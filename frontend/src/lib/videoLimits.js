@@ -10,6 +10,7 @@
  * table calls within the limit is within it whichever way the platform counts.
  */
 import { CLIP_AUDIO_KBPS, CLIP_VIDEO_KBPS } from './postClip.js';
+import { shortClock } from './scenes.js';
 
 const MB = 1000 ** 2;
 const GB = 1000 ** 3;
@@ -94,4 +95,27 @@ export function passageFits(platform, passage, options = {}) {
 /** The platforms a video is over the limit on, by name: what a composer says when it offers the cut. */
 export function overOn(video, options = {}) {
   return PLATFORMS.filter((platform) => !videoFits(platform, video, options).fits).map((p) => VIDEO_LIMITS[p].name);
+}
+
+/** A limit in minutes, as the words under a video say it. */
+const minutes = (seconds) => (seconds % 60 ? shortClock(seconds) : `${seconds / 60} minutes`);
+/** A size the way the platforms write theirs, in thousands: `300 MB`, `8 GB`, `1.2 GB`. */
+const size = (bytes) => (bytes >= GB ? `${Number((bytes / GB).toFixed(1))} GB` : `${Math.max(1, Math.round(bytes / MB))} MB`);
+
+/**
+ * What a composer says of a video `videoFits` found over the limit on `platform`: how
+ * long or how big it is, and what the platform takes. A platform with a paid tier says
+ * the free account's, which is what the table holds by default.
+ */
+export function overWords(platform, fit, { seconds = null, bytes = null } = {}) {
+  const table = VIDEO_LIMITS[platform];
+  if (!table || fit?.fits !== false) return '';
+  const account = table.premium ? ' from a free account' : '';
+  if (fit.over.includes('seconds') && seconds < table.minSeconds) {
+    return `This video is under ${table.minSeconds} s, shorter than ${table.name} takes.`;
+  }
+  if (fit.over.includes('seconds')) {
+    return `This video runs ${shortClock(seconds)}, and ${table.name} takes ${minutes(fit.limit.seconds)}${account}.`;
+  }
+  return `This video is ${size(bytes)}, and ${table.name} takes ${size(fit.limit.bytes)}${account}.`;
 }

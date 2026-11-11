@@ -725,15 +725,39 @@ export const POST_TEMPLATE_STARTERS = Object.freeze([
   },
 ].map((starter) => Object.freeze(starter)));
 
+/** A video thread's orders (lib/videoThread.js ORDERS), and the posts beside its recap. */
+export const VIDEO_ORDERS = Object.freeze(['recap', 'video', 'proof', 'all']);
+export const THREAD_ROLES = Object.freeze(['video', 'place']);
+
+// What each place of a video thread says by default: its sentence, the time it shows,
+// and where it is. The recap names the places as the contact sheet numbers them.
+const PLACE_TEXT = '#description\n#timecode\n\n#coordinates';
+const RECAP_TEXT = '#video\n\n#scenes\n\n#mention';
+const threadTexts = (video, place = PLACE_TEXT) => Object.freeze([
+  Object.freeze({ role: 'video', body: video }),
+  Object.freeze({ role: 'place', body: place }),
+]);
+
 /**
- * The starts New template offers, per kind. Geolocation keeps the four above. A plate
- * post and a free post get one each and a compare post two, with no media post
- * scaffolded under them: their pictures ride on the first post. Video thread starts
- * come with the video thread.
+ * A video thread's starts, one per order (lib/videoThread.js). Each is a recap text
+ * (`body`: Recap first's first post, All in one's one post), the video's post and each
+ * place's (`posts`). The mention goes where the thread opens.
+ */
+export const VIDEO_THREAD_STARTERS = Object.freeze([
+  { id: 'recap', label: 'Recap first', order: 'recap', body: RECAP_TEXT, posts: threadTexts('Source: #source') },
+  { id: 'video', label: 'Video first', order: 'video', body: RECAP_TEXT, posts: threadTexts('#video\n\n#mention\n\nSource: #source') },
+  { id: 'proof', label: 'Proof first', order: 'proof', body: RECAP_TEXT, posts: threadTexts('#video\n\n#scenes\n\n#mention\n\nSource: #source') },
+  { id: 'all', label: 'All in one', order: 'all', body: '#video\n\n#scenes\n\n#mention\n\nSource: #source', posts: threadTexts('Source: #source') },
+].map((starter) => Object.freeze({ ...starter, mediaEnabled: false })));
+
+/**
+ * The starts New template offers, per kind. Geolocation keeps the four above, and a
+ * video thread one per order. A plate post and a free post get one each and a compare
+ * post two, with no media post scaffolded under them: their pictures ride on the first post.
  */
 export const POST_KIND_STARTERS = Object.freeze({
   geolocation: POST_TEMPLATE_STARTERS,
-  video: Object.freeze([]),
+  video: VIDEO_THREAD_STARTERS,
   plate: Object.freeze([
     Object.freeze({ id: 'plate', label: 'Plate', body: '#description\n\n#credits\n\n#mention', mediaEnabled: false }),
   ]),
@@ -1069,7 +1093,7 @@ function bodyFromLegacy(data) {
  * boilerplate extra tweets (their text, no ids).
  */
 export function templateFromPost({
-  mention = '@GeoConfirmed', body = DEFAULT_TWEET_BODY, mediaEnabled = true, extraTweets = [], kind, reply,
+  mention = '@GeoConfirmed', body = DEFAULT_TWEET_BODY, mediaEnabled = true, extraTweets = [], kind, reply, order, posts,
 } = {}) {
   return {
     mention: mention ?? '',
@@ -1077,6 +1101,25 @@ export function templateFromPost({
     mediaEnabled: mediaEnabled !== false,
     extraTweets: (extraTweets ?? []).map((e) => ({ text: e.text ?? '' })),
     ...stated(kind, reply),
+    ...threadParts(kind, order, posts),
+  };
+}
+
+/**
+ * A video thread's order and the texts of its other posts, each only when it says
+ * something, and for a video thread only (`api/templates.py`): the first text of a role
+ * is the one a thread reads.
+ */
+function threadParts(kind, order, posts) {
+  if (normalizePostKind(kind) !== 'video') return {};
+  const texts = [];
+  for (const one of Array.isArray(posts) ? posts : []) {
+    if (!THREAD_ROLES.includes(one?.role) || texts.some((t) => t.role === one.role)) continue;
+    texts.push({ role: one.role, body: typeof one.body === 'string' ? one.body.slice(0, 4_000) : '' });
+  }
+  return {
+    ...(VIDEO_ORDERS.includes(order) ? { order } : {}),
+    ...(texts.length ? { posts: texts } : {}),
   };
 }
 
@@ -1112,6 +1155,7 @@ export function normPostTemplate(data = {}) {
       }))
       : [],
     ...stated(source.kind, source.reply),
+    ...threadParts(source.kind, source.order, source.posts),
   };
 }
 

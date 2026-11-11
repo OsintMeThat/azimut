@@ -27,7 +27,7 @@
   import { readTemplateFile, templateFile } from '../../lib/plate/templateFile.js';
   import { readLook, styleLabel, templateLook } from '../../lib/notes/look.js';
   import { CASE_NOTES, noteEndpoint, openCopy } from '../../lib/notes/noteDoc.svelte.js';
-  import { POST_KINDS, postStarters, STARTABLE_POST_KINDS, templatesOfKind } from '../../lib/post.js';
+  import { POST_KINDS, postStarters, templatesOfKind } from '../../lib/post.js';
   import { READY_NOTES } from '../../lib/notes/ready.js';
   import { noteTemplateFile, noteTemplateFileName, readNoteTemplateFile } from '../../lib/notes/templateFile.js';
 
@@ -261,10 +261,6 @@
       {#each postStarters(kind.id) as starter (starter.id)}
         <button type="button" class="fm-item ready-item" onclick={() => startPostTemplate(kind.id, starter)}>
           <span class="fm-grow">{starter.label}</span>
-        </button>
-      {:else}
-        <button type="button" class="fm-item" disabled title={STARTABLE_POST_KINDS.includes(kind.id) ? '' : 'Its layouts come with the video thread'}>
-          <span class="fm-grow">Coming next</span>
         </button>
       {/each}
     {/each}

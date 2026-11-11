@@ -296,6 +296,43 @@ def test_a_first_posts_own_pictures_are_what_the_post_is_made_from(client):
     assert (too_many.status_code, unsafe.status_code, shape.status_code) == (422, 422, 422)
 
 
+def test_a_video_thread_is_made_from_its_video_and_lists_as_one(client):
+    """A video thread draft names its video, its contact sheet and the clip it picked:
+    each links the post to the file as a posted picture does, so a delete of one warns,
+    and the home knows the video's series has its thread."""
+    cid = client.post("/api/cases", json={"name": "Thread"}).json()["id"]
+    video = mediafixture._upload(client, cid, "convoy.png", color=(10, 90, 10))
+    sheet = mediafixture._upload(client, cid, "sheet.png", color=(90, 10, 10))
+    clip = mediafixture._upload(client, cid, "clip.png", color=(10, 10, 90))
+    state = {
+        "kind": "video", "video": video, "order": "recap", "sheet": sheet, "clip": clip,
+        "posts": [{"role": "video", "body": "Source: #source"}, {"role": "place", "body": "#description"}],
+        "tweet1": "1. [0:00–0:07] Road bridge", "firstMedia": [sheet], "firstMediaType": "images",
+        "mediaEnabled": False, "mediaType": "none", "first": "recap",
+        "extraTweets": [
+            {"text": "Source: https://x.com/a/1", "mediaPaths": [clip], "mediaType": "video", "key": "video"},
+            {"text": "The bridge", "mediaPaths": [], "mediaType": "images", "key": "place:bridge", "edited": True},
+        ],
+    }
+    saved = client.post(f"/api/cases/{cid}/drafts", json={"title": "Convoy thread", "state": state})
+    assert saved.status_code == 200, saved.text
+    assert client.get(f"/api/cases/{cid}/drafts/Convoy thread").json()["state"] == state
+
+    row = client.get(f"/api/cases/{cid}/drafts").json()[0]
+    assert (row["kind"], row["video"], row["posts"], row["picture"], row["proof"]) == (
+        "video", video, 3, sheet, None,
+    )
+    post = next(e for e in graph_read.entities(cid) if e["type"] == "post")
+    paths = {e["id"]: e["attrs"].get("path") for e in graph_read.entities(cid)}
+    made_from = {paths[link["to"]] for link in graph_read.links(cid, "derived-from") if link["from"] == post["id"]}
+    assert made_from == {video, sheet, clip}
+
+    unsafe = client.post(
+        f"/api/cases/{cid}/drafts", json={"title": "Out", "state": {"kind": "video", "video": "../outside.mp4"}},
+    )
+    assert unsafe.status_code == 422
+
+
 # -- whether a post went out ---------------------------------------------------------
 
 POSTED_X = "https://x.com/someone/status/1850000000000000001"

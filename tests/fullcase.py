@@ -99,6 +99,8 @@ class FullCase:
     published_proof: str = ""  # a proof imported as published: its picture is the proof
     published_asset: str = ""  # that picture, kept in the proof's assets folder
     draft: str = ""
+    thread_draft: str = ""  # a video thread: made from its video, naming its contact sheet and clip
+    thread_sheet: str = ""  # that sheet, a picture filed in Media
     note_id: str = ""
     note: str = ""  # its case-relative path
     sheet_id: str = ""
@@ -497,6 +499,29 @@ def build_full_case(
     )
     assert draft.status_code == 200, draft.text
     full.draft = draft.json()["draft"]
+
+    # -- a video thread: the proof's places, on its contact sheet, then its clip --------
+    # The full case holds no video, so the pictures stand in for the video and the sheet
+    # the thread files (`api/postclips.file_sheet`).
+    full.thread_sheet = upload("thread-sheet.png", _png(color=(20, 23, 28), size=(64, 36)))
+    thread = client.post(
+        f"/api/cases/{case_id}/drafts",
+        json={
+            "title": "Video thread draft",
+            "state": {
+                "kind": "video", "video": full.piece, "order": "recap", "sheet": full.thread_sheet, "clip": full.post_clip,
+                "posts": [{"role": "video", "body": "Source: #source"}, {"role": "place", "body": "#description"}],
+                "tweet1": "1. Convoy proof", "firstMedia": [full.thread_sheet], "firstMediaType": "images",
+                "mediaEnabled": False, "mediaType": "none", "first": "recap",
+                "extraTweets": [
+                    {"text": "", "mediaPaths": [full.post_clip], "mediaType": "video", "key": "video"},
+                    {"text": "Convoy proof", "mediaPaths": [proof.json()["png"]], "mediaType": "images", "key": "place:Convoy proof"},
+                ],
+            },
+        },
+    )
+    assert thread.status_code == 200, thread.text
+    full.thread_draft = thread.json()["draft"]
 
     # -- a filed note, the free-form notes, a folder, and a saved grid --------
     client.post(f"/api/cases/{case_id}/folders", json={"name": "Sources/Telegram"})

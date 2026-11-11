@@ -757,7 +757,9 @@
         name: '',
         data: templateFromPost({
           kind: postKind,
-          ...(starter ? { body: starter.body, mediaEnabled: starter.mediaEnabled !== false } : {}),
+          ...(starter ? {
+            body: starter.body, mediaEnabled: starter.mediaEnabled !== false, order: starter.order, posts: starter.posts,
+          } : {}),
         }),
         fresh: true,
       };

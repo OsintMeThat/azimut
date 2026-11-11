@@ -55,6 +55,25 @@ def test_the_list_numbers_a_videos_proofs_in_clip_order_the_abandoned_last(clien
 
 
 @needs_ffmpeg
+def test_the_list_says_which_slides_a_video_thread_posts(client, tmp_path):
+    """A thread posts the proofs that state a place: one still geolocated or given up on
+    is a slide of the video, and no post of its thread."""
+    cid = _case(client)
+    video = _video(client, cid, tmp_path)
+    photo = _upload_png(client, cid)
+    _proof(client, cid, "Placed", photo, coords="48.858400, 2.294500", scene={"video": video, "moments": [{"start": 0.5}]})
+    _proof(client, cid, "Unplaced", photo, scene={"video": video, "moments": [{"start": 1.0}]})
+    _proof(client, cid, "Given up", photo, scene={"video": video, "moments": [{"start": 2.0}]})
+    assert client.put(f"/api/cases/{cid}/proofs/Given up/abandon", json={"reason": "blurry"}).status_code == 200
+
+    rows = _listed(client, cid)
+
+    assert {name: rows[name]["postable"] for name in ("Placed", "Unplaced", "Given up")} == {
+        "Placed": True, "Unplaced": False, "Given up": False,
+    }
+
+
+@needs_ffmpeg
 def test_a_proof_traced_to_its_video_by_its_frames_is_a_slide_of_it(client, tmp_path):
     cid = _case(client)
     video = _video(client, cid, tmp_path)

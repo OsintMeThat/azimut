@@ -369,6 +369,49 @@ def test_a_post_template_can_say_its_kind_and_to_reply_by_default(client):
         assert client.post("/api/templates/post", json={"name": "Bad", "data": bad}).status_code == 422
 
 
+def test_a_video_thread_template_keeps_its_order_and_its_text_per_post(client):
+    data = {
+        "kind": "video",
+        "order": "proof",
+        "mention": "@Desk",
+        "body": "#video\n\n#scenes",
+        "mediaEnabled": False,
+        "posts": [
+            {"role": "video", "body": "Source: #source"},
+            {"role": "place", "body": "#description\n#timecode\n\n#coordinates"},
+            # a second text for a role is not the one a thread reads
+            {"role": "place", "body": "ignored"},
+        ],
+    }
+    saved = client.post("/api/templates/post", json={"name": "Thread", "data": data})
+    assert saved.status_code == 200, saved.text
+    out = saved.json()["data"]
+    assert out["order"] == "proof"
+    assert out["posts"] == data["posts"][:2]
+
+    # saved back as it reads, byte for byte
+    again = client.post("/api/templates/post", json={"id": saved.json()["id"], "name": "Thread", "data": out})
+    assert json.dumps(again.json()["data"]) == json.dumps(out)
+    listed = client.get("/api/templates").json()["post"]
+    assert json.dumps(listed[0]["data"]) == json.dumps(out)
+
+    # a video thread that says no order or no texts writes neither
+    bare = client.post("/api/templates/post", json={"name": "Bare", "data": {"kind": "video", "body": "#video"}}).json()
+    assert "order" not in bare["data"] and "posts" not in bare["data"]
+
+    # the order and the texts shape a video thread only: another kind drops them
+    geo = client.post("/api/templates/post", json={"name": "Geo", "data": {"order": "all", "posts": data["posts"]}}).json()
+    assert "order" not in geo["data"] and "posts" not in geo["data"]
+
+    for bad in (
+        {"kind": "video", "order": "random"},
+        {"kind": "video", "posts": [{"role": "recap", "body": "#scenes"}]},
+        {"kind": "video", "posts": [{"role": "place", "body": "x" * 4_001}]},
+        {"kind": "video", "posts": "Source: #source"},
+    ):
+        assert client.post("/api/templates/post", json={"name": "Bad", "data": bad}).status_code == 422
+
+
 def test_a_template_from_the_first_reply_builds_still_lists(client):
     """The first 0.3.4 builds stored whether a reply kept its source line. Neither word
     asks for a reply, so the template lists, reads as no default, and saves back without it."""

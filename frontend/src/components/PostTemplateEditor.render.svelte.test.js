@@ -13,7 +13,7 @@ import { dirname, join } from 'node:path';
 import { flushSync, mount, unmount } from 'svelte';
 import PostTemplateEditor from './PostTemplateEditor.svelte';
 import { postDraftState } from '../lib/state.svelte.js';
-import { DEFAULT_TWEET_BODY, POST_TEMPLATE_STARTERS, TWEET_TOKENS } from '../lib/post.js';
+import { DEFAULT_TWEET_BODY, POST_TEMPLATE_STARTERS, TWEET_TOKENS, VIDEO_THREAD_STARTERS } from '../lib/post.js';
 
 const sample = (tag) => TWEET_TOKENS.find((t) => t.tag === tag).sample;
 
@@ -242,15 +242,69 @@ describe('a template of a kind', () => {
     unmount(app);
     open({ kind: 'video', fresh: true });
     expect(tokenTags()).toEqual(expect.arrayContaining(['#timecode', '#scenes', '#video']));
-    expect(target.querySelector('.starters')).toBeNull(); // its starts come with the video thread
+    expect([...target.querySelectorAll('.starters button')].map((b) => b.textContent.trim()))
+      .toEqual(['Recap first', 'Video first', 'Proof first', 'All in one']);
   });
 
   it('previews with a sample of its kind', () => {
     open({ kind: 'free', body: '#description\n#coordinates' });
     expect(preview()).toBe('Smoke over the port at dusk, seen from three angles');
-    unmount(app);
-    open({ kind: 'video', body: '#video\nAt #timecode' });
-    expect(preview()).toBe(`${sample('#video')}\nAt ${sample('#timecode')}`);
+  });
+});
+
+describe('a video thread template', () => {
+  const posts = () => [...target.querySelectorAll('.pv-post')].map((post) => ({
+    label: post.querySelector('.pv-num').textContent,
+    text: post.querySelector('pre').textContent,
+  }));
+  const text = (role) => target.querySelector(`[data-role="${role}"] textarea`);
+  const recapFirst = VIDEO_THREAD_STARTERS[0];
+
+  it('says its order and each post\'s text, and previews the whole thread on three places', () => {
+    const data = open({ kind: 'video', body: recapFirst.body, mediaEnabled: false });
+    // a template that said neither starts on Recap first's
+    expect(data.order).toBe('recap');
+    expect(data.posts).toEqual(recapFirst.posts.map((one) => ({ ...one })));
+    expect(target.querySelector('select.order').value).toBe('recap');
+    expect(text('video').value).toBe('Source: #source');
+    expect(text('place').value).toBe('#description\n#timecode\n\n#coordinates');
+    expect(target.querySelector('.chk input')).toBeNull(); // no media post: each post carries its own
+    expect(posts().map((p) => p.label)).toEqual(['1 · Recap', '2 · Video', '3 · Road bridge', '4 · Port gate', '5 · Hilltop village']);
+    expect(posts()[0].text).toBe(`${sample('#video')}\n\n1. [0:00–0:07] Road bridge\n2. [0:15] Port gate\n3. Hilltop village\n\n@GeoConfirmed`);
+    expect(posts()[3].text).toBe('Port gate\n[0:15]\n\n48.860000, 2.360000');
+    expect(posts()[4].text).toBe('Hilltop village\n\n48.870000, 2.370000');
+  });
+
+  it('follows the order picked and the texts as they are typed', () => {
+    const data = open({ kind: 'video', body: recapFirst.body });
+    const order = target.querySelector('select.order');
+    order.value = 'proof';
+    order.dispatchEvent(new Event('change', { bubbles: true }));
+    flushSync();
+    expect(data.order).toBe('proof');
+    expect(posts().map((p) => p.label)).toEqual(['1 · Road bridge', '2 · Video', '3 · Port gate', '4 · Hilltop village']);
+    text('place').value = 'Here: #timecode';
+    text('place').dispatchEvent(new Event('input', { bubbles: true }));
+    flushSync();
+    expect(data.posts.find((one) => one.role === 'place').body).toBe('Here: #timecode');
+    expect(posts()[0].text).toBe('Here: [0:00–0:07]');
+  });
+
+  it('puts a token in the text last written in', () => {
+    const data = open({ kind: 'video', body: '#scenes' });
+    text('video').dispatchEvent(new Event('focus'));
+    flushSync();
+    click([...target.querySelectorAll('.tokens .tok')].find((b) => b.textContent.trim() === '#mention'));
+    expect(data.posts.find((one) => one.role === 'video').body).toContain('#mention');
+    expect(data.body).toBe('#scenes');
+  });
+
+  it('starts from one order\'s layout, its texts and its order', () => {
+    const data = open({ kind: 'video', fresh: true });
+    click([...target.querySelectorAll('.starters button')].find((b) => b.textContent.trim() === 'All in one'));
+    const all = VIDEO_THREAD_STARTERS.find((one) => one.order === 'all');
+    expect([data.order, data.body]).toEqual(['all', all.body]);
+    expect(posts()).toHaveLength(1);
   });
 
   it('previews with the open post only when it is of that kind', () => {

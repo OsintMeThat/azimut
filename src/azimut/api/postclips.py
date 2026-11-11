@@ -1,9 +1,13 @@
-"""Cut for the post: a passage of a proof's ★ video, cut into a case file of its own.
+"""What a video thread files for its posts (`engine/postclips.py`).
 
-The cut runs as a job (`jobs.start`), polled at ``GET /api/jobs/{id}`` for its percent
-like Inspect's scan. A passage the case already holds a clip of answers that clip at
-once, and a cut already running for it answers the same job, so a second press never
-makes a second copy (`engine/postclips.py`).
+Cut for the post: a passage of a proof's ★ video, cut into a case file of its own. The
+cut runs as a job (`jobs.start`), polled at ``GET /api/jobs/{id}`` for its percent like
+Inspect's scan. A passage the case already holds a clip of answers that clip at once,
+and a cut already running for it answers the same job, so a second press never makes a
+second copy.
+
+The contact sheet: the picture of a video's places the browser draws for the thread,
+filed in Media.
 """
 
 from __future__ import annotations
@@ -11,7 +15,7 @@ from __future__ import annotations
 import threading
 from typing import Any
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, File, Form, HTTPException, UploadFile
 from pydantic import BaseModel
 
 from .. import jobs
@@ -85,3 +89,20 @@ def cut_clip(case_id: str, name: str, body: ClipIn) -> dict[str, Any]:
         job_id = jobs.start("post-clip", work)
         _running[key] = job_id
     return {"job_id": job_id}
+
+
+@router.post("/cases/{case_id}/scenes/sheet")
+async def file_sheet(
+    case_id: str,
+    video: str = Form(min_length=1, max_length=512),
+    image: UploadFile = File(),
+) -> dict[str, Any]:
+    """File the contact sheet of a video's thread in Media. Answers ``{path}``."""
+    case = get_case(case_id)
+    data = await image.read(clip_engine.SHEET_MAX_BYTES + 1)
+    if len(data) > clip_engine.SHEET_MAX_BYTES:
+        raise HTTPException(status_code=413, detail="a contact sheet is under 2 MB")
+    try:
+        return clip_engine.file_sheet(case, video, data)
+    except (clip_engine.BadClip, CaseError) as exc:
+        raise _refused(exc) from exc

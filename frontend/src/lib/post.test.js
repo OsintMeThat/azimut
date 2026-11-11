@@ -8,7 +8,7 @@ import {
   sourceSection, sourceUrls,
   templateFromPost, templateUsesPostField, togglePostMedia,
   pointLines, postCoordinates, splitPointLine, postDate,
-  POST_TEMPLATE_STARTERS, bodyTokens, fixMisspelledToken, misspelledTokens,
+  POST_TEMPLATE_STARTERS, VIDEO_THREAD_STARTERS, bodyTokens, fixMisspelledToken, misspelledTokens,
   POST_KINDS, STARTABLE_POST_KINDS, normalizePostKind, statedPostKind, postKind, tokensForKind,
   videoTitle, postTemplateKind, postStarters, defaultPostTemplate, templatesOfKind,
   startMediaPlan, replyTarget, replyIntentUrl, replyPostText, replyByDefault,
@@ -880,10 +880,41 @@ describe('post templates per kind', () => {
     expect(postStarters('free').map((s) => s.id)).toEqual(['free']);
     expect(postStarters('compare').map((s) => s.label)).toEqual(['Before and after', 'Dates first']);
     expect(postStarters('compare')[0].body).toBe('#description\n\n#date\n\n#credits\n\n#mention');
-    expect(postStarters('video')).toEqual([]);
     for (const starter of [...postStarters('plate'), ...postStarters('free'), ...postStarters('compare')]) {
       expect(misspelledTokens(starter.body)).toEqual([]);
       expect(starter.mediaEnabled).toBe(false);
+    }
+  });
+
+  it('starts a video thread on one layout per order, each with its recap, its video post and its place post', () => {
+    expect(postStarters('video')).toBe(VIDEO_THREAD_STARTERS);
+    expect(VIDEO_THREAD_STARTERS.map((s) => [s.order, s.label])).toEqual([
+      ['recap', 'Recap first'], ['video', 'Video first'], ['proof', 'Proof first'], ['all', 'All in one'],
+    ]);
+    for (const starter of VIDEO_THREAD_STARTERS) {
+      expect(starter.posts.map((one) => one.role)).toEqual(['video', 'place']);
+      for (const text of [starter.body, ...starter.posts.map((one) => one.body)]) expect(misspelledTokens(text), starter.id).toEqual([]);
+      expect(starter.mediaEnabled).toBe(false);
+      expect(Object.isFrozen(starter) && Object.isFrozen(starter.posts)).toBe(true);
+    }
+    // each place says its time; the recap names the places
+    expect(VIDEO_THREAD_STARTERS.every((s) => bodyTokens(s.posts[1].body).includes('#timecode'))).toBe(true);
+    expect(bodyTokens(VIDEO_THREAD_STARTERS[0].body)).toContain('#scenes');
+  });
+
+  it('keeps a video thread template\'s order and texts, and only a video thread\'s', () => {
+    const posts = [{ role: 'video', body: 'Source: #source' }, { role: 'place', body: '#timecode' }];
+    const made = templateFromPost({ kind: 'video', body: '#scenes', mediaEnabled: false, order: 'all', posts });
+    expect(made).toEqual({ mention: '@GeoConfirmed', body: '#scenes', mediaEnabled: false, extraTweets: [], kind: 'video', order: 'all', posts });
+    expect(normPostTemplate(made)).toEqual(made);
+    // a role said twice, an unknown role, an order that is none: the first and the known kept
+    const odd = normPostTemplate({ kind: 'video', body: '#scenes', order: 'random', posts: [...posts, { role: 'place', body: 'x' }, { role: 'recap', body: 'y' }] });
+    expect(odd).not.toHaveProperty('order');
+    expect(odd.posts).toEqual(posts);
+    // another kind has none of it
+    for (const kind of [undefined, 'free']) {
+      expect(templateFromPost({ kind, body: '#place', order: 'all', posts })).not.toHaveProperty('posts');
+      expect(normPostTemplate({ kind, body: '#place', order: 'all', posts })).not.toHaveProperty('order');
     }
   });
 

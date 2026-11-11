@@ -13,12 +13,18 @@
    * A template is for one kind of post (`data.kind`, none for a geolocation), chosen
    * when it is made: its tokens, its starts and its sample follow that kind, and a
    * geolocation also says whether its posts reply under their source by default.
+   *
+   * A video thread's template is several posts: its order, its recap (`body`), the
+   * video's post and each place's (`posts`), each written with the tokens it can fill
+   * and previewed as a whole sample thread of three places.
    */
   import {
     TWEET_TOKENS, DEFAULT_TWEET_BODY, POST_TARGETS, buildTweet1,
     fixMisspelledToken, misspelledTokens, postCharacterCount, postKind, postStarters,
     postTemplateKind, tokensForKind,
   } from '../lib/post.js';
+  import { ORDER_NAMES, ORDER_WORDS, ORDERS } from '../lib/videoThread.js';
+  import { layoutPosts, threadPostLabel, videoLayout, videoPosts } from '../lib/videoPost.js';
   import { postDraftState } from '../lib/state.svelte.js';
   import { bidiSafe } from '../lib/bidi.js';
   import Icon from './Icon.svelte';
@@ -28,21 +34,49 @@
   // guarantee the shape (a hand-edited or legacy blob may omit fields)
   if (typeof data.body !== 'string' || !data.body) data.body = DEFAULT_TWEET_BODY;
   if (!Array.isArray(data.extraTweets)) data.extraTweets = [];
+  // a video thread says its order and the text of each of its posts
+  if (postTemplateKind(data) === 'video') {
+    const layout = videoLayout(data);
+    data.order = layout.order;
+    data.posts = layoutPosts(layout);
+  }
 
   let bodyEl = $state(null);
+  // the text a token goes into: the recap, or one of a video thread's other posts
+  let active = $state('body');
+  const roleEls = $state({});
 
   const kind = $derived(postTemplateKind(data));
   const tokens = $derived(tokensForKind(kind));
   const starters = $derived(postStarters(kind));
+  const video = $derived(kind === 'video');
+
+  /** A video thread's text for a kind of post. */
+  const roleText = (role) => data.posts?.find((one) => one.role === role)?.body ?? '';
+  function setRoleText(role, text) {
+    const one = data.posts.find((p) => p.role === role);
+    if (one) one.body = text;
+  }
+
+  /** A start: its layout, and for a video thread its order and the text of each post. */
+  function applyStarter(starter) {
+    data.body = starter.body;
+    if (!video) return;
+    data.order = starter.order;
+    data.posts = starter.posts.map((one) => ({ ...one }));
+  }
 
   // Insert a token at the caret (or over the selection), keeping focus so the
   // analyst can keep typing/inserting without reaching for the mouse.
   function insertToken(tag) {
-    const el = bodyEl;
-    const text = data.body ?? '';
+    const role = video && active !== 'body' ? active : null;
+    const el = role ? roleEls[role] : bodyEl;
+    const text = role ? roleText(role) : data.body ?? '';
     const start = el?.selectionStart ?? text.length;
     const end = el?.selectionEnd ?? text.length;
-    data.body = text.slice(0, start) + tag + text.slice(end);
+    const next = text.slice(0, start) + tag + text.slice(end);
+    if (role) setRoleText(role, next);
+    else data.body = next;
     requestAnimationFrame(() => {
       if (!el) return;
       const caret = start + tag.length;
@@ -67,6 +101,35 @@
   // A word that looks like a token and is not one goes out as plain text, so it
   // is named here, with the one click that mends it.
   const misspelled = $derived(misspelledTokens(data.body));
+
+  // A video thread previews whole, on three places: a passage, an instant, the whole video.
+  const SAMPLE_VIDEO = { path: 'media/sample.mp4', title: TWEET_TOKENS.find((t) => t.tag === '#video').sample };
+  const sampleRow = (name, title, description, coords) => ({
+    name, title, png: `proofs/${name}.png`,
+    row: { description, points: [{ lat: Number(coords.split(', ')[0]), lon: Number(coords.split(', ')[1]), coords, label: '' }] },
+  });
+  const SAMPLE_SLIDES = [
+    { ...sampleRow('bridge', 'Road bridge', 'The convoy crosses the road bridge', '48.850000, 2.350000'), moments: [{ start: 0, end: 7 }] },
+    { ...sampleRow('gate', 'Port gate', '', '48.860000, 2.360000'), moments: [{ start: 15, end: null }] },
+    { ...sampleRow('village', 'Hilltop village', '', '48.870000, 2.370000'), moments: [] },
+  ];
+  const threadPreview = $derived(video
+    ? videoPosts({
+      video: SAMPLE_VIDEO,
+      slides: SAMPLE_SLIDES,
+      layout: videoLayout(data),
+      common: { mention: data.mention, source: TWEET_TOKENS.find((t) => t.tag === '#source').sample },
+      sheet: 'media/sample-sheet.jpg',
+      extra: data.extraTweets,
+    }).posts.map((post) => ({
+      ...post,
+      label: threadPostLabel(post, new Map(SAMPLE_SLIDES.map((one) => [one.name, one.title]))),
+      counts: Object.values(POST_TARGETS).map((target) => {
+        const count = postCharacterCount(target.id, bidiSafe(post.text));
+        return { ...target, count, over: count > target.limit };
+      }),
+    }))
+    : []);
 
   // Live preview of the first tweet, so the effect of the token layout reads
   // without leaving Settings. It fills the tokens with placeholder facts of the
@@ -135,15 +198,27 @@
         <input type="text" placeholder="@GeoConfirmed" maxlength="280" bind:value={data.mention} />
       </label>
 
+      {#if video}
+        <label class="fld">
+          <span>Order</span>
+          <select class="order" value={data.order} onchange={(event) => (data.order = event.currentTarget.value)}
+            title="The order the thread's posts go out in">
+            {#each ORDERS as order (order)}<option value={order}>{ORDER_NAMES[order]}</option>{/each}
+          </select>
+          <p class="hint">{ORDER_WORDS[data.order]}.</p>
+        </label>
+      {/if}
+
       <fieldset class="fld">
-        <span>First post layout</span>
-        <p class="hint">Arrange the tokens in the order you want, add line breaks and
-          your own text. A token with no value drops its line.</p>
+        <span>{video ? 'Recap post' : 'First post layout'}</span>
+        <p class="hint">{video
+          ? 'Names every place: the first post of Recap first, the only post of All in one. A token with no value drops its line.'
+          : 'Arrange the tokens in the order you want, add line breaks and your own text. A token with no value drops its line.'}</p>
         {#if fresh && starters.length}
           <div class="starters" role="group" aria-label="Start from">
             <span class="starters-label">Start from</span>
             {#each starters as starter (starter.id)}
-              <button type="button" class="tok starter" onclick={() => (data.body = starter.body)}>
+              <button type="button" class="tok starter" onclick={() => applyStarter(starter)}>
                 {starter.label}
               </button>
             {/each}
@@ -155,7 +230,7 @@
               onclick={() => insertToken(tok.tag)}>{tok.tag}</button>
           {/each}
         </div>
-        <textarea class="body" rows="9" bind:this={bodyEl} bind:value={data.body}></textarea>
+        <textarea class="body" rows={video ? 5 : 9} bind:this={bodyEl} bind:value={data.body} onfocus={() => (active = 'body')}></textarea>
         {#each misspelled as word (word.written)}
           <p class="misspelled" role="status">
             <span><code>{word.written}</code> is not a token. Did you mean <code>{word.meant}</code>?</span>
@@ -166,9 +241,28 @@
         {/each}
       </fieldset>
 
-      <label class="chk">
-        <input type="checkbox" bind:checked={data.mediaEnabled} /> Include a media post
-      </label>
+      {#if video}
+        {#each [['video', 'Video post', 'The post that carries the video, or its link.'], ['place', 'Each place', 'One post per place, with its proof’s picture.']] as [role, label, hint] (role)}
+          <fieldset class="fld" data-role={role}>
+            <span>{label}</span>
+            <p class="hint">{hint}</p>
+            <textarea class="body" rows="4" bind:this={roleEls[role]} value={roleText(role)}
+              oninput={(event) => setRoleText(role, event.currentTarget.value)} onfocus={() => (active = role)}></textarea>
+            {#each misspelledTokens(roleText(role)) as word (word.written)}
+              <p class="misspelled" role="status">
+                <span><code>{word.written}</code> is not a token. Did you mean <code>{word.meant}</code>?</span>
+                <button type="button" class="btn btn-sm"
+                  onclick={() => setRoleText(role, fixMisspelledToken(roleText(role), word.written, word.meant))}
+                >Fix</button>
+              </p>
+            {/each}
+          </fieldset>
+        {/each}
+      {:else}
+        <label class="chk">
+          <input type="checkbox" bind:checked={data.mediaEnabled} /> Include a media post
+        </label>
+      {/if}
 
       {#if kind === 'geolocation'}
         <label class="chk reply" title="A post whose source is an X or Bluesky post goes out under it, without its link">
@@ -192,6 +286,18 @@
       </fieldset>
     </div>
 
+    {#if video}
+      <div class="pe-preview thread-preview">
+        <span class="pv-label">Thread preview, three sample places</span>
+        {#each threadPreview as post, i (post.key)}
+          <div class="pv-post">
+            <span class="pv-num">{i + 1} · {post.label}</span>
+            <pre>{post.text || '(no text)'}</pre>
+            <p class="counters">{#each post.counts as count, j (count.id)}{#if j}<span aria-hidden="true">{' · '}</span>{/if}<span class="counter" class:over={count.over}>{count.label} {count.count}/{count.limitLabel}</span>{/each}</p>
+          </div>
+        {/each}
+      </div>
+    {:else}
     <div class="pe-preview">
       <span class="pv-label">First post preview</span>
       <div class="pv-switch" role="group" aria-label="Preview with">
@@ -207,6 +313,7 @@
       <!-- one line of markup, so no stray whitespace lands between the counts -->
       <p class="counters">{#each counts as count, i (count.id)}{#if i}<span aria-hidden="true">{' · '}</span>{/if}<span class="counter" class:over={count.over}>{count.label} {count.count}/{count.limitLabel}</span>{/each}</p>
     </div>
+    {/if}
   </div>
 </div>
 
@@ -268,4 +375,12 @@
     margin: 0; white-space: pre-wrap; word-break: break-word;
     font: 12px/1.4 system-ui, sans-serif; color: var(--text-1);
   }
+  .order {
+    background: var(--bg-2); border: 1px solid var(--border); border-radius: 6px;
+    color: var(--text-1); padding: 5px 8px; font: inherit; align-self: flex-start;
+  }
+  .thread-preview { max-height: 70vh; overflow-y: auto; gap: 10px; }
+  .pv-post { display: flex; flex-direction: column; gap: 4px; padding-top: 8px; border-top: 1px solid var(--border); }
+  .pv-post:first-of-type { border-top: 0; padding-top: 0; }
+  .pv-num { font-size: 11px; color: var(--text-2); font-weight: 600; }
 </style>
