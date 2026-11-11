@@ -1032,6 +1032,19 @@ export function proofSourceMediaPaths(caseData, proofPng, proofSource, mediaItem
   });
 }
 
+/**
+ * The source media a proof's post carries, with the clip cut for its post in place of
+ * the whole video it was cut from (`engine/postclips.py`, `{ video, path }`). The clip
+ * leads when that video was not among them. Without a clip, the paths as they were.
+ */
+export function withPostClip(paths, clip) {
+  const listed = (paths ?? []).filter((path) => typeof path === 'string' && path);
+  const cut = typeof clip?.path === 'string' && clip.path ? clip.path : null;
+  if (!cut) return listed;
+  const swapped = listed.map((path) => (path === clip.video ? cut : path));
+  return [...new Set(swapped.includes(cut) ? swapped : [cut, ...swapped])];
+}
+
 /** A legacy toggle template (pre-token) rebuilt as a body, for one-time migration. */
 function bodyFromLegacy(data) {
   const t = data?.toggles;

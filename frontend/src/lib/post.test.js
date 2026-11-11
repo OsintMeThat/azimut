@@ -4,7 +4,7 @@ import {
   extraPostTweetText, groupPostMedia, mediaTweetText, newPostMediaTweet,
   applyPostTemplateStructure, normalizePostMediaPickerTarget, normPostTemplate, postMediaForType,
   handoffThread, postCharacterCount, postComposeUrl, postHandoffUrl, postReportMarkdown, postTarget,
-  proofSourceMediaPaths, renumberMediaTweetText, retargetMediaTweetText,
+  proofSourceMediaPaths, renumberMediaTweetText, retargetMediaTweetText, withPostClip,
   sourceSection, sourceUrls,
   templateFromPost, templateUsesPostField, togglePostMedia,
   pointLines, postCoordinates, splitPointLine, postDate,
@@ -446,6 +446,27 @@ describe('proofSourceMediaPaths — source media selected from a proof', () => {
 
   it('does not select media without a matching proof source', () => {
     expect(proofSourceMediaPaths({ entities: [], links: [] }, 'proofs/missing.png', 'https://source.test/post')).toEqual([]);
+  });
+});
+
+describe('withPostClip — the clip cut for the post, in place of its video', () => {
+  const clip = { video: 'media/convoy.mp4', path: 'media/convoy 0.03-0.09.mp4' };
+
+  it('puts the clip where the whole video was, and keeps the rest in their order', () => {
+    expect(withPostClip(['media/still.jpg', 'media/convoy.mp4', 'media/other.mp4'], clip))
+      .toEqual(['media/still.jpg', 'media/convoy 0.03-0.09.mp4', 'media/other.mp4']);
+  });
+
+  it('leads with the clip when its video was not among them, and never lists it twice', () => {
+    expect(withPostClip(['media/still.jpg'], clip)).toEqual(['media/convoy 0.03-0.09.mp4', 'media/still.jpg']);
+    expect(withPostClip([], clip)).toEqual(['media/convoy 0.03-0.09.mp4']);
+    expect(withPostClip(['media/convoy 0.03-0.09.mp4', 'media/convoy.mp4'], clip)).toEqual(['media/convoy 0.03-0.09.mp4']);
+  });
+
+  it('leaves the media as they were without a clip', () => {
+    for (const none of [null, undefined, {}, { video: 'media/convoy.mp4', path: '' }]) {
+      expect(withPostClip(['media/convoy.mp4', null], none)).toEqual(['media/convoy.mp4']);
+    }
   });
 });
 

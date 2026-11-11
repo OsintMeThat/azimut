@@ -21,7 +21,7 @@
   import {
     buildTweet1 as buildTweet1Lines, DEFAULT_TWEET_BODY,
     extraPostTweetText, groupPostMedia, MAX_POST_MEDIA, mediaTweetText,
-    applyPostTemplateStructure, newPostMediaTweet, proofSourceMediaPaths,
+    applyPostTemplateStructure, newPostMediaTweet, proofSourceMediaPaths, withPostClip,
     normalizePostMediaPickerTarget, postMediaForType, renumberMediaTweetText, retargetMediaTweetText,
     normalizePostTarget, POST_TARGETS, postCharacterCount, postComposeUrl, postReportMarkdown,
     postTarget, templateUsesPostField, togglePostMedia, pointLines,
@@ -832,17 +832,48 @@
     proofVer = png ? Date.now() : 0;
   }
 
+  /**
+   * The clip cut for the proof's post (`GET /proofs/{name}/clip`), `{ video, path }`, or
+   * null: none cut, its file gone, or a proof that rests on no video.
+   */
+  async function proofClip(cid, png) {
+    const row = (caseProofs ?? []).find((one) => one.png === png);
+    // a proof the list knows rests on no video: it has no clip to ask for
+    if (row && !row.video) return null;
+    const name = row?.name ?? /^proofs\/([^/]+)\.png$/.exec(png)?.[1];
+    if (!name) return null;
+    try {
+      const said = await api.get(`/api/cases/${cid}/proofs/${encodeURIComponent(name)}/clip`);
+      const path = said?.clip?.path;
+      return typeof path === 'string' && path ? { video: said.video ?? null, path } : null;
+    } catch {
+      return null;
+    }
+  }
+
+  /**
+   * The proof's source media, placed on the media post and the ones after it. A clip cut
+   * for the post goes in place of the whole video it came from, which the media post's
+   * Edit media still offers.
+   */
   async function preloadProofMedia(png, proofSourceUrl) {
-    if (!png || !proofSourceUrl || !caseState.current) return;
+    if (!png || !caseState.current) return;
     try {
       const cid = caseState.current.id;
-      const proof = await lookupEntity(cid, 'path', png);
-      if (!proof) return;
+      const [proof, clip] = await Promise.all([
+        proofSourceUrl ? lookupEntity(cid, 'path', png) : null,
+        proofClip(cid, png),
+      ]);
+      if (!proof && !clip) return;
       const [library, graph] = await Promise.all([
         api.get(`/api/cases/${cid}/media`),
-        fetchDerivation(cid, proof.id),
+        proof ? fetchDerivation(cid, proof.id) : null,
       ]);
-      const linkedMedia = proofSourceMediaPaths(graph, png, proofSourceUrl, library);
+      const listed = Array.isArray(library) ? library : [];
+      const kinds = new Map(listed.map((item) => [item.path, item.kind]));
+      // the clip's file in the case, or the video as it always was
+      const cut = clip && kinds.has(clip.path) ? clip : null;
+      const linkedMedia = withPostClip(graph ? proofSourceMediaPaths(graph, png, proofSourceUrl, listed) : [], cut);
       if (!linkedMedia.length) return;
 
       const selected = new Set([
@@ -851,7 +882,7 @@
       ]);
       const added = linkedMedia.filter((path) => !selected.has(path));
       if (!added.length) return;
-      const groups = groupPostMedia(added, mediaKind);
+      const groups = groupPostMedia(added, (path) => kinds.get(path) ?? mediaKind(path));
 
       if (!mediaPaths.length && groups.length) {
         const first = groups.shift();
@@ -866,7 +897,10 @@
         tweet.mediaPaths = group.mediaPaths;
         extraTweets.push(tweet);
       }
-      toast(`${added.length} source media ${added.length === 1 ? 'file' : 'files'} added to the thread`, 'ok', 2000);
+      const files = (count) => `${count} source media ${count === 1 ? 'file' : 'files'}`;
+      const others = added.filter((path) => path !== cut?.path).length;
+      if (!cut || !added.includes(cut.path)) toast(`${files(added.length)} added to the thread`, 'ok', 2000);
+      else toast(others ? `The proof's clip and ${files(others)} added to the thread` : "The proof's clip added to the thread", 'ok', 2000);
     } catch {
       /* Media selection is a convenience; attaching the proof still works offline. */
     }

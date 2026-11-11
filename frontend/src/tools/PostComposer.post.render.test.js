@@ -83,7 +83,7 @@ function answer(path) {
   if (spec) return lists.specs[decodeURIComponent(spec[1])];
   // every file the case holds is found again, so nothing reads as deleted
   if (path.includes('/entities/lookup')) return { entity: { id: 'e1', type: 'proof' } };
-  if (path.includes('/derivation')) return { entities: [], links: [] };
+  if (path.includes('/derivation')) return lists.derivation ?? { entities: [], links: [] };
   if (path.includes('/entities')) return { items: lists.entities, next: null };
   return [];
 }
@@ -120,7 +120,7 @@ const toasts = () => uiState.toasts.map((t) => t.message);
 
 beforeEach(() => {
   vi.clearAllMocks();
-  lists = { drafts: [], proofs: [], media: [], saved: {}, specs: {}, entities: [] };
+  lists = { drafts: [], proofs: [], media: [], saved: {}, specs: {}, entities: [], derivation: null };
   api.get.mockImplementation(async (path) => answer(path));
   api.put.mockImplementation(async () => ({}));
   api.post.mockImplementation(async (path, body) => {
@@ -1279,6 +1279,67 @@ describe('a post already out, from the home', () => {
     // the row with no link keeps the slots, so the pills line up
     const fresh = [...list.querySelectorAll('.ol-row')].find((r) => r.textContent.includes('Fresh'));
     expect(fresh.querySelectorAll('span.ol-act[aria-hidden="true"]')).toHaveLength(2);
+  });
+});
+
+describe('a proof\'s clip, cut for its post', () => {
+  const VIDEO = 'media/convoy.mp4';
+  const CLIP = 'media/convoy 0.03-0.09.mp4';
+  beforeEach(() => {
+    // the proof was made from a frame of the downloaded video its source names
+    lists.derivation = {
+      entities: [
+        { id: 'e1', type: 'proof', attrs: { path: PROOF.png } },
+        { id: 'v1', type: 'media', attrs: { path: VIDEO, kind: 'video' } },
+      ],
+      links: [{ from: 'e1', to: 'v1', type: 'derived-from' }],
+    };
+    lists.media = [
+      { path: VIDEO, kind: 'video', source: { type: 'download', url: SOURCE_X } },
+      { path: CLIP, kind: 'video', source: { type: 'inspect', from: VIDEO } },
+    ];
+  });
+  const mediaPost = async () => {
+    await saved();
+    return draftWrites().at(-1)[1].state.mediaPaths;
+  };
+
+  it('goes on the media post in place of the whole video', async () => {
+    lists.specs['helicopters/clip'] = { proof: 'helicopters', video: VIDEO, clip: { path: CLIP, start: 3, end: 9 } };
+    await mountPost();
+    uiState.postProof = { ...PROOF };
+    await settle();
+    expect(await mediaPost()).toEqual([CLIP]);
+    expect(toasts()).toContain('The proof\'s clip added to the thread');
+    expect(api.get.mock.calls.map(([path]) => path)).toContain('/api/cases/case-1/proofs/helicopters/clip');
+  });
+
+  it('leaves a proof with no clip on its video, as before', async () => {
+    lists.specs['helicopters/clip'] = { proof: 'helicopters', video: VIDEO, clip: null };
+    await mountPost();
+    uiState.postProof = { ...PROOF };
+    await settle();
+    expect(await mediaPost()).toEqual([VIDEO]);
+    expect(toasts()).toContain('1 source media file added to the thread');
+  });
+
+  it('falls back to the video when the clip\'s file is no longer in the case', async () => {
+    lists.specs['helicopters/clip'] = { proof: 'helicopters', video: VIDEO, clip: { path: CLIP, start: 3, end: 9 } };
+    lists.media = lists.media.filter((item) => item.path !== CLIP);
+    await mountPost();
+    uiState.postProof = { ...PROOF };
+    await settle();
+    expect(await mediaPost()).toEqual([VIDEO]);
+  });
+
+  it('asks nothing for a proof the list says rests on photos', async () => {
+    lists.proofs = [{ name: 'helicopters', png: PROOF.png, video: null }];
+    lists.drafts = [{ name: 'Old', title: 'Old', target: 'x', posts: 1 }];
+    await mountPost();
+    uiState.postProof = { ...PROOF };
+    await settle();
+    expect(api.get.mock.calls.some(([path]) => path.endsWith('/clip'))).toBe(false);
+    expect(await mediaPost()).toEqual([VIDEO]);
   });
 });
 

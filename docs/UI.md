@@ -4641,7 +4641,7 @@ each proof.
 states a passage, one press per passage when it states several; an instant has nothing to
 cut. It cuts the passage into a video of its own, filed in Media as Inspect's files are
 (`clip 2m10s–2m38s`, after the video's title), and the proof's scene keeps it for its
-post. The line says *Cutting 2:10–2:38… 40%* while it runs, then *Clip · 28 s · 4.2 MB*,
+post: its To Post attaches the clip in place of the whole video. The line says *Cutting 2:10–2:38… 40%* while it runs, then *Clip · 28 s · 4.2 MB*,
 its passage named when the proof states several, with **Show in Media**, which lets the working file through Media's switch, and
 **Remove**, which moves it to the case trash after the usual preview names the proof.
 The cut is re-encoded rather than copied, so it starts on the frame asked for and plays
@@ -5296,6 +5296,11 @@ never posts, and pressing Post on X or Bluesky stays the analyst's.
   files under a fresh one rather than write over it. Going home, opening another
   post, Back, New post, a proof sent with **To Post**, another case or the tab closing
   each writes what is pending first; a post whose save failed stays open and says so.
+- **A proof sent with To Post** fills a geolocation: its sentence, its date, its points
+  and its source, with the media its source names on the media post. A clip cut for its
+  post (Geo Proof's **Cut for the post**) goes there in place of the whole video it came
+  from, which the media post's **Edit media** still offers. A clip whose file left the case
+  gives the video back.
 - **Add to notes**, a note icon beside Open, writes the post into a new case note (its
   place, points, assessment, source and pictures, linked to the proof, the media and
   the draft). **The header's ⋯**, beside the name once the post is saved, holds
