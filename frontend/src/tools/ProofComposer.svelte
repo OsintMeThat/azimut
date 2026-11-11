@@ -473,6 +473,11 @@
     const cut = new Set(sceneFrames.map((f) => f.src));
     return [...new Set(proof.panels.map((p) => p.src).filter((src) => src && !cut.has(src)))].join('\n');
   });
+  // a panel taken out, or another proof opened, lets its ties go before the next read lands
+  const panelTies = $derived.by(() => {
+    const laid = new Set(untiedPanels.split('\n'));
+    return sceneTies.filter((tie) => laid.has(tie.src));
+  });
   let tiesRun = 0;
   async function readTies(caseId = caseState.current?.id, panels = untiedPanels) {
     const run = ++tiesRun;
@@ -498,7 +503,7 @@
     toast,
     where: () => ({ caseId: caseState.current?.id ?? null, name: savedName }),
     frames: () => sceneFrames,
-    ties: () => sceneTies,
+    ties: () => panelTies,
     // a video by its title in Media, as every surface of Geo Proof names it
     titleOf: (path) => mediaTitle(path),
     // the ★ video's scenes, as the strip read them: where a proof made by hand finds its own
