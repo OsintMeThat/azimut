@@ -337,8 +337,9 @@ def test_a_file_rename_cut_short_still_carries_its_work_along(client, monkeypatc
     with pytest.raises(RuntimeError, match="simulated interruption"):
         media_engine.rename_media(case, photo, "North roof")
     monkeypatch.setattr(inspectwork, "follow_file_rename", follow)
-    media_engine.recover_media_rename(case)
-    media_engine.recover_media_rename(case)
+    # the next open finishes it, and the one after finds nothing left to do
+    Case.open(cid)
+    Case.open(cid)
 
     assert _work(client, cid, "media/North roof.png")["name"] == "North roof"
     assert len(_of_type(cid, "inspect-session")) == 1

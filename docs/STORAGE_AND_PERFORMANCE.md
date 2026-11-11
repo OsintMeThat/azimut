@@ -161,13 +161,17 @@ there with independent atomic renames, so a partial move resumes. If both
 locations differ, the current hidden file wins and the legacy copy is retained
 beside it under a `.legacy` name.
 
-For media, proof PNGs, notes, drafts, Inspect works, collages and Compare sessions, the
-human-readable filename stem is the name Azimut shows. Spaces, case and Unicode survive;
-characters forbidden by Windows are replaced and the returned canonical stem
-is written back to the UI. Renaming moves the file and its companions, rewrites
-exact stored paths in the graph, jobs, sidecars and tool specs, and rebinds the
-same entity. A rename onto a name another item holds is refused before anything
-moves.
+For media, proof PNGs, notes, drafts, Inspect works, collages, Compare sessions, Horizon
+views, map plates and sheets, the human-readable filename stem is the name Azimut shows.
+Spaces, case and Unicode survive; characters forbidden by Windows are replaced and the
+returned canonical stem is written back to the UI. Renaming, from its tool or from
+Details, moves the file and the companions `engine/artifacts.py` names after it, and
+rebinds the same entity. `engine/renames.py` then rewrites every exact stored path, as
+a value or a key, in the graph, jobs, sidecars, tool specs and the `/files/` addresses
+in notes, plus the few fields that hold a name: a video thread's post of one place, a
+proof's dating statement, a collage's exported picture. A rename onto a name another
+item holds is refused before anything moves. The move is journalled in
+`.data/rename.json` and finished on the next open (`Case.open`) when it was cut short.
 
 Every mutation used to re-read and rewrite the whole `case.json` under a per-case
 lock. At 10k entities that rewrote megabytes per edit and shipped the entire
@@ -313,8 +317,9 @@ stamp and resumes the same normalizer on the next open. Schema 9 is what 0.3.0
 wrote; one step takes it to 11, giving each file one Inspect work, then dating
 every kept Detect pin (`analysis_dating.backfill`) and standing every saved
 comparison on the map (`comparisons.backfill`). Schema 10 was a development
-checkpoint and runs only those last two. Media moves additionally
-use `.data/rename.json`, so a restart can finish references after the bytes moved.
+checkpoint and runs only those last two. Every rename writes itself down in
+`.data/rename.json` before anything moves, so the next open of the case finishes
+the references after the bytes moved.
 
 ### Tables
 

@@ -60,15 +60,34 @@ def _media_search_text(item: dict[str, Any]) -> str:
     ))
 
 
+def replace_paths(value: Any, moved: dict[str, str]) -> Any:
+    """Recursively replace every string equal to a key of ``moved`` by its value, as
+    a value or as a key; never edit prose.
+
+    A key counts because a record can be keyed by a file: a post's descriptions are
+    one per picture (`api/drafts._alt_texts`). A key that lands on one already there
+    takes its place, since a rename only lands on a free path and whatever was kept
+    under it named nothing.
+    """
+    if isinstance(value, str):
+        return moved.get(value, value)
+    if isinstance(value, list):
+        return [replace_paths(item, moved) for item in value]
+    if isinstance(value, dict):
+        kept: dict[Any, Any] = {}
+        renamed: dict[Any, Any] = {}
+        for key, item in value.items():
+            if isinstance(key, str) and key in moved:
+                renamed[moved[key]] = replace_paths(item, moved)
+            else:
+                kept[key] = replace_paths(item, moved)
+        return {**kept, **renamed}
+    return value
+
+
 def _replace_exact(value: Any, old: str, new: str) -> Any:
     """Recursively replace strings equal to ``old``; never edit prose."""
-    if isinstance(value, str):
-        return new if value == old else value
-    if isinstance(value, list):
-        return [_replace_exact(item, old, new) for item in value]
-    if isinstance(value, dict):
-        return {key: _replace_exact(item, old, new) for key, item in value.items()}
-    return value
+    return replace_paths(value, {old: new})
 
 _MEDIA_CATEGORIES = (
     "image",
