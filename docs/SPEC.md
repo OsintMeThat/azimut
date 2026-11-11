@@ -289,6 +289,7 @@ stops making sense.
 - **Media in the analyst's half:** a button that looks for media beside `azimut/` and offers to bring them into the case, rather than waiting for them to be moved into `media/` by hand.
 - **Count a statement's independence by origin, not by wrapper:** three collages made from one video are three sources today, and are arguably one. The graph already answers this for a place; changing it for a statement changes a published number.
 - **Free-form montage editor:** consider only if it stays distinct from Geo Proof and the Collage tool.
+- **Highlight by category in Geo Proof:** paint or lasso an area by hand, one colour per category, with an outline, a light tint, a label and a legend; greying the rest is an option, off by default.
 - **In-app OSINT assistant:** local chat and vision suggestions for analyst confirmation, with no cloud or API key by default.
 - **Geographic playback:** step through dated case items on the map instead of showing one fixed Timeline window.
 - **Notes, next:** a preview on hovering a chip.
