@@ -1,10 +1,12 @@
 /**
  * Fill a social composer with the thread Azimut prepared, and stop there.
  *
- * Injected into the composer tab by the background worker, once, after the app's
- * Publish button asked for it. It writes and attaches; it never submits. The
- * button that publishes is the analyst's, exactly as it is when they paste the
- * thread by hand — which is still what happens whenever this script gives up.
+ * Injected into the composer tab by the background worker after the app's
+ * Publish button asked for it: once for a thread, and once per post for a reply
+ * the site lets out one post at a time (`background.js`, "a reply in several
+ * posts"). It writes and attaches; it never submits. The button that publishes
+ * is the analyst's, exactly as it is when they paste the thread by hand — which
+ * is still what happens whenever this script gives up.
  *
  * **Runs in the page's own world**, which is the only place this works. An
  * extension's scripts live in a separate world by default: the events they make
@@ -15,10 +17,12 @@
  * `window.__AZIMUT_HANDOFF__`, set by the injection before this one, and the
  * report is this script's own return value.
  *
- * **This is the one file in the repo that knows another site's DOM**, and it will
- * age: X and Bluesky move their markup without notice. So it is written to fail
- * shallow — every step reports how far it got, nothing throws into the page, and
- * the thread the app copied to the clipboard is the answer to all of it.
+ * **This is one of the two files in the repo that know another site's DOM** (the
+ * other, `postlink.js`, reads the link of what was sent), and it will age: X and
+ * Bluesky move their markup without notice. So it is written to fail shallow —
+ * every step reports how far it got and what the page held there (`probe`),
+ * nothing throws into the page, and the thread the app copied to the clipboard
+ * is the answer to all of it.
  */
 
 (() => {
@@ -482,7 +486,7 @@
     // own state and a box that stayed empty means it ignored us.
     if (post.text && !holdsText(box)) {
       const trouble = await type(site, box, post.text);
-      if (trouble) return `Post ${index + 1} ${trouble}.`;
+      if (trouble) return `Post ${post.number ?? index + 1} ${trouble}.`;
     }
     if (!post.files?.length) return null;
     // One input per post where a site has them, so the pictures land under the
@@ -523,6 +527,61 @@
   }
 
   /**
+   * Whether the composer on screen offers a next post, asked once the first is in.
+   *
+   * X's reply dialog has no "+" at all: the box, the toolbar, the counter and the
+   * button that sends. Waiting the full patience owed to a "+" held back over a
+   * video would only make the analyst wait for a button that is never drawn, so
+   * this asks for the button being there, refused or not.
+   */
+  async function offersNext(site) {
+    return Boolean(await waitFor(() => found(site.add)[0] ?? null, 3000));
+  }
+
+  // A test id names a control in the site's code, not in its words. Anything else
+  // about the page stays out of a report, and a test id that is not one plain
+  // word (an avatar's carries its owner's handle) is only counted.
+  const TEST_ID = /^[A-Za-z][A-Za-z0-9_]{0,48}$/;
+
+  /**
+   * What the page held where this script looked: how many nodes each selector of
+   * this site matched, and the test ids of the controls in the dialog (or the page,
+   * when no dialog is open). Counts and test ids only, never a word of the page,
+   * since it goes into the report the analyst may copy back.
+   */
+  function probe(site) {
+    const count = (selector) => {
+      try {
+        return document.querySelectorAll(selector).length;
+      } catch {
+        return -1;
+      }
+    };
+    const selectors = {};
+    for (const role of ["editors", "add", "files"]) selectors[role] = (site[role] ?? []).map(count);
+    let reply = 0;
+    try {
+      reply = site.reply?.() ? 1 : 0;
+    } catch {
+      reply = -1;
+    }
+    selectors.reply = [reply];
+    const dialog = document.querySelector('[role="dialog"]');
+    const scope = dialog ?? document.querySelector("main") ?? document.body;
+    const buttons = [];
+    let unnamed = 0;
+    const controls = scope?.querySelectorAll(
+      'button[data-testid], [role="button"][data-testid], input[data-testid], [data-testid="toolBar"] [data-testid]'
+    );
+    for (const node of controls ?? []) {
+      const id = node.getAttribute("data-testid");
+      if (!TEST_ID.test(id)) unnamed += 1;
+      else if (!buttons.includes(id) && buttons.length < 40) buttons.push(id);
+    }
+    return { selectors, scope: dialog ? "dialog" : "page", buttons, unnamed };
+  }
+
+  /**
    * Open the reply box under the post this tab shows, and say whether it opened.
    *
    * A reply is handed over on the source post's own page. Its reply button opens the
@@ -545,6 +604,26 @@
     return Boolean(await waitFor(() => found(inDialog, editable)[0] ?? null, 8000));
   }
 
+  // The step this run is on, named the way the report names it: `open-reply`,
+  // `open-composer`, `fill-2`, `add-3`. Kept out here so that a throw still says
+  // where it happened.
+  let step = "start";
+
+  /**
+   * Fill the posts handed over, and say how far it got.
+   *
+   * What arrives on the global, beyond the posts:
+   *  - `reply`: open the reply box under the post this page shows, first;
+   *  - `ask`: one post, the first of several: fill it, then say whether the
+   *    composer offers a next post (`add`) instead of looking for one to press.
+   *    Without one, the worker chains the rest one reply at a time;
+   *  - `more`: these posts follow one already in the composer on screen, so the
+   *    first of them is added like any other (`carried`: that post handed over a
+   *    file, which is what a "+" is held back for);
+   *  - `number`: the first of these posts' place in the whole thread, for what
+   *    is said about them;
+   *  - `probe`: fill nothing, and say only what the page holds (see `probe`).
+   */
   async function run() {
     const site = SITES.find((one) => one.match.test(location.hostname));
     if (!site) return { filled: 0, error: "Azimut does not know this composer." };
@@ -552,28 +631,49 @@
     const thread = window.__AZIMUT_HANDOFF__;
     const posts = thread?.posts;
     delete window.__AZIMUT_HANDOFF__; // the page keeps nothing of the case
+    if (thread?.probe === true) return { filled: 0, probe: probe(site) };
     if (!posts?.length) return { filled: 0 };
-    if (thread.reply === true && !(await openReply(site))) {
-      return { filled: 0, error: "Could not open the reply box under the source post." };
-    }
-
-    const opened = await waitFor(() => {
-      const nodes = boxes(site);
-      return nodes.length ? nodes : null;
-    });
-    if (!opened) return { filled: 0, error: "The composer did not open in time." };
+    const number = Number.isInteger(thread.number) && thread.number > 0 ? thread.number : 1;
+    const more = thread.more === true;
+    // Boxes already in the composer ahead of these posts, for the file input of each.
+    const offset = more ? number - 1 : 0;
 
     let filled = 0;
     // What went wrong on one post does not stop the next: a thread missing its
     // third line still beats a composer holding nothing.
     const notes = [];
+    let troubleStep = null;
     // Stopping is not a reason to drop what went wrong on the way here: a post
     // left empty is why a composer refuses to open the next one, and the stop
     // on its own reads like the markup moved.
-    const stop = (reason) => ({ filled, error: [...notes, reason].join(" ") });
-    let box = boxes(site)[0];
+    const stop = (reason) => ({
+      filled,
+      error: [...notes, reason].join(" "),
+      step,
+      probe: probe(site),
+    });
+
+    step = thread.reply === true ? "open-reply" : "open-composer";
+    if (thread.reply === true && !(await openReply(site))) {
+      return stop(
+        number > 1
+          ? "Could not open the reply box under your last reply."
+          : "Could not open the reply box under the source post."
+      );
+    }
+
+    step = "open-composer";
+    const opened = await waitFor(() => {
+      const nodes = boxes(site);
+      return nodes.length ? nodes : null;
+    });
+    if (!opened) return stop("The composer did not open in time.");
+
+    // After one already filled, the box to add under is the last that holds a post.
+    let box = more ? (boxes(site).filter(holdsText).at(-1) ?? boxes(site).at(-1)) : boxes(site)[0];
     for (let i = 0; i < posts.length; i += 1) {
-      if (i > 0) {
+      if (i > 0 || more) {
+        step = `add-${number + i}`;
         // The **last** one. A composer that draws a footer under every post
         // draws an add button under every post too, and only the one at the end
         // appends — the others insert a post in the middle of the thread.
@@ -586,7 +686,8 @@
         //
         // No button, no thread: stop where we are and say so. Half a thread
         // filled beats none, and the rest is one paste away.
-        const patience = posts[i - 1].files?.length ? 20000 : 3000;
+        const carried = i > 0 ? posts[i - 1].files?.length : thread.carried === true;
+        const patience = carried ? 20000 : 3000;
         const add = await waitFor(() => found(site.add, pressable).at(-1), patience);
         if (!add) return stop("Could not add the next post to the thread.");
         press(add);
@@ -595,12 +696,18 @@
         await sleep(250); // it is drawn; let it become the one the composer listens to
         box = nextBox(site, box) ?? grown;
       }
+      step = `fill-${number + i}`;
       if (!box) return stop("Lost the composer while filling it.");
-      const trouble = await fill(site, box, posts[i], i);
-      if (trouble) notes.push(trouble);
-      else filled += 1;
+      const trouble = await fill(site, box, { ...posts[i], number: number + i }, offset + i);
+      if (trouble) {
+        notes.push(trouble);
+        troubleStep ??= step;
+      } else filled += 1;
     }
-    return notes.length ? { filled, error: notes.join(" ") } : { filled };
+    if (notes.length) return { filled, error: notes.join(" "), step: troubleStep, probe: probe(site) };
+    // Nothing is pressed to find out more: the worker decides what follows.
+    if (thread.ask === true) return { filled, add: await offersNext(site) };
+    return { filled };
   }
 
   // The value the injection hands back to the worker, which is what says whether
@@ -608,5 +715,6 @@
   return run().catch((e) => ({
     filled: 0,
     error: e?.message || "The composer refused the thread.",
+    step,
   }));
 })();

@@ -85,10 +85,11 @@ def test_the_capture_shortcut_is_declared(manifest):
 
 def test_the_helpers_load_before_the_worker_in_both_browsers(manifest):
     """Firefox runs the listed scripts in order; Chrome's worker imports them."""
-    assert manifest["background"]["scripts"] == ["notesmsg.js", "mapsites.js", "background.js"]
+    assert manifest["background"]["scripts"] == ["notesmsg.js", "mapsites.js", "postlink.js", "background.js"]
     worker = (EXT / manifest["background"]["service_worker"]).read_text(encoding="utf-8")
     assert 'importScripts("notesmsg.js")' in worker
     assert 'importScripts("mapsites.js")' in worker
+    assert 'importScripts("postlink.js")' in worker
 
 
 def test_the_toolbar_button_is_the_workers_once_paired(manifest):

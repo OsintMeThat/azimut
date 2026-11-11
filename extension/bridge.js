@@ -7,8 +7,9 @@
  *     answer for later checks);
  *  2. relays the app's requests to the background worker and hands its answer
  *     back — capture, publish, reverse search, and the two the update
- *     button needs — and the one the worker hands the app: a map panel's
- *     Make the proof.
+ *     button needs — and the ones the worker hands the app: a map panel's
+ *     Make the proof, and what a hand-off to X or Bluesky caught or where it
+ *     stopped.
  *
  * The app keeps all judgment: registration, cropping, filing. The bridge
  * never touches the backend and never sees the pairing token — the app files
@@ -74,6 +75,22 @@
     answers.set(id, reply);
     post({ type: "scene-proof", id, scene: msg.scene });
     return true; // answered once the page has
+  });
+
+  // What a hand-off to X or Bluesky tells the app afterwards (`background.js`, "what
+  // was sent"): the link of the post just sent, for the app to offer, and where a
+  // hand-off stopped. From the worker only, like a scene above, and never relayed
+  // from the page. Only the named fields cross, and the page answers nothing.
+  const TOLD = {
+    "post-link-caught": ["caseId", "draft", "url", "site", "at"],
+    "post-handoff-report": ["caseId", "draft", "error", "report"],
+  };
+  api.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
+    const fields = TOLD[msg?.type];
+    if (!fields || !current()) return false;
+    post({ type: msg.type, ...Object.fromEntries(fields.map((name) => [name, msg[name] ?? null])) });
+    sendResponse({ ok: true });
+    return false;
   });
 
   // What the app may ask for, and what the answer is called coming back. The

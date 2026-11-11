@@ -5332,7 +5332,7 @@ never posts, and pressing Post on X or Bluesky stays the analyst's.
   clipboard to paste (*Picture copied: paste it with Ctrl+V.*); Bluesky has no such
   page, so it says so and copies the post and opens the source to paste it under.
 - **Mark as posted**, in the header beside *Saved*, is where a post says it went out:
-  nothing is read from the site, the analyst says so. A post is a **Draft**, **Posted**
+  the analyst says so, and a link the extension caught is only offered (below). A post is a **Draft**, **Posted**
   or **Changed since posted** when it was edited after (`publish` on the draft: `site`,
   `url` when it has a link, `posted_at`, a print of the post as it went out in `mark`,
   and `changed`; written only once it is marked, so a draft from before reads as a
@@ -5369,6 +5369,41 @@ never posts, and pressing Post on X or Bluesky stays the analyst's.
   another case is ignored. A hand-off that went wrong (`post-handoff-report`) shows its
   one sentence in a warning toast with **Copy report**, which copies the extension's
   short plain-text report.
+- **After the extension's hand-off.** X's reply box takes one post, so a reply of
+  several goes out one press per post: the extension fills post 1 (*Post 1 of 3 is
+  ready. Press Reply, then Azimut opens the next under it.*), and each Reply the
+  analyst presses opens that reply's page with the next post filled under it (*Post
+  2 of 3 is ready under your reply.*). A reply box that offers a next post takes the
+  whole thread. Once a post is sent, the extension reads its link off the site's toast
+  (the account signed in, made in the last five minutes) and hands it to the app as
+  `post-link-caught`, once per hand-off: a thread's first post, a reply's first reply.
+  The app only offers it. A hand-off that stops (no reply in 10 minutes, the tab closed
+  or gone elsewhere, a step that failed) says why in a notification and sends the app
+  a `post-handoff-report`: the step and what the extension's selectors found there,
+  never a word of the page.
+- **Link to your post** is the first field of every post, whatever its kind and a
+  draft from before kinds included (*Paste it once it's posted*). A post is a **Draft**,
+  **Opened in X** (or Bluesky) once Publish, Reply or the extension's hand-off opened
+  the site with it, **Posted** once the analyst gave its link, or **Changed since
+  posted** when it was edited after (`publish` on the draft: `opened_at`, `site`, `url`,
+  `posted_at`, a print of the post as it went out in `mark`, and `changed`; written only
+  once there is something to say, so a draft from before reads as a draft). The field
+  takes a link on a paste, Enter or leaving it, as the browser shows it (no `https://`,
+  a share's `?s=20`), and keeps it written the one way; anything that is not an X
+  status or a Bluesky post is said so under it and kept nowhere. Its text alone saves
+  nothing, while a link set on a blank post files it. Set, the link has **Copy**
+  (*Link copied*), **Open** in a new tab and **×**; another link pasted replaces it, and
+  × (or emptying the field) takes it back, the link having been wrong: the post is
+  Opened again when it was, else a draft. One quiet line under the field says where
+  it stands: nothing for a draft, *Opened in X · paste its link here once it's posted*
+  with the field's border in the accent, *Posted on X · 11 Nov 2026*, or *Changed since
+  posted* in the warning colour. The link and date also go on the proof the post is
+  about, as its `posted` record (one per post, the latest twenty): a record of the
+  post, not a source, since it is no evidence. A changed link replaces the old one
+  there, a link taken back leaves it, and deleting the draft keeps it, since the post
+  did go out. The proof's Details show *Posted on X · date · link*, and Add to notes
+  writes a *Posted* section. Nothing is read from the site: the analyst says it went
+  out.
 - **A narrow header** gives way a step at a time, measured rather than guessed: the
   name field narrows and the quiet line and Reply say less, then Open folds to its
   icon, then the quiet line keeps only **Install**, the kind its icon and Publish its

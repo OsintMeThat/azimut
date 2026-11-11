@@ -164,6 +164,7 @@ packages = ["src/azimut"]
 "extension/maplink.js" = "azimut/extension/maplink.js"
 "extension/mapsites.js" = "azimut/extension/mapsites.js"
 "extension/mapoverlay.js" = "azimut/extension/mapoverlay.js"
+"extension/postlink.js" = "azimut/extension/postlink.js"
 "extension/overlay.js" = "azimut/extension/overlay.js"
 "extension/reverse.js" = "azimut/extension/reverse.js"
 "extension/popup.html" = "azimut/extension/popup.html"

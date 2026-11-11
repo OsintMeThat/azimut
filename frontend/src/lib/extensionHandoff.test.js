@@ -92,7 +92,7 @@ const PNG = { name: 'proof.png', type: 'image/png', data: btoa('\x89PNG') };
  * do — `takesPaste: false` and `canType: false` are how a test closes a road.
  */
 function run({
-  hostname = 'x.com', pathname = '/', posts, html, reply = false,
+  hostname = 'x.com', pathname = '/', posts, html, reply = false, thread = {},
   canType = true, takesPaste = true, gecko = false,
   onPaste, onAttach, onType, onReady,
 }) {
@@ -148,7 +148,7 @@ function run({
   }
   document.body.addEventListener('drop', (e) => dropped.push(e.dataTransfer.files));
   onReady?.(document);
-  window.__AZIMUT_HANDOFF__ = reply ? { posts, reply } : { posts };
+  window.__AZIMUT_HANDOFF__ = { ...(reply ? { posts, reply } : { posts }), ...thread };
   // No `fetch` in scope on purpose — see the CSP test at the bottom.
   return new Function(
     'location',
@@ -747,4 +747,148 @@ describe('a reply under the source', () => {
     expect(pressed).toEqual([]);
     expect(report.filled).toBe(1);
   });
+});
+
+describe('a reply the site lets out one post at a time', () => {
+  // X's reply dialog as a logged-in French account draws it: the source quoted on
+  // top, the box, a toolbar of icons, the counter and Répondre. No "+".
+  const TOOLBAR = `<div data-testid="toolBar">${FILE_INPUT(0)}
+    <button data-testid="gifSearchButton"></button><button data-testid="createPollButton"></button>
+    <button aria-label="Emoji"></button><button data-testid="scheduleOption"></button>
+    <button data-testid="geoButton"></button></div>
+    <div role="progressbar" aria-valuenow="20"></div>
+    <button data-testid="tweetButton"><span>Répondre</span></button>`;
+  const SOURCE = `<article data-testid="tweet" tabindex="-1">
+    <a href="/someone/status/200"><time datetime="2026-11-11">9:00</time></a>
+    <button data-testid="reply"></button></article>`;
+  const opens = (doc, { add = false } = {}) => {
+    doc.querySelector('[data-testid="reply"]').addEventListener('click', () => {
+      const dialog = doc.createElement('div');
+      dialog.setAttribute('role', 'dialog');
+      dialog.innerHTML = `<div data-testid="tweetText">The source post, quoted.</div>${BOX(0)}${TOOLBAR}`
+        + (add ? '<button data-testid="addButton"></button>' : '');
+      doc.body.append(dialog);
+      const box = dialog.querySelector('[contenteditable]');
+      box.addEventListener('paste', (e) => { box.textContent += e.clipboardData.text; });
+    });
+  };
+  const sendsPressed = () => {
+    const pressed = [];
+    document.body.addEventListener('click', (e) => {
+      const button = e.target.closest?.('button');
+      if (button) pressed.push(button.dataset.testid ?? button.getAttribute('aria-label'));
+    });
+    return pressed;
+  };
+
+  it('fills the first post and says the dialog offers no next one, pressing nothing else', async () => {
+    const pressed = sendsPressed();
+    const report = await run({
+      pathname: '/someone/status/200', reply: true, thread: { ask: true }, html: SOURCE,
+      posts: [{ text: 'Geolocated.', files: [PNG] }],
+      onReady: (doc) => opens(doc),
+    });
+    expect(report).toMatchObject({ filled: 1, add: false });
+    expect(report.error).toBeUndefined();
+    expect(document.querySelector('[role="dialog"] [contenteditable]').textContent).toBe('Geolocated.');
+    expect(pressed).toEqual(['reply']); // and never Répondre
+  }, 20000);
+
+  it('says the dialog offers a next post when it draws a "+"', async () => {
+    const pressed = sendsPressed();
+    const report = await run({
+      pathname: '/someone/status/200', reply: true, thread: { ask: true }, html: SOURCE,
+      posts: [{ text: 'Geolocated.', files: [] }],
+      onReady: (doc) => opens(doc, { add: true }),
+    });
+    expect(report).toMatchObject({ filled: 1, add: true });
+    expect(pressed).toEqual(['reply']); // asked about, not pressed
+  });
+
+  it('adds the rest under the post already in the composer', async () => {
+    const page = document.createElement('div');
+    page.innerHTML = `<div role="dialog">${BOX(0)}${FILE_INPUT(0)}${FILE_INPUT(1)}`
+      + '<button data-testid="addButton"></button></div>';
+    page.querySelector('[contenteditable]').textContent = 'One.';
+    const inputs = [];
+    const report = await run({
+      html: page.innerHTML,
+      thread: { more: true, number: 2 },
+      onAttach: (input) => inputs.push(input.dataset.post),
+      posts: [{ text: 'Two.', files: [PNG] }, { text: 'Three.', files: [] }],
+      onReady: (doc) => {
+        const add = doc.querySelector('[data-testid="addButton"]');
+        add.addEventListener('click', () => {
+          const n = doc.querySelectorAll('[contenteditable]').length;
+          const box = doc.createElement('div');
+          box.dataset.testid = `tweetTextarea_${n}`;
+          box.setAttribute('contenteditable', 'true');
+          box.addEventListener('paste', (e) => { box.textContent += e.clipboardData.text; });
+          add.before(box);
+        });
+      },
+    });
+    expect(report).toEqual(expect.objectContaining({ filled: 2 }));
+    expect([...document.querySelectorAll('[contenteditable]')].map((box) => box.textContent))
+      .toEqual(['One.', 'Two.', 'Three.']);
+    // post 2's picture goes to post 2's own input, the second in the composer
+    expect(report.attached.map((one) => one.files[0].name)).toEqual(['proof.png']);
+    expect(inputs).toEqual(['1']);
+  }, 20000);
+
+  it('names a post by its place in the whole thread', async () => {
+    const report = await run({
+      html: BOX(0), canType: false, takesPaste: false, thread: { number: 3 },
+      posts: [{ text: 'Three.', files: [] }],
+    });
+    expect(report).toMatchObject({ filled: 0, error: 'Post 3 stayed empty.', step: 'fill-3' });
+  });
+
+  it('carries the step it stopped on and what the page held there', async () => {
+    const report = await run({
+      posts: [{ text: 'One.', files: [] }, { text: 'Two.', files: [] }],
+      html: `<div role="dialog">${BOX(0)}${TOOLBAR}</div>`,
+    });
+    expect(report).toMatchObject({ filled: 1, step: 'add-2', error: expect.stringMatching(/add the next post/) });
+    expect(report.probe).toEqual({
+      selectors: { editors: [1, 1], add: [0, 0], files: [1, 1, 1], reply: [0] },
+      scope: 'dialog',
+      buttons: ['fileInput', 'gifSearchButton', 'createPollButton', 'scheduleOption', 'geoButton', 'tweetButton'],
+      unnamed: 0,
+    });
+  }, 20000);
+
+  it('reads the page for a report and fills nothing, in counts and test ids only', async () => {
+    const report = await run({
+      html: `<main>${SOURCE}<div data-testid="UserAvatar-Container-desk" role="button"></div>`
+        + '<div data-testid="tweetText">Words on the page.</div></main>',
+      thread: { probe: true },
+      posts: [{ text: 'Never typed.', files: [] }],
+    });
+    expect(report.filled).toBe(0);
+    expect(report.landed).toEqual([]);
+    expect(report.probe).toMatchObject({ scope: 'page', buttons: ['reply'], unnamed: 1 });
+    expect(JSON.stringify(report.probe)).not.toMatch(/desk|someone|Words|status/);
+  });
+
+  it('asks Bluesky\'s reply composer for its "+" by the glyph', async () => {
+    const report = await run({
+      hostname: 'bsky.app', reply: true, thread: { ask: true },
+      html: '<button data-testid="replyPromptBtn"></button>',
+      posts: [{ text: 'Geolocated.', files: [] }],
+      onReady: (doc) => {
+        doc.querySelector('[data-testid="replyPromptBtn"]').addEventListener('click', () => {
+          const dialog = doc.createElement('div');
+          dialog.setAttribute('role', 'dialog');
+          dialog.innerHTML = '<div class="ProseMirror" contenteditable="true"></div>'
+            + '<div role="button" aria-label="Ajouter un autre post au fil de discussion">'
+            + '<svg><path d="M12 3a1 1 0 0 1 1 1v7h7a1 1 0 1 1 0 2h-7v7a1 1 0 1 1-2 0v-7H4"></path></svg></div>';
+          doc.body.append(dialog);
+          const box = dialog.querySelector('[contenteditable]');
+          box.addEventListener('paste', (e) => { box.textContent += e.clipboardData.text; });
+        });
+      },
+    });
+    expect(report).toMatchObject({ filled: 1, add: true });
+  }, 20000);
 });

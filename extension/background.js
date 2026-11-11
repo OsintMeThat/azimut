@@ -15,12 +15,13 @@
 
 const api = typeof browser !== "undefined" ? browser : chrome;
 
-// The notes panel's helpers (`notesmsg.js`) and the map hosts (`mapsites.js`). Firefox's
-// event page has them already, listed before this file in the manifest; Chrome's worker
-// loads them here.
+// The notes panel's helpers (`notesmsg.js`), the map hosts (`mapsites.js`) and the
+// checks on a sent post's link (`postlink.js`). Firefox's event page has them already,
+// listed before this file in the manifest; Chrome's worker loads them here.
 if (typeof importScripts === "function") {
   if (typeof AzimutNotes === "undefined") importScripts("notesmsg.js");
   if (typeof AzimutMapSites === "undefined") importScripts("mapsites.js");
+  if (typeof AzimutPostLink === "undefined") importScripts("postlink.js");
 }
 
 const APP_ORIGINS = ["http://127.0.0.1", "http://localhost"];
@@ -366,23 +367,113 @@ async function handOff(payload) {
     }
     target = { ...payload, url: payload.reply_to, reply: true };
   }
+  // The draft the thread came from, handed back with whatever this hand-off tells
+  // the app (a link caught, a report), so the app knows which post it is about.
+  const draft = payload.draft ?? null;
+  if (draft !== null && !(typeof draft === "string" && draft.length > 0 && draft.length <= 200)) {
+    throw new Error("not a draft Azimut knows");
+  }
   if (!handOffAllowed(target.url)) throw new Error("not a site Azimut posts to");
-  fillComposer(target, backendUrl, token).catch((e) =>
-    notify("Azimut hand-off", `${e.message} The thread is on your clipboard.`)
+  fillComposer({ ...target, draft }, backendUrl, token).catch((e) =>
+    notify("Azimut hand-off", `${e?.message} The thread is on your clipboard.`)
   );
   return { ok: true, accepted: true };
 }
 
+/**
+ * Open the composer and fill it. Never throws: every way this ends is told to the
+ * analyst in a notification and, when it stops short, to the app in a report.
+ *
+ * A thread goes into the composer in one go. A reply in several posts asks first
+ * whether the reply box offers a next post: with one, the rest follows in the same
+ * box; without one (X's reply box has none), the rest goes out one reply at a time
+ * (`nextReply`). Either way the tab is then followed for the link of what was sent
+ * (`postlink.js`), which the app is offered once.
+ */
 async function fillComposer(payload, backendUrl, token) {
-  const tab = await api.tabs.create({ url: payload.url, active: true });
-  await tabLoaded(tab.id);
-  // Both injections run in the page's own world, which is the only place a
-  // composer accepts what we make (see handoff.js). Nothing over there can call
-  // an extension API, so the thread goes in on a global, its file parts follow,
-  // and the report comes back as the script's return value.
-  const target = { tabId: tab.id };
+  const site = globalThis.AzimutPostLink?.siteOf(payload.url) ?? null;
+  const hand = {
+    id: crypto.randomUUID(),
+    tabId: null,
+    site,
+    host: hostOf(payload.url),
+    caseId: typeof payload.caseId === "string" ? payload.caseId : null,
+    draft: payload.draft ?? null,
+    posts: (payload.posts ?? []).map((post) => ({
+      text: String(post?.text ?? ""),
+      files: Array.isArray(post?.files) ? post.files.filter((path) => typeof path === "string") : [],
+    })),
+    reply: payload.reply === true,
+    chain: false, // the posts go out one reply at a time
+    done: 0, // posts filled so far
+    phase: "filling", // "filling", "waiting" for the analyst's press, or "opening" the next
+    seen: [], // record keys already used: the source, then each reply
+    sent: false, // the link went to the app
+    reading: false, // postlink.js runs on the page
+  };
+  let step = "open-tab";
+  try {
+    const tab = await api.tabs.create({ url: payload.url, active: true });
+    hand.tabId = tab.id;
+    await tabLoaded(tab.id);
+    if (site) {
+      const source = hand.reply ? AzimutPostLink.keyOf(site, payload.url) : null;
+      if (source) hand.seen.push(source);
+      (await watchBook()).set(tab.id, hand);
+      armWatch(hand);
+      await follow(hand);
+    }
+    // A reply of several posts fills its first, then says whether the box offers
+    // a next post; the files of the rest are not carried until it is known where.
+    const ask = hand.reply && hand.posts.length > 1;
+    step = "inject";
+    const thread = hand.reply ? (ask ? { reply: true, ask: true } : { reply: true }) : {};
+    const first = await fillPosts(hand, ask ? hand.posts.slice(0, 1) : hand.posts, thread, backendUrl, token);
+    if (first.error) {
+      return failHandOff(hand, { step, ...first, keep: !ask && first.filled > 0 });
+    }
+    if (ask && !(first.filled >= 1)) {
+      return failHandOff(hand, { step: "fill-1", error: "The reply box did not answer." });
+    }
+    if (!ask) {
+      hand.done = hand.posts.length;
+      return await inLine(() => waitForLink(hand));
+    }
+    if (first.add) {
+      const rest = await fillPosts(
+        hand,
+        hand.posts.slice(1),
+        { more: true, number: 2, carried: hand.posts[0].files.length > 0 },
+        backendUrl,
+        token
+      );
+      if (rest.error) return failHandOff(hand, { step, ...rest, keep: true });
+      hand.done = hand.posts.length;
+      return await inLine(() => waitForLink(hand));
+    }
+    return await inLine(() => startChain(hand));
+  } catch (e) {
+    const gone = hand.tabId !== null && (await tabGone(hand.tabId));
+    return failHandOff(hand, {
+      step,
+      error: gone ? "The tab was closed before the thread was in." : e?.message || "The composer refused the thread.",
+      gone,
+    });
+  }
+}
+
+/**
+ * Hand these posts to the page and run the filler on them; its report comes back.
+ *
+ * Both injections run in the page's own world, which is the only place a composer
+ * accepts what we make (see handoff.js). Nothing over there can call an extension
+ * API, so the posts go in on a global, their file parts follow, and the report
+ * comes back as the script's return value.
+ */
+async function fillPosts(hand, posts, thread, backendUrl, token) {
+  const target = { tabId: hand.tabId };
   const plans = [];
-  const posts = (payload.posts ?? []).map((post, postIndex) => ({
+  const handed = posts.map((post, postIndex) => ({
     text: post.text ?? "",
     files: (post.files ?? []).map((path, fileIndex) => {
       const id = `${postIndex}:${fileIndex}`;
@@ -398,16 +489,16 @@ async function fillComposer(payload, backendUrl, token) {
   await api.scripting.executeScript({
     target,
     world: "MAIN",
-    func: (thread) => {
-      window.__AZIMUT_HANDOFF__ = thread;
+    func: (given) => {
+      window.__AZIMUT_HANDOFF__ = given;
     },
-    args: [payload.reply ? { posts, reply: true } : { posts }],
+    args: [{ posts: handed, ...thread }],
   });
 
   let skipped = 0;
   for (const plan of plans) {
     try {
-      await streamAttachment(target, backendUrl, token, payload.caseId, plan.path, plan.id);
+      await streamAttachment(target, backendUrl, token, hand.caseId, plan.path, plan.id);
     } catch {
       skipped += 1;
       await discardAttachment(target, plan.id).catch(() => {});
@@ -425,8 +516,451 @@ async function fillComposer(payload, backendUrl, token) {
     world: "MAIN",
     files: ["handoff.js"],
   });
-  if (done?.result?.error) {
-    notify("Azimut hand-off", `${done.result.error} The thread is on your clipboard.`);
+  return done?.result ?? {};
+}
+
+const hostOf = (url) => {
+  try {
+    return new URL(url).hostname;
+  } catch {
+    return "";
+  }
+};
+
+/** Whether the browser no longer has this tab. */
+async function tabGone(tabId) {
+  try {
+    await api.tabs.get(tabId);
+    return false;
+  } catch {
+    return true;
+  }
+}
+
+// --- what was sent: the post's link, and a reply in several posts --------------
+//
+// Once the composer is filled the analyst presses Post (or Reply), and the site
+// says so in a toast that links to the post. `postlink.js` reads that link on the
+// tab this hand-off opened, and nowhere else; the app is offered it once, for the
+// post's Link field, and decides nothing until the analyst does.
+//
+// A reply in several posts needs that link to go on. X's reply box has no "+", so
+// the rest of the thread cannot wait in it: each post goes out under the one before,
+// one press each. The analyst presses Reply; the link of what they sent opens that
+// reply's page; its reply button opens the next box, and the next post goes in. The
+// extension presses nothing that sends, and nothing at all to find a link.
+//
+// A hand-off being followed is kept in storage.session, since the worker may be
+// put to sleep while the analyst reads what they are about to send. It ends with
+// the thread, after ten minutes without a post, or with the tab.
+
+const WATCH_KEY = "postWatches";
+const WATCH_MS = 10 * 60 * 1000;
+/** The steps a report may name. */
+const REPORT_STEP = /^(?:open-tab|inject|open-reply|open-composer|catch-link|(?:fill|add)-\d{1,3})$/;
+/** A test id the report may carry: one plain word, never an avatar's with a handle in it. */
+const REPORT_TEST_ID = /^[A-Za-z][A-Za-z0-9_]{0,48}$/;
+
+let watchMemo = null; // tabId → hand-off, mirrored in storage.session
+const watchTimers = new Map();
+let watchLine = Promise.resolve();
+
+/** One thing at a time: a press, a closed tab and a timeout can arrive together. */
+function inLine(work) {
+  const run = watchLine.then(work, work);
+  watchLine = run.catch(() => {});
+  return run;
+}
+
+async function watchBook() {
+  if (!watchMemo) {
+    let stored = null;
+    try {
+      stored = (await api.storage.session.get({ [WATCH_KEY]: null }))?.[WATCH_KEY];
+    } catch {
+      // nothing kept: nothing to follow
+    }
+    watchMemo ??= new Map(Object.entries(stored ?? {}).map(([tabId, hand]) => [Number(tabId), hand]));
+  }
+  return watchMemo;
+}
+
+function keepWatches() {
+  try {
+    Promise.resolve(api.storage.session.set({ [WATCH_KEY]: Object.fromEntries(watchMemo ?? []) })).catch(() => {});
+  } catch {
+    // the hand-off goes on in memory; a restart in the middle loses it
+  }
+}
+
+/** Start the ten minutes of a step over: a fresh post is looked for from now. */
+function armWatch(hand) {
+  hand.since = Date.now();
+  hand.deadline = hand.since + WATCH_MS;
+  clearTimeout(watchTimers.get(hand.tabId));
+  const timer = setTimeout(() => inLine(() => expireWatch(hand.tabId, hand.id)), WATCH_MS);
+  timer?.unref?.();
+  watchTimers.set(hand.tabId, timer);
+  keepWatches();
+}
+
+/** Put the link reader on the page the hand-off is on. */
+async function follow(hand) {
+  const target = { tabId: hand.tabId };
+  try {
+    await api.scripting.executeScript({ target, files: ["postlink.js"] });
+    await api.scripting.executeScript({
+      target,
+      func: (config) => globalThis.AzimutPostLink?.watch(config) ?? false,
+      args: [{ watch: hand.id, site: hand.site, since: hand.since, seen: hand.seen, deadline: hand.deadline }],
+    });
+    hand.reading = true;
+  } catch {
+    // no reader: the composer is filled all the same, and the link is the analyst's to paste
+    hand.reading = false;
+  }
+  keepWatches();
+}
+
+/** Ask the reader on the page something: `ping`, `probe` or `stop`. Null when it is gone. */
+async function askReader(hand, ask) {
+  try {
+    const answer = await api.tabs.sendMessage(hand.tabId, { type: "post-watch", watch: hand.id, ask });
+    return answer?.alive === true ? answer : null;
+  } catch {
+    return null;
+  }
+}
+
+/** The hand-off is over: stop following it. */
+function endWatch(hand, { gone = false } = {}) {
+  if (watchMemo?.get(hand.tabId)?.id === hand.id) watchMemo.delete(hand.tabId);
+  clearTimeout(watchTimers.get(hand.tabId));
+  watchTimers.delete(hand.tabId);
+  keepWatches();
+  if (!gone && hand.reading) askReader(hand, "stop");
+}
+
+/** Everything is in the composer: wait for the analyst's press and its link. */
+async function waitForLink(hand) {
+  // a tab closed while it was being filled was let go then; this is the step that hears of it
+  if (!hand.reading || (await tabGone(hand.tabId))) return endWatch(hand, { gone: true });
+  hand.phase = "waiting";
+  keepWatches();
+}
+
+/** The reply box offers no next post: fill the rest one reply at a time. */
+async function startChain(hand) {
+  const total = hand.posts.length;
+  if (await tabGone(hand.tabId)) {
+    return failHandOff(hand, {
+      step: "catch-link",
+      stopped: "closed",
+      error: `The tab was closed, so Azimut stopped after post 1 of ${total}.`,
+      gone: true,
+    });
+  }
+  if (!hand.reading) {
+    return failHandOff(hand, {
+      step: "catch-link",
+      error: `Azimut could not follow this page, so it stopped after post 1 of ${total}.`,
+    });
+  }
+  hand.chain = true;
+  hand.done = 1;
+  hand.phase = "waiting";
+  keepWatches();
+  notify("Azimut hand-off", `Post 1 of ${total} is ready. Press Reply, then Azimut opens the next under it.`);
+  // The analyst was quicker than the question about a next post.
+  if (hand.pending) {
+    const url = hand.pending;
+    delete hand.pending;
+    await nextReply(hand, url);
+  }
+}
+
+/**
+ * The reader saw a post of the analyst's. The app hears of the first one; a reply
+ * in several posts goes on under each.
+ */
+async function linkSeen(tabId, id, url) {
+  const hand = (await watchBook()).get(tabId);
+  if (!hand || hand.id !== id || !handOffAllowed(url)) return;
+  const at = AzimutPostLink.sentAt(hand.site, url);
+  const key = AzimutPostLink.keyOf(hand.site, url);
+  const now = Date.now();
+  const fresh =
+    at !== null && Math.abs(at - now) <= AzimutPostLink.FRESH_MS && at >= hand.since - AzimutPostLink.SKEW_MS;
+  if (!fresh || hand.seen.includes(key)) return;
+  if (!hand.sent) {
+    hand.sent = true;
+    keepWatches();
+    tellApp({
+      type: "post-link-caught",
+      caseId: hand.caseId,
+      draft: hand.draft,
+      url,
+      site: hand.site,
+      at: new Date(at).toISOString(),
+    });
+  }
+  if (hand.phase === "filling") {
+    hand.pending ??= url;
+    keepWatches();
+    return;
+  }
+  if (!hand.chain || hand.done >= hand.posts.length) return endWatch(hand);
+  if (hand.phase === "waiting") await nextReply(hand, url);
+}
+
+/** Resolve once the tab has loaded the page it was sent to (or after a while). */
+function pageLoaded(tabId, url, timeoutMs = 20000) {
+  return new Promise((resolve) => {
+    let left = false;
+    const done = () => {
+      api.tabs.onUpdated.removeListener(onUpdated);
+      clearTimeout(timer);
+      resolve();
+    };
+    const timer = setTimeout(done, timeoutMs);
+    // A page that pushes its own address says "complete" too: only the load of
+    // the page asked for counts.
+    function onUpdated(id, info, tab) {
+      if (id !== tabId) return;
+      if (info?.status === "loading") left = true;
+      if (info?.status === "complete" && (left || !tab || tab.url === url)) done();
+    }
+    api.tabs.onUpdated.addListener(onUpdated);
+  });
+}
+
+/** Open the reply the analyst just sent, and fill the next post under it. */
+async function nextReply(hand, url) {
+  const number = hand.done + 1;
+  const total = hand.posts.length;
+  hand.phase = "opening";
+  hand.seen.push(AzimutPostLink.keyOf(hand.site, url));
+  keepWatches();
+  const { backendUrl, token } = await settings();
+  let step = "open-reply";
+  try {
+    const loaded = pageLoaded(hand.tabId, url);
+    await api.tabs.update(hand.tabId, { url });
+    await loaded;
+    armWatch(hand);
+    await follow(hand);
+    step = `fill-${number}`;
+    const done = await fillPosts(hand, [hand.posts[number - 1]], { reply: true, number }, backendUrl, token);
+    if (done.error) return failHandOff(hand, done);
+  } catch (e) {
+    const gone = await tabGone(hand.tabId);
+    return failHandOff(hand, {
+      step,
+      error: gone ? `The tab was closed, so Azimut stopped after post ${hand.done} of ${total}.` : e?.message,
+      gone,
+    });
+  }
+  hand.done = number;
+  notify("Azimut hand-off", `Post ${number} of ${total} is ready under your reply.`);
+  if (number >= total) return endWatch(hand);
+  hand.phase = "waiting";
+  keepWatches();
+}
+
+/** Ten minutes without a post: a thread stops following, a reply in several posts stops. */
+async function expireWatch(tabId, id) {
+  const hand = (await watchBook()).get(tabId);
+  if (!hand || hand.id !== id || hand.phase !== "waiting") return;
+  if (Date.now() < hand.deadline - 1000) return; // a reader from an earlier step
+  if (!hand.chain) return endWatch(hand);
+  const link = (await askReader(hand, "probe"))?.counts ?? null;
+  const probe = await probePage(hand.tabId);
+  return failHandOff(hand, {
+    step: "catch-link",
+    stopped: "timeout",
+    error: `No reply was seen within 10 minutes, so Azimut stopped after post ${hand.done} of ${hand.posts.length}.`,
+    probe,
+    link,
+  });
+}
+
+/** The tab closed, reloaded or left the site while a hand-off followed it. */
+async function watchMoved(tabId, info, tab) {
+  const hand = (await watchBook()).get(tabId);
+  if (!hand) return;
+  // A step still running hears of a closed tab on its own and says so; one cut off
+  // by a restart of the worker has nobody left to say it.
+  if (info?.removed && hand.phase !== "waiting") return endWatch(hand, { gone: true });
+  if (hand.phase !== "waiting") return;
+  const url = info?.url ?? (info?.status === "complete" ? tab?.url : undefined);
+  const where = hand.site === "bluesky" ? "Bluesky" : "X";
+  const after = `so Azimut stopped after post ${hand.done} of ${hand.posts.length}`;
+  let stopped = null;
+  let error = null;
+  if (info?.removed) {
+    stopped = "closed";
+    error = `The tab was closed, ${after}.`;
+  } else if (url && AzimutPostLink.siteOf(url) !== hand.site) {
+    stopped = "left";
+    error = `The tab left ${where}, ${after}.`;
+  } else if (info?.status === "complete" && !(await askReader(hand, "ping"))) {
+    // A page that swapped its address keeps the reader; a page that loaded anew
+    // has lost it, and the filled box with it.
+    stopped = "reloaded";
+    error = `The page loaded again, ${after}.`;
+  }
+  if (!stopped) return;
+  if (!hand.chain) return endWatch(hand, { gone: true });
+  return failHandOff(hand, { step: "catch-link", stopped, error, gone: true });
+}
+
+api.tabs.onUpdated.addListener(async (tabId, info, tab) => {
+  if (!info?.url && info?.status !== "complete") return;
+  if (!(await watchBook()).has(tabId)) return;
+  inLine(() => watchMoved(tabId, info, tab));
+});
+
+api.tabs.onRemoved?.addListener(async (tabId) => {
+  if (!(await watchBook()).has(tabId)) return;
+  inLine(() => watchMoved(tabId, { removed: true }));
+});
+
+/** What the page held, for a report, read by the filler that knows the site. */
+async function probePage(tabId) {
+  try {
+    const target = { tabId };
+    await api.scripting.executeScript({
+      target,
+      world: "MAIN",
+      func: () => {
+        window.__AZIMUT_HANDOFF__ = { probe: true };
+      },
+    });
+    const [done] = await api.scripting.executeScript({ target, world: "MAIN", files: ["handoff.js"] });
+    return done?.result?.probe ?? null;
+  } catch {
+    return null;
+  }
+}
+
+/** Put the posts not yet sent on the clipboard, from the tab. False when refused. */
+async function copyRest(tabId, text) {
+  try {
+    const [done] = await api.scripting.executeScript({
+      target: { tabId },
+      func: async (value) => {
+        try {
+          await navigator.clipboard.writeText(value);
+          return true;
+        } catch {
+          return false;
+        }
+      },
+      args: [text],
+    });
+    return done?.result === true;
+  } catch {
+    return false;
+  }
+}
+
+/** One sentence for the app: no address beyond its host, no line breaks. */
+function plainError(error) {
+  return String(error || "The hand-off stopped.")
+    .replace(/\bhttps?:\/\/[^\s]+/g, (url) => hostOf(url) || "a page")
+    .replace(/\s+/g, " ")
+    .trim()
+    .slice(0, 300);
+}
+
+/**
+ * What to copy back when a hand-off stopped: where, and what the page held there.
+ *
+ * Counts and test ids only, each checked here, since the page's world wrote them.
+ * Never a word of the page, a handle, a post or an address beyond the host.
+ */
+function handOffReport(hand, { step, stopped, probe, link }) {
+  const count = (value) => (Number.isInteger(value) && value >= -1 && value < 100000 ? value : 0);
+  const lines = [`Azimut Capture ${api.runtime.getManifest().version} on ${hand.host || "an unknown host"}`];
+  lines.push(`Step: ${REPORT_STEP.test(String(step)) ? step : "unknown"}`);
+  if (stopped) lines.push(`Stopped: ${stopped}`);
+  const selectors = probe?.selectors;
+  if (selectors && typeof selectors === "object") {
+    const roles = ["editors", "add", "files", "reply"].map((role) => {
+      const counts = Array.isArray(selectors[role]) ? selectors[role].slice(0, 8).map(count) : [];
+      return `${role} ${counts.length ? counts.join("+") : "none"}`;
+    });
+    lines.push(`Selectors: ${roles.join(", ")}`);
+    const ids = (Array.isArray(probe.buttons) ? probe.buttons : [])
+      .filter((id) => typeof id === "string" && REPORT_TEST_ID.test(id))
+      .slice(0, 40);
+    const unnamed = count(probe.unnamed);
+    const scope = probe.scope === "dialog" ? "dialog" : "page";
+    lines.push(`Buttons in the ${scope}: ${ids.join(", ") || "none"}${unnamed ? ` (+${unnamed} unnamed)` : ""}`);
+  } else {
+    lines.push("Selectors: the page could not be read");
+  }
+  if (link && typeof link === "object") {
+    lines.push(
+      `Link: toasts ${count(link.toasts)}, post links ${count(link.links)}, refused ${count(link.refused)}, ` +
+        `account ${link.account ? "found" : "not found"}`
+    );
+  }
+  return lines.join("\n");
+}
+
+/**
+ * Say where the hand-off stopped: a notification for the analyst and a report for
+ * the app. A reply in several posts puts the posts not yet sent on the clipboard
+ * when the browser lets it; the whole thread is there anyway, since the app copied
+ * it before opening anything.
+ *
+ * `keep` goes on following the tab: a thread filled in part may still be sent.
+ */
+async function failHandOff(hand, { step, error, probe = null, link = null, stopped = null, gone = false, keep = false }) {
+  const sentence = plainError(error);
+  if (!keep) endWatch(hand, { gone });
+  else await waitForLink(hand);
+  let clip = "The thread is on your clipboard.";
+  const first = hand.done + 1;
+  const last = hand.posts.length;
+  const rest = hand.posts.slice(hand.done).map((post) => post.text).filter(Boolean);
+  if (hand.chain && rest.length && !gone && hand.tabId !== null && (await copyRest(hand.tabId, rest.join("\n\n")))) {
+    clip = first === last ? `Post ${last} is on your clipboard.` : `Posts ${first} to ${last} are on your clipboard.`;
+  }
+  notify("Azimut hand-off", `${sentence} ${clip}`);
+  const report = handOffReport(hand, { step, stopped, probe, link });
+  // Also where about:debugging's Inspect shows it, for an app that does not show reports.
+  console.info(`Azimut hand-off stopped: ${sentence}\n${report}`);
+  await tellApp({ type: "post-handoff-report", caseId: hand.caseId, draft: hand.draft, error: sentence, report });
+}
+
+/**
+ * Tell the app's own tabs something about a hand-off, by the bridge, as a map
+ * panel's Make the proof is told (`sceneProof`). The paired address only, never a
+ * map window. A bridge left behind by an update is replaced and asked again.
+ */
+async function tellApp(message) {
+  let tabs = [];
+  try {
+    tabs = await appTabs();
+  } catch {
+    return; // the notification has said it already
+  }
+  for (const tab of tabs) {
+    let told = false;
+    try {
+      told = (await api.tabs.sendMessage(tab.id, message))?.ok === true;
+    } catch {
+      // no bridge yet, or one from before an update
+    }
+    if (told) continue;
+    await api.scripting.executeScript({ target: { tabId: tab.id }, files: ["bridge.js"] }).catch(() => {});
+    try {
+      await api.tabs.sendMessage(tab.id, message);
+    } catch {
+      // a tab still loading: the analyst still has the notification
+    }
   }
 }
 
@@ -1964,6 +2498,19 @@ async function handle(msg, sender) {
     } catch (e) {
       return { ok: false, error: e.message };
     }
+  }
+
+  // The link reader on a composer tab this extension opened (`postlink.js`): a post
+  // of the analyst's was sent, or ten minutes went by without one. Taken only from
+  // that tab, for the hand-off it was started for; anything else is nobody's.
+  if (msg.type === "post-link-seen" || msg.type === "post-link-timeout") {
+    const tabId = sender.tab?.id;
+    if (!Number.isInteger(tabId) || typeof msg.watch !== "string" || isAppUrl(sender.tab.url)) {
+      return { ok: false, error: "not a hand-off this extension follows" };
+    }
+    if (msg.type === "post-link-timeout") inLine(() => expireWatch(tabId, msg.watch));
+    else inLine(() => linkSeen(tabId, msg.watch, String(msg.url ?? "")));
+    return { ok: true };
   }
 
   // The app's Reverse Search buttons, relayed by bridge.js: open the engine and

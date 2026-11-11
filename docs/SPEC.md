@@ -390,7 +390,7 @@ stops making sense.
   **resolved** path, so `media/../case.json` is refused where a prefix read off
   the request would have served it. Filling a composer and handing a picture to a
   reverse-image engine are the extension's only reach past localhost — eight
-  hosts, declared, where it writes what the app gave it and reads nothing — and
+  hosts, declared, where it writes what the app gave it — and
   each switch that uses one is in the app (Settings → Publishing, Settings →
   General), where the analyst already decides how a thread is published and which
   engine gets the picture. The engine road carries the image itself rather than a
@@ -402,10 +402,15 @@ stops making sense.
   risk rather than an oversight: Lens redirects `lens.google.com` to the search
   home page and draws its uploader there, so the grant has to cover wherever that
   redirect lands. It buys nothing beyond that — the extension injects only into a
-  tab it opened itself, at a URL the app handed it, and reads nothing back. A reply
+  tab it opened itself, at a URL the app handed it. A reply
   under the source is the one hand-off that opens a page it did not prepare: the source
   post's own address, taken only when it is an X status or a Bluesky post, where it
   finds that post's reply button, presses it and fills the box it opens.
+  After a hand-off it started, on x.com and bsky.app, the extension reads the sent
+  post's link off the site's toast (read-only, taken only for the account signed in
+  on that page and an id made in the last five minutes, sent only to the paired Azimut
+  tab), and for a reply in several posts opens that reply and its reply box for the
+  next; it still never presses send.
   Accepted risk (owner's choice, 2026-11-06): the notes panel's Add may ask for
   every site (`optional_host_permissions: <all_urls>`), since a press in a side
   panel opens no tab to an extension. It is optional, asked the first time Add
