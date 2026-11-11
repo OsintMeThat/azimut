@@ -15,12 +15,16 @@
  * stated, with no moments; only the Undo of a first time takes the proof back to its
  * frames (`traced`).
  *
- * A proof made by hand states nothing, yet its frames may all fall in one scene of
- * Inspect still to prove. A proof never saved takes it as its `match`: the time reads
- * the scene's, the tab names it, and the first save takes it up as Make the proof's
- * does. A saved proof is what is on disk, as Inspect shows it: the scene is its
- * `proposal`, named under the field, and nothing is written until **Take it up**.
- * **Not this scene** keeps the proof apart from it for the session, and writes nothing.
+ * A proof made by hand states nothing, yet its panels may point at one scene of Inspect
+ * still to prove: frames that all fall in it, a capture made over a collage of the video
+ * whose pieces do, or a capture the scene gathered on the map (`ties()`, read by the
+ * server off each panel's derivation). A proof never saved takes it as its `match`: the
+ * time reads the scene's, the tab names it, and the first save takes it up as Make the
+ * proof's does. A saved proof is what is on disk, as Inspect shows it: the scene is its
+ * `proposal`, named under the field, and nothing is written until **Take it up**. Panels
+ * pointing at several scenes, or saying too little, tie nothing: the scenes are its
+ * `choices`, each with its own Take it up. **Not this scene** keeps the proof apart from
+ * what was offered for the session, and writes nothing.
  *
  * **Inspect writes the same scene** from its Scenes tab. Geo Proof reads it again when it
  * comes back to the front and when the server says a scene moved (`reread`, `follow`),
@@ -30,7 +34,7 @@
 import { SceneEdit } from '../../lib/sceneEdit.svelte.js';
 import { sameMoments, sceneMoments, sortMoments, timeWords } from '../../lib/scenes.js';
 import {
-  outsideFrames, proofVideos, readStatedScene, sceneOfFrames, starVideo, statedMoments, videoName,
+  outsideFrames, proofVideos, readStatedScene, sceneOffer, starVideo, statedMoments, videoName,
 } from '../../lib/proofScene.js';
 
 const plain = (moments) => (moments ?? []).map(({ start, end }) => ({ start, end: end ?? null }));
@@ -66,19 +70,26 @@ export class ProofScene {
   edit;
 
   /**
-   * The scene still to prove the proof's frames all fall in (`lib/proofScene.sceneOfFrames`),
-   * or null. Only while the proof states no scene: none at all, or only the video a slide
-   * started with + New scene holds.
+   * The scene still to prove the proof's panels point at, and the ones offered when they
+   * point at several (`lib/proofScene.sceneOffer`), those refused left out. Only while the
+   * proof states no scene: none at all, or only the video a slide started with + New
+   * scene holds.
    */
-  #found = $derived.by(() => {
+  #offer = $derived.by(() => {
     const stated = this.stated;
-    if (stated && !(this.held && !stated.draft && !stated.moments.length)) return null;
+    if (stated && !(this.held && !stated.draft && !stated.moments.length)) return { found: null, choices: [] };
     const star = this.star;
     // the clip's own frame once the player read it, else a thirtieth, as in Inspect
     const frame = this.view?.video === star && this.clip.fps > 0 ? 1 / this.clip.fps : 0;
-    const found = sceneOfFrames(this.frames(), star, this.listed(), { own: this.#listedAs, frame });
-    return found && !this.refused.includes(found.id) ? found : null;
+    const { found, choices } = sceneOffer(this.frames(), star, this.listed(), { own: this.#listedAs, frame, ties: this.ties() });
+    const refused = this.refused;
+    return {
+      found: found && !refused.includes(found.id) ? found : null,
+      choices: choices.filter((one) => !refused.includes(one.id)),
+    };
   });
+
+  #found = $derived(this.#offer.found);
 
   /** The scene found, for a proof never saved: its time is the proof's, and the first save takes it up. */
   match = $derived(this.#listedAs === null ? this.#found : null);
@@ -86,18 +97,23 @@ export class ProofScene {
   /** The scene found, for a saved proof: named under the field, written only by Take it up. */
   proposal = $derived(this.#listedAs === null ? null : this.#found);
 
+  /** The scenes offered when the panels point at several, or say too little: one is taken up, or none. */
+  choices = $derived(this.#offer.choices);
+
   /**
    * `where()` answers `{ caseId, name }`, the name null until the first save;
    * `frames()` the panels cut from a video (`lib/proofScene.panelFrames`);
+   * `ties()` the other panels made from a video's footage (`POST /scenes/ties`);
    * `listed()` what `GET /scenes?video=` answered for the ★ video, or null.
    * `titleOf(path)` a video's title in Media, '' when it has none.
    * `onstated()` hears every change the analyst states, not the first save's.
    */
-  constructor({ api, toast, where, frames, listed = () => null, titleOf = () => '', onstated = () => {} }) {
+  constructor({ api, toast, where, frames, ties = () => [], listed = () => null, titleOf = () => '', onstated = () => {} }) {
     this.api = api;
     this.toast = toast;
     this.where = where;
     this.frames = frames;
+    this.ties = ties;
     this.listed = listed;
     this.titleOf = titleOf;
     this.onstated = onstated;
@@ -106,7 +122,7 @@ export class ProofScene {
 
   /** The video the proof is about. */
   get star() {
-    return starVideo(this.frames(), this.stated);
+    return starVideo(this.frames(), this.stated, this.ties());
   }
 
   /** When in it the place shows: none is the whole video, and a match reads its scene's. */
@@ -121,7 +137,7 @@ export class ProofScene {
 
   /** Every video the proof rests on, the ★ first. The block shows itself when there is one. */
   get videos() {
-    return proofVideos(this.frames(), this.stated, this.titleOf);
+    return proofVideos(this.frames(), this.stated, this.titleOf, this.ties());
   }
 
   /** The ★ panels whose frame shows in none of the moments. */
@@ -150,20 +166,24 @@ export class ProofScene {
     this.refused = this.#refusals.get(this.#refusalKey()) ?? [];
   }
 
-  /** Not this scene: the proof stays apart from the scene its frames found. Nothing is written. */
+  /** Not this scene: the proof stays apart from the scene found, or the ones offered. Nothing is written. */
   refuse() {
-    const found = this.#found;
-    if (!found) return;
+    const ids = this.#found ? [this.#found.id] : this.choices.map((one) => one.id);
+    if (!ids.length) return;
     const read = !!this.match;
-    this.refused = [...this.refused, found.id];
+    this.refused = [...this.refused, ...ids];
     this.#keepRefusals();
     // a time printed on the picture now reads the whole video
     if (read) this.onstated();
   }
 
-  /** Take it up: the scene proposed becomes the proof's, its time and the scene itself, written at once. */
-  async takeUp() {
-    const found = this.proposal;
+  /**
+   * Take it up: the scene proposed, or the one picked among those offered (`id`), becomes
+   * the proof's, its time and the scene itself, written at once, or at the first save of a
+   * proof never saved.
+   */
+  async takeUp(id = null) {
+    const found = id == null ? this.proposal : this.choices.find((one) => one.id === id) ?? null;
     if (!found) return false;
     this.edit.close();
     return this.write({ video: this.star, moments: found.moments }, { draft: found.id });
@@ -320,7 +340,9 @@ export class ProofScene {
   async makeStar(video) {
     if (!video || video === this.star) return;
     this.edit.close();
-    await this.write({ video, moments: [] }, { traced: video === this.frames()[0]?.video });
+    // the video the proof reads back to when it states nothing, as the server traces it
+    const traced = this.frames()[0]?.video ?? this.ties()[0]?.video;
+    await this.write({ video, moments: [] }, { traced: video === traced });
   }
 
   // -- writing --------------------------------------------------------------------------

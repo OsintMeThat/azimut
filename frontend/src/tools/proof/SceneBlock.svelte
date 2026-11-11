@@ -24,9 +24,10 @@
   // the end of a field runs that video in it, Here reads its frame and a frame becomes
   // a panel. What is stated goes through `proofScene.svelte.js`.
   //
-  // The scene still to prove the panels fall in is named under the ★ field: read as the
+  // The scene still to prove the panels point at is named under the ★ field: read as the
   // time of a proof never saved, which its first save takes up, and offered to a saved
   // one, with **Take it up** and **Not this scene**, its time left as the proof states it.
+  // Panels pointing at several scenes tie nothing: each is offered with its own Take it up.
   //
   // `active` is whether the tab is shown. A hidden tab keeps its player where it
   // stood, paused, so coming back finds the same frame.
@@ -212,29 +213,56 @@
       </button>
     </div>
     {#if v.star && scene.match}
-      <!-- The scene still to prove its frames found, taken up at the next save. -->
+      <!-- The scene still to prove its panels found, taken up at the next save. -->
       {@const found = scene.match}
-      <p class="matched" role="status" data-testid="scene-match" title={found.whole ? HELP.onlyScene : HELP.matched}>
+      {@const gathered = found.by === 'captures'}
+      <p class="matched" role="status" data-testid="scene-match" title={gathered ? HELP.capturedFor : found.whole ? HELP.onlyScene : HELP.matched}>
         <span class="swatch" style:background={found.color} aria-hidden="true"></span>
         <span class="found" dir="auto">{found.title}</span>
         <span class="sep" aria-hidden="true">·</span>
-        <span class="why">{found.whole ? 'the video\'s only scene' : 'found by its frames'}</span>
+        <span class="why">{gathered ? 'its captures were taken for it' : found.whole ? 'the video\'s only scene' : 'found by its frames'}</span>
         <button class="link refuse" onclick={() => scene.refuse()} title={HELP.notThisScene}>Not this scene</button>
       </p>
     {/if}
     {#if v.star && scene.proposal}
-      <!-- A saved proof's time is what it states: the scene its frames fall in is offered. -->
+      <!-- A saved proof's time is what it states: the scene its panels point at is offered. -->
       {@const found = scene.proposal}
-      <p class="matched proposed" role="status" data-testid="scene-proposal" title={HELP.proposed}>
+      {@const when = sceneTime({ kind: 'proof', moments: found.moments })}
+      <p class="matched proposed" role="status" data-testid="scene-proposal" title={found.by === 'captures' ? HELP.proposedCaptures : HELP.proposed}>
         <span class="swatch" style:background={found.color} aria-hidden="true"></span>
         <span class="found" dir="auto">{found.title}</span>
-        <span class="sep" aria-hidden="true">·</span>
-        <span class="why">{sceneTime({ kind: 'proof', moments: found.moments })}</span>
+        {#if when !== found.title}
+          <span class="sep" aria-hidden="true">·</span>
+          <span class="why">{when}</span>
+        {/if}
         <span class="acts">
           <button class="link" onclick={() => scene.takeUp()} title={HELP.takeUp}>Take it up</button>
           <button class="link" onclick={() => scene.refuse()} title={HELP.notThisScene}>Not this scene</button>
         </span>
       </p>
+    {/if}
+    {#if v.star && scene.choices.length}
+      <!-- Panels pointing at several scenes, or saying too little: the analyst says which. -->
+      <div class="choices" role="group" aria-label="Scenes to take up" data-testid="scene-choices">
+        <p class="matched choice-head">
+          <span class="why">{scene.choices.length > 1 ? 'Which scene is it?' : 'Is it this scene?'}</span>
+          <button class="link refuse" onclick={() => scene.refuse()} title={HELP.noneOfThese}>{scene.choices.length > 1 ? 'None of these' : 'Not this scene'}</button>
+        </p>
+        {#each scene.choices as one (one.id)}
+          {@const when = sceneTime({ kind: 'proof', moments: one.moments })}
+          <p class="matched proposed" data-testid="scene-choice" title={HELP.choice}>
+            <span class="swatch" style:background={one.color} aria-hidden="true"></span>
+            <span class="found" dir="auto">{one.title}</span>
+            {#if when !== one.title}
+              <span class="sep" aria-hidden="true">·</span>
+              <span class="why">{when}</span>
+            {/if}
+            <span class="acts">
+              <button class="link" onclick={() => scene.takeUp(one.id)} title={HELP.takeUp}>Take it up</button>
+            </span>
+          </p>
+        {/each}
+      </div>
     {/if}
   {/each}
 
@@ -447,6 +475,9 @@
     flex-shrink: 0;
     margin-left: auto;
     white-space: nowrap;
+  }
+  .choice-head {
+    color: var(--text-2);
   }
   /* offered, not read: its two answers go under it when the column is narrow */
   .proposed {

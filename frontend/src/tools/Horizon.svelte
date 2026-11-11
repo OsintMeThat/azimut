@@ -80,6 +80,7 @@
     viewFilename,
   } from '../lib/horizon/viewExport.js';
   import { canvasBlob, blobBase64 } from '../lib/map/compareExport.js';
+  import { keepInOrder, sendToGeoProof } from '../lib/toGeoProof.js';
   import { destinationLabel } from '../lib/exportDest.js';
   import { earthCameraLink } from '../lib/maplinks.js';
   import { verticalFov } from '../lib/horizon/camera.js';
@@ -668,16 +669,20 @@
   offerPuts('horizon', () => (view.observer ? [noteArea] : []));
   onDestroy(() => withdrawNote('horizon'));
 
-  /** A picture of the saved view kept in the case, listed under it. */
-  async function keepPicture(caseId, blob, kind, filename) {
+  /**
+   * A picture of the saved view kept in the case, listed under it. Answers the server's
+   * `{ path, scene }`, `scene` the one being geolocated that it was attached to.
+   * `reload` reads the case again once it is filed.
+   */
+  async function keepPicture(caseId, blob, kind, filename, { reload = true } = {}) {
     const form = new FormData();
     form.append('image', blob, 'view.png');
     form.append('kind', kind);
     form.append('filename', filename);
     if (pictureCredits) form.append('attribution', pictureCredits);
     const answer = await api.post(`/api/cases/${encodeURIComponent(caseId)}/horizon/views/${encodeURIComponent(views.current.name)}/images`, form);
-    reloadCase();
-    return answer.path;
+    if (reload) reloadCase();
+    return answer;
   }
 
   let captureBusy = $state(false);
@@ -739,7 +744,10 @@
   /**
    * The photo and the terrain through the same frame, the ridge lines on both,
    * kept under the view and laid as two panels of a new Geo Proof. A view never
-   * saved is saved first: the panels say which view they came from.
+   * saved is saved first: the panels say which view they came from. While the
+   * case geolocates a scene, which gathers both, the proof is that scene's
+   * (`lib/toGeoProof.js`). Both pictures are encoded at once and kept in turn, and
+   * the case is read again once, after both.
    */
   async function sendToProof() {
     if (exportBusy || !viewPane || !photoOn || !overlay.source) return;
@@ -753,18 +761,17 @@
         const saved = await views.save(viewTitle);
         if (!saved) return;
       }
-      const drawn = await viewPane.exportPicture({ kind: 'view', variants: [{ photo: 1 }, { photo: 0 }] });
+      const drawn = await viewPane.exportPicture({ kind: 'view', variants: [{ photo: 1 }, { photo: 0 }], note: 'Making the proof…' });
       if (!drawn) throw new Error('the view has not finished landing');
       const caseId = caseState.current.id;
       const name = views.current.title;
-      const paths = [];
       const photoPart = overlay.warped ? 'photo reshaped, with the ridge lines' : 'photo with the ridge lines';
-      for (const [index, part] of [['photo', photoPart], ['terrain', 'terrain, simulated']].entries()) {
-        const blob = await canvasBlob(drawn.frames[index]);
-        paths.push(await keepPicture(caseId, blob, part[0], `${name} ${part[1]}`));
-      }
-      for (const path of paths) if (!uiState.composeQueue.includes(path)) uiState.composeQueue.push(path);
-      uiState.tool = 'proof';
+      const kept = await keepInOrder(drawn.frames, [['photo', photoPart], ['terrain', 'terrain, simulated']], {
+        encode: canvasBlob,
+        keep: (blob, [kind, words]) => keepPicture(caseId, blob, kind, `${name} ${words}`, { reload: false }),
+      });
+      reloadCase();
+      sendToGeoProof(caseId, kept);
     } catch (failure) {
       toast(`Could not send the view to Geo Proof: ${failure.message}`, 'danger');
     } finally {

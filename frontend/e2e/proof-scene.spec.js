@@ -528,7 +528,7 @@ test('ties a proof made by hand to the scene still to prove its frames fall in, 
   await shoot(page, 'inspect-after-save');
 });
 
-test('leaves a proof made by hand apart with Not this scene, and says nothing of frames in two scenes', async ({ page }) => {
+test('leaves a proof made by hand apart with Not this scene, and offers both scenes its frames fall in, tying neither', async ({ page }) => {
   const { scenePuts, saves } = await openClip(page);
   await newProof(page, ['Frame A']);
   await showProofTab(page, 'Scene');
@@ -548,12 +548,20 @@ test('leaves a proof made by hand apart with Not this scene, and says nothing of
   await page.waitForTimeout(300);
   expect(scenePuts).toEqual([]);
 
-  // frames in Bridge? and on Tower? are in two scenes: nothing is said, nothing tied
+  // frames in Bridge? and on Tower? are in two scenes: both offered, neither tied
   await newProof(page, ['Frame A', 'Frame C']);
   await showProofTab(page, 'Scene');
   await expect(sceneBlock(page).getByTestId('scene-video')).toHaveText(/★\s*Steps\s*·\s*Whole video/);
   await expect(matchLine(page)).toHaveCount(0);
+  const choices = sceneBlock(page).getByTestId('scene-choices');
+  await expect(choices).toContainText('Which scene is it?');
+  await expect(choices.getByTestId('scene-choice')).toHaveText([/Bridge\?\s*·\s*0:00–0:01\s*Take it up/, /Tower\?\s*·\s*0:01\s*Take it up/]);
   await saveClip(page, saves, 2);
+  await page.waitForTimeout(300);
+  expect(scenePuts).toEqual([]);
+  // None of these keeps it apart, writing nothing
+  await choices.getByRole('button', { name: 'None of these' }).click();
+  await expect(choices).toHaveCount(0);
   await page.waitForTimeout(300);
   expect(scenePuts).toEqual([]);
 });

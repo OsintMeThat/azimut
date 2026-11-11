@@ -465,11 +465,45 @@
   // (`lib/proofScene.js`). It is shown and stated in the side column (SceneBlock), and
   // written through its own route, never with a save (proof/proofScene.svelte.js).
   const sceneFrames = $derived(panelFrames(proof.panels, new Map(caseMedia.map((one) => [one.path, one]))));
+  // The other panels made from a video's footage: a capture over a frame or a collage of
+  // it, or one a scene of it gathered on the map. The server walks each one's derivation
+  // (`POST /scenes/ties`); they say which video and scene, and are never frames.
+  let sceneTies = $state([]);
+  const untiedPanels = $derived.by(() => {
+    const cut = new Set(sceneFrames.map((f) => f.src));
+    return [...new Set(proof.panels.map((p) => p.src).filter((src) => src && !cut.has(src)))].join('\n');
+  });
+  // a panel taken out, or another proof opened, lets its ties go before the next read lands
+  const panelTies = $derived.by(() => {
+    const laid = new Set(untiedPanels.split('\n'));
+    return sceneTies.filter((tie) => laid.has(tie.src));
+  });
+  let tiesRun = 0;
+  async function readTies(caseId = caseState.current?.id, panels = untiedPanels) {
+    const run = ++tiesRun;
+    const wanted = panels ? panels.split('\n') : [];
+    if (!caseId || !wanted.length) {
+      sceneTies = [];
+      return;
+    }
+    try {
+      const answer = await api.post(`/api/cases/${caseId}/scenes/ties`, { panels: wanted });
+      if (run === tiesRun) sceneTies = Array.isArray(answer?.ties) ? answer.ties : [];
+    } catch {
+      if (run === tiesRun) sceneTies = [];
+    }
+  }
+  const tiesCase = $derived(caseState.current?.id ?? null);
+  $effect(() => {
+    const id = tiesCase, panels = untiedPanels;
+    untrack(() => readTies(id, panels));
+  });
   const scene = new ProofScene({
     api,
     toast,
     where: () => ({ caseId: caseState.current?.id ?? null, name: savedName }),
     frames: () => sceneFrames,
+    ties: () => panelTies,
     // a video by its title in Media, as every surface of Geo Proof names it
     titleOf: (path) => mediaTitle(path),
     // the ★ video's scenes, as the strip read them: where a proof made by hand finds its own
@@ -479,6 +513,9 @@
       if (proof.sceneBadge) dirty = true;
     },
   });
+  // The video a delete asks about the scene of: one the proof states or was cut from. A
+  // proof only tied to it states nothing there, so its delete gives nothing back.
+  const sceneOwned = $derived(scene.stated || sceneFrames.length ? scene.star : null);
   // The badge each panel of the proof's video prints, when asked: part of the picture.
   const badges = $derived(sceneBadges(proof.sceneBadge, sceneFrames, scene.star, scene.moments));
   // The scene's colour on Inspect's bar, read when its player opens on the proof's video.
@@ -610,6 +647,8 @@
   // stays; the read is made again once it is applied or dropped.
   function rereadScenes() {
     readSlides();
+    // a capture gathered by a scene meanwhile points the proof's panels at it
+    readTies();
     if (proofStarted) scene.reread();
   }
   $effect(() => {
@@ -1120,10 +1159,19 @@
    *
    * `template` is the house style New proof chose for it ('' for none), in place of the
    * look of the slide before or the default. True once the proof is open.
+   *
+   * Pictures a map tab sends while a scene is geolocated (`handoff.join`, `lib/toGeoProof.js`)
+   * join the proof open when it already holds that scene, or lays out that picture.
    */
   async function makeSceneProof(handoff, { look = null, navigate = true, template = undefined } = {}) {
     const made = readHandoff(handoff);
     if (!made) return false;
+    const holding = made.scene ? !!made.scene.draft && scene.draft === made.scene.draft : proof.panels.some((p) => p.src === made.panels[0]);
+    if (handoff.join && proofStarted && holding) {
+      await readCaseMedia(caseState.current.id);
+      await addPanelsFromPaths(made.panels, { media: caseMedia });
+      return true;
+    }
     // On the video of the slide open, that slide is saved as moving to the next one saves
     // it; any other proof with changes asks first, as it always did.
     const onSlides = proofStarted && !!made.scene?.video && made.scene.video === scene.star;
@@ -1143,7 +1191,7 @@
     if (made.scene) scene.hold(made.scene);
     // the frames were filed a moment ago, so the case's media is read again first
     await readCaseMedia(caseState.current.id);
-    await addPanelsFromPaths(made.panels);
+    await addPanelsFromPaths(made.panels, { media: caseMedia });
     dirty = true;
     anchorHistory();
     if (made.scene) scene.show(made.scene.video);
@@ -2449,9 +2497,12 @@
     }
   }
 
-  async function addPanelsFromPaths(paths) {
+  /** These case files as panels, in order. `media` is the media list when it was just read. */
+  async function addPanelsFromPaths(paths, { media: read = null } = {}) {
+    // a list that misses one of them was read before it was filed
+    const fresh = read && paths.every((path) => read.some((one) => one.path === path)) ? read : null;
     const [media, sats] = await Promise.all([
-      api.get(`/api/cases/${caseState.current.id}/media`),
+      fresh ?? api.get(`/api/cases/${caseState.current.id}/media`),
       api.get(`/api/cases/${caseState.current.id}/satellite`),
     ]);
     for (const path of paths) {
@@ -7870,7 +7921,7 @@
         <div class="fm-sep"></div>
       {/if}
       <button type="button" class="fm-item danger" title="Send it to the Trash, from where it can be restored"
-        onclick={() => { proofMenu = null; askDelete({ name: savedName, title: openLabel(), video: scene.star }); }}>
+        onclick={() => { proofMenu = null; askDelete({ name: savedName, title: openLabel(), video: sceneOwned }); }}>
         <Icon name="trash" size={14} /><span class="fm-grow">Delete…</span></button>
     </FloatingMenu>
   {/if}

@@ -7,7 +7,7 @@ the Proof Composer picker with zero extra plumbing). Long scans run as jobs.
 
 from __future__ import annotations
 
-from typing import Any, Literal
+from typing import Annotated, Any, Literal
 
 from fastapi import APIRouter, HTTPException, Response, UploadFile
 from fastapi.responses import FileResponse
@@ -460,6 +460,21 @@ def list_scenes(case_id: str, video: str) -> dict[str, Any]:
         "geolocating": held["id"] if held and held["video"] == video else None,
         "collages": collages,
     }
+
+
+class TiesIn(BaseModel):
+    panels: list[Annotated[str, Field(min_length=1, max_length=1024)]] = Field(
+        default_factory=list, max_length=scenes_engine.MAX_TIE_PANELS
+    )
+
+
+@router.post("/cases/{case_id}/scenes/ties")
+def scene_ties(case_id: str, body: TiesIn) -> dict[str, Any]:
+    """What ties each of a proof's panels to a video's scene without being cut from it: a
+    capture made over a collage of the video, or one a scene gathered on the map. Geo Proof
+    asks it for the panels it cannot read off themselves. A read: nothing is written."""
+    case = get_case(case_id)
+    return {"ties": scenes_engine.panel_ties(case, body.panels)}
 
 
 @router.get("/cases/{case_id}/scenes/{draft}/frames")

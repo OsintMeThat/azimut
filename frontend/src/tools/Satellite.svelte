@@ -33,6 +33,7 @@
     caseState, uiState, ensureCase, reloadCase, toast, dismissToast, prefs, fmtCoords, prefsReady,
   } from '../lib/state.svelte.js';
   import { copyText } from '../lib/clipboard.js';
+  import { sendToGeoProof } from '../lib/toGeoProof.js';
   import { formatHeight } from '../lib/measure.js';
   import { FREE_FAR_PROVIDER } from '../lib/map/quotaGuard.js';
   import { bearingBetween } from '../lib/horizon/geometry.js';
@@ -2279,10 +2280,12 @@
     return fmtCoords(item.lat, item.lon);
   }
 
-  /** A capture or a place, queued for the composer to build a proof on. */
+  /**
+   * A capture or a place, queued for the composer to build a proof on: the proof of the
+   * scene the case geolocates when that scene gathered it (`lib/toGeoProof.js`).
+   */
   function sendToComposer(item) {
-    if (!uiState.composeQueue.includes(item.path)) uiState.composeQueue.push(item.path);
-    uiState.tool = 'proof';
+    sendToGeoProof(caseState.current?.id ?? null, [{ path: item.path }]);
   }
 
   /** A proof already built on the file being played: open it where it lives. */

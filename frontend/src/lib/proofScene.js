@@ -125,20 +125,25 @@ export function readStatedScene(scene) {
   };
 }
 
-/** The video the proof is about: the one it states, else the first one a panel was cut from. */
-export function starVideo(frames, stated) {
-  return stated?.video ?? frames?.[0]?.video ?? null;
+/**
+ * The video the proof is about: the one it states, else the first one a panel was cut
+ * from, else the first one a panel is tied to without being cut from it (`ties`, what
+ * `POST /scenes/ties` answers: a capture made over a collage of it, or one a scene of it
+ * gathered).
+ */
+export function starVideo(frames, stated, ties = []) {
+  return stated?.video ?? frames?.[0]?.video ?? ties?.[0]?.video ?? null;
 }
 
 /**
  * Every video the proof rests on, the ★ first and then the others in the order of
- * their first panel. Each with the instants its panels were cut at, and its name
- * (`videoName`, by `titleOf(path)`).
+ * their first panel, those its panels are tied to last. Each with the instants its
+ * panels were cut at, and its name (`videoName`, by `titleOf(path)`).
  */
-export function proofVideos(frames, stated, titleOf = () => '') {
-  const star = starVideo(frames, stated);
+export function proofVideos(frames, stated, titleOf = () => '', ties = []) {
+  const star = starVideo(frames, stated, ties);
   if (!star) return [];
-  const order = [star, ...(frames ?? []).map((f) => f.video)];
+  const order = [star, ...(frames ?? []).map((f) => f.video), ...(ties ?? []).map((t) => t.video)];
   return [...new Set(order)].map((video) => ({
     video,
     name: videoName(video, titleOf),
@@ -151,50 +156,87 @@ export function proofVideos(frames, stated, titleOf = () => '') {
 export const statedMoments = (stated, star) => (stated && stated.video === star ? stated.moments : []);
 
 /**
- * The scene still to prove that a proof stating none is about, found by its frames, or
- * null. What Make the proof states for a proof made from a scene, read back for one
- * made by hand.
+ * The scene still to prove that a proof stating none is about, found by its panels, or
+ * null: `sceneOffer`'s `found`. What Make the proof states for a proof made from a scene,
+ * read back for one made by hand.
+ */
+export function sceneOfFrames(frames, star, answer, options = {}) {
+  return sceneOffer(frames, star, answer, options).found;
+}
+
+/** A scene as the Scene tab names it: the draft, its moments, its label or else its time, its colour, how it was found. */
+const offered = (scene, by) => ({
+  id: scene.id,
+  moments: sceneMoments(scene).map(({ start, end }) => ({ start, end: end ?? null })),
+  title: scene.label || sceneTime(scene),
+  color: scene.color,
+  whole: isWholeVideo(scene),
+  by,
+});
+
+/**
+ * Which scene still to prove a proof stating none is about, read off its panels:
+ * `{ found, choices }`. `found` is the one scene they point at, which a proof never saved
+ * takes up at its first save and a saved one is offered; `choices` the scenes the analyst
+ * picks from when the panels point at several, or say too little, nothing tied until one
+ * is picked. Only a scene Inspect still lists to geolocate is ever found or offered: not
+ * abandoned, not taken up by a proof.
  *
- * Every instant the ★ video's panels were cut at, each piece of a collage of it
- * included, falls in that one scene by the rule Inspect's dots use (`frameInMoment`,
- * at the clip's frame length `frame`), and in no other scene of the video, a proof's
- * included. Only a scene Inspect still lists to geolocate is taken: not abandoned, not
- * taken up by a proof. A scene about the whole video holds every frame, so it is taken
- * only as the video's one scene. Frames in several scenes, or in none, decide nothing.
+ * The panels speak in two ways. A time: each instant the ★ video's panels were cut at,
+ * each piece of a collage of it included, and those a panel made from that footage
+ * carries (`ties`, a capture made over a frame or a collage of it), which falls in a scene
+ * by the rule Inspect's dots use (`frameInMoment`, at the clip's frame length `frame`).
+ * And a pointer: a capture a scene gathered on the map points at that scene. A scene
+ * about the whole video holds no time, so it is pointed at or taken as the one scene.
+ *
+ * - One scene still to prove pointed at, every time in it, or about the whole video:
+ *   found. Some time outside it, or a proof's scene beside it: offered.
+ * - Several: offered, the ones still to prove.
+ * - None: the video's one scene, when it is the only one or no time says otherwise, is
+ *   found; an open scene among proofs the times leave alone, and every open scene when
+ *   no panel carries a time, are offered. Times that fall in no scene say nothing.
  *
  * `answer` is what `GET /cases/{id}/scenes?video=` answered for the ★ video, and `own`
- * the name the proof is listed under there, whose row is left out. Answers
- * `{ id, moments, title, color, whole }`: the draft, its moments, its label or else its
- * time, its colour on Inspect's bar, and whether it was taken as the only scene.
+ * the name the proof is listed under there, whose row is left out. Each scene comes as
+ * `{ id, moments, title, color, whole, by }`, `by` saying how it was found: `frames`,
+ * `captures` (gathered for it), `only` (the video's one scene) or `video` (any of its
+ * scenes, when nothing says which).
  */
-export function sceneOfFrames(frames, star, answer, { own = null, frame = 0 } = {}) {
-  if (!star || answer?.video !== star) return null;
+export function sceneOffer(frames, star, answer, { own = null, frame = 0, ties = [] } = {}) {
+  const none = { found: null, choices: [] };
+  if (!star || answer?.video !== star) return none;
+  const cut = (frames ?? []).filter((f) => f.video === star);
+  const tied = (ties ?? []).filter((t) => t?.video === star);
+  if (!cut.length && !tied.length) return none;
   const pieces = new Map((answer.collages ?? []).filter((c) => c?.export).map((c) => [c.export, c.times ?? []]));
-  const times = (frames ?? [])
-    .filter((f) => f.video === star)
-    .flatMap((f) => pieces.get(f.src) ?? [f.time])
-    .filter(Number.isFinite);
-  if (!times.length) return null;
+  const times = [
+    ...cut.flatMap((f) => pieces.get(f.src) ?? [f.time]),
+    ...tied.flatMap((t) => t.times ?? []),
+  ].filter(Number.isFinite);
   const listed = (answer.scenes ?? []).filter((s) => s?.kind === 'proof' || s?.kind === 'draft');
   const scenes = liveScenes(sceneList(listed, listed.filter((s) => s.kind === 'draft'), answer.taken ?? []))
     .filter((s) => !(s.kind === 'proof' && s.proof === own));
+  const drafts = scenes.filter((s) => s.kind === 'draft');
+  // a pointer at a scene no longer to prove points nowhere
+  const wanted = new Set(tied.map((t) => t.scene).filter(Boolean));
+  const pointed = drafts.filter((s) => wanted.has(s.id));
   // a scene about the whole video holds no frame here, or it would hold them all
   const touched = new Set(times.flatMap((t) => scenesAt(t, scenes, frame)));
-  let found = null;
-  if (touched.size === 1) {
-    const [one] = touched;
-    if (one.kind === 'draft' && times.every((t) => scenesAt(t, [one], frame).length)) found = one;
-  } else if (!touched.size && scenes.length === 1 && scenes[0].kind === 'draft' && isWholeVideo(scenes[0])) {
-    found = scenes[0];
+  // in clip order, as the strip and Inspect's bar lay them out
+  const named = scenes.filter((s) => pointed.includes(s) || touched.has(s));
+  const offer = (list, by) => ({ found: null, choices: list.map((s) => offered(s, by)) });
+  if (named.length === 1) {
+    const [one] = named;
+    if (one.kind !== 'draft') return none;
+    const by = pointed.includes(one) ? 'captures' : 'frames';
+    if (isWholeVideo(one) || times.every((t) => scenesAt(t, [one], frame).length)) return { found: offered(one, by), choices: [] };
+    return offer([one], by);
   }
-  if (!found) return null;
-  return {
-    id: found.id,
-    moments: sceneMoments(found).map(({ start, end }) => ({ start, end: end ?? null })),
-    title: found.label || sceneTime(found),
-    color: found.color,
-    whole: isWholeVideo(found),
-  };
+  if (named.length > 1) return offer(named.filter((s) => s.kind === 'draft'), pointed.length ? 'captures' : 'frames');
+  if (drafts.length !== 1) return times.length ? none : offer(drafts, 'video');
+  const [only] = drafts;
+  if (scenes.length === 1 && (isWholeVideo(only) || !times.length)) return { found: offered(only, 'only'), choices: [] };
+  return isWholeVideo(only) || !times.length ? offer([only], 'only') : none;
 }
 
 /**

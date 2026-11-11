@@ -2404,6 +2404,9 @@ export async function installAppFixture(page, options = {}) {
     // The scenes still to geolocate, which the To-do lists over its own: none, unless a
     // spec routes its own queue over this one.
     if (/^\/api\/cases\/[^/]+\/scenes\/queue$/.test(path)) return json(route, { files: [], geolocating: null });
+    // What ties a proof's panels to a video's scene without being cut from it, which Geo
+    // Proof reads for the panels that are no frame: nothing, unless a spec routes its own.
+    if (/^\/api\/cases\/[^/]+\/scenes\/ties$/.test(path) && request.method() === 'POST') return json(route, { ties: [] });
     // One file's scenes, which the Collage tool reads for its Mark to geolocate: none, unless
     // a spec routes its own over this one.
     if (/^\/api\/cases\/[^/]+\/scenes$/.test(path) && request.method() === 'GET') {

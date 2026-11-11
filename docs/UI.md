@@ -39,7 +39,14 @@ pulses as one lands from the app or the extension, and what its video gives it. 
 proof** opens Inspect's chooser on it, and ✕ stops; the captures stay with the scene.
 Every capture filed meanwhile, from any map tool or the extension, is gathered for it on
 the server (`engine/geolocate.py`), and every tab and the extension's panel follow the
-same scene. The server's word is shown as it lands, the capture counted and the pill gone
+same scene. **Send to Geo Proof** then makes the proof of that scene, from Horizon's
+export menu and from a saved row of Satellite, Compare's comparisons among them, as Make
+the proof does: a new proof holding the scene, named after its label, which its first
+save takes up with nothing offered, or the proof open when it holds that scene already.
+Only pictures the scene gathered go that way (`lib/toGeoProof.js`); any other joins the
+proof open, as before. Horizon draws its two pictures under *Making the proof…*, encodes
+both at once and keeps them in turn, each written again in about a second off the
+server's loop. The server's word is shown as it lands, the capture counted and the pill gone
 when the scene ends, and the server is read again behind it; an answer asked before that
 word is dropped, so a count never steps back. Narrower than 1240 px it drops its first word, and under 1080 px Make the
 proof keeps its icon alone. A scene holding several passages reads its first and counts
@@ -4618,8 +4625,9 @@ statement someone has since added reasoning to is left alone. Statements written
 this are corrected on the proof's next save.
 
 **A proof built on a video gets a Scene tab**, between Proof and Layout. It is there
-only when a panel is a frame Inspect cut from a video, or when the proof states a time of
-its own; any other proof shows three tabs and reads, saves and exports exactly as before.
+only when a panel is a frame Inspect cut from a video or a picture made from its footage
+(below), or when the proof states a time of its own; any other proof shows three tabs and
+reads, saves and exports exactly as before.
 Under *Video*, one boxed line per video, like a source: `★ clip.mp4 · 2:10–2:38` for the video the proof is about, which
 its date states, and `☆ other.mp4 · confirmation` for any other video among the panels,
 made the ★ in one press, its time then starting as the whole video. A proof that states
@@ -4691,11 +4699,30 @@ cut, never a second copy, and one cut runs at a time
 stays while the ★ does, through a change of time, and is let go when the ★ moves to
 another video; its file stays in Media.
 
-**A proof made by hand finds its scene by its frames.** When it states no scene and
+**A proof made by hand finds its scene by its panels.** When it states no scene and
 every frame of the ★ video among its panels (each piece of a collage of it included) falls
 in one scene still to prove, and in no other scene of the video, by the rule Inspect's
 dots use, the proof finds that scene. A scene about the whole video is found only as the
-video's one scene. Frames in several scenes, or in none, find nothing.
+video's one scene. Frames in none find nothing.
+
+**A picture made from the footage counts too.** The server walks each panel that is no
+frame up its derivation, at most six steps and each file once (`POST
+/cases/{id}/scenes/ties`, `engine/scenes.panel_ties`): a Horizon or Satellite capture
+made over a frame carries the frame's instant, one made over a collage of the video every
+piece's, a capture of such a capture the same. A capture a scene gathered while it was
+geolocated points at that scene, whatever it was made from, and the line under the field
+says *its captures were taken for it*. Such a panel is no frame: it pins nothing, prints
+no time and has no ▶, and the video it comes from is the ★ when no frame names one. With
+no time at all, the video's one scene is found. A collage of several videos stays a
+picture of its own, and an older proof with no derivation opens as it did.
+
+**Panels pointing at several scenes tie nothing.** Frames or pieces in two scenes, a
+capture gathered for one and a frame in another, or panels with no time on a video with
+several scenes: the line under the field asks *Which scene is it?* and lists them in clip
+order, each with **Take it up**, and **None of these** keeps the proof apart for the
+session. One scene offered beside a proof, or with a piece outside it, asks *Is it this
+scene?* the same way. Nothing is written until one is picked; a proof never saved holds
+it for its first save.
 
 A proof never saved takes the scene it found: its field reads the scene's time, and a
 line under it names the scene in its colour, *Bridge? · found by its frames*, with **Not
@@ -4712,8 +4739,12 @@ proof made by hand opens this way, and nothing changes on disk until Take it up.
 
 **Not this scene** keeps the proof apart for the session and writes nothing. Abandoned
 scenes and scenes another proof took up are never offered, nor is any to a proof that
-said the whole video, and the line follows the panels as they change. The scenes are the ones the strip reads (`GET /cases/{id}/scenes?video=`), so
-nothing more is asked of the server.
+said the whole video, and the line follows the panels as they change. The scenes are the ones the strip reads (`GET /cases/{id}/scenes?video=`); only the panels
+that are no frame are asked about, read again when the panels change and when a scene
+moves. Take it up writes `scene.draft` through the scene's route, which accepts the video
+the panels are tied to, so the To-do drops the scene as it does for Make the proof; its
+Undo gives the proof back its panels alone. A delete asks about the scene only of a proof
+that states one or was cut from the video.
 
 **A proof on a video shows its slides under the canvas**, on a strip laid out like Map
 plate's bar under its page, between the toolbar and the side column. It holds every proof
