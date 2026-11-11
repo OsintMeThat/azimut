@@ -16,7 +16,7 @@
     isDefaultName, nextName, savedSlugs, savedTitles, slugify, specAttr, specPath,
   } from '../lib/naming.js';
   import { filingName, planProofHandoff, proofPosts } from './post/handoff.js';
-  import { startFields, startPost } from './post/start.js';
+  import { spanNote, startFields, startPost } from './post/start.js';
   import { extensionWindowPutAway, putExtensionWindowAway } from './post/extensionWindow.js';
   import {
     buildTweet1 as buildTweet1Lines, DEFAULT_TWEET_BODY,
@@ -70,6 +70,8 @@
   // Set when the attached proof was read and states no date, so the empty field
   // says why rather than looking forgotten.
   let proofUndated = $state(false);
+  // A before and after with a side still `?` says which one under the field (`spanNote`).
+  const dateNote = $derived(spanNote(date));
   let proofPng = $state(null);
   let proofVer = $state(0); // cache-buster: bumped whenever proofPng is (re)assigned
   let tweet1 = $state('');
@@ -2306,6 +2308,8 @@
             />
             {#if proofUndated && !date.trim()}
               <p class="field-note">This proof has no date. Leave it empty and the line drops.</p>
+            {:else if dateNote}
+              <p class="field-note">{dateNote}</p>
             {/if}
           </div>
         {/if}

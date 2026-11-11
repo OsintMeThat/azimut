@@ -737,7 +737,7 @@ export const POST_KIND_STARTERS = Object.freeze({
     Object.freeze({ id: 'compare-dates', label: 'Dates first', body: '#date\n\n#description\n\n#credits\n\n#mention', mediaEnabled: false }),
   ]),
   free: Object.freeze([
-    Object.freeze({ id: 'free', label: 'Text and source', body: '#description\n\n#mention\n\nSource: #source', mediaEnabled: false }),
+    Object.freeze({ id: 'free', label: 'Text and source', body: '#description\n\n#date\n\n#mention\n\nSource: #source', mediaEnabled: false }),
   ]),
 });
 

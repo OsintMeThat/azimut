@@ -26,12 +26,19 @@ const day = (source) => String(source?.date ?? '').slice(0, 10);
 
 /**
  * What the post is told of its pins: the pin's name (the run's for several), the pin's
- * own description when there is one, and the days of the passes they were read on.
+ * own description when there is one, and the days of the passes they were read on, as
+ * before and after: a pin's two passes, or for several the earliest before and the
+ * latest after. A pass that names a release rather than a day is a side with no known
+ * date (null). A method that reads one pass has no before, so its pins say the days of
+ * the passes they were seen on.
  */
 export function pinPostAbout({ title = '', description = '', pairs = [], single = false } = {}) {
+  const days = (side) => pairs.map((pair) => day(pair?.[side])).filter(Boolean).sort();
+  const before = days('a');
+  const after = days('b');
   return {
     title: String(title ?? '').trim(),
     description: String(description ?? '').trim(),
-    dates: pairs.flatMap((pair) => (single ? [day(pair?.b)] : [day(pair?.a), day(pair?.b)])).filter(Boolean),
+    ...(single ? { dates: after } : { span: { before: before[0] ?? null, after: after.at(-1) ?? null } }),
   };
 }

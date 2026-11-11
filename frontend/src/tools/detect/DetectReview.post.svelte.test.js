@@ -64,7 +64,7 @@ it('sends a pin To Post from its footer with its picture, its name, its words an
   await settle();
   expect(uiState.tool).toBe('post');
   expect(uiState.postStart).toEqual({ kind: 'free', media: ['media/Hangar 1.png'], about: {
-    title: 'Hangar 1', description: 'Scorched roof', dates: ['2026-03-02', '2026-03-14'], credits: '' } });
+    title: 'Hangar 1', description: 'Scorched roof', dates: [], span: { before: '2026-03-02', after: '2026-03-14' }, credits: '' } });
 });
 
 it('sends the run\'s pins To Post from its head, as many as one post holds, under the run\'s name', async () => {

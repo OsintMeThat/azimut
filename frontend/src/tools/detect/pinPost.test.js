@@ -14,10 +14,28 @@ describe('what a Detect post carries', () => {
     expect(pinsPostHint(4, 9)).toBe('A free post with the 4 pinned pictures, the first 4 of 9');
   });
 
-  it('tells the post the days of the passes, one pass for a single-pass method', () => {
-    const pairs = [{ a: { date: '2026-03-02' }, b: { date: '2026-03-14' } }, { a: { release: 3 }, b: { date: '2026-04-01T10:12:00Z' } }];
+  it('tells the post a pin\'s passes as its before and after', () => {
+    const pairs = [{ a: { date: '2026-03-02' }, b: { date: '2026-03-14' } }];
     expect(pinPostAbout({ title: ' Port ', description: 'Roof', pairs }))
-      .toEqual({ title: 'Port', description: 'Roof', dates: ['2026-03-02', '2026-03-14', '2026-04-01'] });
-    expect(pinPostAbout({ pairs, single: true }).dates).toEqual(['2026-03-14', '2026-04-01']);
+      .toEqual({ title: 'Port', description: 'Roof', span: { before: '2026-03-02', after: '2026-03-14' } });
+  });
+
+  it('tells the post a run\'s pins as the earliest before and the latest after', () => {
+    const pairs = [
+      { a: { date: '2026-03-05' }, b: { date: '2026-03-14' } },
+      { a: { date: '2026-03-02' }, b: { date: '2026-04-01T10:12:00Z' } },
+      { a: { date: '2026-03-09' }, b: { date: '2026-03-20' } },
+    ];
+    expect(pinPostAbout({ pairs }).span).toEqual({ before: '2026-03-02', after: '2026-04-01' });
+  });
+
+  it('says a pass that names a release rather than a day as a side with no known date', () => {
+    expect(pinPostAbout({ pairs: [{ a: { release: 3 }, b: { date: '2026-04-01' } }] }).span).toEqual({ before: null, after: '2026-04-01' });
+    expect(pinPostAbout({ pairs: [] }).span).toEqual({ before: null, after: null });
+  });
+
+  it('gives a method that reads one pass the days it was seen on, with no before', () => {
+    const pairs = [{ a: null, b: { date: '2026-03-14' } }, { a: null, b: { date: '2026-03-02' } }];
+    expect(pinPostAbout({ pairs, single: true })).toEqual({ title: '', description: '', dates: ['2026-03-02', '2026-03-14'] });
   });
 });
