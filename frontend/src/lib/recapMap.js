@@ -281,7 +281,7 @@ export async function drawGround(view, background, width, height, { loadTile = n
 }
 
 /** The scale bar's measures, in the picture's own pixels: its longest, its line, its end ticks and its words. */
-export const SCALE_BAR = Object.freeze({ most: 170, line: 3, tick: 9, text: 21 });
+export const SCALE_BAR = Object.freeze({ most: 170, line: 3, tick: 9, text: 24 });
 
 /**
  * Where the scale bar stands and what it says, in the picture's own pixels: `{ x, y,
