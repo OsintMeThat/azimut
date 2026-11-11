@@ -472,7 +472,7 @@ async function keptToPost(page) {
   return { ...opened, kept };
 }
 
-test('To Post keeps the comparison in the case and opens a free post carrying it', async ({ page }) => {
+test('To Post keeps the comparison in the case and opens a Compare post carrying it', async ({ page }) => {
   const { errors, kept, saved } = await keptToPost(page);
   await page.getByRole('button', { name: 'Export', exact: true }).click();
   const dialog = page.getByRole('dialog', { name: 'Export a copy' });
@@ -482,7 +482,7 @@ test('To Post keeps the comparison in the case and opens a free post carrying it
   expect(saved).toHaveLength(1);
   expect(kept[0]).toContain('name="format"\r\n\r\npng');
   expect(kept[0]).toContain('name="reuse"\r\n\r\ntrue');
-  await expect(page.locator('.kind-chip')).toHaveText('Free post');
+  await expect(page.locator('.kind-chip')).toHaveText('Compare');
   await expect(page.locator('.first-media .attach-chip a')).toHaveText('Comparison.png');
   await expect(page.locator('.first-pics img')).toHaveCount(1);
   expect(errors).toEqual([]);
@@ -497,7 +497,7 @@ test('a Blink GIF goes To Post alone, as the one video a post holds', async ({ p
   await expect.poll(() => kept.length).toBe(1);
   expect(kept[0]).toContain('name="format"\r\n\r\nblink');
   expect(kept[0]).toContain('name="image_b"');
-  await expect(page.locator('.kind-chip')).toHaveText('Free post');
+  await expect(page.locator('.kind-chip')).toHaveText('Compare');
   await expect(page.locator('.first-media .attach-chip')).toHaveCount(1);
   await expect(page.locator('.first-media .attach-chip a')).toHaveText('Comparison blink.gif');
   expect(errors).toEqual([]);

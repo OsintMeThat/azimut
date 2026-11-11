@@ -30,7 +30,7 @@ export const prefs = $state({
   postMention: '@GeoConfirmed', // handle a fresh post draft is addressed to
   postTarget: 'x', // social composer a fresh post draft starts with
   postTemplate: '', // id of the post template a fresh draft starts with; '' = classic
-  postKindTemplates: {}, // { video?, plate?, free? }: each other kind's default template id
+  postKindTemplates: {}, // { video?, plate?, compare?, free? }: each other kind's default template id
   proofTemplate: '', // id of the proof template New proof starts with; '' = none
   proofScenePlays: true, // Geo Proof's canvas shows a ▶ on each panel cut from a video
   postPrefill: true, // let the capture extension fill that composer on Publish

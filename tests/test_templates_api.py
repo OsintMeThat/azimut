@@ -361,6 +361,10 @@ def test_a_post_template_can_say_its_kind_and_to_reply_by_default(client):
     geo = client.post("/api/templates/post", json={"name": "Geo", "data": {"kind": "geolocation", "reply": False}}).json()
     assert "kind" not in geo["data"] and "reply" not in geo["data"]
 
+    compare = client.post("/api/templates/post", json={"name": "Before after", "data": {"body": "#date", "kind": "compare"}})
+    assert compare.status_code == 200, compare.text
+    assert compare.json()["data"]["kind"] == "compare"
+
     for bad in ({"kind": "telegram"}, {"reply": "maybe"}, {"reply": 1}):
         assert client.post("/api/templates/post", json={"name": "Bad", "data": bad}).status_code == 422
 

@@ -8,8 +8,8 @@ describe('what a Detect post carries', () => {
     expect(postablePins(null)).toEqual([]);
   });
 
-  it('says what it carries, or that only a pin has a picture', () => {
-    expect(pinsPostHint(0)).toBe(NO_PIN);
+  it('says what it carries, and how to get a picture when nothing is pinned', () => {
+    expect(NO_PIN).toBe('Pin a candidate to post it');
     expect(pinsPostHint(1)).toBe('A free post with the pinned picture');
     expect(pinsPostHint(4, 9)).toBe('A free post with the 4 pinned pictures, the first 4 of 9');
   });

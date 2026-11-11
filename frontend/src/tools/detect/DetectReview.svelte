@@ -26,7 +26,7 @@
   import PutInNote from '../../components/PutInNote.svelte';
   import { pinCaption, pinOffer } from './pinNote.js';
   import { keptOffer, keptRows } from './keptTable.js';
-  import { pinPostAbout, pinsPostHint, postablePins } from './pinPost.js';
+  import { NO_PIN, pinPostAbout, pinsPostHint, postablePins } from './pinPost.js';
   import { startPost } from '../post/start.js';
 
   let {
@@ -349,8 +349,13 @@
       <button class="btn btn-sm" onclick={onexport}>Export as layer</button>
       {#if hasKept}
         <PutInNote offer={noteKept} class="btn btn-sm" role="button" named />
-        <button class="btn btn-sm" disabled={busy || !posted.length} title={pinsPostHint(posted.length, pinnedRows.length)}
-          onclick={() => toPost(posted, run.title)}><Icon name="post" size={13} /> To Post</button>
+        <!-- only a pin files a picture: until one does, a line says how to get one -->
+        {#if posted.length}
+          <button class="btn btn-sm" disabled={busy} title={pinsPostHint(posted.length, pinnedRows.length)}
+            onclick={() => toPost(posted, run.title)}><Icon name="post" size={13} /> To Post</button>
+        {:else}
+          <span class="hint no-pin">{NO_PIN}</span>
+        {/if}
       {/if}
       <span class="map-acts">
         <OverlayDisplay bind:markers bind:outlines bind:hidden={bare}
@@ -519,6 +524,7 @@
   .map-acts { display: flex; gap: 2px; margin-left: auto; }
   /* the run's buttons wrap on a narrow dock rather than run past it */
   .run-acts { flex-wrap: wrap; row-gap: 6px; }
+  .no-pin { align-self: center; }
   .pin-line { display: flex; align-items: center; justify-content: space-between; gap: 8px; min-width: 0; }
   .pin-line .verdict { min-width: 0; }
   .compare { justify-self: start; }

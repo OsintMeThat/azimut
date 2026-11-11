@@ -245,6 +245,10 @@ def test_the_list_says_each_drafts_kind_posts_and_what_it_posts(client):
     )
     client.post(
         f"/api/cases/{cid}/drafts",
+        json={"title": "Before after", "state": {"kind": "compare", "tweet1": "Depot", "firstMedia": ["media/c.png"]}},
+    )
+    client.post(
+        f"/api/cases/{cid}/drafts",
         json={"title": "Odd", "state": {"kind": "telegram", "video": 3, "proofPng": None}},
     )
     rows = {row["title"]: row for row in client.get(f"/api/cases/{cid}/drafts").json()}
@@ -256,6 +260,7 @@ def test_the_list_says_each_drafts_kind_posts_and_what_it_posts(client):
     assert rows["Old shape"]["video"] is None
     assert rows["Free one"]["kind"] == "free"
     assert rows["Free one"]["posts"] == 1
+    assert rows["Before after"]["kind"] == "compare"
     # what this build does not know reads as nothing rather than as itself
     assert rows["Odd"]["kind"] == "geolocation"
     assert rows["Odd"]["video"] is None and rows["Odd"]["proof"] is None

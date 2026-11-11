@@ -373,6 +373,7 @@ describe('what a hand-off to X or Bluesky tells the app', () => {
     draft: null,
     error: 'Could not add the next post to the thread.',
     report: 'Azimut Capture 0.3.4 on x.com\nStep: add-2',
+    from: 2,
   };
 
   /** What the bridge posts when the worker tells it `msg`, and what it answers. */
@@ -394,6 +395,11 @@ describe('what a hand-off to X or Bluesky tells the app', () => {
       expect(posted).toEqual([{ channel: CHANNEL, ...msg }]);
       expect(answers).toEqual([{ ok: true }]);
     }
+  });
+
+  it('relays a report that knows no post to start from with that field empty', () => {
+    const { from: _from, ...unknown } = REPORT;
+    expect(told(unknown).posted).toEqual([{ channel: CHANNEL, ...unknown, from: null }]);
   });
 
   it('takes them from the worker only: a page posting them reaches nothing', async () => {

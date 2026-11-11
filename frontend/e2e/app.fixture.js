@@ -2374,6 +2374,12 @@ export async function installAppFixture(page, options = {}) {
       });
     }
 
+    // The clip cut for a proof's post, which Post asks for as a proof comes over: none,
+    // unless a spec routes its own over this one.
+    const clipMatch = path.match(new RegExp(`^/api/cases/${caseId}/proofs/([^/]+)/clip$`));
+    if (clipMatch && request.method() === 'GET') {
+      return json(route, { proof: decodeURIComponent(clipMatch[1]), video: null, clip: null });
+    }
     // The layers a proof's point can join: the fixture case has none. A spec
     // that needs some routes its own over this one.
     if (/^\/api\/cases\/[^/]+\/layer-targets$/.test(path)) return json(route, []);

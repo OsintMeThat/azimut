@@ -178,7 +178,7 @@ class PostExtraTweet(CanonicalModel):
 
 
 #: What a post is made from, as New post offers it (frontend `lib/post.js` POST_KINDS).
-PostKind = Literal["geolocation", "video", "plate", "free"]
+PostKind = Literal["geolocation", "video", "plate", "compare", "free"]
 #: A post template's keys that a template from before them never had. Unset, they stay
 #: unwritten, so a 0.3.3 template reads and saves back byte for byte.
 POST_UNSTATED_WHEN_NONE = ("kind", "reply")

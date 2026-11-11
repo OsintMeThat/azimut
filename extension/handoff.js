@@ -623,10 +623,14 @@
    *  - `number`: the first of these posts' place in the whole thread, for what
    *    is said about them;
    *  - `probe`: fill nothing, and say only what the page holds (see `probe`).
+   *
+   * What comes back says `filled`, the posts filled, and `through`, how many of
+   * these posts went in one after the other from the first before anything went
+   * wrong: the worker tells the app the post the rest starts from.
    */
   async function run() {
     const site = SITES.find((one) => one.match.test(location.hostname));
-    if (!site) return { filled: 0, error: "Azimut does not know this composer." };
+    if (!site) return { filled: 0, through: 0, error: "Azimut does not know this composer." };
 
     const thread = window.__AZIMUT_HANDOFF__;
     const posts = thread?.posts;
@@ -639,6 +643,7 @@
     const offset = more ? number - 1 : 0;
 
     let filled = 0;
+    let through = 0;
     // What went wrong on one post does not stop the next: a thread missing its
     // third line still beats a composer holding nothing.
     const notes = [];
@@ -648,6 +653,7 @@
     // on its own reads like the markup moved.
     const stop = (reason) => ({
       filled,
+      through,
       error: [...notes, reason].join(" "),
       step,
       probe: probe(site),
@@ -702,12 +708,15 @@
       if (trouble) {
         notes.push(trouble);
         troubleStep ??= step;
-      } else filled += 1;
+      } else {
+        if (through === i) through += 1; // no post before this one went wrong
+        filled += 1;
+      }
     }
-    if (notes.length) return { filled, error: notes.join(" "), step: troubleStep, probe: probe(site) };
+    if (notes.length) return { filled, through, error: notes.join(" "), step: troubleStep, probe: probe(site) };
     // Nothing is pressed to find out more: the worker decides what follows.
-    if (thread.ask === true) return { filled, add: await offersNext(site) };
-    return { filled };
+    if (thread.ask === true) return { filled, through, add: await offersNext(site) };
+    return { filled, through };
   }
 
   // The value the injection hands back to the worker, which is what says whether

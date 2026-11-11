@@ -1,6 +1,6 @@
 /**
- * Compare going To Post: what a free post is told of the image the comparison kept in
- * the case (`tools/post/start.js` `startPost`).
+ * Compare going To Post: what a Compare post is told of the image the comparison kept
+ * in the case (`tools/post/start.js` `startPost`).
  *
  * A post holds four pictures or one video, and X takes a GIF as its video, so each To
  * Post carries one file: the comparison's PNG, its Blink or Slide GIF, the evolution's

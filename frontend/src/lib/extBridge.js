@@ -199,6 +199,8 @@ export function onSceneProof(take, win = window) {
 /** At most this many characters of a hand-off's sentence, and of its report. */
 export const MAX_REPORT_ERROR = 300;
 export const MAX_REPORT_TEXT = 8000;
+/** The furthest post a report may say the rest starts from: past any thread Post writes. */
+export const MAX_REPORT_FROM = 100;
 
 const bounded = (value, max) => (typeof value === 'string' && value && value.length <= max ? value : null);
 
@@ -236,8 +238,10 @@ export function onPostLinkCaught(cb, win = window) {
 
 /**
  * Subscribe to what the extension reports of a hand-off that went wrong while it filled
- * the composer: `{ caseId, draft, error, report }`, the sentence to show and a short
- * plain text to copy, each cut to its bound. Returns an unsubscribe function.
+ * the composer: `{ caseId, draft, error, report, from }`, the sentence to show and a
+ * short plain text to copy, each cut to its bound, and the post the rest starts from
+ * (1 for the first) when the extension knows it, else null. Returns an unsubscribe
+ * function.
  */
 export function onPostHandoffReport(cb, win = window) {
   const onMessage = (event) => {
@@ -248,11 +252,13 @@ export function onPostHandoffReport(cb, win = window) {
     if (!caseId || typeof msg.error !== 'string' || !msg.error.trim()) return;
     if (msg.report != null && typeof msg.report !== 'string') return;
     const cut = (text, max) => (text.length > max ? `${text.slice(0, max - 1)}…` : text);
+    const from = Number.isInteger(msg.from) && msg.from >= 1 && msg.from <= MAX_REPORT_FROM ? msg.from : null;
     cb({
       caseId,
       draft: bounded(msg.draft, 200),
       error: cut(msg.error.trim(), MAX_REPORT_ERROR),
       report: cut(msg.report ?? '', MAX_REPORT_TEXT),
+      from,
     });
   };
   win.addEventListener('message', onMessage);

@@ -3,21 +3,20 @@
  * free post (`tools/post/start.js` `startPost`).
  *
  * Only a pin files a picture. A candidate kept in its run has none, and nothing is drawn
- * for it here: the run's To Post carries its pins, or says there is nothing to carry.
+ * for it here: the run's To Post carries its pins, and a run with none says how to get one.
  */
 import { MAX_POST_MEDIA } from '../../lib/post.js';
 
-/** Why a run has nothing to post, or '' when it has a pin. */
-export const NO_PIN = 'Only a pin files a picture: pin a candidate first';
+/** What a run with nothing pinned says where its To Post would be. */
+export const NO_PIN = 'Pin a candidate to post it';
 
 /** The pins a run's post carries, in the order given, as many as one post holds. */
 export function postablePins(rows) {
   return (rows ?? []).filter((row) => row?.review === 'kept' && row.entity_id).slice(0, MAX_POST_MEDIA);
 }
 
-/** What the run's To Post says it carries, on its hover. */
+/** What the run's To Post says it carries, on its hover, once a pin is there to post. */
 export function pinsPostHint(pinned, all = pinned) {
-  if (!pinned) return NO_PIN;
   const more = all > pinned ? `, the first ${pinned} of ${all}` : '';
   return `A free post with ${pinned === 1 ? 'the pinned picture' : `the ${pinned} pinned pictures`}${more}`;
 }

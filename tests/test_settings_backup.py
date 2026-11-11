@@ -491,9 +491,10 @@ def test_a_backup_with_an_unreadable_template_id_still_restores(client, key):
 
 def test_every_kind_of_posts_default_travels_with_the_backup(client):
     client.put("/api/settings/prefs", json={"post_template": "tpl_geo"})
-    client.put("/api/settings/prefs", json={"post_kind_templates": {"free": "tpl_free", "plate": "tpl_plate"}})
+    kinds = {"free": "tpl_free", "plate": "tpl_plate", "compare": "tpl_cmp"}
+    client.put("/api/settings/prefs", json={"post_kind_templates": kinds})
     blob = client.get("/api/settings/export").json()
-    assert blob["settings"]["post_kind_templates"] == {"free": "tpl_free", "plate": "tpl_plate"}
+    assert blob["settings"]["post_kind_templates"] == kinds
 
     client.put("/api/settings/prefs", json={"post_template": "", "post_kind_templates": {}})
     res = client.post("/api/settings/import", json=blob)
@@ -501,7 +502,7 @@ def test_every_kind_of_posts_default_travels_with_the_backup(client):
     assert {"post_template", "post_kind_templates"} <= set(res.json()["imported"])
     body = client.get("/api/settings").json()
     assert body["post_template"] == "tpl_geo"
-    assert body["post_kind_templates"] == {"free": "tpl_free", "plate": "tpl_plate"}
+    assert body["post_kind_templates"] == kinds
 
 
 def test_a_backup_with_unreadable_kind_defaults_keeps_the_readable_ones(client):

@@ -1,9 +1,9 @@
 <script>
   /**
-   * New post: the four starts, one card each (`lib/post.js` POST_KINDS). Geolocation is
-   * the composer Post has always been and comes first, marked as the usual one. A start
-   * this version cannot open yet keeps its card, greyed and saying it comes next, so the
-   * gallery reads the same once it arrives.
+   * New post: the starts, one card each (`lib/post.js` POST_KINDS). Geolocation is the
+   * composer Post has always been and comes first, across the top, marked as the usual
+   * one. A start this version cannot open yet keeps its card, greyed and saying it comes
+   * next, so the gallery reads the same once it arrives.
    */
   import Modal from '../../components/Modal.svelte';
   import Icon from '../../components/Icon.svelte';
@@ -50,6 +50,7 @@
   }
   .np-card:not(:disabled):hover { border-color: var(--accent); transform: translateY(-2px); box-shadow: var(--shadow-2); }
   .np-card:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+  .np-card.usual { grid-column: 1 / -1; min-height: 0; }
   .np-card.usual { border-color: color-mix(in srgb, var(--accent) 55%, var(--border)); background: color-mix(in srgb, var(--accent) 7%, var(--bg-2)); }
   .np-card:disabled { cursor: default; opacity: 0.62; }
   .np-icon {

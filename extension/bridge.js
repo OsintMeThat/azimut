@@ -83,7 +83,7 @@
   // from the page. Only the named fields cross, and the page answers nothing.
   const TOLD = {
     "post-link-caught": ["caseId", "draft", "url", "site", "at"],
-    "post-handoff-report": ["caseId", "draft", "error", "report"],
+    "post-handoff-report": ["caseId", "draft", "error", "report", "from"],
   };
   api.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
     const fields = TOLD[msg?.type];

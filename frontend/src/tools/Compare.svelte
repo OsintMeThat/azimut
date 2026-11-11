@@ -2608,7 +2608,7 @@
   /**
    * To Post: the export picked, kept in the case under the comparison (saved first when
    * it is not, named after its place and days, as for a note) and handed to Post as a
-   * free post carrying it. One file each, a GIF counting as X's one video.
+   * Compare post carrying it. One file each, a GIF counting as X's one video.
    */
   async function exportToPost() {
     if (outputBusy || sessionBusy) return;
@@ -2653,7 +2653,7 @@
       await reloadCase();
       rightPanel = null;
       toast(`${kept.path.split('/').pop()} ${kept.reused ? 'was already in the case' : 'kept in the case'}`, 'ok', 2400);
-      startPost('free', [kept.path], about);
+      startPost('compare', [kept.path], about);
     } catch (error) {
       if (error?.name === 'AbortError') toast('Stopped; nothing went to Post', 'info');
       else outputError('Could not send it to Post', error);
@@ -3328,7 +3328,7 @@
               <Icon name="x" size={13} /> Stop
             </button>
           {/if}
-          <button class="btn" onclick={exportToPost} title="Keeps it in the case and opens a free post carrying it"
+          <button class="btn" onclick={exportToPost} title="Keeps it in the case and opens a Compare post carrying it"
             disabled={!!outputBusy || (evolutionKind && (evolutionChosen.length < 2 || evolutionChosen.length > MAX_EVOLUTION_FRAMES))}>
             <Icon name="post" size={13} />
             {#if outputBusy === 'post'}

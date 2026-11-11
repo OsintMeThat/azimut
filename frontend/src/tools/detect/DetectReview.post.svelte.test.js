@@ -78,16 +78,17 @@ it('sends the run\'s pins To Post from its head, as many as one post holds, unde
   expect(uiState.postStart.about).toMatchObject({ title: 'Port fire', description: '' });
 });
 
-it('says a run with nothing pinned has no picture to post, and posts nothing', async () => {
+it('says on a run with nothing pinned how to post, in place of its To Post', async () => {
   served = run([row('noted-1', 'noted'), row('new-1', 'new')]);
   await open();
-  const button = toPost(target.querySelector('.run-acts'));
-  expect(button.disabled).toBe(true);
-  expect(button.title).toBe('Only a pin files a picture: pin a candidate first');
+  const acts = target.querySelector('.run-acts');
+  expect(toPost(acts)).toBeUndefined();
+  expect(acts.querySelector('.no-pin').textContent).toBe('Pin a candidate to post it');
   expect(uiState.postStart).toBeNull();
   // a run where nothing was kept offers it not at all
   unmount(live); live = null; target.remove();
   served = run([row('new-1', 'new')]);
   await open();
   expect(toPost(target.querySelector('.run-acts'))).toBeUndefined();
+  expect(target.querySelector('.run-acts .no-pin')).toBeNull();
 });

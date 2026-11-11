@@ -726,7 +726,7 @@ export const PAGES = {
       { title: 'It saves itself', text: 'Once it holds something, a post is saved as you write. Its name is the draft’s.' },
       { title: 'The home', text: 'With no post open, Post shows what is in progress, the proofs with no post yet, and what went out. One press on a proof writes its geolocation.' },
       { title: 'Mark as posted', text: 'Once it is out, say so beside Saved, with its link if you have it. The link dates the post, and its proof keeps it.' },
-      { title: 'New post', text: 'Geolocation is the composer it always was. Map plate and Free post carry their own pictures on the first post.' },
+      { title: 'New post', text: 'Geolocation is the composer it always was. Map plate, Compare and Free post carry their own pictures on the first post.' },
       { title: 'Reply under the source', text: 'When the source is an X or Bluesky post, a box under it sends the post as a reply there, without the link to the source.' },
       { title: 'Thread styles', text: 'Settings, Templates holds the structures a post can follow, for each kind of post.' },
       { title: 'Counted for the site', text: 'Each post counts its characters against the limit of the site picked.' },

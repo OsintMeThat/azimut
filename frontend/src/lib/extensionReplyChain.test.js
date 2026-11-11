@@ -395,6 +395,8 @@ describe('where a reply in several posts stops', () => {
       caseId: 'case-1',
       draft: 'depot-strike',
       error: 'No reply was seen within 10 minutes, so Azimut stopped after post 1 of 3.',
+      // the rest starts at post 2, for the app's Copy the rest
+      from: 2,
     });
     expect(report.report.split('\n')).toEqual([
       'Azimut Capture 9.9.9 on x.com',
@@ -420,8 +422,21 @@ describe('where a reply in several posts stops', () => {
       'The tab was closed, so Azimut stopped after post 1 of 3. The thread is on your clipboard.'
     );
     const report = b.told.find((msg) => msg.type === 'post-handoff-report');
+    expect(report.from).toBe(2);
     expect(report.report).toContain('Stopped: closed');
     expect(report.report).toContain('Selectors: the page could not be read');
+  }, 30000);
+
+  it('says the rest starts after the last post filled, further down a reply', async () => {
+    const b = browser();
+    await b.worker.handOff(payload);
+    await heard(b.notes, 'Post 1 of 3 is ready');
+    b.pressSend();
+    await heard(b.notes, 'Post 2 of 3 is ready under your reply.');
+
+    b.close();
+    await heard(b.notes, 'The tab was closed, so Azimut stopped after post 2 of 3.');
+    expect(b.told.find((msg) => msg.type === 'post-handoff-report').from).toBe(3);
   }, 30000);
 
   it('stops when the tab leaves X', async () => {
@@ -480,7 +495,7 @@ describe('a thread from Publish', () => {
     await heard(b.notes, 'Could not add the next post to the thread.');
 
     const report = b.told.find((msg) => msg.type === 'post-handoff-report');
-    expect(report).toMatchObject({ caseId: 'case-1', draft: null, error: 'Could not add the next post to the thread.' });
+    expect(report).toMatchObject({ caseId: 'case-1', draft: null, error: 'Could not add the next post to the thread.', from: 2 });
     expect(report.report).toContain('Step: add-2');
     expect(report.report).toContain('add 0+0');
     expect(report.report).not.toMatch(/desk|someone|roof|quoted|Répondre|status|https?:|\/\//i);

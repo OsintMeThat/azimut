@@ -83,7 +83,7 @@ function answer(path) {
   if (spec) return lists.specs[decodeURIComponent(spec[1])];
   // every file the case holds is found again, so nothing reads as deleted
   if (path.includes('/entities/lookup')) return { entity: { id: 'e1', type: 'proof' } };
-  if (path.includes('/derivation')) return { entities: [], links: [] };
+  if (path.includes('/derivation')) return lists.derivation ?? { entities: [], links: [] };
   if (path.includes('/entities')) return { items: lists.entities, next: null };
   return [];
 }
@@ -120,7 +120,7 @@ const toasts = () => uiState.toasts.map((t) => t.message);
 
 beforeEach(() => {
   vi.clearAllMocks();
-  lists = { drafts: [], proofs: [], media: [], saved: {}, specs: {}, entities: [] };
+  lists = { drafts: [], proofs: [], media: [], saved: {}, specs: {}, entities: [], derivation: null };
   api.get.mockImplementation(async (path) => answer(path));
   api.put.mockImplementation(async () => ({}));
   api.post.mockImplementation(async (path, body) => {
@@ -414,15 +414,15 @@ describe('New post', () => {
     lists.drafts = [{ name: 'Old', title: 'Old', target: 'x', kind: 'geolocation', posts: 1 }];
   });
 
-  it('offers four starts, Geolocation first, and the video thread comes next', async () => {
+  it('offers five starts, Geolocation first, and the video thread comes next', async () => {
     await mountPost();
     button(home(), 'New post').click();
     await settle();
     const gallery = dialog('New post');
     const cards = [...gallery.querySelectorAll('.np-card')];
     expect(cards.map((card) => card.querySelector('.np-name').textContent.replace(/\s+/g, ' ').trim()))
-      .toEqual(['Geolocation Usual', 'Video thread Coming next', 'Map plate', 'Free post']);
-    expect(cards.map((card) => card.disabled)).toEqual([false, true, false, false]);
+      .toEqual(['Geolocation Usual', 'Video thread Coming next', 'Map plate', 'Compare', 'Free post']);
+    expect(cards.map((card) => card.disabled)).toEqual([false, true, false, false, false]);
   });
 
   it('opens Geolocation on the composer it always was', async () => {
@@ -444,7 +444,7 @@ describe('New post', () => {
     await mountPost();
     button(home(), 'New post').click();
     await settle();
-    [...dialog('New post').querySelectorAll('.np-card')][3].click();
+    [...dialog('New post').querySelectorAll('.np-card')][4].click();
     await settle();
     expect(target.querySelector('.kind-chip').textContent.trim()).toBe('Free post');
     expect(target.querySelector('#pc-coords')).toBeNull();
@@ -453,6 +453,52 @@ describe('New post', () => {
     expect(target.querySelector('.tweet-head .label').textContent).toBe('First post');
     expect(button(target, 'Attach a proof')).toBeUndefined();
     expect(target.querySelector('.first-media')).not.toBeNull();
+  });
+});
+
+describe('a Compare post', () => {
+  beforeEach(() => {
+    lists.drafts = [{ name: 'Old', title: 'Old', target: 'x', kind: 'geolocation', posts: 1 }];
+  });
+
+  it('opens from the gallery on its before and after layout, its pictures chosen as a free post\'s are', async () => {
+    await mountPost();
+    button(home(), 'New post').click();
+    await settle();
+    const card = [...dialog('New post').querySelectorAll('.np-card')].find((one) => one.textContent.includes('Compare'));
+    expect(card.querySelector('.np-icon svg')).not.toBeNull();
+    card.click();
+    await settle();
+    expect(target.querySelector('.kind-chip').textContent.trim()).toBe('Compare');
+    expect(target.querySelector('#pc-coords')).toBeNull();
+    expect(target.querySelector('#pc-desc')).not.toBeNull();
+    expect(target.querySelector('.first-media')).not.toBeNull();
+    expect(button(target, 'Attach a proof')).toBeUndefined();
+    // no media post under it: its picture rides on the first post
+    expect(target.querySelectorAll('.tweet-block')).toHaveLength(1);
+  });
+
+  it('starts on its own default template, never on the free post\'s', async () => {
+    templatesState.post = [
+      { id: 'po_free', name: 'Free house', data: { body: '#description\n\nBy the desk', kind: 'free', mediaEnabled: false } },
+      { id: 'po_cmp', name: 'Before after', data: { body: '#date\n#description\n\nVia Compare', kind: 'compare', mediaEnabled: false } },
+    ];
+    prefs.postKindTemplates = { free: 'po_free', compare: 'po_cmp' };
+    lists.media = [{ path: 'media/Comparison.png', kind: 'image' }];
+    await mountPost();
+    startPost('compare', ['media/Comparison.png'], { title: 'Depot', dates: ['2025-03-14', '2025-03-02'] });
+    await settle();
+    expect(firstPost().value).toBe('2025-03-02 to 2025-03-14\n\nVia Compare');
+    await saved();
+    expect(draftWrites().at(-1)[1].state).toMatchObject({ kind: 'compare', firstMedia: ['media/Comparison.png'] });
+  });
+
+  it('opens a draft saved as a free post from Compare as the free post it was', async () => {
+    lists.saved = { Depot: { title: 'Depot', state: { kind: 'free', description: 'Depot', firstMedia: ['media/Comparison.png'], firstMediaType: 'images' } } };
+    await mountPost();
+    uiState.openDraft = 'Depot';
+    await settle();
+    expect(target.querySelector('.kind-chip').textContent.trim()).toBe('Free post');
   });
 });
 
@@ -946,10 +992,30 @@ describe('Mark as posted, in the header', () => {
     Object.defineProperty(box, 'scrollWidth', { configurable: true, get: () => 2000 });
     // the header is laid out again when what it holds changes: here, the post saved
     await saved();
-    for (let i = 0; i < 4; i += 1) await settle();
+    for (let i = 0; i < 6; i += 1) await settle();
     expect(box.classList.contains('tight')).toBe(true);
     expect(markButton().textContent.trim()).toBe('');
     expect(markButton().getAttribute('title')).toBe('Mark as posted');
+    expect(header().querySelector('.save-status').classList.contains('bare')).toBe(true);
+  });
+
+  it('folds Saved to its tick one step before, so Mark as posted keeps its words longest', async () => {
+    await mountPost();
+    await sendProof();
+    const box = header();
+    // too narrow until Saved says only its tick, and wide enough from then on
+    Object.defineProperty(box, 'clientWidth', { configurable: true, get: () => 600 });
+    Object.defineProperty(box, 'scrollWidth', {
+      configurable: true, get: () => (box.querySelector('.save-status.bare') ? 600 : 2000),
+    });
+    await saved();
+    for (let i = 0; i < 6; i += 1) await settle();
+    const saved_ = box.querySelector('.save-status');
+    expect(saved_.classList.contains('bare')).toBe(true);
+    expect(saved_.getAttribute('title')).toBe('Saved: this post saves itself as you write');
+    // its word stays for a screen reader
+    expect(saved_.textContent.trim()).toBe('Saved');
+    expect(markButton().textContent.trim()).toBe('Mark as posted');
   });
 });
 
@@ -1054,6 +1120,56 @@ describe('a link the extension caught', () => {
     const count = uiState.toasts.length;
     bridge.reported({ caseId: 'case-2', draft: 'Post 1', error: 'Elsewhere.', report: '' });
     expect(uiState.toasts).toHaveLength(count);
+  });
+
+  describe('Copy the rest', () => {
+    const STOPPED = 'No reply was seen within 10 minutes, so Azimut stopped after post 1 of 3.';
+    let writeText;
+    beforeEach(() => {
+      writeText = vi.fn(async () => {});
+      vi.stubGlobal('navigator', { ...navigator, clipboard: { writeText } });
+      lists.saved = { Thread: { title: 'Thread', state: {
+        tweet1: 'Geolocated: the depot', tweet1Edited: true, mediaEnabled: true, mediaType: 'none',
+        extraTweets: [{ text: 'The roof line matches' }, { text: 'Imagery: Esri' }],
+      } } };
+    });
+    const openThread = async () => {
+      await mountPost();
+      uiState.openDraft = 'Thread';
+      await settle();
+    };
+    const labels = (said) => [said.action].flat().map((one) => one.label);
+
+    it('copies the posts from the one it names to the last, on the post open', async () => {
+      await openThread();
+      bridge.reported({ caseId: CASE.id, draft: 'Thread', error: STOPPED, report: 'Step: catch-link', from: 2 });
+      const said = uiState.toasts.at(-1);
+      expect(said.message).toBe(STOPPED);
+      expect(labels(said)).toEqual(['Copy the rest', 'Copy report']);
+      said.action[0].onClick();
+      await settle();
+      expect(writeText).toHaveBeenCalledWith('The roof line matches\n\nImagery: Esri');
+      expect(toasts()).toContain('Posts 2 to 3 copied');
+    });
+
+    it('says one post as one', async () => {
+      await openThread();
+      bridge.reported({ caseId: CASE.id, draft: 'Thread', error: STOPPED, report: '', from: 3 });
+      const said = uiState.toasts.at(-1);
+      expect(labels(said)).toEqual(['Copy the rest']);
+      said.action.onClick();
+      await settle();
+      expect(writeText).toHaveBeenCalledWith('Imagery: Esri');
+      expect(toasts()).toContain('Post 3 copied');
+    });
+
+    it('is not offered for another post, without a number, or past the thread', async () => {
+      await openThread();
+      for (const report of [{ draft: 'Other', from: 2 }, { draft: 'Thread', from: null }, { draft: 'Thread', from: 4 }]) {
+        bridge.reported({ caseId: CASE.id, error: STOPPED, report: 'Step: catch-link', ...report });
+        expect(labels(uiState.toasts.at(-1))).toEqual(['Copy report']);
+      }
+    });
   });
 });
 
@@ -1233,6 +1349,133 @@ describe('a post already out, from the home', () => {
     // the row with no link keeps the slots, so the pills line up
     const fresh = [...list.querySelectorAll('.ol-row')].find((r) => r.textContent.includes('Fresh'));
     expect(fresh.querySelectorAll('span.ol-act[aria-hidden="true"]')).toHaveLength(2);
+  });
+});
+
+describe('a proof\'s clip, cut for its post', () => {
+  const VIDEO = 'media/convoy.mp4';
+  const CLIP = 'media/convoy 0.03-0.09.mp4';
+  beforeEach(() => {
+    // the proof was made from a frame of the downloaded video its source names
+    lists.derivation = {
+      entities: [
+        { id: 'e1', type: 'proof', attrs: { path: PROOF.png } },
+        { id: 'v1', type: 'media', attrs: { path: VIDEO, kind: 'video' } },
+      ],
+      links: [{ from: 'e1', to: 'v1', type: 'derived-from' }],
+    };
+    lists.media = [
+      { path: VIDEO, kind: 'video', source: { type: 'download', url: SOURCE_X } },
+      { path: CLIP, kind: 'video', source: { type: 'inspect', from: VIDEO } },
+    ];
+  });
+  const mediaPost = async () => {
+    await saved();
+    return draftWrites().at(-1)[1].state.mediaPaths;
+  };
+
+  it('goes on the media post in place of the whole video', async () => {
+    lists.specs['helicopters/clip'] = { proof: 'helicopters', video: VIDEO, clip: { path: CLIP, start: 3, end: 9 } };
+    await mountPost();
+    uiState.postProof = { ...PROOF };
+    await settle();
+    expect(await mediaPost()).toEqual([CLIP]);
+    expect(toasts()).toContain('The proof\'s clip added to the thread');
+    expect(api.get.mock.calls.map(([path]) => path)).toContain('/api/cases/case-1/proofs/helicopters/clip');
+  });
+
+  it('leaves a proof with no clip on its video, as before', async () => {
+    lists.specs['helicopters/clip'] = { proof: 'helicopters', video: VIDEO, clip: null };
+    await mountPost();
+    uiState.postProof = { ...PROOF };
+    await settle();
+    expect(await mediaPost()).toEqual([VIDEO]);
+    expect(toasts()).toContain('1 source media file added to the thread');
+  });
+
+  it('falls back to the video when the clip\'s file is no longer in the case', async () => {
+    lists.specs['helicopters/clip'] = { proof: 'helicopters', video: VIDEO, clip: { path: CLIP, start: 3, end: 9 } };
+    lists.media = lists.media.filter((item) => item.path !== CLIP);
+    await mountPost();
+    uiState.postProof = { ...PROOF };
+    await settle();
+    expect(await mediaPost()).toEqual([VIDEO]);
+  });
+
+  it('asks nothing for a proof the list says rests on photos', async () => {
+    lists.proofs = [{ name: 'helicopters', png: PROOF.png, video: null }];
+    lists.drafts = [{ name: 'Old', title: 'Old', target: 'x', posts: 1 }];
+    await mountPost();
+    uiState.postProof = { ...PROOF };
+    await settle();
+    expect(api.get.mock.calls.some(([path]) => path.endsWith('/clip'))).toBe(false);
+    expect(await mediaPost()).toEqual([VIDEO]);
+  });
+});
+
+describe('To Post with a post of the proof already in the case', () => {
+  const row = (name, extra = {}) => ({
+    name, title: name, target: 'x', kind: 'geolocation', posts: 1, proof: PROOF.png, state: 'draft',
+    updated_at: '2026-11-10T09:00:00Z', ...extra,
+  });
+  const nameField = () => header().querySelector('.title-input');
+  const OPENED = 'Opened its post in progress';
+  const WENT_OUT = 'Its post went out, so this is a new one';
+
+  it('opens its post in progress, the latest of several, once the post on screen is filed', async () => {
+    lists.drafts = [row('Helicopters old', { updated_at: '2026-11-01T09:00:00Z' }), row('Helicopters')];
+    lists.saved = {
+      Helicopters: { title: 'Helicopters', state: { description: 'Kept words', proofPng: PROOF.png, tweet1: 'Kept words', tweet1Edited: true } },
+    };
+    await mountPost();
+    startPost('free', []);
+    await settle();
+    type(target.querySelector('#pc-desc'), 'Unrelated words');
+    uiState.postProof = { ...PROOF };
+    await settle();
+    await settle();
+    expect(draftWrites().some(([, body]) => body.state.description === 'Unrelated words')).toBe(true);
+    expect(nameField().value).toBe('Helicopters');
+    expect(firstPost().value).toBe('Kept words');
+    expect(toasts()).toContain(OPENED);
+  });
+
+  it('starts a new post when every post of it went out', async () => {
+    lists.drafts = [row('Helicopters', { state: 'posted' }), row('Helicopters 2', { state: 'changed' })];
+    await mountPost();
+    uiState.postProof = { ...PROOF };
+    await settle();
+    expect(firstPost().value).toBe(CLASSIC_FIRST_POST);
+    expect(nameField().value).not.toMatch(/^Helicopters/);
+    expect(api.get.mock.calls.some(([path]) => /\/drafts\/Helicopters/.test(path))).toBe(false);
+    expect(toasts()).toContain(WENT_OUT);
+  });
+
+  it('starts a new post, saying nothing more, when it has none', async () => {
+    lists.drafts = [row('Bridge', { proof: 'proofs/bridge.png' })];
+    await mountPost();
+    uiState.postProof = { ...PROOF };
+    await settle();
+    expect(firstPost().value).toBe(CLASSIC_FIRST_POST);
+    expect(toasts()).not.toContain(OPENED);
+    expect(toasts()).not.toContain(WENT_OUT);
+  });
+
+  it('starts a new post over the one on screen when that one went out', async () => {
+    lists.drafts = [row('Helicopters', { state: 'posted' })];
+    lists.saved = { Helicopters: { title: 'Helicopters', state: {
+      description: 'Out', proofPng: PROOF.png, tweet1: 'Out', tweet1Edited: true,
+      publish: { site: 'x', posted_at: '2026-11-09T10:00:00Z' },
+    } } };
+    await mountPost();
+    uiState.openDraft = 'Helicopters';
+    await settle();
+    expect(nameField().value).toBe('Helicopters');
+    uiState.postProof = { ...PROOF };
+    await settle();
+    expect(nameField().value).not.toBe('Helicopters');
+    expect(firstPost().value).toBe(CLASSIC_FIRST_POST);
+    expect(toasts()).toContain(WENT_OUT);
   });
 });
 

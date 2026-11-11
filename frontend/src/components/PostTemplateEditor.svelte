@@ -92,6 +92,11 @@
       date: '2025-10-01/2025-10-30',
       credits: SAMPLE.credits,
     },
+    compare: {
+      description: 'Burn scars north of the depot, before and after',
+      date: '2025-03-02 to 2025-03-14',
+      credits: SAMPLE.credits,
+    },
     free: {
       description: 'Smoke over the port at dusk, seen from three angles',
       source: SAMPLE.source,

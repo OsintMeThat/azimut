@@ -2396,7 +2396,7 @@ work under the comparison, stamped with the reading on screen and never replaced
 later save; asked on a comparison never saved, it asks for a name first. **To Post**,
 beside Export copy, keeps the export picked in the case the same way, one file each
 (the PNG, the Blink or Slide GIF, the evolution's GIF or its sheet), and opens Post on
-a free post carrying it, told the comparison's name, each picture's date (an
+a Compare post carrying it, told the comparison's name, each picture's date (an
 evolution's first and last day) and the credits under the image. A comparison never
 saved is saved first, named after its place and days as for a note, and the same image
 kept before is cited again. An optional
@@ -4354,7 +4354,7 @@ pin opens Post on a free post carrying its picture, told the pin's name, its
 description and the days of its passes. The run's own **To Post**, once something was
 kept, carries its pins' pictures in the queue's order, four at most as one post holds.
 A candidate only kept here has no picture and none is made for it, so a run of those
-says so on the button and posts nothing. Undo sends those
+shows *Pin a candidate to post it* where its To Post would be. Undo sends those
 copies to Trash, the claim with them unless something was added to it. Evidence is enlarged
 by a whole-number factor with no interpolation, so a candidate a dozen pixels
 across can be read without pretending to detail the sensor never recorded. The
@@ -4656,7 +4656,7 @@ each proof.
 states a passage, one press per passage when it states several; an instant has nothing to
 cut. It cuts the passage into a video of its own, filed in Media as Inspect's files are
 (`clip 2m10s–2m38s`, after the video's title), and the proof's scene keeps it for its
-post. The line says *Cutting 2:10–2:38… 40%* while it runs, then *Clip · 28 s · 4.2 MB*,
+post: its To Post attaches the clip in place of the whole video. The line says *Cutting 2:10–2:38… 40%* while it runs, then *Clip · 28 s · 4.2 MB*,
 its passage named when the proof states several, with **Show in Media**, which lets the working file through Media's switch, and
 **Remove**, which moves it to the case trash after the usual preview names the proof.
 The cut is re-encoded rather than copied, so it starts on the frame asked for and plays
@@ -5320,15 +5320,27 @@ never posts, and pressing Post on X or Bluesky stays the analyst's.
   files under a fresh one rather than write over it. Going home, opening another
   post, Back, New post, a proof sent with **To Post**, another case or the tab closing
   each writes what is pending first; a post whose save failed stays open and says so.
+- **A proof sent with To Post** fills a geolocation: its sentence, its date, its points
+  and its source, with the media its source names on the media post. The post on screen
+  is filed first. When the case holds a post of that proof still a Draft, To Post opens
+  it as it was left instead, the latest saved of several (*Opened its post in
+  progress*); sent again to its own draft on screen, the proof fills that one. Once every
+  post of it went out, a new one starts (*Its post went out, so this is a new one*). A
+  clip cut for its post (Geo Proof's **Cut for the post**) goes on the media post in
+  place of the whole video it came from, which **Edit media** still offers. A clip whose
+  file left the case gives the video back.
 - **Add to notes**, a note icon beside Open, writes the post into a new case note (its
   place, points, assessment, source and pictures, linked to the proof, the media and
   the draft). **The header's ⋯**, beside the name once the post is saved, holds
   **Delete…**: the draft goes to the Trash with the delete preview and **Undo** in the
   toast, and the composer goes back home.
-- **New post** offers four starts. **Geolocation** is the composer as it always was:
-  the same fields, the same first post, the same Publish. **Map plate** and **Free post**
-  carry their own pictures, or a video, on the first post (`firstMedia`) and show only
-  the fields their layout uses. **Video thread** says *Coming next* until it is built.
+- **New post** offers five starts, Geolocation across the top. **Geolocation** is the
+  composer as it always was: the same fields, the same first post, the same Publish.
+  **Map plate**, **Compare** and **Free post** carry their own pictures, or a video, on
+  the first post (`firstMedia`) and show only the fields their layout uses. **Compare**
+  is a before and after: its layout says the description, the dates, the imagery
+  credits and the mention, with no media post under it. **Video thread** says *Coming
+  next* until it is built.
   A draft or a template says its `kind` only when it is not a geolocation, so every
   draft and template from before reads as one. Another tool starts a post through
   `tools/post/start.js` (`startPost(kind, media, about)`): what Post holds is saved
@@ -5336,8 +5348,9 @@ never posts, and pressing Post on X or Bluesky stays the analyst's.
   after a geolocation's proof. `about` says what the media show: the name of what they
   came from, its own sentence when it has one, the days they show and the credit line
   on their face (`startFields` gives the post's name, `#description`, `#date` and
-  `#credits` from it). Map plate's export starts a Map plate post this way, and
-  Compare's export and Detect's pins a free post.
+  `#credits` from it). Map plate's export starts a Map plate post this way, Compare's
+  export a Compare post and Detect's pins a free post. A draft saved as a free post
+  from Compare before the Compare kind stays a free post.
 - **The extension window** says once, on arriving in Post without the capture
   extension, why it is worth having here: it fills the whole thread in X or Bluesky,
   pictures included, and can reply under the source post or capture it into the case.
@@ -5392,7 +5405,11 @@ never posts, and pressing Post on X or Bluesky stays the analyst's.
   for “Post 38”* with the same two, Keep writing it through that post's route; one for
   another case is ignored. A hand-off that went wrong (`post-handoff-report`) shows its
   one sentence in a warning toast with **Copy report**, which copies the extension's
-  short plain-text report.
+  short plain-text report. When it stopped part way through the post open and says
+  where the rest starts (`from`, a whole number from 1 to 100, else ignored), the toast
+  also offers **Copy the rest**: the posts from that one to the last, as the composer
+  builds them, a blank line between each (*Posts 2 to 3 copied*). Firefox lets the
+  extension write the clipboard only right after a press, so this press does it.
 - **After the extension's hand-off.** X's reply box takes one post, so a reply of
   several goes out one press per post: the extension fills post 1 (*Post 1 of 3 is
   ready. Press Reply, then Azimut opens the next under it.*), and each Reply the
@@ -5404,42 +5421,22 @@ never posts, and pressing Post on X or Bluesky stays the analyst's.
   The app only offers it. A hand-off that stops (no reply in 10 minutes, the tab closed
   or gone elsewhere, a step that failed) says why in a notification and sends the app
   a `post-handoff-report`: the step and what the extension's selectors found there,
-  never a word of the page.
-- **Link to your post** is the first field of every post, whatever its kind and a
-  draft from before kinds included (*Paste it once it's posted*). A post is a **Draft**,
-  **Opened in X** (or Bluesky) once Publish, Reply or the extension's hand-off opened
-  the site with it, **Posted** once the analyst gave its link, or **Changed since
-  posted** when it was edited after (`publish` on the draft: `opened_at`, `site`, `url`,
-  `posted_at`, a print of the post as it went out in `mark`, and `changed`; written only
-  once there is something to say, so a draft from before reads as a draft). The field
-  takes a link on a paste, Enter or leaving it, as the browser shows it (no `https://`,
-  a share's `?s=20`), and keeps it written the one way; anything that is not an X
-  status or a Bluesky post is said so under it and kept nowhere. Its text alone saves
-  nothing, while a link set on a blank post files it. Set, the link has **Copy**
-  (*Link copied*), **Open** in a new tab and **×**; another link pasted replaces it, and
-  × (or emptying the field) takes it back, the link having been wrong: the post is
-  Opened again when it was, else a draft. One quiet line under the field says where
-  it stands: nothing for a draft, *Opened in X · paste its link here once it's posted*
-  with the field's border in the accent, *Posted on X · 11 Nov 2026*, or *Changed since
-  posted* in the warning colour. The link and date also go on the proof the post is
-  about, as its `posted` record (one per post, the latest twenty): a record of the
-  post, not a source, since it is no evidence. A changed link replaces the old one
-  there, a link taken back leaves it, and deleting the draft keeps it, since the post
-  did go out. The proof's Details show *Posted on X · date · link*, and Add to notes
-  writes a *Posted* section. Nothing is read from the site: the analyst says it went
-  out.
+  never a word of the page, and `from`, the first post not handed over, when the posts
+  before it all went in.
 - **A narrow header** gives way a step at a time, measured rather than guessed: the
   name field narrows and the quiet line and Reply say less, then Open folds to its
   icon, then the quiet line keeps only **Install**, the kind its icon and Publish its
-  verb, and last Mark as posted (or its pill) keeps its icon, its words in the hover,
-  so a laptop with the case panel open still shows Publish whole. Wide enough, it is
-  the header it always was.
+  verb, then *Saved* keeps its tick and the name field narrows again, so Mark as posted
+  keeps its words longest, and last Mark as posted (or its pill) keeps its icon, its
+  words in the hover, so a laptop with the case panel open still shows Publish whole.
+  Wide enough, it is the header it always was.
 
 ## Post templates
 
 Settings → Templates lists the post layouts, made there and nowhere else: the
 composer offers no "save as template". Each is for one kind of post, listed under it:
-Geolocation (every template from before kinds), Video thread, Map plate or Free post. A
+Geolocation (every template from before kinds), Video thread, Map plate, Compare or Free
+post. A
 layout is a body of tokens (`#place`, `#pluscode`, `#coordinates`, `#description`,
 `#mention`, `#source`, `#date`, `#video`, `#timecode`, `#scenes`, `#credits`) and
 plain text, the editor offering the tokens of its kind. A token with no value drops
@@ -5455,8 +5452,8 @@ line drops. A token ends where its word does, so a `#dates` or `#placement` hash
 stays text.
 
 - **New post template** is a menu of kinds, each with its starts: Geolocation's
-  Classic, Coordinates only, Short and With date, a Map plate's Plate, a Free post's
-  Text and source. Video thread's come with the video thread. The editor then offers
+  Classic, Coordinates only, Short and With date, a Map plate's Plate, Compare's Before
+  and after and Dates first, a Free post's Text and source. Video thread's come with the video thread. The editor then offers
   that kind's **Start from**, each replacing the body and nothing else. A copy does not
   offer it, and keeps its kind. The same starts are in the composer's **Thread style**,
   under **Built-in** below the analyst's own templates of the open kind (alone when there

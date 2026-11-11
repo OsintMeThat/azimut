@@ -15,13 +15,13 @@
   import {
     isDefaultName, nextName, savedSlugs, savedTitles, slugify, specAttr, specPath,
   } from '../lib/naming.js';
-  import { filingName, planProofHandoff } from './post/handoff.js';
+  import { filingName, planProofHandoff, proofPosts } from './post/handoff.js';
   import { startFields, startPost } from './post/start.js';
   import { extensionWindowPutAway, putExtensionWindowAway } from './post/extensionWindow.js';
   import {
     buildTweet1 as buildTweet1Lines, DEFAULT_TWEET_BODY,
     extraPostTweetText, groupPostMedia, MAX_POST_MEDIA, mediaTweetText,
-    applyPostTemplateStructure, newPostMediaTweet, proofSourceMediaPaths,
+    applyPostTemplateStructure, newPostMediaTweet, proofSourceMediaPaths, withPostClip,
     normalizePostMediaPickerTarget, postMediaForType, renumberMediaTweetText, retargetMediaTweetText,
     normalizePostTarget, POST_TARGETS, postCharacterCount, postComposeUrl, postReportMarkdown,
     postTarget, templateUsesPostField, togglePostMedia, pointLines,
@@ -318,7 +318,7 @@
     const p = uiState.postProof;
     if (!p) return;
     uiState.postProof = null;
-    adoptProof(p);
+    untrack(() => adoptProof(p));
   });
 
   /**
@@ -326,18 +326,43 @@
    * screen is filed under its own name first and then makes way, so sending a
    * second proof over does not write over the post the first one produced.
    * Re-sending the proof this thread already carries stays in place instead —
-   * that is the same piece of work, edited.
+   * that is the same piece of work, edited. A post of the proof the case holds as a
+   * draft opens as it was left rather than a second one starting; one that went out
+   * is done, and the proof starts a new one.
    */
   async function adoptProof(p) {
-    const plan = planProofHandoff({ incomingPng: p.png, currentPng: proofPng, hasContent });
+    const caseId = caseState.current?.id;
+    const sameOnScreen = !!p.png && p.png === proofPng;
+    if (!(sameOnScreen && liveState === 'draft') && p.png && caseId) {
+      const drafts = await api.get(`/api/cases/${caseId}/drafts`).catch(() => null);
+      if (caseState.current?.id !== caseId) return;
+      const { open, posted } = proofPosts(drafts, p.png, { except: draftName });
+      if (open) {
+        if (!(await letGo())) return;
+        await loadDraft(open.name);
+        if (draftName === open.name) toast('Opened its post in progress', 'ok', 2400);
+        return;
+      }
+      if (posted || sameOnScreen) {
+        if (await startProofPost(p, liveState)) toast('Its post went out, so this is a new one', 'info', 3200);
+        return;
+      }
+    }
+    await startProofPost(p, liveState);
+  }
+
+  /** The proof in the thread on screen, or in a fresh one once that is filed. Answers whether it went in. */
+  async function startProofPost(p, standing) {
+    const plan = planProofHandoff({ incomingPng: p.png, currentPng: proofPng, hasContent, standing });
     if (plan === 'file-then-apply') {
-      if (!(await fileCurrentDraft())) return;
+      if (!(await fileCurrentDraft())) return false;
       resetDraft();
     } else if (!geolocation) {
       // a blank post of another kind: the proof starts a geolocation, on its own template
       resetDraft();
     }
     applyProof(p);
+    return true;
   }
 
   // A post started from the gallery, the home or another tool's To Post (`post/start.js`).
@@ -832,17 +857,48 @@
     proofVer = png ? Date.now() : 0;
   }
 
+  /**
+   * The clip cut for the proof's post (`GET /proofs/{name}/clip`), `{ video, path }`, or
+   * null: none cut, its file gone, or a proof that rests on no video.
+   */
+  async function proofClip(cid, png) {
+    const row = (caseProofs ?? []).find((one) => one.png === png);
+    // a proof the list knows rests on no video: it has no clip to ask for
+    if (row && !row.video) return null;
+    const name = row?.name ?? /^proofs\/([^/]+)\.png$/.exec(png)?.[1];
+    if (!name) return null;
+    try {
+      const said = await api.get(`/api/cases/${cid}/proofs/${encodeURIComponent(name)}/clip`);
+      const path = said?.clip?.path;
+      return typeof path === 'string' && path ? { video: said.video ?? null, path } : null;
+    } catch {
+      return null;
+    }
+  }
+
+  /**
+   * The proof's source media, placed on the media post and the ones after it. A clip cut
+   * for the post goes in place of the whole video it came from, which the media post's
+   * Edit media still offers.
+   */
   async function preloadProofMedia(png, proofSourceUrl) {
-    if (!png || !proofSourceUrl || !caseState.current) return;
+    if (!png || !caseState.current) return;
     try {
       const cid = caseState.current.id;
-      const proof = await lookupEntity(cid, 'path', png);
-      if (!proof) return;
+      const [proof, clip] = await Promise.all([
+        proofSourceUrl ? lookupEntity(cid, 'path', png) : null,
+        proofClip(cid, png),
+      ]);
+      if (!proof && !clip) return;
       const [library, graph] = await Promise.all([
         api.get(`/api/cases/${cid}/media`),
-        fetchDerivation(cid, proof.id),
+        proof ? fetchDerivation(cid, proof.id) : null,
       ]);
-      const linkedMedia = proofSourceMediaPaths(graph, png, proofSourceUrl, library);
+      const listed = Array.isArray(library) ? library : [];
+      const kinds = new Map(listed.map((item) => [item.path, item.kind]));
+      // the clip's file in the case, or the video as it always was
+      const cut = clip && kinds.has(clip.path) ? clip : null;
+      const linkedMedia = withPostClip(graph ? proofSourceMediaPaths(graph, png, proofSourceUrl, listed) : [], cut);
       if (!linkedMedia.length) return;
 
       const selected = new Set([
@@ -851,7 +907,7 @@
       ]);
       const added = linkedMedia.filter((path) => !selected.has(path));
       if (!added.length) return;
-      const groups = groupPostMedia(added, mediaKind);
+      const groups = groupPostMedia(added, (path) => kinds.get(path) ?? mediaKind(path));
 
       if (!mediaPaths.length && groups.length) {
         const first = groups.shift();
@@ -866,7 +922,10 @@
         tweet.mediaPaths = group.mediaPaths;
         extraTweets.push(tweet);
       }
-      toast(`${added.length} source media ${added.length === 1 ? 'file' : 'files'} added to the thread`, 'ok', 2000);
+      const files = (count) => `${count} source media ${count === 1 ? 'file' : 'files'}`;
+      const others = added.filter((path) => path !== cut?.path).length;
+      if (!cut || !added.includes(cut.path)) toast(`${files(added.length)} added to the thread`, 'ok', 2000);
+      else toast(others ? `The proof's clip and ${files(others)} added to the thread` : "The proof's clip added to the thread", 'ok', 2000);
     } catch {
       /* Media selection is a convenience; attaching the proof still works offline. */
     }
@@ -1145,12 +1204,32 @@
       { label: 'Not this one', onClick: () => {} },
     ]);
   }));
+  // A hand-off that stopped on the post open, with the post its rest starts from, offers
+  // Copy the rest: the browser lets the page write the clipboard on this press, where it
+  // refused the extension.
   $effect(() => onPostHandoffReport((report) => {
     if (report.caseId !== caseState.current?.id) return;
-    toast(report.error, 'warn', 12000, report.report
-      ? { label: 'Copy report', onClick: () => copyText(report.report, { said: 'Report copied' }) }
-      : null);
+    const rest = report.from && draftName && report.draft === draftName && report.from <= handoffPayload().posts.length
+      ? [{ label: 'Copy the rest', onClick: () => copyRest(report.from) }]
+      : [];
+    const copyReport = report.report
+      ? [{ label: 'Copy report', onClick: () => copyText(report.report, { said: 'Report copied' }) }]
+      : [];
+    const actions = [...rest, ...copyReport];
+    toast(report.error, 'warn', 12000, actions.length > 1 ? actions : actions[0] ?? null);
   }));
+
+  /** The posts of the thread from `from` (1 for the first) to the last, as the extension took them. */
+  function copyRest(from) {
+    const thread = handoffPayload().posts;
+    const texts = thread.slice(from - 1).map((post) => post.text).filter((text) => text.trim());
+    if (!texts.length) {
+      toast('Those posts are no longer in the thread', 'warn');
+      return;
+    }
+    const last = thread.length;
+    copyText(texts.join('\n\n'), { said: last > from ? `Posts ${from} to ${last} copied` : `Post ${from} copied` });
+  }
 
   // The note is titled after the post it is written from, so the two read as one piece
   // of work. The dialog leaves it editable.
@@ -1905,18 +1984,21 @@
   // way, a step at a time: first the name field narrows and the quiet line and Reply
   // say less (`narrow`), then the secondary buttons fold to their icons (`compact`),
   // as Geo Proof's do, then the quiet line keeps its Install, the kind its icon and
-  // Publish its verb (`tight`), and last Mark as posted (or its pill) keeps its icon
-  // (`tightest`), so a laptop with the case panel open still shows Publish whole. Each opens again once the header is as wide as it needed, all of it before
-  // the frame is drawn.
+  // Publish its verb (`tight`), then Saved keeps its tick and the name field narrows
+  // again (`savedBare`), so Mark as posted keeps its words longest, and last Mark as
+  // posted (or its pill) keeps its icon (`tightest`), so a laptop with the case panel
+  // open still shows Publish whole. Each opens again once the header is as wide as it
+  // needed, all of it before the frame is drawn.
   let headerEl = $state(null);
   let headerW = $state(0);
-  let fold = $state(0); // 0 whole, 1 narrow, 2 compact, 3 tight, 4 tightest
+  let fold = $state(0); // 0 whole, 1 narrow, 2 compact, 3 tight, 4 savedBare, 5 tightest
   const narrow = $derived(fold >= 1);
   const compact = $derived(fold >= 2);
   const tight = $derived(fold >= 3);
-  const tightest = $derived(fold >= 4);
-  const LAST_FOLD = 4;
-  let needs = [0, 0, 0, 0];
+  const savedBare = $derived(fold >= 4);
+  const tightest = $derived(fold >= 5);
+  const LAST_FOLD = 5;
+  let needs = [0, 0, 0, 0, 0];
   const headerHolds = $derived([
     homeShown, homeAvailable, hasContent, replying, windowPutAway && extensionMissing, saveStatus,
     kind, !!draftName, targetInfo.label, !!caseState.current, liveState, postedOnDay, caughtLink?.url ?? '',
@@ -1946,7 +2028,7 @@
     void headerHolds;
     untrack(() => {
       fold = 0;
-      needs = [0, 0, 0, 0];
+      needs = [0, 0, 0, 0, 0];
       tick().then(fitHeader);
     });
   });
@@ -2033,7 +2115,7 @@
   <!-- Narrower than what it holds (the case panel open on a laptop, a reply beside
        Publish), the header shows its secondary buttons as icons rather than cut off
        Publish, as Geo Proof's does. Wide enough, it is the header it always was. -->
-  <div class="tool-header" class:narrow class:compact class:tight bind:this={headerEl} bind:clientWidth={headerW}>
+  <div class="tool-header" class:narrow class:compact class:tight class:saved-bare={savedBare} bind:this={headerEl} bind:clientWidth={headerW}>
     {#if !homeShown}
       <!-- the way back to the posts of the case, once it has some to list -->
       {#if homeAvailable}
@@ -2051,7 +2133,9 @@
         {#if saveStatus === 'saving'}
           <span class="save-status">Saving…</span>
         {:else if saveStatus === 'saved'}
-          <span class="save-status" title="This post saves itself as you write"><Icon name="check" size={12} /> Saved</span>
+          <span class="save-status" class:bare={savedBare}
+            title={savedBare ? 'Saved: this post saves itself as you write' : 'This post saves itself as you write'}>
+            <Icon name="check" size={12} /><span class="saved-word">Saved</span></span>
         {:else if saveStatus === 'error'}
           <span class="save-status error" title={autosave.state.error}><Icon name="alert" size={12} /> Not saved</span>
           <button class="btn btn-ghost btn-xs" onclick={() => autosave.flush()}>Retry</button>
@@ -2084,7 +2168,7 @@
         </button>
       {/if}
       {#if homeShown}
-        <button class="btn btn-sm" data-guide="post.new" onclick={openGallery} title="Start a post: a geolocation, a map plate or your own words">
+        <button class="btn btn-sm" data-guide="post.new" onclick={openGallery} title="Start a post: a geolocation, a map plate, a comparison or your own words">
           <Icon name="plus" size={14} /> New post
         </button>
       {:else}
@@ -2879,6 +2963,8 @@
     white-space: nowrap;
   }
   .save-status.error { color: var(--danger); }
+  /* its tick alone at the header's last steps, the word still read aloud */
+  .save-status.bare .saved-word { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
   .modal-lead { margin: 0 0 14px; color: var(--text-2); font-size: var(--fs-sm); line-height: 1.5; }
   .ext-quiet {
     color: var(--text-3);
@@ -2888,6 +2974,7 @@
   .tool-header.compact .words { display: inline-block; width: 0; margin-left: -7px; overflow: hidden; }
   .tool-header.narrow .title-input { width: min(200px, 18vw); }
   .tool-header.tight .title-input { width: min(150px, 15vw); }
+  .tool-header.saved-bare .title-input { width: min(120px, 12vw); }
   .ext-install {
     color: var(--text-2);
     font: inherit;

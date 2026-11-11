@@ -430,10 +430,10 @@ async function fillComposer(payload, backendUrl, token) {
     const thread = hand.reply ? (ask ? { reply: true, ask: true } : { reply: true }) : {};
     const first = await fillPosts(hand, ask ? hand.posts.slice(0, 1) : hand.posts, thread, backendUrl, token);
     if (first.error) {
-      return failHandOff(hand, { step, ...first, keep: !ask && first.filled > 0 });
+      return failHandOff(hand, { step, ...first, keep: !ask && first.filled > 0, handed: leading(first) });
     }
     if (ask && !(first.filled >= 1)) {
-      return failHandOff(hand, { step: "fill-1", error: "The reply box did not answer." });
+      return failHandOff(hand, { step: "fill-1", error: "The reply box did not answer.", handed: 0 });
     }
     if (!ask) {
       hand.done = hand.posts.length;
@@ -447,7 +447,7 @@ async function fillComposer(payload, backendUrl, token) {
         backendUrl,
         token
       );
-      if (rest.error) return failHandOff(hand, { step, ...rest, keep: true });
+      if (rest.error) return failHandOff(hand, { step, ...rest, keep: true, handed: leading(rest, 1) });
       hand.done = hand.posts.length;
       return await inLine(() => waitForLink(hand));
     }
@@ -460,6 +460,14 @@ async function fillComposer(payload, backendUrl, token) {
       gone,
     });
   }
+}
+
+/**
+ * How many posts of the thread went in one after the other from its first, by a fill
+ * of the posts after `before` of them: null when the filler did not say.
+ */
+function leading(result, before = 0) {
+  return Number.isInteger(result?.through) && result.through >= 0 ? before + result.through : null;
 }
 
 /**
@@ -658,12 +666,14 @@ async function startChain(hand) {
       stopped: "closed",
       error: `The tab was closed, so Azimut stopped after post 1 of ${total}.`,
       gone: true,
+      handed: 1,
     });
   }
   if (!hand.reading) {
     return failHandOff(hand, {
       step: "catch-link",
       error: `Azimut could not follow this page, so it stopped after post 1 of ${total}.`,
+      handed: 1,
     });
   }
   hand.chain = true;
@@ -913,11 +923,17 @@ function handOffReport(hand, { step, stopped, probe, link }) {
  * Say where the hand-off stopped: a notification for the analyst and a report for
  * the app. A reply in several posts puts the posts not yet sent on the clipboard
  * when the browser lets it; the whole thread is there anyway, since the app copied
- * it before opening anything.
+ * it before opening anything. The report says `from`, the first post not handed
+ * over, when that is known, so the app can copy the rest on a press of its own:
+ * Firefox lets a page write to the clipboard only right after one.
  *
  * `keep` goes on following the tab: a thread filled in part may still be sent.
+ * `handed`, the posts that went in one after the other from the first, is a reply
+ * chain's count of them unless the step that stopped says otherwise.
  */
-async function failHandOff(hand, { step, error, probe = null, link = null, stopped = null, gone = false, keep = false }) {
+async function failHandOff(hand, stop) {
+  const { step, error, probe = null, link = null, stopped = null, gone = false, keep = false } = stop;
+  const handed = stop.handed ?? (hand.chain ? hand.done : null);
   const sentence = plainError(error);
   if (!keep) endWatch(hand, { gone });
   else await waitForLink(hand);
@@ -932,7 +948,8 @@ async function failHandOff(hand, { step, error, probe = null, link = null, stopp
   const report = handOffReport(hand, { step, stopped, probe, link });
   // Also where about:debugging's Inspect shows it, for an app that does not show reports.
   console.info(`Azimut hand-off stopped: ${sentence}\n${report}`);
-  await tellApp({ type: "post-handoff-report", caseId: hand.caseId, draft: hand.draft, error: sentence, report });
+  const from = Number.isInteger(handed) && handed >= 0 && handed < hand.posts.length ? handed + 1 : null;
+  await tellApp({ type: "post-handoff-report", caseId: hand.caseId, draft: hand.draft, error: sentence, report, from });
 }
 
 /**

@@ -1101,6 +1101,10 @@ def test_each_kind_of_post_keeps_a_default_template_of_its_own(client):
     client.put("/api/settings/prefs", json={"post_template": "tpl_geo"})
     assert client.get("/api/settings").json()["post_kind_templates"] == {"free": "tpl_free"}
 
+    # Compare posts keep theirs beside the others
+    both = client.put("/api/settings/prefs", json={"post_kind_templates": {"free": "tpl_free", "compare": "tpl_cmp"}})
+    assert both.json()["post_kind_templates"] == {"free": "tpl_free", "compare": "tpl_cmp"}
+
     for bad in ({"geolocation": "tpl"}, {"telegram": "tpl"}, {"free": "../x"}, ["free"]):
         assert client.put("/api/settings/prefs", json={"post_kind_templates": bad}).status_code == 422, bad
     assert client.put("/api/settings/prefs", json={"post_kind_templates": {}}).json()["post_kind_templates"] == {}
