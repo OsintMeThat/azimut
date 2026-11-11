@@ -5501,16 +5501,19 @@ never posts, and pressing Post on X or Bluesky stays the analyst's.
   30 m apart; else the sheet stays, and the column says *These places are too close
   together for a map, so the recap shows the proofs sheet.* The map (`lib/recapMap.js`)
   is 1600 × 900, framed by itself on every place, each a numbered pin in the number and
-  the colour `#scenes` and the strip give it, with a scale bar, a north arrow and the
-  imagery's credit, always, and no title. It is drawn as Map plate draws a page
+  the colour `#scenes` and the strip give it, with a small scale bar (a thin line and its
+  length, haloed rather than boxed, in the bottom left corner) and the imagery's credit,
+  always, and no title. It has no north arrow: it is always north up. It is drawn as Map plate draws a page
   (`lib/plate/draw.js` `drawPage`, its credits from `lib/plate/credits.js`), the ground
   laid from the app's tiles (`/api/tiles`, five at a time). Its choices, each redrawn at
   once on a small preview (480 × 270, a dozen tiles or so): **Background**, Satellite
   (Esri World Imagery, the app's default basemap) or Map (OpenStreetMap); **Line in
   video order**, a dashed line from place to place, off by default; **Signature** and
-  **Azimut mark**, on when the analyst's default proof style carries them, drawn where
-  that style puts them (the north and the scale move to the corners they leave); the
-  signature needs a logo or a handle, and says to set them in Settings → Publishing.
+  **Azimut mark**, on when the analyst's default proof style carries them: the signature
+  where that style puts it, a proof's margin above the credit (the scale moves to the
+  bottom right corner when it takes the bottom left), the mark small in the top right
+  corner; the signature needs a logo or a handle, and says to set them in Settings →
+  Publishing.
   **Local first**: the preview is drawn on a plain ground, no tile asked, until the
   analyst presses **Show the map**, picks Map or picks a ground. **Make the map** draws
   it whole and files it in Media as made from the video (`POST
