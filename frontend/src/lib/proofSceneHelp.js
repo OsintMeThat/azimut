@@ -24,6 +24,7 @@ export const PROOF_SCENE_HELP = {
 
   // the clip for the post
   cut: 'Cut this passage into a short video for the post, filed in Media',
+  saveAndCut: 'Save the proof, then cut this passage into a short video for the post',
   clipShow: 'Show the clip in Media',
   clipRemove: 'Move the clip to the case trash',
 

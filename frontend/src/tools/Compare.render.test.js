@@ -1015,7 +1015,7 @@ describe('Compare', () => {
     expect(post.mock.calls.some(([path]) => path.endsWith('/compare/sequence'))).toBe(false);
     expect(uiState.tool).toBe('post');
     expect(uiState.postStart).toEqual({ kind: 'compare', media: ['media/Comparison evolution.gif'], about: {
-      title: 'Comparison', description: '', dates: ['2025-06-01', '2026-09-01'], credits: 'Esri, World Imagery Wayback' } });
+      title: 'Comparison', description: '', dates: [], span: { before: '2025-06-01', after: '2026-09-01' }, credits: 'Esri, World Imagery Wayback' } });
     expect(document.querySelector('[role="dialog"][aria-label="Export a copy"]')).toBeNull();
     uiState.postStart = null;
   });
@@ -1033,7 +1033,7 @@ describe('Compare', () => {
       .toEqual(['png', '2014-02-20', '2026-09-01', 'true']);
     expect(post.mock.calls.some(([path]) => path === '/api/cases/case-a/plates')).toBe(false);
     expect(uiState.postStart).toMatchObject({ kind: 'compare', media: ['media/Comparison evolution.png'],
-      about: { dates: ['2014-02-20', '2026-09-01'] } });
+      about: { span: { before: '2014-02-20', after: '2026-09-01' } } });
     uiState.postStart = null;
   });
 

@@ -12,6 +12,8 @@
    * and the proposal waits, so the header never grows with it.
    *
    * At the header's narrowest step (`iconOnly`) it shows its icon, its words in the hover.
+   * Mark as posted wears a flag rather than a tick, so it is never read as Saved's beside
+   * it; the green pill keeps its tick once the post is marked.
    */
   import Icon from '../../components/Icon.svelte';
   import FloatingMenu from '../../components/FloatingMenu.svelte';
@@ -84,7 +86,7 @@
   <button type="button" class="btn btn-sm pc-mark" class:accent bind:this={opener}
     aria-haspopup="dialog" aria-expanded={asking} aria-label="Mark as posted"
     title={iconOnly ? 'Mark as posted' : 'Say it went out, with its link if you have it'} onclick={() => (asking = !asking)}>
-    <Icon name="check" size={13} />{#if !iconOnly}<span>Mark as posted</span>{/if}
+    <Icon name="flag" size={13} />{#if !iconOnly}<span>Mark as posted</span>{/if}
   </button>
 {:else}
   <button type="button" class="pc-pill {standing}" bind:this={opener} aria-haspopup="menu" aria-expanded={menu}

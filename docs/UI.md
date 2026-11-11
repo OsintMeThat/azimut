@@ -2396,8 +2396,10 @@ work under the comparison, stamped with the reading on screen and never replaced
 later save; asked on a comparison never saved, it asks for a name first. **To Post**,
 beside Export copy, keeps the export picked in the case the same way, one file each
 (the PNG, the Blink or Slide GIF, the evolution's GIF or its sheet), and opens Post on
-a Compare post carrying it, told the comparison's name, each picture's date (an
-evolution's first and last day) and the credits under the image. A comparison never
+a Compare post carrying it, told the comparison's name, its dates as before and after
+(the left picture's and the right one's, an evolution's first and last day) and the
+credits under the image. A picture with no single date, like World Imagery's mosaic,
+is a side the post leaves as `?` for the analyst to complete. A comparison never
 saved is saved first, named after its place and days as for a note, and the same image
 kept before is cited again. An optional
 ground-anchored frame cuts any export to the
@@ -4351,8 +4353,10 @@ Time tab, and a claim at the place, citing the picture, says what the sweep read
 change `occurred` between the two passes, a thing on one pass was `observed` on it.
 The place itself carries no date, and the claim no confidence. **To Post** beside a
 pin opens Post on a free post carrying its picture, told the pin's name, its
-description and the days of its passes. The run's own **To Post**, once something was
-kept, carries its pins' pictures in the queue's order, four at most as one post holds.
+description and its two passes as before and after. The run's own **To Post**, once
+something was kept, carries its pins' pictures in the queue's order, four at most as
+one post holds, dated from the earliest before to the latest after. A method that reads
+one pass has no before, and says the day it was seen. Detect hands over no credit line.
 A candidate only kept here has no picture and none is made for it, so a run of those
 shows *Pin a candidate to post it* where its To Post would be. Undo sends those
 copies to Trash, the claim with them unless something was added to it. Evidence is enlarged
@@ -4652,9 +4656,14 @@ left of each ★ panel, the passage that panel's frame shows in. It is drawn on 
 A proof about the whole video has no time to print, and the house style leaves it to
 each proof.
 
-**Cut for the post** sits on one quiet line under the video's field of a saved proof that
-states a passage, one press per passage when it states several; an instant has nothing to
-cut. It cuts the passage into a video of its own, filed in Media as Inspect's files are
+**Cut for the post** sits on one quiet line under the video's field of a proof that
+states a passage, one press per passage when it states several; an instant, or the whole
+video, has nothing to cut. On a proof never saved, the passage can be the time of the
+scene its frames found, and the press saves the proof first through the normal save, its
+point check and name question included, the line saying *Saving the proof first…*; the
+cut starts once the save landed. A save that stops or is cancelled cuts nothing, and the
+line says *The proof was not saved, so nothing was cut.* It cuts the passage into a
+video of its own, filed in Media as Inspect's files are
 (`clip 2m10s–2m38s`, after the video's title), and the proof's scene keeps it for its
 post: its To Post attaches the clip in place of the whole video. The line says *Cutting 2:10–2:38… 40%* while it runs, then *Clip · 28 s · 4.2 MB*,
 its passage named when the proof states several, with **Show in Media**, which lets the working file through Media's switch, and
@@ -5346,11 +5355,20 @@ never posts, and pressing Post on X or Bluesky stays the analyst's.
   `tools/post/start.js` (`startPost(kind, media, about)`): what Post holds is saved
   first, as for a proof sent with **To Post**, and the media land on the first post, or
   after a geolocation's proof. `about` says what the media show: the name of what they
-  came from, its own sentence when it has one, the days they show and the credit line
-  on their face (`startFields` gives the post's name, `#description`, `#date` and
-  `#credits` from it). Map plate's export starts a Map plate post this way, Compare's
-  export a Compare post and Detect's pins a free post. A draft saved as a free post
-  from Compare before the Compare kind stays a free post.
+  came from, its own sentence when it has one, the days they show (or `span`, a before
+  and an after kept on their sides) and the credit line on their face (`startFields`
+  gives the post's name, `#description`, `#date` and `#credits` from it). The date
+  reads one day, or the first and the last joined by an arrow,
+  `2024-05-01 → 2025-06-01`. A before and after always says both sides: a side with no
+  known date is `?`, and the Date field says under it *The after picture has no known
+  date.* (or before) for as long as it holds that `?`. Map plate's export starts a Map plate post
+  this way, Compare's export a Compare post and Detect's pins a free post, whose Text
+  and source layout carries `#date` for them. A draft saved as a free post from Compare
+  before the Compare kind stays a free post.
+- **Credits** is a field of the composer shown when the layout uses `#credits`, filled
+  with the credit line a Compare or Map plate start hands over and edited like any
+  other. The draft keeps it (`credits`, written only when there is one), and an empty
+  field drops the line.
 - **The extension window** says once, on arriving in Post without the capture
   extension, why it is worth having here: it fills the whole thread in X or Bluesky,
   pictures included, and can reply under the source post or capture it into the case.
@@ -5429,6 +5447,8 @@ never posts, and pressing Post on X or Bluesky stays the analyst's.
   verb, then *Saved* keeps its tick and the name field narrows again, so Mark as posted
   keeps its words longest, and last Mark as posted (or its pill) keeps its icon, its
   words in the hover, so a laptop with the case panel open still shows Publish whole.
+  Mark as posted's icon is a flag, here and in the home's menus, so it is never read as
+  Saved's tick beside it; the green pill keeps its tick once posted.
   Wide enough, it is the header it always was.
 
 ## Post templates
@@ -5441,8 +5461,9 @@ layout is a body of tokens (`#place`, `#pluscode`, `#coordinates`, `#description
 `#mention`, `#source`, `#date`, `#video`, `#timecode`, `#scenes`, `#credits`) and
 plain text, the editor offering the tokens of its kind. A token with no value drops
 its line. `#video` is the title Media gives the video the post is about, never its file
-name. `#timecode`, `#scenes` and `#credits` are known to the layout and its typo check
-and stay empty, their line dropped, until the video thread and the credits fill them.
+name. `#timecode` and `#scenes` are known to the layout and its typo check and stay
+empty, their line dropped, until the video thread fills them. `#credits` is the
+composer's Credits field.
 `#date` is the date the proof
 states, and the composer shows its Date field only when the layout uses it. It is
 filled from the proof as the case stores it (`2024-03-12`, `2024-03~`), the same in
@@ -6636,8 +6657,8 @@ counts each transition's own time in what the video runs. Everything goes into t
 same file and files it in the case instead, naming its plate, the day and step a page
 shows, and the credits on its face (`POST /map-plates/export` with `into=case`); the same
 file filed from the plate before is cited again. Post then opens on a Map plate post
-carrying it, told the plate's title, the day shown or the first and last days played,
-and those credits. An analyst who went to another tool meanwhile is offered **Open in
+carrying it, told the plate's title, the day shown or the first and last days played
+(`2026-10-01 → 2026-10-14`), and those credits, which fill the post's Credits field. An analyst who went to another tool meanwhile is offered **Open in
 Post** on the toast instead.
 **Export** closes the dialog and the export goes on behind: the plate holds still under
 a veil saying what is drawn and how far, the top bar says **Plate export** with its

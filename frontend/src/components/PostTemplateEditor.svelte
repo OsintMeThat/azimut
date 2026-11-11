@@ -89,12 +89,12 @@
     video: { ...GEOLOCATION_SAMPLE, timecode: SAMPLE.timecode, scenes: SAMPLE.scenes },
     plate: {
       description: 'Front line around Kupiansk, 1 to 30 October',
-      date: '2025-10-01/2025-10-30',
+      date: '2025-10-01 → 2025-10-30',
       credits: SAMPLE.credits,
     },
     compare: {
       description: 'Burn scars north of the depot, before and after',
-      date: '2025-03-02 to 2025-03-14',
+      date: '2025-03-02 → 2025-03-14',
       credits: SAMPLE.credits,
     },
     free: {

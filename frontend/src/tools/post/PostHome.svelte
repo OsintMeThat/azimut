@@ -277,7 +277,7 @@
     {/if}
     {#if !isPosted(draft)}
       <button type="button" class="fm-item" title="Say it went out, with its link if you have it" onclick={() => act('mark')}>
-        <Icon name="check" size={14} /><span class="fm-grow">Mark as posted…</span></button>
+        <Icon name="flag" size={14} /><span class="fm-grow">Mark as posted…</span></button>
     {:else}
       {#if draft.posted?.url}
         <a class="fm-item" href={draft.posted.url} target="_blank" rel="noreferrer" onclick={() => (menu = null)}>
@@ -299,7 +299,7 @@
     <button type="button" class="fm-item" title="Open it in Geo Proof" onclick={() => act('proof')}>
       <Icon name="proof" size={14} /><span class="fm-grow">Open the proof</span></button>
     <button type="button" class="fm-item" title="Start its post and say it went out" onclick={() => act('posted')}>
-      <Icon name="check" size={14} /><span class="fm-grow">Mark as posted…</span></button>
+      <Icon name="flag" size={14} /><span class="fm-grow">Mark as posted…</span></button>
   </FloatingMenu>
 {/if}
 

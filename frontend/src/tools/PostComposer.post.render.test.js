@@ -488,7 +488,7 @@ describe('a Compare post', () => {
     await mountPost();
     startPost('compare', ['media/Comparison.png'], { title: 'Depot', dates: ['2025-03-14', '2025-03-02'] });
     await settle();
-    expect(firstPost().value).toBe('2025-03-02 to 2025-03-14\n\nVia Compare');
+    expect(firstPost().value).toBe('2025-03-02 → 2025-03-14\n\nVia Compare');
     await saved();
     expect(draftWrites().at(-1)[1].state).toMatchObject({ kind: 'compare', firstMedia: ['media/Comparison.png'] });
   });
@@ -533,7 +533,79 @@ describe('startPost — the entry every To Post shares', () => {
     await saved();
     const write = draftWrites().at(-1)[1];
     expect(write.title).toBe('Front, October');
-    expect(write.state).toMatchObject({ kind: 'plate', description: 'Shelling along the river', date: '2026-10-01 to 2026-10-14' });
+    expect(write.state).toMatchObject({ kind: 'plate', description: 'Shelling along the river', date: '2026-10-01 → 2026-10-14' });
+  });
+
+  it('writes a Compare start\'s dates as before → after, with its credits in a field of their own', async () => {
+    lists.media = [{ path: 'media/Comparison.png', kind: 'image' }];
+    await mountPost();
+    startPost('compare', ['media/Comparison.png'], {
+      title: 'Depot', span: { before: '2024-05-01', after: '2025-06-01' }, credits: 'Esri · Contains modified Copernicus Sentinel data 2025',
+    });
+    await settle();
+    expect(target.querySelector('#pc-date').value).toBe('2024-05-01 → 2025-06-01');
+    expect(target.querySelector('#pc-date').closest('.field').querySelector('.field-note')).toBeNull();
+    const field = target.querySelector('#pc-credits');
+    expect(field.closest('.field').querySelector('label').textContent.trim()).toBe('Credits');
+    expect(field.value).toBe('Esri · Contains modified Copernicus Sentinel data 2025');
+    expect(firstPost().value).toBe('2024-05-01 → 2025-06-01\n\nEsri · Contains modified Copernicus Sentinel data 2025\n\n@GeoConfirmed');
+  });
+
+  it('marks a side with no known date ? and says so under the field until it is completed', async () => {
+    lists.media = [{ path: 'media/Comparison.png', kind: 'image' }];
+    await mountPost();
+    startPost('compare', ['media/Comparison.png'], { title: 'Depot', span: { before: '2024-05-01', after: null } });
+    await settle();
+    const date = target.querySelector('#pc-date');
+    const note = () => date.closest('.field').querySelector('.field-note');
+    expect(date.value).toBe('2024-05-01 → ?');
+    expect(note().textContent.trim()).toBe('The after picture has no known date.');
+    // the note stays while the field still holds ?
+    type(date, '2024-05-02 → ?');
+    expect(note().textContent.trim()).toBe('The after picture has no known date.');
+    type(date, '2024-05-02 → 2025-06-01');
+    expect(note()).toBeNull();
+    expect(firstPost().value).toContain('2024-05-02 → 2025-06-01');
+    // a draft reopened with a ? says it again
+    lists.saved = { Mosaic: { title: 'Mosaic', state: { kind: 'compare', date: '? → 2025-06-01', body: '#date', firstMedia: ['media/Comparison.png'], firstMediaType: 'images' } } };
+    uiState.openDraft = 'Mosaic';
+    await settle();
+    expect(target.querySelector('#pc-date').value).toBe('? → 2025-06-01');
+    expect(target.querySelector('#pc-date').closest('.field').querySelector('.field-note').textContent.trim())
+      .toBe('The before picture has no known date.');
+  });
+
+  it('fills Credits from a plate start, keeps it with the draft, and reopens it', async () => {
+    lists.media = [{ path: 'media/Front.png', kind: 'image' }];
+    await mountPost();
+    startPost('plate', ['media/Front.png'], { title: 'Front, October', credits: 'Esri, Maxar · Made with Azimut' });
+    await settle();
+    expect(target.querySelector('#pc-credits').value).toBe('Esri, Maxar · Made with Azimut');
+    expect(firstPost().value).toBe('Esri, Maxar · Made with Azimut\n\n@GeoConfirmed');
+    type(target.querySelector('#pc-credits'), 'Esri, Maxar, Vantor · Made with Azimut');
+    await saved();
+    const write = draftWrites().at(-1)[1];
+    expect(write.state.credits).toBe('Esri, Maxar, Vantor · Made with Azimut');
+
+    lists.saved = { [write.title]: { title: write.title, state: write.state } };
+    startPost('free');
+    await settle();
+    expect(target.querySelector('#pc-credits')).toBeNull();
+    uiState.openDraft = write.title;
+    await settle();
+    expect(target.querySelector('#pc-credits').value).toBe('Esri, Maxar, Vantor · Made with Azimut');
+    expect(firstPost().value).toContain('Esri, Maxar, Vantor · Made with Azimut');
+  });
+
+  it('drops the credits line when the field is emptied, and writes no credits on the draft then', async () => {
+    lists.media = [{ path: 'media/Front.png', kind: 'image' }];
+    await mountPost();
+    startPost('plate', ['media/Front.png'], { title: 'Front, October', description: 'Shelling along the river', credits: 'Esri' });
+    await settle();
+    type(target.querySelector('#pc-credits'), '');
+    expect(firstPost().value).toBe('Shelling along the river\n\n@GeoConfirmed');
+    await saved();
+    expect('credits' in draftWrites().at(-1)[1].state).toBe(false);
   });
 
   it('keeps a fresh number when another post already holds the name given', async () => {
@@ -997,6 +1069,9 @@ describe('Mark as posted, in the header', () => {
     expect(markButton().textContent.trim()).toBe('');
     expect(markButton().getAttribute('title')).toBe('Mark as posted');
     expect(header().querySelector('.save-status').classList.contains('bare')).toBe(true);
+    // two bare icons side by side: Mark as posted's flag is never read as Saved's tick
+    const drawn = (node) => node.querySelector('svg').innerHTML;
+    expect(drawn(markButton())).not.toBe(drawn(header().querySelector('.save-status')));
   });
 
   it('folds Saved to its tick one step before, so Mark as posted keeps its words longest', async () => {

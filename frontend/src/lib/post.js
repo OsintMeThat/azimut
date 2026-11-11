@@ -621,6 +621,7 @@ const FIELD_TOKENS = {
   mention: ['#mention'],
   source: ['#source'],
   date: ['#date'],
+  credits: ['#credits'],
 };
 
 // A token ends where the word does: `#placement` is text, not `#place` and "ment",
@@ -737,7 +738,7 @@ export const POST_KIND_STARTERS = Object.freeze({
     Object.freeze({ id: 'compare-dates', label: 'Dates first', body: '#date\n\n#description\n\n#credits\n\n#mention', mediaEnabled: false }),
   ]),
   free: Object.freeze([
-    Object.freeze({ id: 'free', label: 'Text and source', body: '#description\n\n#mention\n\nSource: #source', mediaEnabled: false }),
+    Object.freeze({ id: 'free', label: 'Text and source', body: '#description\n\n#date\n\n#mention\n\nSource: #source', mediaEnabled: false }),
   ]),
 });
 

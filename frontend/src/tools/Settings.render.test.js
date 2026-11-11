@@ -297,7 +297,7 @@ describe('post templates', () => {
     click(pane().querySelector('[data-new-post-template]'));
     pickStart('Text and source');
     expect(editor().querySelector('.pe-kind').textContent.trim()).toBe('Free post');
-    expect(editor().querySelector('textarea.body').value).toBe('#description\n\n#mention\n\nSource: #source');
+    expect(editor().querySelector('textarea.body').value).toBe('#description\n\n#date\n\n#mention\n\nSource: #source');
     editor().querySelector('.tpl-title').value = 'Free one';
     editor().querySelector('.tpl-title').dispatchEvent(new Event('input', { bubbles: true }));
     flushSync();

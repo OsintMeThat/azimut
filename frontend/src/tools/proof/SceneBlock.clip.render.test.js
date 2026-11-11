@@ -58,15 +58,17 @@ afterEach(() => {
   document.body.innerHTML = '';
 });
 
-function setup({ moments = [{ start: 130, end: 158 }], name = 'depot', active = true } = {}) {
+function setup({ moments = [{ start: 130, end: 158 }], name = 'depot', active = true, onsave = null } = {}) {
   const api = { put: vi.fn() };
   const frames = [{ panel: 'p1', video: CLIP, time: 130.4 }];
   const scene = new ProofScene({ api, toast: vi.fn(), where: () => ({ caseId: 'case', name }), frames: () => frames });
-  scene.load({ video: CLIP, moments });
+  if (name) scene.load({ video: CLIP, moments });
+  // a proof never saved holds what it states for its first save, as Make the proof's does
+  else scene.hold({ video: CLIP, moments });
   const target = document.createElement('div');
   document.body.append(target);
   targets.push(target);
-  live.push(mount(SceneBlock, { target, props: { scene, caseId: 'case', active, onaddframe: vi.fn() } }));
+  live.push(mount(SceneBlock, { target, props: { scene, caseId: 'case', active, onaddframe: vi.fn(), onsave } }));
   flushSync();
   return { root: target, scene };
 }
@@ -164,14 +166,94 @@ describe('Cut for the post', () => {
     expect(words(line(root))).toBe('Cut for the post');
   });
 
-  it('is not there for an instant, the whole video, a proof never saved, or while the time changes', async () => {
+  it('is not there for an instant, the whole video, or while the time changes, saved or not', async () => {
     expect(line(setup({ moments: [{ start: 12, end: null }] }).root)).toBeNull();
     expect(line(setup({ moments: [] }).root)).toBeNull();
-    expect(line(setup({ name: null }).root)).toBeNull();
+    expect(line(setup({ name: null, moments: [{ start: 12, end: null }] }).root)).toBeNull();
+    expect(line(setup({ name: null, moments: [] }).root)).toBeNull();
     const { root } = setup();
     await settle();
     root.querySelector('.time').click();
     await settle();
     expect(line(root)).toBeNull();
+  });
+});
+
+describe('Cut for the post on a proof never saved', () => {
+  it('is there as soon as the proof states a passage, and says the press saves it first', async () => {
+    const { root } = setup({ name: null, onsave: vi.fn() });
+    await settle();
+    expect(words(line(root))).toBe('Cut for the post');
+    expect(button(root, 'Cut for the post').getAttribute('title')).toBe('Save the proof, then cut this passage into a short video for the post');
+    // nothing is asked of the server for a proof it does not hold yet
+    expect(server.posts).toEqual([]);
+  });
+
+  it('saves the proof through the normal save, then cuts the passage once the save landed', async () => {
+    server.jobs = [{ status: 'done', result: { clip: CUT } }];
+    let land;
+    const onsave = vi.fn(() => new Promise((resolve) => { land = resolve; }));
+    const { root } = setup({ name: null, onsave });
+    await settle();
+    button(root, 'Cut for the post').click();
+    await settle();
+    expect(onsave).toHaveBeenCalledTimes(1);
+    expect(words(line(root))).toBe('Saving the proof first…');
+    expect(line(root).querySelector('[role="status"]')).not.toBeNull();
+    expect(server.posts).toEqual([]);
+    // nothing to press again while it saves
+    expect(button(root, 'Cut for the post')).toBeUndefined();
+    land({ caseId: 'case', name: 'depot' });
+    await settle(5);
+    expect(onsave).toHaveBeenCalledTimes(1);
+    expect(server.posts).toEqual([{ url: '/api/cases/case/proofs/depot/clip', body: { start: 130, end: 158 } }]);
+    expect(words(line(root))).toBe('Clip · 28 s · 4.2 MB Show in Media Remove');
+  });
+
+  it('cuts nothing when the save stops or is cancelled, and says why', async () => {
+    const onsave = vi.fn(async () => null);
+    const { root } = setup({ name: null, onsave });
+    await settle();
+    button(root, 'Cut for the post').click();
+    await settle();
+    expect(onsave).toHaveBeenCalledTimes(1);
+    expect(server.posts).toEqual([]);
+    expect(root.querySelector('.clip-error').textContent).toBe('The proof was not saved, so nothing was cut.');
+    expect(words(line(root))).toBe('Cut for the post');
+    // a save that fails says why in its own toast: the line says the same as a cancel
+    onsave.mockRejectedValueOnce(new Error('Save failed'));
+    button(root, 'Cut for the post').click();
+    await settle();
+    expect(server.posts).toEqual([]);
+    expect(root.querySelector('.clip-error').textContent).toBe('The proof was not saved, so nothing was cut.');
+  });
+
+  it('offers the time of the scene its frames found, which the save takes up, until Not this scene', async () => {
+    const listed = { video: CLIP, taken: [], collages: [],
+      scenes: [{ kind: 'draft', id: 's1', start: 120, end: 140, label: 'Bridge?', state: 'todo', captures: [], abandoned: null }] };
+    const scene = new ProofScene({ api: { put: vi.fn() }, toast: vi.fn(), where: () => ({ caseId: 'case', name: null }),
+      frames: () => [{ panel: 'p1', video: CLIP, time: 130.4 }], listed: () => listed });
+    const target = document.createElement('div');
+    document.body.append(target);
+    targets.push(target);
+    live.push(mount(SceneBlock, { target, props: { scene, caseId: 'case', onaddframe: vi.fn(), onsave: vi.fn() } }));
+    flushSync();
+    await settle();
+    expect(words(line(target))).toBe('Cut for the post');
+    button(target, 'Not this scene').click();
+    await settle();
+    expect(line(target)).toBeNull();
+  });
+
+  it('offers each passage when it states several, and cuts the one pressed after the save', async () => {
+    server.jobs = [{ status: 'done', result: { clip: { ...CUT, start: 190, end: 200 } } }];
+    const onsave = vi.fn(async () => ({ caseId: 'case', name: 'depot' }));
+    const { root } = setup({ name: null, onsave, moments: [{ start: 30, end: 45 }, { start: 190, end: 200 }] });
+    await settle();
+    expect([...line(root).querySelectorAll('button')].map((b) => b.getAttribute('title')))
+      .toEqual(Array(2).fill('Save the proof, then cut this passage into a short video for the post'));
+    button(root, '3:10–3:20').click();
+    await settle(5);
+    expect(server.posts).toEqual([{ url: '/api/cases/case/proofs/depot/clip', body: { start: 190, end: 200 } }]);
   });
 });

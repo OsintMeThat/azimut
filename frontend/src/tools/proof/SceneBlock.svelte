@@ -31,9 +31,11 @@
   // `active` is whether the tab is shown. A hidden tab keeps its player where it
   // stood, paused, so coming back finds the same frame.
   //
-  // **Cut for the post** sits on one quiet line under the fields, for a saved proof that
-  // states a passage: it cuts that passage into a video of its own in Media, which the
-  // proof's scene keeps for its post (`sceneClip.svelte.js`). The line then says the
+  // **Cut for the post** sits on one quiet line under the fields, for a proof that states
+  // a passage: it cuts that passage into a video of its own in Media, which the proof's
+  // scene keeps for its post (`sceneClip.svelte.js`). A proof never saved is saved first,
+  // through Geo Proof's own save and its questions (`onsave`), and cut once that landed;
+  // a save that stopped cuts nothing and the line says so. The line then says the
   // clip's length and size, its passage too when the proof states several, with Show in
   // Media and Remove, the case trash's road. One clip a proof: another passage is cut
   // once this one is removed.
@@ -42,7 +44,9 @@
   // each panel cut from a video, which covers the picture while composing. It is the
   // analyst's way of working, kept in settings.json for every proof (`prefs.proofScenePlays`);
   // the panel's frame is still a press away here, on the player's dots.
-  let { scene, caseId, color = 'var(--accent)', active = true, onaddframe } = $props();
+  // `onsave()` saves a proof never saved as Save proof does, answering `{ caseId, name }`
+  // once it landed or null when it stopped.
+  let { scene, caseId, color = 'var(--accent)', active = true, onaddframe, onsave = null } = $props();
 
   let player = $state(null);
 
@@ -99,15 +103,18 @@
   // -- the clip for the post ------------------------------------------------------------
   const clips = new SceneClip({ api });
   const named = $derived(scene.where().name ?? null);
-  // the stretches the proof states, while its time is not being changed: never an
-  // instant, and never the time of a scene its frames found, which is not stated yet
-  const passages = $derived(editing || scene.match ? [] : scene.moments.filter(cuttable));
+  // the stretches the proof states, while its time is not being changed, never an
+  // instant: on a proof never saved, the time of the scene its frames found too, which
+  // the save the cut runs first takes up
+  const passages = $derived(editing ? [] : scene.moments.filter(cuttable));
   const clip = $derived(clips.clip);
   // the clip's passage goes without saying when it is the proof's one passage
   const clipPassage = $derived(
     !!clip && !(passages.length === 1 && Math.abs(passages[0].start - clip.start) < 1e-3 && Math.abs(passages[0].end - clip.end) < 1e-3),
   );
   const cutting = $derived(clips.cutting);
+  const cut = (passage) => clips.cut(caseId, named, passage, onsave);
+  const cutHelp = $derived(named ? HELP.cut : HELP.saveAndCut);
   let removing = $state(null);
   let removeBusy = $state(false);
 
@@ -240,11 +247,13 @@
     </p>
   {/if}
 
-  {#if named && (clip || cutting || passages.length)}
+  {#if clip || cutting || clips.saving || passages.length}
     <!-- Cut for the post: one quiet line, the clip once cut. -->
     <div class="post-clip" data-testid="scene-clip">
       <Icon name="scissors" size={12} />
-      {#if cutting}
+      {#if clips.saving}
+        <span class="clip-what" role="status">Saving the proof first…</span>
+      {:else if cutting}
         <span class="clip-what" role="status">Cutting {spanLabel(cutting.start, cutting.end)}… {Math.round(cutting.percent)}%</span>
         <span class="clip-bar" aria-hidden="true"><span style:width={`${Math.round(cutting.percent)}%`}></span></span>
       {:else if clip}
@@ -252,11 +261,11 @@
         <button class="link" onclick={showInMedia} title={HELP.clipShow}>Show in Media</button>
         <button class="link" onclick={() => (removing = clip)} title={HELP.clipRemove}>Remove</button>
       {:else if passages.length === 1}
-        <button class="link" onclick={() => clips.cut(caseId, named, passages[0])} title={HELP.cut}>Cut for the post</button>
+        <button class="link" onclick={() => cut(passages[0])} title={cutHelp}>Cut for the post</button>
       {:else}
         <span class="clip-what">Cut for the post</span>
         {#each passages as m (m.start)}
-          <button class="link time-pick" onclick={() => clips.cut(caseId, named, m)} title={HELP.cut}>{spanLabel(m.start, m.end)}</button>
+          <button class="link time-pick" onclick={() => cut(m)} title={cutHelp}>{spanLabel(m.start, m.end)}</button>
         {/each}
       {/if}
     </div>
