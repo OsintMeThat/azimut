@@ -60,7 +60,7 @@ export const TWEET_TOKENS = [
   { tag: '#date', label: 'Date', sample: '2025-10-24 14:30 UTC+3', kinds: ['geolocation', 'video', 'plate', 'compare', 'free'] },
   { tag: '#video', label: 'Video title', sample: 'Convoy on the coast road', kinds: ['geolocation', 'video'] },
   { tag: '#timecode', label: 'Timecode', sample: '[0:00–0:07]', kinds: ['geolocation', 'video'] },
-  { tag: '#scenes', label: 'Scenes', sample: '1. [0:00–0:07] Road bridge\n2. [0:15] Port gate\n3. Hilltop village', kinds: ['video'] },
+  { tag: '#scenes', label: 'Scenes', sample: '1. [0:00–0:07] - 48.850000, 2.350000\n2. [0:15] - 48.860000, 2.360000\n3. 48.870000, 2.370000', kinds: ['video'] },
   { tag: '#credits', label: 'Credits', sample: 'Imagery: Copernicus Sentinel-2', kinds: ['geolocation', 'video', 'plate', 'compare', 'free'] },
 ];
 

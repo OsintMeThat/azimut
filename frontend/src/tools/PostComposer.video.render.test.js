@@ -74,7 +74,7 @@ const MEDIA = [
   { path: 'media/lone.mp4', kind: 'video', title: 'Lone clip', size: 1_000_000, source: { type: 'upload' } },
 ];
 // a thread opens with no title: the analyst gives one, or its line drops
-const RECAP = '1. [0:00–0:07] Road bridge\n2. [0:15] Port gate\n3. Hilltop village\n\n@GeoConfirmed';
+const RECAP = '1. [0:00–0:07] - 48.850000, 2.350000\n2. [0:15] - 48.860000, 2.360000\n3. 48.870000, 2.370000\n\n@GeoConfirmed';
 const PLACES = [
   'The convoy crosses the road bridge south of the port\n[0:00–0:07]\n\n48.850000, 2.350000',
   'Port gate\n[0:15]\n\n48.860000, 2.360000',

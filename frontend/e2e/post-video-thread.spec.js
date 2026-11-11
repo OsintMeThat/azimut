@@ -48,7 +48,7 @@ const MEDIA = [
     source: { type: 'upload' }, thumbnail: null, folder: '' },
 ];
 // no title until the analyst gives one: the recap opens on its places
-const RECAP = '1. [0:00–0:07] Road bridge\n2. [0:15] Port gate\n\n@GeoConfirmed';
+const RECAP = '1. [0:00–0:07] - 48.850000, 2.350000\n2. [0:15] - 48.860000, 2.360000\n\n@GeoConfirmed';
 
 /** A tile of one colour, as the app's tile route would answer one. */
 const TILE = Buffer.from(

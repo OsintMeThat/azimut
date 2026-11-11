@@ -5483,10 +5483,14 @@ never posts, and pressing Post on X or Bluesky stays the analyst's.
   or the proofs sheet, then the video, then a post per place), **Video first**, **Proof
   first** (the first place, then the video naming every place) and **All in one** (one
   post: up to four pictures, the contact sheet past four places). Each post is labelled
-  (*Recap*, *Video*, the place's name, else where it stands) and carries its files: a
-  place's proof picture, the video, the recap's picture. `#scenes` calls a place the
-  same way: its proof's name, else its region and country, else its point, never a
-  technical *Proof 3*. A place's post says its sentence, its time and its points, the
+  (*Recap*, *Video*, the place's name, else where it stands with its plus code, *Al Jawf,
+  Yemen (7H872G9H+FC)*, never a technical *Proof 3*) and carries its files: a place's
+  proof picture, the video, the recap's picture; the column's lists call a place the
+  same way. `#scenes` gives each place its time and its point, the first one to six
+  decimals as the place's post writes it, `1. [0:03–0:09] - 16.018740, 45.528599`, the
+  point alone for the whole video, `3. 16.018740, 45.528599`; a proof the analyst named
+  says its point there too, its name staying in its own post, and a place with no point
+  says its label. A place's post says its sentence, its time and its points, the
   same in every order; changing the order keeps the words written on a post, while the
   recap and the video's post take the order's own start. The mention and the Source
   field (the video's link) are the only fields; the places bring theirs. **No picture
@@ -5642,8 +5646,8 @@ plain text, the editor offering the tokens of its kind. A token with no value dr
 its line. `#video` is the title Media gives the video the post is about, never its file
 name. `#timecode` is the time a proof states in its video, `[0:15]` or `[0:00–0:07]`,
 for a geolocation and each place of a video thread; `#scenes` a thread's places, one a
-line and numbered, `1. [0:00–0:07] Road bridge`, an unnamed place by where it
-stands and its plus code, `2. [0:15] Al Jawf, Yemen (7H872G9H+FC)`. `#credits` is the composer's Credits
+line and numbered, each its time and its point, `1. [0:03–0:09] - 16.018740, 45.528599`,
+the point alone for the whole video, `3. 16.018740, 45.528599`. `#credits` is the composer's Credits
 field.
 `#date` is the date the proof
 states, and the composer shows its Date field only when the layout uses it. It is
