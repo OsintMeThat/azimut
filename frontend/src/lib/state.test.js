@@ -179,6 +179,12 @@ describe('applyPrefs', () => {
 
     applyPrefs({ signature_handle: '@example' });
     expect(prefs.signatureHandle).toBe('@example');
+
+    expect(prefs.postAltText).toBe(false); // Post's Alt text box starts off
+    applyPrefs({ post_alt_text: true });
+    expect(prefs.postAltText).toBe(true);
+    applyPrefs({ units: 'metric' });
+    expect(prefs.postAltText).toBe(true);
   });
 
   it('knows who signs a report, and whether the logo and the signature are set', async () => {
