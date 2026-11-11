@@ -103,6 +103,18 @@ describe('the tiles of a strip', () => {
       .toEqual(['proof:road-bridge', 's1', 'proof:market', 's3', 'proof:square', 's2']);
   });
 
+  it('say the time the open slide\'s Scene tab reads, a scene its frames found included', () => {
+    // Market states nothing, so the server lists it as the whole video; its frames found Water tower?
+    const tiles = slideTiles(ANSWER, { started: true, name: 'market', title: 'Market', draft: 's1', time: '0:50–1:00' });
+    expect(tiles[1]).toMatchObject({ key: 'proof:market', time: '0:50–1:00', words: '0:50–1:00' });
+    // a time changed a moment ago, before the strip is read again
+    expect(slideTiles(ANSWER, { started: true, name: 'road-bridge', time: '0:32' })[0]).toMatchObject({ time: '0:32', words: '0:32' });
+    // what is not a time stays what it says
+    expect(slideTiles(ANSWER, { started: true, name: 'square', time: '1:40' }).find((t) => t.current)).toMatchObject({ words: 'No picture yet', time: '1:40' });
+    // with no time given, the server's
+    expect(slideTiles(ANSWER, { started: true, name: 'road-bridge' })[0]).toMatchObject({ words: '0:30–0:45' });
+  });
+
   it('add a new slide at the end of the live ones, before the abandoned', () => {
     const tiles = slideTiles(ANSWER, { started: true, name: null, title: 'Proof 7' });
     expect(tiles.map((t) => t.key).slice(-2)).toEqual(['new', 's2']);

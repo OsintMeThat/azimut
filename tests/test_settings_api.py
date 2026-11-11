@@ -364,6 +364,21 @@ def test_the_find_beta_notice_is_kept_once_read(client):
     assert client.get("/api/settings").json()["find_beta_seen"] is True
 
 
+def test_the_play_buttons_on_video_panels_are_kept_and_travel_with_the_backup(client):
+    assert client.get("/api/settings").json()["proof_scene_plays"] is True
+    assert client.put("/api/settings/prefs", json={"proof_scene_plays": False}).json()["proof_scene_plays"] is False
+    # another preference saved leaves them hidden
+    client.put("/api/settings/prefs", json={"units": "imperial"})
+    assert client.get("/api/settings").json()["proof_scene_plays"] is False
+    assert client.put("/api/settings/prefs", json={"proof_scene_plays": "maybe"}).status_code == 422
+    # the analyst's own way of working: the backup carries it to another machine
+    blob = client.get("/api/settings/export").json()
+    assert blob["settings"]["proof_scene_plays"] is False
+    client.put("/api/settings/prefs", json={"proof_scene_plays": True})
+    client.post("/api/settings/import", json=blob)
+    assert client.get("/api/settings").json()["proof_scene_plays"] is False
+
+
 def test_the_3d_quality_is_this_computers_and_stays_behind_in_the_backup(client):
     assert client.get("/api/settings").json()["quality_3d"] == "full"
     assert client.put("/api/settings/prefs", json={"quality_3d": "light"}).json()["quality_3d"] == "light"

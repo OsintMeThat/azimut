@@ -32,6 +32,7 @@ export const prefs = $state({
   postTemplate: '', // id of the post template a fresh draft starts with; '' = classic
   postKindTemplates: {}, // { video?, plate?, free? }: each other kind's default template id
   proofTemplate: '', // id of the proof template New proof starts with; '' = none
+  proofScenePlays: true, // Geo Proof's canvas shows a ▶ on each panel cut from a video
   postPrefill: true, // let the capture extension fill that composer on Publish
   reversePrefill: true, // let it hand the image to the engine on Reverse Search
   signatureHandle: '', // account handle stamped onto proofs that opt into it
@@ -121,6 +122,7 @@ export function applyPrefs(s) {
   if (s.post_template !== undefined) prefs.postTemplate = s.post_template; // '' = none
   if (s.post_kind_templates !== undefined) prefs.postKindTemplates = s.post_kind_templates ?? {};
   if (s.proof_template !== undefined) prefs.proofTemplate = s.proof_template; // '' = none
+  if (s.proof_scene_plays !== undefined) prefs.proofScenePlays = s.proof_scene_plays;
   if (s.post_prefill !== undefined) prefs.postPrefill = s.post_prefill;
   if (s.reverse_prefill !== undefined) prefs.reversePrefill = s.reverse_prefill;
   if (s.signature_handle !== undefined) prefs.signatureHandle = s.signature_handle; // '' = none

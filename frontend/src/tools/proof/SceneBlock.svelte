@@ -8,7 +8,7 @@
   import { onEvent } from '../../lib/events.js';
   import { clipWords, cuttable } from '../../lib/postClip.js';
   import { sceneTime, spanLabel } from '../../lib/scenes.js';
-  import { uiState } from '../../lib/state.svelte.js';
+  import { applyPrefs, prefs, toast, uiState } from '../../lib/state.svelte.js';
   import { RESTORABLE, deletedToast } from '../../lib/trash.js';
   import { PROOF_SCENE_HELP as HELP, PROOF_TIME_HELP, PROOF_TIME_TIPS } from '../../lib/proofSceneHelp.js';
   import { SceneClip } from './sceneClip.svelte.js';
@@ -33,6 +33,11 @@
   // clip's length and size, its passage too when the proof states several, with Show in
   // Media and Remove, the case trash's road. One clip a proof: another passage is cut
   // once this one is removed.
+  //
+  // **▶ on video panels**, under the fields, hides the ▶ the canvas draws in the corner of
+  // each panel cut from a video, which covers the picture while composing. It is the
+  // analyst's way of working, kept in settings.json for every proof (`prefs.proofScenePlays`);
+  // the panel's frame is still a press away here, on the player's dots.
   let { scene, caseId, color = 'var(--accent)', active = true, onaddframe } = $props();
 
   let player = $state(null);
@@ -119,6 +124,17 @@
       offScenes();
     };
   });
+
+  // -- the ▶ on the canvas --------------------------------------------------------------
+  async function showPlays(on) {
+    if (on === prefs.proofScenePlays) return;
+    prefs.proofScenePlays = on; // the box answers the click, not the round trip
+    try {
+      applyPrefs(await api.put('/api/settings/prefs', { proof_scene_plays: on }));
+    } catch {
+      toast('That box could not be saved, so it lasts this session only', 'warn');
+    }
+  }
 
   function showInMedia() {
     if (!clip) return;
@@ -230,6 +246,11 @@
       <p class="clip-error" role="alert">{clips.error}</p>
     {/if}
   {/if}
+
+  <label class="plays" title={HELP.plays}>
+    <input type="checkbox" checked={prefs.proofScenePlays} onchange={(e) => showPlays(e.currentTarget.checked)} />
+    <span>▶ on video panels</span>
+  </label>
 
   {#if view}
     <div class="under">
@@ -462,6 +483,21 @@
     font-size: var(--fs-xs);
     line-height: 1.4;
     color: var(--danger, #e5534b);
+  }
+  /* a quiet line of its own, like Cut for the post */
+  .plays {
+    display: flex;
+    align-items: center;
+    gap: 7px;
+    margin: 8px 0 0;
+    padding: 0 0 0 8px;
+    font-size: var(--fs-xs);
+    color: var(--text-2);
+    cursor: pointer;
+  }
+  .plays input {
+    margin: 0;
+    accent-color: var(--accent);
   }
   .under {
     display: flex;

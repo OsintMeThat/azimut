@@ -154,6 +154,8 @@ class PrefsIn(BaseModel):
     ] | None = None
     # id of the proof template New proof starts with; "" is none
     proof_template: str | None = Field(default=None, pattern=r"^$|^[A-Za-z0-9_-]{1,64}$")
+    # a play button on each of Geo Proof's panels cut from a video
+    proof_scene_plays: bool | None = None
     post_prefill: bool | None = None  # let the extension fill that composer
     reverse_prefill: bool | None = None  # let it open an engine with the image
     signature_handle: str | None = None  # account handle stamped on opted-in proofs
@@ -227,6 +229,7 @@ def _prefs(settings: dict[str, Any]) -> dict[str, Any]:
         "post_template": settings.get("post_template", DEFAULT_POST_TEMPLATE),
         "post_kind_templates": _kind_templates(settings.get("post_kind_templates")),
         "proof_template": settings.get("proof_template", DEFAULT_PROOF_TEMPLATE),
+        "proof_scene_plays": bool(settings.get("proof_scene_plays", True)),
         "post_prefill": bool(settings.get("post_prefill", True)),
         "reverse_prefill": bool(settings.get("reverse_prefill", True)),
         "signature_handle": settings.get("signature_handle", DEFAULT_SIGNATURE_HANDLE),
@@ -403,6 +406,8 @@ def _apply_prefs(settings: dict[str, Any], body: PrefsIn) -> None:
         settings["post_kind_templates"] = _kind_templates(body.post_kind_templates)
     if body.proof_template is not None:
         settings["proof_template"] = body.proof_template
+    if body.proof_scene_plays is not None:
+        settings["proof_scene_plays"] = bool(body.proof_scene_plays)
     if body.post_prefill is not None:
         settings["post_prefill"] = bool(body.post_prefill)
     if body.reverse_prefill is not None:
@@ -859,6 +864,7 @@ class ImportedSettings(BaseModel):
     post_template: str = DEFAULT_POST_TEMPLATE
     post_kind_templates: dict[str, Any] = Field(default_factory=dict, max_length=16)
     proof_template: str = DEFAULT_PROOF_TEMPLATE
+    proof_scene_plays: bool = True
     post_prefill: bool = True
     reverse_prefill: bool = True
     signature_handle: str = Field(default=DEFAULT_SIGNATURE_HANDLE, max_length=64)

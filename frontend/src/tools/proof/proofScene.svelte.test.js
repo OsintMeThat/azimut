@@ -9,11 +9,13 @@ import { ProofScene } from './proofScene.svelte.js';
 const CLIP = 'media/clip.mp4';
 const OTHER = 'media/other.mp4';
 
-function setup({ name = 'depot', frames = [{ panel: 'p1', video: CLIP, time: 130 }], answer, listed = null } = {}) {
+function setup({ name = 'depot', frames = [{ panel: 'p1', video: CLIP, time: 130 }], answer, listed = null, onDisk = {} } = {}) {
   const where = { caseId: 'case', name };
-  const scenes = { answer: listed };
+  const scenes = $state({ answer: listed });
   const puts = [];
   const api = {
+    // the proof as the server reads it now, by name: what Inspect wrote meanwhile
+    get: vi.fn(async (url) => ({ title: 'Depot', scene: onDisk[decodeURIComponent(url.split('/').pop())] })),
     put: vi.fn(async (url, body) => {
       puts.push({ url, body });
       if (answer) return answer(body);
@@ -239,6 +241,136 @@ describe('a proof made by hand, whose frames fall in a scene still to prove', ()
     expect(scene.match?.id).toBe('s1');
     await scene.makeStar(OTHER);
     expect(puts[0].body).toEqual({ moments: [], video: OTHER });
+  });
+});
+
+describe('a time Inspect changed meanwhile', () => {
+  const LISTED = {
+    video: CLIP,
+    scenes: [{ kind: 'draft', id: 's1', start: 120, end: 140, label: 'Bridge?', state: 'todo', captures: [], abandoned: null }],
+    taken: [],
+    collages: [],
+  };
+
+  it('reads the saved proof\'s scene again, the player left where it stands, writing nothing', async () => {
+    const onDisk = { depot: { video: CLIP, moments: [], draft: 's1' } };
+    const { scene, puts, onstated } = setup({ onDisk });
+    scene.load({ video: CLIP, moments: [{ start: 120, end: 140 }], draft: 's1' });
+    scene.show(CLIP, { at: 131 });
+    await scene.reread();
+    expect([scene.stated, scene.moments]).toEqual([{ video: CLIP, moments: [], draft: 's1' }, []]);
+    expect(scene.view).toMatchObject({ video: CLIP, at: 131, n: 1 });
+    expect(onstated).toHaveBeenCalledTimes(1);
+    // read again with nothing moved: no change said
+    await scene.reread();
+    expect(onstated).toHaveBeenCalledTimes(1);
+    expect(puts).toEqual([]);
+  });
+
+  it('starts an open time with no change again from the time read', async () => {
+    const onDisk = { depot: { video: CLIP, moments: [{ start: 125, end: 150 }] } };
+    const { scene } = setup({ onDisk });
+    scene.load({ video: CLIP, moments: [{ start: 120, end: 140 }] });
+    scene.openTime();
+    await scene.reread();
+    expect(scene.edit.moments.map((m) => [m.start, m.end])).toEqual([[125, 150]]);
+    expect(scene.edit.changed).toBe(false);
+  });
+
+  it('never cuts into a time in hand: the read waits for it to be dropped', async () => {
+    const onDisk = { depot: { video: CLIP, moments: [{ start: 125, end: 150 }] } };
+    const { scene, puts } = setup({ onDisk });
+    scene.load({ video: CLIP, moments: [{ start: 120, end: 140 }] });
+    scene.openTime();
+    scene.edit.typeEnd('2:30');
+    await scene.reread();
+    expect(scene.moments).toEqual([{ start: 120, end: 140 }]);
+    expect(scene.edit.moments.map((m) => [m.start, m.end])).toEqual([[120, 150]]);
+    expect(scene.behind).toBe(true);
+    // dropped, the read is made again and lands
+    scene.edit.close();
+    await scene.reread();
+    expect([scene.moments, scene.behind]).toEqual([[{ start: 125, end: 150 }], false]);
+    expect(puts).toEqual([]);
+  });
+
+  it('drops an answer that crossed a write or an open', async () => {
+    let release;
+    const onDisk = { depot: { video: CLIP, moments: [{ start: 1, end: null }] } };
+    const { scene, api } = setup({ onDisk });
+    scene.load({ video: CLIP, moments: [{ start: 120, end: 140 }] });
+    api.get.mockImplementationOnce(() => new Promise((resolve) => { release = () => resolve({ scene: onDisk.depot }); }));
+    const reading = scene.reread();
+    await scene.write({ video: CLIP, moments: [{ start: 200, end: null }] });
+    release();
+    await reading;
+    expect(scene.moments).toEqual([{ start: 200, end: null }]);
+  });
+
+  it('reads a proof Inspect took back to the whole video as the whole video, not the scene its frames find', async () => {
+    const onDisk = { depot: undefined };
+    const { scene, puts } = setup({ onDisk, listed: LISTED });
+    scene.load({ video: CLIP, moments: [{ start: 125, end: 135 }] });
+    expect(scene.match).toBeNull();
+    await scene.reread();
+    expect([scene.stated, scene.match, scene.moments]).toEqual([null, null, []]);
+    // its next save takes nothing up
+    await scene.flush();
+    expect(puts).toEqual([]);
+  });
+
+  it('keeps the whole video asked for here, rather than the scene its frames then find', async () => {
+    const { scene, puts, toast } = setup({ listed: LISTED });
+    scene.load({ video: CLIP, moments: [{ start: 125, end: 135 }] });
+    await scene.write({ video: CLIP, moments: [] });
+    expect(puts[0].body).toEqual({ moments: [], video: CLIP });
+    expect([scene.stated, scene.match, scene.moments]).toEqual([null, null, []]);
+    expect(toast.mock.calls[0][0]).toBe('Scene now the whole video');
+    await scene.flush();
+    expect(puts).toHaveLength(1);
+  });
+
+  it('gives back the time a found scene showed on Undo, not the whole video', async () => {
+    const { scene, puts, toast } = setup({ listed: LISTED });
+    scene.load(undefined);
+    expect(scene.moments).toEqual([{ start: 120, end: 140 }]);
+    await scene.write({ video: CLIP, moments: [{ start: 120, end: 130 }] });
+    expect(puts[0].body.draft).toBe('s1');
+    toast.mock.calls[0][3].onClick();
+    await vi.waitFor(() => expect(puts).toHaveLength(2));
+    expect(puts[1].body).toEqual({ moments: [{ start: 120, end: 140 }], video: CLIP });
+    await vi.waitFor(() => expect(scene.moments).toEqual([{ start: 120, end: 140 }]));
+  });
+
+  it('lets a proof never saved follow the scene it was made from, until a time is stated here', () => {
+    const { scene, scenes } = setup({ name: null, listed: LISTED });
+    scene.hold({ video: CLIP, moments: [{ start: 120, end: 140 }], draft: 's1' });
+    scene.follow();
+    const moved = (start, end) => ({ ...LISTED, scenes: [{ ...LISTED.scenes[0], start, end }] });
+    scenes.answer = moved(122, 140);
+    scene.follow();
+    expect(scene.moments).toEqual([{ start: 122, end: 140 }]);
+    // a time stated here is the analyst's
+    scene.write({ video: CLIP, moments: [{ start: 100, end: null }] });
+    scenes.answer = moved(124, 140);
+    scene.follow();
+    expect(scene.moments).toEqual([{ start: 100, end: null }]);
+  });
+
+  it('follows only a move made after the hand-over: a first reading behind it is where Inspect stood', () => {
+    const { scene, scenes } = setup({ name: null, listed: null });
+    // Make the proof a moment after the time changed, before Inspect's save landed
+    scene.hold({ video: CLIP, moments: [{ start: 122, end: 140 }], draft: 's1' });
+    scenes.answer = LISTED;
+    scene.follow();
+    expect(scene.moments).toEqual([{ start: 122, end: 140 }]);
+    // the save lands: the scene now reads as handed over
+    scenes.answer = { ...LISTED, scenes: [{ ...LISTED.scenes[0], start: 122 }] };
+    scene.follow();
+    expect(scene.moments).toEqual([{ start: 122, end: 140 }]);
+    scenes.answer = { ...LISTED, scenes: [{ ...LISTED.scenes[0], start: 126 }] };
+    scene.follow();
+    expect(scene.moments).toEqual([{ start: 126, end: 140 }]);
   });
 });
 
