@@ -13,9 +13,10 @@ import json
 import subprocess
 
 import pytest
+from jobwait import WAIT
 from PIL import Image
 
-from azimut.engine import geolocate, inspectwork
+from azimut.engine import geolocate, inspectwork, workqueue
 from azimut.engine import media as media_engine
 from azimut.engine import uses as uses_engine
 from azimut.workspace import Case
@@ -546,7 +547,9 @@ def test_a_collage_exported_before_instants_were_recorded_is_read_from_its_docum
     name = _collage(client, cid, "Gate", pieces)
     picture = _export(client, cid, name, pieces)
     _record_export(client, cid, name, "Gate", pieces, picture)
-    # as an older release wrote it: the files and no instants
+    # as an older release wrote it: the files and no instants, once the picture's
+    # enrichment has stopped rewriting the same sidecar
+    assert workqueue.wait_until_idle(timeout=WAIT)
     case = Case.open(cid)
     item = case.media_items_by_paths([picture])[0]
     sidecar = case.resolve_inside(f"media/.meta/{picture.split('/')[-1]}.json")
@@ -560,7 +563,11 @@ def test_a_collage_exported_before_instants_were_recorded_is_read_from_its_docum
 
 
 def _as_filed_before_instants(case, picture, **extra):
-    """A composed picture as an older release filed it: its files, and no instants."""
+    """A composed picture as an older release filed it: its files, and no instants.
+
+    Written once the picture's enrichment is done, which rewrites the same sidecar.
+    """
+    assert workqueue.wait_until_idle(timeout=WAIT)
     item = case.media_items_by_paths([picture])[0]
     sidecar = case.resolve_inside(f"media/.meta/{picture.split('/')[-1]}.json")
     data = json.loads(sidecar.read_text())

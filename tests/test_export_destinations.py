@@ -307,11 +307,19 @@ def test_reveal_routes_resolve_saved_folders_without_accepting_a_path(client, tm
 
 
 def _credit_sidecar(case_id: str, path: str, **source) -> None:
-    """Give an uploaded picture a map capture's sidecar source, as a capture writes it."""
+    """Give an uploaded picture a map capture's sidecar source, as a capture writes it.
+
+    Only once the upload's enrichment is done: its worker rewrites the same sidecar, and
+    a write landing between its read and its write would be lost.
+    """
     import json
 
-    from azimut.engine import media as media_engine
+    from jobwait import WAIT
 
+    from azimut.engine import media as media_engine
+    from azimut.engine import workqueue
+
+    assert workqueue.wait_until_idle(timeout=WAIT)
     sidecar = media_engine._sidecar_path(Case.open(case_id).resolve_inside(path))
     data = json.loads(sidecar.read_text(encoding="utf-8"))
     data["source"] = {**(data.get("source") or {}), **source}

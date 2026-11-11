@@ -22,7 +22,9 @@ export default defineConfig({
     trace: 'retain-on-failure',
   },
   webServer: {
-    command: 'npm run dev -- --host 127.0.0.1 --port 18477',
+    // In test mode, the only one where the note's panel takes a stand-in for the
+    // extension's page (`lib/notes/panelOrigin.js`).
+    command: 'npm run dev -- --mode test --host 127.0.0.1 --port 18477',
     url: 'http://127.0.0.1:18477',
     reuseExistingServer: !process.env.CI,
     timeout: 120_000,

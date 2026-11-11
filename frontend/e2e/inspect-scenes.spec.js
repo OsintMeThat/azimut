@@ -91,7 +91,10 @@ async function serve(page, { scenes = [], proofs = [], held = {}, collages = [],
       return json({ name: 'Work', title: 'Work' });
     }
     if (path === `/api/cases/${CASE_ID}/inspect/render-preview`) {
-      return route.fulfill({ contentType: 'image/png', body: PIXEL_PNG });
+      // the server names a cut by its frame's own timestamp, as Firefox's player does not
+      const body = request.postDataJSON();
+      const named = body.snap ? { 'X-Frame-Time': (Math.floor(body.time * STEPS_FPS + 1e-6) / STEPS_FPS).toFixed(6) } : {};
+      return route.fulfill({ contentType: 'image/png', body: PIXEL_PNG, headers: named });
     }
     // the To-do's scenes waiting, the clip's that no proof takes up
     if (path === `/api/cases/${CASE_ID}/scenes/queue`) {

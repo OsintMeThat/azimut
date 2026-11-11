@@ -11,7 +11,7 @@ from __future__ import annotations
 import time
 
 import pytest
-from test_scenes import _case, _cut, _proof, _save_work, _scenes, _upload_png, _video, _work, needs_ffmpeg
+from scenesfixture import _case, _cut, _proof, _save_work, _scenes, _upload_png, _video, _work, needs_ffmpeg
 
 from azimut import layout
 from azimut.engine import scenes as scenes_engine
