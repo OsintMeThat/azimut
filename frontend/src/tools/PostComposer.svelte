@@ -1204,12 +1204,32 @@
       { label: 'Not this one', onClick: () => {} },
     ]);
   }));
+  // A hand-off that stopped on the post open, with the post its rest starts from, offers
+  // Copy the rest: the browser lets the page write the clipboard on this press, where it
+  // refused the extension.
   $effect(() => onPostHandoffReport((report) => {
     if (report.caseId !== caseState.current?.id) return;
-    toast(report.error, 'warn', 12000, report.report
-      ? { label: 'Copy report', onClick: () => copyText(report.report, { said: 'Report copied' }) }
-      : null);
+    const rest = report.from && draftName && report.draft === draftName && report.from <= handoffPayload().posts.length
+      ? [{ label: 'Copy the rest', onClick: () => copyRest(report.from) }]
+      : [];
+    const copyReport = report.report
+      ? [{ label: 'Copy report', onClick: () => copyText(report.report, { said: 'Report copied' }) }]
+      : [];
+    const actions = [...rest, ...copyReport];
+    toast(report.error, 'warn', 12000, actions.length > 1 ? actions : actions[0] ?? null);
   }));
+
+  /** The posts of the thread from `from` (1 for the first) to the last, as the extension took them. */
+  function copyRest(from) {
+    const thread = handoffPayload().posts;
+    const texts = thread.slice(from - 1).map((post) => post.text).filter((text) => text.trim());
+    if (!texts.length) {
+      toast('Those posts are no longer in the thread', 'warn');
+      return;
+    }
+    const last = thread.length;
+    copyText(texts.join('\n\n'), { said: last > from ? `Posts ${from} to ${last} copied` : `Post ${from} copied` });
+  }
 
   // The note is titled after the post it is written from, so the two read as one piece
   // of work. The dialog leaves it editable.

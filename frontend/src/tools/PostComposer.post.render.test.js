@@ -1121,6 +1121,56 @@ describe('a link the extension caught', () => {
     bridge.reported({ caseId: 'case-2', draft: 'Post 1', error: 'Elsewhere.', report: '' });
     expect(uiState.toasts).toHaveLength(count);
   });
+
+  describe('Copy the rest', () => {
+    const STOPPED = 'No reply was seen within 10 minutes, so Azimut stopped after post 1 of 3.';
+    let writeText;
+    beforeEach(() => {
+      writeText = vi.fn(async () => {});
+      vi.stubGlobal('navigator', { ...navigator, clipboard: { writeText } });
+      lists.saved = { Thread: { title: 'Thread', state: {
+        tweet1: 'Geolocated: the depot', tweet1Edited: true, mediaEnabled: true, mediaType: 'none',
+        extraTweets: [{ text: 'The roof line matches' }, { text: 'Imagery: Esri' }],
+      } } };
+    });
+    const openThread = async () => {
+      await mountPost();
+      uiState.openDraft = 'Thread';
+      await settle();
+    };
+    const labels = (said) => [said.action].flat().map((one) => one.label);
+
+    it('copies the posts from the one it names to the last, on the post open', async () => {
+      await openThread();
+      bridge.reported({ caseId: CASE.id, draft: 'Thread', error: STOPPED, report: 'Step: catch-link', from: 2 });
+      const said = uiState.toasts.at(-1);
+      expect(said.message).toBe(STOPPED);
+      expect(labels(said)).toEqual(['Copy the rest', 'Copy report']);
+      said.action[0].onClick();
+      await settle();
+      expect(writeText).toHaveBeenCalledWith('The roof line matches\n\nImagery: Esri');
+      expect(toasts()).toContain('Posts 2 to 3 copied');
+    });
+
+    it('says one post as one', async () => {
+      await openThread();
+      bridge.reported({ caseId: CASE.id, draft: 'Thread', error: STOPPED, report: '', from: 3 });
+      const said = uiState.toasts.at(-1);
+      expect(labels(said)).toEqual(['Copy the rest']);
+      said.action.onClick();
+      await settle();
+      expect(writeText).toHaveBeenCalledWith('Imagery: Esri');
+      expect(toasts()).toContain('Post 3 copied');
+    });
+
+    it('is not offered for another post, without a number, or past the thread', async () => {
+      await openThread();
+      for (const report of [{ draft: 'Other', from: 2 }, { draft: 'Thread', from: null }, { draft: 'Thread', from: 4 }]) {
+        bridge.reported({ caseId: CASE.id, error: STOPPED, report: 'Step: catch-link', ...report });
+        expect(labels(uiState.toasts.at(-1))).toEqual(['Copy report']);
+      }
+    });
+  });
 });
 
 describe('a post already out, from the home', () => {

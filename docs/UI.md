@@ -5381,7 +5381,11 @@ never posts, and pressing Post on X or Bluesky stays the analyst's.
   for “Post 38”* with the same two, Keep writing it through that post's route; one for
   another case is ignored. A hand-off that went wrong (`post-handoff-report`) shows its
   one sentence in a warning toast with **Copy report**, which copies the extension's
-  short plain-text report.
+  short plain-text report. When it stopped part way through the post open and says
+  where the rest starts (`from`, a whole number from 1 to 100, else ignored), the toast
+  also offers **Copy the rest**: the posts from that one to the last, as the composer
+  builds them, a blank line between each (*Posts 2 to 3 copied*). Firefox lets the
+  extension write the clipboard only right after a press, so this press does it.
 - **After the extension's hand-off.** X's reply box takes one post, so a reply of
   several goes out one press per post: the extension fills post 1 (*Post 1 of 3 is
   ready. Press Reply, then Azimut opens the next under it.*), and each Reply the
@@ -5393,30 +5397,8 @@ never posts, and pressing Post on X or Bluesky stays the analyst's.
   The app only offers it. A hand-off that stops (no reply in 10 minutes, the tab closed
   or gone elsewhere, a step that failed) says why in a notification and sends the app
   a `post-handoff-report`: the step and what the extension's selectors found there,
-  never a word of the page.
-- **Link to your post** is the first field of every post, whatever its kind and a
-  draft from before kinds included (*Paste it once it's posted*). A post is a **Draft**,
-  **Opened in X** (or Bluesky) once Publish, Reply or the extension's hand-off opened
-  the site with it, **Posted** once the analyst gave its link, or **Changed since
-  posted** when it was edited after (`publish` on the draft: `opened_at`, `site`, `url`,
-  `posted_at`, a print of the post as it went out in `mark`, and `changed`; written only
-  once there is something to say, so a draft from before reads as a draft). The field
-  takes a link on a paste, Enter or leaving it, as the browser shows it (no `https://`,
-  a share's `?s=20`), and keeps it written the one way; anything that is not an X
-  status or a Bluesky post is said so under it and kept nowhere. Its text alone saves
-  nothing, while a link set on a blank post files it. Set, the link has **Copy**
-  (*Link copied*), **Open** in a new tab and **×**; another link pasted replaces it, and
-  × (or emptying the field) takes it back, the link having been wrong: the post is
-  Opened again when it was, else a draft. One quiet line under the field says where
-  it stands: nothing for a draft, *Opened in X · paste its link here once it's posted*
-  with the field's border in the accent, *Posted on X · 11 Nov 2026*, or *Changed since
-  posted* in the warning colour. The link and date also go on the proof the post is
-  about, as its `posted` record (one per post, the latest twenty): a record of the
-  post, not a source, since it is no evidence. A changed link replaces the old one
-  there, a link taken back leaves it, and deleting the draft keeps it, since the post
-  did go out. The proof's Details show *Posted on X · date · link*, and Add to notes
-  writes a *Posted* section. Nothing is read from the site: the analyst says it went
-  out.
+  never a word of the page, and `from`, the first post not handed over, when the posts
+  before it all went in.
 - **A narrow header** gives way a step at a time, measured rather than guessed: the
   name field narrows and the quiet line and Reply say less, then Open folds to its
   icon, then the quiet line keeps only **Install**, the kind its icon and Publish its

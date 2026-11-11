@@ -3,7 +3,7 @@ import { describe, it, expect, afterEach } from 'vitest';
 import {
   extensionVersion, extensionOutdated, captureTab, handOffPost, handOffReverse, onActivated,
   extensionState, pingExtensions, reloadExtension, onBridgeHello, mapLinkRelay, onSceneProof, sceneHandoff,
-  onPairingAsked, onPostLinkCaught, onPostHandoffReport, MAX_REPORT_ERROR, MAX_REPORT_TEXT,
+  onPairingAsked, onPostLinkCaught, onPostHandoffReport, MAX_REPORT_ERROR, MAX_REPORT_TEXT, MAX_REPORT_FROM,
 } from './extBridge.js';
 
 // The bridge protocol is the app's only path to widget pixels, so what these
@@ -587,11 +587,21 @@ describe('onPostHandoffReport', () => {
     listen();
     forged(REPORT);
     forged({ ...REPORT, error: 'e'.repeat(MAX_REPORT_ERROR + 50), report: 'r'.repeat(MAX_REPORT_TEXT + 50), draft: undefined });
-    expect(heard[0]).toEqual({ caseId: 'case-1', draft: 'Post 38', error: REPORT.error, report: REPORT.report });
+    expect(heard[0]).toEqual({ caseId: 'case-1', draft: 'Post 38', error: REPORT.error, report: REPORT.report, from: null });
     expect(heard[1].error).toHaveLength(MAX_REPORT_ERROR);
     expect(heard[1].error.endsWith('…')).toBe(true);
     expect(heard[1].report).toHaveLength(MAX_REPORT_TEXT);
     expect(heard[1].draft).toBeNull();
+  });
+
+  it('passes on the post the rest starts from, a whole number in bounds, and nothing else', () => {
+    listen();
+    forged({ ...REPORT, from: 2 });
+    forged({ ...REPORT, from: MAX_REPORT_FROM });
+    for (const bad of [0, -1, 1.5, '2', MAX_REPORT_FROM + 1, null, true, Number.NaN, { n: 2 }]) forged({ ...REPORT, from: bad });
+    expect(heard.map((report) => report.from)).toEqual([2, MAX_REPORT_FROM, ...Array(9).fill(null)]);
+    // a report with a bad number still says what went wrong
+    expect(heard.at(-1).error).toBe(REPORT.error);
   });
 
   it('hears nothing from another origin or channel, nor a report of the wrong shape', () => {
