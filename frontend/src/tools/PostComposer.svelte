@@ -1826,23 +1826,35 @@
   // Each time, it is laid out whole first and measured, and only what overflows gives
   // way, a step at a time: first the name field narrows and the quiet line and Reply
   // say less (`narrow`), then the secondary buttons fold to their icons (`compact`),
-  // as Geo Proof's do. Each opens again once the header is as wide as it needed, all
-  // of it before the frame is drawn.
+  // as Geo Proof's do, and last the quiet line keeps its Install, the kind its icon and
+  // Publish its verb (`tight`), so a laptop with the case panel open still shows Publish
+  // whole. Each opens again once the header is as wide as it needed, all of it before
+  // the frame is drawn.
   let headerEl = $state(null);
   let headerW = $state(0);
-  let fold = $state(0); // 0 whole, 1 narrow, 2 compact
+  let fold = $state(0); // 0 whole, 1 narrow, 2 compact, 3 tight
   const narrow = $derived(fold >= 1);
   const compact = $derived(fold >= 2);
-  let needs = [0, 0];
+  const tight = $derived(fold >= 3);
+  let needs = [0, 0, 0];
   const headerHolds = $derived([
     homeShown, homeAvailable, hasContent, replying, windowPutAway && extensionMissing, saveStatus,
     kind, !!draftName, targetInfo.label, !!caseState.current,
   ].join('|'));
 
+  /** The width the header needs as laid out now: what scrolls, or what eats its right padding. */
+  function headerNeeds() {
+    const box = headerEl.getBoundingClientRect();
+    const end = headerEl.lastElementChild?.getBoundingClientRect().right ?? box.right;
+    const pad = Number.parseFloat(getComputedStyle(headerEl).paddingRight) || 0;
+    return headerEl.clientWidth + Math.max(headerEl.scrollWidth - headerEl.clientWidth, end - (box.right - pad), 0);
+  }
+
   function fitHeader() {
     if (!headerEl) return;
-    if (fold < 2 && headerEl.scrollWidth > headerEl.clientWidth + 1) {
-      needs[fold] = headerEl.scrollWidth;
+    const need = headerNeeds();
+    if (fold < 3 && need > headerEl.clientWidth + 1) {
+      needs[fold] = need;
       fold += 1;
       tick().then(fitHeader);
     } else if (fold > 0 && headerEl.clientWidth >= needs[fold - 1]) {
@@ -1854,7 +1866,7 @@
     void headerHolds;
     untrack(() => {
       fold = 0;
-      needs = [0, 0];
+      needs = [0, 0, 0];
       tick().then(fitHeader);
     });
   });
@@ -1933,7 +1945,7 @@
   <!-- Narrower than what it holds (the case panel open on a laptop, a reply beside
        Publish), the header shows its secondary buttons as icons rather than cut off
        Publish, as Geo Proof's does. Wide enough, it is the header it always was. -->
-  <div class="tool-header" class:narrow class:compact bind:this={headerEl} bind:clientWidth={headerW}>
+  <div class="tool-header" class:narrow class:compact class:tight bind:this={headerEl} bind:clientWidth={headerW}>
     {#if !homeShown}
       <!-- the way back to the posts of the case, once it has some to list -->
       {#if homeAvailable}
@@ -1956,13 +1968,13 @@
         {/if}
       {/if}
       {#if !geolocation}
-        <span class="kind-chip" title="What this post is made from"><Icon name={postKind(kind).icon} size={12} /> {postKind(kind).label}</span>
+        <span class="kind-chip" title={tight ? postKind(kind).label : 'What this post is made from'}><Icon name={postKind(kind).icon} size={12} />{#if !tight}{postKind(kind).label}{/if}</span>
       {/if}
     {/if}
     <div class="head-actions">
       {#if windowPutAway && extensionMissing}
         <span class="ext-quiet" title="The capture extension fills the thread in the site's composer">
-          {narrow ? 'No extension' : 'Extension not connected'} · <button type="button" class="ext-install" onclick={howToInstall}>Install</button>
+          {#if !tight}{narrow ? 'No extension' : 'Extension not connected'}{' · '}{/if}<button type="button" class="ext-install" onclick={howToInstall}>Install</button>
         </span>
       {/if}
       {#if caseState.current}
@@ -1982,8 +1994,9 @@
             <Icon name="undo" size={14} /> {narrow ? 'Reply' : 'Reply under the source'}
           </button>
         {:else}
-          <button class="btn btn-info btn-sm" data-guide="post.publish" onclick={publish} disabled={!tweet1.trim() || publishing} title={`Copy posts and open ${targetInfo.label}`}>
-            <Icon name="post" size={14} /> Publish on {targetInfo.label}
+          <button class="btn btn-info btn-sm" data-guide="post.publish" onclick={publish} disabled={!tweet1.trim() || publishing} title={`Copy posts and open ${targetInfo.label}`}
+            aria-label={`Publish on ${targetInfo.label}`}>
+            <Icon name="post" size={14} /> {tight ? 'Publish' : `Publish on ${targetInfo.label}`}
           </button>
         {/if}
       {/if}
@@ -2643,7 +2656,8 @@
 <style>
   .layout {
     display: grid;
-    grid-template-columns: minmax(300px, 420px) minmax(360px, 1fr);
+    /* both columns whole on a laptop with the case panel open (640px for the tool) */
+    grid-template-columns: minmax(240px, 420px) minmax(300px, 1fr);
     gap: 26px;
     padding: 20px;
     max-width: 1200px;
@@ -2701,6 +2715,8 @@
     align-items: center;
     gap: 8px;
   }
+  /* one line, so a narrow thread column cuts the name rather than stack it */
+  .tweet-head .label { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .tweet-num {
     display: inline-flex;
     align-items: center;
@@ -2774,6 +2790,8 @@
     font-weight: 600;
     white-space: nowrap;
   }
+  /* amber on its own soft ground is too faint on white: darkened there */
+  :global(:root[data-theme='light']) .kind-chip { color: color-mix(in srgb, var(--accent) 60%, var(--text-1)); }
   .post-more { flex: none; padding-inline: 5px; color: var(--text-2); }
   .save-status {
     display: inline-flex;
@@ -2793,6 +2811,7 @@
   }
   .tool-header.compact .words { display: inline-block; width: 0; margin-left: -7px; overflow: hidden; }
   .tool-header.narrow .title-input { width: min(200px, 18vw); }
+  .tool-header.tight .title-input { width: min(150px, 15vw); }
   .ext-install {
     color: var(--text-2);
     font: inherit;

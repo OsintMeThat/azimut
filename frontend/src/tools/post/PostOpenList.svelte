@@ -158,6 +158,8 @@
     white-space: nowrap;
   }
   .ol-pill.opened { background: color-mix(in srgb, var(--accent) 18%, transparent); color: var(--accent); }
+  /* amber on its own soft ground is too faint on white: darkened there */
+  :global(:root[data-theme='light']) .ol-pill.opened { color: color-mix(in srgb, var(--accent) 60%, var(--text-1)); }
   .ol-pill.posted { background: color-mix(in srgb, var(--ok) 18%, transparent); color: var(--ok); }
   .ol-pill.changed { background: color-mix(in srgb, var(--warn) 20%, transparent); color: var(--warn); }
   .ol-act { flex: none; justify-content: center; width: 28px; padding-inline: 0; color: var(--text-2); }

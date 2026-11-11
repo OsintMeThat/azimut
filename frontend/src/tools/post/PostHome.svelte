@@ -374,6 +374,8 @@
   }
   .ph-pill.flat { position: static; flex: none; box-shadow: none; background: var(--bg-3); }
   .ph-pill.opened { background: color-mix(in srgb, var(--accent) 22%, var(--bg-0)); color: var(--accent); box-shadow: none; }
+  /* a found draft's pill sits on white in the light theme, where amber on amber is too faint */
+  :global(:root[data-theme='light']) .ph-pill.flat.opened { color: color-mix(in srgb, var(--accent) 60%, var(--text-1)); }
   .ph-pill.posted { background: color-mix(in srgb, var(--ok) 22%, var(--bg-0)); color: var(--ok); box-shadow: none; }
   .ph-pill.changed { background: color-mix(in srgb, var(--warn) 24%, var(--bg-0)); color: var(--warn); box-shadow: none; }
   .ph-pic {

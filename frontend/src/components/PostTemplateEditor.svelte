@@ -165,7 +165,7 @@
       </label>
 
       {#if kind === 'geolocation'}
-        <label class="chk reply" title="When the source is an X or Bluesky post. The link to it leaves the text, since the reply sits under it.">
+        <label class="chk reply" title="A post whose source is an X or Bluesky post goes out under it, without its link">
           <input type="checkbox" checked={data.reply === true} onchange={(event) => setReply(event.currentTarget.checked)} />
           Reply under the source by default
         </label>
@@ -211,10 +211,6 @@
     display: inline-flex; align-items: center; gap: 6px; align-self: flex-start; margin: 0;
     padding: 2px 9px; border-radius: 999px; background: var(--accent-soft); color: var(--accent);
     font-size: 11px; font-weight: 600;
-  }
-  .reply {
-    background: var(--bg-2); border: 1px solid var(--border); border-radius: 6px;
-    color: var(--text-1); padding: 5px 8px; font: inherit; align-self: flex-start;
   }
   .fld { display: flex; flex-direction: column; gap: 6px; border: 0; margin: 0; padding: 0; }
   .fld > span { font-size: 12px; color: var(--text-2); font-weight: 600; }

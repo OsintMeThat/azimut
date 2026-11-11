@@ -5347,7 +5347,9 @@ never posts, and pressing Post on X or Bluesky stays the analyst's.
   out.
 - **A narrow header** gives way a step at a time, measured rather than guessed: the
   name field narrows and the quiet line and Reply say less, then Open folds to its
-  icon. Wide enough, it is the header it always was.
+  icon, and last the quiet line keeps only **Install**, the kind its icon and Publish
+  its verb, so a laptop with the case panel open still shows Publish whole. Wide
+  enough, it is the header it always was.
 
 ## Post templates
 
