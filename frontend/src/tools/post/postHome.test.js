@@ -67,30 +67,41 @@ describe('readyToPost — what has no post yet', () => {
     expect(ready.videos[0].slides.map((row) => row.name)).toEqual(['s1', 's3']);
   });
 
-  it('keeps a video whose slides all have a post only while its thread can still be started', () => {
+  it('leaves out a video whose slides all have a post, its thread unoffered', () => {
     const proofs = [slide('s1', 1), slide('s2', 2)];
     const drafts = [{ proof: 'proofs/s1.png' }, { proof: 'proofs/s2.png' }];
     expect(readyToPost(proofs, drafts, { threads: false }).videos).toEqual([]);
-    expect(readyToPost(proofs, drafts, { threads: true }).videos).toHaveLength(1);
-    // a video thread naming the video is its post
-    const threaded = [...drafts, { kind: 'video', video: 'media/clip.mp4' }];
-    expect(readyToPost(proofs, threaded, { threads: true }).videos).toEqual([]);
+    expect(readyToPost(proofs, drafts, { threads: true }).videos).toEqual([]);
   });
 
-  it('offers a video\'s thread for two proofs to post or more, its slides still one by one', () => {
+  it('offers a video\'s thread while two of its proofs or more have no post at all, its slides still one by one', () => {
     const two = readyToPost([slide('s1', 1), slide('s2', 2)], [], { threads: true }).videos[0];
     expect([two.thread, two.postable, two.slides.length]).toEqual([true, 2, 2]);
     // one proof is a geolocation of its own: no thread, and its slide still waits
     const one = readyToPost([slide('s1', 1)], [], { threads: true }).videos[0];
     expect([one.thread, one.slides.length]).toEqual([false, 1]);
-    // nothing to offer and nothing waiting: the video is not listed
+    // nothing waiting: the video is not listed
     expect(readyToPost([slide('s1', 1)], [{ proof: 'proofs/s1.png' }], { threads: true }).videos).toEqual([]);
     // a proof still geolocated or given up on is no post of the thread
     const unplaced = readyToPost([slide('s1', 1), slide('s2', 2, { postable: false })], [], { threads: true }).videos[0];
     expect([unplaced.thread, unplaced.postable, unplaced.count]).toEqual([false, 1, 2]);
-    // a thread already in the case is not offered twice; its slides wait on their own
-    const held = readyToPost([slide('s1', 1), slide('s2', 2)], [{ kind: 'video', video: 'media/clip.mp4' }], { threads: true }).videos[0];
-    expect([held.thread, held.slides.length]).toEqual([false, 2]);
+  });
+
+  it('stops offering the thread once only one proof of three is left without a post', () => {
+    const proofs = [slide('s1', 1), slide('s2', 2), slide('s3', 3)];
+    const ready = readyToPost(proofs, [{ proof: 'proofs/s1.png' }, { proof: 'proofs/s3.png' }], { threads: true }).videos[0];
+    expect([ready.thread, ready.slides.map((row) => row.name)]).toEqual([false, ['s2']]);
+    // two still without one: offered
+    expect(readyToPost(proofs, [{ proof: 'proofs/s1.png' }], { threads: true }).videos[0].thread).toBe(true);
+  });
+
+  it('takes a video\'s proofs off the list once a thread of it is in the case', () => {
+    const proofs = [slide('s1', 1), slide('s2', 2), proof('photo')];
+    const ready = readyToPost(proofs, [{ kind: 'video', video: 'media/clip.mp4' }], { threads: true });
+    expect(ready.videos).toEqual([]);
+    expect(ready.photos.map((row) => row.name)).toEqual(['photo']);
+    // a thread of another video leaves this one as it is
+    expect(readyToPost(proofs, [{ kind: 'video', video: 'media/other.mp4' }], { threads: true }).videos[0].thread).toBe(true);
   });
 });
 

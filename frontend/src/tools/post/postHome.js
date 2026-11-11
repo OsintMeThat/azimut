@@ -5,7 +5,7 @@
  * (`GET /cases/{id}/proofs`, a proof of a video saying which video and which slide).
  *
  * **What has a post yet** is read off the drafts alone: a proof has one when a draft
- * names its picture, and a video's series when a video-thread draft names the video.
+ * names its picture, or when a video-thread draft names its video.
  * The drafts list reads every draft file anyway, so this costs no read of its own, and
  * a post deleted to the Trash gives its proof back to Ready to post at once.
  */
@@ -119,12 +119,12 @@ const threadedVideos = (drafts) => new Set(
 /**
  * What waits for a post: the proofs on photos no draft names yet, newest first, and the
  * videos whose proofs make a series, each with its slides no draft names yet, in slide
- * order. A video whose thread can be started (`threads`) and has none yet offers one
- * (`thread`) once it holds two proofs to post (`THREAD_MIN`); every slide stays one press
- * from its own geolocation all the same, since a thread is never the only way. A video
- * stays while one of its slides waits or while it offers its thread: a series is never
- * offered twice and never lost while a slide still waits. A proof with no picture saved
- * cannot be posted and is left out.
+ * order. A proof has a post once a draft names it or once a video thread of its video
+ * is in the case, so a video with a thread leaves the list whole. A video whose thread
+ * can be started (`threads`) offers one (`thread`) while two of its proofs to post or
+ * more (`THREAD_MIN`) have no post at all; every slide stays one press from its own
+ * geolocation all the same, since a thread is never the only way. A video stays while
+ * one of its slides waits. A proof with no picture saved cannot be posted and is left out.
  */
 export function readyToPost(proofs, drafts, { threads = STARTABLE_POST_KINDS.includes('video') } = {}) {
   const posted = new Set((drafts ?? []).map((draft) => draft.proof).filter(Boolean));
@@ -137,26 +137,31 @@ export function readyToPost(proofs, drafts, { threads = STARTABLE_POST_KINDS.inc
       if (!posted.has(row.png)) photos.push(row);
       continue;
     }
+    // the thread of its video is its post
+    if (threaded.has(row.video)) continue;
     const series = videos.get(row.video) ?? {
       video: row.video,
       title: videoName(row.video, row.video_title),
       slides: [],
       count: 0,
       postable: 0,
-      threaded: threaded.has(row.video),
+      waiting: 0,
     };
     series.count += 1;
     if (postable(row)) series.postable += 1;
-    if (!posted.has(row.png)) series.slides.push(row);
+    if (!posted.has(row.png)) {
+      series.slides.push(row);
+      if (postable(row)) series.waiting += 1;
+    }
     videos.set(row.video, series);
   }
   const waiting = [...videos.values()]
     .map((series) => ({
       ...series,
-      thread: threads && !series.threaded && series.postable >= THREAD_MIN,
+      thread: threads && series.waiting >= THREAD_MIN,
       slides: series.slides.sort((a, b) => a.slide - b.slide),
     }))
-    .filter((series) => series.slides.length || series.thread);
+    .filter((series) => series.slides.length);
   return { photos, videos: waiting };
 }
 

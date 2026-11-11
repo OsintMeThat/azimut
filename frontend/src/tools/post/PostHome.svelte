@@ -3,10 +3,10 @@
    * Where Post opens with no post open, in place of the composer, in the manner of Geo
    * Proof's home: **New post** and a search that finds a draft by name and opens it, then
    * three parts. **In progress**, the drafts not gone out yet or changed since, each with
-   * its platform and how many posts it holds; **Ready to post**, the proofs no draft names
-   * yet and the videos whose slides wait, one press starting the right post: a slide's
-   * geolocation, or, for a video of two proofs or more with no thread yet, its **Video
-   * thread**; and
+   * its platform and how many posts it holds; **Ready to post**, the proofs with no post
+   * yet (a video's leave once a thread of it is in the case) and the videos whose slides
+   * wait, one press starting the right post: a slide's geolocation, or, while two of a
+   * video's proofs or more have no post at all, its **Video thread**; and
    * **Posted**, the latest to go out, with their link (`postHome.js`). Every post card
    * wears its state as a pill (Draft, Posted, Changed since posted), and its ⋯ or a
    * right-click opens it, marks it posted (**Mark as posted…**, with its link or without,
