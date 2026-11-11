@@ -73,6 +73,9 @@
     color: var(--warn);
   }
   .toast-action {
+    /* a label on one line: the message wraps rather than the press */
+    flex: none;
+    white-space: nowrap;
     pointer-events: auto;
     margin-left: 4px;
     padding: 2px 0;
