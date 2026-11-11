@@ -5442,6 +5442,8 @@ never posts, and pressing Post on X or Bluesky stays the analyst's.
   verb, then *Saved* keeps its tick and the name field narrows again, so Mark as posted
   keeps its words longest, and last Mark as posted (or its pill) keeps its icon, its
   words in the hover, so a laptop with the case panel open still shows Publish whole.
+  Mark as posted's icon is a flag, here and in the home's menus, so it is never read as
+  Saved's tick beside it; the green pill keeps its tick once posted.
   Wide enough, it is the header it always was.
 
 ## Post templates

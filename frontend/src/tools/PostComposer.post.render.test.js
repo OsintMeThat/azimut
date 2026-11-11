@@ -1069,6 +1069,9 @@ describe('Mark as posted, in the header', () => {
     expect(markButton().textContent.trim()).toBe('');
     expect(markButton().getAttribute('title')).toBe('Mark as posted');
     expect(header().querySelector('.save-status').classList.contains('bare')).toBe(true);
+    // two bare icons side by side: Mark as posted's flag is never read as Saved's tick
+    const drawn = (node) => node.querySelector('svg').innerHTML;
+    expect(drawn(markButton())).not.toBe(drawn(header().querySelector('.save-status')));
   });
 
   it('folds Saved to its tick one step before, so Mark as posted keeps its words longest', async () => {
