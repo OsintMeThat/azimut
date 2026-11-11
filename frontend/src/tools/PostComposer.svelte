@@ -1964,18 +1964,21 @@
   // way, a step at a time: first the name field narrows and the quiet line and Reply
   // say less (`narrow`), then the secondary buttons fold to their icons (`compact`),
   // as Geo Proof's do, then the quiet line keeps its Install, the kind its icon and
-  // Publish its verb (`tight`), and last Mark as posted (or its pill) keeps its icon
-  // (`tightest`), so a laptop with the case panel open still shows Publish whole. Each opens again once the header is as wide as it needed, all of it before
-  // the frame is drawn.
+  // Publish its verb (`tight`), then Saved keeps its tick and the name field narrows
+  // again (`savedBare`), so Mark as posted keeps its words longest, and last Mark as
+  // posted (or its pill) keeps its icon (`tightest`), so a laptop with the case panel
+  // open still shows Publish whole. Each opens again once the header is as wide as it
+  // needed, all of it before the frame is drawn.
   let headerEl = $state(null);
   let headerW = $state(0);
-  let fold = $state(0); // 0 whole, 1 narrow, 2 compact, 3 tight, 4 tightest
+  let fold = $state(0); // 0 whole, 1 narrow, 2 compact, 3 tight, 4 savedBare, 5 tightest
   const narrow = $derived(fold >= 1);
   const compact = $derived(fold >= 2);
   const tight = $derived(fold >= 3);
-  const tightest = $derived(fold >= 4);
-  const LAST_FOLD = 4;
-  let needs = [0, 0, 0, 0];
+  const savedBare = $derived(fold >= 4);
+  const tightest = $derived(fold >= 5);
+  const LAST_FOLD = 5;
+  let needs = [0, 0, 0, 0, 0];
   const headerHolds = $derived([
     homeShown, homeAvailable, hasContent, replying, windowPutAway && extensionMissing, saveStatus,
     kind, !!draftName, targetInfo.label, !!caseState.current, liveState, postedOnDay, caughtLink?.url ?? '',
@@ -2005,7 +2008,7 @@
     void headerHolds;
     untrack(() => {
       fold = 0;
-      needs = [0, 0, 0, 0];
+      needs = [0, 0, 0, 0, 0];
       tick().then(fitHeader);
     });
   });
@@ -2092,7 +2095,7 @@
   <!-- Narrower than what it holds (the case panel open on a laptop, a reply beside
        Publish), the header shows its secondary buttons as icons rather than cut off
        Publish, as Geo Proof's does. Wide enough, it is the header it always was. -->
-  <div class="tool-header" class:narrow class:compact class:tight bind:this={headerEl} bind:clientWidth={headerW}>
+  <div class="tool-header" class:narrow class:compact class:tight class:saved-bare={savedBare} bind:this={headerEl} bind:clientWidth={headerW}>
     {#if !homeShown}
       <!-- the way back to the posts of the case, once it has some to list -->
       {#if homeAvailable}
@@ -2110,7 +2113,9 @@
         {#if saveStatus === 'saving'}
           <span class="save-status">Saving…</span>
         {:else if saveStatus === 'saved'}
-          <span class="save-status" title="This post saves itself as you write"><Icon name="check" size={12} /> Saved</span>
+          <span class="save-status" class:bare={savedBare}
+            title={savedBare ? 'Saved: this post saves itself as you write' : 'This post saves itself as you write'}>
+            <Icon name="check" size={12} /><span class="saved-word">Saved</span></span>
         {:else if saveStatus === 'error'}
           <span class="save-status error" title={autosave.state.error}><Icon name="alert" size={12} /> Not saved</span>
           <button class="btn btn-ghost btn-xs" onclick={() => autosave.flush()}>Retry</button>
@@ -2938,6 +2943,8 @@
     white-space: nowrap;
   }
   .save-status.error { color: var(--danger); }
+  /* its tick alone at the header's last steps, the word still read aloud */
+  .save-status.bare .saved-word { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
   .modal-lead { margin: 0 0 14px; color: var(--text-2); font-size: var(--fs-sm); line-height: 1.5; }
   .ext-quiet {
     color: var(--text-3);
@@ -2947,6 +2954,7 @@
   .tool-header.compact .words { display: inline-block; width: 0; margin-left: -7px; overflow: hidden; }
   .tool-header.narrow .title-input { width: min(200px, 18vw); }
   .tool-header.tight .title-input { width: min(150px, 15vw); }
+  .tool-header.saved-bare .title-input { width: min(120px, 12vw); }
   .ext-install {
     color: var(--text-2);
     font: inherit;

@@ -992,10 +992,30 @@ describe('Mark as posted, in the header', () => {
     Object.defineProperty(box, 'scrollWidth', { configurable: true, get: () => 2000 });
     // the header is laid out again when what it holds changes: here, the post saved
     await saved();
-    for (let i = 0; i < 4; i += 1) await settle();
+    for (let i = 0; i < 6; i += 1) await settle();
     expect(box.classList.contains('tight')).toBe(true);
     expect(markButton().textContent.trim()).toBe('');
     expect(markButton().getAttribute('title')).toBe('Mark as posted');
+    expect(header().querySelector('.save-status').classList.contains('bare')).toBe(true);
+  });
+
+  it('folds Saved to its tick one step before, so Mark as posted keeps its words longest', async () => {
+    await mountPost();
+    await sendProof();
+    const box = header();
+    // too narrow until Saved says only its tick, and wide enough from then on
+    Object.defineProperty(box, 'clientWidth', { configurable: true, get: () => 600 });
+    Object.defineProperty(box, 'scrollWidth', {
+      configurable: true, get: () => (box.querySelector('.save-status.bare') ? 600 : 2000),
+    });
+    await saved();
+    for (let i = 0; i < 6; i += 1) await settle();
+    const saved_ = box.querySelector('.save-status');
+    expect(saved_.classList.contains('bare')).toBe(true);
+    expect(saved_.getAttribute('title')).toBe('Saved: this post saves itself as you write');
+    // its word stays for a screen reader
+    expect(saved_.textContent.trim()).toBe('Saved');
+    expect(markButton().textContent.trim()).toBe('Mark as posted');
   });
 });
 

@@ -5420,9 +5420,10 @@ never posts, and pressing Post on X or Bluesky stays the analyst's.
 - **A narrow header** gives way a step at a time, measured rather than guessed: the
   name field narrows and the quiet line and Reply say less, then Open folds to its
   icon, then the quiet line keeps only **Install**, the kind its icon and Publish its
-  verb, and last Mark as posted (or its pill) keeps its icon, its words in the hover,
-  so a laptop with the case panel open still shows Publish whole. Wide enough, it is
-  the header it always was.
+  verb, then *Saved* keeps its tick and the name field narrows again, so Mark as posted
+  keeps its words longest, and last Mark as posted (or its pill) keeps its icon, its
+  words in the hover, so a laptop with the case panel open still shows Publish whole.
+  Wide enough, it is the header it always was.
 
 ## Post templates
 
