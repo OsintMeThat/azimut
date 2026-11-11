@@ -4413,7 +4413,13 @@ counts. A chip is Make the proof: the frames of the scene chosen as from the str
 the proof of it and its captures. A case holding nothing shows the button and one sentence.
 The home opens on the list it read last and reads it again behind (`GET /proofs`, one read),
 the scenes coming from the queue the app already keeps. A scene of the strip still shows its
-page in place of the canvas, as before.
+page in place of the canvas, as before. **‹ Proofs**, first in the header while a proof or a
+scene's page is open, goes back to the home: a proof with changes not saved asks *Leave this
+proof?* first, as opening another proof does, and one with none goes at once. It is a step
+Back retraces, so the browser's Back from the home opens the proof again. A narrow header
+folds its secondary buttons to icons, then shortens the name field, Save proof to Save and
+the unsaved badge to a dot, so Proofs, Save and To Post stay whole at 1024 px with the case
+panel open.
 
 **New proof** opens a window of the case's pictures. On the left, where they come from:
 **All**, then **Satellite**, **Videos**, **Collages**, **Screenshots** and **Photos**, each

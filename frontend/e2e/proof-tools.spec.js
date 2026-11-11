@@ -255,7 +255,7 @@ test('a new proof is set in the shipped face, and the Style tab changes it', asy
 });
 
 test('a narrow header keeps Save and To Post in sight, on the one line it always had', async ({ page }) => {
-  // 1280 px with the case panel open: the header is under 920 px wide
+  // 1280 px with the case panel open: the header is under 1030 px wide
   await installAppFixture(page);
   await openProofWithPanel(page);
   const header = page.locator('.tool-header').first();
@@ -277,4 +277,27 @@ test('a narrow header keeps Save and To Post in sight, on the one line it always
     .map((b) => Math.round(b.getBoundingClientRect().top)));
   expect(tops.length).toBeGreaterThanOrEqual(6);
   expect(Math.max(...tops) - Math.min(...tops)).toBeLessThanOrEqual(1);
+});
+
+test('a 1024 px screen keeps Proofs, Save and To Post whole, with the case panel open or not', async ({ page }) => {
+  await installAppFixture(page);
+  await page.setViewportSize({ width: 1024, height: 720 });
+  await openProofWithPanel(page);
+  await page.getByRole('textbox', { name: 'Proof name' }).fill('Convoy at the north gate, seen from the tower');
+  const header = page.locator('.tool-header').first();
+  const overflow = () => header.evaluate((row) => {
+    const edge = row.getBoundingClientRect().right - Number.parseFloat(getComputedStyle(row).paddingRight);
+    return Math.round(row.lastElementChild.getBoundingClientRect().right - edge);
+  });
+  const sidebar = page.locator('aside.sidebar');
+  for (const panel of [true, false]) {
+    if ((await sidebar.count() > 0) !== panel) await page.getByRole('button', { name: /Toggle case sidebar/ }).click();
+    await expect(sidebar).toHaveCount(panel ? 1 : 0);
+    await expect.poll(overflow).toBeLessThanOrEqual(0);
+    for (const name of ['Proofs', 'Save proof', 'To Post']) {
+      await expect(header.getByRole('button', { name, exact: true })).toBeVisible();
+    }
+    // the badge keeps its dot, still saying what it is
+    await expect(header.locator('.badge')).toHaveText('unsaved');
+  }
 });

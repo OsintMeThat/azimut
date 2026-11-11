@@ -25,6 +25,7 @@
   import { templatesState } from '../lib/state.svelte.js';
   import { myLogoUrl } from '../lib/myLogo.js';
   import Icon from '../components/Icon.svelte';
+  import BackButton from '../components/BackButton.svelte';
   import Modal from '../components/Modal.svelte';
   import DateField from '../components/DateField.svelte';
   import ClockField from '../components/ClockField.svelte';
@@ -1098,9 +1099,12 @@
   }
 
   // ---- the header ---------------------------------------------------------------------
-  // Its own width, read for its compact form: under this the secondary buttons show as
-  // icons, so Save and To Post stay in sight beside the case panel on a laptop.
-  const HEADER_COMPACT = 920;
+  // Its own width, read for its compact forms, set for a proof with changes in its widest
+  // state: under the first the secondary buttons show as icons, under the second the name
+  // narrows, Save proof says Save and the unsaved badge keeps its dot, so Save and To Post
+  // stay whole beside the case panel on a 1024 px screen.
+  const HEADER_COMPACT = 1030;
+  const HEADER_TIGHT = 800;
   let headerW = $state(0);
 
   // ---- the side column's tabs (proof/sideTabs.js) ----------------------------------
@@ -1962,8 +1966,21 @@
   }
 
   function discardProof() {
+    openRun += 1; // a proof still loading stops writing into the page cleared
     resetDoc();
     discardConfirm = false;
+  }
+
+  /**
+   * Back to the home, the proofs of the case. Changes not saved are asked about first, as
+   * opening another proof asks; a proof with none goes at once. It is a step Back retraces,
+   * so the browser's Back from the home opens the proof again, as last saved.
+   */
+  async function backToHome() {
+    if (!(await mayLeave())) return;
+    openRun += 1;
+    resetDoc();
+    settlePlace('proof', place(), { navigate: true });
   }
 
   // ---- house-style templates ---------------------------------------------------
@@ -7824,9 +7841,15 @@
 
 <div class="tool">
   <!-- Narrower than its row (the case panel open on a laptop), the header shows the
-       secondary buttons as icons rather than cut off Save and To Post. It is measured on
-       its own width, so the unsaved badge coming and going never moves the canvas. -->
-  <div class="tool-header" class:compact={headerW > 0 && headerW < HEADER_COMPACT} bind:clientWidth={headerW}>
+       secondary buttons as icons, then a shorter name, Save and a dot for unsaved, rather
+       than cut off Save and To Post. It is measured on its own width, so the unsaved badge
+       coming and going never moves the canvas. -->
+  <div class="tool-header" class:compact={headerW > 0 && headerW < HEADER_COMPACT}
+    class:tight={headerW > 0 && headerW < HEADER_TIGHT} bind:clientWidth={headerW}>
+    {#if !homeShown}
+      <!-- the way back to the proofs of the case, from a proof or a scene's page -->
+      <BackButton label="Proofs" title="Back to the proofs of this case" onclick={backToHome} guide="proof.home" />
+    {/if}
     {#if proofStarted}
       <!-- the analyst's name, empty for none: a technical name never shows here -->
       <input
@@ -7837,7 +7860,7 @@
         value={ownName(proof.title, 'proof')}
         oninput={(event) => nameProof(event.currentTarget.value)}
       />
-      {#if dirty}<span class="badge">unsaved</span>{/if}
+      {#if dirty}<span class="badge unsaved" title="Changes not saved"><span class="badge-word">unsaved</span></span>{/if}
       {#if savedName}
         <button class="btn btn-ghost btn-sm proof-more" aria-label="More for this proof" title="More for this proof"
           aria-haspopup="menu" aria-expanded={!!proofMenu} onclick={(event) => (proofMenu = proofMenu ? null : event.currentTarget)}>
@@ -7905,7 +7928,7 @@
       {/if}
     </div>
     <button class="btn btn-ok btn-sm" data-guide="proof.save" onclick={() => save()} disabled={!proofHasContent || saving}>
-      <Icon name="save" size={14} /> {saving ? 'Saving…' : 'Save proof'}
+      <Icon name="save" size={14} /> <span>{#if saving}Saving…{:else}Save<span class="fold-word">{' proof'}</span>{/if}</span>
     </button>
     <button class="btn btn-info btn-sm" data-guide="proof.save" onclick={() => save({ andPost: true })} disabled={!proofHasContent || saving}>
       <Icon name="post" size={14} /> To Post
@@ -9081,6 +9104,11 @@
   /* Folded to no width rather than taken out, so the button keeps the height of its
      line of text and stands level with Save and To Post. */
   .tool-header.compact .words { display: inline-block; width: 0; margin-left: -7px; overflow: hidden; }
+  /* Tighter still, the name keeps less room, Save proof its verb and the badge its dot. */
+  .tool-header.tight .title-input { min-width: 88px; }
+  .tool-header.tight .fold-word,
+  .tool-header.tight .badge-word { display: inline-block; width: 0; overflow: hidden; vertical-align: bottom; }
+  .tool-header.tight .unsaved { align-self: center; width: 8px; height: 8px; padding: 0; border-radius: 50%; background: var(--warn); }
   .spacer { flex: 1; }
   .proof-more { align-self: center; padding-inline: 5px; color: var(--text-2); }
   .scene-choice { display: flex; flex-direction: column; gap: 6px; margin: 0; padding: 0; border: 0; }

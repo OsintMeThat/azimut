@@ -142,6 +142,32 @@ test('Back between proofs asks before leaving unsaved changes, and keeps them wh
   fixture.expectNoUnexpectedRequests();
 });
 
+test('Proofs goes back to the home, and Back opens the proof again', async ({ page }) => {
+  const fixture = await withProofs(page);
+  await page.goto('/#proof');
+  const proofs = page.locator('.tool-header').getByRole('button', { name: 'Proofs', exact: true });
+  await expect(page.getByTestId('proof-home')).toBeVisible();
+  await expect(proofs).toHaveCount(0);
+
+  await openProof(page, PROOFS['proof-a']);
+  await expect(proofs).toHaveAttribute('title', 'Back to the proofs of this case');
+  await proofs.click();
+  await expect(page.getByTestId('proof-home')).toBeVisible();
+  await expect(proofs).toHaveCount(0);
+  await expect(page.getByRole('alertdialog')).toHaveCount(0);
+  expect(await hashOf(page)).toBe('#proof');
+
+  await page.goBack();
+  const name = page.getByRole('textbox', { name: 'Proof name' });
+  await expect(name).toHaveValue(PROOFS['proof-a']);
+  await expect.poll(() => hashOf(page)).toBe('#proof?proof=proof-a');
+
+  await page.goForward();
+  await expect(page.getByTestId('proof-home')).toBeVisible();
+  await expect.poll(() => hashOf(page)).toBe('#proof');
+  fixture.expectNoUnexpectedRequests();
+});
+
 test('opening another proof asks first too, so the list cannot drop an edit', async ({ page }) => {
   const fixture = await withProofs(page);
   await page.goto('/#proof');
