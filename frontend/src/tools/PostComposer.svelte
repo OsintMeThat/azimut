@@ -15,7 +15,7 @@
   import {
     isDefaultName, nextName, savedSlugs, savedTitles, slugify, specAttr, specPath,
   } from '../lib/naming.js';
-  import { filingName, planProofHandoff } from './post/handoff.js';
+  import { filingName, planProofHandoff, proofPosts } from './post/handoff.js';
   import { startFields, startPost } from './post/start.js';
   import { extensionWindowPutAway, putExtensionWindowAway } from './post/extensionWindow.js';
   import {
@@ -318,7 +318,7 @@
     const p = uiState.postProof;
     if (!p) return;
     uiState.postProof = null;
-    adoptProof(p);
+    untrack(() => adoptProof(p));
   });
 
   /**
@@ -326,18 +326,43 @@
    * screen is filed under its own name first and then makes way, so sending a
    * second proof over does not write over the post the first one produced.
    * Re-sending the proof this thread already carries stays in place instead —
-   * that is the same piece of work, edited.
+   * that is the same piece of work, edited. A post of the proof the case holds as a
+   * draft opens as it was left rather than a second one starting; one that went out
+   * is done, and the proof starts a new one.
    */
   async function adoptProof(p) {
-    const plan = planProofHandoff({ incomingPng: p.png, currentPng: proofPng, hasContent });
+    const caseId = caseState.current?.id;
+    const sameOnScreen = !!p.png && p.png === proofPng;
+    if (!(sameOnScreen && liveState === 'draft') && p.png && caseId) {
+      const drafts = await api.get(`/api/cases/${caseId}/drafts`).catch(() => null);
+      if (caseState.current?.id !== caseId) return;
+      const { open, posted } = proofPosts(drafts, p.png, { except: draftName });
+      if (open) {
+        if (!(await letGo())) return;
+        await loadDraft(open.name);
+        if (draftName === open.name) toast('Opened its post in progress', 'ok', 2400);
+        return;
+      }
+      if (posted || sameOnScreen) {
+        if (await startProofPost(p, liveState)) toast('Its post went out, so this is a new one', 'info', 3200);
+        return;
+      }
+    }
+    await startProofPost(p, liveState);
+  }
+
+  /** The proof in the thread on screen, or in a fresh one once that is filed. Answers whether it went in. */
+  async function startProofPost(p, standing) {
+    const plan = planProofHandoff({ incomingPng: p.png, currentPng: proofPng, hasContent, standing });
     if (plan === 'file-then-apply') {
-      if (!(await fileCurrentDraft())) return;
+      if (!(await fileCurrentDraft())) return false;
       resetDraft();
     } else if (!geolocation) {
       // a blank post of another kind: the proof starts a geolocation, on its own template
       resetDraft();
     }
     applyProof(p);
+    return true;
   }
 
   // A post started from the gallery, the home or another tool's To Post (`post/start.js`).

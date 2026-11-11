@@ -5297,10 +5297,14 @@ never posts, and pressing Post on X or Bluesky stays the analyst's.
   post, Back, New post, a proof sent with **To Post**, another case or the tab closing
   each writes what is pending first; a post whose save failed stays open and says so.
 - **A proof sent with To Post** fills a geolocation: its sentence, its date, its points
-  and its source, with the media its source names on the media post. A clip cut for its
-  post (Geo Proof's **Cut for the post**) goes there in place of the whole video it came
-  from, which the media post's **Edit media** still offers. A clip whose file left the case
-  gives the video back.
+  and its source, with the media its source names on the media post. The post on screen
+  is filed first. When the case holds a post of that proof still a Draft, To Post opens
+  it as it was left instead, the latest saved of several (*Opened its post in
+  progress*); sent again to its own draft on screen, the proof fills that one. Once every
+  post of it went out, a new one starts (*Its post went out, so this is a new one*). A
+  clip cut for its post (Geo Proof's **Cut for the post**) goes on the media post in
+  place of the whole video it came from, which **Edit media** still offers. A clip whose
+  file left the case gives the video back.
 - **Add to notes**, a note icon beside Open, writes the post into a new case note (its
   place, points, assessment, source and pictures, linked to the proof, the media and
   the draft). **The header's ⋯**, beside the name once the post is saved, holds

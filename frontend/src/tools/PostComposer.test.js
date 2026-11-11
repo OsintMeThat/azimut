@@ -68,12 +68,12 @@ describe('Post actions', () => {
 
 describe('Proof handoff', () => {
   it('files the current thread and starts a fresh one when a new proof arrives', () => {
-    expect(source).toContain("import { filingName, planProofHandoff } from './post/handoff.js';");
+    expect(source).toContain("import { filingName, planProofHandoff, proofPosts } from './post/handoff.js';");
     expect(source).toContain(
-      'const plan = planProofHandoff({ incomingPng: p.png, currentPng: proofPng, hasContent });'
+      'const plan = planProofHandoff({ incomingPng: p.png, currentPng: proofPng, hasContent, standing });'
     );
     expect(source).toContain("if (plan === 'file-then-apply') {");
-    expect(source).toContain('if (!(await fileCurrentDraft())) return;');
+    expect(source).toContain('if (!(await fileCurrentDraft())) return false;');
     expect(source).toContain('resetDraft();\n    }\n    applyProof(p);');
   });
 

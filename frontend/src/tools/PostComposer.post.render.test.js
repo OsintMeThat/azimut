@@ -1343,6 +1343,72 @@ describe('a proof\'s clip, cut for its post', () => {
   });
 });
 
+describe('To Post with a post of the proof already in the case', () => {
+  const row = (name, extra = {}) => ({
+    name, title: name, target: 'x', kind: 'geolocation', posts: 1, proof: PROOF.png, state: 'draft',
+    updated_at: '2026-11-10T09:00:00Z', ...extra,
+  });
+  const nameField = () => header().querySelector('.title-input');
+  const OPENED = 'Opened its post in progress';
+  const WENT_OUT = 'Its post went out, so this is a new one';
+
+  it('opens its post in progress, the latest of several, once the post on screen is filed', async () => {
+    lists.drafts = [row('Helicopters old', { updated_at: '2026-11-01T09:00:00Z' }), row('Helicopters')];
+    lists.saved = {
+      Helicopters: { title: 'Helicopters', state: { description: 'Kept words', proofPng: PROOF.png, tweet1: 'Kept words', tweet1Edited: true } },
+    };
+    await mountPost();
+    startPost('free', []);
+    await settle();
+    type(target.querySelector('#pc-desc'), 'Unrelated words');
+    uiState.postProof = { ...PROOF };
+    await settle();
+    await settle();
+    expect(draftWrites().some(([, body]) => body.state.description === 'Unrelated words')).toBe(true);
+    expect(nameField().value).toBe('Helicopters');
+    expect(firstPost().value).toBe('Kept words');
+    expect(toasts()).toContain(OPENED);
+  });
+
+  it('starts a new post when every post of it went out', async () => {
+    lists.drafts = [row('Helicopters', { state: 'posted' }), row('Helicopters 2', { state: 'changed' })];
+    await mountPost();
+    uiState.postProof = { ...PROOF };
+    await settle();
+    expect(firstPost().value).toBe(CLASSIC_FIRST_POST);
+    expect(nameField().value).not.toMatch(/^Helicopters/);
+    expect(api.get.mock.calls.some(([path]) => /\/drafts\/Helicopters/.test(path))).toBe(false);
+    expect(toasts()).toContain(WENT_OUT);
+  });
+
+  it('starts a new post, saying nothing more, when it has none', async () => {
+    lists.drafts = [row('Bridge', { proof: 'proofs/bridge.png' })];
+    await mountPost();
+    uiState.postProof = { ...PROOF };
+    await settle();
+    expect(firstPost().value).toBe(CLASSIC_FIRST_POST);
+    expect(toasts()).not.toContain(OPENED);
+    expect(toasts()).not.toContain(WENT_OUT);
+  });
+
+  it('starts a new post over the one on screen when that one went out', async () => {
+    lists.drafts = [row('Helicopters', { state: 'posted' })];
+    lists.saved = { Helicopters: { title: 'Helicopters', state: {
+      description: 'Out', proofPng: PROOF.png, tweet1: 'Out', tweet1Edited: true,
+      publish: { site: 'x', posted_at: '2026-11-09T10:00:00Z' },
+    } } };
+    await mountPost();
+    uiState.openDraft = 'Helicopters';
+    await settle();
+    expect(nameField().value).toBe('Helicopters');
+    uiState.postProof = { ...PROOF };
+    await settle();
+    expect(nameField().value).not.toBe('Helicopters');
+    expect(firstPost().value).toBe(CLASSIC_FIRST_POST);
+    expect(toasts()).toContain(WENT_OUT);
+  });
+});
+
 describe('the geolocation road, unchanged', () => {
   it('writes the same first post from a proof sent with To Post', async () => {
     await mountPost();
