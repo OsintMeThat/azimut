@@ -1154,10 +1154,19 @@
    *
    * `template` is the house style New proof chose for it ('' for none), in place of the
    * look of the slide before or the default. True once the proof is open.
+   *
+   * Pictures a map tab sends while a scene is geolocated (`handoff.join`, `lib/toGeoProof.js`)
+   * join the proof open when it already holds that scene, or lays out that picture.
    */
   async function makeSceneProof(handoff, { look = null, navigate = true, template = undefined } = {}) {
     const made = readHandoff(handoff);
     if (!made) return false;
+    const holding = made.scene ? !!made.scene.draft && scene.draft === made.scene.draft : proof.panels.some((p) => p.src === made.panels[0]);
+    if (handoff.join && proofStarted && holding) {
+      await readCaseMedia(caseState.current.id);
+      await addPanelsFromPaths(made.panels, { media: caseMedia });
+      return true;
+    }
     // On the video of the slide open, that slide is saved as moving to the next one saves
     // it; any other proof with changes asks first, as it always did.
     const onSlides = proofStarted && !!made.scene?.video && made.scene.video === scene.star;
@@ -1177,7 +1186,7 @@
     if (made.scene) scene.hold(made.scene);
     // the frames were filed a moment ago, so the case's media is read again first
     await readCaseMedia(caseState.current.id);
-    await addPanelsFromPaths(made.panels);
+    await addPanelsFromPaths(made.panels, { media: caseMedia });
     dirty = true;
     anchorHistory();
     if (made.scene) scene.show(made.scene.video);
@@ -2483,9 +2492,12 @@
     }
   }
 
-  async function addPanelsFromPaths(paths) {
+  /** These case files as panels, in order. `media` is the media list when it was just read. */
+  async function addPanelsFromPaths(paths, { media: read = null } = {}) {
+    // a list that misses one of them was read before it was filed
+    const fresh = read && paths.every((path) => read.some((one) => one.path === path)) ? read : null;
     const [media, sats] = await Promise.all([
-      api.get(`/api/cases/${caseState.current.id}/media`),
+      fresh ?? api.get(`/api/cases/${caseState.current.id}/media`),
       api.get(`/api/cases/${caseState.current.id}/satellite`),
     ]);
     for (const path of paths) {

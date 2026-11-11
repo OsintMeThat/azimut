@@ -1668,7 +1668,9 @@ describe('Proof Composer scene', () => {
     // a proof with changes asks first, unless it is a slide of the same video: that one is saved
     expect(make).toContain("const onSlides = proofStarted && !!made.scene?.video && made.scene.video === scene.star;");
     expect(make).toContain('if (!(await (onSlides ? settleSlide() : mayLeave()))) return false;');
-    expect(make.indexOf('resetDoc();')).toBeLessThan(make.indexOf('await addPanelsFromPaths(made.panels);'));
+    expect(make.indexOf('resetDoc();')).toBeLessThan(make.lastIndexOf('await addPanelsFromPaths(made.panels, { media: caseMedia });'));
+    // pictures a map tab sends for the scene the proof open holds join it, with nothing reset
+    expect(make.indexOf('if (handoff.join && proofStarted && holding) {')).toBeLessThan(make.indexOf('resetDoc();'));
     expect(make).toContain('scene.hold(made.scene);');
     // ready where the scene starts, playing only once its tab is shown
     expect(make).toContain('scene.show(made.scene.video);');

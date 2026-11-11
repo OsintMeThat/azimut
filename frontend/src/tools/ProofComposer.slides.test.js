@@ -88,7 +88,7 @@ describe('moving between slides', () => {
   it('saves a slide of the same video when Inspect hands a scene over, and asks about any other', () => {
     const make = bodyOfFn('makeSceneProof');
     expect(make).toContain('if (!(await (onSlides ? settleSlide() : mayLeave()))) return false;');
-    expect(make.indexOf('if (look) applyLook(look);')).toBeLessThan(make.indexOf('await addPanelsFromPaths(made.panels);'));
+    expect(make.indexOf('if (look) applyLook(look);')).toBeLessThan(make.lastIndexOf('await addPanelsFromPaths(made.panels, { media: caseMedia });'));
     // the pill's Make the proof on the same video keeps the open slide's look, read before it is reset,
     // unless New proof chose a template for it
     expect(make.indexOf('look ??= onSlides && template === undefined ? slideStyle(proof) : null;')).toBeLessThan(make.indexOf('resetDoc();'));

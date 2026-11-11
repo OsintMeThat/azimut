@@ -122,9 +122,10 @@ describe('Satellite saved work', () => {
     expect((source.match(/bind:hoveredId=\{hoveredSavedId\}/g) ?? []).length).toBe(3);
   });
 
-  it('queues a saved row as a panel of a new proof', () => {
+  it('queues a saved row as a panel of a new proof, the scene geolocated\'s when it gathered it', () => {
     expect(source).toContain('function sendToComposer(item)');
-    expect(source).toContain('uiState.composeQueue.push(item.path)');
+    // lib/toGeoProof.js queues it, or hands the scene over (toGeoProof.test.js)
+    expect(source).toContain('sendToGeoProof(caseState.current?.id ?? null, [{ path: item.path }]);');
   });
 
   it('opens a proof already built on the file being played', () => {
