@@ -296,6 +296,8 @@ describe('Recap first, as it opens', () => {
     });
     expect(recapPicturePath()).toContain(encodeURIComponent('recap map'));
     expect(pendingMap()).toBeNull();
+    // its tiles were asked on that press: the preview shows them too
+    expect(typeof sheets.preview.mock.calls.at(-1)[3].loadTile).toBe('function');
     // the fields a geolocation asks for are the places' own here
     for (const id of ['#pc-desc', '#pc-coords', '#pc-place', '#pc-date']) expect(target.querySelector(id), id).toBeNull();
     expect(target.querySelector('#pc-mention').value).toBe('@GeoConfirmed');

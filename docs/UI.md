@@ -5519,7 +5519,8 @@ never posts, and pressing Post on X or Bluesky stays the analyst's.
   corner; the signature needs a logo or a handle, and says to set them in Settings →
   Publishing.
   **Local first**: the preview is drawn on a plain ground, no tile asked, until the
-  analyst presses **Show the map**, picks Map or picks a ground. The preview is what goes
+  analyst presses **Show the map**, picks Map or picks a ground, or a press makes the
+  map. The preview is what goes
   out, and there is no button to make the map: it is drawn whole and filed in Media as
   made from the video (`POST /cases/{id}/scenes/map`, *convoy recap map.jpg*) when the
   thread needs its picture and no map made matches its choices, on **Publish** (before

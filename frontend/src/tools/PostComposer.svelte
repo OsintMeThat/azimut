@@ -611,6 +611,8 @@
       if (run !== postRun || !thread) return { ok: false, gone: true };
       thread.map = path;
       thread.mapFor = options;
+      // its tiles were asked on this press: the preview shows them too
+      thread.mapLive = true;
       layoutThread();
       await tick();
       if (altOn) await prefillAlt(run);
