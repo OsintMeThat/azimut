@@ -431,12 +431,12 @@ async function openClip(page, { older = false, timed = null } = {}) {
       const body = request.postDataJSON();
       const name = decodeURIComponent(timed[1]);
       scenePuts.push({ proof: name, body });
-      // as the server does: Inspect names no video, the scene taken up stays, and a proof
-      // stating nothing its frames do not say keeps no scene
+      // as the server does: Inspect names no video, the scene taken up stays, the whole
+      // video asked for is kept, and only `traced` takes the proof back to its frames
       const held = proofs[name].scene;
       const video = body.video ?? held?.video ?? VIDEO;
-      const draft = body.draft ?? held?.draft ?? null;
-      if (!body.moments.length && !draft) delete proofs[name].scene;
+      const draft = body.traced ? null : body.draft ?? held?.draft ?? null;
+      if (body.traced) delete proofs[name].scene;
       else proofs[name].scene = { video, moments: body.moments, draft };
       return json({ proof: name, video, moments: body.moments, at: [], stated: !!proofs[name].scene, draft });
     }
@@ -558,26 +558,6 @@ test('leaves a proof made by hand apart with Not this scene, and says nothing of
   expect(scenePuts).toEqual([]);
 });
 
-test('names the scene of an older proof made by hand, and writes nothing until it is saved', async ({ page }) => {
-  const { scenePuts, saves } = await openClip(page, { older: true });
-  await page.evaluate(async () => {
-    const { uiState } = await import('/src/lib/state.svelte.js');
-    uiState.openProof = 'lookout';
-  });
-  await expect(page.getByRole('textbox', { name: 'Proof name' })).toHaveValue('Lookout');
-  await showProofTab(page, 'Scene');
-  await expect(matchLine(page)).toHaveText(/Bridge\?\s*·\s*found by its frames/);
-  // opening it is no change: nothing to save, nothing written
-  await expect(page.locator('.tool-header .badge')).toHaveCount(0);
-  await expect(stripTiles(page).locator('.tile-title')).toHaveText(['Lookout', 'Tower?']);
-  await page.waitForTimeout(300);
-  expect(scenePuts).toEqual([]);
-
-  await saveClip(page, saves, 1);
-  await expect.poll(() => scenePuts.length).toBe(1);
-  expect(scenePuts[0]).toEqual({ proof: 'lookout', body: { moments: [{ start: 0.1, end: 1 }], video: VIDEO, draft: 's1' } });
-});
-
 // -- one time, read alike in Inspect and Geo Proof -----------------------------------------
 
 const inspectRows = (page) => page.getByRole('tabpanel', { name: 'Scenes' }).getByTestId('scene-row');
@@ -603,6 +583,51 @@ async function wholeInInspect(page) {
   await row.getByRole('radio', { name: 'Whole video' }).click();
   await row.getByRole('button', { name: 'Apply' }).click();
 }
+
+const proposal = (page) => sceneBlock(page).getByTestId('scene-proposal');
+
+test('offers an older proof made by hand the scene its frames fall in, its time as on disk, until Take it up', async ({ page }) => {
+  const { scenePuts, saves } = await openClip(page, { older: true });
+  await openLookout(page);
+  // its time is what it states, as Inspect lists it; the scene is offered under the field
+  await expect(sceneBlock(page).getByTestId('scene-video')).toHaveText(/★\s*Steps\s*·\s*Whole video/);
+  await expect(matchLine(page)).toHaveCount(0);
+  await expect(proposal(page)).toHaveText(/Bridge\?\s*·\s*0:00–0:01\s*Take it up\s*Not this scene/);
+  await expect(proposal(page)).toHaveAttribute('title', 'Its panels from this video all fall in this scene, still to prove');
+  // opening it is no change, and a save takes nothing up: nothing written
+  await expect(page.locator('.tool-header .badge')).toHaveCount(0);
+  await expect(stripTiles(page).locator('.tile-title')).toHaveText(['Bridge?', 'Lookout', 'Tower?']);
+  await saveClip(page, saves, 1);
+  await page.waitForTimeout(300);
+  expect(scenePuts).toEqual([]);
+  await expect(proposal(page)).toHaveCount(1);
+
+  // Take it up: written at once, the scene's time, the scene taken
+  await proposal(page).getByRole('button', { name: 'Take it up' }).click();
+  await expect.poll(() => scenePuts.length).toBe(1);
+  expect(scenePuts[0]).toEqual({ proof: 'lookout', body: { moments: [{ start: 0.1, end: 1 }], video: VIDEO, draft: 's1' } });
+  await expect(proposal(page)).toHaveCount(0);
+  await expect(sceneBlock(page).getByTestId('scene-video')).toHaveText(/★\s*Steps\s*·\s*0:00–0:01/);
+  await expect(page.locator('.toast', { hasText: 'Scene now 0:00–0:01' })).toBeVisible();
+
+  // and Inspect says the same: one row for the bridge, the proof
+  await goTo(page, 'inspect');
+  await page.locator('.card', { hasText: 'Steps' }).click();
+  await expect(inspectRows(page)).toHaveCount(2);
+  await expect(inspectRows(page).nth(0)).toContainText('Lookout');
+  await expect(inspectRows(page).nth(0).getByTestId('scene-when')).toHaveText(/0:00–0:01/);
+});
+
+test('keeps an older proof apart from the scene offered with Not this scene, writing nothing', async ({ page }) => {
+  const { scenePuts } = await openClip(page, { older: true });
+  await openLookout(page);
+  await proposal(page).getByRole('button', { name: 'Not this scene' }).click();
+  await expect(proposal(page)).toHaveCount(0);
+  await expect(sceneBlock(page).getByTestId('scene-video')).toHaveText(/★\s*Steps\s*·\s*Whole video/);
+  await expect(page.locator('.tool-header .badge')).toHaveCount(0);
+  await page.waitForTimeout(300);
+  expect(scenePuts).toEqual([]);
+});
 
 test('reads in Geo Proof the time Inspect gave the proof open there, without opening it again', async ({ page }) => {
   const { scenePuts } = await openClip(page, { timed: 'scene' });
@@ -659,13 +684,26 @@ test('keeps a proof Inspect made the whole video as the whole video, never the s
   // it states nothing now, as a proof made by hand does
   await expect.poll(() => scenePuts.length).toBe(1);
 
+  expect(scenePuts[0].body).toEqual({ moments: [] });
+
   await goTo(page, 'proof');
   await expect(sceneBlock(page).getByTestId('scene-video')).toHaveText(/★\s*Steps\s*·\s*Whole video/);
   await expect(matchLine(page)).toHaveCount(0);
+  await expect(proposal(page)).toHaveCount(0);
   // its next save takes nothing up behind the analyst's back
   await saveClip(page, saves, 1);
   await page.waitForTimeout(300);
   expect(scenePuts).toHaveLength(1);
+
+  // and after a reload, both tabs still say the whole video, nothing offered in its place
+  await page.reload();
+  await expect(page.locator('.tool-header').getByRole('button', { name: 'New proof', exact: true })).toBeVisible({ timeout: 15_000 });
+  await openLookout(page);
+  await expect(sceneBlock(page).getByTestId('scene-video')).toHaveText(/★\s*Steps\s*·\s*Whole video/);
+  await expect(proposal(page)).toHaveCount(0);
+  await goTo(page, 'inspect');
+  await page.locator('.card', { hasText: 'Steps' }).click();
+  await expect(inspectRows(page).filter({ hasText: 'Lookout' }).getByTestId('scene-when')).toHaveText('Whole video');
 });
 
 test('hides the ▶ on video panels from the Scene tab, for every proof, and shows them again', async ({ page }) => {

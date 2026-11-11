@@ -24,6 +24,10 @@
   // the end of a field runs that video in it, Here reads its frame and a frame becomes
   // a panel. What is stated goes through `proofScene.svelte.js`.
   //
+  // The scene still to prove the panels fall in is named under the ★ field: read as the
+  // time of a proof never saved, which its first save takes up, and offered to a saved
+  // one, with **Take it up** and **Not this scene**, its time left as the proof states it.
+  //
   // `active` is whether the tab is shown. A hidden tab keeps its player where it
   // stood, paused, so coming back finds the same frame.
   //
@@ -209,6 +213,20 @@
         <span class="sep" aria-hidden="true">·</span>
         <span class="why">{found.whole ? 'the video\'s only scene' : 'found by its frames'}</span>
         <button class="link refuse" onclick={() => scene.refuse()} title={HELP.notThisScene}>Not this scene</button>
+      </p>
+    {/if}
+    {#if v.star && scene.proposal}
+      <!-- A saved proof's time is what it states: the scene its frames fall in is offered. -->
+      {@const found = scene.proposal}
+      <p class="matched proposed" role="status" data-testid="scene-proposal" title={HELP.proposed}>
+        <span class="swatch" style:background={found.color} aria-hidden="true"></span>
+        <span class="found" dir="auto">{found.title}</span>
+        <span class="sep" aria-hidden="true">·</span>
+        <span class="why">{sceneTime({ kind: 'proof', moments: found.moments })}</span>
+        <span class="acts">
+          <button class="link" onclick={() => scene.takeUp()} title={HELP.takeUp}>Take it up</button>
+          <button class="link" onclick={() => scene.refuse()} title={HELP.notThisScene}>Not this scene</button>
+        </span>
       </p>
     {/if}
   {/each}
@@ -418,6 +436,17 @@
   }
   .refuse {
     flex-shrink: 0;
+    margin-left: auto;
+    white-space: nowrap;
+  }
+  /* offered, not read: its two answers go under it when the column is narrow */
+  .proposed {
+    flex-wrap: wrap;
+    row-gap: 2px;
+  }
+  .acts {
+    display: flex;
+    gap: 10px;
     margin-left: auto;
     white-space: nowrap;
   }

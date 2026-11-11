@@ -4606,7 +4606,9 @@ Under *Video*, one boxed line per video, like a source: `★ clip.mp4 · 2:10–
 its date states, and `☆ other.mp4 · confirmation` for any other video among the panels,
 made the ★ in one press, its time then starting as the whole video. A proof that states
 no time reads *Whole video*: the instants its frames were cut at pin it, they are not
-its time.
+its time. Whole video chosen in the editor, here or in Inspect, is kept on the proof
+(`scene.moments` empty), so nothing is offered in its place again; only the Undo of a
+proof's first time takes it back to stating nothing (`traced`).
 
 **The time opens Inspect's own editor**: Whole video, Instant or Passage, a line per
 passage, typed or nudged a frame with ↑/↓, and **Here** takes the frame on the tab's
@@ -4638,7 +4640,8 @@ time in hand with a change stays the analyst's: the read waits until it is appli
 dropped. A proof not saved yet, made from a scene still to prove, follows a time changed
 on that scene in Inspect until one is stated here. Inspect reads its list again when a
 write from Geo Proof lands after it was read. The open slide's tile says the time its
-Scene tab reads.
+Scene tab reads. A time read again that the picture prints, with **Scene time on the
+picture** on, marks the proof unsaved: its saved picture still prints the old one.
 
 **Nothing moves the time behind the analyst's back.** When a frame of the ★ video falls
 outside every passage stated, the field says *1 panel is outside these passages* and
@@ -4668,18 +4671,25 @@ another video; its file stays in Media.
 **A proof made by hand finds its scene by its frames.** When it states no scene and
 every frame of the ★ video among its panels (each piece of a collage of it included) falls
 in one scene still to prove, and in no other scene of the video, by the rule Inspect's
-dots use, the proof takes that scene. Its field reads the scene's time, and a line under
-it names the scene in its colour, *Bridge? · found by its frames*, with **Not this
-scene**. A scene about the whole video is taken only as the video's one scene, *Which
-town? · the video's only scene*. Frames in several scenes, or in none, tie nothing. The
-next save takes the scene up as Make the proof's first save does, so Inspect shows one
-row. A time changed meanwhile is stated for that scene. **Not this scene** keeps the
-proof as it was for the session and writes nothing. A proof taken back to the whole
-video, here or in Inspect, is kept apart from the scene its frames then find in the same
-way, so it reads *Whole video* as Inspect does. An older proof made by hand reads the
-same when opened, and nothing changes on disk until it is saved. Abandoned scenes and
-scenes another proof took up are never offered, and the line follows the panels as they
-change. The scenes are the ones the strip reads (`GET /cases/{id}/scenes?video=`), so
+dots use, the proof finds that scene. A scene about the whole video is found only as the
+video's one scene. Frames in several scenes, or in none, find nothing.
+
+A proof never saved takes the scene it found: its field reads the scene's time, and a
+line under it names the scene in its colour, *Bridge? · found by its frames*, with **Not
+this scene**, or *Which town? · the video's only scene*. Its first save takes the scene up
+as Make the proof's does, so Inspect shows one row; a time changed meanwhile is stated
+for that scene.
+
+A saved proof is what is on disk, as Inspect shows it: its field keeps the time it
+states, *Whole video* for one that states none, and the line under it offers the scene,
+*Bridge? · 0:00–0:01*, with **Take it up** and **Not this scene**. Take it up writes the
+scene's time and takes the scene up at once, with Undo in the toast, which gives the
+proof back its frames and the scene back to Inspect. A save never takes it up. An older
+proof made by hand opens this way, and nothing changes on disk until Take it up.
+
+**Not this scene** keeps the proof apart for the session and writes nothing. Abandoned
+scenes and scenes another proof took up are never offered, nor is any to a proof that
+said the whole video, and the line follows the panels as they change. The scenes are the ones the strip reads (`GET /cases/{id}/scenes?video=`), so
 nothing more is asked of the server.
 
 **A proof on a video shows its slides under the canvas**, on a strip laid out like Map

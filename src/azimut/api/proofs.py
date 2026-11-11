@@ -30,7 +30,7 @@ from typing import Any, Literal
 
 from fastapi import APIRouter, HTTPException
 from PIL import Image
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, StrictBool
 
 from .. import config
 from ..engine import artifacts as artifact_engine
@@ -112,16 +112,18 @@ class ProofIn(BaseModel):
 
 class SceneIn(BaseModel):
     """When in its video a proof happens: its moments, each ``{start, end}`` with
-    ``end`` null for an instant. None puts it back at the frames it was built on.
-    Read by `scenes._stated_moments`, which refuses what is not a time rather than
-    letting Pydantic turn ``true`` into 1.
+    ``end`` null for an instant. Read by `scenes._stated_moments`, which refuses what
+    is not a time rather than letting Pydantic turn ``true`` into 1.
 
     ``video`` moves the ★ to another video a panel was cut from, and ``draft`` names
-    the Inspect scene the proof takes up. Left out, each stays as it is."""
+    the Inspect scene the proof takes up. Left out, each stays as it is. No moments is
+    the whole video, kept as stated; ``traced`` takes the proof back to its frames
+    instead, the Undo of its first time."""
 
     moments: Any
     video: Any = None
     draft: Any = None
+    traced: StrictBool = False
 
 
 def _now() -> str:
@@ -1150,7 +1152,7 @@ def state_proof_scene(case_id: str, name: str, body: SceneIn) -> dict[str, Any]:
     except CaseError as exc:
         raise HTTPException(status_code=403, detail=str(exc)) from exc
     try:
-        scene = scene_engine.state_proof_scene(case, name, body.moments, body.video, body.draft)
+        scene = scene_engine.state_proof_scene(case, name, body.moments, body.video, body.draft, body.traced)
     except scene_engine.UnknownProof as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     except scene_engine.BadScene as exc:

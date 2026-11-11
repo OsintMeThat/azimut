@@ -413,8 +413,9 @@ def test_a_proof_is_given_an_instant_then_a_period_then_its_frame_back(client, t
     }
     assert written == json.loads(before)
 
-    # taken back, the proof sits at its frame again and is byte for byte what it was
-    res = _state(client, cid, "Roundabout")
+    # taken back to its frames, the Undo of its first time, it sits at its frame again
+    # and is byte for byte what it was
+    res = client.put(f"/api/cases/{cid}/proofs/Roundabout/scene", json={"moments": [], "traced": True})
     assert res.status_code == 200, res.text
     assert res.json()["stated"] is False
     assert _spec(cid, "Roundabout").read_bytes() == before
@@ -609,8 +610,9 @@ def test_the_star_moves_to_another_video_a_panel_was_cut_from(client, tmp_path):
         assert res.status_code == 422, (video, res.text)
     assert json.loads(_spec(cid, "Depot").read_text(encoding="utf-8"))["scene"]["video"] == second
 
-    # back on the clip its first frame names, with no time: the proof it was, byte for byte
-    assert client.put(f"/api/cases/{cid}/proofs/Depot/scene", json={"moments": [], "video": first}).status_code == 200
+    # back on the clip its first frame names, taken back to its frames: the proof it was, byte for byte
+    back = {"moments": [], "video": first, "traced": True}
+    assert client.put(f"/api/cases/{cid}/proofs/Depot/scene", json=back).status_code == 200
     assert _spec(cid, "Depot").read_bytes() == before
 
 

@@ -19,9 +19,10 @@ function setup({ name = 'depot', frames = [{ panel: 'p1', video: CLIP, time: 130
     put: vi.fn(async (url, body) => {
       puts.push({ url, body });
       if (answer) return answer(body);
-      // the server's answer: a scene that states nothing its frames do not say is no scene
-      const traced = body.video === CLIP && !body.moments.length && !body.draft;
-      return { proof: where.name, video: body.video, moments: body.moments, at: [130], stated: !traced, draft: body.draft ?? null };
+      // the server's answer: the whole video asked for is kept, and only `traced`, taking a
+      // proof back to the frames it was cut from, leaves it stating nothing
+      const traced = body.traced === true && (body.video ?? CLIP) === CLIP;
+      return { proof: where.name, video: body.video ?? CLIP, moments: body.moments, at: [130], stated: !traced, draft: traced ? null : body.draft ?? null };
     }),
   };
   const toast = vi.fn();
@@ -52,7 +53,8 @@ describe('a saved proof\'s scene', () => {
     expect(words).toBe('Scene now 2:10–2:38');
     action.onClick();
     await vi.waitFor(() => expect(puts).toHaveLength(2));
-    expect(puts[1].body).toEqual({ moments: [], video: CLIP });
+    // it stated nothing before: back to its frames, not the whole video said
+    expect(puts[1].body).toEqual({ moments: [], video: CLIP, traced: true });
     await vi.waitFor(() => expect(scene.stated).toBeNull());
     // the undo is not offered again
     expect(toast.mock.calls[1][3]).toBeNull();
@@ -89,6 +91,10 @@ describe('a saved proof\'s scene', () => {
     expect(puts[0].body).toEqual({ moments: [], video: OTHER });
     expect(scene.star).toBe(OTHER);
     expect(toast.mock.calls[0][0]).toBe('The proof is now about other');
+    // back on the video its first panel was cut from: read off its frames, as before it said anything
+    await scene.makeStar(CLIP);
+    expect(puts[1].body).toEqual({ moments: [], video: CLIP, traced: true });
+    expect([scene.stated, scene.star]).toEqual([null, CLIP]);
   });
 
   it('says what the server refused, and keeps what was there', async () => {
@@ -197,14 +203,44 @@ describe('a proof made by hand, whose frames fall in a scene still to prove', ()
     expect(scene.match?.id).toBe('s1');
   });
 
-  it('keeps an older proof as it is on disk until it is saved', async () => {
+  it('offers an older proof the scene, its time left as on disk, and a save takes nothing up', async () => {
     const { scene, puts } = setup({ listed: { ...LISTED, scenes: [...LISTED.scenes, { kind: 'proof', proof: 'depot', moments: [], at: [130], stated: false }] } });
     scene.load(undefined);
     // its own row is no other scene
-    expect(scene.match?.id).toBe('s1');
-    expect(puts).toEqual([]);
+    expect([scene.match, scene.proposal?.id, scene.moments, scene.draft]).toEqual([null, 's1', [], null]);
     await scene.flush();
+    expect(puts).toEqual([]);
+    expect(scene.proposal?.id).toBe('s1');
+  });
+
+  it('takes the offered scene up at once with Take it up, and its Undo gives the proof its frames back', async () => {
+    const { scene, puts, toast } = setup({ listed: LISTED });
+    scene.load(undefined);
+    expect(await scene.takeUp()).toBe(true);
     expect(puts[0].body).toEqual({ moments: [{ start: 120, end: 140 }], video: CLIP, draft: 's1' });
+    expect([scene.stated, scene.proposal, scene.moments]).toEqual([{ video: CLIP, moments: [{ start: 120, end: 140 }], draft: 's1' }, null, [{ start: 120, end: 140 }]]);
+    expect(toast.mock.calls[0][0]).toBe('Scene now 2:00–2:20');
+    toast.mock.calls[0][3].onClick();
+    await vi.waitFor(() => expect(puts).toHaveLength(2));
+    expect(puts[1].body).toEqual({ moments: [], video: CLIP, traced: true });
+    await vi.waitFor(() => expect(scene.stated).toBeNull());
+    expect(scene.proposal?.id).toBe('s1');
+  });
+
+  it('keeps a saved proof apart with Not this scene, writing nothing', () => {
+    const { scene, puts, onstated } = setup({ listed: LISTED });
+    scene.load(undefined);
+    scene.refuse();
+    expect([scene.proposal, scene.moments]).toEqual([null, []]);
+    // its time never read the scene's, so nothing on the picture moves
+    expect(onstated).not.toHaveBeenCalled();
+    expect(puts).toEqual([]);
+  });
+
+  it('offers nothing to a proof that said the whole video', () => {
+    const { scene } = setup({ listed: LISTED });
+    scene.load({ video: CLIP, moments: [] });
+    expect([scene.proposal, scene.match, scene.moments]).toEqual([null, null, []]);
   });
 
   it('refuses it with Not this scene, for this proof and the session, writing nothing', async () => {
@@ -215,30 +251,40 @@ describe('a proof made by hand, whose frames fall in a scene still to prove', ()
     where.name = 'bridge';
     await scene.flush();
     expect(puts).toEqual([]);
-    // opened again in the session, it stays apart; another proof is asked afresh
+    // opened again in the session, it stays apart; another saved proof is offered it afresh
     scene.load(undefined);
-    expect(scene.match).toBeNull();
+    expect([scene.match, scene.proposal]).toEqual([null, null]);
     where.name = 'market';
     scene.load(undefined);
-    expect(scene.match?.id).toBe('s1');
+    expect(scene.proposal?.id).toBe('s1');
     scene.reset();
     expect(scene.refused).toEqual([]);
   });
 
-  it('states the scene with a time changed meanwhile, at once for a saved proof', async () => {
-    const { scene, puts } = setup({ listed: LISTED });
+  it('holds the scene with a time changed meanwhile, for the first save to write', async () => {
+    const { scene, puts, where } = setup({ name: null, listed: LISTED });
     scene.openTime();
     expect(scene.edit.moments.map((m) => [m.start, m.end])).toEqual([[120, 140]]);
     scene.edit.typeEnd('2:10');
     await scene.applyTime();
+    expect(scene.stated).toEqual({ video: CLIP, moments: [{ start: 120, end: 130 }], draft: 's1' });
+    where.name = 'bridge';
+    await scene.flush();
     expect(puts[0].body).toEqual({ moments: [{ start: 120, end: 130 }], video: CLIP, draft: 's1' });
-    expect(scene.stated.draft).toBe('s1');
+  });
+
+  it('states a saved proof\'s new time without taking the offered scene up', async () => {
+    const { scene, puts } = setup({ listed: LISTED });
+    scene.load(undefined);
+    await scene.write({ video: CLIP, moments: [{ start: 125, end: null }] });
+    expect(puts[0].body).toEqual({ moments: [{ start: 125, end: null }], video: CLIP });
   });
 
   it('takes nothing to another video made the ★', async () => {
     const frames = [{ panel: 'p1', video: CLIP, time: 130 }, { panel: 'p2', video: OTHER, time: 12 }];
     const { scene, puts } = setup({ listed: LISTED, frames });
-    expect(scene.match?.id).toBe('s1');
+    scene.load(undefined);
+    expect(scene.proposal?.id).toBe('s1');
     await scene.makeStar(OTHER);
     expect(puts[0].body).toEqual({ moments: [], video: OTHER });
   });
@@ -307,39 +353,36 @@ describe('a time Inspect changed meanwhile', () => {
     expect(scene.moments).toEqual([{ start: 200, end: null }]);
   });
 
-  it('reads a proof Inspect took back to the whole video as the whole video, not the scene its frames find', async () => {
-    const onDisk = { depot: undefined };
+  it('reads the whole video Inspect said as the whole video, offering nothing in its place', async () => {
+    const onDisk = { depot: { video: CLIP, moments: [], draft: null } };
     const { scene, puts } = setup({ onDisk, listed: LISTED });
     scene.load({ video: CLIP, moments: [{ start: 125, end: 135 }] });
-    expect(scene.match).toBeNull();
     await scene.reread();
-    expect([scene.stated, scene.match, scene.moments]).toEqual([null, null, []]);
-    // its next save takes nothing up
+    expect([scene.stated, scene.match, scene.proposal, scene.moments]).toEqual([{ video: CLIP, moments: [], draft: null }, null, null, []]);
     await scene.flush();
     expect(puts).toEqual([]);
   });
 
-  it('keeps the whole video asked for here, rather than the scene its frames then find', async () => {
+  it('keeps the whole video asked for here as said, rather than the scene its frames fall in', async () => {
     const { scene, puts, toast } = setup({ listed: LISTED });
     scene.load({ video: CLIP, moments: [{ start: 125, end: 135 }] });
     await scene.write({ video: CLIP, moments: [] });
     expect(puts[0].body).toEqual({ moments: [], video: CLIP });
-    expect([scene.stated, scene.match, scene.moments]).toEqual([null, null, []]);
+    expect([scene.stated, scene.proposal, scene.moments]).toEqual([{ video: CLIP, moments: [], draft: null }, null, []]);
     expect(toast.mock.calls[0][0]).toBe('Scene now the whole video');
-    await scene.flush();
-    expect(puts).toHaveLength(1);
-  });
-
-  it('gives back the time a found scene showed on Undo, not the whole video', async () => {
-    const { scene, puts, toast } = setup({ listed: LISTED });
-    scene.load(undefined);
-    expect(scene.moments).toEqual([{ start: 120, end: 140 }]);
-    await scene.write({ video: CLIP, moments: [{ start: 120, end: 130 }] });
-    expect(puts[0].body.draft).toBe('s1');
+    // its Undo states the passage again: it stated one before
     toast.mock.calls[0][3].onClick();
     await vi.waitFor(() => expect(puts).toHaveLength(2));
-    expect(puts[1].body).toEqual({ moments: [{ start: 120, end: 140 }], video: CLIP });
-    await vi.waitFor(() => expect(scene.moments).toEqual([{ start: 120, end: 140 }]));
+    expect(puts[1].body).toEqual({ moments: [{ start: 125, end: 135 }], video: CLIP });
+  });
+
+  it('offers the scene again to a proof Inspect took back to its frames', async () => {
+    const onDisk = { depot: undefined };
+    const { scene, onstated } = setup({ onDisk, listed: LISTED });
+    scene.load({ video: CLIP, moments: [{ start: 120, end: 140 }], draft: 's1' });
+    await scene.reread();
+    expect([scene.stated, scene.moments, scene.proposal?.id]).toEqual([null, [], 's1']);
+    expect(onstated).toHaveBeenCalledTimes(1);
   });
 
   it('lets a proof never saved follow the scene it was made from, until a time is stated here', () => {

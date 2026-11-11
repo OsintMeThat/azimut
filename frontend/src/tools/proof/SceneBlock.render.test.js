@@ -39,17 +39,17 @@ afterEach(() => {
   targets = [];
 });
 
-function setup({ frames = [{ panel: 'p1', video: CLIP, time: 130.4 }], stated = null, name = 'depot', active = true, listed = null } = {}) {
+function setup({ frames = [{ panel: 'p1', video: CLIP, time: 130.4 }], stated = null, name = 'depot', active = true, listed = null, opened = false } = {}) {
   const puts = [];
   const api = {
     put: vi.fn(async (url, body) => {
       puts.push(body);
       // what the server answers: a proof that says no more than its first frame states nothing
-      return { video: body.video, moments: body.moments, at: [], stated: body.moments.length > 0 || body.video !== CLIP, draft: null };
+      return { video: body.video, moments: body.moments, at: [], stated: body.moments.length > 0 || body.video !== CLIP || !!body.draft, draft: body.draft ?? null };
     }),
   };
   const scene = new ProofScene({ api, toast: vi.fn(), where: () => ({ caseId: 'case', name }), frames: () => frames, listed: () => listed });
-  if (stated) scene.load(stated);
+  if (stated || opened) scene.load(stated ?? undefined);
   const onaddframe = vi.fn();
   const target = document.createElement('div');
   document.body.append(target);
@@ -329,6 +329,51 @@ describe('the scene its frames found', () => {
     const [star, other] = fields(root);
     expect(star.nextElementSibling).toBe(line(root));
     expect(line(root).nextElementSibling).toBe(other);
+  });
+});
+
+describe('the scene offered to a saved proof', () => {
+  const LISTED = {
+    video: CLIP,
+    scenes: [{ kind: 'draft', id: 's1', start: 120, end: 140, label: 'Bridge?', state: 'todo', captures: [], abandoned: null }],
+    taken: [],
+    collages: [],
+  };
+  const offer = (root) => root.querySelector('[data-testid="scene-proposal"]');
+  const words = (node) => node.textContent.replace(/\s+/g, ' ').trim();
+
+  it('is named under the ★ field with its time, the field keeping the time the proof states', () => {
+    const { root } = setup({ listed: LISTED, opened: true });
+    const [field] = fields(root);
+    expect(words(field.querySelector('.line'))).toBe('★ clip · Whole video');
+    expect(root.querySelector('[data-testid="scene-match"]')).toBeNull();
+    expect(field.nextElementSibling).toBe(offer(root));
+    expect(words(offer(root))).toBe('Bridge? · 2:00–2:20 Take it up Not this scene');
+    expect(offer(root).getAttribute('title')).toBe('Its panels from this video all fall in this scene, still to prove');
+    expect(button(offer(root), 'Take it up').getAttribute('title')).toBe('Make this scene\'s time the proof\'s, and take the scene up');
+  });
+
+  it('is taken up with Take it up, written at once with the scene', async () => {
+    const { root, puts, scene } = setup({ listed: LISTED, opened: true });
+    button(offer(root), 'Take it up').click();
+    await settle();
+    expect(puts).toEqual([{ moments: [{ start: 120, end: 140 }], video: CLIP, draft: 's1' }]);
+    expect(offer(root)).toBeNull();
+    expect(scene.draft).toBe('s1');
+  });
+
+  it('goes with Not this scene, nothing written', async () => {
+    const { root, puts } = setup({ listed: LISTED, opened: true });
+    button(offer(root), 'Not this scene').click();
+    await settle();
+    expect(offer(root)).toBeNull();
+    expect(words(fields(root)[0].querySelector('.line'))).toBe('★ clip · Whole video');
+    expect(puts).toEqual([]);
+  });
+
+  it('is never made to a proof that said the whole video', () => {
+    const { root } = setup({ listed: LISTED, stated: { video: CLIP, moments: [] } });
+    expect(offer(root)).toBeNull();
   });
 });
 
