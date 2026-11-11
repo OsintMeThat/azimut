@@ -48,6 +48,7 @@ from .. import __version__, errors, layout
 from ..engine import artifacts as artifact_engine
 from ..engine import comparisons, horizon_views, inspectwork, snapshots, tiles
 from ..engine import media as media_engine
+from ..engine import renames as rename_engine
 from ..engine.sheets import replace_atomic
 from ..workspace import Case, CaseError
 from .cases import delete_by_path, get_case
@@ -555,20 +556,16 @@ def _save_view(case: Case, body: ViewIn) -> tuple[dict[str, Any], tuple[str, flo
             raise HTTPException(status_code=422, detail="the photo laid over the view is not in the case")
 
     rel = layout.horizon_view_rel(name)
+    # A rename lands first, on its own, a change of case included: the view and its
+    # preview move, and the images kept from it and whatever else names them follow
+    # (`engine/renames.py`). The save then writes onto the new name like any other.
+    if old_rel and case.resolve_inside(old_rel).is_file():
+        rename_engine.rename_record(case, horizon_views.TYPE, old_rel, rel)
     path = case.resolve_inside(rel)
-    if old_rel and case_only(old, name):
-        source = case.resolve_inside(old_rel)
-        # The name asked for, not `path`'s: Windows resolves a path to the case already on disk.
-        if source.is_file():
-            path = source.with_name(PurePosixPath(rel).name)
-            media_engine.rename_path(source, path)
-    previous = path if old_rel and case_only(old, name) else case.resolve_inside(
-        layout.horizon_view_rel(old or name)
-    )
     saved = {
         "azimut_horizon": 1,
         "title": name,
-        "created_at": read_created_at(previous) or _now(),
+        "created_at": read_created_at(path) or _now(),
         "updated_at": _now(),
         "app_version": __version__,
         "spec": spec,
@@ -576,21 +573,13 @@ def _save_view(case: Case, body: ViewIn) -> tuple[dict[str, Any], tuple[str, flo
     }
     media_engine.write_json_atomic(path, saved)
 
-    # the preview follows its view, and the images kept from it point at the new name
-    thumb: str | None = None
-    if old_rel:
-        moved = case.resolve_inside(layout.horizon_thumb_rel(old or name))
-        if moved.is_file():
-            target = layout.horizon_thumb_rel(name)
-            media_engine.rename_path(moved, moved.with_name(PurePosixPath(target).name))
-            thumb = target
-    thumb = thumb or _thumb_of(case, name)
+    thumb = _thumb_of(case, name)
 
     placed = horizon_views.placement(spec, [list(point) for point in body.footprint] if body.footprint else None)
     attrs: dict[str, Any] = {"spec": rel, **placed}
     if thumb:
         attrs["thumb"] = thumb
-    existing = case.find_entity(attr="spec", value=old_rel or rel)
+    existing = case.find_entity(attr="spec", value=rel)
     if existing:
         stale = comparisons.moved(existing.get("attrs") or {}, placed)
         case.update_entity(existing["id"], {"label": name, "attrs": attrs})
@@ -598,10 +587,6 @@ def _save_view(case: Case, body: ViewIn) -> tuple[dict[str, Any], tuple[str, flo
     else:
         stale = True
         entity_id = case.add_entity(horizon_views.TYPE, name, attrs=attrs, by="horizon")["id"]
-    if old_rel:
-        horizon_views.follow_rename(case, old_rel, rel)
-        if not case_only(old, name):
-            case.resolve_inside(old_rel).unlink(missing_ok=True)
     located = (entity_id, placed["lat"], placed["lon"]) if stale else None
     return {"name": name, "title": name, "spec_path": rel, "thumb": thumb}, located
 

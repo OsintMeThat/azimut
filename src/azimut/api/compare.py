@@ -34,7 +34,6 @@ import io
 import json
 import warnings
 from datetime import datetime, timezone
-from pathlib import PurePosixPath
 from typing import Any, Literal
 
 from fastapi import APIRouter, File, Form, HTTPException, UploadFile
@@ -48,6 +47,7 @@ from ..engine import comparisons, exportdir, sentinel, snapshots, tiles
 from ..engine import links as link_engine
 from ..engine.analysis_models import RETIRED_OVERLAYS
 from ..engine import media as media_engine
+from ..engine import renames as rename_engine
 from ..workspace import Case, CaseError
 from .cases import delete_by_path, get_case
 from .naming import case_only, holders, read_created_at, slugify
@@ -527,23 +527,17 @@ def _save_session(
             taken = {p.stem.casefold() for p in folder.glob("*.json")} | trashed
             name = layout.free_stem(taken, name, "Comparison")
     rel = layout.compare_session_rel(name)
-    path = case.resolve_inside(rel)
-    if old_rel and case_only(old, name):
-        source = case.resolve_inside(old_rel)
-        # The name asked for, not `path`'s: Windows resolves a path to the case
-        # already on disk.
-        if source.is_file():
-            path = source.with_name(PurePosixPath(rel).name)
-            media_engine.rename_path(source, path)
-
-    previous = path if old_rel and case_only(old, name) else case.resolve_inside(
-        layout.compare_session_rel(old or name)
-    )
     reading = _validated_spec(body.spec)
+    # A rename lands first, on its own, a change of case included: the comparison moves
+    # with its entity, and the images kept from it and whatever else names it follow
+    # (`engine/renames.py`). The save then writes onto the new name like any other.
+    if old_rel and case.resolve_inside(old_rel).is_file():
+        rename_engine.rename_record(case, "compare-session", old_rel, rel)
+    path = case.resolve_inside(rel)
     saved = {
         "azimut_compare": 1,
         "title": name,
-        "created_at": read_created_at(previous) or _now(),
+        "created_at": read_created_at(path) or _now(),
         "updated_at": _now(),
         "spec": reading,
     }
@@ -551,7 +545,7 @@ def _save_session(
 
     # The comparison stands where its reading is: saved work, beside the captures.
     placed = comparisons.placement(reading)
-    existing = case.find_entity(attr="spec", value=old_rel or rel)
+    existing = case.find_entity(attr="spec", value=rel)
     if existing:
         stale = comparisons.moved(existing.get("attrs") or {}, placed)
         case.update_entity(existing["id"], {"label": name, "attrs": {"spec": rel, **placed}})
@@ -560,10 +554,6 @@ def _save_session(
         stale = True
         entity_id = case.add_entity("compare-session", name, attrs={"spec": rel, **placed},
                                     by="compare")["id"]
-    if old_rel:
-        comparisons.follow_rename(case, old_rel, rel)
-        if not case_only(old, name):
-            case.resolve_inside(old_rel).unlink(missing_ok=True)
     located = (entity_id, placed["lat"], placed["lon"]) if stale else None
     return {"name": name, "title": name, "spec_path": rel}, located
 

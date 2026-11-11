@@ -12,6 +12,7 @@ from __future__ import annotations
 import base64
 import io
 import json
+from pathlib import Path
 from urllib.parse import quote, unquote
 
 import pytest
@@ -24,6 +25,7 @@ from azimut.engine import scenes as scene_engine
 from azimut.workspace import Case
 
 import casefold
+import fullcase
 
 
 def _png(color=(40, 40, 60), size=(80, 50)) -> bytes:
@@ -389,6 +391,47 @@ def test_uses_and_the_delete_preview_see_a_renamed_proof_as_before(client):
 # -- the other renames ---------------------------------------------------------------------
 
 
+@pytest.mark.parametrize("route", ["collage", "details"])
+def test_a_collage_renamed_is_still_opened_from_its_picture(client, route):
+    cid = _case(client)
+    a = _upload(client, cid, "a.png")
+    b = _upload(client, cid, "b.png", (20, 200, 20))
+    nodes = [
+        {"id": "nd_1", "save": {"path": a, "time": None, "ops": []}, "w": 60, "h": 60,
+         "quad": [[0, 0], [60, 0], [60, 60], [0, 60]]},
+        {"id": "nd_2", "save": {"path": b, "time": None, "ops": []}, "w": 60, "h": 60,
+         "quad": [[60, 0], [120, 0], [120, 60], [60, 60]]},
+    ]
+    saved = client.post(f"/api/cases/{cid}/collages", json={"title": "Street", "spec": {"width": 120, "height": 60, "nodes": nodes}})
+    assert saved.status_code == 200, saved.text
+    thumb = client.put(f"/api/cases/{cid}/collages/Street/thumb", files={"file": ("t.png", io.BytesIO(_png()), "image/png")})
+    assert thumb.status_code == 200, thumb.text
+    made = client.post(f"/api/cases/{cid}/inspect/compose", json={
+        "width": 120, "height": 60, "label": "Street", "collage": "Street",
+        "nodes": [{"src": {"path": a}, "quad": [[0, 0], [60, 0], [60, 60], [0, 60]]},
+                  {"src": {"path": b}, "quad": [[60, 0], [120, 0], [120, 60], [60, 60]]}],
+    })
+    assert made.status_code == 200, made.text
+    picture = made.json()["item"]["path"]
+    assert _entity(cid, "path", picture)["attrs"]["collage"] == "Street"
+
+    if route == "collage":
+        spec = client.get(f"/api/cases/{cid}/collages/Street").json()["spec"]
+        res = client.post(f"/api/cases/{cid}/collages", json={"name": "Street", "title": "Main street", "spec": spec})
+    else:
+        res = _rename_from_details(client, cid, _entity(cid, "spec", layout.collage_rel("Street"))["id"], "Main street")
+    assert res.status_code == 200, res.text
+
+    assert _entity(cid, "path", picture)["attrs"]["collage"] == "Main street"
+    collage = _entity(cid, "spec", layout.collage_rel("Main street"))
+    assert collage["label"] == "Main street"
+    # its preview goes with it, whichever way it was renamed
+    assert collage["attrs"]["thumb"] == layout.collage_thumb_rel("Main street")
+    case = Case.open(cid)
+    assert case.resolve_inside(layout.collage_thumb_rel("Main street")).is_file()
+    assert not case.resolve_inside(layout.collage_thumb_rel("Street")).exists()
+
+
 def test_a_media_rename_carries_a_post_s_descriptions_and_a_note_s_picture(client):
     cid = _case(client)
     photo = _upload(client, cid, "port (1).png")
@@ -474,3 +517,59 @@ def _names_anywhere(case: Case, olds: set[str]) -> list[str]:
         text = note.read_text(encoding="utf-8") if note.is_file() else ""
         found += [f"{note.name} · {old}" for old in olds if unquote(_address(case.id, old)) in unquote(text)]
     return found
+
+
+def test_renaming_everything_leaves_nothing_naming_an_old_file(client):
+    full = fullcase.build_full_case(client)
+    cid = full.case_id
+    case = Case.open(cid)
+    olds: set[str] = set()
+
+    def moved(type_, rel):
+        olds.update(old for old, _new in rename_engine._moves(type_, rel, rel))
+
+    # a proof, through its composer
+    moved("proof", full.proof)
+    assert _rename_proof(client, cid, Path(full.proof).stem, "Convoy at dawn").status_code == 200
+    # the post about it, through its own
+    moved("post", full.draft)
+    state = _state(client, cid, Path(full.draft).stem)
+    res = client.post(f"/api/cases/{cid}/drafts", json={"rename_from": Path(full.draft).stem, "title": "Posted thread", "state": state})
+    assert res.status_code == 200, res.text
+    # the collage layout, through Collage
+    moved("collage", full.collage_doc)
+    name = Path(full.collage_doc).stem
+    spec = client.get(f"/api/cases/{cid}/collages/{quote(name, safe='')}").json()["spec"]
+    assert client.post(f"/api/cases/{cid}/collages", json={"name": name, "title": "Street layout", "spec": spec}).status_code == 200
+    # the comparison, through Compare
+    moved("compare-session", full.compare_session)
+    name = Path(full.compare_session).stem
+    opened = client.get(f"/api/cases/{cid}/compare/sessions/{quote(name, safe='')}").json()
+    res = client.post(f"/api/cases/{cid}/compare/sessions", json={"rename_from": name, "title": "Harbour then and now", "spec": opened["spec"]})
+    assert res.status_code == 200, res.text
+    # the map plate, through Map plate
+    moved("map-plate", full.map_plate)
+    name = Path(full.map_plate).stem
+    loaded = client.get(f"/api/cases/{cid}/map-plates/{quote(name, safe='')}").json()
+    res = client.post(f"/api/cases/{cid}/map-plates", json={"rename_from": name, "title": "Situation at dawn", "spec": loaded["spec"]})
+    assert res.status_code == 200, res.text
+    # and from Details: the Horizon view, the sheet, the Inspect work, the video thread
+    for type_, attr, rel, label in (
+        ("horizon-view", "spec", full.horizon_view, "Ridge at noon"),
+        ("sheet", "path", full.sheet, "Shortlist"),
+        ("inspect-session", "spec", full.session, "Roof pass"),
+        ("post", "draft", full.thread_draft, "Dawn thread"),
+    ):
+        moved(type_, rel)
+        res = _rename_from_details(client, cid, case.find_entity(attr=attr, value=rel)["id"], label)
+        assert res.status_code == 200, res.text
+    # and a file, which every tool may name
+    olds.add(full.photo)
+    assert client.patch(f"/api/cases/{cid}/media", json={"path": full.photo, "title": "Harbour photo"}).status_code == 200
+
+    case = Case.open(cid)
+    assert _names_anywhere(case, olds) == []
+    thread = _state(client, cid, "Dawn thread")
+    assert [one["key"] for one in thread["extraTweets"]] == ["video", "place:Convoy at dawn"]
+    assert _state(client, cid, "Posted thread")["proofPng"] == "proofs/Convoy at dawn.png"
+    assert not rename_engine.record_journal(case).exists()

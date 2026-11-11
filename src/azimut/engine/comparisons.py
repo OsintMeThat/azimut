@@ -24,7 +24,6 @@ import math
 from typing import TYPE_CHECKING, Any
 
 from .. import layout
-from . import media as media_engine
 
 if TYPE_CHECKING:
     from ..workspace import Case
@@ -103,31 +102,6 @@ def moved(attrs: dict[str, Any], placed: dict[str, Any]) -> bool:
         return True
     return (abs(float(attrs["lat"]) - placed["lat"]) > 0.01
             or abs(float(attrs["lon"]) - placed["lon"]) > 0.01)
-
-
-def follow_rename(
-    case: Case, old_rel: str, new_rel: str, attr: str = SESSION_ATTR, key: str = "session"
-) -> None:
-    """Point every image made from a renamed comparison at its new name, on its
-    entity and in its sidecar, which is what the Saved panel groups by.
-
-    A saved Horizon view keeps its images the same way, under its own `attr`
-    and sidecar `key`."""
-    found: list[dict[str, Any]] = []
-    cursor: str | None = None
-    while True:
-        page = case.page_entities(limit=200, cursor=cursor, types=["media"],
-                                  attr=attr, attr_value=old_rel)
-        found.extend(page["items"])
-        cursor = page.get("next_cursor")
-        if not cursor:
-            break
-    for entity in found:
-        case.update_entity(entity["id"], {"attrs": {attr: new_rel}})
-        path = str((entity.get("attrs") or {}).get("path") or "")
-        item = media_engine.read_item(case, path) if path else None
-        if item and isinstance(item.get("source"), dict):
-            media_engine.merge_item(case, path, {"source": {**item["source"], key: new_rel}})
 
 
 def grouped(

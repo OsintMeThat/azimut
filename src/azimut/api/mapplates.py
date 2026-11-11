@@ -36,8 +36,9 @@ from starlette.concurrency import run_in_threadpool
 
 from .. import __version__, errors, layout
 from ..engine import artifacts as artifact_engine
-from ..engine import comparisons, exportdir, inspectwork, mapplates, snapshots
+from ..engine import exportdir, inspectwork, mapplates, snapshots
 from ..engine import media as media_engine
+from ..engine import renames as rename_engine
 from ..engine.sheets import replace_atomic
 from ..workspace import Case, CaseError
 from .cases import delete_by_path, get_case
@@ -144,44 +145,30 @@ def _save(case: Case, title: str, rename_from: str | None, spec: dict[str, Any])
         if name.casefold() in taken:
             name = layout.free_stem(taken, name, mapplates.FALLBACK)
     rel = layout.map_plate_rel(name)
+    # A rename lands first, on its own, a change of case included: the plate and its
+    # preview move, and the figures filed from it and whatever else names them follow
+    # (`engine/renames.py`). The save then writes onto the new name like any other.
+    if old_rel and case.resolve_inside(old_rel).is_file():
+        rename_engine.rename_record(case, mapplates.TYPE, old_rel, rel)
     path = case.resolve_inside(rel)
-    if old_rel and case_only(old, name):
-        source = case.resolve_inside(old_rel)
-        # The name asked for, not `path`'s: Windows resolves a path to the case already on disk.
-        if source.is_file():
-            path = source.with_name(PurePosixPath(rel).name)
-            media_engine.rename_path(source, path)
-    previous = path if old_rel and case_only(old, name) else case.resolve_inside(layout.map_plate_rel(old or name))
     saved = {
         "azimut_plate": mapplates.VERSION,
         "title": name,
-        "created_at": read_created_at(previous) or _now(),
+        "created_at": read_created_at(path) or _now(),
         "updated_at": _now(),
         "app_version": __version__,
         "spec": spec,
     }
     media_engine.write_json_atomic(path, saved)
-    thumb: str | None = None
-    if old_rel:
-        moved = case.resolve_inside(layout.map_plate_thumb_rel(old or name))
-        if moved.is_file():
-            target = layout.map_plate_thumb_rel(name)
-            media_engine.rename_path(moved, moved.with_name(PurePosixPath(target).name))
-            thumb = target
-    thumb = thumb or _thumb_of(case, name)
+    thumb = _thumb_of(case, name)
     attrs: dict[str, Any] = {"spec": rel}
     if thumb:
         attrs["thumb"] = thumb
-    existing = case.find_entity(attr="spec", value=old_rel or rel)
+    existing = case.find_entity(attr="spec", value=rel)
     if existing:
         case.update_entity(existing["id"], {"label": name, "attrs": attrs})
     else:
         case.add_entity(mapplates.TYPE, name, attrs=attrs, by=mapplates.PRODUCER)
-    if old_rel:
-        # the figures filed from the plate follow it to its new name
-        comparisons.follow_rename(case, old_rel, rel, mapplates.FIGURE_ATTR, "plate")
-    if old_rel and not case_only(old, name):
-        case.resolve_inside(old_rel).unlink(missing_ok=True)
     return {"name": name, "title": name, "spec_path": rel, "thumb": thumb}
 
 

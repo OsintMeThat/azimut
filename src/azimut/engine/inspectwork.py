@@ -1351,7 +1351,14 @@ def save_collage(
             if old_rel and final.casefold() in taken and final.casefold() != current.casefold():
                 raise NameTaken("another collage already uses that name")
         rel = layout.collage_rel(final)
-        previous = _read(case.resolve_inside(old_rel or rel)) or {}
+        if old_rel and case.resolve_inside(old_rel).is_file():
+            # A rename lands first, on its own, a change of case included: the collage
+            # and its preview move, and its exported picture and whatever else names
+            # them follow (`engine/renames.py`). The save then writes onto the new name.
+            from . import renames
+
+            renames.rename_record(case, COLLAGE_TYPE, old_rel, rel)
+        previous = _read(case.resolve_inside(rel)) or {}
         written = {
             "azimut_collage": COLLAGE_VERSION,
             "title": final,
@@ -1361,42 +1368,10 @@ def save_collage(
         }
         if previous.get("migrated_from"):
             written["migrated_from"] = previous["migrated_from"]
-        if old_rel and final.casefold() == current.casefold():
-            # A change of case only. Windows and macOS see one file under both
-            # names, so deleting "the old one" would delete the collage: rename it.
-            source = case.resolve_inside(old_rel)
-            if source.is_file():
-                media_engine.rename_path(source, source.with_name(Path(rel).name))
-            _write(case.resolve_inside(rel), written)
-            existing = case.find_entity(attr="spec", value=old_rel)
-            renamed = {"spec": rel, **_carry_thumb(case, current, final)}
-            if existing:
-                case.update_entity(existing["id"], {"label": final, "attrs": renamed})
-        elif old_rel:
-            # Written under the new name before the old file goes, so a crash in
-            # between leaves the collage twice rather than not at all.
-            _write(case.resolve_inside(rel), written)
-            existing = case.find_entity(attr="spec", value=old_rel)
-            renamed = {"spec": rel, **_carry_thumb(case, current, final)}
-            if existing:
-                case.update_entity(existing["id"], {"label": final, "attrs": renamed})
-            case.resolve_inside(old_rel).unlink(missing_ok=True)
-        else:
-            _write(case.resolve_inside(rel), written)
+        _write(case.resolve_inside(rel), written)
         if case.find_entity(attr="spec", value=rel) is None:
             case.add_entity(COLLAGE_TYPE, final, attrs={"spec": rel}, by=PRODUCER)
     return {"name": final, "title": final}
-
-
-def _carry_thumb(case: "Case", old: str, new: str) -> dict[str, str]:
-    """Move a renamed collage's preview along, and say where it went."""
-    source = case.resolve_inside(layout.collage_thumb_rel(old))
-    if not source.is_file():
-        return {}
-    target = layout.collage_thumb_rel(new)
-    # Not resolved: on Windows a path resolves to the case on disk, which is the old one.
-    media_engine.rename_path(source, source.with_name(Path(target).name))
-    return {"thumb": target}
 
 
 def _preview_image(raw: bytes) -> "Image.Image":
