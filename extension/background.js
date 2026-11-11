@@ -394,7 +394,8 @@ function altTexts(post, files) {
   const alt = {};
   for (const path of files) {
     const text = Object.hasOwn(given, path) ? given[path] : null;
-    if (typeof text === "string" && text.trim()) alt[path] = text.trim().slice(0, MAX_ALT);
+    // cut by character, never through the middle of one
+    if (typeof text === "string" && text.trim()) alt[path] = [...text.trim()].slice(0, MAX_ALT).join("");
   }
   return Object.keys(alt).length ? { alt } : {};
 }

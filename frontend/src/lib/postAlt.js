@@ -65,6 +65,8 @@ export function altLength(target, text) {
 }
 
 const said = (text) => typeof text === 'string' && text.trim() !== '';
+/** A text cut to the longest a field takes, never through the middle of a character. */
+const bounded = (text) => (text.length > ALT_MAX ? [...text].slice(0, ALT_MAX).join('') : text);
 
 /**
  * What a draft keeps of the texts: those of the pictures it carries that say something,
@@ -74,7 +76,7 @@ export function altRecord(texts, pictures) {
   const kept = {};
   for (const path of pictures ?? []) {
     const text = texts?.[path];
-    if (said(text)) kept[path] = text.slice(0, ALT_MAX);
+    if (said(text)) kept[path] = bounded(text);
   }
   return Object.keys(kept).length ? kept : null;
 }
@@ -84,7 +86,7 @@ export function readAltRecord(record) {
   if (!record || typeof record !== 'object' || Array.isArray(record)) return null;
   const kept = {};
   for (const [path, text] of Object.entries(record)) {
-    if (path && said(text)) kept[path] = text.slice(0, ALT_MAX);
+    if (path && said(text)) kept[path] = bounded(text);
   }
   return Object.keys(kept).length ? kept : null;
 }
@@ -97,7 +99,7 @@ export function withAltTexts(posts, texts) {
   return (posts ?? []).map((post) => {
     const alt = {};
     for (const path of post.files ?? []) {
-      if (said(texts?.[path])) alt[path] = texts[path].trim().slice(0, ALT_MAX);
+      if (said(texts?.[path])) alt[path] = bounded(texts[path].trim());
     }
     return Object.keys(alt).length ? { ...post, alt } : post;
   });

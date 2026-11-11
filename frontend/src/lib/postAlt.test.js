@@ -39,6 +39,10 @@ describe('what a draft keeps', () => {
     expect(altRecord({}, ['proofs/a.png'])).toBeNull();
     expect(altRecord(texts, [])).toBeNull();
     expect(altRecord({ 'media/long.png': 'x'.repeat(ALT_MAX + 5) }, ['media/long.png'])['media/long.png']).toHaveLength(ALT_MAX);
+    // cut by character, never through the middle of one the server would refuse to write
+    const flags = altRecord({ 'media/flags.png': '🇺🇦'.repeat(ALT_MAX) }, ['media/flags.png'])['media/flags.png'];
+    expect([...flags]).toHaveLength(ALT_MAX);
+    expect(flags.isWellFormed?.() ?? true).toBe(true);
   });
 
   it('reads a saved record, leaving out what is not a text', () => {
