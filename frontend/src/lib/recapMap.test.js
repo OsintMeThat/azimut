@@ -71,13 +71,13 @@ describe('the framing', () => {
       const [x, y] = project(fit.view, MAP_FRAME, [one.lon, one.lat]);
       expect(x / MAP_FRAME.width).toBeGreaterThan(0.1);
       expect(x / MAP_FRAME.width).toBeLessThan(0.9);
-      expect(y / MAP_FRAME.height).toBeGreaterThan(0.13);
-      expect(y / MAP_FRAME.height).toBeLessThan(0.82);
+      expect(y / MAP_FRAME.height).toBeGreaterThan(0.15);
+      expect(y / MAP_FRAME.height).toBeLessThan(0.75);
     }
     // the places fill the room left them on their tighter side: as close as the page allows
     const at = places.map((one) => project(fit.view, MAP_FRAME, [one.lon, one.lat]));
     const spread = (axis) => Math.max(...at.map((p) => p[axis])) - Math.min(...at.map((p) => p[axis]));
-    const filled = Math.max(spread(0) / (MAP_FRAME.width * 0.76), spread(1) / (MAP_FRAME.height * 0.65));
+    const filled = Math.max(spread(0) / (MAP_FRAME.width * 0.76), spread(1) / (MAP_FRAME.height * 0.58));
     expect(filled).toBeCloseTo(1, 3);
   });
 

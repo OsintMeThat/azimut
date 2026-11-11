@@ -71,9 +71,10 @@ const MM = 12;
 const PAGE = { width: MAP_WIDTH / MM, height: MAP_HEIGHT / MM };
 const BAND = 4.4; // the credits' band under the map, in millimetres
 const PIN = 6.5; // a pin's width, in millimetres
-// what the framing keeps clear round the places, as shares of the page: the scale, the
-// north, the signature and the credits sit in that margin
-const ROOM = { side: 0.12, top: 0.15, bottom: 0.2 };
+// what the framing keeps clear round the places' middles, as shares of the page, a pin's
+// half included: the scale, the north, the signature and the credits sit in that margin
+const ROOM = { side: 0.12, top: 0.16, bottom: 0.26 };
+const SCALE_BOX = [24, 6.5]; // the scale bar's box, in millimetres
 
 /** The colours a scene is drawn in on Inspect's bar (`app.css` --anno-N), for a picture. */
 const SCENE_HEX = {
@@ -184,8 +185,8 @@ export function recapPlate(fit, places, options, signed = { logo: null, text: nu
       box: [0, 0, PIN, PIN], fill: place.colour, colour: numberInk(place.colour), size: 10 });
   }
   elements.push(
-    { id: 'scale', kind: 'scale', of: 'map', fill: '#ffffff', size: 8,
-      box: [scale === 'bl' ? 3 : PAGE.width - 3 - 34, above - 3 - 7.5, 34, 7.5] },
+    { id: 'scale', kind: 'scale', of: 'map', fill: '#ffffff', size: 7,
+      box: [scale === 'bl' ? 3 : PAGE.width - 3 - SCALE_BOX[0], above - 3 - SCALE_BOX[1], ...SCALE_BOX] },
     { id: 'north', kind: 'north', of: 'map', fill: '#ffffff', box: [north === 'tr' ? PAGE.width - 3 - 7 : 3, 3, 7, 10] },
     { id: 'credits', kind: 'credits', of: 'map', size: 6, align: 'right', box: [0, above, PAGE.width, BAND] },
   );
