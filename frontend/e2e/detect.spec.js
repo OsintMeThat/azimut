@@ -528,14 +528,14 @@ test('a pin goes To Post with its picture, and the run offers its pins too', asy
   expect(errors).toEqual([]);
 });
 
-test('a run with nothing pinned says so, and has no picture to post', async ({ page }) => {
+test('a run with nothing pinned says how to post in place of its To Post', async ({ page }) => {
   const { errors, run } = await openDetect(page, true);
   run.results[0].review = 'noted';
   await page.getByRole('button', { name: 'Saved', exact: true }).click();
   await page.getByRole('button', { name: /^North site pass/ }).click();
-  const button = page.locator('.run-acts').getByRole('button', { name: 'To Post' });
-  await expect(button).toBeDisabled();
-  await expect(button).toHaveAttribute('title', 'Only a pin files a picture: pin a candidate first');
+  const acts = page.locator('.run-acts');
+  await expect(acts.getByText('Pin a candidate to post it', { exact: true })).toBeVisible();
+  await expect(acts.getByRole('button', { name: 'To Post' })).toHaveCount(0);
   expect(errors).toEqual([]);
 });
 

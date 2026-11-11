@@ -4354,7 +4354,7 @@ pin opens Post on a free post carrying its picture, told the pin's name, its
 description and the days of its passes. The run's own **To Post**, once something was
 kept, carries its pins' pictures in the queue's order, four at most as one post holds.
 A candidate only kept here has no picture and none is made for it, so a run of those
-says so on the button and posts nothing. Undo sends those
+shows *Pin a candidate to post it* where its To Post would be. Undo sends those
 copies to Trash, the claim with them unless something was added to it. Evidence is enlarged
 by a whole-number factor with no interpolation, so a candidate a dozen pixels
 across can be read without pretending to detail the sensor never recorded. The
