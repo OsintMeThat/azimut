@@ -133,7 +133,8 @@ test('offers Proof 100, made of Horizon\'s pictures of the video\'s collage, the
     const { uiState } = await import('/src/lib/state.svelte.js');
     uiState.openProof = 'proof-100';
   });
-  await expect(page.getByRole('textbox', { name: 'Proof name' })).toHaveValue('Proof 100');
+  // a name the app gave is never shown: the field waits for the analyst's own
+  await expect(page.getByRole('textbox', { name: 'Proof name' })).toHaveValue('');
   // its panels are no frames: the server is asked what they were made from
   await expect.poll(() => tieReads.at(-1)).toEqual([PHOTO, TERRAIN]);
   await showProofTab(page, 'Scene');

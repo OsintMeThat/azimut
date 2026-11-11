@@ -537,7 +537,7 @@ test('leaves a proof made by hand apart with Not this scene, and offers both sce
   await expect(matchLine(page)).toHaveCount(0);
   await expect(sceneBlock(page).getByTestId('scene-video')).toHaveText(/★\s*Steps\s*·\s*Whole video/);
   // the strip keeps Bridge? to geolocate, the new slide after the scenes
-  await expect(stripTiles(page).locator('.tile-title')).toHaveText(['Bridge?', 'Tower?', /^Proof/]);
+  await expect(stripTiles(page).locator('.tile-title')).toHaveText(['Bridge?', 'Tower?', 'New slide']);
 
   // saved, it states no scene, and the refusal holds for this proof once listed
   const saved = await saveClip(page, saves, 1);
