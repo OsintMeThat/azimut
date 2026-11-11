@@ -362,10 +362,10 @@
   });
   onDestroy(() => withdrawNote('proof'));
 
-  // ---- into the note pinned beside -------------------------------------------
-  // "This proof" is the proof as saved: an unsaved one goes through the same save
-  // a press of Save proof runs, its point check and name question included, and
-  // the put waits for it. A save that does not land puts nothing in.
+  // ---- a save another act waits for ---------------------------------------------
+  // The same save a press of Save proof runs, its point check and name question
+  // included, for what needs the proof saved first: the note pinned beside, the cut
+  // for the post. Answers once it is over, landed or not.
   let saveWaiters = [];
   $effect(() => {
     if (saving || checking || overwritePrompt) return;
@@ -374,23 +374,36 @@
     for (const settle of waiting) settle();
   });
 
-  function savedForNote({ signal } = {}) {
-    return new Promise((resolve, reject) => {
-      const settle = () => {
-        if (signal?.aborted) reject(new DOMException('Stopped', 'AbortError'));
-        else if (dirty || !savedName) reject(new Error('The proof was not saved, so nothing went in'));
-        else statedForNote().then(resolve, reject);
-      };
-      if (!dirty && savedName) return settle();
-      if (!proofHasContent) return reject(new Error('The proof is empty'));
-      saveWaiters.push(settle);
+  function saveSettled() {
+    return new Promise((resolve) => {
+      saveWaiters.push(resolve);
       void save();
       // A save refused before it began leaves nothing to wait for.
       if (!saving && !checking && !overwritePrompt) {
-        saveWaiters = saveWaiters.filter((one) => one !== settle);
-        settle();
+        saveWaiters = saveWaiters.filter((one) => one !== resolve);
+        resolve();
       }
     });
+  }
+
+  // ---- into the note pinned beside -------------------------------------------
+  // "This proof" is the proof as saved: an unsaved one is saved first and the put
+  // waits for it. A save that does not land puts nothing in.
+  function savedForNote({ signal } = {}) {
+    const settle = () => {
+      if (signal?.aborted) throw new DOMException('Stopped', 'AbortError');
+      if (dirty || !savedName) throw new Error('The proof was not saved, so nothing went in');
+      return statedForNote();
+    };
+    if (!dirty && savedName) return Promise.resolve().then(settle);
+    if (!proofHasContent) return Promise.reject(new Error('The proof is empty'));
+    return saveSettled().then(settle);
+  }
+
+  /** Cut for the post on a proof never saved: where its save put it, or null when it stopped. */
+  async function savedForClip() {
+    if (!savedName) await saveSettled();
+    return savedName ? { caseId: caseState.current?.id, name: savedName } : null;
   }
 
   /** The saved proof's record, and what it states, as the note puts them. */
@@ -8223,7 +8236,7 @@
              player has the tab to itself, and is paused whenever the tab is left. -->
         {#if scene.videos.length}
           <div class="side-scroll" role="tabpanel" id="proof-pane-scene" aria-labelledby="proof-tab-scene" hidden={sideShown !== 'scene'}>
-            <SceneBlock {scene} caseId={caseState.current?.id} color={sceneHue} active={sideShown === 'scene'} onaddframe={addSceneFrame} />
+            <SceneBlock {scene} caseId={caseState.current?.id} color={sceneHue} active={sideShown === 'scene'} onaddframe={addSceneFrame} onsave={savedForClip} />
           </div>
         {/if}
 

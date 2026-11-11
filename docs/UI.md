@@ -4656,9 +4656,14 @@ left of each ★ panel, the passage that panel's frame shows in. It is drawn on 
 A proof about the whole video has no time to print, and the house style leaves it to
 each proof.
 
-**Cut for the post** sits on one quiet line under the video's field of a saved proof that
-states a passage, one press per passage when it states several; an instant has nothing to
-cut. It cuts the passage into a video of its own, filed in Media as Inspect's files are
+**Cut for the post** sits on one quiet line under the video's field of a proof that
+states a passage, one press per passage when it states several; an instant, or the whole
+video, has nothing to cut. On a proof never saved, the passage can be the time of the
+scene its frames found, and the press saves the proof first through the normal save, its
+point check and name question included, the line saying *Saving the proof first…*; the
+cut starts once the save landed. A save that stops or is cancelled cuts nothing, and the
+line says *The proof was not saved, so nothing was cut.* It cuts the passage into a
+video of its own, filed in Media as Inspect's files are
 (`clip 2m10s–2m38s`, after the video's title), and the proof's scene keeps it for its
 post: its To Post attaches the clip in place of the whole video. The line says *Cutting 2:10–2:38… 40%* while it runs, then *Clip · 28 s · 4.2 MB*,
 its passage named when the proof states several, with **Show in Media**, which lets the working file through Media's switch, and

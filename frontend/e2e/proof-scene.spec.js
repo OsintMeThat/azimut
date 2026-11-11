@@ -841,4 +841,37 @@ test('cuts a passage for the post, says how far it got, then shows the clip, sho
   await expect(card).toHaveClass(/focused/);
 });
 
+test('on a proof never saved, Cut for the post saves the proof first, then cuts once the save landed', async ({ page }) => {
+  test.setTimeout(60_000);
+  const { fixture, scenePuts, media } = await openCase(page);
+  const { cut } = await serveClips(page, media);
+  // the proof of a scene of Inspect, as Make the proof hands it over: a passage, never saved
+  await page.evaluate(async () => {
+    const { uiState } = await import('/src/lib/state.svelte.js');
+    uiState.proofScene = {
+      video: 'media/steps.webm', moments: [{ start: 0.2, end: 1 }], draft: 's3',
+      panels: ['media/frame-a.png', 'media/frame-b.png'], label: 'Road bridge?',
+    };
+  });
+  await expect(page.locator('.panel-row')).toHaveCount(2);
+  await showProofTab(page, 'Scene');
+  const line = sceneBlock(page).getByTestId('scene-clip');
+  await expect(line).toHaveText(/^\s*Cut for the post\s*$/);
+  const press = line.getByRole('button', { name: 'Cut for the post' });
+  await expect(press).toHaveAttribute('title', 'Save the proof, then cut this passage into a short video for the post');
+  expect(fixture.proofSaves).toHaveLength(0);
+
+  await press.click();
+  // the normal save, its scene written by its own route, then the cut
+  await expect.poll(() => fixture.proofSaves.length).toBe(1);
+  await expect.poll(() => scenePuts.length).toBe(1);
+  expect(scenePuts[0].body).toEqual({ moments: [{ start: 0.2, end: 1 }], video: VIDEO, draft: 's3' });
+  await expect.poll(() => cut.posts.length).toBe(1);
+  expect(cut.posts).toEqual([{ start: 0.2, end: 1 }]);
+  await expect(line).toContainText('Cutting 0:00–0:01… 45%');
+  cut.release();
+  await expect(line).toContainText('Clip · 1 s · 1.2 MB');
+  expect(fixture.proofSaves).toHaveLength(1);
+});
+
 const theme = (page) => page.evaluate(() => document.documentElement.dataset.theme || 'dark');
