@@ -27,17 +27,16 @@ afterEach(() => {
 });
 
 describe('Post actions', () => {
-  it('keeps Add to notes in the header\'s ⋯, and no Save button: a post saves itself', () => {
+  it('keeps Add to notes in the header, and no Save button: a post saves itself', () => {
     caseState.current = { id: 'case-1', folders: [], entities: [] };
 
     const { body } = render(PostComposer);
 
-    expect(body).toContain('aria-label="More for this post"');
+    expect(body).toContain('aria-label="Add to notes"');
     expect(body).toContain('Publish on');
     expect(body).not.toContain('Save report');
     expect(body).not.toContain('Save as draft');
     expect(body).not.toContain('Copy report');
-    expect(source).toContain('Add to notes…');
     expect(source).toContain("createAutosave({ write: () => writeDraft() })");
   });
 
@@ -50,7 +49,6 @@ describe('Post actions', () => {
   });
 
   it('says what Add to notes produces', () => {
-    expect(source).toContain('title="Write this post into a new case note, with its proof and media"');
     expect(source).toContain('Writes this post into a new case note: its place, its source and its pictures. The post stays as it is.');
   });
 

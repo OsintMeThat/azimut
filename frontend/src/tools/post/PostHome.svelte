@@ -6,9 +6,11 @@
    * its platform and how many posts it holds; **Ready to post**, the proofs no draft names
    * yet and the videos whose slides wait, one press starting the right post; and
    * **Posted**, the latest to go out, with their link (`postHome.js`). Every post card
-   * wears its state as a pill, and its ⋯ or a right-click opens it, copies its link once
-   * posted and deletes it. A proof waiting has one too, for a post already out
-   * (**Already posted…**: its post started as a press does, then its link field).
+   * wears its state as a pill (Draft, Posted, Changed since posted), and its ⋯ or a
+   * right-click opens it, marks it posted (**Mark as posted…**, with its link or without,
+   * in a popover on the card) or not, copies its link once posted and deletes it. A proof
+   * waiting has one too, for a post already out (**Mark as posted…**: its post started as
+   * a press does, then the header's popover).
    *
    * The composer decides when this shows: a case holding no draft and no proof keeps the
    * composer as it always was. Both lists arrive from the composer, null while read.
@@ -21,8 +23,9 @@
   import { slideTag } from '../../lib/proofList.js';
   import { sceneColorAt } from '../../lib/scenes.js';
   import { postKind, STARTABLE_POST_KINDS } from '../../lib/post.js';
+  import MarkPosted from './MarkPosted.svelte';
   import {
-    draftLine, draftPicture, draftPill, findDrafts, homeDrafts, readyToPost, recentDrafts, shortLink,
+    draftLine, draftPicture, draftPill, findDrafts, homeDrafts, isPosted, postedOn, readyToPost, recentDrafts, shortLink,
   } from './postHome.js';
 
   let {
@@ -40,8 +43,12 @@
     onall,
     /** `(row)`: start a Geolocation post of this proof. */
     onproof,
-    /** `(row)`: start it the same way, for a post already out, its link field waiting. */
+    /** `(row)`: start it the same way, for a post already out, the header's Mark as posted open. */
     onposted,
+    /** `(draft, url)`: mark this post posted, with this link or none (null). */
+    onmark,
+    /** `(draft)`: Not posted, for a post marked posted by mistake. */
+    onunmark,
     /** `(draft)`: ask to delete this post (the composer holds the dialog). */
     ondelete,
   } = $props();
@@ -66,7 +73,9 @@
 
   // A card's ⋯, under it or at the pointer for a right-click: a post's, or a waiting proof's.
   let menu = $state(null); // { draft?, proof?, anchor?, at? }
-  const menuFor = (one) => menu && (menu.draft === one || menu.proof === one);
+  // Mark as posted… on a post's card: its popover, where its menu stood.
+  let marking = $state(null); // { draft, anchor?, at? }
+  const menuFor = (one) => (menu && (menu.draft === one || menu.proof === one)) || marking?.draft === one;
   function openMenu(item, anchor) {
     menu = menuFor(item.draft ?? item.proof) ? null : { ...item, anchor };
   }
@@ -75,13 +84,21 @@
     menu = { ...item, at: { x: event.clientX, y: event.clientY } };
   }
   function act(what) {
-    const { draft, proof } = menu;
+    const { draft, proof, anchor, at } = menu;
     menu = null;
     if (what === 'open') onopen?.(draft);
     else if (what === 'copy') copyText(draft.posted.url, { said: 'Link copied' });
     else if (what === 'delete') ondelete?.(draft);
+    else if (what === 'mark') marking = { draft, anchor, at };
+    else if (what === 'unmark') onunmark?.(draft);
     else if (what === 'write') onproof?.(proof);
     else if (what === 'posted') onposted?.(proof);
+  }
+
+  function mark(url) {
+    const { draft } = marking;
+    marking = null;
+    onmark?.(draft, url);
   }
 </script>
 
@@ -104,7 +121,7 @@
       </span>
       <span class="ph-card-words">
         <span class="ph-title" dir="auto">{draft.title}</span>
-        <span class="ph-said"><span class="ph-line">{draftLine(draft)}</span><span class="ph-when">{timeAgo(pill.state === 'posted' ? draft.posted?.at ?? draft.updated_at : draft.updated_at)}</span></span>
+        <span class="ph-said"><span class="ph-line">{draftLine(draft)}</span><span class="ph-when">{pill.state === 'posted' ? postedOn(draft) : timeAgo(draft.updated_at)}</span></span>
       </span>
     </button>
     {#if draft.posted?.url}
@@ -112,7 +129,7 @@
         <Icon name="external" size={11} /><span>{shortLink(draft.posted.url)}</span>
       </a>
     {/if}
-    <button type="button" class="ph-more" aria-label={`More for ${draft.title}`} title="Open or delete this post" aria-haspopup="menu"
+    <button type="button" class="ph-more" aria-label={`More for ${draft.title}`} title="Open, mark or delete this post" aria-haspopup="menu"
       aria-expanded={!!menuFor(draft)} onclick={(event) => openMenu({ draft }, event.currentTarget)}>
       <Icon name="more" size={13} stroke={2.6} />
     </button>
@@ -171,8 +188,7 @@
 
       {#if ready.photos.length || ready.videos.length}
         <div class="ph-head">
-          <h4>Ready to post</h4>
-          <span class="ph-count">No post yet</span>
+          <span class="ph-titles"><h4>Ready to post</h4><span class="ph-sub">Proofs with no post yet</span></span>
         </div>
         {#if ready.photos.length}
           <div class="ph-cards">
@@ -185,7 +201,7 @@
                     <span class="ph-said"><span class="ph-line"><Icon name="crosshair" size={11} /> Geolocation</span><span class="ph-when">{timeAgo(row.updated_at)}</span></span>
                   </span>
                 </button>
-                <button type="button" class="ph-more" aria-label={`More for ${row.title}`} title="Write its post, or say it is posted already" aria-haspopup="menu"
+                <button type="button" class="ph-more" aria-label={`More for ${row.title}`} title="Write its post, or mark it posted" aria-haspopup="menu"
                   aria-expanded={!!menuFor(row)} onclick={(event) => openMenu({ proof: row }, event.currentTarget)}>
                   <Icon name="more" size={13} stroke={2.6} />
                 </button>
@@ -249,10 +265,17 @@
   <FloatingMenu anchor={menu.anchor ?? null} at={menu.at ?? null} width={220} label={draft.title} onclose={() => (menu = null)}>
     <p class="fm-head" dir="auto">{draft.title}</p>
     <button type="button" class="fm-item" onclick={() => act('open')}><Icon name="folderOpen" size={14} /><span class="fm-grow">Open</span></button>
-    {#if draft.posted?.url}
-      <a class="fm-item" href={draft.posted.url} target="_blank" rel="noreferrer" onclick={() => (menu = null)}>
-        <Icon name="external" size={14} /><span class="fm-grow">See the post</span></a>
-      <button type="button" class="fm-item" onclick={() => act('copy')}><Icon name="copy" size={14} /><span class="fm-grow">Copy link</span></button>
+    {#if !isPosted(draft)}
+      <button type="button" class="fm-item" title="Say it went out, with its link if you have it" onclick={() => act('mark')}>
+        <Icon name="check" size={14} /><span class="fm-grow">Mark as posted…</span></button>
+    {:else}
+      {#if draft.posted?.url}
+        <a class="fm-item" href={draft.posted.url} target="_blank" rel="noreferrer" onclick={() => (menu = null)}>
+          <Icon name="external" size={14} /><span class="fm-grow">See the post</span></a>
+        <button type="button" class="fm-item" onclick={() => act('copy')}><Icon name="copy" size={14} /><span class="fm-grow">Copy link</span></button>
+      {/if}
+      <button type="button" class="fm-item" title="Back to Draft, for a post marked posted by mistake" onclick={() => act('unmark')}>
+        <Icon name="undo" size={14} /><span class="fm-grow">Not posted</span></button>
     {/if}
     <div class="fm-sep"></div>
     <button type="button" class="fm-item danger" title="Send it to the Trash, from where it can be restored" onclick={() => act('delete')}>
@@ -263,9 +286,13 @@
   <FloatingMenu anchor={menu.anchor ?? null} at={menu.at ?? null} width={220} label={proof.title} onclose={() => (menu = null)}>
     <p class="fm-head" dir="auto">{proof.title}</p>
     <button type="button" class="fm-item" onclick={() => act('write')}><Icon name="post" size={14} /><span class="fm-grow">Write its post</span></button>
-    <button type="button" class="fm-item" title="Start its post and paste the link it went out at" onclick={() => act('posted')}>
-      <Icon name="link" size={14} /><span class="fm-grow">Already posted…</span></button>
+    <button type="button" class="fm-item" title="Start its post and say it went out" onclick={() => act('posted')}>
+      <Icon name="check" size={14} /><span class="fm-grow">Mark as posted…</span></button>
   </FloatingMenu>
+{/if}
+
+{#if marking}
+  <MarkPosted anchor={marking.anchor ?? null} at={marking.at ?? null} align="end" onsubmit={mark} oncancel={() => (marking = null)} />
 {/if}
 
 <style>
@@ -302,6 +329,8 @@
   .ph-head { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; margin: 24px 0 10px; }
   h4 { margin: 0; color: var(--text-3); font-size: 10.5px; font-weight: 700; letter-spacing: 0.07em; text-transform: uppercase; }
   .ph-count { color: var(--text-3); font-size: var(--fs-xs); }
+  .ph-titles { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
+  .ph-sub { color: var(--text-3); font-size: var(--fs-xs); }
   .ph-link { color: var(--text-2); font-size: var(--fs-xs); }
   .ph-link:hover { color: var(--accent); }
 
@@ -373,9 +402,6 @@
     box-shadow: 0 0 0 1px var(--border);
   }
   .ph-pill.flat { position: static; flex: none; box-shadow: none; background: var(--bg-3); }
-  .ph-pill.opened { background: color-mix(in srgb, var(--accent) 22%, var(--bg-0)); color: var(--accent); box-shadow: none; }
-  /* a found draft's pill sits on white in the light theme, where amber on amber is too faint */
-  :global(:root[data-theme='light']) .ph-pill.flat.opened { color: color-mix(in srgb, var(--accent) 60%, var(--text-1)); }
   .ph-pill.posted { background: color-mix(in srgb, var(--ok) 22%, var(--bg-0)); color: var(--ok); box-shadow: none; }
   .ph-pill.changed { background: color-mix(in srgb, var(--warn) 24%, var(--bg-0)); color: var(--warn); box-shadow: none; }
   .ph-pic {

@@ -13,6 +13,8 @@
  * one tab reload — Settings says so next to the install button.
  */
 
+import { postedAddress } from './post.js';
+
 const CHANNEL = 'azimut-capture-ext';
 
 /** The installed extension's version, or null. */
@@ -189,6 +191,69 @@ export function onSceneProof(take, win = window) {
       }
     }
     win.postMessage({ channel: CHANNEL, ...answer, type: 'scene-proof-result', id: msg.id }, win.location.origin);
+  };
+  win.addEventListener('message', onMessage);
+  return () => win.removeEventListener('message', onMessage);
+}
+
+/** At most this many characters of a hand-off's sentence, and of its report. */
+export const MAX_REPORT_ERROR = 300;
+export const MAX_REPORT_TEXT = 8000;
+
+const bounded = (value, max) => (typeof value === 'string' && value && value.length <= max ? value : null);
+
+/**
+ * A link the extension caught for a post (`post-link-caught`), or null when it is not
+ * one: the case and the draft it names, the post's link written the one way
+ * (`lib/post.js` `postedAddress`, on the site it names), and when it was caught.
+ */
+export function caughtPostLink(msg) {
+  const caseId = bounded(msg?.caseId, 200);
+  const draft = bounded(msg?.draft, 200);
+  const found = typeof msg?.url === 'string' && msg.url.length <= 300 ? postedAddress(msg.url) : null;
+  if (!caseId || !draft || !found || found.site !== msg.site) return null;
+  const at = bounded(msg.at, 64) ?? (Number.isFinite(msg.at) ? msg.at : null);
+  return { caseId, draft, url: found.url, site: found.site, at };
+}
+
+/**
+ * Subscribe to the links the extension's bridge says it caught once a post went out on
+ * X or Bluesky. Only a link that parses as a post's is passed on, as `{ caseId, draft,
+ * url, site, at }`: what to do with it is the composer's, which proposes it and keeps
+ * nothing by itself. Returns an unsubscribe function.
+ */
+export function onPostLinkCaught(cb, win = window) {
+  const onMessage = (event) => {
+    if (event.origin !== win.location.origin) return;
+    const msg = event.data;
+    if (!msg || msg.channel !== CHANNEL || msg.type !== 'post-link-caught') return;
+    const link = caughtPostLink(msg);
+    if (link) cb(link);
+  };
+  win.addEventListener('message', onMessage);
+  return () => win.removeEventListener('message', onMessage);
+}
+
+/**
+ * Subscribe to what the extension reports of a hand-off that went wrong while it filled
+ * the composer: `{ caseId, draft, error, report }`, the sentence to show and a short
+ * plain text to copy, each cut to its bound. Returns an unsubscribe function.
+ */
+export function onPostHandoffReport(cb, win = window) {
+  const onMessage = (event) => {
+    if (event.origin !== win.location.origin) return;
+    const msg = event.data;
+    if (!msg || msg.channel !== CHANNEL || msg.type !== 'post-handoff-report') return;
+    const caseId = bounded(msg.caseId, 200);
+    if (!caseId || typeof msg.error !== 'string' || !msg.error.trim()) return;
+    if (msg.report != null && typeof msg.report !== 'string') return;
+    const cut = (text, max) => (text.length > max ? `${text.slice(0, max - 1)}…` : text);
+    cb({
+      caseId,
+      draft: bounded(msg.draft, 200),
+      error: cut(msg.error.trim(), MAX_REPORT_ERROR),
+      report: cut(msg.report ?? '', MAX_REPORT_TEXT),
+    });
   };
   win.addEventListener('message', onMessage);
   return () => win.removeEventListener('message', onMessage);

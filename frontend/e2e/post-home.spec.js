@@ -155,9 +155,11 @@ test.describe('the home in three parts', () => {
     const home = page.getByTestId('post-home');
     await expect(home.locator('h4')).toHaveText(['In progress', 'Ready to post', 'Posted']);
     await expect(home.getByRole('button', { name: 'New post' })).toBeVisible();
+    await expect(home.locator('.ph-sub')).toHaveText('Proofs with no post yet');
     const progress = home.locator('[data-part="progress"]');
     await expect(progress.locator('.ph-title')).toHaveText(['Bridge thread', 'Harbour words', 'Opened one']);
-    await expect(progress.locator('.ph-pill')).toHaveText(['Draft', 'Draft', 'Opened in X']);
+    // an earlier build's opened post is a draft: three states only
+    await expect(progress.locator('.ph-pill')).toHaveText(['Draft', 'Draft', 'Draft']);
     const posted = home.locator('[data-part="posted"]');
     await expect(posted.locator('.ph-title')).toHaveText(['Gone out']);
     await expect(posted.locator('.ph-pill')).toHaveText(['Posted']);
@@ -166,7 +168,7 @@ test.describe('the home in three parts', () => {
     // a right-click and the ⋯ open the same menu
     await progress.locator('.post-card', { hasText: 'Harbour words' }).click({ button: 'right' });
     const menu = page.locator('.float-menu[aria-label="Harbour words"]');
-    await expect(menu.locator('.fm-item')).toHaveText(['Open', 'Delete…']);
+    await expect(menu.locator('.fm-item')).toHaveText(['Open', 'Mark as posted…', 'Delete…']);
     await page.keyboard.press('Escape');
     await progress.locator('.post-card', { hasText: 'Harbour words' }).hover();
     await progress.getByRole('button', { name: 'More for Harbour words' }).click();
@@ -256,9 +258,10 @@ test.describe('a post saves itself', () => {
     await home.locator('.ph-card', { hasText: 'Harbour words' }).click();
     await expect(page.getByRole('textbox', { name: 'Post name' })).toHaveValue('Harbour words');
 
+    await expect(page.locator('.tool-header').getByRole('button', { name: 'Add to notes' })).toBeEnabled();
     await page.getByRole('button', { name: 'More for this post' }).click();
     const menu = page.locator('.float-menu[aria-label="This post"]');
-    await expect(menu.locator('.fm-item')).toHaveText(['Add to notes…', 'Delete…']);
+    await expect(menu.locator('.fm-item')).toHaveText(['Delete…']);
     await menu.getByRole('button', { name: 'Delete…' }).click();
     const ask = page.getByRole('alertdialog', { name: 'Delete this post?' });
     await ask.getByRole('button', { name: 'Delete', exact: true }).click();
@@ -272,52 +275,66 @@ test.describe('a post saves itself', () => {
   });
 });
 
-test.describe('the link to the post', () => {
-  test('waits after Publish, refuses what is no post, and the link pasted marks it posted', async ({ page }) => {
+test.describe('Mark as posted', () => {
+  const POSTED = 'https://x.com/desk/status/1850000000000000009';
+
+  test('waits in the accent after Publish, refuses what is no post, and Enter marks it posted with its link', async ({ page }) => {
     await catchWhatLeaves(page);
     const fixture = await installAppFixture(page, { proofList: [PROOFS[0]], lookupEntities: lookups });
     await postRoutes(page);
     await page.goto('/#post');
     await page.getByTestId('post-home').locator('.ph-card').first().click();
     await expect(page.locator('.tweet-block textarea').first()).toHaveValue(FIRST_POST);
+    await expect(page.getByRole('textbox', { name: 'Link to your post' })).toHaveCount(0);
 
-    const field = page.getByRole('textbox', { name: 'Link to your post' });
-    const said = page.locator('.link-said');
-    await expect(field).toHaveAttribute('placeholder', "Paste it once it's posted");
-    await expect(said).toHaveCount(0);
-    await page.getByRole('button', { name: 'Publish on X' }).click();
-    await expect(said).toHaveText("Opened in X · paste its link here once it's posted");
+    const header = page.locator('.tool-header');
+    const mark = header.getByRole('button', { name: 'Mark as posted' });
+    await expect(mark).not.toHaveClass(/accent/);
+    await header.getByRole('button', { name: 'Publish on X' }).click();
+    await expect(mark).toHaveClass(/accent/);
 
+    await mark.click();
+    const ask = page.getByRole('dialog', { name: 'Mark as posted' });
+    const field = ask.getByRole('textbox', { name: 'Link to the post (optional)' });
+    await expect(field).toBeFocused();
+    await expect(field).toHaveAttribute('placeholder', 'https://x.com/…');
+    await expect(ask).toContainText('Keeps it with the proof and dates it.');
     await field.fill('https://example.com/elsewhere');
     await field.press('Enter');
-    await expect(said).toHaveText('That is not the link of an X or Bluesky post.');
+    await expect(ask.getByRole('alert')).toHaveText('That is not the link of an X or Bluesky post.');
     await field.fill('x.com/desk/status/1850000000000000009?s=20');
     await field.press('Enter');
-    await expect(field).toHaveValue('https://x.com/desk/status/1850000000000000009');
-    await expect(said).toHaveText(/^Posted on X · \d{1,2} [A-Z][a-z]{2} \d{4}$/);
-    await expect(page.getByRole('link', { name: 'Open the post' })).toHaveAttribute('href', 'https://x.com/desk/status/1850000000000000009');
-    await page.getByRole('button', { name: 'Copy the link' }).click();
-    await expect(page.locator('.toast', { hasText: 'Link copied' })).toBeVisible();
-    expect((await page.evaluate(() => window.__clipboard)).at(-1)).toEqual({ text: 'https://x.com/desk/status/1850000000000000009' });
-    await expect.poll(() => fixture.draftWrites.at(-1)?.state.publish).toMatchObject({
-      site: 'x', url: 'https://x.com/desk/status/1850000000000000009', changed: false,
-    });
+    await expect(ask).toHaveCount(0);
+    await expect(page.locator('.toast', { hasText: 'Marked as posted' })).toBeVisible();
 
-    // an edit after it went out says so
+    const pill = header.locator('.pc-pill');
+    // its day is the one the link's own id holds
+    await expect(pill).toHaveText('Posted · 26 Oct 2024');
+    await pill.click();
+    const menu = page.locator('.float-menu[aria-label="Where this post stands"]');
+    await expect(menu.locator('.fm-item')).toHaveText(['Open the post', 'Copy link', 'Change link…', 'Not posted']);
+    await expect(menu.getByRole('link', { name: 'Open the post' })).toHaveAttribute('href', POSTED);
+    await menu.getByRole('button', { name: 'Copy link' }).click();
+    await expect(page.locator('.toast', { hasText: 'Link copied' })).toBeVisible();
+    expect((await page.evaluate(() => window.__clipboard)).at(-1)).toEqual({ text: POSTED });
+    await expect.poll(() => fixture.draftWrites.at(-1)?.state.publish).toMatchObject({ site: 'x', url: POSTED, changed: false });
+    expect(fixture.draftWrites.at(-1).state.publish.opened_at).toBeUndefined();
+
+    // an edit after it went out says so, in amber
     await page.locator('#pc-desc').fill('A second look at the bridge');
-    await expect(said).toHaveText('Changed since posted');
+    await expect(pill).toHaveText('Changed since posted');
+    await expect(pill).toHaveClass(/changed/);
     await expect.poll(() => fixture.draftWrites.at(-1)?.state.publish.changed).toBe(true);
 
-    // a wrong link taken back: opened again, the link gone from the draft
-    await page.getByRole('button', { name: 'Clear the link' }).click();
-    await expect(field).toHaveValue('');
-    await expect(field).toBeFocused();
-    await expect(said).toHaveText(/^Opened in X/);
-    await expect.poll(() => fixture.draftWrites.at(-1)?.state.publish).toEqual({ site: 'x', opened_at: expect.any(String) });
+    // marked by mistake: a draft again, nothing of it kept
+    await pill.click();
+    await menu.getByRole('button', { name: 'Not posted' }).click();
+    await expect(mark).toBeVisible();
+    await expect.poll(() => fixture.draftWrites.at(-1)?.state.publish).toBeUndefined();
     fixture.expectNoUnexpectedRequests();
   });
 
-  test('Already posted… on a waiting proof starts its post, and its link files it as posted', async ({ page }) => {
+  test('Mark as posted… on a waiting proof starts its post, and the header marks it with no link', async ({ page }) => {
     const fixture = await installAppFixture(page, { proofList: [PROOFS[0], PROOFS[1]], lookupEntities: lookups });
     await postRoutes(page);
     await page.goto('/#post');
@@ -326,20 +343,19 @@ test.describe('the link to the post', () => {
     await card.hover();
     await card.getByRole('button', { name: 'More for Vincent Thomas Bridge' }).click();
     const menu = page.locator('.float-menu[aria-label="Vincent Thomas Bridge"]');
-    await expect(menu.locator('.fm-item')).toHaveText(['Write its post', 'Already posted…']);
-    await menu.getByRole('button', { name: 'Already posted…' }).click();
+    await expect(menu.locator('.fm-item')).toHaveText(['Write its post', 'Mark as posted…']);
+    await menu.getByRole('button', { name: 'Mark as posted…' }).click();
 
     await expect(home).toHaveCount(0);
     await expect(page.locator('.tweet-block textarea').first()).toHaveValue(FIRST_POST);
-    const field = page.getByRole('textbox', { name: 'Link to your post' });
-    await expect(field).toBeFocused();
-    // the text lands as a paste puts it there, and the paste alone takes it: no Enter, no leaving
-    await field.fill('https://x.com/desk/status/1850000000000000009');
-    await field.dispatchEvent('paste');
-    await expect(page.locator('.link-said')).toHaveText(/^Posted on X/);
+    const ask = page.getByRole('dialog', { name: 'Mark as posted' });
+    await expect(ask.getByRole('textbox', { name: 'Link to the post (optional)' })).toBeFocused();
+    await ask.getByRole('button', { name: 'Mark as posted' }).click();
+    await expect(page.locator('.tool-header .pc-pill')).toHaveText(/^Posted · \d{1,2} [A-Z][a-z]{2}$/);
     await expect.poll(() => fixture.draftWrites.at(-1)?.state).toMatchObject({
-      proofPng: 'proofs/bridge.png', publish: { site: 'x', url: 'https://x.com/desk/status/1850000000000000009', changed: false },
+      proofPng: 'proofs/bridge.png', publish: { site: 'x', changed: false },
     });
+    expect(fixture.draftWrites.at(-1).state.publish.url).toBeUndefined();
 
     await page.locator('.tool-header').getByRole('button', { name: 'Posts' }).click();
     const posted = home.locator('[data-part="posted"]');
@@ -347,6 +363,53 @@ test.describe('the link to the post', () => {
     // the proof has its post now, and only the other one waits
     await expect(home.locator('.post-card', { hasText: 'Vincent Thomas Bridge' })).toHaveCount(0);
     await expect(home.locator('.post-card', { hasText: 'Container terminal' })).toHaveCount(1);
+    fixture.expectNoUnexpectedRequests();
+  });
+
+  test('a post in progress is marked from its card, and shows under Posted without a reload', async ({ page }) => {
+    const fixture = await installAppFixture(page, { drafts: DRAFTS, proofList: PROOFS, lookupEntities: lookups });
+    await postRoutes(page);
+    await page.goto('/#post');
+    const home = page.getByTestId('post-home');
+    const progress = home.locator('[data-part="progress"]');
+    await expect(home.locator('[data-part="posted"]')).toHaveCount(0);
+    await progress.locator('.post-card', { hasText: 'Harbour words' }).click({ button: 'right' });
+    await page.locator('.float-menu[aria-label="Harbour words"]').getByRole('button', { name: 'Mark as posted…' }).click();
+    const ask = page.getByRole('dialog', { name: 'Mark as posted' });
+    await ask.getByRole('textbox', { name: 'Link to the post (optional)' }).fill(POSTED);
+    await ask.getByRole('button', { name: 'Mark as posted' }).click();
+
+    // the post was never opened, and the home read the case's posts again
+    await expect(home).toBeVisible();
+    expect(fixture.publishWrites).toEqual([{ name: 'Harbour words', posted: true, url: POSTED }]);
+    const posted = home.locator('[data-part="posted"]');
+    await expect(posted.locator('.ph-title')).toHaveText(['Harbour words']);
+    await expect(posted.locator('.ph-when')).toHaveText(['26 Oct 2024']);
+    await expect(posted.getByRole('link')).toHaveAttribute('href', POSTED);
+    await expect(progress.locator('.ph-title')).toHaveText(['Bridge thread']);
+
+    // and Not posted puts it back
+    await posted.locator('.post-card', { hasText: 'Harbour words' }).click({ button: 'right' });
+    await page.locator('.float-menu[aria-label="Harbour words"]').getByRole('button', { name: 'Not posted' }).click();
+    await expect(progress.locator('.ph-title')).toHaveText(['Harbour words', 'Bridge thread']);
+    await expect(home.locator('[data-part="posted"]')).toHaveCount(0);
+    expect(fixture.draftWrites).toEqual([]);
+    fixture.expectNoUnexpectedRequests();
+  });
+
+  test('a link set in the post shows on the home once back, with no reload', async ({ page }) => {
+    const fixture = await installAppFixture(page, { drafts: DRAFTS, proofList: PROOFS, lookupEntities: lookups });
+    await postRoutes(page);
+    await page.goto('/#post');
+    const home = page.getByTestId('post-home');
+    await home.locator('.ph-card', { hasText: 'Bridge thread' }).click();
+    const header = page.locator('.tool-header');
+    await header.getByRole('button', { name: 'Mark as posted' }).click();
+    await page.getByRole('dialog', { name: 'Mark as posted' }).getByRole('textbox').fill(POSTED);
+    await page.getByRole('dialog', { name: 'Mark as posted' }).getByRole('textbox').press('Enter');
+    await header.getByRole('button', { name: 'Posts' }).click();
+    await expect(home.locator('[data-part="posted"] .ph-title')).toHaveText(['Bridge thread']);
+    expect(fixture.draftWrites.at(-1).state.publish).toMatchObject({ url: POSTED });
     fixture.expectNoUnexpectedRequests();
   });
 });

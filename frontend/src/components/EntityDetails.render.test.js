@@ -137,19 +137,24 @@ describe('a proof that went out', () => {
   const PLACE = { ...entity, attrs: { ...entity.attrs } };
   afterEach(() => Object.assign(entity, PLACE, { attrs: { ...PLACE.attrs } }));
 
-  it('says where and when, with the link, and nothing for a link that is no post', async () => {
+  it('says where and when, with the link when it has one, and nothing for a link that is no post', async () => {
+    const year = new Date().getFullYear();
     Object.assign(entity, {
       id: 'pr1', type: 'proof', label: 'Bridge',
       attrs: { path: 'proofs/Bridge.png', posted: [
-        { url: 'https://x.com/desk/status/185', site: 'x', at: '2026-11-10T10:05:00Z' },
-        { url: 'javascript:alert(1)', site: 'x', at: '2026-11-10T10:05:00Z' },
+        { url: 'https://x.com/desk/status/185', site: 'x', at: `${year}-03-10T12:05:00Z` },
+        { url: 'javascript:alert(1)', site: 'x', at: `${year}-03-10T12:05:00Z` },
+        { site: 'bluesky', at: `${year}-03-09T12:00:00Z` },
       ] },
     });
     const target = await open({ entityId: 'pr1' });
     const rows = [...target.querySelectorAll('.info-row.posted')];
-    expect(rows).toHaveLength(1);
-    expect(rows[0].textContent.replace(/\s+/g, ' ').trim()).toBe('Posted on X · 2026-11-10 · x.com/desk/status/185');
+    expect(rows.map((row) => row.textContent.replace(/\s+/g, ' ').trim())).toEqual([
+      'Posted on X · 10 Mar · x.com/desk/status/185',
+      'Posted on Bluesky · 9 Mar',
+    ]);
     expect(rows[0].querySelector('a').getAttribute('href')).toBe('https://x.com/desk/status/185');
+    expect(rows[1].querySelector('a')).toBeNull();
   });
 });
 

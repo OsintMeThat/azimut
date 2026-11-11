@@ -43,7 +43,7 @@
   import { pollWhile } from '../lib/poll.js';
   import { canStateSource, sourceProblem } from '../lib/statedSource.js';
   import { deletedToast, FILE_BACKED, RESTORABLE } from '../lib/trash.js';
-  import { postedAddress, postTarget } from '../lib/post.js';
+  import { postTarget, proofPostLines } from '../lib/post.js';
   import Icon from './Icon.svelte';
   import SubjectActions from './SubjectActions.svelte';
   import ConfirmDialog from './ConfirmDialog.svelte';
@@ -735,11 +735,11 @@
       <!-- Where a post about this proof went out, as Post was told (`api/drafts.py`). A
            record of the post, not a source: it says nothing of where the proof came from. -->
       {#if entity.type === 'proof' && Array.isArray(entity.attrs?.posted)}
-        {#each entity.attrs.posted.map((one) => ({ ...one, out: postedAddress(one?.url) })).filter((one) => one.out) as one (one.out.url)}
+        {#each proofPostLines(entity.attrs.posted) as one, i (i)}
           <div class="info-row posted">
             <span class="info-k">Posted</span>
-            <span>{`on ${postTarget(one.out.site).label} · `}{#if typeof one.at === 'string'}<span class="mono">{one.at.slice(0, 10)}</span>{' · '}{/if}<a
-              class="mono src" href={one.out.url} target="_blank" rel="noreferrer" title="Open the post">{one.out.url.replace(/^https:\/\//, '')}</a></span>
+            <span>{`on ${postTarget(one.site).label}`}{#if one.day}{` · ${one.day}`}{/if}{#if one.url}{' · '}<a
+              class="mono src" href={one.url} target="_blank" rel="noreferrer" title="Open the post">{one.url.replace(/^https:\/\//, '')}</a>{/if}</span>
           </div>
         {/each}
       {/if}

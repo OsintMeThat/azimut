@@ -49,9 +49,9 @@ for (const theme of ['dark', 'light']) {
     await expect(publishReport).toBeVisible();
     await expect(page.locator('.tabstrip').getByRole('button', { name: 'Post', exact: true })).toHaveAttribute('aria-current', 'page');
     await page.mouse.move(0, 0);
-    // a post saves itself, and Add to notes lives in its ⋯: Publish is the one button left to press
+    // a post saves itself, and Add to notes is an icon beside Open: Publish is the one button left to press
     await expect(header.getByRole('button', { name: /Save|Discard/ })).toHaveCount(0);
-    await expect(header.getByRole('button', { name: 'More for this post' })).toBeVisible();
+    await expect(actions.getByRole('button', { name: 'Add to notes' })).toBeVisible();
     await expect(publishReport).toBeDisabled();
     expect(await buttonStyle(actions.getByRole('button', { name: 'Open', exact: true }))).toEqual(neutral);
     expect(await buttonStyle(publishReport)).toEqual(disabledPublish);

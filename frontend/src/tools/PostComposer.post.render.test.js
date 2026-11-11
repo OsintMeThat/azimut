@@ -18,11 +18,21 @@ const { api } = vi.hoisted(() => ({
 }));
 vi.mock('../lib/api.js', () => ({ api }));
 
-const bridge = vi.hoisted(() => ({ installed: null, handOffPost: null }));
+// The bridge's own listeners are tested on forged window messages (lib/extBridge.test.js);
+// here the composer is handed what they pass on.
+const bridge = vi.hoisted(() => ({ installed: null, handOffPost: null, caught: null, reported: null }));
 vi.mock('../lib/extBridge.js', () => ({
   extensionVersion: () => bridge.installed,
   extensionOutdated: (installed, bundled) => Boolean(installed && bundled && installed < bundled),
   handOffPost: (...args) => bridge.handOffPost(...args),
+  onPostLinkCaught: (cb) => {
+    bridge.caught = cb;
+    return () => { if (bridge.caught === cb) bridge.caught = null; };
+  },
+  onPostHandoffReport: (cb) => {
+    bridge.reported = cb;
+    return () => { if (bridge.reported === cb) bridge.reported = null; };
+  },
 }));
 
 const { caseState, prefs, templatesState, uiState, updatesState } = await import('../lib/state.svelte.js');
@@ -112,6 +122,7 @@ beforeEach(() => {
   vi.clearAllMocks();
   lists = { drafts: [], proofs: [], media: [], saved: {}, specs: {}, entities: [] };
   api.get.mockImplementation(async (path) => answer(path));
+  api.put.mockImplementation(async () => ({}));
   api.post.mockImplementation(async (path, body) => {
     if (path === '/api/geo/parse') return GEO;
     if (path.endsWith('/drafts')) return { name: body.title, title: body.title, draft: `.drafts/${body.title}.json` };
@@ -227,29 +238,38 @@ describe('the home', () => {
 describe('the home in three parts', () => {
   const row = (name, state, extra = {}) => ({
     name, title: name, updated_at: '2026-11-09T10:00:00Z', target: 'x', kind: 'geolocation', posts: 1, proof: null, video: null,
-    state, site: state === 'draft' ? null : 'x', posted: null, picture: null, ...extra,
+    state, posted: null, picture: null, ...extra,
   });
   const part = (name) => home().querySelector(`[data-part="${name}"]`);
   const titles = (root) => [...(root?.querySelectorAll('.ph-title') ?? [])].map((t) => t.textContent);
   const pills = (root) => [...(root?.querySelectorAll('.ph-pill') ?? [])].map((t) => t.textContent);
 
   it('splits the drafts from what went out, each card wearing its state', async () => {
+    const early = `https://x.com/desk/status/${snowflake('2025-03-09T12:00:00Z')}`;
     lists.drafts = [
       row('Fresh', 'draft'),
+      // what an earlier build listed as opened reads as a draft: no Opened pill anywhere
       row('Sent', 'opened'),
-      row('Out', 'posted', { posted: { url: 'https://x.com/desk/status/1', site: 'x', at: '2026-11-10T08:00:00Z' } }),
+      // marked lately, but its link says it went out in March: the latest first is by the post's own day
+      row('Out', 'posted', { posted: { url: early, site: 'x', at: '2026-11-10T08:00:00Z' } }),
+      row('Quiet', 'posted', { posted: { url: null, site: 'bluesky', at: '2025-06-01T12:00:00Z' } }),
       row('Edited', 'changed', { posted: { url: 'https://x.com/desk/status/2', site: 'x', at: '2026-11-08T08:00:00Z' } }),
     ];
     lists.proofs = [{ name: 'waiting', title: 'waiting', png: 'proofs/waiting.png', thumb: null, video: null, updated_at: '2026-11-08T10:00:00Z' }];
     await mountPost();
     expect([...home().querySelectorAll('h4')].map((h) => h.textContent)).toEqual(['In progress', 'Ready to post', 'Posted']);
+    expect(home().querySelector('.ph-sub').textContent).toBe('Proofs with no post yet');
+    expect(home().textContent).not.toContain('No post yet');
     expect(titles(part('progress'))).toEqual(['Fresh', 'Sent', 'Edited']);
-    expect(pills(part('progress'))).toEqual(['Draft', 'Opened in X', 'Changed since posted']);
-    expect(titles(part('posted'))).toEqual(['Out']);
-    expect(pills(part('posted'))).toEqual(['Posted']);
-    const link = part('posted').querySelector('a.ph-out');
-    expect(link.getAttribute('href')).toBe('https://x.com/desk/status/1');
-    expect(link.textContent.trim()).toBe('x.com/desk/status/1');
+    expect(pills(part('progress'))).toEqual(['Draft', 'Draft', 'Changed since posted']);
+    expect(titles(part('posted'))).toEqual(['Quiet', 'Out']);
+    expect(pills(part('posted'))).toEqual(['Posted', 'Posted']);
+    expect([...part('posted').querySelectorAll('.ph-when')].map((t) => t.textContent)).toEqual(['1 Jun 2025', '9 Mar 2025']);
+    expect(home().textContent).not.toContain('Opened');
+    const links = part('posted').querySelectorAll('a.ph-out');
+    expect(links).toHaveLength(1);
+    expect(links[0].getAttribute('href')).toBe(early);
+    expect(links[0].textContent.trim()).toBe(early.replace('https://', ''));
     // New post stays at the top
     expect(home().querySelector('.ph-start .ph-new').textContent.trim()).toBe('New post');
   });
@@ -261,7 +281,7 @@ describe('the home in three parts', () => {
     home().querySelector('button[aria-label="More for Fresh"]').click();
     flushSync();
     const menu = document.querySelector('.float-menu[aria-label="Fresh"]');
-    expect([...menu.querySelectorAll('.fm-item')].map((b) => b.textContent.trim())).toEqual(['Open', 'Delete…']);
+    expect([...menu.querySelectorAll('.fm-item')].map((b) => b.textContent.trim())).toEqual(['Open', 'Mark as posted…', 'Delete…']);
     button(menu, 'Delete…').click();
     await settle();
     button(document.querySelector('[role="alertdialog"]'), 'Delete').click();
@@ -276,10 +296,40 @@ describe('the home in three parts', () => {
   });
 });
 
+describe('deleting a post with a proof', () => {
+  const row = (name, extra = {}) => ({
+    name, title: name, updated_at: '2026-11-09T10:00:00Z', target: 'x', kind: 'geolocation', posts: 1, proof: null, video: null,
+    state: 'draft', posted: null, picture: null, ...extra,
+  });
+  const ask = async (name) => {
+    home().querySelector(`button[aria-label="More for ${name}"]`).click();
+    flushSync();
+    button(document.querySelector(`.float-menu[aria-label="${name}"]`), 'Delete…').click();
+    await settle();
+    return document.querySelector('[role="alertdialog"]');
+  };
+
+  it('says its proof goes back to Ready to post, unless another post names it', async () => {
+    lists.drafts = [
+      row('Bridge', { proof: 'proofs/bridge.png' }), row('Words', { kind: 'free' }),
+      row('Port', { proof: 'proofs/port.png' }), row('Port again', { proof: 'proofs/port.png' }),
+    ];
+    await mountPost();
+    const LINE = 'Its proof goes back to Ready to post.';
+    expect((await ask('Bridge')).textContent).toContain(LINE);
+    button(document.querySelector('[role="alertdialog"]'), 'Cancel').click();
+    await settle();
+    expect((await ask('Words')).textContent).not.toContain(LINE);
+    button(document.querySelector('[role="alertdialog"]'), 'Cancel').click();
+    await settle();
+    expect((await ask('Port')).textContent).not.toContain(LINE);
+  });
+});
+
 describe('Open', () => {
   const row = (name, extra = {}) => ({
     name, title: name, updated_at: '2026-11-09T10:00:00Z', target: 'x', kind: 'geolocation', posts: 1, proof: null, video: null,
-    state: 'draft', site: null, posted: null, picture: null, ...extra,
+    state: 'draft', posted: null, picture: null, ...extra,
   });
   const list = () => dialog('Open a post');
   const rows = () => [...list().querySelectorAll('.ol-title')].map((t) => t.textContent);
@@ -292,9 +342,9 @@ describe('Open', () => {
 
   beforeEach(() => {
     lists.drafts = [
-      row('Convoy east', { state: 'posted', site: 'x', posted: { url: 'https://x.com/a/status/1', site: 'x', at: '2026-11-10T08:00:00Z' }, picture: 'proofs/east.png' }),
+      row('Convoy east', { state: 'posted', posted: { url: 'https://x.com/a/status/1', site: 'x', at: '2026-11-10T08:00:00Z' }, picture: 'proofs/east.png' }),
       row('Depot words', { kind: 'free', target: 'bluesky', picture: 'media/depot.png' }),
-      row('Convoy west', { state: 'opened', site: 'x' }),
+      row('Convoy west', { state: 'changed', posted: { url: null, site: 'x', at: '2026-11-10T08:00:00Z' } }),
     ];
     lists.proofs = [{ name: 'east', title: 'east', png: 'proofs/east.png', thumb: 'proofs/.thumbs/east.webp', video: null }];
     lists.media = [{ path: 'media/depot.png', kind: 'image', thumbnail: 'media/.thumbs/depot.webp' }];
@@ -307,7 +357,7 @@ describe('Open', () => {
     expect(rows()).toEqual(['Convoy east', 'Depot words', 'Convoy west']);
     const subs = [...list().querySelectorAll('.ol-sub')].map((t) => t.textContent.trim());
     expect(subs).toEqual(['Geolocation · X · 2026-11-09', 'Free post · Bluesky · 2026-11-09', 'Geolocation · X · 2026-11-09']);
-    expect([...list().querySelectorAll('.ol-pill')].map((t) => t.textContent)).toEqual(['Posted', 'Draft', 'Opened in X']);
+    expect([...list().querySelectorAll('.ol-pill')].map((t) => t.textContent)).toEqual(['Posted', 'Draft', 'Changed since posted']);
     const pictures = [...list().querySelectorAll('.ol-pic img')].map((img) => img.getAttribute('src'));
     expect(pictures[0]).toContain('proofs/.thumbs/east.webp');
     expect(pictures[1]).toContain('media/.thumbs/depot.webp');
@@ -321,10 +371,10 @@ describe('Open', () => {
     expect([...list().querySelectorAll('select[aria-label="Kind"] option')].map((o) => o.textContent))
       .toEqual(['Every kind', 'Geolocation · 2', 'Free post · 1']);
     expect([...list().querySelectorAll('select[aria-label="State"] option')].map((o) => o.textContent))
-      .toEqual(['Every state', 'Draft · 1', 'Opened · 1', 'Posted · 1']);
+      .toEqual(['Every state', 'Draft · 1', 'Posted · 1', 'Changed since posted · 1']);
     pick('Kind', 'geolocation');
     expect(rows()).toEqual(['Convoy east', 'Convoy west']);
-    pick('State', 'opened');
+    pick('State', 'changed');
     expect(rows()).toEqual(['Convoy west']);
     pick('Kind', '');
     pick('State', '');
@@ -558,17 +608,18 @@ describe('a post saves itself', () => {
   });
 });
 
-describe('the header ⋯', () => {
+describe('the header', () => {
   const more = () => header().querySelector('button[aria-label="More for this post"]');
   const menu = () => document.querySelector('.float-menu[aria-label="This post"]');
+  const notes = () => header().querySelector('button[aria-label="Add to notes"]');
 
-  it('adds the post to the notes, and says so plainly', async () => {
+  it('adds the post to the notes from its own button beside Open, and says so plainly', async () => {
     await mountPost();
     uiState.postProof = { ...PROOF };
     await settle();
-    more().click();
-    flushSync();
-    button(menu(), 'Add to notes…').click();
+    expect(notes().getAttribute('title')).toBe('Add to notes');
+    expect(notes().nextElementSibling.textContent.trim()).toBe('Open');
+    notes().click();
     flushSync();
     const ask = dialog('Add to notes');
     expect(ask.textContent).toContain('Writes this post into a new case note');
@@ -589,6 +640,8 @@ describe('the header ⋯', () => {
     await settle();
     more().click();
     flushSync();
+    // the ⋯ keeps Delete, and Delete only
+    expect([...menu().querySelectorAll('.fm-item')].map((b) => b.textContent.trim())).toEqual(['Delete…']);
     button(menu(), 'Delete…').click();
     await settle(); // the dialog reads what the delete touches first
     const ask = document.querySelector('[role="alertdialog"]');
@@ -600,43 +653,35 @@ describe('the header ⋯', () => {
     expect(home()).not.toBeNull();
   });
 
-  it('offers no Delete before the post was ever saved', async () => {
+  it('offers no ⋯ before the post was ever saved, and no note of a post that holds nothing', async () => {
     await mountPost();
-    more().click();
-    flushSync();
-    expect(button(menu(), 'Delete…')).toBeUndefined();
-    expect(button(menu(), 'Add to notes…').disabled).toBe(true);
+    expect(more()).toBeNull();
+    expect(notes().disabled).toBe(true);
   });
 });
 
-describe('the link to the post', () => {
-  const field = () => target.querySelector('#pc-link');
-  const said = () => target.querySelector('.link-said')?.textContent.trim() ?? '';
-  const box = () => field().closest('.post-link');
-  const POSTED = 'https://x.com/desk/status/1850000000000000009';
+// An X status id for a known moment, as X makes them: its top bits count milliseconds
+// from X's epoch. The post's day is read off it.
+const snowflake = (iso) => (((BigInt(Date.parse(iso)) - 1288834974657n) << 22n) | 77n).toString();
+const NINTH_MARCH = 'https://x.com/desk/status/' + snowflake('2025-03-09T12:00:00Z');
+
+describe('Mark as posted, in the header', () => {
+  const markButton = () => header().querySelector('button[aria-label="Mark as posted"]');
+  const popover = () => document.querySelector('.float-menu[role="dialog"][aria-label="Mark as posted"]');
+  const pill = () => header().querySelector('.pc-pill');
+  const stateMenu = () => document.querySelector('.float-menu[aria-label="Where this post stands"]');
   const writeText = vi.fn(async () => {});
-  const publishNow = async () => {
-    button(header(), 'Publish on X').click();
-    await settle();
-  };
-  const fill = (text) => {
-    field().value = text;
-    field().dispatchEvent(new Event('input', { bubbles: true }));
-    flushSync();
-  };
-  // what a paste does: the text lands in the field, and the field takes it at once
-  const paste = async (text) => {
-    fill(text);
-    field().dispatchEvent(new Event('paste', { bubbles: true }));
-    await settle();
-  };
-  const enter = async (text) => {
-    fill(text);
-    field().dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
-    await settle();
-  };
   const sendProof = async () => {
     uiState.postProof = { ...PROOF };
+    await settle();
+  };
+  /** Mark as posted pressed, the field filled, and its own Mark as posted pressed. */
+  const mark = async (link = '') => {
+    markButton().click();
+    flushSync();
+    const field = popover().querySelector('input');
+    type(field, link);
+    button(popover(), 'Mark as posted').click();
     await settle();
   };
 
@@ -645,160 +690,211 @@ describe('the link to the post', () => {
     vi.stubGlobal('navigator', { ...navigator, clipboard: { writeText } });
   });
 
-  it('is the first field of every kind, empty and quiet on a draft', async () => {
+  it('stands beside Saved on every kind of post, and the link field is gone', async () => {
     await mountPost();
     for (const kind of ['geolocation', 'plate', 'free']) {
       startPost(kind);
       await settle();
-      const first = target.querySelector('.col .field');
-      expect(first.querySelector('.label').textContent).toBe('Link to your post');
-      expect(first.querySelector('#pc-link').getAttribute('placeholder')).toBe("Paste it once it's posted");
-      expect(field().value).toBe('');
-      expect(target.querySelector('.link-said')).toBeNull();
-      expect(target.querySelector('.went')).toBeNull();
+      expect(markButton().textContent.trim()).toBe('Mark as posted');
+      expect(target.querySelector('#pc-link')).toBeNull();
+      expect(target.textContent).not.toContain('Link to your post');
     }
   });
 
-  it('says it was opened after Publish, its border waiting, and the draft keeps it', async () => {
+  it('asks for the link in a popover, and marks the post posted with it', async () => {
     await mountPost();
     await sendProof();
-    await publishNow();
-    expect(said()).toBe("Opened in X · paste its link here once it's posted");
-    expect(box().classList.contains('awaited')).toBe(true);
-    await saved();
-    expect(draftWrites().at(-1)[1].state.publish).toEqual({ site: 'x', opened_at: expect.any(String) });
-  });
+    markButton().click();
+    flushSync();
+    const ask = popover();
+    expect(ask.querySelector('label').textContent).toBe('Link to the post (optional)');
+    expect(ask.querySelector('input').getAttribute('placeholder')).toBe('https://x.com/…');
+    expect(ask.textContent).toContain('Keeps it with the proof and dates it.');
+    expect(document.activeElement).toBe(ask.querySelector('input'));
+    type(ask.querySelector('input'), `${NINTH_MARCH.replace('https://', '')}?s=20`);
+    button(ask, 'Mark as posted').click();
+    await settle();
 
-  it('marks the post posted on a paste of its link, written the one way', async () => {
-    await mountPost();
-    await sendProof();
-    await publishNow();
-    await paste(`${POSTED.replace('https://', '')}?s=20`);
-    expect(field().value).toBe(POSTED);
-    expect(said()).toMatch(/^Posted on X · \d{1,2} [A-Z][a-z]{2} \d{4}$/);
-    expect(box().classList.contains('awaited')).toBe(false);
+    expect(popover()).toBeNull();
+    expect(toasts()).toContain('Marked as posted');
+    expect(markButton()).toBeNull();
+    // the day is the post's own, read off its link
+    expect(pill().textContent.trim()).toBe('Posted · 9 Mar 2025');
+    expect(pill().classList.contains('posted')).toBe(true);
     await saved();
-    expect(draftWrites().at(-1)[1].state.publish).toMatchObject({
-      site: 'x', url: POSTED, opened_at: expect.any(String), posted_at: expect.any(String), mark: expect.any(String), changed: false,
+    expect(draftWrites().at(-1)[1].state.publish).toEqual({
+      site: 'x', url: NINTH_MARCH, posted_at: expect.any(String), mark: expect.any(String), changed: false,
     });
   });
 
-  it('refuses a link that is no X or Bluesky post, and keeps nothing of it', async () => {
+  it('marks it posted with no link, on the platform it was written for', async () => {
+    await mountPost();
+    await sendProof();
+    target.querySelectorAll('.target-tabs button')[1].click(); // Bluesky
+    flushSync();
+    await mark('');
+    expect(pill().textContent.trim()).toMatch(/^Posted · \d{1,2} [A-Z][a-z]{2}$/);
+    await saved();
+    const publish = draftWrites().at(-1)[1].state.publish;
+    expect(publish).toEqual({ site: 'bluesky', posted_at: expect.any(String), mark: expect.any(String), changed: false });
+    // with no link, its menu has none to open or copy
+    pill().click();
+    flushSync();
+    expect([...stateMenu().querySelectorAll('.fm-item')].map((b) => b.textContent.trim())).toEqual(['Add the link…', 'Not posted']);
+  });
+
+  it('refuses a link that is no X or Bluesky post, and marks nothing', async () => {
     await mountPost();
     await sendProof();
     await saved();
     const before = draftWrites().length;
-    await enter('https://example.com/not-a-post');
-    expect(said()).toBe('That is not the link of an X or Bluesky post.');
-    expect(field().getAttribute('aria-invalid')).toBe('true');
-    expect(target.querySelector('button[aria-label="Copy the link"]')).toBeNull();
+    markButton().click();
+    flushSync();
+    type(popover().querySelector('input'), 'https://example.com/not-a-post');
+    button(popover(), 'Mark as posted').click();
+    await settle();
+    expect(popover().querySelector('[role="alert"]').textContent).toBe('That is not the link of an X or Bluesky post.');
+    expect(popover().querySelector('input').getAttribute('aria-invalid')).toBe('true');
+    expect(markButton()).not.toBeNull();
     await saved();
     expect(draftWrites()).toHaveLength(before);
-    // typing again clears the sentence
-    fill('https://x.com/desk');
-    expect(target.querySelector('.link-said')).toBeNull();
+    // typing again clears the sentence, and Cancel leaves it a draft
+    type(popover().querySelector('input'), 'https://x.com/desk');
+    expect(popover().querySelector('[role="alert"]')).toBeNull();
+    button(popover(), 'Cancel').click();
+    flushSync();
+    expect(popover()).toBeNull();
+    expect(markButton()).not.toBeNull();
   });
 
-  it('copies the link and opens it once set', async () => {
+  it('opens, copies and changes the link from the pill\'s menu, and Not posted takes it back', async () => {
     await mountPost();
     await sendProof();
-    await enter(POSTED);
-    target.querySelector('button[aria-label="Copy the link"]').click();
-    await settle();
-    expect(writeText).toHaveBeenCalledWith(POSTED);
-    expect(toasts()).toContain('Link copied');
-    const open = target.querySelector('a[aria-label="Open the post"]');
-    expect(open.getAttribute('href')).toBe(POSTED);
+    await mark(NINTH_MARCH);
+    pill().click();
+    flushSync();
+    expect([...stateMenu().querySelectorAll('.fm-item')].map((b) => b.textContent.trim()))
+      .toEqual(['Open the post', 'Copy link', 'Change link…', 'Not posted']);
+    const open = stateMenu().querySelector('a.fm-item');
+    expect(open.getAttribute('href')).toBe(NINTH_MARCH);
     expect(open.getAttribute('target')).toBe('_blank');
-  });
-
-  it('takes the link back with ×, to Opened after a Publish and to a draft without one', async () => {
-    await mountPost();
-    await sendProof();
-    await publishNow();
-    await enter(POSTED);
-    target.querySelector('button[aria-label="Clear the link"]').click();
+    button(stateMenu(), 'Copy link').click();
     await settle();
-    expect(field().value).toBe('');
-    expect(said()).toMatch(/^Opened in X/);
+    expect(writeText).toHaveBeenCalledWith(NINTH_MARCH);
+    expect(toasts()).toContain('Link copied');
+
+    // Change link…: the popover holds the link, and another replaces it, the day kept
+    pill().click();
+    flushSync();
+    button(stateMenu(), 'Change link…').click();
+    flushSync();
+    expect(popover().querySelector('input').value).toBe(NINTH_MARCH);
+    const other = 'https://bsky.app/profile/desk.bsky.social/post/3kabc';
+    type(popover().querySelector('input'), other);
+    button(popover(), 'Save link').click();
     await saved();
-    expect(draftWrites().at(-1)[1].state.publish).toEqual({ site: 'x', opened_at: expect.any(String) });
+    const publish = draftWrites().at(-1)[1].state.publish;
+    expect(publish).toMatchObject({ site: 'bluesky', url: other, changed: false });
+    expect(toasts()).toContain('Link saved');
 
-    startPost('free');
+    pill().click();
+    flushSync();
+    button(stateMenu(), 'Not posted').click();
     await settle();
-    type(firstPost(), 'Smoke over the port');
-    await enter('https://bsky.app/profile/desk.bsky.social/post/3kabc');
-    expect(said()).toMatch(/^Posted on Bluesky/);
-    target.querySelector('button[aria-label="Clear the link"]').click();
-    await settle();
-    expect(target.querySelector('.link-said')).toBeNull();
+    expect(markButton()).not.toBeNull();
+    expect(pill()).toBeNull();
     await saved();
     expect(draftWrites().at(-1)[1].state.publish).toBeUndefined();
   });
 
-  it('replaces the link with another, and an emptied field takes it back', async () => {
+  it('reads as changed since posted after an edit, the same menu on an amber pill, and as posted once undone', async () => {
     await mountPost();
     await sendProof();
-    await enter(POSTED);
-    const other = 'https://x.com/desk/status/1850000000000000010';
-    await enter(other);
-    expect(field().value).toBe(other);
-    await saved();
-    expect(draftWrites().at(-1)[1].state.publish.url).toBe(other);
-    fill('');
-    field().dispatchEvent(new FocusEvent('blur'));
-    await saved();
-    expect(draftWrites().at(-1)[1].state.publish).toBeUndefined();
-  });
-
-  it('reads as changed since posted after an edit, and as posted again once it is undone', async () => {
-    await mountPost();
-    await sendProof();
-    await enter(POSTED);
+    await mark(NINTH_MARCH);
     type(target.querySelector('#pc-desc'), 'Twelve helicopters, not thirteen');
     await settle();
-    expect(said()).toBe('Changed since posted');
-    expect(target.querySelector('.link-said').classList.contains('changed')).toBe(true);
+    expect(pill().textContent.trim()).toBe('Changed since posted');
+    expect(pill().classList.contains('changed')).toBe(true);
+    pill().click();
+    flushSync();
+    expect([...stateMenu().querySelectorAll('.fm-item')].map((b) => b.textContent.trim()))
+      .toEqual(['Open the post', 'Copy link', 'Change link…', 'Not posted']);
     await saved();
     expect(draftWrites().at(-1)[1].state.publish.changed).toBe(true);
     type(target.querySelector('#pc-desc'), PROOF.description);
     await settle();
-    expect(said()).toMatch(/^Posted on X/);
+    expect(pill().textContent.trim()).toBe('Posted · 9 Mar 2025');
   });
 
-  it('files nothing for a blank post while typed in, and files it once its link is set', async () => {
+  it('wears a soft accent after Publish until it is marked, and nothing of it is saved', async () => {
     await mountPost();
-    fill('x.com/desk');
-    field().dispatchEvent(new FocusEvent('blur'));
+    await sendProof();
+    expect(markButton().classList.contains('accent')).toBe(false);
+    button(header(), 'Publish on X').click();
+    await settle();
+    expect(markButton().classList.contains('accent')).toBe(true);
     await saved();
-    expect(draftWrites()).toEqual([]);
-    await enter(POSTED);
-    await saved();
-    expect(draftWrites()).toHaveLength(1);
-    expect(draftWrites()[0][1].state.publish).toMatchObject({ url: POSTED, site: 'x' });
+    expect(draftWrites().at(-1)[1].state.publish).toBeUndefined();
+    await mark('');
+    expect(markButton()).toBeNull();
+    pill().click();
+    flushSync();
+    button(stateMenu(), 'Not posted').click();
+    await settle();
+    expect(markButton().classList.contains('accent')).toBe(false);
   });
 
-  it('opens a post opened and never posted saying so, and a posted one with its link', async () => {
-    lists.drafts = [{ name: 'Sent', title: 'Sent', target: 'x', posts: 1, state: 'opened' }, { name: 'Out', title: 'Out', target: 'x', posts: 1, state: 'posted' }];
+  it('wears it after the extension\'s hand-off too, and loses it once the post is closed', async () => {
+    bridge.installed = '0.3.3';
+    lists.proofs = [{ name: 'waiting', title: 'waiting', png: 'proofs/waiting.png', thumb: null, video: null }];
+    await mountPost();
+    await sendProof();
+    button(header(), 'Publish on X').click();
+    await settle();
+    expect(bridge.handOffPost).toHaveBeenCalledTimes(1);
+    expect(markButton().classList.contains('accent')).toBe(true);
+    button(header(), 'Posts').click();
+    await settle();
+    lists.saved = { [draftWrites().at(-1)[1].title]: { title: draftWrites().at(-1)[1].title, state: draftWrites().at(-1)[1].state } };
+    uiState.openDraft = draftWrites().at(-1)[1].title;
+    await settle();
+    expect(markButton().classList.contains('accent')).toBe(false);
+  });
+
+  it('opens a posted post with its pill, a changed one amber, and an earlier build\'s opened one as a draft', async () => {
+    lists.drafts = [{ name: 'Sent', title: 'Sent', target: 'x', posts: 1, state: 'draft' }, { name: 'Out', title: 'Out', target: 'x', posts: 1, state: 'posted' }];
     lists.saved = {
       Sent: { title: 'Sent', state: { description: 'D', tweet1: 'D', tweet1Edited: true, publish: { opened_at: '2026-11-10T10:00:00Z', site: 'bluesky' } } },
-      Out: { title: 'Out', state: { description: 'D', tweet1: 'D', tweet1Edited: true, publish: { site: 'x', url: POSTED, posted_at: '2026-11-10T10:05:00Z', mark: 'x', changed: true } } },
+      Out: { title: 'Out', state: { description: 'D', tweet1: 'D', tweet1Edited: true, publish: { site: 'x', url: NINTH_MARCH, posted_at: '2026-11-10T10:05:00Z', mark: 'x', changed: true } } },
     };
     await mountPost();
     [...home().querySelectorAll('.ph-open')].find((b) => b.textContent.includes('Sent')).click();
     await settle();
-    expect(field().value).toBe('');
-    expect(said()).toMatch(/^Opened in Bluesky/);
+    expect(markButton()).not.toBeNull();
+    expect(markButton().classList.contains('accent')).toBe(false);
     button(header(), 'Posts').click();
     await settle();
     [...home().querySelectorAll('.ph-open')].find((b) => b.textContent.includes('Out')).click();
     await settle();
-    expect(field().value).toBe(POSTED);
     // its print is recomputed on opening: a mark that is not this post's reads as changed
-    expect(said()).toBe('Changed since posted');
+    expect(pill().textContent.trim()).toBe('Changed since posted');
   });
 
-  it('takes the link of a draft Geo Report saved, with no kind and no publish', async () => {
+  it('takes a post marked from its card before it was opened as it stands, and opening it writes nothing', async () => {
+    lists.drafts = [{ name: 'Out', title: 'Out', target: 'x', posts: 1, state: 'posted' }];
+    lists.saved = { Out: { title: 'Out', state: { description: 'D', tweet1: 'D', tweet1Edited: true, publish: { site: 'x', posted_at: '2025-03-09T12:00:00Z', changed: false } } } };
+    await mountPost();
+    home().querySelector('.ph-open').click();
+    await settle();
+    expect(pill().textContent.trim()).toBe('Posted · 9 Mar 2025');
+    await saved();
+    expect(draftWrites()).toEqual([]);
+    type(target.querySelector('#pc-desc'), 'Another word');
+    await settle();
+    expect(pill().textContent.trim()).toBe('Changed since posted');
+  });
+
+  it('marks a draft Geo Report saved, with no kind and no publish', async () => {
     lists.drafts = [{ name: 'Old', title: 'Old', target: 'x', posts: 1 }];
     lists.saved = { Old: { title: 'Old', state: {
       description: PROOF.description, coordsText: PROOF.coordsText, place: 'Los Anacuos, Miranda, Venezuela',
@@ -808,75 +904,179 @@ describe('the link to the post', () => {
     await mountPost();
     home().querySelector('.ph-open').click();
     await settle();
-    expect(field().value).toBe('');
-    await paste(POSTED);
-    expect(said()).toMatch(/^Posted on X/);
+    await mark(NINTH_MARCH);
     await saved();
     const write = draftWrites().at(-1)[1];
     expect(write).toMatchObject({ rename_from: 'Old', title: 'Old' });
-    expect(write.state.publish).toMatchObject({ url: POSTED, site: 'x', changed: false });
+    expect(write.state.publish).toMatchObject({ url: NINTH_MARCH, site: 'x', changed: false });
     expect(write.state.kind).toBeUndefined();
   });
 
-  it('marks a hand-off to the extension as opened too', async () => {
-    bridge.installed = '0.3.3';
+  it('files a blank post once it is marked posted, and nothing before', async () => {
     await mountPost();
-    await sendProof();
-    await publishNow();
-    expect(bridge.handOffPost).toHaveBeenCalledTimes(1);
-    expect(said()).toMatch(/^Opened in X/);
+    markButton().click();
+    flushSync();
+    button(popover(), 'Cancel').click();
+    await saved();
+    expect(draftWrites()).toEqual([]);
+    await mark(NINTH_MARCH);
+    await saved();
+    expect(draftWrites()).toHaveLength(1);
+    expect(draftWrites()[0][1].state.publish).toMatchObject({ url: NINTH_MARCH, site: 'x' });
   });
 
   it('writes where it went out into the note Add to notes makes', async () => {
     await mountPost();
     await sendProof();
-    await enter(POSTED);
-    header().querySelector('button[aria-label="More for this post"]').click();
-    flushSync();
-    button(document.querySelector('.float-menu'), 'Add to notes…').click();
+    await mark(NINTH_MARCH);
+    header().querySelector('button[aria-label="Add to notes"]').click();
     flushSync();
     button(dialog('Add to notes'), 'Add to notes').click();
     await settle();
     const [, note] = api.post.mock.calls.find(([path]) => path.endsWith('/notes'));
-    expect(note.content).toContain(`## Posted\n\n[On X, `);
-    expect(note.content).toContain(`](${POSTED})`);
+    expect(note.content).toContain('## Posted\n\n[On X, 2025-03-09](' + NINTH_MARCH + ')');
+  });
+
+  it('shows its icon alone at the header\'s narrowest step, its words in the hover', async () => {
+    await mountPost();
+    await sendProof();
+    // a header too narrow for anything: every step folds
+    const box = header();
+    Object.defineProperty(box, 'clientWidth', { configurable: true, get: () => 300 });
+    Object.defineProperty(box, 'scrollWidth', { configurable: true, get: () => 2000 });
+    // the header is laid out again when what it holds changes: here, the post saved
+    await saved();
+    for (let i = 0; i < 4; i += 1) await settle();
+    expect(box.classList.contains('tight')).toBe(true);
+    expect(markButton().textContent.trim()).toBe('');
+    expect(markButton().getAttribute('title')).toBe('Mark as posted');
+  });
+});
+
+describe('a link the extension caught', () => {
+  const caught = (extra = {}) => ({
+    caseId: CASE.id, draft: 'Post 1', url: NINTH_MARCH, site: 'x', at: '2026-11-11T09:00:00Z', ...extra,
+  });
+  const proposal = () => header().querySelector('[role="group"][aria-label="Link caught"]');
+  const pill = () => header().querySelector('.pc-pill');
+  const writeOpen = async () => {
+    uiState.postProof = { ...PROOF };
+    await saved();
+    return draftWrites().at(-1)[1].title;
+  };
+
+  it('is proposed on the post open, never kept by itself: Keep marks it posted at that link', async () => {
+    await mountPost();
+    const name = await writeOpen();
+    bridge.caught(caught({ draft: name }));
+    flushSync();
+    expect(proposal().textContent.replace(/\s+/g, ' ').trim())
+      .toBe(`Link caught: ${NINTH_MARCH.replace('https://', '')} Keep Not this one`);
+    await saved();
+    expect(draftWrites().at(-1)[1].state.publish).toBeUndefined();
+    button(proposal(), 'Keep').click();
+    await settle();
+    expect(proposal()).toBeNull();
+    expect(pill().textContent.trim()).toBe('Posted · 9 Mar 2025');
+    await saved();
+    expect(draftWrites().at(-1)[1].state.publish).toMatchObject({ url: NINTH_MARCH, site: 'x', changed: false });
+  });
+
+  it('goes with Not this one, and the post stays as it stood', async () => {
+    await mountPost();
+    const name = await writeOpen();
+    bridge.caught(caught({ draft: name }));
+    flushSync();
+    button(proposal(), 'Not this one').click();
+    flushSync();
+    expect(proposal()).toBeNull();
+    expect(header().querySelector('button[aria-label="Mark as posted"]')).not.toBeNull();
+    await saved();
+    expect(draftWrites().at(-1)[1].state.publish).toBeUndefined();
+  });
+
+  it('asks in a toast for another post of the case, and Keep writes it through its own route', async () => {
+    lists.entities = [{ id: 'p38', type: 'post', label: 'Post 38', attrs: { draft: '.drafts/Post 38.json' } }];
+    lists.drafts = [{ name: 'Post 38', title: 'Post 38', target: 'x', posts: 1, state: 'draft' }];
+    await mountPost();
+    bridge.caught(caught({ draft: 'Post 38' }));
+    flushSync();
+    const ask = uiState.toasts.at(-1);
+    expect(ask.message).toBe('Link caught for “Post 38”');
+    expect(ask.action.map((one) => one.label)).toEqual(['Keep', 'Not this one']);
+    expect(api.put).not.toHaveBeenCalled();
+    ask.action[0].onClick();
+    await settle();
+    expect(api.put).toHaveBeenCalledWith('/api/cases/case-1/drafts/Post%2038/publish', { posted: true, url: NINTH_MARCH });
+    expect(toasts()).toContain('Marked as posted');
+
+    bridge.caught(caught({ draft: 'Post 38', url: 'https://x.com/desk/status/1850000000000000010' }));
+    flushSync();
+    api.put.mockClear();
+    uiState.toasts.at(-1).action[1].onClick();
+    await settle();
+    expect(api.put).not.toHaveBeenCalled();
+  });
+
+  it('ignores a link for another case, and one for a post the case does not hold', async () => {
+    await mountPost();
+    const name = await writeOpen();
+    const before = uiState.toasts.length;
+    bridge.caught(caught({ caseId: 'case-2', draft: name }));
+    bridge.caught(caught({ draft: 'Nowhere' }));
+    flushSync();
+    expect(proposal()).toBeNull();
+    expect(uiState.toasts).toHaveLength(before);
+  });
+
+  it('says what went wrong in a hand-off, its report one press from the clipboard', async () => {
+    const writeText = vi.fn(async () => {});
+    vi.stubGlobal('navigator', { ...navigator, clipboard: { writeText } });
+    await mountPost();
+    bridge.reported({ caseId: CASE.id, draft: 'Post 1', error: 'The composer did not open.', report: 'tab 3: no composer after 20 s' });
+    const said = uiState.toasts.at(-1);
+    expect(said).toMatchObject({ message: 'The composer did not open.', kind: 'warn', action: { label: 'Copy report' } });
+    said.action.onClick();
+    await settle();
+    expect(writeText).toHaveBeenCalledWith('tab 3: no composer after 20 s');
+    const count = uiState.toasts.length;
+    bridge.reported({ caseId: 'case-2', draft: 'Post 1', error: 'Elsewhere.', report: '' });
+    expect(uiState.toasts).toHaveLength(count);
   });
 });
 
 describe('a post already out, from the home', () => {
-  const POSTED = 'https://x.com/desk/status/1850000000000000009';
   const row = (name, extra = {}) => ({
     name, title: name, updated_at: '2026-11-09T10:00:00Z', target: 'x', kind: 'geolocation', posts: 1, proof: null, video: null,
-    state: 'draft', site: null, posted: null, picture: null, ...extra,
+    state: 'draft', posted: null, picture: null, ...extra,
   });
+  const popover = () => document.querySelector('.float-menu[role="dialog"][aria-label="Mark as posted"]');
 
   beforeEach(() => {
     lists.proofs = [{ name: 'waiting', title: 'waiting', png: 'proofs/waiting.png', thumb: null, video: null, updated_at: '2026-11-08T10:00:00Z' }];
     lists.specs = { waiting: { description: PROOF.description, points: [{ lat: GEO.lat, lon: GEO.lon }], source: SOURCE_X } };
   });
 
-  it('starts a waiting proof\'s post from Already posted…, the link field waiting, and its link files it', async () => {
+  it('starts a waiting proof\'s post from Mark as posted…, and the header\'s popover marks it', async () => {
     await mountPost();
     const card = home().querySelector('.post-card');
     card.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true, clientX: 40, clientY: 40 }));
     flushSync();
     const menu = document.querySelector('.float-menu[aria-label="waiting"]');
-    expect([...menu.querySelectorAll('.fm-item')].map((b) => b.textContent.trim())).toEqual(['Write its post', 'Already posted…']);
-    button(menu, 'Already posted…').click();
+    expect([...menu.querySelectorAll('.fm-item')].map((b) => b.textContent.trim())).toEqual(['Write its post', 'Mark as posted…']);
+    button(menu, 'Mark as posted…').click();
     await settle();
 
     expect(home()).toBeNull();
     expect(target.querySelector('#pc-desc').value).toBe(PROOF.description);
-    expect(document.activeElement).toBe(target.querySelector('#pc-link'));
-    const field = target.querySelector('#pc-link');
-    field.value = POSTED;
-    field.dispatchEvent(new Event('input', { bubbles: true }));
-    field.dispatchEvent(new Event('paste', { bubbles: true }));
+    // the popover waits under the header's button, once the proof filled the post in
+    expect(document.activeElement).toBe(popover().querySelector('input'));
+    type(popover().querySelector('input'), NINTH_MARCH);
+    button(popover(), 'Mark as posted').click();
     await saved();
     const write = draftWrites().at(-1)[1];
     expect(write.state.proofPng).toBe('proofs/waiting.png');
-    expect(write.state.publish).toMatchObject({ url: POSTED, site: 'x', changed: false });
-    expect(write.state.publish.opened_at).toBeUndefined();
+    expect(write.state.publish).toMatchObject({ url: NINTH_MARCH, site: 'x', changed: false });
   });
 
   it('offers it on a waiting slide\'s chip too, by a right-click', async () => {
@@ -885,7 +1085,7 @@ describe('a post already out, from the home', () => {
     home().querySelector('.ph-chip').dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true, clientX: 40, clientY: 40 }));
     flushSync();
     const menu = document.querySelector('.float-menu[aria-label="slide-1"]');
-    expect([...menu.querySelectorAll('.fm-item')].map((b) => b.textContent.trim())).toEqual(['Write its post', 'Already posted…']);
+    expect([...menu.querySelectorAll('.fm-item')].map((b) => b.textContent.trim())).toEqual(['Write its post', 'Mark as posted…']);
   });
 
   it('opens the same menu from a waiting card\'s ⋯, Write its post doing what a press does', async () => {
@@ -896,32 +1096,87 @@ describe('a post already out, from the home', () => {
     await settle();
     expect(home()).toBeNull();
     expect(target.querySelector('.attach-chip').textContent).toContain('waiting.png');
-    expect(document.activeElement).not.toBe(target.querySelector('#pc-link'));
+    expect(popover()).toBeNull();
   });
 
-  it('copies a posted post\'s link from its card\'s menu and from Open', async () => {
+  it('marks a post in progress from its card, in a popover on the card, and the home reads it again', async () => {
+    lists.proofs = [];
+    lists.drafts = [row('Fresh'), row('Other')];
+    await mountPost();
+    home().querySelector('button[aria-label="More for Fresh"]').click();
+    flushSync();
+    const menu = document.querySelector('.float-menu[aria-label="Fresh"]');
+    expect([...menu.querySelectorAll('.fm-item')].map((b) => b.textContent.trim())).toEqual(['Open', 'Mark as posted…', 'Delete…']);
+    button(menu, 'Mark as posted…').click();
+    flushSync();
+    // marked on the home: the post is not opened
+    expect(home()).not.toBeNull();
+    expect(popover()).not.toBeNull();
+    api.put.mockImplementation(async () => {
+      lists.drafts = [row('Fresh', { state: 'posted', posted: { url: null, site: 'x', at: '2026-11-11T09:00:00Z' } }), row('Other')];
+      return {};
+    });
+    const reads = () => api.get.mock.calls.filter(([path]) => path.endsWith('/drafts')).length;
+    const before = reads();
+    type(popover().querySelector('input'), '');
+    button(popover(), 'Mark as posted').click();
+    await settle();
+    expect(api.put).toHaveBeenCalledWith('/api/cases/case-1/drafts/Fresh/publish', { posted: true, url: null });
+    expect(reads()).toBe(before + 1);
+    expect(toasts()).toContain('Marked as posted');
+    expect([...home().querySelectorAll('[data-part="posted"] .ph-title')].map((t) => t.textContent)).toEqual(['Fresh']);
+  });
+
+  it('refuses a link that is no post on a card, and marks nothing', async () => {
+    lists.proofs = [];
+    lists.drafts = [row('Fresh')];
+    await mountPost();
+    home().querySelector('.post-card').dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true, clientX: 40, clientY: 40 }));
+    flushSync();
+    button(document.querySelector('.float-menu[aria-label="Fresh"]'), 'Mark as posted…').click();
+    flushSync();
+    type(popover().querySelector('input'), 'https://example.com/post');
+    button(popover(), 'Mark as posted').click();
+    await settle();
+    expect(popover().querySelector('[role="alert"]').textContent).toBe('That is not the link of an X or Bluesky post.');
+    expect(api.put).not.toHaveBeenCalled();
+  });
+
+  it('offers a posted post\'s link, its copy and Not posted from its card\'s menu, and its link from Open', async () => {
     const writeText = vi.fn(async () => {});
     vi.stubGlobal('navigator', { ...navigator, clipboard: { writeText } });
-    lists.drafts = [row('Out', { state: 'posted', site: 'x', posted: { url: POSTED, site: 'x', at: '2026-11-10T08:00:00Z' } }), row('Fresh')];
+    lists.drafts = [row('Out', { state: 'posted', posted: { url: NINTH_MARCH, site: 'x', at: '2026-11-10T08:00:00Z' } }), row('Fresh')];
     await mountPost();
     home().querySelector('button[aria-label="More for Out"]').click();
     flushSync();
     const menu = document.querySelector('.float-menu[aria-label="Out"]');
-    expect([...menu.querySelectorAll('.fm-item')].map((b) => b.textContent.trim())).toEqual(['Open', 'See the post', 'Copy link', 'Delete…']);
+    expect([...menu.querySelectorAll('.fm-item')].map((b) => b.textContent.trim())).toEqual(['Open', 'See the post', 'Copy link', 'Not posted', 'Delete…']);
     button(menu, 'Copy link').click();
     await settle();
-    expect(writeText).toHaveBeenLastCalledWith(POSTED);
+    expect(writeText).toHaveBeenLastCalledWith(NINTH_MARCH);
     expect(toasts()).toContain('Link copied');
+
+    home().querySelector('button[aria-label="More for Out"]').click();
+    flushSync();
+    button(document.querySelector('.float-menu[aria-label="Out"]'), 'Not posted').click();
+    await settle();
+    expect(api.put).toHaveBeenCalledWith('/api/cases/case-1/drafts/Out/publish', { posted: false });
 
     button(header(), 'Open').click();
     await settle();
-    const copies = dialog('Open a post').querySelectorAll('button[title="Copy the post\'s link"]');
+    const list = dialog('Open a post');
+    const copies = list.querySelectorAll('button[title="Copy the post\'s link"]');
     expect(copies).toHaveLength(1);
     expect(copies[0].getAttribute('aria-label')).toBe('Copy the link of Out');
     copies[0].click();
     await settle();
-    expect(writeText).toHaveBeenCalledTimes(2);
-    expect(writeText).toHaveBeenLastCalledWith(POSTED);
+    expect(writeText).toHaveBeenLastCalledWith(NINTH_MARCH);
+    const open = list.querySelector('a[title="Open the post"]');
+    expect(open.getAttribute('href')).toBe(NINTH_MARCH);
+    expect(open.getAttribute('aria-label')).toBe('Open the post of Out');
+    // the row with no link keeps the slots, so the pills line up
+    const fresh = [...list.querySelectorAll('.ol-row')].find((r) => r.textContent.includes('Fresh'));
+    expect(fresh.querySelectorAll('span.ol-act[aria-hidden="true"]')).toHaveLength(2);
   });
 });
 
@@ -971,7 +1226,10 @@ describe('the geolocation road, unchanged', () => {
     await settle();
     expect(bridge.handOffPost).toHaveBeenCalledTimes(1);
     const [message] = bridge.handOffPost.mock.calls[0];
-    expect(Object.keys(message)).toEqual(['url', 'caseId', 'posts']);
+    // the draft it names was written first, so the extension's reports name a post that exists
+    expect(Object.keys(message)).toEqual(['url', 'caseId', 'posts', 'draft']);
+    expect(draftWrites()).toHaveLength(1);
+    expect(message.draft).toBe(draftWrites()[0][1].title);
     expect(message.url).toBe(`https://x.com/compose/post?text=${encodeURIComponent(CLASSIC_FIRST_POST)}`);
     expect(message.posts).toEqual([{ text: CLASSIC_FIRST_POST, files: [PROOF.png] }]);
     expect(opened).not.toHaveBeenCalled();
@@ -1176,6 +1434,61 @@ describe('Reply under the source', () => {
   });
 });
 
+describe('Thread style', () => {
+  const select = () => target.querySelector('#pc-tpl');
+  const groups = () => [...select().querySelectorAll('optgroup')].map((g) => ({
+    label: g.getAttribute('label'), options: [...g.querySelectorAll('option')].map((o) => o.textContent),
+  }));
+  const choose = (value) => {
+    select().value = value;
+    select().dispatchEvent(new Event('change', { bubbles: true }));
+    flushSync();
+  };
+
+  it('offers the built-in layouts of the kind open with no template of the analyst\'s, and a way to Settings', async () => {
+    await mountPost();
+    uiState.postProof = { ...PROOF };
+    await settle();
+    expect(target.querySelector('.tpl-none')).toBeNull();
+    expect(groups()).toEqual([{ label: 'Built-in', options: ['Classic', 'Coordinates only', 'Short', 'With date'] }]);
+    expect(button(target, 'Settings templates')).toBeTruthy();
+    startPost('plate');
+    await settle();
+    expect(groups()).toEqual([{ label: 'Built-in', options: ['Plate'] }]);
+  });
+
+  it('lists them under the analyst\'s own templates', async () => {
+    templatesState.post = [{ id: 'po_geo', name: 'Geo house', data: { body: '#coordinates' } }];
+    await mountPost();
+    const options = [...select().children].map((node) => node.tagName === 'OPTGROUP' ? `[${node.getAttribute('label')}]` : node.textContent);
+    expect(options).toEqual(['Apply a template…', 'Geo house', '[Built-in]']);
+  });
+
+  it('changes the body only, and Remove goes back to the layout it had', async () => {
+    await mountPost();
+    uiState.postProof = { ...PROOF };
+    await settle();
+    type(target.querySelector('#pc-mention'), '@desk');
+    await settle();
+    const mediaPost = () => [...target.querySelectorAll('.tweet-block .label')].some((l) => l.textContent === 'Media');
+    expect(mediaPost()).toBe(true);
+    choose('built-in:coordinates');
+    expect(target.querySelector('.tpl-loaded-name').textContent.trim()).toBe('Coordinates only');
+    expect(firstPost().value).toBe('10.303315, -66.874095\n\n@desk');
+    expect(toasts()).toContain('Layout loaded: Coordinates only');
+    // the mention and the media post stay as they were
+    expect(target.querySelector('#pc-mention').value).toBe('@desk');
+    expect(mediaPost()).toBe(true);
+    await saved();
+    expect(draftWrites().at(-1)[1].state.body).toBe('#coordinates\n\n#mention');
+    target.querySelector('.tpl-remove').click();
+    await settle();
+    expect(firstPost().value).toContain('Los Anacuos, Miranda, Venezuela - 76XH+8F5');
+    expect(firstPost().value).toContain('@desk');
+  });
+
+});
+
 describe('a kind\'s default template', () => {
   it('starts that kind, and its Remove goes back to the kind\'s own layout', async () => {
     templatesState.post = [
@@ -1193,7 +1506,8 @@ describe('a kind\'s default template', () => {
     // a free post lists only the templates of its kind
     target.querySelector('.tpl-remove').click();
     await settle();
-    expect([...target.querySelectorAll('#pc-tpl option')].map((o) => o.textContent)).toEqual(['Apply a template…', 'Free house']);
+    expect([...target.querySelectorAll('#pc-tpl option')].map((o) => o.textContent)).toEqual(['Apply a template…', 'Free house', 'Text and source']);
+    expect(target.querySelector('#pc-tpl optgroup').getAttribute('label')).toBe('Built-in');
     target.querySelector('#pc-desc').value = 'Smoke';
     target.querySelector('#pc-desc').dispatchEvent(new Event('input', { bubbles: true }));
     target.querySelector('#pc-desc').dispatchEvent(new Event('change', { bubbles: true }));

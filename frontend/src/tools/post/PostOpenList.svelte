@@ -4,8 +4,8 @@
    * row shows its picture, its name, its kind, its platform, where it stands and when it
    * was last saved; a search and a filter by kind and by state narrow it once it holds
    * more than one of either (`postHome.js` `postFacets`, `filterPosts`). A press opens a
-   * post, a posted one's copy button copies its link, and the bin asks to delete it, the
-   * composer holding the dialog.
+   * post, a posted one's buttons copy its link and open it, and the bin asks to delete it,
+   * the composer holding the dialog.
    */
   import Modal from '../../components/Modal.svelte';
   import Icon from '../../components/Icon.svelte';
@@ -42,8 +42,8 @@
     if (state && !facets.states.some((one) => one.id === state)) state = '';
   });
   const narrowing = $derived(drafts.length > 1);
-  // a posted row's copy button keeps its place on every row, so the pills line up
-  const copies = $derived(shown.some((draft) => draft.posted?.url));
+  // a posted row's link buttons keep their place on every row, so the pills line up
+  const links = $derived(shown.some((draft) => draft.posted?.url));
 </script>
 
 <Modal title="Open a post" width="640px" {onclose}>
@@ -96,7 +96,12 @@
                 onclick={() => copyText(draft.posted.url, { said: 'Link copied' })}>
                 <Icon name="copy" size={13} />
               </button>
-            {:else if copies}
+              <a class="btn btn-ghost btn-sm ol-act" href={draft.posted.url} target="_blank" rel="noreferrer"
+                aria-label={`Open the post of ${draft.title}`} title="Open the post">
+                <Icon name="external" size={13} />
+              </a>
+            {:else if links}
+              <span class="ol-act" aria-hidden="true"></span>
               <span class="ol-act" aria-hidden="true"></span>
             {/if}
             <button type="button" class="btn btn-ghost btn-sm ol-act ol-del" aria-label={`Delete ${draft.title}`} title="Delete this post"
@@ -157,11 +162,9 @@
     font-weight: 650;
     white-space: nowrap;
   }
-  .ol-pill.opened { background: color-mix(in srgb, var(--accent) 18%, transparent); color: var(--accent); }
-  /* amber on its own soft ground is too faint on white: darkened there */
-  :global(:root[data-theme='light']) .ol-pill.opened { color: color-mix(in srgb, var(--accent) 60%, var(--text-1)); }
   .ol-pill.posted { background: color-mix(in srgb, var(--ok) 18%, transparent); color: var(--ok); }
   .ol-pill.changed { background: color-mix(in srgb, var(--warn) 20%, transparent); color: var(--warn); }
   .ol-act { flex: none; justify-content: center; width: 28px; padding-inline: 0; color: var(--text-2); }
+  a.ol-act { text-decoration: none; }
   .ol-del { color: var(--danger); }
 </style>

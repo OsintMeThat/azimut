@@ -828,6 +828,8 @@ export async function installAppFixture(page, options = {}) {
   const fixtureDrafts = structuredClone(options.drafts ?? {});
   // What Post wrote (it saves itself) and what a restore puts back, by trash group.
   const draftWrites = [];
+  // what Post's home marked through `PUT /drafts/{name}/publish`
+  const publishWrites = [];
   const restorable = new Map();
   const fixtureSettings = {
     ...settings,
@@ -2094,6 +2096,27 @@ export async function installAppFixture(page, options = {}) {
       fixtureLookupEntities[`.drafts/${name}.json`] ??= { id: `d-${name}`, type: 'post' };
       return json(route, { name, title: body.title, draft: `.drafts/${name}.json` });
     }
+    if (path.startsWith(`/api/cases/${CASE_ID}/drafts/`) && path.endsWith('/publish') && request.method() === 'PUT') {
+      // as `api/drafts.py` marks a post from its card: only its `publish` record changes
+      const name = decodeURIComponent(path.slice(`/api/cases/${CASE_ID}/drafts/`.length, -'/publish'.length));
+      const draft = fixtureDrafts[name];
+      if (!draft) return json(route, { detail: 'draft not found' }, 404);
+      const body = request.postDataJSON();
+      publishWrites.push({ name, ...body });
+      const state = { ...(draft.state ?? {}) };
+      if (!body.posted) delete state.publish;
+      else {
+        const held = state.publish?.posted_at ? state.publish : {};
+        state.publish = {
+          posted_at: held.posted_at ?? new Date().toISOString(), changed: held.changed ?? false,
+          ...(held.mark ? { mark: held.mark } : {}),
+          site: body.url ? (body.url.startsWith('https://bsky.app/') ? 'bluesky' : 'x') : (held.site ?? state.target ?? 'x'),
+          ...(body.url ? { url: body.url } : {}),
+        };
+      }
+      fixtureDrafts[name] = { ...draft, updated_at: new Date().toISOString(), state };
+      return json(route, { name, state: state.publish ? 'posted' : 'draft' });
+    }
     if (path.startsWith(`/api/cases/${CASE_ID}/drafts/`) && request.method() === 'DELETE') {
       // to the Trash, as one group a restore puts back
       const name = decodeURIComponent(path.slice(path.lastIndexOf('/') + 1));
@@ -2114,7 +2137,10 @@ export async function installAppFixture(page, options = {}) {
       // as `api/drafts.py` lists them: what Post's home says of each without opening it
       const listed = Object.entries(fixtureDrafts).map(([name, draft]) => {
         const publish = draft.state?.publish;
-        const posted = publish?.url ? { url: publish.url, site: publish.site ?? 'x', at: publish.posted_at ?? null } : null;
+        // out once it has its link, or once it was marked posted without one
+        const posted = publish?.url || publish?.posted_at
+          ? { url: publish.url ?? null, site: publish.site ?? draft.state?.target ?? 'x', at: publish.posted_at ?? null }
+          : null;
         return {
           name,
           title: draft.title,
@@ -2126,8 +2152,7 @@ export async function installAppFixture(page, options = {}) {
           proof: draft.state?.proofPng ?? null,
           video: draft.state?.video ?? null,
           // whether it went out, and the picture its card shows
-          state: posted ? (publish.changed ? 'changed' : 'posted') : publish?.opened_at ? 'opened' : 'draft',
-          site: posted?.site ?? publish?.site ?? null,
+          state: posted ? (publish.changed ? 'changed' : 'posted') : 'draft',
           posted,
           picture: draft.state?.proofPng ?? draft.state?.firstMedia?.[0] ?? draft.state?.mediaPaths?.[0] ?? null,
         };
@@ -2401,6 +2426,7 @@ export async function installAppFixture(page, options = {}) {
     sheetOnDisk: (id) => fixtureSheets.get(id),
     trashWrites,
     draftWrites,
+    publishWrites,
     bundleCalls,
     geoQueries,
     settingsWrites,

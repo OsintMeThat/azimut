@@ -5255,29 +5255,36 @@ never posts, and pressing Post on X or Bluesky stays the analyst's.
   proof: **New post** and a search that finds a draft by name (Enter opens the first),
   then three parts. **In progress**, the last six drafts not gone out yet or changed
   since, each with its platform, its kind when it is not a geolocation, and how many
-  posts it holds when they are several; **Ready to post**, the proofs no draft names
-  yet, a proof of a video listed under its video with the slides that wait; and
-  **Posted**, the latest six to go out, each with its link. Every post card wears its
-  state as a pill (*Draft*, *Opened in X*, *Posted*, *Changed since posted*), and its ⋯
-  or a right-click offers **Open**, **See the post** and **Copy link** once posted, and
-  **Delete…**. One press on a proof writes its geolocation, as Attach a proof does; its
-  ⋯ or a right-click (a slide's chip takes the right-click) offers **Write its post** and
-  **Already posted…**, for a post that went out from elsewhere: the same post starts,
-  and the link field takes the focus once the proof has filled it in. A card's picture
+  posts it holds when they are several; **Ready to post**, under its line *Proofs with
+  no post yet*, the proofs no draft names yet, a proof of a video listed under its
+  video with the slides that wait; and **Posted**, the latest six to go out by the
+  post's own day (read off its link, else the moment it was marked), each with that day
+  and its link when it has one. Every post card wears its state as a pill (*Draft*,
+  *Posted*, *Changed since posted*), and its ⋯ or a right-click offers **Open**, **Mark
+  as posted…** on a draft (the same popover as the header's, on the card, without
+  opening the post: `PUT /drafts/{name}/publish`), **See the post**, **Copy link** and
+  **Not posted** once posted, and **Delete…**, whose question adds *Its proof goes back
+  to Ready to post.* when no other post names that proof. One press on a proof writes
+  its geolocation, as Attach a proof does; its ⋯ or a right-click (a slide's chip takes
+  the right-click) offers **Write its post** and **Mark as posted…**, for a post that
+  went out from elsewhere: the same post starts, and the header's popover opens once the
+  proof has filled it in. The home reads the case's drafts and proofs once each time it
+  is shown: back from a post, after a delete or an Undo, after a mark. A card's picture
   sits whole on a dark ground in both themes, as Geo Proof's home and the Open list show
   theirs, since a proof is drawn on its own dark one. A proof *has a post* when a draft names its
   picture, read off the drafts list (`GET /drafts` carries each draft's `kind`,
-  `posts`, `proof`, `video`, `state`, `site`, `posted` and the `picture` its card
+  `posts`, `proof`, `video`, `state`, `posted` and the `picture` its card
   shows, all read off the file it opens anyway), so a draft sent to the Trash gives its
   proof back at once. A case with neither keeps the composer it always opened on.
   **‹ Posts**, first in the header, goes back to the home.
 - **Open**, in the header, lists every post of the case as Geo Proof's Open proof does:
   each row with its picture, name, kind, platform, state pill and the day it was last
   saved, newest first. A search and a filter by kind and by state (each counted, shown
-  once the posts hold more than one) narrow it, a posted row's copy button copies its
-  link, and the bin on a row deletes it with the delete preview and Undo; the list
-  reads the case again after a delete or an Undo.
-  It reads only `GET /drafts`, and `GET /proofs` for the pictures when the home has not.
+  once the posts hold more than one) narrow it, a posted row's buttons copy its link
+  and open it (**↗**, a row with no link keeping their room so the pills line up), and
+  the bin on a row deletes it with the delete preview and Undo; the list reads the case
+  again after a delete or an Undo. It reads `GET /drafts` and `GET /proofs` each time it
+  opens, and the home under it takes what it read.
 - **A post saves itself**, as Inspect's work does: once something is typed, picked or
   attached, it is written when the typing stops, and the header says *Saving…*, then
   *Saved*, or *Not saved* with **Retry**. An untouched blank post files nothing, and
@@ -5287,11 +5294,11 @@ never posts, and pressing Post on X or Bluesky stays the analyst's.
   files under a fresh one rather than write over it. Going home, opening another
   post, Back, New post, a proof sent with **To Post**, another case or the tab closing
   each writes what is pending first; a post whose save failed stays open and says so.
-- **The header's ⋯**, beside the name, holds **Add to notes…**, which writes the post
-  into a new case note (its place, points, assessment, source and pictures, linked to
-  the proof, the media and the draft), and **Delete…** once the post is saved: the
-  draft goes to the Trash with the delete preview and **Undo** in the toast, and the
-  composer goes back home.
+- **Add to notes**, a note icon beside Open, writes the post into a new case note (its
+  place, points, assessment, source and pictures, linked to the proof, the media and
+  the draft). **The header's ⋯**, beside the name once the post is saved, holds
+  **Delete…**: the draft goes to the Trash with the delete preview and **Undo** in the
+  toast, and the composer goes back home.
 - **New post** offers four starts. **Geolocation** is the composer as it always was:
   the same fields, the same first post, the same Publish. **Map plate** and **Free post**
   carry their own pictures, or a video, on the first post (`firstMedia`) and show only
@@ -5322,34 +5329,48 @@ never posts, and pressing Post on X or Bluesky stays the analyst's.
   (`intent/post` with `in_reply_to`) with the first post typed, the proof on the
   clipboard to paste (*Picture copied: paste it with Ctrl+V.*); Bluesky has no such
   page, so it says so and copies the post and opens the source to paste it under.
-- **Link to your post** is the first field of every post, whatever its kind and a
-  draft from before kinds included (*Paste it once it's posted*). A post is a **Draft**,
-  **Opened in X** (or Bluesky) once Publish, Reply or the extension's hand-off opened
-  the site with it, **Posted** once the analyst gave its link, or **Changed since
-  posted** when it was edited after (`publish` on the draft: `opened_at`, `site`, `url`,
-  `posted_at`, a print of the post as it went out in `mark`, and `changed`; written only
-  once there is something to say, so a draft from before reads as a draft). The field
-  takes a link on a paste, Enter or leaving it, as the browser shows it (no `https://`,
-  a share's `?s=20`), and keeps it written the one way; anything that is not an X
-  status or a Bluesky post is said so under it and kept nowhere. Its text alone saves
-  nothing, while a link set on a blank post files it. Set, the link has **Copy**
-  (*Link copied*), **Open** in a new tab and **×**; another link pasted replaces it, and
-  × (or emptying the field) takes it back, the link having been wrong: the post is
-  Opened again when it was, else a draft. One quiet line under the field says where
-  it stands: nothing for a draft, *Opened in X · paste its link here once it's posted*
-  with the field's border in the accent, *Posted on X · 11 Nov 2026*, or *Changed since
-  posted* in the warning colour. The link and date also go on the proof the post is
-  about, as its `posted` record (one per post, the latest twenty): a record of the
-  post, not a source, since it is no evidence. A changed link replaces the old one
-  there, a link taken back leaves it, and deleting the draft keeps it, since the post
-  did go out. The proof's Details show *Posted on X · date · link*, and Add to notes
-  writes a *Posted* section. Nothing is read from the site: the analyst says it went
-  out.
+- **Mark as posted**, in the header beside *Saved*, is where a post says it went out:
+  nothing is read from the site, the analyst says so. A post is a **Draft**, **Posted**
+  or **Changed since posted** when it was edited after (`publish` on the draft: `site`,
+  `url` when it has a link, `posted_at`, a print of the post as it went out in `mark`,
+  and `changed`; written only once it is marked, so a draft from before reads as a
+  draft, and a record an earlier build wrote on opening the site, `opened_at` alone,
+  reads as one too). On a draft, **Mark as posted** opens a popover: *Link to the post
+  (optional)*, *Keeps it with the proof and dates it.*, then **Mark as posted** (Enter)
+  and **Cancel**. A link is taken as the browser shows it (no `https://`, a share's
+  `?s=20`) and kept written the one way; one that is no X status or Bluesky post is said
+  so and marks nothing; an empty field marks the post posted with no link, on its
+  platform (*Marked as posted*). Once marked, a green pill says **Posted · 9 Nov**, the
+  post's own day: an X status id and a Bluesky record key (a TID) hold the moment the
+  post was made (`lib/post.js` `postLinkDate`, no network), else the moment it was
+  marked. Edited after, the pill turns amber, **Changed since posted**. Its menu has
+  **Open the post** and **Copy link** when it has a link, **Add the link…** or **Change
+  link…** (the popover again, the day and the print kept), and **Not posted**, which
+  makes it a draft again. After Publish, Reply or the extension's hand-off, **Mark as
+  posted** wears a soft accent until the post is marked or closed; nothing of that is
+  saved. The post's site, link and day also go on the proof it is about, as its
+  `posted` record (one per post, the latest twenty, the link only when there is one): a
+  record of the post, not a source, since it is no evidence. A changed link replaces
+  the old one there, Not posted takes the post's entry off, and deleting the draft keeps
+  it, since the post did go out. The proof's Details show *Posted on X · 9 Nov · link*,
+  or *Posted on X · 9 Nov* with no link, and Add to notes writes a *Posted* section.
+- **The extension's word** on a thread it handed out reaches the composer through the
+  bridge (`lib/extBridge.js`): the hand-off names the draft it came from (`draft`, the
+  draft's name, written first so it exists). A link the extension caught once the post
+  went out (`post-link-caught`, a post's link on X or Bluesky only) is proposed, never
+  kept by itself, since it can be the wrong post of a thread: on the post open, the
+  header says *Link caught: x.com/desk/status/…* with **Keep** (marks it posted at that
+  link) and **Not this one**; for another post of the case, a toast says *Link caught
+  for “Post 38”* with the same two, Keep writing it through that post's route; one for
+  another case is ignored. A hand-off that went wrong (`post-handoff-report`) shows its
+  one sentence in a warning toast with **Copy report**, which copies the extension's
+  short plain-text report.
 - **A narrow header** gives way a step at a time, measured rather than guessed: the
   name field narrows and the quiet line and Reply say less, then Open folds to its
-  icon, and last the quiet line keeps only **Install**, the kind its icon and Publish
-  its verb, so a laptop with the case panel open still shows Publish whole. Wide
-  enough, it is the header it always was.
+  icon, then the quiet line keeps only **Install**, the kind its icon and Publish its
+  verb, and last Mark as posted (or its pill) keeps its icon, its words in the hover,
+  so a laptop with the case panel open still shows Publish whole. Wide enough, it is
+  the header it always was.
 
 ## Post templates
 
@@ -5374,7 +5395,10 @@ stays text.
   Classic, Coordinates only, Short and With date, a Map plate's Plate, a Free post's
   Text and source. Video thread's come with the video thread. The editor then offers
   that kind's **Start from**, each replacing the body and nothing else. A copy does not
-  offer it, and keeps its kind.
+  offer it, and keeps its kind. The same starts are in the composer's **Thread style**,
+  under **Built-in** below the analyst's own templates of the open kind (alone when there
+  are none, with the link to Settings → Templates kept): applying one changes the body
+  only, and its **Remove** goes back to the layout the post had.
 - **Reply under the source by default**, on a geolocation template, starts its posts
   with *Post as a reply under the source* checked whenever their source is an X or
   Bluesky post (`reply: true`, written only when checked). A template from the first

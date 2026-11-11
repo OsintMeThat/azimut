@@ -29,9 +29,11 @@
     defaultPostTemplate, normalizePostKind, postKind, postStarters, normPostTemplate,
     replyByDefault, replyIntentUrl, replyPostText, replyTarget, startMediaPlan,
     statedPostKind, templatesOfKind, videoTitle,
-    postedAddress, postFingerprint, postLinkLine, postState, unpostedRecord,
+    postedAddress, postedDay, postedWhen, postFingerprint, postState,
   } from '../lib/post.js';
-  import { extensionOutdated, extensionVersion, handOffPost } from '../lib/extBridge.js';
+  import {
+    extensionOutdated, extensionVersion, handOffPost, onPostHandoffReport, onPostLinkCaught,
+  } from '../lib/extBridge.js';
   import { bidiSafe } from '../lib/bidi.js';
   import { mapLinks } from '../lib/maplinks.js';
   import { matchesQuery } from '../lib/mediaFilter.js';
@@ -47,6 +49,7 @@
   import ExtensionWindow from './post/ExtensionWindow.svelte';
   import ReplyDialog from './post/ReplyDialog.svelte';
   import PostOpenList from './post/PostOpenList.svelte';
+  import PostedControl from './post/PostedControl.svelte';
 
   let coordsText = $state('');
   let geo = $state(null); // {lat, lon, dms, plus_code}
@@ -110,13 +113,23 @@
   let listsFor = $state(null); // the case they were asked for
   let listsRun = 0;
   let listsAsked = ''; // what the last read was for, so one reason reads once
+  // Each showing of the home counts, so it reads the lists once each time it is shown:
+  // back from a post (whose link or name may have changed with no move of the case),
+  // after a delete, and on coming back to Post. A mark from the home reads them itself.
+  let homeShowing = 0;
+  let wasIdle = false;
   $effect(() => {
     const id = caseState.current?.id;
     const rev = caseState.rev;
-    if (uiState.tool !== 'post') return;
+    if (uiState.tool !== 'post') {
+      wasIdle = false;
+      return;
+    }
     // Read for the home while no post is open, and for a proof the list does not hold
     // yet (one just saved and sent over), never on each save of a post being written.
     const idle = !postOpen && !hasContent;
+    if (idle && !wasIdle) homeShowing += 1;
+    wasIdle = idle;
     const unknown = proofPng && !(caseProofs ?? []).some((row) => row.png === proofPng) ? proofPng : '';
     if (!id) {
       untrack(() => {
@@ -128,7 +141,7 @@
       return;
     }
     if (!idle && !unknown) return;
-    const reason = `${id}|${rev}|${idle ? '' : unknown}`;
+    const reason = `${id}|${rev}|${idle ? `home ${homeShowing}` : unknown}`;
     untrack(() => {
       if (reason === listsAsked) return;
       listsAsked = reason;
@@ -590,10 +603,30 @@
     if (t) applyPostTemplate(t, { quiet: true });
   }
 
+  // The layouts every post of this kind can take as they ship (lib/post.js
+  // `postStarters`), under the analyst's own in Thread style.
+  const builtInLayouts = $derived(postStarters(kind));
+  const BUILT_IN = 'built-in:';
+
   function applyPostFromSelect(e) {
-    const t = kindTemplates.find((x) => x.id === e.target.value);
+    const value = e.target.value;
     e.target.value = '';
+    if (value.startsWith(BUILT_IN)) {
+      const starter = builtInLayouts.find((one) => one.id === value.slice(BUILT_IN.length));
+      if (starter) applyBuiltInLayout(starter);
+      return;
+    }
+    const t = kindTemplates.find((x) => x.id === value);
     if (t) applyPostTemplate(t);
+  }
+
+  /** A built-in layout changes the body only: the mention, the media post and the later posts stay. Remove goes back as a template's does. */
+  function applyBuiltInLayout(starter) {
+    const prev = appliedPostTemplate?.prev ?? snapshotPostStructure();
+    body = starter.body;
+    appliedPostTemplate = { name: starter.label, prev };
+    if (!tweet1Edited) regenerate();
+    toast(`Layout loaded: ${starter.label}`, 'ok', 1400);
   }
 
   function discardPostTemplate() {
@@ -1005,17 +1038,19 @@
     };
   }
 
-  // ---- its link, once it is posted -------------------------------------------------
-  // `publishState` is the draft's `publish` record (lib/post.js `postState`): when Publish,
-  // Reply or the extension opened the site with it, and once the analyst pasted its link,
-  // where it went out and when, with a print of the post as it was then (`mark`), so an
-  // edit after it reads as changed since posted. Nothing of it is written before then.
+  // ---- whether it went out ----------------------------------------------------------
+  // `publishState` is the draft's `publish` record (lib/post.js `postState`): once the
+  // analyst marked the post posted, where it went out and when, its link when they gave
+  // one, and a print of the post as it was then (`mark`), so an edit after it reads as
+  // changed since posted. Nothing of it is written before then. The header's control
+  // (`post/PostedControl.svelte`) is where it is said.
   let publishState = $state(null);
-  // The link field at the top of every post: what it holds while it is written, taken
-  // on a paste, Enter or leaving it. Its text alone is never saved.
-  let linkText = $state('');
-  let linkError = $state('');
-  let linkEl = $state(null);
+  // The site was opened with the post (Publish, Reply, the extension's hand-off): Mark as
+  // posted wears a soft accent until the post is marked or closed. Never saved.
+  let openedNow = $state(false);
+  // A link the extension caught for the post open, proposed and never kept by itself.
+  let caughtLink = $state(null); // { url, site }
+  let postedControl = $state(null);
 
   // What the post says and carries, as its print reads it: its platform and a first
   // post rebuilt from the fields are not what changed.
@@ -1027,77 +1062,93 @@
 
   function publishRecord(state) {
     const record = { ...publishState };
-    if (record.url) record.changed = postPrint(state) !== record.mark;
+    if (postState(record) !== 'draft') record.changed = postPrint(state) !== record.mark;
     return record;
   }
 
-  const liveState = $derived(postState(publishState?.url ? publishRecord(threadState()) : publishState));
-  const linkLine = $derived(postLinkLine(liveState, publishState));
+  const liveState = $derived(postState(publishState ? publishRecord(threadState()) : null));
+  // the day it went out: its link's own, else the moment it was marked
+  const postedOnDay = $derived(
+    publishState ? postedDay(postedWhen({ url: publishState.url, at: publishState.posted_at })) : ''
+  );
 
-  /** The site opened with the post: the link field waits for its link. */
-  function markOpened(site) {
-    const now = new Date().toISOString();
-    publishState = publishState?.url ? { ...publishState, opened_at: now } : { ...(publishState ?? {}), opened_at: now, site };
+  /** The site opened with the post: Mark as posted waits for it in the accent. */
+  function markOpened() {
+    openedNow = true;
   }
 
   /**
-   * The link field taken: the analyst's word that the post went out, at the link it went
-   * out at. Another link replaces the one it held, an emptied field takes it back, and
-   * a link that is no X or Bluesky post is said so and kept nowhere.
+   * Mark as posted, from the header's popover or a caught link kept: the analyst's word
+   * that the post went out, at this link or with none. A post already out keeps its day
+   * and its print and only takes the link given, or loses the one it had.
    */
-  function commitLink() {
-    const typed = linkText.trim();
-    if (!typed) {
-      linkError = '';
-      if (publishState?.url) clearLink({ focus: false });
+  function markPosted(url) {
+    const found = url ? postedAddress(url) : null;
+    if (liveState !== 'draft') {
+      const next = { ...publishState, site: found?.site ?? publishState.site ?? target };
+      if (found) next.url = found.url;
+      else delete next.url;
+      publishState = next;
+      toast(found ? 'Link saved' : 'Link removed', 'ok', 1600);
+    } else {
+      publishState = {
+        site: found?.site ?? target, ...(found ? { url: found.url } : {}),
+        posted_at: new Date().toISOString(), mark: postPrint(),
+      };
+      toast('Marked as posted', 'ok', 1800);
+    }
+    openedNow = false;
+    caughtLink = null;
+  }
+
+  /** Not posted: marked by mistake. The post is a draft again, and its proof lets it go. */
+  function unmarkPosted() {
+    publishState = null;
+    toast('Back to Draft', 'ok', 1600);
+  }
+
+  /**
+   * A saved post other than the open one, marked from its card on the home or from a link
+   * the extension caught for it, through its own route: only its record changes. The
+   * home and an Open list up read the case's posts again.
+   */
+  async function markSavedPost(entry, url, { posted = true } = {}) {
+    const caseId = caseState.current?.id;
+    if (!caseId || !entry?.name) return;
+    try {
+      await api.put(`/api/cases/${caseId}/drafts/${encodeURIComponent(entry.name)}/publish`,
+        posted ? { posted: true, url: url ?? null } : { posted: false });
+      toast(posted ? 'Marked as posted' : 'Back to Draft', 'ok', 1800);
+      if (listsFor === caseId) readLists(caseId);
+      if (openList !== null) openDraftList();
+    } catch (e) {
+      toast(`Not marked: ${e.message}`, 'danger');
+    }
+  }
+
+  // What the extension's bridge says of a thread it handed out (lib/extBridge.js). A link
+  // it caught is only proposed: on the post open, in the header; for another post of the
+  // case, in a toast. One for another case is not this tab's. Heard once mounted.
+  $effect(() => onPostLinkCaught((link) => {
+    const id = caseState.current?.id;
+    if (!id || link.caseId !== id) return;
+    if (draftName && link.draft === draftName) {
+      if (link.url !== publishState?.url) caughtLink = { url: link.url, site: link.site };
       return;
     }
-    const found = postedAddress(typed);
-    if (!found) {
-      linkError = 'That is not the link of an X or Bluesky post.';
-      return;
-    }
-    linkError = '';
-    linkText = found.url;
-    if (found.url === publishState?.url) return;
-    publishState = {
-      ...(publishState ?? {}), site: found.site, url: found.url,
-      posted_at: new Date().toISOString(), mark: postPrint(),
-    };
-  }
-
-  /** × : the link was wrong. The post is opened again, or a draft, and its proof lets the link go. */
-  function clearLink({ focus = true } = {}) {
-    publishState = unpostedRecord(publishState);
-    linkText = '';
-    linkError = '';
-    if (focus) linkEl?.focus();
-  }
-
-  function linkKey(event) {
-    if (event.key === 'Enter') {
-      event.preventDefault();
-      commitLink();
-    } else if (event.key === 'Escape') {
-      linkText = publishState?.url ?? '';
-      linkError = '';
-    }
-  }
-
-  /** A paste is taken at once, once the browser has put it in the field. */
-  function linkPasted() {
-    setTimeout(commitLink, 0);
-  }
-
-  function copyLink() {
-    if (publishState?.url) copyText(publishState.url, { said: 'Link copied' });
-  }
-
-  /** Focus the link field, for a post the analyst says is out already. */
-  async function focusLink() {
-    await tick();
-    linkEl?.focus();
-  }
+    if (!savedSlugs(draftEntities, 'draft').has(link.draft)) return;
+    const title = (caseDrafts ?? []).find((row) => row.name === link.draft)?.title ?? link.draft;
+    toast(`Link caught for “${title}”`, 'info', 0, [
+      { label: 'Keep', onClick: () => markSavedPost({ name: link.draft }, link.url) },
+      { label: 'Not this one', onClick: () => {} },
+    ]);
+  }));
+  $effect(() => onPostHandoffReport((report) => {
+    if (report.caseId !== caseState.current?.id) return;
+    toast(report.error, 'warn', 12000, report.report
+      ? { label: 'Copy report', onClick: () => copyText(report.report, { said: 'Report copied' }) }
+      : null);
+  }));
 
   // The note is titled after the post it is written from, so the two read as one piece
   // of work. The dialog leaves it editable.
@@ -1211,7 +1262,7 @@
   }
 
   // Open: the dialog stands on the press, its rows following when the case answers. The
-  // proofs are read with them when the home has not, for the pictures of the rows.
+  // drafts and the proofs are read each time it opens, and the home under it takes them.
   let openListLoading = $state(false);
   async function openDraftList() {
     const caseId = caseState.current?.id;
@@ -1221,13 +1272,16 @@
     try {
       const [drafts, proofs] = await Promise.all([
         api.get(`/api/cases/${caseId}/drafts`),
-        caseProofs ?? api.get(`/api/cases/${caseId}/proofs`).catch(() => null),
+        api.get(`/api/cases/${caseId}/proofs`).catch(() => null),
       ]);
       // closed while it was read: it stays closed
       if (openList === null || caseState.current?.id !== caseId) return;
       openList = drafts;
-      if (!caseProofs && Array.isArray(proofs) && listsFor === caseId) caseProofs = proofs;
-      else if (!caseProofs && Array.isArray(proofs)) openProofs = proofs;
+      if (listsFor === caseId) {
+        listsRun += 1; // a read of the home's still on its way is older than this one
+        caseDrafts = drafts;
+        if (Array.isArray(proofs)) caseProofs = proofs;
+      } else if (Array.isArray(proofs)) openProofs = proofs;
     } catch (e) {
       openList = null;
       toast(`The posts could not be read: ${e.message}`, 'warn');
@@ -1246,12 +1300,19 @@
   // From the header's ⋯ for the post open, a card on the home or the Open list: one
   // question with what the delete touches, the draft to the Trash, and Undo in the
   // toast. The post open goes back home once it is gone.
-  let deleteEntry = $state(null); // { name, title } pending deletion
+  let deleteEntry = $state(null); // { name, title, proof } pending deletion
   let deleting = $state(false);
 
   function askDelete(entry) {
-    if (entry?.name) deleteEntry = { name: entry.name, title: entry.title || entry.name };
+    if (entry?.name) deleteEntry = { name: entry.name, title: entry.title || entry.name, proof: entry.proof ?? null };
   }
+
+  // A post deleted gives its proof back to Ready to post, unless another post names it:
+  // the dialog says so, so the proof waiting there again reads as expected.
+  const deleteFreesProof = $derived(
+    !!deleteEntry?.proof
+      && !(caseDrafts ?? []).some((row) => row.proof === deleteEntry.proof && row.name !== deleteEntry.name)
+  );
 
   async function deleteSavedDraft() {
     const entry = deleteEntry;
@@ -1297,8 +1358,8 @@
       postOpen = true;
       replyChosen = s.reply === true;
       publishState = s.publish && typeof s.publish === 'object' ? publishFrom(s.publish) : null;
-      linkText = publishState?.url ?? '';
-      linkError = '';
+      openedNow = false;
+      caughtLink = null;
       description = s.description ?? '';
       coordsText = s.coordsText ?? '';
       place = s.place ?? '';
@@ -1354,6 +1415,9 @@
       tweet1 = s.tweet1 ?? buildTweet1();
       tweet1Edited = s.tweet1Edited ?? false;
       target = normalizePostTarget(s.target);
+      // marked posted from its card before it was ever opened here: the post as it
+      // stands is the one that went out
+      if (publishState && !publishState.mark) publishState = { ...publishState, mark: postPrint() };
       openList = null;
       // as it was saved: opening it writes nothing
       blankKey = contentKey();
@@ -1365,18 +1429,21 @@
     }
   }
 
-  /** A saved `publish` record as this build reads it: what it does not know is left out. */
+  /**
+   * A saved `publish` record as this build reads it, or null for a post that never went
+   * out: what it does not know is left out, so a record an earlier build wrote on opening
+   * the site (`opened_at`) and nothing more is a draft's.
+   */
   function publishFrom(saved) {
+    if (postState(saved) === 'draft') return null;
     const text = (value) => (typeof value === 'string' && value ? value : undefined);
     const found = postedAddress(saved.url);
-    const record = Object.fromEntries(Object.entries({
-      opened_at: text(saved.opened_at),
-      site: ['x', 'bluesky'].includes(saved.site) ? saved.site : undefined,
+    return Object.fromEntries(Object.entries({
+      site: found?.site ?? (['x', 'bluesky'].includes(saved.site) ? saved.site : undefined),
       url: found?.url,
-      posted_at: found ? text(saved.posted_at) : undefined,
-      mark: found ? text(saved.mark) : undefined,
+      posted_at: text(saved.posted_at),
+      mark: text(saved.mark),
     }).filter(([, value]) => value !== undefined));
-    return Object.keys(record).length ? record : null;
   }
 
   /** A blank post: Geolocation unless a start names another kind. */
@@ -1388,8 +1455,8 @@
     replyChosen = false;
     beforeReply = null;
     publishState = null;
-    linkText = '';
-    linkError = '';
+    openedNow = false;
+    caughtLink = null;
     description = '';
     coordsText = '';
     geo = null;
@@ -1555,7 +1622,7 @@
       description,
       source,
       attachments: reportAttachmentPaths(),
-      posted: publishState?.url ? { url: publishState.url, at: publishState.posted_at } : null,
+      posted: liveState !== 'draft' ? { url: publishState.url ?? null, site: publishState.site, at: publishState.posted_at } : null,
       ...evidence,
     });
   }
@@ -1662,8 +1729,10 @@
     const { posts, dropped } = handoffPayload();
     if (!posts.length) return false;
     try {
-      await handOffPost({ url, caseId: caseState.current.id, posts });
-      markOpened(target);
+      // written first, so the draft the extension names exists when it reports on it
+      await flushForHandOff();
+      await handOffPost({ url, caseId: caseState.current.id, posts, draft: draftName });
+      markOpened();
       // What it manages is the extension's to report — it is still filling while
       // this runs. What is said here is what is already true.
       const left = dropped ? ` ${dropped} file${dropped > 1 ? 's' : ''} over the per-post limit stayed behind.` : '';
@@ -1674,6 +1743,12 @@
       if (excuse) toast(excuse, 'warn', 6000);
       return false;
     }
+  }
+
+  /** What is pending is written before a hand-off, a change made a moment ago included. */
+  async function flushForHandOff() {
+    await tick();
+    await autosave.flush();
   }
 
   /** The files on the first post: a geolocation's proof, or any other kind's own media. */
@@ -1730,8 +1805,9 @@
     const { posts, dropped } = handoffPayload(text);
     if (!posts.length) return false;
     try {
-      await handOffPost({ url: replyTo.url, caseId: caseState.current.id, posts, reply_to: replyTo.url });
-      markOpened(replyTo.site);
+      await flushForHandOff();
+      await handOffPost({ url: replyTo.url, caseId: caseState.current.id, posts, reply_to: replyTo.url, draft: draftName });
+      markOpened();
       const left = dropped ? ` ${dropped} file${dropped > 1 ? 's' : ''} over the per-post limit stayed behind.` : '';
       toast(`${replySite} is opening the reply under the source.${left} Nothing was posted.`, 'info', 4200);
       return true;
@@ -1767,7 +1843,7 @@
         }
       }
       window.open(replyIntentUrl(replyTo.id, text), '_blank', 'noopener,noreferrer');
-      markOpened('x');
+      markOpened();
       const more = threadParts(text).length > 1 ? ' The next posts are here to copy.' : '';
       toast(
         pictured ? `Picture copied: paste it with ${pasteKeys}.${more}` : `Opened ${replySite} under the source post.${more}`,
@@ -1785,7 +1861,7 @@
     await copyText(bidiSafe(tweet1), { said: 'Post copied' });
     if (replyTo) {
       window.open(replyTo.url, '_blank', 'noopener,noreferrer');
-      markOpened(replyTo.site);
+      markOpened();
     }
   }
 
@@ -1826,20 +1902,22 @@
   // Each time, it is laid out whole first and measured, and only what overflows gives
   // way, a step at a time: first the name field narrows and the quiet line and Reply
   // say less (`narrow`), then the secondary buttons fold to their icons (`compact`),
-  // as Geo Proof's do, and last the quiet line keeps its Install, the kind its icon and
-  // Publish its verb (`tight`), so a laptop with the case panel open still shows Publish
-  // whole. Each opens again once the header is as wide as it needed, all of it before
+  // as Geo Proof's do, then the quiet line keeps its Install, the kind its icon and
+  // Publish its verb (`tight`), and last Mark as posted (or its pill) keeps its icon
+  // (`tightest`), so a laptop with the case panel open still shows Publish whole. Each opens again once the header is as wide as it needed, all of it before
   // the frame is drawn.
   let headerEl = $state(null);
   let headerW = $state(0);
-  let fold = $state(0); // 0 whole, 1 narrow, 2 compact, 3 tight
+  let fold = $state(0); // 0 whole, 1 narrow, 2 compact, 3 tight, 4 tightest
   const narrow = $derived(fold >= 1);
   const compact = $derived(fold >= 2);
   const tight = $derived(fold >= 3);
-  let needs = [0, 0, 0];
+  const tightest = $derived(fold >= 4);
+  const LAST_FOLD = 4;
+  let needs = [0, 0, 0, 0];
   const headerHolds = $derived([
     homeShown, homeAvailable, hasContent, replying, windowPutAway && extensionMissing, saveStatus,
-    kind, !!draftName, targetInfo.label, !!caseState.current,
+    kind, !!draftName, targetInfo.label, !!caseState.current, liveState, postedOnDay, caughtLink?.url ?? '',
   ].join('|'));
 
   /** The width the header needs as laid out now: what scrolls, or what eats its right padding. */
@@ -1853,7 +1931,7 @@
   function fitHeader() {
     if (!headerEl) return;
     const need = headerNeeds();
-    if (fold < 3 && need > headerEl.clientWidth + 1) {
+    if (fold < LAST_FOLD && need > headerEl.clientWidth + 1) {
       needs[fold] = need;
       fold += 1;
       tick().then(fitHeader);
@@ -1866,7 +1944,7 @@
     void headerHolds;
     untrack(() => {
       fold = 0;
-      needs = [0, 0, 0];
+      needs = [0, 0, 0, 0];
       tick().then(fitHeader);
     });
   });
@@ -1899,12 +1977,13 @@
   }
 
   /**
-   * Already posted…: the same post, then the link field, once the proof has filled it in,
-   * so the link pasted is kept against the post as it went out.
+   * Mark as posted… on a waiting proof: the same post, then the header's popover, once the
+   * proof has filled it in, so the post is marked as it went out.
    */
   async function postedFromHome(row) {
     await postProofFromHome(row);
-    await focusLink();
+    await tick();
+    postedControl?.ask();
   }
 
   async function openFromHome(draft) {
@@ -1927,7 +2006,7 @@
       if (await tryHandOff()) return;
       const url = postComposeUrl(target, bidiSafe(tweet1));
       window.open(url, '_blank', 'noopener,noreferrer');
-      markOpened(target);
+      markOpened();
       toast(
         copied ? `Opened ${targetInfo.label}. Posts copied for replies.` : `Opened ${targetInfo.label}. Copy the replies from here.`,
         'info',
@@ -1954,10 +2033,12 @@
       {#if caseState.current}
         <input class="input title-input" bind:value={postName} onblur={commitName} onkeydown={nameKey}
           maxlength="200" aria-label="Post name" title="Rename the post" />
-        <button class="btn btn-ghost btn-sm post-more" data-guide="post.report" aria-label="More for this post" title="More for this post"
-          aria-haspopup="menu" aria-expanded={!!postMenu} onclick={(event) => (postMenu = postMenu ? null : event.currentTarget)}>
-          <Icon name="more" size={14} stroke={2.4} />
-        </button>
+        {#if draftName}
+          <button class="btn btn-ghost btn-sm post-more" aria-label="More for this post" title="More for this post"
+            aria-haspopup="menu" aria-expanded={!!postMenu} onclick={(event) => (postMenu = postMenu ? null : event.currentTarget)}>
+            <Icon name="more" size={14} stroke={2.4} />
+          </button>
+        {/if}
         {#if saveStatus === 'saving'}
           <span class="save-status">Saving…</span>
         {:else if saveStatus === 'saved'}
@@ -1966,6 +2047,11 @@
           <span class="save-status error" title={autosave.state.error}><Icon name="alert" size={12} /> Not saved</span>
           <button class="btn btn-ghost btn-xs" onclick={() => autosave.flush()}>Retry</button>
         {/if}
+        <!-- where it stands, and the one place to say it went out -->
+        <PostedControl bind:this={postedControl} standing={liveState} url={publishState?.url ?? null} day={postedOnDay}
+          accent={openedNow} iconOnly={tightest} proposal={caughtLink}
+          onmark={markPosted} onunmark={unmarkPosted}
+          onkeep={() => markPosted(caughtLink.url)} ondismiss={() => (caughtLink = null)} />
       {/if}
       {#if !geolocation}
         <span class="kind-chip" title={tight ? postKind(kind).label : 'What this post is made from'}><Icon name={postKind(kind).icon} size={12} />{#if !tight}{postKind(kind).label}{/if}</span>
@@ -1976,6 +2062,12 @@
         <span class="ext-quiet" title="The capture extension fills the thread in the site's composer">
           {#if !tight}{narrow ? 'No extension' : 'Extension not connected'}{' · '}{/if}<button type="button" class="ext-install" onclick={howToInstall}>Install</button>
         </span>
+      {/if}
+      {#if caseState.current && !homeShown}
+        <button class="btn btn-sm add-notes" data-guide="post.report" onclick={openSaveReport} disabled={!hasContent}
+          aria-label="Add to notes" title="Add to notes">
+          <Icon name="note" size={14} />
+        </button>
       {/if}
       {#if caseState.current}
         <button class="btn btn-sm" onclick={openDraftList} title="Open a post of this case">
@@ -2003,17 +2095,11 @@
     </div>
   </div>
 
-  {#if postMenu}
-    <FloatingMenu anchor={postMenu} width={230} label="This post" onclose={() => (postMenu = null)}>
-      <button type="button" class="fm-item" disabled={!hasContent} title="Write this post into a new case note, with its proof and media"
-        onclick={() => { postMenu = null; openSaveReport(); }}>
-        <Icon name="file" size={14} /><span class="fm-grow">Add to notes…</span></button>
-      {#if draftName}
-        <div class="fm-sep"></div>
-        <button type="button" class="fm-item danger" title="Send it to the Trash, from where it can be restored"
-          onclick={() => { postMenu = null; askDelete({ name: draftName, title: postTitle }); }}>
-          <Icon name="trash" size={14} /><span class="fm-grow">Delete…</span></button>
-      {/if}
+  {#if postMenu && draftName}
+    <FloatingMenu anchor={postMenu} width={200} label="This post" onclose={() => (postMenu = null)}>
+      <button type="button" class="fm-item danger" title="Send it to the Trash, from where it can be restored"
+        onclick={() => { postMenu = null; askDelete({ name: draftName, title: postTitle, proof: geolocation ? proofPng : null }); }}>
+        <Icon name="trash" size={14} /><span class="fm-grow">Delete…</span></button>
     </FloatingMenu>
   {/if}
 
@@ -2021,6 +2107,7 @@
   <div class="tool-body home-body">
     <PostHome caseId={caseState.current?.id ?? ''} drafts={caseDrafts} proofs={caseProofs} media={mediaByPath}
       onnew={openGallery} onopen={openFromHome} onall={openDraftList} onproof={postProofFromHome} onposted={postedFromHome}
+      onmark={(draft, url) => markSavedPost(draft, url)} onunmark={(draft) => markSavedPost(draft, null, { posted: false })}
       ondelete={askDelete} />
   </div>
   {:else}
@@ -2028,34 +2115,6 @@
     <div class="layout">
       <!-- left column: ingredients -->
       <div class="col" data-guide="post.ingredients">
-        <!-- Its link once it is posted, on every post: the analyst's word that it went
-             out, since nothing is read from the site. -->
-        <div class="field">
-          <label class="label" for="pc-link">Link to your post</label>
-          <div class="field-with-act post-link" class:awaited={liveState === 'opened' && !linkError} class:invalid={!!linkError}>
-            <input id="pc-link" class="input" bind:this={linkEl} bind:value={linkText}
-              oninput={() => (linkError = '')} onpaste={linkPasted} onkeydown={linkKey} onblur={commitLink}
-              placeholder="Paste it once it's posted" spellcheck="false" autocomplete="off"
-              aria-invalid={!!linkError} aria-describedby={linkError || linkLine ? 'pc-link-said' : undefined} />
-            {#if publishState?.url}
-              <button type="button" class="link-clear" aria-label="Clear the link" title="Clear the link" onclick={() => clearLink()}>
-                <Icon name="x" size={12} />
-              </button>
-              <button type="button" class="field-act" aria-label="Copy the link" title="Copy the link" onclick={copyLink}>
-                <Icon name="copy" size={13} />
-              </button>
-              <a class="field-act link-open" href={publishState.url} target="_blank" rel="noreferrer" aria-label="Open the post" title="Open the post">
-                <Icon name="external" size={13} />
-              </a>
-            {/if}
-          </div>
-          {#if linkError}
-            <p class="field-note link-said invalid" id="pc-link-said" role="alert">{linkError}</p>
-          {:else if linkLine}
-            <p class="field-note link-said" class:changed={liveState === 'changed'} id="pc-link-said">{linkLine}</p>
-          {/if}
-        </div>
-
         <div class="field">
           <span class="label">Publish target</span>
           <div class="target-tabs" aria-label="Publish target">
@@ -2076,7 +2135,7 @@
         <div class="field">
           <div class="style-head">
             <label class="label" for="pc-tpl">Thread style</label>
-            {#if templatesState.post.length}
+            {#if templatesState.post.length || builtInLayouts.length}
               <button
                 class="tpl-settings-link"
                 type="button"
@@ -2096,12 +2155,19 @@
                 <Icon name="x" size={12} />
               </button>
             </div>
-          {:else if kindTemplates.length}
+          {:else if kindTemplates.length || builtInLayouts.length}
             <select id="pc-tpl" class="input" onchange={applyPostFromSelect}>
               <option value="">Apply a template…</option>
               {#each kindTemplates as t (t.id)}
                 <option value={t.id}>{t.name}</option>
               {/each}
+              {#if builtInLayouts.length}
+                <optgroup label="Built-in">
+                  {#each builtInLayouts as starter (starter.id)}
+                    <option value={`${BUILT_IN}${starter.id}`}>{starter.label}</option>
+                  {/each}
+                </optgroup>
+              {/if}
             </select>
           {:else}
             <p class="tpl-none">
@@ -2571,7 +2637,7 @@
   <ConfirmDialog
     title="Delete this post?"
     message={`“${deleteEntry.title}” will be removed from the case.`}
-    detail="Moves the post to the case trash."
+    detail={deleteFreesProof ? 'Moves the post to the case trash. Its proof goes back to Ready to post.' : 'Moves the post to the case trash.'}
     impact={{ caseId: caseState.current?.id, named: [{ tool: 'draft', name: deleteEntry.name }] }}
     restorable={RESTORABLE}
     confirmLabel="Delete"
@@ -2793,6 +2859,7 @@
   /* amber on its own soft ground is too faint on white: darkened there */
   :global(:root[data-theme='light']) .kind-chip { color: color-mix(in srgb, var(--accent) 60%, var(--text-1)); }
   .post-more { flex: none; padding-inline: 5px; color: var(--text-2); }
+  .add-notes { padding-inline: 7px; }
   .save-status {
     display: inline-flex;
     align-items: center;
@@ -2906,24 +2973,6 @@
     line-height: 1.4;
   }
   .field-note { margin: 4px 0 0; font-size: var(--fs-xs); color: var(--text-3); }
-  /* the link field: waiting in the accent once the site was opened, red on a wrong link */
-  .post-link.awaited { border-color: var(--accent); }
-  .post-link.invalid { border-color: var(--danger); }
-  .post-link .input { text-overflow: ellipsis; }
-  .link-clear {
-    display: grid;
-    place-items: center;
-    flex: none;
-    width: 24px;
-    color: var(--text-3);
-  }
-  .link-clear:hover { color: var(--text-1); }
-  .post-link .field-act { border-radius: 0; }
-  .post-link .field-act:last-child { border-radius: 0 3px 3px 0; }
-  .link-open { text-decoration: none; }
-  .link-said { color: var(--text-2); }
-  .link-said.changed { color: var(--warn); }
-  .link-said.invalid { color: var(--danger); }
   .reply-check {
     display: flex;
     align-items: center;
