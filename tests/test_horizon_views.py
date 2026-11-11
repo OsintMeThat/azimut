@@ -412,6 +412,46 @@ def test_a_kept_picture_carries_the_credits_and_is_held_back_as_a_working_file(c
     assert collected["facets"]["made_here_count"] >= 1
 
 
+def test_a_kept_picture_keeps_every_pixel_written_again_off_the_server_s_loop(client, monkeypatch):
+    """Send to Geo Proof keeps two pictures of the view. Each was written again at the
+    slowest compression, seconds a picture, on the loop every other request waits on."""
+    import asyncio
+    import random
+
+    cid = _case(client, "Kept quickly")
+    _save(client, cid, "North ridge")
+    noise = random.Random(7)
+    drawn = Image.new("RGBA", (120, 80))
+    drawn.putdata([(noise.randrange(256), noise.randrange(256), noise.randrange(256), 255) for _ in range(120 * 80)])
+    sent = io.BytesIO()
+    drawn.save(sent, "PNG")
+
+    writes = []
+    save = Image.Image.save
+
+    def spy(self, fp, format=None, **params):
+        try:
+            asyncio.get_running_loop()
+            on_loop = True
+        except RuntimeError:
+            on_loop = False
+        writes.append({"format": format, "params": params, "on_loop": on_loop})
+        return save(self, fp, format, **params)
+
+    monkeypatch.setattr(Image.Image, "save", spy)
+    kept = _keep(client, cid, "North ridge", "photo", data=sent.getvalue())
+    assert kept.status_code == 200, kept.text
+    [written] = [w for w in writes if w["format"] == "PNG"]
+    assert written["on_loop"] is False
+    assert not written["params"].get("optimize") and written["params"].get("compress_level", 6) < 9
+    monkeypatch.setattr(Image.Image, "save", save)
+
+    stored = Case.open(cid).resolve_inside(kept.json()["path"])
+    with Image.open(stored) as again:
+        assert again.mode == "RGB" and again.size == (120, 80)
+        assert again.tobytes() == drawn.convert("RGB").tobytes()
+
+
 def test_a_picture_is_kept_only_from_a_saved_view_and_only_as_a_picture(client):
     cid = _case(client, "Kept refused")
     assert _keep(client, cid, "Nothing").status_code == 404

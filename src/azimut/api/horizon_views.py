@@ -42,6 +42,7 @@ from typing import Annotated, Any, Literal
 from fastapi import APIRouter, File, Form, HTTPException, UploadFile
 from PIL import Image
 from pydantic import BaseModel, Field, field_validator, model_validator
+from starlette.concurrency import run_in_threadpool
 
 from .. import __version__, errors, layout
 from ..engine import artifacts as artifact_engine
@@ -654,7 +655,7 @@ async def keep_image(
     saved = _read_view(case, stem)
     if saved is None or case.find_entity(attr="spec", value=spec_rel) is None:
         raise HTTPException(status_code=404, detail="save the view before keeping its pictures")
-    data = _png_bytes(await image.read(MAX_KEPT_BYTES + 1))
+    data = await _png_bytes(await image.read(MAX_KEPT_BYTES + 1))
     spec = saved.get("spec") or {}
     eye = spec.get("eye") or {}
     look = spec.get("look") or {}
@@ -758,7 +759,7 @@ async def capture_view(
         source["from"] = photo.strip()
     if attribution.strip():
         source["attribution"] = attribution.strip()
-    data = _png_bytes(await image.read(MAX_KEPT_BYTES + 1))
+    data = await _png_bytes(await image.read(MAX_KEPT_BYTES + 1))
     try:
         filed = media_engine.import_rendered_bytes(case, data, filename, ".png", source, by="horizon", extra_attrs=attrs)
     except (OSError, ValueError, CaseError) as exc:
@@ -769,8 +770,14 @@ async def capture_view(
     return {**answer, "scene": scene} if scene else answer
 
 
-def _png_bytes(raw: bytes) -> bytes:
-    """A PNG the browser drew, checked by its header before a pixel is decoded, written again."""
+async def _png_bytes(raw: bytes) -> bytes:
+    """A PNG the browser drew, checked by its header before a pixel is decoded, then
+    written again in a worker thread, so the server answers everything else meanwhile."""
+    return await run_in_threadpool(_written_again, _checked_png(raw))
+
+
+def _checked_png(raw: bytes) -> Image.Image:
+    """The picture opened by its header alone: a PNG, of a size the case keeps."""
     if len(raw) > MAX_KEPT_BYTES:
         raise HTTPException(status_code=413, detail="that picture is too large")
     try:
@@ -779,15 +786,22 @@ def _png_bytes(raw: bytes) -> bytes:
             opened = Image.open(io.BytesIO(raw))
             if opened.format != "PNG":
                 raise ValueError("not a PNG")
-            if opened.width * opened.height > MAX_KEPT_PIXELS:
-                raise HTTPException(status_code=413, detail="that picture has too many pixels")
-            picture = opened.convert("RGB")
-    except HTTPException:
-        raise
+    except Exception as exc:
+        raise HTTPException(status_code=422, detail="that is not a picture of the view") from exc
+    if opened.width * opened.height > MAX_KEPT_PIXELS:
+        raise HTTPException(status_code=413, detail="that picture has too many pixels")
+    return opened
+
+
+def _written_again(opened: Image.Image) -> bytes:
+    """Its pixels alone, written again at zlib's usual level. The smallest file took
+    seconds a picture (ten for a 2192 × 1232 terrain) for a few percent fewer bytes."""
+    try:
+        picture = opened.convert("RGB")
     except Exception as exc:
         raise HTTPException(status_code=422, detail="that is not a picture of the view") from exc
     out = io.BytesIO()
-    picture.save(out, "PNG", optimize=True)
+    picture.save(out, "PNG")
     return out.getvalue()
 
 
