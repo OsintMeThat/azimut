@@ -17,7 +17,12 @@
   } from '../lib/naming.js';
   import { filingName, planProofHandoff, proofPosts } from './post/handoff.js';
   import { startFields, startPost } from './post/start.js';
-  import { timecode } from '../lib/videoThread.js';
+  import { timecode, usesSheet, videoSlides } from '../lib/videoThread.js';
+  import { threadPostLabel, videoLayout, videoLink, videoPosts } from '../lib/videoPost.js';
+  import { overWords, videoFits } from '../lib/videoLimits.js';
+  import { videoName } from '../lib/proofScene.js';
+  import { fileThreadSheet } from './post/threadSheet.js';
+  import { THREAD_MIN } from './post/postHome.js';
   import { extensionWindowPutAway, putExtensionWindowAway } from './post/extensionWindow.js';
   import {
     buildTweet1 as buildTweet1Lines, DEFAULT_TWEET_BODY,
@@ -27,7 +32,7 @@
     normalizePostTarget, POST_TARGETS, postCharacterCount, postComposeUrl, postReportMarkdown,
     postTarget, templateUsesPostField, togglePostMedia, pointLines,
     handoffThread, postHandoffUrl, postDate,
-    defaultPostTemplate, normalizePostKind, postKind, postStarters, normPostTemplate,
+    defaultPostTemplate, normalizePostKind, postKind, postStarters, normPostTemplate, VIDEO_THREAD_STARTERS,
     replyByDefault, replyIntentUrl, replyPostText, replyTarget, startMediaPlan,
     statedPostKind, templatesOfKind, videoTitle,
     postedAddress, postedDay, postedWhen, postFingerprint, postState,
@@ -51,6 +56,8 @@
   import ReplyDialog from './post/ReplyDialog.svelte';
   import PostOpenList from './post/PostOpenList.svelte';
   import PostedControl from './post/PostedControl.svelte';
+  import VideoPicker from './post/VideoPicker.svelte';
+  import VideoThreadPanel from './post/VideoThreadPanel.svelte';
 
   let coordsText = $state('');
   let geo = $state(null); // {lat, lon, dms, plus_code}
@@ -106,6 +113,16 @@
   const geolocation = $derived(kind === 'geolocation');
   let firstMedia = $state([]);
   let firstMediaType = $state('none'); // 'none' | 'video' | 'images'
+
+  // A video thread: the placed proofs of one video as one thread (lib/videoThread.js,
+  // lib/videoPost.js), null for any other kind. A draft keeps its video, its order, the
+  // texts of its video post and of each place's post beside `body` (the recap), the post
+  // that opens it (`first`), the template's closing posts (`extra`) and what it filed or
+  // picked: the contact sheet, a clip in place of the whole video, or its link. Its
+  // places (`slides`, `left`), the video's length, their addresses and how many places
+  // a thread could not hold are read again.
+  let thread = $state(null);
+  let videoPickerOpen = $state(false);
 
   // Whether a post is open: a draft, a proof sent over, a start picked. Without one a
   // case that holds drafts or proofs shows the home instead of an empty composer.
@@ -384,7 +401,8 @@
     if (hasContent) {
       if (!(await fileCurrentDraft())) return;
     }
-    beginPost(wanted, media, about);
+    if (normalizePostKind(wanted) === 'video') await beginThread(media?.[0]);
+    else beginPost(wanted, media, about);
   }
 
   /**
@@ -433,6 +451,263 @@
   async function fileCurrentDraft() {
     return letGo();
   }
+
+  // ---- a video thread ---------------------------------------------------------------
+
+  /** A thread of this video before its places are read, in Recap first's words. */
+  function newThread(video = null) {
+    const layout = videoLayout();
+    return {
+      video, order: layout.order, texts: { video: layout.video, place: layout.place }, first: null, extra: [],
+      sheet: null, clip: null, link: false, slides: null, left: [], seconds: null, facts: {}, cut: 0, sheetState: '',
+      // the recap and the video's text each order was left with in this post, and the
+      // words of each post the analyst rewrote, kept through an order that has no such post
+      byOrder: {},
+      written: {},
+    };
+  }
+
+  /** A saved thread as this build reads it: what it says, the default start for what it does not. */
+  function threadFrom(s) {
+    const layout = videoLayout({ order: s.order, body: s.body, posts: s.posts });
+    const path = (value) => (typeof value === 'string' && value ? value : null);
+    return {
+      ...newThread(path(s.video)),
+      order: layout.order,
+      texts: { video: layout.video, place: layout.place },
+      first: typeof s.first === 'string' ? s.first : null,
+      extra: Array.isArray(s.extra) ? s.extra.map((one) => ({ text: String(one?.text ?? '') })) : [],
+      sheet: path(s.sheet),
+      clip: path(s.clip),
+      link: s.link === true,
+    };
+  }
+
+  /** What a draft keeps of its thread, each piece only when it says something. */
+  function threadRecord() {
+    return {
+      video: thread.video,
+      order: thread.order,
+      posts: [{ role: 'video', body: thread.texts.video }, { role: 'place', body: thread.texts.place }],
+      ...(thread.first ? { first: thread.first } : {}),
+      ...(thread.extra.length ? { extra: thread.extra.map((one) => ({ text: one.text })) } : {}),
+      ...(thread.sheet ? { sheet: thread.sheet } : {}),
+      ...(thread.clip ? { clip: thread.clip } : {}),
+      ...(thread.link ? { link: true } : {}),
+    };
+  }
+
+  /** The video's places as the strip reads them, and how long it runs: `{ slides, left, seconds }`, or null. */
+  async function readThread(caseId, video) {
+    const [answer, probe] = await Promise.all([
+      api.get(`/api/cases/${caseId}/scenes?video=${encodeURIComponent(video)}`).catch(() => null),
+      api.get(`/api/cases/${caseId}/inspect/probe?path=${encodeURIComponent(video)}`).catch(() => null),
+    ]);
+    if (!answer) return null;
+    const { slides, left } = videoSlides(answer);
+    const seconds = Number.isFinite(probe?.duration) && probe.duration > 0 ? probe.duration : null;
+    return { slides, left, seconds };
+  }
+
+  /**
+   * Post a video's proofs as one thread: its places read, laid out in this kind's
+   * default order and words, named after the video, and its contact sheet filed when
+   * the order shows one. A video of fewer than two proofs to post is no thread.
+   */
+  async function beginThread(video) {
+    const caseId = caseState.current?.id;
+    if (!caseId || !video) return;
+    resetDraft('video');
+    postOpen = true;
+    thread.video = video;
+    const run = postRun;
+    const read = await readThread(caseId, video);
+    if (run !== postRun || !thread) return;
+    if (!read || read.slides.length < THREAD_MIN) {
+      toast(read ? 'This video has fewer than two proofs to post. Each one can go out as a geolocation.' : 'The proofs of this video could not be read', 'warn', 5200);
+      resetDraft();
+      return;
+    }
+    Object.assign(thread, read);
+    const named = videoName(video, titleByPath.get(video));
+    if (named && !nameTaken(named)) postName = postTitle = named;
+    source = videoLink(mediaByPath.get(video));
+    layoutThread();
+    await Promise.all([fileSheetIfShown(), readPlaceFacts()]);
+  }
+
+  /** The thread as `lib/videoPost.js` writes it, from what the composer holds. */
+  function threadInput() {
+    return {
+      video: { path: thread.video, title: titleByPath.get(thread.video) ?? '' },
+      slides: thread.slides ?? [],
+      layout: { order: thread.order, recap: body, video: thread.texts.video, place: thread.texts.place },
+      common: { mention, source },
+      sheet: thread.sheet,
+      clip: thread.clip,
+      link: thread.link,
+      facts: thread.facts,
+      extra: thread.extra,
+    };
+  }
+
+  /** A post of the thread as the composer holds it after post 1. */
+  function threadTweet(post, written) {
+    return {
+      id: ++extraSeq,
+      text: written.get(post.key) ?? post.text,
+      mediaPaths: post.mediaPaths,
+      mediaType: post.mediaType,
+      isMediaTweet: post.mediaType !== 'none',
+      mediaTextIncludesPrefix: true,
+      key: post.key,
+      edited: written.has(post.key),
+    };
+  }
+
+  /**
+   * The thread laid out again, in its order, with what each post carries: the words of
+   * a post the analyst rewrote stay on it, and a post they added stays at the end.
+   */
+  function layoutThread() {
+    if (!thread?.slides) return;
+    const { posts, cut } = videoPosts(threadInput());
+    const written = new Map(Object.entries(thread.written));
+    if (tweet1Edited && thread.first) written.set(thread.first, tweet1);
+    for (const one of extraTweets) if (one.key && one.edited) written.set(one.key, one.text);
+    thread.written = Object.fromEntries(written);
+    const added = extraTweets.filter((one) => !one.key);
+    const [first, ...rest] = posts;
+    thread.first = first.key;
+    thread.cut = cut;
+    tweet1 = written.get(first.key) ?? first.text;
+    tweet1Edited = written.has(first.key);
+    firstMedia = first.mediaPaths;
+    firstMediaType = first.mediaType;
+    mediaEnabled = false;
+    mediaType = 'none';
+    mediaPaths = [];
+    mediaText = '';
+    extraTweets = [...rest.map((post) => threadTweet(post, written)), ...added];
+  }
+
+  /** The words of every post the analyst left as written, from the fields again; post 1's too when asked. */
+  function rewriteThread({ first = false } = {}) {
+    if (!thread?.slides) return;
+    const texts = new Map(videoPosts(threadInput()).posts.map((post) => [post.key, post.text]));
+    if ((first || !tweet1Edited) && texts.has(thread.first)) {
+      tweet1 = texts.get(thread.first);
+      tweet1Edited = false;
+      delete thread.written[thread.first];
+    }
+    for (const one of extraTweets) {
+      if (one.key && !one.edited && texts.has(one.key)) one.text = texts.get(one.key);
+    }
+  }
+
+  /** One post of the thread written from the fields again. */
+  function rewritePost(tweet) {
+    tweet.edited = false;
+    delete thread.written[tweet.key];
+    rewriteThread();
+  }
+
+  /** A thread's order and texts, from a template or a start: the posts follow. */
+  function applyThreadLayout(layout, extra = thread.extra) {
+    body = layout.recap;
+    thread.order = layout.order;
+    thread.texts = { video: layout.video, place: layout.place };
+    thread.extra = (extra ?? []).map((one) => ({ text: String(one?.text ?? '') }));
+    layoutThread();
+    fileSheetIfShown();
+    readPlaceFacts();
+  }
+
+  /**
+   * Another order: the same places in another sequence, each with its words. Where the
+   * thread opens and where its mention goes are the order's own, so the recap and the
+   * video's post take that order's start, or the words they had in it earlier on.
+   */
+  function setThreadOrder(order) {
+    if (!thread) return;
+    thread.byOrder[thread.order] = { recap: body, video: thread.texts.video };
+    const start = videoLayout(VIDEO_THREAD_STARTERS.find((one) => one.order === order));
+    const known = thread.byOrder[order] ?? { recap: start.recap, video: start.video };
+    body = known.recap;
+    thread.texts.video = known.video;
+    thread.order = order;
+    layoutThread();
+    fileSheetIfShown();
+  }
+
+  /** A clip in place of the whole video, or the whole video again (null). */
+  function setThreadClip(path) {
+    thread.clip = path;
+    thread.link = false;
+    layoutThread();
+  }
+
+  /** The video's link in place of the file, or the whole video again. */
+  function setThreadLink(on) {
+    thread.link = on;
+    thread.clip = null;
+    layoutThread();
+  }
+
+  /** The contact sheet, drawn and filed once the order shows one and none is filed yet. */
+  async function fileSheetIfShown() {
+    if (!thread?.slides || thread.sheet || thread.sheetState === 'making') return;
+    if (!usesSheet(thread.order, thread.slides.length)) return;
+    const caseId = caseState.current?.id;
+    if (!caseId) return;
+    const run = postRun;
+    thread.sheetState = 'making';
+    try {
+      const path = await fileThreadSheet(caseId, { video: thread.video, title: titleByPath.get(thread.video) ?? '', slides: thread.slides });
+      if (run !== postRun || !thread) return;
+      thread.sheet = path;
+      thread.sheetState = '';
+      layoutThread();
+    } catch {
+      if (run === postRun && thread) thread.sheetState = 'failed';
+    }
+  }
+
+  /**
+   * Each place's address, read once a place's text names it (`#place`, `#pluscode`):
+   * the plus code from its point, the place's name as the geolocation post reads it.
+   */
+  async function readPlaceFacts() {
+    const wants = (tag) => new RegExp(`${tag}(?![\\p{L}\\p{N}_])`, 'iu').test(thread?.texts.place ?? '');
+    if (!thread?.slides || !(wants('#place') || wants('#pluscode'))) return;
+    const run = postRun;
+    for (const slide of thread.slides) {
+      if (thread.facts[slide.name]) continue;
+      const point = (slide.row?.points ?? []).find((one) => Number.isFinite(one?.lat) && Number.isFinite(one?.lon));
+      if (!point) continue;
+      const parsed = await api.post('/api/geo/parse', { text: `${point.lat}, ${point.lon}` }).catch(() => null);
+      const found = wants('#place') ? await api.get(`/api/geo/reverse?lat=${point.lat}&lon=${point.lon}`).catch(() => null) : null;
+      if (run !== postRun || !thread) return;
+      thread.facts[slide.name] = { place: found ? placeName(found) : '', plusCode: parsed?.plus_code ?? '' };
+    }
+    rewriteThread();
+  }
+
+  /** A post of the thread's name above it: a place's by its title, the others by what they are. */
+  function threadLabel(key, type) {
+    const [role, ...rest] = String(key ?? '').split(':');
+    const proof = rest.join(':');
+    const titles = new Map((thread?.slides ?? []).map((slide) => [slide.name, slide.title]));
+    return threadPostLabel({ role: role || null, proof, mediaType: type }, titles);
+  }
+
+  // What the thread's video is over on the platform picked, in words, while its post
+  // carries the whole video: the panel offers a clip or the link then.
+  const threadOver = $derived.by(() => {
+    if (!thread?.video || thread.clip || thread.link || thread.order === 'all') return '';
+    const facts = { seconds: thread.seconds, bytes: mediaByPath.get(thread.video)?.size ?? null };
+    return overWords(target, videoFits(target, facts), facts);
+  });
 
   function applyProof(p) {
     postOpen = true;
@@ -496,16 +771,19 @@
     placeLoading = true;
     try {
       const r = await api.get(`/api/geo/reverse?lat=${geo.lat}&lon=${geo.lon}`);
-      const a = r.address ?? {};
-      place = [a.village || a.town || a.city || a.county, a.state, a.country]
-        .filter(Boolean)
-        .join(', ') || r.display_name || '';
+      place = placeName(r);
       regenerate();
     } catch {
       /* offline or Nominatim down — place stays manual */
     } finally {
       placeLoading = false;
     }
+  }
+
+  /** A reverse lookup's answer as the place line says it: village, state, country. */
+  function placeName(r) {
+    const a = r?.address ?? {};
+    return [a.village || a.town || a.city || a.county, a.state, a.country].filter(Boolean).join(', ') || r?.display_name || '';
   }
 
   // A reply under the source leaves the line naming it, and the post shows it so.
@@ -539,7 +817,8 @@
   // The video the post is about, for `#video`: the one its proof rests on, else the
   // first video it carries. Its title as Media gives it, or nothing.
   const postVideoPath = $derived(
-    (proofPng && caseProofs?.find((row) => row.png === proofPng)?.video)
+    thread?.video
+      || (proofPng && caseProofs?.find((row) => row.png === proofPng)?.video)
       || (firstMediaType === 'video' ? firstMedia[0] : null)
       || (mediaType === 'video' ? mediaPaths[0] : null)
       || null
@@ -555,6 +834,11 @@
   });
 
   function regenerate() {
+    // a thread writes each post it left as written, from the fields
+    if (thread) {
+      rewriteThread();
+      return;
+    }
     tweet1 = buildTweet1();
     tweet1Edited = false;
   }
@@ -570,12 +854,18 @@
   const TEMPLATE_FIELD_HINT = 'This template does not use this field.';
 
   function fieldDisabledByTemplate(field) {
-    return !!appliedPostTemplate && !templateUsesPostField(body, field);
+    return !thread && !!appliedPostTemplate && !templateUsesPostField(body, field);
   }
 
   // A geolocation shows every field, as it always has. Another kind shows the fields
-  // its layout uses, so a free post is not asked for coordinates.
+  // its layout uses, so a free post is not asked for coordinates. A video thread's
+  // places bring their own facts: it asks for the mention and the video's link only,
+  // when one of its texts says them.
   function fieldShown(field) {
+    if (thread) {
+      return ['mention', 'source'].includes(field)
+        && [body, thread.texts.video, thread.texts.place].some((text) => templateUsesPostField(text, field));
+    }
     return geolocation || templateUsesPostField(body, field);
   }
 
@@ -586,6 +876,7 @@
       body,
       mediaEnabled,
       replyChosen,
+      layout: thread ? { order: thread.order, recap: body, ...thread.texts, extra: thread.extra.map((one) => ({ ...one })) } : null,
       extraTweets: extraTweets.map((e) => ({
         text: e.text,
         mediaPaths: [...e.mediaPaths],
@@ -604,6 +895,13 @@
     const prev = appliedPostTemplate?.prev ?? snapshotPostStructure();
     const norm = applyPostTemplateStructure({}, t.data);
     mention = norm.mention;
+    if (thread) {
+      // a thread's template is its order and its texts: the posts follow them
+      appliedPostTemplate = { name: t.name, prev };
+      applyThreadLayout(videoLayout(norm), norm.extraTweets);
+      if (!quiet) toast(`Template loaded: ${t.name}`, 'ok', 1400);
+      return;
+    }
     body = norm.body;
     mediaEnabled = norm.mediaEnabled;
     replyChosen = replyByDefault(t.data);
@@ -637,6 +935,7 @@
       const norm = normPostTemplate({ body: starter.body, mediaEnabled: starter.mediaEnabled, mention });
       body = norm.body;
       mediaEnabled = norm.mediaEnabled;
+      if (thread) applyThreadLayout(videoLayout(starter), []);
     }
     const t = defaultTemplate();
     if (t) applyPostTemplate(t, { quiet: true });
@@ -662,8 +961,14 @@
   /** A built-in layout changes the body only: the mention, the media post and the later posts stay. Remove goes back as a template's does. */
   function applyBuiltInLayout(starter) {
     const prev = appliedPostTemplate?.prev ?? snapshotPostStructure();
-    body = starter.body;
     appliedPostTemplate = { name: starter.label, prev };
+    if (thread) {
+      // a thread's start is an order and its texts, its closing posts kept
+      applyThreadLayout(videoLayout(starter));
+      toast(`Layout loaded: ${starter.label}`, 'ok', 1400);
+      return;
+    }
+    body = starter.body;
     if (!tweet1Edited) regenerate();
     toast(`Layout loaded: ${starter.label}`, 'ok', 1400);
   }
@@ -672,6 +977,13 @@
     if (!appliedPostTemplate) return;
     const p = appliedPostTemplate.prev;
     mention = p.mention;
+    if (thread && p.layout) {
+      appliedPostTemplate = null;
+      defaultDeclined = true;
+      applyThreadLayout(p.layout, p.layout.extra);
+      toast('Template removed', 'ok', 1200);
+      return;
+    }
     body = p.body;
     mediaEnabled = p.mediaEnabled;
     replyChosen = p.replyChosen === true;
@@ -1103,12 +1415,15 @@
         mediaType: t.mediaType ?? 'none',
         isMediaTweet: t.isMediaTweet === true,
         mediaTextIncludesPrefix: t.mediaTextIncludesPrefix === true,
+        // a thread's post says which it is, and whether the analyst rewrote it
+        ...(t.key ? { key: t.key, ...(t.edited ? { edited: true } : {}) } : {}),
       })),
       // Written only for a post that is not a geolocation, so a geolocation draft keeps
       // the shape every draft before kinds had.
       ...(statedPostKind(kind)
         ? { kind, firstMedia: [...firstMedia], firstMediaType }
         : {}),
+      ...(thread ? threadRecord() : {}),
       // written only for a post that goes out as a reply under its source
       ...(replyChosen ? { reply: true } : {}),
     };
@@ -1453,6 +1768,7 @@
         ? s.firstMedia.filter((path) => typeof path === 'string').slice(0, MAX_POST_MEDIA)
         : [];
       firstMediaType = own && ['video', 'images'].includes(s.firstMediaType) ? s.firstMediaType : 'none';
+      thread = kind === 'video' ? threadFrom(s) : null;
       postOpen = true;
       replyChosen = s.reply === true;
       publishState = s.publish && typeof s.publish === 'object' ? publishFrom(s.publish) : null;
@@ -1494,6 +1810,7 @@
           mediaType: type,
           isMediaTweet,
           mediaTextIncludesPrefix: isMediaTweet || hasPrefix,
+          ...(thread && typeof t.key === 'string' ? { key: t.key, edited: t.edited === true } : {}),
         };
       });
       draftName = name;
@@ -1522,6 +1839,13 @@
       // as it was saved: opening it writes nothing
       blankKey = contentKey();
       writtenKey = saveKey(snapshot(), postTitle.trim());
+      // a thread's places read again, for what it lays out next: its posts stay as saved
+      if (thread?.video) {
+        const caseId = caseState.current.id;
+        readThread(caseId, thread.video).then((read) => {
+          if (read && run === postRun && thread) Object.assign(thread, read);
+        });
+      }
     } catch (e) {
       toast(`Could not open the post: ${e.message}`, 'danger');
     } finally {
@@ -1551,6 +1875,7 @@
     kind = normalizePostKind(next);
     firstMedia = [];
     firstMediaType = 'none';
+    thread = kind === 'video' ? newThread() : null;
     postOpen = false;
     replyChosen = false;
     beforeReply = null;
@@ -2070,9 +2395,20 @@
   /** A start picked: the same road a To Post from another tool takes (`post/start.js`). */
   function pickStart(wanted) {
     galleryOpen = false;
+    // a video thread asks which video first
+    if (wanted === 'video') {
+      videoPickerOpen = true;
+      return;
+    }
     // what was on screen was let go when New post was pressed
     resetDraft();
     startPost(wanted);
+  }
+
+  /** A video picked for its thread: the road every start takes. */
+  function pickThreadVideo(video) {
+    videoPickerOpen = false;
+    startPost('video', [video]);
   }
 
   /** A proof waiting on the home: its geolocation post, as Attach a proof writes it. */
@@ -2221,6 +2557,7 @@
   <div class="tool-body home-body">
     <PostHome caseId={caseState.current?.id ?? ''} drafts={caseDrafts} proofs={caseProofs} media={mediaByPath}
       onnew={openGallery} onopen={openFromHome} onall={openDraftList} onproof={postProofFromHome} onposted={postedFromHome}
+      onthread={(series) => startPost('video', [series.video])}
       onmark={(draft, url) => markSavedPost(draft, url)} onunmark={(draft) => markSavedPost(draft, null, { posted: false })}
       ondelete={askDelete} onproofopen={openProofInGeoProof} />
   </div>
@@ -2298,6 +2635,15 @@
           {/if}
         </div>
 
+        {#if thread}
+          <!-- the video, its places, the order, and what goes when the video is too long -->
+          <div class="field">
+            <VideoThreadPanel title={thread.video ? videoName(thread.video, titleByPath.get(thread.video)) : ''}
+              places={thread.slides} left={thread.left} cut={thread.cut} order={thread.order} onorder={setThreadOrder}
+              sheet={thread.sheetState} onsheet={fileSheetIfShown} over={threadOver} clip={thread.clip} link={thread.link}
+              href={source.trim()} onclip={setThreadClip} onlink={setThreadLink} />
+          </div>
+        {:else}
         <div
           class="field"
           class:template-disabled={fieldDisabledByTemplate('description')}
@@ -2313,8 +2659,9 @@
             disabled={fieldDisabledByTemplate('description')}
           />
         </div>
+        {/if}
 
-        {#if templateUsesPostField(body, 'date')}
+        {#if !thread && templateUsesPostField(body, 'date')}
           <div class="field">
             <label class="label" for="pc-date">Date</label>
             <input
@@ -2457,9 +2804,9 @@
         <div class="tweet-block card" data-guide="post.first">
           <div class="tweet-head">
             <span class="tweet-num">1</span>
-            <span class="label" style="margin:0">{geolocation ? 'Geolocation post' : 'First post'}</span>
+            <span class="label" style="margin:0">{geolocation ? 'Geolocation post' : thread?.first ? threadLabel(thread.first, firstMediaType) : 'First post'}</span>
             {#if tweet1Edited}
-              <button class="btn btn-ghost btn-sm" onclick={regenerate} title="Rebuild from the fields">
+              <button class="btn btn-ghost btn-sm" onclick={() => (thread ? rewriteThread({ first: true }) : regenerate())} title="Rebuild from the fields">
                 <Icon name="compass" size={13} /> regenerate
               </button>
             {/if}
@@ -2629,8 +2976,13 @@
         {#each extraTweets as tweet, i (tweet.id)}
           <div class="tweet-block card">
             <div class="tweet-head">
-              <span class="tweet-num">{i + 3}</span>
-              <span class="label" style="margin:0">{tweet.isMediaTweet || tweet.mediaType !== 'none' ? 'Media' : 'Context'}</span>
+              <span class="tweet-num">{i + (mediaEnabled ? 3 : 2)}</span>
+              <span class="label" style="margin:0">{tweet.key ? threadLabel(tweet.key, tweet.mediaType) : tweet.isMediaTweet || tweet.mediaType !== 'none' ? 'Media' : 'Context'}</span>
+              {#if tweet.key && tweet.edited}
+                <button class="btn btn-ghost btn-sm" onclick={() => rewritePost(tweet)} title="Rebuild from the fields">
+                  <Icon name="compass" size={13} /> regenerate
+                </button>
+              {/if}
               {#if tweet.isMediaTweet || tweet.mediaPaths.length || tweet.mediaType !== 'none'}
                 <div class="media-tabs">
                   <button class="btn btn-sm" class:btn-primary={tweet.mediaType === 'video'} class:btn-ghost={tweet.mediaType !== 'video'} onclick={() => setExtraMediaType(tweet, 'video')}>Video</button>
@@ -2655,6 +3007,7 @@
                 dir="auto"
                 placeholder={tweet.mediaType !== 'none' ? 'Descriptions, captions, hashtags…' : 'Additional context…'}
                 bind:value={tweet.text}
+                oninput={() => { if (tweet.key) tweet.edited = true; }}
                 rows={tweet.mediaType !== 'none' ? 3 : 4}
               ></textarea>
             {/if}
@@ -2701,7 +3054,7 @@
               <Icon name="plus" size={13} /> Restore post 2
             </button>
           {/if}
-          <button class="btn btn-ghost btn-sm" onclick={() => (!mediaEnabled && !geolocation ? (mediaEnabled = true) : addMediaTweet())}>
+          <button class="btn btn-ghost btn-sm" onclick={() => (!mediaEnabled && !geolocation && !thread ? (mediaEnabled = true) : addMediaTweet())}>
             <Icon name="plus" size={13} /> Add media post
           </button>
           <button class="btn btn-ghost btn-sm" onclick={addExtraTweet}>
@@ -2720,6 +3073,11 @@
 
 {#if galleryOpen}
   <NewPostGallery onpick={pickStart} onclose={() => (galleryOpen = false)} />
+{/if}
+
+{#if videoPickerOpen}
+  <VideoPicker caseId={caseState.current?.id ?? ''} proofs={caseProofs ?? openProofs} drafts={caseDrafts}
+    onpick={pickThreadVideo} onclose={() => (videoPickerOpen = false)} />
 {/if}
 
 {#if extensionWindow}

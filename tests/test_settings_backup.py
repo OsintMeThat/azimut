@@ -491,7 +491,7 @@ def test_a_backup_with_an_unreadable_template_id_still_restores(client, key):
 
 def test_every_kind_of_posts_default_travels_with_the_backup(client):
     client.put("/api/settings/prefs", json={"post_template": "tpl_geo"})
-    kinds = {"free": "tpl_free", "plate": "tpl_plate", "compare": "tpl_cmp"}
+    kinds = {"video": "tpl_thread", "free": "tpl_free", "plate": "tpl_plate", "compare": "tpl_cmp"}
     client.put("/api/settings/prefs", json={"post_kind_templates": kinds})
     blob = client.get("/api/settings/export").json()
     assert blob["settings"]["post_kind_templates"] == kinds

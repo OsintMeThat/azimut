@@ -195,7 +195,8 @@ describe('the home', () => {
     const series = home().querySelector('.ph-video');
     expect(series.textContent).toContain('Convoy');
     expect([...series.querySelectorAll('.ph-chip')].map((chip) => chip.querySelector('.ph-chip-name').textContent)).toEqual(['slide-1', 'slide-2']);
-    expect(button(series, 'Video thread Coming next').disabled).toBe(true);
+    // two proofs of one video: its thread is offered beside them
+    expect(button(series, 'Video thread').disabled).toBe(false);
     // the header waits for a post: nothing to act on from here
     expect(button(header(), 'New post')).toBeTruthy();
     expect(header().querySelector('.post-more')).toBeNull();
@@ -414,15 +415,15 @@ describe('New post', () => {
     lists.drafts = [{ name: 'Old', title: 'Old', target: 'x', kind: 'geolocation', posts: 1 }];
   });
 
-  it('offers five starts, Geolocation first, and the video thread comes next', async () => {
+  it('offers five starts, Geolocation first, every one open', async () => {
     await mountPost();
     button(home(), 'New post').click();
     await settle();
     const gallery = dialog('New post');
     const cards = [...gallery.querySelectorAll('.np-card')];
     expect(cards.map((card) => card.querySelector('.np-name').textContent.replace(/\s+/g, ' ').trim()))
-      .toEqual(['Geolocation Usual', 'Video thread Coming next', 'Map plate', 'Compare', 'Free post']);
-    expect(cards.map((card) => card.disabled)).toEqual([false, true, false, false, false]);
+      .toEqual(['Geolocation Usual', 'Video thread', 'Map plate', 'Compare', 'Free post']);
+    expect(cards.map((card) => card.disabled)).toEqual([false, false, false, false, false]);
   });
 
   it('opens Geolocation on the composer it always was', async () => {

@@ -17,6 +17,9 @@
    * On a narrow window it is a pager. Folded, or for a video this proof is alone on, it
    * is one thin line; the fold lasts the session only.
    *
+   * The strip's own ⋯ exports the slides' pictures and, once two slides state a place
+   * on a picture, posts them as one video thread (**Post this video's slides**).
+   *
    * ←/→ walk the tiles without opening them, Enter opens, Home and End go to the ends.
    * Alt+←/→ go to the next slide from anywhere in the composer, which handles them.
    */
@@ -27,7 +30,7 @@
   import SearchInput from '../../components/SearchInput.svelte';
   import { fileUrl } from '../../lib/fileUrl.js';
   import { videoName } from '../../lib/proofScene.js';
-  import { ABANDONED, GEOLOCATING, NEW, NO_PICTURE, findTiles } from '../../lib/proofSlides.js';
+  import { ABANDONED, GEOLOCATING, NEW, NO_PICTURE, PROVED, findTiles } from '../../lib/proofSlides.js';
   import { PROOF_SLIDES_HELP as HELP } from '../../lib/proofSlidesHelp.js';
 
   let {
@@ -58,6 +61,8 @@
     onaction,
     /** Every proved slide's picture copied into one numbered folder; null where it is not offered. */
     onexport = null,
+    /** The slides a thread posts, as a video thread in Post; null where it is not offered. */
+    onpost = null,
   } = $props();
 
   /** A tile's width and the gap after it; the strip's padding, its gaps and +; under what it turns into a pager. */
@@ -98,6 +103,8 @@
   const name = $derived(videoName(video, title));
   const count = (n) => (n === 1 ? '1 scene' : `${n} scenes`);
   const proved = $derived(tiles.filter((t) => t.kind === 'proof' && t.state !== NO_PICTURE).length);
+  // the slides a video thread posts: a place stated on a picture (`lib/videoThread.js`)
+  const postable = $derived(tiles.filter((t) => t.kind === 'proof' && t.state === PROVED && !t.unplaced).length);
 
   /** How many tiles stand more than half out of sight, each side. */
   function measure() {
@@ -299,7 +306,7 @@
 {/snippet}
 
 {#snippet series()}
-  {#if onexport}
+  {#if onexport || onpost}
     <button type="button" class="list" aria-label="More for the slides" aria-haspopup="menu" aria-expanded={!!seriesAnchor}
       title={HELP.series} onclick={(event) => (seriesAnchor = seriesAnchor ? null : event.currentTarget)}>
       <Icon name="more" size={14} stroke={2.6} /></button>
@@ -466,10 +473,17 @@
 
 {#if seriesAnchor}
   <FloatingMenu anchor={seriesAnchor} width={250} align="end" label="The slides" onclose={() => (seriesAnchor = null)}>
-    <button type="button" class="fm-item" disabled={!proved} title={HELP.export}
-      onclick={() => { seriesAnchor = null; onexport?.(); }}>
-      <Icon name="download" size={14} /><span class="fm-grow">Export the slides</span></button>
-    <p class="fm-note">{proved ? `${proved === 1 ? '1 picture' : `${proved} pictures`}, numbered in clip order, in a folder of their own` : 'No slide has a picture yet'}</p>
+    {#if onexport}
+      <button type="button" class="fm-item" disabled={!proved} title={HELP.export}
+        onclick={() => { seriesAnchor = null; onexport?.(); }}>
+        <Icon name="download" size={14} /><span class="fm-grow">Export the slides</span></button>
+      <p class="fm-note">{proved ? `${proved === 1 ? '1 picture' : `${proved} pictures`}, numbered in clip order, in a folder of their own` : 'No slide has a picture yet'}</p>
+    {/if}
+    {#if onpost && postable >= 2}
+      <button type="button" class="fm-item" title={HELP.post} onclick={() => { seriesAnchor = null; onpost?.(); }}>
+        <Icon name="post" size={14} /><span class="fm-grow">Post this video's slides</span></button>
+      <p class="fm-note">{postable} places as one thread, from the slides as saved</p>
+    {/if}
   </FloatingMenu>
 {/if}
 

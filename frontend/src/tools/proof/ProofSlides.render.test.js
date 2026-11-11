@@ -409,4 +409,28 @@ describe('the strip\'s own menu', () => {
     show();
     expect(document.body.querySelector('[aria-label="More for the slides"]')).toBeNull();
   });
+
+  const items = () => [...document.body.querySelectorAll('.float-menu .fm-item')].map((one) => one.textContent.trim());
+
+  it('posts the slides as one video thread once two of them state a place on a picture', () => {
+    const onpost = vi.fn();
+    show({ onexport: vi.fn(), onpost });
+    document.body.querySelector('[aria-label="More for the slides"]').click();
+    flushSync();
+    expect(items()).toEqual(['Export the slides', 'Post this video\'s slides']);
+    expect([...document.body.querySelectorAll('.float-menu .fm-note')][1].textContent).toBe('2 places as one thread, from the slides as saved');
+    [...document.body.querySelectorAll('.float-menu .fm-item')][1].click();
+    flushSync();
+    expect(onpost).toHaveBeenCalledOnce();
+    expect(document.body.querySelector('.float-menu')).toBeNull();
+  });
+
+  it('offers no thread for one place: a slide still geolocated or with no picture is no post of it', () => {
+    const scenes = [proof('Road bridge', { moments: [{ start: 30, end: 45 }] }), proof('Market', { at: [80], state: 'progress' }),
+      proof('Square', { png: null, thumb: null, at: [100] })];
+    show({ onexport: vi.fn(), onpost: vi.fn(), tiles: slideTiles({ video: 'v', scenes }, { started: true, name: 'Market' }) });
+    document.body.querySelector('[aria-label="More for the slides"]').click();
+    flushSync();
+    expect(items()).toEqual(['Export the slides']);
+  });
 });

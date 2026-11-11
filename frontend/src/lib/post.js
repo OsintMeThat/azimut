@@ -24,8 +24,8 @@ export const POST_KINDS = Object.freeze([
   { id: 'free', label: 'Free post', many: 'free posts', icon: 'edit', text: 'Your own words and up to four pictures or a video per post.' },
 ].map((kind) => Object.freeze(kind)));
 
-/** The kinds New post can start today. Video thread arrives with its own screen. */
-export const STARTABLE_POST_KINDS = Object.freeze(['geolocation', 'plate', 'compare', 'free']);
+/** The kinds New post can start: a kind left out keeps its card, greyed, until it is built. */
+export const STARTABLE_POST_KINDS = Object.freeze(['geolocation', 'video', 'plate', 'compare', 'free']);
 
 /** A known kind, or Geolocation for anything else: an old draft, a hand-edited one. */
 export function normalizePostKind(kind) {

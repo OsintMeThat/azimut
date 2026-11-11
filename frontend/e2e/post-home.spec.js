@@ -119,7 +119,7 @@ test.describe('the home', () => {
     const series = home.locator('.ph-video');
     await expect(series).toContainText('Convoy along the port');
     await expect(series.locator('.ph-chip')).toHaveCount(2);
-    await expect(series.getByRole('button', { name: /Video thread/ })).toBeDisabled();
+    await expect(series.getByRole('button', { name: /Video thread/ })).toBeEnabled();
 
     await home.getByLabel('Find a draft by name').fill('harb');
     await expect(home.locator('.ph-hit')).toHaveCount(1);
@@ -461,7 +461,7 @@ test.describe('Mark as posted', () => {
 });
 
 test.describe('New post', () => {
-  test('offers five starts, and each built one opens its own post', async ({ page }) => {
+  test('offers five starts, and each one opens its own post', async ({ page }) => {
     const fixture = await installAppFixture(page, { drafts: DRAFTS, proofList: PROOFS, lookupEntities: lookups });
     await postRoutes(page);
     await page.goto('/#post');
@@ -471,8 +471,8 @@ test.describe('New post', () => {
     const cards = gallery.locator('.np-card');
     await expect(cards).toHaveCount(5);
     await expect(cards.nth(0)).toContainText('Geolocation');
-    await expect(cards.nth(1)).toContainText('Coming next');
-    await expect(cards.nth(1)).toBeDisabled();
+    await expect(cards.nth(1)).toContainText('Video thread');
+    await expect(cards.nth(1)).toBeEnabled();
     await expect(cards.nth(3)).toContainText('Compare');
     await expect(cards.nth(3)).toBeEnabled();
 
@@ -640,7 +640,8 @@ test.describe('post templates per kind', () => {
     await section.getByRole('button', { name: 'New post template' }).click();
     const menu = page.locator('.float-menu[aria-label="New post template"]');
     await expect(menu.locator('.fm-item')).toHaveText([
-      'Classic', 'Coordinates only', 'Short', 'With date', 'Coming next', 'Plate', 'Before and after', 'Dates first', 'Text and source',
+      'Classic', 'Coordinates only', 'Short', 'With date', 'Recap first', 'Video first', 'Proof first', 'All in one',
+      'Plate', 'Before and after', 'Dates first', 'Text and source',
     ]);
     await menu.getByRole('button', { name: 'Plate' }).click();
     const editor = page.locator('.tpl-modal');

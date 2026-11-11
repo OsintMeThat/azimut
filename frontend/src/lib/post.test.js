@@ -807,9 +807,9 @@ describe('the geolocation road, pinned', () => {
 });
 
 describe('POST_KINDS — what a post is made from', () => {
-  it('offers five starts, Geolocation first, and opens the four that are built', () => {
+  it('offers five starts, Geolocation first, and opens every one of them', () => {
     expect(POST_KINDS.map((k) => k.id)).toEqual(['geolocation', 'video', 'plate', 'compare', 'free']);
-    expect(STARTABLE_POST_KINDS).toEqual(['geolocation', 'plate', 'compare', 'free']);
+    expect(STARTABLE_POST_KINDS).toEqual(['geolocation', 'video', 'plate', 'compare', 'free']);
     expect(postKind('compare')).toMatchObject({ label: 'Compare', icon: 'compare' });
     for (const k of POST_KINDS) expect(k.label && k.icon && k.text).toBeTruthy();
   });

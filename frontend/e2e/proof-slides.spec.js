@@ -436,6 +436,48 @@ test('exports the slides as one numbered set, saving the slide on screen first',
   await expect(page.locator('.toast', { hasText: 'Exported 2 slides to clip' })).toContainText('Left out, no picture yet: Square');
 });
 
+test('posts this video\'s slides as one thread in Post: Recap first, saved, and opened again as it was', async ({ page }) => {
+  const { fixture } = await openCase(page);
+  const sheets = [];
+  await page.route(`**/api/cases/${CASE_ID}/scenes/sheet`, (route) => {
+    sheets.push(route.request().postDataBuffer()?.length ?? 0);
+    return route.fulfill({ json: { path: 'media/Clip contact sheet.jpg' } });
+  });
+  await openProof(page, 'market', 'Market');
+  await slides(page).getByRole('button', { name: 'More for the slides' }).click();
+  const menu = page.getByRole('menu', { name: 'The slides' });
+  await expect(menu.locator('.fm-note').last()).toHaveText('3 places as one thread, from the slides as saved');
+  await menu.getByRole('button', { name: 'Post this video\'s slides' }).click();
+
+  await expect(page.locator('.tabstrip').getByRole('button', { name: 'Post', exact: true })).toHaveAttribute('aria-current', 'page');
+  await expect(page.getByTestId('video-thread')).toBeVisible();
+  const labels = page.locator('.tweet-block .tweet-head .label');
+  await expect(labels).toHaveText(['Recap', 'Video', 'Road bridge', 'Market', 'Square']);
+  await expect(page.locator('.tweet-block textarea').first()).toHaveValue(/^Clip\n\n1\. \[0:00–0:00\] Road bridge\n2\. Market\n3\. Square\n\n@GeoConfirmed$/);
+  await expect(page.getByTestId('video-thread').locator('.vt-order.on .vt-order-name')).toHaveText('Recap first');
+  await expect.poll(() => fixture.draftWrites.at(-1)?.state?.sheet).toBe('media/Clip contact sheet.jpg');
+  expect(sheets).toHaveLength(1);
+  expect(fixture.draftWrites.at(-1).state).toMatchObject({ kind: 'video', video: VIDEO, order: 'recap', first: 'recap' });
+
+  // opened again from the case's posts, as it was saved
+  await page.reload();
+  await expect(page.locator('.tabstrip').getByRole('button', { name: 'Post', exact: true })).toHaveAttribute('aria-current', 'page');
+  await page.locator('.tool-header').getByRole('button', { name: 'Open' }).click();
+  const list = page.getByRole('dialog', { name: 'Open a post' });
+  await expect(list.locator('.ol-sub')).toHaveText([/^Video thread · X · /]);
+  await list.locator('.ol-open', { hasText: 'Clip' }).click();
+  await expect(labels).toHaveText(['Recap', 'Video', 'Road bridge', 'Market', 'Square']);
+  await expect(page.getByTestId('video-thread').locator('.vt-order.on .vt-order-name')).toHaveText('Recap first');
+  await expect(page.locator('.tweet-block .first-pics img')).toHaveAttribute('src', /Clip%20contact%20sheet\.jpg/);
+});
+
+test('offers no thread for a video this proof is alone on', async ({ page }) => {
+  await openCase(page, { alone: true });
+  await openProof(page, 'market', 'Market');
+  await expect(slides(page)).toHaveClass(/line/);
+  await expect(slides(page).getByRole('button', { name: 'More for the slides' })).toHaveCount(0);
+});
+
 test('saves the slide open when Inspect hands over a scene of the same video, rather than asking', async ({ page }) => {
   const { saves } = await openCase(page);
   await openProof(page, 'market', 'Market');
