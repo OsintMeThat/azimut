@@ -18,6 +18,7 @@ export const PROOF_SCENE_HELP = {
   matched: 'Its panels from this video all fall in this scene, which the save takes up',
   onlyScene: 'The one scene of this video to geolocate, which the save takes up',
   notThisScene: 'Keep this proof apart from that scene',
+  plays: 'Shows a play button on each panel cut from a video',
 
   // the clip for the post
   cut: 'Cut this passage into a short video for the post, filed in Media',

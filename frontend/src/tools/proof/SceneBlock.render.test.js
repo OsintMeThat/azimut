@@ -3,11 +3,18 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { flushSync, mount, tick, unmount } from 'svelte';
 
 vi.mock('../../lib/api.js', () => ({
-  api: { get: vi.fn(async () => ({ kind: 'video', duration: 400, fps: 25 })) },
+  api: {
+    get: vi.fn(async () => ({ kind: 'video', duration: 400, fps: 25 })),
+    // the prefs as settings.json now holds them
+    put: vi.fn(async (url, body) => ({ ...body })),
+  },
 }));
 
 import SceneBlock from './SceneBlock.svelte';
 import { ProofScene } from './proofScene.svelte.js';
+import { api } from '../../lib/api.js';
+import { prefs } from '../../lib/state.svelte.js';
+import { PROOF_SCENE_HELP } from '../../lib/proofSceneHelp.js';
 
 /**
  * The Scene tab of Geo Proof's side column, used the way an analyst uses it: the
@@ -322,5 +329,45 @@ describe('the scene its frames found', () => {
     const [star, other] = fields(root);
     expect(star.nextElementSibling).toBe(line(root));
     expect(line(root).nextElementSibling).toBe(other);
+  });
+});
+
+describe('the ▶ on video panels', () => {
+  const box = (root) => root.querySelector('label.plays');
+
+  it('is a box of the tab, ticked unless the analyst hid them, its words on hover', () => {
+    prefs.proofScenePlays = true;
+    const { root } = setup({ stated: { video: CLIP, moments: [{ start: 130, end: 158 }] } });
+    expect(box(root).textContent.trim()).toBe('▶ on video panels');
+    expect(box(root).getAttribute('title')).toBe(PROOF_SCENE_HELP.plays);
+    expect(box(root).getAttribute('title')).toBe('Shows a play button on each panel cut from a video');
+    expect(box(root).querySelector('input').checked).toBe(true);
+  });
+
+  it('hides them for every proof, kept in settings.json, and shows them again', async () => {
+    prefs.proofScenePlays = true;
+    api.put.mockClear();
+    const { root } = setup();
+    const input = box(root).querySelector('input');
+    input.checked = false;
+    input.dispatchEvent(new Event('change', { bubbles: true }));
+    flushSync();
+    // the box answers the click, before the round trip
+    expect(prefs.proofScenePlays).toBe(false);
+    await settle();
+    expect(api.put).toHaveBeenCalledWith('/api/settings/prefs', { proof_scene_plays: false });
+    expect(prefs.proofScenePlays).toBe(false);
+    input.checked = true;
+    input.dispatchEvent(new Event('change', { bubbles: true }));
+    await settle();
+    expect(api.put).toHaveBeenLastCalledWith('/api/settings/prefs', { proof_scene_plays: true });
+    expect(prefs.proofScenePlays).toBe(true);
+  });
+
+  it('reads as the analyst left it on the next proof', () => {
+    prefs.proofScenePlays = false;
+    const { root } = setup();
+    expect(box(root).querySelector('input').checked).toBe(false);
+    prefs.proofScenePlays = true;
   });
 });

@@ -154,6 +154,9 @@ DEFAULT_SETTINGS: dict[str, Any] = {
     # The proof template New proof starts with, by id, read the same way: empty
     # means none, and an id whose template is gone reads as none.
     "proof_template": "",
+    # Whether Geo Proof's canvas shows a play button on each panel cut from a video,
+    # which opens the scene's player on its frame (its Scene tab's box). Never exported.
+    "proof_scene_plays": True,
     # Whether Publish lets the capture extension fill that composer — the thread
     # typed in, the proof and the media attached, nothing posted. The only switch
     # for it: the extension keeps none of its own, so this is where the answer

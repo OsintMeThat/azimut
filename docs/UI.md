@@ -4626,7 +4626,19 @@ one. ←/→ step a frame, Shift a second, Space plays, and none of
 them reach the canvas behind. **Add this frame** files the frame on screen as Inspect
 files a capture and adds it as a panel the way the picker does, so its source traces as
 usual. Each panel cut from a video carries a ▶ in its corner on the canvas, drawn with
-the handles and never exported, which shows the Scene tab on that panel's frame.
+the handles and never exported, which shows the Scene tab on that panel's frame. The
+tab's **▶ on video panels** box, on by default, hides them all while composing; it is
+kept in settings.json for every proof and travels with the settings backup
+(`proof_scene_plays`).
+
+**Inspect writes the same time.** Each time Geo Proof comes back to the front, when the
+case moves and when the server says a scene moved, it reads the open proof's scene and
+the strip again, the player and the tab left where they stand and nothing written. A
+time in hand with a change stays the analyst's: the read waits until it is applied or
+dropped. A proof not saved yet, made from a scene still to prove, follows a time changed
+on that scene in Inspect until one is stated here. Inspect reads its list again when a
+write from Geo Proof lands after it was read. The open slide's tile says the time its
+Scene tab reads.
 
 **Nothing moves the time behind the analyst's back.** When a frame of the ★ video falls
 outside every passage stated, the field says *1 panel is outside these passages* and
@@ -4662,7 +4674,9 @@ scene**. A scene about the whole video is taken only as the video's one scene, *
 town? · the video's only scene*. Frames in several scenes, or in none, tie nothing. The
 next save takes the scene up as Make the proof's first save does, so Inspect shows one
 row. A time changed meanwhile is stated for that scene. **Not this scene** keeps the
-proof as it was for the session and writes nothing. An older proof made by hand reads the
+proof as it was for the session and writes nothing. A proof taken back to the whole
+video, here or in Inspect, is kept apart from the scene its frames then find in the same
+way, so it reads *Whole video* as Inspect does. An older proof made by hand reads the
 same when opened, and nothing changes on disk until it is saved. Abandoned scenes and
 scenes another proof took up are never offered, and the line follows the panels as they
 change. The scenes are the ones the strip reads (`GET /cases/{id}/scenes?video=`), so

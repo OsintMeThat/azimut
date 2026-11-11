@@ -1725,6 +1725,7 @@
     tool;
     sceneFrames;
     scene.star;
+    prefs.proofScenePlays;
     if (stage) canvasRenderGate?.requestUi();
   });
 
@@ -4774,11 +4775,12 @@
   /**
    * A ▶ in the corner of each panel cut from a video, which opens the scene's player
    * on its frame. Drawn with the handles, never on the page, so no export carries it,
-   * and only for Select: a drawing tool holds the canvas alone.
+   * and only for Select: a drawing tool holds the canvas alone. The Scene tab's box hides
+   * them all (`prefs.proofScenePlays`).
    */
   function drawScenePlays(boxes = boxesOf()) {
     scenePlays.destroyChildren();
-    if (tool !== 'select' || cropSurfaceId) return;
+    if (tool !== 'select' || cropSurfaceId || !prefs.proofScenePlays) return;
     const k = stage.scaleX();
     const r = 11 / k;
     for (const frame of sceneFrames) {

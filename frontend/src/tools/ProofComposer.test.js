@@ -1644,10 +1644,10 @@ describe('Proof Composer scene', () => {
     expect(source).toContain('const badges = $derived(sceneBadges(proof.sceneBadge, sceneFrames, scene.star, scene.moments));');
   });
 
-  it('puts a panel\'s ▶ with the handles, where no export reaches', () => {
+  it('puts a panel\'s ▶ with the handles, where no export reaches, unless the Scene tab\'s box hides them', () => {
     expect(source).toContain('uiLayer.add(scenePlays);');
     const plays = bodyOfFn('drawScenePlays');
-    expect(plays).toContain("if (tool !== 'select' || cropSurfaceId) return;");
+    expect(plays).toContain("if (tool !== 'select' || cropSurfaceId || !prefs.proofScenePlays) return;");
     expect(plays).toContain('scenePlays.add(g);');
     expect(plays).not.toContain('docLayer');
     expect(bodyOfFn('playPanelScene')).toContain('scene.show(frame.video, { at: frame.time });');
