@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   badgeText, frameOrigin, handoffTitle, momentHolds, outsideFrames, panelFrames, playSegments, proofVideos,
-  readHandoff, readStatedScene, sceneBadges, sceneColor, sceneOfFrames, segmentAt, starVideo, statedMoments,
+  readHandoff, readStatedScene, sceneBadges, sceneColor, sceneOfFrames, sceneOffer, segmentAt, starVideo, statedMoments,
   mediaTitles, videoName,
 } from './proofScene.js';
 import { sceneList } from './scenes.js';
@@ -105,6 +105,18 @@ describe('the video the proof is about', () => {
     expect(starVideo(frames, null)).toBe(CLIP);
     expect(starVideo(frames, { video: OTHER, moments: [] })).toBe(OTHER);
     expect(starVideo([], null)).toBeNull();
+  });
+
+  it('is else the first one a panel is tied to, made from its footage without being cut from it', () => {
+    const ties = [{ src: 'media/capture.png', video: OTHER, times: [12], scene: null }];
+    expect(starVideo([], null, ties)).toBe(OTHER);
+    expect(starVideo(frames, null, ties)).toBe(CLIP);
+    // a video only tied to comes last, as a confirmation with no frame of its own
+    expect(proofVideos(frames.filter((f) => f.video === CLIP), null, () => '', ties).map((v) => [v.name, v.star, v.frames.length])).toEqual([
+      ['clip', true, 2],
+      ['other', false, 0],
+    ]);
+    expect(proofVideos([], null, () => '', ties).map((v) => [v.name, v.star])).toEqual([['other', true]]);
   });
 
   it('comes first, the others after as confirmations, each with its frames', () => {
@@ -278,7 +290,7 @@ describe('the scene a proof made by hand finds by its frames', () => {
     const found = sceneOfFrames(at(0.2, 3, 6.9), CLIP, answer(SCENES));
     const bar = sceneList(SCENES, SCENES);
     expect(found).toEqual({
-      id: 's1', moments: [{ start: 0, end: 7 }], title: 'Bridge?', color: bar.find((s) => s.id === 's1').color, whole: false,
+      id: 's1', moments: [{ start: 0, end: 7 }], title: 'Bridge?', color: bar.find((s) => s.id === 's1').color, whole: false, by: 'frames',
     });
     // an instant holds the frame cut on it; a scene with no label is named by its time
     expect(sceneOfFrames(at(30), CLIP, answer(SCENES))).toMatchObject({ id: 's2', moments: [{ start: 30, end: null }], title: '0:30' });
@@ -352,5 +364,79 @@ describe('the scene a proof made by hand finds by its frames', () => {
   it('reads only the frames of the ★ video', () => {
     const frames = [...at(3), { panel: 'po', src: 'media/o.png', video: OTHER, time: 70 }];
     expect(sceneOfFrames(frames, CLIP, answer(SCENES))).toMatchObject({ id: 's1' });
+  });
+});
+
+describe('the scene a proof finds through panels made from the footage', () => {
+  const draft = (id, start, end, extra = {}) => ({
+    kind: 'draft', id, start, end, label: '', state: 'todo', captures: [], abandoned: null, ...extra,
+  });
+  const proofRow = (name, extra = {}) => ({ kind: 'proof', proof: name, title: name, moments: [], at: [], stated: false, ...extra });
+  const answer = (scenes, extra = {}) => ({ video: CLIP, scenes, taken: [], collages: [], ...extra });
+  const SCENES = [draft('s1', 0, 7, { label: 'Bridge?' }), draft('s2', 30, null), draft('s3', 60, 90, { label: 'Market?' })];
+  /** A Horizon capture of a collage of the clip, as `POST /scenes/ties` answers it. */
+  const tie = (times, scene = null, src = 'media/ridge photo.png') => ({ src, video: CLIP, times, scene });
+  const offer = (ties, scenes, extra = {}) => sceneOffer([], CLIP, answer(scenes), { ties, ...extra });
+  const ids = (list) => list.map((one) => one.id);
+
+  it('finds the scene the pieces of the collage under a capture fall in, as a frame would', () => {
+    const { found, choices } = offer([tie([3, 4.5, 6])], SCENES);
+    expect(found).toMatchObject({ id: 's1', moments: [{ start: 0, end: 7 }], title: 'Bridge?', by: 'frames' });
+    expect(choices).toEqual([]);
+  });
+
+  it('finds the scene a capture was gathered for, the whole video included', () => {
+    // the owner's case: one scene, the whole video, and Horizon's two pictures of its collage
+    const whole = draft('sc_whole', null, null, { captures: ['media/ridge photo.png', 'media/ridge terrain.png'] });
+    const ties = [tie([30.3, 30.6, 31.9], 'sc_whole'), tie([30.3, 30.6, 31.9], 'sc_whole', 'media/ridge terrain.png')];
+    expect(offer(ties, [whole]).found).toMatchObject({ id: 'sc_whole', moments: [], whole: true, by: 'captures' });
+    // beside a proof the times leave alone, the scene gathered for is still the one
+    expect(offer(ties, [whole, proofRow('elsewhere', { at: [80] })]).found).toMatchObject({ id: 'sc_whole' });
+    // a timed scene gathered for, its pieces inside it
+    expect(offer([tie([62], 's3')], SCENES).found).toMatchObject({ id: 's3', by: 'captures' });
+    // a map capture made over nothing, gathered for a scene: no time, the scene says it
+    expect(offer([tie([], 's2')], SCENES).found).toMatchObject({ id: 's2', by: 'captures' });
+  });
+
+  it('takes the video\'s one scene when nothing says when, and offers it beside a proof', () => {
+    expect(offer([tie([])], [draft('s1', 0, 7)]).found).toMatchObject({ id: 's1', by: 'only' });
+    expect(offer([tie([])], [draft('w', null, null)]).found).toMatchObject({ id: 'w', whole: true, by: 'only' });
+    const beside = offer([tie([])], [draft('s1', 0, 7), proofRow('other', { moments: [{ start: 40, end: 50 }], stated: true })]);
+    expect([beside.found, ids(beside.choices)]).toEqual([null, ['s1']]);
+    // the whole video's open scene beside a proof the times leave alone: offered, not taken
+    const whole = sceneOffer([{ panel: 'p', src: 'media/f.png', video: CLIP, time: 3 }], CLIP, answer([draft('w', null, null), proofRow('old', { at: [50] })]));
+    expect([whole.found, ids(whole.choices)]).toEqual([null, ['w']]);
+  });
+
+  it('offers a choice, tying nothing, when the panels point at several scenes or say too little', () => {
+    // pieces in two scenes
+    let read = offer([tie([3, 65])], SCENES);
+    expect([read.found, ids(read.choices)]).toEqual([null, ['s1', 's3']]);
+    // a capture gathered for one scene, a frame in another
+    read = sceneOffer([{ panel: 'p', src: 'media/f.png', video: CLIP, time: 3 }], CLIP, answer(SCENES), { ties: [tie([], 's3')] });
+    expect([read.found, ids(read.choices)]).toEqual([null, ['s1', 's3']]);
+    // one capture two scenes gathered
+    read = offer([tie([], 's1'), tie([], 's2')], SCENES);
+    expect([read.found, ids(read.choices), read.choices[0].by]).toEqual([null, ['s1', 's2'], 'captures']);
+    // no time at all, several scenes still to prove: every one is offered
+    read = offer([tie([])], SCENES);
+    expect([read.found, ids(read.choices)]).toEqual([null, ['s1', 's2', 's3']]);
+    // a capture gathered for a timed scene, pieces outside it: offered, not taken
+    read = offer([tie([20], 's1')], SCENES);
+    expect([read.found, ids(read.choices)]).toEqual([null, ['s1']]);
+    // frames in two scenes are offered too, never taken
+    read = sceneOffer([0.2, 65].map((time, i) => ({ panel: `p${i}`, src: `media/f${i}.png`, video: CLIP, time })), CLIP, answer(SCENES));
+    expect([read.found, ids(read.choices)]).toEqual([null, ['s1', 's3']]);
+  });
+
+  it('says nothing for times in no scene, a scene taken or given up on, or another video', () => {
+    expect(offer([tie([20])], SCENES)).toEqual({ found: null, choices: [] });
+    expect(offer([tie([3], 's1')], SCENES, {})).toMatchObject({ found: { id: 's1' } });
+    expect(sceneOffer([], CLIP, answer(SCENES, { taken: ['s1'] }), { ties: [tie([], 's1')] })).toMatchObject({ found: null });
+    const left = SCENES.map((s) => (s.id === 's1' ? { ...s, abandoned: { reason: '' }, state: 'abandoned' } : s));
+    expect(sceneOffer([], CLIP, answer(left), { ties: [tie([3], 's1')] }).found).toBeNull();
+    expect(sceneOffer([], CLIP, answer(SCENES), { ties: [{ ...tie([3]), video: OTHER }] })).toEqual({ found: null, choices: [] });
+    // a scene already proved holds the pieces: the panels show what a proof proves
+    expect(offer([tie([45])], [...SCENES, proofRow('done', { moments: [{ start: 40, end: 50 }], stated: true })])).toEqual({ found: null, choices: [] });
   });
 });

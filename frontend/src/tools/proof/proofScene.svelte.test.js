@@ -9,7 +9,7 @@ import { ProofScene } from './proofScene.svelte.js';
 const CLIP = 'media/clip.mp4';
 const OTHER = 'media/other.mp4';
 
-function setup({ name = 'depot', frames = [{ panel: 'p1', video: CLIP, time: 130 }], answer, listed = null, onDisk = {} } = {}) {
+function setup({ name = 'depot', frames = [{ panel: 'p1', video: CLIP, time: 130 }], ties = [], answer, listed = null, onDisk = {} } = {}) {
   const where = { caseId: 'case', name };
   const scenes = $state({ answer: listed });
   const puts = [];
@@ -27,7 +27,7 @@ function setup({ name = 'depot', frames = [{ panel: 'p1', video: CLIP, time: 130
   };
   const toast = vi.fn();
   const onstated = vi.fn();
-  const scene = new ProofScene({ api, toast, where: () => where, frames: () => frames, listed: () => scenes.answer, onstated });
+  const scene = new ProofScene({ api, toast, where: () => where, frames: () => frames, ties: () => ties, listed: () => scenes.answer, onstated });
   return { scene, api, puts, toast, onstated, where, scenes };
 }
 
@@ -287,6 +287,83 @@ describe('a proof made by hand, whose frames fall in a scene still to prove', ()
     expect(scene.proposal?.id).toBe('s1');
     await scene.makeStar(OTHER);
     expect(puts[0].body).toEqual({ moments: [], video: OTHER });
+  });
+});
+
+describe('a proof of panels made from the footage, never cut from it', () => {
+  /** The owner's case: one scene, the whole video, which gathered Horizon's two pictures. */
+  const WHOLE = {
+    video: CLIP,
+    scenes: [{ kind: 'draft', id: 'sc_whole', start: null, end: null, label: '', state: 'progress', captures: ['media/photo.png', 'media/terrain.png'], abandoned: null }],
+    taken: [],
+    collages: [],
+  };
+  /** The two Horizon pictures, as `POST /scenes/ties` answers them: their collage's pieces, and the scene. */
+  const TIES = ['media/photo.png', 'media/terrain.png'].map((src) => ({ src, video: CLIP, times: [130.3, 130.6, 131.9], scene: 'sc_whole' }));
+
+  it('is about the video its panels are tied to, and a saved one is offered the scene, until Take it up', async () => {
+    const { scene, puts, toast } = setup({ frames: [], ties: TIES, listed: WHOLE });
+    scene.load(null);
+    expect([scene.star, scene.videos.map((v) => [v.name, v.star, v.frames.length])]).toEqual([CLIP, [['clip', true, 0]]]);
+    expect([scene.match, scene.proposal?.id, scene.proposal?.by, scene.moments]).toEqual([null, 'sc_whole', 'captures', []]);
+    // the time editor pins none of them: they are no frames
+    scene.openTime();
+    expect(scene.edit.scene.at).toEqual([]);
+    scene.edit.close();
+    // nothing is written until Take it up
+    await scene.flush();
+    expect(puts).toEqual([]);
+    expect(await scene.takeUp()).toBe(true);
+    expect(puts[0]).toEqual({ url: '/api/cases/case/proofs/depot/scene', body: { moments: [], video: CLIP, draft: 'sc_whole' } });
+    expect([scene.stated, scene.proposal]).toEqual([{ video: CLIP, moments: [], draft: 'sc_whole' }, null]);
+    // its Undo reads it back to the video it is tied to, stating nothing
+    toast.mock.calls[0][3].onClick();
+    await vi.waitFor(() => expect(puts).toHaveLength(2));
+    expect(puts[1].body).toEqual({ moments: [], video: CLIP, traced: true });
+  });
+
+  it('takes the scene up at the first save of a proof never saved, as Make the proof does', async () => {
+    const { scene, puts, where } = setup({ name: null, frames: [], ties: TIES, listed: WHOLE });
+    expect([scene.match?.id, scene.draft]).toEqual(['sc_whole', 'sc_whole']);
+    where.name = 'proof-100';
+    await scene.flush();
+    expect(puts).toEqual([{ url: '/api/cases/case/proofs/proof-100/scene', body: { moments: [], video: CLIP, draft: 'sc_whole' } }]);
+  });
+
+  it('offers each scene the panels point at, and Take it up writes the one picked', async () => {
+    const two = {
+      ...WHOLE,
+      scenes: [
+        { kind: 'draft', id: 's1', start: 120, end: 140, label: 'Bridge?', state: 'todo', captures: [], abandoned: null },
+        { kind: 'draft', id: 's2', start: 300, end: null, label: '', state: 'todo', captures: [], abandoned: null },
+      ],
+    };
+    const ties = [{ src: 'media/photo.png', video: CLIP, times: [130, 300], scene: null }];
+    const { scene, puts } = setup({ frames: [], ties, listed: two });
+    scene.load(null);
+    expect([scene.proposal, scene.choices.map((one) => one.id)]).toEqual([null, ['s1', 's2']]);
+    expect(await scene.takeUp('s2')).toBe(true);
+    expect(puts[0].body).toEqual({ moments: [{ start: 300, end: null }], video: CLIP, draft: 's2' });
+    expect(scene.choices).toEqual([]);
+  });
+
+  it('holds the scene picked on a proof never saved, and None of these keeps it apart', async () => {
+    const ties = [{ src: 'media/photo.png', video: CLIP, times: [], scene: null }];
+    const two = { ...WHOLE, scenes: [
+      { kind: 'draft', id: 's1', start: 120, end: 140, label: 'Bridge?', state: 'todo', captures: [], abandoned: null },
+      { kind: 'draft', id: 's2', start: 300, end: null, label: '', state: 'todo', captures: [], abandoned: null },
+    ] };
+    const { scene, puts, where } = setup({ name: null, frames: [], ties, listed: two });
+    expect(scene.choices.map((one) => one.id)).toEqual(['s1', 's2']);
+    await scene.takeUp('s1');
+    expect([scene.stated, scene.held, puts]).toEqual([{ video: CLIP, moments: [{ start: 120, end: 140 }], draft: 's1' }, true, []]);
+    where.name = 'bridge';
+    await scene.flush();
+    expect(puts[0].body).toEqual({ moments: [{ start: 120, end: 140 }], video: CLIP, draft: 's1' });
+
+    const other = setup({ name: null, frames: [], ties, listed: two });
+    other.scene.refuse();
+    expect([other.scene.choices, other.scene.match, other.scene.refused]).toEqual([[], null, ['s1', 's2']]);
   });
 });
 

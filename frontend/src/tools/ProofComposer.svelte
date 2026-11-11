@@ -465,11 +465,40 @@
   // (`lib/proofScene.js`). It is shown and stated in the side column (SceneBlock), and
   // written through its own route, never with a save (proof/proofScene.svelte.js).
   const sceneFrames = $derived(panelFrames(proof.panels, new Map(caseMedia.map((one) => [one.path, one]))));
+  // The other panels made from a video's footage: a capture over a frame or a collage of
+  // it, or one a scene of it gathered on the map. The server walks each one's derivation
+  // (`POST /scenes/ties`); they say which video and scene, and are never frames.
+  let sceneTies = $state([]);
+  const untiedPanels = $derived.by(() => {
+    const cut = new Set(sceneFrames.map((f) => f.src));
+    return [...new Set(proof.panels.map((p) => p.src).filter((src) => src && !cut.has(src)))].join('\n');
+  });
+  let tiesRun = 0;
+  async function readTies(caseId = caseState.current?.id, panels = untiedPanels) {
+    const run = ++tiesRun;
+    const wanted = panels ? panels.split('\n') : [];
+    if (!caseId || !wanted.length) {
+      sceneTies = [];
+      return;
+    }
+    try {
+      const answer = await api.post(`/api/cases/${caseId}/scenes/ties`, { panels: wanted });
+      if (run === tiesRun) sceneTies = Array.isArray(answer?.ties) ? answer.ties : [];
+    } catch {
+      if (run === tiesRun) sceneTies = [];
+    }
+  }
+  const tiesCase = $derived(caseState.current?.id ?? null);
+  $effect(() => {
+    const id = tiesCase, panels = untiedPanels;
+    untrack(() => readTies(id, panels));
+  });
   const scene = new ProofScene({
     api,
     toast,
     where: () => ({ caseId: caseState.current?.id ?? null, name: savedName }),
     frames: () => sceneFrames,
+    ties: () => sceneTies,
     // a video by its title in Media, as every surface of Geo Proof names it
     titleOf: (path) => mediaTitle(path),
     // the ★ video's scenes, as the strip read them: where a proof made by hand finds its own
@@ -479,6 +508,9 @@
       if (proof.sceneBadge) dirty = true;
     },
   });
+  // The video a delete asks about the scene of: one the proof states or was cut from. A
+  // proof only tied to it states nothing there, so its delete gives nothing back.
+  const sceneOwned = $derived(scene.stated || sceneFrames.length ? scene.star : null);
   // The badge each panel of the proof's video prints, when asked: part of the picture.
   const badges = $derived(sceneBadges(proof.sceneBadge, sceneFrames, scene.star, scene.moments));
   // The scene's colour on Inspect's bar, read when its player opens on the proof's video.
@@ -610,6 +642,8 @@
   // stays; the read is made again once it is applied or dropped.
   function rereadScenes() {
     readSlides();
+    // a capture gathered by a scene meanwhile points the proof's panels at it
+    readTies();
     if (proofStarted) scene.reread();
   }
   $effect(() => {
@@ -7849,7 +7883,7 @@
         <div class="fm-sep"></div>
       {/if}
       <button type="button" class="fm-item danger" title="Send it to the Trash, from where it can be restored"
-        onclick={() => { proofMenu = null; askDelete({ name: savedName, title: savedTitle(proofEntities, 'proof', savedName) || proof.title, video: scene.star }); }}>
+        onclick={() => { proofMenu = null; askDelete({ name: savedName, title: savedTitle(proofEntities, 'proof', savedName) || proof.title, video: sceneOwned }); }}>
         <Icon name="trash" size={14} /><span class="fm-grow">Delete…</span></button>
     </FloatingMenu>
   {/if}
