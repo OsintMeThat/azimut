@@ -338,9 +338,10 @@ test('puts a point of a proof made from a scene in a layer, saving it first, eve
  * holds frames A and B, and Tower?, an instant on frame C. With `older`, a proof made by
  * hand before, on frame B, stating nothing. The server is faked the way it answers:
  * a proof's scene written through its route takes the draft up, which `/scenes` then
- * hides, and Inspect lists the proof in its place.
+ * hides, and Inspect lists the proof in its place. With `timed`, Lookout states that
+ * scene's passage and takes it up (`'scene'`), or states a passage of its own (`'own'`).
  */
-async function openClip(page, { older = false } = {}) {
+async function openClip(page, { older = false, timed = null } = {}) {
   const media = [
     { path: VIDEO, filename: 'steps.webm', title: 'Steps', kind: 'video', entity_id: 'e_steps', size: STEPS_WEBM.length, source: { type: 'upload' }, thumbnail: null, folder: '' },
     frame('media/frame-a.png', 'Frame A', 0.2),
@@ -352,13 +353,15 @@ async function openClip(page, { older = false } = {}) {
     { id: 's2', start: 1.12, end: null, label: 'Tower?' },
   ];
   const proofs = {};
-  if (older) {
+  if (older || timed) {
     proofs.lookout = {
       azimut_proof: 1, ink: 'page', title: 'Lookout', pastes: [], shapes: [], notes: {}, legendOrder: [], material: [],
       panels: [{ id: 'p1', src: 'media/frame-b.png', caption: '', row: 0, scale: 1, natural: [640, 360] }],
       points: [{ coords: '', label: '', pov: false }], when: null, description: null, sources: null,
     };
   }
+  if (timed === 'scene') proofs.lookout.scene = { video: VIDEO, moments: [{ start: 0.1, end: 1 }], draft: 's1' };
+  if (timed === 'own') proofs.lookout.scene = { video: VIDEO, moments: [{ start: 0.5, end: 1 }], draft: null };
   const fixture = await installAppFixture(page, {
     media,
     lookupEntities: Object.fromEntries(['road-bridge', 'lookout', 'proof-1', 'proof-2'].map((name) => [`proofs/.meta/${name}.json`, {
@@ -428,9 +431,16 @@ async function openClip(page, { older = false } = {}) {
       const body = request.postDataJSON();
       const name = decodeURIComponent(timed[1]);
       scenePuts.push({ proof: name, body });
-      proofs[name].scene = { video: body.video, moments: body.moments, draft: body.draft ?? null };
-      return json({ proof: name, video: body.video, moments: body.moments, at: [], stated: true, draft: body.draft ?? null });
+      // as the server does: Inspect names no video, the scene taken up stays, and a proof
+      // stating nothing its frames do not say keeps no scene
+      const held = proofs[name].scene;
+      const video = body.video ?? held?.video ?? VIDEO;
+      const draft = body.draft ?? held?.draft ?? null;
+      if (!body.moments.length && !draft) delete proofs[name].scene;
+      else proofs[name].scene = { video, moments: body.moments, draft };
+      return json({ proof: name, video, moments: body.moments, at: [], stated: !!proofs[name].scene, draft });
     }
+    if (path === `/api/cases/${CASE_ID}/inspect/work` && method === 'PUT') return json({ name: 'Work', title: 'Work' });
     return route.fallback();
   });
   await page.goto('/#proof');
@@ -566,6 +576,120 @@ test('names the scene of an older proof made by hand, and writes nothing until i
   await saveClip(page, saves, 1);
   await expect.poll(() => scenePuts.length).toBe(1);
   expect(scenePuts[0]).toEqual({ proof: 'lookout', body: { moments: [{ start: 0.1, end: 1 }], video: VIDEO, draft: 's1' } });
+});
+
+// -- one time, read alike in Inspect and Geo Proof -----------------------------------------
+
+const inspectRows = (page) => page.getByRole('tabpanel', { name: 'Scenes' }).getByTestId('scene-row');
+/** Another tool to the front, as the side bar puts it there, the others kept as they stand. */
+const goTo = (page, tool) => page.evaluate(async (wanted) => {
+  const { uiState } = await import('/src/lib/state.svelte.js');
+  uiState.tool = wanted;
+}, tool);
+
+async function openLookout(page) {
+  await page.evaluate(async () => {
+    const { uiState } = await import('/src/lib/state.svelte.js');
+    uiState.openProof = 'lookout';
+  });
+  await expect(page.getByRole('textbox', { name: 'Proof name' })).toHaveValue('Lookout');
+  await showProofTab(page, 'Scene');
+}
+
+/** Lookout's row in Inspect, open: its time set to the whole video and applied. */
+async function wholeInInspect(page) {
+  const row = inspectRows(page).filter({ hasText: 'Lookout' });
+  await expect(row.getByRole('radio', { name: 'Passage' })).toHaveAttribute('aria-checked', 'true');
+  await row.getByRole('radio', { name: 'Whole video' }).click();
+  await row.getByRole('button', { name: 'Apply' }).click();
+}
+
+test('reads in Geo Proof the time Inspect gave the proof open there, without opening it again', async ({ page }) => {
+  const { scenePuts } = await openClip(page, { timed: 'scene' });
+  await openLookout(page);
+  await expect(sceneBlock(page).getByTestId('scene-video')).toHaveText(/★\s*Steps\s*·\s*0:00–0:01/);
+  await expect(stripTiles(page).locator('.tile-title')).toHaveText(['Lookout', 'Tower?']);
+
+  // to its row in Inspect, from the proof's menu, where it becomes the whole video
+  await page.getByRole('button', { name: 'More for this proof' }).click();
+  await page.getByRole('button', { name: 'Show in Inspect' }).click();
+  await wholeInInspect(page);
+  await expect.poll(() => scenePuts.length).toBe(1);
+  expect(scenePuts[0]).toEqual({ proof: 'lookout', body: { moments: [] } });
+
+  // back in Geo Proof, on the Scene tab still: the whole video, on the tab and its tile
+  await goTo(page, 'proof');
+  await expect(sideTab(page, 'Scene')).toHaveAttribute('aria-selected', 'true');
+  await expect(sceneBlock(page).getByTestId('scene-video')).toHaveText(/★\s*Steps\s*·\s*Whole video/);
+  // a slide with no place yet says its time on hover
+  await expect(stripTiles(page).first()).toHaveAttribute('title', /^Lookout · Whole video/);
+  await expect(page.locator('.tool-header .badge')).toHaveCount(0);
+  await page.waitForTimeout(300);
+  expect(scenePuts).toHaveLength(1);
+});
+
+test('reads in Inspect the time Geo Proof gave a proof, its row open on it', async ({ page }) => {
+  const { scenePuts } = await openClip(page, { timed: 'scene' });
+  await goTo(page, 'inspect');
+  await page.locator('.card', { hasText: 'Steps' }).click();
+  await expect(inspectRows(page).filter({ hasText: 'Lookout' }).getByTestId('scene-when')).toHaveText(/0:00–0:01/);
+
+  await goTo(page, 'proof');
+  await openLookout(page);
+  await sceneBlock(page).getByRole('button', { name: /^Time of the scene/ }).click();
+  await sceneBlock(page).getByRole('radio', { name: 'Whole video' }).click();
+  await sceneBlock(page).getByRole('button', { name: 'Apply' }).click();
+  await expect.poll(() => scenePuts.length).toBe(1);
+  await expect(sceneBlock(page).getByTestId('scene-video')).toHaveText(/★\s*Steps\s*·\s*Whole video/);
+
+  await goTo(page, 'inspect');
+  await expect(inspectRows(page).filter({ hasText: 'Lookout' }).getByTestId('scene-when')).toHaveText('Whole video');
+});
+
+test('keeps a proof Inspect made the whole video as the whole video, never the scene its frames fall in', async ({ page }) => {
+  // Lookout states a passage of its own, and its frame falls in Bridge?, still to prove
+  const { scenePuts, saves } = await openClip(page, { timed: 'own' });
+  await openLookout(page);
+  await expect(sceneBlock(page).getByTestId('scene-video')).toHaveText(/★\s*Steps\s*·\s*0:00–0:01/);
+  await expect(matchLine(page)).toHaveCount(0);
+
+  await page.getByRole('button', { name: 'More for this proof' }).click();
+  await page.getByRole('button', { name: 'Show in Inspect' }).click();
+  await wholeInInspect(page);
+  // it states nothing now, as a proof made by hand does
+  await expect.poll(() => scenePuts.length).toBe(1);
+
+  await goTo(page, 'proof');
+  await expect(sceneBlock(page).getByTestId('scene-video')).toHaveText(/★\s*Steps\s*·\s*Whole video/);
+  await expect(matchLine(page)).toHaveCount(0);
+  // its next save takes nothing up behind the analyst's back
+  await saveClip(page, saves, 1);
+  await page.waitForTimeout(300);
+  expect(scenePuts).toHaveLength(1);
+});
+
+test('hides the ▶ on video panels from the Scene tab, for every proof, and shows them again', async ({ page }) => {
+  const { fixture } = await openClip(page, { timed: 'scene' });
+  await openLookout(page);
+  const plays = () => page.evaluate(() => {
+    const stage = window.Konva.stages.find((s) => s.container().isConnected);
+    return stage.find('.scene-play').length;
+  });
+  await expect.poll(plays).toBe(1);
+  const box = sceneBlock(page).getByRole('checkbox', { name: '▶ on video panels' });
+  await expect(box).toBeChecked();
+  await expect(sceneBlock(page).locator('label.plays')).toHaveAttribute('title', 'Shows a play button on each panel cut from a video');
+  await box.uncheck();
+  await expect.poll(plays).toBe(0);
+  await expect.poll(() => fixture.settingsWrites.at(-1)).toEqual({ proof_scene_plays: false });
+  // still hidden from any other tab
+  await showProofTab(page, 'Layout');
+  await page.waitForTimeout(200);
+  expect(await plays()).toBe(0);
+  await showProofTab(page, 'Scene');
+  await box.check();
+  await expect.poll(plays).toBe(1);
+  await expect.poll(() => fixture.settingsWrites.at(-1)).toEqual({ proof_scene_plays: true });
 });
 
 /**

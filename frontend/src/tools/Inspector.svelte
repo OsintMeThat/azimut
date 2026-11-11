@@ -1105,9 +1105,9 @@
     }),
   );
 
-  // A proof's time written from Geo Proof can land after the list was read on the way
-  // back here: its first save taking up a scene, a time applied as the tab was left. The
-  // server says so, and the list is read again, once for a burst.
+  // A proof's time written elsewhere can land after the list was read on the way back
+  // here: Geo Proof's save taking up a scene a moment after it was pressed, or another
+  // window. The server says so, and the list is read again, once for a burst.
   let scenesTimer = null;
   onDestroy(
     onEvent('scenes', (event) => {
