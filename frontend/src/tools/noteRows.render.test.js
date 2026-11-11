@@ -137,6 +137,6 @@ describe('each tool puts its row where the hand already goes', () => {
   it('saves an unsaved proof through its own save and waits for it', () => {
     const source = read('./ProofComposer.svelte');
     expect(source).toContain('if (saving || checking || overwritePrompt) return;');
-    expect(source).toContain("else if (dirty || !savedName) reject(new Error('The proof was not saved, so nothing went in'));");
+    expect(source).toContain("if (dirty || !savedName) throw new Error('The proof was not saved, so nothing went in');");
   });
 });
