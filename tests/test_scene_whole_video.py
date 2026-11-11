@@ -168,3 +168,20 @@ def test_a_proof_said_about_the_whole_video_gives_one_scene_back_as_a_traced_one
     row = _row(client, cid, video)
     assert (row["moments"], row["stated"]) == ([], True)
     assert [s for s in client.get(f"/api/cases/{cid}/scenes", params={"video": video}).json()["scenes"] if s["kind"] == "draft"] == []
+
+
+@needs_ffmpeg
+def test_a_proof_row_carries_its_point_plus_code(client, tmp_path):
+    """The thread labels two places of one region apart by their plus codes."""
+    cid = _case(client)
+    video = _video(client, cid, tmp_path)
+    _proof(client, cid, video)
+    assert _row(client, cid, video)["plus_code"] == ""
+    spec = client.get(f"/api/cases/{cid}/proofs/Lookout").json()
+    point = {"lat": 16.01874, "lon": 45.528599, "coords": "16.018740, 45.528599"}
+    res = client.post(
+        f"/api/cases/{cid}/proofs",
+        json={"rename_from": "Lookout", "title": "Lookout", "spec": {"panels": spec["panels"], "points": [point]}},
+    )
+    assert res.status_code == 200, res.text
+    assert _row(client, cid, video)["plus_code"] == "7H872G9H+FC"

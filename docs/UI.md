@@ -5596,7 +5596,8 @@ plain text, the editor offering the tokens of its kind. A token with no value dr
 its line. `#video` is the title Media gives the video the post is about, never its file
 name. `#timecode` is the time a proof states in its video, `[0:15]` or `[0:00–0:07]`,
 for a geolocation and each place of a video thread; `#scenes` a thread's places, one a
-line and numbered, `1. [0:00–0:07] Road bridge`. `#credits` is the composer's Credits
+line and numbered, `1. [0:00–0:07] Road bridge`, an unnamed place by where it
+stands and its plus code, `2. [0:15] Al Jawf, Yemen (7H872G9H+FC)`. `#credits` is the composer's Credits
 field.
 `#date` is the date the proof
 states, and the composer shows its Date field only when the layout uses it. It is

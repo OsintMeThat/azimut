@@ -62,6 +62,9 @@ describe('the slides a thread posts', () => {
     expect(placeLabel(row({ place: 'Al Jawf, Yemen', points: [{ lat: 1, lon: 2 }] }))).toBe('Al Jawf, Yemen');
     expect(placeLabel(row({ place: '', points: [{ lat: 15.47123, lon: 45.32211 }] }))).toBe('15.4712, 45.3221');
     expect(placeLabel(row({ points: [] }))).toBe('0:15');
+    // the plus code tells two places of one region apart
+    expect(placeLabel(row({ place: 'Al Jawf, Yemen', plus_code: '7H872G9H+FC' }))).toBe('Al Jawf, Yemen (7H872G9H+FC)');
+    expect(placeLabel(row({ place: '', plus_code: '7H872G9H+FC', points: [{ lat: 1, lon: 2 }] }))).toBe('7H872G9H+FC');
     const unnamed = { ...ANSWER, scenes: [row({ proof: 'Proof 3', png: 'proofs/p3.png', state: 'proved', place: 'Marib, Yemen', points: [{ lat: 1, lon: 2 }] })] };
     expect(scenesText(videoSlides(unnamed).slides)).toBe('1. [0:15] Marib, Yemen');
   });

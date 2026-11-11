@@ -86,11 +86,19 @@ export function shortTimecode(moments) {
 /**
  * What `#scenes`, a post's heading and the thread's column call a place of the video:
  * the proof's name when the analyst gave it one, else where it stands as the case knows
- * it (`place`), else its point, else its time. Never "Proof 3", a name the app gave.
+ * it (`place`) with its point's plus code, which tells two places of one region apart
+ * (`Al Jawf, Yemen (7H872G9H+FC)`), else the plus code or the point alone, else its
+ * time. Never "Proof 3", a name the app gave.
  */
 export function placeLabel(row) {
+  const own = ownName(sceneTitle(row ?? {}), 'proof');
+  if (own) return own;
+  const where = String(row?.place ?? '').trim();
+  const plus = String(row?.plus_code ?? '').trim();
+  if (where) return plus ? `${where} (${plus})` : where;
+  if (plus) return plus;
   const point = (row?.points ?? []).find((one) => Number.isFinite(one?.lat) && Number.isFinite(one?.lon));
-  return ownName(sceneTitle(row ?? {}), 'proof') || String(row?.place ?? '').trim() || labelCoords(point) || sceneTime(row ?? {});
+  return labelCoords(point) || sceneTime(row ?? {});
 }
 
 /** One line of `#scenes`: its number, the time and the place, or the number and the place alone. */

@@ -53,6 +53,7 @@ from typing import TYPE_CHECKING, Any
 
 from .. import layout
 from ..workspace import CaseError
+from . import geo as geo_engine
 from . import inspect as inspect_engine
 from . import inspectwork
 from . import links as link_engine
@@ -571,6 +572,8 @@ def _proof_row(lookup: Lookup, name: str, spec: dict[str, Any], scene: dict[str,
         "points": points,
         # where its conclusion stands as the case knows it, for a proof's label
         "place": satellite_engine.place_words(lookup.place(first["lat"], first["lon"])) if first else "",
+        # its point's plus code, which tells apart two places of one region
+        "plus_code": geo_engine.plus_code(first["lat"], first["lon"]) if first else "",
         "state": state,
         "abandoned": abandoned,
         "png": _existing(case, layout.proof_export_rel(name)),

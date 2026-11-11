@@ -369,6 +369,9 @@ describe('a video thread', () => {
     await mountPost();
     startPost('video', [VIDEO]);
     await settle();
+    // places apart start the recap on a map: the proofs sheet is the analyst's pick here
+    button(target, 'Proofs sheet')?.click();
+    await settle();
     await settle();
     expect(field('Convoy on the coast road contact sheet.jpg').value)
       .toBe('Pictures of the 3 places geolocated in the video, numbered as in the post');
