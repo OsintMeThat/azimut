@@ -5386,6 +5386,23 @@ never posts, and pressing Post on X or Bluesky stays the analyst's.
   with the credit line a Compare or Map plate start hands over and edited like any
   other. The draft keeps it (`credits`, written only when there is one), and an empty
   field drops the line.
+- **Alt text** is a small box beside the post's first picture, off by default. Ticked,
+  every picture of every post gets a one-line **Alt text** field under it, never a
+  video, with a counter against the platform's limit and **Copy** for posting by hand.
+  The limits live in one table with the day each was checked and where
+  (`lib/postAlt.js` `ALT_LIMITS`: X 1000 characters, Bluesky 2000). A field starts once
+  with what the case says of its picture: a proof's picture its sentence, else nothing;
+  a Compare or Map plate picture the post's name and dates (*Kherson bridge, 2024-05-01
+  → 2025-06-01*, or *Before and after, …* for a numbered post); a video thread's contact
+  sheet *Pictures of the 3 places geolocated in the video, numbered as in the post*, its
+  map *Map of the 3 places…*. What the analyst writes over it, or clears, stays. The
+  box is a preference (`post_alt_text`, carried by the settings backup): a new post
+  starts the way the last one left it, and a saved post that keeps a text opens with it
+  ticked. The draft keeps the texts by picture (`alt`, a case path to its text) only
+  while the box is on and a text exists, so a post without one keeps its shape, and a
+  text follows its picture when a video thread changes order. A text is no change to
+  what went out, so a post marked posted stays Posted. On X, the only trace of it once
+  posted is the small *ALT* badge on the picture.
 - **A video thread** posts the placed proofs of one video together: an extra choice,
   never the only way, since each proof still goes out on its own. It is offered for a
   video of two such proofs or more, from New post, from the home's series card and from

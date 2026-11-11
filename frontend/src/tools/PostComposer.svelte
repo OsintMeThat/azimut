@@ -58,6 +58,9 @@
   import PostedControl from './post/PostedControl.svelte';
   import VideoPicker from './post/VideoPicker.svelte';
   import VideoThreadPanel from './post/VideoThreadPanel.svelte';
+  import AltTextBox from './post/AltTextBox.svelte';
+  import AltTexts from './post/AltTexts.svelte';
+  import { altRecord, altSuggestion, readAltRecord, withAltTexts } from '../lib/postAlt.js';
 
   let coordsText = $state('');
   let geo = $state(null); // {lat, lon, dms, plus_code}
@@ -1385,6 +1388,100 @@
     );
   }
 
+  // ---- alt text (lib/postAlt.js) ------------------------------------------
+  // One box beside the post's first picture puts an Alt text field under every picture
+  // of the post, never under a video. Off by default: a new post starts the way the
+  // last one left it (`post_alt_text`), and a saved post that keeps a text opens with it
+  // on. A field starts once with what the case says of its picture and keeps what the
+  // analyst writes over it. The texts are kept by picture, so a text follows its picture
+  // into another post when a video thread is laid out again.
+  let altOn = $state(false);
+  let altTexts = $state({}); // case path → its text
+  let altSeen = new Set(); // the pictures already given their first words
+  const proofWords = new Map(); // a proof's sentence, by case and picture, read once
+
+  /** The pictures of the post on screen, each once, in thread order. */
+  const altPictures = $derived.by(() => {
+    const pictures = (paths, type) => (type === 'images' ? paths : []);
+    return [...new Set([
+      ...(geolocation ? (proofPng ? [proofPng] : []) : pictures(firstMedia, firstMediaType)),
+      ...(mediaEnabled ? pictures(mediaPaths, mediaType) : []),
+      ...extraTweets.flatMap((tweet) => pictures(tweet.mediaPaths, tweet.mediaType)),
+    ])];
+  });
+
+  // The box sits in the first post that shows a picture.
+  const altBoxAt = $derived(
+    (geolocation ? !!proofPng : firstMediaType === 'images' && firstMedia.length > 0) ? 'first'
+      : mediaEnabled && mediaType === 'images' && mediaPaths.length ? 'media'
+        : extraTweets.find((tweet) => tweet.mediaType === 'images' && tweet.mediaPaths.length)?.id ?? null
+  );
+
+  /** The box ticked or not: this post's fields, and how the next post starts. */
+  function setAltOn(on) {
+    altOn = on;
+    if (prefs.postAltText === on) return;
+    prefs.postAltText = on;
+    api.put('/api/settings/prefs', { post_alt_text: on })
+      .catch(() => toast('The Alt text box could not be kept for the next posts', 'warn'));
+  }
+
+  function editAlt(path, text) {
+    altTexts[path] = text;
+  }
+
+  function copyAlt(text) {
+    copyText(text, { said: 'Alt text copied' });
+  }
+
+  /** What the case says of a picture, for its field's first words, or ''. */
+  async function altWords(path) {
+    const count = thread?.slides?.length ?? 0;
+    if (thread?.sheet === path) return altSuggestion({ role: 'sheet', count });
+    if (thread?.map === path) return altSuggestion({ role: 'map', count });
+    const proof = /^proofs\/([^/]+)\.png$/.exec(path)?.[1];
+    if (proof) return altSuggestion({ role: 'proof', description: await proofSentence(proof, path) });
+    if (firstMedia.includes(path)) return altSuggestion({ role: 'start', kind, name: postTitle, date });
+    return '';
+  }
+
+  /** A proof's own sentence: a thread's place says it, any other proof is read once. */
+  async function proofSentence(name, path) {
+    const slide = (thread?.slides ?? []).find((one) => one.png === path);
+    if (slide) return slide.row?.description ?? '';
+    const caseId = caseState.current?.id;
+    if (!caseId) return '';
+    const key = `${caseId}\n${path}`;
+    if (!proofWords.has(key)) {
+      const spec = await api.get(`/api/cases/${caseId}/proofs/${encodeURIComponent(name)}`).catch(() => null);
+      proofWords.set(key, typeof spec?.description === 'string' ? spec.description : '');
+    }
+    return proofWords.get(key);
+  }
+
+  /** Each picture not given its first words yet gets them, unless it holds a text already. */
+  async function prefillAlt(run = postRun) {
+    const fresh = altPictures.filter((path) => !altSeen.has(path));
+    for (const path of fresh) altSeen.add(path);
+    await Promise.all(fresh.map(async (path) => {
+      const words = await altWords(path);
+      if (run !== postRun || !words || altTexts[path]?.trim()) return;
+      altTexts[path] = words;
+    }));
+  }
+
+  $effect(() => {
+    if (!altOn || opening) return;
+    altPictures;
+    untrack(() => prefillAlt());
+  });
+
+  /** What a save keeps of them: only while the box is on and a picture has a text. */
+  function altState() {
+    const kept = altOn ? altRecord(altTexts, altPictures) : null;
+    return kept ? { alt: kept } : {};
+  }
+
   // ---- draft persistence --------------------------------------------------
 
   /** What a save keeps: the thread, and whether it went out (`publish`) once that says something. */
@@ -1435,6 +1532,7 @@
       ...(replyChosen ? { reply: true } : {}),
       // written only when there is a credit line, so a draft without one keeps its shape
       ...(credits.trim() ? { credits } : {}),
+      ...altState(),
     };
   }
 
@@ -1457,6 +1555,8 @@
   function postPrint(state = threadState()) {
     const words = { ...state, tweet1: tweet1Edited ? tweet1 : null };
     delete words.target;
+    // a picture's description is no change to what went out: its first words arrive on opening
+    delete words.alt;
     return postFingerprint(JSON.stringify(words));
   }
 
@@ -1823,6 +1923,11 @@
           ...(thread && typeof t.key === 'string' ? { key: t.key, edited: t.edited === true } : {}),
         };
       });
+      // the pictures' texts it keeps, with its box on when it keeps one
+      const keptAlt = readAltRecord(s.alt);
+      altTexts = keptAlt ?? {};
+      altOn = !!keptAlt || prefs.postAltText;
+      altSeen = new Set(keptAlt ? altPictures : []);
       draftName = name;
       settlePlace('post', where(), { navigate: true });
       postName = doc.title || name;
@@ -1845,6 +1950,9 @@
       // marked posted from its card before it was ever opened here: the post as it
       // stands is the one that went out
       if (publishState && !publishState.mark) publishState = { ...publishState, mark: postPrint() };
+      // a post that keeps no text opens with its first words, as part of the post opened
+      if (altOn) await prefillAlt(run);
+      if (run !== postRun) return;
       openList = null;
       // as it was saved: opening it writes nothing
       blankKey = contentKey();
@@ -1913,6 +2021,9 @@
     mediaPaths = [];
     body = DEFAULT_TWEET_BODY;
     extraTweets = [];
+    altOn = prefs.postAltText;
+    altTexts = {};
+    altSeen = new Set();
     draftName = null;
     postName = freshPostName();
     postTitle = postName;
@@ -1988,6 +2099,9 @@
   // preferred platform, while a selected or saved draft keeps its own target.
   $effect(() => {
     if (!hasContent) target = normalizePostTarget(prefs.postTarget);
+  });
+  $effect(() => {
+    if (!hasContent) altOn = prefs.postAltText;
   });
 
   // Templates and preferences can land after this tool mounts, so a blank
@@ -2116,7 +2230,7 @@
    * app with its own pairing token, so no case file passes through the page.
    */
   function handoffPayload(firstText = tweet1) {
-    return handoffThread([
+    const handed = handoffThread([
       { text: bidiSafe(firstText), files: firstFiles() },
       ...(mediaEnabled && mediaType !== 'none'
         ? [{ text: bidiSafe(tweet2Text()), files: mediaPaths }]
@@ -2126,6 +2240,8 @@
         files: tweet.mediaPaths,
       })),
     ]);
+    // each picture's text beside its file, while the box is on
+    return altOn ? { ...handed, posts: withAltTexts(handed.posts, altRecord(altTexts, altPictures) ?? {}) } : handed;
   }
 
   /**
@@ -2884,6 +3000,7 @@
                   <Icon name="download" size={13} /> {firstMedia.length > 1 ? `Download all (${firstMedia.length})` : 'Download'}
                 </button>
               {/if}
+              {#if altBoxAt === 'first'}<AltTextBox on={altOn} onchange={setAltOn} />{/if}
             </div>
             {#if firstMediaType === 'images' && firstMedia.length}
               <div class="first-pics">
@@ -2891,6 +3008,7 @@
                   <img src={mediaHref(path)} alt="" loading="lazy" />
                 {/each}
               </div>
+              {#if altOn}<AltTexts paths={firstMedia} texts={altTexts} {target} href={mediaHref} onedit={editAlt} oncopy={copyAlt} />{/if}
             {/if}
           {:else if caseState.current}
             <div class="media-attach">
@@ -2914,11 +3032,13 @@
                   <Icon name="proof" size={13} /> Attach a proof
                 </button>
               {/if}
+              {#if altBoxAt === 'first'}<AltTextBox on={altOn} onchange={setAltOn} />{/if}
             </div>
             {#if proofPng}
               <a href={proofHref} target="_blank" rel="noreferrer">
                 <img class="proof-preview card" src={proofHref} alt="proof" />
               </a>
+              {#if altOn}<AltTexts paths={[proofPng]} texts={altTexts} {target} href={mediaHref} thumbs={false} onedit={editAlt} oncopy={copyAlt} />{/if}
             {/if}
           {/if}
         </div>
@@ -2991,7 +3111,9 @@
                   <Icon name="download" size={13} /> {mediaPaths.length > 1 ? `Download all (${mediaPaths.length})` : 'Download'}
                 </button>
               {/if}
+              {#if altBoxAt === 'media'}<AltTextBox on={altOn} onchange={setAltOn} />{/if}
             </div>
+            {#if altOn && mediaType === 'images' && mediaPaths.length}<AltTexts paths={mediaPaths} texts={altTexts} {target} href={mediaHref} onedit={editAlt} oncopy={copyAlt} />{/if}
           {:else}
             <span class="muted">Choose Video or Image to add media.</span>
           {/if}
@@ -3067,7 +3189,9 @@
                     <Icon name="download" size={13} /> {tweet.mediaPaths.length > 1 ? `Download all (${tweet.mediaPaths.length})` : 'Download'}
                   </button>
                 {/if}
+                {#if altBoxAt === tweet.id}<AltTextBox on={altOn} onchange={setAltOn} />{/if}
               </div>
+              {#if altOn && tweet.mediaType === 'images' && tweet.mediaPaths.length}<AltTexts paths={tweet.mediaPaths} texts={altTexts} {target} href={mediaHref} onedit={editAlt} oncopy={copyAlt} />{/if}
             {/if}
           </div>
         {/each}

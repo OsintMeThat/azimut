@@ -53,6 +53,9 @@ POSTED_URL = {
 }
 #: How many posts a proof keeps a record of, the latest last.
 MAX_POSTED_PER_PROOF = 20
+#: The longest description a picture keeps (frontend `lib/postAlt.js` ALT_MAX):
+#: Bluesky's, the larger of the two sites' limits.
+MAX_ALT_TEXT = 2000
 
 
 class PublishIn(BaseModel):
@@ -183,6 +186,23 @@ def _publish(state: dict[str, Any]) -> dict[str, Any] | None:
     if publish.get("changed") is not None and not isinstance(publish.get("changed"), bool):
         raise HTTPException(status_code=422, detail="state.publish.changed must be true or false")
     return publish
+
+
+def _alt_texts(state: dict[str, Any]) -> None:
+    """The pictures' descriptions a post keeps (``alt``, frontend `lib/postAlt.js`): a case
+    path to its text, written only while the composer's Alt text box is on and a text
+    is typed. Refused at the edge unless it is that: bounded paths and bounded strings."""
+    alt = state.get("alt")
+    if alt is None:
+        return
+    if not isinstance(alt, dict) or len(alt) > MAX_DRAFT_ATTACHMENTS:
+        raise HTTPException(status_code=422, detail="state.alt must map pictures to their descriptions")
+    for path, text in alt.items():
+        _artifact_path(path, "state.alt")
+        if not isinstance(text, str) or len(text) > MAX_ALT_TEXT:
+            raise HTTPException(
+                status_code=422, detail=f"state.alt texts must be at most {MAX_ALT_TEXT} characters"
+            )
 
 
 def _link_site(url: Any) -> str | None:
@@ -349,6 +369,7 @@ def save_draft(case_id: str, body: DraftIn) -> dict[str, Any]:
     case.subdir(layout.DRAFTS_DIR)  # born on first save, so the folder exists
     source_paths = _draft_source_paths(body.state)
     _publish(body.state)
+    _alt_texts(body.state)
     rel = layout.draft_rel(name)
     path = case.resolve_inside(rel)
 
