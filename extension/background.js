@@ -929,13 +929,10 @@ async function failHandOff(hand, { step, error, probe = null, link = null, stopp
     clip = first === last ? `Post ${last} is on your clipboard.` : `Posts ${first} to ${last} are on your clipboard.`;
   }
   notify("Azimut hand-off", `${sentence} ${clip}`);
-  await tellApp({
-    type: "post-handoff-report",
-    caseId: hand.caseId,
-    draft: hand.draft,
-    error: sentence,
-    report: handOffReport(hand, { step, stopped, probe, link }),
-  });
+  const report = handOffReport(hand, { step, stopped, probe, link });
+  // Also where about:debugging's Inspect shows it, for an app that does not show reports.
+  console.info(`Azimut hand-off stopped: ${sentence}\n${report}`);
+  await tellApp({ type: "post-handoff-report", caseId: hand.caseId, draft: hand.draft, error: sentence, report });
 }
 
 /**

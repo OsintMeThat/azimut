@@ -420,7 +420,8 @@ link to the post and names your account; otherwise nothing is sent.
 Azimut gets a short report to paste into a bug report: the extension version and the site,
 the step (`open-reply`, `fill-1`, `add-2`, `catch-link`), how many nodes each of the
 extension's selectors found there, and the test ids of the buttons in the dialog. It
-holds no word of the page, no handle, no post and no address beyond the site.
+holds no word of the page, no handle, no post and no address beyond the site. The
+same lines go to the extension's console (`about:debugging` → This Firefox → Inspect).
 
 There is one switch and it is in the app: **Settings → Publishing → Let the
 extension fill the composer**, on by default. Nothing to set here.
