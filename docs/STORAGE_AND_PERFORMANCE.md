@@ -163,8 +163,13 @@ beside it under a `.legacy` name.
 
 For media, proof PNGs, notes, drafts, Inspect works, collages, Compare sessions, Horizon
 views, map plates and sheets, the human-readable filename stem is the name Azimut shows.
-Spaces, case and Unicode survive; characters forbidden by Windows are replaced and the
-returned canonical stem is written back to the UI. Renaming, from its tool or from
+Spaces, case and Unicode survive; characters forbidden by Windows are replaced, the
+invisible ones a paste brings along (bidi marks and isolates, zero-width space, word
+joiner, byte-order mark, soft hyphen, a joiner at either end of a word) are dropped, and
+the returned canonical stem is written back to the UI. That cleaning applies to a name
+being given (`layout.slugify`); a name read back to find what is already saved goes
+through `layout.existing_stem`, which keeps them, so an item saved under one before is
+still found and moves to its clean name on its next save. Renaming, from its tool or from
 Details, moves the file and the companions `engine/artifacts.py` names after it, and
 rebinds the same entity. `engine/renames.py` then rewrites every exact stored path, as
 a value or a key, in the graph, jobs, sidecars, tool specs and the `/files/` addresses

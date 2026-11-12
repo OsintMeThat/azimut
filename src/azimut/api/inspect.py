@@ -23,7 +23,7 @@ from ..engine import scenes as scenes_engine
 from ..workspace import CaseError
 from . import events
 from .cases import delete_by_path, get_case
-from .naming import slugify
+from .naming import existing_stem
 
 router = APIRouter(prefix="/api", tags=["inspect"])
 
@@ -802,7 +802,7 @@ async def save_collage_thumb(case_id: str, name: str, file: UploadFile) -> dict[
 
 def collage_spec(name: str) -> str:
     """The record a collage's name stands for, as its delete and its preview read it."""
-    return layout.collage_rel(slugify(name, "Collage"))
+    return layout.collage_rel(existing_stem(name, "Collage"))
 
 
 @router.delete("/cases/{case_id}/collages/{name}")

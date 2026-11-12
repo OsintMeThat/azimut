@@ -844,7 +844,9 @@ class Case(CaseStore):
             return
         _prune_empty_note_dirs(self.note_dir, self.resolve_inside(rel).parent)
 
-    def note_target(self, folder: str, label: str, *, taken_by: str | None = None) -> str:
+    def note_target(
+        self, folder: str, label: str, *, taken_by: str | None = None, existing: bool = False
+    ) -> str:
         """A free case-relative path for a note called `label` in `folder`.
 
         The name is the filename, as it already is for proofs, sessions and
@@ -855,8 +857,9 @@ class Case(CaseStore):
         refusal: a note is the most frequent thing an analyst creates, and the
         front already proposes free names (`lib/naming.js`, `uniqueName`).
         `taken_by` is the note being renamed, which does not collide with itself.
+        ``existing`` is a label the note already goes by, read by `layout.existing_stem`.
         """
-        stem = layout.slugify(label, "note")
+        stem = (layout.existing_stem if existing else layout.slugify)(label, "note")
         candidate = layout.note_rel(folder, stem)
         directory = self.resolve_inside(candidate).parent
         occupied = (
@@ -1032,7 +1035,10 @@ class Case(CaseStore):
 
         from .engine import renames
 
-        canonical = layout.slugify(str(patch["label"]), fallback)
+        # A name given is cleaned of invisible characters; the one the record already goes
+        # by, restated, is kept, so restating it moves nothing.
+        label = str(patch["label"])
+        canonical = (layout.existing_stem if label == entity.get("label") else layout.slugify)(label, fallback)
         target = build(canonical)
         patch["label"] = canonical
         if target == current:
@@ -1071,7 +1077,10 @@ class Case(CaseStore):
         current = attrs.get("path")
         if not isinstance(current, str):
             return
-        target = self.note_target(str(folder), str(label), taken_by=current)
+        # refiled or restated, the note keeps its name; renamed, the new one is cleaned
+        target = self.note_target(
+            str(folder), str(label), taken_by=current, existing=label == entity.get("label")
+        )
         canonical = Path(target).stem
         if target == current:
             if patch.get("label") != canonical and entity.get("label") != canonical:

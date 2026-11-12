@@ -25,7 +25,7 @@ from ..engine import media as media_engine
 from ..engine import renames as rename_engine
 from ..workspace import CaseError
 from .cases import delete_by_path, get_case
-from .naming import holders, read_created_at, slugify, technical_name
+from .naming import existing_stem, holders, read_created_at, slugify, technical_name
 from .. import layout
 
 router = APIRouter(prefix="/api", tags=["drafts"])
@@ -390,7 +390,7 @@ def load_draft(case_id: str, name: str) -> dict[str, Any]:
 def save_draft(case_id: str, body: DraftIn) -> dict[str, Any]:
     case = get_case(case_id)
     folder = case.subdir(layout.DRAFTS_DIR)  # born on first save, so the folder exists
-    bound = slugify(body.rename_from, "draft") if body.rename_from else None
+    bound = existing_stem(body.rename_from, "draft") if body.rename_from else None
     name = slugify(body.title, "Post") if body.title.strip() else technical_name(folder, "draft", bound)
     source_paths = _draft_source_paths(body.state)
     _publish(body.state)
@@ -530,7 +530,7 @@ def _follow_posted(case: Any, before: dict[str, Any], after: dict[str, Any]) -> 
 
 def draft_spec(name: str) -> str:
     """The record a draft's name stands for, as its delete and its preview read it."""
-    return layout.draft_rel(slugify(name, "draft"))
+    return layout.draft_rel(existing_stem(name, "draft"))
 
 
 @router.delete("/cases/{case_id}/drafts/{name}")

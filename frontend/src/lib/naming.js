@@ -18,10 +18,17 @@ export const MAX_SLUG = 68;
 /** What a fresh item of each kind is called until the analyst renames it. */
 export const NAME_PREFIX = { collage: 'Collage', proof: 'Proof', draft: 'Post', note: 'Note' };
 
-/** Human-readable cross-platform filename stem — mirror of backend `slugify`. */
+// The invisible characters a pasted name brings along, and a joiner that joins nothing:
+// mirrors `_INVISIBLE` and `_LOOSE_JOINER` in azimut/layout.py.
+const INVISIBLE = /[­؜᠎​‎‏‪-‮⁠-⁤⁦-⁯﻿]/g;
+const LOOSE_JOINER = /(?<!\S)[‌‍]+|[‌‍]+(?!\S)/g;
+
+/** Human-readable cross-platform filename stem for a name being given — mirror of backend `slugify`. */
 export function slugify(text, fallback) {
   let name = String(text ?? '')
     .normalize('NFC')
+    .replace(INVISIBLE, '')
+    .replace(LOOSE_JOINER, '')
     .replace(/\s+/g, ' ')
     .trim()
     .replace(/[<>:"/\\|?*\u0000-\u001f]+/g, '_')

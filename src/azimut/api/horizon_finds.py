@@ -411,7 +411,7 @@ def list_finds(case_id: str) -> list[dict[str, Any]]:
 
 
 def _one(case: Any, name: str) -> tuple[str, dict[str, Any]]:
-    safe = layout.slugify(name, FALLBACK)
+    safe = layout.existing_stem(name, FALLBACK)
     try:
         record = horizon_finds.read(case, safe)
     except CaseError as exc:
@@ -434,7 +434,7 @@ def find_points(
 ) -> dict[str, Any]:
     """The points a running search has scored so far, from the `since`-th of the run `started` on, for
     the map to fill in as it runs; every point when that run is not the one under way."""
-    return horizon_finds.live(get_case(case_id), layout.slugify(name, FALLBACK), since, started)
+    return horizon_finds.live(get_case(case_id), layout.existing_stem(name, FALLBACK), since, started)
 
 
 @router.post("/cases/{case_id}/horizon/finds/{name}/cancel")
@@ -502,7 +502,7 @@ def check_find(case_id: str, name: str) -> dict[str, Any]:
 
 def find_spec(name: str) -> str:
     """The record a search's name stands for, as its delete and its preview read it."""
-    return layout.horizon_find_rel(layout.slugify(name, FALLBACK))
+    return layout.horizon_find_rel(layout.existing_stem(name, FALLBACK))
 
 
 @router.delete("/cases/{case_id}/horizon/finds/{name}")

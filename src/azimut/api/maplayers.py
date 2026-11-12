@@ -172,7 +172,7 @@ IconKey = Annotated[str, Field(pattern=r"^([0-9a-f]{16})?$")]
 
 def _layer_name(value: str | None) -> str | None:
     """The layer a point's own icon is copied from, named the way a save names it."""
-    return layout.slugify(value, "Layer") if value else None
+    return layout.existing_stem(value, "Layer") if value else None
 
 
 class MarkerIn(MarkerFields):
@@ -877,4 +877,4 @@ def _stem(name: str) -> str:
     the file is found by running it through the same rule that wrote it, rather
     than by trusting the string as a path.
     """
-    return layout.slugify(name, "Layer")
+    return layout.existing_stem(name, "Layer")

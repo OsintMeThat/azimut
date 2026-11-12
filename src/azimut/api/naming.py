@@ -16,10 +16,10 @@ import json
 from pathlib import Path
 from typing import Any
 
-from ..layout import DEFAULT_PREFIX, MAX_SLUG, is_default_name, slugify
+from ..layout import DEFAULT_PREFIX, MAX_SLUG, existing_stem, is_default_name, slugify
 
 __all__ = [
-    "MAX_SLUG", "slugify", "read_created_at", "holders", "case_only", "is_default_name", "technical_name",
+    "MAX_SLUG", "slugify", "existing_stem", "read_created_at", "holders", "case_only", "is_default_name", "technical_name",
 ]
 
 

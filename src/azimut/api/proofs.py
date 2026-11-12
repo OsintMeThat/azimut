@@ -50,7 +50,7 @@ from . import events
 from .cases import delete_by_path, get_case
 from .cases.common import delete_entity_deep
 from .inspect import say_geolocating
-from .naming import holders, read_created_at, slugify, technical_name
+from .naming import existing_stem, holders, read_created_at, slugify, technical_name
 from .satellite import locate_on_save
 from .. import layout
 
@@ -615,7 +615,7 @@ def reveal_proof_exports(case_id: str) -> dict[str, str]:
 def save_proof(case_id: str, body: ProofIn) -> dict[str, Any]:
     case = get_case(case_id)
     case.subdir("proofs")  # born on first save, so the visible folder exists
-    bound = slugify(body.rename_from, "proof") if body.rename_from else None
+    bound = existing_stem(body.rename_from, "proof") if body.rename_from else None
     name = slugify(body.title, "Proof") if body.title.strip() else technical_name(
         case.subdir("proofs").joinpath(layout.META_DIR), "proof", bound
     )
@@ -1112,7 +1112,7 @@ def save_proof_place(case_id: str, name: str) -> list[dict[str, Any]]:
     of minted again.
     """
     case = get_case(case_id)
-    proof = case.find_entity(attr="spec", value=layout.proof_spec_rel(slugify(name, "proof")))
+    proof = case.find_entity(attr="spec", value=layout.proof_spec_rel(existing_stem(name, "proof")))
     if proof is None:
         raise HTTPException(status_code=404, detail="no such proof")
     return file_proof_points(case, proof)
@@ -1165,7 +1165,7 @@ def delete_proof(case_id: str, name: str, scene: Literal["keep", "drop"] = "keep
     Restored, the proof states its moments as it did, so nothing is lost but the draft."""
     case = get_case(case_id)
     # Named the way the save named it — see `api/satellite.delete_search_grid`.
-    rel = layout.proof_spec_rel(slugify(name, "proof"))
+    rel = layout.proof_spec_rel(existing_stem(name, "proof"))
     try:
         case.resolve_inside(rel)
     except CaseError as exc:

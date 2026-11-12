@@ -236,7 +236,7 @@ def find_work(case: "Case", subject: str) -> dict[str, Any] | None:
 
 def load_work(case: "Case", name: str) -> dict[str, Any] | None:
     """The work saved under one name: how the sidebar reopens it."""
-    rel = layout.session_rel(layout.slugify(name, "Inspect"))
+    rel = layout.session_rel(layout.existing_stem(name, "Inspect"))
     spec = _read(case.resolve_inside(rel))
     if spec is None or spec.get("azimut_inspect") != WORK_VERSION:
         return None
@@ -978,7 +978,7 @@ def _collage_titles(case: "Case") -> dict[str, str]:
 
 def collage_export(case: "Case", name: str) -> str | None:
     """The picture a collage last exported, as its document records it."""
-    spec = _read(case.resolve_inside(layout.collage_rel(layout.slugify(name, "Collage"))))
+    spec = _read(case.resolve_inside(layout.collage_rel(layout.existing_stem(name, "Collage"))))
     exported = (spec or {}).get("exported")
     path = exported.get("path") if isinstance(exported, dict) else None
     return path if isinstance(path, str) and path else None
@@ -1225,7 +1225,7 @@ def frames_of(case: "Case", path: str) -> tuple[Any, dict[str, Any]] | None:
 
 
 def load_collage(case: "Case", name: str) -> dict[str, Any] | None:
-    rel = layout.collage_rel(layout.slugify(name, "Collage"))
+    rel = layout.collage_rel(layout.existing_stem(name, "Collage"))
     spec = _read(case.resolve_inside(rel))
     if spec is None or spec.get("azimut_collage") != COLLAGE_VERSION:
         return None
@@ -1344,7 +1344,7 @@ def save_collage(
             final = layout.free_stem(_taken(case, layout.COLLAGE_DIR), title, "Collage")
             old_rel = None
         else:
-            current = layout.slugify(name, "Collage")
+            current = layout.existing_stem(name, "Collage")
             final = layout.slugify(title, "Collage")
             old_rel = layout.collage_rel(current) if final != current else None
             taken = _stems(case, layout.COLLAGE_DIR)
@@ -1407,7 +1407,7 @@ def save_collage_thumb(case: "Case", name: str, raw: bytes) -> dict[str, Any] | 
     side re-encoded, and the entity points at it for the graph and the Timeline.
     """
     data = preview_webp(raw)
-    stem = layout.slugify(name, "Collage")
+    stem = layout.existing_stem(name, "Collage")
     rel = layout.collage_rel(stem)
     thumb = layout.collage_thumb_rel(stem)
     with case.lock:

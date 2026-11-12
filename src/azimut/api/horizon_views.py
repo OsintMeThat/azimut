@@ -55,7 +55,7 @@ from .cases import delete_by_path, get_case
 from ..engine import horizon
 from .horizon import HEIGHT_LIMITS, SKYLINE_CUTS
 from .inspect import attach_capture
-from .naming import case_only, holders, read_created_at, slugify
+from .naming import case_only, existing_stem, holders, read_created_at, slugify
 from .satellite import locate_on_save, saved_changed
 
 router = APIRouter(prefix="/api", tags=["horizon"])
@@ -530,7 +530,14 @@ def _save_view(case: Case, body: ViewIn) -> tuple[dict[str, Any], tuple[str, flo
     """Names answer to Windows and macOS, and to the Trash, as a comparison's do."""
     folder = case.subdir(layout.HORIZON_DIR)
     name = slugify(body.title, FALLBACK)
-    old = slugify(body.rename_from, FALLBACK) if body.rename_from else None
+    old = existing_stem(body.rename_from, FALLBACK) if body.rename_from else None
+    if body.rename_from is None and body.overwrite:
+        # Saved over by its title, as the view open is: one saved under an invisible
+        # character, before names were cleaned, moves to the clean name rather than
+        # stay beside a copy of itself.
+        held = existing_stem(body.title, FALLBACK)
+        if held != name and case.resolve_inside(layout.horizon_view_rel(held)).is_file():
+            old = held
     old_rel = layout.horizon_view_rel(old) if old and old != name else None
     trashed = case.trashed_stems(layout.HORIZON_DIR)
     if old_rel:
@@ -600,7 +607,7 @@ async def save_view_thumb(case_id: str, name: str, file: UploadFile = File()) ->
         data = inspectwork.preview_webp(raw)
     except CaseError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
-    stem = slugify(name, FALLBACK)
+    stem = existing_stem(name, FALLBACK)
     rel = layout.horizon_view_rel(stem)
     thumb = layout.horizon_thumb_rel(stem)
     with case.lock:
@@ -635,7 +642,7 @@ async def keep_image(
     it stands at the eye, which is where the photo was taken from.
     """
     case = get_case(case_id)
-    stem = slugify(name, FALLBACK)
+    stem = existing_stem(name, FALLBACK)
     spec_rel = layout.horizon_view_rel(stem)
     saved = _read_view(case, stem)
     if saved is None or case.find_entity(attr="spec", value=spec_rel) is None:
@@ -726,8 +733,8 @@ async def capture_view(
     }
     attrs: dict[str, Any] = {"lat": lat, "lon": lon}
     if view.strip():
-        spec_rel = layout.horizon_view_rel(slugify(view, FALLBACK))
-        if _read_view(case, slugify(view, FALLBACK)) is None or case.find_entity(attr="spec", value=spec_rel) is None:
+        spec_rel = layout.horizon_view_rel(existing_stem(view, FALLBACK))
+        if _read_view(case, existing_stem(view, FALLBACK)) is None or case.find_entity(attr="spec", value=spec_rel) is None:
             raise HTTPException(status_code=404, detail="that view is not saved in the case")
         # listed under its view with the pictures kept from it, and following its renames
         source["kept"] = True
@@ -794,7 +801,7 @@ def _written_again(opened: Image.Image) -> bytes:
 def delete_view(case_id: str, name: str) -> dict[str, Any]:
     """Delete the view and its preview. Images kept from it stay in Media."""
     case = get_case(case_id)
-    rel = layout.horizon_view_rel(slugify(name, FALLBACK))
+    rel = layout.horizon_view_rel(existing_stem(name, FALLBACK))
     try:
         case.resolve_inside(rel)
     except CaseError as exc:

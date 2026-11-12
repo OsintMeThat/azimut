@@ -1484,7 +1484,8 @@ def rename_media(
         if not media_path.exists():
             raise ValueError(f"no media found for {rel_path!r}")
         requested = (requested_title or "").strip() or media_path.stem
-        filename = layout.visible_filename(requested, media_path.suffix)
+        # a name given is cleaned of invisible characters; the one it has, restated, stays
+        filename = layout.visible_filename(requested, media_path.suffix, existing=requested == media_path.stem)
         destination = unique_path(media_path.parent, filename, taken_by=media_path)
         record = {
             "old": rel_path,

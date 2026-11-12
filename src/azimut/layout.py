@@ -222,6 +222,15 @@ def is_tool_dir(name: str) -> bool:
 
 
 _INVALID_NAME = re.compile(r'[<>:"/\\|?*\x00-\x1f]+')
+#: Formatting characters a name brings along unseen when it is pasted, beside Arabic
+#: or Hebrew text above all: the bidi marks, embeddings and isolates (a proof was saved
+#: as ``7H45MFQC+QR`` and a U+2069), the zero-width space, the word joiner and the
+#: invisible operators, the soft hyphen and the byte-order mark. Two names that read
+#: the same must be one name (frontend `lib/naming.js` mirrors it).
+_INVISIBLE = re.compile("[­؜᠎​‎‏‪-‮⁠-⁤⁦-⁯﻿]")
+#: A zero-width joiner or non-joiner that joins nothing, at either end of a word. One
+#: inside a word stays: it builds an emoji sequence, or shapes a Persian word.
+_LOOSE_JOINER = re.compile(r"(?<!\S)[‌‍]+|[‌‍]+(?!\S)")
 _WINDOWS_RESERVED = frozenset(
     ["con", "prn", "aux", "nul"]
     + [f"com{number}" for number in range(1, 10)]
@@ -241,14 +250,36 @@ def is_default_name(name: str | None, kind: str) -> bool:
 
 
 def slugify(text: str | None, fallback: str, *, limit: int = MAX_SLUG) -> str:
-    """A human-readable, cross-platform filename stem.
+    """A human-readable, cross-platform filename stem, for a name being given.
 
     The historical function name stays because every save route already shares
     it, but the result is no longer a URL slug. The filesystem stem is the name
     Azimut shows, so case, spaces and Unicode survive. Only characters Windows
-    forbids are replaced. The returned value is the canonical visible name.
+    forbids are replaced, and the invisible ones a paste brings along dropped
+    (`_INVISIBLE`). The returned value is the canonical visible name.
+
+    A name that already stands on disk is found with `existing_stem` instead: a
+    file saved before names were cleaned keeps its invisible characters, and
+    cleaning the lookup would miss it and file a second copy beside it.
     """
+    return _stem(text, fallback, limit=limit, clean=True)
+
+
+def existing_stem(name: str | None, fallback: str, *, limit: int = MAX_SLUG) -> str:
+    """The stem of something already saved, from the name the app knows it by.
+
+    `slugify` without the cleaning of invisible characters, so a record saved under
+    one is still found by its name, and its next save under that name moves it to
+    the clean one. Still replaces what Windows forbids, so a name sent by a request
+    never climbs out of its folder.
+    """
+    return _stem(name, fallback, limit=limit, clean=False)
+
+
+def _stem(text: str | None, fallback: str, *, limit: int, clean: bool) -> str:
     value = unicodedata.normalize("NFC", str(text or ""))
+    if clean:
+        value = _LOOSE_JOINER.sub("", _INVISIBLE.sub("", value))
     value = re.sub(r"\s+", " ", value).strip()
     value = _INVALID_NAME.sub("_", value).strip(" .")
     while ".." in value:
@@ -279,11 +310,15 @@ def free_stem(taken: set[str], title: str | None, fallback: str) -> str:
         n += 1
 
 
-def visible_filename(title: str | None, suffix: str, fallback: str = "file") -> str:
-    """Canonical visible filename for ``title`` while preserving ``suffix``."""
+def visible_filename(title: str | None, suffix: str, fallback: str = "file", *, existing: bool = False) -> str:
+    """Canonical visible filename for ``title`` while preserving ``suffix``.
+
+    ``existing`` is a name the file already has, read by `existing_stem`.
+    """
     clean_suffix = suffix if suffix.startswith(".") else f".{suffix}" if suffix else ""
     stem_limit = max(1, MAX_MEDIA_NAME - len(clean_suffix))
-    return f"{slugify(title, fallback, limit=stem_limit)}{clean_suffix}"
+    stem = (existing_stem if existing else slugify)(title, fallback, limit=stem_limit)
+    return f"{stem}{clean_suffix}"
 
 
 #: Characters a case folder's name may not hold, on top of everything `slugify`
@@ -311,21 +346,22 @@ def names_one_child(name: str) -> bool:
     return name == PurePosixPath(name).name == PureWindowsPath(name).name
 
 
-def case_folder_name(name: str | None, fallback: str = "case") -> str:
+def case_folder_name(name: str | None, fallback: str = "case", *, existing: bool = False) -> str:
     """The folder name a case is given, out of the name the analyst typed.
 
     `slugify` is this repo's naming rule and answers most of it: the folder is
     the name Azimut shows, so case, spaces and Unicode survive and only what
     Windows refuses is replaced. A case folder carries one rule more, because
     its name *is* the case id and the id travels in a URL path, so
-    `URL_HOSTILE_CHARS` go as well.
+    `URL_HOSTILE_CHARS` go as well. ``existing`` reads a folder already there by
+    `existing_stem`'s rule, which keeps the invisible characters it holds.
 
     Held to `MAX_CASE_SLUG`, which the path budget above is computed from.
     """
     value = str(name or "")
     for char in URL_HOSTILE_CHARS:
         value = value.replace(char, "_")
-    return slugify(value, fallback, limit=MAX_CASE_SLUG)
+    return (existing_stem if existing else slugify)(value, fallback, limit=MAX_CASE_SLUG)
 
 
 def usable_case_name(name: str) -> bool:
@@ -344,7 +380,8 @@ def usable_case_name(name: str) -> bool:
     """
     if not name or name in {".", ".."}:
         return False
-    return case_folder_name(name) == unicodedata.normalize("NFC", name)
+    # adopting a folder renames nothing, so an invisible character it holds is no reason to refuse it
+    return case_folder_name(name, existing=True) == unicodedata.normalize("NFC", name)
 
 
 class LayoutError(ValueError):
@@ -471,8 +508,10 @@ def note_rel(folder: str, name: str) -> str:
     at the exact moment an analyst's workflow is one folder per video. So
     uniqueness is scoped to the folder, not the case.
     """
+    # The folders are the catalog's, named as they stand there: a note filed in one
+    # lands beside the notes filed in it before.
     parts = [
-        slugify(segment, "folder") for segment in folder.split("/") if segment.strip()
+        existing_stem(segment, "folder") for segment in folder.split("/") if segment.strip()
     ]
     return "/".join(["notes", *parts, f"{name}.md"])
 

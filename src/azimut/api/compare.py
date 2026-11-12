@@ -50,7 +50,7 @@ from ..engine import media as media_engine
 from ..engine import renames as rename_engine
 from ..workspace import Case, CaseError
 from .cases import delete_by_path, get_case
-from .naming import case_only, holders, read_created_at, slugify
+from .naming import case_only, existing_stem, holders, read_created_at, slugify
 from .satellite import locate_on_save, saved_changed
 
 router = APIRouter(prefix="/api", tags=["compare"])
@@ -507,7 +507,7 @@ def _save_session(
     """
     folder = case.subdir(layout.COMPARE_DIR)
     name = slugify(body.title, "Comparison")
-    old = slugify(body.rename_from, "Comparison") if body.rename_from else None
+    old = existing_stem(body.rename_from, "Comparison") if body.rename_from else None
     old_rel = layout.compare_session_rel(old) if old and old != name else None
     trashed = case.trashed_stems(layout.COMPARE_DIR)
     if old_rel:
@@ -642,7 +642,7 @@ async def save_session_preview(
     becomes a new file (see the module docstring).
     """
     case = get_case(case_id)
-    canonical = slugify(name, "Comparison")
+    canonical = existing_stem(name, "Comparison")
     spec_rel = layout.compare_session_rel(canonical)
     session = _read_session(case, canonical)
     entity = case.find_entity(attr="spec", value=spec_rel)
@@ -824,7 +824,7 @@ def _file_kept(case: Case, spec_rel: str, reading: dict[str, Any], data: bytes, 
 
 def _kept_reading(case: Case, name: str, spec: str) -> tuple[str, dict[str, Any]]:
     """The saved comparison an image is kept under, and the reading it shows."""
-    canonical = slugify(name, "Comparison")
+    canonical = existing_stem(name, "Comparison")
     spec_rel = layout.compare_session_rel(canonical)
     if _read_session(case, canonical) is None or case.find_entity(attr="spec", value=spec_rel) is None:
         raise HTTPException(status_code=404, detail="save the comparison before keeping its images")
@@ -878,7 +878,7 @@ async def keep_evolution(
 
 def session_spec(name: str) -> str:
     """The record a comparison's name stands for, as its delete and its preview read it."""
-    return layout.compare_session_rel(slugify(name, "Comparison"))
+    return layout.compare_session_rel(existing_stem(name, "Comparison"))
 
 
 @router.delete("/cases/{case_id}/compare/sessions/{name}")

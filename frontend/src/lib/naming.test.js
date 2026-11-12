@@ -18,6 +18,29 @@ describe('slugify — mirrors the backend api/naming.slugify', () => {
     expect(slugify(null, 'draft')).toBe('draft');
     expect(slugify('a'.repeat(200), 'proof')).toHaveLength(MAX_SLUG);
   });
+
+  // the cases tests/test_naming.py pins on the backend, so a name taken is judged alike
+  it('drops the invisible characters a paste brings along', () => {
+    expect(slugify('7H45MFQC+QR⁩', 'Proof')).toBe('7H45MFQC+QR');
+    expect(slugify('⁧جسر⁩ bridge', 'Proof')).toBe('جسر bridge');
+    for (const char of ['‎', '‏', '؜', '‪', '‫', '‬', '‭', '‮',
+      '⁦', '⁧', '⁨', '⁩', '​', '⁠', '﻿', '­']) {
+      expect(slugify(`${char}Har${char}bour${char}`, 'Proof'), JSON.stringify(char)).toBe('Harbour');
+    }
+    expect(slugify('⁦⁩', 'Proof')).toBe('Proof');
+    expect(slugify('Port ⁩ east', 'Proof')).toBe('Port east');
+  });
+
+  it('keeps a joiner inside a word and drops one at its ends', () => {
+    for (const joiner of ['‍', '‌']) {
+      expect(slugify(`${joiner}Depot${joiner}`, 'Proof')).toBe('Depot');
+      expect(slugify(`North ${joiner}depot`, 'Proof')).toBe('North depot');
+      expect(slugify(`North${joiner} depot`, 'Proof')).toBe('North depot');
+      expect(slugify(`mi${joiner}ravam`, 'Proof')).toBe(`mi${joiner}ravam`);
+    }
+    const family = '\u{1F468}‍\u{1F469}‍\u{1F467}';
+    expect(slugify(`Rally ${family}`, 'Proof')).toBe(`Rally ${family}`);
+  });
 });
 
 describe('nextName — the default name of a fresh item', () => {

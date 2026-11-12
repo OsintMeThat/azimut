@@ -49,7 +49,7 @@ from . import events, tile_batch
 from .cases import delete_by_path, get_case
 from .inspect import attach_capture
 from .limits import MAX_IMAGE_BYTES
-from .naming import slugify
+from .naming import existing_stem
 from .media import with_thumb_state
 from .. import layout
 
@@ -2259,7 +2259,7 @@ def apply_grid_marks(case, name: str, marks: dict[str, Any]) -> dict[str, Any]:
     touched the same one resolve last-writer-wins, which is what an analyst
     marking the same cell twice would expect anyway.
     """
-    spec_path = case.resolve_inside(layout.grid_rel(slugify(name, "grid")))
+    spec_path = case.resolve_inside(layout.grid_rel(existing_stem(name, "grid")))
     # Atomic replacement protects the JSON bytes. The case lock protects the
     # read/merge/write transaction shared by app tabs and the extension.
     with case.lock:
@@ -2378,7 +2378,7 @@ def save_search_grid(case_id: str, name: str, body: GridSaveIn) -> dict[str, Any
     write over each other — see ``apply_grid_marks``.
     """
     case = get_case(case_id)
-    slug = slugify(name, "grid")
+    slug = existing_stem(name, "grid")
     spec = dict(body.spec)
     aoi = spec.get("aoi")
     if not isinstance(aoi, dict) or aoi.get("type") not in {"rect", "polygon"}:
@@ -2441,7 +2441,7 @@ def delete_search_grid(case_id: str, name: str) -> dict[str, Any]:
     """
     case = get_case(case_id)
     try:
-        spec_path = case.resolve_inside(layout.grid_rel(slugify(name, "grid")))
+        spec_path = case.resolve_inside(layout.grid_rel(existing_stem(name, "grid")))
     except CaseError as exc:
         raise HTTPException(status_code=403, detail=str(exc)) from exc
     with case.lock:

@@ -42,7 +42,7 @@ from ..engine import renames as rename_engine
 from ..engine.sheets import replace_atomic
 from ..workspace import Case, CaseError
 from .cases import delete_by_path, get_case
-from .naming import case_only, holders, read_created_at, slugify
+from .naming import case_only, existing_stem, holders, read_created_at, slugify
 
 router = APIRouter(prefix="/api", tags=["map plates"])
 
@@ -110,7 +110,7 @@ def list_plates(case_id: str) -> list[dict[str, Any]]:
 @router.get("/cases/{case_id}/map-plates/{name}")
 def load_plate(case_id: str, name: str) -> dict[str, Any]:
     case = get_case(case_id)
-    stem = slugify(name, mapplates.FALLBACK)
+    stem = existing_stem(name, mapplates.FALLBACK)
     saved = _read(case, stem)
     if saved is None:
         raise HTTPException(status_code=404, detail="plate not found")
@@ -131,7 +131,7 @@ def _save(case: Case, title: str, rename_from: str | None, spec: dict[str, Any])
     """Names answer to Windows and macOS, and to the Trash, as a Horizon view's do."""
     folder = case.subdir(layout.MAPPLATE_DIR)
     name = slugify(title, mapplates.FALLBACK)
-    old = slugify(rename_from, mapplates.FALLBACK) if rename_from else None
+    old = existing_stem(rename_from, mapplates.FALLBACK) if rename_from else None
     old_rel = layout.map_plate_rel(old) if old and old != name else None
     trashed = case.trashed_stems(layout.MAPPLATE_DIR)
     if old_rel:
@@ -181,7 +181,7 @@ async def save_plate_thumb(case_id: str, name: str, file: UploadFile = File()) -
         data = inspectwork.preview_webp(raw)
     except CaseError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
-    stem = slugify(name, mapplates.FALLBACK)
+    stem = existing_stem(name, mapplates.FALLBACK)
     rel = layout.map_plate_rel(stem)
     thumb = layout.map_plate_thumb_rel(stem)
     with case.lock:
@@ -198,7 +198,7 @@ async def save_plate_thumb(case_id: str, name: str, file: UploadFile = File()) -
 def duplicate_plate(case_id: str, name: str) -> dict[str, Any]:
     """A copy of a plate under the next free name, its preview copied with it so the list shows it at once."""
     case = get_case(case_id)
-    stem = slugify(name, mapplates.FALLBACK)
+    stem = existing_stem(name, mapplates.FALLBACK)
     with case.lock:
         saved = _read(case, stem)
         if saved is None:
@@ -410,7 +410,7 @@ async def _played(case: Case, stage: Staged, format: str, interval: int, beats: 
 
 def plate_spec(name: str) -> str:
     """The record a plate's name stands for, as its delete and its preview read it."""
-    return layout.map_plate_rel(slugify(name, mapplates.FALLBACK))
+    return layout.map_plate_rel(existing_stem(name, mapplates.FALLBACK))
 
 
 @router.delete("/cases/{case_id}/map-plates/{name}")
@@ -474,7 +474,7 @@ async def export_plate(
     if into == "case":
         if format == "pdf":
             raise HTTPException(status_code=422, detail="a PDF is written out, not filed in the case")
-        stem = slugify(plate, mapplates.FALLBACK)
+        stem = existing_stem(plate, mapplates.FALLBACK)
         rel = layout.map_plate_rel(stem)
         if not plate.strip() or _read(case, stem) is None or case.find_entity(attr="spec", value=rel) is None:
             raise HTTPException(status_code=404, detail="save the plate before filing what it exports")
@@ -573,7 +573,7 @@ async def file_figure(
     step and size are one figure, which a second press cites rather than files again.
     """
     case = get_case(case_id)
-    stem = slugify(name, mapplates.FALLBACK)
+    stem = existing_stem(name, mapplates.FALLBACK)
     rel = layout.map_plate_rel(stem)
     saved = _read(case, stem)
     if saved is None or case.find_entity(attr="spec", value=rel) is None:
