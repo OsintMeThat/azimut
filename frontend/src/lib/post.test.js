@@ -12,7 +12,7 @@ import {
   POST_KINDS, STARTABLE_POST_KINDS, normalizePostKind, statedPostKind, postKind, tokensForKind,
   videoTitle, postTemplateKind, postStarters, defaultPostTemplate, templatesOfKind,
   startMediaPlan, replyTarget, replyIntentUrl, replyPostText, replyByDefault,
-  postedAddress, postedDay, postedWhen, postLinkDate, postState, postStateLabel, postFingerprint, POST_STATES,
+  linkKey, postedAddress, postedDay, postedWhen, postLinkDate, postState, postStateLabel, postFingerprint, POST_STATES,
 } from './post.js';
 
 const full = {
@@ -1033,6 +1033,40 @@ describe('whether a post went out', () => {
     for (const none of ['', null, 'https://x.com/Desk', 'https://x.com/Desk/status/abc', 'https://evil.example/x.com/a/status/1',
       'https://bsky.app/profile/desk', 'Posted it!', 'https://instagram.com/p/abc']) {
       expect(postedAddress(none), String(none)).toBeNull();
+    }
+  });
+
+  it('reads a link pasted however it is written as the one kept, for the search', () => {
+    const same = (links) => expect(new Set(links.map(linkKey)).size, links.join(' | ')).toBe(1);
+    // an X post by its status id, whoever's handle and whatever host or share it came through
+    same([
+      'https://x.com/Desk/status/1850000000000000001',
+      'http://twitter.com/desk/status/1850000000000000001?s=20&t=AbCdEf',
+      'mobile.twitter.com/Desk/status/1850000000000000001/photo/1',
+      'https://www.x.com/i/status/1850000000000000001',
+      'https://fxtwitter.com/Desk/status/1850000000000000001',
+      'https://vxtwitter.com/Desk/status/1850000000000000001).',
+    ]);
+    expect(linkKey('https://x.com/Desk/status/1850000000000000001')).toBe('x:1850000000000000001');
+    same(['https://bsky.app/profile/Desk.bsky.social/post/3kabc', 'bsky.app/profile/desk.bsky.social/post/3kabc/']);
+    same([
+      'https://www.youtube.com/watch?v=dQw4w9WgXcQ',
+      'https://youtu.be/dQw4w9WgXcQ?si=Share123&t=42',
+      'http://m.youtube.com/watch?feature=share&v=dQw4w9WgXcQ',
+    ]);
+    same(['https://t.me/channel/1234', 'https://t.me/s/channel/1234?single', 't.me/channel/1234/']);
+    same([
+      'https://example.org/news/strike?utm_source=x&utm_medium=social',
+      'http://www.example.org/news/strike/#comments',
+      'example.org/news/strike?fbclid=abc',
+    ]);
+    // what identifies the page stays: another video, another post, another path
+    expect(linkKey('https://youtube.com/watch?v=other')).not.toBe(linkKey('https://youtube.com/watch?v=dQw4w9WgXcQ'));
+    expect(linkKey('https://t.me/channel/1235')).not.toBe(linkKey('https://t.me/channel/1234'));
+    expect(linkKey('https://example.org/News/Strike')).not.toBe(linkKey('https://example.org/news/strike'));
+    // words are no link
+    for (const words of ['', null, 'Al Jawf', 'kherson.ua', 'x.com', 'Bridge at dusk https://x.com/a/status/1']) {
+      expect(linkKey(words), String(words)).toBeNull();
     }
   });
 

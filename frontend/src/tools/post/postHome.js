@@ -14,7 +14,7 @@ import { itemLabel } from '../../lib/naming.js';
 import { onVideo } from '../../lib/proofList.js';
 import { videoName } from '../../lib/proofScene.js';
 import {
-  normalizePostKind, POST_KINDS, POST_STATES, postedAddress, postedDay, postedWhen, postKind, postStateLabel, postTarget,
+  linkKey, normalizePostKind, POST_KINDS, POST_STATES, postedAddress, postedDay, postedWhen, postKind, postStateLabel, postTarget,
   STARTABLE_POST_KINDS,
 } from '../../lib/post.js';
 
@@ -101,14 +101,17 @@ export const labelledDrafts = (drafts, proofs = [], now = new Date()) =>
 
 /**
  * Whether a post answers a search: its label's words (the name the analyst gave, or its
- * place), or, for a post's link pasted, that post, found by its own link or by the id
- * its name holds.
+ * place), or, for a link pasted, the post that went out at it (`posted`), the one whose
+ * source it is (`sources`, from `GET /drafts`: its Source field's links and those of the
+ * files it carries), and for a post's own link, one whose name holds its id. Links are
+ * compared as `linkKey` writes them, however they were pasted.
  */
 function answersSearch(draft, query) {
-  const pasted = postedAddress(query);
+  const pasted = linkKey(query);
   if (pasted) {
-    const id = linkId(pasted.url);
-    return linkId(draft?.posted?.url) === id || [draft?.title, draft?.name].some((text) => String(text ?? '').includes(id));
+    if ([draft?.posted?.url, ...(draft?.sources ?? [])].some((link) => link && linkKey(link) === pasted)) return true;
+    const id = postedAddress(query) ? linkId(query) : '';
+    return !!id && [draft?.title, draft?.name].some((text) => String(text ?? '').includes(id));
   }
   // by its label alone: a technical name, never shown, finds nothing
   return matchesTerms(draft?.label ?? postLabel(draft), query);

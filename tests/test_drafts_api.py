@@ -335,6 +335,34 @@ def test_a_video_thread_is_made_from_its_video_and_lists_as_one(client):
     assert unsafe.status_code == 422
 
 
+def test_the_list_gives_the_links_of_what_each_post_geolocates(client):
+    """Post's search finds a post by the link of its source pasted (frontend `postHome.js`):
+    the list says the links its Source field holds, then those of the files it carries,
+    read from the media index in one go rather than from each file."""
+    cid = client.post("/api/cases", json={"name": "Sources"}).json()["id"]
+    video = mediafixture._upload(client, cid, "convoy.png", color=(10, 90, 10))
+    photo = mediafixture._upload(client, cid, "photo.png", color=(90, 10, 10))
+    bare = mediafixture._upload(client, cid, "bare.png", color=(10, 10, 90))
+    for path, url in ((video, "https://www.youtube.com/watch?v=dQw4w9WgXcQ"), (photo, "https://t.me/channel/1234")):
+        stated = client.patch(f"/api/cases/{cid}/media", json={"path": path, "source_url": url})
+        assert stated.status_code == 200, stated.text
+    geolocation = dict(STATE, source="https://x.com/Witness/status/1849000000000000007 · https://t.me/channel/1234",
+                       mediaPaths=[photo, bare], mediaPath=photo, extraTweets=[])
+    client.post(f"/api/cases/{cid}/drafts", json={"title": "Bridge", "state": geolocation})
+    client.post(f"/api/cases/{cid}/drafts", json={"title": "Convoy thread", "state": {
+        "kind": "video", "video": video, "source": "", "extraTweets": [{"text": "", "mediaPaths": [photo], "mediaType": "images"}],
+    }})
+    client.post(f"/api/cases/{cid}/drafts", json={"title": "Words", "state": {"description": "No link"}})
+
+    rows = {row["name"]: row["sources"] for row in client.get(f"/api/cases/{cid}/drafts").json()}
+    assert rows == {
+        # the field's links first, then the files', each once; a file with no link adds none
+        "Bridge": ["https://x.com/Witness/status/1849000000000000007", "https://t.me/channel/1234"],
+        "Convoy thread": ["https://www.youtube.com/watch?v=dQw4w9WgXcQ", "https://t.me/channel/1234"],
+        "Words": [],
+    }
+
+
 # -- whether a post went out ---------------------------------------------------------
 
 POSTED_X = "https://x.com/someone/status/1850000000000000001"

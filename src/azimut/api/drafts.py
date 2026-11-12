@@ -23,6 +23,7 @@ from ..engine import geo as geo_engine
 from ..engine import links as link_engine
 from ..engine import media as media_engine
 from ..engine import renames as rename_engine
+from ..engine import scenes as scene_engine
 from ..workspace import CaseError
 from .cases import delete_by_path, get_case
 from .naming import existing_stem, holders, read_created_at, slugify, technical_name
@@ -329,10 +330,54 @@ def _post_count(state: dict[str, Any]) -> int:
     return count
 
 
+#: An address in a post's Source field (frontend `lib/post.js` SOURCE_URL): the composer
+#: joins several with a middle dot.
+SOURCE_URL = re.compile(r"https?://[^\s\u00b7]+", re.IGNORECASE)
+#: The most links a listed post carries for the search to find it by.
+MAX_LISTED_SOURCES = 12
+
+
+def _carried(state: dict[str, Any]) -> list[str]:
+    """The case files a draft carries, read without judging them as a save does: a video
+    thread's video and clip, and the pictures or video on each post."""
+    paths = [state.get(key) for key in ("video", "clip")]
+    for key in ("firstMedia", "mediaPaths"):
+        held = state.get(key)
+        paths.extend(held if isinstance(held, list) else [])
+    posts = state.get("extraTweets")
+    for post in posts if isinstance(posts, list) else []:
+        held = post.get("mediaPaths") if isinstance(post, dict) else None
+        paths.extend(held if isinstance(held, list) else [])
+    return list(dict.fromkeys(path for path in paths if isinstance(path, str) and path))
+
+
+def _media_links(case: Any, paths: set[str]) -> dict[str, str]:
+    """Each of these case files' own source link, where the media index has one: the
+    page it was downloaded from, or the one the analyst stated."""
+    wanted = sorted(paths)
+    links: dict[str, str] = {}
+    for at in range(0, len(wanted), scene_engine.LOOKUP_BATCH):
+        for item in case.media_items_by_paths(wanted[at : at + scene_engine.LOOKUP_BATCH]):
+            source = item.get("source")
+            url = source.get("url") if isinstance(source, dict) else None
+            if isinstance(url, str) and url:
+                links[item["path"]] = url
+    return links
+
+
+def _sources(state: dict[str, Any], links: dict[str, str]) -> list[str]:
+    """The links of what a post geolocates, for Post's search to find it by (frontend
+    `postHome.js`): those its Source field holds, then those of the files it carries."""
+    typed = state.get("source")
+    found = SOURCE_URL.findall(typed) if isinstance(typed, str) else []
+    found += [links[path] for path in _carried(state) if path in links]
+    return list(dict.fromkeys(found))[:MAX_LISTED_SOURCES]
+
+
 @router.get("/cases/{case_id}/drafts")
 def list_drafts(case_id: str) -> list[dict[str, Any]]:
     case = get_case(case_id)
-    drafts = []
+    read: list[tuple[Any, dict[str, Any], dict[str, Any]]] = []
     for path in sorted(case.subdir(layout.DRAFTS_DIR).glob("*.json")):
         try:
             data = json.loads(path.read_text(encoding="utf-8"))
@@ -341,7 +386,11 @@ def list_drafts(case_id: str) -> list[dict[str, Any]]:
         if data.get("azimut_draft") != DRAFT_MARKER:
             continue
         state = data.get("state")
-        state = state if isinstance(state, dict) else {}
+        read.append((path, data, state if isinstance(state, dict) else {}))
+    # the source link of every file the posts carry, in one read of the media index
+    links = _media_links(case, {one for _path, _data, state in read for one in _carried(state)})
+    drafts = []
+    for path, data, state in read:
         drafts.append(
             {
                 "name": path.stem,
@@ -368,6 +417,8 @@ def list_drafts(case_id: str) -> list[dict[str, Any]]:
                 "place": _said(state.get("place")),
                 "when": _said(state.get("date")),
                 "coords": _first_point(state.get("coordsText")),
+                # The links of what it geolocates, so a source pasted in the search finds it.
+                "sources": _sources(state, links),
             }
         )
     drafts.sort(key=lambda d: d.get("updated_at") or "", reverse=True)

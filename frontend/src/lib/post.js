@@ -191,6 +191,47 @@ export function postedAddress(text) {
   return found ? { site: found.site, url: found.url } : null;
 }
 
+// The hosts that show an X post under another name: the embed fixers.
+const X_MIRRORS = /^(?:fxtwitter|vxtwitter|fixupx|fixvx)\.com$/i;
+// What a share adds to a link to say how it was shared, never what it points at.
+const SHARE_PARAMS = /^(?:s|t|si|ref|ref_src|ref_url|feature|single|fbclid|gclid|igsh|igshid|utm_.+)$/i;
+
+/**
+ * A link as Post's search compares it, or null for words: an X post by its status id,
+ * a Bluesky post by its author and key, any other address by its host and path, with no
+ * scheme, no `www.` or mobile host, no closing slash and none of a share's tracking. So
+ * a link pasted however the browser or a share writes it reads as the one kept.
+ */
+export function linkKey(text) {
+  let address = String(text ?? '').trim().replace(/[),.;]+$/, '');
+  if (!address || /\s/.test(address)) return null;
+  // typed without its scheme, an address is a host with a dot, then a path
+  if (!/^https?:\/\//i.test(address)) {
+    if (!/^[a-z0-9-]+(?:\.[a-z0-9-]+)+\/\S/i.test(address)) return null;
+    address = `https://${address}`;
+  }
+  let url;
+  try {
+    url = new URL(address);
+  } catch {
+    return null;
+  }
+  let host = url.hostname.toLowerCase().replace(/^(?:www|m|mobile)\./, '');
+  if (X_MIRRORS.test(host)) host = 'x.com';
+  const post = postAddress(`https://${host}${url.pathname}`);
+  if (post) return post.site === 'x' ? `x:${post.id}` : `bluesky:${post.url.split('/')[4].toLowerCase()}/${post.id}`;
+  let path = url.pathname.replace(/\/+$/, '');
+  const params = [...url.searchParams].filter(([key]) => !SHARE_PARAMS.test(key));
+  if (host === 'youtu.be' && path) {
+    params.unshift(['v', path.slice(1)]);
+    [host, path] = ['youtube.com', '/watch'];
+  }
+  // a Telegram post as its web preview shows it is the post
+  if (host === 't.me') path = path.replace(/^\/s\//, '/');
+  const query = params.map(([key, value]) => `${key}=${value}`).sort().join('&');
+  return `${host}${path}${query ? `?${query}` : ''}`;
+}
+
 /**
  * Where a post stands, from its draft's `publish` record: a **draft**, one **posted**
  * once the analyst marked it so (with its link or without, `posted_at`), or **changed**

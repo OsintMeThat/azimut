@@ -207,6 +207,28 @@ describe('the Open list', () => {
     // words still search the names
     expect(names('bridge')).toEqual(['p1']);
   });
+
+  it('finds a post by the link of what it geolocates, however that link is pasted', () => {
+    const posts = [
+      { name: 'p1', title: 'Bridge', state: 'posted', posted: { url: 'https://x.com/desk/status/1850000000000000001' },
+        sources: ['https://x.com/Witness/status/1849000000000000007'] },
+      { name: 'p2', title: 'Convoy', state: 'draft', sources: ['https://www.youtube.com/watch?v=dQw4w9WgXcQ', 'https://t.me/channel/1234'] },
+      { name: 'p3', title: 'Depot', state: 'draft', sources: [] },
+      { name: 'p4', title: 'Old', state: 'draft' },
+    ];
+    const names = (query) => filterPosts(posts, { query }).map((d) => d.name);
+    // the source, an X post, through another host and a share's tracking
+    expect(names('https://twitter.com/witness/status/1849000000000000007?s=46&t=xyz')).toEqual(['p1']);
+    expect(names('fxtwitter.com/Witness/status/1849000000000000007')).toEqual(['p1']);
+    // the analyst's own geolocation, as before
+    expect(names('https://x.com/Desk/status/1850000000000000001?s=20')).toEqual(['p1']);
+    // a video and a channel post, pasted as a share writes them
+    expect(names('https://youtu.be/dQw4w9WgXcQ?si=abc')).toEqual(['p2']);
+    expect(names('t.me/s/channel/1234')).toEqual(['p2']);
+    expect(findDrafts(posts, 'https://t.me/channel/1234/').map((d) => d.name)).toEqual(['p2']);
+    // a link nothing rests on finds nothing
+    expect(names('https://t.me/channel/9999')).toEqual([]);
+  });
 });
 
 describe('what a listed post is called', () => {

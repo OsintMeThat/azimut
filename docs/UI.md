@@ -5344,8 +5344,13 @@ for that release. It writes a post or a thread and opens the site to publish it;
 never posts, and pressing Post on X or Bluesky stays the analyst's.
 
 - **The home** stands where an empty composer would, once the case holds a draft or a
-  proof: **New post** and a search that finds a post by its name or its place, or by its
-  link pasted (Enter opens the first),
+  proof: **New post** and a search that finds a post by its name or its place, or by a
+  link pasted (Enter opens the first): the post's own once it went out, or the link of
+  what it geolocates, as its Source field holds it or as the files it carries record it
+  (`GET /drafts` gives each its `sources`). A link reads the same however it is pasted
+  (`lib/post.js` `linkKey`): an X post by its status id whatever the host (twitter.com,
+  mobile, fxtwitter), with or without `https://`, `www.`, a closing slash or a share's
+  tracking (`?s=20`, `?t=`, `?si=`, `utm_*`),
   then three parts. **In progress**, the last six drafts not gone out yet or changed
   since, each with its platform, its kind when it is not a geolocation, and how many
   posts it holds when they are several; **Ready to post**, under its line *Proofs with
@@ -5395,7 +5400,7 @@ never posts, and pressing Post on X or Bluesky stays the analyst's.
   the day a post went out (its link's own, else the day it was marked), a post not gone
   out its last change. A search and a filter by kind and by state (each counted, shown
   once the posts hold more than one) narrow it; the search reads the label, a name or a
-  place, and a post's link pasted in it finds that post, by its own link or by the id its name holds, a posted row's buttons copy its link
+  place, and a link pasted in it finds the post as the home's search does, a posted row's buttons copy its link
   and open it (**↗**, a row with no link keeping their room so the pills line up), and
   the bin on a row deletes it with the delete preview and Undo; the list reads the case
   again after a delete or an Undo. It reads `GET /drafts` and `GET /proofs` each time it
