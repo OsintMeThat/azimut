@@ -46,9 +46,9 @@ describe('Proof Composer header', () => {
     expect(header).toContain('btn-ok');
     expect(header).not.toContain('size={15}');
     expect(header).toContain('Open proof');
-    expect(header).toContain("saving ? 'Saving…' : 'Save proof'");
-    expect(header).toContain('<Icon name="save" size={14} /> {saving');
-    expect(header).not.toContain('<Icon name="check" size={14} /> {saving');
+    expect(header).toContain(`{#if saving}Saving…{:else}Save<span class="fold-word">{' proof'}</span>{/if}`);
+    expect(header).toContain('<Icon name="save" size={14} /> <span>{#if saving}');
+    expect(header).not.toContain('<Icon name="check" size={14} />');
     expect(header).toContain('btn-info');
     expect(source).toContain('align-items: baseline;');
     expect(source).toContain('font-weight: 700;');
@@ -56,17 +56,24 @@ describe('Proof Composer header', () => {
 
   it('shows the secondary buttons as icons on a narrow header rather than cut off Save', () => {
     const header = source.slice(source.indexOf('<div class="tool-header"'), source.indexOf('\n  <div class="body">'));
-    expect(header).toContain('class:compact={headerW > 0 && headerW < HEADER_COMPACT} bind:clientWidth={headerW}');
+    expect(header).toContain('class:compact={headerW > 0 && headerW < HEADER_COMPACT}');
+    expect(header).toContain('class:tight={headerW > 0 && headerW < HEADER_TIGHT} bind:clientWidth={headerW}');
+    expect(source).toContain('const HEADER_COMPACT = 1030;');
+    expect(source).toContain('const HEADER_TIGHT = 800;');
     // named whether their words show or not
-    for (const name of ['Open proof', 'Discard', 'New proof']) {
+    for (const name of ['Open proof', 'New proof']) {
       expect(header).toContain(`aria-label="${name}"`);
       expect(header).toContain(`<span class="words">${name}</span>`);
     }
     expect(header).toContain("aria-label={copying ? 'Copying…' : 'Copy'}");
-    // Save and To Post keep their words
-    expect(header).toContain("<Icon name=\"save\" size={14} /> {saving ? 'Saving…' : 'Save proof'}");
+    // Save keeps its verb and To Post its words, still named Save proof when tighter
+    expect(header).toContain(`<Icon name="save" size={14} /> <span>{#if saving}Saving…{:else}Save<span class="fold-word">{' proof'}</span>{/if}</span>`);
+    expect(header).toContain('<Icon name="post" size={14} /> To Post');
+    expect(header).toContain('<span class="badge unsaved" title="Changes not saved"><span class="badge-word">unsaved</span></span>');
     const css = source.slice(source.indexOf('<style>'));
     expect(css).toContain('.tool-header.compact .words { display: inline-block; width: 0; margin-left: -7px; overflow: hidden; }');
+    expect(css).toContain('.tool-header.tight .title-input { min-width: 88px; }');
+    expect(css).toContain('.tool-header.tight .badge-word { display: inline-block; width: 0; overflow: hidden; vertical-align: bottom; }');
     // measured, never wrapped: a second line would come and go with the unsaved badge
     expect(css).not.toMatch(/\.tool-header \{[^}]*flex-wrap/);
   });
@@ -1187,7 +1194,7 @@ describe('a dialog over the composer', () => {
     );
 
     for (const flag of [
-      'picker', 'newProofOpen', 'importOpen', 'openList', 'discardConfirm',
+      'picker', 'newProofOpen', 'importOpen', 'openList',
       'replaceWithNewConfirm', 'exportPicker', 'overwritePrompt', 'placeOffer',
       'orphanOffer', 'deleteTarget', 'sourcePick',
     ]) {
@@ -1353,7 +1360,7 @@ describe('the unsaved badge', () => {
       source.indexOf('async function openProof('),
       source.indexOf('const selectedShapes'),
     );
-    const reset = source.slice(source.indexOf('function resetDoc'), source.indexOf('function discardProof'));
+    const reset = source.slice(source.indexOf('function resetDoc'), source.indexOf('async function backToHome'));
 
     expect(save).toContain('savedSnapshot = docSnapshot();');
     expect(open).toContain('savedSnapshot = docSnapshot();');

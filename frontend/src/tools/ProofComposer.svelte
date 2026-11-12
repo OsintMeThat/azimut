@@ -25,6 +25,7 @@
   import { templatesState } from '../lib/state.svelte.js';
   import { myLogoUrl } from '../lib/myLogo.js';
   import Icon from '../components/Icon.svelte';
+  import BackButton from '../components/BackButton.svelte';
   import Modal from '../components/Modal.svelte';
   import DateField from '../components/DateField.svelte';
   import ClockField from '../components/ClockField.svelte';
@@ -1098,9 +1099,12 @@
   }
 
   // ---- the header ---------------------------------------------------------------------
-  // Its own width, read for its compact form: under this the secondary buttons show as
-  // icons, so Save and To Post stay in sight beside the case panel on a laptop.
-  const HEADER_COMPACT = 920;
+  // Its own width, read for its compact forms, set for a proof with changes in its widest
+  // state: under the first the secondary buttons show as icons, under the second the name
+  // narrows, Save proof says Save and the unsaved badge keeps its dot, so Save and To Post
+  // stay whole beside the case panel on a 1024 px screen.
+  const HEADER_COMPACT = 1030;
+  const HEADER_TIGHT = 800;
   let headerW = $state(0);
 
   // ---- the side column's tabs (proof/sideTabs.js) ----------------------------------
@@ -1275,7 +1279,6 @@
   );
   let saving = $state(false);
   let proofFor = $state(undefined);
-  let discardConfirm = $state(false);
 
   // ---- undo / redo -------------------------------------------------------------
   // Snapshot-based history over the serializable document (toSpec). Mutations
@@ -1710,8 +1713,8 @@
   }
 
   // Where the composer is, in the address: the saved proof open, or none. Opening a
-  // proof and starting a new one are the steps Back retraces; a save naming the proof,
-  // a rename or a discard only rewrite the step it is on.
+  // proof, starting a new one and going home are the steps Back retraces; a save
+  // naming the proof or a rename only rewrite the step it is on.
   const place = () => ({ proof: savedName });
   $effect(() => settlePlace('proof', place()));
   onDestroy(onBackForward('proof', async (to) => {
@@ -1961,9 +1964,16 @@
     anchorHistory();
   }
 
-  function discardProof() {
+  /**
+   * Back to the home, the proofs of the case. Changes not saved are asked about first, as
+   * opening another proof asks; a proof with none goes at once. It is a step Back retraces,
+   * so the browser's Back from the home opens the proof again, as last saved.
+   */
+  async function backToHome() {
+    if (!(await mayLeave())) return;
+    openRun += 1;
     resetDoc();
-    discardConfirm = false;
+    settlePlace('proof', place(), { navigate: true });
   }
 
   // ---- house-style templates ---------------------------------------------------
@@ -1976,7 +1986,7 @@
 
   function applyTemplate(t, { notify = true } = {}) {
     // first apply snapshots the current look; re-applying keeps that original,
-    // so Discard always walks back to the pre-template style, not the last one.
+    // so No template always walks back to the pre-template style, not the last one.
     const prevStyle = appliedTemplate?.prevStyle ?? templateFromProof(proof);
     applyProofStyle(proof, t.data, {
       logo: !!sigImg,
@@ -7394,7 +7404,7 @@
   // Every dialog that can sit over the composer. A modal owns the keyboard while
   // it is up, and this is what keeps the canvas shortcuts out from under it.
   const modalOpen = $derived(
-    picker || newProofOpen || importOpen || openList !== null || discardConfirm
+    picker || newProofOpen || importOpen || openList !== null
       || replaceWithNewConfirm || exportPicker || overwritePrompt !== null
       || placeOffer !== null || orphanOffer !== null || deleteTarget !== null
       || sourcePick !== null || pointMap !== null || checking !== null || leaving !== null
@@ -7824,9 +7834,15 @@
 
 <div class="tool">
   <!-- Narrower than its row (the case panel open on a laptop), the header shows the
-       secondary buttons as icons rather than cut off Save and To Post. It is measured on
-       its own width, so the unsaved badge coming and going never moves the canvas. -->
-  <div class="tool-header" class:compact={headerW > 0 && headerW < HEADER_COMPACT} bind:clientWidth={headerW}>
+       secondary buttons as icons, then a shorter name, Save and a dot for unsaved, rather
+       than cut off Save and To Post. It is measured on its own width, so the unsaved badge
+       coming and going never moves the canvas. -->
+  <div class="tool-header" class:compact={headerW > 0 && headerW < HEADER_COMPACT}
+    class:tight={headerW > 0 && headerW < HEADER_TIGHT} bind:clientWidth={headerW}>
+    {#if !homeShown}
+      <!-- the way back to the proofs of the case, from a proof or a scene's page -->
+      <BackButton label="Proofs" title="Back to the proofs of this case" onclick={backToHome} guide="proof.home" />
+    {/if}
     {#if proofStarted}
       <!-- the analyst's name, empty for none: a technical name never shows here -->
       <input
@@ -7837,7 +7853,7 @@
         value={ownName(proof.title, 'proof')}
         oninput={(event) => nameProof(event.currentTarget.value)}
       />
-      {#if dirty}<span class="badge">unsaved</span>{/if}
+      {#if dirty}<span class="badge unsaved" title="Changes not saved"><span class="badge-word">unsaved</span></span>{/if}
       {#if savedName}
         <button class="btn btn-ghost btn-sm proof-more" aria-label="More for this proof" title="More for this proof"
           aria-haspopup="menu" aria-expanded={!!proofMenu} onclick={(event) => (proofMenu = proofMenu ? null : event.currentTarget)}>
@@ -7849,11 +7865,6 @@
     {#if caseState.current}
       <button class="btn btn-sm" onclick={openProofDialog} aria-label="Open proof" title="Open a saved proof">
         <Icon name="folderOpen" size={14} /> <span class="words">Open proof</span>
-      </button>
-    {/if}
-    {#if proofStarted}
-      <button class="btn btn-sm" onclick={() => (discardConfirm = true)} aria-label="Discard" title="Clear this proof">
-        <Icon name="reset" size={14} /> <span class="words">Discard</span>
       </button>
     {/if}
     <button class="btn btn-sm" onclick={openNewProofDialog} aria-label="New proof" title="Start a new proof">
@@ -7905,7 +7916,7 @@
       {/if}
     </div>
     <button class="btn btn-ok btn-sm" data-guide="proof.save" onclick={() => save()} disabled={!proofHasContent || saving}>
-      <Icon name="save" size={14} /> {saving ? 'Saving…' : 'Save proof'}
+      <Icon name="save" size={14} /> <span>{#if saving}Saving…{:else}Save<span class="fold-word">{' proof'}</span>{/if}</span>
     </button>
     <button class="btn btn-info btn-sm" data-guide="proof.save" onclick={() => save({ andPost: true })} disabled={!proofHasContent || saving}>
       <Icon name="post" size={14} /> To Post
@@ -8796,19 +8807,6 @@
   />
 {/if}
 
-{#if discardConfirm}
-  <ConfirmDialog
-    title="Discard this proof?"
-    message="This clears the current document."
-    detail={savedName ? 'This does not delete the saved proof, only the unsaved changes here.' : 'Anything not saved yet will be lost.'}
-    confirmLabel="Discard"
-    tone="danger"
-    icon="reset"
-    onconfirm={discardProof}
-    oncancel={() => (discardConfirm = false)}
-  />
-{/if}
-
 {#if overwritePrompt}
   <ConfirmDialog
     title="Overwrite this proof?"
@@ -9081,6 +9079,11 @@
   /* Folded to no width rather than taken out, so the button keeps the height of its
      line of text and stands level with Save and To Post. */
   .tool-header.compact .words { display: inline-block; width: 0; margin-left: -7px; overflow: hidden; }
+  /* Tighter still, the name keeps less room, Save proof its verb and the badge its dot. */
+  .tool-header.tight .title-input { min-width: 88px; }
+  .tool-header.tight .fold-word,
+  .tool-header.tight .badge-word { display: inline-block; width: 0; overflow: hidden; vertical-align: bottom; }
+  .tool-header.tight .unsaved { align-self: center; width: 8px; height: 8px; padding: 0; border-radius: 50%; background: var(--warn); }
   .spacer { flex: 1; }
   .proof-more { align-self: center; padding-inline: 5px; color: var(--text-2); }
   .scene-choice { display: flex; flex-direction: column; gap: 6px; margin: 0; padding: 0; border: 0; }

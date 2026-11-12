@@ -27,15 +27,14 @@ vi.mock('../lib/extBridge.js', () => ({
 
 // the sheet and the map are drawn by the browser's canvas, which happy-dom has not: what is
 // asked of them, and their filing, are the subject here
-const sheets = vi.hoisted(() => ({ file: null, map: null, preview: null, build: null }));
+const sheets = vi.hoisted(() => ({ file: null, make: null, preview: null }));
 vi.mock('./post/threadSheet.js', () => ({
   fileThreadSheet: (...args) => sheets.file(...args),
-  fileRecapMap: (...args) => sheets.map(...args),
+  makeRecapMap: (...args) => sheets.make(...args),
 }));
 vi.mock('../lib/recapMap.js', async (original) => ({
   ...(await original()),
   recapMapPreview: (...args) => sheets.preview(...args),
-  buildRecapMap: (...args) => sheets.build(...args),
 }));
 
 const { caseState, prefs, templatesState, uiState } = await import('../lib/state.svelte.js');
@@ -75,7 +74,7 @@ const MEDIA = [
   { path: 'media/lone.mp4', kind: 'video', title: 'Lone clip', size: 1_000_000, source: { type: 'upload' } },
 ];
 // a thread opens with no title: the analyst gives one, or its line drops
-const RECAP = '1. [0:00–0:07] Road bridge\n2. [0:15] Port gate\n3. Hilltop village\n\n@GeoConfirmed';
+const RECAP = '1. [0:00–0:07] - 48.850000, 2.350000\n2. [0:15] - 48.860000, 2.360000\n3. 48.870000, 2.370000\n\n@GeoConfirmed';
 const PLACES = [
   'The convoy crosses the road bridge south of the port\n[0:00–0:07]\n\n48.850000, 2.350000',
   'Port gate\n[0:15]\n\n48.860000, 2.360000',
@@ -133,10 +132,18 @@ async function pickSheet() {
   button(recapPicture(), 'Proofs sheet').click();
   await settle();
 }
-/** Make the map, filed for the recap. */
-async function makeMap() {
-  button(recapPicture(), 'Make the map').click();
+/** The recap map waiting on post 1 to be made, or null once one is made for the choices. */
+const pendingMap = () => target.querySelector('[data-testid="recap-map-pending"]');
+const recapPicturePath = () => target.querySelector('.first-pics img')?.getAttribute('src') ?? null;
+/** Copy all, from the bottom of the thread: the words copied, then the map made if it is to make. */
+async function copyAll() {
+  button(target, 'Copy all').click();
   await settle();
+}
+function clipboard() {
+  const writeText = vi.fn(async () => {});
+  vi.stubGlobal('navigator', { ...navigator, clipboard: { writeText } });
+  return writeText;
 }
 function typeTitle(text) {
   titleField().value = text;
@@ -174,9 +181,8 @@ beforeEach(() => {
     return {};
   });
   sheets.file = vi.fn(async () => SHEET);
-  sheets.map = vi.fn(async () => MAP);
+  sheets.make = vi.fn(async () => MAP);
   sheets.preview = vi.fn(async () => ({ url: 'blob:preview', missing: 0, revoke: vi.fn() }));
-  sheets.build = vi.fn(async () => ({ blob: new Blob(['map'], { type: 'image/jpeg' }), missing: 0 }));
   bridge.installed = null;
   bridge.handOffPost = vi.fn(async () => true);
   prefs.postTemplate = '';
@@ -272,14 +278,26 @@ describe('Recap first, as it opens', () => {
       { num: '4', label: 'Port gate', text: PLACES[1] },
       { num: '5', label: 'Hilltop village', text: PLACES[2] },
     ]);
-    // places that stand apart: the map, previewed, made on a press; no sheet filed meanwhile
+    // places that stand apart: the map, previewed, made once the thread needs it; no sheet filed meanwhile
     expect(recapPicture().querySelector('[role="radio"][aria-checked="true"]').textContent).toBe('Map');
     expect(sheets.file).not.toHaveBeenCalled();
-    expect(target.querySelector('.first-pics img')).toBeNull();
-    await makeMap();
-    expect(sheets.map).toHaveBeenCalledWith(CASE.id, { video: VIDEO, blob: expect.any(Blob) });
-    expect(target.querySelector('.first-pics img').getAttribute('src')).toContain(encodeURIComponent('recap map'));
-    expect(recapPicture().querySelector('[data-testid="recap-made"]').textContent).toContain('On the recap');
+    expect(button(recapPicture(), 'Make the map')).toBeUndefined();
+    expect(recapPicturePath()).toBeNull();
+    expect(pendingMap().textContent.replace(/\s+/g, ' ').trim()).toBe('Recap map Download');
+    expect(sheets.make).not.toHaveBeenCalled();
+    // the recap's own Copy: its words, then its map
+    const writeText = clipboard();
+    button(target.querySelector('.tweet-block'), 'Copy').click();
+    await settle();
+    expect(writeText).toHaveBeenCalledWith(RECAP);
+    expect(sheets.make).toHaveBeenCalledTimes(1);
+    expect(sheets.make).toHaveBeenCalledWith(CASE.id, {
+      video: VIDEO, slides: expect.any(Array), options: { background: 'satellite', line: false, signature: false, mark: false },
+    });
+    expect(recapPicturePath()).toContain(encodeURIComponent('recap map'));
+    expect(pendingMap()).toBeNull();
+    // its tiles were asked on that press: the preview shows them too
+    expect(typeof sheets.preview.mock.calls.at(-1)[3].loadTile).toBe('function');
     // the fields a geolocation asks for are the places' own here
     for (const id of ['#pc-desc', '#pc-coords', '#pc-place', '#pc-date']) expect(target.querySelector(id), id).toBeNull();
     expect(target.querySelector('#pc-mention').value).toBe('@GeoConfirmed');
@@ -300,7 +318,9 @@ describe('Recap first, as it opens', () => {
 
   it('saves itself as a video thread, each post carrying its files', async () => {
     await startFromGallery();
-    await makeMap();
+    clipboard();
+    await copyAll();
+    expect(sheets.make).toHaveBeenCalledTimes(1);
     await saved();
     const state = draftWrites().at(-1)[1].state;
     expect(state).toMatchObject({
@@ -399,10 +419,12 @@ describe('the thread\'s title', () => {
   it('prints on no picture: the sheet and the map are asked for with the places alone', async () => {
     await startFromGallery();
     typeTitle('Convoy at dawn');
-    await makeMap();
-    const [places, , options, deps] = sheets.build.mock.calls[0];
-    expect(places.map((one) => one.number)).toEqual([1, 2, 3]);
-    expect(JSON.stringify([places, options, Object.keys(deps)])).not.toContain('Convoy at dawn');
+    clipboard();
+    await copyAll();
+    const [, map] = sheets.make.mock.calls[0];
+    expect(Object.keys(map).sort()).toEqual(['options', 'slides', 'video']);
+    expect(map.slides.map((one) => one.name)).toEqual(['bridge', 'gate', 'village']);
+    expect(JSON.stringify(map.options)).not.toContain('Convoy at dawn');
     await pickSheet();
     const [, asked] = sheets.file.mock.calls[0];
     expect(Object.keys(asked).sort()).toEqual(['slides', 'video']);
@@ -471,26 +493,114 @@ describe('the recap map', () => {
     expect(button(recapPicture(), 'Show the map')).toBeUndefined();
   });
 
-  it('redraws the preview as a choice changes, and a map made before is made again', async () => {
+  it('redraws the preview as a choice changes, files nothing for it, and makes the map again only for choices it was not made for', async () => {
     await startFromGallery();
-    await makeMap();
+    clipboard();
+    await copyAll();
+    expect(sheets.make).toHaveBeenCalledTimes(1);
     expect(posts()[0].text).toBe(RECAP);
-    expect(target.querySelector('.first-pics img')).not.toBeNull();
+    expect(recapPicturePath()).not.toBeNull();
     check('Line in video order').click();
     await settle();
     expect(lastPreview()[2]).toMatchObject({ line: true, background: 'satellite' });
-    // the map on the recap was another: it is made again before it goes out
-    expect(target.querySelector('.first-pics img')).toBeNull();
-    expect(button(recapPicture(), 'Make the map')).toBeTruthy();
+    // the map on the recap was another: it waits to be made again, and nothing is filed for a choice
+    expect(recapPicturePath()).toBeNull();
+    expect(pendingMap()).not.toBeNull();
+    expect(sheets.make).toHaveBeenCalledTimes(1);
+    await saved();
+    expect('map' in draftWrites().at(-1)[1].state).toBe(false);
+    // the choices it was made for again: the same map, nothing made
+    check('Line in video order').click();
+    await settle();
+    expect(recapPicturePath()).toContain(encodeURIComponent('recap map'));
+    await copyAll();
+    expect(sheets.make).toHaveBeenCalledTimes(1);
+    check('Line in video order').click();
     radios('Background').find((one) => one.textContent === 'Map').click();
     await settle();
     expect(lastPreview()[2]).toMatchObject({ line: true, background: 'map' });
     // picking a ground is a press for the map
     expect(typeof lastPreview()[3].loadTile).toBe('function');
-    await makeMap();
-    expect(sheets.build.mock.calls.at(-1)[2]).toMatchObject({ line: true, background: 'map' });
+    expect(sheets.make).toHaveBeenCalledTimes(1);
+    // Download makes it for these choices, then downloads it
+    button(pendingMap(), 'Download').click();
+    await settle();
+    expect(sheets.make).toHaveBeenCalledTimes(2);
+    expect(sheets.make.mock.calls[1][1].options).toMatchObject({ line: true, background: 'map' });
+    expect(toasts()).toContain('Media downloaded. Drag it into X.');
     await saved();
     expect(draftWrites().at(-1)[1].state).toMatchObject({ recap: 'map', map: MAP, mapOptions: { line: true, background: 'map' } });
+  });
+
+  it('is made on Publish and handed to the extension on the recap, once for the same choices', async () => {
+    bridge.installed = '0.3.4';
+    await startFromGallery();
+    clipboard();
+    target.querySelector('[data-guide="post.publish"]').click();
+    await settle();
+    expect(sheets.make).toHaveBeenCalledTimes(1);
+    const [message] = bridge.handOffPost.mock.calls[0];
+    expect(message.posts[0]).toEqual({ text: RECAP, files: [MAP] });
+    target.querySelector('[data-guide="post.publish"]').click();
+    await settle();
+    expect(sheets.make).toHaveBeenCalledTimes(1);
+    expect(bridge.handOffPost.mock.calls[1][0].posts[0].files).toEqual([MAP]);
+  });
+
+  it('says it is making the map, and opens the platform once it is made', async () => {
+    let done;
+    sheets.make = vi.fn(() => new Promise((resolve) => { done = resolve; }));
+    await startFromGallery();
+    clipboard();
+    target.querySelector('[data-guide="post.publish"]').click();
+    await settle();
+    expect(pendingMap().textContent.trim()).toBe('Making the map…');
+    expect(target.querySelector('[data-guide="post.publish"]').disabled).toBe(true);
+    expect(window.open).not.toHaveBeenCalled();
+    done(MAP);
+    await settle();
+    expect(pendingMap()).toBeNull();
+    expect(recapPicturePath()).toContain(encodeURIComponent('recap map'));
+    expect(window.open).toHaveBeenCalledTimes(1);
+    expect(String(window.open.mock.calls[0][0])).toContain('x.com');
+  });
+
+  it('asks for a press to open the platform when the browser no longer lets the page open one', async () => {
+    await startFromGallery();
+    vi.stubGlobal('navigator', { ...navigator, clipboard: { writeText: vi.fn(async () => {}) }, userActivation: { isActive: false } });
+    target.querySelector('[data-guide="post.publish"]').click();
+    await settle();
+    expect(sheets.make).toHaveBeenCalledTimes(1);
+    expect(window.open).not.toHaveBeenCalled();
+    const said = uiState.toasts.find((one) => one.message === 'The recap map is made. Open X to post.');
+    expect(said.action.label).toBe('Open X');
+    said.action.onClick();
+    expect(window.open).toHaveBeenCalledTimes(1);
+  });
+
+  it('stops what needs it when it cannot be made, says so, and offers a report', async () => {
+    bridge.installed = '0.3.4';
+    sheets.make = vi.fn(async () => { throw new Error('3 of its 40 tiles did not load'); });
+    await startFromGallery();
+    const writeText = clipboard();
+    target.querySelector('[data-guide="post.publish"]').click();
+    await settle();
+    expect(bridge.handOffPost).not.toHaveBeenCalled();
+    expect(window.open).not.toHaveBeenCalled();
+    const said = uiState.toasts.find((one) => one.message === 'The recap map could not be made, so X was not opened.');
+    expect(said.action.label).toBe('Copy report');
+    said.action.onClick();
+    await settle();
+    expect(writeText.mock.calls.at(-1)[0]).toContain('Error: 3 of its 40 tiles did not load');
+    expect(writeText.mock.calls.at(-1)[0]).toContain(`Video: ${VIDEO}`);
+    // the words of Copy all are copied all the same; Download downloads nothing
+    await copyAll();
+    expect(toasts()).toContain('The posts are copied, but the recap map could not be made.');
+    button(pendingMap(), 'Download').click();
+    await settle();
+    expect(toasts()).toContain('The recap map could not be made, so nothing was downloaded.');
+    expect(toasts()).not.toContain('Media downloaded. Drag it into X.');
+    expect(pendingMap()).not.toBeNull();
   });
 
   it('signs as the analyst\'s default proof style does', async () => {
@@ -539,11 +649,15 @@ describe('the recap map', () => {
     await mountPost();
     [...home().querySelectorAll('.ph-open')][0].click();
     await settle();
-    expect(recapPicture().querySelector('[data-testid="recap-made"]')).not.toBeNull();
-    expect(target.querySelector('.first-pics img').getAttribute('src')).toContain(encodeURIComponent('recap map'));
+    expect(pendingMap()).toBeNull();
+    expect(recapPicturePath()).toContain(encodeURIComponent('recap map'));
     expect(lastPreview()[2]).toEqual({ background: 'map', line: true, signature: false, mark: false });
     // reopened, its tiles wait for a press again
     expect(lastPreview()[3].loadTile).toBeNull();
+    // its map is the one its choices draw: it goes out as it is, nothing made
+    clipboard();
+    await copyAll();
+    expect(sheets.make).not.toHaveBeenCalled();
 
     target.querySelector('.tool-header').querySelector('button[title="Back to the posts of this case"]').click();
     await settle();

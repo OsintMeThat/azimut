@@ -38,9 +38,9 @@ const thread = (order, extra = {}) => videoPosts({
 const RECAP = [
   'Convoy on the coast road',
   '',
-  '1. [0:00–0:07] Road bridge',
-  '2. [0:15] Port gate',
-  '3. Hilltop village',
+  '1. [0:00–0:07] - 48.850000, 2.350000',
+  '2. [0:15] - 48.860000, 2.360000',
+  '3. 48.870000, 2.370000',
   '',
   '@GeoConfirmed',
 ].join('\n');

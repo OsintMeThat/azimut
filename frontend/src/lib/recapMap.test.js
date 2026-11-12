@@ -1,9 +1,10 @@
 import { describe, expect, it, vi } from 'vitest';
 import {
-  BACKGROUNDS, MAP_FRAME, MAP_HEIGHT, MAP_MAX_BYTES, MAP_WIDTH, MIN_SPREAD, PREVIEW_HEIGHT, PREVIEW_WIDTH,
+  BACKGROUNDS, MAP_FRAME, MAP_HEIGHT, MAP_MAX_BYTES, MAP_WIDTH, MIN_SPREAD, PREVIEW_HEIGHT, PREVIEW_WIDTH, SCALE_BAR,
   buildRecapMap, drawRecapMap, groundTiles, mapOptions, recapCredit, recapFit, recapMapPreview, recapPlaces, recapPlate,
-  sceneHex, signing,
+  scaleCorner, scalePlace, sceneHex, signing,
 } from './recapMap.js';
+import { SIG_MARGIN, SIG_TEXT_SIZE } from './composer.js';
 import { project } from './plate/geo.js';
 import { sceneColorAt } from './scenes.js';
 
@@ -63,7 +64,7 @@ describe('the places it pins', () => {
 });
 
 describe('the framing', () => {
-  it('frames every place inside the page, clear of the edges where the scale, the north and the credits stand', () => {
+  it('frames every place inside the page, clear of the edges where the scale, the signature and the credit stand', () => {
     const places = recapPlaces(SLIDES);
     const fit = recapFit(places);
     expect(fit.ok).toBe(true);
@@ -112,11 +113,12 @@ describe('the options', () => {
     expect(line.points).toEqual(places.map((one) => [one.lon, one.lat]));
   });
 
-  it('is a page of pins, a scale, a north and the credits, with no title', () => {
+  it('is a page of pins and the credit, with no title and no north arrow: it is always north up', () => {
     const places = recapPlaces(SLIDES);
     const plate = recapPlate(recapFit(places), places, { background: 'map' });
-    expect(plate.elements.map((one) => one.kind)).toEqual(['map', 'label', 'label', 'label', 'scale', 'north', 'credits']);
-    expect(plate.elements.some((one) => one.kind === 'text')).toBe(false);
+    expect(plate.elements.map((one) => one.kind)).toEqual(['map', 'label', 'label', 'label', 'credits']);
+    expect(plate.elements.some((one) => one.kind === 'text' || one.kind === 'north')).toBe(false);
+    expect(recapFit(places).view.bearing).toBe(0);
     expect(plate.elements[0].basemap).toBe('osm');
     const pins = plate.elements.filter((one) => one.kind === 'label');
     expect(pins.map((one) => [one.id, one.fill, one.style])).toEqual([
@@ -128,26 +130,32 @@ describe('the options', () => {
     expect(recapCredit(plate, PROVIDERS)).toBe('© OpenStreetMap contributors, openstreetmap.org/copyright');
   });
 
-  it('moves the north and the scale out of the corners the signature takes', () => {
-    const places = recapPlaces(SLIDES);
-    const fit = recapFit(places);
-    const at = (plate, id) => plate.elements.find((one) => one.id === id).box[0];
-    const plain = recapPlate(fit, places, {});
-    const signed = recapPlate(fit, places, {}, { logo: { anchor: 'tr' }, text: null, mark: { anchor: 'bl' } });
-    expect(at(plain, 'north')).toBeGreaterThan(at(signed, 'north'));
-    expect(at(plain, 'scale')).toBeLessThan(at(signed, 'scale'));
+  it('puts the scale in the bottom left corner, or the right one when the signature takes the left', () => {
+    expect(scaleCorner()).toBe('bl');
+    expect(scaleCorner({ logo: { anchor: 'br' }, text: { anchor: 'br' } })).toBe('bl');
+    expect(scaleCorner({ logo: null, text: { anchor: 'bl' } })).toBe('br');
+    // a signature split over both bottom corners leaves the scale where it was
+    expect(scaleCorner({ logo: { anchor: 'bl' }, text: { anchor: 'br' } })).toBe('bl');
+    const view = recapFit(recapPlaces(SLIDES)).view;
+    const left = scalePlace(view, 'bl');
+    const right = scalePlace(view, 'br');
+    expect(left.x).toBe(SIG_MARGIN);
+    expect(right.x + right.length).toBeCloseTo(MAP_WIDTH - SIG_MARGIN, 6);
+    // on the credit's row on the left, above the credit's strip on the right
+    expect(left.y).toBe(MAP_HEIGHT - SIG_MARGIN);
+    expect(right.y).toBeLessThan(left.y - 30);
   });
 
-  it('signs with what the analyst has, as their default proof style sets it', () => {
+  it('signs with what the analyst has, as their default proof style sets it, the mark in the top right corner', () => {
     const style = { signatureText: { anchor: 'bl', size: 30 }, azimutMark: { anchor: 'tl', show: 'logo', size: 40 } };
     expect(signing({ signature: true, mark: true }, { style, handle: '@desk' })).toEqual({
-      logo: null, text: style.signatureText, mark: { anchor: 'tl', show: 'logo', size: 40 },
+      logo: null, text: style.signatureText, mark: { anchor: 'tr', show: 'logo', size: 40 },
     });
     // nothing to sign with: no signature, whatever is ticked
     expect(signing({ signature: true }, { style }).text).toBeNull();
-    // no style: the proofs' own defaults, in the bottom right
+    // no style: the proofs' own defaults, the signature in the bottom right
     const plain = signing({ signature: true, mark: true }, { handle: '@desk', logo: { width: 10, height: 10 } });
-    expect([plain.logo.anchor, plain.text.anchor, plain.mark.anchor]).toEqual(['br', 'br', 'br']);
+    expect([plain.logo.anchor, plain.text.anchor, plain.mark.anchor]).toEqual(['br', 'br', 'tr']);
     expect(signing({}, { style, handle: '@desk' })).toEqual({ logo: null, text: null, mark: null });
   });
 });
@@ -179,8 +187,51 @@ describe('the picture', () => {
     expect(drawn.asked).toBe(0);
     const [ground, page] = made;
     expect(ground.calls.filter((c) => c.op === 'drawImage')).toHaveLength(0);
-    // the numbers, the scale's words, the north and the credit: and no title
-    expect(texts(page)).toEqual(['3', '2', '1', '0', expect.stringMatching(/ km$/), 'N', PROVIDERS[0].attribution]);
+    // the numbers, the credit and the scale's length: no title, no north
+    expect(texts(page)).toEqual(['3', '2', '1', PROVIDERS[0].attribution, expect.stringMatching(/^\d+ k?m$/)]);
+  });
+
+  it('draws the scale small, a thin line and its length over it, haloed rather than boxed', async () => {
+    const { made, makeCanvas } = recorder();
+    const places = recapPlaces(SLIDES);
+    const fit = recapFit(places);
+    await drawRecapMap(places, fit, {}, { providers: PROVIDERS, makeCanvas });
+    const page = made[1];
+    const scale = scalePlace(fit.view, 'bl');
+    expect(scale.length).toBeGreaterThan(SCALE_BAR.most / 3);
+    expect(scale.length).toBeLessThanOrEqual(SCALE_BAR.most);
+    expect(scale.length).toBeLessThan(MAP_WIDTH * 0.12);
+    // its length written once, small, and haloed: stroked under, then filled
+    const said = page.calls.filter((c) => ['fillText', 'strokeText'].includes(c.op) && c.args[0] === scale.label);
+    expect(said.map((c) => c.op)).toEqual(['strokeText', 'fillText']);
+    expect(said[1].args[2]).toBeGreaterThan(MAP_HEIGHT - 60);
+    // no box under it: nothing is filled over the corner it stands in
+    const corner = { x: scale.x - 10, y: scale.y - 50, w: scale.length + 20, h: 60 };
+    const boxes = page.calls.filter((c) => c.op === 'fillRect').map(({ args: [x, y, w, h] }) => ({ x, y, w, h }));
+    const covers = (a, b) => a.x < b.x + b.w && b.x < a.x + a.w && a.y < b.y + b.h && b.y < a.y + a.h;
+    expect(boxes.filter((box) => box.w < MAP_WIDTH && covers(box, corner))).toEqual([]);
+    // white over imagery, dark over the plain map
+    const ink = (calls) => calls.filter((c) => c.op === 'fillText' && c.args[0] === scale.label)[0].fill;
+    expect(ink(page.calls)).toBe('#ffffff');
+    const plain = recorder();
+    await drawRecapMap(places, fit, { background: 'map' }, { providers: PROVIDERS, makeCanvas: plain.makeCanvas });
+    expect(ink(plain.made[1].calls)).toBe('#15181e');
+  });
+
+  it('seats the signature a proof\'s margin above the credit\'s strip', async () => {
+    const { made, makeCanvas } = recorder();
+    const places = recapPlaces(SLIDES);
+    const fit = recapFit(places);
+    await drawRecapMap(places, fit, { signature: true }, { providers: PROVIDERS, handle: '@desk', makeCanvas });
+    const plate = recapPlate(fit, places, {});
+    const credits = plate.elements.find((one) => one.kind === 'credits');
+    const perMm = MAP_WIDTH / plate.page.size[0];
+    const stripTop = credits.box[1] * perMm;
+    // the strip is one line of the credit, at the foot of the picture
+    expect(MAP_HEIGHT - stripTop).toBeGreaterThan(20);
+    expect(MAP_HEIGHT - stripTop).toBeLessThan(40);
+    const handle = made[1].calls.find((c) => c.op === 'fillText' && c.args[0] === '@desk');
+    expect(handle.args[2] + SIG_TEXT_SIZE * 1.2).toBeCloseTo(stripTop - SIG_MARGIN, 6);
   });
 
   it('lays the background\'s tiles, a few at a time, and says how many did not come', async () => {

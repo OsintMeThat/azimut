@@ -28,8 +28,9 @@
  * **The time.** One formatter for every time a post prints (`timecode`): an instant
  * `[0:15]`, a passage `[0:00–0:07]`, several side by side `[0:00–0:07] [1:05–1:12]`, and
  * nothing for a proof about the whole video. `#scenes` is the video's places, one a
- * line and numbered as the sheet numbers them, `1. [0:00–0:07] Road bridge`, the title
- * alone for the whole video. The clock is `lib/scenes.js`'s, never written here.
+ * line and numbered as the sheet and the map number them, each its time and where it
+ * stands, `1. [0:00–0:07] - 16.018740, 45.528599`, the point alone for the whole video.
+ * The clock is `lib/scenes.js`'s, never written here.
  */
 import { labelCoords, ownName } from './naming.js';
 import { isAbandoned, momentTime, sceneList, sceneMoments, sceneTime, sceneTitle, sortMoments, unplaced } from './scenes.js';
@@ -84,11 +85,11 @@ export function shortTimecode(moments) {
 }
 
 /**
- * What `#scenes`, a post's heading and the thread's column call a place of the video:
- * the proof's name when the analyst gave it one, else where it stands as the case knows
- * it (`place`) with its point's plus code, which tells two places of one region apart
- * (`Al Jawf, Yemen (7H872G9H+FC)`), else the plus code or the point alone, else its
- * time. Never "Proof 3", a name the app gave.
+ * What a post's heading and the thread's column call a place of the video, and `#scenes`
+ * a place with no point: the proof's name when the analyst gave it one, else where it
+ * stands as the case knows it (`place`) with its point's plus code, which tells two
+ * places of one region apart (`Al Jawf, Yemen (7H872G9H+FC)`), else the plus code or the
+ * point alone, else its time. Never "Proof 3", a name the app gave.
  */
 export function placeLabel(row) {
   const own = ownName(sceneTitle(row ?? {}), 'proof');
@@ -101,13 +102,25 @@ export function placeLabel(row) {
   return labelCoords(point) || sceneTime(row ?? {});
 }
 
-/** One line of `#scenes`: its number, the time and the place, or the number and the place alone. */
+/** A place's first point as its post writes it, to six decimals, `16.018740, 45.528599`, or ''. */
+function sceneCoords(row) {
+  const point = (row?.points ?? []).find((one) => Number.isFinite(one?.lat) && Number.isFinite(one?.lon));
+  return point ? `${point.lat.toFixed(6)}, ${point.lon.toFixed(6)}` : '';
+}
+
+/**
+ * One line of `#scenes`: its number, the time and the place's point, `1. [0:03–0:09] -
+ * 16.018740, 45.528599`, or the number and the point alone for the whole video, a named
+ * proof's too. A place with no point says what the thread calls it instead.
+ */
 export function sceneLine(slide, number) {
   const time = timecode(slide.moments);
+  const where = sceneCoords(slide.row);
+  if (where) return `${number}. ${time ? `${time} - ` : ''}${where}`;
   return `${number}. ${time ? `${time} ` : ''}${slide.label ?? slide.title}`;
 }
 
-/** `#scenes`: the places of the thread with their times, one a line, numbered from 1. */
+/** `#scenes`: the places of the thread with their times and points, one a line, numbered from 1. */
 export function scenesText(slides) {
   return (slides ?? []).map((slide, i) => sceneLine(slide, i + 1)).join('\n');
 }

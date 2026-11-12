@@ -4,18 +4,21 @@
  * enough apart to be told apart on a map.
  *
  * **What it shows.** Each place a numbered pin, the number and the colour `#scenes` and
- * the strip give it (`lib/videoThread.js`); a scale bar and a north arrow; the imagery's
- * credit, always; and, when asked, a dashed line joining the places in the video's
- * order, the analyst's signature and the Azimut mark. No title: the post's `#scenes` is
- * its legend. Framed by itself on every place, with room for what is drawn round them.
+ * the strip give it (`lib/videoThread.js`); a small scale bar; the imagery's credit,
+ * always; and, when asked, a dashed line joining the places in the video's order, the
+ * analyst's signature and the Azimut mark. No title: the post's `#scenes` is its legend.
+ * No north arrow either: the map is always north up. Framed by itself on every place,
+ * with room for what is drawn round them.
  *
  * **How it is drawn.** As Map plate draws a page (`lib/plate/draw.js` `drawPage`): the
- * map is one element of a small plate made here, the pins its numbered labels, the line,
- * the scale, the north and the credits its own elements, the credit worded by
- * `lib/plate/credits.js`. The ground is the background's tiles, asked of the app's tile
- * route (`/api/tiles`) and laid side by side at the zoom the picture needs, a few at a
- * time. The signature and the mark are drawn as a proof draws them (`lib/composer.js`
- * `signatureBox`, `lib/proofMark.js`), from the analyst's default proof style.
+ * map is one element of a small plate made here, the pins its numbered labels, the line
+ * and the credits its own elements, the credit worded by `lib/plate/credits.js`. The
+ * ground is the background's tiles, asked of the app's tile route (`/api/tiles`) and laid
+ * side by side at the zoom the picture needs, a few at a time. The scale bar is drawn
+ * here, a thin line and its length with a halo rather than a plate's boxed bar. The
+ * signature and the mark are drawn as a proof draws them (`lib/composer.js`
+ * `signatureBox`, `lib/proofMark.js`), from the analyst's default proof style: the
+ * signature sits just above the credit, the mark small in the top right corner.
  *
  * **Local first.** Nothing here reaches the network unless `loadTile` is given: the
  * preview is drawn first on a plain ground, and the tiles come once the analyst asks.
@@ -24,11 +27,11 @@
  * is the same page drawn smaller, its ground asked at the zoom that size needs.
  */
 import { drawPage } from './plate/draw.js';
-import { distance, fromWorld, toWorld } from './plate/geo.js';
-import { PX_PER_MM } from './plate/page.js';
+import { distance, fromWorld, scaleBar, toWorld } from './plate/geo.js';
+import { MM_PER_PT, PX_PER_MM } from './plate/page.js';
 import { plateCredits } from './plate/credits.js';
 import {
-  SIG_TEXT_SIZE, anchoredPos, isLightColor, newSignature, newSignatureText, normalizeAzimutMark, newAzimutMark,
+  SIG_MARGIN, SIG_TEXT_SIZE, anchoredPos, isLightColor, newSignature, newSignatureText, normalizeAzimutMark, newAzimutMark,
   signatureBox, signaturePairPositions,
 } from './composer.js';
 import { drawMark, markBox } from './proofMark.js';
@@ -69,12 +72,14 @@ export function mapOptions(value = {}) {
 // full size, so its type is read on a phone when the picture is shown a quarter its size.
 const MM = 12;
 const PAGE = { width: MAP_WIDTH / MM, height: MAP_HEIGHT / MM };
-const BAND = 4.4; // the credits' band under the map, in millimetres
+const CREDIT_SIZE = 6; // the credit's type, in points
+// the credit's strip at the foot of the map, in millimetres: one line of it, and the band
+// a plate lays under its words (`lib/plate/draw.js` `writeLines`)
+const STRIP = CREDIT_SIZE * MM_PER_PT * (1.25 + 0.1);
 const PIN = 6.5; // a pin's width, in millimetres
 // what the framing keeps clear round the places' middles, as shares of the page, a pin's
-// half included: the scale, the north, the signature and the credits sit in that margin
+// half included: the scale, the signature, the mark and the credit sit in that margin
 const ROOM = { side: 0.12, top: 0.16, bottom: 0.26 };
-const SCALE_BOX = [24, 6.5]; // the scale bar's box, in millimetres
 
 /** The colours a scene is drawn in on Inspect's bar (`app.css` --anno-N), for a picture. */
 const SCENE_HEX = {
@@ -137,19 +142,19 @@ export function recapFit(places) {
 const numberInk = (colour) => (isLightColor(colour) ? '#14171c' : '#ffffff');
 
 /**
- * Which corners the scale, the north, the signature and the mark take: the signature
- * and the mark where the analyst's proof style puts them, the north in a top corner
- * they leave, the scale in a bottom one.
+ * The bottom corner the scale takes: the left one, unless the signature stands there
+ * and leaves the right one free.
  */
-function corners(sign) {
-  const taken = new Set(sign.filter(Boolean).map((one) => one.anchor ?? 'br'));
-  return {
-    north: taken.has('tr') && !taken.has('tl') ? 'tl' : 'tr',
-    scale: taken.has('bl') && !taken.has('br') ? 'br' : 'bl',
-  };
+export function scaleCorner(signed = { logo: null, text: null }) {
+  const taken = new Set([signed.logo, signed.text].filter(Boolean).map((one) => one.anchor ?? 'br'));
+  return taken.has('bl') && !taken.has('br') ? 'br' : 'bl';
 }
 
-/** The signature and the mark the map carries, from the analyst's proof style, or null for each. */
+/**
+ * The signature and the mark the map carries, or null for each: the signature where the
+ * analyst's proof style puts it, the mark as that style draws it, small in the top right
+ * corner whatever corner the proofs give it.
+ */
 export function signing(options, { style = null, logo = null, handle = '' } = {}) {
   const wanted = mapOptions(options);
   const sign = wanted.signature
@@ -158,19 +163,16 @@ export function signing(options, { style = null, logo = null, handle = '' } = {}
         text: handle?.trim() ? (style?.signatureText ?? newSignatureText()) : null,
       }
     : { logo: null, text: null };
-  const mark = wanted.mark ? (normalizeAzimutMark(style?.azimutMark) ?? newAzimutMark(sign.logo?.anchor ?? sign.text?.anchor ?? 'br')) : null;
+  const mark = wanted.mark ? { ...(normalizeAzimutMark(style?.azimutMark) ?? newAzimutMark()), anchor: 'tr' } : null;
   return { logo: sign.logo, text: sign.text, mark };
 }
 
 /**
  * The map as a plate (`lib/plate/page.js`'s shape): one page the picture's size, the map
- * over all of it, a pin per place, the line when asked, the scale, the north and the
- * credits. `signed` is `signing`'s, for the corners it takes.
+ * over all of it, a pin per place, the line when asked, and the credit in its strip.
  */
-export function recapPlate(fit, places, options, signed = { logo: null, text: null, mark: null }) {
+export function recapPlate(fit, places, options) {
   const wanted = mapOptions(options);
-  const { north, scale } = corners([signed.logo, signed.text, signed.mark]);
-  const above = PAGE.height - BAND;
   const elements = [
     { id: 'map', kind: 'map', box: [0, 0, PAGE.width, PAGE.height], view: fit.view, basemap: BACKGROUNDS[wanted.background],
       overlays: [], layers: [], grid: 'none', border: false },
@@ -184,12 +186,7 @@ export function recapPlate(fit, places, options, signed = { logo: null, text: nu
     elements.push({ id: `pin-${place.number}`, kind: 'label', of: 'map', at: [place.lon, place.lat], leader: 'none', style: 'number',
       box: [0, 0, PIN, PIN], fill: place.colour, colour: numberInk(place.colour), size: 10 });
   }
-  elements.push(
-    { id: 'scale', kind: 'scale', of: 'map', fill: '#ffffff', size: 7,
-      box: [scale === 'bl' ? 3 : PAGE.width - 3 - SCALE_BOX[0], above - 3 - SCALE_BOX[1], ...SCALE_BOX] },
-    { id: 'north', kind: 'north', of: 'map', fill: '#ffffff', box: [north === 'tr' ? PAGE.width - 3 - 7 : 3, 3, 7, 10] },
-    { id: 'credits', kind: 'credits', of: 'map', size: 6, align: 'right', box: [0, above, PAGE.width, BAND] },
-  );
+  elements.push({ id: 'credits', kind: 'credits', of: 'map', size: CREDIT_SIZE, align: 'right', box: [0, PAGE.height - STRIP, PAGE.width, STRIP] });
   return {
     page: { paper: 'custom', size: [PAGE.width, PAGE.height], orientation: 'landscape' },
     theme: { paper: '#ffffff', ink: '#15181e', accent: '#c8102e', font: 'inter', preset: '' },
@@ -283,13 +280,72 @@ export async function drawGround(view, background, width, height, { loadTile = n
   return { canvas, missing, asked: tiles.length };
 }
 
+/** The scale bar's measures, in the picture's own pixels: its longest, its line, its end ticks and its words. */
+export const SCALE_BAR = Object.freeze({ most: 170, line: 3, tick: 9, text: 24 });
+
+/**
+ * Where the scale bar stands and what it says, in the picture's own pixels: `{ x, y,
+ * length, label }`, `y` its line. In the bottom left corner, the credit's row, or above
+ * the credit in the right one when the signature takes the left.
+ */
+export function scalePlace(view, corner = 'bl') {
+  const per = MAP_WIDTH / MAP_FRAME.width; // picture pixels a frame pixel
+  const bar = scaleBar(view, SCALE_BAR.most / per);
+  const length = bar.pixels * per;
+  const left = corner !== 'br';
+  return {
+    x: left ? SIG_MARGIN : MAP_WIDTH - SIG_MARGIN - length,
+    y: left ? MAP_HEIGHT - SIG_MARGIN : MAP_HEIGHT - STRIP * MM - SIG_MARGIN,
+    length,
+    label: bar.label,
+  };
+}
+
+/** The scale bar: a thin line ticked at its ends, its length over it, haloed so it reads on any ground. */
+function drawScaleBar(ctx, view, background, corner) {
+  const { x, y, length, label } = scalePlace(view, corner);
+  if (!(length > 0)) return;
+  const plain = background === 'map';
+  const ink = plain ? '#15181e' : '#ffffff';
+  const halo = plain ? 'rgba(255, 255, 255, 0.9)' : 'rgba(0, 0, 0, 0.55)';
+  const { line, tick, text } = SCALE_BAR;
+  ctx.save();
+  ctx.lineCap = 'round';
+  ctx.lineJoin = 'round';
+  const trace = () => {
+    ctx.beginPath();
+    ctx.moveTo(x, y - tick);
+    ctx.lineTo(x, y);
+    ctx.lineTo(x + length, y);
+    ctx.lineTo(x + length, y - tick);
+  };
+  trace();
+  ctx.strokeStyle = halo;
+  ctx.lineWidth = line + 3;
+  ctx.stroke();
+  trace();
+  ctx.strokeStyle = ink;
+  ctx.lineWidth = line;
+  ctx.stroke();
+  ctx.font = `600 ${text}px Inter, sans-serif`;
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'bottom';
+  ctx.lineWidth = 4;
+  ctx.strokeStyle = halo;
+  ctx.strokeText(label, x + length / 2, y - 5);
+  ctx.fillStyle = ink;
+  ctx.fillText(label, x + length / 2, y - 5);
+  ctx.restore();
+}
+
 /**
  * The signature and the mark, drawn as a proof draws them, in the picture's own pixels
- * (`MAP_WIDTH` × `MAP_HEIGHT`) above the credits' band.
+ * (`MAP_WIDTH` × `MAP_HEIGHT`): the signature a proof's margin above the credit's strip,
+ * the mark in the top right corner.
  */
 function drawSigning(ctx, signed, { logo = null, handle = '' }) {
   const width = MAP_WIDTH;
-  const height = MAP_HEIGHT - BAND * MM;
+  const height = MAP_HEIGHT - STRIP * MM;
   const drawn = [];
   const natural = logo ? [logo.naturalWidth || logo.width, logo.naturalHeight || logo.height] : null;
   const logoBox = signed.logo && natural ? signatureBox(signed.logo, width, height, natural) : null;
@@ -351,7 +407,7 @@ export async function drawRecapMap(places, fit, options, {
 } = {}) {
   const wanted = mapOptions(options);
   const signed = signing(wanted, { style, logo, handle });
-  const plate = recapPlate(fit, places, wanted, signed);
+  const plate = recapPlate(fit, places, wanted);
   const ground = await drawGround(fit.view, wanted.background, width, height, { loadTile, makeCanvas });
   const canvas = makeCanvas(width, height);
   const ctx = canvas.getContext('2d');
@@ -365,12 +421,11 @@ export async function drawRecapMap(places, fit, options, {
     credits: { credits: recapCredit(plate, providers) },
     numberOf: (id) => numbers.get(id) ?? '',
   });
-  if (signed.logo || signed.text || signed.mark) {
-    ctx.save();
-    ctx.scale(width / MAP_WIDTH, height / MAP_HEIGHT);
-    drawSigning(ctx, signed, { logo, handle });
-    ctx.restore();
-  }
+  ctx.save();
+  ctx.scale(width / MAP_WIDTH, height / MAP_HEIGHT);
+  drawScaleBar(ctx, fit.view, wanted.background, scaleCorner(signed));
+  if (signed.logo || signed.text || signed.mark) drawSigning(ctx, signed, { logo, handle });
+  ctx.restore();
   return { canvas, missing: ground.missing, asked: ground.asked };
 }
 
@@ -389,7 +444,7 @@ export async function buildRecapMap(places, fit, options, deps = {}) {
     blob = await encode(drawn.canvas, MAP_TYPE, quality);
     if (blob.size <= MAP_MAX_BYTES) break;
   }
-  return { blob, missing: drawn.missing };
+  return { blob, missing: drawn.missing, asked: drawn.asked };
 }
 
 /** The preview's size: small, its ground a dozen tiles or so. */

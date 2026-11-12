@@ -4413,7 +4413,13 @@ counts. A chip is Make the proof: the frames of the scene chosen as from the str
 the proof of it and its captures. A case holding nothing shows the button and one sentence.
 The home opens on the list it read last and reads it again behind (`GET /proofs`, one read),
 the scenes coming from the queue the app already keeps. A scene of the strip still shows its
-page in place of the canvas, as before.
+page in place of the canvas, as before. **‹ Proofs**, first in the header while a proof or a
+scene's page is open, goes back to the home: a proof with changes not saved asks *Leave this
+proof?* first, as opening another proof does, and one with none goes at once. It is a step
+Back retraces, so the browser's Back from the home opens the proof again. A narrow header
+folds its secondary buttons to icons, then shortens the name field, Save proof to Save and
+the unsaved badge to a dot, so Proofs, Save and To Post stay whole at 1024 px with the case
+panel open.
 
 **New proof** opens a window of the case's pictures. On the left, where they come from:
 **All**, then **Satellite**, **Videos**, **Collages**, **Screenshots** and **Photos**, each
@@ -4494,7 +4500,7 @@ place, and the arrows, Home and End walk the tabs without reaching the canvas be
 **The Proof tab carries its fields' `!`** on its label, *Still needs coordinates and a
 source* on hover, a date the save would refuse included, so a blank is not forgotten
 while composing in Layout. Nothing on the canvas or in the export depends on the tab.
-**A narrow header keeps Save in sight**: under 920 px Open proof, Discard, New proof and
+**A narrow header keeps Save in sight**: under 1030 px Open proof, New proof and
 Copy show their icons alone, on the same single line, so the canvas never moves.
 
 **Coordinates and sources.** Both head the Proof tab and both fill themselves in:
@@ -5483,10 +5489,14 @@ never posts, and pressing Post on X or Bluesky stays the analyst's.
   or the proofs sheet, then the video, then a post per place), **Video first**, **Proof
   first** (the first place, then the video naming every place) and **All in one** (one
   post: up to four pictures, the contact sheet past four places). Each post is labelled
-  (*Recap*, *Video*, the place's name, else where it stands) and carries its files: a
-  place's proof picture, the video, the recap's picture. `#scenes` calls a place the
-  same way: its proof's name, else its region and country, else its point, never a
-  technical *Proof 3*. A place's post says its sentence, its time and its points, the
+  (*Recap*, *Video*, the place's name, else where it stands with its plus code, *Al Jawf,
+  Yemen (7H872G9H+FC)*, never a technical *Proof 3*) and carries its files: a place's
+  proof picture, the video, the recap's picture; the column's lists call a place the
+  same way. `#scenes` gives each place its time and its point, the first one to six
+  decimals as the place's post writes it, `1. [0:03–0:09] - 16.018740, 45.528599`, the
+  point alone for the whole video, `3. 16.018740, 45.528599`; a proof the analyst named
+  says its point there too, its name staying in its own post, and a place with no point
+  says its label. A place's post says its sentence, its time and its points, the
   same in every order; changing the order keeps the words written on a post, while the
   recap and the video's post take the order's own start. The mention and the Source
   field (the video's link) are the only fields; the places bring theirs. **No picture
@@ -5501,29 +5511,45 @@ never posts, and pressing Post on X or Bluesky stays the analyst's.
   30 m apart; else the sheet stays, and the column says *These places are too close
   together for a map, so the recap shows the proofs sheet.* The map (`lib/recapMap.js`)
   is 1600 × 900, framed by itself on every place, each a numbered pin in the number and
-  the colour `#scenes` and the strip give it, with a scale bar, a north arrow and the
-  imagery's credit, always, and no title. It is drawn as Map plate draws a page
+  the colour `#scenes` and the strip give it, with a small scale bar (a thin line and its
+  length, haloed rather than boxed, in the bottom left corner) and the imagery's credit,
+  always, and no title. It has no north arrow: it is always north up. It is drawn as Map plate draws a page
   (`lib/plate/draw.js` `drawPage`, its credits from `lib/plate/credits.js`), the ground
   laid from the app's tiles (`/api/tiles`, five at a time). Its choices, each redrawn at
   once on a small preview (480 × 270, a dozen tiles or so): **Background**, Satellite
   (Esri World Imagery, the app's default basemap) or Map (OpenStreetMap); **Line in
   video order**, a dashed line from place to place, off by default; **Signature** and
-  **Azimut mark**, on when the analyst's default proof style carries them, drawn where
-  that style puts them (the north and the scale move to the corners they leave); the
-  signature needs a logo or a handle, and says to set them in Settings → Publishing.
+  **Azimut mark**, on when the analyst's default proof style carries them: the signature
+  where that style puts it, a proof's margin above the credit (the scale moves to the
+  bottom right corner when it takes the bottom left), the mark small in the top right
+  corner; the signature needs a logo or a handle, and says to set them in Settings →
+  Publishing.
   **Local first**: the preview is drawn on a plain ground, no tile asked, until the
-  analyst presses **Show the map**, picks Map or picks a ground. **Make the map** draws
-  it whole and files it in Media as made from the video (`POST
-  /cases/{id}/scenes/map`, *convoy recap map.jpg*; the same picture is one file), and the
-  recap carries it (*On the recap*). A choice changed after takes it off the recap until
-  it is made again. A thread saved before the map opens on its sheet. **When the video is over the
+  analyst presses **Show the map**, picks Map or picks a ground, or a press makes the
+  map. The preview is what goes
+  out, and there is no button to make the map: it is drawn whole and filed in Media as
+  made from the video (`POST /cases/{id}/scenes/map`, *convoy recap map.jpg*) when the
+  thread needs its picture and no map made matches its choices, on **Publish** (before
+  the hand-off to the extension), the recap's **Copy**, **Copy all** and the recap's
+  **Download**. Until then the recap shows *Recap map* with Download, then *Making the
+  map…*, and the action goes on with the map on the recap. The words of a Copy are
+  copied first, while the browser still lets the page write the clipboard; Publish
+  without the extension opens the platform once the map is made, or asks for one more
+  press when the browser no longer lets the page open a tab. A map that cannot be drawn
+  whole (a tile that did not load leaves a hole) stops the action with one sentence
+  (*The recap map could not be made, so X was not opened.*) and **Copy report**:
+  nothing is opened or handed over without it. A choice changed files nothing: the
+  recap waits for a map made for it, and gets the one made before back when the choice
+  is undone; the same choices made again are one file. A draft keeps the `map` only
+  while it is the one its choices draw. A thread saved before the map opens on its
+  sheet. **When the video is over the
   platform's limit** (`lib/videoLimits.js`: *This video runs 24:10, and X takes 20 minutes
   from a free account.*), the column offers the clip a place cut for its post, one per
   thread on the video's post, else its link (with **Cut for the post** named as the way
   to make one); **Post the whole video** goes back. Nothing is cut or re-encoded there.
   The draft keeps `kind: 'video'`, `video`, `title`, `order`, the texts beside `body`
   (`posts`), `first`, and the `sheet`, `clip` or `link` it uses, `recap: 'map'` with its
-  `mapOptions` (`background`, `line`, `signature`, `mark`) and the `map` once made,
+  `mapOptions` (`background`, `line`, `signature`, `mark`) and the `map` made for them,
   each post its `key`
   (`video`, `place:<proof>`) and `edited`. It saves itself, opens, is marked posted,
   deleted with Undo and handed to the extension, its files on each post, like any
@@ -5595,7 +5621,14 @@ never posts, and pressing Post on X or Bluesky stays the analyst's.
   whole thread. Once a post is sent, the extension reads its link off the site's toast
   (the account signed in, made in the last five minutes) and hands it to the app as
   `post-link-caught`, once per hand-off: a thread's first post, a reply's first reply.
-  The app only offers it. A hand-off that stops (no reply in 10 minutes, the tab closed
+  The app only offers it. While it works, the extension shows its own banner in the top
+  right corner of the site's tab (`extension/banner.js`): the step under way (*Filling
+  your post…*, *Bringing the pictures from Azimut…*, *Post 2 of 3…*, *Adding pictures 2
+  of 4…*, *Describing the pictures…*), then *Ready. Check it, then press Post.* (or
+  *Reply*), gone after six seconds, the reply chain's sentence while it waits on a
+  Reply, or *Stopped:* and the hand-off's sentence, kept until closed. It takes no
+  click but its own ×, presses nothing and shrinks to a dot once the analyst types in
+  the composer. A hand-off that stops (no reply in 10 minutes, the tab closed
   or gone elsewhere, a step that failed) says why in a notification and sends the app
   a `post-handoff-report`: the step and what the extension's selectors found there,
   never a word of the page, and `from`, the first post not handed over, when the posts
@@ -5627,8 +5660,8 @@ plain text, the editor offering the tokens of its kind. A token with no value dr
 its line. `#video` is the title Media gives the video the post is about, never its file
 name. `#timecode` is the time a proof states in its video, `[0:15]` or `[0:00–0:07]`,
 for a geolocation and each place of a video thread; `#scenes` a thread's places, one a
-line and numbered, `1. [0:00–0:07] Road bridge`, an unnamed place by where it
-stands and its plus code, `2. [0:15] Al Jawf, Yemen (7H872G9H+FC)`. `#credits` is the composer's Credits
+line and numbered, each its time and its point, `1. [0:03–0:09] - 16.018740, 45.528599`,
+the point alone for the whole video, `3. 16.018740, 45.528599`. `#credits` is the composer's Credits
 field.
 `#date` is the date the proof
 states, and the composer shows its Date field only when the layout uses it. It is

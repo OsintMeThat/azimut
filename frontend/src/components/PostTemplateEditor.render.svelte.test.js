@@ -270,7 +270,8 @@ describe('a video thread template', () => {
     expect(text('place').value).toBe('#description\n#timecode\n\n#coordinates');
     expect(target.querySelector('.chk input')).toBeNull(); // no media post: each post carries its own
     expect(posts().map((p) => p.label)).toEqual(['1 · Recap', '2 · Video', '3 · Road bridge', '4 · Port gate', '5 · Hilltop village']);
-    expect(posts()[0].text).toBe(`${sample('#video')}\n\n1. [0:00–0:07] Road bridge\n2. [0:15] Port gate\n3. Hilltop village\n\n@GeoConfirmed`);
+    expect(posts()[0].text).toBe(`${sample('#video')}\n\n${sample('#scenes')}\n\n@GeoConfirmed`);
+    expect(sample('#scenes')).toBe('1. [0:00–0:07] - 48.850000, 2.350000\n2. [0:15] - 48.860000, 2.360000\n3. 48.870000, 2.370000');
     expect(posts()[3].text).toBe('Port gate\n[0:15]\n\n48.860000, 2.360000');
     expect(posts()[4].text).toBe('Hilltop village\n\n48.870000, 2.370000');
   });

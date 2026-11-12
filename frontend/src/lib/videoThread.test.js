@@ -65,8 +65,10 @@ describe('the slides a thread posts', () => {
     // the plus code tells two places of one region apart
     expect(placeLabel(row({ place: 'Al Jawf, Yemen', plus_code: '7H872G9H+FC' }))).toBe('Al Jawf, Yemen (7H872G9H+FC)');
     expect(placeLabel(row({ place: '', plus_code: '7H872G9H+FC', points: [{ lat: 1, lon: 2 }] }))).toBe('7H872G9H+FC');
-    const unnamed = { ...ANSWER, scenes: [row({ proof: 'Proof 3', png: 'proofs/p3.png', state: 'proved', place: 'Marib, Yemen', points: [{ lat: 1, lon: 2 }] })] };
-    expect(scenesText(videoSlides(unnamed).slides)).toBe('1. [0:15] Marib, Yemen');
+    // what the thread's headings and lists call it; #scenes says its point
+    const unnamed = { ...ANSWER, scenes: [row({ proof: 'Proof 3', png: 'proofs/p3.png', state: 'proved', place: 'Al Jawf, Yemen', plus_code: '7H872G9H+FC', points: [{ lat: 1, lon: 2 }] })] };
+    expect(videoSlides(unnamed).slides[0].label).toBe('Al Jawf, Yemen (7H872G9H+FC)');
+    expect(scenesText(videoSlides(unnamed).slides)).toBe('1. [0:15] - 1.000000, 2.000000');
   });
 });
 
@@ -97,11 +99,27 @@ describe('the time a post prints', () => {
     expect(shortTimecode([])).toBe('');
   });
 
-  it('#scenes is the places one a line, numbered as the sheet numbers them, the title alone without a time', () => {
+  it('#scenes is the places one a line, numbered as the sheet numbers them, each its time and its point', () => {
+    const at = (lat, lon) => ({ points: [{ lat: 'not a point' }, { lat, lon, coords: `${lat}, ${lon}`, label: '' }, { lat: 1, lon: 1 }] });
+    const pointed = posted().map((one, i) => ({ ...one, row: { ...one.row, ...at(16.01874 + i / 100, 45.5285993 + i / 100) } }));
+    expect(scenesText(pointed)).toBe([
+      // a passage, twice: every time, then the first point to six decimals, as a place's post writes it
+      '1. [0:00–0:07] [3:05–3:12] - 16.018740, 45.528599',
+      // an instant
+      '2. [0:03] - 16.028740, 45.538599',
+      '3. [1:05–1:12] - 16.038740, 45.548599',
+      // the whole video: the point alone
+      '4. 16.048740, 45.558599',
+    ].join('\n'));
+    // a proof the analyst named says its point here, its name staying in its own post
+    expect(pointed[0].title).toBe('Road bridge');
+    expect(scenesText([])).toBe('');
+  });
+
+  it('#scenes says what the thread calls a place with no point, as before', () => {
     expect(scenesText(posted())).toBe(
       ['1. [0:00–0:07] [3:05–3:12] Road bridge', '2. [0:03] Square', '3. [1:05–1:12] Market', '4. Tower'].join('\n'),
     );
-    expect(scenesText([])).toBe('');
   });
 });
 

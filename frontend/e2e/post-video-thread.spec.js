@@ -4,11 +4,13 @@ import { CASE_ID, installAppFixture } from './app.fixture.js';
 
 /**
  * A video thread in Post, in a browser: offered for a video of two proofs or more and
- * for no other, laid out Recap first with its recap map previewed and made, or its
- * contact sheet, each drawn by the browser and filed in the case, saved, and opened again
- * as it was. A geolocation of a proof of a video prints the time the proof states.
+ * for no other, laid out Recap first with its recap map previewed and made when the
+ * thread goes out, or its contact sheet, each drawn by the browser and filed in the case,
+ * saved, and opened again as it was. A geolocation of a proof of a video prints the time
+ * the proof states.
  *
- * Nothing leaves the machine: the tiles, the filing and every read are answered here.
+ * Nothing leaves the machine: the tiles, the filing, the extension and every read are
+ * answered here.
  */
 
 const PHOTOS = ['container_yard', 'bridge_channel', 'wando_terminal'].map((name) =>
@@ -46,11 +48,11 @@ const MEDIA = [
     source: { type: 'upload' }, thumbnail: null, folder: '' },
 ];
 // no title until the analyst gives one: the recap opens on its places
-const RECAP = '1. [0:00–0:07] Road bridge\n2. [0:15] Port gate\n\n@GeoConfirmed';
+const RECAP = '1. [0:00–0:07] - 48.850000, 2.350000\n2. [0:15] - 48.860000, 2.360000\n\n@GeoConfirmed';
 
 /** A tile of one colour, as the app's tile route would answer one. */
 const TILE = Buffer.from(
-  'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAIAAACQd1PeAAAADElEQVR4nGOQUOAGAACpADOjlmHJAAAAAElFTkSuQmCC', 'base64');
+  'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAIAAACQd1PeAAAADElEQVR4nGPoWlIHAANoAa2IbRJcAAAAAElFTkSuQmCC', 'base64');
 
 /** The reads a thread makes beyond the shared fixture, and the sheet and the map it files. */
 async function threadRoutes(page) {
@@ -89,6 +91,23 @@ async function threadRoutes(page) {
   return Object.assign(sheets, { maps, tiles });
 }
 
+/** The bridge, as the extension marks the page and answers a hand-off. */
+async function fakeExtension(page) {
+  await page.addInitScript(() => {
+    window.__handoffs = [];
+    // as the content script does at document_start, once the page has its root
+    const mark = () => { document.documentElement.dataset.azimutCaptureExtension = '0.3.4'; };
+    if (document.documentElement) mark();
+    else document.addEventListener('readystatechange', mark, { once: true });
+    window.addEventListener('message', (event) => {
+      const msg = event.data;
+      if (msg?.channel !== 'azimut-capture-ext' || msg.type !== 'post-handoff') return;
+      window.__handoffs.push(msg.payload);
+      window.postMessage({ channel: 'azimut-capture-ext', type: 'post-handoff-result', id: msg.id, ok: true }, window.location.origin);
+    });
+  });
+}
+
 const home = (page) => page.getByTestId('post-home');
 const posts = (page) => page.locator('.tweet-block');
 const lookups = Object.fromEntries(PROOFS.map((row) => [row.png, { id: `p-${row.name}`, type: 'proof' }]));
@@ -109,9 +128,10 @@ test('a video of one proof is offered no thread, and its proof still waits for i
   fixture.expectNoUnexpectedRequests();
 });
 
-test('Recap first opens on a map previewed with no tile asked, shows it on a press, and files it once made', async ({ page }) => {
+test('Recap first opens on a map previewed with no tile asked, shows it on a press, and makes it once on Publish for the hand-off', async ({ page }) => {
   const fixture = await installAppFixture(page, { proofList: PROOFS, media: MEDIA, lookupEntities: lookups });
   const sheets = await threadRoutes(page);
+  await fakeExtension(page);
   await page.goto('/#post');
   await home(page).getByRole('button', { name: 'New post' }).click();
   await page.getByRole('dialog', { name: 'New post' }).locator('.np-card', { hasText: 'Video thread' }).click();
@@ -130,16 +150,30 @@ test('Recap first opens on a map previewed with no tile asked, shows it on a pre
   await expect.poll(() => sheets.tiles.some((path) => path.startsWith('/api/tiles/osm/'))).toBe(true);
   await recap.getByText('Line in video order').click();
 
-  await recap.getByRole('button', { name: 'Make the map' }).click();
-  await expect(recap.getByTestId('recap-made')).toHaveText(/On the recap/);
+  // no button makes it, and a choice files nothing: the recap waits for the map
+  await expect(recap.getByRole('button', { name: 'Make the map' })).toHaveCount(0);
+  const pending = posts(page).first().getByTestId('recap-map-pending');
+  await expect(pending).toContainText('Recap map');
+  expect(sheets.maps).toHaveLength(0);
+
+  // Publish makes it, then hands the thread over with the map on the recap
+  await page.locator('[data-guide="post.publish"]').click();
+  await expect.poll(() => page.evaluate(() => window.__handoffs.length)).toBe(1);
   expect(sheets.maps).toHaveLength(1);
   expect(sheets.maps[0].jpeg).toBe(true);
   expect(sheets).toHaveLength(0);
+  const [handed] = await page.evaluate(() => window.__handoffs);
+  expect(handed.posts[0].files).toEqual([MAP]);
+  await expect(pending).toHaveCount(0);
   await expect(posts(page).first().locator('.first-pics img')).toHaveAttribute('src', /recap%20map\.jpg/);
   await expect.poll(() => fixture.draftWrites.at(-1)?.state?.map).toBe(MAP);
   expect(fixture.draftWrites.at(-1).state).toMatchObject({
     recap: 'map', firstMedia: [MAP], mapOptions: { background: 'map', line: true },
   });
+  // the same choices again: the same map, not made twice
+  await page.locator('[data-guide="post.publish"]').click();
+  await expect.poll(() => page.evaluate(() => window.__handoffs.length)).toBe(2);
+  expect(sheets.maps).toHaveLength(1);
   fixture.expectNoUnexpectedRequests();
 });
 

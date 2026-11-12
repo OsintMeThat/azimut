@@ -21,9 +21,9 @@
   import { threadPostLabel, videoLayout, videoLink, videoPosts } from '../lib/videoPost.js';
   import { overWords, videoFits } from '../lib/videoLimits.js';
   import { videoName } from '../lib/proofScene.js';
-  import { fileRecapMap, fileThreadSheet } from './post/threadSheet.js';
+  import { fileThreadSheet, makeRecapMap } from './post/threadSheet.js';
   import RecapMap from './post/RecapMap.svelte';
-  import { mapOptions, recapFit, recapPlaces } from '../lib/recapMap.js';
+  import { BACKGROUND_NAMES, mapOptions, recapFit, recapPlaces } from '../lib/recapMap.js';
   import { defaultProofTemplate } from '../lib/proofTemplates.js';
   import { postLabel, THREAD_MIN } from './post/postHome.js';
   import { extensionWindowPutAway, putExtensionWindowAway } from './post/extensionWindow.js';
@@ -476,9 +476,11 @@
       video, order: layout.order, texts: { video: layout.video, place: layout.place }, first: null, extra: [],
       sheet: null, clip: null, link: false, slides: null, left: [], seconds: null, facts: {}, cut: 0, sheetState: '',
       // Recap first's picture: the proofs sheet, as every thread had before, or the places
-      // on a map (`lib/recapMap.js`), its choices and its file once made. `mapLive` is
+      // on a map (`lib/recapMap.js`), its choices, and the file made when the thread last
+      // needed its picture with the choices it was made for (`mapFor`). `mapLive` is
       // whether its tiles may be asked for, never saved: the analyst pressed for the map.
-      recap: 'sheet', map: null, mapOptions: mapOptions(), mapLive: false,
+      // `mapState` is 'making' while the map is drawn and filed.
+      recap: 'sheet', map: null, mapFor: null, mapOptions: mapOptions(), mapLive: false, mapState: '',
       // the recap and the video's text each order was left with in this post, and the
       // words of each post the analyst rewrote, kept through an order that has no such post
       byOrder: {},
@@ -494,7 +496,9 @@
       ...newThread(path(s.video)),
       title: typeof s.title === 'string' ? s.title : null,
       recap: s.recap === 'map' ? 'map' : 'sheet',
+      // a draft keeps its map only while it is the one its choices draw
       map: path(s.map),
+      mapFor: path(s.map) ? mapOptions(s.mapOptions) : null,
       mapOptions: mapOptions(s.mapOptions),
       order: layout.order,
       texts: { video: layout.video, place: layout.place },
@@ -517,7 +521,7 @@
       ...(thread.extra.length ? { extra: thread.extra.map((one) => ({ text: one.text })) } : {}),
       ...(thread.sheet ? { sheet: thread.sheet } : {}),
       ...(thread.recap === 'map' ? { recap: 'map', mapOptions: { ...thread.mapOptions } } : {}),
-      ...(thread.map ? { map: thread.map } : {}),
+      ...(madeMap() ? { map: thread.map } : {}),
       ...(thread.clip ? { clip: thread.clip } : {}),
       ...(thread.link ? { link: true } : {}),
     };
@@ -573,28 +577,91 @@
     fileSheetIfShown();
   }
 
-  /** A choice of the map changed: the map made before is no longer it, and is made again. */
+  /** Whether two sets of the map's choices draw the same map. */
+  const sameMap = (a, b) => !!a && !!b && JSON.stringify(mapOptions(a)) === JSON.stringify(mapOptions(b));
+
+  /** The recap map made for the thread's choices as they stand, or null. */
+  const madeMap = () => (thread?.map && sameMap(thread.mapFor, thread.mapOptions) ? thread.map : null);
+
+  // The recap carries the map and none made matches its choices: it is made when the
+  // thread needs its picture (Publish, the hand-off, Copy, Download), never on a choice.
+  const mapPending = $derived(!!thread?.slides && thread.order === 'recap' && thread.recap === 'map'
+    && recapFit(recapPlaces(thread.slides)).ok && !madeMap());
+
+  /** A choice of the map changed: the recap carries the map made for it, or waits for one. Nothing is filed. */
   function setMapOptions(patch) {
     if (!thread) return;
+    const before = madeMap();
     thread.mapOptions = mapOptions({ ...thread.mapOptions, ...patch });
     // a ground picked is a press for the map
     if ('background' in patch) thread.mapLive = true;
-    if (thread.map) {
-      thread.map = null;
+    if (madeMap() !== before) layoutThread();
+  }
+
+  // The making under way, shared by every press that needs the map: `{ options, run }`.
+  let mapMaking = null;
+
+  /** Draw the map whole for these choices and file it: the recap carries it. Answers `{ ok, error? }`. */
+  async function makeMapFor(options) {
+    const caseId = caseState.current?.id;
+    const run = postRun;
+    thread.mapState = 'making';
+    try {
+      const path = await makeRecapMap(caseId, { video: thread.video, slides: thread.slides, options });
+      if (run !== postRun || !thread) return { ok: false, gone: true };
+      thread.map = path;
+      thread.mapFor = options;
+      // its tiles were asked on this press: the preview shows them too
+      thread.mapLive = true;
       layoutThread();
+      await tick();
+      if (altOn) await prefillAlt(run);
+      return { ok: true };
+    } catch (error) {
+      return { ok: false, error, gone: run !== postRun || !thread };
+    } finally {
+      if (run === postRun && thread) thread.mapState = '';
+      if (mapMaking?.options === options) mapMaking = null;
     }
   }
 
-  /** The map made, filed in Media as made from the video: the recap carries it. */
-  async function placeRecapMap(blob) {
-    const caseId = caseState.current?.id;
-    if (!thread || !caseId) return;
-    const run = postRun;
-    const path = await fileRecapMap(caseId, { video: thread.video, blob });
-    if (run !== postRun || !thread) return;
-    thread.map = path;
-    thread.mapLive = true;
-    layoutThread();
+  /**
+   * The recap map a press needs, made first when the recap carries the map and none made
+   * matches its choices. Answers whether the press may go on; when the map could not be
+   * made, `stopped` says so, with a report to copy.
+   */
+  async function readyRecapMap(stopped) {
+    // a choice changed while it was made: made again for the choice that stands
+    for (let tries = 0; mapPending && tries < 3; tries += 1) {
+      const options = { ...thread.mapOptions };
+      if (!mapMaking || !sameMap(mapMaking.options, options)) mapMaking = { options, run: makeMapFor(options) };
+      const made = await mapMaking.run;
+      if (made.gone) return false;
+      if (!made.ok) {
+        sayMapFailed(stopped, made.error, options);
+        return false;
+      }
+    }
+    return !mapPending;
+  }
+
+  /** The map could not be made: one sentence, and what happened for a report. */
+  function sayMapFailed(stopped, error, options) {
+    const report = [
+      'Recap map not made',
+      `Video: ${thread?.video ?? ''}`,
+      `Places: ${recapPlaces(thread?.slides ?? []).length}`,
+      `Background: ${BACKGROUND_NAMES[options.background]}${options.line ? ', line' : ''}${options.signature ? ', signature' : ''}${options.mark ? ', Azimut mark' : ''}`,
+      `Error: ${error?.message ?? String(error)}`,
+    ].join('\n');
+    toast(stopped, 'warn', 12000, { label: 'Copy report', onClick: () => copyText(report, { said: 'Report copied' }) });
+  }
+
+  /** The recap's map, made first when it is to make, downloaded. */
+  async function downloadRecapMap() {
+    if (!(await readyRecapMap('The recap map could not be made, so nothing was downloaded.'))) return;
+    const map = madeMap();
+    if (map) downloadPostMedia([map]);
   }
 
   /** What `#video` says: the thread's title, or an older draft's video title in Media. */
@@ -620,7 +687,7 @@
       facts: thread.facts,
       extra: thread.extra,
       recap: thread.recap,
-      map: thread.map,
+      map: madeMap(),
     };
   }
 
@@ -1140,6 +1207,18 @@
   async function copyAll(showToast = true, first = tweet1) {
     const parts = threadParts(first);
     return copyText(parts.map(bidiSafe).join('\n\n---\n\n'), { said: 'All posts copied', quiet: !showToast });
+  }
+
+  // A thread's recap needs its picture once its words are copied: the words go first,
+  // while the press still lets the page write the clipboard, then the map is made.
+  async function copyAllPressed() {
+    await copyAll();
+    await readyRecapMap('The posts are copied, but the recap map could not be made.');
+  }
+
+  async function copyFirst() {
+    await copy(tweet1);
+    await readyRecapMap('The post is copied, but the recap map could not be made.');
   }
 
   // ---- media picker -------------------------------------------------------
@@ -2137,8 +2216,8 @@
   }
 
   // Where the composer is, in the address: the saved draft open, or none. Opening a
-  // draft is the step Back retraces; a save naming it, a rename or a discard only
-  // rewrite the step it is on.
+  // draft and going home are the steps Back retraces; a save naming it, a rename or a
+  // discard only rewrite the step it is on.
   const where = () => ({ draft: draftName });
   $effect(() => settlePlace('post', where()));
   onDestroy(onBackForward('post', async (to) => {
@@ -2630,10 +2709,14 @@
     await requestLoadDraft(draft.name);
   }
 
-  /** Back to the home, once what is pending is written. */
+  /**
+   * Back to the home, once what is pending is written. It is a step Back retraces, as in
+   * Geo Proof, so the browser's Back from the home opens the post again.
+   */
   async function backToHome() {
     if (!(await letGo())) return;
     resetDraft();
+    settlePlace('post', where(), { navigate: true });
   }
 
   async function publish() {
@@ -2643,18 +2726,32 @@
       // Social intents prefill the first post only. The rest is copied as replies, and a
       // clipboard the browser keeps shut costs the replies, never the hand-off itself.
       const copied = await copyAll(false);
+      // a thread's recap goes with its map, made first, or nothing is opened
+      const making = mapPending;
+      if (!(await readyRecapMap(`The recap map could not be made, so ${targetInfo.label} was not opened.`))) return;
       if (await tryHandOff()) return;
       const url = postComposeUrl(target, bidiSafe(tweet1));
-      window.open(url, '_blank', 'noopener,noreferrer');
-      markOpened();
-      toast(
-        copied ? `Opened ${targetInfo.label}. Posts copied for replies.` : `Opened ${targetInfo.label}. Copy the replies from here.`,
-        'info',
-        3200,
-      );
+      // the browser may no longer let the page open a tab once the map is made
+      if (making && globalThis.navigator?.userActivation?.isActive === false) {
+        toast(`The recap map is made. Open ${targetInfo.label} to post.`, 'info', 0,
+          { label: `Open ${targetInfo.label}`, onClick: () => openCompose(url, copied) });
+        return;
+      }
+      openCompose(url, copied);
     } finally {
       publishing = false;
     }
+  }
+
+  /** The platform's composer opened in a tab, its first post in it. */
+  function openCompose(url, copied) {
+    window.open(url, '_blank', 'noopener,noreferrer');
+    markOpened();
+    toast(
+      copied ? `Opened ${targetInfo.label}. Posts copied for replies.` : `Opened ${targetInfo.label}. Copy the replies from here.`,
+      'info',
+      3200,
+    );
   }
 </script>
 
@@ -2832,8 +2929,8 @@
           <!-- the video, its places, the order, and what goes when the video is too long -->
           <div class="field">
             {#snippet recapPicture()}
-              <RecapMap slides={thread.slides} recap={thread.recap} options={thread.mapOptions} live={thread.mapLive} made={thread.map}
-                onrecap={setRecap} onoptions={setMapOptions} onlive={() => (thread.mapLive = true)} onmake={placeRecapMap} />
+              <RecapMap slides={thread.slides} recap={thread.recap} options={thread.mapOptions} live={thread.mapLive}
+                onrecap={setRecap} onoptions={setMapOptions} onlive={() => (thread.mapLive = true)} />
             {/snippet}
             <VideoThreadPanel title={thread.video ? videoName(thread.video, titleByPath.get(thread.video)) : ''}
               threadTitle={threadTitle()} ontitle={setThreadTitle} recap={recapPicture}
@@ -3024,7 +3121,7 @@
               </button>
             {/if}
             <span class="counter" class:over={tweet1Over} title={targetInfo.limitHelp}>{tweet1Count}/{targetInfo.limitLabel}</span>
-            <button class="btn btn-ghost btn-sm" onclick={() => copy(tweet1)} disabled={!tweet1.trim()}>
+            <button class="btn btn-ghost btn-sm" onclick={copyFirst} disabled={!tweet1.trim()}>
               <Icon name="copy" size={13} /> Copy
             </button>
           </div>
@@ -3038,7 +3135,21 @@
           <!-- The proof is this post's attachment, so it rides on this card the way
                every other post carries its media. Read across the column, the thread
                is what will be published, picture by picture. -->
-          {#if caseState.current && !geolocation}
+          {#if caseState.current && mapPending}
+            <!-- the recap's map, made when the thread needs its picture -->
+            <div class="media-attach first-media" data-testid="recap-map-pending">
+              {#if thread.mapState === 'making'}
+                <span class="map-making" role="status"><Icon name="satellite" size={13} /> Making the map…</span>
+              {:else}
+                <span class="attach-chip" title="Made and filed in Media when you publish, copy or download the thread">
+                  <Icon name="satellite" size={12} /> Recap map
+                </span>
+                <button class="btn btn-ghost btn-sm" onclick={downloadRecapMap} title="Make the map and download it">
+                  <Icon name="download" size={13} /> Download
+                </button>
+              {/if}
+            </div>
+          {:else if caseState.current && !geolocation}
             <!-- its own pictures or video, chosen like any media post's -->
             <div class="media-attach first-media">
               <div class="media-tabs">
@@ -3281,7 +3392,7 @@
           <button class="btn btn-ghost btn-sm" onclick={addExtraTweet}>
             <Icon name="plus" size={13} /> Add context post
           </button>
-          <button class="btn btn-ghost btn-sm" onclick={copyAll}>
+          <button class="btn btn-ghost btn-sm" onclick={copyAllPressed}>
             <Icon name="copy" size={13} /> Copy all
           </button>
         </div>
@@ -3732,6 +3843,13 @@
     color: var(--text-3);
   }
   .chip-x:hover { color: var(--danger); }
+  .map-making {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    color: var(--text-2);
+    font-size: var(--fs-sm);
+  }
 
   /* media picker */
   .picker-empty {

@@ -154,6 +154,7 @@ packages = ["src/azimut"]
 [tool.hatch.build.targets.wheel.force-include]
 "extension/manifest.json" = "azimut/extension/manifest.json"
 "extension/background.js" = "azimut/extension/background.js"
+"extension/banner.js" = "azimut/extension/banner.js"
 "extension/bridge.js" = "azimut/extension/bridge.js"
 "extension/handoff.js" = "azimut/extension/handoff.js"
 "extension/mapmath.js" = "azimut/extension/mapmath.js"

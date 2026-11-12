@@ -142,6 +142,32 @@ test('Back between proofs asks before leaving unsaved changes, and keeps them wh
   fixture.expectNoUnexpectedRequests();
 });
 
+test('Proofs goes back to the home, and Back opens the proof again', async ({ page }) => {
+  const fixture = await withProofs(page);
+  await page.goto('/#proof');
+  const proofs = page.locator('.tool-header').getByRole('button', { name: 'Proofs', exact: true });
+  await expect(page.getByTestId('proof-home')).toBeVisible();
+  await expect(proofs).toHaveCount(0);
+
+  await openProof(page, PROOFS['proof-a']);
+  await expect(proofs).toHaveAttribute('title', 'Back to the proofs of this case');
+  await proofs.click();
+  await expect(page.getByTestId('proof-home')).toBeVisible();
+  await expect(proofs).toHaveCount(0);
+  await expect(page.getByRole('alertdialog')).toHaveCount(0);
+  expect(await hashOf(page)).toBe('#proof');
+
+  await page.goBack();
+  const name = page.getByRole('textbox', { name: 'Proof name' });
+  await expect(name).toHaveValue(PROOFS['proof-a']);
+  await expect.poll(() => hashOf(page)).toBe('#proof?proof=proof-a');
+
+  await page.goForward();
+  await expect(page.getByTestId('proof-home')).toBeVisible();
+  await expect.poll(() => hashOf(page)).toBe('#proof');
+  fixture.expectNoUnexpectedRequests();
+});
+
 test('opening another proof asks first too, so the list cannot drop an edit', async ({ page }) => {
   const fixture = await withProofs(page);
   await page.goto('/#proof');
@@ -272,6 +298,31 @@ test('Back between drafts saves the edited post on the way, and asks nothing', a
 
   await page.goForward();
   await expect(description).toHaveValue('Smoke over the depot, east side');
+  fixture.expectNoUnexpectedRequests();
+});
+
+test('Posts goes back to the home, and Back opens the post again, as Proofs does', async ({ page }) => {
+  const fixture = await installAppFixture(page, {
+    drafts: DRAFTS,
+    lookupEntities: Object.fromEntries(Object.keys(DRAFTS).map((name) => [`.drafts/${name}.json`, { id: name }])),
+  });
+  await page.goto('/#post');
+  const posts = page.locator('.tool-header').getByRole('button', { name: 'Posts', exact: true });
+  await openDraft(page, 'Thread A');
+  await expect.poll(() => hashOf(page)).toBe('#post?draft=thread-a');
+
+  await posts.click();
+  await expect(page.getByTestId('post-home')).toBeVisible();
+  await expect(page.getByRole('alertdialog')).toHaveCount(0);
+  await expect.poll(() => hashOf(page)).toBe('#post');
+
+  await page.goBack();
+  await expect(page.getByRole('textbox', { name: 'Post name' })).toHaveValue('Thread A');
+  await expect.poll(() => hashOf(page)).toBe('#post?draft=thread-a');
+
+  await page.goForward();
+  await expect(page.getByTestId('post-home')).toBeVisible();
+  await expect.poll(() => hashOf(page)).toBe('#post');
   fixture.expectNoUnexpectedRequests();
 });
 
