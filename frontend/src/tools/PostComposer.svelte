@@ -2216,8 +2216,8 @@
   }
 
   // Where the composer is, in the address: the saved draft open, or none. Opening a
-  // draft is the step Back retraces; a save naming it, a rename or a discard only
-  // rewrite the step it is on.
+  // draft and going home are the steps Back retraces; a save naming it, a rename or a
+  // discard only rewrite the step it is on.
   const where = () => ({ draft: draftName });
   $effect(() => settlePlace('post', where()));
   onDestroy(onBackForward('post', async (to) => {
@@ -2709,10 +2709,14 @@
     await requestLoadDraft(draft.name);
   }
 
-  /** Back to the home, once what is pending is written. */
+  /**
+   * Back to the home, once what is pending is written. It is a step Back retraces, as in
+   * Geo Proof, so the browser's Back from the home opens the post again.
+   */
   async function backToHome() {
     if (!(await letGo())) return;
     resetDraft();
+    settlePlace('post', where(), { navigate: true });
   }
 
   async function publish() {
