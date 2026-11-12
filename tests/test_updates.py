@@ -246,7 +246,7 @@ def test_update_endpoint_links_a_binary_to_its_download(client, monkeypatch, tmp
 # shipped file really changes, set the manifest to the current __version__ and
 # record the new digest here (the failing test prints it).
 EXTENSION_VERSION = "0.3.4"
-EXTENSION_PAYLOAD = "8f79b02c9afba8552bc26095cb9d0927b3a10145d46e278d988ef1f3b2d6c6c4"
+EXTENSION_PAYLOAD = "ebcd8710378c6b85d3cfbdcaee926b6083936d55b064519eb635817b0901154d"
 
 # The digest itself lives in engine/extinstall.py, because the update button
 # compares the same number: what the app ships against what the installed folder

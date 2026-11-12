@@ -7,7 +7,8 @@
  * posts"). It writes, attaches and describes the pictures it was given a text
  * for; it never submits. The button that publishes is the analyst's, exactly as it
  * is when they paste the thread by hand — which is still what happens whenever this
- * script gives up.
+ * script gives up. Each step it takes is said on Azimut's banner on the page
+ * (`banner.js`), which the worker puts up first.
  *
  * **Runs in the page's own world**, which is the only place this works. An
  * extension's scripts live in a separate world by default: the events they make
@@ -489,6 +490,36 @@
     return new File([bytes], file.name, { type: file.type });
   }
 
+  // The step the banner says now, so a step said twice is said once.
+  let saying = null;
+
+  /**
+   * Tell Azimut's banner on this page the step under way (`banner.js`). The worker
+   * puts the banner up; on a page without one, nothing is said and nothing changes.
+   */
+  function say(text) {
+    if (text === saying) return;
+    saying = text;
+    try {
+      document.querySelector("azimut-banner")?.azimutSay?.({ kind: "busy", text });
+    } catch {
+      // the banner is a courtesy: the thread goes in without it
+    }
+  }
+
+  /** What these files are called on the banner: pictures, a video, or files when mixed. */
+  function mediaNoun(files) {
+    const kinds = new Set(files.map((file) => String(file?.type ?? "").split("/")[0]));
+    if (kinds.size !== 1) return "file";
+    return kinds.has("image") ? "picture" : kinds.has("video") ? "video" : "file";
+  }
+
+  /** The banner's words while a post's files go in: `at` of the thread's `files` handed so far. */
+  function addingWords(at, files) {
+    const noun = mediaNoun(files);
+    return files.length === 1 ? `Adding the ${noun}…` : `Adding ${noun}s ${at} of ${files.length}…`;
+  }
+
   /**
    * Fill one post. Returns null, or what to tell the analyst about this one.
    *
@@ -499,7 +530,7 @@
    * halfway through the text already there. What the analyst got was a thread
    * saying everything twice. Emptiness is the question that can be answered.
    */
-  async function fill(site, box, post, index) {
+  async function fill(site, box, post, index, adding = () => {}) {
     // Focused even when there is nothing to type into it: a composer hands a
     // picture to the post it calls active, and a post carrying an image and no
     // text is never typed into.
@@ -514,6 +545,7 @@
     // One input per post where a site has them, so the pictures land under the
     // post they belong to rather than all under the first.
     const inputs = found(site.files);
+    adding(post.files.length);
     const transfer = new DataTransfer();
     for (const file of post.files) transfer.items.add(toFile(file));
     attach(site, box, transfer, inputs[index] ?? inputs[0]);
@@ -733,6 +765,8 @@
    */
   async function describeAll(site, written) {
     const missed = [];
+    const pictures = written.flatMap(({ post }) => (post.files ?? []).filter((file) => file.alt));
+    if (site.alt && pictures.length) say(pictures.length === 1 ? "Describing the picture…" : "Describing the pictures…");
     for (const { box, post, number } of written) {
       if (!site.alt || !(post.files ?? []).some((file) => file.alt)) continue;
       step = `alt-${number}`;
@@ -768,6 +802,8 @@
    *    file, which is what a "+" is held back for);
    *  - `number`: the first of these posts' place in the whole thread, for what
    *    is said about them;
+   *  - `total`: how many posts the whole thread holds, when it is more than these
+   *    and the ones before them (a reply in several posts), for the banner;
    *  - `probe`: fill nothing, and say only what the page holds (see `probe`).
    *
    * What comes back says `filled`, the posts filled, and `through`, how many of
@@ -787,6 +823,15 @@
     if (!posts?.length) return { filled: 0 };
     const number = Number.isInteger(thread.number) && thread.number > 0 ? thread.number : 1;
     const more = thread.more === true;
+    // The banner's words: "Post 2 of 3…" in a thread, and the pictures as they go in.
+    const total = Math.max(number - 1 + posts.length, Number.isInteger(thread.total) ? thread.total : 0);
+    const postWords = (n) => (total > 1 ? `Post ${n} of ${total}…` : "Filling your post…");
+    const media = posts.flatMap((post) => post.files ?? []);
+    let added = 0;
+    const adding = (count) => {
+      added += count;
+      say(addingWords(added, media));
+    };
     describing = posts.some((post) => (post.files ?? []).some((file) => file?.alt));
     // Boxes already in the composer ahead of these posts, for the file input of each.
     const offset = more ? number - 1 : 0;
@@ -821,6 +866,7 @@
     };
 
     step = thread.reply === true ? "open-reply" : "open-composer";
+    say(postWords(number));
     if (thread.reply === true && !(await openReply(site))) {
       return stop(
         number > 1
@@ -841,6 +887,7 @@
     for (let i = 0; i < posts.length; i += 1) {
       if (i > 0 || more) {
         step = `add-${number + i}`;
+        say(postWords(number + i));
         // The **last** one. A composer that draws a footer under every post
         // draws an add button under every post too, and only the one at the end
         // appends — the others insert a post in the middle of the thread.
@@ -865,7 +912,7 @@
       }
       step = `fill-${number + i}`;
       if (!box) return stop("Lost the composer while filling it.");
-      const trouble = await fill(site, box, { ...posts[i], number: number + i }, offset + i);
+      const trouble = await fill(site, box, { ...posts[i], number: number + i }, offset + i, adding);
       written.push({ box, post: posts[i], number: number + i });
       if (trouble) {
         notes.push(trouble);

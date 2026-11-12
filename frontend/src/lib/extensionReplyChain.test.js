@@ -25,6 +25,7 @@ const read = (name) => readFileSync(join(here, `../../../extension/${name}`), 'u
 const WORKER = read('background.js');
 const FILLER = read('handoff.js');
 const READER = read('postlink.js');
+const BANNER = read('banner.js');
 
 const WATCH_MS = 10 * 60 * 1000;
 const SOURCE_ID = '1850000000000000000';
@@ -107,6 +108,9 @@ function browser({ add = false, clipboard = true } = {}) {
   const notes = [];
   const copied = [];
   const sends = []; // presses on the button that sends
+  const banners = []; // what the banner on the tab was told, by the worker and the filler
+  const wrapped = new WeakSet();
+  let injecting = false;
   const session = {};
   let worker;
 
@@ -121,6 +125,7 @@ function browser({ add = false, clipboard = true } = {}) {
   /** A page loaded in the tab: a new document, so no reader on it yet. */
   function load(url) {
     tab.world?.AzimutPostLink?.watch({ site: '' }); // the old page's reader goes with it
+    document.querySelector('azimut-banner')?.remove(); // and its banner
     tab.world = null;
     tab.listeners = [];
     tab.url = url;
@@ -216,6 +221,27 @@ function browser({ add = false, clipboard = true } = {}) {
           )(where(), FakeDataTransfer, FakeClipboardEvent, FakeDragEvent, FakeFile);
           return [{ result }];
         }
+        if (files?.[0] === 'banner.js') {
+          // the page's own world, like the filler: what to say is on the window
+          if (window.__AZIMUT_BANNER__) banners.push(window.__AZIMUT_BANNER__);
+          injecting = true;
+          let result;
+          try {
+            result = new Function(`const shown = ${BANNER}\n; return shown;`)();
+          } finally {
+            injecting = false;
+          }
+          const host = document.querySelector('azimut-banner');
+          if (host && !wrapped.has(host)) {
+            wrapped.add(host);
+            const say = host.azimutSay;
+            host.azimutSay = (state) => {
+              if (!injecting) banners.push(state);
+              say(state);
+            };
+          }
+          return [{ result }];
+        }
         if (files?.[0] === 'postlink.js') {
           tab.world = {};
           new Function('globalThis', 'chrome', 'browser', 'location', READER)(tab.world, contentChrome, undefined, where());
@@ -274,7 +300,15 @@ function browser({ add = false, clipboard = true } = {}) {
     tab.open = false;
     for (const cb of removed) cb(7);
   };
-  const made = { worker, tab, told, notes, copied, sends, fire, pressSend, box, close };
+  /** What the banner on the tab shows now: `{ kind, text, note }`, or null when there is none. */
+  const shown = () => {
+    const root = document.querySelector('azimut-banner')?.shadowRoot;
+    if (!root) return null;
+    const card = root.querySelector('.card');
+    const kind = ['busy', 'ready', 'wait', 'stopped'].find((one) => card.classList.contains(one));
+    return { kind, text: root.querySelector('.text').textContent, note: root.querySelector('.note').textContent };
+  };
+  const made = { worker, tab, told, notes, copied, sends, banners, shown, fire, pressSend, box, close };
   browsers.push(made);
   return made;
 }
@@ -298,6 +332,7 @@ afterEach(() => {
     if (b.tab.open) b.close();
     b.tab.world?.AzimutPostLink?.watch({ site: '' }); // its reader goes with the tab
   }
+  for (const banner of document.querySelectorAll('azimut-banner')) banner.remove();
   vi.useRealTimers();
   delete globalThis.AzimutPostLink;
 });
@@ -553,5 +588,118 @@ describe('what the app hands over', () => {
     await new Promise((r) => setTimeout(r, 300));
     expect(b.tab.url).toBe(SOURCE);
     expect(b.told).toEqual([]);
+  }, 30000);
+});
+
+/**
+ * Azimut's banner on the tab (extension/banner.js) while the hand-off works: the
+ * worker puts it up and says how things begin and end, the filler says each step.
+ */
+describe('the banner on the composer tab', () => {
+  const texts = (b) => b.banners.map((state) => (state.end ? 'END' : state.text));
+
+  it('steps through the files and the posts, says Ready, then is gone', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    const b = browser({ add: true });
+    await b.worker.handOff(payload);
+    const until = Date.now() + 15000;
+    while (b.shown()?.kind !== 'ready' && Date.now() < until) await vi.advanceTimersByTimeAsync(50);
+
+    expect(texts(b)).toEqual([
+      'Filling your post…',
+      'Bringing the picture from Azimut…',
+      'Post 1 of 3…',
+      'Adding the picture…',
+      'Post 2 of 3…',
+      'Post 3 of 3…',
+      'Ready. Check it, then press Reply.',
+    ]);
+    expect(b.shown()).toEqual({ kind: 'ready', text: 'Ready. Check it, then press Reply.', note: '' });
+
+    // the analyst sends, and the hand-off is over: Ready ends on its own all the same
+    b.pressSend();
+    await vi.advanceTimersByTimeAsync(400);
+    expect(texts(b).at(-1)).toBe('END');
+    await vi.advanceTimersByTimeAsync(6500);
+    expect(b.shown()).toBeNull();
+    expect(b.sends).toEqual([]);
+  }, 30000);
+
+  it('says what a reply in several posts waits on, in the words of the notification', async () => {
+    const b = browser();
+    await b.worker.handOff(payload);
+    await heard(b.notes, 'Post 1 of 3 is ready. Press Reply, then Azimut opens the next under it.');
+    expect(b.shown()).toEqual({
+      kind: 'wait',
+      text: 'Post 1 of 3 is ready. Press Reply, then Azimut opens the next under it.',
+      note: '',
+    });
+
+    b.pressSend();
+    await heard(b.notes, 'Post 2 of 3 is ready under your reply.');
+    expect(b.shown()).toEqual({
+      kind: 'wait',
+      text: 'Post 2 of 3 is ready under your reply.',
+      note: 'Press Reply, then Azimut opens the next under it.',
+    });
+    // the reply's own page put the banner up again, at the post it is on
+    expect(texts(b)).toContain('Post 2 of 3…');
+
+    b.pressSend(snowflake(Date.now() + 1000));
+    await heard(b.notes, 'Post 3 of 3 is ready under your reply.');
+    expect(b.shown()).toMatchObject({ kind: 'ready', text: 'Ready. Check it, then press Reply.' });
+    expect(b.sends).toEqual([]);
+  }, 40000);
+
+  it('keeps a stop up, naming the clipboard only when the rest was put there', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    const b = browser();
+    await b.worker.handOff(payload);
+    await heard(b.notes, 'Post 1 of 3 is ready');
+    await vi.advanceTimersByTimeAsync(WATCH_MS);
+    await heard(b.notes, 'No reply was seen within 10 minutes');
+    await vi.advanceTimersByTimeAsync(100);
+    expect(b.shown()).toEqual({
+      kind: 'stopped',
+      text: 'Stopped: No reply was seen within 10 minutes, so Azimut stopped after post 1 of 3.',
+      note: 'The rest is on your clipboard.',
+    });
+    // the hand-off is over, and the stop stays until it is closed
+    await vi.advanceTimersByTimeAsync(WATCH_MS);
+    expect(b.shown()?.kind).toBe('stopped');
+    document.querySelector('azimut-banner').shadowRoot.querySelector('.close').click();
+    expect(b.shown()).toBeNull();
+
+    const refused = browser({ clipboard: false });
+    await refused.worker.handOff(payload);
+    await heard(refused.notes, 'Post 1 of 3 is ready');
+    await vi.advanceTimersByTimeAsync(WATCH_MS);
+    await heard(refused.notes, 'No reply was seen within 10 minutes');
+    await vi.advanceTimersByTimeAsync(100);
+    expect(refused.shown()).toMatchObject({ kind: 'stopped', note: '' });
+  }, 30000);
+
+  it('says where a thread stopped in the hand-off\'s own sentence', async () => {
+    const b = browser();
+    const thread = { url: 'https://x.com/compose/post?text=One', caseId: 'case-1', posts: [POSTS[1], POSTS[2]] };
+    await b.worker.handOff(thread);
+    await new Promise((r) => setTimeout(r, 50));
+    document.querySelector('[data-testid="reply"]').click();
+    await heard(b.notes, 'Could not add the next post to the thread.');
+    await new Promise((r) => setTimeout(r, 50));
+    expect(b.shown()).toEqual({ kind: 'stopped', text: 'Stopped: Could not add the next post to the thread.', note: '' });
+    expect(texts(b)).toEqual(['Filling your post…', 'Post 1 of 2…', 'Post 2 of 2…', 'Stopped: Could not add the next post to the thread.']);
+  }, 30000);
+
+  it('carries a description the reply box would not take into its last word', async () => {
+    const b = browser();
+    const described = [{ ...POSTS[0], alt: { 'proofs/depot.png': 'A depot north of the bridge' } }, ...POSTS.slice(1)];
+    await b.worker.handOff({ ...payload, posts: described });
+    await heard(b.notes, 'Post 1 of 3 is ready. Press Reply, then Azimut opens the next under it.');
+    expect(b.shown()).toEqual({
+      kind: 'wait',
+      text: 'Post 1 of 3 is ready. Press Reply, then Azimut opens the next under it.',
+      note: 'The picture descriptions of post 1 did not go in. Copy each one from Post into the composer.',
+    });
   }, 30000);
 });

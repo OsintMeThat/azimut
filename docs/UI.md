@@ -5621,7 +5621,14 @@ never posts, and pressing Post on X or Bluesky stays the analyst's.
   whole thread. Once a post is sent, the extension reads its link off the site's toast
   (the account signed in, made in the last five minutes) and hands it to the app as
   `post-link-caught`, once per hand-off: a thread's first post, a reply's first reply.
-  The app only offers it. A hand-off that stops (no reply in 10 minutes, the tab closed
+  The app only offers it. While it works, the extension shows its own banner in the top
+  right corner of the site's tab (`extension/banner.js`): the step under way (*Filling
+  your post…*, *Bringing the pictures from Azimut…*, *Post 2 of 3…*, *Adding pictures 2
+  of 4…*, *Describing the pictures…*), then *Ready. Check it, then press Post.* (or
+  *Reply*), gone after six seconds, the reply chain's sentence while it waits on a
+  Reply, or *Stopped:* and the hand-off's sentence, kept until closed. It takes no
+  click but its own ×, presses nothing and shrinks to a dot once the analyst types in
+  the composer. A hand-off that stops (no reply in 10 minutes, the tab closed
   or gone elsewhere, a step that failed) says why in a notification and sends the app
   a `post-handoff-report`: the step and what the extension's selectors found there,
   never a word of the page, and `from`, the first post not handed over, when the posts

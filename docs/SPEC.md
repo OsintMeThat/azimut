@@ -411,7 +411,9 @@ stops making sense.
   post's link off the site's toast (read-only, taken only for the account signed in
   on that page and an id made in the last five minutes, sent only to the paired Azimut
   tab), and for a reply in several posts opens that reply and its reply box for the
-  next; it still never presses send.
+  next; it still never presses send. While it works, its own banner on that tab says
+  how far it got and takes no press but its close. It runs in the page's world beside
+  the filler, so the page could change its words, as it can draw anything on itself.
   Accepted risk (owner's choice, 2026-11-06): the notes panel's Add may ask for
   every site (`optional_host_permissions: <all_urls>`), since a press in a side
   panel opens no tab to an extension. It is optional, asked the first time Add

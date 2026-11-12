@@ -16,7 +16,7 @@
  * there is no extension API to stub: the thread goes in on a global and the
  * report is the script's own return value.
  */
-import { describe, it, expect, vi } from 'vitest';
+import { afterEach, describe, it, expect, vi } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
@@ -1018,5 +1018,124 @@ describe('describing the pictures', () => {
     });
     expect(Object.keys(report).filter((key) => !['landed', 'typed', 'pastes', 'attached', 'dropped'].includes(key)))
       .toEqual(['filled', 'through']);
+  });
+});
+
+/**
+ * Azimut's banner on the page (extension/banner.js), which the worker puts up before
+ * the filler runs. The filler says each step on it as it takes it: the post it is on
+ * in a thread, the pictures as they go in, the descriptions. A banner that keeps
+ * what it is told stands in for it here; its own suite is extensionBanner.test.js.
+ */
+describe('the steps said on the banner', () => {
+  /** A banner the worker put up, keeping the steps it is told. */
+  const banner = (said, then = () => {}) => (doc) => {
+    for (const old of doc.querySelectorAll('azimut-banner')) old.remove();
+    const host = doc.createElement('azimut-banner');
+    host.azimutSay = (state) => said.push(state.kind === 'busy' ? state.text : state);
+    doc.documentElement.append(host);
+    then(doc);
+  };
+  /** A composer whose "+" opens one more box under the last. */
+  const grows = (doc) => {
+    const add = doc.querySelector('[data-testid="addButton"]');
+    add.addEventListener('click', () => {
+      const n = doc.querySelectorAll('[contenteditable="true"]').length;
+      const box = doc.createElement('div');
+      box.dataset.testid = `tweetTextarea_${n}`;
+      box.setAttribute('contenteditable', 'true');
+      const input = doc.createElement('input');
+      input.type = 'file';
+      input.dataset.testid = 'fileInput';
+      add.before(box, input);
+    });
+  };
+  afterEach(() => {
+    for (const host of document.querySelectorAll('azimut-banner')) host.remove();
+  });
+
+  it('says the post it is on, then the pictures as they go in', async () => {
+    const said = [];
+    const report = await run({
+      posts: [
+        { text: 'Geolocated.', files: [PNG, { ...PNG, name: 'map.png' }] },
+        { text: 'Context.', files: [] },
+        { text: 'Source.', files: [{ ...PNG, name: 'frame.png' }, { ...PNG, name: 'sat.png' }] },
+      ],
+      html: `<div role="dialog">${BOX(0)}${FILE_INPUT(0)}<button data-testid="addButton"></button></div>`,
+      onReady: banner(said, grows),
+    });
+
+    expect(report).toMatchObject({ filled: 3, through: 3 });
+    expect(said).toEqual(['Post 1 of 3…', 'Adding pictures 2 of 4…', 'Post 2 of 3…', 'Post 3 of 3…', 'Adding pictures 4 of 4…']);
+  }, 20000);
+
+  it('says a single post, a single picture and a video in the words for each', async () => {
+    const said = [];
+    await run({ posts: [{ text: 'Geolocated.', files: [PNG] }], html: `${BOX(0)}${FILE_INPUT(0)}`, onReady: banner(said) });
+    expect(said).toEqual(['Filling your post…', 'Adding the picture…']);
+
+    said.length = 0;
+    const clip = { name: 'clip.mp4', type: 'video/mp4', data: btoa('\x00\x00') };
+    await run({ posts: [{ text: 'Geolocated.', files: [clip] }], html: `${BOX(0)}${FILE_INPUT(0)}`, onReady: banner(said) });
+    expect(said).toEqual(['Filling your post…', 'Adding the video…']);
+
+    said.length = 0;
+    await run({ posts: [{ text: 'Geolocated.', files: [clip, PNG] }], html: `${BOX(0)}${FILE_INPUT(0)}`, onReady: banner(said) });
+    expect(said).toEqual(['Filling your post…', 'Adding files 2 of 2…']);
+  });
+
+  it('counts a reply in several posts against the whole thread', async () => {
+    const said = [];
+    await run({
+      pathname: '/someone/status/1',
+      posts: [{ text: 'Post two.', files: [] }],
+      thread: { reply: true, number: 2, total: 3 },
+      html: '<article data-testid="tweet" tabindex="-1"><button data-testid="reply"></button></article>',
+      onReady: banner(said, (doc) => {
+        doc.querySelector('[data-testid="reply"]').addEventListener('click', () => {
+          const dialog = doc.createElement('div');
+          dialog.setAttribute('role', 'dialog');
+          dialog.innerHTML = BOX(0);
+          doc.body.append(dialog);
+          dialog.querySelector('[contenteditable]').addEventListener('paste', (e) => {
+            e.target.textContent += e.clipboardData.text;
+          });
+        });
+      }),
+    });
+    expect(said).toEqual(['Post 2 of 3…']);
+  });
+
+  it('says the pictures are described once the thread is in', async () => {
+    const said = [];
+    const report = await run({
+      posts: [{ text: 'Geolocated.', files: [{ ...PNG, alt: 'A road bridge' }, { ...PNG, name: 'map.png', alt: 'The map' }] }],
+      html: `<div class="cell">${BOX(0)}<div data-testid="attachments">`
+        + `<span data-testid="altTextLabel"></span><span data-testid="altTextLabel"></span></div></div>${FILE_INPUT(0)}`,
+      onReady: banner(said, (doc) => {
+        for (const label of doc.querySelectorAll('[data-testid="altTextLabel"]')) {
+          label.addEventListener('click', () => {
+            const dialog = doc.createElement('div');
+            dialog.setAttribute('role', 'dialog');
+            dialog.innerHTML = '<textarea data-testid="altTextInput"></textarea><button data-testid="endEditingButton">Save</button>';
+            doc.body.append(dialog);
+            dialog.querySelector('button').addEventListener('click', () => dialog.remove());
+          });
+        }
+      }),
+    });
+    expect(report.missed).toBeUndefined();
+    expect(said).toEqual(['Filling your post…', 'Adding pictures 2 of 2…', 'Describing the pictures…']);
+  }, 20000);
+
+  it('says nothing when it only reads the page for a report, and fills without a banner', async () => {
+    const said = [];
+    await run({ posts: [], thread: { probe: true }, html: BOX(0), onReady: banner(said) });
+    expect(said).toEqual([]);
+
+    // no banner on the page: the thread goes in as it always did
+    const report = await run({ posts: [{ text: 'Geolocated.', files: [PNG] }], html: `${BOX(0)}${FILE_INPUT(0)}` });
+    expect(report).toMatchObject({ filled: 1, through: 1 });
   });
 });

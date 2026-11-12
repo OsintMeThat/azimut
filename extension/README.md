@@ -395,6 +395,17 @@ Post's **Publish** opens the site's full composer, types each post of the
 thread and attaches its pictures. Nothing is posted: the composer is left filled
 and the button is yours.
 
+**The banner.** While it works, the tab shows a small Azimut card in its top right
+corner with the step under way: *Filling your post…*, *Bringing the pictures from
+Azimut…* while the files come from the case, then *Post 2 of 3…*, *Adding pictures
+2 of 4…* and *Describing the pictures…*. It ends on *Ready. Check it, then press
+Post.* (or *Reply*), which fades after six seconds, or on *Stopped:* and the reason,
+which stays until you close it, with *The rest is on your clipboard.* when the
+extension put it there. A reply of several posts waits on your Reply in the words of
+the notification. The card takes no click but its own ×, presses nothing on the page,
+and shrinks to a dot once you type in the composer; press the dot to read it again.
+It runs with the filling, so it asks for no permission of its own.
+
 **Pictures' descriptions.** When Post's **Alt text** box is ticked, each picture
 goes with its text. Once every post is in, the extension opens each picture's
 description (X's *Add description*, Bluesky's *ALT*), types the text and saves it.
@@ -473,7 +484,7 @@ image is on your clipboard either way.
 | Permission | Why |
 |---|---|
 | `activeTab` | Reads the current URL and captures the tab only after you click the extension. |
-| `scripting` | Shows the area-selection overlay, draws the map tools panel, fills a composer you allowed, and hands an image to an engine you opened. |
+| `scripting` | Shows the area-selection overlay, draws the map tools panel, fills a composer you allowed and shows how far it got there, and hands an image to an engine you opened. |
 | `storage` | Stores the local app URL, pairing token and last-used case. |
 | `notifications` | Reports an area capture once it is filed, says how far a hand-off to X or Bluesky got, and why the tools or the note could not open. |
 | `contextMenus` | Adds Cite, Quote and Capture to the right-click menu while a note is open in the panel. Firefox reads it as `menus`. |

@@ -400,6 +400,62 @@ function altTexts(post, files) {
   return Object.keys(alt).length ? { alt } : {};
 }
 
+// --- the banner on the composer tab ---------------------------------------------
+//
+// While the hand-off works, the tab it opened shows Azimut's own banner (banner.js):
+// the step under way, Ready, or where it stopped, in the words the notifications
+// use. It takes no press but its own close and presses nothing. Best-effort, like a
+// notification: a page that refuses it is filled all the same.
+
+/** The banner's first words, which the filler takes over once it runs. */
+const FILLING = "Filling your post…";
+/** What a reply in several posts waits on: the analyst's press, then the next post. */
+const NEXT_UNDER = "Press Reply, then Azimut opens the next under it.";
+const PICTURE_FILE = /\.(?:png|jpe?g|webp|gif|avif)$/i;
+const VIDEO_FILE = /\.(?:mp4|m4v|mov|webm|mkv)$/i;
+
+let bannerLine = Promise.resolve();
+
+/**
+ * Say this on the composer tab's banner: `{ kind, text, note }`, or `{ end: true }`
+ * once the hand-off is over. One at a time, in the order asked, since what to say
+ * goes over on the page's window for the banner to take.
+ */
+function banner(hand, state) {
+  const tabId = hand.tabId;
+  if (tabId === null) return Promise.resolve();
+  const run = bannerLine.then(async () => {
+    try {
+      const target = { tabId };
+      await api.scripting.executeScript({
+        target,
+        world: "MAIN",
+        func: (given) => {
+          window.__AZIMUT_BANNER__ = given;
+        },
+        args: [state],
+      });
+      await api.scripting.executeScript({ target, world: "MAIN", files: ["banner.js"] });
+    } catch {
+      // no banner: the notification says it all the same
+    }
+  });
+  bannerLine = run;
+  return run;
+}
+
+/** What the banner calls these case files: the picture, the pictures, a video, or files. */
+function mediaWords(paths) {
+  const kinds = new Set(paths.map((path) => (PICTURE_FILE.test(path) ? "picture" : VIDEO_FILE.test(path) ? "video" : "file")));
+  const noun = kinds.size === 1 ? [...kinds][0] : "file";
+  return `the ${noun}${paths.length > 1 ? "s" : ""}`;
+}
+
+/** Ready, with what the notifications said on the way when they said something. */
+function readyBanner(hand, said = []) {
+  return { kind: "ready", text: `Ready. Check it, then press ${hand.reply ? "Reply" : "Post"}.`, note: said.join(" ") };
+}
+
 /**
  * Open the composer and fill it. Never throws: every way this ends is told to the
  * analyst in a notification and, when it stops short, to the app in a report.
@@ -436,6 +492,7 @@ async function fillComposer(payload, backendUrl, token) {
     const tab = await api.tabs.create({ url: payload.url, active: true });
     hand.tabId = tab.id;
     await tabLoaded(tab.id);
+    await banner(hand, { kind: "busy", text: FILLING });
     if (site) {
       const source = hand.reply ? AzimutPostLink.keyOf(site, payload.url) : null;
       if (source) hand.seen.push(source);
@@ -447,7 +504,7 @@ async function fillComposer(payload, backendUrl, token) {
     // a next post; the files of the rest are not carried until it is known where.
     const ask = hand.reply && hand.posts.length > 1;
     step = "inject";
-    const thread = hand.reply ? (ask ? { reply: true, ask: true } : { reply: true }) : {};
+    const thread = hand.reply ? (ask ? { reply: true, ask: true, total: hand.posts.length } : { reply: true }) : {};
     const first = await fillPosts(hand, ask ? hand.posts.slice(0, 1) : hand.posts, thread, backendUrl, token);
     if (first.error) {
       return failHandOff(hand, { step, ...first, keep: !ask && first.filled > 0, handed: leading(first) });
@@ -457,6 +514,7 @@ async function fillComposer(payload, backendUrl, token) {
     }
     if (!ask) {
       hand.done = hand.posts.length;
+      await banner(hand, readyBanner(hand, first.said));
       return await inLine(() => waitForLink(hand));
     }
     if (first.add) {
@@ -469,9 +527,10 @@ async function fillComposer(payload, backendUrl, token) {
       );
       if (rest.error) return failHandOff(hand, { step, ...rest, keep: true, handed: leading(rest, 1) });
       hand.done = hand.posts.length;
+      await banner(hand, readyBanner(hand, [...first.said, ...rest.said]));
       return await inLine(() => waitForLink(hand));
     }
-    return await inLine(() => startChain(hand));
+    return await inLine(() => startChain(hand, first.said));
   } catch (e) {
     const gone = hand.tabId !== null && (await tabGone(hand.tabId));
     return failHandOff(hand, {
@@ -496,7 +555,8 @@ function leading(result, before = 0) {
  * Both injections run in the page's own world, which is the only place a composer
  * accepts what we make (see handoff.js). Nothing over there can call an extension
  * API, so the posts go in on a global, their file parts follow, and the report
- * comes back as the script's return value.
+ * comes back as the script's return value, with `said`, what the notifications said
+ * on the way, for the banner's last word.
  */
 async function fillPosts(hand, posts, thread, backendUrl, token) {
   const target = { tabId: hand.tabId };
@@ -524,6 +584,8 @@ async function fillPosts(hand, posts, thread, backendUrl, token) {
     args: [{ posts: handed, ...thread }],
   });
 
+  if (plans.length) await banner(hand, { kind: "busy", text: `Bringing ${mediaWords(plans.map((plan) => plan.path))} from Azimut…` });
+  const said = [];
   let skipped = 0;
   for (const plan of plans) {
     try {
@@ -534,10 +596,9 @@ async function fillPosts(hand, posts, thread, backendUrl, token) {
     }
   }
   if (skipped) {
-    notify(
-      "Azimut hand-off",
-      `${skipped} file${skipped > 1 ? "s" : ""} could not be handed over. Attach ${skipped > 1 ? "them" : "it"} from the case.`
-    );
+    const sentence = `${skipped} file${skipped > 1 ? "s" : ""} could not be handed over. Attach ${skipped > 1 ? "them" : "it"} from the case.`;
+    notify("Azimut hand-off", sentence);
+    said.push(sentence);
   }
 
   const [done] = await api.scripting.executeScript({
@@ -547,17 +608,21 @@ async function fillPosts(hand, posts, thread, backendUrl, token) {
   });
   const result = done?.result ?? {};
   // A thread that went in with a description missed goes on; a stop says it in its report.
-  if (!result.error && Array.isArray(result.missed) && result.missed.length) await tellMissed(hand, result);
-  return result;
+  if (!result.error && Array.isArray(result.missed) && result.missed.length) {
+    const sentence = await tellMissed(hand, result);
+    if (sentence) said.push(sentence);
+  }
+  return { ...result, said };
 }
 
 /**
  * Say which pictures' descriptions did not go in, while the thread itself did: a
  * notification for the analyst, and a report for the app naming the steps missed.
+ * Answers the sentence said, for the banner.
  */
 async function tellMissed(hand, { missed, probe = null }) {
   const steps = missed.filter((one) => /^alt-\d{1,3}$/.test(String(one)));
-  if (!steps.length) return;
+  if (!steps.length) return null;
   const numbers = steps.map((one) => one.slice(4));
   const which = numbers.length === 1 ? `post ${numbers[0]}` : `posts ${numbers.slice(0, -1).join(", ")} and ${numbers.at(-1)}`;
   const sentence = `The picture descriptions of ${which} did not go in. Copy each one from Post into the composer.`;
@@ -565,6 +630,7 @@ async function tellMissed(hand, { missed, probe = null }) {
   const report = handOffReport(hand, { step: steps[0], probe, missed: steps });
   console.info(`Azimut hand-off: ${sentence}\n${report}`);
   await tellApp({ type: "post-handoff-report", caseId: hand.caseId, draft: hand.draft, error: sentence, report, from: null });
+  return sentence;
 }
 
 const hostOf = (url) => {
@@ -680,13 +746,15 @@ async function askReader(hand, ask) {
   }
 }
 
-/** The hand-off is over: stop following it. */
+/** The hand-off is over: stop following it, and take its banner away. */
 function endWatch(hand, { gone = false } = {}) {
   if (watchMemo?.get(hand.tabId)?.id === hand.id) watchMemo.delete(hand.tabId);
   clearTimeout(watchTimers.get(hand.tabId));
   watchTimers.delete(hand.tabId);
   keepWatches();
-  if (!gone && hand.reading) askReader(hand, "stop");
+  if (gone) return;
+  if (hand.reading) askReader(hand, "stop");
+  banner(hand, { end: true });
 }
 
 /** Everything is in the composer: wait for the analyst's press and its link. */
@@ -698,7 +766,7 @@ async function waitForLink(hand) {
 }
 
 /** The reply box offers no next post: fill the rest one reply at a time. */
-async function startChain(hand) {
+async function startChain(hand, said = []) {
   const total = hand.posts.length;
   if (await tabGone(hand.tabId)) {
     return failHandOff(hand, {
@@ -720,7 +788,9 @@ async function startChain(hand) {
   hand.done = 1;
   hand.phase = "waiting";
   keepWatches();
-  notify("Azimut hand-off", `Post 1 of ${total} is ready. Press Reply, then Azimut opens the next under it.`);
+  const sentence = `Post 1 of ${total} is ready. ${NEXT_UNDER}`;
+  notify("Azimut hand-off", sentence);
+  await banner(hand, { kind: "wait", text: sentence, note: said.join(" ") });
   // The analyst was quicker than the question about a next post.
   if (hand.pending) {
     const url = hand.pending;
@@ -793,15 +863,18 @@ async function nextReply(hand, url) {
   keepWatches();
   const { backendUrl, token } = await settings();
   let step = "open-reply";
+  let said = [];
   try {
     const loaded = pageLoaded(hand.tabId, url);
     await api.tabs.update(hand.tabId, { url });
     await loaded;
     armWatch(hand);
     await follow(hand);
+    await banner(hand, { kind: "busy", text: `Post ${number} of ${total}…` });
     step = `fill-${number}`;
-    const done = await fillPosts(hand, [hand.posts[number - 1]], { reply: true, number }, backendUrl, token);
+    const done = await fillPosts(hand, [hand.posts[number - 1]], { reply: true, number, total }, backendUrl, token);
     if (done.error) return failHandOff(hand, done);
+    said = done.said;
   } catch (e) {
     const gone = await tabGone(hand.tabId);
     return failHandOff(hand, {
@@ -811,10 +884,15 @@ async function nextReply(hand, url) {
     });
   }
   hand.done = number;
-  notify("Azimut hand-off", `Post ${number} of ${total} is ready under your reply.`);
-  if (number >= total) return endWatch(hand);
+  const sentence = `Post ${number} of ${total} is ready under your reply.`;
+  notify("Azimut hand-off", sentence);
+  if (number >= total) {
+    await banner(hand, readyBanner(hand, said));
+    return endWatch(hand);
+  }
   hand.phase = "waiting";
   keepWatches();
+  await banner(hand, { kind: "wait", text: sentence, note: [NEXT_UNDER, ...said].join(" ") });
 }
 
 /** Ten minutes without a post: a thread stops following, a reply in several posts stops. */
@@ -982,13 +1060,18 @@ async function failHandOff(hand, stop) {
   if (!keep) endWatch(hand, { gone });
   else await waitForLink(hand);
   let clip = "The thread is on your clipboard.";
+  let copied = false;
   const first = hand.done + 1;
   const last = hand.posts.length;
   const rest = hand.posts.slice(hand.done).map((post) => post.text).filter(Boolean);
   if (hand.chain && rest.length && !gone && hand.tabId !== null && (await copyRest(hand.tabId, rest.join("\n\n")))) {
     clip = first === last ? `Post ${last} is on your clipboard.` : `Posts ${first} to ${last} are on your clipboard.`;
+    copied = true;
   }
   notify("Azimut hand-off", `${sentence} ${clip}`);
+  // The stop stays on the page until it is closed. The clipboard is named only where
+  // the extension wrote the rest there itself.
+  if (!gone) await banner(hand, { kind: "stopped", text: `Stopped: ${sentence}`, note: copied ? "The rest is on your clipboard." : "" });
   const report = handOffReport(hand, { step, stopped, probe, link, missed });
   // Also where about:debugging's Inspect shows it, for an app that does not show reports.
   console.info(`Azimut hand-off stopped: ${sentence}\n${report}`);
