@@ -64,6 +64,7 @@
   import VideoThreadPanel from './post/VideoThreadPanel.svelte';
   import AltTextBox from './post/AltTextBox.svelte';
   import AltTexts from './post/AltTexts.svelte';
+  import ThreadPreview from './post/ThreadPreview.svelte';
   import { altRecord, altSuggestion, readAltRecord, withAltTexts } from '../lib/postAlt.js';
 
   let coordsText = $state('');
@@ -2217,6 +2218,7 @@
     postRun += 1;
     opening = false;
     writtenKey = null;
+    previewing = false;
     startFromDefaultTemplate();
     blankKey = contentKey();
   }
@@ -2495,6 +2497,14 @@
     if (kind !== 'geolocation') return firstMedia;
     return proofPng ? [proofPng] : [];
   }
+
+  // ---- the thread preview (post/ThreadPreview.svelte) ------------------------------
+  // Write or Preview over the thread's column. The preview reads the posts as the
+  // extension would get them, and only while it is shown; a new post opens on Write.
+  // A recap map still to make shows the small preview its own column draws.
+  let previewing = $state(false);
+  let recapShown = $state(null);
+  const previewed = $derived(previewing ? handoffPayload() : null);
 
   let publishing = $state(false);
 
@@ -2971,7 +2981,8 @@
           <div class="field">
             {#snippet recapPicture()}
               <RecapMap slides={thread.slides} recap={thread.recap} options={thread.mapOptions} live={thread.mapLive}
-                onrecap={setRecap} onoptions={setMapOptions} onlive={() => (thread.mapLive = true)} />
+                onrecap={setRecap} onoptions={setMapOptions} onlive={() => (thread.mapLive = true)}
+                onpreview={(url) => (recapShown = url)} />
             {/snippet}
             <VideoThreadPanel title={thread.video ? videoName(thread.video, titleByPath.get(thread.video)) : ''}
               threadTitle={threadTitle()} ontitle={setThreadTitle} recap={recapPicture}
@@ -3149,6 +3160,11 @@
 
       <!-- right column: the thread -->
       <div class="col">
+        <ThreadPreview bind:open={previewing} posts={previewed?.posts ?? []} dropped={previewed?.dropped ?? 0} {target}
+          caseId={caseState.current?.id ?? ''} media={mediaByPath} proofs={caseProofs}
+          recap={mapPending ? (recapShown ?? '') : null} reply={replying ? replyTo : null} />
+        <!-- the posts as they are written, while the preview is not shown -->
+        {#if !previewing}
 
         <!-- Post 1: geolocation -->
         <!-- or the first post of another kind, carrying its own media -->
@@ -3437,6 +3453,7 @@
             <Icon name="copy" size={13} /> Copy all
           </button>
         </div>
+        {/if}
 
       </div>
     </div>

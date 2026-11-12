@@ -99,12 +99,22 @@ export function postTarget(target) {
   return POST_TARGETS[normalizePostTarget(target)];
 }
 
+/** What X counts a link as, whatever its length: every http(s) address goes out through t.co. */
+export const X_LINK_WEIGHT = 23;
+
 /** X reserves a fixed length for every HTTP(S) URL, whatever the URL is. */
 export function weightedUrlLength(text) {
   const value = String(text ?? '');
   const stripped = value.replace(URL_RE, '');
   const urls = value.match(URL_RE)?.length ?? 0;
-  return [...stripped].length + urls * 23;
+  return [...stripped].length + urls * X_LINK_WEIGHT;
+}
+
+/** The addresses X counts at `X_LINK_WEIGHT` in a text, in order: `{ start, end, url }`. */
+export function xLinks(text) {
+  return [...String(text ?? '').matchAll(URL_RE)].map((match) => ({
+    start: match.index, end: match.index + match[0].length, url: match[0],
+  }));
 }
 
 /** Bluesky limits posts by visible Unicode grapheme clusters, not code units. */
@@ -116,10 +126,62 @@ export function graphemeLength(text) {
   return [...value].length;
 }
 
+// A link as Bluesky finds it, read off its own code on 2026-11-12 (`URL_REGEX` and
+// `detectFacets` in bluesky-social/atproto, packages/api/src/rich-text): an http(s)
+// address at the start of the text, after a space or after `(`, less one closing
+// `.,;:!?` and then one `)` it does not open. A bare domain is a link there too, but
+// telling one needs the list of top-level domains, so it counts whole here, which can
+// only count more than Bluesky does.
+const BLUESKY_URL = /(^|\s|\()(https?:\/\/\S+)/gi;
+
+/** The addresses Bluesky makes links of in a text, in order: `{ start, end, url }`. */
+export function blueskyLinks(text) {
+  return [...String(text ?? '').matchAll(BLUESKY_URL)].map((match) => {
+    let url = match[2];
+    if (/[.,;:!?]$/.test(url)) url = url.slice(0, -1);
+    if (url.endsWith(')') && !url.includes('(')) url = url.slice(0, -1);
+    const start = match.index + match[1].length;
+    return { start, end: start + url.length, url };
+  });
+}
+
+/**
+ * A link as Bluesky writes it into the post: its host and its path, cut to the first
+ * 13 characters and `...` past 15, `example.com/articles/2024...` (`toShortUrl` in
+ * bluesky-social/social-app, src/lib/strings/url-helpers.ts, read 2026-11-12).
+ */
+export function blueskyShortUrl(url) {
+  try {
+    const parsed = new URL(url);
+    if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') return url;
+    const path = (parsed.pathname === '/' ? '' : parsed.pathname) + parsed.search + parsed.hash;
+    return path.length > 15 ? `${parsed.host}${path.slice(0, 13)}...` : `${parsed.host}${path}`;
+  } catch {
+    return url;
+  }
+}
+
+/**
+ * The text Bluesky counts against its limit: each link in its short form. Its composer
+ * counts the post this way before it lets it go (`shortenLinks(rt).graphemeLength` in
+ * social-app's composer state, read 2026-11-12), so a long source link costs its short
+ * form, not its whole length.
+ */
+export function blueskyCountedText(text) {
+  const value = String(text ?? '');
+  let out = '';
+  let at = 0;
+  for (const link of blueskyLinks(value)) {
+    out += value.slice(at, link.start) + blueskyShortUrl(link.url);
+    at = link.end;
+  }
+  return out + value.slice(at);
+}
+
 /** Count text according to the selected target's documented rule. */
 export function postCharacterCount(target, text) {
   return normalizePostTarget(target) === 'bluesky'
-    ? graphemeLength(text)
+    ? graphemeLength(blueskyCountedText(text))
     : weightedUrlLength(text);
 }
 
