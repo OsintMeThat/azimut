@@ -14,7 +14,7 @@ import threading
 
 import pytest
 from jobwait import job_result, wait_for_job
-from test_scenes import _case, _cut, _proof, _scenes, _upload_png, needs_ffmpeg
+from scenesfixture import _case, _cut, _proof, _scenes, _upload_png, needs_ffmpeg
 
 from azimut import layout
 from azimut.api import postclips as clip_api
