@@ -176,7 +176,8 @@ a value or a key, in the graph, jobs, sidecars, tool specs and the `/files/` add
 in notes, plus the few fields that hold a name: a video thread's post of one place, a
 proof's dating statement, a collage's exported picture. A rename onto a name another
 item holds is refused before anything moves. The move is journalled in
-`.data/rename.json` and finished on the next open (`Case.open`) when it was cut short.
+`.data/rename-record.json` (a media's in `.data/rename.json`) and finished on the next
+open (`Case.open`) when it was cut short.
 
 Every mutation used to re-read and rewrite the whole `case.json` under a per-case
 lock. At 10k entities that rewrote megabytes per edit and shipped the entire
@@ -200,7 +201,10 @@ not orphan it. Diagnosis is read-only and reports:
 - a missing or unreadable `case.db`;
 - media and capture entities whose file no longer exists;
 - visible files placed directly in `media/` without a graph entity;
-- a temporal projection that no longer matches Claims or media metadata.
+- a temporal projection that no longer matches Claims or media metadata;
+- a saved post naming a proof picture the case no longer holds;
+- a rename journal still on disk: one cut short that the last open could not finish
+  either, a file held open on Windows say.
 
 Repairs are separate API actions. A deleted database is rebuilt in a temporary
 SQLite file from media sidecars, note files and proof specs, then renamed into
@@ -209,7 +213,10 @@ database-only provenance cannot be recovered and the dialog says so first.
 Missing media can be removed through the normal Trash path or rebound to an
 unregistered file already inside `media/`. An unknown file goes through the
 normal media registration pipeline, gaining a hash, sidecar, index row and
-provenance. A stale temporal projection can be rebuilt from its authorities.
+provenance. A stale temporal projection can be rebuilt from its authorities. A rename
+cut short, which every open already tries to finish on its own, is finished on request
+by `renames.recover` in strict mode, which says why when it still cannot be; a journal
+that cannot be read is named and offers no repair.
 None of these actions runs at startup, on case open or during a diagnostic request.
 
 ## Ownership rules
@@ -322,8 +329,8 @@ stamp and resumes the same normalizer on the next open. Schema 9 is what 0.3.0
 wrote; one step takes it to 11, giving each file one Inspect work, then dating
 every kept Detect pin (`analysis_dating.backfill`) and standing every saved
 comparison on the map (`comparisons.backfill`). Schema 10 was a development
-checkpoint and runs only those last two. Every rename writes itself down in
-`.data/rename.json` before anything moves, so the next open of the case finishes
+checkpoint and runs only those last two. Every rename writes itself down under
+`.data/` before anything moves, so the next open of the case finishes
 the references after the bytes moved.
 
 ### Tables

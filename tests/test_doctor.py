@@ -1,12 +1,17 @@
 """The Case Doctor diagnoses damage first and repairs only on request."""
 
+import base64
 import io
 import json
 import sqlite3
 from contextlib import closing
 
+import pytest
+
 from azimut import layout
 from jobwait import WAIT
+from azimut.engine import media as media_engine
+from azimut.engine import renames as rename_engine
 from azimut.engine import workqueue
 from azimut.workspace import Case
 
@@ -220,6 +225,9 @@ def test_doctor_refuses_repairs_that_the_current_damage_does_not_offer(client):
         f"/api/cases/{case_id}/doctor/repair",
         json={"action": "drop", "entity_id": uploaded["entity"]["id"]},
     ).status_code == 409
+    assert client.post(
+        f"/api/cases/{case_id}/doctor/repair", json={"action": "finish-rename"}
+    ).status_code == 409
 
 
 def test_case_renamed_outside_azimut_is_found_from_its_manifest(client):
@@ -317,3 +325,99 @@ def test_a_rebuilt_case_is_shaped_like_a_new_one(client):
         )
 
     assert tree(Case.open(case_id).tool_root) == tree(born.tool_root)
+
+
+# -- a rename cut short ------------------------------------------------------------------
+
+
+def _proof(client, case_id, title):
+    saved = client.post(f"/api/cases/{case_id}/proofs", json={
+        "title": title, "spec": {"panels": []}, "png_base64": base64.b64encode(_png()).decode(),
+    })
+    assert saved.status_code == 200, saved.text
+    return saved.json()
+
+
+def _lock_the_picture(monkeypatch):
+    """The proof's picture held open by another program, as Windows refuses to move it:
+    the rename stops once its record moved, and every open after it stops there too.
+    Answers the switch that lets it go."""
+    real = rename_engine._move
+    held = {"locked": True}
+
+    def move(case, source_rel, target_rel, *, main):
+        if held["locked"] and source_rel.endswith(".png"):
+            raise PermissionError(f"the file '{source_rel}' is in use by another program")
+        return real(case, source_rel, target_rel, main=main)
+
+    monkeypatch.setattr(rename_engine, "_move", move)
+    return held
+
+
+def _cut_issues(report):
+    return [one for one in report["issues"] if one["kind"] == "rename-cut-short"]
+
+
+def test_a_rename_cut_short_is_named_and_finished_on_request(client, monkeypatch):
+    case_id = _new_case(client)
+    saved = _proof(client, case_id, "Depot")
+    post = client.post(f"/api/cases/{case_id}/drafts", json={"title": "Strike", "state": {"proofPng": saved["png"]}})
+    held = _lock_the_picture(monkeypatch)
+    spec = client.get(f"/api/cases/{case_id}/proofs/Depot").json()
+    with pytest.raises(PermissionError):
+        client.post(f"/api/cases/{case_id}/proofs", json={"rename_from": "Depot", "title": "Fuel depot", "spec": spec})
+    Case.open(case_id)  # the next open tries to finish it, and stops at the same file
+
+    [issue] = _cut_issues(client.get(f"/api/cases/{case_id}/doctor").json())
+    assert issue["title"] == "A rename was cut short"
+    assert issue["detail"] == "Proof “Depot” to “Fuel depot”"
+    assert issue["actions"] == [{"id": "finish-rename", "label": "Finish rename", "tone": "primary"}]
+
+    # still held: the repair says why, and the issue stands
+    refused = client.post(f"/api/cases/{case_id}/doctor/repair", json={"action": "finish-rename"})
+    assert refused.status_code == 409
+    assert "in use by another program" in refused.json()["detail"]
+    assert _cut_issues(client.get(f"/api/cases/{case_id}/doctor").json())
+
+    held["locked"] = False
+    repaired = client.post(f"/api/cases/{case_id}/doctor/repair", json={"action": "finish-rename"})
+    assert repaired.status_code == 200, repaired.text
+    assert repaired.json()["repair"] == {"status": "finished"}
+    assert repaired.json()["report"]["status"] == "healthy"
+    assert Case.open(case_id).resolve_inside("proofs/Fuel depot.png").is_file()
+    state = client.get(f"/api/cases/{case_id}/drafts/{post.json()['name']}").json()["state"]
+    assert state["proofPng"] == "proofs/Fuel depot.png"
+
+
+def test_a_file_rename_cut_short_names_the_file(client, monkeypatch):
+    case_id = _new_case(client)
+    path = _upload(client, case_id)["item"]["path"]
+    real = media_engine.rename_path
+
+    def locked(source, target):
+        raise PermissionError("the file is in use by another program")
+
+    monkeypatch.setattr(media_engine, "rename_path", locked)
+    with pytest.raises(PermissionError):
+        client.patch(f"/api/cases/{case_id}/media", json={"path": path, "title": "Report"})
+
+    [issue] = _cut_issues(client.get(f"/api/cases/{case_id}/doctor").json())
+    assert issue["detail"] == "File “evidence.txt” to “Report.txt”"
+
+    monkeypatch.setattr(media_engine, "rename_path", real)
+    repaired = client.post(f"/api/cases/{case_id}/doctor/repair", json={"action": "finish-rename"})
+    assert repaired.status_code == 200, repaired.text
+    assert not _cut_issues(repaired.json()["report"])
+    assert Case.open(case_id).resolve_inside("media/Report.txt").is_file()
+
+
+def test_a_rename_journal_that_cannot_be_read_is_named_without_a_repair(client):
+    case_id = _new_case(client)
+    rename_engine.record_journal(Case.locate(case_id)).write_text("{not json", encoding="utf-8")
+
+    [issue] = _cut_issues(client.get(f"/api/cases/{case_id}/doctor").json())
+    assert issue["detail"] == "What it was renaming cannot be read."
+    assert issue["actions"] == []
+    refused = client.post(f"/api/cases/{case_id}/doctor/repair", json={"action": "finish-rename"})
+    assert refused.status_code == 409
+    assert refused.json()["detail"] == "a rename journal is unreadable"

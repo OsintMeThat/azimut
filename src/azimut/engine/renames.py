@@ -398,7 +398,7 @@ def rename_record(case: "Case", type_: str, old_rel: str, new_rel: str) -> None:
             _finish(case, record)
 
 
-def _valid_record(record: Any) -> bool:
+def valid_record(record: Any) -> bool:
     if not isinstance(record, dict):
         return False
     moves, names = record.get("moves"), record.get("names")
@@ -413,7 +413,7 @@ def _valid_record(record: Any) -> bool:
     )
 
 
-def _valid_media(record: Any) -> bool:
+def valid_media(record: Any) -> bool:
     return isinstance(record, dict) and all(isinstance(record.get(key), str) for key in ("old", "new", "title"))
 
 
@@ -432,8 +432,8 @@ def recover(case: "Case", *, strict: bool = False) -> None:
     try:
         with case.lock:
             for path, valid, finish in (
-                (record_journal(case), _valid_record, _finish),
-                (media_journal(case), _valid_media, media_engine.finish_media_rename),
+                (record_journal(case), valid_record, _finish),
+                (media_journal(case), valid_media, media_engine.finish_media_rename),
             ):
                 if not path.exists():
                     continue  # never begun, or another thread finished it while this one waited

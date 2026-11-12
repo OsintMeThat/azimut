@@ -43,6 +43,12 @@ def doctor_repair(case_id: str, body: DoctorRepair) -> dict[str, Any]:
         if body.action == "rebuild":
             result = doctor_engine.rebuild_database(located)
             case = located
+        elif body.action == "finish-rename":
+            # Read before the open, which tries to finish it too, as every open does:
+            # a rename it finished is the repair done, one it could not says why here.
+            doctor_engine.require_cut_rename(located)
+            case = Case.open(case_id)
+            result = doctor_engine.finish_renames(case)
         else:
             case = Case.open(case_id)
             if body.action == "rebuild-timeline":

@@ -6,13 +6,14 @@ import json
 import shutil
 import sqlite3
 import uuid
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from typing import Any, Iterator
 
 from .. import layout
 from ..sqlite_backend import SqliteCase
 from ..workspace import Case, CaseError, ensure_dir
 from . import media as media_engine
+from . import renames as rename_engine
 
 DATABASE_MISSING = "database-missing"
 DATABASE_UNREADABLE = "database-unreadable"
@@ -21,6 +22,14 @@ MEDIA_UNKNOWN = "media-unknown"
 TEMPORAL_INDEX_STALE = "temporal-index-stale"
 REDIRECT_DANGLING = "redirect-dangling"
 POST_PROOF_MISSING = "post-proof-missing"
+RENAME_CUT_SHORT = "rename-cut-short"
+
+#: What a journalled rename moves, as the issue names it (`engine/artifacts.py` KINDS).
+_RENAMED = {
+    "proof": "Proof", "post": "Post", "collage": "Collage", "compare-session": "Comparison",
+    "horizon-view": "Horizon view", "map-plate": "Map plate", "inspect-session": "Inspect work",
+    "sheet": "Sheet",
+}
 
 
 def _media_files(case: Case) -> Iterator[Path]:
@@ -145,6 +154,20 @@ def scan(case: Case) -> dict[str, Any]:
                 }
             )
 
+    for journal, renaming in _cut_renames(case):
+        issues.append(
+            {
+                "id": f"{RENAME_CUT_SHORT}:{journal}",
+                "kind": RENAME_CUT_SHORT,
+                "severity": "warning",
+                "title": "A rename was cut short",
+                "detail": renaming or "What it was renaming cannot be read.",
+                # one whose record cannot be read cannot be finished either
+                "actions": [{"id": "finish-rename", "label": "Finish rename", "tone": "primary"}]
+                if renaming else [],
+            }
+        )
+
     for post in _posts_missing_their_proof(case):
         issues.append(
             {
@@ -184,6 +207,45 @@ def scan(case: Case) -> dict[str, Any]:
             }
         )
     return _report(case, manifest, issues)
+
+
+def _cut_renames(case: Case) -> list[tuple[str, str]]:
+    """Each rename still written down (`engine/renames.py`), by its journal: one an
+    interruption left halfway that the last open of the case could not finish either, a
+    file held open on Windows say. With what it was renaming, '' for a journal that
+    cannot be read."""
+    found = []
+    for path, valid in (
+        (rename_engine.record_journal(case), rename_engine.valid_record),
+        (rename_engine.media_journal(case), rename_engine.valid_media),
+    ):
+        if not path.is_file():
+            continue
+        try:
+            record = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            record = None
+        if not valid(record):
+            found.append((path.name, ""))
+        elif "names" in record:
+            old, new = record["names"]
+            found.append((path.name, f"{_RENAMED.get(record['type'], 'Record')} “{old}” to “{new}”"))
+        else:
+            old, new = (PurePosixPath(record[key]).name for key in ("old", "new"))
+            found.append((path.name, f"File “{old}” to “{new}”"))
+    return found
+
+
+def require_cut_rename(case: Case) -> None:
+    """Refuse to finish a rename unless the read-only check found one waiting."""
+    if not _cut_renames(case):
+        raise CaseError("no rename is waiting to be finished")
+
+
+def finish_renames(case: Case) -> dict[str, Any]:
+    """Finish every rename `_cut_renames` found, or say why one still cannot be."""
+    rename_engine.recover(case, strict=True)
+    return {"status": "finished"}
 
 
 def _posts_missing_their_proof(case: Case) -> list[dict[str, str]]:

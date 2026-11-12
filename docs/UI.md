@@ -1122,7 +1122,9 @@ damage is listed one item at a time with only the repairs that apply. Database
 rebuild states what cannot be recovered before the button. Removing a missing
 media record takes a second click, while relinking only accepts an unregistered
 file already placed in that case's `media/` folder. A stale Timeline index can be
-rebuilt from Claims and media metadata.
+rebuilt from Claims and media metadata. A rename cut short names what it was renaming
+(*Proof “Depot” to “Fuel depot”*), and **Finish rename** completes it or says why it
+still cannot, a file held open by another program say.
 
 ## Workspace folder
 
