@@ -4,6 +4,7 @@ import {
   extraPostTweetText, groupPostMedia, mediaTweetText, newPostMediaTweet,
   applyPostTemplateStructure, normalizePostMediaPickerTarget, normPostTemplate, postMediaForType,
   handoffThread, postCharacterCount, postComposeUrl, postHandoffUrl, postReportMarkdown, postTarget,
+  blueskyCountedText, blueskyLinks, blueskyShortUrl, xLinks,
   proofSourceMediaPaths, renumberMediaTweetText, retargetMediaTweetText, withPostClip,
   sourceSection, sourceUrls,
   templateFromPost, templateUsesPostField, togglePostMedia,
@@ -512,8 +513,41 @@ describe('post targets', () => {
 
   it('counts links for X, but graphemes for Bluesky', () => {
     expect(postCharacterCount('x', 'A https://example.test/very-long-url')).toBe(25);
-    expect(postCharacterCount('bluesky', 'A https://example.test/very-long-url')).toBe(36);
+    // Bluesky writes a link without its scheme, and counts it so
+    expect(postCharacterCount('bluesky', 'A https://example.test/very-long-url')).toBe(28);
     expect(postCharacterCount('bluesky', '👍🏽')).toBe(1);
+  });
+
+  it('counts a long link on Bluesky as Bluesky writes it: its host and 13 characters of its path', () => {
+    const source = 'https://www.instagram.com/reel/C8kXyZaBcDe/?igsh=MWZ1dGx0a2Y0';
+    expect(blueskyShortUrl(source)).toBe('www.instagram.com/reel/C8kXyZa...');
+    expect(postCharacterCount('bluesky', `Source: ${source}`)).toBe('Source: www.instagram.com/reel/C8kXyZa...'.length);
+    // X still counts any link as 23
+    expect(postCharacterCount('x', `Source: ${source}`)).toBe(8 + 23);
+    // a path of 15 characters or fewer stays whole, and so does the bare host
+    expect(blueskyShortUrl('https://example.test/very-long-url')).toBe('example.test/very-long-url');
+    expect(blueskyShortUrl('https://example.test/')).toBe('example.test');
+    expect(blueskyShortUrl('https://bsky.app/profile/a.bsky.social/post/3k')).toBe('bsky.app/profile/a.bs...');
+    expect(blueskyShortUrl('not a link')).toBe('not a link');
+  });
+
+  it('finds a link where Bluesky does: after a space, a line or a bracket, less its closing punctuation', () => {
+    const text = 'See https://example.test/a, (https://example.test/b) and\nhttps://example.test/c(1). x:https://example.test/d';
+    expect(blueskyLinks(text).map((one) => one.url)).toEqual([
+      'https://example.test/a', 'https://example.test/b', 'https://example.test/c(1)',
+    ]);
+    for (const link of blueskyLinks(text)) expect(text.slice(link.start, link.end)).toBe(link.url);
+    // glued to a word, a link is words there, and counts whole
+    expect(blueskyCountedText('x:https://example.test/a-very-long-path')).toBe('x:https://example.test/a-very-long-path');
+    expect(blueskyCountedText('Read https://example.test/a-very-long-path.')).toBe('Read example.test/a-very-long-....');
+  });
+
+  it('finds every address X counts as 23, where it stands', () => {
+    const text = 'a https://x.com/b c http://d.test';
+    expect(xLinks(text)).toEqual([
+      { start: 2, end: 17, url: 'https://x.com/b' },
+      { start: 20, end: 33, url: 'http://d.test' },
+    ]);
   });
 
   it('builds the official compose handoff for each social target', () => {

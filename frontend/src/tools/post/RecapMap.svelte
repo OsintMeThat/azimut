@@ -40,6 +40,8 @@
     onlive,
     /** The preview's drawing, `lib/recapMap.js`'s by default. */
     preview = recapMapPreview,
+    /** `(url)`: the small preview as drawn, null while the recap shows none; the thread's preview shows it too. */
+    onpreview,
   } = $props();
 
   const places = $derived(recapPlaces(slides ?? []));
@@ -93,6 +95,12 @@
     })();
   });
   $effect(() => () => shown?.revoke());
+  $effect(() => {
+    onpreview?.(onMap ? shown?.url ?? null : null);
+  });
+  $effect(() => () => {
+    onpreview?.(null);
+  });
 
   const choose = (patch) => onoptions?.(patch);
 </script>

@@ -5476,6 +5476,28 @@ never posts, and pressing Post on X or Bluesky stays the analyst's.
   text follows its picture when a video thread changes order. A text is no change to
   what went out, so a post marked posted stays Posted. On X, the only trace of it once
   posted is the small *ALT* badge on the picture.
+- **Write** and **Preview** are two tabs over the thread's column. Preview shows the
+  thread as it goes out on the platform picked, post by post, in Azimut's own look
+  (`tools/post/ThreadPreview.svelte`, `threadPreview.js`): each post's final text with
+  its lines; its links as the site shows them, X without `https://` and cut after 25
+  characters, Bluesky its host and 13 characters of its path
+  (`www.instagram.com/reel/C8kXyZa...`); mentions and hashtags in the link colour where
+  the site makes links of them (on Bluesky a mention is a whole handle,
+  `@name.bsky.social`); its pictures framed as the site frames one to four (X in a 16:9
+  block, Bluesky two or three in a 2:1 one and four in a 3:2 one; one picture keeps its
+  shape, between 3:4 and 2:1 on X, never taller than wide on Bluesky); a video on its
+  poster; an **ALT** mark on a picture that has its text, which the hover shows; *Replying
+  to @name* on a reply; a line from each post to the next; and its count against the
+  limit, red past it, with what runs past softly marked. The line over it says how many
+  posts go out and how many are too long. It reads the posts the extension would get,
+  only while it is shown, on the thumbnails the case keeps (a picture with none shows
+  itself, a video with none shows no picture), and nothing else: a recap map still to
+  make shows its column's small preview, with *The map is made when you publish.* under
+  it, and nothing is drawn, made or fetched for it. A new post and the home go back to
+  Write, and nothing is remembered. The counts are the composer's, the same in both
+  tabs: X counts every link as 23, and Bluesky counts a link as it writes it
+  (`lib/post.js` `blueskyCountedText`, read off its app on 2026-11-12), so a long source
+  link costs a Bluesky post its short form only.
 - **A video thread** posts the placed proofs of one video together: an extra choice,
   never the only way, since each proof still goes out on its own. It is offered for a
   video of two such proofs or more, from New post, from the home's series card and from

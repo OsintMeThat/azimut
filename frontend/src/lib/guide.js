@@ -730,6 +730,7 @@ export const PAGES = {
       { title: 'Reply under the source', text: 'When the source is an X or Bluesky post, a box under it sends the post as a reply there, without the link to the source.' },
       { title: 'Thread styles', text: 'Settings, Templates holds the structures a post can follow, for each kind of post.' },
       { title: 'Counted for the site', text: 'Each post counts its characters against the limit of the site picked.' },
+      { title: 'See it before it goes out', text: 'Preview, over the posts, shows the thread as X or Bluesky will, with its pictures and its counts.' },
       { title: 'The point, every way', text: 'The geolocation post gives the point in decimal, DMS and plus code, with links to the maps.' },
     ],
   },
