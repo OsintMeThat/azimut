@@ -21,7 +21,6 @@ import binascii
 import hashlib
 import json
 import re
-import shutil
 import struct
 import zlib
 from datetime import datetime, timezone
@@ -40,6 +39,7 @@ from ..engine import links as link_engine
 from ..engine import localtime
 from ..engine import media as media_engine
 from ..engine import proofimport as import_engine
+from ..engine import renames as rename_engine
 from ..engine import reveal as reveal_engine
 from ..engine import satellite as satellite_engine
 from ..engine import scenes as scene_engine
@@ -50,7 +50,7 @@ from . import events
 from .cases import delete_by_path, get_case
 from .cases.common import delete_entity_deep
 from .inspect import say_geolocating
-from .naming import case_only, holders, read_created_at, slugify, technical_name
+from .naming import holders, read_created_at, slugify, technical_name
 from .satellite import locate_on_save
 from .. import layout
 
@@ -388,24 +388,6 @@ def published_export(
         return None
 
 
-def _move_assets(src: Path, dst: Path) -> None:
-    """Carry a proof's assets folder over to its new name.
-
-    Windows refuses to rename onto an existing directory, so anything already
-    sitting at the destination is moved aside and deleted last.
-    """
-    if not src.is_dir():
-        return
-    if dst.exists():
-        stale = dst.with_name(dst.name + ".stale")
-        shutil.rmtree(stale, ignore_errors=True)
-        dst.rename(stale)
-        src.rename(dst)
-        shutil.rmtree(stale, ignore_errors=True)
-    else:
-        src.rename(dst)
-
-
 def _write_assets(folder: Path, incoming: dict[str, bytes], keep: set[str]) -> None:
     """Land the pasted images this save brings, then drop the ones it dropped.
 
@@ -650,7 +632,6 @@ def save_proof(case_id: str, body: ProofIn) -> dict[str, Any]:
     old_rel = layout.proof_spec_rel(old) if old and old != name else None
     if holders(spec_path.parent, name, source=old if old_rel else name):
         raise HTTPException(status_code=409, detail="another proof already uses that name")
-    recased = case_only(old, name)
 
     # Decoded up front: a bad batch must be refused before anything is written.
     incoming = _decode_assets(body.assets)
@@ -665,9 +646,9 @@ def save_proof(case_id: str, body: ProofIn) -> dict[str, Any]:
     when_zone = zone if when else None
     description = _stated_description(body.spec)
     credits = imagery_credits(body.spec)
-    # The export too, and for a stronger reason — the rename below deletes the
-    # old PNG and moves the assets folder, so a payload refused after that point
-    # would leave the proof under its old name with both of them gone.
+    # The export too, and for a stronger reason: the rename below moves the proof
+    # to its new name, so a payload refused after that point would leave it renamed
+    # by a save that answered an error.
     png_bytes: bytes | None = None
     if body.png_base64:
         try:
@@ -682,28 +663,15 @@ def save_proof(case_id: str, body: ProofIn) -> dict[str, Any]:
         # the credits travel inside the file, wherever it is copied to
         png_bytes = with_credits(png_bytes, credits)
 
-    if recased and old:
-        # One file under both names on Windows and macOS: each is renamed in place,
-        # and nothing is deleted as "the old one", which there is the same file.
-        for rel_of in (layout.proof_spec_rel, layout.proof_export_rel, layout.proof_assets_rel):
-            source = case.resolve_inside(rel_of(old))
-            if source.exists():
-                media_engine.rename_path(source, source.with_name(Path(rel_of(name)).name))
+    # A rename lands first, on its own: the spec, the export and the pasted images
+    # move to the new name, and every post, note, thread and record naming them
+    # follows (`engine/renames.py`), a change of case included. The rest of the save
+    # then writes onto the new name like any other, so a rename saved without fresh
+    # pixels keeps the export the proof already had.
+    renamed = bool(old_rel) and case.resolve_inside(str(old_rel)).is_file()
+    if renamed:
+        rename_engine.rename_record(case, "proof", str(old_rel), rel)
         spec_path = case.resolve_inside(rel)
-    # The export moves with the spec, so a rename saved without fresh pixels
-    # keeps the PNG the proof already had rather than dropping it.
-    elif old_rel and old:
-        old_png = case.resolve_inside(layout.proof_export_rel(old))
-        if old_png.exists():
-            if png_bytes is not None:
-                old_png.unlink()
-            else:
-                old_png.replace(case.resolve_inside(layout.proof_export_rel(name)))
-        # the pasted images follow the proof, exactly as its export does
-        _move_assets(
-            case.resolve_inside(layout.proof_assets_rel(old)),
-            case.resolve_inside(layout.proof_assets_rel(name)),
-        )
 
     # A published picture nobody drew on is its own export, whatever the browser drew.
     # Read after the rename above, which carried its assets folder to this name.
@@ -722,7 +690,7 @@ def save_proof(case_id: str, body: ProofIn) -> dict[str, Any]:
         case.resolve_inside(layout.proof_export_rel(name)).write_bytes(png_bytes)
         png_rel = layout.proof_export_rel(name)
         thumb_rel = _proof_thumb(case, name, png_bytes)
-    elif old_rel and case.resolve_inside(layout.proof_export_rel(name)).exists():
+    elif renamed and case.resolve_inside(layout.proof_export_rel(name)).exists():
         png_rel = layout.proof_export_rel(name)
         thumb_rel = _proof_thumb(case, name)
 
@@ -736,13 +704,12 @@ def save_proof(case_id: str, body: ProofIn) -> dict[str, Any]:
     spec["whenZone"] = _chosen_zone(body.spec)
     spec.pop("whenZoneStated", None)
     spec["description"] = description or None
-    previous = case.resolve_inside(layout.proof_spec_rel(name if recased else old or name))
-    spec.setdefault("created_at", read_created_at(previous) or _now())
+    spec.setdefault("created_at", read_created_at(spec_path) or _now())
     # Where in its video the proof happens is stated through its own route
     # (`state_proof_scene`), so a save that does not name it keeps the one on disk:
     # the composer, the sheet and an import write the rest of the proof and never
     # this. One that does name it is read into its one shape.
-    scene = scene_engine.read_scene(body.spec["scene"] if "scene" in body.spec else _stored_scene(previous))
+    scene = scene_engine.read_scene(body.spec["scene"] if "scene" in body.spec else _stored_scene(spec_path))
     if scene is None:
         spec.pop("scene", None)
     else:
@@ -759,13 +726,13 @@ def save_proof(case_id: str, body: ProofIn) -> dict[str, Any]:
         case.resolve_inside(layout.proof_assets_rel(name)), incoming, _referenced_assets(spec)
     )
 
-    # upsert the proof entity (analyst action → confirmed). A rename rebinds the
-    # entity the old name held rather than filing a second one, so the proof
-    # keeps its folder, notes and links.
-    existing = case.find_entity(attr="spec", value=old_rel or rel)
+    # upsert the proof entity (analyst action → confirmed). A rename above has
+    # rebound the entity the old name held rather than filing a second one, so the
+    # proof keeps its folder, notes and links.
+    existing = case.find_entity(attr="spec", value=rel)
     if existing:
         patch: dict[str, Any] = {"label": name}
-        attrs: dict[str, Any] = {"spec": rel} if old_rel else {}
+        attrs: dict[str, Any] = {}
         if png_rel and existing["attrs"].get("path") != png_rel:
             # a spec-only proof exported later gains its PNG here — without the
             # path the sidebar preview and delete_by_path can't see the file
@@ -816,8 +783,6 @@ def save_proof(case_id: str, body: ProofIn) -> dict[str, Any]:
             },
             by="proof-composer",
         )["id"]
-    if old_rel and not recased:
-        case.resolve_inside(layout.proof_spec_rel(str(old))).unlink(missing_ok=True)
 
     # A proof is derived from what it composes *and* from what it rests on: the same
     # click that saves it files the chain (ONTOLOGY §3). Panels are the pictures laid
@@ -846,7 +811,6 @@ def save_proof(case_id: str, body: ProofIn) -> dict[str, Any]:
         name=name,
         old=old,
         rel=rel,
-        old_rel=old_rel,
         when=when,
         when_zone=when_zone,
         spec=spec,
@@ -883,7 +847,7 @@ def save_proof(case_id: str, body: ProofIn) -> dict[str, Any]:
 #: The attribute that binds the dating statement below to the proof that made it.
 #: Keyed by the spec path for the same reason the proof entity itself is found that
 #: way: it is the one value a proof owns, and a rename carries it.
-_STATED_BY = "proof"
+_STATED_BY = scene_engine.DATED_BY
 
 #: What the statement holds when nothing but this save has touched it. A Claim that
 #: has grown reasoning, a quote or a confidence is the analyst's own work by then,
@@ -924,10 +888,6 @@ def _dated_material(
     return link_engine.collected_roots(case, found), span
 
 
-def _dating_label(name: str) -> str:
-    return f"Material of {name} was taken"
-
-
 def _date_the_material(
     case: Case,
     *,
@@ -935,7 +895,6 @@ def _date_the_material(
     name: str,
     old: str | None,
     rel: str,
-    old_rel: str | None,
     when: str,
     spec: dict[str, Any],
     when_zone: str | None = None,
@@ -955,7 +914,7 @@ def _date_the_material(
     statement about three files says exactly that, where three statements would read
     as three findings and would have to be kept in step by hand.
     """
-    standing = case.find_entity(attr=_STATED_BY, value=old_rel or rel)
+    standing = case.find_entity(attr=_STATED_BY, value=rel)
     if standing is not None and standing.get("type") != "claim":
         standing = None
     sources, span = _dated_material(case, spec) if when else ([], None)
@@ -969,8 +928,8 @@ def _date_the_material(
     # The wording is this save's only while nobody has rewritten it. A statement
     # reworded by hand is the analyst's sentence, and restating the date is no
     # reason to put our own back over it.
-    written = {_dating_label(name), _dating_label(old)} if old else {_dating_label(name)}
-    label = standing["label"] if standing and standing["label"] not in written else _dating_label(name)
+    written = {scene_engine.dating_label(name), scene_engine.dating_label(old)} if old else {scene_engine.dating_label(name)}
+    label = standing["label"] if standing and standing["label"] not in written else scene_engine.dating_label(name)
     case.save_temporal_claim(
         entity_id=standing["id"] if standing else None,
         label=label,

@@ -22,9 +22,10 @@ from ..engine import artifacts as artifact_engine
 from ..engine import geo as geo_engine
 from ..engine import links as link_engine
 from ..engine import media as media_engine
+from ..engine import renames as rename_engine
 from ..workspace import CaseError
 from .cases import delete_by_path, get_case
-from .naming import case_only, holders, read_created_at, slugify, technical_name
+from .naming import holders, read_created_at, slugify, technical_name
 from .. import layout
 
 router = APIRouter(prefix="/api", tags=["drafts"])
@@ -407,21 +408,18 @@ def save_draft(case_id: str, body: DraftIn) -> dict[str, Any]:
     old_rel = layout.draft_rel(old) if old and old != name else None
     if holders(path.parent, name, source=old if old_rel else name):
         raise HTTPException(status_code=409, detail="another draft already uses that name")
-    recased = case_only(old, name)
-    if recased and old:
-        # One file under both names there: renamed in place, never deleted as "the old one".
-        source = case.resolve_inside(layout.draft_rel(old))
-        # The name asked for, not `path`'s: Windows resolves a path to the case
-        # already on disk.
-        if source.is_file():
-            path = source.with_name(PurePosixPath(rel).name)
-            media_engine.rename_path(source, path)
+    # A rename lands first, on its own, a change of case included: the draft moves to
+    # its new name with its entity, so it keeps its folder, notes and links, and
+    # whatever names it follows (`engine/renames.py`). The save then writes onto the
+    # new name like any other.
+    if old_rel and case.resolve_inside(old_rel).is_file():
+        rename_engine.rename_record(case, "post", old_rel, rel)
+        path = case.resolve_inside(rel)
 
     # What the post said of its going out before this save, so the proof it is about
     # follows a link pasted, changed or taken back.
-    before_path = case.resolve_inside(layout.draft_rel(old or name))
     try:
-        before = json.loads(before_path.read_text(encoding="utf-8")).get("state")
+        before = json.loads(path.read_text(encoding="utf-8")).get("state")
     except (OSError, json.JSONDecodeError, AttributeError):
         before = None
     before = before if isinstance(before, dict) else {}
@@ -429,23 +427,16 @@ def save_draft(case_id: str, body: DraftIn) -> dict[str, Any]:
     data = {
         "azimut_draft": DRAFT_MARKER,
         "title": name,
-        "created_at": read_created_at(
-            path if recased else case.resolve_inside(layout.draft_rel(old or name))
-        ) or _now(),
+        "created_at": read_created_at(path) or _now(),
         "updated_at": _now(),
         "state": body.state,
     }
     media_engine.write_json_atomic(path, data)
 
-    # upsert the post entity (analyst action → confirmed). A rename rebinds the
-    # entity the old name held rather than filing a second one, so the draft
-    # keeps its folder, notes and links.
-    existing = case.find_entity(attr="draft", value=old_rel or rel)
+    # upsert the post entity (analyst action → confirmed)
+    existing = case.find_entity(attr="draft", value=rel)
     if existing:
-        patch: dict[str, Any] = {"label": name}
-        if old_rel:
-            patch["attrs"] = {"draft": rel}
-        case.update_entity(existing["id"], patch)
+        case.update_entity(existing["id"], {"label": name})
         entity_id = existing["id"]
     else:
         entity_id = case.add_entity(
@@ -454,8 +445,6 @@ def save_draft(case_id: str, body: DraftIn) -> dict[str, Any]:
             attrs={"draft": rel},
             by="post-composer",
         )["id"]
-    if old_rel and not recased:
-        case.resolve_inside(layout.draft_rel(str(old))).unlink(missing_ok=True)
 
     # A post is derived from the proof it announces and the media it attaches —
     # it carries their coordinates and source in its own text, so it outlives

@@ -572,8 +572,9 @@ sits on the line carrying the entity's name while the edge's own rating sits on 
 line below (§3). Nothing needs one: most bookmarks are never graded.
 
 The file-backed pointers of `proof`, `post`, `inspect-session`, `collage`,
-`compare-session`, `horizon-view` and `map-plate` are not stable: the file's name follows the label, so renaming
-one in its tool rewrites its `spec`, `draft` or `path` on the same entity. A
+`compare-session`, `horizon-view`, `map-plate` and `sheet` are not stable: the file's name follows the label, so renaming
+one in its tool or from Details rewrites its `spec`, `draft` or `path` on the same entity,
+and every other attribute holding the old path (`engine/renames.py`). A
 comparison's images follow it: its preview and every image kept from it name it in
 `compare_session`, which a rename rewrites. Each save also restates where the
 comparison stands (`engine/comparisons.py`): its frame's centre, or its view's, with

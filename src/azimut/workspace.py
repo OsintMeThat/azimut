@@ -397,8 +397,10 @@ class Case(CaseStore):
         case = cls.locate(case_id)
         case.migrate()
         _follow_hidden_dirs(case.path)
+        from .engine import renames
         from .engine import trash as trash_engine
 
+        renames.recover(case)
         trash_engine.recover(case)
         from .engine import merge as merge_engine
 
@@ -1000,6 +1002,9 @@ class Case(CaseStore):
         same move. This hook closes the other route: the shared Details editor
         patches an entity directly. Explicitly supplying the path attribute
         means the caller already owns the move, so this does nothing.
+
+        The move is `engine/renames.py`'s: the files named after the record go
+        with it, and everything naming any of them follows, journalled.
         """
         entity = self.get_entity(entity_id)
         if entity is None or "label" not in patch:
@@ -1025,88 +1030,23 @@ class Case(CaseStore):
         if not isinstance(current, str):
             return
 
-        from .engine import media as media_engine
+        from .engine import renames
 
         canonical = layout.slugify(str(patch["label"]), fallback)
         target = build(canonical)
+        patch["label"] = canonical
+        if target == current:
+            renames.title_record(self, current)
+            return
         source_path = self.resolve_inside(current)
         target_path = self.resolve_inside(target)
         occupied = {
             path.name.casefold() for path in target_path.parent.iterdir() if path != source_path
-        }
+        } if target_path.parent.is_dir() else set()
         if target_path.name.casefold() in occupied:
             raise CaseError(f"another {entity['type']} already uses that name")
-
-        moves: list[tuple[Path, Path]] = [(source_path, target_path)]
-        replacements: list[tuple[str, str]] = [(current, target)]
-        attrs = {attribute: target}
-        if entity["type"] == "proof":
-            old_name = Path(current).stem
-            old_export = layout.proof_export_rel(old_name)
-            new_export = layout.proof_export_rel(canonical)
-            moves.extend(
-                [
-                    (
-                        self.resolve_inside(old_export),
-                        self.resolve_inside(new_export),
-                    ),
-                    (
-                        self.resolve_inside(layout.proof_assets_rel(old_name)),
-                        self.resolve_inside(layout.proof_assets_rel(canonical)),
-                    ),
-                ]
-            )
-            replacements.append((old_export, new_export))
-            if (entity.get("attrs") or {}).get("path") == old_export:
-                attrs["path"] = new_export
-        if entity["type"] == "sheet":
-            # The sidecar is named after the table, so it follows it or the grid
-            # reopens with its colours and links hung on nothing.
-            old_meta = layout.sheet_meta_rel(Path(current).stem)
-            new_meta = layout.sheet_meta_rel(canonical)
-            moves.append((self.resolve_inside(old_meta), self.resolve_inside(new_meta)))
-            replacements.append((old_meta, new_meta))
-        if entity["type"] in ("horizon-view", "map-plate"):
-            # The preview the lists show is named after the work, so it follows it.
-            thumb_rel = layout.horizon_thumb_rel if entity["type"] == "horizon-view" else layout.map_plate_thumb_rel
-            old_thumb = thumb_rel(Path(current).stem)
-            new_thumb = thumb_rel(canonical)
-            moves.append((self.resolve_inside(old_thumb), self.resolve_inside(new_thumb)))
-            replacements.append((old_thumb, new_thumb))
-
-        moved: list[tuple[Path, Path]] = []
-        applied: list[tuple[str, str]] = []
-        try:
-            for source, destination in moves:
-                if source.exists() and str(source) != str(destination):
-                    media_engine.rename_path(source, destination)
-                    moved.append((source, destination))
-            for old, new in replacements:
-                if old == new:
-                    continue
-                self.replace_path_references(old, new)
-                media_engine.rewrite_file_references(self, old, new)
-                applied.append((old, new))
-            if target_path.exists():
-                try:
-                    data = json.loads(target_path.read_text(encoding="utf-8"))
-                except (OSError, json.JSONDecodeError):
-                    data = None
-                if isinstance(data, dict):
-                    data["title"] = canonical
-                    media_engine.write_json_atomic(target_path, data)
-        except Exception:
-            for old, new in reversed(applied):
-                self.replace_path_references(new, old)
-                media_engine.rewrite_file_references(self, new, old)
-            for source, destination in reversed(moved):
-                if destination.exists() and not source.exists():
-                    media_engine.rename_path(destination, source)
-            raise
-
-        patch["label"] = canonical
-        if attrs:
-            patch.setdefault("attrs", {}).update(attrs)
+        renames.rename_record(self, str(entity["type"]), current, target)
+        patch.setdefault("attrs", {})[attribute] = target
 
     def _follow_note_rename(self, entity_id: str, patch: dict[str, Any]) -> None:
         """Move a note's file when its title or its folder changes.

@@ -19,13 +19,10 @@ own picture in the lists is a small preview beside its spec
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any
+from typing import Any
 
 from .. import layout
 from . import comparisons
-
-if TYPE_CHECKING:
-    from ..workspace import Case
 
 
 TYPE = "horizon-view"
@@ -61,11 +58,6 @@ def placement(spec: dict[str, Any], footprint: list[list[float]] | None) -> dict
         "projection": look["projection"],
         "footprint": {"type": "Polygon", "coordinates": [ring]} if ring else None,
     }
-
-
-def follow_rename(case: Case, old_rel: str, new_rel: str) -> None:
-    """Point every image kept from a renamed view at its new name."""
-    comparisons.follow_rename(case, old_rel, new_rel, attr=VIEW_ATTR, key=VIEW_KEY)
 
 
 def grouped(items: list[dict[str, Any]]) -> dict[str, list[dict[str, Any]]]:

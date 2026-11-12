@@ -572,7 +572,9 @@ def relink_existing(
         sidecar.pop("path", None)
         _write_sidecar(media_path, sidecar)
 
-        case.replace_path_references(old_rel, rel_path)
+        from . import renames
+
+        renames.rewrite_references(case, {old_rel: rel_path})
         updated = case.update_entity(
             entity_id,
             {
@@ -1373,17 +1375,6 @@ def download_url(
     return result
 
 
-def _replace_exact(value: Any, old: str, new: str) -> Any:
-    """Recursively replace strings equal to ``old``; never edit prose."""
-    if isinstance(value, str):
-        return new if value == old else value
-    if isinstance(value, list):
-        return [_replace_exact(item, old, new) for item in value]
-    if isinstance(value, dict):
-        return {key: _replace_exact(item, old, new) for key, item in value.items()}
-    return value
-
-
 def write_json_atomic(path: Path, data: dict[str, Any]) -> None:
     write_text_atomic(path, json.dumps(data, indent=2, ensure_ascii=False) + "\n")
 
@@ -1414,59 +1405,8 @@ def rename_path(source: Path, destination: Path) -> None:
     source.rename(destination)
 
 
-def _rename_journal(case: Case) -> Path:
-    return case.resolve_inside(f"{layout.DATA_DIR}/rename.json")
-
-
-def _structured_record_paths(case: Case) -> list[Path]:
-    tool = case.tool_root
-    roots = (
-        layout.subdir(case.path, "proofs") / layout.META_DIR,
-        tool / layout.INSPECT_DIR,
-        tool / layout.COLLAGE_DIR,
-        tool / layout.DRAFTS_DIR,
-        tool / layout.SEARCH_DIR,
-        # Horizon's saved views and the bench's `.work.json`, then its searches.
-        tool / layout.HORIZON_DIR,
-        tool / layout.HORIZON_DIR / layout.HORIZON_FINDS_DIR,
-        tool / layout.MAPPLATE_DIR,
-    )
-    return [path for root in roots if root.is_dir() for path in sorted(root.glob("*.json"))]
-
-
-def rewrite_file_references(case: Case, old: str, new: str) -> None:
-    """Rewrite exact paths in sidecars and tool specs after a media move."""
-    media_dir = case.subdir("media")
-    sidecars = media_dir / layout.META_DIR
-    if sidecars.is_dir():
-        for sidecar in sorted(sidecars.glob("*.json")):
-            try:
-                data = json.loads(sidecar.read_text(encoding="utf-8"))
-            except (OSError, json.JSONDecodeError):
-                continue
-            replaced = _replace_exact(data, old, new)
-            if replaced == data:
-                continue
-            write_json_atomic(sidecar, replaced)
-            media_name = sidecar.name.removesuffix(".json")
-            entity = case.find_entity(attr="path", value=f"media/{media_name}")
-            case.upsert_media_item(
-                {**replaced, "path": f"media/{media_name}"},
-                entity_id=entity["id"] if entity else None,
-            )
-
-    for path in _structured_record_paths(case):
-        try:
-            data = json.loads(path.read_text(encoding="utf-8"))
-        except (OSError, json.JSONDecodeError):
-            continue
-        replaced = _replace_exact(data, old, new)
-        if replaced != data:
-            write_json_atomic(path, replaced)
-
-
-def _finish_media_rename(case: Case, record: dict[str, str]) -> dict[str, Any]:
-    """Complete one journalled media rename. Safe to call repeatedly."""
+def finish_media_rename(case: Case, record: dict[str, str]) -> dict[str, Any]:
+    """Complete one journalled media rename (`engine/renames.py`). Safe to call repeatedly."""
     old = record["old"]
     new = record["new"]
     title = record["title"]
@@ -1496,32 +1436,19 @@ def _finish_media_rename(case: Case, record: dict[str, str]) -> dict[str, Any]:
     owner = case.find_entity(attr="path", value=old) or case.find_entity(attr="path", value=new)
     owner_id = owner["id"] if owner else None
     case.remove_media_item(old)
-    case.replace_path_references(old, new)
+    if old != new:
+        case.replace_path_references(old, new)
     if owner_id:
         case.update_entity(owner_id, {"label": title})
     indexed = {**data, "path": new}
     case.upsert_media_item(indexed, entity_id=owner_id)
-    rewrite_file_references(case, old, new)
-    from . import inspectwork
+    from . import inspectwork, renames
 
+    renames.rewrite_files(case, {old: new})
     old_labels = [str(owner.get("label") or "") if owner else "", Path(old).stem]
     inspectwork.follow_file_rename(case, new, old_labels, title)
-    _rename_journal(case).unlink(missing_ok=True)
+    renames.media_journal(case).unlink(missing_ok=True)
     return indexed
-
-
-def recover_media_rename(case: Case) -> None:
-    """Finish a rename interrupted between filesystem and database updates."""
-    journal = _rename_journal(case)
-    if not journal.exists():
-        return
-    try:
-        record = json.loads(journal.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError) as exc:
-        raise CaseError("the media rename journal is unreadable") from exc
-    if not all(isinstance(record.get(key), str) for key in ("old", "new", "title")):
-        raise CaseError("the media rename journal is invalid")
-    _finish_media_rename(case, record)
 
 
 #: How long a rename waits for the background worker to put the file down.
@@ -1547,12 +1474,12 @@ def rename_media(
     settle_worker: bool = True,
 ) -> dict[str, Any]:
     """Rename a media file and every stored reference to its canonical stem."""
-    from . import workqueue
+    from . import renames, workqueue
 
     if settle_worker and not workqueue.wait_until_idle(timeout=RENAME_SETTLE_SECONDS):
         raise CaseError("background media work is still running; try the rename again")
     with case.lock:
-        recover_media_rename(case)
+        renames.recover(case, strict=True)
         media_path = case.resolve_inside(rel_path)
         if not media_path.exists():
             raise ValueError(f"no media found for {rel_path!r}")
@@ -1564,8 +1491,9 @@ def rename_media(
             "new": f"media/{destination.name}",
             "title": destination.stem,
         }
-        write_json_atomic(_rename_journal(case), record)
-        return _finish_media_rename(case, record)
+        renames.write_journal(renames.media_journal(case), record)
+        with renames.finishing(case):
+            return finish_media_rename(case, record)
 
 
 def merge_item(case: Case, rel_path: str, patch: dict[str, Any]) -> dict[str, Any] | None:
@@ -1633,7 +1561,9 @@ def update_media(case: Case, rel_path: str, patch: dict[str, Any]) -> dict[str, 
             return renamed
 
     with case.lock:
-        recover_media_rename(case)
+        from . import renames
+
+        renames.recover(case, strict=True)
         media_path = case.resolve_inside(rel_path)
         sidecar = _sidecar_path(media_path)
         if not sidecar.exists():

@@ -730,7 +730,8 @@ def test_media_rename_recovers_after_files_moved_before_database_update(client, 
     assert not case.resolve_inside(item["path"]).exists()
 
     monkeypatch.setattr(Case, "replace_path_references", real_replace)
-    media_engine.recover_media_rename(case)
+    # the next open of the case finishes it
+    case = Case.open(cid)
 
     recovered = media_engine.read_item(case, "media/After.png")
     assert recovered["title"] == "After"

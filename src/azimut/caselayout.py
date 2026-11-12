@@ -340,8 +340,9 @@ def _align_visible_names(case: "Case") -> None:
     Details edit that changed only the graph label.
     """
     from .engine import media as media_engine
+    from .engine import renames
 
-    media_engine.recover_media_rename(case)
+    renames.recover(case, strict=True)
     for item in list(case.list_media_items()):
         path = str(item.get("path") or "")
         if not path:

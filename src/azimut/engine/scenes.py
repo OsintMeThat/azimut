@@ -87,6 +87,14 @@ MAX_DRAFT_ID = 64
 #: The most scenes a proof names as given back (`scene.gave`): it gives one now, holding
 #: every moment, where it once gave one per moment.
 MAX_GIVEN = MAX_MOMENTS
+#: The attribute binding the date a proof states for its footage (a Claim,
+#: `api/proofs._date_the_material`) to the proof, by the proof's spec path.
+DATED_BY = "proof"
+
+
+def dating_label(name: str) -> str:
+    """What the date a proof states for its footage is called, until someone rewords it."""
+    return f"Material of {name} was taken"
 
 
 class UnknownProof(LookupError):
