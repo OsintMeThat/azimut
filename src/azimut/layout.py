@@ -227,10 +227,10 @@ _INVALID_NAME = re.compile(r'[<>:"/\\|?*\x00-\x1f]+')
 #: as ``7H45MFQC+QR`` and a U+2069), the zero-width space, the word joiner and the
 #: invisible operators, the soft hyphen and the byte-order mark. Two names that read
 #: the same must be one name (frontend `lib/naming.js` mirrors it).
-_INVISIBLE = re.compile("[­؜᠎​‎‏‪-‮⁠-⁤⁦-⁯﻿]")
+_INVISIBLE = re.compile("[\u00ad\u061c\u180e\u200b\u200e\u200f\u202a-\u202e\u2060-\u2064\u2066-\u206f\ufeff]")
 #: A zero-width joiner or non-joiner that joins nothing, at either end of a word. One
 #: inside a word stays: it builds an emoji sequence, or shapes a Persian word.
-_LOOSE_JOINER = re.compile(r"(?<!\S)[‌‍]+|[‌‍]+(?!\S)")
+_LOOSE_JOINER = re.compile("(?<!\\S)[\u200c\u200d]+|[\u200c\u200d]+(?!\\S)")
 _WINDOWS_RESERVED = frozenset(
     ["con", "prn", "aux", "nul"]
     + [f"com{number}" for number in range(1, 10)]

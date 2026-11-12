@@ -20,8 +20,8 @@ export const NAME_PREFIX = { collage: 'Collage', proof: 'Proof', draft: 'Post', 
 
 // The invisible characters a pasted name brings along, and a joiner that joins nothing:
 // mirrors `_INVISIBLE` and `_LOOSE_JOINER` in azimut/layout.py.
-const INVISIBLE = /[­؜᠎​‎‏‪-‮⁠-⁤⁦-⁯﻿]/g;
-const LOOSE_JOINER = /(?<!\S)[‌‍]+|[‌‍]+(?!\S)/g;
+const INVISIBLE = /[\u00AD\u061C\u180E\u200B\u200E\u200F\u202A-\u202E\u2060-\u2064\u2066-\u206F\uFEFF]/g;
+const LOOSE_JOINER = /(?<!\S)[\u200C\u200D]+|[\u200C\u200D]+(?!\S)/g;
 
 /** Human-readable cross-platform filename stem for a name being given — mirror of backend `slugify`. */
 export function slugify(text, fallback) {
