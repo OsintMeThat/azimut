@@ -61,7 +61,7 @@ describe('Proof Composer header', () => {
     expect(source).toContain('const HEADER_COMPACT = 1030;');
     expect(source).toContain('const HEADER_TIGHT = 800;');
     // named whether their words show or not
-    for (const name of ['Open proof', 'Discard', 'New proof']) {
+    for (const name of ['Open proof', 'New proof']) {
       expect(header).toContain(`aria-label="${name}"`);
       expect(header).toContain(`<span class="words">${name}</span>`);
     }
@@ -1194,7 +1194,7 @@ describe('a dialog over the composer', () => {
     );
 
     for (const flag of [
-      'picker', 'newProofOpen', 'importOpen', 'openList', 'discardConfirm',
+      'picker', 'newProofOpen', 'importOpen', 'openList',
       'replaceWithNewConfirm', 'exportPicker', 'overwritePrompt', 'placeOffer',
       'orphanOffer', 'deleteTarget', 'sourcePick',
     ]) {
@@ -1360,7 +1360,7 @@ describe('the unsaved badge', () => {
       source.indexOf('async function openProof('),
       source.indexOf('const selectedShapes'),
     );
-    const reset = source.slice(source.indexOf('function resetDoc'), source.indexOf('function discardProof'));
+    const reset = source.slice(source.indexOf('function resetDoc'), source.indexOf('async function backToHome'));
 
     expect(save).toContain('savedSnapshot = docSnapshot();');
     expect(open).toContain('savedSnapshot = docSnapshot();');

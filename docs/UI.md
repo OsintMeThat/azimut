@@ -4500,7 +4500,7 @@ place, and the arrows, Home and End walk the tabs without reaching the canvas be
 **The Proof tab carries its fields' `!`** on its label, *Still needs coordinates and a
 source* on hover, a date the save would refuse included, so a blank is not forgotten
 while composing in Layout. Nothing on the canvas or in the export depends on the tab.
-**A narrow header keeps Save in sight**: under 920 px Open proof, Discard, New proof and
+**A narrow header keeps Save in sight**: under 1030 px Open proof, New proof and
 Copy show their icons alone, on the same single line, so the canvas never moves.
 
 **Coordinates and sources.** Both head the Proof tab and both fill themselves in:

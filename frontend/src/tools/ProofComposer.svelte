@@ -1279,7 +1279,6 @@
   );
   let saving = $state(false);
   let proofFor = $state(undefined);
-  let discardConfirm = $state(false);
 
   // ---- undo / redo -------------------------------------------------------------
   // Snapshot-based history over the serializable document (toSpec). Mutations
@@ -1714,8 +1713,8 @@
   }
 
   // Where the composer is, in the address: the saved proof open, or none. Opening a
-  // proof and starting a new one are the steps Back retraces; a save naming the proof,
-  // a rename or a discard only rewrite the step it is on.
+  // proof, starting a new one and going home are the steps Back retraces; a save
+  // naming the proof or a rename only rewrite the step it is on.
   const place = () => ({ proof: savedName });
   $effect(() => settlePlace('proof', place()));
   onDestroy(onBackForward('proof', async (to) => {
@@ -1965,12 +1964,6 @@
     anchorHistory();
   }
 
-  function discardProof() {
-    openRun += 1; // a proof still loading stops writing into the page cleared
-    resetDoc();
-    discardConfirm = false;
-  }
-
   /**
    * Back to the home, the proofs of the case. Changes not saved are asked about first, as
    * opening another proof asks; a proof with none goes at once. It is a step Back retraces,
@@ -1993,7 +1986,7 @@
 
   function applyTemplate(t, { notify = true } = {}) {
     // first apply snapshots the current look; re-applying keeps that original,
-    // so Discard always walks back to the pre-template style, not the last one.
+    // so No template always walks back to the pre-template style, not the last one.
     const prevStyle = appliedTemplate?.prevStyle ?? templateFromProof(proof);
     applyProofStyle(proof, t.data, {
       logo: !!sigImg,
@@ -7411,7 +7404,7 @@
   // Every dialog that can sit over the composer. A modal owns the keyboard while
   // it is up, and this is what keeps the canvas shortcuts out from under it.
   const modalOpen = $derived(
-    picker || newProofOpen || importOpen || openList !== null || discardConfirm
+    picker || newProofOpen || importOpen || openList !== null
       || replaceWithNewConfirm || exportPicker || overwritePrompt !== null
       || placeOffer !== null || orphanOffer !== null || deleteTarget !== null
       || sourcePick !== null || pointMap !== null || checking !== null || leaving !== null
@@ -7872,11 +7865,6 @@
     {#if caseState.current}
       <button class="btn btn-sm" onclick={openProofDialog} aria-label="Open proof" title="Open a saved proof">
         <Icon name="folderOpen" size={14} /> <span class="words">Open proof</span>
-      </button>
-    {/if}
-    {#if proofStarted}
-      <button class="btn btn-sm" onclick={() => (discardConfirm = true)} aria-label="Discard" title="Clear this proof">
-        <Icon name="reset" size={14} /> <span class="words">Discard</span>
       </button>
     {/if}
     <button class="btn btn-sm" onclick={openNewProofDialog} aria-label="New proof" title="Start a new proof">
@@ -8816,19 +8804,6 @@
     icon="reset"
     onconfirm={() => leaving.answer(true)}
     oncancel={() => leaving.answer(false)}
-  />
-{/if}
-
-{#if discardConfirm}
-  <ConfirmDialog
-    title="Discard this proof?"
-    message="This clears the current document."
-    detail={savedName ? 'This does not delete the saved proof, only the unsaved changes here.' : 'Anything not saved yet will be lost.'}
-    confirmLabel="Discard"
-    tone="danger"
-    icon="reset"
-    onconfirm={discardProof}
-    oncancel={() => (discardConfirm = false)}
   />
 {/if}
 
