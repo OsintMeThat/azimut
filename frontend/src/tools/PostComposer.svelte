@@ -26,6 +26,7 @@
   import { BACKGROUND_NAMES, mapOptions, recapFit, recapPlaces } from '../lib/recapMap.js';
   import { defaultProofTemplate } from '../lib/proofTemplates.js';
   import { postLabel, THREAD_MIN } from './post/postHome.js';
+  import { movedNames } from './post/moved.js';
   import { extensionWindowPutAway, putExtensionWindowAway } from './post/extensionWindow.js';
   import {
     buildTweet1 as buildTweet1Lines, DEFAULT_TWEET_BODY,
@@ -259,6 +260,8 @@
     if (!id) return;
     let live = true;
     (async () => {
+      // a rename made elsewhere is followed first: what it moved was not deleted
+      if (draft && (await followRenames(id, draft))) return;
       if (draft) {
         const bound = await lookupEntity(id, specAttr('draft'), specPath('draft', draft));
         if (live && !bound && draftName === draft) {
@@ -282,6 +285,44 @@
       live = false;
     };
   });
+
+  /**
+   * A proof, a picture or a video renamed elsewhere (Geo Proof, Details, Media) has this
+   * draft rewritten on disk (`engine/renames.py`) while the composer holds the old
+   * names: they are carried over (`post/moved.js`) before a save can write them back,
+   * and a thread's places are read again. What was typed stays. Answers whether
+   * anything moved.
+   */
+  async function followRenames(caseId, name) {
+    const doc = await api.get(`/api/cases/${caseId}/drafts/${encodeURIComponent(name)}`).catch(() => null);
+    if (!writtenKey || draftName !== name || caseState.current?.id !== caseId || !doc?.state) return false;
+    const moved = movedNames(JSON.parse(writtenKey).state, doc.state);
+    if (!moved.size) return false;
+    const settled = saveKey(snapshot(), postTitle.trim()) === writtenKey;
+    const move = (value) => moved.get(value) ?? value;
+    if (moved.has(proofPng)) setProof(move(proofPng));
+    mediaPaths = mediaPaths.map(move);
+    firstMedia = firstMedia.map(move);
+    for (const tweet of extraTweets) {
+      tweet.mediaPaths = tweet.mediaPaths.map(move);
+      if (tweet.key) tweet.key = move(tweet.key);
+    }
+    altTexts = Object.fromEntries(Object.entries(altTexts).map(([path, text]) => [move(path), text]));
+    altSeen = new Set([...altSeen].map(move));
+    if (thread) {
+      for (const key of ['video', 'clip', 'sheet', 'map', 'first']) thread[key] = move(thread[key]);
+      thread.written = Object.fromEntries(Object.entries(thread.written).map(([key, text]) => [move(key), text]));
+      const run = postRun;
+      if (thread.video) {
+        readThread(caseId, thread.video).then((read) => {
+          if (read && run === postRun && thread) Object.assign(thread, read);
+        });
+      }
+    }
+    // nothing typed since the last save: what is on disk is what the composer holds now
+    if (settled) writtenKey = saveKey(snapshot(), postTitle.trim());
+    return true;
+  }
   let reportModal = $state(null); // { title, folder }: Add to notes
   let postMenu = $state(null); // the header's ⋯, by the button that opened it
   let reportSaving = $state(false);

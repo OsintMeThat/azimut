@@ -5417,6 +5417,11 @@ never posts, and pressing Post on X or Bluesky stays the analyst's.
   lowest free one is taken. Going home, opening another
   post, Back, New post, a proof sent with **To Post**, another case or the tab closing
   each writes what is pending first; a post whose save failed stays open and says so.
+  A proof, a picture or a video renamed elsewhere while the post is open (Geo Proof,
+  Details, Media) is followed as soon as the case is read again: the composer reads its
+  draft as the rename rewrote it and takes the new names (`post/moved.js`), a thread's
+  place keys included, keeping what was typed, so its next save never writes the old
+  name back.
   A name given is cleaned of the invisible characters a paste brings along, beside
   Arabic text above all, as every saved name is (`layout.slugify`); a post or a proof
   saved under one before moves to the clean name on its next save.

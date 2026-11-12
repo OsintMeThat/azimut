@@ -740,6 +740,74 @@ describe('a post saves itself', () => {
   });
 });
 
+describe('a rename made elsewhere', () => {
+  const DELETED = 'The attached proof was deleted. The thread text is unchanged';
+  // what the server holds: the proof's old picture is gone once it is renamed
+  const gone = new Set();
+  const openDepot = async (state) => {
+    lists.drafts = [{ name: 'Depot', title: 'Depot', target: 'x', posts: 1, proof: 'proofs/Depot.png' }];
+    lists.saved = { Depot: { title: 'Depot', state } };
+    api.get.mockImplementation(async (path) => {
+      const asked = path.includes('/entities/lookup') ? new URLSearchParams(path.split('?')[1]).get('value') : null;
+      if (asked && gone.has(asked)) return { entity: null };
+      return answer(path);
+    });
+    await mountPost();
+    home().querySelector('.ph-open, button.ph-card').click();
+    await saved();
+  };
+  // Geo Proof renames the proof: the server rewrites the draft naming it, and the case is read again
+  const renameInGeoProof = async (rewrite) => {
+    gone.add('proofs/Depot.png');
+    lists.saved.Depot = { title: 'Depot', state: rewrite(structuredClone(lists.saved.Depot.state)) };
+    caseState.rev += 1;
+    await settle();
+  };
+
+  beforeEach(() => gone.clear());
+
+  it('follows its proof to the new name, and the next save writes that one', async () => {
+    await openDepot({ description: 'Depot fire', proofPng: 'proofs/Depot.png', tweet1: 'Depot fire', tweet1Edited: true });
+    expect(target.querySelector('.attach-chip').textContent).toContain('Depot.png');
+    await renameInGeoProof((state) => ({ ...state, proofPng: 'proofs/Fuel depot.png' }));
+
+    expect(toasts()).not.toContain(DELETED);
+    expect(target.querySelector('.attach-chip').textContent).toContain('Fuel depot.png');
+    // the post on disk already says it: following it writes nothing
+    await saved();
+    expect(draftWrites()).toEqual([]);
+    type(firstPost(), 'Depot fire at night');
+    await saved();
+    const [, sent] = draftWrites().at(-1);
+    expect(sent.state.proofPng).toBe('proofs/Fuel depot.png');
+    expect(sent.state.tweet1).toBe('Depot fire at night');
+  });
+
+  it('keeps what was typed and not yet saved when the rename lands', async () => {
+    await openDepot({
+      description: 'Depot fire', proofPng: 'proofs/Depot.png', tweet1: 'Depot fire', tweet1Edited: true,
+      alt: { 'proofs/Depot.png': 'Smoke over the depot' },
+    });
+    type(firstPost(), 'Depot fire, typed just now');
+    await renameInGeoProof((state) => ({
+      ...state, proofPng: 'proofs/Fuel depot.png', alt: { 'proofs/Fuel depot.png': 'Smoke over the depot' },
+    }));
+    await saved();
+    const [, sent] = draftWrites().at(-1);
+    expect(sent.state).toMatchObject({
+      proofPng: 'proofs/Fuel depot.png', tweet1: 'Depot fire, typed just now',
+      alt: { 'proofs/Fuel depot.png': 'Smoke over the depot' },
+    });
+    expect(toasts()).not.toContain(DELETED);
+  });
+
+  it('still says so when the proof was deleted rather than renamed', async () => {
+    await openDepot({ description: 'Depot fire', proofPng: 'proofs/Depot.png', tweet1: 'Depot fire', tweet1Edited: true });
+    await renameInGeoProof((state) => state);
+    expect(toasts()).toContain(DELETED);
+  });
+});
+
 describe('the header', () => {
   const more = () => header().querySelector('button[aria-label="More for this post"]');
   const menu = () => document.querySelector('.float-menu[aria-label="This post"]');

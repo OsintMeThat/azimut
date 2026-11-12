@@ -711,3 +711,46 @@ describe('a video too long for the platform', () => {
     expect(panel().querySelector('[data-testid="video-over"]').textContent).toContain('Bluesky takes 10 minutes.');
   });
 });
+
+describe('a proof of the thread renamed elsewhere', () => {
+  it('carries its place\'s words and picture to the new name', async () => {
+    const gate = (key, png) => ({
+      text: 'The gate, as I say it', mediaPaths: [png], mediaType: 'images', isMediaTweet: true,
+      mediaTextIncludesPrefix: true, key, edited: true,
+    });
+    lists.drafts = [{ name: 'Convoy', title: 'Convoy', target: 'x', kind: 'video', video: VIDEO, posts: 3 }];
+    lists.saved = { Convoy: { title: 'Convoy', state: {
+      kind: 'video', video: VIDEO, order: 'proof', first: 'place:bridge', posts: VIDEO_THREAD_STARTERS[2].posts,
+      body: VIDEO_THREAD_STARTERS[2].body, mention: '@GeoConfirmed', source: SOURCE, target: 'x',
+      tweet1: 'My own words', tweet1Edited: true, firstMedia: ['proofs/bridge.png'], firstMediaType: 'images',
+      mediaEnabled: false, mediaType: 'none',
+      extraTweets: [
+        { text: 'The video', mediaPaths: [VIDEO], mediaType: 'video', isMediaTweet: true, mediaTextIncludesPrefix: true, key: 'video' },
+        gate('place:gate', 'proofs/gate.png'),
+      ],
+    } } };
+    await mountPost();
+    home().querySelector('.ph-open').click();
+    await saved();
+
+    // Geo Proof renames the gate's proof: the draft is rewritten on disk, and its video's places say so
+    const state = lists.saved.Convoy.state;
+    lists.saved.Convoy = { title: 'Convoy', state: {
+      ...state, extraTweets: [state.extraTweets[0], gate('place:East gate', 'proofs/East gate.png')],
+    } };
+    lists.scenes[VIDEO] = { ...SCENES, scenes: SCENES.scenes.map((row) => (row.proof === 'gate'
+      ? { ...row, proof: 'East gate', title: 'East gate', png: 'proofs/East gate.png' } : row)) };
+    caseState.rev += 1;
+    await settle();
+
+    // laid out again: the words written for the place stay on it, under its new name
+    button(panel(), 'Video first The video, then a post per place').click();
+    await settle();
+    expect(posts()[2]).toMatchObject({ label: 'East gate', text: 'The gate, as I say it' });
+    await saved();
+    const written = draftWrites().at(-1)[1].state;
+    expect(written.extraTweets.find((one) => one.key === 'place:East gate'))
+      .toMatchObject({ text: 'The gate, as I say it', mediaPaths: ['proofs/East gate.png'] });
+    expect(JSON.stringify(written)).not.toContain('place:gate');
+  });
+});
