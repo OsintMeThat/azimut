@@ -10,6 +10,7 @@ import { afterEach, describe, expect, it } from 'vitest';
 import { flushSync, mount, unmount } from 'svelte';
 import ThreadPreview from './ThreadPreview.svelte';
 import { prefs } from '../../lib/state.svelte.js';
+import { myLogoUrl } from '../../lib/myLogo.js';
 
 const SOURCE = 'https://www.instagram.com/reel/C8kXyZaBcDe/?igsh=MWZ1dGx0a2Y0';
 const FIRST = [
@@ -75,6 +76,7 @@ afterEach(() => {
   target?.remove();
   app = null;
   prefs.signatureHandle = '';
+  prefs.logoSet = false;
 });
 
 describe('Write or Preview', () => {
@@ -183,6 +185,40 @@ describe('the posts, on X', () => {
     show();
     expect(posts()[0].querySelector('.tp-name').textContent).toBe('@desk');
     expect(posts()[0].querySelector('.tp-avatar').textContent).toBe('D');
+    expect(posts()[0].querySelector('.tp-avatar img')).toBeNull();
+  });
+
+  it('wears the logo of Settings in its circle, whole and as wide as the circle lets it, the handle beside it', () => {
+    prefs.signatureHandle = '@desk';
+    prefs.logoSet = true;
+    show();
+    const avatar = posts()[0].querySelector('.tp-avatar');
+    const logo = avatar.querySelector('img');
+    expect(avatar.classList).toContain('logo');
+    expect(avatar.textContent).toBe('');
+    expect(posts()[0].querySelector('.tp-name').textContent).toBe('@desk');
+    // where every tool reads it, so the copy the browser holds serves each post
+    expect(logo.getAttribute('src')).toBe(myLogoUrl());
+    expect(new Set(posts().map((post) => post.querySelector('.tp-avatar img').getAttribute('src')))).toEqual(new Set([myLogoUrl()]));
+    // a wide logo takes its own shape, its corners inside the circle
+    Object.defineProperty(logo, 'naturalWidth', { value: 400, configurable: true });
+    Object.defineProperty(logo, 'naturalHeight', { value: 100, configurable: true });
+    logo.dispatchEvent(new Event('load'));
+    flushSync();
+    const [width, height] = [parseFloat(logo.style.width), parseFloat(logo.style.height)];
+    expect(width / height).toBeCloseTo(4, 6);
+    expect(Math.hypot(width, height)).toBeLessThanOrEqual(36);
+    expect(width).toBeGreaterThan(30);
+  });
+
+  it('keeps the initial when the logo does not load', () => {
+    prefs.signatureHandle = '@desk';
+    prefs.logoSet = true;
+    show();
+    posts()[0].querySelector('.tp-avatar img').dispatchEvent(new Event('error'));
+    flushSync();
+    expect(posts().map((post) => post.querySelector('.tp-avatar').textContent)).toEqual(['D', 'D', 'D']);
+    expect(target.querySelector('.tp-avatar img')).toBeNull();
   });
 });
 

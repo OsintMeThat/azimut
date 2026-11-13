@@ -18,11 +18,17 @@
    * would get them), draws only while it is shown, on thumbnails rather than files, and
    * asks nothing of the network. A recap map still to make shows the composer's small
    * preview of it (`recap`), never a map made for the occasion.
+   *
+   * The author's round avatar is the logo of Settings › Publishing when there is one, read
+   * at the address every tool reads it (`lib/myLogo.js`), so the copy the browser holds
+   * serves it: whole, never cropped, on a white ground as it prints on paper. Else the
+   * handle's first letter.
    */
   import Icon from '../../components/Icon.svelte';
   import { prefs } from '../../lib/state.svelte.js';
+  import { myLogoUrl } from '../../lib/myLogo.js';
   import {
-    DEFAULT_RATIO, gridFrame, postPictures, previewAuthor, previewText, replyHandle, singleFrame, threadWords,
+    avatarLogoBox, DEFAULT_RATIO, gridFrame, postPictures, previewAuthor, previewText, replyHandle, singleFrame, threadWords,
   } from './threadPreview.js';
 
   let {
@@ -65,6 +71,13 @@
     shapes.set(src, shape);
     learnt[src] = shape;
   }
+  // the logo while Settings has one and it loads, framed once its shape is known; the
+  // handle's initial otherwise
+  const AVATAR = 36;
+  let logoFailed = $state('');
+  const logo = $derived(prefs.logoSet && myLogoUrl() !== logoFailed ? myLogoUrl() : '');
+  const logoBox = $derived(logo ? avatarLogoBox(learnt[logo] ?? shapes.get(logo) ?? DEFAULT_RATIO, AVATAR, 1) : null);
+
   /** Reads a picture's shape once it is decoded, a picture the browser held already included. */
   function shaped(img, src) {
     let current = src;
@@ -117,7 +130,9 @@
         {@const one = post.pictures.length === 1 ? singleFrame(target, shapeOf(post.pictures[0])) : null}
         <article class="tp-post" class:linked={i < readings.length - 1} data-testid="preview-post">
           <div class="tp-side" aria-hidden="true">
-            <span class="tp-avatar">{#if author.initial}{author.initial}{:else}<Icon name="user" size={15} />{/if}</span>
+            <span class="tp-avatar" class:logo={!!logo}>{#if logo}<img src={logo} alt="" decoding="async"
+                style:width="{logoBox.width}px" style:height="{logoBox.height}px" use:shaped={logo}
+                onerror={() => (logoFailed = logo)} />{:else if author.initial}{author.initial}{:else}<Icon name="user" size={15} />{/if}</span>
           </div>
           <div class="tp-main">
             <div class="tp-head">
@@ -230,6 +245,13 @@
     font-weight: 600;
     user-select: none;
   }
+  /* the analyst's logo, whole, on white as it prints on paper, in either theme */
+  .tp-avatar.logo {
+    overflow: hidden;
+    background: #fff;
+    box-shadow: inset 0 0 0 1px var(--border);
+  }
+  .tp-avatar.logo img { display: block; max-width: none; object-fit: contain; }
   /* the line from a post to the next */
   .tp-post.linked .tp-side::after {
     content: '';

@@ -5515,7 +5515,11 @@ never posts, and pressing Post on X or Bluesky stays the analyst's.
   shape, between 3:4 and 2:1 on X, never taller than wide on Bluesky); a video on its
   poster; an **ALT** mark on a picture that has its text, which the hover shows; *Replying
   to @name* on a reply; a line from each post to the next; and its count against the
-  limit, red past it, with what runs past softly marked. The line over it says how many
+  limit, red past it, with what runs past softly marked. Each reads as the handle Settings
+  › Publishing signs proofs with (else *You*), beside a round avatar: the logo set there,
+  whole and never cropped, as wide as the circle lets it, on white as it prints on paper,
+  read at the address every tool reads it so the browser's copy serves every post; else
+  the handle's first letter. The line over it says how many
   posts go out and how many are too long. It reads the posts the extension would get,
   only while it is shown, on the thumbnails the case keeps (a picture with none shows
   itself, a video with none shows no picture), and nothing else: a recap map still to

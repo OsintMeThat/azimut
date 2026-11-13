@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { postCharacterCount } from '../../lib/post.js';
 import { bidiSafe } from '../../lib/bidi.js';
 import {
-  DEFAULT_RATIO, gridFrame, postPictures, previewAuthor, previewText, replyHandle, singleFrame, textParts, threadWords,
+  avatarLogoBox, DEFAULT_RATIO, gridFrame, postPictures, previewAuthor, previewText, replyHandle, singleFrame, textParts, threadWords,
   xDisplayUrl,
 } from './threadPreview.js';
 
@@ -155,5 +155,22 @@ describe('who it reads as', () => {
     expect(previewAuthor('  ')).toEqual({ name: 'You', initial: '' });
     expect(threadWords(1)).toBe('1 post');
     expect(threadWords(4)).toBe('4 posts');
+  });
+
+  it('fits the whole logo in its round avatar, a wide one as wide as the circle lets it', () => {
+    const inCircle = ({ width, height }, size) => Math.hypot(width / 2, height / 2) <= size / 2 + 1e-9;
+    for (const shape of [1, 4, 1 / 3, 16 / 9]) {
+      const box = avatarLogoBox(shape, 36);
+      expect(inCircle(box, 36), String(shape)).toBe(true);
+      expect(box.width / box.height).toBeCloseTo(shape, 9);
+      // and no smaller than it must be: its corners touch the circle
+      expect(Math.hypot(box.width, box.height)).toBeCloseTo(36, 9);
+    }
+    // a square logo is the inscribed square; a wide one spans nearly the whole circle
+    expect(avatarLogoBox(1, 36).width).toBeCloseTo(36 / Math.SQRT2, 9);
+    expect(avatarLogoBox(4, 36).width).toBeGreaterThan(34);
+    // an inset keeps it off the ring; a shape not known yet is read as square
+    expect(avatarLogoBox(1, 36, 3).width).toBeCloseTo(30 / Math.SQRT2, 9);
+    expect(avatarLogoBox(NaN, 36)).toEqual(avatarLogoBox(1, 36));
   });
 });

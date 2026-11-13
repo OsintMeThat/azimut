@@ -217,6 +217,18 @@ export function previewAuthor(handle) {
   return { name: said || 'You', initial: initial.toUpperCase() };
 }
 
+/**
+ * The box a logo of this shape (width over height) takes in a round avatar of `size`
+ * pixels: the largest of its shape whose corners stay inside the circle, less `inset`
+ * all round, so the whole logo shows and a wide one keeps all the width it can.
+ */
+export function avatarLogoBox(shape, size, inset = 0) {
+  const ratio = Number.isFinite(shape) && shape > 0 ? shape : 1;
+  const across = Math.max(0, size - 2 * inset);
+  const height = across / Math.hypot(ratio, 1);
+  return { width: height * ratio, height };
+}
+
 /** The line over the preview: how many posts go out. */
 export function threadWords(count) {
   return `${count} ${count === 1 ? 'post' : 'posts'}`;

@@ -136,6 +136,64 @@ test('Preview shows the thread as it goes out on X, then on Bluesky, reading onl
   fixture.expectNoUnexpectedRequests();
 });
 
+/** A wide logo, four times as wide as tall on a transparent ground, drawn by the browser. */
+async function wideLogo(page) {
+  const bytes = await page.evaluate(async () => {
+    const canvas = new OffscreenCanvas(480, 120);
+    const pen = canvas.getContext('2d');
+    pen.fillStyle = '#1f3a5f';
+    pen.beginPath();
+    pen.roundRect(4, 4, 472, 112, 28);
+    pen.fill();
+    pen.fillStyle = '#ffffff';
+    pen.font = 'bold 76px sans-serif';
+    pen.textAlign = 'center';
+    pen.textBaseline = 'middle';
+    pen.fillText('DESK', 240, 64);
+    const blob = await canvas.convertToBlob({ type: 'image/png' });
+    return [...new Uint8Array(await blob.arrayBuffer())];
+  });
+  return Buffer.from(bytes);
+}
+
+test('the author wears the analyst\'s logo, whole in its circle, read once for every post', async ({ page }) => {
+  await page.setViewportSize({ width: 1024, height: 800 });
+  const logo = await wideLogo(page);
+  const fixture = await installAppFixture(page, {
+    drafts: DRAFTS, proofList: PROOFS, media: MEDIA, lookupEntities: lookups, settings: { signature_handle: '@desk', signature: true },
+  });
+  await postRoutes(page);
+  const reads = [];
+  // as the app serves it: no-cache, so a changed logo is never the one a browser kept
+  await page.route('**/api/settings/signature.png**', (route) => {
+    reads.push(route.request().url());
+    return route.fulfill({ contentType: 'image/png', body: logo, headers: { 'Cache-Control': 'no-cache' } });
+  });
+  await page.goto('/#post');
+  await page.getByTestId('post-home').locator('.post-card', { hasText: 'Bridge thread' }).locator('.ph-open').click();
+  await tab(page, 'Preview').click();
+
+  const avatars = shown(page).locator('.tp-avatar img');
+  await expect(avatars).toHaveCount(4);
+  await expect.poll(() => avatars.first().evaluate((img) => img.complete && img.naturalWidth)).toBe(480);
+  await expect(shown(page).first().locator('.tp-name')).toHaveText('@desk');
+  // whole: the logo keeps its shape, its corners inside the circle
+  const circle = await shown(page).first().locator('.tp-avatar').boundingBox();
+  const box = await avatars.first().boundingBox();
+  expect(box.width / box.height).toBeCloseTo(4, 1);
+  expect(Math.hypot(box.width / 2, box.height / 2)).toBeLessThanOrEqual(circle.width / 2);
+  expect(box.width).toBeGreaterThan(circle.width * 0.85);
+
+  // another platform, Write and Preview again: the same picture, never asked again
+  await page.locator('.target-tabs').getByRole('button', { name: 'Bluesky', exact: true }).click();
+  await tab(page, 'Write').click();
+  await tab(page, 'Preview').click();
+  await expect(avatars).toHaveCount(4);
+  await expect.poll(() => avatars.last().evaluate((img) => img.complete && img.naturalWidth)).toBe(480);
+  expect(reads).toHaveLength(1);
+  fixture.expectNoUnexpectedRequests();
+});
+
 // ---- a video thread, Recap first on its map ----------------------------------------
 const VIDEO = 'media/convoy.mp4';
 const slideRow = (name, title, slide, extra = {}) => ({
