@@ -2143,6 +2143,9 @@
       // marked posted from its card before it was ever opened here: the post as it
       // stands is the one that went out
       if (publishState && !publishState.mark) publishState = { ...publishState, mark: postPrint() };
+      // A post that went out opens on what went out, once, by where it stands now: changed
+      // since, or still a draft, it opens on Write. Nothing follows the state afterwards.
+      previewing = liveState === 'posted';
       // a post that keeps no text opens with its first words, as part of the post opened
       if (altOn) await prefillAlt(run);
       if (run !== postRun) return;
@@ -2536,8 +2539,9 @@
 
   // ---- the thread preview (post/ThreadPreview.svelte) ------------------------------
   // Write or Preview over the thread's column. The preview reads the posts as the
-  // extension would get them, and only while it is shown; a new post opens on Write.
-  // A recap map still to make shows the small preview its own column draws.
+  // extension would get them, and only while it is shown. A new post opens on Write, a
+  // saved one on Preview when it is Posted at opening (`loadDraft`), and nothing of the
+  // choice is kept. A recap map still to make shows the small preview its own column draws.
   let previewing = $state(false);
   let recapShown = $state(null);
   const previewed = $derived(previewing ? handoffPayload() : null);

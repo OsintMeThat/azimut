@@ -356,6 +356,11 @@ describe('a saved post', () => {
     prefs.postAltText = true;
     const posted = { ...STATE, publish: { site: 'x', posted_at: '2026-11-09T10:00:00Z' } };
     await open(posted);
+    // a posted post opens on what went out: the fields are one press away
+    const write = [...target.querySelectorAll('[role="tab"]')].find((one) => one.textContent.trim() === 'Write');
+    expect(write.getAttribute('aria-selected')).toBe('false');
+    write.click();
+    await settle();
     expect(field('helicopters.png').value).toBe(DESCRIPTION);
     expect(target.querySelector('.tool-header').textContent).not.toContain('Changed since posted');
   });

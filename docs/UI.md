@@ -5524,8 +5524,11 @@ never posts, and pressing Post on X or Bluesky stays the analyst's.
   only while it is shown, on the thumbnails the case keeps (a picture with none shows
   itself, a video with none shows no picture), and nothing else: a recap map still to
   make shows its column's small preview, with *The map is made when you publish.* under
-  it, and nothing is drawn, made or fetched for it. A new post and the home go back to
-  Write, and nothing is remembered. The counts are the composer's, the same in both
+  it, and nothing is drawn, made or fetched for it. A post opened while it stands
+  **Posted** (its card, Open, Back or Forward) opens on Preview, what went out; one
+  changed since, a draft, a new post and the home open on Write. The choice follows the
+  state at opening and nothing is remembered, so marking a post posted while it is open
+  leaves it on the tab it is on. The counts are the composer's, the same in both
   tabs: X counts every link as 23, and Bluesky counts a link as it writes it
   (`lib/post.js` `blueskyCountedText`, read off its app on 2026-11-12), so a long source
   link costs a Bluesky post its short form only.

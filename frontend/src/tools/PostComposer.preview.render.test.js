@@ -227,6 +227,75 @@ describe('Preview in Post', () => {
     expect(shown()[0].querySelector('.tp-text').textContent).toContain('www.instagram.com/reel/C8kXyZa...');
   });
 
+  describe('a post that went out', () => {
+    const POSTED = { site: 'x', url: 'https://x.com/desk/status/1855000000000000000', posted_at: '2026-11-10T10:05:00Z' };
+    const saved = (name, publish) => ({ title: name, state: { ...DRAFT.state, publish } });
+    const open = async (name) => {
+      [...home().querySelectorAll('.ph-open')].find((b) => b.textContent.includes(name)).click();
+      await settle();
+    };
+    const goHome = async () => {
+      button(target.querySelector('.tool-header'), 'Posts').click();
+      await settle();
+    };
+    const selected = () => tab('Preview').getAttribute('aria-selected') === 'true' ? 'Preview' : 'Write';
+
+    beforeEach(() => {
+      lists.drafts = [
+        { name: 'Out', title: 'Out', target: 'x', posts: 3, state: 'posted' },
+        { name: 'Edited', title: 'Edited', target: 'x', posts: 3, state: 'changed' },
+        { name: 'Bridge thread', title: 'Bridge thread', target: 'x', posts: 3, state: 'draft' },
+      ];
+      // marked from its card before it was ever opened: what stands is what went out
+      lists.saved.Out = saved('Out', { ...POSTED, changed: false });
+      lists.saved.Edited = saved('Edited', { ...POSTED, mark: 'not this post', changed: true });
+    });
+
+    it('opens on Preview while it stands Posted, and Write stays one press away', async () => {
+      await mountPost();
+      await open('Out');
+      expect(selected()).toBe('Preview');
+      expect(shown()).toHaveLength(3);
+      expect(cards()).toHaveLength(0);
+      await press('Write');
+      expect(cards()).toHaveLength(3);
+      // nothing remembered: opened again, it is Posted again, and on Preview
+      await goHome();
+      await open('Out');
+      expect(selected()).toBe('Preview');
+    });
+
+    it('opens on Write once changed since posted, as a draft and a new post do', async () => {
+      await mountPost();
+      await open('Edited');
+      expect(target.querySelector('.pc-pill').textContent.trim()).toBe('Changed since posted');
+      expect(selected()).toBe('Write');
+      await goHome();
+      await open('Out');
+      expect(selected()).toBe('Preview');
+      // from a posted post on Preview straight to a draft: Write
+      uiState.openDraft = 'Bridge thread';
+      await settle();
+      expect(selected()).toBe('Write');
+      expect(preview()).toBeNull();
+    });
+
+    it('stays on the tab it is on when it is marked posted while open', async () => {
+      await mountPost();
+      await open('Bridge thread');
+      expect(selected()).toBe('Write');
+      target.querySelector('.tool-header button[aria-label="Mark as posted"]').click();
+      flushSync();
+      const popover = document.querySelector('.float-menu[role="dialog"][aria-label="Mark as posted"]');
+      button(popover, 'Mark as posted').click();
+      await settle();
+      expect(target.querySelector('.pc-pill').textContent).toContain('Posted');
+      expect(selected()).toBe('Write');
+      await press('Preview');
+      expect(selected()).toBe('Preview');
+    });
+  });
+
   it('a new post opens on Write', async () => {
     await openDraft();
     await press('Preview');

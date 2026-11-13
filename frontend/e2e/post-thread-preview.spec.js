@@ -136,6 +136,46 @@ test('Preview shows the thread as it goes out on X, then on Bluesky, reading onl
   fixture.expectNoUnexpectedRequests();
 });
 
+test('a posted post opens on Preview, from its card and from Back, and Write is one press away', async ({ page }) => {
+  await page.setViewportSize({ width: 1024, height: 800 });
+  const sent = {
+    title: 'Sent thread', updated_at: '2026-11-11T08:00:00Z',
+    state: { ...DRAFTS['Bridge thread'].state, publish: { site: 'x', url: 'https://x.com/desk/status/1855000000000000000', posted_at: '2026-11-10T10:05:00Z', changed: false } },
+  };
+  const fixture = await installAppFixture(page, {
+    drafts: { ...DRAFTS, 'Sent thread': sent }, proofList: PROOFS, media: MEDIA,
+    lookupEntities: { ...lookups, '.drafts/Sent thread.json': { id: 'd-sent', type: 'post' } },
+  });
+  await postRoutes(page);
+  await page.goto('/#post');
+  const card = (name) => page.getByTestId('post-home').locator('.post-card', { hasText: name }).locator('.ph-open');
+
+  await card('Sent thread').click();
+  await expect(page.locator('.pc-pill')).toHaveAccessibleName(/^Posted · /);
+  await expect(tab(page, 'Preview')).toHaveAttribute('aria-selected', 'true');
+  await expect(shown(page)).toHaveCount(4);
+  await tab(page, 'Write').click();
+  await expect(page.locator('.tweet-block')).toHaveCount(4);
+
+  // home, then Back to it: on Preview again, since nothing of Write pressed is kept
+  const posts = page.locator('.tool-header').getByRole('button', { name: 'Posts' });
+  await posts.click();
+  await expect(page.getByTestId('post-home')).toBeVisible();
+  await page.goBack();
+  await expect(page.locator('.pc-pill')).toHaveAccessibleName(/^Posted · /);
+  await expect(tab(page, 'Preview')).toHaveAttribute('aria-selected', 'true');
+  await expect(shown(page)).toHaveCount(4);
+
+  // a draft opens on Write
+  await posts.click();
+  await card('Bridge thread').click();
+  await expect(page.locator('.pc-pill')).toHaveCount(0);
+  await expect(tab(page, 'Write')).toHaveAttribute('aria-selected', 'true');
+  // opening them wrote nothing
+  expect(fixture.draftWrites).toEqual([]);
+  fixture.expectNoUnexpectedRequests();
+});
+
 /** A wide logo, four times as wide as tall on a transparent ground, drawn by the browser. */
 async function wideLogo(page) {
   const bytes = await page.evaluate(async () => {
