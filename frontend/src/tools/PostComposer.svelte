@@ -1199,7 +1199,7 @@
   function targetLength(text) {
     // Count the bidi-safe text that gets copied, so coordinates, plus codes,
     // mentions and URLs stay honest in right-to-left posts too.
-    return postCharacterCount(target, bidiSafe(text));
+    return postCharacterCount(target, bidiSafe(text, target));
   }
 
   function tweet2Text() {
@@ -1237,9 +1237,10 @@
   }
 
   // Copies go through bidiSafe so coordinates, plus codes, mentions and URLs
-  // keep reading left-to-right in Arabic or Hebrew posts (see lib/bidi).
+  // keep reading left-to-right in Arabic or Hebrew posts, as the platform lets them
+  // (see lib/bidi).
   async function copy(value) {
-    await copyText(bidiSafe(value));
+    await copyText(bidiSafe(value, target));
   }
 
   function threadParts(first = tweet1) {
@@ -1255,7 +1256,7 @@
 
   async function copyAll(showToast = true, first = tweet1) {
     const parts = threadParts(first);
-    return copyText(parts.map(bidiSafe).join('\n\n---\n\n'), { said: 'All posts copied', quiet: !showToast });
+    return copyText(parts.map((part) => bidiSafe(part, target)).join('\n\n---\n\n'), { said: 'All posts copied', quiet: !showToast });
   }
 
   // A thread's recap needs its picture once its words are copied: the words go first,
@@ -2455,14 +2456,14 @@
    * to attach to each post. Paths only — the extension reads the bytes from the
    * app with its own pairing token, so no case file passes through the page.
    */
-  function handoffPayload(firstText = tweet1) {
+  function handoffPayload(firstText = tweet1, site = target) {
     const handed = handoffThread([
-      { text: bidiSafe(firstText), files: firstFiles() },
+      { text: bidiSafe(firstText, site), files: firstFiles() },
       ...(mediaEnabled && mediaType !== 'none'
-        ? [{ text: bidiSafe(tweet2Text()), files: mediaPaths }]
+        ? [{ text: bidiSafe(tweet2Text(), site), files: mediaPaths }]
         : []),
       ...extraTweets.map((tweet, i) => ({
-        text: bidiSafe(extraTweetText(tweet, i + 3)),
+        text: bidiSafe(extraTweetText(tweet, i + 3), site),
         files: tweet.mediaPaths,
       })),
     ]);
@@ -2504,7 +2505,7 @@
    */
   async function tryHandOff() {
     if (!prefs.postPrefill || !extensionVersion()) return false;
-    const url = postHandoffUrl(target, bidiSafe(tweet1));
+    const url = postHandoffUrl(target, bidiSafe(tweet1, target));
     if (!url || !caseState.current) return false;
     const { posts, dropped } = handoffPayload();
     if (!posts.length) return false;
@@ -2591,7 +2592,7 @@
     const installed = extensionVersion();
     if (!prefs.postPrefill || !installed || !caseState.current || !replyTo) return false;
     if (extensionOutdated(installed, updatesState.extensionBundled)) return false;
-    const { posts, dropped } = handoffPayload(text);
+    const { posts, dropped } = handoffPayload(text, replyTo.site);
     if (!posts.length) return false;
     try {
       await flushForHandOff();
@@ -2611,7 +2612,7 @@
     if (publishing || !replyTo) return;
     publishing = true;
     try {
-      const text = bidiSafe(tweet1);
+      const text = bidiSafe(tweet1, replyTo.site);
       await copyAll(false);
       if (await tryReplyHandOff(text)) return;
       if (replyTo.site !== 'x') {
@@ -2647,7 +2648,7 @@
   /** Bluesky without the extension: the reply copied, and the source post opened to paste it under. */
   async function copyReplyAndOpen() {
     replyDialog = false;
-    await copyText(bidiSafe(tweet1), { said: 'Post copied' });
+    await copyText(bidiSafe(tweet1, replyTo?.site ?? target), { said: 'Post copied' });
     if (replyTo) {
       window.open(replyTo.url, '_blank', 'noopener,noreferrer');
       markOpened();
@@ -2821,7 +2822,7 @@
       const making = mapPending;
       if (!(await readyRecapMap(`The recap map could not be made, so ${targetInfo.label} was not opened.`))) return;
       if (await tryHandOff()) return;
-      const url = postComposeUrl(target, bidiSafe(tweet1));
+      const url = postComposeUrl(target, bidiSafe(tweet1, target));
       // the browser may no longer let the page open a tab once the map is made
       if (making && globalThis.navigator?.userActivation?.isActive === false) {
         toast(`The recap map is made. Open ${targetInfo.label} to post.`, 'info', 0,

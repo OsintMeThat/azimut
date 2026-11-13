@@ -125,7 +125,7 @@
       ...post,
       label: threadPostLabel(post, new Map(SAMPLE_SLIDES.map((one) => [one.name, one.title]))),
       counts: Object.values(POST_TARGETS).map((target) => {
-        const count = postCharacterCount(target.id, bidiSafe(post.text));
+        const count = postCharacterCount(target.id, bidiSafe(post.text, target.id));
         return { ...target, count, over: count > target.limit };
       }),
     }))
@@ -183,7 +183,7 @@
   // What is copied is the bidi-safe text, so that is what each platform counts.
   const counts = $derived(
     Object.values(POST_TARGETS).map((target) => {
-      const count = postCharacterCount(target.id, bidiSafe(built));
+      const count = postCharacterCount(target.id, bidiSafe(built, target.id));
       return { ...target, count, over: count > target.limit };
     })
   );

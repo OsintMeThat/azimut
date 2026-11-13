@@ -296,6 +296,18 @@ describe('Preview in Post', () => {
     });
   });
 
+  it('keeps the link and the handle of a right-to-left post on Bluesky, counted as in Write', async () => {
+    const rtl = ['مدينة الحزم - 7H872G9H+FC', '', '16.018740, 45.528599', '', '@geoconfirmed.org', '', `Source: ${SOURCE}`].join('\n');
+    lists.saved['Bridge thread'] = { ...DRAFT, state: { ...DRAFT.state, target: 'bluesky', tweet1: rtl, mention: '@geoconfirmed.org' } };
+    await openDraft();
+    const written = target.querySelector('.tweet-block .counter').textContent.trim();
+    await press('Preview');
+    const [first] = shown();
+    expect([...first.querySelectorAll('.tp-link')].map((one) => one.textContent)).toEqual(['@geoconfirmed.org', 'www.instagram.com/reel/C8kXyZa...']);
+    expect(first.querySelector('.tp-count').textContent).toBe(written);
+    expect(written).toBe(`${rtl.replace(SOURCE, 'www.instagram.com/reel/C8kXyZa...').length + 4}/300`);
+  });
+
   it('a new post opens on Write', async () => {
     await openDraft();
     await press('Preview');

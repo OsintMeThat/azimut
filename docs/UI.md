@@ -5531,7 +5531,11 @@ never posts, and pressing Post on X or Bluesky stays the analyst's.
   leaves it on the tab it is on. The counts are the composer's, the same in both
   tabs: X counts every link as 23, and Bluesky counts a link as it writes it
   (`lib/post.js` `blueskyCountedText`, read off its app on 2026-11-12), so a long source
-  link costs a Bluesky post its short form only.
+  link costs a Bluesky post its short form only. In a post holding Arabic or Hebrew, its
+  points, plus codes, mentions and links go out pinned left to right (`lib/bidi.js`
+  `bidiSafe`), except on Bluesky, which makes a link or a mention only at the start or
+  after a space or `(`: there those two stay bare and only the points and plus codes are
+  pinned, so the link and the handle work, and the preview and the count say so.
 - **A video thread** posts the placed proofs of one video together: an extra choice,
   never the only way, since each proof still goes out on its own. It is offered for a
   video of two such proofs or more, from New post, from the home's series card and from

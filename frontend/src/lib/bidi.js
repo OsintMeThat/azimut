@@ -6,6 +6,13 @@
  * lands mid-sentence. Wrapping each LTR run in a Left-to-Right Isolate
  * (U+2066 … U+2069) pins it in place; text without RTL passes through
  * untouched, so LTR-only users never see a difference.
+ *
+ * Bluesky is the exception for links and mentions. It makes one only where it
+ * starts the text or follows a space or `(` (`URL_REGEX` and `MENTION_REGEX` in the
+ * rich-text code its app posts with, `@bsky/sdk` 1.3.2 and `@atproto/api` 0.31.2, read
+ * 2026-11-13), and an isolate is neither: a URL behind one went out as words, counted
+ * whole, and a handle there, a domain, lost what follows its first dot. So on Bluesky
+ * those two stay bare and only plus codes and coordinates are isolated.
  */
 
 // Hebrew, Arabic (incl. supplements/extended), and presentation forms.
@@ -23,12 +30,19 @@ export function hasRtl(text) {
   return RTL_CHARS.test(text ?? '');
 }
 
-/** Isolate direction-sensitive LTR runs when the text contains RTL script. */
-export function bidiSafe(text) {
+/**
+ * Isolate direction-sensitive LTR runs when the text contains RTL script, as the
+ * platform it goes to lets them: on `bluesky`, never a link or a mention.
+ */
+export function bidiSafe(text, target = 'x') {
   if (!text || !hasRtl(text)) return text ?? '';
-  return text.replace(LTR_RUN, (run, offset, str) =>
-    str[offset - 1] === LRI ? run : LRI + run + PDI
-  );
+  const bare = target === 'bluesky';
+  // a link is matched whole first, so a point inside one is never isolated either
+  return text.replace(LTR_RUN, (run, offset, str) => {
+    if (str[offset - 1] === LRI) return run;
+    if (bare && (run.startsWith('@') || /^https?:/.test(run))) return run;
+    return LRI + run + PDI;
+  });
 }
 
 /**

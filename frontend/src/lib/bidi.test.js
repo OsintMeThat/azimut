@@ -47,6 +47,48 @@ describe('bidiSafe — isolates LTR runs inside RTL text', () => {
   });
 });
 
+// Bluesky's own detectors, as its app posts with them: `URL_REGEX` and `MENTION_REGEX`
+// from `@bsky/sdk` 1.3.2 (dist/rich-text/util.js, the version bluesky-social/social-app
+// pins), word for word the same in `@atproto/api` 0.31.2, read 2026-11-13. Copyright (c)
+// 2022-2026 Bluesky Social PBC and contributors, under the MIT or the Apache-2.0
+// license. Its `detectFacets` makes a link of `[2]` and a mention of `[3]`.
+const BLUESKY_URL_REGEX = /(^|\s|\()((https?:\/\/[\S]+)|((?<domain>[a-z][a-z0-9]*(\.[a-z0-9]+)+)[\S]*))/gim;
+const BLUESKY_MENTION_REGEX = /(^|\s|\()(@)([a-zA-Z0-9.-]+)(\b)/g;
+
+describe('bidiSafe on Bluesky — its links and mentions stay ones', () => {
+  const POST = `${ARABIC}\n7H872G9H+FC\n16.018740, 45.528599\n@geoconfirmed.org\nSource: https://x.com/a/status/1`;
+  const links = (text) => [...text.matchAll(BLUESKY_URL_REGEX)].map((found) => found[2]);
+  const handles = (text) => [...text.matchAll(BLUESKY_MENTION_REGEX)].map((found) => found[3]);
+
+  it('finds both in the words as written, and neither once they are isolated as for X', () => {
+    expect(links(POST)).toEqual(['https://x.com/a/status/1']);
+    expect(handles(POST)).toEqual(['geoconfirmed.org']);
+    const forX = bidiSafe(POST);
+    expect(links(forX)).toEqual([]);
+    expect(handles(forX)).toEqual([]);
+  });
+
+  it('leaves them bare there, so Bluesky finds the link and the whole handle, and still pins the rest', () => {
+    const out = bidiSafe(POST, 'bluesky');
+    expect(links(out)).toEqual(['https://x.com/a/status/1']);
+    expect(handles(out)).toEqual(['geoconfirmed.org']);
+    expect(out).toContain(`${LRI}7H872G9H+FC${PDI}`);
+    expect(out).toContain(`${LRI}16.018740, 45.528599${PDI}`);
+    expect(bidiSafe(out, 'bluesky')).toBe(out);
+  });
+
+  it('isolates no point inside a link', () => {
+    const text = `${ARABIC} https://maps.example.test/?q=16.018740,45.528599`;
+    expect(bidiSafe(text, 'bluesky')).toBe(text);
+    expect(links(bidiSafe(text, 'bluesky'))).toEqual(['https://maps.example.test/?q=16.018740,45.528599']);
+  });
+
+  it('changes nothing on X', () => {
+    expect(bidiSafe(POST, 'x')).toBe(bidiSafe(POST));
+    expect(bidiSafe(POST, 'x')).toContain(`${LRI}https://x.com/a/status/1${PDI}`);
+  });
+});
+
 describe('bidiIsolate — a drawn label reads in its own direction', () => {
   it('isolates a label holding RTL, so its number and ellipsis stay on its side', () => {
     expect(bidiIsolate('مسجد 12')).toBe(`${FSI}مسجد 12${PDI}`);

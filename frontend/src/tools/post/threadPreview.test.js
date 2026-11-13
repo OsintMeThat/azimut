@@ -76,6 +76,20 @@ describe('the words of a post, as each site shows them', () => {
   });
 });
 
+describe('a right-to-left post on Bluesky', () => {
+  it('shows and counts its link and its handle as Bluesky will make them, X keeping its isolates', () => {
+    const text = `مدينة الحزم 16.018740, 45.528599\n@geoconfirmed.org\nSource: ${SOURCE}`;
+    const sky = previewText('bluesky', bidiSafe(text, 'bluesky'));
+    expect(sky.parts.filter((part) => part.kind !== 'text').map((part) => [part.kind, part.text]))
+      .toEqual([['mention', '@geoconfirmed.org'], ['link', 'www.instagram.com/reel/C8kXyZa...']]);
+    // the link counts its short form, as the counter says in Write
+    expect(sky.count).toBe(postCharacterCount('bluesky', bidiSafe(text, 'bluesky')));
+    expect(sky.count).toBeLessThan(postCharacterCount('bluesky', bidiSafe(text)));
+    const x = previewText('x', bidiSafe(text, 'x'));
+    expect(x.parts.filter((part) => part.kind === 'link')).toHaveLength(1);
+  });
+});
+
 describe('a post past its limit', () => {
   it('marks only what runs past the limit, cut at the character on X', () => {
     const text = `${'a'.repeat(275)} hello world`;
