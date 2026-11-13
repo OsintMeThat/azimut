@@ -9,8 +9,7 @@ import { CASE_ID, PANEL_PATH, installAppFixture } from './app.fixture.js';
  *
  * The server is stood in for, as in `notebook-editions.spec.js`; its answer is the one
  * `engine/notepieces.py` gives for this note (`tests/test_note_pieces.py` holds the
- * stripping). Post is kept from loading, so the start it would adopt can be read
- * before it is taken.
+ * stripping). Post then lays the pieces out itself (`tools/post/pieces.js`).
  */
 
 const at = '2026-10-01T10:00:00Z';
@@ -36,7 +35,6 @@ test('To Post sends the note and opens Post on a Free post of its public edition
     return route.fulfill({ json: { title: 'Quay strike', pieces: PIECES, left: { internal: 1, tables: 0, diagrams: 0, other: 0 } } });
   });
   await page.route(`**/api/cases/${CASE_ID}/entities/redirects`, (route) => route.fulfill({ json: { redirects: {} } }));
-  await page.route('**/src/tools/PostComposer.svelte**', (route) => route.abort());
 
   await page.goto('/#notebook');
   await page.locator('button[title="Open Quay strike"]').click();
@@ -54,12 +52,12 @@ test('To Post sends the note and opens Post on a Free post of its public edition
   await expect(page.locator('.toast', { hasText: '1 internal passage stays out' })).toBeVisible();
   expect(asked).toEqual([{ text: NOTE, selection: null }]);
 
-  const landed = await page.evaluate(async () => {
-    const { uiState } = await import('/src/lib/state.svelte.js');
-    return { tool: uiState.tool, start: JSON.parse(JSON.stringify(uiState.postStart)) };
-  });
-  expect(landed.tool).toBe('post');
-  expect(landed.start).toMatchObject({ kind: 'free', media: [], about: { title: 'Quay strike' }, pieces: PIECES });
-  expect(JSON.stringify(landed.start)).not.toContain('port worker');
-  expect(JSON.stringify(landed.start)).not.toContain('internal]');
+  // Post lays the pieces out as a Free post: the paragraph through the Free post
+  // template, the picture on the post it follows, and never the internal passage
+  await expect(page.locator('.kind-chip')).toHaveText('Free post');
+  await expect(page.locator('.tweet-block textarea').first()).toHaveValue(/Smoke rose over the quay at dawn\./);
+  const written = await page.locator('.tweet-block textarea').evaluateAll((areas) => areas.map((area) => area.value).join('\n'));
+  expect(written).not.toContain('port worker');
+  expect(written).not.toContain('internal]');
+  await expect(page.locator('.tweet-block .attach-chip')).toHaveCount(1);
 });
