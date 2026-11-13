@@ -109,6 +109,15 @@ describe('buildTweet1 — token ordering + line control', () => {
     expect(buildTweet1('#place - #pluscode', { ...full, place: '' })).toBe('8FPGXXXX+XX');
   });
 
+  it('trims only the template\'s separators, never the ones a value starts or ends with', () => {
+    // a note's list handed to a Free post opens on its bullet, and keeps it
+    expect(buildTweet1('#description\n\n#mention', { ...full, description: '- first\n- second' }))
+      .toBe('- first\n- second\n\n@GeoConfirmed');
+    expect(buildTweet1('#place - #description', { ...full, description: 'and so on,' }))
+      .toBe('Bakhmut, Donetsk, Ukraine - and so on,');
+    expect(buildTweet1('#place - #pluscode', { ...full, place: '', plusCode: '-8FPG+XX' })).toBe('-8FPG+XX');
+  });
+
   it('collapses blank-line runs and trims the ends', () => {
     expect(buildTweet1('\n\n#coordinates\n\n\n\n#mention\n\n', full))
       .toBe('48.850000, 2.350000\n\n@GeoConfirmed');

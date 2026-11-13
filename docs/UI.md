@@ -5473,6 +5473,20 @@ never posts, and pressing Post on X or Bluesky stays the analyst's.
   this way, Compare's export a Compare post and Detect's pins a free post, whose Text
   and source layout carries `#date` for them. A draft saved as a free post from Compare
   before the Compare kind stays a free post.
+- **A note handed over** (`startPost('free', [], about, pieces)`, the Notebook's To Post)
+  opens a Free post laid out as a thread (`tools/post/pieces.js`). The pieces are texts
+  (a heading said as such), files by case path, proofs by name and sources by address
+  (`startPieces`). A heading opens a post, and the paragraphs after it join it while they fit.
+  A text over the platform's count is cut at a line break, then a sentence's end, then
+  between words, never inside a word, a link, a @mention or a point's coordinates. A
+  picture joins the post before it, up to four, and a video or a GIF goes alone. A proof
+  is a post of its own, its picture and its points, and a source is a line of the post
+  before it while it fits. A file, a proof or a source ends the grouping. The first post
+  goes through the kind's template, the note in its `#description`, and the template's
+  own closing posts stay last. A template without `#description` keeps its first post,
+  and the note starts on the next one. While the analyst leaves the posts as laid out,
+  another platform lays them out again for its own count. What the case does not hold
+  and the posts past the 21 a post keeps are said in one toast, never dropped in silence.
 - **The mention** a new post starts with is its platform's, from Settings › Publishing:
   **Mention on X**, and **Mention on Bluesky**, where a handle is a domain and
   `@GeoConfirmed` would stay words. Until Bluesky's is chosen (`post_mention_bluesky`

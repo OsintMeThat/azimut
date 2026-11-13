@@ -764,6 +764,10 @@ const TOKEN_RE = new RegExp(
   'giu',
 );
 
+// Where a token's value stands in a line while `buildTweet1` trims the line's separators.
+const VALUE_MARK = '\u0000';
+const VALUE_AT = /\u0000(\d+)\u0000/g;
+
 /** The tokens a body holds, lower-cased, in the order it holds them. */
 export function bodyTokens(body) {
   return (String(body ?? '').match(TOKEN_RE) ?? []).map((token) => token.toLowerCase());
@@ -1095,11 +1099,18 @@ export function buildTweet1(body, rawFields = {}) {
     if (tokens && tokens.every((t) => !fields[TOKEN_FIELD[t.toLowerCase()]])) {
       continue; // token-driven line with nothing to show
     }
-    let text = line.replace(TOKEN_RE, (m) => fields[TOKEN_FIELD[m.toLowerCase()]] ?? '');
+    // A value stands in as a marker while the line's own separators are trimmed, so a
+    // description opening on a list's `- ` keeps it: only the template's dash goes.
+    const values = [];
+    let text = line.replace(TOKEN_RE, (m) => {
+      const value = fields[TOKEN_FIELD[m.toLowerCase()]] ?? '';
+      return value ? `${VALUE_MARK}${values.push(value) - 1}${VALUE_MARK}` : '';
+    });
     text = text
       .replace(/^\s*[-·,]\s*/, '') // leading separator from an empty first token
       .replace(/\s*[-·,]\s*$/, '') // trailing separator from an empty last token
-      .replace(/[ \t]+$/, '');
+      .replace(/[ \t]+$/, '')
+      .replace(VALUE_AT, (_, index) => values[Number(index)]);
     out.push(text);
   }
   const collapsed = [];

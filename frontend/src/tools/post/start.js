@@ -98,15 +98,87 @@ export function spanNote(date) {
   return '';
 }
 
+/** The most pieces a start carries, and the longest text one holds. */
+export const MAX_PIECES = 200;
+export const MAX_PIECE_TEXT = 20_000;
+const MAX_PIECE_WORDS = 200;
+const MAX_PIECE_PATH = 512;
+const MAX_PIECE_URL = 2000;
+const MEDIA_TYPES = new Set(['image', 'video', 'gif']);
+const VIDEO_PATH = /\.(mp4|webm|mov|m4v|mkv)$/i;
+
+/** Text cut to `max` UTF-16 units without splitting a surrogate pair at the end. */
+function capped(text, max) {
+  if (text.length <= max) return text;
+  const end = /[\uD800-\uDBFF]/.test(text[max - 1]) ? max - 1 : max;
+  return text.slice(0, end);
+}
+
+/** A case-relative path as a piece names it, or '' for anything else. */
+function casePath(value) {
+  const path = typeof value === 'string' ? value.trim() : '';
+  if (!path || path.length > MAX_PIECE_PATH || path.startsWith('/') || path.includes('\0')) return '';
+  return path.split(/[\\/]/).includes('..') ? '' : path;
+}
+
+/** One piece as Post reads it, or null for one it cannot use. */
+function startPiece(piece) {
+  if (!isObject(piece)) return null;
+  const id = typeof piece.id === 'string' && piece.id.trim() ? { id: piece.id.trim() } : {};
+  if (piece.kind === 'text') {
+    const text = typeof piece.text === 'string' ? capped(piece.text.trim(), MAX_PIECE_TEXT).trim() : '';
+    return text ? { kind: 'text', text, ...(piece.heading === true ? { heading: true } : {}) } : null;
+  }
+  if (piece.kind === 'media') {
+    const path = casePath(piece.path);
+    if (!path && !id.id) return null;
+    const type = MEDIA_TYPES.has(piece.type) ? piece.type
+      : VIDEO_PATH.test(path) ? 'video' : /\.gif$/i.test(path) ? 'gif' : 'image';
+    return { kind: 'media', path, type, ...id };
+  }
+  if (piece.kind === 'proof') {
+    const name = words(piece.name, MAX_PIECE_WORDS);
+    return name || id.id ? { kind: 'proof', name, ...id } : null;
+  }
+  if (piece.kind === 'source') {
+    const url = typeof piece.url === 'string' ? piece.url.trim() : '';
+    if (url.length > MAX_PIECE_URL || !/^https?:\/\/\S+$/i.test(url)) return null;
+    const label = words(piece.label, MAX_PIECE_WORDS);
+    return { kind: 'source', url, ...(label && label !== url ? { label } : {}) };
+  }
+  return null;
+}
+
+/**
+ * What a start hands Post to lay out as posts (`tools/post/pieces.js`), kept to what it
+ * can use: a text with words in it, a heading said as such; a picture, a video or a GIF
+ * by its case path; a proof by its name; a source by its web address. Each may carry
+ * its entity `id` as well. An unknown kind, an empty text, a path climbing out of the
+ * case or a source that is no web address is dropped, and past `MAX_PIECES` nothing is
+ * kept. The Notebook hands a note over this way (`startPost`'s `pieces`).
+ */
+export function startPieces(pieces) {
+  const kept = [];
+  for (const piece of Array.isArray(pieces) ? pieces : []) {
+    if (kept.length >= MAX_PIECES) break;
+    const one = startPiece(piece);
+    if (one) kept.push(one);
+  }
+  return kept;
+}
+
 /**
  * Start a post of `kind` carrying `media` (case-relative paths, in order), and show
- * Post. `about` is what the media show (`startAbout`).
+ * Post. `about` is what the media show (`startAbout`). `pieces`, when a tool hands
+ * words and files to be laid out as several posts (`startPieces`), ride along.
  */
-export function startPost(kind, media = [], about = null) {
+export function startPost(kind, media = [], about = null, pieces = null) {
+  const laid = startPieces(pieces);
   uiState.postStart = {
     kind: normalizePostKind(kind),
     media: (media ?? []).filter((path) => typeof path === 'string' && path),
     about: startAbout(about),
+    ...(laid.length ? { pieces: laid } : {}),
   };
   uiState.tool = 'post';
 }

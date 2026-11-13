@@ -18,7 +18,8 @@
   import { filingName, planProofHandoff, proofPosts } from './post/handoff.js';
   import { spanNote, startFields, startPost } from './post/start.js';
   import { timecode, usesSheet, videoSlides } from '../lib/videoThread.js';
-  import { threadPostLabel, videoLayout, videoLink, videoPosts } from '../lib/videoPost.js';
+  import { MAX_THREAD_POSTS, placeCoords, threadPostLabel, videoLayout, videoLink, videoPosts } from '../lib/videoPost.js';
+  import { fitsOn, leftWords, piecePosts, resolvePieces } from './post/pieces.js';
   import { overWords, videoFits } from '../lib/videoLimits.js';
   import { videoName } from '../lib/proofScene.js';
   import { fileThreadSheet, makeRecapMap } from './post/threadSheet.js';
@@ -34,7 +35,7 @@
     applyPostTemplateStructure, newPostMediaTweet, proofSourceMediaPaths, withPostClip,
     normalizePostMediaPickerTarget, postMediaForType, renumberMediaTweetText, retargetMediaTweetText,
     normalizePostTarget, POST_TARGETS, postCharacterCount, postComposeUrl, postReportMarkdown,
-    postTarget, templateUsesPostField, togglePostMedia, pointLines,
+    postTarget, templateUsesPostField, togglePostMedia, pointLines, postCoordinates,
     handoffThread, postHandoffUrl, postDate,
     defaultPostTemplate, normalizePostKind, postKind, postStarters, normPostTemplate, VIDEO_THREAD_STARTERS,
     replyByDefault, replyIntentUrl, replyPostText, replyTarget, startMediaPlan,
@@ -456,12 +457,91 @@
   });
 
   /** As a proof sent over does, a start files what is on screen first and makes way. */
-  async function adoptStart({ kind: wanted, media, about }) {
+  async function adoptStart({ kind: wanted, media, about, pieces }) {
     if (hasContent) {
       if (!(await fileCurrentDraft())) return;
     }
-    if (normalizePostKind(wanted) === 'video') await beginThread(media?.[0]);
+    if (pieces?.length) await beginPieces(about, pieces);
+    else if (normalizePostKind(wanted) === 'video') await beginThread(media?.[0]);
     else beginPost(wanted, media, about);
+  }
+
+  // ---- a note laid out as posts ------------------------------------------------------
+  // What the Notebook hands over (`start.js` `startPieces`) as resolved, and the posts as
+  // they were laid out (`piecesKey`): while they stand so, another platform lays them out
+  // again for its own count. Never saved: a post opened again is the analyst's to edit.
+  let laidPieces = null; // { pieces, past, key }
+
+  /** The posts as laid out, to tell a post the analyst left alone from one they edited. */
+  function piecesKey() {
+    return JSON.stringify({
+      body,
+      description,
+      first: tweet1Edited ? tweet1 : null,
+      firstMedia,
+      extra: extraTweets.map((one) => [one.text, one.mediaPaths, one.mediaType]),
+    });
+  }
+
+  /** A proof's points as a Geolocation post writes them: a line each, the first in decimal. */
+  function proofPointsText(row) {
+    const first = (row.points ?? []).find((point) => Number.isFinite(point?.lat) && Number.isFinite(point?.lon));
+    return postCoordinates(placeCoords(row.points), first ? { lat: first.lat, lon: first.lon } : {});
+  }
+
+  /**
+   * A note handed over as pieces opens a Free post laid out as a thread
+   * (`post/pieces.js`), named after the note, its first post through the kind's
+   * template. What stayed out is said once.
+   */
+  async function beginPieces(about, pieces) {
+    const caseId = caseState.current?.id;
+    if (!caseId) return;
+    const run = postRun;
+    const proofs = pieces.some((piece) => piece.kind === 'proof')
+      ? await api.get(`/api/cases/${caseId}/proofs`).catch(() => [])
+      : [];
+    if (run !== postRun || caseState.current?.id !== caseId) return;
+    const { pieces: resolved, missing } = resolvePieces(pieces, { proofs, pointsText: proofPointsText });
+    beginPost('free', [], about);
+    const past = layOutPieces(resolved);
+    laidPieces = { pieces: resolved, past, key: piecesKey() };
+    const said = leftWords({ missing, past });
+    if (said) toast(said, 'warn', 6000);
+  }
+
+  /**
+   * The pieces as posts for the platform on screen: the first post's words in
+   * `#description`, the template's own closing posts kept after the note's. A template
+   * without `#description` keeps its first post, and the note starts on the next one.
+   * Answers how many posts stayed out.
+   */
+  function layOutPieces(resolved) {
+    const boilerplate = extraTweets.filter((one) => !one.fromNote);
+    const opening = templateUsesPostField(body, 'description');
+    const fits = fitsOn(target);
+    const fields = replying ? { ...tokenFields(), source: '' } : tokenFields();
+    const first = (words) => fits(buildTweet1Lines(body, { ...fields, description: words }));
+    const room = MAX_THREAD_POSTS - boilerplate.length - (opening ? 0 : 1);
+    const { posts, past } = piecePosts(resolved, { fits, first: opening ? first : fits, max: room });
+    const [head, ...rest] = opening ? posts : [null, ...posts];
+    description = head?.text ?? '';
+    firstMedia = head ? head.mediaPaths : [];
+    firstMediaType = head ? head.mediaType : 'none';
+    extraTweets = [
+      ...rest.map((post) => ({
+        id: ++extraSeq,
+        text: post.text,
+        mediaPaths: post.mediaPaths,
+        mediaType: post.mediaType,
+        isMediaTweet: post.mediaType !== 'none',
+        mediaTextIncludesPrefix: true,
+        fromNote: true,
+      })),
+      ...boilerplate,
+    ];
+    regenerate();
+    return past;
   }
 
   /**
@@ -2063,6 +2143,7 @@
       const doc = await api.get(`/api/cases/${caseState.current.id}/drafts/${encodeURIComponent(name)}`);
       if (run !== postRun) return;
       autosave.cancel();
+      laidPieces = null;
       const s = doc.state ?? {};
       // a draft from before kinds says none, and is the geolocation it always was
       kind = normalizePostKind(s.kind);
@@ -2218,6 +2299,7 @@
     mediaPaths = [];
     body = DEFAULT_TWEET_BODY;
     extraTweets = [];
+    laidPieces = null;
     altOn = prefs.postAltText;
     altTexts = {};
     altSeen = new Set();
@@ -2316,8 +2398,19 @@
    */
   function pickTarget(next) {
     if (next === target) return;
+    // a note's posts the analyst left as laid out are laid out again for the new count
+    const relay = !!laidPieces && piecesKey() === laidPieces.key;
     const kept = retargetMention(mention, target, next, mentions());
     target = next;
+    if (relay) {
+      mention = kept;
+      if (offeredMention !== null) offeredMention = kept;
+      const before = laidPieces.past;
+      laidPieces.past = layOutPieces(laidPieces.pieces);
+      laidPieces.key = piecesKey();
+      if (laidPieces.past > before) toast(leftWords({ past: laidPieces.past }), 'warn', 6000);
+      return;
+    }
     if (kept === mention) return;
     // a blank post stays blank: the platform's default is no work, as the platform is not
     const untouched = !draftName && blankKey !== null && contentKey() === blankKey;

@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it } from 'vitest';
 import { uiState } from '../../lib/state.svelte.js';
-import { spanNote, startAbout, startFields, startPost } from './start.js';
+import { MAX_PIECES, MAX_PIECE_TEXT, spanNote, startAbout, startFields, startPieces, startPost } from './start.js';
 
 afterEach(() => {
   uiState.postStart = null;
@@ -23,6 +23,67 @@ describe('startPost — what another tool hands Post', () => {
   it('starts with nothing said when nothing is, and an unknown kind as a geolocation', () => {
     startPost('telegram');
     expect(uiState.postStart).toEqual({ kind: 'geolocation', media: [], about: { title: '', description: '', dates: [], credits: '' } });
+  });
+
+  it('carries the pieces a note hands over, and none when it hands none', () => {
+    startPost('free', [], { title: 'Depot report' }, [{ kind: 'text', text: 'Words.' }, { kind: 'nope' }]);
+    expect(uiState.postStart.pieces).toEqual([{ kind: 'text', text: 'Words.' }]);
+    startPost('free', [], null, [{ kind: 'text', text: '  ' }]);
+    expect(uiState.postStart).not.toHaveProperty('pieces');
+  });
+});
+
+describe('startPieces — what a note hands over, kept to what Post can use', () => {
+  it('keeps each kind as Post reads it, its id beside', () => {
+    expect(startPieces([
+      { kind: 'text', text: '  Title  ', heading: true },
+      { kind: 'text', text: 'A paragraph.\n- a list', heading: 'yes' },
+      { kind: 'media', path: 'media/a.jpg', type: 'image', id: 'e1' },
+      { kind: 'media', path: 'exports/plate.mp4' },
+      { kind: 'media', path: 'media/loop.gif' },
+      { kind: 'proof', name: 'depot-strike', id: 'e2' },
+      { kind: 'source', url: ' https://x.com/a/status/1 ', label: 'The video' },
+      { kind: 'source', url: 'https://t.me/s/chan/2', label: 'https://t.me/s/chan/2' },
+    ])).toEqual([
+      { kind: 'text', text: 'Title', heading: true },
+      { kind: 'text', text: 'A paragraph.\n- a list' },
+      { kind: 'media', path: 'media/a.jpg', type: 'image', id: 'e1' },
+      { kind: 'media', path: 'exports/plate.mp4', type: 'video' },
+      { kind: 'media', path: 'media/loop.gif', type: 'gif' },
+      { kind: 'proof', name: 'depot-strike', id: 'e2' },
+      { kind: 'source', url: 'https://x.com/a/status/1', label: 'The video' },
+      { kind: 'source', url: 'https://t.me/s/chan/2' },
+    ]);
+  });
+
+  it('drops what Post cannot use: an unknown kind, no words, a path out of the case, a source that is no web address', () => {
+    expect(startPieces([
+      null, 'text', { kind: 'table', text: '| a |' },
+      { kind: 'text', text: '   ' },
+      { kind: 'media', path: '../secret.png' },
+      { kind: 'media', path: '/etc/passwd' },
+      { kind: 'media', path: 'media/..\\x.png' },
+      { kind: 'proof', name: '  ' },
+      { kind: 'source', url: 'javascript:alert(1)' },
+      { kind: 'source', url: 'https://a b' },
+    ])).toEqual([]);
+    expect(startPieces('not a list')).toEqual([]);
+  });
+
+  it('keeps a piece named by its id alone, for Post to say it was not found', () => {
+    expect(startPieces([{ kind: 'media', id: 'e9' }, { kind: 'proof', id: 'e8' }])).toEqual([
+      { kind: 'media', path: '', type: 'image', id: 'e9' },
+      { kind: 'proof', name: '', id: 'e8' },
+    ]);
+  });
+
+  it('caps the pieces and the words of a text', () => {
+    const many = Array.from({ length: MAX_PIECES + 5 }, (_, i) => ({ kind: 'text', text: `P${i}` }));
+    expect(startPieces(many)).toHaveLength(MAX_PIECES);
+    expect(startPieces([{ kind: 'text', text: 'x'.repeat(MAX_PIECE_TEXT + 10) }])[0].text).toHaveLength(MAX_PIECE_TEXT);
+    // a cut never splits an emoji in two
+    const emoji = `${'x'.repeat(MAX_PIECE_TEXT - 1)}😀`;
+    expect(startPieces([{ kind: 'text', text: emoji }])[0].text).toBe('x'.repeat(MAX_PIECE_TEXT - 1));
   });
 });
 
