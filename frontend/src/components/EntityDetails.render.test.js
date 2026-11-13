@@ -46,13 +46,14 @@ const { patch } = vi.hoisted(() => ({ patch: vi.fn() }));
 
 vi.mock('../lib/api.js', async () => {
   // The panel reads its entity off the bounded chain endpoint, never off the case.
-  const { entity, mediaItem } = await import('./details.fixture.svelte.js');
+  const { entity, mediaItem, captureItem } = await import('./details.fixture.svelte.js');
   const chain = { entity, sources: [], lost: [], dependents: [], relations: [], empty: true };
   return {
     api: {
       get: (url) => {
         if (url.includes('entity-types')) return registryLanded;
         if (url.includes('/media/item')) return Promise.resolve({ ...mediaItem });
+        if (url.endsWith('/satellite')) return Promise.resolve([{ ...captureItem }]);
         return Promise.resolve(chain);
       },
       patch,
@@ -89,7 +90,7 @@ vi.mock('../lib/trash.js', () => ({
 const { default: EntityDetails } = await import('./EntityDetails.svelte');
 // The same module instance the mocks hand the panel, so a test can change what the
 // entity and its file are between mounts.
-const { entity, mediaItem } = await import('./details.fixture.svelte.js');
+const { entity, mediaItem, captureItem } = await import('./details.fixture.svelte.js');
 
 let live = null;
 
@@ -306,5 +307,36 @@ describe('a place states its precision once', () => {
 
     expect(document.body.textContent).not.toContain('Drop the traced shape?');
     expect(patch).toHaveBeenCalled();
+  });
+});
+
+describe('where a capture can be checked', () => {
+  const before = { type: entity.type, label: entity.label, attrs: entity.attrs };
+  afterEach(() => {
+    Object.assign(entity, before);
+    Object.assign(captureItem, { provider: 'esri-wayback~31144', imagery_date: '2023-05-01', imagery_exact: undefined });
+  });
+
+  const verifyRow = (target) =>
+    [...target.querySelectorAll('.info-row')].find((el) => el.querySelector('.info-k')?.textContent === 'Verify on');
+
+  it('links Esri Wayback at its point and release, as a printed note lists it', async () => {
+    Object.assign(entity, { type: 'capture', label: 'Quay in 2023', attrs: { path: captureItem.path, lat: 14.79801, lon: 42.95402, zoom: 18 } });
+    const target = await open();
+    const link = verifyRow(target)?.querySelector('a');
+    expect(link?.textContent).toBe('Esri Wayback');
+    expect(link?.getAttribute('href')).toBe(
+      'https://livingatlas.arcgis.com/wayback/#mapCenter=42.95402%2C14.79801%2C18&mode=explore&active=31144',
+    );
+    expect(link?.getAttribute('target')).toBe('_blank');
+  });
+
+  it('says nothing for a day the provider only estimated', async () => {
+    Object.assign(captureItem, { provider: 'sentinel2', imagery_date: '2025-04-11', imagery_exact: false });
+    Object.assign(entity, { type: 'capture', label: 'Quay burning', attrs: { path: captureItem.path, lat: 14.79801, lon: 42.95402, zoom: 15 } });
+    const target = await open();
+    const keys = [...target.querySelectorAll('.info-k')].map((el) => el.textContent);
+    expect(keys).toContain('Imagery');
+    expect(verifyRow(target)).toBeUndefined();
   });
 });

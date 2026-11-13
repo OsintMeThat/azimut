@@ -1,5 +1,6 @@
+import { readFileSync } from 'node:fs';
 import { describe, it, expect } from 'vitest';
-import { earthCameraLink, mapLinks } from './maplinks.js';
+import { earthCameraLink, mapLinks, verifyLinks } from './maplinks.js';
 
 /**
  * The forms asserted here are the ones a browser was actually driven through
@@ -106,5 +107,15 @@ describe('Google Earth from a Horizon eye', () => {
   it('keeps the heading in a turn and the tilt between straight down and straight up', () => {
     const url = earthCameraLink({ lat: 1, lon: 2, altitude: 10, heading: -10, tilt: -120, vfov: 0 });
     expect(url).toContain(',35y,350h,0t,0r');
+  });
+});
+
+describe('verifyLinks', () => {
+  // The same file `tests/test_verify_links.py` reads: a printed note's sources and a
+  // capture's Details give a reader the same pages to check it on.
+  const { cases } = JSON.parse(readFileSync(new URL('../../../tests/fixtures/verify-links.json', import.meta.url), 'utf8'));
+
+  it.each(cases.map((c) => [c.name, c]))('%s', (_name, c) => {
+    expect(verifyLinks({ provider: c.provider, lat: c.lat, lon: c.lon, zoom: c.zoom, day: c.day })).toEqual(c.links);
   });
 });

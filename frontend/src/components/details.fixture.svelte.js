@@ -35,6 +35,20 @@ export const mediaItem = $state({
   source: { type: 'upload', original_name: 'shot.png' },
 });
 
+/** What the satellite list answers with, for the tests that make `entity` a capture:
+ *  the capture's provenance merged with its file's fields. */
+export const captureItem = $state({
+  path: 'media/sat.png',
+  title: 'Quay in 2023',
+  provider: 'esri-wayback~31144',
+  provider_label: 'Esri Wayback',
+  lat: 14.79801,
+  lon: 42.95402,
+  zoom: 18,
+  imagery_date: '2023-05-01',
+  fetched_at: '2026-03-14T10:00:00Z',
+});
+
 export const reloadCase = () => Promise.resolve();
 export const toast = () => {};
 

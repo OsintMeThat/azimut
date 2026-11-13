@@ -1,0 +1,198 @@
+{
+  "_about": "Where a reader checks a picture of the ground without Azimut: the links frontend/src/lib/maplinks.js (verifyLinks) writes in a capture's Details and src/azimut/engine/verifylinks.py writes in a printed note's sources. Checked from both sides: frontend/src/lib/maplinks.test.js and tests/test_verify_links.py. The Wayback form is the one Esri's app writes for its own share links; the Copernicus form is the one tests/fixtures/map-link-writes.json measured keeping its acquisition.",
+  "cases": [
+    {
+      "name": "a Wayback capture: its point and its release",
+      "provider": "esri-wayback~31144",
+      "lat": 14.79801,
+      "lon": 42.95402,
+      "zoom": 18,
+      "day": "2023-05-01",
+      "links": [
+        {
+          "label": "Esri Wayback",
+          "url": "https://livingatlas.arcgis.com/wayback/#mapCenter=42.95402%2C14.79801%2C18&mode=explore&active=31144"
+        }
+      ]
+    },
+    {
+      "name": "a Wayback release needs no day, and no zoom opens at 17",
+      "provider": "esri-wayback~64776",
+      "lat": 48.8584,
+      "lon": 2.2945,
+      "zoom": null,
+      "day": "",
+      "links": [
+        {
+          "label": "Esri Wayback",
+          "url": "https://livingatlas.arcgis.com/wayback/#mapCenter=2.2945%2C48.8584%2C17&mode=explore&active=64776"
+        }
+      ]
+    },
+    {
+      "name": "a level between two rounds half up",
+      "provider": "esri-wayback~64776",
+      "lat": 48.8584,
+      "lon": 2.2945,
+      "zoom": 16.5,
+      "day": "",
+      "links": [
+        {
+          "label": "Esri Wayback",
+          "url": "https://livingatlas.arcgis.com/wayback/#mapCenter=2.2945%2C48.8584%2C17&mode=explore&active=64776"
+        }
+      ]
+    },
+    {
+      "name": "five places, no trailing zero, no minus zero",
+      "provider": "esri-wayback~64776",
+      "lat": -1e-06,
+      "lon": -122.0,
+      "zoom": 15,
+      "day": "",
+      "links": [
+        {
+          "label": "Esri Wayback",
+          "url": "https://livingatlas.arcgis.com/wayback/#mapCenter=-122%2C0%2C15&mode=explore&active=64776"
+        }
+      ]
+    },
+    {
+      "name": "a long coordinate cut to about a metre",
+      "provider": "esri-wayback~64776",
+      "lat": 48.858412345,
+      "lon": 2.294481,
+      "zoom": 19,
+      "day": "",
+      "links": [
+        {
+          "label": "Esri Wayback",
+          "url": "https://livingatlas.arcgis.com/wayback/#mapCenter=2.29448%2C48.85841%2C19&mode=explore&active=64776"
+        }
+      ]
+    },
+    {
+      "name": "the newest Wayback, which names no release",
+      "provider": "esri-wayback",
+      "lat": 48.8584,
+      "lon": 2.2945,
+      "zoom": 17,
+      "day": "2024-03-02",
+      "links": []
+    },
+    {
+      "name": "a release that is no release",
+      "provider": "esri-wayback~0",
+      "lat": 48.8584,
+      "lon": 2.2945,
+      "zoom": 17,
+      "day": "",
+      "links": []
+    },
+    {
+      "name": "World Imagery never recorded its release",
+      "provider": "esri-world-imagery",
+      "lat": 48.8584,
+      "lon": 2.2945,
+      "zoom": 17,
+      "day": "2024-03-02",
+      "links": []
+    },
+    {
+      "name": "a Sentinel-2 capture on its day, held to the level a link reaches",
+      "provider": "sentinel2~TRUE_COLOR~2025-04-01~2025-04-30",
+      "lat": 14.79801,
+      "lon": 42.95402,
+      "zoom": 19,
+      "day": "2025-04-11",
+      "links": [
+        {
+          "label": "Copernicus Browser",
+          "url": "https://browser.dataspace.copernicus.eu/?zoom=18&lat=14.79801&lng=42.95402&datasetId=S2_L2A_CDAS&fromTime=2025-04-11T00%3A00%3A00.000Z&toTime=2025-04-11T23%3A59%3A59.999Z"
+        }
+      ]
+    },
+    {
+      "name": "a plain Sentinel-2 capture on its day",
+      "provider": "sentinel2",
+      "lat": 47.38846,
+      "lon": 2.35279,
+      "zoom": 15,
+      "day": "2026-09-01",
+      "links": [
+        {
+          "label": "Copernicus Browser",
+          "url": "https://browser.dataspace.copernicus.eu/?zoom=15&lat=47.38846&lng=2.35279&datasetId=S2_L2A_CDAS&fromTime=2026-09-01T00%3A00%3A00.000Z&toTime=2026-09-01T23%3A59%3A59.999Z"
+        }
+      ]
+    },
+    {
+      "name": "a radar pass's moment is its day",
+      "provider": "sentinel1~VV~2026-03-01~2026-03-05",
+      "lat": 47.38846,
+      "lon": 2.35279,
+      "zoom": 14,
+      "day": "2026-03-02T10:22:00Z",
+      "links": [
+        {
+          "label": "Copernicus Browser",
+          "url": "https://browser.dataspace.copernicus.eu/?zoom=14&lat=47.38846&lng=2.35279&datasetId=S1_CDAS_IW_VVVH&fromTime=2026-03-02T00%3A00%3A00.000Z&toTime=2026-03-02T23%3A59%3A59.999Z"
+        }
+      ]
+    },
+    {
+      "name": "an estimated day is no day",
+      "provider": "sentinel2",
+      "lat": 47.38846,
+      "lon": 2.35279,
+      "zoom": 15,
+      "day": "2025-04-11~",
+      "links": []
+    },
+    {
+      "name": "a Sentinel capture with no day",
+      "provider": "sentinel2",
+      "lat": 47.38846,
+      "lon": 2.35279,
+      "zoom": 15,
+      "day": "",
+      "links": []
+    },
+    {
+      "name": "no point, no link",
+      "provider": "esri-wayback~31144",
+      "lat": null,
+      "lon": 2.35279,
+      "zoom": 15,
+      "day": "",
+      "links": []
+    },
+    {
+      "name": "a point off the globe",
+      "provider": "esri-wayback~31144",
+      "lat": 95,
+      "lon": 2.35279,
+      "zoom": 15,
+      "day": "",
+      "links": []
+    },
+    {
+      "name": "a provider named like an object's own property",
+      "provider": "constructor",
+      "lat": 47.38846,
+      "lon": 2.35279,
+      "zoom": 15,
+      "day": "2026-09-01",
+      "links": []
+    },
+    {
+      "name": "a basemap that is not imagery anyone else serves",
+      "provider": "google-maps",
+      "lat": 47.38846,
+      "lon": 2.35279,
+      "zoom": 15,
+      "day": "2025-11-01",
+      "links": []
+    }
+  ]
+}

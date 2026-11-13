@@ -110,3 +110,65 @@ export function earthCameraLink({ lat, lon, altitude, heading, tilt = 0, roll = 
     `${fixed(across, 2)}y,${fixed(turn, 2)}h,${fixed(up, 2)}t,${fixed(roll, 2)}r`
   );
 }
+
+/** Esri's own Wayback app, as its share links write it: `mapCenter` is longitude first. */
+const WAYBACK_APP = 'https://livingatlas.arcgis.com/wayback/';
+const COPERNICUS_APP = 'https://browser.dataspace.copernicus.eu/';
+/** The deepest level the Copernicus Browser honours from a link (`docs/MAP_SITES.md`). */
+const COPERNICUS_MAX_ZOOM = 18;
+/** The level a verify link opens at when the picture recorded none. */
+const VERIFY_ZOOM = 17;
+/** The Copernicus Browser's collection for each Sentinel basemap the app captures from. */
+const DATASETS = { sentinel2: 'S2_L2A_CDAS', sentinel1: 'S1_CDAS_IW_VVVH' };
+/** A Wayback release rides on the provider id (`lib/wayback.js`). */
+const RELEASE = /^esri-wayback~([1-9]\d{0,8})$/;
+/** A day as the case reads it, or the moment of a radar pass on it; never one ending `~`. */
+const DAY = /^(\d{4}-\d{2}-\d{2})(?:T\d{2}:\d{2}(?::\d{2}(?:\.\d+)?)?Z)?$/;
+
+/** A coordinate as a verify link writes it: five places, about a metre, no trailing zero. */
+export function linkCoord(value) {
+  const text = Number(value).toFixed(5).replace(/\.?0+$/, '');
+  return text === '-0' ? '0' : text;
+}
+
+/** The map level a verify link opens at: the picture's own, rounded half up, else the default. */
+function linkLevel(zoom, ceiling = Infinity) {
+  const value = zoom == null || zoom === '' ? NaN : Number(zoom);
+  const whole = Math.max(0, Number.isFinite(value) ? Math.floor(value + 0.5) : VERIFY_ZOOM);
+  return Math.min(whole, ceiling);
+}
+
+/** Esri's Wayback app over the point, showing one release. */
+export function waybackLink(lat, lon, zoom, release) {
+  return `${WAYBACK_APP}#mapCenter=${linkCoord(lon)}%2C${linkCoord(lat)}%2C${linkLevel(zoom)}&mode=explore&active=${release}`;
+}
+
+/** The Copernicus Browser over the point, on one day of one collection. */
+export function copernicusLink(lat, lon, zoom, day, dataset) {
+  return (
+    `${COPERNICUS_APP}?zoom=${linkLevel(zoom, COPERNICUS_MAX_ZOOM)}&lat=${linkCoord(lat)}&lng=${linkCoord(lon)}` +
+    `&datasetId=${dataset}&fromTime=${day}T00%3A00%3A00.000Z&toTime=${day}T23%3A59%3A59.999Z`
+  );
+}
+
+/**
+ * Where a picture from `provider` at the point can be checked without Azimut, as
+ * `{ label, url }`: Esri's Wayback app at its release, the Copernicus Browser on the
+ * day of its pass. `day` is its imagery day as the case reads it (`2024-03-12~` for an
+ * estimate, which is no day). Nothing for a point, a release or a day it did not
+ * record. `engine/verifylinks.py` writes the same links in a printed note's sources,
+ * and `tests/fixtures/verify-links.json` holds the two to one set of answers.
+ */
+export function verifyLinks({ provider, lat, lon, zoom = null, day = '' } = {}) {
+  const y = lat == null || lat === '' ? NaN : Number(lat);
+  const x = lon == null || lon === '' ? NaN : Number(lon);
+  if (!Number.isFinite(y) || !Number.isFinite(x) || Math.abs(y) > 90 || Math.abs(x) > 180) return [];
+  const ident = String(provider ?? '').trim();
+  const release = RELEASE.exec(ident);
+  if (release) return [{ label: 'Esri Wayback', url: waybackLink(y, x, zoom, Number(release[1])) }];
+  const base = ident.split('~')[0];
+  const dataset = Object.hasOwn(DATASETS, base) ? DATASETS[base] : '';
+  const found = DAY.exec(String(day ?? '').trim());
+  if (dataset && found) return [{ label: 'Copernicus Browser', url: copernicusLink(y, x, zoom, found[1], dataset) }];
+  return [];
+}

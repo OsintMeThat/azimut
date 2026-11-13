@@ -1458,6 +1458,7 @@ class _Cited:
         for entry in self.annex.entries:
             source = entry.source
             said.extend((source.label, *notesources.details(source), source.address, source.archive))
+            said.extend(f"{site}: {address}" for site, address in source.verify)
         return said
 
 
@@ -1770,6 +1771,8 @@ class _Builder:
             addresses.append(("Archive: ", source.archive))
         if source.posted and source.posted not in (source.address, source.archive):
             addresses.append(("Posted: ", source.posted))
+        # where a reader checks the imagery without the app, each linked like the rest
+        addresses.extend((f"{site}: ", address) for site, address in source.verify)
         width = pdf.epw - hang - 2 * pdf.c_margin
         # measured first, so an entry that fits on a page is never split over two
         pdf.set_font(theme.heading_family, "", size)

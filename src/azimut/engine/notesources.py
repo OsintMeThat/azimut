@@ -45,7 +45,7 @@ from pathlib import PurePosixPath
 from typing import TYPE_CHECKING, Any, Iterable, Iterator
 from urllib.parse import urlsplit
 
-from . import copernicus_credit, entities, links, notes_style, timeline, urltitles
+from . import copernicus_credit, entities, links, notes_style, timeline, urltitles, verifylinks
 from .proposals import URL_ATTRS
 
 if TYPE_CHECKING:
@@ -153,6 +153,8 @@ class Source:
     #: Each picture of the ground it holds, and the provider's own credit line.
     readings: tuple[Reading, ...] = ()
     attribution: str = ""
+    #: Public pages a reader checks that imagery on, as `(site, address)` (`verifylinks`).
+    verify: tuple[tuple[str, str], ...] = ()
     #: Where a drawn view was seen from, and the moment a frame was cut at.
     seen: str = ""
     at: str = ""
@@ -365,6 +367,7 @@ class Reader:
         sha = str(attrs.get("sha256") or item.get("sha256") or "").lower()
 
         readings = self._readings(sidecar, attrs) if imagery else ()
+        verify = self._verify(sidecar, attrs) if imagery else ()
         # Older captures keep the app's former Copernicus wording on disk: read as the notice,
         # dated by the imagery they show (`engine/copernicus_credit.py`).
         attribution = copernicus_credit.normalise_attribution(
@@ -409,6 +412,7 @@ class Reader:
             arrival="made" if derived or kind == "proof" else ARRIVALS.get(route, "collected"),
             readings=readings,
             attribution=attribution,
+            verify=verify,
             seen=_seen(sidecar) if route == HORIZON else "",
             at=_moment(sidecar.get("time")) if route == "inspect" and sidecar.get("op") == "frame" else "",
             sha256=sha if path and SHA256.match(sha) else "",
@@ -443,6 +447,29 @@ class Reader:
             # a Detect picture of one pass names its imagery in the run it came from
             provider = self._name(self._passes(sidecar).get("b", {}).get("provider"))
         return (Reading(provider, day),) if provider or day else ()
+
+    def _verify(self, sidecar: dict[str, Any], attrs: dict[str, Any]) -> tuple[tuple[str, str], ...]:
+        """Where a reader checks each picture of the ground an item holds without the
+        app: at its point, its Wayback release or its Sentinel pass's day. Only what the
+        item recorded; an evolution sheet's many days are read in the app."""
+        if isinstance(sidecar.get("evolution"), dict):
+            return ()
+        lat = sidecar.get("lat", attrs.get("lat"))
+        lon = sidecar.get("lon", attrs.get("lon"))
+        pair = [(side, timeline.imagery_reading(sidecar, f"imagery_{side}")) for side in ("a", "b")]
+        if any(day for _, day in pair):
+            providers = sidecar.get("providers")
+            named: dict[str, Any] = providers if isinstance(providers, dict) else {}
+            passes = self._passes(sidecar)
+            sides = [(named.get(side) or passes.get(side, {}).get("provider"), day or "") for side, day in pair if day]
+        else:
+            sides = [(sidecar.get("provider") or attrs.get("provider"), timeline.capture_imagery(sidecar) or "")]
+        found: list[tuple[str, str]] = []
+        for provider, day in sides:
+            for link in verifylinks.verify_links(provider, lat, lon, sidecar.get("zoom"), day):
+                if link not in found:
+                    found.append(link)
+        return tuple(found)
 
     @staticmethod
     def _passes(sidecar: dict[str, Any]) -> dict[str, dict[str, Any]]:

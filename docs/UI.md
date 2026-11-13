@@ -7163,7 +7163,13 @@ address: its name, the day it was filed, its SHA-256), every cited record that h
 address, an archive or an author, and every web link written in the text, each once in
 order of first citation. An entry says what the item is, its kind and site, who posted
 it, the day of its content and the day it was collected, its address and archived copy
-in full, its SHA-256 and *from [k]* for what it was made from. A chip, a credit and a
+in full, its SHA-256 and *from [k]* for what it was made from. A capture or a Compare
+picture adds where a reader checks its imagery without Azimut, linked: *Esri Wayback:*
+at its point and release, *Copernicus Browser:* at its point on its Sentinel pass's
+day (`engine/verifylinks.py`). Only what it recorded: World Imagery names no release
+and an estimated day is no day, so neither gets a link. A capture's Details shows the
+same links as *Verify on* (`lib/maplinks.js`, held to the server by
+`tests/fixtures/verify-links.json`). A chip, a credit and a
 written link carry a small `[n]` that jumps to their entry. A place, a person or an
 event with no address is not a source; generated links (coordinates) are not listed;
 a note citing nothing prints no list.

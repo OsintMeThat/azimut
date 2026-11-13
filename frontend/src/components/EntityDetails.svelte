@@ -44,6 +44,7 @@
   import { canStateSource, sourceProblem } from '../lib/statedSource.js';
   import { deletedToast, FILE_BACKED, RESTORABLE } from '../lib/trash.js';
   import { postTarget, proofPostLines } from '../lib/post.js';
+  import { verifyLinks } from '../lib/maplinks.js';
   import Icon from './Icon.svelte';
   import SubjectActions from './SubjectActions.svelte';
   import ConfirmDialog from './ConfirmDialog.svelte';
@@ -116,6 +117,19 @@
 
   // ── resolved listing item (media/satellite) + editable fields ──────────────
   let infoData = $state(null);
+  // Where the capture's imagery can be checked outside the app: its point at its Wayback
+  // release, or on its Sentinel pass's day, as a printed note's sources list it.
+  const verify = $derived(
+    entity?.type === 'capture' && infoData
+      ? verifyLinks({
+          provider: infoData.provider,
+          lat: infoData.lat,
+          lon: infoData.lon,
+          zoom: infoData.zoom,
+          day: infoData.imagery_date ? `${infoData.imagery_date}${infoData.imagery_exact === false ? '~' : ''}` : '',
+        })
+      : [],
+  );
   let infoLoading = $state(false);
   let infoTitle = $state('');
   let infoNotes = $state('');
@@ -786,6 +800,12 @@
         {/if}
         {#if infoData?.imagery_date}
           <div class="info-row"><span class="info-k">Imagery</span><span class="mono">{infoData.imagery_date}</span></div>
+        {/if}
+        {#if verify.length}
+          <div class="info-row">
+            <span class="info-k">Verify on</span>
+            <span>{#each verify as link, at (link.url)}{#if at}, {/if}<a class="src" href={link.url} target="_blank" rel="noreferrer">{link.label}</a>{/each}</span>
+          </div>
         {/if}
         {#if infoData?.source_url}
           <div class="info-row">

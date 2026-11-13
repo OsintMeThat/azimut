@@ -33,7 +33,7 @@ from sourcesfixture import (
     sourced_note,
 )
 from test_notes_pages import link_targets, pages
-from test_notes_pdf import FakeCase, pdf_text, png
+from test_notes_pdf import FakeCase, pdf_text, png, png_bytes
 from test_notes_report import make_case, make_note, tree
 
 
@@ -307,6 +307,61 @@ def test_an_entry_says_what_it_is_and_its_addresses_in_full(sourced):
     assert f"SHA-256{made['video']['sha256']}" in joined
     assert "Picture·at1:23.5" in joined
     assert NOTICE_URL in link_targets(out.pdf) and ARCHIVE_URL in link_targets(out.pdf)
+
+
+def test_a_capture_lists_where_a_reader_checks_its_imagery(client):
+    """A Wayback capture links Esri's app at its point and release, a Sentinel capture
+    the Copernicus Browser on the day of its pass, a pair one link per side, each in
+    full and clickable. A picture that recorded no release or only an estimated day
+    gets none: a link is never made up (`engine/verifylinks.py`)."""
+    from PIL import Image
+
+    from azimut.engine import media as media_engine
+    from azimut.engine import verifylinks
+
+    case = Case.open(make_case(client))
+    at = {"lat": 14.79801, "lon": 42.95402}
+
+    def capture(title, colour, **source):
+        return media_engine.import_image(
+            case, Image.new("RGB", (64, 48), colour), f"{title}.png",
+            {"type": "satellite", "fetched_at": "2026-03-14T10:00:00Z", **at, **source},
+            title=title, dedupe=False, entity_type="capture",
+        )["entity"]["id"]
+
+    wayback = capture("Quay in 2023", (60, 110, 60), provider="esri-wayback~31144",
+                      provider_label="Esri Wayback", zoom=18, imagery_date="2023-05-01")
+    sentinel = capture("Quay burning", (110, 60, 60), provider="sentinel2~TRUE_COLOR~2025-04-01~2025-04-30",
+                       provider_label="Sentinel-2", zoom=15, imagery_date="2025-04-11")
+    estimated = capture("Quay later", (60, 60, 110), provider="sentinel2", provider_label="Sentinel-2",
+                        zoom=15, imagery_date="2025-05-02", imagery_exact=False)
+    current = capture("Quay today", (110, 110, 60), provider="esri-world-imagery",
+                      provider_label="Esri World Imagery", zoom=17, imagery_date="2025-06-02")
+    pair = media_engine.import_rendered_bytes(case, png_bytes(), "Quay before and after", ".png", {
+        "type": "compare", "session": "compare/quay.json", "mode": "swipe", **at, "zoom": 17,
+        "providers": {"a": "esri-wayback~31144", "b": "esri-wayback~64776"},
+        "imagery_a": "2023-05-01", "imagery_b": "2025-06-02", "rendered_at": "2026-03-15T12:00:00Z",
+    }, by="compare")["entity"]["id"]
+
+    wayback_url = verifylinks.wayback_link(14.79801, 42.95402, 18, 31144)
+    copernicus_url = verifylinks.copernicus_link(14.79801, 42.95402, 15, "2025-04-11", "S2_L2A_CDAS")
+    reader = notesources.Reader(case)
+    assert reader.entity(wayback).verify == ((verifylinks.WAYBACK, wayback_url),)
+    assert reader.entity(sentinel).verify == ((verifylinks.COPERNICUS, copernicus_url),)
+    assert reader.entity(estimated).verify == () and reader.entity(current).verify == ()
+    assert [url for _, url in reader.entity(pair).verify] == [
+        verifylinks.wayback_link(14.79801, 42.95402, 17, 31144),
+        verifylinks.wayback_link(14.79801, 42.95402, 17, 64776),
+    ]
+
+    text = " ".join(f"[[entity:{one}|Picture {n}]]" for n, one in enumerate((wayback, sentinel, estimated, current), 1))
+    out = notes_pdf.render(case, title="T", text=f"{text}\n", look=look(style="brief"))
+    annex = squash(pdf_text(out.pdf).split("SOURCES", 1)[1])
+    assert squash(f"Esri Wayback: {wayback_url}") in annex
+    assert squash(f"Copernicus Browser: {copernicus_url}") in annex
+    assert annex.count("EsriWayback:") == 1 and annex.count("CopernicusBrowser:") == 1
+    targets = link_targets(out.pdf)
+    assert wayback_url in targets and copernicus_url in targets
 
 
 def test_a_record_without_a_source_and_a_generated_link_are_not_listed(sourced):
