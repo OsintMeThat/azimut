@@ -7278,6 +7278,7 @@ What each tool puts, and where its *Put in “<note>”* sits:
 | Horizon | Offered whenever an eye stands: a box dragged over the view as it shows, loupe kept (Esc or Cancel calls it off), the view saved first, filed once per view, area, kind and size. *An area of the photo above the terrain* while a photo is laid, else *An area of the view* with its names, ruler and credits. Never a Find score or rank | Export menu, Add |
 | Detect | *The kept table*: kept and noted candidates only, under a quoted header (run and areas, analyzer, passes, threshold, cloud mask, *N kept of M candidates, P pinned*), 200 rows at most | beside Export as layer, Add |
 | Timeline, Graph | *This reading* as a picture of its plate, filed with the snapshot that freezes it (or the one open) | the *Export this reading* dialog, Add |
+| Inspect | *The scenes of this video* as a table, offered while it has some: one row per scene in clip order, with its time (`[0:15]`, `[0:00–0:07]` or *Whole video*), title, place chip or coordinates, the proof's date and the proof's chip, under the video's chip; a scene with no place says *Not geolocated yet* | Add |
 
 *Open in <Tool>* on a picture's bar reopens what it came from: the map at that view
 and basemap (not a tilted capture's pitch nor a dated pick), the comparison as it is

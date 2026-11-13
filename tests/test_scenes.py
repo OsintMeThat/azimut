@@ -151,6 +151,8 @@ def test_a_proof_built_on_a_frame_joins_its_video_with_nothing_written(client, t
     assert (point["lat"], point["lon"]) == (48.51203, 35.04122)
     place = Case.open(cid).get_entity(point["place_id"])
     assert place["type"] == "place"
+    # and what the case calls it, which a note's chip writes
+    assert point["place_label"] == place["label"]
     # where it stands, as a proof's label says it, once the case knows its geography
     assert scene["place"] == ""
     satellite_engine.set_geo(Case.open(cid), place["id"], {"state": "ok", "country_code": "ua", "country": "Україна", "region": "Dnipropetrovsk Oblast"})

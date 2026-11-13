@@ -42,6 +42,7 @@
   import { lookupEntity } from '../lib/catalog.js';
   import PutInNote from '../components/PutInNote.svelte';
   import { frameOffer } from './inspect/frameNote.js';
+  import { scenesOffer } from './inspect/scenesNote.js';
   import { takeSeek } from './inspect/handoff.js';
   import Icon from '../components/Icon.svelte';
   import BackButton from '../components/BackButton.svelte';
@@ -2190,7 +2191,7 @@
     name: (frame) => frameNames.get(frame.id),
     file: fileForNote,
   });
-  offerPuts('inspect', () => (activeFrame ? [noteFrame] : []));
+  offerPuts('inspect', () => [activeFrame ? noteFrame : null, scenesOffer({ caseId: work.caseId, video: isVideo ? work.source : null, scenes: scenes.length })].filter(Boolean));
 
   // -- clearing -------------------------------------------------------------------------
   async function clearWork() {

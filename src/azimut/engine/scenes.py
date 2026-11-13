@@ -670,6 +670,8 @@ def _points(lookup: Lookup, spec: dict[str, Any]) -> list[dict[str, Any]]:
                 "label": point.get("label") or "",
                 "pov": bool(point.get("pov")),
                 "place_id": place["id"] if place else None,
+                # what the case calls that place, for a reader citing it by id
+                "place_label": (place.get("label") or None) if place else None,
             }
         )
     return out
