@@ -17,8 +17,10 @@
    * On a narrow window it is a pager. Folded, or for a video this proof is alone on, it
    * is one thin line; the fold lasts the session only.
    *
-   * The strip's own ⋯ exports the slides' pictures and, once two slides state a place
-   * on a picture, posts them as one video thread (**Post this video's slides**).
+   * Once two slides state a place on a picture, **Post as a thread** beside + posts them
+   * as one video thread in Post, the count of those places on it; a strip too tight for
+   * its words beside the tiles keeps its icon and its count, the words on hover. The
+   * strip's own ⋯ exports the slides' pictures.
    *
    * ←/→ walk the tiles without opening them, Enter opens, Home and End go to the ends.
    * Alt+←/→ go to the next slide from anywhere in the composer, which handles them.
@@ -71,6 +73,9 @@
   const NARROW = 440;
   /** Under this the video's name gives way to its icon, its name on hover. */
   const TIGHT = 760;
+  /** A tile at its smallest and the gap after it; Post as a thread with its words and its gap. */
+  const COMPACT_TILE = 81;
+  const THREAD_WORDS = 160;
 
   let width = $state(0);
   let lead = $state(0);
@@ -97,14 +102,21 @@
   const lone = $derived(tiles.length <= 1);
   const narrow = $derived(width > 0 && width < NARROW);
   const tight = $derived(width > 0 && width < TIGHT);
-  const compact = $derived(width > 0 && tiles.length * TILE > width - lead - tail - ROOM);
+  // the slides a video thread posts: a place stated on a picture (`lib/videoThread.js`)
+  const postable = $derived(tiles.filter((t) => t.kind === 'proof' && t.state === PROVED && !t.unplaced).length);
+  // a thread needs two places
+  const threadable = $derived(!!onpost && postable >= 2);
+  /** The room Post as a thread takes on the strip, its gap included, so the tiles shrink for it. */
+  let threadWidth = $state(0);
+  const threadRoom = $derived(threadable && threadWidth ? threadWidth + 6 : 0);
+  // its words stay while the strip holds them beside the tiles at their smallest, else its icon and count
+  const threadWords = $derived(!tight || width - lead - tail - ROOM - tiles.length * COMPACT_TILE >= THREAD_WORDS);
+  const compact = $derived(width > 0 && tiles.length * TILE > width - lead - tail - threadRoom - ROOM);
   const mode = $derived(gone ? 'gone' : lone ? 'lone' : folded ? 'folded' : narrow ? 'pager' : 'strip');
   const found = $derived(findTiles(tiles, query));
   const name = $derived(videoName(video, title));
   const count = (n) => (n === 1 ? '1 scene' : `${n} scenes`);
   const proved = $derived(tiles.filter((t) => t.kind === 'proof' && t.state !== NO_PICTURE).length);
-  // the slides a video thread posts: a place stated on a picture (`lib/videoThread.js`)
-  const postable = $derived(tiles.filter((t) => t.kind === 'proof' && t.state === PROVED && !t.unplaced).length);
 
   /** How many tiles stand more than half out of sight, each side. */
   function measure() {
@@ -293,6 +305,23 @@
   </button>
 {/snippet}
 
+{#snippet toThread(words = true, measured = false)}
+  {#if threadable}
+    {#if measured}
+      <span class="to-thread-room" bind:clientWidth={threadWidth}>{@render threadButton(words)}</span>
+    {:else}
+      {@render threadButton(words)}
+    {/if}
+  {/if}
+{/snippet}
+
+{#snippet threadButton(words)}
+  <button type="button" class="to-thread" class:bare={!words} aria-label={`Post as a thread, ${postable} places`}
+    title={HELP.post} onclick={() => onpost?.()}>
+    <Icon name="post" size={13} />{#if words}<span>Post as a thread</span>{/if}<span class="thread-count num">{postable}</span>
+  </button>
+{/snippet}
+
 {#snippet steppers()}
   <button type="button" class="step" aria-label="Previous slide" title={HELP.previous} disabled={index <= 0} onclick={() => onstep?.(-1)}>
     <Icon name="chevronLeft" size={14} /></button>
@@ -307,7 +336,7 @@
 {/snippet}
 
 {#snippet series()}
-  {#if onexport || onpost}
+  {#if onexport}
     <button type="button" class="list" aria-label="More for the slides" aria-haspopup="menu" aria-expanded={!!seriesAnchor}
       title={HELP.series} onclick={(event) => (seriesAnchor = seriesAnchor ? null : event.currentTarget)}>
       <Icon name="more" size={14} stroke={2.6} /></button>
@@ -354,7 +383,9 @@
       {#if shown}<span class="said-title" dir="auto">{shown.title}</span>{/if}
     </span>
     {@render steppers()}
-    {@render newScene()}
+    <!-- on a narrow line, + gives up its words so Post as a thread fits beside it -->
+    {@render newScene(!(narrow && threadable))}
+    {@render toThread(!tight)}
     {@render fold()}
   {:else if mode === 'pager'}
     {@render steppers()}
@@ -363,6 +394,7 @@
       {#if shown}<span class="dot-sep" aria-hidden="true">·</span><span class="said-title" dir="auto">{shown.title}</span>{/if}
     </span>
     {@render newScene(false)}
+    {@render toThread(false)}
     {@render listButton()}
     {@render series()}
     {@render fold()}
@@ -404,6 +436,7 @@
         title={HELP.after} onclick={() => page(1)}>{after || ''}<Icon name="chevronRight" size={12} /></button>
     {/if}
     {@render newScene(false)}
+    {@render toThread(threadWords, true)}
     <div class="tail" bind:clientWidth={tail}>
       {@render listButton()}
       {#if compact && !tight}
@@ -479,11 +512,6 @@
         onclick={() => { seriesAnchor = null; onexport?.(); }}>
         <Icon name="download" size={14} /><span class="fm-grow">Export the slides</span></button>
       <p class="fm-note">{proved ? `${proved === 1 ? '1 picture' : `${proved} pictures`}, numbered in clip order, in a folder of their own` : 'No slide has a picture yet'}</p>
-    {/if}
-    {#if onpost && postable >= 2}
-      <button type="button" class="fm-item" title={HELP.post} onclick={() => { seriesAnchor = null; onpost?.(); }}>
-        <Icon name="post" size={14} /><span class="fm-grow">Post this video's slides</span></button>
-      <p class="fm-note">{postable} places as one thread, from the slides as saved</p>
     {/if}
   </FloatingMenu>
 {/if}
@@ -604,6 +632,19 @@
   .add.bare { width: 34px; padding: 0; }
   .line .add { height: 22px; padding: 0 8px; }
   .line .add.bare { width: 24px; padding: 0; }
+
+  /* the thread a video's placed slides make, in plain sight after + */
+  .to-thread-room { display: flex; flex: none; }
+  .to-thread { display: inline-flex; flex: none; align-items: center; gap: 6px; height: 50px; padding: 0 10px 0 12px;
+    border: 1px solid var(--border-strong); border-radius: var(--r-sm); background: var(--bg-2); color: var(--text-1);
+    font-size: 11px; font-weight: 600; white-space: nowrap; cursor: pointer; transition: border-color .12s, color .12s; }
+  .to-thread:hover { border-color: var(--accent); color: var(--accent); }
+  .to-thread:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+  .to-thread.bare { gap: 4px; padding: 0 7px; }
+  .line .to-thread { height: 22px; padding: 0 6px 0 8px; }
+  .line .to-thread.bare { padding: 0 5px; }
+  .thread-count { min-width: 16px; height: 16px; padding: 0 4px; box-sizing: border-box; border-radius: 999px;
+    background: var(--accent-soft); color: var(--accent); font-size: 10px; font-weight: 700; line-height: 16px; text-align: center; }
 
   .list, .fold, .step { display: inline-flex; flex: none; align-items: center; justify-content: center; gap: 4px; height: 26px; min-width: 26px;
     padding: 0 5px; border-radius: var(--r-sm); color: var(--text-2); font-size: 11px; cursor: pointer; }

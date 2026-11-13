@@ -437,7 +437,7 @@ test('exports the slides as one numbered set, saving the slide on screen first',
   await expect(page.locator('.toast', { hasText: 'Exported 2 slides to clip' })).toContainText('Left out, no picture yet: Square');
 });
 
-test('posts this video\'s slides as one thread in Post: Recap first, saved, and opened again as it was', async ({ page }) => {
+test('posts the video\'s slides as one thread from the strip: Recap first, saved, and opened again as it was', async ({ page }) => {
   const { fixture } = await openCase(page);
   const sheets = [];
   await page.route(`**/api/cases/${CASE_ID}/scenes/sheet`, (route) => {
@@ -445,10 +445,13 @@ test('posts this video\'s slides as one thread in Post: Recap first, saved, and 
     return route.fulfill({ json: { path: 'media/Clip contact sheet.jpg' } });
   });
   await openProof(page, 'market', 'Market');
+  // in plain sight beside +, with the places it posts counted, and no longer in the ⋯
+  const toThread = slides(page).getByRole('button', { name: 'Post as a thread, 3 places' });
+  await expect(toThread.locator('.thread-count')).toHaveText('3');
   await slides(page).getByRole('button', { name: 'More for the slides' }).click();
-  const menu = page.getByRole('menu', { name: 'The slides' });
-  await expect(menu.locator('.fm-note').last()).toHaveText('3 places as one thread, from the slides as saved');
-  await menu.getByRole('button', { name: 'Post this video\'s slides' }).click();
+  await expect(page.getByRole('menu', { name: 'The slides' }).locator('.fm-item')).toHaveText(['Export the slides']);
+  await page.keyboard.press('Escape');
+  await toThread.click();
 
   await expect(page.locator('.tabstrip').getByRole('button', { name: 'Post', exact: true })).toHaveAttribute('aria-current', 'page');
   await expect(page.getByTestId('video-thread')).toBeVisible();
@@ -478,6 +481,7 @@ test('offers no thread for a video this proof is alone on', async ({ page }) => 
   await openProof(page, 'market', 'Market');
   await expect(slides(page)).toHaveClass(/line/);
   await expect(slides(page).getByRole('button', { name: 'More for the slides' })).toHaveCount(0);
+  await expect(slides(page).getByRole('button', { name: /^Post as a thread/ })).toHaveCount(0);
 });
 
 test('saves the slide open when Inspect hands over a scene of the same video, rather than asking', async ({ page }) => {

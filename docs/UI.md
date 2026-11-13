@@ -4818,9 +4818,12 @@ is left out and named in the toast. A second export lands in `clip (2)`, never o
 first, and a copy that fails takes the whole set back
 (`POST /cases/{id}/proofs/series-export`).
 
-**Post this video's slides**, in the same ⋯ once two slides state a place on a picture,
-saves the slide on screen and opens Post on the video's thread (see Post). A video with
-one such slide offers none: that proof is a geolocation of its own.
+**Post as a thread** stands beside **+** once two slides state a place on a picture,
+with the count of those places on it, and saves the slide on screen and opens Post on
+the video's thread (see Post). A strip with no room for its words beside the tiles at
+their smallest, and the pager, keep its icon and its count, its words on hover, and the
+tiles shrink for it rather than slip under it; the folded line keeps it too. A video with one such slide
+offers none: that proof is a geolocation of its own. The strip's ⋯ holds the export only.
 
 **The toolbar is two columns.** In one it stood taller than a laptop window, and the
 colour, width and layout controls sat under the fold behind a scrollbar nobody looks
@@ -5525,7 +5528,7 @@ never posts, and pressing Post on X or Bluesky stays the analyst's.
 - **A video thread** posts the placed proofs of one video together: an extra choice,
   never the only way, since each proof still goes out on its own. It is offered for a
   video of two such proofs or more, from New post, from the home's series card and from
-  Geo Proof's strip (**Post this video's slides**); a proof abandoned, still geolocated
+  Geo Proof's strip (**Post as a thread**); a proof abandoned, still geolocated
   or never exported is left out and named. Its column says the video, its places, the
   **Thread title** and the **Order**. The thread title is `#video`, the analyst's own
   words: empty by default (*Optional, e.g. Convoy on the coast road*), never the video's

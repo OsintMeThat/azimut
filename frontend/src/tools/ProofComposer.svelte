@@ -936,7 +936,7 @@
   }
 
   /**
-   * Post this video's slides: the placed slides as one video thread in Post, read from
+   * Post as a thread, on the strip: the placed slides as one video thread in Post, read from
    * what they saved, so the slide on screen is saved first when it holds changes.
    */
   async function postSlides() {

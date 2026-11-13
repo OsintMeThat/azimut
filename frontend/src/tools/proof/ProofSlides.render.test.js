@@ -3,6 +3,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { flushSync, mount, tick, unmount } from 'svelte';
 import ProofSlides from './ProofSlides.svelte';
 import { slideTiles } from '../../lib/proofSlides.js';
+import { PROOF_SLIDES_HELP as HELP } from '../../lib/proofSlidesHelp.js';
 
 /** The strip of a video's slides under Geo Proof's canvas, pressed, walked and folded. */
 
@@ -41,6 +42,7 @@ function show({ tiles = slideTiles(ANSWER, { started: true, name: 'Market', titl
     if (this.classList.contains('slides')) return width;
     if (this.classList.contains('lead')) return 110;
     if (this.classList.contains('tail')) return 120;
+    if (this.classList.contains('to-thread-room')) return 150;
     return 0;
   });
   const calls = { onpick: vi.fn(), onnew: vi.fn(), onstep: vi.fn(), onvideo: vi.fn(), onaction: vi.fn() };
@@ -408,29 +410,85 @@ describe('the strip\'s own menu', () => {
     unmount(held); held = null; target.remove();
     show();
     expect(document.body.querySelector('[aria-label="More for the slides"]')).toBeNull();
+    // posting has its own button: a ⋯ with nothing to export would be empty
+    unmount(held); held = null; target.remove();
+    show({ onpost: vi.fn() });
+    expect(document.body.querySelector('[aria-label="More for the slides"]')).toBeNull();
   });
+});
 
+describe('Post as a thread', () => {
+  const thread = () => document.body.querySelector('.to-thread');
+  // what it says, its words and its count apart
+  const words = () => [...thread().querySelectorAll('span')].map((part) => part.textContent.trim()).join(' ');
   const items = () => [...document.body.querySelectorAll('.float-menu .fm-item')].map((one) => one.textContent.trim());
 
-  it('posts the slides as one video thread once two of them state a place on a picture', () => {
+  it('stands right after + once two slides state a place on a picture, counts them, and posts them, once', () => {
     const onpost = vi.fn();
     show({ onexport: vi.fn(), onpost });
-    document.body.querySelector('[aria-label="More for the slides"]').click();
-    flushSync();
-    expect(items()).toEqual(['Export the slides', 'Post this video\'s slides']);
-    expect([...document.body.querySelectorAll('.float-menu .fm-note')][1].textContent).toBe('2 places as one thread, from the slides as saved');
-    [...document.body.querySelectorAll('.float-menu .fm-item')][1].click();
-    flushSync();
+    expect(words()).toBe('Post as a thread 2');
+    expect(thread().getAttribute('aria-label')).toBe('Post as a thread, 2 places');
+    expect(thread().title).toBe(HELP.post);
+    expect(thread().querySelector('svg')).not.toBeNull();
+    expect(document.body.querySelector('[aria-label="New scene"]').nextElementSibling.contains(thread())).toBe(true);
+    thread().click();
     expect(onpost).toHaveBeenCalledOnce();
-    expect(document.body.querySelector('.float-menu')).toBeNull();
-  });
-
-  it('offers no thread for one place: a slide still geolocated or with no picture is no post of it', () => {
-    const scenes = [proof('Road bridge', { moments: [{ start: 30, end: 45 }] }), proof('Market', { at: [80], state: 'progress' }),
-      proof('Square', { png: null, thumb: null, at: [100] })];
-    show({ onexport: vi.fn(), onpost: vi.fn(), tiles: slideTiles({ video: 'v', scenes }, { started: true, name: 'Market' }) });
+    // and only there: the strip's ⋯ keeps the export
     document.body.querySelector('[aria-label="More for the slides"]').click();
     flushSync();
     expect(items()).toEqual(['Export the slides']);
+  });
+
+  it('keeps its icon and its count where the strip has no room for its words, its words on hover', () => {
+    show({ onpost: vi.fn(), width: 700 });
+    expect(thread().classList).toContain('bare');
+    expect(words()).toBe('2');
+    expect(thread().title).toBe(HELP.post);
+    // as tight a strip with fewer slides keeps them
+    unmount(held); held = null; target.remove();
+    const two = [proof('Road bridge', { moments: [{ start: 30, end: 45 }] }), proof('Market', { at: [80] })];
+    show({ onpost: vi.fn(), width: 700, tiles: slideTiles({ video: 'v', scenes: two }, { started: true, name: 'Market' }) });
+    expect(words()).toBe('Post as a thread 2');
+    unmount(held); held = null; target.remove();
+    show({ onpost: vi.fn(), width: 400 });
+    expect(strip().textContent).toContain('Slide 3 of 6');
+    expect(words()).toBe('2');
+  });
+
+  it('stays on the folded line, its words kept while the strip has room', () => {
+    const onpost = vi.fn();
+    show({ onpost, folded: true });
+    expect(strip().classList).toContain('line');
+    expect(words()).toBe('Post as a thread 2');
+    thread().click();
+    expect(onpost).toHaveBeenCalledOnce();
+    // a narrow line: its icon and count, and + gives up its words for it
+    unmount(held); held = null; target.remove();
+    show({ onpost: vi.fn(), folded: true, width: 300 });
+    expect(words()).toBe('2');
+    expect(document.body.querySelector('[aria-label="New scene"]').classList).toContain('bare');
+    // without it, + keeps its words there as before
+    unmount(held); held = null; target.remove();
+    show({ folded: true, width: 300 });
+    expect(document.body.querySelector('[aria-label="New scene"]').classList).not.toContain('bare');
+  });
+
+  it('gives the tiles its room, so they shrink rather than slip under it', () => {
+    show({ width: 1400 });
+    expect(strip().classList).not.toContain('compact');
+    unmount(held); held = null; target.remove();
+    show({ onpost: vi.fn(), width: 1400 });
+    expect(strip().classList).toContain('compact');
+  });
+
+  it('is not offered for one place: a slide still geolocated or with no picture is no post of it', () => {
+    const scenes = [proof('Road bridge', { moments: [{ start: 30, end: 45 }] }), proof('Market', { at: [80], state: 'progress' }),
+      proof('Square', { png: null, thumb: null, at: [100] })];
+    show({ onexport: vi.fn(), onpost: vi.fn(), tiles: slideTiles({ video: 'v', scenes }, { started: true, name: 'Market' }) });
+    expect(thread()).toBeNull();
+    // nor where Post is not offered
+    unmount(held); held = null; target.remove();
+    show();
+    expect(thread()).toBeNull();
   });
 });
