@@ -120,6 +120,7 @@ const settings = {
   units: 'metric',
   home_view: { lat: 48.8584, lon: 2.2945, zoom: 16 },
   post_mention: '@GeoConfirmed',
+  post_mention_bluesky: null,
   post_target: 'x',
   post_template: '',
   signature_handle: '',

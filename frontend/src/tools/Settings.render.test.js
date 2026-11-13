@@ -144,6 +144,33 @@ describe('each section', () => {
     expect(text).toContain('up to 1 MB');
   });
 
+  it('Publishing shows the mention a Bluesky post will take, and saves it only once edited', async () => {
+    show('publishing');
+    const field = () => pane().querySelector('input[aria-label="Mention on Bluesky"]');
+    prefs.postMention = '@GeoConfirmed';
+    prefs.postMentionBluesky = null;
+    flushSync();
+    // not chosen: GeoConfirmed's own handle there, shown as what will be used
+    expect(field().value).toBe('@geoconfirmed.org');
+    prefs.postMention = '@desk';
+    flushSync();
+    expect(field().value).toBe('@desk');
+
+    api.put.mockImplementation(async (path, patch) => ({ ...settingsBlob(), post_mention: '@desk', ...patch }));
+    api.put.mockClear();
+    field().value = '';
+    field().dispatchEvent(new Event('change', { bubbles: true }));
+    await vi.waitFor(() => expect(prefs.postMentionBluesky).toBe(''));
+    expect(api.put).toHaveBeenCalledWith('/api/settings/prefs', { post_mention_bluesky: '' });
+    flushSync();
+    // emptied is no mention, which the field keeps saying rather than going back to the X one
+    expect(field().value).toBe('');
+    expect(field().getAttribute('title')).toBeTruthy();
+    api.put.mockImplementation(async () => settingsBlob());
+    prefs.postMention = '@GeoConfirmed';
+    prefs.postMentionBluesky = null;
+  });
+
   it('Publishing keeps who signs a report, one line each, and the signature picture beside the logo', async () => {
     show('publishing');
     api.put.mockImplementation(async (path, patch) => ({ ...settingsBlob(), ...patch }));

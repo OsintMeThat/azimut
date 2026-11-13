@@ -14,6 +14,7 @@ import {
   videoTitle, postTemplateKind, postStarters, defaultPostTemplate, templatesOfKind,
   startMediaPlan, replyTarget, replyIntentUrl, replyPostText, replyByDefault,
   linkKey, postedAddress, postedDay, postedWhen, postLinkDate, postState, postStateLabel, postFingerprint, POST_STATES,
+  defaultMention, retargetMention, SHIPPED_MENTION, SHIPPED_BLUESKY_MENTION,
 } from './post.js';
 
 const full = {
@@ -568,6 +569,41 @@ describe('post targets', () => {
     expect(postHandoffUrl('mastodon', 'A post')).toBe('https://x.com/compose/post?text=A%20post');
     expect(postComposeUrl('mastodon', 'A post')).toBe('https://x.com/intent/post?text=A%20post');
     expect(postTarget('mastodon').id).toBe('x');
+  });
+});
+
+describe('the mention each platform starts with', () => {
+  const shipped = { x: '@GeoConfirmed', bluesky: null };
+
+  it('gives X the mention as set, and Bluesky its own once chosen, empty for none', () => {
+    expect(defaultMention('x', shipped)).toBe('@GeoConfirmed');
+    expect(defaultMention('x', { x: '', bluesky: '@desk.bsky.social' })).toBe('');
+    expect(defaultMention('bluesky', { x: '@GeoConfirmed', bluesky: '@desk.bsky.social' })).toBe('@desk.bsky.social');
+    expect(defaultMention('bluesky', { x: '@GeoConfirmed', bluesky: '' })).toBe('');
+    // a dropped or hand-edited target is X, as everywhere
+    expect(defaultMention('mastodon', { x: '@desk', bluesky: '@desk.bsky.social' })).toBe('@desk');
+  });
+
+  it('not chosen, gives Bluesky GeoConfirmed\'s own handle while the X mention is the shipped one, else that mention', () => {
+    expect(SHIPPED_MENTION).toBe('@GeoConfirmed');
+    expect(defaultMention('bluesky', shipped)).toBe(SHIPPED_BLUESKY_MENTION);
+    expect(defaultMention('bluesky', { x: '@geoconfirmed', bluesky: null })).toBe('@geoconfirmed.org');
+    expect(defaultMention('bluesky', {})).toBe('@geoconfirmed.org');
+    // nobody else's handle on Bluesky can be guessed
+    expect(defaultMention('bluesky', { x: '@desk', bluesky: null })).toBe('@desk');
+    expect(defaultMention('bluesky', { x: '', bluesky: null })).toBe('');
+    expect(defaultMention('bluesky', { x: '@GeoConfirmed @other', bluesky: null })).toBe('@GeoConfirmed @other');
+  });
+
+  it('follows a post to its new platform only while it holds the old platform\'s default', () => {
+    expect(retargetMention('@GeoConfirmed', 'x', 'bluesky', shipped)).toBe('@geoconfirmed.org');
+    expect(retargetMention('@geoconfirmed.org', 'bluesky', 'x', shipped)).toBe('@GeoConfirmed');
+    // a mention the analyst typed is theirs
+    expect(retargetMention('@someone', 'x', 'bluesky', shipped)).toBe('@someone');
+    expect(retargetMention('@GeoConfirmed @someone', 'x', 'bluesky', shipped)).toBe('@GeoConfirmed @someone');
+    expect(retargetMention('@geoconfirmed.org', 'x', 'bluesky', shipped)).toBe('@geoconfirmed.org');
+    // the same default on both sides changes nothing
+    expect(retargetMention('@desk', 'x', 'bluesky', { x: '@desk', bluesky: null })).toBe('@desk');
   });
 });
 

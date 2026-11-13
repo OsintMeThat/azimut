@@ -1067,6 +1067,28 @@ def test_default_mention_holds_several_full_handles(client):
     assert saved.json()["post_mention"] == mention
 
 
+def test_the_bluesky_mention_is_not_chosen_until_the_analyst_says_one(client):
+    """Not chosen is null, and the app decides it from the X mention; nothing is
+    written for it until the field is edited, and an empty one is a choice of none."""
+    assert client.get("/api/settings").json()["post_mention_bluesky"] is None
+    client.put("/api/settings/prefs", json={"post_mention": "@desk"})
+    assert config.load_settings()["post_mention_bluesky"] is None
+
+    saved = client.put("/api/settings/prefs", json={"post_mention_bluesky": "  @desk.bsky.social  "})
+    assert saved.json()["post_mention_bluesky"] == "@desk.bsky.social"
+    # a PUT about something else, or saying null, leaves it as it was
+    client.put("/api/settings/prefs", json={"units": "imperial", "post_mention_bluesky": None})
+    assert client.get("/api/settings").json()["post_mention_bluesky"] == "@desk.bsky.social"
+    # emptied, it is no mention, which is not the same as not chosen
+    assert client.put("/api/settings/prefs", json={"post_mention_bluesky": ""}).json()["post_mention_bluesky"] == ""
+    assert config.load_settings()["post_mention_bluesky"] == ""
+
+
+def test_a_bluesky_mention_that_is_no_text_reads_as_not_chosen(client):
+    config.update_settings(lambda settings: settings.update(post_mention_bluesky=["@hand.edited"]))
+    assert client.get("/api/settings").json()["post_mention_bluesky"] is None
+
+
 def test_post_template_default_is_none_and_round_trips(client):
     assert client.get("/api/settings").json()["post_template"] == ""
 

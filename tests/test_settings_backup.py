@@ -84,6 +84,32 @@ def test_export_then_import_restores_keys_and_prefs(client):
     assert restored["units"] == "imperial"
 
 
+def test_the_bluesky_mention_travels_chosen_or_not(client):
+    client.put("/api/settings/prefs", json={"post_mention_bluesky": "@desk.bsky.social"})
+    chosen = bundle_of(client)
+    assert chosen["settings"]["post_mention_bluesky"] == "@desk.bsky.social"
+    client.put("/api/settings/prefs", json={"post_mention_bluesky": ""})
+    client.post("/api/settings/import", json=chosen)
+    assert client.get("/api/settings").json()["post_mention_bluesky"] == "@desk.bsky.social"
+
+    # a machine that never chose one hands over that it never did
+    config.update_settings(lambda settings: settings.update(post_mention_bluesky=None))
+    unchosen = bundle_of(client)
+    assert unchosen["settings"]["post_mention_bluesky"] is None
+    client.put("/api/settings/prefs", json={"post_mention_bluesky": "@other.bsky.social"})
+    assert "post_mention_bluesky" in client.post("/api/settings/import", json=unchosen).json()["imported"]
+    assert client.get("/api/settings").json()["post_mention_bluesky"] is None
+
+
+def test_a_backup_from_before_the_bluesky_mention_leaves_it_not_chosen(client):
+    response = client.post("/api/settings/import", json={"settings": {"post_mention": "  @GeoConfirmed "}})
+    assert response.status_code == 200, response.text
+    assert response.json()["imported"] == ["post_mention"]
+    body = client.get("/api/settings").json()
+    assert body["post_mention"] == "@GeoConfirmed"
+    assert body["post_mention_bluesky"] is None
+
+
 def test_the_map_tabs_switch_travels_with_the_backup(client):
     client.put("/api/settings/prefs", json={"map_sync": False})
     blob = bundle_of(client)

@@ -168,6 +168,12 @@ describe('applyPrefs', () => {
     applyPrefs({ post_mention: '' }); // an empty mention is a real choice, not absence
     expect(prefs.postMention).toBe('');
 
+    expect(prefs.postMentionBluesky).toBeNull(); // not chosen until Settings says one
+    applyPrefs({ post_mention_bluesky: '' });
+    expect(prefs.postMentionBluesky).toBe('');
+    applyPrefs({ post_mention_bluesky: null }); // a backup from a machine that never chose one
+    expect(prefs.postMentionBluesky).toBeNull();
+
     applyPrefs({ post_target: 'bluesky' });
     expect(prefs.postTarget).toBe('bluesky');
 

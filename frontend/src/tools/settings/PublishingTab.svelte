@@ -12,7 +12,7 @@
    * (`lib/notes/reportParts.js`), as its Signature block does. The hover texts
    * live in `lib/publishingHelp.js`.
    */
-  import { POST_TARGETS } from '../../lib/post.js';
+  import { defaultMention, POST_TARGETS } from '../../lib/post.js';
   import { api } from '../../lib/api.js';
   import { prefs, toast } from '../../lib/state.svelte.js';
   import { LOGO_MAX_BYTES, PUBLISHING_HELP as HELP, REPORT_FIELD_MAX, SIGNATURE_MAX_MB } from '../../lib/publishingHelp.js';
@@ -30,6 +30,12 @@
     postPrefill = $bindable(),
     signatureHandle = $bindable(),
   } = $props();
+
+  // What a new Bluesky post is addressed to: its own once chosen, else what the app
+  // decides from the X mention as saved (lib/post.js `defaultMention`), shown in the
+  // field so the analyst sees it. Nothing is saved until the field is edited, and an
+  // emptied one is no mention, which is a choice too.
+  const blueskyMention = $derived(defaultMention('bluesky', { x: prefs.postMention, bluesky: prefs.postMentionBluesky }));
 
   let handInput = $state(null);
   let logoInput = $state(null);
@@ -108,8 +114,8 @@
   <h3>Post</h3>
   <div class="row">
     <div class="row-label" title={HELP.mention}>
-      <span>Default mention</span>
-      <span class="row-hint">Pre-filled on a new draft. Leave empty for none.</span>
+      <span>Mention on X</span>
+      <span class="row-hint">Pre-filled on a new X post. Leave empty for none.</span>
     </div>
     <input
       class="input mention"
@@ -117,7 +123,23 @@
       onchange={() => savePrefs({ post_mention: mention })}
       placeholder="@GeoConfirmed"
       spellcheck="false"
+      aria-label="Mention on X"
       title={HELP.mention}
+    />
+  </div>
+  <div class="row">
+    <div class="row-label" title={HELP.mentionBluesky}>
+      <span>Mention on Bluesky</span>
+      <span class="row-hint">A handle there is a domain, like @name.bsky.social. Leave empty for none.</span>
+    </div>
+    <input
+      class="input mention"
+      value={blueskyMention}
+      onchange={(event) => savePrefs({ post_mention_bluesky: event.currentTarget.value })}
+      placeholder="@name.bsky.social"
+      spellcheck="false"
+      aria-label="Mention on Bluesky"
+      title={HELP.mentionBluesky}
     />
   </div>
   <div class="row">

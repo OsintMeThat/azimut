@@ -144,6 +144,8 @@ class PrefsIn(BaseModel):
     # whether saving a proof files its point as a place, or asks first
     proof_place_auto: bool | None = None
     post_mention: str | None = None  # handle a new post draft is addressed to
+    # the one a new Bluesky post is addressed to; "" is none, and None leaves it as it is
+    post_mention_bluesky: str | None = None
     post_target: str | None = None  # social composer a new post draft starts with
     # id of the post template a new draft starts with; "" is the classic layout
     post_template: str | None = Field(default=None, pattern=r"^$|^[A-Za-z0-9_-]{1,64}$")
@@ -201,6 +203,13 @@ def _report_text(settings: dict[str, Any], key: str) -> str:
     return " ".join(value.split())[:REPORT_TEXT_MAX] if isinstance(value, str) else ""
 
 
+def _bluesky_mention(settings: dict[str, Any]) -> str | None:
+    """The Bluesky mention as chosen, or None while it is not: what reads as no text is
+    not a choice, so the app goes on deciding it from the X mention."""
+    value = settings.get("post_mention_bluesky")
+    return value[:280] if isinstance(value, str) else None
+
+
 def _quality_3d(settings: dict[str, Any]) -> str:
     """How much the 3D views draw here: a level the app knows, else as they always did."""
     level = settings.get("quality_3d")
@@ -226,6 +235,7 @@ def _prefs(settings: dict[str, Any]) -> dict[str, Any]:
         "capture_scale_north": bool(settings.get("capture_scale_north", False)),
         "proof_place_auto": bool(settings.get("proof_place_auto", True)),
         "post_mention": settings.get("post_mention", DEFAULT_POST_MENTION),
+        "post_mention_bluesky": _bluesky_mention(settings),
         "post_target": settings.get("post_target", DEFAULT_POST_TARGET),
         "post_template": settings.get("post_template", DEFAULT_POST_TEMPLATE),
         "post_kind_templates": _kind_templates(settings.get("post_kind_templates")),
@@ -399,6 +409,8 @@ def _apply_prefs(settings: dict[str, Any], body: PrefsIn) -> None:
         settings["proof_place_auto"] = bool(body.proof_place_auto)
     if body.post_mention is not None:
         settings["post_mention"] = body.post_mention.strip()[:280]
+    if body.post_mention_bluesky is not None:
+        settings["post_mention_bluesky"] = body.post_mention_bluesky.strip()[:280]
     if body.post_target is not None:
         settings["post_target"] = body.post_target
     if body.post_template is not None:
@@ -864,6 +876,8 @@ class ImportedSettings(BaseModel):
     capture_scale_north: bool = False
     proof_place_auto: bool = True
     post_mention: str = Field(default=DEFAULT_POST_MENTION, max_length=280)
+    # None is not chosen yet, as a backup from before it says by leaving it out
+    post_mention_bluesky: str | None = Field(default=None, max_length=280)
     post_target: str = DEFAULT_POST_TARGET
     post_template: str = DEFAULT_POST_TEMPLATE
     post_kind_templates: dict[str, Any] = Field(default_factory=dict, max_length=16)
@@ -947,6 +961,11 @@ class ImportedSettings(BaseModel):
     @classmethod
     def strip_short_text(cls, value: str) -> str:
         return value.strip()
+
+    @field_validator("post_mention_bluesky")
+    @classmethod
+    def strip_chosen_mention(cls, value: str | None) -> str | None:
+        return value.strip() if value is not None else None
 
     @field_validator(*REPORT_KEYS, mode="before")
     @classmethod

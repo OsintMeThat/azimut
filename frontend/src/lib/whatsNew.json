@@ -6,6 +6,7 @@
         "title": "And also",
         "items": [
           { "icon": "post", "text": "Geo Report is now Post: the same tool, for more kinds of posts." },
+          { "icon": "at", "text": "Bluesky posts now mention a real Bluesky handle, @geoconfirmed.org by default." },
           { "icon": "unlink", "text": "Media's Unused filter finds the files nothing uses, and every delete says what it touches before it runs." },
           { "icon": "image", "text": "The Google basemap keeps its credit and logo in plain sight." },
           { "icon": "eyeOff", "text": "A plate's map hides one feature, or everything a layer held before a day you pick." },

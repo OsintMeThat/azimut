@@ -139,6 +139,11 @@ DEFAULT_SETTINGS: dict[str, Any] = {
     "proof_place_auto": True,
     # The handle a new post draft is addressed to. Empty means no mention.
     "post_mention": "@GeoConfirmed",
+    # The one a new Bluesky post is addressed to, where a handle is a domain. None
+    # means not chosen yet: Bluesky then takes GeoConfirmed's own handle while the
+    # mention above is still the shipped one, else that mention (frontend
+    # lib/post.js `defaultMention`). Empty means no mention.
+    "post_mention_bluesky": None,
     # The social composer a new post draft starts with. A saved draft keeps its
     # own target so a later preference change never rewrites it.
     "post_target": "x",

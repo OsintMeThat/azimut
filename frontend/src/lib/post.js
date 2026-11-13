@@ -99,6 +99,33 @@ export function postTarget(target) {
   return POST_TARGETS[normalizePostTarget(target)];
 }
 
+/** The mention Azimut ships (`config.DEFAULT_SETTINGS`), and that account's handle on Bluesky. */
+export const SHIPPED_MENTION = '@GeoConfirmed';
+export const SHIPPED_BLUESKY_MENTION = '@geoconfirmed.org';
+
+/**
+ * The mention a new post on `target` starts with, from Settings › Publishing: `x`, the
+ * mention as set, and `bluesky`, Bluesky's own once chosen (`''` for none), `null` while
+ * it is not. A handle there is a domain, so `@GeoConfirmed` would stay words: not
+ * chosen, Bluesky takes GeoConfirmed's own handle while the X mention is still the one
+ * Azimut ships, else the X mention, since nobody's Bluesky handle can be guessed.
+ */
+export function defaultMention(target, { x = SHIPPED_MENTION, bluesky = null } = {}) {
+  const own = typeof x === 'string' ? x : '';
+  if (normalizePostTarget(target) !== 'bluesky') return own;
+  if (typeof bluesky === 'string') return bluesky;
+  return own.trim().toLowerCase() === SHIPPED_MENTION.toLowerCase() ? SHIPPED_BLUESKY_MENTION : own;
+}
+
+/**
+ * The mention a post holds once its platform changes from `from` to `to`: the new
+ * platform's default when it still holds the old one's, else what it holds, since a
+ * mention typed is the analyst's. `mentions` is what `defaultMention` reads.
+ */
+export function retargetMention(mention, from, to, mentions) {
+  return mention === defaultMention(from, mentions) ? defaultMention(to, mentions) : mention;
+}
+
 /** What X counts a link as, whatever its length: every http(s) address goes out through t.co. */
 export const X_LINK_WEIGHT = 23;
 

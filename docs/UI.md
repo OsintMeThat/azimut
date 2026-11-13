@@ -5470,6 +5470,15 @@ never posts, and pressing Post on X or Bluesky stays the analyst's.
   this way, Compare's export a Compare post and Detect's pins a free post, whose Text
   and source layout carries `#date` for them. A draft saved as a free post from Compare
   before the Compare kind stays a free post.
+- **The mention** a new post starts with is its platform's, from Settings › Publishing:
+  **Mention on X**, and **Mention on Bluesky**, where a handle is a domain and
+  `@GeoConfirmed` would stay words. Until Bluesky's is chosen (`post_mention_bluesky`
+  null), a Bluesky post takes `@geoconfirmed.org` while the X mention is still
+  `@GeoConfirmed`, else the X mention; Settings shows the one it will use, and emptied it
+  is no mention (`lib/post.js` `defaultMention`). Picking the other platform swaps the
+  post's Mention field only while it holds the first one's default, and rewrites the posts
+  written from the fields; a mention typed stays, a saved post opens with its own, and a
+  template's is the template's. The settings backup carries it, not chosen included.
 - **Credits** is a field of the composer shown when the layout uses `#credits`, filled
   with the credit line a Compare or Map plate start hands over and edited like any
   other. The draft keeps it (`credits`, written only when there is one), and an empty

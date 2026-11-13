@@ -134,6 +134,7 @@ beforeEach(() => {
   prefs.postTemplate = '';
   prefs.postKindTemplates = {};
   prefs.postMention = '@GeoConfirmed';
+  prefs.postMentionBluesky = null;
   prefs.postTarget = 'x';
   prefs.postPrefill = true;
   templatesState.post = [];
@@ -629,6 +630,85 @@ describe('startPost — the entry every To Post shares', () => {
     expect(api.post.mock.calls.some(([path]) => path.endsWith('/drafts'))).toBe(true);
     expect(target.querySelector('.kind-chip').textContent.trim()).toBe('Map plate');
     expect(target.querySelector('#pc-desc').value).toBe('');
+  });
+});
+
+describe('the mention a post starts with', () => {
+  const mentionField = () => target.querySelector('#pc-mention');
+  const pick = async (site) => {
+    button(target.querySelector('.target-tabs'), site).click();
+    await settle();
+  };
+
+  it('is its platform\'s on a new post: on Bluesky, GeoConfirmed\'s own handle until Settings says another', async () => {
+    prefs.postTarget = 'bluesky';
+    await mountPost();
+    expect(mentionField().value).toBe('@geoconfirmed.org');
+    prefs.postMentionBluesky = '@desk.bsky.social';
+    startPost('geolocation');
+    await settle();
+    expect(mentionField().value).toBe('@desk.bsky.social');
+    prefs.postMentionBluesky = '';
+    startPost('geolocation');
+    await settle();
+    expect(mentionField().value).toBe('');
+    // not chosen, and an X mention of the analyst's own: nobody's Bluesky handle is guessed
+    prefs.postMentionBluesky = null;
+    prefs.postMention = '@desk';
+    startPost('geolocation');
+    await settle();
+    expect(mentionField().value).toBe('@desk');
+  });
+
+  it('follows the platform while it holds the other\'s default, rewrites the posts written from the fields, and files no blank post', async () => {
+    await mountPost();
+    expect(mentionField().value).toBe('@GeoConfirmed');
+    await pick('Bluesky');
+    expect(mentionField().value).toBe('@geoconfirmed.org');
+    await pick('X');
+    expect(mentionField().value).toBe('@GeoConfirmed');
+    await saved();
+    expect(draftWrites()).toEqual([]);
+
+    type(target.querySelector('#pc-desc'), 'Smoke over the depot');
+    type(target.querySelector('#pc-desc'), 'Smoke over the depot');
+    expect(firstPost().value).toContain('@GeoConfirmed');
+    await pick('Bluesky');
+    expect(firstPost().value).toContain('@geoconfirmed.org');
+    expect(firstPost().value).not.toContain('@GeoConfirmed');
+  });
+
+  it('never touches a mention the analyst typed, nor a first post they wrote', async () => {
+    await mountPost();
+    type(firstPost(), 'My own words @GeoConfirmed');
+    await pick('Bluesky');
+    expect(mentionField().value).toBe('@geoconfirmed.org');
+    expect(firstPost().value).toBe('My own words @GeoConfirmed');
+    type(mentionField(), '@someone');
+    await pick('X');
+    expect(mentionField().value).toBe('@someone');
+    await pick('Bluesky');
+    expect(mentionField().value).toBe('@someone');
+  });
+
+  it('opens a saved post with the mention it kept, whatever its platform', async () => {
+    lists.drafts = [{ name: 'Old', title: 'Old', target: 'bluesky', posts: 1 }];
+    lists.saved = { Old: { title: 'Old', state: { target: 'bluesky', description: 'D', mention: '@GeoConfirmed', tweet1: 'D @GeoConfirmed', tweet1Edited: true } } };
+    await mountPost();
+    home().querySelector('.ph-open').click();
+    await saved();
+    expect(mentionField().value).toBe('@GeoConfirmed');
+    expect(draftWrites()).toEqual([]);
+  });
+
+  it('keeps the mention a template carries', async () => {
+    templatesState.post = [{ id: 'po_house', name: 'House', data: { mention: '@House', body: '#description\n\n#mention', mediaEnabled: false } }];
+    prefs.postTemplate = 'po_house';
+    prefs.postTarget = 'bluesky';
+    await mountPost();
+    expect(mentionField().value).toBe('@House');
+    await pick('X');
+    expect(mentionField().value).toBe('@House');
   });
 });
 

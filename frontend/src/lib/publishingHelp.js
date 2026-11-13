@@ -5,7 +5,8 @@
  * tab and the editor to a hover text.
  */
 export const PUBLISHING_HELP = {
-  mention: 'The handle a new post is addressed to',
+  mention: 'The handle a new X post is addressed to',
+  mentionBluesky: 'The handle a new Bluesky post is addressed to',
   platform: 'The site a new post is written for',
   prefill: 'Let the capture extension type the thread and attach the proof',
   handle: 'Your handle, printed on proofs that turn on Add account handle',

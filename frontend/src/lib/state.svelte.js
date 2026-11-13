@@ -28,6 +28,7 @@ export const prefs = $state({
   detectView: { collapsed: false, width: 380, basemap: 'esri-world-imagery' },
   captureScaleNorth: false, // burn a scale bar and a north arrow into captures
   postMention: '@GeoConfirmed', // handle a fresh post draft is addressed to
+  postMentionBluesky: null, // the one a fresh Bluesky post is addressed to; null = not chosen (lib/post.js defaultMention)
   postTarget: 'x', // social composer a fresh post draft starts with
   postTemplate: '', // id of the post template a fresh draft starts with; '' = classic
   postKindTemplates: {}, // { video?, plate?, compare?, free? }: each other kind's default template id
@@ -119,6 +120,7 @@ export function applyPrefs(s) {
   if (s.detect_view) prefs.detectView = s.detect_view;
   if (s.capture_scale_north !== undefined) prefs.captureScaleNorth = s.capture_scale_north;
   if (s.post_mention !== undefined) prefs.postMention = s.post_mention; // '' = none
+  if (s.post_mention_bluesky !== undefined) prefs.postMentionBluesky = s.post_mention_bluesky; // null = not chosen
   if (s.post_target !== undefined) prefs.postTarget = s.post_target;
   if (s.post_template !== undefined) prefs.postTemplate = s.post_template; // '' = none
   if (s.post_kind_templates !== undefined) prefs.postKindTemplates = s.post_kind_templates ?? {};

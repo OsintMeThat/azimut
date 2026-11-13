@@ -39,7 +39,7 @@
     defaultPostTemplate, normalizePostKind, postKind, postStarters, normPostTemplate, VIDEO_THREAD_STARTERS,
     replyByDefault, replyIntentUrl, replyPostText, replyTarget, startMediaPlan,
     statedPostKind, templatesOfKind, videoTitle,
-    postedAddress, postedDay, postedWhen, postFingerprint, postState,
+    postedAddress, postedDay, postedWhen, postFingerprint, postState, defaultMention, retargetMention,
   } from '../lib/post.js';
   import {
     extensionOutdated, extensionVersion, handOffPost, onPostHandoffReport, onPostLinkCaught,
@@ -74,7 +74,13 @@
   let place = $state('');
   let placeLoading = $state(false);
   let description = $state('');
-  let mention = $state(prefs.postMention);
+  // The mention a new post starts with is its platform's (Settings › Publishing,
+  // lib/post.js `defaultMention`): on Bluesky a handle is a domain.
+  const mentions = () => ({ x: prefs.postMention, bluesky: prefs.postMentionBluesky });
+  // The default a blank post was last given, so the preferences landing late move a
+  // mention still holding it and never one typed over it.
+  let offeredMention = defaultMention('x', mentions());
+  let mention = $state(offeredMention);
   let source = $state('');
   /** The Source box grows with what it holds, up to four lines: a proof read from a
    *  thread carries an address per post, and one row would hide all but the first. */
@@ -1078,6 +1084,7 @@
     const prev = appliedPostTemplate?.prev ?? snapshotPostStructure();
     const norm = applyPostTemplateStructure({}, t.data);
     mention = norm.mention;
+    offeredMention = null; // the template's, kept whatever the preferences say next
     if (thread) {
       // a thread's template is its order and its texts: the posts follow them
       appliedPostTemplate = { name: t.name, prev };
@@ -2190,7 +2197,6 @@
     coordsText = '';
     geo = null;
     place = '';
-    mention = prefs.postMention;
     source = '';
     date = '';
     proofUndated = false;
@@ -2201,6 +2207,7 @@
     tweet1 = '';
     tweet1Edited = false;
     target = normalizePostTarget(prefs.postTarget);
+    mention = offeredMention = defaultMention(target, mentions());
     mediaEnabled = true;
     mediaType = 'none';
     mediaText = '';
@@ -2283,10 +2290,39 @@
   const homeShown = $derived(homeAvailable && !postOpen && !hasContent);
 
   // Preferences can arrive after this tool mounts. A blank composer follows the
-  // preferred platform, while a selected or saved draft keeps its own target.
+  // preferred platform and its mention, while a selected or saved draft keeps its own
+  // target; a mention typed on a blank one, or a template's, stays.
   $effect(() => {
-    if (!hasContent) target = normalizePostTarget(prefs.postTarget);
+    if (hasContent) return;
+    const next = normalizePostTarget(prefs.postTarget);
+    const offered = defaultMention(next, mentions());
+    untrack(() => {
+      if (offeredMention !== null && mention === offeredMention && mention !== offered) {
+        const untouched = blankKey !== null && contentKey() === blankKey;
+        mention = offeredMention = offered;
+        if (untouched) blankKey = contentKey(); // the platform's default is no work
+      }
+      target = next;
+    });
   });
+
+  /**
+   * Another platform for the post on screen. Its mention follows only while it holds the
+   * platform's default it had, and the posts written from the fields say the new one.
+   */
+  function pickTarget(next) {
+    if (next === target) return;
+    const kept = retargetMention(mention, target, next, mentions());
+    target = next;
+    if (kept === mention) return;
+    // a blank post stays blank: the platform's default is no work, as the platform is not
+    const untouched = !draftName && blankKey !== null && contentKey() === blankKey;
+    mention = kept;
+    if (offeredMention !== null) offeredMention = kept;
+    if (thread) rewriteThread();
+    else if (!tweet1Edited && tweet1.trim()) tweet1 = buildTweet1();
+    if (untouched) blankKey = contentKey();
+  }
   $effect(() => {
     if (!hasContent) altOn = prefs.postAltText;
   });
@@ -2915,7 +2951,7 @@
                 class="btn btn-sm"
                 class:btn-primary={target === option.id}
                 class:btn-ghost={target !== option.id}
-                onclick={() => (target = option.id)}
+                onclick={() => pickTarget(option.id)}
               >{option.label}</button>
             {/each}
           </div>
@@ -3117,7 +3153,7 @@
           <input
             id="pc-mention"
             class="input mono"
-            placeholder="@GeoConfirmed"
+            placeholder={target === 'bluesky' ? '@name.bsky.social' : '@GeoConfirmed'}
             bind:value={mention}
             onchange={regenerate}
             disabled={fieldDisabledByTemplate('mention')}
