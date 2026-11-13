@@ -13,6 +13,7 @@ import { api } from '../api.js';
 import { createBookmark } from '../bookmarks.js';
 import { entityReference } from '../markdown.js';
 import { reloadCase } from '../state.svelte.js';
+import { pinnedNote, putInNote, shortTitle } from './putInNote.svelte.js';
 import { asPosted, lookupSource, QUOTE_MAX } from './sources.js';
 import { picturePut } from './syntax.js';
 import { passageLink } from './textFragment.js';
@@ -90,23 +91,58 @@ export function quoteOffer(caseId, { url, title, text }, deps = {}) {
   };
 }
 
+/** The capture the extension filed, read back as the case holds it; an Error when it is not there. */
+async function filedPicture(caseId, entityId, { get, reload }) {
+  let entity = null;
+  try {
+    entity = (await get(`/api/cases/${caseId}/entities/${entityId}/chain`))?.entity ?? null;
+  } catch {
+    entity = null;
+  }
+  if (!entity?.id || !entity.attrs?.path || !PICTURES.has(entity.type)) throw new Error('That capture is not in this case');
+  // the note draws a picture from the case's records, which must hold it by now
+  await reload();
+  return entity;
+}
+
 /** Show a capture the extension filed, as a picture whose caption is asked for. */
 export function pictureOffer(caseId, { entityId }, { get = api.get, reload = reloadCase, now = Date.now } = {}) {
   return {
     id: 'picture',
     picture: true,
     put: async () => {
-      let entity = null;
-      try {
-        entity = (await get(`/api/cases/${caseId}/entities/${entityId}/chain`))?.entity ?? null;
-      } catch {
-        entity = null;
-      }
-      if (!entity?.id || !entity.attrs?.path || !PICTURES.has(entity.type)) throw new Error('That capture is not in this case');
-      // the note draws a picture from the case's records, which must hold it by now
-      await reload();
+      const entity = await filedPicture(caseId, entityId, { get, reload });
       return { text: picturePut(entity), filed: freshCapture(entity, now()) ? [entity.id] : [] };
     },
+  };
+}
+
+/**
+ * A capture the extension filed on its own (the tools' Capture over a map), put in from
+ * the toast that says it was filed. It was taken for itself, not for the note, so Undo
+ * takes the picture back out and leaves the capture in the case.
+ */
+export function capturedOffer(caseId, entityId, { get = api.get, reload = reloadCase } = {}) {
+  return {
+    id: 'picture',
+    picture: true,
+    put: async () => ({ text: picturePut(await filedPicture(caseId, entityId, { get, reload })), filed: [] }),
+  };
+}
+
+/** What the app accepts as an entity id from an event. */
+const ENTITY_ID = /^[A-Za-z0-9_-]{1,64}$/;
+
+/**
+ * The action the toast saying the extension filed a capture (`ev`, the server's
+ * `capture` event) offers: `Put in “<note>”`, while a note of that case is on the side.
+ * None for a capture the notes panel took for its own note, which it puts in itself.
+ */
+export function captureToastAction(ev, { target = pinnedNote(), put = putInNote, deps = {} } = {}) {
+  if (!target?.caseId || target.caseId !== ev?.case_id || ev.for_note || !ENTITY_ID.test(String(ev.entity_id ?? ''))) return null;
+  return {
+    label: `Put in “${shortTitle(target.title)}”`,
+    onClick: () => void put(capturedOffer(ev.case_id, ev.entity_id, deps)),
   };
 }
 

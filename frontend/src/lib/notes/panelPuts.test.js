@@ -2,7 +2,9 @@ import { describe, expect, it, vi } from 'vitest';
 
 vi.mock('../api.js', () => ({ api: { get: vi.fn(), post: vi.fn(), put: vi.fn(), del: vi.fn(), patch: vi.fn() } }));
 
-const { citeOffer, freshCapture, panelOffer, pictureOffer, quoteMarkdown, quoteOffer, FRESH_CAPTURE_MS } = await import('./panelPuts.js');
+const {
+  captureToastAction, capturedOffer, citeOffer, freshCapture, panelOffer, pictureOffer, quoteMarkdown, quoteOffer, FRESH_CAPTURE_MS,
+} = await import('./panelPuts.js');
 
 /**
  * What the extension's panel puts in a note, built in the app from the facts it is
@@ -116,5 +118,45 @@ describe('the offer for a put', () => {
     expect(panelOffer('c1', { action: 'quote', url: URL_, text: 'x' }).id).toBe('quote');
     expect(panelOffer('c1', { action: 'picture', entityId: 'e1' }).id).toBe('picture');
     expect(panelOffer('c1', { action: 'other' })).toBeNull();
+  });
+});
+
+describe('a capture filed outside the notes panel', () => {
+  const CAPTURE = { id: 'cap_9', type: 'capture', label: 'Quay', attrs: { path: 'media/quay.png' }, provenance: { by: 'ingest', at: new Date().toISOString() } };
+  const NOTE = { caseId: 'c1', noteId: 'n1', title: 'Port strike on the night of 12 March' };
+  const EVENT = { type: 'capture', case_id: 'c1', entity_id: 'cap_9', path: 'media/quay.png', title: 'Quay', site: 'google-maps' };
+
+  it('is offered to the note on the side, named, and put in by its record', async () => {
+    const put = vi.fn();
+    const action = captureToastAction(EVENT, { target: NOTE, put });
+    expect(action.label).toBe('Put in “Port strike on the…”');
+    action.onClick();
+    const [offer] = put.mock.calls[0];
+    expect(offer).toMatchObject({ id: 'picture', picture: true });
+  });
+
+  it('is offered to no note of another case, none at all, nor the notes panel’s own', () => {
+    expect(captureToastAction(EVENT, { target: null })).toBeNull();
+    expect(captureToastAction(EVENT, { target: { ...NOTE, caseId: 'c2' } })).toBeNull();
+    expect(captureToastAction({ ...EVENT, for_note: true }, { target: NOTE })).toBeNull();
+    // an older app's event names no record to put in
+    expect(captureToastAction({ ...EVENT, entity_id: undefined }, { target: NOTE })).toBeNull();
+    expect(captureToastAction({ ...EVENT, entity_id: '../x' }, { target: NOTE })).toBeNull();
+  });
+
+  it('leaves the capture in the case when its put is undone, fresh as it is', async () => {
+    const get = vi.fn(async () => ({ entity: CAPTURE }));
+    const reload = vi.fn(async () => {});
+    const result = await capturedOffer('c1', 'cap_9', { get, reload }).put();
+    expect(get).toHaveBeenCalledWith('/api/cases/c1/entities/cap_9/chain');
+    expect(result).toEqual({ text: expect.stringContaining('[[media:cap_9|Quay]]'), filed: [] });
+    expect(reload).toHaveBeenCalled();
+    // the same capture put in from the notes panel is its own, and Undo trashes it
+    expect((await pictureOffer('c1', { entityId: 'cap_9' }, { get, reload }).put()).filed).toEqual(['cap_9']);
+  });
+
+  it('refuses a record that is no picture of the case', async () => {
+    const get = vi.fn(async () => ({ entity: { id: 'b1', type: 'bookmark', label: 'x', attrs: {} } }));
+    await expect(capturedOffer('c1', 'b1', { get, reload: vi.fn() }).put()).rejects.toThrow('That capture is not in this case');
   });
 });

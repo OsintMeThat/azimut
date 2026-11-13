@@ -120,4 +120,15 @@ describe('filedToast', () => {
     filedToast('1 file filed', [filed], { action: offer });
     expect(uiState.toasts.at(-1)).toMatchObject({ message: '1 file filed in North', action: offer });
   });
+
+  it('offers what it is also given first, beside Move or alone', () => {
+    const put = { label: 'Put in “Port strike”', onClick: () => {} };
+    filedToast('Capture filed', [filed], { fallback: 'Capture filed from x', also: [put], timeout: 8000 });
+    expect(uiState.toasts.at(-1)).toMatchObject({ message: 'Capture filed from x', action: [put] });
+    caseState.current = { ...caseState.current, work_folder: 'Air/North' };
+    filedToast('Capture filed', [filed], { also: [put] });
+    const toast = uiState.toasts.at(-1);
+    expect(toast.message).toBe('Capture filed in North');
+    expect(toast.action.map((one) => one.label)).toEqual(['Put in “Port strike”', 'Move']);
+  });
 });

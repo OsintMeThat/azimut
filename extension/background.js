@@ -153,6 +153,8 @@ async function ingest(blob, meta) {
   }
   form.append("captured_at", new Date().toISOString());
   form.append("extension", api.runtime.getManifest().version);
+  // taken for the notes panel, which puts it in its note: the app's toast offers it no further
+  if (meta.forNote) form.append("for_note", "true");
   // the map's own credit line, read off the page: the selection rarely holds it
   if (typeof meta.screenCredit === "string" && meta.screenCredit.trim()) {
     form.append("screen_credit", meta.screenCredit.trim().slice(0, 400));
@@ -2283,7 +2285,9 @@ async function finishNoteCapture(msg, tab, meta) {
     const dataUrl = await withoutPanel(tab.id, () => inQuota(() => captureActiveTab(tab.windowId)));
     const { blob, scale } = await cropDataUrl(dataUrl, msg.rect, msg.viewportW);
     const { note, ...filed } = meta;
-    const body = await ingest(blob, { ...filed, caseId: panel.caseId || meta.caseId, deviceScale: scale, screenCredit: msg.credit });
+    const body = await ingest(blob, {
+      ...filed, caseId: panel.caseId || meta.caseId, deviceScale: scale, screenCredit: msg.credit, forNote: true,
+    });
     tellPanel(port, {
       type: "put",
       put: { action: "picture", url: meta.url, title: note.title, entityId: body.entity_id },

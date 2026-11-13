@@ -63,6 +63,7 @@
   import CaseChangeGuard from './components/CaseChangeGuard.svelte';
   import { isPaletteKey } from './lib/commandPalette.js';
   import { filedToast, workFolder } from './lib/folders.js';
+  import { captureToastAction } from './lib/notes/panelPuts.js';
   import { isNoteKey } from './lib/noteHere.svelte.js';
   import { noteDock, setDockOpen } from './lib/notes/noteDock.svelte.js';
   import { readStatus, stoppedBecause } from './lib/workspace.js';
@@ -375,7 +376,7 @@
   startEvents();
   // Filed from another window, so the toast is where the analyst hears which
   // folder it landed in, with Move when the work folder took it.
-  async function filedFromExtension(ev, lead, fallback) {
+  async function filedFromExtension(ev, lead, fallback, also = []) {
     if (caseState.current?.id !== ev.case_id) return toast(fallback, 'ok', 5000);
     await reloadCase();
     let entity = null;
@@ -388,11 +389,14 @@
         /* the toast still says it was filed */
       }
     }
-    filedToast(lead, [entity], { fallback, timeout: 5000 });
+    filedToast(lead, [entity], { fallback, timeout: also.length ? 8000 : 5000, also });
   }
-  onEvent('capture', (ev) =>
-    filedFromExtension(ev, `“${ev.title}” filed from ${ev.site}`, `Capture filed from ${ev.site}: ${ev.title}`)
-  );
+  // A map captured with the extension's tools, outside its notes panel, is one press from
+  // the note on the side (`captureToastAction`).
+  onEvent('capture', (ev) => {
+    const put = captureToastAction(ev);
+    filedFromExtension(ev, `“${ev.title}” filed from ${ev.site}`, `Capture filed from ${ev.site}: ${ev.title}`, put ? [put] : []);
+  });
   onEvent('bookmark', (ev) => filedFromExtension(ev, `Bookmark “${ev.title}” saved`, `Bookmark saved: ${ev.title}`));
   onEvent('place', (ev) =>
     filedFromExtension(ev, `“${ev.title}” saved from ${ev.site}`, `Place saved from ${ev.site}: ${ev.title}`)

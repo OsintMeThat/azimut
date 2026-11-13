@@ -7371,6 +7371,13 @@ note through the same Put as every tool, with its light, toast and Undo:
 The items are gone when the panel closes or holds no note. On Azimut's own page they
 say *This is Azimut itself, not a source.*
 
+A map captured with the tools over the map (their **Capture**, outside the notes panel)
+is said by the app's toast, *“Quay” filed from google-maps*. While a note of that case
+is on the side, in the dock or in this panel, the toast adds **Put in “<note>”**, which
+puts the picture in by its record through the same Put; its Undo takes the picture out
+and leaves the capture in the case. A capture taken for the panel's note says so when
+it is filed (`for_note`), and its toast offers nothing more.
+
 **A source…** takes a pasted or typed link. It is looked up in the case first, nothing
 fetched (`GET /sources/lookup`): what the case holds is cited. Otherwise *Bookmark*,
 named from the address (*Post by @h on X*, *Telegram, channel #n*…,

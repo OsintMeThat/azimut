@@ -88,16 +88,19 @@ export function removeFolderPrompt(path, folders) {
  * went to, and its Move is the way out when it was filed for another thread.
  * `lead` reads before the folder ("2 files filed"); `fallback` is the message
  * when no work folder was involved. A toast that already offers something
- * (`action`) keeps it and names the folder in its words only.
+ * (`action`) keeps it and names the folder in its words only. `also` are actions
+ * offered first, beside that one or Move.
  */
-export function filedToast(lead, entities, { fallback = lead, action = null, timeout = 3800 } = {}) {
+export function filedToast(lead, entities, { fallback = lead, action = null, also = [], timeout = 3800 } = {}) {
   const folder = workFolder();
   const filed = (entities ?? []).filter(Boolean);
   if (!folder || !filed.length || !filed.every((e) => e.attrs?.folder === folder)) {
-    return toast(fallback, 'ok', action ? Math.max(timeout, 6000) : timeout, action);
+    const offered = also.length ? [...also, ...(action ? [action] : [])] : action;
+    return toast(fallback, 'ok', offered ? Math.max(timeout, 6000) : timeout, offered);
   }
-  return toast(`${lead} in ${leafOf(folder)}`, 'ok', 7000, action ?? {
+  const move = action ?? {
     label: 'Move',
     onClick: () => (uiState.moving = filed),
-  });
+  };
+  return toast(`${lead} in ${leafOf(folder)}`, 'ok', 7000, also.length ? [...also, move] : move);
 }

@@ -339,6 +339,8 @@ async def ingest_screenshot(
     extension: str = Form(default="", max_length=32),
     # the map's own credit line, read off the page (`overlay.js`)
     screen_credit: str = Form(default="", max_length=SCREEN_CREDIT_MAX),
+    # taken for the extension's notes panel, which puts it in its note itself
+    for_note: bool = Form(default=False),
 ) -> dict[str, Any]:
     """File one user-initiated screenshot of an external map as a capture.
 
@@ -482,10 +484,12 @@ async def ingest_screenshot(
     # a screenshot whose URL carried no position is settled as `nocoords`: there
     # is nothing to look up, and the Locate pass must not keep retrying it
     locate_on_save(case, result["entity"]["id"], lat, lon)
-    # nudge any open app tab so the capture shows up without a reload
+    # nudge any open app tab so the capture shows up without a reload, and its toast
+    # offers it to the note on the side unless the notes panel already puts it in one
     events.publish(
         {"type": "capture", "case_id": case.id, "path": result["item"]["path"],
-         "title": label, "site": site}
+         "entity_id": result["entity"]["id"], "title": label, "site": site,
+         **({"for_note": True} if for_note else {})}
     )
     # the scene being geolocated gathers it, as it gathers the app's own captures
     scene = attach_capture(case, result["item"]["path"])

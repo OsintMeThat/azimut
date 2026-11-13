@@ -503,6 +503,27 @@ def test_place_empty_case_files_into_a_scratch_session(client):
     assert match and match[0]["scratch"] is True
 
 
+def test_a_capture_nudges_open_tabs_with_its_record_and_says_when_a_note_takes_it(client, monkeypatch):
+    """The app's toast offers the capture to the note on the side, by its record. One
+    the extension's notes panel took for its note is put there already, so it says so
+    and the toast offers nothing more."""
+    from azimut.api import ingest as ingest_api
+
+    seen = []
+    monkeypatch.setattr(ingest_api.events, "publish", seen.append)
+    token = _token(client)
+    cid = client.post("/api/cases", json={"name": "Nudged"}).json()["id"]
+    plain = _post(client, token=token, case_id=cid, title="Quay").json()
+    noted = _post(client, token=token, case_id=cid, title="Quay again", for_note="true").json()
+    captures = [e for e in seen if e["type"] == "capture"]
+    assert captures == [
+        {"type": "capture", "case_id": cid, "path": plain["path"], "entity_id": plain["entity_id"],
+         "title": "Quay", "site": "google-maps"},
+        {"type": "capture", "case_id": cid, "path": noted["path"], "entity_id": noted["entity_id"],
+         "title": "Quay again", "site": "google-maps", "for_note": True},
+    ]
+
+
 def test_place_shows_up_in_the_saved_index_and_nudges_open_tabs(client, monkeypatch):
     from azimut.api import ingest as ingest_api
 

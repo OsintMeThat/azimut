@@ -448,6 +448,8 @@ describe('a right-click', () => {
     expect(init.body.get('lat')).toBe('48.85');
     // the map's own credit line, read off the page with the rectangle
     expect(init.body.get('screen_credit')).toBe('Images ©2026 Maxar Technologies');
+    // the panel puts it in its note, so the app's toast offers it to no other
+    expect(init.body.get('for_note')).toBe('true');
     expect(init.headers['X-Azimut-Token']).toBe('tok-123');
     expect(run.session.has('pending:6')).toBe(false);
   });
@@ -511,6 +513,8 @@ describe('a right-click', () => {
     await plain.handle({ type: 'start-area-select', meta }, { tab: MAP });
     await plain.handle({ type: 'area-selected', rect: { x: 0, y: 0, w: 50, h: 50 }, viewportW: 1000 }, { tab: MAP });
     expect(plain.chrome.notifications.create.mock.calls.at(-1)[0].message).toBe('Google Maps');
+    // taken outside the notes panel: the app's toast may offer it to the note on the side
+    expect(filed(plain)[1].body.has('for_note')).toBe(false);
 
     const noted = mapRun({
       screenshot: { entity_id: 'cap_42', case_id: 'case-9', title: 'Street View', notice: 'Credit Google', scene: { video: 'v', id: 'sc_1', label: '' } },

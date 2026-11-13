@@ -112,3 +112,12 @@ describe('the sidebar’s toggle and the first scene kept', () => {
     expect(source).toMatch(/void pointedFrom;\s*untrack\(\(\) => \(todoPointer = null\)\);/);
   });
 });
+
+describe('a capture the extension filed', () => {
+  it('offers its toast’s Put to the note on the side, and nothing for a bookmark or a place', () => {
+    const handler = source.slice(source.indexOf("onEvent('capture'"), source.indexOf("onEvent('bookmark'"));
+    expect(handler).toContain('const put = captureToastAction(ev);');
+    expect(handler).toContain("put ? [put] : []");
+    expect(source).toContain('filedToast(lead, [entity], { fallback, timeout: also.length ? 8000 : 5000, also });');
+  });
+});
