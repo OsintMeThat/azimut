@@ -76,6 +76,8 @@
     onarrive = () => {},
     /** Turn Look › Cover to Your own page, once `/` › Cover page wrote one; null to have the editor write the look itself. */
     oncover = null,
+    /** Told the stretch selected, `{ from, to }` in the editor's offsets, or null once nothing is (the Notebook's To Post). */
+    onselect = null,
   } = $props();
 
   let host = $state(null);
@@ -150,7 +152,10 @@
       parent: host,
       state: EditorState.create({
         doc: doc?.text ?? '',
-        extensions: noteExtensions({ handlers, placeholder, readOnly, editable, template, mode: noteMode.mode }),
+        extensions: [
+          noteExtensions({ handlers, placeholder, readOnly, editable, template, mode: noteMode.mode }),
+          EditorView.updateListener.of(selected),
+        ],
       }),
     });
     view.dispatch({ effects: setNoteCase.of({ caseId, entities, redirects, notes, identity }) });
@@ -161,6 +166,17 @@
     view?.destroy();
     view = null;
   });
+
+  /** The stretch selected, said only when it changed: a cursor that moves selects nothing. */
+  let selection = null;
+  function selected(update) {
+    if (!onselect || (!update.selectionSet && !update.docChanged)) return;
+    const { from, to } = update.state.selection.main;
+    const now = from === to ? null : { from, to };
+    if (now?.from === selection?.from && now?.to === selection?.to) return;
+    selection = now;
+    onselect(now);
+  }
 
   // The text changed outside this editor: read from disk, ticked from the To-do, appended,
   // or typed in the other editor showing the same note. Only the stretch that differs is

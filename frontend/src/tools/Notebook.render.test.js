@@ -803,3 +803,25 @@ describe('a template from Settings', () => {
     expect(target.querySelector('[data-cover-rule]')?.textContent).toBe('End of the cover page');
   });
 });
+
+describe('To Post', () => {
+  it('sits beside PDF on an open note and opens Post on a Free post of what the editor holds', async () => {
+    const pieces = [{ kind: 'text', text: 'Old lead', heading: true }, { kind: 'text', text: 'Seen at Quay.' }];
+    const before = post.getMockImplementation();
+    post.mockImplementation(async (url, body) => (url.endsWith('/pieces')
+      ? { title: 'Old lead', pieces, left: { internal: 0, tables: 0, diagrams: 0, other: 0 } }
+      : before(url, body)));
+    target.querySelector('button[title="Open Old lead"]').click();
+    await settle();
+    const button = target.querySelector('[data-guide="notebook.to-post"]');
+    expect(button.previousElementSibling.dataset.guide).toBe('notebook.pdf');
+    expect(button.title).toBe('Opens Post with this note as a thread, its public edition only');
+    expect(button.disabled).toBe(false);
+    button.click();
+    await settle();
+    expect(post).toHaveBeenCalledWith('/api/cases/case-a/notes/n1/pieces', { text: OLD_TEXT, selection: null });
+    expect(uiState.tool).toBe('post');
+    expect(uiState.postStart).toMatchObject({ kind: 'free', media: [], about: { title: 'Old lead' } });
+    uiState.postStart = null;
+  });
+});

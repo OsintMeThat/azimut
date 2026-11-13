@@ -36,6 +36,9 @@ with no source, a task left open, a link a reader cannot open): the warnings the
 page pane lists, with the line each is about and its kind. It writes nothing and
 never stands in the way: the export goes on whatever it finds. For the public
 edition it also says how many internal passages are left out.
+
+**To Post** asks `/notes/{id}/pieces` for the note's public edition, or the stretch
+selected in it, as the pieces a Post thread starts from (`engine/notepieces.py`).
 """
 
 from __future__ import annotations
@@ -60,7 +63,7 @@ from ..engine import exportdir
 from ..engine import links as link_engine
 from ..engine import notelook
 from ..engine import notes_pdf as pdf_engine
-from ..engine import notefill, notefromcase, notelinks, notetext
+from ..engine import notefill, notefromcase, notelinks, notepieces, notetext
 from ..engine import pdffonts
 from ..engine import reveal as reveal_engine
 from ..engine import urltitles
@@ -897,6 +900,52 @@ def reveal_exports(case_id: str) -> dict[str, str]:
     except reveal_engine.RevealError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
     return {"path": str(destination)}
+
+
+# -- to Post ----------------------------------------------------------------------
+
+
+class PiecesSelection(BaseModel):
+    """A stretch of the note as the editor counts it: UTF-16 code units from its start.
+    A browser's offsets never run past the note's bytes, so the note's bound is theirs."""
+
+    start: int = Field(ge=0, le=MAX_NOTE_BODY_BYTES)
+    end: int = Field(ge=0, le=MAX_NOTE_BODY_BYTES)
+
+
+class PiecesIn(BaseModel):
+    """The note as the editor holds it, and the stretch selected in it, if any."""
+
+    text: str = Field(default="", max_length=MAX_NOTE_BODY_BYTES)
+    selection: PiecesSelection | None = None
+
+
+@router.post("/{case_id}/notes/{note_id}/pieces")
+def note_pieces(case_id: str, note_id: str, body: PiecesIn) -> dict[str, Any]:
+    """The note's public edition as pieces for a Post thread (`engine/notepieces.py`).
+
+    The text is the editor's, unsaved words included, and the whole note even when a
+    stretch is selected: the internal passages are found in the whole before the stretch
+    is cut out. Nothing is written and nothing is posted; what stayed out is counted.
+    """
+    case = get_case(case_id)
+    _require_note(case, note_id)
+    if len(body.text.encode("utf-8")) > MAX_NOTE_BODY_BYTES:
+        raise HTTPException(status_code=413, detail="the note is too large to send to Post")
+    selection = (body.selection.start, body.selection.end) if body.selection is not None else None
+    if selection is not None and selection[0] > selection[1]:
+        raise HTTPException(status_code=422, detail="the selection ends before it starts")
+    title = _note_title(case, note_id)
+    look = notelook.effective(case, note_id)
+    day = date.fromisoformat(look.cover.date) if look.cover.date else _now().date()
+    try:
+        handed = notepieces.hand(
+            case, title=title, text=body.text, selection=selection, note_id=note_id,
+            resolve=_resolver(case), values=notefill.Identity.from_settings().values(day),
+        )
+    except notepieces.NotePiecesError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    return {"title": title, "pieces": handed.pieces, "left": handed.left}
 
 
 # -- editions ---------------------------------------------------------------------

@@ -337,3 +337,24 @@ describe('the two modes of the page', () => {
     expect(view().textContent).toContain('| --- | --- |');
   });
 });
+
+describe('the stretch selected', () => {
+  it('is told when it changes, as the editor counts it, and null once only a cursor is left', async () => {
+    const doc = await editor('Seen at the quay.');
+    const onselect = vi.fn();
+    unmount(app);
+    app = mount(NoteEditor, { target, props: { doc, caseId: 'c1', entities: ENTITIES, onselect } });
+    await settle();
+    const { EditorView } = await import('@codemirror/view');
+    const cm = EditorView.findFromDOM(target.querySelector('.cm-editor'));
+    cm.dispatch({ selection: { anchor: 3 } });
+    expect(onselect).not.toHaveBeenCalled();
+    cm.dispatch({ selection: { anchor: 16, head: 8 } });
+    expect(onselect).toHaveBeenLastCalledWith({ from: 8, to: 16 });
+    cm.dispatch({ selection: { anchor: 8, head: 16 } });
+    expect(onselect).toHaveBeenCalledTimes(1);
+    cm.dispatch({ selection: { anchor: 5 } });
+    expect(onselect).toHaveBeenLastCalledWith(null);
+    expect(onselect).toHaveBeenCalledTimes(2);
+  });
+});

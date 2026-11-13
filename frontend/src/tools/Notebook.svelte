@@ -21,6 +21,9 @@
    * passage, the dialog asks which edition to write, Internal or Public, the choice
    * kept per note (`lib/notes/editions.svelte.js`). Every export is a new file, and
    * a note's ⋯ lists its editions, each with Show and Check.
+   *
+   * To Post opens Post on a Free post thread made of the note's public edition, or of
+   * the stretch selected in it (`lib/notes/toPost.js`); nothing is posted from here.
    */
   import { onDestroy, untrack } from 'svelte';
   import { api } from '../lib/api.js';
@@ -56,6 +59,7 @@
   import ViewModes from './notebook/ViewModes.svelte';
   import EditionSwitch from './notebook/EditionSwitch.svelte';
   import EditionsDialog from './notebook/EditionsDialog.svelte';
+  import ToPostButton from './notebook/ToPostButton.svelte';
   import ConfirmDialog from '../components/ConfirmDialog.svelte';
   import ExportFolderPicker from '../components/ExportFolderPicker.svelte';
   import FloatingMenu from '../components/FloatingMenu.svelte';
@@ -67,6 +71,8 @@
   let opened = $state(null);
   let doc = $state(null);
   let editor = $state(null);
+  // the stretch selected in the note, which To Post sends in its place: { from, to } or null
+  let noteSelection = $state(null);
   let pendingLine = $state(null);
   let rows = $state([]);
   let rowsLoading = $state(false);
@@ -698,6 +704,7 @@
         {/if}
         <button class="btn btn-sm" title="Export this note as PDF" data-guide="notebook.pdf" onclick={() => exportSome([opened.noteId])}>
           <Icon name="download" size={14} /> PDF</button>
+        <ToPostButton {caseId} noteId={opened.noteId ?? CASE_NOTES} text={doc.text} selection={noteSelection} ready={doc.loaded} />
         <button class="btn btn-ghost btn-sm" aria-label="More" title="More" onclick={(event) => (menu = { anchor: event.currentTarget })}>
           <Icon name="more" size={15} /></button>
       </header>
@@ -705,7 +712,8 @@
         <div class="writing">
           {#key doc}
             <NoteEditor {doc} {caseId} entities={graphEntities} redirects={referenceRedirects} where="notebook" notes={rows}
-              onopen={openEntity} onnote={(id) => show(id)} onready={(handle) => (editor = handle)} oncover={coverWritten} />
+              onopen={openEntity} onnote={(id) => show(id)} onready={(handle) => { editor = handle; noteSelection = null; }} oncover={coverWritten}
+              onselect={(range) => (noteSelection = range)} />
           {/key}
         </div>
         {#if pageMode && look && doc.loaded}
@@ -856,9 +864,10 @@
 <style>
   .notebook { position: relative; height: 100%; display: flex; flex-direction: column; min-height: 0; container: notebook / inline-size; }
   .tool-header { flex-wrap: nowrap; }
-  .title-input { flex: 0 1 320px; min-width: 120px; font-weight: 600; }
+  /* both give way before the header's last buttons do */
+  .title-input { flex: 0 1 320px; min-width: 96px; font-weight: 600; }
   .case-title { display: inline-flex; align-items: center; gap: 6px; font-weight: 600; color: var(--text-1); }
-  .folder-pick { flex: 0 1 200px; min-width: 120px; }
+  .folder-pick { flex: 0 1 200px; min-width: 100px; }
   .kind { color: var(--accent); font-size: var(--fs-xs); font-weight: 700; text-transform: uppercase; letter-spacing: .06em; }
   .hint { color: var(--text-3); font-size: var(--fs-xs); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   .status { color: var(--text-3); font-size: var(--fs-xs); display: inline-flex; align-items: center; gap: 4px; white-space: nowrap; }
@@ -869,7 +878,8 @@
   .writing { flex: 1; min-width: 0; min-height: 0; display: flex; flex-direction: column; }
   .writing > :global(.note-editor) { flex: 1; }
   .body.split > :global(.page-pane) { flex: 0 0 clamp(300px, 46%, 820px); }
-  @container notebook (max-width: 1180px) { .wide-only { display: none; } }
+  /* the header's words that go first when it narrows, a child's (To Post) included */
+  @container notebook (max-width: 1180px) { .notebook :global(.wide-only) { display: none; } }
   .fm-item.danger { color: var(--danger); }
   .export-dest { display: flex; align-items: center; gap: 8px; margin-top: 6px; font-size: var(--fs-sm); }
   .dest-label { color: var(--text-3); }

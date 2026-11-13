@@ -7032,8 +7032,9 @@ image says its host is contacted on every open.
 The file stays the Markdown it was: what the old split-pane Notebook wrote opens as it
 was written and is never rewritten for being opened. The header names the note (the
 name is the filename), files it in a folder, says whether it is saved, and holds
-**Look**, **Write | Page**, **Pin to the side**, **Open in its own tab**, **PDF**, and
-a ⋯ with *Editions*, *Keep as template* and *Delete* (*Clear the case notes* for the case's page).
+**Look**, **Write | Page**, **Pin to the side**, **Open in its own tab**, **PDF**, **To
+Post**, and a ⋯ with *Editions*, *Keep as template* and *Delete* (*Clear the case notes*
+for the case's page).
 PDF export writes one server-rendered PDF per note without a print dialog, in the
 note's look, local images and browser-drawn diagrams with it, remote images left out,
 homonyms under stable suffixes, into the shared notes destination (the case's
@@ -7062,6 +7063,22 @@ SHA-256 on hover): *Show* opens its folder, and *Check* says *Unchanged since it
 written*, *This file is not the one Azimut wrote* or *File missing*. The record (day,
 edition, file, folder, pages, the PDF's SHA-256 and the printed text's) is kept on the
 note, fifty at most, and travels in a bundle.
+
+**To Post.** Beside **PDF**, **To Post** opens Post on a Free post thread made of the
+note's public edition, or of the stretch selected in it, which its title then says;
+nothing is posted. It waits on an empty note. The server reads the note as the editor
+holds it, unsaved words included, and writes nothing (`POST /notes/{id}/pieces`,
+`engine/notepieces.py`): every internal passage is blanked first with the PDF's rule
+over the whole note, so a selection that starts inside one carries none of it, and the
+rest is read by the PDF's parser, chapters in and placeholders filled. A heading, a
+paragraph, a list (its `- ` lines kept), a quote and a callout (its label first,
+*Unverified: …*) each become words, a case reference its label, a written link its words
+then its address, and a paragraph that is only a link a source. A picture or a video of
+the case goes as itself, a Geo Proof's picture as the proof. The cover, `::: corner`
+blocks, page breaks and comments go silently; tables, diagrams, code and pictures Post
+cannot have stay out, and one toast says what did (*2 internal passages and 1 table stay
+out*). With nothing that can go, Post stays shut and the toast says so. Post makes the
+posts and cuts a long text itself.
 
 **How it prints.** **Look** sets the note's style, kept beside the note (the note
 record's `look`, `notes.case_look` for the case notes) and never in its Markdown. Its
