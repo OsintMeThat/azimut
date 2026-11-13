@@ -431,6 +431,41 @@ def test_a_capture_is_a_file_the_case_produced_itself(client):
     assert page["facets"]["made_here_count"] == 2
 
 
+#: How a file the analyst gathered enters the case: brought in by hand (dropped,
+#: picked or pasted), downloaded, or found already in the folder. Every other route
+#: a file arrives by is the app's own work.
+COLLECTED_ROUTES = {"upload", "clipboard", "download", "manual"}
+
+
+def test_every_route_a_file_arrives_by_is_collected_or_a_working_file(client):
+    """Drift gate. A tool filing a picture of its own stamps its route on the file,
+    and the route has to be in `links.PRODUCED_HERE`, or the picture lands among what
+    the case collected. A note's Add filing a Map plate page or a Timeline reading
+    once did just that. The full case holds a file from every tool, so a new route
+    fails here until it is sorted into one of the two."""
+    import fullcase
+
+    from azimut.engine import links as link_engine
+
+    full = fullcase.build_full_case(client)
+    url = f"/api/cases/{full.case_id}/media/page"
+    everything = client.get(url, params={"limit": 500}).json()
+    assert everything["total"] == len(everything["items"])
+    routes = {(item.get("source") or {}).get("type") for item in everything["items"]}
+    assert not routes - COLLECTED_ROUTES - set(link_engine.PRODUCED_HERE), (
+        "sort each new route into COLLECTED_ROUTES or links.PRODUCED_HERE"
+    )
+
+    collected = client.get(url, params={"limit": 500, "collected_only": "true"}).json()
+    kept = {item["path"]: (item.get("source") or {}).get("type") for item in collected["items"]}
+    assert set(kept.values()) <= COLLECTED_ROUTES
+    # the two a note's Add files, by name
+    assert full.map_plate_figure not in kept and full.reading_figure not in kept
+    held = {item["path"] for item in everything["items"]} - set(kept)
+    assert {full.map_plate_figure, full.reading_figure} <= held
+    assert collected["facets"]["made_here_count"] == len(held)
+
+
 def test_the_switch_reads_how_a_file_entered_not_everything_true_about_it(client):
     """Dedupe hands back the entity that is already there, and its row with it. Bytes
     that arrived as an upload stay on the collected side even once Inspect produces

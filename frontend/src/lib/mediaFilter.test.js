@@ -133,7 +133,7 @@ describe('the shared facet list', () => {
   // on a large case and counts them itself on a small one, and the reference
   // picker counts them again, so a facet added on one side has to exist on both.
   const read = (rel) => readFileSync(new URL(rel, import.meta.url), 'utf8');
-  const quoted = (text) => [...text.matchAll(/"([a-z_]+)"/g)].map((m) => m[1]);
+  const quoted = (text) => [...text.matchAll(/"([a-z_-]+)"/g)].map((m) => m[1]);
 
   it('has the server categories, in the server order', () => {
     const rows = read('../../../src/azimut/store/rows.py');
@@ -149,6 +149,7 @@ describe('the shared facet list', () => {
       ...quoted(links.match(/^PRODUCED_HERE: .* = \(([^)]*)\)/m)[1]),
     ];
     expect(types).toContain('compare');
+    expect(types).toContain('map-plate');
     for (const type of types) expect(isMadeHere({ source: { type } }), type).toBe(true);
   });
 
@@ -317,6 +318,9 @@ describe('what the case made, apart from what it collected', () => {
     expect(isMadeHere(grabbed)).toBe(true);
     // A Compare render and a kept Detect finding: before/after the app drew.
     expect(isMadeHere(item({ source: { type: 'compare' } }))).toBe(true);
+    // What a note's Add files: a Map plate's page and a Graph or Timeline reading.
+    expect(isMadeHere(item({ source: { type: 'map-plate', kind: 'page' } }))).toBe(true);
+    expect(isMadeHere(item({ source: { type: 'analysis-view', surface: 'timeline' } }))).toBe(true);
     expect(isMadeHere(upload)).toBe(false);
     expect(isMadeHere(item())).toBe(false);
     expect(isMadeHere(null)).toBe(false);

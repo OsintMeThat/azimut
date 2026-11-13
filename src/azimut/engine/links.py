@@ -92,8 +92,11 @@ MADE_HERE: tuple[str, ...] = ("inspect",)
 FROM_ABOVE: tuple[str, ...] = ("satellite", "screenshot", "compare")
 #: A picture of a saved Horizon view is the app's render of the terrain from the
 #: eye: produced here, so held back with the rest, but seen from the ground, not
-#: from above, so it stays off the imagery lane.
-PRODUCED_HERE: tuple[str, ...] = (*MADE_HERE, *FROM_ABOVE, "horizon")
+#: from above, so it stays off the imagery lane. So are a Map plate's page, its days
+#: side by side or its export (`mapplates.SOURCE_TYPE`), and a Graph or Timeline
+#: reading drawn as a picture (`api/analysis_views.FIGURE_SOURCE`): a note's Add
+#: files them, and they are the case's own drawings, not material it gathered.
+PRODUCED_HERE: tuple[str, ...] = (*MADE_HERE, *FROM_ABOVE, "horizon", "map-plate", "analysis-view")
 
 #: Exact artifact contract. These are not ordinary relations: producing tools
 #: record them, and the pair decides delete behaviour. A file path resolving to an

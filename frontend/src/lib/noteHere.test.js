@@ -1,8 +1,9 @@
 // @vitest-environment happy-dom
 import { beforeEach, describe, expect, it } from 'vitest';
-import { readFileSync } from 'node:fs';
+import { readFileSync, readdirSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { isMadeHere } from './mediaFilter.js';
 import { changeInterval, formatTemporalValue } from './timeline.js';
 import {
   isNoteKey, noteDatesFor, noteEntityFor, noteHere, offerNote, offerPuts, pairOffers, placeOf, putsFor, withdrawNote,
@@ -148,5 +149,42 @@ describe('a confirmed place, as the server reads one', () => {
       entity: { id: 'pl1', type: 'place', label: 'Quay', ...(place ? { provenance: { status: place } } : {}) },
     }] };
     expect(placeOf(chain) !== null).toBe(confirmed);
+  });
+});
+
+describe('the pictures a note’s Add files', () => {
+  /**
+   * Every offer that puts a picture in a note, by the file that makes it, and the route
+   * the picture is filed under in the case (`source.type`), or null for a record the
+   * Media Library does not list (a proof). A filed picture is the case's own work, so
+   * the Media Library holds it back with the working files rather than among what the
+   * case collected (`links.PRODUCED_HERE`).
+   */
+  const PICTURES = {
+    'tools/inspect/frameNote.js': ['inspect'], // a frame, and a collage composed through Inspect
+    'tools/plate/plateNote.js': ['map-plate'], // the page, and the days side by side
+    'tools/compare/pairNote.js': ['compare'], // the pair, and the evolution sheet
+    'tools/satellite/mapNote.js': ['satellite'],
+    'tools/horizon/horizonNote.js': ['horizon'],
+    'tools/detect/pinNote.js': ['compare'], // the evidence the pin filed
+    'lib/notes/panelPuts.js': ['screenshot'], // the extension's capture
+    'lib/notes/readingFigure.js': ['analysis-view'], // a Graph or Timeline reading
+    'tools/proof/proofNote.js': [null],
+  };
+  const src = join(dirname(fileURLToPath(import.meta.url)), '..');
+
+  it('knows every offer that puts a picture in a note', () => {
+    const found = readdirSync(src, { recursive: true })
+      .map((rel) => rel.split('\\').join('/'))
+      .filter((rel) => /\.(js|svelte)$/.test(rel) && !/\.test\.js$/.test(rel))
+      .filter((rel) => /\bpicture: true\b/.test(readFileSync(join(src, rel), 'utf8')));
+    // A new one names the route its picture is filed under here.
+    expect(found.sort()).toEqual(Object.keys(PICTURES).sort());
+  });
+
+  it('files each one among the working files', () => {
+    for (const [file, routes] of Object.entries(PICTURES)) {
+      for (const type of routes.filter(Boolean)) expect(isMadeHere({ source: { type } }), `${file}: ${type}`).toBe(true);
+    }
   });
 });

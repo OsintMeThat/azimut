@@ -1495,7 +1495,8 @@ other. **File dates** holds what each file the case collected says about itself:
 camera's clock, the day a picture was taken from orbit, the post's date. That is a clue
 rather than a finding, and a post's date is rarely when anything happened, so none of
 it is drawn by default. Like the Media Library, it holds back the working files the
-case made itself (frames, captures, collages, Compare renders). **Include working
+case made itself (frames, captures, collages, Compare renders, plate pages, pictures of a
+reading). **Include working
 files** in a track's editor lets them in. A saved view keeps the tracks it was saved
 with. A row handed over from a file's Time tab adds the track that holds it, and lets
 a working file onto it. When the axis is empty, it says how many file dates the tracks
@@ -1673,7 +1674,8 @@ one pin glyph — coordinates in the tooltip, not in the title — and clicking 
 flies the map there. **Show N working files** sits on the same independent axis: a
 switch rather than another chip, because the chips answer *show me only X* and are
 single-select where this one is *put X back*. The library opens on what the case
-collected, the frames, collages, captures and Compare or Detect renders it produced itself held back — a capture
+collected, the frames, collages, captures, Compare or Detect renders, Horizon pictures, Map
+plate pages and Graph or Timeline pictures it produced itself held back — a capture
 is a map the app drew out of tiles or the extension grabbed off the screen, where an
 upload, a paste and a download came from outside — and the switch says how
 many those are rather than leaving them unannounced; the counts and the paging are
@@ -7252,7 +7254,8 @@ note on the side, no tool changes. A put is one press, never a dialog: it lands 
 cursor, or at the end if the note was not written in this visit, on lines of its own;
 the note scrolls to it and lights it, a picture opens its caption, and the toast offers
 Undo, which also sends what was filed only for it to the Trash. A picture is filed in
-the case like any capture, and the same state put twice is filed once. Tables stop at
+the case like any capture, among Media's working files, and the same state put twice
+is filed once. Tables stop at
 200 rows with a line naming the cut, and their records are chips, so their sources get
 their number (`lib/notes/putInNote.svelte.js`, offers from `lib/noteHere.svelte.js`,
 openers in `tools/**/*.opener.js`).

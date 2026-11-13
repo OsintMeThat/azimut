@@ -461,8 +461,8 @@ class CaseRepository(Protocol):
         """Filter, sort and page media without scanning sidecar files.
 
         ``gps`` keeps only the items whose own metadata states a position.
-        ``collected_only`` drops what the case made out of its own material
-        (``links.MADE_HERE``) and scopes the facet counts with it, so no chooser
+        ``collected_only`` drops what the app produced rather than the analyst
+        gathered (``links.PRODUCED_HERE``) and scopes the facet counts with it, so no chooser
         offers rows the switch is hiding. ``facets.made_here_count`` says how many
         that is, on either setting.
         ``used_refs`` is what the records outside the graph lean on
