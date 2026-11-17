@@ -142,3 +142,94 @@ def test_pictures_are_not_sandboxed_but_never_sniffed(client):
 
     assert "content-security-policy" not in served.headers
     assert served.headers["x-content-type-options"] == "nosniff"
+
+
+# -- a player is answered a piece at a time ------------------------------------------
+
+
+def _write_case_file(cid, rel, data):
+    from azimut.api.cases import get_case
+
+    target = get_case(cid).resolve_inside(rel)
+    target.write_bytes(data)
+    return rel
+
+
+def test_a_player_gets_a_long_video_a_piece_at_a_time(client, monkeypatch):
+    """A media element asks from where it reads to the end of the file and stops
+    reading once its buffer is full, which kept one of the browser's six connections
+    to the app for as long as the player stayed open. A short answer lands whole and
+    frees it; the player asks again for the next piece, and a seek still lands."""
+    from azimut.api import files
+
+    monkeypatch.setattr(files, "PLAYER_PIECE", 1000)
+    cid = client.post("/api/cases", json={"name": "Files"}).json()["id"]
+    data = bytes(range(256)) * 20  # 5120 bytes
+    rel = _write_case_file(cid, "media/clip.mp4", data)
+
+    first = client.get(f"/files/{cid}/{rel}", headers={"Range": "bytes=0-"})
+    assert first.status_code == 206
+    assert first.headers["content-range"] == "bytes 0-999/5120"
+    assert first.content == data[:1000]
+
+    # Chrome's next ask names the last byte and the version it holds: still the rest
+    etag = first.headers["etag"]
+    then = client.get(f"/files/{cid}/{rel}", headers={"Range": "bytes=1000-5119", "If-Range": etag})
+    assert then.status_code == 206
+    assert then.headers["content-range"] == "bytes 1000-1999/5120"
+    assert then.content == data[1000:2000]
+
+    # a seek far into the file is answered from there, one piece long
+    seek = client.get(f"/files/{cid}/{rel}", headers={"Range": "bytes=2500-"})
+    assert seek.headers["content-range"] == "bytes 2500-3499/5120"
+    assert seek.content == data[2500:3500]
+
+    # the last piece is whatever is left
+    tail = client.get(f"/files/{cid}/{rel}", headers={"Range": "bytes=4500-"})
+    assert tail.headers["content-range"] == "bytes 4500-5119/5120"
+    assert tail.content == data[4500:]
+
+    # the answer still says the file's whole length, which the player reads its duration against
+    assert all(r.headers["accept-ranges"] == "bytes" for r in (first, seek, tail))
+
+
+def test_what_is_not_a_player_ask_is_served_as_asked(client, monkeypatch):
+    from azimut.api import files
+
+    monkeypatch.setattr(files, "PLAYER_PIECE", 100)
+    cid = client.post("/api/cases", json={"name": "Files"}).json()["id"]
+    data = bytes(range(256)) * 4
+    video = _write_case_file(cid, "media/clip.mp4", data)
+    picture = _upload(client, cid)
+
+    # the whole file, without a Range: a download, the Media Library's Open
+    whole = client.get(f"/files/{cid}/{video}")
+    assert whole.status_code == 200 and whole.content == data
+
+    # a range with an end is what was asked, past the piece too
+    closed = client.get(f"/files/{cid}/{video}", headers={"Range": "bytes=0-499"})
+    assert closed.headers["content-range"] == "bytes 0-499/1024"
+    assert len(closed.content) == 500
+
+    # a picture asked open-ended is never shortened: only players hold a connection
+    png = (client.get(f"/files/{cid}/{picture['path']}")).content
+    assert len(png) > 100
+    rest = client.get(f"/files/{cid}/{picture['path']}", headers={"Range": "bytes=10-"})
+    assert rest.content == png[10:]
+
+
+def test_only_an_open_ended_ask_longer_than_a_piece_is_shortened(monkeypatch):
+    from azimut.api import files
+
+    monkeypatch.setattr(files, "PLAYER_PIECE", 1000)
+    assert files.player_range("bytes=0-", 5000) == "bytes=0-999"
+    assert files.player_range("bytes = 200 -", 5000) == "bytes=200-1199"
+    assert files.player_range("bytes=1000-4999", 5000) == "bytes=1000-1999"  # to the last byte
+    assert files.player_range("bytes=1000-9999", 5000) == "bytes=1000-1999"  # past it, the same
+    assert files.player_range("bytes=4500-", 5000) is None  # what is left is short already
+    assert files.player_range("bytes=0-99", 5000) is None
+    assert files.player_range("bytes=0-4998", 5000) is None  # stops short of the end: as asked
+    assert files.player_range("bytes=-500", 5000) is None
+    assert files.player_range("bytes=0-,2000-", 5000) is None
+    assert files.player_range(None, 5000) is None
+    assert files.player_range("items=0-", 5000) is None

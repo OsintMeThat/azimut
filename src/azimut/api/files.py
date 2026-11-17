@@ -11,12 +11,19 @@ Every response carries an ETag and revalidates, so reopening a picker costs one
 conditional request per image instead of a full redownload. Thumbnail URLs
 embed the content hash and a generation counter, so they are handed out as
 immutable and the browser stops asking at all.
+
+A video or a sound goes to its player a piece at a time (`PLAYER_PIECE`), so a
+paused player never keeps one of the browser's few connections to the app.
 """
 
 from __future__ import annotations
 
+import re
+
 from fastapi import APIRouter, HTTPException, Request, Response
 from fastapi.responses import FileResponse
+from starlette.datastructures import Headers
+from starlette.types import Receive, Scope, Send
 
 from ..engine.thumbnails import THUMB_DIR
 from ..workspace import CaseError
@@ -51,6 +58,49 @@ def _security_headers(media_type: str) -> dict[str, str]:
     return headers
 
 
+#: The most one answer to a player carries. A video or audio element asks from
+#: where it reads to the end of the file, keeps what it wants to buffer and then
+#: stops reading, and the browser holds that connection for it. A browser keeps
+#: six connections to one host, so a few paused players (Inspect's, a reference
+#: window's, a proof's scene) left every other call of the app waiting for a free
+#: one. An answer this short lands whole in the browser's own buffer and the
+#: connection goes back to the pool; the player asks again for the next piece.
+#: Measured in Chrome: 2 MB still frees the connection, 8 MB holds it.
+PLAYER_PIECE = 1024 * 1024
+
+_ONE_RANGE = re.compile(r"bytes=(\d+)-(\d*)")
+
+
+def player_range(asked: str | None, size: int) -> str | None:
+    """The ``Range`` a player's ask for the rest of the file is answered with, one
+    piece long, or None to answer what was asked. The rest is ``bytes=N-``, or a range
+    that runs to the last byte: Chrome asks the first way, then, knowing the size, the
+    second. A range that stops short of the end, several ranges or a suffix are served
+    as they come."""
+    found = _ONE_RANGE.fullmatch((asked or "").replace(" ", ""))
+    if found is None:
+        return None
+    start = int(found.group(1))
+    if found.group(2) and int(found.group(2)) < size - 1:
+        return None
+    if size - start <= PLAYER_PIECE:
+        return None
+    return f"bytes={start}-{start + PLAYER_PIECE - 1}"
+
+
+class _CaseFileResponse(FileResponse):
+    """A case file, a video or a sound answered a piece at a time (`player_range`)."""
+
+    async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
+        kind = (self.media_type or "").split(";")[0].strip().lower()
+        if scope["type"] == "http" and self.stat_result is not None and kind.startswith(PASSIVE_PREFIXES):
+            shorter = player_range(Headers(scope=scope).get("range"), self.stat_result.st_size)
+            if shorter is not None:
+                headers = [(key, value) for key, value in scope["headers"] if key != b"range"]
+                scope = {**scope, "headers": [*headers, (b"range", shorter.encode("latin-1"))]}
+        await super().__call__(scope, receive, send)
+
+
 @router.get("/{case_id}/{rel_path:path}")
 def case_file(case_id: str, rel_path: str, request: Request) -> Response:
     case = get_case(case_id)
@@ -64,7 +114,7 @@ def case_file(case_id: str, rel_path: str, request: Request) -> Response:
     cache = IMMUTABLE if path.parent.name == THUMB_DIR else REVALIDATE
     # stat here so the ETag is on the response before we answer, and so a file
     # edited in place (Inspect writes back) invalidates its own cache entry.
-    response = FileResponse(path, stat_result=path.stat())
+    response = _CaseFileResponse(path, stat_result=path.stat())
     response.headers["cache-control"] = cache
     guard = _security_headers(response.media_type or "")
     response.headers.update(guard)
