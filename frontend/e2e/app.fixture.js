@@ -2545,7 +2545,8 @@ export function repainted(before, after) {
 
 export async function openProofWithPanel(page) {
   await page.goto('/#proof');
-  await expect(page.locator('.tool-header').getByRole('button', { name: 'New proof', exact: true })).toBeVisible();
+  // a fresh dev server compiles the app on this first visit
+  await expect(page.locator('.tool-header').getByRole('button', { name: 'New proof', exact: true })).toBeVisible({ timeout: 15_000 });
   await page.getByRole('button', { name: 'New proof' }).first().click();
   await expect(page.getByRole('heading', { name: 'New proof' })).toBeVisible();
   await page.locator('.selectable-pick').click();
