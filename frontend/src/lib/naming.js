@@ -168,6 +168,22 @@ export function savedTitles(entities, kind) {
   return new Set(savedEntities(entities, kind).map((e) => e.label ?? ''));
 }
 
+/** Every name a saved item of `kind` holds, as listed and as its file: what a
+ *  fresh name has to miss. */
+export function takenNames(entities, kind) {
+  return new Set([...savedTitles(entities, kind), ...savedSlugs(entities, kind)]);
+}
+
+/**
+ * The name an item the app named files under: `name` while no saved item of `kind`
+ * holds it, else the lowest number free. A number is not a choice, and the header
+ * never shows it, so it never asks to write over another item: it moves on.
+ */
+export function freeDefaultName(name, kind, entities) {
+  const taken = takenNames(entities, kind);
+  return taken.has(name) ? nextName(kind, taken) : name;
+}
+
 /** Name of the saved item of `kind` with slug `slug`, for the overwrite prompt. */
 export function savedTitle(entities, kind, slug) {
   const { dir, attr } = SPEC_ATTR[kind];

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
-  badgeText, frameOrigin, handoffTitle, momentHolds, outsideFrames, panelFrames, playSegments, proofVideos,
+  badgeText, footageOf, frameOrigin, handoffTitle, momentHolds, outsideFrames, panelFrames, playSegments, proofVideos,
   readHandoff, readStatedScene, sceneBadges, sceneColor, sceneOfFrames, sceneOffer, segmentAt, starVideo, statedMoments,
   mediaTitles, videoName,
 } from './proofScene.js';
@@ -240,6 +240,36 @@ describe('the scene\'s colour', () => {
   });
 });
 
+describe('the video a photo shows or was cut from', () => {
+  // The case of the Horizon view filed over a published proof: a collage of straightened
+  // collages, each of one video, with no instant recorded on the outer one.
+  const piece = (time) => ({ path: `media/bent ${time}.png`, kind: 'image', source: { type: 'inspect', op: 'collage', sources: [CLIP], times: [time], straightened: true } });
+  const pieces = [piece(3), piece(10), piece(23)];
+  const media = [
+    { path: CLIP, kind: 'video' },
+    { path: OTHER, kind: 'video' },
+    ...pieces,
+    { path: 'media/Collage 25.png', kind: 'image', source: { type: 'inspect', op: 'collage', from: '', sources: pieces.map((one) => one.path), times: [null, null, null] } },
+    { path: 'media/frame.png', kind: 'image', ...frameOf(OTHER, 4) },
+    { path: 'media/mixed.png', kind: 'image', source: { type: 'inspect', op: 'collage', sources: [pieces[0].path, 'media/frame.png'] } },
+    { path: 'media/street.jpg', kind: 'image', source: { type: 'upload' } },
+  ];
+
+  it('follows a picture back to its one video, through collages of collages', () => {
+    expect(footageOf('media/Collage 25.png', media)).toBe(CLIP);
+    expect(footageOf('media/frame.png', media)).toBe(OTHER);
+    // a video laid as the photo is its own footage
+    expect(footageOf(CLIP, media)).toBe(CLIP);
+  });
+
+  it('names none rather than guess', () => {
+    expect(footageOf('media/mixed.png', media)).toBeNull(); // pieces of two videos
+    expect(footageOf('media/street.jpg', media)).toBeNull(); // a picture of no video
+    expect(footageOf('media/not here.png', media)).toBeNull();
+    expect(footageOf('media/Collage 25.png', null)).toBeNull();
+  });
+});
+
 describe('a Make the proof handoff', () => {
   it('reads the scene, its frames in order and a name from its label', () => {
     expect(readHandoff({
@@ -262,6 +292,20 @@ describe('a Make the proof handoff', () => {
     expect(readHandoff({ picture: 'media/photo.jpg', panels: [] })).toBeNull();
     // a video named wins: its scene states its time
     expect(readHandoff({ picture: 'media/photo.jpg', video: CLIP, moments: [], panels: ['media/a.png'] }).scene.video).toBe(CLIP);
+  });
+
+  it('reads Horizon\'s view as a proof with no scene yet, naming the photo laid', () => {
+    expect(readHandoff({ panels: ['media/v photo.png', 'media/v terrain.png', 'media/v photo.png'], photo: 'media/Collage 25.png', view: true })).toEqual({
+      scene: null,
+      panels: ['media/v photo.png', 'media/v terrain.png'],
+      title: '',
+      photo: 'media/Collage 25.png',
+    });
+    // a photo from disk or another case names no file here
+    expect(readHandoff({ panels: ['media/v photo.png'], photo: null, view: true }).photo).toBeNull();
+    expect(readHandoff({ panels: [], photo: 'media/x.png', view: true })).toBeNull();
+    // without the mark it is no handoff at all, as before
+    expect(readHandoff({ panels: ['media/v photo.png'], photo: 'media/x.png' })).toBeNull();
   });
 
   it('names the proof after the label, without the question it was kept with', () => {

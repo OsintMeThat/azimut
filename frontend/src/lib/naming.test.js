@@ -2,7 +2,7 @@ import { describe, it, expect } from 'vitest';
 import {
   MAX_SLUG, NAME_PREFIX, slugify, nextName, isDefaultName,
   savedEntities, savedSlugs, savedTitles, savedTitle, specAttr, specPath,
-  itemLabel, labelCoords, labelDay, ownName,
+  takenNames, freeDefaultName, itemLabel, labelCoords, labelDay, ownName,
 } from './naming.js';
 
 describe('slugify — mirrors the backend api/naming.slugify', () => {
@@ -61,6 +61,26 @@ describe('nextName — the default name of a fresh item', () => {
 
   it('numbers a name that still slugs to a distinct filename', () => {
     expect(slugify(nextName('proof', ['Proof 1']), 'proof')).toBe('Proof 2');
+  });
+});
+
+describe('freeDefaultName — a name the app gave never lands on another item', () => {
+  const proof = (label, slug = label) => ({ label, attrs: { spec: `proofs/.meta/${slug}.json` } });
+
+  it('keeps a technical name nothing holds', () => {
+    expect(freeDefaultName('Proof 1', 'proof', [proof('Proof 2')])).toBe('Proof 1');
+  });
+
+  it('moves on to the lowest free number when a saved proof holds it', () => {
+    // the case of a proof saved days ago as "Proof 1", still in the composer's way
+    expect(freeDefaultName('Proof 1', 'proof', [proof('Proof 1'), proof('Proof 2')])).toBe('Proof 3');
+    expect(freeDefaultName('Proof 1', 'proof', [proof('Proof 1'), proof('Proof 3')])).toBe('Proof 2');
+  });
+
+  it('counts a file name as taken even when the proof is listed under another', () => {
+    const renamed = proof('Al Jawf berm', 'Proof 1');
+    expect(takenNames([renamed], 'proof')).toEqual(new Set(['Al Jawf berm', 'Proof 1']));
+    expect(freeDefaultName('Proof 1', 'proof', [renamed])).toBe('Proof 2');
   });
 });
 

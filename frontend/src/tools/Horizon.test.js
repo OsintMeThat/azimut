@@ -145,3 +145,11 @@ describe('the small map\'s layers', () => {
     expect(markup).toContain('<PersonalLayerPanel');
   });
 });
+
+describe('Send to Geo Proof', () => {
+  it('sends the view as a proof of its own, naming the photo only as a file of this case', () => {
+    const send = source.slice(source.indexOf('async function sendToProof()'), source.indexOf('// -- one camera with the other map tabs'));
+    expect(send).toContain('const photo = overlay.source.caseId === caseId ? overlay.source.path ?? null : null;');
+    expect(send).toContain('sendToGeoProof(caseId, kept, { view: true, photo });');
+  });
+});

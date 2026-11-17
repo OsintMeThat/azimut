@@ -60,6 +60,20 @@ export function frameOrigin(item, mediaByPath = null) {
   return { video: source.from, time: source.time };
 }
 
+/**
+ * The video a case file shows or was cut from: itself for a video, else the video of
+ * its frame or of every piece of its collage (`frameOrigin`), else null. A collage of
+ * pieces from two videos, or a picture of no video, names none rather than guess.
+ * `media` is the case's media list.
+ */
+export function footageOf(path, media) {
+  const byPath = new Map((media ?? []).map((item) => [item.path, item]));
+  const item = byPath.get(path);
+  if (!item) return null;
+  if (item.kind === 'video') return item.path;
+  return frameOrigin(item, byPath)?.video ?? null;
+}
+
 /** How deep a collage's pieces are followed through pictures composed from others. */
 const COMPOSED_DEPTH = 3;
 
@@ -315,13 +329,19 @@ export function sceneColor(listed, { proof = null, draft = null } = {}) {
 
 /**
  * A Make the proof handoff as the composer holds it, or null when it names neither a
- * video nor a picture. A picture's proof holds no scene (`scene: null`).
+ * video nor a picture. A picture's proof holds no scene (`scene: null`), and neither does
+ * Horizon's view (`view`) until the composer finds the video its photo came from
+ * (`photo`, `footageOf`).
  */
 export function readHandoff(handoff) {
   const panels = [...new Set((Array.isArray(handoff?.panels) ? handoff.panels : []).filter((p) => typeof p === 'string' && p))];
   // a picture marked to geolocate: its proof states no scene, the picture is its panel
   if (typeof handoff?.picture === 'string' && handoff.picture && !handoff.video) {
     return panels.length ? { scene: null, panels, title: handoffTitle(handoff.label) } : null;
+  }
+  if (handoff?.view === true && !handoff.video) {
+    const photo = typeof handoff.photo === 'string' && handoff.photo ? handoff.photo : null;
+    return panels.length ? { scene: null, panels, title: '', photo } : null;
   }
   const stated = readStatedScene(handoff);
   if (!stated) return null;

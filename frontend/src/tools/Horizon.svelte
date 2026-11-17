@@ -743,11 +743,12 @@
 
   /**
    * The photo and the terrain through the same frame, the ridge lines on both,
-   * kept under the view and laid as two panels of a new Geo Proof. A view never
-   * saved is saved first: the panels say which view they came from. While the
-   * case geolocates a scene, which gathers both, the proof is that scene's
-   * (`lib/toGeoProof.js`). Both pictures are encoded at once and kept in turn, and
-   * the case is read again once, after both.
+   * kept under the view and laid as two panels of a new Geo Proof, which holds the
+   * video the photo was cut from. A proof open and never saved takes them instead;
+   * a saved one never does. A view never saved is saved first: the panels say which
+   * view they came from. While the case geolocates a scene, which gathers both, the
+   * proof is that scene's (`lib/toGeoProof.js`). Both pictures are encoded at once
+   * and kept in turn, and the case is read again once, after both.
    */
   async function sendToProof() {
     if (exportBusy || !viewPane || !photoOn || !overlay.source) return;
@@ -771,7 +772,9 @@
         keep: (blob, [kind, words]) => keepPicture(caseId, blob, kind, `${name} ${words}`, { reload: false }),
       });
       reloadCase();
-      sendToGeoProof(caseId, kept);
+      // the photo is named only as a file of this case: one from disk or another case has no video here
+      const photo = overlay.source.caseId === caseId ? overlay.source.path ?? null : null;
+      sendToGeoProof(caseId, kept, { view: true, photo });
     } catch (failure) {
       toast(`Could not send the view to Geo Proof: ${failure.message}`, 'danger');
     } finally {

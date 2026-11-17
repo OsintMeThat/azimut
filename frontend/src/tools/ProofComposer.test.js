@@ -432,10 +432,20 @@ describe('Proof Composer saved-proof list', () => {
 });
 
 describe('Proof naming', () => {
-  it('names a fresh proof "Proof N", numbered past the case', () => {
-    expect(source).toContain("const freshTitle = () => nextName('proof', savedProofTitles());");
-    expect(source).toContain("savedTitles(proofEntities, 'proof')");
+  it('names a fresh proof "Proof N", numbered past the case, its names and its files', () => {
+    expect(source).toContain("const freshTitle = () => nextName('proof', takenNames(proofEntities, 'proof'));");
     expect(source).not.toContain('Untitled proof');
+  });
+
+  it('files a technical name under a number no proof holds, read from the case at the save', () => {
+    // A composer open for days held "Proof 1" while a proof saved meanwhile took it;
+    // the save asked to overwrite a name the header never showed.
+    const perform = bodyOfFn('performSave');
+    expect(perform).toContain("if (proof.title !== savedName && isDefaultName(proof.title, 'proof')) {");
+    expect(perform).toContain("const read = await fetchAllEntities(c.id, { types: ['proof'] }).catch(() => null);");
+    expect(perform).toContain("proof.title = freeDefaultName(proof.title, 'proof', proofEntities);");
+    // before the payload names the file
+    expect(perform.indexOf('freeDefaultName')).toBeLessThan(perform.indexOf('title: proof.title,'));
   });
 
   it('names the proof in the header and nowhere else, a technical name never shown there', () => {
@@ -453,8 +463,8 @@ describe('Proof naming', () => {
     expect(source).toContain('title: proof.title,');
   });
 
-  it('asks before an unbound proof takes a name another proof holds', () => {
-    expect(source).toContain("if (!savedName && savedProofNames().has(slugify(proof.title, 'proof')))");
+  it('asks before an unbound proof takes a name the analyst typed and another proof holds', () => {
+    expect(source).toContain("if (!savedName && !isDefaultName(proof.title, 'proof') && savedProofNames().has(slugify(proof.title, 'proof')))");
     expect(source).toContain('title="Overwrite this proof?"');
   });
 });
@@ -1682,7 +1692,8 @@ describe('Proof Composer scene', () => {
     expect(make).toContain('if (!(await (onSlides ? settleSlide() : mayLeave()))) return false;');
     expect(make.indexOf('resetDoc();')).toBeLessThan(make.lastIndexOf('await addPanelsFromPaths(made.panels, { media: caseMedia });'));
     // pictures a map tab sends for the scene the proof open holds join it, with nothing reset
-    expect(make.indexOf('if (handoff.join && proofStarted && holding) {')).toBeLessThan(make.indexOf('resetDoc();'));
+    expect(make).toContain('const joins = handoff.view ? proofStarted && !savedName : handoff.join && proofStarted && holding;');
+    expect(make.indexOf('if (joins) {')).toBeLessThan(make.indexOf('resetDoc();'));
     expect(make).toContain('scene.hold(made.scene);');
     // ready where the scene starts, playing only once its tab is shown
     expect(make).toContain('scene.show(made.scene.video);');
@@ -1690,6 +1701,52 @@ describe('Proof Composer scene', () => {
     // the label names the proof; the description is the analyst's sentence, left to write
     expect(make).toContain('if (made.title) proof.title = made.title;');
     expect(make).not.toContain('description');
+  });
+});
+
+describe('Proof Composer — a Horizon view', () => {
+  it('joins a proof never saved, and makes a new one rather than go into a saved proof', () => {
+    // A view sent while a proof saved and posted two days earlier stood open went in
+    // under its name, and the save wrote over the published proof.
+    const make = bodyOfFn('makeSceneProof');
+    expect(make).toContain('handoff.view ? proofStarted && !savedName');
+  });
+
+  it('holds the video the photo was cut from, read off the case before anything is decided', () => {
+    const make = bodyOfFn('makeSceneProof');
+    expect(make).toContain('const video = footageOf(made.photo, caseMedia);');
+    expect(make).toContain('if (video) made.scene = { video, moments: [], draft: null };');
+    // known before the slide check, so a view of the video the slides are of saves the slide and goes on
+    expect(make.indexOf('footageOf(')).toBeLessThan(make.indexOf('const onSlides'));
+    expect(make.indexOf('footageOf(')).toBeLessThan(make.indexOf('if (joins) {'));
+  });
+});
+
+describe('Proof Composer — a proof made from another tab', () => {
+  it('is made under one veil over the tab, from the handoff until its pictures are laid', () => {
+    // Horizon's view landed on the proof it left, then an empty one, then the pictures
+    expect(source).toContain('untrack(() => makeHandedProof(handoff));');
+    const handed = bodyOfFn('makeHandedProof');
+    expect(handed).toContain('const box = toolEl?.getBoundingClientRect();');
+    expect(handed).toContain('await makeSceneProof(handoff);');
+    expect(handed.indexOf('makingBox = box?.width')).toBeLessThan(handed.indexOf('await makeSceneProof'));
+    expect(handed).toContain('} finally {\n      makingBox = null;');
+    expect(source).toContain('<div class="tool" bind:this={toolEl}>');
+    expect(source).toContain('Making the proof…</p>');
+  });
+
+  it('keeps the veil under the dialogs, so a question on the way still shows over it', () => {
+    const making = source.slice(source.indexOf('  .making {'), source.indexOf('  .making-card {'));
+    expect(making).toContain('position: fixed;');
+    const z = Number(/z-index: (\d+);/.exec(making)?.[1]);
+    expect(z).toBeGreaterThan(0);
+    expect(z).toBeLessThan(900); // Modal 900, ConfirmDialog 950
+  });
+
+  it('reads the case\'s media once per proof made', () => {
+    const make = bodyOfFn('makeSceneProof');
+    expect(make.match(/readCaseMedia\(/g)).toHaveLength(1);
+    expect(make.match(/await readOnce\(\);/g)).toHaveLength(3);
   });
 });
 

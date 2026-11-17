@@ -43,8 +43,11 @@ same scene. **Send to Geo Proof** then makes the proof of that scene, from Horiz
 export menu and from a saved row of Satellite, Compare's comparisons among them, as Make
 the proof does: a new proof holding the scene, named after its label, which its first
 save takes up with nothing offered, or the proof open when it holds that scene already.
-Only pictures the scene gathered go that way (`lib/toGeoProof.js`); any other joins the
-proof open, as before. Horizon draws its two pictures under *Making the proof…*, encodes
+Only pictures the scene gathered go that way (`lib/toGeoProof.js`). Outside a scene,
+Horizon's view is a proof of its own: it joins the proof open only while that one was never
+saved, else it makes a new proof holding the video its photo was cut from. Any other
+picture joins the proof open, as before. Whatever the tab, Geo Proof stays under *Making
+the proof…* from the moment it shows until the pictures are laid. Horizon draws its two pictures under *Making the proof…*, encodes
 both at once and keeps them in turn, each written again in about a second off the
 server's loop. The server's word is shown as it lands, the capture counted and the pill gone
 when the scene ends, and the server is read again behind it; an answer asked before that

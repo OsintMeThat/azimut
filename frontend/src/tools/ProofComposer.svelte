@@ -50,7 +50,7 @@
   import ProofSideTabs from './proof/ProofSideTabs.svelte';
   import { needsWords, proofNeeds, shownTab, sideTabs } from './proof/sideTabs.js';
   import { ProofScene } from './proof/proofScene.svelte.js';
-  import { frameOrigin, panelFrames, readHandoff, readStatedScene, sceneBadges, sceneColor, videoName } from '../lib/proofScene.js';
+  import { footageOf, frameOrigin, panelFrames, readHandoff, readStatedScene, sceneBadges, sceneColor, videoName } from '../lib/proofScene.js';
   import { PROOF_SCENE_HELP } from '../lib/proofSceneHelp.js';
   import { buildFrameOps, frameSaveName, sliderFilters, sourceStem } from '../lib/inspect.js';
   import { preciseClock } from '../lib/inspectPlayer.js';
@@ -139,7 +139,7 @@
     assetName, base64Of, PASTE_TYPES, MAX_PASTES, MAX_PASTE_BYTES,
   } from '../lib/pasteAsset.js';
   import {
-    isDefaultName, nextName, ownName, savedSlugs, savedTitles, savedTitle, slugify, specAttr, specPath,
+    freeDefaultName, isDefaultName, nextName, ownName, savedSlugs, savedTitle, slugify, specAttr, specPath, takenNames,
   } from '../lib/naming.js';
   import { createHistory } from '../lib/history.js';
   import { shortcut } from '../lib/keys.js';
@@ -818,7 +818,7 @@
       draftShown = null;
       proofStarted = true;
       if (look) applyLook(look);
-      proof.title = nextName('proof', [...savedProofTitles(), ...left]);
+      proof.title = nextName('proof', [...takenNames(proofEntities, 'proof'), ...left]);
       scene.hold({ video, moments: [], draft: null });
       pickSideTab('scene');
       scene.show(video, at != null ? { at } : {});
@@ -1170,9 +1170,24 @@
   async function makeSceneProof(handoff, { look = null, navigate = true, template = undefined } = {}) {
     const made = readHandoff(handoff);
     if (!made) return false;
+    // The frames were filed a moment ago, so the case's media is read again, once.
+    let read = false;
+    const readOnce = async () => {
+      if (!read) await readCaseMedia(caseState.current.id);
+      read = true;
+    };
+    // Horizon's view joins a proof being put together, never one saved: that one is
+    // finished work, maybe published, and the view would go out under its name. A
+    // new proof of it holds the video its photo was cut from, as a whole.
+    if (made.photo) {
+      await readOnce();
+      const video = footageOf(made.photo, caseMedia);
+      if (video) made.scene = { video, moments: [], draft: null };
+    }
     const holding = made.scene ? !!made.scene.draft && scene.draft === made.scene.draft : proof.panels.some((p) => p.src === made.panels[0]);
-    if (handoff.join && proofStarted && holding) {
-      await readCaseMedia(caseState.current.id);
+    const joins = handoff.view ? proofStarted && !savedName : handoff.join && proofStarted && holding;
+    if (joins) {
+      await readOnce();
       await addPanelsFromPaths(made.panels, { media: caseMedia });
       return true;
     }
@@ -1193,8 +1208,7 @@
     settlePlace('proof', place(), { navigate });
     if (made.title) proof.title = made.title;
     if (made.scene) scene.hold(made.scene);
-    // the frames were filed a moment ago, so the case's media is read again first
-    await readCaseMedia(caseState.current.id);
+    await readOnce();
     await addPanelsFromPaths(made.panels, { media: caseMedia });
     dirty = true;
     anchorHistory();
@@ -1669,14 +1683,31 @@
     }
   });
 
-  // consume a "make the proof" handoff from a scene of Inspect
+  // consume a "make the proof" handoff from a scene of Inspect or a map tab
   $effect(() => {
     if (uiState.tool === 'proof' && uiState.proofScene && caseState.current) {
       const handoff = uiState.proofScene;
       uiState.proofScene = null;
-      untrack(() => makeSceneProof(handoff));
+      untrack(() => makeHandedProof(handoff));
     }
   });
+
+  // A proof made from another tab is made under "Making the proof…" over the whole tab,
+  // from the moment it shows until the pictures are laid: the proof it leaves, then an
+  // empty one, then the pictures read as three steps of something gone wrong. The veil
+  // is fixed over the tab's own box and under the dialogs, so a question asked on the
+  // way (changes not saved, a point to check) still comes up over it.
+  let makingBox = $state(null);
+  let toolEl = $state();
+  async function makeHandedProof(handoff) {
+    const box = toolEl?.getBoundingClientRect();
+    makingBox = box?.width ? { top: box.top, left: box.left, width: box.width, height: box.height } : null;
+    try {
+      await makeSceneProof(handoff);
+    } finally {
+      makingBox = null;
+    }
+  }
 
   // ---- leaving a proof that holds unsaved changes --------------------------
   // Opening another proof, from the list, the sidebar or Back, asks first when this
@@ -6856,15 +6887,14 @@
   }
 
   // Every proof already saved in this case, read off the filed entities: the
-  // slugs (filename without `proofs/.meta/…​.json`) to catch a filename collision, and
-  // the names so a fresh proof can take one that reads apart from them.
+  // slugs (filename without `proofs/.meta/…​.json`) to catch a filename collision.
   const savedProofNames = () => savedSlugs(proofEntities, 'proof');
-  const savedProofTitles = () => savedTitles(proofEntities, 'proof');
 
   // The technical name a fresh proof files under, numbered past those already in the
-  // case so two never clash ("Proof 2"). The header never shows it: its field stays
-  // empty until the analyst names the proof, and the lists show its label. Called on reset.
-  const freshTitle = () => nextName('proof', savedProofTitles());
+  // case, as listed and as files, so two never clash ("Proof 2"). The header never
+  // shows it: its field stays empty until the analyst names the proof, and the lists
+  // show its label. Called on reset; the save checks it again (`performSave`).
+  const freshTitle = () => nextName('proof', takenNames(proofEntities, 'proof'));
   // A name cleared: the technical one the proof holds already, else a fresh one.
   const technicalTitle = () => (savedName && isDefaultName(savedName, 'proof') ? savedName : freshTitle());
 
@@ -7017,9 +7047,10 @@
     }
     // The name in the header is the filename. A bound proof writes back over
     // itself, and renaming it moves the file — the backend refuses a rename onto
-    // a name another proof holds. An unbound proof landing on a saved name is
-    // the one case that can go either way, so it asks first.
-    if (!savedName && savedProofNames().has(slugify(proof.title, 'proof'))) {
+    // a name another proof holds. An unbound proof landing on a name the analyst
+    // typed and another proof holds is the one case that can go either way, so it
+    // asks first. A technical name never asks: the save moves it to a free number.
+    if (!savedName && !isDefaultName(proof.title, 'proof') && savedProofNames().has(slugify(proof.title, 'proof'))) {
       overwritePrompt = { slug: slugify(proof.title, 'proof'), andPost, then };
       return;
     }
@@ -7053,6 +7084,13 @@
     const unchecked = slide ? uncheckedPoints(proof.points, proof.panels).length : 0;
     try {
       const c = await ensureCase();
+      // A name the app gave lands on a new file only where no proof is: the case's
+      // proofs are read again now, since the list this tab holds can be days old.
+      if (proof.title !== savedName && isDefaultName(proof.title, 'proof')) {
+        const read = await fetchAllEntities(c.id, { types: ['proof'] }).catch(() => null);
+        if (read) proofEntities = read;
+        proof.title = freeDefaultName(proof.title, 'proof', proofEntities);
+      }
       await fontReady;
       const dataUrl = exportPng();
       // Pasted images the case does not hold yet ride along with the spec; the
@@ -7832,7 +7870,7 @@
     onnew={openNewProofDialog} onopen={requestOpenProof} onall={openProofDialog} onscene={makeFromHome} />
 {/snippet}
 
-<div class="tool">
+<div class="tool" bind:this={toolEl}>
   <!-- Narrower than its row (the case panel open on a laptop), the header shows the
        secondary buttons as icons, then a shorter name, Save and a dot for unsaved, rather
        than cut off Save and To Post. It is measured on its own width, so the unsaved badge
@@ -8807,6 +8845,20 @@
   />
 {/if}
 
+{#if makingBox}
+  <div
+    class="making"
+    role="status"
+    aria-live="polite"
+    style:top="{makingBox.top}px"
+    style:left="{makingBox.left}px"
+    style:width="{makingBox.width}px"
+    style:height="{makingBox.height}px"
+  >
+    <p class="making-card"><span class="making-spin" aria-hidden="true"></span>Making the proof…</p>
+  </div>
+{/if}
+
 {#if overwritePrompt}
   <ConfirmDialog
     title="Overwrite this proof?"
@@ -9182,6 +9234,39 @@
     min-height: 0;
   }
   /* what is opening, over the top of the canvas until its pictures are in */
+  /* Over the tab, under the dialogs (Modal 900, ConfirmDialog 950). */
+  .making {
+    position: fixed;
+    z-index: 800;
+    display: grid;
+    place-items: center;
+    background: color-mix(in srgb, var(--bg-0, #000) 55%, transparent);
+    cursor: progress;
+  }
+  .making-card {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin: 0;
+    padding: 12px 18px;
+    border-radius: var(--r-md, 8px);
+    background: var(--bg-2);
+    border: 1px solid var(--border);
+    color: var(--text-1);
+    font-size: var(--fs-sm);
+    box-shadow: 0 6px 24px rgb(0 0 0 / 0.35);
+  }
+  .making-spin {
+    width: 14px;
+    height: 14px;
+    border: 2px solid color-mix(in srgb, var(--text-1) 25%, transparent);
+    border-top-color: var(--accent);
+    border-radius: 50%;
+    animation: making-spin 0.8s linear infinite;
+  }
+  @keyframes making-spin {
+    to { transform: rotate(360deg); }
+  }
   .opening {
     position: absolute;
     top: 14px;

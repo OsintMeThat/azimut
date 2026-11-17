@@ -63,6 +63,18 @@ describe('sending them to Geo Proof', () => {
     expect([uiState.proofScene.draft, uiState.composeQueue, uiState.tool]).toEqual(['sc_whole', [], 'proof']);
   });
 
+  it('makes Horizon\'s view a proof of its own, naming the photo laid', () => {
+    const made = sendToGeoProof('case', [PHOTO, TERRAIN], { view: true, photo: 'media/Collage 25.png' });
+    expect(made).toEqual({ panels: [PHOTO.path, TERRAIN.path], photo: 'media/Collage 25.png', view: true });
+    expect([uiState.proofScene, uiState.composeQueue, uiState.tool]).toEqual([made, [], 'proof']);
+  });
+
+  it('still makes the scene\'s proof when the scene geolocated gathered the view', () => {
+    geolocating.caseId = 'case';
+    geolocating.scene = held();
+    expect(sendToGeoProof('case', [PHOTO, TERRAIN], { view: true, photo: 'media/Collage 25.png' }).draft).toBe('sc_whole');
+  });
+
   it('queues the pictures for the proof open otherwise, once each', () => {
     geolocating.caseId = 'other case';
     geolocating.scene = held();
