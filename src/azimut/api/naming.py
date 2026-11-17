@@ -23,16 +23,20 @@ __all__ = [
 ]
 
 
-def technical_name(folder: Path, kind: str, source: str | None = None) -> str:
+def technical_name(
+    folder: Path, kind: str, source: str | None = None, *, skip: frozenset[str] | set[str] = frozenset()
+) -> str:
     """The name an item files under when the analyst gives it none, or clears theirs.
 
     One it holds already of that shape stays, so clearing an unnamed item moves
     nothing; else the lowest number free in `folder`, judged without case as
-    `holders` judges a name, so the gaps deletes leave are taken first.
+    `holders` judges a name, so the gaps deletes leave are taken first. `skip` holds
+    names, casefolded, that are not free though no file holds them.
     """
     if source and is_default_name(source, kind):
         return source
     taken = {path.stem.casefold() for path in folder.glob("*.json")} if folder.is_dir() else set()
+    taken |= set(skip)
     number = 1
     while f"{DEFAULT_PREFIX[kind]} {number}".casefold() in taken:
         number += 1

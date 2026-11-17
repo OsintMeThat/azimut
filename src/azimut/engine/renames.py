@@ -208,6 +208,52 @@ def rewrite_files(case: "Case", moved: dict[str, str]) -> None:
     _rewrite_note_addresses(case, moved)
 
 
+def _strings(value: Any) -> Iterator[str]:
+    """Every string a record holds, as a value or as a key (`replace_paths` reads both)."""
+    if isinstance(value, str):
+        yield value
+    elif isinstance(value, list):
+        for item in value:
+            yield from _strings(item)
+    elif isinstance(value, dict):
+        for key, item in value.items():
+            if isinstance(key, str):
+                yield key
+            yield from _strings(item)
+
+
+def cited_stems(case: "Case", folder: str, suffix: str) -> set[str]:
+    """The stems of the files right in `folder` (``proofs/``) ending in `suffix` that a
+    tool's record or a note names, casefolded: what a rename of one would rewrite.
+
+    A name some record still cites with no file under it belonged to an item since
+    deleted. Another item filed under it would be read as that one, and a rename of it
+    would drag the record along (`api/proofs.save_proof`).
+    """
+    def stem(path: str) -> str | None:
+        if not (path.startswith(folder) and path.endswith(suffix)):
+            return None
+        rest = path[len(folder) : -len(suffix)]
+        return rest.casefold() if rest and "/" not in rest else None
+
+    found: set[str] = set()
+    for path in _record_paths(case):
+        try:
+            data = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            continue
+        found |= {one for value in _strings(data) if (one := stem(value))}
+    for file in _note_files(case):
+        try:
+            text = file.read_text(encoding="utf-8")
+        except OSError:
+            continue
+        for match in _FILE_ADDRESS.finditer(text):
+            if unquote(match.group(1)) == case.id and (one := stem(unquote(match.group(2)))):
+                found.add(one)
+    return found
+
+
 def rewrite_references(case: "Case", moved: dict[str, str]) -> None:
     """Point every stored reference to each old path at its new one: the graph and the
     queued jobs, then everything kept outside the database (`rewrite_files`)."""

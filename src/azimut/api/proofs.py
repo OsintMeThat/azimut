@@ -50,7 +50,7 @@ from . import events
 from .cases import delete_by_path, get_case
 from .cases.common import delete_entity_deep
 from .inspect import say_geolocating
-from .naming import existing_stem, holders, read_created_at, slugify, technical_name
+from .naming import existing_stem, holders, is_default_name, read_created_at, slugify, technical_name
 from .satellite import locate_on_save
 from .. import layout
 
@@ -616,9 +616,15 @@ def save_proof(case_id: str, body: ProofIn) -> dict[str, Any]:
     case = get_case(case_id)
     case.subdir("proofs")  # born on first save, so the visible folder exists
     bound = existing_stem(body.rename_from, "proof") if body.rename_from else None
-    name = slugify(body.title, "Proof") if body.title.strip() else technical_name(
-        case.subdir("proofs").joinpath(layout.META_DIR), "proof", bound
-    )
+    meta_dir = case.subdir("proofs").joinpath(layout.META_DIR)
+    name = slugify(body.title, "Proof") if body.title.strip() else technical_name(meta_dir, "proof", bound)
+    # A number the app gave, landing where no proof is, moves past one a post or a note
+    # still cites: the proof that had it is gone, a new one under its name would be read
+    # as that one, and a rename of it would drag the post along.
+    if name != bound and is_default_name(name, "proof") and not holders(meta_dir, name):
+        cited = rename_engine.cited_stems(case, "proofs/", ".png")
+        if name.casefold() in cited:
+            name = technical_name(meta_dir, "proof", skip=cited)
     rel = layout.proof_spec_rel(name)
     spec_path = case.resolve_inside(rel)
 

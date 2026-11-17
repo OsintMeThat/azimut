@@ -2233,6 +2233,44 @@ def test_a_proof_saved_with_no_name_files_under_a_technical_one_and_clears_back_
     assert again["name"] == "Proof 1"
 
 
+def test_a_technical_name_a_post_still_cites_is_never_taken_again(client):
+    """A proof deleted leaves its posts naming its picture, so a Trash restore finds
+    them again. A new proof filed under its number was read as theirs, and renamed, it
+    dragged them along: a published post came to show another place."""
+    cid = client.post("/api/cases", json={"name": "Proofs"}).json()["id"]
+    gone = client.post(f"/api/cases/{cid}/proofs", json={"title": "", "spec": SPEC, "png_base64": _png_b64()}).json()
+    assert gone["name"] == "Proof 1"
+    client.post(f"/api/cases/{cid}/drafts", json={"title": "", "state": {"proofPng": "proofs/Proof 1.png"}})
+    assert client.delete(f"/api/cases/{cid}/proofs/Proof 1").status_code == 200
+
+    # the composer's own number, or none given: either moves past the name the post holds
+    assert _save(client, cid, "Proof 1", SPEC)["name"] == "Proof 2"
+    assert _save(client, cid, "", SPEC)["name"] == "Proof 3"
+    # nor does clearing a name land on it
+    named = _save(client, cid, "Rooftop angle", SPEC)
+    cleared = client.post(f"/api/cases/{cid}/proofs", json={"rename_from": named["name"], "title": "", "spec": SPEC}).json()
+    assert cleared["name"] == "Proof 4"
+    # a name the analyst typed is theirs, and the post still names a picture no proof has
+    assert _save(client, cid, "Al Jawf berm", SPEC)["name"] == "Al Jawf berm"
+    post = json.loads(Case.open(cid).resolve_inside(".drafts/Post 1.json").read_text(encoding="utf-8"))
+    assert post["state"]["proofPng"] == "proofs/Proof 1.png"
+    # and the Trash still puts the proof back under its name
+    group = client.get(f"/api/cases/{cid}/trash").json()
+    groups = group if isinstance(group, list) else group.get("groups", group.get("items", []))
+    restored = [g for g in groups if g.get("label") == "Proof 1"][0]
+    assert client.post(f"/api/cases/{cid}/trash/{restored['id']}/restore").status_code == 200
+    assert client.get(f"/files/{cid}/proofs/Proof 1.png").status_code == 200
+
+
+def test_a_note_citing_a_deleted_proof_keeps_its_name_too(client):
+    cid = client.post("/api/cases", json={"name": "Proofs"}).json()["id"]
+    _save(client, cid, "", SPEC)
+    case = Case.open(cid)
+    case.notes_path.write_text(f"Seen in ![proof](/files/{cid}/proofs/Proof%201.png)\n", encoding="utf-8")
+    assert client.delete(f"/api/cases/{cid}/proofs/Proof 1").status_code == 200
+    assert _save(client, cid, "Proof 1", SPEC)["name"] == "Proof 2"
+
+
 def test_the_list_gives_what_a_proof_with_no_name_is_labelled_by(client):
     from azimut.engine import satellite as satellite_engine
 
