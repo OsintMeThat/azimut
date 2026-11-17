@@ -805,7 +805,7 @@ describe('a template from Settings', () => {
 });
 
 describe('To Post', () => {
-  it('sits beside PDF on an open note and opens Post on a Free post of what the editor holds', async () => {
+  it('sits in the open note\'s ⋯ rather than its header, and opens Post on a Free post of what the editor holds', async () => {
     const pieces = [{ kind: 'text', text: 'Old lead', heading: true }, { kind: 'text', text: 'Seen at Quay.' }];
     const before = post.getMockImplementation();
     post.mockImplementation(async (url, body) => (url.endsWith('/pieces')
@@ -813,8 +813,11 @@ describe('To Post', () => {
       : before(url, body)));
     target.querySelector('button[title="Open Old lead"]').click();
     await settle();
-    const button = target.querySelector('[data-guide="notebook.to-post"]');
-    expect(button.previousElementSibling.dataset.guide).toBe('notebook.pdf');
+    expect(target.querySelector('.tool-header [data-guide="notebook.to-post"]')).toBeNull();
+    target.querySelector('.tool-header button[aria-label="More"]').click();
+    flushSync();
+    const button = document.body.querySelector('[data-guide="notebook.to-post"]');
+    expect(button.closest('[role="menu"], .float-menu')).not.toBeNull();
     expect(button.title).toBe('Opens Post with this note as a thread, its public edition only');
     expect(button.disabled).toBe(false);
     button.click();

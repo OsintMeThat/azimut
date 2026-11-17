@@ -7034,8 +7034,8 @@ image says its host is contacted on every open.
 The file stays the Markdown it was: what the old split-pane Notebook wrote opens as it
 was written and is never rewritten for being opened. The header names the note (the
 name is the filename), files it in a folder, says whether it is saved, and holds
-**Look**, **Write | Page**, **Pin to the side**, **Open in its own tab**, **PDF**, **To
-Post**, and a ⋯ with *Editions*, *Keep as template* and *Delete* (*Clear the case notes*
+**Look**, **Write | Page**, **Pin to the side**, **Open in its own tab**, **PDF**, and a
+⋯ with *Editions*, *Keep as template*, *To Post* and *Delete* (*Clear the case notes*
 for the case's page).
 PDF export writes one server-rendered PDF per note without a print dialog, in the
 note's look, local images and browser-drawn diagrams with it, remote images left out,
@@ -7066,7 +7066,7 @@ written*, *This file is not the one Azimut wrote* or *File missing*. The record 
 edition, file, folder, pages, the PDF's SHA-256 and the printed text's) is kept on the
 note, fifty at most, and travels in a bundle.
 
-**To Post.** Beside **PDF**, **To Post** opens Post on a Free post thread made of the
+**To Post.** In the open note's ⋯, kept out of the header, *To Post* opens Post on a Free post thread made of the
 note's public edition, or of the stretch selected in it, which its title then says;
 nothing is posted. It waits on an empty note. The server reads the note as the editor
 holds it, unsaved words included, and writes nothing (`POST /notes/{id}/pieces`,

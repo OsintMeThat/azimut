@@ -3,15 +3,16 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { flushSync, mount, unmount } from 'svelte';
 
 /**
- * To Post in the Notebook's header: what its title promises, when it waits, and
- * what it hands over, the selection in place of the note when there is one.
+ * To Post, a row of the open note's ⋯: what its title promises, when it waits, what
+ * it hands over (the selection in place of the note when there is one), and that the
+ * menu holding it closes on the press.
  */
 
 const { noteToPost, toast } = vi.hoisted(() => ({ noteToPost: vi.fn(async () => true), toast: vi.fn() }));
 vi.mock('../../lib/notes/toPost.js', () => ({ noteToPost }));
 vi.mock('../../lib/state.svelte.js', () => ({ toast }));
 
-const { default: ToPostButton } = await import('./ToPostButton.svelte');
+const { default: ToPostItem } = await import('./ToPostItem.svelte');
 
 let component;
 let target;
@@ -19,7 +20,7 @@ let target;
 function show(props) {
   target = document.createElement('div');
   document.body.append(target);
-  component = mount(ToPostButton, { target, props: { caseId: 'case-a', noteId: 'n1', ...props } });
+  component = mount(ToPostItem, { target, props: { caseId: 'case-a', noteId: 'n1', ...props } });
   flushSync();
   return target.querySelector('[data-guide="notebook.to-post"]');
 }
@@ -37,13 +38,16 @@ afterEach(async () => {
 });
 
 describe('To Post', () => {
-  it('says it sends the note, its public edition only, and sends the whole of it', async () => {
-    const button = show({ text: '# Findings\n\nSmoke over the quay.' });
+  it('says it sends the note, its public edition only, sends the whole of it and closes its menu', async () => {
+    const ondone = vi.fn();
+    const button = show({ text: '# Findings\n\nSmoke over the quay.', ondone });
     expect(button.textContent.trim()).toBe('To Post');
+    expect(button.classList.contains('fm-item')).toBe(true);
     expect(button.title).toBe('Opens Post with this note as a thread, its public edition only');
     expect(button.disabled).toBe(false);
     button.click();
     await settle();
+    expect(ondone).toHaveBeenCalledTimes(1);
     expect(noteToPost).toHaveBeenCalledWith('case-a', 'n1', '# Findings\n\nSmoke over the quay.', null);
   });
 

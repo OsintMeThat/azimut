@@ -40,12 +40,21 @@ test('To Post sends the note and opens Post on a Free post of its public edition
   await page.locator('button[title="Open Quay strike"]').click();
   await expect(page.locator('.cm-content')).toContainText('Smoke rose over the quay');
 
-  // its title says what goes: the selection while there is one, the note else
-  const toPost = page.locator('[data-guide="notebook.to-post"]');
+  // a row of the note's ⋯, never a button of the header; its title says what goes:
+  // the selection while there is one, the note else
+  const more = page.locator('.tool-header button[aria-label="More"]');
+  const toPost = page.locator('.float-menu [data-guide="notebook.to-post"]');
+  await expect(page.locator('.tool-header [data-guide="notebook.to-post"]')).toHaveCount(0);
+  await more.click();
   await expect(toPost).toHaveAttribute('title', 'Opens Post with this note as a thread, its public edition only');
+  await page.keyboard.press('Escape');
   await page.locator('.cm-line', { hasText: 'Smoke rose' }).dblclick();
+  await more.click();
   await expect(toPost).toHaveAttribute('title', 'Opens Post with the selection as a thread, its public edition only');
+  await page.keyboard.press('Escape');
+  await page.locator('.cm-content').click();
   await page.keyboard.press('Control+End');
+  await more.click();
   await expect(toPost).toHaveAttribute('title', 'Opens Post with this note as a thread, its public edition only');
 
   await toPost.click();

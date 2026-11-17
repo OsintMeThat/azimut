@@ -1,8 +1,9 @@
 <script>
   /**
-   * To Post, in the Notebook's header beside PDF: the note's public edition, or the
-   * stretch selected in it, opened in Post as a Free post thread to read, edit and
-   * publish (`lib/notes/toPost.js`). Nothing is posted from here.
+   * To Post, a row of the open note's ⋯ menu rather than a button of its own: the
+   * note's public edition, or the stretch selected in it, opened in Post as a Free
+   * post thread to read, edit and publish (`lib/notes/toPost.js`). Nothing is posted
+   * from here.
    */
   import { toast } from '../../lib/state.svelte.js';
   import { noteToPost } from '../../lib/notes/toPost.js';
@@ -18,6 +19,8 @@
     selection = null,
     /** Whether the note is read and can be sent. */
     ready = true,
+    /** Called once the row is pressed, so the menu holding it closes. */
+    ondone = () => {},
   } = $props();
 
   let busy = $state(false);
@@ -28,6 +31,7 @@
 
   async function send() {
     if (busy || empty || !ready) return;
+    ondone();
     busy = true;
     try {
       await noteToPost(caseId, noteId, text, selection);
@@ -39,6 +43,5 @@
   }
 </script>
 
-<!-- its words go when the header narrows (`.wide-only` in the Notebook), its icon and title stay -->
-<button class="btn btn-sm" {title} aria-label="To Post" data-guide="notebook.to-post" disabled={!ready || empty || busy} onclick={send}>
-  <Icon name="post" size={14} /><span class="wide-only">To Post</span></button>
+<button type="button" class="fm-item" {title} data-guide="notebook.to-post" disabled={!ready || empty || busy} onclick={send}>
+  <Icon name="post" size={14} /><span class="fm-grow">To Post</span></button>
