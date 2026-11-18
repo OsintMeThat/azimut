@@ -46,6 +46,26 @@ describe('exporting notes as PDF', () => {
     expect(body.changes.length).toBe(300);
   });
 
+  it('writes a web folder in the public edition, its diagrams as SVG, with the address it will live at', async () => {
+    const post = vi.spyOn(api, 'post').mockImplementation((path) => (
+      path.endsWith('/diagrams')
+        ? Promise.resolve({ diagrams: [{ key: 'abc123', source: 'graph TD; A-->B;' }] })
+        : Promise.resolve({ written: [{ note: 'n1', file: 'harbour' }], warnings: [] })
+    ));
+    const draw = vi.fn(async (source) => ({ svg: `<svg>${source}</svg>`, width: 400, height: 200 }));
+    await exportNotes('case-1', ['n1'], { draw, edition: 'internal', format: 'web', address: ' https://desk.github.io/articles/harbour/ ' });
+    expect(post).toHaveBeenNthCalledWith(1, '/api/cases/case-1/notes/pdf/diagrams', { notes: ['n1'], edition: 'public' });
+    const [path, body] = post.mock.calls[1];
+    expect(path).toBe('/api/cases/case-1/notes/web');
+    expect(body).toEqual({
+      notes: ['n1'], diagrams: { abc123: '<svg>graph TD; A-->B;</svg>' }, edition: 'public', round_pov: false, changes: '',
+      base_url: 'https://desk.github.io/articles/harbour/',
+    });
+    // with no address, none is sent: the folder works without one
+    await exportNotes('case-1', ['n1'], { draw, format: 'web' });
+    expect(post.mock.calls[3][1]).not.toHaveProperty('base_url');
+  });
+
   it('skips drawing entirely when no note holds a diagram', async () => {
     const post = vi.spyOn(api, 'post').mockImplementation((path) => (
       path.endsWith('/diagrams')

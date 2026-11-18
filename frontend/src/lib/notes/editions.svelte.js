@@ -79,12 +79,13 @@ const HEX = /^[0-9a-f]{64}$/;
 
 /**
  * An edition as the server lists it, or null when a part is not what an export writes.
- * `format` is `pdf` or `html`; an HTML page has no pages to count, and its file's
- * fingerprint is read under either name the record gives it.
+ * `format` is `pdf`, `html` or `web`; an HTML page or a web folder has no pages to
+ * count, its fingerprint (a web folder's page's) is read under either name the record
+ * gives it, and a web folder keeps the `address` it was made for.
  */
 export function readEdition(item) {
   if (!item || typeof item.at !== 'string' || !EDITIONS.includes(item.edition)) return null;
-  const format = item.format === 'html' ? 'html' : 'pdf';
+  const format = item.format === 'html' || item.format === 'web' ? item.format : 'pdf';
   if (typeof item.file !== 'string' || !item.file) return null;
   if (!Number.isInteger(item.pages) && format === 'pdf') return null;
   const sha = [item.sha256, item.pdf_sha256].find((value) => HEX.test(value ?? '')) ?? '';
@@ -97,10 +98,11 @@ export function readEdition(item) {
     pages: Number.isInteger(item.pages) ? item.pages : 0,
     pdf_sha256: sha,
     text_sha256: HEX.test(item.text_sha256 ?? '') ? item.text_sha256 : '',
+    ...(format === 'web' ? { address: typeof item.address === 'string' && item.address.startsWith('https://') ? item.address : '' } : {}),
   };
 }
 
-/** The files a note was exported as, PDF and HTML, newest first. */
+/** The files a note was exported as, PDF, HTML and web folders, newest first. */
 export async function listEditions(caseId, noteId) {
   const answer = await api.get(`/api/cases/${caseId}/notes/${noteId || 'case'}/editions`);
   return (Array.isArray(answer?.editions) ? answer.editions : []).map(readEdition).filter(Boolean);

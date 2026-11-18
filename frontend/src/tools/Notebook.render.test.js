@@ -791,6 +791,91 @@ describe('the check before export', () => {
     expect(dialog().querySelector('.round input').checked).toBe(false);
   });
 
+  it('writes a web folder in the public edition, to the address typed, and stays open on what it wrote', async () => {
+    const LEFT = { text: '2 internal passages left out.', line: null, kind: 'internal' };
+    const NO_ADDRESS = { text: 'No address given: X shows the link without its picture card.', line: null, kind: 'address' };
+    answerCheck((notes, edition) => ({
+      notes: notes.map((note) => ({
+        note, title: 'Old lead', internal: 2, warnings: edition === 'public' ? [LEFT, NO_ADDRESS] : [],
+        weight: 2 * 1024 * 1024, earlier: 0, links: [], pov: [],
+      })),
+    }));
+    const fallback = post.getMockImplementation();
+    post.mockImplementation(async (url, body) => {
+      if (url.endsWith('/notes/web')) {
+        return { written: [{ note: 'n1', title: 'Old lead', file: 'harbour', edition: 'public', at: '2026-11-18T10:00:00Z', folder: 'exports',
+          address: body.base_url ?? '' }], warnings: [], path: '/case/exports/web' };
+      }
+      if (url.endsWith('/editions/reveal')) return { path: '/case/exports/web/harbour' };
+      return fallback(url, body);
+    });
+    await exportFromNote();
+    const buttons = [...dialog().querySelectorAll('[role="group"][aria-label="Format"] button')];
+    expect(buttons.map((button) => button.textContent.trim())).toEqual(['PDF', 'HTML page', 'Web folder', 'WordPress draft']);
+    expect(buttons.every((button) => button.title)).toBe(true);
+    buttons[2].click();
+    await settle();
+    expect(dialog().getAttribute('aria-label')).toBe('Export note as a web folder');
+    // the public edition whatever the note was set to, and no edition to pick
+    expect(post.mock.calls.filter(([url]) => url.endsWith('/notes/pdf/check')).at(-1)[1]).toEqual({ notes: ['n1'], edition: 'public', format: 'web' });
+    expect(dialog().querySelector('[role="group"][aria-label="Edition"]')).toBeNull();
+    expect(dialogText()).toContain('Public edition. 2 internal passages left out.');
+    expect(dialogText()).toContain('Written to web/ in the destination, ready to put online.');
+    // no address yet: said beside its field, never among the faults
+    const field = dialog().querySelector('#export-address');
+    expect(dialog().querySelector('label[for="export-address"]').textContent).toBe('Address it will live at');
+    expect(dialog().querySelector('#export-address-said').textContent.trim()).toBe(NO_ADDRESS.text);
+    expect(dialogText()).not.toContain('Before you export');
+    // a wrong address stops the export and says why
+    field.value = 'http://desk.github.io/articles/harbour/';
+    field.dispatchEvent(new Event('input', { bubbles: true }));
+    flushSync();
+    expect(dialog().querySelector('#export-address-said').textContent.trim()).toBe('The address must start with https://.');
+    expect(field.getAttribute('aria-invalid')).toBe('true');
+    expect(primary().disabled).toBe(true);
+    field.value = 'https://desk.github.io/articles/harbour/';
+    field.dispatchEvent(new Event('input', { bubbles: true }));
+    flushSync();
+    expect(dialog().querySelector('#export-address-said').textContent.trim()).toBe('');
+    expect(primary().disabled).toBe(false);
+    expect(primary().textContent.trim()).toBe('Export web folder');
+    primary().click();
+    await settle();
+    const [, body] = post.mock.calls.find(([url]) => url.endsWith('/notes/web'));
+    expect(body).toEqual({ notes: ['n1'], diagrams: {}, edition: 'public', round_pov: false, changes: '', base_url: 'https://desk.github.io/articles/harbour/' });
+    // the dialog stays on what it wrote, with the folder and the steps a press away
+    expect(dialog().querySelector('.done-line').textContent).toContain('Folder written: web/harbour');
+    expect(dialogText()).toContain('Made for https://desk.github.io/articles/harbour/');
+    anyButton('How to publish').click();
+    flushSync();
+    const steps = dialog().querySelector('section[aria-label="How to publish"]');
+    expect(steps.querySelectorAll('ol li').length).toBeGreaterThanOrEqual(6);
+    expect(steps.textContent).toContain('Settings › Pages');
+    anyButton('Open the folder').click();
+    await settle();
+    expect(post).toHaveBeenCalledWith('/api/cases/case-a/notes/n1/editions/reveal', { at: '2026-11-18T10:00:00Z', file: 'harbour', folder: 'exports' });
+    anyButton('Done').click();
+    await settle();
+    expect(dialog()).toBeNull();
+    // the address is kept for this note, and the next export starts on a web folder with it
+    target.querySelector('[data-guide="notebook.pdf"]').click();
+    await settle();
+    expect(dialog().getAttribute('aria-label')).toBe('Export note as a web folder');
+    expect(dialog().querySelector('#export-address').value).toBe('https://desk.github.io/articles/harbour/');
+  });
+
+  it('offers a WordPress draft as its own branch, with nothing to export from here yet', async () => {
+    answerCheck((notes) => ({ notes: notes.map((note) => ({ note, title: 'Old lead', warnings: [] })) }));
+    await exportFromNote();
+    const asked = post.mock.calls.filter(([url]) => url.endsWith('/notes/pdf/check')).length;
+    [...dialog().querySelectorAll('[role="group"][aria-label="Format"] button')].at(-1).click();
+    await settle();
+    expect(dialog().getAttribute('aria-label')).toBe('Export note as a WordPress draft');
+    expect(post.mock.calls.filter(([url]) => url.endsWith('/notes/pdf/check'))).toHaveLength(asked);
+    expect(dialog().querySelector('.btn-primary')).toBeNull();
+    expect(dialog().querySelector('#export-address')).toBeNull();
+  });
+
   it('forgets a check answered after the dialog was closed', async () => {
     const hold = holding();
     answerCheck((notes) => ({ notes: notes.map((note) => ({ note, title: 'Old lead', warnings: [ROOF] })) }), hold);

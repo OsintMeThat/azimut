@@ -97,18 +97,25 @@ export const asSvg = (svg) => svg;
  * An HTML export also carries what its dialog asked: `roundPov`, the points where a
  * filmer stood rounded to about 150 m in this file only, and `changes`, the line
  * that says what changed since an earlier public edition.
+ *
+ * With `format: 'web'` each note becomes a folder ready to put online, always the
+ * public edition, its diagrams drawn as an HTML page's are; `address` is where it
+ * will live, which gives X its picture card.
  */
-export async function exportNotes(caseId, noteIds, { edition = 'internal', format = 'pdf', roundPov = false, changes = '', ...options } = {}) {
-  const html = format === 'html';
+export async function exportNotes(caseId, noteIds, { edition = 'internal', format = 'pdf', roundPov = false, changes = '', address = '', ...options } = {}) {
+  const web = format === 'web';
+  const html = format === 'html' || web;
+  const asked = web ? 'public' : edition;
   const { diagrams: pending } = await api.post(`/api/cases/${caseId}/notes/pdf/diagrams`, {
-    notes: noteIds, edition,
+    notes: noteIds, edition: asked,
   });
   const drawing = html ? { toPng: asSvg, ...options } : options;
   const diagrams = pending.length ? await drawDiagrams(pending, drawing) : {};
   if (!html) return api.post(`/api/cases/${caseId}/notes/pdf`, { notes: noteIds, diagrams, edition });
-  return api.post(`/api/cases/${caseId}/notes/html`, {
-    notes: noteIds, diagrams, edition, round_pov: Boolean(roundPov), changes: String(changes ?? '').trim().slice(0, 300),
-  });
+  const shared = { notes: noteIds, diagrams, edition: asked, round_pov: Boolean(roundPov), changes: String(changes ?? '').trim().slice(0, 300) };
+  if (!web) return api.post(`/api/cases/${caseId}/notes/html`, shared);
+  const where = String(address ?? '').trim();
+  return api.post(`/api/cases/${caseId}/notes/web`, where ? { ...shared, base_url: where } : shared);
 }
 
 export function revealExports(caseId) {
