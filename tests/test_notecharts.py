@@ -5,6 +5,7 @@ route. What the engine draws is `tests/test_notes_charts.py`'s."""
 
 from __future__ import annotations
 
+import base64
 import io
 import json
 import os
@@ -211,6 +212,35 @@ def test_a_chart_in_a_web_folder_stays_in_the_page_and_holds_no_data_address(cli
     # the folder holds the reader and nothing the chart would have needed
     assert all(path.endswith((".css", ".js", ".woff", ".svg")) for path in folder.files)
     assert not any("chart" in path for path in folder.files)
+
+
+def test_a_picture_a_chart_draws_stays_in_the_page_and_is_a_file_of_a_web_folder(client, monkeypatch):
+    """A kind may draw the analyst's own icon or a flag as a picture in the chart's SVG
+    (`<image href="data:image/png…">`): the engine's SVG is never cleaned as a diagram is,
+    so the picture stays in a single file, and a web folder holds it as a file of its own,
+    which its policy (`img-src 'self'`) lets in."""
+    buffer = io.BytesIO()
+    Image.new("RGB", (16, 16), (200, 30, 30)).save(buffer, "PNG")
+    icon = buffer.getvalue()
+    real = notes_charts.svg
+
+    def with_icon(chart, **options):
+        drawn = real(chart, **options)
+        image = (f'<image href="data:image/png;base64,{base64.b64encode(icon).decode()}" x="0" y="0" width="16" '
+                 'height="16" preserveAspectRatio="xMidYMid meet"/>')
+        return drawn.replace("</svg>", image + "</svg>")
+
+    monkeypatch.setattr(notes_charts, "svg", with_icon)
+    cid, case = _case(client)
+    single = _figure(notes_html.render(case, title="Vehicles", text=NOTE).html.decode())
+    assert single.count('<image href="data:image/png;base64,') == 2
+    folder = notes_html.Folder(csp=notes_web.folder_csp())
+    page = notes_html.render(case, title="Vehicles", text=NOTE, public=True, folder=folder).html.decode()
+    figure = _figure(page)
+    assert "data:" not in figure
+    lifted = re.findall(r'<image href="(assets/[^"]+\.png)"', figure)
+    assert len(lifted) == 2 and len(set(lifted)) == 1 and folder.files[lifted[0]] == icon
+    assert "img-src 'self'" in notes_web.folder_csp()
 
 
 def test_the_chart_figure_fixture_is_what_the_engine_writes(tmp_workspace):

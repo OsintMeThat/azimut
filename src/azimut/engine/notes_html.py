@@ -1917,7 +1917,9 @@ class _Page:
         """A `::: chart` block as a figure (`engine/notecharts.py`): the chart as SVG in the
         page, a title and a description for screen readers and a title on every bar, drawn
         again for a phone and, in a story, for its dark stage; captioned as every figure
-        is, its numbers folded under it, or its own table after it when it says to show it."""
+        is, its numbers folded under it, or its own table after it when it says to show it.
+        The SVG is the engine's own, never cleaned as a pasted diagram is: the pictures it
+        holds (an analyst's icon, a flag) stay in it, as files of a web folder."""
         chart = notecharts.read(self.case, body, look=self.look, note_text=self._note_text)
         line = self._line
         for message, kind, offset in chart.warnings:
@@ -1946,9 +1948,12 @@ class _Page:
             f'<details class="az-chart-numbers"><summary>{notecharts.THE_NUMBERS}</summary>\n'
             f"{notes_charts.data_table_html(chart.layout, caption=False)}</details>\n")
         caption = self._caption(chart.title, "Chart")
-        parts = [f'<figure class="az-figure az-chart-figure" data-kind="chart" id="{ident}">\n'
-                 f'<div class="az-chart-frame">{"".join(drawn)}</div>\n'
-                 f"<figcaption>{caption}{numbers}</figcaption>\n</figure>\n"]
+        figure = (f'<figure class="az-figure az-chart-figure" data-kind="chart" id="{ident}">\n'
+                  f'<div class="az-chart-frame">{"".join(drawn)}</div>\n'
+                  f"<figcaption>{caption}{numbers}</figcaption>\n</figure>\n")
+        # the engine drew it, so it is not cleaned as a diagram is; its own pictures (an
+        # icon, a flag) are files beside the page in a folder, as a map's are
+        parts = [figure if self.folder is None else self._lift_data(figure, ident)]
         if shown and table is not None:
             block_line = self._block_line
             self._block_line = line + table.line
@@ -1978,8 +1983,8 @@ class _Page:
         return f"data:{mime};base64,{base64.b64encode(data).decode('ascii')}", size
 
     def _lift_data(self, html: str, name: str) -> str:
-        """A map's own pictures (its marks' pictograms) as files beside the page, which a
-        folder's policy lets in from the folder only."""
+        """A map's or a chart's own pictures (its marks' pictograms, an icon) as files beside
+        the page, which a folder's policy lets in from the folder only."""
         assert self.folder is not None
         folder = self.folder
 
