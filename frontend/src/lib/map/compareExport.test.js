@@ -6,6 +6,7 @@ import {
   comparisonFilename,
   pictureDateFields,
   composeComparison,
+  composePairSides,
   footerCredits,
   gifColours,
   scaleBarLength,
@@ -337,5 +338,40 @@ describe('signing an export', () => {
   it('leaves the picture whole where the browser cannot trace the lockup', () => {
     vi.stubGlobal('Path2D', undefined);
     expect(() => composeComparison({ ...BASE, mode: 'side', signed: true })).not.toThrow();
+  });
+});
+
+describe('a pair\'s two sides, for a slider', () => {
+  const texts = (out) => out.context.calls.filter(([name]) => name === 'fillText');
+
+  it('keeps each side as a picture the same size, its date and credit on its own half of the band', () => {
+    const { a, b } = composePairSides({
+      ...BASE,
+      labelA: 'A · Esri Wayback · 2024-05-03',
+      labelB: 'B · Apple · ~2025-06',
+      attributionA: 'Esri, Vantor, Earthstar Geographics, and the GIS User Community',
+      attributionB: 'Apple',
+    });
+    expect([a.width, a.height]).toEqual([b.width, b.height]);
+    expect(a.width).toBe(500);
+    expect(draws(a).map((call) => call[1])).toEqual([BASE.a.canvas]);
+    expect(draws(b).map((call) => call[1])).toEqual([BASE.b.canvas]);
+    // A's words from the left margin, B's from the right one, each held to its half
+    const dateA = texts(a).find(([, text]) => text.startsWith('A · Esri'));
+    const dateB = texts(b).find(([, text]) => text.startsWith('B · Apple'));
+    expect(dateA.slice(2)).toEqual([16, 300 + 19, 500 / 2 - 8]);
+    expect(dateB.slice(2)).toEqual([500 - 16, 300 + 19, 500 / 2 - 8]);
+    const creditsA = texts(a).filter(([, , , y]) => y > 300 + 19);
+    expect(creditsA.length).toBeGreaterThan(1);
+    for (const [, text] of creditsA) expect(text.length * 6).toBeLessThanOrEqual(500 / 2 - 8 - 16);
+    // the band is as tall as the longer credit needs, on both
+    expect(a.height).toBe(300 + 30 + creditsA.length * 13);
+    // each wears its letter, on its own side
+    expect(texts(a).some(([, text]) => text === 'A')).toBe(true);
+    expect(texts(b).some(([, text]) => text === 'B')).toBe(true);
+  });
+
+  it('refuses a side that is not drawn yet', () => {
+    expect(() => composePairSides({ ...BASE, b: { canvas: { width: 0 }, frame: FRAME } })).toThrow('both maps must be ready');
   });
 });

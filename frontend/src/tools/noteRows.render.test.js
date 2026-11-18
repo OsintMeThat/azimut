@@ -134,6 +134,17 @@ describe('each tool puts its row where the hand already goes', () => {
     expect(source).toContain('const { gone } = await storeSession(owner, title, { unique: true });');
   });
 
+  it('sends each side of the pair as a picture of its own, dated and credited, for an HTML page\'s slider', () => {
+    const source = read('./Compare.svelte');
+    // cut from the same sources as the pair, so the two halves are the pair's own area
+    expect(source).toContain('const halves = pairSides(sources);');
+    expect(source).toContain("form.append('side_a', sideA, 'comparison-a.png');");
+    expect(source).toContain("form.append('side_b', sideB, 'comparison-b.png');");
+    const sides = source.slice(source.indexOf('function pairSides('), source.indexOf('/** The difference an export carries'));
+    expect(sides).toContain('labelA: dated(labelA, provenanceA.imageryDate)');
+    expect(sides).toContain('attributionB: normaliseAttribution(shownB.provider?.attribution, shownB.id)');
+  });
+
   it('saves an unsaved proof through its own save and waits for it', () => {
     const source = read('./ProofComposer.svelte');
     expect(source).toContain('if (saving || checking || overwritePrompt) return;');

@@ -504,6 +504,81 @@ export function composeComparison({
   return output;
 }
 
+/**
+ * The two sides of a pair as pictures of their own, for an HTML page that lays one over
+ * the other under a slider: the same size, each the area drawn with its own marks, its
+ * letter, the scale, and a band under it with its date and its credit. A's words keep to
+ * the left half of its band and B's to the right half of its own, so a slider showing
+ * half of each still shows each half's date and credit. The bands are as tall as the
+ * longer one needs, so the two stay the same size.
+ *
+ * @returns {{ a: HTMLCanvasElement, b: HTMLCanvasElement }}
+ */
+export function composePairSides({
+  a,
+  b,
+  labelA = 'Imagery A',
+  labelB = 'Imagery B',
+  attributionA = '',
+  attributionB = '',
+  annotations = [],
+  bearing = 0,
+  units = 'metric',
+  makeCanvas,
+}) {
+  if (!a?.canvas?.width || !b?.canvas?.width || !a?.frame || !b?.frame) {
+    throw new Error('both maps must be ready before the pair can be kept');
+  }
+  const s = a.canvas.width / a.frame.width;
+  const width = Math.max(a.canvas.width, b.canvas.width);
+  const height = Math.max(a.canvas.height, b.canvas.height);
+  // each side's words stay in their half of the band, short of the middle
+  const half = width / 2 - 8 * s;
+  const measure = canvasOf(1, 1, makeCanvas).getContext('2d');
+  if (!measure) throw new Error('this browser cannot compose the pair');
+  const credits = {
+    a: footerCredits(measure, attributionA, half + 16 * s, s),
+    b: footerCredits(measure, attributionB, half + 16 * s, s),
+  };
+  const creditRows = Math.max(attributionA ? credits.a.lines.length : 0, attributionB ? credits.b.lines.length : 0);
+  const band = Math.round(30 * s + creditRows * CREDIT_LINE * s);
+
+  const side = (capture, letter, label, credit, wrote) => {
+    const output = canvasOf(width, height + band, makeCanvas);
+    const ctx = output.getContext('2d');
+    if (!ctx) throw new Error('this browser cannot compose the pair');
+    ctx.fillStyle = BAND;
+    ctx.fillRect(0, 0, output.width, output.height);
+    ctx.drawImage(capture.canvas, 0, 0);
+    ctx.save();
+    ctx.beginPath();
+    ctx.rect(0, 0, capture.canvas.width, capture.canvas.height);
+    ctx.clip();
+    drawAnnotations(ctx, annotations.filter((mark) => onSide(mark, letter)), captureProjection(capture, 0, 0), { scale: s, units });
+    ctx.restore();
+    const right = letter === 'b';
+    drawTag(ctx, letter.toUpperCase(), right ? width - 12 * s : 12 * s, 12 * s, { scale: s, accent: true, align: right ? 'right' : 'left' });
+    drawScaleAndNorth(ctx, capture.frame, 12 * s, height - 12 * s, { scale: s, bearing, units });
+    // the band: the date first, the credit under it, on the side's own half
+    const x = right ? width - 16 * s : 16 * s;
+    ctx.textAlign = right ? 'right' : 'left';
+    ctx.fillStyle = INK;
+    ctx.font = `600 ${Math.round(12 * s)}px ${FONT}`;
+    ctx.fillText(label, x, height + 19 * s, half);
+    if (wrote) {
+      ctx.fillStyle = MUTED;
+      ctx.font = `${Math.round(credit.size * s)}px ${FONT}`;
+      credit.lines.forEach((line, index) => ctx.fillText(line, x, height + 19 * s + (index + 1) * CREDIT_LINE * s));
+    }
+    ctx.textAlign = 'left';
+    return output;
+  };
+  return {
+    a: side(a, 'a', labelA, credits.a, Boolean(attributionA)),
+    b: side(b, 'b', labelB, credits.b, Boolean(attributionB)),
+  };
+}
+
 export function canvasBlob(canvas) {
   return new Promise((resolve, reject) => {
     try {

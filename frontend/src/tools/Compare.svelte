@@ -43,6 +43,7 @@
     canvasBlob,
     comparisonFilename,
     composeComparison,
+    composePairSides,
     gifColours,
     pictureDateFields,
   } from '../lib/map/compareExport.js';
@@ -2109,6 +2110,24 @@
     });
   }
 
+  /** The two sides of `sources` as pictures of their own, each dated and credited (`composePairSides`). */
+  function pairSides(sources) {
+    const provenanceA = a.surface?.provenance?.() ?? {};
+    const provenanceB = b.surface?.provenance?.() ?? {};
+    const dated = (label, date) => (date ? `${label} · ${date}` : label);
+    return composePairSides({
+      a: sources.a,
+      b: sources.b,
+      labelA: dated(labelA, provenanceA.imageryDate),
+      labelB: dated(labelB, provenanceB.imageryDate),
+      attributionA: normaliseAttribution(shownA.provider?.attribution, shownA.id),
+      attributionB: normaliseAttribution(shownB.provider?.attribution, shownB.id),
+      annotations,
+      units: prefs.units,
+      bearing: compassAngle(-sources.a.frame.bearing),
+    });
+  }
+
   /** The difference an export carries: none when it is off, this view's when on. */
   async function exportedChange() {
     if (!difference) return null;
@@ -2238,6 +2257,8 @@
   // -- into the note pinned beside -----------------------------------------------
   // "An area of the pair" arms the frame tool, then keeps the two pictures of the area
   // drawn side by side in the case, under the comparison, whatever reading is on screen.
+  // Each side goes with it as a picture of its own, with its date and credit, which an
+  // HTML page lays one over the other under a slider; a PDF prints the pair.
   // A comparison not saved yet is saved first, named after the case's place there (else
   // its point) and its two dates. The same pair kept before is cited again rather than
   // kept twice.
@@ -2285,8 +2306,12 @@
       if (signal?.aborted) throw new DOMException('Stopped', 'AbortError');
       const sources = await markedSources(frame);
       const blob = await canvasBlob(compose(sources, { renderMode: 'side', renderChangeMap: null }));
+      const halves = pairSides(sources);
+      const [sideA, sideB] = await Promise.all([canvasBlob(halves.a), canvasBlob(halves.b)]);
       const form = new FormData();
       form.append('image_a', blob, 'comparison.png');
+      form.append('side_a', sideA, 'comparison-a.png');
+      form.append('side_b', sideB, 'comparison-b.png');
       form.append('format', 'png');
       form.append('filename', exportName());
       // what the image shows: the area drawn, the pair side by side, without the difference
