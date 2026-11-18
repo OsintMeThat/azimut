@@ -295,6 +295,9 @@ def test_release_tooling_is_bounded_and_built_from_the_lock():
         "azimut/assets/fonts/BITSTREAM-VERA.txt",
         "azimut/assets/fonts/Literata-OFL.txt",
         "azimut/assets/fonts/IBMPlexSans-OFL.txt",
+        # the HTML report inlines these two into every file it writes
+        "azimut/engine/notes_html_assets/reader.css",
+        "azimut/engine/notes_html_assets/reader.js",
     ):
         assert font_asset in workflow
     # A guard job runs before anything builds: it checks the pushed tag equals

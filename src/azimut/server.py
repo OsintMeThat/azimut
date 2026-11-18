@@ -74,6 +74,8 @@ class BulkBodyLimit:
     ROUTES: tuple[tuple[str, tuple[str, ...], str, str], ...] = (
         ("POST", ("notes", "pdf"), "notes", "MAX_PDF_BODY_BYTES"),
         ("POST", ("notes", "preview"), "notes", "MAX_PREVIEW_BODY_BYTES"),
+        ("POST", ("notes", "html"), "notes", "MAX_PDF_BODY_BYTES"),
+        ("POST", ("notes", "html", "preview"), "notes", "MAX_PREVIEW_BODY_BYTES"),
         # The note itself, on the three roads that write one. Declared after `notes/pdf`
         # so the export keeps its own, larger number.
         ("POST", ("notes",), "notes", "MAX_NOTE_BODY_BYTES"),
@@ -90,7 +92,7 @@ class BulkBodyLimit:
         ("POST", ("compare", "gif"), "compare", "MAX_GIF_BODY_BYTES"),
         ("POST", ("compare", "sequence"), "compare", "MAX_SEQUENCE_BODY_BYTES"),
         ("POST", ("compare", "sessions", "*", "preview"), "compare", "MAX_GIF_BODY_BYTES"),
-        ("POST", ("compare", "sessions", "*", "images"), "compare", "MAX_GIF_BODY_BYTES"),
+        ("POST", ("compare", "sessions", "*", "images"), "compare", "MAX_KEEP_BODY_BYTES"),
         ("POST", ("compare", "sessions", "*", "evolution"), "compare", "MAX_SEQUENCE_BODY_BYTES"),
         ("POST", ("proofs",), "proofs", "MAX_PROOF_BODY_BYTES"),
         ("POST", ("sheets",), "sheets", "MAX_SHEET_BODY_BYTES"),

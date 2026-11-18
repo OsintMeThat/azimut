@@ -1,0 +1,2023 @@
+"""A note rendered to one HTML file, read offline in any browser.
+
+The PDF (`engine/notes_pdf.py`) is the document a note prints as; this is the page
+it is published as. Both read the note the same way (`engine/notes_markdown.py`):
+the same chapters, the same two editions, the same citations numbered the same,
+the same credit under every picture. What a page can do and paper cannot is added
+on top: a picture opens large, a comparison is a slider, a clip plays from the
+timecode the text names, a table sorts, a citation shows its source on hover.
+That behaviour and the look are `notes_html_assets/reader.js` and `reader.css`,
+inlined into the file; this module writes the markup they read (the `az-` classes).
+
+**One file, nothing fetched.** Every picture, clip, font and diagram is inside the
+file as a `data:` address, and the page's own policy (`CSP`) lets it load nothing
+else, so opening it reaches no server and tells nobody it was read. The only web
+addresses it holds are its links, each opened in a new tab with no referrer.
+
+**What a public file never holds.** It is laid out from the public edition, every
+internal passage blanked before anything is read (`notes_markdown.strip_internal`),
+and refused if one were still there. Guidance lines and HTML comments are dropped,
+raw HTML is shown as text, a case reference is its words with no record id, and a
+link to this machine, a private network or a case path keeps its words and loses
+its address. Pictures are encoded again without their EXIF, GPS or text chunks, and
+a clip is copied without its container's metadata (`ffmpeg -map_metadata -1`).
+
+**Its weight.** About 25 MB at most (`MAX_BYTES`). A picture is at most 2400 pixels
+on its long side, a JPEG unless it shows through somewhere. A clip goes in only when
+it is one cut for a post (`engine/postclips.py`) or a short case video, and only while
+the file stays under the target; any other becomes its still and a Watch link. The
+check before export says the weight and every clip turned into a link.
+
+**Points of view.** A proof's point where the footage was filmed (`pov`) is kept in
+the public edition. The check lists each one, and the export can round them to about
+150 m (`POV_METRES`) for that file only; the note is never rewritten.
+
+**Counts.** A count with no "at least" or range before it is said by the check as a
+warning (`COUNT`), never changed. A confidence the analyst typed is printed as typed.
+"""
+
+from __future__ import annotations
+
+import base64
+import hashlib
+import html
+import math
+import re
+import subprocess
+import tempfile
+import threading
+import unicodedata
+from collections import OrderedDict
+from dataclasses import dataclass, field
+from datetime import date, datetime
+from io import BytesIO
+from pathlib import Path
+from typing import TYPE_CHECKING, Any, Iterable
+from urllib.parse import unquote, urlsplit
+from xml.etree import ElementTree
+
+import defusedxml.ElementTree as SafeTree
+from markdown_it.token import Token
+from PIL import Image as PILImage
+from PIL import ImageOps, ImageSequence, UnidentifiedImageError
+
+from . import ffmpeg as ffmpeg_engine
+from . import mapsites, notefill, notes_style, notesources, pdffonts, thumbnails
+from . import notes_markdown as md
+from .media import media_kind
+from .notelook import DEFAULT as DEFAULT_LOOK
+from .notelook import TLP_LABELS, NoteLook
+from .notes_pdf import MAX_EMPTY_SECTIONS, MAX_IMAGE_PIXELS, MAX_IMAGES, _orientation, _shows_through, _strip_jpeg
+from .notesources import Entry, Source
+
+if TYPE_CHECKING:
+    from ..workspace import Case
+
+#: Where the reader's stylesheet and script live, inlined into every file.
+ASSETS = Path(__file__).resolve().parent / "notes_html_assets"
+ASSET_NAMES = ("reader.css", "reader.js")
+#: What the page may load: nothing but what it holds.
+CSP = (
+    "default-src 'none'; img-src data:; media-src data:; font-src data:; style-src 'unsafe-inline'; "
+    "script-src 'unsafe-inline'; base-uri 'none'; form-action 'none'"
+)
+#: The weight a file aims to stay under; clips are left out first to keep it there.
+MAX_BYTES = 25 * 1024 * 1024
+#: The longest side of a picture in the file, and in the Page pane's lighter copy.
+PICTURE_SIDE = 2400
+PREVIEW_SIDE = 1200
+POSTER_SIDE = 1280
+INLINE_SIDE = 480
+JPEG_QUALITY = 84
+#: A case video short enough to go in whole, as bytes on disk; a clip cut for a post
+#: goes in whatever its size, while the file has room for it.
+SHORT_VIDEO_BYTES = 8 * 1024 * 1024
+#: A GIF that moves goes in moving up to this size, and as its first frame past it.
+MAX_GIF_BYTES = 8 * 1024 * 1024
+#: The containers a browser plays from a `data:` address, by suffix.
+CLIP_TYPES = {".mp4": "video/mp4", ".m4v": "video/mp4", ".webm": "video/webm"}
+#: How long copying a clip without its metadata may take.
+CLIP_TIMEOUT = 120.0
+#: How far a point of view is moved when the export rounds it, in metres.
+POV_METRES = 150
+#: A diagram's SVG, as the browser drew it, and how many a file holds.
+MAX_SVG_BYTES = 2_000_000
+#: How many bare counts the check names one by one.
+MAX_COUNTS = 10
+#: The check's kind for a count said with no "at least" or range.
+COUNT = "count"
+WARNING_KINDS = (*md.WARNING_KINDS, COUNT)
+#: What a graphic picture's veil says, once, at the top of the report.
+GRAPHIC_WARNING = "This report holds graphic pictures. Each stays blurred until you press it."
+#: The one-time line for a picture whose site does not allow it in published work,
+#: the one said when such a capture is filed (`engine/mapsites.py`).
+STREET_VIEW_NOTICE = mapsites.STREET_VIEW_NOTICE
+YANDEX_NOTICE = mapsites.SITE_NOTICES["yandex-maps"]
+#: What each TLP 2.0 label means, in FIRST's own short words (https://www.first.org/tlp/).
+TLP_MEANINGS = {
+    "clear": "Disclosure is not limited.",
+    "green": "Limited disclosure, restricted to the community.",
+    "amber": "Limited disclosure, restricted to participants' organisations and their clients.",
+    "amber-strict": "Limited disclosure, restricted to participants' organisations.",
+    "red": "For the eyes and ears of individual recipients only, no further disclosure.",
+}
+#: What prints where a picture or a video cannot.
+MEDIA_UNAVAILABLE = "Media unavailable"
+CASE_PICTURE = "Picture from the case"
+#: Sites a "Posted on" link names, by host.
+PLATFORMS = {
+    "x.com": "X", "twitter.com": "X", "bsky.app": "Bluesky", "t.me": "Telegram", "youtube.com": "YouTube",
+    "youtu.be": "YouTube", "facebook.com": "Facebook", "instagram.com": "Instagram", "tiktok.com": "TikTok",
+    "threads.net": "Threads", "linkedin.com": "LinkedIn", "reddit.com": "Reddit", "mastodon.social": "Mastodon",
+}
+
+#: `[2:10]` or `[2:10–2:38]`, the way a post prints a moment of its video (`lib/videoThread.js`).
+TIMECODE = re.compile(
+    r"\[((?:\d{1,2}:)?\d{1,2}:\d{2}(?:\.\d)?)(?:\s*[–-]\s*((?:\d{1,2}:)?\d{1,2}:\d{2}(?:\.\d)?))?\]"
+)
+#: An Open Location Code, `8C2XQ7R4+9G` or its short form `Q7R4+9G`.
+PLUS_CODE = re.compile(r"(?<![\w+])(?:[23456789CFGHJMPQRVWX]{4,8}\+[23456789CFGHJMPQRVWX]{2,3})(?![\w+])")
+#: A table row whose first cell is a short code (`V12`, `A3`, `T-04`) can be linked to.
+ROW_CODE = re.compile(r"^[A-Z]{1,3}-?\d{1,4}[a-z]?$")
+#: An anchor a note may link to inside the page.
+ANCHOR = re.compile(r"^[\w:.-]{1,80}$")
+#: Ids the page keeps for itself.
+RESERVED_IDS = frozenset({"sources", "corrections", "contents", "top", "main", "cover", "footer"})
+RESERVED_ID = re.compile(r"^(?:src|clip|fig|step|limits)-\d+$")
+
+#: A number followed by a word, the shape of a count.
+BARE_COUNT = re.compile(r"(?<![\w.,:/#+~≥≤>–—-])(\d{1,6})(?![\w.,:/%°×x–—-])[ \t]+([A-Za-z][A-Za-z'-]{2,})")
+#: What before a count makes it a minimum, a maximum or a range.
+HEDGES = re.compile(
+    r"(?:at\s+least|at\s+most|about|around|approximately|approx\.?|roughly|some|up\s+to|more\s+than|less\s+than|"
+    r"fewer\s+than|over|under|nearly|almost|estimated|between|minimum\s+of|maximum\s+of|c\.|ca\.|~|≥|≤|>|<)\s*$",
+    re.I,
+)
+#: Words after a number that make it a measure, a day or a time rather than a count.
+NOT_COUNTED = frozenset("""
+km kilometres kilometers metres meters miles feet ft mm cm kg tonnes tons percent per cent degrees hours hour
+minutes minute seconds second days day weeks week months month years year am pm utc gmt px mb gb kb times
+january february march april may june july august september october november december
+jan feb mar apr jun jul aug sep sept oct nov dec to and or of
+""".split())
+#: Words before a number that make it a name or a position rather than a count.
+NOT_A_COUNT_BEFORE = re.compile(
+    r"(?:figure|fig\.?|table|step|slide|page|no\.?|number|frame|day|version|row|line|section|chapter|route|"
+    r"road|highway|brigade|battalion|regiment|division|unit|building|block|plot|sector|grid|kilometre|km)\s*$",
+    re.I,
+)
+
+
+class NotesHtmlError(Exception):
+    """The note could not be turned into a page."""
+
+
+@dataclass
+class RenderedHtml:
+    """One finished page, and what the analyst should know about it."""
+
+    html: bytes
+    warnings: list[str] = field(default_factory=list)
+    warning_lines: list[int | None] = field(default_factory=list)
+    warning_kinds: list[str] = field(default_factory=list)
+    #: The internal passages in the note and its chapters.
+    internal: int = 0
+    #: The SHA-256 of the source this edition printed (`notes_markdown.printed_source`).
+    text_sha256: str = ""
+    #: The file's weight in bytes, as written or, for the check, as it would be.
+    weight: int = 0
+    #: The clips that went as their still and a Watch link, with the line naming each.
+    links: list[tuple[str, int | None]] = field(default_factory=list)
+    #: The points of view the page shows, with the line of the proof showing each.
+    pov: list[tuple[str, int | None]] = field(default_factory=list)
+    #: The Mermaid fences drawn as source because no SVG came with them, as (key, source).
+    diagrams: list[tuple[str, str]] = field(default_factory=list)
+
+
+def render(
+    case: "Case | None",
+    *,
+    title: str,
+    text: str,
+    look: NoteLook | None = None,
+    note_id: str = "",
+    resolve: md.Resolve | None = None,
+    created: datetime | None = None,
+    public: bool = False,
+    identity: notefill.Identity | None = None,
+    diagrams: dict[str, str] | None = None,
+    light: bool = False,
+    check: bool = False,
+    round_pov: bool = False,
+    changes: str = "",
+    earlier: Iterable[dict[str, Any]] = (),
+) -> RenderedHtml:
+    """Lay one note out as an HTML page.
+
+    ``public`` lays out the public edition. ``diagrams`` holds each Mermaid fence's
+    SVG as the browser drew it, keyed by `notes_markdown.diagram_key`. ``light`` is
+    the Page pane's copy: lighter pictures, clips as their still, nothing run.
+    ``check`` lays the page out as the export would, pictures included, to say its
+    weight and which clips would become links, and writes no clip. ``round_pov``
+    rounds every point of view to about `POV_METRES`. ``changes`` is the line the
+    analyst wrote about what this edition changed, and ``earlier`` the note's earlier
+    editions as its record keeps them; the public ones are listed at the end.
+    """
+    look = look or DEFAULT_LOOK
+    day = date.fromisoformat(look.cover.date) if look.cover.date else (created or datetime.now()).date()
+    identity = identity if identity is not None else notefill.Identity.from_settings()
+    values = identity.values(day)
+    empty: dict[str, int] = {}
+    passages = [0]
+    cut = notefill.split_cover(text) if look.cover.own else None
+    pieces = md.expand(title, cut.body if cut is not None else text, resolve=resolve, note_id=note_id,
+                       public=public, counter=passages, values=values, empty=empty)
+    cover: md.Piece | None = None
+    if cut is not None:
+        cover = md.cover_piece(title, cut.text, public=public, counter=passages, values=values, empty=empty)
+        if not notefill.prints_anything(cover.text):
+            cover = None
+    blocks = {id(piece): md.alignment_blocks(piece.text) for piece in pieces if piece.kind == "text"}
+    shown = [cover, *pieces] if cover is not None else pieces
+    if cover is not None:
+        blocks[id(cover)] = md.alignment_blocks(cover.text)
+    if public and any(md.holds_internal(block.tokens) for parsed in blocks.values() for block in parsed):
+        raise NotesHtmlError("an internal passage could not be left out, so the public edition was not made")
+    theme = notes_style.theme_for(look)
+    cited = md.Cited(case, look=look, styled=not theme.plain, identity=identity)
+    cited.collect(shown, blocks)
+    if look.cover.own and cover is None:
+        cited.warn(notefill.EMPTY_COVER, cut.line if cut is not None else None, md.OTHER)
+    if "name" in empty:
+        cited.warn(notefill.NO_NAME, empty["name"], md.SETTING)
+    # a note with no internal passage has one edition, shareable as it stands: it says public
+    page = _Page(case, look=look, theme=theme, cited=cited, diagrams=diagrams or {}, light=light, check=check,
+                 public=public or not passages[0], round_pov=round_pov, day=day)
+    printed = hashlib.sha256(md.printed_source(shown).encode("utf-8")).hexdigest()
+    document = page.build(title, pieces, blocks, cover=cover, printed=printed, changes=changes, earlier=earlier)
+    return RenderedHtml(
+        html=document,
+        warnings=[message for message, _, _ in page.warnings],
+        warning_lines=[line for _, line, _ in page.warnings],
+        warning_kinds=[kind for _, _, kind in page.warnings],
+        internal=passages[0],
+        text_sha256=printed,
+        weight=page.weight,
+        links=page.links,
+        pov=page.pov,
+        diagrams=list(page.missing.items()),
+    )
+
+
+# -- the page ------------------------------------------------------------------
+
+
+@dataclass
+class _Clip:
+    """A video the page shows, decided once the rest of the page is laid out."""
+
+    number: int
+    path: Path | None
+    mime: str
+    size: int
+    #: Whether it may go in whole: a clip cut for a post, or a short case video.
+    candidate: bool
+    poster: str
+    poster_size: tuple[int, int]
+    url: str
+    label: str
+    line: int | None
+    in_steps: bool
+    figure_attrs: str
+    after: str
+    embedded: bool = False
+    data: str = ""
+    #: What it adds to the file, in bytes.
+    weight: int = 0
+
+    @property
+    def id(self) -> str:
+        return f"clip-{self.number}"
+
+
+@dataclass
+class _Time:
+    """A timecode in the text, bound to a clip once the page knows its clips."""
+
+    start: float
+    end: float | None
+    words: str
+    #: How many clips came before it in the page.
+    after_clips: int
+
+
+@dataclass
+class _Heading:
+    level: int
+    id: str
+    text: str
+    number: str
+
+
+class _Page:
+    """Walks the parsed note and writes it as HTML."""
+
+    def __init__(
+        self,
+        case: "Case | None",
+        *,
+        look: NoteLook,
+        theme: notes_style.Theme,
+        cited: md.Cited,
+        diagrams: dict[str, str],
+        light: bool,
+        check: bool,
+        public: bool,
+        round_pov: bool,
+        day: date,
+    ) -> None:
+        self.case = case
+        self.look = look
+        self.theme = theme
+        self.cited = cited
+        self.diagrams = diagrams
+        self.light = light
+        self.check = check
+        self.public = public
+        self.round_pov = round_pov
+        self.day = day
+        self.out: list[str] = []
+        self.warnings: list[tuple[str, int | None, str]] = []
+        self.links: list[tuple[str, int | None]] = []
+        self.pov: list[tuple[str, int | None]] = []
+        self.missing: dict[str, str] = {}
+        self.weight = 0
+        self.images = 0
+        self.figures = 0
+        self.graphic = False
+        self.clips: list[_Clip] = []
+        self.times: list[_Time] = []
+        self.headings: list[_Heading] = []
+        self.ids: set[str] = set()
+        self._prefixes = md.file_prefixes(case)
+        self._line = 0
+        self._block_line = 0
+        self._fixed = False
+        self._shift = 0
+        self._base = 1
+        self._counters = [0, 0, 0]
+        self._on_cover = False
+        self._in_steps = False
+        self._remote = 0
+        self._remote_line: int | None = None
+        self._counts: list[tuple[str, int | None]] = []
+        self._notices: set[str] = set()
+        self._svgs = 0
+
+    # -- the whole document -------------------------------------------------------
+
+    def build(
+        self,
+        title: str,
+        pieces: list[md.Piece],
+        blocks: dict[int, list[md.Block]],
+        *,
+        cover: md.Piece | None,
+        printed: str,
+        changes: str,
+        earlier: Iterable[dict[str, Any]],
+    ) -> bytes:
+        self._prescan(pieces, blocks)
+        found: list[tuple[str, int | None, str]] = []
+        if self.case is not None:
+            empty = md.empty_sections(pieces, blocks, journal=self.look.style == "journal")
+            found.extend((f'Section "{md.cut_text(name, 80)}" is empty.', line, md.EMPTY_SECTION)
+                         for name, line in empty[:MAX_EMPTY_SECTIONS])
+            rest = len(empty) - MAX_EMPTY_SECTIONS
+            if rest > 0:
+                found.append((f"{rest} more section{'s are' if rest > 1 else ' is'} empty.", None,
+                              md.EMPTY_SECTION))
+        head = self._cover(title, cover, blocks)
+        drawn = False
+        for piece in pieces:
+            if piece.kind == "chapter":
+                self._chapter(piece)
+                drawn = True
+                continue
+            if piece.kind == "aside":
+                self._line = piece.line
+                self.out.append(_aside(piece.text))
+                drawn = True
+                continue
+            self._shift = piece.shift
+            self._fixed = piece.fixed
+            for block in blocks[id(piece)]:
+                self._block_line = piece.line + (0 if piece.fixed else block.line)
+                before = len(self.out)
+                self._block(block)
+                drawn = drawn or len(self.out) > before
+        if not drawn:
+            self.out.append(_aside("This note is empty."))
+        # what the citation pass found comes first, as in the PDF; a link to a part of
+        # this page opens on a page, where it would not in a PDF
+        self.warnings[:0] = found + [
+            (message, line, kind) for message, line, kind in self.cited.warnings
+            if not (kind == md.LOCAL_LINK and _anchor_named(message) in self.ids)
+        ]
+        if self._remote:
+            self._warn(f"{self._remote} remote image{'s' if self._remote > 1 else ''} left out: "
+                       "the export never fetches from the network.", self._remote_line, md.OTHER)
+        for phrase, line in self._counts[:MAX_COUNTS]:
+            self._warn(f'"{phrase}" is a bare count: say "at least" or give a range.', line, COUNT)
+        rest = len(self._counts) - MAX_COUNTS
+        if rest > 0:
+            self._warn(f"{rest} more bare count{'s' if rest > 1 else ''}.", None, COUNT)
+        body = self._scrub("".join(self.out))
+        sources = self._sources()
+        corrections = self._corrections(changes, earlier)
+        footer = self._footer(printed)
+        contents = self._contents(bool(sources), bool(corrections))
+        warning = f'<p class="az-graphic-warning" role="note">{_text(GRAPHIC_WARNING)}</p>\n' if self.graphic else ""
+        page = (f'{warning}{head}{contents}<main class="az-body" id="main">\n{body}</main>\n'
+                f"{sources}{corrections}{footer}")
+        return self._assemble(title, page)
+
+    def _assemble(self, title: str, page: str) -> bytes:
+        """The page with its clips and timecodes settled, wrapped in its document."""
+        css = _asset("reader.css").replace("</", "<\\/")
+        script = _asset("reader.js").replace("</", "<\\/")
+        fonts = _font_faces(self.look, self.theme, _visible_text(page) + title)
+        accent = f' style="--az-accent:{self.look.accent}"' if self.look.accent else ""
+        tlp = f' data-tlp="{self.look.tlp}"' if self.look.tlp else ""
+        edition = md.PUBLIC if self.public else md.INTERNAL
+        top = (
+            f'<!doctype html>\n<html lang="en" dir="auto" data-look="{self.look.style}" data-font="{self.look.font}"'
+            f'{tlp} data-edition="{edition}"{accent}>\n<head>\n<meta charset="utf-8">\n'
+            '<meta name="viewport" content="width=device-width, initial-scale=1">\n'
+            '<meta name="referrer" content="no-referrer">\n'
+            f'<meta http-equiv="Content-Security-Policy" content="{CSP}">\n'
+            '<meta name="generator" content="Azimut">\n'
+            f"<title>{_text(title)}</title>\n"
+            f'{_wrapped("az-fonts", fonts, "style")}'
+            f'<style id="az-reader">{css}</style>\n</head>\n<body>\n'
+        )
+        bottom = f"<script>{script}</script>\n</body>\n</html>\n"
+        frame = len((top + bottom).encode("utf-8"))
+        settled = self._settle_clips(page, frame)
+        document = top + settled + bottom
+        data = document.encode("utf-8")
+        self.weight = len(data) + (sum(clip.weight for clip in self.clips if clip.embedded) if self.check else 0)
+        if self.weight > MAX_BYTES:
+            self._warn(f"The page weighs {_megabytes(self.weight)}, past the {_megabytes(MAX_BYTES)} it aims for.",
+                       None, md.OTHER)
+        return data
+
+    def _settle_clips(self, page: str, frame: int) -> str:
+        """Each clip in or as its link, in page order, while the file stays under
+        `MAX_BYTES`; then each timecode bound to the clip it is about."""
+        used = len(page.encode("utf-8")) + frame
+        for clip in self.clips:
+            if not clip.candidate or self.light or clip.path is None:
+                continue
+            cost = 4 * ((clip.size + 2) // 3) + 200
+            if used + cost > MAX_BYTES:
+                continue
+            if self.check:
+                clip.embedded, clip.weight = True, cost  # its weight, with nothing read
+                used += cost
+                continue
+            data = _clip_bytes(clip.path)
+            if data is None:
+                self._warn(f'The clip "{clip.label}" could not be copied without its metadata, so it is a link.',
+                           clip.line, md.OTHER)
+                continue
+            encoded = f"data:{clip.mime};base64,{base64.b64encode(data).decode('ascii')}"
+            if used + len(encoded) > MAX_BYTES:
+                continue
+            clip.embedded, clip.data, clip.weight = True, encoded, len(encoded)
+            used += len(encoded)
+        for clip in self.clips:
+            if not clip.embedded and not self.light:
+                self.links.append((clip.label, clip.line))
+
+        def place(match: re.Match[str]) -> str:
+            kind, number = match.group(1), int(match.group(2))
+            if kind == "C":
+                return self._clip_html(self.clips[number])
+            return self._time_html(self.times[number])
+
+        return re.sub("\x00([CT])(\\d+)\x00", place, page)
+
+    def _warn(self, message: str, line: int | None, kind: str = md.OTHER) -> None:
+        self.warnings.append((message, line, kind))
+
+    def _scrub(self, page: str) -> str:
+        """The page without this machine's home folder or the case's own folder, should
+        the note have written either out: a reader is told neither."""
+        places: list[tuple[str, str]] = []
+        if self.case is not None:
+            places.extend((prefix, "") for prefix in self._prefixes)
+            places.append((str(self.case.path), "[case]"))
+        home = str(Path.home())
+        if len(home) > 3:
+            places.append((home, "~"))
+        for place, word in places:
+            for written in {place, _text(place), _attr(place), place.replace("\\", "/")}:
+                page = page.replace(written, word)
+        return page
+
+    def _notice(self, message: str, line: int | None) -> None:
+        """A word the check says once, however many pictures it is about."""
+        if message not in self._notices:
+            self._notices.add(message)
+            self._warn(message, line, md.OTHER)
+
+    # -- reading ahead ------------------------------------------------------------
+
+    def _prescan(self, pieces: list[md.Piece], blocks: dict[int, list[md.Block]]) -> None:
+        """Which level the headings start at, and how far each chapter moves its own,
+        the way the PDF reads them."""
+        tops: dict[int, int] = {}
+        for piece in pieces:
+            if piece.kind != "text":
+                continue
+            for position, block in enumerate(blocks[id(piece)]):
+                if position == 0 and piece.opens is not None:
+                    block.start = md.skip_repeated_title(block.tokens, piece.opens)
+                for token in block.tokens[block.start:]:
+                    if token.type == "heading_open":
+                        tops[piece.source] = min(tops.get(piece.source, 6), int(token.tag[1]))
+        for piece in pieces:
+            if piece.kind == "text" and piece.depth:
+                piece.shift = piece.depth + 1 - tops.get(piece.source, piece.depth + 1)
+        levels: list[int] = []
+        for piece in pieces:
+            if piece.kind == "chapter":
+                levels.append(piece.depth)
+            elif piece.kind == "text":
+                for block in blocks[id(piece)]:
+                    levels.extend(md.heading_level(token.tag, piece.shift)
+                                  for token in block.tokens[block.start:] if token.type == "heading_open")
+        self._base = min(levels) if levels else 1
+
+    # -- the cover ----------------------------------------------------------------
+
+    def _cover(self, title: str, cover: md.Piece | None, blocks: dict[int, list[md.Block]]) -> str:
+        look = self.look
+        tlp = self._tlp()
+        if cover is not None:
+            parts = [f'<header class="az-cover" data-cover="own">\n{tlp}']
+            self._on_cover = True
+            try:
+                for block in blocks[id(cover)]:
+                    self._block_line = cover.line + block.line
+                    inner = self._drawn(block.tokens, block.start, len(block.tokens))
+                    if block.corner:
+                        parts.append(f'<div class="az-corner" data-corner="{block.corner}">{inner}</div>\n')
+                    elif inner.strip():
+                        parts.append(_aligned(block.align, inner))
+            finally:
+                self._on_cover = False
+            parts.append("</header>\n")
+            return "".join(parts)
+        kind = "style" if look.cover.on else "none"
+        lines = [f'<header class="az-cover" data-cover="{kind}">\n', tlp,
+                 f'<p class="az-kicker">{_text(notes_style.KICKERS[look.style])}</p>\n',
+                 f'<h1 class="az-title" dir="auto">{_text(title)}</h1>\n']
+        if look.cover.subtitle:
+            lines.append(f'<p class="az-standfirst" dir="auto">{_text(look.cover.subtitle)}</p>\n')
+        lines.append(f'<p class="az-dateline"><time class="az-date" datetime="{self.day.isoformat()}">'
+                     f"{_text(notes_style.long_date(self.day))}</time></p>\n")
+        if look.cover.on and look.cover.image:
+            lines.append(self._cover_picture(look.cover.image))
+        lines.append("</header>\n")
+        return "".join(lines)
+
+    def _tlp(self) -> str:
+        label = TLP_LABELS.get(self.look.tlp)
+        if label is None:
+            return ""
+        meaning = TLP_MEANINGS.get(self.look.tlp, "")
+        note = f' <span class="az-tlp-note">{_text(meaning)}</span>' if meaning else ""
+        return f'<p class="az-tlp" data-tlp="{self.look.tlp}"><span>{_text(label[0])}</span>{note}</p>\n'
+
+    def _cover_picture(self, entity_id: str) -> str:
+        if self.case is None:
+            return f'<figure class="az-figure az-cover-figure" data-kind="placeholder">{_aside(CASE_PICTURE)}</figure>\n'
+        record = self.case.get_entity(entity_id)
+        attrs = (record or {}).get("attrs") or {}
+        if not record or not attrs.get("path"):
+            self._warn("The cover picture is no longer in the case; the cover was drawn without it.", None, md.MISSING)
+            return ""
+        if attrs.get("kind") == "video":
+            self._warn("A video cannot be a cover picture; the cover was drawn without it.", None)
+            return ""
+        path = self._case_path(str(attrs["path"]))
+        encoded = self._picture(path) if path is not None else None
+        if encoded is None:
+            self._warn("The cover picture could not be read; the cover was drawn without it.", None)
+            return ""
+        source = self.cited.reader.entity(entity_id)
+        uri, size = encoded
+        alt = str(record.get("label") or "Cover picture")
+        credit = self._credit(source.credit() if source is not None else None, self.cited.number(source))
+        caption = f"<figcaption>{credit}</figcaption>" if credit else ""
+        return (f'<figure class="az-figure az-cover-figure" data-kind="picture">'
+                f"{_zoom_button(_img(uri, size, alt), alt)}{caption}</figure>\n")
+
+    # -- chapters and headings ------------------------------------------------------
+
+    def _chapter(self, piece: md.Piece) -> None:
+        self._line = piece.line
+        self.out.append(self._heading_html(" ".join(piece.text.split()), piece.depth, chapter=True))
+
+    def _heading_html(self, words: str, level: int, *, inner: str = "", chapter: bool = False) -> str:
+        """A heading at ``level`` after its chapter's shift: `h2` for the page's top
+        level, an id from its words, a number when the look numbers sections."""
+        rank = level - self._base
+        tag = min(6, rank + 2)
+        number = ""
+        if self.look.numbered and 0 <= rank < len(self._counters):
+            self._counters[rank] += 1
+            for deeper in range(rank + 1, len(self._counters)):
+                self._counters[deeper] = 0
+            number = ".".join(str(count) for count in self._counters[: rank + 1] if count)
+        anchor = self._new_id(_slug(words))
+        if tag <= 3:
+            self.headings.append(_Heading(tag, anchor, words, number))
+        shown = inner or _text(words)
+        numbered = f'<span class="az-num">{number}</span> ' if number else ""
+        kind = ' class="az-chapter"' if chapter else ""
+        return f'<h{tag} id="{anchor}"{kind} dir="auto">{numbered}{shown}</h{tag}>\n'
+
+    def _new_id(self, wanted: str) -> str:
+        base = wanted or "section"
+        if base in RESERVED_IDS or RESERVED_ID.match(base):
+            base = f"{base}-section"
+        candidate, counter = base, 2
+        while candidate in self.ids:
+            candidate, counter = f"{base}-{counter}", counter + 1
+        self.ids.add(candidate)
+        return candidate
+
+    def _contents(self, sources: bool, corrections: bool) -> str:
+        entries = list(self.headings)
+        if not entries and not sources:
+            return ""
+        items: list[str] = []
+        open_sub = False
+        for entry in entries:
+            number = f'<span class="az-num">{entry.number}</span> ' if entry.number else ""
+            link = f'<a href="#{entry.id}">{number}{_text(entry.text)}</a>'
+            if entry.level == 3 and items:
+                if not open_sub:
+                    items[-1] = items[-1].removesuffix("</li>") + "<ol>"
+                    open_sub = True
+                items.append(f"<li>{link}</li>")
+                continue
+            if open_sub:
+                items.append("</ol></li>")
+                open_sub = False
+            items.append(f"<li>{link}</li>")
+        if open_sub:
+            items.append("</ol></li>")
+        if sources:
+            items.append('<li class="az-contents-sources"><a href="#sources">Sources</a></li>')
+        if corrections:
+            items.append('<li class="az-contents-corrections"><a href="#corrections">Corrections</a></li>')
+        return (f'<nav class="az-contents" aria-label="Contents">\n<ol>{"".join(items)}</ol>\n</nav>\n')
+
+    # -- blocks -------------------------------------------------------------------
+
+    def _block(self, block: md.Block) -> None:
+        if block.kind == md.STEPS:
+            self.out.append(self._steps(block))
+            return
+        if block.kind == md.STORY:
+            self.out.append(self._story(block))
+            return
+        inner = self._drawn(block.tokens, block.start, len(block.tokens))
+        if inner:
+            self.out.append(_aligned(block.align, inner))
+
+    def _drawn(self, tokens: list[Token], start: int, end: int) -> str:
+        """What tokens ``start`` to ``end`` draw, as text, rather than into the page."""
+        kept, self.out = self.out, []
+        try:
+            self._walk(tokens, start, end)
+            return "".join(self.out)
+        finally:
+            self.out = kept
+
+    def _walk(self, tokens: list[Token], index: int, end: int) -> None:
+        while index < end:
+            token = tokens[index]
+            where = token.map
+            if where and not self._fixed:
+                self._line = self._block_line + where[0]
+            elif self._fixed:
+                self._line = self._block_line
+            handler = getattr(self, f"_on_{token.type}", None)
+            index = handler(tokens, index) if handler is not None else index + 1
+
+    def _on_heading_open(self, tokens: list[Token], index: int) -> int:
+        token = tokens[index]
+        inline = tokens[index + 1]
+        inner = self._inline(inline)
+        if self._on_cover:
+            level = int(token.tag[1])
+            self.out.append(f'<h{level} class="az-cover-heading" dir="auto">{inner}</h{level}>\n')
+            return index + 3
+        words = " ".join(md.inline_text(inline).split())
+        self.out.append(self._heading_html(words, md.heading_level(token.tag, self._shift), inner=inner))
+        return index + 3
+
+    def _on_paragraph_open(self, tokens: list[Token], index: int) -> int:
+        inline = tokens[index + 1]
+        figure = self._standalone(inline)
+        if figure is not None:
+            self.out.append(figure)
+            return index + 3
+        words = self._inline(inline, counted=True)
+        if words.strip():
+            self.out.append(words if tokens[index].hidden else f'<p dir="auto">{words}</p>\n')
+        return index + 3
+
+    def _on_hr(self, tokens: list[Token], index: int) -> int:
+        self.out.append("<hr>\n")
+        return index + 1
+
+    def _on_fence(self, tokens: list[Token], index: int) -> int:
+        token = tokens[index]
+        if md.MERMAID_INFO.match(token.info or ""):
+            self.out.append(self._diagram(token.content))
+        else:
+            self.out.append(_code(token.content))
+        return index + 1
+
+    def _on_code_block(self, tokens: list[Token], index: int) -> int:
+        self.out.append(_code(tokens[index].content))
+        return index + 1
+
+    def _on_html_block(self, tokens: list[Token], index: int) -> int:
+        # shown as what it is, never run, and never with a comment in it
+        text = _without_comments(tokens[index].content).strip()
+        if text:
+            self.out.append(_aside(text))
+        return index + 1
+
+    def _on_blockquote_open(self, tokens: list[Token], index: int) -> int:
+        kind = md.callout_kind(tokens, index)
+        callout = md.take_callout(tokens, index)
+        end = md.past(tokens, index)
+        inner = self._drawn(tokens, index + 1, end - 1)
+        if callout is None:
+            self.out.append(f"<blockquote>\n{inner}</blockquote>\n")
+            return end
+        label = f'<p class="az-callout-label">{_text(callout[0])}</p>\n'
+        if kind == md.INTERNAL:
+            self.out.append(f'<aside class="az-internal" data-kind="internal">\n{label}{inner}</aside>\n')
+            return end
+        anchor = ""
+        if kind == "limits":
+            # listed in the contents, under the section it closes
+            ident = self._new_id("limits")
+            self.headings.append(_Heading(3 if self.headings else 2, ident, callout[0], ""))
+            anchor = f' id="{ident}"'
+        self.out.append(f'<aside class="az-callout" data-kind="{kind}"{anchor}>\n{label}{inner}</aside>\n')
+        return end
+
+    def _on_bullet_list_open(self, tokens: list[Token], index: int) -> int:
+        return self._list(tokens, index, "ul")
+
+    def _on_ordered_list_open(self, tokens: list[Token], index: int) -> int:
+        return self._list(tokens, index, "ol")
+
+    def _list(self, tokens: list[Token], index: int, tag: str) -> int:
+        end = md.past(tokens, index)
+        start = _start(tokens[index]) if tag == "ol" else 1
+        opening = f'<{tag} start="{start}">' if start != 1 else f"<{tag}>"
+        items: list[str] = []
+        position = index + 1
+        while position < end - 1:
+            if tokens[position].type != "list_item_open":
+                position += 1
+                continue
+            stop = md.past(tokens, position)
+            where = tokens[position].map
+            if where and not self._fixed:
+                self._line = self._block_line + where[0]
+            task = md.take_task(tokens, position)
+            inner = self._drawn(tokens, position + 1, stop - 1)
+            if task is None:
+                items.append(f'<li dir="auto">{inner}</li>\n')
+            else:
+                state = "done" if task else "open"
+                box = (f'<input type="checkbox" disabled{" checked" if task else ""} '
+                       f'aria-label="{"Done" if task else "Open"}"> ')
+                items.append(f'<li class="az-task" data-task="{state}" dir="auto">{box}{inner}</li>\n')
+            position = stop
+        self.out.append(f"{opening}\n{''.join(items)}</{tag}>\n")
+        return end
+
+    def _on_table_open(self, tokens: list[Token], index: int) -> int:
+        end = md.past(tokens, index)
+        head: list[str] = []
+        rows: list[str] = []
+        in_head = False
+        position = index + 1
+        while position < end:
+            token = tokens[position]
+            if token.type == "thead_open":
+                in_head = True
+            elif token.type == "thead_close":
+                in_head = False
+            elif token.type == "tr_open":
+                cells: list[str] = []
+                first = ""
+                position += 1
+                while position < end and tokens[position].type != "tr_close":
+                    cell = tokens[position]
+                    if cell.type in ("th_open", "td_open"):
+                        tag = "th" if cell.type == "th_open" else "td"
+                        style = md.token_attr(cell, "style")
+                        aligned = re.search(r"text-align:\s*(left|center|right)", style)
+                        where = f' data-align="{aligned.group(1)}"' if aligned else ""
+                        scope = ' scope="col"' if in_head else ""
+                        if not cells:
+                            first = " ".join(md.inline_text(tokens[position + 1]).split())
+                        cells.append(f'<{tag}{scope}{where} dir="auto">{self._inline(tokens[position + 1])}</{tag}>')
+                        position += 3
+                        continue
+                    position += 1
+                row_id = ""
+                if not in_head and ROW_CODE.match(first) and first not in self.ids:
+                    self.ids.add(first)
+                    row_id = f' id="{first}"'
+                (head if in_head else rows).append(f"<tr{row_id}>{''.join(cells)}</tr>\n")
+            position += 1
+        if head or rows:
+            thead = f"<thead>\n{''.join(head)}</thead>\n" if head else ""
+            self.out.append(f'<div class="az-table-wrap">\n<table class="az-table" data-rows="{len(rows)}">\n'
+                            f"{thead}<tbody>\n{''.join(rows)}</tbody>\n</table>\n</div>\n")
+        return end
+
+    # -- steps and story --------------------------------------------------------------
+
+    def _parts(self, block: md.Block) -> tuple[str, list[tuple[Token, str]]]:
+        """A block of steps cut into what comes before its first picture, then each
+        picture with the words after it."""
+        tokens = block.tokens
+        lead: list[str] = []
+        steps: list[tuple[Token, list[str]]] = []
+        index = block.start
+        while index < len(tokens):
+            token = tokens[index]
+            end = md.past(tokens, index) if token.nesting == 1 else index + 1
+            where = token.map
+            if where and not self._fixed:
+                self._line = self._block_line + where[0]
+            picture = _lone_picture(tokens, index)
+            if picture is not None:
+                steps.append((picture, []))
+            else:
+                drawn = self._drawn(tokens, index, end)
+                (steps[-1][1] if steps else lead).append(drawn)
+            index = end
+        return "".join(lead), [(picture, "".join(words)) for picture, words in steps]
+
+    def _steps(self, block: md.Block) -> str:
+        """`::: steps`: one step per picture, its words under it, and the bar that
+        moves between them. Without the script the steps stand one under another."""
+        self._in_steps = True
+        try:
+            lead, parts = self._parts(block)
+            steps: list[str] = []
+            dots: list[str] = []
+            for number, (picture, words) in enumerate(parts, 1):
+                label = _step_label(picture, number)
+                figure = self._figure(picture)
+                steps.append(f'<div class="az-step" data-step="{number}" style="--az-n:{number}" '
+                             f'data-label="{_attr(label)}">\n{figure}'
+                             f'{_wrapped("az-step-words", words)}</div>\n')
+                dots.append(f'<li><button type="button" data-step="{number}" '
+                            f'aria-label="Step {number}: {_attr(label)}">{_text(label)}</button></li>')
+        finally:
+            self._in_steps = False
+        bar = (f'<nav class="az-steps-bar" aria-label="Steps" hidden>\n'
+               f'<button type="button" class="az-steps-prev" aria-label="Previous step">‹</button>\n'
+               f'<ol class="az-steps-dots">{"".join(dots)}</ol>\n'
+               f'<button type="button" class="az-steps-next" aria-label="Next step">›</button>\n</nav>\n')
+        head = f'<div class="az-steps-lead">{lead}</div>\n' if lead else ""
+        return (f'<section class="az-steps" data-steps="{len(steps)}" aria-label="Steps">\n'
+                f"{head}{''.join(steps)}{bar if steps else ''}</section>\n")
+
+    def _story(self, block: md.Block) -> str:
+        """`::: story`: the pictures on one side, the words of each step on the other;
+        each picture and its words share a step number (and `--az-n`, for a layout
+        that reads them in order without the script)."""
+        lead, parts = self._parts(block)
+        figures: list[str] = []
+        words: list[str] = []
+        for number, (picture, said) in enumerate(parts, 1):
+            zoom = md.image_zoom(md.token_attr(picture, "src"))
+            extra = f' data-step="{number}" style="--az-n:{number}"'
+            if zoom is not None:
+                extra += f' data-zoom="{",".join(_short(value) for value in zoom)}"'
+            figures.append(self._figure(picture, extra=extra))
+            words.append(f'<div class="az-story-step" data-step="{number}" style="--az-n:{number}">'
+                         f"{said}</div>\n")
+        head = f'<div class="az-story-lead">{lead}</div>\n' if lead else ""
+        return (f'<section class="az-story" data-steps="{len(parts)}">\n{head}'
+                f'<div class="az-story-figures">\n{"".join(figures)}</div>\n'
+                f'<div class="az-story-steps">\n{"".join(words)}</div>\n</section>\n')
+
+    # -- inline -------------------------------------------------------------------
+
+    def _inline(self, token: Token, *, counted: bool = False) -> str:
+        """One inline token stream as HTML: marks, links, citations, and in prose the
+        addresses, coordinates and timecodes it holds."""
+        if token.type != "inline":
+            return ""
+        parts: list[str] = []
+        links: list[tuple[str, int]] = []
+        for child in token.children or []:
+            kind = child.type
+            if kind in ("strong_open", "strong_close", "em_open", "em_close", "s_open", "s_close"):
+                tag = {"strong": "strong", "em": "em", "s": "s"}[kind.rsplit("_", 1)[0]]
+                parts.append(f"<{tag}>" if kind.endswith("_open") else f"</{tag}>")
+            elif kind == "link_open":
+                opening, closing, number = self._link(child)
+                parts.append(opening)
+                links.append((closing, number))
+            elif kind == "link_close":
+                closing, number = links.pop() if links else ("", 0)
+                parts.append(closing + (_cite(number) if number else ""))
+            elif kind == "image":
+                parts.append(self._inline_picture(child))
+            elif kind == "code_inline":
+                parts.append(f"<code>{_text(child.content)}</code>")
+            elif kind == "softbreak":
+                parts.append("\n")
+            elif kind == "hardbreak":
+                parts.append("<br>\n")
+            elif kind == "html_inline":
+                shown = _without_comments(child.content)
+                if shown:
+                    parts.append(_text(shown))
+            elif kind == "text":
+                if links:
+                    parts.append(_text(child.content))
+                else:
+                    if counted and not self._on_cover:
+                        self._count(child.content)
+                    parts.append(self._prose(child.content))
+        parts.extend(closing for closing, _ in reversed(links))
+        return "".join(parts)
+
+    def _link(self, token: Token) -> tuple[str, str, int]:
+        """How a written link opens and closes, and the source it cites."""
+        href = md.token_attr(token, "href").strip()
+        number = self.cited.number(self.cited.link_source(href)) if self.cited.annex is not None else 0
+        entity = md.ENTITY_HREF.match(href)
+        if entity:
+            if self.case is None:
+                return '<span class="az-ref">', "</span>", 0
+            source = self.cited.reader.entity(entity.group(1))
+            if source is None:
+                return '<span class="az-ref az-gone">', "</span>", 0
+            if source.link:
+                return f'<a class="az-ref" {_outward(source.link)}>', "</a>", number
+            return '<span class="az-ref">', "</span>", number
+        if href.startswith("#"):
+            if ANCHOR.match(href[1:]):
+                return f'<a href="#{_attr(href[1:])}">', "</a>", 0
+            return "<span>", "</span>", 0
+        if notesources.web(href) and not md.is_local(href, ()):
+            return f"<a {_outward(href)}>", "</a>", number
+        scheme = urlsplit(href).scheme.lower() if ":" in href else ""
+        if scheme in ("mailto", "tel"):
+            return f'<a href="{_attr(href)}">', "</a>", 0
+        if number:
+            # a file of the case: its entry in the sources list
+            return f'<a class="az-ref" href="#src-{number}">', "</a>", 0
+        return '<span class="az-unlinked">', "</span>", 0
+
+    def _prose(self, text: str) -> str:
+        """Prose with each bare address linked and cited, each coordinate pair linked
+        to the map, each plus code isolated and each timecode bound to its clip."""
+        found: list[tuple[int, int, str, Any]] = []
+        for start, end, address in md.bare_urls(text):
+            found.append((start, end, "url", address))
+        for match in md.COORDINATES.finditer(text):
+            if abs(float(match.group(1))) <= 90 and abs(float(match.group(2))) <= 180:
+                found.append((match.start(), match.end(), "coords", match))
+        for match in PLUS_CODE.finditer(text):
+            found.append((match.start(), match.end(), "plus", match))
+        for match in TIMECODE.finditer(text):
+            found.append((match.start(), match.end(), "time", match))
+        for match in md.FILE_URL.finditer(text):
+            found.append((match.start(), match.end(), "file", match))
+        found.sort(key=lambda item: (item[0], -item[1]))
+        out: list[str] = []
+        at = 0
+        for start, end, kind, value in found:
+            if start < at:
+                continue
+            out.append(_text(text[at:start]))
+            written = text[start:end]
+            if kind == "url":
+                number = self.cited.number(self.cited.link_source(value)) if self.cited.annex is not None else 0
+                if md.is_local(value, ()):
+                    out.append(_text(written))
+                else:
+                    out.append(f"<a {_outward(value)}>{_text(written)}</a>{_cite(number) if number else ''}")
+            elif kind == "coords":
+                lat, lon = value.group(1), value.group(2)
+                out.append(f'<a class="az-coords" {_outward(md.MAP_LINK.format(lat=lat, lon=lon))}>'
+                           f"<bdi>{_text(written)}</bdi></a>")
+            elif kind == "plus":
+                out.append(f"<bdi>{_text(written)}</bdi>")
+            elif kind == "file":
+                # a file on this machine: no reader has it, and its path is the analyst's
+                out.append('<span class="az-unlinked">[a local file]</span>')
+            else:
+                out.append(self._timecode(value))
+            at = end
+        out.append(_text(text[at:]))
+        return "".join(out)
+
+    def _timecode(self, match: re.Match[str]) -> str:
+        start = _seconds(match.group(1))
+        end = _seconds(match.group(2)) if match.group(2) else None
+        if start is None:
+            return _text(match.group(0))
+        self.times.append(_Time(start, end, match.group(0), len(self.clips)))
+        return f"\x00T{len(self.times) - 1}\x00"
+
+    def _time_html(self, time: _Time) -> str:
+        """A timecode as a link that plays its clip from there, or that opens the video
+        where it is posted; as written when the page shows no video."""
+        clip = None
+        if self.clips:
+            clip = self.clips[time.after_clips - 1] if time.after_clips else self.clips[0]
+        if clip is None:
+            return _text(time.words)
+        if clip.embedded:
+            end = f' data-end="{_short(time.end)}"' if time.end is not None else ""
+            return (f'<a class="az-time" href="#{clip.id}" data-clip="{clip.id}" data-t="{_short(time.start)}"'
+                    f"{end}>{_text(time.words)}</a>")
+        if clip.url:
+            return f'<a class="az-watch" {_outward(_at_moment(clip.url, time.start))}>Watch {_text(time.words)}</a>'
+        return _text(time.words)
+
+    def _count(self, text: str) -> None:
+        """Note each count said with no "at least" or range before it, for the check."""
+        for match in BARE_COUNT.finditer(text):
+            number, word = int(match.group(1)), match.group(2).lower()
+            if number < 2 or 1900 <= number <= 2099 or word in NOT_COUNTED:
+                continue
+            before = text[max(0, match.start() - 24):match.start()]
+            if HEDGES.search(before) or NOT_A_COUNT_BEFORE.search(before):
+                continue
+            self._counts.append((f"{match.group(1)} {match.group(2)}", self._line))
+
+    # -- pictures -----------------------------------------------------------------------
+
+    def _standalone(self, inline: Token) -> str | None:
+        """A paragraph that is nothing but one picture, as a figure."""
+        children = [child for child in inline.children or [] if child.type != "softbreak"]
+        if len(children) != 1 or children[0].type != "image":
+            return None
+        return self._figure(children[0])
+
+    def _inline_picture(self, token: Token) -> str:
+        """A picture inside a line of words: small, opening large like any other."""
+        src = md.token_attr(token, "src")
+        options = md.image_options(src)
+        words = " ".join((token.content or "").split()) or "Picture"
+        name = notefill.picture_name(options.source)
+        if name is not None:
+            return self._built_in(name, inline=True)
+        found = self._find(options.source)
+        if isinstance(found, str):
+            return f'<span class="az-missing">[{_text(words)}]</span>'
+        path, _, record = found
+        source = self.cited.image_source(src)
+        number = self.cited.number(source)
+        attrs = (record or {}).get("attrs") or {}
+        if attrs.get("kind") == "video" or media_kind(path.name) == "video":
+            url = source.traced_address if source is not None else ""
+            named = f"<a {_outward(url)}>[{_text(words)}]</a>" if url else f"[{_text(words)}]"
+            return f'<span class="az-inline-video">{named}</span>{_cite(number) if number else ""}'
+        encoded = self._picture(path, INLINE_SIDE)
+        if encoded is None:
+            return f'<span class="az-missing">[{_text(words)}]</span>'
+        uri, size = encoded
+        return f'{_zoom_button(_img(uri, size, words, "az-inline"), words)}{_cite(number) if number else ""}'
+
+    def _find(self, written: str) -> "tuple[Path, str, dict[str, Any] | None] | str":
+        """The case file a picture shows and its record, or the words said instead."""
+        parts = urlsplit(written)
+        if parts.scheme in ("http", "https"):
+            self._remote += 1
+            if self._remote_line is None:
+                self._remote_line = self._line
+            return "External image not included."
+        if self.case is None:
+            if (parts.scheme == "azimut" and parts.netloc == "media") or written.startswith("/files/"):
+                return CASE_PICTURE
+            return "Image not included."
+        record: dict[str, Any] | None = None
+        if parts.scheme == "azimut" and parts.netloc == "media":
+            record = self.case.get_entity(unquote(parts.path.lstrip("/")))
+            relative = str(((record or {}).get("attrs") or {}).get("path") or "")
+            if not record or not relative:
+                return MEDIA_UNAVAILABLE
+        elif (prefix := next((one for one in self._prefixes if written.startswith(one)), "")):
+            relative = unquote(written[len(prefix):])
+        else:
+            return "Image not included."
+        if self.images >= MAX_IMAGES:
+            return "Image not included: this note holds too many."
+        path = self._case_path(relative)
+        if path is None or not path.is_file():
+            return MEDIA_UNAVAILABLE
+        if record is None:
+            found = self.cited.reader.file(relative)
+            record = self.case.get_entity(found.entity_id) if found is not None and found.entity_id else None
+        self.images += 1
+        return path, relative, record
+
+    def _case_path(self, relative: str) -> Path | None:
+        if self.case is None:
+            return None
+        try:
+            return self.case.resolve_inside(relative)
+        except Exception:
+            return None
+
+    def _picture(self, path: Path, side: int = PICTURE_SIDE) -> tuple[str, tuple[int, int]] | None:
+        """A picture of the case as a `data:` address and its size, without its metadata."""
+        made = PICTURES.get(path, PREVIEW_SIDE if self.light else side)
+        if made is None:
+            return None
+        data, mime, size = made
+        return f"data:{mime};base64,{base64.b64encode(data).decode('ascii')}", size
+
+    def _figure(self, token: Token, *, extra: str = "") -> str:
+        """A picture standing alone, as the figure its kind asks for."""
+        src = md.token_attr(token, "src")
+        options = md.image_options(src)
+        title = options.caption or md.token_attr(token, "title")
+        words = " ".join((token.content or "").split())
+        name = notefill.picture_name(options.source)
+        if name is not None:
+            return self._built_in(name)
+        found = self._find(options.source)
+        if isinstance(found, str):
+            if found == MEDIA_UNAVAILABLE:
+                said = md.cut_text(words or "Untitled", 80)
+                self._warn(f'Picture "{said}" is no longer in the case.', self._line, md.MISSING)
+            if found == CASE_PICTURE:
+                caption = self._caption(title, words)
+                return (f'<figure class="az-figure" data-kind="placeholder"{extra}>{_aside(CASE_PICTURE)}'
+                        f'{f"<figcaption>{caption}</figcaption>" if caption else ""}</figure>\n')
+            return _aside(found)
+        path, relative, record = found
+        source = self.cited.image_source(src)
+        number = self.cited.number(source)
+        attrs = (record or {}).get("attrs") or {}
+        graphic = md.image_graphic(src)
+        self._street_view(source)
+        layout = ""
+        if options.width:
+            layout += f' data-width="{options.width}" style="--az-width:{options.width}"'
+        if options.aligned:
+            layout += f' data-align="{options.align}"'
+        if graphic:
+            self.graphic = True
+            layout += ' data-graphic="true"'
+        classes = "az-figure az-graphic" if graphic else "az-figure"
+        alt = words or title or "Picture"
+        if attrs.get("kind") == "video" or media_kind(path.name) == "video":
+            return self._clip(path, relative, record, source, title, words, number,
+                              f'class="{classes}"{layout}{extra}')
+        caption = self._caption(title, words)
+        credit = self._credit(source.credit() if source is not None else None, number)
+        posted = _posted(source.posted) if source is not None and source.posted else ""
+        chain = self._chain(source)
+        kind = "proof" if (record or {}).get("type") == "proof" else "picture"
+        sides = self._sides(relative, source) if kind == "picture" else None
+        if sides is not None:
+            kind = "pair"
+        dates = self._dates(source) if kind == "proof" else ""
+        figcaption = "".join(part for part in (caption, credit, posted, dates) if part)
+        figcaption = f"<figcaption>{figcaption}</figcaption>\n" if figcaption else ""
+        if sides is not None:
+            shown = sides
+        else:
+            encoded = self._picture(path)
+            if encoded is None:
+                said = md.cut_text(words or "Untitled", 80)
+                self._warn(f'Picture "{said}" could not be read.', self._line, md.MISSING)
+                return _aside(MEDIA_UNAVAILABLE)
+            uri, size = encoded
+            shown = _zoom_button(_img(uri, size, alt), alt)
+        proof = self._proof(record, source) if kind == "proof" else ""
+        return (f'<figure class="{classes}" data-kind="{kind}"{layout}{extra}>\n{shown}\n{proof}'
+                f"{figcaption}{chain}</figure>\n")
+
+    def _built_in(self, name: str, *, inline: bool = False) -> str:
+        """The app's logo or the analyst's own logo or signature: no frame, no number."""
+        path = self.cited.identity.picture(name)
+        if path is None:
+            return ""
+        if path.suffix.lower() == ".svg":
+            try:
+                data = path.read_bytes()
+            except OSError:
+                return ""
+            uri = f"data:image/svg+xml;base64,{base64.b64encode(data).decode('ascii')}"
+            size = notefill.AZIMUT_LOGO_SIZE
+        else:
+            encoded = self._picture(path, POSTER_SIDE)
+            if encoded is None:
+                return ""
+            uri, size = encoded
+        alt = {"logo": "Azimut", "my-logo": "Logo", "my-signature": "Signature"}.get(name, "")
+        picture = _img(uri, size, alt, f"az-{name}")
+        return picture if inline else f'<p class="az-mark">{picture}</p>\n'
+
+    def _caption(self, title: str, words: str) -> str:
+        label = ""
+        said = title
+        if self.look.numbered:
+            self.figures += 1
+            label = f"Figure {self.figures}"
+            said = title or words
+        if not label and not said:
+            return ""
+        lead = (f'<span class="az-fig-num">{label}.</span> ' if said else f'<span class="az-fig-num">{label}</span>') \
+            if label else ""
+        return f'<span class="az-caption" dir="auto">{lead}{_text(said)}</span>\n'
+
+    def _credit(self, credit: notesources.Credit | None, number: int) -> str:
+        if credit is None:
+            return f'<span class="az-credit">{_cite(number)}</span>\n' if number else ""
+        value = f"<a {_outward(credit.link)}>{_text(credit.value)}</a>" if credit.link else _text(credit.value)
+        cite = f" {_cite(number)}" if number else ""
+        return (f'<span class="az-credit"><span class="az-credit-kind">{_text(credit.kind)}:</span> '
+                f"{value}{cite}</span>\n")
+
+    def _street_view(self, source: Source | None) -> None:
+        """Say once that a site's rules keep its picture out of published work."""
+        for one in source.lineage() if source is not None else ():
+            words = f"{one.attribution} {one.label}".lower()
+            host = one.host
+            if "street view" in words or ("google." in host and ",3a," in one.address):
+                self._notice(STREET_VIEW_NOTICE, self._line)
+            elif host.startswith("yandex.") or ".yandex." in host:
+                self._notice(YANDEX_NOTICE, self._line)
+
+    def _chain(self, source: Source | None) -> str:
+        """"How this was checked": the picture's sources back to its originals, each
+        with what the case recorded of it."""
+        if source is None:
+            return ""
+        items: list[str] = []
+        for one in source.lineage():
+            said: list[str] = []
+            if one.address:
+                said.append(f'<a class="az-original" {_outward(one.address)}>{_text(_short_address(one.address))}</a>')
+            if one.archive and one.archive != one.address:
+                said.append(f'<a class="az-archive" {_outward(one.archive)}>Archived copy</a>')
+            if one.published:
+                said.append(f'<span class="az-posted-day">Posted {_day(one.published)}</span>')
+            if one.collected:
+                said.append(f'<span class="az-collected">{_text(one.arrival.capitalize())} {_day(one.collected)}</span>')
+            if one.at:
+                said.append(f'<span class="az-frame">Frame at {_text(one.at)}</span>')
+            imagery = one.imagery() if one.readings else ""
+            if imagery:
+                said.append(f'<span class="az-imagery">{_text(imagery)}</span>')
+            if one.seen:
+                said.append(f'<span class="az-seen">{_text(one.seen)}</span>')
+            said.extend(f'<a class="az-verify" {_outward(address)}>Check on {_text(site)}</a>'
+                        for site, address in one.verify)
+            if one.sha256:
+                said.append(f'<span class="az-hash">SHA-256 of the original <code>{one.sha256}</code></span>')
+            if not said:
+                continue
+            what = f'<span class="az-chain-what">{_text(one.noun or "Item")}</span> '
+            label = f'<span class="az-chain-label" dir="auto">{_text(one.label)}</span> ' if one.label else ""
+            items.append(f"<li>{what}{label}{' '.join(said)}</li>")
+        if not items:
+            return ""
+        return ('<details class="az-checked"><summary>How this was checked</summary>\n'
+                f'<ol class="az-chain">{"".join(items)}</ol>\n</details>\n')
+
+    def _dates(self, source: Source | None) -> str:
+        """`Imagery: Apple, about 3 June 2025 · Footage: 24 October 2025`, the days a
+        comparison or a proof rests on, read from what it was made from."""
+        if source is None:
+            return ""
+        imagery: list[str] = []
+        footage = ""
+        for one in source.lineage():
+            for reading in one.readings:
+                said = ", ".join(part for part in (reading.provider, notesources.spoken_day(reading.day)) if part)
+                if said and said not in imagery:
+                    imagery.append(said)
+            if not footage and one.published and one.kind != notesources.IMAGERY:
+                footage = notesources.spoken_day(one.published)
+        parts: list[str] = []
+        if imagery:
+            parts.append(f'<span class="az-date-imagery">Imagery: {_text(" and ".join(imagery))}</span>')
+        if footage:
+            parts.append(f'<span class="az-date-footage">Footage: {_text(footage)}</span>')
+        return f'<span class="az-dates">{" · ".join(parts)}</span>\n' if parts else ""
+
+    def _sidecar(self, relative: str) -> dict[str, Any]:
+        """What the producer of a case file recorded of it (its media sidecar's source)."""
+        if self.case is None or not relative:
+            return {}
+        try:
+            found = self.case.media_items_by_paths([relative])
+        except Exception:
+            return {}
+        item = found[0] if found and isinstance(found[0], dict) else {}
+        sidecar = item.get("source")
+        return sidecar if isinstance(sidecar, dict) else {}
+
+    def _sides(self, relative: str, source: Source | None) -> str | None:
+        """A comparison kept with its two sides, as the slider's two pictures; None for
+        any other picture, or a comparison kept before its sides were."""
+        sidecar = self._sidecar(relative)
+        if sidecar.get("type") != "compare":
+            return None
+        sides = sidecar.get("sides")
+        if not isinstance(sides, dict):
+            return None
+        files = [self._case_path(str(sides.get(side) or "")) if sides.get(side) else None for side in ("a", "b")]
+        if any(file is None or not file.is_file() for file in files):
+            return None
+        encoded = [self._picture(file) for file in files if file is not None]
+        if len(encoded) != 2 or any(one is None for one in encoded):
+            return None
+        days = [_side_day(sidecar, side) for side in ("a", "b")]
+        # whose imagery each side is, as the sources read it: one reading per dated side
+        readings = list(source.readings) if source is not None else []
+        names = [reading.provider for reading in readings] if len(readings) == 2 else ["", ""]
+        halves: list[str] = []
+        labels: list[str] = []
+        for side, role, one, day, name in zip(("a", "b"), ("before", "after"), encoded, days, names):
+            assert one is not None
+            uri, size = one
+            said = ", ".join(part for part in (name, day) if part) or role.capitalize()
+            halves.append(_img(uri, size, f"{role.capitalize()}: {said}", f"az-{role}"))
+            when = f'<span class="az-side-date">{_text(day)}</span>' if day else ""
+            credit = f'<span class="az-side-credit">{_text(name)}</span>' if name else ""
+            labels.append(f'<span class="az-side-label" data-side="{side}">{when}{credit}</span>')
+        slider = ('<input class="az-slider" type="range" min="0" max="100" value="50" step="1" '
+                  'aria-label="Before and after">')
+        return f'<div class="az-compare">{halves[0]}{halves[1]}{slider}{labels[0]}{labels[1]}</div>'
+
+    def _proof(self, record: dict[str, Any] | None, source: Source | None) -> str:
+        """A proof's sentence and the points it concludes on, each linked to the map."""
+        spec = _proof_spec(self.case, record)
+        sentence = str(spec.get("description") or "").strip()
+        from . import satellite as satellite_engine
+
+        try:
+            points = [point for point in satellite_engine.spec_points(spec) if not point.get("proposed")]
+        except Exception:  # a spec the app cannot read says nothing more
+            points = []
+        out = f'<p class="az-proof-sentence" dir="auto">{_text(sentence)}</p>\n' if sentence else ""
+        items: list[str] = []
+        for point in points:
+            lat, lon = float(point["lat"]), float(point["lon"])
+            pov = bool(point.get("pov"))
+            rounded = pov and self.round_pov
+            if rounded:
+                lat, lon = _rounded(lat, lon)
+            shown = f"{lat:.4f}, {lon:.4f}" if rounded else f"{lat:.6f}, {lon:.6f}"
+            classes = "az-point az-pov" if pov else "az-point"
+            label = str(point.get("label") or "").strip()
+            words = f' <span class="az-point-label" dir="auto">{_text(label)}</span>' if label else ""
+            note = ""
+            if pov:
+                note = ' <span class="az-pov-note">Where it was filmed' + (
+                    f", rounded to about {POV_METRES} m" if rounded else "") + "</span>"
+                named = (record or {}).get("label") or "Proof"
+                self.pov.append((f"{named}: {shown}", self._line))
+            href = md.MAP_LINK.format(lat=f"{lat:.6f}", lon=f"{lon:.6f}")
+            items.append(f'<li><a class="{classes}" {_outward(href)}><bdi>{shown}</bdi></a>{words}{note}</li>')
+        if items:
+            out += f'<ul class="az-points">{"".join(items)}</ul>\n'
+        return out
+
+    def _clip(self, path: Path, relative: str, record: dict[str, Any] | None, source: Source | None, title: str,
+              words: str, number: int, attrs: str) -> str:
+        """A video, settled once the page knows its weight (`_settle_clips`)."""
+        sidecar = self._sidecar(relative)
+        cut = sidecar.get("type") == "inspect" and sidecar.get("op") == "clip"
+        mime = CLIP_TYPES.get(path.suffix.lower(), "")
+        try:
+            size = path.stat().st_size
+        except OSError:
+            size = 0
+        sha = str(((record or {}).get("attrs") or {}).get("sha256") or (source.sha256 if source is not None else ""))
+        poster, poster_size = "", (0, 0)
+        still = thumbnails.thumb_relpath(sha, "video") if sha else None
+        still_path = self._case_path(still) if still else None
+        if still_path is not None and still_path.is_file():
+            encoded = self._picture(still_path, POSTER_SIDE)
+            if encoded is not None:
+                poster, poster_size = encoded
+        url = source.traced_address if source is not None else ""
+        caption = self._caption(title or f"Video: {words or 'untitled'}", words)
+        credit = self._credit(source.credit() if source is not None else None, number)
+        chain = self._chain(source)
+        figcaption = f"<figcaption>{caption}{credit}</figcaption>\n" if caption or credit else ""
+        label = words or title or path.stem
+        clip = _Clip(len(self.clips) + 1, path, mime, size, bool(mime) and (cut or size <= SHORT_VIDEO_BYTES),
+                     poster, poster_size, url, label, self._line, self._in_steps,
+                     f'{attrs} data-kind="clip"', f"{figcaption}{chain}")
+        self.clips.append(clip)
+        return f"\x00C{len(self.clips) - 1}\x00"
+
+    def _clip_html(self, clip: _Clip) -> str:
+        poster = f' poster="{clip.poster}"' if clip.poster else ""
+        if clip.embedded:
+            muted = " muted" if clip.in_steps else ""
+            sized = (f' width="{clip.poster_size[0]}" height="{clip.poster_size[1]}"'
+                     if clip.poster_size[0] else "")
+            video = (f'<video class="az-clip" id="{clip.id}" src="{clip.data}" controls preload="metadata" '
+                     f"playsinline{muted}{poster}{sized}></video>")
+            return f"<figure {clip.figure_attrs}>\n{video}\n{clip.after}</figure>\n"
+        still = _img(clip.poster, clip.poster_size, clip.label, "az-poster") if clip.poster else ""
+        if self.light and clip.candidate:
+            # the Page pane shows where the clip goes without carrying it
+            video = (f'<video class="az-clip" id="{clip.id}" preload="none" controls playsinline{poster}'
+                     ' data-preview="true"></video>')
+            return f"<figure {clip.figure_attrs}>\n{video}\n{clip.after}</figure>\n"
+        if clip.url:
+            watch = (f'<a class="az-watch" {_outward(clip.url)}>{still}'
+                     f'<span class="az-watch-words">Watch on {_text(_platform(clip.url))}</span></a>')
+        elif still:
+            watch = f'{still}<p class="az-aside">Video not included.</p>'
+        else:
+            watch = _aside("Video not included.")
+        return f'<figure {clip.figure_attrs} data-linked="true">\n{watch}\n{clip.after}</figure>\n'
+
+    def _diagram(self, source: str) -> str:
+        key = md.diagram_key(source)
+        svg = self.diagrams.get(key)
+        cleaned = _clean_svg(svg, f"az-diagram-{self._svgs + 1}") if svg else None
+        if cleaned is None:
+            self.missing.setdefault(key, source)
+            return _aside("Diagram not drawn.") + _code(source)
+        self._svgs += 1
+        caption = self._caption("", "")
+        figcaption = f"<figcaption>{caption}</figcaption>" if caption else ""
+        return (f'<figure class="az-figure" data-kind="diagram">\n<div class="az-diagram" role="img" '
+                f'aria-label="Diagram">{cleaned}</div>\n{figcaption}</figure>\n')
+
+    # -- the end of the page ------------------------------------------------------------
+
+    def _sources(self) -> str:
+        annex = self.cited.annex
+        if annex is None or not annex.entries:
+            return ""
+        entries = "".join(self._source_entry(entry) for entry in annex.entries)
+        return (f'<section class="az-sources" id="sources" aria-labelledby="sources-title">\n'
+                f'<h2 id="sources-title">Sources</h2>\n<ol>\n{entries}</ol>\n</section>\n')
+
+    def _source_entry(self, entry: Entry) -> str:
+        source = entry.source
+        label = f'<span class="az-source-label" dir="auto">{_text(source.label or source.host or "Untitled")}</span>'
+        said = notesources.details(source)
+        details = f' <span class="az-source-details">{_text(" · ".join(said))}</span>' if said else ""
+        origins = ""
+        if entry.origins:
+            linked = ", ".join(_cite(number) for number in entry.origins)
+            origins = f' <span class="az-source-from">from {linked}</span>'
+        links: list[str] = []
+        if source.address:
+            links.append(f'<a class="az-source-address" {_outward(source.address)}>{_text(source.address)}</a>')
+        if source.archive and source.archive != source.address:
+            links.append(f'<a class="az-archive" {_outward(source.archive)}>Archived copy</a>')
+        if source.posted and source.posted not in (source.address, source.archive):
+            links.append(_posted(source.posted))
+        links.extend(f'<a class="az-verify" {_outward(address)}>Check on {_text(site)}</a>'
+                     for site, address in source.verify)
+        if source.sha256:
+            links.append(f'<span class="az-hash">SHA-256 <code>{source.sha256}</code></span>')
+        more = f'<span class="az-source-links">{" ".join(links)}</span>' if links else ""
+        return f'<li id="src-{entry.number}" data-kind="{_attr(source.kind or "item")}">{label}{details}{origins}{more}</li>\n'
+
+    def _corrections(self, changes: str, earlier: Iterable[dict[str, Any]]) -> str:
+        """What this edition changed, and the public editions made before it."""
+        said = " ".join(changes.split())[:300]
+        before = [record for record in earlier if record.get("edition") == md.PUBLIC]
+        if not said and not before:
+            return ""
+        rows: list[str] = []
+        if said:
+            rows.append(f'<li class="az-this-edition"><time datetime="{self.day.isoformat()}">'
+                        f"{_text(notes_style.long_date(self.day))}</time> <span>{_text(said)}</span></li>")
+        for record in before:
+            stamp = str(record.get("at") or "")
+            try:
+                when = notes_style.long_date(date.fromisoformat(stamp[:10]))
+            except ValueError:
+                continue
+            fingerprint = str(record.get("sha256") or record.get("pdf_sha256") or "")
+            what = "HTML" if record.get("format") == "html" else "PDF"
+            note = record.get("changes")
+            words = f" <span>{_text(' '.join(str(note).split())[:300])}</span>" if isinstance(note, str) and note else ""
+            rows.append(f'<li><time datetime="{stamp[:10]}">{_text(when)}</time> {what}{words} '
+                        f'<span class="az-hash">SHA-256 <code>{_attr(fingerprint)}</code></span></li>')
+        return (f'<section class="az-corrections" id="corrections" aria-labelledby="corrections-title">\n'
+                f'<h2 id="corrections-title">Corrections</h2>\n<ol>{"".join(rows)}</ol>\n</section>\n')
+
+    def _footer(self, printed: str) -> str:
+        edition = "Public edition" if self.public else "Internal edition"
+        return (f'<footer class="az-footer">\n<p><span class="az-edition">{edition}</span> · '
+                f'<time datetime="{self.day.isoformat()}">{_text(notes_style.long_date(self.day))}</time> · '
+                f'<span class="az-fingerprint">Source SHA-256 <code>{printed}</code></span></p>\n</footer>\n')
+
+
+# -- pictures, encoded once ------------------------------------------------------------
+
+
+class _Pictures:
+    """Pictures as the page holds them, kept between documents.
+
+    The check before an export encodes every picture at its export size to say what
+    the file weighs; the export that follows finds them here rather than encode them
+    again. Light on the machine: a few hundred entries and 128 MB at most, keyed by
+    the file's path, size and modification time.
+    """
+
+    MAX_ENTRIES = 400
+    MAX_BYTES = 128 * 1024 * 1024
+
+    def __init__(self) -> None:
+        self._kept: OrderedDict[tuple[str, int, int, int], tuple[bytes, str, tuple[int, int]] | None] = OrderedDict()
+        self._bytes = 0
+        self._lock = threading.Lock()
+
+    def get(self, path: Path, side: int) -> tuple[bytes, str, tuple[int, int]] | None:
+        try:
+            stat = path.stat()
+        except OSError:
+            return None
+        key = (str(path), stat.st_mtime_ns, stat.st_size, side)
+        with self._lock:
+            if key in self._kept:
+                self._kept.move_to_end(key)
+                return self._kept[key]
+        made = _encode_picture(path, side)
+        with self._lock:
+            if key not in self._kept:
+                self._kept[key] = made
+                self._bytes += len(made[0]) if made else 0
+            while len(self._kept) > self.MAX_ENTRIES or self._bytes > self.MAX_BYTES:
+                dropped = self._kept.popitem(last=False)[1]
+                self._bytes -= len(dropped[0]) if dropped else 0
+        return made
+
+
+def _encode_picture(path: Path, side: int) -> tuple[bytes, str, tuple[int, int]] | None:
+    """A picture at most ``side`` pixels on its long side, upright, without its EXIF,
+    GPS, XMP or text: a JPEG, or a PNG when it shows through somewhere. A JPEG already
+    small and upright keeps its pixels as they are, its metadata segments taken out."""
+    try:
+        with PILImage.open(path) as image:
+            if image.width * image.height > MAX_IMAGE_PIXELS:
+                return None
+            if image.format == "GIF" and getattr(image, "n_frames", 1) > 1:
+                moving = _animated_gif(image, path, side)
+                if moving is not None:
+                    return moving
+            if image.format == "JPEG" and max(image.size) <= side and _orientation(image) in (0, 1):
+                stripped = _strip_jpeg(path.read_bytes())
+                if stripped is not None:
+                    return stripped, "image/jpeg", image.size
+            if image.format == "JPEG":
+                image.draft(image.mode, (side, side))
+            profile = image.info.get("icc_profile")
+            upright = ImageOps.exif_transpose(image)
+            clear = _shows_through(upright)
+            upright = upright.convert("RGBA" if clear else ("L" if upright.mode in ("L", "LA", "1") else "RGB"))
+            upright.thumbnail((side, side), PILImage.Resampling.LANCZOS, reducing_gap=3.0)
+            upright.info = {}
+            buffer = BytesIO()
+            extra = {"icc_profile": profile} if profile else {}
+            if clear:
+                upright.save(buffer, "PNG", optimize=True, **extra)
+                return buffer.getvalue(), "image/png", upright.size
+            upright.save(buffer, "JPEG", quality=JPEG_QUALITY, optimize=True, progressive=True, **extra)
+            return buffer.getvalue(), "image/jpeg", upright.size
+    except (OSError, ValueError, UnidentifiedImageError, PILImage.DecompressionBombError):
+        return None
+
+
+def _animated_gif(image: PILImage.Image, path: Path, side: int) -> tuple[bytes, str, tuple[int, int]] | None:
+    """A GIF that moves (a comparison's blink or slide) kept moving, its comment left
+    behind; None when it is too large to carry, which leaves its first frame."""
+    try:
+        if path.stat().st_size > MAX_GIF_BYTES or max(image.size) > side:
+            return None
+    except OSError:
+        return None
+    frames: list[PILImage.Image] = []
+    durations: list[int] = []
+    for frame in ImageSequence.Iterator(image):
+        durations.append(int(frame.info.get("duration") or 100))
+        copy = frame.copy()
+        copy.info = {}
+        frames.append(copy)
+    buffer = BytesIO()
+    frames[0].save(buffer, "GIF", save_all=True, append_images=frames[1:], duration=durations,
+                   loop=int(image.info.get("loop") or 0), disposal=2)
+    return buffer.getvalue(), "image/gif", image.size
+
+
+PICTURES = _Pictures()
+
+
+def _clip_bytes(path: Path) -> bytes | None:
+    """A clip copied without its container's metadata (title, GPS, the phone that
+    filmed it), streams untouched; None without ffmpeg or when the copy fails."""
+    exe = ffmpeg_engine.ffmpeg_path()
+    if exe is None:
+        return None
+    with tempfile.TemporaryDirectory(prefix="azimut-clip-") as folder:
+        target = Path(folder) / f"clip{path.suffix.lower()}"
+        command = [exe, "-nostdin", "-v", "error", "-i", str(path), "-map", "0", "-map_metadata", "-1",
+                   "-map_chapters", "-1", "-c", "copy", "-fflags", "+bitexact", "-y", str(target)]
+        if path.suffix.lower() in (".mp4", ".m4v"):
+            command[-2:-2] = ["-movflags", "+faststart"]
+        try:
+            subprocess.run(command, check=True, capture_output=True, timeout=CLIP_TIMEOUT)
+            return target.read_bytes()
+        except (OSError, subprocess.SubprocessError):
+            return None
+
+
+# -- fonts ----------------------------------------------------------------------------
+
+#: The faces each family the look can set its text in is drawn from, by weight and style.
+FAMILY_FILES: dict[str, dict[tuple[int, str], str]] = {
+    pdffonts.SERIF: {(400, "normal"): "NotoSerif-Regular.ttf", (700, "normal"): "NotoSerif-Bold.ttf",
+                     (400, "italic"): "NotoSerif-Italic.ttf", (700, "italic"): "NotoSerif-BoldItalic.ttf"},
+    pdffonts.SANS: {(400, "normal"): "NotoSans-Regular.ttf", (700, "normal"): "NotoSans-Bold.ttf",
+                    (400, "italic"): "NotoSans-Italic.ttf", (700, "italic"): "NotoSans-BoldItalic.ttf"},
+    pdffonts.BOOK: {(400, "normal"): "Literata-Regular.ttf", (700, "normal"): "Literata-Bold.ttf",
+                    (400, "italic"): "Literata-Italic.ttf", (700, "italic"): "Literata-BoldItalic.ttf"},
+    pdffonts.MODERN: {(400, "normal"): "IBMPlexSans-Regular.ttf", (700, "normal"): "IBMPlexSans-Bold.ttf",
+                      (400, "italic"): "IBMPlexSans-Italic.ttf", (700, "italic"): "IBMPlexSans-BoldItalic.ttf"},
+}
+#: What the reader's own controls, labels and punctuation draw, kept in every subset:
+#: printable ASCII, Latin-1 and the marks the stylesheet and the script write.
+ALWAYS_DRAWN = (
+    "".join(chr(code) for code in range(0x20, 0x7F))
+    + "".join(chr(code) for code in range(0xA0, 0x100))
+    + "‘’“”–—…·•→←↑↓↕‹›×▶↗↩✓°±≈"
+)
+_FONTS: OrderedDict[tuple[str, str], bytes] = OrderedDict()
+_FONTS_LOCK = threading.Lock()
+MAX_KEPT_FONTS = 24
+
+
+def _font_faces(look: NoteLook, theme: notes_style.Theme, text: str) -> str:
+    """The `@font-face` rules for the look's typeface, each face cut to the characters
+    the page draws and packed as WOFF. None for a plain look with no face chosen, which
+    reads in the reader's own fonts."""
+    if look.style == "plain" and not look.font:
+        return ""
+    codes = _subset_codes(text)
+    rules: list[str] = []
+    for name, family, faces in (("az-body", theme.body_family, ((400, "normal"), (700, "normal"),
+                                                                 (400, "italic"), (700, "italic"))),
+                                ("az-head", theme.heading_family, ((400, "normal"), (700, "normal")))):
+        files = FAMILY_FILES.get(family)
+        if not files:
+            continue
+        for weight, style in faces:
+            woff = _subset(files[(weight, style)], codes)
+            if woff is None:
+                continue
+            rules.append(f'@font-face{{font-family:"{name}";src:url(data:font/woff;base64,'
+                         f'{base64.b64encode(woff).decode("ascii")}) format("woff");font-weight:{weight};'
+                         f"font-style:{style};font-display:swap}}")
+    return "\n".join(rules)
+
+
+def _subset_codes(text: str) -> list[int]:
+    """The characters a page's faces must carry: what the page says, every letter of it
+    in both cases (the stylesheet sets labels in capitals, `ß` and all), what the
+    reader's stylesheet and script write themselves, read off the two files, and
+    `ALWAYS_DRAWN`."""
+    drawn = set(text) | set(ALWAYS_DRAWN) | set(_asset("reader.css")) | set(_asset("reader.js"))
+    drawn |= {variant for char in list(drawn) for case in (char.upper(), char.lower()) for variant in case}
+    return sorted({ord(char) for char in drawn if unicodedata.category(char) not in ("Cc", "Cs", "Co", "Cn")})
+
+
+def _subset(filename: str, codes: list[int]) -> bytes | None:
+    from fontTools import subset
+    from fontTools.ttLib import TTFont
+
+    digest = hashlib.sha256(",".join(map(str, codes)).encode("ascii")).hexdigest()
+    key = (filename, digest)
+    with _FONTS_LOCK:
+        if key in _FONTS:
+            _FONTS.move_to_end(key)
+            return _FONTS[key]
+    options = subset.Options()
+    options.flavor = "woff"
+    options.layout_features = ["*"]
+    options.hinting = False
+    options.desubroutinize = True
+    options.notdef_outline = True
+    try:
+        font = TTFont(str(pdffonts.FONT_DIR / filename))
+        subsetter = subset.Subsetter(options)
+        subsetter.populate(unicodes=codes)
+        subsetter.subset(font)
+        font.flavor = "woff"
+        buffer = BytesIO()
+        font.save(buffer)
+    except Exception:  # a face that cannot be cut leaves the reader's own font
+        return None
+    data = buffer.getvalue()
+    with _FONTS_LOCK:
+        _FONTS[key] = data
+        while len(_FONTS) > MAX_KEPT_FONTS:
+            _FONTS.popitem(last=False)
+    return data
+
+
+# -- diagrams -----------------------------------------------------------------------
+
+SVG_NS = "http://www.w3.org/2000/svg"
+XLINK_NS = "http://www.w3.org/1999/xlink"
+#: The SVG a diagram may hold: shapes, text, markers, gradients and its own style.
+SVG_TAGS = frozenset("""
+svg g path rect circle ellipse line polyline polygon text tspan textPath defs marker style title desc clipPath
+linearGradient radialGradient stop pattern mask symbol use filter feGaussianBlur feOffset feBlend feFlood
+feComposite feMerge feMergeNode feColorMatrix feDropShadow switch
+""".split())
+URL_IN = re.compile(r"url\(\s*(['\"]?)(.*?)\1\s*\)", re.I)
+
+
+def _clean_svg(svg: str, prefix: str) -> str | None:
+    """A diagram's SVG with nothing in it that runs or reaches out: no script, no
+    `foreignObject`, no event handler, no link but to itself, no `url(…)` but to its
+    own parts; its ids renamed under ``prefix`` so two diagrams on a page never meet.
+    None when it is not an SVG this can read."""
+    if not svg or len(svg.encode("utf-8")) > MAX_SVG_BYTES or "<!DOCTYPE" in svg.upper() or "<!ENTITY" in svg.upper():
+        return None
+    try:
+        root = SafeTree.fromstring(svg, forbid_dtd=True)
+    except Exception:
+        return None
+    if _local_name(root.tag) != "svg":
+        return None
+    old = root.get("id") or ""
+    for parent in list(root.iter()):
+        for child in list(parent):
+            if not isinstance(child.tag, str) or _local_name(child.tag) not in SVG_TAGS:
+                parent.remove(child)
+    for element in root.iter():
+        for name in list(element.attrib):
+            local = _local_name(name).lower()
+            value = element.attrib[name]
+            if local.startswith("on") or local in ("src", "action", "formaction"):
+                del element.attrib[name]
+            elif local == "href" and not value.strip().startswith("#"):
+                del element.attrib[name]
+            elif "url(" in value.lower() and any(not target.strip().startswith("#")
+                                                for _, target in URL_IN.findall(value)):
+                del element.attrib[name]
+            elif "javascript:" in value.lower() or "expression(" in value.lower():
+                del element.attrib[name]
+        if _local_name(element.tag) == "style":
+            css = element.text or ""
+            if "@import" in css.lower() or any(not target.strip().startswith("#") for _, target in URL_IN.findall(css)):
+                element.text = ""
+    ElementTree.register_namespace("", SVG_NS)
+    ElementTree.register_namespace("xlink", XLINK_NS)
+    text = ElementTree.tostring(root, encoding="unicode")
+    # an SVG inside a page needs no namespace said, and the page holds no address but its links
+    text = re.sub(r'\s+xmlns(?::\w+)?="[^"]*"', "", text)
+    if old:
+        text = text.replace(old, prefix)
+    else:
+        text = text.replace("<svg ", f'<svg id="{prefix}" ', 1)
+    return text
+
+
+def _local_name(tag: str) -> str:
+    return tag.rsplit("}", 1)[-1]
+
+
+# -- small readings ---------------------------------------------------------------------
+
+
+def _asset(name: str) -> str:
+    try:
+        return (ASSETS / name).read_text(encoding="utf-8")
+    except OSError:
+        return ""
+
+
+def _text(value: str) -> str:
+    return html.escape(value, quote=False)
+
+
+def _attr(value: str) -> str:
+    return html.escape(value, quote=True)
+
+
+def _outward(url: str) -> str:
+    """A link out of the page: a new tab, with nothing of this page sent along."""
+    return f'href="{_attr(url)}" target="_blank" rel="noopener noreferrer"'
+
+
+def _cite(number: int) -> str:
+    return f'<a class="az-cite" href="#src-{number}" data-src="{number}">[{number}]</a>'
+
+
+def _aside(message: str) -> str:
+    return f'<p class="az-aside" dir="auto">{_text(message)}</p>\n'
+
+
+def _code(source: str) -> str:
+    return f'<pre class="az-code"><code>{_text(source)}</code></pre>\n'
+
+
+def _wrapped(classes: str, inner: str, tag: str = "div") -> str:
+    """``inner`` in a ``tag`` of its own, or nothing when there is nothing in it."""
+    if not inner:
+        return ""
+    named = f'id="{classes}"' if tag == "style" else f'class="{classes}"'
+    return f"<{tag} {named}>{inner}</{tag}>\n"
+
+
+def _start(token: Token) -> int:
+    try:
+        return int(token.attrGet("start") or 1)
+    except (TypeError, ValueError):
+        return 1
+
+
+def _aligned(align: str, inner: str) -> str:
+    if align in ("center", "right"):
+        return f'<div class="az-align" data-align="{align}">\n{inner}</div>\n'
+    return inner
+
+
+def _img(uri: str, size: tuple[int, int], alt: str, classes: str = "") -> str:
+    kind = f' class="{classes}"' if classes else ""
+    sized = f' width="{size[0]}" height="{size[1]}"' if size[0] and size[1] else ""
+    return f'<img{kind} src="{uri}" alt="{_attr(alt)}"{sized} decoding="async">'
+
+
+def _zoom_button(picture: str, alt: str) -> str:
+    return f'<button class="az-zoom" type="button" aria-label="Open larger: {_attr(alt)}">{picture}</button>'
+
+
+def _without_comments(text: str) -> str:
+    """Raw HTML with every comment taken out, an unclosed one to the end."""
+    text = re.sub(r"<!--.*?-->", "", text, flags=re.S)
+    cut = text.find("<!--")
+    return text if cut < 0 else text[:cut]
+
+
+def _visible_text(page: str) -> str:
+    """The words a page draws, for its fonts: its markup and its pictures left out."""
+    page = re.sub(r"<(svg|script|style)\b.*?</\1>", " ", page, flags=re.S | re.I)
+    page = re.sub(r"<[^>]*>", " ", page)
+    return html.unescape(page)
+
+
+def _slug(words: str) -> str:
+    folded = unicodedata.normalize("NFKC", words).casefold()
+    slug = re.sub(r"[^\w]+", "-", folded).strip("-_")[:60].strip("-_")
+    if slug and slug[0].isdigit():
+        slug = f"s-{slug}"
+    return slug
+
+
+def _short(value: float | None) -> str:
+    if value is None:
+        return ""
+    return f"{value:.3f}".rstrip("0").rstrip(".")
+
+
+def _seconds(written: str | None) -> float | None:
+    if not written:
+        return None
+    try:
+        parts = [float(part) for part in written.split(":")]
+    except ValueError:
+        return None
+    total = 0.0
+    for part in parts:
+        total = total * 60 + part
+    return total
+
+
+def _at_moment(url: str, seconds: float) -> str:
+    """The video's page at a moment, where the site reads one (YouTube); else the page."""
+    host = notesources.host(url)
+    if host in ("youtube.com", "m.youtube.com", "youtu.be"):
+        joiner = "&" if "?" in url else "?"
+        return f"{url.split('#', 1)[0]}{joiner}t={int(seconds)}s"
+    return url
+
+
+def _platform(url: str) -> str:
+    host = notesources.host(url)
+    return PLATFORMS.get(host, host or "the web")
+
+
+def _posted(url: str) -> str:
+    return f'<a class="az-posted" {_outward(url)}>Posted on {_text(_platform(url))} ↗</a>'
+
+
+def _short_address(url: str) -> str:
+    try:
+        parts = urlsplit(url)
+    except ValueError:
+        return url
+    shown = f"{notesources.host(url)}{parts.path.rstrip('/')}"
+    return shown if len(shown) <= 80 else f"{shown[:79]}…"
+
+
+def _day(value: str) -> str:
+    return f'<time datetime="{_attr(value[:10])}">{_text(notesources.spoken_day(value))}</time>'
+
+
+def _megabytes(size: int) -> str:
+    return f"{size / (1024 * 1024):.1f} MB"
+
+
+def _rounded(lat: float, lon: float, metres: float = POV_METRES) -> tuple[float, float]:
+    """A point moved to a grid about ``metres`` wide, so it names the place, not the spot."""
+    step_lat = metres / 111_320
+    step_lon = metres / (111_320 * max(0.01, math.cos(math.radians(lat))))
+    return round(lat / step_lat) * step_lat, round(lon / step_lon) * step_lon
+
+
+def _proof_spec(case: "Case | None", record: dict[str, Any] | None) -> dict[str, Any]:
+    import json
+
+    rel = ((record or {}).get("attrs") or {}).get("spec")
+    if case is None or not isinstance(rel, str) or not rel:
+        return {}
+    try:
+        path = case.resolve_inside(rel)
+        if path.stat().st_size > 4 * 1024 * 1024:
+            return {}
+        loaded = json.loads(path.read_text(encoding="utf-8"))
+    except Exception:
+        return {}
+    return loaded if isinstance(loaded, dict) else {}
+
+
+def _side_day(sidecar: dict[str, Any], side: str) -> str:
+    day = sidecar.get(f"imagery_{side}")
+    if not isinstance(day, str) or not day:
+        return ""
+    exact = sidecar.get(f"imagery_{side}_exact") is not False
+    return notesources.spoken_day(day if exact else f"{day}~")
+
+
+def _anchor_named(message: str) -> str:
+    """The part of the page a link warning names (`The link "#V12" …`), or ""."""
+    found = re.match(r'^The link "#([^"]+)"', message)
+    return found.group(1) if found else ""
+
+
+def _lone_picture(tokens: list[Token], index: int) -> Token | None:
+    """The picture a paragraph at ``index`` is made of alone, or None."""
+    if tokens[index].type != "paragraph_open" or index + 1 >= len(tokens):
+        return None
+    children = [child for child in tokens[index + 1].children or [] if child.type != "softbreak"]
+    return children[0] if len(children) == 1 and children[0].type == "image" else None
+
+
+def _step_label(picture: Token, number: int) -> str:
+    """What a step's dot says: its caption up to the first comma, or its number."""
+    options = md.image_options(md.token_attr(picture, "src"))
+    caption = options.caption or md.token_attr(picture, "title") or " ".join((picture.content or "").split())
+    label = caption.split(", ", 1)[0].strip()
+    return md.cut_text(label, 28) if label else str(number)
+
+
+__all__ = ["CSP", "MAX_BYTES", "NotesHtmlError", "PICTURES", "RenderedHtml", "WARNING_KINDS", "render"]

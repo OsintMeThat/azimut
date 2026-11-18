@@ -11,7 +11,9 @@ one note two ways, so what they share lives here and nowhere else:
   chapter's note in, guidance emptied and placeholders filled;
 - the two editions: `strip_internal` blanks every `> [!internal]` passage as
   either reader of the note sees one, which is what the public edition is made from;
-- the aligned blocks (`::: center`) and the own cover's corners (`::: top-right`);
+- the aligned blocks (`::: center`), the own cover's corners (`::: top-right`) and
+  the two blocks that tell a story in pictures (`::: steps`, `::: story`), in which
+  every picture opens a step and the words after it are that step's;
 - the callouts a quote opens with (`> [!confirmed]`) and the tasks a list holds;
 - the own cover (the lines above `<!-- cover -->`, `cover_piece`);
 - what a picture's braces say (`image_options`);
@@ -27,7 +29,7 @@ import hashlib
 import ipaddress
 import re
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Callable, NamedTuple
+from typing import TYPE_CHECKING, Any, Callable, NamedTuple
 from urllib.parse import parse_qs, quote, unquote, urlsplit
 
 from markdown_it import MarkdownIt
@@ -36,7 +38,7 @@ from markdown_it.token import Token
 from . import notefill, notesources
 from .notelook import NoteLook
 from .notesources import Annex, Source
-from .notetext import CALLOUT, ENTITY_REF, FENCE, INCLUDE, MEDIA_REF, without_hints
+from .notetext import CALLOUT, ENTITY_REF, FENCE, INCLUDE, MEDIA_REF, PAGE_BREAK, without_hints
 
 if TYPE_CHECKING:
     from ..workspace import Case
@@ -44,6 +46,11 @@ if TYPE_CHECKING:
 #: The alignments a `::: name` block can set, and the corners of the own cover.
 ALIGNMENT_NAMES = ("left", "center", "right")
 CORNER_NAMES = ("top-left", "top-right", "bottom-left", "bottom-right")
+#: The blocks whose pictures are steps: a stepper, and a story told as the page
+#: scrolls. A PDF prints both as they are written, each picture then its words.
+STEPS = "steps"
+STORY = "story"
+FIGURE_BLOCKS = (STEPS, STORY)
 
 
 #: How deep chapters nest: a report's chapter may hold chapters of its own, and
@@ -59,7 +66,8 @@ COMMENT = re.compile(r"\A(?:\s*<!--.*?-->)+\s*\Z", re.S)
 MERMAID_INFO = re.compile(r"^\s*mermaid\b")
 IMAGE_ATTRS = re.compile(r"!\[([^\]]*)\]\((\S+?)(?:\s+[\"']([^\"']*)[\"'])?\)\s*\{([^}\n]+)\}")
 ALIGNMENT_BLOCK = re.compile(
-    r"^:::[ \t]*(left|center|right|top-left|top-right|bottom-left|bottom-right)[ \t]*\n(.*?)^:::[ \t]*$", re.S | re.M
+    r"^:::[ \t]*(left|center|right|top-left|top-right|bottom-left|bottom-right|steps|story)[ \t]*\n(.*?)^:::[ \t]*$",
+    re.S | re.M,
 )
 ATTR_PARAM = "__azimut_attrs"
 ATTR_VALUES = re.compile(r"\b(width|align)\s*=\s*([\w.%+-]+)")
@@ -89,6 +97,8 @@ CALLOUTS: dict[str, tuple[str, tuple[int, int, int]]] = {
     "note": ("Note", (119, 119, 119)),
     "warning": ("Warning", (178, 52, 40)),
     "internal": ("Internal", (111, 87, 160)),
+    #: What the evidence cannot say: the HTML report lists it in its contents.
+    "limits": ("Limits", (84, 96, 112)),
 }
 
 #: The callout that keeps a passage out of the public edition, and the two editions.
@@ -486,17 +496,24 @@ def alignment_blocks(text: str) -> list["Block"]:
     """Parse a stretch of note, honouring the `::: center` blocks around parts of it.
 
     Each block is parsed on its own so its alignment can be pushed into everything
-    it produced, which is how the preview reads it too.
+    it produced, which is how the preview reads it too. A `::: steps` or `::: story`
+    block stands left, each of its pictures in a paragraph of its own
+    (`split_figures`), so every reader finds its steps the same way.
     """
     blocks: list[Block] = []
     position = 0
     for match in ALIGNMENT_BLOCK.finditer(text):
         blocks.append(Block("left", parse(text[position : match.start()]), text.count("\n", 0, position)))
         name = match.group(1)
+        line = text.count("\n", 0, match.start(2))
+        if name in FIGURE_BLOCKS:
+            blocks.append(Block("left", split_figures(parse(match.group(2))), line, kind=name))
+            position = match.end()
+            continue
         corner = name if name in CORNER_NAMES else ""
         # a corner stands at its side of the page: `top-right` is set to the right
         align = name.rsplit("-", 1)[-1] if corner else name
-        blocks.append(Block(align, parse(match.group(2)), text.count("\n", 0, match.start(2)), corner=corner))
+        blocks.append(Block(align, parse(match.group(2)), line, corner=corner))
         position = match.end()
     blocks.append(Block("left", parse(text[position:]), text.count("\n", 0, position)))
     return blocks
@@ -574,6 +591,96 @@ class Block:
     start: int = 0
     #: The corner of the own cover it is pinned to (`CORNER_NAMES`), or "".
     corner: str = ""
+    #: `steps` or `story` for a block of pictures told as steps (`FIGURE_BLOCKS`), or "".
+    kind: str = ""
+
+
+#: A paragraph's marks that hold nothing a reader sees on their own.
+BREAKS = ("softbreak", "hardbreak")
+
+
+def split_figures(tokens: list[Token]) -> list[Token]:
+    """``tokens`` with every picture in a paragraph of its own, and the words around it
+    in paragraphs of theirs, in the order written.
+
+    In a block of steps each picture opens a step, and the analyst writes a step as a
+    picture line with its words on the next line: one paragraph to the parser. Cut
+    apart, a PDF draws the picture as a figure, then its words, and the HTML report
+    finds the step's picture and its words without reading inside a paragraph.
+    """
+    out: list[Token] = []
+    index = 0
+    while index < len(tokens):
+        token = tokens[index]
+        inline = tokens[index + 1] if index + 1 < len(tokens) else None
+        if (
+            token.type == "paragraph_open"
+            and inline is not None
+            and inline.type == "inline"
+            and index + 2 < len(tokens)
+            and any(child.type == "image" for child in inline.children or [])
+        ):
+            out.extend(_split_paragraph(token, inline, tokens[index + 2]))
+            index += 3
+            continue
+        out.append(token)
+        index += 1
+    return out
+
+
+def _split_paragraph(opening: Token, inline: Token, closing: Token) -> list[Token]:
+    pieces: list[list[Token]] = [[]]
+    for child in inline.children or []:
+        if child.type == "image":
+            pieces.extend([[child], []])
+        else:
+            pieces[-1].append(child)
+    out: list[Token] = []
+    for piece in pieces:
+        while piece and (piece[0].type in BREAKS or (piece[0].type == "text" and not piece[0].content.strip())):
+            piece.pop(0)
+        while piece and (piece[-1].type in BREAKS or (piece[-1].type == "text" and not piece[-1].content.strip())):
+            piece.pop()
+        if not piece:
+            continue
+        words = "".join(child.content for child in piece if child.type in ("text", "code_inline"))
+        out.extend((opening.copy(), inline.copy(children=piece, content=words), closing.copy()))
+    return out
+
+
+#: `zoom=0.2,0.3,0.4,0.4` in a picture's braces: the part of it a story's step looks
+#: at, as fractions of its width and height (left, top, width, height).
+ZOOM_ATTR = re.compile(r"\bzoom\s*=\s*([0-9.]+)\s*,\s*([0-9.]+)\s*,\s*([0-9.]+)\s*,\s*([0-9.]+)")
+#: `graphic` in a picture's braces: a picture a reader is warned about before seeing it.
+GRAPHIC_ATTR = re.compile(r"(?<![\w=\"-])graphic(?![\w=\"-])")
+
+
+def image_attributes(href: str) -> str:
+    """What a picture's braces held, the caption taken out (`image_options`)."""
+    attributes = parse_qs(urlsplit(href).query, keep_blank_values=True).get(ATTR_PARAM, [""])[0]
+    return CAPTION_ATTR.sub(" ", attributes)
+
+
+def image_zoom(href: str) -> tuple[float, float, float, float] | None:
+    """The zoom a picture's braces set, each value between 0 and 1 and the rectangle
+    inside the picture; None when none is written or it reads as no rectangle."""
+    match = ZOOM_ATTR.search(image_attributes(href))
+    if match is None:
+        return None
+    try:
+        left, top, width, height = (float(value) for value in match.groups())
+    except ValueError:
+        return None
+    if not (0 <= left < 1 and 0 <= top < 1 and 0 < width <= 1 and 0 < height <= 1):
+        return None
+    if left + width > 1.0001 or top + height > 1.0001:
+        return None
+    return left, top, width, height
+
+
+def image_graphic(href: str) -> bool:
+    """Whether a picture's braces mark it `graphic`."""
+    return GRAPHIC_ATTR.search(image_attributes(href)) is not None
 
 
 class Cited:
@@ -905,6 +1012,85 @@ def inline_text(token: Token) -> str:
         for child in token.children or []
         if child.type in ("text", "code_inline") or (child.type == "html_inline" and not child.content.startswith("<!--"))
     )
+
+
+#: A Log entry's heading, as the Notebook's `/` menu writes it (`lib/notes/syntax.js`,
+#: `logStamp`): `2026-11-04 14:32 (UTC+1)`, then whatever the analyst adds.
+LOG_STAMP = re.compile(
+    r"^(\d{4})-(\d{2})-(\d{2})(?:[ T](\d{1,2}:\d{2})(?::\d{2})?)?"
+    r"(?:\s*\(([^)]{1,24})\))?\s*(?:[-–—:]\s*)?(.*)$",
+    re.S,
+)
+
+
+def prints(tokens: list[Token], index: int) -> bool:
+    """Whether the block opening at ``index`` puts anything on the page: a rule, a
+    page break or a comment does not, and neither does a paragraph of guidance."""
+    token = tokens[index]
+    if token.type == "paragraph_open":
+        inline = tokens[index + 1] if index + 1 < len(tokens) else None
+        if inline is None:
+            return False
+        return bool(inline_text(inline).strip()) or any(
+            child.type == "image" for child in inline.children or []
+        )
+    if token.type == "html_block":
+        text = token.content.strip()
+        return bool(text) and not PAGE_BREAK.match(text) and not COMMENT.match(text)
+    return token.type not in ("hr", "heading_open")
+
+
+def empty_sections(pieces: list[Piece], blocks: dict[int, list[Block]], *, journal: bool) -> list[tuple[str, int]]:
+    """Each heading with nothing under it before the next heading of its rank, with
+    its line: a report sent with "Method" and no method is the slip to catch.
+
+    A heading that only holds deeper headings is not named, since those are, and a
+    journal's dated entry is an entry rather than a heading waiting for words.
+    Guidance and comments print nothing, so a section holding only those is empty
+    too. ``blocks`` are each piece's (`alignment_blocks`), read from their ``start``.
+    """
+    # open headings, outermost first: (level, name, line, has a deeper heading)
+    open_: list[list[Any]] = []
+    empty: list[tuple[str, int]] = []
+
+    def heading(level: int, name: str, line: int) -> None:
+        while open_ and open_[-1][0] >= level:
+            closed = open_.pop()
+            if not closed[3]:
+                empty.append((closed[1], closed[2]))
+        for outer in open_:
+            outer[3] = True
+        open_.append([level, name, line, False])
+
+    def content() -> None:
+        open_.clear()
+
+    for piece in pieces:
+        if piece.kind == "chapter":
+            # the heading above an include holds that chapter
+            content()
+            heading(piece.depth, " ".join(piece.text.split()), piece.line)
+            continue
+        if piece.kind != "text":
+            content()
+            continue
+        for block in blocks[id(piece)]:
+            base = piece.line + (0 if piece.fixed else block.line)
+            for index in range(block.start, len(block.tokens)):
+                token = block.tokens[index]
+                if token.level != 0 or token.type.endswith("_close") or token.type == "inline":
+                    continue
+                if token.type == "heading_open":
+                    name = " ".join(inline_text(block.tokens[index + 1]).split())
+                    if journal and token.tag == "h3" and LOG_STAMP.match(name):
+                        content()
+                        continue
+                    line = piece.line if piece.fixed else base + (token.map[0] if token.map else 0)
+                    heading(heading_level(token.tag, piece.shift), name, line)
+                elif prints(block.tokens, index):
+                    content()
+    heading(0, "", 0)
+    return empty
 
 
 def cut_text(text: str, limit: int) -> str:

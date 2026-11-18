@@ -102,6 +102,7 @@ from .notes_markdown import (
     EMPTY_SECTION,
     ENTITY_HREF,
     INTERNAL,
+    LOG_STAMP,
     MAP_LINK,
     MERMAID_INFO,
     MISSING,
@@ -112,6 +113,7 @@ from .notes_markdown import (
     Piece,
     Resolve,
     diagram_key,
+    empty_sections,
     expand,
     internal_passages,
     mermaid_sources,
@@ -133,7 +135,6 @@ from .notes_markdown import file_prefixes as _file_prefixes
 from .notes_markdown import heading_level as _level
 from .notes_markdown import holds_internal as _holds_internal
 from .notes_markdown import image_options as _image_options
-from .notes_markdown import inline_text as _inline_text
 from .notes_markdown import past as _past
 from .notes_markdown import skip_repeated_title as _skip_repeated_title
 from .notes_markdown import take_callout as _take_callout
@@ -187,13 +188,6 @@ UNSIZED_SHARE = 0.5
 DIAGRAM_PIXEL_SCALE = 2
 #: How many empty sections a document names one by one before it counts the rest.
 MAX_EMPTY_SECTIONS = 10
-#: A Log entry's heading, as the Notebook's `/` menu writes it (`lib/notes/syntax.js`,
-#: `logStamp`): `2026-11-04 14:32 (UTC+1)`, then whatever the analyst adds.
-LOG_STAMP = re.compile(
-    r"^(\d{4})-(\d{2})-(\d{2})(?:[ T](\d{1,2}:\d{2})(?::\d{2})?)?"
-    r"(?:\s*\(([^)]{1,24})\))?\s*(?:[-–—:]\s*)?(.*)$",
-    re.S,
-)
 
 #: Each alignment a block or a picture can name (`notes_markdown.ALIGNMENT_NAMES`):
 #: a corner of the own cover (`CORNER_NAMES`) is read as its side.
@@ -1245,55 +1239,8 @@ class _Builder:
             pass
 
     def _empty_sections(self, pieces: list[Piece], blocks: dict[int, list[_Block]]) -> None:
-        """Warn about each heading with nothing under it before the next heading of
-        its rank: a report sent with "Method" and no method is the slip to catch.
-
-        A heading that only holds deeper headings is not named, since those are,
-        and a journal's dated entry is an entry rather than a heading waiting for
-        words. Guidance and comments print nothing, so a section holding only
-        those is empty too.
-        """
-        # open headings, outermost first: (level, name, line, has a deeper heading)
-        open_: list[list[Any]] = []
-        empty: list[tuple[str, int]] = []
-
-        def heading(level: int, name: str, line: int) -> None:
-            while open_ and open_[-1][0] >= level:
-                closed = open_.pop()
-                if not closed[3]:
-                    empty.append((closed[1], closed[2]))
-            for outer in open_:
-                outer[3] = True
-            open_.append([level, name, line, False])
-
-        def content() -> None:
-            open_.clear()
-
-        for piece in pieces:
-            if piece.kind == "chapter":
-                # the heading above an include holds that chapter
-                content()
-                heading(piece.depth, " ".join(piece.text.split()), piece.line)
-                continue
-            if piece.kind != "text":
-                content()
-                continue
-            for block in blocks[id(piece)]:
-                base = piece.line + (0 if piece.fixed else block.line)
-                for index in range(block.start, len(block.tokens)):
-                    token = block.tokens[index]
-                    if token.level != 0 or token.type.endswith("_close") or token.type == "inline":
-                        continue
-                    if token.type == "heading_open":
-                        name = " ".join(_inline_text(block.tokens[index + 1]).split())
-                        if self.theme.style == "journal" and token.tag == "h3" and LOG_STAMP.match(name):
-                            content()
-                            continue
-                        line = piece.line if piece.fixed else base + (token.map[0] if token.map else 0)
-                        heading(_level(token.tag, piece.shift), name, line)
-                    elif _prints(block.tokens, index):
-                        content()
-        heading(0, "", 0)
+        """Warn about each heading with nothing under it (`notes_markdown.empty_sections`)."""
+        empty = empty_sections(pieces, blocks, journal=self.theme.style == "journal")
         for name, line in empty[:MAX_EMPTY_SECTIONS]:
             self._warn(f'Section "{_cut_text(name, 80)}" is empty.', line, EMPTY_SECTION)
         rest = len(empty) - MAX_EMPTY_SECTIONS
@@ -3094,23 +3041,6 @@ def _prefix_fits(pdf: FPDF, word: str, room: float, length: int) -> bool:
 WRAP_SLACK = 0.02
 
 
-
-
-def _prints(tokens: list[Token], index: int) -> bool:
-    """Whether the block opening at ``index`` puts anything on the page: a rule, a
-    page break or a comment does not, and neither does a paragraph of guidance."""
-    token = tokens[index]
-    if token.type == "paragraph_open":
-        inline = tokens[index + 1] if index + 1 < len(tokens) else None
-        if inline is None:
-            return False
-        return bool(_inline_text(inline).strip()) or any(
-            child.type == "image" for child in inline.children or []
-        )
-    if token.type == "html_block":
-        text = token.content.strip()
-        return bool(text) and not PAGE_BREAK.match(text) and not COMMENT.match(text)
-    return token.type not in ("hr", "heading_open")
 
 
 

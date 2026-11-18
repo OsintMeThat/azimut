@@ -39,6 +39,15 @@ edition it also says how many internal passages are left out.
 
 **To Post** asks `/notes/{id}/pieces` for the note's public edition, or the stretch
 selected in it, as the pieces a Post thread starts from (`engine/notepieces.py`).
+
+**HTML.** `/notes/html` writes the same note as one HTML file a reader opens offline
+(`engine/notes_html.py`), in the same folder, named the same with `.html`, and kept in
+the same record of editions with `format: "html"` and the file's SHA-256. The check
+before it is `/notes/pdf/check` with `format: "html"`, which also says the file's
+weight, the clips that become a Watch link, the points of view it shows and the
+earlier public editions. `/notes/html/preview` is the Page pane's copy, written
+nowhere, answered under a sandboxing policy so it never runs as the app. Its diagrams
+come as the SVG the browser drew, which is cleaned before it is placed.
 """
 
 from __future__ import annotations
@@ -62,6 +71,7 @@ from .. import errors, layout
 from ..engine import exportdir
 from ..engine import links as link_engine
 from ..engine import notelook, notes_markdown
+from ..engine import notes_html as html_engine
 from ..engine import notes_pdf as pdf_engine
 from ..engine import notefill, notefromcase, notelinks, notepieces, notetext
 from ..engine import pdffonts
@@ -134,6 +144,11 @@ SHA256 = re.compile(r"^[0-9a-f]{64}$")
 STAMP = re.compile(r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$")
 #: One edition record written at a time, so two exports of one note keep both.
 _editions_turn = threading.Lock()
+#: The line saying what an edition changed, in characters.
+MAX_CHANGES = 300
+#: What the Page pane's HTML is answered under: a page of its own, with no origin, so
+#: opened anywhere it never runs as the app.
+HTML_PREVIEW_POLICY = f"sandbox allow-scripts; {html_engine.CSP}"
 
 
 class Notes(BaseModel):
@@ -184,6 +199,33 @@ class PreviewIn(BaseModel):
 
 class NotePreviewIn(PreviewIn):
     note: str = Field(default=CASE_NOTE, max_length=64, pattern=r"^[A-Za-z0-9_-]+$")
+
+
+class CheckIn(EditionSelection):
+    """Notes to check before an export, the edition, and the format to be written."""
+
+    format: Literal["pdf", "html"] = "pdf"
+
+
+class HtmlPreviewIn(NotePreviewIn):
+    """The Page pane's HTML: the note unsaved, its diagrams as SVG text, and whether
+    its points of view are rounded as the export would round them."""
+
+    round_pov: bool = False
+
+
+class HtmlExportIn(EditionSelection):
+    """Which notes to write as HTML, in which edition, with the diagrams drawn for them.
+
+    ``diagrams`` holds each Mermaid fence's SVG, as text, under the key
+    `/notes/pdf/diagrams` gave it. ``round_pov`` rounds every point of view to about
+    150 m in these files; ``changes`` is the line saying what this edition changed,
+    printed at the end of the public file and kept in its record.
+    """
+
+    diagrams: dict[str, str] = Field(default_factory=dict)
+    round_pov: bool = False
+    changes: str = Field(default="", max_length=MAX_CHANGES)
 
 
 class ExportIn(EditionSelection):
@@ -733,11 +775,14 @@ def _note_source(case: Case, note_id: str) -> tuple[str, str]:
     return str(entity.get("label") or "Note"), case.read_note(note_id)
 
 
-def _pdf_filename(title: str, note_id: str, peers: dict[str, list[str]], edition: str, day: date) -> str:
+def _pdf_filename(
+    title: str, note_id: str, peers: dict[str, list[str]], edition: str, day: date, *, suffix: str = ".pdf"
+) -> str:
     """`<title> - <edition> - <day>.pdf`, or `<title> - <day>.pdf` with no edition
     named (a note with one edition only), flat, a homonym's stable marker after its
-    title, and room left for the ` (2)` a second one that day takes."""
-    tail = f" - {edition} - {day.isoformat()}.pdf" if edition else f" - {day.isoformat()}.pdf"
+    title, and room left for the ` (2)` a second one that day takes. An HTML file is
+    named the same with ``suffix`` `.html`."""
+    tail = f" - {edition} - {day.isoformat()}{suffix}" if edition else f" - {day.isoformat()}{suffix}"
     marker = ""
     if len(peers.get(title.casefold(), [])) >= 2:
         marker = f" [{hashlib.sha256(note_id.encode('utf-8')).hexdigest()[:16]}]"
@@ -774,7 +819,7 @@ def export_diagrams(case_id: str, body: EditionSelection) -> dict[str, Any]:
 
 
 @router.post("/{case_id}/notes/pdf/check")
-def check_pdf(case_id: str, body: EditionSelection) -> dict[str, Any]:
+def check_pdf(case_id: str, body: CheckIn) -> dict[str, Any]:
     """What each requested note's PDF would get wrong, before it is exported.
 
     Every note is laid out in its own look and in the edition asked for, in memory,
@@ -783,11 +828,14 @@ def check_pdf(case_id: str, body: EditionSelection) -> dict[str, Any]:
     when all is well; one that cannot be laid out answers the reason as its one
     warning. ``internal`` counts its internal passages, chapters included, which is
     what the dialog offers the two editions on; the public edition says, as a warning
-    of its own kind, how many it leaves out.
+    of its own kind, how many it leaves out. With ``format: "html"`` each note is laid
+    out as its HTML file instead (`_check_html`).
     """
     case = get_case(case_id)
     resolve = _resolver(case)
     public = body.edition == notes_markdown.PUBLIC
+    if body.format == "html":
+        return {"notes": [_check_html(case, note_id, resolve, public) for note_id in dict.fromkeys(body.notes)]}
     answered: list[dict[str, Any]] = []
     for note_id in dict.fromkeys(body.notes):
         title, text = _note_source(case, note_id)
@@ -813,6 +861,163 @@ def check_pdf(case_id: str, body: EditionSelection) -> dict[str, Any]:
                 warnings.append({"text": said, "line": None, "kind": notes_markdown.LEFT_OUT})
         answered.append({"note": note_id, "title": title, "warnings": warnings, "internal": internal})
     return {"notes": answered}
+
+
+def _check_html(case: Case, note_id: str, resolve: notes_markdown.Resolve, public: bool) -> dict[str, Any]:
+    """One note's check for its HTML file: the warnings, as the PDF's check gives them
+    and with bare counts as kind `count`; the file's weight in bytes, every picture
+    encoded as the export encodes it; the clips that go as a Watch link and the points
+    of view it shows, each with its line; and how many public editions came before."""
+    title, text = _note_source(case, note_id)
+    answer: dict[str, Any] = {"note": note_id, "title": title, "warnings": [], "internal": 0, "weight": 0,
+                              "links": [], "pov": [], "earlier": 0}
+    try:
+        rendered = html_engine.render(
+            case, title=title, text=text, look=notelook.stored(case, note_id), note_id=note_id, resolve=resolve,
+            public=public, check=True,
+        )
+    except html_engine.NotesHtmlError as exc:
+        answer["warnings"] = [{"text": str(exc)[:MAX_WARNING_CHARS], "line": None, "kind": notes_markdown.OTHER}]
+        return answer
+    warnings = [
+        {"text": said[:MAX_WARNING_CHARS], "line": line, "kind": kind}
+        for said, line, kind in zip(rendered.warnings, rendered.warning_lines, rendered.warning_kinds)
+    ]
+    if public and rendered.internal:
+        said = f"{rendered.internal} internal passage{'s' if rendered.internal > 1 else ''} left out."
+        warnings.append({"text": said, "line": None, "kind": notes_markdown.LEFT_OUT})
+    answer.update(
+        warnings=warnings,
+        internal=rendered.internal,
+        weight=rendered.weight,
+        links=[{"text": said[:MAX_WARNING_CHARS], "line": line} for said, line in rendered.links],
+        pov=[{"text": said[:MAX_WARNING_CHARS], "line": line} for said, line in rendered.pov],
+        earlier=sum(1 for record in _read_editions(case, note_id) if record["edition"] == notes_markdown.PUBLIC),
+    )
+    return answer
+
+
+def _svg_diagrams(drawn: dict[str, str]) -> dict[str, str]:
+    """The diagrams an HTML export carries, each bounded before a page is laid out;
+    what each SVG may hold is the renderer's to clean."""
+    if len(drawn) > MAX_DIAGRAMS:
+        raise HTTPException(status_code=422, detail=f"an export carries at most {MAX_DIAGRAMS} diagrams")
+    total = 0
+    for key, svg in drawn.items():
+        if not key or len(key) > 64 or not key.isalnum():
+            raise HTTPException(status_code=422, detail="invalid diagram key")
+        size = len(svg.encode("utf-8"))
+        if not size or size > html_engine.MAX_SVG_BYTES:
+            raise HTTPException(status_code=422, detail="diagram too large")
+        total += size
+        if total > MAX_DIAGRAM_TOTAL_BYTES:
+            raise HTTPException(status_code=422, detail="diagram batch too large")
+    return drawn
+
+
+@router.post("/{case_id}/notes/html/preview")
+def preview_html(case_id: str, body: HtmlPreviewIn) -> Response:
+    """The HTML a note would export as, from the text in the editor, written nowhere.
+
+    Pictures are lighter and clips stand as their still, so it is quick to make after
+    every pause in typing; the headers are the PDF preview's (`preview_response`).
+    """
+    case = get_case(case_id)
+    _require_note(case, body.note)
+    if len(body.text.encode("utf-8")) > MAX_NOTE_BODY_BYTES:
+        raise HTTPException(status_code=413, detail="the note is too large to preview")
+    diagrams = _svg_diagrams(body.diagrams)
+    title = body.title.strip() or _note_title(case, body.note)
+    look = body.look if body.look is not None else notelook.effective(case, body.note)
+    if not _preview_turn.acquire(timeout=PREVIEW_WAIT_SECONDS):
+        raise HTTPException(status_code=503, detail="another preview is still being laid out")
+    try:
+        rendered = html_engine.render(
+            case, title=title, text=body.text, look=look, note_id=body.note, resolve=_resolver(case),
+            public=body.edition == notes_markdown.PUBLIC, diagrams=diagrams, light=True, round_pov=body.round_pov,
+        )
+    except html_engine.NotesHtmlError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    finally:
+        _preview_turn.release()
+    return Response(
+        content=rendered.html,
+        media_type="text/html; charset=utf-8",
+        headers={
+            "Cache-Control": "no-store",
+            "Content-Security-Policy": HTML_PREVIEW_POLICY,
+            "X-Content-Type-Options": "nosniff",
+            "X-Note-Diagrams": _diagram_header(rendered.diagrams),
+            "X-Note-Warnings": _ascii_json(
+                [warning[:MAX_WARNING_CHARS] for warning in rendered.warnings[:MAX_HEADER_WARNINGS]]
+            ),
+            "X-Note-Warning-Lines": _ascii_json(rendered.warning_lines[:MAX_HEADER_WARNINGS]),
+            "X-Note-Warning-Kinds": _ascii_json(rendered.warning_kinds[:MAX_HEADER_WARNINGS]),
+            "X-Note-Internal": str(rendered.internal),
+        },
+    )
+
+
+@router.post("/{case_id}/notes/html")
+def export_html(case_id: str, body: HtmlExportIn) -> dict[str, Any]:
+    """Write one HTML file per requested note into the notes export folder, in the
+    edition asked for, each a new file the note keeps a record of, as a PDF is."""
+    case = get_case(case_id)
+    diagrams = _svg_diagrams(body.diagrams)
+    try:
+        destination = exportdir.destination("notes", case.path)
+    except exportdir.ExportDirError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    in_case = destination == layout.subdir(case.path, EXPORTS_DIR)
+    selected = [(note_id, *_note_source(case, note_id)) for note_id in dict.fromkeys(body.notes)]
+    peers = case.note_ids_by_titles({title for _, title, _ in selected})
+    peers.setdefault("case notes", []).append(CASE_NOTE)
+    written: list[dict[str, Any]] = []
+    warnings: list[str] = []
+    resolve = _resolver(case)
+    public = body.edition == notes_markdown.PUBLIC
+    changes = " ".join(body.changes.split())
+    for note_id, title, text in selected:
+        try:
+            rendered = html_engine.render(
+                case, title=title, text=text, look=notelook.stored(case, note_id), note_id=note_id,
+                resolve=resolve, public=public, diagrams=diagrams, round_pov=body.round_pov, changes=changes,
+                earlier=_read_editions(case, note_id),
+            )
+        except html_engine.NotesHtmlError as exc:
+            warnings.append(f"{title}: {exc}")
+            continue
+        now = _now()
+        edition = body.edition if rendered.internal else notes_markdown.PUBLIC
+        filename = _pdf_filename(title, note_id, peers, body.edition if rendered.internal else "", now.date(),
+                                 suffix=".html")
+        try:
+            path = exportdir.write_out(rendered.html, destination, filename)
+        except (OSError, exportdir.ExportDirError) as exc:
+            raise HTTPException(status_code=409, detail=f"could not write the file: {errors.explain(exc)}") from exc
+        record: dict[str, Any] = {
+            "at": now.astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+            "edition": edition,
+            "file": path.name,
+            "folder": EXPORTS_DIR if in_case else str(destination),
+            "format": "html",
+            "sha256": hashlib.sha256(rendered.html).hexdigest(),
+            "text_sha256": rendered.text_sha256,
+        }
+        if changes:
+            record["changes"] = changes[:MAX_CHANGES]
+        _record_edition(case, note_id, record)
+        written.append({"note": note_id, "title": title, "file": path.name, "edition": edition,
+                        "bytes": len(rendered.html)})
+        warnings.extend(f"{title}: {warning}" for warning in rendered.warnings)
+    if not written:
+        raise HTTPException(status_code=422, detail="; ".join(warnings) or "nothing to export")
+    return {
+        "written": written,
+        "warnings": warnings,
+        "folder": EXPORTS_DIR if in_case else str(destination),
+        "path": str(destination),
+    }
 
 
 @router.post("/{case_id}/notes/pdf")
@@ -981,6 +1186,8 @@ def _read_editions(case: Case, note_id: str) -> list[dict[str, Any]]:
 
 
 def _edition_record(item: Any) -> dict[str, Any] | None:
+    """One record read back: a PDF's as it always was, or an HTML file's, which says
+    its format and its file's SHA-256 and has no pages."""
     if not isinstance(item, dict):
         return None
     at, edition, file, folder = item.get("at"), item.get("edition"), item.get("file"), item.get("folder")
@@ -989,6 +1196,16 @@ def _edition_record(item: Any) -> dict[str, Any] | None:
         return None
     if not (isinstance(file, str) and layout.names_one_child(file) and isinstance(folder, str) and folder):
         return None
+    if item.get("format") == "html":
+        sha = item.get("sha256")
+        if not (isinstance(sha, str) and SHA256.match(sha) and isinstance(text_sha, str) and SHA256.match(text_sha)):
+            return None
+        record = {"at": at, "edition": edition, "file": file, "folder": folder, "format": "html", "sha256": sha,
+                  "text_sha256": text_sha}
+        changes = item.get("changes")
+        if isinstance(changes, str) and changes.strip():
+            record["changes"] = " ".join(changes.split())[:MAX_CHANGES]
+        return record
     if not (isinstance(pages, int) and not isinstance(pages, bool) and pages >= 0):
         return None
     if not (isinstance(pdf_sha, str) and SHA256.match(pdf_sha) and isinstance(text_sha, str) and SHA256.match(text_sha)):
@@ -1043,7 +1260,8 @@ def _file_sha256(path: Path) -> str | None:
 
 @router.get("/{case_id}/notes/{note_id}/editions")
 def note_editions(case_id: str, note_id: str) -> dict[str, Any]:
-    """The PDFs a note was exported as, newest first: day, edition, file, pages, hashes."""
+    """The PDFs and HTML files a note was exported as, newest first: day, edition, file,
+    pages (a PDF's), format (an HTML file's) and hashes."""
     case = get_case(case_id)
     _require_note(case, note_id)
     return {"editions": _read_editions(case, note_id)}
@@ -1059,7 +1277,8 @@ def check_edition(case_id: str, note_id: str, body: EditionRef) -> dict[str, str
     found = _file_sha256(path) if path is not None else None
     if found is None:
         return {"state": "missing"}
-    return {"state": "unchanged" if found == record["pdf_sha256"] else "changed"}
+    expected = record.get("sha256") or record["pdf_sha256"]
+    return {"state": "unchanged" if found == expected else "changed"}
 
 
 @router.post("/{case_id}/notes/{note_id}/editions/reveal")

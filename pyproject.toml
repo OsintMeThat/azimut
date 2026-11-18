@@ -45,6 +45,10 @@ dependencies = [
     # correctly in one document (see docs, and the shaping note below).
     "fpdf2>=2.8,<3",
     "markdown-it-py>=4.0,<5",
+    # The HTML report (engine/notes_html.py) cuts the look's typeface down to the
+    # characters a page draws and packs it as WOFF, so the file carries a few dozen
+    # kilobytes of font rather than megabytes. Pure Python; fpdf2 already brings it.
+    "fonttools>=4.50,<5",
     # Reading a multi-tab workbook into one sheet per tab (engine/sheetxlsx.py). The
     # binders this tool replaces arrive as .xlsx with five or six tabs, and asking the
     # analyst to export each one to CSV by hand is asking them not to bother. Pure

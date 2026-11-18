@@ -1548,10 +1548,11 @@ def test_detect_layers_are_no_longer_a_setting(client):
 
 
 def test_a_source_run_has_every_part_a_binary_can_lose(client):
-    """What the release smoke test asks a binary: zones, PDF faces, the extension,
-    the scrapers' metadata, the buildings' decoders."""
+    """What the release smoke test asks a binary: zones, PDF faces, the HTML report's
+    stylesheet and script, the extension, the scrapers' metadata, the buildings' decoders."""
     assert client.get("/api/settings/bundled").json() == {
-        "zones": True, "pdf_fonts": True, "extension": True, "scrapers": True, "buildings": True,
+        "zones": True, "pdf_fonts": True, "report_reader": True, "extension": True, "scrapers": True,
+        "buildings": True,
     }
 
 

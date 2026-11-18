@@ -544,7 +544,14 @@ stops making sense.
   case and reads no case file. The typefaces a note can print in are served
   read-only from a fixed list (`/api/notes/fonts`), with no path taken from the
   request. A JPEG goes into a note's PDF without its EXIF, GPS, XMP and IPTC
-  blocks. Decoded note pictures are kept between renders in a
+  blocks. A note's HTML report is one file that loads nothing: its own policy allows
+  `data:` addresses only, every picture in it is encoded again without its metadata, a
+  clip is copied without its container's, its diagrams are SVG cleaned of script, event
+  handlers, `foreignObject` and any reference leaving it, and the Page pane's copy is
+  answered under a sandboxing policy. Accepted risk (owner's choice, 2026-11-18): a
+  public HTML report may carry Esri and Google imagery, its credit kept beside the
+  picture and in its lightbox; a Street View or Yandex capture is warned about once by
+  the check before export and never refused. Decoded note pictures are kept between renders in a
   cache capped at 40 entries and 64 MB, and the preview's lighter copies (re-encoded,
   so with no metadata either) in one capped at 400 entries and 96 MB. Three routes take a picture drawn in the
   browser back: the note PDF export, whose request, diagrams and decoded total are

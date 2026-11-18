@@ -83,10 +83,12 @@ jobs:
               "azimut/assets/fonts/IBMPlexSans-OFL.txt",
               "azimut/assets/fonts/BITSTREAM-VERA.txt",
               "azimut/assets/fonts/README.md",
+              "azimut/engine/notes_html_assets/reader.css",
+              "azimut/engine/notes_html_assets/reader.js",
           }
           missing = sorted(required - names)
-          assert not missing, f"wheel is missing PDF font assets: {missing}"
-          print(f"{whl}: {len(static)} static files and PDF font assets bundled")
+          assert not missing, f"wheel is missing PDF and HTML report assets: {missing}"
+          print(f"{whl}: {len(static)} static files, PDF fonts and HTML report assets bundled")
           PY
       - uses: actions/upload-artifact@v7
         with:

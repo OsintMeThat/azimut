@@ -110,6 +110,19 @@ VIEW_TILTED = "tilted"  # a pitched 3D camera
 VIEW_STREET = "streetview"  # a ground-level panorama
 VIEW_GLOBE = "globe"  # level, but far enough out that the Earth is visibly round
 
+#: Said once when a Street View capture is filed, and again by the check before a
+#: report is published: Google's rules forbid screenshots of Street View, in print
+#: above all. The capture is the analyst's to keep or publish.
+STREET_VIEW_NOTICE = "Google's rules don't allow Street View screenshots in print or published work."
+#: The same word for a site whose own rules keep its map screenshots out of published
+#: work: Yandex allows its maps for personal, non-commercial use only and says no
+#: screenshot of them may be used. Bing's print rights allow screenshots, so says nothing.
+SITE_NOTICES = {
+    "yandex-maps": "Yandex's rules don't allow its map screenshots in published work.",
+    # Google's geo guidelines: Earth images only for non-commercial use, never promotional
+    "google-earth": "Google's rules allow Google Earth images for non-commercial use only.",
+}
+
 #: How high a level 3D camera may sit before the ground under it stops being
 #: flat enough to draw on, in metres.
 #:

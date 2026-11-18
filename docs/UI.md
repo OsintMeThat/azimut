@@ -7085,6 +7085,22 @@ written*, *This file is not the one Azimut wrote* or *File missing*. The record 
 edition, file, folder, pages, the PDF's SHA-256 and the printed text's) is kept on the
 note, fifty at most, and travels in a bundle.
 
+**The HTML file, on the server's side.** `POST /notes/html` writes one HTML file per
+note beside its PDFs, named the same with `.html`, in the edition asked for, and keeps it
+in the same record with `format: html`, the file's SHA-256 and the line saying what
+changed, if one was written (*Check* reads it as it reads a PDF). The file loads nothing:
+pictures (2400 px at most, JPEG unless they show through), fonts (the look's face, cut to
+the characters used; none for Plain) and diagrams (the SVG the browser drew, cleaned) are
+inside it, and only its links reach out. It aims to stay under 25 MB: a clip cut for a
+post or a short case video goes in whole while there is room, any other is its still and
+a *Watch* link. Its pictures go in without EXIF, GPS or text, a clip without its
+container's metadata. The check before it is `POST /notes/pdf/check` with
+`format: html`: the PDF's warnings, a bare count with no "at least" or range, the file's
+weight, the clips that become links and the points of view it shows, each pov roundable
+to about 150 m for that file only. `POST /notes/html/preview` makes the Page pane's
+lighter copy, written nowhere and sandboxed. Inside `::: steps` and `::: story` every
+picture opens a step; the PDF prints both as written, each picture then its words.
+
 **The HTML page, for its reader.** It reads like a long investigation online, in the
 note's look: the cover with its TLP label in FIRST's colours, the contents beside the
 text on a wide screen (a bar at the top on a phone) marking the chapter being read, the
