@@ -24,7 +24,7 @@
    * Ctrl+Shift+M switches it from anywhere in the editor.
    */
   import { onDestroy, onMount, untrack } from 'svelte';
-  import { Compartment, EditorState } from '@codemirror/state';
+  import { Compartment, EditorState, Transaction } from '@codemirror/state';
   import { EditorView } from '@codemirror/view';
   import { api } from '../lib/api.js';
   import { toast, reloadCase, prefs } from '../lib/state.svelte.js';
@@ -180,13 +180,15 @@
 
   // The text changed outside this editor: read from disk, ticked from the To-do, appended,
   // or typed in the other editor showing the same note. Only the stretch that differs is
-  // replaced, so the cursor and the drawing stay where they were.
+  // replaced, so the cursor and the drawing stay where they were. It never enters this
+  // editor's history: Undo takes back what was typed here, and an Undo that took back the
+  // note's own loading would empty it, and the empty note would be saved.
   $effect(() => {
     const text = doc?.text ?? '';
     if (!view || !doc?.loaded) return;
     untrack(() => {
       const change = differing(view.state.doc.toString(), text);
-      if (change) view.dispatch({ changes: change });
+      if (change) view.dispatch({ changes: change, annotations: Transaction.addToHistory.of(false) });
     });
   });
   $effect(() => {

@@ -13,7 +13,9 @@ const { reloadCase } = vi.hoisted(() => ({ reloadCase: vi.fn(async () => {}) }))
 vi.mock('../lib/state.svelte.js', async (actual) => ({ ...(await actual()), reloadCase }));
 
 const { prefs, uiState } = await import('../lib/state.svelte.js');
-const { openNote, resetOpenNotes, noteReady } = await import('../lib/notes/noteDoc.svelte.js');
+const { openNote, resetOpenNotes, noteReady, editNote } = await import('../lib/notes/noteDoc.svelte.js');
+const { EditorView } = await import('@codemirror/view');
+const { undo } = await import('@codemirror/commands');
 const { default: NoteEditor } = await import('./NoteEditor.svelte');
 const { registerOpener } = await import('../lib/notes/openers.js');const { noteMode } = await import('../lib/notes/noteMode.svelte.js');
 
@@ -89,6 +91,54 @@ describe('where a put lands', () => {
     const landed = handle.place(handle.spot(), 'PUT');
     expect(handle.takeBack(landed)).toBe(true);
     expect(view().textContent).toBe('First line.');
+  });
+});
+
+describe('Undo', () => {
+  const editorView = () => EditorView.findFromDOM(target.querySelector('.cm-editor'));
+  const undoAll = () => { let turns = 0; while (undo(editorView()) && turns < 50) turns += 1; return turns; };
+
+  it('never takes back the note as it was read, even when the editor stood before it arrived', async () => {
+    let arrive;
+    get.mockImplementation(() => new Promise((resolve) => { arrive = resolve; }));
+    const doc = openNote('c1', 'n1');
+    target = document.createElement('div');
+    document.body.append(target);
+    app = mount(NoteEditor, { target, props: { doc, caseId: 'c1', entities: ENTITIES, where: 'dock', onready: (api) => (handle = api) } });
+    await settle();
+    arrive({ text: 'The whole article.' });
+    await noteReady(doc);
+    await settle();
+    expect(editorView().state.doc.toString()).toBe('The whole article.');
+
+    expect(undoAll()).toBe(0);
+    await settle();
+    expect(editorView().state.doc.toString()).toBe('The whole article.');
+    expect(doc.text).toBe('The whole article.');
+  });
+
+  it('takes back what was typed here and stops at the note as it was read', async () => {
+    const doc = await editor('The whole article.');
+    const end = editorView().state.doc.length;
+    editorView().dispatch({ changes: { from: end, insert: ' One more line.' }, userEvent: 'input.type' });
+    await settle();
+    expect(doc.text).toBe('The whole article. One more line.');
+
+    undoAll();
+    await settle();
+    expect(editorView().state.doc.toString()).toBe('The whole article.');
+    expect(doc.text).toBe('The whole article.');
+  });
+
+  it('leaves what came from outside this editor where it is', async () => {
+    const doc = await editor('The whole article.');
+    // ticked from the To-do, or typed in the other editor showing the same note
+    editNote(doc, 'The whole article, ticked elsewhere.');
+    await settle();
+    expect(editorView().state.doc.toString()).toBe('The whole article, ticked elsewhere.');
+
+    expect(undoAll()).toBe(0);
+    expect(editorView().state.doc.toString()).toBe('The whole article, ticked elsewhere.');
   });
 });
 
