@@ -4,6 +4,7 @@
  * here (`editor/blocks.js` says what a kind declares).
  */
 import './alignedBlock.js';
+import './playedBlock.js';
 import './diagramBlock.js';
 import './tableBlock.js';
 import './breakBlocks.js';
