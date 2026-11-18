@@ -657,18 +657,6 @@ registerBlock({
   }),
 });
 
-registerBlock({
-  name: 'table',
-  node: 'Table',
-  read: (node) => ({ from: node.from, to: node.to }),
-  widget: blockWidget,
-  atomic: true,
-  source: (ctx, found) => {
-    ctx.lines(found.from, found.to, 'cm-table-line');
-    return true;
-  },
-});
-
 /** One comment line read as a block of its own when `test` says it is one. */
 function commentLine(test) {
   return (node, { state }) => {

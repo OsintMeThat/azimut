@@ -4,3 +4,4 @@
  * here (`editor/blocks.js` says what a kind declares).
  */
 import './diagramBlock.js';
+import './tableBlock.js';
