@@ -14,6 +14,18 @@
     const end = text.lastIndexOf('</body>');
     return end < 0 ? `${text}${script}` : `${text.slice(0, end)}${script}${text.slice(end)}`;
   }
+
+  /**
+   * A press inside the page lands in the page's own document, so a menu or a panel
+   * floating over the app never hears it and stays open. Taking the focus is what
+   * the app does see: the frame then tells the app it was pressed, as any part of
+   * the app would, and every press-outside rule closes what it should.
+   */
+  export function pressFrame(frame) {
+    const Pointer = typeof PointerEvent === 'function' ? PointerEvent : MouseEvent;
+    frame.dispatchEvent(new Pointer('pointerdown', { bubbles: true, cancelable: true, composed: true }));
+    frame.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, cancelable: true, composed: true }));
+  }
 </script>
 
 <script>
@@ -55,8 +67,22 @@
     const y = Number(event.data?.azimutPage);
     if (Number.isFinite(y) && y >= 0) top = y;
   }
+  // The window loses the focus to a frame of this page: read once it has moved.
+  let focusCheck = 0;
+  function left() {
+    clearTimeout(focusCheck);
+    focusCheck = setTimeout(() => {
+      const frame = document.activeElement;
+      if (frame && elements.includes(frame)) pressFrame(frame);
+    }, 0);
+  }
   window.addEventListener('message', heard);
-  onDestroy(() => window.removeEventListener('message', heard));
+  window.addEventListener('blur', left);
+  onDestroy(() => {
+    clearTimeout(focusCheck);
+    window.removeEventListener('message', heard);
+    window.removeEventListener('blur', left);
+  });
 </script>
 
 <div class="html-page">

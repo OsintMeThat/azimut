@@ -284,7 +284,10 @@ test('the Page pane shows the note as its HTML page, and the export dialog write
   await expect.poll(() => state.htmlPreviews.length).toBeGreaterThan(asked);
   expect(state.htmlPreviews.at(-1).look).toMatchObject({ style: 'report', web: 'story' });
   expect(state.looks.at(-1)).toMatchObject({ web: 'story' });
-  await page.keyboard.press('Escape');
+  // a press in the page closes the Look over it, as a press anywhere else in the app does
+  await expect(page.getByRole('dialog', { name: 'Look' })).toBeVisible();
+  await frame.locator('h1.az-title').click();
+  await expect(page.getByRole('dialog', { name: 'Look' })).toHaveCount(0);
 
   await page.locator('[data-guide="notebook.pdf"]').click();
   let dialog = page.getByRole('dialog', { name: 'Export note as PDF' });
