@@ -15,12 +15,17 @@
  *
  * Built on CodeMirror 6. Everything the page draws is worked out from the editor
  * state alone (`noteDecorations`), so it is tested without a browser.
+ *
+ * This file only puts the editor together, and says what the rest of the app may
+ * import. The parts live in `editor/`: the page (`decorations.js`), the kinds of
+ * block it draws whole, one module each, registered in `blocks.js` and loaded by
+ * `kinds.js`, where the drawn blocks are (`ranges.js`), the keys at a block
+ * (`blockKeys.js`), the `/` and `@` menus, what the toolbar writes (`writing.js`) and
+ * what a tool puts in (`puts.js`).
  */
+import { EditorState, Compartment, Prec } from '@codemirror/state';
 import {
-  EditorState, StateEffect, StateField, Compartment, EditorSelection, Prec,
-} from '@codemirror/state';
-import {
-  Decoration, EditorView, keymap, placeholder as placeholderText, drawSelection, dropCursor,
+  EditorView, keymap, placeholder as placeholderText, drawSelection, dropCursor,
 } from '@codemirror/view';
 import { markdown, markdownLanguage } from '@codemirror/lang-markdown';
 import { syntaxHighlighting } from '@codemirror/language';
@@ -28,18 +33,18 @@ import { history, historyKeymap, defaultKeymap, indentWithTab } from '@codemirro
 import { autocompletion, completionKeymap, acceptCompletion } from '@codemirror/autocomplete';
 
 import { blockKinds } from './editor/blocks.js';
-import './editor/kinds.js';
 import { blockKeys, pickedClass, typeNextToBlock, typeOnPicked } from './editor/blockKeys.js';
 import { drawn, rawField, rawHighlight, typeOverHints } from './editor/decorations.js';
-import { PICTURE_LINE, openCaption } from './editor/pictureBlock.js';
+import './editor/kinds.js';
+import { mentionSource } from './editor/mentionMenu.js';
+import { landed, spots } from './editor/puts.js';
 import { blocksIn } from './editor/ranges.js';
+import { slashSource } from './editor/slashMenu.js';
 import {
   focused, noteCase, noteHandlers, openBlock, resolve, setFocused, setNoteCase, setOpenBlock, templateMode,
 } from './editor/state.js';
-import { mentionSource } from './editor/mentionMenu.js';
-import { slashSource } from './editor/slashMenu.js';
 import { highlight, look } from './editor/theme.js';
-import { coverChange } from './reportParts.js';
+import { leaveEmptyItem, tickTask, toggleWrap } from './editor/writing.js';
 
 export { noteCase, setNoteCase, templateMode } from './editor/state.js';
 export { hintLineAt, noteDecorations, typeOverHints } from './editor/decorations.js';
@@ -50,6 +55,12 @@ export { mapBlock } from './editor/mapBlock.js';
 export { resizePicture } from './editor/pictureBlock.js';
 export { mentionSource } from './editor/mentionMenu.js';
 export { slashSource } from './editor/slashMenu.js';
+export {
+  LIGHT_MS, blockAt, captionAt, heldRange, holdRange, lightLines, placeText, releaseRange, takeBackRange,
+} from './editor/puts.js';
+export {
+  insertAtCursor, insertCover, jumpToLine, leaveEmptyItem, setLinePrefix, toggleWrap,
+} from './editor/writing.js';
 
 // -- the two modes ----------------------------------------------------------------
 
@@ -78,342 +89,6 @@ export function setNoteMode(view, mode) {
   if (noteMode(view.state) === next) return false;
   view.dispatch({ effects: [drawing.reconfigure(next === 'markdown' ? rawMode : drawnMode), view.scrollSnapshot()] });
   return true;
-}
-
-// -- writing ------------------------------------------------------------------
-
-/** Wrap the selection in a mark (`**` for bold), or take the mark away if it is there. */
-export function toggleWrap(view, mark) {
-  const { state } = view;
-  const changes = state.changeByRange((range) => {
-    const text = state.sliceDoc(range.from, range.to);
-    const before = state.sliceDoc(range.from - mark.length, range.from);
-    const after = state.sliceDoc(range.to, range.to + mark.length);
-    if (before === mark && after === mark) {
-      return {
-        changes: [{ from: range.from - mark.length, to: range.from }, { from: range.to, to: range.to + mark.length }],
-        range: EditorSelection.range(range.from - mark.length, range.to - mark.length),
-      };
-    }
-    return {
-      changes: [{ from: range.from, insert: mark }, { from: range.to, insert: mark }],
-      range: EditorSelection.range(range.from + mark.length, range.to + mark.length + (text ? 0 : 0)),
-    };
-  });
-  view.dispatch(state.update(changes, { scrollIntoView: true, userEvent: 'input' }));
-  view.focus();
-  return true;
-}
-
-/** Start the line the cursor is on with `prefix` (`## `, `- [ ] `), replacing a heading or list mark it had. */
-export function setLinePrefix(view, prefix) {
-  const { state } = view;
-  const line = state.doc.lineAt(state.selection.main.head);
-  const current = /^(\s*)(#{1,6}\s+|>\s*(\[![A-Za-z]+\]\s*)?|[-*+]\s+(\[[ xX]\]\s+)?|\d+[.)]\s+)?/.exec(line.text);
-  const indent = current[1].length;
-  const existing = current[2] ?? '';
-  const next = existing === prefix ? '' : prefix;
-  view.dispatch({
-    changes: { from: line.from + indent, to: line.from + indent + existing.length, insert: next },
-    selection: { anchor: line.from + indent + next.length + (line.length - indent - existing.length) },
-    userEvent: 'input',
-  });
-  view.focus();
-  return true;
-}
-
-/** Put text at the cursor, replacing the selection, with spaces around a chip so it stands alone. */
-export function insertAtCursor(view, text, { block = false } = {}) {
-  const { state } = view;
-  const range = state.selection.main;
-  let insert = text;
-  if (block) {
-    const line = state.doc.lineAt(range.from);
-    const lead = line.text.trim() ? (range.from === line.to ? '\n\n' : '\n') : '';
-    insert = `${lead}${text}\n`;
-  } else {
-    const before = state.sliceDoc(range.from - 1, range.from);
-    const after = state.sliceDoc(range.to, range.to + 1);
-    if (before && !/\s/.test(before)) insert = ` ${insert}`;
-    if (!after || !/\s/.test(after)) insert = `${insert} `;
-  }
-  view.dispatch({
-    changes: { from: range.from, to: range.to, insert },
-    selection: { anchor: range.from + insert.length },
-    scrollIntoView: true,
-    userEvent: 'input',
-  });
-  view.focus();
-}
-
-/**
- * Put the cursor at the start of a line (0-based), and bring it into view. A line
- * holding a picture is picked, brought into view and lit rather than opened, so the
- * picture stays drawn with its bar, which is where a picture is sized, captioned and
- * sourced. A line inside another drawn block (a table row, a line of an aligned
- * block) opens that block there.
- */
-export function jumpToLine(view, line) {
-  const number = Math.min(view.state.doc.lines, Math.max(1, Number(line) + 1));
-  const target = view.state.doc.line(number);
-  const block = blocksIn(view.state, target.from, target.to).find((item) => item.from <= target.from && target.to <= item.to);
-  const picture = PICTURE_LINE.test(target.text);
-  if (block && picture) {
-    view.dispatch({ selection: { anchor: block.from } });
-    lightLines(view, target.from, target.to);
-    view.focus();
-    return;
-  }
-  const effects = [EditorView.scrollIntoView(target.from, { y: 'center' })];
-  if (block) effects.push(setOpenBlock.of({ from: block.from, to: block.to }));
-  view.dispatch({ selection: { anchor: target.from }, effects });
-  // a picture's line, shown as text, is lit as a picture is
-  if (picture) lightLines(view, target.from, target.to);
-  view.focus();
-}
-
-// -- what a tool puts in the note ----------------------------------------------
-
-/**
- * Places in the note held while something is being made for them: a position a put
- * will land at, or the stretch it landed as. Each follows the typing around it, so a
- * picture that takes a while still lands where it was asked for, and Undo finds it.
- */
-const holdSpot = StateEffect.define();
-const dropSpot = StateEffect.define();
-let spotSeq = 0;
-
-const spots = StateField.define({
-  create: () => new Map(),
-  update(value, transaction) {
-    let next = value;
-    if (transaction.docChanged && value.size) {
-      next = new Map();
-      for (const [id, spot] of value) {
-        // what is typed at a held position goes before it, as at the start of a stretch; at its end, after it
-        const from = transaction.changes.mapPos(spot.from, 1);
-        next.set(id, { from, to: spot.to === spot.from ? from : Math.max(from, transaction.changes.mapPos(spot.to, -1)) });
-      }
-    }
-    for (const effect of transaction.effects) {
-      if (effect.is(holdSpot)) {
-        if (next === value) next = new Map(value);
-        next.set(effect.value.id, { from: effect.value.from, to: effect.value.to });
-      } else if (effect.is(dropSpot) && next.has(effect.value)) {
-        if (next === value) next = new Map(value);
-        next.delete(effect.value);
-      }
-    }
-    return next;
-  },
-});
-
-/** Hold `from`–`to` (a position when they are one) as the note changes; answers its id. */
-export function holdRange(view, from, to = from) {
-  spotSeq += 1;
-  view.dispatch({ effects: holdSpot.of({ id: spotSeq, from, to }) });
-  return spotSeq;
-}
-
-/** Where a held place is now, `{ from, to }`, or null once let go. */
-export function heldRange(view, id) {
-  return view.state.field(spots, false)?.get(id) ?? null;
-}
-
-export function releaseRange(view, id) {
-  if (view.state.field(spots, false)?.has(id)) view.dispatch({ effects: dropSpot.of(id) });
-}
-
-/** A picture line's braces, which the bar and the caption field change, read as one. */
-function unsized(text) {
-  return String(text ?? '').replace(/(\]\]|\))\{[^}\n]*\}/g, '$1');
-}
-
-/**
- * The text that puts `text` at `pos` on lines of its own: a blank line from words
- * before it and after it, so a table or a picture is read as one. `inline` puts it
- * in the line at `pos` instead, with a space either side, as a citation is written.
- * Answers `{ insert, start, end }`, the text and where `text` sits in it.
- */
-export function blockAt(state, pos, text, { inline = false } = {}) {
-  const at = Math.max(0, Math.min(pos, state.doc.length));
-  if (inline) {
-    const before = state.sliceDoc(at - 1, at);
-    const after = state.sliceDoc(at, at + 1);
-    const lead = before && !/\s/.test(before) ? ' ' : '';
-    const trail = !after || !/\s/.test(after) ? ' ' : '';
-    return { insert: `${lead}${text}${trail}`, start: lead.length, end: lead.length + text.length };
-  }
-  const line = state.doc.lineAt(at);
-  const head = line.text.slice(0, at - line.from);
-  const tail = line.text.slice(at - line.from);
-  const previous = line.number > 1 ? state.doc.line(line.number - 1).text : '';
-  const next = line.number < state.doc.lines ? state.doc.line(line.number + 1).text : null;
-  // words before it on this line take a blank line; an empty line under words, one more break
-  const lead = head.trim() ? '\n\n' : !head && previous.trim() ? '\n' : '';
-  // the line's own break follows it unless it is the last: words after it take a blank line
-  const trail = tail.trim() ? '\n\n' : next === null ? '\n' : next.trim() ? '\n' : '';
-  const insert = `${lead}${text}${trail}`;
-  return { insert, start: lead.length, end: lead.length + text.length };
-}
-
-/**
- * Put `text` at `pos` (a held place's position when it is the id of one), as
- * `blockAt` writes it. Answers the id of the stretch it now holds in the note, which
- * `takeBackRange` reads. The note's own cursor moves past it only when it was there.
- */
-export function placeText(view, pos, text, options = {}) {
-  if (view.state.readOnly) return null;
-  const { insert, start, end } = blockAt(view.state, pos, text, options);
-  const from = Math.max(0, Math.min(pos, view.state.doc.length));
-  const head = view.state.selection.main.head;
-  view.dispatch({
-    changes: { from, insert },
-    ...(head === from ? { selection: { anchor: from + insert.length } } : {}),
-    userEvent: 'input',
-  });
-  const id = holdRange(view, from, from + insert.length);
-  lightLines(view, from + start, from + end);
-  return { id, text: insert };
-}
-
-/**
- * Take back what `placeText` put in, if the note still holds it as it was: a
- * picture's size and caption may have been set since, nothing else. False when it
- * changed, or is no longer there.
- */
-export function takeBackRange(view, landed) {
-  const held = landed ? heldRange(view, landed.id) : null;
-  if (!held || view.state.readOnly) return false;
-  const now = view.state.sliceDoc(held.from, held.to);
-  if (unsized(now) !== unsized(landed.text)) return false;
-  view.dispatch({ changes: { from: held.from, to: held.to }, effects: dropSpot.of(landed.id), userEvent: 'delete' });
-  return true;
-}
-
-/** Light the lines `from`–`to` for a moment and bring them into view: where a put landed. */
-const lightOn = StateEffect.define();
-const lightOff = StateEffect.define();
-const landedLine = Decoration.line({ class: 'cm-landed' });
-
-const landed = StateField.define({
-  create: () => Decoration.none,
-  update(value, transaction) {
-    let next = value.map(transaction.changes);
-    for (const effect of transaction.effects) {
-      if (effect.is(lightOff)) next = Decoration.none;
-      if (effect.is(lightOn)) {
-        const { from, to } = effect.value;
-        const lines = [];
-        const doc = transaction.state.doc;
-        for (let number = doc.lineAt(from).number; number <= doc.lineAt(Math.max(from, to)).number; number += 1) {
-          lines.push(landedLine.range(doc.line(number).from));
-        }
-        next = Decoration.set(lines);
-      }
-    }
-    return next;
-  },
-  provide: (field) => EditorView.decorations.from(field),
-});
-
-/** How long the lines a put landed as stay lit. */
-export const LIGHT_MS = 1800;
-
-export function lightLines(view, from, to = from) {
-  const at = Math.max(0, Math.min(from, view.state.doc.length));
-  const end = Math.max(at, Math.min(to, view.state.doc.length));
-  view.dispatch({ effects: [lightOn.of({ from: at, to: end }), EditorView.scrollIntoView(at, { y: 'center' })] });
-  // a picture or a table is drawn in place of its lines, so it is lit itself
-  const first = view.state.doc.lineAt(at).number;
-  const last = view.state.doc.lineAt(end).number;
-  const markBlocks = () => {
-    for (const node of view.contentDOM.querySelectorAll('.cm-block')) {
-      let number = 0;
-      try { number = view.state.doc.lineAt(view.posAtDOM(node)).number; } catch { continue; }
-      if (number >= first && number <= last) node.classList.add('cm-block-landed');
-    }
-  };
-  markBlocks();
-  if (typeof requestAnimationFrame === 'function') requestAnimationFrame(markBlocks);
-  clearTimeout(view.lightTimer);
-  view.lightTimer = setTimeout(() => {
-    if (!view.dom.isConnected) return;
-    view.dispatch({ effects: lightOff.of(null) });
-    for (const node of view.contentDOM.querySelectorAll('.cm-block-landed')) node.classList.remove('cm-block-landed');
-  }, LIGHT_MS);
-}
-
-/**
- * Open the caption field of the picture on the line at `pos`, once the page has
- * drawn it. `returnTo` gets the keyboard back after Enter or Escape. Answers whether
- * it opened, after a few frames at most.
- */
-export function captionAt(view, pos, { returnTo = null, frames = 6 } = {}) {
-  return new Promise((done) => {
-    const tryOpen = (left) => {
-      const line = view.state.doc.lineAt(Math.min(pos, view.state.doc.length));
-      const box = [...view.contentDOM.querySelectorAll('.cm-block-picture')]
-        .find((node) => { try { return view.state.doc.lineAt(view.posAtDOM(node)).number === line.number; } catch { return false; } });
-      if (box) {
-        openCaption(view, box, returnTo);
-        done(true);
-        return;
-      }
-      if (left <= 0) {
-        done(false);
-        return;
-      }
-      requestAnimationFrame(() => tryOpen(left - 1));
-    };
-    tryOpen(frames);
-  });
-}
-
-/**
- * Write the cover page at the top of the note, unless it has one, and put the
- * cursor on its first line to write. Answers whether it wrote one. Without
- * `focus` (Look › Cover was changed) the keyboard stays where it is.
- */
-export function insertCover(view, { focus = true } = {}) {
-  if (view.state.readOnly) return false;
-  const change = coverChange(view.state.doc.toString());
-  if (!change) {
-    if (!focus) return false;
-    view.dispatch({ selection: { anchor: 0 }, scrollIntoView: true });
-    view.focus();
-    return false;
-  }
-  const changes = { from: change.from, to: change.to, insert: change.insert };
-  if (!focus) {
-    view.dispatch({ changes, userEvent: 'input' });
-    return true;
-  }
-  // drawn as focused at once, so the page opens around the cursor rather than over it
-  view.dispatch({ changes, selection: { anchor: change.cursor }, effects: setFocused.of(true), scrollIntoView: true, userEvent: 'input' });
-  view.focus();
-  return true;
-}
-
-/**
- * Enter on a list item with nothing in it leaves the list, a task as well as a bullet:
- * Markdown's own Enter counts `[ ]` as the item's text and would start another one.
- */
-export function leaveEmptyItem(view) {
-  const { state } = view;
-  const range = state.selection.main;
-  if (!range.empty) return false;
-  const line = state.doc.lineAt(range.head);
-  if (range.head !== line.to || !/^\s*(?:[-*+]|\d+[.)])\s+\[[ xX]\]\s*$/.test(line.text)) return false;
-  view.dispatch({ changes: { from: line.from, to: line.to, insert: '' }, selection: { anchor: line.from }, userEvent: 'delete' });
-  return true;
-}
-
-/** Tick a task box: the `[ ]` at `at` becomes `[x]`, or back. */
-function tickTask(view, at) {
-  const marker = view.state.sliceDoc(at, at + 3);
-  if (!/^\[[ xX]\]$/.test(marker)) return;
-  view.dispatch({ changes: { from: at + 1, to: at + 2, insert: marker[1] === ' ' ? 'x' : ' ' }, userEvent: 'input' });
 }
 
 // -- the editor ----------------------------------------------------------------
