@@ -10,7 +10,8 @@
  *
  * `header` and `footer` are the late keys: a band of three one-line slots that
  * replaces the style's own running header or footer, written only once a slot is
- * filled, so a look that never used them reads and writes as it always did.
+ * filled, so a look that never used them reads and writes as it always did. `web`,
+ * how the HTML page is laid out, is one too: the server keeps it only once set.
  */
 import { api } from '../api.js';
 
@@ -25,6 +26,7 @@ export const DEFAULT_LOOK = Object.freeze({
   toc: false,
   numbered: false,
   sources: '',
+  web: '',
 });
 
 /** Each style, and the typeface it sets its text in when none is picked (`engine/notes_style.py`). */
@@ -74,6 +76,12 @@ export const SOURCES = [
   { id: '', label: "Style's own" },
   { id: 'on', label: 'On' },
   { id: 'off', label: 'Off' },
+];
+
+/** How the HTML page is laid out, the PDF the same either way (`engine/notelook.py`, `Web`). */
+export const WEBS = [
+  { id: '', label: 'Article' },
+  { id: 'story', label: 'Story' },
 ];
 
 /** The styles that print no list of sources unless it is turned on (`engine/notelook.py`). */
@@ -186,6 +194,7 @@ export function normaliseLook(look) {
     toc: Boolean(given.toc),
     numbered: Boolean(given.numbered),
     sources: pick(given.sources ?? '', SOURCES, ''),
+    web: pick(given.web ?? '', WEBS, ''),
     ...(header && { header }),
     ...(footer && { footer }),
   };
@@ -194,12 +203,12 @@ export function normaliseLook(look) {
 /**
  * Which sections of the Look hold something set, a note with no look holding none:
  * what the panel's tabs mark with a dot. Style counts the contents, numbering and
- * sources switches too, Page its paper, accent and marking.
+ * sources switches and the web page's layout too, Page its paper, accent and marking.
  */
 export function sectionsSet(look) {
   const whole = normaliseLook(look);
   return {
-    style: whole.style !== DEFAULT_LOOK.style || whole.toc || whole.numbered || whole.sources !== '',
+    style: whole.style !== DEFAULT_LOOK.style || whole.toc || whole.numbered || whole.sources !== '' || whole.web !== '',
     text: Boolean(whole.font || whole.size),
     page: whole.page !== DEFAULT_LOOK.page || Boolean(whole.accent || whole.tlp),
     cover: whole.cover.on,

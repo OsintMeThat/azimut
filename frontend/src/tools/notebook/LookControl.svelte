@@ -7,7 +7,8 @@
 <script>
   /**
    * How a note prints, set from the editor's header: a panel of five tabs, one
-   * section at a time. Style (with the contents, numbering and sources switches),
+   * section at a time. Style (with the contents, numbering and sources switches,
+   * and the HTML page's layout, an article or a story),
    * Text (size and typeface), Page (paper, accent, marking), Cover and the page's
    * Header & footer. A tab whose section holds something set wears a dot. Each
    * change is handed up at once (`onchange`), which saves it beside the note and
@@ -25,7 +26,7 @@
   import { tick, untrack } from 'svelte';
   import { LOOK_HELP } from '../../lib/notes/lookHelp.js';
   import {
-    BANDS, BAND_MAX, COVERS, FONTS, PAGES, SIZES, SLOTS, SLOT_LOGOS, STYLES, SUBTITLE_MAX, TLPS, bandStyleOwn, coverChoice, coverFor, lookFont, normaliseLook,
+    BANDS, BAND_MAX, COVERS, FONTS, PAGES, SIZES, SLOTS, SLOT_LOGOS, STYLES, SUBTITLE_MAX, TLPS, WEBS, bandStyleOwn, coverChoice, coverFor, lookFont, normaliseLook,
     sectionsSet, slotText, sourcesOn, styleLabel,
   } from '../../lib/notes/look.js';
   import { faceFamily, loadNoteFont, noteFonts } from '../../lib/notes/noteFonts.js';
@@ -222,6 +223,15 @@
             {@render toggle('Contents page', LOOK_HELP.toc, whole.toc, (on) => set({ toc: on }))}
             {@render toggle('Numbered headings', LOOK_HELP.numbered, whole.numbered, (on) => set({ numbered: on }))}
             {@render toggle('List sources at the end', LOOK_HELP.sources, sourcesOn(whole), (on) => set({ sources: on ? 'on' : 'off' }))}
+          </div>
+          <div class="row web">
+            <span class="key" title={LOOK_HELP.web}>Web page</span>
+            <div class="seg" role="radiogroup" aria-label="Web page" title={LOOK_HELP.web}>
+              {#each WEBS as web (web.id)}
+                <button type="button" class:on={whole.web === web.id} role="radio" aria-checked={whole.web === web.id}
+                  title={web.id ? LOOK_HELP.webStory : LOOK_HELP.webArticle} onclick={() => set({ web: web.id })}>{web.label}</button>
+              {/each}
+            </div>
           </div>
 
         {:else if tab === 'text'}
@@ -434,7 +444,8 @@
   .stack { display: flex; flex-direction: column; gap: 8px; }
   .key { color: var(--text-3); font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: .06em; }
   .row .input { min-width: 0; font-size: var(--fs-sm); }
-  .group { display: flex; flex-direction: column; gap: 8px; padding-top: 16px; border-top: 1px solid var(--border); }
+  .group, .web { padding-top: 16px; border-top: 1px solid var(--border); }
+  .group { display: flex; flex-direction: column; gap: 8px; }
 
   .fonts { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 8px; }
   .font-card {

@@ -626,6 +626,56 @@ def test_a_plain_look_uses_the_readers_fonts_and_a_styled_one_brings_its_own(rep
     assert woff[:4] == b"wOFF"
 
 
+# -- the story layout ---------------------------------------------------------------------
+
+
+def test_the_story_layout_holds_each_picture_beside_the_words_after_it(report):
+    """The look's `web: story`: the same text, each picture with the words that follow it
+    made a scene. A heading, a table or another picture ends a scene; a picture with no
+    words after it, or narrower than the page, stays a figure; blocks written as steps or
+    as a story stay as written. The article never holds a scene."""
+    story = parse(notes_html.render(
+        report["case"], title=TITLE, text=report["text"], look=LOOK.model_copy(update={"web": "story"}),
+        identity=notefill.Identity(), diagrams={notes_markdown.diagram_key(DIAGRAM): DIAGRAM_SVG}, created=CREATED).html)
+    article = report["page"]
+    assert story.one("html").attrs["data-web"] == "story" and "data-web" not in article.one("html").attrs
+    assert not article.find("section", "az-scenes")
+    [scene] = story.find("section", "az-scenes")
+    main = story.one("main", "az-body")
+    assert scene.parent is main and main.children[main.children.index(scene) - 1].attrs.get("id") == "the-footage"
+    figure = scene.one(cls="az-story-figures").one("figure")
+    assert figure.attrs["data-kind"] == "clip" and figure.attrs["data-step"] == "1" and "--az-n:1" in figure.attrs["style"]
+    words = scene.one(cls="az-story-steps").one(cls="az-story-step")
+    assert words.attrs["data-step"] == "1" and "first strike lands" in words.words() and "data-quiet" not in words.attrs
+    in_story = lambda node: any("az-story" in above.classes for above in node.ancestors())  # noqa: E731
+    narrow = next(node for node in story.find("figure") if "lead tank stops" in node.words())
+    assert not in_story(narrow) and not in_story(story.one("figure", data_kind="proof"))
+    assert len(story.find("section", "az-steps")) == 1
+    [written] = [node for node in story.find("section", "az-story") if "az-scenes" not in node.classes]
+    assert written.attrs["data-steps"] == "2"
+    # nothing is added or lost, only regrouped
+    assert sorted(main.words().split()) == sorted(article.one("main", "az-body").words().split())
+
+
+def test_a_run_of_pictures_is_one_story_and_a_table_ends_it(report):
+    made = report["made"]
+    text = (f"## One\n\n[[media:{made['capture']['id']}|Above]]\n\nWords about the junction.\n\n"
+            f"[[media:{made['wide']['id']}|Ridge]]\n\n[[media:{made['wreck']['id']}|Wreck]]\n\n"
+            "- the wrecks\n- the road\n\n| a | b |\n|---|---|\n| 1 | 2 |\n\nAfter the table.\n\n"
+            f"[[media:{made['photo']['id']}|Photo]]\n\n| c | d |\n|---|---|\n| 3 | 4 |\n")
+    page = parse(notes_html.render(report["case"], title="Run", text=text, look=NoteLook(web="story"),
+                                   identity=notefill.Identity(), created=CREATED).html)
+    [scene] = page.find("section", "az-scenes")
+    assert [node.attrs["data-step"] for node in scene.one(cls="az-story-figures").children] == ["1", "2", "3"]
+    steps = scene.one(cls="az-story-steps").children
+    assert ["data-quiet" in node.attrs for node in steps] == [False, True, False]
+    assert "junction" in steps[0].words() and steps[2].one("ul")
+    main = page.one("main", "az-body")
+    after = main.children[main.children.index(scene) + 1:]
+    assert [node.tag for node in after] == ["div", "p", "figure", "div"]
+    assert "After the table." in after[1].words() and after[2].attrs["data-kind"] == "picture"
+
+
 def test_only_an_edition_that_says_what_it_changed_is_a_correction():
     """A public file made again with nothing said about it is the same text: the note's
     record keeps it, the reader is never shown it as a correction."""

@@ -1,6 +1,6 @@
 /*
  * Azimut reader: how an exported HTML report looks, inlined by engine/notes_html.py.
- * The Look sets data-look, data-font and --az-accent on <html>, its faces
+ * The Look sets data-look, data-font, data-web and --az-accent on <html>, its faces
  * az-body and az-head. reader.js adds .az-js: the page reads whole without it.
  *
  * One axis: the text column stands in the middle of the window at every width, and
@@ -155,17 +155,17 @@ body > .az-graphic-warning {
 .az-contents > ol::before { content: "Contents"; display: block; margin-bottom: .7rem; font: 700 .6875rem/1.3 var(--ui); letter-spacing: .14em; text-transform: uppercase; color: var(--ink); }
 .az-contents-toggle { display: none; }
 @media (min-width: 85rem) {
-  :root { --margin: calc(var(--rail) + 3.5rem); }
+  :root:not([data-web="story"]) { --margin: calc(var(--rail) + 3.5rem); }
   /* the rail stands left of the wide column, as tall as the text and its end matter, never over the footer */
-  .az-contents {
+  html:not([data-web="story"]) .az-contents {
     position: absolute; z-index: 5; inset: 0 auto 0 max(1.5rem, calc(50% - var(--wide) / 2 - 2rem - var(--rail)));
     width: var(--rail); margin: 0;
   }
-  .az-contents > ol {
+  html:not([data-web="story"]) .az-contents > ol {
     position: sticky; top: 0; max-height: 100vh; overflow-y: auto; overscroll-behavior: contain; scrollbar-width: thin;
     padding: clamp(3rem, 6vw, 4.5rem) .25rem 2.5rem 0; font-size: .8125rem;
   }
-  .az-contents ol ol a { font-size: .78rem; }
+  html:not([data-web="story"]) .az-contents ol ol a { font-size: .78rem; }
 }
 /* the bar: the title, the part being read, and the contents a press away */
 .az-contents.az-bar { position: sticky; top: 0; z-index: 20; width: auto; height: var(--bar); margin: 0; border-bottom: 1px solid var(--rule); background: color-mix(in srgb, var(--paper) 96%, transparent); backdrop-filter: saturate(1.4) blur(12px); }
@@ -460,8 +460,48 @@ html:not(.az-js) .az-graphic:focus-within img { filter: none; transform: none; }
 }
 .az-live .az-story-step:last-child { margin-bottom: 0; }
 .az-live .az-story-step.az-on { border-left-color: var(--az-accent); color: var(--ink); }
+.az-live .az-story-step[data-quiet] { visibility: hidden; min-height: 30vh; padding: 0; border: 0; box-shadow: none; }
 .az-story-count { display: block; margin-bottom: .4rem; font: 600 .75rem/1 var(--ui); letter-spacing: .06em; color: var(--muted); font-variant-numeric: tabular-nums; }
 .az-on > .az-story-count { color: var(--accent-ink); }
+
+/* the story layout: the cover a hero, then each picture held still while the words that follow it go by */
+[data-web="story"] .az-cover:not([data-cover="own"]) { min-height: 88vh; min-height: 88svh; align-content: center; }
+[data-web="story"] .az-cover[data-cover="own"] { min-height: 100svh; align-content: center; }
+[data-web="story"] .az-cover:not([data-cover="own"]) .az-title { font-size: clamp(2.6rem, 1rem + 5vw, 5.75rem); max-width: 15em; }
+[data-web="story"] .az-cover:has(> .az-cover-figure) {
+  min-height: 100vh; min-height: 100svh; align-content: end; padding-bottom: clamp(5rem, 14vh, 9rem); border: 0;
+  background: #0d0e10; color: #fff; isolation: isolate; overflow: hidden;
+}
+[data-web="story"] .az-cover > .az-cover-figure { position: absolute; grid-column: 1 / -1; inset: 0; z-index: -1; margin: 0; }
+[data-web="story"] .az-cover-figure :is(.az-zoom, img) { width: 100%; height: 100%; max-height: none; object-fit: cover; background: none; cursor: default; }
+[data-web="story"] .az-cover-figure .az-zoom::after { content: none; }
+[data-web="story"] .az-cover-figure::after {
+  content: ""; position: absolute; inset: 0; pointer-events: none;
+  background: linear-gradient(to top, rgba(8, 9, 11, .96), rgba(8, 9, 11, .78) 38%, rgba(8, 9, 11, .42) 72%, rgba(8, 9, 11, .55));
+}
+[data-web="story"] .az-cover-figure figcaption { position: absolute; z-index: 1; right: var(--gutter); bottom: 1.25rem; max-width: 40%; margin: 0; color: rgba(255, 255, 255, .7); }
+[data-web="story"] .az-cover-figure .az-credit, [data-web="story"] .az-cover-figure .az-credit .az-cite { color: inherit; }
+[data-web="story"] .az-cover:has(> .az-cover-figure) .az-title { text-shadow: 0 2px 28px rgba(0, 0, 0, .55); }
+[data-web="story"] .az-cover:has(> .az-cover-figure) :is(.az-standfirst, .az-tlp-note) { color: rgba(255, 255, 255, .86); }
+[data-web="story"] .az-cover:has(> .az-cover-figure) :is(.az-dateline, .az-kicker) { color: rgba(255, 255, 255, .72); }
+[data-web="story"] .az-cover:not([data-cover="own"])::after {
+  content: "Scroll"; position: absolute; left: 50%; bottom: 1.5rem; padding-bottom: 1.75rem; transform: translateX(-50%);
+  font: 600 .6875rem/1 var(--ui); letter-spacing: .2em; text-transform: uppercase; opacity: .6;
+  background: linear-gradient(currentColor, currentColor) 50% 100% / 1px 1.25rem no-repeat; animation: az-cue 2.4s var(--ease) infinite;
+}
+@keyframes az-cue { 50% { background-position-y: 70%; } }
+[data-web="story"] .az-body > .az-story { grid-column: full; margin-block: 2.5rem; }
+[data-web="story"] .az-story.az-live {
+  grid-template-columns: minmax(0, 1fr) minmax(17rem, 25rem); gap: 0 clamp(2rem, 4vw, 4.5rem);
+  width: min(100%, 112rem); margin-inline: auto; padding-inline: var(--gutter);
+}
+[data-web="story"] .az-live .az-story-figures { top: var(--bar); height: calc(100vh - var(--bar)); }
+[data-web="story"] .az-live .az-story-figures :is(img, video, .az-compare > img) { max-height: calc(100vh - var(--bar) - 8.5rem); }
+/* a proof says its claim and its points under the picture: the picture leaves them room */
+.az-live .az-story-figures > [data-kind="proof"] img { max-height: calc(100vh - var(--bar) - 15rem) !important; }
+[data-web="story"] .az-live .az-story-steps { padding: 45vh 0 50vh; }
+[data-web="story"] .az-live .az-story-step { max-width: none; margin-bottom: 75vh; padding: 1.4rem 1.6rem 1.5rem; font-size: 1em; line-height: 1.55; }
+[data-web="story"] .az-live .az-story-step[data-quiet] { margin-bottom: 40vh; }
 
 /* the end of the page, on the text's column */
 .az-sources, .az-corrections { width: min(var(--measure), 100% - 2 * var(--gutter)); margin: 4.5rem auto 0; padding-top: 1.5rem; border-top: 2px solid var(--ink); font: 400 .875rem/1.55 var(--ui); }
@@ -533,6 +573,17 @@ html.az-locked { overflow: hidden; }
   .az-lb-level { display: none; }
   .az-bar-title:has(+ .az-contents-now:not(:empty)) { display: none; }
   .az-contents-now::before { content: none !important; }
+  /* a story on a phone: the picture on top, the words passing over its lower part */
+  [data-web="story"] .az-story.az-live { grid-template-columns: minmax(0, 1fr); padding: 0; }
+  [data-web="story"] .az-live .az-story-figures { grid-area: 1 / 1; height: calc(100svh - var(--bar)); }
+  [data-web="story"] .az-live .az-story-figures > figure { justify-content: flex-start; padding-top: .75rem; }
+  [data-web="story"] .az-live .az-story-figures :is(img, video, .az-compare > img) { max-height: 58svh; }
+  [data-web="story"] .az-live .az-story-steps { grid-area: 1 / 1; z-index: 2; padding: 64svh 0 30svh; }
+  [data-web="story"] .az-live .az-story-step {
+    width: calc(100% - 2 * var(--gutter)); margin: 0 auto 80svh; padding: 1.1rem 1.2rem 1.2rem; border: 0; border-radius: 6px;
+    background: color-mix(in srgb, var(--paper) 96%, transparent); box-shadow: 0 14px 40px -12px rgba(0, 0, 0, .45);
+  }
+  [data-web="story"] .az-live .az-story-step.az-on { border: 0; }
 }
 
 @media (prefers-reduced-motion: no-preference) { html { scroll-behavior: smooth; } }
@@ -558,10 +609,14 @@ html.az-locked { overflow: hidden; }
   html { scroll-behavior: auto; }
   body { background: #fff; }
   .az-contents, .az-progress, .az-slider, .az-steps-bar, .az-table-tools, .az-lightbox, .az-card, .az-story-count, .az-zoom::after, body > .az-graphic-warning { display: none !important; }
-  .az-cover { display: block; min-height: 0; padding: 0 0 8mm; background: none; color: inherit; border-top: 0; }
+  .az-cover, [data-web="story"] .az-cover:not([data-cover="own"]) { display: block; min-height: 0; padding: 0 0 8mm; background: none; color: inherit; border-top: 0; }
   .az-cover::after { content: none !important; }
   .az-cover > * { margin-inline: auto; }
   .az-title { text-shadow: none !important; }
+  [data-web="story"] .az-cover > .az-cover-figure { position: static; }
+  .az-cover-figure[data-borrowed] { display: none !important; }
+  [data-web="story"] .az-cover-figure::after { content: none; }
+  [data-web="story"] .az-cover-figure figcaption { position: static; color: var(--muted); }
   .az-title { font-size: 26pt !important; }
   .az-standfirst { font-size: 13pt; color: var(--ink-2) !important; }
   .az-dateline { color: var(--muted) !important; }

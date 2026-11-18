@@ -6,7 +6,7 @@ vi.mock('../api.js', () => ({ api: { get, put } }));
 
 const {
   BANDS, BAND_MAX, COVERS, DEFAULT_LOOK, FONTS, HINT_LINE, coverChoice, coverFor, ownCover, INCLUDE_LINE, SIZES, SOURCES_OFF_STYLES, STYLES, hintLine, includeLine, isPlainLook, isReport, lookFont,
-  bandStyleOwn, normaliseLook, readLook, sectionsSet, slotText, reportBody, reportLook, sourcesOn, templateLook, writeLook,
+  WEBS, bandStyleOwn, normaliseLook, readLook, sectionsSet, slotText, reportBody, reportLook, sourcesOn, templateLook, writeLook,
 } = await import('./look.js');
 
 afterEach(() => vi.clearAllMocks());
@@ -54,6 +54,20 @@ describe('a look', () => {
     expect(isPlainLook({ sources: '' })).toBe(true);
     expect(isPlainLook({ sources: 'on' })).toBe(false);
     expect(templateLook({ style: 'report', sources: 'off' }).sources).toBe('off');
+  });
+
+  it('keeps the web page\'s layout as set, an article for anything else, as the server reads it', () => {
+    expect(WEBS.map((web) => [web.id, web.label])).toEqual([['', 'Article'], ['story', 'Story']]);
+    expect(normaliseLook(null).web).toBe('');
+    expect(normaliseLook({ web: 'story' }).web).toBe('story');
+    expect(normaliseLook({ web: 'scroll' }).web).toBe('');
+    expect(isPlainLook({ web: '' })).toBe(true);
+    expect(isPlainLook({ web: 'story' })).toBe(false);
+    expect(templateLook({ style: 'report', web: 'story' }).web).toBe('story');
+    // the server's own list, read off its source, so a layout added on one end fails here
+    const server = readFileSync(new URL('../../../../src/azimut/engine/notelook.py', import.meta.url), 'utf8');
+    expect(server).toContain('Web = Literal["", "story"]');
+    expect(server).toMatch(/LATE_KEYS = \([^)]*"web"/);
   });
 
   it('lists the sources at the end for every style but Plain, unless set', () => {
@@ -138,7 +152,7 @@ describe('a look', () => {
     expect(sectionsSet(null)).toEqual(none);
     expect(sectionsSet({ style: 'plain', page: 'a4' })).toEqual(none);
     expect(sectionsSet({ style: 'report' })).toEqual({ ...none, style: true });
-    for (const change of [{ toc: true }, { numbered: true }, { sources: 'on' }, { sources: 'off' }]) expect(sectionsSet(change).style, JSON.stringify(change)).toBe(true);
+    for (const change of [{ toc: true }, { numbered: true }, { sources: 'on' }, { sources: 'off' }, { web: 'story' }]) expect(sectionsSet(change).style, JSON.stringify(change)).toBe(true);
     expect(sectionsSet({ font: 'book' })).toEqual({ ...none, text: true });
     expect(sectionsSet({ size: 'small' })).toEqual({ ...none, text: true });
     for (const change of [{ page: 'letter' }, { accent: '#c8102e' }, { tlp: 'green' }]) expect(sectionsSet(change), JSON.stringify(change)).toEqual({ ...none, page: true });

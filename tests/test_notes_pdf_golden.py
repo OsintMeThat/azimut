@@ -293,7 +293,7 @@ def _digests(tmp_path: Path) -> dict[str, str]:
 def test_a_note_without_a_look_prints_as_it_always_did(tmp_path, name):
     case = golden_case(tmp_path / "case")
     for look in (None, NoteLook(), NoteLook.model_validate({"style": "plain", "cover": {}}),
-                 NoteLook.model_validate({"font": "", "size": ""})):
+                 NoteLook.model_validate({"font": "", "size": ""}), NoteLook.model_validate({"web": "story"})):
         pdf = render_plain(case, name, look)
         digest = hashlib.sha256(drawing(pdf)).hexdigest()
         if digest != GOLDEN[name]:

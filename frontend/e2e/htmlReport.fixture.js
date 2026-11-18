@@ -32,8 +32,8 @@ const zoom = (src, alt) => `<button class="az-zoom" type="button" aria-label="Op
 const caption = (number, words, credit) => `<figcaption><span class="az-caption"><span class="az-fig-num">Figure ${number}.</span> ${words}</span>
 <span class="az-credit"><span class="az-credit-kind">Imagery:</span> ${credit}</span></figcaption>`;
 
-/** The page, its pictures `[picture, before, after, step1, step2, step3, story1, story2]`. */
-export function reportHtml(pictures) {
+/** The page, its pictures `[picture, before, after, step1, step2, step3, story1, story2]`, as an article or a story (`web`). */
+export function reportHtml(pictures, { web = '' } = {}) {
   const [picture, before, after, s1, s2, s3, story1, story2] = pictures;
   const rows = Array.from({ length: 14 }, (_, index) => {
     const code = `V${String(index + 1).padStart(2, '0')}`;
@@ -43,7 +43,7 @@ export function reportHtml(pictures) {
   const step = (n, src, day, words) => `<div class="az-step" data-step="${n}" style="--az-n:${n}" data-label="${day}">
 <figure class="az-figure" data-kind="picture">${zoom(src, `Plate ${n}`)}${caption(7 + n, `${day}, ${words}`, 'Esri, Maxar')}</figure></div>`;
   return `<!doctype html>
-<html lang="en" dir="auto" data-look="report" data-font="" data-tlp="amber" data-edition="public">
+<html lang="en" dir="auto" data-look="report" data-font="" data-tlp="amber"${web ? ` data-web="${web}"` : ''} data-edition="public">
 <head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="referrer" content="no-referrer">
 <meta http-equiv="Content-Security-Policy" content="default-src 'none'; img-src data:; media-src data:; font-src data:; style-src 'unsafe-inline'; script-src 'unsafe-inline'; base-uri 'none'; form-action 'none'">

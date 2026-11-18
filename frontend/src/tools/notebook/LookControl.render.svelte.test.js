@@ -287,6 +287,26 @@ describe('the Look panel', () => {
     expect(sources().checked).toBe(true);
   });
 
+  it('lays the web page out as an article or a story, the article until set, and hands the choice up', () => {
+    openPanel();
+    goTo('Style');
+    const group = panel().querySelector('[role="radiogroup"][aria-label="Web page"]');
+    const choices = [...group.querySelectorAll('[role="radio"]')];
+    expect(choices.map((choice) => choice.textContent.trim())).toEqual(['Article', 'Story']);
+    expect(choices.every((choice) => choice.title)).toBe(true);
+    expect(choices[0].getAttribute('aria-checked')).toBe('true');
+    expect(tabNamed('Style').querySelector('.dot')).toBeNull();
+    choices[1].click();
+    flushSync();
+    expect(changes.at(-1)).toMatchObject({ style: 'plain', web: 'story' });
+    expect(group.querySelector('[aria-checked="true"]').textContent.trim()).toBe('Story');
+    // the Style tab says it holds something set
+    expect(tabNamed('Style').querySelector('.dot')).not.toBeNull();
+    pressed('Article').click();
+    flushSync();
+    expect(changes.at(-1).web).toBe('');
+  });
+
   it('offers a template the list of sources too', () => {
     props.template = true;
     props.look = normaliseLook({ style: 'brief' });

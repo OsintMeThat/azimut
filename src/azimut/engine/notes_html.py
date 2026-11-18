@@ -34,6 +34,11 @@ the public edition. The check lists each one, and the export can round them to a
 
 **Counts.** A count with no "at least" or range before it is said by the check as a
 warning (`COUNT`), never changed. A confidence the analyst typed is printed as typed.
+
+**Two layouts.** The look's `web` lays the page out as an article, or as a story whose
+pictures hold still while the words after each go by (`_scenes`, the `::: story` markup
+reused). The text is the same in both, only grouped; the reader script and style sheet
+do the rest, and the page still reads top to bottom without them.
 """
 
 from __future__ import annotations
@@ -143,6 +148,10 @@ PLUS_CODE = re.compile(r"(?<![\w+])(?:[23456789CFGHJMPQRVWX]{4,8}\+[23456789CFGH
 ROW_CODE = re.compile(r"^[A-Z]{1,3}-?\d{1,4}[a-z]?$")
 #: An anchor a note may link to inside the page.
 ANCHOR = re.compile(r"^[\w:.-]{1,80}$")
+#: The story layout's scenes: the figures that can hold its stage, and the parts of the
+#: text that can be read beside one.
+SCENE_FIGURES = frozenset({"picture", "pair", "proof", "clip"})
+SCENE_WORDS = re.compile(r"<(?:p|ul|ol|blockquote|h4|h5|h6)[ >]|<aside class=\"az-(?:callout|internal)\"")
 #: Ids the page keeps for itself.
 RESERVED_IDS = frozenset({"sources", "corrections", "contents", "top", "main", "cover", "footer"})
 RESERVED_ID = re.compile(r"^(?:src|clip|fig|step|limits)-\d+$")
@@ -422,6 +431,8 @@ class _Page:
                 drawn = drawn or len(self.out) > before
         if not drawn:
             self.out.append(_aside("This note is empty."))
+        if self.look.web == "story":
+            self.out = self._scenes(self.out)
         # what the citation pass found comes first, as in the PDF; a link to a part of
         # this page opens on a page, where it would not in a PDF
         self.warnings[:0] = found + [
@@ -452,10 +463,11 @@ class _Page:
         fonts = _font_faces(self.look, self.theme, _visible_text(page) + title)
         accent = f' style="--az-accent:{self.look.accent}"' if self.look.accent else ""
         tlp = f' data-tlp="{self.look.tlp}"' if self.look.tlp else ""
+        web = f' data-web="{self.look.web}"' if self.look.web else ""
         edition = md.PUBLIC if self.public else md.INTERNAL
         top = (
             f'<!doctype html>\n<html lang="en" dir="auto" data-look="{self.look.style}" data-font="{self.look.font}"'
-            f'{tlp} data-edition="{edition}"{accent}>\n<head>\n<meta charset="utf-8">\n'
+            f'{tlp}{web} data-edition="{edition}"{accent}>\n<head>\n<meta charset="utf-8">\n'
             '<meta name="viewport" content="width=device-width, initial-scale=1">\n'
             '<meta name="referrer" content="no-referrer">\n'
             f'<meta http-equiv="Content-Security-Policy" content="{CSP}">\n'
@@ -702,16 +714,24 @@ class _Page:
         if block.kind == md.STORY:
             self.out.append(self._story(block))
             return
-        inner = self._drawn(block.tokens, block.start, len(block.tokens))
-        if inner:
-            self.out.append(_aligned(block.align, inner))
+        if block.align in ("center", "right"):
+            inner = self._drawn(block.tokens, block.start, len(block.tokens))
+            if inner:
+                self.out.append(_aligned(block.align, inner))
+            return
+        # one part per element, which the story layout groups into scenes
+        self.out.extend(part for part in self._parts_of(block.tokens, block.start, len(block.tokens)) if part)
 
     def _drawn(self, tokens: list[Token], start: int, end: int) -> str:
         """What tokens ``start`` to ``end`` draw, as text, rather than into the page."""
+        return "".join(self._parts_of(tokens, start, end))
+
+    def _parts_of(self, tokens: list[Token], start: int, end: int) -> list[str]:
+        """What tokens ``start`` to ``end`` draw, one string per element."""
         kept, self.out = self.out, []
         try:
             self._walk(tokens, start, end)
-            return "".join(self.out)
+            return self.out
         finally:
             self.out = kept
 
@@ -943,6 +963,70 @@ class _Page:
         return (f'<section class="az-story" data-steps="{len(parts)}">\n{head}'
                 f'<div class="az-story-figures">\n{"".join(figures)}</div>\n'
                 f'<div class="az-story-steps">\n{"".join(words)}</div>\n</section>\n')
+
+    def _scenes(self, parts: list[str]) -> list[str]:
+        """The story layout: each picture and the words after it, up to the next picture,
+        heading, table or diagram, made a scene, and the scenes that follow one another
+        one story (`_story`'s markup), its pictures held still while their words scroll.
+        Words with no picture before them, and everything else, stay as the article has
+        them; a picture with no words after it stays a figure unless its neighbours have
+        some."""
+        out: list[str] = []
+        run: list[tuple[str, list[str]]] = []
+
+        def close() -> None:
+            if any(words for _, words in run):
+                out.append(self._scene_story(run))
+            else:
+                out.extend(figure for figure, _ in run)
+            run.clear()
+
+        for part in parts:
+            kind = self._scene_kind(part)
+            if kind == "picture":
+                run.append((part, []))
+            elif kind == "words" and run:
+                run[-1][1].append(part)
+            else:
+                close()
+                out.append(part)
+        close()
+        return out
+
+    def _scene_kind(self, part: str) -> str:
+        """What a part of the body is to a scene: a picture that can hold a stage,
+        words that can go beside it, or anything else, which ends it."""
+        clip = re.fullmatch("\x00C(\\d+)\x00\\n?", part)
+        opening = self.clips[int(clip.group(1))].figure_attrs if clip else ""
+        if not clip:
+            if not part.startswith("<figure "):
+                return "words" if SCENE_WORDS.match(part) and not part.startswith('<p class="az-mark"') else "other"
+            opening = part[: part.find(">")]
+        kind = re.search(r'data-kind="(\w+)"', opening)
+        width = re.search(r'data-width="([^"]*)"', opening)
+        aligned = re.search(r'data-align="(left|right)"', opening)
+        if kind is None or kind.group(1) not in SCENE_FIGURES or aligned or (width and width.group(1) != "100%"):
+            return "other"
+        return "picture"
+
+    def _scene_story(self, run: list[tuple[str, list[str]]]) -> str:
+        figures: list[str] = []
+        steps: list[str] = []
+        for number, (figure, words) in enumerate(run, 1):
+            clip = re.fullmatch("\x00C(\\d+)\x00\\n?", figure)
+            if clip:
+                held = self.clips[int(clip.group(1))]
+                held.figure_attrs = _stepped(held.figure_attrs, number)
+            else:
+                end = figure.find(">")
+                figure = f"<figure {_stepped(figure[len('<figure '):end], number)}{figure[end:]}"
+            figures.append(figure)
+            quiet = "" if words else ' data-quiet="true"'
+            steps.append(f'<div class="az-story-step" data-step="{number}" style="--az-n:{number}"{quiet}>'
+                         f'{"".join(words)}</div>\n')
+        return (f'<section class="az-story az-scenes" data-steps="{len(run)}">\n'
+                f'<div class="az-story-figures">\n{"".join(figures)}</div>\n'
+                f'<div class="az-story-steps">\n{"".join(steps)}</div>\n</section>\n')
 
     # -- inline -------------------------------------------------------------------
 
@@ -1926,6 +2010,12 @@ def _start(token: Token) -> int:
         return int(token.attrGet("start") or 1)
     except (TypeError, ValueError):
         return 1
+
+
+def _stepped(attrs: str, number: int) -> str:
+    """A figure's attributes with its step in a story: its number, and `--az-n` for
+    the order the page reads it in when the story's two columns fold into one."""
+    return _one_style(f'{attrs} data-step="{number}" style="--az-n:{number}"')
 
 
 def _one_style(attrs: str) -> str:

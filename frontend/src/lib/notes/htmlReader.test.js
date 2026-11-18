@@ -69,7 +69,7 @@ describe('the page without anything pressed', () => {
   });
 
   it('stays under the weight agreed for its two files, unminified', () => {
-    // 75 KB until the bar, the progress line and the links the page takes itself came in
+    // 75 KB until the story layout, the bar and the links the page takes itself came in
     expect(Buffer.byteLength(READER) + Buffer.byteLength(CSS)).toBeLessThan(84 * 1024);
   });
 });
@@ -447,8 +447,8 @@ describe('a story keeps its picture beside the words', () => {
     expect(doc.querySelectorAll('.az-story-figures > figure')[1].classList.contains('az-on')).toBe(true);
   });
 
-  it('reads picture then words, with nothing moving, when narrow or when motion is turned down', async () => {
-    for (const options of [{ wide: false }, { reduced: true }]) {
+  it('reads picture then words, with nothing moving, when narrow in an article or when motion is turned down', async () => {
+    for (const options of [{ wide: false }, { reduced: true }, { reduced: true, web: 'story' }]) {
       const doc = await report(STORY, options);
       expect(doc.querySelector('.az-story').classList.contains('az-live')).toBe(false);
       expect(doc.querySelector('.az-on')).toBeNull();
@@ -462,6 +462,60 @@ describe('a story keeps its picture beside the words', () => {
   it('interleaves the two columns in the style sheet when they fold, step by step', () => {
     expect(CSS).toContain('.az-story-figures > figure { order: calc(var(--az-n, 0) * 2);');
     expect(CSS).toContain('.az-story-step { order: calc(var(--az-n, 0) * 2 + 1); }');
+  });
+});
+
+describe('the story layout', () => {
+  const SCENES = `<header class="az-cover" data-cover="none"><h1 class="az-title">Port</h1></header>
+    <div class="az-page"><main class="az-body"><p>Before.</p>
+    <figure class="az-figure" data-kind="picture"><button type="button" class="az-zoom"><img src="data:image/png;base64,Y2hhcnQ=" alt=""></button></figure>
+    <section class="az-story az-scenes"><div class="az-story-figures">
+      <figure class="az-figure" data-kind="picture" data-step="1" style="--az-n:1"><button type="button" class="az-zoom"><img src="${PIXEL}" alt=""></button>
+      <figcaption><span class="az-caption">The quay</span><span class="az-credit">Esri <a class="az-cite" href="#src-1" id="c1">[1]</a></span></figcaption></figure>
+      <figure class="az-figure" data-kind="picture" data-step="2" style="--az-n:2"><button type="button" class="az-zoom"><img src="${PIXEL}" alt=""></button></figure>
+    </div><div class="az-story-steps">
+      <div class="az-story-step" data-step="1" style="--az-n:1"><p>The quay.</p></div>
+      <div class="az-story-step" data-step="2" style="--az-n:2" data-quiet="true"></div>
+    </div></section></main></div>`;
+
+  it('holds each picture beside its words at any width, the words of a scene carrying no count', async () => {
+    for (const wide of [true, false]) {
+      const doc = await report(SCENES, { wide, web: 'story' });
+      expect(doc.querySelector('.az-scenes').classList.contains('az-live'), String(wide)).toBe(true);
+      expect(doc.querySelector('.az-story-count')).toBeNull();
+      await window.happyDOM.close();
+    }
+    window = null;
+  });
+
+  it('opens on the first picture that came from somewhere, its credit kept on it, never in an article', async () => {
+    const doc = await report(SCENES, { web: 'story' });
+    const held = doc.querySelector('.az-cover > .az-cover-figure');
+    expect(held.querySelector('img').getAttribute('src')).toBe(PIXEL);
+    expect(held.querySelector('.az-credit').textContent).toContain('Esri');
+    expect(held.querySelector('[id]')).toBeNull();
+    await window.happyDOM.close();
+    const article = await report(SCENES);
+    expect(article.querySelector('.az-cover-figure')).toBeNull();
+    await window.happyDOM.close();
+    // a cover picture of the look's own stays the one shown
+    const own = await report(SCENES.replace('</h1>', '</h1><figure class="az-figure az-cover-figure" data-kind="picture"><img src="data:image/png;base64,b3du" alt=""></figure>'), { web: 'story' });
+    expect([...own.querySelectorAll('.az-cover-figure img')].map((image) => image.getAttribute('src'))).toEqual(['data:image/png;base64,b3du']);
+  });
+
+  it('keeps its contents in the bar at every width, the article in a rail where there is room', async () => {
+    const PAGE = '<header class="az-cover"><h1 class="az-title">Port</h1></header><div class="az-page"><nav class="az-contents"><ol><li><a href="#one">One</a></li></ol></nav><main class="az-body"><h2 id="one">One</h2></main></div>';
+    const story = await report(PAGE, { web: 'story' });
+    expect(story.querySelector('.az-contents').classList.contains('az-bar')).toBe(true);
+    expect(story.documentElement.classList.contains('az-barred')).toBe(true);
+    expect(story.querySelector('.az-bar-title').textContent).toBe('Port');
+    await window.happyDOM.close();
+    const wide = await report(PAGE);
+    expect(wide.querySelector('.az-contents').classList.contains('az-bar')).toBe(false);
+    expect(wide.documentElement.classList.contains('az-barred')).toBe(false);
+    await window.happyDOM.close();
+    const narrow = await report(PAGE, { wide: false });
+    expect(narrow.querySelector('.az-contents').classList.contains('az-bar')).toBe(true);
   });
 });
 

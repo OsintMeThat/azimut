@@ -10,6 +10,7 @@ prints it. The plain document notes always printed as is held, to the byte, by
 from __future__ import annotations
 
 import json
+from datetime import datetime, timezone
 from io import BytesIO
 
 import pytest
@@ -667,7 +668,7 @@ def test_a_note_that_cannot_be_laid_out_answers_why(client, monkeypatch):
 
 
 def test_the_sources_key_follows_the_style_unless_set():
-    assert notelook.LATE_KEYS == ("font", "size", "sources")
+    assert notelook.LATE_KEYS == ("font", "size", "sources", "web")
     assert notelook.SOURCES_OFF_STYLES == ("plain",)
     for style in ("plain", "report", "brief", "journal"):
         assert look(style=style).sources_on is (style not in notelook.SOURCES_OFF_STYLES)
@@ -677,6 +678,27 @@ def test_the_sources_key_follows_the_style_unless_set():
     assert look(sources="on").model_dump(mode="json")["sources"] == "on"
     assert look(sources="").is_default and not look(sources="on").is_default
     assert notelook.TemplateLook.model_validate({"sources": "off"}).sources == "off"
+
+
+def test_the_web_key_is_written_only_once_set_and_the_pdf_never_reads_it(tmp_path):
+    """How the HTML page is laid out is a late key: a look that never set it is stored
+    as an older Azimut wrote it, one written by a later Azimut with a layout this one
+    does not know keeps the rest, and the PDF comes out the same byte for byte."""
+    assert "web" not in look(style="report").model_dump(mode="json")
+    assert look(web="story").model_dump(mode="json")["web"] == "story"
+    assert look(web="").is_default and not look(web="story").is_default
+    assert notelook.TemplateLook.model_validate({"web": "story"}).web == "story"
+    with pytest.raises(ValidationError):
+        NoteLook.model_validate({"web": "scroll"})
+    kept = notelook.parse({"style": "report", "toc": True, "web": "scroll"})
+    assert kept is not None and (kept.style, kept.toc, kept.web) == ("report", True, "")
+    case = FakeCase(tmp_path)
+    text = "# Port\n\n## One\n\nWords [a](https://example.org/a).\n"
+    created = datetime(2026, 1, 2, 3, 4, 5, tzinfo=timezone.utc)
+    for values in ({"style": "report", "toc": True, "cover": {"on": True}}, {"style": "plain"}):
+        article = notes_pdf.render(case, title="Port", text=text, look=look(**values), created=created).pdf
+        story = notes_pdf.render(case, title="Port", text=text, look=look(**values, web="story"), created=created).pdf
+        assert article == story
 
 
 @pytest.mark.parametrize("bad", ["yes", True, 1, None, "ON"])

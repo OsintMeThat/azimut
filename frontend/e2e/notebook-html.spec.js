@@ -154,12 +154,45 @@ test('the report on a phone reads picture then words, with the contents folded i
   expect(refused).toEqual([]);
 });
 
+test('the story layout, opened from the disk: a hero, and the story held beside its words even on a phone', async ({ page, browserName }, testInfo) => {
+  test.skip(browserName !== 'chromium', 'one browser is enough for the file itself');
+  for (const viewport of [{ width: 1440, height: 900 }, { width: 390, height: 844 }]) {
+    await page.route('**/*', (route) => (route.request().url().startsWith('file:') ? route.continue() : route.abort()));
+    await page.setViewportSize(viewport);
+    const pictures = await drawPictures(page, COLOURS);
+    const file = testInfo.outputPath(`story-${viewport.width}.html`);
+    writeFileSync(file, reportHtml(pictures, { web: 'story' }));
+    await page.goto(`file://${file}`);
+    // the cover opens on the first picture that came from somewhere, its credit kept on it
+    const hero = page.locator('header.az-cover > .az-cover-figure');
+    await expect(hero.locator('.az-credit')).toContainText('Esri World Imagery');
+    expect((await page.locator('header.az-cover').boundingBox()).height).toBeGreaterThanOrEqual(viewport.height - 1);
+    // the contents are a bar at every width
+    await expect(page.locator('.az-contents')).toHaveClass(/az-bar/);
+    const story = page.locator('section.az-story');
+    await expect(story).toHaveClass(/az-live/);
+    for (const step of [0, 1]) {
+      await page.evaluate((at) => {
+        const words = document.querySelectorAll('.az-story-step')[at];
+        window.scrollTo({ top: scrollY + words.getBoundingClientRect().top - innerHeight * 0.4, behavior: 'instant' });
+      }, step);
+      await expect(story.locator('.az-story-figures > figure.az-on')).toHaveAttribute('data-step', String(step + 1));
+    }
+    // the picture held is in sight while its words are read
+    const held = await story.locator('.az-story-figures > figure.az-on img').boundingBox();
+    expect(held.y).toBeGreaterThanOrEqual(0);
+    expect(held.y).toBeLessThan(viewport.height);
+    expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(viewport.width);
+    await page.unrouteAll();
+  }
+});
+
 /** A note in the Notebook, the server stood in for, answering the HTML routes with a real reading page. */
 async function notebook(page, html) {
   const at = '2026-10-01T10:00:00Z';
   const catalog = [{ id: 'n1', type: 'note', label: 'Lead', attrs: { path: 'notes/n1.md', folder: '' }, provenance: { by: 'user', at, status: 'confirmed' } }];
   await installAppFixture(page, { catalog });
-  const state = { previews: [], htmlPreviews: [], checks: [], exported: [] };
+  const state = { previews: [], htmlPreviews: [], checks: [], exported: [], looks: [] };
   await page.route(`**/api/cases/${CASE_ID}/catalog/entities**`, (route) =>
     route.fulfill({ json: { items: catalog, next_cursor: null, total: catalog.length } }));
   await page.route(`**/api/cases/${CASE_ID}/entities/redirects`, (route) => route.fulfill({ json: { redirects: {} } }));
@@ -192,7 +225,10 @@ async function notebook(page, html) {
       state.exported.push(body);
       return route.fulfill({ json: { written: [{ note: 'n1', title: 'Lead', file: 'Lead - 2026-11-18.html', edition: 'public', bytes: 3_400_000 }], warnings: [], path: '' } });
     }
-    if (/^\/[\w-]+\/look$/.test(path)) return route.fulfill({ json: { look: { style: 'report' } } });
+    if (/^\/[\w-]+\/look$/.test(path)) {
+      if (request.method() === 'PUT') state.looks.push(request.postDataJSON());
+      return route.fulfill({ json: { look: state.looks.at(-1) ?? { style: 'report' } } });
+    }
     if (path === '/n1') return route.fulfill({ json: { text: '# Lead\n\nSeen at the quay.\n' } });
     return route.fallback();
   });
@@ -220,6 +256,7 @@ test('the Page pane shows the note as its HTML page, and the export dialog write
   await expect(frame.locator('h1.az-title')).toHaveText('Ambush on the Wadi Sahm road');
   await expect(page.locator('.html-page iframe').first()).toHaveAttribute('sandbox', 'allow-scripts allow-popups allow-popups-to-escape-sandbox');
   expect(await page.evaluate(() => localStorage.getItem('azimut:note-page-format'))).toBe('html');
+
   // a Contents entry goes to its part inside the frame: the frame keeps the report, never a blank page
   await frame.locator('.az-contents-toggle').click();
   await frame.locator('.az-contents a[href="#the-register"]').click();
@@ -231,6 +268,15 @@ test('the Page pane shows the note as its HTML page, and the export dialog write
   await expect(frame.locator('#src-1')).toHaveClass(/az-flash/);
   expect(await frame.locator('html').evaluate(() => location.href)).toBe('about:srcdoc');
 
+  // the Look lays the page out as a story, and the HTML view is drawn again in it
+  const asked = state.htmlPreviews.length;
+  await page.locator('[data-guide="notebook.look"]').click();
+  await page.getByRole('tab', { name: 'Style' }).click();
+  await page.getByRole('radiogroup', { name: 'Web page' }).getByRole('radio', { name: 'Story' }).click();
+  await expect.poll(() => state.htmlPreviews.length).toBeGreaterThan(asked);
+  expect(state.htmlPreviews.at(-1).look).toMatchObject({ style: 'report', web: 'story' });
+  expect(state.looks.at(-1)).toMatchObject({ web: 'story' });
+  await page.keyboard.press('Escape');
 
   await page.locator('[data-guide="notebook.pdf"]').click();
   let dialog = page.getByRole('dialog', { name: 'Export note as PDF' });

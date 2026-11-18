@@ -12,6 +12,8 @@
   const reduced = query('(prefers-reduced-motion: reduce)');
   const wide = query('(min-width: 64rem)');
   const roomy = query('(min-width: 85rem)');
+  // the story layout: each picture held still while the words after it go by
+  const story = root.dataset.web === 'story';
   const motion = () => (reduced.matches ? 'auto' : 'smooth');
   const all = (selector, within = doc) => [...within.querySelectorAll(selector)];
   const words = (node) => (node ? node.textContent.replace(/\s+/g, ' ').trim() : '');
@@ -68,7 +70,7 @@
       nav.classList.toggle('az-open', on);
       toggle.setAttribute('aria-expanded', String(on));
     };
-    const barred = () => !roomy.matches;
+    const barred = () => story || !roomy.matches;
     const settle = () => {
       nav.classList.toggle('az-bar', barred());
       root.classList.toggle('az-barred', barred());
@@ -549,8 +551,10 @@
       const figureOf = (step) => figures.find((figure) => figure.dataset.step === step?.dataset.step) || null;
       const imageOf = (figure) => figure?.querySelector('img');
       let at = null;
-      // where the reader is, quietly on each card: 2 / 4
-      const counts = parts.map((part, index) => make('span', { class: 'az-story-count', 'aria-hidden': 'true' }, `${index + 1} / ${parts.length}`));
+      // where the reader is, quietly on each card of a story written as one: 2 / 4
+      const scenes = section.classList.contains('az-scenes');
+      const counts = parts.map((part, index) => (scenes ? null
+        : make('span', { class: 'az-story-count', 'aria-hidden': 'true' }, `${index + 1} / ${parts.length}`)));
       function show(step) {
         if (step === at) return;
         const before = figureOf(at);
@@ -601,14 +605,35 @@
         for (const part of parts) if (part.getBoundingClientRect().top <= line) found = part;
         show(found);
       }
-      // live only with room and with motion; anything else reads picture then words
-      const can = () => wide.matches && !reduced.matches;
+      // live with motion, and with room unless the whole page is a story; anything else reads picture then words
+      const can = () => !reduced.matches && (story || wide.matches);
       const settle = () => { if (can() !== section.classList.contains('az-live')) live(can()); };
       wide.addEventListener?.('change', settle);
       reduced.addEventListener?.('change', settle);
       watchers.push(follow);
       live(can());
     }
+  }
+
+  /* the story layout opens on its first picture when the cover has none of its own: the first that
+     came from somewhere (it has a credit) rather than a chart, else the first; its credit kept on it */
+  function hero() {
+    const cover = doc.querySelector('.az-cover:not([data-cover="own"])');
+    if (!story || !cover || cover.querySelector('.az-cover-figure')) return;
+    const figures = all('.az-body .az-figure:is([data-kind="picture"], [data-kind="proof"]):not(.az-graphic)');
+    const figure = figures.find((one) => one.querySelector('.az-credit')) || figures[0];
+    const image = figure?.querySelector('.az-zoom > img');
+    if (!image) return;
+    const held = make('figure', { class: 'az-figure az-cover-figure', 'data-kind': 'picture', 'data-borrowed': 'true' });
+    held.append(make('img', { src: image.getAttribute('src'), alt: '' }));
+    const credit = figure.querySelector('.az-credit');
+    if (credit) {
+      const caption = make('figcaption');
+      caption.append(credit.cloneNode(true));
+      for (const node of all('[id]', caption)) node.removeAttribute('id');
+      held.append(caption);
+    }
+    cover.append(held);
   }
 
   /** The hyphenated words of `node` matching `word` kept whole on their line. */
@@ -645,7 +670,7 @@
   }
 
   function start() {
-    for (const part of [titles, progress, contents, pictures, pairs, timecodes, tables, citations, steps, stories, printing, addresses]) part();
+    for (const part of [titles, hero, progress, contents, pictures, pairs, timecodes, tables, citations, steps, stories, printing, addresses]) part();
   }
   if (doc.readyState === 'loading') doc.addEventListener('DOMContentLoaded', start, { once: true });
   else start();

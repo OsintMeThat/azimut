@@ -18,7 +18,9 @@ used them reads the same to a reader that predates them. So did the cover's own
 page and where it stands on it (`cover.mode`, `cover.top`): a reader that drops
 them prints the style's cover, and the lines meant for the own page as text. And
 the analyst's own header and footer (`header`, `footer`), written only once a slot
-holds something: a reader that drops them prints the style's own.
+holds something: a reader that drops them prints the style's own. And how the HTML
+page is laid out (`web`): an article, or a story whose pictures hold still while their
+words scroll by. The PDF never reads it.
 """
 
 from __future__ import annotations
@@ -57,9 +59,12 @@ Font = Literal["", "serif", "sans", "book", "modern"]
 Size = Literal["", "small", "large"]
 #: The numbered list of sources at the end: "" keeps the style's own, else on or off.
 Sources = Literal["", "on", "off"]
+#: How the HTML page is laid out: "" an article, "story" each picture held still
+#: beside the words that follow it. The PDF prints the same either way.
+Web = Literal["", "story"]
 #: Keys a look writes only once they leave their default, so a look that never used
 #: them is stored, served and bundled exactly as an older Azimut wrote it.
-LATE_KEYS = ("font", "size", "sources")
+LATE_KEYS = ("font", "size", "sources", "web")
 #: The page bands under the same rule: one with nothing in it is not written.
 BAND_KEYS = ("header", "footer")
 #: The longest a header or footer slot is, in characters: one line of a page's edge.
@@ -170,6 +175,7 @@ class NoteLook(BaseModel):
     font: Font = ""
     size: Size = ""
     sources: Sources = ""
+    web: Web = ""
     header: PageBand = Field(default_factory=PageBand)
     footer: PageBand = Field(default_factory=PageBand)
 
