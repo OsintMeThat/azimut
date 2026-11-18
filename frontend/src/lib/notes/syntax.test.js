@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   appended, citation, findCoordinates, uploadedImage, findReferences, logStamp, mentionMatches, pastedUrl, slashInsert,
-  slashMatches, SLASH_COMMANDS, today, wrapInBlock,
+  slashMatches, PLAYED_BLOCK, SLASH_COMMANDS, STEPS_BLOCK, STORY_BLOCK, today, wrapInBlock,
 } from './syntax.js';
 import { READY_NOTES, filledBody, freeTitle } from './ready.js';
 import { calloutOf, calloutMarkdown } from './callouts.js';
@@ -140,6 +140,23 @@ describe('what @ and / offer', () => {
     expect(command('align-bottom-left').hint).toBe('Pinned on the cover, else aligned');
   });
 
+  it('offers Steps and Story, each an empty block opened on its guidance, which the HTML page plays', () => {
+    expect(slashMatches('steps')[0].id).toBe('steps');
+    expect(slashMatches('scrolly')[0].id).toBe('story');
+    expect(slashMatches('carousel')[0].id).toBe('steps');
+    const command = (id) => SLASH_COMMANDS.find((item) => item.id === id);
+    const steps = slashInsert(command('steps'));
+    expect(steps.text).toBe('::: steps\n<!--? One picture a line, each a step with its caption: / › Case picture -->\n:::\n');
+    expect(steps.text.slice(steps.cursor)).toBe('\n:::\n');
+    const story = slashInsert(command('story'), { before: 'Intro. ' });
+    expect(story.text.startsWith('\n\n::: story\n<!--? A picture, then the words read beside it.')).toBe(true);
+    expect(story.text.slice(story.cursor)).toBe('\n:::\n');
+    expect(PLAYED_BLOCK.exec('::: story ')?.[1]).toBe('story');
+    expect(PLAYED_BLOCK.exec('::: stories')).toBeNull();
+    expect(STEPS_BLOCK.startsWith('::: steps\n')).toBe(true);
+    expect(STORY_BLOCK.endsWith('\n:::')).toBe(true);
+  });
+
   it('wraps words in a block named for where they sit, the cursor at their end', () => {
     expect(wrapInBlock('right', '  Signed.  ')).toEqual({ text: '::: right\nSigned.\n:::', cursor: 17 });
     expect(wrapInBlock('bottom-left', '')).toEqual({ text: '::: bottom-left\n\n:::', cursor: 16 });
@@ -168,8 +185,10 @@ describe('notes made from others', () => {
     expect(freeTitle('Geolocation', ['geolocation', 'Geolocation 2'])).toBe('Geolocation 3');
   });
 
-  it('reads and writes the six callouts, and no other', () => {
+  it('reads and writes the seven callouts, and no other', () => {
     expect(calloutOf('> [!Confirmed] yes')?.kind).toBe('confirmed');
+    expect(calloutOf('> [!limits] Night footage only')?.label).toBe('Limits');
+    expect(slashMatches('limit')[0].id).toBe('callout-limits');
     expect(calloutOf('> [!INTERNAL] who told us')?.kind).toBe('internal');
     expect(calloutOf('> [!odd] no')).toBeNull();
     expect(calloutOf('plain')).toBeNull();

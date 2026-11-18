@@ -7,7 +7,8 @@
  * callout is a coloured block. The marks come back on the line being edited, so
  * nothing is hidden from the person writing it.
  *
- * A block (a picture, a table, a diagram, an aligned block, a page break, a chapter)
+ * A block (a picture, a table, a diagram, an aligned block, a block of steps or a
+ * story, a page break, a chapter)
  * stays drawn when it is clicked: the press picks it, and its source shows only once
  * it is opened (a double press, Enter, or its </> button), until the cursor leaves.
  * The page can also be switched off for the raw Markdown (`setNoteMode`).
@@ -40,7 +41,7 @@ import {
   rovingToolbar, sizeWidth, sizedLine, sourceField,
 } from './pictureSize.js';
 import {
-  findCoordinates, findReferences, mentionMatches, slashInsert, slashMatches,
+  PLAYED_BLOCK, findCoordinates, findReferences, mentionMatches, slashInsert, slashMatches,
 } from './syntax.js';
 
 // -- what the case says about the references ----------------------------------
@@ -761,6 +762,90 @@ function openCaption(view, box, returnTo = null) {
   field.select();
 }
 
+/** `zoom=x,y,w,h` in a picture's braces: the part of it a story moves in on, as fractions, or null. */
+export function storyZoom(rest) {
+  const match = /\bzoom\s*=\s*([\d.]+)\s*,\s*([\d.]+)\s*,\s*([\d.]+)\s*,\s*([\d.]+)/.exec(String(rest ?? ''));
+  if (!match) return null;
+  const [x, y, w, h] = match.slice(1).map(Number);
+  if (![x, y, w, h].every(Number.isFinite) || w <= 0 || h <= 0 || x < 0 || y < 0 || x + w > 1.0001 || y + h > 1.0001) return null;
+  return { x, y, w, h };
+}
+
+/**
+ * The steps of a `::: steps` or `::: story` block, from its source: each line holding
+ * a picture opens a step, and the lines after it are that step's words. Words before
+ * the first picture are the block's lead.
+ */
+export function playedSteps(source) {
+  const lines = String(source ?? '').split('\n').slice(1, -1);
+  const lead = [];
+  const steps = [];
+  for (const line of lines) {
+    const [picture] = picturesIn(line);
+    if (picture) steps.push({ picture: line, zoom: storyZoom(picture.rest), words: [] });
+    else if (steps.length) steps.at(-1).words.push(line);
+    else lead.push(line);
+  }
+  return { lead: lead.join('\n').trim(), steps: steps.map((step) => ({ ...step, words: step.words.join('\n').trim() })) };
+}
+
+/**
+ * A block of steps or a story, drawn small the way the HTML page plays it: its steps
+ * in order, numbered, each picture with its words; a story's beside it, and the part
+ * a step moves in on outlined. The PDF prints them one after the other.
+ */
+function drawPlayed(box, kind, source, info) {
+  const { text, hints } = hintsMarked(source);
+  const { lead, steps } = playedSteps(text);
+  const head = document.createElement('div');
+  head.className = 'cm-played-head';
+  const count = steps.length;
+  head.textContent = kind === 'steps'
+    ? `Steps · ${count} picture${count === 1 ? '' : 's'}, one at a time in HTML`
+    : `Story · ${count} step${count === 1 ? '' : 's'}, the words scroll beside the pictures in HTML`;
+  box.append(head);
+  if (lead) {
+    const words = document.createElement('div');
+    words.className = 'cm-played-lead';
+    words.innerHTML = markdownHtml(lead, info);
+    box.append(words);
+  }
+  const list = document.createElement('ol');
+  list.className = `cm-played-list cm-played-${kind}`;
+  steps.forEach((step, index) => {
+    const item = document.createElement('li');
+    item.className = 'cm-played-step';
+    const figure = document.createElement('div');
+    figure.className = 'cm-played-figure';
+    figure.dataset.step = String(index + 1);
+    figure.innerHTML = markdownHtml(step.picture, info);
+    const picture = figure.querySelector('img, video');
+    if (picture && step.zoom && kind === 'story') {
+      const frame = document.createElement('span');
+      frame.className = 'cm-zoom-frame';
+      picture.replaceWith(frame);
+      frame.append(picture);
+      const zoom = document.createElement('span');
+      zoom.className = 'cm-zoom-box';
+      zoom.title = 'The part this step moves in on';
+      Object.assign(zoom.style, {
+        left: `${step.zoom.x * 100}%`, top: `${step.zoom.y * 100}%`, width: `${step.zoom.w * 100}%`, height: `${step.zoom.h * 100}%`,
+      });
+      frame.append(zoom);
+    }
+    item.append(figure);
+    if (step.words) {
+      const words = document.createElement('div');
+      words.className = 'cm-played-words';
+      words.innerHTML = markdownHtml(step.words, info);
+      item.append(words);
+    }
+    list.append(item);
+  });
+  box.append(list);
+  drawHints(box, hints);
+}
+
 /** The small label a corner block of the cover wears, so the analyst sees it is pinned to the page. */
 function cornerTag(name) {
   const tag = document.createElement('div');
@@ -831,6 +916,7 @@ class BlockWidget extends WidgetType {
     box.title = 'Double-click to edit the source';
     markPicked(box, this.picked);
     if (this.kind === 'diagram') drawDiagram(box, this.source);
+    else if (this.kind === 'steps' || this.kind === 'story') drawPlayed(box, this.kind, this.source, this.info);
     else {
       const { text, hints } = hintsMarked(this.source);
       box.innerHTML = markdownHtml(text, this.info);
@@ -1311,14 +1397,25 @@ export function noteDecorations(state) {
   // `::: center` … `:::`, the old Notebook's aligned text: drawn as it reads unless it is open.
   // A corner (`::: top-right`) reads as its side, and says so when it is in the note's own cover.
   let coverEnd; // the 1-based line of the cover rule, 0 without one: found when a corner asks
+  // `::: steps` and `::: story`, which an HTML page plays, are drawn as their steps the same way
   for (let number = 1; number <= state.doc.lines; number += 1) {
-    const open = BLOCK_OPEN.exec(state.doc.line(number).text);
-    if (!open) continue;
+    const line = state.doc.line(number).text;
+    const open = BLOCK_OPEN.exec(line);
+    const played = open ? null : PLAYED_BLOCK.exec(line);
+    if (!open && !played) continue;
     let end = number + 1;
     while (end <= state.doc.lines && !/^:::[ \t]*$/.test(state.doc.line(end).text)) end += 1;
     if (end > state.doc.lines) break;
     const from = state.doc.line(number).from;
     const to = state.doc.line(end).to;
+    if (played) {
+      if (isOpen(from, to)) {
+        ranges.push(lineClass('cm-fence-line').range(from));
+        ranges.push(lineClass('cm-fence-line').range(state.doc.line(end).from));
+      } else block(played[1], from, to);
+      number = end;
+      continue;
+    }
     const side = blockSide(open[1]);
     if (side !== 'left') for (let inner = number + 1; inner < end; inner += 1) blockAligns.set(inner, side);
     if (isOpen(from, to)) {
@@ -2245,6 +2342,29 @@ const look = EditorView.theme({
   '.cm-block-diagram > .cm-source-edit': { right: '6px' },
   '.cm-block-diagram svg': { maxWidth: '100%', height: 'auto', display: 'block', margin: '0 auto' },
   '.cm-block-failed': { color: 'var(--danger)', background: 'var(--danger-soft)', fontSize: '0.9em' },
+  '.cm-block-steps, .cm-block-story': {
+    margin: '4px var(--note-gutter, 32px)', padding: '8px 12px 10px', border: '1px solid var(--border)', borderRadius: '6px', background: 'var(--bg-2)',
+  },
+  '.cm-block-steps > .cm-source-edit, .cm-block-story > .cm-source-edit': { right: '6px' },
+  '.cm-played-head': {
+    color: 'var(--text-3)', fontSize: '0.7em', fontWeight: '650', letterSpacing: '0.06em', textTransform: 'uppercase', marginBottom: '6px',
+  },
+  '.cm-played-lead': { color: 'var(--text-2)', marginBottom: '6px' },
+  '.cm-played-list': { listStyle: 'none', margin: '0', padding: '0', display: 'flex', gap: '10px' },
+  '.cm-played-steps': { overflowX: 'auto', paddingBottom: '4px' },
+  '.cm-played-steps > .cm-played-step': { flex: '0 0 min(220px, 45%)' },
+  '.cm-played-story': { flexDirection: 'column' },
+  '.cm-played-story > .cm-played-step': { display: 'grid', gridTemplateColumns: 'minmax(0, 2fr) minmax(0, 3fr)', gap: '12px', alignItems: 'start' },
+  '.cm-played-figure': { position: 'relative', fontSize: '0.85em', color: 'var(--text-2)' },
+  '.cm-played-figure::before': {
+    content: 'attr(data-step)', position: 'absolute', top: '6px', left: '6px', zIndex: '1', minWidth: '18px', height: '18px', borderRadius: '9px',
+    background: 'var(--accent)', color: '#fff', fontSize: '11px', fontWeight: '650', lineHeight: '18px', textAlign: 'center', padding: '0 4px', boxSizing: 'border-box',
+  },
+  '.cm-played-figure img, .cm-played-figure video': { width: '100% !important', marginLeft: '0 !important' },
+  '.cm-zoom-frame': { position: 'relative', display: 'block' },
+  '.cm-zoom-box': { position: 'absolute', border: '2px dashed #fff', outline: '1px solid rgba(0,0,0,.55)', borderRadius: '2px', pointerEvents: 'none' },
+  '.cm-played-words': { fontSize: '0.94em', minWidth: '0' },
+  '.cm-played-steps .cm-played-words': { color: 'var(--text-2)', fontSize: '0.85em', marginTop: '4px' },
   '.cm-hint': {
     display: 'inline-block', maxWidth: '100%', boxSizing: 'border-box', verticalAlign: 'top', color: 'var(--text-3)', fontStyle: 'italic',
     borderLeft: '2px solid var(--border-strong)', paddingLeft: '8px', cursor: 'text',

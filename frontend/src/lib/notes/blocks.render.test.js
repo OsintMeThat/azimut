@@ -10,7 +10,8 @@ const { drawDiagram } = vi.hoisted(() => ({ drawDiagram: vi.fn(async () => ({ sv
 vi.mock('../mermaid.js', () => ({ renderMermaidSvg: drawDiagram }));
 
 const {
-  focusedState, jumpToLine, noteExtensions, noteMode, openBlockAt, placeText, resizePicture, setNoteCase, setNoteMode, slashSource, takeBackRange,
+  focusedState, jumpToLine, noteExtensions, noteMode, openBlockAt, placeText, playedSteps, resizePicture, setNoteCase, setNoteMode, slashSource,
+  storyZoom, takeBackRange,
 } = await import('./liveMarkdown.js');
 
 /**
@@ -90,6 +91,8 @@ describe('a press on a block', () => {
       table: '| A | B |\n| --- | --- |\n| 1 | 2 |\n\nEnd',
       diagram: '```mermaid\nflowchart LR\n  A --> B\n```\n\nEnd',
       aligned: '::: right\nSigned\n:::\n\nEnd',
+      steps: '::: steps\n[[media:m1|Roof]]\n:::\n\nEnd',
+      story: '::: story\n[[media:m1|Roof]]\nWords.\n:::\n\nEnd',
       html: '<details>More</details>\n\nEnd',
       pagebreak: '<!-- pagebreak -->\n\nEnd',
       cover: '<!-- cover -->\n\nEnd',
@@ -682,5 +685,56 @@ describe('the raw Markdown mode', () => {
     writing('<!--? Who said it -->', 10);
     view.dispatch({ changes: { from: 10, insert: 'A' }, selection: { anchor: 11 }, userEvent: 'input.type' });
     expect(text()).toBe('A');
+  });
+});
+
+describe('a block of steps and a story', () => {
+  const STEPS = 'Intro\n\n::: steps\n[[media:m1|Roof]]{caption="2 Mar 2026, Slide 1"}\n[[media:m1|Roof]]{caption="3 Mar 2026, Slide 2"}\n:::\n\nEnd';
+  const STORY = '::: story\nWhat the strike left.\n[[media:m1|Roof]]{zoom=0.25,0.1,0.5,0.4}\nThe **roof** first.\n\nThen the yard.\n[[media:m1|Roof]]\nThe yard.\n:::\n\nEnd';
+
+  it('reads its steps: a picture opens each, the words after it are its own', () => {
+    const { lead, steps } = playedSteps(STORY.split('\n\nEnd')[0]);
+    expect(lead).toBe('What the strike left.');
+    expect(steps.map((step) => [step.words, step.zoom])).toEqual([
+      ['The **roof** first.\n\nThen the yard.', { x: 0.25, y: 0.1, w: 0.5, h: 0.4 }],
+      ['The yard.', null],
+    ]);
+    expect(storyZoom('zoom=0.8,0.1,0.5,0.4')).toBeNull();
+    expect(storyZoom('zoom=0.1,0.1,0,0.4')).toBeNull();
+    expect(storyZoom('width=50%')).toBeNull();
+  });
+
+  it('draws steps as numbered pictures in a row, each with its caption, and opens like an aligned block', () => {
+    writing(STEPS, 0);
+    const box = view.dom.querySelector('.cm-block-steps');
+    expect(box.querySelector('.cm-played-head').textContent).toBe('Steps · 2 pictures, one at a time in HTML');
+    const figures = [...box.querySelectorAll('.cm-played-figure')];
+    expect(figures.map((figure) => figure.dataset.step)).toEqual(['1', '2']);
+    expect(figures.map((figure) => figure.querySelector('.markdown-caption').textContent)).toEqual(['2 Mar 2026, Slide 1', '3 Mar 2026, Slide 2']);
+    // no size bar: a step's picture takes the stepper's width
+    expect(box.querySelector('[data-size-bar]')).toBeNull();
+    mouse(box, 'dblclick');
+    expect(view.dom.querySelector('.cm-block-steps')).toBeNull();
+    expect([...view.dom.querySelectorAll('.cm-fence-line')].map((line) => line.textContent)).toEqual(['::: steps', ':::']);
+  });
+
+  it('draws a story as each picture beside its words, the part it moves in on outlined', () => {
+    writing(STORY, STORY.length);
+    const box = view.dom.querySelector('.cm-block-story');
+    expect(box.querySelector('.cm-played-head').textContent).toBe('Story · 2 steps, the words scroll beside the pictures in HTML');
+    expect(box.querySelector('.cm-played-lead').textContent.trim()).toBe('What the strike left.');
+    const steps = [...box.querySelectorAll('.cm-played-step')];
+    expect(steps[0].querySelector('.cm-played-words strong').textContent).toBe('roof');
+    const zoom = steps[0].querySelector('.cm-zoom-box');
+    expect([zoom.style.left, zoom.style.top, zoom.style.width, zoom.style.height]).toEqual(['25%', '10%', '50%', '40%']);
+    expect(steps[1].querySelector('.cm-zoom-box')).toBeNull();
+  });
+
+  it('shows the guidance an empty block opens with, in grey', () => {
+    const doc = '::: steps\n<!--? One picture a line -->\n:::\n\nEnd';
+    writing(doc, doc.length);
+    const box = view.dom.querySelector('.cm-block-steps');
+    expect(box.querySelector('.cm-hint').textContent).toBe('One picture a line');
+    expect(box.querySelector('.cm-played-head').textContent).toBe('Steps · 0 pictures, one at a time in HTML');
   });
 });

@@ -127,6 +127,15 @@ export function logStamp(now = new Date()) {
 }
 
 const TABLE = '| Source | Status |\n| --- | --- |\n|  |  |';
+/**
+ * The two blocks an HTML page plays (`engine/notes_html.py`), as `/` writes them
+ * empty: each picture put inside opens a step. A PDF prints them in order, the
+ * pictures then the words.
+ */
+export const STEPS_BLOCK = `::: steps\n${hintLine('One picture a line, each a step with its caption: / › Case picture')}\n:::`;
+export const STORY_BLOCK = `::: story\n${hintLine('A picture, then the words read beside it. {zoom=x,y,w,h} after a picture moves in on a part of it')}\n:::`;
+/** The names a block of steps or a story opens with. */
+export const PLAYED_BLOCK = /^:::[ \t]*(steps|story)[ \t]*$/;
 const DIAGRAM = '```mermaid\nflowchart LR\n  A[Tip] --> B[Check]\n  B --> C[Confirmed]\n```';
 
 /** The `:::` blocks `/` › Alignment offers: where a line sits, or a corner of the cover. */
@@ -167,6 +176,8 @@ export const SLASH_COMMANDS = [
   { id: 'hint', label: 'Guidance', icon: 'help', words: 'hint guide help template', hint: 'Grey, never printed', template: true },
   { id: 'table', label: 'Table', icon: 'table', words: 'grid columns', block: TABLE },
   { id: 'diagram', label: 'Diagram', icon: 'network', words: 'mermaid flowchart chart', block: DIAGRAM },
+  { id: 'steps', label: 'Steps', icon: 'columns', words: 'stepper slides sequence carousel before after days', block: STEPS_BLOCK, hint: 'Pictures one at a time, in HTML' },
+  { id: 'story', label: 'Story', icon: 'text', words: 'scrollytelling scroll narrative sticky zoom', block: STORY_BLOCK, hint: 'Words scroll beside a picture, in HTML' },
   { id: 'code', label: 'Code', icon: 'hash', words: 'code block monospace', block: '```\n\n```' },
   { id: 'divider', label: 'Divider', icon: 'minus', words: 'rule line separator hr', block: '---' },
   { id: 'pagebreak', label: 'Page break', icon: 'file', words: 'new page pdf break', block: PAGE_BREAK, hint: 'PDF only' },
@@ -233,8 +244,10 @@ export function slashInsert(command, { before = '', now = new Date() } = {}) {
   }
   const lead = alone ? '' : '\n\n';
   const text = `${lead}${command.block}\n`;
-  // inside the fence of a code block, and on the first empty cell of a table
-  const inner = command.id === 'code' ? lead.length + 4 : command.id === 'table' ? text.length - 6 : text.length;
+  // inside the fence of a code block, on the first empty cell of a table, and on the guidance a played block opens with
+  const played = command.id === 'steps' || command.id === 'story';
+  const inner = command.id === 'code' ? lead.length + 4 : command.id === 'table' ? text.length - 6
+    : played ? text.length - 5 : text.length;
   return { text, cursor: inner };
 }
 
