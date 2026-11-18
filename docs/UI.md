@@ -7052,9 +7052,9 @@ what it finds is listed under *Before you export*, by note when several are expo
 each with *Go to* when it names a line, and the button reads *Export anyway*. A check
 that fails says nothing and never holds the export back.
 
-**PDF | HTML.** The export dialog opens with a **PDF | HTML** switch, the last one picked
-kept for this browser; everything else (the edition, the destination, the check, the
-Editions record) is the same for both. For HTML the check also says what the file would
+**PDF | HTML.** The export dialog opens with a **PDF | HTML | WordPress draft** switch, the
+last one picked kept for this browser; everything else (the edition, the destination, the
+check, the Editions record) is the same for PDF and HTML. For HTML the check also says what the file would
 weigh, past the 25 MB it aims under in amber, lists the clips that go out as a poster and
 a link rather than inside the file, and lists the points where a filmer stood, which a
 public file keeps to the metre unless *Round them to about 150 m in this file* is ticked
@@ -7065,6 +7065,29 @@ shown to a reader as a correction. The Page pane has
 the same switch: HTML draws the page an export would write, in a frame that runs its own
 script and reaches nothing of the app, keeping its place between drafts; a template shows
 its pages.
+
+**WordPress draft.** The switch's third choice sends one note to the analyst's own
+WordPress site as a **draft**, which they publish with WordPress's own button: Azimut never
+publishes or schedules, and a post that has left the drafts is never touched again. The
+dialog says where it goes (*To example.org as desk, as a draft you publish in WordPress*),
+that the public edition goes, how many pictures and clips go to the media library and what
+stays out (internal passages, interactive maps, diagrams not drawn, pictures the note cannot
+show; a clip past the HTML page's budget, or one the site refuses, goes as its still and a
+link), with the same points of view and *Round them to about 150 m* as HTML. One note at a
+time. While no site is set, it shows the setup steps of Settings › Publishing and a way
+there. **Send as a draft** uploads every picture without its metadata, with its alt text
+and caption, then makes the post: title, excerpt (the cover's subtitle, else the first
+paragraph), featured image (the cover picture, else the first credited one), and content
+written as a person would in the block editor: headings, paragraphs, lists, quotes,
+tables, separators, code, each picture an image block with its caption and credit linked
+to the full picture, a comparison's two sides in two columns with their labels, a graphic
+picture folded in a Details block, a callout as a paragraph led by its label, and the
+numbered **Sources** list every `[n]` links to. Diagrams go as the PNG the browser drew;
+the Story layout and `::: steps`/`::: story` read as a plain article. The dialog then says
+*Draft saved in WordPress* (or *updated*) with **Preview** and **Open in WordPress**.
+Sending the note again updates its draft while it is still one, reusing the pictures
+already up. `POST /notes/{id}/wordpress` does it (`engine/notes_wordpress.py`); with
+`check: true` it only says what would go, and reaches nothing.
 
 **Editions.** A passage written as `> [!internal]` (*Internal* in **/** and the callout
 menu) is for the team: drawn in its own colour, printed in a marked box in the internal
@@ -7085,7 +7108,11 @@ PDF's pages and the file (its
 SHA-256 on hover): *Show* opens its folder, and *Check* says *Unchanged since it was
 written*, *This file is not the one Azimut wrote* or *File missing*. The record (day,
 edition, file, folder, pages, the PDF's SHA-256 and the printed text's) is kept on the
-note, fifty at most, and travels in a bundle.
+note, fifty at most, and travels in a bundle. A WordPress draft is listed too, one line per
+post however often it was sent (`format: wordpress`, the site, the post, its edit and
+preview links, the pictures it uploaded), *Draft on example.org* with **Open in
+WordPress** in place of *Show* and *Check*; a record whose site or links do not read as
+web addresses is dropped when read.
 
 **The HTML file, on the server's side.** `POST /notes/html` writes one HTML file per
 note beside its PDFs, named the same with `.html`, in the edition asked for, and keeps it
@@ -7497,6 +7524,20 @@ composer and the Map plate already use), **Name**, **Role** and **Organisation**
 line each, 80 characters at most) and the **Signature**, a PNG of a handwritten
 signature up to 1 MB, a transparent one recommended; each field says what it takes and
 where it prints. The settings backup carries them all.
+
+**WordPress.** The last group of Settings › Publishing connects the site a note is sent
+to: **Site address** (https, or http on this computer for a test site; a WordPress.com
+address is told it needs an OAuth app Azimut does not have), **Username**, and
+**Application password**, made in WordPress under Users › Profile › Application Passwords
+(core since WordPress 5.6, free, no plugin). The address and the username save when a
+field is left and travel in the settings backup; the password goes up once, is kept in
+`publishing.json` beside `settings.json` (owner-only, never in a backup) and never comes
+back: the field says *Kept on this computer, ending 6789*. **Test connection** signs in
+and says *Connected as … on …*, or one sentence on what went wrong (the password refused,
+no WordPress at the address, http, a timeout, an account below Author); it is the tab's
+only network call, on its press. **Forget** takes the three away. *How to connect a site*
+says each field and where WordPress shows it, open while something is missing; the export
+dialog shows the same steps (`lib/wordpressSetup.js`).
 
 **The logo editor.** A picked logo opens *Edit logo* before it is saved, and **Edit…**
 opens it again. It cuts the logo to a rectangle, rounded corners or a circle, draws a
