@@ -196,7 +196,7 @@ describe('leftWords — what stayed out, said once', () => {
   it('names each reason in one sentence', () => {
     expect(leftWords({ missing: 1 })).toBe('Left out of the thread: 1 file or proof not found in the case.');
     expect(leftWords({ missing: 2, past: 3 })).toBe(
-      'Left out of the thread: 2 files or proofs not found in the case, and 3 posts past the 21 a thread holds.',
+      'Left out of the thread: 2 files or proofs not found in the case, and 3 posts past the 25 a thread holds.',
     );
   });
 });

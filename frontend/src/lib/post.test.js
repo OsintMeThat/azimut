@@ -335,7 +335,7 @@ describe('templateFromPost / normPostTemplate — round-trip', () => {
     });
     expect(normalized.mention).toHaveLength(280);
     expect(normalized.body).toHaveLength(16_000);
-    expect(normalized.extraTweets).toHaveLength(20);
+    expect(normalized.extraTweets).toHaveLength(24); // the first post and 24 more: the 25 a thread holds
     expect(normalized.extraTweets[0].text).toHaveLength(4_000);
   });
 });

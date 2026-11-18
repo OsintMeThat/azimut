@@ -113,6 +113,29 @@ afterEach(() => {
   localStorage.clear();
 });
 
+describe('a long thread', () => {
+  it('stops at 25 posts, as on X, and says so where posts are added', async () => {
+    await mountPost();
+    const many = Array.from({ length: 30 }, (_, n) => ({ kind: 'text', text: `Part ${n + 1}.`, heading: true }));
+    startPost('free', [], { title: 'Long one' }, many);
+    await settle();
+    const adders = () => [...target.querySelectorAll('.thread-actions button')]
+      .filter((button) => /Add (media|context) post|Restore post 2/.test(button.textContent));
+    expect(posts().length).toBeLessThanOrEqual(25);
+    // filled to the limit by hand if the note left room
+    while (!adders()[0]?.disabled && posts().length < 40) {
+      adders().find((button) => button.textContent.includes('Add context post')).click();
+      flushSync();
+    }
+    expect(posts()).toHaveLength(25);
+    for (const button of adders()) {
+      expect(button.disabled).toBe(true);
+      expect(button.title).toBe('A thread holds 25 posts at most, as on X');
+    }
+    expect(target.querySelector('.thread-full').textContent).toContain('25 posts');
+  });
+});
+
 describe('a note handed to Post', () => {
   it('opens a Free post named after the note, laid out as a thread', async () => {
     await mountPost();

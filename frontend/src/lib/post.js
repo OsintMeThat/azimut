@@ -11,6 +11,10 @@
 
 import { entityReference, mediaReference } from './markdown.js';
 
+/** The most posts a thread holds, as X's composer takes them: the first, post 2 and the
+ * rest (`api/drafts.py`, `MAX_THREAD_POSTS`). */
+export const MAX_THREAD_POSTS = 25;
+
 /**
  * What a post is made from, as New post offers it. A draft or a template that says
  * nothing is a Geolocation one, which is what every post was before kinds existed,
@@ -1292,7 +1296,7 @@ export function normPostTemplate(data = {}) {
       : bodyFromLegacy(source),
     mediaEnabled: typeof source.mediaEnabled === 'boolean' ? source.mediaEnabled : true,
     extraTweets: Array.isArray(source.extraTweets)
-      ? source.extraTweets.slice(0, 20).map((e) => ({
+      ? source.extraTweets.slice(0, MAX_THREAD_POSTS - 1).map((e) => ({
         text: typeof e?.text === 'string' ? e.text.slice(0, 4_000) : '',
       }))
       : [],

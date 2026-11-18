@@ -18,12 +18,14 @@
  * across a rebuild (`video`, `recap`, `all`, `place:<proof>`), so words the analyst
  * changed stay on their post when the thread changes order.
  */
-import { buildTweet1, postDate, POINT_SEPARATOR, THREAD_ROLES, VIDEO_ORDERS, VIDEO_THREAD_STARTERS } from './post.js';
+import {
+  buildTweet1, MAX_THREAD_POSTS, postDate, POINT_SEPARATOR, THREAD_ROLES, VIDEO_ORDERS, VIDEO_THREAD_STARTERS,
+} from './post.js';
 import { isDefaultName } from './naming.js';
 import { DEFAULT_ORDER, videoThread } from './videoThread.js';
 
-/** The most posts a thread holds: the first, and the twenty a draft keeps after it (`api/drafts.py`). */
-export const MAX_THREAD_POSTS = 21;
+/** The most posts a thread holds, as X's composer takes them (`lib/post.js`). */
+export { MAX_THREAD_POSTS };
 
 /** The start a thread opens on without a template: Recap first. */
 const FIRST_START = VIDEO_THREAD_STARTERS.find((one) => one.order === DEFAULT_ORDER);

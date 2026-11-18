@@ -161,11 +161,29 @@ def test_draft_rejects_attachment_fan_out(client):
         f"/api/cases/{cid}/drafts",
         json={
             "title": "Posts",
-            "state": {"extraTweets": [{"mediaPaths": []} for _ in range(21)]},
+            "state": {"extraTweets": [{"mediaPaths": []} for _ in range(24)]},
         },
     )
     assert too_many_media.status_code == 422
     assert too_many_posts.status_code == 422
+    assert "at most 25 posts" in too_many_posts.json()["detail"]
+
+
+@pytest.mark.parametrize("media_post,extra,status", [(True, 23, 200), (True, 24, 422), (False, 24, 200), (False, 25, 422)])
+def test_a_thread_holds_twenty_five_posts_as_on_x(client, media_post, extra, status):
+    cid = client.post("/api/cases", json={"name": "Long thread"}).json()["id"]
+    answer = client.post(f"/api/cases/{cid}/drafts", json={
+        "title": "Thread", "state": {"mediaEnabled": media_post, "extraTweets": [{"text": f"{n}/"} for n in range(extra)]}})
+    assert answer.status_code == status, answer.text
+
+
+def test_the_thread_limit_is_one_number_in_the_server_and_the_app():
+    from pathlib import Path
+
+    from azimut.api import drafts
+
+    post_js = (Path(__file__).resolve().parents[1] / "frontend/src/lib/post.js").read_text(encoding="utf-8")
+    assert f"export const MAX_THREAD_POSTS = {drafts.MAX_THREAD_POSTS};" in post_js
 
 
 @pytest.mark.parametrize(

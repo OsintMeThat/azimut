@@ -156,11 +156,12 @@ describe('a place', () => {
 });
 
 describe('a long thread', () => {
-  it('holds 21 posts, and counts the places it leaves out', () => {
-    const many = Array.from({ length: 25 }, (_, i) => ({ name: `p${i}`, title: `Place ${i}`, moments: [], png: `proofs/p${i}.png`, row: {} }));
+  it('holds 25 posts, as on X, and counts the places it leaves out', () => {
+    expect(MAX_THREAD_POSTS).toBe(25);
+    const many = Array.from({ length: 30 }, (_, i) => ({ name: `p${i}`, title: `Place ${i}`, moments: [], png: `proofs/p${i}.png`, row: {} }));
     const { posts, cut } = videoPosts({ video: VIDEO, slides: many, layout: videoLayout(), common });
     expect(posts).toHaveLength(MAX_THREAD_POSTS);
-    expect(cut).toBe(25 + 2 - MAX_THREAD_POSTS);
+    expect(cut).toBe(30 + 2 - MAX_THREAD_POSTS);
   });
 
   it('ends on the template\'s boilerplate posts, within the same count', () => {

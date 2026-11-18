@@ -1287,6 +1287,11 @@
     return mediaText.trim();
   }
 
+  // the posts the thread holds now: the first, post 2 when it is on, and the rest
+  const threadSize = $derived(1 + (mediaEnabled ? 1 : 0) + extraTweets.length);
+  const threadFull = $derived(threadSize >= MAX_THREAD_POSTS);
+  const FULL_TITLE = `A thread holds ${MAX_THREAD_POSTS} posts at most, as on X`;
+
   const tweet1Count = $derived(targetLength(tweet1));
   const tweet1Over = $derived(tweet1Count > targetInfo.limit);
 
@@ -3577,16 +3582,19 @@
           <!-- a post of another kind starts with no media post under it, so its first
                one is post 2 itself rather than a post 2 "restored" -->
           {#if !mediaEnabled && geolocation}
-            <button class="btn btn-ghost btn-sm" onclick={() => (mediaEnabled = true)}>
+            <button class="btn btn-ghost btn-sm" disabled={threadFull} title={threadFull ? FULL_TITLE : undefined}
+              onclick={() => (mediaEnabled = true)}>
               <Icon name="plus" size={13} /> Restore post 2
             </button>
           {/if}
-          <button class="btn btn-ghost btn-sm" onclick={() => (!mediaEnabled && !geolocation && !thread ? (mediaEnabled = true) : addMediaTweet())}>
+          <button class="btn btn-ghost btn-sm" disabled={threadFull} title={threadFull ? FULL_TITLE : undefined}
+            onclick={() => (!mediaEnabled && !geolocation && !thread ? (mediaEnabled = true) : addMediaTweet())}>
             <Icon name="plus" size={13} /> Add media post
           </button>
-          <button class="btn btn-ghost btn-sm" onclick={addExtraTweet}>
+          <button class="btn btn-ghost btn-sm" disabled={threadFull} title={threadFull ? FULL_TITLE : undefined} onclick={addExtraTweet}>
             <Icon name="plus" size={13} /> Add context post
           </button>
+          {#if threadFull}<span class="thread-full" role="status">{MAX_THREAD_POSTS} posts: the most a thread holds on X.</span>{/if}
           <button class="btn btn-ghost btn-sm" onclick={copyAllPressed}>
             <Icon name="copy" size={13} /> Copy all
           </button>
@@ -3843,6 +3851,7 @@
     padding: 4px 0;
     flex-wrap: wrap;
   }
+  .thread-full { color: var(--text-3); font-size: var(--fs-xs); }
   .danger-hover:hover { color: var(--danger); }
 
   /* header actions */

@@ -33,7 +33,11 @@ router = APIRouter(prefix="/api", tags=["drafts"])
 
 DRAFT_MARKER = 1
 MAX_MEDIA_PER_POST = 4
-MAX_EXTRA_POSTS = 20
+#: The most posts a thread holds, as X's composer takes them: the first, post 2 when it is
+#: on, and the rest (`frontend/src/lib/post.js` holds the same number).
+MAX_THREAD_POSTS = 25
+#: The posts a draft keeps after its first, post 2 among them when it is on.
+MAX_EXTRA_POSTS = MAX_THREAD_POSTS - 1
 # the proof, a video thread's video, sheet, map and clip, then the first post's own
 # pictures, the media post and the later ones
 MAX_DRAFT_ATTACHMENTS = 1 + 4 + MAX_MEDIA_PER_POST * (2 + MAX_EXTRA_POSTS)
@@ -148,10 +152,11 @@ def _draft_source_paths(state: dict[str, Any]) -> list[str]:
     extra = state.get("extraTweets", [])
     if not isinstance(extra, list):
         raise HTTPException(status_code=422, detail="state.extraTweets must be an array")
-    if len(extra) > MAX_EXTRA_POSTS:
+    room = MAX_EXTRA_POSTS - (0 if state.get("mediaEnabled", True) is False else 1)
+    if len(extra) > room:
         raise HTTPException(
             status_code=422,
-            detail=f"state.extraTweets allows at most {MAX_EXTRA_POSTS} posts",
+            detail=f"A thread holds at most {MAX_THREAD_POSTS} posts; this one has {len(extra) + MAX_THREAD_POSTS - room}.",
         )
     for index, tweet in enumerate(extra):
         if not isinstance(tweet, dict):
