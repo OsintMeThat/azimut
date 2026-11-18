@@ -13,8 +13,10 @@ one note two ways, so what they share lives here and nowhere else:
   either reader of the note sees one, which is what the public edition is made from;
 - the aligned blocks (`::: center`), the own cover's corners (`::: top-right`),
   the two blocks that tell a story in pictures (`::: steps`, `::: story`), in which
-  every picture opens a step and the words after it are that step's, and a map
-  (`::: map`), handed on as one token (`az_map`) whose lines `engine/notes_maps.py` reads;
+  every picture opens a step and the words after it are that step's, and the blocks
+  each renderer draws whole (`TOKEN_BLOCKS`): a map (`::: map`, read by
+  `engine/notes_maps.py`) and a chart (`::: chart`, read by `engine/notes_charts.py`),
+  each handed on as one token holding its lines (`az_map`, `az_chart`);
 - the callouts a quote opens with (`> [!confirmed]`) and the tasks a list holds;
 - the own cover (the lines above `<!-- cover -->`, `cover_piece`);
 - what a picture's braces say (`image_options`);
@@ -56,6 +58,12 @@ FIGURE_BLOCKS = (STEPS, STORY)
 #: `MAP_TOKEN`, holding the block's lines, which each renderer draws its own way.
 MAP = "map"
 MAP_TOKEN = "az_map"
+#: A chart drawn from the table it holds (`engine/notes_charts.py`), handed on the same way.
+CHART = "chart"
+CHART_TOKEN = "az_chart"
+#: The blocks a renderer draws whole, by name, and the one token each becomes
+#: (`block_token`): every renderer has an `_on_<token>` for each.
+TOKEN_BLOCKS: dict[str, str] = {MAP: MAP_TOKEN, CHART: CHART_TOKEN}
 
 
 #: How deep chapters nest: a report's chapter may hold chapters of its own, and
@@ -71,7 +79,7 @@ COMMENT = re.compile(r"\A(?:\s*<!--.*?-->)+\s*\Z", re.S)
 MERMAID_INFO = re.compile(r"^\s*mermaid\b")
 IMAGE_ATTRS = re.compile(r"!\[([^\]]*)\]\((\S+?)(?:\s+[\"']([^\"']*)[\"'])?\)\s*\{([^}\n]+)\}")
 ALIGNMENT_BLOCK = re.compile(
-    r"^:::[ \t]*(left|center|right|top-left|top-right|bottom-left|bottom-right|steps|story|map)[ \t]*\n(.*?)^:::[ \t]*$",
+    rf"^:::[ \t]*({'|'.join((*ALIGNMENT_NAMES, *CORNER_NAMES, *FIGURE_BLOCKS, *TOKEN_BLOCKS))})[ \t]*\n(.*?)^:::[ \t]*$",
     re.S | re.M,
 )
 ATTR_PARAM = "__azimut_attrs"
@@ -531,16 +539,23 @@ def alignment_blocks(text: str) -> list["Block"]:
     Each block is parsed on its own so its alignment can be pushed into everything
     it produced, which is how the preview reads it too. A `::: steps` or `::: story`
     block stands left, each of its pictures in a paragraph of its own
-    (`split_figures`), so every reader finds its steps the same way.
+    (`split_figures`), so every reader finds its steps the same way. A block written
+    inside a code fence is an example of the syntax, shown as the fence's text.
     """
     blocks: list[Block] = []
     position = 0
-    for match in ALIGNMENT_BLOCK.finditer(text):
+    fenced = fenced_spans(text)
+    search = 0
+    while (match := ALIGNMENT_BLOCK.search(text, search)) is not None:
+        if any(start <= match.start() < end for start, end in fenced):
+            search = text.find("\n", match.start()) + 1 or len(text)
+            continue
+        search = match.end()
         blocks.append(Block("left", parse(text[position : match.start()]), text.count("\n", 0, position)))
         name = match.group(1)
         line = text.count("\n", 0, match.start(2))
-        if name == MAP:
-            blocks.append(Block("left", [map_token(match.group(2))], line, kind=MAP))
+        if name in TOKEN_BLOCKS:
+            blocks.append(Block("left", [block_token(name, match.group(2))], line, kind=name))
             position = match.end()
             continue
         if name in FIGURE_BLOCKS:
@@ -556,9 +571,30 @@ def alignment_blocks(text: str) -> list["Block"]:
     return blocks
 
 
-def map_token(body: str) -> Token:
-    """A `::: map` block as the one token every renderer walks to (`_on_az_map`)."""
-    token = Token(MAP_TOKEN, "", 0)
+def fenced_spans(text: str) -> list[tuple[int, int]]:
+    """Where the code fences of a stretch of note run, as character offsets."""
+    if "```" not in text and "~~~" not in text:
+        return []
+    spans: list[tuple[int, int]] = []
+    opened: int | None = None
+    offset = 0
+    for line in text.split("\n"):
+        if FENCE.match(line):
+            if opened is None:
+                opened = offset
+            else:
+                spans.append((opened, offset + len(line)))
+                opened = None
+        offset += len(line) + 1
+    if opened is not None:
+        spans.append((opened, len(text)))
+    return spans
+
+
+def block_token(name: str, body: str) -> Token:
+    """A block of `TOKEN_BLOCKS` as the one token every renderer walks to: `::: map`
+    to `_on_az_map`, `::: chart` to `_on_az_chart`."""
+    token = Token(TOKEN_BLOCKS[name], "", 0)
     token.content = body
     token.block = True
     token.map = [0, max(1, body.count("\n"))]
@@ -638,7 +674,7 @@ class Block:
     #: The corner of the own cover it is pinned to (`CORNER_NAMES`), or "".
     corner: str = ""
     #: `steps` or `story` for a block of pictures told as steps (`FIGURE_BLOCKS`), `map`
-    #: for a map (`MAP`), or "".
+    #: or `chart` for a block drawn whole (`TOKEN_BLOCKS`), or "".
     kind: str = ""
 
 

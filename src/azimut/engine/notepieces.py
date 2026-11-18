@@ -9,7 +9,7 @@ the pieces into posts and cuts long text with its own counter (`tools/post/start
   quote or a callout (its label first, ``Confirmed: …``), with ``"heading": True``
   for a heading or a chapter's title;
 - ``{"kind": "media", "path": …, "type": "image" | "video" | "gif", "id": …}`` for a
-  picture or a video of the case, by its case-relative path;
+  picture or a video of the case, by its case-relative path, with ``"alt"`` for a chart;
 - ``{"kind": "proof", "name": …, "id": …}`` for a Geo Proof's picture, by the proof's
   name;
 - ``{"kind": "source", "url": …, "label": …}`` for a paragraph that is only a link.
@@ -24,6 +24,10 @@ carries none of it. What is left is read by the same parser with the same rewrit
 the note's syntax, chapters included and placeholders filled as the page prints them,
 and it is checked again as the public PDF is: with a passage still there, nothing is
 handed over.
+
+**Charts.** A ``::: chart`` block goes as its picture for X, its title drawn on it and
+said as its alt text. The picture is filed in the case's media (`notecharts.file_for_post`),
+since a post carries files of the case; the same picture is filed once.
 
 **What stays out.** The cover above a ``<!-- cover -->`` line, the ``::: corner``
 blocks, page breaks and comments print nothing in a post and go silently. Tables,
@@ -44,8 +48,9 @@ from markdown_it.common.normalize_url import normalizeLinkText
 from markdown_it.token import Token
 
 from ..workspace import Case, CaseError
-from . import notefill, notes_markdown, notesources
+from . import notecharts, notefill, notes_markdown, notesources
 from .media import media_kind
+from .notelook import NoteLook
 from .notetext import without_hints
 
 #: How many pieces one note hands over, as many as Post takes. The rest are counted.
@@ -87,13 +92,14 @@ def hand(
     note_id: str = "",
     resolve: notes_markdown.Resolve | None = None,
     values: dict[str, str] | None = None,
+    look: NoteLook | None = None,
 ) -> Handed:
     """The public edition of ``text`` as pieces for Post.
 
     ``selection`` is a stretch of ``text`` as the editor counts it, UTF-16 code units
     from the start, ``(start, end)``; None hands the whole note. ``resolve`` finds the
     notes a chapter line includes, and ``values`` fills the placeholders, as the PDF
-    has them (`notes_pdf.render`).
+    has them (`notes_pdf.render`). ``look`` is the note's, which its charts are drawn in.
     """
     prepared = without_hints(text)
     cover = notefill.split_cover(prepared)
@@ -111,7 +117,8 @@ def hand(
     expanded = notes_markdown.expand(title, stripped, resolve=resolve, note_id=note_id, public=True,
                                 counter=found, values=values)
     handed.left["internal"] += found[0]
-    reading = _Reading(case, handed)
+    reading = _Reading(case, handed, look=look, note_id=note_id,
+                       note_text="\n".join(piece.text for piece in expanded if piece.kind == "text"))
     for piece in expanded:
         reading.piece(piece)
     return handed
@@ -169,9 +176,14 @@ def _passages_met(before: str, after: str, start: tuple[int, int], end: tuple[in
 class _Reading:
     """One note read into pieces, each picture looked up once."""
 
-    def __init__(self, case: Case | None, handed: Handed) -> None:
+    def __init__(self, case: Case | None, handed: Handed, *, look: NoteLook | None = None, note_id: str = "",
+                 note_text: str = "") -> None:
         self.case = case
         self.handed = handed
+        self.look = look
+        self.note_id = note_id
+        #: The note's words, which a chart reads for whether the note calls its figures minimums.
+        self.note_text = note_text
         self.left = handed.left
         self.reader = notesources.Reader(case)
         self.prefixes = notes_markdown.file_prefixes(case)
@@ -227,9 +239,27 @@ class _Reading:
                 self._say("\n".join(self._list(tokens, index, end, 0)))
             elif token.type == "blockquote_open":
                 self._say("\n".join(self._quote(tokens, index, end)))
+            elif token.type == notes_markdown.CHART_TOKEN:
+                self._chart(token)
             else:
                 self._leave(token)
             index = end
+
+    def _chart(self, token: Token) -> None:
+        """A chart as its picture for X, filed in the case, its title as its alt text; its
+        table, when the block shows one, stays out like any table."""
+        chart = notecharts.read(self.case, token.content, look=self.look, note_text=self.note_text, origins=False)
+        try:
+            filed = notecharts.file_for_post(self.case, chart, note_id=self.note_id) if self.case is not None else None
+        except (CaseError, OSError, ValueError):  # a case that cannot take the file: the chart stays out, counted
+            filed = None
+        if filed is None:
+            self.left["other"] += 1
+            return
+        self._say("")
+        self._add({"kind": "media", "path": filed["path"], "type": "image", "id": filed["id"], "alt": chart.title})
+        if chart.block.shows_table():
+            self.left["tables"] += 1
 
     def _paragraph(self, inline: Token) -> None:
         """A paragraph that is only a link is a source; any other is words."""

@@ -102,6 +102,8 @@ export function spanNote(date) {
 export const MAX_PIECES = 200;
 export const MAX_PIECE_TEXT = 20_000;
 const MAX_PIECE_WORDS = 200;
+/** The longest alt text a picture piece carries: what Post's field takes (`postAlt.js`). */
+const MAX_PIECE_ALT = 2000;
 const MAX_PIECE_PATH = 512;
 const MAX_PIECE_URL = 2000;
 const MEDIA_TYPES = new Set(['image', 'video', 'gif']);
@@ -134,7 +136,8 @@ function startPiece(piece) {
     if (!path && !id.id) return null;
     const type = MEDIA_TYPES.has(piece.type) ? piece.type
       : VIDEO_PATH.test(path) ? 'video' : /\.gif$/i.test(path) ? 'gif' : 'image';
-    return { kind: 'media', path, type, ...id };
+    const alt = type === 'image' ? words(piece.alt, MAX_PIECE_ALT) : '';
+    return { kind: 'media', path, type, ...id, ...(alt ? { alt } : {}) };
   }
   if (piece.kind === 'proof') {
     const name = words(piece.name, MAX_PIECE_WORDS);
@@ -152,7 +155,8 @@ function startPiece(piece) {
 /**
  * What a start hands Post to lay out as posts (`tools/post/pieces.js`), kept to what it
  * can use: a text with words in it, a heading said as such; a picture, a video or a GIF
- * by its case path; a proof by its name; a source by its web address. Each may carry
+ * by its case path, a picture with the alt text it comes with (a chart's title); a proof
+ * by its name; a source by its web address. Each may carry
  * its entity `id` as well. An unknown kind, an empty text, a path climbing out of the
  * case or a source that is no web address is dropped, and past `MAX_PIECES` nothing is
  * kept. The Notebook hands a note over this way (`startPost`'s `pieces`).

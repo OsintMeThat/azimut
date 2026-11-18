@@ -70,3 +70,25 @@ test('To Post sends the note and opens Post on a Free post of its public edition
   expect(written).not.toContain('internal]');
   await expect(page.locator('.tweet-block .attach-chip')).toHaveCount(1);
 });
+
+test('a chart handed over as its picture starts its Alt text field with the chart’s title', async ({ page }) => {
+  await installAppFixture(page, { catalog: CATALOG });
+  const chart = 'At least 41 armoured vehicles, by model and grade';
+  await page.route(`**/api/cases/${CASE_ID}/notes/n1`, (route) => (route.request().method() === 'PUT'
+    ? route.fulfill({ json: { status: 'saved' } })
+    : route.fulfill({ json: { text: NOTE } })));
+  await page.route(`**/api/cases/${CASE_ID}/notes/n1/pieces`, (route) => route.fulfill({ json: {
+    title: 'Quay strike', left: { internal: 0, tables: 0, diagrams: 0, other: 0 },
+    pieces: [{ kind: 'text', text: 'Smoke rose over the quay at dawn.' },
+      { kind: 'media', path: PANEL_PATH, type: 'image', id: 'm1', alt: chart }],
+  } }));
+  await page.route(`**/api/cases/${CASE_ID}/entities/redirects`, (route) => route.fulfill({ json: { redirects: {} } }));
+  await page.goto('/#notebook');
+  await page.locator('button[title="Open Quay strike"]').click();
+  await expect(page.locator('.cm-content')).toContainText('Smoke rose over the quay');
+  await page.locator('.tool-header button[aria-label="More"]').click();
+  await page.locator('.float-menu [data-guide="notebook.to-post"]').click();
+  await expect(page.locator('.kind-chip')).toHaveText('Free post');
+  await page.locator('.alt-box input').check();
+  await expect(page.getByRole('textbox', { name: /^Alt text for / })).toHaveValue(chart);
+});

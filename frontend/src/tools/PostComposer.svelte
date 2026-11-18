@@ -504,6 +504,7 @@
     if (run !== postRun || caseState.current?.id !== caseId) return;
     const { pieces: resolved, missing } = resolvePieces(pieces, { proofs, pointsText: proofPointsText });
     beginPost('free', [], about);
+    handedAlt = new Map(resolved.filter((piece) => piece.kind === 'media' && piece.alt).map((piece) => [piece.path, piece.alt]));
     const past = layOutPieces(resolved);
     laidPieces = { pieces: resolved, past, key: piecesKey() };
     const said = leftWords({ missing, past });
@@ -1671,6 +1672,7 @@
   let altOn = $state(false);
   let altTexts = $state({}); // case path → its text
   let altSeen = new Set(); // the pictures already given their first words
+  let handedAlt = new Map(); // what a note handed over says of its pictures (a chart's title), by path
   const proofWords = new Map(); // a proof's sentence, by case and picture, read once
 
   /** The pictures of the post on screen, each once, in thread order. */
@@ -1709,6 +1711,7 @@
 
   /** What the case says of a picture, for its field's first words, or ''. */
   async function altWords(path) {
+    if (handedAlt.has(path)) return handedAlt.get(path);
     const count = thread?.slides?.length ?? 0;
     if (thread?.sheet === path) return altSuggestion({ role: 'sheet', count });
     if (thread?.map === path) return altSuggestion({ role: 'map', count });
@@ -2303,6 +2306,7 @@
     altOn = prefs.postAltText;
     altTexts = {};
     altSeen = new Set();
+    handedAlt = new Map();
     draftName = null;
     postTitle = freshPostName();
     postName = '';

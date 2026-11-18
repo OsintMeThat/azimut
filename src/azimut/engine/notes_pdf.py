@@ -50,6 +50,11 @@ Two things a server cannot do on its own:
 filed when it was put in, with the layers' features and the proofs drawn over it as on
 the map's last day, its credit under it. Nothing is fetched to print it.
 
+**Charts.** A `::: chart` block prints as a picture at 300 dpi across the frame, drawn
+from its table in the note's look and the case's colours (`engine/notecharts.py`), and
+captioned as every figure is: its title under it, numbered when the look numbers
+figures. With `show: chart and table` its table prints under it.
+
 **Sources stay sources.** A PDF is read away from the case, so what the case knows
 about where something came from is printed rather than kept behind the app: a
 reference to a record with a web address links to it, a picture says under its
@@ -121,6 +126,7 @@ from .notes_markdown import (
     expand,
     internal_passages,
     mermaid_sources,
+    parse,
     printed_source,
     strip_internal,
 )
@@ -191,6 +197,10 @@ UNSIZED_SHARE = 0.5
 #: How wide a map is drawn for a PDF, and for the Page pane's lighter copy, in pixels.
 MAP_PIXELS = 1800
 MAP_PIXELS_LIGHT = 1000
+#: A chart's picture across the frame: at print resolution, and lighter in the Page pane.
+CHART_PIXELS = 1960
+CHART_PIXELS_LIGHT = 1000
+CHART_DPI = 300
 #: The browser draws a diagram at twice its size on screen, for a sharp print.
 DIAGRAM_PIXEL_SCALE = 2
 #: How many empty sections a document names one by one before it counts the rest.
@@ -827,6 +837,8 @@ class _Builder:
         self._line = 0
         self._block_line = 0
         self._fixed = False
+        #: The document's pieces, which a chart reads for whether the note calls its figures minimums.
+        self._pieces: list[Piece] = []
         # headings: how far a chapter pushes them down, and their numbering
         self._shift = 0
         self._base = 1
@@ -874,6 +886,7 @@ class _Builder:
         theme, look, pdf = self.theme, self.look, self.pdf
         if blocks is None:
             blocks = {id(piece): _alignment_blocks(piece.text) for piece in pieces if piece.kind == "text"}
+        self._pieces = pieces
         self._prescan(pieces, blocks)
         if self.case is not None:
             self._empty_sections(pieces, blocks)
@@ -1761,6 +1774,38 @@ class _Builder:
         self._place(BytesIO(picture), natural, "", Align.C, self._caption(words, "Map"), credit=credit, unsized=1.0)
         return index + 1
 
+    def _on_az_chart(self, tokens: list[Token], index: int, align: Align) -> int:
+        """A `::: chart` block as a figure: the chart its table draws, in the note's look
+        and the case's colours (`engine/notecharts.py`), at print resolution and the
+        frame's width, captioned as every figure is; then its table, when it says to
+        show it."""
+        from . import notecharts
+
+        note_text = "\n".join(piece.text for piece in self._pieces if piece.kind == "text")
+        chart = notecharts.read(self.case, tokens[index].content, look=self.look, note_text=note_text)
+        line = self._line
+        for message, kind, offset in chart.warnings:
+            self._warn(message, line if self._fixed or offset is None else line + offset,
+                       kind if kind in WARNING_KINDS else OTHER)
+        if not chart.drawable:
+            self._aside(notecharts.NO_TABLE)
+            return index + 1
+        pixels = CHART_PIXELS_LIGHT if self.light else CHART_PIXELS
+        picture = chart.png(pixels, dpi=None if self.light else CHART_DPI)
+        with PILImage.open(BytesIO(picture)) as opened:
+            natural = opened.size
+        self._place(BytesIO(picture), natural, "", Align.C, self._caption(chart.title, "Chart"), unsized=1.0,
+                    alt=chart.alt)
+        table = chart.block.table
+        if chart.block.shows_table() and table is not None:
+            block_line = self._block_line
+            self._block_line = line + table.line
+            try:
+                self._walk(parse(table.text()), 0, align, stop=None)
+            finally:
+                self._block_line = block_line
+        return index + 1
+
     def _on_blockquote_open(self, tokens: list[Token], index: int, align: Align) -> int:
         # an internal passage is boxed in every style, so it stands out wherever it prints
         if not self.theme.plain or _callout_kind(tokens, index) == INTERNAL:
@@ -2564,6 +2609,7 @@ class _Builder:
         unsized: float = UNSIZED_SHARE,
         framed: bool = True,
         posted: str = "",
+        alt: str = "",
     ) -> None:
         """Draw a picture as a block, its caption and credit kept on its page.
 
@@ -2574,7 +2620,7 @@ class _Builder:
         entry in the sources list, said after the credit. ``framed`` draws a styled
         look's hairline round it, which a logo or a signature does without.
         ``posted`` is where the analyst published it: the picture links there, and a
-        line under its credit says so.
+        line under its credit says so. ``alt`` is what a screen reader says of it.
         """
         pdf = self.pdf
         theme = self.theme
@@ -2596,7 +2642,8 @@ class _Builder:
             else:
                 gap = self._gap(natural, below)
                 pdf.add_page()
-        self._picture(source, w=width, h=height, x=align, **({"link": also.link} if also else {}))
+        self._picture(source, w=width, h=height, x=align, **({"link": also.link} if also else {}),
+                      **({"alt_text": alt} if alt else {}))
         left = self._left(align, width)
         top = pdf.get_y() - height
         if video:
