@@ -300,7 +300,9 @@ replaces the add-on itself. Full instructions in
 
 The Svelte frontend builds into `src/azimut/static/` (git-ignored) and is
 bundled into the Python wheel via hatchling `artifacts`. So `npm run build`
-**must** run before building the package, or the shipped UI is stale.
+**must** run before building the package, or the shipped UI is stale. The same
+build copies MapLibre's own files into `static/vendor/maplibre/`, which a note's
+web folder carries for its live maps; without them its maps stay offline.
 
 ```bash
 cd frontend && npm run build && cd ..    # refresh the bundled UI
