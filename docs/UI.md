@@ -7012,12 +7012,14 @@ the order they were picked, in the Report look with a cover and a contents page,
 opens it beside its pages.
 
 **A note, written in place.** The note is drawn as it reads while it is typed
-(CodeMirror 6, `lib/notes/liveMarkdown.js`). A heading is set large, emphasis and links are styled, bullets are dots, `- [ ]` is a box to tick,
+(CodeMirror 6, `lib/notes/liveMarkdown.js`, each kind of drawn block a module of `lib/notes/editor/`). A heading is set large, emphasis and links are styled, bullets are dots, `- [ ]` is a box to tick,
 and the marks come back on the line being edited. A case reference is a chip that
 opens what it names; a picture, a table, a diagram, an aligned block, a block of
 steps or a story, an HTML block, a chapter and the page-break and cover lines are drawn
 whole and stay drawn. Steps show their pictures numbered in a row, each with its
-caption; a story shows each picture beside its words, the part it zooms in on outlined. A press
+caption; a story shows each picture beside its words, the part it zooms in on outlined. A
+Mermaid chart (`xychart-beta`) draws its series in a blue ramp then grey and its words in
+the note's sans, in the editor, the PDF and the HTML page alike. A press
 picks one (an accent outline, a picture's bar kept up); a double press, Enter or its
 `</>` opens its source, which closes again once the cursor leaves it, and Escape closes
 it at once. While one is picked, Backspace or Delete takes it out (Undo brings it back),
