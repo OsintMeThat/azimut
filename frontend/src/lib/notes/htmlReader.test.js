@@ -503,6 +503,17 @@ describe('the story layout', () => {
     expect([...own.querySelectorAll('.az-cover-figure img')].map((image) => image.getAttribute('src'))).toEqual(['data:image/png;base64,b3du']);
   });
 
+  it('holds its pictures on a dark band the width of the window, on a screen only, the cards beside or over it', () => {
+    const screen = CSS.slice(CSS.indexOf('@media screen {'), CSS.indexOf('@media screen and (max-width: 63.99rem)'));
+    expect(screen).toContain('grid-template-columns: minmax(0, 62fr) minmax(0, 38fr); gap: 0; margin-block: 3.5rem; background: #0f1012;');
+    // the picture kept whole, the column of what is said of it the picture's own width
+    expect(screen).toContain('grid-template-columns: minmax(min(20rem, var(--stage-w)), min-content)');
+    expect(screen).toMatch(/:is\(\.az-zoom img, \.az-compare > \.az-before, video, \.az-poster\) \{\s+width: auto; max-width: var\(--stage-w\);/);
+    expect(screen).not.toContain('object-fit: cover');
+    // printed, none of it: the story reads as the article does
+    expect(CSS.slice(CSS.indexOf('@media print {'))).not.toContain('#0f1012');
+  });
+
   it('keeps its contents in the bar at every width, the article in a rail where there is room', async () => {
     const PAGE = '<header class="az-cover"><h1 class="az-title">Port</h1></header><div class="az-page"><nav class="az-contents"><ol><li><a href="#one">One</a></li></ol></nav><main class="az-body"><h2 id="one">One</h2></main></div>';
     const story = await report(PAGE, { web: 'story' });

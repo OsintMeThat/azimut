@@ -178,10 +178,18 @@ test('the story layout, opened from the disk: a hero, and the story held beside 
       }, step);
       await expect(story.locator('.az-story-figures > figure.az-on')).toHaveAttribute('data-step', String(step + 1));
     }
-    // the picture held is in sight while its words are read
+    // the picture held is in sight while its words are read, whole on a dark band, what is said of it on its own edges
     const held = await story.locator('.az-story-figures > figure.az-on img').boundingBox();
     expect(held.y).toBeGreaterThanOrEqual(0);
     expect(held.y).toBeLessThan(viewport.height);
+    expect(await story.evaluate((node) => getComputedStyle(node).backgroundColor)).toBe('rgb(15, 16, 18)');
+    const said = await story.locator('.az-story-figures > figure.az-on figcaption').boundingBox();
+    expect(Math.abs(said.x - held.x)).toBeLessThan(2);
+    expect(Math.abs(said.x + said.width - held.x - held.width)).toBeLessThan(2);
+    // the card being read is white on it, as wide as the others
+    const widths = await story.locator('.az-story-step').evaluateAll((cards) => cards.map((card) => Math.round(card.getBoundingClientRect().width)));
+    expect(new Set(widths).size).toBe(1);
+    expect(await story.locator('.az-story-step.az-on').evaluate((card) => getComputedStyle(card).backgroundColor)).toBe('rgb(255, 255, 255)');
     expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(viewport.width);
     await page.unrouteAll();
   }

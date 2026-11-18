@@ -7136,8 +7136,10 @@ the same either way. A story opens on the whole window: the cover's picture, els
 first picture in the note that came from somewhere (it has a credit), under a dark
 gradient with the title over it and its credit kept, or a large title alone when there is
 none. Then each picture and the words after it, up to the next picture, heading, table or
-diagram, are a scene: the picture is held still on a stage while its words go by in cards
-beside it (over its lower part on a phone), and the next scene's picture fades in over it.
+diagram, are a scene: the picture is held still and whole on a dark stage the width of the
+window, its caption and credit under it at its own width, while its words go by in white
+cards beside it (over its lower part below a laptop's width), and the next scene's picture
+fades in over it.
 Pictures that follow one another share a stage; one with no words after it stays on until
 the next. Words with no picture before them, tables, code, diagrams, the sources and the
 corrections read as in the article, and the contents are the bar at every width.
