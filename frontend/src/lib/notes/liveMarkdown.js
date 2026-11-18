@@ -38,13 +38,13 @@ import {
 } from './editor/state.js';
 import { highlight, look } from './editor/theme.js';
 import {
-  BlockWidget, blockWidget, drawMarkdown, sourceButton,
+  BlockWidget, blockWidget, sourceButton,
 } from './editor/widgets.js';
 import { entityReference, markdownHtml } from '../markdown.js';
 import { paths as iconPaths } from '../../components/Icon.svelte';
 import { coverChange } from './reportParts.js';
 import {
-  BLOCK_OPEN, CAPTION_HELP, PICTURE_ALIGNS, PICTURE_SIZES, POSTED_HELP, SOURCE_HELP, blockAlignAt, blockSide, captionField, pictureLine, picturesIn,
+  CAPTION_HELP, PICTURE_ALIGNS, PICTURE_SIZES, POSTED_HELP, SOURCE_HELP, blockAlignAt, captionField, pictureLine, picturesIn,
   rovingToolbar, sizeWidth, sizedLine, sourceField,
 } from './pictureSize.js';
 import {
@@ -384,14 +384,6 @@ function drawPlayed(box, kind, source, info) {
   drawHints(box, hints);
 }
 
-/** The small label a corner block of the cover wears, so the analyst sees it is pinned to the page. */
-function cornerTag(name) {
-  const tag = document.createElement('div');
-  tag.className = `cm-corner-tag cm-corner-${blockSide(name ?? '')}`;
-  tag.textContent = `${(name ?? '').replace('-', ' ').replace(/^./, (letter) => letter.toUpperCase())} corner`;
-  tag.title = 'Pinned to this corner of page 1 when Look › Cover is Your own page';
-  return tag;
-}
 /** A line holding nothing but one picture: `![…](…){…}` or `[[media:…]]{…}`. */
 const PICTURE_LINE = /^\s*(?:!\[[^\]]*\]\([^)]*\)(?:\{[^}\n]*\})?|\[\[media:[A-Za-z0-9_-]+\|[^\]\n]+\]\](?:\{[^}\n]*\})?)\s*$/;
 // -- the kinds of block, until each has a module of its own in editor/ ----------
@@ -460,28 +452,6 @@ registerBlock({
     const again = [...view.contentDOM.querySelectorAll('.cm-block-picture')].find((node) => view.posAtDOM(node) === from);
     again?.querySelector(`[data-size-bar] ${same}`)?.focus({ preventScroll: true });
   }),
-});
-
-/**
- * `::: center` … `:::`, the old Notebook's aligned text, drawn as it reads unless it is
- * open. A corner (`::: top-right`) reads as its side, and says so when it is in the
- * note's own cover.
- */
-registerBlock({
-  name: 'aligned',
-  fence: BLOCK_OPEN,
-  read: ({ match, first, last }, ctx) => {
-    const side = blockSide(match[1]);
-    if (side !== 'left') for (let inner = first + 1; inner < last; inner += 1) ctx.aligns.set(inner, side);
-    const corner = match[1] !== side;
-    return { pinned: corner && last < ctx.coverEnd() };
-  },
-  widget: blockWidget,
-  draw: (box, widget) => {
-    drawMarkdown(box, widget);
-    if (widget.pinned) box.prepend(cornerTag(BLOCK_OPEN.exec(widget.source.split('\n', 1)[0])?.[1]));
-  },
-  atomic: true,
 });
 
 // `::: steps` and `::: story`, which an HTML page plays, drawn as their steps
