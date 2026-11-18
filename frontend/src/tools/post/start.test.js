@@ -70,6 +70,20 @@ describe('startPieces — what a note hands over, kept to what Post can use', ()
     expect(startPieces('not a list')).toEqual([]);
   });
 
+  it('keeps the alt text a picture comes with, a chart’s title, on one line and capped; never on a video', () => {
+    expect(startPieces([
+      { kind: 'media', path: 'media/Chart.png', type: 'image', id: 'e3', alt: '  At least 41 armoured\nvehicles  ' },
+      { kind: 'media', path: 'media/long.png', type: 'image', alt: 'x'.repeat(2100) },
+      { kind: 'media', path: 'media/clip.mp4', type: 'video', alt: 'A clip' },
+      { kind: 'media', path: 'media/b.png', type: 'image', alt: 7 },
+    ])).toEqual([
+      { kind: 'media', path: 'media/Chart.png', type: 'image', id: 'e3', alt: 'At least 41 armoured vehicles' },
+      { kind: 'media', path: 'media/long.png', type: 'image', alt: 'x'.repeat(2000) },
+      { kind: 'media', path: 'media/clip.mp4', type: 'video' },
+      { kind: 'media', path: 'media/b.png', type: 'image' },
+    ]);
+  });
+
   it('keeps a piece named by its id alone, for Post to say it was not found', () => {
     expect(startPieces([{ kind: 'media', id: 'e9' }, { kind: 'proof', id: 'e8' }])).toEqual([
       { kind: 'media', path: '', type: 'image', id: 'e9' },
