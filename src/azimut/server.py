@@ -83,6 +83,8 @@ class BulkBodyLimit:
         ("PUT", ("notes", "*"), "notes", "MAX_NOTE_BODY_BYTES"),
         # and the one that reads a note unsaved, for Post
         ("POST", ("notes", "*", "pieces"), "notes", "MAX_NOTE_BODY_BYTES"),
+        # and the one that sends it to WordPress, with the diagrams the browser drew
+        ("POST", ("notes", "*", "wordpress"), "notes", "MAX_PDF_BODY_BYTES"),
         ("POST", ("plates",), "plates", "MAX_PLATE_BODY_BYTES"),
         ("POST", ("analysis-views", "figure"), "analysis_views", "MAX_FIGURE_BODY_BYTES"),
         ("POST", ("map-plates", "export"), "mapplates", "MAX_EXPORT_BODY_BYTES"),
@@ -352,7 +354,7 @@ def create_app() -> FastAPI:
         analysis_views, analyzers, cases, compare, drafts, events, figures, files, folders, horizon,
         horizon_buildings, horizon_finds, horizon_views, horizon_work, icons, impact, ingest, inspect, mapplates, maplayers, media,
         notes, plates, postclips,
-        proofimports, proofs,
+        proofimports, proofs, publishing,
         proposals, satellite, settings, sheetproofs, sheets, templates, terrain,
     )
     from .engine import sheets as sheet_engine
@@ -390,6 +392,7 @@ def create_app() -> FastAPI:
     app.include_router(files.router)
     app.include_router(folders.router)
     app.include_router(settings.router)
+    app.include_router(publishing.router)
     app.include_router(ingest.router)
     app.include_router(events.router)
     app.include_router(templates.router)

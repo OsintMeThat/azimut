@@ -222,10 +222,43 @@ def test_export_leaves_the_login_session_behind(client):
         files={"file": ("cookies.txt", session, "text/plain")},
     )
     assert config.cookies_file_path().is_file()
+    assert config.cookies_file_path().name in NOT_CARRIED_FILES
 
     raw = client.get("/api/settings/export").text
     assert "auth_token" not in raw
     assert "Netscape" not in raw
+
+
+#: Files beside settings.json that a backup deliberately leaves on this machine, each
+#: with its reason, the way NOT_EXPORTED records the keys.
+NOT_CARRIED_FILES: dict[str, str] = {
+    "cookies.txt": "a live login session, which would expire in transit and trip device checks",
+    "publishing.json": "live write credentials stay on the machine that made them",
+}
+
+
+def test_export_leaves_the_publishing_credentials_behind(client):
+    """The WordPress application password writes to the analyst's site: it stays here,
+    while the site's address and the username travel as ordinary settings."""
+    from azimut.engine import publishsecrets
+
+    saved = client.put("/api/publishing/wordpress", json={
+        "site": "https://desk.example.org", "user": "desk", "password": "abcd EFGH 1234 ijkl MNOP 6789"})
+    assert saved.status_code == 200, saved.text
+    assert publishsecrets.path().name in NOT_CARRIED_FILES
+    raw = client.get("/api/settings/export").text
+    assert "abcd EFGH 1234" not in raw and "abcdEFGH1234" not in raw
+    blob = json.loads(raw)
+    assert blob["settings"]["wordpress_site"] == "https://desk.example.org"
+    assert blob["settings"]["wordpress_user"] == "desk"
+
+
+def test_a_wordpress_address_settings_would_refuse_reads_as_none(client):
+    res = client.post("/api/settings/import", json={"settings": {
+        "wordpress_site": "http://desk.example.org", "wordpress_user": "desk", "units": "imperial"}})
+    assert res.status_code == 200, res.text
+    stored = config.load_settings()
+    assert stored["wordpress_site"] == "" and stored["wordpress_user"] == "desk"
 
 
 def test_export_leaves_the_workspace_location_behind(client, tmp_path):
