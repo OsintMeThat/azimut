@@ -14,13 +14,17 @@
    * makes as the note is typed. The home picks several notes at once, to export
    * them or to make a report that includes them as chapters.
    *
-   * The export dialog opens at once and asks the server what the PDFs would warn
+   * The export dialog opens at once and asks the server what the files would warn
    * about (`lib/notes/warnings.js`). What it finds is listed before anything is
    * written, each with a way to the line it is about; a check that fails says
-   * nothing and never holds the export back. When a note picked holds an internal
-   * passage, the dialog asks which edition to write, Internal or Public, the choice
-   * kept per note (`lib/notes/editions.svelte.js`). Every export is a new file, and
-   * a note's ⋯ lists its editions, each with Show and Check.
+   * nothing and never holds the export back. It writes a PDF or one HTML page per
+   * note (`lib/notes/formats.js`); for HTML the check also says what the file would
+   * weigh, which clips go out as a link, and where a filmer stood, which can be
+   * rounded for that file. When a note picked holds an internal passage, the dialog
+   * asks which edition to write, Internal or Public, the choice kept per note
+   * (`lib/notes/editions.svelte.js`). Every export is a new file, and a note's ⋯
+   * lists its editions, each with Show and Check; a public HTML page after an earlier
+   * one asks what changed, which it prints at its end.
    *
    * To Post, in the open note's ⋯, opens Post on a Free post thread made of the note's
    * public edition, or of the stretch selected in it (`lib/notes/toPost.js`); nothing is
@@ -42,6 +46,7 @@
   import { keepPageView, readPageView } from '../lib/notes/pageView.js';
   import { exportNotes, revealExports } from '../lib/notesExport.js';
   import { checkNotes, isLeftOut } from '../lib/notes/warnings.js';
+  import { HTML, HTML_BUDGET, keepFormat, readFormat, weightWords } from '../lib/notes/formats.js';
   import { editionOfAll, keepEdition, PUBLIC } from '../lib/notes/editions.svelte.js';
   import { destinationLabel, readDestinations } from '../lib/exportDest.js';
   import { assignFolder, renameEntity } from '../lib/filing.js';
@@ -59,6 +64,7 @@
   import PagePane from './notebook/PagePane.svelte';
   import ViewModes from './notebook/ViewModes.svelte';
   import EditionSwitch from './notebook/EditionSwitch.svelte';
+  import FormatSwitch from './notebook/FormatSwitch.svelte';
   import EditionsDialog from './notebook/EditionsDialog.svelte';
   import ToPostItem from './notebook/ToPostItem.svelte';
   import ConfirmDialog from '../components/ConfirmDialog.svelte';
@@ -94,6 +100,12 @@
   let exportCheck = $state(null);
   // the edition the export writes, internal or public
   let exportEdition = $state('internal');
+  // what it writes, a PDF or an HTML page, as last picked in this browser
+  let exportFormat = $state(readFormat('export'));
+  // an HTML page's points of view rounded to about 150 m, in that file only
+  let roundPov = $state(false);
+  // what changed since an earlier public edition, printed at the page's end
+  let exportChanges = $state('');
   // the note whose editions are listed: { noteId, title }
   let editionsOf = $state(null);
   let checkController = null;
@@ -515,16 +527,19 @@
     if (exportCheck?.checking) stopCheck();
     // read before the dialog closes, which forgets what the check found
     const edition = exportEdition;
+    const format = exportFormat;
     const said = exportCheck?.internal ? `${edition} ` : '';
+    const options = format === HTML ? { edition, format, roundPov, changes: exportChanges } : { edition };
     exportBusy = true;
     try {
-      // the PDF is drawn from the file, so what is still waiting is written first
+      // the file is drawn from the note on disk, so what is still waiting is written first
       if (doc) await flush(doc);
-      const result = await exportNotes(id, noteIds, { edition });
+      const result = await exportNotes(id, noteIds, options);
       closeExport();
       selected = [];
       const count = result.written.length;
-      toast(`${count} ${said}PDF${count > 1 ? 's' : ''} written to ${destinationLabel(result.path)}`, 'ok', 5200, {
+      const what = format === HTML ? `HTML page${count > 1 ? 's' : ''}` : `PDF${count > 1 ? 's' : ''}`;
+      toast(`${count} ${said}${what} written to ${destinationLabel(result.path)}`, 'ok', 5200, {
         label: 'Show',
         onClick: () => revealExports(id).catch((error) => toast(error.message, 'warn')),
       });
@@ -540,12 +555,21 @@
     readDestinations().then((dirs) => (exportDir = dirs.notes)).catch(() => {});
   }
 
-  /** One note, or the notes picked on the home, each to a PDF of its own. */
+  /** One note, or the notes picked on the home, each to a file of its own. */
   function exportSome(noteIds) {
     exportIds = noteIds.map((id) => id ?? CASE_NOTES);
     exportEdition = editionOfAll(caseId, exportIds);
+    roundPov = false;
+    exportChanges = '';
     exportOpen = true;
     readExportDestination();
+    void checkExport(exportIds);
+  }
+
+  /** PDF or HTML, picked in the dialog: kept for the next export, and the check asked again. */
+  function chooseFormat(format) {
+    exportFormat = format;
+    keepFormat('export', format);
     void checkExport(exportIds);
   }
 
@@ -567,7 +591,7 @@
     exportCheck = { checking: true, internal };
     try {
       if (doc) await flush(doc);
-      const answer = await checkNotes(id, noteIds, { signal: mine.signal, edition: exportEdition });
+      const answer = await checkNotes(id, noteIds, { signal: mine.signal, edition: exportEdition, format: exportFormat });
       if (checkController === mine) exportCheck = answer;
     } catch {
       if (checkController === mine) exportCheck = null;
@@ -703,8 +727,8 @@
           <button class="btn btn-ghost btn-sm" title="Open in its own tab, for another screen" aria-label="Open in its own tab"
             data-guide="notebook.tab" onclick={() => detach()}><Icon name="external" size={15} /></button>
         {/if}
-        <button class="btn btn-sm" title="Export this note as PDF" data-guide="notebook.pdf" onclick={() => exportSome([opened.noteId])}>
-          <Icon name="download" size={14} /> PDF</button>
+        <button class="btn btn-sm" title="Export this note as a PDF or an HTML page" data-guide="notebook.pdf" onclick={() => exportSome([opened.noteId])}>
+          <Icon name="download" size={14} /> Export</button>
         <button class="btn btn-ghost btn-sm" aria-label="More" title="More" onclick={(event) => (menu = { anchor: event.currentTarget })}>
           <Icon name="more" size={15} /></button>
       </header>
@@ -738,7 +762,7 @@
         <button type="button" class="fm-item" onclick={() => fromMenu((note) => detach(note.id === CASE_NOTES ? null : note.id))}>
           <Icon name="external" size={14} /><span class="fm-grow">In its own tab</span></button>
         <button type="button" class="fm-item" onclick={() => fromMenu((note) => exportSome([note.id]))}>
-          <Icon name="download" size={14} /><span class="fm-grow">Export as PDF</span></button>
+          <Icon name="download" size={14} /><span class="fm-grow">Export</span></button>
       {:else}
         <button type="button" class="fm-item" onclick={() => { menu = null; naming = { value: noteEntity?.label ?? 'Case notes' }; }}
           title="Keep this note as it is, to start others from"><Icon name="save" size={14} /><span class="fm-grow">Keep as template</span></button>
@@ -748,7 +772,7 @@
         {/if}
       {/if}
       {#if row}
-        <button type="button" class="fm-item" title="Every PDF of this note, with Show and Check"
+        <button type="button" class="fm-item" title="Every PDF and HTML page of this note, with Show and Check"
           onclick={() => fromMenu((note) => (editionsOf = { noteId: note.id, title: note.title }))}>
           <Icon name="file" size={14} /><span class="fm-grow">Editions</span></button>
       {/if}
@@ -783,11 +807,19 @@
 
   {#if exportOpen}
     {@const several = exportIds.length > 1}
+    {@const html = exportFormat === HTML}
+    {@const named = html ? 'HTML' : 'PDF'}
     {@const checked = exportCheck?.found ?? []}
     {@const leftOut = checked.flatMap((item) => item.warnings.filter(isLeftOut).map((warning) => ({ ...warning, title: item.title })))}
     {@const found = checked.map((item) => ({ ...item, warnings: item.warnings.filter((warning) => !isLeftOut(warning)) }))
       .filter((item) => item.warnings.length)}
-    <Modal title={several ? 'Export notes as PDF' : 'Export note as PDF'} onclose={closeExport} width="560px">
+    {@const page = html && exportCheck && !exportCheck.checking ? exportCheck : null}
+    {@const shared = exportEdition === PUBLIC || !exportCheck?.internal}
+    <Modal title={several ? `Export notes as ${named}` : `Export note as ${named}`} onclose={closeExport} width="560px">
+      <div class="export-format">
+        <span class="dest-label">Format</span>
+        <FormatSwitch value={exportFormat} onchange={chooseFormat} />
+      </div>
       <div class="export-dest">
         <span class="dest-label">Destination</span>
         <span class="dest-path mono" title={exportDir || "The case's own exports folder"}>{exportDir || "the case's exports folder"}</span>
@@ -805,9 +837,56 @@
         </div>
       {/if}
       <p class="export-note">
-        {several ? `${exportIds.length} PDFs will be written, one per note.` : 'One PDF will be written.'}
+        {#if html}{several ? `${exportIds.length} HTML pages will be written, one per note.` : 'One HTML page will be written.'}
+          It holds its pictures and short clips, and reads offline.
+        {:else}{several ? `${exportIds.length} PDFs will be written, one per note.` : 'One PDF will be written.'}{/if}
         Earlier exports are kept.
       </p>
+      {#if page}
+        <section class="html-check" aria-label="The HTML page">
+          {#if page.weight}
+            <p class="weight" class:over={page.weight > HTML_BUDGET} role="status">
+              About {weightWords(page.weight)}{page.weight > HTML_BUDGET ? `, past the ${weightWords(HTML_BUDGET)} it aims under` : ''}.
+            </p>
+          {/if}
+          {#if page.links.length}
+            <div class="listed">
+              <h5 class="listed-head">Played from a link, not inside the file</h5>
+              <ul aria-label="Clips turned into a link">
+                {#each page.links as item, index (index)}
+                  <li>{several ? `${item.title}: ` : ''}{item.text}</li>
+                {/each}
+              </ul>
+            </div>
+          {/if}
+          {#if page.pov.length}
+            <div class="listed">
+              <h5 class="listed-head">Where a filmer stood, shown to the metre</h5>
+              <ul aria-label="Points of view">
+                {#each page.pov as item, index (index)}
+                  <li>
+                    <span class="listed-words">{several ? `${item.title}: ` : ''}{item.text}</span>
+                    {#if Number.isInteger(item.line)}
+                      <button type="button" class="btn btn-ghost btn-xs" title="Open the note at this line"
+                        onclick={() => goToWarning(item.note, item.line)}>Go to</button>
+                    {/if}
+                  </li>
+                {/each}
+              </ul>
+              <label class="round" title="The note keeps its points as written">
+                <input type="checkbox" bind:checked={roundPov} /> Round them to about 150 m in this file
+              </label>
+            </div>
+          {/if}
+          {#if page.earlier && shared}
+            <div class="listed">
+              <label class="listed-head" for="export-changes">What changed since the last public edition</label>
+              <input id="export-changes" class="input" bind:value={exportChanges} maxlength="300"
+                placeholder="Printed at the end of the page, beside the earlier editions" />
+            </div>
+          {/if}
+        </section>
+      {/if}
       {#if exportCheck?.checking}
         <p class="checking" role="status">Checking…</p>
       {:else if found.length}
@@ -835,7 +914,7 @@
         <div style="flex:1"></div>
         <button class="btn" onclick={closeExport}>Cancel</button>
         <button class="btn btn-primary" disabled={exportBusy} onclick={() => runExport(exportIds)}>
-          {exportBusy ? 'Exporting…' : found.length ? 'Export anyway' : several ? `Export ${exportIds.length} PDFs` : 'Export PDF'}</button>
+          {exportBusy ? 'Exporting…' : found.length ? 'Export anyway' : several ? `Export ${exportIds.length} ${html ? 'HTML pages' : 'PDFs'}` : `Export ${named}`}</button>
       </div>
     </Modal>
   {/if}
@@ -884,6 +963,17 @@
   @container notebook (max-width: 1180px) { .wide-only { display: none; } }
   .fm-item.danger { color: var(--danger); }
   .export-dest { display: flex; align-items: center; gap: 8px; margin-top: 6px; font-size: var(--fs-sm); }
+  .export-format { display: flex; align-items: center; gap: 8px; margin-top: 2px; font-size: var(--fs-sm); }
+  .html-check { margin-top: 10px; display: flex; flex-direction: column; gap: 8px; font-size: var(--fs-sm); }
+  .weight { margin: 0; color: var(--text-2); }
+  .weight.over { color: var(--warn); }
+  .listed { border: 1px solid var(--border); border-radius: var(--r-md); padding: 6px 10px; background: var(--bg-1); }
+  .listed-head { display: block; margin: 0 0 4px; color: var(--text-2); font-size: var(--fs-xs); font-weight: 600; }
+  .listed ul { list-style: none; margin: 0; padding: 0; max-height: 120px; overflow: auto; }
+  .listed li { display: flex; align-items: center; gap: 8px; min-height: 24px; color: var(--text-1); }
+  .listed-words { flex: 1; min-width: 0; overflow-wrap: anywhere; }
+  .round { display: flex; align-items: center; gap: 6px; margin-top: 6px; color: var(--text-2); font-size: var(--fs-xs); cursor: pointer; }
+  .listed .input { width: 100%; }
   .dest-label { color: var(--text-3); }
   .dest-path { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .export-note { color: var(--text-3); font-size: var(--fs-xs); margin: 6px 0 0; }

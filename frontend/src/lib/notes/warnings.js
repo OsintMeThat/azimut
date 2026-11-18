@@ -12,7 +12,7 @@
 import { api } from '../api.js';
 
 /** What a warning is about (`engine/notes_pdf.py`); anything else reads as `other`. */
-export const WARNING_KINDS = ['missing', 'unsourced', 'open-task', 'local-link', 'empty-section', 'setting', 'other', 'internal'];
+export const WARNING_KINDS = ['missing', 'unsourced', 'open-task', 'local-link', 'empty-section', 'setting', 'other', 'internal', 'count', 'pov'];
 
 /** The internal passages a public edition leaves out: said, but nothing to fix. */
 export function isLeftOut(warning) {
@@ -55,12 +55,44 @@ export function internalCount(answer) {
   return notes.reduce((sum, item) => sum + (Number.isInteger(item?.internal) && item.internal > 0 ? item.internal : 0), 0);
 }
 
+/** A line an HTML check lists (a clip turned into a link, a point of view), with its note and line. */
+function listed(item, note, title) {
+  const text = String(item?.text ?? '').trim();
+  if (!text) return null;
+  const line = item?.line;
+  return { note, title, text, line: Number.isInteger(line) && line >= 0 ? line : null };
+}
+
 /**
- * Ask what the PDFs of these notes would warn about, from the notes as saved, in
- * `edition`: `{ found, internal }`, the notes with something to say and the
- * internal passages they hold.
+ * What an HTML check says beside the warnings, over every note asked: `weight`, the
+ * bytes the files would weigh together; `links`, the clips that go out as a poster and
+ * a Watch link rather than inside the file; `pov`, the points where a filmer stood,
+ * which a public file keeps unless they are rounded; `earlier`, how many public
+ * editions came before, which is when the dialog asks what changed.
  */
-export async function checkNotes(caseId, noteIds, { signal, edition = 'internal' } = {}) {
-  const answer = await api.post(`/api/cases/${caseId}/notes/pdf/check`, { notes: noteIds, edition }, { signal });
-  return { found: readCheck(answer), internal: internalCount(answer) };
+export function readHtmlCheck(answer) {
+  const notes = (Array.isArray(answer?.notes) ? answer.notes : []).filter((item) => item && typeof item.note === 'string');
+  const titled = (item) => String(item.title || (item.note === 'case' ? 'Case notes' : 'Untitled note'));
+  const lists = (key) => notes.flatMap((item) => (Array.isArray(item[key]) ? item[key] : [])
+    .map((entry) => listed(entry, item.note, titled(item))).filter(Boolean));
+  const count = (value) => (Number.isFinite(value) && value > 0 ? Math.round(value) : 0);
+  return {
+    weight: notes.reduce((sum, item) => sum + count(item.weight), 0),
+    links: lists('links'),
+    pov: lists('pov'),
+    earlier: notes.reduce((most, item) => Math.max(most, count(item.earlier)), 0),
+  };
+}
+
+/**
+ * Ask what the files of these notes would warn about, from the notes as saved, in
+ * `edition`: `{ found, internal }`, the notes with something to say and the
+ * internal passages they hold. With `format: 'html'` the server checks the HTML
+ * pages instead, and the answer holds what `readHtmlCheck` reads too.
+ */
+export async function checkNotes(caseId, noteIds, { signal, edition = 'internal', format = 'pdf' } = {}) {
+  const html = format === 'html';
+  const body = html ? { notes: noteIds, edition, format } : { notes: noteIds, edition };
+  const answer = await api.post(`/api/cases/${caseId}/notes/pdf/check`, body, { signal });
+  return { found: readCheck(answer), internal: internalCount(answer), ...(html ? readHtmlCheck(answer) : {}) };
 }

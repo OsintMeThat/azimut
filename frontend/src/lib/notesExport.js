@@ -1,5 +1,5 @@
 /**
- * Exporting notes as PDF.
+ * Exporting notes as PDF, or as one HTML page each.
  *
  * The document itself is built by the backend (`engine/notes_pdf.py`), which
  * reads each note's Markdown from disk rather than this preview: no print
@@ -82,20 +82,33 @@ export async function drawDiagrams(pending, { draw = renderMermaidSvg, toPng = r
   return diagrams;
 }
 
+/** An HTML page holds a diagram as the SVG Mermaid draws, sharp at any size: no pixels to make. */
+export const asSvg = (svg) => svg;
+
 /**
- * Write one PDF per note into the notes export folder, each a new file.
+ * Write one file per note into the notes export folder, each a new file: a PDF, or
+ * with `format: 'html'` one HTML page that reads offline.
  *
  * `noteIds` holds note entity ids, and `case` for the case's own scratchpad.
  * `edition` is `internal`, the note whole, or `public`, without its internal
  * passages. Nothing unsaved travels: the backend reads each note from disk, which
  * is why the caller flushes a pending edit before calling this.
+ *
+ * An HTML export also carries what its dialog asked: `roundPov`, the points where a
+ * filmer stood rounded to about 150 m in this file only, and `changes`, the line
+ * that says what changed since an earlier public edition.
  */
-export async function exportNotes(caseId, noteIds, { edition = 'internal', ...options } = {}) {
+export async function exportNotes(caseId, noteIds, { edition = 'internal', format = 'pdf', roundPov = false, changes = '', ...options } = {}) {
+  const html = format === 'html';
   const { diagrams: pending } = await api.post(`/api/cases/${caseId}/notes/pdf/diagrams`, {
     notes: noteIds, edition,
   });
-  const diagrams = pending.length ? await drawDiagrams(pending, options) : {};
-  return api.post(`/api/cases/${caseId}/notes/pdf`, { notes: noteIds, diagrams, edition });
+  const drawing = html ? { toPng: asSvg, ...options } : options;
+  const diagrams = pending.length ? await drawDiagrams(pending, drawing) : {};
+  if (!html) return api.post(`/api/cases/${caseId}/notes/pdf`, { notes: noteIds, diagrams, edition });
+  return api.post(`/api/cases/${caseId}/notes/html`, {
+    notes: noteIds, diagrams, edition, round_pov: Boolean(roundPov), changes: String(changes ?? '').trim().slice(0, 300),
+  });
 }
 
 export function revealExports(caseId) {

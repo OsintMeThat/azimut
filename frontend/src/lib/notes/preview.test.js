@@ -2,10 +2,10 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 const { postBytes } = vi.hoisted(() => ({ postBytes: vi.fn() }));
 vi.mock('../api.js', () => ({ api: { postBytes } }));
-vi.mock('../notesExport.js', () => ({ drawDiagrams: vi.fn() }));
+vi.mock('../notesExport.js', () => ({ drawDiagrams: vi.fn(), asSvg: (svg) => svg }));
 
 const {
-  MOST_DELAY, createPreview, fetchPreview, forgetDiagrams, headerList, internalHeader, noteWarnings, pageLine,
+  MOST_DELAY, createPreview, fetchHtmlPreview, fetchPreview, forgetDiagrams, headerList, internalHeader, noteWarnings, pageLine,
 } = await import('./preview.js');
 
 const page = (overrides = {}) => ({ data: new ArrayBuffer(4), pages: [0], diagrams: [], warnings: [], ...overrides });
@@ -33,6 +33,22 @@ describe('asking the server for a page', () => {
     expect(answer.pages).toEqual([0, 14, 40]);
     expect(answer.diagrams).toEqual([{ key: 'ab12', source: 'flowchart LR' }]);
     expect(answer.warnings).toEqual([{ text: 'A picture is missing', line: null, kind: 'other' }]);
+  });
+
+  it('asks for the HTML page of a note, reads it as text, and the same headers as the pages', async () => {
+    const headers = new Headers({
+      'X-Note-Diagrams': '[{"key":"ab12","source":"flowchart LR"}]',
+      'X-Note-Warnings': '["A count with no range."]',
+      'X-Note-Warning-Kinds': '["count"]',
+      'X-Note-Internal': '2',
+    });
+    postBytes.mockResolvedValue({ data: new TextEncoder().encode('<p>Café à l’heure</p>').buffer, headers });
+    const answer = await fetchHtmlPreview({ caseId: 'c1', note: '', title: 'Lead', text: '# Lead', look: { style: 'plain' }, edition: 'public' });
+    expect(postBytes).toHaveBeenCalledWith('/api/cases/c1/notes/html/preview',
+      { note: 'case', title: 'Lead', text: '# Lead', look: { style: 'plain' }, diagrams: {}, edition: 'public' }, { signal: undefined });
+    expect(answer.html).toBe('<p>Café à l’heure</p>');
+    expect(answer).toMatchObject({ pages: [], pictures: [], internal: 2, diagrams: [{ key: 'ab12', source: 'flowchart LR' }] });
+    expect(answer.warnings).toEqual([{ text: 'A count with no range.', line: null, kind: 'count' }]);
   });
 
   it('gives each warning the line the server says it is about', () => {
@@ -203,6 +219,18 @@ describe('a pane drawn as the note is typed', () => {
     await preview.now({ text: 'xy' });
     expect(draw).toHaveBeenCalledTimes(1);
     expect(fetch.mock.calls[2][0].diagrams).toEqual({ k1: 'cG5n' });
+  });
+
+  it('keeps a diagram drawn for the HTML page apart from the PDF\'s picture of it', async () => {
+    const fetch = vi.fn(async (request) => (Object.keys(request.diagrams).length
+      ? page()
+      : page({ diagrams: [{ key: 'k1', source: 'flowchart LR\n A --> B' }] })));
+    const png = createPreview({ fetch, draw: vi.fn(async () => ({ k1: 'cG5n' })) });
+    const svg = createPreview({ fetch, draw: vi.fn(async () => ({ k1: '<svg/>' })), kind: 'svg' });
+    await png.now({ text: 'x' });
+    await svg.now({ text: 'x' });
+    expect(fetch.mock.calls[1][0].diagrams).toEqual({ k1: 'cG5n' });
+    expect(fetch.mock.calls[3][0].diagrams).toEqual({ k1: '<svg/>' });
   });
 
   it('does not try a diagram Mermaid failed on again, and keeps its source on the page', async () => {

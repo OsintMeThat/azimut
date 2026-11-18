@@ -28,6 +28,24 @@ describe('exporting notes as PDF', () => {
     expect(result.written).toHaveLength(1);
   });
 
+  it('writes an HTML page with its diagrams as SVG, and what its dialog asked', async () => {
+    const post = vi.spyOn(api, 'post').mockImplementation((path) => (
+      path.endsWith('/diagrams')
+        ? Promise.resolve({ diagrams: [{ key: 'abc123', source: 'graph TD; A-->B;' }] })
+        : Promise.resolve({ written: [{ note: 'n1', file: 'Rooftop.html' }], warnings: [] })
+    ));
+    const draw = vi.fn(async (source) => ({ svg: `<svg>${source}</svg>`, width: 400, height: 200 }));
+    await exportNotes('case-1', ['n1'], {
+      draw, edition: 'public', format: 'html', roundPov: true, changes: `  ${'Corrected the second date. '.repeat(20)}`,
+    });
+    expect(post).toHaveBeenNthCalledWith(1, '/api/cases/case-1/notes/pdf/diagrams', { notes: ['n1'], edition: 'public' });
+    const [path, body] = post.mock.calls[1];
+    expect(path).toBe('/api/cases/case-1/notes/html');
+    expect(body).toMatchObject({ notes: ['n1'], diagrams: { abc123: '<svg>graph TD; A-->B;</svg>' }, edition: 'public', round_pov: true });
+    expect(body.changes.startsWith('Corrected the second date.')).toBe(true);
+    expect(body.changes.length).toBe(300);
+  });
+
   it('skips drawing entirely when no note holds a diagram', async () => {
     const post = vi.spyOn(api, 'post').mockImplementation((path) => (
       path.endsWith('/diagrams')

@@ -29,12 +29,19 @@ const answer = {
     { line: 2, ref: 'media:m2', page: 0, box: [0.1, 0.2, 0.4, 0.2], width: '50%', align: 'center' },
   ],
 };
-const { asked } = vi.hoisted(() => ({ asked: [] }));
+const { asked, askedHtml } = vi.hoisted(() => ({ asked: [], askedHtml: [] }));
+/** The HTML page the server stands in with: a reading page holding one line. */
+const PAGE = '<!doctype html><html><head><title>Lead</title></head><body><main class="az-body"><p>Seen at the quay.</p></main></body></html>';
 vi.mock('../../lib/notes/preview.js', () => ({
   pageLine: (pages, index) => pages[index] ?? 0,
   createPreview: ({ onresult }) => ({
     ask: (request) => { asked.push(request); onresult(answer); },
     now: async (request) => { asked.push(request); onresult(answer); },
+    stop: () => {},
+  }),
+  htmlPreview: ({ onresult }) => ({
+    ask: (request) => { askedHtml.push(request); onresult({ ...answer, html: PAGE, warnings: [{ text: 'A count with no range.', line: 4, kind: 'count' }] }); },
+    now: async (request) => { askedHtml.push(request); onresult({ ...answer, html: PAGE, warnings: [{ text: 'A count with no range.', line: 4, kind: 'count' }] }); },
     stop: () => {},
   }),
 }));
@@ -59,6 +66,7 @@ afterEach(() => {
   answer.warnings = [];
   answer.internal = 0;
   asked.length = 0;
+  askedHtml.length = 0;
   localStorage.clear();
   reloadEditions();
   resetOpeners();
@@ -349,5 +357,61 @@ describe('the editions', () => {
     await settle();
     expect(asked.at(-1).edition).toBe('public');
     expect(localStorage.getItem('azimut:note-editions')).toBeNull();
+  });
+});
+
+describe('PDF or HTML', () => {
+  const settle = async () => {
+    for (let round = 0; round < 4; round += 1) {
+      await tick();
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    }
+    flushSync();
+  };
+  const formats = () => target.querySelector('.pane-bar [role="group"][aria-label="Format"]');
+  const frames = () => [...target.querySelectorAll('.html-page iframe')];
+
+  it('shows the pages first, and the HTML page once asked, as the file reads, kept for this browser', async () => {
+    await pane({});
+    const [pdf, html] = formats().querySelectorAll('button');
+    expect(pdf.getAttribute('aria-pressed')).toBe('true');
+    expect(askedHtml).toHaveLength(0);
+    expect(frames()).toHaveLength(0);
+    html.click();
+    await settle();
+    expect(askedHtml.at(-1)).toMatchObject({ caseId: 'c1', note: 'n1', edition: 'internal', text: 'x' });
+    expect(localStorage.getItem('azimut:note-page-format')).toBe('html');
+    // the pages and their picture marks are gone; the page is in a frame that reaches nothing of the app
+    expect(target.querySelector('.sheet')).toBeNull();
+    expect(target.querySelector('.picture')).toBeNull();
+    const [first, second] = frames();
+    expect(first.getAttribute('sandbox')).toBe('allow-scripts allow-popups allow-popups-to-escape-sandbox');
+    expect(first.getAttribute('sandbox')).not.toContain('allow-same-origin');
+    expect(second.getAttribute('srcdoc')).toContain('<p>Seen at the quay.</p>');
+    // the app's own lines say where the page was read to, before the page closes
+    expect(second.getAttribute('srcdoc')).toMatch(/azimutPage[\s\S]*<\/script><\/body>/);
+    expect(target.querySelector('.pane-bar').textContent).toContain('As the file reads in a browser');
+    expect(target.querySelector('#page-warnings').textContent).toContain('A count with no range.');
+  });
+
+  it('opens on HTML when it was left there, and goes back to the pages', async () => {
+    localStorage.setItem('azimut:note-page-format', 'html');
+    await pane({});
+    expect(askedHtml).toHaveLength(1);
+    expect(asked).toHaveLength(0);
+    formats().querySelectorAll('button')[0].click();
+    await settle();
+    expect(asked).toHaveLength(1);
+    expect(frames()).toHaveLength(0);
+    expect(target.querySelector('.sheet')).not.toBeNull();
+    expect(localStorage.getItem('azimut:note-page-format')).toBe('pdf');
+  });
+
+  it('offers no HTML to a template, which belongs to no case', async () => {
+    localStorage.setItem('azimut:note-page-format', 'html');
+    await pane({ caseId: '', note: 'case' });
+    expect(formats()).toBeNull();
+    expect(askedHtml).toHaveLength(0);
+    expect(asked).toHaveLength(1);
   });
 });

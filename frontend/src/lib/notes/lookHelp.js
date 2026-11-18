@@ -37,6 +37,9 @@ export const LOOK_HELP = {
   write: 'The note alone',
   page_pane: 'The PDF beside the note, drawn as you type',
   page_in_place: 'The PDF of the note, in place of its text',
+  pdf: 'The note as pages, to print or attach',
+  html: 'The note as one web page that reads offline, pictures and clips inside',
+  page_html: 'The HTML page beside the note, drawn as you type',
   internal: 'The note whole, its internal passages in marked boxes',
   public: 'The note without its internal passages, for readers outside the team',
 };

@@ -1,8 +1,9 @@
 <script>
   /**
-   * The PDFs a note was exported as, newest first: the day, the edition, the pages
-   * and the file's name. Show opens the folder it was written to; Check hashes the
-   * file again and says whether it is still the one Azimut wrote. Nothing is fetched.
+   * The files a note was exported as, PDFs and HTML pages, newest first: the day, the
+   * format, the edition, a PDF's pages and the file's name. Show opens the folder it
+   * was written to; Check hashes the file again and says whether it is still the one
+   * Azimut wrote. Nothing is fetched.
    */
   import { untrack } from 'svelte';
   import Icon from '../../components/Icon.svelte';
@@ -59,13 +60,13 @@
 </script>
 
 <Modal title="Editions" {onclose} width="620px">
-  <p class="lead">{title ? `Every PDF of “${title}”, newest first.` : 'Every PDF of this note, newest first.'} Each one stays where it was written.</p>
+  <p class="lead">{title ? `Every PDF and HTML page of “${title}”, newest first.` : 'Every PDF and HTML page of this note, newest first.'} Each one stays where it was written.</p>
   {#if editions === null}
     <p class="quiet" role="status">Reading…</p>
   {:else if failed}
     <p class="quiet error" role="alert"><Icon name="alert" size={12} /> Could not read the editions: {failed}</p>
   {:else if !editions.length}
-    <p class="quiet">No PDF yet. Each export is listed here.</p>
+    <p class="quiet">Nothing exported yet. Each export is listed here.</p>
   {:else}
     <ul class="list" aria-label="Editions">
       {#each editions as edition (keyOf(edition))}
@@ -74,8 +75,9 @@
           <div class="what">
             <div class="head">
               <span class="day">{editionDay(edition.at)}</span>
+              <span class="badge format" data-format={edition.format}>{edition.format === 'html' ? 'HTML' : 'PDF'}</span>
               <span class="badge edition" class:internal={edition.edition !== PUBLIC}>{edition.edition === PUBLIC ? 'Public' : 'Internal'}</span>
-              <span class="pages">{edition.pages} page{edition.pages === 1 ? '' : 's'}</span>
+              {#if edition.format !== 'html'}<span class="pages">{edition.pages} page{edition.pages === 1 ? '' : 's'}</span>{/if}
             </div>
             <span class="file mono" title={edition.pdf_sha256 ? `SHA-256 ${edition.pdf_sha256}` : edition.file}>{edition.file}</span>
             {#if state === 'checking'}
@@ -111,6 +113,8 @@
   .head { display: flex; align-items: center; gap: 8px; font-size: var(--fs-sm); color: var(--text-1); }
   .pages { color: var(--text-3); font-size: var(--fs-xs); }
   .edition { color: var(--text-2); }
+  .format { color: var(--text-2); font-family: var(--font-mono); letter-spacing: .02em; }
+  .format[data-format='html'] { color: var(--accent); }
   .edition.internal { background: color-mix(in srgb, var(--internal) 16%, transparent); color: var(--internal); }
   .file { color: var(--text-3); font-size: var(--fs-xs); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .said { display: inline-flex; align-items: center; gap: 4px; font-size: var(--fs-xs); color: var(--text-2); }

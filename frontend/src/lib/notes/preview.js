@@ -9,28 +9,33 @@
  * under the key it gave, and the page is asked for again with them.
  */
 import { api } from '../api.js';
-import { drawDiagrams } from '../notesExport.js';
+import { asSvg, drawDiagrams } from '../notesExport.js';
 import { warningKind } from './warnings.js';
 
 export const PREVIEW_DELAY = 900;
 const KEPT_DIAGRAMS = 30;
 const SENT_DIAGRAMS = 24;
 
-/** Diagrams drawn in this tab, as base64 PNGs by the server's key. */
-const drawn = new Map();
-/** Keys Mermaid could not draw: the server keeps their source in the page, and they are not tried again. */
-const failed = new Set();
+/**
+ * Diagrams drawn in this tab by the server's key, as base64 PNGs for the PDF and as
+ * SVG text for the HTML page, each kept apart; and the keys Mermaid could not draw,
+ * whose source the server keeps in the page, which are not tried again.
+ */
+const stores = { png: { drawn: new Map(), failed: new Set() }, svg: { drawn: new Map(), failed: new Set() } };
 
-export function keepDiagram(key, png) {
+export function keepDiagram(key, picture, kind = 'png') {
+  const { drawn } = stores[kind];
   drawn.delete(key);
-  drawn.set(key, png);
+  drawn.set(key, picture);
   while (drawn.size > KEPT_DIAGRAMS) drawn.delete(drawn.keys().next().value);
 }
 
 /** For tests: forget the diagrams drawn so far. */
 export function forgetDiagrams() {
-  drawn.clear();
-  failed.clear();
+  for (const store of Object.values(stores)) {
+    store.drawn.clear();
+    store.failed.clear();
+  }
 }
 
 /** A JSON list the server put in a header, or none when it is missing or unreadable. */
@@ -59,6 +64,25 @@ export async function fetchPreview({ caseId = '', note = 'case', title = '', tex
     diagrams: headerList(headers, 'X-Note-Diagrams').filter((item) => item && typeof item.key === 'string'),
     warnings: noteWarnings(headers),
     pictures: headerList(headers, 'X-Note-Pictures').filter(placedPicture),
+    internal: internalHeader(headers),
+  };
+}
+
+/**
+ * Ask the server for the HTML page of `text`, as note `note` of case `caseId`: the
+ * file an HTML export writes, with lighter pictures, written nowhere. Its diagrams
+ * travel as SVG. The headers say what the PDF preview's say; a page has no page
+ * breaks or placed pictures to report.
+ */
+export async function fetchHtmlPreview({ caseId = '', note = 'case', title = '', text = '', look, diagrams = {}, edition = 'internal' }, signal) {
+  const body = { note: note || 'case', title, text, look, diagrams, edition };
+  const { data, headers } = await api.postBytes(`/api/cases/${caseId}/notes/html/preview`, body, { signal });
+  return {
+    html: new TextDecoder().decode(data),
+    pages: [],
+    diagrams: headerList(headers, 'X-Note-Diagrams').filter((item) => item && typeof item.key === 'string'),
+    warnings: noteWarnings(headers),
+    pictures: [],
     internal: internalHeader(headers),
   };
 }
@@ -121,16 +145,21 @@ export const MOST_DELAY = 4000;
  * `onresult({ data, pages, warnings, pictures })` is called with each answer, the
  * older one first while a newer is drawn, `onerror(message)` when one failed, and
  * `onbusy(flag)` while any is being drawn or waits for its turn.
+ *
+ * The HTML page is drawn the same way, with `fetch: fetchHtmlPreview`, `kind: 'svg'`
+ * and a `draw` that keeps Mermaid's SVG (`htmlPreview`).
  */
 export function createPreview({
   fetch: fetchPdf = fetchPreview,
   draw = drawDiagrams,
+  kind = 'png',
   delay = PREVIEW_DELAY,
   onresult = () => {},
   onerror = () => {},
   onbusy = () => {},
   now: clock = () => Date.now(),
 } = {}) {
+  const { drawn, failed } = stores[kind];
   let timer = null;
   let controller = null;
   /** The newest request made while another was in flight. */
@@ -159,7 +188,7 @@ export function createPreview({
         const missing = answer.diagrams.filter((item) => !drawn.has(item.key) && !failed.has(item.key));
         const pngs = missing.length ? await draw(missing) : {};
         if (current !== ticket) return;
-        for (const [key, png] of Object.entries(pngs)) keepDiagram(key, png);
+        for (const [key, png] of Object.entries(pngs)) keepDiagram(key, png, kind);
         for (const item of missing) if (!pngs[item.key]) failed.add(item.key);
         if (failed.size > KEPT_DIAGRAMS) failed.delete(failed.values().next().value);
         // asked again once, with every diagram there is now a picture of
@@ -217,4 +246,14 @@ export function createPreview({
       controller = null;
     },
   };
+}
+
+/** The HTML page's preview: `createPreview` with its fetch and its diagrams kept as SVG. */
+export function htmlPreview(options = {}) {
+  return createPreview({
+    fetch: fetchHtmlPreview,
+    draw: (pending) => drawDiagrams(pending, { toPng: asSvg }),
+    kind: 'svg',
+    ...options,
+  });
 }

@@ -59,9 +59,17 @@ describe('the edition a note prints in', () => {
 describe('the record of editions', () => {
   it('lists a note\'s editions, and drops one that is not what an export writes', async () => {
     get.mockResolvedValue({ editions: [RECORD, { ...RECORD, edition: 'draft' }, { ...RECORD, pages: 'x' }, null] });
-    expect(await listEditions('c1', 'n1')).toEqual([RECORD]);
+    expect(await listEditions('c1', 'n1')).toEqual([{ ...RECORD, format: 'pdf' }]);
     expect(get).toHaveBeenCalledWith('/api/cases/c1/notes/n1/editions');
     expect(readEdition({ ...RECORD, pdf_sha256: 'short' }).pdf_sha256).toBe('');
+  });
+
+  it('lists an HTML page beside the PDFs, with no pages to count and its fingerprint under either name', () => {
+    const page = { at: RECORD.at, edition: 'public', format: 'html', file: 'Lead - public - 2026-03-12.html', folder: 'exports', sha256: 'c'.repeat(64), text_sha256: 'b'.repeat(64) };
+    expect(readEdition(page)).toEqual({ ...page, sha256: undefined, pages: 0, pdf_sha256: 'c'.repeat(64) });
+    expect(readEdition({ ...page, sha256: undefined, pdf_sha256: 'd'.repeat(64) }).pdf_sha256).toBe('d'.repeat(64));
+    expect(readEdition({ ...page, format: 'docx' })).toBeNull();
+    expect(readEdition({ ...page, file: '' })).toBeNull();
   });
 
   it('checks or shows one by when it was written and its file', async () => {

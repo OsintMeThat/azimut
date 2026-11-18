@@ -342,7 +342,7 @@ describe('picking notes on the home', () => {
     box('Old lead').click();
     box('Case notes').click();
     flushSync();
-    buttonNamed('Export as PDF').click();
+    buttonNamed('Export').click();
     await settle();
     expect(everything()).toContain('Export notes as PDF');
     expect(everything()).toContain('2 PDFs will be written, one per note.');
@@ -397,7 +397,7 @@ describe('a note\'s menu', () => {
   it('opens and exports the note of the card it came from', async () => {
     await withMore();
     cardMenu('Shadows');
-    anyButton('Export as PDF').click();
+    anyButton('Export').click();
     await settle();
     expect(everything()).toContain('Export note as PDF');
     anyButton('Cancel').click();
@@ -439,8 +439,8 @@ describe('a note\'s menu', () => {
     const dialog = document.querySelector('[role="dialog"][aria-label="Editions"]');
     const rows = [...dialog.querySelectorAll('li')];
     expect(rows.map((row) => row.textContent.replace(/\s+/g, ' ').trim())).toEqual([
-      expect.stringMatching(/^12 Mar 2026, \d\d:\d\d Public 3 pages Old lead - public - 2026-03-12\.pdf Show Check$/),
-      expect.stringMatching(/^11 Mar 2026, \d\d:\d\d Internal 1 page Old lead - internal - 2026-03-11\.pdf Show Check$/),
+      expect.stringMatching(/^12 Mar 2026, \d\d:\d\d PDF Public 3 pages Old lead - public - 2026-03-12\.pdf Show Check$/),
+      expect.stringMatching(/^11 Mar 2026, \d\d:\d\d PDF Internal 1 page Old lead - internal - 2026-03-11\.pdf Show Check$/),
     ]);
     expect(get).toHaveBeenCalledWith('/api/cases/case-a/notes/n1/editions');
     const press = (row, words) => [...row.querySelectorAll('button')].find((button) => button.textContent.trim() === words).click();
@@ -464,7 +464,7 @@ describe('a note\'s menu', () => {
     flushSync();
     anyButton('Editions').click();
     await settle();
-    expect(everything()).toContain('No PDF yet. Each export is listed here.');
+    expect(everything()).toContain('Nothing exported yet. Each export is listed here.');
   });
 
   it('deletes the note open, from its own menu', async () => {
@@ -637,7 +637,7 @@ describe('the check before export', () => {
     await withMore();
     target.querySelector('button[aria-label="Actions for Old lead"]').click();
     flushSync();
-    anyButton('Export as PDF').click();
+    anyButton('Export').click();
     await settle();
     const go = dialog().querySelector('.before-item button');
     expect(document.getElementById(go.getAttribute('aria-describedby')).textContent).toBe(ROOF.text);
@@ -674,7 +674,7 @@ describe('the check before export', () => {
     target.querySelector('input[aria-label="Pick Mast"]').click();
     target.querySelector('input[aria-label="Pick Case notes"]').click();
     flushSync();
-    buttonNamed('Export as PDF').click();
+    buttonNamed('Export').click();
     await settle();
     const [, body] = post.mock.calls.find(([address]) => address.endsWith('/notes/pdf/check'));
     expect(body.notes).toEqual(['n1', 'n4', 'case']);
@@ -735,6 +735,60 @@ describe('the check before export', () => {
     await settle();
     expect(post.mock.calls.filter(([url]) => url.endsWith('/notes/pdf/check')).at(-1)[1].edition).toBe('public');
     expect(dialog().querySelector('[role="group"][aria-label="Edition"] [aria-pressed="true"]').textContent).toBe('Public');
+  });
+
+  it('writes an HTML page when HTML is picked, says what it weighs and lists the clips and points it holds', async () => {
+    const LEFT = { text: '2 internal passages left out.', line: null, kind: 'internal' };
+    answerCheck((notes, edition) => ({
+      notes: notes.map((note) => ({
+        note, title: 'Old lead', internal: 2, warnings: edition === 'public' ? [LEFT] : [],
+        weight: 31 * 1024 * 1024, earlier: 1,
+        links: [{ text: 'Strike clip, 4 min', line: 3 }],
+        pov: [{ text: 'Filmer, 33.51381, 36.27652', line: 6 }],
+      })),
+    }));
+    const fallback = post.getMockImplementation();
+    post.mockImplementation(async (url, body) => (url.endsWith('/notes/html')
+      ? { written: [{ note: 'n1', title: 'Old lead', file: 'Old lead.html', edition: body.edition }], warnings: [], path: '/exports' }
+      : fallback(url, body)));
+    await exportFromNote();
+    expect(dialog().getAttribute('aria-label')).toBe('Export note as PDF');
+    // a PDF's check says nothing of weight or clips
+    expect(dialog().querySelector('.html-check')).toBeNull();
+    const [pdf, html] = dialog().querySelectorAll('[role="group"][aria-label="Format"] button');
+    expect(pdf.getAttribute('aria-pressed')).toBe('true');
+    html.click();
+    await settle();
+    expect(dialog().getAttribute('aria-label')).toBe('Export note as HTML');
+    expect(post.mock.calls.filter(([url]) => url.endsWith('/notes/pdf/check')).at(-1)[1]).toEqual({ notes: ['n1'], edition: 'internal', format: 'html' });
+    expect(localStorage.getItem('azimut:note-export-format')).toBe('html');
+    expect(dialogText()).toContain('One HTML page will be written.');
+    expect(dialogText()).toContain('About 31 MB, past the 25 MB it aims under.');
+    expect([...dialog().querySelectorAll('ul[aria-label="Clips turned into a link"] li')].map((item) => item.textContent)).toEqual(['Strike clip, 4 min']);
+    expect(dialog().querySelector('ul[aria-label="Points of view"]').textContent).toContain('Filmer, 33.51381, 36.27652');
+    // what changed is asked of a public page only
+    expect(dialog().querySelector('#export-changes')).toBeNull();
+    dialog().querySelector('[role="group"][aria-label="Edition"] button:last-child').click();
+    await settle();
+    const changes = dialog().querySelector('#export-changes');
+    changes.value = 'Corrected the date of the second strike';
+    changes.dispatchEvent(new Event('input', { bubbles: true }));
+    const round = dialog().querySelector('.round input');
+    round.click();
+    flushSync();
+    expect(primary().textContent.trim()).toBe('Export HTML');
+    primary().click();
+    await settle();
+    expect(post.mock.calls.filter(([url]) => url.endsWith('/notes/pdf'))).toHaveLength(0);
+    const [, body] = post.mock.calls.find(([url]) => url.endsWith('/notes/html'));
+    expect(body).toEqual({ notes: ['n1'], diagrams: {}, edition: 'public', round_pov: true, changes: 'Corrected the date of the second strike' });
+    expect(uiState.toasts.some((one) => one.message.startsWith('1 public HTML page written to'))).toBe(true);
+    uiState.toasts.length = 0;
+    // the next export starts on HTML, rounding nothing until asked again
+    target.querySelector('[data-guide="notebook.pdf"]').click();
+    await settle();
+    expect(dialog().getAttribute('aria-label')).toBe('Export note as HTML');
+    expect(dialog().querySelector('.round input').checked).toBe(false);
   });
 
   it('forgets a check answered after the dialog was closed', async () => {

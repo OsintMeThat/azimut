@@ -275,8 +275,8 @@
     {#if selecting}
       <div class="select-bar" role="toolbar" aria-label="Picked notes" data-guide="notebook.selection">
         <span class="count">{selected.length ? `${selected.length} selected` : 'Pick notes'}</span>
-        <button type="button" class="btn btn-sm" disabled={!selected.length} title="One PDF per note, in the export folder"
-          onclick={() => onexport([...selected])}><Icon name="download" size={13} /> Export as PDF</button>
+        <button type="button" class="btn btn-sm" disabled={!selected.length} title="One PDF or HTML page per note, in the export folder"
+          onclick={() => onexport([...selected])}><Icon name="download" size={13} /> Export</button>
         <button type="button" class="btn btn-sm btn-primary" disabled={!selected.length}
           title="A new note that includes these as chapters, in the order picked"
           onclick={() => onreport([...selected])}><Icon name="layers" size={13} /> Make a report</button>

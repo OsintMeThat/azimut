@@ -25,10 +25,16 @@
    * A note holding an internal passage, itself or in a chapter, gets Internal |
    * Public in the bar, the same choice the export dialog keeps for it, so the
    * public pages are seen before they are written. A template keeps it for the visit.
+   *
+   * A note also gets PDF | HTML: the pages, or the one HTML page an export would
+   * write (`notes/html/preview`), drawn the same way and shown as a browser reads it
+   * (`HtmlPage.svelte`). The choice is kept for this browser (`lib/notes/formats.js`).
+   * A template, which belongs to no case, shows its pages.
    */
   import { onDestroy, untrack } from 'svelte';
   import { prefs } from '../../lib/state.svelte.js';
-  import { createPreview, pageLine } from '../../lib/notes/preview.js';
+  import { createPreview, htmlPreview, pageLine } from '../../lib/notes/preview.js';
+  import { HTML, PDF, keepFormat, readFormat } from '../../lib/notes/formats.js';
   import {
     CAPTION_HELP, PICTURE_ALIGNS, PICTURE_SIZES, POSTED_HELP, SOURCE_HELP, blockAlignAt, captionField, pictureAt, pictureLine, rovingToolbar, sizeWidth,
     sourceField,
@@ -40,6 +46,8 @@
   import Icon from '../../components/Icon.svelte';
   import PagePreview from '../../components/PagePreview.svelte';
   import EditionSwitch from './EditionSwitch.svelte';
+  import FormatSwitch from './FormatSwitch.svelte';
+  import HtmlPage from './HtmlPage.svelte';
 
   let { caseId = '', note = 'case', title = '', text = '', look = null, entities = [], onjump = () => {}, onresize = null } = $props();
 
@@ -57,8 +65,19 @@
     if (caseId) keepEdition(caseId, [note], value);
     else templateEdition = value;
   }
+  /** PDF or HTML, for a note; a template shows its pages. */
+  let format = $state(readFormat('page'));
+  const shows = $derived(caseId && format === HTML ? HTML : PDF);
+  function setFormat(value) {
+    format = value;
+    keepFormat('page', value);
+  }
+  /** The HTML page drawn last, kept while the next is drawn. */
+  let html = $state('');
   let error = $state('');
-  let busy = $state(false);
+  /** Whether the PDF, or the HTML page, is being drawn. */
+  let drawing = $state({ [PDF]: false, [HTML]: false });
+  const busy = $derived(drawing[shows]);
   let warningsFolded = $state(false);
   /** The picture whose caption is being written (`captionKey`), or null. */
   let captioning = $state(null);
@@ -123,19 +142,35 @@
     return { destroy: () => field.remove() };
   }
 
+  // the PDF and the HTML page each have their own preview; only the one shown speaks in the bar
   const preview = createPreview({
     onresult: (answer) => {
       data = answer.data;
       pages = answer.pages;
-      warnings = answer.warnings ?? [];
       pictures = answer.pictures ?? [];
+      if (shows !== PDF) return;
+      warnings = answer.warnings ?? [];
       internal = answer.internal ?? 0;
       error = '';
     },
-    onerror: (message) => { error = message; },
-    onbusy: (flag) => { busy = flag; },
+    onerror: (message) => { if (shows === PDF) error = message; },
+    onbusy: (flag) => { drawing[PDF] = flag; },
   });
-  onDestroy(() => preview.stop());
+  const page = htmlPreview({
+    onresult: (answer) => {
+      html = answer.html;
+      if (shows !== HTML) return;
+      warnings = answer.warnings ?? [];
+      internal = answer.internal ?? 0;
+      error = '';
+    },
+    onerror: (message) => { if (shows === HTML) error = message; },
+    onbusy: (flag) => { drawing[HTML] = flag; },
+  });
+  onDestroy(() => {
+    preview.stop();
+    page.stop();
+  });
 
   const ALIGN_ICONS = { left: ['alignLeft', 'Left'], center: ['alignCentreH', 'Centre'], right: ['alignRight', 'Right'] };
   const percent = (value) => `${(value * 100).toFixed(3)}%`;
@@ -203,23 +238,24 @@
     prefs.picturesRev, prefs.logoRev, prefs.reportName, prefs.reportRole, prefs.reportOrganisation,
   ].join('\n'));
   let lastStated = null;
+  const drawer = () => (shows === HTML ? page : preview);
   $effect(() => {
     const key = stated;
     untrack(() => {
-      if (lastStated !== null && key !== lastStated && lastRequest) void preview.now(lastRequest);
+      if (lastStated !== null && key !== lastStated && lastRequest) void drawer().now(lastRequest);
       lastStated = key;
     });
   });
   $effect(() => {
     const request = { caseId, note, title, text, look, edition };
     lastRequest = request;
-    const rest = JSON.stringify([caseId, note, title, look, edition]);
+    const rest = JSON.stringify([caseId, note, title, look, edition, shows]);
     untrack(() => {
       const typed = lastText !== null && rest === lastRest && text !== lastText;
       lastText = text;
       lastRest = rest;
-      if (typed) preview.ask(request);
-      else void preview.now(request);
+      if (typed) drawer().ask(request);
+      else void drawer().now(request);
     });
   });
 </script>
@@ -227,13 +263,15 @@
 <aside class="page-pane" aria-label="Page" data-guide="notebook.page">
   <div class="pane-bar">
     <span class="said">
-      {#if count}{count} page{count === 1 ? '' : 's'}{:else if busy}Drawing the pages…{:else}&nbsp;{/if}
+      {#if shows === HTML}{#if html}As the file reads in a browser{:else if busy}Drawing the page…{:else}&nbsp;{/if}
+      {:else if count}{count} page{count === 1 ? '' : 's'}{:else if busy}Drawing the pages…{:else}&nbsp;{/if}
     </span>
-    {#if busy && count}<span class="busy" title="Drawing the pages again">Updating…</span>{/if}
+    {#if busy && (shows === HTML ? html : count)}<span class="busy" title="Drawing it again">Updating…</span>{/if}
+    {#if caseId}<FormatSwitch tight page value={shows} onchange={setFormat} />{/if}
     {#if internal}<EditionSwitch tight value={edition} onchange={setEdition} />{/if}
     {#if warnings.length}
       <button type="button" class="warned" aria-expanded={!warningsFolded} aria-controls="page-warnings"
-        title={warningsFolded ? 'Show what the PDF warns about' : 'Hide the warnings'} onclick={() => (warningsFolded = !warningsFolded)}>
+        title={warningsFolded ? `Show what the ${shows === HTML ? 'HTML page' : 'PDF'} warns about` : 'Hide the warnings'} onclick={() => (warningsFolded = !warningsFolded)}>
         <Icon name="alert" size={12} /> {warnings.length} warning{warnings.length === 1 ? '' : 's'}
         <Icon name={warningsFolded ? 'chevronDown' : 'chevronUp'} size={11} />
       </button>
@@ -255,8 +293,12 @@
     </ul>
   {/if}
   {#if error}<p class="error" role="alert"><Icon name="alert" size={12} /> {error}</p>{/if}
-  <PagePreview {data} label="Pages of the PDF" onerror={(message) => (error = message)} onpages={(n) => (count = n)}
-    onpage={(index) => onjump(pageLine(pages, index))} overlay={pictures.length ? marks : null} />
+  {#if shows === HTML}
+    <HtmlPage {html} label="The note as an HTML page" />
+  {:else}
+    <PagePreview {data} label="Pages of the PDF" onerror={(message) => (error = message)} onpages={(n) => (count = n)}
+      onpage={(index) => onjump(pageLine(pages, index))} overlay={pictures.length ? marks : null} />
+  {/if}
 </aside>
 
 {#snippet marks(index, size)}

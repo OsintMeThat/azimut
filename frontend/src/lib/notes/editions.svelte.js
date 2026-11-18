@@ -9,7 +9,8 @@
  * as public, whatever is asked.
  *
  * Every export is a file of its own that the note keeps a record of (`GET
- * notes/{id}/editions`): when, which edition, the file, its pages and fingerprints.
+ * notes/{id}/editions`): when, which edition, PDF or HTML, the file, its pages and
+ * fingerprints.
  * Check hashes the file again; Show opens its folder. Nothing is fetched.
  */
 import { api } from '../api.js';
@@ -76,22 +77,30 @@ export function reloadEditions(storage = globalThis.localStorage) {
 
 const HEX = /^[0-9a-f]{64}$/;
 
-/** An edition as the server lists it, or null when a part is not what an export writes. */
+/**
+ * An edition as the server lists it, or null when a part is not what an export writes.
+ * `format` is `pdf` or `html`; an HTML page has no pages to count, and its file's
+ * fingerprint is read under either name the record gives it.
+ */
 export function readEdition(item) {
   if (!item || typeof item.at !== 'string' || !EDITIONS.includes(item.edition)) return null;
-  if (typeof item.file !== 'string' || !item.file || !Number.isInteger(item.pages)) return null;
+  const format = item.format === 'html' ? 'html' : 'pdf';
+  if (typeof item.file !== 'string' || !item.file) return null;
+  if (!Number.isInteger(item.pages) && format === 'pdf') return null;
+  const sha = [item.sha256, item.pdf_sha256].find((value) => HEX.test(value ?? '')) ?? '';
   return {
     at: item.at,
     edition: item.edition,
+    format,
     file: item.file,
     folder: String(item.folder ?? ''),
-    pages: item.pages,
-    pdf_sha256: HEX.test(item.pdf_sha256 ?? '') ? item.pdf_sha256 : '',
+    pages: Number.isInteger(item.pages) ? item.pages : 0,
+    pdf_sha256: sha,
     text_sha256: HEX.test(item.text_sha256 ?? '') ? item.text_sha256 : '',
   };
 }
 
-/** The PDFs a note was exported as, newest first. */
+/** The files a note was exported as, PDF and HTML, newest first. */
 export async function listEditions(caseId, noteId) {
   const answer = await api.get(`/api/cases/${caseId}/notes/${noteId || 'case'}/editions`);
   return (Array.isArray(answer?.editions) ? answer.editions : []).map(readEdition).filter(Boolean);
