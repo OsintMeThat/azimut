@@ -758,12 +758,13 @@ def build_full_case(
         ).json()["entity"]["id"]
 
     # -- a note holding a map: the layer and the plate it draws and its ground, all uses ----
+    # Its written link finds the bookmark of that thread, which makes it a use as well.
     ground_id = client.get(
         f"/api/cases/{case_id}/entities/lookup", params={"attr": "path", "value": full.capture}
     ).json()["entity"]["id"]
     mapped = client.post(f"/api/cases/{case_id}/notes", json={"title": "Map", "content": (
         f"::: map\ntitle: Situation\nlayer: {layer_name}\nplate: {Path(full.map_plate).stem}\n"
-        f"proofs: all\nground: {ground_id}\n:::\n")})
+        f"proofs: all\nground: {ground_id}\n:::\n\nAs [the harbour thread](https://example.test/thread/48#post-3) said.\n")})
     assert mapped.status_code == 200, mapped.text
     full.map_note_id = mapped.json()["id"]
     full.map_note = mapped.json()["attrs"]["path"]

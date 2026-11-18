@@ -28,7 +28,9 @@ for the editor to draw: the Azimut logo, the analyst's logo and their signature.
 
 A note cites a web source through `/sources/lookup`: the address is read for a name
 and looked for among what the case already filed for it (`engine/urltitles.py`), so
-a link pasted twice cites one item. Nothing is fetched.
+a link pasted twice cites one item. Its `known` says what the case knows of the page
+a written link to it would cite (`engine/notesources.py`): the item, who posted it and
+when, its archived copy and the day it was seen. Nothing is fetched.
 
 Before an export, `/notes/pdf/check` lays the chosen notes out in memory and says,
 note by note, what the PDF would get wrong (a picture no longer in the case, one
@@ -89,7 +91,7 @@ from ..engine import notes_html as html_engine
 from ..engine import notes_web as web_engine
 from ..engine import notes_pdf as pdf_engine
 from ..engine import notes_wordpress as wordpress_engine
-from ..engine import notefill, notefromcase, notelinks, notepieces, notetext
+from ..engine import notefill, notefromcase, notelinks, notepieces, notesources, notetext
 from ..engine import pdffonts
 from ..engine import reveal as reveal_engine
 from ..engine import urltitles
@@ -440,7 +442,8 @@ def source_lookup(
     if len(address) > 2048 or not urltitles.url_key(address):
         raise HTTPException(status_code=422, detail="the source must be an http(s) address")
     case = get_case(case_id)
-    found = urltitles.find_by_url(case, address)
+    reader = notesources.Reader(case)
+    found = reader.index.find(address, types=urltitles.FILED)
     return {
         "url": address,
         "title": urltitles.title_of(address, title),
@@ -449,6 +452,29 @@ def source_lookup(
              "attrs": entity.get("attrs") or {}}
             for entity in found
         ],
+        "known": _known(reader, address),
+    }
+
+
+def _known(reader: notesources.Reader, address: str) -> dict[str, Any] | None:
+    """What a written link to ``address`` would cite, as the citation card shows it: the
+    item the case holds at that page, who posted it and when, its archived copy and the
+    day the case saw it, every day as `YYYY-MM-DD`; None when the case holds nothing."""
+    record = reader.held(address)
+    if record is None:
+        return None
+    source = reader.link(address)
+    return {
+        "id": str(record.get("id") or ""),
+        "type": str(record.get("type") or ""),
+        "label": source.label,
+        "noun": source.noun,
+        "address": source.address,
+        "author": source.author,
+        "published": source.published,
+        "archive": source.archive,
+        "archived_at": source.archived,
+        "seen": source.collected,
     }
 
 

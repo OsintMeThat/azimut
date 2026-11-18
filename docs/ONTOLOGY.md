@@ -895,7 +895,9 @@ leaves a gap rather than voiding the layout, and the picture it exports is a
   it), and what names it outside the graph: a plate, a collage, a Horizon view, the
   bench or a search, a layer marker, a sheet, an entity photo, a note's map (its
   layers, its plate and the pictures under it, read off its `::: map` block; its
-  period of proofs is a question asked of the case, not a name). A Detect routine
+  period of proofs is a question asked of the case, not a name), a note's written link
+  (the file, bookmark, capture or imported proof the case holds at the link's address,
+  read live since what a link finds follows what the case holds). A Detect routine
   watching an area is listed apart, as what refuses the delete. The Media Library's
   Unused filter is the same rule read from the other end.
 - Losing a secondary source leaves a placeholder. Only losing the subject can

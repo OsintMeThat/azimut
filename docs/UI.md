@@ -7346,6 +7346,21 @@ written link carry a small `[n]` that jumps to their entry. A place, a person or
 event with no address is not a source; generated links (coordinates) are not listed;
 a note citing nothing prints no list.
 
+**A written link finds what the case holds at its address**, cited elsewhere or not:
+the file downloaded from that post, the bookmark of that page, the capture of that map
+view, read off one index of the case per document (`urltitles.AddressIndex`), nothing
+fetched. The address is read as the source lookup reads it: X and Twitter and their
+embed mirrors are one site and a post is its number, a `www.`, `m.` or `mobile.`, a
+trailing slash, a fragment, escapes and share or campaign words (`utm_`, `si`,
+`fbclid`…) make no difference. The link then lists as that item, with who posted it,
+its day, its archived copy and the day it was collected; the text keeps the link's
+words. A page held by several items is the downloaded file first, then the bookmark,
+then the capture, the first filed first. A link to the post a proof was imported from
+stays that page, collected the day of the import. A link the case holds nothing of
+prints exactly as before. PDF, HTML, web folder and WordPress draft all list it so.
+The same reading answers `GET /sources/lookup`'s `known` (the item, its author, posted
+day, archived copy and its day, and the day it was seen) for the citation card to come.
+
 **Write | Page** opens the note's pages beside it: the real PDF the server would write
 (`POST /notes/preview`, nothing written to disk), drawn with pdf.js loaded only
 there, redrawn 900 ms after typing stops with the old pages kept until the new ones

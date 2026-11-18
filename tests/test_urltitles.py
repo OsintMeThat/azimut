@@ -81,6 +81,20 @@ def test_what_is_not_a_web_address_has_no_name_and_no_key(bad):
         ("https://youtu.be/abc123?si=share", "https://www.youtube.com/watch?v=abc123&feature=shared"),
         ("https://example.org/a/?utm_source=x&id=4#top", "https://example.org/a?id=4"),
         ("https://m.facebook.com/story.php?story_fbid=9&id=2", "https://www.facebook.com/story.php?id=2&story_fbid=9"),
+        # the mirrors a post is shared through so it embeds in a chat, and X on a phone
+        ("https://vxtwitter.com/a/status/1890", "https://x.com/a/status/1890"),
+        ("https://fxtwitter.com/a/status/1890/photo/1", "https://mobile.twitter.com/b/status/1890"),
+        ("https://fixupx.com/a/status/1890", "https://x.com/i/web/status/1890"),
+        # a video's other paths
+        ("https://www.youtube.com/live/abc123?si=x", "https://youtu.be/abc123"),
+        ("https://www.youtube-nocookie.com/embed/abc123", "https://m.youtube.com/watch?v=abc123"),
+        # tracking words: campaigns, ad clicks, the BBC's and a newsletter's
+        ("https://www.bbc.com/news/articles/c1?at_medium=RSS&at_campaign=rss", "https://bbc.com/news/articles/c1/"),
+        ("https://example.org/a?mc_cid=1&mc_eid=2&msclkid=3&_ga=4", "https://example.org/a"),
+        # an address written with its escapes and one typed as it reads
+        ("https://www.aljazeera.net/news/%D8%A7%D9%84%D9%8A%D9%85%D9%86", "https://aljazeera.net/news/اليمن"),
+        # a passage of the page, and its anchors
+        ("https://example.org/a#:~:text=the%20words", "https://example.org/a#section-2"),
     ],
 )
 def test_two_addresses_of_one_page_share_a_key(one, other):
@@ -94,6 +108,12 @@ def test_two_addresses_of_one_page_share_a_key(one, other):
         ("https://example.org/page?id=4", "https://example.org/page?id=5"),
         ("https://t.me/portnews/412", "https://t.me/portnews/413"),
         ("https://example.org/a", "https://example.com/a"),
+        # a page of an app routed by its fragment is that page
+        ("https://app.example.org/#/report/12", "https://app.example.org/#/report/13"),
+        ("https://app.example.org/#!/report/12", "https://app.example.org/"),
+        # a search on a WordPress site is not its home page, nor a video's time its id
+        ("https://example.org/?s=mocha", "https://example.org/"),
+        ("https://example.org/a/B", "https://example.org/a/b"),
     ],
 )
 def test_two_pages_keep_two_keys(one, other):
@@ -130,7 +150,26 @@ def test_the_lookup_finds_what_the_case_filed_for_a_page(client):
 def test_the_lookup_names_a_page_the_case_does_not_hold(client):
     cid = client.post("/api/cases", json={"name": "Fresh"}).json()["id"]
     body = client.get(f"/api/cases/{cid}/sources/lookup", params={"url": "https://t.me/portnews/412"}).json()
-    assert body == {"url": "https://t.me/portnews/412", "title": "Telegram, portnews #412", "found": []}
+    assert body == {"url": "https://t.me/portnews/412", "title": "Telegram, portnews #412", "found": [], "known": None}
+
+
+def test_the_index_reads_the_case_once_and_answers_every_page_from_it(client):
+    cid = client.post("/api/cases", json={"name": "Indexed"}).json()["id"]
+    case = Case.open(cid)
+    for number in range(3):
+        _bookmark(client, cid, f"https://example.org/{number}", f"Page {number}")
+    proof = case.add_entity("proof", "Imported", attrs={
+        "path": "proofs/Imported.png", "published_url": "https://x.com/someone/status/9",
+        "posted_url": "https://x.com/me/status/10"}, by="proof-import")
+    index = urltitles.AddressIndex(case)
+    assert index.read == 1 and len(index) == 4
+    assert [index.first(f"https://www.example.org/{number}/")["label"] for number in range(3)] == ["Page 0", "Page 1", "Page 2"]
+    # a proof answers for the post it was imported from, and is never offered for a pasted link
+    assert index.first("https://twitter.com/x/status/9")["id"] == proof["id"]
+    assert urltitles.find_by_url(case, "https://x.com/someone/status/9") == []
+    # where the analyst published it is the case's own work, not a page it holds
+    assert index.own_work("https://x.com/me/status/10") and index.first("https://x.com/me/status/10") is None
+    assert len(urltitles.AddressIndex(None)) == 0
 
 
 @pytest.mark.parametrize("bad", ["port strike", "ftp://host/x", "https://example.org/" + "a" * 2100])

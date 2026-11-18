@@ -32,6 +32,14 @@ document also cites is that item: the same address, or the same page as the case
 source lookup reads it (`urltitles.url_key`), which drops the `#fragment`. So a
 quote linked to the passage it was taken from (`#:~:text=…`) beside the chip of the
 page it is on is one source, not two.
+
+**A written link finds what the case holds at its address**, cited or not: the file
+downloaded from that post, the bookmark of that page, the capture of that map view
+(`urltitles.AddressIndex`, read once per document). The link is then that item, with
+its author, its day, its archived copy and the day it was collected, and the text
+keeps the words it was written with. A proof imported from somebody's post is not the
+post: a link to that post stays a web page, collected the day the proof was imported.
+A link the case holds nothing for is a bare web page, exactly as before.
 """
 
 from __future__ import annotations
@@ -39,7 +47,7 @@ from __future__ import annotations
 import math
 import re
 from collections import deque
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import date
 from pathlib import PurePosixPath
 from typing import TYPE_CHECKING, Any, Iterable, Iterator
@@ -104,6 +112,18 @@ KNOWN_NAMES = {
 SHA256 = re.compile(r"^[0-9a-f]{64}$")
 #: A day, and a moment of one (`2026-03-02T10:22:00Z`, a radar pass's time).
 INSTANT = re.compile(r"^(\d{4}-\d{2}-\d{2})T(\d{2}:\d{2})(?::\d{2})?Z$")
+#: The day a copy was made, kept beside its address once something archived it.
+ARCHIVED_AT = "archived_at"
+#: A Wayback copy's address says when it was taken: `web.archive.org/web/20261118093012/…`.
+WAYBACK_STAMP = re.compile(r"^/web/(\d{4})(\d{2})(\d{2})\d*[a-z_]*/", re.I)
+#: Where an archived copy of a page lives: such a link is a copy already, dated by the archive.
+ARCHIVE_HOSTS = ("web.archive.org", "wayback.archive.org", "archive.org", "archive.today", "archive.ph",
+                 "archive.is", "archive.li", "archive.md", "archive.vn", "ghostarchive.org", "perma.cc")
+#: Pages that are the app's own tools rather than sources: the viewers a reader checks
+#: imagery in (`verifylinks`) and the imagery services the captures are drawn from, each
+#: a host, or a host and the path the tool lives under.
+OWN_TOOLS = ("livingatlas.arcgis.com/wayback", "browser.dataspace.copernicus.eu", "server.arcgisonline.com",
+             "services.arcgisonline.com", "wayback.maptiles.arcgis.com")
 
 
 @dataclass(frozen=True)
@@ -138,9 +158,11 @@ class Source:
     label: str = ""
     kind: str = ""
     noun: str = ""
-    #: The original address and an archived copy, both http(s).
+    #: The original address and an archived copy, both http(s), and the day that copy
+    #: was made when the case knows it.
     address: str = ""
     archive: str = ""
+    archived: str = ""
     #: Where the analyst published it (`POSTED`), http(s).
     posted: str = ""
     #: The account or author the case records.
@@ -275,6 +297,7 @@ class Reader:
         self._parents: dict[str, list[str]] = {}
         self._reading: set[str] = set()
         self._names: dict[str, str] | None = None
+        self._index: urltitles.AddressIndex | None = None
 
     # -- what a note can point at ---------------------------------------------
 
@@ -298,7 +321,8 @@ class Reader:
         return source
 
     def link(self, address: str, words: str = "") -> Source:
-        """A web page a note links to, named by the words of its first link."""
+        """A web page a note links to: the item the case holds at that address when it
+        holds one, else the page, named by the words of its first link."""
         found = self._links.get(address)
         if found is not None:
             return found
@@ -306,8 +330,38 @@ class Reader:
         if not label or label == address:
             label = host(address)
         source = Source(key=f"url:{address}", label=label, kind=PAGE, noun="Web page", address=address)
+        source = self._held(address, source)
         self._links[address] = source
         return source
+
+    @property
+    def index(self) -> urltitles.AddressIndex:
+        """Every item of the case that holds an address, read the first time a link asks."""
+        if self._index is None:
+            try:
+                self._index = urltitles.AddressIndex(self.case)
+            except Exception:  # a case that cannot be read says nothing more of its links
+                self._index = urltitles.AddressIndex(None)
+        return self._index
+
+    def held(self, address: str) -> dict[str, Any] | None:
+        """The record a written link to ``address`` finds in the case, or None."""
+        if self.case is None or not urltitles.url_key(address):
+            return None
+        return self.index.first(address)
+
+    def _held(self, address: str, page: Source) -> Source:
+        """``page``, or what the case holds at its address."""
+        record = self.held(address)
+        if record is None:
+            return page
+        item = self.entity(str(record.get("id") or ""))
+        if item is None:
+            return page
+        if record.get("type") == "proof":
+            # the post a proof was imported from: still that page, seen the day it came in
+            return replace(page, collected=item.collected)
+        return item if item.address else page
 
     # -- reading --------------------------------------------------------------
 
@@ -351,6 +405,7 @@ class Reader:
         address = next((one for one in (web(attrs.get(key)) for key in keys) if one), "")
         address = address or web(sidecar.get("url")) or web(sidecar.get("webpage_url"))
         archive = web(attrs.get(ARCHIVE)) or web(sidecar.get(ARCHIVE))
+        archived = (_day(attrs.get(ARCHIVED_AT)) or _day(sidecar.get(ARCHIVED_AT)) or archive_day(archive)) if archive else ""
 
         author = _line(sidecar.get("uploader"))
         if not author and entity_id and path:
@@ -405,6 +460,7 @@ class Reader:
             noun=noun,
             address=address,
             archive=archive,
+            archived=archived,
             posted=web(attrs.get(POSTED)),
             author=author,
             published=timeline.media_published(sidecar) or "" if not imagery else "",
@@ -707,6 +763,42 @@ def host(url: str) -> str:
     return name[4:] if name.startswith("www.") else name
 
 
+def _on(url: str, places: tuple[str, ...]) -> bool:
+    """Whether ``url`` is on one of ``places``: a host and its subdomains, or a host and a path under it."""
+    name = host(url)
+    try:
+        path = urlsplit(url).path
+    except ValueError:
+        return False
+    for place in places:
+        site, _, under = place.partition("/")
+        if (name == site or name.endswith(f".{site}")) and (not under or f"{path}/".startswith(f"/{under}/")):
+            return True
+    return False
+
+
+def is_archive(url: str) -> bool:
+    """Whether ``url`` is an archived copy (the Wayback Machine, archive.today…)."""
+    return _on(url, ARCHIVE_HOSTS)
+
+
+def is_own_tool(url: str) -> bool:
+    """Whether ``url`` is one of the app's own tools rather than a source: a viewer a
+    reader checks imagery in, or an imagery service the captures are drawn from."""
+    return _on(url, OWN_TOOLS)
+
+
+def archive_day(url: str) -> str:
+    """The day a Wayback copy was taken, read off its address, or ""."""
+    if not url or host(url) not in ("web.archive.org", "wayback.archive.org"):
+        return ""
+    try:
+        match = WAYBACK_STAMP.match(urlsplit(url).path)
+    except ValueError:
+        return ""
+    return _day("-".join(match.groups())) if match else ""
+
+
 def spoken_day(reading: str | None) -> str:
     """A day as the Time panel reads it (`2024-03-12`, `2024-03-12~` when the
     provider only estimates it, `2024-03-12T10:22:00Z` for a radar pass) said in
@@ -770,4 +862,5 @@ def _line(value: Any) -> str:
     return " ".join(value.split())[:MAX_LABEL] if isinstance(value, str) else ""
 
 
-__all__ = ["Annex", "Credit", "Entry", "Reader", "Reading", "Source", "details", "host", "spoken_day", "web"]
+__all__ = ["Annex", "Credit", "Entry", "Reader", "Reading", "Source", "archive_day", "details", "host", "is_archive",
+           "is_own_tool", "spoken_day", "web"]
