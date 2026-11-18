@@ -5,6 +5,7 @@
  */
 import './alignedBlock.js';
 import './playedBlock.js';
+import './mapBlock.js';
 import './diagramBlock.js';
 import './tableBlock.js';
 import './breakBlocks.js';

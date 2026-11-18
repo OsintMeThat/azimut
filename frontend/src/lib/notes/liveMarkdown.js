@@ -37,9 +37,9 @@ import {
 } from './editor/state.js';
 import { highlight, look } from './editor/theme.js';
 import {
-  BlockWidget, blockWidget, sourceButton,
+  BlockWidget, sourceButton,
 } from './editor/widgets.js';
-import { entityReference, markdownHtml } from '../markdown.js';
+import { entityReference } from '../markdown.js';
 import { paths as iconPaths } from '../../components/Icon.svelte';
 import { coverChange } from './reportParts.js';
 import {
@@ -47,7 +47,7 @@ import {
   rovingToolbar, sizeWidth, sizedLine, sourceField,
 } from './pictureSize.js';
 import {
-  MAP_BLOCK, mentionMatches, slashInsert, slashMatches,
+  mentionMatches, slashInsert, slashMatches,
 } from './syntax.js';
 
 export { noteCase, setNoteCase, templateMode } from './editor/state.js';
@@ -55,6 +55,7 @@ export { hintLineAt, noteDecorations, typeOverHints } from './editor/decorations
 export { openBlockAt } from './editor/ranges.js';
 export { insertInclude, removeInclude } from './editor/includeBlock.js';
 export { playedSteps, storyZoom } from './editor/playedBlock.js';
+export { mapBlock } from './editor/mapBlock.js';
 
 // -- the widgets ---------------------------------------------------------------
 
@@ -249,57 +250,6 @@ function openCaption(view, box, returnTo = null) {
   field.select();
 }
 
-/** A map's block, read: its title, what it shows and its ground (`engine/notes_maps.py`). */
-export function mapBlock(source) {
-  const read = { title: '', layers: [], plate: '', proofs: '', ground: '', details: 0 };
-  for (const line of String(source ?? '').split('\n').slice(1)) {
-    const found = /^\s*([a-z]+)\s*:\s*(.*?)\s*$/i.exec(line);
-    if (!found) continue;
-    const [, key, value] = found;
-    const name = key.toLowerCase();
-    if ((name === 'layer' || name === 'layers') && value) read.layers.push(value);
-    else if (name === 'detail' && value) read.details += 1;
-    else if (name in read && typeof read[name] === 'string' && !read[name]) read[name] = value;
-  }
-  return read;
-}
-
-/**
- * A map, drawn small as what it shows: its title, its layers or plate and its proofs,
- * over its ground. The HTML page moves it and plays its days; the PDF prints its picture.
- */
-function drawMap(box, source, info) {
-  const map = mapBlock(source);
-  const head = document.createElement('div');
-  head.className = 'cm-played-head';
-  head.textContent = 'Map · interactive in HTML, a picture in the PDF';
-  const frame = document.createElement('div');
-  frame.className = 'cm-map-frame';
-  if (map.ground) {
-    frame.innerHTML = markdownHtml(`[[media:${map.ground}|Ground]]`, info);
-    if (!frame.querySelector('img')) frame.replaceChildren();
-  }
-  if (!frame.childNodes.length) frame.classList.add('cm-map-plain');
-  const said = document.createElement('div');
-  said.className = 'cm-map-said';
-  const title = document.createElement('strong');
-  title.textContent = map.title || 'Map';
-  said.append(title);
-  const parts = [
-    map.plate ? `Plate: ${map.plate}` : '',
-    map.layers.length ? `${map.layers.length === 1 ? 'Layer' : 'Layers'}: ${map.layers.join(', ')}` : '',
-    map.proofs ? `Proofs: ${map.proofs === 'all' ? 'all' : map.proofs.replace('..', ' to ')}` : '',
-    map.ground ? '' : 'No ground: drawn on a plain background',
-  ].filter(Boolean);
-  for (const part of parts) {
-    const line = document.createElement('span');
-    line.textContent = part;
-    said.append(line);
-  }
-  frame.append(said);
-  box.append(head, frame);
-}
-
 /** A line holding nothing but one picture: `![…](…){…}` or `[[media:…]]{…}`. */
 const PICTURE_LINE = /^\s*(?:!\[[^\]]*\]\([^)]*\)(?:\{[^}\n]*\})?|\[\[media:[A-Za-z0-9_-]+\|[^\]\n]+\]\](?:\{[^}\n]*\})?)\s*$/;
 // -- the kinds of block, until each has a module of its own in editor/ ----------
@@ -368,14 +318,6 @@ registerBlock({
     const again = [...view.contentDOM.querySelectorAll('.cm-block-picture')].find((node) => view.posAtDOM(node) === from);
     again?.querySelector(`[data-size-bar] ${same}`)?.focus({ preventScroll: true });
   }),
-});
-
-registerBlock({
-  name: 'map',
-  fence: MAP_BLOCK,
-  widget: blockWidget,
-  draw: (box, widget) => drawMap(box, widget.source, widget.info),
-  atomic: true,
 });
 
 // -- the two modes ----------------------------------------------------------------
