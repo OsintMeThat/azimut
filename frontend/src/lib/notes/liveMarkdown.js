@@ -41,7 +41,7 @@ import {
   rovingToolbar, sizeWidth, sizedLine, sourceField,
 } from './pictureSize.js';
 import {
-  PLAYED_BLOCK, findCoordinates, findReferences, mentionMatches, slashInsert, slashMatches,
+  MAP_BLOCK, PLAYED_BLOCK, findCoordinates, findReferences, mentionMatches, slashInsert, slashMatches,
 } from './syntax.js';
 
 // -- what the case says about the references ----------------------------------
@@ -789,6 +789,57 @@ export function playedSteps(source) {
   return { lead: lead.join('\n').trim(), steps: steps.map((step) => ({ ...step, words: step.words.join('\n').trim() })) };
 }
 
+/** A map's block, read: its title, what it shows and its ground (`engine/notes_maps.py`). */
+export function mapBlock(source) {
+  const read = { title: '', layers: [], plate: '', proofs: '', ground: '', details: 0 };
+  for (const line of String(source ?? '').split('\n').slice(1)) {
+    const found = /^\s*([a-z]+)\s*:\s*(.*?)\s*$/i.exec(line);
+    if (!found) continue;
+    const [, key, value] = found;
+    const name = key.toLowerCase();
+    if ((name === 'layer' || name === 'layers') && value) read.layers.push(value);
+    else if (name === 'detail' && value) read.details += 1;
+    else if (name in read && typeof read[name] === 'string' && !read[name]) read[name] = value;
+  }
+  return read;
+}
+
+/**
+ * A map, drawn small as what it shows: its title, its layers or plate and its proofs,
+ * over its ground. The HTML page moves it and plays its days; the PDF prints its picture.
+ */
+function drawMap(box, source, info) {
+  const map = mapBlock(source);
+  const head = document.createElement('div');
+  head.className = 'cm-played-head';
+  head.textContent = 'Map · interactive in HTML, a picture in the PDF';
+  const frame = document.createElement('div');
+  frame.className = 'cm-map-frame';
+  if (map.ground) {
+    frame.innerHTML = markdownHtml(`[[media:${map.ground}|Ground]]`, info);
+    if (!frame.querySelector('img')) frame.replaceChildren();
+  }
+  if (!frame.childNodes.length) frame.classList.add('cm-map-plain');
+  const said = document.createElement('div');
+  said.className = 'cm-map-said';
+  const title = document.createElement('strong');
+  title.textContent = map.title || 'Map';
+  said.append(title);
+  const parts = [
+    map.plate ? `Plate: ${map.plate}` : '',
+    map.layers.length ? `${map.layers.length === 1 ? 'Layer' : 'Layers'}: ${map.layers.join(', ')}` : '',
+    map.proofs ? `Proofs: ${map.proofs === 'all' ? 'all' : map.proofs.replace('..', ' to ')}` : '',
+    map.ground ? '' : 'No ground: drawn on a plain background',
+  ].filter(Boolean);
+  for (const part of parts) {
+    const line = document.createElement('span');
+    line.textContent = part;
+    said.append(line);
+  }
+  frame.append(said);
+  box.append(head, frame);
+}
+
 /**
  * A block of steps or a story, drawn small the way the HTML page plays it: its steps
  * in order, numbered, each picture with its words; a story's beside it, and the part
@@ -901,7 +952,7 @@ class BlockWidget extends WidgetType {
 
   /** What the block draws from the case: the records and notes its source names, as they read now. */
   caseKey() {
-    this.key ??= JSON.stringify([...this.source.matchAll(/\[\[(?:media|entity|include):([A-Za-z0-9_-]+)/g)].map(([, id]) => {
+    this.key ??= JSON.stringify([...this.source.matchAll(/(?:\[\[(?:media|entity|include):|^ground:[ \t]*)([A-Za-z0-9_-]+)/gm)].map(([, id]) => {
       const entity = resolve(this.info, id);
       const note = this.info.notes?.get?.(id);
       return [id, entity ? [entity.id, entity.type, entity.label, entity.attrs] : null, note ? [note.title, note.excerpt] : null];
@@ -917,6 +968,7 @@ class BlockWidget extends WidgetType {
     markPicked(box, this.picked);
     if (this.kind === 'diagram') drawDiagram(box, this.source);
     else if (this.kind === 'steps' || this.kind === 'story') drawPlayed(box, this.kind, this.source, this.info);
+    else if (this.kind === 'map') drawMap(box, this.source, this.info);
     else {
       const { text, hints } = hintsMarked(this.source);
       box.innerHTML = markdownHtml(text, this.info);
@@ -1401,7 +1453,7 @@ export function noteDecorations(state) {
   for (let number = 1; number <= state.doc.lines; number += 1) {
     const line = state.doc.line(number).text;
     const open = BLOCK_OPEN.exec(line);
-    const played = open ? null : PLAYED_BLOCK.exec(line);
+    const played = open ? null : PLAYED_BLOCK.exec(line) ?? (MAP_BLOCK.test(line) ? [line, 'map'] : null);
     if (!open && !played) continue;
     let end = number + 1;
     while (end <= state.doc.lines && !/^:::[ \t]*$/.test(state.doc.line(end).text)) end += 1;
@@ -2342,10 +2394,19 @@ const look = EditorView.theme({
   '.cm-block-diagram > .cm-source-edit': { right: '6px' },
   '.cm-block-diagram svg': { maxWidth: '100%', height: 'auto', display: 'block', margin: '0 auto' },
   '.cm-block-failed': { color: 'var(--danger)', background: 'var(--danger-soft)', fontSize: '0.9em' },
-  '.cm-block-steps, .cm-block-story': {
+  '.cm-map-frame': { position: 'relative', borderRadius: '4px', overflow: 'hidden', background: '#20252b', minHeight: '64px' },
+  '.cm-map-frame img': { display: 'block', width: '100% !important', marginLeft: '0 !important', filter: 'saturate(.62) brightness(.8)' },
+  '.cm-map-plain': { background: 'var(--surface-2)' },
+  '.cm-map-said': {
+    position: 'absolute', left: '10px', bottom: '10px', display: 'flex', flexDirection: 'column', gap: '2px', maxWidth: 'calc(100% - 20px)',
+    padding: '7px 10px', borderRadius: '6px', background: 'rgba(16, 18, 22, .82)', color: '#fff', fontSize: '0.8em', lineHeight: '1.35',
+  },
+  '.cm-map-plain .cm-map-said': { position: 'static', margin: '10px' },
+  '.cm-map-said > span': { color: 'rgba(255, 255, 255, .8)' },
+  '.cm-block-steps, .cm-block-story, .cm-block-map': {
     margin: '4px var(--note-gutter, 32px)', padding: '8px 12px 10px', border: '1px solid var(--border)', borderRadius: '6px', background: 'var(--bg-2)',
   },
-  '.cm-block-steps > .cm-source-edit, .cm-block-story > .cm-source-edit': { right: '6px' },
+  '.cm-block-steps > .cm-source-edit, .cm-block-story > .cm-source-edit, .cm-block-map > .cm-source-edit': { right: '6px' },
   '.cm-played-head': {
     color: 'var(--text-3)', fontSize: '0.7em', fontWeight: '650', letterSpacing: '0.06em', textTransform: 'uppercase', marginBottom: '6px',
   },

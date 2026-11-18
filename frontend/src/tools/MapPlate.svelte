@@ -55,6 +55,7 @@
   import { caseState, deleteTemplate, prefs, reloadCase, saveTemplate, toast, uiState } from '../lib/state.svelte.js';
   import { myLogoUrl } from '../lib/myLogo.js';
   import { offerPuts, withdrawNote } from '../lib/noteHere.svelte.js';
+  import { mapOffer } from '../lib/notes/mapPut.js';
   import {
     faceCredits, figureName, figureScale, pageOffer, sheetOffer, sheetRefusal, slideCaption, slidesRefusal, stepsOffer,
   } from './plate/plateNote.js';
@@ -1941,8 +1942,15 @@
   const noteSlides = stepsOffer({ keep: keepSlides });
   /** The days side by side, of `days` (the export's range) or of every day the plate plays. */
   const noteSheet = (days = null) => sheetOffer({ keep: (options) => keepFigure('sheet', { ...options, days }) });
+  // the plate as a map a reader moves and plays in the HTML page, read as it was saved
+  const noteMap = mapOffer({
+    caseId: () => plate?.caseId,
+    hint: 'Its layers, days and steps, played in the HTML page; a picture in the PDF',
+    prepare: async () => { await autosave.flush(); if (!plate?.name) throw new Error('The plate is not saved yet'); },
+    request: () => ({ title: plate?.title ?? '', plate: plate?.name ?? '' }),
+  });
   offerPuts('plate', () => (plate && !plate.template && plate.caseId
-    ? [notePage, ...(videoPlayed.length >= 2 ? [noteSheet()] : []), ...(sequence.length >= 2 ? [noteSlides] : [])] : []));
+    ? [notePage, ...(videoPlayed.length >= 2 ? [noteSheet()] : []), ...(sequence.length >= 2 ? [noteSlides] : []), noteMap] : []));
   onDestroy(() => withdrawNote('plate'));
 
   // -- templates -----------------------------------------------------------------------

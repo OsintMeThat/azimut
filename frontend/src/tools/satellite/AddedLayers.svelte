@@ -43,6 +43,7 @@
   import MarkerSymbol from './MarkerSymbol.svelte';
   import { layerPalette } from '../../lib/map/layerPalette.svelte.js';
   import { caseState } from '../../lib/state.svelte.js';
+  import { pinned, shortTitle } from '../../lib/notes/putInNote.svelte.js';
   import { iconVersion, layerIconUrl } from '../../lib/map/ownIcons.js';
   import { ICON_HELP } from '../../lib/map/layerHelp.js';
   import LayerIconsToLibrary from './LayerIconsToLibrary.svelte';
@@ -67,6 +68,8 @@
     addLabel = 'Add a layer',
     onedit = null,
     ondownload = null,
+    /** `(row)`: put the layer in the note pinned beside as a map; offered while a note is. */
+    onmap = null,
     /** The layer an act is running on, so its buttons can say so. */
     busy = '',
     /** The head's Refresh is going through every followed layer. */
@@ -320,6 +323,12 @@
             <button type="button" class="icon-act" aria-label={`Edit ${row.title}`}
               title="Edit this layer" onclick={() => onedit(row)}>
               <Icon name="edit" size={13} />
+            </button>
+          {/if}
+          {#if onmap && pinned.current}
+            <button type="button" class="icon-act" aria-label={`Put ${row.title} in “${shortTitle(pinned.current.title)}” as a map`}
+              title={`As a map in “${shortTitle(pinned.current.title)}”`} onclick={() => onmap(row)}>
+              <Icon name="mapArea" size={13} />
             </button>
           {/if}
           {#if ondownload}<button class="icon-act" aria-label={`Download ${row.title}`} title="Download layer" onclick={() => ondownload(row)}><Icon name="download" size={13} /></button>{/if}

@@ -112,12 +112,13 @@ async function appendToPinned(caseId, noteId, text) {
 }
 
 /**
- * Put `offer` in the pinned note. Answers what landed, `{ text, filed }`, or null when
- * nothing did: no note pinned, the put refused or failed (its message is shown), or
- * it was cancelled.
+ * Put `offer` in the pinned note, or in `target` (`{ caseId, noteId, title, editor }`, the
+ * note being written in, for a put made from its own editor). Answers what landed,
+ * `{ text, filed }`, or null when nothing did: no note pinned, the put refused or failed
+ * (its message is shown), or it was cancelled.
  */
-export async function putInNote(offer, { busyAfter = BUSY_AFTER } = {}) {
-  const target = pinned.current;
+export async function putInNote(offer, { busyAfter = BUSY_AFTER, target: given = null } = {}) {
+  const target = given?.caseId ? given : pinned.current;
   if (!target || typeof offer?.put !== 'function') return null;
   const { caseId, noteId, title, editor } = target;
   const name = shortTitle(title);
@@ -153,7 +154,7 @@ export async function putInNote(offer, { busyAfter = BUSY_AFTER } = {}) {
   }
 
   // the panel may have closed or moved to another note meanwhile: it still goes where it was asked to
-  const live = Boolean(editor?.alive?.() && pinned.current?.editor === editor && spot !== null);
+  const live = Boolean(editor?.alive?.() && (given?.caseId || pinned.current?.editor === editor) && spot !== null);
   let landed = null;
   let written = text;
   try {

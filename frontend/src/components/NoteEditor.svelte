@@ -22,6 +22,9 @@
    * The page is shown drawn or as the raw Markdown, one choice for every editor of
    * the browser (`lib/notes/noteMode.svelte.js`): a toggle ends the toolbar, and
    * Ctrl+Shift+M switches it from anywhere in the editor.
+   *
+   * `/` › Interactive map asks what a map shows (`NoteMapPicker.svelte`) and puts it at
+   * the cursor the way a tool's put lands, Undo included (`lib/notes/mapPut.js`).
    */
   import { onDestroy, onMount, untrack } from 'svelte';
   import { Compartment, EditorState } from '@codemirror/state';
@@ -48,6 +51,9 @@
     resizePicture, setLinePrefix, setNoteCase, setNoteMode, takeBackRange, toggleWrap,
   } from '../lib/notes/liveMarkdown.js';
   import { startCompletion } from '@codemirror/autocomplete';
+  import { mapOffer } from '../lib/notes/mapPut.js';
+  import { putInNote } from '../lib/notes/putInNote.svelte.js';
+  import NoteMapPicker from './NoteMapPicker.svelte';
   import Icon from './Icon.svelte';
   import FloatingMenu from './FloatingMenu.svelte';
   import Modal from './Modal.svelte';
@@ -89,6 +95,7 @@
   let picker = $state(null);
   let uploading = $state(false);
   let including = $state(false);
+  let mapping = $state(false);
   let includeQuery = $state('');
   let fetchedNotes = $state(null);
 
@@ -136,6 +143,7 @@
     include: () => openIncludes(),
     get point() { return tools ? gotoPoint : null; },
     picture: () => { pictureOpen = true; },
+    map: () => { if (caseId && !template) mapping = true; },
     cover: () => writeCover(),
     upload: () => picker?.click(),
     image: (file) => upload(file),
@@ -248,6 +256,13 @@
     /** Write the cover page at the top, unless there is one: Look › Cover was turned to Your own page. */
     cover: () => Boolean(view && !readOnly && insertCover(view, { focus: false })),
   };
+
+  /** The map asked for, put at the cursor as a tool's put lands there. */
+  function putMap(request) {
+    mapping = false;
+    if (!view || readOnly) return;
+    void putInNote(mapOffer({ caseId, request }), { target: { caseId, noteId: doc?.noteId ?? null, title: '', editor: api_ } });
+  }
 
   /** `/` › Cover page: the page at the top, and the look that prints it alone on page 1. */
   async function writeCover() {
@@ -488,6 +503,10 @@
       {#if !includable.length}<p class="none">{fetchedNotes === null && !notes.length ? 'Reading the notes…' : 'No other note to include.'}</p>{/if}
     </div>
   </Modal>
+{/if}
+
+{#if mapping}
+  <NoteMapPicker {caseId} onclose={() => { mapping = false; view?.focus(); }} onput={putMap} />
 {/if}
 
 {#if calloutAnchor}

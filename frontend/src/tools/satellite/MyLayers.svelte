@@ -3,6 +3,8 @@
   import LayerEditor from './LayerEditor.svelte';
   import { addedLayers } from '../../lib/map/addedLayersState.svelte.js';
   import { caseState } from '../../lib/state.svelte.js';
+  import { layerMapOffer } from '../../lib/notes/mapPut.js';
+  import { putInNote } from '../../lib/notes/putInNote.svelte.js';
 
   let { rows = [], controller, onnew, onedit, ontoggle,
     ondone, onfly, onremove, onreorder, oncategory, ondeleteplace } = $props();
@@ -15,6 +17,7 @@
   {:else}
     <AddedLayers rows={personal} heading="My layers" headingIcon="stack" addLabel="New layer"
       ondownload={(row) => controller.download(row)}
+      onmap={(row) => void putInNote(layerMapOffer(caseState.current?.id, row))}
       {ontoggle} {onedit} {onremove} {onreorder} {oncategory} onadd={onnew}
       dates={addedLayers.dates}
       onperiod={(row, period, commit) => addedLayers.setPeriod(caseState.current?.id, row, period, commit)}
