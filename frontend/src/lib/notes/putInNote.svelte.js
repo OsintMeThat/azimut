@@ -121,14 +121,15 @@ export async function putInNote(offer, { busyAfter = BUSY_AFTER, target: given =
   const target = given?.caseId ? given : pinned.current;
   if (!target || typeof offer?.put !== 'function') return null;
   const { caseId, noteId, title, editor } = target;
-  const name = shortTitle(title);
+  // a put made from the note's own editor, which knows no title, says this note
+  const where = given?.caseId && !String(title ?? '').trim() ? 'this note' : `“${shortTitle(title)}”`;
   // where it goes is decided on the press, and held while it is being made
   const returnTo = typeof document === 'undefined' ? null : document.activeElement;
   const spot = editor?.spot?.() ?? null;
   const controller = new AbortController();
   let busy = null;
   const timer = setTimeout(() => {
-    busy = toast(offer.busy || `Putting it in “${name}”…`, 'info', 0, { label: 'Cancel', onClick: () => controller.abort() });
+    busy = toast(offer.busy || `Putting it in ${where}…`, 'info', 0, { label: 'Cancel', onClick: () => controller.abort() });
   }, busyAfter);
 
   let result;
@@ -173,7 +174,7 @@ export async function putInNote(offer, { busyAfter = BUSY_AFTER, target: given =
     return null;
   }
 
-  toast(`Put in “${name}”`, 'ok', 8000, {
+  toast(`Put in ${where}`, 'ok', 8000, {
     label: 'Undo',
     onClick: async () => {
       try {

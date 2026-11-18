@@ -111,10 +111,6 @@ ENTITY_ID = re.compile(r"^[A-Za-z0-9_-]{1,64}$")
 NAME = re.compile(r"^[^/\\\x00-\x1f]{1,120}$")
 
 
-class MapError(ValueError):
-    """What a map put cannot make, said in a sentence."""
-
-
 # -- the block ---------------------------------------------------------------------------
 
 
@@ -1984,6 +1980,6 @@ def _text(value: str) -> str:
 
 
 __all__ = [
-    "BLOCK", "Derived", "MapBlock", "MapError", "TOKEN", "block_text", "blocks_in", "derive", "fit_view",
+    "BLOCK", "Derived", "MapBlock", "TOKEN", "block_text", "blocks_in", "derive", "fit_view",
     "ground_bounds", "parse_block", "render_png", "svg",
 ]

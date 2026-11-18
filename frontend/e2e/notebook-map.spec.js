@@ -97,7 +97,7 @@ test('a layer put as a map is drawn in the note, and moved and played in the Pag
   await picker.getByRole('button', { name: 'Put the map' }).click();
   await expect(picker).toHaveCount(0);
   expect(state.asked.at(-1)).toEqual({ title: 'Front, north', layers: ['Front, north'], provider: 'esri-world-imagery' });
-  await expect(page.getByText(/Put in “/)).toBeVisible();
+  await expect(page.getByText('Put in this note')).toBeVisible();
   await expect(page.locator('.cm-block-map')).toContainText('The line');
   await expect(page.locator('.cm-block-map')).toContainText('Layer: Front, north');
   await expect.poll(() => state.written.at(-1) ?? '').toContain(BLOCK);
