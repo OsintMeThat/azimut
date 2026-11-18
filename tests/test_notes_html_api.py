@@ -45,7 +45,8 @@ def test_the_check_weighs_the_file_and_lists_links_points_of_view_and_counts(cli
     kinds = {warning["kind"] for warning in checked["warnings"]}
     assert {"count", "internal", "unsourced"} <= kinds
     counted = [warning for warning in checked["warnings"] if warning["kind"] == "count"]
-    assert counted[0]["text"].startswith('"12 trucks"') and isinstance(counted[0]["line"], int)
+    assert len(counted) == 1 and counted[0]["text"].startswith('1 count reads as exact: "12 trucks"')
+    assert isinstance(counted[0]["line"], int)
     # the PDF's check is as it was: no weight, no count
     pdf = client.post(f"/api/cases/{ambush['cid']}/notes/pdf/check", json={"notes": [ambush["note"]]}).json()
     assert "weight" not in pdf["notes"][0] and all(w["kind"] != "count" for w in pdf["notes"][0]["warnings"])

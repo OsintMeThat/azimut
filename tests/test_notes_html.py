@@ -55,6 +55,8 @@ class Node:
         self.tag, self.attrs, self.parent = tag, attrs, parent
         self.children: list[Node] = []
         self.text = ""
+        #: Its words and its children, in the order the page has them.
+        self.parts: list[Node | str] = []
 
     @property
     def classes(self) -> set[str]:
@@ -75,7 +77,10 @@ class Node:
         return found[0]
 
     def words(self) -> str:
-        return " ".join("".join(node.text for node in self.walk()).split())
+        return " ".join(self._said().split())
+
+    def _said(self) -> str:
+        return "".join(part if isinstance(part, str) else part._said() for part in self.parts)
 
     def ancestors(self):
         node = self.parent
@@ -95,11 +100,14 @@ class Page(HTMLParser):
     def handle_starttag(self, tag, attrs):
         node = Node(tag, {key: value or "" for key, value in attrs}, self.at)
         self.at.children.append(node)
+        self.at.parts.append(node)
         if tag not in VOID:
             self.at = node
 
     def handle_startendtag(self, tag, attrs):
-        self.at.children.append(Node(tag, {key: value or "" for key, value in attrs}, self.at))
+        node = Node(tag, {key: value or "" for key, value in attrs}, self.at)
+        self.at.children.append(node)
+        self.at.parts.append(node)
 
     def handle_endtag(self, tag):
         node = self.at
@@ -110,6 +118,7 @@ class Page(HTMLParser):
 
     def handle_data(self, data):
         self.at.text += data
+        self.at.parts.append(data)
 
     def handle_comment(self, data):
         self.comments.append(data)
@@ -391,11 +400,30 @@ def test_a_diagram_is_inline_svg_with_its_own_ids_and_nothing_that_runs(report):
     assert "#az-diagram-1 .label" in svg.one("style").text and "azimut-mermaid-0" not in svg.one("style").text
 
 
-def test_a_diagram_with_no_svg_is_its_source_and_asked_for(report):
+def test_a_diagram_with_no_svg_says_so_its_source_a_press_away(report):
     rendered = notes_html.render(None, title="T", text=f"```mermaid\n{DIAGRAM}```\n", identity=notefill.Identity())
     page = parse(rendered.html)
-    assert page.one("pre", "az-code") and "Diagram not drawn." in page.words()
+    figure = page.one("figure", "az-figure", data_kind="diagram")
+    assert figure.attrs["data-missing"] == "true" and not figure.find("svg")
+    assert figure.one("p", "az-diagram-missing").words() == "Diagram not drawn in this file."
+    details = figure.one("details")
+    assert details.one("summary").words() == "Its source" and "A[Post] --> B[Clip]" in details.one("pre").words()
     assert rendered.diagrams == [(notes_markdown.diagram_key(DIAGRAM), DIAGRAM)]
+
+
+def test_the_app_never_signs_the_cover_and_a_kicker_is_the_looks_own():
+    def kicker(look):
+        page = parse(notes_html.render(None, title="T", text="Words.", look=look, identity=notefill.Identity()).html)
+        return [node.words() for node in page.find(cls="az-kicker")]
+
+    assert kicker(None) == []
+    assert kicker(NoteLook(style="plain", cover={"on": True})) == []
+    assert kicker(NoteLook(style="report")) == []
+    assert kicker(NoteLook(style="report", cover={"on": True})) == ["Report"]
+    assert kicker(NoteLook(style="brief", cover={"on": True})) == ["Brief"]
+    assert "Azimut".casefold() not in parse(notes_html.render(None, title="T", text="Words.",
+                                                              identity=notefill.Identity()).html).one(
+        "header").words().casefold()
 
 
 # -- what a published file never holds ---------------------------------------------------
@@ -535,15 +563,30 @@ def test_points_of_view_are_listed_and_rounded_on_demand(report):
     assert "15.412700, 44.238100" in page.one("figure", "az-figure", data_kind="proof").words()
 
 
-def test_a_bare_count_is_a_warning_a_minimum_or_range_is_not():
-    note = ("At least 60 vehicles, 40–60 trucks, about 30 men and some 12 tanks were seen. We saw 12 trucks "
-            "and 3 BMPs. Figure 12 shows 2024 and 90% of it; the road is 14 km long; 14 of them burnt.\n")
+def test_a_count_read_as_exact_is_one_warning_a_minimum_or_range_is_not():
+    note = ("At least 60 vehicles, 40–60 trucks, 40 to 60 tanks, about 30 people, up to 9 drones and some 12 "
+            "tanks were seen; over 5 boats, more than 4 homes, ~8 strikes, ≥3 buildings. We saw 12 trucks, "
+            "**at least** 7 pickups and 3 civilians, and 12 trucks again. 200 base, 2 above, 6 distant, 6 BATT, "
+            "8 Tygor, 35 identified, a T-72 tank, 14 km, 90% sure, 2024 and `19 vehicles` in code.\n\n"
+            "| Count | What |\n|---|---|\n| 19 vehicles | in a table |\n\n## 4 tanks in a heading\n\n"
+            "> 5 fighters in a quote.\n\n- 2 soldiers in a list\n")
     rendered = notes_html.render(None, title="T", text=note, identity=notefill.Identity())
     counts = [said for said, kind in zip(rendered.warnings, rendered.warning_kinds) if kind == notes_html.COUNT]
-    assert counts == ['"12 trucks" is a bare count: say "at least" or give a range.',
-                      '"3 BMPs" is a bare count: say "at least" or give a range.']
+    assert counts == ['4 counts read as exact: "12 trucks", "3 civilians", "2 soldiers". '
+                      'Say "at least" or give a range.']
     # a confidence is printed as typed
-    assert "90%" in parse(rendered.html).words()
+    assert "90% sure" in parse(rendered.html).words()
+
+
+def test_more_counts_than_the_warning_quotes_are_counted_and_cut():
+    note = "".join(f"We saw {number} {noun}. " for number, noun in
+                   ((2, "tanks"), (3, "trucks"), (4, "boats"), (5, "drones"), (6, "homes"), (7, "people")))
+    rendered = notes_html.render(None, title="T", text=note, identity=notefill.Identity())
+    counts = [said for said, kind in zip(rendered.warnings, rendered.warning_kinds) if kind == notes_html.COUNT]
+    assert counts == ['6 counts read as exact: "2 tanks", "3 trucks", "4 boats", "5 drones", "6 homes", … '
+                      'Say "at least" or give a range.']
+    single = notes_html.render(None, title="T", text="We saw 2 tanks.", identity=notefill.Identity())
+    assert single.warnings == ['1 count reads as exact: "2 tanks". Say "at least" or give a range.']
 
 
 def test_the_check_says_what_the_pdf_check_says(report):
@@ -675,3 +718,45 @@ def test_every_character_the_reader_writes_itself_is_in_each_face():
     missing = [char for char in own if ord(char) in whole and ord(char) not in cmap]
     assert not missing, missing
     assert all(char in own for char in "0123456789/·↗‹›×…→‘’“”–—")
+
+
+def test_a_figure_has_one_credit_line_each_name_said_once(client):
+    """A proof made from eight Apple Maps captures credited them as "Apple Maps · Apple
+    Maps · Data from TomTom… +7" and said "Imagery: Apple Maps" again under it."""
+    from azimut.engine import links as link_engine
+    from azimut.engine import media as media_engine
+    from test_notes_report import make_case
+
+    case = Case.open(make_case(client, "Credits"))
+    notice = "Data from TomTom, © OpenStreetMap and other data providers"
+    captures = []
+    for index, provider in enumerate(("Apple Maps", "Apple Maps", "APPLE MAPS", "Apple Maps")):
+        filed = media_engine.import_image(case, Image.new("RGB", (40, 30), (index * 40, 90, 90)), f"c{index}.png", {
+            "type": "satellite", "provider": "apple", "provider_label": provider,
+            "attribution": f"{provider} · {notice}"}, title=f"Capture {index}", dedupe=False, entity_type="capture")
+        captures.append(filed["item"]["path"])
+    picture = media_engine.import_image(case, Image.new("RGB", (40, 30)), "proof.png", {"type": "clipboard"},
+                                        title="Where they lie", dedupe=False)
+    link_engine.link_all(case, picture["entity"]["id"], link_engine.DERIVED_FROM, captures, by="proof-composer")
+    many = media_engine.import_image(case, Image.new("RGB", (40, 30)), "many.png", {"type": "clipboard"},
+                                     title="Many", dedupe=False)
+    others = []
+    for index, provider in enumerate(("Esri World Imagery", "Google Satellite", "Bing", "Yandex", "Mapbox")):
+        filed = media_engine.import_image(case, Image.new("RGB", (40, 30), (9, index * 40, 9)), f"o{index}.png", {
+            "type": "satellite", "provider_label": provider, "imagery_date": "2025-06-0" + str(index + 1)},
+            title=f"Other {index}", dedupe=False, entity_type="capture")
+        others.append(filed["item"]["path"])
+    link_engine.link_all(case, many["entity"]["id"], link_engine.DERIVED_FROM, others, by="proof-composer")
+    note = (f"[[media:{picture['entity']['id']}|Where they lie]]{{caption=\"Imagery: Apple Maps.\"}}\n\n"
+            f"[[media:{many['entity']['id']}|Many]]\n")
+    page = parse(notes_html.render(case, title="T", text=note, identity=notefill.Identity()).html)
+    first, second = page.find("figure", "az-figure")
+    credits = first.find(cls="az-credit")
+    assert len(credits) == 1 and not first.find(cls="az-dates")
+    said = credits[0].words()
+    assert said.startswith("Imagery: Apple Maps · " + notice) and "+" not in said
+    assert said.casefold().count("apple maps") == 1 and said.count(notice) == 1
+    # the caption keeps its own words
+    assert first.one(cls="az-caption").words() == "Imagery: Apple Maps."
+    more = second.one(cls="az-credit").words()
+    assert more.startswith("Imagery: Esri World Imagery, 1 June 2025 · ") and more.endswith("and 1 more")

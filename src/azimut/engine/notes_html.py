@@ -121,6 +121,8 @@ TLP_MEANINGS = {
     "amber-strict": "Limited disclosure, restricted to participants' organisations.",
     "red": "For the eyes and ears of individual recipients only, no further disclosure.",
 }
+#: The word over a cover's title, by the look's style; a plain page has none.
+KICKERS = {"report": "Report", "brief": "Brief", "journal": "Log"}
 #: What prints where a picture or a video cannot.
 MEDIA_UNAVAILABLE = "Media unavailable"
 CASE_PICTURE = "Picture from the case"
@@ -145,27 +147,27 @@ ANCHOR = re.compile(r"^[\w:.-]{1,80}$")
 RESERVED_IDS = frozenset({"sources", "corrections", "contents", "top", "main", "cover", "footer"})
 RESERVED_ID = re.compile(r"^(?:src|clip|fig|step|limits)-\d+$")
 
-#: A number followed by a word, the shape of a count.
-BARE_COUNT = re.compile(r"(?<![\w.,:/#+~≥≤>–—-])(\d{1,6})(?![\w.,:/%°×x–—-])[ \t]+([A-Za-z][A-Za-z'-]{2,})")
-#: What before a count makes it a minimum, a maximum or a range.
-HEDGES = re.compile(
-    r"(?:at\s+least|at\s+most|about|around|approximately|approx\.?|roughly|some|up\s+to|more\s+than|less\s+than|"
-    r"fewer\s+than|over|under|nearly|almost|estimated|between|minimum\s+of|maximum\s+of|c\.|ca\.|~|≥|≤|>|<)\s*$",
-    re.I,
-)
-#: Words after a number that make it a measure, a day or a time rather than a count.
-NOT_COUNTED = frozenset("""
-km kilometres kilometers metres meters miles feet ft mm cm kg tonnes tons percent per cent degrees hours hour
-minutes minute seconds second days day weeks week months month years year am pm utc gmt px mb gb kb times
-january february march april may june july august september october november december
-jan feb mar apr jun jul aug sep sept oct nov dec to and or of
+#: What a count is a count of: the nouns a register or a strike report counts. A
+#: number followed straight by one is read as a count; any other number is not.
+COUNT_NOUNS = frozenset("""
+vehicle vehicles tank tanks truck trucks pickup pickups person people civilian civilians fighter fighters
+soldier soldiers dead killed wounded casualty casualties strike strikes building buildings home homes
+boat boats drone drones aircraft
 """.split())
-#: Words before a number that make it a name or a position rather than a count.
-NOT_A_COUNT_BEFORE = re.compile(
-    r"(?:figure|fig\.?|table|step|slide|page|no\.?|number|frame|day|version|row|line|section|chapter|route|"
-    r"road|highway|brigade|battalion|regiment|division|unit|building|block|plot|sector|grid|kilometre|km)\s*$",
+#: A number followed by a word, the shape of a count.
+BARE_COUNT = re.compile(r"(?<![\w.,:/#+~≥≤>–—-])(\d{1,6})(?![\w.,:/%°×+–—-])[ \t]+([A-Za-z]+)\b")
+#: What before a count makes it a minimum, a maximum or a range: a hedge, or a first
+#: number and `to`, `-` or `or` (`40 to 60 vehicles`).
+HEDGES = re.compile(
+    r"(?:\bat\s+least|\bat\s+most|\babout|\baround|\bapproximately|\bapprox\.?|\broughly|\bsome|\bup\s+to|"
+    r"\bmore\s+than|\bless\s+than|\bfewer\s+than|\bover|\bunder|\bnearly|\balmost|\bestimated|\bbetween|"
+    r"\bminimum\s+of|\bmaximum\s+of|\bc\.|\bca\.|~|≥|≤|>|<|\d\s*(?:to|or|-|–|—)\s*)\s*$",
     re.I,
 )
+#: How many credits of one kind a figure names before it counts the rest.
+MAX_CREDITS = 4
+#: How many counts the check's one warning quotes.
+MAX_COUNTS = 5
 
 
 class NotesHtmlError(Exception):
@@ -371,6 +373,8 @@ class _Page:
         self._remote = 0
         self._remote_line: int | None = None
         self._counts: list[tuple[str, int | None]] = []
+        #: How deep inside quotes and callouts the walk is: their words are not counted.
+        self._quoted = 0
         self._notices: set[str] = set()
         self._svgs = 0
 
@@ -427,11 +431,8 @@ class _Page:
         if self._remote:
             self._warn(f"{self._remote} remote image{'s' if self._remote > 1 else ''} left out: "
                        "the export never fetches from the network.", self._remote_line, md.OTHER)
-        for phrase, line in self._counts[:MAX_COUNTS]:
-            self._warn(f'"{phrase}" is a bare count: say "at least" or give a range.', line, COUNT)
-        rest = len(self._counts) - MAX_COUNTS
-        if rest > 0:
-            self._warn(f"{rest} more bare count{'s' if rest > 1 else ''}.", None, COUNT)
+        if self._counts:
+            self._warn(_counts_said([phrase for phrase, _ in self._counts]), self._counts[0][1], COUNT)
         body = self._scrub("".join(self.out))
         sources = self._sources()
         corrections = self._corrections(changes, earlier)
@@ -581,8 +582,11 @@ class _Page:
             parts.append("</header>\n")
             return "".join(parts)
         kind = "style" if look.cover.on else "none"
-        lines = [f'<header class="az-cover" data-cover="{kind}">\n', tlp,
-                 f'<p class="az-kicker">{_text(notes_style.KICKERS[look.style])}</p>\n',
+        # the style's name over the title, only where the look asked for a cover: the
+        # app never signs a page it was not asked to
+        said = KICKERS.get(look.style, "") if look.cover.on else ""
+        kicker = f'<p class="az-kicker">{_text(said)}</p>\n' if said else ""
+        lines = [f'<header class="az-cover" data-cover="{kind}">\n', tlp, kicker,
                  f'<h1 class="az-title" dir="auto">{_text(title)}</h1>\n']
         if look.cover.subtitle:
             lines.append(f'<p class="az-standfirst" dir="auto">{_text(look.cover.subtitle)}</p>\n')
@@ -620,7 +624,7 @@ class _Page:
         source = self.cited.reader.entity(entity_id)
         uri, size = encoded
         alt = str(record.get("label") or "Cover picture")
-        credit = self._credit(source.credit() if source is not None else None, self.cited.number(source))
+        credit = self._credit(source, self.cited.number(source))
         caption = f"<figcaption>{credit}</figcaption>" if credit else ""
         return (f'<figure class="az-figure az-cover-figure" data-kind="picture">'
                 f"{_zoom_button(_img(uri, size, alt), alt)}{caption}</figure>\n")
@@ -738,7 +742,9 @@ class _Page:
         if figure is not None:
             self.out.append(figure)
             return index + 3
-        words = self._inline(inline, counted=True)
+        if not self._quoted and not self._on_cover:
+            self._count(inline)
+        words = self._inline(inline)
         if words.strip():
             self.out.append(words if tokens[index].hidden else f'<p dir="auto">{words}</p>\n')
         return index + 3
@@ -770,7 +776,11 @@ class _Page:
         kind = md.callout_kind(tokens, index)
         callout = md.take_callout(tokens, index)
         end = md.past(tokens, index)
-        inner = self._drawn(tokens, index + 1, end - 1)
+        self._quoted += 1
+        try:
+            inner = self._drawn(tokens, index + 1, end - 1)
+        finally:
+            self._quoted -= 1
         if callout is None:
             self.out.append(f"<blockquote>\n{inner}</blockquote>\n")
             return end
@@ -934,7 +944,7 @@ class _Page:
 
     # -- inline -------------------------------------------------------------------
 
-    def _inline(self, token: Token, *, counted: bool = False) -> str:
+    def _inline(self, token: Token) -> str:
         """One inline token stream as HTML: marks, links, citations, and in prose the
         addresses, coordinates and timecodes it holds."""
         if token.type != "inline":
@@ -966,12 +976,7 @@ class _Page:
                 if shown:
                     parts.append(_text(shown))
             elif kind == "text":
-                if links:
-                    parts.append(_text(child.content))
-                else:
-                    if counted and not self._on_cover:
-                        self._count(child.content)
-                    parts.append(self._prose(child.content))
+                parts.append(_text(child.content) if links else self._prose(child.content))
         parts.extend(closing for closing, _ in reversed(links))
         return "".join(parts)
 
@@ -1071,14 +1076,18 @@ class _Page:
             return f'<a class="az-watch" {_outward(_at_moment(clip.url, time.start))}>Watch {_text(time.words)}</a>'
         return _text(time.words)
 
-    def _count(self, text: str) -> None:
-        """Note each count said with no "at least" or range before it, for the check."""
+    def _count(self, inline: Token) -> None:
+        """Note each count of a paragraph read as exact, for the check: a number straight
+        before a noun of `COUNT_NOUNS`, with no hedge or range before it. Its code spans
+        are no prose, and a heading, a table, a caption or a quote is never read."""
+        text = "".join("\x00" if child.type == "code_inline" else
+                       (" " if child.type in ("softbreak", "hardbreak") else child.content)
+                       for child in inline.children or [] if child.type in ("text", "code_inline", "softbreak",
+                                                                            "hardbreak"))
         for match in BARE_COUNT.finditer(text):
-            number, word = int(match.group(1)), match.group(2).lower()
-            if number < 2 or 1900 <= number <= 2099 or word in NOT_COUNTED:
+            if match.group(2).lower() not in COUNT_NOUNS or int(match.group(1)) < 2:
                 continue
-            before = text[max(0, match.start() - 24):match.start()]
-            if HEDGES.search(before) or NOT_A_COUNT_BEFORE.search(before):
+            if HEDGES.search(text[max(0, match.start() - 24):match.start()]):
                 continue
             self._counts.append((f"{match.group(1)} {match.group(2)}", self._line))
 
@@ -1204,7 +1213,7 @@ class _Page:
             return self._clip(path, relative, record, source, title, words, number,
                               f'class="{classes}"{layout}{extra}')
         caption = self._caption(title, words)
-        credit = self._credit(source.credit() if source is not None else None, number)
+        credit = self._credit(source, number)
         posted = _posted(source.posted) if source is not None and source.posted else ""
         chain = self._chain(source)
         kind = "proof" if (record or {}).get("type") == "proof" else "picture"
@@ -1262,13 +1271,47 @@ class _Page:
             if label else ""
         return f'<span class="az-caption" dir="auto">{lead}{_text(said)}</span>\n'
 
-    def _credit(self, credit: notesources.Credit | None, number: int) -> str:
-        if credit is None:
-            return f'<span class="az-credit">{_cite(number)}</span>\n' if number else ""
-        value = f"<a {_outward(credit.link)}>{_text(credit.value)}</a>" if credit.link else _text(credit.value)
+    def _credit(self, source: Source | None, number: int) -> str:
+        """The one credit line of a figure: whose imagery and of which day, where it was
+        posted, what a map or a terrain owes, each named once whatever its case, read
+        from the picture or, for one made in the case, from everything it was made
+        from. Past `MAX_CREDITS` of a kind the rest are counted; How this was checked
+        names them all."""
         cite = f" {_cite(number)}" if number else ""
-        return (f'<span class="az-credit"><span class="az-credit-kind">{_text(credit.kind)}:</span> '
-                f"{value}{cite}</span>\n")
+        groups: dict[str, list[tuple[str, str]]] = {}
+        seen: set[str] = set()
+
+        def add(kind: str, words: str, link: str = "", *also: str) -> None:
+            words = " ".join(words.split())
+            key = words.casefold()
+            if not key or key in seen:
+                return
+            seen.update({key, *(" ".join(one.split()).casefold() for one in also)})
+            groups.setdefault(kind, []).append((words, link))
+
+        for kind, leaf in _credit_leaves(source):
+            if kind == "Imagery":
+                for reading in leaf.readings:
+                    day = notesources.spoken_day(reading.day)
+                    add(kind, ", ".join(part for part in (reading.provider, day) if part), leaf.address,
+                        reading.provider)
+                for part in leaf.attribution.split(" · "):
+                    add(kind, part)
+            elif kind == "Source":
+                add(kind, notesources.host(leaf.address), leaf.address)
+            else:
+                for part in leaf.attribution.split(" · "):
+                    add(kind, part)
+        if not groups:
+            return f'<span class="az-credit">{cite.strip()}</span>\n' if number else ""
+        said: list[str] = []
+        for kind, items in groups.items():
+            shown = [f"<a {_outward(link)}>{_text(words)}</a>" if link else _text(words)
+                     for words, link in items[:MAX_CREDITS]]
+            more = len(items) - MAX_CREDITS
+            tail = f" and {more} more" if more > 0 else ""
+            said.append(f'<span class="az-credit-kind">{_text(kind)}:</span> {" · ".join(shown)}{tail}')
+        return f'<span class="az-credit">{"; ".join(said)}{cite}</span>\n'
 
     def _street_view(self, source: Source | None) -> None:
         """Say once that a site's rules keep its picture out of published work."""
@@ -1326,8 +1369,10 @@ class _Page:
         footage = ""
         for one in source.lineage():
             for reading in one.readings:
-                said = ", ".join(part for part in (reading.provider, notesources.spoken_day(reading.day)) if part)
-                if said and said not in imagery:
+                day = notesources.spoken_day(reading.day)
+                said = ", ".join(part for part in (reading.provider, day) if part)
+                # a provider with no day is the credit's to name, not a date
+                if day and said.casefold() not in (known.casefold() for known in imagery):
                     imagery.append(said)
             if not footage and one.published and one.kind != notesources.IMAGERY:
                 footage = notesources.spoken_day(one.published)
@@ -1437,7 +1482,7 @@ class _Page:
                 poster, poster_size = encoded
         url = source.traced_address if source is not None else ""
         caption = self._caption(title or f"Video: {words or 'untitled'}", words)
-        credit = self._credit(source.credit() if source is not None else None, number)
+        credit = self._credit(source, number)
         chain = self._chain(source)
         figcaption = f"<figcaption>{caption}{credit}</figcaption>\n" if caption or credit else ""
         label = words or title or path.stem
@@ -1476,8 +1521,11 @@ class _Page:
         svg = self.diagrams.get(key)
         cleaned = _clean_svg(svg, f"az-diagram-{self._svgs + 1}") if svg else None
         if cleaned is None:
+            # said in a line, its source a press away: never an empty frame
             self.missing.setdefault(key, source)
-            return _aside("Diagram not drawn.") + _code(source)
+            return ('<figure class="az-figure" data-kind="diagram" data-missing="true">\n'
+                    '<p class="az-diagram-missing">Diagram not drawn in this file.</p>\n'
+                    f"<details><summary>Its source</summary>\n{_code(source)}</details>\n</figure>\n")
         self._svgs += 1
         caption = self._caption("", "")
         figcaption = f"<figcaption>{caption}</figcaption>" if caption else ""
@@ -1996,6 +2044,33 @@ def _side_day(sidecar: dict[str, Any], side: str) -> str:
         return ""
     exact = sidecar.get(f"imagery_{side}_exact") is not False
     return notesources.spoken_day(day if exact else f"{day}~")
+
+
+def _credit_leaves(source: Source | None, depth: int = 0) -> Iterable[tuple[str, Source]]:
+    """What a picture's credit is read from, as `notesources.Source.credit` reads it, but
+    every origin rather than the first: imagery that says whose it is, a page it was
+    posted on, or what a map or a terrain owes."""
+    if source is None or depth > notesources.MAX_HOPS:
+        return
+    if source.kind == notesources.IMAGERY and (source.readings or source.attribution):
+        yield "Imagery", source
+    elif source.address:
+        yield "Source", source
+    elif source.origins:
+        for origin in source.origins:
+            yield from _credit_leaves(origin, depth + 1)
+    elif source.attribution:
+        yield ("Map" if source.noun == notesources.PLATE_NOUN else "Terrain"), source
+
+
+def _counts_said(phrases: list[str]) -> str:
+    """The check's one warning for the counts a note gives as exact, a few quoted."""
+    said = list(dict.fromkeys(phrases))
+    quoted = ", ".join(f'"{phrase}"' for phrase in said[:MAX_COUNTS])
+    quoted += ", …" if len(said) > MAX_COUNTS else "."
+    if len(phrases) == 1:
+        return f'1 count reads as exact: {quoted} Say "at least" or give a range.'
+    return f'{len(phrases)} counts read as exact: {quoted} Say "at least" or give a range.'
 
 
 def _anchor_named(message: str) -> str:
