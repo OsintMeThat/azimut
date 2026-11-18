@@ -7052,9 +7052,9 @@ what it finds is listed under *Before you export*, by note when several are expo
 each with *Go to* when it names a line, and the button reads *Export anyway*. A check
 that fails says nothing and never holds the export back.
 
-**PDF | HTML.** The export dialog opens with a **PDF | HTML | WordPress draft** switch, the
-last one picked kept for this browser; everything else (the edition, the destination, the
-check, the Editions record) is the same for PDF and HTML. For HTML the check also says what the file would
+**PDF | HTML.** The export dialog opens with a **PDF | HTML** switch, the last one picked
+kept for this browser; everything else (the edition, the destination, the check, the
+Editions record) is the same for both. For HTML the check also says what the file would
 weigh, past the 25 MB it aims under in amber, lists the clips that go out as a poster and
 a link rather than inside the file, and lists the points where a filmer stood, which a
 public file keeps to the metre unless *Round them to about 150 m in this file* is ticked
@@ -7066,15 +7066,16 @@ the same switch: HTML draws the page an export would write, in a frame that runs
 script and reaches nothing of the app, keeping its place between drafts; a template shows
 its pages.
 
-**WordPress draft.** The switch's third choice sends one note to the analyst's own
+**WordPress draft.** The switch's **WordPress draft** sends one note to the analyst's own
 WordPress site as a **draft**, which they publish with WordPress's own button: Azimut never
 publishes or schedules, and a post that has left the drafts is never touched again. The
 dialog says where it goes (*To example.org as desk, as a draft you publish in WordPress*),
 that the public edition goes, how many pictures and clips go to the media library and what
 stays out (internal passages, interactive maps, diagrams not drawn, pictures the note cannot
 show; a clip past the HTML page's budget, or one the site refuses, goes as its still and a
-link), with the same points of view and *Round them to about 150 m* as HTML. One note at a
-time. While no site is set, it shows the setup steps of Settings › Publishing and a way
+link), what the note would warn about under *Before you send* (the branch checks the
+public edition itself), and the same points of view and *Round them to about 150 m* as
+HTML. One note at a time. While no site is set, it shows the setup steps of Settings › Publishing and a way
 there. **Send as a draft** uploads every picture without its metadata, with its alt text
 and caption, then makes the post: title, excerpt (the cover's subtitle, else the first
 paragraph), featured image (the cover picture, else the first credited one), and content
