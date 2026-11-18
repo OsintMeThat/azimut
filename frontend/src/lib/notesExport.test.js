@@ -64,6 +64,10 @@ describe('exporting notes as PDF', () => {
     // with no address, none is sent: the folder works without one
     await exportNotes('case-1', ['n1'], { draw, format: 'web' });
     expect(post.mock.calls[3][1]).not.toHaveProperty('base_url');
+    expect(post.mock.calls[3][1]).not.toHaveProperty('offline_maps');
+    // its maps kept offline when asked, and only then said
+    await exportNotes('case-1', ['n1'], { draw, format: 'web', offlineMaps: true });
+    expect(post.mock.calls[5][1].offline_maps).toBe(true);
   });
 
   it('skips drawing entirely when no note holds a diagram', async () => {

@@ -864,6 +864,47 @@ describe('the check before export', () => {
     expect(dialog().querySelector('#export-address').value).toBe('https://desk.github.io/articles/harbour/');
   });
 
+  it('says once that a web folder’s maps load their base map from OpenFreeMap online, and keeps them offline when asked', async () => {
+    answerCheck((notes) => ({
+      notes: notes.map((note) => ({ note, title: 'Old lead', internal: 0, warnings: [], weight: 3 * 1024 * 1024, earlier: 0,
+        links: [], pov: [], live: true })),
+    }));
+    const fallback = post.getMockImplementation();
+    post.mockImplementation(async (url, body) => {
+      if (url.endsWith('/notes/web')) {
+        return { written: [{ note: 'n1', title: 'Old lead', file: 'harbour', edition: 'public', at: '2026-11-18T10:00:00Z', folder: 'exports',
+          address: '' }], warnings: [], path: '/case/exports/web' };
+      }
+      return fallback(url, body);
+    });
+    await exportFromNote();
+    // a PDF says nothing of it
+    expect(dialogText()).not.toContain('OpenFreeMap');
+    [...dialog().querySelectorAll('[role="group"][aria-label="Format"] button')][2].click();
+    await settle();
+    const line = dialog().querySelector('.live-maps');
+    expect(line.textContent).toContain('Its maps load their base map from OpenFreeMap when read online.');
+    const tick = line.querySelector('input[type="checkbox"]');
+    expect(tick.checked).toBe(false);
+    expect(tick.closest('label').title).toBeTruthy();
+    expect(tick.closest('label').textContent.trim()).toBe('Keep its maps offline');
+    tick.click();
+    flushSync();
+    primary().click();
+    await settle();
+    const [, body] = post.mock.calls.find(([url]) => url.endsWith('/notes/web'));
+    expect(body.offline_maps).toBe(true);
+  });
+
+  it('says nothing of OpenFreeMap for a web folder whose maps stay offline or that holds none', async () => {
+    answerCheck((notes) => ({ notes: notes.map((note) => ({ note, title: 'Old lead', warnings: [], weight: 1024, earlier: 0, links: [], pov: [], live: false })) }));
+    await exportFromNote();
+    [...dialog().querySelectorAll('[role="group"][aria-label="Format"] button')][2].click();
+    await settle();
+    expect(dialog().querySelector('.live-maps')).toBeNull();
+    expect(dialogText()).not.toContain('OpenFreeMap');
+  });
+
   it('offers a WordPress draft as its own branch, with nothing to export from here yet', async () => {
     answerCheck((notes) => ({ notes: notes.map((note) => ({ note, title: 'Old lead', warnings: [] })) }));
     await exportFromNote();
