@@ -38,12 +38,12 @@ import {
 } from './editor/state.js';
 import { highlight, look } from './editor/theme.js';
 import {
-  BlockWidget, blockMouse, blockWidget, drawMarkdown, markPicked, sourceButton,
+  BlockWidget, blockWidget, drawMarkdown, markPicked, sourceButton,
 } from './editor/widgets.js';
 import { entityReference, markdownHtml } from '../markdown.js';
 import { paths as iconPaths } from '../../components/Icon.svelte';
-import { INCLUDE_LINE, PAGE_BREAK_LINE, includeLine } from './look.js';
-import { COVER_LINE, coverChange } from './reportParts.js';
+import { INCLUDE_LINE, includeLine } from './look.js';
+import { coverChange } from './reportParts.js';
 import {
   BLOCK_OPEN, CAPTION_HELP, PICTURE_ALIGNS, PICTURE_SIZES, POSTED_HELP, SOURCE_HELP, blockAlignAt, blockSide, captionField, pictureLine, picturesIn,
   rovingToolbar, sizeWidth, sizedLine, sourceField,
@@ -145,91 +145,6 @@ function includeButton(text, className, title) {
   button.textContent = text;
   button.title = title;
   return button;
-}
-
-class PageBreakWidget extends WidgetType {
-  constructor(picked = false) {
-    super();
-    this.picked = picked;
-  }
-
-  /** The kind of block this draws, as `editor/blocks.js` names it. */
-  get blockKind() {
-    return 'pagebreak';
-  }
-
-  eq(other) {
-    return other.picked === this.picked;
-  }
-
-  updateDOM(dom, _view, previous) {
-    if (!previous) return false;
-    markPicked(dom, this.picked);
-    return true;
-  }
-
-  toDOM(view) {
-    const box = document.createElement('div');
-    box.className = 'cm-pagebreak';
-    box.dataset.pagebreak = 'true';
-    box.title = 'The PDF starts a new page here. Double-click to edit the line';
-    const label = document.createElement('span');
-    label.textContent = 'Page break';
-    box.append(label);
-    blockMouse(view, box, this.picked);
-    return box;
-  }
-
-  ignoreEvent(event) {
-    return event.type !== 'mousedown';
-  }
-
-  get estimatedHeight() {
-    return 30;
-  }
-}
-
-/** Where the analyst's own first page ends: a rule, named. Pressing it picks it, a double press opens its line. */
-class CoverRuleWidget extends WidgetType {
-  constructor(picked = false) {
-    super();
-    this.picked = picked;
-  }
-
-  /** The kind of block this draws, as `editor/blocks.js` names it. */
-  get blockKind() {
-    return 'cover';
-  }
-
-  eq(other) {
-    return other.picked === this.picked;
-  }
-
-  updateDOM(dom, _view, previous) {
-    if (!previous) return false;
-    markPicked(dom, this.picked);
-    return true;
-  }
-
-  toDOM(view) {
-    const box = document.createElement('div');
-    box.className = 'cm-pagebreak cm-cover-rule';
-    box.dataset.coverRule = 'true';
-    box.title = 'Above this line is page 1 when Look › Cover is Your own page. Double-click to edit the line';
-    const label = document.createElement('span');
-    label.textContent = 'End of the cover page';
-    box.append(label);
-    blockMouse(view, box, this.picked);
-    return box;
-  }
-
-  ignoreEvent(event) {
-    return event.type !== 'mousedown';
-  }
-
-  get estimatedHeight() {
-    return 30;
-  }
 }
 
 const ALIGN_LABELS = { left: ['alignLeft', 'Left'], center: ['alignCentreH', 'Centre'], right: ['alignRight', 'Right'] };
@@ -568,18 +483,6 @@ function cornerTag(name) {
 }
 /** A line holding nothing but one picture: `![…](…){…}` or `[[media:…]]{…}`. */
 const PICTURE_LINE = /^\s*(?:!\[[^\]]*\]\([^)]*\)(?:\{[^}\n]*\})?|\[\[media:[A-Za-z0-9_-]+\|[^\]\n]+\]\](?:\{[^}\n]*\})?)\s*$/;
-/** Whether the comment `from`–`to` is a page break (`<!-- pagebreak -->`) alone on its line. */
-function pageBreakOn(state, from, to) {
-  const line = state.doc.lineAt(from);
-  return to <= line.to && PAGE_BREAK_LINE.test(line.text);
-}
-
-/** Whether the comment `from`–`to` is the end of the cover page (`<!-- cover -->`) alone on its line. */
-function coverRuleOn(state, from, to) {
-  const line = state.doc.lineAt(from);
-  return to <= line.to && COVER_LINE.test(line.text);
-}
-
 /** What a chapter line shows: the note as the home lists it, its record else, null when gone. */
 function includedNote(info, id) {
   const row = info.notes.get(id);
@@ -655,37 +558,6 @@ registerBlock({
     const again = [...view.contentDOM.querySelectorAll('.cm-block-picture')].find((node) => view.posAtDOM(node) === from);
     again?.querySelector(`[data-size-bar] ${same}`)?.focus({ preventScroll: true });
   }),
-});
-
-/** One comment line read as a block of its own when `test` says it is one. */
-function commentLine(test) {
-  return (node, { state }) => {
-    const line = state.doc.lineAt(node.from);
-    return test(state, node.from, node.to) ? { from: line.from, to: line.to } : null;
-  };
-}
-
-const pageBreakSource = (ctx, found) => {
-  ctx.line(found.from, 'cm-pagebreak-line');
-  return true;
-};
-
-registerBlock({
-  name: 'pagebreak',
-  node: 'CommentBlock',
-  read: commentLine(pageBreakOn),
-  widget: (spec) => new PageBreakWidget(spec.picked),
-  atomic: true,
-  source: pageBreakSource,
-});
-
-registerBlock({
-  name: 'cover',
-  node: 'CommentBlock',
-  read: commentLine(coverRuleOn),
-  widget: (spec) => new CoverRuleWidget(spec.picked),
-  atomic: true,
-  source: pageBreakSource,
 });
 
 registerBlock({
