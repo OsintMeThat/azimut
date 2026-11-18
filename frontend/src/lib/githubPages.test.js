@@ -33,8 +33,9 @@ describe('the GitHub Pages site, as Settings and the dialog read it', () => {
     const said = await publishNote('c1', 'n1', { shortName: 'port-strike', roundPov: true, changes: ' Fixed a date. ' });
     expect(post).toHaveBeenCalledWith('/api/cases/c1/notes/pdf/diagrams', { notes: ['n1'], edition: 'public' });
     expect(drawDiagrams.mock.calls[0][1].toPng('<svg/>')).toBe('<svg/>');
+    // its maps live unless the dialog keeps them offline
     expect(post).toHaveBeenLastCalledWith('/api/cases/c1/notes/n1/github', {
-      short_name: 'port-strike', diagrams: { k1: '<svg/>' }, round_pov: true, changes: 'Fixed a date.' });
+      short_name: 'port-strike', diagrams: { k1: '<svg/>' }, round_pov: true, changes: 'Fixed a date.', offline_maps: false });
     expect(said.address).toBe('https://octo.github.io/articles/port-strike/');
     post.mockImplementation(async (path) => (path.endsWith('/pdf/diagrams') ? { diagrams: [] }
       : { published: false, needs: 'pages', detail: 'Pages is off for octo/articles.' }));

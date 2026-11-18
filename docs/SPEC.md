@@ -582,7 +582,12 @@ stops making sense.
   (https, no credentials, no `?` or `#`, 300 characters) before it is printed in the
   head; the folder is written beside the notes, swapped in by renames, and nothing is
   sent anywhere from the app. Once published it is public, which the app and the folder's
-  how-to both say. Accepted risk (owner's choice, 2026-11-18): a
+  how-to both say. A page holding a map is the one page whose policy reaches past the
+  folder, to OpenFreeMap's one host (`tiles.openfreemap.org`, `connect-src` and `img-src`)
+  for its live map's style, tiles, glyphs and sprites: the readers' browsers reach it when
+  they read the page online, Azimut itself never does, and the export dialog says so once
+  with a tick to keep the maps offline. MapLibre runs from the folder's own files, its
+  worker one of them (no `blob:`), and no live satellite tile is ever fetched. Accepted risk (owner's choice, 2026-11-18): a
   public HTML report may carry Esri and Google imagery, its credit kept beside the
   picture and in its lightbox; a Street View or Yandex capture is warned about once by
   the check before export and never refused. Decoded note pictures are kept between renders in a

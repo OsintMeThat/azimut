@@ -110,6 +110,6 @@ describe('the check before export', () => {
     const answer = await checkNotes('c1', ['n1'], { format: 'pdf' });
     expect(post.mock.calls[0][1]).toEqual({ notes: ['n1'], edition: 'internal' });
     expect(answer).toEqual({ found: [], internal: 0 });
-    expect(readHtmlCheck(null)).toEqual({ weight: 0, links: [], pov: [], earlier: 0 });
+    expect(readHtmlCheck(null)).toEqual({ weight: 0, links: [], pov: [], earlier: 0, live: false });
   });
 });

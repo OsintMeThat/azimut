@@ -50,7 +50,10 @@ do the rest, and the page still reads top to bottom without them.
 (`engine/notes_web.py`): each picture, clip, font and the reader's own two files go
 under `assets/`, named by their content, and the page names them in place of `data:`
 addresses, under the folder's own policy. Nothing else changes: the same reading, the
-same safety, the same budget, counted over the whole folder.
+same safety, the same budget, counted over the whole folder. A folder given `LiveMaps`
+also carries MapLibre and the reader's live part (`reader.live.js`, `reader.live.css`),
+which turn its maps into live ones once the page is read online, under the wider policy
+that page alone is given.
 """
 
 from __future__ import annotations
@@ -226,6 +229,8 @@ class Folder:
 
     csp: str
     head: Callable[[str], str] | None = None
+    #: What makes its maps live online, or None to keep them as the HTML report draws them.
+    live: "LiveMaps | None" = None
     files: dict[str, bytes] = field(default_factory=dict)
     _named: dict[str, str] = field(default_factory=dict, repr=False)
 
@@ -246,6 +251,24 @@ class Folder:
         self.files[path] = data
         self._named[digest] = path
         return path
+
+
+@dataclass(frozen=True)
+class LiveMaps:
+    """What a folder's maps need to go live once it is online (`engine/notes_web.py`):
+    MapLibre's own files, each kept under its name in `assets/maplibre-<version>/` since
+    they name one another, the base map's style, and the policy that lets the page reach
+    the base map's host, used in place of the folder's own when the page holds a map."""
+
+    csp: str
+    style: str
+    version: str
+    files: dict[str, bytes]
+    #: MapLibre's licence, which the folder carries beside the page.
+    licence: bytes = b""
+    #: The reader's own part for it, and its style, beside the reader's.
+    module: str = "reader.live.js"
+    sheet: str = "reader.live.css"
 
 
 @dataclass(frozen=True)
@@ -285,6 +308,9 @@ class RenderedHtml:
     hero: Hero | None = None
     #: The day it is dated.
     day: date | None = None
+    #: How many maps it holds, and whether they go live once the folder is online.
+    maps: int = 0
+    live: bool = False
 
 
 def render(
@@ -364,6 +390,8 @@ def render(
         description=page.description,
         hero=page.hero,
         day=day,
+        maps=page.maps,
+        live=page.live,
     )
 
 
@@ -481,6 +509,8 @@ class _Page:
         self._cover_hero: Hero | None = None
         self._heroes: list[tuple[Hero, bool]] = []
         self.maps = 0
+        #: Whether its maps go live online: a folder's, holding one, given what it takes.
+        self.live = False
         #: Each map's steps, `(label, day)`, by its figure's id: the cards a story gives it.
         self._map_steps: dict[str, list[tuple[str, str, str, str]]] = {}
         #: The figure each proof shown in the page stands in, by its record, which a map's card links to.
@@ -559,11 +589,16 @@ class _Page:
     def _assemble(self, title: str, page: str) -> bytes:
         """The page with its clips and timecodes settled, wrapped in its document."""
         mapped = bool(self.maps)
-        reader_css = _asset("reader.css") + (_asset("reader.map.css") if mapped else "")
+        live = self.folder.live if self.folder is not None and mapped else None
+        self.live = live is not None
+        reader_css = (_asset("reader.css") + (_asset("reader.map.css") if mapped else "")
+                      + (_asset(live.sheet) if live is not None else ""))
         reader = _asset("reader.js")
         reader_js = reader.replace(MAP_SLOT, _asset("reader.map.js"), 1) if mapped else reader
         # what the reader writes itself is drawn in the page's face, a map's words with it
         own = (_asset("reader.map.js") + _asset("reader.map.css")) if mapped else ""
+        if live is not None:
+            own += _asset(live.module)
         fonts = _font_faces(self.look, self.theme, _visible_text(page) + title + own, self.folder)
         accent = f' style="--az-accent:{self.look.accent}"' if self.look.accent else ""
         tlp = f' data-tlp="{self.look.tlp}"' if self.look.tlp else ""
@@ -577,12 +612,14 @@ class _Page:
             script = f"<script>{code}</script>\n"
         else:
             # the reader's two files beside the page, which its policy lets in from the folder only
-            policy = self.folder.csp
+            policy = self.folder.csp if live is None else live.csp
             said = self.folder.head(self.description) if self.folder.head is not None else ""
             sheet = self.folder.put(self._folder_css(reader_css), "reader", ".css")
             styles = f'<link rel="stylesheet" id="az-reader" href="{sheet}">\n'
             code_file = self.folder.put(reader_js.encode("utf-8"), "reader", ".js")
             script = f'<script src="{code_file}"></script>\n'
+            if live is not None:
+                said += self._live_config(live)
         top = (
             f'<!doctype html>\n<html lang="en" dir="auto" data-look="{self.look.style}" data-font="{self.look.font}"'
             f'{tlp}{web} data-edition="{edition}"{accent}>\n<head>\n<meta charset="utf-8">\n'
@@ -605,6 +642,20 @@ class _Page:
             self._warn(f"The page weighs {_megabytes(self.weight)}, past the {_megabytes(MAX_BYTES)} it aims for.",
                        None, md.OTHER)
         return data
+
+    def _live_config(self, live: LiveMaps) -> str:
+        """MapLibre's files and the reader's live part put in the folder, and where they
+        are, for the reader to load once the page is read online (`maps` in reader.map.js);
+        unread data like a map's own."""
+        assert self.folder is not None
+        base = f"{FOLDER_ASSETS}/maplibre-{live.version}"
+        for name, data in live.files.items():
+            self.folder.files[f"{base}/{name}"] = data
+        module = self.folder.put(_asset(live.module).encode("utf-8"), "reader-live", ".js")
+        said = {"module": module, "maplibre": f"{base}/maplibre-gl.js", "css": f"{base}/maplibre-gl.css",
+                "style": live.style}
+        written = json.dumps(said, separators=(",", ":")).replace("<", "\\u003c")
+        return f'<script type="application/json" id="az-gl">{written}</script>\n'
 
     def _settle_clips(self, page: str, frame: int) -> str:
         """Each clip in or as its link, in page order, while the file stays under

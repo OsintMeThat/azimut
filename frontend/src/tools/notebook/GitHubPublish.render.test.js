@@ -79,10 +79,10 @@ it('publishes on the press and hands the answer up', async () => {
     : { published: true, address: 'https://octo.github.io/articles/port-strike/', repository: 'octo/articles', commit: 'c'.repeat(40) }));
   const props = show();
   await settle();
-  const answer = await live.publish({ roundPov: true, changes: 'Fixed a date.' });
+  const answer = await live.publish({ roundPov: true, changes: 'Fixed a date.', offlineMaps: true });
   expect(props.prepare).toHaveBeenCalled();
   expect(post).toHaveBeenLastCalledWith('/api/cases/c1/notes/n1/github', {
-    short_name: 'port-strike', diagrams: { k1: '<svg/>' }, round_pov: true, changes: 'Fixed a date.' });
+    short_name: 'port-strike', diagrams: { k1: '<svg/>' }, round_pov: true, changes: 'Fixed a date.', offline_maps: true });
   expect(answer.published).toBe(true);
   expect(bound.busy).toBe(false);
 });

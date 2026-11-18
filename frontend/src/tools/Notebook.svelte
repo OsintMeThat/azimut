@@ -121,6 +121,8 @@
   let exportFormat = $state(readFormat('export'));
   // an HTML page's points of view rounded to about 150 m, in that file only
   let roundPov = $state(false);
+  /** A web folder's maps kept as the HTML page draws them, rather than live over OpenFreeMap once online. */
+  let offlineMaps = $state(false);
   // what changed since an earlier public edition, printed at the page's end
   let exportChanges = $state('');
   // the address a web folder will live at, kept per note, and whether it was typed in this dialog
@@ -564,7 +566,7 @@
     const edition = PUBLIC_ONLY.includes(format) ? PUBLIC : exportEdition;
     const said = exportCheck?.internal ? `${edition} ` : '';
     const address = format === WEB && noteIds.length === 1 ? webAddress.trim() : '';
-    const options = format === HTML || format === WEB ? { edition, format, roundPov, changes: exportChanges, address } : { edition };
+    const options = format === HTML || format === WEB ? { edition, format, roundPov, changes: exportChanges, address, offlineMaps: format === WEB && offlineMaps } : { edition };
     if (address) keepAddress(id, noteIds[0], address);
     exportBusy = true;
     try {
@@ -610,6 +612,7 @@
     exportIds = noteIds.map((id) => id ?? CASE_NOTES);
     exportEdition = editionOfAll(caseId, exportIds);
     roundPov = false;
+    offlineMaps = false;
     exportChanges = '';
     webDone = null;
     githubDone = null;
@@ -648,7 +651,7 @@
   async function runPublish() {
     if (!caseId || !githubPublish || exportBusy) return;
     const id = caseId;
-    const result = await githubPublish.publish({ roundPov, changes: exportChanges });
+    const result = await githubPublish.publish({ roundPov, changes: exportChanges, offlineMaps });
     if (!result || id !== caseId || !exportOpen) return;
     stopCheck();
     githubDone = result;
@@ -996,6 +999,10 @@
           {/if}
           <p class="export-note">{githubSet && !several ? 'Export writes it to web/ in the destination; Publish puts it online in your repository.'
             : 'Written to web/ in the destination, ready to put online. Exporting again replaces it.'}</p>
+          {#if page?.live}
+            <p class="export-note live-maps">Its maps load their base map from OpenFreeMap when read online.
+              <label class="round" title={LOOK_HELP.offline_maps}><input type="checkbox" bind:checked={offlineMaps} /> Keep its maps offline</label></p>
+          {/if}
         </div>
       {:else if wordpress}
         <!-- WordPress draft: its fields, its button and its result line, filled in by the WordPress branch. -->
@@ -1170,6 +1177,8 @@
   .dest-label { color: var(--text-3); }
   .dest-path { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .export-note { color: var(--text-3); font-size: var(--fs-xs); margin: 6px 0 0; }
+  .live-maps { display: flex; flex-wrap: wrap; align-items: center; gap: 2px 12px; }
+  .live-maps .round { margin-top: 0; }
   .export-edition { display: flex; align-items: center; gap: 8px; margin-top: 8px; font-size: var(--fs-sm); }
   .edition-said { flex: 1; min-width: 0; display: flex; flex-direction: column; color: var(--text-3); font-size: var(--fs-xs); }
   .checking { color: var(--text-3); font-size: var(--fs-xs); margin: 10px 0 0; }

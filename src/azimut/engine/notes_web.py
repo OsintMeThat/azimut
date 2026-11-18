@@ -27,6 +27,16 @@ any other host, no inline script. The safety of the HTML report holds as it is: 
 public edition only, every internal passage refused, metadata stripped, the same
 25 MB budget counted over the whole folder.
 
+**Its maps go live online.** A page holding a map carries MapLibre GL JS as files
+(`assets/maplibre-<version>/`, its licence as `LICENSE-maplibre.txt`), copied from the
+build the frontend leaves in `static/vendor/maplibre/` (`live_maps`), and the reader
+turns each map into a live one over OpenFreeMap's free vector map once the page is read
+over the web, the offline drawing staying until it is ready and for good when it cannot
+be. That page alone widens its policy (`LIVE_SOURCES`), to OpenFreeMap's one host, which
+the reader's browser reaches; Azimut never does. The analyst can keep the maps offline
+(``live=False``), and a copy of Azimut built without those files keeps them offline
+and says so once.
+
 **The card** (`share_card`) is the note's cover picture, else the picture the story
 layout opens on, under a dark gradient with the title in the report's own face, its
 day, and the provider's credit for imagery or a map; with no picture, the title on
@@ -137,6 +147,25 @@ MUTED = (98, 103, 111)
 #: A folder name taken from an address: one plain path part.
 FOLDER_NAME = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,79}$")
 
+#: Where the frontend build leaves MapLibre's own build for a live map
+#: (`frontend/src/lib/notes/maplibreVendor.js`), shipped with the rest of `static/`.
+LIVE_VENDOR = Path(__file__).resolve().parents[1] / "static" / "vendor" / "maplibre"
+#: Its files a folder carries under `assets/maplibre-<version>/`, by the names they call one another.
+LIVE_FILES = ("maplibre-gl.js", "maplibre-gl-shared.js", "maplibre-gl-worker.js", "maplibre-gl.css")
+LIVE_LICENSE = "LICENSE-maplibre.txt"
+LIVE_VERSION = re.compile(r"^\d{1,3}\.\d{1,3}\.\d{1,3}(?:-[0-9A-Za-z.]{1,20})?$")
+#: The base map a live map draws on: OpenFreeMap's free vector style, which needs no key.
+#: Its style, tiles, glyphs and sprites all come from this one host, as the style at
+#: `LIVE_STYLE` names them (read 2026-11-18).
+LIVE_HOST = "https://tiles.openfreemap.org"
+LIVE_STYLE = f"{LIVE_HOST}/styles/liberty"
+#: What a page with a live map adds to the folder's policy: the base map's host, fetched
+#: (style, tiles, glyphs, sprites) and drawn, and the page's own files fetched, as the map
+#: reads the filed ground. Its worker is a file of the folder, which `script-src 'self'` allows.
+LIVE_SOURCES: dict[str, tuple[str, ...]] = {"connect-src": ("'self'", LIVE_HOST), "img-src": (LIVE_HOST,)}
+#: The check's words when the maps cannot go live.
+LIVE_MISSING = "Its maps stay offline: this copy of Azimut was built without the live map's files."
+
 
 class NotesWebError(Exception):
     """The note could not be made a web folder, said for the analyst."""
@@ -164,6 +193,9 @@ class WebBuild:
     internal: int = 0
     links: list[tuple[str, int | None]] = field(default_factory=list)
     pov: list[tuple[str, int | None]] = field(default_factory=list)
+    #: How many maps its page holds, and whether they go live once it is online.
+    maps: int = 0
+    live: bool = False
 
     def warn(self, message: str, line: int | None, kind: str) -> None:
         self.warnings.append(message)
@@ -254,6 +286,7 @@ def build(
     homonym: bool = False,
     check: bool = False,
     now: datetime | None = None,
+    live: bool = True,
 ) -> WebBuild:
     """The web folder of one note, in memory: its files, its name, what to know of it.
 
@@ -262,6 +295,7 @@ def build(
     HTML report's own. ``homonym`` marks the name of a note sharing its title with
     another. ``check`` lays it out as the export would to say its weight and what it
     warns about, the missing address included, and makes no card and writes no clip.
+    ``live`` lets its maps go live online; False keeps them as the HTML report draws them.
     """
     if edition != md.PUBLIC:
         raise NotesWebError("A web folder holds the public edition only.")
@@ -273,7 +307,9 @@ def build(
     look = notelook.stored(case, note_id) or DEFAULT_LOOK
     when = now or datetime.now().astimezone()
     day = date.fromisoformat(look.cover.date) if look.cover.date else when.date()
-    folder = html_engine.Folder(csp=folder_csp(), head=lambda description: _head(title, description, where))
+    vendor = live_maps() if live else None
+    folder = html_engine.Folder(csp=folder_csp(), head=lambda description: _head(title, description, where),
+                                live=vendor)
     rendered = html_engine.render(
         case, title=title, text=text, look=look, note_id=note_id, resolve=md.case_resolver(case), created=when,
         public=True, diagrams=diagrams, round_pov=round_pov, changes=changes, earlier=earlier, check=check,
@@ -284,10 +320,12 @@ def build(
         files[SHARE] = share_card(title=title, day=rendered.day or day, look=look, hero=rendered.hero,
                                   description=rendered.description)
     files[NOJEKYLL] = b""
+    if rendered.live and vendor is not None:
+        files[LIVE_LICENSE] = vendor.licence
     name = folder_name(title, day, where, note_id=note_id if homonym else "")
     files[HOW_TO] = how_to(name, where).encode("utf-8")
     made = WebBuild(
-        files=files, name=name, title=title, address=where,
+        files=files, name=name, title=title, address=where, maps=rendered.maps, live=rendered.live,
         warnings=list(rendered.warnings), warning_lines=list(rendered.warning_lines),
         warning_kinds=list(rendered.warning_kinds), sha256=hashlib.sha256(rendered.html).hexdigest(),
         text_sha256=rendered.text_sha256, internal=rendered.internal, links=rendered.links, pov=rendered.pov,
@@ -299,7 +337,24 @@ def build(
                   "so upload it in two goes.", None, UPLOAD)
     if check and not where:
         made.warn(NO_ADDRESS, None, ADDRESS)
+    if live and rendered.maps and vendor is None:
+        made.warn(LIVE_MISSING, None, md.OTHER)
     return made
+
+
+def live_maps() -> html_engine.LiveMaps | None:
+    """What a folder's maps need to go live, read from the build the frontend leaves
+    (`LIVE_VENDOR`); None when it is not there whole, as in a tree never built."""
+    try:
+        version = (LIVE_VENDOR / "VERSION").read_text(encoding="utf-8").strip()
+        files = {name: (LIVE_VENDOR / name).read_bytes() for name in LIVE_FILES}
+        licence = (LIVE_VENDOR / "LICENSE.txt").read_bytes()
+    except (OSError, UnicodeDecodeError):
+        return None
+    if not LIVE_VERSION.match(version) or not all(files.values()) or not licence:
+        return None
+    return html_engine.LiveMaps(csp=folder_csp(LIVE_SOURCES), style=LIVE_STYLE, version=version, files=files,
+                                licence=licence)
 
 
 def write(made: WebBuild, dest_dir: Path) -> Path:
@@ -629,7 +684,8 @@ def _inside(root: Path, relative: str) -> Path:
 
 
 __all__ = [
-    "ADDRESS", "HOW_TO", "INDEX", "UPLOAD", "MAX_ADDRESS", "NOJEKYLL", "NO_ADDRESS", "NotesWebError", "PAGES_CARD",
-    "PAGES_INTRO", "PAGES_PUBLIC", "PAGES_STEPS", "PAGES_UPDATE", "SHARE", "SHARE_SIZE", "WEB_DIR", "WebBuild",
-    "address", "build", "folder_csp", "folder_name", "how_to", "share_card", "write",
+    "ADDRESS", "HOW_TO", "INDEX", "LIVE_HOST", "LIVE_LICENSE", "LIVE_MISSING", "LIVE_SOURCES", "LIVE_STYLE",
+    "LIVE_VENDOR", "MAX_ADDRESS", "NOJEKYLL", "NO_ADDRESS", "NotesWebError", "PAGES_CARD", "PAGES_INTRO",
+    "PAGES_PUBLIC", "PAGES_STEPS", "PAGES_UPDATE", "SHARE", "SHARE_SIZE", "UPLOAD", "WEB_DIR", "WebBuild", "address",
+    "build", "folder_csp", "folder_name", "how_to", "live_maps", "share_card", "write",
 ]

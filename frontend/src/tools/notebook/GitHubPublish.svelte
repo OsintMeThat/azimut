@@ -96,7 +96,7 @@
    * Publish the note to GitHub Pages; the dialog's button calls this. Answers what
    * GitHub said once published, or null when it was not.
    */
-  export async function publish({ roundPov = false, changes = '' } = {}) {
+  export async function publish({ roundPov = false, changes = '', offlineMaps = false } = {}) {
     if (busy) return null;
     if (!ready) {
       setupShown = true;
@@ -110,7 +110,7 @@
     try {
       await prepare();
       onaddress(address);
-      const answer = await publishNote(caseId, noteId, { shortName: short, roundPov, changes });
+      const answer = await publishNote(caseId, noteId, { shortName: short, roundPov, changes, offlineMaps });
       if (answer?.published) return answer;
       needs = { needs: answer?.needs === 'repository' ? 'repository' : 'pages', detail: String(answer?.detail ?? '') };
       return null;

@@ -411,6 +411,23 @@ def test_one_press_commits_the_folder_in_one_commit_and_the_note_keeps_its_recor
     assert client.get("/api/publishing").json()["github"]["site"] == "https://octo.github.io/articles/"
 
 
+def test_keep_its_maps_offline_reaches_the_published_folder_too(client, fake, published, monkeypatch):
+    from azimut.engine import notes_web
+
+    asked: list[bool] = []
+    real = notes_web.build
+
+    def build(*args, **kwargs):
+        asked.append(kwargs.get("live", True))
+        return real(*args, **kwargs)
+
+    monkeypatch.setattr(notes_web, "build", build)
+    assert client.post(published["url"], json={"short_name": "port-strike"}).status_code == 200
+    assert client.post(published["url"], json={"short_name": "port-strike", "offline_maps": True}).status_code == 200
+    # as the web folder's export does: live maps unless the analyst keeps them offline
+    assert asked == [True, False]
+
+
 def test_a_second_press_replaces_the_folder_and_git_keeps_the_history(client, fake, published):
     first = client.post(published["url"], json={"short_name": "port-strike"}).json()
     before = set(fake.files())

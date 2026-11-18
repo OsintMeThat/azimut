@@ -100,9 +100,10 @@ export const asSvg = (svg) => svg;
  *
  * With `format: 'web'` each note becomes a folder ready to put online, always the
  * public edition, its diagrams drawn as an HTML page's are; `address` is where it
- * will live, which gives X its picture card.
+ * will live, which gives X its picture card, and `offlineMaps` keeps its maps from
+ * going live over OpenFreeMap once it is online.
  */
-export async function exportNotes(caseId, noteIds, { edition = 'internal', format = 'pdf', roundPov = false, changes = '', address = '', ...options } = {}) {
+export async function exportNotes(caseId, noteIds, { edition = 'internal', format = 'pdf', roundPov = false, changes = '', address = '', offlineMaps = false, ...options } = {}) {
   const web = format === 'web';
   const html = format === 'html' || web;
   const asked = web ? 'public' : edition;
@@ -115,7 +116,8 @@ export async function exportNotes(caseId, noteIds, { edition = 'internal', forma
   const shared = { notes: noteIds, diagrams, edition: asked, round_pov: Boolean(roundPov), changes: String(changes ?? '').trim().slice(0, 300) };
   if (!web) return api.post(`/api/cases/${caseId}/notes/html`, shared);
   const where = String(address ?? '').trim();
-  return api.post(`/api/cases/${caseId}/notes/web`, where ? { ...shared, base_url: where } : shared);
+  const folder = { ...shared, ...(where ? { base_url: where } : {}), ...(offlineMaps ? { offline_maps: true } : {}) };
+  return api.post(`/api/cases/${caseId}/notes/web`, folder);
 }
 
 export function revealExports(caseId) {

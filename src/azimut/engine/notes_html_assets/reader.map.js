@@ -162,6 +162,8 @@
     let opener = null;
     let currentDay = data.day || days[days.length - 1] || '';
     let clashTimer = 0;
+    /** A live map that has taken the drawing over (reader.live.js), which then moves and draws it. */
+    let engine = null;
 
     stage.tabIndex = 0;
     stage.setAttribute('aria-label', `${stage.getAttribute('aria-label') || 'Map'}. Plus and minus zoom, the arrows move it`);
@@ -429,7 +431,8 @@
       picked?.classList.remove('az-picked');
       picked = nodeOf.get(id) || null;
       picked?.classList.add('az-picked');
-      opener = from || picked;
+      engine?.pick(id);
+      opener = from || (engine ? null : picked);
       card.replaceChildren();
       card.setAttribute('aria-label', said.title || feature.label || 'Feature');
       const shut = make('button', { type: 'button', class: 'az-map-card-close', 'aria-label': 'Close' }, '×');
@@ -484,6 +487,7 @@
       card.hidden = true;
       picked?.classList.remove('az-picked');
       picked = null;
+      engine?.pick(null);
       if (opener?.isConnected && opener.focus && !opener.classList.contains('az-off')) opener.focus({ preventScroll: true });
       opener = null;
     }
@@ -521,7 +525,8 @@
         nowDay.textContent = longDay(day, 'short');
         nowCount.textContent = `Day ${index + 1} of ${days.length}`;
       }
-      paint();
+      if (engine) engine.day(day, { quiet });
+      else paint();
     }
     let slider = null;
     let nowDay = null;
@@ -589,7 +594,8 @@
       if (!chosen) return;
       if (chosen.day && days.includes(chosen.day)) setDay(chosen.day);
       else if (chosen.day && days.length) setDay(days.filter((day) => day <= chosen.day).pop() || days[0]);
-      fly(placed(chosen.view), smooth ? 1300 : 0);
+      if (engine) engine.look(chosen.view, { smooth, focus: chosen.focus || [] });
+      else fly(placed(chosen.view), smooth ? 1300 : 0);
       stepButtons.forEach((button, i) => (i === index ? button.setAttribute('aria-current', 'step') : button.removeAttribute('aria-current')));
       const current = stepButtons[index];
       if (current && stepRow && stepRow.scrollWidth > stepRow.clientWidth) {
@@ -652,18 +658,45 @@
     settle();
     if (currentDay) setDay(currentDay, { quiet: true });
 
+    /** What the stage shows, as `[west, south, east, north]`. */
+    function seen() {
+      const { w, h } = size();
+      const at = (x, y) => {
+        const mx = x0 + ((x - view.x) / (fit() * view.k) / W) * spanX;
+        const my = y0 + ((y - view.y) / (fit() * view.k) / H) * spanY;
+        return [mx * 360 - 180, (Math.atan(Math.sinh(Math.PI * (1 - 2 * my))) * 180) / Math.PI];
+      };
+      const [west, north] = at(0, 0);
+      const [east, south] = at(w, h);
+      return [west, south, east, north];
+    }
+
     return {
-      fly: (target, ms) => fly(placed(target), ms),
+      fly: (target, ms) => (engine ? engine.look(target, { smooth: ms !== 0 }) : fly(placed(target), ms)),
       day: (day) => setDay(day),
       step,
       open,
       close,
+      seen,
       /** A story's card: its own step, or the whole map as on its last day for the card of words. */
       story: (index) => {
         if (index == null || index === '') {
           if (days.length) setDay(data.day || days[days.length - 1]);
-          fly({ k: 1, x: 0, y: 0 }, 1100);
+          if (engine) engine.whole(); else fly({ k: 1, x: 0, y: 0 }, 1100);
         } else step(Number(index));
+      },
+      /**
+       * Hand the map to a live one (`{day, look, whole, pick}`, reader.live.js), which from then on
+       * draws it and is moved by the timeline, the steps and the story; `null` takes it back. The
+       * drawing stays under it, out of reach. Answers what the live map starts from and what it
+       * shares with the drawing: the day, the card open, how marks are spread and a crowd drawn.
+       */
+      attach(live) {
+        engine = live || null;
+        stage.inert = Boolean(engine);
+        if (engine) stage.setAttribute('aria-hidden', 'true');
+        else { stage.removeAttribute('aria-hidden'); paint(); }
+        return { day: currentDay, picked: picked?.dataset.id || null, arrange, bubble };
       },
     };
   }
@@ -674,4 +707,16 @@
       try { data = JSON.parse(figure.querySelector('script.az-map-data')?.textContent || 'null'); } catch { data = null; }
       if (data?.features) figure.azMap = mapOf(figure, data);
     }
+    online();
+  }
+
+  /* a web folder's maps go live once its page is read over the web: its reader loads reader.live.js,
+     and MapLibre beside it, from the folder (`script#az-gl` names them); each map takes over from its
+     drawing once ready, which stays when it cannot be. A file opened from the disk keeps its drawings */
+  function online() {
+    let said = null;
+    try { said = JSON.parse(doc.getElementById('az-gl')?.textContent || 'null'); } catch { said = null; }
+    const figures = all('figure.az-map').filter((figure) => figure.azMap);
+    if (!said?.module || !figures.length || !/^https?:$/.test(window.location.protocol)) return;
+    quietly(import(new URL(said.module, doc.baseURI).href).then((live) => live.start(figures, said)));
   }

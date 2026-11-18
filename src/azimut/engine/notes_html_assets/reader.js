@@ -1,7 +1,8 @@
 /*
  * Azimut reader: what an exported HTML report does when it is read. Inlined by
  * engine/notes_html.py beside reader.css; no library, no network, nothing kept.
- * It only adds to a page that reads whole without it.
+ * It only adds to a page that reads whole without it. The one exception is a web
+ * folder read online, whose maps it hands to reader.live.js (`online` in reader.map.js).
  */
 (() => {
   'use strict';

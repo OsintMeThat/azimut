@@ -86,6 +86,8 @@ export function readHtmlCheck(answer) {
     links: lists('links'),
     pov: lists('pov'),
     earlier: notes.reduce((most, item) => Math.max(most, count(item.earlier)), 0),
+    // a web folder's maps go live over OpenFreeMap once online, which the dialog says
+    live: notes.some((item) => item.live === true),
   };
 }
 
@@ -95,7 +97,7 @@ export function readHtmlCheck(answer) {
  * internal passages they hold. With `format: 'html'` the server checks the HTML
  * pages instead, and the answer holds what `readHtmlCheck` reads too; with
  * `format: 'web'` the web folders, in the public edition, which also say when they
- * have no address.
+ * have no address and whether their maps go live online (`live`).
  */
 export async function checkNotes(caseId, noteIds, { signal, edition = 'internal', format = 'pdf' } = {}) {
   const html = format === 'html' || format === 'web';

@@ -1,9 +1,30 @@
+import { readFileSync } from 'node:fs';
+import { createRequire } from 'node:module';
+import { dirname, join } from 'node:path';
 import { defineConfig } from 'vite';
 import { svelte } from '@sveltejs/vite-plugin-svelte';
+import { VENDOR_DIR, vendorFiles } from './src/lib/notes/maplibreVendor.js';
+
+/**
+ * MapLibre's standalone build beside the app's own, for the live map of a note's web
+ * folder, which loads it from the folder (`src/lib/notes/maplibreVendor.js`). Emitted by
+ * the build, so it lands in `src/azimut/static/vendor/maplibre/` and ships with the UI.
+ */
+function maplibreForWebFolders() {
+  return {
+    name: 'azimut-maplibre-for-web-folders',
+    apply: 'build',
+    generateBundle() {
+      const root = dirname(createRequire(import.meta.url).resolve('maplibre-gl/package.json'));
+      const files = vendorFiles((path) => readFileSync(join(root, path), 'utf8'));
+      for (const [name, source] of Object.entries(files)) this.emitFile({ type: 'asset', fileName: `${VENDOR_DIR}/${name}`, source });
+    },
+  };
+}
 
 // Builds straight into the Python package so `pip install .` ships the UI.
 export default defineConfig({
-  plugins: [svelte()],
+  plugins: [svelte(), maplibreForWebFolders()],
   // Vitest's dependency optimiser writes beside the file whose imports it is
   // resolving, so a suite run left two `node_modules` trees inside `src/`. They
   // are ignored by git and never shipped, but they shadow module resolution in

@@ -88,6 +88,15 @@ jobs:
               "azimut/engine/notes_html_assets/reader.map.css",
               "azimut/engine/notes_html_assets/reader.map.js",
               "azimut/engine/notes_html_assets/markers.json",
+              "azimut/engine/notes_html_assets/reader.live.js",
+              "azimut/engine/notes_html_assets/reader.live.css",
+              # MapLibre's own build, which a web folder's live map loads from the folder
+              "azimut/static/vendor/maplibre/maplibre-gl.js",
+              "azimut/static/vendor/maplibre/maplibre-gl-shared.js",
+              "azimut/static/vendor/maplibre/maplibre-gl-worker.js",
+              "azimut/static/vendor/maplibre/maplibre-gl.css",
+              "azimut/static/vendor/maplibre/LICENSE.txt",
+              "azimut/static/vendor/maplibre/VERSION",
           }
           missing = sorted(required - names)
           assert not missing, f"wheel is missing PDF and HTML report assets: {missing}"

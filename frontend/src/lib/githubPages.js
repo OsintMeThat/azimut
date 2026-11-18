@@ -69,12 +69,13 @@ export function buildState(commit, { signal } = {}) {
  * `{ published: true, address, repository, commit, … }` or `{ published: false, needs, detail }`
  * when the repository is missing or Pages is off, nothing written.
  */
-export async function publishNote(caseId, noteId, { shortName, roundPov = false, changes = '', ...drawing } = {}) {
+export async function publishNote(caseId, noteId, { shortName, roundPov = false, changes = '', offlineMaps = false, ...drawing } = {}) {
   const note = noteId || 'case';
   const { diagrams: pending } = await api.post(`/api/cases/${caseId}/notes/pdf/diagrams`, { notes: [note], edition: 'public' });
   const diagrams = pending?.length ? await drawDiagrams(pending, { toPng: asSvg, ...drawing }) : {};
   const answer = await api.post(`/api/cases/${caseId}/notes/${note}/github`, {
     short_name: shortName, diagrams, round_pov: Boolean(roundPov), changes: String(changes ?? '').trim().slice(0, 300),
+    offline_maps: Boolean(offlineMaps),
   });
   return answer?.published ? { ...answer, address: webLink(answer.address) } : answer;
 }

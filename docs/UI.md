@@ -7210,6 +7210,23 @@ the description on the report's paper under its accent. `POST /notes/web` writes
 characters at most; one note at a time with an address), records it with `format: web`,
 the page's SHA-256 and the address, and `POST /notes/pdf/check` with `format: web` says
 its weight and, kind `address`, when no address was given.
+A page holding a map goes **live once read online**: its reader loads MapLibre GL JS from
+the folder (`assets/maplibre-<version>/`, its licence as `LICENSE-maplibre.txt`, copied from
+the build's `static/vendor/maplibre/`) and turns each map into a live one over OpenFreeMap's
+free vector map, in the same figure: the same features as layers in their colours, dashes,
+fills and pictograms, a moved line faint where it stood, marks spread or counted as the
+drawing does them, the same cards, legend, timeline, steps and Story, and the same keys
+(Tab through the features, Enter for a card, the arrows, + and −, 0 for the whole map).
+It opens on the ground the map was filed with, laid at its bounds over OpenFreeMap's map
+under its place names, its credit in the corner, so it takes over from the drawing as it
+stands; *Map · Satellite (as filed)* switches to the map alone and back. No live satellite
+tile is ever fetched. The drawing shows first and stays
+when the live map cannot load (a file opened from the disk, no WebGL, a data saver, the base
+map out of reach), and with motion turned down the live map jumps rather than flies. When a
+note holds a map, the dialog says once *Its maps load their base map from OpenFreeMap when
+read online.* beside **Keep its maps offline** (unticked; `offline_maps` on the export),
+and the check answers `live`. A copy of Azimut built without MapLibre keeps the maps
+offline and its check says so once.
 
 **Publish to GitHub Pages.** Beside *Export web folder*, for one note, **Publish to GitHub
 Pages** puts the folder online in the analyst's own repository, on their press only
