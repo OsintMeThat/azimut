@@ -7235,6 +7235,30 @@ before export names a layer, a plate or a picture no longer in the case at its l
 map with no ground, and one past 8 MB. A layer, a plate or a ground a map names is a use:
 its delete names the note.
 
+**Charts.** A `::: chart` block holds its settings as `key: value` lines above its own
+table (`kind`, `title`, `count`, `by`, `colour by`, `order`, `only`, `highlight`, `show`,
+`source`, `from` and the rest, `engine/notes_charts.py`), so the rows printed are the rows in
+the note. Every document draws it from that table in the note's look and the case's named
+colours (`engine/notecharts.py`), and captions it as every figure: its title under it,
+numbered when the look numbers figures. The PDF prints it at 300 dpi across the frame,
+with alt text. The HTML report and the web folder hold it as SVG in the page: real words
+in the page's faces, a title on each bar, a description for screen readers, its edges on
+the text's own, drawn again for a phone, and in a Story again dark for its stage, where it
+holds still as a picture does; print takes the first. *The numbers* folds its table under
+the caption. With `show: chart and table` the note's own table follows it instead, in the
+PDF, the page and WordPress alike. A WordPress draft takes it as a PNG at twice the page's
+width with its alt text, its caption, its credit in the media library and its numbers in a
+Details block. To Post hands it as a picture for X, its title drawn and said as its alt
+text, filed once in the case's media since a post carries case files. The check before
+export says, each at its line, a count of floors whose title does not say *at least*, rows
+left out (a total, a row with nothing to draw it by, a cell that is no number), and rows
+that differ from where they were copied (`from: note:<id>`, `note:<id>#<heading>`,
+`sheet:<id>`) or whose source is gone. A block written inside a code fence is an example
+and stays text. `POST /notes/figure` draws one block alone, its title on it, as SVG or as
+a PNG for the PDF page, X (16:9), 4:5 or 1:1: the editor's chart card and *Export as a
+picture* read it. It writes nothing, refuses a block past 256 KB, and says the check in
+its headers.
+
 **To Post.** In the open note's ⋯, kept out of the header, *To Post* opens Post on a Free post thread made of the
 note's public edition, or of the stretch selected in it, which its title then says;
 nothing is posted. It waits on an empty note. The server reads the note as the editor

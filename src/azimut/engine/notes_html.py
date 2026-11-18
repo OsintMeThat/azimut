@@ -41,6 +41,11 @@ over it as SVG in their own colours and pictograms, a card a press away for each
 slider through its days. Its data rides along unread (`script.az-map-data`, JSON), and
 the figure shows the map as on its last day with no script and in print.
 
+**Charts.** A `::: chart` block is a figure drawn as SVG in the page (`engine/notecharts.py`):
+real words in the page's faces, a title on every bar for the pointer and a description for
+screen readers, its numbers folded under it as a table. It is drawn again for a phone, and
+in a story for its dark stage; the style sheet shows the one that fits, and print the first.
+
 **Two layouts.** The look's `web` lays the page out as an article, or as a story whose
 pictures hold still while the words after each go by (`_scenes`, the `::: story` markup
 reused). The text is the same in both, only grouped; the reader script and style sheet
@@ -80,7 +85,7 @@ from PIL import Image as PILImage
 from PIL import ImageOps, ImageSequence, UnidentifiedImageError
 
 from . import ffmpeg as ffmpeg_engine
-from . import mapsites, notefill, notes_maps, notes_style, notesources, pdffonts, thumbnails
+from . import mapsites, notecharts, notefill, notes_charts, notes_maps, notes_style, notesources, pdffonts, thumbnails
 from . import notes_markdown as md
 from .media import media_kind
 from .notelook import DEFAULT as DEFAULT_LOOK
@@ -167,7 +172,7 @@ ROW_CODE = re.compile(r"^[A-Z]{1,3}-?\d{1,4}[a-z]?$")
 ANCHOR = re.compile(r"^[\w:.-]{1,80}$")
 #: The story layout's scenes: the figures that can hold its stage, and the parts of the
 #: text that can be read beside one.
-SCENE_FIGURES = frozenset({"picture", "pair", "proof", "clip", "map"})
+SCENE_FIGURES = frozenset({"picture", "pair", "proof", "clip", "map", "chart"})
 SCENE_WORDS = re.compile(r"<(?:p|ul|ol|blockquote|h4|h5|h6)[ >]|<aside class=\"az-(?:callout|internal)\"")
 #: Ids the page keeps for itself.
 RESERVED_IDS = frozenset({"sources", "corrections", "contents", "top", "main", "cover", "footer"})
@@ -485,6 +490,11 @@ class _Page:
         self._map_steps: dict[str, list[tuple[str, str, str, str]]] = {}
         #: The figure each proof shown in the page stands in, by its record, which a map's card links to.
         self._proof_anchors: dict[str, str] = {}
+        self.charts = 0
+        #: The words the page's charts draw, which its faces must carry.
+        self._chart_words: list[str] = []
+        #: The note's words, which a chart reads for whether the note calls its figures minimums.
+        self._note_text = ""
 
     # -- the whole document -------------------------------------------------------
 
@@ -500,6 +510,7 @@ class _Page:
         earlier: Iterable[dict[str, Any]],
     ) -> bytes:
         self._prescan(pieces, blocks)
+        self._note_text = "\n".join(piece.text for piece in pieces if piece.kind == "text")
         found: list[tuple[str, int | None, str]] = []
         if self.case is not None:
             empty = md.empty_sections(pieces, blocks, journal=self.look.style == "journal")
@@ -564,7 +575,8 @@ class _Page:
         reader_js = reader.replace(MAP_SLOT, _asset("reader.map.js"), 1) if mapped else reader
         # what the reader writes itself is drawn in the page's face, a map's words with it
         own = (_asset("reader.map.js") + _asset("reader.map.css")) if mapped else ""
-        fonts = _font_faces(self.look, self.theme, _visible_text(page) + title + own, self.folder)
+        fonts = _font_faces(self.look, self.theme, _visible_text(page) + title + own + "".join(self._chart_words),
+                            self.folder)
         accent = f' style="--az-accent:{self.look.accent}"' if self.look.accent else ""
         tlp = f' data-tlp="{self.look.tlp}"' if self.look.tlp else ""
         web = f' data-web="{self.look.web}"' if self.look.web else ""
@@ -940,6 +952,10 @@ class _Page:
 
     def _on_az_map(self, tokens: list[Token], index: int) -> int:
         self.out.append(self._map(tokens[index].content))
+        return index + 1
+
+    def _on_az_chart(self, tokens: list[Token], index: int) -> int:
+        self.out.extend(self._chart(tokens[index].content))
         return index + 1
 
     def _on_html_block(self, tokens: list[Token], index: int) -> int:
@@ -1841,6 +1857,63 @@ class _Page:
         figure = _map_figure(derived, ident, self._caption(block.title, "Map"))
         return figure if self.folder is None else self._lift_data(figure, ident)
 
+    # -- charts -----------------------------------------------------------------------
+
+    def _chart(self, body: str) -> list[str]:
+        """A `::: chart` block as a figure (`engine/notecharts.py`): the chart as SVG in the
+        page, a title and a description for screen readers and a title on every bar, drawn
+        again for a phone and, in a story, for its dark stage; captioned as every figure
+        is, its numbers folded under it, or its own table after it when it says to show it."""
+        chart = notecharts.read(self.case, body, look=self.look, note_text=self._note_text)
+        line = self._line
+        for message, kind, offset in chart.warnings:
+            self._warn(message, line if self._fixed or offset is None else line + offset,
+                       kind if kind in WARNING_KINDS else md.OTHER)
+        if not chart.drawable:
+            return [_aside(notecharts.NO_TABLE)]
+        self.charts += 1
+        ident = f"chart-{self.charts}"
+        self.ids.add(ident)
+        faces = self._chart_faces(chart.layout.theme)
+        drawings = [("wide", False, chart.layout), ("phone", False, chart.drawn(notecharts.PHONE_WIDTH))]
+        if self.look.web == "story":
+            drawings += [("wide", True, chart.drawn(dark=True)),
+                         ("phone", True, chart.drawn(notecharts.PHONE_WIDTH, dark=True))]
+        drawn: list[str] = []
+        for width, dark, layout in drawings:
+            markup = _flush_chart(notes_charts.svg(layout, ident=f"{ident}-{width}{'-dark' if dark else ''}",
+                                                   transparent=True, faces=faces), layout)
+            self._chart_words.append(html.unescape(re.sub(r"<[^>]*>", " ", markup)))
+            drawn.append(markup.replace('class="az-chart ', f'class="az-chart az-chart-{width}'
+                                                           f'{" az-chart-on-dark" if dark else ""} ', 1))
+        table = chart.block.table
+        shown = chart.block.shows_table() and table is not None
+        numbers = "" if shown else (
+            f'<details class="az-chart-numbers"><summary>{notecharts.THE_NUMBERS}</summary>\n'
+            f"{notes_charts.data_table_html(chart.layout, caption=False)}</details>\n")
+        caption = self._caption(chart.title, "Chart")
+        parts = [f'<figure class="az-figure az-chart-figure" data-kind="chart" id="{ident}">\n'
+                 f'<div class="az-chart-frame">{"".join(drawn)}</div>\n'
+                 f"<figcaption>{caption}{numbers}</figcaption>\n</figure>\n"]
+        if shown and table is not None:
+            block_line = self._block_line
+            self._block_line = line + table.line
+            try:
+                tokens = md.parse(table.text())
+                parts.extend(part for part in self._parts_of(tokens, 0, len(tokens)) if part)
+            finally:
+                self._block_line = block_line
+        return parts
+
+    def _chart_faces(self, theme: notes_charts.ChartTheme) -> dict[str, str]:
+        """The page's own faces a chart's words are set in, where they are the ones it was
+        measured in; none for a look that sets the reader's own fonts."""
+        if self.look.style == "plain" and not self.look.font:
+            return {}
+        page = {self.theme.body_family: "az-body", self.theme.heading_family: "az-head"}
+        return {role: page[face.family] for role, face in (("head", theme.head), ("body", theme.body))
+                if face.family in page}
+
     def _map_picture(self, path: Path, side: int) -> tuple[str, tuple[int, int]] | None:
         made = PICTURES.get(path, min(side, PREVIEW_SIDE) if self.light else side)
         if made is None:
@@ -1930,6 +2003,21 @@ class _Page:
         return (f'<footer class="az-footer">\n<p><span class="az-edition">{edition}</span> · '
                 f'<time datetime="{self.day.isoformat()}">{_text(notes_style.long_date(self.day))}</time> · '
                 f'<span class="az-fingerprint">Source SHA-256 <code>{printed}</code></span></p>\n</footer>\n')
+
+
+# -- a chart's drawing ----------------------------------------------------------------
+
+
+def _flush_chart(markup: str, chart: notes_charts.Layout) -> str:
+    """A chart's SVG without the paper's margin around it, so its words stand on the
+    text's own edges; what reaches into the margin still shows (`overflow: visible`)."""
+    pad = chart.theme.pad
+    width, height = chart.width, chart.height
+    n = notes_charts._n
+    drawn = f'viewBox="0 0 {n(width)} {n(height)}" width="{n(width)}" height="{n(height)}"'
+    flush = (f'viewBox="{n(pad)} {n(pad)} {n(width - 2 * pad)} {n(height - 2 * pad)}" '
+             f'width="{n(width - 2 * pad)}" height="{n(height - 2 * pad)}"')
+    return markup.replace(drawn, flush, 1)
 
 
 # -- a map's figure ------------------------------------------------------------------

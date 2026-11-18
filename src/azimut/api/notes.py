@@ -1241,7 +1241,8 @@ def note_pieces(case_id: str, note_id: str, body: PiecesIn) -> dict[str, Any]:
 
     The text is the editor's, unsaved words included, and the whole note even when a
     stretch is selected: the internal passages are found in the whole before the stretch
-    is cut out. Nothing is written and nothing is posted; what stayed out is counted.
+    is cut out. Nothing is posted, and nothing is written but a chart's picture, filed
+    in the case's media so the post can carry it; what stayed out is counted.
     """
     case = get_case(case_id)
     _require_note(case, note_id)
@@ -1256,7 +1257,7 @@ def note_pieces(case_id: str, note_id: str, body: PiecesIn) -> dict[str, Any]:
     try:
         handed = notepieces.hand(
             case, title=title, text=body.text, selection=selection, note_id=note_id,
-            resolve=_resolver(case), values=notefill.Identity.from_settings().values(day),
+            resolve=_resolver(case), values=notefill.Identity.from_settings().values(day), look=look,
         )
     except notepieces.NotePiecesError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc

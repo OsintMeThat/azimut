@@ -13,7 +13,9 @@ careful person would have made by hand: headings, paragraphs, lists, quotes, tab
 separators, each picture an image block with its alt text, caption and credit, a
 comparison's two sides in two columns with their labels, a graphic picture folded in a
 Details block, and the numbered Sources list with each entry's links and verify links,
-which every citation links to. The Story layout and the `::: steps` and `::: story`
+which every citation links to. A chart (`::: chart`) is its picture, captioned as every
+figure is, its numbers folded under it in a table, or its own table after it when the
+block says to show it. The Story layout and the `::: steps` and `::: story`
 blocks read as a plain article, each picture then its words.
 
 **What is uploaded.** Every picture goes to the media library re-encoded as the report
@@ -21,7 +23,7 @@ encodes it (at most 2400 pixels, EXIF, GPS and text chunks left behind), named f
 words, with its alt text and caption. A clip goes up whole, without its container's
 metadata, under the report's budget (`notes_html.MAX_BYTES`); one past it is its still,
 linked to where it was posted. A Mermaid diagram goes as the PNG the browser drew,
-since WordPress takes no SVG. Sending the note again updates its draft while it is
+and a chart as the PNG Azimut paints of it, since WordPress takes no SVG. Sending the note again updates its draft while it is
 still one, and pictures already uploaded for it are reused.
 
 **What stays out**, counted for the dialog to say once: internal passages, interactive
@@ -54,7 +56,7 @@ from markdown_it.token import Token
 from PIL import Image
 
 from .. import __version__
-from . import notefill, notesources, thumbnails
+from . import notecharts, notefill, notesources, thumbnails
 from . import notes_html as report
 from . import notes_markdown as md
 from .media import media_kind
@@ -331,11 +333,15 @@ def left_said(left: dict[str, int]) -> str:
 
 
 def _without_maps(text: str) -> tuple[str, int]:
-    """``text`` with each `::: map` block blanked, lines kept, and how many there were."""
+    """``text`` with each `::: map` block blanked, lines kept, and how many there were;
+    one written inside a code fence is an example, kept as the fence's text."""
     found = 0
+    fenced = md.fenced_spans(text)
 
     def blank(match: re.Match[str]) -> str:
         nonlocal found
+        if any(start <= match.start() < end for start, end in fenced):
+            return match.group(0)
         found += 1
         return "\n" * match.group(0).count("\n")
 
@@ -501,6 +507,8 @@ class _Writer:
         self.diagrams_out = 0
         self.other = 0
         self.first_words = ""
+        #: The note's words, which a chart reads for whether the note calls its figures minimums.
+        self._note_text = ""
         self._prefixes = md.file_prefixes(case)
         self._ids: set[str] = {"sources"}
         self._shift = 0
@@ -526,6 +534,7 @@ class _Writer:
 
     def build(self, pieces: list[md.Piece], blocks: dict[int, list[md.Block]]) -> str:
         self._prescan(pieces, blocks)
+        self._note_text = "\n".join(piece.text for piece in pieces if piece.kind == "text")
         out: list[str] = []
         tlp = TLP_LABELS.get(self.look.tlp)
         if tlp is not None:
@@ -623,6 +632,8 @@ class _Writer:
                 out.append(self._list(tokens, index, stop))
             elif kind == "table_open":
                 out.append(self._table(tokens, index, stop))
+            elif kind == md.CHART_TOKEN:
+                out.extend(self._chart(token))
             index = stop
         return [part for part in out if part]
 
@@ -673,6 +684,33 @@ class _Writer:
             return ""
         caption = self._caption("", "")
         return image(index, "Diagram", caption, media_link=False)
+
+    def _chart(self, token: Token) -> list[str]:
+        """A `::: chart` block as its picture, painted as the PDF's at twice the page's
+        pixels, alt text, caption and credit kept with it in the media library; then its
+        numbers folded under it, or its own table when it says to show it."""
+        chart = notecharts.read(self.case, token.content, look=self.look, note_text=self._note_text, origins=False)
+        self.warnings.extend(message for message, _, _ in chart.warnings)
+        if not chart.drawable:
+            return []
+        data = chart.png(round(notecharts.DOCUMENT_WIDTH * notecharts.WEB_PIXELS))
+        digest = hashlib.sha256(data).hexdigest()
+        library = md.cut_text(" · ".join(part for part in (chart.title, chart.layout.credit) if part), MAX_ALT)
+        index = self._add(f"chart:{digest}", data, "image/png", chart.alt, library, ".png", digest)
+        if index is None:
+            return []
+        out = [image(index, md.cut_text(chart.alt, MAX_ALT), self._caption(chart.title, "Chart"), media_link=False)]
+        written = chart.block.table
+        if chart.block.shows_table() and written is not None:
+            tokens = md.parse(written.text())
+            out.extend(self._walk(tokens, 0, len(tokens)))
+        else:
+            head = [f"<tr>{''.join(f'<th>{_text(cell)}</th>' for cell in chart.layout.table_head)}</tr>"]
+            rows = [f"<tr><td>{_text(row[0])}</td>"
+                    + "".join(f'<td class="has-text-align-right" data-align="right">{_text(cell)}</td>' for cell in row[1:])
+                    + "</tr>" for row in chart.layout.table_rows]
+            out.append(details(notecharts.THE_NUMBERS, [table(head, rows)]))
+        return out
 
     def _quote(self, tokens: list[Token], index: int, end: int) -> list[str]:
         callout = md.take_callout(tokens, index)
