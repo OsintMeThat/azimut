@@ -7039,6 +7039,30 @@ a library file dragged in lands as its picture. A link pasted alone is offered a
 bookmark of the case, titled from its address, nothing fetched. A note with a remote
 image says its host is contacted on every open.
 
+**Blocks.** Every block of the drawn page (a paragraph, a heading, a list, a quote, a
+callout, a picture, a table, a diagram, an aligned or corner block, steps, a story, a
+map, a page break, a chapter) shows a ⋮⋮ handle in the left margin while the pointer
+is over it, and a quieter one beside the cursor's block, the only one on a touch
+screen (`lib/notes/editor/handle.js`). It stands left of the words, never over them,
+and the raw Markdown has none. Dragging it moves the block, a line showing where it
+lands and its name following the pointer, Escape calling the drag off; Alt+↑ and
+Alt+↓ move the cursor's block past the next one. A press on the handle, or Ctrl+/,
+opens its menu (`editor/blockMenu.js`), walked with the arrows, a letter or Escape,
+which gives the keyboard back to the note. What it offers depends on the block:
+**Turn into** a paragraph, a heading, a subheading, a small heading, a bulleted,
+numbered or to-do list, a quote or one of the six callouts, keeping the words (a list
+put in a quote or a callout stays a list in it); **Mark internal** wraps it in
+`> [!internal]`, the passage the public edition leaves out, and **Make public** takes
+it out again; **Align** left, centre or right writes a picture's `align=` as its bar
+does and puts words in `::: center` or `::: right`; above the end of an own cover,
+**Pin to a cover corner** writes `::: top-right` and the three others; **Move up**,
+**Move down**, **Duplicate**, **Start a new page here** (a `<!-- pagebreak -->` above
+it, or *Remove the page break above*), **Copy link to this heading**
+(`[Words](#anchor)`, the anchor the HTML page gives it; the PDF prints the words) and
+**Delete**. Each choice writes the Markdown an expert would type (`editor/turnInto.js`)
+as one step, which one Undo takes back to the byte; the cursor moves with the block
+when it was in it, and the page stays still otherwise.
+
 The file stays the Markdown it was: what the old split-pane Notebook wrote opens as it
 was written and is never rewritten for being opened. The header names the note (the
 name is the filename), files it in a folder, says whether it is saved, and holds

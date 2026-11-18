@@ -48,6 +48,15 @@ describe('the blocks of a note', () => {
     expect(words.filter(([, drawn]) => drawn).map(([kind]) => kind)).toEqual(['picture', 'pagebreak', 'aligned']);
   });
 
+  it('reads a quote, a callout or a list holding a drawn block as one block with it', () => {
+    const note = '> [!internal]\n> | A | B |\n> | --- | --- |\n> | 1 | 2 |\n\n- item\n\n  | C |\n  | --- |\n  | 3 |\n\nEnd';
+    expect(read(noteState(note))).toEqual([
+      ['callout', false, '> [!internal]\n> | A | B |\n> | --- | --- |\n> | 1 | 2 |'],
+      ['list', false, '- item\n\n  | C |\n  | --- |\n  | 3 |'],
+      ['paragraph', false, 'End'],
+    ]);
+  });
+
   it('reads every block as Markdown in the raw mode, where nothing is drawn', () => {
     const words = read(noteState(NOTE, { mode: 'markdown' }));
     expect(words.some(([, drawn]) => drawn)).toBe(false);

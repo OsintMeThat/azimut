@@ -65,14 +65,19 @@ const MARKDOWN_BLOCKS = {
   Table: 'table',
 };
 
+/** The blocks of Markdown that hold others: a drawn block inside one is part of it. */
+const CONTAINERS = new Set(['list', 'quote', 'callout']);
+
 /**
  * Every block of the note, top to bottom, over whole lines, as `{ from, to, kind,
  * drawn }`: a block drawn now as one, its kind from the registry (`drawn` true), and
  * around them each block of Markdown the syntax tree reads at the top of the note,
  * as `paragraph`, `heading`, `list`, `quote`, `callout`, `code`, `table`, `rule` or
  * `html`. A paragraph a drawn block stands in (a picture right under a line of
- * words) keeps the lines left over. An open block, and every block in the raw
- * Markdown, is read as its Markdown. What the block handle sits on and moves.
+ * words) keeps the lines left over; a quote, a callout or a list a drawn block
+ * stands in (a table in an internal passage) is one block with it. An open block,
+ * and every block in the raw Markdown, is read as its Markdown. What the block
+ * handle sits on and moves.
  */
 export function blockRanges(state) {
   const whole = blocksIn(state, 0, state.doc.length).map((block) => ({ ...block, drawn: true }));
@@ -83,6 +88,17 @@ export function blockRanges(state) {
     const name = /^ATXHeading[1-6]$/.test(node.name) ? 'heading' : MARKDOWN_BLOCKS[node.name];
     if (!name) continue;
     const kind = name === 'quote' && calloutOf(state.doc.lineAt(node.from).text) ? 'callout' : name;
+    // a quote, a callout or a list holding a drawn block (a table, a diagram) is one block with it
+    if (CONTAINERS.has(kind)) {
+      const start = state.doc.lineAt(node.from).from;
+      const end = state.doc.lineAt(node.to).to;
+      const held = whole.filter((block) => block.from >= start && block.to <= end);
+      if (held.length) {
+        for (const block of held) found.splice(found.indexOf(block), 1);
+        found.push({ from: start, to: end, kind, drawn: false });
+        continue;
+      }
+    }
     // the lines of it no drawn block stands on, a run at a time
     let run = null;
     for (let number = state.doc.lineAt(node.from).number; number <= state.doc.lineAt(node.to).number; number += 1) {
