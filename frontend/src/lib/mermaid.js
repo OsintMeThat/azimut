@@ -17,6 +17,22 @@ import { MERMAID_CLASS } from './markdown.js';
 
 export const MERMAID_SELECTOR = `.${MERMAID_CLASS}:not([data-processed])`;
 
+/**
+ * A chart's series (`xychart-beta`), in order: the blue ramp the reference
+ * infographics draw grades in, darkest first, then grey. Mermaid's own first colour
+ * is cream, which a bar on a white page all but loses.
+ */
+export const CHART_PALETTE = ['#184f95', '#3987e5', '#86b6ef', '#a9a79f'];
+
+/**
+ * The type a chart is set in: the sans a note's headings print in (Noto Sans in the
+ * PDF), then each system's own. A chart is drawn into a picture for the PDF, where
+ * only the fonts on the machine can be read. Mermaid takes a diagram's own font in
+ * letters, digits, spaces and quotes only, so the list names families and ends on
+ * Arial rather than `sans-serif`.
+ */
+export const CHART_FACE = '"Noto Sans", "Segoe UI", Roboto, "Helvetica Neue", Arial';
+
 const CONFIG = {
   startOnLoad: false,
   securityLevel: 'strict',
@@ -38,6 +54,20 @@ const CONFIG = {
     lineColor: '#8a5a1a',
     secondaryColor: '#f1ece5',
     tertiaryColor: '#f8f6f3',
+    // a chart only: its series in the palette, its axes in soft greys, its words in ink
+    xyChart: {
+      plotColorPalette: CHART_PALETTE.join(', '),
+      titleColor: '#202124',
+      legendTextColor: '#202124',
+      xAxisLabelColor: '#52514e',
+      xAxisTitleColor: '#52514e',
+      xAxisTickColor: '#c3c2b7',
+      xAxisLineColor: '#c3c2b7',
+      yAxisLabelColor: '#52514e',
+      yAxisTitleColor: '#52514e',
+      yAxisTickColor: '#c3c2b7',
+      yAxisLineColor: '#c3c2b7',
+    },
   },
 };
 
@@ -51,14 +81,28 @@ const CONFIG = {
  * A journey ignores it and answers to its own text placement. Chromium still draws
  * those, Firefox leaves the boxes empty.
  */
-const PLAIN_LABELS = '%%{init: {"htmlLabels": false, "journey": {"textPlacement": "tspan"}} }%%\n';
+const PLAIN_LABELS = '"htmlLabels": false, "journey": {"textPlacement": "tspan"}';
+
+/**
+ * A chart sets its words in the chart face. Mermaid has no setting for one kind of
+ * diagram's type, so a chart's own init says it; a note's init after it still wins.
+ */
+const CHART_TYPE = `"themeVariables": {"fontFamily": ${JSON.stringify(CHART_FACE)}}`;
 
 /** A note's own config block, which Mermaid reads only at the very top of a diagram. */
 const FRONT_MATTER = /^\s*---[ \t]*\r?\n[\s\S]*?\r?\n---[ \t]*\r?\n/;
 
+/** Whether `source` draws a chart (`xychart-beta`): its first line past its config, its inits and its comments. */
+function isChart(source) {
+  const body = String(source ?? '').slice(FRONT_MATTER.exec(source)?.[0].length ?? 0);
+  const first = body.split('\n').find((line) => line.trim() && !line.trim().startsWith('%%')) ?? '';
+  return /^\s*xychart(?:-beta)?\b/.test(first);
+}
+
 function withPlainLabels(source) {
   const at = FRONT_MATTER.exec(source)?.[0].length ?? 0;
-  return `${source.slice(0, at)}${PLAIN_LABELS}${source.slice(at)}`;
+  const init = isChart(source) ? `${PLAIN_LABELS}, ${CHART_TYPE}` : PLAIN_LABELS;
+  return `${source.slice(0, at)}%%{init: {${init}} }%%\n${source.slice(at)}`;
 }
 
 let loading = null;
