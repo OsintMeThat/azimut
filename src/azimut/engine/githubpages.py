@@ -1,0 +1,730 @@
+"""A note's web folder published to the analyst's own GitHub Pages site, in one press.
+
+The web folder (`engine/notes_web.py`) is a page to put online; this puts it there,
+in the repository the analyst named in Settings › Publishing, with the token they made
+for it. It is the one exception to "no auto-posting" (SPEC §8): a report page goes to
+the analyst's own site on their press in Azimut. Nothing here runs on a schedule, at
+startup or on a read.
+
+**The calls** go to `https://api.github.com` and nowhere else, with the token in the
+`Authorization` header (never in an address, never logged, never said back), the
+version of the API pinned, timeouts, every answer read up to a bound, and a redirect
+followed only while it stays on that host over https. They are, from GitHub's REST
+reference (docs.github.com, read on 2026-11-18):
+
+- `GET /user`, who the token signs in as;
+- `GET /repos/{owner}/{repo}`, whether the repository is there;
+- `GET /repos/{owner}/{repo}/pages`, whether Pages is on, its address (`html_url`,
+  a custom domain included), the branch and folder it serves;
+- the Git database to commit the whole folder as **one commit**: `GET git/ref/heads/…`,
+  `GET git/commits/…`, `GET git/trees/…`, `POST git/blobs` for each file the folder's
+  earlier copy does not already hold, `POST git/trees` for the folder (made whole,
+  so a file the new build no longer has is gone from it) and for the root
+  (`base_tree`, so every other article stays as it was), `POST git/commits`, then
+  `PATCH git/refs/heads/…` as a fast-forward only;
+- `GET /repos/{owner}/{repo}/pages/builds/latest`, watched for a bounded time after;
+- `GET /repos/{owner}/{repo}/contents/{path}` (raw), for Check;
+- on their own presses only, `POST /user/repos` (or `/orgs/{org}/repos`) to make the
+  repository, and `POST /repos/{owner}/{repo}/pages` to turn Pages on, after a first
+  `PUT contents/README.md` when the repository is still empty (the Git database
+  answers 409 on an empty repository, and GitHub's guide names this way to start one).
+
+**The token** is a fine-grained personal access token limited to the one repository:
+Contents and Pages, each Read and write (Metadata, read-only, comes with them).
+Turning Pages on from here also needs Administration, Read and write, and making the
+repository needs a token on all repositories with Administration: both are offered as
+presses, and when the token cannot, the tool says what to do on github.com instead.
+
+**What is committed**: the folder under `<short-name>/` at the root the Pages site is
+served from (`/`, or `docs/`), without its `HOW-TO-PUBLISH.md` (that is for putting
+it online by hand), and `.nojekyll` beside it at that root, so Pages serves the files
+as they are. The message is "Publish <note title>"; the author is the token's own
+account, as GitHub sets it. A folder of that name that Azimut did not make is refused,
+never replaced.
+"""
+
+from __future__ import annotations
+
+import base64
+import hashlib
+import json
+import re
+import time
+from dataclasses import dataclass, field
+from datetime import datetime
+from typing import Any, Callable, Mapping
+from urllib.parse import quote, urljoin, urlsplit
+
+import httpx
+
+from .. import __version__
+from . import notes_web
+
+API = "https://api.github.com"
+API_HOST = "api.github.com"
+#: The REST API version every request names, so an answer's shape does not move under it.
+API_VERSION = "2026-03-10"
+TIMEOUT = httpx.Timeout(30.0, connect=10.0, write=120.0)
+#: The most a JSON answer may weigh, and the page Check reads back.
+MAX_ANSWER = 8 * 1024 * 1024
+MAX_PAGE = 32 * 1024 * 1024
+#: How many redirects are followed, and only on api.github.com over https.
+MAX_REDIRECTS = 3
+#: A folder this large is refused before anything is written: GitHub warns past 50 MB
+#: a file and recommends a Pages site stay under 1 GB.
+MAX_FILE_BYTES = 50 * 1024 * 1024
+MAX_TOTAL_BYTES = 200 * 1024 * 1024
+MAX_FILES = 1000
+#: How long one publish may wait, in all, when GitHub asks it to slow down.
+MAX_PATIENCE = 120.0
+#: GitHub takes some 80 content-making requests a minute: past this many in one
+#: publish, they are spaced so that a large folder does not trip the limit.
+PACE_FROM = 60
+PACE_SECONDS = 0.8
+#: The longest commit message, in characters.
+MAX_TITLE = 200
+
+DEFAULT_REPO = "articles"
+DEFAULT_BRANCH = "main"
+NOJEKYLL = notes_web.NOJEKYLL
+#: What every Azimut web folder holds at its top, which is how one is known again.
+OURS = (notes_web.INDEX, notes_web.SHARE)
+#: The README an empty repository is started with before Pages can serve it.
+STARTER = b"# Articles\n\nReports published from Azimut, one folder each.\n"
+
+#: A GitHub username or organisation: letters, digits and single hyphens, 39 at most.
+ACCOUNT = re.compile(r"^[A-Za-z0-9](?:[A-Za-z0-9]|-(?=[A-Za-z0-9])){0,38}$")
+#: A repository name, as GitHub's own form takes it.
+REPO = re.compile(r"^[A-Za-z0-9._-]{1,100}$")
+#: A branch: a safe part of what Git takes, checked again part by part.
+BRANCH = re.compile(r"^[A-Za-z0-9._/-]{1,100}$")
+#: An article's short name, the last part of its address: lower case, digits, - and _.
+SHORT = re.compile(r"^[a-z0-9](?:[a-z0-9_-]{0,78}[a-z0-9])?$")
+MAX_SHORT = 80
+SHA1 = re.compile(r"^[0-9a-f]{40}$")
+SHA256 = re.compile(r"^[0-9a-f]{64}$")
+
+#: What each permission is called on GitHub's token page.
+PERMISSIONS = {
+    "contents": "Contents",
+    "pages": "Pages",
+    "administration": "Administration",
+    "metadata": "Metadata",
+    "repository_creation": "Repository creation",
+}
+
+BAD_TOKEN = ("GitHub refused the token: it may be mistyped, expired or revoked. "
+             "Make a new one and paste it in Settings › Publishing.")
+NOT_SET = "GitHub Pages is not set up yet: Settings › Publishing › GitHub Pages."
+
+
+class GitHubError(Exception):
+    """Something GitHub, the network or a name stopped, said for the analyst in one
+    sentence. ``status`` is GitHub's answer, 0 for none."""
+
+    def __init__(self, message: str, status: int = 0, *, permission: str = "") -> None:
+        super().__init__(message)
+        self.status = status
+        self.permission = permission
+
+
+class NotFound(GitHubError):
+    pass
+
+
+class Conflict(GitHubError):
+    pass
+
+
+class RateLimited(GitHubError):
+    def __init__(self, message: str, status: int, wait: float | None) -> None:
+        super().__init__(message, status)
+        self.wait = wait
+
+
+# -- the names ---------------------------------------------------------------------------
+
+
+def account_name(value: str | None) -> str:
+    """A GitHub account as typed, checked; "" for none."""
+    text = str(value or "").strip().lstrip("@")
+    if not text:
+        return ""
+    if not ACCOUNT.match(text):
+        raise GitHubError("An account name holds letters, digits and single hyphens, 39 at most, "
+                          "and does not start or end with a hyphen.")
+    return text
+
+
+def repository_name(value: str | None) -> str:
+    """A repository name, checked; "" for none."""
+    text = str(value or "").strip()
+    if text.lower().endswith(".git"):
+        text = text[:-4]
+    if not text:
+        return ""
+    if not REPO.match(text) or text in (".", ".."):
+        raise GitHubError("A repository name holds letters, digits, dots, hyphens and underscores, 100 at most.")
+    return text
+
+
+def branch_name(value: str | None) -> str:
+    """A branch name, checked against what Git refuses; "" for none."""
+    text = str(value or "").strip()
+    if not text:
+        return ""
+    parts = text.split("/")
+    if (not BRANCH.match(text) or text.startswith("-") or text == "HEAD" or ".." in text
+            or any(not part or part.startswith(".") or part.endswith(".lock") for part in parts)
+            or text.endswith(".")):
+        raise GitHubError("That does not read as a branch name, such as main.")
+    return text
+
+
+def short_name(value: str | None) -> str:
+    """An article's short name, the last part of its address: required."""
+    text = str(value or "").strip().strip("/")
+    if not text:
+        raise GitHubError("Give the article a short name, such as port-strike.")
+    if len(text) > MAX_SHORT:
+        raise GitHubError(f"A short name is {MAX_SHORT} characters at most.")
+    if not SHORT.match(text):
+        raise GitHubError("A short name holds lower-case letters, digits, hyphens and underscores, "
+                          "and starts and ends with a letter or a digit.")
+    return text
+
+
+def site_base(account: str, repo: str, pages_url: str = "") -> str:
+    """Where the articles live: the address Pages gave the site (a custom domain
+    included), else `https://<account>.github.io/<repo>/`, or the account's own site
+    for a repository named `<account>.github.io`. Always ends with a slash."""
+    if pages_url:
+        try:
+            parts = urlsplit(pages_url)
+            address = notes_web.address(parts._replace(scheme="https").geturl())
+        except (ValueError, notes_web.NotesWebError):
+            address = ""
+        if address:
+            return address
+    host = f"{account.lower()}.github.io"
+    if repo.lower() == host:
+        return f"https://{host}/"
+    return f"https://{host}/{repo}/"
+
+
+def article_address(base: str, short: str) -> str:
+    """The address one article will live at, checked as the web folder checks it."""
+    return notes_web.address(f"{base}{short}/")
+
+
+def blob_sha(data: bytes) -> str:
+    """The id Git gives a file's bytes, so a file the repository already holds is not sent again."""
+    return hashlib.sha1(b"blob %d\0" % len(data) + data, usedforsecurity=False).hexdigest()
+
+
+# -- the connection ----------------------------------------------------------------------
+
+
+def client(transport: httpx.BaseTransport | None = None) -> httpx.Client:
+    """The one way out to GitHub: timeouts, no redirect followed by itself, Azimut named.
+    ``transport`` stands GitHub in for the tests."""
+    return httpx.Client(timeout=TIMEOUT, follow_redirects=False, transport=transport, headers={
+        "User-Agent": f"Azimut/{__version__}",
+        "Accept": "application/vnd.github+json",
+        "X-GitHub-Api-Version": API_VERSION,
+    })
+
+
+@dataclass
+class Answer:
+    status: int
+    headers: httpx.Headers
+    body: bytes
+
+    def json(self) -> Any:
+        try:
+            return json.loads(self.body or b"null")
+        except ValueError:
+            return None
+
+
+class GitHub:
+    """GitHub's REST API, reached with the analyst's token.
+
+    ``patience`` is how long, in all, this one task may wait when GitHub asks it to slow
+    down (0 for a quick question such as Test connection); ``sleep`` is how it waits."""
+
+    def __init__(self, token: str, http: httpx.Client, *, patience: float = 0.0,
+                 sleep: Callable[[float], None] | None = None) -> None:
+        self._auth = f"Bearer {token}"
+        self.http = http
+        self.patience = patience
+        self.sleep = sleep or time.sleep
+        self.waited = 0.0
+        self.writes = 0
+
+    def call(self, method: str, path: str, *, body: Any = None, query: Mapping[str, str] | None = None,
+             doing: str = "", accept: str = "", cap: int = MAX_ANSWER) -> Answer:
+        """One request, retried while GitHub asks for a pause this task can still afford."""
+        while True:
+            try:
+                return self._call(method, path, body=body, query=query, doing=doing, accept=accept, cap=cap)
+            except RateLimited as limited:
+                wait = limited.wait
+                if wait is None or self.waited + wait > self.patience:
+                    raise
+                self.waited += wait
+                self.sleep(wait)
+
+    def _call(self, method: str, path: str, *, body: Any, query: Mapping[str, str] | None, doing: str,
+              accept: str, cap: int) -> Answer:
+        url = f"{API}{path}"
+        if query:
+            url += "?" + "&".join(f"{quote(key, safe='')}={quote(value, safe='')}" for key, value in query.items())
+        headers = {"Authorization": self._auth}
+        if accept:
+            headers["Accept"] = accept
+        for _ in range(MAX_REDIRECTS + 1):
+            answer = self._send(method, url, body, headers, cap)
+            if answer.status not in (301, 302, 303, 307, 308):
+                return _checked(answer, doing)
+            url = self._next(url, answer, method)
+            if answer.status == 303:
+                method, body = "GET", None
+        raise GitHubError("GitHub sent Azimut round in redirects.")
+
+    def _send(self, method: str, url: str, body: Any, headers: dict[str, str], cap: int) -> Answer:
+        try:
+            request = self.http.build_request(method, url, json=body, headers=headers)
+            response = self.http.send(request, stream=True)
+            try:
+                kept = bytearray()
+                for chunk in response.iter_bytes():
+                    kept += chunk
+                    if len(kept) > cap:
+                        raise GitHubError("GitHub answered with more than Azimut reads at once.")
+            finally:
+                response.close()
+        except httpx.TimeoutException as exc:
+            raise GitHubError("GitHub did not answer in time. Try again in a moment.") from exc
+        except httpx.ConnectError as exc:
+            raise GitHubError("Azimut could not reach GitHub. Check this computer's connection.") from exc
+        except httpx.HTTPError as exc:
+            raise GitHubError("GitHub could not be reached.") from exc
+        if method in ("POST", "PUT", "PATCH", "DELETE"):
+            self.writes += 1
+        return Answer(response.status_code, response.headers, bytes(kept))
+
+    @staticmethod
+    def _next(url: str, answer: Answer, method: str) -> str:
+        """Where a redirect points, when it stays on api.github.com over https and keeps
+        the request whole; anything else stops here."""
+        location = answer.headers.get("location") or ""
+        target = urljoin(url, location)
+        parts = urlsplit(target)
+        same = parts.scheme == "https" and parts.hostname == API_HOST and parts.port in (None, 443)
+        keeps = method in ("GET", "HEAD") or answer.status in (303, 307, 308)
+        if not (location and same and keeps):
+            raise GitHubError("GitHub answered from another address, which Azimut does not follow. "
+                              "If the repository was renamed, type its new name.", answer.status)
+        return target
+
+
+def _message(answer: Answer) -> str:
+    body = answer.json()
+    said = str(body.get("message") or "") if isinstance(body, dict) else ""
+    return re.sub(r"<[^>]+>", "", " ".join(said.split()))[:160]
+
+
+def _permission_words(header: str) -> str:
+    """`pages=write,administration=write` as the token page says it: the first set only."""
+    first = header.split(";")[0]
+    names: list[str] = []
+    level = "Read-only"
+    for item in first.split(","):
+        name, _, access = item.strip().partition("=")
+        if not name:
+            continue
+        names.append(PERMISSIONS.get(name, name.replace("_", " ").capitalize()))
+        if access in ("write", "admin"):
+            level = "Read and write"
+    if not names:
+        return ""
+    joined = names[0] if len(names) == 1 else f"{', '.join(names[:-1])} and {names[-1]}"
+    return f"{joined}, {level}"
+
+
+def _checked(answer: Answer, doing: str) -> Answer:
+    """The answer when it is one, else the sentence that says what went wrong."""
+    status = answer.status
+    if status < 300:
+        return answer
+    message = _message(answer)
+    doing = doing or "do that"
+    if status == 401:
+        raise GitHubError(BAD_TOKEN, status)
+    if status in (403, 429):
+        remaining = answer.headers.get("x-ratelimit-remaining")
+        retry = answer.headers.get("retry-after")
+        if remaining == "0":
+            reset = answer.headers.get("x-ratelimit-reset") or ""
+            when = ""
+            if reset.isdigit():
+                when = f" after {datetime.fromtimestamp(int(reset)).astimezone().strftime('%H:%M')}"
+            raise RateLimited(f"GitHub's hourly limit for this token is used up: try again{when}.", status, None)
+        if retry is not None or "rate limit" in message.lower() or status == 429:
+            wait = float(retry) if retry and retry.isdigit() else 60.0
+            raise RateLimited("GitHub asks Azimut to slow down: try again in a minute.", status, wait)
+        needed = _permission_words(answer.headers.get("x-accepted-github-permissions") or "")
+        if needed:
+            raise GitHubError(f"The token may not {doing}: give it {needed} on this repository.", status,
+                              permission=needed)
+        if "personal access token" in message.lower() or "not accessible" in message.lower():
+            raise GitHubError(f"The token may not {doing}: give it Contents and Pages, Read and write, "
+                              "on this repository.", status)
+        raise GitHubError(f"GitHub refused to {doing}{f': {message}' if message else ''}.", status)
+    if status == 404:
+        raise NotFound(f"GitHub found nothing to {doing}: check the account, the repository and that the token "
+                       "reaches it.", status)
+    if status == 409:
+        raise Conflict("The repository is empty, or GitHub is still making it: turn on Pages first, "
+                       "or wait a moment.", status)
+    if status == 422:
+        raise GitHubError(f"GitHub would not {doing}{f': {message}' if message else ''}.", status)
+    if status >= 500:
+        raise GitHubError(f"GitHub is having trouble (HTTP {status}): try again in a moment.", status)
+    raise GitHubError(f"GitHub answered HTTP {status} when asked to {doing}.", status)
+
+
+def _dict(answer: Answer) -> dict[str, Any]:
+    body = answer.json()
+    if not isinstance(body, dict):
+        raise GitHubError("GitHub answered with something Azimut cannot read.", answer.status)
+    return body
+
+
+def _part(value: Any) -> dict[str, Any]:
+    """A part of an answer that should be an object, or an empty one."""
+    return value if isinstance(value, dict) else {}
+
+
+def _sha(value: Any) -> str:
+    if not (isinstance(value, str) and SHA1.match(value)):
+        raise GitHubError("GitHub answered with something Azimut cannot read.")
+    return value
+
+
+def _repo_path(owner: str, repo: str, tail: str = "") -> str:
+    return f"/repos/{quote(owner, safe='')}/{quote(repo, safe='')}{tail}"
+
+
+# -- reading -------------------------------------------------------------------------------
+
+
+@dataclass
+class Repository:
+    full_name: str
+    private: bool
+    default_branch: str
+
+
+@dataclass
+class Pages:
+    url: str
+    branch: str
+    path: str
+    build_type: str
+    status: str
+
+    @property
+    def root(self) -> str:
+        """The folder of the repository the site is served from: "" or "docs/"."""
+        return "docs/" if self.path.strip("/") == "docs" else ""
+
+    def said(self) -> dict[str, Any]:
+        return {"url": self.url, "branch": self.branch, "path": self.path, "build_type": self.build_type,
+                "status": self.status}
+
+
+def whoami(gh: GitHub) -> str:
+    login = _dict(gh.call("GET", "/user", doing="read who it signs in as")).get("login")
+    return str(login) if isinstance(login, str) and ACCOUNT.match(login) else ""
+
+
+def repository(gh: GitHub, owner: str, repo: str) -> Repository | None:
+    try:
+        body = _dict(gh.call("GET", _repo_path(owner, repo), doing="read the repository"))
+    except NotFound:
+        return None
+    branch = body.get("default_branch")
+    return Repository(full_name=str(body.get("full_name") or f"{owner}/{repo}")[:200],
+                      private=bool(body.get("private")),
+                      default_branch=branch if isinstance(branch, str) and BRANCH.match(branch) else "")
+
+
+def pages(gh: GitHub, owner: str, repo: str) -> Pages | None:
+    try:
+        body = _dict(gh.call("GET", _repo_path(owner, repo, "/pages"), doing="read the Pages site"))
+    except NotFound:
+        return None
+    return _pages(body, owner, repo)
+
+
+def _pages(body: dict[str, Any], owner: str, repo: str) -> Pages:
+    source = _part(body.get("source"))
+    url = body.get("html_url")
+    return Pages(
+        url=site_base(owner, repo, url if isinstance(url, str) else ""),
+        branch=str(source.get("branch") or "")[:100],
+        path=str(source.get("path") or "/")[:20],
+        build_type=str(body.get("build_type") or "legacy")[:20],
+        status=str(body.get("status") or "")[:20],
+    )
+
+
+def head(gh: GitHub, owner: str, repo: str, branch: str) -> str | None:
+    """The commit a branch points at, None when there is no such branch. An empty
+    repository raises `Conflict`."""
+    try:
+        body = _dict(gh.call("GET", _repo_path(owner, repo, f"/git/ref/heads/{quote(branch)}"),
+                             doing="read the branch"))
+    except NotFound:
+        return None
+    target = _part(body.get("object"))
+    return _sha(target.get("sha"))
+
+
+def _entries(gh: GitHub, owner: str, repo: str, tree: str, *, recursive: bool = False) -> list[dict[str, Any]]:
+    body = _dict(gh.call("GET", _repo_path(owner, repo, f"/git/trees/{tree}"),
+                         query={"recursive": "1"} if recursive else None, doing="read the repository's files"))
+    found = body.get("tree")
+    return [entry for entry in found if isinstance(entry, dict)] if isinstance(found, list) else []
+
+
+@dataclass
+class Build:
+    state: str
+    detail: str = ""
+
+
+def build_state(gh: GitHub, owner: str, repo: str, commit: str) -> Build:
+    """Whether Pages has built ``commit``: `built`, `errored` with GitHub's words, or `building`."""
+    try:
+        body = _dict(gh.call("GET", _repo_path(owner, repo, "/pages/builds/latest"), doing="read the Pages build"))
+    except NotFound:
+        return Build("building")
+    status = str(body.get("status") or "")
+    if body.get("commit") != commit:
+        return Build("building")
+    if status == "built":
+        return Build("built")
+    if status == "errored":
+        error = _part(body.get("error"))
+        said = re.sub(r"<[^>]+>", "", " ".join(str(error.get("message") or "").split()))[:200]
+        return Build("errored", said or "GitHub could not build the page.")
+    return Build("building")
+
+
+def page_state(gh: GitHub, owner: str, repo: str, branch: str, path: str, sha256: str) -> str:
+    """Whether the page a publish committed is still the one on the branch:
+    `unchanged`, `changed` or `missing`. Reads it back, bounded."""
+    try:
+        answer = gh.call("GET", _repo_path(owner, repo, f"/contents/{quote(path)}"), query={"ref": branch},
+                         accept="application/vnd.github.raw+json", doing="read the page", cap=MAX_PAGE)
+    except NotFound:
+        return "missing"
+    return "unchanged" if hashlib.sha256(answer.body).hexdigest() == sha256 else "changed"
+
+
+# -- setting up, each on its own press -----------------------------------------------------
+
+
+def create_repository(gh: GitHub, owner: str, repo: str, login: str) -> Repository:
+    """Make the repository, public, with a README so it has a branch to serve."""
+    body = {"name": repo, "description": "Reports published from Azimut", "private": False, "auto_init": True,
+            "has_issues": False, "has_projects": False, "has_wiki": False}
+    path = "/user/repos" if owner.lower() == login.lower() else f"/orgs/{quote(owner, safe='')}/repos"
+    made = _dict(gh.call("POST", path, body=body, doing="make a repository"))
+    branch = made.get("default_branch")
+    return Repository(full_name=str(made.get("full_name") or f"{owner}/{repo}")[:200], private=False,
+                      default_branch=branch if isinstance(branch, str) and BRANCH.match(branch) else DEFAULT_BRANCH)
+
+
+def turn_on_pages(gh: GitHub, owner: str, repo: str, branch: str) -> Pages:
+    """Serve ``branch`` from its root. An empty repository is given a README first,
+    the one way GitHub lets a first commit be made there, and a missing branch is made
+    from the default one."""
+    try:
+        found = head(gh, owner, repo, branch)
+    except Conflict:
+        gh.call("PUT", _repo_path(owner, repo, "/contents/README.md"), doing="start the site",
+                body={"message": "Start the site", "branch": branch,
+                      "content": base64.b64encode(STARTER).decode("ascii")})
+        found = head(gh, owner, repo, branch)
+    if found is None:
+        known = repository(gh, owner, repo)
+        start = head(gh, owner, repo, known.default_branch) if known and known.default_branch else None
+        if start is None:
+            raise GitHubError(f"The repository has no branch {branch} to serve, and none to make it from.")
+        gh.call("POST", _repo_path(owner, repo, "/git/refs"), body={"ref": f"refs/heads/{branch}", "sha": start},
+                doing="make the branch")
+    try:
+        made = gh.call("POST", _repo_path(owner, repo, "/pages"),
+                       body={"build_type": "legacy", "source": {"branch": branch, "path": "/"}}, doing="turn on Pages")
+    except Conflict:
+        # Pages was on already
+        on = pages(gh, owner, repo)
+        if on is None:
+            raise
+        return on
+    return _pages(_dict(made), owner, repo)
+
+
+# -- publishing ----------------------------------------------------------------------------
+
+
+@dataclass
+class Published:
+    commit: str
+    folder: str
+    uploaded: int
+    reused: int
+    removed: int | None
+    created_branch: bool = False
+    files: list[str] = field(default_factory=list)
+
+
+def _bounded(files: Mapping[str, bytes]) -> None:
+    if len(files) > MAX_FILES:
+        raise GitHubError(f"The folder holds {len(files)} files; Azimut publishes {MAX_FILES} at most.")
+    total = 0
+    for path, data in files.items():
+        _plain(path)
+        if len(data) > MAX_FILE_BYTES:
+            raise GitHubError(f"{path} weighs more than {MAX_FILE_BYTES // (1024 * 1024)} MB, which GitHub "
+                              "warns against: leave the clip as a link.")
+        total += len(data)
+    if total > MAX_TOTAL_BYTES:
+        raise GitHubError(f"The folder weighs more than {MAX_TOTAL_BYTES // (1024 * 1024)} MB, too much for one "
+                          "page on GitHub Pages.")
+
+
+def _plain(path: str) -> None:
+    parts = path.split("/")
+    if (not path or path.startswith("/") or "\\" in path or ":" in path
+            or any(part in ("", ".", "..") for part in parts)):
+        raise GitHubError(f"a file of the folder has a name it cannot have: {path!r}")
+
+
+def publish(gh: GitHub, owner: str, repo: str, branch: str, files: Mapping[str, bytes], folder: str,
+            message: str) -> Published:
+    """Commit ``files`` as ``folder`` (`<short>` or `docs/<short>`) on ``branch``, in one
+    commit, with `.nojekyll` at the folder's root: the folder made whole, so a file the
+    new build no longer has is gone; everything else in the repository as it was."""
+    _bounded(files)
+    _plain(folder)
+    parent = head(gh, owner, repo, branch)
+    created = parent is None
+    if parent is None:
+        known = repository(gh, owner, repo)
+        parent = head(gh, owner, repo, known.default_branch) if known and known.default_branch else None
+        if parent is None:
+            raise GitHubError(f"The repository has no branch {branch}: turn on Pages for it first.")
+    commit = _dict(gh.call("GET", _repo_path(owner, repo, f"/git/commits/{parent}"), doing="read the branch"))
+    tree = _part(commit.get("tree"))
+    base_tree = _sha(tree.get("sha"))
+
+    *above, name = folder.split("/")
+    level = base_tree
+    for part in above:
+        entry = next((item for item in _entries(gh, owner, repo, level) if item.get("path") == part), None)
+        if entry is None or entry.get("type") != "tree":
+            level = ""
+            break
+        level = _sha(entry.get("sha"))
+    top = _entries(gh, owner, repo, level) if level else []
+    found = next((item for item in top if item.get("path") == name), None)
+    old: dict[str, str] = {}
+    complete = True
+    if found is not None:
+        if found.get("type") != "tree":
+            raise GitHubError(f"The repository holds a file named {name} there: give the article another short name.")
+        listing = _dict(gh.call("GET", _repo_path(owner, repo, f"/git/trees/{_sha(found.get('sha'))}"),
+                                query={"recursive": "1"}, doing="read the article's files"))
+        complete = not listing.get("truncated")
+        found_entries = listing.get("tree")
+        entries: list[Any] = found_entries if isinstance(found_entries, list) else []
+        old = {str(item.get("path")): str(item.get("sha")) for item in entries
+               if isinstance(item, dict) and item.get("type") == "blob" and isinstance(item.get("sha"), str)}
+        if not all(part in old for part in OURS):
+            raise GitHubError(f"The repository already has a folder named {name} that Azimut did not make: "
+                              "give the article another short name.")
+    have = set(old.values())
+    wanted = {path: blob_sha(data) for path, data in files.items()}
+    new = sorted(path for path, sha in wanted.items() if sha not in have)
+    pace = len(new) > PACE_FROM
+    shas: dict[str, str] = {}
+    for path in sorted(files):
+        if path in new:
+            if pace and gh.writes:
+                gh.sleep(PACE_SECONDS)
+            made = _dict(gh.call("POST", _repo_path(owner, repo, "/git/blobs"), doing="upload the folder's files",
+                                 body={"content": base64.b64encode(files[path]).decode("ascii"),
+                                       "encoding": "base64"}))
+            shas[path] = _sha(made.get("sha"))
+        else:
+            shas[path] = wanted[path]
+    folder_tree = _tree(gh, owner, repo, shas)
+    root = "/".join(above)
+    entries_out: list[dict[str, Any]] = [{"path": folder, "mode": "040000", "type": "tree", "sha": folder_tree}]
+    if not any(item.get("path") == NOJEKYLL and item.get("type") == "blob" for item in top):
+        entries_out.append({"path": f"{root}/{NOJEKYLL}" if root else NOJEKYLL, "mode": "100644", "type": "blob",
+                            "content": ""})
+    new_root = _dict(gh.call("POST", _repo_path(owner, repo, "/git/trees"), doing="write the folder",
+                             body={"base_tree": base_tree, "tree": entries_out}))
+    title = " ".join(message.split())[:MAX_TITLE] or "Publish"
+    made_commit = _dict(gh.call("POST", _repo_path(owner, repo, "/git/commits"), doing="commit the folder",
+                                body={"message": title, "tree": _sha(new_root.get("sha")), "parents": [parent]}))
+    sha = _sha(made_commit.get("sha"))
+    try:
+        if created:
+            gh.call("POST", _repo_path(owner, repo, "/git/refs"), body={"ref": f"refs/heads/{branch}", "sha": sha},
+                    doing="make the branch")
+        else:
+            gh.call("PATCH", _repo_path(owner, repo, f"/git/refs/heads/{quote(branch)}"),
+                    body={"sha": sha, "force": False}, doing="move the branch")
+    except GitHubError as exc:
+        if exc.status == 422:
+            raise GitHubError("The branch changed on GitHub while Azimut was publishing: press Publish again.",
+                              422) from exc
+        raise
+    return Published(commit=sha, folder=folder, uploaded=len(new), reused=len(files) - len(new),
+                     removed=len(set(old) - set(files)) if complete else None, created_branch=created,
+                     files=sorted(files))
+
+
+def _tree(gh: GitHub, owner: str, repo: str, shas: Mapping[str, str]) -> str:
+    """The folder's own tree, made from nothing so it holds these files and no other,
+    its subfolders first."""
+    here: list[dict[str, Any]] = []
+    below: dict[str, dict[str, str]] = {}
+    for path, sha in shas.items():
+        first, _, rest = path.partition("/")
+        if rest:
+            below.setdefault(first, {})[rest] = sha
+        else:
+            here.append({"path": first, "mode": "100644", "type": "blob", "sha": sha})
+    for name, inner in sorted(below.items()):
+        here.append({"path": name, "mode": "040000", "type": "tree", "sha": _tree(gh, owner, repo, inner)})
+    made = _dict(gh.call("POST", _repo_path(owner, repo, "/git/trees"), doing="write the folder",
+                         body={"tree": sorted(here, key=lambda entry: entry["path"])}))
+    return _sha(made.get("sha"))
+
+
+__all__ = [
+    "API", "API_VERSION", "BAD_TOKEN", "Build", "Conflict", "DEFAULT_BRANCH", "DEFAULT_REPO", "GitHub",
+    "GitHubError", "NOT_SET", "NotFound", "Pages", "Published", "RateLimited", "Repository", "account_name",
+    "article_address", "blob_sha", "branch_name", "build_state", "client", "create_repository", "head",
+    "page_state", "pages", "publish", "repository", "repository_name", "short_name", "site_base", "turn_on_pages",
+    "whoami",
+]

@@ -25,8 +25,10 @@ from ..engine import (
     extinstall,
     ffmpeg,
     firms,
+    githubpages,
     google_tiles,
     iconlibrary,
+    notes_web,
     notes_wordpress,
     reveal,
     scrapers,
@@ -689,8 +691,9 @@ def export_settings() -> Response:
     machine), how much the 3D views draw (this machine's graphics card), the
     half-written Copernicus layer in the picker,
     ``cookies.txt`` (a live login session), ``publishing.json`` (the WordPress
-    application password: live write credentials stay on the machine that made
-    them, while the site's address and the username travel), the cases themselves
+    application password and the GitHub token: live write credentials stay on the
+    machine that made them, while the site's address, the username, the GitHub
+    account, repository and branch travel), the cases themselves
     (portable folders already), the extension folder the app owns
     (``config.extension_dir()`` — those are this build's own bundled bytes, and
     the new machine's Install button writes its own copy, which the browser has
@@ -920,6 +923,45 @@ class ImportedSettings(BaseModel):
         try:
             return notes_wordpress.user_name(value)
         except notes_wordpress.WordPressError:
+            return ""
+
+    # the GitHub repository a web folder is published to; the token never travels
+    github_account: str = Field(default="", max_length=60)
+    github_repo: str = Field(default=githubpages.DEFAULT_REPO, max_length=120)
+    github_branch: str = Field(default=githubpages.DEFAULT_BRANCH, max_length=120)
+    github_site: str = Field(default="", max_length=notes_web.MAX_ADDRESS + 20)
+
+    @field_validator("github_account")
+    @classmethod
+    def readable_github_account(cls, value: str) -> str:
+        """A name GitHub would refuse reads as none rather than failing the backup."""
+        try:
+            return githubpages.account_name(value)
+        except githubpages.GitHubError:
+            return ""
+
+    @field_validator("github_repo")
+    @classmethod
+    def readable_github_repo(cls, value: str) -> str:
+        try:
+            return githubpages.repository_name(value) or githubpages.DEFAULT_REPO
+        except githubpages.GitHubError:
+            return githubpages.DEFAULT_REPO
+
+    @field_validator("github_branch")
+    @classmethod
+    def readable_github_branch(cls, value: str) -> str:
+        try:
+            return githubpages.branch_name(value) or githubpages.DEFAULT_BRANCH
+        except githubpages.GitHubError:
+            return githubpages.DEFAULT_BRANCH
+
+    @field_validator("github_site")
+    @classmethod
+    def readable_github_site(cls, value: str) -> str:
+        try:
+            return notes_web.address(value)
+        except notes_web.NotesWebError:
             return ""
 
     @field_validator("logo_look", mode="before")

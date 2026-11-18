@@ -13,7 +13,10 @@
  * fingerprints.
  * Check hashes the file again; Show opens its folder. Nothing is fetched. A note sent
  * to WordPress is recorded too, as its draft (`readDraft`): the site, the post and its
- * edit link, one line per draft however often it was sent again.
+ * edit link, one line per draft however often it was sent again. A note published to
+ * GitHub Pages is recorded once per publish (`readPublished`): its address, the
+ * repository and the commit; Check reads the page back from the repository, on its
+ * press, and the page is opened at its address.
  */
 import { webLink } from '../wordpressSetup.js';
 import { api } from '../api.js';
@@ -27,6 +30,13 @@ export const CHECK_SAID = {
   unchanged: 'Unchanged since it was written',
   changed: 'This file is not the one Azimut wrote',
   missing: 'File missing',
+};
+
+/** What Check says of a page published to GitHub Pages, read back from its repository. */
+export const CHECK_SAID_PAGE = {
+  unchanged: 'Unchanged since it was published',
+  changed: 'The page on GitHub is not the one Azimut published',
+  missing: 'Page missing from the repository',
 };
 
 const KEY = 'azimut:note-editions';
@@ -132,9 +142,37 @@ export function editionDay(at) {
   return when.toLocaleString('en-GB', { day: 'numeric', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' });
 }
 
-/** An edition as the server lists it: a file's (`readEdition`), or a WordPress draft's. */
+/** An edition as the server lists it: a file's (`readEdition`), a WordPress draft's or a published page's. */
 export function readListed(item) {
-  return item?.format === 'wordpress' ? readDraft(item) : readEdition(item);
+  if (item?.format === 'wordpress') return readDraft(item);
+  if (item?.format === 'github') return readPublished(item);
+  return readEdition(item);
+}
+
+/**
+ * A page published to GitHub Pages as the record keeps it, or null: `format: 'github'`,
+ * its short name as `file`, its https address, the repository, the commit and the
+ * page's SHA-256. Show opens the address; Check asks the repository.
+ */
+export function readPublished(item) {
+  if (!item || typeof item.at !== 'string' || item.edition !== PUBLIC) return null;
+  const address = webLink(item.address);
+  const commit = /^[0-9a-f]{40}$/.test(item.commit ?? '') ? item.commit : '';
+  const repository = /^[A-Za-z0-9-]{1,39}\/[A-Za-z0-9._-]{1,100}$/.test(item.repository ?? '') ? item.repository : '';
+  if (!address.startsWith('https://') || !commit || !repository || typeof item.file !== 'string' || !item.file) return null;
+  return {
+    at: item.at,
+    edition: PUBLIC,
+    format: 'github',
+    file: item.file,
+    folder: '',
+    pages: 0,
+    pdf_sha256: HEX.test(item.sha256 ?? '') ? item.sha256 : '',
+    text_sha256: HEX.test(item.text_sha256 ?? '') ? item.text_sha256 : '',
+    address,
+    repository,
+    commit,
+  };
 }
 
 /**

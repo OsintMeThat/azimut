@@ -62,6 +62,14 @@ PNG the browser drew. The note keeps a record of it among its editions with
 `format: "wordpress"`, the site, the post and its two links; sending again updates that
 draft while it is still one. With `check: true` it says what would go and what would
 stay out, and reaches nothing.
+
+**GitHub Pages.** `/notes/{id}/github` builds the note's web folder for the address its
+short name will have on the analyst's GitHub Pages site and commits it to the
+repository of Settings › Publishing in one commit (`engine/githubpages.py`). The note
+keeps a record of it among its editions with `format: "github"`: the address, the
+repository, the branch, the folder, the commit and the page's SHA-256. Check reads the
+page back from the repository on its press and compares; there is nothing to show on
+this machine, so the dialog opens the address instead.
 """
 
 from __future__ import annotations
@@ -83,6 +91,7 @@ from pydantic import BaseModel, Field
 
 from .. import errors, layout
 from ..engine import exportdir
+from ..engine import githubpages
 from ..engine import links as link_engine
 from ..engine import notelook, notes_markdown
 from ..engine import notes_html as html_engine
@@ -1303,6 +1312,8 @@ def _edition_record(item: Any) -> dict[str, Any] | None:
         return None
     if item.get("format") == WORDPRESS:
         return _wordpress_record(item)
+    if item.get("format") == GITHUB:
+        return _github_record(item)
     at, edition, file, folder = item.get("at"), item.get("edition"), item.get("file"), item.get("folder")
     pages, pdf_sha, text_sha = item.get("pages"), item.get("pdf_sha256"), item.get("text_sha256")
     if not (isinstance(at, str) and STAMP.match(at) and edition in notes_markdown.EDITIONS):
@@ -1355,7 +1366,10 @@ def _edition(case: Case, note_id: str, ref: EditionRef) -> dict[str, Any]:
 
 def _edition_path(case: Case, record: dict[str, Any]) -> Path | None:
     """Where an edition was written: the case's own exports, or the absolute folder
-    the analyst had chosen. None for a folder this machine cannot name."""
+    the analyst had chosen. None for a folder this machine cannot name, or a page that
+    lives on GitHub."""
+    if record.get("format") == GITHUB:
+        return None
     folder = record["folder"]
     # a web folder is checked by its page, and shown as itself
     tail = (web_engine.WEB_DIR, record["file"], web_engine.INDEX) if record.get("format") == "web" else (record["file"],)
@@ -1396,6 +1410,8 @@ def check_edition(case_id: str, note_id: str, body: EditionRef) -> dict[str, str
     or ``missing``. Hashes the file again; nothing is fetched or written."""
     case = get_case(case_id)
     record = _edition(case, note_id, body)
+    if record.get("format") == GITHUB:
+        return {"state": _github_page_state(record)}
     path = _edition_path(case, record)
     found = _file_sha256(path) if path is not None else None
     if found is None:
@@ -1414,7 +1430,8 @@ def reveal_edition(case_id: str, note_id: str, body: EditionRef) -> dict[str, st
     record = _edition(case, note_id, body)
     path = _edition_path(case, record)
     if path is None:
-        raise HTTPException(status_code=409, detail="that folder is not on this machine")
+        raise HTTPException(status_code=409, detail="that page lives on GitHub, not on this machine"
+                            if record.get("format") == GITHUB else "that folder is not on this machine")
     try:
         reveal_engine.reveal(path.parent, workspace_only=False)
     except reveal_engine.RevealError as exc:
@@ -1546,3 +1563,159 @@ def wordpress_draft(case_id: str, note_id: str, body: WordPressDraftIn) -> dict[
         said.update(left=left, left_said=wordpress_engine.left_said(left),
                     warnings=[*warnings, *(warning[:MAX_WARNING_CHARS] for warning in sent.refused)])
     return {**said, "post": sent.post, "edit": sent.edit, "preview": sent.preview, "updated": sent.updated}
+
+
+# -- to GitHub Pages --------------------------------------------------------------
+
+#: The format a page published to GitHub Pages is recorded under among a note's editions.
+GITHUB = "github"
+#: The folder a page is committed as: its short name, under `docs/` when Pages serves that.
+GITHUB_FOLDER = re.compile(r"^(?:docs/)?[a-z0-9](?:[a-z0-9_-]{0,78}[a-z0-9])?$")
+REPOSITORY = re.compile(r"^[A-Za-z0-9](?:[A-Za-z0-9]|-(?=[A-Za-z0-9])){0,38}/[A-Za-z0-9._-]{1,100}$")
+
+
+class GitHubPublishIn(BaseModel):
+    """A note published to GitHub Pages: its short name, the last part of its address;
+    its diagrams as the SVG the browser drew; whether its points of view are rounded;
+    and the line saying what changed since its last public edition."""
+
+    short_name: str = Field(max_length=githubpages.MAX_SHORT + 20)
+    diagrams: dict[str, str] = Field(default_factory=dict)
+    round_pov: bool = False
+    changes: str = Field(default="", max_length=MAX_CHANGES)
+
+
+def _github_record(item: dict[str, Any]) -> dict[str, Any] | None:
+    """A published page's record read back, every part checked: it may have come in a
+    bundle, so an address, a repository or a folder that does not read as one drops it."""
+    at, file, text_sha, sha = item.get("at"), item.get("file"), item.get("text_sha256"), item.get("sha256")
+    if not (isinstance(at, str) and STAMP.match(at) and item.get("edition") == notes_markdown.PUBLIC):
+        return None
+    repository, branch, path, commit = item.get("repository"), item.get("branch"), item.get("path"), item.get("commit")
+    try:
+        where = web_engine.address(item.get("address") if isinstance(item.get("address"), str) else None)
+        branch = githubpages.branch_name(branch if isinstance(branch, str) else "")
+    except (web_engine.NotesWebError, githubpages.GitHubError):
+        return None
+    if not (where and branch and isinstance(file, str) and githubpages.SHORT.match(file)
+            and isinstance(repository, str) and REPOSITORY.match(repository)
+            and isinstance(path, str) and GITHUB_FOLDER.match(path) and path.rsplit("/", 1)[-1] == file
+            and isinstance(commit, str) and githubpages.SHA1.match(commit)
+            and isinstance(sha, str) and SHA256.match(sha) and isinstance(text_sha, str) and SHA256.match(text_sha)):
+        return None
+    record: dict[str, Any] = {"at": at, "edition": notes_markdown.PUBLIC, "format": GITHUB, "file": file,
+                              "address": where, "repository": repository, "branch": branch, "path": path,
+                              "commit": commit, "sha256": sha, "text_sha256": text_sha}
+    changes = item.get("changes")
+    if isinstance(changes, str) and changes.strip():
+        record["changes"] = " ".join(changes.split())[:MAX_CHANGES]
+    return record
+
+
+def _github_page_state(record: dict[str, Any]) -> str:
+    """Whether the page a publish committed is still the one on its branch, read back
+    from the repository on Check's press with the token kept now."""
+    from .publishing import github_settings
+
+    target = github_settings()
+    if not target.token:
+        raise HTTPException(status_code=409, detail=githubpages.NOT_SET)
+    owner, repo = record["repository"].split("/", 1)
+    try:
+        with githubpages.client() as http:
+            return githubpages.page_state(githubpages.GitHub(target.token, http), owner, repo, record["branch"],
+                                          f"{record['path']}/{web_engine.INDEX}", record["sha256"])
+    except githubpages.GitHubError as exc:
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
+
+
+@router.post("/{case_id}/notes/{note_id}/github")
+def github_publish(case_id: str, note_id: str, body: GitHubPublishIn) -> dict[str, Any]:
+    """Publish the note's public edition to the analyst's GitHub Pages site: its web
+    folder, built for the address it will have, committed as `<short-name>/` in one
+    commit. The press reaches GitHub; nothing else does.
+
+    When the repository is missing or Pages is off, it says so (``needs``) and writes
+    nothing: making the repository and turning Pages on are presses of their own
+    (`api/publishing.py`). Once committed, the note keeps a record of it among its
+    editions, and the dialog watches the build (`/api/publishing/github/build`).
+    """
+    from .publishing import pages_warnings, github_settings, keep_site
+
+    case = get_case(case_id)
+    _require_note(case, note_id)
+    target = github_settings()
+    if not target.ready:
+        raise HTTPException(status_code=409, detail=githubpages.NOT_SET)
+    try:
+        short = githubpages.short_name(body.short_name)
+    except githubpages.GitHubError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    diagrams = _svg_diagrams(body.diagrams)
+    title = _note_title(case, note_id)
+    peers = case.note_ids_by_titles({title})
+    changes = " ".join(body.changes.split())
+    repository = f"{target.account}/{target.repo}"
+    try:
+        with githubpages.client() as http:
+            gh = githubpages.GitHub(target.token, http, patience=githubpages.MAX_PATIENCE)
+            repo = githubpages.repository(gh, target.account, target.repo)
+            if repo is None:
+                return {"published": False, "needs": "repository", "repository": repository,
+                        "detail": f"There is no repository {repository} that this token can reach."}
+            pages = githubpages.pages(gh, target.account, target.repo)
+            if pages is None:
+                return {"published": False, "needs": "pages", "repository": repository,
+                        "detail": f"Pages is off for {repository}."}
+            if pages.branch and pages.branch != target.branch:
+                raise HTTPException(status_code=409, detail=pages_warnings(target, pages, False)[0])
+            keep_site(target, pages.url)
+            try:
+                where = githubpages.article_address(pages.url, short)
+            except web_engine.NotesWebError as exc:
+                raise HTTPException(status_code=422, detail=str(exc)) from exc
+            now = _now()
+            try:
+                made = web_engine.build(
+                    case, note_id, base_url=where, diagrams=diagrams, round_pov=body.round_pov, changes=changes,
+                    earlier=_read_editions(case, note_id), homonym=len(peers.get(title.casefold(), [])) >= 2,
+                    now=now,
+                )
+            except (html_engine.NotesHtmlError, web_engine.NotesWebError) as exc:
+                raise HTTPException(status_code=422, detail=str(exc)) from exc
+            # the how-to is for putting the folder online by hand: a published page has no use for it
+            files = {path: data for path, data in made.files.items() if path != web_engine.HOW_TO}
+            published = githubpages.publish(gh, target.account, target.repo, target.branch, files,
+                                            f"{pages.root}{short}", f"Publish {title}")
+    except githubpages.GitHubError as exc:
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
+    record: dict[str, Any] = {
+        "at": now.astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+        "edition": notes_markdown.PUBLIC,
+        "format": GITHUB,
+        "file": short,
+        "address": where,
+        "repository": repository,
+        "branch": target.branch,
+        "path": published.folder,
+        "commit": published.commit,
+        "sha256": made.sha256,
+        "text_sha256": made.text_sha256,
+    }
+    if changes:
+        record["changes"] = changes[:MAX_CHANGES]
+    _record_edition(case, note_id, record)
+    return {
+        "published": True,
+        "address": where,
+        "repository": repository,
+        "branch": target.branch,
+        "commit": published.commit,
+        "sha256": made.sha256,
+        "at": record["at"],
+        "uploaded": published.uploaded,
+        "reused": published.reused,
+        "removed": published.removed,
+        "warnings": [f"{title}: {warning}"[:MAX_WARNING_CHARS]
+                     for warning, kind in zip(made.warnings, made.warning_kinds) if kind != web_engine.UPLOAD],
+    }

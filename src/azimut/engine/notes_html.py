@@ -1918,7 +1918,7 @@ class _Page:
             except ValueError:
                 continue
             fingerprint = str(record.get("sha256") or record.get("pdf_sha256") or "")
-            what = {"html": "HTML", "web": "Web page"}.get(str(record.get("format")), "PDF")
+            what = {"html": "HTML", "web": "Web page", "github": "Web page"}.get(str(record.get("format")), "PDF")
             words = f" <span>{_text(' '.join(str(record['changes']).split())[:300])}</span>"
             rows.append(f'<li><time datetime="{stamp[:10]}">{_text(when)}</time> {what}{words} '
                         f'<span class="az-hash">SHA-256 <code>{_attr(fingerprint)}</code></span></li>')

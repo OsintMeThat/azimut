@@ -199,6 +199,15 @@ DEFAULT_SETTINGS: dict[str, Any] = {
     # kept in publishing.json (engine/publishsecrets.py), which no backup carries.
     "wordpress_site": "",
     "wordpress_user": "",
+    # The GitHub repository a note's web folder is published to, and the branch its
+    # Pages site serves (engine/githubpages.py); the token is kept in publishing.json
+    # with the WordPress password. github_site is the address Pages last said the site
+    # has (a custom domain included), read on a press and cleared when the repository
+    # changes, so the export dialog can say a page's address without asking GitHub.
+    "github_account": "",
+    "github_repo": "articles",
+    "github_branch": "main",
+    "github_site": "",
     # Pairing token for the capture browser extension (api/ingest.py). Minted
     # lazily on first use, shown once in Settings, pasted into the extension.
     # Empty means "not minted yet" — never a valid credential.

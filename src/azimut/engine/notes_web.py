@@ -82,6 +82,9 @@ MAX_ADDRESS = 300
 MAX_UPLOAD_FILES = 100
 #: The check's kind and words for a folder given no address.
 ADDRESS = "address"
+#: The kind of the warning that a folder is too many files for GitHub's upload page,
+#: which a folder published from Azimut has no use for.
+UPLOAD = "upload"
 NO_ADDRESS = "No address given: X shows the link without its picture card."
 
 #: How to put the folder on GitHub Pages. The app says the same words
@@ -293,7 +296,7 @@ def build(
     )
     if len(files) > MAX_UPLOAD_FILES:
         made.warn(f"The folder holds {len(files)} files; GitHub's upload page takes {MAX_UPLOAD_FILES} at a time, "
-                  "so upload it in two goes.", None, md.OTHER)
+                  "so upload it in two goes.", None, UPLOAD)
     if check and not where:
         made.warn(NO_ADDRESS, None, ADDRESS)
     return made
@@ -626,7 +629,7 @@ def _inside(root: Path, relative: str) -> Path:
 
 
 __all__ = [
-    "ADDRESS", "HOW_TO", "INDEX", "MAX_ADDRESS", "NOJEKYLL", "NO_ADDRESS", "NotesWebError", "PAGES_CARD",
+    "ADDRESS", "HOW_TO", "INDEX", "UPLOAD", "MAX_ADDRESS", "NOJEKYLL", "NO_ADDRESS", "NotesWebError", "PAGES_CARD",
     "PAGES_INTRO", "PAGES_PUBLIC", "PAGES_STEPS", "PAGES_UPDATE", "SHARE", "SHARE_SIZE", "WEB_DIR", "WebBuild",
     "address", "build", "folder_csp", "folder_name", "how_to", "share_card", "write",
 ]

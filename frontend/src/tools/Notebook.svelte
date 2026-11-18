@@ -29,7 +29,11 @@
    * A web folder is the public edition as a folder to put online (`engine/notes_web.py`):
    * the dialog asks the address it will live at, kept per note (`lib/notes/webAddress.js`),
    * which gives X its picture card, and once written offers Open the folder and How to
-   * publish (`lib/githubPagesSetup.js`). A WordPress draft has its own branch.
+   * publish (`lib/githubPagesSetup.js`). With GitHub Pages set up in Settings, the
+   * address is the site's own plus a short name, and **Publish to GitHub Pages** beside
+   * the export puts the folder online in one commit, then watches the page being built
+   * until it is live (`notebook/GitHubPublish.svelte`, `notebook/GitHubLive.svelte`).
+   * A WordPress draft has its own branch.
    *
    * To Post, in the open note's ⋯, opens Post on a Free post thread made of the note's
    * public edition, or of the stretch selected in it (`lib/notes/toPost.js`); nothing is
@@ -79,6 +83,8 @@
   import ToPostItem from './notebook/ToPostItem.svelte';
   import ConfirmDialog from '../components/ConfirmDialog.svelte';
   import WordPressDraft from './notebook/WordPressDraft.svelte';
+  import GitHubPublish from './notebook/GitHubPublish.svelte';
+  import GitHubLive from './notebook/GitHubLive.svelte';
   import ExportFolderPicker from '../components/ExportFolderPicker.svelte';
   import FloatingMenu from '../components/FloatingMenu.svelte';
   import Modal from '../components/Modal.svelte';
@@ -131,6 +137,12 @@
   let draftBusy = $state(false);
   let draftReady = $state(false);
   let draftSent = $state(null);
+  // GitHub Pages, in the Web folder branch: its Publish, and the page once published
+  let githubPublish = $state(null);
+  let githubSet = $state(false);
+  let githubProblem = $state('');
+  let githubBusy = $state(false);
+  let githubDone = $state(null);
   // the notes picked on the home, in the order they were picked
   let selected = $state([]);
   // the PDF beside the note, as the analyst last left it
@@ -587,6 +599,12 @@
     readDestinations().then((dirs) => (exportDir = dirs.notes)).catch(() => {});
   }
 
+  /** The title of the one note in the export dialog, which a short name starts from. */
+  const exportTitle = $derived(exportIds.length === 1
+    ? rows.find((row) => row.id === exportIds[0])?.title
+      ?? (opened && (opened.noteId ?? CASE_NOTES) === exportIds[0] ? noteEntity?.label ?? 'Case notes' : '')
+    : '');
+
   /** One note, or the notes picked on the home, each to a file of its own. */
   function exportSome(noteIds) {
     exportIds = noteIds.map((id) => id ?? CASE_NOTES);
@@ -594,6 +612,7 @@
     roundPov = false;
     exportChanges = '';
     webDone = null;
+    githubDone = null;
     stepsOpen = false;
     readWebAddress(exportIds);
     exportOpen = true;
@@ -612,8 +631,9 @@
     const id = caseId;
     listEditions(id, noteIds[0])
       .then((list) => {
-        const made = list.find((edition) => edition.format === WEB && edition.address);
-        if (made && !webAddressTyped && !webAddress && id === caseId && exportOpen) webAddress = made.address;
+        const made = list.find((edition) => (edition.format === WEB || edition.format === 'github') && edition.address);
+        // with GitHub set up, the address on the field was made from the title: the one published wins
+        if (made && !webAddressTyped && (!webAddress || githubSet) && id === caseId && exportOpen) webAddress = made.address;
       })
       .catch(() => {});
   }
@@ -622,6 +642,18 @@
     webAddressTyped = true;
     webAddress = value;
     if (exportIds.length === 1 && !addressProblem(value)) keepAddress(caseId, exportIds[0], value);
+  }
+
+  /** Publish the one note to GitHub Pages; the dialog then stays on the page being built. */
+  async function runPublish() {
+    if (!caseId || !githubPublish || exportBusy) return;
+    const id = caseId;
+    const result = await githubPublish.publish({ roundPov, changes: exportChanges });
+    if (!result || id !== caseId || !exportOpen) return;
+    stopCheck();
+    githubDone = result;
+    selected = [];
+    for (const warning of result.warnings ?? []) toast(warning, 'warn', 6500);
   }
 
   /** The web folder just written, in the system's file manager. */
@@ -684,6 +716,7 @@
     stopCheck();
     exportOpen = false;
     webDone = null;
+    githubDone = null;
     stepsOpen = false;
   }
 
@@ -848,7 +881,7 @@
         {/if}
       {/if}
       {#if row}
-        <button type="button" class="fm-item" title="Every PDF, HTML page, web folder and WordPress draft of this note, with Show and Check"
+        <button type="button" class="fm-item" title="Every PDF, HTML page, web folder, WordPress draft and published page of this note, with Show and Check"
           onclick={() => fromMenu((note) => (editionsOf = { noteId: note.id, title: note.title }))}>
           <Icon name="file" size={14} /><span class="fm-grow">Editions</span></button>
       {/if}
@@ -895,7 +928,7 @@
       .filter((item) => item.warnings.length)}
     {@const page = (html || web) && exportCheck && !exportCheck.checking ? exportCheck : null}
     {@const shared = exportEdition === PUBLIC || publicOnly || !exportCheck?.internal}
-    {@const problem = web && !several ? addressProblem(webAddress) : ''}
+    {@const problem = web && !several ? (githubSet ? githubProblem : addressProblem(webAddress)) : ''}
     <Modal title={several ? `Export notes as ${named}` : `Export note as ${named}`} onclose={closeExport} width="560px">
       {#if webDone}
         {@const count = webDone.written.length}
@@ -909,6 +942,12 @@
           </div>
           {#if stepsOpen}<PublishSteps />{/if}
         </section>
+        <div class="modal-row">
+          <div style="flex:1"></div>
+          <button class="btn btn-primary" onclick={closeExport}>Done</button>
+        </div>
+      {:else if githubDone}
+        <GitHubLive result={githubDone} />
         <div class="modal-row">
           <div style="flex:1"></div>
           <button class="btn btn-primary" onclick={closeExport}>Done</button>
@@ -941,6 +980,12 @@
       {#if web}
         <div class="web-fields">
           {#if !several}
+            <GitHubPublish bind:this={githubPublish} bind:address={webAddress} bind:connected={githubSet}
+              bind:problem={githubProblem} bind:busy={githubBusy} {caseId} noteId={exportIds[0]} title={exportTitle}
+              prepare={async () => { if (doc) await flush(doc); }} onaddress={(value) => { webAddressTyped = true; keepAddress(caseId, exportIds[0], value); }}
+              onleave={closeExport} />
+          {/if}
+          {#if !several && !githubSet}
             <label class="dest-label" for="export-address">Address it will live at</label>
             <input id="export-address" class="input mono" value={webAddress} maxlength="300" spellcheck="false" autocomplete="off"
               placeholder="https://your-name.github.io/articles/short-name/" title={LOOK_HELP.web_address}
@@ -949,7 +994,8 @@
             <p id="export-address-said" class="address-said" class:bad={problem} role="status">
               {problem || (!webAddress.trim() && noAddress ? noAddress.text : '')}</p>
           {/if}
-          <p class="export-note">Written to web/ in the destination, ready to put online. Exporting again replaces it.</p>
+          <p class="export-note">{githubSet && !several ? 'Export writes it to web/ in the destination; Publish puts it online in your repository.'
+            : 'Written to web/ in the destination, ready to put online. Exporting again replaces it.'}</p>
         </div>
       {:else if wordpress}
         <!-- WordPress draft: its fields, its button and its result line, filled in by the WordPress branch. -->
@@ -1036,9 +1082,16 @@
         <div style="flex:1"></div>
         <button class="btn" onclick={closeExport}>{wordpress && draftSent ? 'Close' : 'Cancel'}</button>
         {#if !wordpress}
-          <button class="btn btn-primary" disabled={exportBusy || Boolean(problem)} onclick={() => runExport(exportIds)}>
+          <button class={web && !several && githubSet ? 'btn' : 'btn btn-primary'} disabled={exportBusy || githubBusy || Boolean(problem)}
+            onclick={() => runExport(exportIds)}>
             {exportBusy ? 'Exporting…' : found.length ? 'Export anyway' : web ? (several ? `Export ${exportIds.length} web folders` : 'Export web folder')
               : several ? `Export ${exportIds.length} ${html ? 'HTML pages' : 'PDFs'}` : `Export ${named}`}</button>
+          {#if web && !several}
+            <button class={githubSet ? 'btn btn-primary' : 'btn'} disabled={githubBusy || exportBusy || (githubSet && Boolean(problem))}
+              onclick={runPublish} title={githubSet ? 'Put the folder online in your GitHub repository, one commit'
+                : 'Publish to your own GitHub Pages site, once it is set up in Settings › Publishing'}>
+              {githubBusy ? 'Publishing…' : 'Publish to GitHub Pages'}</button>
+          {/if}
         {:else if draftSent?.edit}
           <a class="btn btn-primary" href={draftSent.edit} target="_blank" rel="noopener noreferrer"
             title="The draft in WordPress's editor, where you publish it">Open in WordPress</a>

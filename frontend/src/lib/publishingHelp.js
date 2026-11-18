@@ -1,6 +1,6 @@
 /**
- * What Settings › Publishing, its logo editor and its WordPress section say on hover,
- * one clause each, and the limits they state under their fields.
+ * What Settings › Publishing, its logo editor and its WordPress and GitHub Pages
+ * sections say on hover, one clause each, and the limits they state under their fields.
  * `publishingHelp.test.js` holds every key to a sentence and to a control showing it,
  * and every control of the tab, the editor and the section to a hover text.
  */
@@ -37,6 +37,19 @@ export const PUBLISHING_HELP = {
   wordpressForget: 'Forget the address, the username and the password on this computer',
   wordpressHow: 'Where each answer is found in WordPress',
   wordpressGuide: "WordPress's own guide to application passwords",
+  githubAccount: 'Your GitHub username, or the organisation that owns the repository',
+  githubRepo: 'The repository the articles go in, one folder each',
+  githubBranch: 'The branch GitHub Pages serves',
+  githubToken: 'A fine-grained token for that one repository, kept on this computer only',
+  githubTest: 'Sign in to GitHub and say whether Pages serves the repository',
+  githubForget: 'Forget the account and the token on this computer',
+  githubHow: 'How to make the repository and the token, step by step',
+  githubSignup: 'Open a free GitHub account',
+  githubTokenPage: "GitHub's token page, with Contents and Pages picked",
+  githubCreate: 'Make the repository on GitHub, public, with a README',
+  githubPagesOn: 'Turn GitHub Pages on for the branch',
+  githubNewRepo: "GitHub's new repository page, with the name and Public picked",
+  githubPagesSettings: "The repository's Pages settings on github.com",
 };
 
 /** The longest name, role or organisation a report prints (`api/settings.py`). */

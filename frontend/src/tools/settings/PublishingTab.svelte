@@ -10,8 +10,9 @@
    * (`LogoEditor.svelte`). In reports, a note prints your name, role and
    * organisation where it says `{name}`, `{role}` and `{organisation}`
    * (`lib/notes/reportParts.js`), as its Signature block does. **WordPress** is the
-   * site a note is sent to as a draft (`WordPressSettings.svelte`). The hover texts
-   * live in `lib/publishingHelp.js`.
+   * site a note is sent to as a draft (`WordPressSettings.svelte`), and **GitHub Pages**
+   * the site a note's web folder is published to (`GitHubPagesSettings.svelte`). The
+   * hover texts live in `lib/publishingHelp.js`.
    */
   import { defaultMention, POST_TARGETS } from '../../lib/post.js';
   import { api } from '../../lib/api.js';
@@ -20,6 +21,7 @@
   import { myLogoUrl } from '../../lib/myLogo.js';
   import LogoEditor from './LogoEditor.svelte';
   import WordPressSettings from './WordPressSettings.svelte';
+  import GitHubPagesSettings from './GitHubPagesSettings.svelte';
 
   let {
     signature,
@@ -288,6 +290,8 @@
 </section>
 
 <WordPressSettings />
+
+<GitHubPagesSettings />
 
 <style>
   .sig-side {
