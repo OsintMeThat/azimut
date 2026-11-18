@@ -25,7 +25,7 @@ import {
 import { markdown, markdownLanguage } from '@codemirror/lang-markdown';
 import { syntaxHighlighting } from '@codemirror/language';
 import { history, historyKeymap, defaultKeymap, indentWithTab } from '@codemirror/commands';
-import { autocompletion, completionKeymap, startCompletion, acceptCompletion } from '@codemirror/autocomplete';
+import { autocompletion, completionKeymap, acceptCompletion } from '@codemirror/autocomplete';
 
 import { blockKinds } from './editor/blocks.js';
 import './editor/kinds.js';
@@ -36,12 +36,10 @@ import { blocksIn } from './editor/ranges.js';
 import {
   focused, noteCase, noteHandlers, openBlock, resolve, setFocused, setNoteCase, setOpenBlock, templateMode,
 } from './editor/state.js';
+import { mentionSource } from './editor/mentionMenu.js';
+import { slashSource } from './editor/slashMenu.js';
 import { highlight, look } from './editor/theme.js';
-import { entityReference } from '../markdown.js';
 import { coverChange } from './reportParts.js';
-import {
-  mentionMatches, slashInsert, slashMatches,
-} from './syntax.js';
 
 export { noteCase, setNoteCase, templateMode } from './editor/state.js';
 export { hintLineAt, noteDecorations, typeOverHints } from './editor/decorations.js';
@@ -50,6 +48,8 @@ export { insertInclude, removeInclude } from './editor/includeBlock.js';
 export { playedSteps, storyZoom } from './editor/playedBlock.js';
 export { mapBlock } from './editor/mapBlock.js';
 export { resizePicture } from './editor/pictureBlock.js';
+export { mentionSource } from './editor/mentionMenu.js';
+export { slashSource } from './editor/slashMenu.js';
 
 // -- the two modes ----------------------------------------------------------------
 
@@ -414,93 +414,6 @@ function tickTask(view, at) {
   const marker = view.state.sliceDoc(at, at + 3);
   if (!/^\[[ xX]\]$/.test(marker)) return;
   view.dispatch({ changes: { from: at + 1, to: at + 2, insert: marker[1] === ' ' ? 'x' : ' ' }, userEvent: 'input' });
-}
-
-// -- what `@` and `/` offer ----------------------------------------------------
-
-export function mentionSource(context) {
-  const typed = context.matchBefore(/@[^\s@[\]()]{0,40}$/);
-  if (!typed) return null;
-  const before = context.state.sliceDoc(typed.from - 1, typed.from);
-  if (before && /[\w.]/.test(before)) return null; // an address, not a mention
-  const info = context.state.field(noteCase);
-  const query = typed.text.slice(1);
-  if (!query && !context.explicit && !info.entities.length) return null;
-  return {
-    from: typed.from,
-    filter: false,
-    options: mentionMatches(info.entities, query).map((entity) => ({
-      label: entity.label,
-      detail: [entity.type, entity.attrs?.folder].filter(Boolean).join(' · '),
-      type: 'mention',
-      apply: (view, _completion, from, to) => {
-        // a mention names a record; a picture is put in with / or the Picture button
-        const text = entityReference(entity);
-        const after = view.state.sliceDoc(to, to + 1);
-        const insert = after && /\s/.test(after) ? text : `${text} `;
-        view.dispatch({ changes: { from, to, insert }, selection: { anchor: from + insert.length }, userEvent: 'input.complete' });
-      },
-    })),
-  };
-}
-
-export function slashSource(handlers, { template = false } = {}) {
-  return (context) => {
-    const typed = context.matchBefore(/(?:^|\s)\/[\w-]{0,20}$/);
-    if (!typed) return null;
-    const slash = typed.text.indexOf('/');
-    const from = typed.from + slash;
-    const line = context.state.doc.lineAt(from);
-    if (context.state.sliceDoc(line.from, from).includes('`')) return null;
-    const query = context.state.sliceDoc(from + 1, context.pos);
-    const before = context.state.sliceDoc(line.from, from);
-    return {
-      from,
-      filter: false,
-      options: slashMatches(query, { template }).map((command) => ({
-        label: command.label,
-        detail: command.hint ?? '',
-        type: command.action ? 'action' : 'block',
-        apply: (view, _completion, start, end) => {
-          if (command.action === 'cite') {
-            view.dispatch({ changes: { from: start, to: end, insert: '@' }, selection: { anchor: start + 1 } });
-            startCompletion(view);
-            return;
-          }
-          if (command.action) {
-            view.dispatch({ changes: { from: start, to: end, insert: '' }, selection: { anchor: start } });
-            handlers[command.action]?.();
-            return;
-          }
-          if (command.menu) {
-            // a group: type its name, and its commands come up together
-            const typed = `/${command.menu}`;
-            view.dispatch({ changes: { from: start, to: end, insert: typed }, selection: { anchor: start + typed.length } });
-            startCompletion(view);
-            return;
-          }
-          if (command.wrap) {
-            // the whole line goes in the block, what was typed before the / and what follows the cursor
-            const made = slashInsert(command, { before: `${before}${view.state.sliceDoc(end, line.to)}` });
-            view.dispatch({ changes: { from: line.from, to: line.to, insert: made.text }, selection: { anchor: line.from + made.cursor }, userEvent: 'input.complete' });
-            return;
-          }
-          const made = slashInsert(command, { before });
-          if (command.line) {
-            // a line command restyles the line it is typed on
-            view.dispatch({ changes: { from: start, to: end, insert: '' }, selection: { anchor: start } });
-            if (!before.trim()) {
-              view.dispatch({ changes: { from: line.from, to: start, insert: command.line }, selection: { anchor: line.from + command.line.length } });
-            } else {
-              view.dispatch({ changes: { from: start, insert: made.text }, selection: { anchor: start + made.cursor } });
-            }
-            return;
-          }
-          view.dispatch({ changes: { from: start, to: end, insert: made.text }, selection: { anchor: start + made.cursor }, userEvent: 'input.complete' });
-        },
-      })),
-    };
-  };
 }
 
 // -- the editor ----------------------------------------------------------------
