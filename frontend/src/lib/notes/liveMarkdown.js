@@ -28,6 +28,7 @@ import { history, historyKeymap, defaultKeymap, indentWithTab } from '@codemirro
 import { autocompletion, completionKeymap, startCompletion, acceptCompletion } from '@codemirror/autocomplete';
 
 import { registerBlock } from './editor/blocks.js';
+import './editor/kinds.js';
 import { blockKeys, pickedClass, typeNextToBlock, typeOnPicked } from './editor/blockKeys.js';
 import { drawn, rawField, rawHighlight, typeOverHints } from './editor/decorations.js';
 import { drawHints, hintsMarked } from './editor/inline.js';
@@ -40,7 +41,6 @@ import {
   BlockWidget, blockMouse, blockWidget, drawMarkdown, markPicked, sourceButton,
 } from './editor/widgets.js';
 import { entityReference, markdownHtml } from '../markdown.js';
-import { renderMermaidSvg } from '../mermaid.js';
 import { paths as iconPaths } from '../../components/Icon.svelte';
 import { INCLUDE_LINE, PAGE_BREAK_LINE, includeLine } from './look.js';
 import { COVER_LINE, coverChange } from './reportParts.js';
@@ -566,39 +566,6 @@ function cornerTag(name) {
   tag.title = 'Pinned to this corner of page 1 when Look › Cover is Your own page';
   return tag;
 }
-const diagrams = new Map();
-
-/** A diagram drawn once per source and kept, so typing elsewhere does not redraw it. */
-function drawDiagram(box, fence) {
-  const source = fence.replace(/^\s*(```|~~~)[^\n]*\n/, '').replace(/\n\s*(```|~~~)\s*$/, '');
-  const known = diagrams.get(source);
-  const show = (result) => {
-    // the drawing replaces what the box held, but not the button that opens its source
-    const edit = box.querySelector('[data-edit-source]');
-    if (result.svg) box.innerHTML = result.svg;
-    else {
-      box.classList.add('cm-block-failed');
-      box.textContent = `Diagram not drawn: ${result.error}`;
-    }
-    if (edit) box.append(edit);
-  };
-  if (known && !(known instanceof Promise)) {
-    show(known);
-    return;
-  }
-  box.textContent = 'Drawing the diagram…';
-  const pending = known ?? renderMermaidSvg(source)
-    .then(({ svg }) => ({ svg }))
-    .catch((error) => ({ error: String(error?.message ?? error).split('\n')[0] }))
-    .then((result) => {
-      diagrams.set(source, result);
-      if (diagrams.size > 60) diagrams.delete(diagrams.keys().next().value);
-      return result;
-    });
-  diagrams.set(source, pending);
-  pending.then(show);
-}
-
 /** A line holding nothing but one picture: `![…](…){…}` or `[[media:…]]{…}`. */
 const PICTURE_LINE = /^\s*(?:!\[[^\]]*\]\([^)]*\)(?:\{[^}\n]*\})?|\[\[media:[A-Za-z0-9_-]+\|[^\]\n]+\]\](?:\{[^}\n]*\})?)\s*$/;
 /** Whether the comment `from`–`to` is a page break (`<!-- pagebreak -->`) alone on its line. */
@@ -700,21 +667,6 @@ registerBlock({
     ctx.lines(found.from, found.to, 'cm-table-line');
     return true;
   },
-});
-
-registerBlock({
-  name: 'diagram',
-  // a closed ```mermaid fence; open, its lines are code
-  node: 'FencedCode',
-  read: (node, { state }) => {
-    const opening = state.doc.sliceString(node.from, Math.min(node.to, state.doc.lineAt(node.from).to));
-    const closed = /^(```|~~~)$/.test(state.doc.lineAt(node.to).text.trim());
-    return /^\s*(```|~~~)\s*mermaid\b/.test(opening) && closed ? { from: node.from, to: node.to } : null;
-  },
-  widget: blockWidget,
-  draw: (box, widget) => drawDiagram(box, widget.source),
-  atomic: true,
-  height: 220,
 });
 
 /** One comment line read as a block of its own when `test` says it is one. */
