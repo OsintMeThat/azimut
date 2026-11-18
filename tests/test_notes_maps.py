@@ -16,7 +16,7 @@ import pytest
 from PIL import Image
 
 from azimut import layout
-from azimut.engine import layerediting, notes_html, notes_maps, notes_pdf, tiles
+from azimut.engine import layerediting, notes_html, notes_maps, notes_pdf, notes_web, tiles
 from azimut.engine import uses as uses_engine
 from azimut.workspace import Case
 
@@ -249,6 +249,50 @@ def test_a_stale_name_is_said_and_never_breaks_the_page(client):
 
 
 # -- the page --------------------------------------------------------------------------------
+
+
+def test_a_map_in_a_web_folder_keeps_every_picture_as_a_file_its_policy_lets_in(client, tiles_here):
+    cid, case = _case(client)
+    name = _tracked_line(case)
+    vehicles = _markers(client, cid)
+    ground = _ground(client, cid)
+    _proof(client, cid, "Heights", "2026-10-20", [("12.7500, 43.5000", "Heights", False)])
+    text = (f"# Map\n\n::: map\ntitle: The line\nlayer: {name}\nlayer: {vehicles}\nproofs: all\n"
+            f"ground: {ground}\n:::\n")
+    folder = notes_html.Folder(csp=notes_web.folder_csp())
+    rendered = notes_html.render(case, title="Map", text=text, public=True, folder=folder)
+    page = rendered.html.decode("utf-8")
+    # the ground, the cards' pictures and the marks' pictograms are files, never data: addresses
+    assert not re.search(r"data:(image|video|audio|font)/", page)
+    for path, data in folder.files.items():
+        if path.endswith((".css", ".js")):
+            assert not re.search(r"data:(image|video|audio|font)/", data.decode("utf-8")), path
+    named = set(re.findall(r'(?:src|href)="(assets/[^"]+)"', page))
+    assert named and named <= set(folder.files)
+    ground_tag = next(attrs for tag, attrs in _tags(rendered.html) if tag == "img" and attrs.get("id") == "map-1-ground")
+    assert ground_tag["src"] in folder.files
+    # the map's own reader travels in the folder's script, which the policy lets in from the folder
+    script = next(data.decode("utf-8") for path, data in folder.files.items() if path.endswith(".js"))
+    assert "az-map" in script
+    assert "script-src 'self'" in notes_web.folder_csp()
+
+
+def test_a_mark_drawn_with_a_layers_own_picture_is_a_file_in_a_web_folder(client, tiles_here, monkeypatch):
+    # a layer imported with its own icons draws its marks with them, as pictures
+    real = notes_maps.symbol_svg
+    monkeypatch.setattr(notes_maps, "symbol_svg",
+                        lambda key, icon, prefix="az-map": real(key, {"png": _png((16, 16))}, prefix))
+    cid, case = _case(client)
+    vehicles = _markers(client, cid)
+    ground = _ground(client, cid)
+    text = f"# Map\n\n::: map\ntitle: Vehicles\nlayer: {vehicles}\nground: {ground}\n:::\n"
+    single = notes_html.render(case, title="Map", text=text, public=True).html.decode("utf-8")
+    assert '<image href="data:image/png;base64,' in single
+    folder = notes_html.Folder(csp=notes_web.folder_csp())
+    page = notes_html.render(case, title="Map", text=text, public=True, folder=folder).html.decode("utf-8")
+    assert "data:image/" not in page
+    lifted = re.findall(r'<image href="(assets/[^"]+\.png)"', page)
+    assert lifted and set(lifted) <= set(folder.files)
 
 
 def test_the_html_map_is_a_figure_of_the_ground_and_its_drawing_with_its_data_beside(client, tiles_here):
