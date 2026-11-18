@@ -402,7 +402,7 @@ def test_every_record_naming_a_file_is_read_as_a_use_or_says_why_not(client):
     read = set()
     for holder, lean in uses_engine._records(case):
         rel = holder.rel
-        if holder.entity is not None:
+        if holder.entity is not None and holder.type == "sheet":
             # The sidecar comes back resolved: /private/var on macOS, the long name of an
             # 8.3 temp folder on Windows.
             rel = sheet_engine.sidecar(case, holder.entity).relative_to(root.resolve()).as_posix()

@@ -27,6 +27,10 @@ Past the chain:
   geolocate gathered: by media path;
 - a personal layer's marker following an entity, a sheet's link, vocabulary word or
   attached file: by entity id;
+- a note's map (`::: map`, `engine/notes_maps.py`): the layers and the plate it draws
+  by their records, the ground and the close-ups under it by entity id. Its period of
+  proofs is a question asked of the case, not a name: a proof deleted leaves the map
+  one point fewer, as a proof added gives it one more;
 - an entity's photo chosen from Media (`entity_images`);
 - a Detect routine watching an area: by the area's record. The delete refuses that
   one until the routine lets the area go (`api/cases/common.delete_entities_deep`),
@@ -49,7 +53,7 @@ from typing import TYPE_CHECKING, Any, Callable, Iterable, Iterator
 
 from .. import layout
 from ..workspace import CaseError
-from . import horizon_finds, horizon_views, inspectwork, mapplates, maplayers, sheets
+from . import horizon_finds, horizon_views, inspectwork, mapplates, maplayers, notes_maps, sheets
 from . import links as link_engine
 
 if TYPE_CHECKING:
@@ -213,6 +217,45 @@ def _read(path: Path, reader: Callable[[Any], Iterable[Lean]]) -> tuple[Lean, ..
     return leans
 
 
+def _note_maps(text: str) -> Iterator[Lean]:
+    """What the maps a note's text holds draw: their layers, plate and pictures."""
+    for block in notes_maps.blocks_in(text):
+        for name in block.layers:
+            if notes_maps.NAME.match(name):
+                yield Lean(layout.layer_spec_rel(name), "maps it")
+        if block.plate and notes_maps.NAME.match(block.plate):
+            yield Lean(layout.map_plate_rel(block.plate), "maps it")
+        for picture in [block.ground, *block.details]:
+            if picture and notes_maps.ENTITY_ID.match(picture):
+                yield Lean(picture, "is the ground of a map in it")
+
+
+def _read_note(path: Path) -> tuple[Lean, ...]:
+    """A note's map leans, kept while its file is unchanged, read only when it holds a map."""
+    try:
+        stat = path.stat()
+    except OSError:
+        return ()
+    key = f"note\n{path}"
+    stamp = (stat.st_mtime_ns, stat.st_size, stat.st_ino)
+    with _cache_lock:
+        hit = _cache.get(key)
+        if hit is not None and hit[0] == stamp:
+            _cache.move_to_end(key)
+            return hit[1]
+    try:
+        text = path.read_text(encoding="utf-8")
+    except (OSError, ValueError):
+        return ()
+    leans = tuple(_note_maps(text)) if "::: map" in text or ":::map" in text else ()
+    with _cache_lock:
+        _cache[key] = (stamp, leans)
+        _cache.move_to_end(key)
+        while len(_cache) > _CACHE_MAX:
+            _cache.popitem(last=False)
+    return leans
+
+
 def _sheet_leans(meta: Any) -> Iterator[Lean]:
     for target in sheets.pointers(meta):
         yield Lean(target, "links to it")
@@ -220,7 +263,7 @@ def _sheet_leans(meta: Any) -> Iterator[Lean]:
 
 @dataclass(frozen=True)
 class _Holder:
-    """Who holds a lean: a record by its path, or a sheet by its entity."""
+    """Who holds a lean: a record by its path, or a sheet or a note by its entity."""
 
     rel: str
     type: str
@@ -244,6 +287,22 @@ def _records(case: "Case") -> Iterator[tuple[_Holder, Lean]]:
     for lean in _read(root / bench, _bench):
         yield _Holder(bench, BENCH_TYPE), lean
     cursor: str | None = None
+    while True:
+        notes = case.page_entities(limit=500, cursor=cursor, types=["note"])
+        for entity in notes.get("items", []):
+            rel = str((entity.get("attrs") or {}).get("path") or "")
+            if not rel:
+                continue
+            try:
+                path = case.resolve_inside(rel)
+            except CaseError:
+                continue
+            for lean in _read_note(path):
+                yield _Holder(rel, "note", entity), lean
+        cursor = notes.get("next_cursor")
+        if not cursor:
+            break
+    cursor = None
     while True:
         page = case.page_entities(limit=sheets.SHEET_PAGE, cursor=cursor, types=["sheet"])
         for entity in page.get("items", []):
