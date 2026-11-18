@@ -7,3 +7,4 @@ import './diagramBlock.js';
 import './tableBlock.js';
 import './breakBlocks.js';
 import './htmlBlock.js';
+import './includeBlock.js';
