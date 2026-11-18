@@ -2068,9 +2068,10 @@ def _counts_said(phrases: list[str]) -> str:
     said = list(dict.fromkeys(phrases))
     quoted = ", ".join(f'"{phrase}"' for phrase in said[:MAX_COUNTS])
     quoted += ", …" if len(said) > MAX_COUNTS else "."
-    if len(phrases) == 1:
+    # counted as they are quoted: one phrase written twice is one count
+    if len(said) == 1:
         return f'1 count reads as exact: {quoted} Say "at least" or give a range.'
-    return f'{len(phrases)} counts read as exact: {quoted} Say "at least" or give a range.'
+    return f'{len(said)} counts read as exact: {quoted} Say "at least" or give a range.'
 
 
 def _anchor_named(message: str) -> str:

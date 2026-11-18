@@ -572,7 +572,7 @@ def test_a_count_read_as_exact_is_one_warning_a_minimum_or_range_is_not():
             "> 5 fighters in a quote.\n\n- 2 soldiers in a list\n")
     rendered = notes_html.render(None, title="T", text=note, identity=notefill.Identity())
     counts = [said for said, kind in zip(rendered.warnings, rendered.warning_kinds) if kind == notes_html.COUNT]
-    assert counts == ['4 counts read as exact: "12 trucks", "3 civilians", "2 soldiers". '
+    assert counts == ['3 counts read as exact: "12 trucks", "3 civilians", "2 soldiers". '
                       'Say "at least" or give a range.']
     # a confidence is printed as typed
     assert "90% sure" in parse(rendered.html).words()
@@ -587,6 +587,10 @@ def test_more_counts_than_the_warning_quotes_are_counted_and_cut():
                       'Say "at least" or give a range.']
     single = notes_html.render(None, title="T", text="We saw 2 tanks.", identity=notefill.Identity())
     assert single.warnings == ['1 count reads as exact: "2 tanks". Say "at least" or give a range.']
+    # one phrase written twice is one count, as it is one quote
+    twice = notes_html.render(None, title="T", text="We saw 19 vehicles. Then 19 vehicles again.",
+                              identity=notefill.Identity())
+    assert twice.warnings == ['1 count reads as exact: "19 vehicles". Say "at least" or give a range.']
 
 
 def test_the_check_says_what_the_pdf_check_says(report):
