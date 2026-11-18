@@ -573,6 +573,36 @@ test('the play goes through each transition for as long as the video will', asyn
   expect(held).toBeLessThan(4500);
 });
 
+test('a played map flies to the next framing with its inset following, and the editor keeps going', async ({ page }) => {
+  needsWebGL();
+  const store = { plates: new Map(), saves: [], exports: [], pictures: [], templates: [] };
+  const spec = { page: { paper: 'a4', orientation: 'landscape' }, theme: { paper: '#ffffff', ink: '#111111', accent: '#c8102e', font: 'inter' },
+    time: { at: null, trail: true, since: null, window: null },
+    transitions: { on: true, fade: true, move: true, blur: false, appear: 'fade', seconds: 1.5 },
+    steps: { now: [{ id: 's1', name: 'One', duration: 1 }, { id: 's2', name: 'Two', duration: 1 }] },
+    framing: { s2: { map: { lat: 50.4, lon: 30.5, zoom: 7, bearing: 0 } } },
+    elements: [{ id: 'map', kind: 'map', box: [10, 24, 277, 176], view: { lat: 48.5, lon: 31.5, zoom: 5, bearing: 0 }, basemap: 'plain', overlays: [], layers: [], grid: 'none' },
+      { id: 'inset', kind: 'inset', of: 'map', box: [230, 150, 50, 40], border: true, zoom: null },
+      { id: 'title', kind: 'text', box: [10, 6, 200, 14], text: 'Flown', size: 22, weight: 700 }] };
+  store.plates.set('Flown', { title: 'Flown', spec });
+  await plateFixture(page, store);
+  const errors = [];
+  page.on('pageerror', (error) => errors.push(String(error)));
+  await page.goto('/#plate');
+  await page.locator('.tile:not(.template) .open', { hasText: 'Flown' }).click();
+  await expect(page.locator('.plate-map .maplibregl-canvas')).toHaveCount(2, { timeout: 20_000 });
+  const shown = page.locator('.steps .tile[aria-selected="true"] .tile-name');
+  await page.getByRole('button', { name: 'Play', exact: true }).click();
+  await expect(shown).toHaveText('One', { timeout: 10_000 });
+  // into Two the map flies to its own framing, the inset jumping along with it frame by frame
+  await expect(shown).toHaveText('Two', { timeout: 10_000 });
+  await page.waitForTimeout(1000);
+  expect(errors).toEqual([]);
+  // the editor still answers: the play stops where it is
+  await page.getByRole('button', { name: 'Pause', exact: true }).click();
+  await expect(page.getByRole('button', { name: 'Play', exact: true })).toBeVisible();
+});
+
 test('the video plays every transition the plate sets, however many', async ({ page }) => {
   test.setTimeout(180_000);
   const store = { plates: new Map(), saves: [], exports: [], pictures: [], templates: [] };

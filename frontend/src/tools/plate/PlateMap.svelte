@@ -436,14 +436,16 @@
     // the move reports where the map went, which reads and writes the page's views: none of it is this effect's to follow
     untrack(() => {
       settingView = element.kind === 'inset';
-      // played, it flies there as the video's transition does (`tween.flight`)
+      // played, it flies there as the video's transition does (`tween.flight`); an inset jumps along with its
+      // map's flight, frame by frame, since a flight of its own would start over on every one and never end
+      const flies = glide > 0 && element.kind !== 'inset';
       if (globe) {
-        if (glide > 0) flyGlobe(next, glide);
+        if (flies) flyGlobe(next, glide);
         else {
           stopFlight();
           globe.setCamera(globeCamera(next));
         }
-      } else if (glide > 0) map.flyTo({ ...camera, duration: glide });
+      } else if (flies) map.flyTo({ ...camera, duration: glide });
       else map.jumpTo(camera);
       settingView = false;
       if (element.kind === 'inset') report();
