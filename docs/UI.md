@@ -7050,7 +7050,15 @@ homonyms under stable suffixes, into the shared notes destination (the case's
 (`POST /notes/pdf/check`, rendered in memory, nothing written) and says *Checking…*;
 what it finds is listed under *Before you export*, by note when several are exported,
 each with *Go to* when it names a line, and the button reads *Export anyway*. A check
-that fails says nothing and never holds the export back.
+that fails says nothing and never holds the export back. While the note lists its
+sources, the check also counts its outside links, each page once: *88 outside links
+have no archived copy.* and *3 links are not in the case, so no day says when they were
+read.*, one line each (a single link is named instead). Under each line its links are
+folded to the first three by their words and how many more; opened, each shows its site
+and *Go to*. Links to the case's own work are not counted: an archived copy itself
+(Wayback, archive.today), the Wayback and Copernicus viewers and the Esri imagery
+services, a map view the case captured, and where a proof was posted. The public
+edition counts only the links it prints. The Page pane lists the same lines, without the links under them.
 
 **PDF | HTML.** The export dialog opens with a **PDF | HTML** switch, the last one picked
 kept for this browser; everything else (the edition, the destination, the check, the
@@ -7373,7 +7381,8 @@ more. Pressing a page scrolls the note to where it starts. The choice is kept fo
 browser. What the PDF warns about is listed under the pane's bar, its count folding
 the list: an empty section; a picture, video, chapter or record no longer in the case
 (marked red); a picture with no source while sources are listed; tasks still open,
-outside Plain; a link a reader cannot open (`file:`, localhost, a private address); a
+outside Plain; a link a reader cannot open (`file:`, localhost, a private address);
+outside links with no archived copy, or none the case holds, while sources are listed; a
 script no face covers. One that names a line goes there when pressed. A template's pages give no such warnings, since a
 template is guidance by design.
 

@@ -35,9 +35,11 @@ when, its archived copy and the day it was seen. Nothing is fetched.
 Before an export, `/notes/pdf/check` lays the chosen notes out in memory and says,
 note by note, what the PDF would get wrong (a picture no longer in the case, one
 with no source, a task left open, a link a reader cannot open): the warnings the
-page pane lists, with the line each is about and its kind. It writes nothing and
-never stands in the way: the export goes on whatever it finds. For the public
-edition it also says how many internal passages are left out.
+page pane lists, with the line each is about and its kind. While the sources are
+listed it also counts the outside links with no archived copy and those the case
+holds nothing of, one line each, the links listed under it as `items`. It writes
+nothing and never stands in the way: the export goes on whatever it finds. For the
+public edition it also says how many internal passages are left out.
 
 **To Post** asks `/notes/{id}/pieces` for the note's public edition, or the stretch
 selected in it, as the pieces a Post thread starts from (`engine/notepieces.py`).
@@ -903,15 +905,26 @@ def check_pdf(case_id: str, body: CheckIn) -> dict[str, Any]:
             warnings = [{"text": str(exc)[:MAX_WARNING_CHARS], "line": None, "kind": notes_markdown.OTHER}]
         else:
             internal = rendered.internal
-            warnings = [
-                {"text": said[:MAX_WARNING_CHARS], "line": line, "kind": kind}
-                for said, line, kind in zip(rendered.warnings, rendered.warning_lines, rendered.warning_kinds)
-            ]
+            warnings = _warnings(rendered)
             if public and internal:
                 said = f"{internal} internal passage{'s' if internal > 1 else ''} left out."
                 warnings.append({"text": said, "line": None, "kind": notes_markdown.LEFT_OUT})
         answered.append({"note": note_id, "title": title, "warnings": warnings, "internal": internal})
     return {"notes": answered}
+
+
+def _warnings(rendered: pdf_engine.Rendered | html_engine.RenderedHtml | web_engine.WebBuild) -> list[dict[str, Any]]:
+    """A document's warnings as the check answers them, a grouped one with the links it
+    counts as ``items`` (each its words, its address and its line)."""
+    said: list[dict[str, Any]] = []
+    for text, line, kind in zip(rendered.warnings, rendered.warning_lines, rendered.warning_kinds):
+        warning: dict[str, Any] = {"text": text[:MAX_WARNING_CHARS], "line": line, "kind": kind}
+        items = rendered.listed.get(kind)
+        if items:
+            warning["items"] = [{"text": str(item["text"])[:MAX_WARNING_CHARS], "url": item["url"][:2048],
+                                 "line": item["line"]} for item in items]
+        said.append(warning)
+    return said
 
 
 def _check_html(
@@ -938,10 +951,7 @@ def _check_html(
     except (html_engine.NotesHtmlError, web_engine.NotesWebError) as exc:
         answer["warnings"] = [{"text": str(exc)[:MAX_WARNING_CHARS], "line": None, "kind": notes_markdown.OTHER}]
         return answer
-    warnings = [
-        {"text": said[:MAX_WARNING_CHARS], "line": line, "kind": kind}
-        for said, line, kind in zip(rendered.warnings, rendered.warning_lines, rendered.warning_kinds)
-    ]
+    warnings = _warnings(rendered)
     if public and rendered.internal:
         said = f"{rendered.internal} internal passage{'s' if rendered.internal > 1 else ''} left out."
         warnings.append({"text": said, "line": None, "kind": notes_markdown.LEFT_OUT})

@@ -267,6 +267,8 @@ class RenderedHtml:
     warnings: list[str] = field(default_factory=list)
     warning_lines: list[int | None] = field(default_factory=list)
     warning_kinds: list[str] = field(default_factory=list)
+    #: The links behind a grouped warning, by its kind (`notes_markdown.Cited.listed`).
+    listed: dict[str, list[dict[str, Any]]] = field(default_factory=dict)
     #: The internal passages in the note and its chapters.
     internal: int = 0
     #: The SHA-256 of the source this edition printed (`notes_markdown.printed_source`).
@@ -355,6 +357,7 @@ def render(
         warnings=[message for message, _, _ in page.warnings],
         warning_lines=[line for _, line, _ in page.warnings],
         warning_kinds=[kind for _, _, kind in page.warnings],
+        listed=cited.listed,
         internal=passages[0],
         text_sha256=printed,
         weight=page.weight,
