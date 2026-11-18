@@ -15,7 +15,7 @@ from urllib.parse import quote
 import pytest
 
 from azimut.api import notes as notes_api
-from azimut.engine import notepieces, notes_pdf
+from azimut.engine import notepieces, notes_markdown, notes_pdf
 from azimut.workspace import Case
 
 from sourcesfixture import NOTICE_URL, sourced_case
@@ -327,7 +327,7 @@ def test_a_selection_cut_through_an_aligned_block_leaves_no_fence():
 
 def test_nothing_goes_when_a_passage_survives_the_stripping(monkeypatch):
     """The belt under the stripping, the public PDF's own: no pieces rather than a leak."""
-    monkeypatch.setattr(notes_pdf, "strip_internal", lambda text: (text, 0))
+    monkeypatch.setattr(notes_markdown, "strip_internal", lambda text: (text, 0))
     with pytest.raises(notepieces.NotePiecesError):
         hand(SECRET)
 
@@ -426,7 +426,7 @@ def test_the_route_refuses_what_it_cannot_read(client, monkeypatch):
     assert client.post(road, json={"text": "x", "selection": {"start": -1, "end": 2}}).status_code == 422
     monkeypatch.setattr(notes_api, "MAX_NOTE_BODY_BYTES", 64)
     assert client.post(road, json={"text": "é" * 40}).status_code == 413
-    monkeypatch.setattr(notes_pdf, "strip_internal", lambda text: (text, 0))
+    monkeypatch.setattr(notes_markdown, "strip_internal", lambda text: (text, 0))
     refused = client.post(road, json={"text": "> [!internal] Secret."})
     assert refused.status_code == 422 and "Secret" not in refused.text
 

@@ -22,7 +22,7 @@ from pypdf import PdfReader
 
 from azimut import layout
 from azimut.api import notes as notes_api
-from azimut.engine import notelook, notes_pdf
+from azimut.engine import notelook, notes_markdown, notes_pdf
 from azimut.engine.notelook import NoteLook
 from azimut.workspace import Case
 
@@ -188,7 +188,7 @@ def test_a_diagram_inside_a_passage_is_not_asked_for_by_the_public_edition():
 
 def test_the_public_edition_refuses_to_print_if_a_passage_were_left(monkeypatch):
     """The belt under the stripping: a page is never made with one still on it."""
-    monkeypatch.setattr(notes_pdf, "strip_internal", lambda text: (text, 0))
+    monkeypatch.setattr(notes_markdown, "strip_internal", lambda text: (text, 0))
     with pytest.raises(notes_pdf.NotesPdfError):
         notes_pdf.render(None, title="T", text=NOTE, public=True)
 

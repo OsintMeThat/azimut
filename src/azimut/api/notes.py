@@ -61,7 +61,7 @@ from pydantic import BaseModel, Field
 from .. import errors, layout
 from ..engine import exportdir
 from ..engine import links as link_engine
-from ..engine import notelook
+from ..engine import notelook, notes_markdown
 from ..engine import notes_pdf as pdf_engine
 from ..engine import notefill, notefromcase, notelinks, notepieces, notetext
 from ..engine import pdffonts
@@ -540,7 +540,7 @@ def preview_response(
     look: notelook.NoteLook,
     diagrams: dict[str, str],
     note_id: str = "",
-    resolve: pdf_engine.Resolve | None = None,
+    resolve: notes_markdown.Resolve | None = None,
     edition: Edition = "internal",
 ) -> Response:
     """Render a preview under the one-at-a-time turn and answer it as PDF bytes.
@@ -558,7 +558,7 @@ def preview_response(
     try:
         rendered = pdf_engine.render(
             case, title=title or "Untitled", text=text, diagrams=decoded, look=look,
-            note_id=note_id, resolve=resolve, public=edition == pdf_engine.PUBLIC, light=True,
+            note_id=note_id, resolve=resolve, public=edition == notes_markdown.PUBLIC, light=True,
         )
     except pdffonts.FontError as exc:
         raise HTTPException(status_code=500, detail=str(exc)) from exc
@@ -666,7 +666,7 @@ def _note_title(case: Case, note_id: str) -> str:
     return str((entity or {}).get("label") or "Note")
 
 
-def _resolver(case: Case) -> pdf_engine.Resolve:
+def _resolver(case: Case) -> notes_markdown.Resolve:
     """How a chapter finds the note it prints: as saved, the case notes included."""
 
     def resolve(note_id: str) -> tuple[str, str] | None:
@@ -764,11 +764,11 @@ def export_diagrams(case_id: str, body: EditionSelection) -> dict[str, Any]:
     case = get_case(case_id)
     fences: dict[str, str] = {}
     resolve = _resolver(case)
-    public = body.edition == pdf_engine.PUBLIC
+    public = body.edition == notes_markdown.PUBLIC
     for note_id in dict.fromkeys(body.notes):
         _, text = _note_source(case, note_id)
-        for source in pdf_engine.mermaid_sources(text, resolve=resolve, note_id=note_id, public=public):
-            fences.setdefault(pdf_engine.diagram_key(source), source)
+        for source in notes_markdown.mermaid_sources(text, resolve=resolve, note_id=note_id, public=public):
+            fences.setdefault(notes_markdown.diagram_key(source), source)
     pending = list(fences.items())[:MAX_DIAGRAMS]
     return {"diagrams": [{"key": key, "source": source} for key, source in pending]}
 
@@ -787,7 +787,7 @@ def check_pdf(case_id: str, body: EditionSelection) -> dict[str, Any]:
     """
     case = get_case(case_id)
     resolve = _resolver(case)
-    public = body.edition == pdf_engine.PUBLIC
+    public = body.edition == notes_markdown.PUBLIC
     answered: list[dict[str, Any]] = []
     for note_id in dict.fromkeys(body.notes):
         title, text = _note_source(case, note_id)
@@ -801,7 +801,7 @@ def check_pdf(case_id: str, body: EditionSelection) -> dict[str, Any]:
         except pdffonts.FontError as exc:
             raise HTTPException(status_code=500, detail=str(exc)) from exc
         except pdf_engine.NotesPdfError as exc:
-            warnings = [{"text": str(exc)[:MAX_WARNING_CHARS], "line": None, "kind": pdf_engine.OTHER}]
+            warnings = [{"text": str(exc)[:MAX_WARNING_CHARS], "line": None, "kind": notes_markdown.OTHER}]
         else:
             internal = rendered.internal
             warnings = [
@@ -810,7 +810,7 @@ def check_pdf(case_id: str, body: EditionSelection) -> dict[str, Any]:
             ]
             if public and internal:
                 said = f"{internal} internal passage{'s' if internal > 1 else ''} left out."
-                warnings.append({"text": said, "line": None, "kind": pdf_engine.LEFT_OUT})
+                warnings.append({"text": said, "line": None, "kind": notes_markdown.LEFT_OUT})
         answered.append({"note": note_id, "title": title, "warnings": warnings, "internal": internal})
     return {"notes": answered}
 
@@ -836,7 +836,7 @@ def export_pdf(case_id: str, body: ExportIn) -> dict[str, Any]:
     written: list[dict[str, str]] = []
     warnings: list[str] = []
     resolve = _resolver(case)
-    public = body.edition == pdf_engine.PUBLIC
+    public = body.edition == notes_markdown.PUBLIC
     for note_id, title, text in selected:
         try:
             rendered = pdf_engine.render(
@@ -852,7 +852,7 @@ def export_pdf(case_id: str, body: ExportIn) -> dict[str, Any]:
         now = _now()
         # a note with no internal passage has one edition, shareable as it stands:
         # its name says no edition, and it is recorded as public
-        edition = body.edition if rendered.internal else pdf_engine.PUBLIC
+        edition = body.edition if rendered.internal else notes_markdown.PUBLIC
         filename = _pdf_filename(title, note_id, peers, body.edition if rendered.internal else "", now.date())
         try:
             # never over an earlier one: a second export that day is numbered
@@ -985,7 +985,7 @@ def _edition_record(item: Any) -> dict[str, Any] | None:
         return None
     at, edition, file, folder = item.get("at"), item.get("edition"), item.get("file"), item.get("folder")
     pages, pdf_sha, text_sha = item.get("pages"), item.get("pdf_sha256"), item.get("text_sha256")
-    if not (isinstance(at, str) and STAMP.match(at) and edition in pdf_engine.EDITIONS):
+    if not (isinstance(at, str) and STAMP.match(at) and edition in notes_markdown.EDITIONS):
         return None
     if not (isinstance(file, str) and layout.names_one_child(file) and isinstance(folder, str) and folder):
         return None
