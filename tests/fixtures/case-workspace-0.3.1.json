@@ -1774,10 +1774,10 @@
    "proof-composer": 3,
    "satellite": 2,
    "sheet": 3,
-   "user": 20
+   "user": 21
   },
   "by_status": {
-   "confirmed": 56,
+   "confirmed": 57,
    "suggested": 1
   },
   "by_type": {
@@ -1798,7 +1798,7 @@
    "map-plate": 1,
    "media": 14,
    "network": 1,
-   "note": 1,
+   "note": 2,
    "organization": 2,
    "person": 1,
    "place": 2,
@@ -1830,7 +1830,7 @@
     "map-plate": 1,
     "media": 14,
     "network": 1,
-    "note": 1,
+    "note": 2,
     "organization": 2,
     "person": 1,
     "place": 2,
@@ -1840,7 +1840,7 @@
     "structure": 1,
     "vessel": 1
    },
-   "unfiled": 55
+   "unfiled": 56
   },
   "countable": 1,
   "lacks": {
@@ -1866,8 +1866,8 @@
    "structure": 4,
    "vessel": 7
   },
-  "total": 57,
-  "unlinked": 11
+  "total": 58,
+  "unlinked": 12
  },
  "views": {
   "Actors frozen": {
