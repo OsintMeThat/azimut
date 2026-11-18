@@ -1,5 +1,8 @@
 import { describe, expect, it, vi } from 'vitest';
-import { MAX_FIGURE_PIXELS, SHEET_DAYS, faceCredits, figureName, figureScale, pageOffer, sheetOffer, sheetRefusal } from './plateNote.js';
+import {
+  MAX_FIGURE_PIXELS, MOST_SLIDES, SHEET_DAYS, faceCredits, figureName, figureScale, pageOffer, sheetOffer, sheetRefusal, slideCaption, slidesRefusal,
+  stepsBlock, stepsOffer,
+} from './plateNote.js';
 
 describe('a Map plate put in a note', () => {
   it('is named after the plate, then the day and the step it shows', () => {
@@ -55,5 +58,59 @@ describe('a Map plate put in a note', () => {
   it('refuses with a sentence when nothing was filed', async () => {
     await expect(pageOffer({ keep: async () => ({ entity: null }) }).put({})).rejects.toThrow('could not be filed');
     await expect(sheetOffer({ keep: async () => ({}) }).put({})).rejects.toThrow('could not be filed');
+  });
+});
+
+describe('the slides of a Map plate, as steps', () => {
+  it('captions each slide with its day, then its title', () => {
+    expect(slideCaption({ day: '2026-03-02', step: 'Smoke over the port' })).toBe('2 Mar 2026, Smoke over the port');
+    expect(slideCaption({ day: '2026-03-02T10:00' })).toBe('2 Mar 2026 · 10:00');
+    expect(slideCaption({ day: '', step: 'Step 2' })).toBe('Step 2');
+    expect(slideCaption({})).toBe('');
+  });
+
+  it('refuses fewer than two slides, or more than a block holds, in a sentence', () => {
+    expect(slidesRefusal(1)).toBe('Steps need a plate that plays two slides or more');
+    expect(slidesRefusal(MOST_SLIDES)).toBe('');
+    expect(slidesRefusal(MOST_SLIDES + 3)).toBe(`A block of steps holds ${MOST_SLIDES} slides at most and this plate plays ${MOST_SLIDES + 3}. Skip some days first`);
+  });
+
+  it('files every slide and writes one block of steps, a captioned picture a line', async () => {
+    const slides = [
+      { entity: { id: 'e1' }, label: 'Port strike, 2 Mar 2026', caption: '2 Mar 2026', fresh: true },
+      { entity: { id: 'e2' }, label: 'Port strike, 2 Mar 2026, Smoke', caption: '2 Mar 2026, Smoke "rising"', fresh: false },
+      { entity: { id: 'e3' }, label: 'Port strike, 3 Mar 2026', caption: '3 Mar 2026', fresh: true },
+    ];
+    const keep = vi.fn().mockResolvedValue(slides);
+    const offer = stepsOffer({ keep });
+    expect(offer).toMatchObject({ id: 'plate-steps', label: 'The slides, as steps', picture: true });
+    const signal = new AbortController().signal;
+    const put = await offer.put({ signal });
+    expect(keep).toHaveBeenCalledWith({ signal });
+    expect(put.text).toBe([
+      '::: steps',
+      '[[media:e1|Port strike, 2 Mar 2026]]{caption="2 Mar 2026"}',
+      '[[media:e2|Port strike, 2 Mar 2026, Smoke]]{caption="2 Mar 2026, Smoke rising"}',
+      '[[media:e3|Port strike, 3 Mar 2026]]{caption="3 Mar 2026"}',
+      ':::',
+    ].join('\n'));
+    // only what was filed by this press is said to be new
+    expect(put.filed).toEqual(['e1', 'e3']);
+  });
+
+  it('says so when nothing could be filed', async () => {
+    await expect(stepsOffer({ keep: async () => [] }).put()).rejects.toThrow('The slides could not be filed in the case');
+    expect(stepsBlock([{ entity: {} }])).toBe('');
+  });
+
+  it('is offered by the plate once it plays two slides, and files each through the figure route', async () => {
+    const { readFileSync } = await import('node:fs');
+    const source = readFileSync(new URL('../MapPlate.svelte', import.meta.url), 'utf8');
+    expect(source).toContain('...(sequence.length >= 2 ? [noteSlides] : [])');
+    const keepSlides = source.slice(source.indexOf('async function keepSlides('), source.indexOf('const notePage = pageOffer('));
+    expect(keepSlides).toContain('const canvas = await render(scale, beat.day, { step: beat.step });');
+    expect(keepSlides).toContain('`/api/cases/${owner}/map-plates/${encodeURIComponent(stem)}/figure`');
+    expect(keepSlides).toContain("form.append('reuse', 'true');");
+    expect(keepSlides).toContain('caption: slideCaption({ day, step: words })');
   });
 });

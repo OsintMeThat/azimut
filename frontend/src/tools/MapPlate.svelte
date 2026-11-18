@@ -55,7 +55,9 @@
   import { caseState, deleteTemplate, prefs, reloadCase, saveTemplate, toast, uiState } from '../lib/state.svelte.js';
   import { myLogoUrl } from '../lib/myLogo.js';
   import { offerPuts, withdrawNote } from '../lib/noteHere.svelte.js';
-  import { faceCredits, figureName, figureScale, pageOffer, sheetOffer, sheetRefusal } from './plate/plateNote.js';
+  import {
+    faceCredits, figureName, figureScale, pageOffer, sheetOffer, sheetRefusal, slideCaption, slidesRefusal, stepsOffer,
+  } from './plate/plateNote.js';
   import { plateFiled, platePostAbout } from './plate/platePost.js';
   import { startPost } from './post/start.js';
   import { fileUrl } from '../lib/fileUrl.js';
@@ -1872,10 +1874,75 @@
     }
   }
 
+  /**
+   * Every slide the plate plays (`sequence`: each day, then each of its steps), drawn
+   * one after the other at screen resolution and filed as a page of this plate, for a
+   * block of steps in the pinned note. A slide filed before in this very state is cited
+   * again. Each answers its label and the caption the note writes under it.
+   */
+  async function keepSlides({ signal } = {}) {
+    if (!plate || plate.template || !plate.caseId) throw new Error('Open a plate first');
+    if (plateExport.running || playing || exportRun) throw new Error('The plate is busy. Try again in a moment');
+    const slides = [...sequence];
+    const refusal = slidesRefusal(slides.length);
+    if (refusal) throw new Error(refusal);
+    await autosave.flush();
+    if (!plate?.name) throw new Error('The plate is not saved yet');
+    const { caseId: owner, name: stem, title } = plate;
+    const run = new AbortController();
+    signal?.addEventListener('abort', () => run.abort());
+    exportRun = run;
+    startExport(title, owner, () => run.abort());
+    const check = () => { if (run.signal.aborted) throw new DOMException('Stopped', 'AbortError'); };
+    framing = ''; selection = [];
+    tilesMissing = 0;
+    const owed = faceCredits(credits, plateCredits(spec, creditSources)).slice(0, 2000);
+    const { width: widthMm, height: heightMm } = pageSize(spec.page);
+    const scale = figureScale(widthMm, heightMm, scaleFor(spec, QUALITIES.screen.dpi));
+    const kept = [];
+    try {
+      for (const [index, beat] of slides.entries()) {
+        exportSays(`Drawing slide ${index + 1} of ${slides.length}…`);
+        const canvas = await render(scale, beat.day, { step: beat.step });
+        let blob;
+        try {
+          check();
+          if (tilesMissing) throw new Error('Some map tiles had not loaded, so a slide would have blank patches. Try again once the map is drawn');
+          blob = await canvasBlob(canvas);
+        } finally {
+          release(canvas);
+        }
+        const day = beat.day ?? '';
+        const stepAt = beat.step ? stepsOf(spec, beat.day).findIndex((item) => item.id === beat.step) : -1;
+        const words = stepAt >= 0 ? stepName(stepAt, beat.day) : '';
+        const label = figureName({ title, day, step: words });
+        const form = new FormData();
+        form.append('frame', blob, 'page.png');
+        form.append('filename', label);
+        form.append('kind', 'page');
+        if (day) form.append('day', day);
+        if (beat.step) form.append('step', beat.step);
+        if (owed) form.append('attribution', owed);
+        form.append('reuse', 'true');
+        const filed = await api.post(`/api/cases/${owner}/map-plates/${encodeURIComponent(stem)}/figure`, form, { signal: run.signal });
+        kept.push({ entity: { id: filed.entity }, label, caption: slideCaption({ day, step: words }), fresh: !filed.reused });
+      }
+      if (kept.some((slide) => slide.fresh)) await reloadCase();
+      return kept;
+    } finally {
+      if (exportRun === run) exportRun = null;
+      exportTime = null;
+      exportStep = null;
+      endExport();
+    }
+  }
+
   const notePage = pageOffer({ keep: (options) => keepFigure('page', options) });
+  const noteSlides = stepsOffer({ keep: keepSlides });
   /** The days side by side, of `days` (the export's range) or of every day the plate plays. */
   const noteSheet = (days = null) => sheetOffer({ keep: (options) => keepFigure('sheet', { ...options, days }) });
-  offerPuts('plate', () => (plate && !plate.template && plate.caseId ? [notePage, ...(videoPlayed.length >= 2 ? [noteSheet()] : [])] : []));
+  offerPuts('plate', () => (plate && !plate.template && plate.caseId
+    ? [notePage, ...(videoPlayed.length >= 2 ? [noteSheet()] : []), ...(sequence.length >= 2 ? [noteSlides] : [])] : []));
   onDestroy(() => withdrawNote('plate'));
 
   // -- templates -----------------------------------------------------------------------

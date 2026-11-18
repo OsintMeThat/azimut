@@ -1,11 +1,13 @@
 /**
- * What a Map plate puts in a pinned note: its page at print resolution, or the
- * page on each of its days side by side, filed in the case as an ordinary picture
- * (`POST /map-plates/{name}/figure`). The plate's face carries its credits; the
- * picture records which plate, day and step it shows, so the note can open it there.
+ * What a Map plate puts in a pinned note: its page at print resolution, the page on
+ * each of its days side by side, or every slide it plays as a block of steps, each
+ * filed in the case as an ordinary picture (`POST /map-plates/{name}/figure`). The
+ * plate's face carries its credits; the picture records which plate, day and step it
+ * shows, so the note can open it there.
  *
  * Side by side, never a video: a PDF prints the first frame of a GIF, which is the
- * first day alone, so the days that replace it are one still.
+ * first day alone, so the days that replace it are one still. The slides as steps are
+ * what an HTML page plays one at a time; a PDF prints them one after the other.
  */
 import { momentLabel } from '../../lib/map/layerHistory.js';
 import { picturePut } from '../../lib/notes/syntax.js';
@@ -86,6 +88,50 @@ export function sheetOffer({ keep }) {
       const { entity, label, fresh } = await keep({ signal });
       if (!entity?.id) throw new Error('The sheet could not be filed in the case');
       return { text: picturePut(entity, { label, width: '100%' }), filed: fresh ? [entity.id] : [] };
+    },
+  };
+}
+
+/** The most slides one block of steps holds: past it the HTML page grows too heavy to send. */
+export const MOST_SLIDES = 24;
+
+/** Why the slides cannot go in as steps, or ''. */
+export function slidesRefusal(count) {
+  if (count < 2) return 'Steps need a plate that plays two slides or more';
+  if (count > MOST_SLIDES) return `A block of steps holds ${MOST_SLIDES} slides at most and this plate plays ${count}. Skip some days first`;
+  return '';
+}
+
+/** What a slide's picture says under it: its day, then its title. */
+export function slideCaption({ day = '', step = '' } = {}) {
+  return [day ? momentLabel(day) : '', String(step ?? '').trim()].filter(Boolean).join(', ');
+}
+
+/** The slides as the note writes them: one `::: steps` block, a picture a line, each captioned. */
+export function stepsBlock(slides) {
+  const lines = (slides ?? []).filter((slide) => slide?.entity?.id)
+    .map((slide) => picturePut(slide.entity, { label: slide.label, caption: slide.caption }));
+  return lines.length ? `::: steps\n${lines.join('\n')}\n:::` : '';
+}
+
+/**
+ * Every slide the plate plays, offered to a pinned note as one block of steps.
+ * `keep({ signal })` draws each, files it (or finds it filed in this very state) and
+ * answers `[{ entity, label, caption, fresh }]`, in the order they play.
+ */
+export function stepsOffer({ keep }) {
+  return {
+    id: 'plate-steps',
+    label: 'The slides, as steps',
+    hint: 'Each slide filed as a picture, shown one at a time in an HTML page',
+    icon: 'columns',
+    picture: true,
+    busy: 'Drawing the slides…',
+    put: async ({ signal } = {}) => {
+      const slides = await keep({ signal });
+      const text = stepsBlock(slides);
+      if (!text) throw new Error('The slides could not be filed in the case');
+      return { text, filed: [...new Set(slides.filter((slide) => slide.fresh && slide.entity?.id).map((slide) => slide.entity.id))] };
     },
   };
 }
