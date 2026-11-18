@@ -864,16 +864,19 @@ describe('the check before export', () => {
     expect(dialog().querySelector('#export-address').value).toBe('https://desk.github.io/articles/harbour/');
   });
 
-  it('offers a WordPress draft as its own branch, with nothing to export from here yet', async () => {
+  it('offers a WordPress draft as its own branch: Send as a draft in place of Export, and no file check', async () => {
     answerCheck((notes) => ({ notes: notes.map((note) => ({ note, title: 'Old lead', warnings: [] })) }));
     await exportFromNote();
     const asked = post.mock.calls.filter(([url]) => url.endsWith('/notes/pdf/check')).length;
     [...dialog().querySelectorAll('[role="group"][aria-label="Format"] button')].at(-1).click();
     await settle();
     expect(dialog().getAttribute('aria-label')).toBe('Export note as a WordPress draft');
+    // the WordPress branch checks the public edition itself: the files' check is not asked again
     expect(post.mock.calls.filter(([url]) => url.endsWith('/notes/pdf/check'))).toHaveLength(asked);
-    expect(dialog().querySelector('.btn-primary')).toBeNull();
+    const primary = [...dialog().querySelectorAll('.btn-primary')].map((button) => button.textContent.trim());
+    expect(primary).toEqual(['Send as a draft']);
     expect(dialog().querySelector('#export-address')).toBeNull();
+    expect(dialog().querySelector('.export-dest')).toBeNull();
   });
 
   it('forgets a check answered after the dialog was closed', async () => {
