@@ -107,6 +107,8 @@ class FullCase:
     thread_map: str = ""  # its recap map, a picture filed in Media the same way
     note_id: str = ""
     note: str = ""  # its case-relative path
+    map_note_id: str = ""  # a note holding a map: it names a layer, a plate and its ground
+    map_note: str = ""
     sheet_id: str = ""
     sheet: str = ""  # the CSV, which is the sheet
     sheet_meta: str = ""  # the sidecar beside it
@@ -754,6 +756,17 @@ def build_full_case(
         full.editable_layer_id = client.get(
             f"/api/cases/{case_id}/entities/lookup", params={"attr": "spec", "value": full.editable_layer}
         ).json()["entity"]["id"]
+
+    # -- a note holding a map: the layer and the plate it draws and its ground, all uses ----
+    ground_id = client.get(
+        f"/api/cases/{case_id}/entities/lookup", params={"attr": "path", "value": full.capture}
+    ).json()["entity"]["id"]
+    mapped = client.post(f"/api/cases/{case_id}/notes", json={"title": "Map", "content": (
+        f"::: map\ntitle: Situation\nlayer: {layer_name}\nplate: {Path(full.map_plate).stem}\n"
+        f"proofs: all\nground: {ground_id}\n:::\n")})
+    assert mapped.status_code == 200, mapped.text
+    full.map_note_id = mapped.json()["id"]
+    full.map_note = mapped.json()["attrs"]["path"]
 
     # -- the graph as the analyst arranged it ---------------------------------
     # Not an artifact and not an assertion: where a node was dragged to, in one

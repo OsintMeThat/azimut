@@ -893,7 +893,9 @@ leaves a gap rather than voiding the layout, and the picture it exports is a
   (`engine/uses.py`): a confirmed relation at either end (`same-image-as` aside), a
   pointer held at the target (`links.POINTER_TYPES`; one the target holds goes with
   it), and what names it outside the graph: a plate, a collage, a Horizon view, the
-  bench or a search, a layer marker, a sheet, an entity photo. A Detect routine
+  bench or a search, a layer marker, a sheet, an entity photo, a note's map (its
+  layers, its plate and the pictures under it, read off its `::: map` block; its
+  period of proofs is a question asked of the case, not a name). A Detect routine
   watching an area is listed apart, as what refuses the delete. The Media Library's
   Unused filter is the same rule read from the other end.
 - Losing a secondary source leaves a placeholder. Only losing the subject can

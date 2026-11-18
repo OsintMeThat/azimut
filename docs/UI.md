@@ -7030,7 +7030,7 @@ quote as `> [!confirmed]`, `[!unverified]`, `[!lead]`, `[!note]`, `[!warning]` o
 **@** and a few letters offer the case's records and write a chip; **/** offers
 headings, a dated log entry, tasks, lists, the callouts, a case item, a case picture,
 an image from a file, a table, a diagram, **Steps** and **Story** (an empty `::: steps` or
-`::: story` block opened on its guidance), code, a divider, a page break and today's date. The bar
+`::: story` block opened on its guidance), an **Interactive map**, code, a divider, a page break and today's date. The bar
 above holds the same as buttons. Ctrl+B and Ctrl+I set bold and italic, Enter on an
 empty item leaves the list. Pasting or dropping an image adds it to the case's media;
 a library file dragged in lands as its picture. A link pasted alone is offered as a
@@ -7176,6 +7176,37 @@ characters at most; one note at a time with an address), records it with `format
 the page's SHA-256 and the address, and `POST /notes/pdf/check` with `format: web` says
 its weight and, kind `address`, when no address was given. The **WordPress draft** branch
 is filled in separately.
+
+**Maps.** `/` › *Interactive map* asks what a map shows: some of the case's layers, or one
+of its Map plates (its layers as it draws them, its days, its steps and how each frames the
+map), and the proofs of a period over either, all of them or from one day to another. My
+layers puts a layer in the note on the side from its row, and a Map plate offers *As an
+interactive map* beside its page, its sheet and its slides. Each lands as a put does, Undo
+included. The note holds the map as a `::: map` block of `key: value` lines it can read
+and edit (`title`, one `layer` a line, `plate`, `proofs`, `ground`, one `detail` a line,
+`view`), drawn in the note as a small card over its ground (`engine/notes_maps.py`). The
+put frames the map on what it shows (a plate's own view for a plate) and files the ground
+under it once, on the press, the way Add › This view files a capture: twice the frame's
+resolution, from the imagery picked (Esri World Imagery by default), its credit kept. A
+plate's step that frames the map closer than that gets a sharper picture of its own frame.
+Offline, the block is written with no ground and the map draws on a plain background. In
+the HTML page the map is the ground muted under the layers' marks, lines and areas in
+their own colours and pictograms, a legend by layer and group, and the credits. It zooms
+with its + and − buttons, a double press, Ctrl and the wheel, two fingers or the keyboard,
+never deeper than its ground stays sharp, and moves by a drag; marks that would cover one
+another are spread round their place with a thin leader to each true spot, and a crowd of
+more than twelve is a count to press until the map can show them apart. A press or Enter
+on a mark opens its card: the picture or the clip's still, the day, its words, the source,
+the proof's figure in the page, the links that check it. With more than one day, a
+timeline under the map shows the day large, steps through the days on its slider or with
+Play, and shows each feature only on its days, a line or an area that moved leaving its
+last place faint and dashed. A map's steps (a plate's, else one a proof in date order) are
+short chips that fly the map there on their day; in a Story, the map is the stage and each
+step is a card that flies it. Without script and in print, the map is as on its last day,
+said under it. The PDF prints it as a picture of that day, its credit under it. The check
+before export names a layer, a plate or a picture no longer in the case at its line, a
+map with no ground, and one past 8 MB. A layer, a plate or a ground a map names is a use:
+its delete names the note.
 
 **To Post.** In the open note's ⋯, kept out of the header, *To Post* opens Post on a Free post thread made of the
 note's public edition, or of the stretch selected in it, which its title then says;
@@ -7393,7 +7424,8 @@ What each tool puts, and where its *Put in “<note>”* sits:
 | Timeline | *This window* as a table | Copy, Add |
 | Sheet | *This view* as a table, its provenance header kept | Export, Add |
 | Media | *Quote the post*: the words as posted, the account and day, then the media's chip | Open in…, Add |
-| Map plate | *This page*: the page on screen drawn at 300 dpi (at most 36 Mpx, a large paper coarser rather than refused), filed once per plate, day, step and size, its credits on its face; refused while tiles are still loading. *The days side by side*: the plate's sheet, 2 to 12 days. *The slides, as steps*: every day and step the plate plays, each filed as its page and written as one `::: steps` block captioned with its day and title, 2 to 24 slides | the export dialog (PNG, Sheet), Add |
+| My layers | *This layer as a map*: a `::: map` block of the layer, framed on its features, its ground filed once per view | the layer's row, while a note is on the side |
+| Map plate | *As an interactive map*: a `::: map` block of the saved plate, framed as the plate is, a sharper picture filed for each step that looks closer. *This page*: the page on screen drawn at 300 dpi (at most 36 Mpx, a large paper coarser rather than refused), filed once per plate, day, step and size, its credits on its face; refused while tiles are still loading. *The days side by side*: the plate's sheet, 2 to 12 days. *The slides, as steps*: every day and step the plate plays, each filed as its page and written as one `::: steps` block captioned with its day and title, 2 to 24 slides | the export dialog (PNG, Sheet), Add |
 | Compare | *This evolution sheet*: 2 to 40 pictures, the comparison saved first, each day credited (Wayback days as estimates); fetched on that press | Export panel with Sheet ticked |
 | Horizon | Offered whenever an eye stands: a box dragged over the view as it shows, loupe kept (Esc or Cancel calls it off), the view saved first, filed once per view, area, kind and size. *An area of the photo above the terrain* while a photo is laid, else *An area of the view* with its names, ruler and credits. Never a Find score or rank | Export menu, Add |
 | Detect | *The kept table*: kept and noted candidates only, under a quoted header (run and areas, analyzer, passes, threshold, cloud mask, *N kept of M candidates, P pinned*), 200 rows at most | beside Export as layer, Add |

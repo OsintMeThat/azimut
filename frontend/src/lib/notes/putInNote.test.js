@@ -86,6 +86,16 @@ describe('the pinned note', () => {
 });
 
 describe('a put', () => {
+  it('lands in the editor it was made from, pinned or not, and says this note when it knows no title', async () => {
+    const editor = fakeEditor('Own note.');
+    const landed = await putInNote(offer({ text: '::: map\nlayer: A\n:::', filed: ['e_ground'] }),
+      { target: { caseId: 'c1', noteId: 'n2', title: '', editor } });
+    expect(landed).toEqual({ text: '::: map\nlayer: A\n:::', filed: ['e_ground'] });
+    expect(editor.text).toBe('Own note.\n\n::: map\nlayer: A\n:::\n');
+    expect(lastToast().message).toBe('Put in this note');
+    expect(pinnedNote()).toBeNull();
+  });
+
   it('lands in the note, names it, and opens a picture’s caption', async () => {
     const editor = fakeEditor();
     pin(editor);

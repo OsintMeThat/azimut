@@ -136,6 +136,8 @@ export const STEPS_BLOCK = `::: steps\n${hintLine('One picture a line, each a st
 export const STORY_BLOCK = `::: story\n${hintLine('A picture, then the words read beside it. {zoom=x,y,w,h} after a picture moves in on a part of it')}\n:::`;
 /** The names a block of steps or a story opens with. */
 export const PLAYED_BLOCK = /^:::[ \t]*(steps|story)[ \t]*$/;
+/** A map's block (`::: map`), which an HTML page draws as a map and a PDF as its picture. */
+export const MAP_BLOCK = /^:::[ \t]*map[ \t]*$/;
 const DIAGRAM = '```mermaid\nflowchart LR\n  A[Tip] --> B[Check]\n  B --> C[Confirmed]\n```';
 
 /** The `:::` blocks `/` › Alignment offers: where a line sits, or a corner of the cover. */
@@ -172,6 +174,7 @@ export const SLASH_COMMANDS = [
   { id: 'cite', label: 'Case item', icon: 'at', words: 'mention reference link entity place person', action: 'cite' },
   { id: 'picture', label: 'Case picture', icon: 'image', words: 'media image photo capture video', action: 'picture' },
   { id: 'upload', label: 'Image from a file', icon: 'upload', words: 'upload picture file', action: 'upload' },
+  { id: 'map', label: 'Interactive map', icon: 'mapArea', words: 'map layers plate proofs front timeline slider interactive', action: 'map', hint: 'Layers, a plate or proofs, in HTML', notes: true },
   { id: 'include', label: 'Include a note', icon: 'note', words: 'chapter report embed note', action: 'include', hint: 'As a chapter', notes: true },
   { id: 'hint', label: 'Guidance', icon: 'help', words: 'hint guide help template', hint: 'Grey, never printed', template: true },
   { id: 'table', label: 'Table', icon: 'table', words: 'grid columns', block: TABLE },

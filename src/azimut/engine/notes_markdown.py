@@ -11,9 +11,10 @@ one note two ways, so what they share lives here and nowhere else:
   chapter's note in, guidance emptied and placeholders filled;
 - the two editions: `strip_internal` blanks every `> [!internal]` passage as
   either reader of the note sees one, which is what the public edition is made from;
-- the aligned blocks (`::: center`), the own cover's corners (`::: top-right`) and
+- the aligned blocks (`::: center`), the own cover's corners (`::: top-right`),
   the two blocks that tell a story in pictures (`::: steps`, `::: story`), in which
-  every picture opens a step and the words after it are that step's;
+  every picture opens a step and the words after it are that step's, and a map
+  (`::: map`), handed on as one token (`az_map`) whose lines `engine/notes_maps.py` reads;
 - the callouts a quote opens with (`> [!confirmed]`) and the tasks a list holds;
 - the own cover (the lines above `<!-- cover -->`, `cover_piece`);
 - what a picture's braces say (`image_options`);
@@ -51,6 +52,10 @@ CORNER_NAMES = ("top-left", "top-right", "bottom-left", "bottom-right")
 STEPS = "steps"
 STORY = "story"
 FIGURE_BLOCKS = (STEPS, STORY)
+#: A map of the case's layers, plates or proofs (`engine/notes_maps.py`): one token,
+#: `MAP_TOKEN`, holding the block's lines, which each renderer draws its own way.
+MAP = "map"
+MAP_TOKEN = "az_map"
 
 
 #: How deep chapters nest: a report's chapter may hold chapters of its own, and
@@ -66,7 +71,7 @@ COMMENT = re.compile(r"\A(?:\s*<!--.*?-->)+\s*\Z", re.S)
 MERMAID_INFO = re.compile(r"^\s*mermaid\b")
 IMAGE_ATTRS = re.compile(r"!\[([^\]]*)\]\((\S+?)(?:\s+[\"']([^\"']*)[\"'])?\)\s*\{([^}\n]+)\}")
 ALIGNMENT_BLOCK = re.compile(
-    r"^:::[ \t]*(left|center|right|top-left|top-right|bottom-left|bottom-right|steps|story)[ \t]*\n(.*?)^:::[ \t]*$",
+    r"^:::[ \t]*(left|center|right|top-left|top-right|bottom-left|bottom-right|steps|story|map)[ \t]*\n(.*?)^:::[ \t]*$",
     re.S | re.M,
 )
 ATTR_PARAM = "__azimut_attrs"
@@ -527,6 +532,10 @@ def alignment_blocks(text: str) -> list["Block"]:
         blocks.append(Block("left", parse(text[position : match.start()]), text.count("\n", 0, position)))
         name = match.group(1)
         line = text.count("\n", 0, match.start(2))
+        if name == MAP:
+            blocks.append(Block("left", [map_token(match.group(2))], line, kind=MAP))
+            position = match.end()
+            continue
         if name in FIGURE_BLOCKS:
             blocks.append(Block("left", split_figures(parse(match.group(2))), line, kind=name))
             position = match.end()
@@ -538,6 +547,15 @@ def alignment_blocks(text: str) -> list["Block"]:
         position = match.end()
     blocks.append(Block("left", parse(text[position:]), text.count("\n", 0, position)))
     return blocks
+
+
+def map_token(body: str) -> Token:
+    """A `::: map` block as the one token every renderer walks to (`_on_az_map`)."""
+    token = Token(MAP_TOKEN, "", 0)
+    token.content = body
+    token.block = True
+    token.map = [0, max(1, body.count("\n"))]
+    return token
 
 
 def file_prefixes(case: "Case | None") -> tuple[str, ...]:
@@ -612,7 +630,8 @@ class Block:
     start: int = 0
     #: The corner of the own cover it is pinned to (`CORNER_NAMES`), or "".
     corner: str = ""
-    #: `steps` or `story` for a block of pictures told as steps (`FIGURE_BLOCKS`), or "".
+    #: `steps` or `story` for a block of pictures told as steps (`FIGURE_BLOCKS`), `map`
+    #: for a map (`MAP`), or "".
     kind: str = ""
 
 

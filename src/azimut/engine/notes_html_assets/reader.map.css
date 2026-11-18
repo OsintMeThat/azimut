@@ -1,0 +1,165 @@
+/*
+ * Azimut reader, its maps: appended to reader.css only in a page that holds a map
+ * (engine/notes_html.py). The figure reads whole without script: the ground with its
+ * features as on the map's last day, its legend and credit. reader.map.js does the rest.
+ */
+/* a map: the ground with the features drawn over it, as on its last day without script;
+   with it, a stage that zooms and pans, a card for each feature and a timeline of its days */
+.az-body > .az-map { grid-column: wide; }
+.az-body .az-map :is(ul, ol) { padding: 0; list-style: none; }
+.az-body .az-map :is(.az-map-steps, .az-map-ticks, .az-map-card-links) { margin: 0; }
+.az-body .az-map .az-map-legend { margin: .9rem 0 0; }
+.az-body .az-map :is(ul, ol) > li { margin: 0; padding: 0; }
+.az-map-frame { position: relative; }
+.az-map-stage {
+  position: relative; width: 100%; aspect-ratio: var(--r, 1.6); overflow: hidden; border-radius: 3px;
+  background: #20252b; isolation: isolate; touch-action: pan-y; outline-offset: 3px;
+}
+/* the ground and the sharper pictures of what the steps look at, moved as one, muted under the marks */
+.az-map-world { position: absolute; inset: 0; transform-origin: 0 0; filter: saturate(.62) brightness(.86) contrast(1.04); pointer-events: none; }
+.az-map-world img { position: absolute; max-width: none; user-select: none; -webkit-user-drag: none; }
+.az-map-ground { inset: 0; width: 100%; height: 100%; }
+.az-map-detail { opacity: 0; transition: opacity .5s var(--ease); }
+.az-map-detail.az-on { opacity: 1; }
+.az-map-svg { position: absolute; inset: 0; display: block; width: 100%; height: 100%; max-width: none; overflow: hidden; }
+.az-map-svg .az-off, .az-map-svg .az-clash { opacity: 0; visibility: hidden; }
+.az-map-svg .az-halo { fill: none; stroke: rgba(255, 255, 255, .5); }
+.az-map-svg .az-stroke { fill: none; }
+.az-map-svg :is(.az-halo, .az-stroke) { vector-effect: non-scaling-stroke; stroke-linecap: round; stroke-linejoin: round; }
+.az-map-svg .az-label { fill: #fff; stroke: rgba(12, 14, 18, .86); stroke-width: 4px; paint-order: stroke; font-family: var(--ui); font-weight: 700; letter-spacing: .01em; pointer-events: none; }
+.az-map-svg .az-past { opacity: .38; visibility: visible; pointer-events: none; }
+.az-map-svg .az-leaders { filter: drop-shadow(0 0 1px rgba(10, 12, 15, .95)); pointer-events: none; }
+.az-map-svg .az-leader line { stroke: rgba(255, 255, 255, .92); stroke-width: 1.2px; vector-effect: non-scaling-stroke; }
+.az-map-svg .az-leader circle { stroke: #fff; stroke-width: 1px; vector-effect: non-scaling-stroke; }
+.az-map-svg .az-grouped { visibility: hidden; }
+.az-map-svg .az-bubble { cursor: zoom-in; outline: none; }
+.az-map-svg .az-bubble-back { fill: rgba(16, 18, 22, .9); stroke: #fff; stroke-width: 1.5px; }
+.az-map-svg .az-bubble-arc { fill: none; stroke-width: 3.5px; stroke-linecap: round; }
+.az-map-svg .az-bubble-count { fill: #fff; font-family: var(--ui); font-weight: 700; font-size: 13px; text-anchor: middle; pointer-events: none; }
+.az-map-svg .az-bubble:is(:hover, :focus-visible) .az-bubble-back { stroke-width: 2.5px; fill: rgba(16, 18, 22, 1); }
+.az-map-svg .az-past .az-stroke { stroke-dasharray: 4 5; }
+.az-map-day { margin: .6rem 0 0; font: 600 .8125rem/1.4 var(--ui); color: var(--muted); }
+.az-map-day time { color: var(--ink); }
+/* the legend: what each colour and pictogram stands for, a layer's groups under its name */
+.az-map-legend { display: flex; flex-wrap: wrap; gap: .3rem 1.25rem; margin: .85rem 0 0; padding: 0; list-style: none; font: 500 .8125rem/1.35 var(--ui); color: var(--ink-2); }
+.az-map-legend > li { display: inline-flex; align-items: center; gap: .45rem; min-width: 0; }
+.az-key-layer { flex-basis: 100%; margin-top: .35rem; font-size: .6875rem; font-weight: 700; letter-spacing: .1em; text-transform: uppercase; color: var(--muted); }
+.az-key-layer:first-child { margin-top: 0; }
+.az-key-mark { flex: none; width: 1.35rem; height: 1.35rem; overflow: visible; }
+.az-key-mark[viewBox="0 0 28 14"], .az-key-mark[viewBox="0 0 28 18"] { width: 1.6rem; height: 1rem; }
+.az-key-count { color: var(--muted); font-variant-numeric: tabular-nums; font-size: .75rem; }
+.az-js .az-key-count { cursor: default; }
+.az-map > figcaption { margin-top: .9rem; }
+.az-js .az-map-day { display: none; }
+/* a feature, the one picked lit */
+.az-js .az-map-svg .az-f { cursor: pointer; outline: none; transition: opacity .35s var(--ease), visibility 0s; }
+.az-js .az-map-svg .az-off { transition: opacity .3s var(--ease), visibility 0s .3s; }
+.az-js .az-map-svg .az-point > use { transition: filter .2s; }
+.az-map-svg .az-point:is(:hover, :focus-visible, .az-picked) > use { filter: drop-shadow(0 0 2.5px #fff) drop-shadow(0 0 6px rgba(255, 255, 255, .7)); }
+.az-map-svg :is(.az-line, .az-area):is(:hover, :focus-visible, .az-picked) .az-halo { stroke: rgba(255, 255, 255, .95); }
+.az-map-svg .az-new > use, .az-map-svg .az-new .az-stroke { animation: az-arrive 1.4s var(--ease); }
+@keyframes az-arrive { 0% { opacity: 0; } 30% { opacity: 1; filter: drop-shadow(0 0 7px #fff); } }
+.az-map-stage.az-held { cursor: grabbing; }
+.az-map-stage.az-moving .az-map-world { will-change: transform; }
+/* the tools: zoom, and the whole map again */
+.az-map-tools { position: absolute; z-index: 3; top: .75rem; left: .75rem; display: flex; flex-direction: column; border-radius: 6px; background: rgba(16, 18, 22, .78); box-shadow: 0 6px 18px -8px rgba(0, 0, 0, .6); backdrop-filter: blur(8px); overflow: hidden; }
+.az-map-tools button { width: 2.25rem; height: 2.25rem; padding: 0; border: 0; background: none; color: #f2f3f5; font: 500 1.15rem/1 var(--sans); cursor: pointer; }
+.az-map-tools button + button { border-top: 1px solid rgba(255, 255, 255, .12); }
+.az-map-tools button:hover { background: rgba(255, 255, 255, .12); }
+.az-map-tools button:disabled { opacity: .35; cursor: default; background: none; }
+.az-map-tools button:focus-visible { outline: 2px solid #fff; outline-offset: -3px; }
+.az-map-hint {
+  position: absolute; z-index: 4; left: 50%; top: 50%; padding: .6rem 1rem; border-radius: 999px; transform: translate(-50%, -50%);
+  background: rgba(12, 13, 15, .82); color: #fff; font: 600 .875rem/1.2 var(--ui); pointer-events: none; opacity: 0; transition: opacity .25s;
+}
+.az-map-hint.az-on { opacity: 1; }
+.az-map-scale { position: absolute; z-index: 2; left: .75rem; bottom: .65rem; padding: .15rem .35rem 0; border: 1.5px solid rgba(255, 255, 255, .9); border-top: 0; color: #fff; font: 600 .6875rem/1.2 var(--ui); text-shadow: 0 1px 2px rgba(0, 0, 0, .9); pointer-events: none; }
+/* a feature's card: beside the map with room, under it on a phone */
+.az-map-card {
+  position: absolute; z-index: 5; top: .75rem; right: .75rem; width: min(21rem, 44%); max-height: calc(100% - 1.5rem); overflow: auto;
+  border-radius: 6px; background: var(--paper); color: var(--ink); box-shadow: 0 18px 44px -14px rgba(0, 0, 0, .7);
+  font: 400 .875rem/1.5 var(--ui); overscroll-behavior: contain; animation: az-in .18s var(--ease); scrollbar-width: thin;
+}
+.az-map-card[hidden] { display: none; }
+.az-map-card-media { position: relative; display: block; margin: 0; background: #111; line-height: 0; }
+.az-map-card-media img { display: block; width: 100%; height: auto; max-height: 15rem; object-fit: contain; }
+.az-map-card-media .az-watch-words { left: .6rem; bottom: .6rem; font-size: .75rem; }
+.az-map-card-body { padding: .85rem 1rem 1rem; }
+.az-map-card-kicker { display: flex; align-items: center; gap: .45rem; margin: 0 2.6rem .3rem 0; font: 700 .6875rem/1.3 var(--ui); letter-spacing: .08em; text-transform: uppercase; color: var(--muted); }
+.az-map-card-kicker i { flex: none; width: .6rem; height: .6rem; border-radius: 50%; box-shadow: 0 0 0 1.5px rgba(0, 0, 0, .25); }
+.az-map-card-title { margin: 0 0 .25rem; font: 700 1.0625rem/1.3 var(--head); color: var(--ink); text-wrap: balance; }
+.az-map-card-day { margin: 0 0 .55rem; font-weight: 600; font-size: .8125rem; color: var(--accent-ink); font-variant-numeric: tabular-nums; }
+.az-map-card-text { margin: 0 0 .7rem; color: var(--ink-2); white-space: pre-line; overflow-wrap: anywhere; }
+.az-map-card-text.az-long { max-height: 9.5em; overflow: hidden; mask-image: linear-gradient(#000 70%, transparent); }
+.az-map-card-more { margin: -.4rem 0 .6rem; padding: 0; border: 0; background: none; color: var(--accent-ink); font: 600 .8125rem/1.4 var(--ui); cursor: pointer; }
+.az-map-card-links { display: flex; flex-wrap: wrap; gap: .35rem .5rem; margin: 0; padding: .65rem 0 0; border-top: 1px solid var(--rule); list-style: none; }
+.az-map-card-links a { display: inline-flex; align-items: center; gap: .3rem; padding: .25rem .6rem; border: 1px solid var(--rule); border-radius: 999px; font: 600 .75rem/1.3 var(--ui); text-decoration: none; white-space: nowrap; }
+.az-map-card-links a:hover { border-color: var(--az-accent); background: var(--accent-soft); }
+.az-map-card-links .az-map-card-proof { border-color: var(--az-accent); background: var(--accent-soft); }
+.az-map-card-credit { margin: .55rem 0 0; font-size: .75rem; color: var(--muted); }
+.az-map-card-close {
+  position: absolute; z-index: 1; top: .5rem; right: .5rem; width: 1.9rem; height: 1.9rem; padding: 0; border: 0; border-radius: 50%;
+  background: rgba(16, 18, 22, .66); color: #fff; font: 400 1.2rem/1 var(--sans); cursor: pointer; backdrop-filter: blur(6px);
+}
+.az-map-card-close:hover { background: rgba(16, 18, 22, .9); }
+/* the days: a timeline under the map, the day shown large */
+.az-map-time { display: grid; grid-template-columns: auto minmax(8.5rem, auto) minmax(0, 1fr); align-items: center; gap: .25rem 1rem; margin-top: .9rem; font: 500 .8125rem/1.3 var(--ui); }
+.az-map-play { display: grid; place-items: center; width: 2.5rem; height: 2.5rem; padding: 0; border: 1px solid var(--rule); border-radius: 50%; background: var(--paper); color: var(--ink); font: 400 .9rem/1 var(--sans); cursor: pointer; }
+.az-map-play:hover { border-color: var(--az-accent); background: var(--accent-soft); }
+.az-map-now { display: flex; flex-direction: column; min-width: 0; }
+.az-map-now-day { font: 700 1.3rem/1.15 var(--head); letter-spacing: -.01em; color: var(--ink); font-variant-numeric: tabular-nums; white-space: nowrap; }
+.az-map-now-count { color: var(--muted); font-size: .75rem; font-variant-numeric: tabular-nums; }
+.az-map-track { position: relative; padding: .55rem 0 1.35rem; }
+.az-map-track input { position: relative; z-index: 2; display: block; width: 100%; height: 1.5rem; margin: 0; background: none; accent-color: var(--az-accent); cursor: pointer; -webkit-appearance: none; appearance: none; }
+.az-map-track input::-webkit-slider-runnable-track { height: 4px; border-radius: 2px; background: linear-gradient(to right, var(--az-accent) var(--at, 100%), var(--rule) var(--at, 100%)); }
+.az-map-track input::-moz-range-track { height: 4px; border-radius: 2px; background: var(--rule); }
+.az-map-track input::-moz-range-progress { height: 4px; border-radius: 2px; background: var(--az-accent); }
+.az-map-track input::-webkit-slider-thumb { -webkit-appearance: none; width: 1.15rem; height: 1.15rem; margin-top: -.42rem; border: 3px solid var(--paper); border-radius: 50%; background: var(--az-accent); box-shadow: 0 1px 4px rgba(0, 0, 0, .45); }
+.az-map-track input::-moz-range-thumb { width: .75rem; height: .75rem; border: 3px solid var(--paper); border-radius: 50%; background: var(--az-accent); box-shadow: 0 1px 4px rgba(0, 0, 0, .45); }
+.az-map-track input:focus-visible { outline: none; }
+.az-map-track input:focus-visible::-webkit-slider-thumb { box-shadow: 0 0 0 3px var(--accent-ink); }
+.az-map-ticks { position: absolute; z-index: 1; inset: 1.18rem .55rem auto; height: .45rem; margin: 0; padding: 0; list-style: none; pointer-events: none; }
+.az-map-ticks > li { position: absolute; top: 0; width: 1px; height: .45rem; background: var(--muted); opacity: .45; }
+.az-map-ticks > li[data-month]::after { content: attr(data-month); position: absolute; top: .75rem; left: 0; transform: translateX(-50%); color: var(--muted); font-size: .6875rem; white-space: nowrap; opacity: 1; }
+.az-map-ticks > li[data-month] { height: .7rem; opacity: .9; }
+/* a map's own steps: where it looks and on which day, a press each; a long row slides, faded at its edge */
+.az-map-steps-row { --fade-start: #000; --fade-end: #000; margin: .8rem 0 0; }
+.az-map-steps-row.az-fade-start { --fade-start: transparent; }
+.az-map-steps-row.az-fade-end { --fade-end: transparent; }
+.az-map-steps { display: flex; gap: .4rem; margin: 0; padding: .1rem; overflow-x: auto; list-style: none; scrollbar-width: none; font: 500 .8125rem/1.3 var(--ui);
+  mask-image: linear-gradient(to right, var(--fade-start), #000 2.5rem, #000 calc(100% - 2.5rem), var(--fade-end)); }
+.az-map-steps button {
+  display: inline-flex; max-width: 16rem; align-items: center; gap: .45rem; padding: .35rem .75rem .35rem .4rem; border: 1px solid var(--rule); border-radius: 999px;
+  background: var(--paper); color: var(--ink-2); font: inherit; white-space: nowrap; cursor: pointer;
+}
+.az-map-steps button > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.az-map-steps button > b { display: grid; place-items: center; min-width: 1.35rem; height: 1.35rem; border-radius: 50%; background: var(--tint); color: var(--muted); font-size: .6875rem; font-variant-numeric: tabular-nums; }
+.az-map-steps button:hover { border-color: var(--az-accent); color: var(--ink); }
+.az-map-steps [aria-current] { border-color: var(--az-accent); color: var(--ink); font-weight: 700; }
+.az-map-steps [aria-current] > b { background: var(--az-accent); color: #fff; }
+@media (max-width: 47.99rem) {
+  .az-body > .az-map { grid-column: full; }
+  .az-map-stage { border-radius: 0; }
+  .az-map > :not(.az-map-frame, script) { margin-inline: var(--gutter); }
+  .az-map-card { position: relative; inset: auto; width: auto; max-height: none; margin: .6rem var(--gutter) 0; box-shadow: 0 0 0 1px var(--rule); }
+  .az-map-time { grid-template-columns: auto minmax(0, 1fr); }
+  .az-map-track { grid-column: 1 / -1; }
+  .az-map-now-day { font-size: 1.15rem; }
+}
+/* a story holds a map as its stage, the cards of its steps going by beside it */
+.az-map-step-day { margin: 0 0 .3rem; font: 700 .75rem/1.3 var(--ui); letter-spacing: .06em; text-transform: uppercase; color: var(--accent-ink); }
+.az-map-step-label { margin: 0; font: 600 1.05rem/1.4 var(--head); }
+.az-map-step-name { margin: .45rem 0 0; font: 500 .8125rem/1.3 var(--ui); color: var(--muted); }
+@media screen {
+  .az-live .az-story-figures > [data-kind="map"] .az-map-legend, .az-live .az-story-figures > [data-kind="map"] .az-map-steps-row { display: none; }
+  [data-web="story"] .az-live .az-story-figures > figure[data-kind="map"] { grid-template-columns: minmax(0, 1fr); align-content: center; }
+  [data-web="story"] .az-live .az-story-figures > [data-kind="map"] .az-map-frame { width: min(var(--stage-w), calc((var(--stage-h) - 8rem) * var(--r, 1.6))); justify-self: center; }
+  [data-web="story"] .az-live .az-story-figures > [data-kind="map"] :is(.az-map-time, figcaption) { width: min(var(--stage-w), calc((var(--stage-h) - 8rem) * var(--r, 1.6))); justify-self: center; }
+  [data-web="story"] .az-live .az-story-figures .az-map-time { --paper: #0f1012; --ink: #fff; --muted: rgba(255, 255, 255, .62); --rule: rgba(255, 255, 255, .22); color: #fff; }
+  .az-live .az-story-figures > [data-kind="map"] .az-map-card { width: min(19rem, 46%); }
+}
+@media print {
+  .az-map-tools, .az-map-hint, .az-map-time, .az-map-steps-row, .az-map-card, .az-map-card-step { display: none !important; }
+  .az-map-stage { break-inside: avoid; }
+  .az-js .az-map-day { display: block; }
+}
