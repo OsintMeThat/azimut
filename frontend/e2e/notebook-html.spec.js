@@ -220,6 +220,17 @@ test('the Page pane shows the note as its HTML page, and the export dialog write
   await expect(frame.locator('h1.az-title')).toHaveText('Ambush on the Wadi Sahm road');
   await expect(page.locator('.html-page iframe').first()).toHaveAttribute('sandbox', 'allow-scripts allow-popups allow-popups-to-escape-sandbox');
   expect(await page.evaluate(() => localStorage.getItem('azimut:note-page-format'))).toBe('html');
+  // a Contents entry goes to its part inside the frame: the frame keeps the report, never a blank page
+  await frame.locator('.az-contents-toggle').click();
+  await frame.locator('.az-contents a[href="#the-register"]').click();
+  await expect.poll(() => frame.locator('#the-register').evaluate((node) => Math.round(node.getBoundingClientRect().top))).toBeLessThan(200);
+  await expect(frame.locator('h1.az-title')).toHaveText('Ambush on the Wadi Sahm road');
+  expect(await frame.locator('html').evaluate(() => [location.href, window.scrollY > 0])).toEqual(['about:srcdoc', true]);
+  // a citation, its source's card and back: every link of the page stays in it
+  await frame.locator('a.az-cite').first().click();
+  await expect(frame.locator('#src-1')).toHaveClass(/az-flash/);
+  expect(await frame.locator('html').evaluate(() => location.href)).toBe('about:srcdoc');
+
 
   await page.locator('[data-guide="notebook.pdf"]').click();
   let dialog = page.getByRole('dialog', { name: 'Export note as PDF' });

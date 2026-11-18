@@ -195,7 +195,7 @@
       opener?.focus();
       opener = null;
     }
-    return { open };
+    return { open, close: () => { if (box?.hasAttribute('open')) close(); } };
   })();
 
   /* a press on a picture opens it; a graphic one is shown first */
@@ -338,28 +338,53 @@
     }
   }
 
-  /** The row, source or heading an address names: brought into sight, a hidden row filtered back in, a row flashed. */
+  /** The row, source or heading an address names, made ready to be seen: its step shown, a hidden row filtered back in, a row or source flashed. */
   function point(hash) {
     const target = byHash(hash);
-    if (!target) return;
+    if (!target) return null;
     reveal(target);
-    if (target.tagName !== 'TR') return;
-    const field = target.closest('table')?.azFilter;
+    const field = target.tagName === 'TR' && target.closest('table')?.azFilter;
     if (target.hidden && field) {
       field.value = '';
       field.dispatchEvent(new Event('input'));
     }
-    target.classList.remove('az-flash');
-    void target.offsetWidth;
-    target.classList.add('az-flash');
+    if (target.matches?.('tr, .az-sources li')) {
+      target.classList.remove('az-flash');
+      void target.offsetWidth;
+      target.classList.add('az-flash');
+    }
+    return target;
+  }
+
+  /* a link to a part of the page goes there by itself. In the Page pane the page is a frame
+     whose address is the app's, which the browser would leave for a blank page */
+  const ownAddress = () => /^(?:file|https?):$/.test(location.protocol);
+  function go(hash) {
+    lightbox.close();
+    const target = point(hash);
+    if (!target) return;
+    target.scrollIntoView?.({ behavior: motion(), block: target.tagName === 'TR' ? 'center' : 'start' });
+    // the keyboard follows, from where the page now reads
+    if (!target.matches('a[href], button, input, select, textarea, summary, video, [tabindex]')) target.setAttribute('tabindex', '-1');
+    target.focus?.({ preventScroll: true });
+    if (ownAddress() && location.hash !== hash) {
+      try { history.pushState(null, '', hash); } catch { /* a page that may not change its address keeps it */ }
+    }
   }
 
   function addresses() {
-    window.addEventListener('hashchange', () => point(location.hash));
     doc.addEventListener('click', (event) => {
-      const link = event.target.closest('a[href^="#"]');
-      if (link && link.getAttribute('href') === location.hash) point(location.hash);
+      const link = event.target.closest?.('a[href^="#"]');
+      if (!link || event.defaultPrevented) return;
+      // a new tab of a file opens the file there; of the Page pane's frame it would open the app
+      if ((event.ctrlKey || event.metaKey || event.shiftKey || event.altKey) && ownAddress()) return;
+      event.preventDefault();
+      go(link.getAttribute('href'));
     });
+    doc.addEventListener('auxclick', (event) => {
+      if (!ownAddress() && event.target.closest?.('a[href^="#"]')) event.preventDefault();
+    });
+    window.addEventListener('hashchange', () => point(location.hash));
     if (location.hash) point(location.hash);
   }
 

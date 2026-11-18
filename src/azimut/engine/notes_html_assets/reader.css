@@ -68,6 +68,7 @@ body {
 }
 ::selection { background: color-mix(in srgb, var(--az-accent) 24%, transparent); }
 :focus-visible { outline: 3px solid var(--accent-ink); outline-offset: 3px; border-radius: 2px; }
+[tabindex="-1"]:focus:not(:focus-visible) { outline: none; }
 img, video, svg { max-width: 100%; }
 img, video { height: auto; }
 a { color: var(--accent-ink); text-decoration-thickness: 1px; text-underline-offset: .2em; text-decoration-color: color-mix(in srgb, currentColor 40%, transparent); }
@@ -360,7 +361,7 @@ html:not(.az-js) .az-graphic:focus-within img { filter: none; transform: none; }
 .az-table [data-align="center"] { text-align: center; }
 .az-table thead th { position: sticky; top: 0; z-index: 1; background: var(--paper); border-bottom: 2px solid var(--ink); font-size: .8125rem; white-space: nowrap; }
 .az-table tbody tr:hover td { background: var(--tint); }
-.az-table tr:target td, .az-table tr.az-flash td { animation: az-flash 2.4s var(--ease); }
+.az-table tr:target td, .az-table tr.az-flash td, .az-sources li.az-flash { animation: az-flash 2.4s var(--ease); }
 .az-table tr:target td:first-child { box-shadow: inset 3px 0 var(--az-accent); }
 @keyframes az-flash { 0%, 35% { background: color-mix(in srgb, var(--az-accent) 24%, var(--paper)); } }
 .az-sort { display: inline-flex; gap: .35rem; margin: -.2rem -.3rem; padding: .2rem .3rem; border: 0; border-radius: 3px; background: none; color: inherit; font: inherit; cursor: pointer; }

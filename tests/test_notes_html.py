@@ -202,6 +202,15 @@ def test_the_top_of_the_page_is_cover_then_contents_then_body(report):
     assert body.one("main", "az-body")
 
 
+def test_every_link_inside_the_page_names_a_part_of_it(report):
+    """The reader script takes a press on such a link itself (the Page pane's frame
+    would otherwise leave for the app's address): each must find what it names."""
+    for page in (report["page"], report["public_page"]):
+        ids = {node.attrs["id"] for node in page.walk() if node.attrs.get("id")}
+        inside = [node.attrs["href"][1:] for node in page.find("a") if node.attrs.get("href", "").startswith("#")]
+        assert inside and set(inside) <= ids
+
+
 def test_sections_have_stable_ids_the_contents_link_to(report):
     page = report["page"]
     headings = page.find("h2") + page.find("h3")

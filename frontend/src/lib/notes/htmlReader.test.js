@@ -18,10 +18,13 @@ afterEach(async () => {
   window = null;
 });
 
-/** A report holding `body`, read at a wide or narrow width, with motion on or turned down. */
-async function report(body, { wide = true, reduced = false, observers = true, hash = '' } = {}) {
+/**
+ * A report holding `body`, read at a wide or narrow width, with motion on or turned down,
+ * in an article or a story (`web`), from a file or from the Page pane's frame (`url`).
+ */
+async function report(body, { wide = true, reduced = false, observers = true, hash = '', web = '', url = '' } = {}) {
   window = new Window({
-    url: `file:///report.html${hash}`, width: wide ? 1440 : 390, height: 900,
+    url: url || `file:///report.html${hash}`, width: wide ? 1440 : 390, height: 900,
     settings: { enableJavaScriptEvaluation: true, suppressInsecureJavaScriptEnvironmentWarning: true },
   });
   window.matchMedia = (query) => ({
@@ -39,7 +42,7 @@ async function report(body, { wide = true, reduced = false, observers = true, ha
   const media = window.HTMLMediaElement.prototype;
   media.play = function play() { this.dataset.playing = 'true'; return Promise.resolve(); };
   media.pause = function pause() { delete this.dataset.playing; this.dispatchEvent(new window.Event('pause')); };
-  window.document.write(`<!doctype html><html lang="en" data-look="report"><head><style>${CSS}</style></head><body>${body}<script>${READER}</script></body></html>`);
+  window.document.write(`<!doctype html><html lang="en" data-look="report"${web ? ` data-web="${web}"` : ''}><head><style>${CSS}</style></head><body>${body}<script>${READER}</script></body></html>`);
   await window.happyDOM.waitUntilComplete();
   return window.document;
 }
@@ -439,6 +442,52 @@ describe('a story keeps its picture beside the words', () => {
   it('interleaves the two columns in the style sheet when they fold, step by step', () => {
     expect(CSS).toContain('.az-story-figures > figure { order: calc(var(--az-n, 0) * 2);');
     expect(CSS).toContain('.az-story-step { order: calc(var(--az-n, 0) * 2 + 1); }');
+  });
+});
+
+describe('a link to a part of the page', () => {
+  const PAGE = `<div class="az-page"><nav class="az-contents"><ol><li><a href="#one">One</a></li><li><a href="#two">Two</a></li></ol></nav>
+    <main class="az-body"><p><a class="az-cite" href="#src-1" data-src="1">[1]</a> and <a href="#gone">a part since cut</a></p>
+    <h2 id="one">One</h2><h2 id="two">Two</h2></main>
+    <section class="az-sources" id="sources"><ol><li id="src-1">First clip</li></ol></section></div>`;
+  const follow = (doc, href, init) => {
+    const event = new window.MouseEvent('click', { bubbles: true, cancelable: true, ...init });
+    doc.querySelector(`a[href="${href}"]`).dispatchEvent(event);
+    return event;
+  };
+
+  it('goes there itself in the Page pane\'s frame, whose address is the app\'s: never a blank page', async () => {
+    const doc = await report(PAGE, { url: 'about:srcdoc' });
+    const seen = [];
+    for (const id of ['two', 'src-1']) doc.getElementById(id).scrollIntoView = (options) => seen.push([id, options]);
+    const pushed = [];
+    window.history.pushState = (...args) => pushed.push(args);
+    // the contents, a citation, even a modified press: each is taken over, the frame never leaves
+    for (const [href, init] of [['#two', {}], ['#src-1', {}], ['#two', { ctrlKey: true }]]) expect(follow(doc, href, init).defaultPrevented, href).toBe(true);
+    expect(seen.map(([id]) => id)).toEqual(['two', 'src-1', 'two']);
+    expect(seen[0][1]).toEqual({ behavior: 'smooth', block: 'start' });
+    // the keyboard follows, and the source read is flashed; the frame's address is never written
+    expect(doc.activeElement).toBe(doc.getElementById('two'));
+    expect(doc.getElementById('two').getAttribute('tabindex')).toBe('-1');
+    expect(doc.getElementById('src-1').classList.contains('az-flash')).toBe(true);
+    expect(pushed).toEqual([]);
+    // a link to nothing on the page goes nowhere rather than away
+    expect(follow(doc, '#gone').defaultPrevented).toBe(true);
+    const middle = new window.MouseEvent('auxclick', { bubbles: true, cancelable: true, button: 1 });
+    doc.querySelector('a[href="#one"]').dispatchEvent(middle);
+    expect(middle.defaultPrevented).toBe(true);
+  });
+
+  it('writes the address of a file as it goes, and leaves a new tab to the browser', async () => {
+    const doc = await report(PAGE, { reduced: true });
+    const pushed = [];
+    window.history.pushState = (...args) => pushed.push(args);
+    let options;
+    doc.getElementById('one').scrollIntoView = (given) => { options = given; };
+    expect(follow(doc, '#one').defaultPrevented).toBe(true);
+    expect(options.behavior).toBe('auto');
+    expect(pushed).toEqual([[null, '', '#one']]);
+    expect(follow(doc, '#two', { metaKey: true }).defaultPrevented).toBe(false);
   });
 });
 
