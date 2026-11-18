@@ -626,6 +626,29 @@ def test_a_plain_look_uses_the_readers_fonts_and_a_styled_one_brings_its_own(rep
     assert woff[:4] == b"wOFF"
 
 
+def test_only_an_edition_that_says_what_it_changed_is_a_correction():
+    """A public file made again with nothing said about it is the same text: the note's
+    record keeps it, the reader is never shown it as a correction."""
+    bare = [{"at": "2026-11-18T10:00:00Z", "edition": "public", "format": "html", "sha256": "1a" * 32},
+            {"at": "2026-11-18T11:00:00Z", "edition": "public", "pdf_sha256": "2b" * 32, "changes": "  "}]
+    noted = {"at": "2026-11-17T09:00:00Z", "edition": "public", "format": "pdf", "pdf_sha256": "3c" * 32,
+             "changes": "The count is now a minimum."}
+
+    def page(earlier, changes=""):
+        return parse(notes_html.render(None, title="Port", text="## One\n\nWords.", identity=notefill.Identity(),
+                                       public=True, created=CREATED, changes=changes, earlier=earlier).html)
+
+    plain = page(bare)
+    assert not plain.find("section", "az-corrections")
+    assert not plain.find(cls="az-contents-corrections")
+    told = page([noted, *bare])
+    rows = told.one("section", "az-corrections").find("li")
+    assert len(rows) == 1 and "The count is now a minimum." in rows[0].words() and "3c" * 32 in rows[0].words()
+    assert told.one(cls="az-contents-corrections").one("a").attrs["href"] == "#corrections"
+    # this edition's own line is a correction too, whatever came before it
+    assert len(page(bare, changes="V10 is captured.").one("section", "az-corrections").find("li")) == 1
+
+
 def test_a_written_width_and_alignment_reach_the_figure(report):
     figure = next(node for node in report["page"].find("figure", "az-figure") if "lead tank stops" in node.words())
     # the width written, then the picture's shape, in one style attribute

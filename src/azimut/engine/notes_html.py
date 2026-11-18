@@ -1569,9 +1569,12 @@ class _Page:
         return f'<li id="src-{entry.number}" data-kind="{_attr(source.kind or "item")}">{label}{details}{origins}{more}</li>\n'
 
     def _corrections(self, changes: str, earlier: Iterable[dict[str, Any]]) -> str:
-        """What this edition changed, and the public editions made before it."""
+        """What this edition changed, and the public editions before it that said what
+        they changed. An edition with no such line is the same text made again: it stays
+        in the note's record of editions and is never shown to a reader as a correction."""
         said = " ".join(changes.split())[:300]
-        before = [record for record in earlier if record.get("edition") == md.PUBLIC]
+        before = [record for record in earlier if record.get("edition") == md.PUBLIC
+                  and isinstance(record.get("changes"), str) and record["changes"].strip()]
         if not said and not before:
             return ""
         rows: list[str] = []
@@ -1586,8 +1589,7 @@ class _Page:
                 continue
             fingerprint = str(record.get("sha256") or record.get("pdf_sha256") or "")
             what = "HTML" if record.get("format") == "html" else "PDF"
-            note = record.get("changes")
-            words = f" <span>{_text(' '.join(str(note).split())[:300])}</span>" if isinstance(note, str) and note else ""
+            words = f" <span>{_text(' '.join(str(record['changes']).split())[:300])}</span>"
             rows.append(f'<li><time datetime="{stamp[:10]}">{_text(when)}</time> {what}{words} '
                         f'<span class="az-hash">SHA-256 <code>{_attr(fingerprint)}</code></span></li>')
         return (f'<section class="az-corrections" id="corrections" aria-labelledby="corrections-title">\n'
