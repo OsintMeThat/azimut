@@ -85,6 +85,8 @@ class BulkBodyLimit:
         ("POST", ("notes", "*", "pieces"), "notes", "MAX_NOTE_BODY_BYTES"),
         # and the one that sends it to WordPress, with the diagrams the browser drew
         ("POST", ("notes", "*", "wordpress"), "notes", "MAX_PDF_BODY_BYTES"),
+        # and the one that publishes its web folder to GitHub Pages
+        ("POST", ("notes", "*", "github"), "notes", "MAX_PDF_BODY_BYTES"),
         ("POST", ("plates",), "plates", "MAX_PLATE_BODY_BYTES"),
         ("POST", ("analysis-views", "figure"), "analysis_views", "MAX_FIGURE_BODY_BYTES"),
         ("POST", ("map-plates", "export"), "mapplates", "MAX_EXPORT_BODY_BYTES"),

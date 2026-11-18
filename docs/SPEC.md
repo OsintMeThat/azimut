@@ -463,9 +463,23 @@ stops making sense.
   left out of the settings backup (live write credentials stay on the machine that made
   them) and never sent back to the browser beyond its last four characters; what the
   site answers is used as a link only when it is an http(s) address.
+  Publishing a note to GitHub Pages is the other: it reaches api.github.com only, over
+  https with the API version pinned, timeouts, answers read up to a bound and a redirect
+  followed only while it stays there; the token rides in the Authorization header, never
+  in an address, a log or an answer to the browser. Its calls are Test connection,
+  Create the repository, Turn on Pages, Publish (the folder's files as blobs, two trees,
+  one commit, a fast-forward of the branch), the bounded watch of that build and an
+  edition's Check, each on a press, never on a read or at startup. Names, the short name
+  and every path are checked at the edge, a folder Azimut did not make is never
+  replaced, and the folder is bounded in files and weight before anything is sent. The
+  token is a fine-grained one the analyst limits to the one repository (Contents and
+  Pages, Read and write), kept in `publishing.json` like the WordPress password and left
+  out of the backup. What it publishes is public: a Pages site is readable by anyone
+  with the address, even from a private repository, which is why only the public edition
+  goes.
   Accepted risks recorded here: cleartext keys over
-  localhost, the WordPress application password readable by anyone who can read the
-  workspace (as the API keys are), the hash-verified scraper updater, Intel macOS staying on cryptography 48
+  localhost, the WordPress application password and the GitHub token readable by anyone
+  who can read the workspace (as the API keys are), the hash-verified scraper updater, Intel macOS staying on cryptography 48
   for want of later wheels (Azimut uses it for AES-GCM only, not the X.509 verifier its
   two open advisories concern), the release workflow's publish job
   running `softprops/action-gh-release` and `pypa/gh-action-pypi-publish` on mutable

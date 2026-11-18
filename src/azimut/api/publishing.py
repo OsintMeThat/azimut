@@ -1,23 +1,33 @@
-"""REST API for Settings › Publishing › WordPress: the site a note is sent to as a draft.
+"""REST API for Settings › Publishing: the WordPress site a note is sent to as a
+draft, and the GitHub Pages site a note's web folder is published to.
 
 The site's address and the username are ordinary settings (`wordpress_site`,
-`wordpress_user`), carried by a settings backup. The application password is kept
-apart, in ``publishing.json`` (`engine/publishsecrets.py`), and never sent back:
-the browser learns only whether one is set and its last four characters.
+`wordpress_user`), carried by a settings backup; so are the GitHub account, the
+repository and the branch (`github_account`, `github_repo`, `github_branch`) and the
+address Pages last said the site has (`github_site`). The application password and the
+GitHub token are kept apart, in ``publishing.json`` (`engine/publishsecrets.py`), and
+never sent back: the browser learns only whether one is set and its last four characters.
 
-Nothing here reaches the network but **Test connection**, on its press: reading
-these settings, saving them and forgetting them stay on this machine. Sending a note
-is the Notebook's (`POST /api/cases/{id}/notes/{note}/wordpress`, `api/notes.py`).
+Nothing here reaches the network but its presses: **Test connection** for either
+service, and for GitHub **Create the repository**, **Turn on Pages** and the watch of
+a page being built (`/github/build`, asked by the export dialog after a publish).
+Reading these settings, saving them and forgetting them stay on this machine. Sending
+a note is the Notebook's (`/notes/{note}/wordpress` and `/notes/{note}/github`,
+`api/notes.py`).
 """
 
 from __future__ import annotations
 
+import re
+from dataclasses import dataclass, field
 from typing import Any
 
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
 
 from .. import config
+from ..engine import githubpages as github
+from ..engine import notes_web
 from ..engine import notes_wordpress as wordpress
 from ..engine import publishsecrets
 
@@ -59,7 +69,7 @@ def _state() -> dict[str, Any]:
 @router.get("")
 def read_publishing() -> dict[str, Any]:
     """What Settings › Publishing shows of each service: never a secret, never fetched."""
-    return {WORDPRESS: _state()}
+    return {WORDPRESS: _state(), GITHUB: _github_state()}
 
 
 @router.put("/wordpress")
@@ -115,3 +125,230 @@ def test_wordpress() -> dict[str, Any]:
         "site_name": connection.site_name,
         "detail": said,
     }
+
+
+# -- GitHub Pages ------------------------------------------------------------------------
+
+GITHUB = "github"
+
+
+class GitHubIn(BaseModel):
+    """What Settings saves; a field left out (None) stays as it is. An empty token keeps
+    the one kept: Forget is how it goes."""
+
+    account: str | None = Field(default=None, max_length=60)
+    repo: str | None = Field(default=None, max_length=120)
+    branch: str | None = Field(default=None, max_length=120)
+    token: str | None = Field(default=None, max_length=publishsecrets.MAX_SECRET + 20)
+
+
+@dataclass(frozen=True)
+class GitHubTarget:
+    """The repository a page is published to, as Settings keeps it, and the token,
+    which no repr of it shows."""
+
+    account: str
+    repo: str
+    branch: str
+    site: str
+    token: str = field(repr=False)
+
+    @property
+    def ready(self) -> bool:
+        return bool(self.account and self.repo and self.branch and self.token)
+
+    @property
+    def base(self) -> str:
+        """Where the articles live, as far as this machine knows without asking GitHub."""
+        return github.site_base(self.account, self.repo, self.site)
+
+
+#: A token as GitHub makes them: letters, digits and underscores.
+TOKEN = re.compile(r"^[A-Za-z0-9_]{20,255}$")
+
+
+def github_settings() -> GitHubTarget:
+    """The account, repository, branch and token as saved, each read again as Settings
+    checks it, so a hand-edited settings file cannot steer a call."""
+    settings = config.load_settings()
+    try:
+        account = github.account_name(str(settings.get("github_account") or ""))
+        repo = github.repository_name(str(settings.get("github_repo") or "")) or github.DEFAULT_REPO
+        branch = github.branch_name(str(settings.get("github_branch") or "")) or github.DEFAULT_BRANCH
+    except github.GitHubError:
+        account, repo, branch = "", github.DEFAULT_REPO, github.DEFAULT_BRANCH
+    site = str(settings.get("github_site") or "")
+    try:
+        site = notes_web.address(site)
+    except notes_web.NotesWebError:
+        site = ""
+    token = publishsecrets.read(GITHUB)
+    return GitHubTarget(account=account, repo=repo, branch=branch, site=site,
+                        token=token if TOKEN.match(token) else "")
+
+
+def _github_state() -> dict[str, Any]:
+    target = github_settings()
+    return {
+        "account": target.account,
+        "repo": target.repo,
+        "branch": target.branch,
+        "site": target.site,
+        "base": target.base if target.account else "",
+        "token": publishsecrets.status(GITHUB),
+    }
+
+
+def keep_site(target: GitHubTarget, url: str) -> None:
+    """Keep the address Pages gave the site, for the dialog to say without asking."""
+    if url and url != target.site:
+        config.update_settings(lambda settings: settings.update(github_site=url))
+
+
+@router.put("/github")
+def save_github(body: GitHubIn) -> dict[str, Any]:
+    try:
+        account = github.account_name(body.account) if body.account is not None else None
+        repo = (github.repository_name(body.repo) or github.DEFAULT_REPO) if body.repo is not None else None
+        branch = (github.branch_name(body.branch) or github.DEFAULT_BRANCH) if body.branch is not None else None
+        if body.token:
+            token = body.token.strip()
+            if not TOKEN.match(token):
+                raise github.GitHubError("That does not read as a GitHub token: copy it whole, as github.com showed it.")
+            publishsecrets.write(GITHUB, token)
+    except (github.GitHubError, publishsecrets.SecretError) as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+    def apply(settings: dict[str, Any]) -> None:
+        moved = False
+        for key, value in (("github_account", account), ("github_repo", repo), ("github_branch", branch)):
+            if value is not None and value != settings.get(key):
+                settings[key] = value
+                moved = moved or key != "github_branch"
+        if moved:
+            # another repository is another site: its address is read again on the next press
+            settings["github_site"] = ""
+
+    if account is not None or repo is not None or branch is not None:
+        config.update_settings(apply)
+    return _github_state()
+
+
+@router.delete("/github")
+def forget_github() -> dict[str, Any]:
+    """Forget the token and the account on this machine; the repository and the branch
+    go back to what they were before anything was set."""
+    publishsecrets.forget(GITHUB)
+    config.update_settings(lambda settings: settings.update(
+        github_account="", github_repo=github.DEFAULT_REPO, github_branch=github.DEFAULT_BRANCH, github_site=""))
+    return _github_state()
+
+
+def _connection(target: GitHubTarget, gh: github.GitHub) -> dict[str, Any]:
+    """Who the token is, whether the repository is there and whether Pages serves it."""
+    login = github.whoami(gh)
+    said: dict[str, Any] = {"ok": False, "login": login, "repository": f"{target.account}/{target.repo}",
+                            "exists": False, "empty": False, "private": False, "pages": None,
+                            "base": target.base, "needs": "", "detail": "", "warnings": []}
+    repo = github.repository(gh, target.account, target.repo)
+    if repo is None:
+        said.update(needs="repository", detail=f"There is no repository {target.account}/{target.repo} "
+                                                "that this token can reach.")
+        return said
+    said.update(exists=True, private=repo.private)
+    try:
+        github.head(gh, target.account, target.repo, target.branch)
+    except github.Conflict:
+        said["empty"] = True
+    pages = github.pages(gh, target.account, target.repo)
+    if pages is None:
+        said.update(needs="pages", detail=f"Pages is off for {target.account}/{target.repo}.")
+        return said
+    keep_site(target, pages.url)
+    said.update(ok=True, pages=pages.said(), base=pages.url, warnings=pages_warnings(target, pages, repo.private))
+    return said
+
+
+def pages_warnings(target: GitHubTarget, pages: github.Pages, private: bool) -> list[str]:
+    warnings = []
+    if pages.branch and pages.branch != target.branch:
+        warnings.append(f"Pages serves the {pages.branch} branch, not {target.branch}: "
+                        f"set Branch to {pages.branch}.")
+    if pages.build_type == "workflow":
+        warnings.append("Pages here is built by a GitHub Actions workflow, which decides what goes live.")
+    if private:
+        warnings.append("The repository is private, but its Pages site is public.")
+    return warnings
+
+
+def _needs_target() -> GitHubTarget:
+    target = github_settings()
+    if not target.ready:
+        raise HTTPException(status_code=409, detail=github.NOT_SET)
+    return target
+
+
+@router.post("/github/test")
+def test_github() -> dict[str, Any]:
+    """Sign in with the kept token and say who it is, whether the repository is there and
+    whether Pages serves it. One press, a handful of reads, nothing written."""
+    target = github_settings()
+    if not target.ready:
+        return {"ok": False, "detail": "Fill in the account and the token first.", "needs": ""}
+    try:
+        with github.client() as http:
+            return _connection(target, github.GitHub(target.token, http))
+    except github.GitHubError as exc:
+        return {"ok": False, "detail": str(exc), "needs": ""}
+
+
+@router.post("/github/repository")
+def create_github_repository() -> dict[str, Any]:
+    """Make the repository on GitHub, public, with a README: the press that says so.
+    A token that may not make repositories is told how to do it on github.com."""
+    target = _needs_target()
+    try:
+        with github.client() as http:
+            gh = github.GitHub(target.token, http)
+            login = github.whoami(gh)
+            made = github.create_repository(gh, target.account, target.repo, login)
+    except github.GitHubError as exc:
+        manual = exc.status in (401, 403, 404)
+        detail = ("This token may not make repositories: make it on github.com, then let the token reach it."
+                  if manual and exc.status != 401 else str(exc))
+        return {"ok": False, "detail": detail, "manual": manual}
+    return {"ok": True, "repository": made.full_name, "branch": made.default_branch}
+
+
+@router.post("/github/pages")
+def turn_on_github_pages() -> dict[str, Any]:
+    """Turn Pages on for the branch set, from its root: the press that says so. A token
+    without the permission GitHub asks for this is told how to do it on github.com."""
+    target = _needs_target()
+    try:
+        with github.client() as http:
+            on = github.turn_on_pages(github.GitHub(target.token, http), target.account, target.repo, target.branch)
+    except github.GitHubError as exc:
+        manual = exc.status in (403, 404)
+        detail = (f"This token may not turn Pages on: give it {exc.permission or 'Administration, Read and write'}, "
+                  "or turn it on in the repository's Settings › Pages." if manual else str(exc))
+        return {"ok": False, "detail": detail, "manual": manual}
+    keep_site(target, on.url)
+    return {"ok": True, "pages": on.said(), "base": on.url}
+
+
+class BuildIn(BaseModel):
+    commit: str = Field(pattern=r"^[0-9a-f]{40}$")
+
+
+@router.post("/github/build")
+def github_build(body: BuildIn) -> dict[str, Any]:
+    """Whether Pages has built a commit Azimut published: `built`, `building` or
+    `errored`. Asked by the export dialog for a bounded time after its press."""
+    target = _needs_target()
+    try:
+        with github.client() as http:
+            state = github.build_state(github.GitHub(target.token, http), target.account, target.repo, body.commit)
+    except github.GitHubError as exc:
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
+    return {"state": state.state, "detail": state.detail}
