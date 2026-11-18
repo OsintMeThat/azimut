@@ -46,6 +46,10 @@ Two things a server cannot do on its own:
 - **Remote images.** They stay out, as they did in the print export: opening a
   note must not make the machine fetch anything (spec — local-first).
 
+**Maps.** A `::: map` block prints as one picture (`engine/notes_maps.py`): the ground
+filed when it was put in, with the layers' features and the proofs drawn over it as on
+the map's last day, its credit under it. Nothing is fetched to print it.
+
 **Sources stay sources.** A PDF is read away from the case, so what the case knows
 about where something came from is printed rather than kept behind the app: a
 reference to a record with a web address links to it, a picture says under its
@@ -184,6 +188,9 @@ MAX_SHRINK = 0.25
 #: phone screenshot is not a page tall. A diagram keeps the whole page, and a width
 #: the analyst wrote is theirs.
 UNSIZED_SHARE = 0.5
+#: How wide a map is drawn for a PDF, and for the Page pane's lighter copy, in pixels.
+MAP_PIXELS = 1800
+MAP_PIXELS_LIGHT = 1000
 #: The browser draws a diagram at twice its size on screen, for a sharp print.
 DIAGRAM_PIXEL_SCALE = 2
 #: How many empty sections a document names one by one before it counts the rest.
@@ -1724,6 +1731,31 @@ class _Builder:
 
     def _on_code_block(self, tokens: list[Token], index: int, align: Align) -> int:
         self._code_box(tokens[index].content)
+        return index + 1
+
+    def _on_az_map(self, tokens: list[Token], index: int, align: Align) -> int:
+        """A `::: map` block as one picture: its ground with its features as on its
+        last day (`notes_maps.render_png`), its credit under it."""
+        from . import notes_maps
+
+        block = notes_maps.parse_block(tokens[index].content)
+        derived = notes_maps.derive(self.case, block)
+        for message, kind, offset in derived.warnings:
+            line = self._line if self._fixed or offset is None else self._line + offset
+            self._warn(message, line, kind if kind in WARNING_KINDS else OTHER)
+        data = derived.data
+        picture = notes_maps.render_png(data, MAP_PIXELS_LIGHT if self.light else MAP_PIXELS, ground=derived.ground,
+                                        icons=derived.icons, fmt="JPEG")
+        with PILImage.open(BytesIO(picture)) as opened:
+            natural = opened.size
+        words = block.title
+        if len(data.get("days") or []) > 1 and data.get("day"):
+            shown = f"as on {notes_style.long_date(date.fromisoformat(data['day']))}"
+            words = f"{words}, {shown}" if words else shown.capitalize()
+        credits = data.get("credits") or []
+        kind, _, value = (credits[0] if credits else "").partition(": ")
+        credit = _Credit(kind, value) if value else None
+        self._place(BytesIO(picture), natural, "", Align.C, self._caption(words, "Map"), credit=credit, unsized=1.0)
         return index + 1
 
     def _on_blockquote_open(self, tokens: list[Token], index: int, align: Align) -> int:

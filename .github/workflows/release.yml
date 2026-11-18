@@ -85,6 +85,9 @@ jobs:
               "azimut/assets/fonts/README.md",
               "azimut/engine/notes_html_assets/reader.css",
               "azimut/engine/notes_html_assets/reader.js",
+              "azimut/engine/notes_html_assets/reader.map.css",
+              "azimut/engine/notes_html_assets/reader.map.js",
+              "azimut/engine/notes_html_assets/markers.json",
           }
           missing = sorted(required - names)
           assert not missing, f"wheel is missing PDF and HTML report assets: {missing}"

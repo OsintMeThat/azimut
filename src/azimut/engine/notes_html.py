@@ -35,6 +35,12 @@ the public edition. The check lists each one, and the export can round them to a
 **Counts.** A count with no "at least" or range before it is said by the check as a
 warning (`COUNT`), never changed. A confidence the analyst typed is printed as typed.
 
+**Maps.** A `::: map` block is a figure the reader can move about (`engine/notes_maps.py`
+reads what it shows): the ground filed when it was put in, the layers' features drawn
+over it as SVG in their own colours and pictograms, a card a press away for each, and a
+slider through its days. Its data rides along unread (`script.az-map-data`, JSON), and
+the figure shows the map as on its last day with no script and in print.
+
 **Two layouts.** The look's `web` lays the page out as an article, or as a story whose
 pictures hold still while the words after each go by (`_scenes`, the `::: story` markup
 reused). The text is the same in both, only grouped; the reader script and style sheet
@@ -46,6 +52,7 @@ from __future__ import annotations
 import base64
 import hashlib
 import html
+import json
 import math
 import re
 import subprocess
@@ -67,7 +74,7 @@ from PIL import Image as PILImage
 from PIL import ImageOps, ImageSequence, UnidentifiedImageError
 
 from . import ffmpeg as ffmpeg_engine
-from . import mapsites, notefill, notes_style, notesources, pdffonts, thumbnails
+from . import mapsites, notefill, notes_maps, notes_style, notesources, pdffonts, thumbnails
 from . import notes_markdown as md
 from .media import media_kind
 from .notelook import DEFAULT as DEFAULT_LOOK
@@ -81,6 +88,10 @@ if TYPE_CHECKING:
 #: Where the reader's stylesheet and script live, inlined into every file.
 ASSETS = Path(__file__).resolve().parent / "notes_html_assets"
 ASSET_NAMES = ("reader.css", "reader.js")
+#: What a page holding a map adds to them: its style, and its script, spliced into the
+#: reader's where it says so, so a page with no map keeps the reader it always had.
+MAP_ASSET_NAMES = ("reader.map.css", "reader.map.js", "markers.json")
+MAP_SLOT = "  /* az:map */\n"
 #: What the page may load: nothing but what it holds.
 CSP = (
     "default-src 'none'; img-src data:; media-src data:; font-src data:; style-src 'unsafe-inline'; "
@@ -150,11 +161,13 @@ ROW_CODE = re.compile(r"^[A-Z]{1,3}-?\d{1,4}[a-z]?$")
 ANCHOR = re.compile(r"^[\w:.-]{1,80}$")
 #: The story layout's scenes: the figures that can hold its stage, and the parts of the
 #: text that can be read beside one.
-SCENE_FIGURES = frozenset({"picture", "pair", "proof", "clip"})
+SCENE_FIGURES = frozenset({"picture", "pair", "proof", "clip", "map"})
 SCENE_WORDS = re.compile(r"<(?:p|ul|ol|blockquote|h4|h5|h6)[ >]|<aside class=\"az-(?:callout|internal)\"")
 #: Ids the page keeps for itself.
 RESERVED_IDS = frozenset({"sources", "corrections", "contents", "top", "main", "cover", "footer"})
-RESERVED_ID = re.compile(r"^(?:src|clip|fig|step|limits)-\d+$")
+RESERVED_ID = re.compile(r"^(?:src|clip|fig|step|limits|map)-\d+$")
+#: The side of a picture a map's card shows.
+CARD_SIDE = 640
 
 #: What a count is a count of: the nouns a register or a strike report counts. A
 #: number followed straight by one is read as a count; any other number is not.
@@ -386,6 +399,11 @@ class _Page:
         self._quoted = 0
         self._notices: set[str] = set()
         self._svgs = 0
+        self.maps = 0
+        #: Each map's steps, `(label, day)`, by its figure's id: the cards a story gives it.
+        self._map_steps: dict[str, list[tuple[str, str, str, str]]] = {}
+        #: The figure each proof shown in the page stands in, by its record, which a map's card links to.
+        self._proof_anchors: dict[str, str] = {}
 
     # -- the whole document -------------------------------------------------------
 
@@ -458,9 +476,13 @@ class _Page:
 
     def _assemble(self, title: str, page: str) -> bytes:
         """The page with its clips and timecodes settled, wrapped in its document."""
-        css = _asset("reader.css").replace("</", "<\\/")
-        script = _asset("reader.js").replace("</", "<\\/")
-        fonts = _font_faces(self.look, self.theme, _visible_text(page) + title)
+        mapped = bool(self.maps)
+        css = (_asset("reader.css") + (_asset("reader.map.css") if mapped else "")).replace("</", "<\\/")
+        reader = _asset("reader.js")
+        script = (reader.replace(MAP_SLOT, _asset("reader.map.js"), 1) if mapped else reader).replace("</", "<\\/")
+        # what the reader writes itself is drawn in the page's face, a map's words with it
+        own = (_asset("reader.map.js") + _asset("reader.map.css")) if mapped else ""
+        fonts = _font_faces(self.look, self.theme, _visible_text(page) + title + own)
         accent = f' style="--az-accent:{self.look.accent}"' if self.look.accent else ""
         tlp = f' data-tlp="{self.look.tlp}"' if self.look.tlp else ""
         web = f' data-web="{self.look.web}"' if self.look.web else ""
@@ -574,6 +596,28 @@ class _Page:
                     levels.extend(md.heading_level(token.tag, piece.shift)
                                   for token in block.tokens[block.start:] if token.type == "heading_open")
         self._base = min(levels) if levels else 1
+        if self.case is not None:
+            self._anchor_proofs(pieces, blocks)
+
+    def _anchor_proofs(self, pieces: list[md.Piece], blocks: dict[int, list[md.Block]]) -> None:
+        """Each proof the page shows as a figure, named `fig-1`, `fig-2`… in page order, so
+        a map's card can link to it. Only when the page holds a map."""
+        if not any(block.kind == md.MAP for piece in pieces if piece.kind == "text" for block in blocks[id(piece)]):
+            return
+        for piece in pieces:
+            if piece.kind != "text":
+                continue
+            for block in blocks[id(piece)]:
+                for token in block.tokens:
+                    if token.type != "inline":
+                        continue
+                    children = [child for child in token.children or [] if child.type != "softbreak"]
+                    if len(children) != 1 or children[0].type != "image":
+                        continue
+                    source = self.cited.image_source(md.token_attr(children[0], "src"))
+                    if source is not None and source.noun == "Proof" and source.entity_id \
+                            and source.entity_id not in self._proof_anchors:
+                        self._proof_anchors[source.entity_id] = f"fig-{len(self._proof_anchors) + 1}"
 
     # -- the cover ----------------------------------------------------------------
 
@@ -785,6 +829,10 @@ class _Page:
 
     def _on_code_block(self, tokens: list[Token], index: int) -> int:
         self.out.append(_code(tokens[index].content))
+        return index + 1
+
+    def _on_az_map(self, tokens: list[Token], index: int) -> int:
+        self.out.append(self._map(tokens[index].content))
         return index + 1
 
     def _on_html_block(self, tokens: list[Token], index: int) -> int:
@@ -1021,9 +1069,20 @@ class _Page:
                 end = figure.find(">")
                 figure = f"<figure {_stepped(figure[len('<figure '):end], number)}{figure[end:]}"
             figures.append(figure)
-            quiet = "" if words else ' data-quiet="true"'
-            steps.append(f'<div class="az-story-step" data-step="{number}" style="--az-n:{number}"{quiet}>'
-                         f'{"".join(words)}</div>\n')
+            # a map's own steps are cards of its scene, each moving the map where it looks
+            mapped = re.match(r'<figure [^>]*\bid="(map-\d+)"', figure)
+            cards = self._map_steps.get(mapped.group(1), []) if mapped else []
+            quiet = "" if words or cards else ' data-quiet="true"'
+            if words or not cards:
+                steps.append(f'<div class="az-story-step" data-step="{number}" style="--az-n:{number}"{quiet}>'
+                             f'{"".join(words)}</div>\n')
+            for position, (label, day, text, name) in enumerate(cards):
+                when = (f'<p class="az-map-step-day"><time datetime="{day}">'
+                        f'{_text(notes_style.long_date(date.fromisoformat(day)))}</time></p>') if day else ""
+                said = f'<p class="az-map-step-label" dir="auto">{_text(label or text or name)}</p>'
+                whose = f'<p class="az-map-step-name" dir="auto">{_text(name)}</p>' if name and (label or text) else ""
+                steps.append(f'<div class="az-story-step az-map-card-step" data-step="{number}" '
+                             f'data-map-step="{position}" style="--az-n:{number}">{when}{said}{whose}</div>\n')
         return (f'<section class="az-story az-scenes" data-steps="{len(run)}">\n'
                 f'<div class="az-story-figures">\n{"".join(figures)}</div>\n'
                 f'<div class="az-story-steps">\n{"".join(steps)}</div>\n</section>\n')
@@ -1321,6 +1380,10 @@ class _Page:
             shown = _zoom_button(_img(uri, size, alt), alt)
             layout += _shape(size)
         proof = self._proof(record, source) if kind == "proof" else ""
+        anchor = self._proof_anchors.get(source.entity_id) if kind == "proof" and source is not None else None
+        if anchor and anchor not in self.ids:
+            self.ids.add(anchor)
+            layout = f' id="{anchor}"{layout}'
         opening = _one_style(f'class="{classes}" data-kind="{kind}"{layout}{extra}')
         return f"<figure {opening}>\n{shown}\n{proof}{figcaption}{chain}</figure>\n"
 
@@ -1619,6 +1682,35 @@ class _Page:
         return (f'<figure class="az-figure" data-kind="diagram">\n<div class="az-diagram" role="img" '
                 f'aria-label="Diagram">{cleaned}</div>\n{figcaption}</figure>\n')
 
+    # -- maps -------------------------------------------------------------------------
+
+    def _map(self, body: str) -> str:
+        """A `::: map` block as a figure: the ground with the features drawn over it,
+        its legend and credits, and its data for the reader's script."""
+        block = notes_maps.parse_block(body)
+        self.maps += 1
+        ident = f"map-{self.maps}"
+        self.ids.add(ident)
+        derived = notes_maps.derive(
+            self.case, block, encode=self._map_picture, anchors=self._proof_anchors, round_pov=self.round_pov,
+            ground_side=PREVIEW_SIDE if self.light else PICTURE_SIDE,
+            card_side=min(CARD_SIDE, INLINE_SIDE) if self.light else CARD_SIDE,
+        )
+        for message, kind, offset in derived.warnings:
+            line = self._line if self._fixed or offset is None else self._line + offset
+            self._warn(message, line, kind if kind in WARNING_KINDS else md.OTHER)
+        self.pov.extend((said, self._line) for said in derived.pov)
+        self._map_steps[ident] = [(str(step.get("label") or ""), str(step.get("day") or ""), str(step.get("text") or ""),
+                                   str(step.get("name") or "")) for step in derived.data.get("steps") or []]
+        return _map_figure(derived, ident, self._caption(block.title, "Map"))
+
+    def _map_picture(self, path: Path, side: int) -> tuple[str, tuple[int, int]] | None:
+        made = PICTURES.get(path, min(side, PREVIEW_SIDE) if self.light else side)
+        if made is None:
+            return None
+        data, mime, size = made
+        return f"data:{mime};base64,{base64.b64encode(data).decode('ascii')}", size
+
     # -- the end of the page ------------------------------------------------------------
 
     def _sources(self) -> str:
@@ -1684,6 +1776,109 @@ class _Page:
         return (f'<footer class="az-footer">\n<p><span class="az-edition">{edition}</span> · '
                 f'<time datetime="{self.day.isoformat()}">{_text(notes_style.long_date(self.day))}</time> · '
                 f'<span class="az-fingerprint">Source SHA-256 <code>{printed}</code></span></p>\n</footer>\n')
+
+
+# -- a map's figure ------------------------------------------------------------------
+
+
+def _map_figure(derived: notes_maps.Derived, ident: str, caption: str) -> str:
+    """The figure a map stands in. Its stage holds the ground and the drawing, which read
+    whole with no script and in print; its data rides along unread for the reader's
+    script (the ground's address named by the picture's id, so the file holds it once)."""
+    data = derived.data
+    ground = data.get("ground")
+    width, height = notes_maps.frame_of(data["bounds"])
+    ratio = f"--r:{width / height:.4f}"
+    picture = ""
+    if ground and ground.get("src"):
+        size = ground.get("size") or [0, 0]
+        picture = (f'<img class="az-map-ground" id="{ident}-ground" src="{ground["src"]}" alt="" '
+                   f'width="{size[0]}" height="{size[1]}" decoding="async">')
+    # the sharper pictures of the parts its steps look closer at, each laid where it stands
+    project = notes_maps._Projector(data["bounds"])
+    for number, detail in enumerate(data.get("details") or []):
+        west, south, east, north = detail["bounds"]
+        left, top = project(west, north)
+        right, bottom = project(east, south)
+        place = (f"left:{left / width * 100:.4f}%;top:{top / height * 100:.4f}%;"
+                 f"width:{(right - left) / width * 100:.4f}%;height:{(bottom - top) / height * 100:.4f}%")
+        size = detail.get("size") or [0, 0]
+        picture += (f'<img class="az-map-detail" id="{ident}-detail-{number}" src="{detail["src"]}" alt="" '
+                    f'width="{size[0]}" height="{size[1]}" style="{place}" decoding="async">')
+    if picture:
+        picture = f'<div class="az-map-world">{picture}</div>'
+    drawing = notes_maps.svg(derived, ident=ident)
+    title = data.get("title") or "Map"
+    count = len(data.get("features") or [])
+    stage = (f'<div class="az-map-frame"><div class="az-map-stage" role="group" aria-roledescription="map" '
+             f'aria-label="{_attr(f"Map: {title}. {count} feature" + ("s" if count != 1 else ""))}">'
+             f'{picture}{drawing}</div></div>\n')
+    carried = json.loads(json.dumps(data))
+    if carried.get("ground"):
+        carried["ground"]["src"] = f"#{ident}-ground"
+    for number, detail in enumerate(carried.get("details") or []):
+        detail["src"] = f"#{ident}-detail-{number}"
+    script = json.dumps(carried, ensure_ascii=False, separators=(",", ":")).replace("<", "\\u003c")
+    days = data.get("days") or []
+    shown = ""
+    if len(days) > 1 and data.get("day"):
+        spoken = notes_style.long_date(date.fromisoformat(data["day"]))
+        shown = (f'<p class="az-map-day">As on <time datetime="{data["day"]}">{_text(spoken)}</time>, '
+                 f'one of {len(days)} days</p>\n')
+    legend = _map_legend(derived.legend, ident)
+    credits = _map_credits(data.get("credits") or [])
+    words = "".join(part for part in (caption, credits) if part)
+    figcaption = f"<figcaption>{words}</figcaption>\n" if words else ""
+    steps = len(data.get("steps") or [])
+    return (f'<figure class="az-figure az-map" data-kind="map" id="{ident}" data-steps="{steps}" '
+            f'data-days="{len(days)}" style="{ratio}">\n{stage}{shown}{legend}{figcaption}'
+            f'<script type="application/json" class="az-map-data">{script}</script>\n</figure>\n')
+
+
+def _map_legend(rows: list[dict[str, Any]], ident: str) -> str:
+    """What each colour and pictogram stands for, a layer's groups under its name."""
+    if not rows:
+        return ""
+    layers = list(dict.fromkeys(str(row.get("layer") or "") for row in rows))
+    items: list[str] = []
+    for layer in layers:
+        if len(layers) > 1:
+            items.append(f'<li class="az-key-layer" dir="auto">{_text(layer)}</li>')
+        for row in rows:
+            if str(row.get("layer") or "") != layer:
+                continue
+            style = row.get("style") or {}
+            colour = _attr(str(style.get("color") or "#0072b2"))
+            if row.get("kind") == "point":
+                key = ("proof-pov" if style.get("pov") else "proof") if style.get("proof") else str(style.get("icon") or "")
+                swatch = (f'<svg class="az-key-mark" viewBox="0 0 64 64" aria-hidden="true">'
+                          f'<use href="#{ident}-mk-{_attr(key)}"/></svg>')
+            elif row.get("kind") == "line":
+                dash = ' stroke-dasharray="5 4"' if style.get("dash") == "dashed" else (
+                    ' stroke-dasharray="1 3"' if style.get("dash") == "dotted" else "")
+                swatch = (f'<svg class="az-key-mark" viewBox="0 0 28 14" aria-hidden="true"><path d="M2 7H26" '
+                          f'stroke="rgba(0,0,0,.28)" stroke-width="5" stroke-linecap="round"/><path d="M2 7H26" '
+                          f'stroke="{colour}" stroke-width="3" stroke-linecap="round"{dash}/></svg>')
+            else:
+                swatch = (f'<svg class="az-key-mark" viewBox="0 0 28 18" aria-hidden="true"><rect x="2" y="2" '
+                          f'width="24" height="14" rx="2" fill="{colour}" fill-opacity=".28" stroke="{colour}" '
+                          f'stroke-width="2"/></svg>')
+            count = int(row.get("count") or 0)
+            items.append(f'<li data-layer="{_attr(layer)}" data-group="{_attr(str(row.get("label") or ""))}">'
+                         f'{swatch}<span class="az-key-name" dir="auto">{_text(str(row.get("label") or layer))}</span>'
+                         f'<span class="az-key-count">{count}</span></li>')
+    return f'<ul class="az-map-legend" aria-label="Legend">{"".join(items)}</ul>\n'
+
+
+def _map_credits(credits: list[str]) -> str:
+    said: list[str] = []
+    for credit in credits:
+        kind, colon, words = credit.partition(": ")
+        if colon and kind and len(kind) <= 12:
+            said.append(f'<span class="az-credit-kind">{_text(kind)}:</span> {_text(words)}')
+        else:
+            said.append(_text(credit))
+    return f'<span class="az-credit">{"; ".join(said)}</span>\n' if said else ""
 
 
 # -- pictures, encoded once ------------------------------------------------------------

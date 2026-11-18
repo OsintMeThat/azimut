@@ -567,6 +567,8 @@
           other.setAttribute('aria-hidden', String(other !== figure));
           other.toggleAttribute('inert', other !== figure);
         }
+        // a map is moved by its card: where its step looks, or the whole map for its words
+        if (figure.azMap) { figure.azMap.story(step?.dataset.mapStep); return; }
         const image = imageOf(figure);
         if (!image) return;
         // the same picture moves on from where the last step left it; another starts whole and moves in
@@ -614,6 +616,8 @@
       live(can());
     }
   }
+
+  /* az:map */
 
   /* the story layout opens on its first picture when the cover has none of its own: the first that
      came from somewhere (it has a credit) rather than a chart, else the first; its credit kept on it */
@@ -670,7 +674,7 @@
   }
 
   function start() {
-    for (const part of [titles, hero, progress, contents, pictures, pairs, timecodes, tables, citations, steps, stories, printing, addresses]) part();
+    for (const part of [titles, hero, progress, contents, pictures, pairs, timecodes, tables, citations, steps, ...(typeof maps === 'function' ? [maps] : []), stories, printing, addresses]) part();
   }
   if (doc.readyState === 'loading') doc.addEventListener('DOMContentLoaded', start, { once: true });
   else start();
