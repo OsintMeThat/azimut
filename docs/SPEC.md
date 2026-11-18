@@ -549,7 +549,14 @@ stops making sense.
   `data:` addresses only, every picture in it is encoded again without its metadata, a
   clip is copied without its container's, its diagrams are SVG cleaned of script, event
   handlers, `foreignObject` and any reference leaving it, and the Page pane's copy is
-  answered under a sandboxing policy. Accepted risk (owner's choice, 2026-11-18): a
+  answered under a sandboxing policy. A note's web folder is the same page laid out as
+  files to put online, the public edition only: its policy (`notes_web.folder_csp`) lets
+  it load its own files and nothing else, no inline script, styles inline as the HTML
+  report has them; no `data:` media; the address typed for it is checked at the edge
+  (https, no credentials, no `?` or `#`, 300 characters) before it is printed in the
+  head; the folder is written beside the notes, swapped in by renames, and nothing is
+  sent anywhere from the app. Once published it is public, which the app and the folder's
+  how-to both say. Accepted risk (owner's choice, 2026-11-18): a
   public HTML report may carry Esri and Google imagery, its credit kept beside the
   picture and in its lightbox; a Street View or Yandex capture is warned about once by
   the check before export and never refused. Decoded note pictures are kept between renders in a
