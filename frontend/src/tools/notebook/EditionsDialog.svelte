@@ -11,12 +11,12 @@
   import Modal from '../../components/Modal.svelte';
   import { siteHost } from '../../lib/wordpressSetup.js';
   import {
-    CHECK_SAID, PUBLIC, checkEdition, editionDay, listEditions, showEdition,
+    CHECK_SAID, CHECK_SAID_PAGE, PUBLIC, checkEdition, editionDay, listEditions, showEdition,
   } from '../../lib/notes/editions.svelte.js';
 
   let { caseId, noteId, title = '', onclose = () => {} } = $props();
 
-  const FORMAT_BADGES = { pdf: 'PDF', html: 'HTML', web: 'Web' };
+  const FORMAT_BADGES = { pdf: 'PDF', html: 'HTML', web: 'Web', github: 'GitHub' };
 
   let editions = $state(null);
   let failed = $state('');
@@ -64,7 +64,7 @@
 </script>
 
 <Modal title="Editions" {onclose} width="620px">
-  <p class="lead">{title ? `Every PDF, HTML page, web folder and WordPress draft of “${title}”, newest first.` : 'Every PDF, HTML page, web folder and WordPress draft of this note, newest first.'} Each one stays where it was written.</p>
+  <p class="lead">{title ? `Every PDF, HTML page, web folder, WordPress draft and published page of “${title}”, newest first.` : 'Every PDF, HTML page, web folder, WordPress draft and published page of this note, newest first.'} Each one stays where it was written.</p>
   {#if editions === null}
     <p class="quiet" role="status">Reading…</p>
   {:else if failed}
@@ -88,13 +88,36 @@
             </div>
             <a class="btn btn-ghost btn-xs" href={edition.edit} target="_blank" rel="noopener noreferrer"
               title="The draft in WordPress's editor; it may have been published since">Open in WordPress</a>
+          {:else if edition.format === 'github'}
+            <!-- a page on GitHub Pages: its address, and Open and Check, which reads it back from the repository -->
+            <div class="what">
+              <div class="head">
+                <span class="day">{editionDay(edition.at)}</span>
+                <span class="badge format" data-format="github">GitHub</span>
+                <span class="badge edition">Public</span>
+              </div>
+              <span class="file mono" title={edition.pdf_sha256 ? `SHA-256 ${edition.pdf_sha256}` : edition.address}>{edition.address}</span>
+              <span class="file" title="The repository and the commit it was published in">{edition.repository} · {edition.commit.slice(0, 7)}</span>
+              {#if state === 'checking'}
+                <span class="said" role="status">Checking…</span>
+              {:else if typeof state === 'string'}
+                <span class="said" data-state={state} role="status">
+                  <Icon name={state === 'unchanged' ? 'check' : 'alert'} size={12} /> {CHECK_SAID_PAGE[state]}</span>
+              {:else if state?.error}
+                <span class="said" data-state="error" role="status"><Icon name="alert" size={12} /> {state.error}</span>
+              {/if}
+            </div>
+            <a class="btn btn-ghost btn-xs" href={edition.address} target="_blank" rel="noopener noreferrer"
+              title="The page at its address, in a new tab">Open</a>
+            <button type="button" class="btn btn-ghost btn-xs" title="Read the page back from the repository and compare it with what Azimut published"
+              disabled={state === 'checking'} onclick={() => check(edition)}>Check</button>
           {:else}
           <div class="what">
             <div class="head">
               <span class="day">{editionDay(edition.at)}</span>
               <span class="badge format" data-format={edition.format}>{FORMAT_BADGES[edition.format] ?? 'PDF'}</span>
               <span class="badge edition" class:internal={edition.edition !== PUBLIC}>{edition.edition === PUBLIC ? 'Public' : 'Internal'}</span>
-              {#if edition.format !== 'html'}<span class="pages">{edition.pages} page{edition.pages === 1 ? '' : 's'}</span>{/if}
+              {#if edition.format === 'pdf'}<span class="pages">{edition.pages} page{edition.pages === 1 ? '' : 's'}</span>{/if}
             </div>
             <span class="file mono" title={edition.pdf_sha256 ? `SHA-256 ${edition.pdf_sha256}` : edition.file}>{edition.file}</span>
             {#if edition.address}<span class="file mono" title="The address it was made for">{edition.address}</span>{/if}
@@ -142,5 +165,5 @@
   .said[data-state='missing'] { color: var(--warn); }
   .mono { font-family: var(--font-mono); }
   .actions { display: flex; justify-content: flex-end; margin-top: 14px; }
-  .format[data-format='wordpress'] { color: var(--accent); }
+  .format[data-format='wordpress'], .format[data-format='github'] { color: var(--accent); }
 </style>

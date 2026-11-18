@@ -6,7 +6,7 @@ vi.mock('../api.js', () => ({ api: { get, post } }));
 const {
   CHECK_SAID, checkEdition, editionDay, editionOf, editionOfAll, keepEdition, listEditions, readEdition, reloadEditions, showEdition,
 } = await import('./editions.svelte.js');
-const { readListed } = await import('./editions.svelte.js');
+const { CHECK_SAID_PAGE, readListed } = await import('./editions.svelte.js');
 
 /** A storage that keeps what it is given, like a browser's. */
 function memory() {
@@ -88,6 +88,28 @@ describe('the record of editions', () => {
     expect(readListed(RECORD)).toEqual(readEdition(RECORD));
     get.mockResolvedValue({ editions: [draft, RECORD, { ...draft, site: 'ftp://x' }] });
     expect((await listEditions('c1', 'n1')).map((edition) => edition.format)).toEqual(['wordpress', 'pdf']);
+  });
+
+  it('lists a page published to GitHub Pages by its address, repository and commit', async () => {
+    const page = { at: RECORD.at, edition: 'public', format: 'github', file: 'port-strike',
+      address: 'https://octo.github.io/articles/port-strike/', repository: 'octo/articles', branch: 'main',
+      path: 'port-strike', commit: 'c'.repeat(40), sha256: 'a'.repeat(64), text_sha256: 'b'.repeat(64) };
+    expect(readListed(page)).toEqual({
+      at: RECORD.at, edition: 'public', format: 'github', file: 'port-strike', folder: '', pages: 0,
+      pdf_sha256: 'a'.repeat(64), text_sha256: 'b'.repeat(64), address: page.address, repository: 'octo/articles',
+      commit: 'c'.repeat(40),
+    });
+    expect(readListed({ ...page, address: 'javascript:alert(1)' })).toBeNull();
+    expect(readListed({ ...page, address: 'http://octo.github.io/a/' })).toBeNull();
+    expect(readListed({ ...page, commit: 'zz' })).toBeNull();
+    expect(readListed({ ...page, repository: 'octo/../x' })).toBeNull();
+    expect(readListed({ ...page, edition: 'internal' })).toBeNull();
+    // Check asks the repository through the same route, by when it was published and its short name
+    post.mockResolvedValue({ state: 'unchanged' });
+    expect(await checkEdition('c1', 'n1', readListed(page))).toBe('unchanged');
+    expect(post).toHaveBeenLastCalledWith('/api/cases/c1/notes/n1/editions/check', { at: RECORD.at, file: 'port-strike', folder: '' });
+    expect(Object.values(CHECK_SAID_PAGE)).toEqual(['Unchanged since it was published',
+      'The page on GitHub is not the one Azimut published', 'Page missing from the repository']);
   });
 
   it('checks or shows one by when it was written and its file', async () => {

@@ -7114,7 +7114,12 @@ note, fifty at most, and travels in a bundle. A WordPress draft is listed too, o
 post however often it was sent (`format: wordpress`, the site, the post, its edit and
 preview links, the pictures it uploaded), *Draft on example.org* with **Open in
 WordPress** in place of *Show* and *Check*; a record whose site or links do not read as
-web addresses is dropped when read.
+web addresses is dropped when read. A page published to GitHub Pages is listed once per
+publish (`format: github`: the address, the repository, the branch, the folder, the commit
+and the page's SHA-256), its address and *repository · commit* under the day, with **Open**
+(the address, in a new tab) and **Check**, which reads the page back from the repository
+on its press and says *Unchanged since it was published*, *The page on GitHub is not the
+one Azimut published* or *Page missing from the repository*.
 
 **The HTML file, on the server's side.** `POST /notes/html` writes one HTML file per
 note beside its PDFs, named the same with `.html`, in the edition asked for, and keeps it
@@ -7203,6 +7208,31 @@ the description on the report's paper under its accent. `POST /notes/web` writes
 characters at most; one note at a time with an address), records it with `format: web`,
 the page's SHA-256 and the address, and `POST /notes/pdf/check` with `format: web` says
 its weight and, kind `address`, when no address was given.
+
+**Publish to GitHub Pages.** Beside *Export web folder*, for one note, **Publish to GitHub
+Pages** puts the folder online in the analyst's own repository, on their press only
+(SPEC §8's one exception to no auto-posting). With GitHub set up in Settings ›
+Publishing, the address field is the site's own address, read on this machine
+(`https://octo.github.io/articles/`, or the custom domain Pages last gave), followed by a
+**short name** the analyst can change (lower case, digits, hyphens and underscores; said
+under the field and holding both buttons back when wrong). It starts as the last part of
+the address the note was last given, else its title, and Export web folder writes the same
+page, so Publish is the primary button. A press builds the folder for that address (so X
+draws its picture card), leaves out `HOW-TO-PUBLISH.md`, and commits it to the repository
+as **one commit**, *Publish <note title>*, authored by the token's own account: the
+folder `<short-name>/` made whole, so a file the new build no longer has is gone, every
+other folder kept, `.nojekyll` at the root Pages serves, files the earlier copy already
+holds named rather than sent again. A folder of that name that Azimut did not make, or a
+file, is refused. The dialog then stays on *Published to octo/articles. GitHub is building
+the page…* and asks after the build every 5 seconds for at most 150, ending on **Live at
+<address>** with **Open** and **Copy link**, or *Published; GitHub is still building the
+page.*, or GitHub's own words when the build failed. Publishing the same note again
+replaces its page; git keeps every earlier version. When the repository is missing or
+Pages is off, the press writes nothing and the dialog offers **Create the repository** or
+**Turn on Pages**, each saying what it does; a token that may not do it is told the way
+on github.com. While GitHub is not set up, the press shows how to connect it and a way to
+Settings › Publishing. `POST /notes/{id}/github` does it (`engine/githubpages.py`), and
+`POST /api/publishing/github/build` answers the watch.
 
 **Maps.** `/` › *Interactive map* asks what a map shows: some of the case's layers, or one
 of its Map plates (its layers as it draws them, its days, its steps and how each frames the
@@ -7600,6 +7630,26 @@ no WordPress at the address, http, a timeout, an account below Author); it is th
 only network call, on its press. **Forget** takes the three away. *How to connect a site*
 says each field and where WordPress shows it, open while something is missing; the export
 dialog shows the same steps (`lib/wordpressSetup.js`).
+
+**GitHub Pages.** The group after it sets where a note's web folder is published:
+**Account** (the username or the organisation), **Repository** (`articles` by default),
+**Branch** (`main`) and **Token**, a fine-grained personal access token. The three names
+save when a field is left, are checked as GitHub names them, and travel in the settings
+backup; the token goes up once, is kept in `publishing.json` with the WordPress password
+(owner-only, never in a backup) and never comes back (*Kept on this computer, ending wxyz*).
+**Test connection** says who the token signs in as and where the site is served (*Signed in
+as octo. octo/articles is served at https://octo.github.io/articles/*), what to mind (Pages
+serving another branch, a workflow-built site, a private repository whose site is still
+public), or one sentence on what went wrong; when the repository is missing or Pages is
+off, it offers **Create the repository** (public, with a README; it needs a token on all
+repositories with Administration, else the two steps on github.com are shown) or **Turn on
+Pages** (the branch from its root; GitHub asks Administration for it, else the way through
+the repository's Settings › Pages is shown). **Forget** takes the account and the token
+away. *How to set up GitHub Pages*, open while something is missing, says it is free and
+public, how to make the repository, and how to make a token limited to that one
+repository with Contents and Pages set to Read and write, with a link to GitHub's token
+page with both picked (`lib/githubPagesSetup.js`, which the folder's own how-to shares).
+Every call goes to api.github.com, on a press only.
 
 **The logo editor.** A picked logo opens *Edit logo* before it is saved, and **Edit…**
 opens it again. It cuts the logo to a rectangle, rounded corners or a circle, draws a

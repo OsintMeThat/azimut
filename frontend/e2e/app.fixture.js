@@ -1158,9 +1158,12 @@ export async function installAppFixture(page, options = {}) {
       return route.fulfill({ status: 404, body: '' });
     }
     if (path === '/api/settings') return json(route, fixtureSettings);
-    // Settings › Publishing reads its WordPress site from this machine: none set here
+    // Settings › Publishing reads its WordPress site and its GitHub Pages site from this machine: none set here
     if (path === '/api/publishing') {
-      return json(route, { wordpress: options.wordpress ?? { site: '', user: '', password: { set: false, hint: '' } } });
+      return json(route, {
+        wordpress: options.wordpress ?? { site: '', user: '', password: { set: false, hint: '' } },
+        github: options.github ?? { account: '', repo: 'articles', branch: 'main', site: '', base: '', token: { set: false, hint: '' } },
+      });
     }
     if (path === '/api/settings/prefs' && request.method() === 'PUT') {
       const payload = request.postDataJSON();
