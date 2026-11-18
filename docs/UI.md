@@ -7059,7 +7059,9 @@ weigh, past the 25 MB it aims under in amber, lists the clips that go out as a p
 a link rather than inside the file, and lists the points where a filmer stood, which a
 public file keeps to the metre unless *Round them to about 150 m in this file* is ticked
 (the note is never rewritten). A public page after an earlier public edition asks
-**What changed**, a line printed at its end with the earlier editions. The Page pane has
+**What changed**, a line printed at its end under *Corrections* with the earlier editions
+that said one; an edition made again with nothing said stays in *Editions* and is never
+shown to a reader as a correction. The Page pane has
 the same switch: HTML draws the page an export would write, in a frame that runs its own
 script and reaches nothing of the app, keeping its place between drafts; a template shows
 its pages.
@@ -7102,10 +7104,20 @@ lighter copy, written nowhere and sandboxed. Inside `::: steps` and `::: story` 
 picture opens a step; the PDF prints both as written, each picture then its words.
 
 **The HTML page, for its reader.** It reads like a long investigation online, in the
-note's look: the cover with its TLP label in FIRST's colours, the contents beside the
-text on a wide screen (a bar at the top on a phone) marking the chapter being read, the
-*Limits* box and the sources, about 68 characters to a line, and pictures wider than the
-text with their caption and credit under them. A press on a picture opens it large, to
+note's look, on one axis down the middle of the window: the cover centred with its TLP
+label in FIRST's colours, a column of about 66 characters justified and hyphenated from a
+tablet up (left-aligned on a phone, as are lists, captions and table cells), and
+pictures, pairs, steps, tables and diagrams breaking out to one wide width on both sides,
+each with its caption and credit on its own edges; a tall picture is held to the window's
+height, and a table as wide as it needs is centred, sliding in its own frame past that
+width, its header kept. The contents, marking the part being read with the *Limits* box
+and the sources, stand in the left margin on a screen wide enough to keep the text
+centred beside them, stopping above the footer, and fold elsewhere into a bar with the
+title, the part being read and a *Contents* sheet; a thin line along the top says how far
+the page has been read. A link to a part of the page (a contents entry, a `[n]`, a row
+code) is followed by the page's own script, which scrolls there, moves the keyboard there
+and writes the address only in a file, so the Page pane's frame never leaves for a blank
+page. A press on a picture opens it large, to
 zoom and move, its credit kept with it; Escape closes it. A Compare pair is a slider
 between its two dated, credited sides; a timecode plays its passage of the clip; a table
 of more than twelve rows can be filtered, any table sorted by a column, and a code such
@@ -7117,6 +7129,21 @@ moves in on the part a step names (`{zoom=x,y,w,h}`). A picture marked `{graphic
 blurred until pressed: a veil for the reader, not a redaction, as the picture is in the
 file whole. Without script, on a narrow screen, printed or with motion turned down, the
 page reads whole, picture then words; printed, the TLP label tops every page.
+
+**Story.** The Look's *Web page* row lays the HTML page out as an **Article** (the
+default) or a **Story**, for the Page pane's HTML view and every HTML export; the PDF is
+the same either way. A story opens on the whole window: the cover's picture, else the
+first picture in the note that came from somewhere (it has a credit), under a dark
+gradient with the title over it and its credit kept, or a large title alone when there is
+none. Then each picture and the words after it, up to the next picture, heading, table or
+diagram, are a scene: the picture is held still on a stage while its words go by in cards
+beside it (over its lower part on a phone), and the next scene's picture fades in over it.
+Pictures that follow one another share a stage; one with no words after it stays on until
+the next. Words with no picture before them, tables, code, diagrams, the sources and the
+corrections read as in the article, and the contents are the bar at every width.
+`::: steps` and `::: story` blocks, internal boxes, the lightbox and the pair's slider work
+as in the article. Without script, printed or with motion turned down, a story reads top to
+bottom as the article does.
 
 **To Post.** In the open note's ⋯, kept out of the header, *To Post* opens Post on a Free post thread made of the
 note's public edition, or of the stretch selected in it, which its title then says;
@@ -7137,7 +7164,7 @@ posts and cuts a long text itself.
 **How it prints.** **Look** sets the note's style, kept beside the note (the note
 record's `look`, `notes.case_look` for the case notes) and never in its Markdown. Its
 panel shows one tab at a time, *Style* (the style, then contents, numbered headings and
-sources as three switches), *Text*, *Page* (paper, accent, marking), *Cover* and *Header
+sources as three switches, and the web page's layout), *Text*, *Page* (paper, accent, marking), *Cover* and *Header
 & footer*, a dot on each tab holding something set, and reopens on the last tab used:
 
 - **Plain**, with nothing else set, is the document the Notebook always printed.
@@ -7195,7 +7222,10 @@ Literata (a book face for long write-ups) or IBM Plex Sans (a clean face for bri
 and the size, Smaller, Normal or Larger, which headings, tables and captions follow.
 A letter a face lacks prints in the Noto face of its script. Templates carry both.
 Its **Sources** row, *List sources at the end*, is on for Report, Brief and Journal and
-off for Plain until set; templates carry it too.
+off for Plain until set; templates carry it too. Its **Web page** row, *Article* or
+*Story*, lays out the HTML page only (see *Story* above); it is kept only once set to
+Story, so a look that never used it reads as an older Azimut wrote it, and templates
+carry it.
 
 The PDF keeps what a reader needs to check the work. A chip naming a record with a
 web address (a bookmark's page, an account's profile, a file's source; an archived
