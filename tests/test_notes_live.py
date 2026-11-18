@@ -21,8 +21,11 @@ from azimut.engine import notes_html, notes_web
 from azimut.engine import notes_markdown as md
 from azimut.workspace import Case
 
-from test_notes_maps import _case, _ground, _markers, _tracked_line, _tags
+from test_notes_maps import _case, _ground, _markers, _tags, _tracked_line
+from test_notes_maps import tiles_here  # noqa: F401  (the fixture: every tile from nowhere)
 from test_notes_pdf import exports_of
+
+pytestmark = pytest.mark.usefixtures("tiles_here")
 
 #: MapLibre's build as the frontend leaves it, made small.
 VENDOR = {
@@ -79,7 +82,7 @@ def _said(page: bytes) -> dict:
 # -- the folder ------------------------------------------------------------------------------------
 
 
-def test_a_folder_with_a_map_carries_maplibre_its_licence_and_the_readers_live_part(client, tiles_here, vendor):
+def test_a_folder_with_a_map_carries_maplibre_its_licence_and_the_readers_live_part(client, vendor):
     _, case, note = _map_note(client)
     built = notes_web.build(case, note)
     files = built.files
@@ -103,7 +106,7 @@ def test_a_folder_with_a_map_carries_maplibre_its_licence_and_the_readers_live_p
     assert not built.warnings or notes_web.LIVE_MISSING not in built.warnings
 
 
-def test_only_a_page_with_a_live_map_widens_its_policy_and_only_to_openfreemap(client, tiles_here, vendor):
+def test_only_a_page_with_a_live_map_widens_its_policy_and_only_to_openfreemap(client, vendor):
     _, case, note = _map_note(client)
     live = notes_web.build(case, note).files["index.html"]
     assert _policy(live) == LIVE_POLICY
@@ -119,7 +122,7 @@ def test_only_a_page_with_a_live_map_widens_its_policy_and_only_to_openfreemap(c
     assert notes_web.LIVE_LICENSE not in built.files and b'id="az-gl"' not in built.files["index.html"]
 
 
-def test_maps_kept_offline_are_the_html_reports_and_reach_nothing(client, tiles_here, vendor):
+def test_maps_kept_offline_are_the_html_reports_and_reach_nothing(client, vendor):
     _, case, note = _map_note(client)
     built = notes_web.build(case, note, live=False)
     page = built.files["index.html"]
@@ -133,7 +136,7 @@ def test_maps_kept_offline_are_the_html_reports_and_reach_nothing(client, tiles_
     assert notes_web.LIVE_MISSING not in built.warnings
 
 
-def test_a_copy_built_without_maplibre_keeps_its_maps_offline_and_says_so_once(client, tiles_here, unbuilt):
+def test_a_copy_built_without_maplibre_keeps_its_maps_offline_and_says_so_once(client, unbuilt):
     _, case, note = _map_note(client, maps=2)
     assert notes_web.live_maps() is None
     built = notes_web.build(case, note)
@@ -152,7 +155,7 @@ def test_a_vendor_folder_not_whole_is_no_vendor_folder(vendor):
     assert notes_web.live_maps() is None
 
 
-def test_the_single_html_file_never_goes_live(client, tiles_here, vendor):
+def test_the_single_html_file_never_goes_live(client, vendor):
     _, case, note = _map_note(client)
     found = md.read_note(case, note)
     assert found is not None
@@ -164,7 +167,7 @@ def test_the_single_html_file_never_goes_live(client, tiles_here, vendor):
 # -- the routes ------------------------------------------------------------------------------------
 
 
-def test_the_check_says_whether_the_folders_maps_go_live(client, tiles_here, vendor):
+def test_the_check_says_whether_the_folders_maps_go_live(client, vendor):
     cid, case, note = _map_note(client)
     route = f"/api/cases/{cid}/notes/pdf/check"
     web = client.post(route, json={"notes": [note], "format": "web"}).json()["notes"][0]
@@ -175,14 +178,14 @@ def test_the_check_says_whether_the_folders_maps_go_live(client, tiles_here, ven
     assert client.post(route, json={"notes": [note], "format": "html"}).json()["notes"][0]["live"] is False
 
 
-def test_the_check_says_nothing_goes_live_in_a_copy_built_without_maplibre(client, tiles_here, unbuilt):
+def test_the_check_says_nothing_goes_live_in_a_copy_built_without_maplibre(client, unbuilt):
     cid, _, note = _map_note(client)
     said = client.post(f"/api/cases/{cid}/notes/pdf/check", json={"notes": [note], "format": "web"}).json()["notes"][0]
     assert said["live"] is False
     assert {"text": notes_web.LIVE_MISSING, "line": None, "kind": "other"} in said["warnings"]
 
 
-def test_the_export_keeps_the_maps_offline_when_asked(client, tiles_here, vendor):
+def test_the_export_keeps_the_maps_offline_when_asked(client, vendor):
     cid, _, note = _map_note(client)
     route = f"/api/cases/{cid}/notes/web"
     live = client.post(route, json={"notes": [note]})

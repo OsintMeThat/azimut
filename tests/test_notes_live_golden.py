@@ -97,7 +97,10 @@ def fixed_map(monkeypatch):
 def test_the_single_file_and_an_offline_folder_are_as_they_were(tmp_path, fixed_map, name):
     kind, look = name.split("-")
     page = _render(tmp_path, LOOKS[look], folder=kind == "folder")
-    assert "openfreemap" not in page and "maplibre" not in page.lower() and 'id="az-gl"' not in page
+    # nothing of a live map: no base map host, no MapLibre file and nothing naming one; the reader's
+    # own script may say where a live map would come from, and is held by its own tests
+    markup = re.sub(r"<script>.*?</script>", "", page, flags=re.S)
+    assert "openfreemap" not in markup and "maplibre" not in markup.lower() and 'id="az-gl"' not in markup
     found = _fingerprint(page)
     if found != GOLDEN[name]:
         kept = tmp_path / f"{name}.html"

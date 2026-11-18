@@ -127,8 +127,9 @@ test('a web folder’s map goes live online, over the base map, and its timeline
   await expect.poll(lines).toEqual(['az-line-halo:l0f0s1', 'az-line:l0f0s1', 'az-past-line:l0f0']);
   await expect.poll(() => drawn(['az-points'])).toEqual([]);
   await expect(figure.locator('.az-gl-over .az-f')).toHaveCount(0);
-  // a press on the line opens the reader's own card
+  // a press on the line opens the reader's own card (the page scrolls smoothly: the map is held still first)
   const at = await page.evaluate(() => {
+    document.querySelector('figure.az-map').scrollIntoView({ block: 'start', behavior: 'instant' });
     const { map } = document.querySelector('figure.az-map').azLive;
     const point = map.project([43.51, 12.74]);
     const box = map.getCanvas().getBoundingClientRect();
