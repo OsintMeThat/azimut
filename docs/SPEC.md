@@ -329,7 +329,9 @@ stops making sense.
   downloader proxies are not because they re-encode media and expose targets.
 - No auto-posting. Every post ends on the site's own Post button, pressed by the
   analyst, and no API key posts for them (owner, 2026-11-10). Core features never
-  require a paid API.
+  require a paid API. One exception, for the analyst's own site: a report page goes
+  to their GitHub Pages on their press in Azimut, with their token (owner,
+  2026-11-18). A WordPress article stays a draft for WordPress's own Publish button.
 
 ## 9. Architecture
 
