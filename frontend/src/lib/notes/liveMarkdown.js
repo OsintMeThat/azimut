@@ -561,20 +561,6 @@ registerBlock({
 });
 
 registerBlock({
-  name: 'html',
-  // any other HTML or comment: read after every other kind of comment
-  node: ['HTMLBlock', 'CommentBlock'],
-  fallback: true,
-  read: (node) => ({ from: node.from, to: node.to }),
-  widget: blockWidget,
-  atomic: true,
-  source: (ctx, found) => {
-    ctx.line(ctx.state.doc.lineAt(found.from).from, 'cm-code-line');
-    return true;
-  },
-});
-
-registerBlock({
   name: 'include',
   // a chapter is its line, as the PDF reads it: whatever is around it
   line: (line, ctx) => {
