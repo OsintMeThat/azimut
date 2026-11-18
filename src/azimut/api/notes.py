@@ -54,7 +54,8 @@ put on the web (`engine/notes_web.py`), under `web/` in the same folder, its pag
 SHA-256 kept in the record of editions with `format: "web"` and the address it was
 given. The address is checked here, at the edge: https, no credentials, a bounded
 length. The check is `/notes/pdf/check` with `format: "web"`, which also says when
-no address was given, since X then shows no picture card.
+no address was given, since X then shows no picture card, and whether its maps go live
+over OpenFreeMap once online, which `offline_maps` on the export turns down.
 
 **WordPress.** `/notes/{id}/wordpress` sends the note's public edition to the site set
 in Settings › Publishing as a draft (`engine/notes_wordpress.py`), its diagrams as the
@@ -251,8 +252,9 @@ class WebExportIn(NoteSelection):
     """Which notes to write as web folders, always in the public edition.
 
     ``base_url`` is the address the folder will live at, which makes its link card
-    whole; it names one note's folder, so it goes with one note at a time. The rest is
-    the HTML export's own.
+    whole; it names one note's folder, so it goes with one note at a time.
+    ``offline_maps`` keeps its maps as the HTML report draws them rather than live over
+    OpenFreeMap once the folder is online. The rest is the HTML export's own.
     """
 
     edition: Literal["public"] = "public"
@@ -260,6 +262,7 @@ class WebExportIn(NoteSelection):
     diagrams: dict[str, str] = Field(default_factory=dict)
     round_pov: bool = False
     changes: str = Field(default="", max_length=MAX_CHANGES)
+    offline_maps: bool = False
 
 
 class ExportIn(EditionSelection):
@@ -896,10 +899,12 @@ def _check_html(
     encoded as the export encodes it; the clips that go as a Watch link and the points
     of view it shows, each with its line; and how many public editions came before.
     With ``web`` (the address given, or "") it checks the note's web folder instead,
-    which weighs its files and says when it has no address (kind `address`)."""
+    which weighs its files and says when it has no address (kind `address`), and
+    whether its maps go live online (`live`), which the dialog says and lets the
+    analyst turn down."""
     title, text = _note_source(case, note_id)
     answer: dict[str, Any] = {"note": note_id, "title": title, "warnings": [], "internal": 0, "weight": 0,
-                              "links": [], "pov": [], "earlier": 0}
+                              "links": [], "pov": [], "earlier": 0, "live": False}
     rendered: html_engine.RenderedHtml | web_engine.WebBuild
     try:
         if web is not None:
@@ -927,6 +932,7 @@ def _check_html(
         pov=[{"text": said[:MAX_WARNING_CHARS], "line": line} for said, line in rendered.pov],
         earlier=sum(1 for record in _read_editions(case, note_id)
                     if record["edition"] == notes_markdown.PUBLIC and record.get("format") != WORDPRESS),
+        live=rendered.live,
     )
     return answer
 
@@ -1095,6 +1101,7 @@ def export_web(case_id: str, body: WebExportIn) -> dict[str, Any]:
             made = web_engine.build(
                 case, note_id, base_url=where, diagrams=diagrams, round_pov=body.round_pov, changes=changes,
                 earlier=_read_editions(case, note_id), homonym=len(peers.get(title.casefold(), [])) >= 2, now=now,
+                live=not body.offline_maps,
             )
         except (html_engine.NotesHtmlError, web_engine.NotesWebError) as exc:
             warnings.append(f"{title}: {exc}")

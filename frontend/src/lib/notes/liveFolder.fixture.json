@@ -1,0 +1,5 @@
+{
+  "csp": "default-src 'none'; img-src 'self' https://tiles.openfreemap.org; media-src 'self'; font-src 'self'; style-src 'self' 'unsafe-inline'; script-src 'self'; base-uri 'none'; form-action 'none'; connect-src 'self' https://tiles.openfreemap.org",
+  "style": "https://tiles.openfreemap.org/styles/liberty",
+  "host": "https://tiles.openfreemap.org"
+}

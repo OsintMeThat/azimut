@@ -1,0 +1,68 @@
+/*
+ * Azimut reader, its live maps: added to the reader's style sheet only in a web folder whose
+ * page holds a map (engine/notes_html.py). The live map lies over the drawing, the same size,
+ * unseen until it has drawn, then fades in; printed, the drawing shows.
+ */
+.az-gl {
+  position: absolute; z-index: 1; top: 0; left: 0; width: 100%; aspect-ratio: var(--r, 1.6); overflow: hidden; border-radius: 3px;
+  background: #20252b; opacity: 0; visibility: hidden; transition: opacity .6s var(--ease), visibility 0s .6s; isolation: isolate;
+  container-type: inline-size;
+}
+.az-gl.az-on { opacity: 1; visibility: visible; transition: opacity .6s var(--ease); }
+/* MapLibre's sheet comes after this one and sets its map relative: held to the stage's box */
+.az-gl > .az-gl-map { position: absolute; inset: 0; }
+.az-gl .maplibregl-canvas { outline: none; }
+.az-gl .maplibregl-canvas-container:focus-visible, .az-gl .maplibregl-canvas:focus-visible { outline: 2px solid var(--az-accent); outline-offset: -2px; }
+/* the marks spread apart, their leaders and names, over the map; only a mark or a count takes a press */
+.az-gl-over { z-index: 1; pointer-events: none; }
+.az-gl-over :is(.az-f, .az-bubble) { pointer-events: auto; }
+/* one key a feature for the keyboard, seen only as a ring where it is when it has the focus */
+.az-gl-keys { position: absolute; inset: 0; z-index: 2; overflow: hidden; pointer-events: none; }
+.az-gl-key { position: absolute; top: -17px; left: -17px; width: 34px; height: 34px; padding: 0; border: 0; border-radius: 50%; background: none; opacity: 0; pointer-events: none; }
+.az-gl-key:focus-visible { opacity: 1; outline: none; box-shadow: 0 0 0 2.5px #fff, 0 0 0 4.5px var(--az-accent), 0 0 14px rgba(0, 0, 0, .55); }
+/* the base the map is drawn on */
+.az-gl-base {
+  position: absolute; z-index: 3; top: .75rem; left: 3.6rem; display: flex; padding: 2px; border-radius: 6px;
+  background: rgba(16, 18, 22, .78); box-shadow: 0 6px 18px -8px rgba(0, 0, 0, .6); backdrop-filter: blur(8px);
+}
+.az-gl-base button {
+  height: 2rem; padding: 0 .75rem; border: 0; border-radius: 4px; background: none; color: rgba(242, 243, 245, .82);
+  font: 600 .75rem/1 var(--ui); letter-spacing: .01em; white-space: nowrap; cursor: pointer;
+}
+.az-gl-base button:hover { color: #fff; background: rgba(255, 255, 255, .1); }
+.az-gl-base button[aria-pressed="true"] { color: #14161a; background: #f2f3f5; }
+.az-gl-base button:focus-visible { outline: 2px solid #fff; outline-offset: 1px; }
+/* what the base owes, in the corner */
+.az-gl-credit {
+  position: absolute; z-index: 3; right: 0; bottom: 0; max-width: calc(100% - 7rem); margin: 0; padding: .2rem .5rem; border-top-left-radius: 4px;
+  background: rgba(255, 255, 255, .78); color: #2a2f36; font: 500 .6875rem/1.35 var(--ui); text-align: right;
+}
+.az-gl[data-base="satellite"] .az-gl-credit { background: rgba(16, 18, 22, .66); color: rgba(255, 255, 255, .86); }
+/* held over the story's own link colour, which would leave them pale on the light band */
+.az-figure > .az-map-frame > .az-gl .az-gl-credit a:not(.az-time) { color: inherit; text-decoration: none; }
+.az-figure > .az-map-frame > .az-gl .az-gl-credit a:not(.az-time):hover { text-decoration: underline; }
+.az-gl[data-base="map"] .az-map-scale { border-color: rgba(30, 34, 40, .85); color: #1e2228; text-shadow: 0 0 2px #fff, 0 0 3px #fff; }
+.az-gl .az-map-scale { z-index: 3; }
+/* MapLibre's word for a wheel or a finger the map leaves to the page, said as the drawing says it */
+.az-gl .maplibregl-cooperative-gesture-screen {
+  inset: 50% auto auto 50%; z-index: 4; display: block; width: auto; height: auto; padding: .6rem 1rem; border-radius: 999px; transform: translate(-50%, -50%);
+  background: rgba(12, 13, 15, .82); color: #fff; font: 600 .875rem/1.2 var(--ui); text-align: center; pointer-events: none;
+}
+@media (max-width: 47.99rem) {
+  .az-gl { border-radius: 0; }
+  .az-gl-base { left: auto; right: .5rem; top: .5rem; }
+  .az-gl-base button { height: 1.75rem; padding: 0 .55rem; font-size: .6875rem; }
+  .az-gl .az-map-tools { top: .5rem; left: .5rem; }
+  .az-gl .az-map-tools button { width: 2rem; height: 2rem; }
+  .az-gl-credit { max-width: calc(100% - 5rem); padding: .15rem .4rem; font-size: .5625rem; }
+}
+/* a map too narrow to say it all on one line leaves the imagery to the figure's caption, as the drawing does */
+@container (max-width: 62rem) {
+  .az-gl-imagery, .az-gl-imagery + .az-gl-dot { display: none; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .az-gl, .az-gl.az-on { transition: none; }
+}
+@media print {
+  .az-gl { display: none !important; }
+}
