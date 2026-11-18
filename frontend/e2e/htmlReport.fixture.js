@@ -57,6 +57,7 @@ export function reportHtml(pictures) {
 <p class="az-standfirst">What open sources show of the column hit on 24 October 2025</p>
 <p class="az-dateline"><time class="az-date" datetime="2025-10-28">28 October 2025</time></p>
 </header>
+<div class="az-page">
 <nav class="az-contents" aria-label="Contents"><ol>
 <li><a href="#the-footage"><span class="az-num">1</span> The footage</a></li>
 <li><a href="#the-register"><span class="az-num">2</span> The register</a></li>
@@ -104,6 +105,7 @@ ${step(3, s3, '25 Oct 2025', 'the wrecks pushed aside')}
 <section class="az-sources" id="sources" aria-labelledby="sources-title"><h2 id="sources-title">Sources</h2><ol>
 <li id="src-1" data-kind="post"><span class="az-source-label">Column hit near Wadi Sahm</span> <span class="az-source-details">Video · x.com · posted 24 October 2025</span><span class="az-source-links"><a class="az-source-address" href="https://x.com/sahm_watch/status/1" target="_blank" rel="noopener noreferrer">https://x.com/sahm_watch/status/1</a></span></li>
 </ol></section>
+</div>
 <footer class="az-footer"><p><span class="az-edition">Public edition</span> · <time datetime="2025-10-28">28 October 2025</time></p></footer>
 <script>${JS}</script>
 </body></html>`;

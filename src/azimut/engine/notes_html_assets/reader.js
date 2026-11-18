@@ -11,6 +11,7 @@
   const query = (text) => (window.matchMedia ? window.matchMedia(text) : { matches: false });
   const reduced = query('(prefers-reduced-motion: reduce)');
   const wide = query('(min-width: 64rem)');
+  const roomy = query('(min-width: 85rem)');
   const motion = () => (reduced.matches ? 'auto' : 'smooth');
   const all = (selector, within = doc) => [...within.querySelectorAll(selector)];
   const words = (node) => (node ? node.textContent.replace(/\s+/g, ' ').trim() : '');
@@ -27,8 +28,31 @@
     if (text != null) node.textContent = text;
     return node;
   }
+  /* what follows the reading: one pass per frame while the page scrolls, and at once on a resize */
+  const watchers = [];
+  let queued = false;
+  const each = () => { for (const watcher of watchers) watcher(); };
+  window.addEventListener('scroll', () => {
+    if (queued) return;
+    queued = true;
+    requestAnimationFrame(() => { queued = false; each(); });
+  }, { passive: true });
+  window.addEventListener('resize', each);
 
-  /* the contents follow the reading, and fold into a bar on a narrow screen */
+  /* a thin line at the top says how far the page has been read */
+  function progress() {
+    const line = make('div', { class: 'az-progress', 'aria-hidden': 'true' });
+    doc.body.prepend(line);
+    const read = () => {
+      const room = root.scrollHeight - window.innerHeight;
+      line.style.setProperty('--read', room > 0 ? Math.min(1, Math.max(0, window.scrollY / room)).toFixed(4) : '0');
+    };
+    watchers.push(read);
+    read();
+  }
+
+  /* the contents follow the reading: a rail in the margin with room for it, else a bar at the top
+     with the title, the part being read and the list a press away */
   function contents() {
     const nav = doc.querySelector('.az-contents');
     if (!nav) return;
@@ -36,13 +60,22 @@
     const marks = all('a[href^="#"]', nav).map((link) => ({ link, target: byHash(link.getAttribute('href')) })).filter((mark) => mark.target);
     const toggle = make('button', { type: 'button', class: 'az-contents-toggle', 'aria-expanded': 'false' });
     const now = make('span', { class: 'az-contents-now' });
-    toggle.append(make('span', { class: 'az-contents-word' }, 'Contents'), now);
+    toggle.append(make('span', { class: 'az-bar-title' }, words(doc.querySelector('.az-title')) || doc.title), now,
+      make('span', { class: 'az-contents-word' }, 'Contents'));
     if (list) toggle.setAttribute('aria-controls', idOf(list));
     nav.prepend(toggle);
     const open = (on) => {
       nav.classList.toggle('az-open', on);
       toggle.setAttribute('aria-expanded', String(on));
     };
+    const barred = () => !roomy.matches;
+    const settle = () => {
+      nav.classList.toggle('az-bar', barred());
+      root.classList.toggle('az-barred', barred());
+      if (!barred()) open(false);
+    };
+    roomy.addEventListener?.('change', settle);
+    settle();
     toggle.addEventListener('click', () => open(!nav.classList.contains('az-open')));
     nav.addEventListener('click', (event) => { if (event.target.closest('a')) open(false); });
     nav.addEventListener('keydown', (event) => {
@@ -59,18 +92,13 @@
       if (!found) return;
       found.link.setAttribute('aria-current', 'true');
       now.textContent = words(found.link);
-      // the link stays in sight in a long list, without moving the page
-      const box = nav.getBoundingClientRect();
+      // the link stays in sight in a long rail, without moving the page
+      if (barred() || !list) return;
+      const box = list.getBoundingClientRect();
       const at = found.link.getBoundingClientRect();
-      if (wide.matches && (at.top < box.top || at.bottom > box.bottom)) nav.scrollTop += at.top - box.top - box.height / 3;
+      if (at.top < box.top + 32 || at.bottom > box.bottom - 32) list.scrollTop += at.top - box.top - box.height / 3;
     };
-    let waiting = false;
-    window.addEventListener('scroll', () => {
-      if (waiting) return;
-      waiting = true;
-      requestAnimationFrame(() => { waiting = false; mark(); });
-    }, { passive: true });
-    window.addEventListener('resize', mark);
+    watchers.push(mark);
     mark();
   }
 
@@ -323,7 +351,10 @@
       const field = make('input', { type: 'search', class: 'az-filter', placeholder: 'Filter the rows', 'aria-label': 'Filter the rows of this table' });
       const said = make('span', { 'aria-live': 'polite' }, `${rows.length} rows`);
       tools.append(field, said);
-      wrap.before(tools);
+      // the filter stands on the table's own edge: the two share a box as wide as the table
+      const block = make('div', { class: 'az-table-block' });
+      wrap.replaceWith(block);
+      block.append(tools, wrap);
       const texts = rows.map((row) => words(row).toLocaleLowerCase());
       field.addEventListener('input', () => {
         const wanted = field.value.trim().toLocaleLowerCase();
@@ -517,7 +548,6 @@
       if (!figures.length || !parts.length) continue;
       const figureOf = (step) => figures.find((figure) => figure.dataset.step === step?.dataset.step) || null;
       const imageOf = (figure) => figure?.querySelector('img');
-      let observer = null;
       let at = null;
       // where the reader is, quietly on each card: 2 / 4
       const counts = parts.map((part, index) => make('span', { class: 'az-story-count', 'aria-hidden': 'true' }, `${index + 1} / ${parts.length}`));
@@ -546,10 +576,8 @@
       }
       function live(on) {
         section.classList.toggle('az-live', on);
-        observer?.disconnect();
-        observer = null;
         at = null;
-        parts.forEach((part, index) => (on ? part.prepend(counts[index]) : counts[index].remove()));
+        parts.forEach((part, index) => counts[index] && (on ? part.prepend(counts[index]) : counts[index].remove()));
         if (!on) {
           for (const node of [...figures, ...parts]) {
             node.classList.remove('az-on');
@@ -559,17 +587,26 @@
           for (const figure of figures) if (imageOf(figure)) imageOf(figure).style.transform = '';
           return;
         }
-        observer = new IntersectionObserver((entries) => {
-          for (const entry of entries) if (entry.isIntersecting) show(entry.target);
-        }, { rootMargin: '-45% 0px -45% 0px' });
-        for (const part of parts) observer.observe(part);
         show(parts[0]);
+        follow();
       }
-      // live only with room, with motion and with an observer; anything else reads picture then words
-      const can = () => wide.matches && !reduced.matches && typeof IntersectionObserver === 'function';
+      // the step being read is the last whose top has passed the line, measured as the page
+      // scrolls: an observer's margins are not kept inside the Page pane's frame
+      function follow() {
+        if (!section.classList.contains('az-live')) return;
+        const box = section.getBoundingClientRect();
+        if (!box.height || box.bottom < 0 || box.top > window.innerHeight) return;
+        const line = window.innerHeight * 0.6;
+        let found = parts[0];
+        for (const part of parts) if (part.getBoundingClientRect().top <= line) found = part;
+        show(found);
+      }
+      // live only with room and with motion; anything else reads picture then words
+      const can = () => wide.matches && !reduced.matches;
       const settle = () => { if (can() !== section.classList.contains('az-live')) live(can()); };
       wide.addEventListener?.('change', settle);
       reduced.addEventListener?.('change', settle);
+      watchers.push(follow);
       live(can());
     }
   }
@@ -589,6 +626,8 @@
   function titles() {
     for (const heading of all('.az-title, .az-body h2, .az-body h3, .az-contents a')) keepWhole(heading, /(\S{1,24}-\S{1,24})/);
     for (const cell of all('.az-table td')) keepWhole(cell, /(\S{1,14}-\S{1,14})/);
+    // an address written out breaks anywhere, rather than leave a justified line stretched before it
+    for (const link of all('.az-body :is(p, li) a')) if (/^\S{28,}$/.test(words(link))) link.classList.add('az-long');
   }
 
   /* printed, every "How this was checked" is open */
@@ -606,7 +645,7 @@
   }
 
   function start() {
-    for (const part of [titles, contents, pictures, pairs, timecodes, tables, citations, steps, stories, printing, addresses]) part();
+    for (const part of [titles, progress, contents, pictures, pairs, timecodes, tables, citations, steps, stories, printing, addresses]) part();
   }
   if (doc.readyState === 'loading') doc.addEventListener('DOMContentLoaded', start, { once: true });
   else start();

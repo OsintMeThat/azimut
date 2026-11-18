@@ -191,8 +191,10 @@ def test_the_reader_assets_are_inlined_whole(report):
 
 def test_the_top_of_the_page_is_cover_then_contents_then_body(report):
     body = report["page"].one("body")
-    order = [node for node in body.children if node.tag in ("header", "nav", "main")]
-    assert [node.tag for node in order] == ["header", "nav", "main"]
+    assert [node.tag for node in body.children if node.tag in ("header", "div", "footer")] == ["header", "div", "footer"]
+    # the contents, the text and its end matter share one box, which the rail never leaves
+    box = body.one("div", "az-page")
+    assert [node.tag for node in box.children][:2] == ["nav", "main"]
     cover = body.one("header", "az-cover")
     assert cover.one(cls="az-tlp").attrs["data-tlp"] == "amber"
     assert "TLP:AMBER" in cover.one(cls="az-tlp").words()
@@ -384,9 +386,9 @@ def test_the_story_pairs_each_picture_with_its_words(report):
 
 def test_the_sources_corrections_and_footer_close_the_page(report):
     page = report["public_page"]
-    body = page.one("body")
-    tail = [node for node in body.children if node.tag in ("section", "footer")]
-    assert [sorted(node.classes)[0] for node in tail] == ["az-sources", "az-corrections", "az-footer"]
+    box = page.one("div", "az-page")
+    assert [sorted(node.classes)[0] for node in box.children if node.tag == "section"] == ["az-sources", "az-corrections"]
+    assert page.one("body").children[-2].tag == "footer" and page.one("body").children[-1].tag == "script"
     sources = page.one("section", "az-sources")
     assert sources.attrs["id"] == "sources"
     assert sources.find(cls="az-hash") and sources.find("a", "az-verify") and sources.find("a", "az-posted")
@@ -626,7 +628,8 @@ def test_a_plain_look_uses_the_readers_fonts_and_a_styled_one_brings_its_own(rep
 
 def test_a_written_width_and_alignment_reach_the_figure(report):
     figure = next(node for node in report["page"].find("figure", "az-figure") if "lead tank stops" in node.words())
-    assert figure.attrs["data-width"] == "70%" and figure.attrs["style"] == "--az-width:70%"
+    # the width written, then the picture's shape, in one style attribute
+    assert figure.attrs["data-width"] == "70%" and figure.attrs["style"] == "--az-width:70%;--r:1.7778"
     assert figure.attrs["data-align"] == "center"
 
 

@@ -439,8 +439,10 @@ class _Page:
         footer = self._footer(printed)
         contents = self._contents(bool(sources), bool(corrections))
         warning = f'<p class="az-graphic-warning" role="note">{_text(GRAPHIC_WARNING)}</p>\n' if self.graphic else ""
-        page = (f'{warning}{head}{contents}<main class="az-body" id="main">\n{body}</main>\n'
-                f"{sources}{corrections}{footer}")
+        # the contents, the text and its end matter share one box, which the contents
+        # rail stays inside: it never runs into the footer
+        page = (f'{warning}{head}<div class="az-page">\n{contents}<main class="az-body" id="main">\n{body}</main>\n'
+                f"{sources}{corrections}</div>\n{footer}")
         return self._assemble(title, page)
 
     def _assemble(self, title: str, page: str) -> bytes:
@@ -1211,7 +1213,7 @@ class _Page:
         alt = words or title or "Picture"
         if attrs.get("kind") == "video" or media_kind(path.name) == "video":
             return self._clip(path, relative, record, source, title, words, number,
-                              f'class="{classes}"{layout}{extra}')
+                              _one_style(f'class="{classes}"{layout}{extra}'))
         caption = self._caption(title, words)
         credit = self._credit(source, number)
         posted = _posted(source.posted) if source is not None and source.posted else ""
@@ -1233,9 +1235,10 @@ class _Page:
                 return _aside(MEDIA_UNAVAILABLE)
             uri, size = encoded
             shown = _zoom_button(_img(uri, size, alt), alt)
+            layout += _shape(size)
         proof = self._proof(record, source) if kind == "proof" else ""
-        return (f'<figure class="{classes}" data-kind="{kind}"{layout}{extra}>\n{shown}\n{proof}'
-                f"{figcaption}{chain}</figure>\n")
+        opening = _one_style(f'class="{classes}" data-kind="{kind}"{layout}{extra}')
+        return f"<figure {opening}>\n{shown}\n{proof}{figcaption}{chain}</figure>\n"
 
     def _built_in(self, name: str, *, inline: bool = False) -> str:
         """The app's logo or the analyst's own logo or signature: no frame, no number."""
@@ -1921,6 +1924,21 @@ def _start(token: Token) -> int:
         return int(token.attrGet("start") or 1)
     except (TypeError, ValueError):
         return 1
+
+
+def _one_style(attrs: str) -> str:
+    """Attributes written with every `style` merged into one, which a browser would
+    otherwise read only the first of."""
+    styles = re.findall(r' style="([^"]*)"', f" {attrs}")
+    if len(styles) < 2:
+        return attrs
+    rest = re.sub(r' style="[^"]*"', "", f" {attrs}").lstrip()
+    return f'{rest} style="{";".join(style.strip(";") for style in styles)}"'
+
+
+def _shape(size: tuple[int, int]) -> str:
+    """A picture's shape, width over height, which holds a tall one to the window."""
+    return f' style="--r:{size[0] / size[1]:.4f}"' if size[0] and size[1] else ""
 
 
 def _aligned(align: str, inner: str) -> str:

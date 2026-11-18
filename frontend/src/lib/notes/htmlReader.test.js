@@ -69,7 +69,8 @@ describe('the page without anything pressed', () => {
   });
 
   it('stays under the weight agreed for its two files, unminified', () => {
-    expect(Buffer.byteLength(READER) + Buffer.byteLength(CSS)).toBeLessThan(75 * 1024);
+    // 75 KB until the bar, the progress line and the links the page takes itself came in
+    expect(Buffer.byteLength(READER) + Buffer.byteLength(CSS)).toBeLessThan(84 * 1024);
   });
 });
 
@@ -250,7 +251,8 @@ describe('a table sorts, filters and points at a row', () => {
     expect(wrap.classList.contains('az-slides')).toBe(true);
     // the style sheet: never the page that slides, and five columns take the figures' width
     expect(CSS).toContain('.az-js .az-table-wrap:not(.az-slides) { overflow: visible; }');
-    expect(CSS).toContain('.az-body > .az-table-wrap:has(th:nth-child(5)) { grid-column: wide; }');
+    // every table stands on the axis, as wide as it needs up to the wide width
+    expect(CSS).toMatch(/\.az-body > :is\(\.az-table-wrap, \.az-table-block\) \{ grid-column: wide; justify-self: center; width: fit-content;/);
   });
 
   it('offers a filter past twelve rows only, and says how many are left', async () => {
@@ -408,6 +410,15 @@ describe('a story keeps its picture beside the words', () => {
       <div class="az-story-step" data-step="2" style="--az-n:2"><p>The berth.</p></div>
     </div></section>`;
 
+  /** Lay the story out as scrolled: the section in sight, each step's top where it is read. */
+  const scrolled = (doc, tops) => {
+    doc.querySelector('.az-story').getBoundingClientRect = () => ({ top: -200, bottom: 1600, left: 0, right: 0, width: 0, height: 1800 });
+    doc.querySelectorAll('.az-story-step').forEach((step, index) => {
+      step.getBoundingClientRect = () => ({ top: tops[index], bottom: tops[index] + 200, left: 0, right: 0, width: 0, height: 200 });
+    });
+    window.dispatchEvent(new window.Event('resize'));
+  };
+
   it('holds the picture of the step being read on a wide screen, and moves in on the part it names', async () => {
     const doc = await report(STORY);
     const section = doc.querySelector('.az-story');
@@ -415,9 +426,10 @@ describe('a story keeps its picture beside the words', () => {
     const [first, second] = doc.querySelectorAll('.az-story-figures > figure');
     expect(first.classList.contains('az-on')).toBe(true);
     expect(second.hasAttribute('inert')).toBe(true);
-    const [observer] = window.observed;
-    expect(observer.nodes).toHaveLength(2);
-    observer.callback([{ target: doc.querySelectorAll('.az-story-step')[1], isIntersecting: true }]);
+    // the step being read is the last whose top has passed six tenths of the window, measured as the page scrolls
+    scrolled(doc, [100, 700]);
+    expect(first.classList.contains('az-on')).toBe(true);
+    scrolled(doc, [-400, 400]);
     expect(second.classList.contains('az-on')).toBe(true);
     expect(first.classList.contains('az-on')).toBe(false);
     expect(doc.querySelectorAll('.az-story-step')[1].classList.contains('az-on')).toBe(true);
@@ -427,8 +439,16 @@ describe('a story keeps its picture beside the words', () => {
     expect([...doc.querySelectorAll('.az-story-count')].map((count) => count.textContent)).toEqual(['1 / 2', '2 / 2']);
   });
 
-  it('reads picture then words, with nothing moving, when narrow, when motion is turned down or with no observer', async () => {
-    for (const options of [{ wide: false }, { reduced: true }, { observers: false }]) {
+  it('follows the reading without an observer, whose margins a sandboxed frame does not keep', async () => {
+    const doc = await report(STORY, { observers: false });
+    expect(doc.querySelector('.az-story').classList.contains('az-live')).toBe(true);
+    expect(window.observed).toHaveLength(0);
+    scrolled(doc, [-400, 300]);
+    expect(doc.querySelectorAll('.az-story-figures > figure')[1].classList.contains('az-on')).toBe(true);
+  });
+
+  it('reads picture then words, with nothing moving, when narrow or when motion is turned down', async () => {
+    for (const options of [{ wide: false }, { reduced: true }]) {
       const doc = await report(STORY, options);
       expect(doc.querySelector('.az-story').classList.contains('az-live')).toBe(false);
       expect(doc.querySelector('.az-on')).toBeNull();
@@ -488,6 +508,25 @@ describe('a link to a part of the page', () => {
     expect(options.behavior).toBe('auto');
     expect(pushed).toEqual([[null, '', '#one']]);
     expect(follow(doc, '#two', { metaKey: true }).defaultPrevented).toBe(false);
+  });
+});
+
+describe('the reading', () => {
+  it('draws how far the page has been read along its top', async () => {
+    const doc = await report('<p>Words.</p>');
+    const line = doc.querySelector('body > .az-progress');
+    expect(line.getAttribute('aria-hidden')).toBe('true');
+    Object.defineProperty(doc.documentElement, 'scrollHeight', { value: 2900, configurable: true });
+    Object.defineProperty(window, 'scrollY', { value: 500, configurable: true });
+    window.dispatchEvent(new window.Event('resize'));
+    expect(line.style.getPropertyValue('--read')).toBe('0.2500');
+  });
+
+  it('lets an address written out break anywhere, rather than stretch a justified line', async () => {
+    const doc = await report('<main class="az-body"><p>See <a href="https://example.org/a/very/long/address/that/runs/on">https://example.org/a/very/long/address/that/runs/on</a> and <a href="https://example.org">this page</a>.</p></main>');
+    expect([...doc.querySelectorAll('a')].map((link) => link.classList.contains('az-long'))).toEqual([true, false]);
+    // the one rule that justifies the text, from a page wide enough
+    expect(CSS).toContain('@media (min-width: 48rem) { .az-body > p, :is(.az-callout, .az-internal, .az-body > blockquote) > p:not(.az-callout-label) { text-align: justify; hyphens: auto; } }');
   });
 });
 
