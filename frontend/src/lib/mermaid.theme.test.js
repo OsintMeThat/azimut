@@ -50,6 +50,8 @@ describe('the diagrams\' theme', () => {
     expect(chart.indexOf(face)).toBeLessThan(chart.indexOf('xychart-beta'));
     expect(commented).toContain(face);
     expect(flow).not.toContain('fontFamily');
+    // Mermaid empties a diagram's own theme value holding anything else (a hyphen, say)
+    expect(CHART_FACE).toMatch(/^[\d "#%(),.;A-Za-z]+$/);
     expect(flow.startsWith('%%{init: {"htmlLabels": false, "journey": {"textPlacement": "tspan"}} }%%\n')).toBe(true);
   });
 

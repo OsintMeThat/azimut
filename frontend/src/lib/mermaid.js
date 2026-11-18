@@ -26,10 +26,12 @@ export const CHART_PALETTE = ['#184f95', '#3987e5', '#86b6ef', '#a9a79f'];
 
 /**
  * The type a chart is set in: the sans a note's headings print in (Noto Sans in the
- * PDF), then the reader's own. A chart is drawn into a picture for the PDF, where only
- * the fonts on the machine can be read, so the list ends on the system's.
+ * PDF), then each system's own. A chart is drawn into a picture for the PDF, where
+ * only the fonts on the machine can be read. Mermaid takes a diagram's own font in
+ * letters, digits, spaces and quotes only, so the list names families and ends on
+ * Arial rather than `sans-serif`.
  */
-export const CHART_FACE = '"Noto Sans", system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif';
+export const CHART_FACE = '"Noto Sans", "Segoe UI", Roboto, "Helvetica Neue", Arial';
 
 const CONFIG = {
   startOnLoad: false,
