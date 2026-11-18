@@ -204,7 +204,7 @@ test('picked notes on the home are exported, one PDF each', async ({ page }) => 
   await page.locator('input[aria-label="Pick Mast"]').check();
   const bar = page.locator('[data-guide="notebook.selection"]');
   await expect(bar).toContainText('2 selected');
-  await bar.getByRole('button', { name: 'Export as PDF' }).click();
+  await bar.getByRole('button', { name: 'Export', exact: true }).click();
   await expect(page.getByRole('dialog', { name: 'Export notes as PDF' })).toContainText('2 PDFs will be written, one per note.');
   await page.getByRole('button', { name: 'Export 2 PDFs' }).click();
   await expect(page.getByText(/2 PDFs written to/)).toBeVisible();
@@ -494,7 +494,7 @@ test('the export says what the PDF would warn about first, Go to takes the note 
   await page.locator('input[aria-label="Pick Lead"]').check();
   await page.locator('input[aria-label="Pick Shadows"]').check();
   await page.locator('input[aria-label="Pick Mast"]').check();
-  await page.locator('[data-guide="notebook.selection"]').getByRole('button', { name: 'Export as PDF' }).click();
+  await page.locator('[data-guide="notebook.selection"]').getByRole('button', { name: 'Export', exact: true }).click();
   const several = page.getByRole('dialog', { name: 'Export notes as PDF' });
   await expect(several.getByRole('list')).toHaveCount(2);
   await expect(several.getByRole('list', { name: 'Lead' }).getByRole('listitem')).toHaveCount(2);

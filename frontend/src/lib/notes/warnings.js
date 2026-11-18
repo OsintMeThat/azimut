@@ -12,7 +12,7 @@
 import { api } from '../api.js';
 
 /** What a warning is about (`engine/notes_pdf.py`); anything else reads as `other`. */
-export const WARNING_KINDS = ['missing', 'unsourced', 'open-task', 'local-link', 'empty-section', 'setting', 'other', 'internal', 'count', 'pov'];
+export const WARNING_KINDS = ['missing', 'unsourced', 'open-task', 'local-link', 'empty-section', 'setting', 'other', 'internal', 'count'];
 
 /** The internal passages a public edition leaves out: said, but nothing to fix. */
 export function isLeftOut(warning) {

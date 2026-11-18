@@ -802,7 +802,7 @@ export const PAGES = {
             { anchor: 'notebook.cite', title: 'Cite', text: '@ and a few letters put in a place, a person or a file as a chip.' },
             { anchor: 'notebook.write', title: 'The page', text: 'Saved as you type. A chip opens what it names, ⌖ shows coordinates on the map.' },
             { anchor: 'notebook.dock', title: 'Pin to the side', text: 'The note stays open on the right as you work on the Map or a video.' },
-            { anchor: 'notebook.pdf', title: 'PDF', text: 'Exports this note as Look sets it out. Page shows it beside the note as you type.' },
+            { anchor: 'notebook.pdf', title: 'Export', text: 'A PDF, or one HTML page that reads offline, as Look sets it out. Page shows either as you type.' },
           ],
         },
       },

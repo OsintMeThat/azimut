@@ -72,7 +72,8 @@ export async function fetchPreview({ caseId = '', note = 'case', title = '', tex
  * Ask the server for the HTML page of `text`, as note `note` of case `caseId`: the
  * file an HTML export writes, with lighter pictures, written nowhere. Its diagrams
  * travel as SVG. The headers say what the PDF preview's say; a page has no page
- * breaks or placed pictures to report.
+ * breaks or placed pictures to report, and its lighter pictures say nothing true of
+ * what the file would weigh, which the export dialog's check tells.
  */
 export async function fetchHtmlPreview({ caseId = '', note = 'case', title = '', text = '', look, diagrams = {}, edition = 'internal' }, signal) {
   const body = { note: note || 'case', title, text, look, diagrams, edition };
