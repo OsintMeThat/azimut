@@ -302,7 +302,8 @@ def test_too_many_columns_propose_bars():
 def test_kinds_that_fit_a_table_are_named_for_the_picker():
     assert "stacked bars" in nc.fitting(_block(_body("armoured.md")).table)
     plain = _block("| Video | Seen |\n| --- | --- |\n| One | 33 |\n| Two | 46 |").table
-    assert nc.fitting(plain) == ["bars", "columns"]
+    # two parts make no pie (`test_notes_chart_kinds` holds each kind's own rule)
+    assert nc.fitting(plain) == ["bars", "columns", "segments", "pictograms", "silhouette rows", "waffle", "circles"]
 
 
 # -- honesty -----------------------------------------------------------------------------------

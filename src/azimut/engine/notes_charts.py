@@ -20,8 +20,10 @@ and cannot move when the case does:
 Other Markdown readers show the settings as a paragraph, then the table.
 
 **The settings** (`KEYS`; every other line is named by the check, never a crash):
-- ``kind``: bars, columns, stacked bars, stacked columns, or a kind another module
-  registers (`register`). ``bars: across`` or ``bars: up`` turns a bar kind.
+- ``kind``: bars, columns, stacked bars, stacked columns, or one of the kinds
+  `notes_chart_kinds` draws (pie, donut, segments, pictograms, silhouette rows, waffle,
+  key figures, timeline, line, circles), registered at this module's foot. ``bars:
+  across`` or ``bars: up`` turns a bar kind, and stands a segmented bar up.
 - ``count``: the number column, or ``rows`` to count rows. Left out, a table with one
   number column counts it, and any other counts rows.
 - ``by``: the column whose values are the bars (the first text column if left out).
@@ -63,7 +65,7 @@ Night). The faces follow the note's Look (`pdffonts.FONTS`).
 
 **One layout model, two painters.** `layout` reads the block, lays the title, legend,
 plot, notes and credit in CSS pixels and returns marks (`Rect`, `Line`, `Shape`,
-`Circle`, `Text`, `Group`) with the facts tests read (`Layout.bars`, `Layout.scale`,
+`Circle`, `Text`, `Group`, `Picture`) with the facts tests read (`Layout.bars`, `Layout.scale`,
 `Layout.legend`). `svg` writes them for HTML and the editor: real text, a `<title>` per
 mark, `role="img"` with a title and a description, and `data_table_html` for screen
 readers. `render_png` paints the same with Pillow, at a destination's size (`render`,
@@ -76,11 +78,15 @@ raster at print resolution.
 it, the keys it reads beyond the common ones, the picker's *Fits* rule, and `plot`, which
 lays the plot inside the frame's box from the `Reading` (rows, categories, colours) and
 returns marks. The frame draws the title, legend, notes and credit around it; a kind
-that draws its own legend (a donut beside its parts) says so. Painters never know a kind.
+that draws its own legend (a donut beside its parts) says so. A kind of parts reads the
+``by`` column as its colours when none is written; a kind that reads its own columns (a
+timeline) counts nothing, so no title is proposed from a sum, and gives its own
+description and data table. Painters never know a kind.
 """
 
 from __future__ import annotations
 
+import base64
 import html
 import math
 import re
@@ -160,7 +166,7 @@ KEYS: dict[str, str] = {
 }
 #: The order the Notebook writes the settings in.
 WRITTEN_ORDER = ("kind", "title", "caption", "count", "by", "colour by", "order", "colours", "only",
-                 "highlight", "sort", "last", "show")
+                 "highlight", "sort", "last", "show", "bars")
 WRITTEN_LAST = ("source", "from", "style")
 
 SETTING_LINE = re.compile(r"^([A-Za-z][A-Za-z ]{0,24}?)\s*:\s?(.*)$")
@@ -650,6 +656,8 @@ def block_text(block: ChartBlock) -> str:
         "colours": ", ".join(f"{name} {colour}" for name, colour in block.colours.items()),
         "highlight": ", ".join(block.highlight), "sort": block.sort, "last": ", ".join(block.last),
         "show": block.show, "source": block.source, "from": block.origin, "style": block.style,
+        # a kind that does not turn into another reads ``bars`` itself (a segmented bar standing up)
+        "bars": block.bars if kind is not None and not kind.turns else "",
     })
     lines = ["::: chart"]
     for key in WRITTEN_ORDER:
@@ -804,6 +812,10 @@ class Plot:
     facts: dict[str, Any] = field(default_factory=dict)
     #: Said under the plot: an axis's name, what a filter left out.
     notes: list[str] = field(default_factory=list)
+    #: A kind that reads its own columns says itself what it shows and gives its own data
+    #: table (key figures, a timeline); left empty, the frame says it from the bars.
+    desc: str = ""
+    table: tuple[list[str], list[list[str]]] | None = None
 
 
 @dataclass(frozen=True)
@@ -831,6 +843,15 @@ class Kind:
     #: Bars and columns: which way they run, and whether ``bars: across/up`` turns them.
     up: bool = False
     turns: str = ""
+    #: Parts of one whole (a pie, a waffle): with no colour column written, the ``by``
+    #: column's values are the parts and take their colours, the case's ones first.
+    parts: bool = False
+    #: False for a kind that reads its own columns rather than a count (key figures, a
+    #: timeline, a line): no title is proposed from a sum and no row is left out for
+    #: having no number in a count column it does not read.
+    counts: bool = True
+    #: The kind's own checks, said after the common ones (a waffle's whole, an icon).
+    check: Callable[["Reading"], list["Check"]] | None = None
 
 
 KINDS: dict[str, Kind] = {}
@@ -988,11 +1009,13 @@ def read(block: ChartBlock, *, theme: ChartTheme | None = None, palette: Sequenc
         warn(f"{said}: its table needs a line of dashes under its header.", line=table.line)
     rows = table.rows
     empty.all_rows = len(rows)
-    count = _count_column(block, table, rows, said, warn)
+    count = _count_column(block, table, rows, said, warn) if kind.counts else None
     by = _named_column(block.by, table, said, "by", warn)
     if by is None:
         by = next((index for index in range(len(table.headers)) if index != count and not _numeric(rows, index)), 0)
     colour = _named_column(block.colour_by, table, said, "colour by", warn) if block.colour_by else None
+    if colour is None and kind.parts and not block.colour_by:
+        colour = by
     floor = bool(count is not None and FLOOR_WORDS.search(table.headers[count])) or bool(MINIMUM_NOTE.search(note_text or ""))
     kept: list[int] = []
     amounts: dict[int, float] = {}
@@ -1274,13 +1297,15 @@ def _check_reading(reading: Reading, said: str, warn: Callable[..., None]) -> No
     for value in block.highlight:
         if value.casefold() not in held:
             warn(f'{said} highlights "{_cut(value, 40)}", which no row holds.', key="highlight")
-    if reading.floor and not TITLE_FLOOR.search(block.title or ""):
+    if reading.kind.counts and reading.floor and not TITLE_FLOOR.search(block.title or ""):
         proposal = propose_title(reading)
         if block.title:
             message = f'"{_cut(block.title, 60)}" counts at least: say so in its title.'
         else:
             message = "A chart counts at least: give it a title that says so."
         warn(message, key="title", fix=(("title", proposal),))
+    if reading.kind.check is not None and reading.table is not None:
+        reading.checks.extend(reading.kind.check(reading))
     if not credit_line(reading):
         warn(f"{said} cites no source: cite one in its table, or write a source line.", UNSOURCED)
 
@@ -1471,7 +1496,21 @@ class Group:
     title: str = ""
 
 
-Mark = Union[Rect, Line, Shape, Circle, Text, Group]
+@dataclass(frozen=True)
+class Picture:
+    """A picture in a box: an icon of the analyst's own, later a frame on a wall. ``data``
+    is a PNG or a JPEG; ``cover`` fills the box and crops what is past it, else the whole
+    picture is fitted in the box, centred."""
+
+    x: float
+    y: float
+    w: float
+    h: float
+    data: bytes
+    cover: bool = False
+
+
+Mark = Union[Rect, Line, Shape, Circle, Text, Group, Picture]
 
 
 @dataclass(frozen=True)
@@ -1631,7 +1670,8 @@ def layout(block: ChartBlock, *, theme: ChartTheme | None = None, palette: Seque
     inner = width - 2 * pad
     head: list[Mark] = []
     y = pad
-    shown_title = block.title or (propose_title(reading, noun) if reading.table is not None else "")
+    shown_title = block.title or (propose_title(reading, noun) if reading.table is not None and reading.kind.counts
+                                  else "")
     if title and shown_title:
         words = shown_title.upper() if theme.caps_title else shown_title
         lines, _ = wrap(words, inner, theme.title_size, theme.head, bold=True, lines=3)
@@ -1674,8 +1714,8 @@ def layout(block: ChartBlock, *, theme: ChartTheme | None = None, palette: Seque
     background = Rect(0, 0, width, total_height, theme.paper)
     marks: list[Mark] = [background, *head, *plot.marks, *moved]
     kind_name = reading.kind.name
-    desc = _describe(reading, kind_name)
-    table_head, table_rows = _data_table(reading)
+    desc = plot.desc or _describe(reading, kind_name)
+    table_head, table_rows = plot.table if plot.table is not None else _data_table(reading)
     return Layout(width, round(total_height, 2), theme, marks, shown_title, desc, plot.lines, legend, plot.scale,
                   plot.bars, notes, credit, kind_name, reading.checks, table_head, table_rows, plot.facts)
 
@@ -1766,7 +1806,8 @@ def _describe(reading: Reading, kind: str) -> str:
         return "A chart with no table."
     noun = noun_of(reading) or ("rows" if reading.count is None else _lower(reading.count_label))
     floor = " (at least)" if reading.floor else ""
-    colour = f", coloured by {_lower(table.headers[reading.colour])}" if reading.colour is not None else ""
+    colour = f", coloured by {_lower(table.headers[reading.colour])}" \
+        if reading.colour is not None and reading.colour != reading.by else ""
     label = KINDS[kind].label if kind in KINDS else kind
     largest = max(reading.categories, key=lambda category: category.total, default=None)
     most = f" The largest is {largest.name}, {number_text(largest.total)}." if largest else ""
@@ -1778,7 +1819,7 @@ def _data_table(reading: Reading) -> tuple[list[str], list[list[str]]]:
     if reading.table is None:
         return [], []
     by = reading.table.headers[reading.by] if reading.by is not None else ""
-    if reading.colour is None:
+    if reading.colour is None or reading.colour == reading.by:
         head = [by, axis_name(reading)]
         return head, [[category.name, number_text(category.total)] for category in reading.categories]
     head = [by, *reading.values, "All"]
@@ -2081,6 +2122,13 @@ def svg(chart: Layout, *, ident: str = "az-chart", transparent: bool = False,
         elif isinstance(mark, Circle):
             stroke = f' stroke="{mark.stroke}" stroke-width="{_n(mark.stroke_width)}"' if mark.stroke else ""
             out.append(f'<circle cx="{_n(mark.cx)}" cy="{_n(mark.cy)}" r="{_n(mark.r)}" fill="{mark.fill}"{stroke}/>')
+        elif isinstance(mark, Picture):
+            kind = picture_type(mark.data)
+            if kind:
+                fit = "xMidYMid slice" if mark.cover else "xMidYMid meet"
+                out.append(f'<image href="data:image/{kind};base64,{base64.b64encode(mark.data).decode("ascii")}" '
+                           f'x="{_n(mark.x)}" y="{_n(mark.y)}" width="{_n(mark.w)}" height="{_n(mark.h)}" '
+                           f'preserveAspectRatio="{fit}"/>')
         elif isinstance(mark, Text):
             attrs = [f'x="{_n(mark.x)}"', f'y="{_n(mark.y)}"', f'font-size="{_n(mark.size)}"', f'fill="{mark.colour}"']
             if mark.bold:
@@ -2204,9 +2252,11 @@ def render_png(chart: Layout, width: int, *, height: int | None = None, dpi: int
         elif isinstance(mark, Circle):
             box = ((mark.cx - mark.r) * unit, (mark.cy - mark.r) * unit, (mark.cx + mark.r) * unit,
                    (mark.cy + mark.r) * unit)
-            draw.ellipse(box, fill=_rgb(mark.fill) if mark.fill else None,
+            draw.ellipse(box, fill=_rgb(mark.fill) if mark.fill and mark.fill != "none" else None,
                          outline=_rgb(mark.stroke) if mark.stroke else None,
                          width=max(1, round(mark.stroke_width * unit)) if mark.stroke else 1)
+        elif isinstance(mark, Picture):
+            _paint_picture(big, mark, unit)
 
     for mark in chart.marks:
         shapes(mark)
@@ -2250,23 +2300,26 @@ def _paint_rect(canvas: Image.Image, draw: ImageDraw.ImageDraw, rect: Rect, unit
         return
     outline = _rgb(rect.stroke) if rect.stroke else None
     line = max(1, round(rect.stroke_width * unit)) if rect.stroke else 1
+    fill = None if rect.fill == "none" else _rgb(rect.fill)
     if radius:
-        draw.rounded_rectangle((x0, y0, x1, y1), radius=radius, fill=_rgb(rect.fill), outline=outline, width=line,
+        draw.rounded_rectangle((x0, y0, x1, y1), radius=radius, fill=fill, outline=outline, width=line,
                                corners=corners)
     else:
-        draw.rectangle((x0, y0, x1, y1), fill=_rgb(rect.fill), outline=outline, width=line)
+        draw.rectangle((x0, y0, x1, y1), fill=fill, outline=outline, width=line)
 
 
 def _hatched(canvas: Image.Image, box: tuple[float, float, float, float], radius: float,
-             corners: tuple[bool, bool, bool, bool], background: str, stripe: str, unit: float) -> None:
-    """Stripes at 45°, six units apart and on one grid, so two hatched boxes line up."""
+             corners: tuple[bool, bool, bool, bool], background: str, stripe: str, unit: float,
+             phase: float | None = None) -> None:
+    """Stripes at 45°, six units apart and on one grid, so two hatched boxes line up;
+    ``phase`` is where the box sits on the picture when ``canvas`` is a layer of its own."""
     x0, y0, x1, y1 = (round(value) for value in box)
     width, height = max(1, x1 - x0), max(1, y1 - y0)
     tile = Image.new("RGB", (width, height), _rgb(background))
     pen = ImageDraw.Draw(tile)
     spacing = 6 * unit * math.sqrt(2)
     thickness = max(1, round(2.6 * unit))
-    start = -((x0 + y0) % spacing)
+    start = -(((x0 + y0) if phase is None else phase) % spacing)
     offset = start - height
     while offset < width + height:
         pen.line([(offset, height), (offset + height, 0)], fill=_rgb(stripe), width=thickness)
@@ -2274,6 +2327,39 @@ def _hatched(canvas: Image.Image, box: tuple[float, float, float, float], radius
     mask = Image.new("L", (width, height), 0)
     ImageDraw.Draw(mask).rounded_rectangle((0, 0, width - 1, height - 1), radius=radius, fill=255, corners=corners)
     canvas.paste(tile, (x0, y0), mask)
+
+
+#: The most pixels a picture in a chart may decode to: a 4K frame is a third of it.
+MAX_PICTURE_PIXELS = 25_000_000
+
+
+def picture_type(data: bytes) -> str:
+    """``png`` or ``jpeg`` by the picture's first bytes, else empty: nothing else is drawn."""
+    if data[:8] == b"\x89PNG\r\n\x1a\n":
+        return "png"
+    return "jpeg" if data[:3] == b"\xff\xd8\xff" else ""
+
+
+def _paint_picture(canvas: Image.Image, mark: Picture, unit: float) -> None:
+    if not picture_type(mark.data):
+        return
+    try:
+        with Image.open(BytesIO(mark.data)) as opened:
+            if opened.width * opened.height > MAX_PICTURE_PIXELS:
+                return
+            picture = opened.convert("RGBA")
+    except Exception:  # a picture that cannot be read is left out, the chart still drawn
+        return
+    box_w, box_h = max(1, round(mark.w * unit)), max(1, round(mark.h * unit))
+    ratio = (max if mark.cover else min)(box_w / picture.width, box_h / picture.height)
+    picture = picture.resize((max(1, round(picture.width * ratio)), max(1, round(picture.height * ratio))),
+                             Image.Resampling.LANCZOS)
+    if mark.cover:
+        left, top = (picture.width - box_w) // 2, (picture.height - box_h) // 2
+        picture = picture.crop((left, top, left + box_w, top + box_h))
+    x = round(mark.x * unit + (box_w - picture.width) / 2)
+    y = round(mark.y * unit + (box_h - picture.height) / 2)
+    canvas.paste(picture, (x, y), picture)
 
 
 def _paint_line(draw: ImageDraw.ImageDraw, mark: Line, unit: float) -> None:
@@ -2294,26 +2380,38 @@ def _paint_line(draw: ImageDraw.ImageDraw, mark: Line, unit: float) -> None:
             at = end + off
 
 
-def _paint_shape(canvas: Image.Image, draw: ImageDraw.ImageDraw, mark: Shape, unit: float) -> None:
+@lru_cache(maxsize=512)
+def _path_points(d: str) -> tuple[tuple[tuple[tuple[float, float], ...], bool], ...]:
+    """A path's points, read once: a pictogram's glyph is drawn many times."""
     from .notes_maps import path_points
 
+    return tuple((tuple(points), closed) for points, closed in path_points(d))
+
+
+def _paint_shape(canvas: Image.Image, draw: ImageDraw.ImageDraw, mark: Shape, unit: float) -> None:
+    read = _path_points(mark.d)
     subpaths = [[((mark.x + x * mark.scale) * unit, (mark.y + y * mark.scale) * unit) for x, y in points]
-                for points, _closed in path_points(mark.d)]
+                for points, _closed in read]
     if mark.fill and mark.fill != "none":
         for points in subpaths:
             if len(points) >= 3:
                 if mark.hatch:
-                    xs, ys = [p[0] for p in points], [p[1] for p in points]
-                    layer = Image.new("RGB", canvas.size, _rgb(mark.hatch))
-                    _hatched(layer, (min(xs), min(ys), max(xs), max(ys)), 0, (True,) * 4, mark.hatch, mark.fill, unit)
-                    mask = Image.new("L", canvas.size, 0)
-                    ImageDraw.Draw(mask).polygon(points, fill=255)
-                    canvas.paste(layer, (0, 0), mask)
+                    # striped in a layer the size of the shape's box, not of the whole picture
+                    left = math.floor(min(p[0] for p in points))
+                    top = math.floor(min(p[1] for p in points))
+                    size = (max(1, math.ceil(max(p[0] for p in points)) - left + 1),
+                            max(1, math.ceil(max(p[1] for p in points)) - top + 1))
+                    layer = Image.new("RGB", size, _rgb(mark.hatch))
+                    _hatched(layer, (0, 0, size[0], size[1]), 0, (True,) * 4, mark.hatch, mark.fill, unit,
+                             phase=left + top)
+                    mask = Image.new("L", size, 0)
+                    ImageDraw.Draw(mask).polygon([(x - left, y - top) for x, y in points], fill=255)
+                    canvas.paste(layer, (left, top), mask)
                 else:
                     draw.polygon(points, fill=_rgb(mark.fill))
     if mark.stroke:
         width = max(1, round(mark.stroke_width * mark.scale * unit))
-        for points, (_, closed) in zip(subpaths, path_points(mark.d)):
+        for points, (_, closed) in zip(subpaths, read):
             if len(points) >= 2:
                 draw.line(points + points[:1] if closed else points, fill=_rgb(mark.stroke), width=width,
                           joint="curve")
@@ -2360,3 +2458,35 @@ def _esc(value: str) -> str:
 def _cut(text: str, limit: int) -> str:
     text = " ".join(str(text or "").split())
     return text if len(text) <= limit else text[: limit - 1].rstrip() + "…"
+
+
+# -- the other kinds, in the order the picker shows them (`notes_chart_kinds`) --------------------------------
+
+from . import notes_chart_kinds as _kinds  # noqa: E402  (its kinds draw with this module's marks)
+
+PIE = register(Kind("pie", "Pie", _kinds.plot_pie, words=("pie chart",), fits=_kinds.fits_pie, legend=False,
+                    parts=True, check=_kinds.check_parts))
+DONUT = register(Kind("donut", "Donut", _kinds.plot_donut, words=("doughnut", "donut chart", "ring"),
+                      keys=("centre", "center"), fits=_kinds.fits_pie, legend=False, parts=True,
+                      check=_kinds.check_parts))
+SEGMENTS = register(Kind("segments", "Segments", _kinds.plot_segments,
+                         words=("segmented bar", "segment", "share bar", "100% bar"), fits=_kinds.fits_segments,
+                         legend=False, parts=True))
+PICTOGRAMS = register(Kind("pictograms", "Pictograms", _kinds.plot_pictograms,
+                           words=("pictogram", "unit chart", "isotype", "icons"), keys=("icon", "per glyph"),
+                           fits=_kinds.fits_pictograms, parts=True, check=_kinds.check_glyphs))
+SILHOUETTES = register(Kind("silhouette rows", "Silhouette rows", _kinds.plot_silhouettes,
+                            words=("silhouettes", "icon rows", "pictogram rows"), keys=("icon", "flag", "per glyph"),
+                            fits=_kinds.fits_silhouettes, check=_kinds.check_glyphs))
+WAFFLE = register(Kind("waffle", "Waffle", _kinds.plot_waffle, words=("waffle chart", "squares", "grid"),
+                       keys=("of", "squares"), fits=_kinds.fits_waffle, sort="as written", legend=False, parts=True,
+                       check=_kinds.check_waffle))
+KEY_FIGURES = register(Kind("key figures", "Key figures", _kinds.plot_figures,
+                            words=("figures", "stat tiles", "tiles", "stats"), fits=_kinds.fits_figures,
+                            sort="as written", legend=False, counts=False))
+TIMELINE = register(Kind("timeline", "Timeline", _kinds.plot_timeline, words=("time line", "chronology", "sequence"),
+                         fits=_kinds.fits_timeline, sort="as written", counts=False, check=_kinds.check_timeline))
+LINE = register(Kind("line", "Line", _kinds.plot_line, words=("line chart", "lines"), fits=_kinds.fits_line,
+                     sort="as written", legend=False, counts=False, check=_kinds.check_line))
+CIRCLES = register(Kind("circles", "Circles", _kinds.plot_circles, words=("circle comparison", "compare circles"),
+                        fits=_kinds.fits_circles, legend=False, parts=True, check=_kinds.check_circles))
