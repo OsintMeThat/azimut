@@ -6,6 +6,7 @@ vi.mock('../api.js', () => ({ api: { get, post } }));
 const {
   CHECK_SAID, checkEdition, editionDay, editionOf, editionOfAll, keepEdition, listEditions, readEdition, reloadEditions, showEdition,
 } = await import('./editions.svelte.js');
+const { readListed } = await import('./editions.svelte.js');
 
 /** A storage that keeps what it is given, like a browser's. */
 function memory() {
@@ -70,6 +71,23 @@ describe('the record of editions', () => {
     expect(readEdition({ ...page, sha256: undefined, pdf_sha256: 'd'.repeat(64) }).pdf_sha256).toBe('d'.repeat(64));
     expect(readEdition({ ...page, format: 'docx' })).toBeNull();
     expect(readEdition({ ...page, file: '' })).toBeNull();
+  });
+
+  it('lists a WordPress draft by its site and edit link, each a web address', async () => {
+    const draft = { at: RECORD.at, edition: 'public', format: 'wordpress', site: 'https://desk.example.org', post: 21,
+      edit: 'https://desk.example.org/wp-admin/post.php?post=21&action=edit', preview: 'https://desk.example.org/?p=21&preview=true',
+      text_sha256: 'b'.repeat(64), media: { '0123456789abcdef': 4 } };
+    expect(readListed(draft)).toEqual({
+      at: RECORD.at, edition: 'public', format: 'wordpress', file: '', folder: '', pages: 0, pdf_sha256: '',
+      text_sha256: 'b'.repeat(64), site: draft.site, post: 21, edit: draft.edit, preview: draft.preview,
+    });
+    expect(readListed({ ...draft, edit: 'javascript:alert(1)' })).toBeNull();
+    expect(readListed({ ...draft, post: '21' })).toBeNull();
+    expect(readListed({ ...draft, edition: 'internal' })).toBeNull();
+    expect(readListed({ ...draft, preview: 'javascript:x' }).preview).toBe('');
+    expect(readListed(RECORD)).toEqual(readEdition(RECORD));
+    get.mockResolvedValue({ editions: [draft, RECORD, { ...draft, site: 'ftp://x' }] });
+    expect((await listEditions('c1', 'n1')).map((edition) => edition.format)).toEqual(['wordpress', 'pdf']);
   });
 
   it('checks or shows one by when it was written and its file', async () => {

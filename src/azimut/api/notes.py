@@ -55,6 +55,13 @@ SHA-256 kept in the record of editions with `format: "web"` and the address it w
 given. The address is checked here, at the edge: https, no credentials, a bounded
 length. The check is `/notes/pdf/check` with `format: "web"`, which also says when
 no address was given, since X then shows no picture card.
+
+**WordPress.** `/notes/{id}/wordpress` sends the note's public edition to the site set
+in Settings › Publishing as a draft (`engine/notes_wordpress.py`), its diagrams as the
+PNG the browser drew. The note keeps a record of it among its editions with
+`format: "wordpress"`, the site, the post and its two links; sending again updates that
+draft while it is still one. With `check: true` it says what would go and what would
+stay out, and reaches nothing.
 """
 
 from __future__ import annotations
@@ -81,6 +88,7 @@ from ..engine import notelook, notes_markdown
 from ..engine import notes_html as html_engine
 from ..engine import notes_web as web_engine
 from ..engine import notes_pdf as pdf_engine
+from ..engine import notes_wordpress as wordpress_engine
 from ..engine import notefill, notefromcase, notelinks, notepieces, notetext
 from ..engine import pdffonts
 from ..engine import reveal as reveal_engine
@@ -917,7 +925,8 @@ def _check_html(
         weight=rendered.weight,
         links=[{"text": said[:MAX_WARNING_CHARS], "line": line} for said, line in rendered.links],
         pov=[{"text": said[:MAX_WARNING_CHARS], "line": line} for said, line in rendered.pov],
-        earlier=sum(1 for record in _read_editions(case, note_id) if record["edition"] == notes_markdown.PUBLIC),
+        earlier=sum(1 for record in _read_editions(case, note_id)
+                    if record["edition"] == notes_markdown.PUBLIC and record.get("format") != WORDPRESS),
     )
     return answer
 
@@ -1292,6 +1301,8 @@ def _edition_record(item: Any) -> dict[str, Any] | None:
     folder's ``file`` is the folder's name, and it keeps the address it was made for."""
     if not isinstance(item, dict):
         return None
+    if item.get("format") == WORDPRESS:
+        return _wordpress_record(item)
     at, edition, file, folder = item.get("at"), item.get("edition"), item.get("file"), item.get("folder")
     pages, pdf_sha, text_sha = item.get("pages"), item.get("pdf_sha256"), item.get("text_sha256")
     if not (isinstance(at, str) and STAMP.match(at) and edition in notes_markdown.EDITIONS):
@@ -1336,7 +1347,8 @@ def _record_edition(case: Case, note_id: str, record: dict[str, Any]) -> None:
 def _edition(case: Case, note_id: str, ref: EditionRef) -> dict[str, Any]:
     _require_note(case, note_id)
     for record in _read_editions(case, note_id):
-        if record["at"] == ref.at and record["file"] == ref.file and ref.folder in ("", record["folder"]):
+        # a WordPress draft is no file: it has nothing to show or check here
+        if record["at"] == ref.at and record.get("file") == ref.file and ref.folder in ("", record.get("folder")):
             return record
     raise HTTPException(status_code=404, detail="that edition is not in the note's record")
 
@@ -1408,3 +1420,129 @@ def reveal_edition(case_id: str, note_id: str, body: EditionRef) -> dict[str, st
     except reveal_engine.RevealError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
     return {"path": str(path.parent)}
+
+
+# -- to WordPress -----------------------------------------------------------------
+
+#: The format a WordPress draft is recorded under among a note's editions.
+WORDPRESS = "wordpress"
+#: The key a draft's uploads are kept under, as `notes_wordpress.Upload.key` writes it.
+MEDIA_KEY = re.compile(r"^[0-9a-f]{16}$")
+
+
+class WordPressDraftIn(BaseModel):
+    """A note sent as a draft: its diagrams as the PNG the browser drew for each fence,
+    whether its points of view are rounded, and ``check`` to say what would go without
+    sending anything."""
+
+    diagrams: dict[str, str] = Field(default_factory=dict)
+    round_pov: bool = False
+    check: bool = False
+
+
+def _wordpress_record(item: dict[str, Any]) -> dict[str, Any] | None:
+    """A WordPress draft's record read back, every part checked: it may have come in a
+    bundle, so a site or a link that does not read as a web address drops it."""
+    at, post, text_sha = item.get("at"), item.get("post"), item.get("text_sha256")
+    if not (isinstance(at, str) and STAMP.match(at) and item.get("edition") == notes_markdown.PUBLIC):
+        return None
+    if not (isinstance(post, int) and not isinstance(post, bool) and 0 < post < 2**63):
+        return None
+    try:
+        site = wordpress_engine.site_address(str(item.get("site") or ""))
+    except wordpress_engine.WordPressError:
+        return None
+    edit, preview = wordpress_engine.web_link(item.get("edit")), wordpress_engine.web_link(item.get("preview"))
+    if not (site and edit and preview and isinstance(text_sha, str) and SHA256.match(text_sha)):
+        return None
+    record: dict[str, Any] = {"at": at, "edition": notes_markdown.PUBLIC, "format": WORDPRESS, "site": site,
+                              "post": post, "edit": edit, "preview": preview, "text_sha256": text_sha}
+    media = item.get("media")
+    if isinstance(media, dict):
+        record["media"] = {key: value for key, value in list(media.items())[:wordpress_engine.MAX_UPLOADS]
+                           if isinstance(key, str) and MEDIA_KEY.match(key)
+                           and isinstance(value, int) and not isinstance(value, bool) and value > 0}
+    return record
+
+
+def _last_draft(case: Case, note_id: str, site: str) -> dict[str, Any] | None:
+    """The newest draft this note was sent as to ``site``: its post and its pictures."""
+    for record in _read_editions(case, note_id):
+        if record.get("format") == WORDPRESS and record["site"] == site:
+            return {"post": record["post"], "media": record.get("media") or {}}
+    return None
+
+
+def _record_draft(case: Case, note_id: str, record: dict[str, Any]) -> None:
+    """Put a draft first in the note's record, in place of its earlier sending: one
+    line per post, and only the newest keeps the pictures it uploaded."""
+    with _editions_turn:
+        earlier = [item for item in _read_editions(case, note_id)
+                   if not (item.get("format") == WORDPRESS and item["site"] == record["site"]
+                           and item["post"] == record["post"])]
+        for item in earlier:
+            if item.get("format") == WORDPRESS and item["site"] == record["site"]:
+                item.pop("media", None)
+        kept = [record, *earlier][:MAX_EDITIONS]
+        if note_id == CASE_NOTE:
+            case.set_setting(CASE_EDITIONS, json.dumps(kept, sort_keys=True))
+        else:
+            case.update_entity(note_id, {"attrs": {EDITIONS_ATTR: kept}})
+
+
+@router.post("/{case_id}/notes/{note_id}/wordpress")
+def wordpress_draft(case_id: str, note_id: str, body: WordPressDraftIn) -> dict[str, Any]:
+    """Send the note's public edition to the WordPress site of Settings › Publishing as
+    a draft, or with ``check`` say what would go. Nothing is ever published: the draft
+    ends on WordPress's own Publish button."""
+    from .publishing import wordpress_settings
+
+    case = get_case(case_id)
+    _require_note(case, note_id)
+    diagrams = _decode_diagrams(body.diagrams)
+    title, text = _note_source(case, note_id)
+    site, user, password = wordpress_settings()
+    try:
+        draft = wordpress_engine.build(
+            case, title=title, text=text, look=notelook.stored(case, note_id), note_id=note_id,
+            resolve=_resolver(case), diagrams=diagrams, round_pov=body.round_pov, check=body.check,
+        )
+    except wordpress_engine.NotesWordPressError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    warnings = [warning[:MAX_WARNING_CHARS] for warning in draft.warnings]
+    said: dict[str, Any] = {
+        "site": site,
+        "left": draft.left,
+        "left_said": wordpress_engine.left_said(draft.left),
+        "warnings": warnings,
+        "pictures": sum(1 for upload in draft.uploads if upload.mime.startswith("image/")),
+        "clips": sum(1 for upload in draft.uploads if upload.mime.startswith("video/")),
+        "pov": [point[:MAX_WARNING_CHARS] for point in draft.pov],
+    }
+    if body.check:
+        return {**said, "ready": bool(site and user and password)}
+    if not (site and user and password):
+        raise HTTPException(status_code=409, detail="WordPress is not set up yet: Settings › Publishing › WordPress.")
+    try:
+        with wordpress_engine.client() as http:
+            sent = wordpress_engine.send(draft, wordpress_engine.Site(site, user, password, http),
+                                         previous=_last_draft(case, note_id, site))
+    except wordpress_engine.WordPressError as exc:
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
+    record = {
+        "at": _now().astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+        "edition": notes_markdown.PUBLIC,
+        "format": WORDPRESS,
+        "site": site,
+        "post": sent.post,
+        "edit": sent.edit,
+        "preview": sent.preview,
+        "text_sha256": draft.text_sha256,
+        "media": sent.media,
+    }
+    _record_draft(case, note_id, record)
+    if sent.refused:
+        left = {**draft.left, "clips": draft.left["clips"] + len(sent.refused)}
+        said.update(left=left, left_said=wordpress_engine.left_said(left),
+                    warnings=[*warnings, *(warning[:MAX_WARNING_CHARS] for warning in sent.refused)])
+    return {**said, "post": sent.post, "edit": sent.edit, "preview": sent.preview, "updated": sent.updated}

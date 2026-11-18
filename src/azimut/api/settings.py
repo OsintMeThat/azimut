@@ -27,6 +27,7 @@ from ..engine import (
     firms,
     google_tiles,
     iconlibrary,
+    notes_wordpress,
     reveal,
     scrapers,
     sentinel,
@@ -687,7 +688,9 @@ def export_settings() -> Response:
     Deliberately absent: export destinations (absolute paths chosen on this
     machine), how much the 3D views draw (this machine's graphics card), the
     half-written Copernicus layer in the picker,
-    ``cookies.txt`` (a live login session), the cases themselves
+    ``cookies.txt`` (a live login session), ``publishing.json`` (the WordPress
+    application password: live write credentials stay on the machine that made
+    them, while the site's address and the username travel), the cases themselves
     (portable folders already), the extension folder the app owns
     (``config.extension_dir()`` — those are this build's own bundled bytes, and
     the new machine's Install button writes its own copy, which the browser has
@@ -898,6 +901,26 @@ class ImportedSettings(BaseModel):
     find_beta_seen: bool = False
     download_cookies: ImportedDownloadCookies = Field(default_factory=ImportedDownloadCookies)
     logo_look: LogoLook | None = None
+    # the WordPress site a note is sent to and its user; the password never travels
+    wordpress_site: str = Field(default="", max_length=notes_wordpress.MAX_ADDRESS + 20)
+    wordpress_user: str = Field(default="", max_length=notes_wordpress.MAX_USER + 20)
+
+    @field_validator("wordpress_site")
+    @classmethod
+    def readable_wordpress_site(cls, value: str) -> str:
+        """An address Settings would refuse reads as none rather than failing the backup."""
+        try:
+            return notes_wordpress.site_address(value)
+        except notes_wordpress.WordPressError:
+            return ""
+
+    @field_validator("wordpress_user")
+    @classmethod
+    def readable_wordpress_user(cls, value: str) -> str:
+        try:
+            return notes_wordpress.user_name(value)
+        except notes_wordpress.WordPressError:
+            return ""
 
     @field_validator("logo_look", mode="before")
     @classmethod

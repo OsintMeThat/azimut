@@ -454,8 +454,18 @@ stops making sense.
   separator only one of them honours cannot walk out of the workspace. The workspace pointer is the one file written
   outside the workspace, 0600 and holding a path; deleting the copy a move set
   aside acts on this process's own memory, never on a path from the request.
+  Sending a note to WordPress is the one press that writes to a site outside: it
+  reaches only the address set in Settings › Publishing, https or http on this machine,
+  checked when typed and again when read, with the analyst's application password by
+  Basic auth, timeouts, no redirect followed, uploads bounded, and only ever a draft;
+  Test connection and Send are its only calls, never one on a read or at startup. The
+  password is kept in `publishing.json` beside `settings.json`, 0600 and written whole,
+  left out of the settings backup (live write credentials stay on the machine that made
+  them) and never sent back to the browser beyond its last four characters; what the
+  site answers is used as a link only when it is an http(s) address.
   Accepted risks recorded here: cleartext keys over
-  localhost, the hash-verified scraper updater, Intel macOS staying on cryptography 48
+  localhost, the WordPress application password readable by anyone who can read the
+  workspace (as the API keys are), the hash-verified scraper updater, Intel macOS staying on cryptography 48
   for want of later wheels (Azimut uses it for AES-GCM only, not the X.509 verifier its
   two open advisories concern), the release workflow's publish job
   running `softprops/action-gh-release` and `pypa/gh-action-pypi-publish` on mutable

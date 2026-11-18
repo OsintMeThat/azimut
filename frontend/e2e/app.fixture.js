@@ -1158,6 +1158,10 @@ export async function installAppFixture(page, options = {}) {
       return route.fulfill({ status: 404, body: '' });
     }
     if (path === '/api/settings') return json(route, fixtureSettings);
+    // Settings › Publishing reads its WordPress site from this machine: none set here
+    if (path === '/api/publishing') {
+      return json(route, { wordpress: options.wordpress ?? { site: '', user: '', password: { set: false, hint: '' } } });
+    }
     if (path === '/api/settings/prefs' && request.method() === 'PUT') {
       const payload = request.postDataJSON();
       const previousExportDirs = fixtureSettings.export_dirs;

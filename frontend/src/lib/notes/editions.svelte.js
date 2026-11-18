@@ -11,8 +11,11 @@
  * Every export is a file of its own that the note keeps a record of (`GET
  * notes/{id}/editions`): when, which edition, PDF or HTML, the file, its pages and
  * fingerprints.
- * Check hashes the file again; Show opens its folder. Nothing is fetched.
+ * Check hashes the file again; Show opens its folder. Nothing is fetched. A note sent
+ * to WordPress is recorded too, as its draft (`readDraft`): the site, the post and its
+ * edit link, one line per draft however often it was sent again.
  */
+import { webLink } from '../wordpressSetup.js';
 import { api } from '../api.js';
 
 export const INTERNAL = 'internal';
@@ -105,7 +108,7 @@ export function readEdition(item) {
 /** The files a note was exported as, PDF, HTML and web folders, newest first. */
 export async function listEditions(caseId, noteId) {
   const answer = await api.get(`/api/cases/${caseId}/notes/${noteId || 'case'}/editions`);
-  return (Array.isArray(answer?.editions) ? answer.editions : []).map(readEdition).filter(Boolean);
+  return (Array.isArray(answer?.editions) ? answer.editions : []).map(readListed).filter(Boolean);
 }
 
 /** An edition as the server finds it in the note's record: never a path it opens. */
@@ -127,4 +130,34 @@ export function editionDay(at) {
   const when = new Date(at);
   if (Number.isNaN(when.getTime())) return '';
   return when.toLocaleString('en-GB', { day: 'numeric', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' });
+}
+
+/** An edition as the server lists it: a file's (`readEdition`), or a WordPress draft's. */
+export function readListed(item) {
+  return item?.format === 'wordpress' ? readDraft(item) : readEdition(item);
+}
+
+/**
+ * A WordPress draft as the record keeps it, or null: `format: 'wordpress'`, no file, its
+ * site, post and two links, each kept only when it is a web address.
+ */
+export function readDraft(item) {
+  if (!item || typeof item.at !== 'string' || item.edition !== PUBLIC) return null;
+  const site = webLink(item.site) ? String(item.site) : '';
+  const edit = webLink(item.edit);
+  if (!site || !edit || !Number.isInteger(item.post) || item.post <= 0) return null;
+  return {
+    at: item.at,
+    edition: PUBLIC,
+    format: 'wordpress',
+    file: '',
+    folder: '',
+    pages: 0,
+    pdf_sha256: '',
+    text_sha256: HEX.test(item.text_sha256 ?? '') ? item.text_sha256 : '',
+    site,
+    post: item.post,
+    edit,
+    preview: webLink(item.preview),
+  };
 }

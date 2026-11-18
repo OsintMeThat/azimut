@@ -20,6 +20,7 @@ asks the question — every path is built from :func:`workspace_root`.
             ├── cookies.txt
             ├── icons/        # the icon library: icons.json + one PNG per icon
             ├── logo-original.png     # the logo as picked, kept while it is framed
+            ├── publishing.json       # publishing credentials (engine/publishsecrets.py)
             ├── report-signature.png  # the handwritten signature reports print
             ├── signature.png # the analyst's logo
             ├── settings.json
@@ -193,6 +194,11 @@ DEFAULT_SETTINGS: dict[str, Any] = {
     "report_name": "",
     "report_role": "",
     "report_organisation": "",
+    # The WordPress site a note is sent to as a draft, and the user it writes as
+    # (engine/notes_wordpress.py). The application password is no setting: it is
+    # kept in publishing.json (engine/publishsecrets.py), which no backup carries.
+    "wordpress_site": "",
+    "wordpress_user": "",
     # Pairing token for the capture browser extension (api/ingest.py). Minted
     # lazily on first use, shown once in Settings, pasted into the extension.
     # Empty means "not minted yet" — never a valid credential.
