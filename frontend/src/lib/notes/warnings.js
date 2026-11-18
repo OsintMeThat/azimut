@@ -12,11 +12,16 @@
 import { api } from '../api.js';
 
 /** What a warning is about (`engine/notes_pdf.py`); anything else reads as `other`. */
-export const WARNING_KINDS = ['missing', 'unsourced', 'open-task', 'local-link', 'empty-section', 'setting', 'other', 'internal', 'count'];
+export const WARNING_KINDS = ['missing', 'unsourced', 'open-task', 'local-link', 'empty-section', 'setting', 'other', 'internal', 'count', 'address'];
 
 /** The internal passages a public edition leaves out: said, but nothing to fix. */
 export function isLeftOut(warning) {
   return warning?.kind === 'internal';
+}
+
+/** A web folder given no address: said beside the address field, not among the faults. */
+export function isNoAddress(warning) {
+  return warning?.kind === 'address';
 }
 
 export function warningKind(value) {
@@ -88,11 +93,13 @@ export function readHtmlCheck(answer) {
  * Ask what the files of these notes would warn about, from the notes as saved, in
  * `edition`: `{ found, internal }`, the notes with something to say and the
  * internal passages they hold. With `format: 'html'` the server checks the HTML
- * pages instead, and the answer holds what `readHtmlCheck` reads too.
+ * pages instead, and the answer holds what `readHtmlCheck` reads too; with
+ * `format: 'web'` the web folders, in the public edition, which also say when they
+ * have no address.
  */
 export async function checkNotes(caseId, noteIds, { signal, edition = 'internal', format = 'pdf' } = {}) {
-  const html = format === 'html';
-  const body = html ? { notes: noteIds, edition, format } : { notes: noteIds, edition };
+  const html = format === 'html' || format === 'web';
+  const body = html ? { notes: noteIds, edition: format === 'web' ? 'public' : edition, format } : { notes: noteIds, edition };
   const answer = await api.post(`/api/cases/${caseId}/notes/pdf/check`, body, { signal });
   return { found: readCheck(answer), internal: internalCount(answer), ...(html ? readHtmlCheck(answer) : {}) };
 }

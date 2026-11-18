@@ -43,6 +43,9 @@ export const LOOK_HELP = {
   pdf: 'The note as pages, to print or attach',
   html: 'The note as one web page that reads offline, pictures and clips inside',
   page_html: 'The HTML page beside the note, drawn as you type',
+  web_folder: 'The public edition as a folder to put online, with its picture card for X',
+  wordpress: 'The public edition as a draft on your WordPress site',
+  web_address: 'Where the folder will be online, which gives X its picture card',
   internal: 'The note whole, its internal passages in marked boxes',
   public: 'The note without its internal passages, for readers outside the team',
 };

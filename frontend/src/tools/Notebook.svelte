@@ -26,6 +26,11 @@
    * lists its editions, each with Show and Check; a public HTML page after an earlier
    * one asks what changed, which it prints at its end.
    *
+   * A web folder is the public edition as a folder to put online (`engine/notes_web.py`):
+   * the dialog asks the address it will live at, kept per note (`lib/notes/webAddress.js`),
+   * which gives X its picture card, and once written offers Open the folder and How to
+   * publish (`lib/githubPagesSetup.js`). A WordPress draft has its own branch.
+   *
    * To Post, in the open note's ⋯, opens Post on a Free post thread made of the note's
    * public edition, or of the stretch selected in it (`lib/notes/toPost.js`); nothing is
    * posted from here.
@@ -45,9 +50,13 @@
   } from '../lib/notes/look.js';
   import { keepPageView, readPageView } from '../lib/notes/pageView.js';
   import { exportNotes, revealExports } from '../lib/notesExport.js';
-  import { checkNotes, isLeftOut } from '../lib/notes/warnings.js';
-  import { HTML, HTML_BUDGET, keepFormat, readFormat, weightWords } from '../lib/notes/formats.js';
-  import { editionOfAll, keepEdition, PUBLIC } from '../lib/notes/editions.svelte.js';
+  import { checkNotes, isLeftOut, isNoAddress } from '../lib/notes/warnings.js';
+  import {
+    HTML, HTML_BUDGET, PDF, PUBLIC_ONLY, WEB, WORDPRESS, keepFormat, readFormat, weightWords,
+  } from '../lib/notes/formats.js';
+  import { editionOfAll, keepEdition, listEditions, PUBLIC, showEdition } from '../lib/notes/editions.svelte.js';
+  import { addressProblem, keepAddress, readAddress } from '../lib/notes/webAddress.js';
+  import { LOOK_HELP } from '../lib/notes/lookHelp.js';
   import { destinationLabel, readDestinations } from '../lib/exportDest.js';
   import { assignFolder, renameEntity } from '../lib/filing.js';
   import { openEntity } from '../lib/navigate.js';
@@ -66,6 +75,7 @@
   import EditionSwitch from './notebook/EditionSwitch.svelte';
   import FormatSwitch from './notebook/FormatSwitch.svelte';
   import EditionsDialog from './notebook/EditionsDialog.svelte';
+  import PublishSteps from './notebook/PublishSteps.svelte';
   import ToPostItem from './notebook/ToPostItem.svelte';
   import ConfirmDialog from '../components/ConfirmDialog.svelte';
   import ExportFolderPicker from '../components/ExportFolderPicker.svelte';
@@ -106,6 +116,12 @@
   let roundPov = $state(false);
   // what changed since an earlier public edition, printed at the page's end
   let exportChanges = $state('');
+  // the address a web folder will live at, kept per note, and whether it was typed in this dialog
+  let webAddress = $state('');
+  let webAddressTyped = false;
+  // the web folders written, which the dialog stays open on: { written, path }
+  let webDone = $state(null);
+  let stepsOpen = $state(false);
   // the note whose editions are listed: { noteId, title }
   let editionsOf = $state(null);
   let checkController = null;
@@ -526,15 +542,25 @@
     // pressed before the check answered: the export does not wait for it
     if (exportCheck?.checking) stopCheck();
     // read before the dialog closes, which forgets what the check found
-    const edition = exportEdition;
     const format = exportFormat;
+    const edition = PUBLIC_ONLY.includes(format) ? PUBLIC : exportEdition;
     const said = exportCheck?.internal ? `${edition} ` : '';
-    const options = format === HTML ? { edition, format, roundPov, changes: exportChanges } : { edition };
+    const address = format === WEB && noteIds.length === 1 ? webAddress.trim() : '';
+    const options = format === HTML || format === WEB ? { edition, format, roundPov, changes: exportChanges, address } : { edition };
+    if (address) keepAddress(id, noteIds[0], address);
     exportBusy = true;
     try {
       // the file is drawn from the note on disk, so what is still waiting is written first
       if (doc) await flush(doc);
       const result = await exportNotes(id, noteIds, options);
+      if (format === WEB) {
+        // the dialog stays on what was written, with the folder and the steps to put it online
+        stopCheck();
+        webDone = { written: result.written ?? [], path: result.path ?? '' };
+        selected = [];
+        for (const warning of result.warnings) toast(warning, 'warn', 6500);
+        return;
+      }
       closeExport();
       selected = [];
       const count = result.written.length;
@@ -561,9 +587,46 @@
     exportEdition = editionOfAll(caseId, exportIds);
     roundPov = false;
     exportChanges = '';
+    webDone = null;
+    stepsOpen = false;
+    readWebAddress(exportIds);
     exportOpen = true;
     readExportDestination();
     void checkExport(exportIds);
+  }
+
+  /**
+   * The address one note's web folder was last given: kept in this browser, else the
+   * one its latest web folder was made for, as its record of editions says.
+   */
+  function readWebAddress(noteIds) {
+    webAddressTyped = false;
+    webAddress = noteIds.length === 1 ? readAddress(caseId, noteIds[0]) : '';
+    if (noteIds.length !== 1 || webAddress) return;
+    const id = caseId;
+    listEditions(id, noteIds[0])
+      .then((list) => {
+        const made = list.find((edition) => edition.format === WEB && edition.address);
+        if (made && !webAddressTyped && !webAddress && id === caseId && exportOpen) webAddress = made.address;
+      })
+      .catch(() => {});
+  }
+
+  function typeWebAddress(value) {
+    webAddressTyped = true;
+    webAddress = value;
+    if (exportIds.length === 1 && !addressProblem(value)) keepAddress(caseId, exportIds[0], value);
+  }
+
+  /** The web folder just written, in the system's file manager. */
+  async function openWebFolder() {
+    const written = webDone?.written ?? [];
+    try {
+      if (written.length === 1) await showEdition(caseId, written[0].note, written[0]);
+      else await revealExports(caseId);
+    } catch (error) {
+      toast(error.message, 'warn');
+    }
   }
 
   /** PDF or HTML, picked in the dialog: kept for the next export, and the check asked again. */
@@ -588,6 +651,11 @@
     const id = caseId;
     const mine = new AbortController();
     checkController = mine;
+    // the WordPress branch says what it checks itself
+    if (exportFormat === WORDPRESS) {
+      checkController = null;
+      return;
+    }
     exportCheck = { checking: true, internal };
     try {
       if (doc) await flush(doc);
@@ -609,6 +677,8 @@
   function closeExport() {
     stopCheck();
     exportOpen = false;
+    webDone = null;
+    stepsOpen = false;
   }
 
   /** Leave the export for the line a warning is about, in its note. */
@@ -727,7 +797,7 @@
           <button class="btn btn-ghost btn-sm" title="Open in its own tab, for another screen" aria-label="Open in its own tab"
             data-guide="notebook.tab" onclick={() => detach()}><Icon name="external" size={15} /></button>
         {/if}
-        <button class="btn btn-sm" title="Export this note as a PDF or an HTML page" data-guide="notebook.pdf" onclick={() => exportSome([opened.noteId])}>
+        <button class="btn btn-sm" title="Export this note as a PDF, an HTML page or a web folder" data-guide="notebook.pdf" onclick={() => exportSome([opened.noteId])}>
           <Icon name="download" size={14} /> Export</button>
         <button class="btn btn-ghost btn-sm" aria-label="More" title="More" onclick={(event) => (menu = { anchor: event.currentTarget })}>
           <Icon name="more" size={15} /></button>
@@ -772,7 +842,7 @@
         {/if}
       {/if}
       {#if row}
-        <button type="button" class="fm-item" title="Every PDF and HTML page of this note, with Show and Check"
+        <button type="button" class="fm-item" title="Every PDF, HTML page and web folder of this note, with Show and Check"
           onclick={() => fromMenu((note) => (editionsOf = { noteId: note.id, title: note.title }))}>
           <Icon name="file" size={14} /><span class="fm-grow">Editions</span></button>
       {/if}
@@ -808,24 +878,48 @@
   {#if exportOpen}
     {@const several = exportIds.length > 1}
     {@const html = exportFormat === HTML}
-    {@const named = html ? 'HTML' : 'PDF'}
+    {@const web = exportFormat === WEB}
+    {@const wordpress = exportFormat === WORDPRESS}
+    {@const publicOnly = PUBLIC_ONLY.includes(exportFormat)}
+    {@const named = { [PDF]: 'PDF', [HTML]: 'HTML', [WEB]: several ? 'web folders' : 'a web folder', [WORDPRESS]: several ? 'WordPress drafts' : 'a WordPress draft' }[exportFormat] ?? 'PDF'}
     {@const checked = exportCheck?.found ?? []}
     {@const leftOut = checked.flatMap((item) => item.warnings.filter(isLeftOut).map((warning) => ({ ...warning, title: item.title })))}
-    {@const found = checked.map((item) => ({ ...item, warnings: item.warnings.filter((warning) => !isLeftOut(warning)) }))
+    {@const noAddress = checked.flatMap((item) => item.warnings.filter(isNoAddress))[0] ?? null}
+    {@const found = checked.map((item) => ({ ...item, warnings: item.warnings.filter((warning) => !isLeftOut(warning) && !isNoAddress(warning)) }))
       .filter((item) => item.warnings.length)}
-    {@const page = html && exportCheck && !exportCheck.checking ? exportCheck : null}
-    {@const shared = exportEdition === PUBLIC || !exportCheck?.internal}
+    {@const page = (html || web) && exportCheck && !exportCheck.checking ? exportCheck : null}
+    {@const shared = exportEdition === PUBLIC || publicOnly || !exportCheck?.internal}
+    {@const problem = web && !several ? addressProblem(webAddress) : ''}
     <Modal title={several ? `Export notes as ${named}` : `Export note as ${named}`} onclose={closeExport} width="560px">
+      {#if webDone}
+        {@const count = webDone.written.length}
+        <section class="web-done" aria-label="Web folder written">
+          <p class="done-line" role="status"><Icon name="check" size={14} />
+            {count === 1 ? `Folder written: web/${webDone.written[0].file}` : `${count} folders written in web/`}</p>
+          {#if count === 1 && webDone.written[0].address}<p class="export-note">Made for {webDone.written[0].address}</p>{/if}
+          <div class="done-actions">
+            <button type="button" class="btn btn-sm" onclick={openWebFolder}><Icon name="folder" size={14} /> Open the folder</button>
+            <button type="button" class="btn btn-sm" aria-expanded={stepsOpen} onclick={() => (stepsOpen = !stepsOpen)}>How to publish</button>
+          </div>
+          {#if stepsOpen}<PublishSteps />{/if}
+        </section>
+        <div class="modal-row">
+          <div style="flex:1"></div>
+          <button class="btn btn-primary" onclick={closeExport}>Done</button>
+        </div>
+      {:else}
       <div class="export-format">
         <span class="dest-label">Format</span>
         <FormatSwitch value={exportFormat} onchange={chooseFormat} />
       </div>
-      <div class="export-dest">
-        <span class="dest-label">Destination</span>
-        <span class="dest-path mono" title={exportDir || "The case's own exports folder"}>{exportDir || "the case's exports folder"}</span>
-        <button class="btn btn-ghost btn-sm" onclick={() => (exportPicker = true)}>Change</button>
-      </div>
-      {#if exportCheck?.internal}
+      {#if !wordpress}
+        <div class="export-dest">
+          <span class="dest-label">Destination</span>
+          <span class="dest-path mono" title={exportDir || "The case's own exports folder"}>{exportDir || "the case's exports folder"}</span>
+          <button class="btn btn-ghost btn-sm" onclick={() => (exportPicker = true)}>Change</button>
+        </div>
+      {/if}
+      {#if exportCheck?.internal && !publicOnly}
         <div class="export-edition">
           <span class="dest-label">Edition</span>
           <EditionSwitch value={exportEdition} onchange={chooseEdition} />
@@ -835,15 +929,36 @@
             {:else}{#each leftOut as item, index (index)}<span>{several ? `${item.title}: ` : ''}{item.text}</span>{/each}{/if}
           </span>
         </div>
+      {:else if publicOnly && leftOut.length}
+        <p class="export-note" role="status">Public edition. {#each leftOut as item, index (index)}<span>{several ? `${item.title}: ` : ''}{item.text} </span>{/each}</p>
       {/if}
-      <p class="export-note">
-        {#if html}{several ? `${exportIds.length} HTML pages will be written, one per note.` : 'One HTML page will be written.'}
-          It holds its pictures and short clips, and reads offline.
-        {:else}{several ? `${exportIds.length} PDFs will be written, one per note.` : 'One PDF will be written.'}{/if}
-        Earlier exports are kept.
-      </p>
+      {#if web}
+        <div class="web-fields">
+          {#if !several}
+            <label class="dest-label" for="export-address">Address it will live at</label>
+            <input id="export-address" class="input mono" value={webAddress} maxlength="300" spellcheck="false" autocomplete="off"
+              placeholder="https://your-name.github.io/articles/short-name/" title={LOOK_HELP.web_address}
+              aria-invalid={problem ? 'true' : undefined} aria-describedby="export-address-said"
+              oninput={(event) => typeWebAddress(event.currentTarget.value)} />
+            <p id="export-address-said" class="address-said" class:bad={problem} role="status">
+              {problem || (!webAddress.trim() && noAddress ? noAddress.text : '')}</p>
+          {/if}
+          <p class="export-note">Written to web/ in the destination, ready to put online. Exporting again replaces it.</p>
+        </div>
+      {:else if wordpress}
+        <!-- WordPress draft: its fields, its button and its result line, filled in by the WordPress branch. -->
+        <p class="export-note">WordPress drafts are not ready yet.</p>
+        <!-- end of the WordPress branch -->
+      {:else}
+        <p class="export-note">
+          {#if html}{several ? `${exportIds.length} HTML pages will be written, one per note.` : 'One HTML page will be written.'}
+            It holds its pictures and short clips, and reads offline.
+          {:else}{several ? `${exportIds.length} PDFs will be written, one per note.` : 'One PDF will be written.'}{/if}
+          Earlier exports are kept.
+        </p>
+      {/if}
       {#if page}
-        <section class="html-check" aria-label="The HTML page">
+        <section class="html-check" aria-label={web ? 'The web folder' : 'The HTML page'}>
           {#if page.weight}
             <p class="weight" class:over={page.weight > HTML_BUDGET} role="status">
               About {weightWords(page.weight)}{page.weight > HTML_BUDGET ? `, past the ${weightWords(HTML_BUDGET)} it aims under` : ''}.
@@ -851,7 +966,7 @@
           {/if}
           {#if page.links.length}
             <div class="listed">
-              <h5 class="listed-head">Played from a link, not inside the file</h5>
+              <h5 class="listed-head">Played from a link, not inside the {web ? 'folder' : 'file'}</h5>
               <ul aria-label="Clips turned into a link">
                 {#each page.links as item, index (index)}
                   <li>{several ? `${item.title}: ` : ''}{item.text}</li>
@@ -874,7 +989,7 @@
                 {/each}
               </ul>
               <label class="round" title="The note keeps its points as written">
-                <input type="checkbox" bind:checked={roundPov} /> Round them to about 150 m in this file
+                <input type="checkbox" bind:checked={roundPov} /> Round them to about 150 m in this {web ? 'folder' : 'file'}
               </label>
             </div>
           {/if}
@@ -913,9 +1028,13 @@
       <div class="modal-row">
         <div style="flex:1"></div>
         <button class="btn" onclick={closeExport}>Cancel</button>
-        <button class="btn btn-primary" disabled={exportBusy} onclick={() => runExport(exportIds)}>
-          {exportBusy ? 'Exporting…' : found.length ? 'Export anyway' : several ? `Export ${exportIds.length} ${html ? 'HTML pages' : 'PDFs'}` : `Export ${named}`}</button>
+        {#if !wordpress}
+          <button class="btn btn-primary" disabled={exportBusy || Boolean(problem)} onclick={() => runExport(exportIds)}>
+            {exportBusy ? 'Exporting…' : found.length ? 'Export anyway' : web ? (several ? `Export ${exportIds.length} web folders` : 'Export web folder')
+              : several ? `Export ${exportIds.length} ${html ? 'HTML pages' : 'PDFs'}` : `Export ${named}`}</button>
+        {/if}
       </div>
+      {/if}
     </Modal>
   {/if}
 
@@ -964,6 +1083,14 @@
   .fm-item.danger { color: var(--danger); }
   .export-dest { display: flex; align-items: center; gap: 8px; margin-top: 6px; font-size: var(--fs-sm); }
   .export-format { display: flex; align-items: center; gap: 8px; margin-top: 2px; font-size: var(--fs-sm); }
+  .web-fields { display: flex; flex-direction: column; gap: 4px; margin-top: 10px; font-size: var(--fs-sm); }
+  .web-fields .input { width: 100%; }
+  .address-said { margin: 0; min-height: 1.2em; color: var(--text-3); font-size: var(--fs-xs); }
+  .address-said.bad { color: var(--danger); }
+  .web-done { display: flex; flex-direction: column; gap: 6px; font-size: var(--fs-sm); }
+  .done-line { display: flex; align-items: center; gap: 6px; margin: 0; color: var(--text-1); font-weight: 600; overflow-wrap: anywhere; }
+  .done-line :global(svg) { color: var(--ok); flex: none; }
+  .done-actions { display: flex; gap: 8px; margin-top: 4px; }
   .html-check { margin-top: 10px; display: flex; flex-direction: column; gap: 8px; font-size: var(--fs-sm); }
   .weight { margin: 0; color: var(--text-2); }
   .weight.over { color: var(--warn); }

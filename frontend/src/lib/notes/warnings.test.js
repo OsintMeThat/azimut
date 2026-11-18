@@ -4,7 +4,7 @@ const { post } = vi.hoisted(() => ({ post: vi.fn() }));
 vi.mock('../api.js', () => ({ api: { post } }));
 
 const {
-  WARNING_KINDS, checkNotes, internalCount, isLeftOut, readCheck, readHtmlCheck, readWarning, warningKind,
+  WARNING_KINDS, checkNotes, internalCount, isLeftOut, isNoAddress, readCheck, readHtmlCheck, readWarning, warningKind,
 } = await import('./warnings.js');
 
 afterEach(() => vi.clearAllMocks());
@@ -12,7 +12,7 @@ afterEach(() => vi.clearAllMocks());
 describe('a warning', () => {
   it('keeps the kinds the server gives, and reads anything else as other', () => {
     expect(WARNING_KINDS).toEqual([
-      'missing', 'unsourced', 'open-task', 'local-link', 'empty-section', 'setting', 'other', 'internal', 'count',
+      'missing', 'unsourced', 'open-task', 'local-link', 'empty-section', 'setting', 'other', 'internal', 'count', 'address',
     ]);
     for (const kind of WARNING_KINDS) expect(warningKind(kind)).toBe(kind);
     expect(warningKind('shiny')).toBe('other');
@@ -91,6 +91,18 @@ describe('the check before export', () => {
       { note: 'case', title: 'Case notes', text: 'Roof', line: null },
     ]);
     expect(answer.found[0].warnings[0].kind).toBe('count');
+  });
+
+  it('checks a web folder in the public edition whatever is asked, and tells its missing address apart', async () => {
+    const NO_ADDRESS = { text: 'No address given: X shows the link without its picture card.', line: null, kind: 'address' };
+    post.mockResolvedValue({ notes: [{ note: 'n1', title: 'Port', internal: 1, weight: 2_000_000, earlier: 0, warnings: [NO_ADDRESS], links: [], pov: [] }] });
+    const answer = await checkNotes('c1', ['n1'], { edition: 'internal', format: 'web' });
+    expect(post.mock.calls[0][1]).toEqual({ notes: ['n1'], edition: 'public', format: 'web' });
+    expect(answer.weight).toBe(2_000_000);
+    const [said] = answer.found[0].warnings;
+    expect(said.kind).toBe('address');
+    expect(isNoAddress(said)).toBe(true);
+    expect(isNoAddress({ kind: 'internal' })).toBe(false);
   });
 
   it('leaves the PDF check as it was asked before HTML existed', async () => {

@@ -7006,7 +7006,7 @@ note holds at most 200, with a line naming the cut.
 
 **Several at once.** *Select* puts a box on every card; Shift-click picks a run,
 *Select all* the folder shown, Escape leaves. A bar at the foot says how many are
-picked and offers **Export** (one PDF or HTML page per note, into the notes destination)
+picked and offers **Export** (one PDF, HTML page or web folder per note, into the notes destination)
 and **Make a report**, which writes a new note holding one chapter per picked note in
 the order they were picked, in the Report look with a cover and a contents page, and
 opens it beside its pages.
@@ -7080,9 +7080,10 @@ passages it leaves out, and the Page pane has the same switch. Each export is a 
 file, never a replacement: a note with no internal passage has one edition, named
 `<title> - <day>.pdf` and listed as Public; a note with one is named `<title> -
 <internal|public> - <day>.pdf`; then `(2)` and so on that day. **⋯ › Editions**
-lists every PDF and HTML page a note was exported to, with its day, format, edition, a
-PDF's pages and the file (its
-SHA-256 on hover): *Show* opens its folder, and *Check* says *Unchanged since it was
+lists every PDF, HTML page and web folder a note was exported to, with its day, format,
+edition, a PDF's pages and the file (its
+SHA-256 on hover), a web folder's address under it: *Show* opens its folder (a web folder
+itself), and *Check* says *Unchanged since it was
 written*, *This file is not the one Azimut wrote* or *File missing*. The record (day,
 edition, file, folder, pages, the PDF's SHA-256 and the printed text's) is kept on the
 note, fifty at most, and travels in a bundle.
@@ -7146,6 +7147,35 @@ corrections read as in the article, and the contents are the bar at every width.
 `::: steps` and `::: story` blocks, internal boxes, the lightbox and the pair's slider work
 as in the article. Without script, printed or with motion turned down, a story reads top to
 bottom as the article does.
+
+**Web folder.** The export dialog's format switch reads *PDF · HTML page · Web folder ·
+WordPress draft*. A **Web folder** is the note's public edition as a folder ready to put
+online, so a post on X can link to it with a picture card (an HTML file cannot be attached
+there). It has no edition switch: the internal passages left out are said on one line.
+For one note the dialog asks the **Address it will live at**
+(`https://your-name.github.io/articles/short-name/`), kept per note in this browser and
+otherwise read back from its last web folder; a wrong one is said under the field and
+holds the export back, and while it is empty the check's line says X shows the link
+without its picture card. The folder is written to `web/` in the notes destination,
+named after the address's last part (else `<note>-<day>`), and an export of the same note
+under that name replaces it. The dialog then stays on *Folder written: web/<name>* with
+**Open the folder** and **How to publish**, the GitHub Pages steps also written into the
+folder as `HOW-TO-PUBLISH.md` (one text, `lib/githubPagesSetup.js` and
+`engine/notes_web.py`, held together by a test). The folder holds `index.html` (the HTML
+page itself, Article or Story, from the same renderer, its pictures, posters, clips,
+fonts and the reader's script and style sheet as files under `assets/`, named by their
+content), `share.jpg`, `.nojekyll` and the how-to. Its head carries the description (the
+cover's subtitle, else the first paragraph), Open Graph and Twitter card tags, and with an
+address the canonical link and absolute card addresses. **share.jpg** (1200 by 630) is the
+page's cover in small: the note's cover picture, else the picture its story opens on,
+under a dark veil with the title centred in the report's own face, the accent rule, the
+day, and an imagery or map provider's credit in its corner; with no picture, the title and
+the description on the report's paper under its accent. `POST /notes/web` writes it
+(`base_url` checked at the edge: https, no name or password, no `?` or `#`, 300
+characters at most; one note at a time with an address), records it with `format: web`,
+the page's SHA-256 and the address, and `POST /notes/pdf/check` with `format: web` says
+its weight and, kind `address`, when no address was given. The **WordPress draft** branch
+is filled in separately.
 
 **To Post.** In the open note's ⋯, kept out of the header, *To Post* opens Post on a Free post thread made of the
 note's public edition, or of the stretch selected in it, which its title then says;

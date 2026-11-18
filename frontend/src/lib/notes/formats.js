@@ -1,6 +1,8 @@
 /**
- * The two files a note exports to: a PDF, or one HTML page that holds everything it
- * shows and reads offline (`engine/notes_html.py`).
+ * What a note exports to: a PDF; one HTML page that holds everything it shows and
+ * reads offline (`engine/notes_html.py`); a web folder ready to put online, with the
+ * picture card a link to it shows on X (`engine/notes_web.py`); or a WordPress draft.
+ * The Page pane draws the first two.
  *
  * The export dialog and the Page pane each remember the last one picked, for this
  * browser, apart: a page read as HTML while writing does not decide what the next
@@ -9,17 +11,28 @@
 
 export const PDF = 'pdf';
 export const HTML = 'html';
-export const FORMATS = [PDF, HTML];
+export const WEB = 'web';
+export const WORDPRESS = 'wordpress';
+/** What the export dialog offers, in its order, and what the Page pane draws. */
+export const FORMATS = [PDF, HTML, WEB, WORDPRESS];
+export const PAGE_FORMATS = [PDF, HTML];
+/** What goes out in the public edition only: a page put online. */
+export const PUBLIC_ONLY = [WEB, WORDPRESS];
+/** How the export dialog names each, and the Page pane, where there are two. */
+export const FORMAT_LABELS = { [PDF]: 'PDF', [HTML]: 'HTML page', [WEB]: 'Web folder', [WORDPRESS]: 'WordPress draft' };
+export const PAGE_LABELS = { [PDF]: 'PDF', [HTML]: 'HTML' };
 
 const KEYS = {
   export: 'azimut:note-export-format',
   page: 'azimut:note-page-format',
 };
+const OFFERED = { export: FORMATS, page: PAGE_FORMATS };
 
-/** The format `where` (`export` or `page`) last used: `pdf` unless `html` was kept. */
+/** The format `where` (`export` or `page`) last used: `pdf` unless another it offers was kept. */
 export function readFormat(where, storage = globalThis.localStorage) {
   try {
-    return storage?.getItem(KEYS[where]) === HTML ? HTML : PDF;
+    const kept = storage?.getItem(KEYS[where]);
+    return (OFFERED[where] ?? PAGE_FORMATS).includes(kept) ? kept : PDF;
   } catch {
     return PDF;
   }
@@ -27,7 +40,7 @@ export function readFormat(where, storage = globalThis.localStorage) {
 
 export function keepFormat(where, format, storage = globalThis.localStorage) {
   try {
-    storage?.setItem(KEYS[where], format === HTML ? HTML : PDF);
+    storage?.setItem(KEYS[where], (OFFERED[where] ?? PAGE_FORMATS).includes(format) ? format : PDF);
   } catch { /* this browser keeps nothing; the choice holds for this visit */ }
 }
 
