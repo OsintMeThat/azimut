@@ -48,6 +48,13 @@ weight, the clips that become a Watch link, the points of view it shows and the
 earlier public editions. `/notes/html/preview` is the Page pane's copy, written
 nowhere, answered under a sandboxing policy so it never runs as the app. Its diagrams
 come as the SVG the browser drew, which is cleaned before it is placed.
+
+**Web folder.** `/notes/web` writes each note's public edition as a folder ready to
+put on the web (`engine/notes_web.py`), under `web/` in the same folder, its page's
+SHA-256 kept in the record of editions with `format: "web"` and the address it was
+given. The address is checked here, at the edge: https, no credentials, a bounded
+length. The check is `/notes/pdf/check` with `format: "web"`, which also says when
+no address was given, since X then shows no picture card.
 """
 
 from __future__ import annotations
@@ -72,6 +79,7 @@ from ..engine import exportdir
 from ..engine import links as link_engine
 from ..engine import notelook, notes_markdown
 from ..engine import notes_html as html_engine
+from ..engine import notes_web as web_engine
 from ..engine import notes_pdf as pdf_engine
 from ..engine import notefill, notefromcase, notelinks, notepieces, notetext
 from ..engine import pdffonts
@@ -202,9 +210,12 @@ class NotePreviewIn(PreviewIn):
 
 
 class CheckIn(EditionSelection):
-    """Notes to check before an export, the edition, and the format to be written."""
+    """Notes to check before an export, the edition, and the format to be written.
+    A web folder is the public edition whatever is asked, and ``base_url`` is the
+    address it will live at, when one is given."""
 
-    format: Literal["pdf", "html"] = "pdf"
+    format: Literal["pdf", "html", "web"] = "pdf"
+    base_url: str | None = Field(default=None, max_length=web_engine.MAX_ADDRESS)
 
 
 class HtmlPreviewIn(NotePreviewIn):
@@ -223,6 +234,21 @@ class HtmlExportIn(EditionSelection):
     printed at the end of the public file and kept in its record.
     """
 
+    diagrams: dict[str, str] = Field(default_factory=dict)
+    round_pov: bool = False
+    changes: str = Field(default="", max_length=MAX_CHANGES)
+
+
+class WebExportIn(NoteSelection):
+    """Which notes to write as web folders, always in the public edition.
+
+    ``base_url`` is the address the folder will live at, which makes its link card
+    whole; it names one note's folder, so it goes with one note at a time. The rest is
+    the HTML export's own.
+    """
+
+    edition: Literal["public"] = "public"
+    base_url: str | None = Field(default=None, max_length=web_engine.MAX_ADDRESS)
     diagrams: dict[str, str] = Field(default_factory=dict)
     round_pov: bool = False
     changes: str = Field(default="", max_length=MAX_CHANGES)
@@ -710,19 +736,7 @@ def _note_title(case: Case, note_id: str) -> str:
 
 def _resolver(case: Case) -> notes_markdown.Resolve:
     """How a chapter finds the note it prints: as saved, the case notes included."""
-
-    def resolve(note_id: str) -> tuple[str, str] | None:
-        if note_id == CASE_NOTE:
-            return "Case notes", case.read_notes()
-        entity = case.get_entity(note_id)
-        if entity is None or entity.get("type") != "note":
-            return None
-        try:
-            return str(entity.get("label") or "Note"), case.read_note(note_id)
-        except CaseError:
-            return None
-
-    return resolve
+    return notes_markdown.case_resolver(case)
 
 
 def _restate(case: Case, note_id: str, text: str) -> None:
@@ -834,6 +848,9 @@ def check_pdf(case_id: str, body: CheckIn) -> dict[str, Any]:
     case = get_case(case_id)
     resolve = _resolver(case)
     public = body.edition == notes_markdown.PUBLIC
+    if body.format == "web":
+        where = _web_address(body.base_url)
+        return {"notes": [_check_html(case, note_id, resolve, True, web=where) for note_id in dict.fromkeys(body.notes)]}
     if body.format == "html":
         return {"notes": [_check_html(case, note_id, resolve, public) for note_id in dict.fromkeys(body.notes)]}
     answered: list[dict[str, Any]] = []
@@ -863,20 +880,28 @@ def check_pdf(case_id: str, body: CheckIn) -> dict[str, Any]:
     return {"notes": answered}
 
 
-def _check_html(case: Case, note_id: str, resolve: notes_markdown.Resolve, public: bool) -> dict[str, Any]:
+def _check_html(
+    case: Case, note_id: str, resolve: notes_markdown.Resolve, public: bool, *, web: str | None = None
+) -> dict[str, Any]:
     """One note's check for its HTML file: the warnings, as the PDF's check gives them
     and with bare counts as kind `count`; the file's weight in bytes, every picture
     encoded as the export encodes it; the clips that go as a Watch link and the points
-    of view it shows, each with its line; and how many public editions came before."""
+    of view it shows, each with its line; and how many public editions came before.
+    With ``web`` (the address given, or "") it checks the note's web folder instead,
+    which weighs its files and says when it has no address (kind `address`)."""
     title, text = _note_source(case, note_id)
     answer: dict[str, Any] = {"note": note_id, "title": title, "warnings": [], "internal": 0, "weight": 0,
                               "links": [], "pov": [], "earlier": 0}
+    rendered: html_engine.RenderedHtml | web_engine.WebBuild
     try:
-        rendered = html_engine.render(
-            case, title=title, text=text, look=notelook.stored(case, note_id), note_id=note_id, resolve=resolve,
-            public=public, check=True,
-        )
-    except html_engine.NotesHtmlError as exc:
+        if web is not None:
+            rendered = web_engine.build(case, note_id, base_url=web, check=True)
+        else:
+            rendered = html_engine.render(
+                case, title=title, text=text, look=notelook.stored(case, note_id), note_id=note_id, resolve=resolve,
+                public=public, check=True,
+            )
+    except (html_engine.NotesHtmlError, web_engine.NotesWebError) as exc:
         answer["warnings"] = [{"text": str(exc)[:MAX_WARNING_CHARS], "line": None, "kind": notes_markdown.OTHER}]
         return answer
     warnings = [
@@ -1017,6 +1042,82 @@ def export_html(case_id: str, body: HtmlExportIn) -> dict[str, Any]:
         "warnings": warnings,
         "folder": EXPORTS_DIR if in_case else str(destination),
         "path": str(destination),
+    }
+
+
+def _web_address(value: str | None) -> str:
+    """The address a web folder will live at, checked at the edge; 422 when it is not one."""
+    try:
+        return web_engine.address(value)
+    except web_engine.NotesWebError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+
+@router.post("/{case_id}/notes/web")
+def export_web(case_id: str, body: WebExportIn) -> dict[str, Any]:
+    """Write one web folder per requested note under `web/` in the notes export folder,
+    each the public edition, kept in the note's record of editions.
+
+    A note's folder is named after its address, else its title and the day, and an
+    export of the same note under that name replaces it: it is one page, put online
+    again (`engine/notes_web.py`). Answers as `/notes/html` does, each folder written
+    with when, where and the address it was made for.
+    """
+    case = get_case(case_id)
+    where = _web_address(body.base_url)
+    notes = list(dict.fromkeys(body.notes))
+    if where and len(notes) > 1:
+        raise HTTPException(status_code=422, detail="an address names one note's folder: export one note with it")
+    diagrams = _svg_diagrams(body.diagrams)
+    try:
+        destination = exportdir.destination("notes", case.path)
+    except exportdir.ExportDirError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    in_case = destination == layout.subdir(case.path, EXPORTS_DIR)
+    selected = [(note_id, *_note_source(case, note_id)) for note_id in notes]
+    peers = case.note_ids_by_titles({title for _, title, _ in selected})
+    peers.setdefault("case notes", []).append(CASE_NOTE)
+    written: list[dict[str, Any]] = []
+    warnings: list[str] = []
+    changes = " ".join(body.changes.split())
+    for note_id, title, _ in selected:
+        now = _now()
+        try:
+            made = web_engine.build(
+                case, note_id, base_url=where, diagrams=diagrams, round_pov=body.round_pov, changes=changes,
+                earlier=_read_editions(case, note_id), homonym=len(peers.get(title.casefold(), [])) >= 2, now=now,
+            )
+        except (html_engine.NotesHtmlError, web_engine.NotesWebError) as exc:
+            warnings.append(f"{title}: {exc}")
+            continue
+        try:
+            web_engine.write(made, destination / web_engine.WEB_DIR / made.name)
+        except (OSError, web_engine.NotesWebError) as exc:
+            raise HTTPException(status_code=409, detail=f"could not write the folder: {errors.explain(exc)}") from exc
+        record: dict[str, Any] = {
+            "at": now.astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+            "edition": notes_markdown.PUBLIC,
+            "file": made.name,
+            "folder": EXPORTS_DIR if in_case else str(destination),
+            "format": "web",
+            "sha256": made.sha256,
+            "text_sha256": made.text_sha256,
+        }
+        if where:
+            record["address"] = where
+        if changes:
+            record["changes"] = changes[:MAX_CHANGES]
+        _record_edition(case, note_id, record)
+        written.append({"note": note_id, "title": title, "file": made.name, "edition": notes_markdown.PUBLIC,
+                        "bytes": made.weight, "at": record["at"], "folder": record["folder"], "address": where})
+        warnings.extend(f"{title}: {warning}" for warning in made.warnings)
+    if not written:
+        raise HTTPException(status_code=422, detail="; ".join(warnings) or "nothing to export")
+    return {
+        "written": written,
+        "warnings": warnings,
+        "folder": EXPORTS_DIR if in_case else str(destination),
+        "path": str(destination / web_engine.WEB_DIR),
     }
 
 
@@ -1186,8 +1287,9 @@ def _read_editions(case: Case, note_id: str) -> list[dict[str, Any]]:
 
 
 def _edition_record(item: Any) -> dict[str, Any] | None:
-    """One record read back: a PDF's as it always was, or an HTML file's, which says
-    its format and its file's SHA-256 and has no pages."""
+    """One record read back: a PDF's as it always was, or an HTML file's or a web
+    folder's, which says its format and its page's SHA-256 and has no pages; a web
+    folder's ``file`` is the folder's name, and it keeps the address it was made for."""
     if not isinstance(item, dict):
         return None
     at, edition, file, folder = item.get("at"), item.get("edition"), item.get("file"), item.get("folder")
@@ -1196,15 +1298,22 @@ def _edition_record(item: Any) -> dict[str, Any] | None:
         return None
     if not (isinstance(file, str) and layout.names_one_child(file) and isinstance(folder, str) and folder):
         return None
-    if item.get("format") == "html":
+    if item.get("format") in ("html", "web"):
         sha = item.get("sha256")
         if not (isinstance(sha, str) and SHA256.match(sha) and isinstance(text_sha, str) and SHA256.match(text_sha)):
             return None
-        record = {"at": at, "edition": edition, "file": file, "folder": folder, "format": "html", "sha256": sha,
-                  "text_sha256": text_sha}
+        record = {"at": at, "edition": edition, "file": file, "folder": folder, "format": item["format"],
+                  "sha256": sha, "text_sha256": text_sha}
         changes = item.get("changes")
         if isinstance(changes, str) and changes.strip():
             record["changes"] = " ".join(changes.split())[:MAX_CHANGES]
+        if item["format"] == "web":
+            try:
+                where = web_engine.address(item.get("address") if isinstance(item.get("address"), str) else None)
+            except web_engine.NotesWebError:
+                where = ""
+            if where:
+                record["address"] = where
         return record
     if not (isinstance(pages, int) and not isinstance(pages, bool) and pages >= 0):
         return None
@@ -1236,10 +1345,12 @@ def _edition_path(case: Case, record: dict[str, Any]) -> Path | None:
     """Where an edition was written: the case's own exports, or the absolute folder
     the analyst had chosen. None for a folder this machine cannot name."""
     folder = record["folder"]
+    # a web folder is checked by its page, and shown as itself
+    tail = (web_engine.WEB_DIR, record["file"], web_engine.INDEX) if record.get("format") == "web" else (record["file"],)
     if folder == EXPORTS_DIR:
-        return layout.subdir(case.path, EXPORTS_DIR) / record["file"]
+        return layout.subdir(case.path, EXPORTS_DIR).joinpath(*tail)
     where = Path(folder)
-    return where / record["file"] if where.is_absolute() else None
+    return where.joinpath(*tail) if where.is_absolute() else None
 
 
 def _file_sha256(path: Path) -> str | None:
@@ -1260,8 +1371,8 @@ def _file_sha256(path: Path) -> str | None:
 
 @router.get("/{case_id}/notes/{note_id}/editions")
 def note_editions(case_id: str, note_id: str) -> dict[str, Any]:
-    """The PDFs and HTML files a note was exported as, newest first: day, edition, file,
-    pages (a PDF's), format (an HTML file's) and hashes."""
+    """The PDFs, HTML files and web folders a note was exported as, newest first: day,
+    edition, file, pages (a PDF's), format (the others') and hashes."""
     case = get_case(case_id)
     _require_note(case, note_id)
     return {"editions": _read_editions(case, note_id)}

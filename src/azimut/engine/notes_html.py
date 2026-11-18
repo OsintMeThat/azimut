@@ -39,6 +39,12 @@ warning (`COUNT`), never changed. A confidence the analyst typed is printed as t
 pictures hold still while the words after each go by (`_scenes`, the `::: story` markup
 reused). The text is the same in both, only grouped; the reader script and style sheet
 do the rest, and the page still reads top to bottom without them.
+
+**As a folder.** Given a `Folder`, the same page is laid out for the web
+(`engine/notes_web.py`): each picture, clip, font and the reader's own two files go
+under `assets/`, named by their content, and the page names them in place of `data:`
+addresses, under the folder's own policy. Nothing else changes: the same reading, the
+same safety, the same budget, counted over the whole folder.
 """
 
 from __future__ import annotations
@@ -57,8 +63,8 @@ from dataclasses import dataclass, field
 from datetime import date, datetime
 from io import BytesIO
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Iterable
-from urllib.parse import unquote, urlsplit
+from typing import TYPE_CHECKING, Any, Callable, Iterable
+from urllib.parse import unquote, unquote_to_bytes, urlsplit
 from xml.etree import ElementTree
 
 import defusedxml.ElementTree as SafeTree
@@ -173,6 +179,8 @@ HEDGES = re.compile(
     r"\bminimum\s+of|\bmaximum\s+of|\bc\.|\bca\.|~|≥|≤|>|<|\d\s*(?:to|or|-|–|—)\s*)\s*$",
     re.I,
 )
+#: How long a page's description runs, for a link's card.
+DESCRIPTION_CHARS = 200
 #: How many credits of one kind a figure names before it counts the rest.
 MAX_CREDITS = 4
 #: How many counts the check's one warning quotes.
@@ -181,6 +189,59 @@ MAX_COUNTS = 5
 
 class NotesHtmlError(Exception):
     """The note could not be turned into a page."""
+
+
+#: Where a folder keeps what its page shows, beside the page.
+FOLDER_ASSETS = "assets"
+#: The suffix of each kind of file a folder holds, by its type.
+FILE_SUFFIXES = {"image/jpeg": ".jpg", "image/png": ".png", "image/gif": ".gif", "image/svg+xml": ".svg"}
+#: A `data:` address in the reader's stylesheet, which a folder lifts out into a file.
+CSS_DATA = re.compile(r"url\(\"data:([\w/+.-]+)(;base64)?,([^\"]*)\"\)")
+
+
+@dataclass
+class Folder:
+    """A page laid out as a folder of files rather than one file (`engine/notes_web.py`).
+
+    ``files`` fills as the page is laid out, each under `assets/` and named by its
+    content, so a picture shown twice is one file. ``csp`` is the folder's policy;
+    ``head`` gives the lines its head adds (the link card's tags) from the page's
+    description.
+    """
+
+    csp: str
+    head: Callable[[str], str] | None = None
+    files: dict[str, bytes] = field(default_factory=dict)
+    _named: dict[str, str] = field(default_factory=dict, repr=False)
+
+    @property
+    def weight(self) -> int:
+        return sum(len(data) for data in self.files.values())
+
+    def put(self, data: bytes, name: str, suffix: str) -> str:
+        """The address of ``data`` in the folder, `assets/<sha8>-<name><suffix>`."""
+        digest = hashlib.sha256(data).hexdigest()
+        known = self._named.get(digest)
+        if known is not None:
+            return known
+        stem = _file_stem(name)
+        path = f"{FOLDER_ASSETS}/{digest[:8]}-{stem}{suffix}"
+        if path in self.files:
+            path = f"{FOLDER_ASSETS}/{digest[:16]}-{stem}{suffix}"
+        self.files[path] = data
+        self._named[digest] = path
+        return path
+
+
+@dataclass(frozen=True)
+class Hero:
+    """The picture a page opens on, as the story layout picks it (`hero()` in
+    reader.js): the cover's, else the first that came from somewhere (it has a credit),
+    else the first. ``credit`` is what the imagery, map or terrain in it owes, in words."""
+
+    path: Path
+    credit: str
+    alt: str
 
 
 @dataclass
@@ -203,6 +264,12 @@ class RenderedHtml:
     pov: list[tuple[str, int | None]] = field(default_factory=list)
     #: The Mermaid fences drawn as source because no SVG came with them, as (key, source).
     diagrams: list[tuple[str, str]] = field(default_factory=list)
+    #: What the page is about in a sentence or two: the cover's subtitle, else its first paragraph.
+    description: str = ""
+    #: The picture it opens on, or None for a page with no picture to open on.
+    hero: Hero | None = None
+    #: The day it is dated.
+    day: date | None = None
 
 
 def render(
@@ -222,6 +289,7 @@ def render(
     round_pov: bool = False,
     changes: str = "",
     earlier: Iterable[dict[str, Any]] = (),
+    folder: Folder | None = None,
 ) -> RenderedHtml:
     """Lay one note out as an HTML page.
 
@@ -233,6 +301,7 @@ def render(
     rounds every point of view to about `POV_METRES`. ``changes`` is the line the
     analyst wrote about what this edition changed, and ``earlier`` the note's earlier
     editions as its record keeps them; the public ones are listed at the end.
+    ``folder`` lays it out for the web, its files in the folder rather than the page.
     """
     look = look or DEFAULT_LOOK
     day = date.fromisoformat(look.cover.date) if look.cover.date else (created or datetime.now()).date()
@@ -263,7 +332,7 @@ def render(
         cited.warn(notefill.NO_NAME, empty["name"], md.SETTING)
     # a note with no internal passage has one edition, shareable as it stands: it says public
     page = _Page(case, look=look, theme=theme, cited=cited, diagrams=diagrams or {}, light=light, check=check,
-                 public=public or not passages[0], round_pov=round_pov, day=day)
+                 public=public or not passages[0], round_pov=round_pov, day=day, folder=folder)
     printed = hashlib.sha256(md.printed_source(shown).encode("utf-8")).hexdigest()
     document = page.build(title, pieces, blocks, cover=cover, printed=printed, changes=changes, earlier=earlier)
     return RenderedHtml(
@@ -277,6 +346,9 @@ def render(
         links=page.links,
         pov=page.pov,
         diagrams=list(page.missing.items()),
+        description=page.description,
+        hero=page.hero,
+        day=day,
     )
 
 
@@ -346,6 +418,7 @@ class _Page:
         public: bool,
         round_pov: bool,
         day: date,
+        folder: Folder | None = None,
     ) -> None:
         self.case = case
         self.look = look
@@ -386,6 +459,12 @@ class _Page:
         self._quoted = 0
         self._notices: set[str] = set()
         self._svgs = 0
+        self.folder = folder
+        self.description = ""
+        #: The pictures a page could open on: the cover's, then the body's in order,
+        #: each with whether it has a credit (`Hero`).
+        self._cover_hero: Hero | None = None
+        self._heroes: list[tuple[Hero, bool]] = []
 
     # -- the whole document -------------------------------------------------------
 
@@ -445,6 +524,7 @@ class _Page:
         if self._counts:
             self._warn(_counts_said([phrase for phrase, _ in self._counts]), self._counts[0][1], COUNT)
         body = self._scrub("".join(self.out))
+        self.description = self._describe(body)
         sources = self._sources()
         corrections = self._corrections(changes, earlier)
         footer = self._footer(printed)
@@ -458,30 +538,43 @@ class _Page:
 
     def _assemble(self, title: str, page: str) -> bytes:
         """The page with its clips and timecodes settled, wrapped in its document."""
-        css = _asset("reader.css").replace("</", "<\\/")
-        script = _asset("reader.js").replace("</", "<\\/")
-        fonts = _font_faces(self.look, self.theme, _visible_text(page) + title)
+        fonts = _font_faces(self.look, self.theme, _visible_text(page) + title, self.folder)
         accent = f' style="--az-accent:{self.look.accent}"' if self.look.accent else ""
         tlp = f' data-tlp="{self.look.tlp}"' if self.look.tlp else ""
         web = f' data-web="{self.look.web}"' if self.look.web else ""
         edition = md.PUBLIC if self.public else md.INTERNAL
+        if self.folder is None:
+            policy, said = CSP, ""
+            css = _asset("reader.css").replace("</", "<\\/")
+            styles = f'<style id="az-reader">{css}</style>\n'
+            code = _asset("reader.js").replace("</", "<\\/")
+            script = f"<script>{code}</script>\n"
+        else:
+            # the reader's two files beside the page, which its policy lets in from the folder only
+            policy = self.folder.csp
+            said = self.folder.head(self.description) if self.folder.head is not None else ""
+            sheet = self.folder.put(self._folder_css(), "reader", ".css")
+            styles = f'<link rel="stylesheet" id="az-reader" href="{sheet}">\n'
+            code_file = self.folder.put(_asset("reader.js").encode("utf-8"), "reader", ".js")
+            script = f'<script src="{code_file}"></script>\n'
         top = (
             f'<!doctype html>\n<html lang="en" dir="auto" data-look="{self.look.style}" data-font="{self.look.font}"'
             f'{tlp}{web} data-edition="{edition}"{accent}>\n<head>\n<meta charset="utf-8">\n'
             '<meta name="viewport" content="width=device-width, initial-scale=1">\n'
             '<meta name="referrer" content="no-referrer">\n'
-            f'<meta http-equiv="Content-Security-Policy" content="{CSP}">\n'
+            f'<meta http-equiv="Content-Security-Policy" content="{policy}">\n'
             '<meta name="generator" content="Azimut">\n'
-            f"<title>{_text(title)}</title>\n"
+            f"<title>{_text(title)}</title>\n{said}"
             f'{_wrapped("az-fonts", fonts, "style")}'
-            f'<style id="az-reader">{css}</style>\n</head>\n<body>\n'
+            f"{styles}</head>\n<body>\n"
         )
-        bottom = f"<script>{script}</script>\n</body>\n</html>\n"
+        bottom = f"{script}</body>\n</html>\n"
         frame = len((top + bottom).encode("utf-8"))
         settled = self._settle_clips(page, frame)
         document = top + settled + bottom
         data = document.encode("utf-8")
-        self.weight = len(data) + (sum(clip.weight for clip in self.clips if clip.embedded) if self.check else 0)
+        held = self.folder.weight if self.folder is not None else 0
+        self.weight = len(data) + held + (sum(clip.weight for clip in self.clips if clip.embedded) if self.check else 0)
         if self.weight > MAX_BYTES:
             self._warn(f"The page weighs {_megabytes(self.weight)}, past the {_megabytes(MAX_BYTES)} it aims for.",
                        None, md.OTHER)
@@ -490,11 +583,12 @@ class _Page:
     def _settle_clips(self, page: str, frame: int) -> str:
         """Each clip in or as its link, in page order, while the file stays under
         `MAX_BYTES`; then each timecode bound to the clip it is about."""
-        used = len(page.encode("utf-8")) + frame
+        # a folder counts every file it holds; a clip there is its own bytes, not their base64
+        used = len(page.encode("utf-8")) + frame + (self.folder.weight if self.folder is not None else 0)
         for clip in self.clips:
             if not clip.candidate or self.light or clip.path is None:
                 continue
-            cost = 4 * ((clip.size + 2) // 3) + 200
+            cost = (clip.size if self.folder is not None else 4 * ((clip.size + 2) // 3)) + 200
             if used + cost > MAX_BYTES:
                 continue
             if self.check:
@@ -505,6 +599,14 @@ class _Page:
             if data is None:
                 self._warn(f'The clip "{clip.label}" could not be copied without its metadata, so it is a link.',
                            clip.line, md.OTHER)
+                continue
+            if self.folder is not None:
+                if used + len(data) > MAX_BYTES:
+                    continue
+                suffix = clip.path.suffix.lower() if clip.path.suffix.lower() in CLIP_TYPES else ".mp4"
+                named = "clip" if clip.label == clip.path.stem else clip.label
+                clip.embedded, clip.data, clip.weight = True, self.folder.put(data, named, suffix), len(data)
+                used += len(data)
                 continue
             encoded = f"data:{clip.mime};base64,{base64.b64encode(data).decode('ascii')}"
             if used + len(encoded) > MAX_BYTES:
@@ -631,14 +733,15 @@ class _Page:
             self._warn("A video cannot be a cover picture; the cover was drawn without it.", None)
             return ""
         path = self._case_path(str(attrs["path"]))
-        encoded = self._picture(path) if path is not None else None
-        if encoded is None:
+        alt = str(record.get("label") or "Cover picture")
+        encoded = self._picture(path, name=alt) if path is not None else None
+        if encoded is None or path is None:
             self._warn("The cover picture could not be read; the cover was drawn without it.", None)
             return ""
         source = self.cited.reader.entity(entity_id)
         uri, size = encoded
-        alt = str(record.get("label") or "Cover picture")
         credit = self._credit(source, self.cited.number(source))
+        self._cover_hero = Hero(path, _credit_words(source), alt)
         caption = f"<figcaption>{credit}</figcaption>" if credit else ""
         return (f'<figure class="az-figure az-cover-figure" data-kind="picture">'
                 f"{_zoom_button(_img(uri, size, alt), alt)}{caption}</figure>\n")
@@ -1205,7 +1308,7 @@ class _Page:
             url = source.traced_address if source is not None else ""
             named = f"<a {_outward(url)}>[{_text(words)}]</a>" if url else f"[{_text(words)}]"
             return f'<span class="az-inline-video">{named}</span>{_cite(number) if number else ""}'
-        encoded = self._picture(path, INLINE_SIDE)
+        encoded = self._picture(path, INLINE_SIDE, words)
         if encoded is None:
             return f'<span class="az-missing">[{_text(words)}]</span>'
         uri, size = encoded
@@ -1252,13 +1355,33 @@ class _Page:
         except Exception:
             return None
 
-    def _picture(self, path: Path, side: int = PICTURE_SIDE) -> tuple[str, tuple[int, int]] | None:
-        """A picture of the case as a `data:` address and its size, without its metadata."""
+    def _picture(self, path: Path, side: int = PICTURE_SIDE, name: str = "picture") -> tuple[str, tuple[int, int]] | None:
+        """A picture of the case as a `data:` address and its size, without its metadata;
+        in a folder, the address of its file there, named after ``name``."""
         made = PICTURES.get(path, PREVIEW_SIDE if self.light else side)
         if made is None:
             return None
         data, mime, size = made
+        if self.folder is not None:
+            return self.folder.put(data, name, FILE_SUFFIXES.get(mime, ".jpg")), size
         return f"data:{mime};base64,{base64.b64encode(data).decode('ascii')}", size
+
+    def _folder_css(self) -> bytes:
+        """The reader's stylesheet as a folder holds it: each picture it names as a
+        `data:` address lifted out into a file beside it."""
+        assert self.folder is not None
+        folder = self.folder
+
+        def lift(match: re.Match[str]) -> str:
+            mime, packed, value = match.group(1), match.group(2), match.group(3)
+            try:
+                data = base64.b64decode(value, validate=True) if packed else unquote_to_bytes(value)
+            except ValueError:
+                return match.group(0)
+            # the stylesheet sits in the same folder as the file it names
+            return f'url("{folder.put(data, "icon", FILE_SUFFIXES.get(mime, ".bin")).rsplit("/", 1)[-1]}")'
+
+        return CSS_DATA.sub(lift, _asset("reader.css")).encode("utf-8")
 
     def _figure(self, token: Token, *, extra: str = "") -> str:
         """A picture standing alone, as the figure its kind asks for."""
@@ -1312,7 +1435,7 @@ class _Page:
         if sides is not None:
             shown = sides
         else:
-            encoded = self._picture(path)
+            encoded = self._picture(path, name=alt)
             if encoded is None:
                 said = md.cut_text(words or "Untitled", 80)
                 self._warn(f'Picture "{said}" could not be read.', self._line, md.MISSING)
@@ -1320,6 +1443,8 @@ class _Page:
             uri, size = encoded
             shown = _zoom_button(_img(uri, size, alt), alt)
             layout += _shape(size)
+            if not graphic:
+                self._may_open_on(Hero(path, _credit_words(source), alt), bool(credit))
         proof = self._proof(record, source) if kind == "proof" else ""
         opening = _one_style(f'class="{classes}" data-kind="{kind}"{layout}{extra}')
         return f"<figure {opening}>\n{shown}\n{proof}{figcaption}{chain}</figure>\n"
@@ -1334,10 +1459,11 @@ class _Page:
                 data = path.read_bytes()
             except OSError:
                 return ""
-            uri = f"data:image/svg+xml;base64,{base64.b64encode(data).decode('ascii')}"
+            uri = (self.folder.put(data, name, ".svg") if self.folder is not None
+                   else f"data:image/svg+xml;base64,{base64.b64encode(data).decode('ascii')}")
             size = notefill.AZIMUT_LOGO_SIZE
         else:
-            encoded = self._picture(path, POSTER_SIDE)
+            encoded = self._picture(path, POSTER_SIDE, name)
             if encoded is None:
                 return ""
             uri, size = encoded
@@ -1365,30 +1491,7 @@ class _Page:
         from. Past `MAX_CREDITS` of a kind the rest are counted; How this was checked
         names them all."""
         cite = f" {_cite(number)}" if number else ""
-        groups: dict[str, list[tuple[str, str]]] = {}
-        seen: set[str] = set()
-
-        def add(kind: str, words: str, link: str = "", *also: str) -> None:
-            words = " ".join(words.split())
-            key = words.casefold()
-            if not key or key in seen:
-                return
-            seen.update({key, *(" ".join(one.split()).casefold() for one in also)})
-            groups.setdefault(kind, []).append((words, link))
-
-        for kind, leaf in _credit_leaves(source):
-            if kind == "Imagery":
-                for reading in leaf.readings:
-                    day = notesources.spoken_day(reading.day)
-                    add(kind, ", ".join(part for part in (reading.provider, day) if part), leaf.address,
-                        reading.provider)
-                for part in leaf.attribution.split(" · "):
-                    add(kind, part)
-            elif kind == "Source":
-                add(kind, notesources.host(leaf.address), leaf.address)
-            else:
-                for part in leaf.attribution.split(" · "):
-                    add(kind, part)
+        groups = _credit_groups(source)
         if not groups:
             return f'<span class="az-credit">{cite.strip()}</span>\n' if number else ""
         said: list[str] = []
@@ -1399,6 +1502,35 @@ class _Page:
             tail = f" and {more} more" if more > 0 else ""
             said.append(f'<span class="az-credit-kind">{_text(kind)}:</span> {" · ".join(shown)}{tail}')
         return f'<span class="az-credit">{"; ".join(said)}{cite}</span>\n'
+
+    def _may_open_on(self, hero: Hero, credited: bool) -> None:
+        """A picture the page could open on: the first of a cover of its own is the cover's."""
+        if self._on_cover:
+            if self._cover_hero is None:
+                self._cover_hero = hero
+            return
+        self._heroes.append((hero, credited))
+
+    @property
+    def hero(self) -> Hero | None:
+        if self._cover_hero is not None:
+            return self._cover_hero
+        credited = next((hero for hero, said in self._heroes if said), None)
+        return credited or (self._heroes[0][0] if self._heroes else None)
+
+    def _describe(self, body: str) -> str:
+        """What the page is about, for a link's card: the cover's subtitle, else the
+        first paragraph of its text, citations left out."""
+        said = " ".join(self.look.cover.subtitle.split())
+        if not said:
+            found = re.search(r'<p dir="auto">(.*?)</p>', body, re.S)
+            if found is None:
+                return ""
+            inner = re.sub("\x00T(\\d+)\x00", lambda match: _text(self.times[int(match.group(1))].words),
+                           found.group(1))
+            inner = re.sub(r'<a class="az-cite"[^>]*>.*?</a>', "", inner)
+            said = " ".join(html.unescape(re.sub("<[^>]*>|\x00C\\d+\x00", "", inner)).split())
+        return _clipped(said, DESCRIPTION_CHARS)
 
     def _street_view(self, source: Source | None) -> None:
         """Say once that a site's rules keep its picture out of published work."""
@@ -1494,7 +1626,7 @@ class _Page:
         files = [self._case_path(str(sides.get(side) or "")) if sides.get(side) else None for side in ("a", "b")]
         if any(file is None or not file.is_file() for file in files):
             return None
-        encoded = [self._picture(file) for file in files if file is not None]
+        encoded = [self._picture(file, name=role) for file, role in zip(files, ("before", "after")) if file is not None]
         if len(encoded) != 2 or any(one is None for one in encoded):
             return None
         days = [_side_day(sidecar, side) for side in ("a", "b")]
@@ -1564,7 +1696,7 @@ class _Page:
         still = thumbnails.thumb_relpath(sha, "video") if sha else None
         still_path = self._case_path(still) if still else None
         if still_path is not None and still_path.is_file():
-            encoded = self._picture(still_path, POSTER_SIDE)
+            encoded = self._picture(still_path, POSTER_SIDE, f"{words or title or 'clip'} poster")
             if encoded is not None:
                 poster, poster_size = encoded
         url = source.traced_address if source is not None else ""
@@ -1672,7 +1804,7 @@ class _Page:
             except ValueError:
                 continue
             fingerprint = str(record.get("sha256") or record.get("pdf_sha256") or "")
-            what = "HTML" if record.get("format") == "html" else "PDF"
+            what = {"html": "HTML", "web": "Web page"}.get(str(record.get("format")), "PDF")
             words = f" <span>{_text(' '.join(str(record['changes']).split())[:300])}</span>"
             rows.append(f'<li><time datetime="{stamp[:10]}">{_text(when)}</time> {what}{words} '
                         f'<span class="az-hash">SHA-256 <code>{_attr(fingerprint)}</code></span></li>')
@@ -1830,10 +1962,10 @@ _FONTS_LOCK = threading.Lock()
 MAX_KEPT_FONTS = 24
 
 
-def _font_faces(look: NoteLook, theme: notes_style.Theme, text: str) -> str:
+def _font_faces(look: NoteLook, theme: notes_style.Theme, text: str, folder: Folder | None = None) -> str:
     """The `@font-face` rules for the look's typeface, each face cut to the characters
     the page draws and packed as WOFF. None for a plain look with no face chosen, which
-    reads in the reader's own fonts."""
+    reads in the reader's own fonts. In a ``folder`` each face is a file of its own."""
     if look.style == "plain" and not look.font:
         return ""
     codes = _subset_codes(text)
@@ -1848,8 +1980,11 @@ def _font_faces(look: NoteLook, theme: notes_style.Theme, text: str) -> str:
             woff = _subset(files[(weight, style)], codes)
             if woff is None:
                 continue
-            rules.append(f'@font-face{{font-family:"{name}";src:url(data:font/woff;base64,'
-                         f'{base64.b64encode(woff).decode("ascii")}) format("woff");font-weight:{weight};'
+            if folder is not None:
+                address = folder.put(woff, f"{name}-{weight}-{style}", ".woff")
+            else:
+                address = f"data:font/woff;base64,{base64.b64encode(woff).decode('ascii')}"
+            rules.append(f'@font-face{{font-family:"{name}";src:url({address}) format("woff");font-weight:{weight};'
                          f"font-style:{style};font-display:swap}}")
     return "\n".join(rules)
 
@@ -2171,6 +2306,66 @@ def _credit_leaves(source: Source | None, depth: int = 0) -> Iterable[tuple[str,
             yield from _credit_leaves(origin, depth + 1)
     elif source.attribution:
         yield ("Map" if source.noun == notesources.PLATE_NOUN else "Terrain"), source
+
+
+def _credit_groups(source: Source | None) -> dict[str, list[tuple[str, str]]]:
+    """A figure's credit by kind (Imagery, Source, Map, Terrain): each name once, with
+    the address it links to, whatever its case (`_Page._credit`)."""
+    groups: dict[str, list[tuple[str, str]]] = {}
+    seen: set[str] = set()
+
+    def add(kind: str, words: str, link: str = "", *also: str) -> None:
+        words = " ".join(words.split())
+        key = words.casefold()
+        if not key or key in seen:
+            return
+        seen.update({key, *(" ".join(one.split()).casefold() for one in also)})
+        groups.setdefault(kind, []).append((words, link))
+
+    for kind, leaf in _credit_leaves(source):
+        if kind == "Imagery":
+            for reading in leaf.readings:
+                day = notesources.spoken_day(reading.day)
+                add(kind, ", ".join(part for part in (reading.provider, day) if part), leaf.address,
+                    reading.provider)
+            for part in leaf.attribution.split(" · "):
+                add(kind, part)
+        elif kind == "Source":
+            add(kind, notesources.host(leaf.address), leaf.address)
+        else:
+            for part in leaf.attribution.split(" · "):
+                add(kind, part)
+    return groups
+
+
+def _credit_words(source: Source | None) -> str:
+    """What a picture's imagery, map or terrain owes, in words and no markup:
+    `Imagery: Esri World Imagery, about 3 June 2025`. A page it was posted on is no
+    provider and is left out."""
+    said: list[str] = []
+    for kind, items in _credit_groups(source).items():
+        if kind == "Source":
+            continue
+        names = [words for words, _ in items[:MAX_CREDITS]]
+        more = len(items) - MAX_CREDITS
+        said.append(f"{kind}: {' · '.join(names)}{f' and {more} more' if more > 0 else ''}")
+    return "; ".join(said)
+
+
+def _clipped(text: str, limit: int) -> str:
+    """``text`` cut at a word to at most ``limit`` characters, an ellipsis said."""
+    if len(text) <= limit:
+        return text
+    cut = text[: limit - 1].rsplit(" ", 1)[0].rstrip(",;:–—-") or text[: limit - 1]
+    return f"{cut}…"
+
+
+def _file_stem(words: str) -> str:
+    """A file's name in a folder from what the page says of it: plain lower-case
+    letters, digits and hyphens, never anything of the case's own paths."""
+    folded = unicodedata.normalize("NFKD", words).encode("ascii", "ignore").decode("ascii").lower()
+    stem = re.sub(r"[^a-z0-9]+", "-", folded).strip("-")[:40].strip("-")
+    return stem or "file"
 
 
 def _counts_said(phrases: list[str]) -> str:

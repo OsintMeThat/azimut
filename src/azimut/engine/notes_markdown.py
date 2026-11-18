@@ -36,7 +36,7 @@ from markdown_it import MarkdownIt
 from markdown_it.token import Token
 
 from . import notefill, notesources
-from .notelook import NoteLook
+from .notelook import CASE_NOTE, NoteLook
 from .notesources import Annex, Source
 from .notetext import CALLOUT, ENTITY_REF, FENCE, INCLUDE, MEDIA_REF, PAGE_BREAK, without_hints
 
@@ -150,6 +150,27 @@ LOCAL_SUFFIXES = (".localhost", ".local", ".internal", ".lan", ".home.arpa")
 
 #: Finds the note a chapter prints: its title and Markdown, or None when it is gone.
 Resolve = Callable[[str], "tuple[str, str] | None"]
+
+
+def read_note(case: "Case", note_id: str) -> tuple[str, str] | None:
+    """A note's title and Markdown as saved, the case notes included; None when there
+    is no such note."""
+    from ..workspace import CaseError
+
+    if note_id == CASE_NOTE:
+        return "Case notes", case.read_notes()
+    entity = case.get_entity(note_id)
+    if entity is None or entity.get("type") != "note":
+        return None
+    try:
+        return str(entity.get("label") or "Note"), case.read_note(note_id)
+    except CaseError:
+        return None
+
+
+def case_resolver(case: "Case") -> Resolve:
+    """How a chapter finds the note it prints in ``case``: as saved, the case notes included."""
+    return lambda note_id: read_note(case, note_id)
 
 
 class ImageOptions(NamedTuple):
