@@ -17,42 +17,44 @@
  * state alone (`noteDecorations`), so it is tested without a browser.
  */
 import {
-  EditorState, StateEffect, StateField, Compartment, EditorSelection, Prec, Transaction,
+  EditorState, StateEffect, StateField, Compartment, EditorSelection, Prec,
 } from '@codemirror/state';
 import {
   Decoration, EditorView, WidgetType, keymap, placeholder as placeholderText, drawSelection, dropCursor,
 } from '@codemirror/view';
 import { markdown, markdownLanguage } from '@codemirror/lang-markdown';
-import { ensureSyntaxTree, syntaxTree, syntaxHighlighting, HighlightStyle } from '@codemirror/language';
+import { syntaxHighlighting } from '@codemirror/language';
 import { history, historyKeymap, defaultKeymap, indentWithTab } from '@codemirror/commands';
 import { autocompletion, completionKeymap, startCompletion, acceptCompletion } from '@codemirror/autocomplete';
-import { tags } from '@lezer/highlight';
 
-import {
-  BulletWidget, CalloutLabelWidget, ChipWidget, CoordinatesWidget, HintWidget, PlaceholderWidget, RuleWidget, TaskWidget,
-  drawHints, drawPlaceholders, hintsMarked,
-} from './editor/inline.js';
+import { registerBlock } from './editor/blocks.js';
+import { blockKeys, pickedClass, typeNextToBlock, typeOnPicked } from './editor/blockKeys.js';
+import { drawn, rawField, rawHighlight, typeOverHints } from './editor/decorations.js';
+import { drawHints, hintsMarked } from './editor/inline.js';
+import { blocksIn, openBlockAt } from './editor/ranges.js';
 import {
   focused, noteCase, noteHandlers, openBlock, resolve, setFocused, setNoteCase, setOpenBlock, templateMode,
 } from './editor/state.js';
 import { highlight, look } from './editor/theme.js';
+import {
+  BlockWidget, blockMouse, blockWidget, drawMarkdown, markPicked, sourceButton,
+} from './editor/widgets.js';
 import { entityReference, markdownHtml } from '../markdown.js';
 import { renderMermaidSvg } from '../mermaid.js';
-import { CALLOUT_LINE, calloutOf } from './callouts.js';
 import { paths as iconPaths } from '../../components/Icon.svelte';
-import { HINT_LINE, INCLUDE_LINE, PAGE_BREAK_LINE, includeLine } from './look.js';
-import {
-  COVER_LINE, NO_IDENTITY, coverChange, coverLineIndex, findPlaceholders,
-} from './reportParts.js';
+import { INCLUDE_LINE, PAGE_BREAK_LINE, includeLine } from './look.js';
+import { COVER_LINE, coverChange } from './reportParts.js';
 import {
   BLOCK_OPEN, CAPTION_HELP, PICTURE_ALIGNS, PICTURE_SIZES, POSTED_HELP, SOURCE_HELP, blockAlignAt, blockSide, captionField, pictureLine, picturesIn,
   rovingToolbar, sizeWidth, sizedLine, sourceField,
 } from './pictureSize.js';
 import {
-  MAP_BLOCK, PLAYED_BLOCK, findCoordinates, findReferences, mentionMatches, slashInsert, slashMatches,
+  MAP_BLOCK, PLAYED_BLOCK, mentionMatches, slashInsert, slashMatches,
 } from './syntax.js';
 
 export { noteCase, setNoteCase, templateMode } from './editor/state.js';
+export { hintLineAt, noteDecorations, typeOverHints } from './editor/decorations.js';
+export { openBlockAt } from './editor/ranges.js';
 
 // -- the widgets ---------------------------------------------------------------
 
@@ -69,6 +71,11 @@ class IncludeWidget extends WidgetType {
   same(other) {
     return other.id === this.id && other.number === this.number && other.note?.title === this.note?.title
       && other.note?.excerpt === this.note?.excerpt;
+  }
+
+  /** The kind of block this draws, as `editor/blocks.js` names it. */
+  get blockKind() {
+    return 'include';
   }
 
   eq(other) {
@@ -140,57 +147,15 @@ function includeButton(text, className, title) {
   return button;
 }
 
-/** A block that is picked wears an outline; the class is all a widget changes when it is, so it is not drawn again. */
-function markPicked(dom, picked) {
-  dom.classList.toggle('cm-picked', Boolean(picked));
-}
-
-/**
- * The `</>` button a drawn block wears, which opens its source. `node` is the
- * block's own element. The press acts at once, as the rest of the block does; the
- * keyboard's Enter and Space give a click without one.
- */
-function sourceButton(view, node, className = 'cm-source-edit') {
-  const button = document.createElement('button');
-  button.type = 'button';
-  button.className = className;
-  button.dataset.editSource = 'true';
-  // the glyph is drawn by the style, so a block's text stays the words it shows
-  button.title = 'Edit the source';
-  button.setAttribute('aria-label', 'Edit the source');
-  button.addEventListener('mousedown', (event) => {
-    if (event.button !== 0) return;
-    event.preventDefault();
-    event.stopPropagation();
-    openBlockAt(view, node);
-  });
-  button.addEventListener('click', (event) => {
-    if (event.detail === 0) openBlockAt(view, node);
-  });
-  return button;
-}
-
-/** What a small drawn rule does with the mouse: a press picks it, a double press or its </> button opens its line. */
-function blockMouse(view, box, picked) {
-  markPicked(box, picked);
-  box.addEventListener('mousedown', (event) => {
-    if (event.button !== 0) return;
-    event.preventDefault();
-    view.dispatch({ selection: { anchor: view.posAtDOM(box) } });
-    view.focus();
-  });
-  box.addEventListener('dblclick', (event) => {
-    event.preventDefault();
-    openBlockAt(view, box);
-  });
-  box.append(sourceButton(view, box));
-}
-
-/** Where the PDF starts a new page: a dashed rule, named. Pressing it picks it, a double press opens its line. */
 class PageBreakWidget extends WidgetType {
   constructor(picked = false) {
     super();
     this.picked = picked;
+  }
+
+  /** The kind of block this draws, as `editor/blocks.js` names it. */
+  get blockKind() {
+    return 'pagebreak';
   }
 
   eq(other) {
@@ -229,6 +194,11 @@ class CoverRuleWidget extends WidgetType {
   constructor(picked = false) {
     super();
     this.picked = picked;
+  }
+
+  /** The kind of block this draws, as `editor/blocks.js` names it. */
+  get blockKind() {
+    return 'cover';
   }
 
   eq(other) {
@@ -596,160 +566,6 @@ function cornerTag(name) {
   tag.title = 'Pinned to this corner of page 1 when Look › Cover is Your own page';
   return tag;
 }
-
-/**
- * A drawn block (a picture, a table, a diagram): pressing it picks it, and a double
- * press, Enter or its </> button opens its source.
- */
-class BlockWidget extends WidgetType {
-  /**
-   * `writable`: whether the note can be changed, which is when a picture offers its bar.
-   * `align`: the place of the `::: center` or `::: right` block a picture stands in.
-   * `pinned`: whether this aligned block is a corner of the cover, which it says.
-   * `picked`: whether the cursor stands at its start, which outlines it.
-   */
-  constructor(kind, source, info, writable = false, align = '', pinned = false, picked = false) {
-    super();
-    this.kind = kind;
-    this.source = source;
-    this.info = info;
-    this.writable = writable;
-    this.align = align;
-    this.pinned = pinned;
-    this.picked = picked;
-  }
-
-  /** Whether `other` draws the same, picked or not: a block that only gets picked keeps its element. */
-  same(other) {
-    if (other.kind !== this.kind || other.source !== this.source || other.info.caseId !== this.info.caseId
-      || other.writable !== this.writable || other.align !== this.align || other.pinned !== this.pinned
-      || !sameIdentity(other.info.identity, this.info.identity)) return false;
-    // A tool that files something reads the case again: the same records come back as a
-    // new list. The block is drawn again only when what it shows changed, so a picture
-    // keeps its open caption field and does not blink.
-    return other.info.entities === this.info.entities || other.caseKey() === this.caseKey();
-  }
-
-  eq(other) {
-    return this.same(other) && other.picked === this.picked;
-  }
-
-  /** Picking and unpicking only moves the outline: the element, and what is open in it, stay. */
-  updateDOM(dom, _view, previous) {
-    if (!(previous instanceof BlockWidget) || !previous.same(this)) return false;
-    markPicked(dom, this.picked);
-    return true;
-  }
-
-  /** What the block draws from the case: the records and notes its source names, as they read now. */
-  caseKey() {
-    this.key ??= JSON.stringify([...this.source.matchAll(/(?:\[\[(?:media|entity|include):|^ground:[ \t]*)([A-Za-z0-9_-]+)/gm)].map(([, id]) => {
-      const entity = resolve(this.info, id);
-      const note = this.info.notes?.get?.(id);
-      return [id, entity ? [entity.id, entity.type, entity.label, entity.attrs] : null, note ? [note.title, note.excerpt] : null];
-    }));
-    return this.key;
-  }
-
-  toDOM(view) {
-    const box = document.createElement('div');
-    box.className = `cm-block cm-block-${this.kind}${this.align ? ` cm-in-align-${this.align}` : ''}`;
-    box.dataset.block = this.kind;
-    box.title = 'Double-click to edit the source';
-    markPicked(box, this.picked);
-    if (this.kind === 'diagram') drawDiagram(box, this.source);
-    else if (this.kind === 'steps' || this.kind === 'story') drawPlayed(box, this.kind, this.source, this.info);
-    else if (this.kind === 'map') drawMap(box, this.source, this.info);
-    else {
-      const { text, hints } = hintsMarked(this.source);
-      box.innerHTML = markdownHtml(text, this.info);
-      drawHints(box, hints);
-      drawPlaceholders(box, this.info.identity);
-      if (this.pinned) box.prepend(cornerTag(BLOCK_OPEN.exec(this.source.split('\n', 1)[0])?.[1]));
-    }
-    const handlers = view.state.facet(noteHandlers);
-    if (this.kind === 'picture' && this.writable) {
-      const bar = sizeBar(box, this.source, this.info, handlers, this.align);
-      bar.append(sourceButton(view, box, 'cm-size-edit'));
-      box.append(bar);
-    } else box.append(sourceButton(view, box));
-    /** A button of the picture bar, pressed: a size, a place, the caption field, its tool or its source. */
-    const press = (target) => {
-      if (target.closest('[data-caption]')) {
-        openCaption(view, box);
-        return;
-      }
-      if (target.closest('[data-open], [data-source], [data-posted]')) {
-        const [shown] = picturesIn(view.state.doc.lineAt(view.posAtDOM(box)).text);
-        const entity = pictureEntity(view.state.field(noteCase), shown);
-        if (!entity) return;
-        if (target.closest('[data-source]')) openSource(view, box, entity);
-        else if (target.closest('[data-posted]')) openPosted(view, box, entity);
-        else handlers.opener?.(entity)?.open();
-        return;
-      }
-      const pick = target.closest('[data-share], [data-align]');
-      if (!pick) return;
-      const line = view.state.doc.lineAt(view.posAtDOM(box));
-      const [picture] = picturesIn(line.text);
-      if (!picture) return;
-      const change = pick.dataset.share
-        ? { width: sizeWidth(Number(pick.dataset.share), pictureRatio(box)) }
-        : { align: pick.dataset.align };
-      resizePicture(view, line.number - 1, picture.ref, change);
-    };
-    box.addEventListener('mousedown', (event) => {
-      if (event.button !== 0 || event.target.closest('a, video, [data-entity-id], .picture-caption-field, .picture-source-field')) return;
-      event.preventDefault();
-      if (event.target.closest('[data-size-bar]')) {
-        press(event.target);
-        return;
-      }
-      // a press picks the block, which stays drawn: its source opens on a double press, Enter or </>
-      const at = view.posAtDOM(box);
-      view.dispatch({ selection: { anchor: at } });
-      view.focus();
-    });
-    box.addEventListener('dblclick', (event) => {
-      if (event.target.closest('a, video, [data-entity-id], [data-size-bar], .picture-caption-field, .picture-source-field')) return;
-      event.preventDefault();
-      openBlockAt(view, box);
-    });
-    // the mouse acts on the press, before focus moves; the keyboard's Enter and Space give a click
-    box.addEventListener('click', (event) => {
-      const button = event.target.closest('[data-size-bar] button');
-      if (event.detail !== 0 || !button || button.dataset.editSource) return;
-      const from = view.state.doc.lineAt(view.posAtDOM(box)).from;
-      if (button.dataset.open || button.dataset.source || button.dataset.posted) {
-        press(button);
-        return;
-      }
-      const same = button.dataset.share ? `[data-share="${button.dataset.share}"]`
-        : button.dataset.align ? `[data-align="${button.dataset.align}"]` : '[data-caption]';
-      press(button);
-      // the picture was drawn again with its new size: the keyboard stays on the button it pressed
-      if (box.isConnected) return;
-      const again = [...view.contentDOM.querySelectorAll('.cm-block-picture')].find((node) => view.posAtDOM(node) === from);
-      again?.querySelector(`[data-size-bar] ${same}`)?.focus({ preventScroll: true });
-    });
-    return box;
-  }
-
-  ignoreEvent(event) {
-    // the caption and source fields are the browser's: the editor leaves their keys and presses alone
-    return event.type !== 'mousedown' || Boolean(event.target?.closest?.('.picture-caption-field, .picture-source-field'));
-  }
-
-  get estimatedHeight() {
-    return this.kind === 'diagram' ? 220 : 160;
-  }
-}
-
-/** Whether two identities draw the same: a block holding `{name}` or a logo is drawn again when they differ. */
-function sameIdentity(a = NO_IDENTITY, b = NO_IDENTITY) {
-  return Object.keys(NO_IDENTITY).every((key) => a?.[key] === b?.[key]);
-}
-
 const diagrams = new Map();
 
 /** A diagram drawn once per source and kept, so typing elsewhere does not redraw it. */
@@ -783,42 +599,8 @@ function drawDiagram(box, fence) {
   pending.then(show);
 }
 
-// -- what the page draws -------------------------------------------------------
-
-const hidden = Decoration.replace({});
-
-function lineClass(name, attributes) {
-  return Decoration.line({ class: name, attributes });
-}
-
-/** The lines the cursor or a selection is on, when the editor has focus. */
-function editedLines(state) {
-  const lines = new Set();
-  if (!state.field(focused, false)) return lines;
-  for (const range of state.selection.ranges) {
-    const first = state.doc.lineAt(range.from).number;
-    const last = state.doc.lineAt(range.to).number;
-    for (let line = first; line <= last; line += 1) lines.add(line);
-  }
-  return lines;
-}
-
-function touches(lines, state, from, to) {
-  const first = state.doc.lineAt(from).number;
-  const last = state.doc.lineAt(Math.max(from, to)).number;
-  for (let line = first; line <= last; line += 1) if (lines.has(line)) return true;
-  return false;
-}
-
 /** A line holding nothing but one picture: `![…](…){…}` or `[[media:…]]{…}`. */
 const PICTURE_LINE = /^\s*(?:!\[[^\]]*\]\([^)]*\)(?:\{[^}\n]*\})?|\[\[media:[A-Za-z0-9_-]+\|[^\]\n]+\]\](?:\{[^}\n]*\})?)\s*$/;
-
-/** Whether the comment `from`–`to` is one line of guidance (`<!--? … -->`). */
-function hintOn(state, from, to) {
-  const line = state.doc.lineAt(from);
-  return to <= line.to && HINT_LINE.test(line.text);
-}
-
 /** Whether the comment `from`–`to` is a page break (`<!-- pagebreak -->`) alone on its line. */
 function pageBreakOn(state, from, to) {
   const line = state.doc.lineAt(from);
@@ -840,573 +622,204 @@ function includedNote(info, id) {
   return entity?.type === 'note' ? { title: entity.label, excerpt: '' } : null;
 }
 
-/** The guidance line at `pos`, outside code, or null. */
-export function hintLineAt(state, pos) {
-  const line = state.doc.lineAt(pos);
-  if (!HINT_LINE.test(line.text)) return null;
-  const tree = ensureSyntaxTree(state, line.to, 50) ?? syntaxTree(state);
-  const start = line.from + /^[ \t]*/.exec(line.text)[0].length;
-  for (let node = tree.resolveInner(start, 1); node; node = node.parent) {
-    if (node.name === 'CommentBlock') return line;
-    if (node.name === 'FencedCode' || node.name === 'CodeBlock') return null;
+// -- the kinds of block, until each has a module of its own in editor/ ----------
+
+/** A picture's bar, pressed: a size, a place, the caption field, its tool or its source. */
+function pressPictureBar(target, box, view) {
+  if (target.closest('[data-caption]')) {
+    openCaption(view, box);
+    return;
   }
-  return null;
+  if (target.closest('[data-open], [data-source], [data-posted]')) {
+    const [shown] = picturesIn(view.state.doc.lineAt(view.posAtDOM(box)).text);
+    const entity = pictureEntity(view.state.field(noteCase), shown);
+    if (!entity) return;
+    if (target.closest('[data-source]')) openSource(view, box, entity);
+    else if (target.closest('[data-posted]')) openPosted(view, box, entity);
+    else view.state.facet(noteHandlers).opener?.(entity)?.open();
+    return;
+  }
+  const pick = target.closest('[data-share], [data-align]');
+  if (!pick) return;
+  const line = view.state.doc.lineAt(view.posAtDOM(box));
+  const [picture] = picturesIn(line.text);
+  if (!picture) return;
+  const change = pick.dataset.share
+    ? { width: sizeWidth(Number(pick.dataset.share), pictureRatio(box)) }
+    : { align: pick.dataset.align };
+  resizePicture(view, line.number - 1, picture.ref, change);
 }
 
-// -- blocks: closed, picked, open ----------------------------------------------
-
-
-/** What kind of drawn block a widget is, or null for anything else. */
-function blockKind(widget) {
-  if (widget instanceof BlockWidget) return widget.kind;
-  if (widget instanceof IncludeWidget) return 'include';
-  if (widget instanceof PageBreakWidget) return 'pagebreak';
-  if (widget instanceof CoverRuleWidget) return 'cover';
-  return null;
-}
-
-/** The blocks drawn now that touch `from`–`to`, as `{ from, to, kind }`: the ones whose source is closed. */
-function blocksIn(state, from, to = from) {
-  const found = [];
-  state.field(drawn, false)?.between(Math.max(0, from), Math.min(state.doc.length, to), (start, end, value) => {
-    const kind = blockKind(value.spec.widget);
-    if (kind) found.push({ from: start, to: end, kind });
-  });
-  return found;
-}
-
-/** The block the cursor stands at the start of, which is picked, or null. */
-function pickedBlock(state) {
-  const range = state.selection.main;
-  return range.empty ? blocksIn(state, range.head).find((block) => block.from === range.head) ?? null : null;
-}
-
-/** A cursor at a block's start, inside it or at its end goes to its start, where it is picked. */
-function settle(state, pos) {
-  return blocksIn(state, pos).find((block) => block.from <= pos && pos <= block.to)?.from ?? pos;
-}
-
-/** Open the source of the block drawn at `at` (a position, or its element), the cursor at its start. */
-export function openBlockAt(view, at) {
-  const pos = typeof at === 'number' ? at : view.posAtDOM(at);
-  const block = blocksIn(view.state, pos).find((item) => item.from <= pos && pos <= item.to);
-  if (!block) return false;
-  view.dispatch({ selection: { anchor: block.from }, effects: setOpenBlock.of({ from: block.from, to: block.to }), scrollIntoView: true });
-  view.focus();
-  return true;
-}
-
-/** Take a drawn block out of the note, with the line break it stands on and a blank line it would leave doubled. */
-function removeBlock(view, block) {
-  const { doc } = view.state;
-  const first = doc.lineAt(block.from);
-  const last = doc.lineAt(block.to);
-  const before = first.number > 1 ? doc.line(first.number - 1) : null;
-  const after = last.number < doc.lines ? doc.line(last.number + 1) : null;
-  let from = first.from;
-  let to = last.to;
-  if (after) {
-    to = after.from;
-    if (!after.text.trim() && (!before || !before.text.trim())) to = after.number < doc.lines ? doc.line(after.number + 1).from : after.to;
-  } else if (before) from = before.to;
-  view.dispatch({ changes: { from, to }, selection: { anchor: from }, scrollIntoView: true, userEvent: 'delete' });
-}
-
-/** Enter on a picked block opens its source. */
-function openPicked(view) {
-  const block = pickedBlock(view.state);
-  return block ? openBlockAt(view, block.from) : false;
-}
-
-/**
- * Tab on a picked block never indents its source: on a picture it goes to its bar, which
- * is where it is sized and captioned, and on any other block it does nothing. (After
- * Escape the editor lets Tab leave it, as it does everywhere.)
- */
-function tabOnPicked(view) {
-  if (!pickedBlock(view.state)) return false;
-  view.dom.querySelector('.cm-picked [data-size-bar] button')?.focus({ preventScroll: true });
-  return true;
-}
-
-/** Escape inside an open block closes it, and picks it. */
-function closeOpen(view) {
-  const open = view.state.field(openBlock, false);
-  if (!open) return false;
-  view.dispatch({ selection: { anchor: open.from }, effects: setOpenBlock.of(null), scrollIntoView: true });
-  return true;
-}
-
-/**
- * Backspace and Delete at a drawn block take the whole of it out in one step, which
- * Undo brings back. Next to it, on a line of words, they pick it first: the words
- * would otherwise be joined onto the block's source.
- */
-function removeAtBlock(forward) {
-  return (view) => {
-    const { state } = view;
-    const range = state.selection.main;
-    if (!range.empty || state.readOnly) return false;
-    const block = blocksIn(state, range.head).find((item) => item.from === range.head || item.to === range.head);
-    if (block) {
-      removeBlock(view, block);
-      return true;
+registerBlock({
+  name: 'picture',
+  // `![…](…)` alone on its line, or `[[media:…]]`, which the parser does not see
+  node: 'Image',
+  read: (node, { state }) => {
+    const line = state.doc.lineAt(node.from);
+    return PICTURE_LINE.test(line.text) ? { from: line.from, to: line.to } : null;
+  },
+  line: (line) => (PICTURE_LINE.test(line.text) && line.text.includes('[[media:') ? { from: line.from, to: line.to } : null),
+  widget: (spec) => new BlockWidget('picture', spec.source, spec.info, spec.writable, spec.blockAlign, false, spec.picked),
+  atomic: true,
+  // the size and place buttons over a picture, which carry its </>, while the note can be written
+  tools: (box, widget, view) => {
+    if (!widget.writable) return null;
+    const bar = sizeBar(box, widget.source, widget.info, view.state.facet(noteHandlers), widget.align);
+    bar.append(sourceButton(view, box, 'cm-size-edit'));
+    return bar;
+  },
+  bar: '[data-size-bar]',
+  press: pressPictureBar,
+  fields: '.picture-caption-field, .picture-source-field',
+  // the mouse acts on the press, before focus moves; the keyboard's Enter and Space give a click
+  listen: (box, _widget, view) => box.addEventListener('click', (event) => {
+    const button = event.target.closest('[data-size-bar] button');
+    if (event.detail !== 0 || !button || button.dataset.editSource) return;
+    const from = view.state.doc.lineAt(view.posAtDOM(box)).from;
+    if (button.dataset.open || button.dataset.source || button.dataset.posted) {
+      pressPictureBar(button, box, view);
+      return;
     }
-    const line = state.doc.lineAt(range.head);
-    let next = null;
-    if (forward && range.head === line.to && line.text) next = blocksIn(state, range.head + 1).find((item) => item.from === range.head + 1);
-    if (!forward && range.head === line.from && line.text && line.number > 1) next = blocksIn(state, range.head - 1).find((item) => item.to === range.head - 1);
-    if (!next) return false;
-    view.dispatch({ selection: { anchor: next.from }, scrollIntoView: true });
-    return true;
-  };
-}
-
-/**
- * Where the cursor goes to leave `block` forward or back: the start of the line after it, the end of the line before it,
- * or, at the end of the note or its start, where it is.
- */
-function past(state, block, forward) {
-  if (forward) return block.to < state.doc.length ? settle(state, block.to + 1) : block.to;
-  return block.from > 0 ? settle(state, block.from - 1) : block.from;
-}
-
-/** Left and Right step over a block as one unit: from the next line or the previous, onto it; off it, past it. */
-function stepAcross(forward) {
-  return (view) => {
-    const { state } = view;
-    const range = state.selection.main;
-    if (!range.empty) return false;
-    const picked = pickedBlock(state);
-    let target = null;
-    if (picked) target = past(state, picked, forward);
-    else if (!forward) {
-      const line = state.doc.lineAt(range.head);
-      if (range.head === line.from && line.number > 1) target = blocksIn(state, range.head - 1).find((item) => item.to === range.head - 1)?.from ?? null;
-    }
-    if (target === null) return false;
-    view.dispatch({ selection: { anchor: target }, scrollIntoView: true, userEvent: 'select' });
-    return true;
-  };
-}
-
-/**
- * Up and Down step over a block as one unit too: off a picked block, to the line
- * past it; onto one, wherever the vertical move would have put the cursor in it.
- */
-function stepAlong(down) {
-  return (view) => {
-    const { state } = view;
-    const range = state.selection.main;
-    if (!range.empty) return false;
-    const picked = pickedBlock(state);
-    let target;
-    if (picked) {
-      target = past(state, picked, down);
-    } else {
-      try { target = view.moveVertically(range, down).head; } catch { return false; }
-      if (target === range.head) return false;
-      // a browser's vertical move goes over a drawn block whole: the first one crossed is picked
-      const line = state.doc.lineAt(range.head);
-      const crossed = blocksIn(state, Math.min(range.head, target), Math.max(range.head, target))
-        .filter((block) => (down ? block.from > line.to : block.to < line.from))
-        .sort((a, b) => (down ? a.from - b.from : b.from - a.from))[0];
-      if (crossed) target = crossed.from;
-      else if (settle(state, target) === target) return false;
-      else target = settle(state, target);
-    }
-    view.dispatch({ selection: { anchor: target }, scrollIntoView: true, userEvent: 'select' });
-    return true;
-  };
-}
-
-/**
- * Typing at a drawn block starts a line after it and types there: the block's own
- * line is never typed into, so a picture keeps its line whole.
- */
-/** Type `text` on a paragraph of its own after `block`, a blank line either side. */
-function typeAfter(view, block, text) {
-  const { state } = view;
-  const last = state.doc.lineAt(block.to);
-  const following = last.number < state.doc.lines ? state.doc.line(last.number + 1) : null;
-  const insert = `\n\n${text}${following?.text.trim() ? '\n' : ''}`;
-  view.dispatch({
-    changes: { from: block.to, insert },
-    selection: { anchor: block.to + 2 + text.length },
-    scrollIntoView: true,
-    userEvent: 'input.type',
-  });
-}
-
-const typeNextToBlock = EditorView.inputHandler.of((view, from, to, text) => {
-  const { state } = view;
-  const range = state.selection.main;
-  if (state.readOnly || from !== to || !text || !range.empty || range.head !== from) return false;
-  const block = blocksIn(state, from).find((item) => item.from === from || item.to === from);
-  if (!block) return false;
-  if (!text.trim()) return true;
-  typeAfter(view, block, text);
-  return true;
+    const same = button.dataset.share ? `[data-share="${button.dataset.share}"]`
+      : button.dataset.align ? `[data-align="${button.dataset.align}"]` : '[data-caption]';
+    pressPictureBar(button, box, view);
+    // the picture was drawn again with its new size: the keyboard stays on the button it pressed
+    if (box.isConnected) return;
+    const again = [...view.contentDOM.querySelectorAll('.cm-block-picture')].find((node) => view.posAtDOM(node) === from);
+    again?.querySelector(`[data-size-bar] ${same}`)?.focus({ preventScroll: true });
+  }),
 });
 
-/**
- * A key typed while a block is picked, read before the browser types it: the caret
- * the browser keeps is not at the block (it cannot stand inside a drawn one), so
- * the text it would type lands on the line after, glued to the block's own.
- */
-const typeOnPicked = EditorView.domEventHandlers({
-  keydown(event, view) {
-    if (event.isComposing || event.ctrlKey || event.metaKey || event.altKey || event.key.length !== 1) return false;
-    if (view.state.readOnly || !view.state.field(focused, false)) return false;
-    const block = pickedBlock(view.state);
-    if (!block) return false;
-    event.preventDefault();
-    if (event.key.trim()) typeAfter(view, block, event.key);
+registerBlock({
+  name: 'table',
+  node: 'Table',
+  read: (node) => ({ from: node.from, to: node.to }),
+  widget: blockWidget,
+  atomic: true,
+  source: (ctx, found) => {
+    ctx.lines(found.from, found.to, 'cm-table-line');
     return true;
   },
 });
 
-const blockKeys = Prec.high(keymap.of([
-  { key: 'Enter', run: openPicked },
-  { key: 'Tab', run: tabOnPicked, shift: tabOnPicked },
-  { key: 'Escape', run: closeOpen },
-  { key: 'Backspace', run: removeAtBlock(false) },
-  { key: 'Delete', run: removeAtBlock(true) },
-  { key: 'ArrowRight', run: stepAcross(true) },
-  { key: 'ArrowLeft', run: stepAcross(false) },
-  { key: 'ArrowDown', run: stepAlong(true) },
-  { key: 'ArrowUp', run: stepAlong(false) },
-]));
+registerBlock({
+  name: 'diagram',
+  // a closed ```mermaid fence; open, its lines are code
+  node: 'FencedCode',
+  read: (node, { state }) => {
+    const opening = state.doc.sliceString(node.from, Math.min(node.to, state.doc.lineAt(node.from).to));
+    const closed = /^(```|~~~)$/.test(state.doc.lineAt(node.to).text.trim());
+    return /^\s*(```|~~~)\s*mermaid\b/.test(opening) && closed ? { from: node.from, to: node.to } : null;
+  },
+  widget: blockWidget,
+  draw: (box, widget) => drawDiagram(box, widget.source),
+  atomic: true,
+  height: 220,
+});
 
-/**
- * Everything the page draws for this state, as one set. Exported so the drawing is
- * tested on a state with no view.
- */
-export function noteDecorations(state) {
-  const info = state.field(noteCase);
-  const lines = editedLines(state);
-  const open = state.field(openBlock, false);
-  const heads = state.selection.ranges.map((range) => range.head);
-  /** Whether the lines `from`–`to` are in the block that was opened. */
-  const inOpen = (from, to) => Boolean(open && open.from <= state.doc.lineAt(Math.max(from, to)).to && state.doc.lineAt(from).from <= open.to);
-  /** Whether the block over `from`–`to` shows its source: it was opened, or the cursor is inside it (a jump, an Undo). */
-  const isOpen = (from, to) => {
-    const start = state.doc.lineAt(from).from;
-    const end = state.doc.lineAt(Math.max(from, to)).to;
-    return inOpen(from, to) || heads.some((head) => head > start && head < end);
+/** One comment line read as a block of its own when `test` says it is one. */
+function commentLine(test) {
+  return (node, { state }) => {
+    const line = state.doc.lineAt(node.from);
+    return test(state, node.from, node.to) ? { from: line.from, to: line.to } : null;
   };
-  const range = state.selection.main;
-  const pick = state.field(focused, false) && range.empty ? range.head : -1;
-  const tree = ensureSyntaxTree(state, state.doc.length, 200) ?? syntaxTree(state);
-  const ranges = [];
-  const covered = []; // [from, to] of blocks drawn whole; nothing else goes inside them
-  const inside = (pos) => covered.some(([from, to]) => pos >= from && pos <= to);
-  const code = []; // [from, to] of code, where references and coordinates stay text
-  const template = state.facet(templateMode);
-  let chapters = 0;
-
-  // the place of the aligned block each line stands in, by line number, for a picture there
-  const blockAligns = new Map();
-  const block = (kind, from, to, pinned = false) => {
-    const first = state.doc.lineAt(from);
-    const last = state.doc.lineAt(to);
-    covered.push([first.from, last.to]);
-    const align = kind === 'picture' ? blockAligns.get(first.number) ?? '' : '';
-    ranges.push(Decoration.replace({
-      widget: new BlockWidget(kind, state.doc.sliceString(first.from, last.to), info, !state.readOnly, align, pinned, first.from === pick), block: true,
-    }).range(first.from, last.to));
-  };
-
-  // `::: center` … `:::`, the old Notebook's aligned text: drawn as it reads unless it is open.
-  // A corner (`::: top-right`) reads as its side, and says so when it is in the note's own cover.
-  let coverEnd; // the 1-based line of the cover rule, 0 without one: found when a corner asks
-  // `::: steps` and `::: story`, which an HTML page plays, are drawn as their steps the same way
-  for (let number = 1; number <= state.doc.lines; number += 1) {
-    const line = state.doc.line(number).text;
-    const open = BLOCK_OPEN.exec(line);
-    const played = open ? null : PLAYED_BLOCK.exec(line) ?? (MAP_BLOCK.test(line) ? [line, 'map'] : null);
-    if (!open && !played) continue;
-    let end = number + 1;
-    while (end <= state.doc.lines && !/^:::[ \t]*$/.test(state.doc.line(end).text)) end += 1;
-    if (end > state.doc.lines) break;
-    const from = state.doc.line(number).from;
-    const to = state.doc.line(end).to;
-    if (played) {
-      if (isOpen(from, to)) {
-        ranges.push(lineClass('cm-fence-line').range(from));
-        ranges.push(lineClass('cm-fence-line').range(state.doc.line(end).from));
-      } else block(played[1], from, to);
-      number = end;
-      continue;
-    }
-    const side = blockSide(open[1]);
-    if (side !== 'left') for (let inner = number + 1; inner < end; inner += 1) blockAligns.set(inner, side);
-    if (isOpen(from, to)) {
-      ranges.push(lineClass('cm-fence-line').range(from));
-      ranges.push(lineClass('cm-fence-line').range(state.doc.line(end).from));
-    } else {
-      const corner = open[1] !== side;
-      if (corner) coverEnd ??= coverLineIndex(state.doc.toString()) + 1;
-      block('aligned', from, to, corner && end < coverEnd);
-    }
-    number = end;
-  }
-
-  tree?.iterate({
-    enter(node) {
-      const { name, from, to } = node;
-      // the document itself starts where a block drawn whole may: only what is in it is skipped
-      if (name !== 'Document' && inside(from)) return false;
-      const editing = touches(lines, state, from, to);
-      if (name === 'FencedCode') {
-        code.push([from, to]);
-        const opening = state.doc.sliceString(from, Math.min(to, state.doc.lineAt(from).to));
-        if (/^\s*(```|~~~)\s*mermaid\b/.test(opening) && !isOpen(from, to) && state.doc.lineAt(to).text.trim().match(/^(```|~~~)$/)) {
-          block('diagram', from, to);
-          return false;
-        }
-        for (let line = state.doc.lineAt(from).number; line <= state.doc.lineAt(to).number; line += 1) {
-          ranges.push(lineClass('cm-code-line').range(state.doc.line(line).from));
-        }
-        return false;
-      }
-      if (name === 'InlineCode') {
-        code.push([from, to]);
-        ranges.push(Decoration.mark({ class: 'cm-inline-code' }).range(from, to));
-        if (!editing) {
-          node.node.getChildren('CodeMark').forEach((mark) => ranges.push(hidden.range(mark.from, mark.to)));
-        }
-        return false;
-      }
-      if (name === 'Table') {
-        if (!isOpen(from, to)) {
-          block('table', from, to);
-          return false;
-        }
-        for (let line = state.doc.lineAt(from).number; line <= state.doc.lineAt(to).number; line += 1) {
-          ranges.push(lineClass('cm-table-line').range(state.doc.line(line).from));
-        }
-        return false;
-      }
-      if (name === 'CommentBlock' && hintOn(state, from, to)) {
-        const line = state.doc.lineAt(from);
-        // a template's guidance is edited as text; a note's stays drawn, and typing replaces it
-        if (template && editing) ranges.push(lineClass('cm-hint-line').range(line.from));
-        else ranges.push(Decoration.replace({ widget: new HintWidget(HINT_LINE.exec(line.text)[1], template) }).range(line.from, line.to));
-        return false;
-      }
-      if (name === 'CommentBlock' && pageBreakOn(state, from, to)) {
-        const line = state.doc.lineAt(from);
-        if (isOpen(line.from, line.to)) ranges.push(lineClass('cm-pagebreak-line').range(line.from));
-        else ranges.push(Decoration.replace({ widget: new PageBreakWidget(line.from === pick), block: true }).range(line.from, line.to));
-        return false;
-      }
-      if (name === 'CommentBlock' && coverRuleOn(state, from, to)) {
-        const line = state.doc.lineAt(from);
-        if (isOpen(line.from, line.to)) ranges.push(lineClass('cm-pagebreak-line').range(line.from));
-        else ranges.push(Decoration.replace({ widget: new CoverRuleWidget(line.from === pick), block: true }).range(line.from, line.to));
-        return false;
-      }
-      if (name === 'HTMLBlock' || name === 'CommentBlock') {
-        if (!isOpen(from, to)) block('html', from, to);
-        else ranges.push(lineClass('cm-code-line').range(state.doc.lineAt(from).from));
-        return false;
-      }
-      if (name === 'SetextHeading1' || name === 'SetextHeading2') {
-        const level = name.endsWith('1') ? 1 : 2;
-        ranges.push(lineClass(`cm-heading cm-h${level}`).range(state.doc.lineAt(from).from));
-        const mark = node.node.getChild('HeaderMark');
-        if (mark && !editing) ranges.push(lineClass('cm-setext-rule').range(state.doc.lineAt(mark.from).from));
-        return undefined;
-      }
-      if (/^ATXHeading[1-6]$/.test(name)) {
-        const level = name.slice(-1);
-        ranges.push(lineClass(`cm-heading cm-h${level}`).range(state.doc.lineAt(from).from));
-        if (!editing) {
-          const mark = node.node.getChild('HeaderMark');
-          if (mark) ranges.push(hidden.range(mark.from, Math.min(to, mark.to + 1)));
-        }
-        return undefined;
-      }
-      if (name === 'StrongEmphasis' || name === 'Emphasis' || name === 'Strikethrough') {
-        const kind = name === 'StrongEmphasis' ? 'cm-strong' : name === 'Emphasis' ? 'cm-em' : 'cm-strike';
-        ranges.push(Decoration.mark({ class: kind }).range(from, to));
-        if (!editing) {
-          const markName = name === 'Strikethrough' ? 'StrikethroughMark' : 'EmphasisMark';
-          node.node.getChildren(markName).forEach((mark) => ranges.push(hidden.range(mark.from, mark.to)));
-        }
-        return undefined;
-      }
-      if (name === 'Link') {
-        // `[[entity:…|…]]` holds a bracket pair the parser reads as a link; it is a reference
-        if (state.doc.sliceString(from, from + 2) === '[[' || state.doc.sliceString(from - 1, from) === '[') return false;
-        ranges.push(Decoration.mark({ class: 'cm-link' }).range(from, to));
-        if (!editing) {
-          const marks = node.node.getChildren('LinkMark');
-          const url = node.node.getChild('URL');
-          if (marks.length >= 2) {
-            ranges.push(hidden.range(marks[0].from, marks[0].to));
-            ranges.push(hidden.range(marks[1].from, url ? to : marks[1].to));
-          }
-        }
-        return false;
-      }
-      if (name === 'Image') {
-        const line = state.doc.lineAt(from);
-        if (!isOpen(line.from, line.to) && PICTURE_LINE.test(line.text)) {
-          block('picture', line.from, line.to);
-          return false;
-        }
-        ranges.push(Decoration.mark({ class: 'cm-link' }).range(from, to));
-        return false;
-      }
-      if (name === 'Blockquote') {
-        const firstLine = state.doc.lineAt(from);
-        const callout = calloutOf(firstLine.text);
-        for (let number = firstLine.number; number <= state.doc.lineAt(to).number; number += 1) {
-          const line = state.doc.line(number);
-          ranges.push(lineClass(callout ? `cm-callout cm-callout-${callout.kind}` : 'cm-quote',
-            callout ? { style: `--callout: ${callout.colour}` } : undefined).range(line.from));
-          if (!lines.has(number)) {
-            const mark = /^\s*>\s?/.exec(line.text);
-            if (mark) ranges.push(hidden.range(line.from, line.from + mark[0].length));
-          }
-        }
-        if (callout && !lines.has(firstLine.number)) {
-          const marker = CALLOUT_LINE.exec(firstLine.text);
-          const quote = /^\s*>\s?/.exec(firstLine.text)[0].length;
-          ranges.push(Decoration.replace({ widget: new CalloutLabelWidget(callout) })
-            .range(firstLine.from + quote, firstLine.from + marker[0].length));
-        }
-        return undefined;
-      }
-      if (name === 'QuoteMark') return false;
-      if (name === 'HorizontalRule') {
-        if (!editing) ranges.push(Decoration.replace({ widget: new RuleWidget() }).range(from, to));
-        return false;
-      }
-      if (name === 'ListItem') {
-        const mark = node.node.getChild('ListMark');
-        const task = node.node.getChild('Task')?.getChild('TaskMarker');
-        const lineNumber = state.doc.lineAt(from).number;
-        if (task) {
-          const done = /x/i.test(state.doc.sliceString(task.from, task.to));
-          if (done) ranges.push(lineClass('cm-task-done').range(state.doc.lineAt(from).from));
-          if (!lines.has(lineNumber) && mark && state.doc.sliceString(mark.from, mark.to).match(/^[-*+]$/)) {
-            ranges.push(hidden.range(mark.from, task.from));
-          }
-          ranges.push(Decoration.replace({ widget: new TaskWidget(done, task.from) }).range(task.from, task.to));
-        } else if (mark && !lines.has(lineNumber) && /^[-*+]$/.test(state.doc.sliceString(mark.from, mark.to))) {
-          ranges.push(Decoration.replace({ widget: new BulletWidget() }).range(mark.from, mark.to));
-        }
-        return undefined;
-      }
-      return undefined;
-    },
-  });
-
-  // References, coordinates and chapters are not Markdown: found line by line, outside code.
-  const inCode = (pos) => code.some(([from, to]) => pos >= from && pos < to);
-  // an editor with no map around it says so with a null `point` (the extension's panel)
-  const mapless = state.facet(noteHandlers).point === null;
-  const chips = [];
-  const chapterLines = [];
-  for (let number = 1; number <= state.doc.lines; number += 1) {
-    const line = state.doc.line(number);
-    if (inside(line.from) || !line.text) continue;
-    // the line being written in, or one of an open block, shows what it is made of
-    const editing = lines.has(number) || inOpen(line.from, line.to);
-    const include = !inCode(line.from) && INCLUDE_LINE.exec(line.text);
-    if (include) {
-      // a chapter is its line, as the PDF reads it: whatever is around it
-      chapters += 1;
-      chapterLines.push(line);
-      if (isOpen(line.from, line.to)) ranges.push(Decoration.mark({ class: 'cm-ref-source' }).range(line.from, line.to));
-      else {
-        ranges.push(Decoration.replace({ widget: new IncludeWidget(include[1], chapters, includedNote(info, include[1]), line.from === pick), block: true })
-          .range(line.from, line.to));
-      }
-      continue;
-    }
-    const pictureLine = !isOpen(line.from, line.to) && PICTURE_LINE.test(line.text) && line.text.includes('[[media:');
-    if (pictureLine) {
-      covered.push([line.from, line.to]);
-      ranges.push(Decoration.replace({
-        widget: new BlockWidget('picture', line.text, info, !state.readOnly, blockAligns.get(number) ?? '', false, line.from === pick), block: true,
-      }).range(line.from, line.to));
-      continue;
-    }
-    const refs = findReferences(line.text, line.from).filter((ref) => !inCode(ref.from));
-    for (const ref of refs) {
-      const entity = resolve(info, ref.id);
-      if (editing) ranges.push(Decoration.mark({ class: 'cm-ref-source' }).range(ref.from, ref.to));
-      else {
-        chips.push(ref);
-        ranges.push(Decoration.replace({ widget: new ChipWidget(ref, entity) }).range(ref.from, ref.to));
-      }
-    }
-    for (const point of findCoordinates(line.text, line.from)) {
-      if (inCode(point.from) || refs.some((ref) => point.from < ref.to && point.to > ref.from)) continue;
-      ranges.push(Decoration.mark({ class: 'cm-coords' }).range(point.from, point.to));
-      if (!mapless) ranges.push(Decoration.widget({ widget: new CoordinatesWidget(point.lat, point.lon), side: 1 }).range(point.to));
-    }
-    // the words the PDF fills in: grey on the line being written, drawn as they print elsewhere
-    const placeholders = HINT_LINE.test(line.text) ? [] : findPlaceholders(line.text, line.from);
-    for (const word of placeholders) {
-      if (inCode(word.from) || refs.some((ref) => word.from < ref.to && word.to > ref.from)) continue;
-      if (editing) ranges.push(Decoration.mark({ class: 'cm-placeholder-source' }).range(word.from, word.to));
-      else ranges.push(Decoration.replace({ widget: new PlaceholderWidget(word.id, info.identity) }).range(word.from, word.to));
-    }
-  }
-  // a chip stands for its whole reference, and a chapter for its line: a mark the parser found inside is not drawn
-  const whole = [...chips, ...chapterLines];
-  const kept = whole.length
-    ? ranges.filter((range) => !whole.some((item) => range.from >= item.from && range.to <= item.to
-      && !(range.from === item.from && range.to === item.to)))
-    : ranges;
-  return Decoration.set(kept, true);
 }
 
-const drawn = StateField.define({
-  create: (state) => noteDecorations(state),
-  update(value, transaction) {
-    const refocused = transaction.effects.some((effect) => effect.is(setFocused) || effect.is(setNoteCase));
-    // a note read while it was locked gets its pictures' bars once it can be written
-    const unlocked = transaction.startState.readOnly !== transaction.state.readOnly;
-    // a block opened or closed is drawn as source or as itself
-    const reopened = transaction.startState.field(openBlock, false) !== transaction.state.field(openBlock, false);
-    if (transaction.docChanged || transaction.selection || refocused || unlocked || reopened) return noteDecorations(transaction.state);
-    return value;
+const pageBreakSource = (ctx, found) => {
+  ctx.line(found.from, 'cm-pagebreak-line');
+  return true;
+};
+
+registerBlock({
+  name: 'pagebreak',
+  node: 'CommentBlock',
+  read: commentLine(pageBreakOn),
+  widget: (spec) => new PageBreakWidget(spec.picked),
+  atomic: true,
+  source: pageBreakSource,
+});
+
+registerBlock({
+  name: 'cover',
+  node: 'CommentBlock',
+  read: commentLine(coverRuleOn),
+  widget: (spec) => new CoverRuleWidget(spec.picked),
+  atomic: true,
+  source: pageBreakSource,
+});
+
+registerBlock({
+  name: 'html',
+  // any other HTML or comment: read after every other kind of comment
+  node: ['HTMLBlock', 'CommentBlock'],
+  fallback: true,
+  read: (node) => ({ from: node.from, to: node.to }),
+  widget: blockWidget,
+  atomic: true,
+  source: (ctx, found) => {
+    ctx.line(ctx.state.doc.lineAt(found.from).from, 'cm-code-line');
+    return true;
   },
-  provide: (field) => [
-    EditorView.decorations.from(field),
-    // a drawn block is one piece, so the cursor steps over it; in a note so is a line of guidance, and a delete takes it whole
-    EditorView.atomicRanges.of((view) => view.state.field(field).update({
-      filter: (_from, _to, value) => blockKind(value.spec.widget) !== null
-        || (!view.state.facet(templateMode) && value.spec.widget instanceof HintWidget),
-    })),
-  ],
+});
+
+registerBlock({
+  name: 'include',
+  // a chapter is its line, as the PDF reads it: whatever is around it
+  line: (line, ctx) => {
+    const include = !ctx.inCode(line.from) && INCLUDE_LINE.exec(line.text);
+    if (!include) return null;
+    const number = ctx.count('include');
+    ctx.standsWhole(line);
+    return { from: line.from, to: line.to, id: include[1], number };
+  },
+  widget: (spec) => new IncludeWidget(spec.id, spec.number, includedNote(spec.info, spec.id), spec.picked),
+  atomic: true,
+  source: (ctx, found) => {
+    ctx.mark(found.from, found.to, 'cm-ref-source');
+    return true;
+  },
 });
 
 /**
- * In a note, what is typed on a line of guidance takes its place: the grey words
- * are a prompt, not text to write after. Enter still opens a line beside it.
+ * `::: center` … `:::`, the old Notebook's aligned text, drawn as it reads unless it is
+ * open. A corner (`::: top-right`) reads as its side, and says so when it is in the
+ * note's own cover.
  */
-export const typeOverHints = EditorState.transactionFilter.of((transaction) => {
-  if (!transaction.docChanged || !transaction.isUserEvent('input') || transaction.startState.facet(templateMode)) return transaction;
-  const inserts = [];
-  transaction.changes.iterChanges((fromA, toA, _fromB, _toB, inserted) => inserts.push({ fromA, toA, text: inserted.toString() }));
-  if (inserts.length !== 1) return transaction;
-  const [{ fromA, toA, text }] = inserts;
-  if (fromA !== toA || /^\n*$/.test(text)) return transaction;
-  const line = hintLineAt(transaction.startState, fromA);
-  if (!line) return transaction;
-  return {
-    changes: { from: line.from, to: line.to, insert: text },
-    selection: { anchor: line.from + text.length },
-    scrollIntoView: true,
-    annotations: Transaction.userEvent.of(transaction.annotation(Transaction.userEvent) ?? 'input.type'),
-  };
+registerBlock({
+  name: 'aligned',
+  fence: BLOCK_OPEN,
+  read: ({ match, first, last }, ctx) => {
+    const side = blockSide(match[1]);
+    if (side !== 'left') for (let inner = first + 1; inner < last; inner += 1) ctx.aligns.set(inner, side);
+    const corner = match[1] !== side;
+    return { pinned: corner && last < ctx.coverEnd() };
+  },
+  widget: blockWidget,
+  draw: (box, widget) => {
+    drawMarkdown(box, widget);
+    if (widget.pinned) box.prepend(cornerTag(BLOCK_OPEN.exec(widget.source.split('\n', 1)[0])?.[1]));
+  },
+  atomic: true,
+});
+
+// `::: steps` and `::: story`, which an HTML page plays, drawn as their steps
+for (const name of ['steps', 'story']) {
+  registerBlock({
+    name,
+    fence: PLAYED_BLOCK,
+    read: ({ match }) => (match[1] === name ? {} : null),
+    widget: blockWidget,
+    draw: (box, widget) => drawPlayed(box, widget.kind, widget.source, widget.info),
+    atomic: true,
+  });
+}
+
+registerBlock({
+  name: 'map',
+  fence: MAP_BLOCK,
+  widget: blockWidget,
+  draw: (box, widget) => drawMap(box, widget.source, widget.info),
+  atomic: true,
 });
 
 // -- the two modes ----------------------------------------------------------------
@@ -1417,60 +830,6 @@ export const typeOverHints = EditorState.transactionFilter.of((transaction) => {
  * cursor, the history and the case stay where they are.
  */
 const drawing = new Compartment();
-
-/** What the raw Markdown keeps of the page: headings, code, tables and guidance lines in their own type, nothing hidden or replaced. */
-function rawLines(state) {
-  const ranges = [];
-  const code = [];
-  const tree = ensureSyntaxTree(state, state.doc.length, 200) ?? syntaxTree(state);
-  const eachLine = (from, to, className) => {
-    for (let number = state.doc.lineAt(from).number; number <= state.doc.lineAt(to).number; number += 1) {
-      ranges.push(lineClass(className).range(state.doc.line(number).from));
-    }
-  };
-  tree?.iterate({
-    enter(node) {
-      const { name, from, to } = node;
-      if (name === 'FencedCode' || name === 'CodeBlock') {
-        code.push([from, to]);
-        eachLine(from, to, 'cm-code-line');
-        return false;
-      }
-      if (name === 'Table') {
-        eachLine(from, to, 'cm-table-line');
-        return false;
-      }
-      if (/^ATXHeading[1-6]$/.test(name)) eachLine(from, from, `cm-heading cm-h${name.slice(-1)}`);
-      else if (name === 'SetextHeading1' || name === 'SetextHeading2') eachLine(from, from, `cm-heading cm-h${name.slice(-1)}`);
-      return undefined;
-    },
-  });
-  for (let number = 1; number <= state.doc.lines; number += 1) {
-    const line = state.doc.line(number);
-    if (!line.text || code.some(([from, to]) => line.from >= from && line.from < to)) continue;
-    if (HINT_LINE.test(line.text)) ranges.push(lineClass('cm-hint-line').range(line.from));
-    else if (PAGE_BREAK_LINE.test(line.text) || COVER_LINE.test(line.text)) ranges.push(lineClass('cm-pagebreak-line').range(line.from));
-  }
-  return Decoration.set(ranges, true);
-}
-
-const rawField = StateField.define({
-  create: (state) => rawLines(state),
-  update: (value, transaction) => (transaction.docChanged ? rawLines(transaction.state) : value),
-  provide: (field) => EditorView.decorations.from(field),
-});
-
-const rawHighlight = HighlightStyle.define([
-  { tag: tags.strong, fontWeight: '650' },
-  { tag: tags.emphasis, fontStyle: 'italic' },
-  { tag: tags.strikethrough, textDecoration: 'line-through' },
-  { tag: tags.link, color: 'var(--info)' },
-]);
-
-/** While a block is picked the editor wears a class, which puts the cursor away: the outline says where it is. */
-const pickedClass = EditorView.editorAttributes.compute(['selection', focused, openBlock, drawn], (state) => (
-  state.field(focused, false) && pickedBlock(state) ? { class: 'cm-block-picking' } : {}
-));
 
 const drawnMode = [openBlock, drawn, typeOverHints, typeNextToBlock, Prec.high(typeOnPicked), pickedClass, blockKeys];
 const rawMode = [rawField, syntaxHighlighting(rawHighlight)];
