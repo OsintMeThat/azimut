@@ -1606,6 +1606,78 @@
    {
     "category": "media",
     "confidence": null,
+    "earliest": "2024-05-03T00:00:00.000000Z",
+    "id": "temporal:media:media:Harbour change for a note - A:imagery-a",
+    "kind": "imagery-a",
+    "label": "Harbour change for a note - A",
+    "latest": "2024-05-04T00:00:00.000000Z",
+    "owner_id": "media:Harbour change for a note - A",
+    "parse_error": null,
+    "places": [],
+    "precision": "day",
+    "raw": "2024-05-03",
+    "sources": [],
+    "status": null,
+    "subjects": [],
+    "time_role": null
+   },
+   {
+    "category": "media",
+    "confidence": null,
+    "earliest": "2026-09-02T00:00:00.000000Z",
+    "id": "temporal:media:media:Harbour change for a note - B:imagery-b",
+    "kind": "imagery-b",
+    "label": "Harbour change for a note - B",
+    "latest": "2026-09-03T00:00:00.000000Z",
+    "owner_id": "media:Harbour change for a note - B",
+    "parse_error": null,
+    "places": [],
+    "precision": "day",
+    "raw": "2026-09-02",
+    "sources": [],
+    "status": null,
+    "subjects": [],
+    "time_role": null
+   },
+   {
+    "category": "media",
+    "confidence": null,
+    "earliest": "2024-05-03T00:00:00.000000Z",
+    "id": "temporal:media:media:Harbour change for a note:imagery-a",
+    "kind": "imagery-a",
+    "label": "Harbour change for a note",
+    "latest": "2024-05-04T00:00:00.000000Z",
+    "owner_id": "media:Harbour change for a note",
+    "parse_error": null,
+    "places": [],
+    "precision": "day",
+    "raw": "2024-05-03",
+    "sources": [],
+    "status": null,
+    "subjects": [],
+    "time_role": null
+   },
+   {
+    "category": "media",
+    "confidence": null,
+    "earliest": "2026-09-02T00:00:00.000000Z",
+    "id": "temporal:media:media:Harbour change for a note:imagery-b",
+    "kind": "imagery-b",
+    "label": "Harbour change for a note",
+    "latest": "2026-09-03T00:00:00.000000Z",
+    "owner_id": "media:Harbour change for a note",
+    "parse_error": null,
+    "places": [],
+    "precision": "day",
+    "raw": "2026-09-02",
+    "sources": [],
+    "status": null,
+    "subjects": [],
+    "time_role": null
+   },
+   {
+    "category": "media",
+    "confidence": null,
     "earliest": "2026-05-04T00:00:00.000000Z",
     "id": "temporal:media:media:Levelled yard:imagery-a",
     "kind": "imagery-a",
@@ -1692,7 +1764,7 @@
   },
   "by_source": {
    "analysis-view": 1,
-   "compare": 10,
+   "compare": 13,
    "horizon": 1,
    "inspect": 3,
    "map-layers": 1,
@@ -1705,7 +1777,7 @@
    "user": 20
   },
   "by_status": {
-   "confirmed": 53,
+   "confirmed": 56,
    "suggested": 1
   },
   "by_type": {
@@ -1724,7 +1796,7 @@
    "inspect-session": 1,
    "map-layer": 1,
    "map-plate": 1,
-   "media": 11,
+   "media": 14,
    "network": 1,
    "note": 1,
    "organization": 2,
@@ -1756,7 +1828,7 @@
     "inspect-session": 1,
     "map-layer": 1,
     "map-plate": 1,
-    "media": 11,
+    "media": 14,
     "network": 1,
     "note": 1,
     "organization": 2,
@@ -1768,7 +1840,7 @@
     "structure": 1,
     "vessel": 1
    },
-   "unfiled": 52
+   "unfiled": 55
   },
   "countable": 1,
   "lacks": {
@@ -1778,11 +1850,11 @@
   "linked_to": {
    "account": 3,
    "bookmark": 3,
-   "capture": 9,
+   "capture": 12,
    "claim": 14,
    "equipment-type": 2,
    "inspect-session": 1,
-   "media": 26,
+   "media": 29,
    "network": 1,
    "note": 3,
    "organization": 3,
@@ -1794,7 +1866,7 @@
    "structure": 4,
    "vessel": 7
   },
-  "total": 54,
+  "total": 57,
   "unlinked": 11
  },
  "views": {

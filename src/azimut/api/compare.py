@@ -21,7 +21,10 @@ Finished copies go to the configured export destination and are not case state.
 They are named by those dates, so two comparisons of one pair would share a name,
 and none ever overwrites another. An export may also be kept in the case: it is then
 a media file of its own, stamped with the reading it shows and never replaced
-(`engine/comparisons.py`). An evolution, the dated pictures of one archive played
+(`engine/comparisons.py`). A still kept for a note may bring its two sides, each
+half of the frame as a picture of its own: they are filed beside it as working
+files, the still records them under `sides` and is derived from them, and the
+note's HTML report draws the pair as a slider. An evolution, the dated pictures of one archive played
 in order, is a finished copy, or kept in the case as its GIF when a post carries it.
 
 A saved comparison stands on the map as saved work, at its frame's centre or its
@@ -64,6 +67,8 @@ MAX_GIF_PIXELS = 16_000_000
 MAX_GIF_EDGE = 1280
 #: Two PNGs plus multipart framing, enforced before uploads are materialised.
 MAX_GIF_BODY_BYTES = MAX_FRAME_BYTES * 2 + 1_000_000
+#: A kept image: the frame, or a GIF's two, and a still's two sides.
+MAX_KEEP_BODY_BYTES = MAX_FRAME_BYTES * 4 + 1_000_000
 #: An evolution: the pictures of one point, one after another. The browser draws
 #: each at most `MAX_GIF_EDGE` across plus its header band, so a frame is a few
 #: megabytes at most and its pixel count is checked before it is decoded.
@@ -734,13 +739,17 @@ async def keep_image(
     imagery_b_exact: bool = Form(default=True),
     reuse: bool = Form(default=False),
     evolution: str = Form(default="", max_length=8000),
+    side_a: UploadFile | None = File(default=None),
+    side_b: UploadFile | None = File(default=None),
 ) -> dict[str, Any]:
     """Keep one export in the case, as an image nothing replaces.
 
     The session's preview is redrawn by every save; this is the copy somebody chose
     to keep, so it carries the reading it was made from rather than the session's,
     which may have moved on since. It is named like the finished copy and never
-    written over another file.
+    written over another file. A still may come with its two sides (``side_a``,
+    ``side_b``), both or neither: each is filed as a working file of its own, dated
+    with its side's day, and the still records them (`_file_sides`).
     """
     case = get_case(case_id)
     spec_rel, reading = _kept_reading(case, name, spec)
@@ -754,14 +763,22 @@ async def keep_image(
             raise HTTPException(status_code=422, detail="that is not an evolution this image could show") from exc
         if format_ != "png":
             raise HTTPException(status_code=422, detail="an evolution sheet is a still")
+    if (side_a is None) != (side_b is None):
+        raise HTTPException(status_code=422, detail="a pair's sides come two at a time")
+    if side_a is not None and (format_ != "png" or shown is not None):
+        raise HTTPException(status_code=422, detail="only a still keeps its two sides")
     a = await _read_png(image_a, "A")
+    halves = (
+        (await _read_png(side_a, "side A"), await _read_png(side_b, "side B"))
+        if side_a is not None and side_b is not None else None
+    )
     # The reading drawn, its two dates and the picture's size: the same key is the
     # same image, which a pair put in a note twice cites rather than keeps twice.
     state_key = snapshots.view_key(
         "compare", session=spec_rel, reading=reading, format=format_,
         interval=None if format_ == "png" else interval, keep=None if format_ == "png" else keep,
         imagery=[imagery_a, imagery_a_exact, imagery_b, imagery_b_exact], size=[a.width, a.height],
-        **({"evolution": shown.model_dump()} if shown else {}),
+        **({"evolution": shown.model_dump()} if shown else {}), **({"sides": True} if halves else {}),
     )
     if reuse and (filed_before := snapshots.filed_view(case, state_key)) is not None:
         attrs_before = filed_before.get("attrs") or {}
@@ -776,16 +793,46 @@ async def keep_image(
         b = await _read_png(image_b, "B")
         data, suffix = _gif_bytes(a, b, format_, interval, _kept_colours(keep)), ".gif"
 
+    imagery = ((imagery_a, imagery_a_exact), (imagery_b, imagery_b_exact))
+    sides = _file_sides(case, spec_rel, reading, halves, filename, imagery) if halves else None
     return _file_kept(case, spec_rel, reading, data, suffix, filename, state_key,
-                      animation=None if format_ == "png" else format_, shown=shown,
-                      imagery=((imagery_a, imagery_a_exact), (imagery_b, imagery_b_exact)))
+                      animation=None if format_ == "png" else format_, shown=shown, imagery=imagery, sides=sides)
+
+
+def _file_sides(case: Case, spec_rel: str, reading: dict[str, Any], halves: tuple[Image.Image, Image.Image],
+                filename: str, imagery: tuple[tuple[str, bool], tuple[str, bool]]) -> dict[str, str]:
+    """File a still's two sides as working files, each stamped with its own side's
+    imagery and day, so each reads as the picture it is when cited alone."""
+    placed = comparisons.placement(reading)
+    filed: dict[str, str] = {}
+    for side, half, (day, exact) in zip(("a", "b"), halves, imagery):
+        source: dict[str, Any] = {
+            # not `kept`: a working file of the still, never listed as a kept image of its own
+            "type": SOURCE_TYPE, "session": spec_rel, "side": side,
+            "providers": {side: reading[side]["provider"]}, "lat": placed["lat"], "lon": placed["lon"],
+            "zoom": placed["zoom"], "rendered_at": _now(), "attribution_burned": True,
+        }
+        if day:
+            source[f"imagery_{side}"] = day
+            if not exact:
+                source[f"imagery_{side}_exact"] = False
+        out = io.BytesIO()
+        half.save(out, "PNG", optimize=True)
+        try:
+            kept = media_engine.import_rendered_bytes(case, out.getvalue(), f"{filename} - {side.upper()}", ".png",
+                                                      source, by="compare")
+        except (OSError, ValueError, CaseError) as exc:
+            raise HTTPException(status_code=409, detail=f"could not keep the side: {errors.explain(exc)}") from exc
+        filed[side] = kept["item"]["path"]
+    return filed
 
 
 def _file_kept(case: Case, spec_rel: str, reading: dict[str, Any], data: bytes, suffix: str, filename: str,
                state_key: str, *, animation: str | None, shown: Evolution | None,
-               imagery: tuple[tuple[str, bool], tuple[str, bool]]) -> dict[str, Any]:
+               imagery: tuple[tuple[str, bool], tuple[str, bool]], sides: dict[str, str] | None = None) -> dict[str, Any]:
     """File an image kept from a comparison: stamped with the reading it shows, its
-    point, the date of each picture and, for an evolution, every day it shows."""
+    point, the date of each picture and, for an evolution, every day it shows. A still
+    kept with its sides names them under ``sides`` and is derived from them."""
     placed = comparisons.placement(reading)
     source: dict[str, Any] = {
         "type": SOURCE_TYPE,
@@ -805,6 +852,8 @@ def _file_kept(case: Case, spec_rel: str, reading: dict[str, Any], data: bytes, 
     }
     if shown:
         source["evolution"] = shown.model_dump()
+    if sides:
+        source["sides"] = sides
     for key, (value, exact) in zip(("imagery_a", "imagery_b"), imagery):
         if value:
             source[key] = value
@@ -818,8 +867,13 @@ def _file_kept(case: Case, spec_rel: str, reading: dict[str, Any], data: bytes, 
         )
     except (OSError, ValueError, CaseError) as exc:
         raise HTTPException(status_code=409, detail=f"could not keep the image: {errors.explain(exc)}") from exc
+    if sides:
+        # drawn from its two halves: deleting one says what loses it, and neither is unused
+        link_engine.link_all(case, filed["entity"]["id"], link_engine.DERIVED_FROM, [sides["a"], sides["b"]],
+                             by="compare")
     saved_changed(case)
-    return {"path": filed["item"]["path"], "entity": filed["entity"]["id"]}
+    return {"path": filed["item"]["path"], "entity": filed["entity"]["id"],
+            **({"sides": sides} if sides else {})}
 
 
 def _kept_reading(case: Case, name: str, spec: str) -> tuple[str, dict[str, Any]]:

@@ -18,6 +18,7 @@ from __future__ import annotations
 import base64
 import hashlib
 import io
+import json
 import zipfile
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -80,6 +81,8 @@ class FullCase:
     session: str = ""  # the photo's Inspect work
     compare_session: str = ""
     compare_image: str = ""  # the session's render, a media working file
+    compare_pair: str = ""  # a still kept for a note with its two sides, which it is derived from
+    compare_sides: tuple[str, ...] = ()  # those two sides, working files of their own
     horizon_view: str = ""  # a saved Horizon view, matched on the photo
     horizon_thumb: str = ""  # its preview, which travels with it
     horizon_find: str = ""  # a search for where the photo was taken, run to its end
@@ -293,6 +296,20 @@ def build_full_case(
     )
     assert rendered.status_code == 200, rendered.text
     full.compare_image = rendered.json()["path"]
+    pair = client.post(
+        f"/api/cases/{case_id}/compare/sessions/{comparison.json()['name']}/images",
+        files={"image_a": ("pair.png", _png(color=(90, 60, 30)), "image/png"),
+               "side_a": ("a.png", _png((40, 60), (90, 60, 30)), "image/png"),
+               "side_b": ("b.png", _png((40, 60), (30, 60, 90)), "image/png")},
+        data={"format": "png", "filename": "Harbour change for a note", "imagery_a": "2024-05-03",
+              "imagery_b": "2026-09-02", "spec": json.dumps({
+                  "version": 2, "camera": {"lat": 48.8584, "lon": 2.2945, "zoom": 17, "bearing": 0},
+                  "mode": "swipe", "a": {"present": True, "provider": "esri-world-imagery", "overlays": []},
+                  "b": {"present": True, "provider": "osm", "overlays": []}})},
+    )
+    assert pair.status_code == 200, pair.text
+    full.compare_pair = pair.json()["path"]
+    full.compare_sides = (pair.json()["sides"]["a"], pair.json()["sides"]["b"])
 
     view = client.post(
         f"/api/cases/{case_id}/horizon/views",

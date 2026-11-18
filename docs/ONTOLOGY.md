@@ -442,7 +442,11 @@ and `imagery-b`: a day, or a radar pass's UTC instant. The image shows two momen
 and argues nothing about what lies between them, so a change is a Claim the analyst
 files, citing the picture. An imagery date a provider only estimated (Esri, Wayback)
 is stored as the provider gave it with `exact: false` beside it, since a capture
-shows that date on its face, and the projection places it with a final `~`.
+shows that date on its face, and the projection places it with a final `~`. A still
+kept for a note may bring its two halves: each is a working file of its own, dated by
+its own side (`side`, `imagery_a` or `imagery_b`), the still names them in `sides`
+(`{"a": path, "b": path}`) and is `derived-from` both, and the note's HTML report
+draws the pair as a slider. A still with no `sides` stays a still.
 
 **A dated Proof states that date for the material it rests on.** The footage was shot
 when it was shot, whichever document argues about it, so saving the proof files one

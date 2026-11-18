@@ -293,3 +293,53 @@ def test_a_rename_onto_a_name_in_the_trash_is_refused(client):
     refused = _save(client, cid, "Harbour", rename_from="Quay")
 
     assert refused.status_code == 409 and "Trash" in refused.json()["detail"]
+
+
+# -- a still kept with its two sides, for a note's slider ------------------------------
+
+
+def test_a_still_kept_for_a_note_files_its_two_sides_and_rests_on_them(client):
+    cid = _case(client, "Sides")
+    _save(client, cid, "Harbour reading")
+    sides = {"side_a": ("a.png", _png((200, 40, 40)), "image/png"),
+             "side_b": ("b.png", _png((40, 40, 200)), "image/png")}
+    answer = client.post(
+        f"/api/cases/{cid}/compare/sessions/Harbour reading/images",
+        files={"image_a": ("pair.png", _png((90, 90, 90)), "image/png"), **sides},
+        data={"format": "png", "filename": "Harbour for a note", "spec": json.dumps(_spec()),
+              "imagery_a": "2024-05-03", "imagery_b": "2026-09-02", "imagery_b_exact": "false"},
+    )
+    assert answer.status_code == 200, answer.text
+    kept = answer.json()
+    case = Case.open(cid)
+    source = media.read_item(case, kept["path"])["source"]
+    assert source["sides"] == kept["sides"] and set(kept["sides"]) == {"a", "b"}
+    first = media.read_item(case, kept["sides"]["a"])["source"]
+    second = media.read_item(case, kept["sides"]["b"])["source"]
+    assert first["side"] == "a" and first["imagery_a"] == "2024-05-03" and "imagery_b" not in first
+    assert second["imagery_b"] == "2026-09-02" and second["imagery_b_exact"] is False
+    assert "kept" not in first and "kept" not in second
+    # the still is drawn from its halves, so neither half is unused or deleted without a word
+    pair = case.find_entity(attr="path", value=kept["path"])
+    targets = {case.get_entity(link["to"])["attrs"]["path"] for link in case.links_of(pair["id"])
+               if link["type"] == "derived-from" and link["from"] == pair["id"]}
+    assert targets == set(kept["sides"].values())
+    # the comparison lists the still among its kept images, never its halves
+    listed = {image["path"] for image in _row(client, cid, "Harbour reading")["kept"]}
+    assert kept["path"] in listed and not listed & set(kept["sides"].values())
+
+
+def test_a_side_comes_with_its_pair_and_only_with_a_still(client):
+    cid = _case(client, "Lone side")
+    _save(client, cid, "Harbour reading")
+    route = f"/api/cases/{cid}/compare/sessions/Harbour reading/images"
+    data = {"format": "png", "filename": "Lone", "spec": json.dumps(_spec())}
+    one = client.post(route, files={"image_a": ("a.png", _png((1, 2, 3)), "image/png"),
+                                    "side_a": ("s.png", _png((1, 2, 3)), "image/png")}, data=data)
+    assert one.status_code == 422
+    animated = client.post(route, files={"image_a": ("a.png", _png((1, 2, 3)), "image/png"),
+                                         "image_b": ("b.png", _png((3, 2, 1)), "image/png"),
+                                         "side_a": ("s.png", _png((1, 2, 3)), "image/png"),
+                                         "side_b": ("t.png", _png((3, 2, 1)), "image/png")},
+                           data={**data, "format": "slide"})
+    assert animated.status_code == 422
