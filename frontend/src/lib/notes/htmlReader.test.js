@@ -69,8 +69,9 @@ describe('the page without anything pressed', () => {
   });
 
   it('stays under the weight agreed for its two files, unminified', () => {
-    // 75 KB until the story layout, the bar and the links the page takes itself came in
-    expect(Buffer.byteLength(READER) + Buffer.byteLength(CSS)).toBeLessThan(84 * 1024);
+    // 75 KB until the story layout, the bar and the links the page takes itself came in; 84 KB
+    // until charts appended their own section (a map's reader is spliced in only where a map is)
+    expect(Buffer.byteLength(READER) + Buffer.byteLength(CSS)).toBeLessThan(88 * 1024);
   });
 });
 
