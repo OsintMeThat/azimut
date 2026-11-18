@@ -128,6 +128,8 @@ export function noteExtensions({ handlers = {}, placeholder = '', readOnly = fal
     placeholder ? placeholderText(placeholder) : [],
     (editable ?? new Compartment()).of([EditorState.readOnly.of(readOnly), EditorView.editable.of(!readOnly)]),
     look,
+    // the rules a kind of block brings, after the editor's own
+    blockKinds().filter((kind) => kind.theme).map((kind) => EditorView.theme(kind.theme)),
     EditorView.updateListener.of((update) => {
       if (update.docChanged) handlers.change?.(update.state.doc.toString());
       if (update.focusChanged) {
