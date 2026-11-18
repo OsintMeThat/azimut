@@ -214,7 +214,8 @@ export function layers() {
         'icon-rotate': ['get', 'turn'], 'icon-rotation-alignment': 'map', 'icon-allow-overlap': true, 'icon-ignore-placement': true },
       paint: { 'icon-opacity': alpha(1) } },
     { id: 'az-glow', type: 'circle', source: FEATURES, base: kind('point'),
-      paint: { 'circle-radius': ['*', 15, ['get', 's']], 'circle-color': '#ffffff', 'circle-blur': 0.7,
+      // a glow round the mark, past its edge as the drawing's drop shadow is
+      paint: { 'circle-radius': ['*', 21, ['get', 's']], 'circle-color': '#ffffff', 'circle-blur': 0.55,
         'circle-opacity': ['case', state('away'), 0, state('picked'), 0.9, state('hover'), 0.65, state('new'), 0.75, 0] } },
     { id: 'az-points', type: 'symbol', source: FEATURES, base: kind('point'),
       layout: { 'icon-image': ['get', 'icon'], 'icon-size': ['get', 's'], 'icon-allow-overlap': true, 'icon-ignore-placement': true },
