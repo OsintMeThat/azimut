@@ -80,6 +80,7 @@
   import FormatSwitch from './notebook/FormatSwitch.svelte';
   import EditionsDialog from './notebook/EditionsDialog.svelte';
   import PublishSteps from './notebook/PublishSteps.svelte';
+  import LinkList from './notebook/LinkList.svelte';
   import ToPostItem from './notebook/ToPostItem.svelte';
   import ConfirmDialog from '../components/ConfirmDialog.svelte';
   import WordPressDraft from './notebook/WordPressDraft.svelte';
@@ -1078,6 +1079,7 @@
                       <button type="button" class="btn btn-ghost btn-xs" title="Open the note at this line"
                         aria-describedby={`export-warning-${at}-${index}`} onclick={() => goToWarning(item.note, warning.line)}>Go to</button>
                     {/if}
+                    {#if warning.items}<LinkList items={warning.items} label={warning.text} ongo={(line) => goToWarning(item.note, line)} />{/if}
                   </li>
                 {/each}
               </ul>
@@ -1192,7 +1194,7 @@
   .before-notes { max-height: 260px; overflow: auto; padding: 0 0 5px; }
   .before-note { margin: 6px 10px 1px; color: var(--text-2); font-size: var(--fs-xs); font-weight: 600; }
   .before-list { list-style: none; margin: 0; padding: 0; }
-  .before-item { display: flex; align-items: center; gap: 8px; min-height: 26px; padding: 1px 6px 1px 10px; color: var(--text-1); }
+  .before-item { display: flex; flex-wrap: wrap; align-items: center; gap: 0 8px; min-height: 26px; padding: 1px 6px 1px 10px; color: var(--text-1); }
   .before-item::before { content: ''; flex: none; width: 5px; height: 5px; border-radius: 50%; background: var(--warn); }
   .before-item[data-kind='missing']::before { background: var(--danger); }
   .before-words { flex: 1; min-width: 0; overflow-wrap: anywhere; }

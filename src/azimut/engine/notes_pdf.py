@@ -269,6 +269,8 @@ class Rendered:
     warning_lines: list[int | None] = field(default_factory=list)
     #: For each warning, what it is about: one of `WARNING_KINDS`.
     warning_kinds: list[str] = field(default_factory=list)
+    #: The links behind a grouped warning, by its kind (`notes_markdown.Cited.listed`).
+    listed: dict[str, list[dict[str, Any]]] = field(default_factory=dict)
     #: For each page, the line of the note it starts at (best effort). A page
     #: inside a chapter starts at the chapter's include line.
     pages: list[int] = field(default_factory=list)
@@ -474,6 +476,7 @@ def render(
         warnings=builder.warnings,
         warning_lines=builder.warning_lines,
         warning_kinds=builder.warning_kinds,
+        listed=cited.listed,
         pages=builder.pages,
         diagrams=list(builder.missing.items()),
         pictures=builder.pictures,

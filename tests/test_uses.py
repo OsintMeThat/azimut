@@ -195,6 +195,29 @@ def test_a_mention_uses_its_target_but_goes_with_its_note(client):
     assert _impact(client, cid, ids=[note.json()["id"]])["counts"]["touched"] == 0
 
 
+def test_a_written_link_to_the_post_a_file_came_from_uses_that_file(client):
+    cid = _case(client)
+    a = _upload(client, cid, "a.png")
+    b = _upload(client, cid, "b.png", (30, 30, 200))
+    stated = client.patch(f"/api/cases/{cid}/media", json={"path": a, "source_url": "https://x.com/port_watch/status/1890"})
+    assert stated.status_code == 200, stated.text
+    bookmark = client.post(f"/api/cases/{cid}/entities", json={
+        "type": "bookmark", "label": "Notice", "attrs": {"url": "https://example.org/notice"}}).json()
+    note = client.post(f"/api/cases/{cid}/notes", json={"title": "Front", "content": (
+        "The [video](https://twitter.com/renamed/status/1890?s=20) and [the notice](https://www.example.org/notice/#top),\n"
+        "and [a page the case lacks](https://example.org/other).\n")})
+    assert note.status_code == 200, note.text
+
+    # the file the post came from is used, the one nothing names is not
+    assert _unused(client, cid) == [b]
+    assert _touched(_impact(client, cid, paths=[a])) == {"Front": ["links to its page"]}
+    assert _touched(_impact(client, cid, ids=[bookmark["id"]])) == {"Front": ["links to its page"]}
+    # what a link finds is read live: dropped from the text, the file is free again
+    client.put(f"/api/cases/{cid}/notes/{note.json()['id']}", json={"text": "Nothing linked.\n"})
+    assert _unused(client, cid) == [a, b]
+    assert _impact(client, cid, ids=[bookmark["id"]])["counts"]["touched"] == 0
+
+
 def test_a_layer_marker_following_an_entity_is_named(client):
     cid = _case(client)
     place = client.post(
@@ -443,6 +466,17 @@ def test_every_record_naming_a_file_is_read_as_a_use_or_says_why_not(client):
         "or list the field in NOT_A_USE with why:\n  " + "\n  ".join(unexplained)
     )
     assert listed == set(NOT_A_USE), f"listed outputs no record writes any more: {set(NOT_A_USE) - listed}"
+
+
+def test_the_full_case_s_written_link_is_read_as_a_use(client):
+    """A note's written link names a page, not a file, so the gate above cannot see it:
+    the full case holds one, and its bookmark must be what the note leans on."""
+    full = fullcase.build_full_case(client)
+    case = Case.open(full.case_id)
+    leans = {(holder.rel, lean.target, lean.how) for holder, lean in uses_engine._records(case)}
+    assert (full.map_note, full.bookmark_id, "links to its page") in leans
+    touched = _touched(_impact(client, full.case_id, ids=[full.bookmark_id]))
+    assert "links to its page" in touched["Map"]
 
 
 # -- the gate: the filter and the dialog are one rule --------------------------------

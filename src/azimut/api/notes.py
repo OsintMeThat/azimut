@@ -28,14 +28,18 @@ for the editor to draw: the Azimut logo, the analyst's logo and their signature.
 
 A note cites a web source through `/sources/lookup`: the address is read for a name
 and looked for among what the case already filed for it (`engine/urltitles.py`), so
-a link pasted twice cites one item. Nothing is fetched.
+a link pasted twice cites one item. Its `known` says what the case knows of the page
+a written link to it would cite (`engine/notesources.py`): the item, who posted it and
+when, its archived copy and the day it was seen. Nothing is fetched.
 
 Before an export, `/notes/pdf/check` lays the chosen notes out in memory and says,
 note by note, what the PDF would get wrong (a picture no longer in the case, one
 with no source, a task left open, a link a reader cannot open): the warnings the
-page pane lists, with the line each is about and its kind. It writes nothing and
-never stands in the way: the export goes on whatever it finds. For the public
-edition it also says how many internal passages are left out.
+page pane lists, with the line each is about and its kind. While the sources are
+listed it also counts the outside links with no archived copy and those the case
+holds nothing of, one line each, the links listed under it as `items`. It writes
+nothing and never stands in the way: the export goes on whatever it finds. For the
+public edition it also says how many internal passages are left out.
 
 **To Post** asks `/notes/{id}/pieces` for the note's public edition, or the stretch
 selected in it, as the pieces a Post thread starts from (`engine/notepieces.py`).
@@ -99,7 +103,7 @@ from ..engine import notes_html as html_engine
 from ..engine import notes_web as web_engine
 from ..engine import notes_pdf as pdf_engine
 from ..engine import notes_wordpress as wordpress_engine
-from ..engine import notefill, notefromcase, notelinks, notepieces, notetext
+from ..engine import notefill, notefromcase, notelinks, notepieces, notesources, notetext
 from ..engine import pdffonts
 from ..engine import reveal as reveal_engine
 from ..engine import urltitles
@@ -452,7 +456,8 @@ def source_lookup(
     if len(address) > 2048 or not urltitles.url_key(address):
         raise HTTPException(status_code=422, detail="the source must be an http(s) address")
     case = get_case(case_id)
-    found = urltitles.find_by_url(case, address)
+    reader = notesources.Reader(case)
+    found = reader.index.find(address, types=urltitles.FILED)
     return {
         "url": address,
         "title": urltitles.title_of(address, title),
@@ -461,6 +466,29 @@ def source_lookup(
              "attrs": entity.get("attrs") or {}}
             for entity in found
         ],
+        "known": _known(reader, address),
+    }
+
+
+def _known(reader: notesources.Reader, address: str) -> dict[str, Any] | None:
+    """What a written link to ``address`` would cite, as the citation card shows it: the
+    item the case holds at that page, who posted it and when, its archived copy and the
+    day the case saw it, every day as `YYYY-MM-DD`; None when the case holds nothing."""
+    record = reader.held(address)
+    if record is None:
+        return None
+    source = reader.link(address)
+    return {
+        "id": str(record.get("id") or ""),
+        "type": str(record.get("type") or ""),
+        "label": source.label,
+        "noun": source.noun,
+        "address": source.address,
+        "author": source.author,
+        "published": source.published,
+        "archive": source.archive,
+        "archived_at": source.archived,
+        "seen": source.collected,
     }
 
 
@@ -889,15 +917,26 @@ def check_pdf(case_id: str, body: CheckIn) -> dict[str, Any]:
             warnings = [{"text": str(exc)[:MAX_WARNING_CHARS], "line": None, "kind": notes_markdown.OTHER}]
         else:
             internal = rendered.internal
-            warnings = [
-                {"text": said[:MAX_WARNING_CHARS], "line": line, "kind": kind}
-                for said, line, kind in zip(rendered.warnings, rendered.warning_lines, rendered.warning_kinds)
-            ]
+            warnings = _warnings(rendered)
             if public and internal:
                 said = f"{internal} internal passage{'s' if internal > 1 else ''} left out."
                 warnings.append({"text": said, "line": None, "kind": notes_markdown.LEFT_OUT})
         answered.append({"note": note_id, "title": title, "warnings": warnings, "internal": internal})
     return {"notes": answered}
+
+
+def _warnings(rendered: pdf_engine.Rendered | html_engine.RenderedHtml | web_engine.WebBuild) -> list[dict[str, Any]]:
+    """A document's warnings as the check answers them, a grouped one with the links it
+    counts as ``items`` (each its words, its address and its line)."""
+    said: list[dict[str, Any]] = []
+    for text, line, kind in zip(rendered.warnings, rendered.warning_lines, rendered.warning_kinds):
+        warning: dict[str, Any] = {"text": text[:MAX_WARNING_CHARS], "line": line, "kind": kind}
+        items = rendered.listed.get(kind)
+        if items:
+            warning["items"] = [{"text": str(item["text"])[:MAX_WARNING_CHARS], "url": item["url"][:2048],
+                                 "line": item["line"]} for item in items]
+        said.append(warning)
+    return said
 
 
 def _check_html(
@@ -926,10 +965,7 @@ def _check_html(
     except (html_engine.NotesHtmlError, web_engine.NotesWebError) as exc:
         answer["warnings"] = [{"text": str(exc)[:MAX_WARNING_CHARS], "line": None, "kind": notes_markdown.OTHER}]
         return answer
-    warnings = [
-        {"text": said[:MAX_WARNING_CHARS], "line": line, "kind": kind}
-        for said, line, kind in zip(rendered.warnings, rendered.warning_lines, rendered.warning_kinds)
-    ]
+    warnings = _warnings(rendered)
     if public and rendered.internal:
         said = f"{rendered.internal} internal passage{'s' if rendered.internal > 1 else ''} left out."
         warnings.append({"text": said, "line": None, "kind": notes_markdown.LEFT_OUT})

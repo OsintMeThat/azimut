@@ -7052,7 +7052,15 @@ homonyms under stable suffixes, into the shared notes destination (the case's
 (`POST /notes/pdf/check`, rendered in memory, nothing written) and says *Checking…*;
 what it finds is listed under *Before you export*, by note when several are exported,
 each with *Go to* when it names a line, and the button reads *Export anyway*. A check
-that fails says nothing and never holds the export back.
+that fails says nothing and never holds the export back. While the note lists its
+sources, the check also counts its outside links, each page once: *88 outside links
+have no archived copy.* and *3 links are not in the case, so no day says when they were
+read.*, one line each (a single link is named instead). Under each line its links are
+folded to the first three by their words and how many more; opened, each shows its site
+and *Go to*. Links to the case's own work are not counted: an archived copy itself
+(Wayback, archive.today), the Wayback and Copernicus viewers and the Esri imagery
+services, a map view the case captured, and where a proof was posted. The public
+edition counts only the links it prints. The Page pane lists the same lines, without the links under them.
 
 **PDF | HTML.** The export dialog opens with a **PDF | HTML** switch, the last one picked
 kept for this browser; everything else (the edition, the destination, the check, the
@@ -7395,6 +7403,21 @@ written link carry a small `[n]` that jumps to their entry. A place, a person or
 event with no address is not a source; generated links (coordinates) are not listed;
 a note citing nothing prints no list.
 
+**A written link finds what the case holds at its address**, cited elsewhere or not:
+the file downloaded from that post, the bookmark of that page, the capture of that map
+view, read off one index of the case per document (`urltitles.AddressIndex`), nothing
+fetched. The address is read as the source lookup reads it: X and Twitter and their
+embed mirrors are one site and a post is its number, a `www.`, `m.` or `mobile.`, a
+trailing slash, a fragment, escapes and share or campaign words (`utm_`, `si`,
+`fbclid`…) make no difference. The link then lists as that item, with who posted it,
+its day, its archived copy and the day it was collected; the text keeps the link's
+words. A page held by several items is the downloaded file first, then the bookmark,
+then the capture, the first filed first. A link to the post a proof was imported from
+stays that page, collected the day of the import. A link the case holds nothing of
+prints exactly as before. PDF, HTML, web folder and WordPress draft all list it so.
+The same reading answers `GET /sources/lookup`'s `known` (the item, its author, posted
+day, archived copy and its day, and the day it was seen) for the citation card to come.
+
 **Write | Page** opens the note's pages beside it: the real PDF the server would write
 (`POST /notes/preview`, nothing written to disk), drawn with pdf.js loaded only
 there, redrawn 900 ms after typing stops with the old pages kept until the new ones
@@ -7407,7 +7430,8 @@ more. Pressing a page scrolls the note to where it starts. The choice is kept fo
 browser. What the PDF warns about is listed under the pane's bar, its count folding
 the list: an empty section; a picture, video, chapter or record no longer in the case
 (marked red); a picture with no source while sources are listed; tasks still open,
-outside Plain; a link a reader cannot open (`file:`, localhost, a private address); a
+outside Plain; a link a reader cannot open (`file:`, localhost, a private address);
+outside links with no archived copy, or none the case holds, while sources are listed; a
 script no face covers. One that names a line goes there when pressed. A template's pages give no such warnings, since a
 template is guidance by design.
 

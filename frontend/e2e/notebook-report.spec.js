@@ -505,6 +505,48 @@ test('the export says what the PDF would warn about first, Go to takes the note 
   await expect(page.locator('input[aria-label="Note name"]')).toHaveValue('Mast');
 });
 
+test('the export counts the links nobody archived in one line, its links folded under it, each one gone to', async ({ page }) => {
+  const LINKS = [
+    ['Al-Khabar al-Yemeni, 16 Nov', 'https://alkhabaralyemeni.net/2026/11/16/a', 4],
+    ['YemenExtra, 10 Oct', 'https://www.yemenextra.net/2026/10/10/b', 9],
+    ['Mereja, 10 Oct', 'https://mereja.com/c', 14],
+    ['BBC, 5 Oct', 'https://www.bbc.com/news/articles/d', 20],
+    ['ISW', 'https://understandingwar.org/e', 25],
+  ].map(([text, url, line]) => ({ text, url, line }));
+  const checks = (id) => (id === 'n1' ? [
+    { text: '5 outside links have no archived copy.', line: 4, kind: 'unarchived', items: LINKS },
+    { text: '“ISW” is not in the case, so no day says when it was read.', line: 25, kind: 'unseen' },
+  ] : []);
+  const state = await notebook(page, { checks });
+  await openLead(page);
+  await page.locator('[data-guide="notebook.pdf"]').click();
+  const dialog = page.getByRole('dialog', { name: 'Export note as PDF' });
+  const before = dialog.getByRole('region', { name: 'Before you export' });
+  const warnings = before.getByRole('list', { name: 'Warnings' });
+  await expect(warnings.locator(':scope > li')).toHaveCount(2);
+  const line = warnings.locator(':scope > li').first();
+  await expect(line).toContainText('5 outside links have no archived copy.');
+  // folded: the first three by their words and how many more, no link listed yet
+  const fold = line.locator('summary');
+  await expect(fold).toHaveText('“Al-Khabar al-Yemeni, 16 Nov” · “YemenExtra, 10 Oct” · “Mereja, 10 Oct” and 2 more');
+  const listed = line.getByRole('list', { name: '5 outside links have no archived copy.' });
+  await expect(listed).toBeHidden();
+  await dialog.screenshot({ path: test.info().outputPath('export-links-folded.png') });
+  await fold.click();
+  await expect(listed.getByRole('listitem')).toHaveText([
+    /Al-Khabar al-Yemeni, 16 Nov\s*alkhabaralyemeni\.net\s*Go to/, /YemenExtra, 10 Oct\s*yemenextra\.net/, /Mereja/, /BBC, 5 Oct\s*bbc\.com/, /ISW/,
+  ]);
+  await dialog.screenshot({ path: test.info().outputPath('export-links-open.png') });
+  // the export never waits on them
+  await expect(dialog.getByRole('button', { name: 'Export anyway' })).toBeEnabled();
+  // a link's Go to takes the note to its line
+  await listed.getByRole('listitem').nth(3).getByRole('button', { name: 'Go to' }).click();
+  await expect(dialog).toHaveCount(0);
+  await page.keyboard.type('X');
+  await expect.poll(() => state.written.at(-1)?.text ?? '').toContain('\nXLine 21\n');
+  expect(state.exported).toEqual([]);
+});
+
 test('a check that fails never holds the export back', async ({ page }) => {
   const state = await notebook(page);
   await page.route(`**/api/cases/${CASE_ID}/notes/pdf/check`, (route) => route.fulfill({ status: 500, json: { detail: 'Boom' } }));

@@ -31,6 +31,11 @@ Past the chain:
   by their records, the ground and the close-ups under it by entity id. Its period of
   proofs is a question asked of the case, not a name: a proof deleted leaves the map
   one point fewer, as a proof added gives it one more;
+- a note's written links (`notelinks.outside_links`): each finds the item the case
+  holds at its address, the file downloaded from that post, the bookmark of that
+  page, the capture of that view or the proof imported from that post
+  (`urltitles.AddressIndex`, read once per question), which is what its print cites
+  for the link. Read live, since what a link finds follows what the case holds;
 - an entity's photo chosen from Media (`entity_images`);
 - a Detect routine watching an area: by the area's record. The delete refuses that
   one until the routine lets the area go (`api/cases/common.delete_entities_deep`),
@@ -53,8 +58,9 @@ from typing import TYPE_CHECKING, Any, Callable, Iterable, Iterator
 
 from .. import layout
 from ..workspace import CaseError
-from . import horizon_finds, horizon_views, inspectwork, mapplates, maplayers, notes_maps, sheets
+from . import horizon_finds, horizon_views, inspectwork, mapplates, maplayers, notelinks, notes_maps, sheets
 from . import links as link_engine
+from . import urltitles
 
 if TYPE_CHECKING:
     from ..workspace import Case
@@ -230,30 +236,37 @@ def _note_maps(text: str) -> Iterator[Lean]:
                 yield Lean(picture, "is the ground of a map in it")
 
 
-def _read_note(path: Path) -> tuple[Lean, ...]:
-    """A note's map leans, kept while its file is unchanged, read only when it holds a map."""
+#: What a note says, kept while its file is unchanged: its map leans, and the addresses
+#: it links to, which a lean is made of only once the case says what holds them.
+_notes: OrderedDict[str, tuple[tuple[int, int, int], tuple[Lean, ...], tuple[str, ...]]] = OrderedDict()
+
+
+def _read_note(path: Path) -> tuple[tuple[Lean, ...], tuple[str, ...]]:
+    """A note's map leans and the web addresses it links to, kept while its file is
+    unchanged; each read only when the text could hold one."""
     try:
         stat = path.stat()
     except OSError:
-        return ()
-    key = f"note\n{path}"
+        return (), ()
+    key = str(path)
     stamp = (stat.st_mtime_ns, stat.st_size, stat.st_ino)
     with _cache_lock:
-        hit = _cache.get(key)
+        hit = _notes.get(key)
         if hit is not None and hit[0] == stamp:
-            _cache.move_to_end(key)
-            return hit[1]
+            _notes.move_to_end(key)
+            return hit[1], hit[2]
     try:
         text = path.read_text(encoding="utf-8")
     except (OSError, ValueError):
-        return ()
+        return (), ()
     leans = tuple(_note_maps(text)) if "::: map" in text or ":::map" in text else ()
+    addresses = tuple(notelinks.outside_links(text)) if "http" in text else ()
     with _cache_lock:
-        _cache[key] = (stamp, leans)
-        _cache.move_to_end(key)
-        while len(_cache) > _CACHE_MAX:
-            _cache.popitem(last=False)
-    return leans
+        _notes[key] = (stamp, leans, addresses)
+        _notes.move_to_end(key)
+        while len(_notes) > _CACHE_MAX:
+            _notes.popitem(last=False)
+    return leans, addresses
 
 
 def _sheet_leans(meta: Any) -> Iterator[Lean]:
@@ -287,6 +300,7 @@ def _records(case: "Case") -> Iterator[tuple[_Holder, Lean]]:
     for lean in _read(root / bench, _bench):
         yield _Holder(bench, BENCH_TYPE), lean
     cursor: str | None = None
+    linking: list[tuple[_Holder, tuple[str, ...]]] = []
     while True:
         notes = case.page_entities(limit=500, cursor=cursor, types=["note"])
         for entity in notes.get("items", []):
@@ -297,11 +311,21 @@ def _records(case: "Case") -> Iterator[tuple[_Holder, Lean]]:
                 path = case.resolve_inside(rel)
             except CaseError:
                 continue
-            for lean in _read_note(path):
-                yield _Holder(rel, "note", entity), lean
+            leans, addresses = _read_note(path)
+            holder = _Holder(rel, "note", entity)
+            for lean in leans:
+                yield holder, lean
+            if addresses:
+                linking.append((holder, addresses))
         cursor = notes.get("next_cursor")
         if not cursor:
             break
+    if linking:
+        index = urltitles.AddressIndex(case)
+        for holder, addresses in linking:
+            found = (index.first(address) for address in addresses)
+            for target in dict.fromkeys(str(item["id"]) for item in found if item is not None):
+                yield holder, Lean(target, "links to its page")
     cursor = None
     while True:
         page = case.page_entities(limit=sheets.SHEET_PAGE, cursor=cursor, types=["sheet"])

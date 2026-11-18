@@ -36,7 +36,7 @@ from urllib.parse import parse_qs, quote, unquote, urlsplit
 from markdown_it import MarkdownIt
 from markdown_it.token import Token
 
-from . import notefill, notesources
+from . import notefill, notesources, urltitles
 from .notelook import CASE_NOTE, NoteLook
 from .notesources import Annex, Source
 from .notetext import CALLOUT, ENTITY_REF, FENCE, INCLUDE, MEDIA_REF, PAGE_BREAK, without_hints
@@ -135,9 +135,16 @@ OTHER = "other"
 LEFT_OUT = "internal"
 #: Something Settings › Publishing holds and nobody set: the logo, the signature, the name.
 SETTING = "setting"
-WARNING_KINDS = (MISSING, UNSOURCED, OPEN_TASK, LOCAL_LINK, EMPTY_SECTION, OTHER, LEFT_OUT, SETTING)
+#: Outside links with no archived copy, and links to pages the case holds nothing of, so
+#: no day says when they were read. Each is one line however many links it counts, the
+#: links themselves listed beside it (`Cited.listed`).
+UNARCHIVED = "unarchived"
+UNSEEN = "unseen"
+WARNING_KINDS = (MISSING, UNSOURCED, OPEN_TASK, LOCAL_LINK, EMPTY_SECTION, OTHER, LEFT_OUT, SETTING, UNARCHIVED, UNSEEN)
 #: How many links a reader cannot open are named one by one before the rest are counted.
 MAX_LOCAL_LINKS = 10
+#: How many links one grouped line lists; its count stays exact past it.
+MAX_LISTED_LINKS = 500
 #: What the aside says where an included note is gone: the warning is read off it.
 CHAPTER_GONE = "The note included here is no longer in the case."
 
@@ -737,6 +744,14 @@ class Cited:
     Without a case (a template's preview) nothing of a case is read and nothing is
     warned about; a web link is still a source. The three pictures every note can
     show are never sources, and one that Settings does not hold is said either way.
+
+    While the sources are listed, the outside links are checked too, each page once:
+    those with no archived copy, and those the case holds nothing of, so no day says
+    when they were read. Each is one line with a count, the links themselves in
+    ``listed`` under the line's kind, each with its words, its address and its line.
+    Links to the case's own work are left out: an archived copy itself, the viewers a
+    reader checks imagery in and the imagery services (`notesources.is_own_tool`), a
+    map view the case captured, and where the analyst published a proof.
     """
 
     def __init__(
@@ -763,6 +778,10 @@ class Cited:
         self._local: dict[str, int | None] = {}
         self._tasks: list[int] = []
         self._images: dict[str, Source | None] = {}
+        #: Each outside page linked to, once, as (address, words, line, source), by its page.
+        self._outside: dict[str, tuple[str, str, int | None, Source]] = {}
+        #: The links behind each grouped line, by the line's kind.
+        self.listed: dict[str, list[dict[str, Any]]] = {}
 
     # -- what a citation is, for the pass and the walk alike -------------------
 
@@ -882,6 +901,13 @@ class Cited:
         source = self.link_source(href, words)
         if source is not None:
             self._cited.append(source)
+            if notesources.web(href):
+                self._outside_link(href, words, line, source)
+
+    def _outside_link(self, address: str, words: str, line: int | None, source: Source) -> None:
+        key = urltitles.url_key(address)
+        if key and key not in self._outside:
+            self._outside[key] = (address, " ".join(words.split()), line, source)
 
     def _image(self, token: Token, line: int) -> None:
         src = token_attr(token, "src")
@@ -904,7 +930,9 @@ class Cited:
             if is_local(address, ()):
                 self._local.setdefault(address, line)
             else:
-                self._cited.append(self.reader.link(address))
+                source = self.reader.link(address)
+                self._cited.append(source)
+                self._outside_link(address, "", line, source)
         for match in FILE_URL.finditer(text):
             self._local.setdefault(match.group(0), line)
 
@@ -918,11 +946,48 @@ class Cited:
             rest = len(self._local) - MAX_LOCAL_LINKS
             if rest > 0:
                 self._warn(f"{rest} more link{'s' if rest > 1 else ''} will not open for a reader.", None, LOCAL_LINK)
+            if self.on:
+                self._check_links()
         if self.on:
             self.annex = Annex(self._cited)
             if self.annex.left_out:
                 self._warn(f"The sources list stops at {self.annex.limit}; "
                            f"{self.annex.left_out} more are not listed.", None, OTHER)
+
+    def _own_work(self, address: str, source: Source) -> bool:
+        """Whether a link points at the case's own work rather than at a source."""
+        return (
+            notesources.is_archive(address)
+            or notesources.is_own_tool(address)
+            or source.kind == notesources.IMAGERY  # a map view the case captured
+            or self.reader.index.own_work(address)  # where the analyst published a proof
+        )
+
+    def _check_links(self) -> None:
+        """One line for the outside links with no archived copy, one for those the case
+        holds nothing of; each names its link when it is alone and lists them otherwise."""
+        unarchived: list[dict[str, Any]] = []
+        unseen: list[dict[str, Any]] = []
+        for address, words, line, source in self._outside.values():
+            if self._own_work(address, source):
+                continue
+            item = {"text": cut_text(words or urltitles.title_of(address), 120), "url": address, "line": line}
+            if not source.archive:
+                unarchived.append(item)
+            if not source.collected:
+                unseen.append(item)
+        if len(unarchived) == 1:
+            self._warn(f"\u201c{unarchived[0]['text']}\u201d has no archived copy.", unarchived[0]["line"], UNARCHIVED)
+        elif unarchived:
+            self._warn(f"{len(unarchived)} outside links have no archived copy.", unarchived[0]["line"], UNARCHIVED)
+            self.listed[UNARCHIVED] = unarchived[:MAX_LISTED_LINKS]
+        if len(unseen) == 1:
+            self._warn(f"\u201c{unseen[0]['text']}\u201d is not in the case, so no day says when it was read.",
+                       unseen[0]["line"], UNSEEN)
+        elif unseen:
+            self._warn(f"{len(unseen)} links are not in the case, so no day says when they were read.",
+                       unseen[0]["line"], UNSEEN)
+            self.listed[UNSEEN] = unseen[:MAX_LISTED_LINKS]
 
     def _warn(self, message: str, line: int | None, kind: str) -> None:
         self.warnings.append((message, line, kind))

@@ -4,7 +4,8 @@ const { post } = vi.hoisted(() => ({ post: vi.fn() }));
 vi.mock('../api.js', () => ({ api: { post } }));
 
 const {
-  WARNING_KINDS, checkNotes, internalCount, isLeftOut, isNoAddress, readCheck, readHtmlCheck, readWarning, warningKind,
+  WARNING_KINDS, checkNotes, internalCount, isLeftOut, isNoAddress, linkHost, linksSummary, readCheck, readHtmlCheck,
+  readWarning, warningKind,
 } = await import('./warnings.js');
 
 afterEach(() => vi.clearAllMocks());
@@ -13,6 +14,7 @@ describe('a warning', () => {
   it('keeps the kinds the server gives, and reads anything else as other', () => {
     expect(WARNING_KINDS).toEqual([
       'missing', 'unsourced', 'open-task', 'local-link', 'empty-section', 'setting', 'other', 'internal', 'count', 'address',
+      'unarchived', 'unseen',
     ]);
     for (const kind of WARNING_KINDS) expect(warningKind(kind)).toBe(kind);
     expect(warningKind('shiny')).toBe('other');
@@ -24,6 +26,47 @@ describe('a warning', () => {
     expect(readWarning({ text: 'A', line: -1 }).line).toBeNull();
     expect(readWarning({ text: 'A', line: '3' }).line).toBeNull();
     expect(readWarning({ text: 'A', line: 2.5 }).line).toBeNull();
+  });
+});
+
+describe('a line that counts links', () => {
+  const LINKS = [
+    { text: 'Al-Khabar al-Yemeni, 16 Nov', url: 'https://alkhabaralyemeni.net/2026/11/16/a', line: 40 },
+    { text: 'YemenExtra, 10 Oct', url: 'https://www.yemenextra.net/x', line: 12 },
+    { text: '', url: 'https://mereja.com/b', line: -1 },
+    { text: 'Liveuamap, 27 Oct', url: 'https://yemen.liveuamap.com/en/2026/27-october', line: 51 },
+    { text: 'BBC, 5 Oct', url: 'https://www.bbc.com/news/articles/c1', line: 7 },
+  ];
+
+  it('keeps the links behind it, each with its words, its address and its line', () => {
+    const read = readWarning({ text: '5 outside links have no archived copy.', line: 40, kind: 'unarchived', items: [...LINKS, null, { text: '' }] });
+    expect(read.kind).toBe('unarchived');
+    expect(read.items).toHaveLength(5);
+    expect(read.items[2]).toEqual({ text: 'https://mereja.com/b', url: 'https://mereja.com/b', line: null });
+    expect(readWarning({ text: 'x', kind: 'unseen', items: [] })).toEqual({ text: 'x', line: null, kind: 'unseen' });
+    expect(readWarning({ text: 'x', kind: 'unseen', items: 'many' })).not.toHaveProperty('items');
+  });
+
+  it('folds them to the first three by their words and how many more', () => {
+    const read = readWarning({ text: 'x', kind: 'unarchived', items: LINKS }).items;
+    expect(linksSummary(read)).toBe('“Al-Khabar al-Yemeni, 16 Nov” · “YemenExtra, 10 Oct” · “https://mereja.com/b” and 2 more');
+    expect(linksSummary(read.slice(0, 2))).toBe('“Al-Khabar al-Yemeni, 16 Nov” · “YemenExtra, 10 Oct”');
+    expect(linksSummary(null)).toBe('');
+  });
+
+  it('names where each link goes by its site', () => {
+    expect(linkHost('https://www.bbc.com/news/articles/c1')).toBe('bbc.com');
+    expect(linkHost('https://yemen.liveuamap.com/en')).toBe('yemen.liveuamap.com');
+    expect(linkHost('not an address')).toBe('');
+  });
+
+  it('comes through the check with the rest of its note', async () => {
+    post.mockResolvedValue({ notes: [{ note: 'n1', title: 'Front', warnings: [
+      { text: '5 outside links have no archived copy.', line: 40, kind: 'unarchived', items: LINKS },
+      { text: '1 task is still open.', line: 3, kind: 'open-task' },
+    ] }] });
+    const { found } = await checkNotes('c1', ['n1']);
+    expect(found[0].warnings.map((warning) => [warning.kind, warning.items?.length ?? 0])).toEqual([['unarchived', 5], ['open-task', 0]]);
   });
 });
 

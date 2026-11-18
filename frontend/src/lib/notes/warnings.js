@@ -8,11 +8,23 @@
  * nothing (`POST notes/pdf/check`), in the edition asked for. The check also counts
  * each note's internal passages, and for the public edition says how many it leaves
  * out, as a warning of the kind `internal` that is no fault (`isLeftOut`).
+ *
+ * While the sources are listed, the outside links are counted too: those with no
+ * archived copy (`unarchived`) and those the case holds nothing of, so no day says
+ * when they were read (`unseen`). Each is one line however many links it counts; the
+ * check sends the links behind it as `items`, each its words, its address and its line,
+ * which the dialog folds under the line (`linksSummary`). The Page pane says the line.
  */
 import { api } from '../api.js';
 
 /** What a warning is about (`engine/notes_pdf.py`); anything else reads as `other`. */
-export const WARNING_KINDS = ['missing', 'unsourced', 'open-task', 'local-link', 'empty-section', 'setting', 'other', 'internal', 'count', 'address'];
+export const WARNING_KINDS = [
+  'missing', 'unsourced', 'open-task', 'local-link', 'empty-section', 'setting', 'other', 'internal', 'count', 'address',
+  'unarchived', 'unseen',
+];
+
+/** How many links a folded list names before it counts the rest. */
+export const LINKS_NAMED = 3;
 
 /** The internal passages a public edition leaves out: said, but nothing to fix. */
 export function isLeftOut(warning) {
@@ -28,14 +40,43 @@ export function warningKind(value) {
   return WARNING_KINDS.includes(value) ? value : 'other';
 }
 
-/** A warning as the server gave it: its words, its line or null, its kind. */
+function readLine(line) {
+  return Number.isInteger(line) && line >= 0 ? line : null;
+}
+
+/** One link a grouped warning counts: its words (its address when it has none), its address, its line. */
+function readLinked(item) {
+  const url = typeof item?.url === 'string' ? item.url : '';
+  const text = String(item?.text ?? '').trim() || url;
+  return text ? { text, url, line: readLine(item?.line) } : null;
+}
+
+/**
+ * A warning as the server gave it: its words, its line or null, its kind, and for a
+ * line that counts links, those links as `items` (left out when it lists none).
+ */
 export function readWarning(item) {
-  const line = item?.line;
-  return {
-    text: String(item?.text ?? ''),
-    line: Number.isInteger(line) && line >= 0 ? line : null,
-    kind: warningKind(item?.kind),
-  };
+  const warning = { text: String(item?.text ?? ''), line: readLine(item?.line), kind: warningKind(item?.kind) };
+  const items = Array.isArray(item?.items) ? item.items.map(readLinked).filter(Boolean) : [];
+  return items.length ? { ...warning, items } : warning;
+}
+
+/** `example.org` for a link's address, as the list names where each one goes. */
+export function linkHost(url) {
+  try {
+    const name = new URL(url).hostname.toLowerCase();
+    return name.startsWith('www.') ? name.slice(4) : name;
+  } catch {
+    return '';
+  }
+}
+
+/** What a folded list of links says: the first few by their words, then how many more. */
+export function linksSummary(items, named = LINKS_NAMED) {
+  const list = Array.isArray(items) ? items : [];
+  const shown = list.slice(0, named).map((item) => `“${item.text}”`).join(' · ');
+  const rest = list.length - Math.min(list.length, named);
+  return rest > 0 ? `${shown} and ${rest} more` : shown;
 }
 
 /**

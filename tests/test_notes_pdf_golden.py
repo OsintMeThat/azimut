@@ -38,7 +38,7 @@ import pytest
 from azimut.engine import notes_pdf
 from azimut.engine.notelook import NoteLook
 
-from test_notes_pdf import FakeCase, png
+from test_notes_pdf import FakeCase, pdf_text, png
 
 # -- the notes -----------------------------------------------------------------
 
@@ -312,3 +312,73 @@ def test_the_fingerprint_reads_the_drawing_not_the_file(tmp_path):
                              created=CREATED.replace(second=59)).pdf
     assert first != later
     assert drawing(first) == drawing(later)
+
+
+# -- written links that find what the case holds ---------------------------------------
+#
+# A written link finds the item the case holds at its address (`urltitles.AddressIndex`)
+# and prints that item's entry. A case holding nothing at the notes' addresses changes
+# nothing: the goldens above, and a styled note's drawing, are the same with an index of
+# unrelated items as with no index at all. One note whose links do find their items is
+# pinned below, from the engine that made them find them.
+
+
+class IndexedCase(FakeCase):
+    """A case that lists its items, as the address index reads them."""
+
+    def page_entities(self, *, limit=100, cursor=None, types=None, **_):
+        rows = [row for row in self._entities.values() if not types or row.get("type") in types]
+        return {"items": rows, "next_cursor": None}
+
+
+UNRELATED = {
+    "elsewhere": {"id": "elsewhere", "type": "bookmark", "label": "Elsewhere",
+                  "attrs": {"url": "https://example.net/elsewhere", "fetched_at": "2026-01-01T00:00:00Z"},
+                  "provenance": {"at": "2026-01-01T00:00:00Z"}},
+}
+
+LINKED = """# Linked
+
+The port authority [closed berths 10 to 14](https://www.port.example.org/notices/13#:~:text=berths)
+the day after [the strike was posted](https://twitter.com/port_watch/status/1899?s=20), which
+[a page the case never kept](https://news.example.com/strike) reported too.
+"""
+
+LINKED_ITEMS = {
+    "notice": {"id": "notice", "type": "bookmark", "label": "Port authority notice",
+               "attrs": {"url": "https://port.example.org/notices/13", "fetched_at": "2026-03-13T07:00:00Z",
+                         "archive_url": "https://web.archive.org/web/20260313091500/https://port.example.org/notices/13"},
+               "provenance": {"at": "2026-03-13T07:00:00Z"}},
+    "post": {"id": "post", "type": "media", "label": "Strike on the port",
+             "attrs": {"path": "media/strike.png", "kind": "image", "source_url": "https://x.com/port_watch/status/1899"},
+             "provenance": {"at": "2026-03-13T08:00:00Z"}},
+}
+
+#: `LINKED` in a report, its first two links finding the bookmark and the file above.
+LINKED_GOLDEN = "f3f6622c516cd5bb8bc1eace78e2fef099f8cc424351e5860c5efbf72894e0fb"
+
+
+@pytest.mark.parametrize("name", sorted(NOTES))
+def test_a_case_holding_nothing_at_the_notes_addresses_changes_nothing(tmp_path, name):
+    plain = golden_case(tmp_path / "plain")
+    indexed = IndexedCase(plain.path, {**plain._entities, **UNRELATED})
+    assert hashlib.sha256(drawing(render_plain(indexed, name))).hexdigest() == GOLDEN[name]
+    styled = NoteLook.model_validate({"style": "report"})
+    assert drawing(render_plain(indexed, name, styled)) == drawing(render_plain(plain, name, styled))
+
+
+def test_a_note_whose_links_find_their_items_prints_their_entries(tmp_path):
+    png(tmp_path, "media/strike.png", size=(320, 180), color="#6a2a4a")
+    case = IndexedCase(tmp_path, {**LINKED_ITEMS, **UNRELATED})
+    pdf = notes_pdf.render(case, title="Linked", text=LINKED, look=NoteLook.model_validate({"style": "report"}),
+                           created=CREATED).pdf
+    annex = "".join(pdf_text(pdf).split("\nSources\n")[1].split())
+    assert "[1]Portauthoritynotice·Webpage·port.example.org·collected13March2026" in annex
+    assert "Archive:https://web.archive.org/web/20260313091500/" in annex
+    assert "[2]Strikeontheport·Picture·x.com·collected13March2026" in annex
+    assert "[3]apagethecaseneverkept·Webpage·news.example.com" in annex
+    digest = hashlib.sha256(drawing(pdf)).hexdigest()
+    if digest != LINKED_GOLDEN:
+        kept = tmp_path / "linked.pdf"
+        kept.write_bytes(pdf)
+        pytest.fail(f"the linked note no longer prints as it did ({digest}); see {kept}")
