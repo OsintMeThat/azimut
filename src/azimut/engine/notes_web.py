@@ -121,6 +121,11 @@ PAGES_CARD = (
 DATE_SIZE = 22
 CREDIT_SIZE = 22
 TWO_LINES = 60
+#: The page's story dark, which the card's lower band is solid in, from this share of
+#: its height down (higher when the title needs it), under a short soft ramp.
+STORY_DARK = (15, 16, 18)
+BAND_FROM = 0.62
+BAND_RAMP = 56
 #: The paper a typographic card is set on, by the look's style, as the reader's stylesheet has it.
 PAPERS = {"journal": (251, 250, 246)}
 WHITE = (255, 255, 255)
@@ -364,8 +369,9 @@ def _cover(path: Path) -> Image.Image | None:
 
 def _picture_card(picture: Image.Image, title: str, day: date, theme: notes_style.Theme, credit: str) -> Image.Image:
     """The page's own story cover in small: the picture whole at its top, the title
-    centred low on a veil that darkens only where the words stand, the accent rule and
-    the day under it, the provider's credit in the lower right corner."""
+    centred low, its first lines on a veil that darkens only where they stand, its last
+    line, the accent rule and the day on a solid band in the story's dark, so nothing the
+    picture says shows under them; the provider's credit in the band's right corner."""
     width, height = SHARE_SIZE
     # X lays the site's name over the card's lower left corner: the words keep above it
     bottom = height - 84
@@ -373,7 +379,13 @@ def _picture_card(picture: Image.Image, title: str, day: date, theme: notes_styl
     leading = round(face.size * 1.08)
     top = bottom - DATE_SIZE - 58 - leading * len(lines)
     card = picture.convert("RGBA")
-    card.alpha_composite(_tinted((9, 10, 12), _veil(top)))
+    card.alpha_composite(_tinted(STORY_DARK, _veil(top)))
+    band = band_top(top, len(lines), leading)
+    ramp = Image.new("L", (1, BAND_RAMP))
+    ramp.putdata([round(255 * _ease((row + 1) / BAND_RAMP)) for row in range(BAND_RAMP)])
+    card.alpha_composite(Image.merge("RGBA", (*Image.new("RGB", (width, BAND_RAMP), STORY_DARK).split(),
+                                              ramp.resize((width, BAND_RAMP)))), (0, band - BAND_RAMP))
+    ImageDraw.Draw(card).rectangle((0, band, width, height), fill=(*STORY_DARK, 255))
     # a soft shadow under the words keeps them on any picture
     shadow = Image.new("L", SHARE_SIZE, 0)
     shade = ImageDraw.Draw(shadow)
@@ -393,6 +405,12 @@ def _picture_card(picture: Image.Image, title: str, day: date, theme: notes_styl
         draw.text((width - 32, height - 26), _ellipsis(credit, quiet, width * 0.72), font=quiet,
                   fill=(255, 255, 255, 214), anchor="rd")
     return card
+
+
+def band_top(top: int, lines: int, leading: int) -> int:
+    """Where the card's solid band starts: `BAND_FROM` of its height, or higher, just
+    above the title's last line, when the title stands that high."""
+    return min(round(SHARE_SIZE[1] * BAND_FROM), top + (lines - 1) * leading - 6)
 
 
 def _veil(start: int) -> Image.Image:

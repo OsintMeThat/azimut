@@ -269,6 +269,30 @@ def test_the_card_opens_on_the_cover_picture_else_the_first_credited_one(folder,
     assert all("graphic" not in str(hero.path) for hero in (plain.hero, covered.hero))
 
 
+def test_under_the_title_the_card_is_the_story_dark_whatever_the_picture_holds(tmp_path):
+    """A picture with words burnt into its foot (a collage's captions) shows none of them
+    under the title's last line, the rule or the day: the band there is solid."""
+    busy = Image.new("RGB", (1600, 900), (250, 250, 250))
+    for y in range(0, 900, 6):
+        busy.paste((255, 255, 255) if y % 12 else (0, 0, 0), (0, y, 1600, y + 3))
+    path = tmp_path / "busy.png"
+    busy.save(path)
+    hero = notes_html.Hero(path, "", "Busy")
+    width, height = notes_web.SHARE_SIZE
+    for title in ("Short title", "A title long enough to need three lines on the card, as some reports do"):
+        data = notes_web.share_card(title=title, day=NOW.date(), look=None, hero=hero)
+        with Image.open(io.BytesIO(data)) as card:
+            band = round(height * notes_web.BAND_FROM)
+            for x in (6, width - 6):
+                for y in range(band, height, 3):
+                    assert max(abs(a - b) for a, b in zip(card.getpixel((x, y)), notes_web.STORY_DARK)) <= 4, (x, y)
+            # the picture's upper part is left as it is
+            assert min(card.getpixel((6, 40))) > 200
+    # a title standing higher than the band lifts it above its last line
+    assert notes_web.band_top(200, 3, 60) == 200 + 2 * 60 - 6
+    assert notes_web.band_top(300, 3, 60) == notes_web.band_top(400, 2, 70) == round(height * notes_web.BAND_FROM)
+
+
 def test_with_no_picture_the_card_is_the_title_on_the_paper(tmp_path):
     card = notes_web.share_card(title="A note with no picture at all", day=NOW.date(), look=None, hero=None,
                                 description="What the note is about, in a sentence.")
