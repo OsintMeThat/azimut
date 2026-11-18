@@ -294,7 +294,11 @@
       if (!body) continue;
       const rows = all(':scope > tr', body);
       const heads = all(':scope > thead > tr:first-child > th', table);
+      // a hash or an address in a cell may break anywhere, rather than widen the table
+      for (const cell of all(':scope > tr > td', body)) if (/\S{24,}/.test(cell.textContent)) cell.classList.add('az-token');
       heads.forEach((head, column) => {
+        // a column with no header holds the rows' labels: nothing to sort by
+        if (!words(head)) return;
         const sort = make('button', { type: 'button', class: 'az-sort', title: 'Sort by this column' });
         sort.append(...head.childNodes);
         head.append(sort);
@@ -309,8 +313,12 @@
           body.append(...rows.slice().sort((a, b) => (down ? -order(a, b) : order(a, b))));
         });
       });
-      if (rows.length <= 12) continue;
       const wrap = table.closest('.az-table-wrap') || table;
+      // a table wider than its place slides in its own frame; one that fits keeps its header stuck to the page
+      const fits = () => wrap.classList.toggle('az-slides', table.scrollWidth > wrap.clientWidth + 1);
+      fits();
+      window.addEventListener('resize', fits);
+      if (rows.length <= 12) continue;
       const tools = make('div', { class: 'az-table-tools' });
       const field = make('input', { type: 'search', class: 'az-filter', placeholder: 'Filter the rows', 'aria-label': 'Filter the rows of this table' });
       const said = make('span', { 'aria-live': 'polite' }, `${rows.length} rows`);
@@ -541,6 +549,23 @@
     }
   }
 
+  /** The hyphenated words of `node` matching `word` kept whole on their line. */
+  function keepWhole(node, word) {
+    const texts = [];
+    const walker = doc.createTreeWalker(node, NodeFilter.SHOW_TEXT);
+    for (let text = walker.nextNode(); text; text = walker.nextNode()) texts.push(text);
+    for (const text of texts) {
+      const parts = text.data.split(word);
+      if (parts.length > 1) text.replaceWith(...parts.map((part, index) => (index % 2 ? make('span', { class: 'az-keep' }, part) : part)));
+    }
+  }
+
+  /* a title never breaks right after a hyphen: "al-Mandab" stays whole on its line, and so does "M-ATV" or "0:23-0:37" in a table */
+  function titles() {
+    for (const heading of all('.az-title, .az-body h2, .az-body h3, .az-contents a')) keepWhole(heading, /(\S{1,24}-\S{1,24})/);
+    for (const cell of all('.az-table td')) keepWhole(cell, /(\S{1,14}-\S{1,14})/);
+  }
+
   /* printed, every "How this was checked" is open */
   function printing() {
     let opened = [];
@@ -556,7 +581,7 @@
   }
 
   function start() {
-    for (const part of [contents, pictures, pairs, timecodes, tables, citations, steps, stories, printing, addresses]) part();
+    for (const part of [titles, contents, pictures, pairs, timecodes, tables, citations, steps, stories, printing, addresses]) part();
   }
   if (doc.readyState === 'loading') doc.addEventListener('DOMContentLoaded', start, { once: true });
   else start();

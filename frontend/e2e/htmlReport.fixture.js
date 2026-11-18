@@ -37,7 +37,8 @@ export function reportHtml(pictures) {
   const [picture, before, after, s1, s2, s3, story1, story2] = pictures;
   const rows = Array.from({ length: 14 }, (_, index) => {
     const code = `V${String(index + 1).padStart(2, '0')}`;
-    return `<tr id="${code}"><td>${code}</td><td>${['T-72B3 tank', 'BMP-2', 'Ural-4320 truck'][index % 3]}</td><td data-align="right">${(index * 37) % 90 + 5}%</td></tr>`;
+    return `<tr id="${code}"><td>${code}</td><td>${['T-72B3 tank', 'BMP-2', 'Ural-4320 truck'][index % 3]}</td><td data-align="right">${(index * 37) % 90 + 5}%</td>`
+      + `<td>burned, on its side</td><td>S04 0:23-0:37</td><td>3:04-3:11; 3:17-3:22</td><td>zone: between Dhubab and the airport road</td><td>12.74625, 43.49463</td><td>A</td></tr>`;
   }).join('\n');
   const step = (n, src, day, words) => `<div class="az-step" data-step="${n}" style="--az-n:${n}" data-label="${day}">
 <figure class="az-figure" data-kind="picture">${zoom(src, `Plate ${n}`)}${caption(7 + n, `${day}, ${words}`, 'Esri, Maxar')}</figure></div>`;
@@ -69,8 +70,17 @@ ${caption(1, 'The column under fire', 'x.com <a class="az-cite" href="#src-1" da
 <figure class="az-figure" data-kind="picture">${zoom(picture, 'The junction from above')}${caption(2, 'The junction from above', 'Esri World Imagery, about 3 June 2025')}</figure>
 <figure class="az-figure" data-kind="pair"><div class="az-compare"><img class="az-before" src="${before}" alt="Before" width="640" height="360"><img class="az-after" src="${after}" alt="After" width="640" height="360"><input class="az-slider" type="range" min="0" max="100" value="50" step="1" aria-label="Before and after"><span class="az-side-label" data-side="a"><span class="az-side-date">12 March 2025</span><span class="az-side-credit">Esri Wayback</span></span><span class="az-side-label" data-side="b"><span class="az-side-date">26 October 2025</span><span class="az-side-credit">Esri World Imagery</span></span></div>
 ${caption(3, 'The junction before and after', 'Esri Wayback and Esri World Imagery')}</figure>
+<figure class="az-figure" data-kind="proof" data-width="100%" style="--az-width:100%" data-align="center">${zoom(picture, 'The junction, matched')}${caption(4, 'The junction, matched on the frame', 'Esri World Imagery')}</figure>
+<figure class="az-figure" data-kind="picture" data-width="50%" style="--az-width:50%">${zoom(before, 'A small picture')}${caption(5, 'A small picture', 'Esri')}</figure>
+<h3 id="the-two-videos">The two videos</h3>
+<div class="az-table-wrap"><table class="az-table" data-rows="3"><thead><tr><th scope="col"></th><th scope="col">Video 1</th><th scope="col">Video 2</th></tr></thead><tbody>
+<tr><td>Link</td><td><a href="https://x.com/MMY1444/status/2122054923298996698" target="_blank" rel="noopener noreferrer">https://x.com/MMY1444/status/2122054923298996698</a></td><td><a href="https://x.com/bonzerbarry/status/2122432246011281557" target="_blank" rel="noopener noreferrer">https://x.com/bonzerbarry/status/2122432246011281557</a></td></tr>
+<tr id="SHA-256"><td>SHA-256</td><td>e1e32f4fcf40a0bcde7d2a638076d1a2995b8c96ccb0b53f198838f246cee09b</td><td>a9739638652c5d4726bf9dde71f80e9a214d9bb23338bed2dba541f94efe61de</td></tr>
+<tr><td>Vehicles seen (at least)</td><td>33</td><td>46</td></tr></tbody></table></div>
+<p>See <a href="https://www.armyrecognition.com/archives/archives-land-defense/land-defense-2017/armoured-vehicles-of-the-world">https://www.armyrecognition.com/archives/archives-land-defense/land-defense-2017/armoured-vehicles-of-the-world</a>.</p>
 <h2 id="the-register"><span class="az-num">2</span> The register</h2>
-<div class="az-table-wrap"><table class="az-table" data-rows="14"><thead><tr><th scope="col">Code</th><th scope="col">Type</th><th scope="col" data-align="right">Confidence</th></tr></thead>
+<div class="az-table-wrap"><table class="az-table" data-rows="14"><thead><tr><th scope="col">Code</th><th scope="col">Type</th><th scope="col" data-align="right">Confidence</th>
+<th scope="col">State</th><th scope="col">Video 1</th><th scope="col">Video 2</th><th scope="col">Position</th><th scope="col">Point</th><th scope="col">Close-up</th></tr></thead>
 <tbody>${rows}</tbody></table></div>
 <p><a href="#V12">V12</a> is the clearest.</p>
 <h2 id="how-it-unfolded"><span class="az-num">3</span> How it unfolded</h2>

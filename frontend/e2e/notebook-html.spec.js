@@ -105,6 +105,36 @@ test('the report opened from the disk, offline: pictures, slider, lightbox, time
   expect(refused).toEqual([]);
 });
 
+test('the page never grows wider than the screen, whatever its tables hold, and a full-width picture breaks out', async ({ page, browserName }, testInfo) => {
+  test.skip(browserName !== 'chromium', 'one browser is enough for the file itself');
+  for (const viewport of [{ width: 1440, height: 900 }, { width: 390, height: 844 }]) {
+    const refused = await openReport(page, testInfo, viewport);
+    const measure = await page.evaluate(() => {
+      const width = (selector) => document.querySelector(selector).getBoundingClientRect().width;
+      const wraps = [...document.querySelectorAll('.az-table-wrap')];
+      return {
+        page: document.documentElement.scrollWidth,
+        text: width('.az-body > p'),
+        full: width('figure[data-width="100%"]'),
+        small: width('figure[data-width="50%"]'),
+        register: width('.az-table-wrap:has(th:nth-child(5))'),
+        // a table that does not fit slides in its own frame, never the page
+        frames: wraps.map((wrap) => wrap.scrollWidth <= wrap.clientWidth + 1 || getComputedStyle(wrap).overflowX === 'auto'),
+        sortable: [...document.querySelectorAll('th')].filter((head) => !head.textContent.trim()).map((head) => head.querySelector('button')),
+      };
+    });
+    expect(measure.page).toBeLessThanOrEqual(viewport.width);
+    expect(measure.frames.every(Boolean)).toBe(true);
+    expect(measure.sortable).toEqual([null]);
+    if (viewport.width === 1440) {
+      expect(measure.full).toBeGreaterThan(measure.text + 200);
+      expect(measure.register).toBeGreaterThan(measure.text + 200);
+      expect(measure.small).toBeLessThan(measure.text);
+    }
+    expect(refused).toEqual([]);
+  }
+});
+
 test('the report on a phone reads picture then words, with the contents folded into a bar', async ({ page, browserName }, testInfo) => {
   test.skip(browserName !== 'chromium', 'one browser is enough for the file itself');
   const refused = await openReport(page, testInfo, { width: 390, height: 844 });

@@ -220,6 +220,36 @@ describe('a table sorts, filters and points at a row', () => {
     expect(order(doc)).toEqual(['V1', 'V2', 'V3', 'V4', 'V5']);
   });
 
+  it('offers no sort on a column with no header, which holds the rows\' labels', async () => {
+    const doc = await report(`<div class="az-table-wrap"><table class="az-table"><thead><tr><th scope="col"></th><th scope="col">Video 1</th></tr></thead>
+      <tbody><tr><td>SHA-256</td><td>e1e32f4fcf40a0bcde7d2a638076d1a2995b8c96ccb0b53f198838f246cee09b</td></tr>
+      <tr><td>Times</td><td>S04 0:23-0:37</td></tr></tbody></table></div>`);
+    const [labels, video] = doc.querySelectorAll('th');
+    expect(labels.querySelector('button')).toBeNull();
+    expect(video.querySelector('button.az-sort').textContent).toBe('Video 1');
+    // a hash may break anywhere rather than widen the table; a time range stays whole
+    const [hash, times] = [...doc.querySelectorAll('tbody tr')].map((row) => row.children[1]);
+    expect(hash.classList.contains('az-token')).toBe(true);
+    expect(times.classList.contains('az-token')).toBe(false);
+    expect(times.querySelector('.az-keep').textContent).toBe('0:23-0:37');
+    // a hash is no hyphenated word to keep whole
+    expect(hash.querySelector('.az-keep')).toBeNull();
+  });
+
+  it('slides a table wider than its place in its own frame, and lets one that fits stick to the page', async () => {
+    const doc = await report(TABLE(3));
+    const wrap = doc.querySelector('.az-table-wrap');
+    const table = wrap.querySelector('table');
+    expect(wrap.classList.contains('az-slides')).toBe(false);
+    Object.defineProperty(table, 'scrollWidth', { value: 900, configurable: true });
+    Object.defineProperty(wrap, 'clientWidth', { value: 580, configurable: true });
+    window.dispatchEvent(new window.Event('resize'));
+    expect(wrap.classList.contains('az-slides')).toBe(true);
+    // the style sheet: never the page that slides, and five columns take the figures' width
+    expect(CSS).toContain('.az-js .az-table-wrap:not(.az-slides) { overflow: visible; }');
+    expect(CSS).toContain('.az-body > .az-table-wrap:has(th:nth-child(5)) { grid-column: wide; }');
+  });
+
   it('offers a filter past twelve rows only, and says how many are left', async () => {
     let doc = await report(TABLE(12));
     expect(doc.querySelector('.az-filter')).toBeNull();
@@ -270,6 +300,19 @@ describe('a citation shows its source', () => {
     key(doc, 'Escape');
     expect(doc.getElementById('az-card')).toBeNull();
     expect(link.hasAttribute('aria-describedby')).toBe(false);
+  });
+});
+
+describe('titles', () => {
+  it('never break right after a hyphen, in the page or in its contents', async () => {
+    const doc = await report(`<header class="az-cover"><h1 class="az-title">The fall of the Bab al-Mandab front, Sep-Nov 2026</h1></header>
+      <nav class="az-contents"><ol><li><a href="#s">Dhubab to Bab al-Mandab</a></li></ol></nav>
+      <main class="az-body"><h2 id="s">Dhubab to Bab al-Mandab</h2></main>`);
+    expect([...doc.querySelectorAll('.az-title .az-keep')].map((node) => node.textContent)).toEqual(['al-Mandab', 'Sep-Nov']);
+    expect(doc.querySelector('.az-title').textContent).toBe('The fall of the Bab al-Mandab front, Sep-Nov 2026');
+    expect(doc.querySelector('h2 .az-keep').textContent).toBe('al-Mandab');
+    expect(doc.querySelector('.az-contents a .az-keep').textContent).toBe('al-Mandab');
+    expect(CSS).toMatch(/\.az-title \{[^}]*text-wrap: balance;[^}]*hyphens: manual;/);
   });
 });
 
