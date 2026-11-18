@@ -20,8 +20,9 @@
  * import. The parts live in `editor/`: the page (`decorations.js`), the kinds of
  * block it draws whole, one module each, registered in `blocks.js` and loaded by
  * `kinds.js`, where the drawn blocks are (`ranges.js`), the keys at a block
- * (`blockKeys.js`), the `/` and `@` menus, what the toolbar writes (`writing.js`) and
- * what a tool puts in (`puts.js`).
+ * (`blockKeys.js`), the `/` and `@` menus, what the toolbar writes (`writing.js`),
+ * what a tool puts in (`puts.js`), and the block handle with its menu (`handle.js`,
+ * `blockMenu.js`, what they write in `turnInto.js`).
  */
 import { EditorState, Compartment, Prec } from '@codemirror/state';
 import {
@@ -35,6 +36,7 @@ import { autocompletion, completionKeymap, acceptCompletion } from '@codemirror/
 import { blockKinds } from './editor/blocks.js';
 import { blockKeys, pickedClass, typeNextToBlock, typeOnPicked } from './editor/blockKeys.js';
 import { drawn, rawField, rawHighlight, typeOverHints } from './editor/decorations.js';
+import { handleExtensions } from './editor/handle.js';
 import './editor/kinds.js';
 import { mentionSource } from './editor/mentionMenu.js';
 import { landed, spots } from './editor/puts.js';
@@ -71,7 +73,7 @@ export {
  */
 const drawing = new Compartment();
 
-const drawnMode = [openBlock, drawn, typeOverHints, typeNextToBlock, Prec.high(typeOnPicked), pickedClass, blockKeys];
+const drawnMode = [openBlock, drawn, typeOverHints, typeNextToBlock, Prec.high(typeOnPicked), pickedClass, blockKeys, handleExtensions];
 const rawMode = [rawField, syntaxHighlighting(rawHighlight)];
 
 /** `drawn` or `markdown`: how the page is shown now. */
