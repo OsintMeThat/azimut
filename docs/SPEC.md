@@ -577,6 +577,11 @@ stops making sense.
   stages a decrypted ZIP inside the incoming case directory. Imports validate
   declared and actual sizes, reserve filesystem headroom and warn above 10 GiB;
   downloads and generated files still have no app quota.
+- **A map in a note** (`api/notemaps.py`, `engine/notes_maps.py`) fetches the same imagery
+  tiles a capture does, once, on the press that puts it, to file its ground and its
+  close-ups as captures of the case. The HTML page and the PDF made from the note never
+  fetch anything: the page's map is the filed ground under SVG, its data JSON that is
+  never run. An offline put writes the map with no ground rather than trying again later.
 
 ## 10. Open questions
 
