@@ -7006,7 +7006,7 @@ note holds at most 200, with a line naming the cut.
 
 **Several at once.** *Select* puts a box on every card; Shift-click picks a run,
 *Select all* the folder shown, Escape leaves. A bar at the foot says how many are
-picked and offers **Export as PDF** (one PDF per note, into the notes destination)
+picked and offers **Export** (one PDF or HTML page per note, into the notes destination)
 and **Make a report**, which writes a new note holding one chapter per picked note in
 the order they were picked, in the Report look with a cover and a contents page, and
 opens it beside its pages.
@@ -7014,8 +7014,10 @@ opens it beside its pages.
 **A note, written in place.** The note is drawn as it reads while it is typed
 (CodeMirror 6, `lib/notes/liveMarkdown.js`). A heading is set large, emphasis and links are styled, bullets are dots, `- [ ]` is a box to tick,
 and the marks come back on the line being edited. A case reference is a chip that
-opens what it names; a picture, a table, a diagram, an aligned block, an HTML block,
-a chapter and the page-break and cover lines are drawn whole and stay drawn. A press
+opens what it names; a picture, a table, a diagram, an aligned block, a block of
+steps or a story, an HTML block, a chapter and the page-break and cover lines are drawn
+whole and stay drawn. Steps show their pictures numbered in a row, each with its
+caption; a story shows each picture beside its words, the part it zooms in on outlined. A press
 picks one (an accent outline, a picture's bar kept up); a double press, Enter or its
 `</>` opens its source, which closes again once the cursor leaves it, and Escape closes
 it at once. While one is picked, Backspace or Delete takes it out (Undo brings it back),
@@ -7023,11 +7025,12 @@ a key typed starts a paragraph of its own after it, and the arrow keys step over
 whole, picking it on the way. The toolbar's last pair switches between **Drawn** and
 **Markdown**, the raw text with no drawing (Ctrl+Shift+M), one choice for the browser,
 every open editor following it. A callout opens a
-quote as `> [!confirmed]`, `[!unverified]`, `[!lead]`, `[!note]` or `[!warning]`, in
-its colour, in the PDF too. Decimal coordinates get a ⌖ that shows them on the map.
+quote as `> [!confirmed]`, `[!unverified]`, `[!lead]`, `[!note]`, `[!warning]` or
+`[!limits]` (what the evidence cannot say), in its colour, in the PDF too. Decimal coordinates get a ⌖ that shows them on the map.
 **@** and a few letters offer the case's records and write a chip; **/** offers
 headings, a dated log entry, tasks, lists, the callouts, a case item, a case picture,
-an image from a file, a table, a diagram, code, a divider, a page break and today's date. The bar
+an image from a file, a table, a diagram, **Steps** and **Story** (an empty `::: steps` or
+`::: story` block opened on its guidance), code, a divider, a page break and today's date. The bar
 above holds the same as buttons. Ctrl+B and Ctrl+I set bold and italic, Enter on an
 empty item leaves the list. Pasting or dropping an image adds it to the case's media;
 a library file dragged in lands as its picture. A link pasted alone is offered as a
@@ -7037,7 +7040,7 @@ image says its host is contacted on every open.
 The file stays the Markdown it was: what the old split-pane Notebook wrote opens as it
 was written and is never rewritten for being opened. The header names the note (the
 name is the filename), files it in a folder, says whether it is saved, and holds
-**Look**, **Write | Page**, **Pin to the side**, **Open in its own tab**, **PDF**, and a
+**Look**, **Write | Page**, **Pin to the side**, **Open in its own tab**, **Export**, and a
 ⋯ with *Editions*, *Keep as template*, *To Post* and *Delete* (*Clear the case notes*
 for the case's page).
 PDF export writes one server-rendered PDF per note without a print dialog, in the
@@ -7048,6 +7051,18 @@ homonyms under stable suffixes, into the shared notes destination (the case's
 what it finds is listed under *Before you export*, by note when several are exported,
 each with *Go to* when it names a line, and the button reads *Export anyway*. A check
 that fails says nothing and never holds the export back.
+
+**PDF | HTML.** The export dialog opens with a **PDF | HTML** switch, the last one picked
+kept for this browser; everything else (the edition, the destination, the check, the
+Editions record) is the same for both. For HTML the check also says what the file would
+weigh, past the 25 MB it aims under in amber, lists the clips that go out as a poster and
+a link rather than inside the file, and lists the points where a filmer stood, which a
+public file keeps to the metre unless *Round them to about 150 m in this file* is ticked
+(the note is never rewritten). A public page after an earlier public edition asks
+**What changed**, a line printed at its end with the earlier editions. The Page pane has
+the same switch: HTML draws the page an export would write, in a frame that runs its own
+script and reaches nothing of the app, keeping its place between drafts; a template shows
+its pages.
 
 **Editions.** A passage written as `> [!internal]` (*Internal* in **/** and the callout
 menu) is for the team: drawn in its own colour, printed in a marked box in the internal
@@ -7063,11 +7078,29 @@ passages it leaves out, and the Page pane has the same switch. Each export is a 
 file, never a replacement: a note with no internal passage has one edition, named
 `<title> - <day>.pdf` and listed as Public; a note with one is named `<title> -
 <internal|public> - <day>.pdf`; then `(2)` and so on that day. **⋯ › Editions**
-lists every PDF a note was exported to, with its day, edition, pages and file (its
+lists every PDF and HTML page a note was exported to, with its day, format, edition, a
+PDF's pages and the file (its
 SHA-256 on hover): *Show* opens its folder, and *Check* says *Unchanged since it was
 written*, *This file is not the one Azimut wrote* or *File missing*. The record (day,
 edition, file, folder, pages, the PDF's SHA-256 and the printed text's) is kept on the
 note, fifty at most, and travels in a bundle.
+
+**The HTML page, for its reader.** It reads like a long investigation online, in the
+note's look: the cover with its TLP label in FIRST's colours, the contents beside the
+text on a wide screen (a bar at the top on a phone) marking the chapter being read, the
+*Limits* box and the sources, about 68 characters to a line, and pictures wider than the
+text with their caption and credit under them. A press on a picture opens it large, to
+zoom and move, its credit kept with it; Escape closes it. A Compare pair is a slider
+between its two dated, credited sides; a timecode plays its passage of the clip; a table
+of more than twelve rows can be filtered, any table sorted by a column, and a code such
+as `[V12](#V12)` jumps to its row. A citation shows its source on hover or focus, and
+*How this was checked* under a figure opens the chain from the original post to the
+picture. A `::: steps` block shows one picture at a time with arrows and a row of days,
+its clip playing muted; a `::: story` keeps the picture beside the words being read and
+moves in on the part a step names (`{zoom=x,y,w,h}`). A picture marked `{graphic}` is
+blurred until pressed: a veil for the reader, not a redaction, as the picture is in the
+file whole. Without script, on a narrow screen, printed or with motion turned down, the
+page reads whole, picture then words; printed, the TLP label tops every page.
 
 **To Post.** In the open note's ⋯, kept out of the header, *To Post* opens Post on a Free post thread made of the
 note's public edition, or of the stretch selected in it, which its title then says;
@@ -7274,7 +7307,7 @@ What each tool puts, and where its *Put in “<note>”* sits:
 | Tool | What lands | Where |
 |---|---|---|
 | Map | *An area of the map*: the capture marquee is armed and the box dragged is filed as a capture (Esc or Cancel calls it off), once per identical view (provider, imagery day, centre, zoom, bearing, size). *This point*: decimal degrees at 5 places, or the open place's chip and its coordinates. *This measure*: its own text and assumption, and the day a shadow was read for | capture menu, right-click *Put this point in “…”*, Add |
-| Compare | *An area of the pair*: the frame tool is armed for the note alone (Esc, a click or Cancel calls it off) and both pictures of the box drawn land side by side, both days in its credit, kept once per identical pair and frame; the export's own frame is left as it was. An unsaved comparison is saved as *<place>, <day A> to <day B>* | Export panel |
+| Compare | *An area of the pair*: the frame tool is armed for the note alone (Esc, a click or Cancel calls it off) and both pictures of the box drawn land side by side, both days in its credit, kept once per identical pair and frame, each side also kept as a picture of its own, dated and credited, which an HTML page lays under a slider; the export's own frame is left as it was. An unsaved comparison is saved as *<place>, <day A> to <day B>* | Export panel |
 | Detect | *This pin*: a pinned candidate's evidence picture, captioned with what was measured, its area and its days; a candidate not pinned offers nothing | the pinned verdict |
 | Inspect | *This frame*, labelled *Frame at 00:12.480*, saved first when it is not | under Save to case |
 | Collage | *This collage*, saved first when it is not | under Save to case |
@@ -7282,7 +7315,7 @@ What each tool puts, and where its *Put in “<note>”* sits:
 | Timeline | *This window* as a table | Copy, Add |
 | Sheet | *This view* as a table, its provenance header kept | Export, Add |
 | Media | *Quote the post*: the words as posted, the account and day, then the media's chip | Open in…, Add |
-| Map plate | *This page*: the page on screen drawn at 300 dpi (at most 36 Mpx, a large paper coarser rather than refused), filed once per plate, day, step and size, its credits on its face; refused while tiles are still loading. *The days side by side*: the plate's sheet, 2 to 12 days | the export dialog (PNG, Sheet), Add |
+| Map plate | *This page*: the page on screen drawn at 300 dpi (at most 36 Mpx, a large paper coarser rather than refused), filed once per plate, day, step and size, its credits on its face; refused while tiles are still loading. *The days side by side*: the plate's sheet, 2 to 12 days. *The slides, as steps*: every day and step the plate plays, each filed as its page and written as one `::: steps` block captioned with its day and title, 2 to 24 slides | the export dialog (PNG, Sheet), Add |
 | Compare | *This evolution sheet*: 2 to 40 pictures, the comparison saved first, each day credited (Wayback days as estimates); fetched on that press | Export panel with Sheet ticked |
 | Horizon | Offered whenever an eye stands: a box dragged over the view as it shows, loupe kept (Esc or Cancel calls it off), the view saved first, filed once per view, area, kind and size. *An area of the photo above the terrain* while a photo is laid, else *An area of the view* with its names, ruler and credits. Never a Find score or rank | Export menu, Add |
 | Detect | *The kept table*: kept and noted candidates only, under a quoted header (run and areas, analyzer, passes, threshold, cloud mask, *N kept of M candidates, P pinned*), 200 rows at most | beside Export as layer, Add |

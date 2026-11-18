@@ -469,9 +469,9 @@ test('the export says what the PDF would warn about first, Go to takes the note 
   await expect(before.getByRole('listitem')).toHaveText([/Roof" has no source\.\s*Go to/, 'Picture "Quay" is no longer in the case.']);
   expect(state.checked).toEqual([['n1']]);
   await expect(dialog.getByRole('button', { name: 'Export anyway' })).toBeVisible();
-  // the keyboard reaches Go to past the destination, and lands in the note at the line
+  // the keyboard reaches Go to past the format and the destination, and lands in the note at the line
   const go = before.getByRole('button', { name: 'Go to' });
-  for (let press = 0; press < 4; press += 1) {
+  for (let press = 0; press < 8; press += 1) {
     await page.keyboard.press('Tab');
     if (await go.evaluate((node) => node === document.activeElement)) break;
   }

@@ -33,7 +33,7 @@
   let shown = $state(0);
   let ticket = 0;
   let top = 0;
-  const elements = $state.raw([]);
+  const elements = $state([]);
 
   $effect(() => {
     const next = html;
