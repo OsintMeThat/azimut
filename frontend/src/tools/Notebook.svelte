@@ -46,7 +46,7 @@
   import { keepPageView, readPageView } from '../lib/notes/pageView.js';
   import { exportNotes, revealExports } from '../lib/notesExport.js';
   import { checkNotes, isLeftOut } from '../lib/notes/warnings.js';
-  import { HTML, HTML_BUDGET, keepFormat, readFormat, weightWords } from '../lib/notes/formats.js';
+  import { HTML, HTML_BUDGET, WORDPRESS, keepFormat, readFormat, weightWords } from '../lib/notes/formats.js';
   import { editionOfAll, keepEdition, PUBLIC } from '../lib/notes/editions.svelte.js';
   import { destinationLabel, readDestinations } from '../lib/exportDest.js';
   import { assignFolder, renameEntity } from '../lib/filing.js';
@@ -68,6 +68,7 @@
   import EditionsDialog from './notebook/EditionsDialog.svelte';
   import ToPostItem from './notebook/ToPostItem.svelte';
   import ConfirmDialog from '../components/ConfirmDialog.svelte';
+  import WordPressDraft from './notebook/WordPressDraft.svelte';
   import ExportFolderPicker from '../components/ExportFolderPicker.svelte';
   import FloatingMenu from '../components/FloatingMenu.svelte';
   import Modal from '../components/Modal.svelte';
@@ -109,6 +110,11 @@
   // the note whose editions are listed: { noteId, title }
   let editionsOf = $state(null);
   let checkController = null;
+  // the WordPress branch of the dialog: its Send, and what WordPress answered
+  let wordpressDraft = $state(null);
+  let draftBusy = $state(false);
+  let draftReady = $state(false);
+  let draftSent = $state(null);
   // the notes picked on the home, in the order they were picked
   let selected = $state([]);
   // the PDF beside the note, as the analyst last left it
@@ -588,6 +594,11 @@
     const id = caseId;
     const mine = new AbortController();
     checkController = mine;
+    // the WordPress branch says what it checks itself
+    if (exportFormat === WORDPRESS) {
+      checkController = null;
+      return;
+    }
     exportCheck = { checking: true, internal };
     try {
       if (doc) await flush(doc);
@@ -815,11 +826,19 @@
       .filter((item) => item.warnings.length)}
     {@const page = html && exportCheck && !exportCheck.checking ? exportCheck : null}
     {@const shared = exportEdition === PUBLIC || !exportCheck?.internal}
-    <Modal title={several ? `Export notes as ${named}` : `Export note as ${named}`} onclose={closeExport} width="560px">
+    {@const wordpress = exportFormat === WORDPRESS}
+    <Modal title={wordpress ? 'Export note as a WordPress draft' : several ? `Export notes as ${named}` : `Export note as ${named}`}
+      onclose={closeExport} width="560px">
       <div class="export-format">
         <span class="dest-label">Format</span>
         <FormatSwitch value={exportFormat} onchange={chooseFormat} />
       </div>
+      {#if wordpress}
+        <!-- WordPress draft: its fields, its button and its result line, filled in by the WordPress branch. -->
+        <WordPressDraft bind:this={wordpressDraft} bind:busy={draftBusy} bind:ready={draftReady} bind:sent={draftSent}
+          {caseId} noteIds={exportIds} prepare={async () => { if (doc) await flush(doc); }} onleave={closeExport} />
+        <!-- end of the WordPress branch -->
+      {:else}
       <div class="export-dest">
         <span class="dest-label">Destination</span>
         <span class="dest-path mono" title={exportDir || "The case's own exports folder"}>{exportDir || "the case's exports folder"}</span>
@@ -887,6 +906,7 @@
           {/if}
         </section>
       {/if}
+      {/if}
       {#if exportCheck?.checking}
         <p class="checking" role="status">Checking…</p>
       {:else if found.length}
@@ -912,9 +932,19 @@
       {/if}
       <div class="modal-row">
         <div style="flex:1"></div>
-        <button class="btn" onclick={closeExport}>Cancel</button>
+        <button class="btn" onclick={closeExport}>{wordpress && draftSent ? 'Close' : 'Cancel'}</button>
+        {#if wordpress}
+          {#if draftSent?.edit}
+            <a class="btn btn-primary" href={draftSent.edit} target="_blank" rel="noopener noreferrer"
+              title="The draft in WordPress's editor, where you publish it">Open in WordPress</a>
+          {:else}
+            <button class="btn btn-primary" disabled={draftBusy || !draftReady} onclick={() => wordpressDraft?.send()}
+              title="Upload the pictures and save the note as a draft; nothing is published">{draftBusy ? 'Sending…' : 'Send as a draft'}</button>
+          {/if}
+        {:else}
         <button class="btn btn-primary" disabled={exportBusy} onclick={() => runExport(exportIds)}>
           {exportBusy ? 'Exporting…' : found.length ? 'Export anyway' : several ? `Export ${exportIds.length} ${html ? 'HTML pages' : 'PDFs'}` : `Export ${named}`}</button>
+        {/if}
       </div>
     </Modal>
   {/if}

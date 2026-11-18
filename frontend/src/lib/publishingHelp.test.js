@@ -4,6 +4,7 @@ import { PUBLISHING_HELP } from './publishingHelp.js';
 
 const TAB = readFileSync(new URL('../tools/settings/PublishingTab.svelte', import.meta.url), 'utf8');
 const EDITOR = readFileSync(new URL('../tools/settings/LogoEditor.svelte', import.meta.url), 'utf8');
+const WORDPRESS = readFileSync(new URL('../tools/settings/WordPressSettings.svelte', import.meta.url), 'utf8');
 
 describe('what Settings › Publishing says on hover', () => {
   it('says one short clause per setting, in the terse register of the app', () => {
@@ -16,12 +17,14 @@ describe('what Settings › Publishing says on hover', () => {
   });
 
   it('has no text left that no control shows', () => {
-    for (const key of Object.keys(PUBLISHING_HELP)) expect(TAB.includes(`HELP.${key}`) || EDITOR.includes(`HELP.${key}`), key).toBe(true);
+    for (const key of Object.keys(PUBLISHING_HELP)) {
+      expect([TAB, EDITOR, WORDPRESS].some((source) => source.includes(`HELP.${key}`)), key).toBe(true);
+    }
   });
 
-  it.each([['the tab', TAB, 10], ['the logo editor', EDITOR, 8]])('titles every control of %s', (_, source, least) => {
+  it.each([['the tab', TAB, 10], ['the logo editor', EDITOR, 8], ['the WordPress section', WORDPRESS, 4]])('titles every control of %s', (_, source, least) => {
     const markup = source.slice(source.indexOf('</script>'));
-    const controls = tags(markup, /<(input|button|select|canvas)\b/g);
+    const controls = tags(markup, /<(input|button|select|canvas|summary|a)\b/g);
     expect(controls.length).toBeGreaterThan(least);
     for (const control of controls) expect(control, control).toMatch(/\btitle=/);
   });

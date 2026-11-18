@@ -8,6 +8,7 @@
   import { untrack } from 'svelte';
   import Icon from '../../components/Icon.svelte';
   import Modal from '../../components/Modal.svelte';
+  import { siteHost } from '../../lib/wordpressSetup.js';
   import {
     CHECK_SAID, PUBLIC, checkEdition, editionDay, listEditions, showEdition,
   } from '../../lib/notes/editions.svelte.js';
@@ -20,7 +21,7 @@
   let checked = $state({});
   let showing = $state('');
 
-  const keyOf = (edition) => `${edition.at}|${edition.file}`;
+  const keyOf = (edition) => `${edition.at}|${edition.file}|${edition.post ?? ''}`;
 
   $effect(() => {
     const id = caseId;
@@ -72,6 +73,19 @@
       {#each editions as edition (keyOf(edition))}
         {@const state = checked[keyOf(edition)]}
         <li class="row">
+          {#if edition.format === 'wordpress'}
+            <!-- a WordPress draft is no file: its site, and Open in WordPress in place of Show and Check -->
+            <div class="what">
+              <div class="head">
+                <span class="day">{editionDay(edition.at)}</span>
+                <span class="badge format" data-format="wordpress">WordPress</span>
+                <span class="badge edition">Public</span>
+              </div>
+              <span class="file">Draft on {siteHost(edition.site)}</span>
+            </div>
+            <a class="btn btn-ghost btn-xs" href={edition.edit} target="_blank" rel="noopener noreferrer"
+              title="The draft in WordPress's editor; it may have been published since">Open in WordPress</a>
+          {:else}
           <div class="what">
             <div class="head">
               <span class="day">{editionDay(edition.at)}</span>
@@ -93,6 +107,7 @@
             onclick={() => show(edition)}>Show</button>
           <button type="button" class="btn btn-ghost btn-xs" title="Read the file again and compare it with what Azimut wrote"
             disabled={state === 'checking'} onclick={() => check(edition)}>Check</button>
+          {/if}
         </li>
       {/each}
     </ul>
@@ -123,4 +138,5 @@
   .said[data-state='missing'] { color: var(--warn); }
   .mono { font-family: var(--font-mono); }
   .actions { display: flex; justify-content: flex-end; margin-top: 14px; }
+  .format[data-format='wordpress'] { color: var(--accent); }
 </style>

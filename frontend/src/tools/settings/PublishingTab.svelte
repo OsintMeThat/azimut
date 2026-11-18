@@ -9,7 +9,8 @@
    * opens the logo editor first, and Edit… opens it again on the picture as picked
    * (`LogoEditor.svelte`). In reports, a note prints your name, role and
    * organisation where it says `{name}`, `{role}` and `{organisation}`
-   * (`lib/notes/reportParts.js`), as its Signature block does. The hover texts
+   * (`lib/notes/reportParts.js`), as its Signature block does. **WordPress** is the
+   * site a note is sent to as a draft (`WordPressSettings.svelte`). The hover texts
    * live in `lib/publishingHelp.js`.
    */
   import { defaultMention, POST_TARGETS } from '../../lib/post.js';
@@ -18,6 +19,7 @@
   import { LOGO_MAX_BYTES, PUBLISHING_HELP as HELP, REPORT_FIELD_MAX, SIGNATURE_MAX_MB } from '../../lib/publishingHelp.js';
   import { myLogoUrl } from '../../lib/myLogo.js';
   import LogoEditor from './LogoEditor.svelte';
+  import WordPressSettings from './WordPressSettings.svelte';
 
   let {
     signature,
@@ -284,6 +286,8 @@
     />
   </div>
 </section>
+
+<WordPressSettings />
 
 <style>
   .sig-side {

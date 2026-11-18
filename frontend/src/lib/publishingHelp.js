@@ -1,8 +1,8 @@
 /**
- * What Settings › Publishing and its logo editor say on hover, one clause each,
- * and the limits they state under their fields. `publishingHelp.test.js` holds
- * every key to a sentence and to a control showing it, and every control of the
- * tab and the editor to a hover text.
+ * What Settings › Publishing, its logo editor and its WordPress section say on hover,
+ * one clause each, and the limits they state under their fields.
+ * `publishingHelp.test.js` holds every key to a sentence and to a control showing it,
+ * and every control of the tab, the editor and the section to a hover text.
  */
 export const PUBLISHING_HELP = {
   mention: 'The handle a new X post is addressed to',
@@ -30,6 +30,13 @@ export const PUBLISHING_HELP = {
   organisation: 'Your organisation, printed where a note says {organisation}',
   signature: 'A picture of your handwritten signature, shown by a note\'s Signature block',
   signatureRemove: 'Take your signature off every note that shows it',
+  wordpressSite: 'The WordPress site a note is sent to as a draft',
+  wordpressUser: 'The username you sign in to WordPress with',
+  wordpressPassword: 'An application password from Users › Profile, kept on this computer only',
+  wordpressTest: 'Sign in to the site and say as whom',
+  wordpressForget: 'Forget the address, the username and the password on this computer',
+  wordpressHow: 'Where each answer is found in WordPress',
+  wordpressGuide: "WordPress's own guide to application passwords",
 };
 
 /** The longest name, role or organisation a report prints (`api/settings.py`). */
