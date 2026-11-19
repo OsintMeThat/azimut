@@ -53,12 +53,12 @@ LOOKS = {"article": NoteLook(), "story": NoteLook.model_validate({"web": "story"
 #: Taken at 0e0a2ba, the commit before the live map, then again each time the reader's own
 #: style sheet changed and nothing else did (read line by line): charts appended their section,
 #: then the annexes theirs, then charts and infographics moved to sheets of their own that only
-#: a page holding one carries.
+#: a page holding one carries, then a table that fits stopped being a frame of its own on a phone.
 GOLDEN = {
-    "single-article": "ecdee687f6e86dd495edd91392535b4655156fd9be14b8c0a8cad64a62636860",
-    "single-story": "d1e29cd191011ad36a647a1ccdd03baf463bee2ea2f758a0aa7372a5a8dbb890",
-    "folder-article": "0382c1af73fccb2f07671474bf8c2e2edfabc8936ead3063360ff9f35c1e0c65",
-    "folder-story": "3ba3874ff65a7797c89f7c5f5694efa7d8ce0bd999b250b1c11e7bd6bf343eec",
+    "single-article": "c8774be885cda49b25d5a84bd4828fe1f590252bf09f07a33079898b2801ef77",
+    "single-story": "c9e80b3e14f0ac430f1d13ef7e2cc4cfc23c8857918700ec4caaa3ba19b132ad",
+    "folder-article": "5dc35615dd6b9cb34e0a8af2b403ff6afcfd9aa117110f4e6a404821d1bb3c7f",
+    "folder-story": "8153c9bed78cec1dd5068eaddb101d5b0c89897bb4a923edc939b05819406e3e",
 }
 
 
