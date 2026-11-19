@@ -285,7 +285,8 @@ presses *Read the guide* on it, which opens the guide on its start page.
 
 Rules:
 
-- **Go to** opens from the topbar or `Ctrl+K` (`⌘K` on macOS). It starts with
+- **Go to** opens from the topbar or `Ctrl+K` (`⌘K` on macOS); on words in a note
+  the key opens the note's Link field instead. It starts with
   recently added documents, then searches tools, Horizon's settings, workspace
   cases, documents in the current case and the words inside its notes, each found
   note opening on its line, and *Note on the side* opens the note on the side. A Horizon setting opens Horizon with
@@ -7013,7 +7014,9 @@ opens it beside its pages.
 
 **A note, written in place.** The note is drawn as it reads while it is typed
 (CodeMirror 6, `lib/notes/liveMarkdown.js`, each kind of drawn block a module of `lib/notes/editor/`). A heading is set large, emphasis and links are styled, bullets are dots, `- [ ]` is a box to tick,
-and the marks come back on the line being edited. A case reference is a chip that
+and the marks come back on the line the cursor is on. Words selected stay drawn, and
+while the mouse is pressed the lines hold as they were, so nothing moves under the
+pointer. A case reference is a chip that
 opens what it names; a picture, a table, a diagram, an aligned block, a block of
 steps or a story, an HTML block, a chapter and the page-break and cover lines are drawn
 whole and stay drawn. Steps show their pictures numbered in a row, each with its
@@ -7029,12 +7032,45 @@ whole, picking it on the way. The toolbar's last pair switches between **Drawn**
 every open editor following it. A callout opens a
 quote as `> [!confirmed]`, `[!unverified]`, `[!lead]`, `[!note]`, `[!warning]` or
 `[!limits]` (what the evidence cannot say), in its colour, in the PDF too. Decimal coordinates get a ⌖ that shows them on the map.
-**@** and a few letters offer the case's records and write a chip; **/** offers
-headings, a dated log entry, tasks, lists, the callouts, a case item, a case picture,
-an image from a file, a table, a diagram, **Steps** and **Story** (an empty `::: steps` or
-`::: story` block opened on its guidance), an **Interactive map**, code, a divider, a page break and today's date. The bar
-above holds the same as buttons. Ctrl+B and Ctrl+I set bold and italic, Enter on an
-empty item leaves the list. Pasting or dropping an image adds it to the case's media;
+**@** and a few letters offer the case's records and write a chip.
+
+**The insert menu.** **/**, the **+** in the left margin of the empty line being
+written, or the toolbar's **+** open one menu in five parts: **Text** (headings, lists,
+a to-do, a quote, **Callout ›** with its six kinds, Internal, code, today's date, a dated
+log entry), **Media** (a case picture, an image from a file, **Steps** and **Story**, an
+empty `::: steps` or `::: story` block opened on its guidance, your logo), **From the
+case** (a case item, an **Interactive map**, a note included as a chapter), **Layout**
+(a divider, a page break, the cover page, **Alignment ›**, **Cover corner ›**, a
+signature, **Field ›** for the words the PDF fills in) and **Figures** (a table, a
+diagram). Each entry has an icon, its name and a line under it; beside the list, the
+entry lit is drawn as it will look, with the Markdown it writes. What is typed after
+`/` (or after the +, which writes nothing until an entry is picked) finds entries by
+name and by the words each goes by, best first, so `/tab` is Table and `/private` is
+Internal. Every entry is one Undo step. An empty note says once, *Type / or press + to
+add anything*, until the menu is first used in this browser.
+
+**The selection bubble.** Words selected on the drawn page bring up a bar above them,
+or under them near the top of the page, never over them: **B**, **I**, **Link**, **H**,
+a bulleted list, a quote, **</>**, **Internal** and **Clear**, each title naming its key.
+Each press writes the Markdown an expert would type, read from the syntax tree (the
+`*` of italic is never taken for half of a bold's `**`), as one Undo step; a mark set on
+words that cut a link or a chip takes it whole. Heading, list and quote turn the lines
+touched, Internal wraps the whole paragraphs touched in `> [!internal]` or takes them
+out, Clear takes bold, italic and code off and leaves links. The bar goes when a block is
+picked, once typing replaces the words, on Escape and while the mouse is still pressed.
+Ctrl+B, Ctrl+I and Ctrl+E (code) work with or without it. Markdown mode has no bubble.
+
+**The Link field.** **Link** or Ctrl+K on words selected, or on the link or the word the
+cursor is in, opens a field under them. An address pasted or typed is looked up in the
+case first (`GET /sources/lookup`, read off the address and the case, nothing fetched):
+a page the case holds says *In the case:* with what it is, who posted it and when, the
+day it was seen, its archived copy and how often the note cites it, and offers **Cite
+it** (the item's chip in place of the words) or **Keep the link** (`[words](address)`);
+a page it does not hold offers **Link**, or **Bookmark it**, which files it as a bookmark
+named from its address and cites it. Words that are not an address find the case's
+items by name, a press citing one. A written link opens with its address, and
+**Remove** keeps its words. Ctrl+K anywhere else in the note still opens Go to. The
+bar above holds the same as buttons. Enter on an empty item leaves the list. Pasting or dropping an image adds it to the case's media;
 a library file dragged in lands as its picture. A link pasted alone is offered as a
 bookmark of the case, titled from its address, nothing fetched. A note with a remote
 image says its host is contacted on every open.

@@ -811,6 +811,7 @@ export const PAGES = {
     tips: [
       { title: 'Cited in Details', text: 'A place a note cites lists the note and the sentence in its Details, and in the Graph.' },
       { title: 'Tasks', text: 'A - [ ] in a note shows in the To-do, where it can be ticked.' },
+      { title: 'Without Markdown', text: 'Select words for a bar that sets bold, a heading, a link or Internal. / or the + of an empty line opens everything else.' },
       { title: 'Callouts', text: '/confirmed, /unverified, /lead: a coloured block, in the PDF too.' },
       { title: 'Cite in note', text: 'Details puts anything it shows into the note being written.' },
       { title: 'Diagrams', text: 'A mermaid code block becomes a diagram, in the note and in the PDF.' },
@@ -1268,6 +1269,15 @@ export const KEYMAP = [
       { combo: 'Enter', does: 'opens the picture, video or sound under the cursor' },
       { combo: '← / →', does: 'walks the viewer through the list' },
       { combo: 'Escape or Space', does: 'closes the viewer' },
+    ],
+  },
+  {
+    where: 'Notebook',
+    keys: [
+      { combo: 'Ctrl+K / ⌘K', does: 'on words, links them or cites the case item at the address' },
+      { combo: 'Ctrl+B, Ctrl+I, Ctrl+E', does: 'sets bold, italic or code on the words, or takes it off' },
+      { combo: '/', does: 'opens the insert menu, as the + of an empty line does' },
+      { combo: 'Ctrl+Shift+M', does: 'switches the page between drawn and Markdown' },
     ],
   },
   {
