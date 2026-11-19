@@ -52,8 +52,7 @@ function gutterOf(view) {
 
 /**
  * The row of the page (a line, or a drawn block) at a height on screen: the one under
- * it, or in a gap between two the one above. Read off the page, which a drawn block's
- * margins leave out of step with the editor's height map.
+ * it, or in a gap between two the one above. Read off the page the pointer is over.
  */
 function rowAt(view, clientY) {
   const { contentDOM } = view;
@@ -70,6 +69,18 @@ function rowAt(view, clientY) {
   return last;
 }
 
+/**
+ * Where a row of the page is drawn on screen: its box, less the clear borders a drawn
+ * block keeps its room above and below in (`editor/theme.js`), so its frame.
+ */
+function frameRect(element) {
+  const rect = element.getBoundingClientRect();
+  const style = getComputedStyle(element);
+  const above = parseFloat(style.borderTopWidth) || 0;
+  const below = parseFloat(style.borderBottomWidth) || 0;
+  return { top: rect.top + above, bottom: rect.bottom - below, left: rect.left, right: rect.right, height: rect.height - above - below };
+}
+
 /** Where a block stands on screen, `{ top, bottom }`: off its rows while they are drawn, off the height map else. */
 function blockSpan(view, block) {
   const lastLine = view.state.doc.lineAt(block.to).from;
@@ -77,7 +88,7 @@ function blockSpan(view, block) {
   const first = block.from >= from && block.from <= to ? topElement(view, block.from) : null;
   // a drawn block is one row, its lines inside it
   const last = block.drawn ? first : lastLine >= from && lastLine <= to ? topElement(view, lastLine) : null;
-  if (first && last) return { top: first.getBoundingClientRect().top, bottom: last.getBoundingClientRect().bottom };
+  if (first && last) return { top: frameRect(first).top, bottom: frameRect(last).bottom };
   return { top: view.lineBlockAt(block.from).top + view.documentTop, bottom: view.lineBlockAt(block.to).bottom + view.documentTop };
 }
 
@@ -180,8 +191,7 @@ class BlockHandle {
 
   /**
    * The block at a height on screen: the one whose lines it is over, or the last one
-   * above it, so the gap between two keeps it. Read off the page itself rather than
-   * the editor's height map, which a drawn block's margins put out of step.
+   * above it, so the gap between two keeps it. Read off the page itself.
    */
   blockAtY(clientY) {
     const { view } = this;
@@ -241,7 +251,7 @@ class BlockHandle {
     if (block.drawn) {
       // a drawn block's words start at the page's margin, inside its padding or its frame's margin alike
       const element = topElement(view, block.from);
-      const rect = element?.getBoundingClientRect();
+      const rect = element ? frameRect(element) : null;
       if (!rect) return null;
       const style = getComputedStyle(element);
       const inset = Math.min(parseFloat(style.paddingTop) || 0, 8);

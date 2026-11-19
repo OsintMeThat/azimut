@@ -4400,7 +4400,6 @@ run has its own layer. Re-exporting a date replaces its category. Older dates ar
 lighter and newer dates darker on a blue ramp. Features carry the name, description,
 pass date, detector, area and run id. Exported layers survive deletion of their runs.
 
-
 ## Geo Proof
 
 A proof is composed of panels: case images, each carrying its source. Two things
@@ -7020,7 +7019,8 @@ pointer. A case reference is a chip that
 opens what it names; a picture, a table, a diagram, an aligned block, a block of
 steps or a story, an HTML block, a chapter and the page-break and cover lines are drawn
 whole and stay drawn. Steps show their pictures numbered in a row, each with its
-caption; a story shows each picture beside its words, the part it zooms in on outlined. A
+caption; a story shows each picture beside its words, the part it zooms in on outlined
+(both worked without braces, see *Steps and stories* below). A
 Mermaid chart (`xychart-beta`) draws its series in a blue ramp then grey and its words in
 the note's sans, in the editor, the PDF and the HTML page alike. A press
 picks one (an accent outline, a picture's bar kept up); a double press, Enter or its
@@ -7039,7 +7039,7 @@ quote as `> [!confirmed]`, `[!unverified]`, `[!lead]`, `[!note]`, `[!warning]` o
 written, or the toolbar's **+** open one menu in five parts: **Text** (headings, lists,
 a to-do, a quote, **Callout ›** with its six kinds, Internal, code, today's date, a dated
 log entry), **Media** (a case picture, an image from a file, **Steps** and **Story**, an
-empty `::: steps` or `::: story` block opened on its guidance, your logo), **From the
+empty `::: steps` or `::: story` block, the cursor after it, drawn as its strip, your logo), **From the
 case** (a case item, an **Interactive map**, a note included as a chapter), **Layout**
 (a divider, a page break, the cover page, **Alignment ›**, **Cover corner ›**, a
 signature, **Field ›** for the words the PDF fills in) and **Figures** (a table, a
@@ -7076,6 +7076,29 @@ bar above holds the same as buttons. Enter on an empty item leaves the list. Pas
 a library file dragged in lands as its picture. A link pasted alone is offered as a
 bookmark of the case, titled from its address, nothing fetched. A note with a remote
 image says its host is contacted on every open.
+
+**Citations.** A chip or a written link, hovered a moment or with the cursor resting
+inside it, shows a card under it of what the case knows of what it cites
+(`lib/notes/editor/citationCard.js`): its kind, site and name, a picture's or a proof's
+thumbnail, then **Posted**, **By**, **Seen** (*Made* for a proof, *Captured* for a map
+capture), **Archived** with the copy's day and host, the SHA-256 of a file, and how
+often this note cites it, chips and links to the same page alike. **By** is the author
+on record, with the account an X or Telegram address names, as the academic list leads
+with them; with no author on record, that account, *from its address*; *Not recorded*
+only when neither says. A written link the case lacks says *Not in the case* and *Not
+archived*, both amber, and an item gone says *No longer in the case.* and nothing more.
+Its actions: **Open** the item (*Open in Geo Proof* where a tool reopens it), **Open
+page** and **Archived copy** in a new tab, **Copy reference** (its entry as this note's
+list of sources prints it, Academic, Web or Short by its style, each linked stretch
+followed by its address; read off `GET /sources/item` for a chip and `/sources/lookup`
+for a link, told the note and the words of its links), **Edit link** (the Link field,
+on the drawn page) and, for a page the case lacks, **Bookmark it**, which files it, seen
+that day, and leaves the note as written. The card fetches nothing, and a page opens only on
+a press. It reads the same in a drawn table or aligned block and in the raw Markdown,
+over `[[entity:…|…]]` and `[words](https://…)`. With the cursor in it, Tab walks into
+its actions, the arrows along them, and Escape gives the keys back; a screen reader is
+told it is there. It goes when the pointer leaves it, the cursor leaves the link, or
+typing starts.
 
 **Blocks.** Every block of the drawn page (a paragraph, a heading, a list, a quote, a
 callout, a picture, a table, a diagram, an aligned or corner block, steps, a story, a
@@ -7640,7 +7663,8 @@ then the capture, the first filed first. A link to the post a proof was imported
 stays that page, collected the day of the import. A link the case holds nothing of
 prints exactly as before. PDF, HTML, web folder and WordPress draft all list it so.
 The same reading answers `GET /sources/lookup`'s `known` (the item, its author, posted
-day, archived copy and its day, and the day it was seen) for the citation card to come.
+day, archived copy and its day, the day it was seen, a file's SHA-256 and its picture)
+and its `reference`, the link's entry as the list prints it, for the citation card.
 
 **Write | Page** opens the note's pages beside it: the real PDF the server would write
 (`POST /notes/preview`, nothing written to disk), drawn with pdf.js loaded only
@@ -7661,7 +7685,16 @@ template is guidance by design.
 
 **Pictures and pages.** Hovering a picture, in the note or on its page in the Page
 pane, offers **XXS**, **XS**, **S**, **M**, **L** and **Full**, left, centre or right, and **Caption**,
-written on its line as `{width=… align=… caption="…"}`. The bar also offers *Open in
+written on its line as `{width=… align=… caption="…"}`. In the note a size shows on the
+picture while the pointer is on its button, written only when pressed, and the corner
+away from where the picture stands can be dragged: the width follows and snaps to the
+nearest size, said on the picture (*L · 75%*), written let go, Escape calling it off. A
+caption pressed is written in its place. **Graphic** marks a picture `{graphic}`: the
+HTML page and WordPress keep it veiled until pressed, and the note draws it blurred with
+*Graphic picture, blurred on the web until pressed* over it, less blurred while the pointer
+is on it; the PDF prints it as it is. **Replace** (⇆) lists the case's pictures, each
+with its thumbnail, and puts the one picked in its place, its size, place, caption, veil
+and zoom kept. Each of these is one change, which one Undo takes back. The bar also offers *Open in
 <Tool>* when a tool can reopen the state the picture was taken from, and *Source…* for
 a picture brought in by hand with no address (a link stated, never fetched). A proof
 also offers *Posted…*, in the note as on the Page pane: where it was published, on X or elsewhere,
@@ -7689,6 +7722,19 @@ comment prints. A video prints as its thumbnail with a play mark and its *Watch*
 credit, or as a line with that link when it has no thumbnail. A diagram prints at its
 size on screen. A caption is never parted from its picture, and a heading never stays
 alone at the foot of a page.
+
+**Steps and stories.** A `::: steps` or `::: story` block is drawn as a strip of its steps
+(`lib/notes/editor/playedBlock.js`), each picture numbered: a row of cards for steps, each
+picture beside its words for a story. **Add a step** lists the case's pictures, each with
+its thumbnail, found by name or folder, and adds the one picked last; a picture dragged in
+from the Media library or the case sidebar lands where the line shows. A step is moved by
+dragging its number, or with the arrows on it, and taken out with its ×. A story's words,
+or a step's caption, are written in place where they show: Enter writes them, Shift+Enter
+starts a line, Escape leaves them. On a story's picture a box dragged frames the part its
+step moves in on (`zoom=x,y,w,h`), and its × shows the whole picture again. An empty block
+says *No step yet* in place of its guidance, which a template keeps. Each gesture writes
+the block's own lines, as an expert would type them (`editor/stepEdits.js`), in one
+change one Undo takes back; a note nobody can write in draws the strip with no tools.
 
 **Chapters and guidance.** **/** → *Include a note* writes `[[include:<id>]]` on its
 own line, drawn as a chapter block with its number, title and first words, *Open* and

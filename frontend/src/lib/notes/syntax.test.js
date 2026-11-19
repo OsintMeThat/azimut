@@ -144,17 +144,19 @@ describe('what @ and / offer', () => {
     expect(command('align-bottom-left').hint).toBe('Pinned on the cover, else aligned');
   });
 
-  it('offers Steps and Story, each an empty block opened on its guidance, which the HTML page plays', () => {
+  it('offers Steps and Story, each an empty block the cursor lands after, drawn as its strip, which the HTML page plays', () => {
     expect(slashMatches('steps')[0].id).toBe('steps');
     expect(slashMatches('scrolly')[0].id).toBe('story');
     expect(slashMatches('carousel')[0].id).toBe('steps');
     const command = (id) => SLASH_COMMANDS.find((item) => item.id === id);
     const steps = slashInsert(command('steps'));
-    expect(steps.text).toBe('::: steps\n<!--? One picture a line, each a step with its caption: / › Case picture -->\n:::\n');
-    expect(steps.text.slice(steps.cursor)).toBe('\n:::\n');
+    expect(steps.text).toBe('::: steps\n<!--? Each picture is a step, with its caption: Add a step, or drop pictures here -->\n:::\n');
+    expect(steps.cursor).toBe(steps.text.length);
     const story = slashInsert(command('story'), { before: 'Intro. ' });
-    expect(story.text.startsWith('\n\n::: story\n<!--? A picture, then the words read beside it.')).toBe(true);
-    expect(story.text.slice(story.cursor)).toBe('\n:::\n');
+    expect(story.text.startsWith('\n\n::: story\n<!--? Each picture is a step, its words read beside it')).toBe(true);
+    // the guidance never asks for braces: the strip writes them
+    expect(story.text).not.toContain('{');
+    expect(story.cursor).toBe(story.text.length);
     expect(PLAYED_BLOCK.exec('::: story ')?.[1]).toBe('story');
     expect(PLAYED_BLOCK.exec('::: stories')).toBeNull();
     expect(STEPS_BLOCK.startsWith('::: steps\n')).toBe(true);

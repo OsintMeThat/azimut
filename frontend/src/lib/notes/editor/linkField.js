@@ -24,7 +24,7 @@ export const LOOKUP_REST_MS = 160;
 const NOUNS = { bookmark: 'Bookmark', capture: 'Capture', media: 'Media file', proof: 'Proof' };
 
 /** The icon a case item is listed with. */
-const TYPE_ICONS = {
+export const TYPE_ICONS = {
   place: 'pin', media: 'image', bookmark: 'bookmark', capture: 'satellite', proof: 'proof', person: 'user', account: 'at',
   organization: 'building', note: 'note', claim: 'flag', event: 'calendar', vehicle: 'car', unit: 'shield',
 };
@@ -39,7 +39,7 @@ export function linkAddress(text) {
 }
 
 /** An address as two of them are compared: no scheme, no `www.`, no fragment, no closing slash. */
-function addressKey(url) {
+export function addressKey(url) {
   try {
     const parts = new URL(url);
     const path = parts.pathname.replace(/\/+$/, '');
@@ -58,7 +58,7 @@ function heldLocally(entities, url) {
     .filter((entity) => order.includes(entity.type))
     .filter((entity) => addressKey(entity.attrs?.url || entity.attrs?.source_url || '') === key)
     .sort((a, b) => order.indexOf(a.type) - order.indexOf(b.type));
-  return found[0] ? itemOf(found[0]) : null;
+  return found[0] ? recordItem(found[0]) : null;
 }
 
 const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
@@ -71,61 +71,72 @@ export function shortDay(value, now = new Date()) {
   return `${Number(day[3])} ${month}${Number(day[1]) === now.getFullYear() ? '' : ` ${day[1]}`}`;
 }
 
-/** A record the lookup answered (`found`), as the field reads it. */
-function itemOf(entity) {
+/** A record of the case (one the lookup found, or one the editor holds), as the field and the citation card read it. */
+export function recordItem(entity) {
   const attrs = entity.attrs ?? {};
   return {
     id: entity.id,
     type: entity.type,
     label: entity.label || '',
     noun: NOUNS[entity.type] ?? '',
+    address: attrs.url || attrs.source_url || '',
     author: '',
+    account: '',
     published: '',
     archive: attrs.archive_url || '',
     archivedAt: '',
     seen: attrs.fetched_at || '',
+    arrival: '',
+    sha256: attrs.sha256 || '',
+    thumb: attrs.thumb || '',
     full: false,
   };
 }
 
+/** What the server says the case knows of an item (`known`), as the field and the citation card read it. */
+export function knownItem(known) {
+  return {
+    id: known.id, type: known.type || '', label: known.label || '', noun: known.noun || NOUNS[known.type] || '', address: known.address || '',
+    author: known.author || '', account: known.account || '', published: known.published || '', archive: known.archive || '', archivedAt: known.archived_at || '',
+    seen: known.seen || '', arrival: known.arrival || '', sha256: known.sha256 || '', thumb: known.thumb || '', full: true,
+  };
+}
+
 /**
- * What the case holds at `url`, `{ url, title, item }`: `title` the name the address
- * gives the page (*Post by @desk on X*), `item` the case's record for it or null.
- * `lookup(url)` asks the server; without one, or when it fails, the editor's own
- * records answer.
+ * What the case holds at `url`, `{ url, title, item, reference }`: `title` the name the
+ * address gives the page (*Post by @desk on X*), `item` the case's record for it or
+ * null, `reference` its entry in the list of sources ("" when no server said it).
+ * `lookup(url, words)` asks the server, `words` being the note's links' to it, which
+ * name and title the page in that entry; without one, or when it fails, the editor's
+ * own records answer.
  */
-export async function lookupAddress(url, { lookup = null, entities = [] } = {}) {
+export async function lookupAddress(url, { lookup = null, entities = [], words = '' } = {}) {
   let answer = null;
   if (lookup) {
     try {
-      answer = await lookup(url);
+      answer = await ([words].flat().filter(Boolean).length ? lookup(url, words) : lookup(url));
     } catch {
       answer = null;
     }
   }
   const local = heldLocally(entities, url);
-  if (!answer) return { url, title: '', item: local };
-  const known = answer.known;
-  if (known?.id) {
-    return {
-      url,
-      title: answer.title || '',
-      item: {
-        id: known.id, type: known.type || '', label: known.label || '', noun: known.noun || NOUNS[known.type] || '', author: known.author || '',
-        published: known.published || '', archive: known.archive || '', archivedAt: known.archived_at || '', seen: known.seen || '', full: true,
-      },
-    };
-  }
+  if (!answer) return { url, title: '', item: local, reference: '' };
+  const said = { url, title: answer.title || '', reference: answer.reference || '' };
+  if (answer.known?.id) return { ...said, item: knownItem(answer.known) };
   const [found] = answer.found ?? [];
-  return { url, title: answer.title || '', item: found?.id ? itemOf(found) : local };
+  return { ...said, item: found?.id ? recordItem(found) : local };
 }
 
-/** How often `item` or `url` is cited in `text` already. */
+/** The written links of `text`, as `[words](address)`: their addresses. */
+const WRITTEN_LINK = /(?<!!)\[[^\]\n]*\]\((https?:\/\/[^)\s]+)\)/gi;
+
+/** How often `item` or the page at `url` is cited in `text` already: its chips, and the links to that page however its address is written. */
 export function citedTimes(text, item, url) {
   const body = String(text ?? '');
   let count = 0;
   if (item?.id) count += body.split(`[[entity:${item.id}|`).length - 1 + body.split(`[[media:${item.id}|`).length - 1;
-  if (url) count += body.split(`](${url})`).length - 1;
+  const key = url ? addressKey(url) : '';
+  if (key) for (const match of body.matchAll(WRITTEN_LINK)) if (addressKey(match[1]) === key) count += 1;
   return count;
 }
 
@@ -145,7 +156,8 @@ export function itemFacts(item, { cited = 0, now = new Date() } = {}) {
 
 // -- the field ----------------------------------------------------------------------
 
-function el(tag, className, ...children) {
+/** A `tag` element of `className` holding `children`, the nulls and falses left out. */
+export function el(tag, className, ...children) {
   const node = document.createElement(tag);
   if (className) node.className = className;
   for (const child of children.flat()) if (child != null && child !== false) node.append(child);

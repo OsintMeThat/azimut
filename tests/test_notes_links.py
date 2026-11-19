@@ -168,8 +168,63 @@ def test_the_lookup_says_what_the_case_knows_of_a_page(client, sourced):
     assert known == {
         "id": made["notice"]["id"], "type": "bookmark", "label": "Port authority notice", "noun": "Web page",
         "address": NOTICE_URL, "author": "", "published": "", "archive": ARCHIVE_URL, "archived_at": "2026-03-13",
-        "seen": "2026-03-13",
+        "seen": "2026-03-13", "arrival": "collected", "sha256": "", "thumb": "", "account": "",
     }
     post = client.get(f"/api/cases/{cid}/sources/lookup", params={"url": POST_URL}).json()["known"]
     assert (post["type"], post["author"], post["published"], post["seen"]) == ("media", "Port Watch", "2026-03-12", "2026-03-13")
+    assert post["sha256"] == made["video"]["sha256"]
     assert client.get(f"/api/cases/{cid}/sources/lookup", params={"url": ELSEWHERE}).json()["known"] is None
+
+
+def test_the_lookup_says_the_entry_a_link_prints_as_named_by_its_words(client, sourced):
+    cid, _, made = sourced
+    bare = client.get(f"/api/cases/{cid}/sources/lookup", params={"url": ELSEWHERE, "words": "Al Jazeera, 10 Sep"}).json()
+    assert bare["reference"] == f"Al Jazeera, 10 Sep · Web page · aljazeera.com. {ELSEWHERE}"
+    held = client.get(f"/api/cases/{cid}/sources/lookup", params={"url": NOTICE_URL, "words": "the notice"}).json()
+    # the item the case holds at the page is the entry, whatever the link's words
+    assert held["reference"] == (f"Port authority notice · Web page · port-authority.example.org · collected 13 March 2026. "
+                                 f"{NOTICE_URL} Archive: {ARCHIVE_URL}")
+
+
+# -- the item a chip cites, for the citation card ----------------------------------------
+
+
+def test_the_card_reads_a_cited_file_with_its_author_days_and_fingerprint(client, sourced):
+    cid, _, made = sourced
+    said = client.get(f"/api/cases/{cid}/sources/item", params={"id": made["video"]["id"]}).json()
+    known = said["known"]
+    assert (known["id"], known["type"], known["noun"], known["address"]) == (made["video"]["id"], "media", "Video", POST_URL)
+    assert (known["author"], known["published"], known["seen"], known["arrival"]) == ("Port Watch", "2026-03-12", "2026-03-13", "collected")
+    assert known["sha256"] == made["video"]["sha256"] and known["archive"] == ""
+    assert said["reference"] == (f"Strike on the port · Video · x.com · by Port Watch · posted 12 March 2026 · "
+                                 f"collected 13 March 2026. {POST_URL} SHA-256 {made['video']['sha256']}")
+
+
+def test_the_card_says_what_a_proof_was_made_from_its_own_picture(client, sourced):
+    cid, case, made = sourced
+    case.update_entity(made["proof"]["id"], {"attrs": {"thumb": "media/.thumbs/strike-g1.jpg"}})
+    known = client.get(f"/api/cases/{cid}/sources/item", params={"id": made["proof"]["id"]}).json()["known"]
+    assert (known["noun"], known["arrival"], known["thumb"]) == ("Proof", "made", "media/.thumbs/strike-g1.jpg")
+
+
+def test_the_card_copies_no_entry_for_what_the_list_leaves_out_and_says_a_gone_item_is_gone(client, sourced):
+    cid, _, made = sourced
+    place = client.get(f"/api/cases/{cid}/sources/item", params={"id": made["place"]["id"]}).json()
+    assert place["known"]["label"] == "Berth 12" and place["reference"] == ""
+    assert client.get(f"/api/cases/{cid}/sources/item", params={"id": "e_gone"}).json() == {"known": None, "reference": ""}
+    assert client.get(f"/api/cases/{cid}/sources/item", params={"id": "../case.json"}).status_code == 422
+
+
+def test_the_card_reaches_nothing_outside_the_case(client, sourced, monkeypatch):
+    cid, _, made = sourced
+    import socket
+
+    def refused(*_args, **_kwargs):
+        raise AssertionError("the citation card reached the network")
+
+    monkeypatch.setattr(socket, "create_connection", refused)
+    monkeypatch.setattr(socket.socket, "connect", refused)
+    for item in ("video", "notice", "proof", "place"):
+        assert client.get(f"/api/cases/{cid}/sources/item", params={"id": made[item]["id"]}).status_code == 200
+    for url in (ELSEWHERE, NOTICE_URL, POST_URL):
+        assert client.get(f"/api/cases/{cid}/sources/lookup", params={"url": url, "words": "w"}).status_code == 200

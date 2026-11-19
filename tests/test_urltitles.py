@@ -150,7 +150,8 @@ def test_the_lookup_finds_what_the_case_filed_for_a_page(client):
 def test_the_lookup_names_a_page_the_case_does_not_hold(client):
     cid = client.post("/api/cases", json={"name": "Fresh"}).json()["id"]
     body = client.get(f"/api/cases/{cid}/sources/lookup", params={"url": "https://t.me/portnews/412"}).json()
-    assert body == {"url": "https://t.me/portnews/412", "title": "Telegram, portnews #412", "found": [], "known": None}
+    assert body == {"url": "https://t.me/portnews/412", "title": "Telegram, portnews #412", "found": [], "known": None,
+                    "reference": "t.me · Web page. https://t.me/portnews/412"}
 
 
 def test_the_index_reads_the_case_once_and_answers_every_page_from_it(client):
