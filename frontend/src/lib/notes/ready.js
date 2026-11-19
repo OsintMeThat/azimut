@@ -228,7 +228,7 @@ export const READY_NOTES = [
     note: 'What, where, when, who, why, on a page',
     look: { style: 'brief' },
     body: lines(
-      '> [!unverified] Bottom line: what happened, in one sentence, and how sure we are.',
+      '> [!unverified] Bottom line: what happened, in one sentence, and how sure it is.',
       '',
       '<!--? Lead with the answer. Make it [!confirmed] once two independent sources agree. Set the marking under Look before sharing. -->',
       '',
@@ -390,7 +390,7 @@ export const READY_NOTES = [
       '',
       '<!--? Its reach, the harm it can do, or who asked. One sentence. -->',
       '',
-      '## What we found',
+      '## What was found',
       '',
       '<!--? The evidence step by step: what was searched, what was found, what it shows, each step linked. -->',
       '',

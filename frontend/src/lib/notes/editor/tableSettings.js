@@ -168,7 +168,7 @@ export function openTableSettings(view, anchor, from) {
     const field = element('input', 'cm-table-look-text');
     field.type = 'text';
     field.value = value;
-    field.placeholder = key === 'caption' ? 'What the table shows' : 'Our register, 17 Nov 2026';
+    field.placeholder = key === 'caption' ? 'What the table shows' : 'Vehicle register, 17 Nov 2026';
     field.setAttribute('aria-label', label);
     field.maxLength = 300;
     const commit = (redraw = true) => {
