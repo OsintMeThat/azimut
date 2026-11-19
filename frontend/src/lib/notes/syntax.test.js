@@ -93,7 +93,9 @@ describe('what @ and / offer', () => {
     expect(slashInsert(command('entry'), { now: NOW }).text).toMatch(/^### 2026-11-04 09:05 \(UTC[+-]?[\d:]*\)\n$/);
     const code = slashInsert(command('code'));
     expect(code.text.slice(0, code.cursor)).toBe('```\n');
-    const table = slashInsert(command('table'));
+    // a note asks a table's size; the raw Markdown writes its two columns, the cursor in the first cell
+    expect(slashInsert(command('table'))).toBeNull();
+    const table = slashInsert({ ...command('table'), action: undefined });
     expect(table.text.slice(table.cursor)).toBe(' |  |\n');
     expect(slashInsert(command('cite'))).toBeNull();
     expect(slashInsert(command('include'))).toBeNull();

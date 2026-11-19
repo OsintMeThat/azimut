@@ -7,8 +7,11 @@
 <script>
   /**
    * How a note prints, set from the editor's header: a panel of five tabs, one
-   * section at a time. Style (with the contents, numbering and sources switches,
-   * and the HTML page's layout, an article or a story),
+   * section at a time. Style (what the document is for: Report, Web article, Brief,
+   * Journal or Plain, each in a line; then what it includes, the sources list, the
+   * five annexes, how its sources are written and how strictly its links are checked,
+   * each the style's own until changed here and marked so with a Reset; the contents
+   * and numbering switches; and the HTML page's layout, an article or a story),
    * Text (size and typeface), Page (paper, accent, marking), Cover and the page's
    * Header & footer. A tab whose section holds something set wears a dot. Each
    * change is handed up at once (`onchange`), which saves it beside the note and
@@ -26,9 +29,11 @@
   import { tick, untrack } from 'svelte';
   import { LOOK_HELP } from '../../lib/notes/lookHelp.js';
   import {
-    BANDS, BAND_MAX, COVERS, FONTS, PAGES, SIZES, SLOTS, SLOT_LOGOS, STYLES, SUBTITLE_MAX, TLPS, WEBS, bandStyleOwn, coverChoice, coverFor, lookFont, normaliseLook,
-    sectionsSet, slotText, sourcesOn, styleLabel,
+    ANNEXES, BANDS, BAND_MAX, COVERS, FONTS, LINK_CHECKS, PAGES, SIZES, SLOTS, SLOT_LOGOS, SOURCES_STYLES, STYLES, SUBTITLE_MAX, TLPS, WEBS,
+    bandStyleOwn, coverChoice, coverFor, lookFont, normaliseLook, profileChanged, profileOf, sectionsSet, slotText, styleLabel, styleOwn as ownWords,
+    stylesTable, withProfile,
   } from '../../lib/notes/look.js';
+  import { prefs } from '../../lib/state.svelte.js';
   import { faceFamily, loadNoteFont, noteFonts } from '../../lib/notes/noteFonts.js';
   import { recentColours } from '../../lib/recentColours.svelte.js';
   import { foldText } from '../../lib/textFold.js';
@@ -83,6 +88,22 @@
     });
   });
   const marked = $derived(sectionsSet(whole));
+  /** What each style carries on this machine (Settings › Publishing › Styles), and what this note carries. */
+  const table = $derived(stylesTable(prefs.noteStyles));
+  const profile = $derived(profileOf(whole, table));
+  const changed = $derived(profileChanged(whole));
+  const ANNEX_HELP = {
+    geolocations: LOOK_HELP.annexGeolocations, credits: LOOK_HELP.annexCredits, method: LOOK_HELP.annexMethod,
+    limits: LOOK_HELP.annexLimits, editions: LOOK_HELP.annexEditions,
+  };
+  const SOURCES_HELP = { academic: LOOK_HELP.sourcesAcademic, web: LOOK_HELP.sourcesWeb, short: LOOK_HELP.sourcesShort };
+  const CHECK_HELP = { each: LOOK_HELP.linkEach, grouped: LOOK_HELP.linkGrouped };
+
+  /** One profile switch for this note, or back to its style's (`null`). */
+  function setProfile(key, value) {
+    const next = withProfile(whole, key, value);
+    if (JSON.stringify(next) !== JSON.stringify(whole)) onchange?.(next);
+  }
   /** What the style prints in a band the look leaves empty: shown in grey while it is. */
   const styleOwn = $derived(bandStyleOwn(whole.style));
 
@@ -210,19 +231,31 @@
 
       <div class="section" role="tabpanel" id={`${uid}-section`} aria-labelledby={`${uid}-tab-${tab}`}>
         {#if tab === 'style'}
-          <div class="styles" role="radiogroup" aria-label="Style" title={LOOK_HELP.style}>
-            {#each STYLES as style (style.id)}
-              <button type="button" class="style-card" class:on={whole.style === style.id} role="radio" aria-checked={whole.style === style.id}
-                title={`${style.label}: ${style.note}`} onclick={() => set({ style: style.id })}>
-                <span class="style-name">{style.label}</span><span class="style-note">{style.note}</span>
-              </button>
-            {/each}
+          <div class="stack">
+            <span class="key" title={LOOK_HELP.for}>For</span>
+            <div class="styles" role="radiogroup" aria-label="For" title={LOOK_HELP.style}>
+              {#each STYLES as style (style.id)}
+                <button type="button" class="style-card" class:on={whole.style === style.id} role="radio" aria-checked={whole.style === style.id}
+                  data-style={style.id} title={`${style.label}: ${style.note}`} onclick={() => set({ style: style.id })}>
+                  <span class="style-name">{style.label}</span><span class="style-note">{style.note}</span>
+                </button>
+              {/each}
+            </div>
+            <p class="said">{LOOK_HELP.forSaid}.</p>
           </div>
           <div class="group" role="group" aria-label="In the document">
             <span class="key">In the document</span>
             {@render toggle('Contents page', LOOK_HELP.toc, whole.toc, (on) => set({ toc: on }))}
             {@render toggle('Numbered headings', LOOK_HELP.numbered, whole.numbered, (on) => set({ numbered: on }))}
-            {@render toggle('List sources at the end', LOOK_HELP.sources, sourcesOn(whole), (on) => set({ sources: on ? 'on' : 'off' }))}
+          </div>
+          <div class="group includes" role="group" aria-label="What it includes">
+            <span class="key" title={LOOK_HELP.includes}>What it includes</span>
+            {@render switchRow('sources', 'Sources', 'numbered, linked', LOOK_HELP.sources)}
+            {#each ANNEXES as annex (annex.id)}
+              {@render switchRow(annex.id, annex.label, annex.note, ANNEX_HELP[annex.id])}
+            {/each}
+            {@render segRow('sources_style', 'Sources written as', SOURCES_STYLES, SOURCES_HELP, LOOK_HELP.sourcesStyle)}
+            {@render segRow('link_check', 'Link check', LINK_CHECKS, CHECK_HELP, LOOK_HELP.linkCheck)}
           </div>
           <div class="row web">
             <span class="key" title={LOOK_HELP.web}>Web page</span>
@@ -233,6 +266,7 @@
               {/each}
             </div>
           </div>
+          <p class="said settings-said" title={LOOK_HELP.stylesSettings}><Icon name="settings" size={12} /> What each style carries by default: Settings › Publishing › Styles</p>
 
         {:else if tab === 'text'}
           <div class="row">
@@ -408,6 +442,41 @@
   </label>
 {/snippet}
 
+{#snippet own(key)}
+  {#if changed[key]}
+    <span class="own-said changed">Changed here ·
+      <button type="button" class="reset" title={LOOK_HELP.profileReset} aria-label={`Reset to ${ownWords(whole.style)}`}
+        onclick={() => setProfile(key, null)}>Reset</button></span>
+  {:else}
+    <span class="own-said">{ownWords(whole.style)}</span>
+  {/if}
+{/snippet}
+
+{#snippet switchRow(key, label, note, help)}
+  <div class="include" data-include={key}>
+    <label class="switch" title={help}>
+      <input type="checkbox" role="switch" checked={profile[key]} title={help}
+        onchange={(event) => setProfile(key, event.currentTarget.checked === table[whole.style][key] ? null : event.currentTarget.checked)} />
+      <span class="track" aria-hidden="true"><span class="knob"></span></span>
+      <span class="include-label">{label} <span class="include-note">{note}</span></span>
+    </label>
+    {@render own(key)}
+  </div>
+{/snippet}
+
+{#snippet segRow(key, label, choices, helps, help)}
+  <div class="include seg-row" data-include={key}>
+    <span class="include-label" title={help}>{label}</span>
+    <div class="seg" role="radiogroup" aria-label={label} title={help}>
+      {#each choices as choice (choice.id)}
+        <button type="button" class:on={profile[key] === choice.id} role="radio" aria-checked={profile[key] === choice.id}
+          title={helps[choice.id]} onclick={() => setProfile(key, choice.id === table[whole.style][key] ? null : choice.id)}>{choice.label}</button>
+      {/each}
+    </div>
+    {@render own(key)}
+  </div>
+{/snippet}
+
 {#snippet day()}
   <label class="row" title={LOOK_HELP.date}>
     <span class="key">Day</span>
@@ -461,6 +530,20 @@
   }
   .font-card.on .font-name { color: var(--text-1); }
   .styles { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+  /* what the document includes: each switch on its line, the style's own or Changed here on the right */
+  .include { display: flex; align-items: center; justify-content: space-between; gap: 8px; min-height: 22px; }
+  .include .switch { flex: 1; min-width: 0; }
+  .include-label { color: var(--text-1); font-size: var(--fs-sm); }
+  .include-note { color: var(--text-3); font-size: var(--fs-xs); }
+  .seg-row .include-label { flex: none; width: 118px; }
+  .seg-row .seg { margin-right: auto; }
+  .seg-row .seg button { padding: 4px 9px; }
+  /* in a narrow panel the style's own goes under the choices rather than squeezing them */
+  .narrow .seg-row { flex-wrap: wrap; }
+  .own-said { flex: none; color: var(--text-3); font-size: 11px; white-space: nowrap; }
+  .own-said.changed { color: var(--accent); }
+  .reset { padding: 0; border: none; background: none; color: inherit; font: inherit; text-decoration: underline; cursor: pointer; }
+  .settings-said { display: flex; align-items: center; gap: 6px; padding-top: 12px; border-top: 1px solid var(--border); }
   .style-card {
     display: flex; flex-direction: column; gap: 2px; padding: 8px 10px; border: 1px solid var(--border); border-radius: var(--r-md);
     background: var(--bg-2); color: var(--text-1); text-align: left; cursor: pointer; font: inherit;

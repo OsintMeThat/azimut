@@ -63,6 +63,18 @@ afterEach(() => {
   vi.clearAllMocks();
 });
 
+describe('a picture put', () => {
+  it('asks the note for a picture\'s place, which a table\'s picked cell can be', async () => {
+    const editor = fakeEditor();
+    const spot = vi.spyOn(editor, 'spot');
+    pin(editor);
+    await putInNote(offer({ text: '[[media:f1|Frame]]' }, { picture: true }));
+    expect(spot).toHaveBeenCalledWith({ picture: true });
+    await putInNote(offer({ text: 'Words' }));
+    expect(spot).toHaveBeenLastCalledWith({ picture: false });
+  });
+});
+
 describe('the pinned note', () => {
   it('is the one the panel shows, and none once it closes', () => {
     expect(pinnedNote()).toBeNull();

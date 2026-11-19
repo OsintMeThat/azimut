@@ -477,6 +477,18 @@ stops making sense.
   out of the backup. What it publishes is public: a Pages site is readable by anyone
   with the address, even from a private repository, which is why only the public edition
   goes.
+  *Archive every link* of a note is the one press that sends a note's sources out: one
+  link at a time it asks `archive.org/wayback/available` for the page's newest copy and,
+  unless one under 30 days old is reused, `web.archive.org/save/` for a new one, over https
+  with Azimut's user agent, timeouts, no redirect followed, answers read up to a bound, 10 s
+  at least between two saves and the wait a 429 asks for (longer each time, then the run
+  stops). Only the page's address goes, never a cookie, a key or the note, and Azimut
+  never fetches the page itself. It runs on the case's queue from that press alone:
+  reading its plan, its run, the note or the check asks nothing, and a run Azimut's
+  closing cut short waits for the next press rather than going on at startup. Accepted
+  risk, said in the dialog before the press: the Internet Archive learns the addresses a
+  note cites and keeps a public copy of each; the links of internal passages go only when
+  the analyst ticks them in.
   Accepted risks recorded here: cleartext keys over
   localhost, the WordPress application password and the GitHub token readable by anyone
   who can read the workspace (as the API keys are), the hash-verified scraper updater, Intel macOS staying on cryptography 48

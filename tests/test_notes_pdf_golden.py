@@ -367,10 +367,16 @@ def test_a_case_holding_nothing_at_the_notes_addresses_changes_nothing(tmp_path,
     assert drawing(render_plain(indexed, name, styled)) == drawing(render_plain(plain, name, styled))
 
 
+#: A report as it printed before styles carried profiles: its sources short, no annex.
+REPORT_AS_BEFORE = {"style": "report", "sources_style": "short",
+                    "annexes": {key: "off" for key in ("geolocations", "credits", "method", "limits", "editions")}}
+
+
 def test_a_note_whose_links_find_their_items_prints_their_entries(tmp_path):
     png(tmp_path, "media/strike.png", size=(320, 180), color="#6a2a4a")
     case = IndexedCase(tmp_path, {**LINKED_ITEMS, **UNRELATED})
-    pdf = notes_pdf.render(case, title="Linked", text=LINKED, look=NoteLook.model_validate({"style": "report"}),
+    # a report set back to its choices of before prints to the byte as it did then
+    pdf = notes_pdf.render(case, title="Linked", text=LINKED, look=NoteLook.model_validate(REPORT_AS_BEFORE),
                            created=CREATED).pdf
     annex = "".join(pdf_text(pdf).split("\nSources\n")[1].split())
     assert "[1]Portauthoritynotice·Webpage·port.example.org·collected13March2026" in annex

@@ -17,7 +17,7 @@ from azimut.engine import notes_markdown, notes_pdf
 from azimut.engine.notelook import NoteLook
 from azimut.workspace import Case
 
-from sourcesfixture import ARCHIVE_URL, MAPS_URL, NOTICE_URL, POST_URL, sourced_case
+from sourcesfixture import ARCHIVE_URL, MAPS_URL, NOTICE_URL, POST_URL, sourced_case, report_as_before
 from test_notes_report import make_case, make_note
 
 REPORT = NoteLook.model_validate({"style": "report"})
@@ -45,6 +45,12 @@ def _check(case, text, look=REPORT, **options):
     said = [(warning, line, kind) for warning, line, kind in zip(out.warnings, out.warning_lines, out.warning_kinds)
             if kind in (notes_markdown.UNARCHIVED, notes_markdown.UNSEEN)]
     return said, out.listed
+
+
+@pytest.fixture(autouse=True)
+def _report_as_before(monkeypatch):
+    """A report here prints its sources short and its links grouped, as before profiles."""
+    report_as_before(monkeypatch)
 
 
 def test_outside_links_are_counted_once_a_page_in_one_line_each_with_their_list(sourced):

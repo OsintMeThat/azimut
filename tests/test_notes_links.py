@@ -15,7 +15,7 @@ from azimut.engine import notefill, notes_html, notes_pdf, notes_web, notes_word
 from azimut.engine.notelook import NoteLook
 from azimut.workspace import Case
 
-from sourcesfixture import ARCHIVE_URL, MAPS_URL, NOTICE_URL, POST_URL, sourced_case
+from sourcesfixture import ARCHIVE_URL, MAPS_URL, NOTICE_URL, POST_URL, sourced_case, report_as_before
 from test_notes_pdf import FakeCase, pdf_text
 from test_notes_report import make_case, make_note
 
@@ -41,6 +41,12 @@ def _imported_proof(case, published):
 
 
 # -- what a link finds -------------------------------------------------------------------
+
+
+@pytest.fixture(autouse=True)
+def _report_as_before(monkeypatch):
+    """A report here prints its sources short and its links grouped, as before profiles."""
+    report_as_before(monkeypatch)
 
 
 def test_a_link_to_a_downloaded_post_is_that_file_with_its_author_and_days(sourced):
@@ -77,7 +83,7 @@ def test_a_link_the_case_holds_nothing_of_is_a_bare_page(sourced):
     _, case, _ = sourced
     found = notesources.Reader(case).link(ELSEWHERE, "Al Jazeera, 10 Sep")
     assert found == notesources.Source(key=f"url:{ELSEWHERE}", label="Al Jazeera, 10 Sep", kind="page",
-                                       noun="Web page", address=ELSEWHERE)
+                                       noun="Web page", address=ELSEWHERE, words=("Al Jazeera, 10 Sep",))
 
 
 def test_a_page_two_items_hold_is_the_first_by_kind_then_by_day(sourced):

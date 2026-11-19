@@ -194,6 +194,11 @@ DEFAULT_SETTINGS: dict[str, Any] = {
     "report_name": "",
     "report_role": "",
     "report_organisation": "",
+    # What each note style carries by default, as Settings › Publishing › Styles changed
+    # it: by style, only what differs from Azimut's own (`engine/notelook.py`, PROFILES),
+    # each of the sources list, how it is written, the five annexes and how strict the
+    # link check is. Empty is Azimut's defaults throughout. A note's Look overrides each.
+    "note_styles": {},
     # The WordPress site a note is sent to as a draft, and the user it writes as
     # (engine/notes_wordpress.py). The application password is no setting: it is
     # kept in publishing.json (engine/publishsecrets.py), which no backup carries.

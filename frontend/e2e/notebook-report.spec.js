@@ -548,6 +548,123 @@ test('the export counts the links nobody archived in one line, its links folded 
   expect(state.exported).toEqual([]);
 });
 
+/**
+ * Archive every link, its routes stood in: the plan, the press and the run read three
+ * times, one more link archived each time. `left` is what the check counts: it drops to
+ * none once the run says it is done. No route reaches the Internet Archive from here.
+ */
+async function archiveRoutes(page, state) {
+  const LINKS = [
+    ['Al-Khabar al-Yemeni, 16 Nov', 'https://alkhabaralyemeni.net/2026/11/16/a', false],
+    ['YemenExtra, 10 Oct', 'https://www.yemenextra.net/2026/10/10/b', true],
+    ['Mereja, 10 Oct', 'https://mereja.com/c', false],
+  ].map(([text, url, held]) => ({ text, url, held }));
+  const archive = { posts: [], polls: 0, left: 3, links: LINKS };
+  const copy = (url, at) => `https://web.archive.org/web/${at.replace(/\D/g, '').slice(0, 14)}/${url}`;
+  const runAt = (done) => {
+    const made = ['2026-11-18T09:30:00Z', '2026-11-12T08:00:00Z', '2026-11-18T09:31:00Z'];
+    const links = LINKS.map((link, index) => (index < done
+      ? { url: link.url, text: link.text, state: index === 1 ? 'kept' : 'new', copy: copy(link.url, made[index]), made: made[index] }
+      : { url: link.url, text: link.text, state: index === done ? 'saving' : 'waiting' }));
+    const finished = done >= LINKS.length;
+    return {
+      state: finished ? 'done' : 'running', folder: 'Links of “Lead”', internal: false, fresh: false, reason: '',
+      left: (LINKS.length - done) * 240, links,
+      counts: { total: 3, archived: done, new: Math.min(done, 1) + (done > 2 ? 1 : 0), kept: done > 1 ? 1 : 0, older: 0, failed: 0 },
+    };
+  };
+  await page.route(`**/api/cases/${CASE_ID}/notes/n1/archive**`, (route) => {
+    const request = route.request();
+    const path = new URL(request.url()).pathname;
+    if (request.method() === 'POST' && path.endsWith('/archive/stop')) return route.fulfill({ json: { run: { ...runAt(1), state: 'stopping' } } });
+    if (request.method() === 'POST') {
+      archive.posts.push(request.postDataJSON());
+      return route.fulfill({ json: { run: { ...runAt(0), state: 'queued' } } });
+    }
+    if (path.endsWith('/archive/run')) {
+      archive.polls += 1;
+      const run = runAt(Math.min(archive.polls, LINKS.length));
+      if (run.state === 'done') archive.left = 0;
+      return route.fulfill({ json: { run } });
+    }
+    const plan = {
+      links: LINKS.map((link) => ({ ...link, state: 'todo', copy: '', made: '' })), total: 3, todo: 3, archived: 0, filed: 2,
+      more_internal: 1, folder: 'Links of “Lead”', max: 500, run: null,
+    };
+    return route.fulfill({ json: plan });
+  });
+  state.archive = archive;
+  return archive;
+}
+
+test('Archive every link from the check: what goes out, the press, each link as it goes, and the count dropping at the end', async ({ page }) => {
+  let archive = null;
+  const checks = (id) => (id === 'n1' && archive.left ? [
+    { text: `${archive.left} outside links have no archived copy.`, line: 0, kind: 'unarchived', items: archive.links },
+  ] : []);
+  const state = await notebook(page, { checks });
+  archive = await archiveRoutes(page, state);
+  await openLead(page);
+  await page.locator('[data-guide="notebook.pdf"]').click();
+  const exporting = page.getByRole('dialog', { name: 'Export note as PDF' });
+  const line = exporting.getByRole('region', { name: 'Before you export' }).locator('.before-item').first();
+  await expect(line).toContainText('3 outside links have no archived copy.');
+  await line.getByRole('button', { name: 'Archive every link…' }).click();
+
+  const dialog = page.getByRole('dialog', { name: 'Archive every link of this note' });
+  await expect(dialog).toContainText('Sends each address to the Internet Archive (web.archive.org)');
+  await expect(dialog).toContainText('Links of the public edition (3)');
+  await expect(dialog).toContainText('Include internal passages (1 more link)');
+  await expect(dialog.locator('.head')).toHaveText('3 links to archive · 2 filed as bookmarks');
+  await expect(dialog.getByRole('list', { name: 'Links' }).getByRole('listitem')).toHaveCount(3);
+  await dialog.screenshot({ path: test.info().outputPath('archive-plan.png') });
+  // nothing is asked before the press
+  expect(archive.posts).toEqual([]);
+  expect(archive.polls).toBe(0);
+
+  await dialog.getByRole('button', { name: 'Archive 3 links' }).click();
+  expect(archive.posts).toEqual([{ internal: false, fresh: false }]);
+  await expect(dialog.locator('.head')).toContainText('1 of 3 archived', { timeout: 8000 });
+  await expect(dialog.getByRole('listitem').nth(0)).toContainText(/new copy, 18 Nov/);
+  await expect(dialog.getByRole('listitem').nth(1)).toContainText('saving…');
+  await expect(dialog.getByRole('progressbar')).toHaveAttribute('aria-valuenow', '33');
+  await dialog.screenshot({ path: test.info().outputPath('archive-running.png') });
+
+  // closed while it goes: the run goes on, the export dialog still counts the three
+  await dialog.getByRole('button', { name: 'Keep going in the background' }).click();
+  await expect(dialog).toHaveCount(0);
+  await expect(line).toContainText('3 outside links have no archived copy.');
+  // it ends: a toast says so, and the check is asked again, finding none
+  await expect(page.getByText('Links of “Lead” archived: 3 of 3 archived.')).toBeVisible({ timeout: 10000 });
+  await expect(exporting.getByRole('region', { name: 'Before you export' })).toHaveCount(0);
+  await expect(exporting.getByRole('button', { name: 'Export PDF' })).toBeEnabled();
+  await exporting.screenshot({ path: test.info().outputPath('archive-export-after.png') });
+  expect(state.exported).toEqual([]);
+});
+
+test('the note\'s ⋯ archives its links, and the header says how far while the dialog is closed', async ({ page }) => {
+  const state = await notebook(page);
+  const archive = await archiveRoutes(page, state);
+  await openLead(page);
+  await page.locator('.tool-header').getByRole('button', { name: 'More' }).click();
+  await page.getByRole('menu', { name: 'Note actions' }).getByText('Archive every link…').click();
+  const dialog = page.getByRole('dialog', { name: 'Archive every link of this note' });
+  await dialog.getByText('Make fresh copies, even where one is under 30 days old').click();
+  await dialog.getByRole('button', { name: 'Archive 3 links' }).click();
+  expect(archive.posts).toEqual([{ internal: false, fresh: true }]);
+  await dialog.getByRole('button', { name: 'Keep going in the background' }).click();
+  const going = page.locator('.tool-header').getByRole('button', { name: /^Archiving \d of 3…$/ });
+  await expect(going).toBeVisible();
+  await page.locator('.tool-header').screenshot({ path: test.info().outputPath('archive-header.png') });
+  await going.click();
+  await expect(dialog).toBeVisible();
+  await expect(dialog.locator('.head')).toContainText('of 3 archived');
+  await dialog.getByRole('button', { name: 'Keep going in the background' }).click();
+  // once done, the header says nothing more
+  await expect(page.getByText('Links of “Lead” archived: 3 of 3 archived.')).toBeVisible({ timeout: 10000 });
+  await expect(going).toHaveCount(0);
+});
+
 test('a check that fails never holds the export back', async ({ page }) => {
   const state = await notebook(page);
   await page.route(`**/api/cases/${CASE_ID}/notes/pdf/check`, (route) => route.fulfill({ status: 500, json: { detail: 'Boom' } }));
@@ -601,4 +718,45 @@ test('a picture bar in the note is one Tab away, walked with the arrows, and kee
   await page.keyboard.press('Tab');
   await page.keyboard.press('Tab');
   await expect(page.locator('.cm-block-picture [data-size-bar] button:focus')).toHaveCount(0);
+});
+
+test('For › Report adds the report\'s annexes to the Page pane, and a switch turned off takes one away', async ({ page }) => {
+  await notebook(page);
+  // the stand-in server prints a page per part: the note, then the sources and the annexes its look asks for
+  const looks = [];
+  const ANNEX_PAGES = [['geolocations', 'Geolocations'], ['credits', 'Credits'], ['method', 'How this was made'],
+    ['limits', 'Limits'], ['editions', 'Editions and corrections']];
+  await page.route(`**/api/cases/${CASE_ID}/notes/preview`, (route) => {
+    const look = route.request().postDataJSON().look ?? {};
+    looks.push(look);
+    const labels = ['Lead'];
+    if (look.style === 'report') {
+      labels.push('Sources');
+      labels.push(...ANNEX_PAGES.filter(([key]) => look.annexes?.[key] !== 'off').map(([, name]) => name));
+    }
+    return pdfAnswer(route, labels.map((_, index) => index * 10), {}, labels);
+  });
+  await openLead(page);
+  await page.locator('[data-guide="notebook.view"]').getByRole('button', { name: 'Page' }).click();
+  const sheets = page.locator('.page-pane .sheet');
+  await expect(sheets).toHaveCount(1);
+
+  await page.locator('[data-guide="notebook.look"]').click();
+  await page.getByRole('tab', { name: 'Style' }).click();
+  const forRow = page.getByRole('radiogroup', { name: 'For' });
+  await expect(forRow.getByRole('radio')).toHaveText([/^Report/, /^Web article/, /^Brief/, /^Journal/, /^Plain/]);
+  await forRow.getByRole('radio', { name: /^Report/ }).click();
+  // the note, its sources, then the five annexes
+  await expect(sheets).toHaveCount(7);
+  await expect(page.locator('.page-pane .pane-bar')).toContainText('7 pages');
+  expect(looks.at(-1)).toMatchObject({ style: 'report', annexes: {}, sources_style: '' });
+
+  const includes = page.getByRole('group', { name: 'What it includes' });
+  await expect(includes.locator('[data-include="method"]')).toContainText("Report's own");
+  await includes.locator('[data-include="method"] input').click();
+  await expect(sheets).toHaveCount(6);
+  expect(looks.at(-1).annexes).toEqual({ method: 'off' });
+  await expect(includes.locator('[data-include="method"]')).toContainText('Changed here');
+  await includes.locator('[data-include="method"]').getByRole('button', { name: /reset/i }).click();
+  await expect(sheets).toHaveCount(7);
 });

@@ -35,6 +35,11 @@
    * until it is live (`notebook/GitHubPublish.svelte`, `notebook/GitHubLive.svelte`).
    * A WordPress draft has its own branch.
    *
+   * **Archive every link…**, on the check's line of links with no archived copy and in a
+   * note's ⋯, opens `notebook/ArchiveLinks.svelte`: one press sends the note's outside
+   * links to the Internet Archive while the header says how far it got; the check
+   * counts them again once the dialog closes or the run ends.
+   *
    * To Post, in the open note's ⋯, opens Post on a Free post thread made of the note's
    * public edition, or of the stretch selected in it (`lib/notes/toPost.js`); nothing is
    * posted from here.
@@ -81,6 +86,8 @@
   import EditionsDialog from './notebook/EditionsDialog.svelte';
   import PublishSteps from './notebook/PublishSteps.svelte';
   import LinkList from './notebook/LinkList.svelte';
+  import ArchiveLinks from './notebook/ArchiveLinks.svelte';
+  import { followed, isActive, onEnded, progressWords } from '../lib/notes/linkArchive.svelte.js';
   import ToPostItem from './notebook/ToPostItem.svelte';
   import ConfirmDialog from '../components/ConfirmDialog.svelte';
   import WordPressDraft from './notebook/WordPressDraft.svelte';
@@ -134,6 +141,8 @@
   let stepsOpen = $state(false);
   // the note whose editions are listed: { noteId, title }
   let editionsOf = $state(null);
+  // the note whose links are being archived, in the dialog: { noteId, title }
+  let archiveOf = $state(null);
   let checkController = null;
   // the WordPress branch of the dialog: its Send, and what WordPress answered
   let wordpressDraft = $state(null);
@@ -716,6 +725,15 @@
     exportCheck = null;
   }
 
+  /** The archive dialog closed: the check before export counts the links again. */
+  function closeArchive() {
+    archiveOf = null;
+    if (exportOpen) void checkExport(exportIds);
+  }
+
+  // a run that ends while the export is open drops its count there
+  $effect(() => onEnded(() => { if (exportOpen) void checkExport(exportIds); }));
+
   function closeExport() {
     stopCheck();
     exportOpen = false;
@@ -782,6 +800,8 @@
     }
   }
 
+  // the open note's run, followed by this tab while its links are archived
+  const archiving = $derived(opened ? followed(caseId, opened.noteId ?? CASE_NOTES) : null);
   const saveSaid = $derived(!doc ? '' : doc.saveError ? 'Not saved' : doc.saving || !doc.saved ? 'Saving…' : 'Saved');
 </script>
 
@@ -831,6 +851,11 @@
             <button class="btn btn-ghost btn-xs" onclick={() => retrySave(doc)}>Retry</button>
           {:else if doc.loaded}{#if saveSaid === 'Saved'}<Icon name="check" size={12} />{/if} {saveSaid}{/if}
         </span>
+        {#if isActive(archiving)}
+          <button type="button" class="btn btn-ghost btn-xs archiving" title="The links of this note are being archived; see how far"
+            onclick={() => (archiveOf = { noteId: opened.noteId ?? CASE_NOTES, title: noteEntity?.label ?? 'Case notes' })}>
+            <Icon name="clock" size={12} /> {progressWords(archiving)}</button>
+        {/if}
         <div class="spacer"></div>
         <LookControl {look} onchange={pickLook} entities={graphEntities} disabled={!look} />
         <ViewModes page={pageMode} guide="notebook.view" onchange={setPageMode} />
@@ -888,6 +913,9 @@
         <button type="button" class="fm-item" title="Every PDF, HTML page, web folder, WordPress draft and published page of this note, with Show and Check"
           onclick={() => fromMenu((note) => (editionsOf = { noteId: note.id, title: note.title }))}>
           <Icon name="file" size={14} /><span class="fm-grow">Editions</span></button>
+        <button type="button" class="fm-item" title="Send each outside link to the Internet Archive and keep its copy"
+          onclick={() => fromMenu((note) => (archiveOf = { noteId: note.id, title: note.title }))}>
+          <Icon name="bookmark" size={14} /><span class="fm-grow">Archive every link…</span></button>
       {/if}
       {#if row}
         <div class="fm-sep"></div>
@@ -1079,6 +1107,10 @@
                       <button type="button" class="btn btn-ghost btn-xs" title="Open the note at this line"
                         aria-describedby={`export-warning-${at}-${index}`} onclick={() => goToWarning(item.note, warning.line)}>Go to</button>
                     {/if}
+                    {#if warning.kind === 'unarchived'}
+                      <button type="button" class="btn btn-primary btn-xs" title="Send each outside link to the Internet Archive and keep its copy"
+                        onclick={() => (archiveOf = { noteId: item.note, title: item.title })}>Archive every link…</button>
+                    {/if}
                     {#if warning.items}<LinkList items={warning.items} label={warning.text} ongo={(line) => goToWarning(item.note, line)} />{/if}
                   </li>
                 {/each}
@@ -1115,6 +1147,10 @@
 
   {#if editionsOf}
     <EditionsDialog {caseId} noteId={editionsOf.noteId} title={editionsOf.title} onclose={() => (editionsOf = null)} />
+  {/if}
+
+  {#if archiveOf}
+    <ArchiveLinks {caseId} noteId={archiveOf.noteId} title={archiveOf.title} onclose={closeArchive} />
   {/if}
 
   {#if exportPicker}

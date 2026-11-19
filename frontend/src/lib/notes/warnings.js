@@ -14,6 +14,8 @@
  * when they were read (`unseen`). Each is one line however many links it counts; the
  * check sends the links behind it as `items`, each its words, its address and its line,
  * which the dialog folds under the line (`linksSummary`). The Page pane says the line.
+ * A style that checks each link (a report's, `engine/notelook.py`) sends one warning per
+ * link instead, each with its own line and no `items`.
  */
 import { api } from '../api.js';
 

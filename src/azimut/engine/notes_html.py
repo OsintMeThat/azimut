@@ -88,7 +88,8 @@ from PIL import Image as PILImage
 from PIL import ImageOps, ImageSequence, UnidentifiedImageError
 
 from . import ffmpeg as ffmpeg_engine
-from . import mapsites, notecharts, notefill, notes_charts, notes_maps, notes_style, notesources, pdffonts, thumbnails
+from . import mapsites, noteannexes, notecharts, notefill, notes_charts, notes_maps, notes_style, notesources, pdffonts
+from . import thumbnails
 from . import notes_markdown as md
 from .media import media_kind
 from .notelook import DEFAULT as DEFAULT_LOOK
@@ -152,7 +153,7 @@ TLP_MEANINGS = {
     "red": "For the eyes and ears of individual recipients only, no further disclosure.",
 }
 #: The word over a cover's title, by the look's style; a plain page has none.
-KICKERS = {"report": "Report", "brief": "Brief", "journal": "Log"}
+KICKERS = {"report": "Report", "brief": "Brief", "journal": "Log", "article": "Article"}
 #: What prints where a picture or a video cannot.
 MEDIA_UNAVAILABLE = "Media unavailable"
 CASE_PICTURE = "Picture from the case"
@@ -372,7 +373,7 @@ def render(
     if public and any(md.holds_internal(block.tokens) for parsed in blocks.values() for block in parsed):
         raise NotesHtmlError("an internal passage could not be left out, so the public edition was not made")
     theme = notes_style.theme_for(look)
-    cited = md.Cited(case, look=look, styled=not theme.plain, identity=identity)
+    cited = md.Cited(case, look=look, styled=not theme.plain, identity=identity, profile=look.profile())
     cited.collect(shown, blocks)
     if look.cover.own and cover is None:
         cited.warn(notefill.EMPTY_COVER, cut.line if cut is not None else None, md.OTHER)
@@ -526,6 +527,10 @@ class _Page:
         self.charts = 0
         #: The words the page's charts draw, which its faces must carry.
         self._chart_words: list[str] = []
+        #: The credits of the maps it drew, and the id of each Limits box in order: what
+        #: the annexes name and link back to (`engine/noteannexes.py`).
+        self._map_credits: list[str] = []
+        self._limit_ids: list[str] = []
         #: The note's words, which a chart reads for whether the note calls its figures minimums.
         self._note_text = ""
 
@@ -590,14 +595,18 @@ class _Page:
         body = self._scrub("".join(self.out))
         self.description = self._describe(body)
         sources = self._sources()
-        corrections = self._corrections(changes, earlier)
+        earlier = list(earlier)
+        profile = self.cited.profile
+        annexes, listed = self._annexes(changes, earlier)
+        # the Editions annex is the corrections and the editions before them: it takes their place
+        corrections = "" if profile.editions else self._corrections(changes, earlier)
         footer = self._footer(printed)
-        contents = self._contents(bool(sources), bool(corrections))
+        contents = self._contents(bool(sources), bool(corrections), listed)
         warning = f'<p class="az-graphic-warning" role="note">{_text(GRAPHIC_WARNING)}</p>\n' if self.graphic else ""
         # the contents, the text and its end matter share one box, which the contents
         # rail stays inside: it never runs into the footer
         page = (f'{warning}{head}<div class="az-page">\n{contents}<main class="az-body" id="main">\n{body}</main>\n'
-                f"{sources}{corrections}</div>\n{footer}")
+                f"{sources}{annexes}{corrections}</div>\n{footer}")
         return self._assemble(title, page)
 
     def _assemble(self, title: str, page: str) -> bytes:
@@ -895,9 +904,10 @@ class _Page:
         self.ids.add(candidate)
         return candidate
 
-    def _contents(self, sources: bool, corrections: bool) -> str:
+    def _contents(self, sources: bool, corrections: bool, annexes: list[tuple[str, str]] | None = None) -> str:
         entries = list(self.headings)
-        if not entries and not sources:
+        annexes = annexes or []
+        if not entries and not sources and not annexes:
             return ""
         items: list[str] = []
         open_sub = False
@@ -918,6 +928,7 @@ class _Page:
             items.append("</ol></li>")
         if sources:
             items.append('<li class="az-contents-sources"><a href="#sources">Sources</a></li>')
+        items.extend(f'<li class="az-contents-annex"><a href="#{ident}">{_text(name)}</a></li>' for ident, name in annexes)
         if corrections:
             items.append('<li class="az-contents-corrections"><a href="#corrections">Corrections</a></li>')
         return (f'<nav class="az-contents" aria-label="Contents">\n<ol>{"".join(items)}</ol>\n</nav>\n')
@@ -1039,6 +1050,7 @@ class _Page:
         if kind == "limits":
             # listed in the contents, under the section it closes
             ident = self._new_id("limits")
+            self._limit_ids.append(ident)
             self.headings.append(_Heading(3 if self.headings else 2, ident, callout[0], ""))
             anchor = f' id="{ident}"'
         self.out.append(f'<aside class="az-callout" data-kind="{kind}"{anchor}>\n{label}{inner}</aside>\n')
@@ -1908,6 +1920,7 @@ class _Page:
         self.pov.extend((said, self._line) for said in derived.pov)
         self._map_steps[ident] = [(str(step.get("label") or ""), str(step.get("day") or ""), str(step.get("text") or ""),
                                    str(step.get("name") or "")) for step in derived.data.get("steps") or []]
+        self._map_credits.extend(str(one) for one in derived.data.get("credits") or [] if one)
         figure = _map_figure(derived, ident, self._caption(block.title, "Map"))
         return figure if self.folder is None else self._lift_data(figure, ident)
 
@@ -2003,9 +2016,110 @@ class _Page:
         annex = self.cited.annex
         if annex is None or not annex.entries:
             return ""
-        entries = "".join(self._source_entry(entry) for entry in annex.entries)
+        style = self.cited.profile.sources_style
+        entries = "".join(self._source_entry(entry) if style == "short" else self._styled_entry(entry, style)
+                          for entry in annex.entries)
         return (f'<section class="az-sources" id="sources" aria-labelledby="sources-title">\n'
                 f'<h2 id="sources-title">Sources</h2>\n<ol>\n{entries}</ol>\n</section>\n')
+
+    def _styled_entry(self, entry: Entry, style: str) -> str:
+        """One source as ``style`` writes it (`notesources.entry`), a capture's check pages
+        and a file's fingerprint under it as in the short form."""
+        source = entry.source
+        said: list[str] = []
+        for part in notesources.entry(source, style, entry.origins):
+            if part.kind == "cite":
+                said.append(_cite(part.number))
+            elif part.kind == "address":
+                said.append(f'<a class="az-source-address" {_outward(part.link)}>{_text(part.text)}</a>')
+            elif part.kind == "outlet":
+                said.append(f"<cite>{_text(part.text)}</cite>")
+            elif part.kind == "link" and part.text == "Archived copy":
+                said.append(f'<a class="az-archive" {_outward(part.link)}>{_text(part.text)}</a>')
+            elif part.link and part.kind in ("title", "link"):
+                said.append(f'<a class="az-source-title" {_outward(part.link)}>{_quoted(part.text)}</a>')
+            elif part.kind == "title":
+                said.append(f'<span class="az-source-title">{_quoted(part.text)}</span>')
+            else:
+                said.append(_text(part.text))
+        links = [f'<a class="az-verify" {_outward(address)}>Check on {_text(site)}</a>' for site, address in source.verify]
+        if style == "web" and source.posted and source.posted not in (source.address, source.archive):
+            links.append(_posted(source.posted))
+        if source.sha256:
+            links.append(f'<span class="az-hash">SHA-256 <code>{source.sha256}</code></span>')
+        more = f'<span class="az-source-links">{" ".join(links)}</span>' if links else ""
+        return (f'<li id="src-{entry.number}" class="az-ref" data-style="{style}" data-kind="{_attr(source.kind or "item")}">'
+                f'{"".join(said)}{more}</li>\n')
+
+    # -- the annexes ----------------------------------------------------------------
+
+    def _annexes(self, changes: str, earlier: list[dict[str, Any]]) -> tuple[str, list[tuple[str, str]]]:
+        """What the style adds after the sources (`engine/noteannexes.py`), each a section
+        of its own, and the contents' line for each as (id, title). The Editions annex
+        keeps the corrections' place and id, so a link to them still lands."""
+        profile = self.cited.profile
+        if not any(profile.annex(key) for key in noteannexes.ANNEXES):
+            return "", []
+        faces = () if self.look.style == "plain" and not self.look.font else noteannexes.face_names(
+            self.theme.body_family, self.theme.heading_family)
+        annexes = noteannexes.build(self.case, self.cited, profile, day=self.day, public=self.public, faces=faces,
+                                    earlier=earlier, changes=changes, made_as="web" if self.folder is not None else "html",
+                                    round_pov=self.round_pov)
+        if profile.credits:
+            for credit in self._map_credits:
+                kind, _, words = credit.partition(": ")
+                noteannexes.add_map_credit(annexes, words or kind)
+        out: list[str] = []
+        listed: list[tuple[str, str]] = []
+        for key in annexes.present():
+            name = noteannexes.HEADINGS[key]
+            ident = "corrections" if key == "editions" else self._new_id(f"az-{key}")
+            inner = getattr(self, f"_annex_{key}")(annexes)
+            classes = "az-annex az-corrections" if key == "editions" else "az-annex"
+            out.append(f'<section class="{classes}" id="{ident}" data-annex="{key}" aria-labelledby="{ident}-title">\n'
+                       f'<h2 id="{ident}-title">{_text(name)}</h2>\n{inner}</section>\n')
+            listed.append((ident, name))
+        return "".join(out), listed
+
+    def _annex_geolocations(self, annexes: noteannexes.Annexes) -> str:
+        rows: list[str] = []
+        for place in annexes.geolocations:
+            number = f"{_cite(place.number)} " if place.number else ""
+            proof = (f'<a class="az-posted" {_outward(place.posted)}>{_text(place.proof)}</a>' if place.posted
+                     else _text(place.proof))
+            coords = f'<a class="az-coords" {_outward(place.link)}><bdi>{place.coords}</bdi></a>' if place.coords else ""
+            rows.append(f'<tr><td dir="auto">{number}{proof}</td><td dir="auto">{_text(place.where)}</td>'
+                        f"<td>{_text(place.day)}</td><td>{coords}</td></tr>")
+        return ('<div class="az-table-wrap"><table class="az-annex-table">\n<thead><tr><th scope="col">Proof</th>'
+                '<th scope="col">Place</th><th scope="col">Day</th><th scope="col">Coordinates</th></tr></thead>\n'
+                f'<tbody>{"".join(rows)}</tbody>\n</table></div>\n')
+
+    def _annex_credits(self, annexes: noteannexes.Annexes) -> str:
+        said = "".join(f'<dt>{_text(kind)}</dt><dd dir="auto">{_text(words)}</dd>' for kind, words in annexes.credits)
+        return f'<dl class="az-credits">{said}</dl>\n'
+
+    def _annex_method(self, annexes: noteannexes.Annexes) -> str:
+        return f'<ul class="az-facts">{"".join(f"<li>{_text(fact)}</li>" for fact in annexes.method)}</ul>\n'
+
+    def _annex_limits(self, annexes: noteannexes.Annexes) -> str:
+        items: list[str] = []
+        for limit in annexes.limits:
+            back = ""
+            if limit.index < len(self._limit_ids):
+                back = f' <a class="az-back-to" href="#{self._limit_ids[limit.index]}">In the text</a>'
+            items.append(f'<li dir="auto">{_text(limit.text)}{back}</li>')
+        return f'<ol class="az-limits">{"".join(items)}</ol>\n'
+
+    def _annex_editions(self, annexes: noteannexes.Annexes) -> str:
+        rows: list[str] = []
+        for one in annexes.editions:
+            lead = "This edition" if one.current else _text(one.day)
+            when = f'<time datetime="{_attr(one.stamp)}">{lead}</time>'
+            fingerprint = (f' <span class="az-hash">SHA-256 <code>{_attr(one.sha256)}</code></span>'
+                           if one.sha256 else "")
+            mark = ' class="az-this-edition"' if one.current else ""
+            rows.append(f"<li{mark}>{when} <span>{_text(one.said)}</span>{fingerprint}</li>")
+        return f'<ol>{"".join(rows)}</ol>\n'
 
     def _source_entry(self, entry: Entry) -> str:
         source = entry.source
@@ -2482,6 +2596,13 @@ def _attr(value: str) -> str:
 def _outward(url: str) -> str:
     """A link out of the page: a new tab, with nothing of this page sent along."""
     return f'href="{_attr(url)}" target="_blank" rel="noopener noreferrer"'
+
+
+def _quoted(text: str) -> str:
+    """A title in its quotes, the words isolated so a right-to-left title leaves the quotes where they are."""
+    if len(text) > 1 and text[0] == "\u201c" and text[-1] == "\u201d":
+        return f"\u201c<bdi>{_text(text[1:-1])}</bdi>\u201d"
+    return f"<bdi>{_text(text)}</bdi>"
 
 
 def _cite(number: int) -> str:

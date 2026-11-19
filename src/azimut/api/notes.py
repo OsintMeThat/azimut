@@ -688,6 +688,7 @@ def preview_note(case_id: str, body: NotePreviewIn) -> Response:
         note_id=body.note,
         resolve=_resolver(case),
         edition=body.edition,
+        earlier=_read_editions(case, body.note),
     )
 
 
@@ -701,6 +702,7 @@ def preview_response(
     note_id: str = "",
     resolve: notes_markdown.Resolve | None = None,
     edition: Edition = "internal",
+    earlier: list[dict[str, Any]] | None = None,
 ) -> Response:
     """Render a preview under the one-at-a-time turn and answer it as PDF bytes.
 
@@ -718,6 +720,7 @@ def preview_response(
         rendered = pdf_engine.render(
             case, title=title or "Untitled", text=text, diagrams=decoded, look=look,
             note_id=note_id, resolve=resolve, public=edition == notes_markdown.PUBLIC, light=True,
+            earlier=earlier or (),
         )
     except pdffonts.FontError as exc:
         raise HTTPException(status_code=500, detail=str(exc)) from exc
@@ -1252,6 +1255,7 @@ def export_pdf(case_id: str, body: ExportIn) -> dict[str, Any]:
             rendered = pdf_engine.render(
                 case, title=title, text=text, diagrams=diagrams,
                 look=notelook.stored(case, note_id), note_id=note_id, resolve=resolve, public=public,
+                earlier=_read_editions(case, note_id),
             )
         except pdffonts.FontError as exc:
             raise HTTPException(status_code=500, detail=str(exc)) from exc
@@ -1610,6 +1614,7 @@ def wordpress_draft(case_id: str, note_id: str, body: WordPressDraftIn) -> dict[
         draft = wordpress_engine.build(
             case, title=title, text=text, look=notelook.stored(case, note_id), note_id=note_id,
             resolve=_resolver(case), diagrams=diagrams, round_pov=body.round_pov, check=body.check,
+            earlier=_read_editions(case, note_id),
         )
     except wordpress_engine.NotesWordPressError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc

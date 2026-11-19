@@ -11,7 +11,8 @@
    * organisation where it says `{name}`, `{role}` and `{organisation}`
    * (`lib/notes/reportParts.js`), as its Signature block does. **WordPress** is the
    * site a note is sent to as a draft (`WordPressSettings.svelte`), and **GitHub Pages**
-   * the site a note's web folder is published to (`GitHubPagesSettings.svelte`). The
+   * the site a note's web folder is published to (`GitHubPagesSettings.svelte`), and
+   * **Styles** what each note style carries by default (`NoteStyles.svelte`). The
    * hover texts live in `lib/publishingHelp.js`.
    */
   import { defaultMention, POST_TARGETS } from '../../lib/post.js';
@@ -22,6 +23,7 @@
   import LogoEditor from './LogoEditor.svelte';
   import WordPressSettings from './WordPressSettings.svelte';
   import GitHubPagesSettings from './GitHubPagesSettings.svelte';
+  import NoteStyles from './NoteStyles.svelte';
 
   let {
     signature,
@@ -269,6 +271,8 @@
     <input bind:this={handInput} class="sig-file" type="file" accept="image/png" title={HELP.signature} onchange={uploadHand} />
   </div>
 </section>
+
+<NoteStyles {savePrefs} />
 
 <section class="group" data-guide="settings.proof-handle">
   <h3>On proofs</h3>

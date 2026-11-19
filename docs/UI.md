@@ -7025,7 +7025,8 @@ Mermaid chart (`xychart-beta`) draws its series in a blue ramp then grey and its
 the note's sans, in the editor, the PDF and the HTML page alike. A press
 picks one (an accent outline, a picture's bar kept up); a double press, Enter or its
 `</>` opens its source, which closes again once the cursor leaves it, and Escape closes
-it at once. While one is picked, Backspace or Delete takes it out (Undo brings it back),
+it at once. A table's Enter puts the caret in its first cell instead, and only its `</>`
+opens the pipes. While one is picked, Backspace or Delete takes it out (Undo brings it back),
 a key typed starts a paragraph of its own after it, and the arrow keys step over it
 whole, picking it on the way. The toolbar's last pair switches between **Drawn** and
 **Markdown**, the raw text with no drawing (Ctrl+Shift+M), one choice for the browser,
@@ -7042,7 +7043,8 @@ empty `::: steps` or `::: story` block opened on its guidance, your logo), **Fro
 case** (a case item, an **Interactive map**, a note included as a chapter), **Layout**
 (a divider, a page break, the cover page, **Alignment ›**, **Cover corner ›**, a
 signature, **Field ›** for the words the PDF fills in) and **Figures** (a table, a
-diagram). Each entry has an icon, its name and a line under it; beside the list, the
+diagram), the table asking rows by columns on a small grid (3 by 3 unless picked) or a
+file. Each entry has an icon, its name and a line under it; beside the list, the
 entry lit is drawn as it will look, with the Markdown it writes. What is typed after
 `/` (or after the +, which writes nothing until an entry is picked) finds entries by
 name and by the words each goes by, best first, so `/tab` is Table and `/private` is
@@ -7119,12 +7121,43 @@ it, or *Remove the page break above*), **Copy link to this heading**
 as one step, which one Undo takes back to the byte; the cursor moves with the block
 when it was in it, and the page stays still otherwise.
 
+**A table is a grid** on the drawn page (`lib/notes/editor/tableGrid.js`, reading and
+writing through `tableText.js`). A press puts the caret in a cell, which shows its
+Markdown while it is typed in and its chips, links and pictures otherwise. Tab and
+Shift+Tab move along, Enter goes down and Shift+Enter up, the arrows leave a cell at its
+edges, and Escape goes back to the text with the table picked. Tab past the last cell, or
+Enter on the last row, opens a new row, written once something is typed in it. A cell is
+written when the caret leaves it, on its row's line only, as one Undo step; Ctrl+Z in a
+cell with nothing typed takes back the grid's last gesture. The bar adds a **Row** or a
+**Column**, takes **Paste from a spreadsheet** and **From a file** (CSV, TSV or HTML: an
+empty table takes the cells whole, a filled one gets them under its last row), and its ⋯
+copies the table for a spreadsheet or deletes it; `</>` opens the pipes. A column's ▾
+sorts it (as numbers, dates or words; a bold or *Total* row stays last), inserts, moves,
+aligns, fills down (an empty cell takes the one above) or deletes it. A row's number
+inserts, duplicates, moves or deletes it, and Alt+↑ or Alt+↓ in a cell moves its row.
+Past 30 rows the grid shows the first 20 and *N more rows · show all*. A table wider than
+the text takes the room beside it, then scrolls sideways, the hidden side fading. **@** in
+a cell offers the case's records; a chip or a link in a cell opens on Ctrl+click. A
+spreadsheet's or a web page's table pasted anywhere on the page becomes a table, and a
+toast offers **Paste as text** and **Undo**; pasted in a cell, it fills the grid from
+there, adding the rows and columns it needs. The raw Markdown pastes and shows the pipes as
+before.
+
+**Pictures in a table.** A column holds pictures when its header names them (Picture,
+Photo, Frame…) or a cell holds one, drawn as a thumbnail. A case picture dropped on a cell
+lands there as its chip, and so does a tool's **Put in** while a cell is picked: from the
+moment it is typed in until the note's text is pressed. A row names a video and a time
+when a cell cites a video of the case beside a time (`4:18`), or a column's header cites
+the video and the row's cell under it holds the time (`S04 0:23-0:37` reads 0:23). An empty
+picture cell of such a row offers **Cut a frame**, which opens Inspect on the video at that
+time with the note beside it; the frame's Put in lands in the cell.
+
 The file stays the Markdown it was: what the old split-pane Notebook wrote opens as it
 was written and is never rewritten for being opened. The header names the note (the
 name is the filename), files it in a folder, says whether it is saved, and holds
 **Look**, **Write | Page**, **Pin to the side**, **Open in its own tab**, **Export**, and a
-⋯ with *Editions*, *Keep as template*, *To Post* and *Delete* (*Clear the case notes*
-for the case's page).
+⋯ with *Editions*, *Archive every link…*, *Keep as template*, *To Post* and *Delete*
+(*Clear the case notes* for the case's page).
 PDF export writes one server-rendered PDF per note without a print dialog, in the
 note's look, local images and browser-drawn diagrams with it, remote images left out,
 homonyms under stable suffixes, into the shared notes destination (the case's
@@ -7141,6 +7174,29 @@ and *Go to*. Links to the case's own work are not counted: an archived copy itse
 (Wayback, archive.today), the Wayback and Copernicus viewers and the Esri imagery
 services, a map view the case captured, and where a proof was posted. The public
 edition counts only the links it prints. The Page pane lists the same lines, without the links under them.
+
+**Archive every link…**, on the line of links with no archived copy and in the note's ⋯,
+opens a dialog that says once what goes out: each address to the Internet Archive
+(web.archive.org), which keeps a copy anyone can open, free and with no account, and
+that the archive learns which pages the note cites. It lists the links the check counts,
+the public edition's (*Include internal passages* adds theirs, off by default), and says
+how many are to archive, how many have a copy already and how many the case lacks and
+will file as bookmarks in a folder *Links of “<note>”*. **Archive N links** is the only
+press that reaches the network (`POST /notes/{id}/archive`, `engine/linkarchive.py`): a
+background job on the case's queue asks the archive for each page's newest copy and
+reuses one under 30 days old (*Make fresh copies* makes a new one anyway), else saves
+it, one link at a time, 10 s at least between saves and waiting as a 429 asks. A row
+per link says *new copy, 18 Nov 09:30*, *copy of 12 Nov kept*, *no longer online · copy
+of 28 Oct linked*, why it failed, *saving…* or *waiting*, under the count, a bar and
+the time left. The dialog can be closed (*Keep going in the background*); the note's
+header then says *Archiving 12 of 70…* and opens it again, and a toast says when it
+ends. **Stop** ends it after the link under way. Each copy is kept on the item the link
+finds (`archive_url`, `archived_at`); a bookmark filed for a link the case lacked is
+dated as read the day it was archived, unless only an older copy could be linked. The
+note's text is never changed: its sources list the copy and the day, and the check
+counts the link no more. Offline or past the archive's patience it stops and says so,
+keeping what it did; failed links are tried again on the next press, and a run cut
+short by Azimut closing waits for that press rather than going on at startup.
 
 **PDF | HTML.** The export dialog opens with a **PDF | HTML** switch, the last one picked
 kept for this browser; everything else (the edition, the destination, the check, the
@@ -7414,17 +7470,61 @@ posts and cuts a long text itself.
 
 **How it prints.** **Look** sets the note's style, kept beside the note (the note
 record's `look`, `notes.case_look` for the case notes) and never in its Markdown. Its
-panel shows one tab at a time, *Style* (the style, then contents, numbered headings and
-sources as three switches, and the web page's layout), *Text*, *Page* (paper, accent, marking), *Cover* and *Header
-& footer*, a dot on each tab holding something set, and reopens on the last tab used:
+panel shows one tab at a time, *Style* (what the document is **For**, then contents and
+numbered headings, **What it includes**, and the web page's layout), *Text*, *Page* (paper, accent, marking), *Cover* and *Header
+& footer*, a dot on each tab holding something set, and reopens on the last tab used.
+The **For** row lists the five styles, each with a line on what it gives; the style is
+the profile, so it decides what the document carries after its text as well as its look:
 
-- **Plain**, with nothing else set, is the document the Notebook always printed.
 - **Report** has a running header, *Page X / Y*, numbered sections in the accent,
-  boxed callouts, striped tables and framed figures.
+  boxed callouts, striped tables and framed figures; its sources are written
+  **Academic** and it carries every annex, and the check names each link on its own line.
+- **Web article** is a page read online: the day over a large title, its sources
+  written for the **Web**, its **Credits** and its **Editions & corrections**.
 - **Brief** sets a dark band with the title and puts the first verdict
   (`[!confirmed]` or `[!unverified]`) in a large box under it, to fit a page or two.
 - **Journal** opens each day with its date and sets each `### YYYY-MM-DD HH:MM`
   entry's time in a left gutter on a timeline.
+- **Plain**, with nothing else set, is the document the Notebook always printed, to the
+  byte: no sources list and no annex.
+
+**What it includes** lists the **Sources** list and the five annexes as switches, then
+**Sources written as** (*Academic*, *Web*, *Short*) and the **Link check** (*Each link*,
+*One line*). Each shows the style's own value (*Report's own*) until changed for this
+note, then *Changed here · Reset*; setting one back to the style's value is the style's
+own again. The annexes print after the sources, each a heading of its own in the
+contents and the bookmarks, in the PDF, the HTML page, its web folder and a WordPress
+draft, and only when they have something to say (`engine/noteannexes.py`):
+
+- **Geolocations**: a table of every proof the note cites, its source number, the place
+  it depicts and how far off its point may be, its day (*about*, or a span), and its
+  coordinates linked to the map; a point filmed from says *Where it was filmed*, rounded
+  when the export rounds them.
+- **Credits**: the imagery (providers and their credit lines, a proof's panels' too),
+  the terrain, the maps drawn in the note, the accounts whose posts it shows by site,
+  and the typefaces with their licence.
+- **How this was made**: facts read from the case, never prose: the edition and the
+  Azimut that made it, how many sources of each kind, the days they were posted and came
+  in, how many outside addresses have an archived copy, the imagery and its days, the
+  fingerprinted files and the tools the items came from.
+- **Limits**: every `> [!limits]` box of the note gathered, each linked back to where
+  it stands; a note with a *Limits* or *Limitations* section of its own is left as it is.
+- **Editions & corrections**: this edition, then each public text published before,
+  one row per text with its first day, its formats, what it corrected and its
+  fingerprint. In the HTML page it takes the place and the `#corrections` address of the
+  corrections; with it off, the page lists its corrections as before.
+
+**Sources written as** *Academic* reads as a journal's reference list: Author (the
+account an X or Telegram address names when the case records none), "Title", the medium
+for a file, *Outlet* in italics (a known site by its name, *Al Jazeera*, any other by its
+host), the full day, the address, *archived (day) at* the copy, *accessed* (or
+*collected*, *made*) the day it was seen. What the case does not know is left out with
+its comma, never *n.d.* A written link takes as its title the longest words the note
+links it with that are not a citation of the site (*Al Jazeera, 10 Sep* is one), so a
+note's own sources list names the page; a link to a Wayback copy is that copy of its
+page. *Web* writes the outlet, the title linked and the short day, then *Archived copy*;
+*Short* is the form notes always printed. Files keep their SHA-256 line and captures
+their *Check on* links in every form.
 
 Every style takes A4 or Letter, an accent (the style's own, a recent colour or a
 pasted hex), a TLP marking (FIRST TLP 2.0 colours, top right and in the footer of
@@ -7472,8 +7572,10 @@ Its **Text** part sets the typeface, each card drawn in its face: the style's ow
 Literata (a book face for long write-ups) or IBM Plex Sans (a clean face for briefs),
 and the size, Smaller, Normal or Larger, which headings, tables and captions follow.
 A letter a face lacks prints in the Noto face of its script. Templates carry both.
-Its **Sources** row, *List sources at the end*, is on for Report, Brief and Journal and
-off for Plain until set; templates carry it too. Its **Web page** row, *Article* or
+Its **Sources** switch is on for Report, Web article, Brief and Journal and off for
+Plain until set; templates carry it and every switch of *What it includes*, each kept
+only once set (`sources_style`, `annexes`, `link_check`), so a look that never used
+them reads as an older Azimut wrote it. Its **Web page** row, *Article* or
 *Story*, lays out the HTML page only (see *Story* above); it is kept only once set to
 Story, so a look that never used it reads as an older Azimut wrote it, and templates
 carry it.
@@ -7764,6 +7866,15 @@ composer and the Map plate already use), **Name**, **Role** and **Organisation**
 line each, 80 characters at most) and the **Signature**, a PNG of a handwritten
 signature up to 1 MB, a transparent one recommended; each field says what it takes and
 where it prints. The settings backup carries them all.
+
+**Styles.** Under *In reports*, Settings › Publishing holds what each style carries, set
+once for every note that keeps its style's own: a column per style (Report, Web article,
+Brief, Journal, Plain), a switch per row for the **Sources** list and the five annexes,
+then **Written as** and **Link check before export** as menus. Each change saves at once
+and reaches a note's next export, never a file already written; a note's Look still
+changes any of it. **Reset to Azimut's defaults** gives every style back what Azimut
+gives it. Only what differs from Azimut's own is kept (`note_styles`), and the settings
+backup carries it.
 
 **WordPress.** The last group of Settings › Publishing connects the site a note is sent
 to: **Site address** (https, or http on this computer for a test site; a WordPress.com
