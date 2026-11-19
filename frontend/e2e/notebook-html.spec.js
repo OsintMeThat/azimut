@@ -284,10 +284,14 @@ test('the Page pane shows the note as its HTML page, and the export dialog write
   await expect.poll(() => state.htmlPreviews.length).toBeGreaterThan(asked);
   expect(state.htmlPreviews.at(-1).look).toMatchObject({ style: 'report', web: 'story' });
   expect(state.looks.at(-1)).toMatchObject({ web: 'story' });
-  // a press in the page closes the Look over it, as a press anywhere else in the app does
-  await expect(page.getByRole('dialog', { name: 'Look' })).toBeVisible();
-  await frame.locator('h1.az-title').click();
-  await expect(page.getByRole('dialog', { name: 'Look' })).toHaveCount(0);
+  // a press in the page closes the Look over it, as a press anywhere else in the app does;
+  // the Look, with what the style includes, covers the page's middle: the press lands beside it
+  const look = page.getByRole('dialog', { name: 'Look' });
+  await expect(look).toBeVisible();
+  const [shown, over] = [await page.locator('.html-page iframe:not([inert])').boundingBox(), await look.boundingBox()];
+  expect(over.x - shown.x).toBeGreaterThan(20);
+  await page.mouse.click((shown.x + over.x) / 2, shown.y + shown.height / 2);
+  await expect(look).toHaveCount(0);
 
   await page.locator('[data-guide="notebook.pdf"]').click();
   let dialog = page.getByRole('dialog', { name: 'Export note as PDF' });
