@@ -726,7 +726,8 @@ class _Writer:
         """A `:::: infographic` block as one picture of the whole page, its alt text the
         title band, every panel and the sources; then each chart's numbers under "The
         numbers", one table a chart, for a reader the picture says nothing to."""
-        page = notes_infographic.read(self.case, token.content, look=self.look, note_text=self._note_text)
+        # where the rows came from is the PDF's and the HTML page's check, as for a chart here
+        page = notes_infographic.read(self.case, token.content, look=self.look, note_text=self._note_text, origins=False)
         self.warnings.extend(message for message, _, _ in page.warnings)
         if not page.panels:
             return []

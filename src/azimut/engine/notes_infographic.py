@@ -42,7 +42,17 @@ before its first panel (`KEYS`):
   the page, the rest take a column;
 - ``legend``: ``each panel`` to keep one legend per chart. Left out, charts that colour by
   the same column (Grade) share one legend at the top, every value of it kept;
-  a column's name asks for that one.
+  a column's name asks for that one;
+- ``data``: what the page's charts are drawn from, named as a chart's ``from:`` names it
+  (`engine/notecharts.py`): ``sheet:<id>`` (a sheet of the case, the usual), or
+  ``note:<id>#<heading>`` (a table of a note).
+
+**The data.** A chart panel with no ``from:`` of its own, whose columns the data all
+holds, *inherits* it (`inherits`): its rows are still copied in, so the page reads the same
+tomorrow, and the data says when they moved on. A panel whose columns the data does not
+hold (key figures typed in) keeps its own rows; one with its own ``from:`` keeps its own
+source. *Read again (all panels)* is the editor's: it copies the data's rows into every
+panel that inherits it, as one change.
 
 **The panels**, in the text's order: a `::: chart` block, a `::: map` block, or words
 (the headings and paragraphs between two blocks, one panel). A wide panel spans the
@@ -107,9 +117,10 @@ KEYS: dict[str, str] = {
     "look": "look", "style": "look",
     "widths": "widths", "width": "widths", "panels": "widths",
     "legend": "legend",
+    "data": "data",
 }
 #: The order the Notebook writes them in.
-WRITTEN_ORDER = ("kicker", "title", "standfirst", "look", "legend", "widths")
+WRITTEN_ORDER = ("data", "kicker", "title", "standfirst", "look", "legend", "widths")
 
 #: What one infographic may hold.
 MAX_PANELS = 16
@@ -156,6 +167,8 @@ MIN_PICTURE = 1080
 WIDE_KINDS = ("key figures", "timeline")
 NO_PANEL = "The infographic holds no panel: put a chart, a map or a few words inside it."
 NO_SOURCE = "The infographic names no source: give its charts a source line."
+DATA_GONE = ("The infographic's data is no longer in the case: its panels keep the rows they copied, but cannot "
+             "read them again. Change its data, or name it again.")
 
 SETTING_LINE = re.compile(r"^([A-Za-z][A-Za-z ]{0,24}?)\s*:\s?(.*)$")
 COMMENT_ONLY = re.compile(r"^\s*(?:<!--.*?-->\s*)+$", re.S)
@@ -195,6 +208,8 @@ class Infographic:
     standfirst: str = ""
     look: str = ""
     legend: str = ""
+    #: What its charts are drawn from: ``sheet:<id>`` or ``note:<id>#<anchor>``, or "".
+    data: str = ""
     widths: list[str] = field(default_factory=list)
     panels: list[Panel] = field(default_factory=list)
     #: Lines it could not read, as ``(line, text, why)``.
@@ -247,6 +262,13 @@ def parse_block(body: str) -> Infographic:
                     else:
                         graphic.widths.append("")
                         graphic.unread.append((index, line[:120], f'"{word[:40]}" is no width: write half or wide'))
+        elif key == "data":
+            said = " ".join(value.split())[:200]
+            if _data_known(said):
+                graphic.data = graphic.data or said
+            else:
+                graphic.unread.append((index, line[:120], f'"{said[:40]}" is no data: name a sheet (sheet:<id>) or a '
+                                                          f"table (note:<id>#<heading>)"))
         elif key == "look":
             word = _clean(value).casefold()
             if word in nc.STYLES:
@@ -342,6 +364,81 @@ def block_of(text: str) -> str:
         if lines and CLOSE.match(lines[-1]):
             lines = lines[:-1]
     return "\n".join(lines)
+
+
+# -- the data ---------------------------------------------------------------------------------------
+
+
+def _data_known(origin: str) -> bool:
+    """Whether ``data:`` (or a chart's ``from:``) names something the case can read rows from."""
+    from .notecharts import origin_known
+
+    kind, _, rest = str(origin or "").partition(":")
+    return bool(kind.strip()) and origin_known(origin) and bool(rest.strip())
+
+
+def own_origin(panel: Panel) -> str:
+    """A chart panel's own ``from:``, when it names a note's table or a sheet; else ""."""
+    if panel.kind != CHART:
+        return ""
+    origin = nc.parse_block(panel.body).origin
+    return origin if _data_known(origin) else ""
+
+
+def _fold(header: str) -> str:
+    return " ".join(nc.plain_cell(str(header)).split()).casefold()
+
+
+def inherits(panel: Panel, columns: Sequence[str]) -> bool:
+    """Whether a panel takes the page's data, whose columns are ``columns``: a chart with no
+    ``from:`` of its own whose table's columns the data holds every one of, or which holds
+    no table yet. A table with a column the data lacks (key figures typed in) is its own."""
+    if panel.kind != CHART or own_origin(panel):
+        return False
+    table = nc.parse_block(panel.body).table
+    if table is None or not table.headers:
+        return True
+    held = {_fold(column) for column in columns}
+    return all(_fold(header) in held for header in table.headers if _fold(header))
+
+
+def data_warnings(case: "Case", graphic: Infographic) -> list[tuple[str, str, int | None]]:
+    """What the check says of where the page's rows came from, each at its line: its data no
+    longer in the case, a panel that inherits it whose rows differ from it, and a panel's
+    own ``from:`` gone or moved on (`notecharts.origin_warning`). Each source is read once."""
+    from . import notecharts
+
+    read: dict[str, tuple[str, list[str], list[list[str]]] | None] = {}
+
+    def rows_of(_case: "Case", origin: str) -> tuple[str, list[str], list[list[str]]] | None:
+        if origin not in read:
+            read[origin] = notecharts.origin_rows(case, origin)
+        return read[origin]
+
+    out: list[tuple[str, str, int | None]] = []
+    data = rows_of(case, graphic.data) if graphic.data else None
+    if graphic.data and data is None:
+        out.append((DATA_GONE, nc.MISSING, graphic.where.get("data")))
+    for panel in graphic.panels:
+        if panel.kind != CHART:
+            continue
+        block = nc.parse_block(panel.body)
+        if block.table is None or not block.table.headers:
+            continue
+        if own_origin(panel):
+            said = notecharts.origin_warning(case, block, read=rows_of)
+            if said is not None:
+                out.append(_offset(said, panel))
+            continue
+        if data is None or not inherits(panel, data[1]):
+            continue
+        name, headers, rows = data
+        if notecharts.compare_rows(block.table, headers, rows) != notecharts.DIFFERS:
+            continue
+        chart = f'The chart "{nc._cut(block.title, 60)}"' if block.title else "A chart of the infographic"
+        out.append(_offset((f'{chart}: its rows differ from the infographic\'s data, "{nc._cut(name, 40)}". '
+                            f"Read again (all panels) brings them up to date.", nc.OTHER_KIND, None), panel))
+    return out
 
 
 # -- the page laid out -------------------------------------------------------------------------------
@@ -493,11 +590,13 @@ def _shares(reading: nc.Reading | None, shared: str) -> bool:
 
 
 def read(case: "Case | None", body: str, *, look: "NoteLook | None" = None, palette: Sequence[Mapping[str, str]] | None = None,
-         note_text: str = "", maps: bool = True, light: bool = False, width: float = PAGE_WIDTH) -> Page:
+         note_text: str = "", maps: bool = True, light: bool = False, width: float = PAGE_WIDTH,
+         origins: bool = True) -> Page:
     """An infographic's lines laid out ``width`` CSS pixels wide, in the note's look and
     the case's colours. ``maps`` False reads a map's data without painting its picture or
     saying what its check finds: the HTML page draws and checks its maps as every map;
-    ``light`` paints it smaller (the Page pane)."""
+    ``light`` paints it smaller (the Page pane). ``origins`` False leaves where the rows
+    came from to the editor, whose Data bar reads it as the note is typed (`data_warnings`)."""
     graphic = parse_block(body)
     theme = theme_of(graphic, look)
     if palette is None:
@@ -552,6 +651,8 @@ def read(case: "Case | None", body: str, *, look: "NoteLook | None" = None, pale
         heights[side] += drawn.h + GAP
         run.append(drawn)
     close_run()
+    if case is not None and origins:
+        warnings.extend(data_warnings(case, graphic))
     if not graphic.panels:
         warnings.append((NO_PANEL, nc.OTHER_KIND, None))
     elif not credits:

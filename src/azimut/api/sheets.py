@@ -126,6 +126,9 @@ class SheetCreateIn(SheetIn):
     """
 
     columns: list[str] | None = Field(default=None, max_length=sheet_engine.MAX_COLUMNS)
+    #: Rows under those columns: a table pasted in the Notebook's *New data…*, read by the
+    #: grid's own paste reader, so a spreadsheet's HTML table lands as the note's grid takes it.
+    rows: list[list[str]] | None = Field(default=None, max_length=sheet_engine.MAX_ROWS)
 
 
 @router.post("/{case_id}/sheets")
@@ -138,7 +141,7 @@ def create_sheet(case_id: str, body: SheetCreateIn) -> dict[str, Any]:
     """
     case = get_case(case_id)
     try:
-        return sheet_engine.create(case, body.title.strip(), body.columns)
+        return sheet_engine.create(case, body.title.strip(), body.columns, body.rows)
     except (CaseError, sheet_engine.SheetError) as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
 

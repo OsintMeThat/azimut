@@ -31,6 +31,9 @@ Past the chain:
   by their records, the ground and the close-ups under it by entity id. Its period of
   proofs is a question asked of the case, not a name: a proof deleted leaves the map
   one point fewer, as a proof added gives it one more;
+- a note's charts and infographics (`engine/notecharts.py`, `notes_infographic.py`): the
+  sheet or the other note an infographic's ``data:`` or a chart's ``from:`` reads its rows
+  from, by entity id. The rows are copied in, but *Read again* and the check read the source;
 - a note's written links (`notelinks.outside_links`): each finds the item the case
   holds at its address, the file downloaded from that post, the bookmark of that
   page, the capture of that view or the proof imported from that post
@@ -58,7 +61,8 @@ from typing import TYPE_CHECKING, Any, Callable, Iterable, Iterator
 
 from .. import layout
 from ..workspace import CaseError
-from . import horizon_finds, horizon_views, inspectwork, mapplates, maplayers, notelinks, notes_maps, sheets
+from . import horizon_finds, horizon_views, inspectwork, mapplates, maplayers, notecharts, notelinks, notes_charts
+from . import notes_infographic, notes_maps, sheets
 from . import links as link_engine
 from . import urltitles
 
@@ -236,6 +240,34 @@ def _note_maps(text: str) -> Iterator[Lean]:
                 yield Lean(picture, "is the ground of a map in it")
 
 
+#: What a figure's source is to the note that reads it, by the line that names it.
+DATA_HOW = "is the data of an infographic in it"
+FROM_HOW = "is where a chart in it copies its rows from"
+
+
+def _note_figures(text: str) -> Iterator[Lean]:
+    """The sheets and notes a note's figures read their rows from: an infographic's
+    ``data:``, a chart's ``from:``. The note's own tables are its own business."""
+    for found in notes_infographic.blocks_in(text):
+        data = notes_infographic.parse_block(found.body).data
+        target = _origin_target(data)
+        if target:
+            yield Lean(target, DATA_HOW)
+    for body in notecharts.chart_bodies(text):
+        target = _origin_target(notes_charts.parse_block(body).origin)
+        if target:
+            yield Lean(target, FROM_HOW)
+
+
+def _origin_target(origin: str) -> str:
+    """The entity id a ``sheet:<id>`` or ``note:<id>#<anchor>`` names, or ""."""
+    kind, _, rest = str(origin or "").partition(":")
+    if kind.strip().casefold() not in ("sheet", "note"):
+        return ""
+    ident = rest.partition("#")[0].strip()
+    return ident if notes_maps.ENTITY_ID.match(ident) else ""
+
+
 #: What a note says, kept while its file is unchanged: its map leans, and the addresses
 #: it links to, which a lean is made of only once the case says what holds them.
 _notes: OrderedDict[str, tuple[tuple[int, int, int], tuple[Lean, ...], tuple[str, ...]]] = OrderedDict()
@@ -260,6 +292,8 @@ def _read_note(path: Path) -> tuple[tuple[Lean, ...], tuple[str, ...]]:
     except (OSError, ValueError):
         return (), ()
     leans = tuple(_note_maps(text)) if "::: map" in text or ":::map" in text else ()
+    if "sheet:" in text or "note:" in text:
+        leans += tuple(dict.fromkeys(_note_figures(text)))
     addresses = tuple(notelinks.outside_links(text)) if "http" in text else ()
     with _cache_lock:
         _notes[key] = (stamp, leans, addresses)
@@ -314,7 +348,8 @@ def _records(case: "Case") -> Iterator[tuple[_Holder, Lean]]:
             leans, addresses = _read_note(path)
             holder = _Holder(rel, "note", entity)
             for lean in leans:
-                yield holder, lean
+                if lean.target != entity.get("id"):  # a figure drawn from the note's own table
+                    yield holder, lean
             if addresses:
                 linking.append((holder, addresses))
         cursor = notes.get("next_cursor")

@@ -518,15 +518,15 @@ def test_the_rows_route_answers_another_notes_table_as_written_and_a_sheets_rows
     note = make_note(client, cid, title="Register",
                      content="# Register\n\n## Count\n\n| Model | At least |\n| --- | ---: |\n| [[entity:x1]] | 3 |\n")
     answer = client.post(f"/api/cases/{cid}/notes/figure/rows", json={"origin": f"note:{note['id']}#count"})
-    assert answer.json() == {"found": True, "name": "Register",
+    assert answer.json() == {"found": True, "name": "Register", "rows": 1,
                              "text": "| Model | At least |\n| --- | ---: |\n| [[entity:x1]] | 3 |"}
     sheet = sheets_engine.create(case, "Sightings", ["Model", "Seen"], [["Cougar | B6", "2"], ["M-ATV", "1"]])
     rows = client.post(f"/api/cases/{cid}/notes/figure/rows", json={"origin": f"sheet:{sheet['id']}"}).json()
-    assert rows["found"] and rows["name"] == "Sightings"
+    assert rows["found"] and rows["name"] == "Sightings" and rows["rows"] == 2
     # the sheet's own row keys stay out, a | in a cell is escaped
     assert rows["text"] == "| Model | Seen |\n| --- | --- |\n| Cougar \\| B6 | 2 |\n| M-ATV | 1 |"
     gone = client.post(f"/api/cases/{cid}/notes/figure/rows", json={"origin": "note:nothere#count"}).json()
-    assert gone == {"found": False, "name": "", "text": ""}
+    assert gone == {"found": False, "name": "", "text": "", "rows": 0}
     refused = client.post(f"/api/cases/{cid}/notes/figure/rows", json={"origin": "layer:Vehicles"})
     assert refused.status_code == 422
 

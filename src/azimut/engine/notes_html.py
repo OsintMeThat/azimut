@@ -2055,7 +2055,7 @@ class _Page:
                        f"{_text(notes_infographic.sentence(page.credit))}</p>\n")
         whole = ""
         if self.folder is not None:
-            drawn_page = notes_infographic.read(self.case, body, look=self.look, note_text=self._note_text)
+            drawn_page = notes_infographic.read(self.case, body, look=self.look, note_text=self._note_text, origins=False)
             picture = notes_infographic.picture(drawn_page, "page")
             address = self.folder.put(picture, graphic.title or "infographic", ".png")
             whole = (f'<p class="az-ig-whole"><a href="{_attr(address)}" download>'
