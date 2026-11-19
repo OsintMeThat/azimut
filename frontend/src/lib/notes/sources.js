@@ -22,12 +22,26 @@ import { pastedUrl } from './syntax.js';
 export const DOWNLOAD_POLL_MS = 700;
 
 /**
- * What the case says of a web address: `{ url, title, found: [entity] }`. `title` is
- * the one the page gave itself, when a browser passed it on: it names the page when
- * the address says nothing better.
+ * What the case says of a web address: `{ url, title, found: [entity], known, reference }`.
+ * `title` is the one the page gave itself, when a browser passed it on: it names the
+ * page when the address says nothing better. `words` are a written link's, which name
+ * the page in its `reference` (its entry in the list of sources) when the case holds
+ * nothing there.
  */
-export function lookupSource(caseId, url, { get = api.get, title = '' } = {}) {
-  return get(`/api/cases/${caseId}/sources/lookup?${new URLSearchParams(title ? { url, title } : { url })}`);
+export function lookupSource(caseId, url, { get = api.get, title = '', words = '' } = {}) {
+  const query = new URLSearchParams({ url });
+  if (title) query.set('title', title);
+  if (words) query.set('words', words);
+  return get(`/api/cases/${caseId}/sources/lookup?${query}`);
+}
+
+/**
+ * What the case knows of the item a chip cites, `{ known, reference }`, read off the
+ * case alone (`/sources/item`): `known` null once the item is gone, `reference` its
+ * entry in the list of sources, "" for what the list leaves out.
+ */
+export function sourceItem(caseId, id, { get = api.get } = {}) {
+  return get(`/api/cases/${caseId}/sources/item?${new URLSearchParams({ id })}`);
 }
 
 /** An address typed or pasted, as one the lookup reads, or null. */

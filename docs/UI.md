@@ -7075,6 +7075,26 @@ a library file dragged in lands as its picture. A link pasted alone is offered a
 bookmark of the case, titled from its address, nothing fetched. A note with a remote
 image says its host is contacted on every open.
 
+**Citations.** A chip or a written link, hovered a moment or with the cursor resting
+inside it, shows a card under it of what the case knows of what it cites
+(`lib/notes/editor/citationCard.js`): its kind, site and name, a picture's or a proof's
+thumbnail, then **Posted**, **By**, **Seen** (*Made* for a proof, *Captured* for a map
+capture), **Archived** with the copy's day and host, the SHA-256 of a file, and how
+often this note cites it, chips and links to the same page alike. A post with no author
+on record says *Not recorded* rather than leave a gap. A written link the case lacks
+says *Not in the case* and *Not archived*, both amber, and an item gone says *No longer
+in the case.* and nothing more. Its actions: **Open** the item (*Open in Geo Proof*
+where a tool reopens it), **Open page** and **Archived copy** in a new tab, **Copy
+reference** (its entry as the list of sources prints it, read off `GET /sources/item`
+for a chip and `/sources/lookup` for a link), **Edit link** (the Link field, on the
+drawn page) and, for a page the case lacks, **Bookmark it**, which files it, seen that
+day, and leaves the note as written. The card fetches nothing, and a page opens only on
+a press. It reads the same in a drawn table or aligned block and in the raw Markdown,
+over `[[entity:…|…]]` and `[words](https://…)`. With the cursor in it, Tab walks into
+its actions, the arrows along them, and Escape gives the keys back; a screen reader is
+told it is there. It goes when the pointer leaves it, the cursor leaves the link, or
+typing starts.
+
 **Blocks.** Every block of the drawn page (a paragraph, a heading, a list, a quote, a
 callout, a picture, a table, a diagram, an aligned or corner block, steps, a story, a
 map, a page break, a chapter) shows a ⋮⋮ handle in the left margin while the pointer
@@ -7500,7 +7520,8 @@ then the capture, the first filed first. A link to the post a proof was imported
 stays that page, collected the day of the import. A link the case holds nothing of
 prints exactly as before. PDF, HTML, web folder and WordPress draft all list it so.
 The same reading answers `GET /sources/lookup`'s `known` (the item, its author, posted
-day, archived copy and its day, and the day it was seen) for the citation card to come.
+day, archived copy and its day, the day it was seen, a file's SHA-256 and its picture)
+and its `reference`, the link's entry as the list prints it, for the citation card.
 
 **Write | Page** opens the note's pages beside it: the real PDF the server would write
 (`POST /notes/preview`, nothing written to disk), drawn with pdf.js loaded only

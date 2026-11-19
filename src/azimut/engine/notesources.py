@@ -740,6 +740,25 @@ def details(source: Source) -> list[str]:
     return [part for part in parts if part]
 
 
+def reference(source: Source) -> str:
+    """One entry of the list of sources as a line of plain text, for the citation card
+    to copy: its label and what `details` says, then its addresses and its fingerprint,
+    each as the PDF's list prints it. Today's form, the one the list has; a sources
+    style the note's look chooses writes its own form here."""
+    head = " · ".join((source.label or source.host or "Untitled", *details(source)))
+    said = [f"{head}."]
+    if source.address:
+        said.append(source.address)
+    if source.archive and source.archive != source.address:
+        said.append(f"Archive: {source.archive}")
+    if source.posted and source.posted not in (source.address, source.archive):
+        said.append(f"Posted: {source.posted}")
+    said.extend(f"{site}: {address}" for site, address in source.verify)
+    if source.sha256:
+        said.append(f"SHA-256 {source.sha256}")
+    return " ".join(said)
+
+
 # -- small readings ---------------------------------------------------------------
 
 

@@ -25,7 +25,9 @@
    *
    * The selection bubble's Link field asks the case what it holds at an address
    * (`lookup`, nothing fetched) and can file the page as a bookmark (`bookmark`), the
-   * same two calls a pasted link makes. The toolbar's + opens the insert menu.
+   * same two calls a pasted link makes. The citation card, on a chip or a written link,
+   * reads the same lookup and the item a chip cites (`source`). The toolbar's + opens
+   * the insert menu.
    *
    * `/` › Interactive map asks what a map shows (`NoteMapPicker.svelte`) and puts it at
    * the cursor the way a tool's put lands, Undo included (`lib/notes/mapPut.js`).
@@ -40,7 +42,7 @@
   import { createBookmark } from '../lib/bookmarks.js';
   import { openerFor } from '../lib/notes/openers.js';
   import '../lib/notes/openersLoaded.js';
-  import { canStateSourceOf, lookupSource, statePostedOf, stateSourceOf } from '../lib/notes/sources.js';
+  import { canStateSourceOf, lookupSource, sourceItem, statePostedOf, stateSourceOf } from '../lib/notes/sources.js';
   import { gotoPoint } from '../lib/navigate.js';
   import { droppedMedia, carriesMedia } from '../lib/drag.js';
   import { CALLOUTS, calloutMarkdown } from '../lib/notes/callouts.js';
@@ -153,9 +155,11 @@
     upload: () => picker?.click(),
     image: (file) => upload(file),
     url: (url, from, to) => offerBookmark(url, from, to),
-    // the Link field asks the case what it holds at an address, and can file one as a bookmark; nothing is fetched
-    get lookup() { return template || !caseId ? null : (url) => lookupSource(caseId, url); },
+    // the Link field and the citation card ask the case what it holds at an address, and can file one as a bookmark; nothing is fetched
+    get lookup() { return template || !caseId ? null : (url, words) => lookupSource(caseId, url, { words }); },
     get bookmark() { return template || !caseId ? null : (url, title) => fileBookmark(url, title); },
+    // what the case knows of the item a chip cites, for the citation card
+    get source() { return template || !caseId ? null : (id) => sourceItem(caseId, id); },
     media: (event, at) => dropMedia(event, at),
     opener: (entity) => (template || !tools ? null : openerFor(entity)),
     sourceable: (entity) => (template || !caseId ? false : canStateSourceOf(caseId, entity)),

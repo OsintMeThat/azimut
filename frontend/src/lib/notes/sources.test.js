@@ -9,7 +9,7 @@ vi.mock('../api.js', () => ({ api: { get: vi.fn(), post: vi.fn(), patch: vi.fn()
 vi.mock('../state.svelte.js', () => ({ reloadCase: vi.fn(async () => {}) }));
 
 const {
-  QUOTE_MAX, bookmarkOffer, canStateSourceOf, citeOffer, downloadOffer, forgetSourceable, lookupSource, quoteOffer, quotePost,
+  QUOTE_MAX, bookmarkOffer, canStateSourceOf, citeOffer, downloadOffer, forgetSourceable, lookupSource, quoteOffer, quotePost, sourceItem,
   sourceAddress, statePostedOf, stateSourceOf,
 } = await import('./sources.js');
 
@@ -26,6 +26,14 @@ describe('a link looked up in the case', () => {
     const get = vi.fn(async () => ({ url: 'u', title: 't', found: [] }));
     await lookupSource('c1', 'https://example.org/a', { get, title: 'Strike & port' });
     expect(get).toHaveBeenCalledWith('/api/cases/c1/sources/lookup?url=https%3A%2F%2Fexample.org%2Fa&title=Strike+%26+port');
+  });
+
+  it('passes on the words a written link shows, which name the page in its entry, and asks a chip\'s item by its id', async () => {
+    const get = vi.fn(async () => ({}));
+    await lookupSource('c1', 'https://example.org/a', { get, words: 'BBC, 5 Oct' });
+    expect(get).toHaveBeenCalledWith('/api/cases/c1/sources/lookup?url=https%3A%2F%2Fexample.org%2Fa&words=BBC%2C+5+Oct');
+    await sourceItem('c1', 'e_12', { get });
+    expect(get).toHaveBeenLastCalledWith('/api/cases/c1/sources/item?id=e_12');
   });
 
   it('is only read when it is an address', () => {
