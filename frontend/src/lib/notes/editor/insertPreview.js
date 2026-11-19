@@ -64,6 +64,13 @@ const ART = {
   field: (command) => [el('span', 'cm-ip-row', el('span', 'cm-ip-words', 'Written by '),
     el('span', 'cm-ip-field', command.text ? command.label.replace(/^Field: /, '') : 'name'), el('span', 'cm-ip-words', '.'))],
   table: () => [el('span', 'cm-ip-table', ['Source', 'Status', '', 'Seen', 'Confirmed', '', '', '', ''].map((cell, at) => el('span', at < 3 ? 'cm-ip-th' : 'cm-ip-td', cell)))],
+  infographic: () => [el('span', 'cm-ip-ig', el('span', 'cm-ip-ig-title'),
+    el('span', 'cm-ip-ig-tiles', [1, 2, 3].map(() => el('span', 'cm-ip-ig-tile'))),
+    el('span', 'cm-ip-ig-row', el('span', 'cm-ip-ig-bars', [0.9, 0.6, 0.75, 0.35].map((share) => {
+      const bar = el('span', 'cm-ip-ig-bar');
+      bar.style.width = `${share * 100}%`;
+      return bar;
+    })), el('span', 'cm-ip-ig-donut')))],
   diagram: () => [el('span', 'cm-ip-diagram', el('span', 'cm-ip-node', 'Tip'), el('span', 'cm-ip-arrow'), el('span', 'cm-ip-node', 'Check'),
     el('span', 'cm-ip-arrow'), el('span', 'cm-ip-node cm-ip-node-done', 'Confirmed'))],
 };
@@ -96,6 +103,7 @@ export function sampleMarkdown(command) {
     map: '::: map\ntitle: The front, north\nlayer: Front, north\n:::',
     include: '[[include:…]]',
     table: '| Source | Status |\n| --- | --- |\n|  |  |',
+    infographic: ':::: infographic\ntitle: At least 60 vehicles lost\n::: chart\nkind: key figures\n…\n:::\n::::',
     cover: '::: center\n# {title}\n{date}\n:::\n<!-- cover -->',
   }[command.id];
   if (written) return written;
@@ -248,6 +256,14 @@ export const previewLook = EditorView.theme({
   '.cm-ip-th, .cm-ip-td': { minHeight: '20px', padding: '2px 6px', fontSize: '10.5px', borderRight: '1px solid var(--border)', borderBottom: '1px solid var(--border)' },
   '.cm-ip-th': { background: 'var(--bg-3)', fontWeight: '650' },
   '.cm-ip-td': { color: 'var(--text-2)' },
+  '.cm-ip-ig': { display: 'flex', flexDirection: 'column', gap: '7px', padding: '10px', borderRadius: '4px', background: '#fff' },
+  '.cm-ip-ig-title': { width: '70%', height: '7px', borderRadius: '2px', background: '#202124' },
+  '.cm-ip-ig-tiles': { display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '6px' },
+  '.cm-ip-ig-tile': { height: '14px', borderTop: '2px solid #202124', background: 'linear-gradient(#5f6368, #5f6368) 0 5px / 60% 5px no-repeat' },
+  '.cm-ip-ig-row': { display: 'flex', alignItems: 'center', gap: '10px' },
+  '.cm-ip-ig-bars': { flex: '1', display: 'flex', flexDirection: 'column', gap: '3px' },
+  '.cm-ip-ig-bar': { height: '6px', borderRadius: '0 2px 2px 0', background: '#184f95' },
+  '.cm-ip-ig-donut': { width: '34px', height: '34px', borderRadius: '50%', background: 'conic-gradient(#eb6834 0 62%, #6f6d66 0 88%, #b4b2aa 0)', mask: 'radial-gradient(circle, transparent 42%, #000 44%)' },
   '.cm-ip-diagram': { display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '4px', padding: '14px 8px', borderRadius: '4px', background: '#fff' },
   '.cm-ip-node': { padding: '4px 7px', border: '1.5px solid #184f95', borderRadius: '4px', color: '#202124', fontSize: '10.5px', background: '#eaf2fc' },
   '.cm-ip-node-done': { background: '#184f95', color: '#fff' },
