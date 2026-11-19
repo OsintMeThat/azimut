@@ -95,7 +95,8 @@
   // -- the panels ----------------------------------------------------------------------
   let dragging = $state(-1);
   let over = $state(-1);
-  let focused = $state(panel);
+  // the panel pressed in the note, picked once when the builder opens
+  let focused = $state((() => panel)());
   function drop(target) {
     if (dragging >= 0 && target >= 0 && dragging !== target) edit((source) => movePanel(source, dragging, target));
     dragging = -1;
@@ -377,14 +378,14 @@
   .ib-panel.ib-over { box-shadow: inset 0 2px 0 var(--accent); }
   .ib-grip { display: inline-flex; color: var(--text-3); cursor: grab; }
   .ib-panel-name {
-    flex: 1; min-width: 0; display: flex; align-items: baseline; gap: 6px; padding: 2px 0; border: none; background: none;
-    color: var(--text-1); font: inherit; font-size: var(--fs-sm); text-align: left; cursor: default;
+    flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 1px; padding: 1px 0; border: none; background: none;
+    color: var(--text-1); font: inherit; font-size: var(--fs-sm); line-height: 1.25; text-align: left; cursor: default;
   }
   .ib-panel-title { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .ib-panel-kind { flex: none; color: var(--text-3); font-size: var(--fs-xs); }
+  .ib-panel-kind { color: var(--text-3); font-size: var(--fs-xs); }
   .ib-widths, .ib-looks { display: inline-flex; border: 1px solid var(--border-strong); border-radius: var(--r-sm); overflow: hidden; }
   .ib-width, .ib-look {
-    padding: 2px 8px; border: none; background: transparent; color: var(--text-2); font: inherit; font-size: var(--fs-xs); cursor: pointer;
+    padding: 2px 7px; border: none; background: transparent; color: var(--text-2); font: inherit; font-size: var(--fs-xs); cursor: pointer;
   }
   .ib-look { padding: 4px 14px; font-size: var(--fs-sm); }
   .ib-width + .ib-width, .ib-look + .ib-look { border-left: 1px solid var(--border-strong); }

@@ -71,6 +71,7 @@ from __future__ import annotations
 import math
 import re
 from dataclasses import dataclass, field, replace
+from itertools import combinations
 from typing import TYPE_CHECKING, Any, Mapping, Sequence
 
 from . import notes_chart_kinds as kinds_module
@@ -769,7 +770,7 @@ def _foot(page: Page, x: float, width: float) -> tuple[list[nc.Mark], float]:
     theme = page.theme
     marks: list[nc.Mark] = [nc.Line(((x, 0.0), (x + width, 0.0)), theme.grid, 1.0)]
     head = "Sources." if len(page.credits) > 1 else "Source."
-    said = f"{head} {page.credit.rstrip('.')}."
+    said = f"{head} {sentence(page.credit)}"
     y = 12.0
     lead = nc.text_width(head, SOURCES_SIZE, theme.body, bold=True)
     for number, line in enumerate(kinds_module.lines_of(said, width, SOURCES_SIZE, theme.body)):
@@ -783,22 +784,38 @@ def _foot(page: Page, x: float, width: float) -> tuple[list[nc.Mark], float]:
     return marks, y + 6
 
 
+def sentence(credit: str) -> str:
+    """The source line as a sentence: its first letter up, a full stop at its end."""
+    said = credit.strip().rstrip(".")
+    return f"{said[:1].upper()}{said[1:]}." if said else ""
+
+
 def _strips(bands: list[Band], count: int) -> list[list[Band]]:
-    """The bands in ``count`` strips of about one height, in reading order."""
-    if count <= 1 or len(bands) <= 1:
+    """The bands in ``count`` strips, in reading order, the tallest strip as short as it can
+    be. Words alone in a band stay with the band after them: a heading never ends a strip."""
+    units: list[list[Band]] = []
+    for band in bands:
+        glued = bool(units) and len(units[-1]) == 1 and all(drawn.panel.kind == WORDS for drawn in units[-1][0].panels)
+        if glued:
+            units[-1].append(band)
+        else:
+            units.append([band])
+    count = max(1, min(count, len(units)))
+    if count == 1:
         return [list(bands)]
-    total = sum(band.height for band in bands) + GAP * (len(bands) - 1)
-    target = total / count
-    strips: list[list[Band]] = [[]]
-    height = 0.0
-    for position, band in enumerate(bands):
-        left = len(bands) - position
-        if strips[-1] and len(strips) < count and (height + band.height / 2 > target or left < count - len(strips) + 1):
-            strips.append([])
-            height = 0.0
-        strips[-1].append(band)
-        height += band.height + GAP
-    return [strip for strip in strips if strip]
+
+    def height(group: Sequence[list[Band]]) -> float:
+        inside = [band for unit in group for band in unit]
+        return sum(band.height for band in inside) + GAP * max(0, len(inside) - 1)
+
+    best: tuple[float, tuple[int, ...]] = (math.inf, ())
+    for cuts in combinations(range(1, len(units)), count - 1):
+        edges = (0, *cuts, len(units))
+        tallest = max(height(units[edges[at]:edges[at + 1]]) for at in range(count))
+        if tallest < best[0] - 1e-6:
+            best = (tallest, cuts)
+    edges = (0, *best[1], len(units))
+    return [[band for unit in units[edges[at]:edges[at + 1]] for band in unit] for at in range(count)]
 
 
 def compose(page: Page, *, strips: int = 1, bands: Sequence[Band] | None = None, header: bool = True,

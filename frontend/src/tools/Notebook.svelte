@@ -1201,7 +1201,7 @@
   .writing { flex: 1; min-width: 0; min-height: 0; display: flex; flex-direction: column; }
   .writing > :global(.note-editor) { flex: 1; }
   .body.split > :global(.page-pane) { flex: 0 0 clamp(300px, 46%, 820px); }
-  .body.split > :global(.ib) { flex: 0 0 clamp(300px, 30%, 380px); }
+  .body.split > :global(.ib) { flex: 0 0 clamp(320px, 34%, 400px); }
   @container notebook (max-width: 1180px) { .wide-only { display: none; } }
   .fm-item.danger { color: var(--danger); }
   .export-dest { display: flex; align-items: center; gap: 8px; margin-top: 6px; font-size: var(--fs-sm); }

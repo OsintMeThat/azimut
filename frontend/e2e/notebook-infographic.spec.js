@@ -89,7 +89,8 @@ test('an infographic is built from a table of the note, reordered, and exported 
   await expect(page.locator('.cm-content')).toContainText('Seen at the quay.');
 
   // `/` › Infographic: a starter of three panels, made of the note's own table
-  await page.locator('.cm-content').click();
+  // a press on words, not on the table's grid, then the note's last line
+  await page.locator('.cm-content').getByText('Seen at the quay.').click();
   await page.keyboard.press('Control+End');
   await page.keyboard.type('/infographic');
   await expect(page.locator('.cm-tooltip-autocomplete li[aria-selected]')).toContainText('Infographic');

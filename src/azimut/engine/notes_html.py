@@ -2046,7 +2046,7 @@ class _Page:
         if page.credits:
             head_word = "Sources." if len(page.credits) > 1 else "Source."
             sources = (f'<p class="az-ig-sources"><strong>{head_word}</strong> '
-                       f"{_text(page.credit.rstrip('.'))}.</p>\n")
+                       f"{_text(notes_infographic.sentence(page.credit))}</p>\n")
         whole = ""
         if self.folder is not None:
             drawn_page = notes_infographic.read(self.case, body, look=self.look, note_text=self._note_text)

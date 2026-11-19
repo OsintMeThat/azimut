@@ -283,6 +283,18 @@ def test_a_tall_page_is_set_in_strips_for_a_wide_picture():
     assert ig.compose(page).facts["strips"] == 1
 
 
+def test_a_strip_never_ends_on_a_heading_and_the_tallest_is_as_short_as_it_gets():
+    page = _page()
+    for count in (2, 3):
+        strips = ig._strips(page.bands, count)
+        assert [band for strip in strips for band in strip] == page.bands
+        for strip in strips[:-1]:
+            assert not all(drawn.panel.kind == ig.WORDS for drawn in strip[-1].panels)
+    two = ig._strips(page.bands, 2)
+    tallest = max(sum(band.height for band in strip) + ig.GAP * (len(strip) - 1) for strip in two)
+    assert tallest < sum(band.height for band in page.bands)
+
+
 def test_the_pdf_page_picture_is_the_page_at_twice_its_pixels():
     page = _page()
     with Image.open(io.BytesIO(ig.picture(page, "page"))) as picture:
@@ -355,7 +367,7 @@ def test_the_html_lays_the_panels_in_two_columns_and_wide_rows(tmp_workspace):
     # the shared legend once, the words' heading kept out of the contents
     assert 'class="az-ig-legend"' in figure and '<p class="az-ig-head" role="heading" aria-level="3"' in figure
     assert "<h3" not in figure
-    assert '<p class="az-ig-sources"><strong>Source.</strong> our vehicle register.</p>' in figure
+    assert '<p class="az-ig-sources"><strong>Source.</strong> Our vehicle register.</p>' in figure
     assert re.findall(r'style="--az-ig-o:(\d+)"', figure) == ["0", "1", "2", "3", "4"]
 
 
