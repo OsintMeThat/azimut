@@ -74,8 +74,8 @@ describe('the grid drawn', () => {
     expect([...box.querySelectorAll('.cm-grid-rowbtn')].map((node) => node.textContent)).toEqual(['1', '2']);
     expect(box.querySelectorAll('.cm-grid-colbtn')).toHaveLength(3);
     const tools = [...box.querySelectorAll('.cm-grid-bar button')].map((node) => node.getAttribute('aria-label') ?? node.textContent);
-    // the charts' own lot registers the Chart button (`editor/chartBlock.js`)
-    expect(tools).toEqual(['Row', 'Column', 'Paste from a spreadsheet', 'From a file', 'Chart', 'More', 'Edit the source']);
+    // the charts' own lot registers the Chart button (`editor/chartBlock.js`); Settings is `tableSettings.js`'
+    expect(tools).toEqual(['Row', 'Column', 'Paste from a spreadsheet', 'From a file', 'Settings', 'Chart', 'More', 'Edit the source']);
     expect(cell(0, 2).style.textAlign).toBe('right');
     // the words around it stay words
     expect(view.contentDOM.textContent).toContain('Words before.');

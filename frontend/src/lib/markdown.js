@@ -4,6 +4,7 @@ import { marked, Renderer } from 'marked';
 import { fileRelPath, fileUrl } from './fileUrl.js';
 import { blockSide, readAttrs } from './notes/pictureSize.js';
 import { BUILT_IN_ADDRESS, builtInPicture, builtInSrc } from './notes/reportParts.js';
+import { withoutLookLines } from './notes/editor/tableLook.js';
 
 const ENTITY_REF = /\[\[entity:([A-Za-z0-9_-]+)\|([^\]]+)\]\]/g;
 const MEDIA_REF = /\[\[media:([A-Za-z0-9_-]+)\|([^\]]+)\]\](?:\{([^}\n]+)\})?/g;
@@ -214,6 +215,7 @@ export function markdownHtml(text = '', { entities = [], caseId = '', redirects 
     breaks: false,
     renderer: renderer({ entities, caseId, redirects, identity }),
   };
-  const rendered = renderAlignmentBlocks(sourceWithCaseReferences(text), options);
+  // a table's settings line is no row of it (`notes/editor/tableLook.js`)
+  const rendered = renderAlignmentBlocks(sourceWithCaseReferences(withoutLookLines(text)), options);
   return sanitize(rendered);
 }

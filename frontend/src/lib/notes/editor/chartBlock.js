@@ -689,7 +689,7 @@ function placeChart(view, found, kind, pos) {
 }
 
 /** The kind picker for the table at `found`, under `anchor`; the chart lands at `pos`. */
-export function chartTable(view, anchor, found, { pos = found.to, copy = null } = {}) {
+export function chartTable(view, anchor, found, { pos = found.end ?? found.to, copy = null } = {}) {
   const { caseId } = view.state.field(noteCase);
   return openKindPicker(view, anchor, {
     caseId,

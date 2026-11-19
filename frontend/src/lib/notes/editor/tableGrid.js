@@ -24,6 +24,8 @@
  *
  * The Chart button is the charts' (`editor/chartBlock.js` registers it through
  * `registerTableChart(open)`): it shows every kind the table fits, drawn from its rows.
+ * Settings opens how the table shows in the report (`editor/tableSettings.js`), written
+ * on a line under its last row that the grid stands over.
  *
  * Only in the drawn mode, and only a note that can be written takes the grid's
  * gestures; the raw Markdown shows the pipes as before. A table only the
@@ -49,6 +51,7 @@ import { chooseTableFile, cutSaid, pasteAsTable, pastedTable, readTableFile, siz
 import { openSource, settle } from './ranges.js';
 import { noteCase, noteHandlers, resolve } from './state.js';
 import { gridAt, isBlankCell, pickCell, pictureColumns, rowVideo, timeLabel } from './tablePictures.js';
+import { SETTINGS_THEME, markSettings, openTableSettings, settingsButton } from './tableSettings.js';
 import {
   MAX_ROWS, cellText, duplicateRow, fillColumn, gridToTable, insertColumn, insertRow, isTotalRow, lineChanges, moveColumn,
   moveRow, parseTable, pasteInto, plainText, removeColumn, removeRow, serializeTable, setAlign, setCell, sortRows,
@@ -273,6 +276,8 @@ class Grid {
       (node) => this.pasteBox(node));
     tool('cm-grid-file', { label: 'From a file', iconName: 'upload', title: 'A CSV, TSV or HTML file' }, () => this.fromFile());
     bar.append(element('span', 'cm-grid-spring'));
+    this.settings = tool(...settingsButton(), (node) => openTableSettings(this.view, node, this.leave('stay').from));
+    markSettings(this.settings, this.widget.look);
     if (chartHook) {
       tool('cm-grid-chart', { label: 'Chart', iconName: 'chart', title: 'Draw a chart from this table' }, () => {
         this.leave('stay');
@@ -475,6 +480,7 @@ class Grid {
     const freshCase = widget.info !== this.widget.info;
     this.widget = widget;
     this.table = widget.table;
+    markSettings(this.settings, widget.look);
     if (before.header.length !== this.table.header.length) {
       this.ghost = false;
       this.render();
@@ -673,7 +679,7 @@ class Grid {
     const found = tableNear(state, from);
     let anchor = from;
     if (where === 'before' && from > 0) anchor = settle(state, from - 1);
-    if (where === 'after' && found) anchor = found.to < state.doc.length ? settle(state, found.to + 1) : found.to;
+    if (where === 'after' && found) anchor = found.end < state.doc.length ? settle(state, found.end + 1) : found.end;
     this.view.dispatch({ selection: { anchor }, scrollIntoView: true });
     this.view.focus();
     return grid;
@@ -954,7 +960,7 @@ class Grid {
     if (!found) return;
     const { doc } = this.view.state;
     const first = doc.lineAt(found.from);
-    const last = doc.lineAt(found.to);
+    const last = doc.lineAt(found.end);
     let from = first.from;
     let to = last.to;
     if (last.number < doc.lines) {
@@ -972,7 +978,7 @@ class Grid {
     const grid = this.leave('stay');
     grid.setPick(null);
     const found = grid.found();
-    if (found) openSource(this.view, { from: found.from, to: found.to });
+    if (found) openSource(this.view, { from: found.from, to: found.end });
   }
 
   // -- a column's and a row's menus --
@@ -1175,6 +1181,7 @@ export class GridWidget extends BlockWidget {
     this.table = spec.table ?? parseTable(spec.source);
     this.tableId = spec.tableId ?? null;
     this.whole = Boolean(spec.whole);
+    this.look = spec.look ?? null;
   }
 
   toDOM(view) {
@@ -1229,7 +1236,7 @@ function openGrid(view, block) {
 /** A table `tableText.js` reads, as the page draws it: a grid. */
 function gridSpec(ctx, found) {
   const tableId = tableIdAt(ctx.state, found.from);
-  return { from: found.from, to: found.to, grid: true, table: found.table, tableId, whole: shownWhole(ctx.state, tableId) };
+  return { from: found.from, to: found.end, grid: true, table: found.table, look: found.look, tableId, whole: shownWhole(ctx.state, tableId) };
 }
 
 const plain = blockKind('table');
@@ -1392,13 +1399,13 @@ registerBlock({
   // a table the parser misses (a chip in its header): found by its first line
   line: (line, ctx) => {
     const found = tableStartingAt(ctx.state, line.from);
-    if (!found || ctx.isOpen(found.from, found.to)) return null;
-    ctx.standsWhole({ from: found.from, to: found.to });
+    if (!found || ctx.isOpen(found.from, found.end)) return null;
+    ctx.standsWhole({ from: found.from, to: found.end });
     return gridSpec(ctx, found);
   },
   widget: (spec) => (spec.grid ? new GridWidget(spec) : plain.widget(spec)),
   open: openGrid,
   height: 220,
-  theme: THEME,
+  theme: { ...THEME, ...SETTINGS_THEME },
   extensions: [tableIds, wholeTables, pasteAsTable],
 });
