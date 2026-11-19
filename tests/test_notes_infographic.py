@@ -480,34 +480,6 @@ def test_the_route_refuses_a_page_with_no_panel_and_writes_nothing(client):
     assert sorted(path.name for path in (case.path / "azimut").rglob("*") if path.is_file()) == before
 
 
-def test_the_offers_draw_each_table_as_the_kinds_it_fits_and_start_from_them(client):
-    cid, _ = _case(client)
-    register = ig.block_of(GROUPS).split("\n")
-    table = "\n".join(line for line in register if line.startswith("|"))
-    figures = "\n".join(line for line in FIGURES.split("\n") if line.startswith("|"))
-    text = f"# Losses\n\n## Figures\n\n{figures}\n\n## The register\n\n{table}\n"
-    note = make_note(client, cid, title="Losses", content=text)
-    offered = client.post(f"/api/cases/{cid}/notes/infographic/offers", json={"text": text, "note": note["id"]}).json()
-    assert [one["heading"] for one in offered["tables"]] == ["Figures", "The register"]
-    assert offered["tables"][0]["kinds"][0]["kind"] == "key figures"
-    kinds = [one["kind"] for one in offered["tables"][1]["kinds"]]
-    assert "stacked columns" in kinds and "donut" in kinds
-    for one in offered["tables"][1]["kinds"]:
-        assert one["svg"].startswith("<svg") and one["block"].startswith("::: chart\nkind: ")
-        assert f"from: note:{note['id']}#the-register" in one["block"]
-    starter = ig.parse_block(ig.block_of(offered["starter"]))
-    assert [panel.kind for panel in starter.panels] == ["chart", "chart", "chart"]
-    assert [notes_charts.parse_block(panel.body).kind for panel in starter.panels][0] == "key figures"
-    # every panel of the starter holds rows the note holds
-    for panel in starter.panels:
-        rows = notes_charts.parse_block(panel.body).table.rows
-        assert all(row[0] in text for row in rows if row[0])
-
-
-def test_a_note_with_no_table_and_no_map_gets_no_starter():
-    assert ig.offers(None, "# Notes\n\nJust words.\n")["starter"] == ""
-
-
 def test_a_lone_period_on_a_timeline_is_drawn_as_a_band():
     block = notes_charts.parse_block("kind: timeline\nsource: x\n| Day | What | Until |\n| --- | --- | --- |\n"
                                      "| 5 Oct 2026 | Offensive opens | |\n| 11 Oct 2026 | Stalled | 2 Nov 2026 |\n"

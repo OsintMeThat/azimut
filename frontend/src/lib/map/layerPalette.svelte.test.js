@@ -32,4 +32,16 @@ describe('the case palette', () => {
     expect(palette.iconNameOf('flag')).toBe('Ours');
     expect(palette.iconNameOf('badge-explosion')).toBe('');
   });
+
+  it('keeps the colours a chart chose, after the names the case holds, a name it holds keeping its colour', async () => {
+    const api = { get: vi.fn(async () => ({ colours: [{ name: 'UAE', colour: '#eb6834' }] })),
+      put: vi.fn(async (path, body) => ({ colours: body.colours })) };
+    const palette = createLayerPalette({ api });
+    palette.load('c3');
+    await Promise.resolve(); await Promise.resolve();
+    await palette.keep('c3', [{ value: 'uae', colour: '#2A78D6' }, { value: 'USA', colour: '#6F6D66' }, { value: ' ', colour: '#000000' }]);
+    expect(api.put).toHaveBeenLastCalledWith('/api/cases/c3/layer-palette',
+      { colours: [{ name: 'UAE', colour: '#eb6834' }, { name: 'USA', colour: '#6f6d66' }] });
+    expect(palette.nameOf('#6f6d66')).toBe('USA');
+  });
 });

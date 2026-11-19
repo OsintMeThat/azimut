@@ -67,6 +67,7 @@
   import { mapOffer } from '../lib/notes/mapPut.js';
   import { EMPTY_INFOGRAPHIC } from '../lib/notes/editor/infographicText.js';
   import { replaceBlock } from '../lib/notes/editor/infographicBlock.js';
+  import { starterFor } from '../lib/notes/editor/infographicPanels.js';
   import { putInNote } from '../lib/notes/putInNote.svelte.js';
   import NoteMapPicker from './NoteMapPicker.svelte';
   import Icon from './Icon.svelte';
@@ -222,8 +223,9 @@
 
   /**
    * `/` › Infographic: with tables in the note, a starter page of its key figures, its main
-   * chart, a donut and its map, each made from the note's own rows (`notes/infographic/offers`);
-   * else an empty page saying how to fill it. Never numbers the note does not hold.
+   * chart, a donut and its map, each made from the note's own rows by the chart's kind picker
+   * (`editor/infographicPanels.js`); else an empty page saying how to fill it. Never numbers
+   * the note does not hold.
    */
   async function newInfographic() {
     if (!view || readOnly) return;
@@ -232,9 +234,7 @@
     if (caseId && !template) {
       try {
         const noteId = doc?.noteId && doc.noteId !== 'case' ? doc.noteId : '';
-        const offered = await api.post(`/api/cases/${encodeURIComponent(caseId)}/notes/infographic/offers`,
-          { text: view.state.doc.toString(), note: noteId });
-        if (offered?.starter) text = offered.starter;
+        text = await starterFor({ caseId, noteId, text: view.state.doc.toString() });
       } catch {
         // the empty page, its guidance saying how to fill it
       }

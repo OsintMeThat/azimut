@@ -9,9 +9,8 @@ notes_infographic.py`):
 - ``svg``: the page as one SVG file, for a designer;
 - ``png``: one picture for a destination, the PDF page or X at 16:9, 4:5 or 1:1.
 
-`POST /api/cases/{id}/notes/infographic/offers` reads a note's text for what "Add a panel"
-offers: each table with the kinds it fits, drawn small, each a ready block; the note's
-maps; and a starter page made of them. Nothing is written by either.
+Nothing is written. What "Add a panel" and `/` › Infographic's starter offer is the chart's
+own kind picker (`POST /notes/figure/kinds`, `api/notecharts.py`) on each table of the note.
 """
 
 from __future__ import annotations
@@ -31,8 +30,6 @@ router = APIRouter(prefix="/api", tags=["notes"])
 
 #: The longest block the route reads, in bytes: a dozen charts at their most, with room.
 MAX_BYTES = notes_infographic.MAX_BODY
-#: The longest note the offers read.
-MAX_NOTE_BYTES = 2 * 1024 * 1024
 #: What an SVG answered from this origin may do when opened on its own: nothing.
 SVG_POLICY = "default-src 'none'; style-src 'unsafe-inline'; img-src data:"
 
@@ -45,14 +42,6 @@ class InfographicIn(BaseModel):
     note: str = Field(default="", max_length=64, pattern=r"^([A-Za-z0-9_-]+)?$")
     format: Literal["json", "svg", "png"] = "json"
     size: Literal["page", "x", "portrait", "square"] = "page"
-
-
-class OffersIn(BaseModel):
-    """A note's text, read for its tables and maps."""
-
-    text: str = Field(max_length=MAX_NOTE_BYTES)
-    look: NoteLook | None = None
-    note: str = Field(default="", max_length=64, pattern=r"^([A-Za-z0-9_-]+)?$")
 
 
 def _note_and_look(case: Any, note: str, look: NoteLook | None) -> tuple[str, NoteLook | None]:
@@ -102,15 +91,6 @@ def infographic(case_id: str, body: InfographicIn) -> Response | dict[str, Any]:
         "alt": page.alt,
         "warnings": [{"message": message, "kind": kind, "line": line} for message, kind, line in page.warnings],
     }
-
-
-@router.post("/cases/{case_id}/notes/infographic/offers")
-def infographic_offers(case_id: str, body: OffersIn) -> dict[str, Any]:
-    """What "Add a panel" offers from a note: its tables as every kind they fit, drawn
-    small, its maps, and a starter page made of them."""
-    case = get_case(case_id)
-    _, look = _note_and_look(case, body.note, body.look)
-    return notes_infographic.offers(case, body.text, note_id=body.note, look=look)
 
 
 def _ident(title: str) -> str:

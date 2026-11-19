@@ -197,6 +197,16 @@ export function panelText(source, index) {
   return panel ? read.lines.slice(panel.from, panel.to + 1).join('\n') : '';
 }
 
+/** Panel `index`'s lines replaced by `text` (a chart's settings written by its card), the rest as it was. */
+export function withPanelText(source, index, text) {
+  const read = readInfographic(source);
+  const panel = read.panels[index];
+  if (!panel) return source;
+  const lines = [...read.lines];
+  lines.splice(panel.from, panel.to - panel.from + 1, ...String(text).split('\n'));
+  return lines.join('\n');
+}
+
 /**
  * Panel `from` moved to stand at `to` (its place after the move): its lines go, a blank
  * line keeps it apart from its neighbours, and `widths:` moves with it.

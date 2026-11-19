@@ -7534,12 +7534,16 @@ each chart keeps its checks, a title band that says the figures are floors says 
 panel, and a title stating a number says *at least* when a panel counts a floor.
 
 `/` › **Infographic** (Figures) writes a starter from what the note holds: its key figures, its
-main chart, a donut and its map, each from the note's own tables, never numbers it does not
-hold; a note with none gets an empty page and a line saying how to fill it. The page is drawn
+main chart, a donut and its map, each made from the note's own tables by the chart's kind
+picker, never numbers it does not hold; a note with none gets an empty page and a line saying
+how to fill it. The page is drawn
 in the note as the server draws it; a press on a panel or on **Edit** opens the builder beside
 the note: the title band, the panels (drag or Alt+↑/↓ to reorder, Half or Wide, × takes one out,
-**Add a panel** shows each table of the note drawn as every kind it fits and the note's maps,
-with Words and Key figures to fill in), the look, **One legend for Grade, at the top**, the
+**Add a panel** shows each table of the note drawn as every kind it fits by the chart's kind
+picker, the chart picked written as one under its table would be, its rows and `from:` with it,
+and the note's maps, with Words and Key figures to fill in; pressing a chart's row opens the
+chart's own settings card under it, title, count, by and colour, each choice written inside the
+page as one Undo), the look, **One legend for Grade, at the top**, the
 colours and where each comes from (*Keep these colours for the case* names them in the case's
 palette), what the check says, **Export as a picture** (X 16:9, 4:5, 1:1, the PDF page, SVG)
 and **To Post**. Each press writes the block's text as one change, so one Undo.
@@ -7553,9 +7557,8 @@ WordPress takes one picture of the page, its alt text the band, every panel and 
 then each chart's numbers under *The numbers*. To Post hands one picture at 16:9, filed once.
 A picture of a fixed shape sets the rows side by side in strips until the page is as near that
 shape as it gets, and pads the rest with paper: nothing cut. `POST /notes/infographic` draws a
-block for the builder (SVG, panel boxes, legend, check), as an SVG file or as a picture;
-`POST /notes/infographic/offers` reads a note's tables and maps for *Add a panel* and the
-starter. Neither writes anything.
+block for the builder (SVG, panel boxes, legend, check), as an SVG file or as a picture, and
+writes nothing.
 
 **To Post.** In the open note's ⋯, kept out of the header, *To Post* opens Post on a Free post thread made of the
 note's public edition, or of the stretch selected in it, which its title then says;

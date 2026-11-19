@@ -10,19 +10,29 @@
    * of its own: it reads the infographic again from the note each time, the `k`-th of the
    * note, so typing above it keeps it found.
    *
-   * "Add a panel" asks the server what the note holds (`notes/infographic/offers`): each table
-   * drawn as every kind it fits, from its real rows, and the note's maps. The analyst picks
-   * one by its picture; nothing is made of numbers the note does not hold.
+   * "Add a panel" shows each table of the note drawn as every kind it fits by the chart's own
+   * kind picker (`POST /notes/figure/kinds`), from its real rows, and the note's maps; the
+   * analyst picks one by its picture and it is written as a chart under its table would be
+   * (`editor/infographicPanels.js`). Nothing is made of numbers the note does not hold.
+   *
+   * Pressing a chart's row opens the chart's own settings card (`editor/chartCard.js`) under
+   * it: title, what it counts, by what, coloured by what; each choice writes that panel's
+   * lines inside the infographic, one Undo each. The look is the page's, set once below.
    */
+  import { untrack } from 'svelte';
   import { api } from '../../lib/api.js';
   import { toast } from '../../lib/state.svelte.js';
   import { layerPalette } from '../../lib/map/layerPalette.svelte.js';
   import { noteToPost } from '../../lib/notes/toPost.js';
   import { drawingOf } from '../../lib/notes/editor/infographicBlock.js';
   import {
-    EACH_PANEL, HALF, KEY_FIGURES_PANEL, LOOKS, WIDE, WORDS_PANEL, addPanel, infographicsIn, movePanel, readInfographic,
-    removePanel, withLegend, withSetting, withWidth,
+    EACH_PANEL, HALF, KEY_FIGURES_PANEL, LOOKS, WIDE, WORDS_PANEL, addPanel, infographicsIn, movePanel, panelText, readInfographic,
+    removePanel, withLegend, withPanelText, withSetting, withWidth,
   } from '../../lib/notes/editor/infographicText.js';
+  import { chartPanel, noteMaps, noteTables } from '../../lib/notes/editor/infographicPanels.js';
+  import { chartKinds, drawChart } from '../../lib/notes/editor/chartFigure.js';
+  import { chartSettings, rowsSaid } from '../../lib/notes/editor/chartCard.js';
+  import { readChart, withSettings } from '../../lib/notes/editor/chartText.js';
   import Icon from '../../components/Icon.svelte';
   import FloatingMenu from '../../components/FloatingMenu.svelte';
 
@@ -98,7 +108,11 @@
   // the panel pressed in the note, picked once when the builder opens
   let focused = $state((() => panel)());
   function drop(target) {
-    if (dragging >= 0 && target >= 0 && dragging !== target) edit((source) => movePanel(source, dragging, target));
+    // a title typed in a card is written first, to the panel it is about
+    if (dragging >= 0 && target >= 0 && dragging !== target) {
+      closeCard();
+      edit((source) => movePanel(source, dragging, target));
+    }
     dragging = -1;
     over = -1;
   }
@@ -107,8 +121,63 @@
     event.preventDefault();
     const to = index + (event.key === 'ArrowUp' ? -1 : 1);
     if (to < 0 || to >= (read?.panels.length ?? 0)) return;
+    closeCard();
     if (edit((source) => movePanel(source, index, to))) focused = to;
   }
+  function remove(index) {
+    closeCard();
+    edit((source) => removePanel(source, index));
+  }
+
+  // -- a chart panel's settings: the chart's own card, writing inside the page ---------
+  /** The panel whose card is open, its index, or -1. */
+  let carded = $state(-1);
+  let cardHost = $state(null);
+  let cardDrawn = $state(null);
+  let card = null;
+  const cardText = $derived(carded >= 0 && block ? panelText(block.source, carded) : '');
+  function closeCard() {
+    card?.commit();
+    card = null;
+    carded = -1;
+    cardDrawn = null;
+  }
+  function pressRow(index, one) {
+    focused = index;
+    if (one.kind !== 'chart') return;
+    if (carded === index) { closeCard(); return; }
+    closeCard();
+    carded = index;
+  }
+  // the card is drawn once its place is, and drawn again as the panel's lines change
+  $effect(() => {
+    const host = cardHost;
+    const index = carded;
+    if (!host || index < 0) return;
+    // made once per panel opened: what it reads later is read when it is drawn again, not here
+    untrack(() => {
+      card = chartSettings(host, {
+        state: () => {
+          const now = block ? panelText(block.source, index) : '';
+          return { chart: readChart(now), drawn: cardDrawn };
+        },
+        write: (changes) => edit((source) => withPanelText(source, index, withSettings(panelText(source, index), changes))),
+      });
+      card.focus();
+    });
+  });
+  $effect(() => {
+    const now = cardText;
+    if (!now || !caseId) return;
+    let live = true;
+    drawChart({ caseId, noteId: noteKey, text: now }).then((answer) => {
+      if (!live) return;
+      cardDrawn = answer?.error ? null : answer;
+      untrack(() => card?.refresh());
+    });
+    untrack(() => card?.refresh());
+    return () => { live = false; };
+  });
   function panelName(one) {
     if (one.kind === 'chart' && one.chartKind) return one.chartKind[0].toUpperCase() + one.chartKind.slice(1);
     return KIND_WORDS[one.kind] ?? one.kind;
@@ -116,25 +185,32 @@
 
   // -- add a panel ---------------------------------------------------------------------
   let adding = $state(false);
-  let offers = $state(null);
-  let offersError = $state('');
+  /** Each table of the note with the kinds it fits, as the chart's kind picker draws them. */
+  let galleries = $state([]);
+  let maps = $state([]);
   async function openAdd() {
     adding = !adding;
     if (!adding) return;
-    offers = null;
-    offersError = '';
-    try {
-      offers = await api.post(`/api/cases/${encodeURIComponent(caseId)}/notes/infographic/offers`,
-        { text: editor?.text?.() ?? text, note: noteKey });
-    } catch (error) {
-      offersError = error.message;
-    }
+    const now = editor?.text?.() ?? text;
+    maps = noteMaps(now);
+    const tables = noteTables(now);
+    galleries = tables.map((found) => ({ found, answer: null }));
+    tables.forEach((found, at) => {
+      chartKinds({ caseId, noteId: noteKey, text: now.slice(found.from, found.to) }).then((answer) => {
+        // the list is the state's own copy: a table is known again by its line
+        if (galleries[at]?.found.line === found.line) galleries[at] = { found, answer };
+      });
+    });
   }
-  function add(panelText, width = '') {
-    if (edit((source) => addPanel(source, panelText, width))) {
+  function add(made, width = '') {
+    if (edit((source) => addPanel(source, made, width))) {
       adding = false;
       focused = (read?.panels.length ?? 1) - 1;
     }
+  }
+  /** The chart a kind picked makes of its table, written as one under the table would be. */
+  function addChart(found, kind) {
+    add(chartPanel(editor?.text?.() ?? text, found, kind, noteKey));
   }
 
   // -- look, legend, colours -----------------------------------------------------------
@@ -145,12 +221,8 @@
   const ownColours = $derived(colours.filter((one) => one.origin === 'order'));
   $effect(() => { if (caseId) layerPalette.load(caseId); });
   async function keepColours() {
-    const kept = [...layerPalette.colours];
-    for (const one of ownColours) {
-      if (!kept.some((entry) => entry.name.toLowerCase() === one.value.toLowerCase())) kept.push({ name: one.value, colour: one.colour });
-    }
     try {
-      await layerPalette.save(caseId, kept);
+      await layerPalette.keep(caseId, ownColours);
       toast('Kept for the case: every chart, map and layer paints them the same', 'ok', 4000);
     } catch (error) {
       toast(`Colours not kept: ${error.message}`, 'warn');
@@ -230,8 +302,10 @@
               ondragend={() => { dragging = -1; over = -1; }}>
               <span class="ib-grip" title="Drag to reorder, or Alt+↑ and Alt+↓"><Icon name="grip" size={13} /></span>
               <Icon name={PANEL_ICONS[one.kind] ?? 'chart'} size={13} />
-              <button type="button" class="ib-panel-name" title={`${one.title || panelName(one)} · Alt+↑ and Alt+↓ move it`}
-                onfocus={() => (focused = index)} onkeydown={(event) => rowKey(event, index)}>
+              <button type="button" class="ib-panel-name" aria-expanded={one.kind === 'chart' ? carded === index : undefined}
+                title={one.kind === 'chart' ? `${one.title || panelName(one)} · its settings · Alt+↑ and Alt+↓ move it`
+                  : `${one.title || panelName(one)} · Alt+↑ and Alt+↓ move it`}
+                onfocus={() => (focused = index)} onclick={() => pressRow(index, one)} onkeydown={(event) => rowKey(event, index)}>
                 <span class="ib-panel-title">{one.title || panelName(one)}</span>
                 {#if one.title}<span class="ib-panel-kind">{panelName(one)}</span>{/if}
               </button>
@@ -242,38 +316,47 @@
                   onclick={() => edit((source) => withWidth(source, index, WIDE))}>Wide</button>
               </span>
               <button type="button" class="ib-remove" title="Take this panel out" aria-label={`Take out ${one.title || panelName(one)}`}
-                onclick={() => edit((source) => removePanel(source, index))}><Icon name="x" size={12} /></button>
+                onclick={() => remove(index)}><Icon name="x" size={12} /></button>
             </li>
+            {#if carded === index}
+              <li class="ib-card-row">
+                <div class="ib-card" bind:this={cardHost}></div>
+                <p class="ib-note">The look is the page’s, set under Look.</p>
+              </li>
+            {/if}
           {/each}
         </ol>
         <button type="button" class="ib-add" aria-expanded={adding} onclick={openAdd}>
           <Icon name="plus" size={13} /> Add a panel: a chart, a map, words</button>
         {#if adding}
           <div class="ib-offers" role="region" aria-label="Add a panel">
-            {#if offersError}
-              <p class="ib-note">Not read: {offersError}</p>
-            {:else if !offers}
-              <p class="ib-note">Reading the note’s tables…</p>
-            {:else}
-              {#each offers.tables as table (table.line)}
-                <div class="ib-table">
-                  <p class="ib-table-name">{table.heading || 'A table'} <span class="ib-aside">{table.rows} rows · {table.columns.join(', ')}</span></p>
+            {#each galleries as gallery (gallery.found.line)}
+              <div class="ib-table">
+                <p class="ib-table-name">{gallery.found.heading || 'A table'}
+                  <span class="ib-aside">{rowsSaid(gallery.found.table.rows.length)}</span></p>
+                {#if !gallery.answer}
+                  <p class="ib-note">Drawing each kind from these rows…</p>
+                {:else if gallery.answer.error}
+                  <p class="ib-note">Not drawn: {gallery.answer.error}</p>
+                {:else}
                   <div class="ib-kinds">
-                    {#each table.kinds as kind (kind.kind)}
-                      <button type="button" class="ib-kind" title={`${kind.label}: ${kind.title}`} onclick={() => add(kind.block)}>
-                        <span class="ib-thumb">{@html kind.svg}</span>
+                    {#each gallery.answer.kinds as kind (kind.kind)}
+                      <button type="button" class="ib-kind" title={kind.title ? `${kind.label}: ${kind.title}` : kind.label}
+                        aria-label={kind.title ? `${kind.label}: ${kind.title}` : kind.label} onclick={() => addChart(gallery.found, kind)}>
+                        <span class="ib-thumb" aria-hidden="true">{@html kind.svg}</span>
                         <span class="ib-kind-name">{kind.label}</span>
                       </button>
                     {/each}
                   </div>
-                </div>
-              {:else}
-                <p class="ib-note">No table in this note yet. A chart is drawn from a table: / › Table writes one.</p>
-              {/each}
-              <div class="ib-more">
-                {#each offers.maps as map, index (index)}
+                {/if}
+              </div>
+            {:else}
+              <p class="ib-note">No table in this note yet. A chart is drawn from a table: / › Table writes one.</p>
+            {/each}
+            <div class="ib-more">
+                {#each maps as map, index (index)}
                   <button type="button" class="btn btn-sm" title="This map of the note, as a panel" onclick={() => add(map.block)}>
-                    <Icon name="mapArea" size={13} /> {map.title}</button>
+                    <Icon name="mapArea" size={13} /> {map.title || 'Map'}</button>
                 {:else}
                   <span class="ib-note" title="/ › Interactive map puts one in the note">No map in this note yet</span>
                 {/each}
@@ -281,8 +364,7 @@
                   <Icon name="text" size={13} /> Words</button>
                 <button type="button" class="btn btn-sm" title="Big figures with the words under them, to fill in" onclick={() => add(KEY_FIGURES_PANEL)}>
                   <Icon name="hash" size={13} /> Key figures</button>
-              </div>
-            {/if}
+            </div>
           </div>
         {/if}
       </section>
@@ -379,7 +461,7 @@
   .ib-grip { display: inline-flex; color: var(--text-3); cursor: grab; }
   .ib-panel-name {
     flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 1px; padding: 1px 0; border: none; background: none;
-    color: var(--text-1); font: inherit; font-size: var(--fs-sm); line-height: 1.25; text-align: left; cursor: default;
+    color: var(--text-1); font: inherit; font-size: var(--fs-sm); line-height: 1.25; text-align: left; cursor: pointer;
   }
   .ib-panel-title { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .ib-panel-kind { color: var(--text-3); font-size: var(--fs-xs); }
@@ -426,5 +508,24 @@
   .ib-warning { display: flex; gap: 6px; line-height: 1.4; }
   .ib-warning::before { content: ''; flex: none; width: 5px; height: 5px; margin-top: .45em; border-radius: 50%; background: var(--warn); }
   .ib-warning[data-kind='missing']::before { background: var(--danger); }
+  .ib-card-row { list-style: none; padding: 2px 0 8px 22px; }
+  .ib-card { display: flex; flex-direction: column; gap: 9px; padding: 10px; border: 1px solid var(--border); border-radius: var(--r-sm);
+    background: var(--bg-2); }
+  .ib-card :global(.cm-chart-field) { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
+  .ib-card :global(.cm-chart-field-name) { color: var(--text-3); font-size: var(--fs-xs); }
+  .ib-card :global(.cm-chart-columns) { display: flex; flex-direction: column; gap: 8px; }
+  .ib-card :global(.cm-chart-looks), .ib-card :global([hidden]) { display: none; }
+  .ib-card :global(.cm-chart-select), .ib-card :global(.cm-chart-title) {
+    box-sizing: border-box; width: 100%; min-height: 28px; padding: 4px 8px; border: 1px solid var(--border-strong); border-radius: 5px;
+    background: var(--bg-1); color: var(--text-1); font: inherit; font-size: var(--fs-sm); outline: none;
+  }
+  .ib-card :global(.cm-chart-title) { resize: none; line-height: 1.4; font-weight: 600; overflow: hidden; }
+  .ib-card :global(.cm-chart-select:focus), .ib-card :global(.cm-chart-title:focus) { border-color: var(--accent); }
+  .ib-card :global(.cm-chart-proposed) { color: var(--text-3); font-size: var(--fs-xs); }
+  .ib-card :global(.cm-chart-proposed em) { color: var(--text-2); }
+  .ib-card :global(.cm-chart-use) {
+    margin-left: 6px; padding: 0; border: none; background: none; color: var(--accent); font: inherit; cursor: pointer; text-decoration: underline;
+  }
+  .ib-card-row > .ib-note { margin-top: 4px; }
   .ib-foot { display: flex; gap: 8px; padding: 10px 14px; border-top: 1px solid var(--border); background: var(--bg-1); }
 </style>
