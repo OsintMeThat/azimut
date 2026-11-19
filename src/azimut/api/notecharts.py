@@ -13,6 +13,11 @@ note's tables and each sheet with the ``from:`` that names it (*Copy rows fromâ€
 /api/cases/{id}/notes/figure/rows` answers the rows a ``from:`` names as a table's Markdown,
 what *Read again* writes when they came from another note or a sheet.
 
+A chart's form fills from the case (`engine/notes_chart_fill.py`): `GET
+/api/cases/{id}/notes/figure/events` lists the case's dated events within a period for a
+timeline, and `POST /api/cases/{id}/notes/figure/counts` counts a note's table or a sheet by
+one column, split by a second, for the kinds of categories and a line. Both only read.
+
 The look in the body wins; without one, the note named is read for its look and its
 words (whether it calls its figures minimums), and the case for its named colours.
 What the check would say of the block rides in the headers, each with its line in the
@@ -29,7 +34,9 @@ from fastapi import APIRouter, HTTPException, Query
 from fastapi.responses import Response
 from pydantic import BaseModel, Field
 
-from ..engine import notecharts, notelook, notes_charts, notes_markdown
+from datetime import date
+
+from ..engine import notecharts, notelook, notes_chart_fill, notes_charts, notes_markdown
 from ..engine.notelook import NoteLook
 from .cases import get_case
 
@@ -69,6 +76,16 @@ class RowsIn(BaseModel):
     """Where a chart's rows were copied from, as its ``from:`` line says it."""
 
     origin: str = Field(max_length=300)
+
+
+class CountsIn(BaseModel):
+    """A note's table or a sheet, as ``from:`` names it, and the columns to count it by."""
+
+    origin: str = Field(max_length=300)
+    by: str = Field(min_length=1, max_length=200)
+    split: str = Field(default="", max_length=200)
+    amount: str = Field(default="", max_length=200)
+    days: bool = False
 
 
 def _note_and_look(case: Any, note: str, look: NoteLook | None, text: str) -> tuple[str, NoteLook | None]:
@@ -149,6 +166,48 @@ def chart_rows(case_id: str, body: RowsIn) -> dict[str, Any]:
     name, text = found
     every = notecharts.origin_rows(case, body.origin)
     return {"found": True, "name": name, "text": text, "rows": len(every[2]) if every is not None else 0}
+
+
+def _day(value: str, name: str) -> date | None:
+    if not value:
+        return None
+    try:
+        return date.fromisoformat(value)
+    except ValueError:
+        raise HTTPException(status_code=422, detail=f"{name} must be a day, YYYY-MM-DD") from None
+
+
+@router.get("/cases/{case_id}/notes/figure/events")
+def chart_events(case_id: str, start: str = Query(default="", alias="from", max_length=10),
+                 end: str = Query(default="", alias="to", max_length=10),
+                 zone: str = Query(default="UTC", max_length=64)) -> dict[str, Any]:
+    """The case's dated events overlapping a period (either end left out), on the case's
+    clock, for a timeline's *Fill from the case*: the days of its proofs and the Claims of
+    its Timeline. Nothing is written."""
+    first, last = _day(start, "from"), _day(end, "to")
+    case = get_case(case_id)
+    try:
+        return notes_chart_fill.case_events(case, start=first, end=last, zone=zone)
+    except ValueError as error:
+        raise HTTPException(status_code=422, detail=str(error)) from None
+
+
+@router.post("/cases/{case_id}/notes/figure/counts")
+def chart_counts(case_id: str, body: CountsIn) -> dict[str, Any]:
+    """A note's table or a sheet counted by one column (split by a second), or a column of
+    numbers summed, for a form's *Fill from the case*; ``found`` false once it is gone.
+    Nothing is written."""
+    case = get_case(case_id)
+    if not notecharts.origin_known(body.origin):
+        raise HTTPException(status_code=422, detail="the rows come from a note's table or a sheet")
+    try:
+        found = notes_chart_fill.origin_counts(case, body.origin, by=body.by, split=body.split, amount=body.amount,
+                                               days=body.days)
+    except KeyError as missing:
+        raise HTTPException(status_code=422, detail=f"no column named {missing.args[0]!r} there") from None
+    if found is None:
+        return {"found": False, "name": "", "rows": [], "values": 0, "floor": False, "blank": 0, "unread": 0, "totals": 0}
+    return {"found": True, **found}
 
 
 def _kind_said(chart: notecharts.Chart) -> dict[str, Any]:

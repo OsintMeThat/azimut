@@ -14,7 +14,7 @@
  * (`inherits`, as `notes_infographic.inherits`): its rows stay copied in, and
  * `withDataRows` copies the data's rows into every such panel as one change.
  */
-import { readChart, withSettings, withTable } from './chartText.js';
+import { OWN_ROWS, readChart, setting, withSettings, withTable } from './chartText.js';
 import { parseTable, plainText } from './tableText.js';
 
 
@@ -275,9 +275,6 @@ export const EMPTY_INFOGRAPHIC = ':::: infographic\n<!--? Add its panels from th
 /** A words panel to start from: a heading and a line the analyst writes over. */
 export const WORDS_PANEL = '### A heading\nA few words about what the panels show.';
 
-/** A key figures chart to fill in: two figures with the words under them. */
-export const KEY_FIGURES_PANEL = '::: chart\nkind: key figures\n| Figure | Words |\n| --- | --- |\n|  |  |\n|  |  |\n:::';
-
 // -- the data -------------------------------------------------------------------------------
 
 /** What `data:` and a chart's `from:` may name: a sheet of the case or a table of a note (`notecharts.origin_known`). */
@@ -305,12 +302,15 @@ function fits(table, columns) {
 /**
  * Whether panel `index` takes the page's data, whose columns are `columns`: a chart with no
  * `from:` of its own whose table's columns the data holds every one of, or which holds no
- * table yet. A table with a column the data lacks (key figures typed in) is its own.
+ * table yet. A table with a column the data lacks (key figures typed in) is its own, and so
+ * are rows a chart's form wrote (`rows: own`), whatever their columns.
  */
 export function inherits(source, index, columns) {
   const panel = readInfographic(source).panels[index];
   if (!panel || panel.kind !== 'chart' || knownOrigin(panel.origin)) return false;
-  return fits(readChart(panelText(source, index)).table, columns);
+  const chart = readChart(panelText(source, index));
+  if (setting(chart, 'rows').toLowerCase() === OWN_ROWS) return false;
+  return fits(chart.table, columns);
 }
 
 /** The panels that take the page's data, by index, given the data's `columns`. */

@@ -84,7 +84,7 @@ function drawInfographic(box, widget, view) {
   box.igData = new DataLine(data, box, widget, view);
   const caseId = widget.info?.caseId;
   if (!count) {
-    page.append(el('p', 'cm-ig-empty', 'No panel yet. Edit adds a chart from a table of this note, a map or words.'));
+    page.append(el('p', 'cm-ig-empty', 'No panel yet. Edit adds a chart, from a table of this note or from scratch, a map or words.'));
     return;
   }
   if (!caseId) {

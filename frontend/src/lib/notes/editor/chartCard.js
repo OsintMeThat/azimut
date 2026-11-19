@@ -2,13 +2,16 @@
  * The two panels a chart is made with, drawn inside the editor so they take its look:
  *
  * - **the kind picker**: every kind the table fits, each already drawn from its real
- *   rows (`POST /notes/figure/kinds`), the analyst picking one by its picture. The
- *   arrows move between them, Enter picks, Escape closes; from `/`, its foot offers
- *   the rows of another note or a sheet instead;
+ *   rows (`POST /notes/figure/kinds`), the analyst picking one by its picture; then, made
+ *   from `/`, every kind from scratch, each saying in one line what it needs, which opens
+ *   the kind's own form (`chartForm.js`), a table or none. The arrows move between them,
+ *   Enter picks, Escape closes; from `/`, its foot offers the rows of another note or a
+ *   sheet instead;
  * - **the settings**: only what a chart is about, in plain words: its title, what it
  *   counts, by what, coloured by what, its icons for a chart of glyphs (`chartIcons.js`),
  *   whether its table shows under it, and its look (Report, Book, Dark), each a whole
- *   preset; the colours it chose on its own, and the press that keeps them for the case.
+ *   preset; the colours it chose on its own, and the press that keeps them for the case;
+ *   and *Edit the data*, the kind's form, when its rows are in the form's shape.
  *   They open on the chart itself, between its bar and its drawing, so each choice is
  *   seen as it is made. Given a `source`, a line on top says where its rows come from,
  *   with *Change…* (the source picker, `components/DataPicker.svelte`).
@@ -18,9 +21,15 @@
  */
 import { button, openPopover } from './gridMenu.js';
 import { chartKinds } from './chartFigure.js';
+import { readForm } from './chartFormText.js';
+import { scratchCards, titleField } from './chartForm.js';
 import { chartIcons } from './chartIcons.js';
 import { ROWS, SHOWS, STYLES, setting } from './chartText.js';
 import { plainText, readColumns } from './tableText.js';
+
+// a page of panels (the infographic builder) reaches a chart from scratch through here alone
+export { chartForm } from './chartForm.js';
+export { starterBlock } from './chartFormText.js';
 
 function element(tag, className, text) {
   const node = document.createElement(tag);
@@ -32,12 +41,18 @@ function element(tag, className, text) {
 /** How many kinds stand across the picker. */
 export const PICKER_COLUMNS = 4;
 
-/** What the picker says under the kinds: changing a chart's kind, a table's chart, rows copied from elsewhere. */
+/** What the picker says under the kinds: changing a chart's kind, a table's chart, rows copied from elsewhere, none. */
 const FOOT = {
   chart: 'The title, the columns and the rows stay; only the drawing changes.',
   table: 'Only the kinds this table fits are here. Its rows are copied under it, and Read again brings them up to date.',
   copied: 'Only the kinds these rows fit are here. They are copied into this note, and Read again brings them up to date.',
+  scratch: 'A kind from scratch opens a form made for it, the chart drawn as you fill it.',
+  both: 'A kind drawn from this table copies its rows under it, Read again keeping them up to date; one from scratch opens a form made for it.',
 };
+
+/** The heads of the picker's two parts. */
+const FROM_TABLE = 'From this table';
+const FROM_SCRATCH = 'From scratch';
 
 /** What the picker says it draws from: "60 rows" of a table, "the chart's 12 rows", the rows copied from elsewhere. */
 export function rowsSaid(rows, { chart = false, copied = false } = {}) {
@@ -76,29 +91,52 @@ function pickCard(kind, current) {
 }
 
 /**
+ * The cards of every kind from scratch, for a picker's or a builder's gallery: each its
+ * sketch, its name and what it needs (`chartForm.js`). `onPick(kind)` gets the kind pressed.
+ */
+export function scratchGallery(host, onPick) {
+  host.classList.add('cm-chart-picker-grid', 'cf-scratch-grid');
+  host.setAttribute('role', 'group');
+  host.setAttribute('aria-label', 'Kinds from scratch');
+  host.replaceChildren(...scratchCards(onPick));
+  return host;
+}
+
+/**
  * The kind picker under `anchor`: the kinds `text` (a table, or a chart's block) fits,
  * drawn small, while they are asked. `onPick(kind)` gets the one picked, `{ kind, label,
  * settings, title }`. `current` marks the kind a chart is now; `copied` says the rows were
  * copied from another note or a sheet; `copy`, given, offers that copy in its foot instead.
- * Answers its close.
+ * `onScratch(kind)`, given, adds every kind from scratch after them, each opening its form;
+ * with no `text`, those alone. Answers its close.
  */
 export function openKindPicker(view, anchor, {
-  caseId, noteId = '', text, current = '', chart = false, copied = false, copy = null, onPick, ask = chartKinds,
+  caseId, noteId = '', text = '', current = '', chart = false, copied = false, copy = null, onPick, onScratch = null, ask = chartKinds,
 }) {
   const panel = element('div', 'cm-chart-picker');
   panel.setAttribute('role', 'dialog');
   panel.setAttribute('aria-label', chart ? 'Kind of chart' : 'Pick a chart');
   const head = element('div', 'cm-chart-picker-head');
   const title = element('strong', '', chart ? 'Kind of chart' : 'Pick a chart');
-  const said = element('span', 'cm-chart-picker-said', 'Drawing each kind from these rows…');
+  const said = element('span', 'cm-chart-picker-said', text ? 'Drawing each kind from these rows…' : 'Every kind has a form made for it');
   head.append(title, said);
+  const scroll = element('div', 'cm-chart-picker-scroll');
   const grid = element('div', 'cm-chart-picker-grid');
   grid.setAttribute('role', 'group');
   grid.setAttribute('aria-label', 'Kinds this table fits');
   // the places hold while the drawings come, so nothing jumps
-  for (let index = 0; index < PICKER_COLUMNS * 2; index += 1) grid.append(element('span', 'cm-chart-pick cm-chart-waiting'));
-  const foot = element('p', 'cm-chart-picker-foot', chart ? FOOT.chart : copied ? FOOT.copied : FOOT.table);
-  panel.append(head, grid, foot);
+  if (text) for (let index = 0; index < PICKER_COLUMNS * 2; index += 1) grid.append(element('span', 'cm-chart-pick cm-chart-waiting'));
+  else grid.hidden = true;
+  const scratch = onScratch ? scratchGallery(element('div'), (kind) => {
+    close(false);
+    onScratch(kind);
+  }) : null;
+  if (scratch && text) scroll.append(element('p', 'cm-chart-picker-part', FROM_TABLE));
+  scroll.append(grid);
+  if (scratch) scroll.append(element('p', 'cm-chart-picker-part', FROM_SCRATCH), scratch);
+  const foot = element('p', 'cm-chart-picker-foot', chart ? FOOT.chart : copied ? FOOT.copied : text ? FOOT.table : FOOT.scratch);
+  if (scratch && text && !copied) foot.textContent = FOOT.both;
+  panel.append(head, scroll, foot);
   let closed = false;
   const close = openPopover(view, anchor, panel, { onClose: () => { closed = true; } });
   if (copy) {
@@ -112,13 +150,17 @@ export function openKindPicker(view, anchor, {
     foot.append(' ', other);
   }
   panel.addEventListener('keydown', (event) => {
-    if (walkKinds(event, [...grid.querySelectorAll('button.cm-chart-pick')])) {
+    if (walkKinds(event, [...panel.querySelectorAll('button.cm-chart-pick')])) {
       event.preventDefault();
       event.stopPropagation();
     }
   });
   panel.tabIndex = -1;
   panel.focus({ preventScroll: true });
+  if (!text) {
+    scratch?.querySelector('button')?.focus({ preventScroll: true });
+    return close;
+  }
   if (!caseId) {
     said.textContent = 'A chart is drawn in a note of a case.';
     grid.replaceChildren();
@@ -129,6 +171,7 @@ export function openKindPicker(view, anchor, {
     if (answer?.error || !answer?.kinds?.length) {
       said.textContent = answer?.error ? `Not drawn: ${answer.error}` : 'No kind of chart fits this table.';
       grid.replaceChildren();
+      if (scratch) grid.hidden = true;
       return;
     }
     said.textContent = rowsSaid(answer.rows, { chart, copied });
@@ -277,59 +320,44 @@ function segmented(label, options, value, onChange) {
  * refresh, commit, focus, destroy }`, `commit` writing a title typed and not yet written,
  * `destroy` closing what the card opened over the page as it closes.
  */
-export function chartSettings(panel, { state, write, keep = null, source = null }) {
+export function chartSettings(panel, { state, write, keep = null, source = null, editData = null }) {
   panel.setAttribute('role', 'group');
   panel.setAttribute('aria-label', 'Chart settings');
   // the title field stays the same element while the panel is drawn again, so typing in it is never lost
-  const titleRow = element('label', 'cm-chart-field cm-chart-title-field');
-  titleRow.append(element('span', 'cm-chart-field-name', 'Title'));
-  const titleField = element('textarea', 'cm-chart-title');
-  titleField.rows = 1;
-  titleField.setAttribute('aria-label', 'Title');
-  titleRow.append(titleField);
-  const offer = element('div', 'cm-chart-proposed');
+  const title = titleField({ state, write });
   const columns = element('div', 'cm-chart-columns');
   const looks = element('div', 'cm-chart-looks');
   const icons = chartIcons(element('div'), { state, write });
   const colours = element('div', 'cm-chart-field cm-chart-colours');
   const data = source ? dataLine(source) : null;
-  panel.replaceChildren(...(data ? [data.node] : []), titleRow, offer, columns, icons.node, looks, colours);
+  // Edit the data stands on the Data line where there is one, else on a line of its own
+  const edit = data ? data.node : element('div', 'cm-chart-field cm-chart-data');
+  panel.replaceChildren(...(data ? [data.node] : []), ...title.nodes, ...(data ? [] : [edit]), columns, icons.node, looks, colours);
 
-  const size = () => {
-    titleField.style.height = 'auto';
-    titleField.style.height = `${titleField.scrollHeight + 2}px`;
-  };
-  const commit = () => {
-    const { chart } = state() ?? {};
-    if (!chart) return;
-    const typed = titleField.value.replace(/\s+/g, ' ').trim();
-    if (typed !== setting(chart, 'title')) write({ title: typed });
-  };
-  titleField.addEventListener('keydown', (event) => {
-    if (event.key !== 'Enter') return;
-    event.preventDefault();
-    commit();
-  });
-  titleField.addEventListener('input', size);
-  titleField.addEventListener('change', commit);
+  /** Edit the data: the kind's form, when the chart's rows are in its shape. */
+  function renderData(chart, kind) {
+    const fits = Boolean(editData) && Boolean(readForm(chart.lines.join('\n'), kind.name ?? '').form);
+    const held = edit.querySelector('.cm-chart-edit-data');
+    if (!data) edit.hidden = !fits;
+    if (!fits) {
+      held?.remove();
+      if (!data) edit.replaceChildren();
+      return;
+    }
+    if (held) return;
+    const open = button('cm-chart-use cm-chart-edit-data', { label: 'Edit the data', title: 'Its rows in a form made for its kind' });
+    open.addEventListener('mousedown', (event) => event.preventDefault());
+    open.addEventListener('click', () => editData());
+    if (!data) edit.append(element('span', 'cm-chart-field-name', 'Data'));
+    edit.append(open);
+  }
 
   function render() {
     const { chart, drawn } = state();
     const kind = drawn?.kind ?? {};
     const choices = cardChoices(chart.table);
-    if (document.activeElement !== titleField) titleField.value = setting(chart, 'title');
-    titleField.placeholder = drawn?.proposed || 'A title that says what is counted';
-    size();
-    const proposed = drawn?.proposed ?? '';
-    offer.replaceChildren();
-    offer.hidden = !proposed || proposed === setting(chart, 'title');
-    if (!offer.hidden) {
-      offer.append(element('span', '', 'From the data: '), element('em', '', proposed));
-      const use = button('cm-chart-use', { label: 'Use it', title: 'Write this title' });
-      use.addEventListener('mousedown', (event) => event.preventDefault());
-      use.addEventListener('click', () => write({ title: proposed }));
-      offer.append(use);
-    }
+    title.render();
+    renderData(chart, kind);
     const fields = [];
     if (kind.counts !== false) {
       const count = setting(chart, 'count');
@@ -344,7 +372,7 @@ export function chartSettings(panel, { state, write, keep = null, source = null 
         fields.push(select('Coloured by', colours, chosen(colours, setting(chart, 'colour by')), (value) => write(cardChanges('colour by', value, { kind })), { none: 'One colour' }));
       }
     }
-    const focused = panel.contains(document.activeElement) && document.activeElement !== titleField ? document.activeElement.getAttribute('aria-label') : null;
+    const focused = panel.contains(document.activeElement) && document.activeElement !== title.field ? document.activeElement.getAttribute('aria-label') : null;
     columns.replaceChildren(...fields);
     columns.hidden = !fields.length;
     icons.refresh();
@@ -381,5 +409,5 @@ export function chartSettings(panel, { state, write, keep = null, source = null 
   }
 
   render();
-  return { refresh: render, commit, focus: () => titleField.focus({ preventScroll: true }), destroy: () => icons.destroy() };
+  return { refresh: render, commit: title.commit, focus: title.focus, destroy: () => icons.destroy() };
 }
