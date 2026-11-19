@@ -7521,7 +7521,8 @@ the data proposes beside it, Count, By or Parts, Coloured by, Show, Style as Rep
 or Dark; a colour column stacks bars and columns, none makes them plain; the colours it
 chose on its own, the grades' ramp included, with *Keep these colours for the case*, the
 infographic builder's own press, its toast offering Undo since the case's palette is no
-step of the note), **Read again**
+step of the note and naming what the case could not take: a colour it names already, a
+name past 40 letters, past its 12 colours), **Read again**
 (only once the table its rows came from changed, compared on the chart's own columns, in any
 order: a table of this note as it is typed, another note's table or a sheet as the server
 reads it, `POST /notes/figure/rows`, asked again when The numbers open), **The numbers** (its rows, a line each,

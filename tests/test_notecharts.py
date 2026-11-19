@@ -563,3 +563,15 @@ def test_the_figure_route_says_each_values_colour_and_where_it_came_from(client)
     colours = json.loads(answer.headers["x-chart-colours"])
     assert [(one["value"], one["origin"]) for one in colours] == [("Ours", "case"), ("Theirs", "order")]
     assert colours[0]["colour"] == "#009e73" and re.fullmatch(r"#[0-9a-f]{6}", colours[1]["colour"])
+
+
+def test_the_editor_keeps_no_more_colours_and_no_longer_names_than_the_case_palette_takes():
+    from azimut.api import maplayers
+    from azimut.engine import layerediting
+
+    source = (Path(__file__).resolve().parents[1] / "frontend" / "src" / "lib" / "map" / "layerPalette.svelte.js").read_text(
+        encoding="utf-8")
+    name = next(meta.max_length for meta in maplayers.PaletteEntryIn.model_fields["name"].metadata
+                if hasattr(meta, "max_length"))
+    assert f"export const MAX_PALETTE = {layerediting.MAX_PALETTE};" in source
+    assert f"export const MAX_COLOUR_NAME = {name};" in source

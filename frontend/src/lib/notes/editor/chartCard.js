@@ -36,9 +36,10 @@ const FOOT = {
   copied: 'Only the kinds these rows fit are here. They are copied into this note, and Read again brings them up to date.',
 };
 
-/** What the picker says it draws from: "60 rows" of a table, "the chart's 12 rows". */
-export function rowsSaid(rows, { chart = false } = {}) {
+/** What the picker says it draws from: "60 rows" of a table, "the chart's 12 rows", the rows copied from elsewhere. */
+export function rowsSaid(rows, { chart = false, copied = false } = {}) {
   const count = `${rows} row${rows === 1 ? '' : 's'}`;
+  if (copied) return `Drawn from the ${count} to copy`;
   return chart ? `Drawn from the chart’s ${count}` : `Drawn from this table’s ${count}`;
 }
 
@@ -127,7 +128,7 @@ export function openKindPicker(view, anchor, {
       grid.replaceChildren();
       return;
     }
-    said.textContent = rowsSaid(answer.rows, { chart });
+    said.textContent = rowsSaid(answer.rows, { chart, copied });
     const picks = answer.kinds.map((kind) => {
       const card = pickCard(kind, current);
       card.addEventListener('mousedown', (event) => event.preventDefault());

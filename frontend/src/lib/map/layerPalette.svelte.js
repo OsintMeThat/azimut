@@ -1,5 +1,9 @@
 import { api as defaultApi } from '../api.js';
 
+/** How many colours a case names, and how long a name may be (`layerediting.MAX_PALETTE`, `PaletteEntryIn`). */
+export const MAX_PALETTE = 12;
+export const MAX_COLOUR_NAME = 40;
+
 /** The plain colours a case offers until it names its own. */
 export const PLAIN_COLOURS = [['#0072b2', 'Blue'], ['#d55e00', 'Orange'], ['#009e73', 'Green'], ['#cc79a7', 'Purple'], ['#f0e442', 'Yellow']];
 
@@ -47,17 +51,23 @@ export function createLayerPalette({ api = defaultApi } = {}) {
      * `[{ value, colour }]`, named in the case's palette after the names it holds, a name it
      * already holds keeping its colour. Every chart, map and layer of the case then paints them
      * the same. The palette is read first when it is not this case's yet, so another's is never
-     * written over it. Answers `{ colours, before }`: what the case keeps now, and what it kept,
-     * for an Undo.
+     * written over it. A colour the case already names, a name past `MAX_COLOUR_NAME` letters,
+     * or one past the `MAX_PALETTE` colours a case names, is left out: a colour has one name.
+     * Answers `{ colours, before, left }`: what the case keeps now, what it kept, for an Undo,
+     * and the names left out.
      */
     async keep(caseId, values) {
       const before = read === caseId ? [...colours] : (await api.get(`/api/cases/${caseId}/layer-palette`)).colours ?? [];
       const kept = [...before];
+      const left = [];
       for (const { value, colour } of values) {
         const name = String(value ?? '').trim();
-        if (name && !kept.some((entry) => entry.name.toLowerCase() === name.toLowerCase())) kept.push({ name, colour: String(colour).toLowerCase() });
+        const hex = String(colour).toLowerCase();
+        if (!name || kept.some((entry) => entry.name.toLowerCase() === name.toLowerCase())) continue;
+        if (name.length > MAX_COLOUR_NAME || kept.length >= MAX_PALETTE || kept.some((entry) => entry.colour === hex)) left.push(name);
+        else kept.push({ name, colour: hex });
       }
-      return { colours: await this.save(caseId, kept), before };
+      return { colours: await this.save(caseId, kept), before, left };
     },
   };
 }

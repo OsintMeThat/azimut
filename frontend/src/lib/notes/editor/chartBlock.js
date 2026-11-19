@@ -25,7 +25,7 @@ import { isolateHistory } from '@codemirror/commands';
 import { Transaction } from '@codemirror/state';
 import { ViewPlugin } from '@codemirror/view';
 
-import { layerPalette } from '../../map/layerPalette.svelte.js';
+import { MAX_COLOUR_NAME, MAX_PALETTE, layerPalette } from '../../map/layerPalette.svelte.js';
 import { rovingToolbar } from '../pictureSize.js';
 import { registerBlock } from './blocks.js';
 import { EXPORTS, chartRows, chartSources, drawChart, exportChart, forgetDrawings, keptDrawing } from './chartFigure.js';
@@ -395,9 +395,9 @@ class ChartBox {
     const caseId = this.info.caseId;
     const toast = this.handlers.tableToast;
     try {
-      const { before } = await layerPalette.keep(caseId, values);
+      const { before, left } = await layerPalette.keep(caseId, values);
       redrawCharts(this.view);
-      toast?.('Kept for the case: every chart, map and layer paints them the same', [{
+      toast?.(keptSaid(left), [{
         label: 'Undo',
         onClick: () => layerPalette.save(caseId, before).then(() => redrawCharts(this.view), (error) => toast?.(`Not undone: ${error.message}`, [], 'warn')),
       }]);
@@ -561,6 +561,13 @@ export class ChartWidget extends BlockWidget {
   }
 }
 
+/** What keeping a chart's colours for the case says, naming those the case could not take. */
+export function keptSaid(left = []) {
+  if (!left.length) return 'Kept for the case: every chart, map and layer paints them the same';
+  const names = left.map((name) => `“${name.length > 24 ? `${name.slice(0, 23)}…` : name}”`).join(', ');
+  return `Kept for the case, but not ${names}: a case names a colour once, ${MAX_PALETTE} at most, in ${MAX_COLOUR_NAME} letters`;
+}
+
 /** The case's colours changed: every chart of the note is asked again, as it is drawn from them. */
 function redrawCharts(view) {
   forgetDrawings();
@@ -705,10 +712,12 @@ function rowsWord(count) {
 /** What *Copy rows from…* lists: each table of the case's other notes, then each sheet. */
 export function sourceItems(sources, run) {
   return [
-    ...sources.tables.map((table) => ({
-      label: table.heading ? `“${table.heading}”` : 'A table', hint: `${table.note} · ${rowsWord(table.rows)}`, iconName: 'table',
-      run: () => run(table.origin),
-    })),
+    ...sources.tables.map((table) => {
+      // the second table under one heading says so
+      const nth = /\/(\d+)$/.exec(table.origin)?.[1];
+      const label = table.heading ? `“${table.heading}”${nth ? `, table ${nth}` : ''}` : nth ? `Table ${nth}` : 'A table';
+      return { label, hint: `${table.note} · ${rowsWord(table.rows)}`, iconName: 'table', run: () => run(table.origin) };
+    }),
     ...sources.sheets.map((sheet) => ({ label: sheet.title, hint: `Sheet · ${rowsWord(sheet.rows)}`, iconName: 'grid', run: () => run(sheet.origin) })),
   ];
 }
@@ -875,8 +884,8 @@ const THEME = {
   '.cm-chart-picker': {
     position: 'fixed', zIndex: '60', background: 'var(--bg-2)', border: '1px solid var(--border-strong)', borderRadius: '9px',
     boxShadow: 'var(--shadow-2)', fontFamily: 'var(--font-sans)', fontSize: '12.5px', color: 'var(--text-1)', outline: 'none',
+    width: 'min(744px, calc(100vw - 24px))', padding: '12px 14px 10px', boxSizing: 'border-box',
   },
-  '.cm-chart-picker': { width: 'min(744px, calc(100vw - 24px))', padding: '12px 14px 10px', boxSizing: 'border-box' },
   '.cm-chart-picker-head': { display: 'flex', alignItems: 'baseline', gap: '10px', marginBottom: '10px' },
   '.cm-chart-picker-head strong': { fontSize: '13.5px' },
   '.cm-chart-picker-said': { color: 'var(--text-2)' },
@@ -928,9 +937,9 @@ const THEME = {
     marginLeft: '6px', padding: '0', border: 'none', background: 'none', color: 'var(--info)', font: 'inherit', cursor: 'pointer', textDecoration: 'underline',
   },
   '.cm-chart-looks .cm-chart-field': { flexDirection: 'row', alignItems: 'center', gap: '10px' },
-  '.cm-chart-colours': { flexDirection: 'row', alignItems: 'center', flexWrap: 'wrap', gap: '6px 10px', paddingLeft: '74px' },
+  '.cm-chart-colours': { flexDirection: 'row', alignItems: 'baseline', flexWrap: 'wrap', gap: '6px 10px', paddingLeft: '74px' },
   '.cm-chart-colours[hidden]': { display: 'none' },
-  '.cm-chart-swatches': { display: 'inline-flex', flexWrap: 'wrap', gap: '4px 10px' },
+  '.cm-chart-swatches': { display: 'inline-flex', flexWrap: 'wrap', gap: '4px 10px', flex: '1 1 0', minWidth: '0' },
   '.cm-chart-swatch': { display: 'inline-flex', alignItems: 'center', gap: '5px', color: 'var(--text-2)', fontSize: '11.5px' },
   '.cm-chart-swatch::before': { content: '""', width: '10px', height: '10px', borderRadius: '2px', background: 'var(--swatch)' },
   '.cm-chart-keep': { marginLeft: '0' },

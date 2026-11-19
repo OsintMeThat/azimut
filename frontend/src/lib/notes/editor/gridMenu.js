@@ -69,7 +69,10 @@ export function openPopover(view, anchor, node, { back = null, onClose = null } 
     const height = node.offsetHeight;
     const width = node.offsetWidth;
     node.style.left = `${Math.max(6, Math.min(box.left, window.innerWidth - width - 6))}px`;
-    node.style.top = `${box.bottom + 4 + height > window.innerHeight - 6 ? Math.max(6, box.top - height - 4) : box.bottom + 4}px`;
+    // under its anchor, or over it; with room for neither, from the editor's top rather than under the app's own bars
+    const lowest = window.innerHeight - 6 - height;
+    const over = Math.max(6, Math.min(Math.max(box.top - height - 4, view.dom.getBoundingClientRect().top), lowest));
+    node.style.top = `${box.bottom + 4 + height > window.innerHeight - 6 ? over : box.bottom + 4}px`;
     return box;
   };
   // the note scrolls under it: it follows its anchor, and goes once the anchor is out of sight

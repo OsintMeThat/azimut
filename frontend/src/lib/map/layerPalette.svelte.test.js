@@ -48,6 +48,18 @@ describe('the case palette', () => {
     expect(api.get).toHaveBeenCalledOnce();
   });
 
+  it('leaves out a name too long for the case, a colour it names already, and the colours past the ones it names', async () => {
+    const held = Array.from({ length: 10 }, (_, at) => ({ name: `Side ${at}`, colour: '#0072b2' }));
+    const api = { get: vi.fn(async () => ({ colours: held })), put: vi.fn(async (path, body) => ({ colours: body.colours })) };
+    const palette = createLayerPalette({ api });
+    const long = 'set aside (#34 a pickup, #37 not in the owner’s lists)';
+    const kept = await palette.keep('c6', [{ value: long, colour: '#a9a79f' }, { value: 'Confirmed', colour: '#184f95' },
+      { value: 'Almost sure, identified', colour: '#184F95' }, { value: 'Almost sure', colour: '#3987e5' }, { value: 'Strong doubt', colour: '#86b6ef' }]);
+    expect(api.put.mock.calls.at(-1)[1].colours.map((entry) => entry.name)).toEqual([...held.map((entry) => entry.name), 'Confirmed', 'Almost sure']);
+    // too long, a colour already named, past the twelve
+    expect(kept.left).toEqual([long, 'Almost sure, identified', 'Strong doubt']);
+  });
+
   it('reads a case’s palette before keeping colours in it, never writing another case’s over it', async () => {
     const api = { get: vi.fn(async (path) => ({ colours: path.includes('/c5/') ? [{ name: 'Ours', colour: '#009e73' }] : [{ name: 'Theirs', colour: '#d55e00' }] })),
       put: vi.fn(async (path, body) => ({ colours: body.colours })) };

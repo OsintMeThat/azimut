@@ -40,6 +40,7 @@ vi.mock('../../api.js', async (original) => {
 
 const { focusedState, noteExtensions, setNoteCase, setNoteMode, startChart } = await import('../liveMarkdown.js');
 const { forgetDrawings } = await import('./chartFigure.js');
+const { keptSaid } = await import('./chartBlock.js');
 
 const TABLE = '| Model | Grade | At least |\n| --- | --- | ---: |\n| Streit Cougar | identified | 8 |\n| Al-Wahsh | almost sure | 2 |';
 const NOTE = `Who made them.\n\n## Count\n\n${TABLE}\n\nAfter.`;
@@ -132,6 +133,8 @@ describe('a chart made from a table', () => {
     press(view.dom.querySelector('.cm-grid-chart'));
     const picker = view.dom.querySelector('.cm-chart-picker');
     expect(picker.getAttribute('aria-label')).toBe('Pick a chart');
+    // it stands over the note, out of the editor's flow: in it, it shrank the page and the note jumped
+    expect(getComputedStyle(picker).position).toBe('fixed');
     await settle();
     // the route is asked with the table as written, and only the kinds it fits are offered
     expect(server.asked[0]).toEqual({ path: '/api/cases/c1/notes/figure/kinds', body: { text: TABLE, note: 'n1' } });
@@ -353,6 +356,12 @@ describe('Keep these colours for the case', () => {
     expect(server.palette).toEqual([{ name: 'UAE', colour: '#eb6834' }]);
   });
 
+  it('says which names the case could not take', () => {
+    expect(keptSaid([])).toBe('Kept for the case: every chart, map and layer paints them the same');
+    expect(keptSaid(['set aside (#34 a pickup, #37 not in the owner’s lists)'])).toBe(
+      'Kept for the case, but not “set aside (#34 a pickup…”: a case names a colour once, 12 at most, in 40 letters');
+  });
+
   it('is not offered once every colour is the case’s', async () => {
     server.figure = () => answer({ colours: [{ value: 'UAE', colour: '#eb6834', origin: 'case' }] });
     editor(CHARTED);
@@ -466,7 +475,8 @@ describe('/ › Chart', () => {
 
 const OTHER = '| Model | At least |\n| --- | ---: |\n| Streit Cougar | 9 |\n| Al-Wahsh | 2 |';
 const SOURCES = {
-  tables: [{ origin: 'note:n2#count', note: 'Register', heading: 'Count', rows: 2, columns: ['Model', 'At least'] }],
+  tables: [{ origin: 'note:n2#count', note: 'Register', heading: 'Count', rows: 2, columns: ['Model', 'At least'] },
+    { origin: 'note:n2#count/2', note: 'Register', heading: 'Count', rows: 4, columns: ['Unit', 'Seen'] }],
   sheets: [{ origin: 'sheet:s1', title: 'Sightings', rows: 3, columns: ['Model', 'Seen'] }],
 };
 const words = () => [...view.dom.querySelectorAll('.cm-grid-menu-item')].map((item) => item.querySelector('.cm-grid-menu-words').textContent);
@@ -483,14 +493,16 @@ describe('Copy rows from another note or a sheet', () => {
     expect(words()).toEqual(['A new table to fill', 'Copy rows from another note or a sheet']);
     press(item('Copy rows from another note or a sheet'));
     await settle();
-    expect(words()).toEqual(['“Count”', 'Sightings']);
-    expect([...view.dom.querySelectorAll('.cm-grid-menu-item small')].map((node) => node.textContent)).toEqual(['Register · 2 rows', 'Sheet · 3 rows']);
+    expect(words()).toEqual(['“Count”', '“Count”, table 2', 'Sightings']);
+    expect([...view.dom.querySelectorAll('.cm-grid-menu-item small')].map((node) => node.textContent))
+      .toEqual(['Register · 2 rows', 'Register · 4 rows', 'Sheet · 3 rows']);
     press(item('“Count”'));
     await settle();
     expect(server.asked.find((one) => one.path.endsWith('/rows')).body).toEqual({ origin: 'note:n2#count' });
     const picker = view.dom.querySelector('.cm-chart-picker');
     expect(server.asked.find((one) => one.path.endsWith('/kinds')).body).toEqual({ text: OTHER, note: 'n1' });
     expect(picker.querySelector('.cm-chart-picker-foot').textContent).toContain('They are copied into this note');
+    expect(picker.querySelector('.cm-chart-picker-said').textContent).toBe('Drawn from the 2 rows to copy');
     press(picker.querySelector('button.cm-chart-pick[data-kind="bars"]'));
     expect(text()).toBe(`Words.\n\n::: chart\nkind: bars\ntitle: At least 10, by model\ncount: At least\nby: Model\nfrom: note:n2#count\n${OTHER}\n:::\n`);
     await settle();
@@ -514,7 +526,7 @@ describe('Copy rows from another note or a sheet', () => {
     press(copy);
     await settle();
     expect(view.dom.querySelector('.cm-chart-picker')).toBeNull();
-    expect(words()).toEqual(['“Count”', 'Sightings']);
+    expect(words()).toEqual(['“Count”', '“Count”, table 2', 'Sightings']);
   });
 });
 
