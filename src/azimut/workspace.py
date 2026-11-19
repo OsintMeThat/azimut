@@ -889,13 +889,14 @@ class Case(CaseStore):
         source: str | None = None,
     ) -> dict[str, Any]:
         with self._lock:
-            canonical = layout.slugify(label, "Note")
+            # the title as typed, its file named after it with what a file name cannot hold replaced
+            title = layout.clean_title(label, "Note")
             # The graph row goes to case.db; the body stays a file on the shell.
             graph = self._graph()
             entity = graph.add_entity(
-                "note", canonical, {"folder": folder}, by=by, status=status, source=source
+                "note", title, {"folder": folder}, by=by, status=status, source=source
             )
-            rel = self.note_target(folder, canonical)
+            rel = self.note_target(folder, title)
             note_path = self.resolve_inside(rel)
             write_text_atomic(note_path, content)
             return graph.update_entity(entity["id"], {"attrs": {"path": rel}})
@@ -1057,34 +1058,37 @@ class Case(CaseStore):
     def _follow_note_rename(self, entity_id: str, patch: dict[str, Any]) -> None:
         """Move a note's file when its title or its folder changes.
 
-        The name is the filename, so renaming a note in the notebook moves the
-        markdown on disk — the same rule proofs, sessions and drafts follow, and
+        The file is named after the title, so renaming a note in the notebook moves
+        the markdown on disk — the same rule proofs, sessions and drafts follow, and
         the reason `notes/` is worth keeping visible at all. The patch is
         completed with the new path, so the graph row and the file never
         disagree.
+
+        The title is the analyst's own and is kept as typed (`layout.clean_title`):
+        `Map: the front by day` files as `Map_ the front by day.md` and keeps its
+        colon. A save that does not rename the note never touches its title, so a
+        later look or folder change cannot turn it back into its file's name.
         """
         entity = self.get_entity(entity_id)
         if entity is None or entity.get("type") != "note":
             return
         attrs = entity.get("attrs") or {}
         incoming = patch.get("attrs") or {}
+        kept = entity.get("label")
+        if "label" in patch:
+            # a name restated as the note already goes by stays as it is
+            given = str(patch["label"])
+            patch["label"] = given if given == kept else layout.clean_title(given, "Note")
         if incoming.get("path"):
-            if "label" in patch:
-                patch["label"] = layout.slugify(str(patch["label"]), "Note")
             return  # the caller is stating where the file is, not renaming it
-        label = patch.get("label", entity.get("label"))
+        label = patch.get("label", kept)
         folder = incoming.get("folder", attrs.get("folder") or "")
         current = attrs.get("path")
         if not isinstance(current, str):
             return
-        # refiled or restated, the note keeps its name; renamed, the new one is cleaned
-        target = self.note_target(
-            str(folder), str(label), taken_by=current, existing=label == entity.get("label")
-        )
-        canonical = Path(target).stem
+        # refiled or restated, the note's file keeps its name; renamed, the new one is cleaned
+        target = self.note_target(str(folder), str(label), taken_by=current, existing=label == kept)
         if target == current:
-            if patch.get("label") != canonical and entity.get("label") != canonical:
-                patch["label"] = canonical
             return
         source = self.resolve_inside(current)
         destination = self.resolve_inside(target)
@@ -1093,7 +1097,6 @@ class Case(CaseStore):
             shutil.move(str(source), str(destination))
             _prune_empty_note_dirs(self.note_dir, source.parent)
         patch.setdefault("attrs", {})["path"] = target
-        patch["label"] = canonical
 
 
     # -- folders (nested organisational buckets for entities) ----------------

@@ -7201,8 +7201,10 @@ picture cell of such a row offers **Cut a frame**, which opens Inspect on the vi
 time with the note beside it; the frame's Put in lands in the cell.
 
 The file stays the Markdown it was: what the old split-pane Notebook wrote opens as it
-was written and is never rewritten for being opened. The header names the note (the
-name is the filename), files it in a folder, says whether it is saved, and holds
+was written and is never rewritten for being opened. The header names the note (its
+file is named after the title, and the title keeps what a file name cannot hold:
+`Map: the front by day` is saved as `Map_ the front by day.md`, and only a rename ever
+changes it), files it in a folder, says whether it is saved, and holds
 **Look**, **Write | Page**, **Pin to the side**, **Open in its own tab**, **Export**, and a
 ⋯ with *Editions*, *Archive every link…*, *Keep as template*, *To Post* and *Delete*
 (*Clear the case notes* for the case's page).
