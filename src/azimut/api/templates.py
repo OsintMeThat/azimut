@@ -1,9 +1,11 @@
 """REST API for reusable presets: proof house styles, post-thread skeletons and map layouts.
 
 Templates are app-wide (workspace-level), like the signature and API keys — a
-house style spans every case, so it never lives inside a case folder. Two
-families, keyed by ``kind``: "proof" (a proof's layout/colors/signature)
-and "post" (a thread skeleton: which lines, mention, media, extra tweets). The
+house style spans every case, so it never lives inside a case folder. The
+families, keyed by ``kind``: "proof" (a proof's layout/colors/signature), "post"
+(a thread skeleton: which lines, mention, media, extra tweets), "map" (a map
+plate's layout), "note" (a note to start others from) and "figure" (a note's
+infographic, chart or map without its data, `engine/figuretemplates.py`). The
 ``data`` is validated here and again in the composers so persisted templates
 cannot drive the renderer with malformed or unbounded values.
 """
@@ -30,7 +32,7 @@ from pydantic import (
 )
 
 from .. import config
-from ..engine import mapplates, notelook
+from ..engine import figuretemplates, mapplates, notelook, notes_infographic
 from .notes import MAX_PREVIEW_BODY_BYTES as MAX_PREVIEW_BODY_BYTES
 from .notes import PreviewIn, preview_response
 
@@ -43,6 +45,8 @@ MAX_DATA_BYTES = 64 * 1024
 #: A map template may keep a logo or a paper picture inside it (`mapplates.Picture`).
 MAX_MAP_DATA_BYTES = 720 * 1024
 MAX_POST_TWEETS = 20
+#: The longest figure a template is made from or applied to: the infographic's own bound.
+MAX_FIGURE_BODY = notes_infographic.MAX_BODY
 
 Color = Annotated[str, Field(pattern=r"^#[0-9a-fA-F]{6}$")]
 SpacingNumber = Annotated[FiniteFloat, Field(ge=0, le=200)]
@@ -330,7 +334,8 @@ def _require_kind(kind: str) -> None:
 
 def _canonical_data(kind: str, data: dict[str, Any]) -> dict[str, Any]:
     models: dict[str, type[BaseModel]] = {"proof": ProofTemplateData, "post": PostTemplateData,
-                                          "map": mapplates.TemplateData, "note": NoteTemplateData}
+                                          "map": mapplates.TemplateData, "note": NoteTemplateData,
+                                          "figure": figuretemplates.TemplateData}
     model = models[kind]
     try:
         return model.model_validate(data).model_dump(mode="json")
@@ -372,6 +377,68 @@ def preview_note_template(body: PreviewIn) -> Response:
         None, title=body.title.strip() or "Untitled", text=body.text, look=look,
         diagrams=body.diagrams, edition=body.edition,
     )
+
+
+# -- figure templates: an infographic's, a chart's or a map's layout, without its data ---------------
+
+
+class FigureFromIn(BaseModel):
+    #: The figure's block as the note writes it: an infographic, a chart or a map.
+    text: str = Field(min_length=1, max_length=MAX_FIGURE_BODY)
+
+
+class FigureApplyIn(BaseModel):
+    #: The template's data (`figuretemplates.TemplateData`): a saved one's or a ready one's.
+    template: figuretemplates.TemplateData
+    #: The data it meets, a table's Markdown (an infographic's data, a chart's own rows); "" for none.
+    table: str = Field(default="", max_length=MAX_FIGURE_BODY)
+    #: Where those rows are from, as ``data:`` names it (``sheet:<id>``, ``note:<id>#<heading>``).
+    origin: str = Field(default="", max_length=200)
+    #: The template's columns given the data's: a column name, or "" to fill it by hand. None
+    #: asks: the answer then says which columns the data does not name, and writes nothing.
+    mapping: dict[str, Annotated[str, Field(max_length=120)]] | None = Field(default=None, max_length=64)
+    #: The template's columns that count, given the data's rows to count instead.
+    rows: list[Annotated[str, Field(max_length=120)]] = Field(default_factory=list, max_length=64)
+
+
+@router.get("/templates/figure/ready")
+def ready_figure_templates() -> dict[str, Any]:
+    """The figure templates the app ships: neutral, generic, holding no case's data."""
+    return {"ready": figuretemplates.ready()}
+
+
+@router.post("/templates/figure/from")
+def figure_template_from(body: FigureFromIn) -> dict[str, Any]:
+    """A figure of a case as a template, not saved: its layout and columns, its data left out."""
+    try:
+        return figuretemplates.from_block(body.text)
+    except figuretemplates.TemplateError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+
+@router.post("/templates/figure/apply")
+def apply_figure_template(body: FigureApplyIn) -> dict[str, Any]:
+    """A figure template applied to the data it meets, writing nothing.
+
+    The answer lists the columns it reads (``needs``), each with the data's column of the
+    same name (``match``) or one whose name holds it (``suggest``). Without ``mapping`` and
+    with a needed column the data does not name, it says ``ask`` and stops there; else it
+    answers the infographic's ``text`` and its ``panels``, or a chart's or a map's ``changes``.
+    """
+    figure, text = body.template.figure, body.template.text
+    data = figuretemplates.data_of(body.table, body.origin)
+    columns = list(data.table.headers) if data is not None else []
+    wanted = figuretemplates.needs(figure, text)
+    matched = figuretemplates.match(wanted, columns)
+    said = [{**need.said(), "match": matched.get(need.column, ""),
+             "suggest": "" if need.column in matched else figuretemplates.suggest(need.column, columns)} for need in wanted]
+    ask = data is not None and body.mapping is None and any(need.column not in matched for need in wanted)
+    answer: dict[str, Any] = {"needs": said, "columns": columns, "ask": ask}
+    if ask:
+        return answer
+    answer.update(figuretemplates.apply(figure, text, table_text=body.table, origin=body.origin,
+                                        given=body.mapping or {}, rows_for=body.rows))
+    return answer
 
 
 @router.post("/templates/{kind}")
