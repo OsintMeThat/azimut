@@ -7515,14 +7515,65 @@ proposes (*at least* when the count is a floor, *rows* when nothing names them),
 columns, `from:` and the table's rows copied in, as one Undo step, and it stands picked.
 `from: note:<id>#<heading>` names the first table under that heading, `#<heading>/2` the
 second, `#/2` the second of the note; a chart's own rows never count. `/` › *Chart* asks
-which table when the note holds several, and with none starts a small table to fill, the
-grid's Chart button then one press away. *Copy rows from another note or a sheet* stands
-beside the note's tables, under the kind picker of its one table, and with none beside the
-small table: it lists the case's other notes' tables by heading and note, then its sheets
-(`GET /notes/figure/sources`), and the one picked shows the kinds its rows fit; the chart is
-written with those rows and `from:` naming them (`sheet:<id>` for a sheet, its row keys left
-out). A case with no other table writes the small table at once. In the raw Markdown the
-block is its lines.
+which table when the note holds several, *From scratch* below them. *Copy rows from another
+note or a sheet* stands beside the note's tables and under the kind picker: it lists the
+case's other notes' tables by heading and note, then its sheets (`GET /notes/figure/sources`),
+and the one picked shows the kinds its rows fit; the chart is written with those rows and
+`from:` naming them (`sheet:<id>` for a sheet, its row keys left out). In the raw Markdown
+the block is its lines.
+
+**A chart from scratch** (`editor/chartForm.js`, `chartFormText.js`). `/` › *Chart* shows every
+kind, with a table in the note or none: the kinds its one table fits come first, drawn from its
+rows, then *From scratch*, the fourteen kinds each with a sketch and one line of what it needs
+(*Timeline: days and what happened*, *Key figures: a figure and what it says*, *Waffle: a part
+and its whole*…). The one picked is written where `/` was typed with its kind and its columns,
+no row, as one Undo step, and its form opens on the chart, between its bar and its drawing,
+the keyboard in the first field; the drawing says what to add until a row holds something,
+then follows every field. One form is open in a note at a time.
+- **Timeline**: *＋ Event* (a day at the day, the month or the year: a calendar, a month and
+  its year, or a year; written `5 Oct 2026`, `Oct 2026`, `2026`) and *＋ Period* (from and
+  until), then what happened. The table is `| When | What happened |`, with `| Until |` once a
+  row is a period; a cell the chart cannot read as a day stays as written and says so.
+- **Key figures**: *＋ Figure*, the figure as written and the line under it, with an *at least*
+  tick written `at least 60`; a floor typed in the figure (`60+`, `≥ 60`) ticks it.
+- **Bars, columns, pie, donut, segments, circles** (two or three), **stacked bars and
+  columns** (with a split column), **pictograms and silhouette rows** (an icon each, from the
+  library's picker, written as `icons:`) and **waffle** (its parts, then *The whole*, a name
+  and a count, written as a row its `of:` names, or a number): *＋ Category*, its name and
+  its count; the columns' names edited in place and written as `by:`, `count:` and `colour
+  by:`; *These counts are floors* writes `(at least)` in the counts' heading; a colour
+  picked from the case's palette or the chart's own order, written as `colours:`, kept by a
+  category renamed.
+- **Line**: days or numbers along (*Days* / *Numbers*), *＋ Row*, a value for each series,
+  *＋ Series* for another line; one series is `| Day | Value |`, several are one row a value,
+  `| Day | Series | Value |` with `colour by: Series`.
+
+Every form has the title field with the title the data proposes, *at least* included, a
+*Source* field for the credit line, rows dragged by their grip or moved with Alt+↑ and Alt+↓,
+× to take one out, and Enter going to the next field, past the last one to a new row. A row
+added stays out of the note until something is typed in it: an empty row only carries the hint
+of what goes there, never a sample number. Each field committed (Enter, Tab or leaving it), a
+row moved or taken out, a precision, a colour, an icon and a fill is one Undo step; a day
+moved with the calendar's arrows is written once it rests. What the form writes is the
+ordinary block, a cell nobody changed written back as it was, so a chart reopens in its form,
+or as a grid through The numbers; `tests/fixtures/chart_forms.json` holds what each kind's
+form writes, drawn by the engine's tests too. Settings › *Edit the data* and The numbers ›
+*Edit the data* open it again when the chart's rows are in its kind's shape; rows counted
+one a line or columns past its kind's are edited as a table.
+
+**Fill from the case** stands beside the add buttons and lists what it would take before
+writing it (`engine/notes_chart_fill.py`, read only). A timeline gets the case's dated events
+within a period, on the case's clock (`GET /notes/figure/events`): the days its Geo Proofs say
+their material was taken, saying the proof's sentence, and the Claims of its Timeline, a
+period when they span days, a proof's own dating Claim never twice. One already in the chart,
+one refuted, or the same day and words as the one above is listed unticked and says why; a day
+the case gives as approximate says *about*; *Add 2 events* adds the ticked ones as one step.
+The kinds of categories, key figures and a line count a note's table or a sheet (`POST
+/notes/figure/counts`): pick where the rows come from, the column they are counted by (along,
+for a line, its days read as one however written), a split or a line for each value, and
+rows counted one each or a column of numbers summed. The counts are listed with what was left
+out (no value, no number, a total row); a floor among the numbers summed ticks *at least*;
+*Write these 5 rows* replaces the form's rows as one step.
 
 The chart is drawn as the server draws it, kept by its text. Its bar: **Kind** (the
 picker again, its title, columns and rows kept; a kind of parts writes its column as its
@@ -7580,9 +7631,11 @@ in the note as the server draws it; a press on a panel or on **Edit** opens the 
 the note: the title band, the panels (drag or Alt+↑/↓ to reorder, Half or Wide, × takes one out,
 **Add a panel** shows each table of the note drawn as every kind it fits by the chart's kind
 picker, the chart picked written as one under its table would be, its rows and `from:` with it,
-and the note's maps, with Words and Key figures to fill in; pressing a chart's row opens the
-chart's own settings card under it, title, count, by and colour, each choice written inside the
-page as one Undo), the look, **One legend for Grade, at the top**, the
+then every kind *From scratch*, the picker's own cards, the one picked written with its columns
+and its form opened in its card, and the note's maps, with Words and Key figures to fill in;
+pressing a chart's row opens the chart's own settings card under it, title, count, by, colour
+and *Edit the data*, its form, each choice written inside the page as one Undo), the look,
+**One legend for Grade, at the top**, the
 colours and where each comes from (*Keep these colours for the case* names them in the case's
 palette), what the check says, **Export as a picture** (X 16:9, 4:5, 1:1, the PDF page, SVG)
 and **To Post**. Each press writes the block's text as one change, so one Undo.

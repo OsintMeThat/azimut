@@ -1,7 +1,8 @@
 /**
  * What the note editor asks the server of a chart (`api/notecharts.py`): its drawing
  * and what the check says of it, every kind its table fits for the kind picker, a
- * picture of it for one destination, and the rows it may be copied from elsewhere. A
+ * picture of it for one destination, the rows it may be copied from elsewhere, and what a
+ * form's *Fill from the case* proposes (the case's dated events, a table's counts). A
  * drawing and a gallery are kept by the block's text, so a chart drawn once is drawn again
  * at once; a picture is asked for each time.
  */
@@ -174,6 +175,39 @@ export function chartSources({ caseId, noteId = '' }, { get = api.get } = {}) {
   const query = noteId ? `?note=${encodeURIComponent(noteId)}` : '';
   return get(`/api/cases/${encodeURIComponent(caseId)}/notes/figure/sources${query}`)
     .then((answer) => ({ tables: Array.isArray(answer?.tables) ? answer.tables : [], sheets: Array.isArray(answer?.sheets) ? answer.sheets : [] }))
+    .catch((error) => ({ error: error?.message ?? String(error) }));
+}
+
+/**
+ * The case's dated events for a timeline's *Fill from the case*, within `from` and `to`
+ * (`2026-10-05`, either left out), days on `zone`'s clock: `{ items: [{ id, type, day, last, precision, approximate,
+ * what, refuted }], total, undated, first, last }`, or `{ error }`. Nothing is written.
+ */
+export function caseEvents({ caseId, from = '', to = '', zone = 'UTC' }, { get = api.get } = {}) {
+  const query = new URLSearchParams();
+  if (from) query.set('from', from);
+  if (to) query.set('to', to);
+  if (zone && zone !== 'UTC') query.set('zone', zone);
+  const said = query.toString();
+  return get(`/api/cases/${encodeURIComponent(caseId)}/notes/figure/events${said ? `?${said}` : ''}`)
+    .then((answer) => ({
+      items: Array.isArray(answer?.items) ? answer.items : [], total: Number(answer?.total) || 0, undated: Number(answer?.undated) || 0,
+      first: answer?.first ?? '', last: answer?.last ?? '',
+    }))
+    .catch((error) => ({ error: error?.message ?? String(error) }));
+}
+
+/**
+ * The rows of a note's table or a sheet (`origin`, as `from:` names it) counted by `by`, split
+ * by `split`, or `amount`'s numbers summed; along days with `days`: `{ name, rows: [{ value,
+ * split, count }], floor, blank, unread, totals }`, or `{ error }`. Nothing is written.
+ */
+export function chartCounts({ caseId, origin, by, split = '', amount = '', days = false }, { post = api.post } = {}) {
+  return post(`/api/cases/${encodeURIComponent(caseId)}/notes/figure/counts`, { origin, by, split, amount, days })
+    .then((answer) => ({
+      name: String(answer?.name ?? ''), rows: Array.isArray(answer?.rows) ? answer.rows : [], floor: Boolean(answer?.floor),
+      blank: Number(answer?.blank) || 0, unread: Number(answer?.unread) || 0, totals: Number(answer?.totals) || 0,
+    }))
     .catch((error) => ({ error: error?.message ?? String(error) }));
 }
 

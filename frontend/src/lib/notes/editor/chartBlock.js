@@ -8,13 +8,15 @@
  *   is written under the table, or where `/` was typed: its kind, the title its data
  *   proposes (*at least* when the count is a floor), its columns, the table's rows
  *   copied in and `from:`, where they came from. `/` › Chart also offers *Copy rows
- *   from another note or a sheet* (`GET /notes/figure/sources`); with no table in the
- *   note, that or a small one to fill.
+ *   from another note or a sheet* (`GET /notes/figure/sources`).
+ * - **Made from scratch**: `/` › Chart shows every kind, a table or none, each saying
+ *   what it needs; the one picked is written with its columns and no row, and its form
+ *   opens on it (`editor/chartForm.js`), the chart drawn under it as it is filled.
  * - **Its bar**: Kind (the picker again, the chart's own settings kept), Settings (the
- *   card: title, count, by, coloured by, show, style, and *Keep these colours for the
- *   case*), Read again (once the table its rows came from changed, in this note, another
- *   one or a sheet), The numbers (its rows, and the way to the table), Export (a picture
- *   for X, 4:5, 1:1, the PDF page, or an SVG).
+ *   card: title, count, by, coloured by, show, style, *Keep these colours for the case*,
+ *   and *Edit the data*, the form again), Read again (once the table its rows came from
+ *   changed, in this note, another one or a sheet), The numbers (its rows, and the way to
+ *   the table or the form), Export (a picture for X, 4:5, 1:1, the PDF page, or an SVG).
  * - **Its checks**: what the check before export says of it, in the honesty rules'
  *   words, under it, with a one-press fix where the check offers one.
  *
@@ -30,6 +32,8 @@ import { rovingToolbar } from '../pictureSize.js';
 import { registerBlock } from './blocks.js';
 import { EXPORTS, chartRows, chartSources, drawChart, exportChart, forgetDrawings, keptDrawing } from './chartFigure.js';
 import { chartSettings, openKindPicker } from './chartCard.js';
+import { chartForm } from './chartForm.js';
+import { EMPTY_SAID, FORMS, hasRows, readForm, starterBlock } from './chartFormText.js';
 import {
   CHART_OPEN, compareRows, headingAbove, newChart, originFor, readChart, readOrigin, setting, tableUnder, withSettings, withTable,
 } from './chartText.js';
@@ -41,7 +45,6 @@ import { blocksIn, openSource } from './ranges.js';
 import { noteCase, noteHandlers } from './state.js';
 import { registerTableChart } from './tableGrid.js';
 import { gridAt } from './tablePictures.js';
-import { insertTable } from './tableInsert.js';
 import { lineChanges, parseTable, plainText } from './tableText.js';
 import { BlockWidget, markPicked, sourceButton } from './widgets.js';
 
@@ -49,8 +52,6 @@ import { BlockWidget, markPicked, sourceButton } from './widgets.js';
 export const NUMBERS_SHOWN = 60;
 /** A chart's height before it is drawn, in pixels. */
 const CHART_HEIGHT = 440;
-/** The table `/` › Chart starts with when the note holds none. */
-export const STARTER_TABLE = '| Category | Count |\n| --- | ---: |\n|  |  |\n|  |  |\n|  |  |';
 
 function element(tag, className, text) {
   const node = document.createElement(tag);
@@ -74,6 +75,9 @@ function tableName(text, line) {
   return heading ? `the table under “${heading}”` : 'the table above';
 }
 
+/** The chart `/` › Chart just wrote from scratch, by view: its form opens once it is drawn. */
+const freshForms = new WeakMap();
+
 /** A chart drawn in the note, kept on its box (`box.chart`). */
 class ChartBox {
   constructor(box, widget, view) {
@@ -86,12 +90,26 @@ class ChartBox {
     this.origin = null;
     this.originAsked = null;
     this.settings = null;
+    this.form = null;
     this.numbersOpen = false;
     this.gone = false;
     box.chart = this;
     this.build();
     this.draw();
     this.refreshOrigin();
+    this.openFresh();
+  }
+
+  /** A chart written from scratch a moment ago opens its form, the keyboard in its first field. */
+  openFresh() {
+    const fresh = freshForms.get(this.view);
+    if (fresh === undefined || !this.writable) return;
+    // the box is in the page once CodeMirror has drawn it
+    queueMicrotask(() => {
+      if (this.gone || freshForms.get(this.view) !== fresh || this.range()?.from !== fresh) return;
+      freshForms.delete(this.view);
+      this.toggleForm(true);
+    });
   }
 
   get info() {
@@ -160,12 +178,14 @@ class ChartBox {
       this.toggleSettings(false);
       this.settingsButton?.focus({ preventScroll: true });
     });
+    this.formPanel = element('div', 'cm-chart-form-panel cm-chart-ui');
+    this.formPanel.hidden = true;
     this.figure = element('div', 'cm-chart-figure');
     this.checks = element('ul', 'cm-chart-checks cm-chart-ui');
     this.checks.setAttribute('aria-label', 'What the check says of this chart');
     this.numbers = element('div', 'cm-chart-numbers cm-chart-ui');
     this.numbers.hidden = true;
-    frame.append(this.settingsPanel, this.figure, this.checks, this.numbers);
+    frame.append(this.formPanel, this.settingsPanel, this.figure, this.checks, this.numbers);
     box.append(frame);
     if (!this.writable) box.append(sourceButton(this.view, box));
   }
@@ -218,12 +238,27 @@ class ChartBox {
     this.refreshOrigin();
     if (this.numbersOpen) this.renderNumbers();
     this.settings?.refresh();
+    this.form?.refresh();
   }
 
   draw() {
     const caseId = this.info.caseId;
     if (!caseId) {
       this.figure.replaceChildren(element('p', 'cm-chart-said', 'A chart is drawn in a note of a case.'));
+      return;
+    }
+    if (!hasRows(this.widget.source)) {
+      // a chart from scratch, no row filled yet: what to do, never a drawing of nothing
+      const family = FORMS[readForm(this.widget.source).kind]?.family;
+      this.asked = null;
+      this.drawn = null;
+      this.figure.classList.remove('cm-chart-loading');
+      this.figure.replaceChildren(element('p', 'cm-chart-said cm-chart-empty', EMPTY_SAID[family] ?? 'Write its rows under its settings: the chart is drawn from them.'));
+      this.renderChecks([]);
+      this.nameKind();
+      this.settings?.refresh();
+      this.form?.refresh();
+      this.view.requestMeasure();
       return;
     }
     const request = { caseId, noteId: this.noteId, text: this.widget.source, origins: !this.readsOrigin() };
@@ -257,13 +292,19 @@ class ChartBox {
       this.figure.querySelector('svg')?.setAttribute('aria-label', answer.title || 'Chart');
       this.renderChecks(answer.checks);
     }
+    this.nameKind();
+    this.settings?.refresh();
+    this.form?.refresh();
+    this.view.requestMeasure();
+  }
+
+  /** The bar's Kind says the kind drawn, or the kind of a chart from scratch not drawn yet. */
+  nameKind() {
     if (this.kindButton) {
-      const label = this.drawn?.kind?.label;
+      const label = this.drawn?.kind?.label || FORMS[readForm(this.widget.source).kind]?.label;
       this.kindButton.lastChild.textContent = label || 'Kind';
       this.kindButton.setAttribute('aria-label', label ? `Kind: ${label}` : 'Kind');
     }
-    this.settings?.refresh();
-    this.view.requestMeasure();
   }
 
   renderChecks(checks) {
@@ -367,6 +408,7 @@ class ChartBox {
   /** Open or close the settings on the chart, between its bar and its drawing; open, the title takes the keyboard. */
   toggleSettings(open = this.settingsPanel.hidden) {
     if (!this.writable) return;
+    if (open) this.toggleForm(false);
     if (!open) {
       this.settings?.commit();
       this.settings?.destroy();
@@ -379,10 +421,56 @@ class ChartBox {
         state: () => (this.gone ? null : { chart: this.chart, drawn: this.drawn }),
         write: (changes) => this.write(changes),
         keep: this.info.caseId ? (values) => this.keepColours(values) : null,
+        editData: () => this.toggleForm(true),
       });
     }
     this.settingsButton?.setAttribute('aria-pressed', String(open));
     if (open) this.settings.focus();
+    this.view.requestMeasure();
+  }
+
+  /** Whether the chart's rows are in the shape of its kind's form. */
+  hasForm() {
+    return Boolean(readForm(this.widget.source, this.drawn?.kind?.name ?? '').form);
+  }
+
+  /**
+   * Open or close the kind's form on the chart, between its bar and its drawing, so every
+   * row filled is seen drawn under it; open, the keyboard goes to the first field to fill.
+   */
+  toggleForm(open = this.formPanel.hidden) {
+    if (!this.writable) return;
+    if (!open) {
+      if (!this.form) return;
+      this.form.commit();
+      this.form.destroy();
+      this.form = null;
+      this.formPanel.hidden = true;
+      this.formPanel.replaceChildren();
+      this.formPanel.className = 'cm-chart-form-panel cm-chart-ui';
+      this.view.requestMeasure();
+      return;
+    }
+    this.toggleSettings(false);
+    // one form open in a note at a time: the chart filled is the one in front of the analyst
+    for (const box of this.view.contentDOM.querySelectorAll('.cm-chart-block')) if (box.chart && box.chart !== this) box.chart.toggleForm(false);
+    if (!this.form) {
+      this.formPanel.hidden = false;
+      this.form = chartForm(this.formPanel, {
+        state: () => {
+          if (this.gone) return null;
+          const range = this.range();
+          return { source: range ? this.view.state.sliceDoc(range.from, range.to) : this.widget.source, drawn: this.drawn };
+        },
+        write: (next) => this.edit(() => next),
+        caseId: this.info.caseId ?? '',
+        onClose: () => {
+          this.toggleForm(false);
+          this.kindButton?.focus({ preventScroll: true });
+        },
+      });
+    }
+    this.form.focus();
     this.view.requestMeasure();
   }
 
@@ -469,6 +557,7 @@ class ChartBox {
     };
     if (origin?.state === 'differs' && this.writable) act('Read again', () => this.readAgain(), 'cm-chart-link-strong');
     if (origin?.found) act('Go to the table', () => this.goToTable());
+    if (this.writable && this.hasForm()) act('Edit the data', () => this.toggleForm(true));
     if (this.writable) act('Edit them as text', () => this.toSource());
     parts.push(said);
     this.numbers.replaceChildren(...parts);
@@ -509,6 +598,7 @@ class ChartBox {
   destroy() {
     this.gone = true;
     this.settings?.destroy();
+    this.form?.destroy();
   }
 }
 
@@ -670,10 +760,11 @@ export function chartFromTable(state, found, kind, noteId = '') {
   return newChart(settings, text);
 }
 
-/** Write `block` at `pos` as one step, and pick it. */
-function placeBlock(view, block, pos) {
+/** Write `block` at `pos` as one step, and pick it. `before(from)` learns where it starts first. */
+function placeBlock(view, block, pos, before = null) {
   if (view.state.readOnly) return;
   const { insert, start } = blockAt(view.state, pos, block);
+  before?.(pos + start);
   view.dispatch({
     changes: { from: pos, insert },
     selection: { anchor: pos + start },
@@ -683,13 +774,25 @@ function placeBlock(view, block, pos) {
   view.focus();
 }
 
+/**
+ * A chart of `kind` from scratch at `pos`, as one step: its kind and its columns, no row
+ * (`chartFormText.starterBlock`), its form open on it once it is drawn, the keyboard in the
+ * first field.
+ */
+export function chartFromScratch(view, kind, pos = view.state.selection.main.head) {
+  placeBlock(view, starterBlock(kind), pos, (from) => freshForms.set(view, from));
+}
+
 /** Write the chart `kind` makes of the table `found` at `pos`, as one step, and pick it. */
 function placeChart(view, found, kind, pos) {
   placeBlock(view, chartFromTable(view.state, found, kind, view.state.facet(noteHandlers).noteId ?? ''), pos);
 }
 
-/** The kind picker for the table at `found`, under `anchor`; the chart lands at `pos`. */
-export function chartTable(view, anchor, found, { pos = found.to, copy = null } = {}) {
+/**
+ * The kind picker for the table at `found`, under `anchor`; the chart lands at `pos`. With
+ * `onScratch`, every kind from scratch follows the kinds the table fits.
+ */
+export function chartTable(view, anchor, found, { pos = found.to, copy = null, onScratch = null } = {}) {
   const { caseId } = view.state.field(noteCase);
   return openKindPicker(view, anchor, {
     caseId,
@@ -697,6 +800,7 @@ export function chartTable(view, anchor, found, { pos = found.to, copy = null } 
     text: view.state.sliceDoc(found.from, found.to),
     onPick: (kind) => placeChart(view, found, kind, pos),
     copy,
+    onScratch,
   });
 }
 
@@ -760,41 +864,28 @@ export async function copyRowsFrom(view, session, pos, known = null) {
 }
 
 const COPY = 'Copy rows from another note or a sheet';
-const STARTED = 'Fill the table, then press Chart above it.';
 
 /**
- * `/` › Chart: the kind picker for the note's one table, a menu of its tables when it
- * holds several, each with *Copy rows from another note or a sheet* beside it; with none,
- * that or a small table to fill, its Chart button then one press away. A case whose other
- * notes and sheets hold no table gets the small table at once.
+ * `/` › Chart: the gallery. The note's one table shows the kinds it fits drawn from its
+ * rows, then every kind from scratch; with no table, every kind from scratch, each opening
+ * its form; with several, which table first, or from scratch. *Copy rows from another note
+ * or a sheet* stands beside them.
  */
 export function startChart(view) {
   if (view.state.readOnly) return;
   const tables = tablesOf(view.state).filter((found) => !inChart(view.state, found.from));
   const { caseId } = view.state.field(noteCase);
-  if (!tables.length && !caseId) {
-    insertTable(view, STARTER_TABLE, { said: STARTED });
-    return;
-  }
+  const noteId = view.state.facet(noteHandlers).noteId ?? '';
   const pos = view.state.selection.main.head;
   const session = cursorSession(view);
+  const onScratch = (kind) => chartFromScratch(view, kind, pos);
+  const copy = caseId ? () => copyRowsFrom(view, session, pos) : null;
   if (!tables.length) {
-    const noteId = view.state.facet(noteHandlers).noteId ?? '';
-    session.wait(chartSources({ caseId, noteId })).then((sources) => {
-      if (sources.error || (!sources.tables.length && !sources.sheets.length)) {
-        session.end();
-        insertTable(view, STARTER_TABLE, { said: STARTED });
-        return;
-      }
-      openMenu(view, session.anchor, [
-        { label: 'A new table to fill', hint: 'Then press its Chart', iconName: 'table', run: () => insertTable(view, STARTER_TABLE, { said: STARTED }) },
-        { label: COPY, iconName: 'copy', run: () => copyRowsFrom(view, session, pos, sources) },
-      ], { label: 'Rows for the chart' });
-    });
+    openKindPicker(view, session.anchor, { caseId, noteId, onScratch, copy });
     return;
   }
   if (tables.length === 1) {
-    chartTable(view, session.anchor, tables[0], { pos, copy: caseId ? () => copyRowsFrom(view, session, pos) : null });
+    chartTable(view, session.anchor, tables[0], { pos, copy, onScratch });
     return;
   }
   const text = view.state.doc.toString();
@@ -804,7 +895,8 @@ export function startChart(view) {
     iconName: 'table',
     run: () => chartTable(view, session.anchor, found, { pos }),
   }));
-  if (caseId) items.push('-', { label: COPY, iconName: 'copy', run: () => copyRowsFrom(view, session, pos) });
+  items.push('-', { label: 'From scratch', hint: 'A form for any kind', iconName: 'chart', run: () => openKindPicker(view, session.anchor, { caseId, noteId, onScratch, copy }) });
+  if (caseId) items.push({ label: COPY, iconName: 'copy', run: () => copyRowsFrom(view, session, pos) });
   openMenu(view, session.anchor, items, { label: 'Which table' });
 }
 
@@ -851,6 +943,14 @@ const THEME = {
   '.cm-chart-figure > svg': { display: 'block', width: '100%', height: 'auto', transition: 'opacity 0.2s var(--ease)' },
   '.cm-chart-loading > svg': { opacity: '0.55' },
   '.cm-chart-said': { margin: '0', padding: '26px 16px', color: 'var(--text-3)', textAlign: 'center' },
+  '.cm-chart-empty': { padding: '34px 16px', fontSize: '13px' },
+  '.cm-chart-field.cm-chart-data': { display: 'grid', gridTemplateColumns: '64px max-content', alignItems: 'center', gap: '10px' },
+  '.cm-chart-field.cm-chart-data[hidden]': { display: 'none' },
+  '.cm-chart-data .cm-chart-edit-data': {
+    display: 'inline-flex', alignItems: 'center', height: '26px', margin: '0', padding: '0 12px', border: '1px solid color-mix(in srgb, var(--accent) 45%, transparent)',
+    borderRadius: '13px', background: 'var(--accent-soft)', color: 'var(--text-1)', fontSize: '12.5px', fontWeight: '600', textDecoration: 'none',
+  },
+  '.cm-chart-data .cm-chart-edit-data:hover, .cm-chart-data .cm-chart-edit-data:focus-visible': { background: 'var(--accent)', color: 'var(--accent-text)', outline: 'none' },
   '.cm-chart-failed': { color: 'var(--danger)' },
   '.cm-chart-checks': {
     listStyle: 'none', margin: '0', padding: '7px 12px', borderTop: '1px solid var(--border)', background: 'var(--bg-1)',
@@ -891,10 +991,14 @@ const THEME = {
   '.cm-chart-picker-head': { display: 'flex', alignItems: 'baseline', gap: '10px', marginBottom: '10px' },
   '.cm-chart-picker-head strong': { fontSize: '13.5px' },
   '.cm-chart-picker-said': { color: 'var(--text-2)' },
-  '.cm-chart-picker-grid': {
-    display: 'grid', gridTemplateColumns: 'repeat(4, minmax(0, 1fr))', gap: '10px', maxHeight: 'min(560px, 70vh)', overflowY: 'auto',
-    padding: '2px', scrollbarWidth: 'thin',
+  '.cm-chart-picker-scroll': { maxHeight: 'min(560px, 70vh)', overflowY: 'auto', padding: '2px', scrollbarWidth: 'thin' },
+  '.cm-chart-picker-grid': { display: 'grid', gridTemplateColumns: 'repeat(4, minmax(0, 1fr))', gap: '10px' },
+  '.cm-chart-picker-grid[hidden]': { display: 'none' },
+  '.cm-chart-picker-part': {
+    margin: '12px 2px 7px', color: 'var(--text-3)', fontSize: '11px', fontWeight: '650', letterSpacing: '.06em', textTransform: 'uppercase',
   },
+  '.cm-chart-picker-part:first-child': { marginTop: '2px' },
+  '.cm-chart-picker-grid.cf-scratch-grid': { gap: '8px' },
   '.cm-chart-pick': {
     display: 'flex', flexDirection: 'column', gap: '6px', padding: '6px 6px 7px', border: '1px solid var(--border)', borderRadius: '7px',
     background: 'var(--bg-1)', color: 'var(--text-1)', font: 'inherit', textAlign: 'left', cursor: 'pointer', minWidth: '0',

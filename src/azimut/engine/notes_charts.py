@@ -973,7 +973,9 @@ class Reading:
 
     @property
     def total(self) -> float:
-        return sum(category.total for category in self.categories)
+        # a waffle's whole, written as a row its ``of`` names, is no part of what it counts
+        whole = (self.block.extra.get("of") or "").strip().casefold() if self.kind.name == "waffle" else ""
+        return sum(category.total for category in self.categories if not whole or category.name.casefold() != whole)
 
     @property
     def count_label(self) -> str:

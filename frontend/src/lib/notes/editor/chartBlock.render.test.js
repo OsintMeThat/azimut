@@ -455,21 +455,24 @@ describe('/ › Chart', () => {
     startChart(view);
     const items = [...view.dom.querySelectorAll('.cm-grid-menu-item')];
     expect(items.map((item) => item.querySelector('.cm-grid-menu-words').textContent))
-      .toEqual(['The table under “Count”', 'The table under “Units”', 'Copy rows from another note or a sheet']);
+      .toEqual(['The table under “Count”', 'The table under “Units”', 'From scratch', 'Copy rows from another note or a sheet']);
     press(items[1]);
     await settle();
     expect(server.asked.at(-1).body.text).toBe('| Unit | Seen |\n| --- | --- |\n| A | 2 |');
   });
 
-  it('starts a small table to fill when the note holds none and nothing else in the case does', async () => {
+  it('shows every kind from scratch when the note holds no table, asking the server nothing', async () => {
     editor('Words.\n');
     view.dispatch({ selection: { anchor: text().length } });
     startChart(view);
     await settle();
-    expect(server.asked.at(-1)).toEqual({ path: '/api/cases/c1/notes/figure/sources?note=n1' });
-    expect(text()).toContain('| Category | Count |\n| --- | ---: |\n|  |  |');
-    expect(handlers.tableToast).toHaveBeenCalledWith('Fill the table, then press Chart above it.', expect.any(Array));
-    expect(view.dom.querySelector('.cm-chart-anchor')).toBeNull();
+    expect(server.asked).toEqual([]);
+    const picker = view.dom.querySelector('.cm-chart-picker');
+    expect(picker.querySelector('.cm-chart-picker-said').textContent).toBe('Every kind has a form made for it');
+    expect([...picker.querySelectorAll('.cm-chart-picker-part')].map((node) => node.textContent)).toEqual(['From scratch']);
+    expect(picker.querySelectorAll('button.cf-scratch')).toHaveLength(14);
+    expect(document.activeElement).toBe(picker.querySelector('button.cf-scratch[data-kind="timeline"]'));
+    expect(text()).toBe('Words.\n');
   });
 });
 
@@ -490,8 +493,7 @@ describe('Copy rows from another note or a sheet', () => {
     view.dispatch({ selection: { anchor: text().length } });
     startChart(view);
     await settle();
-    expect(words()).toEqual(['A new table to fill', 'Copy rows from another note or a sheet']);
-    press(item('Copy rows from another note or a sheet'));
+    press(view.dom.querySelector('.cm-chart-picker .cm-chart-copy'));
     await settle();
     expect(words()).toEqual(['“Count”', '“Count”, table 2', 'Sightings']);
     expect([...view.dom.querySelectorAll('.cm-grid-menu-item small')].map((node) => node.textContent))
@@ -515,7 +517,7 @@ describe('Copy rows from another note or a sheet', () => {
     server.sources = () => SOURCES;
     editor(`${CHARTED}\n\n## Units\n\n| Unit | Seen |\n| --- | --- |\n| A | 2 |\n`);
     startChart(view);
-    expect(words()).toEqual(['The table under “Count”', 'The table under “Units”', 'Copy rows from another note or a sheet']);
+    expect(words()).toEqual(['The table under “Count”', 'The table under “Units”', 'From scratch', 'Copy rows from another note or a sheet']);
     expect(view.dom.querySelector('.cm-grid-menu-line')).toBeTruthy();
     view.destroy();
     editor(`${NOTE}\n\n`);

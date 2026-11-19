@@ -553,6 +553,23 @@ def day_column(rows: list[list[str]], column: int) -> bool:
     return found >= 2 and found * 2 >= len(cells)
 
 
+#: A column named for days: one day read in it is enough, so a timeline of one event draws.
+DAY_HEADER = re.compile(r"^\s*(?:when|days?|dates?|from|start|since)\b", re.I)
+
+
+def day_columns(headers: Sequence[str], rows: list[list[str]]) -> list[int]:
+    """The columns of days (`day_column`); with none, a column named for days whose every
+    filled cell reads as one, so a table of a single dated row still has its days."""
+    found = [index for index in range(len(headers)) if day_column(rows, index)]
+    if found:
+        return found
+    for index, header in enumerate(headers):
+        cells = [row[index] for row in rows if index < len(row) and row[index]]
+        if DAY_HEADER.match(nc.plain_cell(header)) and cells and all(read_day(cell) is not None for cell in cells):
+            return [index]
+    return []
+
+
 def column_year(rows: list[list[str]], columns: Sequence[int]) -> int | None:
     """The first year any of these columns says, for the days written without one."""
     for row in rows:
@@ -1790,7 +1807,7 @@ def _timeline_columns(reading: "Reading") -> tuple[int | None, int | None, int |
     if table is None:
         return None, None, None
     rows = table.rows
-    days = [index for index in range(len(table.headers)) if day_column(rows, index)]
+    days = day_columns(table.headers, rows)
     start = days[0] if days else None
     # a column named for an end holds periods even when one row alone has one
     ends = [index for index in range(len(table.headers)) if index != start
@@ -2527,7 +2544,7 @@ def fits_figures(table: "Table") -> bool:
 
 def fits_timeline(table: "Table") -> bool:
     rows = table.rows
-    days = [index for index in range(len(table.headers)) if day_column(rows, index)]
+    days = day_columns(table.headers, rows)
     if not days:
         return False
     return any(index not in days and not nc._numeric(rows, index) and any(row[index] for row in rows)
