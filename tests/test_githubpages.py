@@ -26,7 +26,7 @@ from azimut.engine import githubpages, notes_web, publishsecrets
 from azimut.workspace import Case
 
 from ambushfixture import _ground, _image
-from test_notes_report import make_case, make_note
+from notecase import make_case, make_note
 
 TOKEN = "github_pat_11ABCDEFG0" + "x" * 72
 SECRET = "The second source asked not to be named"

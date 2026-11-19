@@ -29,6 +29,7 @@ from azimut.engine import notelinks, notelook, notes_pdf, notes_style, notetext
 from azimut.engine.notelook import NoteLook
 from azimut.workspace import Case
 
+from notecase import make_case, make_note  # noqa: F401  (also read from here by other notes tests)
 from test_notes_pdf import FakeCase, png, png_bytes
 
 # -- helpers -----------------------------------------------------------------
@@ -51,18 +52,6 @@ def render(text, case=None, title="Rooftop", resolve=None, note_id="", **values)
     return notes_pdf.render(
         case, title=title, text=text, look=look(**values), resolve=resolve, note_id=note_id
     )
-
-
-def make_case(client, name="Report case"):
-    return client.post("/api/cases", json={"name": name}).json()["id"]
-
-
-def make_note(client, cid, title="Rooftop", content="Body.\n", folder=""):
-    response = client.post(
-        f"/api/cases/{cid}/notes", json={"title": title, "content": content, "folder": folder}
-    )
-    assert response.status_code == 200, response.text
-    return response.json()
 
 
 def upload_picture(client, cid, name="cover.png", size=(320, 180)):

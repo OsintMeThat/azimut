@@ -15,7 +15,7 @@ import pytest
 from azimut.workspace import Case
 
 from sourcesfixture import ARCHIVE_URL, NOTICE_URL, POST_URL, sourced_case
-from test_notes_report import make_case, make_note
+from notecase import make_case, make_note
 
 #: A page the case holds nothing of.
 ELSEWHERE = "https://www.aljazeera.com/news/2026/9/10/houthis-take-mocha"

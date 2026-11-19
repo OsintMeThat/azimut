@@ -21,7 +21,7 @@ from azimut.engine import bundles, linkarchive, notesources, uses, workqueue
 from azimut.engine.notelook import CASE_NOTE
 from azimut.workspace import Case
 
-from test_notes_report import make_case, make_note
+from notecase import make_case, make_note
 
 JAZEERA = "https://www.aljazeera.com/news/2026/9/10/houthis-take-mocha"
 BBC = "https://www.bbc.com/news/articles/c1"
