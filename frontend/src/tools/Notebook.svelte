@@ -825,7 +825,7 @@
           onkeydown={(event) => { if (event.key === 'Enter') event.currentTarget.blur(); }} />
         <span class="hint">{'{today}'} and {'{now}'} are written in when a note starts from it; {'{title}'}, {'{date}'} and the signature's words when it prints. A ::: top-right block in the cover pins it to a corner.</span>
         <div class="spacer"></div>
-        <LookControl look={template.look} template onchange={changeTemplateLook} />
+        <LookControl look={template.look} template onchange={changeTemplateLook} text={templateDoc.text} />
         <ViewModes page={pageMode} guide="notebook.view" onchange={setPageMode} />
         <button class="btn btn-primary btn-sm" onclick={() => leaveTemplate()}><Icon name="check" size={14} /> Done</button>
       </header>
@@ -865,7 +865,7 @@
             <Icon name="clock" size={12} /> {progressWords(archiving)}</button>
         {/if}
         <div class="spacer"></div>
-        <LookControl {look} onchange={pickLook} entities={graphEntities} disabled={!look} />
+        <LookControl {look} onchange={pickLook} entities={graphEntities} disabled={!look} text={doc.text} />
         <ViewModes page={pageMode} guide="notebook.view" onchange={setPageMode} />
         <button class="btn btn-ghost btn-sm" title="Stays open on the right as you switch tools" aria-label="Pin to the side"
           data-guide="notebook.dock" onclick={() => beside()}><Icon name="panelRight" size={15} /><span class="wide-only">Pin to the side</span></button>

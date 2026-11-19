@@ -329,7 +329,7 @@
       </button>
       <span class="spacer"></span>
       <NoteSaved {doc} />
-      <LookControl {look} onchange={pickLook} {entities} disabled={!look} />
+      <LookControl {look} onchange={pickLook} {entities} disabled={!look} text={doc?.text ?? ''} />
       <ViewModes {page} inPlace onchange={setPage} />
       <button type="button" class="btn btn-ghost btn-sm add" title="Add from the tab in front, or cite a source" aria-haspopup="menu"
         aria-label="Add" aria-expanded={Boolean(adding)} onclick={(event) => openAdding(event.currentTarget)}>

@@ -756,6 +756,9 @@ test('For › Report adds the report\'s annexes to the Page pane, and a switch t
   expect(looks.at(-1)).toMatchObject({ style: 'report', annexes: {}, sources_style: '' });
 
   const includes = page.getByRole('group', { name: 'What it includes' });
+  // folded to one line until Change… opens it
+  await expect(includes).toContainText('Academic sources · 5 annexes · links grouped');
+  await includes.getByRole('button', { name: /Change…/ }).click();
   await expect(includes.locator('[data-include="method"]')).toContainText("Report's own");
   await includes.locator('[data-include="method"] input').click();
   await expect(sheets).toHaveCount(6);
