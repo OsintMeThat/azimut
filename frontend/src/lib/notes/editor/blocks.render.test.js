@@ -41,7 +41,7 @@ function ownKind(kind) {
 describe('the block kinds', () => {
   it('holds every kind the page draws whole, in the order they are read', () => {
     expect(blockKinds().map((kind) => kind.name)).toEqual([
-      'aligned', 'steps', 'story', 'map', 'diagram', 'table', 'picture', 'pagebreak', 'cover', 'html', 'include',
+      'infographic', 'aligned', 'steps', 'story', 'map', 'diagram', 'table', 'picture', 'pagebreak', 'cover', 'html', 'include',
     ]);
     for (const kind of blockKinds()) {
       expect(typeof kind.widget, kind.name).toBe('function');

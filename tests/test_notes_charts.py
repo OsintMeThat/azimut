@@ -763,12 +763,14 @@ def dots():
         return nc.Plot([*marks, *legend], 60 + height, lines=[category.name for category in reading.categories],
                        legend=own, facts={"of": reading.block.extra.get("of")}, notes=["Areas to scale."])
 
+    # what the registry held before, given back whole: a waffle reads "of" too, and a test after
+    # this one in the same worker must still find it
+    kept = (dict(nc.KINDS), dict(nc._KIND_WORDS), dict(nc._KIND_KEYS))
     kind = nc.register(nc.Kind("dots", "Dots", plot, words=("dot chart",), keys=("of",), legend=False))
     yield kind
-    nc.KINDS.pop("dots")
-    for word in ("dots", "dot chart"):
-        nc._KIND_WORDS.pop(word)
-    nc._KIND_KEYS.pop("of")
+    for registry, before in zip((nc.KINDS, nc._KIND_WORDS, nc._KIND_KEYS), kept):
+        registry.clear()
+        registry.update(before)
 
 
 def test_a_registered_kind_is_read_written_laid_and_painted(dots):
