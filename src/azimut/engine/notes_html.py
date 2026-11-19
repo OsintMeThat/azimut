@@ -46,6 +46,12 @@ real words in the page's faces, a title on every bar for the pointer and a descr
 screen readers, its numbers folded under it as a table. It is drawn again for a phone, and
 in a story for its dark stage; the style sheet shows the one that fits, and print the first.
 
+**Infographics.** A `:::: infographic` block is a page of panels (`engine/notes_infographic.py`):
+its title band, one legend for a colour column its charts share, its panels in two columns
+as the picture lays them (each chart its own SVG, the map the page's own, the words as
+text), then its one source line. On a phone the columns become one, in the text's order.
+A web folder also carries the whole page as one picture, a press away.
+
 **Two layouts.** The look's `web` lays the page out as an article, or as a story whose
 pictures hold still while the words after each go by (`_scenes`, the `::: story` markup
 reused). The text is the same in both, only grouped; the reader script and style sheet
@@ -88,7 +94,18 @@ from PIL import Image as PILImage
 from PIL import ImageOps, ImageSequence, UnidentifiedImageError
 
 from . import ffmpeg as ffmpeg_engine
-from . import mapsites, noteannexes, notecharts, notefill, notes_charts, notes_maps, notes_style, notesources, pdffonts
+from . import (
+    mapsites,
+    noteannexes,
+    notecharts,
+    notefill,
+    notes_charts,
+    notes_infographic,
+    notes_maps,
+    notes_style,
+    notesources,
+    pdffonts,
+)
 from . import thumbnails
 from . import notes_markdown as md
 from .media import media_kind
@@ -525,6 +542,7 @@ class _Page:
         #: The figure each proof shown in the page stands in, by its record, which a map's card links to.
         self._proof_anchors: dict[str, str] = {}
         self.charts = 0
+        self.infographics = 0
         #: The words the page's charts draw, which its faces must carry.
         self._chart_words: list[str] = []
         #: The credits of the maps it drew, and the id of each Limits box in order: what
@@ -783,7 +801,8 @@ class _Page:
     def _anchor_proofs(self, pieces: list[md.Piece], blocks: dict[int, list[md.Block]]) -> None:
         """Each proof the page shows as a figure, named `fig-1`, `fig-2`… in page order, so
         a map's card can link to it. Only when the page holds a map."""
-        if not any(block.kind == md.MAP for piece in pieces if piece.kind == "text" for block in blocks[id(piece)]):
+        if not any(block.kind in (md.MAP, md.INFOGRAPHIC) for piece in pieces if piece.kind == "text"
+                   for block in blocks[id(piece)]):
             return
         for piece in pieces:
             if piece.kind != "text":
@@ -1021,6 +1040,10 @@ class _Page:
 
     def _on_az_chart(self, tokens: list[Token], index: int) -> int:
         self.out.extend(self._chart(tokens[index].content))
+        return index + 1
+
+    def _on_az_infographic(self, tokens: list[Token], index: int) -> int:
+        self.out.append(self._infographic(tokens[index].content))
         return index + 1
 
     def _on_html_block(self, tokens: list[Token], index: int) -> int:
@@ -1976,6 +1999,127 @@ class _Page:
             finally:
                 self._block_line = block_line
         return parts
+
+    # -- infographics -------------------------------------------------------------------
+
+    def _infographic(self, body: str) -> str:
+        """A `:::: infographic` block as a figure: its title band, its shared legend, its
+        panels in the two columns the picture lays them in, and its one source line. Each
+        chart is its own SVG, drawn again for a phone; the map is the page's own map, live
+        in a web folder that makes maps live; the words are text. A folder also carries
+        the whole page as one picture."""
+        line = self._line
+        page = notes_infographic.read(self.case, body, look=self.look, note_text=self._note_text, maps=False,
+                                      width=notes_infographic.HTML_WIDTH)
+        for message, kind, offset in page.warnings:
+            self._warn(message, line if self._fixed or offset is None else line + offset,
+                       kind if kind in WARNING_KINDS else md.OTHER)
+        if not page.panels:
+            return _aside(notes_infographic.NO_PANEL)
+        self.infographics += 1
+        ident = f"infographic-{self.infographics}"
+        self.ids.add(ident)
+        graphic = page.graphic
+        band = "".join([
+            f'<p class="az-ig-kicker">{_text(graphic.kicker)}</p>' if graphic.kicker else "",
+            f'<p class="az-ig-title" role="heading" aria-level="2">{_text(graphic.title)}</p>' if graphic.title else "",
+            f'<p class="az-ig-standfirst">{_text(graphic.standfirst)}</p>' if graphic.standfirst else "",
+        ])
+        legend = ""
+        if page.legend:
+            drawing = notes_infographic.legend_drawing(page, page.width - 2 * notes_infographic.MARGIN)
+            markup = notes_charts.svg(drawing, ident=f"{ident}-legend", transparent=True,
+                                      faces=self._chart_faces(page.theme))
+            legend = f'<div class="az-ig-legend">{markup}</div>'
+        head = f'<header class="az-ig-band">{band}{legend}</header>\n' if band or legend else ""
+        rows: list[str] = []
+        for number, row in enumerate(page.bands):
+            if len(row.panels) == 1 and row.panels[0].column < 0:
+                rows.append(f'<div class="az-ig-row">{self._ig_panel(page, row.panels[0], ident, line)}</div>\n')
+                continue
+            columns = ["", ""]
+            for drawn in sorted(row.panels, key=lambda one: (one.column, one.y)):
+                columns[max(0, drawn.column)] += self._ig_panel(page, drawn, ident, line)
+            rows.append(f'<div class="az-ig-row az-ig-pair"><div class="az-ig-col">{columns[0]}</div>'
+                        f'<div class="az-ig-col">{columns[1]}</div></div>\n')
+        sources = ""
+        if page.credits:
+            head_word = "Sources." if len(page.credits) > 1 else "Source."
+            sources = (f'<p class="az-ig-sources"><strong>{head_word}</strong> '
+                       f"{_text(page.credit.rstrip('.'))}.</p>\n")
+        whole = ""
+        if self.folder is not None:
+            drawn_page = notes_infographic.read(self.case, body, look=self.look, note_text=self._note_text)
+            picture = notes_infographic.picture(drawn_page, "page")
+            address = self.folder.put(picture, graphic.title or "infographic", ".png")
+            whole = (f'<p class="az-ig-whole"><a href="{_attr(address)}" download>'
+                     f"The infographic as one picture</a></p>\n")
+        look = page.theme.name
+        figure = (f'<figure class="az-infographic" data-kind="infographic" data-ig-look="{look}" id="{ident}" '
+                  f'aria-label="{_attr(page.title or "Infographic")}">\n{head}<div class="az-ig-rows">\n'
+                  f'{"".join(rows)}</div>\n{sources}{whole}</figure>\n')
+        return figure if self.folder is None else self._lift_data(figure, ident)
+
+    def _ig_panel(self, page: notes_infographic.Page, drawn: notes_infographic.Drawn, ident: str, line: int) -> str:
+        """One panel of an infographic: a chart's SVG, wide and for a phone, its numbers
+        folded under it; the map; or the words."""
+        order = f' style="--az-ig-o:{drawn.index}"'
+        panel = drawn.panel
+        if panel.kind == notes_infographic.CHART and drawn.chart is not None:
+            faces = self._chart_faces(page.theme)
+            name = f"{ident}-{drawn.index + 1}"
+            drawings = [("wide", drawn.chart)]
+            phone = notes_infographic.relaid(page, drawn, notecharts.PHONE_WIDTH)
+            if phone is not None and drawn.w > notecharts.PHONE_WIDTH * 1.2:
+                drawings.append(("phone", phone))
+            marked: list[str] = []
+            for width, layout in drawings:
+                markup = _flush_chart(notes_charts.svg(layout, ident=f"{name}-{width}", transparent=True, faces=faces),
+                                      layout)
+                self._chart_words.append(html.unescape(re.sub(r"<[^>]*>", " ", markup)))
+                marked.append(markup.replace('class="az-chart ', f'class="az-chart az-chart-{width} ', 1))
+            if len(marked) == 1:
+                # drawn at a column's width, it is the phone's drawing too
+                marked[0] = marked[0].replace("az-chart-wide ", "az-chart-both ", 1)
+            numbers = (f'<details class="az-chart-numbers"><summary>{notecharts.THE_NUMBERS}</summary>\n'
+                       f"{notes_charts.data_table_html(drawn.chart, caption=False)}</details>\n")
+            return (f'<div class="az-ig-panel" data-panel="chart"{order}><div class="az-chart-frame">{"".join(marked)}'
+                    f"</div>{numbers}</div>")
+        if panel.kind == notes_infographic.MAP:
+            kept, self._line = self._line, line + panel.line + 1
+            try:
+                inner = self._map(panel.body)
+            finally:
+                self._line = kept
+            return f'<div class="az-ig-panel" data-panel="map"{order}>{inner}</div>'
+        if panel.kind == notes_infographic.WORDS:
+            kept_line, self._block_line = self._block_line, line + panel.line
+            try:
+                words = self._ig_words(panel.body)
+            finally:
+                self._block_line = kept_line
+            return f'<div class="az-ig-panel az-ig-words" data-panel="words"{order}>{words}</div>'
+        return f'<div class="az-ig-panel"{order}>{_aside("Chart not drawn: it holds no table.")}</div>'
+
+    def _ig_words(self, text: str) -> str:
+        """A words panel: its headings as the panel's own (never in the contents), its
+        paragraphs and lists as the page draws them."""
+        tokens = md.parse(text)
+        out: list[str] = []
+        index = 0
+        while index < len(tokens):
+            if tokens[index].type == "heading_open":
+                level = 3 if tokens[index].tag in ("h1", "h2", "h3") else 4
+                out.append(f'<p class="az-ig-head" role="heading" aria-level="{level}" dir="auto">'
+                           f"{self._inline(tokens[index + 1])}</p>\n")
+                index += 3
+                continue
+            end = index
+            while end < len(tokens) and not (tokens[end].type == "heading_open" and tokens[end].level == 0):
+                end += 1
+            out.extend(part for part in self._parts_of(tokens, index, end) if part)
+            index = end
+        return "".join(out)
 
     def _chart_faces(self, theme: notes_charts.ChartTheme) -> dict[str, str]:
         """The page's own faces a chart's words are set in, where they are the ones it was

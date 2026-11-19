@@ -7432,6 +7432,44 @@ a PNG for the PDF page, X (16:9), 4:5 or 1:1: the editor's chart card and *Expor
 picture* read it. It writes nothing, refuses a block past 256 KB, and says the check in
 its headers.
 
+**Infographics.** A `:::: infographic` block is a page of panels read as one figure
+(`engine/notes_infographic.py`): a title band, then ordinary `::: chart` and `::: map` blocks
+and the words between them, in reading order, then one source line. Its four colons keep each
+panel's own syntax, so a panel moved out reads the same. Its own lines are only `kicker`,
+`title`, `standfirst`, `look` (report, book or dark, one for the page), `legend` (`each panel`
+to keep one legend a chart) and `widths` (each panel half or wide, in reading order; words, key
+figures and a timeline span the page unless it says otherwise). Half panels fill the shorter of
+two columns, so a tall panel stands beside two short ones; a wide panel starts below both.
+Charts that colour by the same column (Grade) share one legend at the top, every value kept; a
+value is one colour on the whole page, the case's first, else the first chart's; the sources of
+every panel and the map's imagery are gathered into one line. The honesty rules hold across it:
+each chart keeps its checks, a title band that says the figures are floors says it for every
+panel, and a title stating a number says *at least* when a panel counts a floor.
+
+`/` › **Infographic** (Figures) writes a starter from what the note holds: its key figures, its
+main chart, a donut and its map, each from the note's own tables, never numbers it does not
+hold; a note with none gets an empty page and a line saying how to fill it. The page is drawn
+in the note as the server draws it; a press on a panel or on **Edit** opens the builder beside
+the note: the title band, the panels (drag or Alt+↑/↓ to reorder, Half or Wide, × takes one out,
+**Add a panel** shows each table of the note drawn as every kind it fits and the note's maps,
+with Words and Key figures to fill in), the look, **One legend for Grade, at the top**, the
+colours and where each comes from (*Keep these colours for the case* names them in the case's
+palette), what the check says, **Export as a picture** (X 16:9, 4:5, 1:1, the PDF page, SVG)
+and **To Post**. Each press writes the block's text as one change, so one Undo.
+
+The PDF prints it on a page of its own as one picture at 300 dpi, broken between rows of panels
+when it is taller than a sheet; what follows starts the next page. The HTML report lays the
+panels in the same two columns, each chart its own SVG (drawn again for a phone), the map the
+page's own (live in a web folder that makes maps live), the words as text; a phone reads one
+column in the text's order. A web folder also carries the page as one picture, a press away.
+WordPress takes one picture of the page, its alt text the band, every panel and the sources,
+then each chart's numbers under *The numbers*. To Post hands one picture at 16:9, filed once.
+A picture of a fixed shape sets the rows side by side in strips until the page is as near that
+shape as it gets, and pads the rest with paper: nothing cut. `POST /notes/infographic` draws a
+block for the builder (SVG, panel boxes, legend, check), as an SVG file or as a picture;
+`POST /notes/infographic/offers` reads a note's tables and maps for *Add a panel* and the
+starter. Neither writes anything.
+
 **To Post.** In the open note's ⋯, kept out of the header, *To Post* opens Post on a Free post thread made of the
 note's public edition, or of the stretch selected in it, which its title then says;
 nothing is posted. It waits on an empty note. The server reads the note as the editor

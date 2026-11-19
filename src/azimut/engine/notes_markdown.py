@@ -61,9 +61,13 @@ MAP_TOKEN = "az_map"
 #: A chart drawn from the table it holds (`engine/notes_charts.py`), handed on the same way.
 CHART = "chart"
 CHART_TOKEN = "az_chart"
+#: An infographic (`engine/notes_infographic.py`): a page of those blocks and words, in
+#: a fence of four colons so the blocks inside keep their own. Read before them, whole.
+INFOGRAPHIC = "infographic"
+INFOGRAPHIC_TOKEN = "az_infographic"
 #: The blocks a renderer draws whole, by name, and the one token each becomes
 #: (`block_token`): every renderer has an `_on_<token>` for each.
-TOKEN_BLOCKS: dict[str, str] = {MAP: MAP_TOKEN, CHART: CHART_TOKEN}
+TOKEN_BLOCKS: dict[str, str] = {MAP: MAP_TOKEN, CHART: CHART_TOKEN, INFOGRAPHIC: INFOGRAPHIC_TOKEN}
 
 
 #: How deep chapters nest: a report's chapter may hold chapters of its own, and
@@ -79,9 +83,11 @@ COMMENT = re.compile(r"\A(?:\s*<!--.*?-->)+\s*\Z", re.S)
 MERMAID_INFO = re.compile(r"^\s*mermaid\b")
 IMAGE_ATTRS = re.compile(r"!\[([^\]]*)\]\((\S+?)(?:\s+[\"']([^\"']*)[\"'])?\)\s*\{([^}\n]+)\}")
 ALIGNMENT_BLOCK = re.compile(
-    rf"^:::[ \t]*({'|'.join((*ALIGNMENT_NAMES, *CORNER_NAMES, *FIGURE_BLOCKS, *TOKEN_BLOCKS))})[ \t]*\n(.*?)^:::[ \t]*$",
+    rf"^:::[ \t]*({'|'.join((*ALIGNMENT_NAMES, *CORNER_NAMES, *FIGURE_BLOCKS, MAP, CHART))})[ \t]*\n(.*?)^:::[ \t]*$",
     re.S | re.M,
 )
+#: A block of blocks, four colons deep, closed by four colons alone.
+WRAPPER_BLOCK = re.compile(r"^::::[ \t]*(infographic)[ \t]*\n(.*?)^::::[ \t]*$", re.S | re.M)
 ATTR_PARAM = "__azimut_attrs"
 ATTR_VALUES = re.compile(r"\b(width|align)\s*=\s*([\w.%+-]+)")
 #: `caption="Smoke over the port"` in a picture's braces. Taken out before the
@@ -551,9 +557,19 @@ def alignment_blocks(text: str) -> list["Block"]:
     blocks: list[Block] = []
     position = 0
     fenced = fenced_spans(text)
+    wrapped = [match for match in WRAPPER_BLOCK.finditer(text)
+               if not any(start <= match.start() < end for start, end in fenced)]
     search = 0
-    while (match := ALIGNMENT_BLOCK.search(text, search)) is not None:
-        if any(start <= match.start() < end for start, end in fenced):
+    while True:
+        match = ALIGNMENT_BLOCK.search(text, search)
+        # a wrapper is read before the blocks inside it, whole: one token, as a map is
+        wrapper = next((one for one in wrapped if one.start() >= search), None)
+        if wrapper is not None and (match is None or wrapper.start() <= match.start()):
+            match = wrapper
+        if match is None:
+            break
+        if match.re is ALIGNMENT_BLOCK and (any(start <= match.start() < end for start, end in fenced)
+                                           or any(one.start() <= match.start() < one.end() for one in wrapped)):
             search = text.find("\n", match.start()) + 1 or len(text)
             continue
         search = match.end()
@@ -599,7 +615,8 @@ def fenced_spans(text: str) -> list[tuple[int, int]]:
 
 def block_token(name: str, body: str) -> Token:
     """A block of `TOKEN_BLOCKS` as the one token every renderer walks to: `::: map`
-    to `_on_az_map`, `::: chart` to `_on_az_chart`."""
+    to `_on_az_map`, `::: chart` to `_on_az_chart`, `:::: infographic` to
+    `_on_az_infographic`."""
     token = Token(TOKEN_BLOCKS[name], "", 0)
     token.content = body
     token.block = True
@@ -679,8 +696,8 @@ class Block:
     start: int = 0
     #: The corner of the own cover it is pinned to (`CORNER_NAMES`), or "".
     corner: str = ""
-    #: `steps` or `story` for a block of pictures told as steps (`FIGURE_BLOCKS`), `map`
-    #: or `chart` for a block drawn whole (`TOKEN_BLOCKS`), or "".
+    #: `steps` or `story` for a block of pictures told as steps (`FIGURE_BLOCKS`), `map`,
+    #: `chart` or `infographic` for a block drawn whole (`TOKEN_BLOCKS`), or "".
     kind: str = ""
 
 
