@@ -136,6 +136,10 @@ test('/tab still finds Table, and Enter writes it', async ({ page }) => {
   await expect(page.locator('.cm-tooltip-autocomplete li[aria-selected]')).toContainText('Table');
   await page.waitForTimeout(120);
   await page.keyboard.press('Enter');
+  // the table asks its size first, 3 by 3 unless picked, and Enter puts it in
+  const squares = page.getByLabel('Rows by columns. Arrows to size, Enter to put in');
+  await expect(squares).toBeFocused();
+  await page.keyboard.press('Enter');
   // a table, its rows written as Markdown reads them; the slash and what was typed gone
   await expect.poll(() => state.written.at(-1) ?? '').toMatch(/^# Lead\n\nSeen at the quay on day two\.\n+\|.*\|\n\| --- \|/);
   expect(state.written.at(-1)).not.toContain('/tab');
