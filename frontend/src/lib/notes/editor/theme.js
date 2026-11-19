@@ -97,16 +97,7 @@ export const look = EditorView.theme({
   '.cm-block table': { borderCollapse: 'collapse', fontSize: '0.92em' },
   '.cm-block th, .cm-block td': { border: '1px solid var(--border-strong)', padding: '4px 10px', textAlign: 'left' },
   '.cm-block th': { background: 'var(--bg-2)' },
-  // The room above and below a framed block is a clear border, never a margin: the editor
-  // measures a block by its box, and a margin it cannot see would put every line under it
-  // out of step with where the page draws it (the handle, a press, a jump). The frame is
-  // then drawn inside that border: the background clipped to it, its line an inset shadow.
-  '.cm-block-diagram': {
-    background: '#fff', backgroundClip: 'padding-box', borderRadius: '4px / 8px', padding: '10px', margin: '0 var(--note-gutter, 32px)',
-    borderTop: '4px solid transparent', borderBottom: '4px solid transparent', overflowX: 'auto', color: '#202124',
-  },
-  '.cm-block-diagram > .cm-source-edit': { right: '6px' },
-  '.cm-block-diagram svg': { maxWidth: '100%', height: 'auto', display: 'block', margin: '0 auto' },
+  // a diagram's frame, its bar and its form are its own (`editor/diagramBlock.js`)
   '.cm-block-failed': { color: 'var(--danger)', background: 'var(--danger-soft)', fontSize: '0.9em' },
   '.cm-map-frame': { position: 'relative', borderRadius: '4px', overflow: 'hidden', background: '#20252b', minHeight: '64px' },
   '.cm-map-frame img': { display: 'block', width: '100% !important', marginLeft: '0 !important', filter: 'saturate(.62) brightness(.8)' },
@@ -117,6 +108,10 @@ export const look = EditorView.theme({
   },
   '.cm-map-plain .cm-map-said': { position: 'static', margin: '10px' },
   '.cm-map-said > span': { color: 'rgba(255, 255, 255, .8)' },
+  // The room above and below a framed block is a clear border, never a margin: the editor
+  // measures a block by its box, and a margin it cannot see would put every line under it
+  // out of step with where the page draws it (the handle, a press, a jump). The frame is
+  // then drawn inside that border: the background clipped to it, its line an inset shadow.
   '.cm-block-steps, .cm-block-story, .cm-block-map': {
     margin: '0 var(--note-gutter, 32px)', padding: '9px 13px 11px', border: 'none', borderTop: '4px solid transparent',
     borderBottom: '4px solid transparent', borderRadius: '6px / 10px', background: 'var(--bg-2)', backgroundClip: 'padding-box',
@@ -124,7 +119,7 @@ export const look = EditorView.theme({
   },
   '.cm-block-steps > .cm-source-edit, .cm-block-story > .cm-source-edit, .cm-block-map > .cm-source-edit': { top: '7px', right: '7px' },
   // picked, a framed block's outline is drawn inside its clear border, where its frame is
-  '.cm-block-diagram.cm-picked, .cm-block-steps.cm-picked, .cm-block-story.cm-picked, .cm-block-map.cm-picked': {
+  '.cm-block-steps.cm-picked, .cm-block-story.cm-picked, .cm-block-map.cm-picked': {
     outline: 'none', boxShadow: 'inset 0 0 0 2px var(--accent)',
   },
   '.cm-played-head': {
