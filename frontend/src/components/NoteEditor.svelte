@@ -49,14 +49,14 @@
   import { gotoPoint } from '../lib/navigate.js';
   import { droppedMedia, carriesMedia } from '../lib/drag.js';
   import { CALLOUTS, calloutMarkdown } from '../lib/notes/callouts.js';
-  import { SLASH_COMMANDS, slashInsert, uploadedImage } from '../lib/notes/syntax.js';
+  import { CHART_STARTER, SLASH_COMMANDS, slashInsert, uploadedImage } from '../lib/notes/syntax.js';
   import { BUILT_IN_PICTURES, builtInLine } from '../lib/notes/reportParts.js';
   import { ownCover, readLook, writeLook } from '../lib/notes/look.js';
   import { noteMode } from '../lib/notes/noteMode.svelte.js';
   import { differing, editNote, takeBack } from '../lib/notes/noteDoc.svelte.js';
   import { offerWriter, openInDock } from '../lib/notes/noteDock.svelte.js';
   import {
-    captionAt, heldRange, holdCell, holdRange, insertAtCursor, insertCover, insertInclude, jumpToLine, noteExtensions, openTablePicker,
+    captionAt, heldRange, holdCell, holdRange, insertAtCursor, insertCover, insertInclude, jumpToLine, noteExtensions, openTablePicker, startChart,
     placeInCell, placeText, releaseCell, releaseRange, resizePicture, setLinePrefix, setNoteCase, setNoteMode, takeBackRange,
     toggleWrap,
   } from '../lib/notes/liveMarkdown.js';
@@ -169,6 +169,9 @@
     stateSource: (entity, url) => stateSourceOf(caseId, entity, url),
     get statePosted() { return template || !caseId ? null : (entity, url) => statePostedOf(caseId, entity, url); },
     table: () => newTable(),
+    chart: () => newChart(),
+    /** The note being written, which a chart is drawn in the look of and whose tables its rows are copied from. */
+    get noteId() { return template || !doc ? '' : (doc.noteId ?? 'case'); },
     tableToast: (message, actions = [], kind = 'info') => toast(message, kind, actions.length ? 8000 : 4000, actions.length ? actions : null),
     /** The note a picked cell belongs to, shared by every editor showing it. */
     get noteKey() { return noteKey(); },
@@ -190,6 +193,19 @@
     const line = view.state.doc.lineAt(head);
     const command = SLASH_COMMANDS.find((item) => item.id === 'table');
     const made = slashInsert({ ...command, action: undefined }, { before: line.text.slice(0, head - line.from) });
+    view.dispatch({ changes: { from: head, insert: made.text }, selection: { anchor: head + made.cursor }, userEvent: 'input.complete' });
+  }
+
+  /** `/` › Chart: a table picked by its picture on the drawn page; the raw Markdown gets the block to fill. */
+  function newChart() {
+    if (!view || readOnly) return;
+    if (noteMode.mode !== 'markdown') {
+      startChart(view);
+      return;
+    }
+    const head = view.state.selection.main.head;
+    const line = view.state.doc.lineAt(head);
+    const made = slashInsert({ block: CHART_STARTER }, { before: line.text.slice(0, head - line.from) });
     view.dispatch({ changes: { from: head, insert: made.text }, selection: { anchor: head + made.cursor }, userEvent: 'input.complete' });
   }
 

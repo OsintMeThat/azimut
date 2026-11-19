@@ -136,6 +136,8 @@ export const STEPS_BLOCK = `::: steps\n${hintLine('One picture a line, each a st
 export const STORY_BLOCK = `::: story\n${hintLine('A picture, then the words read beside it. {zoom=x,y,w,h} after a picture moves in on a part of it')}\n:::`;
 /** The names a block of steps or a story opens with. */
 export const PLAYED_BLOCK = /^:::[ \t]*(steps|story)[ \t]*$/;
+/** A chart as the raw Markdown's `/` › Chart writes it: a kind over a table to fill (`engine/notes_charts.py`). */
+export const CHART_STARTER = '::: chart\nkind: bars\n| Category | Count |\n| --- | ---: |\n|  |  |\n|  |  |\n:::';
 /** A map's block (`::: map`), which an HTML page draws as a map and a PDF as its picture. */
 export const MAP_BLOCK = /^:::[ \t]*map[ \t]*$/;
 const DIAGRAM = '```mermaid\nflowchart LR\n  A[Tip] --> B[Check]\n  B --> C[Confirmed]\n```';
@@ -184,7 +186,8 @@ export const SLASH_COMMANDS = [
   { id: 'include', label: 'Include a note', icon: 'note', words: 'chapter report embed note', action: 'include', hint: 'As a chapter', notes: true },
   { id: 'hint', label: 'Guidance', icon: 'help', words: 'hint guide help template', hint: 'Grey, never printed', template: true },
   { id: 'table', label: 'Table', icon: 'table', words: 'grid columns rows spreadsheet csv file', block: TABLE, action: 'table', hint: 'Rows by columns, or from a file' },
-  { id: 'diagram', label: 'Diagram', icon: 'network', words: 'mermaid flowchart chart', block: DIAGRAM },
+  { id: 'chart', label: 'Chart', icon: 'chart', words: 'chart graph bars pie donut pictograms waffle timeline figures plot', action: 'chart', hint: 'Drawn from a table, picked by its picture' },
+  { id: 'diagram', label: 'Diagram', icon: 'network', words: 'mermaid flowchart', block: DIAGRAM },
   { id: 'steps', label: 'Steps', icon: 'columns', words: 'stepper slides sequence carousel before after days', block: STEPS_BLOCK, hint: 'Pictures one at a time, in HTML' },
   { id: 'story', label: 'Story', icon: 'text', words: 'scrollytelling scroll narrative sticky zoom', block: STORY_BLOCK, hint: 'Words scroll beside a picture, in HTML' },
   { id: 'code', label: 'Code', icon: 'hash', words: 'code block monospace', block: '```\n\n```', hint: 'Kept as typed, in a fixed-width face' },
@@ -218,7 +221,7 @@ export const INSERT_SECTIONS = [
   { id: 'media', label: 'Media', ids: ['picture', 'upload', 'steps', 'story', 'my-logo'] },
   { id: 'case', label: 'From the case', ids: ['cite', 'map', 'include'] },
   { id: 'layout', label: 'Layout', ids: ['divider', 'pagebreak', 'cover', 'align', 'corner', 'signature', 'field'] },
-  { id: 'figures', label: 'Figures', ids: ['table', 'diagram'] },
+  { id: 'figures', label: 'Figures', ids: ['table', 'chart', 'diagram'] },
 ];
 
 /** The line under an entry's name, for the entries that carry none of their own. */

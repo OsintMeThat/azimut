@@ -64,6 +64,12 @@ const ART = {
   field: (command) => [el('span', 'cm-ip-row', el('span', 'cm-ip-words', 'Written by '),
     el('span', 'cm-ip-field', command.text ? command.label.replace(/^Field: /, '') : 'name'), el('span', 'cm-ip-words', '.'))],
   table: () => [el('span', 'cm-ip-table', ['Source', 'Status', '', 'Seen', 'Confirmed', '', '', '', ''].map((cell, at) => el('span', at < 3 ? 'cm-ip-th' : 'cm-ip-td', cell)))],
+  chart: () => [el('span', 'cm-ip-chart', [['Cougar', 8, 0], ['Tygor', 1, 7], ['M-ATV', 7, 0], ['Model open', 0, 6]].map(([name, sure, almost]) => {
+    const bar = el('span', 'cm-ip-chart-bar', el('span', 'cm-ip-chart-sure'), el('span', 'cm-ip-chart-almost'));
+    bar.firstChild.style.width = `${sure * 11}%`;
+    bar.lastChild.style.width = `${almost * 11}%`;
+    return el('span', 'cm-ip-chart-row', el('span', 'cm-ip-chart-name', name), bar);
+  }))],
   diagram: () => [el('span', 'cm-ip-diagram', el('span', 'cm-ip-node', 'Tip'), el('span', 'cm-ip-arrow'), el('span', 'cm-ip-node', 'Check'),
     el('span', 'cm-ip-arrow'), el('span', 'cm-ip-node cm-ip-node-done', 'Confirmed'))],
 };
@@ -96,6 +102,7 @@ export function sampleMarkdown(command) {
     map: '::: map\ntitle: The front, north\nlayer: Front, north\n:::',
     include: '[[include:…]]',
     table: '| Source | Status |\n| --- | --- |\n|  |  |',
+    chart: '::: chart\nkind: stacked bars\ntitle: At least 41 vehicles, by model\ncount: At least\nby: Model\ncolour by: Grade\n| Model | Grade | At least |\n…\n:::',
     cover: '::: center\n# {title}\n{date}\n:::\n<!-- cover -->',
   }[command.id];
   if (written) return written;
@@ -252,4 +259,10 @@ export const previewLook = EditorView.theme({
   '.cm-ip-node': { padding: '4px 7px', border: '1.5px solid #184f95', borderRadius: '4px', color: '#202124', fontSize: '10.5px', background: '#eaf2fc' },
   '.cm-ip-node-done': { background: '#184f95', color: '#fff' },
   '.cm-ip-arrow': { width: '14px', height: '0', borderTop: '1.5px solid #5f6368' },
+  '.cm-ip-chart': { display: 'flex', flexDirection: 'column', gap: '5px', padding: '10px 10px', borderRadius: '4px', background: '#fff' },
+  '.cm-ip-chart-row': { display: 'grid', gridTemplateColumns: '58px 1fr', alignItems: 'center', gap: '6px' },
+  '.cm-ip-chart-name': { color: '#202124', fontSize: '10px', textAlign: 'right', whiteSpace: 'nowrap' },
+  '.cm-ip-chart-bar': { display: 'flex', height: '9px' },
+  '.cm-ip-chart-sure': { background: '#184f95', borderRadius: '2px 0 0 2px' },
+  '.cm-ip-chart-almost': { background: '#3987e5', borderRadius: '0 2px 2px 0' },
 });
