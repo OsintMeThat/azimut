@@ -47,16 +47,24 @@
   let top = 0;
   const elements = $state([]);
 
+  // what each frame has finished loading: a page asked again as the hidden frame holds it
+  // (an Undo back to it) loads nothing new there, so it is shown as it stands
+  const done = ['', ''];
+
   $effect(() => {
     const next = html;
     if (!next) return;
     untrack(() => {
       ticket += 1;
-      frames[1 - shown] = { doc: keptScroll(next, top), ticket };
+      const other = 1 - shown;
+      const doc = keptScroll(next, top);
+      frames[other] = { doc, ticket };
+      if (done[other] === doc) shown = other;
     });
   });
 
   function loaded(index) {
+    done[index] = frames[index].doc;
     if (!frames[index].doc || frames[index].ticket !== ticket) return;
     shown = index;
   }
