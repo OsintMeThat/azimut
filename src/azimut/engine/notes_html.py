@@ -1974,8 +1974,9 @@ class _Page:
                     f"<details><summary>Its source</summary>\n{_code(source)}</details>\n</figure>\n")
         self._svgs += 1
         caption = self._caption("", "")
-        figcaption = f"<figcaption>{caption}</figcaption>" if caption else ""
-        return (f'<figure class="az-figure" data-kind="diagram">\n<div class="az-diagram" role="img" '
+        paper, words = _diagram_paper(cleaned)
+        figcaption = f"<figcaption{words}>{caption}</figcaption>" if caption else ""
+        return (f'<figure class="az-figure" data-kind="diagram"{paper}>\n<div class="az-diagram" role="img" '
                 f'aria-label="Diagram">{cleaned}</div>\n{figcaption}</figure>\n')
 
     # -- maps -------------------------------------------------------------------------
@@ -2798,6 +2799,23 @@ def _clean_svg(svg: str, prefix: str) -> str | None:
     else:
         text = text.replace("<svg ", f'<svg id="{prefix}" ', 1)
     return text
+
+
+#: The page a diagram's own config names, as the browser said it on the picture it drew.
+DIAGRAM_PAPER = re.compile(r'^<svg\b[^>]*?\sdata-background="(#[0-9a-fA-F]{6})"')
+
+
+def _diagram_paper(svg: str) -> tuple[str, str]:
+    """What lays a diagram's figure on its own page (a Dark diagram's): the figure's style,
+    and its caption's, light on a dark page. Nothing for one drawn on white."""
+    found = DIAGRAM_PAPER.match(svg)
+    if not found:
+        return "", ""
+    colour = found.group(1).lower()
+    red, green, blue = (int(colour[at:at + 2], 16) for at in (1, 3, 5))
+    if 0.2126 * red + 0.7152 * green + 0.0722 * blue >= 128:
+        return f' style="background:{colour}"', ""
+    return f' style="background:{colour};border-color:{colour}"', ' style="color:#c9ced5"'
 
 
 def _local_name(tag: str) -> str:

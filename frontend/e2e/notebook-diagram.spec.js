@@ -21,20 +21,97 @@ async function openCaseNotes(page, text) {
 
 test('draws a mermaid fence in the note, offline', async ({ page }) => {
   const fixture = await installAppFixture(page);
+  // the form reads the case's colours, a category takes the case's own
+  await page.route(`**/api/cases/${CASE_ID}/layer-palette`, (route) => route.fulfill({ json: { colours: [], icons: [] } }));
   await openCaseNotes(page, `# Field notes\n\n${DIAGRAM}\n\nAfter.`);
 
-  const diagram = page.locator('.cm-block-diagram svg');
+  const diagram = page.locator('.cm-block-diagram .cm-dg-figure svg');
   await expect(diagram).toBeVisible();
   await expect(diagram.getByText('Confirmed')).toBeVisible();
   await expect(page.locator('.cm-block-failed')).toHaveCount(0);
-  // a press picks it and leaves it drawn; a double press opens its source to edit
-  await page.locator('.cm-block-diagram').click();
-  await expect(page.locator('.cm-block-diagram.cm-picked svg')).toBeVisible();
-  await page.locator('.cm-block-diagram').dblclick();
+  // a press picks it and leaves it drawn; a double press opens its form, its </> its Mermaid
+  await page.locator('.cm-dg-figure').click();
+  await expect(page.locator('.cm-block-diagram.cm-picked svg').first()).toBeVisible();
+  await page.locator('.cm-dg-figure').dblclick();
+  await expect(page.getByRole('group', { name: 'Diagram' })).toBeVisible();
+  await expect(page.getByRole('textbox', { name: 'Box 3', exact: true })).toHaveValue('Confirmed');
+  await page.locator('.cm-dg-bar [data-edit-source]').click();
   await expect(page.locator('.cm-block-diagram')).toHaveCount(0);
   await expect(page.locator('.cm-content')).toContainText('flowchart LR');
 
   fixture.expectNoUnexpectedRequests();
+});
+
+test('builds a flow from scratch, turns it top down, and exports it drawn with its legend', async ({ page }) => {
+  await installAppFixture(page);
+  await page.route(`**/api/cases/${CASE_ID}/layer-palette`, (route) => route.fulfill({ json: { colours: [], icons: [] } }));
+  const state = { saved: '', exported: [] };
+  await page.route(`**/api/cases/${CASE_ID}/notes`, (route) => {
+    if (route.request().method() === 'GET') return route.fulfill({ json: { text: '# Field notes\n\n' } });
+    state.saved = route.request().postDataJSON().text;
+    return route.fulfill({ json: { status: 'saved' } });
+  });
+  await page.route(`**/api/cases/${CASE_ID}/notes/pdf/**`, (route) => {
+    const path = new URL(route.request().url()).pathname;
+    if (path.endsWith('/check')) return route.fulfill({ json: { notes: [{ note: 'case', title: 'Case notes', warnings: [] }] } });
+    const source = /```mermaid\n([\s\S]*?)\n```/.exec(state.saved)?.[1] ?? '';
+    return route.fulfill({ json: { diagrams: source ? [{ key: 'k1', source }] : [] } });
+  });
+  await page.route(`**/api/cases/${CASE_ID}/notes/pdf`, (route) => {
+    state.exported.push(route.request().postDataJSON());
+    return route.fulfill({ json: { written: ['Case notes.pdf'], warnings: [], path: '' } });
+  });
+  await page.goto('/#notebook');
+  await page.locator('[data-guide="notebook.case"] button.open').click();
+  await expect(page.locator('.cm-editor')).toBeVisible();
+
+  // / › Diagram: the gallery of kinds, each saying what it needs
+  await page.locator('.cm-content').click();
+  await page.keyboard.press('Control+End');
+  await page.keyboard.type('/diagram');
+  await expect(page.locator('.cm-tooltip-autocomplete li[aria-selected]')).toContainText('Diagram');
+  await page.waitForTimeout(120);
+  await page.keyboard.press('Enter');
+  const gallery = page.getByRole('dialog', { name: 'Pick a diagram' });
+  await expect(gallery.locator('.dg-pick')).toHaveCount(6);
+  await gallery.getByRole('button', { name: /^Flow: Steps and decisions/ }).click();
+
+  const form = page.getByRole('group', { name: 'Diagram' });
+  const write = async (field, words) => {
+    await field.fill(words);
+    await field.press('Enter');
+  };
+  await write(form.getByRole('textbox', { name: 'Box 1', exact: true }), 'Tip received');
+  await write(form.getByRole('combobox', { name: 'Category of box 1' }), 'Sources');
+  await form.getByRole('button', { name: 'Add a box' }).click();
+  await write(form.getByRole('textbox', { name: 'Box 5', exact: true }), 'Published');
+  await form.getByRole('button', { name: 'Add a link' }).click();
+  await form.getByRole('combobox', { name: 'From, link 4' }).selectOption({ label: 'Confirmed' });
+  await form.getByRole('radiogroup', { name: 'Direction' }).getByRole('radio', { name: '↓ Top down' }).click();
+
+  const figure = page.locator('.cm-dg-figure svg');
+  await expect(figure.getByText('Published')).toBeVisible();
+  // the legend under the drawing names the category
+  await expect(figure.locator('[data-legend]')).toContainText('Sources');
+  await expect.poll(() => state.saved).toContain('flowchart TD');
+  expect(state.saved).toContain('n1["Tip received"]');
+  expect(state.saved).toContain('n5["Published"]');
+  expect(state.saved).toContain('n3 --> n5');
+  expect(state.saved).toContain('%% legend c1: Sources');
+
+  // exported: the browser draws it as the page shows it, legend included, into the PDF's picture
+  await page.locator('[data-guide="notebook.pdf"]').click();
+  const dialog = page.getByRole('dialog', { name: 'Export note as PDF' });
+  await dialog.getByRole('button', { name: 'Export PDF' }).click();
+  await expect.poll(() => state.exported.length).toBe(1);
+  const png = state.exported[0].diagrams.k1;
+  expect(png.length).toBeGreaterThan(2000);
+  const drawn = await page.evaluate(async (source) => {
+    const { renderMermaidSvg } = await import('/src/lib/mermaid.js');
+    const { svg } = await renderMermaidSvg(source);
+    return { legend: svg.includes('data-legend'), html: svg.includes('foreignObject') };
+  }, /```mermaid\n([\s\S]*?)\n```/.exec(state.saved)[1]);
+  expect(drawn).toEqual({ legend: true, html: false });
 });
 
 test('says a diagram it cannot draw failed, and keeps its source', async ({ page }) => {

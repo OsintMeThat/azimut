@@ -199,13 +199,15 @@ describe('a press on a block', () => {
     expect(blocks().map((node) => node.dataset.block ?? node.className)).toEqual(['table', 'cm-include']);
   });
 
-  it('keeps its </> button when a diagram is drawn into it', async () => {
+  it('keeps its </> button when a diagram is drawn into it, which opens its Mermaid; a double press opens its form', async () => {
     writing('```mermaid\nflowchart LR\n  A --> B\n```\n\nEnd', 0);
     await settle();
     const diagram = view.dom.querySelector('.cm-block-diagram');
     expect(diagram.querySelector('svg[data-drawn]')).not.toBeNull();
     expect(diagram.querySelector('[data-edit-source]')).not.toBeNull();
     mouse(diagram, 'dblclick');
+    expect(diagram.querySelector('.dg-form')).not.toBeNull();
+    mouse(diagram.querySelector('[data-edit-source]'), 'mousedown');
     expect(view.dom.querySelector('.cm-block-diagram')).toBeNull();
     expect(view.contentDOM.textContent).toContain('flowchart LR');
   });
@@ -257,15 +259,21 @@ describe('the keyboard at a picked block', () => {
     expect(text()).toBe('Words\n');
   });
 
-  it('opens a diagram and a chapter the same way, and a table at its first cell', () => {
+  it('opens a chapter’s source, a diagram’s form and a table at its first cell', () => {
     const doc = '| A | B |\n| --- | --- |\n| 1 | 2 |\n\n```mermaid\nflowchart LR\n  A --> B\n```\n\n[[include:n2]]';
-    for (const at of [doc.indexOf('```mermaid'), doc.indexOf('[[include')]) {
-      writing(doc, at);
-      const before = blocks().length;
-      key('Enter');
-      expect(blocks().length).toBe(before - 1);
-      expect(head()).toBe(at);
-    }
+    const chapter = doc.indexOf('[[include');
+    writing(doc, chapter);
+    const before = blocks().length;
+    key('Enter');
+    expect(blocks().length).toBe(before - 1);
+    expect(head()).toBe(chapter);
+    // a diagram the form can read opens in it, drawn and picked
+    const diagram = doc.indexOf('```mermaid');
+    writing(doc, diagram);
+    key('Enter');
+    expect(blocks()).toHaveLength(3);
+    expect(view.dom.querySelector('.cm-block-diagram .dg-form')).not.toBeNull();
+    expect(head()).toBe(diagram);
     // a table is a grid: Enter puts the caret in its first cell, its source stays shut
     writing(doc, 0);
     key('Enter');

@@ -7040,7 +7040,7 @@ the note's sans, in the editor, the PDF and the HTML page alike. A press
 picks one (an accent outline, a picture's bar kept up); a double press, Enter or its
 `</>` opens its source, which closes again once the cursor leaves it, and Escape closes
 it at once. A table's Enter puts the caret in its first cell instead, and only its `</>`
-opens the pipes. While one is picked, Backspace or Delete takes it out (Undo brings it back),
+opens the pipes; a diagram the form can read opens in its form (see *Diagrams* below). While one is picked, Backspace or Delete takes it out (Undo brings it back),
 a key typed starts a paragraph of its own after it, and the arrow keys step over it
 whole, picking it on the way. The toolbar's last pair switches between **Drawn** and
 **Markdown**, the raw text with no drawing (Ctrl+Shift+M), one choice for the browser,
@@ -7093,7 +7093,7 @@ empty `::: steps` or `::: story` block, the cursor after it, drawn as its strip,
 case** (a case item, an **Interactive map**, a note included as a chapter), **Layout**
 (a divider, a page break, the cover page, **Alignment ›**, **Cover corner ›**, a
 signature, **Field ›** for the words the PDF fills in) and **Figures** (a table, a
-diagram), the table asking rows by columns on a small grid (3 by 3 unless picked) or a
+chart, a diagram, an infographic), the table asking rows by columns on a small grid (3 by 3 unless picked) or a
 file. Each entry has an icon, its name and a line under it; beside the list, the
 entry lit is drawn as it will look, with the Markdown it writes. What is typed after
 `/` (or after the +, which writes nothing until an entry is picked) finds entries by
@@ -7681,6 +7681,56 @@ panel card is the same card.
 Every choice writes its own line in the engine's order and is one Undo step. A press on a
 bar button picks the chart first, so the note stays where it is when a panel takes the
 keyboard. A double press or Enter opens its settings; a locked note shows the drawing.
+
+**Diagrams** (`editor/diagramBlock.js`, `diagramForm.js`, `diagramText.js`, `diagramCase.js`). A diagram
+is a ```` ```mermaid ```` fence, made in a form rather than typed. **/ › Diagram** opens a gallery of
+six kinds, each drawn small with the one line it needs: **Flow** (steps and decisions), **Network**
+(who is linked to whom), **Organisation** (a tree), **Timeline** (dated events), **Mind map** and
+**Sequence** (who sends what to whom). The one picked is written at the cursor as a small example
+whose words are there to be written over, and opens in its form; the raw Markdown's / still writes
+Mermaid to edit, and the gallery's *Write it yourself* does the same on the drawn page.
+
+The form stands between the diagram's bar and its drawing, or beside the drawing where the page has
+room (it then takes the room beside the note's column). **＋ Box** adds a box with its words (Shift+Enter
+starts a line), a shape (box, round, a diamond for a decision, a cylinder for records kept, a person) and
+a category; an organisation's or a mind map's box says the box it stands under, a sequence's person its
+group, a timeline's event its day and its phase. **＋ Link** joins two boxes picked from the list, with
+words on it, **Dashed** or not, an **Arrow** or not (a sequence's messages, in the order they are sent,
+*Reply* for a dashed one). **Direction** is *Left to right* or *Top down* in one press, **Style** *Report*
+(the app's own look), *Book* or *Dark*. **Colours** gives each category its colour: the case's own for a
+name its palette holds, else the charts' order; a swatch picks another from the case's colours or a
+colour code; *Legend under the drawing* draws the categories under it; *Keep these colours for the
+case* names them in the palette, and *Use the case's colours* takes the palette's where they differ. A
+row moves with its ▲ ▼ or Alt+↑ ↓ and goes with its ×. Each gesture is one Undo step: a field once
+committed (Enter, Tab or leaving it), a choice, a row added, moved or taken out, a colour; the form's
+**Undo** and Ctrl+Z on anything but words being typed take the last one back. **Kind…** draws it as
+another kind that keeps its boxes and links (a tree's lines become links, links a tree); a timeline
+stays a timeline.
+
+What the form writes is plain Mermaid: a category is a `classDef` named by a `%% legend c1: …` line, a
+group a sequence `box`, a phase or a branch its `cScale` colour, a look other than Report its theme's
+colours in the front matter with `theme: base`, a network and an organisation a `%% kind:` line. The
+characters Mermaid cannot hold are written as look-alikes (‹ › for angle brackets, ; in a sequence,
+꞉ in a timeline) and read back as themselves; straight quotes are written curly. A diagram reopens in the
+form when it can be read back whole; Mermaid it cannot read (a subgraph, a style, a note, a config of
+its own) keeps its bar saying *Written in Mermaid the form cannot read: edit its source*, and opens as
+its source. Its `</>` always opens the Mermaid.
+
+**From the case**, in the gallery and in a network's or a timeline's form: **Network from the Graph**
+lists the entities the Graph draws (or a saved Graph view draws), grouped by type, each ticked by hand
+or a whole type at once; the links the Graph draws between them come with them in their verbs, and
+*Links through what is left out* adds a dashed one for each pair joined only through two entities or
+fewer left out, saying what it passes through (*via 1 media → 1 proof*). Each box is coloured by its
+entity's type. **Timeline from the Timeline** lists the case's dated events in a period (the whole
+case at first), each on its day as the case states it (*about 18 Oct 2026* where it is approximate),
+all ticked; more than six are drawn top down. Both list what they will write, boxes and links or
+events, before *Write it* writes them; nothing is added that the case does not say. Where the Graph
+drew only the case's most linked entities, or the Timeline held more events than one read, the panel
+says so.
+
+The legend and a Dark or Book diagram's page are drawn into the picture itself (`lib/mermaid.js`), so
+the editor, the PDF (as the PNG the browser drew), the HTML page and its web folder (as SVG, the figure
+laid on the same page) and WordPress show the same diagram, in the same colours.
 
 **Infographics.** A `:::: infographic` block is a page of panels read as one figure
 (`engine/notes_infographic.py`): a title band, then ordinary `::: chart` and `::: map` blocks
