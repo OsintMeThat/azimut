@@ -376,7 +376,8 @@ def rebuild_database(case: Case) -> dict[str, Any]:
             notes = case.note_dir
             if notes.is_dir():
                 for path in sorted(notes.rglob("*.md")):
-                    if path.is_symlink():
+                    # a hidden folder is machinery, not a filing folder: the kept public texts
+                    if path.is_symlink() or any(part.startswith(".") for part in path.relative_to(notes).parts):
                         continue
                     rel_path = path.relative_to(case.tool_root).as_posix()
                     folder = path.parent.relative_to(notes).as_posix()

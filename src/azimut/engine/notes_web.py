@@ -193,6 +193,8 @@ class WebBuild:
     listed: dict[str, list[dict[str, Any]]] = field(default_factory=dict)
     sha256: str = ""
     text_sha256: str = ""
+    #: The source the page printed, which its edition keeps (`engine/noteeditions.py`).
+    printed: str = ""
     weight: int = 0
     internal: int = 0
     links: list[tuple[str, int | None]] = field(default_factory=list)
@@ -332,7 +334,7 @@ def build(
         files=files, name=name, title=title, address=where, maps=rendered.maps, live=rendered.live,
         warnings=list(rendered.warnings), warning_lines=list(rendered.warning_lines),
         warning_kinds=list(rendered.warning_kinds), listed=rendered.listed, sha256=hashlib.sha256(rendered.html).hexdigest(),
-        text_sha256=rendered.text_sha256, internal=rendered.internal, links=rendered.links, pov=rendered.pov,
+        text_sha256=rendered.text_sha256, printed=rendered.printed, internal=rendered.internal, links=rendered.links, pov=rendered.pov,
         weight=rendered.weight + sum(len(data) for path, data in files.items() if path not in folder.files
                                      and path != INDEX),
     )

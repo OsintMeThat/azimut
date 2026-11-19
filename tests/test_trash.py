@@ -42,9 +42,10 @@ def test_a_deleted_artifact_waits_in_the_trash_instead_of_going(client):
     assert listed["size_bytes"] > 0
     # ...under a numbered slot, not under a copy of the case tree: the group
     # directory is flat, so the trash can never be the longest path in the case.
+    # The note owns its file and the public texts its HTML export kept, one slot each.
     group_dir = case.trash_dir / deleted["trash"]
-    assert [p.name for p in group_dir.iterdir()] == ["0"]
-    assert (group_dir / "0").is_file()
+    assert sorted(p.name for p in group_dir.iterdir()) == ["0", "1"]
+    assert sorted((group_dir / slot).is_file() for slot in ("0", "1")) == [False, True]
 
 
 def test_undo_brings_back_the_entity_its_id_and_its_file(client):

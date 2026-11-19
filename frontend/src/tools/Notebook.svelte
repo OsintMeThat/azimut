@@ -24,7 +24,8 @@
    * asks which edition to write, Internal or Public, the choice kept per note
    * (`lib/notes/editions.svelte.js`). Every export is a new file, and a note's ⋯
    * lists its editions, each with Show and Check; a public HTML page after an earlier
-   * one asks what changed, which it prints at its end.
+   * one asks what changed, which it prints at its end. The editions' What changed
+   * compares two public texts and drafts that line, which waits in the field.
    *
    * A web folder is the public edition as a folder to put online (`engine/notes_web.py`):
    * the dialog asks the address it will live at, kept per note (`lib/notes/webAddress.js`),
@@ -63,7 +64,9 @@
   import {
     HTML, HTML_BUDGET, PDF, PUBLIC_ONLY, WEB, WORDPRESS, keepFormat, readFormat, weightWords,
   } from '../lib/notes/formats.js';
-  import { editionOfAll, keepEdition, listEditions, PUBLIC, showEdition } from '../lib/notes/editions.svelte.js';
+  import {
+    correctionFor, editionOfAll, keepCorrection, keepEdition, listEditions, PUBLIC, showEdition,
+  } from '../lib/notes/editions.svelte.js';
   import { addressProblem, keepAddress, readAddress } from '../lib/notes/webAddress.js';
   import { LOOK_HELP } from '../lib/notes/lookHelp.js';
   import { destinationLabel, readDestinations } from '../lib/exportDest.js';
@@ -591,6 +594,8 @@
       // the file is drawn from the note on disk, so what is still waiting is written first
       if (doc) await flush(doc);
       const result = await exportNotes(id, noteIds, options);
+      // the line drafted from What changed has gone out with it, or was cleared on purpose
+      if ((format === HTML || format === WEB) && noteIds.length === 1) keepCorrection(id, noteIds[0], '');
       if (format === WEB) {
         // the dialog stays on what was written, with the folder and the steps to put it online
         stopCheck();
@@ -625,13 +630,21 @@
       ?? (opened && (opened.noteId ?? CASE_NOTES) === exportIds[0] ? noteEntity?.label ?? 'Case notes' : '')
     : '');
 
-  /** One note, or the notes picked on the home, each to a file of its own. */
-  function exportSome(noteIds) {
+  /**
+   * One note, or the notes picked on the home, each to a file of its own. A line drafted
+   * from What changed waits in its What changed field; `correcting`, from the Editions
+   * dialog, opens on the public HTML page that prints it.
+   */
+  function exportSome(noteIds, { correcting = false } = {}) {
     exportIds = noteIds.map((id) => id ?? CASE_NOTES);
-    exportEdition = editionOfAll(caseId, exportIds);
+    exportEdition = correcting ? PUBLIC : editionOfAll(caseId, exportIds);
+    if (correcting && (exportFormat === PDF || exportFormat === WORDPRESS)) {
+      exportFormat = HTML;
+      keepFormat('export', HTML);
+    }
     roundPov = false;
     offlineMaps = false;
-    exportChanges = '';
+    exportChanges = exportIds.length === 1 ? correctionFor(caseId, exportIds[0]) : '';
     webDone = null;
     githubDone = null;
     stepsOpen = false;
@@ -670,6 +683,7 @@
     if (!caseId || !githubPublish || exportBusy) return;
     const id = caseId;
     const result = await githubPublish.publish({ roundPov, changes: exportChanges, offlineMaps });
+    if (result && exportIds.length === 1) keepCorrection(id, exportIds[0], '');
     if (!result || id !== caseId || !exportOpen) return;
     stopCheck();
     githubDone = result;
@@ -1097,11 +1111,11 @@
               </label>
             </div>
           {/if}
-          {#if page.earlier && shared}
+          {#if (page.earlier || exportChanges) && shared}
             <div class="listed">
               <label class="listed-head" for="export-changes">What changed since the last public edition</label>
-              <input id="export-changes" class="input" bind:value={exportChanges} maxlength="300"
-                placeholder="Printed at the end of the page, beside the earlier editions" />
+              <textarea id="export-changes" class="input" rows="2" bind:value={exportChanges} maxlength="300"
+                placeholder="Printed at the end of the page, beside the earlier editions"></textarea>
             </div>
           {/if}
         </section>
@@ -1161,7 +1175,8 @@
   {/if}
 
   {#if editionsOf}
-    <EditionsDialog {caseId} noteId={editionsOf.noteId} title={editionsOf.title} onclose={() => (editionsOf = null)} />
+    <EditionsDialog {caseId} noteId={editionsOf.noteId} title={editionsOf.title} onclose={() => (editionsOf = null)}
+      onexport={() => { const id = editionsOf.noteId; editionsOf = null; exportSome([id], { correcting: true }); }} />
   {/if}
 
   {#if archiveOf}
@@ -1228,6 +1243,7 @@
   .listed-words { flex: 1; min-width: 0; overflow-wrap: anywhere; }
   .round { display: flex; align-items: center; gap: 6px; margin-top: 6px; color: var(--text-2); font-size: var(--fs-xs); cursor: pointer; }
   .listed .input { width: 100%; }
+  .listed textarea.input { resize: vertical; line-height: 1.45; }
   .dest-label { color: var(--text-3); }
   .dest-path { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .export-note { color: var(--text-3); font-size: var(--fs-xs); margin: 6px 0 0; }

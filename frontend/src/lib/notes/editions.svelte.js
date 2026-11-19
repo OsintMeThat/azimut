@@ -17,6 +17,9 @@
  * GitHub Pages is recorded once per publish (`readPublished`): its address, the
  * repository and the commit; Check reads the page back from the repository, on its
  * press, and the page is opened at its address.
+ *
+ * A public edition also keeps the text it printed (`kept`), which What changed compares
+ * (`editionCompare.js`); the line it drafts waits here for the note's next export.
  */
 import { webLink } from '../wordpressSetup.js';
 import { api } from '../api.js';
@@ -86,6 +89,49 @@ export function keepEdition(caseId, noteIds, edition, storage = globalThis.local
 /** For tests: read the kept choices again from `storage`. */
 export function reloadEditions(storage = globalThis.localStorage) {
   chosen = load(storage);
+  corrections = loadCorrections(storage);
+}
+
+/*
+ * The What changed line drafted in the Editions dialog (Write the correction from this),
+ * kept per note in this browser until the next public export of that note sends it. The
+ * export dialog starts from it; it reaches a page only through that dialog's field, after
+ * the analyst has read and changed it there or not.
+ */
+const CORRECTIONS = 'azimut:note-corrections';
+/** The longest line, as the server keeps it (`api/notes.py` MAX_CHANGES). */
+export const MAX_CORRECTION = 300;
+
+function loadCorrections(storage) {
+  try {
+    const value = JSON.parse(storage?.getItem(CORRECTIONS) ?? '{}');
+    return value && typeof value === 'object' && !Array.isArray(value) ? value : {};
+  } catch {
+    return {};
+  }
+}
+
+let corrections = $state(loadCorrections(globalThis.localStorage));
+
+/** The line drafted for a note's next public export, or ''. */
+export function correctionFor(caseId, noteId) {
+  const line = corrections[keyOf(caseId, noteId)];
+  return typeof line === 'string' ? line.slice(0, MAX_CORRECTION) : '';
+}
+
+/** Keep `line` for a note's next public export; an empty line lets it go. */
+export function keepCorrection(caseId, noteId, line, storage = globalThis.localStorage) {
+  const next = { ...corrections };
+  const key = keyOf(caseId, noteId);
+  delete next[key];
+  const said = String(line ?? '').replace(/\s+/g, ' ').trim().slice(0, MAX_CORRECTION);
+  if (said) next[key] = said;
+  const keys = Object.keys(next);
+  for (const old of keys.slice(0, Math.max(0, keys.length - KEPT))) delete next[old];
+  corrections = next;
+  try {
+    storage?.setItem(CORRECTIONS, JSON.stringify(next));
+  } catch { /* this browser keeps nothing; the line holds for this visit */ }
 }
 
 const HEX = /^[0-9a-f]{64}$/;
@@ -117,8 +163,19 @@ export function readEdition(item) {
 
 /** The files a note was exported as, PDF, HTML and web folders, newest first. */
 export async function listEditions(caseId, noteId) {
+  return (await readEditions(caseId, noteId)).editions;
+}
+
+/**
+ * A note's editions, newest first, and `kept`: the SHA-256 of each public text kept for
+ * What changed (`engine/noteeditions.py`), newest first.
+ */
+export async function readEditions(caseId, noteId) {
   const answer = await api.get(`/api/cases/${caseId}/notes/${noteId || 'case'}/editions`);
-  return (Array.isArray(answer?.editions) ? answer.editions : []).map(readListed).filter(Boolean);
+  return {
+    editions: (Array.isArray(answer?.editions) ? answer.editions : []).map(readListed).filter(Boolean),
+    kept: (Array.isArray(answer?.kept) ? answer.kept : []).filter((sha) => HEX.test(sha ?? '')),
+  };
 }
 
 /** An edition as the server finds it in the note's record: never a path it opens. */

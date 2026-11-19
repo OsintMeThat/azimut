@@ -74,6 +74,9 @@ LAYER_CACHE_DIR = ".cache"
 #: Machinery that belongs to a visible sibling: `media/.meta/` holds sidecars,
 #: `proofs/.meta/` holds the editable specs and pasted assets.
 META_DIR = ".meta"
+#: A note's public texts as its exports printed them, one folder per note
+#: (`engine/noteeditions.py`): `notes/.editions/<note id>/<text sha256>.md`.
+NOTE_EDITIONS_DIR = ".editions"
 #: The case database. Hidden because it is the one file whose loss costs
 #: everything, and the one someone deletes to reclaim space.
 DATA_DIR = ".data"
@@ -532,6 +535,18 @@ def note_rel(folder: str, name: str) -> str:
         existing_stem(segment, "folder") for segment in folder.split("/") if segment.strip()
     ]
     return "/".join(["notes", *parts, f"{name}.md"])
+
+
+def note_editions_rel(owner: str) -> str:
+    """The folder a note's kept public texts live in, named after the note's id rather
+    than its file, so a rename or a refiling leaves it where it is. The case notes,
+    which have no entity, keep theirs under `case`."""
+    return f"notes/{NOTE_EDITIONS_DIR}/{owner}"
+
+
+def note_edition_text_rel(owner: str, text_sha256: str) -> str:
+    """One kept public text, named after its SHA-256 (`text_sha256` in the record)."""
+    return f"{note_editions_rel(owner)}/{text_sha256}.md"
 
 
 def sheet_rel(name: str) -> str:

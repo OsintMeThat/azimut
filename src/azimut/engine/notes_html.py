@@ -329,6 +329,8 @@ class RenderedHtml:
     internal: int = 0
     #: The SHA-256 of the source this edition printed (`notes_markdown.printed_source`).
     text_sha256: str = ""
+    #: That source, which a public edition keeps for What changed (`engine/noteeditions.py`).
+    printed: str = ""
     #: The file's weight in bytes, as written or, for the check, as it would be.
     weight: int = 0
     #: The clips that went as their still and a Watch link, with the line naming each.
@@ -411,7 +413,8 @@ def render(
     # a note with no internal passage has one edition, shareable as it stands: it says public
     page = _Page(case, look=look, theme=theme, cited=cited, diagrams=diagrams or {}, light=light, check=check,
                  public=public or not passages[0], round_pov=round_pov, day=day, folder=folder)
-    printed = hashlib.sha256(md.printed_source(shown).encode("utf-8")).hexdigest()
+    source = md.printed_source(shown)
+    printed = hashlib.sha256(source.encode("utf-8")).hexdigest()
     document = page.build(title, pieces, blocks, cover=cover, printed=printed, changes=changes, earlier=earlier)
     return RenderedHtml(
         html=document,
@@ -421,6 +424,7 @@ def render(
         listed=cited.listed,
         internal=passages[0],
         text_sha256=printed,
+        printed=source,
         weight=page.weight,
         links=page.links,
         pov=page.pov,
