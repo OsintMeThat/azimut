@@ -32,7 +32,7 @@ import { diagramForm, openDiagramGallery, openNetworkPanel, openTimelinePanel } 
 import { DIAGRAM_KINDS, convertModel, diagramFence, fenceSource, readDiagram, starterModel, withColours, writeDiagram } from './diagramText.js';
 import { button } from './gridMenu.js';
 import { heldHeight, holdHeight, moveHeight, releaseHeight } from './heights.js';
-import { blockAt } from './puts.js';
+import { blockAt } from './blockText.js';
 import { blocksIn, openSource } from './ranges.js';
 import { noteCase, noteHandlers } from './state.js';
 import { lineChanges } from './tableText.js';
