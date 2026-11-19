@@ -7519,7 +7519,9 @@ dark), a view filed before cited again with nothing fetched, and refused with th
 was when the imagery cannot be fetched; the frame, a rectangle dragged on the map or *Fit to what it
 shows* (`frame: west, south, east, north`), the ground laid where it stands and a part it does not
 cover shown plain, with *File the ground for this frame*; the size, *Half*, *Wide* or *Full height*;
-the legend, *Shown*, *Folded* or *Hidden*; a north arrow; the scale, *Off*, *Page* or *Page + PDF*.
+the legend, *Shown*, *Folded* or *Hidden*; a north arrow; the scale, *Off*, *Page* or *Page + PDF*;
+**Apply a template…**, a map template's look of Settings → Templates → Figure templates written
+as one Undo, its layers, frame and steps kept, another base filed on the press as picking it does.
 **Layers**: each layer on or off (`hide`) and painted in one colour of the case's palette (`colour:
 Front line = #d55e00`), another layer added, the proofs of a period, every point or *Only where it
 was filmed* (`proof points`), the names on the map (`labels`) and the crowd past which marks are a
@@ -7737,6 +7739,28 @@ the top**, the
 colours and where each comes from (*Keep these colours for the case* names them in the case's
 palette), what the check says, **Export as a picture** (X 16:9, 4:5, 1:1, the PDF page, SVG)
 and **To Post**. Each press writes the block's text as one change, so one Undo.
+
+**Start from a template…** stands beside *Add a panel* in the builder. It lists the analyst's
+infographic templates, then the ready ones, and says what the page will meet: its data
+(*With Sheet “Vehicle register”…*), or none, each panel then opening its own form. The one
+picked is applied by the server, which writes nothing (`POST /templates/figure/apply`): the
+template's columns are matched to the data's by name, case and spaces aside. A column the data
+does not name is asked in **Match the columns**: each with where the template reads it
+(*Donut: its parts*), one of the data's columns, a column whose name holds the template's
+picked and said as a suggestion, *Count the rows* for a column that counts, and *Fill it by
+hand* (*Leave it out* for a filter or a row's icon). A note holding maps is asked which goes in
+each map panel, in the template's look, or an empty one. A chart panel whose columns are all
+given takes the page's data, its rows copied in and the title they propose written; one with a
+column left to the hand, and every panel when the page has no data, gets the template's
+columns, no row and `rows: own`, the first one's form opened in its card. Key figures are
+always typed. A value the data does not hold drops its colour, its icon, its highlight or its
+place last; `order` stays whole while the data holds one of its values, so a grade scale keeps
+its steps. Silhouette rows that give each row its flag take the icon of the library named like
+each row, and say when none is. The page is written as one change, one Undo, its own band and
+`data:` kept where the template says none. A chart's settings card, in the note and in the
+builder, ends on **Apply a template…**: a chart template's kind and settings over the chart's
+own rows, matched the same way, its title, credit and rows left as they are; one it cannot
+draw (a column left to the hand) changes nothing and says so.
 
 The PDF prints it on a page of its own as one picture at 300 dpi, broken between rows of panels
 when it is taller than a sheet; what follows starts the next page. The HTML report lays the
@@ -8198,6 +8222,31 @@ note*. `{today}` and `{now}` are written in when a note starts from one; the fiv
 words are filled when it prints. The ready Geolocation report opens on its own cover
 page with the Azimut logo on a line of its own and ends with a signature block, both
 removable.
+
+**Figure templates.** Settings → Templates → **Figure templates** keeps an infographic's
+layout, a chart's settings or a map's look without their data, listed under *Infographics*,
+*Charts* and *Maps*, each with a sketch of its panels and a line of what it holds (*5 panels ·
+Report · reads Grade, Status, Type*). A template is the block's own text with no row
+(`engine/figuretemplates.py`, kind `figure` of `templates.json`): an infographic keeps its
+look, its legend, its panels in order with their widths, and the band's words typed into the
+template itself; a chart keeps its kind and settings, the columns it is drawn by named, and its
+table's header; a map keeps its base, size, legend, north arrow, scale, names, crowds, proofs,
+timeline, Play's pace and cards. Never a row, a title, a caption, a source, `data:`, `from:`,
+nor a map's layers, plate, proofs, ground, frame or steps: the server takes them out of every
+save, whatever was sent. **New figure template ▾** starts one *Blank* (a page, a bars chart, a
+map), *From a ready one* › (three neutral pages: *Losses at a glance*, key figures, pictograms
+by grade, a donut, segments and a timeline; *A front on a map*, a map, key figures and a
+timeline; *Who supplied them*, silhouette rows with their flags and a donut), or *From a figure
+of this case* ›, a note picked and then one of its infographics, charts or maps, whose band,
+words, rows, titles, sources and places stay with the case. Each opens unsaved in the
+template editor, as **Edit** and **Duplicate** do, with **Delete** beside: the sketch on the
+left, then the band's words (left empty, each page writes its own), the look, one legend or
+one per chart, and the panels, moved with ↑ ↓ or Alt+↑/↓, *Half* or *Wide*, taken out, or
+added (a chart of any kind with its columns, a map, words). A chart panel opens on its kind,
+turned only into a kind of the same table, and the names of the columns it reads, each with
+what it does (*its parts*, *its colours*): renaming one renames it in the header and every
+line naming it, so the template meets the analyst's own sheets by name. Key figures are typed
+in each page. The settings backup carries them with every other template.
 
 **A report's author.** Settings › Publishing groups *Post*, **In reports** and
 *On proofs* (the account handle). *In reports* holds the **Logo** (the picture the proof

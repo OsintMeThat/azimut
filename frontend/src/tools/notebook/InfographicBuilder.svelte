@@ -28,6 +28,12 @@
    * picker, `components/DataPicker.svelte`), each one change and one Undo. With data, Add a
    * panel offers the data's rows first, and a panel's card says where its rows come from. A
    * chart made from scratch, or whose rows its form wrote, says `rows: own` and never takes it.
+   *
+   * **Start from a template…** lays the page out as a figure template of Settings › Templates ›
+   * Figures, or a ready one (`components/FigureTemplatePicker.svelte`): its panels read the
+   * page's data by its columns' names, a column the data does not name asked, and without
+   * data, or for a column filled by hand, a panel opens its own form. One change, one Undo; the
+   * band the page already says is kept.
    */
   import { untrack } from 'svelte';
   import { api } from '../../lib/api.js';
@@ -46,6 +52,8 @@
   import Icon from '../../components/Icon.svelte';
   import FloatingMenu from '../../components/FloatingMenu.svelte';
   import DataPicker from '../../components/DataPicker.svelte';
+  import FigureTemplatePicker from '../../components/FigureTemplatePicker.svelte';
+  import { pageFromTemplate } from '../../lib/notes/figureTemplates.js';
   import { openEntity } from '../../lib/navigate.js';
   import { dataLabel, dataPanel, dataSaid, dataState, readData } from '../../lib/notes/editor/infographicData.js';
   import { dataOf, inheritingPanels, withDataRows, withDataSource } from '../../lib/notes/editor/infographicText.js';
@@ -256,6 +264,7 @@
           write,
           source: caseId ? { said: () => panelSource(index), change: (anchor) => (dataPick = { anchor, panel: index }) } : null,
           editData: () => { card?.commit(); cardForm = true; },
+          templates: true,
         });
       card.focus();
     });
@@ -371,6 +380,29 @@
   /** The picker's own cards of every kind from scratch, in the offers. */
   function scratchKinds(node) {
     scratchGallery(node, addScratch);
+  }
+
+  // -- start from a template -----------------------------------------------------------
+  let templateAnchor = $state(null);
+  /** What the template meets: the page's data, read now, or none. */
+  const templateData = $derived(data.data?.found ? { table: data.data.text, origin: data.data.origin, name: dataName } : null);
+  const templateMaps = $derived(templateAnchor ? noteMaps(editor?.text?.() ?? text).map((map) => ({ label: map.title || 'A map', text: map.block })) : []);
+  /** The page laid out as the template applied says, as one change; the first panel to fill opens its form. */
+  function startFromTemplate(answer, record) {
+    templateAnchor = null;
+    if (!answer?.text) return;
+    closeCard();
+    if (!edit((source) => pageFromTemplate(source, answer.text))) return;
+    const reading = answer.panels?.filter((one) => one.reads === 'data').length ?? 0;
+    const own = answer.panels?.filter((one) => one.reads === 'own') ?? [];
+    const said = [reading ? `${reading} read${reading === 1 ? 's' : ''} ${dataName}` : '', own.length ? `${own.length} to fill` : ''].filter(Boolean).join(', ');
+    toast(`Started from “${record?.name ?? 'a template'}”${said ? `: ${said}` : ''}. Undo brings the page back.`, 'ok', 5000);
+    const first = own[0];
+    if (first) {
+      focused = first.index;
+      carded = first.index;
+      cardForm = true;
+    }
   }
 
   // -- look, legend, colours -----------------------------------------------------------
@@ -509,8 +541,14 @@
             {/if}
           {/each}
         </ol>
-        <button type="button" class="ib-add" aria-expanded={adding} onclick={openAdd}>
-          <Icon name="plus" size={13} /> Add a panel: a chart, a map, words</button>
+        <div class="ib-adds">
+          <button type="button" class="ib-add" aria-expanded={adding} onclick={openAdd}>
+            <Icon name="plus" size={13} /> Add a panel: a chart, a map, words</button>
+          <button type="button" class="ib-add" aria-haspopup="dialog" aria-expanded={Boolean(templateAnchor)}
+            title="Lay the page out as a template of yours or a ready one, its panels reading this page’s data"
+            onclick={(event) => (templateAnchor = templateAnchor ? null : event.currentTarget)}>
+            <Icon name="layers" size={13} /> Start from a template…</button>
+        </div>
         {#if adding}
           <div class="ib-offers" role="region" aria-label="Add a panel">
             {#each galleries as gallery (gallery.found.line)}
@@ -617,6 +655,11 @@
     onclose={() => (dataPick = null)} />
 {/if}
 
+{#if templateAnchor}
+  <FigureTemplatePicker anchor={templateAnchor} figure="infographic" data={templateData} maps={templateMaps}
+    onapply={startFromTemplate} onclose={() => (templateAnchor = null)} />
+{/if}
+
 {#if exportAnchor}
   <FloatingMenu anchor={exportAnchor} width={250} label="Export as a picture" onclose={() => (exportAnchor = null)}>
     {#each SIZES as one (one.size)}
@@ -673,6 +716,7 @@
     font: inherit; font-size: var(--fs-sm); cursor: pointer;
   }
   .ib-add:hover, .ib-add:focus-visible { text-decoration: underline; }
+  .ib-adds { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 4px 14px; }
   .ib-offers { margin-top: 8px; padding: 10px; border: 1px solid var(--border); border-radius: var(--r-md, 6px); background: var(--bg-0); }
   .ib-table + .ib-table { margin-top: 12px; }
   .ib-table-name { margin: 0 0 6px; font-size: var(--fs-sm); color: var(--text-1); font-weight: 600; }

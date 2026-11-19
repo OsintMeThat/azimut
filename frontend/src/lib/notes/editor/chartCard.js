@@ -14,7 +14,10 @@
  *   and *Edit the data*, the kind's form, when its rows are in the form's shape.
  *   They open on the chart itself, between its bar and its drawing, so each choice is
  *   seen as it is made. Given a `source`, a line on top says where its rows come from,
- *   with *Change…* (the source picker, `components/DataPicker.svelte`).
+ *   with *Change…* (the source picker, `components/DataPicker.svelte`). Given
+ *   `templates`, *Apply a template…* sets a chart template's kind and settings over its
+ *   own rows, the template's columns matched to the chart's by name
+ *   (`lib/notes/figureTemplatePicker.js`).
  *
  * Neither writes the note: each says what was chosen, and the chart block writes its
  * lines, one Undo step a choice (`editor/chartBlock.js`).
@@ -26,6 +29,7 @@ import { scratchCards, titleField } from './chartForm.js';
 import { chartIcons } from './chartIcons.js';
 import { ROWS, SHOWS, STYLES, setting } from './chartText.js';
 import { plainText, readColumns } from './tableText.js';
+import { openFigurePicker } from '../figureTemplatePicker.js';
 
 // a page of panels (the infographic builder) reaches a chart from scratch through here alone
 export { chartForm } from './chartForm.js';
@@ -320,7 +324,7 @@ function segmented(label, options, value, onChange) {
  * refresh, commit, focus, destroy }`, `commit` writing a title typed and not yet written,
  * `destroy` closing what the card opened over the page as it closes.
  */
-export function chartSettings(panel, { state, write, keep = null, source = null, editData = null }) {
+export function chartSettings(panel, { state, write, keep = null, source = null, editData = null, templates = false }) {
   panel.setAttribute('role', 'group');
   panel.setAttribute('aria-label', 'Chart settings');
   // the title field stays the same element while the panel is drawn again, so typing in it is never lost
@@ -332,7 +336,28 @@ export function chartSettings(panel, { state, write, keep = null, source = null,
   const data = source ? dataLine(source) : null;
   // Edit the data stands on the Data line where there is one, else on a line of its own
   const edit = data ? data.node : element('div', 'cm-chart-field cm-chart-data');
-  panel.replaceChildren(...(data ? [data.node] : []), ...title.nodes, ...(data ? [] : [edit]), columns, icons.node, looks, colours);
+  /** The template picker this card opened, closed with it. */
+  let closePicker = null;
+  const template = templates ? templateLine() : null;
+  panel.replaceChildren(...(data ? [data.node] : []), ...title.nodes, ...(data ? [] : [edit]), columns, icons.node, looks, colours,
+    ...(template ? [template] : []));
+
+  /** Apply a template…: a chart template's kind and settings over the chart's own rows, one Undo. */
+  function templateLine() {
+    const node = element('div', 'cm-chart-field cm-chart-template');
+    const press = button('cm-chart-use', { label: 'Apply a template…', title: 'A chart template’s kind and settings, its columns matched to this chart’s by name; the rows and the title stay' });
+    press.setAttribute('aria-haspopup', 'dialog');
+    press.addEventListener('mousedown', (event) => event.preventDefault());
+    press.addEventListener('click', () => {
+      const chart = state()?.chart;
+      closePicker = openFigurePicker(press, {
+        figure: 'chart', data: { table: chart?.text ?? '', origin: '', name: 'This chart' },
+        onapply: (answer) => { if (answer?.changes && Object.keys(answer.changes).length) write(answer.changes); },
+      });
+    });
+    node.append(element('span', 'cm-chart-field-name', 'Template'), press);
+    return node;
+  }
 
   /** Edit the data: the kind's form, when the chart's rows are in its shape. */
   function renderData(chart, kind) {
@@ -409,5 +434,5 @@ export function chartSettings(panel, { state, write, keep = null, source = null,
   }
 
   render();
-  return { refresh: render, commit: title.commit, focus: title.focus, destroy: () => icons.destroy() };
+  return { refresh: render, commit: title.commit, focus: title.focus, destroy: () => { icons.destroy(); closePicker?.(); } };
 }

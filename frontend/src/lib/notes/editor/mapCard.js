@@ -4,7 +4,8 @@
  *
  * - **Look**: its title, the base it is drawn on (satellite as filed, a street map, a
  *   topographic one, a dark one), its frame (dragged on the map, or fitted to what it
- *   shows), its size, its legend, a north arrow and the scale;
+ *   shows), its size, its legend, a north arrow and the scale; *Apply a template…* sets a
+ *   map template's look (Settings › Templates › Figures), its layers, frame and steps kept;
  * - **Layers**: each layer on or off and its colour from the case's palette, another
  *   layer added, the proofs of a period (only where each was filmed, or every point),
  *   the names on the map and how many marks make a crowd;
@@ -19,6 +20,7 @@
  * writes as its lines, one Undo step a choice (`editor/mapBlock.js`).
  */
 import { button, icon } from './gridMenu.js';
+import { openFigurePicker } from '../figureTemplatePicker.js';
 import {
   BASES, CARD_PARTS, CROWDS, LEGENDS, SIZES, SPEEDS, aboutArea, areaKm2, colourText, fitView, frameText, stepValue, viewBounds,
 } from './mapText.js';
@@ -253,7 +255,29 @@ export function mapSettings(panel, ctx) {
       segmented('North arrow', [{ value: 'off', label: 'Off' }, { value: 'on', label: 'On' }], map.north === 'on' ? 'on' : 'off', (value) => ctx.write({ north: value === 'on' ? 'on' : '' })),
       segmented('Scale', ['off', '', 'on'].map((value) => ({ value, label: SCALE_NAMES[value], title: SCALE_HINTS[value] })), map.scale, (value) => ctx.write({ scale: value })),
     );
-    return [title, base, frame, grid];
+    return [title, base, frame, grid, templateLine(map)];
+  }
+
+  /** The template picker this card opened, closed with it. */
+  let closePicker = null;
+  /** Apply a template…: a map template's look over this map, its layers, frame and steps kept. */
+  function templateLine(map) {
+    const row = element('div', 'cm-map-field');
+    row.append(element('span', 'cm-map-field-name', 'Template'));
+    const press = button('cm-map-act', { label: 'Apply a template…', iconName: 'layers', title: 'A map template’s look: base, legend, size, north arrow, scale, timeline and cards' });
+    press.setAttribute('aria-haspopup', 'dialog');
+    press.addEventListener('mousedown', (event) => event.preventDefault());
+    press.addEventListener('click', () => (closePicker = openFigurePicker(press, {
+      figure: 'map',
+      onapply: (answer) => {
+        const { base = '', ...look } = answer?.changes ?? {};
+        ctx.write(look);
+        // another base is a ground filed on the press, as picking it on the card files it
+        if ((base || 'satellite') !== (map.base || 'satellite')) ctx.base(base || 'satellite');
+      },
+    })));
+    row.append(press);
+    return row;
   }
 
   /** What the frame says: drawn by hand, and whether the ground covers it. */
@@ -534,7 +558,7 @@ export function mapSettings(panel, ctx) {
       return current;
     },
     focus: () => tabs.querySelector('[aria-selected="true"]')?.focus({ preventScroll: true }),
-    destroy: () => ctx.overlay?.([]),
+    destroy: () => { ctx.overlay?.([]); closePicker?.(); },
   };
 }
 

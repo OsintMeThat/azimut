@@ -437,3 +437,94 @@ describe('post templates per kind', () => {
       kind: 'compare', starter: expect.objectContaining({ body: '#description\n\n#date\n\n#credits\n\n#mention' }) }));
   });
 });
+
+describe('Figure templates', () => {
+  const PAGE = { id: 'fg_1', name: 'Losses, our way', data: { figure: 'infographic', text: ':::: infographic\nlook: dark\n\n::: chart\nkind: donut\ncount: rows\nby: Grade\n| Grade |\n| --- |\n:::\n::::' } };
+  const CHART = { id: 'fg_2', name: 'Grades donut', data: { figure: 'chart', text: '::: chart\nkind: donut\ncount: rows\nby: Grade\n| Grade |\n| --- |\n:::' } };
+  const MAP = { id: 'fg_3', name: 'Dark map', data: { figure: 'map', text: '::: map\nbase: dark\nnorth: on\n:::' } };
+  const READY = [{ id: 'losses-at-a-glance', name: 'Losses at a glance', about: 'Key figures, pictograms by grade, a donut, segments and a timeline',
+    data: { figure: 'infographic', text: ':::: infographic\n::::' } }];
+  const menu = () => document.querySelector('.float-menu[aria-label="New figure template"]');
+  const entries = () => [...menu().querySelectorAll('.fm-item')].map((node) => node.textContent.trim());
+  const entry = (text) => [...menu().querySelectorAll('.fm-item')].find((node) => node.textContent.trim().startsWith(text));
+  const settle = async () => { for (let i = 0; i < 20; i++) await Promise.resolve(); flushSync(); };
+  const section = () => target.querySelector('[data-guide="settings.figure-templates"]');
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    get.mockImplementation(async (url) => {
+      if (url === '/api/templates/figure/ready') return { ready: READY };
+      if (url === '/api/cases/c1/notes/index') return { items: [{ id: 'n1', title: 'Losses', folder: '', updated_at: 'x' }] };
+      if (url === '/api/cases/c1/notes/n1') return { text: `# Losses\n\n${PAGE.data.text}\n\n${MAP.data.text}` };
+      return {};
+    });
+    post.mockImplementation(async (url) => (url === '/api/templates/figure/from'
+      ? { figure: 'infographic', text: ':::: infographic\n::::', name: 'Infographic of 0 panels' } : {}));
+  });
+  afterEach(() => { templatesState.figure = []; });
+
+  it('lists them by figure, each with its sketch and what it holds', () => {
+    templatesState.figure = [PAGE, CHART, MAP];
+    open();
+    expect(section().querySelector('h3').textContent).toBe('Figure templates');
+    expect([...section().querySelectorAll('.tpl-kind')].map((head) => head.textContent.trim())).toEqual(['Infographics', 'Charts', 'Maps']);
+    expect(rowOf('Losses, our way').textContent).toContain('1 panel · Dark · reads Grade');
+    expect(rowOf('Grades donut').textContent).toContain('Donut · reads Grade');
+    expect(rowOf('Dark map').textContent).toContain('Dark base · north arrow');
+    expect(rowOf('Losses, our way').querySelector('svg.fts')).not.toBeNull();
+  });
+
+  it('says how to make one when there is none', () => {
+    open();
+    expect(section().textContent).toContain('No figure templates yet. Start one from a ready one, or from an infographic, a chart or a map of a case.');
+  });
+
+  it('edits and copies one in Settings, a delete beside', () => {
+    templatesState.figure = [CHART];
+    open();
+    button(rowOf('Grades donut'), 'Edit').click();
+    expect(props.editTemplate).toHaveBeenCalledWith('figure', CHART);
+    button(rowOf('Grades donut'), 'Duplicate').click();
+    expect(props.duplicateTemplate).toHaveBeenCalledWith('figure', CHART);
+    expect(rowOf('Grades donut').querySelector('button[aria-label="Delete Grades donut"]')).not.toBeNull();
+  });
+
+  it('starts one blank, from a ready one, or from a figure of the case open', async () => {
+    caseState.current = { id: 'c1', name: 'Case' };
+    open();
+    section().querySelector('[data-new-figure-template]').click();
+    await settle();
+    expect(entries()).toEqual(['Blank infographic', 'Blank chart', 'Blank map', 'From a ready one', 'From a figure of this case']);
+    entry('Blank map').click();
+    flushSync();
+    expect(props.newTemplate).toHaveBeenCalledWith('figure', { name: 'Map template', data: { figure: 'map', text: '::: map\n:::' } });
+    expect(menu()).toBeNull();
+
+    section().querySelector('[data-new-figure-template]').click();
+    await settle();
+    entry('From a ready one').click();
+    flushSync();
+    expect(entries()).toContain('From a ready one');
+    entry('Losses at a glance').click();
+    flushSync();
+    expect(props.newTemplate).toHaveBeenLastCalledWith('figure', { name: 'Losses at a glance', data: READY[0].data });
+  });
+
+  it('makes one from a figure of a note of the case, its data left there', async () => {
+    caseState.current = { id: 'c1', name: 'Case' };
+    open();
+    section().querySelector('[data-new-figure-template]').click();
+    await settle();
+    entry('From a figure of this case').click();
+    await settle();
+    const notes = document.querySelector('.float-menu[aria-label="Notes"]');
+    [...notes.querySelectorAll('button')].find((node) => node.textContent.includes('Losses')).click();
+    await settle();
+    expect(entries()).toEqual(['Losses', 'Infographic of 1 panelInfographic', 'A mapMap']);
+    expect(menu().textContent).toContain('Its rows, words, sources and places stay with the case.');
+    entry('Infographic of 1 panel').click();
+    await settle();
+    expect(post).toHaveBeenCalledWith('/api/templates/figure/from', { text: PAGE.data.text });
+    expect(props.newTemplate).toHaveBeenCalledWith('figure', { name: 'Infographic of 0 panels', data: { figure: 'infographic', text: ':::: infographic\n::::' } });
+  });
+});

@@ -14,6 +14,12 @@
    * A Notebook template starts from anything, under one New template menu: blank,
    * a ready one, one of the analyst's own (a copy), or a note of the open case,
    * which keeps what Keep as template keeps. Each opens in the Notebook, as Edit does.
+   *
+   * A figure template is an infographic's panels, a chart's settings or a map's look,
+   * without their data (`lib/notes/figureTemplates.js`), listed by figure. New figure
+   * template starts one blank, from a ready one, or from an infographic, a chart or a map
+   * of a note of the open case, its data left there; each opens in the editor here, as
+   * Edit and Duplicate do (`FigureTemplateEditor.svelte`). The Notebook applies them.
    */
   import Icon from '../../components/Icon.svelte';
   import FloatingMenu from '../../components/FloatingMenu.svelte';
@@ -30,6 +36,8 @@
   import { POST_KINDS, postStarters, templatesOfKind } from '../../lib/post.js';
   import { READY_NOTES } from '../../lib/notes/ready.js';
   import { noteTemplateFile, noteTemplateFileName, readNoteTemplateFile } from '../../lib/notes/templateFile.js';
+  import FigureTemplateSketch from './FigureTemplateSketch.svelte';
+  import { FIGURES, blankText, figureFrom, figureOf, figureSaid, figuresIn, readyFigures } from '../../lib/notes/figureTemplates.js';
 
   let { newTemplate, editTemplate, duplicateTemplate, savePrefs, deleteTpl = $bindable() } = $props();
 
@@ -150,6 +158,56 @@
       if (await addNote(name, data)) toast(`“${name}” added`, 'ok');
     } catch (error) { toast(error.message, 'danger', 5000); }
   }
+  // -- figure templates ------------------------------------------------------------
+  const figureGroups = $derived(FIGURES.map((figure) => ({ figure, list: (templatesState.figure ?? []).filter((t) => figureOf(t) === figure.id) }))
+    .filter((group) => group.list.length));
+  let figureAnchor = $state(null);
+  let figureStep = $state('');
+  let figureReady = $state([]);
+  /** The figures of the note picked, for From a figure of this case. */
+  let caseFigures = $state(null);
+  let figureNotesAnchor = $state(null);
+  function closeFigures() {
+    figureAnchor = null;
+    figureStep = '';
+    caseFigures = null;
+  }
+  async function figureMenu(button) {
+    if (figureAnchor) { closeFigures(); return; }
+    figureAnchor = button;
+    figureReady = await readyFigures().catch(() => []);
+  }
+  /** A new figure template, opened in the editor unsaved: Save keeps it. */
+  function startFigure(name, data) {
+    closeFigures();
+    newTemplate('figure', { name, data });
+  }
+  function fromCaseFigures() {
+    const anchor = figureAnchor;
+    figureAnchor = null;
+    figureStep = '';
+    figureNotesAnchor = anchor;
+  }
+  /** A note picked: its figures listed under the same press. */
+  async function figuresOfNote(caseId, noteId, row) {
+    const anchor = figureNotesAnchor;
+    figureNotesAnchor = null;
+    try {
+      const open = openCopy(caseId, noteId);
+      const body = open?.loaded ? open.text : (await api.get(noteEndpoint(caseId, noteId)))?.text ?? '';
+      caseFigures = { title: row?.title || 'Case notes', list: figuresIn(body) };
+      figureStep = 'case';
+      figureAnchor = anchor;
+    } catch (error) { toast(`The note could not be read: ${error.message}`, 'danger', 5000); }
+  }
+  /** A figure of the case as a template: its layout and columns, its data left with the case. */
+  async function fromFigure(found) {
+    try {
+      const made = await figureFrom(found.text);
+      startFigure(made.name, { figure: made.figure, text: made.text });
+    } catch (error) { toast(`Not made: ${error.message}`, 'danger', 5000); }
+  }
+
   let picker = $state();
   async function importMap(event) {
     const file = event.currentTarget.files?.[0];
@@ -344,6 +402,85 @@
     onpick={(id, row) => fromNote(caseId, id ?? CASE_NOTES, row)} onclose={() => (notesAnchor = null)} />
 {/if}
 
+<section class="group" data-guide="settings.figure-templates">
+  <h3>Figure templates</h3>
+  <p class="note">
+    An infographic’s panels, a chart’s settings or a map’s look, without their data, shared across cases. A page started from one reads its data’s columns by name.
+  </p>
+  {#each figureGroups as group (group.figure.id)}
+    <h4 class="tpl-kind"><Icon name={group.figure.icon} size={12} /> {group.figure.label}</h4>
+    <div class="tpl-list">
+      {#each group.list as t (t.id)}
+        <div class="tpl-row figure-row">
+          <FigureTemplateSketch data={t.data} width={44} />
+          <span class="tpl-label stacked">
+            <span class="tpl-name">{t.name}</span>
+            <span class="tpl-said">{figureSaid(t.data)}</span>
+          </span>
+          <div class="tpl-actions">
+            <button class="btn btn-sm" onclick={() => editTemplate('figure', t)}><Icon name="edit" size={13} /> Edit</button>
+            <button class="btn btn-sm" onclick={() => duplicateTemplate('figure', t)}><Icon name="copy" size={13} /> Duplicate</button>
+            <button class="btn btn-sm" title="Delete" aria-label={`Delete ${t.name}`}
+              onclick={() => (deleteTpl = { kind: 'figure', id: t.id, name: t.name })}><Icon name="trash" size={13} /></button>
+          </div>
+        </div>
+      {/each}
+    </div>
+  {/each}
+  {#if !(templatesState.figure ?? []).length}
+    <div class="tpl-list"><p class="empty">No figure templates yet. Start one from a ready one, or from an infographic, a chart or a map of a case.</p></div>
+  {/if}
+  <button class="btn btn-sm" aria-haspopup="menu" aria-expanded={Boolean(figureAnchor)} data-new-figure-template
+    title="Start a template blank, from a ready one, or from a figure of this case"
+    onclick={(event) => figureMenu(event.currentTarget)}>
+    <Icon name="plus" size={13} /> New figure template <Icon name="chevronDown" size={12} />
+  </button>
+</section>
+
+{#if figureAnchor}
+  <FloatingMenu anchor={figureAnchor} width={320} label="New figure template" onclose={closeFigures}>
+    {#if figureStep === 'ready'}
+      <button type="button" class="fm-item back" onclick={() => (figureStep = '')}><Icon name="chevronLeft" size={13} /><span class="fm-grow">From a ready one</span></button>
+      <div class="fm-sep"></div>
+      {#each figureReady as ready (ready.id)}
+        <button type="button" class="fm-item ready-item figure-item" onclick={() => startFigure(ready.name, ready.data)}>
+          <FigureTemplateSketch data={ready.data} width={30} />
+          <span class="fm-grow figure-words"><span>{ready.name}</span><small>{ready.about}</small></span>
+        </button>
+      {/each}
+    {:else if figureStep === 'case' && caseFigures}
+      <button type="button" class="fm-item back" onclick={() => { figureStep = ''; caseFigures = null; }}><Icon name="chevronLeft" size={13} /><span class="fm-grow">{caseFigures.title}</span></button>
+      <div class="fm-sep"></div>
+      {#if !caseFigures.list.length}<p class="fm-note">This note holds no infographic, chart or map.</p>{/if}
+      {#each caseFigures.list as found, index (index)}
+        <button type="button" class="fm-item ready-item" onclick={() => fromFigure(found)}>
+          <Icon name={FIGURES.find((one) => one.id === found.figure)?.icon ?? 'chart'} size={14} />
+          <span class="fm-grow">{found.label}</span><small>{FIGURES.find((one) => one.id === found.figure)?.one}</small>
+        </button>
+      {/each}
+      <p class="fm-note">Its panels, columns and look start the template. Its rows, words, sources and places stay with the case.</p>
+    {:else}
+      {#each FIGURES as figure (figure.id)}
+        <button type="button" class="fm-item" onclick={() => startFigure(`${figure.one} template`, { figure: figure.id, text: blankText(figure.id) })}>
+          <Icon name={figure.icon} size={14} /><span class="fm-grow">Blank {figure.one.toLowerCase()}</span></button>
+      {/each}
+      <div class="fm-sep"></div>
+      <button type="button" class="fm-item" onclick={() => (figureStep = 'ready')}>
+        <Icon name="grid" size={14} /><span class="fm-grow">From a ready one</span><Icon name="chevronRight" size={13} /></button>
+      {#if caseState.current}
+        <button type="button" class="fm-item" onclick={fromCaseFigures}>
+          <Icon name="layers" size={14} /><span class="fm-grow">From a figure of this case</span><Icon name="chevronRight" size={13} /></button>
+      {/if}
+    {/if}
+  </FloatingMenu>
+{/if}
+
+{#if figureNotesAnchor && caseState.current}
+  {@const caseId = caseState.current.id}
+  <NotePicker {caseId} anchor={figureNotesAnchor} intro="The note whose infographic, chart or map starts the template."
+    onpick={(id, row) => figuresOfNote(caseId, id ?? CASE_NOTES, row)} onclose={() => (figureNotesAnchor = null)} />
+{/if}
+
 <section class="group" data-guide="settings.plate-templates">
   <h3>Map plate templates</h3>
   <p class="note">
@@ -432,9 +569,25 @@
   }
 
   .note-row,
+  .figure-row,
   .proof-row {
     justify-content: flex-start;
     padding: 6px 10px 6px 8px;
+  }
+
+  .figure-item {
+    align-items: center;
+  }
+
+  .figure-words {
+    display: flex;
+    flex-direction: column;
+    gap: 1px;
+    white-space: normal;
+  }
+
+  .figure-words small {
+    line-height: 1.35;
   }
 
   .ready-item small {
