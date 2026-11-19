@@ -25,8 +25,8 @@ Past the chain:
   or on Horizon's bench, the photo a Horizon search is for, the video a proof states
   its scene in and the clip cut from it for its post, the captures a scene to
   geolocate gathered: by media path;
-- a personal layer's marker following an entity, a sheet's link, vocabulary word or
-  attached file: by entity id;
+- a personal layer's marker following an entity, the sheet a layer is made from, a
+  sheet's link, vocabulary word or attached file: by entity id;
 - a note's map (`::: map`, `engine/notes_maps.py`): the layers and the plate it draws
   by their records (the layer its card draws in among them), the ground and the
   close-ups under it and the proof a step of its own opens by entity id. Its period of
@@ -147,6 +147,11 @@ def _layer(data: dict[str, Any]) -> Iterator[Lean]:
             counts[target] = counts.get(target, 0) + 1
     for target, count in counts.items():
         yield Lean(target, "1 marker follows it" if count == 1 else f"{count} markers follow it")
+    # the sheet a layer is made from (`engine/sheetmap.py`), whose rows its points are
+    link = data.get("sheet")
+    sheet = link.get("id") if isinstance(link, dict) else None
+    if isinstance(sheet, str) and sheet:
+        yield Lean(sheet, "is made from it")
 
 
 def _proof(data: dict[str, Any]) -> Iterator[Lean]:

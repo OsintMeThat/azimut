@@ -38,6 +38,7 @@ from ..engine import layerediting
 from ..engine import layerexports
 from ..engine import layerlinks
 from ..engine import maplayers as layer_engine
+from ..engine import sheetmap
 from ..workspace import CaseError
 from .cases import delete_by_path, get_case
 from . import events
@@ -527,6 +528,36 @@ def add_layer_shape(case_id: str, name: str, body: ShapeIn) -> dict[str, Any]:
         return layerediting.add_shape(get_case(case_id), _stem(name), **body.model_dump())
     except layer_engine.LayerError as exc:
         raise _refused(exc) from exc
+
+
+class SheetUpdateIn(BaseModel):
+    #: Every point back as the sheet says, the analyst's own edits to them dropped.
+    replace: bool = False
+
+
+class SheetUndoIn(BaseModel):
+    token: str = Field(min_length=1, max_length=64)
+
+
+@router.post("/{case_id}/map-layers/{name}/sheet")
+def update_from_sheet(case_id: str, name: str, body: SheetUpdateIn) -> dict[str, Any]:
+    """Bring a layer made from a sheet level with it, in one change (`engine/sheetmap.update`)."""
+    try:
+        answer = sheetmap.update(get_case(case_id), _stem(name), replace=body.replace)
+    except (sheetmap.SheetMapError, layer_engine.LayerError) as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    events.publish({"type": "saved", "case_id": case_id})
+    return answer
+
+
+@router.post("/{case_id}/map-layers/{name}/sheet/undo")
+def undo_sheet_update(case_id: str, name: str, body: SheetUndoIn) -> dict[str, Any]:
+    try:
+        answer = sheetmap.undo(get_case(case_id), _stem(name), body.token)
+    except (sheetmap.SheetMapError, layer_engine.LayerError) as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    events.publish({"type": "saved", "case_id": case_id})
+    return answer
 
 
 @router.get("/{case_id}/map-layers/places/{place_id}/usage")

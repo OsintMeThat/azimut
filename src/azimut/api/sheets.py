@@ -44,6 +44,7 @@ from ..engine import exportdir
 from ..engine import reveal as reveal_engine
 from ..engine import sheetfromcase as fromcase_engine
 from ..engine import sheetlinks
+from ..engine import sheetmap
 from ..engine import sheetpass as pass_engine
 from ..engine import sheetpromote as promote_engine
 from ..engine import sheetroles
@@ -51,6 +52,7 @@ from ..engine import sheets as sheet_engine
 from ..engine import sheetxlsx as xlsx_engine
 from ..workspace import CaseError
 from .cases import get_case
+from . import events
 
 router = APIRouter(prefix="/api/cases", tags=["sheets"])
 
@@ -252,6 +254,45 @@ def sheet_points(case_id: str, sheet_id: str, body: SheetPointsIn) -> dict[str, 
     if entity is None or entity.get("type") != "sheet":
         raise HTTPException(status_code=404, detail=f"sheet '{sheet_id}' not found")
     return {"points": sheetroles.entity_points(case, body.ids)}
+
+
+class SheetMapIn(BaseModel):
+    """The columns a sheet goes on a map with (`engine/sheetmap.CHOICE`), and the layer's name."""
+
+    choice: dict[str, Any] = Field(default_factory=dict)
+    title: str = Field(default="", max_length=200)
+
+
+def _sheet_or_404(case: Any, sheet_id: str) -> None:
+    entity = case.get_entity(sheet_id)
+    if entity is None or entity.get("type") != "sheet":
+        raise HTTPException(status_code=404, detail=f"sheet '{sheet_id}' not found")
+
+
+@router.post("/{case_id}/sheets/{sheet_id}/map/preview")
+def sheet_map_preview(case_id: str, sheet_id: str, body: SheetMapIn) -> dict[str, Any]:
+    """What a choice of columns would put on the map: the points, the rows that hold no
+    place it can read and why, the colours and the days, and the layers already made from
+    this sheet. Nothing is written."""
+    case = get_case(case_id)
+    _sheet_or_404(case, sheet_id)
+    try:
+        return sheetmap.preview(case, sheet_id, body.choice)
+    except sheetmap.SheetMapError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+
+@router.post("/{case_id}/sheets/{sheet_id}/map")
+def sheet_to_map(case_id: str, sheet_id: str, body: SheetMapIn) -> dict[str, Any]:
+    """The sheet's rows that hold a place, as a personal layer that remembers the sheet."""
+    case = get_case(case_id)
+    _sheet_or_404(case, sheet_id)
+    try:
+        made = sheetmap.make(case, sheet_id, body.choice, title=body.title)
+    except sheetmap.SheetMapError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    events.publish({"type": "saved", "case_id": case_id})
+    return made
 
 
 class SheetTextIn(BaseModel):

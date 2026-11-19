@@ -258,6 +258,12 @@ Three modelling calls the table alone does not show:
   hidden groups, serials and removal journal. A revision guard refuses stale
   finishes. The checkpoint travels through the existing bundle and Trash lifecycle.
   Discarding a layer session does not delete separately promoted case places.
+  A layer made from a sheet (`engine/sheetmap.py`) keeps a `sheet` link in its spec:
+  the sheet's id, the columns it was made with, the file's stamp and a digest of what it
+  put on the map, so the row can say the sheet moved on. Each of its points keeps its
+  row's key (`sheet_row`) and what the sheet wrote for it last (`sheet_said`), which is how
+  an update tells the analyst's edits apart. The link is a use of the sheet
+  (`engine/uses.py`), not a graph edge: deleting the sheet leaves the layer and its points.
 - **Layer downloads strip case identities and provenance references.** KML and GeoJSON retain geometry and
   style fields; KMZ also bundles locally drawn or already imported pictograms.
   **Add from the case** stores an `entity_id` on a marker: a place, capture,

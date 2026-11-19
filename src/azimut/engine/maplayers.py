@@ -2282,10 +2282,13 @@ def row(name: str, spec: dict[str, Any], *, case: "Case | None" = None) -> dict[
     source = spec.get("source") or {}
     at = str(snapshot.get("checked_at") or snapshot.get("at") or "")
     content_hash = spec.get("content_sha256") or snapshot.get("sha256") or ""
+    sheet = None
     if case and source.get("kind") == "editable":
-        from . import layerediting
+        from . import layerediting, sheetmap
 
         content_hash = layerediting.render_digest(case, spec)
+        # a layer made from a sheet: which, and whether it has moved on since
+        sheet = sheetmap.status(case, spec)
     return {
         "name": name,
         "title": spec.get("title") or name,
@@ -2320,6 +2323,8 @@ def row(name: str, spec: dict[str, Any], *, case: "Case | None" = None) -> dict[
         "track": spec.get("track") or None,
         # the My Maps a personal layer is sent to, by its editor's address
         "mymaps": spec.get("mymaps") or "",
+        # the sheet a personal layer is made from: `{id, title, changed, gone, problem?}`
+        "sheet": sheet,
     }
 
 
