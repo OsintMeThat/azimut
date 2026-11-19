@@ -177,7 +177,7 @@ export const SLASH_COMMANDS = [
   { id: 'map', label: 'Interactive map', icon: 'mapArea', words: 'map layers plate proofs front timeline slider interactive', action: 'map', hint: 'Layers, a plate or proofs, in HTML', notes: true },
   { id: 'include', label: 'Include a note', icon: 'note', words: 'chapter report embed note', action: 'include', hint: 'As a chapter', notes: true },
   { id: 'hint', label: 'Guidance', icon: 'help', words: 'hint guide help template', hint: 'Grey, never printed', template: true },
-  { id: 'table', label: 'Table', icon: 'table', words: 'grid columns', block: TABLE },
+  { id: 'table', label: 'Table', icon: 'table', words: 'grid columns rows spreadsheet csv file', block: TABLE, action: 'table', hint: 'Rows by columns, or from a file' },
   { id: 'diagram', label: 'Diagram', icon: 'network', words: 'mermaid flowchart chart', block: DIAGRAM },
   { id: 'steps', label: 'Steps', icon: 'columns', words: 'stepper slides sequence carousel before after days', block: STEPS_BLOCK, hint: 'Pictures one at a time, in HTML' },
   { id: 'story', label: 'Story', icon: 'text', words: 'scrollytelling scroll narrative sticky zoom', block: STORY_BLOCK, hint: 'Words scroll beside a picture, in HTML' },

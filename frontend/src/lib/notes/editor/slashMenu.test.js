@@ -13,9 +13,10 @@ describe('the writers of the / menu', () => {
     const writer = (id) => slashWriter(SLASH_COMMANDS.find((command) => command.id === id));
     expect(writer('cite')).toBe('cite');
     expect(writer('picture')).toBe('action');
+    expect(writer('table')).toBe('action');
     expect(writer('align')).toBe('menu');
     expect(writer('align-center')).toBe('wrap');
     expect(writer('h2')).toBe('line');
-    expect(['table', 'entry', 'date', 'hint', 'steps'].map(writer)).toEqual(['insert', 'insert', 'insert', 'insert', 'insert']);
+    expect(['entry', 'date', 'hint', 'steps'].map(writer)).toEqual(['insert', 'insert', 'insert', 'insert']);
   });
 });

@@ -257,15 +257,22 @@ describe('the keyboard at a picked block', () => {
     expect(text()).toBe('Words\n');
   });
 
-  it('opens a table, a diagram and a chapter the same way', () => {
+  it('opens a diagram and a chapter the same way, and a table at its first cell', () => {
     const doc = '| A | B |\n| --- | --- |\n| 1 | 2 |\n\n```mermaid\nflowchart LR\n  A --> B\n```\n\n[[include:n2]]';
-    for (const at of [0, doc.indexOf('```mermaid'), doc.indexOf('[[include')]) {
+    for (const at of [doc.indexOf('```mermaid'), doc.indexOf('[[include')]) {
       writing(doc, at);
       const before = blocks().length;
       key('Enter');
       expect(blocks().length).toBe(before - 1);
       expect(head()).toBe(at);
     }
+    // a table is a grid: Enter puts the caret in its first cell, its source stays shut
+    writing(doc, 0);
+    key('Enter');
+    expect(blocks()).toHaveLength(3);
+    const field = view.dom.querySelector('.cm-block-table .cm-grid-input');
+    expect(field.value).toBe('1');
+    expect(document.activeElement).toBe(field);
   });
 
   it('sends Tab to the picture bar, and never indents the source of a block', () => {
@@ -346,7 +353,7 @@ describe('the keyboard at a picked block', () => {
 
   it('closes an open block on Escape and picks it', () => {
     writing('| A | B |\n| --- | --- |\n| 1 | 2 |\n\nEnd', 0);
-    key('Enter');
+    mouse(view.dom.querySelector('.cm-block-table [data-edit-source]'), 'mousedown');
     view.dispatch({ selection: { anchor: 14 } });
     expect(view.dom.querySelector('.cm-block-table')).toBeNull();
     const event = key('Escape');

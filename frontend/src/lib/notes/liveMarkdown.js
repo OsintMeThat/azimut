@@ -20,8 +20,8 @@
  * import. The parts live in `editor/`: the page (`decorations.js`), the kinds of
  * block it draws whole, one module each, registered in `blocks.js` and loaded by
  * `kinds.js`, where the drawn blocks are (`ranges.js`), the keys at a block
- * (`blockKeys.js`), the `/` and `@` menus, what the toolbar writes (`writing.js`) and
- * what a tool puts in (`puts.js`).
+ * (`blockKeys.js`), the `/` and `@` menus, what the toolbar writes (`writing.js`),
+ * what a tool puts in (`puts.js`) and a table's grid (`tableGrid.js`).
  */
 import { EditorState, Compartment, Prec } from '@codemirror/state';
 import {
@@ -55,6 +55,9 @@ export { mapBlock } from './editor/mapBlock.js';
 export { resizePicture } from './editor/pictureBlock.js';
 export { mentionSource } from './editor/mentionMenu.js';
 export { slashSource } from './editor/slashMenu.js';
+export { registerTableChart } from './editor/tableGrid.js';
+export { openTablePicker } from './editor/tableInsert.js';
+export { holdCell, placeInCell, releaseCell } from './editor/tablePictures.js';
 export {
   LIGHT_MS, blockAt, captionAt, heldRange, holdRange, lightLines, placeText, releaseRange, takeBackRange,
 } from './editor/puts.js';
@@ -71,7 +74,11 @@ export {
  */
 const drawing = new Compartment();
 
-const drawnMode = [openBlock, drawn, typeOverHints, typeNextToBlock, Prec.high(typeOnPicked), pickedClass, blockKeys];
+const drawnMode = [
+  openBlock, drawn, typeOverHints, typeNextToBlock, Prec.high(typeOnPicked), pickedClass, blockKeys,
+  // what a kind of block keeps or reads besides its lines (a table: which table is which, a pasted spreadsheet)
+  blockKinds().map((kind) => kind.extensions ?? []),
+];
 const rawMode = [rawField, syntaxHighlighting(rawHighlight)];
 
 /** `drawn` or `markdown`: how the page is shown now. */

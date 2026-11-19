@@ -8,6 +8,7 @@ import './playedBlock.js';
 import './mapBlock.js';
 import './diagramBlock.js';
 import './tableBlock.js';
+import './tableGrid.js';
 import './pictureBlock.js';
 import './breakBlocks.js';
 import './htmlBlock.js';

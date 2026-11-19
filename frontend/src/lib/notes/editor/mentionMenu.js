@@ -1,10 +1,19 @@
 /**
  * The `@` menu: `@` and a few letters offer the case's records, and picking one
- * writes its chip.
+ * writes its chip. A table's cell offers the same records (`editor/cellMention.js`).
  */
 import { entityReference } from '../../markdown.js';
 import { mentionMatches } from '../syntax.js';
 import { noteCase } from './state.js';
+
+/** The records `@` offers for `query`, each with how the menu shows it: its name, and its kind and folder. */
+export function mentionChoices(entities, query) {
+  return mentionMatches(entities, query).map((entity) => ({
+    entity,
+    label: entity.label,
+    detail: [entity.type, entity.attrs?.folder].filter(Boolean).join(' · '),
+  }));
+}
 
 /** The completion source of the `@` menu: the records whose name holds what was typed, a chip each. */
 export function mentionSource(context) {
@@ -18,9 +27,9 @@ export function mentionSource(context) {
   return {
     from: typed.from,
     filter: false,
-    options: mentionMatches(info.entities, query).map((entity) => ({
-      label: entity.label,
-      detail: [entity.type, entity.attrs?.folder].filter(Boolean).join(' · '),
+    options: mentionChoices(info.entities, query).map(({ entity, label, detail }) => ({
+      label,
+      detail,
       type: 'mention',
       apply: (view, _completion, from, to) => {
         // a mention names a record; a picture is put in with / or the Picture button

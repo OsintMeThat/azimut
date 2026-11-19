@@ -125,7 +125,8 @@ export async function putInNote(offer, { busyAfter = BUSY_AFTER, target: given =
   const where = given?.caseId && !String(title ?? '').trim() ? 'this note' : `“${shortTitle(title)}”`;
   // where it goes is decided on the press, and held while it is being made
   const returnTo = typeof document === 'undefined' ? null : document.activeElement;
-  const spot = editor?.spot?.() ?? null;
+  // a picture goes to the cell picked in a table, if one is
+  const spot = editor?.spot?.({ picture: Boolean(offer.picture) }) ?? null;
   const controller = new AbortController();
   let busy = null;
   const timer = setTimeout(() => {

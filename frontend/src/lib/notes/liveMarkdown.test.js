@@ -51,7 +51,9 @@ describe('the note page', () => {
     const state = noteState(text, { caseInfo: CASE });
     const words = drawn(state);
     expect(words).toContain(`block 6-${6 + '[[media:m1|clip.jpg]]{width=50%}'.length}`);
-    expect(words.filter((word) => word.startsWith('block'))).toHaveLength(2);
+    expect(words.filter((word) => word.startsWith('block'))).toHaveLength(1);
+    // the table is a grid, over its whole lines
+    expect(words).toContain(`grid ${text.indexOf('| A')}-${text.indexOf('\n\nEnd')}`);
   });
 
   it('draws a closed mermaid fence as a diagram, and its source once it is open', () => {

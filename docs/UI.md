@@ -7022,7 +7022,8 @@ Mermaid chart (`xychart-beta`) draws its series in a blue ramp then grey and its
 the note's sans, in the editor, the PDF and the HTML page alike. A press
 picks one (an accent outline, a picture's bar kept up); a double press, Enter or its
 `</>` opens its source, which closes again once the cursor leaves it, and Escape closes
-it at once. While one is picked, Backspace or Delete takes it out (Undo brings it back),
+it at once. A table's Enter puts the caret in its first cell instead, and only its `</>`
+opens the pipes. While one is picked, Backspace or Delete takes it out (Undo brings it back),
 a key typed starts a paragraph of its own after it, and the arrow keys step over it
 whole, picking it on the way. The toolbar's last pair switches between **Drawn** and
 **Markdown**, the raw text with no drawing (Ctrl+Shift+M), one choice for the browser,
@@ -7031,13 +7032,45 @@ quote as `> [!confirmed]`, `[!unverified]`, `[!lead]`, `[!note]`, `[!warning]` o
 `[!limits]` (what the evidence cannot say), in its colour, in the PDF too. Decimal coordinates get a ⌖ that shows them on the map.
 **@** and a few letters offer the case's records and write a chip; **/** offers
 headings, a dated log entry, tasks, lists, the callouts, a case item, a case picture,
-an image from a file, a table, a diagram, **Steps** and **Story** (an empty `::: steps` or
+an image from a file, a table (rows by columns on a small grid, 3 by 3 unless picked, or
+from a file), a diagram, **Steps** and **Story** (an empty `::: steps` or
 `::: story` block opened on its guidance), an **Interactive map**, code, a divider, a page break and today's date. The bar
 above holds the same as buttons. Ctrl+B and Ctrl+I set bold and italic, Enter on an
 empty item leaves the list. Pasting or dropping an image adds it to the case's media;
 a library file dragged in lands as its picture. A link pasted alone is offered as a
 bookmark of the case, titled from its address, nothing fetched. A note with a remote
 image says its host is contacted on every open.
+
+**A table is a grid** on the drawn page (`lib/notes/editor/tableGrid.js`, reading and
+writing through `tableText.js`). A press puts the caret in a cell, which shows its
+Markdown while it is typed in and its chips, links and pictures otherwise. Tab and
+Shift+Tab move along, Enter goes down and Shift+Enter up, the arrows leave a cell at its
+edges, and Escape goes back to the text with the table picked. Tab past the last cell, or
+Enter on the last row, opens a new row, written once something is typed in it. A cell is
+written when the caret leaves it, on its row's line only, as one Undo step; Ctrl+Z in a
+cell with nothing typed takes back the grid's last gesture. The bar adds a **Row** or a
+**Column**, takes **Paste from a spreadsheet** and **From a file** (CSV, TSV or HTML: an
+empty table takes the cells whole, a filled one gets them under its last row), and its ⋯
+copies the table for a spreadsheet or deletes it; `</>` opens the pipes. A column's ▾
+sorts it (as numbers, dates or words; a bold or *Total* row stays last), inserts, moves,
+aligns, fills down (an empty cell takes the one above) or deletes it. A row's number
+inserts, duplicates, moves or deletes it, and Alt+↑ or Alt+↓ in a cell moves its row.
+Past 30 rows the grid shows the first 20 and *N more rows · show all*. A table wider than
+the text takes the room beside it, then scrolls sideways, the hidden side fading. **@** in
+a cell offers the case's records; a chip or a link in a cell opens on Ctrl+click. A
+spreadsheet's or a web page's table pasted anywhere on the page becomes a table, and a
+toast offers **Paste as text** and **Undo**; pasted in a cell, it fills the grid from
+there, adding the rows and columns it needs. The raw Markdown pastes and shows the pipes as
+before.
+
+**Pictures in a table.** A column holds pictures when its header names them (Picture,
+Photo, Frame…) or a cell holds one, drawn as a thumbnail. A case picture dropped on a cell
+lands there as its chip, and so does a tool's **Put in** while a cell is picked: from the
+moment it is typed in until the note's text is pressed. A row names a video and a time
+when a cell cites a video of the case beside a time (`4:18`), or a column's header cites
+the video and the row's cell under it holds the time (`S04 0:23-0:37` reads 0:23). An empty
+picture cell of such a row offers **Cut a frame**, which opens Inspect on the video at that
+time with the note beside it; the frame's Put in lands in the cell.
 
 The file stays the Markdown it was: what the old split-pane Notebook wrote opens as it
 was written and is never rewritten for being opened. The header names the note (the
