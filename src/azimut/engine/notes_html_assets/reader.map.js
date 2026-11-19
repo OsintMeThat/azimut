@@ -38,9 +38,10 @@
   const BUBBLE_FROM = 12;
   /**
    * Where each of `points` (`{id, x, y}` in pixels) stands once spread; a mark alone is not in it.
-   * With `bubbles`, a crowd past `BUBBLE_FROM` is left out and answered in `crowds` instead.
+   * With `bubbles`, a crowd past `from` (`BUBBLE_FROM`, or the map's own `crowds`) is left out and
+   * answered in `crowds` instead.
    */
-  function arrange(points, { bubbles = false } = {}) {
+  function arrange(points, { bubbles = false, from = BUBBLE_FROM } = {}) {
     const grid = new Map();
     const cellOf = (p) => `${Math.floor(p.x / NEAR_PX)},${Math.floor(p.y / NEAR_PX)}`;
     points.forEach((p, i) => { const key = cellOf(p); if (!grid.has(key)) grid.set(key, []); grid.get(key).push(i); });
@@ -65,7 +66,7 @@
       if (group.length === 1) continue;
       const cx = group.reduce((sum, j) => sum + points[j].x, 0) / group.length;
       const cy = group.reduce((sum, j) => sum + points[j].y, 0) / group.length;
-      if (bubbles && group.length > BUBBLE_FROM) {
+      if (bubbles && group.length > from) {
         crowds.push({ ids: group.map((j) => points[j].id), x: cx, y: cy });
         continue;
       }
@@ -156,6 +157,8 @@
     }
     const labelOf = new Map(labels.map((label) => [label.dataset.for, label]));
     const days = data.days || [];
+    /** How many marks make a crowd to press: the map's own `crowds`, none for 0. */
+    const crowdFrom = data.crowds === 0 ? Infinity : Number(data.crowds) || BUBBLE_FROM;
     const view = { k: 1, x: 0, y: 0 };
     let most = 24;
     let picked = null;
@@ -184,7 +187,7 @@
       view.y = Math.min(0, Math.max(h - h * view.k, view.y));
       if (world) world.style.transform = `translate(${view.x.toFixed(2)}px, ${view.y.toFixed(2)}px) scale(${view.k.toFixed(5)})`;
       // a closer picture shows once the ground under it would blur
-      const sharp = (ground?.naturalWidth || W) / size().w;
+      const sharp = (ground?.naturalWidth || W) / ((Number.parseFloat(ground?.style.width || '') / 100 || 1) * size().w);
       for (const detail of details) detail.classList.toggle('az-on', view.k > sharp * 0.9);
       const unit = 1 / (fit() * view.k);
       svg.setAttribute('viewBox', `${(-view.x * unit).toFixed(3)} ${(-view.y * unit).toFixed(3)} ${(W / view.k).toFixed(3)} ${(H / view.k).toFixed(3)}`);
@@ -192,7 +195,7 @@
       const px = 1 / unit;
       const spread = arrange(points.filter((node) => !node.classList.contains('az-off'))
         .map((node) => ({ id: node.dataset.id, x: Number(node.dataset.x) * px, y: Number(node.dataset.y) * px })),
-      { bubbles: view.k < most * 0.95 });
+      { bubbles: view.k < most * 0.95, from: crowdFrom });
       const grouped = new Set(spread.crowds.flatMap((one) => one.ids));
       for (const node of points) node.classList.toggle('az-grouped', grouped.has(node.dataset.id));
       bubbles.replaceChildren(...spread.crowds.map((one) => bubble(one, unit)));
@@ -219,6 +222,13 @@
       leaders?.replaceChildren(...drawn);
       for (const label of labels) {
         const anchor = nodeOf.get(label.dataset.for);
+        // a line's or an area's name stays on its middle, at the size of the others
+        if (label.dataset.x) {
+          label.setAttribute('y', (Number(label.dataset.y) + LABEL_PX * 0.35 * unit).toFixed(2));
+          label.setAttribute('font-size', (LABEL_PX * unit).toFixed(3));
+          label.style.strokeWidth = `${(3.2 * unit).toFixed(3)}px`;
+          continue;
+        }
         if (!anchor?.azAt) continue;
         label.setAttribute('x', (anchor.azAt[0] + 15 * unit).toFixed(2));
         label.setAttribute('y', (anchor.azAt[1] + LABEL_PX * 0.35 * unit).toFixed(2));
@@ -252,10 +262,11 @@
       }
     }
 
-    /* the scale: a round distance about a hundred pixels long, at the map's middle */
-    const ruler = make('div', { class: 'az-map-scale', 'aria-hidden': 'true' });
-    stage.append(ruler);
+    /* the scale: a round distance about a hundred pixels long, at the map's middle, unless the map takes it away */
+    const ruler = data.scale === 'off' ? null : make('div', { class: 'az-map-scale', 'aria-hidden': 'true' });
+    if (ruler) stage.append(ruler);
     function scale() {
+      if (!ruler) return;
       const { w, h } = size();
       const unit = 1 / (fit() * view.k);
       const mid = [(-view.x + w / 2) * unit, (-view.y + h / 2) * unit];
@@ -533,7 +544,7 @@
     let nowCount = null;
     let playing = 0;
     const after = figure.querySelector('.az-map-day') || stage.parentNode;
-    if (days.length > 1) {
+    if (days.length > 1 && data.timeline !== false) {
       const time = make('div', { class: 'az-map-time' });
       const play = make('button', { type: 'button', class: 'az-map-play', 'aria-label': 'Play the days' }, '▶');
       const now = make('div', { class: 'az-map-now', 'aria-live': 'polite' });
@@ -581,7 +592,7 @@
           if (index >= days.length - 1) stop();
         };
         next();
-        playing = setInterval(next, 1100);
+        playing = setInterval(next, Number(data.speed) || 1100);
       });
     }
 
@@ -637,8 +648,10 @@
     }
 
     const settle = () => {
-      // as deep as the ground stays sharp: each of its pixels drawn at most two and a half wide
-      most = Math.max(3, Math.min(24, ((ground?.naturalWidth || W * 2) / size().w) * 2.5));
+      // as deep as the ground stays sharp: each of its pixels drawn at most two and a half wide; a ground
+      // laid on part of a map framed otherwise is as wide as the share of the stage it covers
+      const groundShare = Number.parseFloat(ground?.style.width || '') / 100 || 1;
+      most = Math.max(3, Math.min(24, ((ground?.naturalWidth || W * 2) / (groundShare * size().w)) * 2.5));
       for (const detail of details) {
         const share = Number.parseFloat(detail.style.width) / 100;
         if (share > 0 && detail.naturalWidth) most = Math.max(most, Math.min(48, (detail.naturalWidth / (share * size().w)) * 2.5));
@@ -696,7 +709,7 @@
         stage.inert = Boolean(engine);
         if (engine) stage.setAttribute('aria-hidden', 'true');
         else { stage.removeAttribute('aria-hidden'); paint(); }
-        return { day: currentDay, picked: picked?.dataset.id || null, arrange, bubble };
+        return { day: currentDay, picked: picked?.dataset.id || null, arrange, bubble, crowdFrom };
       },
     };
   }

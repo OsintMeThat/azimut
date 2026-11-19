@@ -26,6 +26,16 @@ const MIN_ZOOM = 1;
  * for it; or `map`, OpenFreeMap's map alone, which a map with no ground always opens on.
  */
 const FIRST_BASE = 'satellite';
+/**
+ * A map's own base (`base:` in its block) as the live map draws it: a street map or a dark one is
+ * OpenFreeMap's own style alone, sharper than the picture filed for the page; a topographic map is
+ * the picture filed, over OpenFreeMap's map, named as such on its switch.
+ */
+const OWN_BASES = {
+  map: { opens: 'map', switch: false },
+  dark: { opens: 'map', switch: false, style: 'dark' },
+  topographic: { opens: 'satellite', switch: true, filed: 'Topographic (as filed)', hint: 'The topographic map filed with the map, as in the report' },
+};
 /** What a mark's name is set in, as in the drawing (`LABEL_PX` of reader.map.js). */
 const LABEL_PX = 12.5;
 /** What the base map owes, as OpenFreeMap asks it to be said. */
@@ -392,11 +402,12 @@ export function mount(figure, said, maplibre) {
   const box = make(doc, 'div', { class: 'az-gl-map' });
   holder.append(box);
   stage.after(holder);
+  const own = OWN_BASES[data.base] || null;
   let map;
   try {
     map = new maplibre.Map({
       container: box,
-      style: said.style,
+      style: (own?.style && said[own.style]) || said.style,
       bounds: data.bounds,
       fitBoundsOptions: { padding: 0 },
       attributionControl: false,
@@ -420,7 +431,7 @@ export function mount(figure, said, maplibre) {
   const shaped = geojson(data);
   const byId = new Map((data.features || []).map((feature) => [String(feature.id), feature]));
   const drawn = layers();
-  let base = data.ground?.src ? FIRST_BASE : 'map';
+  let base = data.ground?.src ? own?.opens || FIRST_BASE : 'map';
   let day = '';
   let past = [];
   /** What the reader shares once the map is handed over (`attach`), null till then. */
@@ -669,7 +680,7 @@ export function mount(figure, said, maplibre) {
       if (at.x < -60 || at.y < -60 || at.x > w + 60 || at.y > h + 60) continue;
       shown.push({ id: String(feature.id), x: at.x, y: at.y });
     }
-    const where = shared.arrange(shown, { bubbles: map.getZoom() < MAX_ZOOM - 0.3 });
+    const where = shared.arrange(shown, { bubbles: map.getZoom() < MAX_ZOOM - 0.3, from: shared.crowdFrom });
     const crowded = new Set(where.crowds.flatMap((crowd) => crowd.ids));
     const moved = new Set([...where.keys()].filter((id) => !crowded.has(id)));
     const hidden = new Set([...crowded, ...moved]);
@@ -718,6 +729,21 @@ export function mount(figure, said, maplibre) {
       text.textContent = words;
       names.push(text);
     }
+    // a line's or an area's name on its middle, as the drawing writes it, kept off the marks' names
+    for (const feature of data.features || []) {
+      if (feature.kind === 'point' || !feature.at || !feature.style?.label || !feature.label) continue;
+      if (day && ((feature.from && feature.from > day) || (feature.until && day > feature.until))) continue;
+      const at = map.project(feature.at);
+      if (at.x < -60 || at.y < -60 || at.x > w + 60 || at.y > h + 60) continue;
+      const words = String(feature.label).slice(0, 34);
+      const span = words.length * LABEL_PX * 0.56;
+      const box4 = [at.x - span / 2, at.y - LABEL_PX * 0.7, at.x + span / 2, at.y + LABEL_PX * 0.5];
+      if (taken.some((other) => box4[0] < other[2] && other[0] < box4[2] && box4[1] < other[3] && other[1] < box4[3])) continue;
+      taken.push(box4);
+      const text = svgNode(doc, 'text', { class: 'az-label', x: at.x.toFixed(1), y: (at.y + LABEL_PX * 0.35).toFixed(1), 'font-size': LABEL_PX, 'text-anchor': 'middle' });
+      text.textContent = words;
+      names.push(text);
+    }
     labels.replaceChildren(...names);
     if (focused) {
       const feature = byId.get(focused.dataset.for);
@@ -745,19 +771,23 @@ export function mount(figure, said, maplibre) {
       else if (act === 'fit') controls.whole();
     });
     holder.append(bar);
-    if (data.ground?.src) {
+    // the north arrow the drawing wears, over the live map too
+    const north = stage.querySelector('.az-map-north');
+    if (north) holder.append(north.cloneNode(true));
+    if (data.ground?.src && (!own || own.switch)) {
       const choice = make(doc, 'div', { class: 'az-gl-base', role: 'group', 'aria-label': 'Base map' });
       const option = (value, words, hint) => {
         const button = make(doc, 'button', { type: 'button', 'data-base': value, title: hint, 'aria-pressed': String(base === value) }, words);
         button.addEventListener('click', () => choose(value));
         return button;
       };
-      choice.append(option('map', 'Map', 'OpenFreeMap, from OpenStreetMap'), option('satellite', 'Satellite (as filed)', 'The imagery filed with the map, as in the report'));
+      choice.append(option('map', 'Map', 'OpenFreeMap, from OpenStreetMap'),
+        option('satellite', own?.filed || 'Satellite (as filed)', own?.hint || 'The imagery filed with the map, as in the report'));
       holder.append(choice);
     }
-    ruler = make(doc, 'div', { class: 'az-map-scale', 'aria-hidden': 'true' });
+    ruler = data.scale === 'off' ? null : make(doc, 'div', { class: 'az-map-scale', 'aria-hidden': 'true' });
     credit = make(doc, 'p', { class: 'az-gl-credit' });
-    holder.append(ruler, credit);
+    holder.append(...[ruler, credit].filter(Boolean));
     credits();
   }
 

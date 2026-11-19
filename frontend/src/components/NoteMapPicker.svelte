@@ -4,6 +4,9 @@
    * Map plates (its layers as it draws them, its days and steps), and the proofs of a
    * period over either. The ground is taken once, on Put, from the imagery picked
    * (`lib/notes/mapPut.js`); the page never fetches it again.
+   *
+   * **Start an empty map** frames a place instead (`NoteMapStart.svelte`, loaded on that
+   * press with the map it shows) and puts a map of its own, drawn on in the note.
    */
   import { onMount } from 'svelte';
   import { api } from '../lib/api.js';
@@ -20,6 +23,8 @@
   let proofs = $state({ on: false, from: '', to: '' });
   let title = $state('');
   let provider = $state('');
+  /** Whether the dialog frames a place for an empty map rather than picking what the case holds. */
+  let starting = $state(false);
 
   onMount(async () => {
     try {
@@ -48,6 +53,18 @@
     chosen = chosen.includes(name) ? chosen.filter((one) => one !== name) : [...chosen, name];
   }
 
+  /** Where an empty map opens: on the case's layers when it has some, else on the world. */
+  const home = $derived.by(() => {
+    const boxes = layers.map((one) => one.bbox).filter((box) => Array.isArray(box) && box.length === 4);
+    if (!boxes.length) return { lat: 20, lon: 10, zoom: 3 };
+    const west = Math.min(...boxes.map((box) => box[0]));
+    const south = Math.min(...boxes.map((box) => box[1]));
+    const east = Math.max(...boxes.map((box) => box[2]));
+    const north = Math.max(...boxes.map((box) => box[3]));
+    const span = Math.max(east - west, north - south, 0.01);
+    return { lat: (south + north) / 2, lon: (west + east) / 2, zoom: Math.max(3, Math.min(14, Math.round(Math.log2(360 / span)))) };
+  });
+
   function put() {
     if (!ready) return;
     const named = asked.title || (asked.plate ? plates.find((one) => one.name === asked.plate)?.title
@@ -56,7 +73,13 @@
   }
 </script>
 
-<Modal title="Interactive map" width="460px" {onclose}>
+<Modal title="Interactive map" width={starting ? '860px' : '460px'} {onclose}>
+  {#if starting}
+    {#await import('./NoteMapStart.svelte') then { default: NoteMapStart }}
+      <NoteMapStart {home} providers={sources?.providers ?? []} bind:title onback={() => (starting = false)}
+        onstart={(request) => onput({ empty: request })} />
+    {/await}
+  {:else}
   <form class="map-picker" onsubmit={(event) => { event.preventDefault(); put(); }}>
     {#if failed}
       <p class="said error">{failed}</p>
@@ -126,10 +149,13 @@
       <p class="said">The ground is fetched once, now, and kept in the case. The page never fetches it.</p>
     {/if}
     <div class="actions">
+      <button type="button" class="btn btn-ghost start" disabled={!sources} title="Frame a place, then put points, lines and areas on it"
+        onclick={() => (starting = true)}>Start an empty map</button>
       <button type="button" class="btn btn-ghost" onclick={() => onclose?.()}>Cancel</button>
       <button type="submit" class="btn btn-primary" disabled={!ready}>Put the map</button>
     </div>
   </form>
+  {/if}
 </Modal>
 
 <style>
@@ -151,4 +177,5 @@
   .said { margin: 0; font-size: 12px; color: var(--text-3); }
   .said.error { color: var(--danger); }
   .actions { display: flex; justify-content: flex-end; gap: 8px; }
+  .actions .start { margin-right: auto; }
 </style>

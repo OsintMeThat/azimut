@@ -1970,7 +1970,9 @@ class _Builder:
         self._map_credits.extend(str(one) for one in credits if one)
         kind, _, value = (credits[0] if credits else "").partition(": ")
         credit = _Credit(kind, value) if value else None
-        self._place(BytesIO(picture), natural, "", Align.C, self._caption(words, "Map"), credit=credit, unsized=1.0)
+        # a half map prints half the frame's width, as the page shows it
+        self._place(BytesIO(picture), natural, "", Align.C, self._caption(words, "Map"), credit=credit,
+                    unsized=0.5 if block.size == "half" else 1.0)
         return index + 1
 
     def _on_az_chart(self, tokens: list[Token], index: int, align: Align) -> int:

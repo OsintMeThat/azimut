@@ -1,0 +1,33 @@
+/*
+ * Azimut reader, a map shown otherwise than by default: appended after reader.map.css only
+ * in a page holding a map that sets its size, its legend, its base, a north arrow, its scale
+ * or a frame of its own (engine/notes_html.py), so every other page keeps the sheet it had.
+ */
+/* its size: half the text's width, the article's (the default), or as tall as the screen */
+.az-body > .az-map.az-size-half { grid-column: text; width: min(100%, max(50%, 20rem)); justify-self: center; }
+@media screen {
+  .az-body > .az-map.az-size-full { grid-column: full; width: min(100%, calc((100vh - 4rem) * var(--r, 1.6))); justify-self: center; }
+  .az-map.az-size-full > :not(.az-map-frame) { width: min(100%, var(--wide)); margin-inline: auto; }
+}
+/* a dark base: its street map turned dark, as the PDF's picture is (`dark_ground`) */
+.az-map-stage[data-base="dark"] { background: #111316; }
+.az-map-stage[data-base="dark"] .az-map-world { filter: grayscale(1) invert(1) brightness(.82) contrast(1.1); }
+.az-map-stage:is([data-base="map"], [data-base="topographic"]) .az-map-world { filter: saturate(.8) brightness(.94); }
+/* a north arrow, under the card and over the drawing */
+.az-map-north {
+  position: absolute; z-index: 2; top: .75rem; right: .75rem; display: grid; place-items: center; width: 2.25rem; height: 2.25rem;
+  border-radius: 50%; background: rgba(16, 18, 22, .78); box-shadow: 0 6px 18px -8px rgba(0, 0, 0, .6); pointer-events: none;
+}
+.az-map-north svg { width: 1.1rem; height: 1.4rem; overflow: visible; }
+.az-map-north path { fill: #fff; }
+.az-map-north text { fill: #fff; font: 700 7px/1 var(--ui); text-anchor: middle; }
+.az-gl .az-map-north { z-index: 3; }
+@media (max-width: 47.99rem) { .az-gl .az-map-north { top: 3rem; right: .5rem; } }
+/* a folded legend: one line that opens it */
+.az-map-key { margin: .85rem 0 0; font: 600 .8125rem/1.35 var(--ui); color: var(--ink-2); }
+.az-map-key > summary { cursor: pointer; width: fit-content; color: var(--muted); }
+.az-map-key[open] > summary { margin-bottom: .2rem; }
+.az-body .az-map .az-map-key .az-map-legend { margin-top: .5rem; }
+@media print {
+  .az-body > .az-map.az-size-full { grid-column: wide; width: auto; }
+}
