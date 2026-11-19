@@ -551,3 +551,15 @@ def test_a_tables_anchor_is_the_one_the_editor_writes():
                      ("/4", "Register", ["v"])]
     for anchor, _, headers in found:
         assert notecharts._table_under(text, anchor).headers == headers
+
+
+def test_the_figure_route_says_each_values_colour_and_where_it_came_from(client):
+    cid, _ = _case(client)
+    assert client.put(f"/api/cases/{cid}/layer-palette",
+                      json={"colours": [{"name": "Ours", "colour": "#009e73"}]}).status_code == 200
+    block = ("kind: stacked bars\ncount: Count\nby: Model\ncolour by: Side\nsource: x\n| Model | Side | Count |\n"
+             "| --- | --- | --- |\n| A | Ours | 2 |\n| B | Theirs | 1 |")
+    answer = client.post(f"/api/cases/{cid}/notes/figure", json={"text": block})
+    colours = json.loads(answer.headers["x-chart-colours"])
+    assert [(one["value"], one["origin"]) for one in colours] == [("Ours", "case"), ("Theirs", "order")]
+    assert colours[0]["colour"] == "#009e73" and re.fullmatch(r"#[0-9a-f]{6}", colours[1]["colour"])

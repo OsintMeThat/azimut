@@ -7,7 +7,8 @@
  *   the rows of another note or a sheet instead;
  * - **the settings**: only what a chart is about, in plain words: its title, what it
  *   counts, by what, coloured by what, whether its table shows under it, and its look
- *   (Report, Book, Dark), each a whole preset. They open on the chart itself, between
+ *   (Report, Book, Dark), each a whole preset; the colours it chose on its own, and the
+ *   press that keeps them for the case. They open on the chart itself, between
  *   its bar and its drawing, so each choice is seen as it is made.
  *
  * Neither writes the note: each says what was chosen, and the chart block writes its
@@ -149,6 +150,11 @@ export function openKindPicker(view, anchor, {
 export const STACKS = { bars: 'stacked bars', columns: 'stacked columns' };
 export const UNSTACKS = { 'stacked bars': 'bars', 'stacked columns': 'columns' };
 
+/** The colours a chart chose on its own, which the case can keep: the fixed order's, the grades' ramp, its own `colours`. */
+export const KEEPABLE = ['order', 'grade', 'chart'];
+/** What keeping them says it does, on the button and in the toast. */
+export const KEEP_SAID = 'Name these colours in the case, so every chart, map and layer paints them the same';
+
 /** The looks a chart takes, as the card names them. */
 export const STYLE_NAMES = { report: 'Report', book: 'Book', dark: 'Dark' };
 export const SHOW_NAMES = { chart: 'Chart', 'chart and table': 'Chart and table' };
@@ -239,7 +245,7 @@ function segmented(label, options, value, onChange) {
  * column, its parts: choosing it writes `by` and takes `colour by` out. Answers `{
  * refresh, commit, focus }`, `commit` writing a title typed and not yet written.
  */
-export function chartSettings(panel, { state, write }) {
+export function chartSettings(panel, { state, write, keep = null }) {
   panel.setAttribute('role', 'group');
   panel.setAttribute('aria-label', 'Chart settings');
   // the title field stays the same element while the panel is drawn again, so typing in it is never lost
@@ -252,7 +258,8 @@ export function chartSettings(panel, { state, write }) {
   const offer = element('div', 'cm-chart-proposed');
   const columns = element('div', 'cm-chart-columns');
   const looks = element('div', 'cm-chart-looks');
-  panel.replaceChildren(titleRow, offer, columns, looks);
+  const colours = element('div', 'cm-chart-field cm-chart-colours');
+  panel.replaceChildren(titleRow, offer, columns, looks, colours);
 
   const size = () => {
     titleField.style.height = 'auto';
@@ -312,7 +319,29 @@ export function chartSettings(panel, { state, write }) {
       segmented('Style', STYLES.map((value) => ({ value, label: STYLE_NAMES[value] })), setting(chart, 'style') || kind.style || 'report',
         (value) => write(cardChanges('style', value, { kind }))),
     );
+    renderColours(drawn?.colours ?? []);
     if (focused) [...panel.querySelectorAll('[aria-label]')].find((node) => node.getAttribute('aria-label') === focused)?.focus({ preventScroll: true });
+  }
+
+  /** The values the chart coloured on its own, and the one press that names them in the case. */
+  function renderColours(all) {
+    const own = all.filter((one) => KEEPABLE.includes(one.origin));
+    colours.hidden = !own.length || !keep;
+    if (colours.hidden) {
+      colours.replaceChildren();
+      return;
+    }
+    const list = element('span', 'cm-chart-swatches');
+    for (const one of own) {
+      const chip = element('span', 'cm-chart-swatch', one.value);
+      chip.style.setProperty('--swatch', one.colour);
+      chip.title = one.colour;
+      list.append(chip);
+    }
+    const press = button('cm-chart-use cm-chart-keep', { label: 'Keep these colours for the case', title: KEEP_SAID });
+    press.addEventListener('mousedown', (event) => event.preventDefault());
+    press.addEventListener('click', () => keep(own.map(({ value, colour }) => ({ value, colour }))));
+    colours.replaceChildren(element('span', 'cm-chart-field-name', 'Colours'), list, press);
   }
 
   render();

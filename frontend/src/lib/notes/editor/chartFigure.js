@@ -83,8 +83,15 @@ export function readChecks(headers) {
   }));
 }
 
+/** Each value a chart colours, `{ value, colour, origin }` (`origin`: "case", "order", "grade", "chart"…). */
+export function readColours(headers) {
+  return listOf(headers, 'X-Chart-Colours')
+    .filter((one) => one && typeof one.value === 'string' && /^#[0-9a-f]{6}$/i.test(String(one.colour)))
+    .map((one) => ({ value: one.value, colour: String(one.colour).toLowerCase(), origin: String(one.origin ?? '') }));
+}
+
 /**
- * A chart drawn: `{ svg, title, proposed, kind, checks }`, or `{ error }`: `kind` is what
+ * A chart drawn: `{ svg, title, proposed, kind, checks, colours }`, or `{ error }`: `kind` is what
  * it is drawn as (`{ name, label, counts, parts, stacked, style }`). `noteId` is the note it
  * stands in, read for its look; `origins` false leaves `from:` to the editor, which reads
  * the rows of its own note as they are typed.
@@ -100,6 +107,7 @@ export function drawChart({ caseId, noteId = '', text, origins = true }, { post 
       proposed: textOf(headers, 'X-Chart-Proposed-Title'),
       kind: objectOf(headers, 'X-Chart-Kind'),
       checks: readChecks(headers),
+      colours: readColours(headers),
     }))
     .catch((error) => ({ error: error?.message ?? String(error) }))
     .then((answer) => {

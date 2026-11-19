@@ -10,7 +10,7 @@ import { undo } from '@codemirror/commands';
  * with their one-press fixes, every choice one Undo step of exact bytes.
  */
 
-const server = vi.hoisted(() => ({ figure: null, kinds: null, rows: null, sources: null, asked: [] }));
+const server = vi.hoisted(() => ({ figure: null, kinds: null, rows: null, sources: null, palette: [], asked: [] }));
 vi.mock('../../api.js', async (original) => {
   const real = await original();
   return {
@@ -27,7 +27,12 @@ vi.mock('../../api.js', async (original) => {
       }),
       get: vi.fn(async (path) => {
         server.asked.push({ path });
-        return server.sources(path);
+        return path.endsWith('/layer-palette') ? { colours: server.palette } : server.sources(path);
+      }),
+      put: vi.fn(async (path, body) => {
+        server.asked.push({ path, body });
+        server.palette = body.colours;
+        return { colours: body.colours, icons: [] };
       }),
     },
   };
@@ -59,7 +64,7 @@ const CHART = [
 const CHARTED = `Who made them.\n\n## Count\n\n${TABLE}\n\n${CHART}\n\nAfter.`;
 
 /** What the figure route answers: its drawing, and what the check says in its headers. */
-function answer({ checks = [], kind = STACKED, proposed = 'At least 10 vehicles, by model and grade', title = 'At least 10, by model and grade' } = {}) {
+function answer({ checks = [], kind = STACKED, proposed = 'At least 10 vehicles, by model and grade', title = 'At least 10, by model and grade', colours = [] } = {}) {
   return {
     data: new TextEncoder().encode(SVG).buffer,
     headers: new Headers({
@@ -70,6 +75,7 @@ function answer({ checks = [], kind = STACKED, proposed = 'At least 10 vehicles,
       'X-Note-Warning-Lines': JSON.stringify(checks.map((check) => check.line ?? null)),
       'X-Note-Warning-Kinds': JSON.stringify(checks.map((check) => check.kind ?? 'other')),
       'X-Note-Warning-Fixes': JSON.stringify(checks.map((check) => check.fix ?? [])),
+      'X-Chart-Colours': JSON.stringify(colours),
     }),
   };
 }
@@ -308,6 +314,51 @@ describe('the settings, on the chart', () => {
     expect(text()).toBe(CHARTED.replace('from: note:n1#count', 'from: note:n1#count\nstyle: book'));
     undo(view);
     expect(text()).toBe(CHARTED);
+  });
+});
+
+describe('Keep these colours for the case', () => {
+  const COLOURS = [
+    { value: 'identified', colour: '#184F95', origin: 'grade' },
+    { value: 'almost sure', colour: '#3987e5', origin: 'grade' },
+    { value: 'UAE', colour: '#eb6834', origin: 'case' },
+    { value: 'Other', colour: '#a9a79f', origin: 'other' },
+  ];
+
+  it('names the colours the chart chose in the case’s palette in one press, the case’s own left as they are, with an Undo', async () => {
+    server.palette = [{ name: 'UAE', colour: '#eb6834' }];
+    server.figure = () => answer({ colours: COLOURS });
+    editor(CHARTED);
+    await settle();
+    press(tool('settings'));
+    const row = card().querySelector('.cm-chart-colours');
+    expect(row.hidden).toBe(false);
+    expect([...row.querySelectorAll('.cm-chart-swatch')].map((node) => node.textContent)).toEqual(['identified', 'almost sure']);
+    const keep = row.querySelector('.cm-chart-keep');
+    expect(keep.textContent).toBe('Keep these colours for the case');
+    expect(keep.title).toBe('Name these colours in the case, so every chart, map and layer paints them the same');
+    const before = text();
+    press(keep);
+    await settle();
+    expect(server.asked.filter((one) => one.path === '/api/cases/c1/layer-palette' && one.body).at(-1).body).toEqual({
+      colours: [{ name: 'UAE', colour: '#eb6834' }, { name: 'identified', colour: '#184f95' }, { name: 'almost sure', colour: '#3987e5' }],
+    });
+    // the note is not written; the chart is drawn again in the case's colours
+    expect(text()).toBe(before);
+    expect(figureAsks().length).toBeGreaterThan(1);
+    const [said, actions] = handlers.tableToast.mock.calls.at(-1);
+    expect(said).toBe('Kept for the case: every chart, map and layer paints them the same');
+    actions[0].onClick();
+    await settle();
+    expect(server.palette).toEqual([{ name: 'UAE', colour: '#eb6834' }]);
+  });
+
+  it('is not offered once every colour is the case’s', async () => {
+    server.figure = () => answer({ colours: [{ value: 'UAE', colour: '#eb6834', origin: 'case' }] });
+    editor(CHARTED);
+    await settle();
+    press(tool('settings'));
+    expect(card().querySelector('.cm-chart-colours').hidden).toBe(true);
   });
 });
 

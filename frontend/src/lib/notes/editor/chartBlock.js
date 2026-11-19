@@ -11,9 +11,10 @@
  *   from another note or a sheet* (`GET /notes/figure/sources`); with no table in the
  *   note, that or a small one to fill.
  * - **Its bar**: Kind (the picker again, the chart's own settings kept), Settings (the
- *   card: title, count, by, coloured by, show, style), Read again (once the table its
- *   rows came from changed, in this note, another one or a sheet), The numbers (its rows, and the way to the table), Export
- *   (a picture for X, 4:5, 1:1, the PDF page, or an SVG).
+ *   card: title, count, by, coloured by, show, style, and *Keep these colours for the
+ *   case*), Read again (once the table its rows came from changed, in this note, another
+ *   one or a sheet), The numbers (its rows, and the way to the table), Export (a picture
+ *   for X, 4:5, 1:1, the PDF page, or an SVG).
  * - **Its checks**: what the check before export says of it, in the honesty rules'
  *   words, under it, with a one-press fix where the check offers one.
  *
@@ -24,9 +25,10 @@ import { isolateHistory } from '@codemirror/commands';
 import { Transaction } from '@codemirror/state';
 import { ViewPlugin } from '@codemirror/view';
 
+import { layerPalette } from '../../map/layerPalette.svelte.js';
 import { rovingToolbar } from '../pictureSize.js';
 import { registerBlock } from './blocks.js';
-import { EXPORTS, chartRows, chartSources, drawChart, exportChart, keptDrawing } from './chartFigure.js';
+import { EXPORTS, chartRows, chartSources, drawChart, exportChart, forgetDrawings, keptDrawing } from './chartFigure.js';
 import { chartSettings, openKindPicker } from './chartCard.js';
 import {
   CHART_OPEN, compareRows, headingAbove, newChart, originFor, readChart, readOrigin, setting, tableUnder, withSettings, withTable,
@@ -375,6 +377,7 @@ class ChartBox {
       this.settings = chartSettings(this.settingsPanel, {
         state: () => (this.gone ? null : { chart: this.chart, drawn: this.drawn }),
         write: (changes) => this.write(changes),
+        keep: this.info.caseId ? (values) => this.keepColours(values) : null,
       });
     }
     this.settingsButton?.setAttribute('aria-pressed', String(open));
@@ -383,6 +386,26 @@ class ChartBox {
   }
 
   /** Copy the rows again from where they came from, as one step Undo takes back. */
+  /**
+   * Name the colours the chart chose on its own in the case's palette (`layerPalette.keep`,
+   * the infographic builder's too), so every chart, map and layer paints them the same. The
+   * case's palette is no Undo step of the note: the toast that says so offers its own Undo.
+   */
+  async keepColours(values) {
+    const caseId = this.info.caseId;
+    const toast = this.handlers.tableToast;
+    try {
+      const { before } = await layerPalette.keep(caseId, values);
+      redrawCharts(this.view);
+      toast?.('Kept for the case: every chart, map and layer paints them the same', [{
+        label: 'Undo',
+        onClick: () => layerPalette.save(caseId, before).then(() => redrawCharts(this.view), (error) => toast?.(`Not undone: ${error.message}`, [], 'warn')),
+      }]);
+    } catch (error) {
+      toast?.(`Colours not kept: ${error.message}`, [], 'warn');
+    }
+  }
+
   readAgain() {
     const found = this.origin?.found;
     const text = found ? this.view.state.sliceDoc(found.from, found.to) : this.origin?.text;
@@ -536,6 +559,12 @@ export class ChartWidget extends BlockWidget {
   get estimatedHeight() {
     return heldHeight(this) ?? CHART_HEIGHT;
   }
+}
+
+/** The case's colours changed: every chart of the note is asked again, as it is drawn from them. */
+function redrawCharts(view) {
+  forgetDrawings();
+  for (const box of view.contentDOM.querySelectorAll('.cm-chart-block')) box.chart?.draw();
 }
 
 /** Enter on a picked chart, or a double press: its settings; a locked note opens the source. */
@@ -900,6 +929,12 @@ const THEME = {
     marginLeft: '6px', padding: '0', border: 'none', background: 'none', color: 'var(--info)', font: 'inherit', cursor: 'pointer', textDecoration: 'underline',
   },
   '.cm-chart-looks .cm-chart-field': { flexDirection: 'row', alignItems: 'center', gap: '10px' },
+  '.cm-chart-colours': { flexDirection: 'row', alignItems: 'center', flexWrap: 'wrap', gap: '6px 10px', paddingLeft: '74px' },
+  '.cm-chart-colours[hidden]': { display: 'none' },
+  '.cm-chart-swatches': { display: 'inline-flex', flexWrap: 'wrap', gap: '4px 10px' },
+  '.cm-chart-swatch': { display: 'inline-flex', alignItems: 'center', gap: '5px', color: 'var(--text-2)', fontSize: '11.5px' },
+  '.cm-chart-swatch::before': { content: '""', width: '10px', height: '10px', borderRadius: '2px', background: 'var(--swatch)' },
+  '.cm-chart-keep': { marginLeft: '0' },
   '.cm-chart-seg': { display: 'inline-flex', border: '1px solid var(--border-strong)', borderRadius: '6px', overflow: 'hidden' },
   '.cm-chart-seg-btn': {
     height: '26px', padding: '0 11px', border: 'none', borderRight: '1px solid var(--border)', background: 'var(--bg-1)', color: 'var(--text-2)',

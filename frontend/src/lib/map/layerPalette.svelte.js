@@ -13,6 +13,7 @@ export function createLayerPalette({ api = defaultApi } = {}) {
   let colours = $state([]);
   let icons = $state([]);
   let owner = null;
+  let read = null;
   let asked = 0;
   return {
     get colours() { return colours; },
@@ -32,7 +33,7 @@ export function createLayerPalette({ api = defaultApi } = {}) {
       const ticket = ++asked;
       if (!again) { colours = []; icons = []; }
       api.get(`/api/cases/${caseId}/layer-palette`)
-        .then((body) => { if (ticket === asked) { colours = body.colours ?? []; icons = body.icons ?? []; } })
+        .then((body) => { if (ticket === asked) { colours = body.colours ?? []; icons = body.icons ?? []; read = caseId; } })
         .catch(() => {});
     },
     /** Saves the colours, and the icons when given; left out, they keep their names. */
@@ -45,15 +46,18 @@ export function createLayerPalette({ api = defaultApi } = {}) {
      * "Keep these colours for the case": the values a chart or a page coloured on its own,
      * `[{ value, colour }]`, named in the case's palette after the names it holds, a name it
      * already holds keeping its colour. Every chart, map and layer of the case then paints them
-     * the same. Answers what the case keeps.
+     * the same. The palette is read first when it is not this case's yet, so another's is never
+     * written over it. Answers `{ colours, before }`: what the case keeps now, and what it kept,
+     * for an Undo.
      */
     async keep(caseId, values) {
-      const kept = [...colours];
+      const before = read === caseId ? [...colours] : (await api.get(`/api/cases/${caseId}/layer-palette`)).colours ?? [];
+      const kept = [...before];
       for (const { value, colour } of values) {
         const name = String(value ?? '').trim();
         if (name && !kept.some((entry) => entry.name.toLowerCase() === name.toLowerCase())) kept.push({ name, colour: String(colour).toLowerCase() });
       }
-      return this.save(caseId, kept);
+      return { colours: await this.save(caseId, kept), before };
     },
   };
 }

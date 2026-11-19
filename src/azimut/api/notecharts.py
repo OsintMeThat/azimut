@@ -103,6 +103,8 @@ def chart_figure(case_id: str, body: FigureIn) -> Response:
         "X-Note-Warning-Kinds": _ascii_json([kind for _, kind, _ in warnings]),
         # the settings that fix each warning, written by the card's one press: [[key, value], ...]
         "X-Note-Warning-Fixes": _ascii_json([[list(pair) for pair in fix] for fix in chart.fixes[:MAX_WARNINGS]]),
+        # each value's colour and where it came from, for the card's Keep these colours for the case
+        "X-Chart-Colours": _ascii_json(_colours(chart)),
     }
     if body.format == "png":
         return Response(content=chart.picture(body.size), media_type="image/png", headers=headers)
@@ -156,6 +158,16 @@ def _kind_said(chart: notecharts.Chart) -> dict[str, Any]:
     return {"name": kind.name, "label": kind.label, "counts": kind.counts, "parts": kind.parts,
             "stacked": kind.stacked, "up": kind.up, "turns": kind.turns,
             "style": notecharts.theme_of(chart.look, chart.block).name}
+
+
+#: How many of a chart's colours ride in the header.
+MAX_COLOURS = 24
+
+
+def _colours(chart: notecharts.Chart) -> list[dict[str, str]]:
+    """Each value a chart's legend names, its colour and where the colour came from."""
+    return [{"value": swatch.value[:MAX_WARNING_CHARS], "colour": swatch.paint.colour, "origin": swatch.paint.origin}
+            for swatch in chart.layout.legend[:MAX_COLOURS] if swatch.value.strip()]
 
 
 def _ident(title: str) -> str:
