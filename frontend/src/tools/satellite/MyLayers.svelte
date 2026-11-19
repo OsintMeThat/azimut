@@ -19,10 +19,12 @@
       ondownload={(row) => controller.download(row)}
       onmap={(row) => void putInNote(layerMapOffer(caseState.current?.id, row))}
       {ontoggle} {onedit} {onremove} {onreorder} {oncategory} onadd={onnew}
+      opened={addedLayers.justAdded}
       dates={addedLayers.dates}
       onperiod={(row, period, commit) => addedLayers.setPeriod(caseState.current?.id, row, period, commit)}
       moments={(row) => addedLayers.moments(row.name)}
-      ontime={(row, patch) => addedLayers.setTime(row.name, patch)} />
+      ontime={(row, patch) => addedLayers.setTime(row.name, patch)}
+      onsheet={(row, options) => addedLayers.updateFromSheet(caseState.current?.id, row, options)} />
   {/if}
 </section>
 

@@ -59,6 +59,7 @@
     moveName,
     sourceLabel,
   } from '../../lib/map/addedLayers.js';
+  import { sheetLine } from '../../lib/sheetMap.js';
 
   let {
     /** The rows as the backend returned them. */
@@ -99,6 +100,8 @@
     moments = null,
     /** `(layer, patch)`: a tracked layer's cursor, trail or gains moved. */
     ontime = null,
+    /** `(layer, { replace })`: a layer made from a sheet brought level with it (`lib/sheetMap.js`). */
+    onsheet = null,
   } = $props();
   $effect(() => { if (rows.some((row) => row.editable)) layerPalette.load(caseState.current?.id); });
   const BADGES = new Set(choices.map((choice) => choice.id));
@@ -342,7 +345,23 @@
             <Icon name="trash" size={13} />
           </button>
         </div>
+        {#if row.sheet?.changed && !row.sheet.gone && onsheet}
+          <!-- Said before a mark is read, like a stale feed: the sheet moved on, one press brings the layer level. -->
+          <p class="sheet-changed">
+            <Icon name="alert" size={11} />
+            <span title={`The sheet “${row.sheet.title}” changed since this layer was made from it`}>{sheetLine(row)}</span>
+            {#if !row.sheet.problem}
+              <button type="button" class="sheet-act" disabled={busy === row.name}
+                title="Take the sheet's changes; your own edits to its points are kept"
+                onclick={() => onsheet(row, { replace: false })}>{busy === row.name ? 'Updating…' : 'Update the layer'}</button>
+            {/if}
+          </p>
+        {/if}
         {#if unfold}
+        {#if row.sheet}
+          <!-- where its points come from, on a line of its own: a sheet's name is too long to share one -->
+          <p class="meta"><span class:stale={row.sheet.gone}>{sheetLine({ sheet: { ...row.sheet, changed: false, problem: '' } })}</span></p>
+        {/if}
         <p class="meta">
           <!-- A followed map is a page somebody publishes, so where it came
                from is a way of getting there: this is the one thing on the row
@@ -356,6 +375,8 @@
               rel="noreferrer"
               title="Open this map at its source"
             >{sourceLabel(row)} <Icon name="external" size={9} /></a>
+          {:else if row.sheet}
+            <!-- said on the line above -->
           {:else if row.editable}
             <span>{row.origin ? `Copy of ${row.origin.source.name || row.origin.source.url}` : 'Personal layer'}</span>
           {:else}
@@ -368,6 +389,20 @@
         <!-- Both numbers, always: what is loaded and what is drawn, never the
              one passing for the other. -->
         <p class="meta counts">{countLabel(row)}</p>
+        {#if row.sheet && !row.sheet.gone && !row.sheet.problem && onsheet}
+          <!-- Read the sheet again whenever, and the other press: every point as the sheet says. -->
+          <p class="meta sheet-acts">
+            {#if !row.sheet.changed}
+              <!-- when it changed, the line under its name already offers this press -->
+              <button type="button" class="sheet-act" disabled={busy === row.name}
+                title="Take the sheet's changes; your own edits to its points are kept"
+                onclick={() => onsheet(row, { replace: false })}>Update from the sheet</button>
+            {/if}
+            <button type="button" class="sheet-act" disabled={busy === row.name}
+              title="Every point back as the sheet says: your moves, renames and removals are dropped"
+              onclick={() => onsheet(row, { replace: true })}>Replace my edits</button>
+          </p>
+        {/if}
         {#if row.icons}
           <!-- the map's own icons, which the analyst may want in every palette; never filed unasked -->
           <p class="meta icons-line"><span>{row.icons} {row.icons === 1 ? 'icon' : 'icons'}</span>
@@ -610,6 +645,31 @@
   .fold:hover,
   .fold:hover .name {
     color: var(--text-1);
+  }
+  .sheet-changed {
+    display: flex;
+    align-items: center;
+    gap: 5px;
+    margin: 0 0 3px;
+    padding-left: var(--indent, 30px);
+    font-size: 10px;
+    color: var(--warn, #ffcc66);
+  }
+  .sheet-act {
+    padding: 0;
+    color: var(--accent);
+    font-size: 10px;
+    cursor: pointer;
+  }
+  .sheet-act:hover:not(:disabled) {
+    text-decoration: underline;
+  }
+  .sheet-act:disabled {
+    color: var(--text-3);
+    cursor: default;
+  }
+  .sheet-changed .sheet-act {
+    margin-left: 2px;
   }
   .stale-mark {
     display: grid;

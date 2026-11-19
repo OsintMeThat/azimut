@@ -50,6 +50,7 @@ import {
 import { active, indexDates, within } from './layerDates.js';
 import { isTracked, momentNow, moments as momentsOf } from './layerHistory.js';
 import { layerMemory } from './layerMemory.js';
+import { updatedWords } from '../sheetMap.js';
 
 /** How a tracked layer is read when nobody moved its cursor: today, with its trail. */
 const UNMOVED = Object.freeze({ at: null, trail: true, since: null });
@@ -354,6 +355,25 @@ export function createAddedLayersState({ api, notify, ensureCase, reloadCase, me
   }
 
   /**
+   * Read the list again where a layer is made from a sheet, so its row says whether the
+   * sheet moved on since (`engine/sheetmap.status`). Disk only, and only when such a layer
+   * is listed: the Map asks it each time it is shown and when the window comes back, which
+   * is when an edit made in the Sheet tool or in a spreadsheet has to be told.
+   */
+  function recheckSheets(caseId) {
+    if (!caseId || loadedFor !== caseId || !rows.some((row) => row.sheet)) return;
+    const ticket = asked;
+    api.get(`/api/cases/${caseId}/map-layers`).then((list) => {
+      if (loadedFor !== caseId || ticket !== asked || !Array.isArray(list)) return;
+      for (const row of list) {
+        const before = rows.find((entry) => entry.name === row.name);
+        if (before && before.sha256 !== row.sha256) forget(row.name);
+      }
+      rows = list;
+    }).catch(() => {});
+  }
+
+  /**
    * Re-read a followed layer the first time it is switched on in the session.
    *
    * Silent when it fails: the snapshot is already being drawn, and the row says
@@ -413,6 +433,20 @@ export function createAddedLayersState({ api, notify, ensureCase, reloadCase, me
       replace(row);
       return moved ? 'moved' : 'same';
     });
+  }
+
+  /** Put a layer back as it was before its last update from its sheet. */
+  async function undoSheetUpdate(caseId, layer, token) {
+    try {
+      const row = await api.post(`/api/cases/${caseId}/map-layers/${encodeURIComponent(layer.name)}/sheet/undo`, { token });
+      if (loadedFor === caseId) {
+        forget(row.name);
+        replace(row);
+      }
+      notify('Update undone', 'ok');
+    } catch (error) {
+      notify(error?.message || 'The update could not be undone', 'error');
+    }
   }
 
   async function act(name, run) {
@@ -594,6 +628,7 @@ export function createAddedLayersState({ api, notify, ensureCase, reloadCase, me
       return picked;
     },
     load,
+    recheckSheets,
     drawing,
     addFile,
     createEditable(title, description = '') {
@@ -612,6 +647,51 @@ export function createAddedLayersState({ api, notify, ensureCase, reloadCase, me
       return add((caseId) => api.post(`/api/cases/${caseId}/map-layers/editable/link`, { url, title, description }),
         'Could not import the map');
     },
+    /**
+     * A layer made elsewhere (a sheet's, in the Sheet tool): listed at once and switched on
+     * in the Map, as one just added is.
+     */
+    async adopt(caseId, row) {
+      if (!row?.name || !caseId) return;
+      if (loadedFor === caseId) {
+        if (rows.find((entry) => entry.name === row.name)?.sha256 !== row.sha256) forget(row.name);
+        replace(row);
+      }
+      justAdded = row.name;
+      renewed.add(row.name);
+      if (loadedFor === caseId && restoredFor === caseId) {
+        show(MAP, row.name, true);
+        keep();
+      } else {
+        // this case's layers are still being read: switched on when they are
+        const kept = memory.added(caseId);
+        memory.keepAdded(caseId, { ...kept, [MAP]: [...new Set([...(kept[MAP] ?? []), row.name])] });
+      }
+      await reloadCase();
+    },
+    /**
+     * A layer made from a sheet brought level with it (`engine/sheetmap.update`), in one
+     * press, the toast saying what moved and offering the one Undo.
+     */
+    async updateFromSheet(caseId, layer, { replace: replacing = false } = {}) {
+      return act(layer.name, async () => {
+        try {
+          const answer = await api.post(`/api/cases/${caseId}/map-layers/${encodeURIComponent(layer.name)}/sheet`, { replace: replacing });
+          if (loadedFor === caseId) {
+            forget(answer.name);
+            replace(answer);
+          }
+          notify(updatedWords(answer.updated, answer.unplaced_count), 'ok', 8000, {
+            label: 'Undo', onClick: () => undoSheetUpdate(caseId, answer, answer.undo),
+          });
+          return answer;
+        } catch (error) {
+          notify(error?.message || 'The layer could not be updated', 'error');
+          return null;
+        }
+      });
+    },
+    undoSheetUpdate,
     copyEditable(layer, title, description = '') {
       return add((caseId) => api.post(`/api/cases/${caseId}/map-layers/${encodeURIComponent(layer.name)}/editable-copy`, { title, description }),
         'Could not copy the layer');

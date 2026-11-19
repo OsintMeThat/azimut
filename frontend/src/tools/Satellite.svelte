@@ -1820,6 +1820,29 @@
     tick().then(() => engine?.resize());
   });
 
+  // A layer made from a sheet says whether its sheet moved on: asked each time the Map is shown.
+  $effect(() => {
+    const id = caseState.current?.id;
+    if (uiState.tool === 'satellite' && id) untrack(() => addedLayers.recheckSheets(id));
+  });
+
+  // A layer made from a sheet: its row in sight in Layers, the map framed on its points.
+  $effect(() => {
+    const asked = uiState.mapLayerFit;
+    if (!mapReady || !asked || !engine) return;
+    uiState.mapLayerFit = null;
+    untrack(() => {
+      // a layer just made elsewhere: listed, and switched on here
+      if (asked.row) void addedLayers.adopt(caseState.current?.id, asked.row);
+      panelTab = 'layers';
+      capturesCollapsed = false;
+      const [west, south, east, north] = asked.bbox ?? [];
+      if (![west, south, east, north].every(Number.isFinite)) return;
+      if (west === east && south === north) engine.setView({ lon: west, lat: south }, Math.max(center.zoom, 15));
+      else engine.fitBounds({ west, south, east, north }, { padding: 48 });
+    });
+  });
+
   // fly to coordinates handed off from the sidebar (place entity click) —
   // match the capture's own zoom/bearing, like clicking its card
   $effect(() => {
@@ -2553,6 +2576,9 @@
     }
   }
 </script>
+
+<!-- the window back from a spreadsheet: a layer made from a sheet says whether the sheet moved on -->
+<svelte:window onfocus={() => { if (uiState.tool === 'satellite') addedLayers.recheckSheets(caseState.current?.id); }} />
 
 {#snippet refWindow(pane)}
   <RefViewer

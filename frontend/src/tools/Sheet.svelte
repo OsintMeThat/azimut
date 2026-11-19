@@ -165,6 +165,8 @@
   import SheetLegend from '../components/SheetLegend.svelte';
   import SheetAnchors from '../components/SheetAnchors.svelte';
   import SheetToCase from '../components/SheetToCase.svelte';
+  import SheetMapDialog from '../components/SheetMapDialog.svelte';
+  import { undoSheetUpdate, updatedWords } from '../lib/sheetMap.js';
   import SheetBuildProofs from '../components/SheetBuildProofs.svelte';
   import SheetMove from '../components/SheetMove.svelte';
   import SheetRowMenu from '../components/SheetRowMenu.svelte';
@@ -335,6 +337,8 @@
   let appending = $state(false);
   /** A geocoding pass being set up: `{ index, mode }`, forward or reverse. */
   let geocoding = $state(null);
+  /** Show on a map: the dialog that makes a layer of this sheet's rows (`components/SheetMapDialog.svelte`). */
+  let mapping = $state(false);
   /** Which way to hand the sheet over, when that menu is open. */
   let exportOpen = $state(false);
   let exportAnchor = $state(null);
@@ -3202,6 +3206,26 @@
     toMap(name, batchIndices);
   }
 
+  /** A layer made from this sheet: the Map takes it, switched on and framed on its points. */
+  function madeLayer(row) {
+    mapping = false;
+    const off = row.made?.unplaced ?? 0;
+    toast(`Layer “${row.title}” made: ${row.made?.points ?? row.features} points${off ? `, ${off} ${off === 1 ? 'row' : 'rows'} with no place left off` : ''}.`, 'ok');
+    uiState.mapLayerFit = { name: row.name, bbox: row.bbox, row };
+    uiState.tool = 'satellite';
+  }
+
+  /** An existing layer brought level with this sheet from the dialog; the Map reads it again when shown. */
+  function updatedLayer(answer) {
+    mapping = false;
+    const asked = caseId;
+    toast(updatedWords(answer.updated, answer.unplaced_count), 'ok', 8000, {
+      label: 'Undo',
+      onClick: () => undoSheetUpdate(asked, answer.name, answer.undo).then(
+        () => toast('Update undone', 'ok'), (error) => toast(error?.message || 'The update could not be undone', 'danger')),
+    });
+  }
+
   function batchToTimeline() {
     const name = firstOfKind('when');
     if (!name) {
@@ -3933,6 +3957,12 @@
           </div>
         {/if}
       </div>
+      <!-- The rows with a place, as a layer of the case every map can show, kept in step
+           with this sheet. Next to Export because it is the other way out of the table. -->
+      <button class="btn btn-sm" data-guide="sheet.map" title="Make a layer of the rows with a place, kept in step with this sheet"
+              onclick={() => (mapping = true)}>
+        <Icon name="mapArea" size={13} /> Show on a map
+      </button>
       <button class="btn btn-sm btn-danger" title="Delete this sheet"
               onclick={() => (confirming = { kind: 'sheet' })}>
         <Icon name="trash" size={13} />
@@ -5037,6 +5067,11 @@
       onedits={(edits, said) => { geocoding = null; cleanCells(edits, said); }}
       onclose={() => (geocoding = null)} />
   </Modal>
+{/if}
+
+{#if mapping && openId}
+  <SheetMapDialog {caseId} sheetId={openId} {table} {meta} sheetTitle={title}
+    onmade={madeLayer} onupdated={updatedLayer} onclose={() => (mapping = false)} />
 {/if}
 
 {#if appending}

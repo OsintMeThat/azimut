@@ -373,6 +373,24 @@ class MapBox {
     }
   }
 
+  /** Layers › From a sheet…: a layer made from a sheet's rows, or one it already makes brought level, put on this map. */
+  fromSheet() {
+    const put = (row) => {
+      if (row?.name && !this.map.layers.includes(row.name)) this.write({ layer: [...this.map.layers, row.name] });
+      else this.describe();
+    };
+    this.handlers.sheetMap?.({
+      onmade: (row) => {
+        put(row);
+        this.say(`Layer “${row.title}” made from its sheet: ${row.made?.points ?? row.features} points`);
+      },
+      onupdated: (answer) => {
+        put(answer);
+        this.say(`Layer “${answer.title}” brought level with its sheet`);
+      },
+    });
+  }
+
   // -- the settings --
 
   /** Open or close the settings on the map, on `tab`; open, its tabs take the keyboard. */
@@ -397,6 +415,7 @@ class MapBox {
         edit: (row, changes) => this.editDrawn(row, changes),
         remove: (row) => this.removed(row),
         overlay: (shapes) => this.surface?.show(shapes),
+        fromSheet: this.handlers.sheetMap ? () => this.fromSheet() : null,
       });
     } else if (tab) this.settings.open(tab);
     this.settingsButton?.setAttribute('aria-pressed', String(open));

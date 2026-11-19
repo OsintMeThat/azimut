@@ -395,6 +395,8 @@ export const uiState = $state({
    */
   mapSheetPoints: null, // { points: [{ lat, lon, label, decimals }], sheet, column }
   gotoCoords: null, // { lat, lon } to fly to in the Satellite tool
+  /** A layer just made elsewhere (a sheet's rows): the Map opens its Layers and frames it. Session only. */
+  mapLayerFit: null, // { name, bbox: [west, south, east, north], row? }: row, a layer made elsewhere, switched on
   // A point, a date and a time handed over by Coords & Sky: the Satellite tab
   // opens its Sun & moon mode there. Session-only, and never part of a capture
   // or a proof.

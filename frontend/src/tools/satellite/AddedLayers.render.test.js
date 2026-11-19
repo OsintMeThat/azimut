@@ -503,3 +503,47 @@ describe('restacking', () => {
     expect(onreorder).not.toHaveBeenCalled();
   });
 });
+
+describe('a layer made from a sheet', () => {
+  const made = (sheet) => ({
+    ...LAYER, name: 'Register', title: 'Register', editable: true, source: { kind: 'editable' },
+    origin: { source: { kind: 'sheet', name: 'Vehicle register' } }, sheet: { id: 's1', title: 'Vehicle register', gone: false, changed: false, ...sheet },
+  });
+
+  it('says its sheet changed even folded, and brings itself level in one press', () => {
+    const onsheet = vi.fn();
+    show({ rows: [made({ changed: true })], onsheet });
+
+    expect(text()).toContain('The sheet changed');
+    byText('button', 'Update the layer').click();
+    expect(onsheet).toHaveBeenCalledWith(expect.objectContaining({ name: 'Register' }), { replace: false });
+  });
+
+  it('names its sheet unfolded, with its two presses: update, and replace the analyst’s edits', () => {
+    const onsheet = vi.fn();
+    show({ rows: [made()], onsheet });
+    expect(text()).not.toContain('The sheet changed');
+
+    unfold('Register');
+    expect(text()).toContain('From the sheet “Vehicle register”');
+    byText('button', 'Replace my edits').click();
+    expect(onsheet).toHaveBeenLastCalledWith(expect.objectContaining({ name: 'Register' }), { replace: true });
+    byText('button', 'Update from the sheet').click();
+    expect(onsheet).toHaveBeenLastCalledWith(expect.objectContaining({ name: 'Register' }), { replace: false });
+  });
+
+  it('says what went wrong when its sheet lost a column it reads, and offers no press that would fail', () => {
+    show({ rows: [made({ changed: true, problem: 'the column “Grade” is not in this sheet' })], onsheet: vi.fn() });
+    expect(text()).toContain('The sheet changed: the column “Grade” is not in this sheet');
+    unfold('Register');
+    expect(byText('button', 'Update the layer')).toBeUndefined();
+    expect(byText('button', 'Replace my edits')).toBeUndefined();
+  });
+
+  it('says when its sheet left the case, and offers no update', () => {
+    show({ rows: [made({ gone: true, changed: false })], onsheet: vi.fn() });
+    unfold('Register');
+    expect(text()).toContain('Its sheet “Vehicle register” is no longer in the case');
+    expect(byText('button', 'Update from the sheet')).toBeUndefined();
+  });
+});

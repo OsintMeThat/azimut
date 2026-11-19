@@ -71,6 +71,7 @@
   import { putInNote } from '../lib/notes/putInNote.svelte.js';
   import NoteMapPicker from './NoteMapPicker.svelte';
   import DataPicker from './DataPicker.svelte';
+  import SheetMapDialog from './SheetMapDialog.svelte';
   import Icon from './Icon.svelte';
   import FloatingMenu from './FloatingMenu.svelte';
   import Modal from './Modal.svelte';
@@ -118,6 +119,8 @@
   let mapping = $state(false);
   /** The source picker a figure asked for: `{ anchor, current, onpick }` and the note as it was then, or null. */
   let dataPick = $state(null);
+  /** A map card asking for a layer made from a sheet: `{ onmade, onupdated }`. */
+  let sheetMapping = $state(null);
   let includeQuery = $state('');
   let fetchedNotes = $state(null);
 
@@ -187,6 +190,8 @@
     get infographic() { return oninfographic && !template && caseId ? (at) => oninfographic(at) : null; },
     /** A figure's *Change…*: the source picker under its press (`components/DataPicker.svelte`). */
     get pickData() { return template || !caseId || readOnly ? null : (request) => { dataPick = { ...request, noteText: view?.state.doc.toString() ?? '' }; }; },
+    /** A map card's Layers › From a sheet…: the sheet dialog over the note (`components/SheetMapDialog.svelte`). */
+    get sheetMap() { return template || !caseId || readOnly ? null : (request) => { sheetMapping = request; }; },
     /** `/` › Infographic: a starter made of the note's own tables and maps, then the builder on it. */
     newInfographic: () => newInfographic(),
     tableToast: (message, actions = [], kind = 'info') => toast(message, kind, actions.length ? 8000 : 4000, actions.length ? actions : null),
@@ -628,6 +633,13 @@
 
 {#if mapping}
   <NoteMapPicker {caseId} onclose={() => { mapping = false; view?.focus(); }} onput={putMap} />
+{/if}
+
+{#if sheetMapping}
+  <SheetMapDialog {caseId}
+    onmade={(row) => { const asked = sheetMapping; sheetMapping = null; void reloadCase(); asked?.onmade?.(row); }}
+    onupdated={(answer) => { const asked = sheetMapping; sheetMapping = null; void reloadCase(); asked?.onupdated?.(answer); }}
+    onclose={() => { sheetMapping = null; view?.focus(); }} />
 {/if}
 
 {#if dataPick}

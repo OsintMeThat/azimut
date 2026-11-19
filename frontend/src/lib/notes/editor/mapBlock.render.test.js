@@ -195,6 +195,29 @@ describe('each choice is one line and one Undo step', () => {
     expect(block()).toBe(BLOCK);
   });
 
+  it('makes a layer from a sheet and puts it on this map in one line, only where the note can', async () => {
+    await opened('Layers');
+    const offered = () => [...panel().querySelectorAll('.cm-map-act')].find((node) => node.textContent.includes('From a sheet'));
+    expect(offered(), 'no dialog to open, no press').toBeUndefined();
+    view.destroy();
+    document.body.replaceChildren();
+    editor();
+    handlers.sheetMap = vi.fn();
+    await settle();
+    press(map().querySelector('.cm-map-settings-btn'));
+    await settle();
+    press(tab('Layers'));
+    await settle();
+    press(offered());
+    expect(handlers.sheetMap).toHaveBeenCalledTimes(1);
+    handlers.sheetMap.mock.calls[0][0].onmade({ name: 'Register', title: 'Register', made: { points: 21 } });
+    await settle();
+    expect(lines().filter((line) => line.startsWith('layer: '))).toEqual(['layer: Front line', 'layer: Vehicles', 'layer: Register']);
+    expect(handlers.tableToast).toHaveBeenCalledWith('Layer “Register” made from its sheet: 21 points', [], undefined);
+    undo(view);
+    expect(block()).toBe(BLOCK);
+  });
+
   it('sets the timeline, the day it opens on and Play’s pace', async () => {
     await opened('Time');
     const day = named('Opens on');

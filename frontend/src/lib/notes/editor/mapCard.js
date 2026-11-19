@@ -159,7 +159,8 @@ export function paletteOf(named = []) {
  * `state()` the map as it stands, `{ map, described, busy }` (`readMap`, the describe
  * answer, the press under way); `write(changes)` one choice; `base(value)` the base filed
  * and written; `arm(tool, done)` a tool armed on the map; `draw(kind, coords, extra)`,
- * `edit(row, changes)` and `remove(row)` what is drawn; `addLayer(name)` another layer.
+ * `edit(row, changes)` and `remove(row)` what is drawn; `addLayer(name)` another layer;
+ * `fromSheet()`, when the note can, a layer made from a sheet and put on the map.
  * Answers `{ refresh, focus, destroy, open(tab) }`.
  */
 export function mapSettings(panel, ctx) {
@@ -313,6 +314,15 @@ export function mapSettings(panel, ctx) {
       });
       const row = element('div', 'cm-map-field');
       row.append(element('span', 'cm-map-field-name', 'Another layer'), add);
+      parts.push(row);
+    }
+    // a sheet's rows with a place, as a new layer of the case put on this map (`components/SheetMapDialog.svelte`)
+    if (ctx.fromSheet) {
+      const row = element('div', 'cm-map-field');
+      const press = button('cm-map-act', { label: '＋ From a sheet…', title: 'Make a layer of a sheet’s rows with a place, and show it here' });
+      press.addEventListener('mousedown', (event) => event.preventDefault());
+      press.addEventListener('click', () => ctx.fromSheet());
+      row.append(element('span', 'cm-map-field-name', described?.others?.length ? '' : 'Another layer'), press);
       parts.push(row);
     }
     // the proofs of a period: off, all, or from a day to another

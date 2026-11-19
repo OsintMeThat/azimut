@@ -2488,7 +2488,11 @@ and its bundled pictograms, and nothing is refreshed afterwards. A file or a cop
 fetches no external icon; a My Maps link is read once, its web pictograms with it,
 and the layer keeps no tie to the map.
 The name offered is one no layer of the case has yet ("My layer 2"), and **Track
-over time** can be switched on there, from the start.
+over time** can be switched on there, from the start. A layer made from a sheet (Sheet
+section, *Show on a map*) says so unfolded, *From the sheet “Vehicle register”*, with
+**Update from the sheet** and **Replace my edits**; folded or not, its row says *The sheet
+changed* with **Update the layer** once the sheet moved on. The Map asks when it is shown
+and when the window comes back.
 
 The section and its rows fold like **Added layers**; the pencil opens the editor,
 the trash removes a layer, and the grip changes its stacking order. Keyboard users
@@ -6462,6 +6466,34 @@ says what it is checking.
   charts keep a copy of its rows; a row edited here, or in Excel, makes the Notebook say the
   data changed since, and *Read again (all panels)* copies it in. A sheet a note's figure
   reads is counted as used, and its delete names that note.
+- **A sheet whose rows have places goes on a map in one press.** **Show on a map**, in the
+  header beside Export, opens a small dialog that proposes its columns from what the sheet
+  already says of them (a role set first, else what the cells look like) and lets each be
+  corrected: the **place** (coordinates in one cell, two columns of numbers with *Longitude:*
+  picked, an MGRS reference, a cell linked to an entity the case has placed, or the name of a
+  place the case holds, one place by that name and not two), the point's **name**, **colour
+  by** a column (each value the colour a chart of the case gives it: its named colour, else
+  its grade's, else the fixed order), **dates** (*From:*, and *Until:* when a column ends it)
+  and the columns its **card** shows, up to eight. A register's hedges are read rather than
+  refused: `~12.7590, 43.4950 (±450 m)` is a point, and its card says the cell as written.
+  Each choice asks the case what it would make, before anything is made: *54 of 60 rows go
+  on the map*, how the places were read, the colours with their counts, the days, and the
+  rows with no place it can read, **counted and listed** with what they hold and why, never
+  dropped in silence. **Make the layer** files a personal layer of the case, one group per
+  value of the colour column, and the Map opens on it, framed on its points. A sheet that
+  already makes one says so and offers **Update it** instead of a second.
+- **The layer remembers its sheet.** When the sheet changes (a cell here, the CSV in Excel),
+  its row in **My layers** says *The sheet changed* with **Update the layer**, one press and
+  one change, its toast saying what moved and holding the one **Undo**. An update takes the
+  sheet's changes and **keeps the analyst's own edits**: a point moved on the map stays where
+  it was put, a renamed one keeps its name, one put in another group stays there, one taken
+  out stays out, and points drawn by hand are never touched; a new row comes in and a row
+  gone from the sheet takes its point. **Replace my edits**, beside it, puts every point back
+  as the sheet says. A filter or a colour painted in the grid moves nothing on the map, and
+  neither does a column the layer does not read. The layer is an ordinary personal layer:
+  Satellite, Compare, Detect, the map plates, a note's `::: map` and its web folder's live
+  map all draw it. Deleting the sheet names the layer, which keeps its points and says its
+  sheet is no longer in the case.
 - **A column naming other rows of the same sheet becomes real edges.** The binders wrote an
   order of battle in a column called `Links with others` — a brigade listing its companies,
   each company naming its brigade back — held together by a spreadsheet validation that
@@ -7519,7 +7551,9 @@ shows* (`frame: west, south, east, north`), the ground laid where it stands and 
 cover shown plain, with *File the ground for this frame*; the size, *Half*, *Wide* or *Full height*;
 the legend, *Shown*, *Folded* or *Hidden*; a north arrow; the scale, *Off*, *Page* or *Page + PDF*.
 **Layers**: each layer on or off (`hide`) and painted in one colour of the case's palette (`colour:
-Front line = #d55e00`), another layer added, the proofs of a period, every point or *Only where it
+Front line = #d55e00`), another layer added, **＋ From a sheet…** (a case sheet picked, then the
+Sheet tool's *Show on a map* dialog, the layer it makes, or the one the sheet already makes brought
+level, put on this map as one `layer:` line), the proofs of a period, every point or *Only where it
 was filmed* (`proof points`), the names on the map (`labels`) and the crowd past which marks are a
 count to press (`crowds`: off, 8, 12, 20). **Draw**: *Area to highlight* (its outline dashed over a
 light fill, its words on its middle, proposed as its size, *about 15 km²*), *Point*, *Line* and
