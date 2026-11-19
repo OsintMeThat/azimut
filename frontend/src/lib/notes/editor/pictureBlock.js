@@ -1,35 +1,23 @@
 /**
  * A picture alone on its line, `![…](…)` or a case picture `[[media:…]]`, drawn with
- * its bar while the note can be written: the sizes and places the PDF prints it at,
- * its caption, the tool it was made in, and a source or a posted address to state.
- * Open, its line is shown as written.
+ * its bar while the note can be written: the sizes and places the PDF prints it at
+ * (a size shows on the picture while the pointer is on it, and a corner dragged snaps
+ * to the sizes), its caption (pressed, it is written in place), whether it is graphic,
+ * another picture in its place, the tool it was made in, and a source or a posted
+ * address to state. Each writes its braces, `{width=… align=… caption="…" graphic}`, in
+ * one change one Undo takes back. Open, its line is shown as written.
  */
-import { paths as iconPaths } from '../../../components/Icon.svelte';
 import {
-  CAPTION_HELP, PICTURE_ALIGNS, PICTURE_SIZES, POSTED_HELP, SOURCE_HELP, blockAlignAt, captionField, pictureLine, picturesIn,
-  rovingToolbar, sizeWidth, sizedLine, sourceField,
+  CAPTION_HELP, GRAPHIC_HELP, PICTURE_ALIGNS, PICTURE_SIZES, POSTED_HELP, SOURCE_HELP, blockAlignAt, captionField, isGraphic,
+  nearestSize, pictureLine, picturesIn, replacedLine, rovingToolbar, sizeWidth, sizedLine, sourceField,
 } from '../pictureSize.js';
 import { registerBlock } from './blocks.js';
+import { openCasePicker, pickerTheme } from './casePicker.js';
+import { iconSvg } from './icons.js';
 import { noteCase, noteHandlers, resolve } from './state.js';
-import { BlockWidget, sourceButton } from './widgets.js';
+import { BlockWidget, drawMarkdown, pickBlock, sourceButton } from './widgets.js';
 
 const ALIGN_LABELS = { left: ['alignLeft', 'Left'], center: ['alignCentreH', 'Centre'], right: ['alignRight', 'Right'] };
-
-function iconSvg(name) {
-  const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
-  svg.setAttribute('viewBox', '0 0 24 24');
-  svg.setAttribute('width', '13');
-  svg.setAttribute('height', '13');
-  svg.setAttribute('fill', 'none');
-  svg.setAttribute('stroke', 'currentColor');
-  svg.setAttribute('stroke-width', '1.9');
-  svg.setAttribute('stroke-linecap', 'round');
-  svg.setAttribute('aria-hidden', 'true');
-  const path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
-  path.setAttribute('d', iconPaths[name]);
-  svg.append(path);
-  return svg;
-}
 
 /** How much taller than wide the picture drawn in `box` is, or 0 before it has loaded. */
 function pictureRatio(box) {
@@ -92,7 +80,21 @@ function sizeBar(box, source, info, handlers = {}, blockAlign = '') {
   caption.dataset.caption = 'true';
   caption.textContent = 'Caption';
   caption.title = CAPTION_HELP.button;
-  bar.append(caption);
+  const graphic = document.createElement('button');
+  graphic.type = 'button';
+  graphic.className = 'cm-size-graphic';
+  graphic.dataset.graphic = 'true';
+  graphic.title = GRAPHIC_HELP.button;
+  graphic.setAttribute('aria-pressed', String(isGraphic(picture.rest)));
+  graphic.append(iconSvg('eyeOff'), document.createTextNode(GRAPHIC_HELP.label));
+  const replace = document.createElement('button');
+  replace.type = 'button';
+  replace.className = 'cm-size-replace';
+  replace.dataset.replace = 'true';
+  replace.title = 'Replace: another picture of the case in its place, its size and caption kept';
+  replace.setAttribute('aria-label', 'Replace…');
+  replace.append(iconSvg('swap'));
+  bar.append(caption, graphic, replace);
   const entity = pictureEntity(info, picture);
   const opener = entity ? handlers.opener?.(entity) : null;
   if (opener) {
@@ -179,6 +181,8 @@ function openSourceField(view, box, entity) {
  */
 export function openCaption(view, box, returnTo = null) {
   if (box.querySelector('.picture-caption-field')) return;
+  // written from the note, the cursor comes to the picture first (`pickBlock`)
+  if (view.hasFocus) pickBlock(view, box);
   const line = view.state.doc.lineAt(view.posAtDOM(box));
   const [picture] = picturesIn(line.text);
   if (!picture) return;
@@ -207,10 +211,41 @@ export function openCaption(view, box, returnTo = null) {
 /** A line holding nothing but one picture: `![…](…){…}` or `[[media:…]]{…}`. */
 export const PICTURE_LINE = /^\s*(?:!\[[^\]]*\]\([^)]*\)(?:\{[^}\n]*\})?|\[\[media:[A-Za-z0-9_-]+\|[^\]\n]+\]\](?:\{[^}\n]*\})?)\s*$/;
 
-/** A picture's bar, pressed: a size, a place, the caption field, its tool or its source. */
+/** Show another picture of the case in place of the one drawn in `box`, its braces kept. */
+function replacePicture(view, box, entity) {
+  if (view.state.readOnly || !box.isConnected) return false;
+  const line = view.state.doc.lineAt(view.posAtDOM(box));
+  const [picture] = picturesIn(line.text);
+  const text = picture ? replacedLine(line.text, picture.ref, entity) : null;
+  if (text === null || text === line.text) return false;
+  view.dispatch({ changes: { from: line.from, to: line.to, insert: text }, userEvent: 'input' });
+  return true;
+}
+
+/** A picture's bar, pressed: a size, a place, the caption field, its veil, another picture, its tool or its source. */
 function pressPictureBar(target, box, view) {
-  if (target.closest('[data-caption]')) {
-    openCaption(view, box);
+  if (target.closest('[data-caption], [data-caption-edit]')) {
+    if (!view.state.readOnly) openCaption(view, box);
+    return;
+  }
+  if (target.closest('.cm-picture-corner')) return;
+  if (target.closest('[data-replace]')) {
+    const button = target.closest('[data-replace]');
+    openCasePicker(view, button, {
+      title: 'Replace the picture',
+      pick: (entity) => {
+        pickBlock(view, box, { focus: true });
+        replacePicture(view, box, entity);
+      },
+    });
+    return;
+  }
+  if (target.closest('[data-graphic]')) {
+    const line = view.state.doc.lineAt(view.posAtDOM(box));
+    const [picture] = picturesIn(line.text);
+    if (!picture) return;
+    pickBlock(view, box, { focus: true });
+    resizePicture(view, line.number - 1, picture.ref, { graphic: !isGraphic(picture.rest) });
     return;
   }
   if (target.closest('[data-open], [data-source], [data-posted]')) {
@@ -230,7 +265,195 @@ function pressPictureBar(target, box, view) {
   const change = pick.dataset.share
     ? { width: sizeWidth(Number(pick.dataset.share), pictureRatio(box)) }
     : { align: pick.dataset.align };
+  pickBlock(view, box, { focus: true });
   resizePicture(view, line.number - 1, picture.ref, change);
+}
+
+// -- the picture drawn: its frame, its veil and its corner -----------------------------
+
+/**
+ * The picture's frame: it takes the width and the place the line writes, and the picture
+ * fills it, so a corner, a veil and a size shown while the pointer is on its button sit
+ * on the picture itself. Null when nothing is drawn (a record no longer in the case).
+ */
+function framePicture(box) {
+  const media = box.querySelector('img, video');
+  if (!media) return null;
+  const frame = document.createElement('span');
+  frame.className = 'cm-picture-frame';
+  for (const name of ['align-left', 'align-center', 'align-right']) if (media.classList.contains(name)) frame.classList.add(name);
+  // a picture whose line writes no place takes its block's, as the PDF prints it
+  if (media.hasAttribute('data-unaligned')) frame.dataset.unaligned = 'true';
+  if (media.style.width) {
+    frame.style.width = media.style.width;
+    media.style.width = '100%';
+  }
+  media.replaceWith(frame);
+  frame.append(media);
+  return frame;
+}
+
+/** A graphic picture is drawn blurred, saying so, as the web page shows it until pressed; the pointer on it blurs it less. */
+function veil(frame) {
+  frame.classList.add('cm-veiled');
+  const said = document.createElement('span');
+  said.className = 'cm-veil-said';
+  said.setAttribute('aria-hidden', 'true');
+  const name = document.createElement('b');
+  name.textContent = GRAPHIC_HELP.veil;
+  const how = document.createElement('span');
+  how.textContent = GRAPHIC_HELP.said;
+  said.append(name, how);
+  frame.append(said);
+}
+
+/** The side of the picture its corner is dragged from: the one away from where it stands. */
+function cornerSide(frame) {
+  return frame.classList.contains('align-right') || (frame.dataset.unaligned && frame.closest('.cm-in-align-right')) ? 'left' : 'right';
+}
+
+function drawPicture(box, widget) {
+  drawMarkdown(box, widget);
+  const frame = framePicture(box);
+  if (!frame) return;
+  const [picture] = picturesIn(widget.source);
+  if (picture && isGraphic(picture.rest)) veil(frame);
+  if (!widget.writable || !picture) return;
+  const caption = box.querySelector('.markdown-caption');
+  if (caption) {
+    caption.dataset.captionEdit = 'true';
+    caption.title = 'Press to write the caption';
+  }
+  const corner = document.createElement('span');
+  corner.className = 'cm-picture-corner';
+  corner.dataset.side = cornerSide(frame);
+  corner.title = 'Drag to resize: it snaps to XXS, XS, S, M, L and Full';
+  corner.setAttribute('aria-hidden', 'true');
+  frame.append(corner);
+}
+
+/** The width of the page a picture's share is of: its box, inside its gutters. */
+function pageWidth(box) {
+  const style = getComputedStyle(box);
+  return box.clientWidth - (parseFloat(style.paddingLeft) || 0) - (parseFloat(style.paddingRight) || 0);
+}
+
+/** The size a frame shows while the pointer is on a size's button, or a corner is dragged: `[XXS · 10%]` by it. */
+function showSize(frame, size, width) {
+  let tag = frame.querySelector('.cm-picture-size');
+  if (!tag) {
+    tag = document.createElement('span');
+    tag.className = 'cm-picture-size';
+    frame.append(tag);
+  }
+  tag.textContent = `${size.label} · ${width}`;
+}
+
+/**
+ * Show `width` on the picture drawn in `box` for as long as the pointer is on a size's
+ * button: nothing is written. Answers the undoing.
+ */
+function previewSize(box, button) {
+  const frame = box.querySelector('.cm-picture-frame');
+  const media = frame?.querySelector('img, video');
+  if (!frame || !media) return () => {};
+  const was = { frame: frame.style.width, media: media.style.width };
+  const size = PICTURE_SIZES.find((one) => String(one.share) === button.dataset.share);
+  const width = sizeWidth(Number(button.dataset.share), pictureRatio(box));
+  frame.style.width = width;
+  media.style.width = '100%';
+  frame.classList.add('cm-sizing');
+  showSize(frame, size, width);
+  return () => {
+    frame.style.width = was.frame;
+    media.style.width = was.media;
+    frame.classList.remove('cm-sizing');
+    frame.querySelector('.cm-picture-size')?.remove();
+  };
+}
+
+/**
+ * A picture's corner dragged: its width follows the pointer and snaps to the nearest
+ * size, said on it; let go, that size is written, one change. Escape leaves it as it was.
+ */
+function dragCorner(event, box, view) {
+  const corner = event.target.closest('.cm-picture-corner');
+  const frame = corner?.closest('.cm-picture-frame');
+  const media = frame?.querySelector('img, video');
+  if (!frame || !media || event.button !== 0 || view.state.readOnly) return;
+  event.preventDefault();
+  event.stopPropagation();
+  const id = event.pointerId;
+  try { corner.setPointerCapture(id); } catch { /* a synthetic press has no pointer to hold */ }
+  const was = { frame: frame.style.width, media: media.style.width };
+  const ratio = pictureRatio(box);
+  const room = pageWidth(box);
+  const start = frame.getBoundingClientRect();
+  const side = corner.dataset.side;
+  const centred = frame.classList.contains('align-center') || (frame.dataset.unaligned && frame.closest('.cm-in-align-center'));
+  let chosen = null;
+  frame.classList.add('cm-sizing');
+  const move = (moveEvent) => {
+    if (moveEvent.pointerId !== id) return;
+    const across = centred ? 2 * Math.abs(moveEvent.clientX - (start.left + start.right) / 2)
+      : side === 'left' ? start.right - moveEvent.clientX : moveEvent.clientX - start.left;
+    chosen = nearestSize(Math.max(0, across) / room, ratio);
+    frame.style.width = chosen.width;
+    media.style.width = '100%';
+    showSize(frame, chosen.size, chosen.width);
+  };
+  const finish = (keep) => {
+    corner.removeEventListener('pointermove', move);
+    corner.removeEventListener('pointerup', up);
+    corner.removeEventListener('pointercancel', cancel);
+    window.removeEventListener('keydown', escape, true);
+    try { corner.releasePointerCapture(id); } catch { /* already let go */ }
+    frame.classList.remove('cm-sizing');
+    frame.querySelector('.cm-picture-size')?.remove();
+    frame.style.width = was.frame;
+    media.style.width = was.media;
+    if (!keep || !chosen) return;
+    const line = view.state.doc.lineAt(view.posAtDOM(box));
+    const [picture] = picturesIn(line.text);
+    if (!picture) return;
+    pickBlock(view, box, { focus: true });
+    resizePicture(view, line.number - 1, picture.ref, { width: chosen.width });
+  };
+  const up = (upEvent) => {
+    if (upEvent.pointerId === id) finish(true);
+  };
+  const cancel = (cancelEvent) => {
+    if (cancelEvent.pointerId === id) finish(false);
+  };
+  const escape = (keyEvent) => {
+    if (keyEvent.key !== 'Escape') return;
+    keyEvent.preventDefault();
+    keyEvent.stopPropagation();
+    finish(false);
+  };
+  corner.addEventListener('pointermove', move);
+  corner.addEventListener('pointerup', up);
+  corner.addEventListener('pointercancel', cancel);
+  window.addEventListener('keydown', escape, true);
+}
+
+/** The keys a picture's bar answers once pressed: the mouse acts on the press, the keyboard's Enter and Space give a click. */
+function clickPictureBar(event, box, view) {
+  const button = event.target.closest('[data-size-bar] button');
+  if (event.detail !== 0 || !button || button.dataset.editSource) return;
+  const from = view.state.doc.lineAt(view.posAtDOM(box)).from;
+  if (button.dataset.open || button.dataset.source || button.dataset.posted || button.dataset.replace) {
+    pressPictureBar(button, box, view);
+    return;
+  }
+  const same = button.dataset.share ? `[data-share="${button.dataset.share}"]`
+    : button.dataset.align ? `[data-align="${button.dataset.align}"]`
+      : button.dataset.graphic ? '[data-graphic]' : '[data-caption]';
+  pressPictureBar(button, box, view);
+  // the picture was drawn again with its new size: the keyboard stays on the button it pressed
+  if (box.isConnected) return;
+  const again = [...view.contentDOM.querySelectorAll('.cm-block-picture')].find((node) => view.posAtDOM(node) === from);
+  again?.querySelector(`[data-size-bar] ${same}`)?.focus({ preventScroll: true });
 }
 
 registerBlock({
@@ -244,6 +467,7 @@ registerBlock({
   line: (line) => (PICTURE_LINE.test(line.text) && line.text.includes('[[media:') ? { from: line.from, to: line.to } : null),
   widget: (spec) => new BlockWidget('picture', spec.source, spec.info, spec.writable, spec.blockAlign, false, spec.picked),
   atomic: true,
+  draw: drawPicture,
   // the size and place buttons over a picture, which carry its </>, while the note can be written
   tools: (box, widget, view) => {
     if (!widget.writable) return null;
@@ -251,32 +475,75 @@ registerBlock({
     bar.append(sourceButton(view, box, 'cm-size-edit'));
     return bar;
   },
-  bar: '[data-size-bar]',
+  // the bar, the corner and the caption answer a press themselves rather than picking the picture
+  bar: '[data-size-bar], .cm-picture-corner, [data-caption-edit]',
   press: pressPictureBar,
   fields: '.picture-caption-field, .picture-source-field',
-  // the mouse acts on the press, before focus moves; the keyboard's Enter and Space give a click
-  listen: (box, _widget, view) => box.addEventListener('click', (event) => {
-    const button = event.target.closest('[data-size-bar] button');
-    if (event.detail !== 0 || !button || button.dataset.editSource) return;
-    const from = view.state.doc.lineAt(view.posAtDOM(box)).from;
-    if (button.dataset.open || button.dataset.source || button.dataset.posted) {
-      pressPictureBar(button, box, view);
-      return;
-    }
-    const same = button.dataset.share ? `[data-share="${button.dataset.share}"]`
-      : button.dataset.align ? `[data-align="${button.dataset.align}"]` : '[data-caption]';
-    pressPictureBar(button, box, view);
-    // the picture was drawn again with its new size: the keyboard stays on the button it pressed
-    if (box.isConnected) return;
-    const again = [...view.contentDOM.querySelectorAll('.cm-block-picture')].find((node) => view.posAtDOM(node) === from);
-    again?.querySelector(`[data-size-bar] ${same}`)?.focus({ preventScroll: true });
-  }),
+  listen: (box, widget, view) => {
+    box.addEventListener('click', (event) => clickPictureBar(event, box, view));
+    if (!widget.writable) return;
+    box.addEventListener('pointerdown', (event) => dragCorner(event, box, view));
+    // a size shows on the picture while the pointer is on its button
+    let undo = null;
+    box.addEventListener('pointerover', (event) => {
+      const button = event.target.closest?.('[data-share]');
+      if (!button || undo) return;
+      undo = previewSize(box, button);
+      const leave = (leaveEvent) => {
+        if (button.contains(leaveEvent.relatedTarget)) return;
+        button.removeEventListener('pointerout', leave);
+        undo?.();
+        undo = null;
+      };
+      button.addEventListener('pointerout', leave);
+    });
+  },
+  theme: {
+    ...pickerTheme,
+    '.cm-picture-frame': { position: 'relative', display: 'block', width: 'fit-content', maxWidth: '100%', borderRadius: '4px' },
+    '.cm-picture-frame.align-center': { marginLeft: 'auto', marginRight: 'auto' },
+    '.cm-picture-frame.align-right': { marginLeft: 'auto' },
+    '.cm-picture-frame > img, .cm-picture-frame > video': { marginLeft: '0', marginRight: '0' },
+    // a veil, not a redaction: blurred inside its own edges, less while the pointer is on it, and always saying so
+    '.cm-veiled > img, .cm-veiled > video': {
+      filter: 'blur(18px) saturate(.5)', clipPath: 'inset(0 round 4px)', transition: 'filter .18s ease-out',
+    },
+    '.cm-block-picture:hover .cm-veiled > img, .cm-block-picture:hover .cm-veiled > video': { filter: 'blur(7px) saturate(.7)' },
+    '.cm-veil-said': {
+      position: 'absolute', left: '50%', top: '50%', transform: 'translate(-50%, -50%)', display: 'flex', flexDirection: 'column',
+      alignItems: 'center', gap: '2px', maxWidth: 'calc(100% - 24px)', padding: '8px 14px', borderRadius: '999px', boxSizing: 'border-box',
+      background: 'rgba(12, 13, 15, .8)', color: '#fff', fontFamily: 'var(--font-sans)', fontSize: '12px', lineHeight: '1.25',
+      textAlign: 'center', pointerEvents: 'none', transition: 'opacity .18s ease-out',
+    },
+    '.cm-veil-said b': { fontWeight: '650', fontSize: '13px' },
+    '.cm-veil-said span': { color: 'rgba(255, 255, 255, .78)' },
+    '.cm-size-bar button.cm-size-graphic': { gap: '4px', padding: '0 8px 0 6px' },
+    '.cm-size-bar button.cm-size-replace': { minWidth: '26px', padding: '0' },
+    // dragged from its corner, a picture snaps to the sizes, the one it takes said on it
+    '.cm-picture-corner': {
+      position: 'absolute', bottom: '-5px', width: '14px', height: '14px', boxSizing: 'border-box', borderRadius: '3px',
+      background: 'var(--bg-1)', border: '2px solid var(--accent)', boxShadow: 'var(--shadow-1)', opacity: '0', touchAction: 'none',
+      transition: 'opacity .12s',
+    },
+    '.cm-picture-corner[data-side="right"]': { right: '-5px', cursor: 'nwse-resize' },
+    '.cm-picture-corner[data-side="left"]': { left: '-5px', cursor: 'nesw-resize' },
+    '.cm-block-picture:hover .cm-picture-corner, .cm-picked .cm-picture-corner, .cm-sizing .cm-picture-corner': { opacity: '1' },
+    '.cm-sizing': { outline: '2px solid var(--accent)', outlineOffset: '2px' },
+    '.cm-picture-size': {
+      position: 'absolute', right: '8px', bottom: '8px', padding: '3px 8px', borderRadius: '4px', background: 'rgba(12, 13, 15, .82)',
+      color: '#fff', fontFamily: 'var(--font-sans)', fontSize: '12px', fontWeight: '650', lineHeight: '1.2', pointerEvents: 'none',
+      whiteSpace: 'nowrap',
+    },
+    '.cm-picture-corner[data-side="left"] ~ .cm-picture-size': { right: 'auto', left: '8px' },
+    '.cm-block .markdown-caption[data-caption-edit]': { cursor: 'text', borderRadius: '3px' },
+    '.cm-block .markdown-caption[data-caption-edit]:hover': { background: 'var(--bg-2)', boxShadow: '0 0 0 3px var(--bg-2)' },
+  },
 });
 
 /**
- * Give the picture `ref` a new size, place or caption (`{ width }`, `{ align }`, `{ caption }`), on the
- * line (0-based) the server placed it from or the nearest one holding it. False
- * when the note no longer holds it, or already says that.
+ * Give the picture `ref` a new size, place, caption or veil (`{ width }`, `{ align }`,
+ * `{ caption }`, `{ graphic }`), on the line (0-based) the server placed it from or the
+ * nearest one holding it. False when the note no longer holds it, or already says that.
  */
 export function resizePicture(view, line, ref, changes) {
   if (view.state.readOnly) return false;

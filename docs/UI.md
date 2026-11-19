@@ -7017,7 +7017,8 @@ and the marks come back on the line being edited. A case reference is a chip tha
 opens what it names; a picture, a table, a diagram, an aligned block, a block of
 steps or a story, an HTML block, a chapter and the page-break and cover lines are drawn
 whole and stay drawn. Steps show their pictures numbered in a row, each with its
-caption; a story shows each picture beside its words, the part it zooms in on outlined. A
+caption; a story shows each picture beside its words, the part it zooms in on outlined
+(both worked without braces, see *Steps and stories* below). A
 Mermaid chart (`xychart-beta`) draws its series in a blue ramp then grey and its words in
 the note's sans, in the editor, the PDF and the HTML page alike. A press
 picks one (an accent outline, a picture's bar kept up); a double press, Enter or its
@@ -7032,7 +7033,7 @@ quote as `> [!confirmed]`, `[!unverified]`, `[!lead]`, `[!note]`, `[!warning]` o
 **@** and a few letters offer the case's records and write a chip; **/** offers
 headings, a dated log entry, tasks, lists, the callouts, a case item, a case picture,
 an image from a file, a table, a diagram, **Steps** and **Story** (an empty `::: steps` or
-`::: story` block opened on its guidance), an **Interactive map**, code, a divider, a page break and today's date. The bar
+`::: story` block, the cursor after it, drawn as its strip), an **Interactive map**, code, a divider, a page break and today's date. The bar
 above holds the same as buttons. Ctrl+B and Ctrl+I set bold and italic, Enter on an
 empty item leaves the list. Pasting or dropping an image adds it to the case's media;
 a library file dragged in lands as its picture. A link pasted alone is offered as a
@@ -7485,7 +7486,16 @@ template is guidance by design.
 
 **Pictures and pages.** Hovering a picture, in the note or on its page in the Page
 pane, offers **XXS**, **XS**, **S**, **M**, **L** and **Full**, left, centre or right, and **Caption**,
-written on its line as `{width=… align=… caption="…"}`. The bar also offers *Open in
+written on its line as `{width=… align=… caption="…"}`. In the note a size shows on the
+picture while the pointer is on its button, written only when pressed, and the corner
+away from where the picture stands can be dragged: the width follows and snaps to the
+nearest size, said on the picture (*L · 75%*), written let go, Escape calling it off. A
+caption pressed is written in its place. **Graphic** marks a picture `{graphic}`: the
+HTML page and WordPress keep it veiled until pressed, and the note draws it blurred with
+*Graphic picture, blurred on the web until pressed* over it, less blurred while the pointer
+is on it; the PDF prints it as it is. **Replace** (⇆) lists the case's pictures, each
+with its thumbnail, and puts the one picked in its place, its size, place, caption, veil
+and zoom kept. Each of these is one change, which one Undo takes back. The bar also offers *Open in
 <Tool>* when a tool can reopen the state the picture was taken from, and *Source…* for
 a picture brought in by hand with no address (a link stated, never fetched). A proof
 also offers *Posted…*, in the note as on the Page pane: where it was published, on X or elsewhere,
@@ -7513,6 +7523,19 @@ comment prints. A video prints as its thumbnail with a play mark and its *Watch*
 credit, or as a line with that link when it has no thumbnail. A diagram prints at its
 size on screen. A caption is never parted from its picture, and a heading never stays
 alone at the foot of a page.
+
+**Steps and stories.** A `::: steps` or `::: story` block is drawn as a strip of its steps
+(`lib/notes/editor/playedBlock.js`), each picture numbered: a row of cards for steps, each
+picture beside its words for a story. **Add a step** lists the case's pictures, each with
+its thumbnail, found by name or folder, and adds the one picked last; a picture dragged in
+from the Media library or the case sidebar lands where the line shows. A step is moved by
+dragging its number, or with the arrows on it, and taken out with its ×. A story's words,
+or a step's caption, are written in place where they show: Enter writes them, Shift+Enter
+starts a line, Escape leaves them. On a story's picture a box dragged frames the part its
+step moves in on (`zoom=x,y,w,h`), and its × shows the whole picture again. An empty block
+says *No step yet* in place of its guidance, which a template keeps. Each gesture writes
+the block's own lines, as an expert would type them (`editor/stepEdits.js`), in one
+change one Undo takes back; a note nobody can write in draws the strip with no tools.
 
 **Chapters and guidance.** **/** → *Include a note* writes `[[include:<id>]]` on its
 own line, drawn as a chapter block with its number, title and first words, *Open* and

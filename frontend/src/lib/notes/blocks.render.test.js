@@ -710,7 +710,8 @@ describe('a block of steps and a story', () => {
     expect(box.querySelector('.cm-played-head').textContent).toBe('Steps · 2 pictures, one at a time in HTML');
     const figures = [...box.querySelectorAll('.cm-played-figure')];
     expect(figures.map((figure) => figure.dataset.step)).toEqual(['1', '2']);
-    expect(figures.map((figure) => figure.querySelector('.markdown-caption').textContent)).toEqual(['2 Mar 2026, Slide 1', '3 Mar 2026, Slide 2']);
+    // written in place under each picture (`editor/pictures.render.test.js`)
+    expect([...box.querySelectorAll('.cm-step-caption')].map((caption) => caption.textContent)).toEqual(['2 Mar 2026, Slide 1', '3 Mar 2026, Slide 2']);
     // no size bar: a step's picture takes the stepper's width
     expect(box.querySelector('[data-size-bar]')).toBeNull();
     mouse(box, 'dblclick');
@@ -730,9 +731,9 @@ describe('a block of steps and a story', () => {
     expect(steps[1].querySelector('.cm-zoom-box')).toBeNull();
   });
 
-  it('shows the guidance an empty block opens with, in grey', () => {
+  it('shows the guidance an empty block of a template opens with, in grey', () => {
     const doc = '::: steps\n<!--? One picture a line -->\n:::\n\nEnd';
-    writing(doc, doc.length);
+    writing(doc, doc.length, { template: true });
     const box = view.dom.querySelector('.cm-block-steps');
     expect(box.querySelector('.cm-hint').textContent).toBe('One picture a line');
     expect(box.querySelector('.cm-played-head').textContent).toBe('Steps · 0 pictures, one at a time in HTML');

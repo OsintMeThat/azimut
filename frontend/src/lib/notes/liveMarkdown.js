@@ -21,8 +21,10 @@
  * block it draws whole, one module each, registered in `blocks.js` and loaded by
  * `kinds.js`, where the drawn blocks are (`ranges.js`), the keys at a block
  * (`blockKeys.js`), the `/` and `@` menus, what the toolbar writes (`writing.js`),
- * what a tool puts in (`puts.js`), and the block handle with its menu (`handle.js`,
- * `blockMenu.js`, what they write in `turnInto.js`).
+ * what a tool puts in (`puts.js`), the block handle with its menu (`handle.js`,
+ * `blockMenu.js`, what they write in `turnInto.js`), and the strip of a block of steps
+ * or a story (`playedBlock.js`, what it writes in `stepEdits.js`, the case's pictures it
+ * and a picture's Replace pick from in `casePicker.js`).
  */
 import { EditorState, Compartment, Prec } from '@codemirror/state';
 import {

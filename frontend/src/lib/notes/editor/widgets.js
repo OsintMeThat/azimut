@@ -44,6 +44,21 @@ export function sourceButton(view, node, className = 'cm-source-edit') {
   return button;
 }
 
+/**
+ * Pick the block drawn in `box`, the cursor at its start, before a field opens in it or a
+ * gesture writes it: the editor keeps the cursor's line drawn, so a cursor left far off
+ * would have the page drawn again, the field with it, once the note lets go of the
+ * keyboard. `focus` gives the note the keyboard, so Ctrl+Z reaches what is written; picked
+ * first, the Undo puts the cursor back here rather than far off.
+ */
+export function pickBlock(view, box, { focus = false } = {}) {
+  if (!box.isConnected) return;
+  const from = view.posAtDOM(box);
+  const range = view.state.selection.main;
+  if (!range.empty || range.head !== from) view.dispatch({ selection: { anchor: from } });
+  if (focus) view.focus();
+}
+
 /** What a small drawn rule does with the mouse: a press picks it, a double press or its </> button opens its line. */
 export function blockMouse(view, box, picked) {
   markPicked(box, picked);
