@@ -186,10 +186,10 @@ OWN_SOURCES = re.compile(
 OWN_SECTIONS = {
     "method": re.compile(
         r"^ {0,3}#{1,6}[ \t]+(?:\d+(?:\.\d+)*\.?[ \t]+)?[*_]*(?:our[ \t]+)?"
-        r"(?:methods?|methodology|how[ \t]+this[ \t]+was[ \t]+made)(?![A-Za-z0-9_])", re.I),
+        r"(?:methods?|methodology|how[ \t]+this[ \t]+was[ \t]+made)(?![A-Za-z0-9])", re.I),
     "geolocations": re.compile(
         r"^ {0,3}#{1,6}[ \t]+(?:\d+(?:\.\d+)*\.?[ \t]+)?[*_]*(?:(?:annex|appendix)(?:[ \t]+[A-Za-z0-9]{1,3})?[ \t]*:[ \t]*)?"
-        r"(?:our[ \t]+)?geolocations(?![A-Za-z0-9_])", re.I),
+        r"(?:our[ \t]+)?geolocations(?![A-Za-z0-9])", re.I),
 }
 #: The words of a picture that tell a reader who cannot see it nothing: a bare label
 #: (`Figure 3`, `Picture`) or a file's name. Its caption then stands for them, if it has one.

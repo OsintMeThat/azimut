@@ -472,8 +472,12 @@ def test_a_report_has_a_cover_contents_bookmarks_and_numbers(tmp_path):
     assert titles[:2] == ["1  Summary", "2  Method"]
     # a report lists its sources, then the annexes its style carries that have something
     # to say: the frame is a file the case says nothing about, and its one open task is
-    # worth a word before it goes out
-    assert "Sources" in contents and titles[titles.index("Sources"):] == ["Sources", "How this was made"]
+    # worth a word before it goes out. Its own Method section stands in for How this was
+    # made, which prints beside it only once the look asks for both.
+    assert "Sources" in contents and titles[titles.index("Sources"):] == ["Sources"]
+    both = render(REPORT, case, style="report", toc=True, method_list="both")
+    outline = [item.title for item in PdfReader(BytesIO(both.pdf)).outline if not isinstance(item, list)]
+    assert outline[outline.index("Sources"):] == ["Sources", "How this was made"]
     assert list(zip(out.warnings, out.warning_lines, out.warning_kinds)) == [
         ('Picture "frame" has no source.', 17, "unsourced"),
         ("1 task is still open.", 25, "open-task"),

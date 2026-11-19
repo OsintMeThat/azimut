@@ -880,7 +880,7 @@
         bookmark: async (links) => {
           const plan = await readPlan(caseId, of.noteId).catch(() => null);
           const { filed, failed } = await bookmarkLinks(caseId, links, { folder: plan?.folder ?? '' });
-          if (filed) toast(`${filed} ${filed === 1 ? 'bookmark' : 'bookmarks'} filed${plan?.folder ? ` in “${plan.folder}”` : ''}`, 'ok', 3500);
+          if (filed) toast(`${filed} ${filed === 1 ? 'bookmark' : 'bookmarks'} filed${plan?.folder ? ` in ${plan.folder}` : ''}`, 'ok', 3500);
           if (failed) toast(failed, 'warn', 5000);
         },
         round: (on) => {

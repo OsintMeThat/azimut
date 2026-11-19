@@ -120,11 +120,11 @@ export function sourcesListOf(look, text) {
 export const OWN_SECTIONS = {
   method: {
     key: 'method_list',
-    heading: /^ {0,3}#{1,6}[ \t]+(?:\d+(?:\.\d+)*\.?[ \t]+)?[*_]*(?:our[ \t]+)?(?:methods?|methodology|how[ \t]+this[ \t]+was[ \t]+made)(?![A-Za-z0-9_])/i,
+    heading: /^ {0,3}#{1,6}[ \t]+(?:\d+(?:\.\d+)*\.?[ \t]+)?[*_]*(?:our[ \t]+)?(?:methods?|methodology|how[ \t]+this[ \t]+was[ \t]+made)(?![A-Za-z0-9])/i,
   },
   geolocations: {
     key: 'geolocations_list',
-    heading: /^ {0,3}#{1,6}[ \t]+(?:\d+(?:\.\d+)*\.?[ \t]+)?[*_]*(?:(?:annex|appendix)(?:[ \t]+[A-Za-z0-9]{1,3})?[ \t]*:[ \t]*)?(?:our[ \t]+)?geolocations(?![A-Za-z0-9_])/i,
+    heading: /^ {0,3}#{1,6}[ \t]+(?:\d+(?:\.\d+)*\.?[ \t]+)?[*_]*(?:(?:annex|appendix)(?:[ \t]+[A-Za-z0-9]{1,3})?[ \t]*:[ \t]*)?(?:our[ \t]+)?geolocations(?![A-Za-z0-9])/i,
   },
 };
 
