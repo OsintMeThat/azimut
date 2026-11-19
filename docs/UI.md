@@ -7345,6 +7345,31 @@ and the page's SHA-256), its address and *repository · commit* under the day, w
 on its press and says *Unchanged since it was published*, *The page on GitHub is not the
 one Azimut published* or *Page missing from the repository*.
 
+**What changed.** Each public edition (PDF, HTML page, web folder, WordPress draft,
+GitHub page) also keeps the text it printed: chapters in place, internal passages
+already out, nothing else. It sits in `notes/.editions/<note id>/` named by its SHA-256
+(the record's `text_sha256`), so one text printed as a PDF and a page is one file, and a
+file whose bytes no longer hash to its name is never read. A note keeps its newest ten
+public texts, which covers an article corrected nine times; a text over 2 MB is not kept.
+The folder belongs to the note: a rename leaves it, the Trash takes and restores it, a
+bundle carries it. Internal editions keep nothing. Above the list, **What changed**
+picks two of them, *From* one *to* another or **The note now** (the newest against the
+note now at first), each named *Edition 2 · 19 Nov, 21:33 · HTML* as the public texts
+were published, and **Compare** shows, under *Figures*, plain sentences on each figure
+that changed (*The chart “At least 41 armoured vehicles…” now counts 42, not 41.*, *In
+the chart …, the row “12 · Al-Wahsh” now reads Confirmed under “Grade”, not Almost
+sure.*, *“Figure 1” shows another picture: “…” in place of “…”.*, a table's row, a map's
+or an infographic's settings, a diagram redrawn, a link sent elsewhere), then under
+*Words* each changed paragraph under its heading, the words taken out struck in red and
+the words added in green, a few words of context either side. **‹ Editions** goes back.
+**Write the correction from this** drafts the What changed line from it (one sentence
+per figure, then *Text revised in “Summary” and “Method”.*, 300 characters at most) in a
+field the analyst edits; **Export with this line…** opens the export on a public HTML
+page with it in *What changed*, where it can still change. The line waits there per
+note until the next HTML page or web folder of that note is exported. Nothing is
+published by any of it, and the comparison reaches a page only through that line.
+`POST /notes/{id}/editions/compare` (`engine/notediff.py`) reads the case and nothing else.
+
 **The HTML file, on the server's side.** `POST /notes/html` writes one HTML file per
 note beside its PDFs, named the same with `.html`, in the edition asked for, and keeps it
 in the same record with `format: html`, the file's SHA-256 and the line saying what
