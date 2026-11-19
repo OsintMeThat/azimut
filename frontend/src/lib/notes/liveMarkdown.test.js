@@ -28,17 +28,18 @@ function at(state, pos) {
 }
 
 describe('the note page', () => {
-  it('sets a heading large and puts its marks away until its line is edited', () => {
+  // the line being written in shows no Markdown either: its marks stay put away (`editor/caret.test.js` holds every construct)
+  it('sets a heading large and puts its marks away, the line being edited included', () => {
     const state = noteState('# Field notes\n\nBody', { caseInfo: CASE });
     expect(drawn(state)).toEqual(['line cm-heading cm-h1 @0', 'hide 0-2']);
-    expect(drawn(at(state, 3))).toEqual(['line cm-heading cm-h1 @0']);
+    expect(drawn(at(state, 3))).toEqual(['line cm-heading cm-h1 @0', 'hide 0-2']);
   });
 
-  it('draws a case reference as a chip, and its source on the line being edited', () => {
+  it('draws a case reference as a chip, on the line being edited too', () => {
     const text = 'Seen at [[entity:p1|Quay]] today';
     const state = noteState(text, { caseInfo: CASE });
     expect(drawn(state)).toEqual(['chip 8-26']);
-    expect(drawn(at(state, 2))).toEqual(['mark cm-ref-source 8-26']);
+    expect(drawn(at(state, 2))).toEqual(['chip 8-26']);
   });
 
   it('keeps a reference inside code as text', () => {
@@ -60,15 +61,17 @@ describe('the note page', () => {
     const text = '```mermaid\nflowchart LR\n  A --> B\n```\n\nAfter';
     const state = noteState(text, { caseInfo: CASE });
     expect(drawn(state)[0]).toBe(`block 0-${text.indexOf('\n\nAfter')}`);
-    expect(drawn(openedState(state, 14)).every((word) => word.startsWith('line cm-code-line'))).toBe(true);
+    // its lines are code, its two fences faint
+    expect(drawn(openedState(state, 14)).every((word) => /^line cm-(code|fence)-line/.test(word))).toBe(true);
+    expect(drawn(openedState(state, 14)).filter((word) => word.startsWith('line cm-fence-line'))).toHaveLength(2);
   });
 
-  it('turns tasks into boxes and bullets into dots', () => {
+  it('turns tasks into boxes and bullets into dots, each standing for its whole mark', () => {
     const state = noteState('- [ ] Check the date\n- [x] Archived\n- plain', { caseInfo: CASE });
     expect(drawn(state)).toEqual([
-      'hide 0-2', 'task 2-5',
-      'line cm-task-done @21', 'hide 21-23', 'task 23-26',
-      'bullet 36-37',
+      'task 0-6',
+      'line cm-task-done @21', 'task 21-27',
+      'bullet 36-38',
     ]);
   });
 
@@ -243,11 +246,13 @@ describe('the end of the cover page', () => {
 });
 
 describe('the words the PDF fills in', () => {
-  it('are drawn as words of their own, and as their text on the line being edited', () => {
+  it('are drawn as words of their own, on the line being edited too, and as their text in an open block', () => {
     const text = 'Signed by {name}, {organisation}';
     const state = noteState(text, { caseInfo: CASE });
     expect(drawn(state)).toEqual(['placeholder 10-16', 'placeholder 18-32']);
-    expect(drawn(at(state, 2))).toEqual(['mark cm-placeholder-source 10-16', 'mark cm-placeholder-source 18-32']);
+    expect(drawn(at(state, 2))).toEqual(['placeholder 10-16', 'placeholder 18-32']);
+    const aligned = noteState(`::: center\n${text}\n:::`, { caseInfo: CASE });
+    expect(drawn(openedState(aligned, 0))).toContain('mark cm-placeholder-source 21-27');
   });
 
   it('stay as written in code and in guidance', () => {
@@ -358,10 +363,10 @@ describe('a block that is clicked', () => {
     expect(drawn(inside)).toContain(`line cm-table-line @${start('| 1 | 2 |')}`);
   });
 
-  it('leaves the marks of the line beside it as they were', () => {
+  it('leaves the line beside it as it was, drawn', () => {
     const state = noteState('# Title\n\n[[media:m1|clip.jpg]]', { caseInfo: CASE });
     expect(drawn(at(state, 3))).toContain('line cm-heading cm-h1 @0');
-    expect(drawn(at(state, 3)).some((word) => word.startsWith('hide'))).toBe(false);
+    expect(drawn(at(state, 3))).toContain('hide 0-2');
     expect(kindsOf(at(state, 3))).toEqual(['picture']);
   });
 });

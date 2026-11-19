@@ -6,6 +6,8 @@
 import { EditorView } from '@codemirror/view';
 
 import { coverChange } from '../reportParts.js';
+import { markAtCaret } from './caret.js';
+import { drawn } from './decorations.js';
 import { PICTURE_LINE } from './pictureBlock.js';
 import { runFormat, toggleInline } from './marks.js';
 import { lightLines } from './puts.js';
@@ -18,10 +20,15 @@ const WRAPS = { '**': 'bold', '*': 'italic', '`': 'code', '~~': 'strike' };
 /**
  * Set a mark on the selection (`**` for bold), or take it off the words that carry
  * it, read from the syntax tree so the `*` of italic is never taken for half of the
- * `**` of bold. One Undo step.
+ * `**` of bold. One Undo step. With nothing selected on the drawn page, the caret
+ * steps out of the mark or into it, or holds it for what is typed next
+ * (`markAtCaret`), so no empty `****` is ever written there.
  */
 export function toggleWrap(view, mark) {
-  runFormat(view, toggleInline(view.state, WRAPS[mark] ?? 'bold'));
+  const kind = WRAPS[mark] ?? 'bold';
+  const caret = view.state.selection.main.empty && view.state.field(drawn, false) ? markAtCaret(view.state, kind) : null;
+  if (caret) view.dispatch(caret);
+  else runFormat(view, toggleInline(view.state, kind));
   view.focus();
   return true;
 }
@@ -121,11 +128,12 @@ export function insertCover(view, { focus = true } = {}) {
 /**
  * Enter on a list item with nothing in it leaves the list, a task as well as a bullet:
  * Markdown's own Enter counts `[ ]` as the item's text and would start another one.
+ * The raw Markdown's rule; the drawn page has its own (`editor/lineKeys.js`).
  */
 export function leaveEmptyItem(view) {
   const { state } = view;
   const range = state.selection.main;
-  if (!range.empty) return false;
+  if (!range.empty || state.field(drawn, false)) return false;
   const line = state.doc.lineAt(range.head);
   if (range.head !== line.to || !/^\s*(?:[-*+]|\d+[.)])\s+\[[ xX]\]\s*$/.test(line.text)) return false;
   view.dispatch({ changes: { from: line.from, to: line.to, insert: '' }, selection: { anchor: line.from }, userEvent: 'delete' });

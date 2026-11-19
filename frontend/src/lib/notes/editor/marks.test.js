@@ -180,24 +180,25 @@ describe('the lines a selection is on', () => {
     return hidden.includes('0-2');
   };
 
-  it('stay drawn, so the bubble stands over the words as they read', () => {
+  it('stay drawn, so the bubble stands over the words as they read, and so does the cursor\'s line', () => {
     const state = focusedState(picked('**Seen «at»** the quay'));
     expect(marksHidden(state)).toBe(true);
-    // the cursor's line shows its marks, as it always did
-    expect(marksHidden(focusedState(state.update({ selection: EditorSelection.cursor(4) }).state))).toBe(false);
+    // the cursor's line no longer shows its marks: the drawn page never does
+    expect(marksHidden(focusedState(state.update({ selection: EditorSelection.cursor(4) }).state))).toBe(true);
   });
 
-  it('hold as they were while the mouse is pressed, so nothing moves under the pointer', () => {
-    const away = focusedState(noteState('**Seen at** the quay\n\nAnother line').update({ selection: EditorSelection.cursor(25) }).state);
-    // the press lands on the drawn first line and drags over it: the line stays drawn
+  it('hold a template\'s guidance as it was while the mouse is pressed, so nothing moves under the pointer', () => {
+    /** Whether the guidance of the first line is drawn as grey words, not as its text. */
+    const drawnHint = (state) => {
+      let hint = false;
+      noteDecorations(state).between(0, 1, (_from, _to, value) => { hint ||= Boolean(value.spec.widget?.constructor.name === 'HintWidget'); });
+      return hint;
+    };
+    const away = focusedState(noteState('<!--? Who said it -->\n\nAnother line', { template: true }).update({ selection: EditorSelection.cursor(30) }).state);
+    // the press lands on the drawn guidance: it stays drawn until the mouse is let go
     const pressed = away.update({ effects: setSelecting.of({ lines: [3] }) }).state.update({ selection: EditorSelection.cursor(4) }).state;
-    expect(marksHidden(pressed)).toBe(true);
-    const dragged = pressed.update({ selection: EditorSelection.range(4, 7) }).state;
-    expect(marksHidden(dragged)).toBe(true);
-    // a click let go shows the line's marks, as the cursor's line always did
-    expect(marksHidden(pressed.update({ effects: setSelecting.of(false) }).state)).toBe(false);
-    // the line the cursor was on when the press began keeps its marks shown
-    const here = focusedState(noteState('**Seen at** the quay').update({ selection: EditorSelection.cursor(4) }).state);
-    expect(marksHidden(here.update({ effects: setSelecting.of({ lines: [1] }) }).state.update({ selection: EditorSelection.range(4, 7) }).state)).toBe(false);
+    expect(drawnHint(pressed)).toBe(true);
+    // let go, the template's own words are written as text
+    expect(drawnHint(pressed.update({ effects: setSelecting.of(false) }).state)).toBe(false);
   });
 });

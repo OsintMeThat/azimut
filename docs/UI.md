@@ -7013,10 +7013,9 @@ the order they were picked, in the Report look with a cover and a contents page,
 opens it beside its pages.
 
 **A note, written in place.** The note is drawn as it reads while it is typed
-(CodeMirror 6, `lib/notes/liveMarkdown.js`, each kind of drawn block a module of `lib/notes/editor/`). A heading is set large, emphasis and links are styled, bullets are dots, `- [ ]` is a box to tick,
-and the marks come back on the line the cursor is on. Words selected stay drawn, and
-while the mouse is pressed the lines hold as they were, so nothing moves under the
-pointer. A case reference is a chip that
+(CodeMirror 6, `lib/notes/liveMarkdown.js`, each kind of drawn block a module of `lib/notes/editor/`). A heading is set large, emphasis and links are styled, bullets are dots, numbers are a list's own, `- [ ]` is a box to tick,
+and a callout is headed by its name. A divider is a line across the page, picked and
+deleted whole like a page break. A case reference is a chip that
 opens what it names; a picture, a table, a diagram, an aligned block, a block of
 steps or a story, an HTML block, a chapter and the page-break and cover lines are drawn
 whole and stay drawn. Steps show their pictures numbered in a row, each with its
@@ -7034,6 +7033,42 @@ every open editor following it. A callout opens a
 quote as `> [!confirmed]`, `[!unverified]`, `[!lead]`, `[!note]`, `[!warning]` or
 `[!limits]` (what the evidence cannot say), in its colour, in the PDF too. Decimal coordinates get a ⌖ that shows them on the map.
 **@** and a few letters offer the case's records and write a chip.
+
+**Writing with no Markdown on the page.** No line shows its Markdown, the one being
+written in included, so nothing moves as the caret goes from line to line
+(`editor/caret.js`, `editor/lineKeys.js`). What the keys do follows the page:
+- **Marks.** The caret steps over the `**`, `` ` `` and `](address)` put away as if they
+  were not there, and never stands among a line's own marks. Typing at the end of bold,
+  italic or strikethrough carries it, at the end of a link or code it does not, and at
+  the start of a line it takes the first word's. Ctrl+B, Ctrl+I or Ctrl+E with nothing
+  selected steps out of the mark the caret is at (or back in), or holds it for the words
+  typed next. Backspace and Delete take the character that shows, never half a mark, a
+  chip whole, and the marks of words deleted entirely go with them.
+- **Links.** A link is its words; its address shows on hover. A press puts the caret in
+  the words, a press with Ctrl (⌘) opens the page in a tab, or goes to the heading a
+  `#` link names, and Ctrl+K edits it in the Link field.
+- **Lines.** Enter continues a list, a quote or a callout; on an empty item, or the empty
+  last line of a quote, it leaves them, with the blank line Markdown needs so what is
+  written next stays out; at the start of a heading or an item it opens a line above.
+  Backspace at the start of a line's words turns a heading into a paragraph, takes an
+  item out of its list (out of one level when nested), joins a quote's line to the one
+  above and turns a quote or a callout back into text, though never an internal passage
+  (its name's menu says Make public). At the end of a line Delete brings the next line's
+  words up. Tab and Shift+Tab nest an item under the one before and take it back out;
+  on any other line Tab does nothing, as four spaces would make words code. Each is one
+  Undo step.
+- **Shortcuts.** `## `, `- `, `1. `, `> `, `**words**` and `` `code` `` typed are drawn at
+  once, and stay as typed until the space or the closing mark that makes them; `[] `
+  makes a to-do, and a list started right under a line of words gets its blank line.
+- **A callout's name** opens its kinds, a plain quote, text and Mark internal; an
+  internal passage's opens Make public.
+- **Copy and paste.** A copy carries the Markdown of what is selected (a mark the
+  selection cuts closed again) and the page it makes as HTML, so Word and Google Docs
+  keep the headings, bold, links and lists. A web page or a document pasted in is written
+  as Markdown (`editor/htmlMarkdown.js`); words alone, and a note's own copy, go in as
+  their text.
+- **The Markdown itself** is one switch away: Ctrl+Shift+M shows the whole note raw,
+  where every key is the plain editor's. Code blocks keep their fences, faint.
 
 **The insert menu.** **/**, the **+** in the left margin of the empty line being
 written, or the toolbar's **+** open one menu in five parts: **Text** (headings, lists,

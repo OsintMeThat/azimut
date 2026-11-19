@@ -55,6 +55,9 @@ export const look = EditorView.theme({
     color: 'var(--callout)', fontWeight: '650', fontSize: '0.74em', letterSpacing: '0.06em', textTransform: 'uppercase', marginRight: '8px',
   },
   '.cm-bullet': { color: 'var(--accent)', display: 'inline-block', width: '0.9em' },
+  // a numbered item's number, in place of its mark, and a callout's name, which offers its kinds
+  '.cm-number': { color: 'var(--text-2)', display: 'inline-block', minWidth: '1.4em', paddingRight: '0.3em', fontVariantNumeric: 'tabular-nums' },
+  '.cm-callout-label[data-callout-at]': { cursor: 'pointer' },
   '.cm-task': { margin: '0 6px 0 0', verticalAlign: '-2px', accentColor: 'var(--accent)', cursor: 'pointer' },
   '.cm-task-done': { color: 'var(--text-3)', textDecoration: 'line-through' },
   '.cm-rule': { border: 'none', borderTop: '1px solid var(--border-strong)', margin: '0.6em 0' },

@@ -11,5 +11,6 @@ import './tableBlock.js';
 import './tableGrid.js';
 import './pictureBlock.js';
 import './breakBlocks.js';
+import './ruleBlock.js';
 import './htmlBlock.js';
 import './includeBlock.js';

@@ -19,6 +19,7 @@ import {
 } from './marks.js';
 import { blocksIn, pickedBlock } from './ranges.js';
 import { cursorLines, noteHandlers, selecting, setSelecting } from './state.js';
+import { markAtCaret } from './caret.js';
 
 /** Hide the bubble until the selection moves (true), or show it again (false). */
 export const hideBubble = StateEffect.define();
@@ -292,7 +293,16 @@ const pointer = EditorView.domEventHandlers({
 
 const keys = Prec.high(keymap.of([
   { key: 'Mod-k', run: openLinkField },
-  { key: 'Mod-e', run: (view) => runFormat(view, toggleInline(view.state, 'code')) },
+  {
+    key: 'Mod-e',
+    run: (view) => {
+      // with nothing selected, the caret steps in or out of code, or holds it for what is typed next
+      const caret = view.state.selection.main.empty ? markAtCaret(view.state, 'code') : null;
+      if (caret) view.dispatch(caret);
+      else runFormat(view, toggleInline(view.state, 'code'));
+      return true;
+    },
+  },
   {
     key: 'Escape',
     run: (view) => {
