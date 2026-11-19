@@ -3,6 +3,7 @@ import { describe, expect, it, vi } from 'vitest';
 import {
   CAPTION_MAX, PAGE_TALL, PICTURE_SIZES, POSTED_HELP, captionField, cleanCaption, pictureAt, pictureLine, picturesIn, readAttrs, rovingToolbar,
   BLOCK_OPEN, CORNERS, blockAlignAt, blockSide, sameRef, sizeWidth, sizedLine, writeAttrs, sourceField,
+  casePictures, isGraphic, nearestSize, pictureReference, replacedLine, storyZoom, withGraphic, withZoom, zoomText,
 } from './pictureSize.js';
 
 describe('a picture line', () => {
@@ -266,5 +267,85 @@ describe('the address field under a picture', () => {
     expect(write).not.toHaveBeenCalled();
     expect(field.getAttribute('aria-invalid')).toBe('true');
     expect(field.getAttribute('aria-label')).toBe('Source');
+  });
+});
+
+describe('a graphic picture', () => {
+  it('is read off its braces as the server reads it, never off a caption or another word', () => {
+    expect(isGraphic('graphic')).toBe(true);
+    expect(isGraphic('zoom=0.1,0.1,0.5,0.5 graphic')).toBe(true);
+    expect(isGraphic('graphics')).toBe(false);
+    expect(isGraphic('data-graphic')).toBe(false);
+    expect(isGraphic('')).toBe(false);
+    // the caption is taken out before: its words never veil a picture
+    expect(isGraphic(readAttrs('caption="A graphic scene"').rest)).toBe(false);
+  });
+
+  it('is veiled and unveiled on its line alone, everything else in the braces kept as written', () => {
+    const line = '[[media:m1|Roof]]{width=50% align=center caption="Smoke" zoom=0.1,0.2,0.3,0.4}';
+    const veiled = sizedLine(line, 'media:m1', { graphic: true });
+    expect(veiled).toBe('[[media:m1|Roof]]{width=50% align=center caption="Smoke" zoom=0.1,0.2,0.3,0.4 graphic}');
+    expect(sizedLine(veiled, 'media:m1', { graphic: false })).toBe(line);
+    expect(sizedLine('[[media:m1|Roof]]', 'media:m1', { graphic: true })).toBe('[[media:m1|Roof]]{graphic}');
+    expect(sizedLine('[[media:m1|Roof]]{graphic}', 'media:m1', { graphic: false })).toBe('[[media:m1|Roof]]');
+    expect(withGraphic('graphic width-ish', true)).toBe('width-ish graphic');
+  });
+});
+
+describe('a story\'s zoom', () => {
+  it('is written to a thousandth, inside the picture, and reads back the same', () => {
+    expect(zoomText({ x: 0.25, y: 0.1, w: 0.5, h: 0.4 })).toBe('0.25,0.1,0.5,0.4');
+    expect(zoomText({ x: 0.33333, y: 0.66666, w: 0.9, h: 0.5 })).toBe('0.333,0.667,0.667,0.333');
+    expect(storyZoom(`zoom=${zoomText({ x: 0.7, y: 0.7, w: 0.31, h: 0.4 })}`)).toEqual({ x: 0.7, y: 0.7, w: 0.3, h: 0.3 });
+  });
+
+  it('is set where it was written, else last, and taken out', () => {
+    expect(withZoom('graphic', { x: 0.1, y: 0.2, w: 0.3, h: 0.4 })).toBe('graphic zoom=0.1,0.2,0.3,0.4');
+    expect(withZoom('zoom=0.5,0.5,0.1,0.1 graphic', { x: 0.1, y: 0.2, w: 0.3, h: 0.4 })).toBe('zoom=0.1,0.2,0.3,0.4 graphic');
+    expect(withZoom('zoom=0.5,0.5,0.1,0.1 graphic', null)).toBe('graphic');
+    expect(sizedLine('[[media:m1|Roof]]{caption="Yard"}', 'media:m1', { zoom: { x: 0, y: 0, w: 0.5, h: 0.5 } }))
+      .toBe('[[media:m1|Roof]]{caption="Yard" zoom=0,0,0.5,0.5}');
+  });
+});
+
+describe('another picture in its place', () => {
+  const SHIP = { id: 'm2', type: 'media', label: 'Ship [at sea]', attrs: { path: 'media/ship.png', kind: 'image' } };
+
+  it('shows the case picture, its size, place, caption, veil and zoom kept', () => {
+    expect(replacedLine('[[media:m1|Roof]]{width=50% caption="Smoke" graphic}', 'media:m1', SHIP))
+      .toBe('[[media:m2|Ship at sea]]{width=50% caption="Smoke" graphic}');
+    expect(replacedLine('[[media:m1|Roof]]', 'media:m1', SHIP)).toBe('[[media:m2|Ship at sea]]');
+    expect(replacedLine('[[media:m1|Roof]]', 'media:m9', SHIP)).toBeNull();
+  });
+
+  it('turns an image\'s title, which printed as its caption, into its caption', () => {
+    expect(replacedLine('![Shot](/files/c1/a.png "The quay"){width=30%}', '/files/c1/a.png', SHIP))
+      .toBe('[[media:m2|Ship at sea]]{width=30% caption="The quay"}');
+    expect(pictureReference({ id: 'm3', label: '' })).toBe('[[media:m3|Picture]]');
+  });
+
+  it('is chosen among the case\'s pictures, found by name or folder, never a video or a record without a file', () => {
+    const entities = [
+      SHIP,
+      { id: 'p1', type: 'proof', label: 'Proof 1', attrs: { path: 'proofs/Proof 1.png', folder: 'Écluse' } },
+      { id: 'v1', type: 'media', label: 'Clip', attrs: { path: 'media/clip.mp4', kind: 'video' } },
+      { id: 'n1', type: 'note', label: 'Note', attrs: { path: 'notes/n.md' } },
+      { id: 'c1', type: 'capture', label: 'Airport', attrs: { path: 'media/a.png', kind: 'image' } },
+    ];
+    expect(casePictures(entities).map((entity) => entity.id)).toEqual(['c1', 'p1', 'm2']);
+    expect(casePictures(entities, 'ecluse').map((entity) => entity.id)).toEqual(['p1']);
+    expect(casePictures(entities, 'clip')).toEqual([]);
+  });
+});
+
+describe('a picture sized by its corner', () => {
+  it('snaps to the nearest size, as wide as that size writes', () => {
+    expect(nearestSize(0.52).size.id).toBe('medium');
+    expect(nearestSize(0.52).width).toBe('50%');
+    expect(nearestSize(0.01).size.id).toBe('xxs');
+    expect(nearestSize(1.4).size.id).toBe('full');
+    // a tall picture: its sizes are narrower, and the drag snaps to them
+    const tall = 2;
+    expect(nearestSize(0.36, tall)).toEqual({ size: PICTURE_SIZES[3], width: sizeWidth(0.5, tall) });
   });
 });
