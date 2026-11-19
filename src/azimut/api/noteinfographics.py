@@ -9,6 +9,9 @@ notes_infographic.py`):
 - ``svg``: the page as one SVG file, for a designer;
 - ``png``: one picture for a destination, the PDF page or X at 16:9, 4:5 or 1:1.
 
+``origins`` false leaves out what the check says of where the rows came from (the page's
+``data:`` and each panel's ``from:``): the editor's Data bar says it as the note is typed.
+
 Nothing is written. What "Add a panel" and `/` › Infographic's starter offer is the chart's
 own kind picker (`POST /notes/figure/kinds`, `api/notecharts.py`) on each table of the note.
 """
@@ -42,6 +45,9 @@ class InfographicIn(BaseModel):
     note: str = Field(default="", max_length=64, pattern=r"^([A-Za-z0-9_-]+)?$")
     format: Literal["json", "svg", "png"] = "json"
     size: Literal["page", "x", "portrait", "square"] = "page"
+    #: Whether the check reads where the rows came from (``data:``, a panel's ``from:``)
+    #: against the case as saved. The editor's Data bar says it itself, as the note is typed.
+    origins: bool = True
 
 
 def _note_and_look(case: Any, note: str, look: NoteLook | None) -> tuple[str, NoteLook | None]:
@@ -60,7 +66,8 @@ def infographic(case_id: str, body: InfographicIn) -> Response | dict[str, Any]:
     case = get_case(case_id)
     note_text, look = _note_and_look(case, body.note, body.look)
     lines = notes_infographic.block_of(body.text)
-    page = notes_infographic.read(case, lines, look=look, note_text=note_text, light=body.format == "json")
+    page = notes_infographic.read(case, lines, look=look, note_text=note_text, light=body.format == "json",
+                                  origins=body.origins)
     if not page.panels:
         raise HTTPException(status_code=422, detail="the infographic holds no panel: put a chart, a map or words in it")
     headers = {"Cache-Control": "no-store", "X-Content-Type-Options": "nosniff"}

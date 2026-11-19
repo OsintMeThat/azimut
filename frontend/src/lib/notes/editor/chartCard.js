@@ -13,7 +13,8 @@
  *   preset; the colours it chose on its own, and the press that keeps them for the case;
  *   and *Edit the data*, the kind's form, when its rows are in the form's shape.
  *   They open on the chart itself, between its bar and its drawing, so each choice is
- *   seen as it is made.
+ *   seen as it is made. Given a `source`, a line on top says where its rows come from,
+ *   with *Change…* (the source picker, `components/DataPicker.svelte`).
  *
  * Neither writes the note: each says what was chosen, and the chart block writes its
  * lines, one Undo step a choice (`editor/chartBlock.js`).
@@ -194,6 +195,29 @@ export function openKindPicker(view, anchor, {
 
 // -- the settings ------------------------------------------------------------------------
 
+/** What the Data line says of where the rows are now. */
+const DATA_STATES = { differs: 'changed since', gone: 'no longer in the case' };
+
+/** The Data line on top of the card: where the chart's rows come from, and Change…. */
+function dataLine(source) {
+  const node = element('div', 'cm-chart-field cm-chart-data');
+  const name = element('span', 'cm-chart-data-name');
+  const state = element('span', 'cm-chart-data-state');
+  const change = button('cm-chart-use cm-chart-data-change', { label: 'Change…', title: 'Read its rows from a sheet, a table of this note, or new data' });
+  change.addEventListener('mousedown', (event) => event.preventDefault());
+  change.addEventListener('click', () => source.change(change));
+  node.append(element('span', 'cm-chart-field-name', 'Data'), name, state, change);
+  return {
+    node,
+    refresh() {
+      const said = source.said() ?? {};
+      name.textContent = said.name || 'Its own rows';
+      state.textContent = DATA_STATES[said.state] ?? '';
+      state.hidden = !state.textContent;
+    },
+  };
+}
+
 /** Bars and columns turn stacked once coloured by a column, and plain again without one. */
 export const STACKS = { bars: 'stacked bars', columns: 'stacked columns' };
 export const UNSTACKS = { 'stacked bars': 'bars', 'stacked columns': 'columns' };
@@ -290,35 +314,42 @@ function segmented(label, options, value, onChange) {
  * drawing, so every choice is seen at once on the chart). `state()` answers the chart
  * as it stands, `{ chart, drawn }` (`readChart`, the figure's answer), read again on each
  * `refresh()`; `write(changes)` writes one choice. A kind of parts is drawn by one
- * column, its parts: choosing it writes `by` and takes `colour by` out. Answers `{
+ * column, its parts: choosing it writes `by` and takes `colour by` out. `source`, given,
+ * is `{ said(), change(anchor) }`: `said()` answers `{ name, state }` for the Data line
+ * (`state` '', `differs` or `gone`), `change` opens the source picker. Answers `{
  * refresh, commit, focus, destroy }`, `commit` writing a title typed and not yet written,
  * `destroy` closing what the card opened over the page as it closes.
  */
-export function chartSettings(panel, { state, write, keep = null, editData = null }) {
+export function chartSettings(panel, { state, write, keep = null, source = null, editData = null }) {
   panel.setAttribute('role', 'group');
   panel.setAttribute('aria-label', 'Chart settings');
   // the title field stays the same element while the panel is drawn again, so typing in it is never lost
   const title = titleField({ state, write });
-  const data = element('div', 'cm-chart-field cm-chart-data');
   const columns = element('div', 'cm-chart-columns');
   const looks = element('div', 'cm-chart-looks');
   const icons = chartIcons(element('div'), { state, write });
   const colours = element('div', 'cm-chart-field cm-chart-colours');
-  panel.replaceChildren(...title.nodes, data, columns, icons.node, looks, colours);
+  const data = source ? dataLine(source) : null;
+  // Edit the data stands on the Data line where there is one, else on a line of its own
+  const edit = data ? data.node : element('div', 'cm-chart-field cm-chart-data');
+  panel.replaceChildren(...(data ? [data.node] : []), ...title.nodes, ...(data ? [] : [edit]), columns, icons.node, looks, colours);
 
   /** Edit the data: the kind's form, when the chart's rows are in its shape. */
   function renderData(chart, kind) {
     const fits = Boolean(editData) && Boolean(readForm(chart.lines.join('\n'), kind.name ?? '').form);
-    data.hidden = !fits;
+    const held = edit.querySelector('.cm-chart-edit-data');
+    if (!data) edit.hidden = !fits;
     if (!fits) {
-      data.replaceChildren();
+      held?.remove();
+      if (!data) edit.replaceChildren();
       return;
     }
-    if (data.childElementCount) return;
+    if (held) return;
     const open = button('cm-chart-use cm-chart-edit-data', { label: 'Edit the data', title: 'Its rows in a form made for its kind' });
     open.addEventListener('mousedown', (event) => event.preventDefault());
     open.addEventListener('click', () => editData());
-    data.append(element('span', 'cm-chart-field-name', 'Data'), open);
+    if (!data) edit.append(element('span', 'cm-chart-field-name', 'Data'));
+    edit.append(open);
   }
 
   function render() {
@@ -352,6 +383,7 @@ export function chartSettings(panel, { state, write, keep = null, editData = nul
         (value) => write(cardChanges('style', value, { kind }))),
     );
     renderColours(drawn?.colours ?? []);
+    data?.refresh();
     if (focused) [...panel.querySelectorAll('[aria-label]')].find((node) => node.getAttribute('aria-label') === focused)?.focus({ preventScroll: true });
   }
 

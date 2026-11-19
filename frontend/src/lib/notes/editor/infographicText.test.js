@@ -5,7 +5,7 @@ import { history, redo, undo, undoDepth } from '@codemirror/commands';
 vi.mock('../../api.js', () => ({ api: { post: vi.fn(() => new Promise(() => {})) } }));
 
 import {
-  EACH_PANEL, EMPTY_INFOGRAPHIC, KEY_FIGURES_PANEL, WORDS_PANEL, addPanel, infographicsIn, movePanel, panelText,
+  EACH_PANEL, EMPTY_INFOGRAPHIC, WORDS_PANEL, addPanel, infographicsIn, movePanel, panelText,
   readInfographic, removePanel, sharesLegend, withLegend, withSetting, withWidth,
 } from './infographicText.js';
 import { replaceBlock } from './infographicBlock.js';
@@ -119,7 +119,7 @@ describe('the builder’s gestures, one Undo each', () => {
     const wide = addPanel(BLOCK, map, 'wide');
     expect(wide).toContain('widths: wide, half, half, wide, wide');
     expect(readInfographic(addPanel(BLOCK, WORDS_PANEL)).panels.at(-1).kind).toBe('words');
-    expect(readInfographic(addPanel(BLOCK, KEY_FIGURES_PANEL)).panels.at(-1).width).toBe('wide');
+    expect(readInfographic(addPanel(BLOCK, '::: chart\nkind: key figures\n| Figure | What it says |\n| --- | --- |\n:::')).panels.at(-1).width).toBe('wide');
   });
 
   it('adds the first panel to an empty page', () => {

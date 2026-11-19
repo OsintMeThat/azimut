@@ -70,6 +70,7 @@
   import { starterFor } from '../lib/notes/editor/infographicPanels.js';
   import { putInNote } from '../lib/notes/putInNote.svelte.js';
   import NoteMapPicker from './NoteMapPicker.svelte';
+  import DataPicker from './DataPicker.svelte';
   import Icon from './Icon.svelte';
   import FloatingMenu from './FloatingMenu.svelte';
   import Modal from './Modal.svelte';
@@ -115,6 +116,8 @@
   let uploading = $state(false);
   let including = $state(false);
   let mapping = $state(false);
+  /** The source picker a figure asked for: `{ anchor, current, onpick }` and the note as it was then, or null. */
+  let dataPick = $state(null);
   let includeQuery = $state('');
   let fetchedNotes = $state(null);
 
@@ -182,6 +185,8 @@
     /** The note being written, which a chart is drawn in the look of and whose tables its rows are copied from. */
     get noteId() { return template || !doc ? '' : (doc.noteId ?? 'case'); },
     get infographic() { return oninfographic && !template && caseId ? (at) => oninfographic(at) : null; },
+    /** A figure's *Change…*: the source picker under its press (`components/DataPicker.svelte`). */
+    get pickData() { return template || !caseId || readOnly ? null : (request) => { dataPick = { ...request, noteText: view?.state.doc.toString() ?? '' }; }; },
     /** `/` › Infographic: a starter made of the note's own tables and maps, then the builder on it. */
     newInfographic: () => newInfographic(),
     tableToast: (message, actions = [], kind = 'info') => toast(message, kind, actions.length ? 8000 : 4000, actions.length ? actions : null),
@@ -623,6 +628,12 @@
 
 {#if mapping}
   <NoteMapPicker {caseId} onclose={() => { mapping = false; view?.focus(); }} onput={putMap} />
+{/if}
+
+{#if dataPick}
+  <DataPicker {caseId} noteId={ownId} noteText={dataPick.noteText} anchor={dataPick.anchor} current={dataPick.current ?? ''}
+    onpick={(choice) => { const asked = dataPick; dataPick = null; asked?.onpick?.(choice); }}
+    onclose={() => { dataPick = null; }} />
 {/if}
 
 {#if calloutAnchor}

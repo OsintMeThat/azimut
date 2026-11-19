@@ -204,8 +204,8 @@ SAVED = {
     "columns": re.compile(r'<div class="wp-block-columns">(?:\x01)+</div>'),
     "column": re.compile(r'<div class="wp-block-column">(?:\x01)+</div>'),
     "details": re.compile(r'<details class="wp-block-details"><summary>[^<]+</summary>(?:\x01)+</details>'),
-    "table": re.compile(r'<figure class="wp-block-table"><table>(?:<thead><tr>.*?</tr></thead>)?<tbody>.*</tbody>'
-                        r"</table></figure>", re.S),
+    "table": re.compile(r'<figure class="wp-block-table(?: is-style-stripes)?"><table>(?:<thead><tr>.*?</tr></thead>)?'
+                        r'<tbody>.*</tbody></table>(?:<figcaption class="wp-element-caption">.*</figcaption>)?</figure>', re.S),
     "separator": re.compile(r'<hr class="wp-block-separator has-alpha-channel-opacity"/>'),
     "code": re.compile(r'<pre class="wp-block-code"><code>[^<]*</code></pre>', re.S),
 }
@@ -263,7 +263,8 @@ def test_every_block_is_what_the_editor_would_write(ambush, which):
         if name == "list":
             assert attrs.get("ordered", False) == (match.group(1) == "ol")
         if name == "table":
-            assert attrs == {"hasFixedLayout": False}
+            striped = 'class="wp-block-table is-style-stripes"' in own
+            assert attrs == {"hasFixedLayout": False, **({"className": "is-style-stripes"} if striped else {})}
         if name == "paragraph" and 'class="wp-element-caption"' in own:
             assert attrs == {"className": "wp-element-caption"}
 

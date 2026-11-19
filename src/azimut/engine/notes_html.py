@@ -103,6 +103,7 @@ from . import (
     notes_infographic,
     notes_maps,
     notes_style,
+    notes_tables,
     notesources,
     pdffonts,
 )
@@ -127,6 +128,9 @@ MAP_SLOT = "  /* az:map */\n"
 #: What a page holding a chart, or an infographic of charts, adds to the reader's style
 #: sheet: kept apart for the same reason, so a page with none stays as light as before.
 FIGURE_ASSET_NAMES = ("reader.chart.css", "reader.infographic.css")
+#: What a page holding a table with a settings line adds to the style sheet (its stripes,
+#: colours, density, caption and folding), kept apart for the same reason.
+TABLE_ASSET_NAMES = ("reader.table.css",)
 #: What the page may load: nothing but what it holds.
 CSP = (
     "default-src 'none'; img-src data:; media-src data:; font-src data:; style-src 'unsafe-inline'; "
@@ -546,6 +550,8 @@ class _Page:
         self._proof_anchors: dict[str, str] = {}
         self.charts = 0
         self.infographics = 0
+        #: Tables with a settings line, whose rules the page then carries (`reader.table.css`).
+        self.table_looks = 0
         #: The words the page's charts draw, which its faces must carry.
         self._chart_words: list[str] = []
         #: The credits of the maps it drew, and the id of each Limits box in order: what
@@ -639,6 +645,7 @@ class _Page:
         reader_css = (_asset("reader.css") + (_asset("reader.map.css") if mapped else "")
                       + (_asset("reader.chart.css") if charted else "")
                       + (_asset("reader.infographic.css") if self.infographics else "")
+                      + (_asset("reader.table.css") if self.table_looks else "")
                       + (_asset(live.sheet) if live is not None else ""))
         reader = _asset("reader.js")
         reader_js = reader.replace(MAP_SLOT, _asset("reader.map.js"), 1) if mapped else reader
@@ -1119,9 +1126,15 @@ class _Page:
         return end
 
     def _on_table_open(self, tokens: list[Token], index: int) -> int:
+        """A table, with what its settings line asks of it (`engine/notes_tables.py`):
+        classes for its stripes, density and a first column kept in sight, data the
+        reader's script reads for its search bar, sorting and folding, each row's colour
+        by a column, and its caption and source under it."""
         end = md.past(tokens, index)
+        look = notes_tables.look_of(tokens[index])
         head: list[str] = []
-        rows: list[str] = []
+        headers: list[str] = []
+        rows: list[tuple[str, list[str], list[str]]] = []
         in_head = False
         position = index + 1
         while position < end:
@@ -1132,7 +1145,7 @@ class _Page:
                 in_head = False
             elif token.type == "tr_open":
                 cells: list[str] = []
-                first = ""
+                texts: list[str] = []
                 position += 1
                 while position < end and tokens[position].type != "tr_close":
                     cell = tokens[position]
@@ -1142,22 +1155,46 @@ class _Page:
                         aligned = re.search(r"text-align:\s*(left|center|right)", style)
                         where = f' data-align="{aligned.group(1)}"' if aligned else ""
                         scope = ' scope="col"' if in_head else ""
-                        if not cells:
-                            first = " ".join(md.inline_text(tokens[position + 1]).split())
+                        texts.append(" ".join(md.inline_text(tokens[position + 1]).split()))
                         cells.append(f'<{tag}{scope}{where} dir="auto">{self._inline(tokens[position + 1])}</{tag}>')
                         position += 3
                         continue
                     position += 1
-                row_id = ""
-                if not in_head and ROW_CODE.match(first) and first not in self.ids:
-                    self.ids.add(first)
-                    row_id = f' id="{first}"'
-                (head if in_head else rows).append(f"<tr{row_id}>{''.join(cells)}</tr>\n")
+                if in_head:
+                    headers = texts
+                    head.append(f"<tr>{''.join(cells)}</tr>\n")
+                else:
+                    first = texts[0] if texts else ""
+                    row_id = ""
+                    if ROW_CODE.match(first) and first not in self.ids:
+                        self.ids.add(first)
+                        row_id = f' id="{first}"'
+                    rows.append((row_id, cells, texts))
             position += 1
-        if head or rows:
-            thead = f"<thead>\n{''.join(head)}</thead>\n" if head else ""
-            self.out.append(f'<div class="az-table-wrap">\n<table class="az-table" data-rows="{len(rows)}">\n'
-                            f"{thead}<tbody>\n{''.join(rows)}</tbody>\n</table>\n</div>\n")
+        if not (head or rows):
+            return end
+        key: int | None = None
+        colours: list[str] = []
+        if look.colour:
+            key, colours = notes_tables.row_colours(headers, [texts for _, _, texts in rows], look.colour,
+                                                    case=self.case, look=self.look)
+            if key is None:
+                self._warn(notes_tables.missing_colour(look.colour), self._line, md.OTHER)
+        body: list[str] = []
+        for number, (row_id, cells, _) in enumerate(rows):
+            colour = colours[number] if colours else ""
+            if colour and key is not None and key < len(cells):
+                cells = [*cells[:key], cells[key].replace("<td", '<td class="az-key"', 1), *cells[key + 1:]]
+            painted = f' style="--az-c:{colour}"' if colour else ""
+            body.append(f"<tr{row_id}{painted}>{''.join(cells)}</tr>\n")
+        if look != notes_tables.DEFAULT:
+            self.table_looks += 1
+        thead = f"<thead>\n{''.join(head)}</thead>\n" if head else ""
+        tbody = "".join(body)
+        table = (f'<div class="az-table-wrap">\n<table class="{_table_classes(look, bool(colours))}" '
+                 f'data-rows="{len(rows)}"{_table_data(look)}>\n{thead}<tbody>\n{tbody}</tbody>\n</table>\n</div>\n')
+        caption = _table_caption(look)
+        self.out.append(f'<div class="az-table-block">\n{table}{caption}</div>\n' if caption else table)
         return end
 
     # -- steps and story --------------------------------------------------------------
@@ -2055,7 +2092,7 @@ class _Page:
                        f"{_text(notes_infographic.sentence(page.credit))}</p>\n")
         whole = ""
         if self.folder is not None:
-            drawn_page = notes_infographic.read(self.case, body, look=self.look, note_text=self._note_text)
+            drawn_page = notes_infographic.read(self.case, body, look=self.look, note_text=self._note_text, origins=False)
             picture = notes_infographic.picture(drawn_page, "page")
             address = self.folder.put(picture, graphic.title or "infographic", ".png")
             whole = (f'<p class="az-ig-whole"><a href="{_attr(address)}" download>'
@@ -2757,6 +2794,33 @@ def _quoted(text: str) -> str:
 
 def _cite(number: int) -> str:
     return f'<a class="az-cite" href="#src-{number}" data-src="{number}">[{number}]</a>'
+
+
+def _table_classes(look: notes_tables.TableLook, coloured: bool) -> str:
+    """A table's classes: its stripes, density, a first column kept in sight and its colours."""
+    names = ["az-table"]
+    names += ["az-stripes"] if look.stripes else []
+    names += ["az-compact"] if look.compact else []
+    names += ["az-first"] if look.sticky_column else []
+    names += ["az-coloured"] if coloured else []
+    return " ".join(names)
+
+
+def _table_data(look: notes_tables.TableLook) -> str:
+    """What the reader's script reads off a table: its search bar, sorting, folding and header."""
+    data = f' data-search="{look.search}"' if look.search != notes_tables.DEFAULT.search else ""
+    data += ' data-sort="off"' if not look.sort else ""
+    data += f' data-fold="{look.fold}"' if look.fold else ""
+    data += ' data-header="scrolls"' if not look.sticky_header else ""
+    return data
+
+
+def _table_caption(look: notes_tables.TableLook) -> str:
+    """The caption and source a settings line writes under its table, or ''."""
+    parts = f'<span class="az-caption">{_text(look.caption)}</span>' if look.caption else ""
+    if look.source:
+        parts += f'<span class="az-credit"><span class="az-credit-kind">Source:</span> {_text(look.source)}</span>'
+    return f'<p class="az-table-cap" dir="auto">{parts}</p>\n' if parts else ""
 
 
 def _aside(message: str) -> str:

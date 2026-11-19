@@ -166,12 +166,15 @@ KEYS: dict[str, str] = {
     "bars": "bars",
     "source": "source", "sources": "source", "credit": "source",
     "from": "from",
+    "rows": "rows",
     "style": "style",
 }
 #: The order the Notebook writes the settings in.
 WRITTEN_ORDER = ("kind", "title", "caption", "count", "by", "colour by", "order", "colours", "only",
                  "highlight", "sort", "last", "show", "bars")
-WRITTEN_LAST = ("source", "from", "style")
+WRITTEN_LAST = ("source", "from", "rows", "style")
+#: ``rows: own``: the rows are the chart's own, typed in its form, never the infographic's data.
+OWN_ROWS = "own"
 
 SETTING_LINE = re.compile(r"^([A-Za-z][A-Za-z ]{0,24}?)\s*:\s?(.*)$")
 TABLE_RULE = re.compile(r"^\s*\|?\s*:?-{1,}:?\s*(\|\s*:?-{1,}:?\s*)*\|?\s*$")
@@ -434,6 +437,8 @@ class ChartBlock:
     show: str = ""
     source: str = ""
     origin: str = ""
+    #: ``rows: own``: rows of its own, which an infographic's data never takes over.
+    own_rows: bool = False
     style: str = ""
     #: ``across`` or ``up`` when a ``bars`` line turned the kind.
     bars: str = ""
@@ -649,6 +654,11 @@ def _setting(block: ChartBlock, offset: int, line: str) -> None:
         block.source = value
     elif key == "from":
         block.origin = value[:200]
+    elif key == "rows":
+        if value.casefold() == OWN_ROWS:
+            block.own_rows = True
+        else:
+            block.unread.append((offset, line[:120], "unreadable"))
 
 
 def block_text(block: ChartBlock) -> str:
@@ -662,7 +672,8 @@ def block_text(block: ChartBlock) -> str:
         "colour by": block.colour_by, "order": ", ".join(block.order),
         "colours": ", ".join(f"{name} {colour}" for name, colour in block.colours.items()),
         "highlight": ", ".join(block.highlight), "sort": block.sort, "last": ", ".join(block.last),
-        "show": block.show, "source": block.source, "from": block.origin, "style": block.style,
+        "show": block.show, "source": block.source, "from": block.origin, "rows": OWN_ROWS if block.own_rows else "",
+        "style": block.style,
         # a kind that does not turn into another reads ``bars`` itself (a segmented bar standing up)
         "bars": block.bars if kind is not None and not kind.turns else "",
     })
@@ -1253,6 +1264,24 @@ def _paints(block: ChartBlock, values: list[str], graded: bool, theme: ChartThem
             folded = True
         shown += 1
     return paints, folded
+
+
+def value_paints(values: Sequence[str], *, theme: ChartTheme,
+                 palette: Sequence[Mapping[str, str]] = ()) -> dict[str, str]:
+    """Each value of a column as a chart coloured by that column paints it, keyed by its
+    words in any case: what a table coloured by a column tints its rows with
+    (`notes_tables`). Grades are told apart as a chart tells them; past `MAX_VALUES`
+    values, the rarest are painted as "Other" is."""
+    seen: list[str] = []
+    for value in values:
+        if value and value.casefold() not in (one.casefold() for one in seen):
+            seen.append(value)
+    graded = bool(seen) and sum(1 for value in seen if grade_of(value)) * 2 >= len(seen)
+    block = ChartBlock()
+    rows = [[value] for value in values]
+    ordered = _value_order(block, seen, graded, 0, rows, list(range(len(rows))))
+    paints, _ = _paints(block, ordered, graded, theme, palette)
+    return {value.casefold(): paint.colour for value, paint in paints.items()}
 
 
 def _categories(block: ChartBlock, kind: Kind, rows: list[list[str]], kept: list[int], amounts: dict[int, float],

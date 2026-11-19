@@ -269,7 +269,7 @@ class _Reading:
     def _infographic(self, token: Token) -> None:
         """An infographic as one picture of its page at X's 16:9, filed in the case, its
         title band, panels and sources as its alt text."""
-        page = notes_infographic.read(self.case, token.content, look=self.look, note_text=self.note_text)
+        page = notes_infographic.read(self.case, token.content, look=self.look, note_text=self.note_text, origins=False)
         try:
             filed = notes_infographic.file_for_post(self.case, page, note_id=self.note_id) \
                 if self.case is not None else None

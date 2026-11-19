@@ -154,16 +154,18 @@ def chart_sources(case_id: str, note: str = Query(default="", max_length=64, pat
 
 @router.post("/cases/{case_id}/notes/figure/rows")
 def chart_rows(case_id: str, body: RowsIn) -> dict[str, Any]:
-    """The rows a chart's ``from:`` names, as a table's Markdown, and the name of where they
-    are; ``found`` false once it is no longer in the case. Nothing is written."""
+    """The rows a chart's ``from:`` (or an infographic's ``data:``) names, as a table's
+    Markdown, the name of where they are and how many rows it holds, a chart taking its first
+    `notes_charts.MAX_ROWS`; ``found`` false once it is no longer in the case. Nothing is written."""
     case = get_case(case_id)
     if not notecharts.origin_known(body.origin):
         raise HTTPException(status_code=422, detail="from: names a note's table or a sheet")
     found = notecharts.origin_table(case, body.origin)
     if found is None:
-        return {"found": False, "name": "", "text": ""}
+        return {"found": False, "name": "", "text": "", "rows": 0}
     name, text = found
-    return {"found": True, "name": name, "text": text}
+    every = notecharts.origin_rows(case, body.origin)
+    return {"found": True, "name": name, "text": text, "rows": len(every[2]) if every is not None else 0}
 
 
 def _day(value: str, name: str) -> date | None:

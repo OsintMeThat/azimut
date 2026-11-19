@@ -20,6 +20,7 @@ import pytest
 
 from azimut.engine import links as link_engine
 from azimut.engine import notecharts, notes_chart_fill, notes_charts
+from azimut.engine import notes_infographic as ig
 from azimut.engine import sheets as sheets_engine
 from azimut.workspace import Case
 
@@ -72,6 +73,18 @@ def test_a_waffle_whole_written_as_a_row_is_not_counted():
     reading = notes_charts.read(notes_charts.parse_block(notecharts.block_of(block)))
     assert reading.total == 23
     assert notecharts.read(None, notecharts.block_of(block)).proposed == "23, by part"
+
+
+def test_rows_a_form_wrote_say_so_and_never_take_an_infographics_data():
+    own = "::: chart\nkind: donut\ncount: Count\nby: Category\nrows: own\n| Category | Count |\n| --- | ---: |\n| MRAP | 23 |\n:::"
+    block = notes_charts.parse_block(notecharts.block_of(own))
+    assert block.own_rows and not block.unread
+    # written back where the Notebook writes it, after the source and from: lines
+    assert notes_charts.block_text(block).split("\n")[1:5] == ["kind: donut", "count: Count", "by: Category", "rows: own"]
+    assert notes_charts.parse_block("rows: theirs\n| A |\n| --- |").unread[0][2] == "unreadable"
+    page = ig.parse_block(f"data: sheet:e_s1\n\n{own}\n\n{own.replace('rows: own', '')}")
+    # the same columns as the data: the one its form wrote keeps its rows, the other takes the data
+    assert [ig.inherits(panel, ["Category", "Count"]) for panel in page.panels] == [False, True]
 
 
 # -- the case's events ----------------------------------------------------------------------------------

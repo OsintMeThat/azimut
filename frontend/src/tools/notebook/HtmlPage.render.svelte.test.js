@@ -59,3 +59,28 @@ describe('a press inside the HTML page', () => {
     other.remove();
   });
 });
+
+describe('the page drawn again', () => {
+  it('shows a page the hidden frame already holds, which loads nothing new there, as after an Undo', () => {
+    target = document.createElement('div');
+    document.body.append(target);
+    const props = $state({ html: '<!doctype html><html><body><p>One</p></body></html>' });
+    app = mount(HtmlPage, { target, props });
+    flushSync();
+    const frames = [...target.querySelectorAll('iframe')];
+    const shown = () => frames.findIndex((frame) => frame.classList.contains('shown'));
+    frames[1].dispatchEvent(new Event('load'));
+    flushSync();
+    expect(shown()).toBe(1);
+    props.html = '<!doctype html><html><body><p>Two</p></body></html>';
+    flushSync();
+    frames[0].dispatchEvent(new Event('load'));
+    flushSync();
+    expect(shown()).toBe(0);
+    // back to the first page, which frame 1 holds already: shown with no load to wait for
+    props.html = '<!doctype html><html><body><p>One</p></body></html>';
+    flushSync();
+    expect(shown()).toBe(1);
+    expect(frames[1].getAttribute('srcdoc')).toContain('<p>One</p>');
+  });
+});

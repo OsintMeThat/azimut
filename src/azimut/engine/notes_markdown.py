@@ -19,7 +19,8 @@ one note two ways, so what they share lives here and nowhere else:
   each handed on as one token holding its lines (`az_map`, `az_chart`);
 - the callouts a quote opens with (`> [!confirmed]`) and the tasks a list holds;
 - the own cover (the lines above `<!-- cover -->`, `cover_piece`);
-- what a picture's braces say (`image_options`);
+- what a picture's braces say (`image_options`), and a table's settings line
+  (`engine/notes_tables.py`), taken out of its rows as it is parsed;
 - the citation pass (`Cited`): every source a document cites, numbered before the
   first is drawn, and the warnings the check before export reads off it.
 
@@ -38,7 +39,7 @@ from urllib.parse import parse_qs, quote, unquote, urlsplit
 from markdown_it import MarkdownIt
 from markdown_it.token import Token
 
-from . import notefill, notesources, urltitles
+from . import notefill, notes_tables, notesources, urltitles
 from .notelook import CASE_NOTE, NoteLook, Profile
 from .notesources import Annex, Source
 from .notetext import CALLOUT, ENTITY_REF, FENCE, INCLUDE, MEDIA_REF, PAGE_BREAK, without_hints
@@ -542,7 +543,11 @@ def parser() -> MarkdownIt:
 
 
 def parse(source: str) -> list[Token]:
-    return parser().parse(case_references(source)) if source.strip() else []
+    """The note's tokens, each table's settings line taken out of its rows and handed on
+    with its ``table_open`` (`notes_tables.attach`)."""
+    if not source.strip():
+        return []
+    return notes_tables.attach(parser().parse(case_references(source)), source)
 
 
 def alignment_blocks(text: str) -> list["Block"]:

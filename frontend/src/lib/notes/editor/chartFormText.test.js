@@ -3,6 +3,8 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
 
+import { OWN_ROWS, withSettings } from './chartText.js';
+import { inherits } from './infographicText.js';
 import {
   FORMS, SCRATCH_KINDS, atPrecision, baseHeading, caseDay, countedRows, eventRows, formKind, hasRows, leftOutSaid, readColours, readFloor, readForm,
   readWhen, starterBlock, writeColours, writeForm, writeWhen,
@@ -86,6 +88,18 @@ describe('what each form writes', () => {
     expect(formKind('')).toBe('bars');
     expect(formKind('radar')).toBe('');
     expect(Object.values(FORMS).every((form) => form.needs && form.label)).toBe(true);
+  });
+});
+
+describe('in an infographic with data', () => {
+  it('keeps the rows a form wrote, marked as its own, out of the page’s data', () => {
+    const own = withSettings(starterBlock('donut'), { rows: OWN_ROWS });
+    expect(own).toBe('::: chart\nkind: donut\ncount: Count\nby: Category\nrows: own\n| Category | Count |\n| --- | ---: |\n:::');
+    // the form writes over it, the mark kept
+    const filled = writeForm(own, 'donut', { ...readForm(own).model, rows: [{ category: 'MRAP', split: '', count: '23' }] });
+    expect(filled).toContain('rows: own\n| Category | Count |\n| --- | ---: |\n| MRAP | 23 |');
+    const page = `:::: infographic\ndata: sheet:e_s1\n\n${filled}\n\n${starterBlock('donut')}\n::::`;
+    expect([0, 1].map((index) => inherits(page, index, ['Category', 'Count']))).toEqual([false, true]);
   });
 });
 

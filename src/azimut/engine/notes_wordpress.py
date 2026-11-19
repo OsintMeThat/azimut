@@ -57,7 +57,7 @@ from markdown_it.token import Token
 from PIL import Image
 
 from .. import __version__
-from . import noteannexes, notecharts, notefill, notes_infographic, notesources, thumbnails
+from . import noteannexes, notecharts, notefill, notes_infographic, notes_tables, notesources, thumbnails
 from . import notes_html as report
 from . import notes_markdown as md
 from .media import media_kind
@@ -468,14 +468,30 @@ def details(summary: str, inner_blocks: list[str]) -> str:
                             f"{nested(inner_blocks)}</details>")
 
 
-def table(head: list[str], rows: list[str]) -> str:
+def table(head: list[str], rows: list[str], *, stripes: bool = False, caption: str = "") -> str:
+    """A table block; ``stripes`` takes the block's own Stripes style, ``caption`` its caption."""
     thead = f"<thead>{''.join(head)}</thead>" if head else ""
-    return block("table", f'<figure class="wp-block-table"><table>{thead}<tbody>{"".join(rows)}</tbody></table></figure>',
-                 {"hasFixedLayout": False})
+    attrs: dict[str, Any] = {"hasFixedLayout": False}
+    if stripes:
+        attrs["className"] = "is-style-stripes"
+    figcaption = f'<figcaption class="wp-element-caption">{caption}</figcaption>' if caption else ""
+    classes = "wp-block-table is-style-stripes" if stripes else "wp-block-table"
+    return block("table", f'<figure class="{classes}"><table>{thead}<tbody>{"".join(rows)}</tbody></table>'
+                          f"{figcaption}</figure>", attrs)
 
 
 def _text(value: str) -> str:
     return html.escape(value, quote=False)
+
+
+def _highlighted(cell: str, colour: str) -> str:
+    """A cell's words highlighted in a light tint of ``colour``, as the editor's highlight
+    writes one (a ``mark`` the block keeps), the cell itself unchanged."""
+    start = cell.index(">") + 1
+    finish = cell.rindex("</")
+    tint = notes_tables.tint(colour, notes_tables.KEY_TINT)
+    return (f'{cell[:start]}<mark style="background-color:{tint}" class="has-inline-color">'
+            f"{cell[start:finish]}</mark>{cell[finish:]}") if cell[start:finish] else cell
 
 
 def _attr(value: str) -> str:
@@ -726,7 +742,8 @@ class _Writer:
         """A `:::: infographic` block as one picture of the whole page, its alt text the
         title band, every panel and the sources; then each chart's numbers under "The
         numbers", one table a chart, for a reader the picture says nothing to."""
-        page = notes_infographic.read(self.case, token.content, look=self.look, note_text=self._note_text)
+        # where the rows came from is the PDF's and the HTML page's check, as for a chart here
+        page = notes_infographic.read(self.case, token.content, look=self.look, note_text=self._note_text, origins=False)
         self.warnings.extend(message for message, _, _ in page.warnings)
         if not page.panels:
             return []
@@ -805,8 +822,16 @@ class _Writer:
                 if tokens[position].type == "paragraph_open"]
 
     def _table(self, tokens: list[Token], index: int, end: int) -> str:
+        """A table block, with what its settings line asks that the block can hold: the
+        block's Stripes style, each value of the colouring column highlighted in its row's
+        colour (a cell takes no colour of its own), and its caption and source as the
+        block's caption. The search bar, sorting and folding are the web page's."""
+        look = notes_tables.look_of(tokens[index])
         head: list[str] = []
+        headers: list[str] = []
         rows: list[str] = []
+        cells_of: list[list[str]] = []
+        texts_of: list[list[str]] = []
         in_head = False
         position = index + 1
         while position < end:
@@ -817,6 +842,7 @@ class _Writer:
                 in_head = False
             elif token.type == "tr_open":
                 cells: list[str] = []
+                texts: list[str] = []
                 position += 1
                 while position < end and tokens[position].type != "tr_close":
                     cell = tokens[position]
@@ -825,13 +851,31 @@ class _Writer:
                         aligned = re.search(r"text-align:\s*(left|center|right)", md.token_attr(cell, "style"))
                         where = (f' class="has-text-align-{aligned.group(1)}" data-align="{aligned.group(1)}"'
                                  if aligned else "")
+                        texts.append(" ".join(md.inline_text(tokens[position + 1]).split()))
                         cells.append(f"<{tag}{where}>{self._inline(tokens[position + 1])}</{tag}>")
                         position += 3
                         continue
                     position += 1
-                (head if in_head else rows).append(f"<tr>{''.join(cells)}</tr>")
+                if in_head:
+                    headers = texts
+                    head.append(f"<tr>{''.join(cells)}</tr>")
+                else:
+                    cells_of.append(cells)
+                    texts_of.append(texts)
             position += 1
-        return table(head, rows) if head or rows else ""
+        key, colours = (notes_tables.row_colours(headers, texts_of, look.colour, case=self.case, look=self.look)
+                        if look.colour else (None, []))
+        if look.colour and key is None:
+            self.warnings.append(notes_tables.missing_colour(look.colour))
+        for number, cells in enumerate(cells_of):
+            colour = colours[number] if colours else ""
+            if colour and key is not None and key < len(cells):
+                cells = [*cells[:key], _highlighted(cells[key], colour), *cells[key + 1:]]
+            rows.append(f"<tr>{''.join(cells)}</tr>")
+        caption = _text(look.caption)
+        if look.source:
+            caption += f"{'<br>' if caption else ''}Source: {_text(look.source)}"
+        return table(head, rows, stripes=bool(look.stripes), caption=caption) if head or rows else ""
 
     # -- inline ------------------------------------------------------------------
 

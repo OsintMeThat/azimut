@@ -36,7 +36,7 @@ from collections import Counter
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import PurePosixPath
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, Callable
 
 from . import notelook, notes_chart_kinds, notes_chart_picker, notes_charts
 from .notelook import DEFAULT as DEFAULT_LOOK
@@ -198,7 +198,11 @@ def gallery(case: "Case | None", body: str, *, look: NoteLook | None = None, not
 # -- where the rows came from ------------------------------------------------------------------
 
 
-def origin_rows(case: "Case", origin: str) -> tuple[str, list[str], list[list[str]]] | None:
+#: A source's rows as `origin_rows` answers them: ``(its name, headers, rows)``.
+Rows = tuple[str, list[str], list[list[str]]]
+
+
+def origin_rows(case: "Case", origin: str) -> Rows | None:
     """What ``from:`` names, as ``(its name, headers, rows)``, each cell as a reader sees
     it; None when it is no longer in the case or names nothing this reads."""
     kind, _, rest = origin.strip().partition(":")
@@ -360,29 +364,68 @@ def origin_known(origin: str) -> bool:
     return origin.strip().partition(":")[0].strip().casefold() in ("note", "sheet")
 
 
-def origin_warning(case: "Case", block: ChartBlock) -> tuple[str, str, int | None] | None:
-    """What the check says of ``from:``: the source gone, or its rows moved on."""
+def origin_warning(case: "Case", block: ChartBlock, *, read: Callable[["Case", str], Rows | None] | None = None
+                   ) -> tuple[str, str, int | None] | None:
+    """What the check says of ``from:``: the source gone, or its rows moved on. ``read``
+    answers a source's rows (`origin_rows` by default; an infographic reads each once)."""
     if not origin_known(block.origin) or block.table is None:
         return None
     said = f'The chart "{_cut(block.title, 60)}"' if block.title else "A chart"
     line = block.where.get("from")
-    found = origin_rows(case, block.origin)
+    found = (read or origin_rows)(case, block.origin)
     if found is None:
         return (f"{said}: its rows were copied from something no longer in the case, so they cannot be "
                 f"read again.", notes_charts.MISSING, line)
     name, headers, rows = found
-    wanted = [header.casefold() for header in block.table.headers]
-    columns = {header.casefold(): index for index, header in enumerate(headers)}
-    shared = [(position, columns[header]) for position, header in enumerate(wanted) if header in columns]
-    if not shared:
+    state = compare_rows(block.table, headers, rows)
+    if state == COLUMNS_GONE:
         return (f'{said}: "{_cut(name, 40)}", where its rows were copied from, no longer has its columns.',
                 notes_charts.OTHER_KIND, line)
-    mine = Counter(tuple(row[position] for position, _ in shared) for row in block.table.rows)
-    theirs = Counter(tuple(row[index] if index < len(row) else "" for _, index in shared) for row in rows)
-    if mine == theirs:
+    if state == SAME:
         return None
     return (f'{said}: its rows differ from "{_cut(name, 40)}", where they were copied from. Read them again '
             f"to bring them up to date.", notes_charts.OTHER_KIND, line)
+
+
+#: What `compare_rows` says of a chart's rows against where they came from.
+SAME = "same"
+DIFFERS = "differs"
+COLUMNS_GONE = "columns"
+
+
+def compare_rows(table: notes_charts.Table, headers: list[str], rows: list[list[str]]) -> str:
+    """Whether a chart's rows are those of a source's ``headers`` and ``rows``, kept to the
+    chart's own columns and in any order: `SAME`, `DIFFERS`, or `COLUMNS_GONE` when the
+    source has none of the chart's columns. The editor's ``compareRows`` reads them alike."""
+    wanted = [header.casefold() for header in table.headers]
+    columns = {header.casefold(): index for index, header in enumerate(headers)}
+    shared = [(position, columns[header]) for position, header in enumerate(wanted) if header in columns]
+    if not shared:
+        return COLUMNS_GONE
+    mine = Counter(tuple(row[position] if position < len(row) else "" for position, _ in shared) for row in table.rows)
+    theirs = Counter(tuple(row[index] if index < len(row) else "" for _, index in shared) for row in rows)
+    return SAME if mine == theirs else DIFFERS
+
+
+def chart_bodies(text: str) -> list[str]:
+    """The lines of every `::: chart` block a note's text holds outside code fences, an
+    infographic's panels included (they keep a chart's own fences)."""
+    bodies: list[str] = []
+    lines = str(text or "").split("\n")
+    fenced = False
+    index = 0
+    while index < len(lines):
+        line = lines[index]
+        if re.match(r"^\s*(```|~~~)", line):
+            fenced = not fenced
+        elif not fenced and CHART_OPEN.match(line):
+            end = index + 1
+            while end < len(lines) and not re.match(r"^:::[ \t]*$", lines[end]):
+                end += 1
+            bodies.append("\n".join(lines[index + 1:end]))
+            index = end
+        index += 1
+    return bodies
 
 
 def _table_under(text: str, anchor: str) -> notes_charts.Table | None:

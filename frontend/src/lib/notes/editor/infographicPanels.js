@@ -2,15 +2,12 @@
  * What an infographic's panels are made from, read the way the chart block reads a table:
  * the note's own tables, each drawn as every kind it fits by the chart's kind picker
  * (`POST /notes/figure/kinds`, `chartKinds`), and the panel the one picked writes, its
- * rows copied in and `from:` saying where they came from (`chartFromTable`). The builder's
+ * rows copied in and `from:` saying where they came from (`chartText.chartOfTable`). The builder's
  * Add a panel and `/` › Infographic's starter both go through here, so a chart made for a
  * page is written exactly as a chart made under its table.
  */
-import { EditorState } from '@codemirror/state';
-
-import { chartFromTable } from './chartBlock.js';
 import { chartKinds } from './chartFigure.js';
-import { CHART_OPEN, headingAbove } from './chartText.js';
+import { CHART_OPEN, chartOfTable, headingAbove } from './chartText.js';
 import { EMPTY_INFOGRAPHIC, HALF, WIDE, infographicsIn } from './infographicText.js';
 import { tablesIn } from './tableText.js';
 
@@ -71,7 +68,7 @@ export function noteMaps(text) {
 
 /** The chart panel kind `kind` (an answer of the kind picker) makes of the note's table `found`. */
 export function chartPanel(text, found, kind, noteId = '') {
-  return chartFromTable(EditorState.create({ doc: String(text ?? '') }), found, kind, noteId);
+  return chartOfTable(String(text ?? ''), found, kind, noteId);
 }
 
 /**

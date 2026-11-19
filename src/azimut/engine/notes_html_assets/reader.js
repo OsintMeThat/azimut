@@ -315,7 +315,8 @@
     step?.parentNode.azShow?.(all(':scope > .az-step', step.parentNode).indexOf(step));
   }
 
-  /* a table sorts by any column, filters past twelve rows, and points at a coded row */
+  /* a table sorts by any column, filters past twelve rows, and points at a coded row; its
+     settings line may ask for the filter always or never, no sorting, or its first rows only */
   const NUMBER = /^[~≈<>≥≤+-]?\s*-?[\d\s.,]*\d(?:[.,]\d+)?\s*(?:%|km|m|s|h)?$/i;
   const numeric = (text) => (NUMBER.test(text) ? Number(text.replace(/[^\d.,-]/g, '').replace(/,(?=\d{3}\b)/g, '').replace(',', '.')) : NaN);
 
@@ -325,15 +326,32 @@
       if (!body) continue;
       const rows = all(':scope > tr', body);
       const heads = all(':scope > thead > tr:first-child > th', table);
+      const { search, sort } = table.dataset;
+      const fold = Number(table.dataset.fold) || 0;
+      let open = false;
+      let wanted = '';
+      let more = null;
+      // past its first rows a long table folds, unless shown whole or filtered
+      const refold = () => {
+        let shown = 0;
+        for (const row of all(':scope > tr', body)) row.classList.toggle('az-folded', fold > 0 && !open && !wanted && (shown += 1) > fold);
+        if (more) more.textContent = open ? `Show the first ${fold} rows` : `Show all ${rows.length} rows`;
+        // Chromium draws a column kept in sight out of place once rows come and go: it is laid out again
+        if (table.classList.contains('az-first')) {
+          table.classList.remove('az-first');
+          void table.offsetWidth;
+          table.classList.add('az-first');
+        }
+      };
       // a hash or an address in a cell may break anywhere, rather than widen the table
       for (const cell of all(':scope > tr > td', body)) if (/\S{24,}/.test(cell.textContent)) cell.classList.add('az-token');
-      heads.forEach((head, column) => {
+      if (sort !== 'off') heads.forEach((head, column) => {
         // a column with no header holds the rows' labels: nothing to sort by
         if (!words(head)) return;
-        const sort = make('button', { type: 'button', class: 'az-sort', title: 'Sort by this column' });
-        sort.append(...head.childNodes);
-        head.append(sort);
-        sort.addEventListener('click', () => {
+        const button = make('button', { type: 'button', class: 'az-sort', title: 'Sort by this column' });
+        button.append(...head.childNodes);
+        head.append(button);
+        button.addEventListener('click', () => {
           const down = head.getAttribute('aria-sort') === 'ascending';
           for (const other of heads) other.removeAttribute('aria-sort');
           head.setAttribute('aria-sort', down ? 'descending' : 'ascending');
@@ -342,6 +360,7 @@
           const order = (a, b) => (counted ? (numeric(cell(a)) || 0) - (numeric(cell(b)) || 0)
             : cell(a).localeCompare(cell(b), undefined, { numeric: true, sensitivity: 'base' }));
           body.append(...rows.slice().sort((a, b) => (down ? -order(a, b) : order(a, b))));
+          refold();
         });
       });
       const wrap = table.closest('.az-table-wrap') || table;
@@ -349,24 +368,43 @@
       const fits = () => wrap.classList.toggle('az-slides', table.scrollWidth > wrap.clientWidth + 1);
       fits();
       window.addEventListener('resize', fits);
-      if (rows.length <= 12) continue;
+      // the filter and the fold stand on the table's own edges: they share a box as wide as the table
+      const boxed = () => {
+        if (wrap.parentNode.classList?.contains('az-table-block')) return;
+        const block = make('div', { class: 'az-table-block' });
+        wrap.replaceWith(block);
+        block.append(wrap);
+      };
+      if (fold && rows.length > fold) {
+        more = make('button', { type: 'button', class: 'az-table-more', 'aria-expanded': 'false' });
+        more.addEventListener('click', () => {
+          open = !open;
+          more.setAttribute('aria-expanded', open);
+          refold();
+        });
+        boxed();
+        wrap.after(more);
+        table.azUnfold = () => { open = true; refold(); };
+        refold();
+      }
+      if (search === 'never' || (search !== 'always' && rows.length <= 12)) continue;
       const tools = make('div', { class: 'az-table-tools' });
       const field = make('input', { type: 'search', class: 'az-filter', placeholder: 'Filter the rows', 'aria-label': 'Filter the rows of this table' });
       const said = make('span', { 'aria-live': 'polite' }, `${rows.length} rows`);
       tools.append(field, said);
-      // the filter stands on the table's own edge: the two share a box as wide as the table
-      const block = make('div', { class: 'az-table-block' });
-      wrap.replaceWith(block);
-      block.append(tools, wrap);
+      boxed();
+      wrap.before(tools);
       const texts = rows.map((row) => words(row).toLocaleLowerCase());
       field.addEventListener('input', () => {
-        const wanted = field.value.trim().toLocaleLowerCase();
+        wanted = field.value.trim().toLocaleLowerCase();
         let shown = 0;
         rows.forEach((row, index) => {
           row.hidden = Boolean(wanted) && !texts[index].includes(wanted);
           if (!row.hidden) shown += 1;
         });
         said.textContent = wanted ? `${shown} of ${rows.length} rows` : `${rows.length} rows`;
+        if (more) more.hidden = Boolean(wanted);
+        refold();
       });
       table.azFilter = field;
     }
@@ -382,6 +420,7 @@
       field.value = '';
       field.dispatchEvent(new Event('input'));
     }
+    if (target.classList?.contains('az-folded')) target.closest('table').azUnfold();
     if (target.matches?.('tr, .az-sources li')) {
       target.classList.remove('az-flash');
       void target.offsetWidth;

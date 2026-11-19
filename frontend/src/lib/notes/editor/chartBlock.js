@@ -35,7 +35,7 @@ import { chartSettings, openKindPicker } from './chartCard.js';
 import { chartForm } from './chartForm.js';
 import { EMPTY_SAID, FORMS, hasRows, readForm, starterBlock } from './chartFormText.js';
 import {
-  CHART_OPEN, compareRows, headingAbove, newChart, originFor, readChart, readOrigin, setting, tableUnder, withSettings, withTable,
+  CHART_OPEN, chartOfTable, compareRows, headingAbove, newChart, readChart, readOrigin, setting, tableUnder, withSettings, withTable,
 } from './chartText.js';
 import { tablesOf } from './gridEdits.js';
 import { button, icon, openMenu } from './gridMenu.js';
@@ -367,6 +367,7 @@ class ChartBox {
       this.againButton.title = differs ? `${state.name[0].toUpperCase()}${state.name.slice(1)} changed: copy its rows again` : '';
     }
     if (this.numbersOpen && was !== state?.state) this.renderNumbers();
+    if (was !== state?.state) this.settings?.refresh();
   }
 
   // -- the bar's gestures --
@@ -422,6 +423,7 @@ class ChartBox {
         write: (changes) => this.write(changes),
         keep: this.info.caseId ? (values) => this.keepColours(values) : null,
         editData: () => this.toggleForm(true),
+        source: this.info.caseId && this.handlers.pickData ? { said: () => this.sourceSaid(), change: (anchor) => this.changeSource(anchor) } : null,
       });
     }
     this.settingsButton?.setAttribute('aria-pressed', String(open));
@@ -474,7 +476,27 @@ class ChartBox {
     this.view.requestMeasure();
   }
 
-  /** Copy the rows again from where they came from, as one step Undo takes back. */
+  /** Where the rows come from, for the settings' Data line: `{ name, state }`. */
+  sourceSaid() {
+    const origin = readOrigin(setting(this.chart, 'from'));
+    if (!origin) return { name: '', state: '' };
+    const known = this.origin;
+    if (!known) return { name: origin.kind === 'sheet' ? 'A sheet' : 'A table', state: '' };
+    const name = known.name.replace(/^the sheet /, 'Sheet ');
+    return { name: `${name[0].toUpperCase()}${name.slice(1)}`, state: known.state === 'differs' || known.state === 'gone' ? known.state : '' };
+  }
+
+  /** Change…: the source picker; the one picked writes `from:` and its rows, as one step. */
+  changeSource(anchor) {
+    this.handlers.pickData?.({
+      anchor,
+      current: setting(this.chart, 'from'),
+      onpick: ({ origin, data }) => {
+        if (origin && data?.text) this.edit((source) => withTable(withSettings(source, { from: origin }), data.text));
+      },
+    });
+  }
+
   /**
    * Name the colours the chart chose on its own in the case's palette (`layerPalette.keep`,
    * the infographic builder's too), so every chart, map and layer paints them the same. The
@@ -754,10 +776,7 @@ function cursorSession(view) {
  * are in; a note with none (a template) writes no `from:`.
  */
 export function chartFromTable(state, found, kind, noteId = '') {
-  const text = state.sliceDoc(found.from, found.to);
-  const settings = { ...kind.settings, title: kind.title ?? '' };
-  if (noteId) settings.from = originFor(noteId, state.doc.toString(), found.line ?? state.doc.lineAt(found.from).number - 1);
-  return newChart(settings, text);
+  return chartOfTable(state.doc.toString(), found, kind, noteId);
 }
 
 /** Write `block` at `pos` as one step, and pick it. `before(from)` learns where it starts first. */
@@ -792,7 +811,7 @@ function placeChart(view, found, kind, pos) {
  * The kind picker for the table at `found`, under `anchor`; the chart lands at `pos`. With
  * `onScratch`, every kind from scratch follows the kinds the table fits.
  */
-export function chartTable(view, anchor, found, { pos = found.to, copy = null, onScratch = null } = {}) {
+export function chartTable(view, anchor, found, { pos = found.end ?? found.to, copy = null, onScratch = null } = {}) {
   const { caseId } = view.state.field(noteCase);
   return openKindPicker(view, anchor, {
     caseId,
@@ -944,7 +963,6 @@ const THEME = {
   '.cm-chart-loading > svg': { opacity: '0.55' },
   '.cm-chart-said': { margin: '0', padding: '26px 16px', color: 'var(--text-3)', textAlign: 'center' },
   '.cm-chart-empty': { padding: '34px 16px', fontSize: '13px' },
-  '.cm-chart-field.cm-chart-data': { display: 'grid', gridTemplateColumns: '64px max-content', alignItems: 'center', gap: '10px' },
   '.cm-chart-field.cm-chart-data[hidden]': { display: 'none' },
   '.cm-chart-data .cm-chart-edit-data': {
     display: 'inline-flex', alignItems: 'center', height: '26px', margin: '0', padding: '0 12px', border: '1px solid color-mix(in srgb, var(--accent) 45%, transparent)',
@@ -1043,6 +1061,12 @@ const THEME = {
     marginLeft: '6px', padding: '0', border: 'none', background: 'none', color: 'var(--info)', font: 'inherit', cursor: 'pointer', textDecoration: 'underline',
   },
   '.cm-chart-looks .cm-chart-field': { flexDirection: 'row', alignItems: 'center', gap: '10px' },
+  // where the rows come from, on top of the settings
+  '.cm-chart-data': { flexDirection: 'row', alignItems: 'baseline', flexWrap: 'wrap', gap: '4px 10px' },
+  '.cm-chart-data > .cm-chart-field-name': { flex: 'none', width: '64px' },
+  '.cm-chart-data-name': { color: 'var(--text-1)', fontWeight: '600' },
+  '.cm-chart-data-state': { color: 'var(--warn)' },
+  '.cm-chart-data-state[hidden]': { display: 'none' },
   '.cm-chart-colours': { flexDirection: 'row', alignItems: 'baseline', flexWrap: 'wrap', gap: '6px 10px', paddingLeft: '74px' },
   '.cm-chart-colours[hidden]': { display: 'none' },
   '.cm-chart-swatches': { display: 'inline-flex', flexWrap: 'wrap', gap: '4px 10px', flex: '1 1 0', minWidth: '0' },

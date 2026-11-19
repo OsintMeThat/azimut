@@ -206,5 +206,5 @@ test('an infographic’s Add a panel makes a chart from scratch, its form open i
   await tab.keyboard.press('Tab');
   await form.getByLabel('What it says', { exact: true }).fill('vehicles seen');
   await tab.keyboard.press('Tab');
-  await expect.poll(() => written.at(-1) ?? '').toBe(`${NOTE}\n\n:::: infographic\ntitle: The front\n\n::: chart\nkind: key figures\n| Figure | What it says |\n| --- | --- |\n| 60 | vehicles seen |\n:::\n::::\n`);
+  await expect.poll(() => written.at(-1) ?? '').toBe(`${NOTE}\n\n:::: infographic\ntitle: The front\n\n::: chart\nkind: key figures\nrows: own\n| Figure | What it says |\n| --- | --- |\n| 60 | vehicles seen |\n:::\n::::\n`);
 });
