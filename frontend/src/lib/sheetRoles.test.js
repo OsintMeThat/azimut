@@ -598,6 +598,8 @@ describe('the same cell, read by both readers', () => {
       expect(point.lat).toBeCloseTo(entry.reads.lat, 6);
       expect(point.lon).toBeCloseTo(entry.reads.lon, 6);
       expect(point.decimals, entry.cell).toBe(entry.reads.decimals);
+      if ('approx' in entry.reads) expect(point.approx, entry.cell).toBe(entry.reads.approx);
+      if ('radius' in entry.reads) expect(point.radius, entry.cell).toBe(entry.reads.radius);
     }
   });
 });

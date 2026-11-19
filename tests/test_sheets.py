@@ -533,6 +533,9 @@ def test_both_readers_answer_the_same_thing_about_a_shared_list_of_cells():
         assert point["lat"] == pytest.approx(wanted["lat"], abs=1e-6), case["cell"]
         assert point["lon"] == pytest.approx(wanted["lon"], abs=1e-6), case["cell"]
         assert point["decimals"] == wanted["decimals"], case["cell"]
+        for hedge in ("approx", "radius"):
+            if hedge in wanted:
+                assert point[hedge] == wanted[hedge], case["cell"]
 
 
 def test_the_types_that_own_a_file_are_the_same_list_on_both_sides():

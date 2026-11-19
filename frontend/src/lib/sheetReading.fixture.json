@@ -43,6 +43,20 @@
       "cell": "48°51'24\"N 2°21'08\"E",
       "reads": { "lat": 48.8566667, "lon": 2.3522222, "decimals": 4 }
     },
+    {
+      "cell": "~12.7590, 43.4950 (±450 m)",
+      "reads": { "lat": 12.759, "lon": 43.495, "decimals": 4, "approx": true, "radius": 450 }
+    },
+    {
+      "cell": "12.74625, 43.49463 (±30 m)",
+      "reads": { "lat": 12.74625, "lon": 43.49463, "decimals": 5, "approx": false, "radius": 30 }
+    },
+    {
+      "cell": "12.7451 43.4949 ± 1.5 km",
+      "reads": { "lat": 12.7451, "lon": 43.4949, "decimals": 4, "approx": false, "radius": 1500 }
+    },
+    { "cell": "(±30 m)", "reads": null },
+    { "cell": "zone: between Dhubab and the airport road", "reads": null },
     { "cell": "48,8", "reads": null },
     { "cell": "-1,5", "reads": null },
     { "cell": "48,8566", "reads": null },

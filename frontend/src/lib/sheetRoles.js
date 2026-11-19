@@ -563,6 +563,10 @@ const DECIMAL_PAIR =
   /^\s*([+-]?\d{1,3}(?:[.,]\d+)?)\s*°?\s*([NnSs])?(\s*[,;/]\s*|\s+)([+-]?\d{1,3}(?:[.,]\d+)?)\s*°?\s*([EeWw])?\s*$/;
 const DMS =
   /(\d{1,3})\s*°\s*(\d{1,2})?\s*['′]?\s*([\d.]+)?\s*["″]?\s*([NnSsEeWw])/g;
+/** What a register writes around a point it is not sure of: `~` before it, and how far
+ *  off it may be after it, `(±450 m)`. Mirrors `engine/sheetroles` (`_APPROX`, `_RADIUS`). */
+const APPROX = /^\s*[~≈]\s*/;
+const RADIUS = /\s*\(?\s*±\s*(\d{1,6}(?:[.,]\d+)?)\s*(km|m)\s*\)?\s*$/i;
 
 function decimals(text) {
   const at = String(text).replace(',', '.').indexOf('.');
@@ -589,9 +593,20 @@ function signed(value, hemisphere, negatives) {
  * A comma is a decimal mark, so `48,8` is one number rather than two coordinates. It
  * separates a pair only where it cannot be decimal: a space after it, a hemisphere letter,
  * or a full stop already doing the job. Mirrors `engine/sheetroles.parse_latlon`.
+ *
+ * A register's hedges are read, not refused: `~12.7590, 43.4950 (±450 m)` is the point its
+ * writer could give and how far off they say it may be. `approx` is the `~`, `radius` the
+ * metres after `±` (null when the cell says nothing of it), and `hedge` the words around
+ * the pair as written, which a rewrite keeps.
  */
 export function parseLatLon(text) {
-  const body = String(text ?? '').trim();
+  let body = String(text ?? '').trim();
+  const approx = APPROX.test(body);
+  body = body.replace(APPROX, '');
+  const hedge = body.match(RADIUS);
+  const radius = hedge ? Number(hedge[1].replace(',', '.')) * (hedge[2].toLowerCase() === 'km' ? 1000 : 1) : null;
+  const said = { approx, radius, hedge: hedge ? hedge[0].trim() : '' };
+  if (hedge) body = body.slice(0, hedge.index).trimEnd();
   if (!body) return null;
 
   const pair = body.match(DECIMAL_PAIR);
@@ -606,6 +621,7 @@ export function parseLatLon(text) {
       lon,
       decimals: Math.min(decimals(rawLat), decimals(rawLon)),
       outOfBounds: Math.abs(lat) > 90 || Math.abs(lon) > 180,
+      ...said,
     };
   }
 
@@ -625,6 +641,7 @@ export function parseLatLon(text) {
       lon: lon.value,
       decimals: 4,
       outOfBounds: Math.abs(lat.value) > 90 || Math.abs(lon.value) > 180,
+      ...said,
     };
   }
   return null;
@@ -641,7 +658,9 @@ export function precisionMetres(places) {
  *  analyst asks for, and it lands in the undo stack like any other. */
 export function formatLatLon(point, places = 5) {
   if (!point) return '';
-  return `${point.lat.toFixed(places)}, ${point.lon.toFixed(places)}`;
+  // a hedge the cell wrote stays with the point: `~` before it, `(±450 m)` after it
+  const pair = `${point.lat.toFixed(places)}, ${point.lon.toFixed(places)}`;
+  return `${point.approx ? '~' : ''}${pair}${point.hedge ? ` ${point.hedge}` : ''}`;
 }
 
 const EARTH_M = 6_371_000;

@@ -356,6 +356,10 @@ _DECIMAL_PAIR = re.compile(
     r"([+-]?\d{1,3}(?:[.,]\d+)?)\s*°?\s*([EeWw])?\s*$"
 )
 _DMS = re.compile(r"(\d{1,3})\s*°\s*(\d{1,2})?\s*['′]?\s*([\d.]+)?\s*[\"″]?\s*([NnSsEeWw])")
+#: What a register writes around a point it is not sure of: `~` before it, and how far off
+#: it may be after it, `(±450 m)`. Mirrors `lib/sheetRoles` (`APPROX`, `RADIUS`).
+_APPROX = re.compile(r"^\s*[~≈]\s*")
+_RADIUS = re.compile(r"\s*\(?\s*±\s*(\d{1,6}(?:[.,]\d+)?)\s*(km|m)\s*\)?\s*$", re.IGNORECASE)
 
 #: One degree of latitude, in metres. The last decimal a cell was written to is how
 #: precisely whoever wrote it was claiming to know the ground.
@@ -395,8 +399,19 @@ def parse_latlon(text: Any) -> dict[str, Any] | None:
     (`sheetpromote._NUMBER_NOISE` reads it the same way), so `48,8` is one number and not
     two coordinates. It separates a pair only where it cannot be decimal: a space after it,
     a hemisphere letter, or a full stop already doing the job.
+
+    **A register's hedges are read, not refused.** `~12.7590, 43.4950 (±450 m)` is the
+    point its writer could give and how far off they say it may be: ``approx`` is the
+    `~`, ``radius`` the metres after `±`, None when the cell says nothing of it.
     """
     body = str(text or "").strip()
+    approx = bool(_APPROX.match(body))
+    body = _APPROX.sub("", body, count=1)
+    hedge = _RADIUS.search(body)
+    radius: float | None = None
+    if hedge:
+        radius = float(hedge.group(1).replace(",", ".")) * (1000 if hedge.group(2).lower() == "km" else 1)
+        body = body[: hedge.start()].rstrip()
     if not body:
         return None
 
@@ -415,6 +430,8 @@ def parse_latlon(text: Any) -> dict[str, Any] | None:
             "lon": lon,
             "decimals": min(_decimals(raw_lat), _decimals(raw_lon)),
             "out_of_bounds": abs(lat) > 90 or abs(lon) > 180,
+            "approx": approx,
+            "radius": radius,
         }
 
     parts = _DMS.findall(body)
@@ -434,6 +451,8 @@ def parse_latlon(text: Any) -> dict[str, Any] | None:
             "lon": east,
             "decimals": 4,
             "out_of_bounds": abs(north) > 90 or abs(east) > 180,
+            "approx": approx,
+            "radius": radius,
         }
     return None
 
