@@ -56,7 +56,7 @@ from PIL import Image
 from . import iconvector
 
 if TYPE_CHECKING:
-    from .notes_charts import Box, ChartTheme, Check, Mark, Paint, Plot, Reading, Swatch, Table
+    from .notes_charts import Box, Category, ChartTheme, Check, Mark, Paint, Plot, Reading, Swatch, Table
 
 #: Parts a pie or a donut draws; past it, the smallest are one part, `OTHERS`.
 MAX_SLICES = 6
@@ -81,6 +81,8 @@ MAX_DIRECT_LABELS = 4
 MAX_ACROSS_EVENTS = 14
 #: A segmented bar's thickness, across.
 SEGMENT_THICKNESS = 28.0
+#: The thickest a segmented bar is drawn in a picture of fixed size.
+MAX_FRAME_SEGMENT = 96.0
 
 _PLAIN_SHAPES = {
     "dot": "M12 4a8 8 0 1 1 0 16 8 8 0 0 1 0-16Z",
@@ -875,6 +877,11 @@ def _plot_round(reading: "Reading", theme: "ChartTheme", box: "Box", *, hole: fl
         # a long legend: the pie sits in its middle
         wedges = [shifted(mark, 0, (legend_height - diameter) / 2) for mark in wedges]
     marks = [*wedges, *legend]
+    if beside and box.height is not None:
+        # a frame of fixed size: the pie and its legend stand in the middle of its width
+        used = max([lx + legend_width - box.x, diameter])
+        if box.width - used > 1:
+            marks = [shifted(mark, (box.width - used) / 2, 0) for mark in marks]
     notes = [note for note in [folded_note(gone, shown.text, hidden_values(reading))] if note]
     marks, height = centred(marks, height, box)
     swatches = [nc.Swatch(part.name, part.paint, part.amount) for part in legend_rows]
@@ -948,7 +955,9 @@ def plot_segments(reading: "Reading", theme: "ChartTheme", box: "Box") -> "Plot"
     gap = 2.0
     length = box.width
     usable = length - gap * (len(parts) - 1)
-    thickness = SEGMENT_THICKNESS
+    # a frame of fixed size draws the bar thicker, so it is the picture rather than a line in it
+    thickness = SEGMENT_THICKNESS if box.height is None else \
+        max(SEGMENT_THICKNESS, min(MAX_FRAME_SEGMENT, box.height * 0.3))
     top = box.y
     marks: list[Mark] = []
     outside: list[tuple[float, str, Part]] = []
@@ -1213,9 +1222,45 @@ def _cut_last(cells: list[list[tuple[Unit, float, float]]]) -> bool:
     return bool(cells) and sum(end - start for _, start, end in cells[-1]) < 1 - 1e-9
 
 
+#: A glyph's step across and down, in glyph heights (across: times its aspect).
+GLYPH_STEP = 1.25
+GLYPH_LINE = 1.3
+#: The tallest glyph a picture of fixed size draws, in CSS pixels of its layout.
+MAX_FRAME_GLYPH = 72.0
+#: How much smaller a glyph may be drawn to keep rows of ten (or of five).
+ROUND_ROWS_COST = 0.9
+
+
+def _grid_width(across: int, height: float, aspect: float) -> float:
+    return (across - 1) * height * aspect * GLYPH_STEP + height * aspect
+
+
+def glyph_grid(glyphs: int, aspect: float, width: float, height: float, *,
+               most: float = MAX_FRAME_GLYPH) -> tuple[int, float]:
+    """``(across, glyph height)`` that fill a ``width`` by ``height`` frame with ``glyphs``
+    glyphs at their largest, none cut: a row of ten, then of five, when it is at least
+    `ROUND_ROWS_COST` as large."""
+    best: dict[int, float] = {}
+    for across in range(1, max(1, glyphs) + 1):
+        rows = math.ceil(glyphs / across)
+        by_width = width / ((across - 1) * aspect * GLYPH_STEP + aspect)
+        by_height = height / ((rows - 1) * GLYPH_LINE + 1)
+        best[across] = max(4.0, min(most, by_width, by_height))
+    largest = max(best.values())
+    for round_rows in (10, 5):
+        kept = [across for across in best if across % round_rows == 0 and best[across] >= largest * ROUND_ROWS_COST]
+        if kept:
+            across = max(kept, key=lambda count: (best[count], count))
+            return across, best[across]
+    # at the same size, longer rows: fewer lines to read down
+    across = max(best, key=lambda count: (best[count], count))
+    return across, best[across]
+
+
 def plot_pictograms(reading: "Reading", theme: "ChartTheme", box: "Box") -> "Plot":
     """One glyph per unit in rows of ten (twenty past sixty), part after part, each in its
-    part's paint; past `MAX_GLYPHS` one glyph stands for a round number and says so."""
+    part's paint; past `MAX_GLYPHS` one glyph stands for a round number and says so. A
+    frame of fixed size is filled: its glyphs as large as it lets them be (`glyph_grid`)."""
     column = _icon_column(reading, "icon")
     parts = [part for part in parts_of(reading, theme) if part.amount > 0]
     total = sum(part.amount for part in parts)
@@ -1232,26 +1277,28 @@ def plot_pictograms(reading: "Reading", theme: "ChartTheme", box: "Box") -> "Plo
         units.extend(_runs(reading, sorted(rows_of.get(part.value, [])), part.value, unit, column, part.value))
     cells = _glyph_cells(units)
     glyphs = len(cells)
-    across = 10 if glyphs <= 60 else 20
     drawings = {run.key: glyph(run.key) for run in units}
     aspect = max(drawing.aspect for drawing in drawings.values())
-    pitch = box.width / across
-    glyph_height = min(24.0 if box.height is None else 40.0, pitch / aspect * 0.8)
-    if box.height is not None:
-        rows_needed = math.ceil(glyphs / across)
-        key_room = 30.0 if unit > 1 else 0.0
-        glyph_height = min(glyph_height, max(8.0, (box.height - key_room) / max(rows_needed, 1) / 1.3))
-    step_x = glyph_height * aspect * 1.25
-    step_y = glyph_height * 1.3
+    if box.height is None:
+        across = 10 if glyphs <= 60 else 20
+        glyph_height = min(24.0, box.width / across / aspect * 0.8)
+        left = box.x
+    else:
+        # a frame of fixed size (a picture for X, 4:5, 1:1) is filled: as many glyphs a row
+        # as make them largest, rows of ten or five kept when they cost little
+        across, glyph_height = glyph_grid(glyphs, aspect, box.width, box.height - (30.0 if unit > 1 else 0.0))
+        left = box.x + max(0.0, (box.width - _grid_width(across, glyph_height, aspect)) / 2)
+    step_x = glyph_height * aspect * GLYPH_STEP
+    step_y = glyph_height * GLYPH_LINE
     marks: list[Mark] = []
     y0 = box.y
-    key_marks, used = scale_key(drawings[units[0].key], unit, reading, theme, box.x, y0, min(glyph_height, 18.0))
+    key_marks, used = scale_key(drawings[units[0].key], unit, reading, theme, left, y0, min(glyph_height, 18.0))
     marks.extend(key_marks)
     y0 += used
     counted: dict[str, float] = {}
     shown_names = {part.value: part.name for part in parts}
     for index, cell in enumerate(cells):
-        x = box.x + (index % across) * step_x
+        x = left + (index % across) * step_x
         y = y0 + (index // across) * step_y
         for run, start, end in cell:
             paint = names[run.value].paint if run.value in names else nc.Paint(theme.series)
@@ -1285,9 +1332,15 @@ def _row_paint(reading: "Reading", theme: "ChartTheme", category: str, value: st
     return reading.paint(value)
 
 
+#: The narrowest column of silhouette rows a wide frame is split into, in CSS pixels.
+SILHOUETTE_COLUMN = 220.0
+SILHOUETTE_GUTTER = 32.0
+
+
 def plot_silhouettes(reading: "Reading", theme: "ChartTheme", box: "Box") -> "Plot":
     """One row per category: its flag or icon, its name, its count, then a glyph per unit
-    in the colour of its part, wrapping onto more lines when the row is long."""
+    in the colour of its part, wrapping onto more lines when the row is long. A wide frame
+    of fixed size (a picture for X) its rows overflow takes them in two columns side by side."""
     categories = [category for category in reading.categories if category.total > 0 or category.rows]
     if not categories:
         return nc.Plot([], 0.0, desc="A chart with nothing to draw.")
@@ -1295,79 +1348,152 @@ def plot_silhouettes(reading: "Reading", theme: "ChartTheme", box: "Box") -> "Pl
     flags = _icon_column(reading, "flag")
     total = sum(category.total for category in categories)
     unit = glyph_unit(total, reading.block.extra.get("per glyph", ""), most=MAX_ROW_GLYPHS)
-    size = theme.label_size + 0.5
-    value_size = theme.value_size + 1.5
-    counts = [nc.number_text(category.total) for category in categories]
-    count_width = max(nc.text_width(text, value_size, theme.head, bold=True) for text in counts)
-    flagged = flags is not None or bool((reading.block.extra.get(FLAGS) or "").strip())
-    flag_width = 26.0 if flagged else 0.0
-    names_width = min(max(nc.text_width(category.name, size, theme.head) for category in categories),
-                      box.width * 0.34)
-    glyph_left = box.x + flag_width + names_width + 12 + count_width + 14
-    room = box.x + box.width - glyph_left
-    glyph_height = 15.0 if box.width < 520 else 17.0
-    all_units: dict[int, list[Unit]] = {}
+    all_units: list[list[Unit]] = []
     keys: set[str] = set()
-    for index, category in enumerate(categories):
+    for category in categories:
         units: list[Unit] = []
         for segment in category.segments:
             if segment.amount > 0:
                 units.extend(_runs(reading, sorted(segment.rows), segment.value, unit, column, category.name))
-        all_units[index] = units
+        all_units.append(units)
         keys.update(run.key for run in units)
     drawings = {key: glyph(key) for key in keys} or {DEFAULT_GLYPH: glyph(DEFAULT_GLYPH)}
+    rows = list(zip(categories, all_units))
+    key_height = 15.0 if box.width < 520 else 17.0
+    single = _silhouette_column(reading, theme, rows, drawings, flags, box.x, box.width, 0.0, measure=True)
+    halves = 1
+    if (box.height is not None and len(rows) >= 4 and box.width >= 2 * SILHOUETTE_COLUMN + SILHOUETTE_GUTTER
+            and single.height > box.height):
+        halves = 2
+    marks, used = scale_key(next(iter(drawings.values())), unit, reading, theme, box.x, box.y, key_height)
+    y = box.y + used
+    if halves == 1:
+        # a frame of fixed size its rows leave room in draws their glyphs larger, as long as they fit
+        grown = None
+        if box.height is not None and single.height + used < box.height:
+            for height in (40.0, 34.0, 28.0, 23.0, 19.0):
+                if height <= single.glyph_height:
+                    break
+                tried = _silhouette_column(reading, theme, rows, drawings, flags, box.x, box.width, y,
+                                           glyph_height=height, measure=True)
+                if tried.height + used <= box.height:
+                    grown = height
+                    break
+        laid = [_silhouette_column(reading, theme, rows, drawings, flags, box.x, box.width, y, glyph_height=grown)]
+    else:
+        width = (box.width - SILHOUETTE_GUTTER) / 2
+        heights = _silhouette_column(reading, theme, rows, drawings, flags, box.x, width, y, measure=True).rows
+        split = _balanced_split(heights)
+        laid = [_silhouette_column(reading, theme, rows[:split], drawings, flags, box.x, width, y),
+                _silhouette_column(reading, theme, rows[split:], drawings, flags, box.x + width + SILHOUETTE_GUTTER,
+                                   width, y)]
+    for one in laid:
+        marks.extend(one.marks)
+    height = max(one.height for one in laid) + used
+    cut = any(one.cut for one in laid)
+    notes = [cut_note(unit, reading)] if cut and unit > 1 else []
+    marks, height = centred(marks, height, box)
+    return nc.Plot(marks, height, lines=[line for one in laid for line in one.lines], notes=notes,
+                   facts={"unit": unit, "glyphs": [count for one in laid for count in one.glyphs],
+                          "across": laid[0].across, "columns": halves})
+
+
+@dataclass
+class _SilhouetteColumn:
+    marks: list["Mark"]
+    height: float
+    lines: list[str]
+    glyphs: list[int]
+    across: int
+    cut: bool
+    #: Each row's height with its gap, for splitting rows into columns.
+    rows: list[float]
+    glyph_height: float
+
+
+def _balanced_split(heights: list[float]) -> int:
+    """Where rows of ``heights`` split in two columns whose tallest is least tall."""
+    total = sum(heights)
+    best, at, running = total, 1, 0.0
+    for index, height in enumerate(heights[:-1], start=1):
+        running += height
+        tallest = max(running, total - running)
+        if tallest < best:
+            best, at = tallest, index
+    return at
+
+
+def _silhouette_column(reading: "Reading", theme: "ChartTheme", rows: list[tuple["Category", list[Unit]]],
+                       drawings: dict[str, Glyph], flags: int | None, x0: float, width: float, y0: float, *,
+                       glyph_height: float | None = None, measure: bool = False) -> _SilhouetteColumn:
+    """Silhouette rows laid in one column ``width`` wide from ``(x0, y0)``, their glyphs
+    ``glyph_height`` tall (else the size the width gives); ``measure`` only says the heights."""
+    size = theme.label_size + 0.5
+    value_size = theme.value_size + 1.5
+    counts = [nc.number_text(category.total) for category, _ in rows]
+    count_width = max(nc.text_width(text, value_size, theme.head, bold=True) for text in counts)
+    # every column keeps a flag's room when the block gives flags, so the names line up
+    flagged = flags is not None or bool((reading.block.extra.get(FLAGS) or "").strip())
+    flag_width = 26.0 if flagged else 0.0
+    names_width = min(max(nc.text_width(category.name, size, theme.head) for category, _ in rows), width * 0.34)
+    glyph_left = x0 + flag_width + names_width + 12 + count_width + 14
+    room = x0 + width - glyph_left
+    glyph_height = glyph_height or (15.0 if width < 520 else 17.0)
     aspect = max(drawing.aspect for drawing in drawings.values())
     step_x = glyph_height * aspect + 4
     across = max(1, int((room + 4) // step_x))
     line_step = glyph_height + 6
-    marks, used = scale_key(next(iter(drawings.values())), unit, reading, theme, glyph_left, box.y, glyph_height)
+    marks: list[Mark] = []
     lines_out: list[str] = []
     per_row: list[int] = []
-    y = box.y + used
+    heights: list[float] = []
+    y = y0
     separated = False
     cut = False
-    for index, category in enumerate(categories):
+    for index, (category, units) in enumerate(rows):
+        top = y
         if category.last and not separated and index:
-            marks.append(nc.Line(((box.x, y + 2), (box.x + box.width, y + 2)), theme.grid, 1.0))
+            if not measure:
+                marks.append(nc.Line(((x0, y + 2), (x0 + width, y + 2)), theme.grid, 1.0))
             y += 10
             separated = True
         names = lines_of(category.name, names_width, size, theme.head)
-        cells = _glyph_cells(all_units[index])
+        cells = _glyph_cells(units)
         glyph_lines = max(1, math.ceil(len(cells) / across))
         name_height = len(names) * size * 1.25
         row_height = max(name_height, glyph_lines * line_step - 6, glyph_height)
-        first = y + glyph_height / 2 + size * 0.36 if len(names) == 1 else y + size
-        if flagged:
-            flag_key = next((glyph_key(reading.table.rows[row][flags]) for row in category.rows
-                             if flags is not None and reading.table is not None
-                             and glyph_key(reading.table.rows[row][flags])), "") \
-                or mapped_glyph(reading, FLAGS, category.name)
-            if flag_key:
-                flag = glyph(flag_key)
-                flag_height = min(16.0, 22.0 / flag.aspect)
-                marks.extend(glyph_marks(flag, nc.Paint(theme.ink2), theme, box.x,
-                                         y + (glyph_height - flag_height) / 2, flag_height))
-        for number, line in enumerate(names):
-            marks.append(nc.Text(box.x + flag_width, first + number * size * 1.25, line, size, theme.ink))
-        marks.append(nc.Text(glyph_left - 14, first, counts[index], value_size, theme.ink, bold=True, anchor="end"))
-        for cell_index, cell in enumerate(cells):
-            gx = glyph_left + (cell_index % across) * step_x
-            gy = y + (cell_index // across) * line_step
-            for run, start, end in cell:
-                paint = _row_paint(reading, theme, category.name, run.value)
-                said = f"{category.name}, {run.value}: " if run.value else f"{category.name}: "
-                amount = next((segment.amount for segment in category.segments if segment.value == run.value), 0.0)
-                marks.append(nc.Group(tuple(glyph_marks(drawings[run.key], paint, theme, gx, gy, glyph_height,
-                                                         (start, end))), said + nc.number_text(amount)))
         per_row.append(len(cells))
         cut = cut or _cut_last(cells)
         lines_out.append(nc._bar_line(reading, category))
+        if not measure:
+            first = y + glyph_height / 2 + size * 0.36 if len(names) == 1 else y + size
+            if flagged:
+                flag_key = next((glyph_key(reading.table.rows[row][flags]) for row in category.rows
+                                 if flags is not None and reading.table is not None
+                                 and glyph_key(reading.table.rows[row][flags])), "") \
+                    or mapped_glyph(reading, FLAGS, category.name)
+                if flag_key:
+                    flag = glyph(flag_key)
+                    flag_height = min(16.0, 22.0 / flag.aspect)
+                    marks.extend(glyph_marks(flag, nc.Paint(theme.ink2), theme, x0,
+                                             y + (glyph_height - flag_height) / 2, flag_height))
+            for number, line in enumerate(names):
+                marks.append(nc.Text(x0 + flag_width, first + number * size * 1.25, line, size, theme.ink))
+            marks.append(nc.Text(glyph_left - 14, first, counts[index], value_size, theme.ink, bold=True,
+                                 anchor="end"))
+            for cell_index, cell in enumerate(cells):
+                gx = glyph_left + (cell_index % across) * step_x
+                gy = y + (cell_index // across) * line_step
+                for run, start, end in cell:
+                    paint = _row_paint(reading, theme, category.name, run.value)
+                    said = f"{category.name}, {run.value}: " if run.value else f"{category.name}: "
+                    amount = next((segment.amount for segment in category.segments if segment.value == run.value),
+                                  0.0)
+                    marks.append(nc.Group(tuple(glyph_marks(drawings[run.key], paint, theme, gx, gy, glyph_height,
+                                                             (start, end))), said + nc.number_text(amount)))
         y += row_height + 12
-    height = y - 12 - box.y
-    notes = [cut_note(unit, reading)] if cut and unit > 1 else []
-    marks, height = centred(marks, height, box)
-    return nc.Plot(marks, height, lines=lines_out, notes=notes,
-                   facts={"unit": unit, "glyphs": per_row, "across": across})
+        heights.append(y - top)
+    return _SilhouetteColumn(marks, y - 12 - y0, lines_out, per_row, across, cut, heights, glyph_height)
 
 
 # -- waffle ----------------------------------------------------------------------------------------------
@@ -1416,15 +1542,25 @@ def plot_waffle(reading: "Reading", theme: "ChartTheme", box: "Box") -> "Plot":
     marks: list[Mark] = []
     legend_x: float
     if squares == 100:
-        cell = min(24.0, (box.width * (0.5 if box.width >= 420 else 1.0)) / 10 - 3)
-        if box.height is not None:
-            cell = min(cell, (box.height - 4) / 10 - 3)
+        beside = box.width >= 420
+        if box.height is None:
+            cell = min(24.0, (box.width * (0.5 if beside else 1.0)) / 10 - 3)
+        else:
+            # a frame of fixed size is filled; a tall one takes the legend under the grid
+            # when the grid is larger for it
+            cell = min((box.width * (0.5 if beside else 1.0)) / 10 - 3, (box.height - 4) / 10 - 3)
+            legend_room = (len(every) + 2) * (theme.label_size * 1.25 + 10) + 16
+            under = min(box.width / 10 - 3, (box.height - legend_room) / 10 - 3)
+            if beside and under > cell * 1.2:
+                beside, cell = False, under
         cell = max(8.0, cell)
-        marks.extend(_waffle_cells(spans, 0, 100, 10, box.x, box.y, cell, 3.0, empty, theme))
         side = cell * 10 + 3.0 * 9
+        # over its legend in a frame of fixed size, the grid stands in the middle of the width
+        x0 = box.x + max(0.0, (box.width - side) / 2) if not beside and box.height is not None else box.x
+        marks.extend(_waffle_cells(spans, 0, 100, 10, x0, box.y, cell, 3.0, empty, theme))
         grid_height = side
-        legend_x = box.x + side + 24 if box.width >= 420 else box.x
-        legend_y = box.y if box.width >= 420 else box.y + side + 16
+        legend_x = box.x + side + 24 if beside else x0
+        legend_y = box.y if beside else box.y + side + 16
     else:
         wide = box.width >= 520
         side = min(300.0, box.width * (0.42 if wide else 0.9))
@@ -2198,7 +2334,8 @@ def plot_circles(reading: "Reading", theme: "ChartTheme", box: "Box") -> "Plot":
     natural = 110.0
     radius = natural
     if box.height is not None:
-        radius = min(radius, max(30.0, (box.height - 20) / 2))
+        # a frame of fixed size: as tall as it lets them be
+        radius = max(30.0, (box.height - 20) / 2)
     for _ in range(3):
         outside = [ratio * radius < 38 for ratio in ratios]
         need = sum(2 * ratio * radius for ratio in ratios) + sum(label_width + 22 for out in outside if out) + \
@@ -2269,6 +2406,10 @@ def plot_circles(reading: "Reading", theme: "ChartTheme", box: "Box") -> "Plot":
         marks.append(nc.Group(tuple(group), said))
         lines.append(said)
     height = max(label_bottoms + [cy + radius]) - box.y + 4
+    # the circles and their words stand in the middle of the width
+    slack = box.width - (x - 28 - box.x)
+    if slack > 1:
+        marks = [shifted(mark, slack / 2, 0) for mark in marks]
     marks, height = centred(marks, height, box)
     notes = ["Areas to scale."]
     if left_out:

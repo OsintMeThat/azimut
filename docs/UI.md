@@ -7121,7 +7121,9 @@ bookmark of the case, titled from its address, nothing fetched. A note with a re
 image says its host is contacted on every open.
 
 **Citations.** A chip or a written link, hovered a moment or with the cursor resting
-inside it, shows a card under it of what the case knows of what it cites
+inside a link or right next to a chip (just after it, or just before it when no link
+ends there; the drawn page steps over a chip whole), shows a card under it of what the
+case knows of what it cites
 (`lib/notes/editor/citationCard.js`): its kind, site and name, a picture's or a proof's
 thumbnail, then **Posted**, **By**, **Seen** (*Made* for a proof, *Captured* for a map
 capture), **Archived** with the copy's day and host, the SHA-256 of a file, and how
@@ -7138,10 +7140,10 @@ for a link, told the note and the words of its links), **Edit link** (the Link f
 on the drawn page) and, for a page the case lacks, **Bookmark it**, which files it, seen
 that day, and leaves the note as written. The card fetches nothing, and a page opens only on
 a press. It reads the same in a drawn table or aligned block and in the raw Markdown,
-over `[[entity:…|…]]` and `[words](https://…)`. With the cursor in it, Tab walks into
+over `[[entity:…|…]]` and `[words](https://…)`. With the cursor at it, Tab walks into
 its actions, the arrows along them, and Escape gives the keys back; a screen reader is
-told it is there. It goes when the pointer leaves it, the cursor leaves the link, or
-typing starts.
+told it is there. It goes when the pointer leaves it, the cursor leaves the link or the
+chip, or typing starts.
 
 **Blocks.** Every block of the drawn page (a paragraph, a heading, a list, a quote, a
 callout, a picture, a table, a diagram, an aligned or corner block, steps, a story, a
@@ -7505,7 +7507,8 @@ the kind it is drawn as.
 A chart is chosen by its picture. *Chart* in a table's grid bar, or `/` › *Chart* in
 Figures, shows every kind the table fits, each already drawn from its real rows
 (`POST /notes/figure/kinds`, `engine/notes_chart_picker.py`): rows counted unless one
-column holds whole numbers (a column of percentages or row numbers never is), bars split by
+column holds whole numbers (a column of percentages, confidences, ratios or row numbers never
+is), bars split by
 the first column of words, stacked and parts kinds by the column of grades first. The kind
 picked is written under the table, or where `/` was typed: its kind, the title its data
 proposes (*at least* when the count is a floor, *rows* when nothing names them), its
@@ -7513,18 +7516,35 @@ columns, `from:` and the table's rows copied in, as one Undo step, and it stands
 `from: note:<id>#<heading>` names the first table under that heading, `#<heading>/2` the
 second, `#/2` the second of the note; a chart's own rows never count. `/` › *Chart* asks
 which table when the note holds several, and with none starts a small table to fill, the
-grid's Chart button then one press away. In the raw Markdown the block is its lines.
+grid's Chart button then one press away. *Copy rows from another note or a sheet* stands
+beside the note's tables, under the kind picker of its one table, and with none beside the
+small table: it lists the case's other notes' tables by heading and note, then its sheets
+(`GET /notes/figure/sources`), and the one picked shows the kinds its rows fit; the chart is
+written with those rows and `from:` naming them (`sheet:<id>` for a sheet, its row keys left
+out). A case with no other table writes the small table at once. In the raw Markdown the
+block is its lines.
 
 The chart is drawn as the server draws it, kept by its text. Its bar: **Kind** (the
 picker again, its title, columns and rows kept; a kind of parts writes its column as its
 `by`), **Settings** (on the chart, between its bar and its drawing: the title with the one
 the data proposes beside it, Count, By or Parts, Coloured by, Show, Style as Report, Book
-or Dark; a colour column stacks bars and columns, none makes them plain), **Read again**
-(only once the table of this note its rows came from changed, the editor comparing them as
-typed on the chart's own columns, in any order), **The numbers** (its rows, a line each,
+or Dark; a colour column stacks bars and columns, none makes them plain; the colours it
+chose on its own, the grades' ramp included, with *Keep these colours for the case*, the
+infographic builder's own press, its toast offering Undo since the case's palette is no
+step of the note and naming what the case could not take: a colour it names already, a
+name past 40 letters, past its 12 colours), **Read again**
+(only once the table its rows came from changed, compared on the chart's own columns, in any
+order: a table of this note as it is typed, another note's table or a sheet as the server
+reads it, `POST /notes/figure/rows`, asked again when The numbers open), **The numbers** (its rows, a line each,
 whether they still match, *Go to the table* and *Edit them as text*) and **Export** (a
 picture for X, 4:5, 1:1, the PDF page, or an SVG, downloaded with its title as its name).
 What the check says shows under it, each fix one press (*Add “at least” to the title*).
+With no `count:` line a chart sums its one column of amounts and the check names it, one
+press writing it; a column read as shares (a `%`, a confidence, a ratio, a rate, by its header
+or its cells) is never summed on its own, so the rows are counted and the check says why.
+A picture of fixed size (X, 4:5, 1:1) is filled: pictograms as large as it lets them be,
+silhouette rows in two columns when a wide frame cannot hold them in one, a segmented bar
+thicker, a waffle's legend under it in a tall frame, circles and a pie in the middle.
 For pictograms and silhouette rows the settings add an **Icon** row (`chartIcons.js`):
 **One for all** is one button showing the chart's icon; **One per category** gives each
 part or row its own, written as `icons: Streit Cougar = own:…, Al-Wahsh = armoured

@@ -43,6 +43,7 @@ import {
   tableStartingAt, tablesOf, wholeTables,
 } from './gridEdits.js';
 import { button, openMenu, openPopover } from './gridMenu.js';
+import { heldHeight, holdHeight, moveHeight, releaseHeight } from './heights.js';
 import { ChipWidget } from './inline.js';
 import { chooseTableFile, cutSaid, pasteAsTable, pastedTable, readTableFile, sizeSaid } from './pasteTable.js';
 import { openSource, settle } from './ranges.js';
@@ -1181,6 +1182,7 @@ export class GridWidget extends BlockWidget {
     // eslint-disable-next-line no-new
     new Grid(box, this, view);
     markPicked(box, this.picked);
+    holdHeight(box, this);
     return box;
   }
 
@@ -1189,6 +1191,7 @@ export class GridWidget extends BlockWidget {
     if (previous.same(this)) dom.grid.widget = this;
     else dom.grid.update(this);
     markPicked(dom, this.picked);
+    moveHeight(dom, this);
     return true;
   }
 
@@ -1197,10 +1200,20 @@ export class GridWidget extends BlockWidget {
   }
 
   destroy(dom) {
+    releaseHeight(dom);
     dom.grid?.destroy();
   }
 
+  /** A table folded or shown whole is another height. */
+  heightKey() {
+    this.gridKey ??= `${super.heightKey()}${this.whole ? ' whole' : ''}`;
+    return this.gridKey;
+  }
+
+  /** The height it was last drawn at, else rows of 34 px. */
   get estimatedHeight() {
+    const held = heldHeight(this);
+    if (held) return held;
     const rows = rowsShown(this.table.rows.length, this.whole);
     return 60 + 34 * (rows + 1) + (this.table.rows.length > FOLD_PAST ? 34 : 0);
   }

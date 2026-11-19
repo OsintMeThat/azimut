@@ -118,6 +118,16 @@ describe('a pictogram chart’s icons', () => {
     expect(text()).toBe(NOTE);
   });
 
+  it('closes the picker when the settings close', async () => {
+    await opened();
+    press(card().querySelector('.cm-chart-icons [data-key="Icon"]'));
+    expect(picker()).not.toBeNull();
+    // Escape on the card closes it without a press elsewhere that would close the picker anyway
+    card().dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }));
+    expect(card().hidden).toBe(true);
+    expect(picker()).toBeNull();
+  });
+
   it('writes the app’s badge by its name', async () => {
     await opened();
     press(card().querySelector('.cm-chart-icons [data-key="Icon"]'));

@@ -388,6 +388,8 @@ export function openGlyphPicker(anchor, { title = 'Icon', current = null, none =
 
   // under its button, or over it when there is more room there, never taller than the room
   const place = () => {
+    // a card drawn again under it leaves the picker where it stands
+    if (!anchor.isConnected) return;
     const box = anchor.getBoundingClientRect();
     const below = window.innerHeight - box.bottom - 10;
     const above = box.top - 10;
@@ -460,7 +462,8 @@ function namesColumn(chart, word) {
 /**
  * The Icon row, and the Flag row for silhouette rows, drawn in `host` from `state()` (`{
  * chart, drawn }`, as the card reads it); `write(changes)` writes one choice. Hidden for a
- * kind that draws no glyph. Answers `{ node, refresh }`.
+ * kind that draws no glyph. Answers `{ node, refresh, destroy }`, `destroy` closing the
+ * picker it opened, as its card closes.
  */
 export function chartIcons(host, { state, write, library = iconLibrary }) {
   host.classList.add('cm-chart-icons');
@@ -471,7 +474,11 @@ export function chartIcons(host, { state, write, library = iconLibrary }) {
   let flagsOpen = false;
   let asked = false;
 
-  const open = (anchor, title, current, onPick, none = '') => openGlyphPicker(anchor, { title, current, none, library, onPick });
+  /** The close of the picker this card opened last. */
+  let picker = null;
+  const open = (anchor, title, current, onPick, none = '') => {
+    picker = openGlyphPicker(anchor, { title, current, none, library, onPick });
+  };
 
   function iconRow(chart, values) {
     const written = setting(chart, 'icon');
@@ -610,5 +617,12 @@ export function chartIcons(host, { state, write, library = iconLibrary }) {
     if (focused) [...host.querySelectorAll('[data-key]')].find((node) => node.dataset.key === focused)?.focus({ preventScroll: true });
   }
 
-  return { node: host, refresh };
+  return {
+    node: host,
+    refresh,
+    destroy() {
+      picker?.(false);
+      picker = null;
+    },
+  };
 }

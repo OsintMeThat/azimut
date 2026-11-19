@@ -53,6 +53,7 @@ import { citationCard } from './editor/citationCard.js';
 import { pageClipboard } from './editor/clipboard.js';
 import { drawn, rawField, rawHighlight, typeOverHints } from './editor/decorations.js';
 import { handleExtensions } from './editor/handle.js';
+import { steadyLines } from './editor/heights.js';
 import './editor/kinds.js';
 import { insertMenu, insertPlus } from './editor/insertMenu.js';
 import { lineKeys } from './editor/lineKeys.js';
@@ -143,6 +144,8 @@ export function noteExtensions({ handlers = {}, placeholder = '', readOnly = fal
     spots,
     landed,
     drawing.of(mode === 'markdown' ? rawMode : drawnMode),
+    // a short heading, code or table never sets the line height the editor estimates the note by
+    steadyLines,
     history(),
     drawSelection(),
     dropCursor(),

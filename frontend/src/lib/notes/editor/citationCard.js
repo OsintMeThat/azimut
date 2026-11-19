@@ -12,9 +12,10 @@
  * `source(id)` for a chip (`/sources/item`), `lookup(url, words)` for a link, read by
  * the Link field's own adapter (`lookupAddress`). A page opens only on a press.
  *
- * Keyboard: the card shows once the cursor rests inside a chip's or a link's text;
- * Tab then walks into its actions, the arrows along them, and Escape closes it and
- * gives the keys back to the note. The raw Markdown shows the same card over
+ * Keyboard: the card shows once the cursor rests inside a link's text, or right next
+ * to a chip, which the drawn page steps over whole (`caretCitation`); Tab then walks
+ * into its actions, the arrows along them, and Escape closes it and gives the keys
+ * back to the note. The raw Markdown shows the same card over
  * `[[entity:…|…]]` and `[words](https://…)`, Edit link aside, since the source is
  * already there to edit. In a drawn table or aligned block, hovering a chip or a link
  * shows it too.
@@ -95,6 +96,26 @@ export function citationAt(state, pos, { inside = false } = {}) {
   const link = linkAt(state, { from: pos, to: pos });
   if (!link || !WEB.test(link.url) || !within(link.from, link.to)) return null;
   return { kind: 'link', from: link.from, to: link.to, url: link.url, words: shownWords(link.words).trim() };
+}
+
+/**
+ * The citation a resting cursor shows the card of: one it stands inside, or, on the drawn
+ * page where a chip is one piece the cursor steps over, a chip right next to it: just
+ * after it, or just before it when no citation ends there too.
+ */
+export function caretCitation(state, pos) {
+  const inside = citationAt(state, pos, { inside: true });
+  if (inside || !state.field(drawn, false)) return inside;
+  const line = state.doc.lineAt(pos);
+  const chips = findReferences(line.text, line.from).filter((one) => one.kind === 'entity' && (one.to === pos || one.from === pos));
+  const chip = chips.find((one) => one.to === pos) ?? (citationAt(state, pos)?.kind === 'link' ? null : chips.find((one) => one.from === pos));
+  if (!chip || inCode(state, chip.from)) return null;
+  return { kind: 'chip', from: chip.from, to: chip.to, id: chip.id, label: chip.label };
+}
+
+/** Whether the cursor at `pos` still stands by `target`: inside a link, inside or at the edges of a chip. */
+function standsBy(target, pos) {
+  return target.kind === 'chip' ? pos >= target.from && pos <= target.to : pos > target.from && pos < target.to;
 }
 
 /** What stands for a citation, so two reads of the same one are known as one. */
@@ -318,7 +339,7 @@ const cardState = StateField.define({
       if (transaction.docChanged) return null;
       if (value.by === 'caret' && transaction.selection) {
         const range = transaction.state.selection.main;
-        if (!range.empty || range.head <= value.target.from || range.head >= value.target.to) return null;
+        if (!range.empty || !standsBy(value.target, range.head)) return null;
       }
       return value;
     }
@@ -665,7 +686,7 @@ const watch = ViewPlugin.fromClass(class {
     if (!update.selectionSet) return;
     const { state } = update;
     const range = state.selection.main;
-    const target = state.field(focused, false) && range.empty ? citationAt(state, range.head, { inside: true }) : null;
+    const target = state.field(focused, false) && range.empty ? caretCitation(state, range.head) : null;
     if (!target) {
       if (this.wait?.by === 'caret') this.cancel();
       return;

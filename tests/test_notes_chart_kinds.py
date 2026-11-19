@@ -17,7 +17,7 @@ from pathlib import Path
 from xml.etree import ElementTree
 
 import pytest
-from PIL import Image, ImageDraw
+from PIL import Image, ImageChops, ImageDraw
 
 from azimut.engine import iconlibrary, notes_chart_kinds as kinds, notes_charts as nc, notes_html
 
@@ -902,3 +902,101 @@ def test_a_jpeg_is_drawn_and_what_is_no_picture_is_left_out(monkeypatch):
     monkeypatch.setattr(nc, "MAX_PICTURE_PIXELS", 100)
     huge = _picture_chart(nc.Picture(0, 0, 100, 100, _png_icon()))
     assert _image(nc.render_png(huge, 200)).getpixel((50, 50)) == (255, 255, 255)
+
+
+# -- a picture of fixed size is filled ---------------------------------------------------------------------
+
+
+FRAMED = {
+    "bars": "kind: bars\ntitle: At least 60 vehicles, by model\ncount: rows\nby: Model\nsource: register\n",
+    "stacked columns": "kind: stacked columns\ntitle: At least 51\ncount: rows\nby: Group\ncolour by: Grade\nsource: x\n",
+    "pie": "kind: pie\ntitle: Where they were made\n" + MADE_IN,
+    "donut": "kind: donut\ntitle: Where they were made\n" + MADE_IN,
+    "segments": "kind: segments\ntitle: How sure we are\ncount: rows\ncolour by: Grade\nsource: register\n",
+    "pictograms": "kind: pictograms\ntitle: What was lost\ncount: rows\ncolour by: Grade\nicon: armoured vehicle\n"
+                  "source: register\n",
+    "a few pictograms": "kind: pictograms\ntitle: Twelve\nicon: armoured vehicle\nsource: x\n| Grade | Count |\n"
+                        "| --- | --- |\n| Confirmed | 8 |\n| Almost sure | 4 |",
+    "silhouette rows": "kind: silhouette rows\ntitle: By model\ncount: rows\nby: Model\ncolour by: Grade\n"
+                       "icon: armoured vehicle\nsource: register\n",
+    "a few silhouette rows": "kind: silhouette rows\ntitle: By maker\nicon: armoured vehicle\n" + MADE_IN,
+    "waffle": "kind: waffle\ntitle: At least 60 vehicles, by grade\ncount: rows\nby: Grade\nsource: register\n",
+    "key figures": "kind: key figures\n" + FIGURES,
+    "timeline": "kind: timeline\n" + WHEN,
+    "line": LINE,
+    "circles": CIRCLES,
+}
+
+
+def _framed(name: str) -> str:
+    body = FRAMED[name]
+    return body + _register() if body.endswith("\n") else body
+
+
+def _inked_tiles(data: bytes, across: int = 12) -> float:
+    """The share of a picture's tiles, under its title band and over its foot, that hold ink."""
+    image = _image(data)
+    paper = Image.new("RGB", image.size, image.getpixel((2, 2)))
+    ink = ImageChops.difference(image, paper).convert("L").point(lambda value: 255 if value > 24 else 0)
+    width, height = image.size
+    tiles = [(column, row) for column in range(across) for row in range(3, across - 1)]
+    inked = sum(1 for column, row in tiles if ink.crop((column * width // across, row * height // across,
+                                                        (column + 1) * width // across,
+                                                        (row + 1) * height // across)).getbbox())
+    return inked / len(tiles)
+
+
+@pytest.mark.parametrize("size", ["x", "portrait", "square"])
+@pytest.mark.parametrize("name", list(FRAMED))
+def test_every_kind_uses_a_picture_of_fixed_size_and_leaves_no_half_empty(name, size):
+    data = nc.render(_block(_framed(name)), size, title=True)
+    assert _inked_tiles(data) >= 0.45
+
+
+def test_pictograms_in_a_frame_are_as_large_as_it_lets_them_be_rows_of_ten_kept_when_cheap():
+    assert kinds.glyph_grid(60, 1.6, 520, 220)[0] == 10
+    across, height = kinds.glyph_grid(12, 1.6, 440, 560)
+    assert across in (3, 4) and height > 2 * 24
+    # every glyph inside the frame: never cut
+    for glyphs, width, frame in ((12, 440, 560), (60, 520, 220), (120, 440, 440), (7, 520, 150)):
+        across, height = kinds.glyph_grid(glyphs, 1.6, width, frame)
+        assert kinds._grid_width(across, height, 1.6) <= width + 1e-6
+        assert (math.ceil(glyphs / across) - 1) * height * kinds.GLYPH_LINE + height <= frame + 1e-6
+
+
+def test_dots_at_x_fill_the_width_rather_than_leave_its_right_half_empty():
+    body = "kind: pictograms\ntitle: What was lost\ncount: rows\ncolour by: Grade\nsource: register\n" + _register()
+    image = _image(nc.render(_block(body), "x", title=True))
+    paper = Image.new("RGB", image.size, image.getpixel((2, 2)))
+    ink = ImageChops.difference(image, paper).convert("L").point(lambda value: 255 if value > 24 else 0)
+    width, height = image.size
+    left, _, right, _ = ink.crop((0, int(height * 0.3), width, int(height * 0.85))).getbbox()
+    assert right / width > 0.85 and left / width < 0.15
+
+
+def test_silhouette_rows_take_two_columns_in_a_wide_frame_they_overflow():
+    body = _framed("silhouette rows")
+    page = nc.layout(_block(body), width=640)
+    assert page.facts["columns"] == 1
+    wide = nc.layout(_block(body), width=560, height=315)
+    assert wide.facts["columns"] == 2 and sum(wide.facts["glyphs"]) == 60
+    names = {mark.text: mark.x for mark in _flat(wide) if isinstance(mark, nc.Text)}
+    assert names["BMC Kirpi II"] > names["Streit Cougar"] + 200
+
+
+def test_flags_given_by_name_keep_their_slot_in_both_columns_of_a_wide_frame(tmp_workspace):
+    flag = iconlibrary.add_pngs([{"png": _png_icon((0, 115, 47, 255), (90, 60)), "name": "UAE", "mode": "image"}])["added"][0]["key"]
+    body = _framed("silhouette rows").replace("source:", f"flags: Streit Cougar = own:{flag}, BMC Kirpi II = own:{flag}\nsource:")
+    wide = nc.layout(_block(body), width=560, height=315)
+    assert wide.facts["columns"] == 2
+    texts = {mark.text: mark for mark in _flat(wide) if isinstance(mark, nc.Text)}
+    flags = [mark for mark in _flat(wide) if isinstance(mark, nc.Picture)]
+    assert len(flags) == 2
+    # a flag in each column, in the slot before its row's name, and every name of a column lined up
+    assert len({round(mark.x) for mark in flags}) == 2
+    for name in ("Streit Cougar", "BMC Kirpi II"):
+        assert any(texts[name].x - 26 == pytest.approx(mark.x) and mark.x + mark.w < texts[name].x for mark in flags)
+    rows = {category.name for category in nc.read(_block(body)).categories}
+    left = {mark.x for name, mark in texts.items() if name in rows and mark.x < texts["BMC Kirpi II"].x - 100}
+    assert left == {texts["Streit Cougar"].x}
+    assert not _messages(wide)

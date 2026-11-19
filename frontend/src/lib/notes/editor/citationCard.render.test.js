@@ -4,7 +4,7 @@ import { EditorSelection, EditorState } from '@codemirror/state';
 import { EditorView } from '@codemirror/view';
 
 import { noteExtensions, setNoteCase } from '../liveMarkdown.js';
-import { CARET_MS, HOVER_MS, LEAVE_MS, byLine, cardModel, citationAt, linkWords, longDay, shownCard } from './citationCard.js';
+import { CARET_MS, HOVER_MS, LEAVE_MS, byLine, cardModel, caretCitation, citationAt, linkWords, longDay, shownCard } from './citationCard.js';
 import { citedTimes } from './linkField.js';
 import { setFocused } from './state.js';
 
@@ -387,6 +387,47 @@ describe('the keyboard', () => {
     await settle(CARET_MS + 10);
     view.dispatch({ selection: EditorSelection.cursor(text.length) });
     expect(card()).toBeNull();
+  });
+
+  it('shows a chip’s card with the cursor right next to it, the chip being one piece the cursor steps over', async () => {
+    const text = 'See [[entity:p53|YEMEN Proof 53]] then.\n[[entity:q1|Quay north]] stands.';
+    editor(text, { at: text.length });
+    const chip = text.indexOf('[[entity:p53');
+    const end = text.indexOf(']]', chip) + 2;
+    // just after the chip
+    view.dispatch({ effects: setFocused.of(true) });
+    view.dispatch({ selection: EditorSelection.cursor(end) });
+    await settle(CARET_MS + 10);
+    expect(shownCard(view.state)).toMatchObject({ by: 'caret', target: { kind: 'chip', id: 'p53' } });
+    expect(view.dom.querySelector('.cm-announced')?.textContent).toMatch(/^YEMEN Proof 53\..*Tab for what to do with it/);
+    view.contentDOM.dispatchEvent(new KeyboardEvent('keydown', { key: 'Tab', bubbles: true }));
+    expect(document.activeElement).toBe(action('open'));
+    action('open').dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+    expect(card()).toBeNull();
+    // the cursor steps over it to just before it: the same card, kept while it stands by the chip
+    view.dispatch({ selection: EditorSelection.cursor(chip) });
+    await settle(CARET_MS + 10);
+    expect(shownCard(view.state).target.id).toBe('p53');
+    view.dispatch({ selection: EditorSelection.cursor(end) });
+    expect(shownCard(view.state).target.id).toBe('p53');
+    // a word away, it goes
+    view.dispatch({ selection: EditorSelection.cursor(end + 3) });
+    expect(card()).toBeNull();
+    // a chip at the start of a line, the cursor just before it
+    view.dispatch({ selection: EditorSelection.cursor(text.indexOf('[[entity:q1')) });
+    await settle(CARET_MS + 10);
+    expect(shownCard(view.state).target.id).toBe('q1');
+  });
+
+  it('reads the chip just behind the cursor first, and leaves the raw Markdown’s edges to writing', () => {
+    const text = 'Two [[entity:p53|YEMEN Proof 53]][[entity:q1|Quay north]] side by side.';
+    const drawnState = EditorState.create({ doc: text, extensions: noteExtensions() });
+    const between = text.indexOf('[[entity:q1');
+    expect(caretCitation(drawnState, between)).toMatchObject({ kind: 'chip', id: 'p53' });
+    expect(caretCitation(drawnState, text.indexOf(' side') + 3)).toBeNull();
+    const raw = EditorState.create({ doc: text, extensions: noteExtensions({ mode: 'markdown' }) });
+    expect(caretCitation(raw, between)).toBeNull();
+    expect(caretCitation(raw, between + 4)).toMatchObject({ kind: 'chip', id: 'q1' });
   });
 
   it('works the same in the raw Markdown, Edit link aside', async () => {

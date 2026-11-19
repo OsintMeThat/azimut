@@ -138,6 +138,7 @@
   const cardText = $derived(carded >= 0 && block ? panelText(block.source, carded) : '');
   function closeCard() {
     card?.commit();
+    card?.destroy();
     card = null;
     carded = -1;
     cardDrawn = null;
@@ -155,8 +156,9 @@
     const index = carded;
     if (!host || index < 0) return;
     // made once per panel opened: what it reads later is read when it is drawn again, not here
+    let made = null;
     untrack(() => {
-      card = chartSettings(host, {
+      made = card = chartSettings(host, {
         state: () => {
           const now = block ? panelText(block.source, index) : '';
           return { chart: readChart(now), drawn: cardDrawn };
@@ -165,6 +167,8 @@
       });
       card.focus();
     });
+    // a picker the card opened goes with it, the builder closed included
+    return () => made?.destroy();
   });
   $effect(() => {
     const now = cardText;

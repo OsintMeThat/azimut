@@ -164,6 +164,14 @@ describe('the card’s rows', () => {
   }
   const seg = (host, group, label) => [...host.querySelector(`[aria-label="${group}"]`).querySelectorAll('button')].find((node) => node.textContent === label);
 
+  it('closes the picker it opened as its card closes', () => {
+    const { host, made } = rows({ lines: ['kind: pictograms'] });
+    host.querySelector('[data-key="Icon"]').click();
+    expect(document.querySelector('.cm-glyph-picker')).not.toBeNull();
+    made.destroy();
+    expect(document.querySelector('.cm-glyph-picker')).toBeNull();
+  });
+
   it('is not there for a kind that draws no glyph', () => {
     const { host } = rows({ kind: { name: 'bars', keys: [] } });
     expect(host.hidden).toBe(true);

@@ -38,7 +38,7 @@ from datetime import datetime, timezone
 from pathlib import PurePosixPath
 from typing import TYPE_CHECKING, Any
 
-from . import notes_chart_kinds, notes_chart_picker, notes_charts
+from . import notelook, notes_chart_kinds, notes_chart_picker, notes_charts
 from .notelook import DEFAULT as DEFAULT_LOOK
 from .notelook import NoteLook
 from .notes_charts import ChartBlock, ChartTheme, Layout
@@ -225,6 +225,134 @@ def origin_rows(case: "Case", origin: str) -> tuple[str, list[str], list[list[st
         rows = [[notes_charts.plain_cell(str(cell)) for cell in row] for row in sheet.get("rows") or []]
         return str(sheet.get("title") or "Sheet"), headers, rows
     return None
+
+
+def origin_table(case: "Case", origin: str) -> tuple[str, str] | None:
+    """What ``from:`` names, as ``(its name, the table's Markdown)``: a note's table as it is
+    written there, chips and links kept, or a sheet's rows written as a table, its row keys
+    left out. What *Read again* writes into a chart whose rows came from elsewhere. None when
+    it is no longer in the case or names nothing this reads."""
+    kind, _, rest = origin.strip().partition(":")
+    kind = kind.strip().casefold()
+    if kind == "note":
+        from . import notes_markdown
+
+        ident, _, anchor = rest.strip().partition("#")
+        found = notes_markdown.read_note(case, ident.strip()) if ident.strip() else None
+        table = _table_under(found[1], anchor.strip()) if found is not None else None
+        return (found[0], table.text()) if found is not None and table is not None else None
+    if kind == "sheet":
+        from . import sheets
+
+        try:
+            sheet = sheets.read(case, rest.strip())
+        except Exception:  # a sheet gone, or a record that is no sheet
+            return None
+        columns = [str(cell) for cell in sheet.get("columns") or []]
+        kept = [index for index, name in enumerate(columns) if name.strip().casefold() != sheets.ID_COLUMN]
+        if not kept:
+            return None
+        rows = [[str(row[index]) if index < len(row) else "" for index in kept] for row in sheet.get("rows") or []]
+        return (str(sheet.get("title") or "Sheet"),
+                notes_charts.table_text([columns[index] for index in kept], rows[:notes_charts.MAX_ROWS]))
+    return None
+
+
+def note_tables(text: str) -> list[tuple[str, str, notes_charts.Table]]:
+    """A note's tables as ``from:`` names them, in order: ``(anchor, the words of the heading
+    above, the table)``. A chart's own rows and code are never one; the anchor is the one the
+    editor writes (``editor/chartText.js``'s ``anchorFor``)."""
+    lines = str(text or "").split("\n")
+    heads = [(index, len(heading.group(1)), slug(heading.group(2)), notes_charts.plain_cell(heading.group(2)))
+             for index, heading in _headings(lines)]
+    spans: list[tuple[int, int]] = []
+    fenced = charted = False
+    index = 0
+    while index < len(lines):
+        line = lines[index]
+        if re.match(r"^\s*(```|~~~)", line):
+            fenced = not fenced
+        elif not fenced and CHART_OPEN.match(line):
+            charted = True
+        elif charted and re.match(r"^:::[ \t]*$", line):
+            charted = False
+        elif not fenced and not charted and line.strip().startswith("|"):
+            end = index
+            while end + 1 < len(lines) and lines[end + 1].strip().startswith("|"):
+                end += 1
+            if end > index and notes_charts.TABLE_RULE.match(lines[index + 1].strip()):
+                spans.append((index, end))
+            index = end + 1
+            continue
+        index += 1
+
+    def stretch(name: str) -> tuple[int, int] | None:
+        if not name:
+            return 0, len(lines)
+        at = next((position for position, head in enumerate(heads) if head[2] == name), None)
+        if at is None:
+            return None
+        end = next((head[0] for head in heads[at + 1:] if head[1] <= heads[at][1]), len(lines))
+        return heads[at][0] + 1, end
+
+    out: list[tuple[str, str, notes_charts.Table]] = []
+    for start, end in spans:
+        above = [head for head in heads if head[0] < start]
+        anchor = ""
+        for name in ([above[-1][2], ""] if above else [""]):
+            within = stretch(name)
+            if within is None:
+                continue
+            here = [span[0] for span in spans if within[0] <= span[0] < within[1]]
+            if start not in here:
+                continue
+            nth = here.index(start)
+            anchor = (name if nth == 0 else f"{name}/{nth + 1}") if name else ("" if nth == 0 else f"/{nth + 1}")
+            break
+        table = notes_charts.parse_block("\n".join(lines[start:end + 1])).table
+        if table is not None and table.headers:
+            out.append((anchor, above[-1][3] if above else "", table))
+    return out
+
+
+#: How many notes *Copy rows from…* reads, and how many tables and sheets it lists.
+MAX_SOURCE_NOTES = 200
+MAX_SOURCES = 150
+
+
+def table_sources(case: "Case", *, besides: str = "") -> dict[str, list[dict[str, Any]]]:
+    """What a chart's rows may be copied from (*Copy rows from…*): each note's tables but
+    ``besides``'s (the note the chart goes in, whose tables its own picker offers), and each
+    sheet, each with the ``from:`` that names it, its rows and its columns."""
+    from . import notes_markdown, sheets
+
+    tables: list[dict[str, Any]] = []
+    notes = [(notelook.CASE_NOTE, "Case notes")]
+    cursor: str | None = None
+    while len(notes) < MAX_SOURCE_NOTES:
+        page = case.page_entities(types=["note"], limit=200, cursor=cursor)
+        notes.extend((str(entity["id"]), str(entity.get("label") or "Note")) for entity in page["items"])
+        cursor = page.get("next_cursor")
+        if not cursor:
+            break
+    for ident, title in notes[:MAX_SOURCE_NOTES]:
+        if ident == besides or len(tables) >= MAX_SOURCES:
+            continue
+        found = notes_markdown.read_note(case, ident)
+        if found is None:
+            continue
+        for anchor, heading, table in note_tables(found[1]):
+            tables.append({"origin": f"note:{ident}" + (f"#{anchor}" if anchor else ""), "note": title,
+                           "heading": heading, "rows": len(table.rows), "columns": table.headers[:8]})
+    listed: list[dict[str, Any]] = []
+    for entity in case.list_entities():
+        if entity.get("type") != "sheet" or len(listed) >= MAX_SOURCES:
+            continue
+        summary = sheets.summary(case, entity)
+        columns = [str(name) for name in summary.get("headings") or [] if str(name).strip().casefold() != sheets.ID_COLUMN]
+        listed.append({"origin": f"sheet:{entity['id']}", "title": str(entity.get("label") or "Sheet"),
+                       "rows": int(summary.get("rows") or 0), "columns": columns[:8]})
+    return {"tables": tables[:MAX_SOURCES], "sheets": listed}
 
 
 def origin_known(origin: str) -> bool:

@@ -508,3 +508,82 @@ def test_the_figure_route_writes_nothing(client):
     after = sorted(path.relative_to(case.path) for path in case.path.rglob("*") if path.is_file()
                    if path.suffix not in (".db-wal", ".db-shm"))
     assert [path for path in after if path not in before] == []
+
+
+# -- Read again and Copy rows from…, for rows that came from elsewhere --------------------------------
+
+
+def test_the_rows_route_answers_another_notes_table_as_written_and_a_sheets_rows(client):
+    cid, case = _case(client)
+    note = make_note(client, cid, title="Register",
+                     content="# Register\n\n## Count\n\n| Model | At least |\n| --- | ---: |\n| [[entity:x1]] | 3 |\n")
+    answer = client.post(f"/api/cases/{cid}/notes/figure/rows", json={"origin": f"note:{note['id']}#count"})
+    assert answer.json() == {"found": True, "name": "Register",
+                             "text": "| Model | At least |\n| --- | ---: |\n| [[entity:x1]] | 3 |"}
+    sheet = sheets_engine.create(case, "Sightings", ["Model", "Seen"], [["Cougar | B6", "2"], ["M-ATV", "1"]])
+    rows = client.post(f"/api/cases/{cid}/notes/figure/rows", json={"origin": f"sheet:{sheet['id']}"}).json()
+    assert rows["found"] and rows["name"] == "Sightings"
+    # the sheet's own row keys stay out, a | in a cell is escaped
+    assert rows["text"] == "| Model | Seen |\n| --- | --- |\n| Cougar \\| B6 | 2 |\n| M-ATV | 1 |"
+    gone = client.post(f"/api/cases/{cid}/notes/figure/rows", json={"origin": "note:nothere#count"}).json()
+    assert gone == {"found": False, "name": "", "text": ""}
+    refused = client.post(f"/api/cases/{cid}/notes/figure/rows", json={"origin": "layer:Vehicles"})
+    assert refused.status_code == 422
+
+
+def test_the_sources_route_lists_other_notes_tables_by_their_from_and_the_sheets(client):
+    cid, case = _case(client)
+    here = make_note(client, cid, title="Here", content="| a |\n| --- |\n| 1 |\n")
+    other = make_note(client, cid, title="Register", content=(
+        "# Register\n\n| x |\n| --- |\n| 1 |\n\n## Count\n\n| Model | At least |\n| --- | --- |\n| A | 3 |\n| B | 2 |\n\n"
+        "| y |\n| --- |\n| 2 |\n\n::: chart\n| q |\n| --- |\n| 9 |\n:::\n"))
+    sheet = sheets_engine.create(case, "Sightings", ["Model", "Seen"], [["Cougar", "2"]])
+    answer = client.get(f"/api/cases/{cid}/notes/figure/sources", params={"note": here["id"]}).json()
+    assert answer["tables"] == [
+        {"origin": f"note:{other['id']}#register", "note": "Register", "heading": "Register", "rows": 1, "columns": ["x"]},
+        {"origin": f"note:{other['id']}#count", "note": "Register", "heading": "Count", "rows": 2,
+         "columns": ["Model", "At least"]},
+        {"origin": f"note:{other['id']}#count/2", "note": "Register", "heading": "Count", "rows": 1, "columns": ["y"]},
+    ]
+    assert answer["sheets"] == [{"origin": f"sheet:{sheet['id']}", "title": "Sightings", "rows": 1,
+                                 "columns": ["Model", "Seen"]}]
+    # each from: reads back the table it names
+    for item in answer["tables"]:
+        rows = client.post(f"/api/cases/{cid}/notes/figure/rows", json={"origin": item["origin"]}).json()
+        assert rows["text"].split("\n")[0] == "| " + " | ".join(item["columns"]) + " |"
+    assert client.get(f"/api/cases/{cid}/notes/figure/sources", params={"note": "../x"}).status_code == 422
+
+
+def test_a_tables_anchor_is_the_one_the_editor_writes():
+    text = ("# A\n\n| x |\n| --- |\n| 1 |\n\n## Register\n\n| y |\n| --- |\n| 2 |\n\n| w |\n| --- |\n| 3 |\n\n"
+            "## Register\n\n| v |\n| --- |\n| 4 |\n")
+    found = [(anchor, heading, table.headers) for anchor, heading, table in notecharts.note_tables(text)]
+    # the second "Register" is not the one its name finds: its table is named from the note's start
+    assert found == [("a", "A", ["x"]), ("register", "Register", ["y"]), ("register/2", "Register", ["w"]),
+                     ("/4", "Register", ["v"])]
+    for anchor, _, headers in found:
+        assert notecharts._table_under(text, anchor).headers == headers
+
+
+def test_the_figure_route_says_each_values_colour_and_where_it_came_from(client):
+    cid, _ = _case(client)
+    assert client.put(f"/api/cases/{cid}/layer-palette",
+                      json={"colours": [{"name": "Ours", "colour": "#009e73"}]}).status_code == 200
+    block = ("kind: stacked bars\ncount: Count\nby: Model\ncolour by: Side\nsource: x\n| Model | Side | Count |\n"
+             "| --- | --- | --- |\n| A | Ours | 2 |\n| B | Theirs | 1 |")
+    answer = client.post(f"/api/cases/{cid}/notes/figure", json={"text": block})
+    colours = json.loads(answer.headers["x-chart-colours"])
+    assert [(one["value"], one["origin"]) for one in colours] == [("Ours", "case"), ("Theirs", "order")]
+    assert colours[0]["colour"] == "#009e73" and re.fullmatch(r"#[0-9a-f]{6}", colours[1]["colour"])
+
+
+def test_the_editor_keeps_no_more_colours_and_no_longer_names_than_the_case_palette_takes():
+    from azimut.api import maplayers
+    from azimut.engine import layerediting
+
+    source = (Path(__file__).resolve().parents[1] / "frontend" / "src" / "lib" / "map" / "layerPalette.svelte.js").read_text(
+        encoding="utf-8")
+    name = next(meta.max_length for meta in maplayers.PaletteEntryIn.model_fields["name"].metadata
+                if hasattr(meta, "max_length"))
+    assert f"export const MAX_PALETTE = {layerediting.MAX_PALETTE};" in source
+    assert f"export const MAX_COLOUR_NAME = {name};" in source

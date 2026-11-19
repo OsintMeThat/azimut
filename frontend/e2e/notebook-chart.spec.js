@@ -28,7 +28,7 @@ function chartPage() {
 <html lang="en" dir="auto" data-look="plain" data-font="" data-edition="internal">
 <head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
 <meta http-equiv="Content-Security-Policy" content="default-src 'none'; img-src data:; media-src data:; font-src data:; style-src 'unsafe-inline'; script-src 'unsafe-inline'; base-uri 'none'; form-action 'none'">
-<title>Lead</title><style id="az-reader">${read('reader.css')}</style></head>
+<title>Lead</title><style id="az-reader">${read('reader.css')}${read('reader.chart.css')}</style></head>
 <body><header class="az-cover" data-cover="none"><h1 class="az-title">Lead</h1></header>
 <div class="az-page"><main class="az-body" id="main"><p>Seen at the quay.</p>
 ${FIGURE}<p>Most are Emirati-made.</p></main></div>

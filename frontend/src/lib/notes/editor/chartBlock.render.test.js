@@ -10,7 +10,7 @@ import { undo } from '@codemirror/commands';
  * with their one-press fixes, every choice one Undo step of exact bytes.
  */
 
-const server = vi.hoisted(() => ({ figure: null, kinds: null, asked: [] }));
+const server = vi.hoisted(() => ({ figure: null, kinds: null, rows: null, sources: null, palette: [], asked: [] }));
 vi.mock('../../api.js', async (original) => {
   const real = await original();
   return {
@@ -23,7 +23,16 @@ vi.mock('../../api.js', async (original) => {
       }),
       post: vi.fn(async (path, body) => {
         server.asked.push({ path, body });
-        return server.kinds(body);
+        return path.endsWith('/rows') ? server.rows(body) : server.kinds(body);
+      }),
+      get: vi.fn(async (path) => {
+        server.asked.push({ path });
+        return path.endsWith('/layer-palette') ? { colours: server.palette } : server.sources(path);
+      }),
+      put: vi.fn(async (path, body) => {
+        server.asked.push({ path, body });
+        server.palette = body.colours;
+        return { colours: body.colours, icons: [] };
       }),
     },
   };
@@ -31,6 +40,7 @@ vi.mock('../../api.js', async (original) => {
 
 const { focusedState, noteExtensions, setNoteCase, setNoteMode, startChart } = await import('../liveMarkdown.js');
 const { forgetDrawings } = await import('./chartFigure.js');
+const { keptSaid } = await import('./chartBlock.js');
 
 const TABLE = '| Model | Grade | At least |\n| --- | --- | ---: |\n| Streit Cougar | identified | 8 |\n| Al-Wahsh | almost sure | 2 |';
 const NOTE = `Who made them.\n\n## Count\n\n${TABLE}\n\nAfter.`;
@@ -55,7 +65,7 @@ const CHART = [
 const CHARTED = `Who made them.\n\n## Count\n\n${TABLE}\n\n${CHART}\n\nAfter.`;
 
 /** What the figure route answers: its drawing, and what the check says in its headers. */
-function answer({ checks = [], kind = STACKED, proposed = 'At least 10 vehicles, by model and grade', title = 'At least 10, by model and grade' } = {}) {
+function answer({ checks = [], kind = STACKED, proposed = 'At least 10 vehicles, by model and grade', title = 'At least 10, by model and grade', colours = [] } = {}) {
   return {
     data: new TextEncoder().encode(SVG).buffer,
     headers: new Headers({
@@ -66,6 +76,7 @@ function answer({ checks = [], kind = STACKED, proposed = 'At least 10 vehicles,
       'X-Note-Warning-Lines': JSON.stringify(checks.map((check) => check.line ?? null)),
       'X-Note-Warning-Kinds': JSON.stringify(checks.map((check) => check.kind ?? 'other')),
       'X-Note-Warning-Fixes': JSON.stringify(checks.map((check) => check.fix ?? [])),
+      'X-Chart-Colours': JSON.stringify(colours),
     }),
   };
 }
@@ -76,6 +87,8 @@ beforeEach(() => {
   server.asked = [];
   server.figure = () => answer();
   server.kinds = () => KINDS;
+  server.rows = () => ({ found: false, name: '', text: '' });
+  server.sources = () => ({ tables: [], sheets: [] });
   forgetDrawings();
 });
 afterEach(() => {
@@ -120,6 +133,8 @@ describe('a chart made from a table', () => {
     press(view.dom.querySelector('.cm-grid-chart'));
     const picker = view.dom.querySelector('.cm-chart-picker');
     expect(picker.getAttribute('aria-label')).toBe('Pick a chart');
+    // it stands over the note, out of the editor's flow: in it, it shrank the page and the note jumped
+    expect(getComputedStyle(picker).position).toBe('fixed');
     await settle();
     // the route is asked with the table as written, and only the kinds it fits are offered
     expect(server.asked[0]).toEqual({ path: '/api/cases/c1/notes/figure/kinds', body: { text: TABLE, note: 'n1' } });
@@ -305,6 +320,57 @@ describe('the settings, on the chart', () => {
   });
 });
 
+describe('Keep these colours for the case', () => {
+  const COLOURS = [
+    { value: 'identified', colour: '#184F95', origin: 'grade' },
+    { value: 'almost sure', colour: '#3987e5', origin: 'grade' },
+    { value: 'UAE', colour: '#eb6834', origin: 'case' },
+    { value: 'Other', colour: '#a9a79f', origin: 'other' },
+  ];
+
+  it('names the colours the chart chose in the case’s palette in one press, the case’s own left as they are, with an Undo', async () => {
+    server.palette = [{ name: 'UAE', colour: '#eb6834' }];
+    server.figure = () => answer({ colours: COLOURS });
+    editor(CHARTED);
+    await settle();
+    press(tool('settings'));
+    const row = card().querySelector('.cm-chart-colours');
+    expect(row.hidden).toBe(false);
+    expect([...row.querySelectorAll('.cm-chart-swatch')].map((node) => node.textContent)).toEqual(['identified', 'almost sure']);
+    const keep = row.querySelector('.cm-chart-keep');
+    expect(keep.textContent).toBe('Keep these colours for the case');
+    expect(keep.title).toBe('Name these colours in the case, so every chart, map and layer paints them the same');
+    const before = text();
+    press(keep);
+    await settle();
+    expect(server.asked.filter((one) => one.path === '/api/cases/c1/layer-palette' && one.body).at(-1).body).toEqual({
+      colours: [{ name: 'UAE', colour: '#eb6834' }, { name: 'identified', colour: '#184f95' }, { name: 'almost sure', colour: '#3987e5' }],
+    });
+    // the note is not written; the chart is drawn again in the case's colours
+    expect(text()).toBe(before);
+    expect(figureAsks().length).toBeGreaterThan(1);
+    const [said, actions] = handlers.tableToast.mock.calls.at(-1);
+    expect(said).toBe('Kept for the case: every chart, map and layer paints them the same');
+    actions[0].onClick();
+    await settle();
+    expect(server.palette).toEqual([{ name: 'UAE', colour: '#eb6834' }]);
+  });
+
+  it('says which names the case could not take', () => {
+    expect(keptSaid([])).toBe('Kept for the case: every chart, map and layer paints them the same');
+    expect(keptSaid(['set aside (#34 a pickup, #37 not in the owner’s lists)'])).toBe(
+      'Kept for the case, but not “set aside (#34 a pickup…”: a case names a colour once, 12 at most, in 40 letters');
+  });
+
+  it('is not offered once every colour is the case’s', async () => {
+    server.figure = () => answer({ colours: [{ value: 'UAE', colour: '#eb6834', origin: 'case' }] });
+    editor(CHARTED);
+    await settle();
+    press(tool('settings'));
+    expect(card().querySelector('.cm-chart-colours').hidden).toBe(true);
+  });
+});
+
 describe('the bar', () => {
   it('reads the rows again once the table they came from changed, as one step', async () => {
     editor(CHARTED);
@@ -389,17 +455,120 @@ describe('/ › Chart', () => {
     startChart(view);
     const items = [...view.dom.querySelectorAll('.cm-grid-menu-item')];
     expect(items.map((item) => item.querySelector('.cm-grid-menu-words').textContent))
-      .toEqual(['The table under “Count”', 'The table under “Units”']);
+      .toEqual(['The table under “Count”', 'The table under “Units”', 'Copy rows from another note or a sheet']);
     press(items[1]);
     await settle();
     expect(server.asked.at(-1).body.text).toBe('| Unit | Seen |\n| --- | --- |\n| A | 2 |');
   });
 
-  it('starts a small table to fill when the note holds none', () => {
+  it('starts a small table to fill when the note holds none and nothing else in the case does', async () => {
     editor('Words.\n');
     view.dispatch({ selection: { anchor: text().length } });
     startChart(view);
+    await settle();
+    expect(server.asked.at(-1)).toEqual({ path: '/api/cases/c1/notes/figure/sources?note=n1' });
     expect(text()).toContain('| Category | Count |\n| --- | ---: |\n|  |  |');
     expect(handlers.tableToast).toHaveBeenCalledWith('Fill the table, then press Chart above it.', expect.any(Array));
+    expect(view.dom.querySelector('.cm-chart-anchor')).toBeNull();
+  });
+});
+
+const OTHER = '| Model | At least |\n| --- | ---: |\n| Streit Cougar | 9 |\n| Al-Wahsh | 2 |';
+const SOURCES = {
+  tables: [{ origin: 'note:n2#count', note: 'Register', heading: 'Count', rows: 2, columns: ['Model', 'At least'] },
+    { origin: 'note:n2#count/2', note: 'Register', heading: 'Count', rows: 4, columns: ['Unit', 'Seen'] }],
+  sheets: [{ origin: 'sheet:s1', title: 'Sightings', rows: 3, columns: ['Model', 'Seen'] }],
+};
+const words = () => [...view.dom.querySelectorAll('.cm-grid-menu-item')].map((item) => item.querySelector('.cm-grid-menu-words').textContent);
+const item = (label) => [...view.dom.querySelectorAll('.cm-grid-menu-item')].find((node) => node.querySelector('.cm-grid-menu-words').textContent === label);
+
+describe('Copy rows from another note or a sheet', () => {
+  it('lists the other notes’ tables and the sheets, shows the kinds the rows picked fit, and writes them with from:', async () => {
+    server.sources = () => SOURCES;
+    server.rows = ({ origin }) => (origin === 'note:n2#count' ? { found: true, name: 'Register', text: OTHER } : { found: false });
+    editor('Words.\n');
+    view.dispatch({ selection: { anchor: text().length } });
+    startChart(view);
+    await settle();
+    expect(words()).toEqual(['A new table to fill', 'Copy rows from another note or a sheet']);
+    press(item('Copy rows from another note or a sheet'));
+    await settle();
+    expect(words()).toEqual(['“Count”', '“Count”, table 2', 'Sightings']);
+    expect([...view.dom.querySelectorAll('.cm-grid-menu-item small')].map((node) => node.textContent))
+      .toEqual(['Register · 2 rows', 'Register · 4 rows', 'Sheet · 3 rows']);
+    press(item('“Count”'));
+    await settle();
+    expect(server.asked.find((one) => one.path.endsWith('/rows')).body).toEqual({ origin: 'note:n2#count' });
+    const picker = view.dom.querySelector('.cm-chart-picker');
+    expect(server.asked.find((one) => one.path.endsWith('/kinds')).body).toEqual({ text: OTHER, note: 'n1' });
+    expect(picker.querySelector('.cm-chart-picker-foot').textContent).toContain('They are copied into this note');
+    expect(picker.querySelector('.cm-chart-picker-said').textContent).toBe('Drawn from the 2 rows to copy');
+    press(picker.querySelector('button.cm-chart-pick[data-kind="bars"]'));
+    expect(text()).toBe(`Words.\n\n::: chart\nkind: bars\ntitle: At least 10, by model\ncount: At least\nby: Model\nfrom: note:n2#count\n${OTHER}\n:::\n`);
+    await settle();
+    expect(view.dom.querySelector('.cm-chart-anchor')).toBeNull();
+    undo(view);
+    expect(text()).toBe('Words.\n');
+  });
+
+  it('is offered beside the note’s own tables, and under the kind picker of its one table', async () => {
+    server.sources = () => SOURCES;
+    editor(`${CHARTED}\n\n## Units\n\n| Unit | Seen |\n| --- | --- |\n| A | 2 |\n`);
+    startChart(view);
+    expect(words()).toEqual(['The table under “Count”', 'The table under “Units”', 'Copy rows from another note or a sheet']);
+    expect(view.dom.querySelector('.cm-grid-menu-line')).toBeTruthy();
+    view.destroy();
+    editor(`${NOTE}\n\n`);
+    startChart(view);
+    await settle();
+    const copy = view.dom.querySelector('.cm-chart-picker .cm-chart-copy');
+    expect(copy.textContent).toBe('Copy rows from another note or a sheet');
+    press(copy);
+    await settle();
+    expect(view.dom.querySelector('.cm-chart-picker')).toBeNull();
+    expect(words()).toEqual(['“Count”', '“Count”, table 2', 'Sightings']);
+  });
+});
+
+describe('Read again, for rows from another note or a sheet', () => {
+  const FROM_OTHER = CHARTED.replace('from: note:n1#count', 'from: note:n2#count');
+  const FROM_SHEET = CHARTED.replace('from: note:n1#count', 'from: sheet:s1');
+
+  it('asks the server for the rows, offers Read again once they differ, and copies them in as one step', async () => {
+    server.rows = () => ({ found: true, name: 'Register', text: OTHER });
+    editor(FROM_OTHER);
+    await settle();
+    // the editor says itself whether they match: the drawing is asked without the origin check
+    expect(figureAsks()[0].body.origins).toBe(false);
+    expect(server.asked.find((one) => one.path.endsWith('/rows')).body).toEqual({ origin: 'note:n2#count' });
+    expect(tool('again').hidden).toBe(false);
+    expect(tool('again').title).toBe('The table in “Register” changed: copy its rows again');
+    press(tool('numbers-btn'));
+    await settle();
+    const said = chart().querySelector('.cm-chart-numbers-said');
+    expect(said.querySelector('span').textContent).toBe('The table in “Register” changed since they were copied.');
+    press([...said.querySelectorAll('.cm-chart-link')].find((node) => node.textContent === 'Read again'));
+    expect(text()).toBe(FROM_OTHER.replace(`${TABLE}\n:::`, `${OTHER}\n:::`));
+    undo(view);
+    expect(text()).toBe(FROM_OTHER);
+  });
+
+  it('says a sheet’s rows are the same, and a source gone from the case', async () => {
+    server.rows = () => ({ found: true, name: 'Sightings', text: TABLE });
+    editor(FROM_SHEET);
+    await settle();
+    expect(tool('again').hidden).toBe(true);
+    press(tool('numbers-btn'));
+    await settle();
+    expect(chart().querySelector('.cm-chart-numbers-said span').textContent).toBe('Same as the sheet “Sightings”.');
+    view.destroy();
+    forgetDrawings();
+    server.rows = () => ({ found: false, name: '', text: '' });
+    editor(FROM_SHEET);
+    await settle();
+    press(tool('numbers-btn'));
+    await settle();
+    expect(chart().querySelector('.cm-chart-numbers-said span').textContent).toBe('The sheet it came from is no longer in the case.');
+    expect(tool('again').hidden).toBe(true);
   });
 });

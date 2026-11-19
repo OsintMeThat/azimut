@@ -26,7 +26,7 @@ const KINDS = {
 };
 const STACKED = { name: 'stacked bars', label: 'Stacked', counts: true, parts: false, stacked: true, up: false, turns: 'stacked columns', style: 'report' };
 
-async function withNote(page) {
+async function withNote(page, text = NOTE) {
   await installAppFixture(page, { catalog: CATALOG });
   const written = [];
   const asked = [];
@@ -35,7 +35,7 @@ async function withNote(page) {
       written.push(route.request().postDataJSON().text);
       return route.fulfill({ json: { status: 'saved' } });
     }
-    return route.fulfill({ json: { text: NOTE } });
+    return route.fulfill({ json: { text } });
   });
   await page.route(`**/api/cases/${CASE_ID}/entities/redirects`, (route) => route.fulfill({ json: { redirects: {} } }));
   await page.route(`**/api/cases/${CASE_ID}/notes/figure/kinds`, (route) => {
@@ -56,7 +56,7 @@ async function withNote(page) {
   });
   await page.goto('/#notebook');
   await page.locator('button[title="Open Register"]').click();
-  await expect(page.locator('.cm-content')).toContainText('Who made them.');
+  await expect(page.locator('.cm-content')).toContainText(text.split('\n')[0].replace(/^#+ /, ''));
   return { written, asked };
 }
 
@@ -113,4 +113,56 @@ test('a chart is picked by its picture from a table, set on itself, read again a
   ]);
   expect(download.suggestedFilename()).toBe('At least 10, by model and grade (X).png');
   expect(asked.at(-1).figure).toMatchObject({ format: 'png', size: 'x', note: 'n1' });
+});
+
+/**
+ * A long folded table far above, the cursor away from what is pressed: the note stays
+ * where it is when a chart's settings take the keyboard. The editor never reads the note's
+ * line height off a heading (`editor/heights.js`), and the table keeps the height it was
+ * drawn at in the editor's height map once it is made again out of sight, never the guess
+ * made before it was drawn: either one wrong moved the chart by hundreds of pixels.
+ */
+const LONG = Array.from({ length: 48 }, (_, at) => `| ${at + 1} | Vehicle ${at + 1} | A long remark that wraps onto several lines in a note set at its usual width, as the register's do |`);
+const FAR = ['# The register', '', '| # | Model | Remark |', '| --- | --- | --- |', ...LONG, '',
+  ...Array.from({ length: 90 }, (_, at) => `Paragraph ${at + 1} between the table and the chart.\n`),
+  ['::: chart', 'kind: bars', 'title: At least 2, by model', 'count: rows', 'by: Model', '| Model | Grade |', '| --- | --- |', '| A | identified |', '| B | almost sure |', ':::'].join('\n'),
+  '', 'The end.'].join('\n');
+
+test('a chart’s settings far below a long table leave the note where it is, the table its drawn height', async ({ page, browserName }) => {
+  test.skip(browserName !== 'chromium', 'the height map is the editor’s, alike in both browsers');
+  await withNote(page, FAR);
+  const scroller = page.locator('.cm-scroller');
+  const grid = page.locator('.cm-grid-block').first();
+  /** The table's height in the editor's height map, and as it was last drawn. */
+  const heights = () => page.evaluate(() => {
+    const view = document.querySelector('.cm-content').cmTile.root.view;
+    return { map: view.lineBlockAt(view.state.doc.toString().indexOf('| # |')).height, drawn: window.gridDrawn ?? 0 };
+  });
+  for (const where of ['top', 'table']) {
+    // the cursor on the note's heading, or on the table, the table drawn once in passing
+    await scroller.evaluate((node) => { node.scrollTop = 0; });
+    if (where === 'top') await page.locator('.cm-line').first().click();
+    else {
+      await grid.click({ position: { x: 4, y: 4 } });
+      await expect(grid).toHaveClass(/cm-picked/);
+    }
+    await grid.evaluate((node) => { window.gridDrawn = node.getBoundingClientRect().height; });
+    expect((await heights()).drawn).toBeGreaterThan(1200);
+    // far down to the chart: out of sight, the table is drawn only while the cursor is on it
+    const chart = page.locator('.cm-chart-block');
+    for (let step = 0; step < 80 && !(await chart.count()); step += 1) await scroller.evaluate((node) => node.scrollBy(0, 400));
+    await chart.evaluate((node) => node.scrollIntoView({ block: 'center' }));
+    await expect(grid).toHaveCount(where === 'top' ? 0 : 1);
+    await expect(chart.locator('.cm-chart-figure svg')).toBeVisible();
+    const before = await chart.evaluate((node) => node.getBoundingClientRect().top);
+    await chart.getByRole('button', { name: 'Settings' }).click();
+    await expect(chart.getByRole('textbox', { name: 'Title' })).toBeFocused();
+    await page.waitForTimeout(400);
+    expect(Math.abs((await chart.evaluate((node) => node.getBoundingClientRect().top)) - before)).toBeLessThan(2);
+    // the cursor left for the chart: the table is no longer drawn, and keeps its height
+    await expect(grid).toHaveCount(0);
+    const { map, drawn } = await heights();
+    expect(Math.abs(map - drawn)).toBeLessThan(2);
+    await chart.getByRole('button', { name: 'Settings' }).click();
+  }
 });

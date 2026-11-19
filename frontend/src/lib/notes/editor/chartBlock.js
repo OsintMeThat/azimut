@@ -7,12 +7,14 @@
  *   the table fits already drawn from its rows (`editor/chartCard.js`). The one picked
  *   is written under the table, or where `/` was typed: its kind, the title its data
  *   proposes (*at least* when the count is a floor), its columns, the table's rows
- *   copied in and `from:`, where they came from. With no table in the note, `/` ›
- *   Chart starts a small one to fill.
+ *   copied in and `from:`, where they came from. `/` › Chart also offers *Copy rows
+ *   from another note or a sheet* (`GET /notes/figure/sources`); with no table in the
+ *   note, that or a small one to fill.
  * - **Its bar**: Kind (the picker again, the chart's own settings kept), Settings (the
- *   card: title, count, by, coloured by, show, style), Read again (once the table its
- *   rows came from changed), The numbers (its rows, and the way to the table), Export
- *   (a picture for X, 4:5, 1:1, the PDF page, or an SVG).
+ *   card: title, count, by, coloured by, show, style, and *Keep these colours for the
+ *   case*), Read again (once the table its rows came from changed, in this note, another
+ *   one or a sheet), The numbers (its rows, and the way to the table), Export (a picture
+ *   for X, 4:5, 1:1, the PDF page, or an SVG).
  * - **Its checks**: what the check before export says of it, in the honesty rules'
  *   words, under it, with a one-press fix where the check offers one.
  *
@@ -23,26 +25,30 @@ import { isolateHistory } from '@codemirror/commands';
 import { Transaction } from '@codemirror/state';
 import { ViewPlugin } from '@codemirror/view';
 
+import { MAX_COLOUR_NAME, MAX_PALETTE, layerPalette } from '../../map/layerPalette.svelte.js';
 import { rovingToolbar } from '../pictureSize.js';
 import { registerBlock } from './blocks.js';
-import { EXPORTS, drawChart, exportChart, keptDrawing } from './chartFigure.js';
+import { EXPORTS, chartRows, chartSources, drawChart, exportChart, forgetDrawings, keptDrawing } from './chartFigure.js';
 import { chartSettings, openKindPicker } from './chartCard.js';
 import {
   CHART_OPEN, compareRows, headingAbove, newChart, originFor, readChart, readOrigin, setting, tableUnder, withSettings, withTable,
 } from './chartText.js';
 import { tablesOf } from './gridEdits.js';
 import { button, icon, openMenu } from './gridMenu.js';
+import { heldHeight, holdHeight, moveHeight, releaseHeight } from './heights.js';
 import { blockAt } from './puts.js';
 import { blocksIn, openSource } from './ranges.js';
 import { noteCase, noteHandlers } from './state.js';
 import { registerTableChart } from './tableGrid.js';
 import { gridAt } from './tablePictures.js';
 import { insertTable } from './tableInsert.js';
-import { lineChanges, plainText } from './tableText.js';
+import { lineChanges, parseTable, plainText } from './tableText.js';
 import { BlockWidget, markPicked, sourceButton } from './widgets.js';
 
 /** The rows The numbers shows before it says how many more. */
 export const NUMBERS_SHOWN = 60;
+/** A chart's height before it is drawn, in pixels. */
+const CHART_HEIGHT = 440;
 /** The table `/` › Chart starts with when the note holds none. */
 export const STARTER_TABLE = '| Category | Count |\n| --- | ---: |\n|  |  |\n|  |  |\n|  |  |';
 
@@ -78,6 +84,7 @@ class ChartBox {
     this.drawn = null;
     this.asked = null;
     this.origin = null;
+    this.originAsked = null;
     this.settings = null;
     this.numbersOpen = false;
     this.gone = false;
@@ -129,6 +136,11 @@ class ChartBox {
   local() {
     const origin = readOrigin(setting(this.chart, 'from'));
     return Boolean(origin && origin.kind === 'note' && this.noteId && origin.id === this.noteId);
+  }
+
+  /** Whether the editor says itself whether the rows still match where they came from: always, once `from:` names a note or a sheet. */
+  readsOrigin() {
+    return Boolean(readOrigin(setting(this.chart, 'from')));
   }
 
   // -- drawing --
@@ -214,7 +226,7 @@ class ChartBox {
       this.figure.replaceChildren(element('p', 'cm-chart-said', 'A chart is drawn in a note of a case.'));
       return;
     }
-    const request = { caseId, noteId: this.noteId, text: this.widget.source, origins: !this.local() };
+    const request = { caseId, noteId: this.noteId, text: this.widget.source, origins: !this.readsOrigin() };
     const kept = keptDrawing(request);
     if (kept) {
       this.show(kept);
@@ -271,9 +283,27 @@ class ChartBox {
     this.checks.hidden = !items.length;
   }
 
-  /** Whether the rows still match the table of this note they were copied from. */
-  refreshOrigin() {
-    const origin = readOrigin(setting(this.chart, 'from'));
+  /**
+   * Whether the rows still match where they were copied from: a table of this note, read
+   * as it is typed, or another note's table or a sheet, asked of the server
+   * (`chartRows`, kept a few seconds; `fresh` asks now).
+   */
+  refreshOrigin({ fresh = false } = {}) {
+    const written = setting(this.chart, 'from');
+    const origin = readOrigin(written);
+    if (origin && !this.local() && this.chart.table && this.info.caseId) {
+      const asked = chartRows({ caseId: this.info.caseId, origin: written, fresh });
+      this.originAsked = asked;
+      asked.then((answer) => {
+        if (this.gone || this.originAsked !== asked || answer.error) return;
+        const name = origin.kind === 'sheet' ? `the sheet “${answer.name}”` : `the table in “${answer.name}”`;
+        this.showOrigin(answer.found
+          ? { state: compareRows(this.chart.table, parseTable(answer.text)), text: answer.text, name, elsewhere: true }
+          : { state: 'gone', name: origin.kind === 'sheet' ? 'the sheet it came from' : 'the table it came from', elsewhere: true });
+      });
+      return;
+    }
+    this.originAsked = null;
     let state = null;
     if (origin && this.local() && this.chart.table) {
       const text = this.view.state.doc.toString();
@@ -283,6 +313,11 @@ class ChartBox {
         ? { state: compareRows(this.chart.table, found.table), found, name: tableName(text, line) }
         : { state: 'gone', name: origin.anchor ? `the table under “${origin.anchor}”` : 'the table it came from' };
     }
+    this.showOrigin(state);
+  }
+
+  /** Say whether the rows match where they came from: Read again on the bar when they do not, and in The numbers. */
+  showOrigin(state) {
     const was = this.origin?.state;
     this.origin = state;
     if (this.againButton) {
@@ -334,6 +369,7 @@ class ChartBox {
     if (!this.writable) return;
     if (!open) {
       this.settings?.commit();
+      this.settings?.destroy();
       this.settings = null;
       this.settingsPanel.hidden = true;
       this.settingsPanel.replaceChildren();
@@ -342,6 +378,7 @@ class ChartBox {
       this.settings = chartSettings(this.settingsPanel, {
         state: () => (this.gone ? null : { chart: this.chart, drawn: this.drawn }),
         write: (changes) => this.write(changes),
+        keep: this.info.caseId ? (values) => this.keepColours(values) : null,
       });
     }
     this.settingsButton?.setAttribute('aria-pressed', String(open));
@@ -349,10 +386,31 @@ class ChartBox {
     this.view.requestMeasure();
   }
 
+  /** Copy the rows again from where they came from, as one step Undo takes back. */
+  /**
+   * Name the colours the chart chose on its own in the case's palette (`layerPalette.keep`,
+   * the infographic builder's too), so every chart, map and layer paints them the same. The
+   * case's palette is no Undo step of the note: the toast that says so offers its own Undo.
+   */
+  async keepColours(values) {
+    const caseId = this.info.caseId;
+    const toast = this.handlers.tableToast;
+    try {
+      const { before, left } = await layerPalette.keep(caseId, values);
+      redrawCharts(this.view);
+      toast?.(keptSaid(left), [{
+        label: 'Undo',
+        onClick: () => layerPalette.save(caseId, before).then(() => redrawCharts(this.view), (error) => toast?.(`Not undone: ${error.message}`, [], 'warn')),
+      }]);
+    } catch (error) {
+      toast?.(`Colours not kept: ${error.message}`, [], 'warn');
+    }
+  }
+
   readAgain() {
     const found = this.origin?.found;
-    if (!found) return;
-    const text = this.view.state.sliceDoc(found.from, found.to);
+    const text = found ? this.view.state.sliceDoc(found.from, found.to) : this.origin?.text;
+    if (!text) return;
     this.edit((source) => withTable(source, text));
   }
 
@@ -360,7 +418,11 @@ class ChartBox {
     this.numbersOpen = open;
     this.numbersButton?.setAttribute('aria-pressed', String(open));
     this.numbers.hidden = !open;
-    if (open) this.renderNumbers();
+    if (open) {
+      this.renderNumbers();
+      // rows from elsewhere are asked again as they are looked at
+      if (this.origin?.elsewhere) this.refreshOrigin({ fresh: true });
+    }
     this.view.requestMeasure();
   }
 
@@ -397,7 +459,7 @@ class ChartBox {
       : origin.state === 'same' ? `Same as ${origin.name}.`
         : origin.state === 'differs' ? `${origin.name[0].toUpperCase()}${origin.name.slice(1)} changed since they were copied.`
           : origin.state === 'columns' ? `${origin.name[0].toUpperCase()}${origin.name.slice(1)} no longer has these columns.`
-            : `${origin.name[0].toUpperCase()}${origin.name.slice(1)} is no longer in this note.`;
+            : `${origin.name[0].toUpperCase()}${origin.name.slice(1)} is no longer in ${origin.elsewhere ? 'the case' : 'this note'}.`;
     said.append(element('span', origin?.state === 'same' ? 'cm-chart-same' : '', words));
     const act = (label, run, className = '') => {
       const node = button(`cm-chart-link ${className}`, { label });
@@ -446,6 +508,7 @@ class ChartBox {
 
   destroy() {
     this.gone = true;
+    this.settings?.destroy();
   }
 }
 
@@ -472,6 +535,7 @@ export class ChartWidget extends BlockWidget {
       event.preventDefault();
       box.chart.toggleSettings(true);
     });
+    holdHeight(box, this);
     return box;
   }
 
@@ -480,6 +544,7 @@ export class ChartWidget extends BlockWidget {
     if (!previous.same(this)) dom.chart.update(this);
     else dom.chart.widget = this;
     markPicked(dom, this.picked);
+    moveHeight(dom, this);
     return true;
   }
 
@@ -488,12 +553,27 @@ export class ChartWidget extends BlockWidget {
   }
 
   destroy(dom) {
+    releaseHeight(dom);
     dom.chart?.destroy();
   }
 
+  /** The height it was last drawn at, its settings or numbers open included, else a drawing's. */
   get estimatedHeight() {
-    return 440;
+    return heldHeight(this) ?? CHART_HEIGHT;
   }
+}
+
+/** What keeping a chart's colours for the case says, naming those the case could not take. */
+export function keptSaid(left = []) {
+  if (!left.length) return 'Kept for the case: every chart, map and layer paints them the same';
+  const names = left.map((name) => `“${name.length > 24 ? `${name.slice(0, 23)}…` : name}”`).join(', ');
+  return `Kept for the case, but not ${names}: a case names a colour once, ${MAX_PALETTE} at most, in ${MAX_COLOUR_NAME} letters`;
+}
+
+/** The case's colours changed: every chart of the note is asked again, as it is drawn from them. */
+function redrawCharts(view) {
+  forgetDrawings();
+  for (const box of view.contentDOM.querySelectorAll('.cm-chart-block')) box.chart?.draw();
 }
 
 /** Enter on a picked chart, or a double press: its settings; a locked note opens the source. */
@@ -544,6 +624,41 @@ function cursorAnchor(view) {
 }
 
 /**
+ * The anchor `/` › Chart's panels stand under, one after the other (which table, where the
+ * rows come from, the kind picker): it stays while one of them is open or while the next is
+ * asked of the server (`wait`), and goes with the last.
+ */
+function cursorSession(view) {
+  const anchor = cursorAnchor(view);
+  let waiting = 0;
+  const open = () => [...view.dom.children].some((node) => node.matches('.cm-chart-picker, .cm-grid-menu'));
+  const watch = new MutationObserver(() => {
+    if (!waiting && !open()) end();
+  });
+  function end() {
+    watch.disconnect();
+    anchor.remove();
+  }
+  watch.observe(view.dom, { childList: true });
+  return {
+    anchor,
+    end,
+    async wait(asked) {
+      waiting += 1;
+      try {
+        return await asked;
+      } finally {
+        waiting -= 1;
+        // what was waited for opens its panel first, in the same turn
+        setTimeout(() => {
+          if (!waiting && !open()) end();
+        }, 0);
+      }
+    },
+  };
+}
+
+/**
  * The block a kind picked from the table at `found` writes: its settings, the title its
  * data proposes, where its rows came from, and the rows. `noteId` names the note they
  * are in; a note with none (a template) writes no `from:`.
@@ -555,11 +670,9 @@ export function chartFromTable(state, found, kind, noteId = '') {
   return newChart(settings, text);
 }
 
-/** Write the chart `kind` makes of the table `found` at `pos`, as one step, and pick it. */
-function placeChart(view, found, kind, pos) {
+/** Write `block` at `pos` as one step, and pick it. */
+function placeBlock(view, block, pos) {
   if (view.state.readOnly) return;
-  const noteId = view.state.facet(noteHandlers).noteId ?? '';
-  const block = chartFromTable(view.state, found, kind, noteId);
   const { insert, start } = blockAt(view.state, pos, block);
   view.dispatch({
     changes: { from: pos, insert },
@@ -570,15 +683,20 @@ function placeChart(view, found, kind, pos) {
   view.focus();
 }
 
+/** Write the chart `kind` makes of the table `found` at `pos`, as one step, and pick it. */
+function placeChart(view, found, kind, pos) {
+  placeBlock(view, chartFromTable(view.state, found, kind, view.state.facet(noteHandlers).noteId ?? ''), pos);
+}
+
 /** The kind picker for the table at `found`, under `anchor`; the chart lands at `pos`. */
-export function chartTable(view, anchor, found, { pos = found.to, onClose = null } = {}) {
+export function chartTable(view, anchor, found, { pos = found.to, copy = null } = {}) {
   const { caseId } = view.state.field(noteCase);
   return openKindPicker(view, anchor, {
     caseId,
     noteId: view.state.facet(noteHandlers).noteId ?? '',
     text: view.state.sliceDoc(found.from, found.to),
     onPick: (kind) => placeChart(view, found, kind, pos),
-    onClose,
+    copy,
   });
 }
 
@@ -588,41 +706,106 @@ function chartButtonOf(view, from) {
   return grid?.box?.querySelector('.cm-grid-chart') ?? null;
 }
 
+/** How many rows, said. */
+function rowsWord(count) {
+  return `${count} row${count === 1 ? '' : 's'}`;
+}
+
+/** What *Copy rows from…* lists: each table of the case's other notes, then each sheet. */
+export function sourceItems(sources, run) {
+  return [
+    ...sources.tables.map((table) => {
+      // the second table under one heading says so
+      const nth = /\/(\d+)$/.exec(table.origin)?.[1];
+      const label = table.heading ? `“${table.heading}”${nth ? `, table ${nth}` : ''}` : nth ? `Table ${nth}` : 'A table';
+      return { label, hint: `${table.note} · ${rowsWord(table.rows)}`, iconName: 'table', run: () => run(table.origin) };
+    }),
+    ...sources.sheets.map((sheet) => ({ label: sheet.title, hint: `Sheet · ${rowsWord(sheet.rows)}`, iconName: 'grid', run: () => run(sheet.origin) })),
+  ];
+}
+
+/**
+ * *Copy rows from…*: the tables of the case's other notes and its sheets under the
+ * session's anchor; the one picked shows the kinds its rows fit, as a table's Chart
+ * does, and the chart is written at `pos` with those rows and `from:` naming them.
+ */
+export async function copyRowsFrom(view, session, pos, known = null) {
+  const { caseId } = view.state.field(noteCase);
+  const noteId = view.state.facet(noteHandlers).noteId ?? '';
+  const toast = view.state.facet(noteHandlers).tableToast;
+  const sources = known ?? await session.wait(chartSources({ caseId, noteId }));
+  if (sources.error) {
+    session.end();
+    toast?.(`Not listed: ${sources.error}`, [], 'warn');
+    return;
+  }
+  const items = sourceItems(sources, async (origin) => {
+    const rows = await session.wait(chartRows({ caseId, origin, fresh: true }));
+    if (rows.error || !rows.found) {
+      session.end();
+      toast?.(rows.error ? `Not read: ${rows.error}` : 'That table is no longer in the case.', [], 'warn');
+      return;
+    }
+    openKindPicker(view, session.anchor, {
+      caseId, noteId, text: rows.text, copied: true,
+      onPick: (kind) => placeBlock(view, newChart({ ...kind.settings, title: kind.title ?? '', from: origin }, rows.text), pos),
+    });
+  });
+  if (!items.length) {
+    session.end();
+    toast?.('No other note holds a table, and the case has no sheet.');
+    return;
+  }
+  openMenu(view, session.anchor, items, { label: 'Copy rows from' });
+}
+
+const COPY = 'Copy rows from another note or a sheet';
+const STARTED = 'Fill the table, then press Chart above it.';
+
 /**
  * `/` › Chart: the kind picker for the note's one table, a menu of its tables when it
- * holds several, or a small table to fill when it holds none, its Chart button then
- * one press away.
+ * holds several, each with *Copy rows from another note or a sheet* beside it; with none,
+ * that or a small table to fill, its Chart button then one press away. A case whose other
+ * notes and sheets hold no table gets the small table at once.
  */
 export function startChart(view) {
   if (view.state.readOnly) return;
   const tables = tablesOf(view.state).filter((found) => !inChart(view.state, found.from));
-  if (!tables.length) {
-    insertTable(view, STARTER_TABLE, { said: 'Fill the table, then press Chart above it.' });
+  const { caseId } = view.state.field(noteCase);
+  if (!tables.length && !caseId) {
+    insertTable(view, STARTER_TABLE, { said: STARTED });
     return;
   }
   const pos = view.state.selection.main.head;
-  const anchor = cursorAnchor(view);
-  const drop = () => anchor.remove();
-  const text = view.state.doc.toString();
-  if (tables.length === 1) {
-    chartTable(view, anchor, tables[0], { pos, onClose: drop });
+  const session = cursorSession(view);
+  if (!tables.length) {
+    const noteId = view.state.facet(noteHandlers).noteId ?? '';
+    session.wait(chartSources({ caseId, noteId })).then((sources) => {
+      if (sources.error || (!sources.tables.length && !sources.sheets.length)) {
+        session.end();
+        insertTable(view, STARTER_TABLE, { said: STARTED });
+        return;
+      }
+      openMenu(view, session.anchor, [
+        { label: 'A new table to fill', hint: 'Then press its Chart', iconName: 'table', run: () => insertTable(view, STARTER_TABLE, { said: STARTED }) },
+        { label: COPY, iconName: 'copy', run: () => copyRowsFrom(view, session, pos, sources) },
+      ], { label: 'Rows for the chart' });
+    });
     return;
   }
+  if (tables.length === 1) {
+    chartTable(view, session.anchor, tables[0], { pos, copy: caseId ? () => copyRowsFrom(view, session, pos) : null });
+    return;
+  }
+  const text = view.state.doc.toString();
   const items = tables.map((found) => ({
     label: `${tableName(text, found.line)[0].toUpperCase()}${tableName(text, found.line).slice(1)}`,
     hint: `${found.table.rows.length} × ${found.table.header.length}`,
     iconName: 'table',
-    run: () => chartTable(view, anchor, found, { pos, onClose: drop }),
+    run: () => chartTable(view, session.anchor, found, { pos }),
   }));
-  const menu = openMenu(view, anchor, items, { label: 'Which table' });
-  // the menu leaves without a pick: its anchor goes with it
-  const watch = new MutationObserver(() => {
-    if (!menu.isConnected && !view.dom.querySelector('.cm-chart-picker')) {
-      watch.disconnect();
-      drop();
-    }
-  });
-  watch.observe(view.dom, { childList: true });
+  if (caseId) items.push('-', { label: COPY, iconName: 'copy', run: () => copyRowsFrom(view, session, pos) });
+  openMenu(view, session.anchor, items, { label: 'Which table' });
 }
 
 /** Whether `pos` is inside a chart block: its rows are a copy, never a table to chart. */
@@ -703,8 +886,8 @@ const THEME = {
   '.cm-chart-picker': {
     position: 'fixed', zIndex: '60', background: 'var(--bg-2)', border: '1px solid var(--border-strong)', borderRadius: '9px',
     boxShadow: 'var(--shadow-2)', fontFamily: 'var(--font-sans)', fontSize: '12.5px', color: 'var(--text-1)', outline: 'none',
+    width: 'min(744px, calc(100vw - 24px))', padding: '12px 14px 10px', boxSizing: 'border-box',
   },
-  '.cm-chart-picker': { width: 'min(744px, calc(100vw - 24px))', padding: '12px 14px 10px', boxSizing: 'border-box' },
   '.cm-chart-picker-head': { display: 'flex', alignItems: 'baseline', gap: '10px', marginBottom: '10px' },
   '.cm-chart-picker-head strong': { fontSize: '13.5px' },
   '.cm-chart-picker-said': { color: 'var(--text-2)' },
@@ -756,6 +939,12 @@ const THEME = {
     marginLeft: '6px', padding: '0', border: 'none', background: 'none', color: 'var(--info)', font: 'inherit', cursor: 'pointer', textDecoration: 'underline',
   },
   '.cm-chart-looks .cm-chart-field': { flexDirection: 'row', alignItems: 'center', gap: '10px' },
+  '.cm-chart-colours': { flexDirection: 'row', alignItems: 'baseline', flexWrap: 'wrap', gap: '6px 10px', paddingLeft: '74px' },
+  '.cm-chart-colours[hidden]': { display: 'none' },
+  '.cm-chart-swatches': { display: 'inline-flex', flexWrap: 'wrap', gap: '4px 10px', flex: '1 1 0', minWidth: '0' },
+  '.cm-chart-swatch': { display: 'inline-flex', alignItems: 'center', gap: '5px', color: 'var(--text-2)', fontSize: '11.5px' },
+  '.cm-chart-swatch::before': { content: '""', width: '10px', height: '10px', borderRadius: '2px', background: 'var(--swatch)' },
+  '.cm-chart-keep': { marginLeft: '0' },
   '.cm-chart-seg': { display: 'inline-flex', border: '1px solid var(--border-strong)', borderRadius: '6px', overflow: 'hidden' },
   '.cm-chart-seg-btn': {
     height: '26px', padding: '0 11px', border: 'none', borderRight: '1px solid var(--border)', background: 'var(--bg-1)', color: 'var(--text-2)',
@@ -780,7 +969,7 @@ registerBlock({
   widget: (spec) => new ChartWidget(spec),
   open: openChart,
   atomic: true,
-  height: 440,
+  height: CHART_HEIGHT,
   extensions: [watchOrigins],
   theme: THEME,
 });

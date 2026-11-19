@@ -5,8 +5,8 @@ import { CASE_ID, installAppFixture } from './app.fixture.js';
  * The citation card: hovering a chip shows what the case knows of its item, and Copy
  * reference copies its entry as the list of sources prints it; a written link the case
  * lacks says so, and Bookmark it files the page, the note left as it was; the cursor
- * resting in a link shows the card too, Tab reaching its actions. The server is stood
- * in for, and nothing reaches past it.
+ * resting in a link, or right next to a chip, shows the card too, Tab reaching its
+ * actions. The server is stood in for, and nothing reaches past it.
  */
 
 const POST = 'https://x.com/portwatch/status/1899200000000000001';
@@ -161,5 +161,29 @@ test('the cursor resting in a link shows its card; Tab reaches its actions, Esca
   await expect(card).toHaveCount(0);
   await expect(page.locator('.cm-content')).toBeFocused();
   expect(state.filed).toEqual([]);
+  expect(state.outside).toEqual([]);
+});
+
+test('the cursor right after a chip, which it steps over whole, shows its card; Tab reaches its actions', async ({ page }) => {
+  const state = await notebook(page);
+  const box = await wordsBox(page, 'The port closed');
+  await page.mouse.click(box.x - 1, box.y + box.height / 2);
+  await page.mouse.move(5, 5);
+  // back over ". " to the chip's end: the cursor stands right after it
+  await page.keyboard.press('ArrowLeft');
+  await page.keyboard.press('ArrowLeft');
+  const card = page.getByRole('dialog', { name: 'About Strike on the port' });
+  await expect(card).toBeVisible();
+  await page.keyboard.press('Tab');
+  await expect(card.locator('[data-action]').first()).toBeFocused();
+  await page.keyboard.press('Escape');
+  await expect(card).toHaveCount(0);
+  await expect(page.locator('.cm-content')).toBeFocused();
+  // the left arrow steps over the chip whole, the cursor now just before it: the same card; one more and it goes
+  await page.keyboard.press('ArrowLeft');
+  await expect(card).toBeVisible();
+  await page.keyboard.press('ArrowLeft');
+  await expect(card).toHaveCount(0);
+  expect(state.written).toEqual([]);
   expect(state.outside).toEqual([]);
 });

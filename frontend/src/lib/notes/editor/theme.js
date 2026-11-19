@@ -23,7 +23,6 @@ export const look = EditorView.theme({
   '.cm-line': { padding: '0 var(--note-gutter, 32px)' },
   '.cm-cursor': { borderLeftColor: 'var(--accent)', borderLeftWidth: '2px' },
   '.cm-selectionBackground, &.cm-focused .cm-selectionBackground': { backgroundColor: 'var(--accent-soft) !important' },
-  '.cm-placeholder': { color: 'var(--text-3)' },
   '.cm-heading': { fontWeight: '650', color: 'var(--text-1)' },
   '.cm-h1': { fontSize: '1.75em', lineHeight: '1.3', paddingTop: '0.5em' },
   '.cm-h2': { fontSize: '1.35em', lineHeight: '1.35', paddingTop: '0.6em' },
