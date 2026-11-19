@@ -110,21 +110,26 @@ function keyOf(target) {
 function pointedAt(view, event) {
   const node = event.target instanceof Element ? event.target : null;
   if (!node || !view.contentDOM.contains(node)) return null;
-  const chip = node.closest('[data-chip]');
-  if (chip) {
-    const found = citationAt(view.state, view.posAtDOM(chip));
-    return found && { ...found, node: chip };
-  }
+  // a drawn block first: what it holds is said by its own elements, its position being the block's
   const block = node.closest('.cm-block');
   if (block) {
     if (!READ_IN.has(block.dataset.block)) return null;
     const from = view.posAtDOM(block);
-    const ref = node.closest('a[data-entity-id]');
-    if (ref) return { kind: 'chip', from, to: from, id: ref.dataset.entityId, label: ref.textContent.trim(), inBlock: true, node: ref };
+    // a chip as the page draws it (a table's grid), or as its Markdown is drawn
+    const ref = node.closest('[data-chip][data-entity-id], a[data-entity-id]');
+    if (ref) {
+      const label = (ref.matches('[data-chip]') ? ref.lastChild?.textContent : ref.textContent) ?? '';
+      return { kind: 'chip', from, to: from, id: ref.dataset.entityId, label: label.trim(), inBlock: true, node: ref };
+    }
     const link = node.closest('a[href]');
     const url = link?.getAttribute('href') ?? '';
     if (WEB.test(url)) return { kind: 'link', from, to: from, url, words: link.textContent.trim(), inBlock: true, node: link };
     return null;
+  }
+  const chip = node.closest('[data-chip]');
+  if (chip) {
+    const found = citationAt(view.state, view.posAtDOM(chip));
+    return found && { ...found, node: chip };
   }
   const pos = view.posAtCoords({ x: event.clientX, y: event.clientY });
   if (pos == null) return null;
@@ -151,7 +156,8 @@ const WRITTEN = /(?<!!)\[([^\]\n]*)\]\((https?:\/\/[^)\s]+)\)/gi;
 export function linkWords(text, url) {
   const found = [];
   for (const [, words, address] of String(text ?? '').matchAll(WRITTEN)) {
-    const said = shownWords(words).trim();
+    // the words as they read: a chip as its label, no marks of bold, italic or code
+    const said = shownWords(words).replace(/\*\*|~~|[*`]/g, '').trim();
     if (address === url && said && !found.includes(said)) found.push(said);
   }
   return found;

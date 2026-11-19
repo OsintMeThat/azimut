@@ -298,7 +298,7 @@ describe('the card on the page', () => {
   it('reads a chip in a drawn table off the page', async () => {
     const text = '| Proof |\n| --- |\n| [[entity:p53|YEMEN Proof 53]] |\n\nAfter.';
     editor(text, { at: text.length });
-    const ref = view.contentDOM.querySelector('.cm-block-table a[data-entity-id="p53"]');
+    const ref = view.contentDOM.querySelector('.cm-block-table [data-entity-id="p53"]');
     expect(ref).not.toBeNull();
     ref.dispatchEvent(new MouseEvent('mousemove', { bubbles: true }));
     await settle(HOVER_MS + 10);
