@@ -18,7 +18,10 @@
  * about links (`STYLE_DEFAULTS`, Azimut's own; Settings › Publishing › Styles changes
  * them for every note). `sources_style`, `annexes` and `link_check` change them for
  * one note, late keys like the others. So does `sources_list`, which list of sources a
- * note with sources ends on: "" decides from the note itself (`sourcesListOf`).
+ * note with sources ends on: "" decides from the note itself (`sourcesListOf`). And
+ * `method_list` and `geolocations_list`, the same three ways for the How this was made
+ * and Geolocations annexes against the note's own Method or Geolocations section
+ * (`annexListOf`).
  */
 import { api } from '../api.js';
 
@@ -37,6 +40,8 @@ export const DEFAULT_LOOK = Object.freeze({
   sources_style: '',
   link_check: '',
   sources_list: '',
+  method_list: '',
+  geolocations_list: '',
   annexes: Object.freeze({}),
 });
 
@@ -108,18 +113,62 @@ export function sourcesListOf(look, text) {
 }
 
 /**
+ * The two annexes a note may hold a section of its own for, the heading that opens it
+ * (`engine/notes_markdown.py`, `OWN_SECTIONS`, both read against
+ * `tests/fixtures/own-sections.json`) and the look's key choosing between them.
+ */
+export const OWN_SECTIONS = {
+  method: {
+    key: 'method_list',
+    heading: /^ {0,3}#{1,6}[ \t]+(?:\d+(?:\.\d+)*\.?[ \t]+)?[*_]*(?:our[ \t]+)?(?:methods?|methodology|how[ \t]+this[ \t]+was[ \t]+made)(?![A-Za-z0-9_])/i,
+  },
+  geolocations: {
+    key: 'geolocations_list',
+    heading: /^ {0,3}#{1,6}[ \t]+(?:\d+(?:\.\d+)*\.?[ \t]+)?[*_]*(?:(?:annex|appendix)(?:[ \t]+[A-Za-z0-9]{1,3})?[ \t]*:[ \t]*)?(?:our[ \t]+)?geolocations(?![A-Za-z0-9_])/i,
+  },
+};
+
+/** Whether a note holds its own section `which` (`method` or `geolocations`): a heading line of its own, code left out. */
+export function ownSection(text, which) {
+  const heading = OWN_SECTIONS[which]?.heading;
+  if (!heading) return false;
+  let fence = '';
+  for (const line of String(text ?? '').split(/\r\n|\r|\n/)) {
+    const marks = FENCE_LINE.exec(line);
+    if (fence) {
+      if (marks && marks[1][0] === fence[0] && marks[1].length >= fence.length) fence = '';
+      continue;
+    }
+    if (marks) {
+      fence = marks[1];
+      continue;
+    }
+    if (heading.test(line)) return true;
+  }
+  return false;
+}
+
+/** How a look prints the annex `which` for a note holding `text`: as set, else its own section when it has one. */
+export function annexListOf(look, text, which) {
+  const set = OWN_SECTIONS[which] ? normaliseLook(look)[OWN_SECTIONS[which].key] : '';
+  return set || (ownSection(text, which) ? 'own' : 'generated');
+}
+
+/**
  * What a note includes after its text, said in one line for the Look's folded group:
- * its list of sources (`listing`, from `sourcesListOf`), how many annexes and how its
+ * its list of sources (`listing`, from `sourcesListOf`), how many annexes (those the
+ * note's own section stands in for left out, `annexLists` from `annexListOf`) and how its
  * links are checked. `Academic sources · 5 annexes · links grouped`.
  */
-export function includesSummary(profile, listing) {
+export function includesSummary(profile, listing, annexLists = {}) {
   const written = (SOURCES_STYLES.find((one) => one.id === profile.sources_style) ?? SOURCES_STYLES[2]).label;
   const parts = [];
   if (!profile.sources) parts.push('No sources list');
   else if (listing === 'own') parts.push('Your own sources');
   else if (listing === 'both') parts.push(`Your own and ${written.toLowerCase()} sources`);
   else parts.push(`${written} sources`);
-  const annexes = ANNEXES.filter((annex) => profile[annex.id]).length;
+  // an annex the note's own section stands in for is not printed
+  const annexes = ANNEXES.filter((annex) => profile[annex.id] && annexLists[annex.id] !== 'own').length;
   parts.push(annexes ? `${annexes} ${annexes === 1 ? 'annex' : 'annexes'}` : 'no annex');
   if (profile.sources) parts.push(profile.link_check === 'each' ? 'each link checked' : 'links grouped');
   return parts.join(' · ');
@@ -369,6 +418,8 @@ export function normaliseLook(look) {
     sources_style: pick(given.sources_style ?? '', SOURCES_STYLES, ''),
     link_check: pick(given.link_check ?? '', LINK_CHECKS, ''),
     sources_list: pick(given.sources_list ?? '', SOURCES_LISTS, ''),
+    method_list: pick(given.method_list ?? '', SOURCES_LISTS, ''),
+    geolocations_list: pick(given.geolocations_list ?? '', SOURCES_LISTS, ''),
     annexes: annexesOf(given.annexes),
     ...(header && { header }),
     ...(footer && { footer }),
@@ -384,7 +435,8 @@ export function sectionsSet(look) {
   const whole = normaliseLook(look);
   return {
     style: whole.style !== DEFAULT_LOOK.style || whole.toc || whole.numbered || whole.sources !== '' || whole.web !== ''
-      || whole.sources_style !== '' || whole.link_check !== '' || whole.sources_list !== '' || Object.keys(whole.annexes).length > 0,
+      || whole.sources_style !== '' || whole.link_check !== '' || whole.sources_list !== '' || whole.method_list !== ''
+      || whole.geolocations_list !== '' || Object.keys(whole.annexes).length > 0,
     text: Boolean(whole.font || whole.size),
     page: whole.page !== DEFAULT_LOOK.page || Boolean(whole.accent || whole.tlp),
     cover: whole.cover.on,

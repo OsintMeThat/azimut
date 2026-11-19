@@ -34,8 +34,8 @@
   import { LOOK_HELP } from '../../lib/notes/lookHelp.js';
   import {
     ANNEXES, BANDS, BAND_MAX, COVERS, FONTS, LINK_CHECKS, PAGES, SIZES, SLOTS, SLOT_LOGOS, SOURCES_LISTS, SOURCES_STYLES, STYLES, SUBTITLE_MAX, TLPS,
-    WEBS, bandStyleOwn, coverChoice, coverFor, includesSummary, lookFont, normaliseLook, ownSources, profileChanged, profileOf, sectionsSet, slotText,
-    styleLabel, styleOwn as ownWords, stylesTable, withProfile,
+    OWN_SECTIONS, WEBS, annexListOf, bandStyleOwn, coverChoice, coverFor, includesSummary, lookFont, normaliseLook, ownSection, ownSources, profileChanged,
+    profileOf, sectionsSet, slotText, styleLabel, styleOwn as ownWords, stylesTable, withProfile,
   } from '../../lib/notes/look.js';
   import { prefs } from '../../lib/state.svelte.js';
   import { faceFamily, loadNoteFont, noteFonts } from '../../lib/notes/noteFonts.js';
@@ -107,10 +107,18 @@
   };
   const SOURCES_HELP = { academic: LOOK_HELP.sourcesAcademic, web: LOOK_HELP.sourcesWeb, short: LOOK_HELP.sourcesShort };
   const LIST_HELP = { generated: LOOK_HELP.sourcesListGenerated, own: LOOK_HELP.sourcesListOwn, both: LOOK_HELP.sourcesListBoth };
+  const ANNEX_LIST_HELP = { generated: LOOK_HELP.annexListGenerated, own: LOOK_HELP.annexListOwn, both: LOOK_HELP.annexListBoth };
   /** The list the note ends on unless the look says: its own section once it has a Sources or References heading. */
   const followed = $derived(ownSources(text) ? 'own' : 'generated');
   const listing = $derived(whole.sources_list || followed);
-  const summary = $derived(includesSummary(profile, listing));
+  /** The same for the two annexes a note may write its own section of: what it follows, what it prints. */
+  const annexFollowed = $derived(Object.fromEntries(Object.keys(OWN_SECTIONS).map((which) => [which, ownSection(text, which) ? 'own' : 'generated'])));
+  const annexLists = $derived(Object.fromEntries(Object.keys(OWN_SECTIONS).map((which) => [which, annexListOf(whole, text, which)])));
+  const ANNEX_LISTS = {
+    method: { label: 'Method section', help: LOOK_HELP.methodList, auto: LOOK_HELP.methodListAuto },
+    geolocations: { label: 'Geolocations section', help: LOOK_HELP.geolocationsList, auto: LOOK_HELP.geolocationsListAuto },
+  };
+  const summary = $derived(includesSummary(profile, listing, annexLists));
   const CHECK_HELP = { each: LOOK_HELP.linkEach, grouped: LOOK_HELP.linkGrouped };
 
   /** One profile switch for this note, or back to its style's (`null`). */
@@ -278,6 +286,7 @@
                 {#if profile.sources}{@render listRow()}{/if}
                 {#each ANNEXES as annex (annex.id)}
                   {@render switchRow(annex.id, annex.label, annex.note, ANNEX_HELP[annex.id])}
+                  {#if ANNEX_LISTS[annex.id] && profile[annex.id]}{@render annexListRow(annex.id)}{/if}
                 {/each}
                 {@render segRow('sources_style', 'Sources written as', SOURCES_STYLES, SOURCES_HELP, LOOK_HELP.sourcesStyle)}
                 {@render segRow('link_check', 'Link check', LINK_CHECKS, CHECK_HELP, LOOK_HELP.linkCheck)}
@@ -524,6 +533,27 @@
           onclick={() => set({ sources_list: '' })}>Reset</button></span>
     {:else}
       <span class="own-said" title={LOOK_HELP.sourcesListAuto}>Follows the note</span>
+    {/if}
+  </div>
+{/snippet}
+
+{#snippet annexListRow(which)}
+  {@const key = OWN_SECTIONS[which].key}
+  {@const said = ANNEX_LISTS[which]}
+  <div class="include seg-row list-row" data-include={key}>
+    <span class="include-label" title={said.help}>{said.label}</span>
+    <div class="seg" role="radiogroup" aria-label={said.label} title={said.help}>
+      {#each SOURCES_LISTS as choice (choice.id)}
+        <button type="button" class:on={annexLists[which] === choice.id} role="radio" aria-checked={annexLists[which] === choice.id}
+          title={ANNEX_LIST_HELP[choice.id]} onclick={() => set({ [key]: choice.id === annexFollowed[which] ? '' : choice.id })}>{choice.label}</button>
+      {/each}
+    </div>
+    {#if whole[key]}
+      <span class="own-said changed">Changed here ·
+        <button type="button" class="reset" title={LOOK_HELP.sourcesListReset} aria-label="Reset to following the note"
+          onclick={() => set({ [key]: '' })}>Reset</button></span>
+    {:else}
+      <span class="own-said" title={said.auto}>Follows the note</span>
     {/if}
   </div>
 {/snippet}
