@@ -51,7 +51,7 @@
   import { gotoPoint } from '../lib/navigate.js';
   import { droppedMedia, carriesMedia } from '../lib/drag.js';
   import { CALLOUTS, calloutMarkdown } from '../lib/notes/callouts.js';
-  import { CHART_STARTER, SLASH_COMMANDS, slashInsert, uploadedImage } from '../lib/notes/syntax.js';
+  import { CHART_STARTER, DIAGRAM_STARTER, SLASH_COMMANDS, slashInsert, uploadedImage } from '../lib/notes/syntax.js';
   import { BUILT_IN_PICTURES, builtInLine } from '../lib/notes/reportParts.js';
   import { ownCover, readLook, writeLook } from '../lib/notes/look.js';
   import { noteMode } from '../lib/notes/noteMode.svelte.js';
@@ -59,6 +59,7 @@
   import { offerWriter, openInDock } from '../lib/notes/noteDock.svelte.js';
   import {
     captionAt, heldRange, holdCell, holdRange, insertAtCursor, insertCover, insertInclude, jumpToLine, noteExtensions, openTablePicker, startChart,
+    startDiagram,
     placeInCell, placeText, releaseCell, releaseRange, resizePicture, setLinePrefix, setNoteCase, setNoteMode, takeBackRange,
     toggleWrap,
   } from '../lib/notes/liveMarkdown.js';
@@ -182,6 +183,7 @@
     get statePosted() { return template || !caseId ? null : (entity, url) => statePostedOf(caseId, entity, url); },
     table: () => newTable(),
     chart: () => newChart(),
+    diagram: () => newDiagram(),
     /** The note being written, which a chart is drawn in the look of and whose tables its rows are copied from. */
     get noteId() { return template || !doc ? '' : (doc.noteId ?? 'case'); },
     get infographic() { return oninfographic && !template && caseId ? (at) => oninfographic(at) : null; },
@@ -223,6 +225,19 @@
     const head = view.state.selection.main.head;
     const line = view.state.doc.lineAt(head);
     const made = slashInsert({ block: CHART_STARTER }, { before: line.text.slice(0, head - line.from) });
+    view.dispatch({ changes: { from: head, insert: made.text }, selection: { anchor: head + made.cursor }, userEvent: 'input.complete' });
+  }
+
+  /** `/` › Diagram: the gallery of kinds on the drawn page, each a form to fill; the raw Markdown gets Mermaid to edit. */
+  function newDiagram() {
+    if (!view || readOnly) return;
+    if (noteMode.mode !== 'markdown') {
+      startDiagram(view);
+      return;
+    }
+    const head = view.state.selection.main.head;
+    const line = view.state.doc.lineAt(head);
+    const made = slashInsert({ block: DIAGRAM_STARTER }, { before: line.text.slice(0, head - line.from) });
     view.dispatch({ changes: { from: head, insert: made.text }, selection: { anchor: head + made.cursor }, userEvent: 'input.complete' });
   }
 

@@ -60,7 +60,7 @@ describe('the note page', () => {
   it('draws a closed mermaid fence as a diagram, and its source once it is open', () => {
     const text = '```mermaid\nflowchart LR\n  A --> B\n```\n\nAfter';
     const state = noteState(text, { caseInfo: CASE });
-    expect(drawn(state)[0]).toBe(`block 0-${text.indexOf('\n\nAfter')}`);
+    expect(drawn(state)[0]).toBe(`diagram 0-${text.indexOf('\n\nAfter')}`);
     // its lines are code, its two fences faint
     expect(drawn(openedState(state, 14)).every((word) => /^line cm-(code|fence)-line/.test(word))).toBe(true);
     expect(drawn(openedState(state, 14)).filter((word) => word.startsWith('line cm-fence-line'))).toHaveLength(2);

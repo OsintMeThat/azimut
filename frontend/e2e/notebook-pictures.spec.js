@@ -209,7 +209,7 @@ test('every drawn block is as tall on the page as the editor measures it, so the
     'Words.', '::: map\ntitle: Front\n:::', 'Words.', '[[include:n2]]', 'Words.', '[[media:roof|Roof]]{width=50%}', 'Closing words.',
   ].join('\n\n');
   await notebook(page, text);
-  await expect(page.locator('.cm-block-diagram svg')).toBeVisible();
+  await expect(page.locator('.cm-block-diagram .cm-dg-figure svg')).toBeVisible();
   await expect(page.locator('.cm-block-story img')).toBeVisible();
   const rows = await page.evaluate(() => {
     const view = document.querySelector('.cm-content').cmTile.root.view;
