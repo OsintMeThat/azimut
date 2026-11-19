@@ -32,6 +32,7 @@ import {
 } from './chartText.js';
 import { tablesOf } from './gridEdits.js';
 import { button, icon, openMenu } from './gridMenu.js';
+import { heldHeight, holdHeight, moveHeight, releaseHeight } from './heights.js';
 import { blockAt } from './puts.js';
 import { blocksIn, openSource } from './ranges.js';
 import { noteCase, noteHandlers } from './state.js';
@@ -43,6 +44,8 @@ import { BlockWidget, markPicked, sourceButton } from './widgets.js';
 
 /** The rows The numbers shows before it says how many more. */
 export const NUMBERS_SHOWN = 60;
+/** A chart's height before it is drawn, in pixels. */
+const CHART_HEIGHT = 440;
 /** The table `/` › Chart starts with when the note holds none. */
 export const STARTER_TABLE = '| Category | Count |\n| --- | ---: |\n|  |  |\n|  |  |\n|  |  |';
 
@@ -472,6 +475,7 @@ export class ChartWidget extends BlockWidget {
       event.preventDefault();
       box.chart.toggleSettings(true);
     });
+    holdHeight(box, this);
     return box;
   }
 
@@ -480,6 +484,7 @@ export class ChartWidget extends BlockWidget {
     if (!previous.same(this)) dom.chart.update(this);
     else dom.chart.widget = this;
     markPicked(dom, this.picked);
+    moveHeight(dom, this);
     return true;
   }
 
@@ -488,11 +493,13 @@ export class ChartWidget extends BlockWidget {
   }
 
   destroy(dom) {
+    releaseHeight(dom);
     dom.chart?.destroy();
   }
 
+  /** The height it was last drawn at, its settings or numbers open included, else a drawing's. */
   get estimatedHeight() {
-    return 440;
+    return heldHeight(this) ?? CHART_HEIGHT;
   }
 }
 
@@ -780,7 +787,7 @@ registerBlock({
   widget: (spec) => new ChartWidget(spec),
   open: openChart,
   atomic: true,
-  height: 440,
+  height: CHART_HEIGHT,
   extensions: [watchOrigins],
   theme: THEME,
 });

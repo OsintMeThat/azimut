@@ -10,6 +10,7 @@ import { WidgetType } from '@codemirror/view';
 import { markdownHtml } from '../../markdown.js';
 import { NO_IDENTITY } from '../reportParts.js';
 import { blockKind } from './blocks.js';
+import { heldHeight, holdHeight, moveHeight, releaseHeight } from './heights.js';
 import { drawHints, drawPlaceholders, hintsMarked } from './inline.js';
 import { openBlockAt } from './ranges.js';
 import { resolve } from './state.js';
@@ -134,7 +135,15 @@ export class BlockWidget extends WidgetType {
   updateDOM(dom, _view, previous) {
     if (!(previous instanceof BlockWidget) || !previous.same(this)) return false;
     markPicked(dom, this.picked);
+    moveHeight(dom, this);
     return true;
+  }
+
+  /** What its drawn height is kept by: what `same` compares (`holdHeight`). */
+  heightKey() {
+    this.heldKey ??= JSON.stringify([this.kind, this.source, this.info.caseId ?? '', this.writable, this.align, this.pinned,
+      Object.keys(NO_IDENTITY).map((key) => this.info.identity?.[key] ?? null), this.caseKey()]);
+    return this.heldKey;
   }
 
   /** What the block draws from the case: the records and notes its source names, as they read now. */
@@ -177,7 +186,12 @@ export class BlockWidget extends WidgetType {
       openBlockAt(view, box);
     });
     kind?.listen?.(box, this, view);
+    holdHeight(box, this);
     return box;
+  }
+
+  destroy(dom) {
+    releaseHeight(dom);
   }
 
   ignoreEvent(event) {
@@ -186,8 +200,9 @@ export class BlockWidget extends WidgetType {
     return event.type !== 'mousedown' || Boolean(fields && event.target?.closest?.(fields));
   }
 
+  /** The height it was last drawn at, else its kind's estimate. */
   get estimatedHeight() {
-    return blockKind(this.kind)?.height ?? 160;
+    return heldHeight(this) ?? blockKind(this.kind)?.height ?? 160;
   }
 }
 
