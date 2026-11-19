@@ -7043,8 +7043,8 @@ The file stays the Markdown it was: what the old split-pane Notebook wrote opens
 was written and is never rewritten for being opened. The header names the note (the
 name is the filename), files it in a folder, says whether it is saved, and holds
 **Look**, **Write | Page**, **Pin to the side**, **Open in its own tab**, **Export**, and a
-⋯ with *Editions*, *Keep as template*, *To Post* and *Delete* (*Clear the case notes*
-for the case's page).
+⋯ with *Editions*, *Archive every link…*, *Keep as template*, *To Post* and *Delete*
+(*Clear the case notes* for the case's page).
 PDF export writes one server-rendered PDF per note without a print dialog, in the
 note's look, local images and browser-drawn diagrams with it, remote images left out,
 homonyms under stable suffixes, into the shared notes destination (the case's
@@ -7061,6 +7061,29 @@ and *Go to*. Links to the case's own work are not counted: an archived copy itse
 (Wayback, archive.today), the Wayback and Copernicus viewers and the Esri imagery
 services, a map view the case captured, and where a proof was posted. The public
 edition counts only the links it prints. The Page pane lists the same lines, without the links under them.
+
+**Archive every link…**, on the line of links with no archived copy and in the note's ⋯,
+opens a dialog that says once what goes out: each address to the Internet Archive
+(web.archive.org), which keeps a copy anyone can open, free and with no account, and
+that the archive learns which pages the note cites. It lists the links the check counts,
+the public edition's (*Include internal passages* adds theirs, off by default), and says
+how many are to archive, how many have a copy already and how many the case lacks and
+will file as bookmarks in a folder *Links of “<note>”*. **Archive N links** is the only
+press that reaches the network (`POST /notes/{id}/archive`, `engine/linkarchive.py`): a
+background job on the case's queue asks the archive for each page's newest copy and
+reuses one under 30 days old (*Make fresh copies* makes a new one anyway), else saves
+it, one link at a time, 10 s at least between saves and waiting as a 429 asks. A row
+per link says *new copy, 18 Nov 09:30*, *copy of 12 Nov kept*, *no longer online · copy
+of 28 Oct linked*, why it failed, *saving…* or *waiting*, under the count, a bar and
+the time left. The dialog can be closed (*Keep going in the background*); the note's
+header then says *Archiving 12 of 70…* and opens it again, and a toast says when it
+ends. **Stop** ends it after the link under way. Each copy is kept on the item the link
+finds (`archive_url`, `archived_at`); a bookmark filed for a link the case lacked is
+dated as read the day it was archived, unless only an older copy could be linked. The
+note's text is never changed: its sources list the copy and the day, and the check
+counts the link no more. Offline or past the archive's patience it stops and says so,
+keeping what it did; failed links are tried again on the next press, and a run cut
+short by Azimut closing waits for that press rather than going on at startup.
 
 **PDF | HTML.** The export dialog opens with a **PDF | HTML** switch, the last one picked
 kept for this browser; everything else (the edition, the destination, the check, the
