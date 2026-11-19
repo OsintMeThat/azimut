@@ -7452,7 +7452,7 @@ layers puts a layer in the note on the side from its row, and a Map plate offers
 interactive map* beside its page, its sheet and its slides. Each lands as a put does, Undo
 included. The note holds the map as a `::: map` block of `key: value` lines it can read
 and edit (`title`, one `layer` a line, `plate`, `proofs`, `ground`, one `detail` a line,
-`view`), drawn in the note as a small card over its ground (`engine/notes_maps.py`). The
+`view`, and the settings below), drawn in the note as the page draws it (`engine/notes_maps.py`). The
 put frames the map on what it shows (a plate's own view for a plate) and files the ground
 under it once, on the press, the way Add › This view files a capture: twice the frame's
 resolution, from the imagery picked (Esri World Imagery by default), its credit kept. A
@@ -7475,6 +7475,46 @@ said under it. The PDF prints it as a picture of that day, its credit under it. 
 before export names a layer, a plate or a picture no longer in the case at its line, a
 map with no ground, and one past 8 MB. A layer, a plate or a ground a map names is a use:
 its delete names the note.
+
+**A map's settings.** In the drawn note a map is the page's own drawing over its ground, read
+from the case and never fetched (`POST /notes/maps/describe`). Its bar has **Draw** and
+**Settings**, which open on the map between its bar and its picture, in five tabs; a double press
+or Enter opens them too. Each choice is one `key: value` line of the block, written after `view`
+in the engine's order, the other lines kept as they were, and one Undo step; a block without them
+reads and draws as it always did, in every reader. **Look**: the title; the base, *Satellite* (the
+ground as filed), *Map*, *Topographic* or *Dark* (`base`), each other base filed once on the press
+that picks it as a put files its ground (OpenStreetMap, OpenTopoMap, and OpenStreetMap again drawn
+dark), a view filed before cited again with nothing fetched, and refused with the map left as it
+was when the imagery cannot be fetched; the frame, a rectangle dragged on the map or *Fit to what it
+shows* (`frame: west, south, east, north`), the ground laid where it stands and a part it does not
+cover shown plain, with *File the ground for this frame*; the size, *Half*, *Wide* or *Full height*;
+the legend, *Shown*, *Folded* or *Hidden*; a north arrow; the scale, *Off*, *Page* or *Page + PDF*.
+**Layers**: each layer on or off (`hide`) and painted in one colour of the case's palette (`colour:
+Front line = #d55e00`), another layer added, the proofs of a period, every point or *Only where it
+was filmed* (`proof points`), the names on the map (`labels`) and the crowd past which marks are a
+count to press (`crowds`: off, 8, 12, 20). **Draw**: *Area to highlight* (its outline dashed over a
+light fill, its words on its middle, proposed as its size, *about 15 km²*), *Point*, *Line* and
+*Area*, put corner by corner (the first corner again, the last again or Enter ends one, Backspace
+takes a corner back, Escape gives up); each lands in a personal layer of the case made for the map
+at its first drawing and named in the block (`layer:`), so it is case data used, bundled and
+trashed like any other, never a line of the block; each is listed with its name, colour, first and
+last day and *On the map*, and its toast has an Undo. **Time**: the timeline on or off, the day it
+opens on (a day of its own becomes a stop of the slider), Play's pace; the steps, its plate's or its
+proofs' until one is changed, then its own (`step: day | label | lat, lon, zoom | proof | words`):
+moved, framed by a rectangle dragged on the map, named, given their words, taken out or added.
+**Cards**: what a feature's card shows, its picture, its sentence, its source and its verify links.
+The offline map, the live map, the PDF's picture and an infographic's map panel each honour what
+applies to them: the live map draws *Map* and *Dark* in OpenFreeMap's own styles, sharper than the
+picture filed, and a *Topographic* map as filed with a switch to OpenFreeMap's; the PDF prints a
+half map half wide, a north arrow and the scale when it says *Page + PDF*, and the day the map
+opens on. A layer's lines and areas whose names are on the map write them on their middle.
+
+**A map from nothing.** `/` › *Interactive map* › **Start an empty map** frames a place on the
+app's own map, opened by that press (a place name or coordinates found on **Find**, the case's own
+gazetteer first and the geocoder after, never on a keystroke, or the map panned), with a title and
+a base. **Start the map** files the ground of the frame and makes the map a personal layer of its
+own (`POST /notes/maps/scratch`); it lands as a put does, Undo sending both to the Trash, and opens
+on its Draw tab.
 
 **Charts.** A `::: chart` block holds its settings as `key: value` lines above its own
 table (`kind`, `title`, `count`, `by`, `colour by`, `order`, `only`, `highlight`, `show`,
