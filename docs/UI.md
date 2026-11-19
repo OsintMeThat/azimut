@@ -7229,8 +7229,10 @@ picture cell of such a row offers **Cut a frame**, which opens Inspect on the vi
 time with the note beside it; the frame's Put in lands in the cell.
 
 The file stays the Markdown it was: what the old split-pane Notebook wrote opens as it
-was written and is never rewritten for being opened. The header names the note (the
-name is the filename), files it in a folder, says whether it is saved, and holds
+was written and is never rewritten for being opened. The header names the note (its
+file is named after the title, and the title keeps what a file name cannot hold:
+`Map: the front by day` is saved as `Map_ the front by day.md`, and only a rename ever
+changes it), files it in a folder, says whether it is saved, and holds
 **Look**, **Write | Page**, **Pin to the side**, **Open in its own tab**, **Export**, and a
 ⋯ with *Editions*, *Archive every link…*, *Keep as template*, *To Post* and *Delete*
 (*Clear the case notes* for the case's page).
@@ -7769,7 +7771,9 @@ record's `look`, `notes.case_look` for the case notes) and never in its Markdown
 panel shows one tab at a time, *Style* (what the document is **For**, then contents and
 numbered headings, **What it includes**, and the web page's layout), *Text*, *Page* (paper, accent, marking), *Cover* and *Header
 & footer*, a dot on each tab holding something set, and reopens on the last tab used.
-The **For** row lists the five styles, each with a line on what it gives; the style is
+The panel stays under its button, left of the Page pane when the pages show beside the
+note, as tall as the room under it and scrolled inside, so the pages it changes stay in
+view. The **For** row lists the five styles, each with a line on what it gives; the style is
 the profile, so it decides what the document carries after its text as well as its look:
 
 - **Report** has a running header, *Page X / Y*, numbered sections in the accent,
@@ -7784,11 +7788,24 @@ the profile, so it decides what the document carries after its text as well as i
 - **Plain**, with nothing else set, is the document the Notebook always printed, to the
   byte: no sources list and no annex.
 
-**What it includes** lists the **Sources** list and the five annexes as switches, then
-**Sources written as** (*Academic*, *Web*, *Short*) and the **Link check** (*Each link*,
-*One line*). Each shows the style's own value (*Report's own*) until changed for this
+**What it includes** is one line each time the panel opens, *Academic sources · 5
+annexes · links grouped* and *Change…*, which opens it (*Fold* folds it again). Open, it
+lists the **Sources** and the five annexes as switches, then **Sources written as**
+(*Academic*, *Web*, *Short*) and the **Link check** (*Each link*, *One line*). Each shows the style's own value (*Report's own*) until changed for this
 note, then *Changed here · Reset*; setting one back to the style's value is the style's
-own again. The annexes print after the sources, each a heading of its own in the
+own again.
+
+With the sources on, **Sources list** says which list the document ends on: *Generated*,
+the numbered list written from what the note cites; *My own section*, the note's own
+section as written; or *Both*. Until set it follows the note (*Follows the note*): its
+own section once the note has a heading named *Sources* or *References*, at any level,
+else the generated list. With its own section, every outside link is still checked for an
+archived copy and a seen day, and nothing is numbered, since no generated list prints for
+a citation to point into. *Both* prints the note's section, then the generated list,
+which the citations number into, headed *References* under a note's own *Sources*.
+*Generated* leaves the note's own section out of the document, up to the next heading of
+its rank, so one list prints. The PDF, the HTML page, its web folder and a WordPress draft
+print the same; Plain prints no generated list whatever is set. The annexes print after the sources, each a heading of its own in the
 contents and the bookmarks, in the PDF, the HTML page, its web folder and a WordPress
 draft, and only when they have something to say (`engine/noteannexes.py`):
 
@@ -7870,7 +7887,7 @@ and the size, Smaller, Normal or Larger, which headings, tables and captions fol
 A letter a face lacks prints in the Noto face of its script. Templates carry both.
 Its **Sources** switch is on for Report, Web article, Brief and Journal and off for
 Plain until set; templates carry it and every switch of *What it includes*, each kept
-only once set (`sources_style`, `annexes`, `link_check`), so a look that never used
+only once set (`sources_style`, `annexes`, `link_check`, `sources_list`), so a look that never used
 them reads as an older Azimut wrote it. Its **Web page** row, *Article* or
 *Story*, lays out the HTML page only (see *Story* above); it is kept only once set to
 Story, so a look that never used it reads as an older Azimut wrote it, and templates
@@ -7935,7 +7952,11 @@ the list: an empty section; a picture, video, chapter or record no longer in the
 (marked red); a picture with no source while sources are listed; tasks still open,
 outside Plain; a link a reader cannot open (`file:`, localhost, a private address);
 outside links with no archived copy, or none the case holds, while sources are listed; a
-script no face covers. One that names a line goes there when pressed. A template's pages give no such warnings, since a
+script no face covers. One that names a line goes there when pressed, as its *Go to* in
+the export dialog does. One about a heading lands on the line under it, never in the
+heading's words: at the section's first words, or, for an empty section, on an empty
+paragraph written under the heading (and any guidance there), which one Undo takes back.
+A link's warning lands on the link's line. A template's pages give no such warnings, since a
 template is guidance by design.
 
 **Pictures and pages.** Hovering a picture, in the note or on its page in the Page
@@ -8257,6 +8278,11 @@ instrument style of QGIS, Google Earth Pro, Resolve and Lightroom.
   stay fixed across themes. Surfaces over imagery remain dark through
   `.dark-surface`. New chrome must use tokens; hardcoded light colours are limited
   to text on dark image scrims.
+- **Quiet controls stay visible**: a ⋯, a ▾, a handle or any button drawn as an icon
+  alone rests in `--text-2`, never in the hint grey `--text-3` or at a lowered opacity,
+  so it stands out at least 3:1 from what it sits on, a row lit under the pointer
+  included (WCAG 1.4.11), in both themes. `lib/notes/quietControls.render.test.js`
+  measures the note editor's and the Notebook's.
 - **Shape**: radii 3/4/6px, flat panels with 1px borders, rectangular badges.
 - **Update dot**: `.update-dot` on a `.dotted` host says "something here is to
   install or update", and nothing else. It repeats down one path — the topbar

@@ -283,7 +283,8 @@ describe('what the page warns about', () => {
     const rows = list.querySelectorAll('li');
     expect(rows[1].querySelector('button')).toBeNull();
     rows[0].querySelector('button').click();
-    expect(onjump).toHaveBeenCalledWith(14);
+    // a warning about a heading lands under it, a link's on its line (`warnings.js`, `jumpFor`)
+    expect(onjump).toHaveBeenCalledWith(14, { section: true });
     expect(target.querySelector('.pane-bar').textContent).toContain('2 warnings');
   });
 

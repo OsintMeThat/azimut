@@ -8,9 +8,39 @@ const {
   BANDS, BAND_MAX, COVERS, DEFAULT_LOOK, FONTS, HINT_LINE, coverChoice, coverFor, ownCover, INCLUDE_LINE, SIZES, SOURCES_OFF_STYLES, STYLES, hintLine, includeLine, isPlainLook, isReport, lookFont,
   WEBS, bandStyleOwn, normaliseLook, readLook, sectionsSet, slotText, reportBody, reportLook, sourcesOn, templateLook, writeLook,
   ANNEXES, LINK_CHECKS, SOURCES_STYLES, STYLE_DEFAULTS, profileChanged, profileOf, styleOwn, stylesTable, withProfile,
+  SOURCES_LISTS, includesSummary, ownSources, sourcesListOf,
 } = await import('./look.js');
 
 afterEach(() => vi.clearAllMocks());
+
+describe('the list of sources a note ends on', () => {
+  it('reads a Sources or References heading of the note as the documents do', () => {
+    // `notes_markdown.own_sources` reads the same file: one rule, read from both sides
+    const { cases } = JSON.parse(readFileSync(new URL('../../../../tests/fixtures/own-sources.json', import.meta.url), 'utf8'));
+    expect(cases.length).toBeGreaterThan(10);
+    for (const { text, own } of cases) expect(ownSources(text), text).toBe(own);
+  });
+
+  it('follows the note until it is set, and is kept as a late key', () => {
+    expect(SOURCES_LISTS.map((one) => one.id)).toEqual(['generated', 'own', 'both']);
+    expect(sourcesListOf({ style: 'report' }, 'Words.')).toBe('generated');
+    expect(sourcesListOf({ style: 'report' }, '## Sources\n\n- one')).toBe('own');
+    expect(sourcesListOf({ style: 'report', sources_list: 'both' }, 'Words.')).toBe('both');
+    expect(normaliseLook({ sources_list: 'mine' }).sources_list).toBe('');
+    expect(normaliseLook({ sources_list: 'own' }).sources_list).toBe('own');
+    expect(sectionsSet({ sources_list: 'generated' }).style).toBe(true);
+  });
+
+  it('says what a note includes in one line', () => {
+    const report = profileOf({ style: 'report' });
+    expect(includesSummary(report, 'generated')).toBe('Academic sources · 5 annexes · links grouped');
+    expect(includesSummary(report, 'own')).toBe('Your own sources · 5 annexes · links grouped');
+    expect(includesSummary(report, 'both')).toBe('Your own and academic sources · 5 annexes · links grouped');
+    expect(includesSummary(profileOf({ style: 'brief', annexes: { credits: 'on' }, link_check: 'each' }), 'generated'))
+      .toBe('Short sources · 1 annex · each link checked');
+    expect(includesSummary(profileOf({ style: 'plain' }), 'generated')).toBe('No sources list · no annex');
+  });
+});
 
 describe('a look', () => {
   it('is the plain one when nothing was kept', () => {

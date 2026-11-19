@@ -11,18 +11,21 @@
    * Items take the `fm-*` classes styled here, so every floating menu reads the
    * same: `fm-item` (a row, `danger` for one that removes), `fm-head`, `fm-sep`
    * and `fm-note`. A `column` menu lays its parts out top to bottom and lets the
-   * part that scrolls of its own give way, the rest staying in view.
+   * part that scrolls of its own give way, the rest staying in view. A `below` panel
+   * stays under its opener and scrolls in the room there (`placeFloating`), left of
+   * `clear`, an element it leaves in view when the window has room for both.
    */
   import { portal } from '../lib/fullscreen.js';
   import { placeFloating } from '../lib/floatingPlace.js';
 
-  let { anchor = null, at = null, width = 220, align = 'start', label, role = 'menu', column = false, onclose, children } = $props();
+  let { anchor = null, at = null, width = 220, align = 'start', below = false, clear = null, label, role = 'menu', column = false, onclose, children } = $props();
   let node = $state(null);
   let place = $state({ left: -9999, top: -9999, maxHeight: 480 });
 
   function reposition() {
     if (!node) return;
-    place = placeFloating({ anchor: anchor?.getBoundingClientRect?.() ?? null, at, align,
+    const kept = clear?.isConnected ? clear.getBoundingClientRect() : null;
+    place = placeFloating({ anchor: anchor?.getBoundingClientRect?.() ?? null, at, align, below, clear: kept?.width ? kept.left : null,
       size: { width: node.offsetWidth || width, height: node.offsetHeight },
       viewport: { width: window.innerWidth, height: window.innerHeight } });
   }
@@ -79,7 +82,8 @@
     border-radius: var(--r-sm); color: var(--text-1); font-size: var(--fs-sm); text-align: left; cursor: pointer; }
   .float-menu :global(.fm-item:hover:not(:disabled)), .float-menu :global(.fm-item:focus-visible) { background: var(--bg-3); }
   .float-menu :global(.fm-item:disabled) { color: var(--text-3); cursor: default; }
-  .float-menu :global(.fm-item > svg) { flex: none; color: var(--text-3); }
+  .float-menu :global(.fm-item > svg) { flex: none; color: var(--text-2); }
+  .float-menu :global(.fm-item:disabled > svg) { color: inherit; }
   .float-menu :global(.fm-item.danger) { color: var(--danger, #e5484d); }
   .float-menu :global(.fm-item.danger > svg) { color: inherit; }
   .float-menu :global(.fm-item .fm-grow) { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }

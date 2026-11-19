@@ -166,6 +166,14 @@ CHAPTER_GONE = "The note included here is no longer in the case."
 #: heading that opens a Limits section of the note's own.
 LIMITS = "limits"
 LIMITS_HEADING = re.compile(r"^(?:\d+(?:\.\d+)*\.?\s+)?(?:limits|limitations)\b", re.I)
+#: A heading line that opens the note's own list of sources: Sources or References, at any
+#: level, numbered or not, bold or not. `lib/notes/look.js` (`ownSources`) reads it the same.
+OWN_SOURCES = re.compile(
+    r"^ {0,3}#{1,6}[ \t]+(?:\d+(?:\.\d+)*\.?[ \t]+)?[*_]*(sources|references)[*_]*[ \t]*:?[ \t]*(?:#+[ \t]*)?$", re.I)
+#: A line that opens or closes fenced code, where a heading is only words.
+FENCE_LINE = re.compile(r"^ {0,3}(`{3,}|~{3,})")
+#: A heading line and its rank, where a section ends.
+ATX_LINE = re.compile(r"^ {0,3}(#{1,6})(?:[ \t]|$)")
 #: The annexes that read every source cited.
 ANNEXES_READ = ("geolocations", "credits", "method")
 
@@ -816,7 +824,9 @@ class Cited:
     a profile that checks `each` link (a report's) says each one on a line of its own.
 
     What the style carries (`notelook.Profile`) is read once here, from the look and
-    this machine's Settings unless ``profile`` is given. The annexes read this pass
+    this machine's Settings unless ``profile`` is given. Which list of sources it ends on
+    is read here too (``listing``): the generated one numbers the citations into it; the
+    note's own section prints as written, every link still checked, nothing numbered. The annexes read this pass
     too: every source cited, numbered or not (``everything``), and the note's Limits
     boxes in order (``limits``).
     Links to the case's own work are left out: an archived copy itself, the viewers a
@@ -840,7 +850,13 @@ class Cited:
         #: Who signs, and where their pictures are: read once for the whole document.
         self.identity = identity if identity is not None else notefill.Identity()
         self.reader = notesources.Reader(case)
+        #: Whether the document has sources at all: its links checked, its pictures' sources asked for.
         self.on = self.profile.sources
+        #: Which list of sources it ends on, once its text is read: "generated", "own" or
+        #: "both" (`notelook.SourcesList`), "" with no sources at all.
+        self.listing = ""
+        #: The word the note's own sources section is headed with, "sources" or "references".
+        self.own_heading = ""
         self.styled = styled
         self.annex: Annex | None = None
         #: Every source the document cites, for the annexes, whether the list is printed or not.
@@ -913,6 +929,10 @@ class Cited:
 
     def collect(self, pieces: list[Piece], blocks: dict[int, list["Block"]]) -> None:
         """Read every citation in document order, chapters included, then number them."""
+        # the note's own words, as the Look reads them: a chapter's section is its own note's
+        self.own_heading = own_sources("\n".join(piece.text for piece in pieces if piece.kind == "text" and not piece.depth))
+        if self.on:
+            self.listing = self.look.sources_list or ("own" if self.own_heading else "generated")
         cover = self.look.cover
         if cover.on and not cover.own and cover.image and self.case is not None:
             shown = self.reader.entity(cover.image)
@@ -1036,12 +1056,17 @@ class Cited:
         self._cited = [self.reader.latest(source) for source in self._cited]
         if self.on or any(self.profile.annex(key) for key in ANNEXES_READ):
             self.everything = Annex(self._cited)
-        if self.on:
+        if self.listing in ("generated", "both"):
             self.annex = self.everything
             assert self.annex is not None
             if self.annex.left_out:
                 self._warn(f"The sources list stops at {self.annex.limit}; "
                            f"{self.annex.left_out} more are not listed.", None, OTHER)
+
+    @property
+    def list_title(self) -> str:
+        """What the generated list is headed: Sources, or References under the note's own Sources."""
+        return "References" if self.listing == "both" and self.own_heading == "sources" else "Sources"
 
     def _own_work(self, address: str, source: Source) -> bool:
         """Whether a link points at the case's own work rather than at a source."""
@@ -1120,6 +1145,62 @@ class Cited:
             if style != "short":
                 said.append(notesources.entry_text(notesources.entry(source, style, entry.origins)))
         return said
+
+
+def own_sources(text: str) -> str:
+    """The word a note's own sources section is headed with, "sources" or "references", or ""
+    when it has none: a heading line of its own text, code left out (`OWN_SOURCES`)."""
+    fence = ""
+    for line in text.splitlines():
+        fence, code = _fence_step(line, fence)
+        if code:
+            continue
+        found = OWN_SOURCES.match(line)
+        if found:
+            return found.group(1).lower()
+    return ""
+
+
+def _fence_step(line: str, fence: str) -> tuple[str, bool]:
+    """The fence open after `line` and whether the line is code (or a fence), from the one open before it."""
+    marks = FENCE_LINE.match(line)
+    if fence:
+        closes = marks is not None and marks.group(1)[0] == fence[0] and len(marks.group(1)) >= len(fence)
+        return ("" if closes else fence), True
+    return (marks.group(1), True) if marks else ("", False)
+
+
+def without_own_sources(text: str) -> str:
+    """The note with its own sources section emptied: its heading and everything under it
+    up to the next heading of its rank or above, the lines kept so every line number holds."""
+    lines = text.split("\n")
+    fence = ""
+    start: int | None = None
+    rank = 0
+    end = len(lines)
+    for index, line in enumerate(lines):
+        fence, code = _fence_step(line, fence)
+        if code:
+            continue
+        heading = ATX_LINE.match(line)
+        if start is None:
+            if heading and OWN_SOURCES.match(line):
+                start, rank = index, len(heading.group(1))
+            continue
+        if heading and len(heading.group(1)) <= rank:
+            end = index
+            break
+    if start is None:
+        return text
+    return "\n".join([*lines[:start], *([""] * (end - start)), *lines[end:]])
+
+
+def sources_cut(text: str, look: NoteLook, profile: Profile) -> str:
+    """The note as its look prints it: with the generated list chosen in place of the note's
+    own sources section (`sources_list` "generated"), that section is left out."""
+    if look.sources_list == "generated" and profile.sources:
+        return without_own_sources(text)
+    return text
 
 
 def heading_level(tag: str, shift: int) -> int:

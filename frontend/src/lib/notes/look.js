@@ -17,7 +17,8 @@
  * sources list and how it is written, the five annexes and how strict the check is
  * about links (`STYLE_DEFAULTS`, Azimut's own; Settings › Publishing › Styles changes
  * them for every note). `sources_style`, `annexes` and `link_check` change them for
- * one note, late keys like the others.
+ * one note, late keys like the others. So does `sources_list`, which list of sources a
+ * note with sources ends on: "" decides from the note itself (`sourcesListOf`).
  */
 import { api } from '../api.js';
 
@@ -35,6 +36,7 @@ export const DEFAULT_LOOK = Object.freeze({
   web: '',
   sources_style: '',
   link_check: '',
+  sources_list: '',
   annexes: Object.freeze({}),
 });
 
@@ -65,6 +67,63 @@ export const SOURCES_STYLES = [
   { id: 'web', label: 'Web' },
   { id: 'short', label: 'Short' },
 ];
+
+/**
+ * Which list of sources a note with sources ends on: the numbered one written from what
+ * it cites, its own section as written (its links still checked, nothing numbered), or
+ * both. "" decides from the note (`sourcesListOf`), as `engine/notelook.py` does.
+ */
+export const SOURCES_LISTS = [
+  { id: 'generated', label: 'Generated' },
+  { id: 'own', label: 'My own section' },
+  { id: 'both', label: 'Both' },
+];
+
+/** A heading line opening the note's own list of sources (`engine/notes_markdown.py`, `OWN_SOURCES`). */
+const OWN_SOURCES = /^ {0,3}#{1,6}[ \t]+(?:\d+(?:\.\d+)*\.?[ \t]+)?[*_]*(sources|references)[*_]*[ \t]*:?[ \t]*(?:#+[ \t]*)?$/i;
+const FENCE_LINE = /^ {0,3}(`{3,}|~{3,})/;
+
+/** The word a note's own sources section is headed with, 'sources' or 'references', or '' when it has none: code left out. */
+export function ownSources(text) {
+  let fence = '';
+  for (const line of String(text ?? '').split(/\r\n|\r|\n/)) {
+    const marks = FENCE_LINE.exec(line);
+    if (fence) {
+      if (marks && marks[1][0] === fence[0] && marks[1].length >= fence.length) fence = '';
+      continue;
+    }
+    if (marks) {
+      fence = marks[1];
+      continue;
+    }
+    const found = OWN_SOURCES.exec(line);
+    if (found) return found[1].toLowerCase();
+  }
+  return '';
+}
+
+/** The list of sources a look ends on for a note holding `text`: as set, else its own section when it has one. */
+export function sourcesListOf(look, text) {
+  return normaliseLook(look).sources_list || (ownSources(text) ? 'own' : 'generated');
+}
+
+/**
+ * What a note includes after its text, said in one line for the Look's folded group:
+ * its list of sources (`listing`, from `sourcesListOf`), how many annexes and how its
+ * links are checked. `Academic sources · 5 annexes · links grouped`.
+ */
+export function includesSummary(profile, listing) {
+  const written = (SOURCES_STYLES.find((one) => one.id === profile.sources_style) ?? SOURCES_STYLES[2]).label;
+  const parts = [];
+  if (!profile.sources) parts.push('No sources list');
+  else if (listing === 'own') parts.push('Your own sources');
+  else if (listing === 'both') parts.push(`Your own and ${written.toLowerCase()} sources`);
+  else parts.push(`${written} sources`);
+  const annexes = ANNEXES.filter((annex) => profile[annex.id]).length;
+  parts.push(annexes ? `${annexes} ${annexes === 1 ? 'annex' : 'annexes'}` : 'no annex');
+  if (profile.sources) parts.push(profile.link_check === 'each' ? 'each link checked' : 'links grouped');
+  return parts.join(' · ');
+}
 
 /** How the check before export names the links with no archived copy or no seen day. */
 export const LINK_CHECKS = [
@@ -309,6 +368,7 @@ export function normaliseLook(look) {
     web: pick(given.web ?? '', WEBS, ''),
     sources_style: pick(given.sources_style ?? '', SOURCES_STYLES, ''),
     link_check: pick(given.link_check ?? '', LINK_CHECKS, ''),
+    sources_list: pick(given.sources_list ?? '', SOURCES_LISTS, ''),
     annexes: annexesOf(given.annexes),
     ...(header && { header }),
     ...(footer && { footer }),
@@ -324,7 +384,7 @@ export function sectionsSet(look) {
   const whole = normaliseLook(look);
   return {
     style: whole.style !== DEFAULT_LOOK.style || whole.toc || whole.numbered || whole.sources !== '' || whole.web !== ''
-      || whole.sources_style !== '' || whole.link_check !== '' || Object.keys(whole.annexes).length > 0,
+      || whole.sources_style !== '' || whole.link_check !== '' || whole.sources_list !== '' || Object.keys(whole.annexes).length > 0,
     text: Boolean(whole.font || whole.size),
     page: whole.page !== DEFAULT_LOOK.page || Boolean(whole.accent || whole.tlp),
     cover: whole.cover.on,

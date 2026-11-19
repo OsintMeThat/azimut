@@ -137,6 +137,7 @@ from .notes_markdown import (
     mermaid_sources,
     parse,
     printed_source,
+    sources_cut,
     strip_internal,
 )
 # The Markdown is read the way every document made from a note reads it
@@ -247,9 +248,8 @@ CAPTION_MIN_WIDTH = 90.0
 CREDIT_SIZE = 7.2
 CREDIT_LEADING = 3.6
 
-#: The list of sources at the end, its entries' type sizes and leadings (points and
-#: millimetres, before the look's text size), and the room its numbers hang in.
-SOURCES_HEADING = "Sources"
+#: The list of sources at the end (headed `Cited.list_title`), its entries' type sizes and
+#: leadings (points and millimetres, before the look's text size), and the room its numbers hang in.
 ENTRY_SIZE = 8.2
 ENTRY_LEADING = 4.1
 ENTRY_SMALL = 7.4
@@ -453,6 +453,8 @@ def render(
     #: Each placeholder left empty, with the first line it stands on.
     empty: dict[str, int] = {}
     passages = [0]
+    profile = look.profile()
+    text = sources_cut(text, look, profile)
     cut = notefill.split_cover(text) if look.cover.own else None
     pieces = expand(title, cut.body if cut is not None else text, resolve=resolve, note_id=note_id,
                     public=public, counter=passages, values=values, empty=empty)
@@ -471,7 +473,6 @@ def render(
         raise NotesPdfError("an internal passage could not be left out, so the public edition was not made")
     # what the document cites is read before a page is laid out: the sources list
     # numbers every citation before the first is drawn, and its words need their fonts
-    profile = look.profile()
     cited = _Cited(case, look=look, styled=not theme.plain, identity=identity, profile=profile)
     cited.collect(shown, blocks)
     if look.cover.own and cover is None:
@@ -1108,7 +1109,7 @@ class _Builder:
         self._shift = 0
         if self.theme.style == "report" and pdf.get_y() > pdf.body_top + 0.5:
             pdf.add_page()
-        self._heading([Run(SOURCES_HEADING)], self._base, [], 0, Align.L, numbered=False)
+        self._heading([Run(self.cited.list_title)], self._base, [], 0, Align.L, numbered=False)
         pdf.set_font(self.theme.heading_family, "B", ENTRY_SIZE * self.theme.scale)
         hang = max(7.0, pdf.get_string_width(f"[{len(annex.entries)}]") + 2.4)
         style = self.cited.profile.sources_style

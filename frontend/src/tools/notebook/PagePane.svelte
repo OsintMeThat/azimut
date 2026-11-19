@@ -40,6 +40,7 @@
     sourceField,
   } from '../../lib/notes/pictureSize.js';
   import { openerFor } from '../../lib/notes/openers.js';
+  import { jumpFor } from '../../lib/notes/warnings.js';
   import '../../lib/notes/openersLoaded.js';
   import { canStateSourceOf, statePostedOf, stateSourceOf } from '../../lib/notes/sources.js';
   import { INTERNAL, editionOf, keepEdition } from '../../lib/notes/editions.svelte.js';
@@ -284,7 +285,7 @@
       {#each warnings as warning, index (index)}
         <li>
           {#if Number.isInteger(warning.line)}
-            <button type="button" class="warning go" data-kind={warning.kind} title="Go to it in the note" onclick={() => onjump(warning.line)}>
+            <button type="button" class="warning go" data-kind={warning.kind} title="Go to it in the note" onclick={() => onjump(warning.line, jumpFor(warning))}>
               <span class="warning-words">{warning.text}</span><Icon name="arrowRight" size={12} />
             </button>
           {:else}

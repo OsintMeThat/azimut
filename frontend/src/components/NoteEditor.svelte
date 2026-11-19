@@ -332,7 +332,7 @@
   /** What the Notebook and the panel drive this editor with. */
   const api_ = {
     insert: (text, options) => arrive(text, options),
-    jump: (line) => view && jumpToLine(view, line),
+    jump: (line, options) => view && jumpToLine(view, line, options),
     /** Size, place or caption a picture from the Page pane: its line there, what it shows, `{ width }`, `{ align }` or `{ caption }`. */
     resize: (line, ref, changes) => Boolean(view && !readOnly && resizePicture(view, line, ref, changes)),
     focus: () => view?.focus(),

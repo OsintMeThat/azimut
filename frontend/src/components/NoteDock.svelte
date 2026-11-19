@@ -61,9 +61,9 @@
     flushSync();
   }
 
-  function jump(line) {
+  function jump(line, options) {
     toWrite();
-    editor?.jump(line);
+    editor?.jump(line, options);
   }
 
   $effect(() => {
