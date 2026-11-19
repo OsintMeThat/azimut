@@ -468,7 +468,7 @@ def test_the_editions_routes_answer_only_for_a_note(client):
     place = Case.open(cid).add_entity("place", "Quay", attrs={}, by="user")
     assert client.get(f"/api/cases/{cid}/notes/{place['id']}/editions").status_code == 404
     assert client.get(f"/api/cases/{cid}/notes/nope/editions").status_code == 404
-    assert client.get(f"/api/cases/{cid}/notes/case/editions").json() == {"editions": []}
+    assert client.get(f"/api/cases/{cid}/notes/case/editions").json() == {"editions": [], "kept": []}
 
 
 def test_the_file_name_keeps_room_for_its_number_and_its_marker(pinned):
