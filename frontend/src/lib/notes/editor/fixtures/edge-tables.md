@@ -132,3 +132,23 @@ The pipe of a chip alone:
 
 [[entity:e_f6|alone]]
 ---
+
+Settings under the last row, which are no row:
+
+| Model | Grade |
+| --- | --- |
+| Cougar | confirmed |
+{stripes colour="Grade" caption="Losses"}
+
+Braces that are a row: no setting named, or a row under them:
+
+| Only |
+| --- |
+| a |
+{x}
+
+| a | b |
+| --- | --- |
+| 1 | 2 |
+{stripes}
+| 3 | 4 |

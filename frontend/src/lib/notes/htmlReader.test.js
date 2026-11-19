@@ -285,6 +285,93 @@ describe('a table sorts, filters and points at a row', () => {
   });
 });
 
+describe('a table\'s settings line asks the reader', () => {
+  const rows = (count) => Array.from({ length: count }, (_, index) => {
+    const n = index + 1;
+    return `<tr id="R${n}"><td>R${n}</td><td>${['Tug', 'Crane', 'Barge'][n % 3]}</td><td>${(n * 37) % 90}</td></tr>`;
+  }).join('');
+  /** A table as `engine/notes_html.py` writes one with settings, `data` its attributes, `after` what the block holds under it. */
+  const TABLE = (count, data = '', after = '') => {
+    const table = `<div class="az-table-wrap"><table class="az-table" data-rows="${count}"${data}><thead><tr><th>Code</th><th>What</th><th>Length</th></tr></thead>
+      <tbody>${rows(count)}</tbody></table></div>`;
+    return after ? `<div class="az-table-block">${table}${after}</div>` : table;
+  };
+  const folded = (doc) => [...doc.querySelectorAll('tbody tr')].filter((row) => row.classList.contains('az-folded')).map((row) => row.id);
+  const order = (doc) => [...doc.querySelectorAll('tbody tr')].map((row) => row.id);
+
+  it('shows the filter on a short table when it says always, and never on a long one that says never', async () => {
+    let doc = await report(TABLE(4, ' data-search="always"'));
+    expect(doc.querySelector('.az-filter').getAttribute('aria-label')).toBe('Filter the rows of this table');
+    await window.happyDOM.close();
+    doc = await report(TABLE(30, ' data-search="never"'));
+    expect(doc.querySelector('.az-filter')).toBeNull();
+    // past twelve rows by itself, as before
+    await window.happyDOM.close();
+    doc = await report(TABLE(13));
+    expect(doc.querySelector('.az-filter')).not.toBeNull();
+  });
+
+  it('offers no sorting when it says sort off', async () => {
+    const doc = await report(TABLE(5, ' data-sort="off"'));
+    expect(doc.querySelector('.az-sort')).toBeNull();
+    expect(doc.querySelector('th').textContent).toBe('Code');
+  });
+
+  it('folds a long table under Show all, opens it whole and folds it again', async () => {
+    const doc = await report(TABLE(12, ' data-fold="5"'));
+    expect(folded(doc)).toEqual(['R6', 'R7', 'R8', 'R9', 'R10', 'R11', 'R12']);
+    const more = doc.querySelector('.az-table-block > .az-table-wrap + button.az-table-more');
+    expect(more.textContent).toBe('Show all 12 rows');
+    expect(more.getAttribute('aria-expanded')).toBe('false');
+    press(more);
+    expect(folded(doc)).toEqual([]);
+    expect(more.textContent).toBe('Show the first 5 rows');
+    expect(more.getAttribute('aria-expanded')).toBe('true');
+    press(more);
+    expect(folded(doc)).toHaveLength(7);
+    // a table no longer than its fold has nothing to fold
+    await window.happyDOM.close();
+    const short = await report(TABLE(5, ' data-fold="5"'));
+    expect(short.querySelector('.az-table-more')).toBeNull();
+    expect(folded(short)).toEqual([]);
+  });
+
+  it('keeps the first rows of the order a sort gives, and folds nothing while the rows are filtered', async () => {
+    const doc = await report(TABLE(14, ' data-fold="3"'));
+    press(doc.querySelectorAll('.az-sort')[2]);
+    // 37, 74, 21, 58, 5, 42, 79, 26, 63, 10, 47, 84, 31, 68: by size, the first three shown
+    expect(order(doc).slice(0, 3)).toEqual(['R5', 'R10', 'R3']);
+    expect(folded(doc)).toEqual(order(doc).slice(3));
+    const field = doc.querySelector('.az-filter');
+    field.value = 'crane';
+    field.dispatchEvent(new window.Event('input'));
+    expect(folded(doc)).toEqual([]);
+    expect(doc.querySelector('.az-table-more').hidden).toBe(true);
+    field.value = '';
+    field.dispatchEvent(new window.Event('input'));
+    expect(folded(doc)).toHaveLength(11);
+    expect(doc.querySelector('.az-table-more').hidden).toBe(false);
+    // a first column kept in sight stays so through it (laid out again for Chromium)
+    await window.happyDOM.close();
+    const kept = await report(TABLE(14, ' data-fold="3"').replace('class="az-table"', 'class="az-table az-first"'));
+    const again = kept.querySelector('.az-filter');
+    again.value = 'tug';
+    again.dispatchEvent(new window.Event('input'));
+    expect(kept.querySelector('table').classList.contains('az-first')).toBe(true);
+  });
+
+  it('opens the fold for a row an address names, and keeps the filter and the fold with the caption under the table', async () => {
+    const caption = '<p class="az-table-cap"><span class="az-caption">The register</span></p>';
+    const doc = await report(`${TABLE(20, ' data-fold="5"', caption)}<p><a href="#R9">R9</a></p>`, { hash: '#R9' });
+    expect(doc.getElementById('R9').classList.contains('az-folded')).toBe(false);
+    expect(doc.getElementById('R9').classList.contains('az-flash')).toBe(true);
+    expect(doc.querySelector('.az-table-more').textContent).toBe('Show the first 5 rows');
+    const block = doc.querySelector('.az-table-block');
+    expect([...block.children].map((node) => node.className)).toEqual(['az-table-tools', 'az-table-wrap', 'az-table-more', 'az-table-cap']);
+    expect(doc.querySelectorAll('.az-table-block')).toHaveLength(1);
+  });
+});
+
 describe('a citation shows its source', () => {
   const PAGE = `<p>Smoke over the port <a class="az-cite" href="#src-1" data-src="1">[1]</a>.</p>
     <section class="az-sources" id="sources"><ol><li id="src-1"><strong>First clip</strong>, posted on X. <a class="az-verify" href="https://web.archive.org/x">Archive ↗</a>

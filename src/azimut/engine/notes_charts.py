@@ -1253,6 +1253,24 @@ def _paints(block: ChartBlock, values: list[str], graded: bool, theme: ChartThem
     return paints, folded
 
 
+def value_paints(values: Sequence[str], *, theme: ChartTheme,
+                 palette: Sequence[Mapping[str, str]] = ()) -> dict[str, str]:
+    """Each value of a column as a chart coloured by that column paints it, keyed by its
+    words in any case: what a table coloured by a column tints its rows with
+    (`notes_tables`). Grades are told apart as a chart tells them; past `MAX_VALUES`
+    values, the rarest are painted as "Other" is."""
+    seen: list[str] = []
+    for value in values:
+        if value and value.casefold() not in (one.casefold() for one in seen):
+            seen.append(value)
+    graded = bool(seen) and sum(1 for value in seen if grade_of(value)) * 2 >= len(seen)
+    block = ChartBlock()
+    rows = [[value] for value in values]
+    ordered = _value_order(block, seen, graded, 0, rows, list(range(len(rows))))
+    paints, _ = _paints(block, ordered, graded, theme, palette)
+    return {value.casefold(): paint.colour for value, paint in paints.items()}
+
+
 def _categories(block: ChartBlock, kind: Kind, rows: list[list[str]], kept: list[int], amounts: dict[int, float],
                 by: int | None, colour: int | None, values: list[str], alias: dict[str, str]) -> list[Category]:
     found: dict[str, Category] = {}
