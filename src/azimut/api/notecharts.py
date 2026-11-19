@@ -5,6 +5,9 @@ fences, or its lines) and the note's look, and answers the chart as an SVG, or a
 for one destination (`notes_charts.DESTINATIONS`: the PDF page, X at 16:9, 4:5 and 1:1).
 A picture standing alone carries its title. Nothing is written.
 
+`POST /api/cases/{id}/notes/figure/kinds` is the kind picker: a table (or a chart's block)
+drawn small as every kind it fits, each with the settings it would be written with.
+
 The look in the body wins; without one, the note named is read for its look and its
 words (whether it calls its figures minimums), and the case for its named colours.
 What the check would say of the block rides in the headers, each with its line in the
@@ -44,24 +47,37 @@ class FigureIn(BaseModel):
     note: str = Field(default="", max_length=64, pattern=r"^([A-Za-z0-9_-]+)?$")
     format: Literal["svg", "png"] = "svg"
     size: Literal["page", "x", "portrait", "square"] = "page"
+    #: Whether the check reads ``from:`` against the case as saved. The editor says it
+    #: itself for rows copied from the note it is in, against what is typed now.
+    origins: bool = True
+
+
+class KindsIn(BaseModel):
+    """A table, or a chart block, to draw as every kind it fits, in the note's look."""
+
+    text: str = Field(max_length=MAX_FIGURE_BYTES)
+    look: NoteLook | None = None
+    note: str = Field(default="", max_length=64, pattern=r"^([A-Za-z0-9_-]+)?$")
+
+
+def _note_and_look(case: Any, note: str, look: NoteLook | None, text: str) -> tuple[str, NoteLook | None]:
+    """The note's words and its look, the look sent winning; 413 past the size read."""
+    if len(text.encode("utf-8")) > MAX_FIGURE_BYTES:
+        raise HTTPException(status_code=413, detail="the chart is too large to draw")
+    if not note:
+        return "", look
+    found = notes_markdown.read_note(case, note)
+    if found is None:
+        raise HTTPException(status_code=404, detail=f"note '{note}' not found")
+    return found[1], look if look is not None else notelook.effective(case, note)
 
 
 @router.post("/cases/{case_id}/notes/figure")
 def chart_figure(case_id: str, body: FigureIn) -> Response:
     """The chart a block draws, as SVG or as a PNG for one destination, its title drawn."""
     case = get_case(case_id)
-    if len(body.text.encode("utf-8")) > MAX_FIGURE_BYTES:
-        raise HTTPException(status_code=413, detail="the chart is too large to draw")
-    look = body.look
-    note_text = ""
-    if body.note:
-        found = notes_markdown.read_note(case, body.note)
-        if found is None:
-            raise HTTPException(status_code=404, detail=f"note '{body.note}' not found")
-        note_text = found[1]
-        if look is None:
-            look = notelook.effective(case, body.note)
-    chart = notecharts.read(case, notecharts.block_of(body.text), look=look, note_text=note_text)
+    note_text, look = _note_and_look(case, body.note, body.look, body.text)
+    chart = notecharts.read(case, notecharts.block_of(body.text), look=look, note_text=note_text, origins=body.origins)
     if not chart.drawable:
         raise HTTPException(status_code=422, detail="the chart holds no table: write its rows under its settings")
     warnings = chart.warnings[:MAX_WARNINGS]
@@ -69,15 +85,44 @@ def chart_figure(case_id: str, body: FigureIn) -> Response:
         "Cache-Control": "no-store",
         "X-Content-Type-Options": "nosniff",
         "X-Chart-Title": _ascii_json(chart.title),
+        "X-Chart-Proposed-Title": _ascii_json(chart.proposed),
+        "X-Chart-Kind": _ascii_json(_kind_said(chart)),
         "X-Note-Warnings": _ascii_json([message[:MAX_WARNING_CHARS] for message, _, _ in warnings]),
         "X-Note-Warning-Lines": _ascii_json([line for _, _, line in warnings]),
         "X-Note-Warning-Kinds": _ascii_json([kind for _, kind, _ in warnings]),
+        # the settings that fix each warning, written by the card's one press: [[key, value], ...]
+        "X-Note-Warning-Fixes": _ascii_json([[list(pair) for pair in fix] for fix in chart.fixes[:MAX_WARNINGS]]),
     }
     if body.format == "png":
         return Response(content=chart.picture(body.size), media_type="image/png", headers=headers)
     drawing = chart.drawn(title=True)
     return Response(content=notes_charts.svg(drawing, ident=_ident(chart.title)), media_type="image/svg+xml",
                     headers={**headers, "Content-Security-Policy": SVG_POLICY})
+
+
+@router.post("/cases/{case_id}/notes/figure/kinds")
+def chart_kinds(case_id: str, body: KindsIn) -> dict[str, Any]:
+    """The kind picker: every kind the table fits, drawn small from its rows, with the
+    settings and the title a chart of that kind is written with."""
+    case = get_case(case_id)
+    note_text, look = _note_and_look(case, body.note, body.look, body.text)
+    lines = notecharts.block_of(body.text)
+    kinds = notecharts.gallery(case, lines, look=look, note_text=note_text)
+    if not kinds:
+        raise HTTPException(status_code=422, detail="no table to draw: a chart is drawn from a table's rows")
+    table = notes_charts.parse_block(lines).table
+    return {"rows": len(table.rows) if table is not None else 0, "kinds": kinds}
+
+
+def _kind_said(chart: notecharts.Chart) -> dict[str, Any]:
+    """The kind a chart is drawn as, and what of it the editor's card asks: whether it
+    counts, draws parts or stacks, which kind it turns into, and the look it takes."""
+    kind = notes_charts.effective_kind(chart.block)
+    if kind is None:
+        return {}
+    return {"name": kind.name, "label": kind.label, "counts": kind.counts, "parts": kind.parts,
+            "stacked": kind.stacked, "up": kind.up, "turns": kind.turns,
+            "style": notecharts.theme_of(chart.look, chart.block).name}
 
 
 def _ident(title: str) -> str:

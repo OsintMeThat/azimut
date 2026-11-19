@@ -1352,7 +1352,7 @@ def propose_title(reading: Reading, noun: str = "") -> str:
     head = f"At least {count}" if reading.floor else count
     head = f"{head} {noun}" if noun else head
     parts = [_lower(reading.table.headers[reading.by])] if reading.table and reading.by is not None else []
-    if reading.table and reading.colour is not None:
+    if reading.table and reading.colour is not None and reading.colour != reading.by:
         parts.append(_lower(reading.table.headers[reading.colour]))
     return f"{head}, by {' and '.join(parts)}" if parts else head
 
