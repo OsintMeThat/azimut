@@ -400,7 +400,7 @@ def test_the_check_says_when_the_rows_moved_on_from_where_they_were_copied(clien
     said = dict(zip(rendered.warnings, zip(rendered.warning_lines, rendered.warning_kinds)))
     moved = ('The chart "Vehicles by model": its rows differ from "Register", where they were copied from. '
              "Read them again to bring them up to date.")
-    assert said[moved] == (line, "other")
+    assert said[moved] == (line, "stale")
     assert client.delete(f"/api/cases/{cid}/entities/{source['id']}").status_code == 200
     gone = notes_html.render(case, title="Vehicles", text=chart)
     assert dict(zip(gone.warnings, gone.warning_kinds)) == {

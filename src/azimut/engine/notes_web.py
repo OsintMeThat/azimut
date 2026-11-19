@@ -200,6 +200,8 @@ class WebBuild:
     #: How many maps its page holds, and whether they go live once it is online.
     maps: int = 0
     live: bool = False
+    #: What the Ready to publish? panel reads beyond the warnings, as its page's.
+    ready: dict[str, Any] = field(default_factory=dict)
 
     def warn(self, message: str, line: int | None, kind: str) -> None:
         self.warnings.append(message)
@@ -333,6 +335,7 @@ def build(
         warnings=list(rendered.warnings), warning_lines=list(rendered.warning_lines),
         warning_kinds=list(rendered.warning_kinds), listed=rendered.listed, sha256=hashlib.sha256(rendered.html).hexdigest(),
         text_sha256=rendered.text_sha256, internal=rendered.internal, links=rendered.links, pov=rendered.pov,
+        ready=rendered.ready,
         weight=rendered.weight + sum(len(data) for path, data in files.items() if path not in folder.files
                                      and path != INDEX),
     )

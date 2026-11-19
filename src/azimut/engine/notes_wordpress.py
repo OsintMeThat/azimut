@@ -274,7 +274,7 @@ def build(
     values = identity.values(day)
     passages = [0]
     profile = look.profile()
-    text = md.sources_cut(text, look, profile)
+    text = md.sections_cut(text, look, profile)
     cut = notefill.split_cover(text) if look.cover.own else None
     body = cut.body if cut is not None else text
     pieces = md.expand(title, body, resolve=resolve, note_id=note_id, public=True, counter=passages, values=values)

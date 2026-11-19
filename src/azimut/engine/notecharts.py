@@ -384,9 +384,12 @@ def origin_warning(case: "Case", block: ChartBlock, *, read: Callable[["Case", s
     if state == SAME:
         return None
     return (f'{said}: its rows differ from "{_cut(name, 40)}", where they were copied from. Read them again '
-            f"to bring them up to date.", notes_charts.OTHER_KIND, line)
+            f"to bring them up to date.", STALE_KIND, line)
 
 
+#: The check's kind for rows that moved on, which Read again brings up to date
+#: (`notes_markdown.STALE`, written out here as `notes_charts` writes its own kinds).
+STALE_KIND = "stale"
 #: What `compare_rows` says of a chart's rows against where they came from.
 SAME = "same"
 DIFFERS = "differs"
