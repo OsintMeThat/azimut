@@ -7460,7 +7460,8 @@ the kind it is drawn as.
 A chart is chosen by its picture. *Chart* in a table's grid bar, or `/` › *Chart* in
 Figures, shows every kind the table fits, each already drawn from its real rows
 (`POST /notes/figure/kinds`, `engine/notes_chart_picker.py`): rows counted unless one
-column holds whole numbers (a column of percentages or row numbers never is), bars split by
+column holds whole numbers (a column of percentages, confidences, ratios or row numbers never
+is), bars split by
 the first column of words, stacked and parts kinds by the column of grades first. The kind
 picked is written under the table, or where `/` was typed: its kind, the title its data
 proposes (*at least* when the count is a floor, *rows* when nothing names them), its
@@ -7480,6 +7481,12 @@ typed on the chart's own columns, in any order), **The numbers** (its rows, a li
 whether they still match, *Go to the table* and *Edit them as text*) and **Export** (a
 picture for X, 4:5, 1:1, the PDF page, or an SVG, downloaded with its title as its name).
 What the check says shows under it, each fix one press (*Add “at least” to the title*).
+With no `count:` line a chart sums its one column of amounts and the check names it, one
+press writing it; a column read as shares (a `%`, a confidence, a ratio, a rate, by its header
+or its cells) is never summed on its own, so the rows are counted and the check says why.
+A picture of fixed size (X, 4:5, 1:1) is filled: pictograms as large as it lets them be,
+silhouette rows in two columns when a wide frame cannot hold them in one, a segmented bar
+thicker, a waffle's legend under it in a tall frame, circles and a pie in the middle.
 Every choice writes its own line in the engine's order and is one Undo step. A press on a
 bar button picks the chart first, so the note stays where it is when a panel takes the
 keyboard. A double press or Enter opens its settings; a locked note shows the drawing.
