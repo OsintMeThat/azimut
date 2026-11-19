@@ -65,6 +65,8 @@
   import { holdSeek } from '../tools/inspect/handoff.js';
   import { startCompletion } from '@codemirror/autocomplete';
   import { mapOffer } from '../lib/notes/mapPut.js';
+  import { EMPTY_INFOGRAPHIC } from '../lib/notes/editor/infographicText.js';
+  import { replaceBlock } from '../lib/notes/editor/infographicBlock.js';
   import { putInNote } from '../lib/notes/putInNote.svelte.js';
   import NoteMapPicker from './NoteMapPicker.svelte';
   import Icon from './Icon.svelte';
@@ -98,6 +100,8 @@
     oncover = null,
     /** Told the stretch selected, `{ from, to }` in the editor's offsets, or null once nothing is (the Notebook's To Post). */
     onselect = null,
+    /** Open the infographic builder beside the note: `{ from, panel }`, the block's offset and the panel pressed (or null). */
+    oninfographic = null,
   } = $props();
 
   let host = $state(null);
@@ -176,6 +180,9 @@
     chart: () => newChart(),
     /** The note being written, which a chart is drawn in the look of and whose tables its rows are copied from. */
     get noteId() { return template || !doc ? '' : (doc.noteId ?? 'case'); },
+    get infographic() { return oninfographic && !template && caseId ? (at) => oninfographic(at) : null; },
+    /** `/` › Infographic: a starter made of the note's own tables and maps, then the builder on it. */
+    newInfographic: () => newInfographic(),
     tableToast: (message, actions = [], kind = 'info') => toast(message, kind, actions.length ? 8000 : 4000, actions.length ? actions : null),
     /** The note a picked cell belongs to, shared by every editor showing it. */
     get noteKey() { return noteKey(); },
@@ -213,6 +220,31 @@
     view.dispatch({ changes: { from: head, insert: made.text }, selection: { anchor: head + made.cursor }, userEvent: 'input.complete' });
   }
 
+  /**
+   * `/` › Infographic: with tables in the note, a starter page of its key figures, its main
+   * chart, a donut and its map, each made from the note's own rows (`notes/infographic/offers`);
+   * else an empty page saying how to fill it. Never numbers the note does not hold.
+   */
+  async function newInfographic() {
+    if (!view || readOnly) return;
+    const at = view.state.selection.main.head;
+    let text = EMPTY_INFOGRAPHIC;
+    if (caseId && !template) {
+      try {
+        const noteId = doc?.noteId && doc.noteId !== 'case' ? doc.noteId : '';
+        const offered = await api.post(`/api/cases/${encodeURIComponent(caseId)}/notes/infographic/offers`,
+          { text: view.state.doc.toString(), note: noteId });
+        if (offered?.starter) text = offered.starter;
+      } catch {
+        // the empty page, its guidance saying how to fill it
+      }
+    }
+    if (!view || readOnly) return;
+    view.dispatch({ selection: { anchor: Math.min(at, view.state.doc.length) } });
+    insertAtCursor(view, text, { block: true });
+    if (oninfographic) oninfographic({ from: Math.min(at, view.state.doc.length), panel: null });
+  }
+
   /** An empty picture cell's Cut a frame: Inspect at the row's time, this note beside it for the frame's Put in. */
   function cutFrame({ entity, time }) {
     const path = entity?.attrs?.path;
@@ -234,7 +266,7 @@
         ],
       }),
     });
-    view.dispatch({ effects: setNoteCase.of({ caseId, entities, redirects, notes, identity }) });
+    view.dispatch({ effects: setNoteCase.of({ caseId, noteId: doc?.noteId ?? null, entities, redirects, notes, identity }) });
     view.contentDOM.addEventListener('focus', () => { wrote = true; });
     onready(api_);
   });
@@ -268,7 +300,7 @@
     });
   });
   $effect(() => {
-    const info = { caseId, entities, redirects, notes, identity };
+    const info = { caseId, noteId: doc?.noteId ?? null, entities, redirects, notes, identity };
     if (view) view.dispatch({ effects: setNoteCase.of(info) });
   });
   $effect(() => {
@@ -329,6 +361,13 @@
       return held ? captionAt(view, held.from + (landed.text.length - landed.text.replace(/^\n+/, '').length), options) : Promise.resolve(false);
     },
     takeBack: (landed) => Boolean(view && takeBackRange(view, landed)),
+    /** The note as the editor holds it now. */
+    text: () => view?.state.doc.toString() ?? '',
+    /**
+     * Replace `from`–`to` with `insert` as one change, its own Undo step, when that stretch
+     * still reads `expected`: the infographic builder's edits. Answers whether it landed.
+     */
+    replace: (from, to, insert, expected) => Boolean(view && !readOnly && replaceBlock(view, from, to, insert, expected)),
     /** Write the cover page at the top, unless there is one: Look › Cover was turned to Your own page. */
     cover: () => Boolean(view && !readOnly && insertCover(view, { focus: false })),
   };

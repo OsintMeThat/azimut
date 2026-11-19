@@ -65,7 +65,7 @@ def test_a_chart_block_is_one_token_holding_its_lines_at_its_line():
     assert charts[0].tokens[0].content.strip("\n") == notecharts.block_of(ARMOURED)
     # the line of the block's first setting, which every warning of it counts from
     assert NOTE.split("\n")[charts[0].line] == "kind: stacked bars"
-    assert md.TOKEN_BLOCKS == {md.MAP: md.MAP_TOKEN, md.CHART: md.CHART_TOKEN}
+    assert md.TOKEN_BLOCKS == {md.MAP: md.MAP_TOKEN, md.CHART: md.CHART_TOKEN, md.INFOGRAPHIC: md.INFOGRAPHIC_TOKEN}
 
 
 def test_a_block_written_inside_a_code_fence_is_an_example_shown_as_text():
@@ -194,8 +194,8 @@ def test_in_a_story_a_chart_is_a_scene_drawn_again_for_its_dark_stage(tmp_worksp
 
 
 def test_the_style_sheet_shows_one_drawing_at_a_time_and_prints_the_first():
-    css = (notes_html.ASSETS / "reader.css").read_text(encoding="utf-8")
-    chart = css[css.index("/* charts:"):]
+    chart = (notes_html.ASSETS / "reader.chart.css").read_text(encoding="utf-8")
+    assert "/* charts:" not in (notes_html.ASSETS / "reader.css").read_text(encoding="utf-8")
     assert "svg.az-chart { display: block; width: 100%; max-width: 100%; height: auto;" in chart
     assert "svg.az-chart-phone, svg.az-chart-on-dark { display: none; }" in chart
     assert "@media print" in chart and "@media screen and (max-width: 37.99rem)" in chart

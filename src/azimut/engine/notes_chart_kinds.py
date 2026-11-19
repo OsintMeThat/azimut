@@ -1590,8 +1590,11 @@ def _timeline_columns(reading: "Reading") -> tuple[int | None, int | None, int |
     rows = table.rows
     days = [index for index in range(len(table.headers)) if day_column(rows, index)]
     start = days[0] if days else None
-    until = next((index for index in days[1:] if re.search(r"until|end|to\b|till", table.headers[index], re.I)),
-                 days[1] if len(days) > 1 else None)
+    # a column named for an end holds periods even when one row alone has one
+    ends = [index for index in range(len(table.headers)) if index != start
+            and re.search(r"until|end|to\b|till", table.headers[index], re.I)
+            and any(index < len(row) and read_day(row[index]) is not None for row in rows)]
+    until = next((index for index in days[1:] if index in ends), ends[0] if ends else days[1] if len(days) > 1 else None)
     what = None
     if reading.block.by:
         found = table.column(reading.block.by)

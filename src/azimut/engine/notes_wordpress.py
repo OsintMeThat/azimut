@@ -15,7 +15,8 @@ comparison's two sides in two columns with their labels, a graphic picture folde
 Details block, and the numbered Sources list with each entry's links and verify links,
 which every citation links to. A chart (`::: chart`) is its picture, captioned as every
 figure is, its numbers folded under it in a table, or its own table after it when the
-block says to show it. The Story layout and the `::: steps` and `::: story`
+block says to show it. An infographic (`:::: infographic`) is one picture of its whole
+page, then each chart's numbers under "The numbers". The Story layout and the `::: steps` and `::: story`
 blocks read as a plain article, each picture then its words.
 
 **What is uploaded.** Every picture goes to the media library re-encoded as the report
@@ -56,7 +57,7 @@ from markdown_it.token import Token
 from PIL import Image
 
 from .. import __version__
-from . import noteannexes, notecharts, notefill, notesources, thumbnails
+from . import noteannexes, notecharts, notefill, notes_infographic, notesources, thumbnails
 from . import notes_html as report
 from . import notes_markdown as md
 from .media import media_kind
@@ -641,6 +642,8 @@ class _Writer:
                 out.append(self._table(tokens, index, stop))
             elif kind == md.CHART_TOKEN:
                 out.extend(self._chart(token))
+            elif kind == md.INFOGRAPHIC_TOKEN:
+                out.extend(self._infographic(token))
             index = stop
         return [part for part in out if part]
 
@@ -717,6 +720,37 @@ class _Writer:
                     + "".join(f'<td class="has-text-align-right" data-align="right">{_text(cell)}</td>' for cell in row[1:])
                     + "</tr>" for row in chart.layout.table_rows]
             out.append(details(notecharts.THE_NUMBERS, [table(head, rows)]))
+        return out
+
+    def _infographic(self, token: Token) -> list[str]:
+        """A `:::: infographic` block as one picture of the whole page, its alt text the
+        title band, every panel and the sources; then each chart's numbers under "The
+        numbers", one table a chart, for a reader the picture says nothing to."""
+        page = notes_infographic.read(self.case, token.content, look=self.look, note_text=self._note_text)
+        self.warnings.extend(message for message, _, _ in page.warnings)
+        if not page.panels:
+            return []
+        data = notes_infographic.picture(page, "page")
+        digest = hashlib.sha256(data).hexdigest()
+        library = md.cut_text(" · ".join(part for part in (page.title, page.credit) if part), MAX_ALT)
+        index = self._add(f"infographic:{digest}", data, "image/png", page.alt, library, ".png", digest)
+        if index is None:
+            return []
+        out = [image(index, md.cut_text(page.alt, MAX_ALT), "", media_link=True)]
+        tables: list[str] = []
+        for drawn in page.panels:
+            chart = drawn.chart
+            if chart is None or not chart.table_head:
+                continue
+            head = [f"<tr>{''.join(f'<th>{_text(cell)}</th>' for cell in chart.table_head)}</tr>"]
+            rows = [f"<tr><td>{_text(row[0])}</td>"
+                    + "".join(f'<td class="has-text-align-right" data-align="right">{_text(cell)}</td>' for cell in row[1:])
+                    + "</tr>" for row in chart.table_rows]
+            if chart.title:
+                tables.append(paragraph(f"<strong>{_text(chart.title)}</strong>"))
+            tables.append(table(head, rows))
+        if tables:
+            out.append(details(notecharts.THE_NUMBERS, tables))
         return out
 
     def _quote(self, tokens: list[Token], index: int, end: int) -> list[str]:

@@ -80,6 +80,7 @@
   import NewNoteDialog from './notebook/NewNoteDialog.svelte';
   import LookControl from './notebook/LookControl.svelte';
   import PagePane from './notebook/PagePane.svelte';
+  import InfographicBuilder from './notebook/InfographicBuilder.svelte';
   import ViewModes from './notebook/ViewModes.svelte';
   import EditionSwitch from './notebook/EditionSwitch.svelte';
   import FormatSwitch from './notebook/FormatSwitch.svelte';
@@ -159,6 +160,9 @@
   let selected = $state([]);
   // the PDF beside the note, as the analyst last left it
   let pageMode = $state(readPageView('notebook'));
+  // the infographic builder beside the note: `{ from, panel, noteId }` while it is open, null else
+  let builder = $state(null);
+  $effect(() => { if (builder && builder.noteId !== (opened?.noteId ?? null)) builder = null; });
   // how the open note prints, null while it is read
   let look = $state(null);
   let lookWrites = 0;
@@ -870,14 +874,21 @@
         <button class="btn btn-ghost btn-sm" aria-label="More" title="More" onclick={(event) => (menu = { anchor: event.currentTarget })}>
           <Icon name="more" size={15} /></button>
       </header>
-      <div class="body" class:split={pageMode}>
+      <div class="body" class:split={pageMode || builder}>
         <div class="writing">
           {#key doc}
             <NoteEditor {doc} {caseId} entities={graphEntities} redirects={referenceRedirects} where="notebook" notes={rows}
               onopen={openEntity} onnote={(id) => show(id)} onready={(handle) => { editor = handle; noteSelection = null; }} oncover={coverWritten}
-              onselect={(range) => (noteSelection = range)} />
+              onselect={(range) => (noteSelection = range)}
+              oninfographic={(at) => (builder = { ...at, noteId: opened?.noteId ?? null, opened: (builder?.opened ?? 0) + 1 })} />
           {/key}
         </div>
+        {#if builder && editor && doc.loaded}
+          {#key builder.opened}
+            <InfographicBuilder {caseId} noteId={opened?.noteId ?? null} text={doc.text} {editor} from={builder.from} panel={builder.panel}
+              onclose={() => (builder = null)} />
+          {/key}
+        {/if}
         {#if pageMode && look && doc.loaded}
           <PagePane {caseId} note={opened.noteId ?? CASE_NOTES} title={noteEntity?.label ?? 'Case notes'} text={doc.text} {look} entities={graphEntities}
             onjump={(line) => editor?.jump(line)} onresize={(picture, changes) => editor?.resize(picture.line, picture.ref, changes)} />
@@ -1190,6 +1201,7 @@
   .writing { flex: 1; min-width: 0; min-height: 0; display: flex; flex-direction: column; }
   .writing > :global(.note-editor) { flex: 1; }
   .body.split > :global(.page-pane) { flex: 0 0 clamp(300px, 46%, 820px); }
+  .body.split > :global(.ib) { flex: 0 0 clamp(320px, 34%, 400px); }
   @container notebook (max-width: 1180px) { .wide-only { display: none; } }
   .fm-item.danger { color: var(--danger); }
   .export-dest { display: flex; align-items: center; gap: 8px; margin-top: 6px; font-size: var(--fs-sm); }

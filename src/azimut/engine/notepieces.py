@@ -29,6 +29,9 @@ handed over.
 said as its alt text. The picture is filed in the case's media (`notecharts.file_for_post`),
 since a post carries files of the case; the same picture is filed once.
 
+**Infographics.** A ``:::: infographic`` block goes as one picture of its whole page for X
+(16:9), filed the same way, its title band, panels and sources said as its alt text.
+
 **What stays out.** The cover above a ``<!-- cover -->`` line, the ``::: corner``
 blocks, page breaks and comments print nothing in a post and go silently. Tables,
 diagrams, code blocks and pictures that cannot go (gone from the case, on the web, an
@@ -48,7 +51,7 @@ from markdown_it.common.normalize_url import normalizeLinkText
 from markdown_it.token import Token
 
 from ..workspace import Case, CaseError
-from . import notecharts, notefill, notes_markdown, notesources
+from . import notecharts, notefill, notes_infographic, notes_markdown, notesources
 from .media import media_kind
 from .notelook import NoteLook
 from .notetext import without_hints
@@ -241,6 +244,8 @@ class _Reading:
                 self._say("\n".join(self._quote(tokens, index, end)))
             elif token.type == notes_markdown.CHART_TOKEN:
                 self._chart(token)
+            elif token.type == notes_markdown.INFOGRAPHIC_TOKEN:
+                self._infographic(token)
             else:
                 self._leave(token)
             index = end
@@ -260,6 +265,21 @@ class _Reading:
         self._add({"kind": "media", "path": filed["path"], "type": "image", "id": filed["id"], "alt": chart.title})
         if chart.block.shows_table():
             self.left["tables"] += 1
+
+    def _infographic(self, token: Token) -> None:
+        """An infographic as one picture of its page at X's 16:9, filed in the case, its
+        title band, panels and sources as its alt text."""
+        page = notes_infographic.read(self.case, token.content, look=self.look, note_text=self.note_text)
+        try:
+            filed = notes_infographic.file_for_post(self.case, page, note_id=self.note_id) \
+                if self.case is not None else None
+        except (CaseError, OSError, ValueError):  # a case that cannot take the file: it stays out, counted
+            filed = None
+        if filed is None:
+            self.left["other"] += 1
+            return
+        self._say("")
+        self._add({"kind": "media", "path": filed["path"], "type": "image", "id": filed["id"], "alt": page.alt})
 
     def _paragraph(self, inline: Token) -> None:
         """A paragraph that is only a link is a source; any other is words."""

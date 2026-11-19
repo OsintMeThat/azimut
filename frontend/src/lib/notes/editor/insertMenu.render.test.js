@@ -66,7 +66,7 @@ describe('the bare menu', () => {
     }
     expect(options.map((option) => option.label).slice(0, 8)).toEqual(
       ['Heading 1', 'Heading 2', 'Heading 3', 'Bulleted list', 'Numbered list', 'To-do', 'Quote', 'Callout']);
-    expect(options.filter((option) => option.section.name === 'Figures').map((option) => option.label)).toEqual(['Table', 'Chart', 'Diagram']);
+    expect(options.filter((option) => option.section.name === 'Figures').map((option) => option.label)).toEqual(['Table', 'Chart', 'Diagram', 'Infographic']);
   });
 
   it('keeps the kinds of a group under it, and opens them together when it is picked', () => {

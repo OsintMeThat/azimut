@@ -1,0 +1,37 @@
+/* charts: drawn wide, again for a phone and, in a story, again dark for its stage; the style
+   sheet shows the one that fits, print the first. The numbers fold under the caption. */
+.az-body > .az-chart-figure { grid-column: text; }
+svg.az-chart { display: block; width: 100%; max-width: 100%; height: auto; margin-inline: auto; overflow: visible; }
+svg.az-chart-phone { max-width: 28rem; }
+svg.az-chart-phone, svg.az-chart-on-dark { display: none; }
+@media screen and (max-width: 37.99rem) {
+  svg.az-chart-wide:not(.az-chart-on-dark) { display: none; }
+  svg.az-chart-phone:not(.az-chart-on-dark) { display: block; }
+}
+.az-chart-numbers { flex-basis: 100%; margin-top: .1rem; color: var(--ink-2); }
+.az-chart-numbers > summary { display: inline-flex; align-items: center; gap: .45rem; padding: .25rem 0; color: var(--muted); cursor: pointer; list-style: none; transition: color .2s; }
+.az-chart-numbers > summary:hover, .az-chart-numbers > summary:focus-visible, .az-chart-numbers[open] > summary { color: var(--accent-ink); }
+.az-chart-numbers > summary::-webkit-details-marker { display: none; }
+.az-chart-numbers > summary::before { content: ""; width: .42rem; height: .42rem; border: solid currentColor; border-width: 0 1.5px 1.5px 0; transform: rotate(-45deg); transition: transform .2s; }
+.az-chart-numbers[open] > summary::before { transform: rotate(45deg); }
+.az-chart-data { margin: .5rem 0 0; border-collapse: collapse; font: 400 .8125rem/1.4 var(--ui); font-variant-numeric: tabular-nums; }
+.az-chart-data th, .az-chart-data td { padding: .3rem .9rem .3rem 0; border-bottom: 1px solid var(--rule); text-align: right; white-space: nowrap; }
+.az-chart-data :is(thead th:first-child, th[scope="row"]) { text-align: left; font-weight: 400; white-space: normal; }
+.az-chart-data thead th { border-bottom-color: var(--ink); font-weight: 600; }
+.az-chart-data tr > :last-child { padding-right: 0; font-weight: 600; }
+@media screen {
+  [data-web="story"] .az-live .az-story-figures svg.az-chart:not(.az-chart-on-dark) { display: none; }
+  [data-web="story"] .az-live .az-story-figures svg.az-chart-wide.az-chart-on-dark {
+    display: block; width: min(var(--stage-w), 46rem); max-width: none; max-height: calc(var(--stage-h) - 7rem);
+  }
+  [data-web="story"] .az-live .az-story-figures .az-chart-numbers { display: none; }
+}
+@media screen and (max-width: 63.99rem) {
+  [data-web="story"] .az-live .az-story-figures svg.az-chart-wide.az-chart-on-dark { display: none; }
+  [data-web="story"] .az-live .az-story-figures svg.az-chart-phone.az-chart-on-dark { display: block; width: min(var(--stage-w), 28rem); max-width: none; max-height: 44svh; }
+}
+@media print {
+  svg.az-chart-wide:not(.az-chart-on-dark) { display: block !important; max-height: 200mm; }
+  svg.az-chart-phone, svg.az-chart-on-dark, .az-chart-numbers { display: none !important; }
+  .az-chart-frame { break-inside: avoid; break-after: avoid; }
+}

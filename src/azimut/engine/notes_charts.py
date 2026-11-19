@@ -1659,10 +1659,12 @@ def _fit(text: str, width: float, size: float, the_face: Face, bold: bool) -> st
 
 def layout(block: ChartBlock, *, theme: ChartTheme | None = None, palette: Sequence[Mapping[str, str]] = (),
            note_text: str = "", width: float = 640.0, height: float | None = None,
-           title: bool = True, noun: str = "") -> Layout:
+           title: bool = True, noun: str = "", legend: bool = True, credit: bool = True) -> Layout:
     """The chart laid out ``width`` CSS pixels wide: the title (unless the page's own figure
     caption carries it), the caption, the legend, the plot, the notes and the credit line.
-    ``height`` fixes the frame (a picture for X or a square), the plot taking what is left."""
+    ``height`` fixes the frame (a picture for X or a square), the plot taking what is left.
+    ``legend`` and ``credit`` False leave those two to a page that draws them once for
+    several charts (an infographic): `Layout.legend` and `Layout.credit` still say them."""
     theme = theme or theme_for(block.style or "report")
     reading = read(block, theme=theme, palette=palette, note_text=note_text)
     width = max(240.0, float(width))
@@ -1690,23 +1692,24 @@ def layout(block: ChartBlock, *, theme: ChartTheme | None = None, palette: Seque
             y += theme.caption_size * 1.1
             head.append(Text(pad, y, line, theme.caption_size, theme.ink2, body=True))
             y += theme.caption_size * 0.35
-    legend = _legend(reading) if reading.kind.legend else []
-    if legend:
+    swatches_said = _legend(reading) if reading.kind.legend else []
+    if swatches_said and legend:
         y += 12
-        swatches, used = legend_marks(legend, theme, pad, y, inner)
+        swatches, used = legend_marks(swatches_said, theme, pad, y, inner)
         head.extend(swatches)
         y += used
     y += 14
     notes = left_notes(reading)
-    credit = credit_line(reading)
-    _, foot_height = _foot(notes, credit, theme, pad, inner)
+    credit_said = credit_line(reading)
+    drawn_credit = credit_said if credit else ""
+    _, foot_height = _foot(notes, drawn_credit, theme, pad, inner)
     box_height = None if height is None else max(40.0, height - y - foot_height - pad)
     plot = reading.kind.plot(reading, theme, Box(pad, y, inner, box_height))
     if plot.legend is not None:
-        legend = plot.legend
+        swatches_said = plot.legend
     y += plot.height if box_height is None else max(box_height, plot.height)
     notes = [*plot.notes, *notes]
-    foot_marks, foot_height = _foot(notes, credit, theme, pad, inner)
+    foot_marks, foot_height = _foot(notes, drawn_credit, theme, pad, inner)
     total_height = y + foot_height + pad if height is None else max(float(height), y + foot_height + pad)
     if height is not None:
         y = total_height - pad - foot_height
@@ -1716,8 +1719,9 @@ def layout(block: ChartBlock, *, theme: ChartTheme | None = None, palette: Seque
     kind_name = reading.kind.name
     desc = plot.desc or _describe(reading, kind_name)
     table_head, table_rows = plot.table if plot.table is not None else _data_table(reading)
-    return Layout(width, round(total_height, 2), theme, marks, shown_title, desc, plot.lines, legend, plot.scale,
-                  plot.bars, notes, credit, kind_name, reading.checks, table_head, table_rows, plot.facts)
+    return Layout(width, round(total_height, 2), theme, marks, shown_title, desc, plot.lines, swatches_said,
+                  plot.scale, plot.bars, notes, credit_said, kind_name, reading.checks, table_head, table_rows,
+                  plot.facts)
 
 
 def _legend(reading: Reading) -> list[Swatch]:
