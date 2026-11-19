@@ -10,6 +10,7 @@ import './diagramBlock.js';
 import './tableBlock.js';
 import './tableGrid.js';
 import './pictureBlock.js';
+import './chartBlock.js';
 import './breakBlocks.js';
 import './htmlBlock.js';
 import './includeBlock.js';

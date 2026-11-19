@@ -72,6 +72,7 @@ export { slashSource } from './editor/slashMenu.js';
 export { openInsertMenu } from './editor/insertMenu.js';
 export { openLinkField } from './editor/bubble.js';
 export { registerTableChart } from './editor/tableGrid.js';
+export { startChart } from './editor/chartBlock.js';
 export { openTablePicker } from './editor/tableInsert.js';
 export { holdCell, placeInCell, releaseCell } from './editor/tablePictures.js';
 export {

@@ -2238,18 +2238,35 @@ def _distinct(rows: list[list[str]], column: int) -> int:
     return len({row[column].casefold() for row in rows if column < len(row) and row[column]})
 
 
-def _parts_fit(table: "Table", low: int, high: int, *, whole: bool = False) -> bool:
-    """A column of a few values, as rows counted (the values repeat) or with one number
-    column beside it; ``whole`` asks for whole counts (one glyph per unit)."""
+#: How many values the column a kind of parts is drawn by may hold, fewest to most, and
+#: whether its amounts must be whole (one glyph per unit). A pie of two is a figure, not
+#: a pie; past six parts the smallest fold. Silhouette rows draw a row per value.
+PARTS: dict[str, tuple[int, int, bool]] = {
+    "pie": (3, 12, False), "donut": (3, 12, False), "segments": (2, 8, False), "pictograms": (1, 8, True),
+    "waffle": (1, 6, False), "silhouette rows": (2, 30, True),
+}
+
+
+def _graded(rows: list[list[str]], column: int) -> bool:
+    values = {row[column] for row in rows if column < len(row) and row[column]}
+    return bool(values) and sum(1 for value in values if nc.grade_of(value)) * 2 >= len(values)
+
+
+def parts_columns(table: "Table", low: int, high: int, *, whole: bool = False) -> list[int]:
+    """The columns of ``low`` to ``high`` values a kind of parts may be drawn by, a column
+    of grades first: values that repeat (rows counted), or with one number column beside
+    them; ``whole`` asks for whole counts (one glyph per unit)."""
     rows, texts, numbers = _shape(table)
     if not rows:
-        return False
+        return []
+    found = []
     for column in texts:
         distinct = _distinct(rows, column)
         if not low <= distinct <= high:
             continue
         if distinct < len(rows):
-            return True
+            found.append(column)
+            continue
         if len(numbers) == 1:
             values = [nc.read_number(row[numbers[0]]) for row in rows]
             amounts = [value.value for value in values if isinstance(value, nc.Number)]
@@ -2257,29 +2274,33 @@ def _parts_fit(table: "Table", low: int, high: int, *, whole: bool = False) -> b
                 continue
             if whole and any(abs(amount - round(amount)) > 1e-9 for amount in amounts):
                 continue
-            return True
-    return False
+            found.append(column)
+    return sorted(found, key=lambda column: 0 if _graded(rows, column) else 1)
+
+
+def _parts_fit(table: "Table", name: str) -> bool:
+    low, high, whole = PARTS[name]
+    return bool(parts_columns(table, low, high, whole=whole))
 
 
 def fits_pie(table: "Table") -> bool:
-    """Three to twelve parts: two is a figure, not a pie; past six the smallest fold."""
-    return _parts_fit(table, 3, 12)
+    return _parts_fit(table, "pie")
 
 
 def fits_segments(table: "Table") -> bool:
-    return _parts_fit(table, 2, 8)
+    return _parts_fit(table, "segments")
 
 
 def fits_pictograms(table: "Table") -> bool:
-    return _parts_fit(table, 1, 8, whole=True)
+    return _parts_fit(table, "pictograms")
 
 
 def fits_waffle(table: "Table") -> bool:
-    return _parts_fit(table, 1, 6)
+    return _parts_fit(table, "waffle")
 
 
 def fits_silhouettes(table: "Table") -> bool:
-    return _parts_fit(table, 2, 30, whole=True)
+    return _parts_fit(table, "silhouette rows")
 
 
 def fits_figures(table: "Table") -> bool:

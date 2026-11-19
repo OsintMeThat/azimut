@@ -20,8 +20,9 @@ picture that stands alone (a post, an exported picture) carries its title.
 
 **Where the rows came from.** ``from:`` names what the rows were copied from, written by
 the Notebook's *Copy rows from…*: ``note:<id>`` (the note's first table) or
-``note:<id>#<heading>`` (the first table under that heading, named as its anchor), and
-``sheet:<id>``. The rows in the note are the chart; this only says when the source moved
+``note:<id>#<heading>`` (the first table under that heading, named as its anchor),
+``note:<id>#<heading>/<n>`` (its n-th table; ``#/<n>`` counts from the note's start, for
+a table under no heading), and ``sheet:<id>``. A chart's own rows are never a table there. The rows in the note are the chart; this only says when the source moved
 on: the source's rows, kept to the chart's own columns, are compared with the chart's,
 in any order. Anything else written there is not read.
 """
@@ -37,7 +38,7 @@ from datetime import datetime, timezone
 from pathlib import PurePosixPath
 from typing import TYPE_CHECKING, Any
 
-from . import notes_charts
+from . import notes_chart_picker, notes_charts
 from .notelook import DEFAULT as DEFAULT_LOOK
 from .notelook import NoteLook
 from .notes_charts import ChartBlock, ChartTheme, Layout
@@ -66,6 +67,7 @@ THE_NUMBERS = "The numbers"
 MAX_ALT = 1000
 
 SLUG = re.compile(r"[^\w]+")
+CHART_OPEN = re.compile(r"^:::[ \t]*chart[ \t]*$")
 HEADING = re.compile(r"^(#{1,6})\s+(.*?)\s*#*\s*$")
 
 
@@ -97,6 +99,11 @@ class Chart:
     title: str
     #: What the check before export says, as ``(message, kind, line in the block)``.
     warnings: list[tuple[str, str, int | None]] = field(default_factory=list)
+    #: For each warning, the settings that fix it (`notes_charts.Check.fix`), or none.
+    fixes: list[tuple[tuple[str, str], ...]] = field(default_factory=list)
+    #: The title the data proposes for these settings, whatever title is written: what the
+    #: chart's card offers when the written one says something else.
+    proposed: str = ""
 
     @property
     def drawable(self) -> bool:
@@ -136,10 +143,15 @@ def read(case: "Case | None", body: str, *, look: NoteLook | None = None, note_t
                                   width=DOCUMENT_WIDTH, title=not IN_DOCUMENT)
     chart = Chart(block, look, colours, note_text, drawing, drawing.title)
     chart.warnings = [check.as_warning() for check in drawing.checks]
+    chart.fixes = [check.fix for check in drawing.checks]
+    if block.table is not None and block.table.headers:
+        reading = notes_charts.read(block, theme=theme_of(look, block), palette=colours, note_text=note_text)
+        chart.proposed = notes_chart_picker.title_for(reading)
     if origins and case is not None and block.origin:
         said = origin_warning(case, block)
         if said is not None:
             chart.warnings.append(said)
+            chart.fixes.append(())
     return chart
 
 
@@ -152,6 +164,30 @@ def block_of(text: str) -> str:
         if lines and re.match(r"^:::[ \t]*$", lines[-1]):
             lines = lines[:-1]
     return "\n".join(lines)
+
+
+# -- the kind picker ---------------------------------------------------------------------------------
+
+
+def gallery(case: "Case | None", body: str, *, look: NoteLook | None = None, note_text: str = "") -> list[dict[str, Any]]:
+    """Every kind a block's table fits, each drawn small from its rows with the settings
+    it would be written with (`notes_chart_picker`), and the title a new chart of it
+    would carry: what pressing Chart on a table shows. ``body`` is a block's lines, or a
+    table alone."""
+    look = look or DEFAULT_LOOK
+    block = notes_charts.parse_block(body)
+    colours = palette(case)
+    shown: list[dict[str, Any]] = []
+    for index, proposal in enumerate(notes_chart_picker.proposals(block)):
+        drawn = notes_chart_picker.applied(block, proposal.settings)
+        theme = theme_of(look, drawn)
+        reading = notes_charts.read(drawn, theme=theme, palette=colours, note_text=note_text)
+        drawing = notes_charts.layout(drawn, theme=theme, palette=colours, note_text=note_text,
+                                      width=notes_chart_picker.THUMB_WIDTH, title=False)
+        shown.append({"kind": proposal.kind, "label": proposal.label, "settings": proposal.settings,
+                      "title": notes_chart_picker.title_for(reading),
+                      "svg": notes_charts.svg(drawing, ident=f"az-pick-{index}")})
+    return shown
 
 
 # -- where the rows came from ------------------------------------------------------------------
@@ -217,37 +253,57 @@ def origin_warning(case: "Case", block: ChartBlock) -> tuple[str, str, int | Non
 
 
 def _table_under(text: str, anchor: str) -> notes_charts.Table | None:
-    """The first table of a note, or the first under the heading named ``anchor``."""
+    """The table ``anchor`` names in a note: the first, or the first under the heading
+    named ``anchor``, or the n-th with ``/<n>`` after it. A chart's own rows are not one."""
     lines = str(text or "").split("\n")
     start = 0
+    anchor, _, nth = anchor.partition("/")
+    wanted_index = int(nth) if nth.strip().isdigit() and int(nth) > 0 else 1
     if anchor:
         wanted = slug(anchor)
-        level = 0
-        for index, line in enumerate(lines):
-            heading = HEADING.match(line)
-            if heading and slug(heading.group(2)) == wanted:
-                start, level = index + 1, len(heading.group(1))
-                break
-        else:
+        found = [(index, len(heading.group(1)), slug(heading.group(2))) for index, heading in _headings(lines)]
+        at = next((position for position, (_, _, name) in enumerate(found) if name == wanted), None)
+        if at is None:
             return None
-        for index in range(start, len(lines)):
-            heading = HEADING.match(lines[index])
-            if heading and len(heading.group(1)) <= level:
-                lines = lines[:index]
-                break
-    fenced = False
-    for index in range(start, len(lines)):
+        start, level = found[at][0] + 1, found[at][1]
+        end = next((index for index, depth, _ in found[at + 1:] if depth <= level), len(lines))
+        lines = lines[:end]
+    fenced = charted = False
+    seen = 0
+    index = start
+    while index < len(lines):
         line = lines[index]
         if re.match(r"^\s*(```|~~~)", line):
             fenced = not fenced
-        elif not fenced and line.strip().startswith("|"):
+        elif not fenced and CHART_OPEN.match(line):
+            charted = True
+        elif charted and re.match(r"^:::[ \t]*$", line):
+            charted = False
+        elif not fenced and not charted and line.strip().startswith("|"):
             end = index
             while end < len(lines) and lines[end].strip().startswith("|"):
                 end += 1
             table = notes_charts.parse_block("\n".join(lines[index:end])).table
             if table is not None and table.ruled:
-                return table
+                seen += 1
+                if seen == wanted_index:
+                    return table
+            index = end
+            continue
+        index += 1
     return None
+
+
+def _headings(lines: list[str]) -> list[tuple[int, re.Match[str]]]:
+    """A note's headings with their lines, outside code."""
+    found: list[tuple[int, re.Match[str]]] = []
+    fenced = False
+    for index, line in enumerate(lines):
+        if re.match(r"^\s*(```|~~~)", line):
+            fenced = not fenced
+        elif not fenced and (heading := HEADING.match(line)):
+            found.append((index, heading))
+    return found
 
 
 def slug(words: str) -> str:

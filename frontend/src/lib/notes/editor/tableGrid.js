@@ -22,8 +22,8 @@
  *   a cell is picked; an empty picture cell offers to cut its row's frame in
  *   Inspect (`tablePictures.js`).
  *
- * The Chart button waits for the lot that draws charts from a table: it calls
- * `registerTableChart(open)`, and the button is drawn from then on.
+ * The Chart button is the charts' (`editor/chartBlock.js` registers it through
+ * `registerTableChart(open)`): it shows every kind the table fits, drawn from its rows.
  *
  * Only in the drawn mode, and only a note that can be written takes the grid's
  * gestures; the raw Markdown shows the pipes as before. A table only the
@@ -54,7 +54,7 @@ import {
 } from './tableText.js';
 import { BlockWidget, markPicked, sourceButton } from './widgets.js';
 
-// -- the Chart button, for the lot that draws charts ---------------------------------
+// -- the Chart button, which the charts register ----------------------------------------
 
 let chartHook = null;
 
