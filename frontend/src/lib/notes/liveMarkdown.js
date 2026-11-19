@@ -16,7 +16,9 @@
  * Nothing on the page needs Markdown to be written: words selected bring up the
  * selection bubble and its Link field (`editor/bubble.js`, `editor/linkField.js`), `/`
  * or the + of an empty line the insert menu (`editor/insertMenu.js`), and what they
- * write is the Markdown an expert would type (`editor/marks.js`).
+ * write is the Markdown an expert would type (`editor/marks.js`). A chip or a written
+ * link, hovered or with the cursor in it, shows what the case knows of what it cites
+ * (`editor/citationCard.js`).
  *
  * Built on CodeMirror 6. Everything the page draws is worked out from the editor
  * state alone (`noteDecorations`), so it is tested without a browser.
@@ -43,6 +45,7 @@ import { autocompletion, completionKeymap, acceptCompletion } from '@codemirror/
 import { blockKinds } from './editor/blocks.js';
 import { blockKeys, pickedClass, typeNextToBlock, typeOnPicked } from './editor/blockKeys.js';
 import { selectionBubble } from './editor/bubble.js';
+import { citationCard } from './editor/citationCard.js';
 import { drawn, rawField, rawHighlight, typeOverHints } from './editor/decorations.js';
 import { handleExtensions } from './editor/handle.js';
 import './editor/kinds.js';
@@ -139,6 +142,8 @@ export function noteExtensions({ handlers = {}, placeholder = '', readOnly = fal
     syntaxHighlighting(highlight),
     autocompletion({ override: [mentionSource, slashSource(handlers, { template })], icons: false, activateOnTyping: true, closeOnBlur: true }),
     insertMenu,
+    // what a chip or a written link cites, on hover or with the cursor in it, drawn or raw
+    citationCard,
     // above Markdown's own Enter, which continues a list: an open menu takes Enter first
     Prec.highest(keymap.of([{ key: 'Tab', run: acceptCompletion }, ...completionKeymap, { key: 'Enter', run: leaveEmptyItem }])),
     keymap.of([
