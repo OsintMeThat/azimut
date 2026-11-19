@@ -424,6 +424,7 @@ class ChartBox {
         keep: this.info.caseId ? (values) => this.keepColours(values) : null,
         editData: () => this.toggleForm(true),
         source: this.info.caseId && this.handlers.pickData ? { said: () => this.sourceSaid(), change: (anchor) => this.changeSource(anchor) } : null,
+        templates: true,
       });
     }
     this.settingsButton?.setAttribute('aria-pressed', String(open));

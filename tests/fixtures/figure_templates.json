@@ -1,0 +1,20 @@
+{
+ "_about": "Each ready figure template applied with no data (engine/figuretemplates.py): figureTemplates.test.js opens each chart panel in its own form.",
+ "ready": [
+  {
+   "id": "losses-at-a-glance",
+   "text": ":::: infographic\nlook: report\nwidths: wide, half, half, wide, wide\n\n::: chart\nkind: key figures\n| Figure | What it says |\n| --- | --- |\n:::\n\n::: chart\nkind: pictograms\ncount: rows\nby: Grade\n| Grade |\n| --- |\n:::\n\n::: chart\nkind: donut\ncount: rows\nby: Status\n| Status |\n| --- |\n:::\n\n::: chart\nkind: segments\ncount: rows\nby: Type\n| Type |\n| --- |\n:::\n\n::: chart\nkind: timeline\nby: What happened\n| Date | What happened |\n| --- | --- |\n:::\n::::",
+   "applied": ":::: infographic\nlook: report\nwidths: wide, half, half, wide, wide\n\n::: chart\nkind: key figures\nrows: own\n| Figure | What it says |\n| --- | --- |\n:::\n\n::: chart\nkind: pictograms\ncount: rows\nby: Grade\nrows: own\n| Grade |\n| --- |\n:::\n\n::: chart\nkind: donut\ncount: rows\nby: Status\nrows: own\n| Status |\n| --- |\n:::\n\n::: chart\nkind: segments\ncount: rows\nby: Type\nrows: own\n| Type |\n| --- |\n:::\n\n::: chart\nkind: timeline\nby: What happened\nrows: own\n| Date | What happened |\n| --- | --- |\n:::\n::::"
+  },
+  {
+   "id": "a-front-on-a-map",
+   "text": ":::: infographic\nlook: report\nwidths: wide, wide, wide\n\n::: map\nnorth: on\nlegend: shown\n:::\n\n::: chart\nkind: key figures\n| Figure | What it says |\n| --- | --- |\n:::\n\n::: chart\nkind: timeline\nby: What happened\n| Date | What happened |\n| --- | --- |\n:::\n::::",
+   "applied": ":::: infographic\nlook: report\nwidths: wide, wide, wide\n\n::: map\nnorth: on\nlegend: shown\n:::\n\n::: chart\nkind: key figures\nrows: own\n| Figure | What it says |\n| --- | --- |\n:::\n\n::: chart\nkind: timeline\nby: What happened\nrows: own\n| Date | What happened |\n| --- | --- |\n:::\n::::"
+  },
+  {
+   "id": "who-supplied-them",
+   "text": ":::: infographic\nlook: report\nwidths: wide, half\n\n::: chart\nkind: silhouette rows\ncount: rows\nby: Supplier\nicon: armoured vehicle\nflags: each\n| Supplier |\n| --- |\n:::\n\n::: chart\nkind: donut\ncount: rows\nby: Supplier\n| Supplier |\n| --- |\n:::\n::::",
+   "applied": ":::: infographic\nlook: report\nwidths: wide, half\n\n::: chart\nkind: silhouette rows\ncount: rows\nby: Supplier\nicon: armoured vehicle\nrows: own\n| Supplier |\n| --- |\n:::\n\n::: chart\nkind: donut\ncount: rows\nby: Supplier\nrows: own\n| Supplier |\n| --- |\n:::\n::::"
+  }
+ ]
+}

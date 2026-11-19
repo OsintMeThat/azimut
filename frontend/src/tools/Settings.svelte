@@ -31,6 +31,7 @@
   import StorageTab from './settings/StorageTab.svelte';
   import SystemTab from './settings/SystemTab.svelte';
   import TemplatesTab from './settings/TemplatesTab.svelte';
+  import FigureTemplateEditor from './settings/FigureTemplateEditor.svelte';
   import IconsTab from './settings/IconsTab.svelte';
   import { iconLibrary } from '../lib/iconLibrary.svelte.js';
 
@@ -747,8 +748,15 @@
   let savingTpl = $state(false);
   let deleteTpl = $state(null); // { kind, id, name } pending confirmation
 
-  /** A new template; a post one starts as a kind of post, from one of that kind's layouts. */
-  function newTemplate(kind, { kind: postKind = 'geolocation', starter = null } = {}) {
+  /**
+   * A new template; a post one starts as a kind of post, from one of that kind's layouts,
+   * a figure one from what Settings › Templates › Figures picked (`name`, `data`).
+   */
+  function newTemplate(kind, { kind: postKind = 'geolocation', starter = null, name = '', data = null } = {}) {
+    if (kind === 'figure') {
+      editing = { kind, id: null, name, data, fresh: true };
+      return;
+    }
     editing = kind === 'proof'
       ? { kind, id: null, name: '', data: null, fresh: true, choosing: true }
       : {
@@ -1060,7 +1068,7 @@
 {#if editing}
   <div class="tpl-modal-overlay" role="presentation"
     onclick={(e) => e.target === e.currentTarget && cancelEdit()}>
-    <div class="tpl-modal" class:wide={editing.kind === 'proof'} role="dialog" aria-modal="true"
+    <div class="tpl-modal" class:wide={editing.kind === 'proof'} class:figure={editing.kind === 'figure'} role="dialog" aria-modal="true"
       aria-label={editing.choosing ? 'New proof template' : 'Template'}>
       <div class="tpl-modal-head">
         {#if editing.choosing}
@@ -1081,6 +1089,8 @@
           <ProofTemplateStarters onpick={startFrom} />
         {:else if editing.kind === 'proof'}
           <ProofTemplateEditor bind:data={editing.data} sampleLegend={editing.sampleLegend} />
+        {:else if editing.kind === 'figure'}
+          <FigureTemplateEditor bind:data={editing.data} />
         {:else}
           <PostTemplateEditor bind:data={editing.data} fresh={editing.fresh === true} />
         {/if}
@@ -1106,7 +1116,8 @@
   <ConfirmDialog
     title="Delete template"
     message={`Delete "${deleteTpl.name}"?`}
-    detail="This preset is removed for every case. Proofs already made keep their style."
+    detail={deleteTpl.kind === 'proof' ? 'This preset is removed for every case. Proofs already made keep their style.'
+      : 'This preset is removed for every case. What was made from it stays as it is.'}
     confirmLabel="Delete"
     tone="danger"
     onconfirm={confirmDeleteTemplate}
@@ -1247,6 +1258,11 @@
   .tpl-modal.wide {
     width: min(1240px, 100%);
     height: 88vh;
+  }
+
+  /* A figure template's sketch stands beside its fields. */
+  .tpl-modal.figure {
+    width: min(980px, 100%);
   }
 
   .tpl-modal.wide .tpl-modal-body {
