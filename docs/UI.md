@@ -7788,7 +7788,11 @@ the list: an empty section; a picture, video, chapter or record no longer in the
 (marked red); a picture with no source while sources are listed; tasks still open,
 outside Plain; a link a reader cannot open (`file:`, localhost, a private address);
 outside links with no archived copy, or none the case holds, while sources are listed; a
-script no face covers. One that names a line goes there when pressed. A template's pages give no such warnings, since a
+script no face covers. One that names a line goes there when pressed, as its *Go to* in
+the export dialog does. One about a heading lands on the line under it, never in the
+heading's words: at the section's first words, or, for an empty section, on an empty
+paragraph written under the heading (and any guidance there), which one Undo takes back.
+A link's warning lands on the link's line. A template's pages give no such warnings, since a
 template is guidance by design.
 
 **Pictures and pages.** Hovering a picture, in the note or on its page in the Page

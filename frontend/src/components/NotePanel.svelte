@@ -193,9 +193,9 @@
     flushSync();
   }
 
-  function jump(line) {
+  function jump(line, options) {
     toWrite();
-    editor?.jump(line);
+    editor?.jump(line, options);
   }
 
   // this note is the one a put from the extension writes to

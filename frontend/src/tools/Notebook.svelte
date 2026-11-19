@@ -59,7 +59,7 @@
   } from '../lib/notes/look.js';
   import { keepPageView, readPageView } from '../lib/notes/pageView.js';
   import { exportNotes, revealExports } from '../lib/notesExport.js';
-  import { checkNotes, isLeftOut, isNoAddress } from '../lib/notes/warnings.js';
+  import { checkNotes, isLeftOut, isNoAddress, jumpFor } from '../lib/notes/warnings.js';
   import {
     HTML, HTML_BUDGET, PDF, PUBLIC_ONLY, WEB, WORDPRESS, keepFormat, readFormat, weightWords,
   } from '../lib/notes/formats.js';
@@ -107,6 +107,8 @@
   // the stretch selected in the note, which To Post sends in its place: { from, to } or null
   let noteSelection = $state(null);
   let pendingLine = $state(null);
+  /** How the line asked for is gone to (`editor.jump`'s options): a warning's lands under a heading. */
+  let pendingJump = {};
   let rows = $state([]);
   let rowsLoading = $state(false);
   let titleField = $state('');
@@ -240,7 +242,7 @@
   // -- one note ------------------------------------------------------------------
 
   /** Show a note (`case` or null for the case notes), at a line if one is given. */
-  function show(noteId, { line = null, navigate = true } = {}) {
+  function show(noteId, { line = null, navigate = true, jump = {} } = {}) {
     if (!caseId) return;
     const id = noteId && noteId !== CASE_NOTES ? noteId : null;
     leaveTemplate({ quiet: true });
@@ -252,6 +254,7 @@
       editor = null;
     }
     pendingLine = Number.isInteger(line) ? line : null;
+    pendingJump = jump;
     uiState.openNotebook = { noteId: id };
     settlePlace('notebook', place(), { navigate });
   }
@@ -276,8 +279,9 @@
     const ready = editor && doc?.loaded;
     if (!ready || pendingLine === null) return;
     const line = pendingLine;
+    const options = pendingJump;
     pendingLine = null;
-    queueMicrotask(() => editor?.jump(line));
+    queueMicrotask(() => editor?.jump(line, options));
   });
 
   // a note asked for from elsewhere: a sidebar row, Details, a search, a citation
@@ -747,9 +751,9 @@
   }
 
   /** Leave the export for the line a warning is about, in its note. */
-  function goToWarning(noteId, line) {
+  function goToWarning(noteId, line, jump = {}) {
     closeExport();
-    show(noteId, { line });
+    show(noteId, { line, jump });
   }
 
   // -- a template from Settings ------------------------------------------------------
@@ -834,7 +838,7 @@
           {/key}
         </div>
         {#if pageMode}
-          <PagePane title={template.name} text={filledBody(templateDoc.text)} look={template.look} onjump={(line) => editor?.jump(line)}
+          <PagePane title={template.name} text={filledBody(templateDoc.text)} look={template.look} onjump={(line, options) => editor?.jump(line, options)}
             onresize={(picture, changes) => editor?.resize(picture.line, picture.ref, changes)} />
         {/if}
       </div>
@@ -891,7 +895,7 @@
         {/if}
         {#if pageMode && look && doc.loaded}
           <PagePane {caseId} note={opened.noteId ?? CASE_NOTES} title={noteEntity?.label ?? 'Case notes'} text={doc.text} {look} entities={graphEntities}
-            onjump={(line) => editor?.jump(line)} onresize={(picture, changes) => editor?.resize(picture.line, picture.ref, changes)} />
+            onjump={(line, options) => editor?.jump(line, options)} onresize={(picture, changes) => editor?.resize(picture.line, picture.ref, changes)} />
         {/if}
       </div>
     {:else}
@@ -1116,7 +1120,7 @@
                     <span class="before-words" id={`export-warning-${at}-${index}`}>{warning.text}</span>
                     {#if Number.isInteger(warning.line)}
                       <button type="button" class="btn btn-ghost btn-xs" title="Open the note at this line"
-                        aria-describedby={`export-warning-${at}-${index}`} onclick={() => goToWarning(item.note, warning.line)}>Go to</button>
+                        aria-describedby={`export-warning-${at}-${index}`} onclick={() => goToWarning(item.note, warning.line, jumpFor(warning))}>Go to</button>
                     {/if}
                     {#if warning.kind === 'unarchived'}
                       <button type="button" class="btn btn-primary btn-xs" title="Send each outside link to the Internet Archive and keep its copy"
