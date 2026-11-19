@@ -7525,6 +7525,15 @@ typed on the chart's own columns, in any order), **The numbers** (its rows, a li
 whether they still match, *Go to the table* and *Edit them as text*) and **Export** (a
 picture for X, 4:5, 1:1, the PDF page, or an SVG, downloaded with its title as its name).
 What the check says shows under it, each fix one press (*Add “at least” to the title*).
+For pictograms and silhouette rows the settings add an **Icon** row (`chartIcons.js`):
+**One for all** is one button showing the chart's icon; **One per category** gives each
+part or row its own, written as `icons: Streit Cougar = own:…, Al-Wahsh = armoured
+vehicle`, first the icon whose name names it, else the chart's, and says which took a
+name. Silhouette rows also get a **Flag** row, None or one per category (`flags:`), the
+flag named like each row taken first. Each button opens the picker: the library by group,
+the app's badges by group and three shapes, a search, and **Import SVG…**, Settings ›
+Icons' own import, whose icon is worn at once and joins the library. An infographic's
+panel card is the same card.
 Every choice writes its own line in the engine's order and is one Undo step. A press on a
 bar button picks the chart first, so the note stays where it is when a panel takes the
 keyboard. A double press or Enter opens its settings; a locked note shows the drawing.

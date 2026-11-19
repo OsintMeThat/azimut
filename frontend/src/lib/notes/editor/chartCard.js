@@ -5,15 +5,17 @@
  *   rows (`POST /notes/figure/kinds`), the analyst picking one by its picture. The
  *   arrows move between them, Enter picks, Escape closes;
  * - **the settings**: only what a chart is about, in plain words: its title, what it
- *   counts, by what, coloured by what, whether its table shows under it, and its look
- *   (Report, Book, Dark), each a whole preset. They open on the chart itself, between
- *   its bar and its drawing, so each choice is seen as it is made.
+ *   counts, by what, coloured by what, its icons for a chart of glyphs (`chartIcons.js`),
+ *   whether its table shows under it, and its look (Report, Book, Dark), each a whole
+ *   preset. They open on the chart itself, between its bar and its drawing, so each
+ *   choice is seen as it is made.
  *
  * Neither writes the note: each says what was chosen, and the chart block writes its
  * lines, one Undo step a choice (`editor/chartBlock.js`).
  */
 import { button, openPopover } from './gridMenu.js';
 import { chartKinds } from './chartFigure.js';
+import { chartIcons } from './chartIcons.js';
 import { ROWS, SHOWS, STYLES, setting } from './chartText.js';
 import { plainText, readColumns } from './tableText.js';
 
@@ -234,7 +236,8 @@ export function chartSettings(panel, { state, write }) {
   const offer = element('div', 'cm-chart-proposed');
   const columns = element('div', 'cm-chart-columns');
   const looks = element('div', 'cm-chart-looks');
-  panel.replaceChildren(titleRow, offer, columns, looks);
+  const icons = chartIcons(element('div'), { state, write });
+  panel.replaceChildren(titleRow, offer, columns, icons.node, looks);
 
   const size = () => {
     titleField.style.height = 'auto';
@@ -288,6 +291,7 @@ export function chartSettings(panel, { state, write }) {
     const focused = panel.contains(document.activeElement) && document.activeElement !== titleField ? document.activeElement.getAttribute('aria-label') : null;
     columns.replaceChildren(...fields);
     columns.hidden = !fields.length;
+    icons.refresh();
     looks.replaceChildren(
       segmented('Show', SHOWS.map((value) => ({ value, label: SHOW_NAMES[value] })), setting(chart, 'show') || 'chart',
         (value) => write(cardChanges('show', value, { kind }))),
