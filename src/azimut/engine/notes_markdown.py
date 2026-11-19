@@ -39,7 +39,7 @@ from markdown_it import MarkdownIt
 from markdown_it.token import Token
 
 from . import notefill, notesources, urltitles
-from .notelook import CASE_NOTE, NoteLook
+from .notelook import CASE_NOTE, NoteLook, Profile
 from .notesources import Annex, Source
 from .notetext import CALLOUT, ENTITY_REF, FENCE, INCLUDE, MEDIA_REF, PAGE_BREAK, without_hints
 
@@ -155,6 +155,12 @@ MAX_LOCAL_LINKS = 10
 MAX_LISTED_LINKS = 500
 #: What the aside says where an included note is gone: the warning is read off it.
 CHAPTER_GONE = "The note included here is no longer in the case."
+#: The callout that says what the evidence cannot, which the Limits annex gathers, and a
+#: heading that opens a Limits section of the note's own.
+LIMITS = "limits"
+LIMITS_HEADING = re.compile(r"^(?:\d+(?:\.\d+)*\.?\s+)?(?:limits|limitations)\b", re.I)
+#: The annexes that read every source cited.
+ANNEXES_READ = ("geolocations", "credits", "method")
 
 
 #: An address written as it is in prose (`https://…`), which the preview links as
@@ -784,7 +790,13 @@ class Cited:
     While the sources are listed, the outside links are checked too, each page once:
     those with no archived copy, and those the case holds nothing of, so no day says
     when they were read. Each is one line with a count, the links themselves in
-    ``listed`` under the line's kind, each with its words, its address and its line.
+    ``listed`` under the line's kind, each with its words, its address and its line;
+    a profile that checks `each` link (a report's) says each one on a line of its own.
+
+    What the style carries (`notelook.Profile`) is read once here, from the look and
+    this machine's Settings unless ``profile`` is given. The annexes read this pass
+    too: every source cited, numbered or not (``everything``), and the note's Limits
+    boxes in order (``limits``).
     Links to the case's own work are left out: an archived copy itself, the viewers a
     reader checks imagery in and the imagery services (`notesources.is_own_tool`), a
     map view the case captured, and where the analyst published a proof.
@@ -797,15 +809,24 @@ class Cited:
         look: NoteLook,
         styled: bool = False,
         identity: notefill.Identity | None = None,
+        profile: Profile | None = None,
     ) -> None:
         self.case = case
         self.look = look
+        #: What the document carries after its text, and how strictly its links are checked.
+        self.profile = profile if profile is not None else look.profile()
         #: Who signs, and where their pictures are: read once for the whole document.
         self.identity = identity if identity is not None else notefill.Identity()
         self.reader = notesources.Reader(case)
-        self.on = look.sources_on
+        self.on = self.profile.sources
         self.styled = styled
         self.annex: Annex | None = None
+        #: Every source the document cites, for the annexes, whether the list is printed or not.
+        self.everything: Annex | None = None
+        #: The note's Limits boxes in order, each its words and its line, and whether the
+        #: note has a Limits section of its own, which the Limits annex then leaves alone.
+        self.limits: list[tuple[str, int | None]] = []
+        self.limits_section = False
         #: (message, line, kind), in the order they were found.
         self.warnings: list[tuple[str, int | None, str]] = []
         self._prefixes = file_prefixes(case)
@@ -891,6 +912,11 @@ class Cited:
                         line = base + token.map[0]
                     if token.type == "list_item_open" and self.styled and task_state(tokens, index) is False:
                         self._tasks.append(line)
+                    elif token.type == "blockquote_open" and callout_kind(tokens, index) == LIMITS:
+                        self.limits.append((limits_words(tokens, index), line))
+                    elif (token.type == "heading_open" and index + 1 < len(tokens)
+                          and LIMITS_HEADING.match(tokens[index + 1].content.strip())):
+                        self.limits_section = True
                     elif token.type == "inline":
                         self._inline(token, line, piece.fixed)
         self._finish()
@@ -984,8 +1010,13 @@ class Cited:
                 self._warn(f"{rest} more link{'s' if rest > 1 else ''} will not open for a reader.", None, LOCAL_LINK)
             if self.on:
                 self._check_links()
+        # a written link counts with every set of words the note linked it with
+        self._cited = [self.reader.latest(source) for source in self._cited]
+        if self.on or any(self.profile.annex(key) for key in ANNEXES_READ):
+            self.everything = Annex(self._cited)
         if self.on:
-            self.annex = Annex(self._cited)
+            self.annex = self.everything
+            assert self.annex is not None
             if self.annex.left_out:
                 self._warn(f"The sources list stops at {self.annex.limit}; "
                            f"{self.annex.left_out} more are not listed.", None, OTHER)
@@ -1012,6 +1043,15 @@ class Cited:
                 unarchived.append(item)
             if not source.collected:
                 unseen.append(item)
+        if self.profile.link_check == "each":
+            # a report checks each link: one line per link, each going to its own line
+            for found, kind in ((unarchived, UNARCHIVED), (unseen, UNSEEN)):
+                for item in found[:MAX_LISTED_LINKS]:
+                    said = ("has no archived copy." if kind == UNARCHIVED
+                            else "is not in the case, so no day says when it was read.")
+                    at = item["line"]
+                    self._warn(f"\u201c{item['text']}\u201d {said}", at if isinstance(at, int) else None, kind)
+            return
         if len(unarchived) == 1:
             self._warn(f"\u201c{unarchived[0]['text']}\u201d has no archived copy.", unarchived[0]["line"], UNARCHIVED)
         elif unarchived:
@@ -1046,10 +1086,13 @@ class Cited:
         if self.annex is None:
             return []
         said: list[str] = []
+        style = self.profile.sources_style
         for entry in self.annex.entries:
             source = entry.source
             said.extend((source.label, *notesources.details(source), source.address, source.archive))
             said.extend(f"{site}: {address}" for site, address in source.verify)
+            if style != "short":
+                said.append(notesources.entry_text(notesources.entry(source, style, entry.origins)))
         return said
 
 
@@ -1099,6 +1142,24 @@ def callout_kind(tokens: list[Token], index: int) -> str:
     match = CALLOUT.match(f">{tokens[index + 2].content}")
     kind = match.group(2).lower() if match else ""
     return kind if kind in CALLOUTS else ""
+
+
+def limits_words(tokens: list[Token], index: int) -> str:
+    """The words of the Limits box opening at ``index``, its marker left out, on one line."""
+    end = past(tokens, index)
+    said: list[str] = []
+    for token in tokens[index + 1:end]:
+        if token.type != "inline":
+            continue
+        for child in token.children or []:
+            if child.type in ("text", "code_inline"):
+                said.append(child.content)
+            elif child.type in ("softbreak", "hardbreak"):
+                said.append(" ")
+        said.append(" ")
+    text = " ".join("".join(said).split())
+    match = CALLOUT.match(f">{text}")
+    return text[len(match.group(0)) - 1:].strip() if match else text
 
 
 def past(tokens: list[Token], index: int) -> int:

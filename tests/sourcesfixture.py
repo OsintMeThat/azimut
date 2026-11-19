@@ -16,6 +16,7 @@ from PIL import Image
 
 from azimut.engine import links as link_engine
 from azimut.engine import media as media_engine
+from azimut.engine import notelook
 
 POST_URL = "https://x.com/portwatch/status/1899200000000000001"
 PHOTO_URL = "https://t.me/portnews/512"
@@ -26,6 +27,21 @@ ARCHIVE_URL = f"https://web.archive.org/web/20260313091500/{NOTICE_URL}"
 ACCOUNT_URL = "https://x.com/portwatch"
 #: What Horizon writes under `attribution`: the terrain's, the imagery's and the peaks' credits.
 HORIZON_CREDITS = "Copernicus DEM GLO-30 © DLR · © OpenStreetMap contributors · 30 m relief"
+
+
+#: A look's choices that print a report as it printed before styles carried profiles
+#: (`engine/notelook.py`, PROFILES): its sources short, no annex, its links grouped.
+AS_BEFORE: dict[str, Any] = {"sources_style": "short", "link_check": "grouped",
+                             "annexes": {key: "off" for key in notelook.ANNEXES}}
+
+
+def report_as_before(monkeypatch: Any) -> None:
+    """Settings › Publishing › Styles set so a report prints as it did before profiles: the
+    tests that read the short sources list and the grouped check through a report. What a
+    report carries by default is `test_notes_profiles.py`'s."""
+    table = notelook.styles_table({"report": {"sources_style": "short", "link_check": "grouped",
+                                              **{key: False for key in notelook.ANNEXES}}})
+    monkeypatch.setattr(notelook, "settings_table", lambda: table)
 
 
 def _picture(colour: tuple[int, int, int], size: tuple[int, int] = (640, 360)) -> Image.Image:

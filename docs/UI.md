@@ -7334,17 +7334,61 @@ posts and cuts a long text itself.
 
 **How it prints.** **Look** sets the note's style, kept beside the note (the note
 record's `look`, `notes.case_look` for the case notes) and never in its Markdown. Its
-panel shows one tab at a time, *Style* (the style, then contents, numbered headings and
-sources as three switches, and the web page's layout), *Text*, *Page* (paper, accent, marking), *Cover* and *Header
-& footer*, a dot on each tab holding something set, and reopens on the last tab used:
+panel shows one tab at a time, *Style* (what the document is **For**, then contents and
+numbered headings, **What it includes**, and the web page's layout), *Text*, *Page* (paper, accent, marking), *Cover* and *Header
+& footer*, a dot on each tab holding something set, and reopens on the last tab used.
+The **For** row lists the five styles, each with a line on what it gives; the style is
+the profile, so it decides what the document carries after its text as well as its look:
 
-- **Plain**, with nothing else set, is the document the Notebook always printed.
 - **Report** has a running header, *Page X / Y*, numbered sections in the accent,
-  boxed callouts, striped tables and framed figures.
+  boxed callouts, striped tables and framed figures; its sources are written
+  **Academic** and it carries every annex, and the check names each link on its own line.
+- **Web article** is a page read online: the day over a large title, its sources
+  written for the **Web**, its **Credits** and its **Editions & corrections**.
 - **Brief** sets a dark band with the title and puts the first verdict
   (`[!confirmed]` or `[!unverified]`) in a large box under it, to fit a page or two.
 - **Journal** opens each day with its date and sets each `### YYYY-MM-DD HH:MM`
   entry's time in a left gutter on a timeline.
+- **Plain**, with nothing else set, is the document the Notebook always printed, to the
+  byte: no sources list and no annex.
+
+**What it includes** lists the **Sources** list and the five annexes as switches, then
+**Sources written as** (*Academic*, *Web*, *Short*) and the **Link check** (*Each link*,
+*One line*). Each shows the style's own value (*Report's own*) until changed for this
+note, then *Changed here · Reset*; setting one back to the style's value is the style's
+own again. The annexes print after the sources, each a heading of its own in the
+contents and the bookmarks, in the PDF, the HTML page, its web folder and a WordPress
+draft, and only when they have something to say (`engine/noteannexes.py`):
+
+- **Geolocations**: a table of every proof the note cites, its source number, the place
+  it depicts and how far off its point may be, its day (*about*, or a span), and its
+  coordinates linked to the map; a point filmed from says *Where it was filmed*, rounded
+  when the export rounds them.
+- **Credits**: the imagery (providers and their credit lines, a proof's panels' too),
+  the terrain, the maps drawn in the note, the accounts whose posts it shows by site,
+  and the typefaces with their licence.
+- **How this was made**: facts read from the case, never prose: the edition and the
+  Azimut that made it, how many sources of each kind, the days they were posted and came
+  in, how many outside addresses have an archived copy, the imagery and its days, the
+  fingerprinted files and the tools the items came from.
+- **Limits**: every `> [!limits]` box of the note gathered, each linked back to where
+  it stands; a note with a *Limits* or *Limitations* section of its own is left as it is.
+- **Editions & corrections**: this edition, then each public text published before,
+  one row per text with its first day, its formats, what it corrected and its
+  fingerprint. In the HTML page it takes the place and the `#corrections` address of the
+  corrections; with it off, the page lists its corrections as before.
+
+**Sources written as** *Academic* reads as a journal's reference list: Author (the
+account an X or Telegram address names when the case records none), "Title", the medium
+for a file, *Outlet* in italics (a known site by its name, *Al Jazeera*, any other by its
+host), the full day, the address, *archived (day) at* the copy, *accessed* (or
+*collected*, *made*) the day it was seen. What the case does not know is left out with
+its comma, never *n.d.* A written link takes as its title the longest words the note
+links it with that are not a citation of the site (*Al Jazeera, 10 Sep* is one), so a
+note's own sources list names the page; a link to a Wayback copy is that copy of its
+page. *Web* writes the outlet, the title linked and the short day, then *Archived copy*;
+*Short* is the form notes always printed. Files keep their SHA-256 line and captures
+their *Check on* links in every form.
 
 Every style takes A4 or Letter, an accent (the style's own, a recent colour or a
 pasted hex), a TLP marking (FIRST TLP 2.0 colours, top right and in the footer of
@@ -7392,8 +7436,10 @@ Its **Text** part sets the typeface, each card drawn in its face: the style's ow
 Literata (a book face for long write-ups) or IBM Plex Sans (a clean face for briefs),
 and the size, Smaller, Normal or Larger, which headings, tables and captions follow.
 A letter a face lacks prints in the Noto face of its script. Templates carry both.
-Its **Sources** row, *List sources at the end*, is on for Report, Brief and Journal and
-off for Plain until set; templates carry it too. Its **Web page** row, *Article* or
+Its **Sources** switch is on for Report, Web article, Brief and Journal and off for
+Plain until set; templates carry it and every switch of *What it includes*, each kept
+only once set (`sources_style`, `annexes`, `link_check`), so a look that never used
+them reads as an older Azimut wrote it. Its **Web page** row, *Article* or
 *Story*, lays out the HTML page only (see *Story* above); it is kept only once set to
 Story, so a look that never used it reads as an older Azimut wrote it, and templates
 carry it.
@@ -7683,6 +7729,15 @@ composer and the Map plate already use), **Name**, **Role** and **Organisation**
 line each, 80 characters at most) and the **Signature**, a PNG of a handwritten
 signature up to 1 MB, a transparent one recommended; each field says what it takes and
 where it prints. The settings backup carries them all.
+
+**Styles.** Under *In reports*, Settings › Publishing holds what each style carries, set
+once for every note that keeps its style's own: a column per style (Report, Web article,
+Brief, Journal, Plain), a switch per row for the **Sources** list and the five annexes,
+then **Written as** and **Link check before export** as menus. Each change saves at once
+and reaches a note's next export, never a file already written; a note's Look still
+changes any of it. **Reset to Azimut's defaults** gives every style back what Azimut
+gives it. Only what differs from Azimut's own is kept (`note_styles`), and the settings
+backup carries it.
 
 **WordPress.** The last group of Settings › Publishing connects the site a note is sent
 to: **Site address** (https, or http on this computer for a test site; a WordPress.com

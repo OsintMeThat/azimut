@@ -73,3 +73,13 @@ and the browser's in-memory search cannot fold one text two ways.
 |---|---|
 | `proof-templates-0.3.3.json` | A `templates.json` as 0.3.3 writes it: one house style that uses every key the editor holds without showing (a dragged logo's offsets and ratios, a handle's opacity, a stack direction kept under free layout) and one written before most keys existed. Read by `tests/test_templates_api.py`, which saves both back byte for byte, and by `frontend/src/components/ProofTemplateEditor.render.test.js`, which opens them in the editor and saves them untouched. |
 | `post-templates-0.3.3.json` | A `templates.json` as 0.3.3 writes its thread layouts: one using every token of the time with two boilerplate posts and no media post, one bare. Neither carries a `kind` or a `reply`. Read by `tests/test_templates_api.py`, which saves both back byte for byte, and by `frontend/src/components/PostTemplateEditor.render.svelte.test.js`, which opens them as Geolocation templates. |
+
+## Note styles
+
+| File | What it is there to break |
+|---|---|
+| `note-styles.json` | What each note style carries when nobody changed it: the sources list, how its sources are written, the five annexes and how strictly its links are checked. Written from `engine/notelook.py` (`PROFILES`), the one place Azimut decides it. |
+
+Read by `tests/test_notes_profiles.py` against `PROFILES` and by
+`frontend/src/lib/notes/look.test.js` against `STYLE_DEFAULTS`, so the Look and Settings
+never show a default the documents do not print.
