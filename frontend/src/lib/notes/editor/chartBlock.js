@@ -326,6 +326,7 @@ class ChartBox {
       this.againButton.title = differs ? `${state.name[0].toUpperCase()}${state.name.slice(1)} changed: copy its rows again` : '';
     }
     if (this.numbersOpen && was !== state?.state) this.renderNumbers();
+    if (was !== state?.state) this.settings?.refresh();
   }
 
   // -- the bar's gestures --
@@ -379,6 +380,7 @@ class ChartBox {
         state: () => (this.gone ? null : { chart: this.chart, drawn: this.drawn }),
         write: (changes) => this.write(changes),
         keep: this.info.caseId ? (values) => this.keepColours(values) : null,
+        source: this.info.caseId && this.handlers.pickData ? { said: () => this.sourceSaid(), change: (anchor) => this.changeSource(anchor) } : null,
       });
     }
     this.settingsButton?.setAttribute('aria-pressed', String(open));
@@ -386,7 +388,27 @@ class ChartBox {
     this.view.requestMeasure();
   }
 
-  /** Copy the rows again from where they came from, as one step Undo takes back. */
+  /** Where the rows come from, for the settings' Data line: `{ name, state }`. */
+  sourceSaid() {
+    const origin = readOrigin(setting(this.chart, 'from'));
+    if (!origin) return { name: '', state: '' };
+    const known = this.origin;
+    if (!known) return { name: origin.kind === 'sheet' ? 'A sheet' : 'A table', state: '' };
+    const name = known.name.replace(/^the sheet /, 'Sheet ');
+    return { name: `${name[0].toUpperCase()}${name.slice(1)}`, state: known.state === 'differs' || known.state === 'gone' ? known.state : '' };
+  }
+
+  /** Change…: the source picker; the one picked writes `from:` and its rows, as one step. */
+  changeSource(anchor) {
+    this.handlers.pickData?.({
+      anchor,
+      current: setting(this.chart, 'from'),
+      onpick: ({ origin, data }) => {
+        if (origin && data?.text) this.edit((source) => withTable(withSettings(source, { from: origin }), data.text));
+      },
+    });
+  }
+
   /**
    * Name the colours the chart chose on its own in the case's palette (`layerPalette.keep`,
    * the infographic builder's too), so every chart, map and layer paints them the same. The
@@ -939,6 +961,12 @@ const THEME = {
     marginLeft: '6px', padding: '0', border: 'none', background: 'none', color: 'var(--info)', font: 'inherit', cursor: 'pointer', textDecoration: 'underline',
   },
   '.cm-chart-looks .cm-chart-field': { flexDirection: 'row', alignItems: 'center', gap: '10px' },
+  // where the rows come from, on top of the settings
+  '.cm-chart-data': { flexDirection: 'row', alignItems: 'baseline', flexWrap: 'wrap', gap: '4px 10px' },
+  '.cm-chart-data > .cm-chart-field-name': { flex: 'none', width: '64px' },
+  '.cm-chart-data-name': { color: 'var(--text-1)', fontWeight: '600' },
+  '.cm-chart-data-state': { color: 'var(--warn)' },
+  '.cm-chart-data-state[hidden]': { display: 'none' },
   '.cm-chart-colours': { flexDirection: 'row', alignItems: 'baseline', flexWrap: 'wrap', gap: '6px 10px', paddingLeft: '74px' },
   '.cm-chart-colours[hidden]': { display: 'none' },
   '.cm-chart-swatches': { display: 'inline-flex', flexWrap: 'wrap', gap: '4px 10px', flex: '1 1 0', minWidth: '0' },

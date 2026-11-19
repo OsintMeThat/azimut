@@ -8,7 +8,15 @@
  * Writing changes only the lines a gesture touches: a setting is its own line, replaced
  * where it stands, put after the others when it is new, taken out when emptied; a panel
  * moves as its lines, and `widths:` moves with it so each panel keeps its width.
+ *
+ * `data:` names what the page's charts are drawn from (`sheet:<id>`, `note:<id>#<anchor>`).
+ * A chart panel with no `from:` of its own, whose columns the data all holds, inherits it
+ * (`inherits`, as `notes_infographic.inherits`): its rows stay copied in, and
+ * `withDataRows` copies the data's rows into every such panel as one change.
  */
+import { readChart, withSettings, withTable } from './chartText.js';
+import { parseTable, plainText } from './tableText.js';
+
 
 export const INFOGRAPHIC_OPEN = /^::::[ \t]*infographic[ \t]*$/;
 export const INFOGRAPHIC_CLOSE = /^::::[ \t]*$/;
@@ -21,9 +29,9 @@ const COMMENT_ONLY = /^\s*(?:<!--[\s\S]*?-->\s*)+$/;
 export const INFOGRAPHIC_KEYS = {
   kicker: 'kicker', eyebrow: 'kicker', title: 'title', headline: 'title',
   standfirst: 'standfirst', subtitle: 'standfirst', dek: 'standfirst', intro: 'standfirst',
-  look: 'look', style: 'look', widths: 'widths', width: 'widths', panels: 'widths', legend: 'legend',
+  look: 'look', style: 'look', widths: 'widths', width: 'widths', panels: 'widths', legend: 'legend', data: 'data',
 };
-export const WRITTEN_ORDER = ['kicker', 'title', 'standfirst', 'look', 'legend', 'widths'];
+export const WRITTEN_ORDER = ['data', 'kicker', 'title', 'standfirst', 'look', 'legend', 'widths'];
 export const HALF = 'half';
 export const WIDE = 'wide';
 /** The three looks, whole presets (`notes_charts.STYLES`). */
@@ -61,9 +69,9 @@ export function infographicsIn(text) {
   return found;
 }
 
-/** A chart's kind and title as its lines write them. */
+/** A chart's kind, title and `from:` as its lines write them. */
 function chartSaid(lines) {
-  const said = { kind: '', title: '' };
+  const said = { kind: '', title: '', from: '' };
   for (const line of lines) {
     if (line.trim().startsWith('|')) break;
     const found = SETTING.exec(line.trim());
@@ -71,6 +79,7 @@ function chartSaid(lines) {
     const key = found[1].trim().toLowerCase();
     if ((key === 'kind' || key === 'type') && !said.kind) said.kind = found[2].trim().toLowerCase();
     if (key === 'title' && !said.title) said.title = found[2].trim();
+    if (key === 'from' && !said.from) said.from = found[2].trim();
   }
   return said;
 }
@@ -85,8 +94,8 @@ export function defaultWidth(panel) {
 /**
  * An infographic block read: `lines` (the whole block, its fences included),
  * `settings` (key → `{ value, line }`, the first of each), and `panels`, each
- * `{ kind, from, to, title, chartKind, written, width }`, `from`–`to` its lines (both
- * included, a block's fences with it).
+ * `{ kind, from, to, title, chartKind, origin, written, width }`, `from`–`to` its lines
+ * (both included, a block's fences with it), `origin` a chart's own `from:` as written.
  */
 export function readInfographic(source) {
   const lines = String(source ?? '').split('\n');
@@ -114,7 +123,7 @@ export function readInfographic(source) {
     if (from <= to && !COMMENT_ONLY.test(text)) {
       const heading = lines.slice(from, to + 1).find((line) => /^#{1,6}\s/.test(line));
       const first = lines.slice(from, to + 1).find((line) => line.trim() && !line.trim().startsWith('<!--')) ?? '';
-      panels.push({ kind: 'words', from, to, title: (heading ?? first).replace(/^#{1,6}\s+/, '').trim(), chartKind: '' });
+      panels.push({ kind: 'words', from, to, title: (heading ?? first).replace(/^#{1,6}\s+/, '').trim(), chartKind: '', origin: '' });
     }
     words = null;
   };
@@ -134,7 +143,7 @@ export function readInfographic(source) {
     closeWords(index - 1);
     const inner = lines.slice(index + 1, end);
     const said = opened[1] === 'chart' ? chartSaid(inner) : { kind: '', title: (inner.map((line) => /^\s*title\s*:\s*(.*)$/i.exec(line)).find(Boolean) ?? [])[1] ?? '' };
-    panels.push({ kind: opened[1], from: index, to: end, title: said.title, chartKind: said.kind });
+    panels.push({ kind: opened[1], from: index, to: end, title: said.title, chartKind: said.kind, origin: said.from ?? '' });
     index = end;
   }
   closeWords(last - 1);
@@ -268,3 +277,94 @@ export const WORDS_PANEL = '### A heading\nA few words about what the panels sho
 
 /** A key figures chart to fill in: two figures with the words under them. */
 export const KEY_FIGURES_PANEL = '::: chart\nkind: key figures\n| Figure | Words |\n| --- | --- |\n|  |  |\n|  |  |\n:::';
+
+// -- the data -------------------------------------------------------------------------------
+
+/** What `data:` and a chart's `from:` may name: a sheet of the case or a table of a note (`notecharts.origin_known`). */
+const ORIGIN = /^\s*(note|sheet)\s*:\s*[^#\s]+/i;
+
+/** Whether `value` names a source the case reads rows from. */
+export function knownOrigin(value) {
+  return ORIGIN.test(String(value ?? ''));
+}
+
+/** The infographic's `data:` as written, '' without one. */
+export function dataOf(source) {
+  return String(readInfographic(source).settings.data?.value ?? '').trim();
+}
+
+const fold = (header) => plainText(header).split(/\s+/).join(' ').toLowerCase();
+
+/** Whether a table's columns are all among `columns` (a table with none is). */
+function fits(table, columns) {
+  if (!table || !table.header.length) return true;
+  const held = new Set((columns ?? []).map(fold));
+  return table.header.filter((header) => fold(header)).every((header) => held.has(fold(header)));
+}
+
+/**
+ * Whether panel `index` takes the page's data, whose columns are `columns`: a chart with no
+ * `from:` of its own whose table's columns the data holds every one of, or which holds no
+ * table yet. A table with a column the data lacks (key figures typed in) is its own.
+ */
+export function inherits(source, index, columns) {
+  const panel = readInfographic(source).panels[index];
+  if (!panel || panel.kind !== 'chart' || knownOrigin(panel.origin)) return false;
+  return fits(readChart(panelText(source, index)).table, columns);
+}
+
+/** The panels that take the page's data, by index, given the data's `columns`. */
+export function inheritingPanels(source, columns) {
+  return readInfographic(source).panels.map((_, index) => index).filter((index) => inherits(source, index, columns));
+}
+
+/** The panels with a source of their own (`from:`), by index. */
+export function ownSourcePanels(source) {
+  return readInfographic(source).panels.map((panel, index) => (panel.kind === 'chart' && knownOrigin(panel.origin) ? index : -1))
+    .filter((index) => index >= 0);
+}
+
+/** The infographic with the data's rows (`dataText`, a table) copied into `indices`'s panels, the rest as it was. */
+export function withDataRows(source, dataText, indices) {
+  let next = source;
+  // from the last panel up, so a panel's new rows never move the lines of the ones before it
+  for (const index of [...indices].sort((a, b) => b - a)) {
+    const text = panelText(next, index);
+    if (!text) continue;
+    next = withPanelText(next, index, withTable(text, dataText));
+  }
+  return next;
+}
+
+/**
+ * The infographic's data set to `origin`, whose rows are `dataText`, as one change. Every chart
+ * panel whose columns the data holds takes it: one that inherited, and the first time a page
+ * gets data, one whose own `from:` named a table of these columns, its `from:` taken out. Each
+ * gets the data's rows. A panel whose columns the data lacks keeps its own rows. Answers
+ * `{ text, panels }`, `panels` the indices that now read the data.
+ */
+export function withDataSource(source, origin, dataText) {
+  const before = dataOf(source);
+  const columns = parseTable(dataText)?.header ?? [];
+  let next = withSetting(source, 'data', origin);
+  const read = readInfographic(next);
+  // a page getting its first data adopts the charts drawn from tables of these columns
+  if (!before) {
+    for (let index = read.panels.length - 1; index >= 0; index -= 1) {
+      const panel = read.panels[index];
+      if (panel.kind !== 'chart' || !knownOrigin(panel.origin)) continue;
+      const text = panelText(next, index);
+      const { table } = readChart(text);
+      if (table?.header.length && fits(table, columns)) next = withPanelText(next, index, withSettings(text, { from: '' }));
+    }
+  } else {
+    // the panels that named this very source take it as the page's
+    read.panels.forEach((panel, index) => {
+      if (panel.kind === 'chart' && panel.origin.trim() === origin.trim()) {
+        next = withPanelText(next, index, withSettings(panelText(next, index), { from: '' }));
+      }
+    });
+  }
+  const panels = inheritingPanels(next, columns);
+  return { text: withDataRows(next, dataText, panels), panels };
+}

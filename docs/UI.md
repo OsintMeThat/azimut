@@ -6455,6 +6455,13 @@ says what it is checking.
   export nobody could find twice. Inside the case a re-export overwrites so the folder is
   refreshed in one click; outside it nothing is ever overwritten, because those files are
   the analyst's.
+- **A sheet is what a note's charts are drawn from.** An infographic's Data line, and a
+  chart's settings, name a sheet as their data (`data: sheet:<id>`, `from: sheet:<id>`) and
+  list the case's sheets first. *New data…* there makes a sheet from a table pasted, an
+  .xlsx or a CSV, named in the Notebook, and the Sheet tool then shows it like any other. The
+  charts keep a copy of its rows; a row edited here, or in Excel, makes the Notebook say the
+  data changed since, and *Read again (all panels)* copies it in. A sheet a note's figure
+  reads is counted as used, and its delete names that note.
 - **A column naming other rows of the same sheet becomes real edges.** The binders wrote an
   order of battle in a column called `Links with others` — a brigade listing its companies,
   each company naming its brigade back — held together by a spreadsheet validation that
@@ -7561,7 +7568,8 @@ keyboard. A double press or Enter opens its settings; a locked note shows the dr
 **Infographics.** A `:::: infographic` block is a page of panels read as one figure
 (`engine/notes_infographic.py`): a title band, then ordinary `::: chart` and `::: map` blocks
 and the words between them, in reading order, then one source line. Its four colons keep each
-panel's own syntax, so a panel moved out reads the same. Its own lines are only `kicker`,
+panel's own syntax, so a panel moved out reads the same. Its own lines are only `data`
+(what its charts are drawn from: `sheet:<id>`, or a note's table, `note:<id>#<heading>`), `kicker`,
 `title`, `standfirst`, `look` (report, book or dark, one for the page), `legend` (`each panel`
 to keep one legend a chart) and `widths` (each panel half or wide, in reading order; words, key
 figures and a timeline span the page unless it says otherwise). Half panels fill the shorter of
@@ -7572,14 +7580,39 @@ every panel and the map's imagery are gathered into one line. The honesty rules 
 each chart keeps its checks, a title band that says the figures are floors says it for every
 panel, and a title stating a number says *at least* when a panel counts a floor.
 
+**The data** (`editor/infographicData.js`, `components/DataPicker.svelte`). A chart panel with
+no `from:` of its own, whose columns the data holds every one of, takes the page's data: it
+picks only what to count, split by and colour by from those columns, in its own card, and keeps
+a copy of the rows, so the page reads the same tomorrow. Key figures typed in keep their own
+rows, and a panel with its own `from:` keeps its own source. On top of the block drawn in the
+note and of the builder, one **Data** line says the source (*Sheet “Vehicle register”*, the
+builder's name opening it in the Sheet tool), its rows (*first 500 of 620* when a chart holds
+fewer), how many panels read it, and *changed since* when their rows differ from it, with
+**Read again (all panels)** and **Change…**. Read again copies the data's rows, read now, into
+every panel that takes it, as one Undo. Change… lists the case's sheets first, marked
+*Recommended* (the Sheet tool or Excel edits them), then the tables of this note, then **New
+data…**: a name, and a table pasted (the grid's own paste reader: a spreadsheet's or a page's
+HTML table, or its tab-separated cells, with a preview and *The first row names the columns*),
+or an .xlsx (every tab filed as a sheet named as its tab, the first the data) or a CSV, kept as
+a new sheet of the case. The one picked becomes `data:` as one Undo; the first time a page gets
+data, the charts copied from a table of its columns take it, their `from:` taken out and the
+rows read in. The line reads the data again as the note changes, when the Notebook is shown
+again after another tool, and when the window comes back. A panel's card in the builder, and a
+chart's settings in the note, start with the same **Data** line, *Change…* opening the same
+picker (a panel can also take the infographic's data back). The check before export says, at
+its line, data no longer in the case and each panel whose rows differ from it or from its own
+source; the builder's drawing leaves that to the Data line (`origins: false`). A sheet or a
+note named by `data:` or `from:` is used (`engine/uses.py`): its delete names the note.
+
 `/` › **Infographic** (Figures) writes a starter from what the note holds: its key figures, its
 main chart, a donut and its map, each made from the note's own tables by the chart's kind
 picker, never numbers it does not hold; a note with none gets an empty page and a line saying
 how to fill it. The page is drawn
 in the note as the server draws it; a press on a panel or on **Edit** opens the builder beside
 the note: the title band, the panels (drag or Alt+↑/↓ to reorder, Half or Wide, × takes one out,
-**Add a panel** shows each table of the note drawn as every kind it fits by the chart's kind
-picker, the chart picked written as one under its table would be, its rows and `from:` with it,
+**Add a panel** shows the page's data first, then each table of the note, drawn as every kind it
+fits by the chart's kind picker (a panel made of the data takes it, with no `from:`), the chart
+picked written as one under its table would be, its rows and `from:` with it,
 and the note's maps, with Words and Key figures to fill in; pressing a chart's row opens the
 chart's own settings card under it, title, count, by and colour, each choice written inside the
 page as one Undo), the look, **One legend for Grade, at the top**, the

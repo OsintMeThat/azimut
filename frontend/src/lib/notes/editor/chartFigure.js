@@ -148,7 +148,8 @@ export function chartKinds({ caseId, noteId = '', text }, { post = api.post } = 
 
 /**
  * The rows a chart's `from:` names when they came from another note or a sheet, as a
- * table's Markdown: `{ found, name, text }`, or `{ error }`. Kept a few seconds
+ * table's Markdown: `{ found, name, text, total }` (`total` its rows, past the ones a chart
+ * holds), or `{ error }`. Kept a few seconds
  * (`ROWS_KEPT_MS`), so typing in the note does not ask again at every key; `fresh` asks now.
  */
 export function chartRows({ caseId, origin, fresh = false }, { post = api.post, now = Date.now } = {}) {
@@ -156,7 +157,7 @@ export function chartRows({ caseId, origin, fresh = false }, { post = api.post, 
   const known = copied.get(key);
   if (known && !fresh && now() - known.at < ROWS_KEPT_MS) return known.asked;
   const asked = post(`/api/cases/${encodeURIComponent(caseId)}/notes/figure/rows`, { origin })
-    .then((answer) => ({ found: Boolean(answer?.found), name: String(answer?.name ?? ''), text: String(answer?.text ?? '') }))
+    .then((answer) => ({ found: Boolean(answer?.found), name: String(answer?.name ?? ''), text: String(answer?.text ?? ''), total: Number(answer?.rows) || 0 }))
     .catch((error) => {
       copied.delete(key);
       return { error: error?.message ?? String(error) };
