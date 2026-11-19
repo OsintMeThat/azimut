@@ -201,9 +201,9 @@ answer by omission (`tests/test_entities.py`).
 | `analysis-zones` | document | annex | ✅ | detect | `spec` (json): an ordered group of shared area IDs; older shape sets migrate on read | yes (`.analysis/zones-<id>.json`) |
 | `analysis-follow-up` | document | annex | ✅ | detect | `spec` (json): an analyzer, its areas and a date rule | yes (`.analysis/followups-<id>.json`) |
 | `analysis-run` | document | annex | ✅ | detect | `spec` (json): candidates, frozen inputs and review decisions | yes (`.analysis/runs-<id>.json` + `.assets/` previews) |
-| `note` | document | annex | ✅ | notebook | `path`, `folder?`, `look?` (json): how it prints; the case notes keep theirs in the setting `notes.case_look` | yes (Markdown) |
+| `note` | document | annex | ✅ | notebook | `path`, `folder?`, `look?` (json): how it prints; `link_archive?` (json): its last Archive every link run; the case notes keep both in the settings `notes.case_look` and `notes.case_link_archive` | yes (Markdown) |
 | `sheet` | document | annex | ✅ | sheet | `path` (csv) | yes (CSV + sidecar) |
-| `bookmark` | document | attestation | ✅ | capture extension | `url`, `fetched_at?`, `archive_url?`, `reliability?` | no (a URL) |
+| `bookmark` | document | attestation | ✅ | capture extension, Archive every link | `url`, `fetched_at?`, `archive_url?`, `archived_at?`, `reliability?` | no (a URL) |
 | `person` | actor | subject | ✅ | analyst | `aliases`, `role`, `nationality` | no |
 | `organization` | actor | subject | ✅ | analyst | `aliases`, `echelon`, `country` | no |
 | `vehicle` | asset | subject | ✅ | analyst | `plate`, `make`, `model`, `colour`, `condition` | no |
@@ -546,7 +546,8 @@ a case actually sources from: `bookmark` (the page) and `account` (whoever poste
 |---|---|---|---|
 | `url` | `bookmark` | the save | where the page is |
 | `fetched_at` | `bookmark` | the save | when it was seen, UTC |
-| `archive_url` | `bookmark` | the analyst | the copy that outlives the page |
+| `archive_url` | `bookmark`, `media` | the analyst, or Archive every link | the copy that outlives the page |
+| `archived_at` | `bookmark`, `media` | Archive every link | when that copy was made, UTC |
 | `reliability` | `bookmark`, `account` | the analyst | how much the source is worth, A–E |
 
 `fetched_at` is stamped server-side by the route standing on the page, so the moment
@@ -554,6 +555,9 @@ is known rather than typed; a bookmark added by hand in the app carries none, an
 that absence is never flagged. It is what an archived copy is later dated against.
 It and `url` are tool-written, so neither is a declared field: the panel reports them
 under Info rather than offering them for edit.
+*Archive every link* (Notebook) writes `archive_url` and `archived_at` on the bookmark or
+the downloaded post a note's link finds, and files a bookmark for a link the case lacks,
+its `fetched_at` the moment it was archived (none when only an older copy was linked).
 
 **The grades are the Admiralty/NATO letters**, served with the registry as a `choice`
 field so the picker and the validator cannot drift:
