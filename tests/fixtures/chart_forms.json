@@ -1,0 +1,437 @@
+{
+ "_about": "What a chart's form writes for each kind (frontend/src/lib/notes/editor/chartFormText.js), and how the engine reads it (engine/notes_charts.py): chartFormText.test.js writes each model and expects its block byte for byte, then reads it back; tests/test_notes_chart_fill.py draws each block and expects its kind and its lines.",
+ "forms": [
+  {
+   "name": "a timeline of three events and a period",
+   "kind": "timeline",
+   "model": {
+    "heads": {
+     "when": "When",
+     "what": "What happened",
+     "until": "Until"
+    },
+    "rows": [
+     {
+      "when": "18 Oct 2026",
+      "what": "Giants Brigades on a peak of the Kahbub Mountains",
+      "until": ""
+     },
+     {
+      "when": "Oct 2026",
+      "what": "The front moves north",
+      "until": ""
+     },
+     {
+      "when": "10 Nov 2026",
+      "what": "Presence northeast of Huwayrib",
+      "until": "14 Nov 2026"
+     },
+     {
+      "when": "2026",
+      "what": "The year of the offensive",
+      "until": ""
+     }
+    ]
+   },
+   "block": "::: chart\nkind: timeline\n| When | What happened | Until |\n| --- | --- | --- |\n| 18 Oct 2026 | Giants Brigades on a peak of the Kahbub Mountains | |\n| Oct 2026 | The front moves north | |\n| 10 Nov 2026 | Presence northeast of Huwayrib | 14 Nov 2026 |\n| 2026 | The year of the offensive | |\n:::",
+   "engine": {
+    "kind": "timeline",
+    "lines": [
+     "2026: The year of the offensive",
+     "Oct 2026: The front moves north",
+     "18 Oct 2026: Giants Brigades on a peak of the Kahbub Mountains",
+     "10 Nov 2026 to 14 Nov 2026: Presence northeast of Huwayrib"
+    ],
+    "proposed": ""
+   }
+  },
+  {
+   "name": "three key figures, one a floor",
+   "kind": "key figures",
+   "model": {
+    "heads": {
+     "figure": "Figure",
+     "words": "What it says"
+    },
+    "rows": [
+     {
+      "figure": "60",
+      "words": "vehicles seen in the two videos",
+      "floor": true
+     },
+     {
+      "figure": "12",
+      "words": "models told apart",
+      "floor": false
+     },
+     {
+      "figure": "$41m",
+      "words": "their replacement value, mid estimate",
+      "floor": false
+     }
+    ]
+   },
+   "block": "::: chart\nkind: key figures\n| Figure | What it says |\n| --- | --- |\n| at least 60 | vehicles seen in the two videos |\n| 12 | models told apart |\n| $41m | their replacement value, mid estimate |\n:::",
+   "engine": {
+    "kind": "key figures",
+    "lines": [
+     "At least 60: vehicles seen in the two videos",
+     "12: models told apart",
+     "$41m: their replacement value, mid estimate"
+    ],
+    "proposed": ""
+   }
+  },
+  {
+   "name": "a donut of five categories, one its own colour",
+   "kind": "donut",
+   "model": {
+    "heads": {
+     "category": "Class",
+     "count": "Vehicles",
+     "split": "Split"
+    },
+    "floor": true,
+    "rows": [
+     {
+      "category": "MRAP",
+      "split": "",
+      "count": "23"
+     },
+     {
+      "category": "Pickup",
+      "split": "",
+      "count": "17"
+     },
+     {
+      "category": "APC",
+      "split": "",
+      "count": "9"
+     },
+     {
+      "category": "Tank",
+      "split": "",
+      "count": "4"
+     },
+     {
+      "category": "Truck",
+      "split": "",
+      "count": "7"
+     }
+    ],
+    "colours": [
+     [
+      "Tank",
+      "#e34948"
+     ]
+    ],
+    "icons": [],
+    "whole": {
+     "name": "",
+     "amount": ""
+    }
+   },
+   "block": "::: chart\nkind: donut\ncount: Vehicles (at least)\nby: Class\ncolours: Tank #e34948\n| Class | Vehicles (at least) |\n| --- | ---: |\n| MRAP | 23 |\n| Pickup | 17 |\n| APC | 9 |\n| Tank | 4 |\n| Truck | 7 |\n:::",
+   "engine": {
+    "kind": "donut",
+    "lines": [
+     "MRAP: 23, 38%",
+     "Pickup: 17, 28%",
+     "APC: 9, 15%",
+     "Truck: 7, 12%",
+     "Tank: 4, 6.7%"
+    ],
+    "proposed": "At least 60 vehicles, by class"
+   }
+  },
+  {
+   "name": "stacked bars, each split by its grade",
+   "kind": "stacked bars",
+   "model": {
+    "heads": {
+     "category": "Model",
+     "count": "Count",
+     "split": "Grade"
+    },
+    "floor": false,
+    "rows": [
+     {
+      "category": "Streit Cougar",
+      "split": "Identified",
+      "count": "8"
+     },
+     {
+      "category": "Streit Cougar",
+      "split": "Almost sure",
+      "count": "2"
+     },
+     {
+      "category": "Al-Wahsh",
+      "split": "Identified",
+      "count": "3"
+     }
+    ],
+    "colours": [],
+    "icons": [],
+    "whole": {
+     "name": "",
+     "amount": ""
+    }
+   },
+   "block": "::: chart\nkind: stacked bars\ncount: Count\nby: Model\ncolour by: Grade\n| Model | Grade | Count |\n| --- | --- | ---: |\n| Streit Cougar | Identified | 8 |\n| Streit Cougar | Almost sure | 2 |\n| Al-Wahsh | Identified | 3 |\n:::",
+   "engine": {
+    "kind": "stacked bars",
+    "lines": [
+     "Streit Cougar: 10 (Identified 8, Almost sure 2)",
+     "Al-Wahsh: 3 (Identified 3)"
+    ],
+    "proposed": "13, by model and grade"
+   }
+  },
+  {
+   "name": "pictograms with an icon each",
+   "kind": "pictograms",
+   "model": {
+    "heads": {
+     "category": "Category",
+     "count": "Count",
+     "split": "Split"
+    },
+    "floor": false,
+    "rows": [
+     {
+      "category": "Armoured vehicles",
+      "split": "",
+      "count": "12"
+     },
+     {
+      "category": "Pickups",
+      "split": "",
+      "count": "5"
+     },
+     {
+      "category": "Trucks",
+      "split": "",
+      "count": "3"
+     }
+    ],
+    "colours": [],
+    "icons": [
+     [
+      "Armoured vehicles",
+      "armoured vehicle"
+     ],
+     [
+      "Pickups",
+      "pickup"
+     ]
+    ],
+    "whole": {
+     "name": "",
+     "amount": ""
+    }
+   },
+   "block": "::: chart\nkind: pictograms\ncount: Count\nby: Category\nicons: Armoured vehicles = armoured vehicle, Pickups = pickup\n| Category | Count |\n| --- | ---: |\n| Armoured vehicles | 12 |\n| Pickups | 5 |\n| Trucks | 3 |\n:::",
+   "engine": {
+    "kind": "pictograms",
+    "lines": [
+     "Armoured vehicles: 12",
+     "Pickups: 5",
+     "Trucks: 3"
+    ],
+    "proposed": "20, by category"
+   }
+  },
+  {
+   "name": "a waffle of two parts of a named whole",
+   "kind": "waffle",
+   "model": {
+    "heads": {
+     "category": "Part",
+     "count": "Count",
+     "split": "Split"
+    },
+    "floor": false,
+    "rows": [
+     {
+      "category": "Destroyed",
+      "split": "",
+      "count": "14"
+     },
+     {
+      "category": "Damaged",
+      "split": "",
+      "count": "9"
+     }
+    ],
+    "colours": [],
+    "icons": [],
+    "whole": {
+     "name": "Seen",
+     "amount": "60"
+    }
+   },
+   "block": "::: chart\nkind: waffle\ncount: Count\nby: Part\nof: Seen\n| Part | Count |\n| --- | ---: |\n| Destroyed | 14 |\n| Damaged | 9 |\n| Seen | 60 |\n:::",
+   "engine": {
+    "kind": "waffle",
+    "lines": [
+     "Destroyed: 14, 23% of Seen",
+     "Damaged: 9, 15% of Seen"
+    ],
+    "proposed": "23, by part"
+   }
+  },
+  {
+   "name": "a line of two series over days",
+   "kind": "line",
+   "model": {
+    "heads": {
+     "x": "Day",
+     "value": "Strikes",
+     "series": "Series"
+    },
+    "days": true,
+    "series": [
+     "North",
+     "South"
+    ],
+    "rows": [
+     {
+      "x": "1 Oct 2026",
+      "values": [
+       "3",
+       "1"
+      ]
+     },
+     {
+      "x": "2 Oct 2026",
+      "values": [
+       "5",
+       ""
+      ]
+     },
+     {
+      "x": "3 Oct 2026",
+      "values": [
+       "4",
+       "2"
+      ]
+     }
+    ]
+   },
+   "block": "::: chart\nkind: line\ncount: Strikes\nby: Day\ncolour by: Series\n| Day | Series | Strikes |\n| --- | --- | ---: |\n| 1 Oct 2026 | North | 3 |\n| 1 Oct 2026 | South | 1 |\n| 2 Oct 2026 | North | 5 |\n| 3 Oct 2026 | North | 4 |\n| 3 Oct 2026 | South | 2 |\n:::",
+   "engine": {
+    "kind": "line",
+    "lines": [
+     "North: 1 Oct 2026 3, 2 Oct 2026 5, 3 Oct 2026 4",
+     "South: 1 Oct 2026 1, 3 Oct 2026 2"
+    ],
+    "proposed": ""
+   }
+  },
+  {
+   "name": "a line of one series over numbers",
+   "kind": "line",
+   "model": {
+    "heads": {
+     "x": "Year",
+     "value": "Strikes",
+     "series": "Series"
+    },
+    "days": false,
+    "series": [
+     ""
+    ],
+    "rows": [
+     {
+      "x": "2023",
+      "values": [
+       "14"
+      ]
+     },
+     {
+      "x": "2024",
+      "values": [
+       "22"
+      ]
+     },
+     {
+      "x": "2025",
+      "values": [
+       "31"
+      ]
+     }
+    ]
+   },
+   "block": "::: chart\nkind: line\ncount: Strikes\nby: Year\n| Year | Strikes |\n| --- | ---: |\n| 2023 | 14 |\n| 2024 | 22 |\n| 2025 | 31 |\n:::",
+   "engine": {
+    "kind": "line",
+    "lines": [
+     "2023 14, 2024 22, 2025 31"
+    ],
+    "proposed": ""
+   }
+  },
+  {
+   "name": "circles comparing three amounts",
+   "kind": "circles",
+   "model": {
+    "heads": {
+     "category": "Name",
+     "count": "Amount",
+     "split": "Split"
+    },
+    "floor": false,
+    "rows": [
+     {
+      "category": "Coalition",
+      "split": "",
+      "count": "120"
+     },
+     {
+      "category": "Houthi",
+      "split": "",
+      "count": "45"
+     },
+     {
+      "category": "Unknown",
+      "split": "",
+      "count": "8"
+     }
+    ],
+    "colours": [],
+    "icons": [],
+    "whole": {
+     "name": "",
+     "amount": ""
+    }
+   },
+   "block": "::: chart\nkind: circles\ncount: Amount\nby: Name\n| Name | Amount |\n| --- | ---: |\n| Coalition | 120 |\n| Houthi | 45 |\n| Unknown | 8 |\n:::",
+   "engine": {
+    "kind": "circles",
+    "lines": [
+     "Coalition: 120",
+     "Houthi: 45, 38% of Coalition",
+     "Unknown: 8, 7% of Coalition"
+    ],
+    "proposed": "173, by name"
+   }
+  }
+ ],
+ "starters": {
+  "timeline": "::: chart\nkind: timeline\n| When | What happened |\n| --- | --- |\n:::",
+  "key figures": "::: chart\nkind: key figures\n| Figure | What it says |\n| --- | --- |\n:::",
+  "bars": "::: chart\nkind: bars\ncount: Count\nby: Category\n| Category | Count |\n| --- | ---: |\n:::",
+  "columns": "::: chart\nkind: columns\ncount: Count\nby: Category\n| Category | Count |\n| --- | ---: |\n:::",
+  "donut": "::: chart\nkind: donut\ncount: Count\nby: Category\n| Category | Count |\n| --- | ---: |\n:::",
+  "pie": "::: chart\nkind: pie\ncount: Count\nby: Category\n| Category | Count |\n| --- | ---: |\n:::",
+  "segments": "::: chart\nkind: segments\ncount: Count\nby: Category\n| Category | Count |\n| --- | ---: |\n:::",
+  "stacked bars": "::: chart\nkind: stacked bars\ncount: Count\nby: Category\ncolour by: Split\n| Category | Split | Count |\n| --- | --- | ---: |\n:::",
+  "stacked columns": "::: chart\nkind: stacked columns\ncount: Count\nby: Category\ncolour by: Split\n| Category | Split | Count |\n| --- | --- | ---: |\n:::",
+  "pictograms": "::: chart\nkind: pictograms\ncount: Count\nby: Category\n| Category | Count |\n| --- | ---: |\n:::",
+  "silhouette rows": "::: chart\nkind: silhouette rows\ncount: Count\nby: Category\n| Category | Count |\n| --- | ---: |\n:::",
+  "waffle": "::: chart\nkind: waffle\ncount: Count\nby: Part\n| Part | Count |\n| --- | ---: |\n:::",
+  "line": "::: chart\nkind: line\ncount: Value\nby: Day\n| Day | Value |\n| --- | ---: |\n:::",
+  "circles": "::: chart\nkind: circles\ncount: Amount\nby: Name\n| Name | Amount |\n| --- | ---: |\n:::"
+ }
+}

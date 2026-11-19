@@ -29,7 +29,7 @@ describe('reading a chart block', () => {
 
   it('writes the order the engine writes', () => {
     expect([...WRITTEN_ORDER, ...WRITTEN_LAST]).toEqual(['kind', 'title', 'caption', 'count', 'by', 'colour by', 'order', 'colours', 'only',
-      'highlight', 'sort', 'last', 'show', 'bars', 'source', 'from', 'style']);
+      'highlight', 'sort', 'last', 'show', 'bars', 'source', 'from', 'rows', 'style']);
   });
 });
 

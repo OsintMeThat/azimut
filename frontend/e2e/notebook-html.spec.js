@@ -284,13 +284,18 @@ test('the Page pane shows the note as its HTML page, and the export dialog write
   await expect.poll(() => state.htmlPreviews.length).toBeGreaterThan(asked);
   expect(state.htmlPreviews.at(-1).look).toMatchObject({ style: 'report', web: 'story' });
   expect(state.looks.at(-1)).toMatchObject({ web: 'story' });
-  // a press in the page closes the Look over it, as a press anywhere else in the app does;
-  // the Look, with what the style includes, covers the page's middle: the press lands beside it
+  // the Look stays under its button, what it includes folded to a line: at 1280 x 720 the page's
+  // middle shows beside it, and a press there closes it, as a press anywhere else in the app does
   const look = page.getByRole('dialog', { name: 'Look' });
   await expect(look).toBeVisible();
+  expect(page.viewportSize()).toEqual({ width: 1280, height: 720 });
   const [shown, over] = [await page.locator('.html-page iframe:not([inert])').boundingBox(), await look.boundingBox()];
-  expect(over.x - shown.x).toBeGreaterThan(20);
-  await page.mouse.click((shown.x + over.x) / 2, shown.y + shown.height / 2);
+  const middle = { x: shown.x + shown.width / 2, y: shown.y + shown.height / 2 };
+  expect(middle.x < over.x || middle.x > over.x + over.width || middle.y > over.y + over.height).toBe(true);
+  expect(over.x + over.width).toBeLessThanOrEqual(shown.x);
+  expect(over.y + over.height).toBeLessThanOrEqual(720);
+  await expect(look.getByRole('group', { name: 'What it includes' }).getByRole('button', { name: /Change…/ })).toBeVisible();
+  await page.mouse.click(middle.x, middle.y);
   await expect(look).toHaveCount(0);
 
   await page.locator('[data-guide="notebook.pdf"]').click();

@@ -42,6 +42,18 @@ export function warningKind(value) {
   return WARNING_KINDS.includes(value) ? value : 'other';
 }
 
+/** The warnings about a link, which may stand in a heading's words: their Go to lands on the link's line. */
+const AT_A_LINK = new Set(['local-link', 'unarchived', 'unseen']);
+
+/**
+ * How a warning's Go to takes the note there, as `editor.jump` reads it: one about a
+ * heading (a section left empty, above all) lands on the line under it (`section`), where
+ * what is typed starts the section rather than lengthening its heading.
+ */
+export function jumpFor(warning) {
+  return { section: !AT_A_LINK.has(warningKind(warning?.kind)) };
+}
+
 function readLine(line) {
   return Number.isInteger(line) && line >= 0 ? line : null;
 }

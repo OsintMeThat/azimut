@@ -417,7 +417,9 @@ def test_long_homonymous_titles_keep_their_stable_suffix(client, pinned):
     assert all(re.search(rf" \[[0-9a-f]{{16}}\]{re.escape(PDF)}$", name) for name in names)
 
 
-def test_an_explicit_note_path_still_canonicalises_its_label(client):
+def test_an_explicit_note_path_keeps_its_file_and_cleans_its_title(client):
+    """A title is the analyst's words, kept whole as the routes bound them; only its file
+    is cut to the path budget. A stated path is where the file is, and stays."""
     cid = make_case(client)
     note = client.post(
         f"/api/cases/{cid}/notes", json={"title": "Short", "content": "A"}
@@ -428,9 +430,11 @@ def test_an_explicit_note_path_still_canonicalises_its_label(client):
     updated = case.update_entity(
         note["id"], {"label": "A" * 300, "attrs": {"path": path}}
     )
-
     assert updated["attrs"]["path"] == path
-    assert len(updated["label"]) == layout.MAX_SLUG
+    assert len(updated["label"]) == layout.MAX_TITLE
+
+    cleaned = case.update_entity(note["id"], {"label": "Map:\nthe\u200b front", "attrs": {"path": path}})
+    assert (cleaned["label"], cleaned["attrs"]["path"]) == ("Map: the front", path)
 
 
 def test_a_diagram_travels_with_the_request(client, pinned):

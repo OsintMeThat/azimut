@@ -392,10 +392,14 @@ def _fold(header: str) -> str:
 def inherits(panel: Panel, columns: Sequence[str]) -> bool:
     """Whether a panel takes the page's data, whose columns are ``columns``: a chart with no
     ``from:`` of its own whose table's columns the data holds every one of, or which holds
-    no table yet. A table with a column the data lacks (key figures typed in) is its own."""
+    no table yet. A table with a column the data lacks (key figures typed in) is its own, and
+    so are rows a chart's form wrote (``rows: own``), whatever their columns."""
     if panel.kind != CHART or own_origin(panel):
         return False
-    table = nc.parse_block(panel.body).table
+    block = nc.parse_block(panel.body)
+    if block.own_rows:
+        return False
+    table = block.table
     if table is None or not table.headers:
         return True
     held = {_fold(column) for column in columns}

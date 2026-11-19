@@ -447,9 +447,9 @@ test('the Page pane lists what the PDF warns about, and a warning with a line ta
   await expect(list.getByRole('listitem')).toHaveText(['Section "Method" is empty.', 'A picture is missing']);
   await expect(page.locator('.page-pane .pane-bar')).toContainText('2 warnings');
   await list.getByRole('button', { name: /Method/ }).click();
-  // the caret lands at the heading's words, never among its hidden marks
-  await page.keyboard.type('Measured shadows. ');
-  await expect.poll(() => state.written.at(-1)?.text ?? '').toContain('Line 20\n## Measured shadows. Method\n');
+  // the empty section gets a line of its own under the heading: what is typed starts it, never lengthens the heading
+  await page.keyboard.type('Measured shadows.');
+  await expect.poll(() => state.written.at(-1)?.text ?? '').toContain('Line 20\n## Method\n\nMeasured shadows.\n\n## Sources\n');
   // folded away from the bar
   await page.locator('.page-pane .warned').click();
   await expect(list).toHaveCount(0);
@@ -756,6 +756,9 @@ test('For › Report adds the report\'s annexes to the Page pane, and a switch t
   expect(looks.at(-1)).toMatchObject({ style: 'report', annexes: {}, sources_style: '' });
 
   const includes = page.getByRole('group', { name: 'What it includes' });
+  // folded to one line until Change… opens it
+  await expect(includes).toContainText('Academic sources · 5 annexes · links grouped');
+  await includes.getByRole('button', { name: /Change…/ }).click();
   await expect(includes.locator('[data-include="method"]')).toContainText("Report's own");
   await includes.locator('[data-include="method"] input').click();
   await expect(sheets).toHaveCount(6);

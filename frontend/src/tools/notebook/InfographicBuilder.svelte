@@ -13,17 +13,21 @@
    * "Add a panel" shows each table of the note drawn as every kind it fits by the chart's own
    * kind picker (`POST /notes/figure/kinds`), from its real rows, and the note's maps; the
    * analyst picks one by its picture and it is written as a chart under its table would be
-   * (`editor/infographicPanels.js`). Nothing is made of numbers the note does not hold.
+   * (`editor/infographicPanels.js`). Every kind from scratch follows, the picker's own cards:
+   * the one picked is written with its columns and no row, and its form opens in its card
+   * (`editor/chartForm.js`). Nothing is made of numbers the note does not hold.
    *
    * Pressing a chart's row opens the chart's own settings card (`editor/chartCard.js`) under
-   * it: title, what it counts, by what, coloured by what; each choice writes that panel's
-   * lines inside the infographic, one Undo each. The look is the page's, set once below.
+   * it: title, what it counts, by what, coloured by what, and Edit the data, the kind's form;
+   * each choice writes that panel's lines inside the infographic, one Undo each. The look is
+   * the page's, set once below.
    *
    * On top, the **Data** bar: what the page's charts are drawn from (`data:`, a sheet of the
    * case or a table of a note), its rows, how many panels read it and whether it changed since
    * (`editor/infographicData.js`), with *Read again (all panels)* and *Change…* (the source
    * picker, `components/DataPicker.svelte`), each one change and one Undo. With data, Add a
-   * panel offers the data's rows first, and a panel's card says where its rows come from.
+   * panel offers the data's rows first, and a panel's card says where its rows come from. A
+   * chart made from scratch, or whose rows its form wrote, says `rows: own` and never takes it.
    */
   import { untrack } from 'svelte';
   import { api } from '../../lib/api.js';
@@ -32,13 +36,13 @@
   import { noteToPost } from '../../lib/notes/toPost.js';
   import { drawingOf } from '../../lib/notes/editor/infographicBlock.js';
   import {
-    EACH_PANEL, HALF, KEY_FIGURES_PANEL, LOOKS, WIDE, WORDS_PANEL, addPanel, infographicsIn, movePanel, panelText, readInfographic,
+    EACH_PANEL, HALF, LOOKS, WIDE, WORDS_PANEL, addPanel, infographicsIn, movePanel, panelText, readInfographic,
     removePanel, withLegend, withPanelText, withSetting, withWidth,
   } from '../../lib/notes/editor/infographicText.js';
   import { chartPanel, noteMaps, noteTables } from '../../lib/notes/editor/infographicPanels.js';
   import { chartKinds, drawChart } from '../../lib/notes/editor/chartFigure.js';
-  import { chartSettings, rowsSaid } from '../../lib/notes/editor/chartCard.js';
-  import { compareRows, readChart, withSettings, withTable } from '../../lib/notes/editor/chartText.js';
+  import { chartForm, chartSettings, rowsSaid, scratchGallery, starterBlock } from '../../lib/notes/editor/chartCard.js';
+  import { OWN_ROWS, compareRows, readChart, withSettings, withTable } from '../../lib/notes/editor/chartText.js';
   import Icon from '../../components/Icon.svelte';
   import FloatingMenu from '../../components/FloatingMenu.svelte';
   import DataPicker from '../../components/DataPicker.svelte';
@@ -202,8 +206,9 @@
   }
 
   // -- a chart panel's settings: the chart's own card, writing inside the page ---------
-  /** The panel whose card is open, its index, or -1. */
+  /** The panel whose card is open, its index, or -1, and whether it shows its settings or its form. */
   let carded = $state(-1);
+  let cardForm = $state(false);
   let cardHost = $state(null);
   let cardDrawn = $state(null);
   let card = null;
@@ -213,6 +218,7 @@
     card?.destroy();
     card = null;
     carded = -1;
+    cardForm = false;
     cardDrawn = null;
   }
   function pressRow(index, one) {
@@ -226,18 +232,31 @@
   $effect(() => {
     const host = cardHost;
     const index = carded;
+    const form = cardForm;
     if (!host || index < 0) return;
     // made once per panel opened: what it reads later is read when it is drawn again, not here
     let made = null;
     untrack(() => {
-      made = card = chartSettings(host, {
-        state: () => {
-          const now = block ? panelText(block.source, index) : '';
-          return { chart: readChart(now), drawn: cardDrawn };
-        },
-        write: (changes) => edit((source) => withPanelText(source, index, withSettings(panelText(source, index), changes))),
-        source: caseId ? { said: () => panelSource(index), change: (anchor) => (dataPick = { anchor, panel: index }) } : null,
-      });
+      host.replaceChildren();
+      host.classList.remove('cf-form');
+      const write = (changes) => edit((source) => withPanelText(source, index, withSettings(panelText(source, index), changes)));
+      made = card = form
+        ? chartForm(host, {
+          state: () => ({ source: block ? panelText(block.source, index) : '', drawn: cardDrawn }),
+          // rows its form writes are the panel's own: the page's data never takes them over
+          write: (next) => edit((source) => withPanelText(source, index, withSettings(next, { rows: OWN_ROWS }))),
+          caseId,
+          onClose: () => { card?.commit(); cardForm = false; },
+        })
+        : chartSettings(host, {
+          state: () => {
+            const now = block ? panelText(block.source, index) : '';
+            return { chart: readChart(now), drawn: cardDrawn };
+          },
+          write,
+          source: caseId ? { said: () => panelSource(index), change: (anchor) => (dataPick = { anchor, panel: index }) } : null,
+          editData: () => { card?.commit(); cardForm = true; },
+        });
       card.focus();
     });
     // a picker the card opened goes with it, the builder closed included
@@ -296,7 +315,7 @@
     if (choice.inherit) {
       const rows = data.data?.found ? data.data.text : '';
       edit((source) => {
-        const own = withSettings(panelText(source, index), { from: '' });
+        const own = withSettings(panelText(source, index), { from: '', rows: '' });
         return withPanelText(source, index, rows ? withTable(own, rows) : own);
       });
     } else if (choice.origin && choice.data?.text) {
@@ -340,6 +359,18 @@
   /** The chart a kind picked makes of its table, written as one under the table would be. */
   function addChart(found, kind) {
     add(found.data ? dataPanel(kind, found.data) : chartPanel(editor?.text?.() ?? text, found, kind, noteKey));
+  }
+  /** A chart of a kind from scratch: its columns, no row and its rows its own, its form open in its card. */
+  function addScratch(kind) {
+    const at = read?.panels.length ?? 0;
+    closeCard();
+    add(withSettings(starterBlock(kind), { rows: OWN_ROWS }));
+    carded = at;
+    cardForm = true;
+  }
+  /** The picker's own cards of every kind from scratch, in the offers. */
+  function scratchKinds(node) {
+    scratchGallery(node, addScratch);
   }
 
   // -- look, legend, colours -----------------------------------------------------------
@@ -473,7 +504,7 @@
             {#if carded === index}
               <li class="ib-card-row">
                 <div class="ib-card" bind:this={cardHost}></div>
-                <p class="ib-note">The look is the page’s, set under Look.</p>
+                {#if !cardForm}<p class="ib-note">The look is the page’s, set under Look.</p>{/if}
               </li>
             {/if}
           {/each}
@@ -502,9 +533,11 @@
                   </div>
                 {/if}
               </div>
-            {:else}
-              <p class="ib-note">No table in this note yet. A chart is drawn from a table: / › Table writes one.</p>
             {/each}
+            <div class="ib-table">
+              <p class="ib-table-name">From scratch <span class="ib-aside">a form for any kind</span></p>
+              <div class="ib-scratch" use:scratchKinds></div>
+            </div>
             <div class="ib-more">
                 {#each maps as map, index (index)}
                   <button type="button" class="btn btn-sm" title="This map of the note, as a panel" onclick={() => add(map.block)}>
@@ -514,8 +547,6 @@
                 {/each}
                 <button type="button" class="btn btn-sm" title="A heading and a few words" onclick={() => add(WORDS_PANEL)}>
                   <Icon name="text" size={13} /> Words</button>
-                <button type="button" class="btn btn-sm" title="Big figures with the words under them, to fill in" onclick={() => add(KEY_FIGURES_PANEL)}>
-                  <Icon name="hash" size={13} /> Key figures</button>
             </div>
           </div>
         {/if}
@@ -634,7 +665,7 @@
   .ib-width[aria-pressed='true'], .ib-look[aria-pressed='true'] { background: var(--bg-3); color: var(--text-1); font-weight: 650; }
   .ib-width:hover, .ib-look:hover { color: var(--text-1); }
   .ib-remove {
-    display: inline-flex; padding: 3px; border: none; border-radius: var(--r-sm); background: none; color: var(--text-3); cursor: pointer;
+    display: inline-flex; padding: 3px; border: none; border-radius: var(--r-sm); background: none; color: var(--text-2); cursor: pointer;
   }
   .ib-remove:hover, .ib-remove:focus-visible { color: var(--danger); background: var(--bg-3); }
   .ib-add {
@@ -700,5 +731,16 @@
   .ib-card :global(.cm-chart-data-name) { color: var(--text-1); font-size: var(--fs-sm); font-weight: 600; }
   .ib-card :global(.cm-chart-data-state) { color: var(--warn); font-size: var(--fs-xs); }
   .ib-card :global(.cm-chart-data-change) { margin-left: 0; font-size: var(--fs-xs); }
+  /* a kind from scratch: the picker's cards, two across; its form in the card, its rows wrapping */
+  .ib-scratch { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 6px; }
+  .ib-scratch :global(.cf-scratch) {
+    display: flex; align-items: center; gap: 8px; min-width: 0; padding: 6px; border: 1px solid var(--border); border-radius: var(--r-sm);
+    background: var(--bg-1); font: inherit; text-align: left; cursor: pointer;
+  }
+  .ib-scratch :global(.cf-scratch:hover), .ib-scratch :global(.cf-scratch:focus-visible) { border-color: var(--accent); outline: none; }
+  .ib-scratch :global(.cf-sketch), .ib-scratch :global(.cf-sketch svg) { width: 40px; height: 25px; }
+  .ib-scratch :global(.cf-scratch-needs) { font-size: 10.5px; }
+  .ib-card:global(.cf-form) { padding: 10px; border-bottom: none; }
+  .ib-card :global(.cm-chart-edit-data) { margin-left: 0; font-size: var(--fs-xs); font-weight: 600; }
   .ib-foot { display: flex; gap: 8px; padding: 10px 14px; border-top: 1px solid var(--border); background: var(--bg-1); }
 </style>

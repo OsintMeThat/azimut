@@ -236,6 +236,10 @@ _WINDOWS_RESERVED = frozenset(
     + [f"com{number}" for number in range(1, 10)]
     + [f"lpt{number}" for number in range(1, 10)]
 )
+#: Control characters, line breaks among them: never part of a one-line title.
+_CONTROL = re.compile(r"[\x00-\x1f\x7f]")
+#: The longest title the analyst can type, as the routes that take one bound it.
+MAX_TITLE = 300
 
 
 #: What a proof and a post are called until the analyst names them (frontend
@@ -263,6 +267,20 @@ def slugify(text: str | None, fallback: str, *, limit: int = MAX_SLUG) -> str:
     cleaning the lookup would miss it and file a second copy beside it.
     """
     return _stem(text, fallback, limit=limit, clean=True)
+
+
+def clean_title(text: str | None, fallback: str, *, limit: int = MAX_TITLE) -> str:
+    """A title as the analyst typed it, for a note whose file is named after it.
+
+    A note's title holds what a file name cannot (`Map: the front by day`, `Before/after`,
+    `Who pays?`): its file is `slugify` of it, and the title keeps its own characters.
+    Only what no title should hold goes: the invisible characters a paste brings along,
+    control characters and line breaks, and runs of spaces, which become one.
+    """
+    value = unicodedata.normalize("NFC", str(text or ""))
+    value = _LOOSE_JOINER.sub("", _INVISIBLE.sub("", value))
+    value = re.sub(r"\s+", " ", _CONTROL.sub(" ", value)).strip()[:limit].rstrip()
+    return value or fallback
 
 
 def existing_stem(name: str | None, fallback: str, *, limit: int = MAX_SLUG) -> str:

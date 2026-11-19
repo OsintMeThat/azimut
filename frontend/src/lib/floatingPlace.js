@@ -10,17 +10,31 @@
 /** How far a menu keeps from the window's edge, and from what opened it. */
 export const MARGIN = 8;
 export const GAP = 4;
+/** The least room under its opener a panel kept there (`below`) scrolls in before it goes elsewhere. */
+export const MIN_BELOW = 240;
 
 /**
  * `anchor`: the opener's box, `{ left, top, right, bottom }`; `at`: a pointer's
  * `{ x, y }` instead. `size` is the menu's `{ width, height }`, `viewport` the
  * window's `{ width, height }`. `align: 'end'` lines the menu's right edge up
- * with the opener's, for an opener near a panel's right side.
+ * with the opener's, for an opener near a panel's right side. `below` keeps a panel
+ * under its opener, as tall as the room there and scrolled inside, never beside it: the
+ * Look beside the note's Page pane, which has to stay in view while it is changed.
+ * `clear` is the left edge of what it must leave in view on its right (that Page pane):
+ * the panel moves left of it as far as the window lets it.
  */
-export function placeFloating({ anchor = null, at = null, size, viewport, align = 'start' }) {
+export function placeFloating({ anchor = null, at = null, size, viewport, align = 'start', below = false, clear = null }) {
   const width = Math.min(size.width, viewport.width - 2 * MARGIN);
   const room = viewport.height - 2 * MARGIN;
   const height = Math.min(size.height, room);
+  const clampLeft = (value) => Math.round(Math.max(MARGIN, Math.min(value, viewport.width - MARGIN - width)));
+  if (below && anchor && !at && viewport.height - MARGIN - (anchor.bottom + GAP) >= MIN_BELOW) {
+    const top = anchor.bottom + GAP;
+    let left = align === 'end' ? anchor.right - width : anchor.left;
+    if (Number.isFinite(clear) && left + width > clear - GAP) left = clear - GAP - width;
+    return { left: clampLeft(left), top: Math.round(top),
+      maxHeight: Math.round(viewport.height - MARGIN - top) };
+  }
   let left, top;
   if (at) {
     left = at.x;
@@ -44,7 +58,7 @@ export function placeFloating({ anchor = null, at = null, size, viewport, align 
     top = (viewport.height - height) / 2;
   }
   return {
-    left: Math.round(Math.max(MARGIN, Math.min(left, viewport.width - MARGIN - width))),
+    left: clampLeft(left),
     top: Math.round(Math.max(MARGIN, Math.min(top, viewport.height - MARGIN - height))),
     maxHeight: Math.round(room),
   };

@@ -1113,6 +1113,56 @@ def test_the_same_title_twice_in_one_folder_takes_a_suffix(client):
     assert first["attrs"]["path"] == "notes/Lead.md"
     assert second["attrs"]["path"] == "notes/Lead-2.md"
     assert Case.open(cid).resolve_inside(second["attrs"]["path"]).exists()
+    # the second keeps the title it was given, and a later save never renames it after its file
+    assert second["label"] == "Lead"
+    resaved = client.patch(f"/api/cases/{cid}/entities/{second['id']}", json={"attrs": {"look": None}}).json()
+    assert (resaved["label"], resaved["attrs"]["path"]) == ("Lead", "notes/Lead-2.md")
+
+
+def test_a_note_title_holds_what_a_file_name_cannot(client):
+    """A colon is the commonest mark in a report's title. The title keeps it; only the
+    file it is saved in replaces what Windows refuses in a name."""
+    cid = client.post("/api/cases", json={"name": "Titles"}).json()["id"]
+    note = client.post(f"/api/cases/{cid}/notes", json={"title": "Map: the front by day", "folder": "Maps"}).json()
+    assert (note["label"], note["attrs"]["path"]) == ("Map: the front by day", "notes/Maps/Map_ the front by day.md")
+
+    title = 'Before/after: "who" pays? <a|b> * \\ end'
+    renamed = client.patch(f"/api/cases/{cid}/entities/{note['id']}", json={"label": title}).json()
+    assert renamed["label"] == title
+    stem = Path(renamed["attrs"]["path"]).stem
+    assert not set('<>:"/\\|?*') & set(stem)
+    case = Case.open(cid)
+    assert case.resolve_inside(renamed["attrs"]["path"]).is_file()
+    assert [item["title"] for item in client.get(f"/api/cases/{cid}/notes/index").json()["items"]
+            if item["id"] == note["id"]] == [title]
+
+    # what no title holds goes: line breaks, control and invisible characters, runs of spaces
+    cleaned = client.patch(f"/api/cases/{cid}/entities/{note['id']}",
+                           json={"label": "  Map:\u200b the\n front\t\x07by  day  "}).json()
+    assert cleaned["label"] == "Map: the front by day"
+    # a name Windows keeps for a device is the file's problem, never the title's
+    reserved = client.patch(f"/api/cases/{cid}/entities/{note['id']}", json={"label": "CON"}).json()
+    assert (reserved["label"], Path(reserved["attrs"]["path"]).name) == ("CON", "_CON.md")
+
+
+def test_a_save_that_does_not_rename_a_note_keeps_its_title(client):
+    """Renaming to "Map: …" was kept, then the next save of the note's look turned it
+    into its file's name, "Map_ …". Only a rename touches the title."""
+    cid = client.post("/api/cases", json={"name": "Kept titles"}).json()["id"]
+    note = client.post(f"/api/cases/{cid}/notes", json={"title": "Map", "folder": "Maps", "content": "# body"}).json()
+    renamed = client.patch(f"/api/cases/{cid}/entities/{note['id']}", json={"label": "Map: the front by day"}).json()
+    assert renamed["label"] == "Map: the front by day"
+
+    attrs = client.patch(f"/api/cases/{cid}/entities/{note['id']}", json={"attrs": {"look": None}}).json()
+    assert attrs["label"] == "Map: the front by day"
+    assert client.put(f"/api/cases/{cid}/notes/{note['id']}/look", json={"style": "report"}).status_code == 200
+    restated = client.patch(f"/api/cases/{cid}/entities/{note['id']}", json={"label": "Map: the front by day"}).json()
+    assert restated["label"] == "Map: the front by day"
+    moved = client.patch(f"/api/cases/{cid}/entities/{note['id']}", json={"attrs": {"folder": "Front"}}).json()
+    assert (moved["label"], moved["attrs"]["path"]) == ("Map: the front by day", "notes/Front/Map_ the front by day.md")
+    case = Case.open(cid)
+    assert case.get_entity(note["id"])["label"] == "Map: the front by day"
+    assert case.read_note(note["id"]) == "# body"
 
 
 def test_details_title_edit_moves_every_named_tool_file(client):

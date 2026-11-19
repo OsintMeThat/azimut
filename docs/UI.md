@@ -7072,7 +7072,7 @@ the note's sans, in the editor, the PDF and the HTML page alike. A press
 picks one (an accent outline, a picture's bar kept up); a double press, Enter or its
 `</>` opens its source, which closes again once the cursor leaves it, and Escape closes
 it at once. A table's Enter puts the caret in its first cell instead, and only its `</>`
-opens the pipes. While one is picked, Backspace or Delete takes it out (Undo brings it back),
+opens the pipes; a diagram the form can read opens in its form (see *Diagrams* below). While one is picked, Backspace or Delete takes it out (Undo brings it back),
 a key typed starts a paragraph of its own after it, and the arrow keys step over it
 whole, picking it on the way. The toolbar's last pair switches between **Drawn** and
 **Markdown**, the raw text with no drawing (Ctrl+Shift+M), one choice for the browser,
@@ -7125,7 +7125,7 @@ empty `::: steps` or `::: story` block, the cursor after it, drawn as its strip,
 case** (a case item, an **Interactive map**, a note included as a chapter), **Layout**
 (a divider, a page break, the cover page, **Alignment ›**, **Cover corner ›**, a
 signature, **Field ›** for the words the PDF fills in) and **Figures** (a table, a
-diagram), the table asking rows by columns on a small grid (3 by 3 unless picked) or a
+chart, a diagram, an infographic), the table asking rows by columns on a small grid (3 by 3 unless picked) or a
 file. Each entry has an icon, its name and a line under it; beside the list, the
 entry lit is drawn as it will look, with the Markdown it writes. What is typed after
 `/` (or after the +, which writes nothing until an entry is picked) finds entries by
@@ -7261,8 +7261,10 @@ picture cell of such a row offers **Cut a frame**, which opens Inspect on the vi
 time with the note beside it; the frame's Put in lands in the cell.
 
 The file stays the Markdown it was: what the old split-pane Notebook wrote opens as it
-was written and is never rewritten for being opened. The header names the note (the
-name is the filename), files it in a folder, says whether it is saved, and holds
+was written and is never rewritten for being opened. The header names the note (its
+file is named after the title, and the title keeps what a file name cannot hold:
+`Map: the front by day` is saved as `Map_ the front by day.md`, and only a rename ever
+changes it), files it in a folder, says whether it is saved, and holds
 **Look**, **Write | Page**, **Pin to the side**, **Open in its own tab**, **Export**, and a
 ⋯ with *Editions*, *Archive every link…*, *Keep as template*, *To Post* and *Delete*
 (*Clear the case notes* for the case's page).
@@ -7618,14 +7620,65 @@ proposes (*at least* when the count is a floor, *rows* when nothing names them),
 columns, `from:` and the table's rows copied in, as one Undo step, and it stands picked.
 `from: note:<id>#<heading>` names the first table under that heading, `#<heading>/2` the
 second, `#/2` the second of the note; a chart's own rows never count. `/` › *Chart* asks
-which table when the note holds several, and with none starts a small table to fill, the
-grid's Chart button then one press away. *Copy rows from another note or a sheet* stands
-beside the note's tables, under the kind picker of its one table, and with none beside the
-small table: it lists the case's other notes' tables by heading and note, then its sheets
-(`GET /notes/figure/sources`), and the one picked shows the kinds its rows fit; the chart is
-written with those rows and `from:` naming them (`sheet:<id>` for a sheet, its row keys left
-out). A case with no other table writes the small table at once. In the raw Markdown the
-block is its lines.
+which table when the note holds several, *From scratch* below them. *Copy rows from another
+note or a sheet* stands beside the note's tables and under the kind picker: it lists the
+case's other notes' tables by heading and note, then its sheets (`GET /notes/figure/sources`),
+and the one picked shows the kinds its rows fit; the chart is written with those rows and
+`from:` naming them (`sheet:<id>` for a sheet, its row keys left out). In the raw Markdown
+the block is its lines.
+
+**A chart from scratch** (`editor/chartForm.js`, `chartFormText.js`). `/` › *Chart* shows every
+kind, with a table in the note or none: the kinds its one table fits come first, drawn from its
+rows, then *From scratch*, the fourteen kinds each with a sketch and one line of what it needs
+(*Timeline: days and what happened*, *Key figures: a figure and what it says*, *Waffle: a part
+and its whole*…). The one picked is written where `/` was typed with its kind and its columns,
+no row, as one Undo step, and its form opens on the chart, between its bar and its drawing,
+the keyboard in the first field; the drawing says what to add until a row holds something,
+then follows every field. One form is open in a note at a time.
+- **Timeline**: *＋ Event* (a day at the day, the month or the year: a calendar, a month and
+  its year, or a year; written `5 Oct 2026`, `Oct 2026`, `2026`) and *＋ Period* (from and
+  until), then what happened. The table is `| When | What happened |`, with `| Until |` once a
+  row is a period; a cell the chart cannot read as a day stays as written and says so.
+- **Key figures**: *＋ Figure*, the figure as written and the line under it, with an *at least*
+  tick written `at least 60`; a floor typed in the figure (`60+`, `≥ 60`) ticks it.
+- **Bars, columns, pie, donut, segments, circles** (two or three), **stacked bars and
+  columns** (with a split column), **pictograms and silhouette rows** (an icon each, from the
+  library's picker, written as `icons:`) and **waffle** (its parts, then *The whole*, a name
+  and a count, written as a row its `of:` names, or a number): *＋ Category*, its name and
+  its count; the columns' names edited in place and written as `by:`, `count:` and `colour
+  by:`; *These counts are floors* writes `(at least)` in the counts' heading; a colour
+  picked from the case's palette or the chart's own order, written as `colours:`, kept by a
+  category renamed.
+- **Line**: days or numbers along (*Days* / *Numbers*), *＋ Row*, a value for each series,
+  *＋ Series* for another line; one series is `| Day | Value |`, several are one row a value,
+  `| Day | Series | Value |` with `colour by: Series`.
+
+Every form has the title field with the title the data proposes, *at least* included, a
+*Source* field for the credit line, rows dragged by their grip or moved with Alt+↑ and Alt+↓,
+× to take one out, and Enter going to the next field, past the last one to a new row. A row
+added stays out of the note until something is typed in it: an empty row only carries the hint
+of what goes there, never a sample number. Each field committed (Enter, Tab or leaving it), a
+row moved or taken out, a precision, a colour, an icon and a fill is one Undo step; a day
+moved with the calendar's arrows is written once it rests. What the form writes is the
+ordinary block, a cell nobody changed written back as it was, so a chart reopens in its form,
+or as a grid through The numbers; `tests/fixtures/chart_forms.json` holds what each kind's
+form writes, drawn by the engine's tests too. Settings › *Edit the data* and The numbers ›
+*Edit the data* open it again when the chart's rows are in its kind's shape; rows counted
+one a line or columns past its kind's are edited as a table.
+
+**Fill from the case** stands beside the add buttons and lists what it would take before
+writing it (`engine/notes_chart_fill.py`, read only). A timeline gets the case's dated events
+within a period, on the case's clock (`GET /notes/figure/events`): the days its Geo Proofs say
+their material was taken, saying the proof's sentence, and the Claims of its Timeline, a
+period when they span days, a proof's own dating Claim never twice. One already in the chart,
+one refuted, or the same day and words as the one above is listed unticked and says why; a day
+the case gives as approximate says *about*; *Add 2 events* adds the ticked ones as one step.
+The kinds of categories, key figures and a line count a note's table or a sheet (`POST
+/notes/figure/counts`): pick where the rows come from, the column they are counted by (along,
+for a line, its days read as one however written), a split or a line for each value, and
+rows counted one each or a column of numbers summed. The counts are listed with what was left
+out (no value, no number, a total row); a floor among the numbers summed ticks *at least*;
+*Write these 5 rows* replaces the form's rows as one step.
 
 The chart is drawn as the server draws it, kept by its text. Its bar: **Kind** (the
 picker again, its title, columns and rows kept; a kind of parts writes its column as its
@@ -7661,6 +7714,56 @@ Every choice writes its own line in the engine's order and is one Undo step. A p
 bar button picks the chart first, so the note stays where it is when a panel takes the
 keyboard. A double press or Enter opens its settings; a locked note shows the drawing.
 
+**Diagrams** (`editor/diagramBlock.js`, `diagramForm.js`, `diagramText.js`, `diagramCase.js`). A diagram
+is a ```` ```mermaid ```` fence, made in a form rather than typed. **/ › Diagram** opens a gallery of
+six kinds, each drawn small with the one line it needs: **Flow** (steps and decisions), **Network**
+(who is linked to whom), **Organisation** (a tree), **Timeline** (dated events), **Mind map** and
+**Sequence** (who sends what to whom). The one picked is written at the cursor as a small example
+whose words are there to be written over, and opens in its form; the raw Markdown's / still writes
+Mermaid to edit, and the gallery's *Write it yourself* does the same on the drawn page.
+
+The form stands between the diagram's bar and its drawing, or beside the drawing where the page has
+room (it then takes the room beside the note's column). **＋ Box** adds a box with its words (Shift+Enter
+starts a line), a shape (box, round, a diamond for a decision, a cylinder for records kept, a person) and
+a category; an organisation's or a mind map's box says the box it stands under, a sequence's person its
+group, a timeline's event its day and its phase. **＋ Link** joins two boxes picked from the list, with
+words on it, **Dashed** or not, an **Arrow** or not (a sequence's messages, in the order they are sent,
+*Reply* for a dashed one). **Direction** is *Left to right* or *Top down* in one press, **Style** *Report*
+(the app's own look), *Book* or *Dark*. **Colours** gives each category its colour: the case's own for a
+name its palette holds, else the charts' order; a swatch picks another from the case's colours or a
+colour code; *Legend under the drawing* draws the categories under it; *Keep these colours for the
+case* names them in the palette, and *Use the case's colours* takes the palette's where they differ. A
+row moves with its ▲ ▼ or Alt+↑ ↓ and goes with its ×. Each gesture is one Undo step: a field once
+committed (Enter, Tab or leaving it), a choice, a row added, moved or taken out, a colour; the form's
+**Undo** and Ctrl+Z on anything but words being typed take the last one back. **Kind…** draws it as
+another kind that keeps its boxes and links (a tree's lines become links, links a tree); a timeline
+stays a timeline.
+
+What the form writes is plain Mermaid: a category is a `classDef` named by a `%% legend c1: …` line, a
+group a sequence `box`, a phase or a branch its `cScale` colour, a look other than Report its theme's
+colours in the front matter with `theme: base`, a network and an organisation a `%% kind:` line. The
+characters Mermaid cannot hold are written as look-alikes (‹ › for angle brackets, ; in a sequence,
+꞉ in a timeline) and read back as themselves; straight quotes are written curly. A diagram reopens in the
+form when it can be read back whole; Mermaid it cannot read (a subgraph, a style, a note, a config of
+its own) keeps its bar saying *Written in Mermaid the form cannot read: edit its source*, and opens as
+its source. Its `</>` always opens the Mermaid.
+
+**From the case**, in the gallery and in a network's or a timeline's form: **Network from the Graph**
+lists the entities the Graph draws (or a saved Graph view draws), grouped by type, each ticked by hand
+or a whole type at once; the links the Graph draws between them come with them in their verbs, and
+*Links through what is left out* adds a dashed one for each pair joined only through two entities or
+fewer left out, saying what it passes through (*via 1 media → 1 proof*). Each box is coloured by its
+entity's type. **Timeline from the Timeline** lists the case's dated events in a period (the whole
+case at first), each on its day as the case states it (*about 18 Oct 2026* where it is approximate),
+all ticked; more than six are drawn top down. Both list what they will write, boxes and links or
+events, before *Write it* writes them; nothing is added that the case does not say. Where the Graph
+drew only the case's most linked entities, or the Timeline held more events than one read, the panel
+says so.
+
+The legend and a Dark or Book diagram's page are drawn into the picture itself (`lib/mermaid.js`), so
+the editor, the PDF (as the PNG the browser drew), the HTML page and its web folder (as SVG, the figure
+laid on the same page) and WordPress show the same diagram, in the same colours.
+
 **Infographics.** A `:::: infographic` block is a page of panels read as one figure
 (`engine/notes_infographic.py`): a title band, then ordinary `::: chart` and `::: map` blocks
 and the words between them, in reading order, then one source line. Its four colons keep each
@@ -7680,7 +7783,8 @@ panel, and a title stating a number says *at least* when a panel counts a floor.
 no `from:` of its own, whose columns the data holds every one of, takes the page's data: it
 picks only what to count, split by and colour by from those columns, in its own card, and keeps
 a copy of the rows, so the page reads the same tomorrow. Key figures typed in keep their own
-rows, and a panel with its own `from:` keeps its own source. On top of the block drawn in the
+rows, a chart made from scratch or whose rows its form wrote says `rows: own` and keeps them
+whatever its columns, and a panel with its own `from:` keeps its own source. On top of the block drawn in the
 note and of the builder, one **Data** line says the source (*Sheet “Vehicle register”*, the
 builder's name opening it in the Sheet tool), its rows (*first 500 of 620* when a chart holds
 fewer), how many panels read it, and *changed since* when their rows differ from it, with
@@ -7708,10 +7812,12 @@ in the note as the server draws it; a press on a panel or on **Edit** opens the 
 the note: the title band, the panels (drag or Alt+↑/↓ to reorder, Half or Wide, × takes one out,
 **Add a panel** shows the page's data first, then each table of the note, drawn as every kind it
 fits by the chart's kind picker (a panel made of the data takes it, with no `from:`), the chart
-picked written as one under its table would be, its rows and `from:` with it,
-and the note's maps, with Words and Key figures to fill in; pressing a chart's row opens the
-chart's own settings card under it, title, count, by and colour, each choice written inside the
-page as one Undo), the look, **One legend for Grade, at the top**, the
+picked written as one under its table would be, its rows and `from:` with it, then every kind
+*From scratch*, the picker's own cards, the one picked written with its columns and `rows: own`
+and its form opened in its card, and the note's maps, with Words to fill in; pressing a chart's
+row opens the chart's own settings card under it, title, count, by, colour and *Edit the data*,
+its form, each choice written inside the page as one Undo), the look, **One legend for Grade, at
+the top**, the
 colours and where each comes from (*Keep these colours for the case* names them in the case's
 palette), what the check says, **Export as a picture** (X 16:9, 4:5, 1:1, the PDF page, SVG)
 and **To Post**. Each press writes the block's text as one change, so one Undo.
@@ -7749,7 +7855,9 @@ record's `look`, `notes.case_look` for the case notes) and never in its Markdown
 panel shows one tab at a time, *Style* (what the document is **For**, then contents and
 numbered headings, **What it includes**, and the web page's layout), *Text*, *Page* (paper, accent, marking), *Cover* and *Header
 & footer*, a dot on each tab holding something set, and reopens on the last tab used.
-The **For** row lists the five styles, each with a line on what it gives; the style is
+The panel stays under its button, left of the Page pane when the pages show beside the
+note, as tall as the room under it and scrolled inside, so the pages it changes stay in
+view. The **For** row lists the five styles, each with a line on what it gives; the style is
 the profile, so it decides what the document carries after its text as well as its look:
 
 - **Report** has a running header, *Page X / Y*, numbered sections in the accent,
@@ -7764,11 +7872,24 @@ the profile, so it decides what the document carries after its text as well as i
 - **Plain**, with nothing else set, is the document the Notebook always printed, to the
   byte: no sources list and no annex.
 
-**What it includes** lists the **Sources** list and the five annexes as switches, then
-**Sources written as** (*Academic*, *Web*, *Short*) and the **Link check** (*Each link*,
-*One line*). Each shows the style's own value (*Report's own*) until changed for this
+**What it includes** is one line each time the panel opens, *Academic sources · 5
+annexes · links grouped* and *Change…*, which opens it (*Fold* folds it again). Open, it
+lists the **Sources** and the five annexes as switches, then **Sources written as**
+(*Academic*, *Web*, *Short*) and the **Link check** (*Each link*, *One line*). Each shows the style's own value (*Report's own*) until changed for this
 note, then *Changed here · Reset*; setting one back to the style's value is the style's
-own again. The annexes print after the sources, each a heading of its own in the
+own again.
+
+With the sources on, **Sources list** says which list the document ends on: *Generated*,
+the numbered list written from what the note cites; *My own section*, the note's own
+section as written; or *Both*. Until set it follows the note (*Follows the note*): its
+own section once the note has a heading named *Sources* or *References*, at any level,
+else the generated list. With its own section, every outside link is still checked for an
+archived copy and a seen day, and nothing is numbered, since no generated list prints for
+a citation to point into. *Both* prints the note's section, then the generated list,
+which the citations number into, headed *References* under a note's own *Sources*.
+*Generated* leaves the note's own section out of the document, up to the next heading of
+its rank, so one list prints. The PDF, the HTML page, its web folder and a WordPress draft
+print the same; Plain prints no generated list whatever is set. The annexes print after the sources, each a heading of its own in the
 contents and the bookmarks, in the PDF, the HTML page, its web folder and a WordPress
 draft, and only when they have something to say (`engine/noteannexes.py`):
 
@@ -7850,7 +7971,7 @@ and the size, Smaller, Normal or Larger, which headings, tables and captions fol
 A letter a face lacks prints in the Noto face of its script. Templates carry both.
 Its **Sources** switch is on for Report, Web article, Brief and Journal and off for
 Plain until set; templates carry it and every switch of *What it includes*, each kept
-only once set (`sources_style`, `annexes`, `link_check`), so a look that never used
+only once set (`sources_style`, `annexes`, `link_check`, `sources_list`), so a look that never used
 them reads as an older Azimut wrote it. Its **Web page** row, *Article* or
 *Story*, lays out the HTML page only (see *Story* above); it is kept only once set to
 Story, so a look that never used it reads as an older Azimut wrote it, and templates
@@ -7915,7 +8036,11 @@ the list: an empty section; a picture, video, chapter or record no longer in the
 (marked red); a picture with no source while sources are listed; tasks still open,
 outside Plain; a link a reader cannot open (`file:`, localhost, a private address);
 outside links with no archived copy, or none the case holds, while sources are listed; a
-script no face covers. One that names a line goes there when pressed. A template's pages give no such warnings, since a
+script no face covers. One that names a line goes there when pressed, as its *Go to* in
+the export dialog does. One about a heading lands on the line under it, never in the
+heading's words: at the section's first words, or, for an empty section, on an empty
+paragraph written under the heading (and any guidance there), which one Undo takes back.
+A link's warning lands on the link's line. A template's pages give no such warnings, since a
 template is guidance by design.
 
 **Pictures and pages.** Hovering a picture, in the note or on its page in the Page
@@ -8237,6 +8362,11 @@ instrument style of QGIS, Google Earth Pro, Resolve and Lightroom.
   stay fixed across themes. Surfaces over imagery remain dark through
   `.dark-surface`. New chrome must use tokens; hardcoded light colours are limited
   to text on dark image scrims.
+- **Quiet controls stay visible**: a ⋯, a ▾, a handle or any button drawn as an icon
+  alone rests in `--text-2`, never in the hint grey `--text-3` or at a lowered opacity,
+  so it stands out at least 3:1 from what it sits on, a row lit under the pointer
+  included (WCAG 1.4.11), in both themes. `lib/notes/quietControls.render.test.js`
+  measures the note editor's and the Notebook's.
 - **Shape**: radii 3/4/6px, flat panels with 1px borders, rectangular badges.
 - **Update dot**: `.update-dot` on a `.dotted` host says "something here is to
   install or update", and nothing else. It repeats down one path — the topbar

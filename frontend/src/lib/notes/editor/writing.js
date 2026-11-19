@@ -3,11 +3,13 @@
  * prefix, text at the cursor, the cover page; where a jump to a line lands; Enter
  * on an empty list item; a task box ticked.
  */
+import { isolateHistory } from '@codemirror/commands';
 import { EditorView } from '@codemirror/view';
 
 import { coverChange } from '../reportParts.js';
 import { markAtCaret } from './caret.js';
 import { drawn } from './decorations.js';
+import { lineShape } from './lineKeys.js';
 import { PICTURE_LINE } from './pictureBlock.js';
 import { runFormat, toggleInline } from './marks.js';
 import { lightLines } from './puts.js';
@@ -74,15 +76,66 @@ export function insertAtCursor(view, text, { block = false } = {}) {
   view.focus();
 }
 
+/** A heading written with `#` at the top level of the note, not in a quote, a list or code. */
+function headingLine(state, line) {
+  return /^ {0,3}#{1,6}(?:[ \t]|$)/.test(line.text) && lineShape(state, line)?.type === 'heading';
+}
+
+/** A line that prints nothing: a comment, guidance, a page break, the cover's rule. */
+const SILENT_LINE = /^[ \t]*<!--.*-->[ \t]*$/;
+
+/**
+ * Where a press on a warning about a heading (line `number`, 1-based) puts the caret:
+ * on the line under it, never among the heading's hidden marks, where words typed would
+ * lengthen the heading. A section that holds words gets the caret at the start of its
+ * first line of them (`{ line }`). An empty one, up to the next heading or the end of the
+ * note, gets an empty paragraph of its own after the heading and any guidance under it,
+ * a blank line parting it from both sides, written as one Undo step (`{ changes, anchor }`).
+ * Null for a line that is no heading.
+ */
+export function underHeading(state, number) {
+  const { doc } = state;
+  const heading = doc.line(number);
+  if (!headingLine(state, heading)) return null;
+  let last = heading;
+  let next = null;
+  for (let at = number + 1; at <= doc.lines; at += 1) {
+    const line = doc.line(at);
+    if (!line.text.trim()) continue;
+    if (SILENT_LINE.test(line.text)) { last = line; continue; }
+    if (headingLine(state, line)) { next = line; break; }
+    return { line: at };
+  }
+  const to = next ? next.from : doc.length;
+  const insert = next ? `${state.lineBreak.repeat(4)}` : state.lineBreak.repeat(2);
+  const anchor = last.to + state.lineBreak.length * 2;
+  if (state.sliceDoc(last.to, to) === insert) return { anchor };
+  return { changes: { from: last.to, to, insert }, anchor };
+}
+
 /**
  * Put the cursor at the start of a line (0-based), and bring it into view. A line
  * holding a picture is picked, brought into view and lit rather than opened, so the
  * picture stays drawn with its bar, which is where a picture is sized, captioned and
  * sourced. A line inside another drawn block (a table row, a line of an aligned
- * block) opens that block there.
+ * block) opens that block there. With `section` (a warning's Go to, `lib/notes/warnings.js`),
+ * a heading's line takes the caret under the heading (`underHeading`).
  */
-export function jumpToLine(view, line) {
-  const number = Math.min(view.state.doc.lines, Math.max(1, Number(line) + 1));
+export function jumpToLine(view, line, { section = false } = {}) {
+  let number = Math.min(view.state.doc.lines, Math.max(1, Number(line) + 1));
+  const under = section ? underHeading(view.state, number) : null;
+  if (under?.line) number = under.line;
+  else if (under && !(under.changes && view.state.readOnly)) {
+    view.dispatch({
+      ...(under.changes && { changes: under.changes }),
+      selection: { anchor: under.anchor },
+      effects: EditorView.scrollIntoView(under.anchor, { y: 'center' }),
+      userEvent: 'input',
+      annotations: isolateHistory.of('full'),
+    });
+    view.focus();
+    return;
+  }
   const target = view.state.doc.line(number);
   const block = blocksIn(view.state, target.from, target.to).find((item) => item.from <= target.from && target.to <= item.to);
   const picture = PICTURE_LINE.test(target.text);

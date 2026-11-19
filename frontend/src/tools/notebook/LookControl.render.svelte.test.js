@@ -34,7 +34,7 @@ const ENTITIES = [
   { id: 'p1', type: 'place', label: 'Quay', attrs: {} },
 ];
 
-const props = $state({ look: null, onchange: null, template: false, entities: ENTITIES });
+const props = $state({ look: null, onchange: null, template: false, entities: ENTITIES, text: '' });
 let target;
 let app;
 let changes;
@@ -67,6 +67,8 @@ const tabNamed = (name) => tabs().find((item) => item.textContent.trim() === nam
 const goTo = (name) => { tabNamed(name).click(); flushSync(); };
 const pressed = (text) => [...panel().querySelectorAll('button')].find((button) => button.textContent.trim() === text);
 const box = (words) => [...panel().querySelectorAll('label.switch')].find((label) => label.textContent.includes(words)).querySelector('input');
+/** What it includes, opened past its one line. */
+const unfold = () => { panel().querySelector('.includes .summary')?.click(); flushSync(); };
 
 describe('the Look panel', () => {
   it('names the style on its button, and opens on its first tab the first time, one section shown', async () => {
@@ -98,6 +100,7 @@ describe('the Look panel', () => {
   it('puts the two switches of the document under the For row, then what it includes, all as switches', () => {
     openPanel();
     goTo('Style');
+    unfold();
     const [document_, includes] = panel().querySelectorAll('.group');
     expect(document_.getAttribute('aria-label')).toBe('In the document');
     expect([...document_.querySelectorAll('label.switch')].map((label) => label.textContent.trim()))
@@ -126,6 +129,7 @@ describe('the Look panel', () => {
     props.look = normaliseLook({ style: 'report' });
     openPanel();
     goTo('Style');
+    unfold();
     const row = (key) => panel().querySelector(`[data-include="${key}"]`);
     expect([...panel().querySelectorAll('.include .switch input')].every((input) => input.checked)).toBe(true);
     expect(row('limits').textContent).toContain("Report's own");
@@ -155,6 +159,7 @@ describe('the Look panel', () => {
       props.look = normaliseLook({ style: 'brief' });
       openPanel();
       goTo('Style');
+      unfold();
       expect(panel().querySelector('[data-include="credits"] input').checked).toBe(true);
       expect(panel().querySelector('[data-include="link_check"] [aria-checked="true"]').textContent).toBe('Each link');
       expect(panel().querySelector('[data-include="credits"]').textContent).toContain("Brief's own");
@@ -325,6 +330,7 @@ describe('the Look panel', () => {
     const sources = () => box('numbered, linked');
     openPanel();
     goTo('Style');
+    unfold();
     expect(sources().closest('.group').textContent).toContain('What it includes');
     // Plain prints none of its own, a report lists them
     expect(sources().checked).toBe(false);
@@ -372,11 +378,89 @@ describe('the Look panel', () => {
     props.look = normaliseLook({ style: 'brief' });
     openPanel();
     goTo('Style');
+    unfold();
     const sources = box('numbered, linked');
     expect(sources.checked).toBe(true);
     sources.click();
     flushSync();
     expect(changes.at(-1)).toMatchObject({ style: 'brief', sources: 'off' });
+  });
+
+  it('folds what it includes into one line each time it opens, which Change… opens and Fold closes', () => {
+    props.look = normaliseLook({ style: 'report' });
+    openPanel();
+    goTo('Style');
+    const includes = panel().querySelector('.includes');
+    const line = includes.querySelector('.summary');
+    expect(line.querySelector('.summary-words').textContent).toBe('Academic sources · 5 annexes · links grouped');
+    expect(line.querySelector('.change').textContent).toBe('Change…');
+    expect(line.getAttribute('aria-expanded')).toBe('false');
+    expect(line.title).toBeTruthy();
+    expect(includes.querySelectorAll('label.switch')).toHaveLength(0);
+    line.click();
+    flushSync();
+    expect(includes.querySelectorAll('label.switch')).toHaveLength(6);
+    const fold = [...includes.querySelectorAll('button')].find((button) => button.textContent.trim() === 'Fold');
+    expect(fold.getAttribute('aria-expanded')).toBe('true');
+    fold.click();
+    flushSync();
+    expect(includes.querySelector('.summary')).not.toBeNull();
+    // opened again, the panel shows it folded however it was left
+    includes.querySelector('.summary').click();
+    flushSync();
+    opener().click();
+    flushSync();
+    openPanel();
+    expect(panel().querySelector('.includes .summary')).not.toBeNull();
+    // the line says what changed here too
+    props.look = normaliseLook({ style: 'report', link_check: 'each', annexes: { method: 'off' }, sources_style: 'short' });
+    flushSync();
+    expect(panel().querySelector('.includes .summary-words').textContent).toBe('Short sources · 4 annexes · each link checked');
+    props.look = normaliseLook({ style: 'plain' });
+    flushSync();
+    expect(panel().querySelector('.includes .summary-words').textContent).toBe('No sources list · no annex');
+  });
+
+  it('ends on the note\'s own Sources section once it has one, the generated list or both when chosen', async () => {
+    props.look = normaliseLook({ style: 'report' });
+    props.text = 'Words.\n\n## Sources\n\n### Agencies\n\n- [Bulletin](https://example.org)';
+    try {
+      openPanel();
+      goTo('Style');
+      expect(panel().querySelector('.includes .summary-words').textContent).toBe('Your own sources · 5 annexes · links grouped');
+      unfold();
+      const row = panel().querySelector('[data-include="sources_list"]');
+      const choices = [...row.querySelectorAll('[role="radio"]')];
+      expect(choices.map((choice) => choice.textContent.trim())).toEqual(['Generated', 'My own section', 'Both']);
+      expect(choices.every((choice) => choice.title)).toBe(true);
+      expect(row.querySelector('[aria-checked="true"]').textContent).toBe('My own section');
+      expect(row.textContent).toContain('Follows the note');
+      choices[2].click();
+      flushSync();
+      expect(changes.at(-1)).toMatchObject({ style: 'report', sources_list: 'both' });
+      expect(row.textContent).toContain('Changed here');
+      expect(tabNamed('Style').querySelector('.dot')).not.toBeNull();
+      row.querySelector('.reset').click();
+      flushSync();
+      expect(changes.at(-1).sources_list).toBe('');
+      // without a heading of its own, the note follows the generated list; choosing it is no change
+      props.text = 'Words only.';
+      flushSync();
+      expect(row.querySelector('[aria-checked="true"]').textContent).toBe('Generated');
+      choices[0].click();
+      flushSync();
+      expect(changes.at(-1).sources_list).toBe('');
+      choices[1].click();
+      flushSync();
+      expect(changes.at(-1).sources_list).toBe('own');
+      expect(panel().querySelector('[data-include="sources"]').textContent).toContain('links checked');
+      // no sources at all, no list to choose
+      panel().querySelector('[data-include="sources"] input').click();
+      flushSync();
+      expect(panel().querySelector('[data-include="sources_list"]')).toBeNull();
+    } finally {
+      props.text = '';
+    }
   });
 
   it('offers three covers: none, the style\'s with its fields, or the analyst\'s own page', () => {

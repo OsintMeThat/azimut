@@ -676,7 +676,7 @@ def test_a_note_that_cannot_be_laid_out_answers_why(client, monkeypatch):
 
 
 def test_the_sources_key_follows_the_style_unless_set():
-    assert notelook.LATE_KEYS == ("font", "size", "sources", "web", "sources_style", "link_check")
+    assert notelook.LATE_KEYS == ("font", "size", "sources", "web", "sources_style", "link_check", "sources_list")
     assert notelook.SOURCES_OFF_STYLES == ("plain",)
     for style in ("plain", "report", "brief", "journal", "article"):
         assert look(style=style).profile(notelook.PROFILES).sources is (style not in notelook.SOURCES_OFF_STYLES)

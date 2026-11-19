@@ -8,15 +8,19 @@
   /**
    * How a note prints, set from the editor's header: a panel of five tabs, one
    * section at a time. Style (what the document is for: Report, Web article, Brief,
-   * Journal or Plain, each in a line; then what it includes, the sources list, the
-   * five annexes, how its sources are written and how strictly its links are checked,
-   * each the style's own until changed here and marked so with a Reset; the contents
+   * Journal or Plain, each in a line; then what it includes, folded into one line until
+   * Change… opens it: the sources and which list the document ends on (the generated
+   * one, the note's own section or both, following the note until set), the five
+   * annexes, how its sources are written and how strictly its links are checked, each
+   * the style's own until changed here and marked so with a Reset; the contents
    * and numbering switches; and the HTML page's layout, an article or a story),
    * Text (size and typeface), Page (paper, accent, marking), Cover and the page's
    * Header & footer. A tab whose section holds something set wears a dot. Each
    * change is handed up at once (`onchange`), which saves it beside the note and
    * draws the Page pane again. A template's look keeps no picture and no day of a
-   * case.
+   * case. The panel stays under its button and left of the Notebook's Page pane, scrolled
+   * in the room there, so the pages it is changing stay in view (`FloatingMenu`, `below`
+   * and `clear`).
    *
    * Each typeface is shown in its own face, loaded from the server when the Text
    * tab first shows (`lib/notes/noteFonts.js`). The hover texts live in
@@ -29,9 +33,9 @@
   import { tick, untrack } from 'svelte';
   import { LOOK_HELP } from '../../lib/notes/lookHelp.js';
   import {
-    ANNEXES, BANDS, BAND_MAX, COVERS, FONTS, LINK_CHECKS, PAGES, SIZES, SLOTS, SLOT_LOGOS, SOURCES_STYLES, STYLES, SUBTITLE_MAX, TLPS, WEBS,
-    bandStyleOwn, coverChoice, coverFor, lookFont, normaliseLook, profileChanged, profileOf, sectionsSet, slotText, styleLabel, styleOwn as ownWords,
-    stylesTable, withProfile,
+    ANNEXES, BANDS, BAND_MAX, COVERS, FONTS, LINK_CHECKS, PAGES, SIZES, SLOTS, SLOT_LOGOS, SOURCES_LISTS, SOURCES_STYLES, STYLES, SUBTITLE_MAX, TLPS,
+    WEBS, bandStyleOwn, coverChoice, coverFor, includesSummary, lookFont, normaliseLook, ownSources, profileChanged, profileOf, sectionsSet, slotText,
+    styleLabel, styleOwn as ownWords, stylesTable, withProfile,
   } from '../../lib/notes/look.js';
   import { prefs } from '../../lib/state.svelte.js';
   import { faceFamily, loadNoteFont, noteFonts } from '../../lib/notes/noteFonts.js';
@@ -41,13 +45,16 @@
   import FloatingMenu from '../../components/FloatingMenu.svelte';
   import HexField from '../../components/HexField.svelte';
 
-  let { look = null, onchange, template = false, entities = [], disabled = false } = $props();
+  /** `text` is the note's, read for a Sources or References heading of its own. */
+  let { look = null, onchange, template = false, entities = [], disabled = false, text = '' } = $props();
 
   // the panel follows the space: a window narrower than it is wide (the extension's panel) gets a narrower one
   let viewport = $state(typeof window === 'undefined' ? 1024 : window.innerWidth);
   const panelWidth = $derived(Math.max(240, Math.min(440, viewport - 16)));
 
   let anchor = $state(null);
+  /** The Page pane beside the note in the Notebook, which the panel leaves in view. */
+  let pane = $state(null);
   let subtitle = $state('');
   let picking = $state(false);
   let pictureQuery = $state('');
@@ -57,6 +64,8 @@
   let faces = $state({});
   let subtitleTimer;
   let tab = $state(lastTab);
+  /** What it includes, open past its one line: folded again each time the panel opens. */
+  let includesOpen = $state(false);
   const uid = `look-${(made += 1)}`;
   const TABS = [
     { id: 'style', label: 'Style', title: LOOK_HELP.tabStyle },
@@ -97,6 +106,11 @@
     limits: LOOK_HELP.annexLimits, editions: LOOK_HELP.annexEditions,
   };
   const SOURCES_HELP = { academic: LOOK_HELP.sourcesAcademic, web: LOOK_HELP.sourcesWeb, short: LOOK_HELP.sourcesShort };
+  const LIST_HELP = { generated: LOOK_HELP.sourcesListGenerated, own: LOOK_HELP.sourcesListOwn, both: LOOK_HELP.sourcesListBoth };
+  /** The list the note ends on unless the look says: its own section once it has a Sources or References heading. */
+  const followed = $derived(ownSources(text) ? 'own' : 'generated');
+  const listing = $derived(whole.sources_list || followed);
+  const summary = $derived(includesSummary(profile, listing));
   const CHECK_HELP = { each: LOOK_HELP.linkEach, grouped: LOOK_HELP.linkGrouped };
 
   /** One profile switch for this note, or back to its style's (`null`). */
@@ -135,6 +149,8 @@
   /** Open the panel on the tab last used, that tab in focus, so the arrows move between sections and Tab goes into one. */
   async function open(button) {
     tab = lastTab;
+    includesOpen = false;
+    pane = button.closest('.notebook')?.querySelector('.page-pane') ?? null;
     anchor = button;
     await tick();
     panel?.querySelector('[role="tab"][aria-selected="true"]')?.focus({ preventScroll: true });
@@ -218,7 +234,7 @@
 <svelte:window bind:innerWidth={viewport} />
 
 {#if anchor}
-  <FloatingMenu {anchor} align="end" width={panelWidth} role="dialog" label="Look" onclose={close}>
+  <FloatingMenu {anchor} align="end" below clear={pane} width={panelWidth} role="dialog" label="Look" onclose={close}>
     <div class="look" class:narrow={panelWidth < 420} bind:this={panel}>
       <div class="tabs" role="tablist" aria-label="Look sections" tabindex="-1" onkeydown={tabKey}>
         {#each TABS as item (item.id)}
@@ -249,13 +265,29 @@
             {@render toggle('Numbered headings', LOOK_HELP.numbered, whole.numbered, (on) => set({ numbered: on }))}
           </div>
           <div class="group includes" role="group" aria-label="What it includes">
-            <span class="key" title={LOOK_HELP.includes}>What it includes</span>
-            {@render switchRow('sources', 'Sources', 'numbered, linked', LOOK_HELP.sources)}
-            {#each ANNEXES as annex (annex.id)}
-              {@render switchRow(annex.id, annex.label, annex.note, ANNEX_HELP[annex.id])}
-            {/each}
-            {@render segRow('sources_style', 'Sources written as', SOURCES_STYLES, SOURCES_HELP, LOOK_HELP.sourcesStyle)}
-            {@render segRow('link_check', 'Link check', LINK_CHECKS, CHECK_HELP, LOOK_HELP.linkCheck)}
+            <div class="includes-head">
+              <span class="key" title={LOOK_HELP.includes}>What it includes</span>
+              {#if includesOpen}
+                <button type="button" class="fold" aria-expanded="true" aria-controls={`${uid}-includes`} title={LOOK_HELP.includesFold}
+                  onclick={() => (includesOpen = false)}>Fold</button>
+              {/if}
+            </div>
+            {#if includesOpen}
+              <div class="includes-body" id={`${uid}-includes`}>
+                {@render switchRow('sources', 'Sources', listing === 'own' ? 'links checked' : 'numbered, linked', LOOK_HELP.sources)}
+                {#if profile.sources}{@render listRow()}{/if}
+                {#each ANNEXES as annex (annex.id)}
+                  {@render switchRow(annex.id, annex.label, annex.note, ANNEX_HELP[annex.id])}
+                {/each}
+                {@render segRow('sources_style', 'Sources written as', SOURCES_STYLES, SOURCES_HELP, LOOK_HELP.sourcesStyle)}
+                {@render segRow('link_check', 'Link check', LINK_CHECKS, CHECK_HELP, LOOK_HELP.linkCheck)}
+              </div>
+            {:else}
+              <button type="button" class="summary" aria-expanded="false" aria-controls={`${uid}-includes`} title={LOOK_HELP.includesChange}
+                onclick={() => (includesOpen = true)}>
+                <span class="summary-words">{summary}</span><span class="change">Change…</span>
+              </button>
+            {/if}
           </div>
           <div class="row web">
             <span class="key" title={LOOK_HELP.web}>Web page</span>
@@ -477,6 +509,25 @@
   </div>
 {/snippet}
 
+{#snippet listRow()}
+  <div class="include seg-row list-row" data-include="sources_list">
+    <span class="include-label" title={LOOK_HELP.sourcesList}>Sources list</span>
+    <div class="seg" role="radiogroup" aria-label="Sources list" title={LOOK_HELP.sourcesList}>
+      {#each SOURCES_LISTS as choice (choice.id)}
+        <button type="button" class:on={listing === choice.id} role="radio" aria-checked={listing === choice.id} title={LIST_HELP[choice.id]}
+          onclick={() => set({ sources_list: choice.id === followed ? '' : choice.id })}>{choice.label}</button>
+      {/each}
+    </div>
+    {#if whole.sources_list}
+      <span class="own-said changed">Changed here ·
+        <button type="button" class="reset" title={LOOK_HELP.sourcesListReset} aria-label="Reset to following the note"
+          onclick={() => set({ sources_list: '' })}>Reset</button></span>
+    {:else}
+      <span class="own-said" title={LOOK_HELP.sourcesListAuto}>Follows the note</span>
+    {/if}
+  </div>
+{/snippet}
+
 {#snippet day()}
   <label class="row" title={LOOK_HELP.date}>
     <span class="key">Day</span>
@@ -515,6 +566,25 @@
   .row .input { min-width: 0; font-size: var(--fs-sm); }
   .group, .web { padding-top: 16px; border-top: 1px solid var(--border); }
   .group { display: flex; flex-direction: column; gap: 8px; }
+  /* what it includes: one line until Change… opens the switches under it */
+  .includes-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+  .includes-body { display: flex; flex-direction: column; gap: 8px; }
+  .fold {
+    padding: 0; border: none; background: none; color: var(--text-2); font: inherit; font-size: 11px; text-decoration: underline; cursor: pointer;
+  }
+  .fold:hover { color: var(--text-1); }
+  .summary {
+    display: flex; align-items: baseline; justify-content: space-between; gap: 10px; width: 100%; padding: 7px 10px;
+    border: 1px solid var(--border); border-radius: var(--r-md); background: var(--bg-2); color: var(--text-1);
+    font: inherit; font-size: var(--fs-sm); text-align: left; cursor: pointer;
+  }
+  .summary:hover { border-color: var(--border-strong); }
+  .summary:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+  .summary-words { min-width: 0; }
+  .change { flex: none; color: var(--text-2); font-size: var(--fs-xs); }
+  .summary:hover .change { color: var(--text-1); }
+  /* three choices beside their label: what the note follows goes under them rather than squeezing them */
+  .list-row { flex-wrap: wrap; row-gap: 4px; }
 
   .fonts { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 8px; }
   .font-card {
@@ -616,9 +686,10 @@
   .slot .input { min-width: 0; font-size: var(--fs-xs); padding: 4px 6px; }
   .slot-logo, .chip-x {
     display: inline-flex; align-items: center; justify-content: center; padding: 1px 3px; border: none; border-radius: var(--r-sm);
-    background: none; color: var(--text-3); cursor: pointer;
+    background: none; color: var(--text-2); cursor: pointer;
   }
   .slot-logo:hover, .slot-logo.on, .chip-x:hover { color: var(--text-1); background: var(--bg-3); }
+  .chip-x:hover { background: var(--bg-2); }
   .slot-chip {
     display: flex; align-items: center; justify-content: space-between; gap: 4px; min-width: 0; padding: 4px 4px 4px 8px;
     border: 1px solid var(--border); border-radius: var(--r-md); background: var(--bg-3); color: var(--text-1); font-size: var(--fs-xs);

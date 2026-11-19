@@ -25,7 +25,7 @@ export const CHART_KEYS = {
   kind: 'kind', type: 'kind', title: 'title', caption: 'caption', count: 'count', by: 'by',
   'colour by': 'colour by', 'color by': 'colour by', colour: 'colour by', color: 'colour by', 'coloured by': 'colour by', 'colored by': 'colour by',
   order: 'order', colours: 'colours', colors: 'colours', only: 'only', highlight: 'highlight', sort: 'sort', last: 'last', show: 'show',
-  bars: 'bars', source: 'source', sources: 'source', credit: 'source', from: 'from', style: 'style',
+  bars: 'bars', source: 'source', sources: 'source', credit: 'source', from: 'from', rows: 'rows', style: 'style',
   // what a kind reads besides (`Kind.keys` in `engine/notes_charts.py`)
   centre: 'centre', center: 'center', icon: 'icon', 'per glyph': 'per glyph', flag: 'flag', of: 'of', squares: 'squares',
   icons: 'icons', flags: 'flags',
@@ -33,7 +33,9 @@ export const CHART_KEYS = {
 
 /** The order the Notebook writes settings in (`notes_charts.WRITTEN_ORDER`), a kind's own next, then the last ones. */
 export const WRITTEN_ORDER = ['kind', 'title', 'caption', 'count', 'by', 'colour by', 'order', 'colours', 'only', 'highlight', 'sort', 'last', 'show', 'bars'];
-export const WRITTEN_LAST = ['source', 'from', 'style'];
+export const WRITTEN_LAST = ['source', 'from', 'rows', 'style'];
+/** `rows: own`: the rows are the chart's own, typed in its form, never an infographic's data (`notes_charts.OWN_ROWS`). */
+export const OWN_ROWS = 'own';
 
 /** What `count:` says to count rows. */
 export const ROWS = 'rows';
@@ -137,6 +139,19 @@ export function withTable(source, text) {
     return lines.join('\n');
   }
   return [...chart.lines.slice(0, chart.tableFrom), text, ...chart.lines.slice(chart.tableTo + 1)].join('\n');
+}
+
+/**
+ * The block a kind picked from a note's table writes: its settings, the title its data
+ * proposes, where its rows came from and the rows. `text` is the note's text, `found` the
+ * table in it (`{ from, to, line }`), `kind` the kind picker's answer; `noteId` names the
+ * note they are in, and a note with none (a template) writes no `from:`.
+ */
+export function chartOfTable(text, found, kind, noteId = '') {
+  const note = String(text ?? '');
+  const settings = { ...kind.settings, title: kind.title ?? '' };
+  if (noteId) settings.from = originFor(noteId, note, found.line ?? note.slice(0, found.from).split('\n').length - 1);
+  return newChart(settings, note.slice(found.from, found.to));
 }
 
 /** A new chart block: `settings` in the Notebook's order, then the table's lines as they stand. */

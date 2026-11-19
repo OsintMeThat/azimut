@@ -33,6 +33,24 @@ describe('placeFloating', () => {
     expect(placeFloating({ anchor: box(700, 300), size: { width: 256, height: 900 }, viewport }).top).toBe(MARGIN);
   });
 
+  it('keeps a panel asked to stay below under its opener, scrolled in the room there, never beside it', () => {
+    // the Look at 1280 x 720: its button in the note's header, the Page pane on its right
+    const look = { width: 440, height: 760 };
+    const screen = { width: 1280, height: 720 };
+    const button = { left: 502, top: 92, right: 610, bottom: 117 };
+    expect(placeFloating({ anchor: button, size: look, viewport: screen, align: 'end' }).left).toBe(610 + GAP);
+    expect(placeFloating({ anchor: button, size: look, viewport: screen, align: 'end', below: true }))
+      .toEqual({ left: 610 - 440, top: 117 + GAP, maxHeight: 720 - MARGIN - 117 - GAP });
+    // the Page pane on the right stays whole in view, the panel moved left of it
+    expect(placeFloating({ anchor: button, size: look, viewport: screen, align: 'end', below: true, clear: 549 }).left).toBe(549 - GAP - 440);
+    // as far as the window lets it
+    expect(placeFloating({ anchor: { left: 60, top: 92, right: 160, bottom: 117 }, size: look, viewport: screen, align: 'end', below: true, clear: 200 }).left)
+      .toBe(MARGIN);
+    // no room under it worth scrolling in: placed as any other menu
+    const low = { left: 502, top: 560, right: 610, bottom: 585 };
+    expect(placeFloating({ anchor: low, size: look, viewport: screen, align: 'end', below: true }).top).toBeLessThan(560);
+  });
+
   it('opens at the pointer for a right-click and flips above it at the bottom', () => {
     expect(placeFloating({ at: { x: 500, y: 300 }, size, viewport })).toMatchObject({ left: 500, top: 300 });
     expect(placeFloating({ at: { x: 990, y: 650 }, size, viewport })).toMatchObject({ left: 1000 - MARGIN - 220, top: 450 });

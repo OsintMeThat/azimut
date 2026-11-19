@@ -83,3 +83,13 @@ and the browser's in-memory search cannot fold one text two ways.
 Read by `tests/test_notes_profiles.py` against `PROFILES` and by
 `frontend/src/lib/notes/look.test.js` against `STYLE_DEFAULTS`, so the Look and Settings
 never show a default the documents do not print.
+
+## A note's own sources
+
+| File | What it is there to break |
+|---|---|
+| `own-sources.json` | Which notes have a list of sources of their own: a heading named Sources or References at any level, numbered, bold or with a colon, and the near misses (*Sources of funding*, a quoted or listed heading, one in code, a setext one). Written by hand. |
+
+Read by `tests/test_notes_profiles.py` against `notes_markdown.own_sources` and by
+`frontend/src/lib/notes/look.test.js` against `ownSources`, so the Look never says a note
+ends on its own section while the document prints the generated list.

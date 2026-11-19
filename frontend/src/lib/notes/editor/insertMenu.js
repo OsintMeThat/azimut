@@ -240,7 +240,7 @@ const look = EditorView.theme({
     gridColumn: '2', gridRow: '2', margin: '0', fontSize: '11.5px', color: 'var(--text-3)', overflow: 'hidden', textOverflow: 'ellipsis',
     whiteSpace: 'nowrap',
   },
-  '.cm-insert-menu li .cm-insert-more': { gridColumn: '3', gridRow: '1 / 3', color: 'var(--text-3)', display: 'flex' },
+  '.cm-insert-menu li .cm-insert-more': { gridColumn: '3', gridRow: '1 / 3', color: 'var(--text-2)', display: 'flex' },
   '.cm-tooltip.cm-tooltip-autocomplete.cm-insert-menu > ul > li[aria-selected]': { background: 'var(--accent-soft)' },
   '.cm-insert-menu li[aria-selected] .cm-insert-icon': { background: 'var(--accent)', color: 'var(--accent-text)', borderColor: 'transparent' },
   '.cm-insert-menu li[aria-selected] .cm-insert-swatch': { background: 'var(--swatch)', color: 'var(--bg-1)' },
@@ -257,7 +257,7 @@ const look = EditorView.theme({
   '.cm-insert-plus': {
     position: 'absolute', left: '-26px', top: '50%', transform: 'translateY(-55%)', width: '22px', height: '22px',
     padding: '0', display: 'flex', alignItems: 'center', justifyContent: 'center', border: '1px solid transparent', borderRadius: '5px',
-    background: 'transparent', color: 'var(--text-3)', cursor: 'pointer',
+    background: 'transparent', color: 'var(--text-2)', cursor: 'pointer',
   },
   '.cm-insert-plus:hover': { color: 'var(--text-1)', background: 'var(--bg-3)', borderColor: 'var(--border)' },
   // an empty note's own words, which share a class name with the print fields' pill and are not one
