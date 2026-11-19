@@ -74,10 +74,12 @@ function pickCard(kind, current) {
 /**
  * The kind picker under `anchor`: the kinds `text` (a table, or a chart's block) fits,
  * drawn small, while they are asked. `onPick(kind)` gets the one picked, `{ kind, label,
- * settings, title }`. `current` marks the kind a chart is now. Answers its close.
+ * settings, title }`. `current` marks the kind a chart is now; `copied` says the rows were
+ * copied from another note or a sheet; `copy`, given, offers that copy in its foot instead.
+ * Answers its close.
  */
 export function openKindPicker(view, anchor, {
-  caseId, noteId = '', text, current = '', chart = false, copied = false, copy = null, onPick, onClose = null, ask = chartKinds,
+  caseId, noteId = '', text, current = '', chart = false, copied = false, copy = null, onPick, ask = chartKinds,
 }) {
   const panel = element('div', 'cm-chart-picker');
   panel.setAttribute('role', 'dialog');
@@ -94,7 +96,7 @@ export function openKindPicker(view, anchor, {
   const foot = element('p', 'cm-chart-picker-foot', chart ? FOOT.chart : copied ? FOOT.copied : FOOT.table);
   panel.append(head, grid, foot);
   let closed = false;
-  const close = openPopover(view, anchor, panel, { onClose: () => { closed = true; onClose?.(); } });
+  const close = openPopover(view, anchor, panel, { onClose: () => { closed = true; } });
   if (copy) {
     // the rows may come from elsewhere: the other notes' tables and the sheets, one press away
     const other = button('cm-chart-use cm-chart-copy', { label: 'Copy rows from another note or a sheet' });

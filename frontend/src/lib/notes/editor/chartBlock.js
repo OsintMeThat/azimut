@@ -680,14 +680,13 @@ function placeChart(view, found, kind, pos) {
 }
 
 /** The kind picker for the table at `found`, under `anchor`; the chart lands at `pos`. */
-export function chartTable(view, anchor, found, { pos = found.to, onClose = null, copy = null } = {}) {
+export function chartTable(view, anchor, found, { pos = found.to, copy = null } = {}) {
   const { caseId } = view.state.field(noteCase);
   return openKindPicker(view, anchor, {
     caseId,
     noteId: view.state.facet(noteHandlers).noteId ?? '',
     text: view.state.sliceDoc(found.from, found.to),
     onPick: (kind) => placeChart(view, found, kind, pos),
-    onClose,
     copy,
   });
 }
