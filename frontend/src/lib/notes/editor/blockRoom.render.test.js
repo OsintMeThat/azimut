@@ -3,8 +3,12 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { EditorView } from '@codemirror/view';
 import { EditorState } from '@codemirror/state';
 
-// a diagram is drawn by Mermaid in a browser; here it answers at once
+// a diagram is drawn by Mermaid in a browser, a chart by the server; here they answer at once
 vi.mock('../../mermaid.js', () => ({ renderMermaidSvg: vi.fn(async () => ({ svg: '<svg></svg>' })) }));
+vi.mock('../../api.js', async (original) => {
+  const real = await original();
+  return { ...real, api: { ...real.api, postBytes: vi.fn(async () => ({ data: new TextEncoder().encode('<svg></svg>').buffer, headers: new Headers() })) } };
+});
 
 const { noteExtensions, setNoteCase } = await import('../liveMarkdown.js');
 
@@ -44,6 +48,7 @@ describe('the room above and below a drawn block', () => {
     table: '| A | B |\n| --- | --- |\n| 1 | 2 |',
     aligned: '::: center\nCentred.\n:::',
     html: '<div>HTML</div>',
+    chart: '::: chart\nkind: bars\n| A | B |\n| --- | --- |\n| x | 1 |\n:::',
   };
   /** Where each kind keeps its room above and below now, as a clear border: what its margin was. */
   const ROOM = { cover: '14px', pagebreak: '10px', diagram: '4px', steps: '4px', story: '4px', map: '4px', include: '6px' };

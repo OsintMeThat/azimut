@@ -7430,7 +7430,36 @@ that differ from where they were copied (`from: note:<id>`, `note:<id>#<heading>
 and stays text. `POST /notes/figure` draws one block alone, its title on it, as SVG or as
 a PNG for the PDF page, X (16:9), 4:5 or 1:1: the editor's chart card and *Export as a
 picture* read it. It writes nothing, refuses a block past 256 KB, and says the check in
-its headers.
+its headers, each warning with the settings that fix it, the title the data proposes and
+the kind it is drawn as.
+
+**Making a chart in the editor** (`editor/chartBlock.js`, `chartCard.js`, `chartText.js`).
+A chart is chosen by its picture. *Chart* in a table's grid bar, or `/` › *Chart* in
+Figures, shows every kind the table fits, each already drawn from its real rows
+(`POST /notes/figure/kinds`, `engine/notes_chart_picker.py`): rows counted unless one
+column holds whole numbers (a column of percentages or row numbers never is), bars split by
+the first column of words, stacked and parts kinds by the column of grades first. The kind
+picked is written under the table, or where `/` was typed: its kind, the title its data
+proposes (*at least* when the count is a floor, *rows* when nothing names them), its
+columns, `from:` and the table's rows copied in, as one Undo step, and it stands picked.
+`from: note:<id>#<heading>` names the first table under that heading, `#<heading>/2` the
+second, `#/2` the second of the note; a chart's own rows never count. `/` › *Chart* asks
+which table when the note holds several, and with none starts a small table to fill, the
+grid's Chart button then one press away. In the raw Markdown the block is its lines.
+
+The chart is drawn as the server draws it, kept by its text. Its bar: **Kind** (the
+picker again, its title, columns and rows kept; a kind of parts writes its column as its
+`by`), **Settings** (on the chart, between its bar and its drawing: the title with the one
+the data proposes beside it, Count, By or Parts, Coloured by, Show, Style as Report, Book
+or Dark; a colour column stacks bars and columns, none makes them plain), **Read again**
+(only once the table of this note its rows came from changed, the editor comparing them as
+typed on the chart's own columns, in any order), **The numbers** (its rows, a line each,
+whether they still match, *Go to the table* and *Edit them as text*) and **Export** (a
+picture for X, 4:5, 1:1, the PDF page, or an SVG, downloaded with its title as its name).
+What the check says shows under it, each fix one press (*Add “at least” to the title*).
+Every choice writes its own line in the engine's order and is one Undo step. A press on a
+bar button picks the chart first, so the note stays where it is when a panel takes the
+keyboard. A double press or Enter opens its settings; a locked note shows the drawing.
 
 **To Post.** In the open note's ⋯, kept out of the header, *To Post* opens Post on a Free post thread made of the
 note's public edition, or of the stretch selected in it, which its title then says;

@@ -114,6 +114,17 @@ class ChartBox {
     return blocksIn(this.view.state, from).find((block) => block.from === from && block.kind === 'chart') ?? null;
   }
 
+  /**
+   * The chart worked on is the one picked: the cursor goes to its start, so the note
+   * keeps it drawn where it is when a panel takes the keyboard, rather than a block
+   * picked far away.
+   */
+  pick() {
+    const range = this.range();
+    const { main } = this.view.state.selection;
+    if (range && !(main.empty && main.head === range.from)) this.view.dispatch({ selection: { anchor: range.from } });
+  }
+
   /** Whether the rows came from a table of this very note, which the editor reads as it is typed. */
   local() {
     const origin = readOrigin(setting(this.chart, 'from'));
@@ -154,7 +165,10 @@ class ChartBox {
     const tool = (className, options, run) => {
       const node = button(`cm-chart-tool ${className}`, options);
       node.addEventListener('mousedown', (event) => event.preventDefault());
-      node.addEventListener('click', () => run(node));
+      node.addEventListener('click', () => {
+        this.pick();
+        run(node);
+      });
       bar.append(node);
       return node;
     };
@@ -365,6 +379,7 @@ class ChartBox {
         const line = element('tr');
         row.forEach((cell, at) => {
           const node = element('td', '', plainText(cell));
+          node.title = plainText(cell);
           if (table.align[at] === 'right') node.style.textAlign = 'right';
           line.append(node);
         });
@@ -670,9 +685,10 @@ const THEME = {
   '.cm-chart-numbers': { borderTop: '1px solid var(--border)', background: 'var(--bg-1)' },
   '.cm-chart-rows-scroll': { maxHeight: '280px', overflow: 'auto', scrollbarWidth: 'thin', scrollbarColor: 'var(--border-strong) transparent' },
   'table.cm-chart-rows': { width: '100%', borderCollapse: 'separate', borderSpacing: '0', fontSize: '12px', fontVariantNumeric: 'tabular-nums' },
+  // a row a line: a long cell is cut, its words whole on hover, and the table scrolls sideways
   '.cm-chart-rows th, .cm-chart-rows td': {
     padding: '4px 10px', borderBottom: '1px solid var(--border)', borderRight: '1px solid var(--border)', textAlign: 'left', verticalAlign: 'top',
-    color: 'var(--text-1)', maxWidth: '22em',
+    color: 'var(--text-1)', maxWidth: '18em', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
   },
   '.cm-chart-rows th': { position: 'sticky', top: '0', background: 'var(--bg-2)', color: 'var(--text-2)', fontWeight: '600', zIndex: '1' },
   '.cm-chart-numbers-said': { display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: '6px 12px', padding: '7px 12px', color: 'var(--text-2)' },
