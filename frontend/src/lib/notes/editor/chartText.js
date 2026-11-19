@@ -297,3 +297,65 @@ export function compareRows(chartTable, sourceTable) {
   for (const [key, count] of mine) if (other.get(key) !== count) return 'differs';
   return 'same';
 }
+
+/** The words a fix's button says: what it writes, plainly. */
+export function fixLabel(fix, title = '') {
+  if (fix.length === 1 && fix[0][0] === 'title') {
+    return /\bat least\b/i.test(fix[0][1]) && !/\bat least\b/i.test(title) ? 'Add “at least” to the title' : `Use “${fix[0][1]}”`;
+  }
+  if (fix.length === 1 && fix[0][0] === 'kind') return `Draw it as ${fix[0][1]}`;
+  return `Write ${fix.map(([key, value]) => `“${key}: ${value}”`).join(', ')}`;
+}
+
+/**
+ * The `::: chart` block of a note's text that line `line` (0-based) stands in, as the
+ * check names a chart's warning: `{ from, to, line, source }`, its offsets from its
+ * opening line to its closing one, or null outside every chart.
+ */
+export function chartBlockAt(text, line) {
+  const lines = String(text ?? '').split('\n');
+  let offset = 0;
+  let fenced = false;
+  let open = null;
+  for (let index = 0; index < lines.length; index += 1) {
+    const here = lines[index];
+    if (!open && FENCE.test(here)) fenced = !fenced;
+    else if (!fenced && !open && CHART_OPEN.test(here)) open = { from: offset, line: index };
+    else if (open && CLOSE.test(here)) {
+      const to = offset + here.length;
+      if (line >= open.line && line <= index) {
+        const source = String(text).slice(open.from, to);
+        return { from: open.from, to, line: open.line, source };
+      }
+      open = null;
+    }
+    offset += here.length + 1;
+  }
+  return null;
+}
+
+/**
+ * Where a chart's rows came from, read now, as Read again copies them: a table of this
+ * note (`noteId`, read off `text`), another note's or a sheet's (`rows`, asked of the
+ * server). `{ state, text, name }`, `state` `'same'`, `'differs'`, `'columns'` or `'gone'`;
+ * null when the chart names no source it can read again.
+ */
+export async function chartOrigin(chart, { text = '', noteId = '', caseId = '', rows = null, fresh = true } = {}) {
+  const written = setting(chart, 'from');
+  const origin = readOrigin(written);
+  if (!origin || !chart.table) return null;
+  if (origin.kind === 'note' && noteId && origin.id === noteId) {
+    const lines = String(text ?? '').split('\n');
+    const at = tableUnder(text, origin.anchor);
+    const found = at >= 0 ? noteTables(lines).find((table) => table.line === at) : null;
+    if (!found) return { state: 'gone', text: '', name: origin.anchor ? `the table under “${origin.anchor}”` : 'the table it came from' };
+    const tableText = lines.slice(found.line, found.end + 1).join('\n');
+    return { state: compareRows(chart.table, parseTable(tableText)), text: tableText, name: headingAbove(text, found.line) };
+  }
+  if (!rows || !caseId) return null;
+  const answer = await rows({ caseId, origin: written, fresh });
+  if (!answer || answer.error) return null;
+  if (!answer.found) return { state: 'gone', text: '', name: origin.kind === 'sheet' ? 'the sheet it came from' : 'the table it came from' };
+  return { state: compareRows(chart.table, parseTable(answer.text)), text: answer.text, name: answer.name };
+}
+

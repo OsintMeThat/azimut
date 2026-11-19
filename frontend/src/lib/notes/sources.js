@@ -77,6 +77,31 @@ export function bookmarkOffer(caseId, { url, title }, { make = createBookmark, r
   };
 }
 
+/**
+ * The pages a note links to that the case holds nothing of, each filed as a bookmark named
+ * by the words the note links it with, as the citation card's Bookmark it files one, in
+ * the folder the note's Archive every link would file them in. Nothing is fetched; the
+ * case is read again once. Answers how many were filed and the first error, if any.
+ */
+export async function bookmarkLinks(caseId, links, { folder = '', make = createBookmark, reload = reloadCase } = {}) {
+  let filed = 0;
+  let failed = '';
+  const seen = new Set();
+  for (const link of links ?? []) {
+    const url = String(link?.url ?? '').trim();
+    if (!url || seen.has(url)) continue;
+    seen.add(url);
+    try {
+      await make(caseId, { title: String(link.text ?? '').trim() || url, url, folder });
+      filed += 1;
+    } catch (error) {
+      failed ||= error?.message ?? String(error);
+    }
+  }
+  if (filed) await reload();
+  return { filed, failed };
+}
+
 /** The download's own answer, as what the note cites or why it cannot. */
 function downloaded(result) {
   if (result?.multi) throw new Error('This post holds several files. Download it from Media to pick them');
