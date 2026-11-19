@@ -210,7 +210,7 @@ proof for publication.
 | ✅ **Sources fit to cite** | Finds the case item behind a written link, writes sources academic, web or short with the annexes a report, a web article or a brief carries, archives a note's links in one press, and shows what the case knows of a citation on hover. |
 | ✅ **Notes in the extension** | A folding panel in the extension holds the note; its Add, a right-click or Alt+Shift+S cites the page (or the post), quotes the selected words with a link to that passage, or puts a map capture in. |
 | ✅ **One-press extension** | The toolbar button opens what the page is for: the map panel over a map, Capture first and the scenes to geolocate listed, the note beside any other page with Save this page; a pairing popup only until paired. |
-| ✅ **Report editions** | Marks passages internal, prints a report as an internal or a public edition that never carries one, and keeps every PDF it wrote with its fingerprint, listed and checked from the note. |
+| ✅ **Report editions** | Marks passages internal, prints a report as an internal or a public edition that never carries one, keeps every PDF it wrote with its fingerprint, listed and checked from the note, and says what changed between two public editions, drafting the correction line from it. |
 | ✅ **From the case** | Writes a note of a period's geolocations from the Notebook home, a figure each or a table, dated by what they show or when they were geolocated. |
 | ✅ **Report covers and signature** | Writes a first page of one's own above a cover line, fills the title, day, name, role and organisation when the PDF is made, prints the Azimut logo, the analyst's logo (rounded, framed or set on a disc in Settings) and a handwritten signature, and starts a template from anything. |
 | ✅ **Post** | Geo Report renamed: saves itself; a home in three parts (in progress, ready to post, posted); New post (Geolocation, Video thread, Map plate, Compare, Free post); a video thread of two proofs or more in four orders, with a title of the analyst's own, a recap map previewed and made from its places or its contact sheet, and a clip or the link for a video too long; posts and proofs with no name listed by their place and date; the time a proof states printed in its post, `[0:15]`; templates and defaults per kind; a window saying once why the extension helps; a reply under the source post on X or Bluesky; Mark as posted in the header or on a card, with its link or none, the post dated by its link and kept on its proof; an Open list with filters; To Post from Map plate, Compare and Detect, and from Geo Proof back into its post in progress with its cut clip; Copy the rest when a hand-off stops; a preview of the thread as X or Bluesky shows it; a note from the Notebook laid out as a thread, cut under the platform's count. |
@@ -389,7 +389,10 @@ stops making sense.
   test proves it. An edition record is case data and can arrive in a bundle: *Show*
   opens only an existing folder it names, *Check* hashes only the regular file it names
   (never a device or a pipe) and tells only the local user whether it matches, nothing
-  is fetched and the browser never sends a path; 0600/0700 perms, hard 100 MP Pillow limit, content-hashed
+  is fetched and the browser never sends a path. A public edition's text, kept beside its
+  note for What changed (`notes/.editions/`), is read only under a SHA-256 the note's own
+  record names and only while its bytes still hash to it; the comparison writes nothing
+  and reaches a page only through the line the analyst writes; 0600/0700 perms, hard 100 MP Pillow limit, content-hashed
   names for images pasted into a proof (no client-chosen path), token-gated
   ingest island for the extension. A case file is served `nosniff`, and under a
   `sandbox` policy unless its type only displays, so an SVG or a page that arrived

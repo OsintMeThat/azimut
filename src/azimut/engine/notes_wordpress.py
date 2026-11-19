@@ -193,6 +193,8 @@ class Draft:
     warnings: list[str] = field(default_factory=list)
     #: The SHA-256 of the source the public edition printed (`notes_markdown.printed_source`).
     text_sha256: str = ""
+    #: That source, which the draft's edition keeps (`engine/noteeditions.py`).
+    printed: str = ""
     #: The points of view the draft shows, said for the dialog as the HTML check says them.
     pov: list[str] = field(default_factory=list)
     #: Each clip's block and the still that stands in for it, by upload.
@@ -309,7 +311,8 @@ def build(
         draft.warnings.insert(0, f"This note is marked {label}; a WordPress post is meant for anyone to read.")
     draft.excerpt = _excerpt(look.cover.subtitle or writer.first_words)
     draft.featured = writer.featured(look)
-    draft.text_sha256 = hashlib.sha256(md.printed_source(pieces).encode("utf-8")).hexdigest()
+    draft.printed = md.printed_source(pieces)
+    draft.text_sha256 = hashlib.sha256(draft.printed.encode("utf-8")).hexdigest()
     draft.pov = writer.pov
     draft.swaps = writer.swaps
     return draft

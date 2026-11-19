@@ -92,6 +92,8 @@ def _tool_relative(slug: int, media: int) -> dict[str, int]:
         "entity photo": len(layout.entity_image_rel("i_0123456789")),
         "entity photo thumbnail": len(layout.entity_image_thumb_rel("i_0123456789")),
         "note": len(layout.note_rel(longest_folder, longest_name)),
+        # named by the note's id and the text's SHA-256, never by a title
+        "note edition text": len(layout.note_edition_text_rel("e_0123456789", "0" * 64)),
         "sheet table": len(layout.sheet_rel(longest_name)),
         "sheet sidecar": len(layout.sheet_meta_rel(longest_name)),
         "proof asset": len(layout.proof_assets_rel(longest_name)) + 1 + ASSET_NAME,

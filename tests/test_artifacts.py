@@ -195,7 +195,7 @@ def test_a_full_case_comes_back_whole_from_its_bundle(client):
         for rel in artifacts.owned(case, entity)
         if bundles.classify_case_entry(rel) == "bundled"
     }
-    assert {full.map_plate, full.horizon_view, full.horizon_find, full.editable_layer} <= carried
+    assert {full.map_plate, full.horizon_view, full.horizon_find, full.editable_layer, full.note_edition} <= carried
 
     exported = bundles.export_case(case)
     destination = Case.create(bundles.imported_name(case.id))

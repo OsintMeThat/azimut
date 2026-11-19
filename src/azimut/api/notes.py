@@ -16,7 +16,9 @@ keeps a record of it among its editions (the `editions` attr, the case setting
 `notes.case_editions` for the case notes): when, which edition, where, how many
 pages, and the SHA-256 of the file and of the text it printed. `/notes/{id}/editions`
 lists them; Check hashes a file again to say whether it is still the one written.
-The files stay where they were written and are not case state.
+The files stay where they were written and are not case state. The text a public
+edition printed is (`engine/noteeditions.py`): `/notes/{id}/editions/compare` says what
+changed between two of them, or one and the note now (`engine/notediff.py`).
 
 Each note prints in its own look (`engine/notelook.py`), kept beside the note and
 set through `/notes/{id}/look`. The page pane asks `/notes/preview` for the PDF of
@@ -106,6 +108,7 @@ from ..engine import notes_html as html_engine
 from ..engine import notes_web as web_engine
 from ..engine import notes_pdf as pdf_engine
 from ..engine import notes_wordpress as wordpress_engine
+from ..engine import notediff, noteeditions
 from ..engine import notefill, notefromcase, notelinks, notepieces, notesources, notetext
 from ..engine import pdffonts
 from ..engine import reveal as reveal_engine
@@ -1157,7 +1160,7 @@ def export_html(case_id: str, body: HtmlExportIn) -> dict[str, Any]:
         }
         if changes:
             record["changes"] = changes[:MAX_CHANGES]
-        _record_edition(case, note_id, record)
+        _record_edition(case, note_id, record, text=rendered.printed)
         written.append({"note": note_id, "title": title, "file": path.name, "edition": edition,
                         "bytes": len(rendered.html)})
         warnings.extend(f"{title}: {warning}" for warning in rendered.warnings)
@@ -1234,7 +1237,7 @@ def export_web(case_id: str, body: WebExportIn) -> dict[str, Any]:
             record["address"] = where
         if changes:
             record["changes"] = changes[:MAX_CHANGES]
-        _record_edition(case, note_id, record)
+        _record_edition(case, note_id, record, text=made.printed)
         written.append({"note": note_id, "title": title, "file": made.name, "edition": notes_markdown.PUBLIC,
                         "bytes": made.weight, "at": record["at"], "folder": record["folder"], "address": where})
         warnings.extend(f"{title}: {warning}" for warning in made.warnings)
@@ -1301,7 +1304,7 @@ def export_pdf(case_id: str, body: ExportIn) -> dict[str, Any]:
             "pages": len(rendered.pages),
             "pdf_sha256": hashlib.sha256(rendered.pdf).hexdigest(),
             "text_sha256": rendered.text_sha256,
-        })
+        }, text=rendered.printed)
         written.append({"note": note_id, "title": title, "file": path.name, "edition": edition})
         warnings.extend(f"{title}: {warning}" for warning in rendered.warnings)
 
@@ -1456,14 +1459,27 @@ def _edition_record(item: Any) -> dict[str, Any] | None:
             "pdf_sha256": pdf_sha, "text_sha256": text_sha}
 
 
-def _record_edition(case: Case, note_id: str, record: dict[str, Any]) -> None:
-    """Put one edition first in the note's record, the oldest past the cap let go."""
+def _record_edition(case: Case, note_id: str, record: dict[str, Any], *, text: str = "") -> None:
+    """Put one edition first in the note's record, the oldest past the cap let go, and
+    keep the text a public one printed (`engine/noteeditions.py`)."""
     with _editions_turn:
         kept = [record, *_read_editions(case, note_id)][:MAX_EDITIONS]
-        if note_id == CASE_NOTE:
-            case.set_setting(CASE_EDITIONS, json.dumps(kept, sort_keys=True))
-        else:
-            case.update_entity(note_id, {"attrs": {EDITIONS_ATTR: kept}})
+        _write_editions(case, note_id, kept, record, text)
+
+
+def _write_editions(case: Case, note_id: str, kept: list[dict[str, Any]], record: dict[str, Any], text: str) -> None:
+    """Write a note's record of editions, keep the text of the one just made when it is
+    public, and let go of the texts the record no longer wants. Held under `_editions_turn`."""
+    if note_id == CASE_NOTE:
+        case.set_setting(CASE_EDITIONS, json.dumps(kept, sort_keys=True))
+    else:
+        case.update_entity(note_id, {"attrs": {EDITIONS_ATTR: kept}})
+    try:
+        if text and record.get("edition") == notes_markdown.PUBLIC:
+            noteeditions.keep(case, note_id, text)
+        noteeditions.prune(case, note_id, kept)
+    except (OSError, CaseError):
+        pass  # the edition is written and recorded; only its comparison is lost
 
 
 def _edition(case: Case, note_id: str, ref: EditionRef) -> dict[str, Any]:
@@ -1509,10 +1525,55 @@ def _file_sha256(path: Path) -> str | None:
 @router.get("/{case_id}/notes/{note_id}/editions")
 def note_editions(case_id: str, note_id: str) -> dict[str, Any]:
     """The PDFs, HTML files and web folders a note was exported as, newest first: day,
-    edition, file, pages (a PDF's), format (the others') and hashes."""
+    edition, file, pages (a PDF's), format (the others') and hashes; and ``kept``, the
+    public texts kept for What changed, by their SHA-256, newest first."""
     case = get_case(case_id)
     _require_note(case, note_id)
-    return {"editions": _read_editions(case, note_id)}
+    editions = _read_editions(case, note_id)
+    return {"editions": editions, "kept": noteeditions.kept(case, note_id, editions)}
+
+
+#: What a comparison names in place of an edition: the note as it would print now.
+NOW = "now"
+
+
+class CompareIn(BaseModel):
+    """Two public texts of a note to compare: ``before`` an edition's, by the SHA-256 its
+    record keeps, and ``after`` another's or `NOW`."""
+
+    before: str = Field(pattern=r"^[0-9a-f]{64}$")
+    after: str = Field(pattern=r"^(?:[0-9a-f]{64}|now)$")
+
+
+@router.post("/{case_id}/notes/{note_id}/editions/compare")
+def compare_editions(case_id: str, note_id: str, body: CompareIn) -> dict[str, Any]:
+    """What changed between two public texts the note kept, or one of them and the note
+    as its public edition would print now (`engine/notediff.py`): each figure that changed
+    in a sentence, and the words, paragraph by paragraph. Reads the case only; nothing is
+    written, fetched or put in any file."""
+    case = get_case(case_id)
+    _require_note(case, note_id)
+    kept = noteeditions.kept(case, note_id, _read_editions(case, note_id))
+
+    def text_of(sha: str) -> str:
+        if sha == NOW:
+            title, text = _note_source(case, note_id)
+            now = noteeditions.printed_now(case, title=title, text=text, look=notelook.stored(case, note_id),
+                                           note_id=note_id, resolve=_resolver(case))
+            if len(now.encode("utf-8")) > noteeditions.MAX_TEXT_BYTES:
+                raise HTTPException(status_code=422, detail="the note is too long to compare")
+            return now
+        found = noteeditions.read(case, note_id, sha) if sha in kept else None
+        if found is None:
+            raise HTTPException(status_code=404, detail="that edition's text is not kept")
+        return found
+
+    def named(entity_id: str) -> str:
+        entity = case.get_entity(entity_id) if noteeditions.OWNER.match(entity_id) else None
+        return str((entity or {}).get("label") or "")
+
+    before, after = text_of(body.before), text_of(body.after)
+    return notediff.compare(before, after, names=named).as_dict()
 
 
 @router.post("/{case_id}/notes/{note_id}/editions/check")
@@ -1601,7 +1662,7 @@ def _last_draft(case: Case, note_id: str, site: str) -> dict[str, Any] | None:
     return None
 
 
-def _record_draft(case: Case, note_id: str, record: dict[str, Any]) -> None:
+def _record_draft(case: Case, note_id: str, record: dict[str, Any], *, text: str = "") -> None:
     """Put a draft first in the note's record, in place of its earlier sending: one
     line per post, and only the newest keeps the pictures it uploaded."""
     with _editions_turn:
@@ -1612,10 +1673,7 @@ def _record_draft(case: Case, note_id: str, record: dict[str, Any]) -> None:
             if item.get("format") == WORDPRESS and item["site"] == record["site"]:
                 item.pop("media", None)
         kept = [record, *earlier][:MAX_EDITIONS]
-        if note_id == CASE_NOTE:
-            case.set_setting(CASE_EDITIONS, json.dumps(kept, sort_keys=True))
-        else:
-            case.update_entity(note_id, {"attrs": {EDITIONS_ATTR: kept}})
+        _write_editions(case, note_id, kept, record, text)
 
 
 @router.post("/{case_id}/notes/{note_id}/wordpress")
@@ -1669,7 +1727,7 @@ def wordpress_draft(case_id: str, note_id: str, body: WordPressDraftIn) -> dict[
         "text_sha256": draft.text_sha256,
         "media": sent.media,
     }
-    _record_draft(case, note_id, record)
+    _record_draft(case, note_id, record, text=draft.printed)
     if sent.refused:
         left = {**draft.left, "clips": draft.left["clips"] + len(sent.refused)}
         said.update(left=left, left_said=wordpress_engine.left_said(left),
@@ -1818,7 +1876,7 @@ def github_publish(case_id: str, note_id: str, body: GitHubPublishIn) -> dict[st
     }
     if changes:
         record["changes"] = changes[:MAX_CHANGES]
-    _record_edition(case, note_id, record)
+    _record_edition(case, note_id, record, text=made.printed)
     return {
         "published": True,
         "address": where,

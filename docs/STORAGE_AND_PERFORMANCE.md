@@ -101,6 +101,7 @@ for a case to fit under it on Windows, and names it as a warning elsewhere.
     case.json     # small manifest: name, dates, storage format, schema, to-do lists, work folder, link-pass mark
     notes.md      # case-wide Markdown note
     notes/        # note bodies, named after their title, filed as in the notebook
+      .editions/  #   each note's public texts as its exports printed them, by SHA-256
     media/        # imported, downloaded and derived media
       .meta/      #   one sidecar per media
       .dl/        #   in-progress downloads (transient)

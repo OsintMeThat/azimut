@@ -303,6 +303,8 @@ class Rendered:
     internal: int = 0
     #: The SHA-256 of the source this edition printed (`printed_source`).
     text_sha256: str = ""
+    #: That source, which a public edition keeps for What changed (`engine/noteeditions.py`).
+    printed: str = ""
 
 
 @dataclass
@@ -504,6 +506,7 @@ def render(
     except Exception as exc:  # fpdf2 raises bare errors for layout dead ends
         raise NotesPdfError(f"the note could not be laid out: {exc}") from exc
     builder.collect_warnings(words)
+    source = printed_source(shown)
     return Rendered(
         pdf=output,
         warnings=builder.warnings,
@@ -514,7 +517,8 @@ def render(
         diagrams=list(builder.missing.items()),
         pictures=builder.pictures,
         internal=passages[0],
-        text_sha256=hashlib.sha256(printed_source(shown).encode("utf-8")).hexdigest(),
+        text_sha256=hashlib.sha256(source.encode("utf-8")).hexdigest(),
+        printed=source,
     )
 
 

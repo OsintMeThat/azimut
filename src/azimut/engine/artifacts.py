@@ -12,8 +12,9 @@ neither table is an oversight, and `tests/test_artifacts.py` fails on it: a new
 tool declares what it writes, or it does not ship.
 
 Companions are the files named after the main artifact — a media's sidecar, a
-proof's export and its assets folder. A companion that does not `travels` is a
-disposable cache: it is dropped on delete and never carried aside, because a
+proof's export and its assets folder — or after the entity's id, which a rename
+leaves alone (a note's kept public texts). A companion that does not `travels` is
+a disposable cache: it is dropped on delete and never carried aside, because a
 content-addressed thumbnail is shared between identical media and moving one
 would blank a surviving row.
 """
@@ -21,6 +22,7 @@ would blank a surviving row.
 from __future__ import annotations
 
 import json
+import re
 import shutil
 from collections.abc import Callable
 from dataclasses import dataclass, field
@@ -88,6 +90,29 @@ class Derived(Named):
 
 
 @dataclass(frozen=True)
+class ById(Companion):
+    """A companion named after the entity's id rather than its file, so a rename or a
+    refiling leaves it where it is: a note's kept public texts (`engine/noteeditions.py`).
+
+    An id that could not be one folder's name owns nothing, since a row from a bundle
+    is not trusted to name a path.
+    """
+
+    build: Callable[[str], str]
+
+    def resolve(self, case: "Case", main: str) -> str | None:
+        return None  # named by the entity, which `owner_rel` is handed
+
+    def owner_rel(self, entity: dict[str, Any]) -> str | None:
+        ident = str(entity.get("id") or "")
+        return self.build(ident) if _OWNER_ID.match(ident) else None
+
+
+#: What an entity id may be to name a folder: one plain path segment.
+_OWNER_ID = re.compile(r"^[A-Za-z0-9_-]{1,64}$")
+
+
+@dataclass(frozen=True)
 class SharedThumb(Companion):
     """The cached thumbnail a media's sidecar records.
 
@@ -146,7 +171,9 @@ KINDS: dict[str, Kind] = {
     "analysis-area": Kind(path_attr="spec"),
     "analysis-follow-up": Kind(path_attr="spec"),
     "analysis-run": Kind(path_attr="spec", companions=(Named(layout.analysis_assets_rel),)),
-    "note": Kind(path_attr="path"),
+    # The public texts its exports printed, kept for What changed; named by its id, so
+    # they stay with the note through a rename and go to the Trash with it.
+    "note": Kind(path_attr="path", companions=(ById(layout.note_editions_rel),)),
     "sheet": Kind(path_attr="path", companions=(Named(layout.sheet_meta_rel),)),
     # A layer the analyst added: its settings, the bytes it was built from, the
     # source's own pictograms, and the parsed copy the map draws. The icons
@@ -219,7 +246,7 @@ def _paths(case: "Case", entity: dict[str, Any], *, travelling: bool) -> list[st
     for companion in kind.companions:
         if companion.travels != travelling:
             continue
-        rel = companion.resolve(case, main)
+        rel = companion.owner_rel(entity) if isinstance(companion, ById) else companion.resolve(case, main)
         if rel:
             rels.append(rel)
     out = []

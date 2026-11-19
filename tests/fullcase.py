@@ -107,6 +107,7 @@ class FullCase:
     thread_map: str = ""  # its recap map, a picture filed in Media the same way
     note_id: str = ""
     note: str = ""  # its case-relative path
+    note_edition: str = ""  # the folder keeping the public text its HTML export printed
     map_note_id: str = ""  # a note holding a map: it names a layer, a plate and its ground
     map_note: str = ""
     sheet_id: str = ""
@@ -565,6 +566,12 @@ def build_full_case(
     assert look.status_code == 200, look.text
     case_look = client.put(f"/api/cases/{case_id}/notes/case/look", json={"style": "journal"})
     assert case_look.status_code == 200, case_look.text
+    # a public HTML edition of it: the note keeps the text it printed, for What changed
+    # (`engine/noteeditions.py`); the page itself is the analyst's file, not case state
+    edition = client.post(f"/api/cases/{case_id}/notes/html", json={"notes": [full.note_id], "edition": "public"})
+    assert edition.status_code == 200, edition.text
+    Path(edition.json()["path"], edition.json()["written"][0]["file"]).unlink()
+    full.note_edition = layout.note_editions_rel(full.note_id)
 
     # -- a sheet: a CSV in the case, and the sidecar that paints it ------------
     sheet = client.post(f"/api/cases/{case_id}/sheets", json={"title": "Candidates"})
