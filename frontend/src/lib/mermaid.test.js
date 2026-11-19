@@ -1,7 +1,7 @@
 import { Window } from 'happy-dom';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { markdownHtml } from './markdown.js';
-import { drawMermaidDiagrams, renderMermaidSvg } from './mermaid.js';
+import { diagramLegend, diagramPaper, drawMermaidDiagrams, renderMermaidSvg } from './mermaid.js';
 
 function preview(markdown) {
   const { document } = new Window();
@@ -115,5 +115,55 @@ describe('renderMermaidSvg', () => {
     expect(sent.startsWith(block)).toBe(true);
     expect(sent.indexOf('"htmlLabels": false')).toBeGreaterThan(block.length - 1);
     expect(sent.indexOf('"htmlLabels": false')).toBeLessThan(sent.indexOf('flowchart LR'));
+  });
+
+  it('draws the legend a diagram’s comments name under it, and grows to hold it', async () => {
+    browser();
+    const render = vi.fn().mockResolvedValue({ svg: '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 400 200"><g class="root"></g></svg>' });
+    const source = [
+      'flowchart LR', '  A --> B', '  classDef c1 fill:#dde9f8,stroke:#2a78d6,color:#202124', '  classDef c2 fill:#fce7df,stroke:#eb6834,color:#202124',
+      '  class A c1', '  class B c2', '  %% legend c1: Houthi side', '  %% legend c2: ‹Government› side',
+    ].join('\n');
+
+    const drawn = await renderMermaidSvg(source, { load: async () => ({ render }) });
+
+    const picture = new window.DOMParser().parseFromString(drawn.svg, 'image/svg+xml');
+    const legend = picture.querySelector('[data-legend]');
+    expect([...legend.querySelectorAll('text')].map((node) => node.textContent)).toEqual(['Houthi side', '<Government> side']);
+    expect(legend.querySelector('rect').getAttribute('style')).toContain('fill:#dde9f8;stroke:#2a78d6');
+    expect(drawn.width).toBe(400);
+    expect(drawn.height).toBeGreaterThan(200);
+    expect(picture.documentElement.getAttribute('viewBox')).toBe(`0 0 400 ${drawn.height}`);
+    expect(picture.documentElement.hasAttribute('data-background')).toBe(false);
+  });
+
+  it('lays a diagram whose config names its page on that page, and says so', async () => {
+    browser();
+    const render = vi.fn().mockResolvedValue({ svg: '<svg xmlns="http://www.w3.org/2000/svg" viewBox="-8 -8 300 100"><g class="root"></g></svg>' });
+    const source = '---\nconfig:\n  theme: base\n  themeVariables:\n    darkMode: true\n    background: "#12161B"\n---\nflowchart LR\n  A --> B';
+
+    const drawn = await renderMermaidSvg(source, { load: async () => ({ render }) });
+
+    const picture = new window.DOMParser().parseFromString(drawn.svg, 'image/svg+xml').documentElement;
+    expect(picture.getAttribute('data-background')).toBe('#12161b');
+    const backdrop = picture.firstElementChild;
+    expect(backdrop.tagName.toLowerCase()).toBe('rect');
+    expect(backdrop.getAttribute('style')).toBe('fill:#12161b');
+    expect([backdrop.getAttribute('x'), backdrop.getAttribute('y'), backdrop.getAttribute('width'), backdrop.getAttribute('height')]).toEqual(['-8', '-8', '300', '100']);
+  });
+});
+
+describe('what a diagram’s source asks for besides Mermaid', () => {
+  it('reads the page its config names, and nothing else as one', () => {
+    expect(diagramPaper('---\nconfig:\n  themeVariables:\n    background: "#efe6d3"\n---\nflowchart LR\n  A --> B')).toBe('#efe6d3');
+    expect(diagramPaper('flowchart LR\n  A --> B')).toBe('');
+    expect(diagramPaper('flowchart LR\n  %% background: "#000000"\n  A --> B')).toBe('');
+  });
+
+  it('reads the legend its comments name, with the colours of their classes, none once it is off or a class is missing', () => {
+    const source = 'flowchart LR\n  classDef c1 fill:#dde9f8,stroke:#2a78d6,color:#202124\n  %% legend c1: Houthis\n  %% legend c9: Nobody';
+    expect(diagramLegend(source)).toEqual([{ name: 'Houthis', fill: '#dde9f8', stroke: '#2a78d6' }]);
+    expect(diagramLegend(`${source}\n  %% legend: off`)).toEqual([]);
+    expect(diagramLegend('flowchart LR\n  A --> B')).toEqual([]);
   });
 });

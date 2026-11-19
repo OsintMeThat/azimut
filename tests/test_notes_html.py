@@ -413,6 +413,24 @@ def test_a_diagram_is_inline_svg_with_its_own_ids_and_nothing_that_runs(report):
     assert "#az-diagram-1 .label" in svg.one("style").text and "azimut-mermaid-0" not in svg.one("style").text
 
 
+def test_a_diagram_drawn_on_its_own_page_lays_its_figure_on_it():
+    """A Dark diagram's picture says the page it was drawn on (`lib/mermaid.js`): its figure
+    takes that page, edge to edge, and its caption reads light on it; one on white is left as it was."""
+    def figure(svg):
+        rendered = notes_html.render(None, title="T", text=f"```mermaid\n{DIAGRAM}```\n\nWords.", identity=notefill.Identity(),
+                                     diagrams={notes_markdown.diagram_key(DIAGRAM): svg})
+        return parse(rendered.html).one("figure", "az-figure", data_kind="diagram")
+
+    dark = figure(DIAGRAM_SVG.replace("<svg ", '<svg data-background="#12161B" ', 1))
+    assert dark.attrs["style"] == "background:#12161b;border-color:#12161b"
+    assert dark.one("svg").attrs["data-background"] == "#12161B"
+    book = figure(DIAGRAM_SVG.replace("<svg ", '<svg data-background="#efe6d3" ', 1))
+    assert book.attrs["style"] == "background:#efe6d3"
+    assert "style" not in figure(DIAGRAM_SVG).attrs
+    # nothing but a colour reaches the page's style
+    assert "style" not in figure(DIAGRAM_SVG.replace("<svg ", '<svg data-background="red;x:url(#a)" ', 1)).attrs
+
+
 def test_a_diagram_with_no_svg_says_so_its_source_a_press_away(report):
     rendered = notes_html.render(None, title="T", text=f"```mermaid\n{DIAGRAM}```\n", identity=notefill.Identity())
     page = parse(rendered.html)
