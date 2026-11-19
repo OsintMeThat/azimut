@@ -24,6 +24,7 @@ from azimut.engine.notelook import NoteLook
 from azimut.workspace import CASE_SCHEMA, Case
 
 from sourcesfixture import (
+    report_as_before,
     ACCOUNT_URL,
     ARCHIVE_URL,
     HORIZON_CREDITS,
@@ -67,6 +68,12 @@ def sourced(client):
 
 
 # -- the one reading ----------------------------------------------------------------
+
+
+@pytest.fixture(autouse=True)
+def _report_as_before(monkeypatch):
+    """A report here prints its sources short and its links grouped, as before profiles."""
+    report_as_before(monkeypatch)
 
 
 def test_a_frame_credits_the_post_its_video_came_from(sourced):
@@ -669,12 +676,12 @@ def test_a_note_that_cannot_be_laid_out_answers_why(client, monkeypatch):
 
 
 def test_the_sources_key_follows_the_style_unless_set():
-    assert notelook.LATE_KEYS == ("font", "size", "sources", "web")
+    assert notelook.LATE_KEYS == ("font", "size", "sources", "web", "sources_style", "link_check")
     assert notelook.SOURCES_OFF_STYLES == ("plain",)
-    for style in ("plain", "report", "brief", "journal"):
-        assert look(style=style).sources_on is (style not in notelook.SOURCES_OFF_STYLES)
-        assert look(style=style, sources="on").sources_on is True
-        assert look(style=style, sources="off").sources_on is False
+    for style in ("plain", "report", "brief", "journal", "article"):
+        assert look(style=style).profile(notelook.PROFILES).sources is (style not in notelook.SOURCES_OFF_STYLES)
+        assert look(style=style, sources="on").profile().sources is True
+        assert look(style=style, sources="off").profile().sources is False
     assert "sources" not in look(style="report").model_dump(mode="json")
     assert look(sources="on").model_dump(mode="json")["sources"] == "on"
     assert look(sources="").is_default and not look(sources="on").is_default

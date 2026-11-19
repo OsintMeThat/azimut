@@ -187,6 +187,13 @@ class Source:
     #: Made in the case out of other items, which are its origins (nearest first).
     derived: bool = False
     origins: tuple["Source", ...] = ()
+    #: The road a file came in by, as its sidecar says (`download`, `inspect`, `horizon`…),
+    #: and the type of its record: what "How this was made" names the tools from.
+    route: str = ""
+    type: str = ""
+    #: Every set of words the note links a page the case holds nothing of with, in order:
+    #: where a written title is found when the first link only named the site.
+    words: tuple[str, ...] = ()
 
     @property
     def host(self) -> str:
@@ -323,15 +330,26 @@ class Reader:
     def link(self, address: str, words: str = "") -> Source:
         """A web page a note links to: the item the case holds at that address when it
         holds one, else the page, named by the words of its first link."""
+        said = _line(words)
         found = self._links.get(address)
         if found is not None:
+            if found.key.startswith("url:") and said and said != address and said not in found.words:
+                found = replace(found, words=(*found.words, said))
+                self._links[address] = found
             return found
-        label = _line(words)
+        label = said
         if not label or label == address:
             label = host(address)
-        source = Source(key=f"url:{address}", label=label, kind=PAGE, noun="Web page", address=address)
+        source = Source(key=f"url:{address}", label=label, kind=PAGE, noun="Web page", address=address,
+                        words=(said,) if said and said != address else ())
         source = self._held(address, source)
         self._links[address] = source
+        return source
+
+    def latest(self, source: Source) -> Source:
+        """A written link's source with every set of words the note has linked it with so far."""
+        if source.key.startswith("url:"):
+            return self._links.get(source.address, source)
         return source
 
     @property
@@ -476,6 +494,8 @@ class Reader:
             entity_id=entity_id,
             derived=derived,
             origins=origins,
+            route=route,
+            type=kind,
         )
 
     def _readings(self, sidecar: dict[str, Any], attrs: dict[str, Any]) -> tuple[Reading, ...]:
@@ -740,6 +760,312 @@ def details(source: Source) -> list[str]:
     return [part for part in parts if part]
 
 
+# -- one entry, written in a style -------------------------------------------------
+
+
+@dataclass(frozen=True)
+class Part:
+    """A stretch of one entry as a style writes it.
+
+    ``kind`` says how it is set: "" plain words, `title` a title in its quotes,
+    `outlet` the outlet in italics, `address` an address written out and linked to
+    itself, `link` words linked to ``link``, `cite` the entry ``number`` links to.
+    """
+
+    text: str
+    kind: str = ""
+    link: str = ""
+    number: int = 0
+
+
+#: What the sources list calls a site, by its host or a domain above it: outlets a
+#: reader knows by name. Any other site is named by its host.
+OUTLETS: dict[str, str] = {
+    "aa.com.tr": "Anadolu Agency", "aawsat.com": "Asharq Al-Awsat", "acleddata.com": "ACLED",
+    "al-monitor.com": "Al-Monitor", "alarabiya.net": "Al Arabiya", "aljazeera.com": "Al Jazeera",
+    "aljazeera.net": "Al Jazeera", "alkhabaralyemeni.net": "Al-Khabar al-Yemeni", "amnesty.org": "Amnesty International",
+    "apnews.com": "Associated Press", "arabnews.com": "Arab News", "bbc.co.uk": "BBC News", "bbc.com": "BBC News",
+    "bellingcat.com": "Bellingcat", "bloomberg.com": "Bloomberg", "bsky.app": "Bluesky", "cnn.com": "CNN",
+    "cyprus-mail.com": "Cyprus Mail", "defence24.pl": "Defence24", "dsca.mil": "DSCA", "dw.com": "DW",
+    "economist.com": "The Economist", "facebook.com": "Facebook", "france24.com": "France 24",
+    "ft.com": "Financial Times", "geoconfirmed.org": "GeoConfirmed", "i24news.tv": "i24NEWS",
+    "instagram.com": "Instagram", "law.cornell.edu": "Legal Information Institute",
+    "legrandcontinent.eu": "Le Grand Continent", "lemonde.fr": "Le Monde", "liveuamap.com": "Liveuamap",
+    "middleeasteye.net": "Middle East Eye", "newarab.com": "The New Arab", "nytimes.com": "The New York Times",
+    "reddit.com": "Reddit", "reuters.com": "Reuters", "south24.net": "South24 Center", "t.me": "Telegram",
+    "theguardian.com": "The Guardian", "thenationalnews.com": "The National", "tiktok.com": "TikTok",
+    "twitter.com": "X", "understandingwar.org": "Institute for the Study of War", "vk.com": "VK",
+    "washingtonpost.com": "The Washington Post", "wikipedia.org": "Wikipedia", "wsj.com": "The Wall Street Journal",
+    "x.com": "X", "yenisafak.com": "Yeni Şafak", "youtu.be": "YouTube", "youtube.com": "YouTube",
+}
+#: The sites whose addresses name the account that posted: `x.com/<handle>/status/…`.
+HANDLE_SITES = ("x.com", "twitter.com", "t.me")
+SHORT_MONTHS = ("Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec")
+
+
+def outlet(url: str) -> str:
+    """The name a reader knows a site by: `Al Jazeera` for aljazeera.com, else its host."""
+    name = host(url)
+    labels = name.split(".")
+    for at in range(len(labels) - 1):
+        known = OUTLETS.get(".".join(labels[at:]))
+        if known:
+            return known
+    return name
+
+
+def handle_of(url: str) -> str:
+    """`@MMY1444` for a post at `x.com/MMY1444/status/…`: the account its address names."""
+    name = host(url)
+    if name.removeprefix("mobile.") not in HANDLE_SITES:
+        return ""
+    try:
+        first = urlsplit(url).path.strip("/").split("/", 1)[0]
+    except ValueError:
+        return ""
+    if not re.fullmatch(r"[A-Za-z0-9_]{2,40}", first) or first.lower() in ("i", "s", "share", "home", "search", "intent"):
+        return ""
+    return f"@{first}"
+
+
+def short_day(reading: str | None) -> str:
+    """`10 Sep 2026`: a day as the web writes it, `about` kept when the day is estimated."""
+    text = " ".join((reading or "").split())[:40]
+    about = text.endswith("~")
+    text = text.rstrip("~")[:10]
+    try:
+        day = date.fromisoformat(text)
+    except ValueError:
+        return spoken_day(reading)
+    said = f"{day.day} {SHORT_MONTHS[day.month - 1]} {day.year}"
+    return f"about {said}" if about else said
+
+
+def _squeezed(text: str) -> str:
+    return re.sub(r"[\W_]+", "", text.lower())
+
+
+#: How many words a written citation of a site runs to at most: `Al Jazeera Arabic, 9 Nov`.
+CITATION_WORDS = 6
+
+
+def _cites_site(words: str, address: str) -> bool:
+    """Whether a written link's words cite its site (`Al Jazeera, 10 Sep`, `DSCA, 2014`): a
+    few words opening on the site's name, which the analyst wrote, not the page's title. A
+    title says more, or holds a colon (`DSCA 14-26: UAE, excess MRAP vehicles`)."""
+    if len(words.split()) > CITATION_WORDS or ":" in words:
+        return False
+    said = _squeezed(words)
+    labels = host(address).split(".")
+    names = {_squeezed(outlet(address)), _squeezed(labels[-2] if len(labels) > 1 else labels[0])}
+    return any(len(name) >= 3 and said.startswith(name) for name in names)
+
+
+def _an_address(words: str) -> bool:
+    """Whether link words are an address written out (`x.com/user/status/1`), not a title."""
+    return " " not in words.strip() and ("/" in words or words.lower().startswith(("http:", "https:", "www.")))
+
+
+def _title(source: Source) -> str:
+    """What an entry quotes as the title: the item's name, unless it is only the site's. A
+    link the case holds nothing for takes the longest words the note linked it with that
+    do not name the site (the title written in a sources list, past `Al Jazeera, 10 Sep`)."""
+    if source.key.startswith("url:"):
+        held = source.address or source.archive
+        page = original(held) or held
+        written = [words for words in (source.words or (source.label,))
+                   if words and words not in (source.host, source.address) and not _cites_site(words, page)
+                   and not _an_address(words)]
+        return max(written, key=len) if written else ""
+    label = source.label.strip()
+    if not label or label in (source.host, source.address, source.archive):
+        return ""
+    return label
+
+
+def original(url: str) -> str:
+    """The page a Wayback copy keeps, read off the copy's address, or ""."""
+    if not archive_day(url):
+        return ""
+    try:
+        path = urlsplit(url).path
+    except ValueError:
+        return ""
+    match = WAYBACK_STAMP.match(path)
+    rest = url[url.find(path) + match.end():] if match else ""
+    return web(rest)
+
+
+def _held_copy(source: Source) -> Source:
+    """A written link to an archived copy, read as that copy of its page: the page's site,
+    the copy's address and day."""
+    page = original(source.address)
+    if not page or source.archive:
+        return source
+    return replace(source, address="", archive=source.address, archived=archive_day(source.address),
+                   words=source.words or (source.label,), label=source.label)
+
+
+def _imagery_said(source: Source) -> str:
+    """Whose imagery and of which day, its credit after without the provider said twice."""
+    said = source.imagery()
+    lead = source.readings[0].provider if source.readings else ""
+    if lead and source.attribution.startswith(f"{lead} · "):
+        said = said.replace(f"{lead} · {lead} · ", f"{lead} · ", 1)
+    return said
+
+
+def _author(source: Source) -> str:
+    """Who the entry leads with: the author the case records, else the account its address names."""
+    handle = handle_of(source.address)
+    if source.author and handle and handle.lower() not in source.author.lower():
+        return f"{source.author} ({handle})"
+    return source.author or handle
+
+
+def entry(source: Source, style: str, origins: Iterable[int] = ()) -> list[Part]:
+    """One source as ``style`` writes it, ending on its full stop; a part the case does not
+    know is left out with its comma, never written as `n.d.`.
+
+    `academic`: Author, "Title", medium, *Outlet*, day, address, archived day at copy,
+    accessed day. `web`: Outlet, "Title" linked, short day, Archived copy. `short` is the
+    form the renderers always drew (`details`) and is not written here. The items it was
+    made from close it, `from [1], [2]`, each linked to its entry.
+    """
+    numbers = list(origins)
+    parts = _web(source) if style == "web" else _academic(source)
+    if numbers:
+        parts.append(Part(", from " if parts else "From "))
+        for position, number in enumerate(numbers):
+            if position:
+                parts.append(Part(", "))
+            parts.append(Part(f"[{number}]", "cite", number=number))
+    parts.append(Part("."))
+    return parts
+
+
+def _joined(groups: list[list[Part]]) -> list[Part]:
+    parts: list[Part] = []
+    for group in groups:
+        if not group:
+            continue
+        if parts:
+            parts.append(Part(", "))
+        parts.extend(group)
+    return parts
+
+
+def _academic(source: Source) -> list[Part]:
+    groups: list[list[Part]] = []
+    page = ""
+    if source.key.startswith("url:") and original(source.address):
+        page = original(source.address)
+        source = _held_copy(source)
+    author = _author(source)
+    if author:
+        groups.append([Part(author)])
+    title = _title(source)
+    if title:
+        groups.append([Part(f"\u201c{title}\u201d", "title")])
+    if source.kind != PAGE and source.noun:
+        medium = source.noun.lower() if source.noun != PLATE_NOUN else source.noun
+        groups.append([Part(f"{medium} at {source.at}" if source.at else medium)])
+    if source.readings or (source.kind == IMAGERY and source.attribution):
+        groups.append([Part(_imagery_said(source))])
+    if source.seen:
+        groups.append([Part(source.seen)])
+    if source.attribution and source.kind != IMAGERY:
+        groups.append([Part(source.attribution)])
+    if (source.address or page) and source.kind != IMAGERY:
+        groups.append([Part(outlet(source.address or page), "outlet")])
+    if source.published:
+        groups.append([Part(spoken_day(source.published))])
+    if source.address:
+        groups.append([Part(source.address, "address", source.address)])
+    if source.archive and source.archive != source.address:
+        when = f"archived {spoken_day(source.archived)} at " if source.archived else "archived at "
+        groups.append([Part(when), Part(source.archive, "address", source.archive)])
+    if source.posted and source.posted not in (source.address, source.archive):
+        groups.append([Part("published at "), Part(source.posted, "address", source.posted)])
+    if source.collected:
+        verb = "accessed" if source.kind == PAGE else source.arrival
+        groups.append([Part(f"{verb} {spoken_day(source.collected)}")])
+    if not groups:
+        groups.append([Part(source.label or "Untitled")])
+    return _joined(groups)
+
+
+def _web(source: Source) -> list[Part]:
+    groups: list[list[Part]] = []
+    page = original(source.address) if source.key.startswith("url:") else ""
+    lead = outlet(page or source.address) if source.address and source.kind != IMAGERY else ""
+    author = _author(source)
+    if author and lead:
+        lead = f"{author} on {lead}"
+    elif author:
+        lead = author
+    title = _title(source)
+    link = source.address or source.archive
+    words = source.label.strip()
+    if (title or not source.key.startswith("url:") or not words or words in (source.host, source.address)
+            or _an_address(words)):
+        if title:
+            groups.extend([[Part(lead)]] if lead else [])
+            groups.append([Part(f"\u201c{title}\u201d", "title", link)])
+        elif lead:
+            groups.append([Part(lead, "link", link)])
+        else:
+            groups.append([Part(words or "Untitled", "link", link)])
+    else:
+        # a written link's own words, which name the site already: linked as they were written
+        groups.append([Part(words, "link", link)])
+    if source.kind != PAGE and source.noun and not source.address:
+        groups.append([Part(source.noun.lower() if source.noun != PLATE_NOUN else source.noun)])
+    if source.readings or (source.kind == IMAGERY and source.attribution):
+        groups.append([Part(_imagery_said(source))])
+    if source.published:
+        groups.append([Part(short_day(source.published))])
+    parts = _joined(groups)
+    if source.archive and source.archive != source.address:
+        parts.extend([Part(". "), Part("Archived copy", "link", source.archive)])
+    return parts
+
+
+def entry_text(parts: Iterable[Part]) -> str:
+    """An entry's words as one line, for the fonts to cover and for tests to read."""
+    return "".join(part.text for part in parts)
+
+
+def reference(source: Source, style: str = "short") -> str:
+    """One entry of the list of sources as a line of plain text, written in ``style`` as
+    the note's list writes it, for the citation card to copy. `short`: its label and what
+    `details` says, then its addresses. `academic` and `web`: as `entry` writes them, each
+    linked stretch followed by its address, which plain text cannot carry. A capture's
+    check pages and a file's fingerprint close it, as they print under every entry."""
+    if style in ("academic", "web"):
+        words: list[str] = []
+        for part in entry(source, style):
+            words.append(part.text)
+            if part.link and part.kind in ("title", "link") and part.link != part.text:
+                words.append(f" ({part.link})")
+        said = ["".join(words)]
+        if style == "web" and source.posted and source.posted not in (source.address, source.archive):
+            said.append(f"Posted: {source.posted}")
+    else:
+        head = " · ".join((source.label or source.host or "Untitled", *details(source)))
+        said = [f"{head}."]
+        if source.address:
+            said.append(source.address)
+        if source.archive and source.archive != source.address:
+            said.append(f"Archive: {source.archive}")
+        if source.posted and source.posted not in (source.address, source.archive):
+            said.append(f"Posted: {source.posted}")
+    said.extend(f"{site}: {address}" for site, address in source.verify)
+    if source.sha256:
+        said.append(f"SHA-256 {source.sha256}")
+    return " ".join(said)
+
+
 # -- small readings ---------------------------------------------------------------
 
 
@@ -862,5 +1188,6 @@ def _line(value: Any) -> str:
     return " ".join(value.split())[:MAX_LABEL] if isinstance(value, str) else ""
 
 
-__all__ = ["Annex", "Credit", "Entry", "Reader", "Reading", "Source", "archive_day", "details", "host", "is_archive",
-           "is_own_tool", "spoken_day", "web"]
+__all__ = ["Annex", "Credit", "Entry", "Part", "Reader", "Reading", "Source", "archive_day", "details", "entry",
+           "entry_text", "handle_of", "host", "is_archive", "is_own_tool", "outlet", "reference", "short_day", "spoken_day",
+           "web"]

@@ -481,9 +481,10 @@ def test_a_report_has_a_cover_contents_bookmarks_and_numbers(tmp_path):
     assert "Page3/" in body
     titles = [item.title for item in reader.outline if not isinstance(item, list)]
     assert titles[:2] == ["1  Summary", "2  Method"]
-    # a report lists its sources: the frame is a file the case says nothing about,
-    # and its one open task is worth a word before it goes out
-    assert "Sources" in contents and titles[-1] == "Sources"
+    # a report lists its sources, then the annexes its style carries that have something
+    # to say: the frame is a file the case says nothing about, and its one open task is
+    # worth a word before it goes out
+    assert "Sources" in contents and titles[titles.index("Sources"):] == ["Sources", "How this was made"]
     assert list(zip(out.warnings, out.warning_lines, out.warning_kinds)) == [
         ('Picture "frame" has no source.', 17, "unsourced"),
         ("1 task is still open.", 25, "open-task"),

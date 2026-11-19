@@ -9,6 +9,7 @@
  * the name the server gives each one it places (`X-Note-Pictures`). A key in the
  * braces that is none of these is kept as it was written.
  */
+import { foldText } from '../textFold.js';
 
 /**
  * The sizes offered. Each keeps the picture inside a share of the page's text,
@@ -133,12 +134,128 @@ export function sameRef(a, b) {
   return a === b || decoded(String(a)) === decoded(String(b));
 }
 
-/** The line with picture `ref` given `changes` ({ width }, { align }, { caption }), or null when the line does not hold it. */
+/**
+ * The line with picture `ref` given `changes` ({ width }, { align }, { caption },
+ * { graphic: true | false }, { zoom: { x, y, w, h } | null }), or null when the line
+ * does not hold it. What else its braces hold is kept as written.
+ */
 export function sizedLine(text, ref, changes, { blockAlign = '' } = {}) {
   const picture = picturesIn(text).find((item) => sameRef(item.ref, ref));
   if (!picture) return null;
-  const next = { width: picture.width, align: picture.align || blockAlign, caption: picture.caption, rest: picture.rest, ...changes };
+  const { graphic, zoom, ...rest } = changes;
+  let kept = picture.rest;
+  if (graphic !== undefined) kept = withGraphic(kept, graphic);
+  if (zoom !== undefined) kept = withZoom(kept, zoom);
+  const next = { width: picture.width, align: picture.align || blockAlign, caption: picture.caption, ...rest, rest: kept };
   return `${text.slice(0, picture.attrFrom)}${writeAttrs(next, { fallback: blockAlign })}${text.slice(picture.to)}`;
+}
+
+// -- a graphic picture and a story's zoom ----------------------------------------
+
+/** `graphic` in a picture's braces: the web page blurs it until it is pressed (`engine/notes_markdown.py`, `GRAPHIC_ATTR`). */
+const GRAPHIC = /(?<![\w="-])graphic(?![\w="-])/g;
+
+/** What the picture bar and the veiled picture say. */
+export const GRAPHIC_HELP = {
+  label: 'Graphic',
+  button: 'Graphic: blurred on the web until pressed',
+  veil: 'Graphic picture',
+  said: 'Blurred on the web until pressed',
+};
+
+/** Whether a picture's braces (what `readAttrs` leaves in `rest`) mark it graphic. */
+export function isGraphic(rest) {
+  return new RegExp(GRAPHIC.source).test(String(rest ?? ''));
+}
+
+/** `rest` with `graphic` in it (written last) or out of it, everything else as it was. */
+export function withGraphic(rest, on) {
+  const kept = String(rest ?? '').replace(GRAPHIC, ' ').replace(/\s+/g, ' ').trim();
+  return on ? [kept, 'graphic'].filter(Boolean).join(' ') : kept;
+}
+
+/** `zoom=x,y,w,h` in a picture's braces: the part of it a story's step moves in on. */
+const ZOOM = /\bzoom\s*=\s*[\d.]+\s*,\s*[\d.]+\s*,\s*[\d.]+\s*,\s*[\d.]+/;
+
+/** `zoom=x,y,w,h` in a picture's braces: the part of it a story moves in on, as fractions, or null. */
+export function storyZoom(rest) {
+  const match = /\bzoom\s*=\s*([\d.]+)\s*,\s*([\d.]+)\s*,\s*([\d.]+)\s*,\s*([\d.]+)/.exec(String(rest ?? ''));
+  if (!match) return null;
+  const [x, y, w, h] = match.slice(1).map(Number);
+  if (![x, y, w, h].every(Number.isFinite) || w <= 0 || h <= 0 || x < 0 || y < 0 || x + w > 1.0001 || y + h > 1.0001) return null;
+  return { x, y, w, h };
+}
+
+/** A share of a picture written short: `0.25`, `0.1`, `1`. */
+function short(value) {
+  return String(Math.round(value * 1000) / 1000);
+}
+
+/**
+ * A zoom as its braces write it, `0.25,0.1,0.5,0.4`: kept inside the picture and
+ * written to a thousandth, so it reads back the same (`storyZoom`).
+ */
+export function zoomText({ x, y, w, h }) {
+  const left = Math.min(Math.max(Math.round(x * 1000) / 1000, 0), 0.999);
+  const top = Math.min(Math.max(Math.round(y * 1000) / 1000, 0), 0.999);
+  const width = Math.max(Math.min(Math.round(w * 1000) / 1000, Math.round((1 - left) * 1000) / 1000), 0.001);
+  const height = Math.max(Math.min(Math.round(h * 1000) / 1000, Math.round((1 - top) * 1000) / 1000), 0.001);
+  return [left, top, width, height].map(short).join(',');
+}
+
+/** `rest` with its zoom set (where it was written, else last) or taken out (`zoom` null). */
+export function withZoom(rest, zoom) {
+  const now = String(rest ?? '');
+  const written = zoom ? `zoom=${zoomText(zoom)}` : '';
+  const kept = ZOOM.test(now) ? now.replace(ZOOM, written) : [now, written].filter(Boolean).join(' ');
+  return kept.replace(/\s+/g, ' ').trim();
+}
+
+// -- another picture in its place ------------------------------------------------
+
+/** The case records a note can show as a picture, found by their name or folder, by name. */
+export function casePictures(entities, query = '', { limit = 80 } = {}) {
+  const wanted = foldText(String(query ?? '').trim());
+  return (entities ?? [])
+    .filter((entity) => ['media', 'capture', 'proof'].includes(entity?.type) && entity.attrs?.path && entity.attrs?.kind !== 'video')
+    .filter((entity) => !wanted || foldText(`${entity.label} ${entity.attrs?.folder ?? ''}`).includes(wanted))
+    .sort((a, b) => String(a.label).localeCompare(String(b.label)))
+    .slice(0, limit);
+}
+
+/** `[[media:id|Label]]`, the line a case picture is written as. */
+export function pictureReference(entity) {
+  return `[[media:${entity.id}|${String(entity.label ?? '').replace(/[[\]|\n]/g, '').trim() || 'Picture'}]]`;
+}
+
+/**
+ * The line with picture `ref` showing case record `entity` in its place, its braces
+ * kept: its size, place, caption, veil and zoom stay. An image's title, which printed
+ * as its caption, becomes its caption. Null when the line does not hold `ref`.
+ */
+export function replacedLine(text, ref, entity) {
+  const picture = picturesIn(text).find((item) => sameRef(item.ref, ref));
+  if (!picture || !entity?.id) return null;
+  const braces = picture.title && !picture.caption
+    ? writeAttrs({ width: picture.width, align: picture.align, caption: picture.title, rest: picture.rest })
+    : text.slice(picture.attrFrom, picture.to);
+  return `${text.slice(0, picture.from)}${pictureReference(entity)}${braces}${text.slice(picture.to)}`;
+}
+
+// -- a size by its corner ----------------------------------------------------------
+
+/**
+ * The size a picture dragged to `fraction` of the page's width snaps to: the one of
+ * `PICTURE_SIZES` whose width (`sizeWidth`) is nearest, with that width.
+ */
+export function nearestSize(fraction, ratio = 0) {
+  let best = null;
+  for (const size of PICTURE_SIZES) {
+    const width = sizeWidth(size.share, ratio);
+    const distance = Math.abs(parseFloat(width) / 100 - fraction);
+    if (!best || distance < best.distance - 1e-9) best = { size, width, distance };
+  }
+  return { size: best.size, width: best.width };
 }
 
 /**

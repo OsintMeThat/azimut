@@ -62,7 +62,11 @@ caption where it came from, and decimal coordinates link to the map. All of it i
 read through `engine/notesources.py`, the one place that says where an item comes
 from. A look with its sources list on (`sources`, on by default in every style but
 plain) ends with a numbered **Sources** section, each source once, and the body
-carries a small `[n]` linked to its entry after every citation.
+carries a small `[n]` linked to its entry after every citation. Each source is written
+as the style has it (`notesources.entry`): a report's academic, a Web article's for the
+web, the others' short. After it come the annexes the style carries
+(`engine/noteannexes.py`), each under a heading of its own: Geolocations, Credits, How
+this was made, Limits (linked back to each box) and Editions and corrections.
 
 **The check before export.** Every warning has a kind (`WARNING_KINDS`), so the
 Page pane and the export's check can say what is wrong and where: a picture or a
@@ -101,7 +105,7 @@ from markdown_it.token import Token
 from PIL import Image as PILImage
 from PIL import ImageOps, UnidentifiedImageError
 
-from . import notefill, notes_style, notesources, pdffonts, thumbnails
+from . import noteannexes, notefill, notes_style, notesources, pdffonts, thumbnails
 from .notelook import DEFAULT as DEFAULT_LOOK
 from .notelook import NoteLook
 from .notes_markdown import (
@@ -111,6 +115,7 @@ from .notes_markdown import (
     EMPTY_SECTION,
     ENTITY_HREF,
     INTERNAL,
+    LIMITS,
     LOG_STAMP,
     MAP_LINK,
     MERMAID_INFO,
@@ -397,6 +402,8 @@ class Run:
     link: str = ""
     entry: int = 0
     raised: bool = False
+    #: An internal link made with `add_link`: where an annex links back to in the text.
+    goto: int = 0
 
 
 
@@ -414,6 +421,8 @@ def render(
     public: bool = False,
     identity: notefill.Identity | None = None,
     light: bool = False,
+    earlier: Iterable[dict[str, Any]] = (),
+    changes: str = "",
 ) -> Rendered:
     """Lay one note out as a PDF.
 
@@ -429,6 +438,8 @@ def render(
     ``light`` sets its pictures at the page pane's size (`PREVIEWS`): the same
     pages, fewer pixels, for the pane and the check before an export, never for a
     PDF that is written.
+    ``earlier`` is the note's record of editions and ``changes`` what this one
+    corrected, which its Editions and corrections annex lists when its style carries it.
     """
     look = look or DEFAULT_LOOK
     theme = notes_style.theme_for(look)
@@ -456,12 +467,18 @@ def render(
         raise NotesPdfError("an internal passage could not be left out, so the public edition was not made")
     # what the document cites is read before a page is laid out: the sources list
     # numbers every citation before the first is drawn, and its words need their fonts
-    cited = _Cited(case, look=look, styled=not theme.plain, identity=identity)
+    profile = look.profile()
+    cited = _Cited(case, look=look, styled=not theme.plain, identity=identity, profile=profile)
     cited.collect(shown, blocks)
     if look.cover.own and cover is None:
         cited.warn(notefill.EMPTY_COVER, cut.line if cut is not None else None, OTHER)
     if "name" in empty:
         cited.warn(notefill.NO_NAME, empty["name"], SETTING)
+    # what the document adds after its sources, read before a page is laid out for its words' fonts
+    annexes = noteannexes.build(
+        case, cited, profile, day=day, public=public or not passages[0], earlier=earlier, changes=changes,
+        faces=noteannexes.face_names(theme.body_family, theme.heading_family),
+    )
     document = NotePage(title=title, theme=theme, look=look, day=day)
     if created is not None:
         document.set_creation_date(created)
@@ -470,9 +487,10 @@ def render(
     bands = [slot for band in (look.header, look.footer) for slot in (band.left, band.center, band.right) if slot]
     _warn_bands(cited, bands, identity, named="name" in empty)
     words = "\n".join([title, look.cover.subtitle, *(piece.text for piece in shown), *cited.words(),
-                       *(document.band_text(slot) for slot in bands)])
+                       *annexes.words(), *(document.band_text(slot) for slot in bands)])
     faces = pdffonts.install(document, words, body=theme.body_family, font=look.font)
-    builder = _Builder(document, case, diagrams or {}, look=look, faces=faces, cited=cited, light=light)
+    builder = _Builder(document, case, diagrams or {}, look=look, faces=faces, cited=cited, light=light,
+                       annexes=annexes)
     try:
         builder.build(title, pieces, blocks, cover=(cover, cut.line) if cover is not None and cut is not None else None)
         output = bytes(document.output())
@@ -802,9 +820,16 @@ class _Builder:
         faces: set[tuple[str, str]] | None = None,
         cited: _Cited | None = None,
         light: bool = False,
+        annexes: noteannexes.Annexes | None = None,
     ) -> None:
         self.pdf = pdf
         self.case = case
+        #: What the document adds after its sources (`engine/noteannexes.py`).
+        self.annexes = annexes
+        #: The credits of the maps it drew, which its Credits annex names.
+        self._map_credits: list[str] = []
+        #: Where each Limits box was drawn, as (internal link, page), which its annex links back to.
+        self._limit_links: list[tuple[int, int]] = []
         #: Pictures at the page pane's size (`PREVIEWS`) rather than every pixel.
         self.light = light
         self.diagrams = diagrams
@@ -935,6 +960,7 @@ class _Builder:
         if not drawn:
             self._aside("This note is empty.")
         self._sources()
+        self._annexes()
 
     def _page_begins(self) -> None:
         self._page_lines[self.pdf.page] = self._line
@@ -1079,8 +1105,170 @@ class _Builder:
         self._heading([Run(SOURCES_HEADING)], self._base, [], 0, Align.L, numbered=False)
         pdf.set_font(self.theme.heading_family, "B", ENTRY_SIZE * self.theme.scale)
         hang = max(7.0, pdf.get_string_width(f"[{len(annex.entries)}]") + 2.4)
+        style = self.cited.profile.sources_style
         for entry in annex.entries:
-            self._source_entry(entry, hang)
+            if style == "short":
+                self._source_entry(entry, hang)
+            else:
+                self._styled_entry(entry, hang, style)
+
+    def _styled_entry(self, entry: Entry, hang: float, style: str) -> None:
+        """One source written as ``style`` has it (`notesources.entry`): the academic one a
+        journal's reference, its addresses inline; the web one the outlet and the title,
+        each address then in full under it, since paper cannot follow a link. A capture's
+        check pages and a file's fingerprint follow, as in the short form."""
+        pdf, theme = self.pdf, self.theme
+        source = entry.source
+        scale = theme.scale
+        size, leading = ENTRY_SIZE * scale, ENTRY_LEADING * scale
+        small, small_leading = ENTRY_SMALL * scale, ENTRY_SMALL_LEADING * scale
+        family = theme.body_family
+        runs = self._part_runs(notesources.entry(source, style, entry.origins), web=style == "web")
+        addresses: list[tuple[str, str]] = []
+        if style == "web":
+            addresses.extend(("", one) for one in (source.address,) if one)
+            if source.archive and source.archive != source.address:
+                addresses.append(("Archive: ", source.archive))
+            if source.posted and source.posted not in (source.address, source.archive):
+                addresses.append(("Posted: ", source.posted))
+        addresses.extend((f"{site}: ", address) for site, address in source.verify)
+        with self._indent(hang):
+            room = pdf.epw - 2 * pdf.c_margin
+            lines = self._run_lines(runs, room, size=size, family=family, bold=False, color=theme.ink)
+            # measured first, so an entry that fits on a page is never split over two
+            height = leading * len(lines)
+            pdf.set_font(theme.heading_family, "", small)
+            for prefix, address in addresses:
+                height += small_leading * len(_wrap_address(pdf, address, room - pdf.get_string_width(prefix), room))
+        if source.sha256:
+            height += small_leading
+        if pdf.will_page_break(min(height, pdf.page_break_trigger - pdf.t_margin - 1)):
+            pdf.add_page()
+        top = pdf.get_y()
+        pdf.set_link(self._entry_link(entry.number), y=top, page=pdf.page)
+        pdf.set_font(theme.heading_family, "B", size)
+        pdf.set_text_color(*theme.accent)
+        self._text_at(pdf.l_margin + pdf.c_margin, top, f"[{entry.number}]", leading)
+        pdf.set_xy(pdf.l_margin, top)
+        with self._indent(hang):
+            room = pdf.epw - 2 * pdf.c_margin
+            self._draw_run_lines(lines, Align.L, room, size=size, leading=leading, family=family, bold=False,
+                                 color=theme.ink)
+            pdf.ln(0.2)
+            for prefix, address in addresses:
+                self._address(prefix, address, small, small_leading)
+            if source.sha256:
+                self._fingerprint(source.sha256, small, small_leading)
+        pdf.ln(ENTRY_GAP * scale)
+
+    def _part_runs(self, parts: list[notesources.Part], *, web: bool) -> list[Run]:
+        """An entry's parts as runs: an outlet in italics, an address in pieces it may wrap
+        between, each linked, and an origin's number linked to its entry."""
+        theme = self.theme
+        runs: list[Run] = []
+        for part in parts:
+            if part.kind == "cite":
+                runs.append(Run(part.text, color=theme.accent, entry=part.number))
+            elif part.kind == "address":
+                runs.extend(Run(piece, color=theme.accent_dark, link=part.link) for piece in _address_pieces(part.text))
+            elif part.kind == "outlet":
+                runs.append(Run(part.text, italic=True, color=theme.ink))
+            elif part.kind == "title" and part.text[:1] == "\u201c" and part.text[-1:] == "\u201d" and RTL.search(part.text):
+                # the quotes as runs of their own, so a right-to-left title keeps them where they belong
+                color = theme.accent_dark if part.link and web else theme.ink
+                link = part.link if web else ""
+                runs.extend((Run("\u201c", color=color, link=link), Run(part.text[1:-1], color=color, link=link),
+                             Run("\u201d", color=color, link=link)))
+            elif part.link and (part.kind == "link" or web):
+                runs.append(Run(part.text, color=theme.accent_dark, link=part.link))
+            elif runs and part.text[:1] in ",.;:":
+                # a comma or a full stop stays on the line of what it follows
+                stuck = part.text[: len(part.text) - len(part.text[1:].lstrip(",.;:"))]
+                runs[-1] = replace(runs[-1], text=runs[-1].text + stuck)
+                if part.text[len(stuck):]:
+                    runs.append(Run(part.text[len(stuck):], color=theme.ink))
+            else:
+                runs.append(Run(part.text, color=theme.ink))
+        return runs
+
+    # -- the annexes -------------------------------------------------------------
+
+    def _annex_keys(self) -> list[str]:
+        """The annexes this document prints. Credits are counted when the note holds a map,
+        whose credits are only known once it is drawn."""
+        if self.annexes is None:
+            return []
+        keys = self.annexes.present()
+        if (self.cited.profile.credits and "credits" not in keys
+                and any("::: map" in piece.text for piece in self._pieces if piece.kind == "text")):
+            keys = [key for key in noteannexes.ANNEXES if key in keys or key == "credits"]
+        return keys
+
+    def _annexes(self) -> None:
+        """What the style adds after the sources, each under a heading of its own, in the
+        contents and the bookmarks like the sources. A report's start a page of their own
+        when no sources list came before them."""
+        annexes = self.annexes
+        if annexes is None:
+            return
+        if self.cited.profile.credits:
+            for credit in self._map_credits:
+                kind, _, words = credit.partition(": ")
+                noteannexes.add_map_credit(annexes, words or kind)
+        keys = [key for key in annexes.present() if key in self._annex_keys()]
+        if not keys:
+            return
+        self._end_entry()
+        pdf = self.pdf
+        self._shift = 0
+        if self.theme.style == "report" and not self._listed() and pdf.get_y() > pdf.body_top + 0.5:
+            pdf.add_page()
+        for key in keys:
+            self._heading([Run(noteannexes.HEADINGS[key])], self._base, [], 0, Align.L, numbered=False)
+            getattr(self, f"_annex_{key}")(annexes)
+
+    def _annex_text(self, runs: list[Run], *, gap: float = 1.4) -> None:
+        theme = self.theme
+        self._runs(runs, size=ENTRY_SIZE * theme.scale * 1.06, leading=ENTRY_LEADING * theme.scale * 1.1,
+                   family=theme.body_family, color=theme.ink, bottom=gap)
+
+    def _annex_geolocations(self, annexes: noteannexes.Annexes) -> None:
+        rows: list[list[list[Run]]] = [[[Run("Proof")], [Run("Place")], [Run("Day")], [Run("Coordinates")]]]
+        for place in annexes.geolocations:
+            label = f"[{place.number}] {place.proof}" if place.number else place.proof
+            proof = [Run(label, entry=place.number)] if place.number else [Run(label, link=place.posted)]
+            rows.append([proof, [Run(place.where)], [Run(place.day)],
+                         [Run(place.coords, link=place.link)] if place.coords else [Run("")]])
+        self._table(rows, 1)
+
+    def _annex_credits(self, annexes: noteannexes.Annexes) -> None:
+        theme = self.theme
+        for kind, words in annexes.credits:
+            self._annex_text([Run(f"{kind}. ", bold=True, color=theme.ink), Run(words, color=theme.ink)])
+
+    def _annex_method(self, annexes: noteannexes.Annexes) -> None:
+        for fact in annexes.method:
+            self._annex_text([Run(fact)])
+
+    def _annex_limits(self, annexes: noteannexes.Annexes) -> None:
+        theme = self.theme
+        for limit in annexes.limits:
+            runs = [Run(limit.text, color=theme.ink)]
+            if limit.index < len(self._limit_links):
+                link, page = self._limit_links[limit.index]
+                runs.append(Run(f" Page {page}", color=theme.accent_dark, goto=link))
+            self._annex_text(runs, gap=2.0)
+
+    def _annex_editions(self, annexes: noteannexes.Annexes) -> None:
+        theme = self.theme
+        scale = theme.scale
+        for one in annexes.editions:
+            lead = "This edition" if one.current else one.day
+            runs = [Run(f"{lead}. ", bold=True, color=theme.ink), Run(one.said, color=theme.ink)]
+            self._annex_text(runs, gap=0.4 if one.sha256 else 1.4)
+            if one.sha256:
+                self._fingerprint(one.sha256, ENTRY_SMALL * scale, ENTRY_SMALL_LEADING * scale)
+                self.pdf.ln(1.4)
 
     def _source_entry(self, entry: Entry, hang: float) -> None:
         """One source: its number in the margin it hangs from, what it is, and under
@@ -1250,6 +1438,7 @@ class _Builder:
         self._contents_entries = sum(1 for level in levels if level - self._base <= 1)
         if self._listed():
             self._contents_entries += 1  # the sources list's own heading
+        self._contents_entries += len(self._annex_keys())
 
     def _count_entry(self, heading: str) -> None:
         stamp = LOG_STAMP.match(heading)
@@ -1285,7 +1474,7 @@ class _Builder:
             return  # the cover carries the title
         if style == "plain":
             self._plain_title(title)
-        elif style == "report":
+        elif style in ("report", "article"):
             self._report_title(title)
         elif style == "journal":
             self._journal_title(title)
@@ -1769,6 +1958,7 @@ class _Builder:
             shown = f"as on {notes_style.long_date(date.fromisoformat(data['day']))}"
             words = f"{words}, {shown}" if words else shown.capitalize()
         credits = data.get("credits") or []
+        self._map_credits.extend(str(one) for one in credits if one)
         kind, _, value = (credits[0] if credits else "").partition(": ")
         credit = _Credit(kind, value) if value else None
         self._place(BytesIO(picture), natural, "", Align.C, self._caption(words, "Map"), credit=credit, unsized=1.0)
@@ -1807,6 +1997,12 @@ class _Builder:
         return index + 1
 
     def _on_blockquote_open(self, tokens: list[Token], index: int, align: Align) -> int:
+        if (self.annexes is not None and self.cited.profile.limits and not self._on_cover
+                and _callout_kind(tokens, index) == LIMITS):
+            # where the Limits annex links back to: the box's top, on the page it starts
+            link = self.pdf.add_link()
+            self.pdf.set_link(link, y=self.pdf.get_y(), page=self.pdf.page)
+            self._limit_links.append((link, self.pdf.page))
         # an internal passage is boxed in every style, so it stands out wherever it prints
         if not self.theme.plain or _callout_kind(tokens, index) == INTERNAL:
             return self._boxed_quote(tokens, index, align)
@@ -2324,6 +2520,23 @@ class _Builder:
         """
         pdf = self.pdf
         room = pdf.epw - 2 * pdf.c_margin
+        lines = self._run_lines(runs, room, size=size, family=family, bold=bold, color=color)
+        self._draw_run_lines(lines, align, room, size=size, leading=leading, family=family, bold=bold, color=color)
+
+    def _run_lines(
+        self,
+        runs: list[Run],
+        room: float,
+        *,
+        size: float,
+        family: str,
+        bold: bool,
+        color: tuple[int, int, int],
+    ) -> list[list[tuple[Run, str]]]:
+        """Runs cut into lines no wider than ``room``: each run keeps its words whole on a
+        line, a word wider than a whole line is cut where it must be, a hard break starts
+        a line."""
+        pdf = self.pdf
         lines: list[list[tuple[Run, str]]] = [[]]
         used = 0.0
 
@@ -2358,6 +2571,30 @@ class _Builder:
                     word = word[cut:]
                 lines[-1].append((run, word))
                 used += width(run, word)
+        return lines
+
+    def _draw_run_lines(
+        self,
+        lines: list[list[tuple[Run, str]]],
+        align: Align,
+        room: float,
+        *,
+        size: float,
+        leading: float,
+        family: str,
+        bold: bool,
+        color: tuple[int, int, int],
+    ) -> None:
+        """Lines cut by `_run_lines`, each started where ``align`` puts it, each run on it
+        drawn at its own place in its own face, with its link."""
+        pdf = self.pdf
+
+        def width(run: Run, text: str) -> float:
+            self._run_face(run, family=family, bold=bold, size=size, color=color)
+            measured = pdf.get_string_width(text)
+            pdf.char_vpos = "LINE"
+            return measured
+
         for line in lines:
             # a run's words on one line are drawn as one string
             pieces: list[tuple[Run, str]] = []
@@ -2385,6 +2622,8 @@ class _Builder:
         """Where a run links: its address, else its entry in the sources list."""
         if run.link:
             return run.link
+        if run.goto:
+            return run.goto
         return self._entry_link(run.entry) if run.entry else ""
 
     def _entry_link(self, number: int) -> int:
@@ -3130,6 +3369,17 @@ WRAP_SLACK = 0.02
 #: Where an address is checked and named: the one reading of sources does both.
 _web = notesources.web
 _host = notesources.host
+
+
+#: A right-to-left letter: Hebrew, Arabic, Syriac, Thaana, N'Ko and their presentation forms.
+RTL = re.compile("[\u0590-\u08ff\ufb1d-\ufdff\ufe70-\ufeff]")
+#: Where an address written inline may break: after one of `ADDRESS_BREAKS`, never inside `//`.
+ADDRESS_PIECE = re.compile(r"(?<=[/?&=#\-_.~+,;])(?!/)")
+
+
+def _address_pieces(text: str) -> list[str]:
+    """An address cut where a line may break inside it, every character kept."""
+    return [piece for piece in ADDRESS_PIECE.split(text) if piece]
 
 
 def _wrap_address(pdf: FPDF, text: str, first: float, width: float) -> list[str]:

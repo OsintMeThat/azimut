@@ -7,6 +7,7 @@ vi.mock('../api.js', () => ({ api: { get, put } }));
 const {
   BANDS, BAND_MAX, COVERS, DEFAULT_LOOK, FONTS, HINT_LINE, coverChoice, coverFor, ownCover, INCLUDE_LINE, SIZES, SOURCES_OFF_STYLES, STYLES, hintLine, includeLine, isPlainLook, isReport, lookFont,
   WEBS, bandStyleOwn, normaliseLook, readLook, sectionsSet, slotText, reportBody, reportLook, sourcesOn, templateLook, writeLook,
+  ANNEXES, LINK_CHECKS, SOURCES_STYLES, STYLE_DEFAULTS, profileChanged, profileOf, styleOwn, stylesTable, withProfile,
 } = await import('./look.js');
 
 afterEach(() => vi.clearAllMocks());
@@ -80,14 +81,13 @@ describe('a look', () => {
     }
   });
 
-  it('follows the rule the server prints by', () => {
-    // read off the server's own source, so a style changing sides on one end fails here
-    const python = readFileSync(new URL('../../../../src/azimut/engine/notelook.py', import.meta.url), 'utf8');
-    const tuple = /^SOURCES_OFF_STYLES[^=]*= \(([^)]*)\)/m.exec(python)?.[1];
-    expect(tuple, 'SOURCES_OFF_STYLES in engine/notelook.py').toBeDefined();
-    const off = [...tuple.matchAll(/"([a-z-]+)"/g)].map((match) => match[1]);
-    expect(SOURCES_OFF_STYLES).toEqual(off);
-    for (const { id } of STYLES) expect(sourcesOn({ style: id }), id).toBe(!off.includes(id));
+  it('follows the table the server prints by', () => {
+    // `engine/notelook.py` PROFILES, written out once for both sides: a default moved on one end fails here
+    const table = JSON.parse(readFileSync(new URL('../../../../tests/fixtures/note-styles.json', import.meta.url), 'utf8'));
+    expect(JSON.parse(JSON.stringify(STYLE_DEFAULTS))).toEqual(table);
+    expect(STYLES.map((style) => style.id).sort()).toEqual(Object.keys(table).sort());
+    expect(SOURCES_OFF_STYLES).toEqual(['plain']);
+    for (const { id } of STYLES) expect(sourcesOn({ style: id }), id).toBe(table[id].sources);
   });
 
   it('keeps no picture and no day in a template', () => {
@@ -191,6 +191,51 @@ describe('a look', () => {
     expect(put.mock.calls[0][0]).toBe('/api/cases/c1/notes/n1/look');
     expect(put.mock.calls[0][1]).toMatchObject({ style: 'brief', toc: true, page: 'a4' });
     expect(saved.toc).toBe(true);
+  });
+});
+
+describe('what a style carries', () => {
+  it('lists the For row Report first and Plain last, each with what it gives in a line', () => {
+    expect(STYLES.map((style) => style.label)).toEqual(['Report', 'Web article', 'Brief', 'Journal', 'Plain']);
+    expect(STYLES.every((style) => style.note && style.note.length < 48)).toBe(true);
+    expect(ANNEXES.map((annex) => annex.id)).toEqual(['geolocations', 'credits', 'method', 'limits', 'editions']);
+    expect(SOURCES_STYLES.map((one) => one.id)).toEqual(['academic', 'web', 'short']);
+    expect(LINK_CHECKS.map((one) => one.id)).toEqual(['each', 'grouped']);
+  });
+
+  it('keeps the profile keys a look sets, and drops values it does not know', () => {
+    const look = normaliseLook({ style: 'article', sources_style: 'academic', link_check: 'loud',
+      annexes: { method: 'on', credits: 'off', sketches: 'on', limits: true } });
+    expect(look).toMatchObject({ style: 'article', sources_style: 'academic', link_check: '' });
+    expect(look.annexes).toEqual({ credits: 'off', method: 'on' });
+    expect(isPlainLook({ annexes: {} })).toBe(true);
+    expect(isPlainLook({ annexes: { credits: 'on' } })).toBe(false);
+    expect(sectionsSet({ sources_style: 'web' }).style).toBe(true);
+    expect(sectionsSet({ annexes: { limits: 'off' } }).style).toBe(true);
+    expect(templateLook({ style: 'report', annexes: { method: 'off' } }).annexes).toEqual({ method: 'off' });
+  });
+
+  it('reads each switch from the look, else its style as Settings has it, else Azimut\'s own', () => {
+    expect(profileOf({ style: 'report' })).toEqual(STYLE_DEFAULTS.report);
+    const settings = { report: { method: false, sources_style: 'web' }, brief: { credits: 'yes' } };
+    expect(profileOf({ style: 'report' }, settings)).toMatchObject({ method: false, sources_style: 'web', limits: true });
+    expect(profileOf({ style: 'brief' }, settings).credits).toBe(false);
+    const own = { style: 'report', sources: 'off', link_check: 'grouped', annexes: { limits: 'off' } };
+    expect(profileOf(own, settings)).toMatchObject({ sources: false, link_check: 'grouped', limits: false, method: false });
+    expect(profileChanged(own)).toMatchObject({ sources: true, link_check: true, limits: true, method: false, sources_style: false });
+    expect(stylesTable({ article: { editions: false }, poster: {} })).toMatchObject({ article: { editions: false, credits: true } });
+    expect(Object.keys(stylesTable(null))).toEqual(Object.keys(STYLE_DEFAULTS));
+    expect(styleOwn('article')).toBe("Web article's own");
+  });
+
+  it('sets one switch for the note, or hands it back to the style', () => {
+    let look = withProfile({ style: 'report' }, 'method', false);
+    expect(look.annexes).toEqual({ method: 'off' });
+    look = withProfile(look, 'sources_style', 'short');
+    look = withProfile(look, 'sources', false);
+    expect(look).toMatchObject({ sources: 'off', sources_style: 'short' });
+    look = withProfile(withProfile(withProfile(look, 'method', null), 'sources_style', null), 'sources', null);
+    expect(isPlainLook({ ...look, style: 'plain' })).toBe(true);
   });
 });
 

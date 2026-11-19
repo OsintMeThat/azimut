@@ -32,6 +32,7 @@ from azimut.engine import notes_html as report
 from azimut.engine.notelook import NoteLook
 from azimut.workspace import Case
 
+from sourcesfixture import AS_BEFORE
 from ambushfixture import (
     DIAGRAM,
     PNG_SECRET,
@@ -45,8 +46,9 @@ from test_notes_report import make_case, make_note
 
 FIXTURES = Path(__file__).parent / "fixtures"
 TITLE = "Ambush on the Wadi Sahm road"
+#: A report as it printed before styles carried profiles; what one carries now is `test_notes_profiles.py`'s.
 LOOK = NoteLook.model_validate({"style": "report", "cover": {"on": True, "subtitle": "What open sources show",
-                                                               "date": "2025-10-28"}})
+                                                               "date": "2025-10-28"}, **AS_BEFORE})
 CREATED = datetime(2025, 10, 28, 12, 0)
 #: What the internal passage of the ambush note says, which no request may carry.
 SECRET = "The second source asked not to be named"

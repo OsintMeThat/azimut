@@ -51,12 +51,13 @@ What the map shows, said after it.
 LOOKS = {"article": NoteLook(), "story": NoteLook.model_validate({"web": "story"})}
 
 #: Taken at 0e0a2ba, the commit before the live map, then again once charts appended their
-#: own section to the reader's style sheet (the only change, read line by line).
+#: own section to the reader's style sheet (the only change, read line by line), and once
+#: the annexes appended theirs (the pages with the sheet of before give the digests of before).
 GOLDEN = {
-    "single-article": "9a552070ab1c9a151137ffeca79ddf82d84b7caadaf5fa69b44f3bbe1e5c35aa",
-    "single-story": "4f919dc1708c3be836b0872b7bfde47710f7129da11e1ea5191f2cc5d8127b7c",
-    "folder-article": "87f92aad4d854199b50bd6c2f774fb71c0d33d0b152a6ae583d120944b99f66f",
-    "folder-story": "8efc5316d3ec71b8c27362712da92deea11d7e464fb6c2abd59445aa11fb3b82",
+    "single-article": "de8c3265003d2d094de607ee2b6e2acf4c5d653636aa652fa6f524604cd53e56",
+    "single-story": "5352d4e3f1e20294f344310cd01bba0f5444fcdc99f26d023ffb9d2152b8695e",
+    "folder-article": "3d8eee0c2928d313339dae10eef2c13d884792c939cf3d45d98d1f8584589d9d",
+    "folder-story": "b2787c202d9cdbfb68504a37b1646db1ab5c21afe1ccca36aa9aa98ee2bb2a02",
 }
 
 
