@@ -105,6 +105,98 @@ function withPlainLabels(source) {
   return `${source.slice(0, at)}%%{init: {${init}} }%%\n${source.slice(at)}`;
 }
 
+/** A colour as a diagram's config or a `classDef` writes it. */
+const HEX = '#[0-9a-fA-F]{6}';
+
+/** The page a diagram's own config names (`themeVariables.background`, a Book or a Dark diagram's), or ''. */
+export function diagramPaper(source) {
+  const front = FRONT_MATTER.exec(String(source ?? ''))?.[0] ?? '';
+  return new RegExp(`^\\s+background:\\s*"?(${HEX})"?\\s*$`, 'm').exec(front)?.[1].toLowerCase() ?? '';
+}
+
+/**
+ * The legend a diagram names (`editor/diagramText.js`): `[{ name, fill, stroke }]`, each
+ * `%% legend c1: Name` line with the colours of its `classDef`, none once `%% legend: off`.
+ * Mermaid draws no legend for a flowchart; these comments name its categories.
+ */
+export function diagramLegend(source) {
+  const text = String(source ?? '');
+  if (/^\s*%%\s*legend:\s*off\s*$/m.test(text)) return [];
+  const classes = new Map();
+  for (const [, name, fill, stroke] of text.matchAll(new RegExp(`^\\s*classDef\\s+(\\w+)\\s+fill:(${HEX}),stroke:(${HEX})`, 'gm'))) {
+    classes.set(name, { fill, stroke });
+  }
+  const legend = [];
+  for (const [, name, words] of text.matchAll(/^\s*%%\s*legend\s+(\w+):\s*(.+?)\s*$/gm)) {
+    const paint = classes.get(name);
+    if (paint) legend.push({ name: words.replace(/‹/g, '<').replace(/›/g, '>'), ...paint });
+  }
+  return legend;
+}
+
+const SVG_NS = 'http://www.w3.org/2000/svg';
+/** The legend's type size, its swatch, and the room around it. */
+const LEGEND = { size: 13, swatch: 13, gap: 8, between: 22, row: 22, above: 14, below: 10 };
+
+function svgNode(document, tag, attributes) {
+  const node = document.createElementNS(SVG_NS, tag);
+  for (const [name, value] of Object.entries(attributes)) node.setAttribute(name, String(value));
+  return node;
+}
+
+/**
+ * The legend drawn under a diagram, its rows centred and wrapped to the diagram's width,
+ * the box grown to hold it. Its words are measured by their letters, as no page lays them
+ * out here: 0.6 of the size a letter is wide enough for the app's sans.
+ */
+function drawLegend(element, legend, box, { ink, face }) {
+  const document = element.ownerDocument;
+  const room = Math.max(box.width, 280);
+  const items = legend.map((item) => ({ ...item, width: LEGEND.swatch + LEGEND.gap + item.name.length * LEGEND.size * 0.6 }));
+  const rows = [];
+  for (const item of items) {
+    const row = rows[rows.length - 1];
+    if (row && row.width + LEGEND.between + item.width <= room) {
+      row.items.push(item);
+      row.width += LEGEND.between + item.width;
+    } else rows.push({ items: [item], width: item.width });
+  }
+  const group = svgNode(document, 'g', { 'data-legend': 'true' });
+  const top = box.y + box.height + LEGEND.above;
+  rows.forEach((row, at) => {
+    let x = box.x + (box.width - row.width) / 2;
+    const y = top + at * LEGEND.row;
+    for (const item of row.items) {
+      group.append(svgNode(document, 'rect', {
+        x, y, width: LEGEND.swatch, height: LEGEND.swatch, rx: 2,
+        style: `fill:${item.fill};stroke:${item.stroke};stroke-width:1.5px`,
+      }));
+      const words = svgNode(document, 'text', {
+        x: x + LEGEND.swatch + LEGEND.gap, y: y + LEGEND.swatch - 2,
+        style: `fill:${ink};font-family:${face};font-size:${LEGEND.size}px`,
+      });
+      words.textContent = item.name;
+      group.append(words);
+      x += item.width + LEGEND.between;
+    }
+  });
+  element.append(group);
+  const grown = rows.length * LEGEND.row + LEGEND.above + LEGEND.below - (LEGEND.row - LEGEND.swatch);
+  return { ...box, width: Math.max(box.width, Math.max(...rows.map((row) => row.width)) + 8), height: box.height + grown };
+}
+
+/** What a diagram's own config sets its words in, or the app's own. */
+function themeValue(source, key, fallback) {
+  const front = FRONT_MATTER.exec(String(source ?? ''))?.[0] ?? '';
+  const found = new RegExp(`^\\s+${key}:\\s*(.+?)\\s*$`, 'm').exec(front)?.[1];
+  if (!found) return fallback;
+  try {
+    return found.startsWith('"') ? JSON.parse(found) : found;
+  } catch {
+    return fallback;
+  }
+}
+
 let loading = null;
 let sequence = 0;
 
@@ -123,17 +215,36 @@ function loadMermaid() {
  * Mermaid sizes its output through a `max-width` style and a viewBox, neither of
  * which a canvas reads, so the intrinsic size is put back on the element before
  * the caller rasterises it.
+ *
+ * Two things a diagram's source asks for are drawn here, so the editor, the PDF, the
+ * HTML page and WordPress all show them: the legend its `%% legend` lines name
+ * (`diagramLegend`), under it, and the page its config names (`diagramPaper`, a Dark
+ * diagram's), as a backdrop the size of the picture, said again in `data-background`
+ * for the page that frames it.
  */
 export async function renderMermaidSvg(source, { load = loadMermaid } = {}) {
   const mermaid = await load();
   const id = `azimut-mermaid-export-${(sequence += 1)}`;
   const { svg } = await mermaid.render(id, withPlainLabels(source));
   const element = new DOMParser().parseFromString(svg, 'image/svg+xml').documentElement;
-  const [, , boxWidth, boxHeight] = (element.getAttribute('viewBox') ?? '0 0 800 600')
+  const [boxX, boxY, boxWidth, boxHeight] = (element.getAttribute('viewBox') ?? '0 0 800 600')
     .split(/[\s,]+/)
     .map(Number);
-  const width = boxWidth || 800;
-  const height = boxHeight || 600;
+  let box = { x: boxX || 0, y: boxY || 0, width: boxWidth || 800, height: boxHeight || 600 };
+  const legend = diagramLegend(source);
+  if (legend.length) {
+    box = drawLegend(element, legend, box, {
+      ink: themeValue(source, 'primaryTextColor', '#202124'),
+      face: themeValue(source, 'fontFamily', CONFIG.themeVariables.fontFamily),
+    });
+  }
+  const paper = diagramPaper(source);
+  if (paper) {
+    element.insertBefore(svgNode(element.ownerDocument, 'rect', { ...box, style: `fill:${paper}` }), element.firstChild);
+    element.setAttribute('data-background', paper);
+  }
+  if (legend.length || paper) element.setAttribute('viewBox', `${box.x} ${box.y} ${box.width} ${box.height}`);
+  const { width, height } = box;
   element.setAttribute('width', String(width));
   element.setAttribute('height', String(height));
   element.removeAttribute('style');

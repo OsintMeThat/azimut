@@ -141,7 +141,8 @@ export const PLAYED_BLOCK = /^:::[ \t]*(steps|story)[ \t]*$/;
 export const CHART_STARTER = '::: chart\nkind: bars\n| Category | Count |\n| --- | ---: |\n|  |  |\n|  |  |\n:::';
 /** A map's block (`::: map`), which an HTML page draws as a map and a PDF as its picture. */
 export const MAP_BLOCK = /^:::[ \t]*map[ \t]*$/;
-const DIAGRAM = '```mermaid\nflowchart LR\n  A[Tip] --> B[Check]\n  B --> C[Confirmed]\n```';
+/** A diagram as the raw Markdown's `/` › Diagram writes it: Mermaid to edit (the drawn page opens a form, `editor/diagramBlock.js`). */
+export const DIAGRAM_STARTER = '```mermaid\nflowchart LR\n  A[Tip] --> B[Check]\n  B --> C[Confirmed]\n```';
 
 /** The `:::` blocks `/` › Alignment offers: where a line sits, or a corner of the cover. */
 const ALIGNMENTS = [
@@ -188,7 +189,10 @@ export const SLASH_COMMANDS = [
   { id: 'hint', label: 'Guidance', icon: 'help', words: 'hint guide help template', hint: 'Grey, never printed', template: true },
   { id: 'table', label: 'Table', icon: 'table', words: 'grid columns rows spreadsheet csv file', block: TABLE, action: 'table', hint: 'Rows by columns, or from a file' },
   { id: 'chart', label: 'Chart', icon: 'chart', words: 'chart graph bars pie donut pictograms waffle timeline figures plot', action: 'chart', hint: 'Drawn from a table, picked by its picture' },
-  { id: 'diagram', label: 'Diagram', icon: 'network', words: 'mermaid flowchart', block: DIAGRAM },
+  {
+    id: 'diagram', label: 'Diagram', icon: 'network', words: 'mermaid flowchart flow network organisation organization org chart tree timeline mind map sequence',
+    action: 'diagram', hint: 'Flow, network, tree, timeline…',
+  },
   { id: 'infographic', label: 'Infographic', icon: 'grid', words: 'infographic poster page panels key figures pie donut columns pictograms waffle', action: 'newInfographic', hint: 'Charts, a map and words on one page', notes: true },
   { id: 'steps', label: 'Steps', icon: 'columns', words: 'stepper slides sequence carousel before after days', block: STEPS_BLOCK, hint: 'Pictures one at a time, in HTML' },
   { id: 'story', label: 'Story', icon: 'text', words: 'scrollytelling scroll narrative sticky zoom', block: STORY_BLOCK, hint: 'Words scroll beside a picture, in HTML' },
@@ -229,7 +233,6 @@ export const INSERT_SECTIONS = [
 /** The line under an entry's name, for the entries that carry none of their own. */
 const ROW_HINTS = {
   table: 'Rows and columns',
-  diagram: 'Boxes and arrows, drawn from text',
 };
 
 /** The line an entry shows under its name in the menu. */

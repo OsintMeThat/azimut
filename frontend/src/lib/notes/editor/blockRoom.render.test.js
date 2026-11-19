@@ -51,7 +51,7 @@ describe('the room above and below a drawn block', () => {
     chart: '::: chart\nkind: bars\n| A | B |\n| --- | --- |\n| x | 1 |\n:::',
   };
   /** Where each kind keeps its room above and below now, as a clear border: what its margin was. */
-  const ROOM = { cover: '14px', pagebreak: '10px', diagram: '4px', steps: '4px', story: '4px', map: '4px', include: '6px' };
+  const ROOM = { cover: '14px', pagebreak: '10px', steps: '4px', story: '4px', map: '4px', include: '6px' };
 
   for (const [kind, source] of Object.entries(KINDS)) {
     it(`is never a margin the editor cannot measure, but inside the box of a ${kind}`, () => {
