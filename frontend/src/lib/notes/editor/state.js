@@ -51,7 +51,7 @@ export const templateMode = Facet.define({ combine: (values) => values.some(Bool
  */
 export const noteHandlers = Facet.define({ combine: (values) => values[0] ?? {} });
 
-/** Whether the editor has focus, which is when the line being edited shows its marks. */
+/** Whether the editor has focus, which is when a block at the cursor is picked and a template's guidance line is text. */
 export const setFocused = StateEffect.define();
 export const focused = StateField.define({
   create: () => false,
@@ -61,7 +61,7 @@ export const focused = StateField.define({
   },
 });
 
-/** The lines the cursor is on while the editor has focus: the ones that show their marks. */
+/** The lines the cursor is on while the editor has focus: where a template's guidance shows as text. */
 export function cursorLines(state) {
   const lines = new Set();
   if (!state.field(focused, false)) return lines;
@@ -81,6 +81,20 @@ export const selecting = StateField.define({
   update(value, transaction) {
     for (const effect of transaction.effects) if (effect.is(setSelecting)) return effect.value;
     return transaction.docChanged ? false : value;
+  },
+});
+
+/**
+ * Where the caret stood right after the last thing typed, or -1 once it moved or the
+ * text changed any other way. The page draws a shortcut being typed (`##`, `-`, the
+ * second `*` of `**words**`) as typed while the caret is still just after it, so
+ * nothing flashes into a heading or a bullet before the space that makes it one.
+ */
+export const typedAt = StateField.define({
+  create: () => -1,
+  update(value, transaction) {
+    if (transaction.docChanged) return transaction.isUserEvent('input.type') ? transaction.state.selection.main.head : -1;
+    return transaction.selection ? -1 : value;
   },
 });
 

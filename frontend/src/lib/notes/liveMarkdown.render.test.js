@@ -82,10 +82,11 @@ describe('an internal passage', () => {
     expect(lines[0].style.getPropertyValue('--callout')).toBe('var(--internal)');
     const label = view.dom.querySelector('.cm-callout-internal .cm-callout-label');
     expect(label.textContent).toBe('Internal');
-    expect(label.title).toBe('Left out of the public edition');
-    // the other callouts keep no hover of their own
+    // its name says what it does, and that a press on it offers its menu (Make public)
+    expect(label.title).toBe('Left out of the public edition. Click for its menu');
+    // the other callouts' names offer the other kinds
     editor('> [!lead] Ask the port.\n');
-    expect(view.dom.querySelector('.cm-callout-label').title).toBe('');
+    expect(view.dom.querySelector('.cm-callout-label').title).toBe('Click to change the kind');
   });
 });
 
@@ -170,11 +171,15 @@ describe('guidance', () => {
 });
 
 describe('Enter on an empty item', () => {
-  it('leaves a task list, and lets Markdown carry on anywhere else', () => {
-    editor('- [ ] Archive\n- [ ] ');
+  // the raw Markdown's rule; the drawn page's own, with the blank line it adds, is `editor/lineKeys.test.js`'s
+  it('leaves a task list in the raw Markdown, and lets Markdown carry on anywhere else', () => {
+    editor('- [ ] Archive\n- [ ] ', { mode: 'markdown' });
     expect(leaveEmptyItem(view)).toBe(true);
     expect(view.state.doc.toString()).toBe('- [ ] Archive\n');
-    editor('- [ ] Archive');
+    editor('- [ ] Archive', { mode: 'markdown' });
+    expect(leaveEmptyItem(view)).toBe(false);
+    // the drawn page leaves it to its own keys
+    editor('- [ ] Archive\n- [ ] ');
     expect(leaveEmptyItem(view)).toBe(false);
   });
 });

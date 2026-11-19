@@ -209,12 +209,22 @@ function rewrite(state, block, out) {
 
 const line = (prefix, parts) => ({ prefix, parts: [parts].flat() });
 
+/**
+ * Words put at the start of a block's line, escaped where Markdown would read them as a
+ * mark: a heading `1. What it cost` turned into text is `1\. What it cost`, not a list.
+ */
+function asWords(unit) {
+  const number = /^\d{1,9}(?=[.)](?:\s|$))/.exec(unit.text);
+  const at = number ? number[0].length : /^(?:[-+*](?=\s|$)|#{1,6}(?=\s|$)|>)/.test(unit.text) ? 0 : -1;
+  return at < 0 ? unit : { ...unit, text: `${unit.text.slice(0, at)}\\${unit.text.slice(at)}` };
+}
+
 /** The lines of a list of `items` (each a list of units) under `marker(index)`, its words under it indented to match. */
 function listLines(items, marker) {
   return items.flatMap((item, index) => {
     const mark = marker(index);
     const pad = ' '.repeat(mark.replace(/\[[ xX]\] $/, '').length);
-    return item.map((unit, at) => line(at ? pad : mark, unit));
+    return item.map((unit, at) => line(at ? pad : mark, asWords(unit)));
   });
 }
 
@@ -307,7 +317,7 @@ export function turnInto(state, block, shape) {
     for (const part of parts) {
       for (const item of part.type === 'list' ? part.items.map((one) => one.units) : [part.units]) {
         if (out.length) blank();
-        out.push(...item.map((unit) => line('', unit)));
+        out.push(...item.map((unit) => line('', asWords(unit))));
       }
     }
     return rewrite(state, block, out);
@@ -320,7 +330,7 @@ export function turnInto(state, block, shape) {
     return rewrite(state, block, callout ? [line(`> [!${callout}]`, []), ...lines] : lines);
   }
   const words = parts.flatMap((part) => part.units ?? []);
-  return rewrite(state, block, words.map((unit, index) => line(index ? '> ' : lead, unit)));
+  return rewrite(state, block, words.map((unit, index) => line(index ? '> ' : lead, asWords(unit))));
 }
 
 // -- internal passages -----------------------------------------------------------

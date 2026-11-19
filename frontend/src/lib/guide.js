@@ -796,7 +796,7 @@ export const PAGES = {
         text: 'Its first words, what is left to do and what it cites. Tick cards to export them or make a report of them.',
         opens: {
           shot: 'notebook-note',
-          lead: 'Headings, chips and pictures drawn as you type; the marks come back on the line you edit.',
+          lead: 'Headings, chips and pictures drawn as you type, with no Markdown on any line; Ctrl+Shift+M shows it.',
           marks: [
             { anchor: 'notebook.toolbar', title: 'Formatting', text: 'Headings, lists, tasks and callouts, or the same from /.' },
             { anchor: 'notebook.cite', title: 'Cite', text: '@ and a few letters put in a place, a person or a file as a chip.' },

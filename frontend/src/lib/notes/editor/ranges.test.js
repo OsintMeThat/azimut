@@ -29,7 +29,7 @@ describe('the blocks of a note', () => {
       ['pagebreak', true, '<!-- pagebreak -->'],
       ['table', true, '| A | B |\n| --- | --- |\n| 1 | 2 |'],
       ['code', false, '```js\ncode\n```'],
-      ['rule', false, '---'],
+      ['rule', true, '---'],
       ['aligned', true, '::: center\nCentred\n:::'],
       ['paragraph', false, 'End'],
     ]);
@@ -45,7 +45,7 @@ describe('the blocks of a note', () => {
     const table = NOTE.indexOf('| A |');
     const words = read(openedState(noteState(NOTE), table));
     expect(words).toContainEqual(['table', false, '| A | B |\n| --- | --- |\n| 1 | 2 |']);
-    expect(words.filter(([, drawn]) => drawn).map(([kind]) => kind)).toEqual(['picture', 'pagebreak', 'aligned']);
+    expect(words.filter(([, drawn]) => drawn).map(([kind]) => kind)).toEqual(['picture', 'pagebreak', 'rule', 'aligned']);
   });
 
   it('reads a quote, a callout or a list holding a drawn block as one block with it', () => {

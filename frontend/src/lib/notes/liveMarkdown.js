@@ -4,8 +4,10 @@
  * The file stays the Markdown the PDF and `lib/markdown.js` read. What changes is
  * the page: a heading is set large with its `#` put away, a case reference is a
  * chip, a picture, a table and a diagram are drawn, a task is a box to tick, and a
- * callout is a coloured block. The marks come back on the line being edited, so
- * nothing is hidden from the person writing it.
+ * callout is a coloured block under its name. No line shows its Markdown, the one
+ * being written in included: the caret steps over the marks put away, and the keys
+ * act on what the page shows (`editor/caret.js`, `editor/lineKeys.js`). The raw
+ * Markdown is one switch away (Ctrl+Shift+M).
  *
  * A block (a picture, a table, a diagram, an aligned block, a block of steps or a
  * story, a page break, a chapter)
@@ -18,7 +20,8 @@
  * or the + of an empty line the insert menu (`editor/insertMenu.js`), and what they
  * write is the Markdown an expert would type (`editor/marks.js`). A chip or a written
  * link, hovered or with the cursor in it, shows what the case knows of what it cites
- * (`editor/citationCard.js`).
+ * (`editor/citationCard.js`). A copy carries the Markdown and the page it makes, and a
+ * web page or a document pasted in is written as Markdown (`editor/clipboard.js`).
  *
  * Built on CodeMirror 6. Everything the page draws is worked out from the editor
  * state alone (`noteDecorations`), so it is tested without a browser.
@@ -45,17 +48,21 @@ import { autocompletion, completionKeymap, acceptCompletion } from '@codemirror/
 import { blockKinds } from './editor/blocks.js';
 import { blockKeys, pickedClass, typeNextToBlock, typeOnPicked } from './editor/blockKeys.js';
 import { selectionBubble } from './editor/bubble.js';
+import { caretExtensions } from './editor/caret.js';
 import { citationCard } from './editor/citationCard.js';
+import { pageClipboard } from './editor/clipboard.js';
 import { drawn, rawField, rawHighlight, typeOverHints } from './editor/decorations.js';
 import { handleExtensions } from './editor/handle.js';
 import './editor/kinds.js';
 import { insertMenu, insertPlus } from './editor/insertMenu.js';
+import { lineKeys } from './editor/lineKeys.js';
 import { mentionSource } from './editor/mentionMenu.js';
 import { landed, spots } from './editor/puts.js';
 import { blocksIn } from './editor/ranges.js';
+import { pagePresses } from './editor/pagePress.js';
 import { slashSource } from './editor/slashMenu.js';
 import {
-  focused, noteCase, noteHandlers, openBlock, resolve, setFocused, setNoteCase, setOpenBlock, templateMode,
+  focused, noteCase, noteHandlers, openBlock, resolve, setFocused, setNoteCase, setOpenBlock, templateMode, typedAt,
 } from './editor/state.js';
 import { highlight, look } from './editor/theme.js';
 import { leaveEmptyItem, tickTask, toggleWrap } from './editor/writing.js';
@@ -97,8 +104,9 @@ const drawnMode = [
   blockKinds().map((kind) => kind.extensions ?? []),
 ];
 const rawMode = [rawField, syntaxHighlighting(rawHighlight)];
-// what helps write on the drawn page without Markdown: the selection bubble, the + of an empty line
-drawnMode.push(selectionBubble, insertPlus);
+// what helps write on the drawn page without Markdown: the selection bubble, the + of an empty line,
+// and the caret, the keys, the presses and the clipboard of a page that never shows its marks
+drawnMode.push(selectionBubble, insertPlus, typedAt, caretExtensions, lineKeys, pagePresses, pageClipboard);
 
 /** `drawn` or `markdown`: how the page is shown now. */
 export function noteMode(state) {

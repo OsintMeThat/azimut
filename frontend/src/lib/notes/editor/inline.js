@@ -1,7 +1,7 @@
 /**
  * What the page draws inside a line: a case reference as a chip, coordinates with
- * their ⌖, a task's box, a bullet, a callout's name, a rule, a template's guidance
- * and the words the PDF fills in. Also the two helpers a drawn block uses to show
+ * their ⌖, a task's box, a bullet, a list's number, a callout's name, a template's
+ * guidance and the words the PDF fills in. Also the two helpers a drawn block uses to show
  * guidance and those words the way a line shows them.
  */
 import { WidgetType } from '@codemirror/view';
@@ -114,35 +114,53 @@ export class BulletWidget extends WidgetType {
   }
 }
 
-export class CalloutLabelWidget extends WidgetType {
-  constructor(callout) {
+/** A numbered item's number, as the list prints it: its first item's, then one more each. */
+export class NumberWidget extends WidgetType {
+  constructor(label) {
     super();
-    this.callout = callout;
+    this.label = label;
   }
 
   eq(other) {
-    return other.callout.kind === this.callout.kind;
+    return other.label === this.label;
+  }
+
+  toDOM() {
+    const number = document.createElement('span');
+    number.className = 'cm-number';
+    number.textContent = this.label;
+    return number;
+  }
+}
+
+/**
+ * A callout's name, at the head of its first line in place of `> [!kind]`. A press on it
+ * offers the other kinds, a plain quote and text (`editor/caret.js`); `at` is where its
+ * line starts.
+ */
+export class CalloutLabelWidget extends WidgetType {
+  constructor(callout, at) {
+    super();
+    this.callout = callout;
+    this.at = at;
+  }
+
+  eq(other) {
+    return other.callout.kind === this.callout.kind && other.at === this.at;
   }
 
   toDOM() {
     const label = document.createElement('span');
     label.className = 'cm-callout-label';
     label.textContent = this.callout.label;
+    label.dataset.calloutAt = String(this.at);
     // the one kind that changes what prints says so on hover
-    if (this.callout.kind === 'internal') label.title = this.callout.hint;
+    label.title = this.callout.kind === 'internal' ? `${this.callout.hint}. Click for its menu` : 'Click to change the kind';
     return label;
   }
-}
 
-export class RuleWidget extends WidgetType {
-  eq() {
-    return true;
-  }
-
-  toDOM() {
-    const rule = document.createElement('hr');
-    rule.className = 'cm-rule';
-    return rule;
+  ignoreEvent() {
+    return false;
   }
 }
 

@@ -9,6 +9,13 @@
  * registered in `editor/blocks.js`; the marks inside a line (headings, emphasis,
  * links, quotes and callouts, lists and tasks, code) are this module's own.
  *
+ * No line shows its Markdown, the one the cursor is on included: a heading's `#`, a
+ * quote's `>`, a list's mark, the `**` of bold and the address of a link are put away
+ * wherever they are, and the caret steps over them (`editor/caret.js`). Each piece put
+ * away says which side of it the caret takes (`conceal`): what is typed at the end of
+ * bold stays bold, at the end of a link it does not. Only an open block shows its
+ * source, and a shortcut being typed (`##`, `-`) stays as typed until it is one.
+ *
  * What a kind's `read` and `source` get as `ctx`:
  * `state`, `info` (the case), `pick` (the position a press picked, or -1),
  * `isOpen(from, to)` (whether the block over those lines shows its source),
@@ -29,13 +36,34 @@ import { COVER_LINE, coverLineIndex, findPlaceholders } from '../reportParts.js'
 import { findCoordinates, findReferences } from '../syntax.js';
 import { blockKind, fenceKinds, isAtomic, lineKinds, nodeKinds } from './blocks.js';
 import {
-  BulletWidget, CalloutLabelWidget, ChipWidget, CoordinatesWidget, HintWidget, PlaceholderWidget, RuleWidget, TaskWidget,
+  BulletWidget, CalloutLabelWidget, ChipWidget, CoordinatesWidget, HintWidget, NumberWidget, PlaceholderWidget, TaskWidget,
 } from './inline.js';
 import {
-  cursorLines, focused, noteCase, noteHandlers, openBlock, resolve, selecting, setFocused, setNoteCase, setSelecting, templateMode,
+  cursorLines, focused, noteCase, noteHandlers, openBlock, resolve, selecting, setFocused, setNoteCase, setSelecting, templateMode, typedAt,
 } from './state.js';
 
-const hidden = Decoration.replace({});
+/**
+ * A piece of syntax put away, and the side of it the caret takes (`editor/caret.js`):
+ * `prefix`, a line's own marks, the caret after them; `open` and `close`, the marks of
+ * bold, italic and strikethrough, the caret before each, so what is typed at their end
+ * carries the mark; `start` and `end`, the marks of code and of a link, the caret
+ * outside both. `mark` names the mark they belong to, for Ctrl+B at the caret.
+ */
+const conceal = (edge, mark) => Decoration.replace({ conceal: edge, mark });
+
+/** The class each mark around words is drawn in. */
+const MARK_CLASS = { bold: 'cm-strong', italic: 'cm-em', strike: 'cm-strike' };
+
+/** What a link's words say on hover: its address, and how to open it. Never shown inline. */
+export function linkTitle(url) {
+  const key = /Mac|iPhone|iPad/.test(globalThis.navigator?.platform ?? '') ? '⌘' : 'Ctrl';
+  return `${url}\n${key}+click to open, Ctrl+K to edit`;
+}
+
+/** A link's words, which carry its address for a press with Ctrl to open. */
+function linkMark(url) {
+  return Decoration.mark({ class: 'cm-link', attributes: { 'data-href': url, title: linkTitle(url) } });
+}
 
 function lineClass(name, attributes) {
   return Decoration.line({ class: name, attributes });
@@ -45,10 +73,10 @@ function lineClass(name, attributes) {
 const FENCE_CLOSE = /^:::[ \t]*$/;
 
 /**
- * The lines that show their marks: the ones the cursor is on, when the editor has
- * focus. Words selected are not being written in: their lines stay drawn under the
- * selection bubble. While the mouse is pressed, the lines that showed their marks when
- * it went down hold as they were (`selecting`), so nothing moves under the pointer.
+ * The lines being written in: the ones the cursor is on, when the editor has focus.
+ * Only a template's guidance shows as text there; nothing else of a line changes
+ * with the cursor. While the mouse is pressed, the lines held when it went down stay
+ * as they were (`selecting`), so nothing moves under the pointer.
  */
 function editedLines(state) {
   const held = state.field(selecting, false);
@@ -108,6 +136,8 @@ export function noteDecorations(state) {
   };
   const range = state.selection.main;
   const pick = state.field(focused, false) && range.empty ? range.head : -1;
+  const typed = state.field(typedAt, false) ?? -1;
+  const opened = []; // [from, to] of the blocks whose source shows, every line of it as written
   const tree = ensureSyntaxTree(state, state.doc.length, 200) ?? syntaxTree(state);
   const ranges = [];
   const covered = []; // [from, to] of blocks drawn whole; nothing else goes inside them
@@ -168,6 +198,7 @@ export function noteDecorations(state) {
       block(kind.name, found);
       return true;
     }
+    opened.push([state.doc.lineAt(found.from).from, state.doc.lineAt(found.to).to]);
     return Boolean((kind.source ?? (kind.fence ? fenceSource : null))?.(ctx, found));
   };
 
@@ -193,6 +224,19 @@ export function noteDecorations(state) {
     }
   }
 
+  /** Whether the lines `from`–`to` show their source: in a block that was opened, or whose source shows. */
+  const shows = (from, to = from) => inOpen(from, to) || opened.some(([start, end]) => from >= start && to <= end);
+  /** Put the syntax `from`–`to` away, unless its lines show their source. */
+  const hide = (from, to, edge, mark) => {
+    if (to > from && !shows(from, to)) ranges.push(conceal(edge, mark).range(from, to));
+  };
+  /** A piece of a line drawn as `widget` in place of its syntax, the caret taking `edge` of it. */
+  const swap = (from, to, widget, edge) => {
+    if (to > from && !shows(from, to)) ranges.push(Decoration.replace({ widget, conceal: edge }).range(from, to));
+  };
+  const numbers = new Map(); // where each item of a numbered list starts → the number it shows
+  const quoted = new Set(); // the lines whose quote marks are put away already: a quote in a quote has them once
+
   tree?.iterate({
     enter(node) {
       const { name, from, to } = node;
@@ -214,56 +258,93 @@ export function noteDecorations(state) {
       }
       if (name === 'FencedCode') {
         code.push([from, to]);
-        for (let line = state.doc.lineAt(from).number; line <= state.doc.lineAt(to).number; line += 1) {
+        const first = state.doc.lineAt(from).number;
+        const last = state.doc.lineAt(to).number;
+        // the fences of code, the one Markdown left on the page, stay faint beside what they hold
+        for (let line = first; line <= last; line += 1) {
           ranges.push(lineClass('cm-code-line').range(state.doc.line(line).from));
+          if (line === first || (line === last && /^\s*(`{3,}|~{3,})\s*$/.test(state.doc.line(line).text))) ranges.push(lineClass('cm-fence-line').range(state.doc.line(line).from));
         }
         return false;
       }
       if (name === 'InlineCode') {
         code.push([from, to]);
         ranges.push(Decoration.mark({ class: 'cm-inline-code' }).range(from, to));
-        if (!editing) {
-          node.node.getChildren('CodeMark').forEach((mark) => ranges.push(hidden.range(mark.from, mark.to)));
+        const marks = node.node.getChildren('CodeMark');
+        if (marks.length >= 2) {
+          hide(marks[0].from, marks[0].to, 'start', 'code');
+          hide(marks.at(-1).from, marks.at(-1).to, 'end', 'code');
         }
         return false;
       }
       if (name === 'SetextHeading1' || name === 'SetextHeading2') {
+        const rule = node.node.getChild('HeaderMark');
+        const under = rule ? state.doc.lineAt(rule.from) : null;
+        // a `-` just typed under words starts a list: they are no heading for it
+        if (under && typed === under.to && /^ {0,3}[-=][ \t]*$/.test(under.text)) return undefined;
         const level = name.endsWith('1') ? 1 : 2;
         ranges.push(lineClass(`cm-heading cm-h${level}`).range(state.doc.lineAt(from).from));
-        const mark = node.node.getChild('HeaderMark');
-        if (mark && !editing) ranges.push(lineClass('cm-setext-rule').range(state.doc.lineAt(mark.from).from));
+        if (under && !shows(under.from)) ranges.push(lineClass('cm-setext-rule').range(under.from));
         return undefined;
       }
       if (/^ATXHeading[1-6]$/.test(name)) {
-        const level = name.slice(-1);
-        ranges.push(lineClass(`cm-heading cm-h${level}`).range(state.doc.lineAt(from).from));
-        if (!editing) {
-          const mark = node.node.getChild('HeaderMark');
-          if (mark) ranges.push(hidden.range(mark.from, Math.min(to, mark.to + 1)));
-        }
+        const line = state.doc.lineAt(from);
+        const marks = node.node.getChildren('HeaderMark');
+        const open = marks[0];
+        // `##` just typed with nothing after it: a heading once the space comes
+        if (!open || (typed === line.to && open.to === line.to)) return undefined;
+        ranges.push(lineClass(`cm-heading cm-h${name.slice(-1)}`).range(line.from));
+        const words = open.to + /^[ \t]*/.exec(state.sliceDoc(open.to, line.to))[0].length;
+        hide(open.from, words, 'prefix');
+        // the closing `#`s some write, `## Title ##`, with the spaces before them
+        const last = marks.at(-1);
+        if (marks.length > 1 && last.from >= words) hide(last.from - /[ \t]*$/.exec(state.sliceDoc(words, last.from))[0].length, line.to, 'close');
         return undefined;
       }
       if (name === 'StrongEmphasis' || name === 'Emphasis' || name === 'Strikethrough') {
-        const kind = name === 'StrongEmphasis' ? 'cm-strong' : name === 'Emphasis' ? 'cm-em' : 'cm-strike';
-        ranges.push(Decoration.mark({ class: kind }).range(from, to));
-        if (!editing) {
-          const markName = name === 'Strikethrough' ? 'StrikethroughMark' : 'EmphasisMark';
-          node.node.getChildren(markName).forEach((mark) => ranges.push(hidden.range(mark.from, mark.to)));
-        }
+        const kind = name === 'StrongEmphasis' ? 'bold' : name === 'Emphasis' ? 'italic' : 'strike';
+        const marks = node.node.getChildren(name === 'Strikethrough' ? 'StrikethroughMark' : 'EmphasisMark');
+        if (marks.length < 2) return undefined;
+        const open = marks[0];
+        const close = marks.at(-1);
+        // the first `*` closing `**words*` just typed reads as italics: drawn once the second comes
+        if (typed === close.to && state.sliceDoc(open.from - 1, open.from) === state.sliceDoc(open.from, open.from + 1)) return undefined;
+        ranges.push(Decoration.mark({ class: MARK_CLASS[kind] }).range(from, to));
+        hide(open.from, open.to, 'open', kind);
+        hide(close.from, close.to, 'close', kind);
         return undefined;
       }
       if (name === 'Link') {
         // `[[entity:…|…]]` holds a bracket pair the parser reads as a link; it is a reference
         if (state.doc.sliceString(from, from + 2) === '[[' || state.doc.sliceString(from - 1, from) === '[') return false;
-        ranges.push(Decoration.mark({ class: 'cm-link' }).range(from, to));
-        if (!editing) {
-          const marks = node.node.getChildren('LinkMark');
-          const url = node.node.getChild('URL');
-          if (marks.length >= 2) {
-            ranges.push(hidden.range(marks[0].from, marks[0].to));
-            ranges.push(hidden.range(marks[1].from, url ? to : marks[1].to));
-          }
+        const marks = node.node.getChildren('LinkMark');
+        const url = node.node.getChild('URL');
+        // words in brackets with no address, `[1]` or `[sic]`, print as they are written
+        if (!url || marks.length < 3) return undefined;
+        ranges.push(linkMark(state.sliceDoc(url.from, url.to)).range(from, to));
+        hide(marks[0].from, marks[0].to, 'start', 'link');
+        hide(marks[1].from, to, 'end', 'link');
+        // the words of a link may be bold
+        return undefined;
+      }
+      if (name === 'Autolink') {
+        const marks = node.node.getChildren('LinkMark');
+        const url = node.node.getChild('URL');
+        if (url) ranges.push(linkMark(state.sliceDoc(url.from, url.to)).range(from, to));
+        if (url && marks.length === 2) {
+          hide(marks[0].from, marks[0].to, 'start', 'link');
+          hide(marks[1].from, marks[1].to, 'end', 'link');
         }
+        return false;
+      }
+      if (name === 'URL') {
+        // an address written bare, which the PDF links too
+        if (!['Link', 'Image', 'Autolink'].includes(node.node.parent?.name)) ranges.push(linkMark(state.sliceDoc(from, to)).range(from, to));
+        return false;
+      }
+      if (name === 'Escape') {
+        // `\*` prints `*`: its backslash is put away, the caret never between the two
+        hide(from, from + 1, 'start');
         return false;
       }
       if (name === 'Image') {
@@ -273,42 +354,59 @@ export function noteDecorations(state) {
       }
       if (name === 'Blockquote') {
         const firstLine = state.doc.lineAt(from);
+        const lastNumber = state.doc.lineAt(to).number;
+        // `>` just typed alone on its line: a quote once the space comes
+        if (lastNumber === firstLine.number && typed === firstLine.to && /^[ \t]*>$/.test(firstLine.text)) return undefined;
         const callout = calloutOf(firstLine.text);
-        for (let number = firstLine.number; number <= state.doc.lineAt(to).number; number += 1) {
+        for (let number = firstLine.number; number <= lastNumber; number += 1) {
           const line = state.doc.line(number);
           ranges.push(lineClass(callout ? `cm-callout cm-callout-${callout.kind}` : 'cm-quote',
             callout ? { style: `--callout: ${callout.colour}` } : undefined).range(line.from));
-          if (!lines.has(number)) {
-            const mark = /^\s*>\s?/.exec(line.text);
-            if (mark) ranges.push(hidden.range(line.from, line.from + mark[0].length));
-          }
+          if (quoted.has(number)) continue;
+          quoted.add(number);
+          const mark = /^(?:[ \t]*>[ \t]?)+/.exec(line.text);
+          if (mark) hide(line.from, line.from + mark[0].length, 'prefix');
         }
-        if (callout && !lines.has(firstLine.number)) {
+        if (callout) {
           const marker = CALLOUT_LINE.exec(firstLine.text);
           const quote = /^\s*>\s?/.exec(firstLine.text)[0].length;
-          ranges.push(Decoration.replace({ widget: new CalloutLabelWidget(callout) })
-            .range(firstLine.from + quote, firstLine.from + marker[0].length));
+          swap(firstLine.from + quote, firstLine.from + marker[0].length, new CalloutLabelWidget(callout, firstLine.from), 'prefix');
         }
         return undefined;
       }
       if (name === 'QuoteMark') return false;
-      if (name === 'HorizontalRule') {
-        if (!editing) ranges.push(Decoration.replace({ widget: new RuleWidget() }).range(from, to));
-        return false;
+      if (name === 'OrderedList') {
+        // the numbers a list prints: its first item's, then one more each
+        let number = null;
+        for (let item = node.node.firstChild; item; item = item.nextSibling) {
+          const mark = item.name === 'ListItem' ? item.getChild('ListMark') : null;
+          if (!mark) continue;
+          const written = state.sliceDoc(mark.from, mark.to);
+          number = number === null ? Number.parseInt(written, 10) : number + 1;
+          numbers.set(item.from, `${number}${written.slice(-1)}`);
+        }
+        return undefined;
       }
       if (name === 'ListItem') {
         const mark = node.node.getChild('ListMark');
+        if (!mark) return undefined;
+        const line = state.doc.lineAt(from);
+        // a mark just typed with nothing after it, `-` or `1.`: an item once the space comes
+        if (mark.to === line.to && typed === line.to) return undefined;
+        // the spaces after a mark are part of it, but past four the words start after one
+        const gap = (at) => {
+          const spaces = /^[ \t]*/.exec(state.sliceDoc(at, line.to))[0].length;
+          return at + (spaces > 4 ? 1 : spaces);
+        };
         const task = node.node.getChild('Task')?.getChild('TaskMarker');
-        const lineNumber = state.doc.lineAt(from).number;
         if (task) {
           const done = /x/i.test(state.doc.sliceString(task.from, task.to));
-          if (done) ranges.push(lineClass('cm-task-done').range(state.doc.lineAt(from).from));
-          if (!lines.has(lineNumber) && mark && state.doc.sliceString(mark.from, mark.to).match(/^[-*+]$/)) {
-            ranges.push(hidden.range(mark.from, task.from));
-          }
-          ranges.push(Decoration.replace({ widget: new TaskWidget(done, task.from) }).range(task.from, task.to));
-        } else if (mark && !lines.has(lineNumber) && /^[-*+]$/.test(state.doc.sliceString(mark.from, mark.to))) {
-          ranges.push(Decoration.replace({ widget: new BulletWidget() }).range(mark.from, mark.to));
+          if (done) ranges.push(lineClass('cm-task-done').range(line.from));
+          swap(mark.from, gap(task.to), new TaskWidget(done, task.from), 'prefix');
+        } else if (/\d/.test(state.sliceDoc(mark.from, mark.to))) {
+          swap(mark.from, gap(mark.to), new NumberWidget(numbers.get(from) ?? state.sliceDoc(mark.from, mark.to)), 'prefix');
+        } else {
+          swap(mark.from, gap(mark.to), new BulletWidget(), 'prefix');
         }
         return undefined;
       }
@@ -323,8 +421,6 @@ export function noteDecorations(state) {
   for (let number = 1; number <= state.doc.lines; number += 1) {
     const line = state.doc.line(number);
     if (inside(line.from) || !line.text) continue;
-    // the line being written in, or one of an open block, shows what it is made of
-    const editing = lines.has(number) || inOpen(line.from, line.to);
     let taken = false;
     for (const kind of ownLines) {
       const found = kind.line(line, ctx);
@@ -333,13 +429,15 @@ export function noteDecorations(state) {
       break;
     }
     if (taken) continue;
+    // only a block whose source is open shows what a line is made of
+    const source = shows(line.from, line.to);
     const refs = findReferences(line.text, line.from).filter((ref) => !inCode(ref.from));
     for (const ref of refs) {
       const entity = resolve(info, ref.id);
-      if (editing) ranges.push(Decoration.mark({ class: 'cm-ref-source' }).range(ref.from, ref.to));
+      if (source) ranges.push(Decoration.mark({ class: 'cm-ref-source' }).range(ref.from, ref.to));
       else {
         whole.push(ref);
-        ranges.push(Decoration.replace({ widget: new ChipWidget(ref, entity) }).range(ref.from, ref.to));
+        ranges.push(Decoration.replace({ widget: new ChipWidget(ref, entity), conceal: 'atom' }).range(ref.from, ref.to));
       }
     }
     for (const point of findCoordinates(line.text, line.from)) {
@@ -347,19 +445,19 @@ export function noteDecorations(state) {
       ranges.push(Decoration.mark({ class: 'cm-coords' }).range(point.from, point.to));
       if (!mapless) ranges.push(Decoration.widget({ widget: new CoordinatesWidget(point.lat, point.lon), side: 1 }).range(point.to));
     }
-    // the words the PDF fills in: grey on the line being written, drawn as they print elsewhere
+    // the words the PDF fills in, drawn as they print, their source in an open block
     const placeholders = HINT_LINE.test(line.text) ? [] : findPlaceholders(line.text, line.from);
     for (const word of placeholders) {
       if (inCode(word.from) || refs.some((ref) => word.from < ref.to && word.to > ref.from)) continue;
-      if (editing) ranges.push(Decoration.mark({ class: 'cm-placeholder-source' }).range(word.from, word.to));
-      else ranges.push(Decoration.replace({ widget: new PlaceholderWidget(word.id, info.identity) }).range(word.from, word.to));
+      if (source) ranges.push(Decoration.mark({ class: 'cm-placeholder-source' }).range(word.from, word.to));
+      else ranges.push(Decoration.replace({ widget: new PlaceholderWidget(word.id, info.identity), conceal: 'atom' }).range(word.from, word.to));
     }
   }
   // a chip stands for its whole reference, and a chapter for its line: a mark the parser found inside is not drawn
-  const kept = whole.length
-    ? ranges.filter((range) => !whole.some((item) => range.from >= item.from && range.to <= item.to
-      && !(range.from === item.from && range.to === item.to)))
-    : ranges;
+  // and what a block drawn whole stands over is its own: the marks of a quote around a table go with it
+  const kept = ranges.filter((range) => !whole.some((item) => range.from >= item.from && range.to <= item.to
+    && !(range.from === item.from && range.to === item.to))
+    && !(range.value.spec.conceal && covered.some(([from, to]) => range.from >= from && range.to <= to)));
   return Decoration.set(kept, true);
 }
 
@@ -377,9 +475,10 @@ export const drawn = StateField.define({
   },
   provide: (field) => [
     EditorView.decorations.from(field),
-    // a drawn block is one piece, so the cursor steps over it; in a note so is a line of guidance, and a delete takes it whole
+    // a drawn block is one piece, so the cursor steps over it; in a note so is a line of guidance, and a delete takes it whole;
+    // and so is every piece of syntax put away, a chip, a bullet: the caret never stands inside one
     EditorView.atomicRanges.of((view) => view.state.field(field).update({
-      filter: (_from, _to, value) => isAtomic(value.spec.widget)
+      filter: (_from, _to, value) => Boolean(value.spec.conceal) || isAtomic(value.spec.widget)
         || (!view.state.facet(templateMode) && value.spec.widget instanceof HintWidget),
     })),
   ],
