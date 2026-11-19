@@ -14,7 +14,7 @@ from fastapi import APIRouter, Form, HTTPException, UploadFile
 from fastapi.responses import Response
 from pydantic import BaseModel, Field
 
-from ..engine import iconlibrary
+from ..engine import iconlibrary, iconvector
 
 router = APIRouter(prefix="/api", tags=["icons"])
 
@@ -43,11 +43,15 @@ def icon_png(key: str) -> Response:
 async def import_icons(
     files: list[UploadFile],
     groups: list[str] = Form(default=[]),
+    vectors: list[str] = Form(default=[]),
 ) -> dict[str, Any]:
     """Image files filed in the library, each in the group at its place in `groups`.
 
     SVG files arrive already drawn as PNGs: the browser renders them, and this
-    route refuses anything Pillow cannot decode as a picture.
+    route refuses anything Pillow cannot decode as a picture. At an SVG's place,
+    `vectors` holds the SVG itself, "" elsewhere: the library keeps a copy of it
+    rebuilt from an allowlist of shapes (`iconvector`), never the file. One past
+    `iconvector.MAX_SOURCE_BYTES` is left out and its icon keeps its PNG alone.
     """
     if len(files) > MAX_FILES_PER_REQUEST:
         raise HTTPException(status_code=413, detail=f"send at most {MAX_FILES_PER_REQUEST} icons at once")
@@ -56,7 +60,8 @@ async def import_icons(
         data = await upload.read(iconlibrary.MAX_FILE_BYTES + 1)
         group = groups[index][: iconlibrary.MAX_GROUP * 4] if index < len(groups) else ""
         read.append(((upload.filename or "icon")[:300], data, group))
-    return iconlibrary.add_files(read)
+    sent = [text if len(text.encode("utf-8")) <= iconvector.MAX_SOURCE_BYTES else "" for text in vectors[:len(read)]]
+    return iconlibrary.add_files(read, sent)
 
 
 class IconUpdateIn(BaseModel):

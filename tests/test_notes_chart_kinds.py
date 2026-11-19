@@ -11,6 +11,8 @@ from __future__ import annotations
 
 import io
 import math
+import re
+from dataclasses import replace
 from pathlib import Path
 from xml.etree import ElementTree
 
@@ -149,7 +151,8 @@ def test_the_kinds_are_registered_in_the_pickers_order_with_their_keys():
     assert names[4:14] == list(NEW_KINDS)
     assert nc.KINDS["donut"].keys == ("centre", "center")
     assert nc.KINDS["waffle"].keys == ("of", "squares")
-    assert nc.KINDS["silhouette rows"].keys == ("icon", "flag", "per glyph")
+    assert nc.KINDS["pictograms"].keys == ("icon", "icons", "per glyph")
+    assert nc.KINDS["silhouette rows"].keys == ("icon", "icons", "flag", "flags", "per glyph")
     assert all(nc.KINDS[name].parts for name in ("pie", "donut", "segments", "pictograms", "waffle", "circles"))
     assert not any(nc.KINDS[name].counts for name in ("key figures", "timeline", "line"))
     for word, name in (("doughnut", "donut"), ("segmented bar", "segments"), ("unit chart", "pictograms"),
@@ -503,6 +506,119 @@ def test_own_icons_draw_as_pictures_a_silhouette_in_its_parts_colour_a_flag_as_i
     assert any(f'cannot draw "own:{vehicle}"' in message for message in _messages(gone))
     assert sum(isinstance(mark, nc.Picture) for mark in _flat(gone)) == 1  # the flag; the vehicles are dots
     assert kinds.glyph(f"own:{vehicle}").key == "dot"
+
+
+def _vector_icon(mode: str = "disc", name: str = "Truck.svg") -> str:
+    """An icon imported from an SVG, as Settings › Icons files it: its picture as the browser
+    drew it, and its shapes kept beside it."""
+    image = Image.new("RGBA", (256, 128), (0, 0, 0, 0))
+    ImageDraw.Draw(image).rectangle((43, 21, 212, 106), fill=(34, 34, 34, 255))
+    out = io.BytesIO()
+    image.save(out, "PNG")
+    svg = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 48 24"><path d="M8 4h32v16H8z" fill="#222"/></svg>'
+    [filed] = iconlibrary.add_files([(name, out.getvalue(), "Vehicles")], [svg])["filed"]
+    iconlibrary.update(filed["key"], {"mode": mode})
+    return filed["key"]
+
+
+TRUCK = '<path d="M8 4h32v16H8z" fill="{}"/>'
+FOUR = "| Model |\n| --- |\n| Cougar |\n| Cougar |\n| Cougar |\n| Oshkosh |"
+
+
+def _stripped(chart: nc.Layout) -> nc.Layout:
+    """The chart with no icon's vector: what it drew before icons kept one."""
+    def strip(mark):
+        if isinstance(mark, nc.Group):
+            return nc.Group(tuple(strip(inner) for inner in mark.marks), mark.title)
+        return replace(mark, vector="", view=(0.0, 0.0, 0.0, 0.0)) if isinstance(mark, nc.Picture) else mark
+    return replace(chart, marks=[strip(mark) for mark in chart.marks])
+
+
+def test_an_icon_kept_as_a_vector_draws_its_shapes_in_the_svg_and_its_picture_in_the_png(tmp_workspace):
+    key = _vector_icon("disc")
+    body = (f"kind: pictograms\ncount: rows\nby: Model\ncolours: Cougar #eb6834, Oshkosh #184f95\n"
+            f"icon: own:{key}\nsource: x\n{FOUR}")
+    chart = _layout(body)
+    pictures = [mark for mark in _flat(chart) if isinstance(mark, nc.Picture)]
+    assert len(pictures) == 4 and all(picture.vector and picture.data for picture in pictures)
+    svg = nc.svg(chart)
+    # a silhouette: each part's glyphs in its colour, as shapes, and no picture of them
+    assert svg.count(TRUCK.format("#eb6834")) == 3 and svg.count(TRUCK.format("#184f95")) == 1
+    assert "<image" not in svg and "#222" not in svg
+    # the PNG painter, and so the PDF and the pictures, draw the picture as before
+    assert nc.render_png(chart, 640) == nc.render_png(_stripped(chart), 640)
+    iconlibrary.update(key, {"mode": "image"})
+    as_it_is = nc.svg(_layout(body))
+    assert as_it_is.count(TRUCK.format("#222")) == 4 and TRUCK.format("#eb6834") not in as_it_is
+
+
+def test_an_icon_kept_before_vectors_draws_its_picture_as_it_did(tmp_workspace):
+    [old] = iconlibrary.add_pngs([{"png": _png_icon(), "name": "MRAP", "mode": "disc"}])["added"]
+    assert "vector" not in old
+    svg = nc.svg(_layout(f"kind: pictograms\ncount: rows\nby: Model\nicon: own:{old['key']}\nsource: x\n{FOUR}"))
+    assert svg.count('<image href="data:image/png;base64,') == 4 and "clip-path" not in svg
+
+
+def test_a_glyph_drawn_in_part_keeps_its_cut_in_the_vector(tmp_workspace):
+    key = _vector_icon("disc")
+    chart = _layout(f"kind: pictograms\ncount: rows\nby: Model\nicon: own:{key}\nper glyph: 2\nsource: x\n{FOUR}")
+    svg = nc.svg(chart, ident="cut")
+    # four vehicles, two a glyph: Cougar's three fill one and a half, Oshkosh the half left
+    assert svg.count('clip-path="url(#cut-k') == 2 and svg.count("<clipPath id=") == 2
+    assert re.search(r'<clipPath id="cut-k1"><rect x="[\d.]+" y="[\d.]+" width="[\d.]+" height="[\d.]+"/></clipPath>', svg)
+
+
+def test_icons_give_each_value_its_own_glyph_and_flags_each_row_its_flag(tmp_workspace):
+    truck = _vector_icon("disc")
+    flag = iconlibrary.add_pngs([{"png": _png_icon((0, 115, 47, 255), (90, 60)), "name": "UAE", "mode": "image"}])["added"][0]["key"]
+    pictograms = _layout(f"kind: pictograms\ncount: rows\nby: Model\nicon: star\n"
+                         f"icons: Cougar = own:{truck}, Oshkosh = square\nsource: x\n{FOUR}\n| Al-Wahsh |")
+    svg = nc.svg(pictograms)
+    assert svg.count('d="M8 4h32v16H8z"') == 3
+    assert svg.count(kinds._PLAIN_SHAPES["square"]) == 1 and svg.count(kinds._PLAIN_SHAPES["star"]) == 1
+    rows = _layout(f"kind: silhouette rows\ncount: rows\nby: Maker\nicon: armoured vehicle\n"
+                   f"flags: Streit Group, UAE = own:{flag}\nsource: x\n| Maker |\n| --- |\n"
+                   f"| Streit Group, UAE |\n| Oshkosh, USA |")
+    flags = [mark for mark in _flat(rows) if isinstance(mark, nc.Picture)]
+    assert len(flags) == 1  # the one row a flag is given, the other room kept for its name
+    names = {mark.text: mark.x for mark in _flat(rows) if isinstance(mark, nc.Text)}
+    assert names["Streit Group, UAE"] == names["Oshkosh, USA"] > flags[0].x
+    assert not _messages(rows)
+
+
+def test_a_rows_own_icon_wins_over_its_values_and_the_icon_line(tmp_workspace):
+    table = "source: x\n| Model | Glyph |\n| --- | --- |\n| Cougar | pickup |\n| Cougar | |\n| Oshkosh | |"
+    by_column = nc.read(_block(f"kind: pictograms\ncount: rows\nby: Model\nicon: Glyph\nicons: Cougar = square\n{table}"))
+    column = kinds._icon_column(by_column, "icon")
+    assert column == 1
+    assert kinds._icon_for(by_column, 0, column, "Cougar") == "badge-pickup"
+    assert kinds._icon_for(by_column, 1, column, "Cougar") == "square"
+    assert kinds._icon_for(by_column, 2, column, "Oshkosh") == "dot"
+    one = nc.read(_block(f"kind: pictograms\ncount: rows\nby: Model\nicon: star\nicons: Cougar = square\n{table}"))
+    assert kinds._icon_for(one, 0, None, "Cougar") == "square"
+    assert kinds._icon_for(one, 2, None, "Oshkosh") == "star"
+
+
+def test_icons_read_whole_however_long_and_say_what_they_cannot_draw_or_find(tmp_workspace):
+    many = ", ".join(f"Model {index} = own:{index:016x}" for index in range(30))
+    assert len(many) > nc.MAX_LINE
+    assert nc.parse_block(f"kind: pictograms\nicons: {many}\n| Model |\n| --- |\n| A |").extra["icons"] == many
+    assert kinds.glyph_pairs("Streit Group, UAE = own:aaaaaaaaaaaaaaaa, Oshkosh = truck, Lost") == [
+        ("Streit Group, UAE", "own:aaaaaaaaaaaaaaaa"), ("Oshkosh", "truck"), ("Lost", "")]
+    reading = nc.read(_block("kind: silhouette rows\ncount: rows\nby: Model\nicons: Cougar = unicorn, Ghost = truck\n"
+                             "flags: Cougar = own:0123456789abcdef, Oshkosh\nsource: x\n" + FOUR))
+    said = _messages(reading)
+    assert 'A chart cannot draw "unicorn" for "Cougar": name a badge of the map or an icon of your library.' in said
+    assert 'A chart gives an icon to "Ghost", which no row holds.' in said
+    assert 'A chart cannot draw "own:0123456789abcdef" for "Cougar": name a badge of the map or an icon of your library.' in said
+    assert 'A chart cannot read "Oshkosh" in flags: write it as Name = icon.' in said
+
+
+def test_the_values_given_a_glyph_each_are_a_pictograms_parts_and_a_silhouettes_rows():
+    pictograms = nc.read(_block(f"kind: pictograms\ncount: rows\nby: Model\nsource: x\n{FOUR}"))
+    assert kinds.glyph_values(pictograms) == ["Cougar", "Oshkosh"]
+    rows = nc.read(_block(f"kind: silhouette rows\ncount: rows\nby: Model\nsource: x\n{FOUR}"))
+    assert kinds.glyph_values(rows) == ["Cougar", "Oshkosh"]
 
 
 # -- waffle ------------------------------------------------------------------------------------------

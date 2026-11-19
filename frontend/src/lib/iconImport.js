@@ -4,15 +4,19 @@
  *
  * The browser does two things here the server will not. It opens a zip, so a
  * pack's folders become the library's groups. And it draws every SVG as a PNG:
- * the server stores no SVG, since one can carry a script, and Python has no
+ * the server stores no SVG file, since one can carry a script, and Python has no
  * renderer for one that installs everywhere. An image drawn from an SVG runs
- * nothing, the browser's own rule for `<img>`.
+ * nothing, the browser's own rule for `<img>`. The SVG rides beside its PNG, and
+ * the server keeps a copy of it rebuilt from an allowlist of shapes
+ * (`engine/iconvector.py`), so a chart drawn as SVG draws the icon sharp.
  */
 
 /** Sides of the PNG an SVG is drawn as: the server sizes it down to the library's weight. */
 export const SVG_SIDE = 256;
 /** What one file may weigh, as the server's limit (`iconlibrary.MAX_FILE_BYTES`). */
 export const MAX_FILE_BYTES = 512 * 1024;
+/** The longest SVG sent for its vector copy (`iconvector.MAX_SOURCE_BYTES`); a longer one keeps its PNG alone. */
+export const MAX_VECTOR_BYTES = 256 * 1024;
 /** How many files one request carries (`api/icons.MAX_FILES_PER_REQUEST`). */
 export const BATCH = 50;
 /** A zip is read whole in memory, so it is bounded: its size, its members, what each inflates to. */
@@ -100,11 +104,13 @@ export async function inflateRaw(bytes, limit) {
 }
 
 /**
- * An SVG drawn as a PNG `side` pixels on its longer edge, or null. An SVG that
- * states no size of its own is given one from its viewBox, or it would draw at
- * the browser's default and come out cropped or blank.
+ * An SVG made ready to draw `side` pixels on its longer edge, `{ markup, width,
+ * height }`, or null. An SVG that states no size of its own is given one from its
+ * viewBox, or it would draw at the browser's default and come out cropped or
+ * blank; one with no viewBox is given one from its size. The markup is what is
+ * drawn, and what the server reads its vector copy from, so the two agree.
  */
-export async function rasterSvg(text, { side = SVG_SIDE, draw = drawSvg } = {}) {
+export function prepareSvg(text, { side = SVG_SIDE } = {}) {
   const doc = new DOMParser().parseFromString(String(text), 'image/svg+xml');
   const root = doc.documentElement;
   if (!root || root.nodeName.toLowerCase() !== 'svg' || doc.getElementsByTagName('parsererror').length) return null;
@@ -118,7 +124,19 @@ export async function rasterSvg(text, { side = SVG_SIDE, draw = drawSvg } = {}) 
   const out = { width: Math.max(1, Math.round(width * fit)), height: Math.max(1, Math.round(height * fit)) };
   root.setAttribute('width', String(out.width));
   root.setAttribute('height', String(out.height));
-  return draw(new XMLSerializer().serializeToString(root), out);
+  return { markup: new XMLSerializer().serializeToString(root), ...out };
+}
+
+/** An SVG drawn as a PNG `side` pixels on its longer edge, or null. */
+export async function rasterSvg(text, { side = SVG_SIDE, draw = drawSvg } = {}) {
+  const prepared = prepareSvg(text, { side });
+  return prepared ? draw(prepared.markup, { width: prepared.width, height: prepared.height }) : null;
+}
+
+/** The SVG sent beside its PNG for the server's vector copy, '' past `MAX_VECTOR_BYTES` or unread. */
+export function vectorOf(text) {
+  const markup = prepareSvg(text)?.markup ?? '';
+  return new Blob([markup]).size <= MAX_VECTOR_BYTES ? markup : '';
 }
 
 async function drawSvg(markup, { width, height }) {
@@ -141,9 +159,10 @@ async function drawSvg(markup, { width, height }) {
 }
 
 /**
- * Picked files → `{ items: [{ name, blob, group }], skipped: [{ name, reason }] }`.
- * A file in a picked folder carries its path (`webkitRelativePath`), which names
- * its group as a folder in a zip does.
+ * Picked files → `{ items: [{ name, blob, group, vector }], skipped: [{ name, reason }] }`,
+ * `vector` the SVG a picture was drawn from (`vectorOf`), '' for the others. A file in
+ * a picked folder carries its path (`webkitRelativePath`), which names its group as a
+ * folder in a zip does.
  */
 export async function collectIcons(files, { svg = rasterSvg, zip = readZip } = {}) {
   const items = [];
@@ -151,8 +170,9 @@ export async function collectIcons(files, { svg = rasterSvg, zip = readZip } = {
   const take = async (path, blob) => {
     const name = leaf(path);
     if (SVG.test(name)) {
-      const png = await svg(await blob.text()).catch(() => null);
-      if (png) items.push({ name, blob: png, group: groupOf(path) });
+      const text = await blob.text();
+      const png = await svg(text).catch(() => null);
+      if (png) items.push({ name, blob: png, group: groupOf(path), vector: vectorOf(text) });
       else skipped.push({ name, reason: 'this SVG could not be drawn' });
     } else if (PICTURE.test(name)) {
       if (blob.size > MAX_FILE_BYTES) skipped.push({ name, reason: 'an icon file weighs at most 512 KB' });
@@ -186,22 +206,25 @@ export async function collectIcons(files, { svg = rasterSvg, zip = readZip } = {
 
 /**
  * Collect, then send in batches. `onprogress(sent, total)` follows the batches;
- * the answer adds them up: `{ added, already, skipped }`. A `group` files every
- * icon there, whatever folder it came in.
+ * the answer adds them up: `{ added, already, skipped, filed }`, `filed` the icon
+ * each file read became, new or already there, `{ name, key }`. A `group` files
+ * every icon there, whatever folder it came in.
  */
 export async function importIcons(files, { api, onprogress = null, collect = collectIcons, group = '' } = {}) {
   const { items, skipped } = await collect(files);
-  const answer = { added: [], already: 0, skipped: [...skipped] };
+  const answer = { added: [], already: 0, skipped: [...skipped], filed: [] };
   for (let at = 0; at < items.length; at += BATCH) {
     const form = new FormData();
     for (const item of items.slice(at, at + BATCH)) {
       form.append('files', item.blob, item.name);
       form.append('groups', group || item.group);
+      form.append('vectors', item.vector ?? '');
     }
     const body = await api.post('/api/icons', form);
     answer.added.push(...(body.added ?? []));
     answer.already += body.already ?? 0;
     answer.skipped.push(...(body.skipped ?? []));
+    answer.filed.push(...(body.filed ?? []));
     onprogress?.(Math.min(items.length, at + BATCH), items.length);
   }
   return answer;

@@ -453,6 +453,18 @@ def test_the_figure_route_answers_the_svg_with_its_title_and_what_the_check_says
     assert checked.headers["x-note-warning-lines"] == "[1]"
 
 
+def test_the_figure_route_names_the_values_a_chart_of_glyphs_gives_an_icon_each(client):
+    """The card's Icon and Flag rows list what the engine draws, as it names it."""
+    cid, _ = _case(client)
+    rows = ("::: chart\nkind: silhouette rows\ncount: rows\nby: Maker\nsource: x\n| Maker |\n| --- |\n"
+            "| Streit Group, UAE |\n| Oshkosh, USA |\n| Streit Group, UAE |\n:::")
+    kind = json.loads(client.post(f"/api/cases/{cid}/notes/figure", json={"text": rows}).headers["x-chart-kind"])
+    assert kind["keys"] == ["icon", "icons", "flag", "flags", "per glyph"]
+    assert kind["values"] == ["Streit Group, UAE", "Oshkosh, USA"]
+    bars = json.loads(client.post(f"/api/cases/{cid}/notes/figure", json={"text": SMALL}).headers["x-chart-kind"])
+    assert bars["keys"] == [] and "values" not in bars
+
+
 @pytest.mark.parametrize("size, pixels", [("page", (1960, None)), ("x", (1600, 900)), ("portrait", (1080, 1350)),
                                           ("square", (1080, 1080))])
 def test_the_figure_route_paints_a_picture_for_each_destination(client, size, pixels):

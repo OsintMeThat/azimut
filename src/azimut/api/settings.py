@@ -28,6 +28,7 @@ from ..engine import (
     githubpages,
     google_tiles,
     iconlibrary,
+    iconvector,
     notelook,
     notes_web,
     notes_wordpress,
@@ -1093,6 +1094,8 @@ class ImportedIcon(BaseModel):
     mode: Literal["disc", "image"] = "image"
     aliases: list[Annotated[str, Field(pattern=r"^[0-9a-f]{16}$")]] = Field(default_factory=list, max_length=iconlibrary.MAX_ALIASES)
     png_base64: str = Field(max_length=iconlibrary.MAX_BACKUP_B64)
+    #: Its vector copy, cleaned again through the allowlist an import's goes through.
+    svg: str = Field(default="", max_length=iconvector.MAX_SOURCE_BYTES)
 
 
 class ImportIn(BaseModel):

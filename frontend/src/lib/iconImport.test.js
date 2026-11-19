@@ -6,7 +6,7 @@
  * than sent, and an SVG drawn into a picture before it leaves the browser.
  */
 import { describe, expect, it, vi } from 'vitest';
-import { BATCH, MAX_FILE_BYTES, collectIcons, groupOf, importIcons, inflateRaw, rasterSvg, readZip } from './iconImport.js';
+import { BATCH, MAX_FILE_BYTES, MAX_VECTOR_BYTES, collectIcons, groupOf, importIcons, inflateRaw, rasterSvg, readZip, vectorOf } from './iconImport.js';
 
 const bytes = (text) => new TextEncoder().encode(text);
 
@@ -157,5 +157,24 @@ describe('collecting and sending', () => {
     const api = { post: vi.fn(async () => ({ added: [], already: 0, skipped: [] })) };
     await importIcons([], { api, group: 'Drones', collect: async () => ({ items, skipped: [] }) });
     expect(api.post.mock.calls[0][1].getAll('groups')).toEqual(['Drones', 'Drones']);
+  });
+
+  it('sends an SVG beside its picture, as it was drawn, for the server’s vector copy', async () => {
+    const svg = vi.fn(async () => new Blob(['png']));
+    const source = '<svg xmlns="http://www.w3.org/2000/svg" width="32" height="16"><rect width="32" height="16"/></svg>';
+    const { items } = await collectIcons([new File([source], 'truck.svg'), new File([new Uint8Array(4)], 'tank.png')], { svg });
+    expect(items.map((item) => item.name)).toEqual(['truck.svg', 'tank.png']);
+    expect(items[0].vector).toContain('viewBox="0 0 32 16"');
+    expect(items[1].vector).toBeUndefined();
+    const api = { post: vi.fn(async (_path, form) => ({ added: [], already: 2, skipped: [],
+      filed: form.getAll('files').map((_entry, index) => ({ name: `icon ${index}`, key: `${index}`.repeat(16) })) })) };
+    const answer = await importIcons([], { api, collect: async () => ({ items, skipped: [] }) });
+    expect(api.post.mock.calls[0][1].getAll('vectors')).toEqual([items[0].vector, '']);
+    expect(answer.filed.map((one) => one.key)).toEqual(['0'.repeat(16), '1'.repeat(16)]);
+  });
+
+  it('sends no vector for an SVG too long to keep one, or one that does not read', () => {
+    expect(vectorOf(`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1 1"><path d="M0 0${'h1'.repeat(MAX_VECTOR_BYTES / 2)}"/></svg>`)).toBe('');
+    expect(vectorOf('<html>no</html>')).toBe('');
   });
 });

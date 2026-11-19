@@ -492,6 +492,13 @@ stops making sense.
   risk, said in the dialog before the press: the Internet Archive learns the addresses a
   note cites and keeps a public copy of each; the links of internal passages go only when
   the analyst ticks them in.
+  An icon imported as an SVG keeps, beside its PNG, a copy of its shapes that the HTML
+  report, the web folder and the editor's chart write inline. It is rebuilt from an
+  allowlist (nine shape elements, geometry and paint attributes, each value checked), never
+  passed through, so no script, event attribute, `<foreignObject>`, `<use>`, `<style>`,
+  `href` or `url(…)` survives; defusedxml parses it with the DOCTYPE and every entity
+  refused, within 256 KB, 2,000 elements and 32 levels, and it is cleaned again when read
+  back and when a backup restores it. A copy that would draw less than its PNG is not kept.
   Accepted risks recorded here: cleartext keys over
   localhost, the WordPress application password and the GitHub token readable by anyone
   who can read the workspace (as the API keys are), the hash-verified scraper updater, Intel macOS staying on cryptography 48

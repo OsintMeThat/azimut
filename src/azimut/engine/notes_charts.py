@@ -117,6 +117,10 @@ MAX_COLUMNS = 24
 MAX_CELL = 300
 MAX_TITLE = 200
 MAX_LINE = 400
+#: A line that names a glyph for each value (``icons``, ``flags``): a dozen values, each
+#: with an icon's key, are longer than any other setting.
+MAX_GLYPH_LINE = 4000
+GLYPH_LINES = ("icons", "flags")
 #: Values one colour column shows before the rest are drawn as one "Other".
 MAX_VALUES = 8
 #: Sources a credit line names before it counts the rest.
@@ -575,8 +579,8 @@ def _setting(block: ChartBlock, offset: int, line: str) -> None:
         block.unread.append((offset, line[:120], "not a setting"))
         return
     written = " ".join(match.group(1).split()).casefold()
-    value = " ".join(CONTROL.sub("", match.group(2)).split())[:MAX_LINE]
     key = KEYS.get(written) or (written if written in _KIND_KEYS else "")
+    value = " ".join(CONTROL.sub("", match.group(2)).split())[:MAX_GLYPH_LINE if key in GLYPH_LINES else MAX_LINE]
     if not key:
         block.unread.append((offset, line[:120], "unknown"))
         return
@@ -1500,7 +1504,12 @@ class Group:
 class Picture:
     """A picture in a box: an icon of the analyst's own, later a frame on a wall. ``data``
     is a PNG or a JPEG; ``cover`` fills the box and crops what is past it, else the whole
-    picture is fitted in the box, centred."""
+    picture is fitted in the box, centred.
+
+    An icon kept as a vector too carries it: ``vector``, its shapes as `iconvector` cleaned
+    them (already in the part's colour for a silhouette), ``view`` the part of them drawn,
+    and ``clip`` the share of its width shown (``data`` is cut the same). The SVG painter
+    draws the shapes and the PNG painter the picture."""
 
     x: float
     y: float
@@ -1508,6 +1517,9 @@ class Picture:
     h: float
     data: bytes
     cover: bool = False
+    vector: str = ""
+    view: tuple[float, float, float, float] = (0.0, 0.0, 0.0, 0.0)
+    clip: tuple[float, float] = (0.0, 1.0)
 
 
 Mark = Union[Rect, Line, Shape, Circle, Text, Group, Picture]
@@ -2082,6 +2094,7 @@ def svg(chart: Layout, *, ident: str = "az-chart", transparent: bool = False,
     head = f"{head_css}, {theme.head.css}" if head_css else theme.head.css
     body = f"{body_css}, {theme.body.css}" if body_css else theme.body.css
     patterns: dict[tuple[str, str], str] = {}
+    clips: dict[tuple[str, ...], str] = {}
     out: list[str] = []
 
     def hatch(colour: str, background: str) -> str:
@@ -2126,6 +2139,8 @@ def svg(chart: Layout, *, ident: str = "az-chart", transparent: bool = False,
         elif isinstance(mark, Circle):
             stroke = f' stroke="{mark.stroke}" stroke-width="{_n(mark.stroke_width)}"' if mark.stroke else ""
             out.append(f'<circle cx="{_n(mark.cx)}" cy="{_n(mark.cy)}" r="{_n(mark.r)}" fill="{mark.fill}"{stroke}/>')
+        elif isinstance(mark, Picture) and mark.vector and mark.view[2] > 0 and mark.view[3] > 0:
+            out.append(_vector(mark, clips, ident))
         elif isinstance(mark, Picture):
             kind = picture_type(mark.data)
             if kind:
@@ -2151,7 +2166,9 @@ def svg(chart: Layout, *, ident: str = "az-chart", transparent: bool = False,
     defs = "".join(
         f'<pattern id="{name}" patternUnits="userSpaceOnUse" width="6" height="6" patternTransform="rotate(45)">'
         f'<rect width="6" height="6" fill="{background}"/><rect width="2.6" height="6" fill="{colour}"/></pattern>'
-        for (colour, background), name in patterns.items())
+        for (colour, background), name in patterns.items()) + "".join(
+        f'<clipPath id="{name}"><rect x="{x}" y="{y}" width="{w}" height="{h}"/></clipPath>'
+        for (x, y, w, h), name in clips.items())
     width, height = _n(chart.width), _n(chart.height)
     return (f'<svg xmlns="http://www.w3.org/2000/svg" id="{ident}" class="az-chart az-chart-{theme.name}" '
             f'viewBox="0 0 {width} {height}" width="{width}" height="{height}" role="img" '
@@ -2159,6 +2176,24 @@ def svg(chart: Layout, *, ident: str = "az-chart", transparent: bool = False,
             f'<title id="{ident}-title">{_esc(chart.title or "Chart")}</title>'
             f'<desc id="{ident}-desc">{_esc(" ".join([chart.desc, "; ".join(chart.lines)]).strip())}</desc>'
             + (f"<defs>{defs}</defs>" if defs else "") + "".join(out) + "</svg>")
+
+
+def _vector(mark: Picture, clips: dict[tuple[str, ...], str], ident: str) -> str:
+    """An icon's shapes fitted in its box as its picture would be, centred, cut to the
+    share of its width ``clip`` keeps. Its shapes are written as `iconvector` cleaned them."""
+    vx, vy, vw, vh = mark.view
+    scale = min(mark.w / vw, mark.h / vh)
+    left = mark.x + (mark.w - vw * scale) / 2
+    top = mark.y + (mark.h - vh * scale) / 2
+    drawn = (f'<g transform="translate({_n(left - vx * scale)} {_n(top - vy * scale)}) scale({scale:.6g})">'
+             f"{mark.vector}</g>")
+    start, end = mark.clip
+    if start <= 0 and end >= 1:
+        return drawn
+    box = (_n(left + vw * scale * start), _n(top), _n(vw * scale * (end - start)), _n(vh * scale))
+    if box not in clips:
+        clips[box] = f"{ident}-k{len(clips) + 1}"
+    return f'<g clip-path="url(#{clips[box]})">{drawn}</g>'
 
 
 def _rounded_path(rect: Rect) -> str:
@@ -2477,10 +2512,11 @@ SEGMENTS = register(Kind("segments", "Segments", _kinds.plot_segments,
                          words=("segmented bar", "segment", "share bar", "100% bar"), fits=_kinds.fits_segments,
                          legend=False, parts=True))
 PICTOGRAMS = register(Kind("pictograms", "Pictograms", _kinds.plot_pictograms,
-                           words=("pictogram", "unit chart", "isotype", "icons"), keys=("icon", "per glyph"),
+                           words=("pictogram", "unit chart", "isotype", "icons"), keys=("icon", "icons", "per glyph"),
                            fits=_kinds.fits_pictograms, parts=True, check=_kinds.check_glyphs))
 SILHOUETTES = register(Kind("silhouette rows", "Silhouette rows", _kinds.plot_silhouettes,
-                            words=("silhouettes", "icon rows", "pictogram rows"), keys=("icon", "flag", "per glyph"),
+                            words=("silhouettes", "icon rows", "pictogram rows"),
+                            keys=("icon", "icons", "flag", "flags", "per glyph"),
                             fits=_kinds.fits_silhouettes, check=_kinds.check_glyphs))
 WAFFLE = register(Kind("waffle", "Waffle", _kinds.plot_waffle, words=("waffle chart", "squares", "grid"),
                        keys=("of", "squares"), fits=_kinds.fits_waffle, sort="as written", legend=False, parts=True,

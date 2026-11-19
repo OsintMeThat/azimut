@@ -1165,7 +1165,15 @@ decodes every picture, keys out a flat background, trims it to what it paints,
 sizes it to the layers' icon weight and stores it under the hash of its pixels,
 so a picture imported twice is one icon. Each tile renames its icon, switches it
 between in a disc and as it is (guessed at import from how many colours it
-paints) and moves or removes it; a group renames or removes as a whole.
+paints) and moves or removes it; a group renames or removes as a whole. An SVG
+also sends its own text, from which the server keeps a copy of its shapes beside
+the PNG (`engine/iconvector.py`): rebuilt from an allowlist, no script, link,
+style or outside reference kept, cut to what it paints. The HTML report, the web
+folder and the editor's chart draw those shapes sharp at any size, a silhouette
+in its part's colour; the PDF and the pictures keep the PNG. An SVG whose copy
+would draw less than its picture (a gradient, a `<use>`, a stylesheet, a flat
+background) keeps the picture alone, as every icon imported before does. The
+backup carries the copies, cleaned again as they come in.
 
 The Settings backup carries portable settings, API keys, templates, the icon
 library, the logo and the report signature with its name, role and organisation. Templates and icons are added to those already here,
@@ -7469,7 +7477,9 @@ its delete names the note.
 **Charts.** A `::: chart` block holds its settings as `key: value` lines above its own
 table (`kind`, `title`, `count`, `by`, `colour by`, `order`, `only`, `highlight`, `show`,
 `source`, `from` and the rest, `engine/notes_charts.py`), so the rows printed are the rows in
-the note. Every document draws it from that table in the note's look and the case's named
+the note. Pictograms and silhouette rows read `icon` (one glyph, or a column naming one a
+row), `icons` (`Value = icon, …`, one a value) and, for rows, `flag` and `flags`; a row's
+own cell wins, then its value's, then the `icon` line. Every document draws it from that table in the note's look and the case's named
 colours (`engine/notecharts.py`), and captions it as every figure: its title under it,
 numbered when the look numbers figures. The PDF prints it at 300 dpi across the frame,
 with alt text. The HTML report and the web folder hold it as SVG in the page: real words

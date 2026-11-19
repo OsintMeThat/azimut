@@ -38,7 +38,7 @@ from datetime import datetime, timezone
 from pathlib import PurePosixPath
 from typing import TYPE_CHECKING, Any
 
-from . import notes_chart_picker, notes_charts
+from . import notes_chart_kinds, notes_chart_picker, notes_charts
 from .notelook import DEFAULT as DEFAULT_LOOK
 from .notelook import NoteLook
 from .notes_charts import ChartBlock, ChartTheme, Layout
@@ -104,6 +104,9 @@ class Chart:
     #: The title the data proposes for these settings, whatever title is written: what the
     #: chart's card offers when the written one says something else.
     proposed: str = ""
+    #: The values a kind of glyphs gives each its own glyph (`notes_chart_kinds.glyph_values`),
+    #: listed by the card's Icon and Flag rows.
+    values: list[str] = field(default_factory=list)
 
     @property
     def drawable(self) -> bool:
@@ -147,6 +150,8 @@ def read(case: "Case | None", body: str, *, look: NoteLook | None = None, note_t
     if block.table is not None and block.table.headers:
         reading = notes_charts.read(block, theme=theme_of(look, block), palette=colours, note_text=note_text)
         chart.proposed = notes_chart_picker.title_for(reading)
+        if notes_chart_kinds.ICONS in reading.kind.keys:
+            chart.values = notes_chart_kinds.glyph_values(reading)[:notes_charts.MAX_BARS]
     if origins and case is not None and block.origin:
         said = origin_warning(case, block)
         if said is not None:

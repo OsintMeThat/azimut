@@ -10,7 +10,10 @@ icon here breaks no map.
 Every image is decoded, bounded, trimmed to its ink, sized to the weight the
 source layers' pictograms are held to and re-encoded, so what the browser loads
 is a PNG this process made. The browser turns an SVG into a PNG before sending
-it, and this module never stores one: an SVG can carry a script.
+it, and this module never stores the SVG it came from: an SVG can carry a script.
+What it keeps beside the PNG is a copy rebuilt from an allowlist of shapes
+(`iconvector`), so the pages drawn as SVG draw the icon sharp; one is kept only
+when it draws what the PNG draws, and an icon without one draws its PNG as before.
 
 An icon's key is the hash of the PNG stored for it, so the same picture
 imported twice is one icon. One taken from a layer also remembers the hash its
@@ -42,7 +45,7 @@ from typing import Any
 from PIL import Image, ImageChops
 
 from .. import config
-from . import maplayers
+from . import iconvector, maplayers
 
 #: How many icons the library holds. A whole icon font is thousands; this is
 #: room for the sets an analyst actually draws with, and it keeps a settings
@@ -91,6 +94,10 @@ def _png_path(key: str) -> Path:
     if not _KEY.match(key):
         raise IconError("that is not an icon of your library")
     return library_dir() / f"{key}.png"
+
+
+def _vector_path(key: str) -> Path:
+    return _png_path(key).with_suffix(".svg")
 
 
 def is_key(value: Any) -> bool:
@@ -161,11 +168,11 @@ def _key_out_background(image: Image.Image) -> Image.Image:
     return keyed
 
 
-def _trimmed(image: Image.Image) -> Image.Image:
+def _ink(image: Image.Image) -> tuple[int, int, int, int]:
     box = image.getchannel("A").point(lambda level: 255 if level > 8 else 0).getbbox()
     if box is None:
         raise IconError("this image has nothing painted in it")
-    return image.crop(box)
+    return box
 
 
 def _square(image: Image.Image) -> Image.Image:
@@ -196,10 +203,22 @@ def normalise(raw: bytes) -> tuple[bytes, str]:
     Its background keyed out, cut to what it paints, sized to the layers' icon
     weight and padded square, so every icon in the library sits the same way.
     """
-    image = _trimmed(_key_out_background(_decode(raw, MAX_FILE_BYTES)))
+    data, mode, _ = _prepared(raw)
+    return data, mode
+
+
+def _prepared(raw: bytes) -> tuple[bytes, str, tuple[float, float, float, float] | None]:
+    """`normalise`, and where its ink lay in the picture as it came: left, top, right
+    and bottom, each a share of a side, which is where a vector of it is cut. None when
+    a background was keyed out, since a vector would still draw that background."""
+    decoded = _decode(raw, MAX_FILE_BYTES)
+    keyed = _key_out_background(decoded)
+    box = _ink(keyed)
+    image = keyed.crop(box)
     mode = guess_mode(image)
-    image = _square(maplayers._resize_icon(image, 1.0))
-    return _encode(image), mode
+    width, height = keyed.size
+    ink = (box[0] / width, box[1] / height, box[2] / width, box[3] / height) if keyed is decoded else None
+    return _encode(_square(maplayers._resize_icon(image, 1.0))), mode, ink
 
 
 def reencoded(png: bytes) -> bytes:
@@ -239,6 +258,7 @@ def _entry(raw: Any) -> dict[str, Any] | None:
         "mode": raw.get("mode") if raw.get("mode") in MODES else "image",
         "added": str(raw.get("added") or "")[:40],
         **({"aliases": aliases} if aliases else {}),
+        **({"vector": True} if raw.get("vector") is True else {}),
     }
 
 
@@ -299,6 +319,34 @@ def png(key: str) -> bytes:
     return data
 
 
+def vector(key: str) -> iconvector.Vector | None:
+    """An icon's vector copy, read back through the same allowlist, or None for an icon
+    that keeps its PNG alone."""
+    try:
+        path = _vector_path(key)
+        with path.open("rb") as handle:
+            data = handle.read(iconvector.MAX_SOURCE_BYTES + 1)
+    except (IconError, OSError):
+        return None
+    read = iconvector.clean(data)
+    return read if read is not None and read.whole else None
+
+
+def _keep_vector(icon: dict[str, Any], text: str, ink: tuple[float, float, float, float] | None) -> None:
+    """Keep the SVG an icon was drawn from, cleaned and cut to its ink (``ink``, as
+    `_prepared` found it; None takes the drawing's own view, a stored copy's)."""
+    if icon.get("vector") or not text:
+        return
+    read = iconvector.clean(text)
+    if read is None or not read.whole:
+        return
+    try:
+        _write_atomic(_vector_path(icon["key"]), (iconvector.cropped(read, ink) if ink else read).document().encode("utf-8"))
+    except OSError:
+        return  # the PNG is the icon; a copy not written is one this icon does without
+    icon["vector"] = True
+
+
 def _put(entries: list[dict[str, Any]], data: bytes, *, name: str, group: str, mode: str,
          alias: str = "") -> tuple[dict[str, Any], bool]:
     """File one PNG under its own hash, or answer the icon already holding it."""
@@ -318,32 +366,39 @@ def _put(entries: list[dict[str, Any]], data: bytes, *, name: str, group: str, m
     return added, True
 
 
-def add_files(files: list[tuple[str, bytes, str]]) -> dict[str, Any]:
-    """Imported files, `(filename, bytes, group)` each, filed one by one.
+def add_files(files: list[tuple[str, bytes, str]], vectors: list[str] | None = None) -> dict[str, Any]:
+    """Imported files, `(filename, bytes, group)` each, filed one by one. ``vectors``
+    holds, at a file's place, the SVG its picture was drawn from, or "".
 
     One that cannot be read is skipped with its reason rather than refusing the
     rest: an icon pack is a folder of a hundred files, and one broken file in it
-    is not a reason to have none.
+    is not a reason to have none. ``filed`` names the icon each file that was
+    read became, new or already there, so a picker can take it at once.
     """
     added: list[dict[str, Any]] = []
     skipped: list[dict[str, str]] = []
+    filed: list[dict[str, str]] = []
     already = 0
+    vectors = vectors or []
     with _lock:
         entries = _load()
-        for filename, raw, group in files:
+        for index, (filename, raw, group) in enumerate(files):
             name = name_from_file(filename)
             try:
-                data, mode = normalise(raw)
+                data, mode, ink = _prepared(raw)
                 icon, new = _put(entries, data, name=name, group=group or DEFAULT_GROUP, mode=mode)
             except IconError as exc:
                 skipped.append({"name": name, "reason": str(exc)})
                 continue
+            if ink is not None and index < len(vectors):
+                _keep_vector(icon, vectors[index], ink)
+            filed.append({"name": name, "key": icon["key"]})
             if new:
                 added.append(icon)
             else:
                 already += 1
         _save(entries)
-    return {"added": added, "already": already, "skipped": skipped, "icons": entries}
+    return {"added": added, "already": already, "skipped": skipped, "filed": filed, "icons": entries}
 
 
 def add_pngs(items: list[dict[str, Any]]) -> dict[str, Any]:
@@ -400,6 +455,7 @@ def remove(keys: list[str]) -> dict[str, Any]:
         for icon in entries:
             if icon["key"] in gone:
                 _png_path(icon["key"]).unlink(missing_ok=True)
+                _vector_path(icon["key"]).unlink(missing_ok=True)
         return {"removed": len(entries) - len(kept), "icons": kept}
 
 
@@ -412,21 +468,24 @@ MAX_BACKUP_B64 = (MAX_STORED_BYTES * 4) // 3 + 4
 
 
 def backup() -> list[dict[str, Any]]:
-    """Every icon with its picture, for `GET /settings/export`."""
+    """Every icon with its picture and its vector copy, for `GET /settings/export`."""
     out = []
     for icon in listing()["icons"]:
         try:
             data = png(icon["key"])
         except IconError:
             continue
+        drawn = vector(icon["key"]) if icon.get("vector") else None
         out.append({**{field: icon[field] for field in ("name", "group", "mode")},
                     **({"aliases": icon["aliases"]} if icon.get("aliases") else {}),
-                    "png_base64": base64.b64encode(data).decode("ascii")})
+                    "png_base64": base64.b64encode(data).decode("ascii"),
+                    **({"svg": drawn.document()} if drawn is not None else {})})
     return out
 
 
 def restore(items: list[dict[str, Any]]) -> int:
-    """Icons out of a backup, each re-encoded as an import would be; how many are new."""
+    """Icons out of a backup, each re-encoded as an import would be, its vector copy
+    cleaned again as an import's is; how many are new."""
     with _lock:
         entries = _load()
         count = 0
@@ -441,6 +500,7 @@ def restore(items: list[dict[str, Any]]) -> int:
             for alias in item.get("aliases") or []:
                 if is_key(alias) and alias != icon["key"] and alias not in icon.get("aliases", []):
                     icon["aliases"] = [*icon.get("aliases", []), alias][:MAX_ALIASES]
+            _keep_vector(icon, str(item.get("svg") or ""), None)
             count += int(new)
         _save(entries)
     return count

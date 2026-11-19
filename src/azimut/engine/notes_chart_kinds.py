@@ -8,8 +8,8 @@ and the box the frame leaves, and returning marks. No painter knows a kind.
 |---|---|---|
 | Pie, Donut | parts of one whole: past six, the smallest fold into *Others* | ``centre`` (donut) |
 | Segments | one bar of the parts, across or (``bars: up``) standing | |
-| Pictograms | one glyph per unit, in rows of ten, coloured by the part | ``icon``, ``per glyph`` |
-| Silhouette rows | one row of glyphs per category, its flag or icon first | ``icon``, ``flag``, ``per glyph`` |
+| Pictograms | one glyph per unit, in rows of ten, coloured by the part | ``icon``, ``icons``, ``per glyph`` |
+| Silhouette rows | one row of glyphs per category, its flag or icon first | ``icon``, ``icons``, ``flag``, ``flags``, ``per glyph`` |
 | Waffle | a grid of a whole, ``1 square = 1/100`` or ``1/10,000`` | ``of``, ``squares`` |
 | Key figures | rows of *Figure · Words*, two to four tiles across | |
 | Timeline | rows of *Day · What · Until*: points, and bands for periods | |
@@ -26,7 +26,15 @@ drawings), a plain shape (``dot``, ``square``, ``star``) or an icon of the analy
 library (``own:<key>``): an icon kept as a silhouette takes the part's colour, one kept
 in its own colours (a flag) is drawn as it is. A glyph stands for one unit until the
 units pass `MAX_GLYPHS`; then one stands for a round number of them, the chart says so,
-and a part of a glyph is drawn cut, not rounded.
+and a part of a glyph is drawn cut, not rounded. An icon imported as an SVG keeps a vector
+copy (`iconvector`): the SVG painter draws its paths, in the part's colour for a
+silhouette, and the PNG painter its picture.
+
+**One glyph per category.** ``icon`` names one glyph for every unit, or a column whose
+cells name one per row. ``icons: Streit Cougar = own:…, Oshkosh M-ATV = armoured
+vehicle`` gives each value its own (a pictogram's part, a silhouette row's category), and
+``flags: UAE = own:…`` gives each silhouette row its flag. A row's own cell wins, then its
+value's, then the ``icon`` line. A value may hold commas; one holding ``=`` cannot be named.
 
 **Never cut text.** Every name and label wraps to as many lines as it needs; a number
 too wide for its tile is set smaller. Labels that would meet (a timeline's, a line's
@@ -44,6 +52,8 @@ from io import BytesIO
 from typing import TYPE_CHECKING, Any, Callable, Sequence
 
 from PIL import Image
+
+from . import iconvector
 
 if TYPE_CHECKING:
     from .notes_charts import Box, ChartTheme, Check, Mark, Paint, Plot, Reading, Swatch, Table
@@ -80,6 +90,9 @@ _PLAIN_SHAPES = {
 _PLAIN_WORDS = {"dot": "dot", "circle": "dot", "disc": "dot", "square": "square", "star": "star"}
 _SPELLINGS = (("armored", "armoured"), ("defense", "defence"), ("harbor", "harbour"))
 OWN = re.compile(r"^own:\s*([0-9a-f]{16})$", re.I)
+#: The settings that give each value its own glyph, and its own flag.
+ICONS = "icons"
+FLAGS = "flags"
 
 
 # -- glyphs --------------------------------------------------------------------------------------------
@@ -96,6 +109,9 @@ class Glyph:
     png: bytes = b""
     #: An icon kept as a silhouette: drawn in the part's colour, not its own.
     tint: bool = False
+    #: An icon's vector copy (`iconvector.Vector.body`) and the view it is drawn in, its ink.
+    vector: str = ""
+    view: tuple[float, float, float, float] = (0.0, 0.0, 0.0, 0.0)
 
     @property
     def aspect(self) -> float:
@@ -179,7 +195,9 @@ def own_icon(key: str) -> Glyph | None:
     if trimmed is None:
         return None
     png, width, height = trimmed
-    return Glyph(f"own:{key}", (), (0.0, 0.0, float(width), float(height)), png, entry.get("mode") == "disc")
+    drawn = iconlibrary.vector(key) if entry.get("vector") else None
+    return Glyph(f"own:{key}", (), (0.0, 0.0, float(width), float(height)), png, entry.get("mode") == "disc",
+                 drawn.body if drawn else "", drawn.view if drawn else (0.0, 0.0, 0.0, 0.0))
 
 
 @lru_cache(maxsize=32)
@@ -235,7 +253,9 @@ def glyph_marks(drawing: Glyph, paint: "Paint", theme: "ChartTheme", x: float, y
     if drawing.png:
         colour = paint.colour if drawing.tint else ""
         data = _own_picture(drawing.png, colour, round(start, 4), round(end, 4))
-        return [nc.Picture(x, y, width, height, data)]
+        vector = (iconvector.tinted(drawing.vector, colour) if colour else drawing.vector) if drawing.vector else ""
+        return [nc.Picture(x, y, width, height, data, vector=vector, view=drawing.view if vector else (0.0, 0.0, 0.0, 0.0),
+                           clip=(round(start, 4), round(end, 4)))]
     cut = start > 0 or end < 1
     left, right = x0 + (x1 - x0) * start, x0 + (x1 - x0) * end
     ox, oy = x - x0 * scale, y - y0 * scale
@@ -1082,10 +1102,51 @@ def _icon_column(reading: "Reading", key: str) -> int | None:
     return reading.table.column(written_icon)
 
 
-def _icon_for(reading: "Reading", row: int | None, column: int | None) -> str:
-    """The glyph a unit wears: its row's icon cell, else the block's ``icon``, else the dot."""
+def glyph_pairs(text: str) -> list[tuple[str, str]]:
+    """``Streit Cougar = own:…, Oshkosh M-ATV = armoured vehicle`` read as ``(value, word)``
+    pairs, a value's own commas kept; a piece with no ``=`` is a pair with no word."""
+    pairs: list[tuple[str, str]] = []
+    pending = ""
+    for piece in str(text or "").split(","):
+        pending = f"{pending},{piece}" if pending else piece
+        if "=" in piece:
+            name, _, word = pending.rpartition("=")
+            if " ".join(name.split()):
+                pairs.append((" ".join(name.split()), " ".join(word.split())))
+            pending = ""
+    if " ".join(pending.split()):
+        pairs.append((" ".join(pending.split()), ""))
+    return pairs
+
+
+@lru_cache(maxsize=64)
+def _glyph_map(text: str) -> dict[str, str]:
+    return {name.casefold(): glyph_key(word) for name, word in glyph_pairs(text) if word}
+
+
+def mapped_glyph(reading: "Reading", key: str, value: str) -> str:
+    """The glyph ``icons`` (or ``flags``) gives ``value``, or empty."""
+    said = (reading.block.extra.get(key) or "").strip()
+    return _glyph_map(said).get(str(value).casefold(), "") if said else ""
+
+
+def glyph_values(reading: "Reading") -> list[str]:
+    """The values ``icons`` names, as the chart draws them: a pictogram's parts, a
+    silhouette row's categories. What a card lists one glyph for each."""
+    if reading.kind.parts:
+        return list(reading.values)
+    return [category.name for category in reading.categories]
+
+
+def _icon_for(reading: "Reading", row: int | None, column: int | None, value: str = "") -> str:
+    """The glyph a unit wears: its row's icon cell, else its value's in ``icons``, else
+    the block's ``icon``, else the dot."""
     if column is not None and row is not None and reading.table is not None:
         found = glyph_key(reading.table.rows[row][column])
+        if found:
+            return found
+    if value:
+        found = mapped_glyph(reading, ICONS, value)
         if found:
             return found
     written_icon = (reading.block.extra.get("icon") or "").strip()
@@ -1096,11 +1157,13 @@ def _icon_for(reading: "Reading", row: int | None, column: int | None) -> str:
     return DEFAULT_GLYPH
 
 
-def _runs(reading: "Reading", segment_rows: list[int], value: str, unit: float, column: int | None) -> list[Unit]:
-    """A part's units in runs of one glyph, in row order, as glyphs' worth (``unit`` units one glyph)."""
+def _runs(reading: "Reading", segment_rows: list[int], value: str, unit: float, column: int | None,
+          named: str = "") -> list[Unit]:
+    """A part's units in runs of one glyph, in row order, as glyphs' worth (``unit`` units one
+    glyph); ``named`` is the value whose glyph ``icons`` gives them."""
     runs: list[Unit] = []
     for row in segment_rows:
-        key = _icon_for(reading, row, column)
+        key = _icon_for(reading, row, column, named)
         count = reading.amounts.get(row, 0.0) / unit
         if runs and runs[-1].key == key:
             runs[-1].count += count
@@ -1166,7 +1229,7 @@ def plot_pictograms(reading: "Reading", theme: "ChartTheme", box: "Box") -> "Plo
     units: list[Unit] = []
     names = {part.value: part for part in parts}
     for part in parts:
-        units.extend(_runs(reading, sorted(rows_of.get(part.value, [])), part.value, unit, column))
+        units.extend(_runs(reading, sorted(rows_of.get(part.value, [])), part.value, unit, column, part.value))
     cells = _glyph_cells(units)
     glyphs = len(cells)
     across = 10 if glyphs <= 60 else 20
@@ -1236,7 +1299,8 @@ def plot_silhouettes(reading: "Reading", theme: "ChartTheme", box: "Box") -> "Pl
     value_size = theme.value_size + 1.5
     counts = [nc.number_text(category.total) for category in categories]
     count_width = max(nc.text_width(text, value_size, theme.head, bold=True) for text in counts)
-    flag_width = 26.0 if flags is not None else 0.0
+    flagged = flags is not None or bool((reading.block.extra.get(FLAGS) or "").strip())
+    flag_width = 26.0 if flagged else 0.0
     names_width = min(max(nc.text_width(category.name, size, theme.head) for category in categories),
                       box.width * 0.34)
     glyph_left = box.x + flag_width + names_width + 12 + count_width + 14
@@ -1248,7 +1312,7 @@ def plot_silhouettes(reading: "Reading", theme: "ChartTheme", box: "Box") -> "Pl
         units: list[Unit] = []
         for segment in category.segments:
             if segment.amount > 0:
-                units.extend(_runs(reading, sorted(segment.rows), segment.value, unit, column))
+                units.extend(_runs(reading, sorted(segment.rows), segment.value, unit, column, category.name))
         all_units[index] = units
         keys.update(run.key for run in units)
     drawings = {key: glyph(key) for key in keys} or {DEFAULT_GLYPH: glyph(DEFAULT_GLYPH)}
@@ -1273,9 +1337,11 @@ def plot_silhouettes(reading: "Reading", theme: "ChartTheme", box: "Box") -> "Pl
         name_height = len(names) * size * 1.25
         row_height = max(name_height, glyph_lines * line_step - 6, glyph_height)
         first = y + glyph_height / 2 + size * 0.36 if len(names) == 1 else y + size
-        if flags is not None:
+        if flagged:
             flag_key = next((glyph_key(reading.table.rows[row][flags]) for row in category.rows
-                             if reading.table is not None and glyph_key(reading.table.rows[row][flags])), "")
+                             if flags is not None and reading.table is not None
+                             and glyph_key(reading.table.rows[row][flags])), "") \
+                or mapped_glyph(reading, FLAGS, category.name)
             if flag_key:
                 flag = glyph(flag_key)
                 flag_height = min(16.0, 22.0 / flag.aspect)
@@ -2388,6 +2454,20 @@ def check_glyphs(reading: "Reading") -> list["Check"]:
         elif key == "flag":
             out.append(_check(reading, f'reads its flags in "{nc._cut(said, 40)}", a column its table does not '
                                        f"have.", key, "missing"))
+    for key in (ICONS, FLAGS):
+        said = (reading.block.extra.get(key) or "").strip()
+        if not said:
+            continue
+        held = {value.casefold() for value in glyph_values(reading)}
+        for name, word in glyph_pairs(said):
+            if not word:
+                out.append(_check(reading, f'cannot read "{nc._cut(name, 40)}" in {key}: write it as Name = icon.', key))
+            elif not _drawn(glyph_key(word)):
+                out.append(_check(reading, f'cannot draw "{nc._cut(word, 40)}" for "{nc._cut(name, 40)}": name a '
+                                           f"badge of the map or an icon of your library.", key))
+            elif name.casefold() not in held:
+                out.append(_check(reading, f'gives {"a flag" if key == FLAGS else "an icon"} to '
+                                           f'"{nc._cut(name, 40)}", which no row holds.', key))
     unit = (reading.block.extra.get("per glyph") or "").strip()
     if unit:
         number = nc.read_number(unit)

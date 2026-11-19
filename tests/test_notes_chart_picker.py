@@ -146,7 +146,7 @@ def test_the_figure_route_says_the_fix_the_proposed_title_and_the_kind(client):
     assert json.loads(answer.headers["x-chart-proposed-title"]) == "At least 41 armoured vehicles, by model and grade"
     assert json.loads(answer.headers["x-chart-kind"]) == {
         "name": "stacked bars", "label": "Stacked", "counts": True, "parts": False, "stacked": True, "up": False,
-        "turns": "stacked columns", "style": "report"}
+        "turns": "stacked columns", "style": "report", "keys": []}
     booked = client.post(f"/api/cases/{cid}/notes/figure", json={"text": ARMOURED.replace("source:", "style: book\nsource:")})
     assert json.loads(booked.headers["x-chart-kind"])["style"] == "book"
 

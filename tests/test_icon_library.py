@@ -8,13 +8,14 @@ pick, and the backup moves the library to another machine.
 
 import base64
 import io
+import re
 import zipfile
 
 import pytest
 from PIL import Image, ImageDraw
 
 from azimut import layout
-from azimut.engine import iconlibrary, layerexports, maplayers
+from azimut.engine import iconlibrary, iconvector, layerexports, maplayers, notes_html
 from azimut.workspace import Case
 
 
@@ -185,6 +186,118 @@ def test_a_backup_icon_that_is_not_a_picture_is_dropped_not_the_whole_restore(cl
 
     assert restored["icons"] == 1 and "units" in restored["imported"]
     assert [icon["name"] for icon in client.get("/api/icons").json()["icons"]] == ["Good"]
+
+
+# ---------------------------------------------------------------------------
+# An SVG keeps a vector copy beside its PNG
+# ---------------------------------------------------------------------------
+
+#: A truck drawn as an SVG, with what an SVG can carry that must never be kept.
+TRUCK_SVG = ('<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 48 24" width="256" height="128" onload="alert(1)">'
+             '<script>alert(2)</script><path d="M8 4h32v16H8z" fill="#222" onclick="alert(3)"/></svg>')
+TRUCK_PATH = '<path d="M8 4h32v16H8z" fill="#222"/>'
+
+
+def drawn(background=None) -> bytes:
+    """The PNG the browser draws of `TRUCK_SVG` before sending it, 256 wide as the import draws."""
+    image = Image.new("RGBA", (256, 128), (*background, 255) if background else (0, 0, 0, 0))
+    ImageDraw.Draw(image).rectangle((43, 21, 212, 106), fill=(34, 34, 34, 255))
+    buffer = io.BytesIO()
+    image.save(buffer, "PNG")
+    return buffer.getvalue()
+
+
+def import_svg(client, svg=TRUCK_SVG, picture=None, name="Truck.svg"):
+    response = client.post("/api/icons", files=[("files", (name, picture or drawn(), "image/png"))],
+                           data={"groups": ["Vehicles"], "vectors": [svg]})
+    assert response.status_code == 200, response.text
+    return response.json()
+
+
+def test_an_svg_keeps_a_cleaned_copy_of_its_shapes_cut_to_its_ink(client):
+    answer = import_svg(client)
+    [icon] = answer["added"]
+    assert icon["vector"] is True and answer["filed"] == [{"name": "Truck", "key": icon["key"]}]
+    assert client.get("/api/icons").json()["icons"][0]["vector"] is True
+    stored = (iconlibrary.library_dir() / f"{icon['key']}.svg").read_text(encoding="utf-8")
+    assert "script" not in stored and "onload" not in stored and "onclick" not in stored
+    kept = iconvector.clean(stored)
+    assert kept.body == TRUCK_PATH
+    # its view is where its picture paints, as the PNG beside it is trimmed
+    assert kept.view == pytest.approx((8, 4, 32, 16), abs=0.25)
+    assert iconlibrary.vector(icon["key"]) == kept
+
+
+def test_the_same_svg_imported_again_is_the_icon_already_there(client):
+    first = import_svg(client)["added"][0]
+    again = import_svg(client, name="Other.svg")
+    assert again["added"] == [] and again["filed"] == [{"name": "Other", "key": first["key"]}]
+
+
+@pytest.mark.parametrize("svg, picture", [
+    # a shape it borrows from elsewhere: the copy would draw less than the picture
+    ('<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 48 24"><use href="#a"/><path d="M8 4h32v16H8z"/></svg>', None),
+    # a picture on a flat background loses it, which the copy would still draw
+    ('<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 48 24"><path d="M8 4h32v16H8z"/></svg>', "white"),
+    # past what is read for a copy
+    ('<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 48 24"><path d="M8 4' + "h1" * 140_000 + 'z"/></svg>', None),
+    ("", None),
+])
+def test_an_svg_whose_copy_would_not_draw_its_picture_keeps_the_picture_alone(client, svg, picture):
+    answer = import_svg(client, svg, drawn((255, 255, 255)) if picture else None)
+    [icon] = answer["added"]
+    assert "vector" not in icon
+    assert not list(iconlibrary.library_dir().glob("*.svg"))
+
+
+def test_removing_an_icon_takes_its_copy_with_it(client):
+    icon = import_svg(client)["added"][0]
+    client.post("/api/icons/remove", json={"keys": [icon["key"]]})
+    assert not list(iconlibrary.library_dir().glob("*.svg"))
+
+
+def test_a_chart_draws_the_copy_in_the_editor_and_the_page_and_the_picture_elsewhere(client, owner):
+    icon = import_svg(client)["added"][0]
+    block = (f"::: chart\nkind: pictograms\ntitle: At least 3 vehicles, by model\ncount: rows\nby: Model\n"
+             f"colours: Cougar #eb6834\nicons: Cougar = own:{icon['key']}\nsource: x\n| Model |\n| --- |\n"
+             f"| Cougar |\n| Cougar |\n| Oshkosh |\n:::")
+    drawing = client.post(f"/api/cases/{owner}/notes/figure", json={"text": block}).text
+    # a silhouette: its shapes in its part's colour, sharp at any size, and no picture of it
+    assert '<path d="M8 4h32v16H8z" fill="#eb6834"/>' in drawing and "<image" not in drawing
+    picture = client.post(f"/api/cases/{owner}/notes/figure", json={"text": block, "format": "png", "size": "x"})
+    assert picture.status_code == 200 and picture.headers["content-type"] == "image/png"
+    page = notes_html.render(Case.open(owner), title="Vehicles", text=f"# Vehicles\n\n{block}\n").html.decode()
+    [figure] = re.findall(r'<figure class="az-figure az-chart-figure".*?</figure>', page, re.S)
+    assert '<path d="M8 4h32v16H8z" fill="#eb6834"/>' in figure and "data:" not in figure and "<image" not in figure
+    client.patch(f"/api/icons/{icon['key']}", json={"mode": "image"})
+    drawn_as_it_is = client.post(f"/api/cases/{owner}/notes/figure", json={"text": block}).text
+    assert TRUCK_PATH in drawn_as_it_is
+
+
+def test_the_settings_backup_carries_the_copies_and_cleans_them_again(client):
+    icon = import_svg(client)["added"][0]
+    plain = imported(client)
+    bundle = client.get("/api/settings/export").json()
+    by_name = {entry["name"]: entry for entry in bundle["icons"]}
+    assert iconvector.clean(by_name["Truck"]["svg"]).body == TRUCK_PATH and "svg" not in by_name["Tank"]
+
+    client.post("/api/icons/remove", json={"keys": [icon["key"], plain["key"]]})
+    by_name["Truck"]["svg"] = by_name["Truck"]["svg"].replace("<path", '<script>alert(1)</script><path onload="x"')
+    assert client.post("/api/settings/import", json=bundle).json()["icons"] == 2
+    stored = (iconlibrary.library_dir() / f"{icon['key']}.svg").read_text(encoding="utf-8")
+    assert iconvector.clean(stored).body == TRUCK_PATH and "script" not in stored and "onload" not in stored
+    restored = {entry["name"]: entry for entry in client.get("/api/icons").json()["icons"]}
+    assert restored["Truck"].get("vector") is True and "vector" not in restored["Tank"]
+
+
+def test_a_backup_copy_that_does_not_read_restores_the_picture_alone(client):
+    icon = import_svg(client)["added"][0]
+    bundle = client.get("/api/settings/export").json()
+    client.post("/api/icons/remove", json={"keys": [icon["key"]]})
+    bundle["icons"][0]["svg"] = '<!DOCTYPE svg [<!ENTITY a "a">]>' + bundle["icons"][0]["svg"]
+    assert client.post("/api/settings/import", json=bundle).json()["icons"] == 1
+    assert "vector" not in client.get("/api/icons").json()["icons"][0]
+    assert not list(iconlibrary.library_dir().glob("*.svg"))
 
 
 # ---------------------------------------------------------------------------
