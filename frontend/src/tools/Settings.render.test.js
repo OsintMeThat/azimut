@@ -137,7 +137,7 @@ describe('each section', () => {
 
   it('Publishing states the mention, who a report is from, and the proofs\' handle', () => {
     const text = show('publishing');
-    expect([...pane().querySelectorAll('h3')].map((h) => h.textContent)).toEqual(['Post', 'In reports', 'On proofs', 'WordPress', 'GitHub Pages']);
+    expect([...pane().querySelectorAll('h3')].map((h) => h.textContent)).toEqual(['Post', 'In reports', 'Styles', 'On proofs', 'WordPress', 'GitHub Pages']);
     for (const words of ['Logo', 'Name', 'Role', 'Organisation', 'Signature', 'Your account handle']) expect(text).toContain(words);
     // each field says what it takes, in the tool
     expect(text).toContain('at most 80 characters');

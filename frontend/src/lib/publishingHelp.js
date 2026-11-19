@@ -50,6 +50,15 @@ export const PUBLISHING_HELP = {
   githubPagesOn: 'Turn GitHub Pages on for the branch',
   githubNewRepo: "GitHub's new repository page, with the name and Public picked",
   githubPagesSettings: "The repository's Pages settings on github.com",
+  styleSources: 'A numbered list of every source a note of this style cites',
+  styleGeolocations: 'A table of every proof the note cites: place, day, coordinates',
+  styleCredits: 'The imagery, map, terrain and footage credits the note owes',
+  styleMethod: 'Facts read from the case: tools, days, counts, fingerprints, edition',
+  styleLimits: 'Every Limits box of the note, gathered at the end',
+  styleEditions: 'The public editions before this one, and what each corrected',
+  styleWritten: 'How each source is written: academic, for the web, or short',
+  styleCheck: 'How the check before export names links with no archived copy or no seen day',
+  stylesReset: "Every style back to what Azimut gives it",
 };
 
 /** The longest name, role or organisation a report prints (`api/settings.py`). */
