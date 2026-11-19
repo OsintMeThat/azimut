@@ -197,6 +197,16 @@ function renderAlignmentBlocks(source, options) {
   ), rendered);
 }
 
+/**
+ * One line of Markdown as a table's cell shows it: its words, marks, links, chips and
+ * pictures, never a block (a cell starting `1.` or `#` is not a list or a heading).
+ */
+export function markdownInlineHtml(text = '', { entities = [], caseId = '', redirects = {}, identity } = {}) {
+  const options = { gfm: true, breaks: false, renderer: renderer({ entities, caseId, redirects, identity }) };
+  // wrapped, as a sanitizer can drop an element the markup starts with
+  return sanitize(`<span>${marked.parseInline(sourceWithCaseReferences(text), options)}</span>`);
+}
+
 /** Render GitHub-flavored Markdown, then remove unsafe HTML before previewing it. */
 export function markdownHtml(text = '', { entities = [], caseId = '', redirects = {}, identity } = {}) {
   const options = {

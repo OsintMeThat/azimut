@@ -68,6 +68,58 @@ afterEach(() => {
   vi.clearAllMocks();
 });
 
+describe('a picture for a table\'s cell', () => {
+  const TABLE = '| # | [[entity:v1|Video 1]] | Frame |\n| --- | --- | --- |\n| 1 | S04 0:23-0:37 |  |';
+
+  it('lands in the cell picked, as its chip, with no caption to open, and goes elsewhere once let go', async () => {
+    const { pickCell } = await import('../lib/notes/editor/tablePictures.js');
+    await editor(`Words.\n\n${TABLE}\n\nAfter.`);
+    pickCell('c1:n1', { table: 0, row: 0, col: 2 });
+    const spot = handle.spot({ picture: true });
+    const landed = handle.place(spot, '[[media:f1|Frame at 0:23]]{width=50%}');
+    expect(landed.cell).toBe(true);
+    expect(await handle.caption(landed)).toBe(false);
+    const cm = EditorView.findFromDOM(target.querySelector('.cm-editor'));
+    expect(cm.state.doc.toString()).toContain('| 1 | S04 0:23-0:37 | [[media:f1|Frame at 0:23]] |');
+    expect(handle.takeBack(landed)).toBe(true);
+    expect(cm.state.doc.toString()).toContain('| 1 | S04 0:23-0:37 |  |');
+    // the pick went with the picture: the next put lands at the end
+    expect(handle.place(handle.spot({ picture: true }), '[[media:f2|Frame]]').text).toBe('\n\n[[media:f2|Frame]]\n');
+  });
+
+  it('cuts a missing frame in Inspect at the row\'s time, this note beside it', async () => {
+    const { takeSeek } = await import('../tools/inspect/handoff.js');
+    get.mockImplementation(async () => ({ text: `${TABLE}\n` }));
+    const doc = openNote('c1', 'n1');
+    await noteReady(doc);
+    target = document.createElement('div');
+    document.body.append(target);
+    const video = { id: 'v1', type: 'media', label: 'Ground tour', attrs: { path: 'media/tour.mp4', kind: 'video' } };
+    app = mount(NoteEditor, { target, props: { doc, caseId: 'c1', entities: [video], where: 'notebook', onready: (api) => (handle = api) } });
+    await settle();
+    target.querySelector('.cm-grid-cut').dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    expect(uiState.tool).toBe('inspect');
+    expect(uiState.inspectPath).toBe('media/tour.mp4');
+    expect(takeSeek('media/tour.mp4')).toBe(23);
+    expect(localStorage.getItem('azimut:noteDock')).toBe('open');
+  });
+
+  it('writes the raw Markdown\'s two columns for / › Table, and asks the size on the drawn page', async () => {
+    const { noteHandlers } = await import('../lib/notes/editor/state.js');
+    noteMode.set('markdown');
+    await editor('');
+    const cm = EditorView.findFromDOM(target.querySelector('.cm-editor'));
+    cm.state.facet(noteHandlers).table();
+    expect(cm.state.doc.toString()).toBe('| Source | Status |\n| --- | --- |\n|  |  |\n');
+    expect(cm.state.selection.main.head).toBe('| Source | Status |\n| --- | --- |\n| '.length);
+    noteMode.set('drawn');
+    await settle();
+    cm.dispatch({ changes: { from: 0, to: cm.state.doc.length, insert: '' } });
+    cm.state.facet(noteHandlers).table();
+    expect(target.querySelector('.cm-table-picker')).not.toBeNull();
+  });
+});
+
 describe('where a put lands', () => {
   it('is the end of a note nobody wrote in this visit', async () => {
     await editor('First line.\n\nLast line.');

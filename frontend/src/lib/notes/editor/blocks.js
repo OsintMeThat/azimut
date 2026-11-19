@@ -40,8 +40,9 @@
  * presses go to `press(target, box, view)` rather than picking the block), `fields`
  * (the selector of inputs it holds, whose keys and presses the editor leaves alone),
  * `listen(box, widget, view)` (more listeners on its box), `mousedown(event, view,
- * handlers)` (a press the editor sees on it, answering whether it took it) and
- * `theme` (its own rules, after the editor's sheet).
+ * handlers)` (a press the editor sees on it, answering whether it took it),
+ * `theme` (its own rules, after the editor's sheet) and `extensions` (more of the
+ * editor it needs in the drawn mode: what it keeps, a paste it reads).
  */
 
 const kinds = [];

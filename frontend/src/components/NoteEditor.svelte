@@ -29,12 +29,17 @@
    *
    * `/` › Interactive map asks what a map shows (`NoteMapPicker.svelte`) and puts it at
    * the cursor the way a tool's put lands, Undo included (`lib/notes/mapPut.js`).
+   *
+   * A table is a grid (`lib/notes/editor/tableGrid.js`): `/` › Table asks its size or
+   * reads a file, a pasted spreadsheet becomes one, and while a cell is picked a
+   * tool's picture lands in it. An empty picture cell whose row names a video and a
+   * time opens Inspect there, the note beside it, so the frame's Put in comes back.
    */
   import { onDestroy, onMount, untrack } from 'svelte';
   import { Compartment, EditorState, Transaction } from '@codemirror/state';
   import { EditorView } from '@codemirror/view';
   import { api } from '../lib/api.js';
-  import { toast, reloadCase, prefs } from '../lib/state.svelte.js';
+  import { toast, reloadCase, prefs, uiState } from '../lib/state.svelte.js';
   import { foldText } from '../lib/textFold.js';
   import { mediaReference, entityReference, remoteImageUrls } from '../lib/markdown.js';
   import { createBookmark } from '../lib/bookmarks.js';
@@ -44,16 +49,18 @@
   import { gotoPoint } from '../lib/navigate.js';
   import { droppedMedia, carriesMedia } from '../lib/drag.js';
   import { CALLOUTS, calloutMarkdown } from '../lib/notes/callouts.js';
-  import { uploadedImage } from '../lib/notes/syntax.js';
+  import { SLASH_COMMANDS, slashInsert, uploadedImage } from '../lib/notes/syntax.js';
   import { BUILT_IN_PICTURES, builtInLine } from '../lib/notes/reportParts.js';
   import { ownCover, readLook, writeLook } from '../lib/notes/look.js';
   import { noteMode } from '../lib/notes/noteMode.svelte.js';
   import { differing, editNote, takeBack } from '../lib/notes/noteDoc.svelte.js';
-  import { offerWriter } from '../lib/notes/noteDock.svelte.js';
+  import { offerWriter, openInDock } from '../lib/notes/noteDock.svelte.js';
   import {
-    captionAt, heldRange, holdRange, insertAtCursor, insertCover, insertInclude, jumpToLine, noteExtensions, placeText, releaseRange,
-    resizePicture, setLinePrefix, setNoteCase, setNoteMode, takeBackRange, toggleWrap,
+    captionAt, heldRange, holdCell, holdRange, insertAtCursor, insertCover, insertInclude, jumpToLine, noteExtensions, openTablePicker,
+    placeInCell, placeText, releaseCell, releaseRange, resizePicture, setLinePrefix, setNoteCase, setNoteMode, takeBackRange,
+    toggleWrap,
   } from '../lib/notes/liveMarkdown.js';
+  import { holdSeek } from '../tools/inspect/handoff.js';
   import { startCompletion } from '@codemirror/autocomplete';
   import { mapOffer } from '../lib/notes/mapPut.js';
   import { putInNote } from '../lib/notes/putInNote.svelte.js';
@@ -161,7 +168,40 @@
     sourceable: (entity) => (template || !caseId ? false : canStateSourceOf(caseId, entity)),
     stateSource: (entity, url) => stateSourceOf(caseId, entity, url),
     get statePosted() { return template || !caseId ? null : (entity, url) => statePostedOf(caseId, entity, url); },
+    table: () => newTable(),
+    tableToast: (message, actions = [], kind = 'info') => toast(message, kind, actions.length ? 8000 : 4000, actions.length ? actions : null),
+    /** The note a picked cell belongs to, shared by every editor showing it. */
+    get noteKey() { return noteKey(); },
+    get cutFrame() { return template || !tools || !caseId ? null : cutFrame; },
   };
+
+  function noteKey() {
+    return template || !caseId || !doc ? null : `${caseId}:${doc.noteId ?? 'case'}`;
+  }
+
+  /** `/` › Table: its size asked on the drawn page; the raw Markdown gets the two columns it always had. */
+  function newTable() {
+    if (!view || readOnly) return;
+    if (noteMode.mode !== 'markdown') {
+      openTablePicker(view);
+      return;
+    }
+    const head = view.state.selection.main.head;
+    const line = view.state.doc.lineAt(head);
+    const command = SLASH_COMMANDS.find((item) => item.id === 'table');
+    const made = slashInsert({ ...command, action: undefined }, { before: line.text.slice(0, head - line.from) });
+    view.dispatch({ changes: { from: head, insert: made.text }, selection: { anchor: head + made.cursor }, userEvent: 'input.complete' });
+  }
+
+  /** An empty picture cell's Cut a frame: Inspect at the row's time, this note beside it for the frame's Put in. */
+  function cutFrame({ entity, time }) {
+    const path = entity?.attrs?.path;
+    if (!path || !caseId) return;
+    if (where !== 'dock') openInDock(caseId, doc?.noteId ?? null);
+    holdSeek(path, time);
+    uiState.inspectPath = path;
+    uiState.tool = 'inspect';
+  }
 
   onMount(() => {
     view = new EditorView({
@@ -242,23 +282,29 @@
     // -- what a tool puts in the note (`lib/notes/putInNote.svelte.js`) --
     /** Whether the editor is still on screen. */
     alive: () => Boolean(view),
-    /** Hold where a put lands: the cursor when the note was written in this visit, its end else. Null when it cannot be written. */
-    spot: () => {
+    /**
+     * Hold where a put lands: the cell picked in a table for a picture, else the cursor when the
+     * note was written in this visit, its end else. Null when it cannot be written.
+     */
+    spot: ({ picture = false } = {}) => {
       if (!view || readOnly) return null;
-      return holdRange(view, wrote ? view.state.selection.main.head : view.state.doc.length);
+      const cell = picture ? holdCell(view, noteKey()) : null;
+      return cell ?? holdRange(view, wrote ? view.state.selection.main.head : view.state.doc.length);
     },
-    release: (spot) => view && releaseRange(view, spot),
+    release: (spot) => view && (typeof spot === 'object' && spot ? releaseCell(view, spot) : releaseRange(view, spot)),
     /** Put `text` where `spot` now is, light it, and answer what landed for Undo. */
     place: (spot, text, options) => {
       if (!view || readOnly) return null;
       onarrive();
       if (!view) return null;
+      if (typeof spot === 'object' && spot) return placeInCell(view, spot, text, noteKey(), options);
       const held = heldRange(view, spot);
       releaseRange(view, spot);
       return held ? placeText(view, held.from, text, options) : null;
     },
-    /** Open the caption of the picture that just landed. */
+    /** Open the caption of the picture that just landed; a picture in a table's cell has none. */
     caption: (landed, options) => {
+      if (landed?.cell) return Promise.resolve(false);
       const held = view && landed ? heldRange(view, landed.id) : null;
       return held ? captionAt(view, held.from + (landed.text.length - landed.text.replace(/^\n+/, '').length), options) : Promise.resolve(false);
     },
