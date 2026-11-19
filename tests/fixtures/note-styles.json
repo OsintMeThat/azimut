@@ -1,0 +1,52 @@
+{
+  "plain": {
+    "sources": false,
+    "sources_style": "short",
+    "geolocations": false,
+    "credits": false,
+    "method": false,
+    "limits": false,
+    "editions": false,
+    "link_check": "grouped"
+  },
+  "report": {
+    "sources": true,
+    "sources_style": "academic",
+    "geolocations": true,
+    "credits": true,
+    "method": true,
+    "limits": true,
+    "editions": true,
+    "link_check": "each"
+  },
+  "brief": {
+    "sources": true,
+    "sources_style": "short",
+    "geolocations": false,
+    "credits": false,
+    "method": false,
+    "limits": false,
+    "editions": false,
+    "link_check": "grouped"
+  },
+  "journal": {
+    "sources": true,
+    "sources_style": "short",
+    "geolocations": false,
+    "credits": false,
+    "method": false,
+    "limits": false,
+    "editions": false,
+    "link_check": "grouped"
+  },
+  "article": {
+    "sources": true,
+    "sources_style": "web",
+    "geolocations": false,
+    "credits": true,
+    "method": false,
+    "limits": false,
+    "editions": true,
+    "link_check": "grouped"
+  }
+}

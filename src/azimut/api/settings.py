@@ -28,6 +28,7 @@ from ..engine import (
     githubpages,
     google_tiles,
     iconlibrary,
+    notelook,
     notes_web,
     notes_wordpress,
     reveal,
@@ -169,6 +170,9 @@ class PrefsIn(BaseModel):
     report_name: str | None = Field(default=None, max_length=REPORT_TEXT_MAX)
     report_role: str | None = Field(default=None, max_length=REPORT_TEXT_MAX)
     report_organisation: str | None = Field(default=None, max_length=REPORT_TEXT_MAX)
+    # what each note style carries by default, the whole table as Settings shows it;
+    # only what differs from Azimut's own is kept, and {} is Azimut's own throughout
+    note_styles: dict[notelook.Style, notelook.StyleChoices] | None = None
     # app self-update pop-up (engine/updates.py) — check on load, and the tag
     # the user muted with "don't show again"
     update_check_on_start: bool | None = None
@@ -249,6 +253,10 @@ def _prefs(settings: dict[str, Any]) -> dict[str, Any]:
         "reverse_prefill": bool(settings.get("reverse_prefill", True)),
         "signature_handle": settings.get("signature_handle", DEFAULT_SIGNATURE_HANDLE),
         **{key: _report_text(settings, key) for key in REPORT_KEYS},
+        # what each style carries, Settings' changes over Azimut's own, and Azimut's own beside it
+        "note_styles": {style: profile.as_json() for style, profile in
+                        notelook.styles_table(settings.get(notelook.SETTINGS_KEY)).items()},
+        "note_styles_default": {style: profile.as_json() for style, profile in notelook.PROFILES.items()},
         "update_check_on_start": bool(settings.get("update_check_on_start", True)),
         "update_dismissed_version": settings.get("update_dismissed_version", ""),
         "tour": settings.get("tour", ""),
@@ -437,6 +445,9 @@ def _apply_prefs(settings: dict[str, Any], body: PrefsIn) -> None:
         value = getattr(body, key)
         if value is not None:
             settings[key] = value
+    if body.note_styles is not None:
+        given = {style: choices.model_dump(exclude_none=True) for style, choices in body.note_styles.items()}
+        settings[notelook.SETTINGS_KEY] = notelook.saved_styles(given)
     if body.update_check_on_start is not None:
         settings["update_check_on_start"] = bool(body.update_check_on_start)
     if body.update_dismissed_version is not None:
@@ -896,6 +907,9 @@ class ImportedSettings(BaseModel):
     report_name: str = Field(default="", max_length=REPORT_TEXT_MAX)
     report_role: str = Field(default="", max_length=REPORT_TEXT_MAX)
     report_organisation: str = Field(default="", max_length=REPORT_TEXT_MAX)
+    # what each note style carries: only what differs from Azimut's own, read the way
+    # the app reads its own (a value this build cannot read keeps Azimut's)
+    note_styles: dict[str, Any] = Field(default_factory=dict, max_length=16)
     ingest_token: str = Field(default="", max_length=128, pattern=r"^[A-Za-z0-9_-]*$")
     update_check_on_start: bool = True
     update_dismissed_version: str = Field(default="", max_length=64)
@@ -963,6 +977,12 @@ class ImportedSettings(BaseModel):
             return notes_web.address(value)
         except notes_web.NotesWebError:
             return ""
+
+    @field_validator("note_styles", mode="before")
+    @classmethod
+    def readable_note_styles(cls, value: Any) -> Any:
+        """Styles' defaults this build reads, the rest Azimut's own, rather than failing the backup."""
+        return notelook.saved_styles(value)
 
     @field_validator("logo_look", mode="before")
     @classmethod

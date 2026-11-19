@@ -25,6 +25,7 @@ from azimut.engine import notefill, notes_html, notes_markdown, notes_pdf
 from azimut.engine.notelook import NoteLook
 from azimut.workspace import Case
 
+from sourcesfixture import AS_BEFORE
 from ambushfixture import (
     ARCHIVE_URL,
     CLIP_SECRET,
@@ -39,9 +40,10 @@ from ambushfixture import (
 from test_notes_pdf import pdf_text
 
 TITLE = "Ambush on the Wadi Sahm road"
+#: A report as it printed before styles carried profiles; what one carries now is `test_notes_profiles.py`'s.
 LOOK = NoteLook.model_validate({
     "style": "report", "tlp": "amber", "toc": True, "numbered": True,
-    "cover": {"on": True, "subtitle": "What open sources show", "date": "2025-10-28"},
+    "cover": {"on": True, "subtitle": "What open sources show", "date": "2025-10-28"}, **AS_BEFORE,
 })
 CREATED = datetime(2025, 10, 28, 12, 0)
 VOID = frozenset("area base br col embed hr img input link meta source track wbr".split())

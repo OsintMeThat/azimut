@@ -1,4 +1,4 @@
-"""The four ways a note prints, and the page furniture they share.
+"""The five ways a note prints, and the page furniture they share.
 
 `plain` is the document every note printed as before looks existed, and its
 numbers are the ones `notes_pdf` always used: changing one here changes every
@@ -17,6 +17,9 @@ The other three are built on the same body and differ where a reader notices:
 - **journal**: a dated log. Each `### 2026-11-04 14:32 (UTC+1)` entry sets its
   time in a left gutter on a timeline rule, the text runs beside it in a compact
   serif, and the first entry of a new day names the day.
+- **article**: the Web article, a page read online. On paper it is a long read:
+  the day over a large title, a roomy serif, no numbering, its sources written for
+  the web (`notelook.PROFILES`).
 
 Colour belongs to the style until the analyst picks an accent; every tint is
 mixed from that one colour so a chosen accent re-colours the whole document
@@ -229,7 +232,33 @@ JOURNAL = Theme(
     gutter=30.0,
 )
 
-THEMES = {"plain": PLAIN, "report": REPORT, "brief": BRIEF, "journal": JOURNAL}
+ARTICLE = Theme(
+    style="article",
+    accent=(168, 50, 40),
+    accent_dark=(112, 32, 26),
+    ink=(24, 24, 26),
+    muted=(108, 108, 112),
+    rule=(220, 216, 210),
+    code_bg=(246, 245, 243),
+    table_head_bg=(168, 50, 40),
+    note_bg=(249, 247, 244),
+    body_size=10.4,
+    leading=5.7,
+    gap=3.6,
+    headings={
+        "h1": (17.0, 8.0),
+        "h2": (13.5, 6.0),
+        "h3": (11.5, 5.0),
+        "h4": (10.5, 4.5),
+        "h5": (10.0, 4.0),
+        "h6": (9.5, 4.0),
+    },
+    margin_top=24.0,
+    margin_side=24.0,
+    margin_bottom=22.0,
+)
+
+THEMES = {"plain": PLAIN, "report": REPORT, "brief": BRIEF, "journal": JOURNAL, "article": ARTICLE}
 
 #: A step smaller or larger than the style's text: enough to be seen across a page,
 #: not so much that the style's proportions stop holding.
@@ -877,7 +906,7 @@ BAND_WORD = re.compile(r"\{(title|date|name|role|organisation|page|pages)\}")
 BAND_SIZE = 7.5
 BAND_PICTURE_HEIGHT = 5.0
 
-KICKERS = {"plain": "AZIMUT NOTES", "report": "REPORT", "brief": "BRIEF", "journal": "LOG"}
+KICKERS = {"plain": "AZIMUT NOTES", "report": "REPORT", "brief": "BRIEF", "journal": "LOG", "article": "ARTICLE"}
 
 
 def fit_line(pdf: FPDF, text: str, width: float) -> str:

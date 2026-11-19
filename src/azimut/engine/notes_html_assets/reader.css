@@ -713,3 +713,20 @@ svg.az-chart-phone, svg.az-chart-on-dark { display: none; }
   svg.az-chart-phone, svg.az-chart-on-dark, .az-chart-numbers { display: none !important; }
   .az-chart-frame { break-inside: avoid; break-after: avoid; }
 }
+
+/* the annexes a style carries after its sources; a reference list written in full reads as running text */
+[data-look="article"] { --az-accent: #a83228; --accent-ink: #681f19; --accent-soft: #fbf0ee; --ink: #18181a; --rule: #dcd8d2; --tint: #f6f4f1; }
+.az-annex { width: min(var(--measure), 100% - 2 * var(--gutter)); margin: 3rem auto 0; padding-top: 1.25rem; border-top: 1px solid var(--rule); font: 400 .875rem/1.55 var(--ui); color: var(--ink-2); }
+.az-annex > h2 { margin: 0 0 .9rem; font-size: .8125rem; letter-spacing: .12em; text-transform: uppercase; color: var(--ink); }
+.az-ref .az-source-address { font-size: inherit; }
+.az-annex-table { width: 100%; border-collapse: collapse; font-variant-numeric: tabular-nums; }
+.az-annex-table :is(th, td) { padding: .4rem .75rem .4rem 0; border-bottom: 1px solid var(--rule); text-align: left; vertical-align: top; }
+.az-annex-table th { border-bottom-color: var(--ink); font-weight: 600; }
+.az-credits { display: grid; grid-template-columns: max-content 1fr; gap: .35rem 1.25rem; margin: 0; }
+.az-credits dt { font-weight: 600; color: var(--ink); }
+.az-credits dd { margin: 0; }
+.az-facts, .az-limits { margin: 0; padding-left: 1.2rem; }
+.az-facts li, .az-limits li { margin: .3rem 0; }
+.az-back-to { margin-left: .35rem; font-weight: 600; white-space: nowrap; }
+@media (max-width: 37.99rem) { .az-credits { grid-template-columns: 1fr; } }
+@media print { .az-annex { width: auto; } .az-back-to { display: none; } }

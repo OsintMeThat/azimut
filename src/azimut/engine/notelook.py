@@ -21,11 +21,20 @@ the analyst's own header and footer (`header`, `footer`), written only once a sl
 holds something: a reader that drops them prints the style's own. And how the HTML
 page is laid out (`web`): an article, or a story whose pictures hold still while their
 words scroll by. The PDF never reads it.
+
+**The style is the profile.** A style says what the document is, and so what it
+carries after its text: the sources list and how it is written (`academic`, `web`,
+`short`), the five annexes (`ANNEXES`), and how strict the check before export is
+about outside links. Azimut's own answer for each style is `PROFILES`, the one place
+it is decided; Settings › Publishing › Styles changes it once for every note
+(`note_styles`, carried by the settings backup), and a look changes it for one note
+(`sources_style`, `annexes`, `link_check`, late keys like the others).
 """
 
 from __future__ import annotations
 
 import json
+from dataclasses import dataclass, fields, replace
 from datetime import date
 from typing import TYPE_CHECKING, Any, Literal
 
@@ -50,7 +59,10 @@ CASE_LOOK = "notes.case_look"
 #: The attr a filed note keeps its look under.
 ATTR = "look"
 
-Style = Literal["plain", "report", "brief", "journal"]
+#: `article` is the Web article: a page read online, its sources written for the web.
+Style = Literal["plain", "report", "brief", "journal", "article"]
+#: Every style, in the order the Look and Settings list them.
+STYLES: tuple[str, ...] = ("report", "article", "brief", "journal", "plain")
 Page = Literal["a4", "letter"]
 Tlp = Literal["", "clear", "green", "amber", "amber-strict", "red"]
 #: The faces a note's text is set in (`engine/pdffonts.py`, `FONTS`); "" keeps the style's own.
@@ -62,9 +74,24 @@ Sources = Literal["", "on", "off"]
 #: How the HTML page is laid out: "" an article, "story" each picture held still
 #: beside the words that follow it. The PDF prints the same either way.
 Web = Literal["", "story"]
+#: How the sources list writes each source: "" keeps the style's own. `academic` is a
+#: journal's reference list (author, "title", outlet, day, address, archived copy,
+#: accessed), `web` the outlet, the title and the day, `short` the form notes always had.
+SourcesStyle = Literal["", "academic", "web", "short"]
+SOURCES_STYLES: tuple[str, ...] = ("academic", "web", "short")
+#: How the check before export names the outside links with no archived copy or no seen
+#: day: "" the style's own, `each` one line per link, `grouped` one line per kind.
+LinkCheck = Literal["", "each", "grouped"]
+LINK_CHECKS: tuple[str, ...] = ("each", "grouped")
+#: An annex as a look sets it: "" the style's own, else on or off.
+Switch = Literal["", "on", "off"]
+#: What a document may add after its sources, in the order it prints them: the proofs it
+#: cites as a table, the credits it owes, the facts of how it was made, its Limits boxes
+#: gathered, and its editions with what each corrected.
+ANNEXES: tuple[str, ...] = ("geolocations", "credits", "method", "limits", "editions")
 #: Keys a look writes only once they leave their default, so a look that never used
 #: them is stored, served and bundled exactly as an older Azimut wrote it.
-LATE_KEYS = ("font", "size", "sources", "web")
+LATE_KEYS = ("font", "size", "sources", "web", "sources_style", "link_check")
 #: The page bands under the same rule: one with nothing in it is not written.
 BAND_KEYS = ("header", "footer")
 #: The longest a header or footer slot is, in characters: one line of a page's edge.
@@ -74,9 +101,103 @@ COVER_LATE_KEYS = ("mode", "top")
 #: What the cover is: "" the style's (title, subtitle, picture, day), or "own", the
 #: lines above `<!-- cover -->` as a page of their own (`engine/notefill.py`).
 CoverMode = Literal["", "own"]
-#: The styles that print no sources list unless the look asks for one: plain is the
-#: document notes always printed as. Read by the frontend's mirror of this rule.
-SOURCES_OFF_STYLES: tuple[str, ...] = ("plain",)
+
+
+@dataclass(frozen=True)
+class Profile:
+    """What a document carries after its text, and how strictly its links are checked."""
+
+    sources: bool
+    sources_style: str
+    geolocations: bool
+    credits: bool
+    method: bool
+    limits: bool
+    editions: bool
+    link_check: str
+
+    def annex(self, key: str) -> bool:
+        return bool(getattr(self, key))
+
+    def as_json(self) -> dict[str, Any]:
+        return {one.name: getattr(self, one.name) for one in fields(self)}
+
+
+#: What each style carries when nobody changed it: the one place Azimut decides it.
+#: Plain is the document notes always printed as. A report is read as a paper: its
+#: sources academic, every annex, every link checked. The Web article owes its
+#: readers the credits and its corrections. The brief and the journal stay lean.
+PROFILES: dict[str, Profile] = {
+    "plain": Profile(sources=False, sources_style="short", geolocations=False, credits=False, method=False,
+                     limits=False, editions=False, link_check="grouped"),
+    "report": Profile(sources=True, sources_style="academic", geolocations=True, credits=True, method=True,
+                      limits=True, editions=True, link_check="each"),
+    "brief": Profile(sources=True, sources_style="short", geolocations=False, credits=False, method=False,
+                     limits=False, editions=False, link_check="grouped"),
+    "journal": Profile(sources=True, sources_style="short", geolocations=False, credits=False, method=False,
+                       limits=False, editions=False, link_check="grouped"),
+    "article": Profile(sources=True, sources_style="web", geolocations=False, credits=True, method=False,
+                       limits=False, editions=True, link_check="grouped"),
+}
+#: The settings key holding what Settings › Publishing › Styles changed: by style, only
+#: what differs from `PROFILES`, so a default Azimut changes later still reaches the rest.
+SETTINGS_KEY = "note_styles"
+#: The styles that print no sources list unless the look asks for one, as Azimut ships them.
+SOURCES_OFF_STYLES: tuple[str, ...] = tuple(style for style, kept in PROFILES.items() if not kept.sources)
+
+
+class StyleChoices(BaseModel):
+    """One style's defaults as Settings changed them, each absent one Azimut's."""
+
+    model_config = ConfigDict(extra="ignore")
+
+    sources: StrictBool | None = None
+    sources_style: Literal["academic", "web", "short"] | None = None
+    geolocations: StrictBool | None = None
+    credits: StrictBool | None = None
+    method: StrictBool | None = None
+    limits: StrictBool | None = None
+    editions: StrictBool | None = None
+    link_check: Literal["each", "grouped"] | None = None
+
+
+def styles_table(saved: Any = None) -> dict[str, Profile]:
+    """Every style's defaults: Azimut's, with what Settings changed. A saved value this
+    build cannot read keeps Azimut's, one key at a time."""
+    table = dict(PROFILES)
+    if not isinstance(saved, dict):
+        return table
+    for style, choices in saved.items():
+        if style not in table or not isinstance(choices, dict):
+            continue
+        kept: dict[str, Any] = {}
+        for key, value in choices.items():
+            try:
+                read = StyleChoices.model_validate({key: value})
+            except ValidationError:
+                continue
+            if key in StyleChoices.model_fields and getattr(read, key) is not None:
+                kept[key] = getattr(read, key)
+        table[style] = replace(table[style], **kept)
+    return table
+
+
+def saved_styles(table: Any) -> dict[str, dict[str, Any]]:
+    """What a table differs by from Azimut's own, which is all Settings keeps."""
+    read = styles_table(table)
+    return {
+        style: changed
+        for style, profile in read.items()
+        if (changed := {key: value for key, value in profile.as_json().items()
+                        if value != getattr(PROFILES[style], key)})
+    }
+
+
+def settings_table() -> dict[str, Profile]:
+    """The styles' defaults on this machine, as Settings › Publishing › Styles left them."""
+    from .. import config
+
+    return styles_table(config.load_settings().get(SETTINGS_KEY))
 
 #: FIRST TLP 2.0: the label as written, and its colour. Every label is set on
 #: black, in capitals, with no spaces, right-justified in the header and footer of
@@ -159,6 +280,23 @@ class PageBand(BaseModel):
         return not (self.left or self.center or self.right)
 
 
+class NoteAnnexes(BaseModel):
+    """Which annexes this note prints, each "" for its style's own. Written only once
+    one is set, and then only the ones set."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    geolocations: Switch = ""
+    credits: Switch = ""
+    method: Switch = ""
+    limits: Switch = ""
+    editions: Switch = ""
+
+    @model_serializer(mode="wrap")
+    def _set_ones_only(self, handler: SerializerFunctionWrapHandler) -> dict[str, Any]:
+        return {key: value for key, value in dict(handler(self)).items() if value}
+
+
 class NoteLook(BaseModel):
     """Every key optional, every missing one at its default; unknown keys refused."""
 
@@ -176,6 +314,9 @@ class NoteLook(BaseModel):
     size: Size = ""
     sources: Sources = ""
     web: Web = ""
+    sources_style: SourcesStyle = ""
+    annexes: NoteAnnexes = Field(default_factory=NoteAnnexes)
+    link_check: LinkCheck = ""
     header: PageBand = Field(default_factory=PageBand)
     footer: PageBand = Field(default_factory=PageBand)
 
@@ -191,6 +332,8 @@ class NoteLook(BaseModel):
             band = data.get(key)
             if isinstance(band, dict) and not any(band.values()):
                 data.pop(key, None)
+        if not data.get("annexes"):
+            data.pop("annexes", None)
         return data
 
     @field_validator("accent")
@@ -202,13 +345,22 @@ class NoteLook(BaseModel):
     def is_default(self) -> bool:
         return self == DEFAULT
 
-    @property
-    def sources_on(self) -> bool:
-        """Whether the note ends with its sources list: as the look says, else as
-        its style does."""
+    def profile(self, table: dict[str, Profile] | None = None) -> Profile:
+        """What this note carries: its style's defaults (``table``, else this machine's
+        Settings), with each switch the look sets."""
+        base = (table if table is not None else settings_table()).get(self.style, PROFILES[self.style])
+        changed: dict[str, Any] = {}
         if self.sources:
-            return self.sources == "on"
-        return self.style not in SOURCES_OFF_STYLES
+            changed["sources"] = self.sources == "on"
+        if self.sources_style:
+            changed["sources_style"] = self.sources_style
+        if self.link_check:
+            changed["link_check"] = self.link_check
+        for key in ANNEXES:
+            value = getattr(self.annexes, key)
+            if value:
+                changed[key] = value == "on"
+        return replace(base, **changed) if changed else base
 
     def accent_rgb(self) -> tuple[int, int, int] | None:
         if not self.accent:
@@ -258,13 +410,19 @@ def parse(value: Any) -> NoteLook | None:
     cover = known.get("cover")
     if isinstance(cover, dict):
         known["cover"] = {key: cover[key] for key in NoteCover.model_fields if key in cover}
+    annexes = known.get("annexes")
+    if isinstance(annexes, dict):
+        known["annexes"] = {key: annexes[key] for key in NoteAnnexes.model_fields if key in annexes}
     for key in BAND_KEYS:
         band = known.get(key)
         if isinstance(band, dict):
             known[key] = {slot: band[slot] for slot in PageBand.model_fields if slot in band}
     # One unreadable value at a time goes back to its default; a field nested in
     # the cover goes alone, and the rest of the cover stays.
-    for _ in range(len(NoteLook.model_fields) + len(NoteCover.model_fields) + 2 * len(PageBand.model_fields) + 1):
+    nested = ("cover", "annexes", *BAND_KEYS)
+    rounds = (len(NoteLook.model_fields) + len(NoteCover.model_fields) + len(NoteAnnexes.model_fields)
+              + 2 * len(PageBand.model_fields) + 1)
+    for _ in range(rounds):
         try:
             return NoteLook.model_validate(known)
         except ValidationError as exc:
@@ -272,7 +430,7 @@ def parse(value: Any) -> NoteLook | None:
             for error in exc.errors():
                 where = error.get("loc") or ()
                 inner = known.get(str(where[0])) if where else None
-                if len(where) >= 2 and where[0] in ("cover", *BAND_KEYS) and isinstance(inner, dict) and where[1] in inner:
+                if len(where) >= 2 and where[0] in nested and isinstance(inner, dict) and where[1] in inner:
                     inner.pop(where[1])
                     dropped = True
                 elif where and where[0] in known:

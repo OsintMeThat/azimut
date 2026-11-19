@@ -719,3 +719,44 @@ test('a picture bar in the note is one Tab away, walked with the arrows, and kee
   await page.keyboard.press('Tab');
   await expect(page.locator('.cm-block-picture [data-size-bar] button:focus')).toHaveCount(0);
 });
+
+test('For › Report adds the report\'s annexes to the Page pane, and a switch turned off takes one away', async ({ page }) => {
+  await notebook(page);
+  // the stand-in server prints a page per part: the note, then the sources and the annexes its look asks for
+  const looks = [];
+  const ANNEX_PAGES = [['geolocations', 'Geolocations'], ['credits', 'Credits'], ['method', 'How this was made'],
+    ['limits', 'Limits'], ['editions', 'Editions and corrections']];
+  await page.route(`**/api/cases/${CASE_ID}/notes/preview`, (route) => {
+    const look = route.request().postDataJSON().look ?? {};
+    looks.push(look);
+    const labels = ['Lead'];
+    if (look.style === 'report') {
+      labels.push('Sources');
+      labels.push(...ANNEX_PAGES.filter(([key]) => look.annexes?.[key] !== 'off').map(([, name]) => name));
+    }
+    return pdfAnswer(route, labels.map((_, index) => index * 10), {}, labels);
+  });
+  await openLead(page);
+  await page.locator('[data-guide="notebook.view"]').getByRole('button', { name: 'Page' }).click();
+  const sheets = page.locator('.page-pane .sheet');
+  await expect(sheets).toHaveCount(1);
+
+  await page.locator('[data-guide="notebook.look"]').click();
+  await page.getByRole('tab', { name: 'Style' }).click();
+  const forRow = page.getByRole('radiogroup', { name: 'For' });
+  await expect(forRow.getByRole('radio')).toHaveText([/^Report/, /^Web article/, /^Brief/, /^Journal/, /^Plain/]);
+  await forRow.getByRole('radio', { name: /^Report/ }).click();
+  // the note, its sources, then the five annexes
+  await expect(sheets).toHaveCount(7);
+  await expect(page.locator('.page-pane .pane-bar')).toContainText('7 pages');
+  expect(looks.at(-1)).toMatchObject({ style: 'report', annexes: {}, sources_style: '' });
+
+  const includes = page.getByRole('group', { name: 'What it includes' });
+  await expect(includes.locator('[data-include="method"]')).toContainText("Report's own");
+  await includes.locator('[data-include="method"] input').click();
+  await expect(sheets).toHaveCount(6);
+  expect(looks.at(-1).annexes).toEqual({ method: 'off' });
+  await expect(includes.locator('[data-include="method"]')).toContainText('Changed here');
+  await includes.locator('[data-include="method"]').getByRole('button', { name: /reset/i }).click();
+  await expect(sheets).toHaveCount(7);
+});
