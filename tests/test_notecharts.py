@@ -587,3 +587,36 @@ def test_the_editor_keeps_no_more_colours_and_no_longer_names_than_the_case_pale
                 if hasattr(meta, "max_length"))
     assert f"export const MAX_PALETTE = {layerediting.MAX_PALETTE};" in source
     assert f"export const MAX_COLOUR_NAME = {name};" in source
+
+
+def test_a_heading_never_stays_alone_above_its_chart_drawn_once(monkeypatch, tmp_workspace):
+    """The heading measures the chart's real picture to keep with it, and the chart
+    prints that same picture rather than drawing itself a second time."""
+    rows = "\n".join(f"| Model {n} | {n + 1} |" for n in range(26))
+    chart = f"::: chart\nkind: bars\ntitle: Vehicles by model\n| Model | Vehicles |\n| --- | ---: |\n{rows}\n:::\n"
+    drawn: list[int] = []
+    draw = notes_pdf._Builder._draw_chart
+
+    def counted(self, token):
+        drawn.append(1)
+        return draw(self, token)
+
+    monkeypatch.setattr(notes_pdf._Builder, "_draw_chart", counted)
+    landed: list[int] = []
+    placed = notes_pdf._Builder._picture
+
+    def watch(self, source, **options):
+        landed.append(self.pdf.page - 1)
+        return placed(self, source, **options)
+
+    monkeypatch.setattr(notes_pdf._Builder, "_picture", watch)
+    for paragraphs in range(1, 34, 2):
+        landed.clear()
+        drawn.clear()
+        body = "\n\n".join(f"Paragraph {n} of the body, long enough to take a line." for n in range(paragraphs))
+        rendered = notes_pdf.render(None, title="R", text=f"{body}\n\n## Field notes\n\n{chart}",
+                                    identity=notefill.Identity())
+        printed = ["".join((page.extract_text() or "").split()).casefold()
+                   for page in PdfReader(io.BytesIO(rendered.pdf)).pages]
+        assert [index for index, page in enumerate(printed) if "fieldnotes" in page] == landed, paragraphs
+        assert len(drawn) == 1, paragraphs

@@ -373,6 +373,20 @@ class _Picture:
 
 
 @dataclass
+class _DrawnMap:
+    """A `::: map` block drawn: its picture and pixel size, its caption's words, its
+    first credit and every credit, its warnings, and the share of the page it may take."""
+
+    picture: bytes
+    natural: tuple[int, int]
+    words: str
+    credit: _Credit | None
+    credits: list[str]
+    warnings: list[Any]
+    unsized: float
+
+
+@dataclass
 class _Poster:
     """A video in a note: the still its thumbnail holds, when there is one, and
     the address it can be watched at, when it or what it was made from is on the
@@ -876,6 +890,16 @@ class _Builder:
         self._figures = 0
         #: An infographic was drawn last: whatever comes next starts a page, so it keeps its own.
         self._page_after = False
+        #: The page a heading opened for the infographic under it, which then starts there.
+        self._infographic_led = 0
+        #: The block of the note being walked, and the next one holding anything with where
+        #: it starts: a heading closing its block is kept with what opens the next, a map,
+        #: a chart or an infographic being a block of its own.
+        self._block_tokens: list[Token] | None = None
+        self._after_block: tuple[list[Token], int] | None = None
+        #: A map's or a chart's picture, drawn once when a heading measured it to keep with
+        #: it, waiting to be printed (by the token's id, the token kept so the id stays its own).
+        self._ahead: dict[int, tuple[Token, Any]] = {}
         self._outlined = not self.theme.plain or self.look.toc
         #: The brief's verdict: the quote lifted to the top, and the tokens it is in.
         self._promoted: Token | None = None
@@ -958,11 +982,16 @@ class _Builder:
             parsed = blocks[id(piece)]
             # a heading closing the stretch before a chapter is kept with that chapter
             last = max((index for index, block in enumerate(parsed) if block.tokens), default=-1)
+            later = [(block.tokens, block.start) for block in parsed if block.tokens[block.start:]]
             for index, block in enumerate(parsed):
                 self._block_line = piece.line + (0 if piece.fixed else block.line)
                 self._lead = following if index == last and following is not None and following.kind == "chapter" else None
+                while later and later[0][0] is block.tokens:
+                    later.pop(0)
+                self._block_tokens, self._after_block = block.tokens, (later[0] if later else None)
                 drawn = self._walk(block.tokens, block.start, ALIGNMENTS[block.align], stop=None)[0] or drawn
             self._lead = None
+            self._block_tokens = self._after_block = None
             self._end_entry()
         if not drawn:
             self._aside("This note is empty.")
@@ -1676,6 +1705,11 @@ class _Builder:
         pdf = self.pdf
         number = self._number(level) if numbered else ""
         chapter = self._lead if self._lead is not None and _nothing_after(tokens, after) else None
+        if self._leads_to_infographic(tokens, after) and self._infographic_led != pdf.page:
+            # the infographic opens a page of its own: its heading opens it, rather than
+            # staying behind alone on the page before
+            self._page_break()
+            self._infographic_led = pdf.page
         room = self._next_height(tokens, after)
         if chapter is not None and self._opens_page(chapter):
             if pdf.get_y() > pdf.t_margin + 4 and (pdf.page, pdf.get_y()) != self._opening:
@@ -1846,7 +1880,10 @@ class _Builder:
         lines else."""
         theme = self.theme
         if index >= len(tokens):
-            return theme.leading * 2
+            ahead = self._block_after(tokens)
+            if ahead is None:
+                return theme.leading * 2
+            tokens, index = ahead
         token = tokens[index]
         if token.type == "heading_open" and depth < 2:
             return self._heading_room(_level(token.tag, self._shift)) + self._next_height(tokens, index + 3, depth + 1)
@@ -1854,10 +1891,25 @@ class _Builder:
         credit: _Credit | None = None
         options = ImageOptions("", "", "left", "")
         words = ""
+        unsized = UNSIZED_SHARE
         if token.type == "fence" and MERMAID_INFO.match(token.info or ""):
             png = self.diagrams.get(diagram_key(token.content))
             picture = _diagram_size(png) if png else None
             options = ImageOptions("", "", "center", "")
+            unsized = 1.0  # `_diagram` lets a diagram take the whole page, not half of it
+        elif token.type == "az_map":
+            drawn_map = self._held(token, self._draw_map)
+            picture, credit, words = drawn_map.natural, drawn_map.credit, drawn_map.words
+            options = ImageOptions("", "", "center", "")
+            unsized = drawn_map.unsized
+        elif token.type == "az_chart":
+            chart, drawn = self._held(token, self._draw_chart)
+            if drawn is not None:
+                picture, words = drawn[1], chart.title or ("Chart" if self.look.numbered else "")
+                options = ImageOptions("", "", "center", "")
+                unsized = 1.0
+        elif token.type == "az_infographic":
+            return theme.leading * 2  # its own page, which the heading opened for it
         elif token.type == "table_open":
             # the header row and the first row under it, which fpdf2 keeps together
             line, pad = (5.0, 1.6) if theme.plain else (4.6, 1.7)
@@ -1878,13 +1930,32 @@ class _Builder:
                     words = options.caption or _attr(children[0], "title")
         if picture is None:
             return theme.leading * 2
-        width, height = _fit(picture, options.width, self._frame(), theme.room)
+        width, height = _fit(picture, options.width, self._frame(), theme.room, unsized)
         label = "Figure 00" if self.look.numbered else ""
         below = self._below((label, words), credit, ALIGNMENTS[options.align], width)
         if not theme.plain:
             below += 0.6  # the breath a styled picture takes above itself
         # what a picture free to shrink needs at least, with a little to spare
         return (height if options.width else height * (1 - MAX_SHRINK + 0.05)) + below
+
+    def _block_after(self, tokens: list[Token]) -> tuple[list[Token], int] | None:
+        """Where the next block of the note starts, past the end of ``tokens`` when
+        they are the block being walked; None at the end of the note or inside a block."""
+        return self._after_block if tokens is self._block_tokens else None
+
+    def _leads_to_infographic(self, tokens: list[Token], index: int) -> bool:
+        """Whether the block after a heading is an infographic, past headings between and
+        into the next block, so the headings over an infographic open its page with it."""
+        for _ in range(2):
+            while index < len(tokens) and tokens[index].type == "heading_open":
+                index += 3
+            if index < len(tokens):
+                return tokens[index].type == "az_infographic"
+            ahead = self._block_after(tokens)
+            if ahead is None:
+                return False
+            tokens, index = ahead
+        return False
 
     def _heading_room(self, level: int) -> float:
         """How far down the page a one-line heading at ``level`` takes the walk:
@@ -1951,13 +2022,21 @@ class _Builder:
     def _on_az_map(self, tokens: list[Token], index: int, align: Align) -> int:
         """A `::: map` block as one picture: its ground with its features as on its
         last day (`notes_maps.render_png`), its credit under it."""
-        from . import notes_maps
-
-        block = notes_maps.parse_block(tokens[index].content)
-        derived = notes_maps.derive(self.case, block)
-        for message, kind, offset in derived.warnings:
+        drawn = self._held(tokens[index], self._draw_map, take=True)
+        for message, kind, offset in drawn.warnings:
             line = self._line if self._fixed or offset is None else self._line + offset
             self._warn(message, line, kind if kind in WARNING_KINDS else OTHER)
+        self._map_credits.extend(drawn.credits)
+        self._place(BytesIO(drawn.picture), drawn.natural, "", Align.C, self._caption(drawn.words, "Map"),
+                    credit=drawn.credit, unsized=drawn.unsized)
+        return index + 1
+
+    def _draw_map(self, token: Token) -> "_DrawnMap":
+        """A `::: map` block's picture, its caption's words and its credit."""
+        from . import notes_maps
+
+        block = notes_maps.parse_block(token.content)
+        derived = notes_maps.derive(self.case, block)
         data = derived.data
         picture = notes_maps.render_png(data, MAP_PIXELS_LIGHT if self.light else MAP_PIXELS, ground=derived.ground,
                                         icons=derived.icons, fmt="JPEG")
@@ -1968,13 +2047,22 @@ class _Builder:
             shown = f"as on {notes_style.long_date(date.fromisoformat(data['day']))}"
             words = f"{words}, {shown}" if words else shown.capitalize()
         credits = data.get("credits") or []
-        self._map_credits.extend(str(one) for one in credits if one)
         kind, _, value = (credits[0] if credits else "").partition(": ")
-        credit = _Credit(kind, value) if value else None
         # a half map prints half the frame's width, as the page shows it
-        self._place(BytesIO(picture), natural, "", Align.C, self._caption(words, "Map"), credit=credit,
-                    unsized=0.5 if block.size == "half" else 1.0)
-        return index + 1
+        return _DrawnMap(picture, natural, words, _Credit(kind, value) if value else None,
+                         [str(one) for one in credits if one], list(derived.warnings),
+                         0.5 if block.size == "half" else 1.0)
+
+    def _held(self, token: Token, draw: Callable[[Token], Any], *, take: bool = False) -> Any:
+        """What ``draw`` makes of a block, made once: a heading measuring the block
+        keeps it for the block's own turn, which ``take``s it."""
+        kept = self._ahead.get(id(token))
+        made = kept[1] if kept is not None and kept[0] is token else draw(token)
+        if take:
+            self._ahead.pop(id(token), None)
+        else:
+            self._ahead[id(token)] = (token, made)
+        return made
 
     def _on_az_chart(self, tokens: list[Token], index: int, align: Align) -> int:
         """A `::: chart` block as a figure: the chart its table draws, in the note's look
@@ -1983,19 +2071,15 @@ class _Builder:
         show it."""
         from . import notecharts
 
-        note_text = "\n".join(piece.text for piece in self._pieces if piece.kind == "text")
-        chart = notecharts.read(self.case, tokens[index].content, look=self.look, note_text=note_text)
+        chart, drawn = self._held(tokens[index], self._draw_chart, take=True)
         line = self._line
         for message, kind, offset in chart.warnings:
             self._warn(message, line if self._fixed or offset is None else line + offset,
                        kind if kind in WARNING_KINDS else OTHER)
-        if not chart.drawable:
+        if drawn is None:
             self._aside(notecharts.NO_TABLE)
             return index + 1
-        pixels = CHART_PIXELS_LIGHT if self.light else CHART_PIXELS
-        picture = chart.png(pixels, dpi=None if self.light else CHART_DPI)
-        with PILImage.open(BytesIO(picture)) as opened:
-            natural = opened.size
+        picture, natural = drawn
         self._place(BytesIO(picture), natural, "", Align.C, self._caption(chart.title, "Chart"), unsized=1.0,
                     alt=chart.alt)
         table = chart.block.table
@@ -2007,6 +2091,19 @@ class _Builder:
             finally:
                 self._block_line = block_line
         return index + 1
+
+    def _draw_chart(self, token: Token) -> "tuple[Any, tuple[bytes, tuple[int, int]] | None]":
+        """A `::: chart` block read, and its picture with its size when it can be drawn."""
+        from . import notecharts
+
+        note_text = "\n".join(piece.text for piece in self._pieces if piece.kind == "text")
+        chart = notecharts.read(self.case, token.content, look=self.look, note_text=note_text)
+        if not chart.drawable:
+            return chart, None
+        pixels = CHART_PIXELS_LIGHT if self.light else CHART_PIXELS
+        picture = chart.png(pixels, dpi=None if self.light else CHART_DPI)
+        with PILImage.open(BytesIO(picture)) as opened:
+            return chart, (picture, opened.size)
 
     def _on_az_infographic(self, tokens: list[Token], index: int, align: Align) -> int:
         """A `:::: infographic` block on a page of its own: its panels in two columns, its
@@ -2025,11 +2122,18 @@ class _Builder:
             self._aside(notes_infographic.NO_PANEL)
             return index + 1
         pdf = self.pdf
-        self._page_break()
+        first = None
+        if self._infographic_led == pdf.page:
+            # under the heading that opened this page for it: the first part fits below it
+            first = pdf.page_break_trigger - pdf.get_y() - 2.0
+        else:
+            self._page_break()
+        self._infographic_led = 0
         frame = self._frame()
         room = min(self.theme.room, pdf.page_break_trigger - pdf.body_top - 2.0)
         pixels = CHART_PIXELS_LIGHT if self.light else CHART_PIXELS
-        parts = notes_infographic.chunks(page, room * page.width / frame)
+        scale = page.width / frame
+        parts = notes_infographic.chunks(page, room * scale, first=None if first is None else min(room, first) * scale)
         for number, part in enumerate(parts):
             if number:
                 pdf.add_page()

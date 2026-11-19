@@ -350,3 +350,67 @@ def test_a_heading_right_above_a_chapter_goes_with_it(style):
         heading = [index for index, page in enumerate(printed) if "fieldnotes" in page]
         chapter = [index for index, page in enumerate(printed) if "filmedfromthequay" in page]
         assert heading == chapter, (paragraphs, heading, chapter)
+
+
+# -- a heading kept with the figure under it --------------------------------------
+
+
+def _landed(monkeypatch) -> list[int]:
+    """The page (0-based) each picture is drawn on, in order."""
+    landed: list[int] = []
+    placed = notes_pdf._Builder._picture
+
+    def watch(self, source, **options):
+        landed.append(self.pdf.page - 1)
+        return placed(self, source, **options)
+
+    monkeypatch.setattr(notes_pdf._Builder, "_picture", watch)
+    return landed
+
+
+def _heading_pages(data: bytes) -> list[int]:
+    return [index for index, page in enumerate(pages(data)) if "fieldnotes" in "".join(page.split()).casefold()]
+
+
+@pytest.mark.parametrize("style", ["plain", "report"])
+def test_a_heading_never_stays_alone_above_a_tall_diagram(monkeypatch, style):
+    """A diagram may take the whole page, so the heading over it reserves what it
+    takes, not what a photo left unsized would: each length of body lands the
+    heading somewhere else, its page's foot among them."""
+    diagram = "```mermaid\ngraph TD; A-->B; B-->C; C-->D;\n```\n"
+    key = notes_pdf.diagram_key(notes_pdf.mermaid_sources(diagram)[0])
+    image = BytesIO()
+    Image.new("RGB", (400, 1400), "white").save(image, format="PNG")
+    landed = _landed(monkeypatch)
+    look = NoteLook.model_validate({"style": style})
+    for paragraphs in range(1, 34):
+        landed.clear()
+        body = "\n\n".join(f"Paragraph {n} of the body, long enough to take a line." for n in range(paragraphs))
+        out = notes_pdf.render(None, title="R", text=f"{body}\n\n## Field notes\n\n{diagram}",
+                               diagrams={key: image.getvalue()}, look=look)
+        assert _heading_pages(out.pdf) == landed, paragraphs
+
+
+@pytest.mark.parametrize("style", ["plain", "report"])
+def test_a_heading_never_stays_alone_above_a_map_drawn_once(monkeypatch, style):
+    """The heading measures the map's real picture to keep with it, and the map
+    prints that same picture: it is drawn once, not once to measure and once to print."""
+    picture = BytesIO()
+    Image.new("RGB", (1200, 1500), "white").save(picture, format="JPEG")
+    drawn: list[str] = []
+
+    def draw(self, token):
+        drawn.append(token.content)
+        return notes_pdf._DrawnMap(picture.getvalue(), (1200, 1500), "The front", None, [], [], 1.0)
+
+    monkeypatch.setattr(notes_pdf._Builder, "_draw_map", draw)
+    landed = _landed(monkeypatch)
+    look = NoteLook.model_validate({"style": style})
+    for paragraphs in range(1, 34):
+        landed.clear()
+        drawn.clear()
+        body = "\n\n".join(f"Paragraph {n} of the body, long enough to take a line." for n in range(paragraphs))
+        out = notes_pdf.render(None, title="R", text=f"# Part\n\n{body}\n\n## Field notes\n\n::: map\nlayer: Front\n:::\n",
+                               look=look)
+        assert _heading_pages(out.pdf) == landed, paragraphs
+        assert len(drawn) == 1, paragraphs

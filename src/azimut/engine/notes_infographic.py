@@ -1022,17 +1022,20 @@ def boxes(page: Page) -> list[dict[str, Any]]:
     return out
 
 
-def chunks(page: Page, room: float) -> list[nc.Layout]:
+def chunks(page: Page, room: float, *, first: float | None = None) -> list[nc.Layout]:
     """The page cut for a PDF between bands only, each part at most ``room`` tall in the
-    page's CSS pixels where a band allows: the title band on the first, the sources on
-    the last. A band taller than ``room`` stands alone, drawn smaller."""
+    page's CSS pixels where a band allows (the first at most ``first``, when a heading
+    stands above it): the title band on the first, the sources on the last. A band
+    taller than its part's room stands alone, drawn smaller."""
     parts: list[list[Band]] = [[]]
     _, header_height = _header(page, MARGIN, page.width - 2 * MARGIN)
     used = MARGIN + header_height
+    limit = room if first is None else first
     for band in page.bands:
-        if parts[-1] and used + band.height + MARGIN > room:
+        if parts[-1] and used + band.height + MARGIN > limit:
             parts.append([])
             used = MARGIN
+            limit = room
         parts[-1].append(band)
         used += band.height + GAP
     last = len(parts) - 1

@@ -490,3 +490,18 @@ def test_a_lone_period_on_a_timeline_is_drawn_as_a_band():
 
 def test_the_engine_module_is_named_in_the_token_table():
     assert md.TOKEN_BLOCKS[md.INFOGRAPHIC] == notes_infographic.TOKEN == md.INFOGRAPHIC_TOKEN
+
+
+def test_the_heading_over_an_infographic_opens_its_page_with_it(tmp_workspace):
+    """An infographic opens a page of its own: the heading right above it opens that
+    page, rather than staying behind alone, and nothing prints a blank page."""
+    for paragraphs in (1, 8, 20):
+        body = "\n\n".join(f"Paragraph {n} of the body, long enough to take a line." for n in range(paragraphs))
+        rendered = notes_pdf.render(None, title="Losses", text=f"{body}\n\n## Field notes\n\n{GRAPHIC}\n\nAfter.\n",
+                                    identity=notefill.Identity())
+        reader = PdfReader(io.BytesIO(rendered.pdf))
+        words = ["".join((page.extract_text() or "").split()).casefold() for page in reader.pages]
+        [heading] = [number for number, page in enumerate(words) if "fieldnotes" in page]
+        with_pictures = [number for number, page in enumerate(reader.pages) if page.images]
+        assert with_pictures[0] == heading, paragraphs
+        assert all(words[n] or reader.pages[n].images for n in range(len(words))), paragraphs
