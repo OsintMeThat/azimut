@@ -2202,6 +2202,12 @@ export async function installAppFixture(page, options = {}) {
       return json(route, { look: request.method() === 'PUT' ? request.postDataJSON() : {} });
     }
     if (path === `/api/cases/${CASE_ID}/notes/preview` && request.method() === 'POST') return pdfAnswer(route);
+    // the Ready badge's check of an open note: nothing to look at, unless a spec answers it itself
+    if (path === `/api/cases/${CASE_ID}/notes/pdf/check` && request.method() === 'POST') {
+      const body = request.postDataJSON();
+      const ready = { format: body.format ?? 'pdf', edition: body.edition, style: 'plain', tlp: '', pictures: [], claims: [], gone: [], unarchived: [], unseen: [] };
+      return json(route, { notes: body.notes.map((note) => ({ note, title: '', internal: 0, warnings: [], ...(body.ready ? { ready } : {}) })) });
+    }
     if (path === `/api/cases/${CASE_ID}/notes/tasks`) return json(route, { items: [] });
     if (path === `/api/cases/${CASE_ID}/notes/search`) return json(route, { items: [], total: 0 });
     if (path.startsWith(`/api/cases/${CASE_ID}/notes/citations/`)) return json(route, { items: [] });

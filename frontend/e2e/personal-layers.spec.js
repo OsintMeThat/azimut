@@ -1136,7 +1136,10 @@ test('Done leaves a layer followed over time on its day, its track still marked'
   await expect(panel.getByText('1 feature', { exact: true })).toBeVisible();
   await panel.getByRole('button', { name: 'Done', exact: true }).click();
   await expect(panel).toHaveCount(0);
-  await page.getByRole('button', { name: 'Front, details', exact: true }).click();
+  // a layer just made opens unfolded: its details are pressed open only when folded
+  const details = page.getByRole('button', { name: 'Front, details', exact: true });
+  const unfold = async () => { if ((await details.getAttribute('aria-expanded')) !== 'true') await details.click(); };
+  await unfold();
   const row = page.getByRole('slider', { name: 'Front: moment', exact: true });
   const ticks = row.locator('xpath=..').locator('.tick');
   await expect(row).toHaveAttribute('aria-valuetext', day);
@@ -1146,6 +1149,6 @@ test('Done leaves a layer followed over time on its day, its track still marked'
   await expect(panel).toBeVisible();
   await panel.getByRole('button', { name: 'Done', exact: true }).click();
   await expect(panel).toHaveCount(0);
-  await page.getByRole('button', { name: 'Front, details', exact: true }).click();
+  await unfold();
   await expect(ticks).toHaveCount(1);
 });
