@@ -66,7 +66,8 @@ test('/ turns a line into a task, a heading or a callout', async ({ page }) => {
   await page.keyboard.type('/confirmed');
   await pick(page, 'Confirmed');
   await page.keyboard.type('The mast matches.');
-  await expect.poll(() => written.at(-1) ?? '').toBe('First line.\n- [ ] Archive the post\n> [!confirmed] The mast matches.');
+  // Enter on the empty to-do leaves the list with the blank line Markdown needs after it
+  await expect.poll(() => written.at(-1) ?? '').toBe('First line.\n- [ ] Archive the post\n\n> [!confirmed] The mast matches.');
   await page.locator('[data-guide="notebook.home"]').click();
   await expect(page.locator('[data-guide="notebook.case"]')).toBeVisible();
 });

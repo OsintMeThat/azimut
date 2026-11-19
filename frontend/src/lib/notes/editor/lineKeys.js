@@ -25,6 +25,7 @@ import { ensureSyntaxTree, syntaxTree } from '@codemirror/language';
 
 import { calloutOf } from '../callouts.js';
 import { caretAt, chainAt, keyOf, unitAfter, unitBefore, wordsStart } from './caret.js';
+import { shownCard } from './citationCard.js';
 import { blockRanges, blocksIn } from './ranges.js';
 import { TEXT_KINDS, turnInto } from './turnInto.js';
 
@@ -189,8 +190,12 @@ function nestItem(state, item, step, alone) {
   return changes;
 }
 
-/** Tab (`step` 1) or Shift+Tab (-1) on the items the selection touches; on any other line nothing, code keeping its Tab. */
+/**
+ * Tab (`step` 1) or Shift+Tab (-1) on the items the selection touches; on any other line
+ * nothing, code keeping its Tab and a citation's card, shown at the caret, taking it.
+ */
 export function indentItems(state, step) {
+  if (shownCard(state)?.by === 'caret') return null;
   const range = state.selection.main;
   const items = itemsOf(state, range);
   if (!items.length) {
