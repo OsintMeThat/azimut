@@ -27,6 +27,37 @@ read and edit as text:
 - ``view`` is where the map looks, ``lat, lon, zoom[, bearing]``, the zoom as the map
   engine counts it (a 512-pixel world at zoom 0, one less than a tile's XYZ zoom).
 
+**How it is shown.** The map's settings card (`editor/mapBlock.js`) writes each choice as
+one more line, and a block without them reads and draws as it always did:
+
+- ``base``: ``satellite`` (the ground as filed, the default), ``map``, ``topographic`` or
+  ``dark``. Each other base is a ground of its own, filed once on the press that picks it
+  (OpenStreetMap, OpenTopoMap, and OpenStreetMap again drawn dark), so the page still
+  fetches nothing; a live map draws ``map`` and ``dark`` from OpenFreeMap's own styles.
+- ``hide`` takes a layer the map names (by a line or its plate) off it, one a line;
+  ``colour: Front line = #d55e00`` paints every feature of a layer in one colour.
+- ``proof points``: ``filmed`` shows a proof only where it was filmed from, ``every``
+  (the default) each of its points.
+- ``labels``: ``on`` writes every mark's name, ``off`` none; left out, as each layer says.
+  ``crowds``: a crowd of marks past this many is a count to press (``off``, or a number;
+  12 by default).
+- ``north: on`` draws a north arrow; ``scale: off`` takes the scale away, ``scale: on``
+  also prints it on the PDF's picture.
+- ``frame: west, south, east, north`` is the part of the world the map shows, by default
+  its ground's.
+- ``timeline: off`` hides the days' slider; ``opens on`` is the day the map opens on
+  (its last by default); ``speed`` is Play's pace, ``slow``, ``normal`` or ``fast``.
+- ``step: day | label | lat, lon, zoom | proof | words``, one a line, are the map's own
+  steps, in order, in place of its plate's or its proofs'; any part may be left empty,
+  ``proof`` naming the proof whose card the step opens.
+- ``card`` lists what a feature's card shows: ``picture, sentence, source, verify``.
+- ``size``: ``half``, ``wide`` (the default) or ``full`` (the screen's height);
+  ``legend``: ``shown``, ``folded`` or ``hidden``.
+
+What the analyst draws on the card (an area to highlight with its words, a point, a
+line) is a feature of a personal layer of the case the block names by a ``layer`` line,
+never kept in the block itself.
+
 **What it shows** (`derive`) is one shape every reader of the map shares, the HTML
 report's offline map, the PDF's picture of it and, later, a live map on a web page:
 features in GeoJSON order (longitude first), each with the days it is there
@@ -59,7 +90,7 @@ from io import BytesIO
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Callable, Iterable, Iterator, Mapping
 
-from PIL import Image, ImageDraw, ImageEnhance, ImageFont
+from PIL import Image, ImageDraw, ImageEnhance, ImageFont, ImageOps
 
 from .. import layout
 from . import notesources
@@ -71,7 +102,22 @@ if TYPE_CHECKING:
 BLOCK = "map"
 TOKEN = "az_map"
 #: The keys a block reads; anything else is said by the check.
-KEYS = ("title", "layer", "layers", "plate", "proofs", "ground", "detail", "view")
+KEYS = ("title", "layer", "layers", "plate", "proofs", "ground", "detail", "view",
+        "base", "hide", "colour", "proof points", "labels", "crowds", "north", "scale", "frame",
+        "timeline", "opens on", "speed", "step", "card", "size", "legend")
+#: The bases a map is drawn on, the first the default.
+BASES = ("satellite", "map", "topographic", "dark")
+#: What a feature's card may show, in its order.
+CARD_PARTS = ("picture", "sentence", "source", "verify")
+SIZES = ("half", "wide", "full")
+LEGENDS = ("shown", "folded", "hidden")
+#: How long Play stays on a day, in milliseconds, by its pace.
+SPEEDS = {"slow": 2200, "normal": 1100, "fast": 550}
+#: A crowd larger than this is a count to press (`BUBBLE_FROM` in reader.map.js).
+CROWDS = 12
+#: The map's own steps one block holds.
+MAX_STEPS = 60
+MAX_STEP_WORDS = 300
 MAX_TITLE = 200
 #: Layers one map names, features it draws, proofs it shows and icons it carries.
 MAX_LAYERS = 12
@@ -115,6 +161,18 @@ NAME = re.compile(r"^[^/\\\x00-\x1f]{1,120}$")
 
 
 @dataclass
+class Step:
+    """One of the map's own steps (`step:`): its day, its short name, where it looks
+    (``lat, lon, zoom``), the proof whose card it opens and its words, each may be empty."""
+
+    day: str = ""
+    label: str = ""
+    view: tuple[float, float, float] | None = None
+    proof: str = ""
+    words: str = ""
+
+
+@dataclass
 class MapBlock:
     """One `::: map` block as written."""
 
@@ -126,6 +184,27 @@ class MapBlock:
     details: list[str] = field(default_factory=list)
     #: ``(lat, lon, zoom, bearing)``, the zoom as the map engine counts it.
     view: tuple[float, float, float, float] | None = None
+    # -- how it is shown, each "" (or empty) for the default --
+    base: str = ""
+    hidden: list[str] = field(default_factory=list)
+    #: A layer's one colour, by its name.
+    colours: dict[str, str] = field(default_factory=dict)
+    proof_points: str = ""
+    labels: str = ""
+    #: "off", or how many marks make a crowd.
+    crowds: str = ""
+    north: str = ""
+    scale: str = ""
+    #: ``(west, south, east, north)``.
+    frame: tuple[float, float, float, float] | None = None
+    timeline: str = ""
+    opens_on: str = ""
+    speed: str = ""
+    steps: list[Step] = field(default_factory=list)
+    #: What a card shows, None for all of it.
+    card: list[str] | None = None
+    size: str = ""
+    legend: str = ""
     #: The lines the block could not read, as written.
     unread: list[str] = field(default_factory=list)
     #: Where in the block each name was written, by what it names (`layer:Front`, `ground`…),
@@ -138,6 +217,13 @@ class MapBlock:
 
     def empty(self) -> bool:
         return not (self.layers or self.plate or self.proofs)
+
+    def shown_base(self) -> str:
+        """The base the map is drawn on: ``satellite`` unless it says another."""
+        return self.base or BASES[0]
+
+    def card_shows(self, part: str) -> bool:
+        return self.card is None or part in self.card
 
 
 def proof_period(written: str) -> tuple[str, str] | None:
@@ -157,23 +243,41 @@ def proof_period(written: str) -> tuple[str, str] | None:
     return start, end
 
 
+#: The words each one-word setting takes, by its key.
+CHOICES: dict[str, tuple[str, ...]] = {
+    "base": BASES, "proof points": ("filmed", "every"), "labels": ("on", "off"), "north": ("on", "off"),
+    "scale": ("on", "off"), "timeline": ("on", "off"), "speed": tuple(SPEEDS), "size": SIZES, "legend": LEGENDS,
+}
+#: Where each setting of a block reads, as the attribute it fills.
+FIELDS = {"base": "base", "proof points": "proof_points", "labels": "labels", "north": "north", "scale": "scale",
+          "timeline": "timeline", "speed": "speed", "size": "size", "legend": "legend", "crowds": "crowds",
+          "opens on": "opens_on"}
+
+
 def parse_block(body: str) -> MapBlock:
     """A block's lines, read: the first `title`, `plate`, `proofs`, `ground` and `view`
-    each, every `layer` in order."""
+    each, every `layer` in order, and how it is shown (the first of each setting, every
+    `hide`, `colour` and `step` in order). A line it cannot read is kept to be said."""
     block = MapBlock()
     for offset, raw in enumerate(str(body or "").split("\n")):
         line = raw.strip()
         if not line or line.startswith("<!--"):
             continue
         key, colon, value = line.partition(":")
-        key = key.strip().lower()
+        key = " ".join(key.split()).lower()
         value = " ".join(value.split())
         if not colon or key not in KEYS:
             block.where.setdefault("unread", offset)
             block.unread.append(line[:120])
             continue
         block.where.setdefault(f"layer:{value[:120]}" if key in ("layer", "layers") else
-                               f"detail:{value}" if key == "detail" else key, offset)
+                               f"detail:{value}" if key == "detail" else
+                               f"hide:{value[:120]}" if key == "hide" else key, offset)
+        if key in KEYS[KEYS.index("base"):]:
+            if not _setting(block, key, value):
+                block.where.setdefault("unread", offset)
+                block.unread.append(line[:120])
+            continue
         if key in ("layer", "layers"):
             if value and value not in block.layers and len(block.layers) < MAX_LAYERS:
                 block.layers.append(value[:120])
@@ -200,6 +304,111 @@ def parse_block(body: str) -> MapBlock:
             else:
                 block.view = view
     return block
+
+
+def _setting(block: MapBlock, key: str, value: str) -> bool:
+    """Read one line of how the map is shown into ``block``; False when it says nothing
+    the block can read. A second line of a one-line setting is left as the first said."""
+    word = value.lower()
+    if key in CHOICES:
+        if word not in CHOICES[key]:
+            return False
+        if not getattr(block, FIELDS[key]):
+            setattr(block, FIELDS[key], word)
+        return True
+    if key == "crowds":
+        if word != "off" and not (word.isdecimal() and 2 <= int(word) <= 99):
+            return False
+        block.crowds = block.crowds or word
+        return True
+    if key == "opens on":
+        if not DAY.match(word):
+            return False
+        block.opens_on = block.opens_on or word
+        return True
+    if key == "hide":
+        if not NAME.match(value):
+            return False
+        if value not in block.hidden and len(block.hidden) < MAX_LAYERS * 2:
+            block.hidden.append(value[:120])
+        return True
+    if key == "colour":
+        name, equals, colour = value.rpartition("=")
+        name = name.strip()
+        if not equals or not NAME.match(name) or not _hex(colour):
+            return False
+        block.colours.setdefault(name[:120], _hex(colour))
+        return True
+    if key == "frame":
+        frame = frame_of_text(value)
+        if frame is None:
+            return False
+        block.frame = block.frame or frame
+        return True
+    if key == "card":
+        parts = [part.strip().lower() for part in value.split(",") if part.strip()]
+        if parts == ["none"]:
+            parts = []
+        if any(part not in CARD_PARTS for part in parts):
+            return False
+        if block.card is None:
+            block.card = [part for part in CARD_PARTS if part in parts]
+        return True
+    if key == "step":
+        step = step_of_text(value)
+        if step is None:
+            return False
+        if len(block.steps) < MAX_STEPS:
+            block.steps.append(step)
+        return True
+    return False
+
+
+def frame_of_text(text: str) -> tuple[float, float, float, float] | None:
+    """``west, south, east, north`` read, or None when it is no part of the world."""
+    try:
+        numbers = [float(part) for part in text.replace(";", ",").split(",") if part.strip()]
+    except ValueError:
+        return None
+    if len(numbers) != 4 or not all(math.isfinite(number) for number in numbers):
+        return None
+    west, south, east, north = numbers
+    if not (-180 <= west < east <= 180 and -85 <= south < north <= 85):
+        return None
+    return west, south, east, north
+
+
+def step_of_text(text: str) -> Step | None:
+    """A ``step:`` line's parts, ``day | label | lat, lon, zoom | proof | words``: any
+    may be empty, the words may hold a ``|`` of their own."""
+    parts = [part.strip() for part in text.split("|", 4)]
+    parts += [""] * (5 - len(parts))
+    day, label, where, proof, words = parts
+    if day and not DAY.match(day):
+        return None
+    if proof and not ENTITY_ID.match(proof):
+        return None
+    view = None
+    if where:
+        read = _view_of(where)
+        if read is None:
+            return None
+        view = read[:3]
+    if not (day or label or view or proof or words):
+        return None
+    return Step(day=day, label=label[:80], view=view, proof=proof, words=words[:MAX_STEP_WORDS])
+
+
+def step_text(step: Step) -> str:
+    """A step as its line writes it, its empty tail left off."""
+    where = ""
+    if step.view is not None:
+        lat, lon, zoom = step.view
+        where = f"{lat:.5f}, {lon:.5f}, {_num(zoom, 2)}"
+    parts = [step.day, " ".join(step.label.split()), where, step.proof, " ".join(step.words.split())]
+    while parts and not parts[-1]:
+        parts.pop()
+    return " | ".join(parts)
 
 
 def _view_of(text: str) -> tuple[float, float, float, float] | None:
@@ -233,8 +442,44 @@ def block_text(block: MapBlock) -> str:
         lat, lon, zoom, bearing = block.view
         tail = f", {_num(bearing, 1)}" if round(bearing, 1) % 360 else ""
         lines.append(f"view: {lat:.5f}, {lon:.5f}, {_num(zoom, 2)}{tail}")
+    lines.extend(settings_lines(block))
     lines.append(":::")
     return "\n".join(lines)
+
+
+def settings_lines(block: MapBlock) -> list[str]:
+    """How the map is shown, as the lines the Notebook writes after its `view`, in the
+    order the settings card writes them (`MAP_ORDER` in `editor/mapText.js`)."""
+    lines: list[str] = []
+    if block.base and block.base != BASES[0]:
+        lines.append(f"base: {block.base}")
+    lines.extend(f"hide: {name}" for name in block.hidden)
+    lines.extend(f"colour: {name} = {colour}" for name, colour in block.colours.items())
+    for key in ("proof points", "labels", "crowds"):
+        if getattr(block, FIELDS[key]):
+            lines.append(f"{key}: {getattr(block, FIELDS[key])}")
+    if block.north:
+        lines.append(f"north: {block.north}")
+    if block.scale:
+        lines.append(f"scale: {block.scale}")
+    if block.frame is not None:
+        lines.append("frame: " + ", ".join(f"{value:.5f}" for value in block.frame))
+    for key in ("timeline", "opens on", "speed"):
+        if getattr(block, FIELDS[key]):
+            lines.append(f"{key}: {getattr(block, FIELDS[key])}")
+    if block.card is not None:
+        lines.append(f"card: {', '.join(block.card) or 'none'}")
+    for key in ("size", "legend"):
+        if getattr(block, FIELDS[key]):
+            lines.append(f"{key}: {getattr(block, FIELDS[key])}")
+    lines.extend(step_line(step) for step in block.steps)
+    return lines
+
+
+def step_line(step: Step) -> str:
+    """A step's whole line, `step:` and its parts."""
+    text = step_text(step)
+    return f"step:{text}" if text.startswith(" ") else f"step: {text}"
 
 
 def blocks_in(text: str) -> list[MapBlock]:
@@ -346,6 +591,12 @@ class Derived:
     icons: dict[str, dict[str, Any]] = field(default_factory=dict)
     #: What it adds to a page, in bytes, as encoded.
     weight: int = 0
+    #: The proof each of its steps is about, by the step's id, for the settings card.
+    step_proofs: dict[str, str] = field(default_factory=dict)
+    #: Each proof shown, by its id: the features it is and its name.
+    proofs: dict[str, dict[str, Any]] = field(default_factory=dict)
+    #: How the figure is laid out in a page: its ``size`` and ``legend``, when set.
+    display: dict[str, str] = field(default_factory=dict)
 
 
 def derive(
@@ -380,6 +631,8 @@ def derive(
     credits: list[str] = []
     view = block.view
     first_day = ""
+    hidden = set(block.hidden)
+    pictured = block.card_shows("picture")
     if block.unread:
         warn(f'{said} reads no line "{_cut(block.unread[0], 60)}".', "other", "unread")
     if block.empty():
@@ -399,7 +652,10 @@ def derive(
                     view = plate["view"]
         icons = _Icons(case)
         for index, (name, frame) in enumerate(sources):
-            read = _layer_features(case, name, index, frame, icons)
+            if name in hidden:
+                continue
+            read = _layer_features(case, name, index, frame, icons, colour=block.colours.get(name, ""),
+                                   labels=block.labels)
             if read is None:
                 warn(f'{said} names a layer no longer in the case: "{_cut(name, 60)}".', "missing",
                      f"layer:{name}" if f"layer:{name}" in block.where else "plate")
@@ -411,8 +667,9 @@ def derive(
                 credits.append(credit)
         period = block.period()
         if period is not None:
-            shown, proof_steps = _proofs(case, period, encode=encode, anchors=anchors, round_pov=round_pov,
-                                         card_side=card_side, out=out)
+            shown, proof_steps = _proofs(case, period, encode=encode if pictured else None, anchors=anchors,
+                                         round_pov=round_pov, card_side=card_side, out=out,
+                                         filmed=block.proof_points == "filmed", labels=block.labels)
             features.extend(shown)
             if not steps:
                 steps.extend(proof_steps)
@@ -422,7 +679,9 @@ def derive(
         if len(features) > MAX_FEATURES:
             warn(f"{said} draws its first {MAX_FEATURES} features of {len(features)}.", "other")
             features = features[:MAX_FEATURES]
-        _cards_media(case, features, encode=encode, card_side=card_side, out=out)
+        _cards_media(case, features, encode=encode if pictured else None, card_side=card_side, out=out)
+        if block.steps:
+            steps = _own_steps(block.steps, out)
     ground = _ground(case, block.ground, encode=encode, side=ground_side) if case is not None and block.ground else None
     if block.ground and ground is None and case is not None:
         warn(f"{said}: its ground picture is no longer in the case.", "missing", "ground")
@@ -430,6 +689,9 @@ def derive(
         warn(f"{said} {NO_GROUND}.", "other")
     if ground is not None:
         out.ground = ground["path"]
+        if block.shown_base() != BASES[0] and ground["credit"].startswith("Imagery: "):
+            # a street or a topographic map under the marks is a map, and its credit says so
+            ground["credit"] = "Map: " + ground["credit"][len("Imagery: "):]
         if ground["credit"] and ground["credit"] not in credits:
             credits.insert(0, ground["credit"])
         out.weight += len(ground["src"])
@@ -441,15 +703,31 @@ def derive(
             continue
         out.weight += len(detail["src"])
         details.append({"src": detail["src"], "bounds": detail["bounds"], "size": list(detail["size"]), "id": entity_id})
+        if block.shown_base() != BASES[0] and detail["credit"].startswith("Imagery: "):
+            detail["credit"] = "Map: " + detail["credit"][len("Imagery: "):]
         if detail["credit"] and detail["credit"] not in credits:
             credits.append(detail["credit"])
     bounds = ground["bounds"] if ground is not None else _features_bounds(features, view)
-    if view is None:
+    if block.frame is not None:
+        bounds = [_round(value) for value in block.frame]
+    if view is None or block.frame is not None:
         width, height = 1200.0, 1200.0 * frame_of(bounds)[1] / FRAME
         lat, lon, zoom = fit_view(bounds, width, height, pad=0)
         view = (lat, lon, zoom, 0.0)
+    if block.opens_on:
+        extra_days.add(block.opens_on)
     days = _days(features, extra_days)
     day = first_day if first_day in days else (days[-1] if days else "")
+    if block.opens_on in days:
+        day = block.opens_on
+    if block.card is not None:
+        _cards_trimmed(features, block.card)
+    for feature in features:
+        # a line's or an area's name is written where it reads best: its middle
+        if feature["kind"] != "point" and feature["style"].get("label") and feature.get("label"):
+            spot = label_anchor(feature)
+            if spot is not None:
+                feature["at"] = spot
     for step in steps:
         # a step about one proof moves in on it, as far as the ground stays sharp
         if isinstance(step.get("view"), dict) and step["view"].get("zoom") is None:
@@ -473,12 +751,73 @@ def derive(
         "steps": steps,
         "credits": credits,
     }
+    data.update(_shown(block))
+    out.display = {key: value for key, value in (("size", block.size), ("legend", block.legend)) if value}
     out.data = data
     out.weight += len(json.dumps(data, separators=(",", ":"), ensure_ascii=False)) - (len(ground["src"]) if ground else 0)
     if out.weight > MAP_BYTES:
         warn(f"{said} weighs {out.weight / 1048576:.1f} MB, past the {MAP_BYTES // 1048576} MB a map aims for.",
              "other")
     return out
+
+
+def _shown(block: MapBlock) -> dict[str, Any]:
+    """What a reader of the map does differently from its defaults, as its data says it:
+    nothing for a block that sets nothing, so an old map's data is what it was."""
+    shown: dict[str, Any] = {}
+    if block.base and block.base != BASES[0]:
+        shown["base"] = block.base
+    if block.crowds:
+        shown["crowds"] = 0 if block.crowds == "off" else int(block.crowds)
+    if block.north == "on":
+        shown["north"] = True
+    if block.scale:
+        shown["scale"] = block.scale
+    if block.timeline == "off":
+        shown["timeline"] = False
+    if block.speed and block.speed != "normal":
+        shown["speed"] = SPEEDS[block.speed]
+    return shown
+
+
+def _own_steps(written: list[Step], out: Derived) -> list[dict[str, Any]]:
+    """The map's own steps, in their order: each flies where it says (the map's own view
+    when it says nothing) on its day, a proof's step opening its card."""
+    steps: list[dict[str, Any]] = []
+    out.step_proofs = {}
+    for number, step in enumerate(written):
+        ident = f"s{number}"
+        proof = out.proofs.get(step.proof) if step.proof else None
+        view: dict[str, Any] | None = None
+        if step.view is not None:
+            lat, lon, zoom = step.view
+            view = {"center": [_round(lon), _round(lat)], "zoom": _num(zoom, 2), "bearing": 0, "pitch": 0}
+        elif proof is not None:
+            view = {"center": list(proof["center"]), "zoom": None, "bearing": 0, "pitch": 0}
+        made: dict[str, Any] = {"id": ident, "label": _cut(step.label, 80), "day": step.day or None, "view": view,
+                                "focus": list(proof["ids"]) if proof is not None else []}
+        if step.words:
+            made["text"] = _cut(step.words, MAX_STEP_WORDS)
+        if proof is not None:
+            made["name"] = proof["name"]
+        if step.proof:
+            out.step_proofs[ident] = step.proof
+        steps.append(made)
+    return steps
+
+
+def _cards_trimmed(features: list[dict[str, Any]], shown: list[str]) -> None:
+    """Each card says only what the block asks: its picture, its sentence, its source
+    and the links that check it."""
+    dropped = {"picture": ("media",), "sentence": ("text",), "source": ("source", "links"), "verify": ("verify",)}
+    for feature in features:
+        card = feature.get("card")
+        if not isinstance(card, dict):
+            continue
+        for part, keys in dropped.items():
+            if part not in shown:
+                for key in keys:
+                    card.pop(key, None)
 
 
 def _features_bounds(features: list[dict[str, Any]], view: tuple[float, float, float, float] | None) -> list[float]:
@@ -506,6 +845,53 @@ def _all_points(features: Iterable[dict[str, Any]]) -> Iterator[tuple[float, flo
             yield from ((point[0], point[1]) for part in coords for point in part)
         else:
             yield from ((point[0], point[1]) for polygon in coords for ring in polygon for point in ring)
+
+
+def label_anchor(feature: Mapping[str, Any]) -> list[float] | None:
+    """Where a line's or an area's name is written: halfway along its longest part, or
+    the middle of its largest area (its centroid, as the map's own square reads it)."""
+    coords: Any = feature.get("coords") or []
+    try:
+        if feature.get("kind") == "line":
+            parts = [part for part in coords if len(part) >= 2]
+            if not parts:
+                return None
+            longest = max(parts, key=_length)
+            half, walked = _length(longest) / 2, 0.0
+            for (x0, y0), (x1, y1) in zip((mercator(*point) for point in longest), (mercator(*point) for point in longest[1:])):
+                step = math.hypot(x1 - x0, y1 - y0)
+                if walked + step >= half and step > 0:
+                    t = (half - walked) / step
+                    lon, lat = unmercator(x0 + (x1 - x0) * t, y0 + (y1 - y0) * t)
+                    return [_round(lon), _round(lat)]
+                walked += step
+            return [_round(longest[-1][0]), _round(longest[-1][1])]
+        if feature.get("kind") == "area":
+            rings = [polygon[0] for polygon in coords if polygon and len(polygon[0]) >= 3]
+            if not rings:
+                return None
+            ring = [mercator(*point) for point in max(rings, key=lambda one: abs(_area([mercator(*p) for p in one])))]
+            twice = _area(ring) * 2
+            if abs(twice) < 1e-18:
+                x = sum(point[0] for point in ring) / len(ring)
+                y = sum(point[1] for point in ring) / len(ring)
+            else:
+                x = sum((a[0] + b[0]) * (a[0] * b[1] - b[0] * a[1]) for a, b in zip(ring, ring[1:] + ring[:1])) / (3 * twice)
+                y = sum((a[1] + b[1]) * (a[0] * b[1] - b[0] * a[1]) for a, b in zip(ring, ring[1:] + ring[:1])) / (3 * twice)
+            lon, lat = unmercator(x, y)
+            return [_round(lon), _round(lat)]
+    except (TypeError, ValueError, IndexError):
+        return None
+    return None
+
+
+def _length(points: list[list[float]]) -> float:
+    corners = [mercator(*point) for point in points]
+    return sum(math.hypot(b[0] - a[0], b[1] - a[1]) for a, b in zip(corners, corners[1:]))
+
+
+def _area(ring: list[tuple[float, float]]) -> float:
+    return sum(a[0] * b[1] - b[0] * a[1] for a, b in zip(ring, ring[1:] + ring[:1])) / 2
 
 
 def _days(features: list[dict[str, Any]], extra: Iterable[str]) -> list[str]:
@@ -554,9 +940,11 @@ def shows_on(feature: Mapping[str, Any], day: str) -> bool:
 
 
 def _layer_features(case: "Case", name: str, index: int, frame: dict[str, Any] | None,
-                    icons: "_Icons") -> tuple[list[dict[str, Any]], list[dict[str, Any]], str] | None:
+                    icons: "_Icons", *, colour: str = "", labels: str = ""
+                    ) -> tuple[list[dict[str, Any]], list[dict[str, Any]], str] | None:
     """One layer's features as a map shows them, its legend rows and its credit; None
-    when the case holds no such layer. ``frame`` is how a plate draws it."""
+    when the case holds no such layer. ``frame`` is how a plate draws it, ``colour`` the
+    one colour the block paints it in, ``labels`` whether every name is written."""
     from . import layerediting, maplayers
 
     if not NAME.match(name or ""):
@@ -596,6 +984,12 @@ def _layer_features(case: "Case", name: str, index: int, frame: dict[str, Any] |
             continue
         style = _style(properties, frame)
         style.pop("status", None)
+        if colour:
+            style["color"] = colour
+        if labels == "on" and str(properties.get("name") or "").strip():
+            style["label"] = True
+        elif labels == "off":
+            style.pop("label", None)
         icon = str(properties.get("icon") or "")
         own = icons.layer_icon(name, icon, properties) if icon and has_icons else ""
         symbol = str(properties.get("symbol") or "pin")
@@ -911,9 +1305,11 @@ def _view_json(view: dict[str, Any] | None) -> dict[str, Any] | None:
 
 
 def _proofs(case: "Case", period: tuple[str, str], *, encode: Encode | None, anchors: Mapping[str, str],
-            round_pov: bool, card_side: int, out: Derived) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+            round_pov: bool, card_side: int, out: Derived, filmed: bool = False,
+            labels: str = "") -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
     """One point a proof point, for each proof dated in ``period`` (any proof for an
-    open one), and one step a proof, in date order."""
+    open one), and one step a proof, in date order. ``filmed`` keeps only where each
+    was filmed from; ``labels: on`` writes each one's name."""
     from . import satellite
 
     start, end = period
@@ -944,6 +1340,8 @@ def _proofs(case: "Case", period: tuple[str, str], *, encode: Encode | None, anc
             points = [point for point in satellite.spec_points(spec) if not point.get("proposed")]
         except Exception:
             points = []
+        if filmed:
+            points = [point for point in points if point.get("pov")]
         if not points:
             continue
         name = str(record.get("label") or spec.get("title") or "Proof")
@@ -968,7 +1366,7 @@ def _proofs(case: "Case", period: tuple[str, str], *, encode: Encode | None, anc
                 "until": None,
                 "label": _cut(f"{name}, {label}" if label else name, 120),
                 "style": {"color": PROOF_COLOUR, "icon": "", "width": 2, "size": 1.0, "proof": True,
-                          **({"pov": True} if pov else {})},
+                          **({"pov": True} if pov else {}), **({"label": True} if labels == "on" else {})},
                 "card": card,
                 "of": f"p{number}",
                 "layer": "Proofs",
@@ -976,6 +1374,10 @@ def _proofs(case: "Case", period: tuple[str, str], *, encode: Encode | None, anc
             })
         lead = points[0]
         said = " ".join(str(spec.get("description") or "").split())
+        out.proofs[str(record.get("id") or "")] = {
+            "ids": focus, "name": _cut(name, 120), "day": day,
+            "center": [_round(float(lead["lon"])), _round(float(lead["lat"]))]}
+        out.step_proofs[f"p{number}"] = str(record.get("id") or "")
         # a proof's step has no short name of its own: its day says it, its sentence comes with it
         steps.append({"id": f"p{number}", "label": "", "text": _cut(said, 300), "name": _cut(name, 120),
                       "day": day or None,
@@ -1362,6 +1764,7 @@ def svg(derived: Derived, *, day: str | None = None, ident: str = "az-map") -> s
     lines: list[str] = []
     placed: list[dict[str, Any]] = []
     labels: list[tuple[float, float, str, str, str]] = []
+    named: list[tuple[float, float, str, str, str]] = []
     faint = traces(data["features"], shown_day)
     for feature in data["features"]:
         kind, style = feature["kind"], feature["style"]
@@ -1389,6 +1792,9 @@ def svg(derived: Derived, *, day: str | None = None, ident: str = "az-map") -> s
         d = _path(feature, project)
         if not d:
             continue
+        if feature.get("at") and style.get("label") and feature.get("label"):
+            spot_x, spot_y = project(*feature["at"])
+            named.append((spot_x, spot_y, str(feature["label"]), feature["id"], off))
         dash = ""
         if style.get("dash") == "dashed":
             dash = ' stroke-dasharray="7 5"'
@@ -1451,7 +1857,7 @@ def svg(derived: Derived, *, day: str | None = None, ident: str = "az-map") -> s
         if one["label"]:
             labels.append((at_x, at_y, one["label"], one["id"], one["off"]))
     points.sort(key=lambda row: row[0])
-    written = _labels(labels, unit, width, height)
+    written = _labels(named, unit, width, height, centred=True) + _labels(labels, unit, width, height)
     ground = data.get("ground")
     plain = "" if ground else f'<rect class="az-plain" width="{width:g}" height="{height:g}" fill="{PLAIN_GROUND}"/>'
     return (f'<svg class="az-map-svg" id="{ident}-svg" viewBox="0 0 {width:g} {height:g}" '
@@ -1463,19 +1869,27 @@ def svg(derived: Derived, *, day: str | None = None, ident: str = "az-map") -> s
             f'<g class="az-labels" aria-hidden="true">{written}</g></svg>')
 
 
-def _labels(labels: list[tuple[float, float, str, str, str]], unit: float, width: float, height: float) -> str:
-    """The names written beside their marks, each kept off the ones already written."""
+def _labels(labels: list[tuple[float, float, str, str, str]], unit: float, width: float, height: float, *,
+            centred: bool = False) -> str:
+    """The names written beside their marks, each kept off the ones already written;
+    ``centred``, a line's or an area's name written on its middle, which stays there."""
     size = 12.5 * unit
     taken: list[tuple[float, float, float, float]] = []
     out: list[str] = []
     for x, y, words, ident, off in sorted(labels, key=lambda row: (row[4] != "", row[1])):
         text = _cut(words, 34)
-        left = x + 15 * unit
-        box = (left, y - size * 0.7, left + len(text) * size * 0.56, y + size * 0.5)
+        span = len(text) * size * 0.56
+        left = x - span / 2 if centred else x + 15 * unit
+        box = (left, y - size * 0.7, left + span, y + size * 0.5)
         clash = not off and any(box[0] < other[2] and other[0] < box[2] and box[1] < other[3] and other[1] < box[3]
                                 for other in taken)
         if not off and not clash:
             taken.append(box)
+        if centred:
+            out.append(f'<text class="az-label{off}{" az-clash" if clash else ""}" data-for="{_attr(ident)}" '
+                       f'data-x="{x:.1f}" data-y="{y:.1f}" x="{x:.1f}" y="{y + size * 0.35:.1f}" '
+                       f'font-size="{size:.2f}" text-anchor="middle">{_text(text)}</text>')
+            continue
         out.append(f'<text class="az-label{off}{" az-clash" if clash else ""}" data-for="{_attr(ident)}" '
                    f'x="{left:.1f}" y="{y + size * 0.35:.1f}" font-size="{size:.2f}">{_text(text)}</text>')
     return "".join(out)
@@ -1537,10 +1951,13 @@ def render_png(data: Mapping[str, Any], width: int, *, ground: "Image.Image | Pa
     height = max(100, round(width * project.height / project.width))
     supersample = 2
     big = (width * supersample, height * supersample)
-    canvas = _ground_image(data, ground, big)
+    canvas = _ground_image(data, ground, big, project)
     if data.get("ground") or ground is not None:
-        # the ground muted under the marks, as the page shows it
-        canvas = ImageEnhance.Brightness(ImageEnhance.Color(canvas.convert("RGB")).enhance(0.62)).enhance(0.86).convert("RGBA")
+        # the ground muted under the marks, as the page shows it; a dark base is its street map turned dark
+        if data.get("base") == "dark":
+            canvas = dark_ground(canvas)
+        else:
+            canvas = ImageEnhance.Brightness(ImageEnhance.Color(canvas.convert("RGB")).enhance(0.62)).enhance(0.86).convert("RGBA")
     scale_x = big[0] / project.width
     scale_y = big[1] / project.height
     overlay = Image.new("RGBA", big, (0, 0, 0, 0))
@@ -1614,8 +2031,15 @@ def render_png(data: Mapping[str, Any], width: int, *, ground: "Image.Image | Pa
             kept[f"{key}/{side}"] = marker
         x, y = where[feature["id"]]
         canvas.alpha_composite(marker, (round(x - side / 2), round(y - side / 2)))
+    named = [feature for feature in features if feature["kind"] != "point" and feature.get("at")
+             and feature["style"].get("label") and feature["id"] not in faint]
+    _draw_labels(canvas, named, lambda feature: at(*feature["at"]), pixel, centred=True)
     _draw_labels(canvas, [feature for feature in points if feature["style"].get("label")],
                  lambda feature: where[feature["id"]], pixel)
+    if data.get("north"):
+        _draw_north(canvas, pixel)
+    if data.get("scale") == "on":
+        _draw_scale(canvas, bounds, project, pixel)
     out = canvas.convert("RGB").resize((width, height), Image.Resampling.LANCZOS)
     buffer = BytesIO()
     if fmt.upper() == "JPEG":
@@ -1625,7 +2049,18 @@ def render_png(data: Mapping[str, Any], width: int, *, ground: "Image.Image | Pa
     return buffer.getvalue()
 
 
-def _ground_image(data: Mapping[str, Any], ground: Any, size: tuple[int, int]) -> Image.Image:
+def dark_ground(picture: Image.Image) -> Image.Image:
+    """A street map turned dark, as a dark base draws its ground: its greys inverted,
+    lit a little less (`.az-base-dark` in reader.mapset.css)."""
+    grey = ImageOps.invert(ImageOps.grayscale(picture.convert("RGB")))
+    toned = ImageEnhance.Contrast(ImageEnhance.Brightness(grey).enhance(0.82)).enhance(1.1)
+    return Image.merge("RGB", (toned, toned, toned)).convert("RGBA")
+
+
+def _ground_image(data: Mapping[str, Any], ground: Any, size: tuple[int, int],
+                  project: "_Projector | None" = None) -> Image.Image:
+    """The ground under a picture of ``size``: laid at its own bounds when the map is
+    framed on another part of the world, the rest the plain background."""
     picture: Image.Image | None = None
     try:
         if isinstance(ground, Image.Image):
@@ -1646,6 +2081,25 @@ def _ground_image(data: Mapping[str, Any], ground: Any, size: tuple[int, int]) -
         picture = None
     if picture is None:
         return Image.new("RGBA", size, (*_rgb(PLAIN_GROUND), 255))
+    placed = (data.get("ground") or {}).get("bounds") if isinstance(data.get("ground"), dict) else None
+    if project is not None and placed and list(placed) != list(data.get("bounds") or []):
+        west, south, east, north = placed
+        x0, y0 = project(west, north)
+        x1, y1 = project(east, south)
+        scale_x, scale_y = size[0] / project.width, size[1] / project.height
+        box = (round(x0 * scale_x), round(y0 * scale_y), round(x1 * scale_x), round(y1 * scale_y))
+        canvas = Image.new("RGBA", size, (*_rgb(PLAIN_GROUND), 255))
+        width, height = max(1, box[2] - box[0]), max(1, box[3] - box[1])
+        # only what shows is drawn: a ground far larger than the frame is cut first
+        left, top = max(0, -box[0]), max(0, -box[1])
+        right, bottom = min(width, size[0] - box[0]), min(height, size[1] - box[1])
+        if right <= left or bottom <= top:
+            return canvas
+        fx, fy = picture.width / width, picture.height / height
+        part = picture.crop((round(left * fx), round(top * fy), round(right * fx), round(bottom * fy)))
+        part = part.convert("RGBA").resize((right - left, bottom - top), Image.Resampling.LANCZOS)
+        canvas.alpha_composite(part, (box[0] + left, box[1] + top))
+        return canvas
     return picture.convert("RGBA").resize(size, Image.Resampling.LANCZOS)
 
 
@@ -1742,25 +2196,66 @@ def _dashes(points: list[tuple[float, float]], on: float, off: float) -> Iterato
 
 
 def _draw_labels(canvas: Image.Image, features: list[dict[str, Any]],
-                 at: Callable[[dict[str, Any]], tuple[float, float]], pixel: float) -> None:
+                 at: Callable[[dict[str, Any]], tuple[float, float]], pixel: float, *, centred: bool = False) -> None:
     if not features:
         return
     size = max(10, round(12.5 * pixel))
     font = _font(size)
     draw = ImageDraw.Draw(canvas)
     taken: list[tuple[float, float, float, float]] = []
-    for feature in sorted(features, key=lambda one: -one["coords"][1]):
+    for feature in sorted(features, key=lambda one: at(one)[1] if centred else -one["coords"][1]):
         text = _cut(str(feature.get("label") or ""), 34)
         if not text:
             continue
         x, y = at(feature)
-        left = x + 15 * pixel
-        box = draw.textbbox((left, y), text, font=font, anchor="lm")
+        left = x if centred else x + 15 * pixel
+        anchor = "mm" if centred else "lm"
+        box = draw.textbbox((left, y), text, font=font, anchor=anchor)
         if any(box[0] < other[2] and other[0] < box[2] and box[1] < other[3] and other[1] < box[3] for other in taken):
             continue
         taken.append(box)
-        draw.text((left, y), text, font=font, anchor="lm", fill=(255, 255, 255, 255),
+        draw.text((left, y), text, font=font, anchor=anchor, fill=(255, 255, 255, 255),
                   stroke_width=max(2, round(size / 6)), stroke_fill=(16, 18, 22, 230))
+
+
+def _draw_north(canvas: Image.Image, pixel: float) -> None:
+    """A north arrow in the top right corner, as the page draws it (`.az-map-north`)."""
+    draw = ImageDraw.Draw(canvas)
+    side = 34 * pixel
+    x, y = canvas.width - side * 0.9 - 14 * pixel, 14 * pixel
+    cx, top, bottom = x + side / 2, y + side * 0.12, y + side * 0.9
+    draw.ellipse((x, y, x + side, y + side), fill=(16, 18, 22, 200))
+    draw.polygon([(cx, top), (cx + side * 0.2, y + side * 0.62), (cx, y + side * 0.52)], fill=(255, 255, 255, 255))
+    draw.polygon([(cx, top), (cx - side * 0.2, y + side * 0.62), (cx, y + side * 0.52)], fill=(190, 194, 200, 255))
+    font = _font(max(8, round(9 * pixel)))
+    draw.text((cx, bottom), "N", font=font, anchor="ms", fill=(255, 255, 255, 255))
+
+
+def _draw_scale(canvas: Image.Image, bounds: list[float], project: "_Projector", pixel: float) -> None:
+    """A scale bar in the bottom left corner: a round distance about a hundred page pixels
+    long at the map's middle, as the page's ruler is."""
+    west, south, east, north = bounds
+    middle = (south + north) / 2
+    metres_across = 40075016.7 * math.cos(math.radians(middle)) * (mercator(east, middle)[0] - mercator(west, middle)[0])
+    per_pixel = metres_across / canvas.width
+    if per_pixel <= 0:
+        return
+    length = 1.0
+    for step in (1, 2, 5):
+        for power in range(8):
+            value = step * 10 ** power
+            if value / per_pixel <= 110 * pixel and value > length:
+                length = value
+    span = length / per_pixel
+    draw = ImageDraw.Draw(canvas)
+    x, y = 14 * pixel, canvas.height - 14 * pixel
+    for colour, wide in (((16, 18, 22, 200), 4.2), ((255, 255, 255, 255), 2.0)):
+        stroke = max(1, round(wide * pixel / 2))
+        draw.line([(x, y - 8 * pixel), (x, y), (x + span, y), (x + span, y - 8 * pixel)], fill=colour, width=stroke,
+                  joint="curve")
+    words = f"{length / 1000:g} km" if length >= 1000 else f"{length:g} m"
+    draw.text((x + 4 * pixel, y - 4 * pixel), words, font=_font(max(8, round(10 * pixel))), anchor="ls",
+              fill=(255, 255, 255, 255), stroke_width=max(1, round(pixel * 1.4)), stroke_fill=(16, 18, 22, 220))
 
 
 @lru_cache(maxsize=8)
@@ -1980,6 +2475,6 @@ def _text(value: str) -> str:
 
 
 __all__ = [
-    "BLOCK", "Derived", "MapBlock", "TOKEN", "block_text", "blocks_in", "derive", "fit_view",
-    "ground_bounds", "parse_block", "render_png", "svg",
+    "BASES", "BLOCK", "CARD_PARTS", "Derived", "MapBlock", "Step", "TOKEN", "block_text", "blocks_in", "derive",
+    "fit_view", "ground_bounds", "label_anchor", "parse_block", "render_png", "settings_lines", "step_text", "svg",
 ]

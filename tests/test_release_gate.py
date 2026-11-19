@@ -300,6 +300,7 @@ def test_release_tooling_is_bounded_and_built_from_the_lock():
         "azimut/engine/notes_html_assets/reader.js",
         "azimut/engine/notes_html_assets/reader.map.css",
         "azimut/engine/notes_html_assets/reader.map.js",
+        "azimut/engine/notes_html_assets/reader.mapset.css",
         "azimut/engine/notes_html_assets/reader.chart.css",
         "azimut/engine/notes_html_assets/reader.infographic.css",
         "azimut/engine/notes_html_assets/markers.json",
