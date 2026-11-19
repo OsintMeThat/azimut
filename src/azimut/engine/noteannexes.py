@@ -176,12 +176,14 @@ def build(
     numbers = ({entry.source.key: entry.number for entry in cited.annex.entries}
                if cited.annex is not None else {})
     out = Annexes()
-    if profile.geolocations and case is not None:
+    # a note with its own Geolocations or Method section keeps it as the only one unless
+    # its look asks for the generated annex too (`notes_markdown.annex_listing`)
+    if profile.geolocations and case is not None and cited.generates("geolocations"):
         out.geolocations = _geolocations(case, entries, numbers, round_pov=round_pov)
     # a document that cites nothing owes no credit but its type, and has no method to state
     if profile.credits and entries:
         out.credits = _credits(case, entries, faces=faces)
-    if profile.method and entries:
+    if profile.method and entries and cited.generates("method"):
         out.method = _method(entries, day=day, public=public, made_as=made_as)
     if profile.limits and not cited.limits_section:
         out.limits = [Limit(" ".join(text.split()), line, index) for index, (text, line) in enumerate(cited.limits)

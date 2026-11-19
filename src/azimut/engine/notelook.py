@@ -21,7 +21,9 @@ the analyst's own header and footer (`header`, `footer`), written only once a sl
 holds something: a reader that drops them prints the style's own. And how the HTML
 page is laid out (`web`): an article, or a story whose pictures hold still while their
 words scroll by. The PDF never reads it. And which list of sources the document ends on
-(`sources_list`): the generated one, the note's own section, or both.
+(`sources_list`): the generated one, the note's own section, or both; and the same for the
+How this was made and Geolocations annexes against the note's own Method or Geolocations
+section (`method_list`, `geolocations_list`).
 
 **The style is the profile.** A style says what the document is, and so what it
 carries after its text: the sources list and how it is written (`academic`, `web`,
@@ -88,7 +90,8 @@ LINK_CHECKS: tuple[str, ...] = ("each", "grouped")
 #: Azimut writes from what the note cites; `own`, the note's own section as written, the
 #: links still checked and nothing numbered; `both`. "" decides from the note: its own
 #: when it has a heading named Sources or References (`notes_markdown.own_sources`), else
-#: the generated one. Not a style's default, since it hangs on what the note holds.
+#: the generated one. Not a style's default, since it hangs on what the note holds. The
+#: method and geolocations annexes take the same three ways (`method_list`, `geolocations_list`).
 SourcesList = Literal["", "generated", "own", "both"]
 SOURCES_LISTS: tuple[str, ...] = ("generated", "own", "both")
 #: An annex as a look sets it: "" the style's own, else on or off.
@@ -99,7 +102,8 @@ Switch = Literal["", "on", "off"]
 ANNEXES: tuple[str, ...] = ("geolocations", "credits", "method", "limits", "editions")
 #: Keys a look writes only once they leave their default, so a look that never used
 #: them is stored, served and bundled exactly as an older Azimut wrote it.
-LATE_KEYS = ("font", "size", "sources", "web", "sources_style", "link_check", "sources_list")
+LATE_KEYS = ("font", "size", "sources", "web", "sources_style", "link_check", "sources_list", "method_list",
+             "geolocations_list")
 #: The page bands under the same rule: one with nothing in it is not written.
 BAND_KEYS = ("header", "footer")
 #: The longest a header or footer slot is, in characters: one line of a page's edge.
@@ -327,6 +331,10 @@ class NoteLook(BaseModel):
     annexes: NoteAnnexes = Field(default_factory=NoteAnnexes)
     link_check: LinkCheck = ""
     sources_list: SourcesList = ""
+    #: The same three ways for the How this was made and Geolocations annexes, against the
+    #: note's own Method or Geolocations section (`notes_markdown.OWN_SECTIONS`).
+    method_list: SourcesList = ""
+    geolocations_list: SourcesList = ""
     header: PageBand = Field(default_factory=PageBand)
     footer: PageBand = Field(default_factory=PageBand)
 

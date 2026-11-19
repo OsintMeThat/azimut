@@ -35,7 +35,7 @@ import { chartSettings, openKindPicker } from './chartCard.js';
 import { chartForm } from './chartForm.js';
 import { EMPTY_SAID, FORMS, hasRows, readForm, starterBlock } from './chartFormText.js';
 import {
-  CHART_OPEN, chartOfTable, compareRows, headingAbove, newChart, readChart, readOrigin, setting, tableUnder, withSettings, withTable,
+  CHART_OPEN, chartOfTable, compareRows, fixLabel, headingAbove, newChart, readChart, readOrigin, setting, tableUnder, withSettings, withTable,
 } from './chartText.js';
 import { tablesOf } from './gridEdits.js';
 import { button, icon, openMenu } from './gridMenu.js';
@@ -60,14 +60,6 @@ function element(tag, className, text) {
   return node;
 }
 
-/** The words a fix's button says: what it writes, plainly. */
-export function fixLabel(fix, title = '') {
-  if (fix.length === 1 && fix[0][0] === 'title') {
-    return /\bat least\b/i.test(fix[0][1]) && !/\bat least\b/i.test(title) ? 'Add “at least” to the title' : `Use “${fix[0][1]}”`;
-  }
-  if (fix.length === 1 && fix[0][0] === 'kind') return `Draw it as ${fix[0][1]}`;
-  return `Write ${fix.map(([key, value]) => `“${key}: ${value}”`).join(', ')}`;
-}
 
 /** How a table is named to the analyst: under the heading above it. */
 function tableName(text, line) {

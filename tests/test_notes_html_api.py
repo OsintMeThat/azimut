@@ -47,9 +47,11 @@ def test_the_check_weighs_the_file_and_lists_links_points_of_view_and_counts(cli
     counted = [warning for warning in checked["warnings"] if warning["kind"] == "count"]
     assert len(counted) == 1 and counted[0]["text"].startswith('1 count reads as exact: "12 trucks"')
     assert isinstance(counted[0]["line"], int)
-    # the PDF's check is as it was: no weight, no count
+    # the PDF's check weighs nothing, and says the same count, each count listed under it
     pdf = client.post(f"/api/cases/{ambush['cid']}/notes/pdf/check", json={"notes": [ambush["note"]]}).json()
-    assert "weight" not in pdf["notes"][0] and all(w["kind"] != "count" for w in pdf["notes"][0]["warnings"])
+    assert "weight" not in pdf["notes"][0]
+    assert [w for w in pdf["notes"][0]["warnings"] if w["kind"] == "count"] == counted
+    assert counted[0]["items"] == [{"text": "12 trucks", "url": "", "line": counted[0]["line"]}]
 
 
 def test_the_check_names_each_clip_that_will_be_a_link(client, ambush, monkeypatch):

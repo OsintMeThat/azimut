@@ -9,7 +9,7 @@ vi.mock('../api.js', () => ({ api: { get: vi.fn(), post: vi.fn(), patch: vi.fn()
 vi.mock('../state.svelte.js', () => ({ reloadCase: vi.fn(async () => {}) }));
 
 const {
-  QUOTE_MAX, bookmarkOffer, canStateSourceOf, citeOffer, downloadOffer, forgetSourceable, lookupSource, quoteOffer, quotePost, sourceItem,
+  QUOTE_MAX, bookmarkLinks, bookmarkOffer, canStateSourceOf, citeOffer, downloadOffer, forgetSourceable, lookupSource, quoteOffer, quotePost, sourceItem,
   sourceAddress, statePostedOf, stateSourceOf,
 } = await import('./sources.js');
 
@@ -190,5 +190,33 @@ describe('a post, quoted', () => {
     expect(quoteOffer({ source: { type: 'upload', description: 'typed' } }, clip)).toBeNull();
     const offer = quoteOffer(download({ url: 'https://t.me/port/4', description: 'Seen' }), clip);
     expect(offer).toMatchObject({ id: 'quote', label: 'Quote the post' });
+  });
+});
+
+describe('the pages a note links to, filed at once', () => {
+  it('files each page once as a bookmark named by its words, in the note’s folder, and reads the case once', async () => {
+    const make = vi.fn(async (caseId, record) => ({ id: `b${make.mock.calls.length}`, ...record }));
+    const reload = vi.fn(async () => {});
+    const links = [
+      { text: 'Al Jazeera, 10 Sep', url: 'https://www.aljazeera.com/a', line: 2 },
+      { text: 'Again', url: 'https://www.aljazeera.com/a', line: 9 },
+      { text: '', url: 'https://b.example.org/x', line: 4 },
+      { text: 'No address', url: '', line: 5 },
+    ];
+    const done = await bookmarkLinks('c1', links, { folder: 'Links of “Article”', make, reload });
+    expect(done).toEqual({ filed: 2, failed: '' });
+    expect(make.mock.calls).toEqual([
+      ['c1', { title: 'Al Jazeera, 10 Sep', url: 'https://www.aljazeera.com/a', folder: 'Links of “Article”' }],
+      ['c1', { title: 'https://b.example.org/x', url: 'https://b.example.org/x', folder: 'Links of “Article”' }],
+    ]);
+    expect(reload).toHaveBeenCalledOnce();
+  });
+
+  it('says the first error and still files the rest', async () => {
+    const make = vi.fn(async (caseId, record) => { if (record.url.includes('bad')) throw new Error('Enter an http(s) URL'); return record; });
+    const reload = vi.fn(async () => {});
+    const done = await bookmarkLinks('c1', [{ text: 'Bad', url: 'https://bad.example.org' }, { text: 'Good', url: 'https://good.example.org' }], { make, reload });
+    expect(done).toEqual({ filed: 1, failed: 'Enter an http(s) URL' });
+    expect(reload).toHaveBeenCalledOnce();
   });
 });

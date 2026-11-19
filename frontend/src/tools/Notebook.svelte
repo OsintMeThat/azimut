@@ -41,6 +41,14 @@
    * links to the Internet Archive while the header says how far it got; the check
    * counts them again once the dialog closes or the run ends.
    *
+   * **Ready to publish?** gathers what the check before export says of one note in one
+   * panel (`notebook/ReadyPanel.svelte`, `lib/notes/readyPanel.js`), grouped, each line
+   * with its own fix where one exists. The open note's header shows how many lines are
+   * to look at, read once the note opens and again a while after typing stops, in the
+   * format and edition the export would write; the export dialog of one note links to it
+   * at its top. Each fix is the action that exists elsewhere, one Undo step where it
+   * writes in the note, and the panel asks the check again after it.
+   *
    * To Post, in the open note's ⋯, opens Post on a Free post thread made of the note's
    * public edition, or of the stretch selected in it (`lib/notes/toPost.js`); nothing is
    * posted from here.
@@ -65,8 +73,11 @@
     HTML, HTML_BUDGET, PDF, PUBLIC_ONLY, WEB, WORDPRESS, keepFormat, readFormat, weightWords,
   } from '../lib/notes/formats.js';
   import {
-    correctionFor, editionOfAll, keepCorrection, keepEdition, listEditions, PUBLIC, showEdition,
+    correctionFor, editionOf, editionOfAll, keepCorrection, keepEdition, listEditions, PUBLIC, showEdition,
   } from '../lib/notes/editions.svelte.js';
+  import { badgeWords, checkReady, issueCount, readyLines, runFix } from '../lib/notes/readyPanel.js';
+  import { chartRows } from '../lib/notes/editor/chartFigure.js';
+  import { bookmarkLinks } from '../lib/notes/sources.js';
   import { addressProblem, keepAddress, readAddress } from '../lib/notes/webAddress.js';
   import { LOOK_HELP } from '../lib/notes/lookHelp.js';
   import { destinationLabel, readDestinations } from '../lib/exportDest.js';
@@ -91,7 +102,8 @@
   import PublishSteps from './notebook/PublishSteps.svelte';
   import LinkList from './notebook/LinkList.svelte';
   import ArchiveLinks from './notebook/ArchiveLinks.svelte';
-  import { followed, isActive, onEnded, progressWords } from '../lib/notes/linkArchive.svelte.js';
+  import { followed, isActive, onEnded, progressWords, readPlan } from '../lib/notes/linkArchive.svelte.js';
+  import ReadyPanel from './notebook/ReadyPanel.svelte';
   import ToPostItem from './notebook/ToPostItem.svelte';
   import ConfirmDialog from '../components/ConfirmDialog.svelte';
   import WordPressDraft from './notebook/WordPressDraft.svelte';
@@ -149,6 +161,19 @@
   let editionsOf = $state(null);
   // the note whose links are being archived, in the dialog: { noteId, title }
   let archiveOf = $state(null);
+  // Ready to publish?: the panel open on { noteId, title, fromExport }, what its check said, and the fix under way
+  let readyOf = $state(null);
+  let readyAnswer = $state(null);
+  let readyChecking = $state(false);
+  let readyFailed = $state('');
+  let readyBusy = $state('');
+  let readyController = null;
+  // the open note's badge: how many lines the panel would list, for the note it was read for
+  let readyBadge = $state(null);
+  let badgeTimer;
+  let badgeController = null;
+  // the note whose next export rounds its points of view, pressed from the panel
+  let roundNext = $state('');
   let checkController = null;
   // the WordPress branch of the dialog: its Send, and what WordPress answered
   let wordpressDraft = $state(null);
@@ -642,7 +667,8 @@
       exportFormat = HTML;
       keepFormat('export', HTML);
     }
-    roundPov = false;
+    // Round them, pressed in the Ready panel, carries into this note's export
+    roundPov = exportIds.length === 1 && roundNext === exportIds[0];
     offlineMaps = false;
     exportChanges = exportIds.length === 1 ? correctionFor(caseId, exportIds[0]) : '';
     webDone = null;
@@ -747,14 +773,18 @@
     exportCheck = null;
   }
 
-  /** The archive dialog closed: the check before export counts the links again. */
+  /** The archive dialog closed: the check before export, and the Ready panel's, count the links again. */
   function closeArchive() {
     archiveOf = null;
     if (exportOpen) void checkExport(exportIds);
+    if (readyOf) void askReady();
   }
 
-  // a run that ends while the export is open drops its count there
-  $effect(() => onEnded(() => { if (exportOpen) void checkExport(exportIds); }));
+  // a run that ends while the export or the Ready panel is open drops its count there
+  $effect(() => onEnded(() => {
+    if (exportOpen) void checkExport(exportIds);
+    if (readyOf) void askReady();
+  }));
 
   function closeExport() {
     stopCheck();
@@ -769,6 +799,160 @@
     closeExport();
     show(noteId, { line, jump });
   }
+
+  // -- Ready to publish? ------------------------------------------------------------
+
+  /** The format and edition the panel checks: the export dialog's when it came from there, else what the export would open on. */
+  function readyChoice(noteId, fromExport) {
+    if (fromExport) return { format: exportFormat, edition: exportEdition, address: webAddress.trim() };
+    return { format: readFormat('export'), edition: editionOf(caseId, noteId), address: readAddress(caseId, noteId) };
+  }
+
+  /** Open the panel on one note: from its header, or from the export dialog, which it goes back to. */
+  function openReady({ noteId = opened?.noteId ?? CASE_NOTES, title = noteEntity?.label ?? 'Case notes', fromExport = false } = {}) {
+    if (!caseId) return;
+    if (fromExport) {
+      // the dialog's choices stay as they are for the way back
+      stopCheck();
+      exportOpen = false;
+    }
+    readyOf = { noteId, title, fromExport };
+    readyAnswer = null;
+    readyFailed = '';
+    void askReady();
+  }
+
+  function closeReady({ toExport = readyOf?.fromExport } = {}) {
+    readyController?.abort();
+    readyController = null;
+    const was = readyOf;
+    readyOf = null;
+    readyChecking = false;
+    if (toExport && was) {
+      exportOpen = true;
+      void checkExport(exportIds);
+    }
+  }
+
+  /** Ask the check for the panel's note, from the note as saved; the open note's badge follows it. */
+  async function askReady() {
+    const of = readyOf;
+    if (!of || !caseId) return;
+    readyController?.abort();
+    const mine = new AbortController();
+    readyController = mine;
+    readyChecking = true;
+    try {
+      if (doc && (doc.noteId ?? CASE_NOTES) === of.noteId) await flush(doc);
+      const answer = await checkReady(caseId, of.noteId, { ...readyChoice(of.noteId, of.fromExport), signal: mine.signal });
+      if (readyController !== mine) return;
+      readyAnswer = answer;
+      readyFailed = '';
+      if (opened && (opened.noteId ?? CASE_NOTES) === of.noteId) readyBadge = { key: badgeKey(), issues: issueCount(readyLines(answer)) };
+    } catch (error) {
+      if (readyController === mine && error?.name !== 'AbortError') readyFailed = error.message;
+    } finally {
+      if (readyController === mine) {
+        readyController = null;
+        readyChecking = false;
+      }
+    }
+  }
+
+  /** The panel's Go to: the note at the line, the way a warning of the export takes it there. */
+  function goReady(line) {
+    const noteId = readyOf?.noteId;
+    closeReady({ toExport: false });
+    show(noteId, { line: line.line, jump: jumpFor(line) });
+  }
+
+  /** Whether the panel's note is the one in the editor, which a fix that writes in it needs. */
+  const readyEditable = $derived(Boolean(readyOf && editor && doc?.loaded && opened && (opened.noteId ?? CASE_NOTES) === readyOf.noteId));
+
+  /** Write one change the panel worked out into the note, as one Undo step. */
+  function writeReady(change, missing) {
+    if (!change || !editor?.replace(change.from, change.to, change.insert, change.expected)) {
+      toast(missing, 'warn', 4500);
+      return false;
+    }
+    return true;
+  }
+
+  /** A fix pressed in the panel: the action that exists elsewhere (`runFix`), then the check again. */
+  async function fixReady(line) {
+    const of = readyOf;
+    if (!of || !line?.fix || readyBusy) return;
+    readyBusy = line.key;
+    try {
+      const again = await runFix(line, {
+        noteId: of.noteId,
+        caseId,
+        text: () => editor?.text() ?? '',
+        write: writeReady,
+        rows: chartRows,
+        archive: () => (archiveOf = { noteId: of.noteId, title: of.title }),
+        bookmark: async (links) => {
+          const plan = await readPlan(caseId, of.noteId).catch(() => null);
+          const { filed, failed } = await bookmarkLinks(caseId, links, { folder: plan?.folder ?? '' });
+          if (filed) toast(`${filed} ${filed === 1 ? 'bookmark' : 'bookmarks'} filed${plan?.folder ? ` in ${plan.folder}` : ''}`, 'ok', 3500);
+          if (failed) toast(failed, 'warn', 5000);
+        },
+        round: (on) => {
+          if (of.fromExport) roundPov = on;
+          roundNext = on ? of.noteId : roundNext === of.noteId ? '' : roundNext;
+        },
+        open: (id) => {
+          const entity = graphEntities.find((item) => item.id === id);
+          if (!entity) return;
+          closeReady({ toExport: false });
+          openEntity(entity);
+        },
+      });
+      if (again) await askReady();
+    } catch (error) {
+      toast(error.message, 'danger');
+    } finally {
+      readyBusy = '';
+    }
+  }
+
+  const badgeKey = () => `${caseId}/${opened?.noteId ?? CASE_NOTES}`;
+  /** How long the badge waits once typing stops before it asks the check again: a long note's check lays its page out whole. */
+  const BADGE_QUIET_MS = 15000;
+
+  // the open note's badge: read once it is loaded, then a while after each change; never while the panel asks
+  $effect(() => {
+    const ready = Boolean(caseId && opened && doc?.loaded && !template);
+    void doc?.text;
+    const key = ready ? badgeKey() : '';
+    clearTimeout(badgeTimer);
+    if (!ready) return;
+    const first = untrack(() => readyBadge?.key) !== key;
+    badgeTimer = setTimeout(() => untrack(() => readBadge(key)), first ? 400 : BADGE_QUIET_MS);
+    return () => clearTimeout(badgeTimer);
+  });
+
+  async function readBadge(key) {
+    if (readyOf || exportOpen || key !== badgeKey()) return;
+    badgeController?.abort();
+    const mine = new AbortController();
+    badgeController = mine;
+    const noteId = opened?.noteId ?? CASE_NOTES;
+    try {
+      if (doc) await flush(doc);
+      const answer = await checkReady(caseId, noteId, { ...readyChoice(noteId, false), signal: mine.signal });
+      if (badgeController === mine && key === badgeKey()) readyBadge = { key, issues: issueCount(readyLines(answer)) };
+    } catch {
+      // a check that fails leaves the badge as it was
+    } finally {
+      if (badgeController === mine) badgeController = null;
+    }
+  }
+  onDestroy(() => {
+    clearTimeout(badgeTimer);
+    badgeController?.abort();
+    readyController?.abort();
+  });
 
   // -- a template from Settings ------------------------------------------------------
 
@@ -879,6 +1063,13 @@
             <Icon name="clock" size={12} /> {progressWords(archiving)}</button>
         {/if}
         <div class="spacer"></div>
+        {#if readyBadge && readyBadge.key === badgeKey()}
+          <button type="button" class="btn btn-ghost btn-xs ready-badge" class:clear={!readyBadge.issues}
+            title="Ready to publish? What the check before export says, in one place" aria-label={`Ready to publish? ${badgeWords(readyBadge.issues)}`}
+            onclick={() => openReady()}>
+            {#if readyBadge.issues}<span class="ready-dot" aria-hidden="true"></span><span>{readyBadge.issues}<span class="ready-words">{' to look at'}</span></span>
+            {:else}<Icon name="check" size={12} /><span class="ready-words">Ready</span>{/if}</button>
+        {/if}
         <LookControl {look} onchange={pickLook} entities={graphEntities} disabled={!look} text={doc.text} />
         <ViewModes page={pageMode} guide="notebook.view" onchange={setPageMode} />
         <button class="btn btn-ghost btn-sm" title="Stays open on the right as you switch tools" aria-label="Pin to the side"
@@ -1014,6 +1205,13 @@
           <button class="btn btn-primary" onclick={closeExport}>Done</button>
         </div>
       {:else}
+      {#if !several}
+        <button type="button" class="ready-link" title="What the check says of this note, grouped, each with its fix"
+          onclick={() => openReady({ noteId: exportIds[0], title: exportTitle || 'Case notes', fromExport: true })}>
+          <Icon name="check" size={13} /> Ready to publish?
+          <span class="ready-link-said">Everything to look at in one place, each with its fix</span>
+          <Icon name="chevronRight" size={12} /></button>
+      {/if}
       <div class="export-format">
         <span class="dest-label">Format</span>
         <FormatSwitch value={exportFormat} onchange={chooseFormat} />
@@ -1179,6 +1377,13 @@
       onexport={() => { const id = editionsOf.noteId; editionsOf = null; exportSome([id], { correcting: true }); }} />
   {/if}
 
+  {#if readyOf}
+    <ReadyPanel title={readyOf.title} ready={readyAnswer} checking={readyChecking} failed={readyFailed} canEdit={readyEditable}
+      rounded={readyOf.fromExport ? roundPov : roundNext === readyOf.noteId} busy={readyBusy} fromExport={readyOf.fromExport}
+      onfix={fixReady} ongo={goReady} onclose={() => closeReady()}
+      onexport={() => { const of = readyOf; closeReady({ toExport: false }); exportSome([of.noteId === CASE_NOTES ? null : of.noteId]); }} />
+  {/if}
+
   {#if archiveOf}
     <ArchiveLinks {caseId} noteId={archiveOf.noteId} title={archiveOf.title} onclose={closeArchive} />
   {/if}
@@ -1207,9 +1412,9 @@
 <style>
   .notebook { position: relative; height: 100%; display: flex; flex-direction: column; min-height: 0; container: notebook / inline-size; }
   .tool-header { flex-wrap: nowrap; }
-  .title-input { flex: 0 1 320px; min-width: 120px; font-weight: 600; }
+  .title-input { flex: 0 1 320px; min-width: 96px; font-weight: 600; }
   .case-title { display: inline-flex; align-items: center; gap: 6px; font-weight: 600; color: var(--text-1); }
-  .folder-pick { flex: 0 1 200px; min-width: 120px; }
+  .folder-pick { flex: 0 1 200px; min-width: 96px; }
   .kind { color: var(--accent); font-size: var(--fs-xs); font-weight: 700; text-transform: uppercase; letter-spacing: .06em; }
   .hint { color: var(--text-3); font-size: var(--fs-xs); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   .status { color: var(--text-3); font-size: var(--fs-xs); display: inline-flex; align-items: center; gap: 4px; white-space: nowrap; }
@@ -1222,7 +1427,21 @@
   .body.split > :global(.page-pane) { flex: 0 0 clamp(300px, 46%, 820px); }
   .body.split > :global(.ib) { flex: 0 0 clamp(320px, 34%, 400px); }
   @container notebook (max-width: 1180px) { .wide-only { display: none; } }
+  /* the Ready badge keeps its count and its dot where the header is short of room */
+  @container notebook (max-width: 1040px) { .ready-words { display: none; } }
   .fm-item.danger { color: var(--danger); }
+  .ready-badge { gap: 6px; color: var(--text-2); font-weight: 500; white-space: nowrap; }
+  .ready-badge.clear :global(svg) { color: var(--ok); }
+  .ready-dot { flex: none; width: 6px; height: 6px; border-radius: 50%; background: color-mix(in srgb, var(--warn) 75%, var(--text-3)); }
+  .ready-link {
+    display: flex; align-items: center; gap: 6px; width: 100%; margin: 0 0 10px; padding: 7px 10px; border: 1px solid var(--border);
+    border-radius: var(--r-md); background: var(--bg-1); color: var(--text-1); font: inherit; font-size: var(--fs-sm); font-weight: 600;
+    text-align: left; cursor: pointer;
+  }
+  .ready-link:hover { background: var(--bg-2); }
+  .ready-link:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+  .ready-link :global(svg:first-child) { color: var(--accent); }
+  .ready-link-said { flex: 1; min-width: 0; color: var(--text-3); font-size: var(--fs-xs); font-weight: 400; }
   .export-dest { display: flex; align-items: center; gap: 8px; margin-top: 6px; font-size: var(--fs-sm); }
   .export-format { display: flex; align-items: center; gap: 8px; margin-top: 2px; font-size: var(--fs-sm); }
   .web-fields { display: flex; flex-direction: column; gap: 4px; margin-top: 10px; font-size: var(--fs-sm); }

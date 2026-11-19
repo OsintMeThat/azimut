@@ -116,6 +116,7 @@ from .notes_markdown import (
     CASE_CHAPTER,
     COMMENT,
     COORDINATES,
+    COUNT,
     EMPTY_SECTION,
     ENTITY_HREF,
     INTERNAL,
@@ -130,14 +131,17 @@ from .notes_markdown import (
     ImageOptions,
     Piece,
     Resolve,
+    counts_listed,
+    counts_said,
     diagram_key,
     empty_sections,
+    exact_counts,
     expand,
     internal_passages,
     mermaid_sources,
     parse,
     printed_source,
-    sources_cut,
+    sections_cut,
     strip_internal,
 )
 # The Markdown is read the way every document made from a note reads it
@@ -305,6 +309,8 @@ class Rendered:
     text_sha256: str = ""
     #: That source, which a public edition keeps for What changed (`engine/noteeditions.py`).
     printed: str = ""
+    #: What the Ready to publish? panel reads beyond the warnings (`notes_markdown.Cited.ready`).
+    ready: dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass
@@ -470,7 +476,7 @@ def render(
     empty: dict[str, int] = {}
     passages = [0]
     profile = look.profile()
-    text = sources_cut(text, look, profile)
+    text = sections_cut(text, look, profile)
     cut = notefill.split_cover(text) if look.cover.own else None
     pieces = expand(title, cut.body if cut is not None else text, resolve=resolve, note_id=note_id,
                     public=public, counter=passages, values=values, empty=empty)
@@ -533,6 +539,7 @@ def render(
         internal=passages[0],
         text_sha256=hashlib.sha256(source.encode("utf-8")).hexdigest(),
         printed=source,
+        ready=cited.ready,
     )
 
 
@@ -875,6 +882,10 @@ class _Builder:
         self.missing: dict[str, str] = {}
         #: How deep inside nested lists the walk currently is.
         self._depth = 0
+        #: How deep inside quotes and callouts the walk is: their words are not counted.
+        self._quoted = 0
+        #: The counts the note gives as exact, each with its line (`notes_markdown.exact_counts`).
+        self._counts: list[tuple[str, int | None]] = []
         self._remote = 0
         self._file_prefixes = _file_prefixes(case)
         # the paragraph defaults, which a promoted verdict enlarges for a moment
@@ -999,6 +1010,9 @@ class _Builder:
             self._end_entry()
         if not drawn:
             self._aside("This note is empty.")
+        if self._counts:
+            self._warn(counts_said([phrase for phrase, _ in self._counts]), self._counts[0][1], COUNT)
+            self.cited.listed[COUNT] = counts_listed(self._counts)
         self._sources()
         self._annexes()
 
@@ -1992,6 +2006,8 @@ class _Builder:
         inline = tokens[index + 1]
         if self._standalone_image(inline, align):
             return index + 3
+        if not self._quoted and not self._on_cover:
+            self._counts.extend((phrase, self._line) for phrase in exact_counts(inline))
         runs = self._inline(inline)
         if runs:
             gap = self.theme.gap
@@ -2077,9 +2093,11 @@ class _Builder:
 
         chart, drawn = self._held(tokens[index], self._draw_chart, take=True)
         line = self._line
-        for message, kind, offset in chart.warnings:
-            self._warn(message, line if self._fixed or offset is None else line + offset,
-                       kind if kind in WARNING_KINDS else OTHER)
+        for (message, kind, offset), fix in zip(chart.warnings, chart.fixes):
+            at = line if self._fixed or offset is None else line + offset
+            self._warn(message, at, kind if kind in WARNING_KINDS else OTHER)
+            # the settings that fix it, which the Ready panel offers as the chart's own bar does
+            self.cited.fix(message, at, fix)
         if drawn is None:
             self._aside(notecharts.NO_TABLE)
             return index + 1
@@ -2152,6 +2170,13 @@ class _Builder:
         return index + 1
 
     def _on_blockquote_open(self, tokens: list[Token], index: int, align: Align) -> int:
+        self._quoted += 1
+        try:
+            return self._quote(tokens, index, align)
+        finally:
+            self._quoted -= 1
+
+    def _quote(self, tokens: list[Token], index: int, align: Align) -> int:
         if (self.annexes is not None and self.cited.profile.limits and not self._on_cover
                 and _callout_kind(tokens, index) == LIMITS):
             # where the Limits annex links back to: the box's top, on the page it starts
@@ -2228,7 +2253,11 @@ class _Builder:
             return
         # drawn here once; the walk then steps over it where the note has it
         self._promoted = None
-        self._boxed_quote(tokens, index, Align.L, big=True)
+        self._quoted += 1
+        try:
+            self._boxed_quote(tokens, index, Align.L, big=True)
+        finally:
+            self._quoted -= 1
         self._promoted = promoted
 
     def _on_bullet_list_open(self, tokens: list[Token], index: int, align: Align) -> int:

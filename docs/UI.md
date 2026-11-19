@@ -7284,6 +7284,38 @@ and *Go to*. Links to the case's own work are not counted: an archived copy itse
 (Wayback, archive.today), the Wayback and Copernicus viewers and the Esri imagery
 services, a map view the case captured, and where a proof was posted. The public
 edition counts only the links it prints. The Page pane lists the same lines, without the links under them.
+The PDF and the HTML page also say the counts a note gives as exact, *4 counts read as
+exact: "13 vehicles", …*, one line with each count under it, a quote, a heading, a table
+and a caption never read.
+
+**Ready to publish?** gathers what that check says of one note in one panel
+(`tools/notebook/ReadyPanel.svelte`, `lib/notes/readyPanel.js`). The open note's header
+shows how many lines are to look at, *3 to look at* in the header's quiet tone, or *Ready*;
+it is read once the note opens and again once typing has rested for 15 s, in the format
+and edition the export would write. The export dialog of one note links to it at its top,
+and the panel then goes back to the export. It is the same route
+(`POST /notes/pdf/check` with `ready`): the server writes each line's group and adds what
+only the panel asks (`engine/noteready.py`), so its counts are the dialog's. Five groups:
+
+- **Words**: each count read as exact, its own line with **Say “at least”**, which writes
+  *at least* before it; empty sections and open tasks; each Claim the note cites that cites
+  nothing itself, with **Open the claim**.
+- **Sources**: the links with no archived copy (**Archive every link…**), those the case
+  holds nothing of (**Bookmark them**, which files each as a bookmark in *Links of
+  “<note>”*, nothing fetched), and the pages the last archive run found gone.
+- **Figures**: a picture whose words are only a label with no caption (no alt text), or
+  that nothing names the owner of; a chart whose rows changed since they were copied
+  (**Read again**) or whose title should say *at least* (the chart's own fix); a map with
+  no ground; the points of view shown to the metre (**Round them**, for the export only).
+- **Edition**: the internal passages and the edition checked, said once, and the TLP
+  marking, or that there is none.
+- **Weight and reach**: the HTML page's weight and the clips that play from a link; a PDF
+  says it holds every picture.
+
+Each line has *Go to* when it names a line. The panel reads only: a fix is the action that
+already exists elsewhere, pressed here, one Undo step where it writes in the note, and the
+check is asked again after it. A fix that writes in the note shows while the note is open
+in the editor. Nothing reaches the network but **Archive every link…**'s own press.
 
 **Archive every link…**, on the line of links with no archived copy and in the note's ⋯,
 opens a dialog that says once what goes out: each address to the Internet Archive
@@ -7938,7 +7970,21 @@ a citation to point into. *Both* prints the note's section, then the generated l
 which the citations number into, headed *References* under a note's own *Sources*.
 *Generated* leaves the note's own section out of the document, up to the next heading of
 its rank, so one list prints. The PDF, the HTML page, its web folder and a WordPress draft
-print the same; Plain prints no generated list whatever is set. The annexes print after the sources, each a heading of its own in the
+print the same; Plain prints no generated list whatever is set.
+
+The same rule holds for two annexes a note often writes itself. While **How this was
+made** is on, **Method section** offers the same three choices against the note's own
+*Method*, *Methodology*, *How this was made* or *Methods and limits* heading; while
+**Geolocations** is on, **Geolocations section** against its *Geolocations*, *Our
+geolocations* or *Annex: our geolocations* heading (words after the name allowed, at any
+level, numbered or not; `OWN_SECTIONS` in `engine/notes_markdown.py`, `lib/notes/look.js`
+read `tests/fixtures/own-sections.json` alike). Until set each follows the note: a note
+with its own section prints it alone and no generated annex, so a report never says its
+method or its geolocations twice. *Generated* leaves the note's section out, *Both* prints
+the two (`method_list`, `geolocations_list`, late keys of the look). The folded line counts
+only the annexes that print. Plain prints neither annex whatever is set, byte for byte.
+
+The annexes print after the sources, each a heading of its own in the
 contents and the bookmarks, in the PDF, the HTML page, its web folder and a WordPress
 draft, and only when they have something to say (`engine/noteannexes.py`):
 

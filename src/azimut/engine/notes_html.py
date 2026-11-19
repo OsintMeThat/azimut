@@ -158,11 +158,9 @@ CLIP_TIMEOUT = 120.0
 POV_METRES = 150
 #: A diagram's SVG, as the browser drew it, and how many a file holds.
 MAX_SVG_BYTES = 2_000_000
-#: How many bare counts the check names one by one.
-MAX_COUNTS = 10
-#: The check's kind for a count said with no "at least" or range.
-COUNT = "count"
-WARNING_KINDS = (*md.WARNING_KINDS, COUNT)
+#: The check's kind for a count said with no "at least" or range (`notes_markdown.exact_counts`).
+COUNT = md.COUNT
+WARNING_KINDS = md.WARNING_KINDS
 #: What a graphic picture's veil says, once, at the top of the report.
 GRAPHIC_WARNING = "This report holds graphic pictures. Each stays blurred until you press it."
 #: The one-time line for a picture whose site does not allow it in published work,
@@ -209,29 +207,10 @@ RESERVED_ID = re.compile(r"^(?:src|clip|fig|step|limits|map)-\d+$")
 #: The side of a picture a map's card shows.
 CARD_SIDE = 640
 
-#: What a count is a count of: the nouns a register or a strike report counts. A
-#: number followed straight by one is read as a count; any other number is not.
-COUNT_NOUNS = frozenset("""
-vehicle vehicles tank tanks truck trucks pickup pickups person people civilian civilians fighter fighters
-soldier soldiers dead killed wounded casualty casualties strike strikes building buildings home homes
-boat boats drone drones aircraft
-""".split())
-#: A number followed by a word, the shape of a count.
-BARE_COUNT = re.compile(r"(?<![\w.,:/#+~≥≤>–—-])(\d{1,6})(?![\w.,:/%°×+–—-])[ \t]+([A-Za-z]+)\b")
-#: What before a count makes it a minimum, a maximum or a range: a hedge, or a first
-#: number and `to`, `-` or `or` (`40 to 60 vehicles`).
-HEDGES = re.compile(
-    r"(?:\bat\s+least|\bat\s+most|\babout|\baround|\bapproximately|\bapprox\.?|\broughly|\bsome|\bup\s+to|"
-    r"\bmore\s+than|\bless\s+than|\bfewer\s+than|\bover|\bunder|\bnearly|\balmost|\bestimated|\bbetween|"
-    r"\bminimum\s+of|\bmaximum\s+of|\bc\.|\bca\.|~|≥|≤|>|<|\d\s*(?:to|or|-|–|—)\s*)\s*$",
-    re.I,
-)
 #: How long a page's description runs, for a link's card.
 DESCRIPTION_CHARS = 200
 #: How many credits of one kind a figure names before it counts the rest.
 MAX_CREDITS = 4
-#: How many counts the check's one warning quotes.
-MAX_COUNTS = 5
 
 
 class NotesHtmlError(Exception):
@@ -348,6 +327,8 @@ class RenderedHtml:
     #: How many maps it holds, and whether they go live once the folder is online.
     maps: int = 0
     live: bool = False
+    #: What the Ready to publish? panel reads beyond the warnings (`notes_markdown.Cited.ready`).
+    ready: dict[str, Any] = field(default_factory=dict)
 
 
 def render(
@@ -388,7 +369,7 @@ def render(
     empty: dict[str, int] = {}
     passages = [0]
     profile = look.profile()
-    text = md.sources_cut(text, look, profile)
+    text = md.sections_cut(text, look, profile)
     cut = notefill.split_cover(text) if look.cover.own else None
     pieces = md.expand(title, cut.body if cut is not None else text, resolve=resolve, note_id=note_id,
                        public=public, counter=passages, values=values, empty=empty)
@@ -434,6 +415,7 @@ def render(
         day=day,
         maps=page.maps,
         live=page.live,
+        ready=cited.ready,
     )
 
 
@@ -631,7 +613,8 @@ class _Page:
             self._warn(f"{self._remote} remote image{'s' if self._remote > 1 else ''} left out: "
                        "the export never fetches from the network.", self._remote_line, md.OTHER)
         if self._counts:
-            self._warn(_counts_said([phrase for phrase, _ in self._counts]), self._counts[0][1], COUNT)
+            self._warn(md.counts_said([phrase for phrase, _ in self._counts]), self._counts[0][1], COUNT)
+            self.cited.listed[COUNT] = md.counts_listed(self._counts)
         body = self._scrub("".join(self.out))
         self.description = self._describe(body)
         sources = self._sources()
@@ -1493,19 +1476,8 @@ class _Page:
         return _text(time.words)
 
     def _count(self, inline: Token) -> None:
-        """Note each count of a paragraph read as exact, for the check: a number straight
-        before a noun of `COUNT_NOUNS`, with no hedge or range before it. Its code spans
-        are no prose, and a heading, a table, a caption or a quote is never read."""
-        text = "".join("\x00" if child.type == "code_inline" else
-                       (" " if child.type in ("softbreak", "hardbreak") else child.content)
-                       for child in inline.children or [] if child.type in ("text", "code_inline", "softbreak",
-                                                                            "hardbreak"))
-        for match in BARE_COUNT.finditer(text):
-            if match.group(2).lower() not in COUNT_NOUNS or int(match.group(1)) < 2:
-                continue
-            if HEDGES.search(text[max(0, match.start() - 24):match.start()]):
-                continue
-            self._counts.append((f"{match.group(1)} {match.group(2)}", self._line))
+        """Note each count of a paragraph read as exact, for the check (`notes_markdown.exact_counts`)."""
+        self._counts.extend((phrase, self._line) for phrase in md.exact_counts(inline))
 
     # -- pictures -----------------------------------------------------------------------
 
@@ -2020,9 +1992,11 @@ class _Page:
         holds (an analyst's icon, a flag) stay in it, as files of a web folder."""
         chart = notecharts.read(self.case, body, look=self.look, note_text=self._note_text)
         line = self._line
-        for message, kind, offset in chart.warnings:
-            self._warn(message, line if self._fixed or offset is None else line + offset,
-                       kind if kind in WARNING_KINDS else md.OTHER)
+        for (message, kind, offset), fix in zip(chart.warnings, chart.fixes):
+            at = line if self._fixed or offset is None else line + offset
+            self._warn(message, at, kind if kind in WARNING_KINDS else md.OTHER)
+            # the settings that fix it, which the Ready panel offers as the chart's own bar does
+            self.cited.fix(message, at, fix)
         if not chart.drawable:
             return [_aside(notecharts.NO_TABLE)]
         self.charts += 1
@@ -3129,17 +3103,6 @@ def _file_stem(words: str) -> str:
     folded = unicodedata.normalize("NFKD", words).encode("ascii", "ignore").decode("ascii").lower()
     stem = re.sub(r"[^a-z0-9]+", "-", folded).strip("-")[:40].strip("-")
     return stem or "file"
-
-
-def _counts_said(phrases: list[str]) -> str:
-    """The check's one warning for the counts a note gives as exact, a few quoted."""
-    said = list(dict.fromkeys(phrases))
-    quoted = ", ".join(f'"{phrase}"' for phrase in said[:MAX_COUNTS])
-    quoted += ", …" if len(said) > MAX_COUNTS else "."
-    # counted as they are quoted: one phrase written twice is one count
-    if len(said) == 1:
-        return f'1 count reads as exact: {quoted} Say "at least" or give a range.'
-    return f'{len(said)} counts read as exact: {quoted} Say "at least" or give a range.'
 
 
 def _anchor_named(message: str) -> str:

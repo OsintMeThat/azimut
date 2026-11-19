@@ -109,7 +109,7 @@ from ..engine import notes_web as web_engine
 from ..engine import notes_pdf as pdf_engine
 from ..engine import notes_wordpress as wordpress_engine
 from ..engine import notediff, noteeditions
-from ..engine import notefill, notefromcase, notelinks, notepieces, notesources, notetext
+from ..engine import notefill, notefromcase, notelinks, notepieces, noteready, notesources, notetext
 from ..engine import pdffonts
 from ..engine import reveal as reveal_engine
 from ..engine import urltitles
@@ -244,6 +244,9 @@ class CheckIn(EditionSelection):
 
     format: Literal["pdf", "html", "web"] = "pdf"
     base_url: str | None = Field(default=None, max_length=web_engine.MAX_ADDRESS)
+    #: Also what the Ready to publish? panel reads: each warning's group, and what only the
+    #: panel lists (`engine/noteready.py`).
+    ready: bool = False
 
 
 class HtmlPreviewIn(NotePreviewIn):
@@ -967,14 +970,17 @@ def check_pdf(case_id: str, body: CheckIn) -> dict[str, Any]:
     public = body.edition == notes_markdown.PUBLIC
     if body.format == "web":
         where = _web_address(body.base_url)
-        return {"notes": [_check_html(case, note_id, resolve, True, web=where) for note_id in dict.fromkeys(body.notes)]}
+        return {"notes": [_check_html(case, note_id, resolve, True, web=where, ready=body.ready)
+                          for note_id in dict.fromkeys(body.notes)]}
     if body.format == "html":
-        return {"notes": [_check_html(case, note_id, resolve, public) for note_id in dict.fromkeys(body.notes)]}
+        return {"notes": [_check_html(case, note_id, resolve, public, ready=body.ready)
+                          for note_id in dict.fromkeys(body.notes)]}
     answered: list[dict[str, Any]] = []
     for note_id in dict.fromkeys(body.notes):
         title, text = _note_source(case, note_id)
         warnings: list[dict[str, Any]]
         internal = 0
+        kept: dict[str, Any] = {}
         try:
             rendered = pdf_engine.render(
                 case, title=title, text=text, look=notelook.stored(case, note_id), note_id=note_id,
@@ -986,30 +992,53 @@ def check_pdf(case_id: str, body: CheckIn) -> dict[str, Any]:
             warnings = [{"text": str(exc)[:MAX_WARNING_CHARS], "line": None, "kind": notes_markdown.OTHER}]
         else:
             internal = rendered.internal
+            kept = rendered.ready
             warnings = _warnings(rendered)
             if public and internal:
                 said = f"{internal} internal passage{'s' if internal > 1 else ''} left out."
                 warnings.append({"text": said, "line": None, "kind": notes_markdown.LEFT_OUT})
-        answered.append({"note": note_id, "title": title, "warnings": warnings, "internal": internal})
+        answer: dict[str, Any] = {"note": note_id, "title": title, "warnings": warnings, "internal": internal}
+        if body.ready:
+            answer["ready"] = _ready(case, note_id, text, kept, warnings, edition=body.edition, made_as="pdf")
+        answered.append(answer)
     return {"notes": answered}
+
+
+def _ready(case: Case, note_id: str, text: str, kept: dict[str, Any], warnings: list[dict[str, Any]], *,
+           edition: str, made_as: str) -> dict[str, Any]:
+    """What the Ready to publish? panel reads beside the check: each warning's group,
+    written onto it, and what only the panel lists (`engine/noteready.py`)."""
+    figures = noteready.figure_lines(text)
+    pictures = {picture.get("line") for picture in kept.get("pictures") or []}
+    for warning in warnings:
+        warning["group"] = noteready.group_of(warning["kind"], warning["line"], warning["text"], figures, pictures)
+    look = notelook.stored(case, note_id) or notelook.DEFAULT
+    return {"format": made_as, "edition": edition, "style": look.style, "tlp": look.tlp,
+            **noteready.extras(case, note_id, kept, warnings)}
 
 
 def _warnings(rendered: pdf_engine.Rendered | html_engine.RenderedHtml | web_engine.WebBuild) -> list[dict[str, Any]]:
     """A document's warnings as the check answers them, a grouped one with the links it
     counts as ``items`` (each its words, its address and its line)."""
     said: list[dict[str, Any]] = []
+    fixes = rendered.ready.get("fixes") or {}
     for text, line, kind in zip(rendered.warnings, rendered.warning_lines, rendered.warning_kinds):
         warning: dict[str, Any] = {"text": text[:MAX_WARNING_CHARS], "line": line, "kind": kind}
         items = rendered.listed.get(kind)
         if items:
             warning["items"] = [{"text": str(item["text"])[:MAX_WARNING_CHARS], "url": item["url"][:2048],
                                  "line": item["line"]} for item in items]
+        # the settings that fix it, as a chart's own bar offers them
+        fix = fixes.get(notes_markdown.fix_key(text, line))
+        if fix:
+            warning["fix"] = [[key[:40], value[:MAX_WARNING_CHARS]] for key, value in fix]
         said.append(warning)
     return said
 
 
 def _check_html(
-    case: Case, note_id: str, resolve: notes_markdown.Resolve, public: bool, *, web: str | None = None
+    case: Case, note_id: str, resolve: notes_markdown.Resolve, public: bool, *, web: str | None = None,
+    ready: bool = False,
 ) -> dict[str, Any]:
     """One note's check for its HTML file: the warnings, as the PDF's check gives them
     and with bare counts as kind `count`; the file's weight in bytes, every picture
@@ -1018,10 +1047,12 @@ def _check_html(
     With ``web`` (the address given, or "") it checks the note's web folder instead,
     which weighs its files and says when it has no address (kind `address`), and
     whether its maps go live online (`live`), which the dialog says and lets the
-    analyst turn down."""
+    analyst turn down. With ``ready`` it also says what the Ready panel reads (`_ready`)."""
     title, text = _note_source(case, note_id)
     answer: dict[str, Any] = {"note": note_id, "title": title, "warnings": [], "internal": 0, "weight": 0,
                               "links": [], "pov": [], "earlier": 0, "live": False}
+    made_as = "web" if web is not None else "html"
+    edition = notes_markdown.PUBLIC if public else notes_markdown.INTERNAL
     rendered: html_engine.RenderedHtml | web_engine.WebBuild
     try:
         if web is not None:
@@ -1033,6 +1064,8 @@ def _check_html(
             )
     except (html_engine.NotesHtmlError, web_engine.NotesWebError) as exc:
         answer["warnings"] = [{"text": str(exc)[:MAX_WARNING_CHARS], "line": None, "kind": notes_markdown.OTHER}]
+        if ready:
+            answer["ready"] = _ready(case, note_id, text, {}, answer["warnings"], edition=edition, made_as=made_as)
         return answer
     warnings = _warnings(rendered)
     if public and rendered.internal:
@@ -1048,6 +1081,8 @@ def _check_html(
                     if record["edition"] == notes_markdown.PUBLIC and record.get("format") != WORDPRESS),
         live=rendered.live,
     )
+    if ready:
+        answer["ready"] = _ready(case, note_id, text, rendered.ready, warnings, edition=edition, made_as=made_as)
     return answer
 
 

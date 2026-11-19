@@ -167,7 +167,7 @@ def printed_now(case: "Case | None", *, title: str, text: str, look: NoteLook | 
     values = identity.values(day)
     empty: dict[str, int] = {}
     passages = [0]
-    text = md.sources_cut(text, look, look.profile())
+    text = md.sections_cut(text, look, look.profile())
     cut = notefill.split_cover(text) if look.cover.own else None
     pieces = md.expand(title, cut.body if cut is not None else text, resolve=resolve, note_id=note_id,
                        public=True, counter=passages, values=values, empty=empty)

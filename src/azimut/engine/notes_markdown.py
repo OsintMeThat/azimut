@@ -155,7 +155,14 @@ SETTING = "setting"
 #: links themselves listed beside it (`Cited.listed`).
 UNARCHIVED = "unarchived"
 UNSEEN = "unseen"
-WARNING_KINDS = (MISSING, UNSOURCED, OPEN_TASK, LOCAL_LINK, EMPTY_SECTION, OTHER, LEFT_OUT, SETTING, UNARCHIVED, UNSEEN)
+#: A count written as exact, with no "at least" or range before it (`exact_counts`): one
+#: line however many, each count listed beside it with its line.
+COUNT = "count"
+#: A chart whose rows differ from where they were copied from, which Read again brings up
+#: to date (`notecharts.origin_warning`).
+STALE = "stale"
+WARNING_KINDS = (MISSING, UNSOURCED, OPEN_TASK, LOCAL_LINK, EMPTY_SECTION, OTHER, LEFT_OUT, SETTING, UNARCHIVED, UNSEEN,
+                 COUNT, STALE)
 #: How many links a reader cannot open are named one by one before the rest are counted.
 MAX_LOCAL_LINKS = 10
 #: How many links one grouped line lists; its count stays exact past it.
@@ -170,6 +177,28 @@ LIMITS_HEADING = re.compile(r"^(?:\d+(?:\.\d+)*\.?\s+)?(?:limits|limitations)\b"
 #: level, numbered or not, bold or not. `lib/notes/look.js` (`ownSources`) reads it the same.
 OWN_SOURCES = re.compile(
     r"^ {0,3}#{1,6}[ \t]+(?:\d+(?:\.\d+)*\.?[ \t]+)?[*_]*(sources|references)[*_]*[ \t]*:?[ \t]*(?:#+[ \t]*)?$", re.I)
+#: A heading line that opens the note's own account of its method, or its own list of
+#: geolocations, at any level, numbered or not, bold or not, words after it allowed: Method,
+#: Methodology, How this was made, Methods and limits; Geolocations, Our geolocations, Annex:
+#: our geolocations. The generated annex of that name is then not printed unless the look
+#: asks for it (`method_list`, `geolocations_list`). `lib/notes/look.js` (`ownSection`)
+#: reads them the same, against `tests/fixtures/own-sections.json`.
+OWN_SECTIONS = {
+    "method": re.compile(
+        r"^ {0,3}#{1,6}[ \t]+(?:\d+(?:\.\d+)*\.?[ \t]+)?[*_]*(?:our[ \t]+)?"
+        r"(?:methods?|methodology|how[ \t]+this[ \t]+was[ \t]+made)(?![A-Za-z0-9])", re.I),
+    "geolocations": re.compile(
+        r"^ {0,3}#{1,6}[ \t]+(?:\d+(?:\.\d+)*\.?[ \t]+)?[*_]*(?:(?:annex|appendix)(?:[ \t]+[A-Za-z0-9]{1,3})?[ \t]*:[ \t]*)?"
+        r"(?:our[ \t]+)?geolocations(?![A-Za-z0-9])", re.I),
+}
+#: The words of a picture that tell a reader who cannot see it nothing: a bare label
+#: (`Figure 3`, `Picture`) or a file's name. Its caption then stands for them, if it has one.
+BARE_ALT = re.compile(
+    r"^(?:(?:figure|fig\.?|picture|pic|image|img|photo|screenshot|capture|untitled)[ \t]*[A-Za-z]?[0-9]*[a-z]?\.?"
+    r"|[^/\\]+\.(?:png|jpe?g|webp|gif|tiff?|bmp|heic|avif))$", re.I)
+#: A caption that names whose a picture is: `Footage: …`, `Imagery: …`, `via @…`, `©`.
+CREDIT_WORDS = re.compile(
+    r"\b(?:source|sources|credit|credits|footage|imagery|photo|photograph|map|courtesy)[ \t]*:|©|\bvia[ \t]+@?\w", re.I)
 #: A line that opens or closes fenced code, where a heading is only words.
 FENCE_LINE = re.compile(r"^ {0,3}(`{3,}|~{3,})")
 #: A heading line and its rank, where a section ends.
@@ -857,6 +886,9 @@ class Cited:
         self.listing = ""
         #: The word the note's own sources section is headed with, "sources" or "references".
         self.own_heading = ""
+        #: For the method and geolocations annexes: whether the generated one prints in place
+        #: of the note's own section, beside it, or not at all (`annex_listing`).
+        self.annex_lists: dict[str, str] = {}
         self.styled = styled
         self.annex: Annex | None = None
         #: Every source the document cites, for the annexes, whether the list is printed or not.
@@ -877,6 +909,11 @@ class Cited:
         self._outside: dict[str, tuple[str, str, int | None, Source]] = {}
         #: The links behind each grouped line, by the line's kind.
         self.listed: dict[str, list[dict[str, Any]]] = {}
+        #: What the Ready to publish? panel reads beyond the warnings (`engine/noteready.py`):
+        #: each picture with whether a reader is told what it shows and whose it is
+        #: (``pictures``), each record cited (``records``), each outside page linked
+        #: (``outside``), and what a renderer adds while it draws (``fixes``, by warning).
+        self.ready: dict[str, Any] = {}
 
     # -- what a citation is, for the pass and the walk alike -------------------
 
@@ -930,9 +967,11 @@ class Cited:
     def collect(self, pieces: list[Piece], blocks: dict[int, list["Block"]]) -> None:
         """Read every citation in document order, chapters included, then number them."""
         # the note's own words, as the Look reads them: a chapter's section is its own note's
-        self.own_heading = own_sources("\n".join(piece.text for piece in pieces if piece.kind == "text" and not piece.depth))
+        own_text = "\n".join(piece.text for piece in pieces if piece.kind == "text" and not piece.depth)
+        self.own_heading = own_sources(own_text)
         if self.on:
             self.listing = self.look.sources_list or ("own" if self.own_heading else "generated")
+        self.annex_lists = {which: annex_listing(self.look, which, own_section(own_text, which)) for which in OWN_SECTIONS}
         cover = self.look.cover
         if cover.on and not cover.own and cover.image and self.case is not None:
             shown = self.reader.entity(cover.image)
@@ -996,8 +1035,11 @@ class Cited:
                 name = cut_text(" ".join(words.split()) or entity.group(1), 80)
                 self._once(f"record:{entity.group(1)}", f'The record "{name}" is no longer in the case.',
                            line, MISSING)
-            elif source.citable:
-                self._cited.append(source)
+            else:
+                self.ready.setdefault("records", []).append(
+                    {"id": entity.group(1), "text": cut_text(" ".join(words.split()), 120), "line": line})
+                if source.citable:
+                    self._cited.append(source)
             return
         if is_local(href, self._prefixes):
             self._local.setdefault(href, line)
@@ -1024,6 +1066,15 @@ class Cited:
         if source is None:
             return
         self._cited.append(source)
+        if self.case is not None and source.noun != "Video":
+            options = image_options(src)
+            words = " ".join((token.content or "").split())
+            self.ready.setdefault("pictures", []).append({
+                "text": cut_text(words or options.caption or source.label or "Untitled", 80),
+                "line": line,
+                "alt": bool(options.caption.strip()) or bool(words and not BARE_ALT.match(words)),
+                "credit": source.sourced or bool(CREDIT_WORDS.search(options.caption)),
+            })
         if self.on and self.case is not None and not source.sourced:
             name = cut_text(" ".join((token.content or source.label).split()) or "Untitled", 80)
             noun = "Video" if source.noun == "Video" else "Picture"
@@ -1052,6 +1103,8 @@ class Cited:
                 self._warn(f"{rest} more link{'s' if rest > 1 else ''} will not open for a reader.", None, LOCAL_LINK)
             if self.on:
                 self._check_links()
+            self.ready["outside"] = [{"url": address, "text": words, "line": line}
+                                     for address, words, line, _ in self.outside()]
         # a written link counts with every set of words the note linked it with
         self._cited = [self.reader.latest(source) for source in self._cited]
         if self.on or any(self.profile.annex(key) for key in ANNEXES_READ):
@@ -1062,6 +1115,11 @@ class Cited:
             if self.annex.left_out:
                 self._warn(f"The sources list stops at {self.annex.limit}; "
                            f"{self.annex.left_out} more are not listed.", None, OTHER)
+
+    def generates(self, which: str) -> bool:
+        """Whether the generated annex ``which`` (``method`` or ``geolocations``) prints,
+        the note's own section of that name left as the only one unless the look asks."""
+        return self.annex_lists.get(which, "generated") in ("generated", "both")
 
     @property
     def list_title(self) -> str:
@@ -1094,6 +1152,9 @@ class Cited:
                 unarchived.append(item)
             if not source.collected:
                 unseen.append(item)
+        # every one, however the check words them, for the Ready panel's Bookmark them
+        self.ready["unarchived"] = unarchived[:MAX_LISTED_LINKS]
+        self.ready["unseen"] = unseen[:MAX_LISTED_LINKS]
         if self.profile.link_check == "each":
             # a report checks each link: one line per link, each going to its own line
             for found, kind in ((unarchived, UNARCHIVED), (unseen, UNSEEN)):
@@ -1123,6 +1184,12 @@ class Cited:
         """Say one more thing the check before export should, from outside the pass."""
         self._warn(message, line, kind)
 
+    def fix(self, message: str, line: int | None, settings: tuple[tuple[str, str], ...]) -> None:
+        """Keep the settings that fix a warning a renderer said (a chart's title that should
+        say "at least"), by its words and line, for the Ready panel (`fix_key`)."""
+        if settings:
+            self.ready.setdefault("fixes", {})[fix_key(message, line)] = [[key, value] for key, value in settings]
+
     def once(self, key: str, message: str, line: int | None, kind: str) -> None:
         """`warn`, unless something said it under ``key`` already."""
         self._once(key, message, line, kind)
@@ -1145,6 +1212,11 @@ class Cited:
             if style != "short":
                 said.append(notesources.entry_text(notesources.entry(source, style, entry.origins)))
         return said
+
+
+def fix_key(message: str, line: int | None) -> str:
+    """How a warning's fix is found again once the warnings are said: its line and words."""
+    return f"{line}\x1f{message}"
 
 
 def own_sources(text: str) -> str:
@@ -1170,9 +1242,30 @@ def _fence_step(line: str, fence: str) -> tuple[str, bool]:
     return (marks.group(1), True) if marks else ("", False)
 
 
+def own_section(text: str, which: str) -> bool:
+    """Whether a note holds its own section of `OWN_SECTIONS` (``method`` or
+    ``geolocations``): a heading line of its own text, code left out."""
+    pattern = OWN_SECTIONS[which]
+    fence = ""
+    for line in text.splitlines():
+        fence, code = _fence_step(line, fence)
+        if not code and pattern.match(line):
+            return True
+    return False
+
+
 def without_own_sources(text: str) -> str:
     """The note with its own sources section emptied: its heading and everything under it
     up to the next heading of its rank or above, the lines kept so every line number holds."""
+    return _without_section(text, OWN_SOURCES)
+
+
+def without_own_section(text: str, which: str) -> str:
+    """The note with its own section of `OWN_SECTIONS` emptied, as `without_own_sources`."""
+    return _without_section(text, OWN_SECTIONS[which])
+
+
+def _without_section(text: str, opens: re.Pattern[str]) -> str:
     lines = text.split("\n")
     fence = ""
     start: int | None = None
@@ -1184,7 +1277,7 @@ def without_own_sources(text: str) -> str:
             continue
         heading = ATX_LINE.match(line)
         if start is None:
-            if heading and OWN_SOURCES.match(line):
+            if heading and opens.match(line):
                 start, rank = index, len(heading.group(1))
             continue
         if heading and len(heading.group(1)) <= rank:
@@ -1195,12 +1288,85 @@ def without_own_sources(text: str) -> str:
     return "\n".join([*lines[:start], *([""] * (end - start)), *lines[end:]])
 
 
-def sources_cut(text: str, look: NoteLook, profile: Profile) -> str:
-    """The note as its look prints it: with the generated list chosen in place of the note's
-    own sources section (`sources_list` "generated"), that section is left out."""
+def annex_listing(look: NoteLook, which: str, own: bool) -> str:
+    """Whether the generated annex ``which`` (``method`` or ``geolocations``) is printed in
+    place of the note's own section, beside it, or not at all: the look's choice, else the
+    note's own section when it has one (``own``), else the generated annex."""
+    chosen: str = getattr(look, f"{which}_list")
+    return chosen or ("own" if own else "generated")
+
+
+def sections_cut(text: str, look: NoteLook, profile: Profile) -> str:
+    """The note as its look prints it: with a generated list or annex chosen in place of the
+    note's own section (`sources_list`, `method_list` or `geolocations_list` "generated"),
+    that section is left out. Only while the style prints the list or the annex."""
     if look.sources_list == "generated" and profile.sources:
-        return without_own_sources(text)
+        text = without_own_sources(text)
+    for which in OWN_SECTIONS:
+        if getattr(look, f"{which}_list") == "generated" and profile.annex(which):
+            text = without_own_section(text, which)
     return text
+
+
+#: What a count is a count of: the nouns a register or a strike report counts. A
+#: number followed straight by one is read as a count; any other number is not.
+COUNT_NOUNS = frozenset("""
+vehicle vehicles tank tanks truck trucks pickup pickups person people civilian civilians fighter fighters
+soldier soldiers dead killed wounded casualty casualties strike strikes building buildings home homes
+boat boats drone drones aircraft
+""".split())
+#: A number followed by a word, the shape of a count.
+BARE_COUNT = re.compile(r"(?<![\w.,:/#+~≥≤>–—-])(\d{1,6})(?![\w.,:/%°×+–—-])[ \t]+([A-Za-z]+)\b")
+#: What before a count makes it a minimum, a maximum or a range: a hedge, or a first
+#: number and `to`, `-` or `or` (`40 to 60 vehicles`).
+HEDGES = re.compile(
+    r"(?:\bat\s+least|\bat\s+most|\babout|\baround|\bapproximately|\bapprox\.?|\broughly|\bsome|\bup\s+to|"
+    r"\bmore\s+than|\bless\s+than|\bfewer\s+than|\bover|\bunder|\bnearly|\balmost|\bestimated|\bbetween|"
+    r"\bminimum\s+of|\bmaximum\s+of|\bc\.|\bca\.|~|≥|≤|>|<|\d\s*(?:to|or|-|–|—)\s*)\s*$",
+    re.I,
+)
+#: How many counts the check's one warning quotes.
+MAX_COUNTS = 5
+
+
+def exact_counts(inline: Token) -> list[str]:
+    """The counts a paragraph gives as exact, for the check: a number straight before a
+    noun of `COUNT_NOUNS`, with no hedge or range before it, each as written (`12 trucks`).
+    Its code spans are no prose. The PDF and the HTML page read a paragraph alike; neither
+    reads a heading, a table, a caption or a quote."""
+    text = "".join("\x00" if child.type == "code_inline" else
+                   (" " if child.type in ("softbreak", "hardbreak") else child.content)
+                   for child in inline.children or [] if child.type in ("text", "code_inline", "softbreak",
+                                                                        "hardbreak"))
+    found: list[str] = []
+    for match in BARE_COUNT.finditer(text):
+        if match.group(2).lower() not in COUNT_NOUNS or int(match.group(1)) < 2:
+            continue
+        if HEDGES.search(text[max(0, match.start() - 24):match.start()]):
+            continue
+        found.append(f"{match.group(1)} {match.group(2)}")
+    return found
+
+
+def counts_said(phrases: list[str]) -> str:
+    """The check's one warning for the counts a note gives as exact, a few quoted."""
+    said = list(dict.fromkeys(phrases))
+    quoted = ", ".join(f'"{phrase}"' for phrase in said[:MAX_COUNTS])
+    quoted += ", …" if len(said) > MAX_COUNTS else "."
+    # counted as they are quoted: one phrase written twice is one count
+    if len(said) == 1:
+        return f'1 count reads as exact: {quoted} Say "at least" or give a range.'
+    return f'{len(said)} counts read as exact: {quoted} Say "at least" or give a range.'
+
+
+def counts_listed(counts: list[tuple[str, int | None]]) -> list[dict[str, Any]]:
+    """The counts behind the check's one line, each its words and the first line it is
+    written on, counted as the line counts them (one phrase written twice is one count):
+    what the Ready panel's Say "at least" reads."""
+    first: dict[str, int | None] = {}
+    for phrase, line in counts:
+        first.setdefault(phrase, line)
+    return [{"text": phrase, "url": "", "line": line} for phrase, line in first.items()][:MAX_LISTED_LINKS]
 
 
 def heading_level(tag: str, shift: int) -> int:

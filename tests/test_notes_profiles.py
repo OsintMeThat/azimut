@@ -515,6 +515,67 @@ def test_plain_prints_its_own_sources_section_byte_for_byte_whatever_the_choice(
     assert "Harbour bulletin" in pdf_text(plain)
 
 
+# -- a note's own Method and Geolocations ------------------------------------------------------
+
+SECTIONS_FIXTURE = Path(__file__).parent / "fixtures" / "own-sections.json"
+#: The owner's article ends on its own Method and its own table of geolocations.
+OWN_SECTIONS = ("\n## Method\n\nMatched on stable terrain.\n\n## Annex: our geolocations on this front\n\n"
+                "| Posted | Place |\n| --- | --- |\n| 14 Sep | Berth 12 |\n\n## After\n\nLast words.\n")
+
+
+def test_a_note_s_own_method_and_geolocations_headings_are_read_as_the_look_reads_them():
+    """`tests/fixtures/own-sections.json`, which `look.test.js` reads against `ownSection`."""
+    cases = json.loads(SECTIONS_FIXTURE.read_text(encoding="utf-8"))["cases"]
+    assert len(cases) > 15
+    for case in cases:
+        for which in ("method", "geolocations"):
+            assert notes_markdown.own_section(case["text"], which) is case[which], (which, case["text"])
+
+
+def test_the_two_annex_choices_are_late_keys():
+    assert {"method_list", "geolocations_list"}.isdisjoint(NoteLook(style="report").model_dump(mode="json"))
+    chosen = look(style="report", method_list="both", geolocations_list="generated").model_dump(mode="json")
+    assert chosen["method_list"] == "both" and chosen["geolocations_list"] == "generated"
+    with pytest.raises(ValueError):
+        NoteLook.model_validate({"method_list": "mine"})
+
+
+def test_a_report_with_its_own_method_and_geolocations_does_not_print_them_twice(sourced):
+    """The owner's Report printed its Method and How this was made, its geolocations and the
+    generated Geolocations: by default a note's own section is the only one."""
+    _, case, made = sourced
+    _geolocated(case, made)
+    text = _note(made) + OWN_SECTIONS
+    annexes = {}
+    for choice in ("", "own", "both", "generated"):
+        chosen = look(style="report", method_list=choice, geolocations_list=choice)
+        page = notes_html.render(case, title="Strike", text=text, look=chosen, created=CREATED).html.decode()
+        printed = pdf_text(notes_pdf.render(case, title="Strike", text=text, look=chosen, created=CREATED).pdf)
+        annexes[choice] = ({key for key in ("geolocations", "method") if f'data-annex="{key}"' in page},
+                           "Matched on stable terrain." in page, "How this was made" in printed,
+                           "Matched on stable terrain." in printed)
+        draft = notes_wordpress.build(case, title="Strike", text=text, look=chosen).content
+        assert ('id="annex-method"' in draft) is (choice in ("both", "generated")), choice
+        assert "Last words." in page and "Last words." in printed
+    # following the note and its own section: one each, the note's
+    assert annexes[""] == annexes["own"] == (set(), True, False, True)
+    assert annexes["both"] == ({"geolocations", "method"}, True, True, True)
+    # the generated ones in place of the note's sections, which are left out up to the next heading
+    assert annexes["generated"] == ({"geolocations", "method"}, False, True, False)
+
+
+def test_plain_prints_its_own_method_and_geolocations_byte_for_byte_whatever_the_choice(tmp_path):
+    case = FakeCase(tmp_path, {})
+    text = "# T\n\nSee [one](https://example.org/a)." + OWN_SECTIONS
+    plain = notes_pdf.render(case, title="T", text=text, look=look(style="plain"), created=CREATED).pdf
+    page = notes_html.render(case, title="T", text=text, look=look(style="plain"), created=CREATED).html
+    for choice in ("generated", "own", "both"):
+        chosen = look(style="plain", method_list=choice, geolocations_list=choice)
+        assert notes_pdf.render(case, title="T", text=text, look=chosen, created=CREATED).pdf == plain, choice
+        assert notes_html.render(case, title="T", text=text, look=chosen, created=CREATED).html == page, choice
+    assert "Matched on stable terrain." in pdf_text(plain)
+
+
 def test_the_look_route_keeps_the_choice_beside_the_note(client):
     cid = make_case(client)
     note = client.post(f"/api/cases/{cid}/notes", json={"title": "Article", "content": "Words." + OWN}).json()

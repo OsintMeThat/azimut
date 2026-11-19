@@ -8,10 +8,37 @@ const {
   BANDS, BAND_MAX, COVERS, DEFAULT_LOOK, FONTS, HINT_LINE, coverChoice, coverFor, ownCover, INCLUDE_LINE, SIZES, SOURCES_OFF_STYLES, STYLES, hintLine, includeLine, isPlainLook, isReport, lookFont,
   WEBS, bandStyleOwn, normaliseLook, readLook, sectionsSet, slotText, reportBody, reportLook, sourcesOn, templateLook, writeLook,
   ANNEXES, LINK_CHECKS, SOURCES_STYLES, STYLE_DEFAULTS, profileChanged, profileOf, styleOwn, stylesTable, withProfile,
-  SOURCES_LISTS, includesSummary, ownSources, sourcesListOf,
+  SOURCES_LISTS, includesSummary, ownSources, sourcesListOf, OWN_SECTIONS, annexListOf, ownSection,
 } = await import('./look.js');
 
 afterEach(() => vi.clearAllMocks());
+
+describe('a note’s own Method and Geolocations', () => {
+  it('reads a Method or Geolocations heading of the note as the documents do', () => {
+    // `notes_markdown.own_section` reads the same file: one rule, read from both sides
+    const { cases } = JSON.parse(readFileSync(new URL('../../../../tests/fixtures/own-sections.json', import.meta.url), 'utf8'));
+    expect(cases.length).toBeGreaterThan(15);
+    for (const { text, method, geolocations } of cases) {
+      expect(ownSection(text, 'method'), text).toBe(method);
+      expect(ownSection(text, 'geolocations'), text).toBe(geolocations);
+    }
+  });
+
+  it('prints the generated annex only where the note has no section of its own, until it is set', () => {
+    expect(Object.keys(OWN_SECTIONS)).toEqual(['method', 'geolocations']);
+    const own = '## Method\n\nHow.\n\n## Annex: our geolocations on this front\n\n| # | Place |';
+    expect(annexListOf({ style: 'report' }, own, 'method')).toBe('own');
+    expect(annexListOf({ style: 'report' }, own, 'geolocations')).toBe('own');
+    expect(annexListOf({ style: 'report' }, 'Words.', 'method')).toBe('generated');
+    expect(annexListOf({ style: 'report', method_list: 'both' }, own, 'method')).toBe('both');
+    expect(normaliseLook({ geolocations_list: 'mine' }).geolocations_list).toBe('');
+    expect(normaliseLook({ method_list: 'generated' }).method_list).toBe('generated');
+    expect(sectionsSet({ geolocations_list: 'own' }).style).toBe(true);
+    // the summary counts the annexes the document prints: the two the note writes itself are not
+    expect(includesSummary(profileOf({ style: 'report' }), 'own', { method: 'own', geolocations: 'own' }))
+      .toBe('Your own sources · 3 annexes · links grouped');
+  });
+});
 
 describe('the list of sources a note ends on', () => {
   it('reads a Sources or References heading of the note as the documents do', () => {

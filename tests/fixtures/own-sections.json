@@ -1,0 +1,28 @@
+{
+  "about": "Whether a note holds its own Method or Geolocations section, as the Look and the renderers both read it: a heading of its own, words after it allowed, code and quotes left out.",
+  "cases": [
+    { "text": "## Method\n\nWe matched each vehicle on imagery.", "method": true, "geolocations": false },
+    { "text": "## Methodology", "method": true, "geolocations": false },
+    { "text": "### How this was made", "method": true, "geolocations": false },
+    { "text": "## Methods and limits", "method": true, "geolocations": false },
+    { "text": "## 4. Method", "method": true, "geolocations": false },
+    { "text": "## **Method**", "method": true, "geolocations": false },
+    { "text": "#### our method:", "method": true, "geolocations": false },
+    { "text": "## Methodical work", "method": false, "geolocations": false },
+    { "text": "Method\n======", "method": false, "geolocations": false },
+    { "text": "> ## Method", "method": false, "geolocations": false },
+    { "text": "    ## Method", "method": false, "geolocations": false },
+    { "text": "```\n## Method\n```\n\nText.", "method": false, "geolocations": false },
+    { "text": "We describe our method below.", "method": false, "geolocations": false },
+    { "text": "## Geolocations", "method": false, "geolocations": true },
+    { "text": "## Our geolocations", "method": false, "geolocations": true },
+    { "text": "## Annex: our geolocations on this front", "method": false, "geolocations": true },
+    { "text": "## Annex A: Geolocations", "method": false, "geolocations": true },
+    { "text": "## 7. _Geolocations_", "method": false, "geolocations": true },
+    { "text": "## Geolocation of the strike", "method": false, "geolocations": false },
+    { "text": "## Annex: the strikes", "method": false, "geolocations": false },
+    { "text": "~~~\n## Geolocations\n~~~", "method": false, "geolocations": false },
+    { "text": "## Geolocations\n\n## Method\n\n## Sources", "method": true, "geolocations": true },
+    { "text": "", "method": false, "geolocations": false }
+  ]
+}
