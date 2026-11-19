@@ -703,10 +703,13 @@ test('a picture bar in the note is one Tab away, walked with the arrows, and kee
   await page.keyboard.press('Enter');
   await expect.poll(() => state.written.at(-1)?.text ?? '').toContain('[[media:m1|Roof]]{width=50%}');
   await expect(page.locator('.cm-block-picture [data-size-bar]').getByRole('button', { name: 'M', exact: true })).toBeFocused();
-  // the bar ends on </> (Edit the source): Caption is the one before it
+  // the bar ends on </> (Edit the source), after Caption, Graphic and Replace
   await page.keyboard.press('End');
   await expect(bar.getByRole('button', { name: 'Edit the source' })).toBeFocused();
-  await page.keyboard.press('ArrowLeft');
+  for (const name of ['Replace…', 'Graphic', 'Caption']) {
+    await page.keyboard.press('ArrowLeft');
+    await expect(bar.getByRole('button', { name, exact: true })).toBeFocused();
+  }
   await page.keyboard.press('Enter');
   const field = page.locator('.cm-block-picture').getByRole('textbox', { name: 'Caption' });
   await expect(field).toBeFocused();
