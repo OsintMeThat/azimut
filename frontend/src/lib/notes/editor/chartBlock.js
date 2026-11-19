@@ -840,6 +840,7 @@ const THEME = {
   // what a chart shows only at times (Read again, its checks, its numbers) stays out of sight when hidden
   '.cm-chart-tool[hidden], .cm-chart-ui[hidden], .cm-chart-proposed[hidden]': { display: 'none' },
   '.cm-chart-tool:hover, .cm-chart-tool:focus-visible': { background: 'var(--bg-3)', color: 'var(--text-1)', outline: 'none' },
+  '.cm-chart-tool:focus-visible': { outline: '2px solid var(--accent)', outlineOffset: '1px' },
   '.cm-chart-tool svg': { flex: 'none', opacity: '0.85' },
   '.cm-chart-kind': { color: 'var(--text-1)', fontWeight: '600' },
   '.cm-chart-again': { color: 'var(--accent)', fontWeight: '600', background: 'var(--accent-soft)' },

@@ -8129,6 +8129,11 @@ instrument style of QGIS, Google Earth Pro, Resolve and Lightroom.
   stay fixed across themes. Surfaces over imagery remain dark through
   `.dark-surface`. New chrome must use tokens; hardcoded light colours are limited
   to text on dark image scrims.
+- **Quiet controls stay visible**: a ⋯, a ▾, a handle or any button drawn as an icon
+  alone rests in `--text-2`, never in the hint grey `--text-3` or at a lowered opacity,
+  so it stands out at least 3:1 from what it sits on, a row lit under the pointer
+  included (WCAG 1.4.11), in both themes. `lib/notes/quietControls.render.test.js`
+  measures the note editor's and the Notebook's.
 - **Shape**: radii 3/4/6px, flat panels with 1px borders, rectangular badges.
 - **Update dot**: `.update-dot` on a `.dotted` host says "something here is to
   install or update", and nothing else. It repeats down one path — the topbar

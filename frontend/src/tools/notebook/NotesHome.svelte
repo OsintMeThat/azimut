@@ -163,7 +163,7 @@
       title="Pick it, Shift-click for a run"
       onclick={(event) => pick(row.id, event.shiftKey)} />
     <button type="button" class="more" aria-label={`Actions for ${row.id === 'case' ? 'the case notes' : row.title}`} title="More"
-      onclick={(event) => onmenu({ id: row.id, title: row.title }, event.currentTarget)}><Icon name="more" size={13} /></button>
+      onclick={(event) => onmenu({ id: row.id, title: row.title }, event.currentTarget)}><Icon name="more" size={15} /></button>
   </div>
 {/snippet}
 
@@ -326,10 +326,11 @@
   }
   .said { color: var(--text-3); font-size: var(--fs-xs); }
   .more {
-    position: absolute; top: 8px; right: 6px; border: none; background: none; color: var(--text-3); cursor: pointer;
+    position: absolute; top: 8px; right: 6px; border: none; background: none; color: var(--text-2); cursor: pointer;
     padding: 4px; border-radius: var(--r-sm);
   }
   .more:hover { color: var(--text-1); background: var(--bg-3); }
+  .more:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
   /* the box to pick a card: on hover, and on every card once picking has begun */
   .pick {
     position: absolute; top: 11px; right: 34px; width: 15px; height: 15px; margin: 0; accent-color: var(--accent); cursor: pointer;

@@ -82,7 +82,8 @@
     border-radius: var(--r-sm); color: var(--text-1); font-size: var(--fs-sm); text-align: left; cursor: pointer; }
   .float-menu :global(.fm-item:hover:not(:disabled)), .float-menu :global(.fm-item:focus-visible) { background: var(--bg-3); }
   .float-menu :global(.fm-item:disabled) { color: var(--text-3); cursor: default; }
-  .float-menu :global(.fm-item > svg) { flex: none; color: var(--text-3); }
+  .float-menu :global(.fm-item > svg) { flex: none; color: var(--text-2); }
+  .float-menu :global(.fm-item:disabled > svg) { color: inherit; }
   .float-menu :global(.fm-item.danger) { color: var(--danger, #e5484d); }
   .float-menu :global(.fm-item.danger > svg) { color: inherit; }
   .float-menu :global(.fm-item .fm-grow) { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }

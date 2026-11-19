@@ -478,7 +478,7 @@
   .ib-width[aria-pressed='true'], .ib-look[aria-pressed='true'] { background: var(--bg-3); color: var(--text-1); font-weight: 650; }
   .ib-width:hover, .ib-look:hover { color: var(--text-1); }
   .ib-remove {
-    display: inline-flex; padding: 3px; border: none; border-radius: var(--r-sm); background: none; color: var(--text-3); cursor: pointer;
+    display: inline-flex; padding: 3px; border: none; border-radius: var(--r-sm); background: none; color: var(--text-2); cursor: pointer;
   }
   .ib-remove:hover, .ib-remove:focus-visible { color: var(--danger); background: var(--bg-3); }
   .ib-add {

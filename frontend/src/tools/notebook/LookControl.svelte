@@ -686,9 +686,10 @@
   .slot .input { min-width: 0; font-size: var(--fs-xs); padding: 4px 6px; }
   .slot-logo, .chip-x {
     display: inline-flex; align-items: center; justify-content: center; padding: 1px 3px; border: none; border-radius: var(--r-sm);
-    background: none; color: var(--text-3); cursor: pointer;
+    background: none; color: var(--text-2); cursor: pointer;
   }
   .slot-logo:hover, .slot-logo.on, .chip-x:hover { color: var(--text-1); background: var(--bg-3); }
+  .chip-x:hover { background: var(--bg-2); }
   .slot-chip {
     display: flex; align-items: center; justify-content: space-between; gap: 4px; min-width: 0; padding: 4px 4px 4px 8px;
     border: 1px solid var(--border); border-radius: var(--r-md); background: var(--bg-3); color: var(--text-1); font-size: var(--fs-xs);
