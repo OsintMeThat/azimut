@@ -168,7 +168,7 @@ def test_the_lookup_says_what_the_case_knows_of_a_page(client, sourced):
     assert known == {
         "id": made["notice"]["id"], "type": "bookmark", "label": "Port authority notice", "noun": "Web page",
         "address": NOTICE_URL, "author": "", "published": "", "archive": ARCHIVE_URL, "archived_at": "2026-03-13",
-        "seen": "2026-03-13", "arrival": "collected", "sha256": "", "thumb": "",
+        "seen": "2026-03-13", "arrival": "collected", "sha256": "", "thumb": "", "account": "",
     }
     post = client.get(f"/api/cases/{cid}/sources/lookup", params={"url": POST_URL}).json()["known"]
     assert (post["type"], post["author"], post["published"], post["seen"]) == ("media", "Port Watch", "2026-03-12", "2026-03-13")

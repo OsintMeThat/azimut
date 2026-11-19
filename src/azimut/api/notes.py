@@ -30,9 +30,10 @@ A note cites a web source through `/sources/lookup`: the address is read for a n
 and looked for among what the case already filed for it (`engine/urltitles.py`), so
 a link pasted twice cites one item. Its `known` says what the case knows of the page
 a written link to it would cite (`engine/notesources.py`): the item, who posted it and
-when, its archived copy, the day it was seen, a file's fingerprint and its picture;
-its `reference`, the link's entry in the list of sources. `/sources/item` says the
-same of the item a chip cites. The citation card reads both. Nothing is fetched.
+when (the account its address names beside the author on record), its archived copy,
+the day it was seen, a file's fingerprint and its picture; its `reference`, the link's
+entry in the list of sources, in the sources style of the note named. `/sources/item`
+says the same of the item a chip cites. The citation card reads both. Nothing is fetched.
 
 Before an export, `/notes/pdf/check` lays the chosen notes out in memory and says,
 note by note, what the PDF would get wrong (a picture no longer in the case, one
@@ -443,10 +444,14 @@ def note_citations(case_id: str, entity_id: str) -> dict[str, Any]:
     return {"items": items}
 
 
+#: A note id, as the card's two routes are told which note's sources style to write in.
+NOTE_QUERY = Query(default="", max_length=64, pattern=r"^[A-Za-z0-9_-]*$")
+
+
 @router.get("/{case_id}/sources/lookup")
 def source_lookup(
     case_id: str, url: str, title: str = Query(default="", max_length=300),
-    words: str = Query(default="", max_length=300),
+    words: list[str] = Query(default=[], max_length=50), note: str = NOTE_QUERY,
 ) -> dict[str, Any]:
     """What a web address is called, and the case items already filed for it.
 
@@ -454,9 +459,9 @@ def source_lookup(
     offline is named and found the same way. ``title`` is the one the page gave
     itself, when the browser that showed it passed it on (the extension's notes
     panel); it names the page only when the address says nothing better. ``words``
-    are those a written link to it shows, which name it in the list of sources when
-    the case holds nothing there: its ``reference`` is that entry, as the citation
-    card copies it.
+    are those the note's written links to it show, which name and title it in the list
+    of sources when the case holds nothing there: its ``reference`` is that entry, in
+    the sources style of ``note`` (`_sources_style`), as the citation card copies it.
     """
     address = url.strip()
     if len(address) > 2048 or not urltitles.url_key(address):
@@ -464,8 +469,11 @@ def source_lookup(
     case = get_case(case_id)
     reader = notesources.Reader(case)
     found = reader.index.find(address, types=urltitles.FILED)
-    # read first with the link's words, which name a page the case holds nothing of
-    linked = reader.link(address, words)
+    # read with the links' words, in the note's order: the first names a page the case
+    # holds nothing of, the others may title it, as the list of sources reads them
+    linked = reader.link(address, words[0] if words else "")
+    for said in words[1:]:
+        linked = reader.link(address, said)
     record = reader.held(address)
     return {
         "url": address,
@@ -476,30 +484,41 @@ def source_lookup(
             for entity in found
         ],
         "known": _known(case, record, linked) if record is not None else None,
-        "reference": notesources.reference(linked),
+        "reference": notesources.reference(linked, _sources_style(case, note)),
     }
 
 
 @router.get("/{case_id}/sources/item")
-def source_item(case_id: str, id: str = Query(min_length=1, max_length=64, pattern=r"^[A-Za-z0-9_-]+$")) -> dict[str, Any]:
+def source_item(
+    case_id: str, id: str = Query(min_length=1, max_length=64, pattern=r"^[A-Za-z0-9_-]+$"), note: str = NOTE_QUERY,
+) -> dict[str, Any]:
     """What the case knows of the item a chip cites, as the citation card shows it, and
-    its entry in the list of sources (``reference``, "" when the list leaves it out:
-    a place, a person). ``known`` is None once the item is no longer in the case.
-    Read off the case alone, nothing fetched."""
+    its entry in the list of sources of ``note`` (``reference``, "" when the list leaves
+    it out: a place, a person). ``known`` is None once the item is no longer in the
+    case. Read off the case alone, nothing fetched."""
     case = get_case(case_id)
     reader = notesources.Reader(case)
     source = reader.entity(id)
     record = case.get_entity(id)
     if source is None or record is None:
         return {"known": None, "reference": ""}
-    return {"known": _known(case, record, source), "reference": notesources.reference(source) if source.citable else ""}
+    reference = notesources.reference(source, _sources_style(case, note)) if source.citable else ""
+    return {"known": _known(case, record, source), "reference": reference}
+
+
+def _sources_style(case: Case, note_id: str) -> str:
+    """How the list of sources of ``note_id`` writes an entry, as its look sets it or its
+    style has it (Academic for a report, Web for a web article, Short otherwise): the form
+    the citation card copies a reference in. Short when no note is named."""
+    return notelook.effective(case, note_id).profile().sources_style if note_id else "short"
 
 
 def _known(case: Case, record: dict[str, Any], source: notesources.Source) -> dict[str, Any]:
     """What a citation of ``record`` says, as the citation card shows it: the item, who
-    posted it and when, its archived copy, the day the case saw it (``seen``, said as
-    ``arrival``: collected, captured or made), its fingerprint and its picture, every
-    day as `YYYY-MM-DD`."""
+    posted it (``author`` as the case records it, ``account`` as its address names it,
+    which the academic list leads with when the case records nobody) and when, its
+    archived copy, the day the case saw it (``seen``, said as ``arrival``: collected,
+    captured or made), its fingerprint and its picture, every day as `YYYY-MM-DD`."""
     return {
         "id": str(record.get("id") or ""),
         "type": str(record.get("type") or ""),
@@ -507,6 +526,7 @@ def _known(case: Case, record: dict[str, Any], source: notesources.Source) -> di
         "noun": source.noun,
         "address": source.address,
         "author": source.author,
+        "account": notesources.handle_of(source.address),
         "published": source.published,
         "archive": source.archive,
         "archived_at": source.archived,

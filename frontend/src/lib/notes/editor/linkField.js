@@ -81,6 +81,7 @@ export function recordItem(entity) {
     noun: NOUNS[entity.type] ?? '',
     address: attrs.url || attrs.source_url || '',
     author: '',
+    account: '',
     published: '',
     archive: attrs.archive_url || '',
     archivedAt: '',
@@ -96,7 +97,7 @@ export function recordItem(entity) {
 export function knownItem(known) {
   return {
     id: known.id, type: known.type || '', label: known.label || '', noun: known.noun || NOUNS[known.type] || '', address: known.address || '',
-    author: known.author || '', published: known.published || '', archive: known.archive || '', archivedAt: known.archived_at || '',
+    author: known.author || '', account: known.account || '', published: known.published || '', archive: known.archive || '', archivedAt: known.archived_at || '',
     seen: known.seen || '', arrival: known.arrival || '', sha256: known.sha256 || '', thumb: known.thumb || '', full: true,
   };
 }
@@ -105,14 +106,15 @@ export function knownItem(known) {
  * What the case holds at `url`, `{ url, title, item, reference }`: `title` the name the
  * address gives the page (*Post by @desk on X*), `item` the case's record for it or
  * null, `reference` its entry in the list of sources ("" when no server said it).
- * `lookup(url, words)` asks the server, `words` being a written link's, which name the
- * page in that entry; without one, or when it fails, the editor's own records answer.
+ * `lookup(url, words)` asks the server, `words` being the note's links' to it, which
+ * name and title the page in that entry; without one, or when it fails, the editor's
+ * own records answer.
  */
 export async function lookupAddress(url, { lookup = null, entities = [], words = '' } = {}) {
   let answer = null;
   if (lookup) {
     try {
-      answer = await (words ? lookup(url, words) : lookup(url));
+      answer = await ([words].flat().filter(Boolean).length ? lookup(url, words) : lookup(url));
     } catch {
       answer = null;
     }

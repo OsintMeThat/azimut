@@ -4,7 +4,7 @@ import { EditorSelection, EditorState } from '@codemirror/state';
 import { EditorView } from '@codemirror/view';
 
 import { noteExtensions, setNoteCase } from '../liveMarkdown.js';
-import { CARET_MS, HOVER_MS, LEAVE_MS, cardModel, citationAt, longDay, shownCard } from './citationCard.js';
+import { CARET_MS, HOVER_MS, LEAVE_MS, byLine, cardModel, citationAt, linkWords, longDay, shownCard } from './citationCard.js';
 import { citedTimes } from './linkField.js';
 import { setFocused } from './state.js';
 
@@ -135,6 +135,18 @@ describe('what a citation is', () => {
     expect(citedTimes(text, { id: 'b1' }, BBC)).toBe(3);
   });
 
+  it('is read with the words of every link to its page, in the note\'s order, as the list of sources reads them', () => {
+    const text = `[Al Jazeera, 10 Sep](${PAGE}) then [**Houthis seize Mocha**](${PAGE}), [again](${BBC}) and [Al Jazeera, 10 Sep](${PAGE}).`;
+    expect(linkWords(text, PAGE)).toEqual(['Al Jazeera, 10 Sep', 'Houthis seize Mocha']);
+  });
+
+  it('names who posted it as the academic list leads with it', () => {
+    expect(byLine({ author: 'Yemeni Military Media', account: '@MMY1444' })).toEqual({ value: 'Yemeni Military Media (@MMY1444)' });
+    expect(byLine({ author: '@MMY1444 on X', account: '@MMY1444' })).toEqual({ value: '@MMY1444 on X' });
+    expect(byLine({ author: '', account: '@MMY1444' })).toEqual({ value: '@MMY1444', note: 'from its address' });
+    expect(byLine({ author: '', account: '' })).toBeNull();
+  });
+
   it('says its days in words', () => {
     expect(longDay('2026-11-17T09:00:00Z')).toBe('17 November 2026');
     expect(longDay('soon')).toBe('');
@@ -155,6 +167,13 @@ describe('what the card says', () => {
     expect(model.rows[4].full).toBe(SHA);
     expect(model.actions.map((one) => [one.id, one.label])).toEqual([['open', 'Open'], ['page', 'Open page'], ['copy', 'Copy reference']]);
     expect(model.actions[1].href).toBe(POST);
+  });
+
+  it('of a post the case records no author for: the account its address names, never "Not recorded"', () => {
+    const item = { ...KNOWN.v1.known, author: '', account: '@MMY1444', archivedAt: '', full: true };
+    const model = cardModel({ ...said('v1'), item, reference: '' }, { handlers });
+    expect(model.rows.find((row) => row.label === 'By')).toMatchObject({ value: '@MMY1444', note: 'from its address' });
+    expect(model.rows.find((row) => row.label === 'By').tone).toBeUndefined();
   });
 
   it('of a bookmark the case archived: its copy\'s day and host, linked, and the copy among the actions', () => {
@@ -294,7 +313,7 @@ describe('a written link the case lacks', () => {
     editor(text, { at: text.length });
     caretIn('Al Jazeera');
     await settle(CARET_MS + 10);
-    expect(handlers.lookup).toHaveBeenCalledWith(PAGE, 'Al Jazeera, 10 Sep');
+    expect(handlers.lookup).toHaveBeenCalledWith(PAGE, ['Al Jazeera, 10 Sep']);
     expect(card().classList.contains('cm-cite-page')).toBe(true);
     expect(rows()).toEqual([['Seen', 'Not in the case'], ['Archived', 'Not archived'], ['In this note', 'Cited once']]);
     expect(actions()).toEqual(['Bookmark it', 'Open page', 'Copy reference', 'Edit link']);

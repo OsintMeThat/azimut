@@ -140,6 +140,36 @@ function pointedAt(view, event) {
 
 // -- what the card says ------------------------------------------------------------
 
+/** A written link's words and address. */
+const WRITTEN = /(?<!!)\[([^\]\n]*)\]\((https?:\/\/[^)\s]+)\)/gi;
+
+/**
+ * The words of every written link to `url` in `text`, in the note's order: the list of
+ * sources is named by the first and may take its title from another, so the card's
+ * reference reads them all, as the list does.
+ */
+export function linkWords(text, url) {
+  const found = [];
+  for (const [, words, address] of String(text ?? '').matchAll(WRITTEN)) {
+    const said = shownWords(words).trim();
+    if (address === url && said && !found.includes(said)) found.push(said);
+  }
+  return found;
+}
+
+/**
+ * Who posted it, as the academic list leads with it: the author the case records, with
+ * the account its address names when that says more (`Yemeni Military Media (@MMY1444)`),
+ * else that account alone, said to be read off the address.
+ */
+export function byLine(item) {
+  const { author = '', account = '' } = item;
+  if (author && account && !author.toLowerCase().includes(account.toLowerCase())) return { value: `${author} (${account})` };
+  if (author) return { value: author };
+  if (account) return { value: account, note: 'from its address' };
+  return null;
+}
+
 /**
  * What the case knows of `target`, read through the editor's handlers, nothing
  * fetched: `{ target, entity, item, title, reference, cited }`, with `missing` for a
@@ -166,7 +196,8 @@ export async function readCitation(view, target) {
     return { target, entity, item, title: '', reference: answer?.reference ?? '', cited: citedTimes(text, item, item.address) };
   }
   const lookup = handlers.lookup ?? null;
-  const said = await lookupAddress(target.url, { lookup, entities: info?.entities ?? [], words: target.words });
+  const words = linkWords(text, target.url);
+  const said = await lookupAddress(target.url, { lookup, entities: info?.entities ?? [], words: words.length ? words : [target.words] });
   const entity = said.item?.id && info ? resolve(info, said.item.id) : null;
   return { target, entity, item: said.item, title: said.title, reference: said.reference, cited: Math.max(1, citedTimes(text, said.item, target.url)) };
 }
@@ -232,7 +263,8 @@ export function cardModel(said, { canEdit = false, handlers = {} } = {}) {
   const rows = [];
   // what only the server reads (a post's author and day) is said missing only when it was asked
   if (item.full && (web || item.published)) rows.push(item.published ? { label: 'Posted', value: longDay(item.published) } : { label: 'Posted', value: 'Not recorded', tone: 'muted' });
-  if (item.full && (web || item.author)) rows.push(item.author ? { label: 'By', value: item.author } : { label: 'By', value: 'Not recorded', tone: 'muted' });
+  const by = byLine(item);
+  if (item.full && (web || by)) rows.push(by ? { label: 'By', ...by } : { label: 'By', value: 'Not recorded', tone: 'muted' });
   const arrived = ARRIVALS[item.arrival] ?? 'Seen';
   if (longDay(item.seen)) rows.push({ label: arrived, value: longDay(item.seen) });
   else if (web) rows.push({ label: 'Seen', value: 'Not recorded', tone: 'muted' });

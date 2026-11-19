@@ -7082,15 +7082,18 @@ inside it, shows a card under it of what the case knows of what it cites
 (`lib/notes/editor/citationCard.js`): its kind, site and name, a picture's or a proof's
 thumbnail, then **Posted**, **By**, **Seen** (*Made* for a proof, *Captured* for a map
 capture), **Archived** with the copy's day and host, the SHA-256 of a file, and how
-often this note cites it, chips and links to the same page alike. A post with no author
-on record says *Not recorded* rather than leave a gap. A written link the case lacks
-says *Not in the case* and *Not archived*, both amber, and an item gone says *No longer
-in the case.* and nothing more. Its actions: **Open** the item (*Open in Geo Proof*
-where a tool reopens it), **Open page** and **Archived copy** in a new tab, **Copy
-reference** (its entry as the list of sources prints it, read off `GET /sources/item`
-for a chip and `/sources/lookup` for a link), **Edit link** (the Link field, on the
-drawn page) and, for a page the case lacks, **Bookmark it**, which files it, seen that
-day, and leaves the note as written. The card fetches nothing, and a page opens only on
+often this note cites it, chips and links to the same page alike. **By** is the author
+on record, with the account an X or Telegram address names, as the academic list leads
+with them; with no author on record, that account, *from its address*; *Not recorded*
+only when neither says. A written link the case lacks says *Not in the case* and *Not
+archived*, both amber, and an item gone says *No longer in the case.* and nothing more.
+Its actions: **Open** the item (*Open in Geo Proof* where a tool reopens it), **Open
+page** and **Archived copy** in a new tab, **Copy reference** (its entry as this note's
+list of sources prints it, Academic, Web or Short by its style, each linked stretch
+followed by its address; read off `GET /sources/item` for a chip and `/sources/lookup`
+for a link, told the note and the words of its links), **Edit link** (the Link field,
+on the drawn page) and, for a page the case lacks, **Bookmark it**, which files it, seen
+that day, and leaves the note as written. The card fetches nothing, and a page opens only on
 a press. It reads the same in a drawn table or aligned block and in the raw Markdown,
 over `[[entity:…|…]]` and `[words](https://…)`. With the cursor in it, Tab walks into
 its actions, the arrows along them, and Escape gives the keys back; a screen reader is

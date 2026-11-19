@@ -28,12 +28,16 @@ describe('a link looked up in the case', () => {
     expect(get).toHaveBeenCalledWith('/api/cases/c1/sources/lookup?url=https%3A%2F%2Fexample.org%2Fa&title=Strike+%26+port');
   });
 
-  it('passes on the words a written link shows, which name the page in its entry, and asks a chip\'s item by its id', async () => {
+  it('passes on the words the note\'s links show and the note whose style writes the entry, and asks a chip\'s item by its id', async () => {
     const get = vi.fn(async () => ({}));
     await lookupSource('c1', 'https://example.org/a', { get, words: 'BBC, 5 Oct' });
     expect(get).toHaveBeenCalledWith('/api/cases/c1/sources/lookup?url=https%3A%2F%2Fexample.org%2Fa&words=BBC%2C+5+Oct');
+    await lookupSource('c1', 'https://example.org/a', { get, words: ['BBC, 5 Oct', 'Port shut'], note: 'n1' });
+    expect(get).toHaveBeenLastCalledWith('/api/cases/c1/sources/lookup?url=https%3A%2F%2Fexample.org%2Fa&words=BBC%2C+5+Oct&words=Port+shut&note=n1');
     await sourceItem('c1', 'e_12', { get });
     expect(get).toHaveBeenLastCalledWith('/api/cases/c1/sources/item?id=e_12');
+    await sourceItem('c1', 'e_12', { get, note: 'case' });
+    expect(get).toHaveBeenLastCalledWith('/api/cases/c1/sources/item?id=e_12&note=case');
   });
 
   it('is only read when it is an address', () => {

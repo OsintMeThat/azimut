@@ -1036,19 +1036,30 @@ def entry_text(parts: Iterable[Part]) -> str:
     return "".join(part.text for part in parts)
 
 
-def reference(source: Source) -> str:
-    """One entry of the list of sources as a line of plain text, for the citation card
-    to copy: its label and what `details` says, then its addresses and its fingerprint,
-    each as the PDF's list prints it. Today's form, the one the list has; a sources
-    style the note's look chooses writes its own form here."""
-    head = " · ".join((source.label or source.host or "Untitled", *details(source)))
-    said = [f"{head}."]
-    if source.address:
-        said.append(source.address)
-    if source.archive and source.archive != source.address:
-        said.append(f"Archive: {source.archive}")
-    if source.posted and source.posted not in (source.address, source.archive):
-        said.append(f"Posted: {source.posted}")
+def reference(source: Source, style: str = "short") -> str:
+    """One entry of the list of sources as a line of plain text, written in ``style`` as
+    the note's list writes it, for the citation card to copy. `short`: its label and what
+    `details` says, then its addresses. `academic` and `web`: as `entry` writes them, each
+    linked stretch followed by its address, which plain text cannot carry. A capture's
+    check pages and a file's fingerprint close it, as they print under every entry."""
+    if style in ("academic", "web"):
+        words: list[str] = []
+        for part in entry(source, style):
+            words.append(part.text)
+            if part.link and part.kind in ("title", "link") and part.link != part.text:
+                words.append(f" ({part.link})")
+        said = ["".join(words)]
+        if style == "web" and source.posted and source.posted not in (source.address, source.archive):
+            said.append(f"Posted: {source.posted}")
+    else:
+        head = " · ".join((source.label or source.host or "Untitled", *details(source)))
+        said = [f"{head}."]
+        if source.address:
+            said.append(source.address)
+        if source.archive and source.archive != source.address:
+            said.append(f"Archive: {source.archive}")
+        if source.posted and source.posted not in (source.address, source.archive):
+            said.append(f"Posted: {source.posted}")
     said.extend(f"{site}: {address}" for site, address in source.verify)
     if source.sha256:
         said.append(f"SHA-256 {source.sha256}")

@@ -163,10 +163,10 @@
     image: (file) => upload(file),
     url: (url, from, to) => offerBookmark(url, from, to),
     // the Link field and the citation card ask the case what it holds at an address, and can file one as a bookmark; nothing is fetched
-    get lookup() { return template || !caseId ? null : (url, words) => lookupSource(caseId, url, { words }); },
+    get lookup() { return template || !caseId ? null : (url, words) => lookupSource(caseId, url, { words, note: ownId }); },
     get bookmark() { return template || !caseId ? null : (url, title) => fileBookmark(url, title); },
     // what the case knows of the item a chip cites, for the citation card
-    get source() { return template || !caseId ? null : (id) => sourceItem(caseId, id); },
+    get source() { return template || !caseId ? null : (id) => sourceItem(caseId, id, { note: ownId }); },
     media: (event, at) => dropMedia(event, at),
     opener: (entity) => (template || !tools ? null : openerFor(entity)),
     sourceable: (entity) => (template || !caseId ? false : canStateSourceOf(caseId, entity)),
