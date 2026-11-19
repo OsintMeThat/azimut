@@ -130,7 +130,7 @@ describe('the Look panel', () => {
     expect([...panel().querySelectorAll('.include .switch input')].every((input) => input.checked)).toBe(true);
     expect(row('limits').textContent).toContain("Report's own");
     expect(row('sources_style').querySelector('[aria-checked="true"]').textContent).toBe('Academic');
-    expect(row('link_check').querySelector('[aria-checked="true"]').textContent).toBe('Each link');
+    expect(row('link_check').querySelector('[aria-checked="true"]').textContent).toBe('One line');
     row('limits').querySelector('input').click();
     flushSync();
     expect(changes.at(-1).annexes).toEqual({ limits: 'off' });

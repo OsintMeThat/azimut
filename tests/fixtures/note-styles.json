@@ -17,7 +17,7 @@
     "method": true,
     "limits": true,
     "editions": true,
-    "link_check": "each"
+    "link_check": "grouped"
   },
   "brief": {
     "sources": true,

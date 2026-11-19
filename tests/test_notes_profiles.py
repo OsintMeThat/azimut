@@ -59,7 +59,7 @@ def test_the_frontend_reads_the_same_defaults_the_documents_print():
 def test_each_style_carries_what_the_study_settled():
     plain, report, article = (notelook.PROFILES[name] for name in ("plain", "report", "article"))
     assert not plain.sources and not any(plain.annex(key) for key in notelook.ANNEXES)
-    assert report.sources_style == "academic" and report.link_check == "each"
+    assert report.sources_style == "academic" and report.link_check == "grouped"
     assert all(report.annex(key) for key in notelook.ANNEXES)
     assert article.sources_style == "web" and article.credits and article.editions and not article.method
     for style in ("brief", "journal"):
@@ -379,9 +379,9 @@ def test_wordpress_writes_the_same_sources_and_annexes(sourced):
 LINKS = "# T\n\nSee [one](https://example.org/a), [two](https://example.org/b) and [three](https://example.net/c).\n"
 
 
-def test_a_report_checks_each_link_and_a_brief_groups_them(tmp_path):
+def test_a_look_asking_each_link_lists_them_and_every_style_groups_them_by_default(tmp_path):
     case = IndexedCase(tmp_path, dict(UNRELATED))
-    each = notes_pdf.render(case, title="T", text=LINKS, look=look(style="report"))
+    each = notes_pdf.render(case, title="T", text=LINKS, look=look(style="report", link_check="each"))
     unarchived = [text for text, kind in zip(each.warnings, each.warning_kinds) if kind == notes_markdown.UNARCHIVED]
     assert unarchived == ["“one” has no archived copy.", "“two” has no archived copy.", "“three” has no archived copy."]
     assert all(line == 2 for line, kind in zip(each.warning_lines, each.warning_kinds) if kind == notes_markdown.UNSEEN)
@@ -389,8 +389,8 @@ def test_a_report_checks_each_link_and_a_brief_groups_them(tmp_path):
     assert [text for text, kind in zip(grouped.warnings, grouped.warning_kinds) if kind == notes_markdown.UNARCHIVED] == [
         "3 outside links have no archived copy."]
     assert len(grouped.listed[notes_markdown.UNARCHIVED]) == 3
-    loose = notes_pdf.render(case, title="T", text=LINKS, look=look(style="report", link_check="grouped"))
-    assert sum(kind == notes_markdown.UNARCHIVED for kind in loose.warning_kinds) == 1
+    report = notes_pdf.render(case, title="T", text=LINKS, look=look(style="report"))
+    assert sum(kind == notes_markdown.UNARCHIVED for kind in report.warning_kinds) == 1
 
 
 # -- one golden per style -----------------------------------------------------------------------

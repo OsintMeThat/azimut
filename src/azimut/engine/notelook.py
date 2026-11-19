@@ -125,13 +125,14 @@ class Profile:
 
 #: What each style carries when nobody changed it: the one place Azimut decides it.
 #: Plain is the document notes always printed as. A report is read as a paper: its
-#: sources academic, every annex, every link checked. The Web article owes its
+#: sources academic, every annex, its links' warnings grouped with each link one press
+#: away (a long article would otherwise list a hundred lines). The Web article owes its
 #: readers the credits and its corrections. The brief and the journal stay lean.
 PROFILES: dict[str, Profile] = {
     "plain": Profile(sources=False, sources_style="short", geolocations=False, credits=False, method=False,
                      limits=False, editions=False, link_check="grouped"),
     "report": Profile(sources=True, sources_style="academic", geolocations=True, credits=True, method=True,
-                      limits=True, editions=True, link_check="each"),
+                      limits=True, editions=True, link_check="grouped"),
     "brief": Profile(sources=True, sources_style="short", geolocations=False, credits=False, method=False,
                      limits=False, editions=False, link_check="grouped"),
     "journal": Profile(sources=True, sources_style="short", geolocations=False, credits=False, method=False,

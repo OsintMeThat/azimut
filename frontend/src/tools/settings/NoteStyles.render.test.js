@@ -50,7 +50,7 @@ describe('Settings › Publishing › Styles', () => {
     expect(cells('method').map((cell) => cell.querySelector('input').checked)).toEqual([true, false, false, false, false]);
     expect(cells('credits').map((cell) => cell.querySelector('input').checked)).toEqual([true, true, false, false, false]);
     expect(cells('sources_style').map((cell) => cell.querySelector('select').value)).toEqual(['academic', 'web', 'short', 'short', 'short']);
-    expect(cells('link_check').map((cell) => cell.querySelector('select').value)).toEqual(['each', 'grouped', 'grouped', 'grouped', 'grouped']);
+    expect(cells('link_check').map((cell) => cell.querySelector('select').value)).toEqual(['grouped', 'grouped', 'grouped', 'grouped', 'grouped']);
     expect(target.querySelector('.foot button').disabled).toBe(true);
   });
 

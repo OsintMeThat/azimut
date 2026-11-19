@@ -82,7 +82,7 @@ export const STYLE_DEFAULTS = Object.freeze({
   plain: Object.freeze({ sources: false, sources_style: 'short', ...no, link_check: 'grouped' }),
   report: Object.freeze({
     sources: true, sources_style: 'academic', geolocations: true, credits: true, method: true, limits: true, editions: true,
-    link_check: 'each',
+    link_check: 'grouped',
   }),
   brief: Object.freeze({ sources: true, sources_style: 'short', ...no, link_check: 'grouped' }),
   journal: Object.freeze({ sources: true, sources_style: 'short', ...no, link_check: 'grouped' }),
