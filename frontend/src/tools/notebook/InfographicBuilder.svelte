@@ -192,7 +192,7 @@
   }
 </script>
 
-<aside class="ib" aria-label="Infographic builder" data-guide="notebook.infographic">
+<aside class="ib" aria-label="Infographic builder">
   <header class="ib-bar">
     <Icon name="grid" size={15} />
     <h2 class="ib-name">Infographic</h2>

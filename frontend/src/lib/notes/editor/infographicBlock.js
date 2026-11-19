@@ -52,12 +52,14 @@ function el(tag, className, text) {
 }
 
 /** The block drawn: a bar saying what it is, then the page with a press-able box over each panel. */
-function drawInfographic(box, widget) {
+function drawInfographic(box, widget, view) {
   const read = readInfographic(widget.source);
+  // the builder is the Notebook's: where there is none (the note pinned to the side), the page is only drawn
+  const builds = widget.writable && Boolean(view?.state.facet(noteHandlers).infographic);
   const head = el('div', 'cm-ig-head');
   const count = read.panels.length;
   head.append(el('span', 'cm-ig-said', `Infographic · ${count} panel${count === 1 ? '' : 's'}`));
-  if (widget.writable) {
+  if (builds) {
     const edit = el('button', 'cm-ig-edit', 'Edit');
     edit.type = 'button';
     edit.dataset.igEdit = 'true';
@@ -91,13 +93,13 @@ function drawInfographic(box, widget) {
       hit.type = 'button';
       hit.dataset.igPanel = String(panel.index);
       const kind = panel.chart ? `${panel.chart[0].toUpperCase()}${panel.chart.slice(1)}` : PANEL_WORDS[panel.kind] ?? panel.kind;
-      hit.title = `${panel.title ? `${panel.title} · ` : ''}${kind} · ${panel.width === 'wide' ? 'Wide' : 'Half'} · press to edit`;
+      hit.title = `${panel.title ? `${panel.title} · ` : ''}${kind} · ${panel.width === 'wide' ? 'Wide' : 'Half'}${builds ? ' · press to edit' : ''}`;
       hit.setAttribute('aria-label', hit.title);
       hit.style.left = `${(panel.x / drawn.width) * 100}%`;
       hit.style.top = `${(panel.y / drawn.height) * 100}%`;
       hit.style.width = `${(panel.w / drawn.width) * 100}%`;
       hit.style.height = `${(panel.h / drawn.height) * 100}%`;
-      if (!widget.writable) hit.disabled = true;
+      if (!builds) hit.disabled = true;
       frame.append(hit);
     }
     page.append(frame);
@@ -145,7 +147,7 @@ registerBlock({
   fence: INFOGRAPHIC_OPEN,
   close: INFOGRAPHIC_CLOSE,
   widget: blockWidget,
-  draw: (box, widget) => drawInfographic(box, widget),
+  draw: (box, widget, view) => drawInfographic(box, widget, view),
   bar: '.cm-ig-edit, .cm-ig-hit',
   press,
   atomic: true,
