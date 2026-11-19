@@ -55,6 +55,10 @@ from its table in the note's look and the case's colours (`engine/notecharts.py`
 captioned as every figure is: its title under it, numbered when the look numbers
 figures. With `show: chart and table` its table prints under it.
 
+**Infographics.** A `:::: infographic` block prints on a page of its own, laid out in its
+two columns as one picture (`engine/notes_infographic.py`), at 300 dpi across the frame.
+A page taller than a sheet breaks between its rows of panels, never through one.
+
 **Sources stay sources.** A PDF is read away from the case, so what the case knows
 about where something came from is printed rather than kept behind the app: a
 reference to a record with a web address links to it, a picture says under its
@@ -105,7 +109,7 @@ from markdown_it.token import Token
 from PIL import Image as PILImage
 from PIL import ImageOps, UnidentifiedImageError
 
-from . import noteannexes, notefill, notes_style, notesources, pdffonts, thumbnails
+from . import noteannexes, notefill, notes_charts, notes_style, notesources, pdffonts, thumbnails
 from .notelook import DEFAULT as DEFAULT_LOOK
 from .notelook import NoteLook
 from .notes_markdown import (
@@ -869,6 +873,8 @@ class _Builder:
         self._base = 1
         self._counters = [0] * NUMBERED_LEVELS
         self._figures = 0
+        #: An infographic was drawn last: whatever comes next starts a page, so it keeps its own.
+        self._page_after = False
         self._outlined = not self.theme.plain or self.look.toc
         #: The brief's verdict: the quote lifted to the top, and the tokens it is in.
         self._promoted: Token | None = None
@@ -1617,6 +1623,9 @@ class _Builder:
             if token is self._promoted:
                 index = _past(tokens, index)
                 continue
+            if self._page_after:
+                self._page_after = False
+                self._page_break()
             handler = getattr(self, f"_on_{token.type}", None)
             if handler is None:
                 index += 1
@@ -1994,6 +2003,41 @@ class _Builder:
                 self._walk(parse(table.text()), 0, align, stop=None)
             finally:
                 self._block_line = block_line
+        return index + 1
+
+    def _on_az_infographic(self, tokens: list[Token], index: int, align: Align) -> int:
+        """A `:::: infographic` block on a page of its own: its panels in two columns, its
+        title band and its one source line, drawn as one picture across the frame and cut
+        between rows of panels when it is taller than the page."""
+        from . import notes_infographic
+
+        note_text = "\n".join(piece.text for piece in self._pieces if piece.kind == "text")
+        page = notes_infographic.read(self.case, tokens[index].content, look=self.look, note_text=note_text,
+                                      light=self.light)
+        line = self._line
+        for message, kind, offset in page.warnings:
+            self._warn(message, line if self._fixed or offset is None else line + offset,
+                       kind if kind in WARNING_KINDS else OTHER)
+        if not page.panels:
+            self._aside(notes_infographic.NO_PANEL)
+            return index + 1
+        pdf = self.pdf
+        self._page_break()
+        frame = self._frame()
+        room = min(self.theme.room, pdf.page_break_trigger - pdf.body_top - 2.0)
+        pixels = CHART_PIXELS_LIGHT if self.light else CHART_PIXELS
+        parts = notes_infographic.chunks(page, room * page.width / frame)
+        for number, part in enumerate(parts):
+            if number:
+                pdf.add_page()
+            picture = notes_charts.render_png(part, round(pixels * part.width / page.width),
+                                              dpi=None if self.light else CHART_DPI)
+            with PILImage.open(BytesIO(picture)) as opened:
+                natural = opened.size
+            self._place(BytesIO(picture), natural, "100%", Align.C, ("", ""), framed=False,
+                        alt=page.alt if number == 0 else "")
+        # the page stays its own: what follows starts the next, and nothing prints a blank one
+        self._page_after = True
         return index + 1
 
     def _on_blockquote_open(self, tokens: list[Token], index: int, align: Align) -> int:

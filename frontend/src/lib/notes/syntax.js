@@ -189,6 +189,7 @@ export const SLASH_COMMANDS = [
   { id: 'table', label: 'Table', icon: 'table', words: 'grid columns rows spreadsheet csv file', block: TABLE, action: 'table', hint: 'Rows by columns, or from a file' },
   { id: 'chart', label: 'Chart', icon: 'chart', words: 'chart graph bars pie donut pictograms waffle timeline figures plot', action: 'chart', hint: 'Drawn from a table, picked by its picture' },
   { id: 'diagram', label: 'Diagram', icon: 'network', words: 'mermaid flowchart', block: DIAGRAM },
+  { id: 'infographic', label: 'Infographic', icon: 'grid', words: 'infographic poster page panels key figures pie donut columns pictograms waffle', action: 'newInfographic', hint: 'Charts, a map and words on one page', notes: true },
   { id: 'steps', label: 'Steps', icon: 'columns', words: 'stepper slides sequence carousel before after days', block: STEPS_BLOCK, hint: 'Pictures one at a time, in HTML' },
   { id: 'story', label: 'Story', icon: 'text', words: 'scrollytelling scroll narrative sticky zoom', block: STORY_BLOCK, hint: 'Words scroll beside a picture, in HTML' },
   { id: 'code', label: 'Code', icon: 'hash', words: 'code block monospace', block: '```\n\n```', hint: 'Kept as typed, in a fixed-width face' },
@@ -222,7 +223,7 @@ export const INSERT_SECTIONS = [
   { id: 'media', label: 'Media', ids: ['picture', 'upload', 'steps', 'story', 'my-logo'] },
   { id: 'case', label: 'From the case', ids: ['cite', 'map', 'include'] },
   { id: 'layout', label: 'Layout', ids: ['divider', 'pagebreak', 'cover', 'align', 'corner', 'signature', 'field'] },
-  { id: 'figures', label: 'Figures', ids: ['table', 'chart', 'diagram'] },
+  { id: 'figures', label: 'Figures', ids: ['table', 'chart', 'diagram', 'infographic'] },
 ];
 
 /** The line under an entry's name, for the entries that carry none of their own. */

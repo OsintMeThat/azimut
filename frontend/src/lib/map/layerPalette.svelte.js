@@ -41,6 +41,20 @@ export function createLayerPalette({ api = defaultApi } = {}) {
       if (owner === caseId) { colours = body.colours; icons = body.icons ?? icons; }
       return body.colours;
     },
+    /**
+     * "Keep these colours for the case": the values a chart or a page coloured on its own,
+     * `[{ value, colour }]`, named in the case's palette after the names it holds, a name it
+     * already holds keeping its colour. Every chart, map and layer of the case then paints them
+     * the same. Answers what the case keeps.
+     */
+    async keep(caseId, values) {
+      const kept = [...colours];
+      for (const { value, colour } of values) {
+        const name = String(value ?? '').trim();
+        if (name && !kept.some((entry) => entry.name.toLowerCase() === name.toLowerCase())) kept.push({ name, colour: String(colour).toLowerCase() });
+      }
+      return this.save(caseId, kept);
+    },
   };
 }
 

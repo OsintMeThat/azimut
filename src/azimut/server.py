@@ -355,7 +355,7 @@ def create_app() -> FastAPI:
     from .api import (
         analysis_views, analyzers, cases, compare, drafts, events, figures, files, folders, horizon,
         horizon_buildings, horizon_finds, horizon_views, horizon_work, icons, impact, ingest, inspect, mapplates, maplayers, media,
-        notecharts, notemaps, notes, notes_archive, plates, postclips,
+        notecharts, noteinfographics, notemaps, notes, notes_archive, plates, postclips,
         proofimports, proofs, publishing,
         proposals, satellite, settings, sheetproofs, sheets, templates, terrain,
     )
@@ -367,6 +367,7 @@ def create_app() -> FastAPI:
     app.include_router(analysis_views.router)
     app.include_router(notemaps.router)
     app.include_router(notecharts.router)
+    app.include_router(noteinfographics.router)
     app.include_router(notes.router)
     # Archive every link: the one note road that reaches the Internet Archive.
     app.include_router(notes_archive.router)

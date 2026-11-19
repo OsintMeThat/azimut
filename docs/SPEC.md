@@ -202,6 +202,11 @@ proof for publication.
 | ✅ **Tools into the note** | While a note is pinned to the side, Add and the tools' own menus put what they show in it in one press: a map view, point or measure, a Compare pair, a pinned Detect candidate, an Inspect frame, a collage, a proof with its points, a Timeline or Sheet table, a quoted post, a Map plate page or its days side by side, a Compare evolution sheet, an area of a Horizon view, Detect's kept table, a Timeline or Graph reading as a picture, a video's scenes as a table, a map captured with the extension's tools from its toast, or a source looked up in the case first; each picture filed once among Media's working files, credited, undoable, and reopened where it came from. |
 | ✅ **Note to Post** | To Post sends a note's public edition, or the passage selected, to Post as the pieces of a Free post thread; internal passages never leave, and what stays out is said once. |
 | ✅ **HTML report** | Writes a note as one self-contained page readable offline beside the PDF (a before/after swipe, playable clips, zoomable pictures, a citation's source on hover, verify links, the edition's hash), laid out as an article or as a story of held pictures. |
+| ✅ **Report on the web** | Writes a note as a folder ready to host, with its link card and the GitHub Pages steps, publishes it to the analyst's own GitHub Pages in one press, or sends it to WordPress as a draft. |
+| ✅ **Maps in reports** | Puts the case's layers, a Map plate or a period's proofs in a note as a map read day by day, its marks opening their cards: offline in the file, live over OpenFreeMap once hosted, a picture in the PDF. |
+| ✅ **Charts and infographics** | Draws a note's table as one of fourteen kinds of chart picked by its picture, in the case's colours and saying "at least" where a count is a floor, and lays charts, a map and key figures out as an infographic page or one picture. |
+| ✅ **Writing without Markdown** | Edits a note on its drawn page: a bubble on selected words, a handle on every block, one insert menu, tables as grids that take a spreadsheet's paste, pictures and stories set by hand, and no syntax shown while typing. |
+| ✅ **Sources fit to cite** | Finds the case item behind a written link, writes sources academic, web or short with the annexes a report, a web article or a brief carries, archives a note's links in one press, and shows what the case knows of a citation on hover. |
 | ✅ **Notes in the extension** | A folding panel in the extension holds the note; its Add, a right-click or Alt+Shift+S cites the page (or the post), quotes the selected words with a link to that passage, or puts a map capture in. |
 | ✅ **One-press extension** | The toolbar button opens what the page is for: the map panel over a map, Capture first and the scenes to geolocate listed, the note beside any other page with Save this page; a pairing popup only until paired. |
 | ✅ **Report editions** | Marks passages internal, prints a report as an internal or a public edition that never carries one, and keeps every PDF it wrote with its fingerprint, listed and checked from the note. |
@@ -254,8 +259,8 @@ supplies, since a ridge ends the day well before the flat horizon does.
 | Tool | What it does |
 |------|--------------|
 | **One sky frame** | Find's skyline, Camera Resection and Sky Clock read in one azimuth and elevation frame, so the sun and moon times the relief hides split the places a matching skyline leaves tied. |
-| **Evidence Locker** | Track SHA-256, timestamps, source and notes; archive with Wayback; export `evidence.jsonl` under a hash-chained manifest, so any later edit to an exported file is detectable. |
-| **Report Builder** | Takes a report past the HTML page: an interactive map of a period's geolocations, each point opening its clip, day, source and proof, exported as a folder a static host such as GitHub Pages serves as it is, so it can be dropped into an article; and a web article as a WordPress draft, a copy for Substack or Medium, or a package for any site. Never published by itself, never with an internal passage. |
+| **Evidence Locker** | Track SHA-256, timestamps, source and notes; export `evidence.jsonl` under a hash-chained manifest, so any later edit to an exported file is detectable. |
+| **Substack and Medium copy** | Copies a note's public edition as rich text to paste into Substack or Medium, which offer an app no way in. |
 | **Case Sync (Git)** | Push a case to a private or public Git remote, pull it back, and diff two revisions, so two analysts can work the same case. |
 
 Toward v4: archive-on-download and a Wayback CDX snapshot timeline with diff; web-page save
@@ -294,10 +299,8 @@ stops making sense.
 - **Highlight by category in Geo Proof:** paint or lasso an area by hand, one colour per category, with an outline, a light tint, a label and a legend; greying the rest is an option, off by default.
 - **In-app OSINT assistant:** local chat and vision suggestions for analyst confirmation, with no cloud or API key by default.
 - **Geographic playback:** step through dated case items on the map instead of showing one fixed Timeline window.
-- **Notes, next:** a preview on hovering a chip.
 - **Map plate, next:** Make a post from a plate: a video over a chosen period for one layer, from a template, handed to the Post composer.
 - **Report, next:** an optional Azimut mark in the footer.
-- **A story on a live map:** the Story layout's held picture becomes a map that moves to each view, proof or day as the reader scrolls, with filed captures where a licence keeps live tiles out and no motion for a reader who turned it off.
 - **Signed PDFs:** sign the finished file (PAdES, an incremental CMS update, e.g. pyHanko once its wheels are checked on the three OSes) with an X.509 key the analyst holds, kept 0600; a self-signed key proves only that the file is unchanged since it was signed, while a reader-trusted identity needs a CA certificate and a timestamp server, a network call.
 - **A report from a period:** every geolocation of a period written into a note through a per-item layout (card, table, one per page).
 - **Interactive map plate:** a map of a period's located videos, each point playing its clip, made without drawing it by hand.

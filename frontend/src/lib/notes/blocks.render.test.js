@@ -284,10 +284,10 @@ describe('the keyboard at a picked block', () => {
     key('Tab');
     key('Tab', { shiftKey: true });
     expect(text()).toBe('| A | B |\n| --- | --- |\n| 1 | 2 |');
-    // in words Tab is the editor's own
+    // in words Tab does nothing on the drawn page: four spaces would turn them into code (an item is nested, `editor/lineKeys.test.js`)
     writing('Words', 0);
     key('Tab');
-    expect(text()).not.toBe('Words');
+    expect(text()).toBe('Words');
   });
 
   it('removes the whole block on Backspace, in one step Undo takes back', () => {

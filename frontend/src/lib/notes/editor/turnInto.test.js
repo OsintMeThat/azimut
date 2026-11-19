@@ -43,6 +43,16 @@ function turned(text, start, shape) {
 }
 
 describe('Turn into', () => {
+  it('escapes words that would read as a mark once they start a line, so a heading numbered 1. stays words', () => {
+    const note = 'Intro\n\n## 1. What it cost\n\nAfter';
+    expect(turned(note, '## 1.', 'paragraph')).toBe('Intro\n\n1\\. What it cost\n\nAfter');
+    expect(turned(note, '## 1.', 'bullet')).toBe('Intro\n\n- 1\\. What it cost\n\nAfter');
+    expect(turned(note, '## 1.', 'quote')).toBe('Intro\n\n> 1\\. What it cost\n\nAfter');
+    expect(turned('Intro\n\n## - not a list\n\nAfter', '## -', 'paragraph')).toBe('Intro\n\n\\- not a list\n\nAfter');
+    // a heading keeps its words as they are: Markdown reads no list inside one
+    expect(turned('Intro\n\n1\\. What it cost\n\nAfter', '1\\.', 'h2')).toBe('Intro\n\n## 1\\. What it cost\n\nAfter');
+  });
+
   it('turns a paragraph into each kind, keeping its words', () => {
     const note = 'Before\n\nThe convoy left at dawn.\n\nAfter';
     const cases = {

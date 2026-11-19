@@ -229,10 +229,13 @@ const itemsOf = (list) => [...list.querySelectorAll(':scope > .cm-handle-item')]
  * Open the menu of `block` beside `anchor` (the handle's rect). A choice dispatches
  * its one transaction and gives the keyboard back to the editor, as Escape and a
  * press outside do. `copied(text)` is told what a copy put on the clipboard; `close()`
- * is called once the menu is gone. Answers the menu's `close`.
+ * is called once the menu is gone. `entries` stand in for the block's whole menu (a
+ * callout's name offers its kinds alone). Answers the menu's `close`.
  */
-export function openBlockMenu(view, block, { anchor, label = 'Block menu', copied = () => {}, closed = () => {}, keyboard = false } = {}) {
-  const entries = blockActions(view.state, block);
+export function openBlockMenu(view, block, {
+  anchor, label = 'Block menu', copied = () => {}, closed = () => {}, keyboard = false, entries: given = null,
+} = {}) {
+  const entries = given ?? blockActions(view.state, block);
   const root = menuList(entries, label);
   root.classList.add('cm-handle-root');
   view.dom.append(root);

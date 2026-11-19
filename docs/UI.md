@@ -7012,10 +7012,9 @@ the order they were picked, in the Report look with a cover and a contents page,
 opens it beside its pages.
 
 **A note, written in place.** The note is drawn as it reads while it is typed
-(CodeMirror 6, `lib/notes/liveMarkdown.js`, each kind of drawn block a module of `lib/notes/editor/`). A heading is set large, emphasis and links are styled, bullets are dots, `- [ ]` is a box to tick,
-and the marks come back on the line the cursor is on. Words selected stay drawn, and
-while the mouse is pressed the lines hold as they were, so nothing moves under the
-pointer. A case reference is a chip that
+(CodeMirror 6, `lib/notes/liveMarkdown.js`, each kind of drawn block a module of `lib/notes/editor/`). A heading is set large, emphasis and links are styled, bullets are dots, numbers are a list's own, `- [ ]` is a box to tick,
+and a callout is headed by its name. A divider is a line across the page, picked and
+deleted whole like a page break. A case reference is a chip that
 opens what it names; a picture, a table, a diagram, an aligned block, a block of
 steps or a story, an HTML block, a chapter and the page-break and cover lines are drawn
 whole and stay drawn. Steps show their pictures numbered in a row, each with its
@@ -7034,6 +7033,42 @@ every open editor following it. A callout opens a
 quote as `> [!confirmed]`, `[!unverified]`, `[!lead]`, `[!note]`, `[!warning]` or
 `[!limits]` (what the evidence cannot say), in its colour, in the PDF too. Decimal coordinates get a ⌖ that shows them on the map.
 **@** and a few letters offer the case's records and write a chip.
+
+**Writing with no Markdown on the page.** No line shows its Markdown, the one being
+written in included, so nothing moves as the caret goes from line to line
+(`editor/caret.js`, `editor/lineKeys.js`). What the keys do follows the page:
+- **Marks.** The caret steps over the `**`, `` ` `` and `](address)` put away as if they
+  were not there, and never stands among a line's own marks. Typing at the end of bold,
+  italic or strikethrough carries it, at the end of a link or code it does not, and at
+  the start of a line it takes the first word's. Ctrl+B, Ctrl+I or Ctrl+E with nothing
+  selected steps out of the mark the caret is at (or back in), or holds it for the words
+  typed next. Backspace and Delete take the character that shows, never half a mark, a
+  chip whole, and the marks of words deleted entirely go with them.
+- **Links.** A link is its words; its address shows on hover. A press puts the caret in
+  the words, a press with Ctrl (⌘) opens the page in a tab, or goes to the heading a
+  `#` link names, and Ctrl+K edits it in the Link field.
+- **Lines.** Enter continues a list, a quote or a callout; on an empty item, or the empty
+  last line of a quote, it leaves them, with the blank line Markdown needs so what is
+  written next stays out; at the start of a heading or an item it opens a line above.
+  Backspace at the start of a line's words turns a heading into a paragraph, takes an
+  item out of its list (out of one level when nested), joins a quote's line to the one
+  above and turns a quote or a callout back into text, though never an internal passage
+  (its name's menu says Make public). At the end of a line Delete brings the next line's
+  words up. Tab and Shift+Tab nest an item under the one before and take it back out;
+  on any other line Tab does nothing, as four spaces would make words code. Each is one
+  Undo step.
+- **Shortcuts.** `## `, `- `, `1. `, `> `, `**words**` and `` `code` `` typed are drawn at
+  once, and stay as typed until the space or the closing mark that makes them; `[] `
+  makes a to-do, and a list started right under a line of words gets its blank line.
+- **A callout's name** opens its kinds, a plain quote, text and Mark internal; an
+  internal passage's opens Make public.
+- **Copy and paste.** A copy carries the Markdown of what is selected (a mark the
+  selection cuts closed again) and the page it makes as HTML, so Word and Google Docs
+  keep the headings, bold, links and lists. A web page or a document pasted in is written
+  as Markdown (`editor/htmlMarkdown.js`); words alone, and a note's own copy, go in as
+  their text.
+- **The Markdown itself** is one switch away: Ctrl+Shift+M shows the whole note raw,
+  where every key is the plain editor's. Code blocks keep their fences, faint.
 
 **The insert menu.** **/**, the **+** in the left margin of the empty line being
 written, or the toolbar's **+** open one menu in five parts: **Text** (headings, lists,
@@ -7497,6 +7532,47 @@ thicker, a waffle's legend under it in a tall frame, circles and a pie in the mi
 Every choice writes its own line in the engine's order and is one Undo step. A press on a
 bar button picks the chart first, so the note stays where it is when a panel takes the
 keyboard. A double press or Enter opens its settings; a locked note shows the drawing.
+
+**Infographics.** A `:::: infographic` block is a page of panels read as one figure
+(`engine/notes_infographic.py`): a title band, then ordinary `::: chart` and `::: map` blocks
+and the words between them, in reading order, then one source line. Its four colons keep each
+panel's own syntax, so a panel moved out reads the same. Its own lines are only `kicker`,
+`title`, `standfirst`, `look` (report, book or dark, one for the page), `legend` (`each panel`
+to keep one legend a chart) and `widths` (each panel half or wide, in reading order; words, key
+figures and a timeline span the page unless it says otherwise). Half panels fill the shorter of
+two columns, so a tall panel stands beside two short ones; a wide panel starts below both.
+Charts that colour by the same column (Grade) share one legend at the top, every value kept; a
+value is one colour on the whole page, the case's first, else the first chart's; the sources of
+every panel and the map's imagery are gathered into one line. The honesty rules hold across it:
+each chart keeps its checks, a title band that says the figures are floors says it for every
+panel, and a title stating a number says *at least* when a panel counts a floor.
+
+`/` › **Infographic** (Figures) writes a starter from what the note holds: its key figures, its
+main chart, a donut and its map, each made from the note's own tables by the chart's kind
+picker, never numbers it does not hold; a note with none gets an empty page and a line saying
+how to fill it. The page is drawn
+in the note as the server draws it; a press on a panel or on **Edit** opens the builder beside
+the note: the title band, the panels (drag or Alt+↑/↓ to reorder, Half or Wide, × takes one out,
+**Add a panel** shows each table of the note drawn as every kind it fits by the chart's kind
+picker, the chart picked written as one under its table would be, its rows and `from:` with it,
+and the note's maps, with Words and Key figures to fill in; pressing a chart's row opens the
+chart's own settings card under it, title, count, by and colour, each choice written inside the
+page as one Undo), the look, **One legend for Grade, at the top**, the
+colours and where each comes from (*Keep these colours for the case* names them in the case's
+palette), what the check says, **Export as a picture** (X 16:9, 4:5, 1:1, the PDF page, SVG)
+and **To Post**. Each press writes the block's text as one change, so one Undo.
+
+The PDF prints it on a page of its own as one picture at 300 dpi, broken between rows of panels
+when it is taller than a sheet; what follows starts the next page. The HTML report lays the
+panels in the same two columns, each chart its own SVG (drawn again for a phone), the map the
+page's own (live in a web folder that makes maps live), the words as text; a phone reads one
+column in the text's order. A web folder also carries the page as one picture, a press away.
+WordPress takes one picture of the page, its alt text the band, every panel and the sources,
+then each chart's numbers under *The numbers*. To Post hands one picture at 16:9, filed once.
+A picture of a fixed shape sets the rows side by side in strips until the page is as near that
+shape as it gets, and pads the rest with paper: nothing cut. `POST /notes/infographic` draws a
+block for the builder (SVG, panel boxes, legend, check), as an SVG file or as a picture, and
+writes nothing.
 
 **To Post.** In the open note's ⋯, kept out of the header, *To Post* opens Post on a Free post thread made of the
 note's public edition, or of the stretch selected in it, which its title then says;
