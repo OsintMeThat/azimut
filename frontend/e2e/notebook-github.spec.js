@@ -137,7 +137,8 @@ test('a note goes live on GitHub Pages on one press, and its editions list the p
   await expect(open).toHaveAttribute('href', ADDRESS);
   await expect(open).toHaveAttribute('target', '_blank');
   await expect(dialog.getByRole('button', { name: 'Copy link' })).toBeVisible();
-  expect(state.published).toEqual([{ short_name: 'port-strike', diagrams: {}, round_pov: false, changes: '' }]);
+  // its maps go live online unless the dialog's Keep its maps offline is ticked
+  expect(state.published).toEqual([{ short_name: 'port-strike', diagrams: {}, round_pov: false, changes: '', offline_maps: false }]);
   await shoot(page, 'dialog-github-live');
   await dialog.getByRole('button', { name: 'Done' }).click();
 
