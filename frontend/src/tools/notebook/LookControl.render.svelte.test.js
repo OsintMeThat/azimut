@@ -18,6 +18,7 @@ vi.mock('../../lib/notes/noteFonts.js', () => ({
 }));
 
 const { default: LookControl } = await import('./LookControl.svelte');
+const { prefs } = await import('../../lib/state.svelte.js');
 
 /**
  * The Look panel, mounted: five tabs, one section at a time, and each setting hands
@@ -86,7 +87,7 @@ describe('the Look panel', () => {
     expect([...dialog.querySelectorAll('[role="tab"]')].map((item) => item.textContent.trim()))
       .toEqual(['Style', 'Text', 'Page', 'Cover', 'Header & footer']);
     expect(dialog.querySelector('[role="tab"][aria-selected="true"]').textContent.trim()).toBe('Style');
-    expect(dialog.querySelectorAll('.style-card')).toHaveLength(4);
+    expect(dialog.querySelectorAll('.style-card')).toHaveLength(5);
     // the other sections are not drawn
     for (const words of ['Typeface', 'Accent', 'Marking', 'Subtitle', 'Footer']) expect(dialog.textContent).not.toContain(words);
     svelte.unmount(fresh);
@@ -94,15 +95,73 @@ describe('the Look panel', () => {
     dialog.remove();
   });
 
-  it('puts the three switches of the document under the style cards, all as switches', () => {
+  it('puts the two switches of the document under the For row, then what it includes, all as switches', () => {
     openPanel();
     goTo('Style');
-    const group = panel().querySelector('.group');
-    expect(group.getAttribute('aria-label')).toBe('In the document');
-    expect([...group.querySelectorAll('label.switch')].map((label) => label.textContent.trim()))
-      .toEqual(['Contents page', 'Numbered headings', 'List sources at the end']);
-    expect([...group.querySelectorAll('input')].every((input) => input.getAttribute('role') === 'switch')).toBe(true);
+    const [document_, includes] = panel().querySelectorAll('.group');
+    expect(document_.getAttribute('aria-label')).toBe('In the document');
+    expect([...document_.querySelectorAll('label.switch')].map((label) => label.textContent.trim()))
+      .toEqual(['Contents page', 'Numbered headings']);
+    expect(includes.getAttribute('aria-label')).toBe('What it includes');
+    expect([...includes.querySelectorAll('label.switch')].map((label) => label.textContent.replace(/\s+/g, ' ').trim())).toEqual([
+      'Sources numbered, linked', 'Geolocations every proof cited', 'Credits imagery, maps, footage',
+      'How this was made generated facts', 'Limits the Limits boxes', 'Editions & corrections what changed',
+    ]);
     expect(panel().querySelector('input[type="checkbox"]:not([role="switch"])')).toBeNull();
+  });
+
+  it('lists what each style is for, in a line each, Report first and Plain last', () => {
+    openPanel();
+    goTo('Style');
+    const cards = [...panel().querySelectorAll('[role="radiogroup"][aria-label="For"] .style-card')];
+    expect(cards.map((card) => card.querySelector('.style-name').textContent)).toEqual(['Report', 'Web article', 'Brief', 'Journal', 'Plain']);
+    expect(cards.every((card) => card.querySelector('.style-note').textContent && card.title.includes(':'))).toBe(true);
+    cards[1].click();
+    flushSync();
+    expect(changes.at(-1).style).toBe('article');
+    expect(target.textContent).toContain('Web article');
+  });
+
+  it('shows what the style includes as its own, a change here marked with a Reset', () => {
+    props.look = normaliseLook({ style: 'report' });
+    openPanel();
+    goTo('Style');
+    const row = (key) => panel().querySelector(`[data-include="${key}"]`);
+    expect([...panel().querySelectorAll('.include .switch input')].every((input) => input.checked)).toBe(true);
+    expect(row('limits').textContent).toContain("Report's own");
+    expect(row('sources_style').querySelector('[aria-checked="true"]').textContent).toBe('Academic');
+    expect(row('link_check').querySelector('[aria-checked="true"]').textContent).toBe('One line');
+    row('limits').querySelector('input').click();
+    flushSync();
+    expect(changes.at(-1).annexes).toEqual({ limits: 'off' });
+    expect(row('limits').textContent).toContain('Changed here');
+    expect(tabNamed('Style').querySelector('.dot')).not.toBeNull();
+    row('limits').querySelector('.reset').click();
+    flushSync();
+    expect(changes.at(-1).annexes).toEqual({});
+    expect(row('limits').textContent).toContain("Report's own");
+    // a choice of the style's own is no change
+    [...row('sources_style').querySelectorAll('button')].find((button) => button.textContent === 'Web').click();
+    flushSync();
+    expect(changes.at(-1).sources_style).toBe('web');
+    [...row('sources_style').querySelectorAll('button')].find((button) => button.textContent === 'Academic').click();
+    flushSync();
+    expect(changes.at(-1).sources_style).toBe('');
+  });
+
+  it('reads the style\'s own from Settings, where it was changed for every note', () => {
+    prefs.noteStyles = { brief: { credits: true, link_check: 'each' } };
+    try {
+      props.look = normaliseLook({ style: 'brief' });
+      openPanel();
+      goTo('Style');
+      expect(panel().querySelector('[data-include="credits"] input').checked).toBe(true);
+      expect(panel().querySelector('[data-include="link_check"] [aria-checked="true"]').textContent).toBe('Each link');
+      expect(panel().querySelector('[data-include="credits"]').textContent).toContain("Brief's own");
+      expect(panel().textContent).toContain('Settings › Publishing › Styles');
+    } finally {
+      prefs.noteStyles = null;
+    }
   });
 
   it('hands up a style, a page size and a marking as soon as they are picked, each on its own tab', () => {
@@ -263,10 +322,10 @@ describe('the Look panel', () => {
   });
 
   it('shows the list of sources as the style has it until it is set, then writes on or off', () => {
-    const sources = () => box('List sources at the end');
+    const sources = () => box('numbered, linked');
     openPanel();
     goTo('Style');
-    expect(sources().closest('.group').textContent).toContain('In the document');
+    expect(sources().closest('.group').textContent).toContain('What it includes');
     // Plain prints none of its own, a report lists them
     expect(sources().checked).toBe(false);
     props.look = normaliseLook({ style: 'report' });
@@ -277,14 +336,15 @@ describe('the Look panel', () => {
     flushSync();
     expect(changes.at(-1)).toMatchObject({ style: 'report', sources: 'off' });
     expect(sources().checked).toBe(false);
+    // once set, it stays as set whatever the style
+    [...panel().querySelectorAll('.style-card')].find((card) => card.textContent.includes('Brief')).click();
+    flushSync();
+    expect(changes.at(-1)).toMatchObject({ style: 'brief', sources: 'off' });
+    expect(sources().checked).toBe(false);
+    // set back to what the style lists, it is the style's own again
     sources().click();
     flushSync();
-    expect(changes.at(-1).sources).toBe('on');
-    // once set, it stays as set whatever the style
-    [...panel().querySelectorAll('.style-card')].find((card) => card.textContent.includes('Plain')).click();
-    flushSync();
-    expect(changes.at(-1)).toMatchObject({ style: 'plain', sources: 'on' });
-    expect(sources().checked).toBe(true);
+    expect(changes.at(-1).sources).toBe('');
   });
 
   it('lays the web page out as an article or a story, the article until set, and hands the choice up', () => {
@@ -312,7 +372,7 @@ describe('the Look panel', () => {
     props.look = normaliseLook({ style: 'brief' });
     openPanel();
     goTo('Style');
-    const sources = box('List sources at the end');
+    const sources = box('numbered, linked');
     expect(sources.checked).toBe(true);
     sources.click();
     flushSync();

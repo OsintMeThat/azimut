@@ -12,6 +12,12 @@
  * replaces the style's own running header or footer, written only once a slot is
  * filled, so a look that never used them reads and writes as it always did. `web`,
  * how the HTML page is laid out, is one too: the server keeps it only once set.
+ *
+ * The style is the profile: it says what the document carries after its text, the
+ * sources list and how it is written, the five annexes and how strict the check is
+ * about links (`STYLE_DEFAULTS`, Azimut's own; Settings › Publishing › Styles changes
+ * them for every note). `sources_style`, `annexes` and `link_check` change them for
+ * one note, late keys like the others.
  */
 import { api } from '../api.js';
 
@@ -27,15 +33,113 @@ export const DEFAULT_LOOK = Object.freeze({
   numbered: false,
   sources: '',
   web: '',
+  sources_style: '',
+  link_check: '',
+  annexes: Object.freeze({}),
 });
 
-/** Each style, and the typeface it sets its text in when none is picked (`engine/notes_style.py`). */
+/**
+ * Each style, in the order the Look lists them, what it gives in a line, and the
+ * typeface it sets its text in when none is picked (`engine/notes_style.py`).
+ */
 export const STYLES = [
-  { id: 'plain', label: 'Plain', note: 'The note as it reads', font: 'serif' },
-  { id: 'report', label: 'Report', note: 'Cover, contents, numbered parts', font: 'serif' },
+  { id: 'report', label: 'Report', note: 'Academic sources, every annex', font: 'serif' },
+  { id: 'article', label: 'Web article', note: 'Sources for the web, credits, corrections', font: 'serif' },
   { id: 'brief', label: 'Brief', note: 'Verdict first, one or two pages', font: 'sans' },
   { id: 'journal', label: 'Journal', note: 'Dated entries, times in the margin', font: 'serif' },
+  { id: 'plain', label: 'Plain', note: 'The note as it reads, nothing added', font: 'serif' },
 ];
+
+/** What a document may add after its text, beside the sources list, in the order it prints them. */
+export const ANNEXES = [
+  { id: 'geolocations', label: 'Geolocations', note: 'every proof cited' },
+  { id: 'credits', label: 'Credits', note: 'imagery, maps, footage' },
+  { id: 'method', label: 'How this was made', note: 'generated facts' },
+  { id: 'limits', label: 'Limits', note: 'the Limits boxes' },
+  { id: 'editions', label: 'Editions & corrections', note: 'what changed' },
+];
+
+/** How the sources list writes each source ("" is the style's own). */
+export const SOURCES_STYLES = [
+  { id: 'academic', label: 'Academic' },
+  { id: 'web', label: 'Web' },
+  { id: 'short', label: 'Short' },
+];
+
+/** How the check before export names the links with no archived copy or no seen day. */
+export const LINK_CHECKS = [
+  { id: 'each', label: 'Each link' },
+  { id: 'grouped', label: 'One line' },
+];
+
+/**
+ * What each style carries when nobody changed it: Azimut's own, decided in
+ * `engine/notelook.py` (`PROFILES`). `tests/fixtures/note-styles.json` holds both to
+ * the same table; Settings answers it with what Settings › Publishing › Styles changed.
+ */
+const no = { geolocations: false, credits: false, method: false, limits: false, editions: false };
+export const STYLE_DEFAULTS = Object.freeze({
+  plain: Object.freeze({ sources: false, sources_style: 'short', ...no, link_check: 'grouped' }),
+  report: Object.freeze({
+    sources: true, sources_style: 'academic', geolocations: true, credits: true, method: true, limits: true, editions: true,
+    link_check: 'grouped',
+  }),
+  brief: Object.freeze({ sources: true, sources_style: 'short', ...no, link_check: 'grouped' }),
+  journal: Object.freeze({ sources: true, sources_style: 'short', ...no, link_check: 'grouped' }),
+  article: Object.freeze({ sources: true, sources_style: 'web', ...no, credits: true, editions: true, link_check: 'grouped' }),
+});
+
+/** A styles table as Settings answers it, each style whole: what it lacks is Azimut's own. */
+export function stylesTable(given) {
+  const table = {};
+  for (const [style, own] of Object.entries(STYLE_DEFAULTS)) {
+    const kept = given && typeof given === 'object' && given[style] && typeof given[style] === 'object' ? given[style] : {};
+    const row = { ...own };
+    for (const key of Object.keys(own)) {
+      const value = kept[key];
+      if (typeof value === typeof own[key] && (key !== 'sources_style' || SOURCES_STYLES.some((one) => one.id === value))
+        && (key !== 'link_check' || LINK_CHECKS.some((one) => one.id === value))) row[key] = value;
+    }
+    table[style] = row;
+  }
+  return table;
+}
+
+/** Each of a look's profile switches as the note has it: the look's own, else its style's (`table`). */
+export function profileOf(look, table = STYLE_DEFAULTS) {
+  const whole = normaliseLook(look);
+  const own = stylesTable(table)[whole.style];
+  const profile = { ...own };
+  if (whole.sources) profile.sources = whole.sources === 'on';
+  if (whole.sources_style) profile.sources_style = whole.sources_style;
+  if (whole.link_check) profile.link_check = whole.link_check;
+  for (const annex of ANNEXES) {
+    const set = whole.annexes[annex.id];
+    if (set) profile[annex.id] = set === 'on';
+  }
+  return profile;
+}
+
+/** Which of a look's profile switches the note changed from its style's, by key. */
+export function profileChanged(look) {
+  const whole = normaliseLook(look);
+  const changed = { sources: Boolean(whole.sources), sources_style: Boolean(whole.sources_style), link_check: Boolean(whole.link_check) };
+  for (const annex of ANNEXES) changed[annex.id] = Boolean(whole.annexes[annex.id]);
+  return changed;
+}
+
+/** The look with one profile switch set for this note, or back to the style's own (`value` null). */
+export function withProfile(look, key, value) {
+  const whole = normaliseLook(look);
+  if (ANNEXES.some((annex) => annex.id === key)) {
+    const annexes = { ...whole.annexes };
+    if (value === null) delete annexes[key];
+    else annexes[key] = value ? 'on' : 'off';
+    return normaliseLook({ ...whole, annexes });
+  }
+  if (key === 'sources') return normaliseLook({ ...whole, sources: value === null ? '' : value ? 'on' : 'off' });
+  return normaliseLook({ ...whole, [key]: value ?? '' });
+}
 
 /**
  * The typefaces a note can print in, "" being the style's own. The labels are
@@ -84,8 +188,8 @@ export const WEBS = [
   { id: 'story', label: 'Story' },
 ];
 
-/** The styles that print no list of sources unless it is turned on (`engine/notelook.py`). */
-export const SOURCES_OFF_STYLES = ['plain'];
+/** The styles that print no list of sources unless it is turned on, as Azimut ships them. */
+export const SOURCES_OFF_STYLES = Object.keys(STYLE_DEFAULTS).filter((style) => !STYLE_DEFAULTS[style].sources);
 
 export const SUBTITLE_MAX = 200;
 
@@ -165,6 +269,14 @@ function bandOf(value) {
 }
 
 const pick = (value, choices, fallback) => (choices.some((choice) => choice.id === value) ? value : fallback);
+
+/** The annexes a look sets, each 'on' or 'off', in their order; the ones left to the style are left out. */
+function annexesOf(value) {
+  const given = value && typeof value === 'object' ? value : {};
+  const kept = {};
+  for (const annex of ANNEXES) if (given[annex.id] === 'on' || given[annex.id] === 'off') kept[annex.id] = given[annex.id];
+  return kept;
+}
 const HEX = /^#[0-9a-f]{6}$/;
 const DAY = /^\d{4}-\d{2}-\d{2}$/;
 
@@ -195,6 +307,9 @@ export function normaliseLook(look) {
     numbered: Boolean(given.numbered),
     sources: pick(given.sources ?? '', SOURCES, ''),
     web: pick(given.web ?? '', WEBS, ''),
+    sources_style: pick(given.sources_style ?? '', SOURCES_STYLES, ''),
+    link_check: pick(given.link_check ?? '', LINK_CHECKS, ''),
+    annexes: annexesOf(given.annexes),
     ...(header && { header }),
     ...(footer && { footer }),
   };
@@ -208,7 +323,8 @@ export function normaliseLook(look) {
 export function sectionsSet(look) {
   const whole = normaliseLook(look);
   return {
-    style: whole.style !== DEFAULT_LOOK.style || whole.toc || whole.numbered || whole.sources !== '' || whole.web !== '',
+    style: whole.style !== DEFAULT_LOOK.style || whole.toc || whole.numbered || whole.sources !== '' || whole.web !== ''
+      || whole.sources_style !== '' || whole.link_check !== '' || Object.keys(whole.annexes).length > 0,
     text: Boolean(whole.font || whole.size),
     page: whole.page !== DEFAULT_LOOK.page || Boolean(whole.accent || whole.tlp),
     cover: whole.cover.on,
@@ -236,10 +352,14 @@ export function styleLabel(style) {
   return STYLES.find((item) => item.id === style)?.label ?? 'Plain';
 }
 
-/** Whether a look ends on the list of sources: as it was set, or as its style has it. */
-export function sourcesOn(look) {
-  const whole = normaliseLook(look);
-  return whole.sources ? whole.sources === 'on' : !SOURCES_OFF_STYLES.includes(whole.style);
+/** The words a style's own value of a switch is said with: `Report's own`. */
+export function styleOwn(style) {
+  return `${styleLabel(style)}'s own`;
+}
+
+/** Whether a look ends on the list of sources: as it was set, or as its style has it (`table`). */
+export function sourcesOn(look, table = STYLE_DEFAULTS) {
+  return profileOf(look, table).sources;
 }
 
 /** The typeface a look prints its text in: the one picked, or its style's own. */

@@ -4400,7 +4400,6 @@ run has its own layer. Re-exporting a date replaces its category. Older dates ar
 lighter and newer dates darker on a blue ramp. Features carry the name, description,
 pass date, detector, area and run id. Exported layers survive deletion of their runs.
 
-
 ## Geo Proof
 
 A proof is composed of panels: case images, each carrying its source. Two things
@@ -7020,7 +7019,8 @@ pointer. A case reference is a chip that
 opens what it names; a picture, a table, a diagram, an aligned block, a block of
 steps or a story, an HTML block, a chapter and the page-break and cover lines are drawn
 whole and stay drawn. Steps show their pictures numbered in a row, each with its
-caption; a story shows each picture beside its words, the part it zooms in on outlined. A
+caption; a story shows each picture beside its words, the part it zooms in on outlined
+(both worked without braces, see *Steps and stories* below). A
 Mermaid chart (`xychart-beta`) draws its series in a blue ramp then grey and its words in
 the note's sans, in the editor, the PDF and the HTML page alike. A press
 picks one (an accent outline, a picture's bar kept up); a double press, Enter or its
@@ -7039,7 +7039,7 @@ quote as `> [!confirmed]`, `[!unverified]`, `[!lead]`, `[!note]`, `[!warning]` o
 written, or the toolbar's **+** open one menu in five parts: **Text** (headings, lists,
 a to-do, a quote, **Callout ›** with its six kinds, Internal, code, today's date, a dated
 log entry), **Media** (a case picture, an image from a file, **Steps** and **Story**, an
-empty `::: steps` or `::: story` block opened on its guidance, your logo), **From the
+empty `::: steps` or `::: story` block, the cursor after it, drawn as its strip, your logo), **From the
 case** (a case item, an **Interactive map**, a note included as a chapter), **Layout**
 (a divider, a page break, the cover page, **Alignment ›**, **Cover corner ›**, a
 signature, **Field ›** for the words the PDF fills in) and **Figures** (a table, a
@@ -7450,17 +7450,61 @@ posts and cuts a long text itself.
 
 **How it prints.** **Look** sets the note's style, kept beside the note (the note
 record's `look`, `notes.case_look` for the case notes) and never in its Markdown. Its
-panel shows one tab at a time, *Style* (the style, then contents, numbered headings and
-sources as three switches, and the web page's layout), *Text*, *Page* (paper, accent, marking), *Cover* and *Header
-& footer*, a dot on each tab holding something set, and reopens on the last tab used:
+panel shows one tab at a time, *Style* (what the document is **For**, then contents and
+numbered headings, **What it includes**, and the web page's layout), *Text*, *Page* (paper, accent, marking), *Cover* and *Header
+& footer*, a dot on each tab holding something set, and reopens on the last tab used.
+The **For** row lists the five styles, each with a line on what it gives; the style is
+the profile, so it decides what the document carries after its text as well as its look:
 
-- **Plain**, with nothing else set, is the document the Notebook always printed.
 - **Report** has a running header, *Page X / Y*, numbered sections in the accent,
-  boxed callouts, striped tables and framed figures.
+  boxed callouts, striped tables and framed figures; its sources are written
+  **Academic** and it carries every annex, and the check names each link on its own line.
+- **Web article** is a page read online: the day over a large title, its sources
+  written for the **Web**, its **Credits** and its **Editions & corrections**.
 - **Brief** sets a dark band with the title and puts the first verdict
   (`[!confirmed]` or `[!unverified]`) in a large box under it, to fit a page or two.
 - **Journal** opens each day with its date and sets each `### YYYY-MM-DD HH:MM`
   entry's time in a left gutter on a timeline.
+- **Plain**, with nothing else set, is the document the Notebook always printed, to the
+  byte: no sources list and no annex.
+
+**What it includes** lists the **Sources** list and the five annexes as switches, then
+**Sources written as** (*Academic*, *Web*, *Short*) and the **Link check** (*Each link*,
+*One line*). Each shows the style's own value (*Report's own*) until changed for this
+note, then *Changed here · Reset*; setting one back to the style's value is the style's
+own again. The annexes print after the sources, each a heading of its own in the
+contents and the bookmarks, in the PDF, the HTML page, its web folder and a WordPress
+draft, and only when they have something to say (`engine/noteannexes.py`):
+
+- **Geolocations**: a table of every proof the note cites, its source number, the place
+  it depicts and how far off its point may be, its day (*about*, or a span), and its
+  coordinates linked to the map; a point filmed from says *Where it was filmed*, rounded
+  when the export rounds them.
+- **Credits**: the imagery (providers and their credit lines, a proof's panels' too),
+  the terrain, the maps drawn in the note, the accounts whose posts it shows by site,
+  and the typefaces with their licence.
+- **How this was made**: facts read from the case, never prose: the edition and the
+  Azimut that made it, how many sources of each kind, the days they were posted and came
+  in, how many outside addresses have an archived copy, the imagery and its days, the
+  fingerprinted files and the tools the items came from.
+- **Limits**: every `> [!limits]` box of the note gathered, each linked back to where
+  it stands; a note with a *Limits* or *Limitations* section of its own is left as it is.
+- **Editions & corrections**: this edition, then each public text published before,
+  one row per text with its first day, its formats, what it corrected and its
+  fingerprint. In the HTML page it takes the place and the `#corrections` address of the
+  corrections; with it off, the page lists its corrections as before.
+
+**Sources written as** *Academic* reads as a journal's reference list: Author (the
+account an X or Telegram address names when the case records none), "Title", the medium
+for a file, *Outlet* in italics (a known site by its name, *Al Jazeera*, any other by its
+host), the full day, the address, *archived (day) at* the copy, *accessed* (or
+*collected*, *made*) the day it was seen. What the case does not know is left out with
+its comma, never *n.d.* A written link takes as its title the longest words the note
+links it with that are not a citation of the site (*Al Jazeera, 10 Sep* is one), so a
+note's own sources list names the page; a link to a Wayback copy is that copy of its
+page. *Web* writes the outlet, the title linked and the short day, then *Archived copy*;
+*Short* is the form notes always printed. Files keep their SHA-256 line and captures
+their *Check on* links in every form.
 
 Every style takes A4 or Letter, an accent (the style's own, a recent colour or a
 pasted hex), a TLP marking (FIRST TLP 2.0 colours, top right and in the footer of
@@ -7508,8 +7552,10 @@ Its **Text** part sets the typeface, each card drawn in its face: the style's ow
 Literata (a book face for long write-ups) or IBM Plex Sans (a clean face for briefs),
 and the size, Smaller, Normal or Larger, which headings, tables and captions follow.
 A letter a face lacks prints in the Noto face of its script. Templates carry both.
-Its **Sources** row, *List sources at the end*, is on for Report, Brief and Journal and
-off for Plain until set; templates carry it too. Its **Web page** row, *Article* or
+Its **Sources** switch is on for Report, Web article, Brief and Journal and off for
+Plain until set; templates carry it and every switch of *What it includes*, each kept
+only once set (`sources_style`, `annexes`, `link_check`), so a look that never used
+them reads as an older Azimut wrote it. Its **Web page** row, *Article* or
 *Story*, lays out the HTML page only (see *Story* above); it is kept only once set to
 Story, so a look that never used it reads as an older Azimut wrote it, and templates
 carry it.
@@ -7577,7 +7623,16 @@ template is guidance by design.
 
 **Pictures and pages.** Hovering a picture, in the note or on its page in the Page
 pane, offers **XXS**, **XS**, **S**, **M**, **L** and **Full**, left, centre or right, and **Caption**,
-written on its line as `{width=… align=… caption="…"}`. The bar also offers *Open in
+written on its line as `{width=… align=… caption="…"}`. In the note a size shows on the
+picture while the pointer is on its button, written only when pressed, and the corner
+away from where the picture stands can be dragged: the width follows and snaps to the
+nearest size, said on the picture (*L · 75%*), written let go, Escape calling it off. A
+caption pressed is written in its place. **Graphic** marks a picture `{graphic}`: the
+HTML page and WordPress keep it veiled until pressed, and the note draws it blurred with
+*Graphic picture, blurred on the web until pressed* over it, less blurred while the pointer
+is on it; the PDF prints it as it is. **Replace** (⇆) lists the case's pictures, each
+with its thumbnail, and puts the one picked in its place, its size, place, caption, veil
+and zoom kept. Each of these is one change, which one Undo takes back. The bar also offers *Open in
 <Tool>* when a tool can reopen the state the picture was taken from, and *Source…* for
 a picture brought in by hand with no address (a link stated, never fetched). A proof
 also offers *Posted…*, in the note as on the Page pane: where it was published, on X or elsewhere,
@@ -7605,6 +7660,19 @@ comment prints. A video prints as its thumbnail with a play mark and its *Watch*
 credit, or as a line with that link when it has no thumbnail. A diagram prints at its
 size on screen. A caption is never parted from its picture, and a heading never stays
 alone at the foot of a page.
+
+**Steps and stories.** A `::: steps` or `::: story` block is drawn as a strip of its steps
+(`lib/notes/editor/playedBlock.js`), each picture numbered: a row of cards for steps, each
+picture beside its words for a story. **Add a step** lists the case's pictures, each with
+its thumbnail, found by name or folder, and adds the one picked last; a picture dragged in
+from the Media library or the case sidebar lands where the line shows. A step is moved by
+dragging its number, or with the arrows on it, and taken out with its ×. A story's words,
+or a step's caption, are written in place where they show: Enter writes them, Shift+Enter
+starts a line, Escape leaves them. On a story's picture a box dragged frames the part its
+step moves in on (`zoom=x,y,w,h`), and its × shows the whole picture again. An empty block
+says *No step yet* in place of its guidance, which a template keeps. Each gesture writes
+the block's own lines, as an expert would type them (`editor/stepEdits.js`), in one
+change one Undo takes back; a note nobody can write in draws the strip with no tools.
 
 **Chapters and guidance.** **/** → *Include a note* writes `[[include:<id>]]` on its
 own line, drawn as a chapter block with its number, title and first words, *Open* and
@@ -7799,6 +7867,15 @@ composer and the Map plate already use), **Name**, **Role** and **Organisation**
 line each, 80 characters at most) and the **Signature**, a PNG of a handwritten
 signature up to 1 MB, a transparent one recommended; each field says what it takes and
 where it prints. The settings backup carries them all.
+
+**Styles.** Under *In reports*, Settings › Publishing holds what each style carries, set
+once for every note that keeps its style's own: a column per style (Report, Web article,
+Brief, Journal, Plain), a switch per row for the **Sources** list and the five annexes,
+then **Written as** and **Link check before export** as menus. Each change saves at once
+and reaches a note's next export, never a file already written; a note's Look still
+changes any of it. **Reset to Azimut's defaults** gives every style back what Azimut
+gives it. Only what differs from Azimut's own is kept (`note_styles`), and the settings
+backup carries it.
 
 **WordPress.** The last group of Settings › Publishing connects the site a note is sent
 to: **Site address** (https, or http on this computer for a test site; a WordPress.com

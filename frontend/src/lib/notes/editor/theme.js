@@ -95,7 +95,14 @@ export const look = EditorView.theme({
   '.cm-block table': { borderCollapse: 'collapse', fontSize: '0.92em' },
   '.cm-block th, .cm-block td': { border: '1px solid var(--border-strong)', padding: '4px 10px', textAlign: 'left' },
   '.cm-block th': { background: 'var(--bg-2)' },
-  '.cm-block-diagram': { background: '#fff', borderRadius: '4px', padding: '10px', margin: '4px var(--note-gutter, 32px)', overflowX: 'auto', color: '#202124' },
+  // The room above and below a framed block is a clear border, never a margin: the editor
+  // measures a block by its box, and a margin it cannot see would put every line under it
+  // out of step with where the page draws it (the handle, a press, a jump). The frame is
+  // then drawn inside that border: the background clipped to it, its line an inset shadow.
+  '.cm-block-diagram': {
+    background: '#fff', backgroundClip: 'padding-box', borderRadius: '4px / 8px', padding: '10px', margin: '0 var(--note-gutter, 32px)',
+    borderTop: '4px solid transparent', borderBottom: '4px solid transparent', overflowX: 'auto', color: '#202124',
+  },
   '.cm-block-diagram > .cm-source-edit': { right: '6px' },
   '.cm-block-diagram svg': { maxWidth: '100%', height: 'auto', display: 'block', margin: '0 auto' },
   '.cm-block-failed': { color: 'var(--danger)', background: 'var(--danger-soft)', fontSize: '0.9em' },
@@ -109,9 +116,15 @@ export const look = EditorView.theme({
   '.cm-map-plain .cm-map-said': { position: 'static', margin: '10px' },
   '.cm-map-said > span': { color: 'rgba(255, 255, 255, .8)' },
   '.cm-block-steps, .cm-block-story, .cm-block-map': {
-    margin: '4px var(--note-gutter, 32px)', padding: '8px 12px 10px', border: '1px solid var(--border)', borderRadius: '6px', background: 'var(--bg-2)',
+    margin: '0 var(--note-gutter, 32px)', padding: '9px 13px 11px', border: 'none', borderTop: '4px solid transparent',
+    borderBottom: '4px solid transparent', borderRadius: '6px / 10px', background: 'var(--bg-2)', backgroundClip: 'padding-box',
+    boxShadow: 'inset 0 0 0 1px var(--border)',
   },
-  '.cm-block-steps > .cm-source-edit, .cm-block-story > .cm-source-edit, .cm-block-map > .cm-source-edit': { right: '6px' },
+  '.cm-block-steps > .cm-source-edit, .cm-block-story > .cm-source-edit, .cm-block-map > .cm-source-edit': { top: '7px', right: '7px' },
+  // picked, a framed block's outline is drawn inside its clear border, where its frame is
+  '.cm-block-diagram.cm-picked, .cm-block-steps.cm-picked, .cm-block-story.cm-picked, .cm-block-map.cm-picked': {
+    outline: 'none', boxShadow: 'inset 0 0 0 2px var(--accent)',
+  },
   '.cm-played-head': {
     color: 'var(--text-3)', fontSize: '0.7em', fontWeight: '650', letterSpacing: '0.06em', textTransform: 'uppercase', marginBottom: '6px',
   },
@@ -137,11 +150,14 @@ export const look = EditorView.theme({
   },
   '.cm-hint-line': { color: 'var(--text-3)', fontStyle: 'italic' },
   '.cm-include': {
-    position: 'relative', margin: '6px var(--note-gutter, 32px)', padding: '8px 12px 10px', border: '1px solid var(--border)', borderLeft: '3px solid var(--accent)',
-    borderRadius: '6px', background: 'var(--bg-2)', cursor: 'text', fontSize: '0.93em', lineHeight: '1.45',
+    position: 'relative', margin: '0 var(--note-gutter, 32px)', padding: '9px 13px 11px 15px', border: 'none',
+    borderTop: '6px solid transparent', borderBottom: '6px solid transparent', borderRadius: '6px / 12px', background: 'var(--bg-2)',
+    backgroundClip: 'padding-box', boxShadow: 'inset 3px 0 0 var(--accent), inset 0 0 0 1px var(--border)', cursor: 'text',
+    fontSize: '0.93em', lineHeight: '1.45',
   },
-  '.cm-include:hover': { borderColor: 'var(--border-strong)', borderLeftColor: 'var(--accent)' },
-  '.cm-include-missing': { borderLeftColor: 'var(--text-3)' },
+  '.cm-include-missing': { boxShadow: 'inset 3px 0 0 var(--text-3), inset 0 0 0 1px var(--border)' },
+  '.cm-include:hover': { boxShadow: 'inset 3px 0 0 var(--accent), inset 0 0 0 1px var(--border-strong)' },
+  '.cm-include.cm-picked': { outline: 'none', boxShadow: 'inset 3px 0 0 var(--accent), inset 0 0 0 2px var(--accent)' },
   '.cm-include-head': { display: 'flex', alignItems: 'center', gap: '8px' },
   '.cm-include-number': {
     flex: '1', color: 'var(--accent)', fontSize: '0.72em', fontWeight: '700', letterSpacing: '0.06em', textTransform: 'uppercase',
@@ -159,7 +175,8 @@ export const look = EditorView.theme({
     color: 'var(--text-2)', display: '-webkit-box', WebkitLineClamp: '2', WebkitBoxOrient: 'vertical', overflow: 'hidden',
   },
   '.cm-pagebreak': {
-    position: 'relative', display: 'flex', alignItems: 'center', gap: '10px', margin: '10px var(--note-gutter, 32px)', cursor: 'text',
+    position: 'relative', display: 'flex', alignItems: 'center', gap: '10px', margin: '0 var(--note-gutter, 32px)',
+    borderTop: '10px solid transparent', borderBottom: '10px solid transparent', cursor: 'text',
     color: 'var(--text-3)', fontFamily: 'var(--font-sans)', fontSize: '0.72em', letterSpacing: '0.06em', textTransform: 'uppercase',
   },
   '.cm-pagebreak::before, .cm-pagebreak::after': { content: '""', flex: '1', borderTop: '1px dashed var(--border-strong)' },
@@ -167,7 +184,9 @@ export const look = EditorView.theme({
   '.cm-pagebreak > .cm-source-edit': { top: '-6px', right: '0' },
   '.cm-pagebreak:hover > .cm-source-edit, .cm-pagebreak.cm-picked > .cm-source-edit': { opacity: '1', pointerEvents: 'auto' },
   '.cm-pagebreak-line': { color: 'var(--text-3)', fontFamily: 'var(--font-mono)', fontSize: '0.9em' },
-  '.cm-cover-rule': { color: 'var(--accent)', margin: '14px var(--note-gutter, 32px)' },
+  '.cm-pagebreak.cm-picked': { outline: 'none', boxShadow: 'inset 0 0 0 2px var(--accent)', borderRadius: '4px / 14px' },
+  '.cm-cover-rule': { color: 'var(--accent)', borderTopWidth: '14px', borderBottomWidth: '14px' },
+  '.cm-cover-rule.cm-picked': { borderRadius: '4px / 18px' },
   '.cm-cover-rule::before, .cm-cover-rule::after': { borderTop: '1px solid color-mix(in srgb, var(--accent) 55%, transparent)' },
   '.cm-placeholder': {
     color: 'var(--text-3)', fontStyle: 'italic', background: 'var(--bg-2)', borderRadius: '3px', padding: '0 4px',

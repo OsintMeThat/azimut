@@ -56,7 +56,7 @@ from markdown_it.token import Token
 from PIL import Image
 
 from .. import __version__
-from . import notecharts, notefill, notesources, thumbnails
+from . import noteannexes, notecharts, notefill, notesources, thumbnails
 from . import notes_html as report
 from . import notes_markdown as md
 from .media import media_kind
@@ -258,6 +258,7 @@ def build(
     diagrams: dict[str, bytes] | None = None,
     round_pov: bool = False,
     check: bool = False,
+    earlier: Iterable[dict[str, Any]] = (),
 ) -> Draft:
     """The public edition of a note as a draft: block markup with every upload's place
     marked (`fill`), the files to upload, the excerpt and what stayed out.
@@ -285,9 +286,13 @@ def build(
     blocks = {id(piece): md.alignment_blocks(piece.text) for piece in pieces if piece.kind == "text"}
     if any(md.holds_internal(block.tokens) for parsed in blocks.values() for block in parsed):
         raise NotesWordPressError("an internal passage could not be left out, so nothing was sent")
-    cited = md.Cited(case, look=look, styled=False, identity=identity)
+    cited = md.Cited(case, look=look, styled=False, identity=identity, profile=look.profile())
     cited.collect(pieces, blocks)
-    writer = _Writer(case, look=look, cited=cited, diagrams=diagrams or {}, round_pov=round_pov, check=check)
+    # what the style adds after the sources, as the HTML page has it, but the maps a draft leaves out
+    annexes = noteannexes.build(case, cited, cited.profile, day=day, public=True, earlier=earlier,
+                                made_as="wordpress", round_pov=round_pov)
+    writer = _Writer(case, look=look, cited=cited, diagrams=diagrams or {}, round_pov=round_pov, check=check,
+                     annexes=annexes)
     content = writer.build(pieces, blocks)
     draft = Draft(title=title, content=content, uploads=writer.uploads)
     draft.left.update(internal=passages[0], maps=maps + writer.maps, clips=writer.clips_out,
@@ -491,8 +496,9 @@ class _Writer:
     """Walks the parsed public edition and writes it as block markup."""
 
     def __init__(self, case: "Case | None", *, look: NoteLook, cited: md.Cited, diagrams: dict[str, bytes],
-                 round_pov: bool, check: bool) -> None:
+                 round_pov: bool, check: bool, annexes: noteannexes.Annexes | None = None) -> None:
         self.case = case
+        self.annexes = annexes
         self.look = look
         self.cited = cited
         self.diagrams = diagrams
@@ -559,6 +565,7 @@ class _Writer:
         if self.graphic:
             out.insert(0, paragraph(f"<em>{_text('This article holds graphic pictures, each folded until pressed.')}</em>"))
         out.extend(self._sources())
+        out.extend(self._annexes())
         return "\n\n".join(part for part in out if part) + "\n"
 
     def _prescan(self, pieces: list[md.Piece], blocks: dict[int, list[md.Block]]) -> None:
@@ -1271,8 +1278,62 @@ class _Writer:
         annex = self.cited.annex
         if annex is None or not annex.entries:
             return []
-        items = [self._source(entry) for entry in annex.entries]
+        style = self.cited.profile.sources_style
+        items = [self._source(entry) if style == "short" else self._styled_source(entry, style)
+                 for entry in annex.entries]
         return [heading(2, "Sources", "sources"), list_block(items, ordered=True)]
+
+    def _styled_source(self, entry: Entry, style: str) -> str:
+        """One source as ``style`` writes it (`notesources.entry`), as the HTML page has it."""
+        source = entry.source
+        said: list[str] = []
+        for part in notesources.entry(source, style, entry.origins):
+            if part.kind == "cite":
+                said.append(f'<a href="#source-{part.number}">[{part.number}]</a>')
+            elif part.kind == "outlet":
+                said.append(f"<em>{_text(part.text)}</em>")
+            elif part.link and (part.kind in ("address", "link") or style == "web"):
+                said.append(_link(part.link, _text(part.text)))
+            else:
+                said.append(_text(part.text))
+        links = [_link(address, f"Check on {_text(site)}") for site, address in source.verify]
+        if source.sha256:
+            links.append(f"SHA-256 <code>{source.sha256}</code>")
+        line = "".join(said)
+        if links:
+            line += f"<br>{' · '.join(links)}"
+        return list_item(line, anchor=f"source-{entry.number}")
+
+    def _annexes(self) -> list[str]:
+        """The annexes the style carries (`engine/noteannexes.py`), as the HTML page has them."""
+        annexes = self.annexes
+        if annexes is None:
+            return []
+        out: list[str] = []
+        for key in annexes.present():
+            out.append(heading(2, _text(noteannexes.HEADINGS[key]), f"annex-{key}"))
+            if key == "geolocations":
+                head = ["<tr>" + "".join(f"<th>{name}</th>" for name in ("Proof", "Place", "Day", "Coordinates")) + "</tr>"]
+                rows = []
+                for place in annexes.geolocations:
+                    number = f'<a href="#source-{place.number}">[{place.number}]</a> ' if place.number else ""
+                    coords = _link(place.link, _text(place.coords)) if place.coords else ""
+                    rows.append(f"<tr><td>{number}{_text(place.proof)}</td><td>{_text(place.where)}</td>"
+                                f"<td>{_text(place.day)}</td><td>{coords}</td></tr>")
+                out.append(table(head, rows))
+            elif key == "credits":
+                out.extend(paragraph(f"<strong>{_text(kind)}.</strong> {_text(words)}") for kind, words in annexes.credits)
+            elif key == "method":
+                out.append(list_block([list_item(_text(fact)) for fact in annexes.method]))
+            elif key == "limits":
+                out.append(list_block([list_item(_text(limit.text)) for limit in annexes.limits]))
+            elif key == "editions":
+                items = []
+                for one in annexes.editions:
+                    lead = "This edition" if one.current else one.day
+                    items.append(list_item(f"<strong>{_text(lead)}</strong> {_text(one.said)}"))
+                out.append(list_block(items))
+        return out
 
     def _source(self, entry: Entry) -> str:
         source = entry.source

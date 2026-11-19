@@ -130,10 +130,11 @@ const TABLE = '| Source | Status |\n| --- | --- |\n|  |  |';
 /**
  * The two blocks an HTML page plays (`engine/notes_html.py`), as `/` writes them
  * empty: each picture put inside opens a step. A PDF prints them in order, the
- * pictures then the words.
+ * pictures then the words. Drawn, each is a strip its steps are added to
+ * (`editor/playedBlock.js`), so the cursor lands after it.
  */
-export const STEPS_BLOCK = `::: steps\n${hintLine('One picture a line, each a step with its caption: / › Case picture')}\n:::`;
-export const STORY_BLOCK = `::: story\n${hintLine('A picture, then the words read beside it. {zoom=x,y,w,h} after a picture moves in on a part of it')}\n:::`;
+export const STEPS_BLOCK = `::: steps\n${hintLine('Each picture is a step, with its caption: Add a step, or drop pictures here')}\n:::`;
+export const STORY_BLOCK = `::: story\n${hintLine('Each picture is a step, its words read beside it: Add a step, then drag on a picture to frame it')}\n:::`;
 /** The names a block of steps or a story opens with. */
 export const PLAYED_BLOCK = /^:::[ \t]*(steps|story)[ \t]*$/;
 /** A chart as the raw Markdown's `/` › Chart writes it: a kind over a table to fill (`engine/notes_charts.py`). */
@@ -333,10 +334,8 @@ export function slashInsert(command, { before = '', now = new Date() } = {}) {
   }
   const lead = alone ? '' : '\n\n';
   const text = `${lead}${command.block}\n`;
-  // inside the fence of a code block, on the first empty cell of a table, and on the guidance a played block opens with
-  const played = command.id === 'steps' || command.id === 'story';
-  const inner = command.id === 'code' ? lead.length + 4 : command.id === 'table' ? text.length - 6
-    : played ? text.length - 5 : text.length;
+  // inside the fence of a code block and on the first empty cell of a table; after a block of steps or a story, drawn as its strip
+  const inner = command.id === 'code' ? lead.length + 4 : command.id === 'table' ? text.length - 6 : text.length;
   return { text, cursor: inner };
 }
 

@@ -201,7 +201,7 @@ answer by omission (`tests/test_entities.py`).
 | `analysis-zones` | document | annex | ✅ | detect | `spec` (json): an ordered group of shared area IDs; older shape sets migrate on read | yes (`.analysis/zones-<id>.json`) |
 | `analysis-follow-up` | document | annex | ✅ | detect | `spec` (json): an analyzer, its areas and a date rule | yes (`.analysis/followups-<id>.json`) |
 | `analysis-run` | document | annex | ✅ | detect | `spec` (json): candidates, frozen inputs and review decisions | yes (`.analysis/runs-<id>.json` + `.assets/` previews) |
-| `note` | document | annex | ✅ | notebook | `path`, `folder?`, `look?` (json): how it prints; `link_archive?` (json): its last Archive every link run; the case notes keep both in the settings `notes.case_look` and `notes.case_link_archive` | yes (Markdown) |
+| `note` | document | annex | ✅ | notebook | `path`, `folder?`, `look?` (json): how it prints, its style and, once set, what it carries after its text (`sources_style`, `annexes`, `link_check`); `link_archive?` (json): its last Archive every link run; the case notes keep both in the settings `notes.case_look` and `notes.case_link_archive` | yes (Markdown) |
 | `sheet` | document | annex | ✅ | sheet | `path` (csv) | yes (CSV + sidecar) |
 | `bookmark` | document | attestation | ✅ | capture extension, Archive every link | `url`, `fetched_at?`, `archive_url?`, `archived_at?`, `reliability?` | no (a URL) |
 | `person` | actor | subject | ✅ | analyst | `aliases`, `role`, `nationality` | no |
