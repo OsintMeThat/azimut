@@ -163,11 +163,11 @@
       {/if}
       <p class="quiet tally">{comparison.unchanged} paragraph{comparison.unchanged === 1 ? '' : 's'} unchanged{comparison.more ? `, ${comparison.more} more change${comparison.more === 1 ? '' : 's'} not listed` : ''}.</p>
       {#if line !== null}
-        <section class="correction" aria-labelledby="correction-head">
-          <label id="correction-head" class="part-head" for="correction-line">What changed, for the next export</label>
+        <div class="correction">
+          <label class="part-head" for="correction-line">What changed, for the next export</label>
           <textarea id="correction-line" class="input" rows="3" maxlength={MAX_CORRECTION} bind:value={line}></textarea>
           <p class="hint"><span class="count">{line.length}/{MAX_CORRECTION}</span> Goes in the What changed line of your next HTML page or web folder, where you can still change it.</p>
-        </section>
+        </div>
       {/if}
     {/if}
   {:else}
