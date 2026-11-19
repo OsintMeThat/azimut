@@ -39,6 +39,17 @@ export async function putMap(caseId, request, { signal, post = api.post, reload 
   return { text: answer?.text ?? '', filed: answer?.filed ?? [] };
 }
 
+/**
+ * A map started from nothing (`/` › Interactive map › Start an empty map): the place framed,
+ * `{ title, west, south, east, north, base, provider }`. The server makes the map a personal
+ * layer of its own and files the ground of the place; both are what Undo sends to the Trash.
+ */
+export async function putEmptyMap(caseId, request, { signal, post = api.post, reload = reloadCase } = {}) {
+  const answer = await post(`/api/cases/${encodeURIComponent(caseId)}/notes/maps/scratch`, request, { signal });
+  if (answer?.filed?.length) await reload();
+  return { text: answer?.text ?? '', filed: answer?.filed ?? [] };
+}
+
 /** The offer `putInNote` runs: `request()` read on the press, so it is what the tool shows then. */
 export function mapOffer({ caseId, request, id = 'map', label = 'As an interactive map', hint = '', prepare = null, deps = {} }) {
   return {
@@ -52,6 +63,7 @@ export function mapOffer({ caseId, request, id = 'map', label = 'As an interacti
       const asked = typeof request === 'function' ? request() : request;
       const owner = typeof caseId === 'function' ? caseId() : caseId;
       if (!owner || !asked) throw new Error('There is nothing to map here');
+      if (asked.empty) return putEmptyMap(owner, asked.empty, { signal, ...deps });
       return putMap(owner, mapRequest(asked), { signal, ...deps });
     },
   };

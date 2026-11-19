@@ -159,6 +159,9 @@ LIVE_VERSION = re.compile(r"^\d{1,3}\.\d{1,3}\.\d{1,3}(?:-[0-9A-Za-z.]{1,20})?$"
 #: `LIVE_STYLE` names them (read 2026-11-18).
 LIVE_HOST = "https://tiles.openfreemap.org"
 LIVE_STYLE = f"{LIVE_HOST}/styles/liberty"
+#: Its dark style, for a map whose base is dark (`base: dark`): the same host, sources,
+#: glyphs and sprites (read 2026-11-19).
+LIVE_DARK = f"{LIVE_HOST}/styles/dark"
 #: What a page with a live map adds to the folder's policy: the base map's host, fetched
 #: (style, tiles, glyphs, sprites) and drawn, and the page's own files fetched, as the map
 #: reads the filed ground. Its worker is a file of the folder, which `script-src 'self'` allows.
@@ -354,7 +357,7 @@ def live_maps() -> html_engine.LiveMaps | None:
         return None
     if not LIVE_VERSION.match(version) or not all(files.values()) or not licence:
         return None
-    return html_engine.LiveMaps(csp=folder_csp(LIVE_SOURCES), style=LIVE_STYLE, version=version, files=files,
+    return html_engine.LiveMaps(csp=folder_csp(LIVE_SOURCES), style=LIVE_STYLE, dark=LIVE_DARK, version=version, files=files,
                                 licence=licence)
 
 
@@ -685,7 +688,7 @@ def _inside(root: Path, relative: str) -> Path:
 
 
 __all__ = [
-    "ADDRESS", "HOW_TO", "INDEX", "LIVE_HOST", "LIVE_LICENSE", "LIVE_MISSING", "LIVE_SOURCES", "LIVE_STYLE",
+    "ADDRESS", "HOW_TO", "INDEX", "LIVE_DARK", "LIVE_HOST", "LIVE_LICENSE", "LIVE_MISSING", "LIVE_SOURCES", "LIVE_STYLE",
     "LIVE_VENDOR", "MAX_ADDRESS", "NOJEKYLL", "NO_ADDRESS", "NotesWebError", "PAGES_CARD", "PAGES_INTRO",
     "PAGES_PUBLIC", "PAGES_STEPS", "PAGES_UPDATE", "SHARE", "SHARE_SIZE", "UPLOAD", "WEB_DIR", "WebBuild", "address",
     "build", "folder_csp", "folder_name", "how_to", "live_maps", "share_card", "write",

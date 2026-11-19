@@ -43,6 +43,7 @@
   import '../../lib/notes/openersLoaded.js';
   import { canStateSourceOf, statePostedOf, stateSourceOf } from '../../lib/notes/sources.js';
   import { INTERNAL, editionOf, keepEdition } from '../../lib/notes/editions.svelte.js';
+  import { mapsChanged } from '../../lib/notes/mapSettings.svelte.js';
   import Icon from '../../components/Icon.svelte';
   import PagePreview from '../../components/PagePreview.svelte';
   import EditionSwitch from './EditionSwitch.svelte';
@@ -229,13 +230,14 @@
   // where it was posted. Stated here, in the note or in Details, the pages are drawn
   // again at once, as no text changed to ask for them.
   // Who signs prints too: a logo, a signature or a name changed in Settings is drawn
-  // again at once, the note beside it untouched.
+  // again at once, the note beside it untouched; and so is a map, once what is drawn on
+  // its card changed the layer it names (`lib/notes/mapSettings.svelte.js`).
   const stated = $derived([
     entities
       .filter((entity) => entity.attrs?.source_url || entity.attrs?.posted_url)
       .map((entity) => `${entity.id}=${entity.attrs.source_url ?? ''}|${entity.attrs.posted_url ?? ''}`)
       .join(','),
-    prefs.picturesRev, prefs.logoRev, prefs.reportName, prefs.reportRole, prefs.reportOrganisation,
+    prefs.picturesRev, prefs.logoRev, prefs.reportName, prefs.reportRole, prefs.reportOrganisation, mapsChanged.rev,
   ].join('\n'));
   let lastStated = null;
   const drawer = () => (shows === HTML ? page : preview);

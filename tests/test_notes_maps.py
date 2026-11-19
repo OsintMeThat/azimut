@@ -574,3 +574,382 @@ def test_a_line_gone_by_the_maps_day_leaves_its_last_place_faint():
     drawing = notes_maps.svg(_fixture_map())
     assert re.search(r'class="az-f az-line az-off az-past" data-id="l0f0s1"', drawing)
     assert re.search(r'class="az-f az-line az-off" data-id="l0f0"', drawing)
+
+
+# -- how it is shown: the settings card's lines --------------------------------------------------
+
+#: An old block, as a put wrote it before the settings card: it must read, write and draw as it did.
+OLD_BLOCK = ("title: The front\nlayer: Front line\nproofs: 2026-10-19..2026-11-02\nground: e_c76d8fac71\n"
+             "detail: e_893ad279dc\nview: 12.73976, 43.51350, 12.05")
+
+
+@pytest.mark.parametrize("line, field, value", [
+    ("base: dark", "base", "dark"),
+    ("base: Topographic", "base", "topographic"),
+    ("hide: Vehicles, by kind", "hidden", ["Vehicles, by kind"]),
+    ("colour: Front = line = #D55E00", "colours", {"Front = line": "#d55e00"}),
+    ("proof points: filmed", "proof_points", "filmed"),
+    ("labels: off", "labels", "off"),
+    ("crowds: off", "crowds", "off"),
+    ("crowds: 20", "crowds", "20"),
+    ("north: on", "north", "on"),
+    ("scale: off", "scale", "off"),
+    ("frame: 43.4, 12.6, 43.6, 12.8", "frame", (43.4, 12.6, 43.6, 12.8)),
+    ("timeline: off", "timeline", "off"),
+    ("opens on: 2026-10-21", "opens_on", "2026-10-21"),
+    ("speed: slow", "speed", "slow"),
+    ("card: source, picture", "card", ["picture", "source"]),
+    ("card: none", "card", []),
+    ("size: full", "size", "full"),
+    ("legend: folded", "legend", "folded"),
+    ("Proof  Points : every", "proof_points", "every"),
+])
+def test_each_setting_reads_its_one_line(line, field, value):
+    block = notes_maps.parse_block(f"layer: Front\n{line}")
+    assert getattr(block, field) == value and block.unread == []
+
+
+@pytest.mark.parametrize("line", [
+    "base: night", "hide: a/b", "colour: Front = red", "colour: #d55e00", "proof points: some", "labels: maybe",
+    "crowds: 1", "crowds: many", "north: up", "frame: 43.6, 12.6, 43.4, 12.8", "frame: 1, 2, 3",
+    "timeline: yes", "opens on: 21 October", "speed: quick", "card: picture, map", "size: tiny", "legend: open",
+    "step: 21-10-2026 | x", "step: | | 95, 10, 4", "step: | | | not an id! |", "step: |  |  |  | ",
+])
+def test_a_setting_it_cannot_read_is_kept_to_be_said(line):
+    block = notes_maps.parse_block(f"layer: Front\n{line}")
+    assert block.unread == [line.strip()]
+    derived = notes_maps.derive(None, block)
+    assert any("reads no line" in message for message, _, _ in derived.warnings)
+
+
+def test_a_step_reads_its_parts_any_of_them_empty_and_writes_them_back():
+    block = notes_maps.parse_block("layer: A\nstep: 2026-10-21 | The quay | 12.7, 43.5, 13 | e_abc | Words | with a bar\n"
+                                   "step: | Only a name\nstep: 2026-10-22")
+    assert block.steps == [
+        notes_maps.Step(day="2026-10-21", label="The quay", view=(12.7, 43.5, 13.0), proof="e_abc", words="Words | with a bar"),
+        notes_maps.Step(label="Only a name"), notes_maps.Step(day="2026-10-22")]
+    assert [notes_maps.step_line(step) for step in block.steps] == [
+        "step: 2026-10-21 | The quay | 12.70000, 43.50000, 13 | e_abc | Words | with a bar",
+        "step: | Only a name", "step: 2026-10-22"]
+
+
+def test_the_settings_are_written_after_the_view_in_the_cards_order_and_read_back_the_same():
+    written = ("layer: Front\nstep: 2026-10-21 | Quay\nlegend: hidden\nsize: half\ncard: picture\nspeed: fast\n"
+               "opens on: 2026-10-21\ntimeline: off\nframe: 43.4, 12.6, 43.6, 12.8\nscale: on\nnorth: on\ncrowds: 8\n"
+               "labels: on\nproof points: filmed\ncolour: Front = #d55e00\nhide: Vehicles\nbase: map\nview: 12.7, 43.5, 12")
+    block = notes_maps.parse_block(written)
+    text = notes_maps.block_text(block)
+    assert text.split("\n") == [
+        "::: map", "layer: Front", "view: 12.70000, 43.50000, 12", "base: map", "hide: Vehicles",
+        "colour: Front = #d55e00", "proof points: filmed", "labels: on", "crowds: 8", "north: on", "scale: on",
+        "frame: 43.40000, 12.60000, 43.60000, 12.80000", "timeline: off", "opens on: 2026-10-21", "speed: fast",
+        "card: picture", "size: half", "legend: hidden", "step: 2026-10-21 | Quay", ":::"]
+    again = notes_maps.parse_block(text.split("\n", 1)[1].rsplit("\n", 1)[0])
+    assert {**again.__dict__, "where": {}} == {**block.__dict__, "where": {}}
+    assert notes_maps.block_text(again) == text
+
+
+def test_an_old_block_reads_writes_and_derives_as_it_did():
+    block = notes_maps.parse_block(OLD_BLOCK)
+    assert block.unread == [] and notes_maps.settings_lines(block) == []
+    assert notes_maps.block_text(block) == f"::: map\n{OLD_BLOCK}\n:::"
+    data = notes_maps.derive(None, block).data
+    assert set(data) == {"version", "title", "view", "bounds", "ground", "details", "days", "day", "features", "steps",
+                         "credits"}, "nothing new rides in an old map's data"
+
+
+def test_hiding_colouring_and_naming_a_layer_shape_what_the_map_draws(client):
+    cid, case = _case(client)
+    line = _tracked_line(case)
+    vehicles = _markers(client, cid)
+    shown = notes_maps.derive(case, notes_maps.parse_block(
+        f"layer: {line}\nlayer: {vehicles}\nhide: {line}\ncolour: {vehicles} = #009e73\nlabels: off")).data
+    assert {one["layer"] for one in shown["features"]} == {"Vehicles"}
+    assert {one["style"]["color"] for one in shown["features"]} == {"#009e73"}
+    assert all(one["style"]["icon"].startswith("s-badge-tank-009e73") for one in shown["features"])
+    assert not any(one["style"].get("label") for one in shown["features"])
+    named = notes_maps.derive(case, notes_maps.parse_block(f"layer: {line}\nlabels: on")).data
+    assert all(one["style"]["label"] and one["at"] for one in named["features"]), "a named line says its name on its middle"
+    # its ids stay as they were: a hidden layer keeps its place in the count
+    assert {one["id"][:2] for one in shown["features"]} == {"l1"}
+
+
+def test_proofs_only_where_they_were_filmed(client):
+    cid, case = _case(client)
+    _proof(client, cid, "Heights", "2026-10-20", [("12.7295, 43.5002", "POV", True), ("12.7400, 43.5100", "Crest", False)])
+    _proof(client, cid, "Airport", "2026-10-09", [("12.8636, 43.5205", "Gate", False)])
+    every = notes_maps.derive(case, notes_maps.parse_block("proofs: all")).data
+    filmed = notes_maps.derive(case, notes_maps.parse_block("proofs: all\nproof points: filmed")).data
+    assert [one["label"] for one in every["features"]] == ["Airport, Gate", "Heights, POV", "Heights, Crest"]
+    assert [one["label"] for one in filmed["features"]] == ["Heights, POV"]
+    assert [step["day"] for step in filmed["steps"]] == ["2026-10-20"]
+
+
+def test_the_day_it_opens_on_the_timeline_play_crowds_north_and_scale_ride_in_its_data(client):
+    cid, case = _case(client)
+    line = _tracked_line(case)
+    data = notes_maps.derive(case, notes_maps.parse_block(
+        f"layer: {line}\nopens on: 2026-10-21\ntimeline: off\nspeed: slow\ncrowds: off\nnorth: on\nscale: off")).data
+    assert "2026-10-21" in data["days"] and data["day"] == "2026-10-21", "a day of its own becomes a stop"
+    assert (data["timeline"], data["speed"], data["crowds"], data["north"], data["scale"]) == (False, 2200, 0, True, "off")
+    plain = notes_maps.derive(case, notes_maps.parse_block(f"layer: {line}\nspeed: normal\ncrowds: 12")).data
+    assert "speed" not in plain and plain["crowds"] == 12
+
+
+def test_a_frame_is_what_the_map_shows_its_ground_laid_where_it_stands(client, tiles_here):
+    cid, case = _case(client)
+    line = _tracked_line(case)
+    ground = _ground(client, cid)
+    whole = notes_maps.derive(case, notes_maps.parse_block(f"layer: {line}\nground: {ground}"))
+    west, south, east, north = whole.data["bounds"]
+    part = [west + (east - west) * 0.25, south + (north - south) * 0.25, east - (east - west) * 0.25, north - (north - south) * 0.25]
+    framed = notes_maps.derive(case, notes_maps.parse_block(f"layer: {line}\nground: {ground}\nframe: {', '.join(map(str, part))}"))
+    assert framed.data["bounds"] == [round(value, 6) for value in part]
+    assert framed.data["ground"]["bounds"] == whole.data["bounds"]
+    framed.data["ground"]["src"] = "data:image/png;base64,AAAA"
+    figure = notes_html._map_figure(framed, "map-1", "")
+    place = re.search(r'class="az-map-ground"[^>]* style="left:(-?[\d.]+)%;top:(-?[\d.]+)%;width:([\d.]+)%;height:([\d.]+)%"',
+                      figure)
+    assert place and [round(float(value)) for value in place.groups()] == [-50, -50, 200, 200]
+    # the picture for the PDF lays the ground the same way: its middle, magnified
+    picture = Image.open(io.BytesIO(notes_maps.render_png(framed.data, 400, ground=framed.ground)))
+    assert picture.size[0] == 400
+
+
+def test_a_card_says_only_what_the_block_asks(client):
+    cid, case = _case(client)
+    vehicles = _markers(client, cid)
+    _proof(client, cid, "Heights", "2026-10-20", [("12.7295, 43.5002", "POV", True)])
+    data = notes_maps.derive(case, notes_maps.parse_block(f"layer: {vehicles}\nproofs: all\ncard: sentence")).data
+    for feature in data["features"]:
+        assert not {"media", "source", "links", "verify"} & set(feature["card"]), feature["card"]
+        assert feature["card"]["title"]
+    assert any(feature["card"].get("text") for feature in data["features"])
+
+
+def test_its_own_steps_are_played_in_their_order_a_proofs_step_opening_its_card(client):
+    cid, case = _case(client)
+    early = _proof(client, cid, "Airport", "2026-10-09", [("12.8636, 43.5205", "Gate", False)])
+    late = _proof(client, cid, "Heights", "2026-10-20", [("12.7295, 43.5002", "POV", True)])
+    derived = notes_maps.derive(case, notes_maps.parse_block("proofs: all"))
+    assert derived.step_proofs == {"p0": early["id"], "p1": late["id"]}
+    own = notes_maps.derive(case, notes_maps.parse_block(
+        f"proofs: all\nstep: 2026-10-20 | | | {late['id']} | The heights first\nstep: | The airport | 12.86, 43.52, 14 | "
+        f"{early['id']}\nstep: | Whole map"))
+    steps = own.data["steps"]
+    assert [step["label"] for step in steps] == ["", "The airport", "Whole map"]
+    assert steps[0]["focus"] == ["p1"] and steps[0]["text"] == "The heights first" and steps[0]["name"] == "Heights"
+    assert steps[0]["view"]["center"] == [43.5002, 12.7295] and steps[0]["view"]["zoom"] is not None
+    assert steps[1]["view"] == {"center": [43.52, 12.86], "zoom": 14, "bearing": 0, "pitch": 0}
+    assert steps[2]["view"]["zoom"] == own.data["view"]["zoom"], "a step that frames nothing keeps the map's view"
+    assert own.step_proofs == {"s0": late["id"], "s1": early["id"]}
+
+
+def test_a_map_shown_otherwise_carries_its_sheet_its_size_legend_north_and_base(client):
+    cid, case = _case(client)
+    line = _tracked_line(case)
+    plain = notes_html.render(case, title="Map", text=f"::: map\nlayer: {line}\n:::\n").html.decode()
+    assert ".az-map-north" not in plain and "az-size-" not in plain and "data-base" not in plain
+    shown = notes_html.render(case, title="Map", text=f"::: map\nlayer: {line}\nsize: half\nlegend: folded\nnorth: on\n"
+                                                      "base: dark\nscale: off\n:::\n").html.decode()
+    assert 'class="az-figure az-map az-size-half"' in shown
+    assert '<details class="az-map-key"><summary>Legend</summary>' in shown
+    assert 'class="az-map-north" role="img" aria-label="North is up"' in shown and 'data-base="dark"' in shown
+    assert ".az-map-north {" in shown and '"scale":"off"' in shown and '"base":"dark"' in shown
+    hidden = notes_html.render(case, title="Map", text=f"::: map\nlayer: {line}\nlegend: hidden\n:::\n").html.decode()
+    assert 'class="az-map-legend"' not in hidden
+
+
+def test_a_dark_map_goes_live_in_the_dark_style_of_the_same_host(client, monkeypatch):
+    cid, case = _case(client)
+    line = _tracked_line(case)
+    live = notes_html.LiveMaps(csp=notes_web.folder_csp(notes_web.LIVE_SOURCES), style=notes_web.LIVE_STYLE,
+                               dark=notes_web.LIVE_DARK, version="5.0.0", files={"maplibre-gl.js": b"x"})
+    for text, dark in ((f"::: map\nlayer: {line}\n:::\n", False), (f"::: map\nlayer: {line}\nbase: dark\n:::\n", True)):
+        folder = notes_html.Folder(csp=notes_web.folder_csp(), live=live)
+        page = notes_html.render(case, title="Map", text=text, folder=folder).html.decode()
+        said = json.loads(re.search(r'<script type="application/json" id="az-gl">(.*?)</script>', page).group(1))
+        assert ("dark" in said) is dark
+        assert notes_web.LIVE_DARK.startswith(notes_web.LIVE_HOST)
+
+
+def test_the_pdf_picture_draws_a_north_arrow_a_scale_a_dark_base_and_an_area_named_on_its_middle():
+    base = notes_maps.derive(None, notes_maps.parse_block("layer: A")).data
+    ground = Image.new("RGB", (400, 250), (230, 230, 225))
+    data = {**base, "bounds": [43.4, 12.6, 43.6, 12.8], "ground": {"src": "", "bounds": [43.4, 12.6, 43.6, 12.8]},
+            "features": [{"id": "a", "kind": "area", "coords": [[[[43.45, 12.65], [43.55, 12.65], [43.55, 12.75],
+                                                                   [43.45, 12.75], [43.45, 12.65]]]],
+                          "from": None, "until": None, "label": "about 15 km²", "style": {"color": "#d55e00", "label": True},
+                          "card": {}, "of": "a", "layer": "Drawn", "group": ""}]}
+    data["features"][0]["at"] = notes_maps.label_anchor(data["features"][0])
+    assert data["features"][0]["at"] == [43.5, pytest.approx(12.700021, abs=1e-4)]
+
+    def pixels(extra):
+        return Image.open(io.BytesIO(notes_maps.render_png({**data, **extra}, 400, ground=ground))).convert("RGB")
+
+    plain, marked = pixels({}), pixels({"north": True, "scale": "on"})
+    width, height = plain.size
+    corner = (width - 30, 0, width, 30)
+    assert plain.crop(corner).tobytes() != marked.crop(corner).tobytes(), "the north arrow, top right"
+    foot = (0, height - 14, 70, height)
+    assert plain.crop(foot).tobytes() != marked.crop(foot).tobytes(), "the scale, bottom left"
+    assert sum(pixels({"base": "dark"}).getpixel((5, 5))) < 200 < sum(plain.getpixel((5, 5))), "a dark base turns its street map dark"
+    centre = plain.crop((width // 2 - 25, height // 2 - 8, width // 2 + 25, height // 2 + 8))
+    assert max(sum(centre.getpixel((x, y))) for x in range(centre.width) for y in range(centre.height)) > 700, \
+        "the area's name, white, on its middle"
+
+
+# -- the settings card's calls ---------------------------------------------------------------------
+
+
+def _note_with(client, cid, text, title="Front map") -> dict:
+    made = client.post(f"/api/cases/{cid}/notes", json={"title": title, "content": text})
+    assert made.status_code == 200, made.text
+    return made.json()
+
+
+def test_the_card_reads_what_the_map_shows_its_layers_steps_and_colours_fetching_nothing(client, monkeypatch):
+    cid, case = _case(client)
+    line = _tracked_line(case)
+    vehicles = _markers(client, cid)
+    proof = _proof(client, cid, "Heights", "2026-10-20", [("12.7295, 43.5002", "POV", True)])
+    monkeypatch.setattr(tiles, "_default_fetch", lambda *_: (_ for _ in ()).throw(AssertionError("no tile")))
+    answer = client.post(f"/api/cases/{cid}/notes/maps/describe",
+                         json={"text": f"::: map\ntitle: Front\nlayer: {line}\nhide: {line}\nproofs: all\n:::"}).json()
+    assert answer["base"] == "satellite" and answer["ground"] is None and answer["svg"].startswith("<svg")
+    assert [(row["name"], row["on"], row["own"], row["from"]) for row in answer["layers"]] == [(line, False, False, "line")]
+    assert [row["name"] for row in answer["others"]] == [vehicles]
+    assert answer["steps"] == [{"label": "", "day": "2026-10-20", "text": "Seen on the heights.", "name": "Heights",
+                                "proof": proof["id"], "view": [12.7295, 43.5002, answer["steps"][0]["view"][2]]}]
+    assert answer["drawings"] == [], "a layer the analyst made elsewhere is never listed as drawn on the map"
+    assert answer["extent"] and answer["proofs"]["count"] == 1
+
+
+def test_a_base_files_its_own_ground_on_the_press_and_answers_its_lines(client, tiles_here):
+    cid, case = _case(client)
+    vehicles = _markers(client, cid)
+    put = client.post(f"/api/cases/{cid}/notes/maps", json={"layers": [vehicles]}).json()
+    asked = len(tiles_here)
+    street = client.post(f"/api/cases/{cid}/notes/maps/ground", json={"text": put["text"], "base": "map"}).json()
+    assert street["base"] == "map" and street["ground"] != put["ground"]["id"] and street["filed"] == [street["ground"]]
+    assert len(tiles_here) > asked and all("openstreetmap" in url for url in tiles_here[asked:])
+    sidecar = case.media_items_by_paths([case.get_entity(street["ground"])["attrs"]["path"]])[0]["source"]
+    assert sidecar["provider"] == "osm"
+    # the same view again is cited, nothing fetched: a dark base is the street map drawn dark
+    asked = len(tiles_here)
+    dark = client.post(f"/api/cases/{cid}/notes/maps/ground", json={"text": put["text"], "base": "dark"}).json()
+    assert dark["ground"] == street["ground"] and dark["filed"] == [] and len(tiles_here) == asked
+    text = put["text"].replace("\n:::", "\nbase: map\n:::").replace(put["ground"]["id"], street["ground"])
+    derived = notes_maps.derive(case, notes_maps.parse_block(text.split("\n", 1)[1].rsplit("\n", 1)[0]))
+    assert derived.data["credits"][0].startswith("Map: ") and derived.data["base"] == "map"
+
+
+def test_a_base_that_cannot_be_fetched_keeps_the_ground_and_says_so(client, tiles_here, monkeypatch):
+    cid, _ = _case(client)
+    vehicles = _markers(client, cid)
+    put = client.post(f"/api/cases/{cid}/notes/maps", json={"layers": [vehicles]}).json()
+
+    def offline(_client, _url):
+        raise OSError("no network")
+
+    monkeypatch.setattr(tiles, "_default_fetch", offline)
+    refused = client.post(f"/api/cases/{cid}/notes/maps/ground", json={"text": put["text"], "base": "topographic"})
+    assert refused.status_code == 503
+    assert refused.json()["detail"] == ("The topographic map could not be fetched, so the map keeps its ground. "
+                                        "Try again once online.")
+
+
+def test_an_empty_map_is_a_layer_of_its_own_and_a_ground_drawn_on_from_its_card(client, tiles_here):
+    cid, case = _case(client)
+    started = client.post(f"/api/cases/{cid}/notes/maps/scratch", json={
+        "title": "The quay", "west": 43.30, "south": 12.60, "east": 43.40, "north": 12.66, "base": "topographic"}).json()
+    block = notes_maps.parse_block(started["text"].split("\n", 1)[1].rsplit("\n", 1)[0])
+    assert block.title == "The quay" and block.layers == [started["layer"]] and block.base == "topographic"
+    assert block.ground == started["ground"]["id"] and block.view is not None
+    layer = case.find_entity(attr="spec", value=layout.layer_spec_rel(started["layer"]))
+    assert started["filed"] == [block.ground, layer["id"]], "Undo of the put sends both to the Trash"
+    # three points and a line, each with its name, its day or days and its colour
+    drawn = []
+    for number, (lon, lat) in enumerate([(43.33, 12.62), (43.35, 12.63), (43.37, 12.64)]):
+        answer = client.post(f"/api/cases/{cid}/notes/maps/features", json={
+            "layer": started["layer"], "kind": "point", "coords": [lon, lat], "name": f"Post {number + 1}",
+            "colour": "#D55E00", "start": "2026-10-0" + str(number + 1)})
+        assert answer.status_code == 200, answer.text
+        drawn.append(answer.json()["key"])
+    road = client.post(f"/api/cases/{cid}/notes/maps/features", json={
+        "layer": started["layer"], "kind": "line", "coords": [[43.32, 12.61], [43.36, 12.63], [43.38, 12.65]],
+        "name": "Road", "colour": "#0072b2", "start": "2026-10-02", "end": "2026-10-10", "label": True}).json()
+    area = client.post(f"/api/cases/{cid}/notes/maps/features", json={
+        "layer": started["layer"], "kind": "area", "coords": [[43.31, 12.61], [43.34, 12.61], [43.34, 12.64]],
+        "name": "about 15 km²", "colour": "#d55e00", "highlight": True}).json()
+    described = client.post(f"/api/cases/{cid}/notes/maps/describe", json={"text": started["text"]}).json()
+    rows = {row["name"]: row for row in described["drawings"]}
+    assert set(rows) == {"Post 1", "Post 2", "Post 3", "Road", "about 15 km²"}
+    assert rows["Road"]["from"] == "2026-10-02" and rows["Road"]["until"] == "2026-10-10" and rows["Road"]["label"]
+    assert rows["about 15 km²"]["highlight"] and rows["about 15 km²"]["label"] and rows["Post 1"]["colour"] == "#d55e00"
+    assert described["layers"][0]["own"]
+    data = notes_maps.derive(case, block).data
+    shown = {one["label"]: one for one in data["features"]}
+    assert shown["Road"]["from"] == "2026-10-02" and shown["Road"]["until"] == "2026-10-10" and shown["Road"]["at"]
+    assert shown["about 15 km²"]["style"]["dash"] == "dashed" and shown["about 15 km²"]["at"]
+    # renamed, its days moved, taken out and put back
+    edited = client.patch(f"/api/cases/{cid}/notes/maps/features/{road['key']}",
+                          json={"layer": started["layer"], "name": "Coast road", "end": "", "label": False})
+    assert edited.status_code == 200, edited.text
+    gone = client.delete(f"/api/cases/{cid}/notes/maps/features/{area['key']}", params={"layer": started["layer"]})
+    assert gone.status_code == 200
+    back = client.post(f"/api/cases/{cid}/notes/maps/features/{area['key']}/restore", params={"layer": started["layer"]})
+    assert back.status_code == 200
+    rows = {row["name"]: row for row in client.post(f"/api/cases/{cid}/notes/maps/describe",
+                                                    json={"text": started["text"]}).json()["drawings"]}
+    assert rows["Coast road"]["until"] == "" and not rows["Coast road"]["label"] and "about 15 km²" in rows
+    # what was drawn is case data: the note that maps it uses the layer, the step's proof too
+    _note_with(client, cid, started["text"])
+    assert layout.layer_spec_rel(started["layer"]) in uses_engine.used_refs(case)
+
+
+def test_a_drawing_refuses_what_is_no_place_and_a_period_that_is_no_day(client):
+    cid, case = _case(client)
+    layer = client.post(f"/api/cases/{cid}/notes/maps/layer", json={"title": "Drawn"}).json()["name"]
+    bad = client.post(f"/api/cases/{cid}/notes/maps/features", json={"layer": layer, "kind": "point", "coords": [400, 12]})
+    assert bad.status_code == 422
+    day = client.post(f"/api/cases/{cid}/notes/maps/features", json={"layer": layer, "kind": "point", "coords": [43, 12],
+                                                                     "start": "21 October"})
+    assert day.status_code == 422 and day.json()["detail"] == "Write a day as YYYY-MM-DD"
+    two = client.post(f"/api/cases/{cid}/notes/maps/features", json={"layer": layer, "kind": "area",
+                                                                     "coords": [[43, 12], [43.1, 12]]})
+    assert two.status_code == 422
+    frame = client.post(f"/api/cases/{cid}/notes/maps/scratch", json={"west": 43, "south": 12, "east": 42, "north": 13})
+    assert frame.status_code == 422
+
+
+def test_a_step_names_its_proof_a_use_the_delete_preview_says(client):
+    cid, case = _case(client)
+    proof = _proof(client, cid, "Heights", "2026-10-20", [("12.7295, 43.5002", "POV", True)])
+    _note_with(client, cid, f"::: map\nproofs: all\nstep: 2026-10-20 | | | {proof['id']} | Heights first\n:::\n")
+    assert proof["id"] in uses_engine.used_refs(case)
+    impact = client.post(f"/api/cases/{cid}/delete-impact", json={"ids": [proof["id"]]}).json()
+    assert ["is a step of a map in it"] in [row["how"] for row in impact["touched"]]
+
+
+def test_an_infographics_map_panel_honours_the_maps_settings(client, monkeypatch):
+    from azimut.engine import notes_infographic
+
+    cid, case = _case(client)
+    line = _tracked_line(case)
+    vehicles = _markers(client, cid)
+    drawn: list[dict] = []
+    real = notes_maps.render_png
+
+    def kept(data, *args, **kwargs):
+        drawn.append(data)
+        return real(data, *args, **kwargs)
+
+    monkeypatch.setattr(notes_maps, "render_png", kept)
+    body = (":::: infographic\ntitle: Losses\n\n::: map\ntitle: Where they lie\n"
+            f"layer: {line}\nlayer: {vehicles}\nhide: {line}\nnorth: on\nscale: on\nbase: dark\nopens on: 2026-11-15\n:::\n\n::::")
+    page = notes_infographic.read(case, body)
+    data = drawn[-1]
+    assert {one["layer"] for one in data["features"]} == {"Vehicles"}
+    assert (data["north"], data["scale"], data["base"], data["day"]) == (True, "on", "dark", "2026-11-15")
+    assert page.bands, "the panel is laid out"

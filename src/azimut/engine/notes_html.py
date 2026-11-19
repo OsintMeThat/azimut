@@ -122,8 +122,9 @@ if TYPE_CHECKING:
 ASSETS = Path(__file__).resolve().parent / "notes_html_assets"
 ASSET_NAMES = ("reader.css", "reader.js")
 #: What a page holding a map adds to them: its style, and its script, spliced into the
-#: reader's where it says so, so a page with no map keeps the reader it always had.
-MAP_ASSET_NAMES = ("reader.map.css", "reader.map.js", "markers.json")
+#: reader's where it says so, so a page with no map keeps the reader it always had; and
+#: the style of a map shown otherwise than by default, only where one is.
+MAP_ASSET_NAMES = ("reader.map.css", "reader.map.js", "markers.json", "reader.mapset.css")
 MAP_SLOT = "  /* az:map */\n"
 #: What a page holding a chart, or an infographic of charts, adds to the reader's style
 #: sheet: kept apart for the same reason, so a page with none stays as light as before.
@@ -294,6 +295,8 @@ class LiveMaps:
     style: str
     version: str
     files: dict[str, bytes]
+    #: The base map's dark style, from the same host, for a map whose base is dark.
+    dark: str = ""
     #: MapLibre's licence, which the folder carries beside the page.
     licence: bytes = b""
     #: The reader's own part for it, and its style, beside the reader's.
@@ -542,6 +545,10 @@ class _Page:
         self._cover_hero: Hero | None = None
         self._heroes: list[tuple[Hero, bool]] = []
         self.maps = 0
+        #: Whether a map of the page is shown otherwise than by default, which brings its sheet,
+        #: and whether one is drawn on a dark base, which a live map draws in its dark style.
+        self.mapset = False
+        self.dark_maps = False
         #: Whether its maps go live online: a folder's, holding one, given what it takes.
         self.live = False
         #: Each map's steps, `(label, day)`, by its figure's id: the cards a story gives it.
@@ -643,6 +650,7 @@ class _Page:
         self.live = live is not None
         charted = bool(self.charts or self.infographics)
         reader_css = (_asset("reader.css") + (_asset("reader.map.css") if mapped else "")
+                      + (_asset("reader.mapset.css") if mapped and self.mapset else "")
                       + (_asset("reader.chart.css") if charted else "")
                       + (_asset("reader.infographic.css") if self.infographics else "")
                       + (_asset("reader.table.css") if self.table_looks else "")
@@ -709,6 +717,8 @@ class _Page:
         module = self.folder.put(_asset(live.module).encode("utf-8"), "reader-live", ".js")
         said = {"module": module, "maplibre": f"{base}/maplibre-gl.js", "css": f"{base}/maplibre-gl.css",
                 "style": live.style}
+        if self.dark_maps and live.dark:
+            said["dark"] = live.dark
         written = json.dumps(said, separators=(",", ":")).replace("<", "\\u003c")
         return f'<script type="application/json" id="az-gl">{written}</script>\n'
 
@@ -1988,6 +1998,8 @@ class _Page:
                                    str(step.get("name") or "")) for step in derived.data.get("steps") or []]
         self._map_credits.extend(str(one) for one in derived.data.get("credits") or [] if one)
         figure = _map_figure(derived, ident, self._caption(block.title, "Map"))
+        self.mapset = self.mapset or _map_set(derived)
+        self.dark_maps = self.dark_maps or derived.data.get("base") == "dark"
         return figure if self.folder is None else self._lift_data(figure, ident)
 
     # -- charts -----------------------------------------------------------------------
@@ -2383,27 +2395,46 @@ def _flush_chart(markup: str, chart: notes_charts.Layout) -> str:
 # -- a map's figure ------------------------------------------------------------------
 
 
+def _map_set(derived: notes_maps.Derived) -> bool:
+    """Whether a map is shown otherwise than by default: its size, its legend, its base, a
+    north arrow, its scale, or a frame other than its ground's."""
+    data = derived.data
+    ground = data.get("ground") or {}
+    framed = bool(ground) and list(ground.get("bounds") or []) != list(data.get("bounds") or [])
+    return bool(derived.display) or framed or any(key in data for key in ("base", "north", "scale"))
+
+
+def _placed(project: notes_maps._Projector, bounds: list[float], width: float, height: float) -> str:
+    """Where a picture covering ``bounds`` stands on a map's stage, in its own shares."""
+    west, south, east, north = bounds
+    left, top = project(west, north)
+    right, bottom = project(east, south)
+    return (f"left:{left / width * 100:.4f}%;top:{top / height * 100:.4f}%;"
+            f"width:{(right - left) / width * 100:.4f}%;height:{(bottom - top) / height * 100:.4f}%")
+
+
 def _map_figure(derived: notes_maps.Derived, ident: str, caption: str) -> str:
     """The figure a map stands in. Its stage holds the ground and the drawing, which read
     whole with no script and in print; its data rides along unread for the reader's
-    script (the ground's address named by the picture's id, so the file holds it once)."""
+    script (the ground's address named by the picture's id, so the file holds it once).
+    How it is shown (`size`, `legend`, `base`, `north`) sets its classes and adds what it
+    draws, and a map that sets nothing is written as it always was."""
     data = derived.data
     ground = data.get("ground")
     width, height = notes_maps.frame_of(data["bounds"])
     ratio = f"--r:{width / height:.4f}"
     picture = ""
+    project = notes_maps._Projector(data["bounds"])
     if ground and ground.get("src"):
         size = ground.get("size") or [0, 0]
-        picture = (f'<img class="az-map-ground" id="{ident}-ground" src="{ground["src"]}" alt="" '
+        # a map framed on another part of the world than its ground lays the ground where it stands
+        place = ("" if list(ground.get("bounds") or []) == list(data["bounds"])
+                 else f' style="{_placed(project, ground["bounds"], width, height)}"')
+        picture = (f'<img class="az-map-ground" id="{ident}-ground" src="{ground["src"]}" alt=""{place} '
                    f'width="{size[0]}" height="{size[1]}" decoding="async">')
     # the sharper pictures of the parts its steps look closer at, each laid where it stands
-    project = notes_maps._Projector(data["bounds"])
     for number, detail in enumerate(data.get("details") or []):
-        west, south, east, north = detail["bounds"]
-        left, top = project(west, north)
-        right, bottom = project(east, south)
-        place = (f"left:{left / width * 100:.4f}%;top:{top / height * 100:.4f}%;"
-                 f"width:{(right - left) / width * 100:.4f}%;height:{(bottom - top) / height * 100:.4f}%")
+        place = _placed(project, detail["bounds"], width, height)
         size = detail.get("size") or [0, 0]
         picture += (f'<img class="az-map-detail" id="{ident}-detail-{number}" src="{detail["src"]}" alt="" '
                     f'width="{size[0]}" height="{size[1]}" style="{place}" decoding="async">')
@@ -2412,9 +2443,13 @@ def _map_figure(derived: notes_maps.Derived, ident: str, caption: str) -> str:
     drawing = notes_maps.svg(derived, ident=ident)
     title = data.get("title") or "Map"
     count = len(data.get("features") or [])
-    stage = (f'<div class="az-map-frame"><div class="az-map-stage" role="group" aria-roledescription="map" '
+    base = f' data-base="{_attr(str(data["base"]))}"' if data.get("base") else ""
+    north = ('<span class="az-map-north" role="img" aria-label="North is up"><svg viewBox="0 0 24 30" '
+             'aria-hidden="true"><path d="M12 2 18 19 12 15.5 6 19Z"/><text x="12" y="29">N</text></svg></span>'
+             if data.get("north") else "")
+    stage = (f'<div class="az-map-frame"><div class="az-map-stage" role="group" aria-roledescription="map"{base} '
              f'aria-label="{_attr(f"Map: {title}. {count} feature" + ("s" if count != 1 else ""))}">'
-             f'{picture}{drawing}</div></div>\n')
+             f'{picture}{drawing}{north}</div></div>\n')
     carried = json.loads(json.dumps(data))
     if carried.get("ground"):
         carried["ground"]["src"] = f"#{ident}-ground"
@@ -2427,12 +2462,17 @@ def _map_figure(derived: notes_maps.Derived, ident: str, caption: str) -> str:
         spoken = notes_style.long_date(date.fromisoformat(data["day"]))
         shown = (f'<p class="az-map-day">As on <time datetime="{data["day"]}">{_text(spoken)}</time>, '
                  f'one of {len(days)} days</p>\n')
-    legend = _map_legend(derived.legend, ident)
+    shown_legend = derived.display.get("legend", "shown")
+    legend = "" if shown_legend == "hidden" else _map_legend(derived.legend, ident)
+    if legend and shown_legend == "folded":
+        legend = f'<details class="az-map-key"><summary>Legend</summary>\n{legend}</details>\n'
     credits = _map_credits(data.get("credits") or [])
     words = "".join(part for part in (caption, credits) if part)
     figcaption = f"<figcaption>{words}</figcaption>\n" if words else ""
     steps = len(data.get("steps") or [])
-    return (f'<figure class="az-figure az-map" data-kind="map" id="{ident}" data-steps="{steps}" '
+    size = derived.display.get("size", "wide")
+    sized = f" az-size-{size}" if size != "wide" else ""
+    return (f'<figure class="az-figure az-map{sized}" data-kind="map" id="{ident}" data-steps="{steps}" '
             f'data-days="{len(days)}" style="{ratio}">\n{stage}{shown}{legend}{figcaption}'
             f'<script type="application/json" class="az-map-data">{script}</script>\n</figure>\n')
 

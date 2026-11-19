@@ -28,7 +28,8 @@ Past the chain:
 - a personal layer's marker following an entity, a sheet's link, vocabulary word or
   attached file: by entity id;
 - a note's map (`::: map`, `engine/notes_maps.py`): the layers and the plate it draws
-  by their records, the ground and the close-ups under it by entity id. Its period of
+  by their records (the layer its card draws in among them), the ground and the
+  close-ups under it and the proof a step of its own opens by entity id. Its period of
   proofs is a question asked of the case, not a name: a proof deleted leaves the map
   one point fewer, as a proof added gives it one more;
 - a note's charts and infographics (`engine/notecharts.py`, `notes_infographic.py`): the
@@ -238,6 +239,9 @@ def _note_maps(text: str) -> Iterator[Lean]:
         for picture in [block.ground, *block.details]:
             if picture and notes_maps.ENTITY_ID.match(picture):
                 yield Lean(picture, "is the ground of a map in it")
+        for proof in dict.fromkeys(step.proof for step in block.steps if step.proof):
+            if notes_maps.ENTITY_ID.match(proof):
+                yield Lean(proof, "is a step of a map in it")
 
 
 #: What a figure's source is to the note that reads it, by the line that names it.

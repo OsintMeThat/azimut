@@ -150,6 +150,62 @@ describe('a map in the report', () => {
   });
 });
 
+/** The fixture's figure with its data changed by `change`, as a block's settings change it. */
+function withData(change) {
+  return FIGURE.replace(/(<script type="application\/json" class="az-map-data">)(.*?)(<\/script>)/s, (_, open, json, close) => {
+    const data = JSON.parse(json);
+    change(data);
+    return `${open}${JSON.stringify(data)}${close}`;
+  });
+}
+
+describe('a map shown otherwise, as its block says', () => {
+  it('has no timeline when it says so, and still shows its day', async () => {
+    const doc = await report(withData((data) => { data.timeline = false; }));
+    expect(doc.querySelector('.az-map-time')).toBeNull();
+    expect(shape(doc, 'l1f1').classList.contains('az-off')).toBe(false);
+  });
+
+  it('plays its days at its own pace, and takes its scale away when it says so', async () => {
+    const doc = await report(withData((data) => { data.speed = 2200; data.scale = 'off'; }));
+    expect(doc.querySelector('.az-map-scale')).toBeNull();
+    const intervals = [];
+    const real = window.setInterval;
+    window.setInterval = (run, ms) => { intervals.push(ms); return real.call(window, run, ms); };
+    doc.querySelector('.az-map-play').dispatchEvent(new window.MouseEvent('click', { bubbles: true }));
+    expect(intervals).toEqual([2200]);
+  });
+
+  it('counts a crowd past its own number, and never with crowds off', async () => {
+    // five marks on one spot: spread under the default dozen, a count to press past two
+    const crowded = (data) => {
+      for (let n = 0; n < 4; n += 1) data.features.push({ ...data.features[2], id: `c${n}`, of: `c${n}`, from: null, coords: [43.495, 12.745] });
+    };
+    const markup = (change) => withData(change).replace('</g><g class="az-labels"',
+      `${[0, 1, 2, 3].map((n) => `<g class="az-f az-point" data-id="c${n}" data-of="c${n}" data-x="760.4" data-y="614.8" data-s="1" data-colour="#e53935"></g>`).join('')}</g><g class="az-labels"`);
+    const spread = await report(markup(crowded));
+    expect(spread.querySelectorAll('.az-bubble')).toHaveLength(0);
+    await window.happyDOM.close();
+    const counted = await report(markup((data) => { crowded(data); data.crowds = 2; }));
+    expect(counted.querySelectorAll('.az-bubble')).toHaveLength(1);
+    expect(counted.querySelector('.az-bubble-count').textContent).toBe('6');
+    await window.happyDOM.close();
+    const never = await report(markup((data) => { crowded(data); data.crowds = 0; }));
+    expect(never.querySelectorAll('.az-bubble')).toHaveLength(0);
+  });
+
+  it('keeps a line’s or an area’s name on its middle at every zoom, at the size of the others', async () => {
+    const named = FIGURE.replace('<g class="az-labels" aria-hidden="true">',
+      '<g class="az-labels" aria-hidden="true"><text class="az-label" data-for="l0f0s1" data-x="400.0" data-y="300.0" x="400.0" y="306.2" font-size="18.18" text-anchor="middle">Forward line</text>');
+    const doc = await report(named);
+    const label = doc.querySelector('.az-label[data-x]');
+    const size = Number(label.getAttribute('font-size'));
+    doc.querySelector('[data-act="in"]').dispatchEvent(new window.MouseEvent('click', { bubbles: true }));
+    expect(label.getAttribute('x')).toBe('400.0');
+    expect(Number(label.getAttribute('font-size'))).toBeCloseTo(size / 2, 1);
+  });
+});
+
 describe('a page with no map', () => {
   it('keeps the reader it had: no map code, and the place the map code goes', () => {
     const plain = readFileSync(new URL('reader.js', ASSETS), 'utf8');
