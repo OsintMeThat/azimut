@@ -90,3 +90,57 @@ test('Settings sets the search bar Always on a short table, and the HTML view sh
   await expect.poll(() => written.at(-1) ?? '').toBe(NOTE);
   await expect(frame.locator('.az-filter')).toHaveCount(0);
 });
+
+/** A report as the server writes one: a contents bar on a narrow screen, a short table, words to scroll past it. */
+function report(classes = 'az-table', data = '') {
+  const rows = Array.from({ length: 8 }, (_, index) => `<tr style="--az-c:#184f95"><td dir="auto">${index + 1}</td><td dir="auto">Model ${index % 3}</td>`
+    + `<td class="az-key" dir="auto">confirmed</td></tr>`).join('\n');
+  const words = Array.from({ length: 30 }, () => '<p dir="auto">Words after the table, enough of them to scroll the page past it.</p>').join('\n');
+  return `<!doctype html><html lang="en" data-look="report"><head><meta charset="utf-8"><style>${CSS}</style></head><body>
+<header class="az-cover" data-cover="none"><h1 class="az-title" dir="auto">Register</h1></header>
+<div class="az-page"><nav class="az-contents" aria-label="Contents"><ol><li><a href="#the-vehicles">The vehicles</a></li></ol></nav>
+<main class="az-body" id="main"><h2 id="the-vehicles" dir="auto">The vehicles</h2><p dir="auto">One row per vehicle.</p>
+<div class="az-table-wrap"><table class="${classes}" data-rows="8"${data}><thead><tr><th scope="col" dir="auto">#</th>
+<th scope="col" dir="auto">Model</th><th scope="col" dir="auto">Grade</th></tr></thead><tbody>${rows}</tbody></table></div>
+${words}</main></div><script>${JS}</script></body></html>`;
+}
+
+/** Where the header's cells stand against the first row and the contents bar, once the table's top went `past` px under the bar. */
+async function header(tab, past) {
+  if (past !== null) {
+    await tab.evaluate((by) => {
+      const table = document.querySelector('table.az-table');
+      const bar = document.querySelector('.az-contents').offsetHeight;
+      window.scrollTo({ top: table.getBoundingClientRect().top + window.scrollY - bar + by, behavior: 'instant' });
+    }, past);
+    // the bar stands at the top once the page is scrolled past it
+    await expect.poll(() => tab.evaluate(() => Math.round(document.querySelector('.az-contents').getBoundingClientRect().top))).toBe(0);
+  }
+  return tab.evaluate(() => {
+    const table = document.querySelector('table.az-table');
+    const cell = table.querySelector('thead th').getBoundingClientRect();
+    return {
+      bar: Math.round(document.querySelector('.az-contents').getBoundingClientRect().bottom),
+      top: Math.round(cell.top), bottom: Math.round(cell.bottom), first: Math.round(table.querySelector('tbody tr').getBoundingClientRect().top),
+    };
+  });
+}
+
+test('a table that fits a phone keeps its header over its first row, and under the contents bar as the page scrolls', async ({ page: tab }) => {
+  await tab.setViewportSize({ width: 390, height: 844 });
+  for (const [classes, data] of [['az-table', ''], ['az-table az-coloured az-first az-stripes', ' data-fold="5"']]) {
+    await tab.setContent(report(classes, data));
+    await expect(tab.locator('html')).toHaveClass(/az-barred/);
+    // at rest the header stands right above the first row, never over it
+    const rest = await header(tab, null);
+    expect(Math.abs(rest.bottom - rest.first)).toBeLessThanOrEqual(1);
+    // the table's top gone 120 px under the bar: the header stays just under the bar
+    const scrolled = await header(tab, 120);
+    expect(Math.abs(scrolled.top - scrolled.bar)).toBeLessThanOrEqual(1);
+  }
+  // a header set to scroll leaves with its rows
+  await tab.setContent(report('az-table', ' data-header="scrolls"'));
+  const gone = await header(tab, 120);
+  expect(gone.top).toBeLessThan(gone.bar - 60);
+});
+

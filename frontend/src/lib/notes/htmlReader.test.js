@@ -250,8 +250,11 @@ describe('a table sorts, filters and points at a row', () => {
     Object.defineProperty(wrap, 'clientWidth', { value: 580, configurable: true });
     window.dispatchEvent(new window.Event('resize'));
     expect(wrap.classList.contains('az-slides')).toBe(true);
-    // the style sheet: never the page that slides, and five columns take the figures' width
-    expect(CSS).toContain('.az-js .az-table-wrap:not(.az-slides) { overflow: visible; }');
+    // the style sheet: never the page that slides, and five columns take the figures' width. A
+    // table that fits is no frame of its own at any width: on a phone its header, stuck under the
+    // contents bar within such a frame, stood that bar's height over its first row
+    expect(CSS).toMatch(/^\.az-js \.az-table-wrap:not\(\.az-slides\) \{ overflow: visible; \}$/m);
+    expect(CSS).not.toMatch(/@media[^{]*\{ \.az-js \.az-table-wrap:not/);
     // every table stands on the axis, as wide as it needs up to the wide width
     expect(CSS).toMatch(/\.az-body > :is\(\.az-table-wrap, \.az-table-block\) \{ grid-column: wide; justify-self: center; width: fit-content;/);
   });

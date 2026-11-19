@@ -387,8 +387,9 @@ html:not(.az-js) .az-graphic:focus-within img { filter: none; transform: none; }
 .az-sort:hover { background: var(--tint); }
 .az-table-tools { display: flex; align-items: center; gap: .75rem; font: 400 .8125rem/1.3 var(--ui); color: var(--muted); }
 .az-filter { flex: 0 1 18rem; min-width: 0; padding: .45rem .7rem; border: 1px solid var(--rule); border-radius: 4px; background: var(--paper); color: var(--ink); font: inherit; }
-/* a table that fits needs no frame of its own, and its header then sticks to the page; one that slides keeps it in its frame */
-@media (min-width: 64rem) { .az-js .az-table-wrap:not(.az-slides) { overflow: visible; } }
+/* a table that fits needs no frame of its own, at any width, and its header then sticks to the page under the
+   contents bar (in a frame of its own it stood that bar's height over the first row); one that slides keeps it in its frame */
+.az-js .az-table-wrap:not(.az-slides) { overflow: visible; }
 .az-slides { max-height: 88vh; overflow: auto; overscroll-behavior-x: contain; }
 .az-slides thead th { top: 0; }
 
