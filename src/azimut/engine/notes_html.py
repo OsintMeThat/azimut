@@ -378,6 +378,8 @@ def render(
     values = identity.values(day)
     empty: dict[str, int] = {}
     passages = [0]
+    profile = look.profile()
+    text = md.sources_cut(text, look, profile)
     cut = notefill.split_cover(text) if look.cover.own else None
     pieces = md.expand(title, cut.body if cut is not None else text, resolve=resolve, note_id=note_id,
                        public=public, counter=passages, values=values, empty=empty)
@@ -393,7 +395,7 @@ def render(
     if public and any(md.holds_internal(block.tokens) for parsed in blocks.values() for block in parsed):
         raise NotesHtmlError("an internal passage could not be left out, so the public edition was not made")
     theme = notes_style.theme_for(look)
-    cited = md.Cited(case, look=look, styled=not theme.plain, identity=identity, profile=look.profile())
+    cited = md.Cited(case, look=look, styled=not theme.plain, identity=identity, profile=profile)
     cited.collect(shown, blocks)
     if look.cover.own and cover is None:
         cited.warn(notefill.EMPTY_COVER, cut.line if cut is not None else None, md.OTHER)
@@ -952,7 +954,7 @@ class _Page:
         if open_sub:
             items.append("</ol></li>")
         if sources:
-            items.append('<li class="az-contents-sources"><a href="#sources">Sources</a></li>')
+            items.append(f'<li class="az-contents-sources"><a href="#sources">{_text(self.cited.list_title)}</a></li>')
         items.extend(f'<li class="az-contents-annex"><a href="#{ident}">{_text(name)}</a></li>' for ident, name in annexes)
         if corrections:
             items.append('<li class="az-contents-corrections"><a href="#corrections">Corrections</a></li>')
@@ -2170,7 +2172,7 @@ class _Page:
         entries = "".join(self._source_entry(entry) if style == "short" else self._styled_entry(entry, style)
                           for entry in annex.entries)
         return (f'<section class="az-sources" id="sources" aria-labelledby="sources-title">\n'
-                f'<h2 id="sources-title">Sources</h2>\n<ol>\n{entries}</ol>\n</section>\n')
+                f'<h2 id="sources-title">{_text(self.cited.list_title)}</h2>\n<ol>\n{entries}</ol>\n</section>\n')
 
     def _styled_entry(self, entry: Entry, style: str) -> str:
         """One source as ``style`` writes it (`notesources.entry`), a capture's check pages

@@ -1,0 +1,22 @@
+{
+  "about": "Whether a note has its own list of sources, as the Look and the renderers both read it: the word its heading uses, or none.",
+  "cases": [
+    { "text": "## Sources\n\n### Our work\n\n- [Post](https://x.com/a/status/1)", "own": "sources" },
+    { "text": "Words.\n\n# References\n", "own": "references" },
+    { "text": "#### sources:", "own": "sources" },
+    { "text": "## 5. Sources", "own": "sources" },
+    { "text": "## 5 References ##", "own": "references" },
+    { "text": "## **Sources**", "own": "sources" },
+    { "text": "   ## Sources", "own": "sources" },
+    { "text": "## Sources of funding", "own": "" },
+    { "text": "Sources\n=======", "own": "" },
+    { "text": "> ## Sources", "own": "" },
+    { "text": "- ## Sources", "own": "" },
+    { "text": "    ## Sources", "own": "" },
+    { "text": "```\n## Sources\n```\n\nText.", "own": "" },
+    { "text": "~~~~\n```\n## Sources\n~~~~\n## References", "own": "references" },
+    { "text": "##Sources", "own": "" },
+    { "text": "Our sources are below.", "own": "" },
+    { "text": "", "own": "" }
+  ]
+}

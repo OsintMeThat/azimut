@@ -421,3 +421,105 @@ def test_each_style_prints_as_it_was_pinned(tmp_path, monkeypatch, style):
         kept = tmp_path / f"{style}.pdf"
         kept.write_bytes(pdf)
         pytest.fail(f"the {style} note no longer prints as it did ({digest}); see {kept}")
+
+
+# -- the list of sources a note ends on ---------------------------------------------------------
+
+OWN_FIXTURE = Path(__file__).parent / "fixtures" / "own-sources.json"
+#: A note's own list of sources, grouped by kind as the analyst wrote it, and a section after it.
+OWN = ("\n## Sources\n\n### Agencies\n\n- [Harbour bulletin](https://harbour.example.net/bulletin)\n\n"
+       "## After\n\nLast words.\n")
+
+
+def test_a_note_s_own_sources_heading_is_read_as_the_look_reads_it():
+    """`tests/fixtures/own-sources.json`, which `look.test.js` reads against `ownSources`:
+    the Look never says a note ends on its own section while the document prints the other."""
+    for case in json.loads(OWN_FIXTURE.read_text(encoding="utf-8"))["cases"]:
+        assert notes_markdown.own_sources(case["text"]) == case["own"], case["text"]
+
+
+def test_the_sources_list_choice_is_a_late_key():
+    assert "sources_list" not in NoteLook(style="report").model_dump(mode="json")
+    assert look(style="report", sources_list="both").model_dump(mode="json")["sources_list"] == "both"
+    read = notelook.parse({"style": "report", "sources_list": "all of them"})
+    assert read is not None and read.style == "report" and read.sources_list == ""
+    with pytest.raises(ValueError):
+        NoteLook.model_validate({"sources_list": "mine"})
+
+
+def test_a_note_with_its_own_sources_section_ends_on_it_and_its_links_are_still_checked(sourced):
+    """The owner's article ends on its own Sources, grouped by kind; the report added a
+    generated list after it. A note with its own section now ends on it by default."""
+    _, case, made = sourced
+    text = _note(made) + OWN
+    pdf = notes_pdf.render(case, title="Strike", text=text, look=look(style="report"), created=CREATED)
+    printed = squash(pdf_text(pdf.pdf))
+    assert squash("Harbour bulletin") in printed and squash("Last words.") in printed
+    assert squash("“Port authority notice”, port-authority.example.org,") not in printed
+    # every outside link is still read for an archived copy and a day it was seen, its own section's too
+    checked = [item["url"] for kind in (notes_markdown.UNARCHIVED, notes_markdown.UNSEEN)
+               for item in pdf.listed.get(kind, [])]
+    checked += [text for text, kind in zip(pdf.warnings, pdf.warning_kinds)
+                if kind in (notes_markdown.UNARCHIVED, notes_markdown.UNSEEN)]
+    assert any("harbour.example.net" in item or "Harbour bulletin" in item for item in checked)
+    page = notes_html.render(case, title="Strike", text=text, look=look(style="report"), created=CREATED).html.decode()
+    # nothing numbered into a list that is not printed
+    assert 'class="az-sources"' not in page and 'href="#src-1"' not in page
+    assert "Harbour bulletin" in page
+    draft = notes_wordpress.build(case, title="Strike", text=text, look=look(style="report"))
+    assert 'id="sources"' not in draft.content.replace('id="sources-', "") and "Harbour bulletin" in draft.content
+
+
+def test_both_lists_print_the_generated_one_headed_references_and_numbered(sourced):
+    _, case, made = sourced
+    text = _note(made) + OWN
+    chosen = look(style="report", sources_list="both")
+    printed = pdf_text(notes_pdf.render(case, title="Strike", text=text, look=chosen, created=CREATED).pdf)
+    assert "References" in printed and "Harbour bulletin" in printed
+    assert squash("“Port authority notice”, port-authority.example.org,") in squash(printed)
+    page = notes_html.render(case, title="Strike", text=text, look=chosen, created=CREATED).html.decode()
+    assert '<h2 id="sources-title">References</h2>' in page and 'href="#src-1"' in page and "Harbour bulletin" in page
+    draft = notes_wordpress.build(case, title="Strike", text=text, look=chosen)
+    assert 'id="sources">References</h2>' in draft.content and "Harbour bulletin" in draft.content
+    # a note headed References keeps "Sources" for the generated list
+    renamed = notes_html.render(case, title="Strike", text=text.replace("## Sources", "## References"), look=chosen,
+                                created=CREATED).html.decode()
+    assert '<h2 id="sources-title">Sources</h2>' in renamed
+
+
+def test_the_generated_list_alone_leaves_the_note_s_own_section_out(sourced):
+    _, case, made = sourced
+    text = _note(made) + OWN
+    chosen = look(style="report", sources_list="generated", toc=True)
+    pdf = notes_pdf.render(case, title="Strike", text=text, look=chosen, created=CREATED)
+    printed = pdf_text(pdf.pdf)
+    assert "Harbour bulletin" not in printed and "Agencies" not in printed and "Last words." in printed
+    assert squash("“Port authority notice”, port-authority.example.org,") in squash(printed)
+    page = notes_html.render(case, title="Strike", text=text, look=chosen, created=CREATED).html.decode()
+    assert "Harbour bulletin" not in page and '<h2 id="sources-title">Sources</h2>' in page
+    # the lines are kept, so a warning after the section still names its own line
+    lines = text.split("\n")
+    assert notes_markdown.without_own_sources(text).split("\n")[lines.index("Last words.")] == "Last words."
+    assert len(notes_markdown.without_own_sources(text).split("\n")) == len(lines)
+    draft = notes_wordpress.build(case, title="Strike", text=text, look=chosen)
+    assert "Harbour bulletin" not in draft.content and "Last words." in draft.content
+
+
+def test_plain_prints_its_own_sources_section_byte_for_byte_whatever_the_choice(tmp_path):
+    case = FakeCase(tmp_path, {})
+    text = "# T\n\nSee [one](https://example.org/a)." + OWN
+    plain = notes_pdf.render(case, title="T", text=text, look=look(style="plain"), created=CREATED).pdf
+    for choice in ("generated", "own", "both"):
+        assert notes_pdf.render(case, title="T", text=text, look=look(style="plain", sources_list=choice),
+                                created=CREATED).pdf == plain, choice
+    assert "Harbour bulletin" in pdf_text(plain)
+
+
+def test_the_look_route_keeps_the_choice_beside_the_note(client):
+    cid = make_case(client)
+    note = client.post(f"/api/cases/{cid}/notes", json={"title": "Article", "content": "Words." + OWN}).json()
+    saved = client.put(f"/api/cases/{cid}/notes/{note['id']}/look", json={"style": "report", "sources_list": "both"})
+    assert saved.status_code == 200, saved.text
+    assert client.get(f"/api/cases/{cid}/notes/{note['id']}/look").json()["look"]["sources_list"] == "both"
+    back = client.put(f"/api/cases/{cid}/notes/{note['id']}/look", json={"style": "report", "sources_list": ""})
+    assert "sources_list" not in back.json()["look"]

@@ -273,6 +273,8 @@ def build(
     identity = identity if identity is not None else notefill.Identity.from_settings()
     values = identity.values(day)
     passages = [0]
+    profile = look.profile()
+    text = md.sources_cut(text, look, profile)
     cut = notefill.split_cover(text) if look.cover.own else None
     body = cut.body if cut is not None else text
     pieces = md.expand(title, body, resolve=resolve, note_id=note_id, public=True, counter=passages, values=values)
@@ -287,7 +289,7 @@ def build(
     blocks = {id(piece): md.alignment_blocks(piece.text) for piece in pieces if piece.kind == "text"}
     if any(md.holds_internal(block.tokens) for parsed in blocks.values() for block in parsed):
         raise NotesWordPressError("an internal passage could not be left out, so nothing was sent")
-    cited = md.Cited(case, look=look, styled=False, identity=identity, profile=look.profile())
+    cited = md.Cited(case, look=look, styled=False, identity=identity, profile=profile)
     cited.collect(pieces, blocks)
     # what the style adds after the sources, as the HTML page has it, but the maps a draft leaves out
     annexes = noteannexes.build(case, cited, cited.profile, day=day, public=True, earlier=earlier,
@@ -1315,7 +1317,7 @@ class _Writer:
         style = self.cited.profile.sources_style
         items = [self._source(entry) if style == "short" else self._styled_source(entry, style)
                  for entry in annex.entries]
-        return [heading(2, "Sources", "sources"), list_block(items, ordered=True)]
+        return [heading(2, self.cited.list_title, "sources"), list_block(items, ordered=True)]
 
     def _styled_source(self, entry: Entry, style: str) -> str:
         """One source as ``style`` writes it (`notesources.entry`), as the HTML page has it."""
