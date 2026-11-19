@@ -6,7 +6,7 @@ whether the table suits it; this says which columns it is drawn by, so a pie of 
 drawn by the grade column and not by the first one:
 
 - **count**: the one column of whole numbers when the table has exactly one (a column of
-  percentages or of row numbers is never a count), else the rows;
+  percentages, confidences or ratios, or of row numbers, is never a count), else the rows;
 - **by**: the first column of words holding more than one value;
 - **colour by**, for the kinds that stack: the column of a few values that repeat, a column
   of grades first;
@@ -51,9 +51,11 @@ def _whole(cell: str) -> bool:
 
 
 def count_column(table: nc.Table) -> str:
-    """What a chart of this table counts: its one column of whole numbers, else its rows."""
+    """What a chart of this table counts: its one column of whole numbers, else its rows. A
+    column of shares (a confidence, a ratio: `notes_charts.reads_as_share`) is never one."""
     rows, _, numbers = kinds_module._shape(table)
-    whole = [column for column in numbers if all(_whole(row[column]) for row in rows if row[column])]
+    whole = [column for column in numbers if all(_whole(row[column]) for row in rows if row[column])
+             and not nc.reads_as_share(table, column)]
     return table.headers[whole[0]] if len(whole) == 1 else nc.ROWS
 
 

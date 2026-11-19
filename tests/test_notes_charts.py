@@ -763,12 +763,15 @@ def dots():
         return nc.Plot([*marks, *legend], 60 + height, lines=[category.name for category in reading.categories],
                        legend=own, facts={"of": reading.block.extra.get("of")}, notes=["Areas to scale."])
 
+    # the waffle reads "of" too: the registry is put back as it was, so a later test still reads it
+    keys = dict(nc._KIND_KEYS)
     kind = nc.register(nc.Kind("dots", "Dots", plot, words=("dot chart",), keys=("of",), legend=False))
     yield kind
     nc.KINDS.pop("dots")
     for word in ("dots", "dot chart"):
         nc._KIND_WORDS.pop(word)
-    nc._KIND_KEYS.pop("of")
+    nc._KIND_KEYS.clear()
+    nc._KIND_KEYS.update(keys)
 
 
 def test_a_registered_kind_is_read_written_laid_and_painted(dots):
@@ -785,3 +788,40 @@ def test_a_registered_kind_is_read_written_laid_and_painted(dots):
     assert [kind.name for kind in nc.kinds()][-1] == "dots"
     bars = nc.read(_block("kind: bars\nof: 3\n| Place | Count |\n| --- | --- |\n| A | 3 |"))
     assert any('a bars chart does not read "of"' in message for message in _messages(bars.checks))
+
+
+# -- what a chart counts with no count written ------------------------------------------------------------
+
+
+REGISTER_ROWS = ("| # | Identification | Grade | Conf. |\n| --- | --- | --- | --- |\n| 1 | Streit Cougar | identified | 80% |\n"
+                 "| 2 | Streit Cougar | identified | 65% |\n| 3 | NIMR Ajban 440A | almost sure | 65% |")
+
+
+def test_a_column_of_percentages_is_never_summed_with_no_count_written():
+    reading = nc.read(_block("kind: bars\nby: Identification\n" + REGISTER_ROWS))
+    assert reading.count is None and reading.total == 3
+    said = [check for check in reading.checks if "counts its rows" in check.message]
+    assert [check.message for check in said] == [
+        'A chart counts its rows: "Conf." reads as a share, which is never summed on its own.']
+    assert said[0].fix == (("count", "rows"),)
+    # a confidence or a ratio by its header, whole numbers or not
+    for header in ("Confidence", "Share of the total", "Ratio", "Conf %", "Rate"):
+        table = f"| Model | {header} |\n| --- | --- |\n| A | 80 |\n| B | 65 |"
+        assert nc.read(_block(table)).count is None, header
+
+
+def test_the_one_column_of_amounts_is_summed_and_the_check_says_which():
+    reading = nc.read(_block("kind: bars\n| Model | Conf. | At least |\n| --- | --- | --- |\n| A | 80% | 3 |\n"
+                             "| B | 65% | 5 |"))
+    assert reading.count == 2 and reading.total == 8
+    said = [check for check in reading.checks if "sums" in check.message]
+    assert [check.message for check in said] == ['A chart sums "At least", its one column of amounts, as no count '
+                                                 'is written.']
+    assert said[0].fix == (("count", "At least"),)
+    written = nc.read(_block("kind: bars\ncount: At least\n| Model | At least |\n| --- | --- |\n| A | 3 |"))
+    assert not any("sums" in check.message for check in written.checks)
+
+
+def test_a_share_named_in_count_is_summed_as_written():
+    reading = nc.read(_block("kind: bars\ncount: Conf.\nby: Identification\n" + REGISTER_ROWS))
+    assert reading.count == 3 and reading.total == 210

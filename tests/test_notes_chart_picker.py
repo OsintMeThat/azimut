@@ -186,3 +186,10 @@ def test_the_editor_writes_settings_in_the_engines_order_and_words():
     assert {key: value for key, value in keys.items() if key in notes_charts.KEYS} == notes_charts.KEYS
     every_kind_key = {key for kind in notes_charts.kinds() for key in kind.keys}
     assert every_kind_key <= set(keys)
+
+
+def test_a_column_of_confidences_is_never_what_a_new_chart_counts():
+    table = notes_charts.parse_block("| # | Model | Conf. |\n| --- | --- | --- |\n| 1 | A | 80 |\n| 2 | B | 65 |").table
+    assert notes_chart_picker.count_column(table) == notes_charts.ROWS
+    both = notes_charts.parse_block("| Model | Confidence | At least |\n| --- | --- | --- |\n| A | 80 | 3 |\n| B | 65 | 5 |").table
+    assert notes_chart_picker.count_column(both) == "At least"

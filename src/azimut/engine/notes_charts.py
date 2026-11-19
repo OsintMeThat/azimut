@@ -186,6 +186,9 @@ TITLE_FLOOR = re.compile(r"\bat least\b|\bminimum\b|≥|>=|\bor more\b|\bno fewe
 TOTAL_ROW = re.compile(r"^(?:sub)?totals?\b", re.I)
 #: A column that numbers the rows, which is never what a chart counts.
 ROW_NUMBER = re.compile(r"^(?:#|n[o°º]?\.?|nr\.?|id|ref\.?|row)$", re.I)
+#: A column of shares, never summed on its own: percentages, confidences, ratios, rates.
+SHARE_HEADER = re.compile(r"%|\bper ?cent|\bpct\b|\bshare\b|\bratio\b|\brates?\b|\bconf(?:idence)?\b|"
+                          r"\bprobability\b|\blikelihood\b|\bodds\b|\bproportion\b", re.I)
 #: What XML refuses and no chart should print.
 CONTROL = re.compile(r"[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]")
 WHOLLY_BOLD = re.compile(r"^\*\*[^*]+\*\*$|^__[^_]+__$")
@@ -1135,8 +1138,20 @@ def _check_lines(block: ChartBlock, kind: Kind, said: str,
             warn(f'{said}: a {kind.label.lower()} chart does not read "{key}".', key=key)
 
 
+def reads_as_share(table: Table, column: int) -> bool:
+    """Whether a column holds shares rather than amounts: its header says a percentage, a
+    confidence, a ratio or a rate, or half its cells end in ``%``. Summing those means nothing."""
+    if SHARE_HEADER.search(table.headers[column]):
+        return True
+    cells = [row[column] for row in table.rows if column < len(row) and row[column]]
+    return bool(cells) and sum(1 for cell in cells if cell.rstrip().endswith("%")) * 2 >= len(cells)
+
+
 def _count_column(block: ChartBlock, table: Table, rows: list[list[str]], said: str,
                   warn: Callable[..., None]) -> int | None:
+    """What a chart counts: the column its ``count`` names, or its rows. With no ``count``
+    line it sums its one column of amounts and says which; a column of shares is never
+    summed on its own (`reads_as_share`), and the rows are counted, said too."""
     if block.count == ROWS:
         return None
     if block.count:
@@ -1146,7 +1161,17 @@ def _count_column(block: ChartBlock, table: Table, rows: list[list[str]], said: 
         return column
     numeric = [index for index in range(len(table.headers))
                if _numeric(rows, index, most=True) and not ROW_NUMBER.match(table.headers[index])]
-    return numeric[0] if len(numeric) == 1 else None
+    amounts = [index for index in numeric if not reads_as_share(table, index)]
+    if len(amounts) == 1:
+        header = _cut(table.headers[amounts[0]], 40)
+        warn(f'{said} sums "{header}", its one column of amounts, as no count is written.',
+             fix=(("count", table.headers[amounts[0]]),))
+        return amounts[0]
+    if numeric and not amounts:
+        header = _cut(table.headers[numeric[0]], 40)
+        warn(f'{said} counts its rows: "{header}" reads as a share, which is never summed on its own.',
+             fix=(("count", ROWS),))
+    return None
 
 
 def _named_column(name: str, table: Table, said: str, key: str, warn: Callable[..., None]) -> int | None:
