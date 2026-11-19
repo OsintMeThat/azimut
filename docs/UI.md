@@ -7113,7 +7113,9 @@ bookmark of the case, titled from its address, nothing fetched. A note with a re
 image says its host is contacted on every open.
 
 **Citations.** A chip or a written link, hovered a moment or with the cursor resting
-inside it, shows a card under it of what the case knows of what it cites
+inside a link or right next to a chip (just after it, or just before it when no link
+ends there; the drawn page steps over a chip whole), shows a card under it of what the
+case knows of what it cites
 (`lib/notes/editor/citationCard.js`): its kind, site and name, a picture's or a proof's
 thumbnail, then **Posted**, **By**, **Seen** (*Made* for a proof, *Captured* for a map
 capture), **Archived** with the copy's day and host, the SHA-256 of a file, and how
@@ -7130,10 +7132,10 @@ for a link, told the note and the words of its links), **Edit link** (the Link f
 on the drawn page) and, for a page the case lacks, **Bookmark it**, which files it, seen
 that day, and leaves the note as written. The card fetches nothing, and a page opens only on
 a press. It reads the same in a drawn table or aligned block and in the raw Markdown,
-over `[[entity:…|…]]` and `[words](https://…)`. With the cursor in it, Tab walks into
+over `[[entity:…|…]]` and `[words](https://…)`. With the cursor at it, Tab walks into
 its actions, the arrows along them, and Escape gives the keys back; a screen reader is
-told it is there. It goes when the pointer leaves it, the cursor leaves the link, or
-typing starts.
+told it is there. It goes when the pointer leaves it, the cursor leaves the link or the
+chip, or typing starts.
 
 **Blocks.** Every block of the drawn page (a paragraph, a heading, a list, a quote, a
 callout, a picture, a table, a diagram, an aligned or corner block, steps, a story, a
