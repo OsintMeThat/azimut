@@ -13,6 +13,11 @@
  * it is opened (a double press, Enter, or its </> button), until the cursor leaves.
  * The page can also be switched off for the raw Markdown (`setNoteMode`).
  *
+ * Nothing on the page needs Markdown to be written: words selected bring up the
+ * selection bubble and its Link field (`editor/bubble.js`, `editor/linkField.js`), `/`
+ * or the + of an empty line the insert menu (`editor/insertMenu.js`), and what they
+ * write is the Markdown an expert would type (`editor/marks.js`).
+ *
  * Built on CodeMirror 6. Everything the page draws is worked out from the editor
  * state alone (`noteDecorations`), so it is tested without a browser.
  *
@@ -34,8 +39,10 @@ import { autocompletion, completionKeymap, acceptCompletion } from '@codemirror/
 
 import { blockKinds } from './editor/blocks.js';
 import { blockKeys, pickedClass, typeNextToBlock, typeOnPicked } from './editor/blockKeys.js';
+import { selectionBubble } from './editor/bubble.js';
 import { drawn, rawField, rawHighlight, typeOverHints } from './editor/decorations.js';
 import './editor/kinds.js';
+import { insertMenu, insertPlus } from './editor/insertMenu.js';
 import { mentionSource } from './editor/mentionMenu.js';
 import { landed, spots } from './editor/puts.js';
 import { blocksIn } from './editor/ranges.js';
@@ -55,6 +62,8 @@ export { mapBlock } from './editor/mapBlock.js';
 export { resizePicture } from './editor/pictureBlock.js';
 export { mentionSource } from './editor/mentionMenu.js';
 export { slashSource } from './editor/slashMenu.js';
+export { openInsertMenu } from './editor/insertMenu.js';
+export { openLinkField } from './editor/bubble.js';
 export {
   LIGHT_MS, blockAt, captionAt, heldRange, holdRange, lightLines, placeText, releaseRange, takeBackRange,
 } from './editor/puts.js';
@@ -73,6 +82,8 @@ const drawing = new Compartment();
 
 const drawnMode = [openBlock, drawn, typeOverHints, typeNextToBlock, Prec.high(typeOnPicked), pickedClass, blockKeys];
 const rawMode = [rawField, syntaxHighlighting(rawHighlight)];
+// what helps write on the drawn page without Markdown: the selection bubble, the + of an empty line
+drawnMode.push(selectionBubble, insertPlus);
 
 /** `drawn` or `markdown`: how the page is shown now. */
 export function noteMode(state) {
@@ -116,6 +127,7 @@ export function noteExtensions({ handlers = {}, placeholder = '', readOnly = fal
     markdown({ base: markdownLanguage, addKeymap: true }),
     syntaxHighlighting(highlight),
     autocompletion({ override: [mentionSource, slashSource(handlers, { template })], icons: false, activateOnTyping: true, closeOnBlur: true }),
+    insertMenu,
     // above Markdown's own Enter, which continues a list: an open menu takes Enter first
     Prec.highest(keymap.of([{ key: 'Tab', run: acceptCompletion }, ...completionKeymap, { key: 'Enter', run: leaveEmptyItem }])),
     keymap.of([

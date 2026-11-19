@@ -23,6 +23,10 @@
    * the browser (`lib/notes/noteMode.svelte.js`): a toggle ends the toolbar, and
    * Ctrl+Shift+M switches it from anywhere in the editor.
    *
+   * The selection bubble's Link field asks the case what it holds at an address
+   * (`lookup`, nothing fetched) and can file the page as a bookmark (`bookmark`), the
+   * same two calls a pasted link makes. The toolbar's + opens the insert menu.
+   *
    * `/` › Interactive map asks what a map shows (`NoteMapPicker.svelte`) and puts it at
    * the cursor the way a tool's put lands, Undo included (`lib/notes/mapPut.js`).
    */
@@ -58,6 +62,7 @@
   import FloatingMenu from './FloatingMenu.svelte';
   import Modal from './Modal.svelte';
   import SearchInput from './SearchInput.svelte';
+  import { openInsertMenu } from '../lib/notes/liveMarkdown.js';
 
   let {
     doc,
@@ -66,7 +71,7 @@
     redirects = {},
     compact = false,
     where = '',
-    placeholder = 'Write here. Type @ to cite something from the case, / to add a heading, a task, a picture or a diagram.',
+    placeholder = 'Write here. Type @ to cite something from the case.',
     onopen = () => {},
     onready = () => {},
     /** Who keeps the text, when it is not a note (a template being edited from Settings). */
@@ -148,6 +153,9 @@
     upload: () => picker?.click(),
     image: (file) => upload(file),
     url: (url, from, to) => offerBookmark(url, from, to),
+    // the Link field asks the case what it holds at an address, and can file one as a bookmark; nothing is fetched
+    get lookup() { return template || !caseId ? null : (url) => lookupSource(caseId, url); },
+    get bookmark() { return template || !caseId ? null : (url, title) => fileBookmark(url, title); },
     media: (event, at) => dropMedia(event, at),
     opener: (entity) => (template || !tools ? null : openerFor(entity)),
     sourceable: (entity) => (template || !caseId ? false : canStateSourceOf(caseId, entity)),
@@ -303,13 +311,7 @@
     startCompletion(view);
   }
   function slash() {
-    if (!view || readOnly) return;
-    const head = view.state.selection.main.head;
-    const line = view.state.doc.lineAt(head);
-    const lead = line.text.slice(0, head - line.from).trim() ? ' /' : '/';
-    view.dispatch({ changes: { from: head, insert: lead }, selection: { anchor: head + lead.length } });
-    view.focus();
-    startCompletion(view);
+    if (view && !readOnly) openInsertMenu(view);
   }
   function callout(kind) {
     calloutAnchor = null;
@@ -386,26 +388,33 @@
       toast(`Already in the case as “${found.label}”`, 'info', 6000, { label: 'Cite it', onClick: () => swap(found) });
       return;
     }
-    let title = answer?.title || url;
-    if (!answer) {
-      try {
-        const parsed = new URL(url);
-        title = `${parsed.hostname.replace(/^www\./, '')}${parsed.pathname === '/' ? '' : parsed.pathname}`.slice(0, 120);
-      } catch { /* the address itself */ }
-    }
     toast('Link pasted', 'info', 6000, {
       label: 'Bookmark it',
       onClick: async () => {
-        try {
-          const entity = await createBookmark(caseId, { title, url });
-          await reloadCase();
-          swap(entity);
-          toast(`Bookmark “${title}” filed`, 'ok', 2200);
-        } catch (error) {
-          toast(error.message, 'danger');
-        }
+        const entity = await fileBookmark(url, answer?.title);
+        if (entity) swap(entity);
       },
     });
+  }
+
+  /** A page filed as a bookmark of the case, named from what the case read off its address, else its host and path. Nothing is fetched. */
+  async function fileBookmark(url, title = '') {
+    let name = title || url;
+    if (!title) {
+      try {
+        const parsed = new URL(url);
+        name = `${parsed.hostname.replace(/^www\./, '')}${parsed.pathname === '/' ? '' : parsed.pathname}`.slice(0, 120);
+      } catch { /* the address itself */ }
+    }
+    try {
+      const entity = await createBookmark(caseId, { title: name, url });
+      await reloadCase();
+      toast(`Bookmark “${name}” filed`, 'ok', 2200);
+      return entity;
+    } catch (error) {
+      toast(error.message, 'danger');
+      return null;
+    }
   }
 
   /** Files dragged from the media library land as pictures where they are dropped. */
@@ -436,7 +445,7 @@
     <button type="button" class="tb" title="Cite a case item (@)" aria-label="Cite a case item" disabled={readOnly} onclick={cite} data-guide="notebook.cite"><Icon name="at" size={14} /></button>
     <button type="button" class="tb" title="Put in a case picture" aria-label="Put in a case picture" class:on={pictureOpen} disabled={readOnly}
       onclick={() => (pictureOpen = !pictureOpen)}><Icon name="image" size={14} /></button>
-    <button type="button" class="tb" title="More: table, diagram, log entry… (/)" aria-label="More blocks" disabled={readOnly} onclick={slash}><Icon name="plus" size={14} /></button>
+    <button type="button" class="tb" title="Insert a heading, a picture, a table, a map… (/)" aria-label="Insert a block" disabled={readOnly} onclick={slash}><Icon name="plus" size={14} /></button>
     <span class="rule" role="presentation"></span>
     <div class="mode" role="radiogroup" aria-label="How the page is shown">
       <button type="button" class="tb" class:on={noteMode.mode === 'drawn'} role="radio" aria-checked={noteMode.mode === 'drawn'}
@@ -572,6 +581,8 @@
   .page { flex: 1; min-height: 0; overflow: hidden; }
   .page :global(.cm-editor) { height: 100%; }
   .compact .page { --note-pad: 14px 0 30vh; --note-gutter: 14px; --note-size: 14px; --note-width: none; }
+  /* a narrow note has no margin for the +: the toolbar's + and / open the same menu */
+  .compact .page :global(.cm-insert-plus) { display: none; }
   .swatch { width: 10px; height: 10px; border-radius: 2px; flex: none; }
   .include-said { margin: 0 0 10px; color: var(--text-3); font-size: var(--fs-xs); }
   .include-list { display: flex; flex-direction: column; gap: 2px; max-height: 340px; overflow: auto; margin-top: 8px; }

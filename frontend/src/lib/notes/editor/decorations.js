@@ -32,7 +32,7 @@ import {
   BulletWidget, CalloutLabelWidget, ChipWidget, CoordinatesWidget, HintWidget, PlaceholderWidget, RuleWidget, TaskWidget,
 } from './inline.js';
 import {
-  focused, noteCase, noteHandlers, openBlock, resolve, setFocused, setNoteCase, templateMode,
+  cursorLines, focused, noteCase, noteHandlers, openBlock, resolve, selecting, setFocused, setNoteCase, setSelecting, templateMode,
 } from './state.js';
 
 const hidden = Decoration.replace({});
@@ -44,16 +44,16 @@ function lineClass(name, attributes) {
 /** The line a `:::` block closes on, unless its kind says otherwise. */
 const FENCE_CLOSE = /^:::[ \t]*$/;
 
-/** The lines the cursor or a selection is on, when the editor has focus. */
+/**
+ * The lines that show their marks: the ones the cursor is on, when the editor has
+ * focus. Words selected are not being written in: their lines stay drawn under the
+ * selection bubble. While the mouse is pressed, the lines that showed their marks when
+ * it went down hold as they were (`selecting`), so nothing moves under the pointer.
+ */
 function editedLines(state) {
-  const lines = new Set();
-  if (!state.field(focused, false)) return lines;
-  for (const range of state.selection.ranges) {
-    const first = state.doc.lineAt(range.from).number;
-    const last = state.doc.lineAt(range.to).number;
-    for (let line = first; line <= last; line += 1) lines.add(line);
-  }
-  return lines;
+  const held = state.field(selecting, false);
+  if (!held) return cursorLines(state);
+  return new Set(held.lines.filter((number) => number <= state.doc.lines));
 }
 
 function touches(lines, state, from, to) {
@@ -367,7 +367,7 @@ export function noteDecorations(state) {
 export const drawn = StateField.define({
   create: (state) => noteDecorations(state),
   update(value, transaction) {
-    const refocused = transaction.effects.some((effect) => effect.is(setFocused) || effect.is(setNoteCase));
+    const refocused = transaction.effects.some((effect) => effect.is(setFocused) || effect.is(setNoteCase) || effect.is(setSelecting));
     // a note read while it was locked gets its pictures' bars once it can be written
     const unlocked = transaction.startState.readOnly !== transaction.state.readOnly;
     // a block opened or closed is drawn as source or as itself
