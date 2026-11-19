@@ -61,7 +61,7 @@ test('a note goes out as a web folder, to the address typed, and the dialog says
   const dialog = page.getByRole('dialog', { name: 'Export note as a web folder' });
   await expect(dialog).toContainText('About 1.7 MB.');
   await expect(dialog).toContainText('No address given: X shows the link without its picture card.');
-  expect(state.checks.at(-1)).toEqual({ notes: ['n1'], edition: 'public', format: 'web' });
+  expect(state.checks.filter((body) => !body.ready).at(-1)).toEqual({ notes: ['n1'], edition: 'public', format: 'web' });
   const field = dialog.getByLabel('Address it will live at');
   await field.fill('http://desk.github.io/articles/quay/');
   await expect(dialog).toContainText('The address must start with https://.');

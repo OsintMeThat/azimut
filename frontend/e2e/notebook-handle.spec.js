@@ -143,5 +143,5 @@ test('Mark internal wraps a passage the public edition leaves out, as the export
   const dialog = page.getByRole('dialog', { name: 'Export note as PDF' });
   await dialog.getByRole('group', { name: 'Edition' }).getByRole('button', { name: 'Public' }).click();
   await expect(dialog).toContainText('1 internal passage left out.');
-  expect(state.checks.at(-1)).toEqual({ notes: ['n1'], edition: 'public' });
+  expect(state.checks.filter((body) => !body.ready).at(-1)).toEqual({ notes: ['n1'], edition: 'public' });
 });

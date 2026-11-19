@@ -105,7 +105,7 @@ test('an internal passage is written from /, its public pages are seen, written,
   await expect(dialog.getByRole('group', { name: 'Edition' }).getByRole('button', { name: 'Public' })).toHaveAttribute('aria-pressed', 'true');
   await expect(dialog).toContainText('1 internal passage left out.');
   await expect(dialog).not.toContainText('Before you export');
-  expect(state.checks.at(-1)).toEqual({ notes: ['n1'], edition: 'public' });
+  expect(state.checks.filter((body) => !body.ready).at(-1)).toEqual({ notes: ['n1'], edition: 'public' });
   await dialog.getByRole('button', { name: 'Export PDF' }).click();
   await expect(dialog).toHaveCount(0);
   expect(state.exported.at(-1)).toMatchObject({ notes: ['n1'], edition: 'public' });

@@ -903,8 +903,8 @@
   }
 
   const badgeKey = () => `${caseId}/${opened?.noteId ?? CASE_NOTES}`;
-  /** How long the badge waits once typing stops before it asks the check again. */
-  const BADGE_QUIET_MS = 6000;
+  /** How long the badge waits once typing stops before it asks the check again: a long note's check lays its page out whole. */
+  const BADGE_QUIET_MS = 15000;
 
   // the open note's badge: read once it is loaded, then a while after each change; never while the panel asks
   $effect(() => {
@@ -1051,9 +1051,10 @@
         <div class="spacer"></div>
         {#if readyBadge && readyBadge.key === badgeKey()}
           <button type="button" class="btn btn-ghost btn-xs ready-badge" class:clear={!readyBadge.issues}
-            title="Ready to publish? What the check before export says, in one place" onclick={() => openReady()}>
-            {#if readyBadge.issues}<span class="ready-dot" aria-hidden="true"></span>{:else}<Icon name="check" size={12} />{/if}
-            {badgeWords(readyBadge.issues)}</button>
+            title="Ready to publish? What the check before export says, in one place" aria-label={`Ready to publish? ${badgeWords(readyBadge.issues)}`}
+            onclick={() => openReady()}>
+            {#if readyBadge.issues}<span class="ready-dot" aria-hidden="true"></span>{readyBadge.issues}<span class="ready-words">&nbsp;to look at</span>
+            {:else}<Icon name="check" size={12} /><span class="ready-words">Ready</span>{/if}</button>
         {/if}
         <LookControl {look} onchange={pickLook} entities={graphEntities} disabled={!look} text={doc.text} />
         <ViewModes page={pageMode} guide="notebook.view" onchange={setPageMode} />
@@ -1396,9 +1397,9 @@
 <style>
   .notebook { position: relative; height: 100%; display: flex; flex-direction: column; min-height: 0; container: notebook / inline-size; }
   .tool-header { flex-wrap: nowrap; }
-  .title-input { flex: 0 1 320px; min-width: 120px; font-weight: 600; }
+  .title-input { flex: 0 1 320px; min-width: 96px; font-weight: 600; }
   .case-title { display: inline-flex; align-items: center; gap: 6px; font-weight: 600; color: var(--text-1); }
-  .folder-pick { flex: 0 1 200px; min-width: 120px; }
+  .folder-pick { flex: 0 1 200px; min-width: 96px; }
   .kind { color: var(--accent); font-size: var(--fs-xs); font-weight: 700; text-transform: uppercase; letter-spacing: .06em; }
   .hint { color: var(--text-3); font-size: var(--fs-xs); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   .status { color: var(--text-3); font-size: var(--fs-xs); display: inline-flex; align-items: center; gap: 4px; white-space: nowrap; }
@@ -1411,6 +1412,8 @@
   .body.split > :global(.page-pane) { flex: 0 0 clamp(300px, 46%, 820px); }
   .body.split > :global(.ib) { flex: 0 0 clamp(320px, 34%, 400px); }
   @container notebook (max-width: 1180px) { .wide-only { display: none; } }
+  /* the Ready badge keeps its count and its dot where the header is short of room */
+  @container notebook (max-width: 1040px) { .ready-words { display: none; } }
   .fm-item.danger { color: var(--danger); }
   .ready-badge { gap: 6px; color: var(--text-2); font-weight: 500; white-space: nowrap; }
   .ready-badge.clear :global(svg) { color: var(--ok); }

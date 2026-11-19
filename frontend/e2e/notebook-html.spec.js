@@ -305,7 +305,7 @@ test('the Page pane shows the note as its HTML page, and the export dialog write
   await expect(dialog).toContainText('About 3.2 MB.');
   await expect(dialog.getByRole('list', { name: 'Clips turned into a link' })).toContainText('The whole video, 4 min');
   await expect(dialog.getByRole('list', { name: 'Points of view' })).toContainText('Rooftop');
-  expect(state.checks.at(-1)).toEqual({ notes: ['n1'], edition: 'internal', format: 'html' });
+  expect(state.checks.filter((body) => !body.ready).at(-1)).toEqual({ notes: ['n1'], edition: 'internal', format: 'html' });
   await dialog.getByLabel('Round them to about 150 m in this file').check();
   await dialog.getByRole('button', { name: 'Export HTML' }).click();
   await expect(dialog).toHaveCount(0);

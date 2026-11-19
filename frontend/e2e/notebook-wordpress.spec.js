@@ -111,9 +111,10 @@ test('a note goes to WordPress as a draft on one press, and its editions list th
   await expect(dialog).toContainText('To desk.example.org as desk, as a draft you publish in WordPress.');
   await expect(dialog).toContainText('4 pictures and 1 clip go to the media library, without their metadata.');
   await expect(dialog).toContainText('1 internal passage and 1 interactive map stay out.');
-  // the branch checks the public edition itself: the dialog's PDF check is not asked again
+  // the branch checks the public edition itself: the dialog's PDF check is not asked again (the
+  // header's Ready badge asks its own, with `ready`)
   await expect(dialog.getByRole('region', { name: 'Before you send' })).toContainText('Picture "The pier" has no source.');
-  expect(state.checks).toHaveLength(1);
+  expect(state.checks.filter((body) => !body.ready)).toHaveLength(1);
   expect(state.sent).toEqual([]);
   await expect(dialog.getByRole('group', { name: 'Edition' })).toHaveCount(0);
   await shoot(page, 'dialog-wordpress');

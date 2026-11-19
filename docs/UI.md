@@ -7259,7 +7259,7 @@ and a caption never read.
 **Ready to publish?** gathers what that check says of one note in one panel
 (`tools/notebook/ReadyPanel.svelte`, `lib/notes/readyPanel.js`). The open note's header
 shows how many lines are to look at, *3 to look at* in the header's quiet tone, or *Ready*;
-it is read once the note opens and again a few seconds after typing stops, in the format
+it is read once the note opens and again once typing has rested for 15 s, in the format
 and edition the export would write. The export dialog of one note links to it at its top,
 and the panel then goes back to the export. It is the same route
 (`POST /notes/pdf/check` with `ready`): the server writes each line's group and adds what

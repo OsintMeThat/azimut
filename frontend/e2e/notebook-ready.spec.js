@@ -69,7 +69,7 @@ test('the badge opens Ready to publish?, and Say “at least” writes it as one
 
   // read once the note is open, as the export would write it, with what the panel reads
   const badge = page.locator('.ready-badge');
-  await expect(badge).toHaveText('2 to look at');
+  await expect(badge).toHaveAccessibleName('Ready to publish? 2 to look at');
   expect(state.checks.at(-1)).toMatchObject({ notes: ['n1'], format: 'pdf', edition: 'internal', ready: true });
 
   await badge.click();
@@ -93,7 +93,7 @@ test('the badge opens Ready to publish?, and Say “at least” writes it as one
   expect(state.checks.length).toBeGreaterThan(checks);
 
   await panel.getByRole('button', { name: 'Close' }).click();
-  await expect(badge).toHaveText('1 to look at');
+  await expect(badge).toHaveAccessibleName('Ready to publish? 1 to look at');
 
   // one Undo takes the words back
   await page.locator('.cm-content').click();
@@ -106,7 +106,7 @@ test('the export dialog of one note opens the panel at its top, and the panel go
   const state = await notebook(page);
   await page.goto('/#notebook');
   await page.locator('button[title="Open Lead"]').click();
-  await expect(page.locator('.ready-badge')).toHaveText('2 to look at');
+  await expect(page.locator('.ready-badge')).toHaveAccessibleName('Ready to publish? 2 to look at');
   await page.locator('[data-guide="notebook.pdf"]').click();
   const dialog = page.getByRole('dialog', { name: 'Export note as PDF' });
   // the dialog's own check counts the same two, on one line
