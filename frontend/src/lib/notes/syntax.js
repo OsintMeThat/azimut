@@ -12,7 +12,7 @@ import { foldText } from '../textFold.js';
 import { CALLOUTS, calloutMarkdown } from './callouts.js';
 import { PAGE_BREAK, hintLine } from './look.js';
 import { CORNERS, writeAttrs } from './pictureSize.js';
-import { SIGNATURE_BLOCK, builtInLine } from './reportParts.js';
+import { PLACEHOLDERS, SIGNATURE_BLOCK, builtInLine } from './reportParts.js';
 
 /** `[[entity:id|label]]` and `[[media:id|label]]{width=… align=…}`. */
 export const REFERENCE = /\[\[(entity|media):([A-Za-z0-9_-]+)\|([^\]\n]+)\]\](?:\{([^}\n]+)\})?/g;
@@ -154,26 +154,32 @@ const ALIGNMENTS = [
  * What `/` inserts. A `line` command replaces the start of the line it is typed
  * on (a heading, a list); a `block` one goes on lines of its own; a `wrap` one
  * puts the line in a `:::` block; an `action` opens something (the record
- * picker, a file) rather than writing text. A `menu` command is a group: it
- * stands in the bare list and, picked, types its name so the commands of its `group`
- * (offered only once something is typed) come up together.
+ * picker, a file) rather than writing text; a `text` one writes its words where it
+ * is typed (a field the PDF fills in). A `menu` command is a group: it stands in the
+ * bare list and, picked, types its name so the commands of its `group` (offered only
+ * once something is typed) come up together. `hint` is the line under its name in the
+ * menu, `icon` (or `glyph`, a heading's level) what it is drawn with; where it stands
+ * in the menu is `INSERT_SECTIONS`'s to say.
  */
 export const SLASH_COMMANDS = [
-  { id: 'h1', label: 'Heading 1', icon: 'text', words: 'title h1', line: '# ' },
-  { id: 'h2', label: 'Heading 2', icon: 'text', words: 'subtitle h2 section', line: '## ' },
-  { id: 'h3', label: 'Heading 3', icon: 'text', words: 'h3', line: '### ' },
-  { id: 'entry', label: 'Log entry', icon: 'clock', words: 'journal date time now stamp', entry: true },
-  { id: 'task', label: 'To-do', icon: 'check', words: 'task checkbox todo', line: '- [ ] ' },
-  { id: 'bullet', label: 'Bulleted list', icon: 'list', words: 'list bullet', line: '- ' },
-  { id: 'numbered', label: 'Numbered list', icon: 'numbered', words: 'list ordered number', line: '1. ' },
+  { id: 'h1', label: 'Heading 1', icon: 'text', glyph: 'H1', words: 'title h1', line: '# ', hint: 'A part of the note' },
+  { id: 'h2', label: 'Heading 2', icon: 'text', glyph: 'H2', words: 'subtitle h2 section', line: '## ', hint: 'A section' },
+  { id: 'h3', label: 'Heading 3', icon: 'text', glyph: 'H3', words: 'h3', line: '### ', hint: 'A smaller section' },
+  { id: 'entry', label: 'Log entry', icon: 'clock', words: 'journal date time now stamp', entry: true, hint: 'A heading with the time now' },
+  { id: 'task', label: 'To-do', icon: 'check', words: 'task checkbox todo', line: '- [ ] ', hint: 'A box to tick, listed in the To-do' },
+  { id: 'bullet', label: 'Bulleted list', icon: 'list', words: 'list bullet', line: '- ', hint: 'A simple list' },
+  { id: 'numbered', label: 'Numbered list', icon: 'numbered', words: 'list ordered number', line: '1. ', hint: 'A list in order' },
+  { id: 'callout', label: 'Callout', icon: 'quote', words: 'callout box', menu: 'callout', hint: 'Confirmed, unverified, lead, limits…' },
+  // every kind is found by its name; Internal also stands in the bare list, the others under Callout
   ...CALLOUTS.map((callout) => ({
-    id: `callout-${callout.kind}`, label: callout.label, icon: 'quote', words: `callout box ${callout.words ?? ''} ${callout.hint}`,
-    line: `${calloutMarkdown(callout.kind)}`, colour: callout.colour, hint: callout.hint,
+    id: `callout-${callout.kind}`, label: callout.label, icon: callout.kind === 'internal' ? 'lock' : 'quote',
+    words: `callout box ${callout.words ?? ''} ${callout.hint}`, line: `${calloutMarkdown(callout.kind)}`, colour: callout.colour,
+    hint: callout.hint, ...(callout.kind === 'internal' ? {} : { group: 'callout' }),
   })),
-  { id: 'quote', label: 'Quote', icon: 'quote', words: 'blockquote cite', line: '> ' },
-  { id: 'cite', label: 'Case item', icon: 'at', words: 'mention reference link entity place person', action: 'cite' },
-  { id: 'picture', label: 'Case picture', icon: 'image', words: 'media image photo capture video', action: 'picture' },
-  { id: 'upload', label: 'Image from a file', icon: 'upload', words: 'upload picture file', action: 'upload' },
+  { id: 'quote', label: 'Quote', icon: 'quote', words: 'blockquote cite', line: '> ', hint: 'Words someone said or wrote' },
+  { id: 'cite', label: 'Case item', icon: 'at', words: 'mention reference link entity place person', action: 'cite', hint: 'A place, a person or a file, as a chip' },
+  { id: 'picture', label: 'Case picture', icon: 'image', words: 'media image photo capture video', action: 'picture', hint: 'From the case’s media, captures and proofs' },
+  { id: 'upload', label: 'Image from a file', icon: 'upload', words: 'upload picture file', action: 'upload', hint: 'Added to the case’s media' },
   { id: 'map', label: 'Interactive map', icon: 'mapArea', words: 'map layers plate proofs front timeline slider interactive', action: 'map', hint: 'Layers, a plate or proofs, in HTML', notes: true },
   { id: 'include', label: 'Include a note', icon: 'note', words: 'chapter report embed note', action: 'include', hint: 'As a chapter', notes: true },
   { id: 'hint', label: 'Guidance', icon: 'help', words: 'hint guide help template', hint: 'Grey, never printed', template: true },
@@ -181,26 +187,102 @@ export const SLASH_COMMANDS = [
   { id: 'diagram', label: 'Diagram', icon: 'network', words: 'mermaid flowchart chart', block: DIAGRAM },
   { id: 'steps', label: 'Steps', icon: 'columns', words: 'stepper slides sequence carousel before after days', block: STEPS_BLOCK, hint: 'Pictures one at a time, in HTML' },
   { id: 'story', label: 'Story', icon: 'text', words: 'scrollytelling scroll narrative sticky zoom', block: STORY_BLOCK, hint: 'Words scroll beside a picture, in HTML' },
-  { id: 'code', label: 'Code', icon: 'hash', words: 'code block monospace', block: '```\n\n```' },
-  { id: 'divider', label: 'Divider', icon: 'minus', words: 'rule line separator hr', block: '---' },
+  { id: 'code', label: 'Code', icon: 'hash', words: 'code block monospace', block: '```\n\n```', hint: 'Kept as typed, in a fixed-width face' },
+  { id: 'divider', label: 'Divider', icon: 'minus', words: 'rule line separator hr', block: '---', hint: 'A line across the page' },
   { id: 'pagebreak', label: 'Page break', icon: 'file', words: 'new page pdf break', block: PAGE_BREAK, hint: 'PDF only' },
   { id: 'cover', label: 'Cover page', icon: 'file', words: 'first page front title report', action: 'cover', hint: 'Page 1, as you write it' },
   { id: 'signature', label: 'Signature', icon: 'edit', words: 'sign name role organisation author', block: SIGNATURE_BLOCK, hint: 'From Settings › Publishing' },
   { id: 'my-logo', label: 'Your logo', icon: 'image', words: 'logo brand organisation picture', block: builtInLine('my-logo'), hint: 'From Settings › Publishing' },
-  { id: 'align', label: 'Alignment', icon: 'alignCentreH', words: 'align', menu: 'align', hint: 'Centre, right, a cover corner' },
-  ...ALIGNMENTS.map(({ id, ...rest }) => ({ id: `align-${id}`, ...rest, words: `align alignment ${rest.words}`, wrap: id, group: 'align' })),
-  { id: 'date', label: 'Today’s date', icon: 'calendar', words: 'day today', today: true },
+  { id: 'align', label: 'Alignment', icon: 'alignCentreH', words: 'align', menu: 'align', hint: 'Centred or at the right' },
+  // a corner is found by 'align' as it always was, and stands under Cover corner
+  ...ALIGNMENTS.map(({ id, ...rest }) => ({
+    id: `align-${id}`, ...rest, words: `align alignment ${rest.words}`, wrap: id, group: CORNERS.includes(id) ? 'corner' : 'align',
+  })),
+  { id: 'date', label: 'Today’s date', icon: 'calendar', words: 'day today', today: true, hint: 'Year, month, day' },
+  { id: 'corner', label: 'Cover corner', icon: 'cornerTR', words: 'corner pin cover logo', menu: 'corner', hint: 'A logo or words in a corner of the cover' },
+  { id: 'field', label: 'Field', icon: 'tag', words: 'field placeholder fill print', menu: 'field', hint: 'Your name, the title or the day, filled in when printed' },
+  ...PLACEHOLDERS.map((field) => ({
+    id: `field-${field.id}`, label: `Field: ${field.word.toLowerCase()}`, icon: 'tag', words: `field placeholder print ${field.id}`,
+    text: `{${field.id}}`, hint: field.said, group: 'field',
+  })),
 ];
 
 /**
- * The commands matching what is typed after `/`, best first. A template offers
+ * The insert menu's five parts, in order, and the entries each shows in the bare
+ * list, in order: what `/` and the + in the margin open on. An entry of a group
+ * (a callout's kind, a corner) comes up under its group's entry. An entry listed
+ * nowhere stands at the end of its own `section`, Figures else.
+ */
+export const INSERT_SECTIONS = [
+  { id: 'text', label: 'Text', ids: ['h1', 'h2', 'h3', 'bullet', 'numbered', 'task', 'quote', 'callout', 'callout-internal', 'code', 'date', 'entry', 'hint'] },
+  { id: 'media', label: 'Media', ids: ['picture', 'upload', 'steps', 'story', 'my-logo'] },
+  { id: 'case', label: 'From the case', ids: ['cite', 'map', 'include'] },
+  { id: 'layout', label: 'Layout', ids: ['divider', 'pagebreak', 'cover', 'align', 'corner', 'signature', 'field'] },
+  { id: 'figures', label: 'Figures', ids: ['table', 'diagram'] },
+];
+
+/** The line under an entry's name, for the entries that carry none of their own. */
+const ROW_HINTS = {
+  table: 'Rows and columns',
+  diagram: 'Boxes and arrows, drawn from text',
+};
+
+/** The line an entry shows under its name in the menu. */
+export function slashHint(command) {
+  return command.hint ?? ROW_HINTS[command.id] ?? '';
+}
+
+/** Where every entry stands in the menu, `{ section, order }` by id: a group's entries just after their group's own. */
+function menuPlaces() {
+  const places = new Map();
+  let order = 0;
+  const place = (command, section) => {
+    if (places.has(command.id)) return;
+    places.set(command.id, { section, order: order++ });
+    if (command.menu) {
+      for (const member of SLASH_COMMANDS) if (member.group === command.menu) place(member, section);
+    }
+  };
+  const byId = new Map(SLASH_COMMANDS.map((command) => [command.id, command]));
+  for (const section of INSERT_SECTIONS) {
+    for (const id of section.ids) if (byId.has(id)) place(byId.get(id), section.id);
+  }
+  for (const command of SLASH_COMMANDS) {
+    const own = INSERT_SECTIONS.some((section) => section.id === command.section) ? command.section : 'figures';
+    place(command, own);
+  }
+  return places;
+}
+
+let places = null;
+
+/** The part of the menu an entry stands in: `{ id, label, rank }`. */
+export function slashSection(command) {
+  places ??= menuPlaces();
+  const id = places.get(command.id)?.section ?? 'figures';
+  const rank = INSERT_SECTIONS.findIndex((section) => section.id === id);
+  return { id, label: INSERT_SECTIONS[rank].label, rank };
+}
+
+/** The group entry whose name `query` is (`callout` for Callout), or null. */
+export function slashGroup(query) {
+  const wanted = foldText(String(query ?? '').trim());
+  return SLASH_COMMANDS.find((command) => command.menu && command.menu === wanted) ?? null;
+}
+
+/**
+ * The commands matching what is typed after `/`, best first, in the menu's order
+ * when two match as well. With nothing typed, the bare list: every entry in its
+ * part of the menu, a group's entries left under their group. A template offers
  * guidance and no chapter (a note of one case has no place in it); a note the
  * other way round.
  */
 export function slashMatches(query, { template = false } = {}) {
+  places ??= menuPlaces();
+  const order = (command) => places.get(command.id)?.order ?? Infinity;
   const wanted = foldText(String(query ?? '').trim());
   const offered = SLASH_COMMANDS.filter((command) => (template ? !command.notes : !command.template));
-  if (!wanted) return offered.filter((command) => !command.group);
+  if (!wanted) return offered.filter((command) => !command.group).sort((a, b) => order(a) - order(b));
   const scored = [];
   for (const command of offered) {
     if (command.menu) continue;
@@ -210,7 +292,7 @@ export function slashMatches(query, { template = false } = {}) {
       : words.includes(wanted) ? 2 : -1;
     if (rank >= 0) scored.push({ command, rank });
   }
-  return scored.sort((a, b) => a.rank - b.rank).map((row) => row.command);
+  return scored.sort((a, b) => a.rank - b.rank || order(a.command) - order(b.command)).map((row) => row.command);
 }
 
 /** `2026-11-04`, the day a `/date` writes. */
@@ -240,6 +322,7 @@ export function slashInsert(command, { before = '', now = new Date() } = {}) {
     const text = today(now);
     return { text, cursor: text.length };
   }
+  if (command.text) return { text: command.text, cursor: command.text.length };
   if (command.template) {
     // guidance is a line of its own, the cursor where its words go
     const text = `${alone ? '' : '\n\n'}${hintLine()}\n`;

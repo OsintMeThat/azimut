@@ -4,32 +4,16 @@
  * its caption, the tool it was made in, and a source or a posted address to state.
  * Open, its line is shown as written.
  */
-import { paths as iconPaths } from '../../../components/Icon.svelte';
 import {
   CAPTION_HELP, PICTURE_ALIGNS, PICTURE_SIZES, POSTED_HELP, SOURCE_HELP, blockAlignAt, captionField, pictureLine, picturesIn,
   rovingToolbar, sizeWidth, sizedLine, sourceField,
 } from '../pictureSize.js';
 import { registerBlock } from './blocks.js';
+import { iconSvg } from './icon.js';
 import { noteCase, noteHandlers, resolve } from './state.js';
 import { BlockWidget, sourceButton } from './widgets.js';
 
 const ALIGN_LABELS = { left: ['alignLeft', 'Left'], center: ['alignCentreH', 'Centre'], right: ['alignRight', 'Right'] };
-
-function iconSvg(name) {
-  const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
-  svg.setAttribute('viewBox', '0 0 24 24');
-  svg.setAttribute('width', '13');
-  svg.setAttribute('height', '13');
-  svg.setAttribute('fill', 'none');
-  svg.setAttribute('stroke', 'currentColor');
-  svg.setAttribute('stroke-width', '1.9');
-  svg.setAttribute('stroke-linecap', 'round');
-  svg.setAttribute('aria-hidden', 'true');
-  const path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
-  path.setAttribute('d', iconPaths[name]);
-  svg.append(path);
-  return svg;
-}
 
 /** How much taller than wide the picture drawn in `box` is, or 0 before it has loaded. */
 function pictureRatio(box) {

@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   appended, citation, findCoordinates, uploadedImage, findReferences, logStamp, mentionMatches, pastedUrl, slashInsert,
-  slashMatches, PLAYED_BLOCK, SLASH_COMMANDS, STEPS_BLOCK, STORY_BLOCK, today, wrapInBlock,
+  slashMatches, INSERT_SECTIONS, PLAYED_BLOCK, SLASH_COMMANDS, STEPS_BLOCK, STORY_BLOCK, today, wrapInBlock,
 } from './syntax.js';
 import { READY_NOTES, filledBody, freeTitle } from './ready.js';
 import { calloutOf, calloutMarkdown } from './callouts.js';
@@ -68,8 +68,10 @@ describe('what @ and / offer', () => {
   });
 
   it('ranks the commands by their name, then by the words they go by', () => {
-    expect(slashMatches('').map((command) => command.id)).toEqual(
-      SLASH_COMMANDS.filter((command) => command.id !== 'hint' && !command.group).map((command) => command.id));
+    // the bare list is the insert menu's, part by part; a group's entries wait under it
+    const listed = INSERT_SECTIONS.flatMap((section) => section.ids).filter((id) => id !== 'hint');
+    expect(slashMatches('').map((command) => command.id)).toEqual(listed);
+    expect(SLASH_COMMANDS.filter((command) => !command.group && !command.template).map((command) => command.id).sort()).toEqual([...listed].sort());
     expect(slashMatches('ta')[0].id).toBe('table');
     expect(slashMatches('todo')[0].id).toBe('task');
     expect(slashMatches('journal')[0].id).toBe('entry');

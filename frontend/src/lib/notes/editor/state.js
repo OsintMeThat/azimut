@@ -61,6 +61,29 @@ export const focused = StateField.define({
   },
 });
 
+/** The lines the cursor is on while the editor has focus: the ones that show their marks. */
+export function cursorLines(state) {
+  const lines = new Set();
+  if (!state.field(focused, false)) return lines;
+  for (const range of state.selection.ranges) if (range.empty) lines.add(state.doc.lineAt(range.head).number);
+  return lines;
+}
+
+/**
+ * While the mouse is pressed on the page, `{ lines }`: the lines that showed their marks
+ * when it went down, and only those show them until it is let go, so nothing moves under
+ * the pointer. A drag selects the words that were seen, a double press the word that was
+ * seen. False the rest of the time, and as soon as anything is typed.
+ */
+export const setSelecting = StateEffect.define();
+export const selecting = StateField.define({
+  create: () => false,
+  update(value, transaction) {
+    for (const effect of transaction.effects) if (effect.is(setSelecting)) return effect.value;
+    return transaction.docChanged ? false : value;
+  },
+});
+
 /** The record `id` names in the case, following a merge, or null. */
 export function resolve(info, id) {
   const to = info.redirects?.[id]?.id ?? id;

@@ -347,7 +347,8 @@ test('/ Page break writes the line the PDF starts a new page at, drawn as a rule
   await page.keyboard.press('Control+End');
   await page.keyboard.press('Enter');
   await page.keyboard.type('/page');
-  await page.locator('.cm-tooltip-autocomplete').getByText('Page break').click();
+  // the entry, not the preview beside the list that names it too
+  await page.locator('.cm-tooltip-autocomplete').getByRole('option', { name: /^Page break/ }).click();
   await expect.poll(() => state.written.at(-1)?.text ?? '').toContain('Line 30\n<!-- pagebreak -->\n');
   await page.keyboard.type('After the break.');
   await expect(page.locator('.cm-pagebreak')).toHaveText('Page break');

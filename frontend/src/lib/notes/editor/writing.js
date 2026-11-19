@@ -3,34 +3,25 @@
  * prefix, text at the cursor, the cover page; where a jump to a line lands; Enter
  * on an empty list item; a task box ticked.
  */
-import { EditorSelection } from '@codemirror/state';
 import { EditorView } from '@codemirror/view';
 
 import { coverChange } from '../reportParts.js';
 import { PICTURE_LINE } from './pictureBlock.js';
+import { runFormat, toggleInline } from './marks.js';
 import { lightLines } from './puts.js';
 import { blocksIn } from './ranges.js';
 import { setFocused, setOpenBlock } from './state.js';
 
-/** Wrap the selection in a mark (`**` for bold), or take the mark away if it is there. */
+/** What each mark the toolbar and the keys write is, for `editor/marks.js`. */
+const WRAPS = { '**': 'bold', '*': 'italic', '`': 'code', '~~': 'strike' };
+
+/**
+ * Set a mark on the selection (`**` for bold), or take it off the words that carry
+ * it, read from the syntax tree so the `*` of italic is never taken for half of the
+ * `**` of bold. One Undo step.
+ */
 export function toggleWrap(view, mark) {
-  const { state } = view;
-  const changes = state.changeByRange((range) => {
-    const text = state.sliceDoc(range.from, range.to);
-    const before = state.sliceDoc(range.from - mark.length, range.from);
-    const after = state.sliceDoc(range.to, range.to + mark.length);
-    if (before === mark && after === mark) {
-      return {
-        changes: [{ from: range.from - mark.length, to: range.from }, { from: range.to, to: range.to + mark.length }],
-        range: EditorSelection.range(range.from - mark.length, range.to - mark.length),
-      };
-    }
-    return {
-      changes: [{ from: range.from, insert: mark }, { from: range.to, insert: mark }],
-      range: EditorSelection.range(range.from + mark.length, range.to + mark.length + (text ? 0 : 0)),
-    };
-  });
-  view.dispatch(state.update(changes, { scrollIntoView: true, userEvent: 'input' }));
+  runFormat(view, toggleInline(view.state, WRAPS[mark] ?? 'bold'));
   view.focus();
   return true;
 }
