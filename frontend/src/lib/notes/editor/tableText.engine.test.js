@@ -2,11 +2,12 @@ import { readFileSync } from 'node:fs';
 import { GFM, parser } from '@lezer/markdown';
 import { describe, expect, it } from 'vitest';
 import { tablesIn } from './tableText.js';
+import { writeLook } from './tableLook.js';
 
 /**
  * The renderers' reading of two corpora, pinned by `tests/test_notes_table_text.py`
  * from the engine itself (markdown-it after `case_references`): this module must
- * find the same tables and the same cells.
+ * find the same tables and the same cells, and the same settings line under a table.
  */
 const fixture = (name) => readFileSync(new URL(`./fixtures/${name}`, import.meta.url), 'utf8');
 const PINNED = JSON.parse(fixture('tables.engine.json'));
@@ -20,12 +21,13 @@ const asEngine = (cell) => cell
 
 function ours(text) {
   const lineOf = (offset) => text.slice(0, offset).split('\n').length - 1;
-  return tablesIn(text).map(({ from, to, table }) => ({
+  return tablesIn(text).map(({ from, end, table, look }) => ({
     line: lineOf(from),
-    end: lineOf(to) + 1,
+    end: lineOf(end) + 1,
     header: table.header.map(asEngine),
     align: table.align,
     rows: table.rows.map((row) => row.map(asEngine)),
+    ...(look ? { look: writeLook(look) } : {}),
   }));
 }
 
@@ -51,12 +53,13 @@ describe('the editor\'s own parser', () => {
 
   it('draws every table of the real notes on the same lines', () => {
     const text = fixture('real-tables.md');
-    expect(lezerTables(text)).toEqual(tablesIn(text).map(({ from, to }) => [from, to]));
+    expect(lezerTables(text)).toEqual(tablesIn(text).map(({ from, end }) => [from, end]));
   });
 
   it('differs on three edge cases, which is why the grid takes its lines from here', () => {
     const text = fixture('edge-tables.md');
-    const mine = tablesIn(text).map(({ from, to }) => `${from}-${to}`);
+    // a settings line stands in the table's block, as the parser reads it a row
+    const mine = tablesIn(text).map(({ from, end }) => `${from}-${end}`);
     const theirs = lezerTables(text).map(([from, to]) => `${from}-${to}`);
     const only = (ranges, others) => ranges.filter((range) => !others.includes(range)).map((range) => text.slice(...range.split('-').map(Number)));
     // its table starts after the first line's indent, runs on to a block's closing `:::`,

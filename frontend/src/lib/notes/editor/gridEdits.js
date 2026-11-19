@@ -26,9 +26,9 @@ export function tablesOf(state) {
   return found;
 }
 
-/** The table standing at `pos`, its header line to its last row, or null. */
+/** The table standing at `pos`, its header line to its last row or its settings line, or null. */
 export function tableNear(state, pos) {
-  return tablesOf(state).find((found) => found.from <= pos && pos <= found.to) ?? null;
+  return tablesOf(state).find((found) => found.from <= pos && pos <= found.end) ?? null;
 }
 
 /** The table whose header line starts at `pos`, or null. */

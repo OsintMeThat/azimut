@@ -4,7 +4,8 @@
 editor and the charts. It must find the cells the PDF, the HTML report and
 WordPress find, so the engine's reading of two corpora (edge cases, and every
 table of two real notes, anonymised) is pinned in `tables.engine.json`, which
-`tableText.engine.test.js` compares the module to. This test keeps that file true
+`tableText.engine.test.js` compares the module to, a table's settings line
+(`engine/notes_tables.py`) with it. This test keeps that file true
 to the engine: after a deliberate change, write it again with
 `python tests/test_notes_table_text.py`.
 """
@@ -17,6 +18,7 @@ from pathlib import Path
 from typing import Any
 
 from azimut.engine import notes_markdown as md
+from azimut.engine import notes_tables
 
 FIXTURES = Path(__file__).resolve().parents[1] / "frontend/src/lib/notes/editor/fixtures"
 CORPORA = ("edge-tables", "real-tables")
@@ -34,6 +36,9 @@ def engine_tables(text: str) -> list[dict[str, Any]]:
             start, end = token.map
             table: dict[str, Any] = {"line": block.line + start, "end": block.line + end}
             table.update(header=[], align=[], rows=[])
+            look = notes_tables.look_of(token)
+            if look is not notes_tables.DEFAULT:
+                table["look"] = notes_tables.write_line(look)
             section = ""
             row: list[str] = []
             for inner in tokens[index + 1 :]:
@@ -82,6 +87,11 @@ def test_the_corpora_hold_what_they_are_for() -> None:
     assert ragged["rows"][2] == ["a", "b", "c"]
     assert ragged["rows"][-1] == ["A line of prose written right under the table.", "", ""]
     assert len(read["real-tables"]) == 10
+    # a settings line under the last row is the table's settings, never a row; braces are a row otherwise
+    settings, braces, between = edge[-3:]
+    assert settings["rows"] == [["Cougar", "confirmed"]] and settings["look"] == '{stripes colour="Grade" caption="Losses"}'
+    assert braces["rows"][-1] == ["{x}"] and "look" not in braces
+    assert between["rows"][1] == ["{stripes}", ""] and "look" not in between
 
 
 if __name__ == "__main__":

@@ -55,11 +55,12 @@ export function closeMenu() {
 
 /**
  * Show `node` (a menu, a small panel) under `anchor`, or over it when there is no
- * room below, inside the editor `view`. It closes on Escape, a press outside or a
- * scroll of the note; `back` (the anchor by default) gets the keyboard back when
- * Escape closes it. Answers its `close(giveBack)`.
+ * room below, inside the editor `view`, from its left edge or, with `end`, ending at
+ * its right one. It closes on Escape, a press outside or a scroll of the note; `back`
+ * (the anchor by default) gets the keyboard back when Escape closes it. Answers its
+ * `close(giveBack)`.
  */
-export function openPopover(view, anchor, node, { back = null, onClose = null } = {}) {
+export function openPopover(view, anchor, node, { back = null, onClose = null, end = false } = {}) {
   closeMenu();
   const outside = (event) => {
     if (!node.contains(event.target) && event.target !== anchor && !anchor.contains(event.target)) close(false);
@@ -68,7 +69,7 @@ export function openPopover(view, anchor, node, { back = null, onClose = null } 
     const box = anchor.getBoundingClientRect();
     const height = node.offsetHeight;
     const width = node.offsetWidth;
-    node.style.left = `${Math.max(6, Math.min(box.left, window.innerWidth - width - 6))}px`;
+    node.style.left = `${Math.max(6, Math.min(end ? box.right - width : box.left, window.innerWidth - width - 6))}px`;
     // under its anchor, or over it; with room for neither, from the editor's top rather than under the app's own bars
     const lowest = window.innerHeight - 6 - height;
     const over = Math.max(6, Math.min(Math.max(box.top - height - 4, view.dom.getBoundingClientRect().top), lowest));

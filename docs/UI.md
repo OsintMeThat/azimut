@@ -7198,6 +7198,27 @@ toast offers **Paste as text** and **Undo**; pasted in a cell, it fills the grid
 there, adding the rows and columns it needs. The raw Markdown pastes and shows the pipes as
 before.
 
+**How a table shows in the report.** The grid's **Settings** opens a card of plain
+choices (`editor/tableSettings.js`): **Search bar** *Auto* (past 12 rows), *Always* or
+*Never*; **Sort by a press on a header**; **Rows shown**, *All* or a long table's first
+10, 20 or 50 with *Show all* under them; **Header stays on screen**; **First column stays
+on screen** when a wide table slides; **Striped rows**; **Colour rows by** one of its
+columns of words, each value in the colour a chart gives it (the case's palette first,
+then a grade's, then the charts' order); **Density** *Comfortable* or *Compact*; a
+**Caption** and a **Source**, under the table. Each choice is written at once and is one
+Undo step, so the Page pane's HTML view follows; **Reset** takes them all back in one.
+They are one line of braces under the table's last row, written as a picture's are
+(`{search=always fold=20 stripes colour="Grade"}`, `editor/tableLook.js` and
+`engine/notes_tables.py` reading it one way), each key only when it is not its default:
+a table with none has no line and shows as before. The drawn page stands the grid over
+the line; the raw Markdown shows it, and any other Markdown reader takes it for a last
+row. The search bar, sorting, folding and the first column are the web page's, as each
+one's title says; the PDF prints the stripes (or none, where a Report would stripe), the
+colours, the density, the caption and source, and the header on each page or once.
+WordPress takes the stripes as its table block's *Stripes* style, a value's colour as a
+highlight on its cell, and the caption and source as the block's caption. A table
+coloured by a column it no longer has is said by the check before export.
+
 **Pictures in a table.** A column holds pictures when its header names them (Picture,
 Photo, Frame…) or a cell holds one, drawn as a thumbnail. A case picture dropped on a cell
 lands there as its chip, and so does a tool's **Put in** while a cell is picked: from the
@@ -7355,8 +7376,9 @@ and writes the address only in a file, so the Page pane's frame never leaves for
 page. A press on a picture opens it large, to
 zoom and move, its credit kept with it; Escape closes it. A Compare pair is a slider
 between its two dated, credited sides; a timecode plays its passage of the clip; a table
-of more than twelve rows can be filtered, any table sorted by a column, and a code such
-as `[V12](#V12)` jumps to its row. A citation shows its source on hover or focus, and
+of more than twelve rows can be filtered, any table sorted by a column (each as its
+settings say, with a long one folded under *Show all*), and a code such as `[V12](#V12)`
+jumps to its row, opening the fold or the filter it hides in. A citation shows its source on hover or focus, and
 *How this was checked* under a figure opens the chain from the original post to the
 picture. A `::: steps` block shows one picture at a time with arrows and a row of days,
 its clip playing muted; a `::: story` keeps the picture beside the words being read and

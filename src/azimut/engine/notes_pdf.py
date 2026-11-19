@@ -109,7 +109,7 @@ from markdown_it.token import Token
 from PIL import Image as PILImage
 from PIL import ImageOps, UnidentifiedImageError
 
-from . import noteannexes, notefill, notes_charts, notes_style, notesources, pdffonts, thumbnails
+from . import noteannexes, notefill, notes_charts, notes_style, notes_tables, notesources, pdffonts, thumbnails
 from .notelook import DEFAULT as DEFAULT_LOOK
 from .notelook import NoteLook
 from .notes_markdown import (
@@ -2183,6 +2183,7 @@ class _Builder:
         pdf.set_x(pdf.get_x() + BULLET_WIDTH)
 
     def _on_table_open(self, tokens: list[Token], index: int, align: Align) -> int:
+        start = index
         rows: list[list[list[Run]]] = []
         header_rows = 0
         in_head = False
@@ -2207,7 +2208,7 @@ class _Builder:
                     header_rows += 1
             index += 1
         if rows:
-            self._table(rows, header_rows)
+            self._table(rows, header_rows, notes_tables.look_of(tokens[start]))
         return index + 1
 
     def _on_html_block(self, tokens: list[Token], index: int, align: Align) -> int:
@@ -2746,12 +2747,18 @@ class _Builder:
         pdf.set_line_width(0.2)
         pdf.rect(left, top, width, bottom - top, style="D")
 
-    def _table(self, rows: list[list[list[Run]]], header_rows: int) -> None:
+    def _table(self, rows: list[list[list[Run]]], header_rows: int,
+               look: notes_tables.TableLook = notes_tables.DEFAULT) -> None:
         """A table, its header row repeated on each page it runs onto.
 
         A cell is one text in one face, so its runs' styling goes; its link stays.
         A cell holding a link (or a reference with an address, or coordinates) links
         to it as a whole, the first one if it holds several, and reads as a link.
+
+        Its settings line (`engine/notes_tables.py`) asks what paper can give: stripes,
+        or none where the style stripes; each row tinted by its value in a column, that
+        cell more; a compact density; a header printed once; a caption and a source under
+        it. A table with none prints as it always did.
         """
         pdf = self.pdf
         theme = self.theme
@@ -2760,39 +2767,62 @@ class _Builder:
         texts = [[_plain(cell) for cell in line] for line in squared]
         from fpdf.fonts import FontFace
 
+        key: int | None = None
+        colours: list[str] = []
+        if look.colour:
+            key, colours = notes_tables.row_colours(texts[0] if header_rows else [], texts[header_rows:], look.colour,
+                                                    case=self.case, look=self.look)
+            if key is None:
+                self._warn(notes_tables.missing_colour(look.colour), self._line, OTHER)
+
         def fill(table: Any) -> None:
             for number, line in enumerate(squared):
-                row = table.row()
-                for cell, text in zip(line, texts[number]):
+                colour = colours[number - header_rows] if colours and number >= header_rows else ""
+                row = table.row(style=FontFace(fill_color=mix(notes_style.hex_rgb(colour), WHITE, notes_tables.ROW_TINT))
+                                if colour else None)
+                for column, (cell, text) in enumerate(zip(line, texts[number])):
                     entry = next((run.entry for run in cell if run.entry), 0)
                     link: str | int = next((run.link for run in cell if run.link), "")
                     link = link or (self._entry_link(entry) if entry else "")
-                    if not link:
+                    shade = (FontFace(fill_color=mix(notes_style.hex_rgb(colour), WHITE, notes_tables.KEY_TINT))
+                             if colour and column == key else None)
+                    if not link and shade:
+                        row.cell(text, style=shade)
+                    elif not link:
                         row.cell(text)
                     elif number < header_rows:
                         row.cell(text, link=link)
                     else:
-                        row.cell(text, link=link, style=FontFace(color=theme.accent_dark))
+                        row.cell(text, link=link, style=FontFace(color=theme.accent_dark,
+                                                                 fill_color=shade.fill_color if shade else None))
 
         scale = theme.scale
+        repeat = 1 if look.sticky_header else 0
         if theme.plain:
             pdf.set_font(theme.body_family, size=9 * scale)
             pdf.set_text_color(*INK)
             pdf.set_draw_color(*theme.rule)
             pdf.set_line_width(0.2)
+            striped: dict[str, Any] = (
+                {"cell_fill_color": theme.tint, "cell_fill_mode": "EVEN_ROWS"} if look.stripes else {}
+            )
+            if striped:
+                pdf.set_fill_color(*WHITE)
             with pdf.table(
                 col_widths=_column_widths(texts, columns),
-                line_height=5.0 * scale,
+                line_height=(4.3 if look.compact else 5.0) * scale,
                 text_align=Align.L,
-                padding=(1.6, 2.2),
+                padding=(1.0, 1.6) if look.compact else (1.6, 2.2),
                 headings_style=FontFace(
                     family=theme.heading_family, emphasis="B", size_pt=9 * scale,
                     fill_color=theme.table_head_bg,
                 ),
                 first_row_as_headings=bool(header_rows),
-                repeat_headings=1,
+                repeat_headings=repeat,
+                **striped,
             ) as table:
                 fill(table)
+            self._table_caption(look)
             pdf.ln(theme.gap)
             return
         size = (8.6 if theme.style == "brief" else 8.8) * scale
@@ -2805,21 +2835,32 @@ class _Builder:
         pdf.set_line_width(0.2)
         with pdf.table(
             col_widths=_column_widths(texts, columns),
-            line_height=4.6 * scale,
+            line_height=(4.0 if look.compact else 4.6) * scale,
             text_align=Align.L,
-            padding=(1.7, 2.4),
+            padding=(1.0, 1.8) if look.compact else (1.7, 2.4),
             borders_layout="HORIZONTAL_LINES",
             cell_fill_color=theme.tint,
-            cell_fill_mode="EVEN_ROWS",
+            cell_fill_mode="NONE" if look.stripes is False else "EVEN_ROWS",
             headings_style=FontFace(
                 family=theme.heading_family, emphasis="B", size_pt=size - 0.4,
                 color=WHITE, fill_color=theme.table_head_bg,
             ),
             first_row_as_headings=bool(header_rows),
-            repeat_headings=1,
+            repeat_headings=repeat,
         ) as table:
             fill(table)
+        self._table_caption(look)
         pdf.ln(theme.gap + 0.8)
+
+    def _table_caption(self, look: notes_tables.TableLook) -> None:
+        """The caption and source a table's settings line writes, under it as under a figure."""
+        pdf = self.pdf
+        if look.caption:
+            self._figure_caption(("", look.caption), Align.L, pdf.l_margin, pdf.epw)
+        if look.source:
+            if not look.caption:
+                pdf.ln(1.0)
+            self._credit_line(_Credit("Source", look.source, ""), Align.L, pdf.l_margin, pdf.epw)
 
     def _standalone_image(self, inline: Token, align: Align) -> bool:
         """A paragraph that is nothing but one image becomes a block image."""

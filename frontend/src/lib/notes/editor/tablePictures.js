@@ -190,6 +190,6 @@ export function placeInCell(view, spot, text, key, options = {}) {
     pickCell(key, null);
     return landed;
   }
-  const found = at ? tablesOf(view.state).find((item) => item.from <= at.from && at.from <= item.to) : null;
-  return placeText(view, found ? found.to : view.state.doc.length, text, options);
+  const found = at ? tablesOf(view.state).find((item) => item.from <= at.from && at.from <= item.end) : null;
+  return placeText(view, found ? found.end : view.state.doc.length, text, options);
 }

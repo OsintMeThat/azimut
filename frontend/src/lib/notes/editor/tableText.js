@@ -26,6 +26,8 @@
  * the table's own text), for the editor to dispatch as one transaction.
  */
 
+import { readLook } from './tableLook.js';
+
 // ── What the renderers rewrite before they split a row ─────────────────────────
 // The same patterns as `engine/notetext.py` and `lib/markdown.js`.
 const ENTITY_REF = /\[\[entity:([A-Za-z0-9_-]+)\|([^\]]+)\]\]/g;
@@ -299,7 +301,11 @@ function cellsOf(line, columns) {
  * `to` are offsets in `text` (`to` before the last row's line break), `line` the
  * 0-based number of its header line. Tables inside a fence, an HTML block or a
  * quote are left out: the grid edits the ones standing on their own.
- * @returns {{ from: number, to: number, line: number, table: Table }[]}
+ *
+ * A settings line under the last row (`tableLook.js`) is no row: it is `look`, its
+ * settings with where it stands (`from`, `to`), and `end` is where the table's block
+ * ends, that line included (`to` without one).
+ * @returns {{ from: number, to: number, end: number, line: number, table: Table, look: object|null }[]}
  */
 export function tablesIn(text) {
   const source = String(text ?? '');
@@ -333,8 +339,12 @@ export function tablesIn(text) {
     let last = index + 1;
     while (last + 1 < lines.length && !endsTable(lines[last + 1].text)) last += 1;
     const from = lines[index].from;
-    const to = lines[last].from + lines[last].text.length;
-    found.push({ from, to, line: index, table: parseTable(source.slice(from, to)) });
+    const end = lines[last].from + lines[last].text.length;
+    const settings = last > index + 1 ? readLook(lines[last].text) : null;
+    const rows = settings ? last - 1 : last;
+    const to = lines[rows].from + lines[rows].text.length;
+    const look = settings && { ...settings, from: lines[last].from, to: end };
+    found.push({ from, to, end, line: index, table: parseTable(source.slice(from, to)), look });
     index = last;
   }
   return found;
@@ -348,7 +358,7 @@ export function tablesIn(text) {
  * from here.
  */
 export function tableAt(text, position) {
-  return tablesIn(text).find((found) => found.from <= position && position <= found.to) ?? null;
+  return tablesIn(text).find((found) => found.from <= position && position <= found.end) ?? null;
 }
 
 // ── How a table is written ──────────────────────────────────────────────────────

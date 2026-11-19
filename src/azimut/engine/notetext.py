@@ -16,6 +16,8 @@ import re
 import unicodedata
 from dataclasses import dataclass
 
+from . import notes_tables
+
 ENTITY_REF = re.compile(r"\[\[entity:([A-Za-z0-9_-]+)\|([^\]]+)\]\]")
 #: A template's guidance: a line that is only `<!--? … -->`. Shown by the editor
 #: as grey text in place and replaced by what the analyst types; never printed,
@@ -129,7 +131,7 @@ def plain_line(line: str) -> str:
     line = ENTITY_REF.sub(lambda match: match.group(2), line)
     line = IMAGE.sub(lambda match: match.group(1), line)
     line = LINK.sub(lambda match: match.group(1), line)
-    if TABLE_RULE.match(line) or ALIGN_FENCE.match(line):
+    if TABLE_RULE.match(line) or ALIGN_FENCE.match(line) or notes_tables.read_line(line) is not None:
         return ""
     line = CALLOUT.sub("", line)
     line = HEADING.sub("", line)
