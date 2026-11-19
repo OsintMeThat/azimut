@@ -1053,7 +1053,7 @@
           <button type="button" class="btn btn-ghost btn-xs ready-badge" class:clear={!readyBadge.issues}
             title="Ready to publish? What the check before export says, in one place" aria-label={`Ready to publish? ${badgeWords(readyBadge.issues)}`}
             onclick={() => openReady()}>
-            {#if readyBadge.issues}<span class="ready-dot" aria-hidden="true"></span>{readyBadge.issues}<span class="ready-words">&nbsp;to look at</span>
+            {#if readyBadge.issues}<span class="ready-dot" aria-hidden="true"></span><span>{readyBadge.issues}<span class="ready-words">{' to look at'}</span></span>
             {:else}<Icon name="check" size={12} /><span class="ready-words">Ready</span>{/if}</button>
         {/if}
         <LookControl {look} onchange={pickLook} entities={graphEntities} disabled={!look} text={doc.text} />
