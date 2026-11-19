@@ -999,14 +999,18 @@ class Cited:
             or self.reader.index.own_work(address)  # where the analyst published a proof
         )
 
+    def outside(self) -> list[tuple[str, str, int | None, Source]]:
+        """The outside pages the document links to, each once and in order, as (address,
+        words, line, source): the links the check counts, the case's own work left out.
+        Archive every link (`engine/linkarchive.py`) reads the same list."""
+        return [one for one in self._outside.values() if not self._own_work(one[0], one[3])]
+
     def _check_links(self) -> None:
         """One line for the outside links with no archived copy, one for those the case
         holds nothing of; each names its link when it is alone and lists them otherwise."""
         unarchived: list[dict[str, Any]] = []
         unseen: list[dict[str, Any]] = []
-        for address, words, line, source in self._outside.values():
-            if self._own_work(address, source):
-                continue
+        for address, words, line, source in self.outside():
             item = {"text": cut_text(words or urltitles.title_of(address), 120), "url": address, "line": line}
             if not source.archive:
                 unarchived.append(item)
