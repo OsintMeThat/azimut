@@ -3,7 +3,8 @@
  *
  * - **the kind picker**: every kind the table fits, each already drawn from its real
  *   rows (`POST /notes/figure/kinds`), the analyst picking one by its picture. The
- *   arrows move between them, Enter picks, Escape closes;
+ *   arrows move between them, Enter picks, Escape closes; from `/`, its foot offers
+ *   the rows of another note or a sheet instead;
  * - **the settings**: only what a chart is about, in plain words: its title, what it
  *   counts, by what, coloured by what, whether its table shows under it, and its look
  *   (Report, Book, Dark), each a whole preset. They open on the chart itself, between
@@ -26,6 +27,13 @@ function element(tag, className, text) {
 
 /** How many kinds stand across the picker. */
 export const PICKER_COLUMNS = 4;
+
+/** What the picker says under the kinds: changing a chart's kind, a table's chart, rows copied from elsewhere. */
+const FOOT = {
+  chart: 'The title, the columns and the rows stay; only the drawing changes.',
+  table: 'Only the kinds this table fits are here. Its rows are copied under it, and Read again brings them up to date.',
+  copied: 'Only the kinds these rows fit are here. They are copied into this note, and Read again brings them up to date.',
+};
 
 /** What the picker says it draws from: "60 rows" of a table, "the chart's 12 rows". */
 export function rowsSaid(rows, { chart = false } = {}) {
@@ -67,7 +75,9 @@ function pickCard(kind, current) {
  * drawn small, while they are asked. `onPick(kind)` gets the one picked, `{ kind, label,
  * settings, title }`. `current` marks the kind a chart is now. Answers its close.
  */
-export function openKindPicker(view, anchor, { caseId, noteId = '', text, current = '', chart = false, onPick, onClose = null, ask = chartKinds }) {
+export function openKindPicker(view, anchor, {
+  caseId, noteId = '', text, current = '', chart = false, copied = false, copy = null, onPick, onClose = null, ask = chartKinds,
+}) {
   const panel = element('div', 'cm-chart-picker');
   panel.setAttribute('role', 'dialog');
   panel.setAttribute('aria-label', chart ? 'Kind of chart' : 'Pick a chart');
@@ -80,12 +90,20 @@ export function openKindPicker(view, anchor, { caseId, noteId = '', text, curren
   grid.setAttribute('aria-label', 'Kinds this table fits');
   // the places hold while the drawings come, so nothing jumps
   for (let index = 0; index < PICKER_COLUMNS * 2; index += 1) grid.append(element('span', 'cm-chart-pick cm-chart-waiting'));
-  const foot = element('p', 'cm-chart-picker-foot', chart
-    ? 'The title, the columns and the rows stay; only the drawing changes.'
-    : 'Only the kinds this table fits are here. Its rows are copied under it, and Read again brings them up to date.');
+  const foot = element('p', 'cm-chart-picker-foot', chart ? FOOT.chart : copied ? FOOT.copied : FOOT.table);
   panel.append(head, grid, foot);
   let closed = false;
   const close = openPopover(view, anchor, panel, { onClose: () => { closed = true; onClose?.(); } });
+  if (copy) {
+    // the rows may come from elsewhere: the other notes' tables and the sheets, one press away
+    const other = button('cm-chart-use cm-chart-copy', { label: 'Copy rows from another note or a sheet' });
+    other.addEventListener('mousedown', (event) => event.preventDefault());
+    other.addEventListener('click', () => {
+      close(false);
+      copy();
+    });
+    foot.append(' ', other);
+  }
   panel.addEventListener('keydown', (event) => {
     if (walkKinds(event, [...grid.querySelectorAll('button.cm-chart-pick')])) {
       event.preventDefault();

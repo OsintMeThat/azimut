@@ -7469,15 +7469,22 @@ columns, `from:` and the table's rows copied in, as one Undo step, and it stands
 `from: note:<id>#<heading>` names the first table under that heading, `#<heading>/2` the
 second, `#/2` the second of the note; a chart's own rows never count. `/` › *Chart* asks
 which table when the note holds several, and with none starts a small table to fill, the
-grid's Chart button then one press away. In the raw Markdown the block is its lines.
+grid's Chart button then one press away. *Copy rows from another note or a sheet* stands
+beside the note's tables, under the kind picker of its one table, and with none beside the
+small table: it lists the case's other notes' tables by heading and note, then its sheets
+(`GET /notes/figure/sources`), and the one picked shows the kinds its rows fit; the chart is
+written with those rows and `from:` naming them (`sheet:<id>` for a sheet, its row keys left
+out). A case with no other table writes the small table at once. In the raw Markdown the
+block is its lines.
 
 The chart is drawn as the server draws it, kept by its text. Its bar: **Kind** (the
 picker again, its title, columns and rows kept; a kind of parts writes its column as its
 `by`), **Settings** (on the chart, between its bar and its drawing: the title with the one
 the data proposes beside it, Count, By or Parts, Coloured by, Show, Style as Report, Book
 or Dark; a colour column stacks bars and columns, none makes them plain), **Read again**
-(only once the table of this note its rows came from changed, the editor comparing them as
-typed on the chart's own columns, in any order), **The numbers** (its rows, a line each,
+(only once the table its rows came from changed, compared on the chart's own columns, in any
+order: a table of this note as it is typed, another note's table or a sheet as the server
+reads it, `POST /notes/figure/rows`, asked again when The numbers open), **The numbers** (its rows, a line each,
 whether they still match, *Go to the table* and *Edit them as text*) and **Export** (a
 picture for X, 4:5, 1:1, the PDF page, or an SVG, downloaded with its title as its name).
 What the check says shows under it, each fix one press (*Add “at least” to the title*).

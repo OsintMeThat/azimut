@@ -8,6 +8,11 @@ A picture standing alone carries its title. Nothing is written.
 `POST /api/cases/{id}/notes/figure/kinds` is the kind picker: a table (or a chart's block)
 drawn small as every kind it fits, each with the settings it would be written with.
 
+`GET /api/cases/{id}/notes/figure/sources` lists what a chart's rows may be copied from, each
+note's tables and each sheet with the ``from:`` that names it (*Copy rows from…*), and `POST
+/api/cases/{id}/notes/figure/rows` answers the rows a ``from:`` names as a table's Markdown,
+what *Read again* writes when they came from another note or a sheet.
+
 The look in the body wins; without one, the note named is read for its look and its
 words (whether it calls its figures minimums), and the case for its named colours.
 What the check would say of the block rides in the headers, each with its line in the
@@ -20,7 +25,7 @@ import json
 import re
 from typing import Any, Literal
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Query
 from fastapi.responses import Response
 from pydantic import BaseModel, Field
 
@@ -58,6 +63,12 @@ class KindsIn(BaseModel):
     text: str = Field(max_length=MAX_FIGURE_BYTES)
     look: NoteLook | None = None
     note: str = Field(default="", max_length=64, pattern=r"^([A-Za-z0-9_-]+)?$")
+
+
+class RowsIn(BaseModel):
+    """Where a chart's rows were copied from, as its ``from:`` line says it."""
+
+    origin: str = Field(max_length=300)
 
 
 def _note_and_look(case: Any, note: str, look: NoteLook | None, text: str) -> tuple[str, NoteLook | None]:
@@ -112,6 +123,28 @@ def chart_kinds(case_id: str, body: KindsIn) -> dict[str, Any]:
         raise HTTPException(status_code=422, detail="no table to draw: a chart is drawn from a table's rows")
     table = notes_charts.parse_block(lines).table
     return {"rows": len(table.rows) if table is not None else 0, "kinds": kinds}
+
+
+@router.get("/cases/{case_id}/notes/figure/sources")
+def chart_sources(case_id: str, note: str = Query(default="", max_length=64, pattern=r"^([A-Za-z0-9_-]+)?$")
+                  ) -> dict[str, Any]:
+    """Every table of the case's notes but ``note``'s, and every sheet, a chart's rows may be
+    copied from; nothing is written."""
+    return notecharts.table_sources(get_case(case_id), besides=note)
+
+
+@router.post("/cases/{case_id}/notes/figure/rows")
+def chart_rows(case_id: str, body: RowsIn) -> dict[str, Any]:
+    """The rows a chart's ``from:`` names, as a table's Markdown, and the name of where they
+    are; ``found`` false once it is no longer in the case. Nothing is written."""
+    case = get_case(case_id)
+    if not notecharts.origin_known(body.origin):
+        raise HTTPException(status_code=422, detail="from: names a note's table or a sheet")
+    found = notecharts.origin_table(case, body.origin)
+    if found is None:
+        return {"found": False, "name": "", "text": ""}
+    name, text = found
+    return {"found": True, "name": name, "text": text}
 
 
 def _kind_said(chart: notecharts.Chart) -> dict[str, Any]:

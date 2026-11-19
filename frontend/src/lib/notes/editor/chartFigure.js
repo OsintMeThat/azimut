@@ -1,8 +1,9 @@
 /**
  * What the note editor asks the server of a chart (`api/notecharts.py`): its drawing
- * and what the check says of it, every kind its table fits for the kind picker, and a
- * picture of it for one destination. A drawing and a gallery are kept by the block's
- * text, so a chart drawn once is drawn again at once; a picture is asked for each time.
+ * and what the check says of it, every kind its table fits for the kind picker, a
+ * picture of it for one destination, and the rows it may be copied from elsewhere. A
+ * drawing and a gallery are kept by the block's text, so a chart drawn once is drawn again
+ * at once; a picture is asked for each time.
  */
 import { api } from '../../api.js';
 
@@ -21,8 +22,12 @@ export const EXPORTS = [
   { id: 'svg', label: 'SVG', hint: 'For a designer', format: 'svg', size: 'page' },
 ];
 
+/** How long the rows read from another note or a sheet are kept before they are asked again, in ms. */
+export const ROWS_KEPT_MS = 3000;
+
 const drawings = new Map();
 const galleries = new Map();
+const copied = new Map();
 
 function keep(store, key, value) {
   store.delete(key);
@@ -133,6 +138,37 @@ export function chartKinds({ caseId, noteId = '', text }, { post = api.post } = 
   return asked;
 }
 
+/**
+ * The rows a chart's `from:` names when they came from another note or a sheet, as a
+ * table's Markdown: `{ found, name, text }`, or `{ error }`. Kept a few seconds
+ * (`ROWS_KEPT_MS`), so typing in the note does not ask again at every key; `fresh` asks now.
+ */
+export function chartRows({ caseId, origin, fresh = false }, { post = api.post, now = Date.now } = {}) {
+  const key = JSON.stringify([caseId, origin]);
+  const known = copied.get(key);
+  if (known && !fresh && now() - known.at < ROWS_KEPT_MS) return known.asked;
+  const asked = post(`/api/cases/${encodeURIComponent(caseId)}/notes/figure/rows`, { origin })
+    .then((answer) => ({ found: Boolean(answer?.found), name: String(answer?.name ?? ''), text: String(answer?.text ?? '') }))
+    .catch((error) => {
+      copied.delete(key);
+      return { error: error?.message ?? String(error) };
+    });
+  keep(copied, key, { at: now(), asked });
+  return asked;
+}
+
+/**
+ * What a chart's rows may be copied from (*Copy rows from…*): the tables of the case's
+ * other notes, `{ origin, note, heading, rows, columns }`, and its sheets, `{ origin,
+ * title, rows, columns }`, or `{ error }`.
+ */
+export function chartSources({ caseId, noteId = '' }, { get = api.get } = {}) {
+  const query = noteId ? `?note=${encodeURIComponent(noteId)}` : '';
+  return get(`/api/cases/${encodeURIComponent(caseId)}/notes/figure/sources${query}`)
+    .then((answer) => ({ tables: Array.isArray(answer?.tables) ? answer.tables : [], sheets: Array.isArray(answer?.sheets) ? answer.sheets : [] }))
+    .catch((error) => ({ error: error?.message ?? String(error) }));
+}
+
 /** A file name for a chart's picture: its title, then where it goes. */
 export function pictureName(title, destination) {
   const words = String(title || 'Chart').replace(/[\\/<>:"|?*\u0000-\u001f]+/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 80) || 'Chart';
@@ -168,4 +204,5 @@ export async function exportChart({ caseId, noteId = '', text, destination }, { 
 export function forgetDrawings() {
   drawings.clear();
   galleries.clear();
+  copied.clear();
 }
