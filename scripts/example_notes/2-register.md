@@ -2,7 +2,7 @@
 title: Boats lost at Saltmere, the register
 look: {"style": "report", "numbered": true}
 ---
-> [!note] Fictional example. Saltmere, its storm of 14 and 15 March 2026 and every account quoted here are invented, to show what a note can hold. The photographs are real, public-domain pictures of other storms and places, each credited in the case.
+> [!note] Fictional example. Saltmere, its storm of 14 and 15 March 2026 and every account quoted here are invented, to show what a note can hold. The photographs are real public-domain pictures of other storms and places, used as illustrations: each caption says where and when it was really taken.
 
 > [!note] Every count is a minimum: each boat is counted once, across the marina survey, two walks and the drone flight of 15 and 16 March.
 
@@ -47,7 +47,7 @@ picture: Picture
 label: #
 words: Type
 shape: 3:2
-source: frames from the marina survey, the harbour and beach walks and the drone flight
+source: Illustrations: FEMA, U.S. Coast Guard and U.S. Fish and Wildlife Service photos from Texas, Mississippi, Louisiana, Florida and North Carolina, 2004 to 2011, public domain; the boats, places and dates of this example are invented
 {{table:wall-by-status}}
 :::
 
@@ -61,6 +61,6 @@ timeline: off
 north: on
 :::
 
-The register is a sheet of the case with a column of coordinates, so the map takes it as a layer coloured by grade, and follows the sheet when it changes.
+The register is a sheet of the case with a column of coordinates, so the map takes it as a layer coloured by grade, and follows the sheet when it changes. The ground under it is a real aerial photograph of another coast, used as an illustration, as its credit line says.
 
 > [!limits] Boats sunk out of sight in the canal, and those the pictures saw only from far off, are not counted. The true number is higher.
