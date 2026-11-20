@@ -2,25 +2,25 @@
 title: Damage on Beach Road, an assessment
 look: {"style": "brief"}
 ---
-> [!note] Fictional example. Saltmere, its storm of 14 and 15 March 2026 and every account quoted here are invented, to show what a note can hold. The photographs are real, public-domain pictures of other storms and places, each credited under it.
+> [!note] Fictional example. Saltmere, its storm of 14 and 15 March 2026 and every account quoted here are invented, to show what a note can hold. The photographs are real public-domain pictures of other storms and places, used as illustrations: each caption says where and when it was really taken.
 
-> [!confirmed] Bottom line: the surge of 14 to 15 March buried Beach Road under sand and left most houses between the road and the beach without a roof or a wall.
+> [!confirmed] Bottom line: the surge of 14 to 15 March came over the dunes in at least six places, flattened them and buried Beach Road under sand.
 
 ## Key figures
 
 ::: chart
 kind: key figures
-source: aerial pictures of 2 and 16 March
+source: aerial pictures before and after the storm
 | Figure | What it says |
 | --- | --- |
-| about 750 m | of Beach Road under sand |
-| at least 12 | houses without a roof or a wall |
+| about 900 m | of Beach Road under sand |
+| at least 6 | places where the sea crossed the road |
 | 1 | pier lost its end |
 :::
 
 ## Before and after
 
-[[media:{{pair}}|Beach Road before and after the storm]]{width=100% caption="Beach Road on 2 March and on 16 March. NOAA aerial photographs (Mexico Beach, Florida, 2017 and 2018), public domain."}
+[[media:{{pair}}|Beach Road before and after the storm]]{width=100% caption="Beach Road before and after the storm. Illustration: NOAA aerial photographs of St. George Island, Florida, April 2017 and 13 October 2018, public domain; the places and dates of this example are invented."}
 
 ## The area hit
 
@@ -32,6 +32,8 @@ timeline: off
 north: on
 scale: on
 :::
+
+The ground under the map is a real aerial photograph of another coast, used as an illustration, as its credit line says.
 
 ## Timeline
 
@@ -51,8 +53,8 @@ source: the aerial passes and the posts of 14 and 15 March
 | Structure | Damage | Before | After |
 | --- | --- | --- | --- |
 | Beach Road | Severe | 2 Mar 2026 | 16 Mar 2026 |
-| Houses on the beach side | Severe | 2 Mar 2026 | 16 Mar 2026 |
-| Houses north of the road | Moderate | 2 Mar 2026 | 16 Mar 2026 |
+| The dunes along the beach | Severe | 2 Mar 2026 | 16 Mar 2026 |
+| Houses at the west end | Moderate | 2 Mar 2026 | 15 Mar 2026 |
 | The old pier | Destroyed | 2 Mar 2026 | 15 Mar 2026 |
 | The marina quay | Moderate | 2 Mar 2026 | 15 Mar 2026 |
 {colour="Damage"}

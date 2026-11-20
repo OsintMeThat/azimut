@@ -1,8 +1,9 @@
 """The example case: a fictional investigation anyone can open to see a report filled.
 
 An invented island, an invented storm and invented accounts, told through real
-photographs of other places and storms, every one in the public domain and credited
-(`assets/example/CREDITS.md`). It holds a sheet, personal layers, proofs, a Compare
+photographs of other places and storms, every one in the public domain, with no landmark,
+and captioned where it shows as the illustration it is: where and when it was really
+taken (`assets/example/CREDITS.md`). It holds a sheet, personal layers, proofs, a Compare
 pair and four notes made from the showcase templates (`lib/notes/ready.js`): a story
 for the web, a losses register with its infographic and picture wall, a claim set
 against the footage, and a damage assessment.

@@ -7057,8 +7057,12 @@ side, opens it in its own tab, exports it, lists its editions, or deletes it.
 **The example case** is a fictional case anyone can open to see a report filled
 (`engine/examplecase.py`, `lib/exampleCase.js`): an invented island, Saltmere, an invented
 storm of 14 to 15 March 2026 and invented accounts, told through real public-domain
-photographs of other storms and places, each credited in its Details and in
-`assets/example/CREDITS.md`. One press (the front door's *Open the example case*, or the
+photographs of other storms and places with no landmark in them, names and numbers on hulls
+blurred. Each photograph says where and when it was really taken where it shows: its
+caption (*Illustration: FEMA photo by …, Pensacola Beach, Florida, 15 October 2004, public
+domain; the scene and dates of this example are invented.*), a proof's band, a picture
+wall's source line, the map ground's credit line and the before and after's two labels;
+its Details and `assets/example/CREDITS.md` say it again. One press (the front door's *Open the example case*, or the
 gallery's link) imports the bundle the app ships, `assets/example/example-case.azimut.zip`,
 as Import case does (`POST /api/cases/example`): a new ordinary case named *Example case
 (fictional)*, nothing fetched, no key asked; pressed again while it is there, it opens it.
@@ -7069,7 +7073,8 @@ kind), a losses register (its infographic reading the case's sheet through its D
 a set table, a chart, a wall, the sheet on a map), a claim checked against proofs
 (verdict callouts, a coloured claims table, short timeline labels, a diagram, a
 correction) and a damage brief. Every note opens on a callout saying the story is
-invented. `scripts/example_case.py` builds the bundle from `scripts/example_notes/`,
+invented, and the story's page opens on a line saying it is illustrated with real
+photographs of other places. `scripts/example_case.py` builds the bundle from `scripts/example_notes/`,
 fetching the photographs from Wikimedia Commons only then; a note changed there is
 built again with `uv run python scripts/example_case.py`.
 

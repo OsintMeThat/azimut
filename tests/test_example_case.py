@@ -167,4 +167,39 @@ def test_the_bundle_holds_the_notes_as_written_in_scripts(client):
         assert re.fullmatch(pattern, written), f"{source.name}: build the example case again"
         look = client.get(f"/api/cases/{case_id}/notes/{note_id}/look").json()["look"]
         for key, value in json.loads(fields["look"]).items():
-            assert look[key] == value, (source.name, key)
+            if isinstance(value, dict):
+                assert {inner: look[key][inner] for inner in value} == value, (source.name, key)
+            else:
+                assert look[key] == value, (source.name, key)
+
+
+def test_every_photograph_says_where_it_is_really_from_where_it_shows(client):
+    """A story about an invented place, told in real photographs: each says it is an
+    illustration, and of what, in its own caption, credit line or label, never only in
+    its Details."""
+    case_id = _made(client)["case_id"]
+    texts = [client.get(f"/api/cases/{case_id}/notes/{note['id']}").json()["text"] for note in _notes(client, case_id)]
+    every = "\n".join(texts)
+    captions = re.findall(r"\[\[media:e_[0-9a-f]+\|[^\]]*\]\]\{[^}]*caption=\"([^\"]*)\"", every)
+    assert len(captions) >= 9
+    for caption in captions:
+        assert "Illustration:" in caption and "public domain" in caption and "invented" in caption, caption
+    shown = re.findall(r"\[\[media:e_[0-9a-f]+\|[^\]]*\]\](?!\{)", "\n".join(
+        line for line in every.splitlines() if not line.startswith("|")))
+    assert shown == [], shown
+    walls = re.findall(r"^kind: pictures\n(?:[a-z ]+: .*\n)*?source: (.*)$", every, re.M)
+    assert walls and all(line.startswith("Illustrations:") and "invented" in line for line in walls)
+    # the ground under every map and the pair's two sides say what they are, where they show
+    media = client.get(f"/api/cases/{case_id}/media").json()
+    sidecars = [client.get(f"/api/cases/{case_id}/media/item", params={"path": item["path"]}).json() for item in media]
+    ground = next(item for item in sidecars if (item.get("source") or {}).get("type") == "satellite")
+    assert ground["source"]["attribution"].startswith("Imagery used as an illustration: NOAA aerial photograph")
+    assert "imagery_date" not in ground["source"]
+    pairs = [item for item in sidecars if (item.get("source") or {}).get("type") == "compare"]
+    assert len(pairs) == 3
+    for item in pairs:
+        assert all("(illustration)" in said for said in item["source"]["providers"].values()), item["path"]
+        # the real days the photographs were taken, never a day of the story
+        assert all(item["source"].get(key, "2017")[:4] in ("2017", "2018") for key in ("imagery_a", "imagery_b"))
+    # no landmark stands in for an invented one
+    assert "lighthouse" not in every.lower()
