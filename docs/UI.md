@@ -7571,11 +7571,11 @@ panel beside it holds **Find on the map** (every word of a feature, its name, gr
 day and columns, local; a result opens on a day it is on, its row switched back on, the map
 moved to it and its card open), **Layers** (the legend, each row a switch for its group and
 each layer's name for all of its rows), its steps and the note's other words, sources and
-footer. The header's **Layers** button folds the panel away and brings it back, the map taking
-the width; the panel opens with the page only on a screen 64rem wide or more, so a tablet, a
-phone on its side or a small window opens on the map alone. On a phone the header keeps the
-title on a line with that button, which opens the panel as a sheet over the map, and a card is a
-sheet of its own. Where the map looks is
+footer. On a phone the header keeps the title on a line, the panel is a sheet at the map's
+foot folded down to its bar (**Layers and search**, a grip and a chevron), which brings it up and
+folds it again, as a feature found does; a card is a sheet of its own. The drawing under a live
+map is clipped to what the page frames, never the live map's own marks spread and counted over
+it, which move with it. Where the map looks is
 kept in the address as `#zoom/lat/lon` (a tile's zoom, as OpenStreetMap writes it), read on
 the way in and written as the map moves, never a step of the history, and only once it has
 moved. **Full screen** asks the browser's own for the whole page; where the browser has none

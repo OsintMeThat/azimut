@@ -43,13 +43,13 @@ function withCard(id, card) {
   });
 }
 
-async function mapPage({ hash = '', wide = true, roomy = wide, url = 'https://desk.github.io/maps/road/', script = READER, fetch = null, figure = FIGURE, mark = '' } = {}) {
+async function mapPage({ hash = '', wide = true, url = 'https://desk.github.io/maps/road/', script = READER, fetch = null, figure = FIGURE, mark = '' } = {}) {
   window = new Window({
     url: `${url}${hash}`, width: wide ? 1440 : 390, height: 900,
     settings: { enableJavaScriptEvaluation: true, suppressInsecureJavaScriptEnvironmentWarning: true },
   });
   window.matchMedia = (query) => ({
-    matches: query.includes('reduce') || (wide && query.includes('min-width') && (roomy || !query.includes('64rem'))),
+    matches: query.includes('reduce') || (wide && query.includes('min-width')),
     addEventListener() {}, removeEventListener() {},
   });
   for (const [name, value] of [['clientWidth', 800], ['clientHeight', 574]]) {
@@ -157,38 +157,38 @@ describe('a map page', () => {
     expect(window.location.hash).toBe('');
   });
 
-  it('folds its panel into a sheet behind a button on a phone', async () => {
+  it('folds its panel down to a bar at the foot of the map on a phone, the bar bringing it up and folding it again', async () => {
     const doc = await mapPage({ wide: false });
-    const menu = doc.querySelector('.az-mappage-head .az-mappage-menu');
-    expect(menu.getAttribute('aria-expanded')).toBe('false');
-    press(menu);
-    expect(doc.querySelector('.az-mappage').classList.contains('az-mappage-open')).toBe(true);
-    expect(menu.getAttribute('aria-expanded')).toBe('true');
-    press(doc.querySelector('.az-mappage-shut'));
-    expect(doc.querySelector('.az-mappage').classList.contains('az-mappage-open')).toBe(false);
-  });
-
-  it('folds its side column away from the same button on a wider screen, folded from the start where room is short', async () => {
-    const doc = await mapPage();
     const page = doc.querySelector('.az-mappage');
-    const menu = doc.querySelector('.az-mappage-head .az-mappage-menu');
-    expect(page.classList.contains('az-mappage-open')).toBe(true);
-    expect(menu.getAttribute('aria-expanded')).toBe('true');
-    press(menu);
+    expect(doc.querySelector('.az-mappage-head button')).toBeNull();
+    const bar = doc.querySelector('.az-mappage-panel > .az-mappage-fold');
+    expect(bar.textContent).toBe('Layers and search');
+    expect(bar.getAttribute('aria-expanded')).toBe('false');
     expect(page.classList.contains('az-mappage-open')).toBe(false);
-    expect(menu.getAttribute('aria-expanded')).toBe('false');
-    press(menu);
+    press(bar);
     expect(page.classList.contains('az-mappage-open')).toBe(true);
-    // a feature found keeps the column open beside the map
+    expect(bar.getAttribute('aria-expanded')).toBe('true');
+    // a feature found folds the sheet back to show it on the map
     const field = doc.querySelector('.az-mappage-field');
     field.value = 'Line';
     field.dispatchEvent(new window.Event('input', { bubbles: true }));
     doc.querySelector('.az-mappage-results button').click();
-    expect(page.classList.contains('az-mappage-open')).toBe(true);
-    // a tablet, a phone on its side or a small laptop window opens on the map alone
-    const narrow = await mapPage({ roomy: false });
-    expect(narrow.querySelector('.az-mappage').classList.contains('az-mappage-open')).toBe(false);
-    expect(narrow.querySelector('.az-mappage-menu').getAttribute('aria-expanded')).toBe('false');
+    expect(page.classList.contains('az-mappage-open')).toBe(false);
+    press(bar);
+    press(bar);
+    expect(bar.getAttribute('aria-expanded')).toBe('false');
+  });
+
+  it("keeps the panel beside the map on a wider screen, with no button to hide it", async () => {
+    const doc = await mapPage();
+    expect(doc.querySelector('.az-mappage-head button')).toBeNull();
+    expect(window.getComputedStyle(doc.querySelector('.az-mappage-fold')).display).toBe('none');
+  });
+
+  it("clips the drawing to what the page frames, never the live map's own marks that move with it", () => {
+    const clipping = CSS.split('}').filter((rule) => /clip-path/.test(rule) && /\.az-map-svg/.test(rule));
+    expect(clipping.length).toBeGreaterThanOrEqual(2);
+    for (const rule of clipping) expect(rule).toMatch(/\.az-map-svg:not\(\.az-gl-over\)/);
   });
 });
 
