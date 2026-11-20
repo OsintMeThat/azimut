@@ -7573,7 +7573,8 @@ moved to it and its card open), **Layers** (the legend, each row a switch for it
 each layer's name for all of its rows), its steps and the note's other words, sources and
 footer. On a phone the header keeps the title on a line, the panel is a sheet at the map's
 foot folded down to its bar (**Layers and search**, a grip and a chevron), which brings it up and
-folds it again, as a feature found does; a card is a sheet of its own. The drawing under a live
+folds it again on a press or a drag of the finger (the sheet following it and settling the way
+it was pulled), as a feature found folds it; a card is a sheet of its own. The drawing under a live
 map is clipped to what the page frames, never the live map's own marks spread and counted over
 it, which move with it. Where the map looks is
 kept in the address as `#zoom/lat/lon` (a tile's zoom, as OpenStreetMap writes it), read on

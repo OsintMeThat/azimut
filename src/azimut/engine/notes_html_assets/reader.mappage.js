@@ -137,7 +137,40 @@
       bar.setAttribute('aria-expanded', String(on));
       if (!on) panel.scrollTop = 0;
     }
-    bar.addEventListener('click', () => sheet(!page.classList.contains('az-mappage-open')));
+    /* the bar follows a finger: the sheet comes with it, and once let go, past a short way, it settles the way it was
+       pulled; a press that hardly moved is the bar's press */
+    let drag = null;
+    let dragged = false;
+    bar.addEventListener('pointerdown', (event) => {
+      if (event.button) return;
+      const tall = panel.getBoundingClientRect().height;
+      drag = { id: event.pointerId, y: event.clientY, open: page.classList.contains('az-mappage-open'), by: 0,
+        travel: Math.max(1, tall - bar.offsetHeight) };
+      bar.setPointerCapture?.(event.pointerId);
+    });
+    bar.addEventListener('pointermove', (event) => {
+      if (!drag || event.pointerId !== drag.id) return;
+      drag.by = event.clientY - drag.y;
+      if (!drag.moved && Math.abs(drag.by) < 6) return;
+      drag.moved = true;
+      const at = Math.min(drag.travel, Math.max(0, (drag.open ? 0 : drag.travel) + drag.by));
+      panel.style.transition = 'none';
+      panel.style.transform = `translateY(${at.toFixed(1)}px)`;
+    });
+    const let_go = (event) => {
+      if (!drag || event.pointerId !== drag.id) return;
+      const was = drag;
+      drag = null;
+      if (!was.moved) return;
+      panel.style.transition = '';
+      panel.style.transform = '';
+      dragged = true;
+      setTimeout(() => { dragged = false; }, 0);
+      sheet(Math.abs(was.by) > 40 ? was.by < 0 : was.open);
+    };
+    bar.addEventListener('pointerup', let_go);
+    bar.addEventListener('pointercancel', let_go);
+    bar.addEventListener('click', () => { if (!dragged) sheet(!page.classList.contains('az-mappage-open')); });
     panel.addEventListener('keydown', (event) => {
       if (event.key === 'Escape' && page.classList.contains('az-mappage-open')) { event.stopPropagation(); sheet(false); bar.focus({ preventScroll: true }); }
     });

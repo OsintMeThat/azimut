@@ -141,7 +141,7 @@
   .az-js .az-mappage-fold {
     position: sticky; top: 0; z-index: 1; display: flex; align-items: center; justify-content: center; gap: .6rem; flex: none;
     height: var(--az-bar); margin: 0 -1rem; padding: 0 1rem; border: 0; border-radius: 14px 14px 0 0; background: #16181b; color: #fff;
-    font: 600 .8125rem/1 var(--ui); cursor: pointer;
+    font: 600 .8125rem/1 var(--ui); cursor: pointer; touch-action: none; user-select: none; -webkit-user-select: none;
   }
   .az-js .az-mappage-grip { position: absolute; top: .4rem; left: 50%; width: 2.25rem; height: 4px; margin-left: -1.125rem; border-radius: 2px; background: rgba(255, 255, 255, .3); }
   .az-js .az-mappage-fold::after {
