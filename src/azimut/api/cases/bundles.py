@@ -15,6 +15,7 @@ from pydantic import BaseModel, Field
 
 from ... import config
 from ...engine import bundles as bundle_engine
+from ...engine import examplecase
 from ...workspace import CaseError
 from .common import get_case
 
@@ -60,6 +61,16 @@ def import_bundle(body: BundleUpload) -> dict[str, Any]:
         "job_id": job["id"],
         "state": job["state"],
     }
+
+@router.post("/example")
+def open_example_case() -> dict[str, Any]:
+    """The fictional example case: the one the workspace holds, else a new one imported from
+    the bundle the app ships (`engine/examplecase.py`). Nothing is fetched."""
+    try:
+        return examplecase.open_example()
+    except CaseError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
 
 @router.delete("/bundles/uploads/{upload_id}")
 def discard_bundle_upload(upload_id: str) -> dict[str, str]:

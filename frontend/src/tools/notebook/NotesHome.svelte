@@ -11,11 +11,15 @@
    *
    * Beside the ready templates, *From the case* opens the New note dialog on the
    * start that writes a note of every geolocation of a period (`NewNoteDialog.svelte`).
+   * The five that show what a report holds stand in a row of their own, with a press
+   * that opens them filled in the example case (`lib/exampleCase.js`).
    */
   import { untrack } from 'svelte';
   import { api } from '../../lib/api.js';
   import { timeAgo } from '../../lib/analysisViews.js';
-  import { READY_NOTES } from '../../lib/notes/ready.js';
+  import { READY_NOTES, SHOWCASE } from '../../lib/notes/ready.js';
+  import { EXAMPLE_HINT, EXAMPLE_NAME, openExampleCase } from '../../lib/exampleCase.js';
+  import { caseState } from '../../lib/state.svelte.js';
   import { isReport, styleLabel } from '../../lib/notes/look.js';
   import Icon from '../../components/Icon.svelte';
   import SearchInput from '../../components/SearchInput.svelte';
@@ -35,6 +39,8 @@
     onexport = () => {},
     onreport = () => {},
   } = $props();
+  // the example case's own notes are the templates filled: no link to where it already is
+  const inExample = $derived(caseState.current?.name === EXAMPLE_NAME);
 
   let query = $state('');
   let sort = $state('recent');
@@ -257,7 +263,7 @@
       {/if}
       <h4>Start from</h4>
       <div class="tiles" data-guide="notebook.ready">
-        {#each READY_NOTES as ready (ready.id)}
+        {#each READY_NOTES.filter((ready) => !SHOWCASE.includes(ready.id)) as ready (ready.id)}
           {@render tile({ name: ready.name, start: ready.id === 'blank' ? 'Note' : ready.name, note: ready.note,
             body: ready.body, folder: '', look: ready.look })}
           {#if ready.id === 'blank'}
@@ -268,6 +274,17 @@
               <span class="tile-said">A period's geolocations</span>
             </button>
           {/if}
+        {/each}
+      </div>
+      <div class="section-head">
+        <h4>Reports with figures</h4>
+        {#if !inExample}
+          <button type="button" class="link" title={EXAMPLE_HINT} onclick={openExampleCase}>See them filled in the example case</button>
+        {/if}
+      </div>
+      <div class="tiles">
+        {#each READY_NOTES.filter((ready) => SHOWCASE.includes(ready.id)) as ready (ready.id)}
+          {@render tile({ name: ready.name, start: ready.name, note: ready.note, body: ready.body, folder: '', look: ready.look })}
         {/each}
       </div>
     {/if}

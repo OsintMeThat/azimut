@@ -1088,14 +1088,15 @@ def imported_name(name: str) -> str:
     return f"{name} (imported)"
 
 
-def create_import_case(name: str) -> Case:
+def create_import_case(name: str, *, as_is: bool = False) -> Case:
     """Create a destination no other case answers to, numbering only when needed.
 
     The question is asked of the *name*, not of the folder: `Case.create` now
     numbers a taken folder itself, so importing the same bundle twice would
-    otherwise leave two cases the switcher shows under one name.
+    otherwise leave two cases the switcher shows under one name. ``as_is`` keeps
+    the name without its *(imported)*, for a bundle the app ships.
     """
-    base = imported_name(name)
+    base = name if as_is else imported_name(name)
     candidate = base
     index = 2
     while Case.name_taken(candidate):
@@ -1296,11 +1297,13 @@ def queue_import(
     *,
     password: str | None = None,
     cleanup_source: bool = False,
+    name: str | None = None,
 ) -> tuple[Case, dict[str, Any]]:
-    """Pre-flight, create the new case shell, then queue its import."""
+    """Pre-flight, create the new case shell, then queue its import. ``name`` names the
+    case as it is, in place of the bundle's own name and its *(imported)*."""
     header = inspect_bundle(source, password=password)
     _require_import_space(Path(source), header)
-    case = create_import_case(header["case_name"])
+    case = create_import_case(name, as_is=True) if name else create_import_case(header["case_name"])
     with _secret_lock:
         _building.add(case.id)
     job = case.enqueue_job(

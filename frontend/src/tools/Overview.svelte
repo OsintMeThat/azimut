@@ -23,6 +23,7 @@
   import { entityIcon, entityKindLabel } from '../lib/entityIcon.js';
   import { fileUrl } from '../lib/fileUrl.js';
   import { KOFI_URL } from '../lib/support.js';
+  import { EXAMPLE_HINT, openExampleCase } from '../lib/exampleCase.js';
   import { markdownHtml } from '../lib/markdown.js';
   import { openEntity, openGuide, openTour, openWhatsNew } from '../lib/navigate.js';
   import { newsOf } from '../lib/onboarding.js';
@@ -439,6 +440,10 @@
             <button class="btn btn-ghost btn-sm" onclick={openTour}>
               <Icon name="compass" size={14} />
               Take the tour
+            </button>
+            <button class="btn btn-ghost btn-sm" title={EXAMPLE_HINT} onclick={openExampleCase}>
+              <Icon name="note" size={14} />
+              Open the example case
             </button>
             <button class="btn btn-ghost btn-sm" onclick={() => openGuide('start')}>
               Read the guide
