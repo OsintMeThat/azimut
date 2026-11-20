@@ -162,7 +162,9 @@ export function paletteOf(named = []) {
  * answer, the press under way); `write(changes)` one choice; `base(value)` the base filed
  * and written; `arm(tool, done)` a tool armed on the map; `draw(kind, coords, extra)`,
  * `edit(row, changes)` and `remove(row)` what is drawn; `addLayer(name)` another layer;
- * `fromSheet()`, when the note can, a layer made from a sheet and put on the map.
+ * `fromSheet()`, when the note can, a layer made from a sheet and put on the map;
+ * `sizedBy`, when the map's host sets its width (an infographic's panel), the words said in
+ * place of the Size choice, a template's size then left out.
  * Answers `{ refresh, focus, destroy, open(tab) }`.
  */
 export function mapSettings(panel, ctx) {
@@ -251,12 +253,20 @@ export function mapSettings(panel, ctx) {
     }
     const grid = element('div', 'cm-map-grid');
     grid.append(
-      segmented('Size', SIZES.map((value) => ({ value, label: SIZE_NAMES[value], title: SIZE_HINTS[value] })), map.size || 'wide', (value) => ctx.write({ size: value === 'wide' ? '' : value })),
+      ctx.sizedBy ? sizedBy(ctx.sizedBy)
+        : segmented('Size', SIZES.map((value) => ({ value, label: SIZE_NAMES[value], title: SIZE_HINTS[value] })), map.size || 'wide', (value) => ctx.write({ size: value === 'wide' ? '' : value })),
       segmented('Legend', LEGENDS.map((value) => ({ value, label: LEGEND_NAMES[value] })), map.legend || 'shown', (value) => ctx.write({ legend: value === 'shown' ? '' : value })),
       segmented('North arrow', [{ value: 'off', label: 'Off' }, { value: 'on', label: 'On' }], map.north === 'on' ? 'on' : 'off', (value) => ctx.write({ north: value === 'on' ? 'on' : '' })),
       segmented('Scale', ['off', '', 'on'].map((value) => ({ value, label: SCALE_NAMES[value], title: SCALE_HINTS[value] })), map.scale, (value) => ctx.write({ scale: value })),
     );
     return [title, base, frame, grid, templateLine(map)];
+  }
+
+  /** Size, where the host sets the map's width: what says so. */
+  function sizedBy(words) {
+    const row = element('div', 'cm-map-field cm-map-sized');
+    row.append(element('span', 'cm-map-field-name', 'Size'), element('span', 'cm-map-note', words));
+    return row;
   }
 
   /** The template picker this card opened, closed with it. */
@@ -272,6 +282,7 @@ export function mapSettings(panel, ctx) {
       figure: 'map',
       onapply: (answer) => {
         const { base = '', ...look } = answer?.changes ?? {};
+        if (ctx.sizedBy) delete look.size;
         ctx.write(look);
         // another base is a ground filed on the press, as picking it on the card files it
         if ((base || 'satellite') !== (map.base || 'satellite')) ctx.base(base || 'satellite');

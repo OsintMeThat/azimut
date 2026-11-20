@@ -953,3 +953,47 @@ def test_an_infographics_map_panel_honours_the_maps_settings(client, monkeypatch
     assert {one["layer"] for one in data["features"]} == {"Vehicles"}
     assert (data["north"], data["scale"], data["base"], data["day"]) == (True, "on", "dark", "2026-11-15")
     assert page.bands, "the panel is laid out"
+
+
+def test_the_pdf_the_picture_and_the_html_page_read_a_map_panel_as_a_notes_map(client, monkeypatch):
+    """What the builder's map card writes in a panel is read as the same lines in a map of the
+    note: the PDF's picture and Export as a picture draw it from the same data, and the HTML page
+    draws the same live map, its legend folded and its north arrow on."""
+    cid, case = _case(client)
+    line = _tracked_line(case)
+    vehicles = _markers(client, cid)
+    _proof(client, cid, "Heights", "2026-10-20", [("12.7295, 43.5002", "POV", True)])
+    lines = (f"title: Where they lie\nlayer: {line}\nlayer: {vehicles}\nproofs: all\nhide: {line}\n"
+             f"colour: {vehicles} = #009e73\nlabels: off\ncrowds: off\nnorth: on\nscale: on\nbase: dark\n"
+             "frame: 43.45000, 12.68000, 43.56000, 12.77000\ntimeline: off\nopens on: 2026-11-15\nspeed: slow\n"
+             "card: sentence\nlegend: folded\nstep: 2026-11-15 | The quay | 12.74000, 43.50000, 14")
+    alone = f"# Front\n\n::: map\n{lines}\n:::\n"
+    graphic = f":::: infographic\ntitle: Losses\n\n::: map\n{lines}\n:::\n::::"
+    inside = f"# Front\n\n{graphic}\n"
+    drawn: list[dict] = []
+    real = notes_maps.render_png
+
+    def kept(data, *args, **kwargs):
+        drawn.append(data)
+        return real(data, *args, **kwargs)
+
+    monkeypatch.setattr(notes_maps, "render_png", kept)
+    notes_pdf.render(case, title="Front", text=alone)
+    printed = drawn[-1]
+    assert {one["layer"] for one in printed["features"]} - {"Proofs"} == {"Vehicles"}
+    assert (printed["north"], printed["scale"], printed["base"], printed["day"]) == (True, "on", "dark", "2026-11-15")
+    drawn.clear()
+    notes_pdf.render(case, title="Front", text=inside)
+    assert drawn and all(one == printed for one in drawn), "the PDF prints the panel as it prints the note's map"
+    drawn.clear()
+    picture = client.post(f"/api/cases/{cid}/notes/infographic", json={"text": graphic, "format": "png", "size": "x"})
+    assert picture.status_code == 200 and drawn[-1] == printed, "Export as a picture draws the same map"
+
+    page_alone = notes_html.render(case, title="Front", text=alone).html
+    page_inside = notes_html.render(case, title="Front", text=inside).html
+    assert _map_data(page_inside) == _map_data(page_alone)
+    panel = page_inside.decode("utf-8")
+    panel = panel[panel.index('data-panel="map"'):]
+    panel = panel[:panel.index("</figure>")]
+    assert 'class="az-map-north"' in panel and 'data-base="dark"' in panel and 'data-steps="1"' in panel
+    assert '<details class="az-map-key"><summary>Legend</summary>' in panel

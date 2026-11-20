@@ -2,7 +2,8 @@
  * An infographic: a `:::: infographic` block (`engine/notes_infographic.py`), drawn as its
  * page, the server's own drawing of it (`POST notes/infographic`), so the editor shows what
  * the PDF and the picture show. A press on a panel, or on Edit, opens the builder beside the
- * note (`tools/notebook/InfographicBuilder.svelte`) at that panel; its `</>` opens the source.
+ * note (`tools/notebook/InfographicBuilder.svelte`), a chart's or a map's settings card open
+ * at the panel pressed; its `</>` opens the source.
  *
  * Under its head, the **Data** line: what `data:` names, its rows, how many panels read it
  * and whether it changed since (`editor/infographicData.js`), then *Read again (all panels)*
@@ -10,11 +11,16 @@
  * Undo. It is said again as the note changes, and read afresh when the block comes back into
  * sight (the Notebook shown again, a sheet edited in the Sheet tool meanwhile) or the window
  * does (a sheet edited in Excel).
+ *
+ * A point, a line or an area drawn on a map, in the builder's map panel or on a map of the
+ * note, is case data rather than a line of the page: the pages holding a map panel are drawn
+ * again (`onMapsTouched`), the drawing they had kept till the new one comes.
  */
 import { isolateHistory } from '@codemirror/commands';
 import { ViewPlugin } from '@codemirror/view';
 
 import { api } from '../../api.js';
+import { onMapsTouched } from '../mapSettings.svelte.js';
 import { registerBlock } from './blocks.js';
 import { dataLabel, dataSaid, dataState } from './infographicData.js';
 import {
@@ -41,6 +47,16 @@ const KEPT = 24;
 
 /** Panel names as the builder says them. */
 const PANEL_WORDS = { chart: 'Chart', map: 'Map', words: 'Words' };
+
+/** A map panel's opening fence, in a block's text. */
+const MAP_PANEL = /^:::[ \t]*map[ \t]*$/m;
+
+/** Forget the pages drawn of blocks holding a map, whose layers changed under them. */
+function forgetMapPages() {
+  for (const key of [...drawings.keys()]) if (MAP_PANEL.test(JSON.parse(key)[2])) drawings.delete(key);
+}
+// heard before any page drawn again asks, so each is asked afresh (`watchData`)
+onMapsTouched(forgetMapPages);
 
 /** The page a block draws, asked once per source and kept. */
 export function drawingOf(caseId, noteId, source) {
@@ -92,7 +108,17 @@ function drawInfographic(box, widget, view) {
     return;
   }
   page.append(el('p', 'cm-ig-empty', 'Drawing the infographic…'));
-  drawingOf(caseId, widget.info?.noteId, widget.source).then((drawn) => {
+  drawPage(page, widget, builds);
+  // drawn again when a map it shows changed, the page it had kept till then
+  if (MAP_PANEL.test(widget.source)) box.igRedraw = () => drawPage(page, widget, builds);
+}
+
+/** The page drawn in `page`, its panels' boxes over it. */
+function drawPage(page, widget, builds) {
+  const asked = drawingOf(widget.info?.caseId, widget.info?.noteId, widget.source);
+  page.igAsked = asked;
+  asked.then((drawn) => {
+    if (page.igAsked !== asked) return;
     page.replaceChildren();
     if (!drawn || drawn.error) {
       page.append(el('p', 'cm-ig-empty', `Not drawn: ${drawn?.error ?? 'no answer'}`));
@@ -298,6 +324,12 @@ const watchData = ViewPlugin.fromClass(class {
     this.timer = null;
     this.back = () => this.each({ fresh: true });
     window.addEventListener('focus', this.back);
+    this.stop = onMapsTouched(() => this.redraw());
+  }
+
+  /** The pages with a map panel drawn again: a map's layer changed under them. */
+  redraw() {
+    for (const box of this.view.contentDOM.querySelectorAll('.cm-block-infographic')) box.igRedraw?.();
   }
 
   each(options) {
@@ -313,6 +345,7 @@ const watchData = ViewPlugin.fromClass(class {
   destroy() {
     clearTimeout(this.timer);
     window.removeEventListener('focus', this.back);
+    this.stop();
   }
 });
 
