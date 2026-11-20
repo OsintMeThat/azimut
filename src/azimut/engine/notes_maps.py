@@ -872,7 +872,8 @@ def _own_steps(written: list[Step], out: Derived) -> list[dict[str, Any]]:
 def _cards_trimmed(features: list[dict[str, Any]], shown: list[str]) -> None:
     """Each card says only what the block asks: its picture, its sentence, its source
     and the links that check it."""
-    dropped = {"picture": ("media",), "sentence": ("text",), "source": ("source", "links"), "verify": ("verify",)}
+    dropped = {"picture": ("media",), "sentence": ("text", "rows", "history"), "source": ("source", "links"),
+               "verify": ("verify",)}
     for feature in features:
         card = feature.get("card")
         if not isinstance(card, dict):
@@ -1054,9 +1055,10 @@ def _layer_features(case: "Case", name: str, index: int, frame: dict[str, Any] |
         elif labels == "off":
             style.pop("label", None)
         icon = str(properties.get("icon") or "")
-        own = icons.layer_icon(name, icon, properties) if icon and has_icons else ""
         symbol = str(properties.get("symbol") or "pin")
-        for state, (geometry, status, first, last) in enumerate(_states(properties, feature.get("geometry"), window)):
+        states = list(_states(properties, feature.get("geometry"), window))
+        history = _history(states)
+        for state, (geometry, status, first, last) in enumerate(states):
             if start and first and first < start:
                 continue
             if end and first and first > end:
@@ -1066,7 +1068,18 @@ def _layer_features(case: "Case", name: str, index: int, frame: dict[str, Any] |
                 if status in ("damaged", "destroyed"):
                     shaped["status"] = status
                 if kind == "point":
-                    shaped["icon"] = own or icons.symbol(symbol, shaped["color"], shaped.get("status", ""))
+                    marks = {"status": shaped.get("status", ""), "external": bool(shaped.get("external"))}
+                    own = icons.layer_icon(name, icon, properties, **marks) if icon and has_icons else ""
+                    shaped["icon"] = own or icons.symbol(symbol, shaped["color"], **marks)
+                    # a plain marker stands on its tip, as the map anchors it; a badge or an icon on its middle
+                    if not own and shaped["icon"].startswith("s-") and not icons.badge(symbol):
+                        shaped["tip"] = True
+                else:
+                    shaped.pop("bearing", None)
+                card = _layer_card(properties, title, first, last, status=status, kind=kind, coords=coords,
+                                   columns=not editable)
+                if history:
+                    card["history"] = history
                 ident = f"l{index}f{number}" + (f"s{state}" if state else "") + (f"p{part}" if part else "")
                 features.append({
                     "id": ident,
@@ -1076,7 +1089,7 @@ def _layer_features(case: "Case", name: str, index: int, frame: dict[str, Any] |
                     "until": last or None,
                     "label": _cut(" ".join(str(properties.get("name") or "").split()), 120),
                     "style": shaped,
-                    "card": _layer_card(properties, title, first, last),
+                    "card": card,
                     "of": f"l{index}f{number}",
                     "layer": title,
                     "group": category,
@@ -1085,7 +1098,7 @@ def _layer_features(case: "Case", name: str, index: int, frame: dict[str, Any] |
                 })
                 row = legend.setdefault((category, kind), {
                     "label": category if category and category != layerediting.DEFAULT_GROUP else "",
-                    "layer": title, "kind": kind, "style": shaped, "count": 0, "names": [],
+                    "layer": title, "kind": kind, "style": shaped, "count": 0, "names": [], "group": category,
                 })
                 if not state and len(row["names"]) < 2:
                     row["names"].append(_cut(" ".join(str(properties.get("name") or "").split()), 60))
@@ -1129,6 +1142,15 @@ def _style(properties: Mapping[str, Any], frame: Mapping[str, Any] | None) -> di
         style["arrow"] = properties["line_arrow"]
     if properties.get("confidence") in ("probable", "claimed"):
         style["confidence"] = properties["confidence"]
+    # which way a marker looks, a point somebody else geolocated, and how large its name is written
+    bearing = properties.get("bearing")
+    if isinstance(bearing, (int, float)) and not isinstance(bearing, bool) and math.isfinite(bearing):
+        style["bearing"] = round(float(bearing) % 360, 1)
+    if properties.get("provenance") == "external":
+        style["external"] = True
+    label_size = properties.get("label_size")
+    if isinstance(label_size, (int, float)) and not isinstance(label_size, bool) and 6 <= label_size <= 32:
+        style["label_size"] = round(float(label_size), 1)
     return style
 
 
@@ -1210,17 +1232,58 @@ def _thin(points: list[list[float]]) -> list[list[float]]:
     return [*kept, points[-1]]
 
 
-def _layer_card(properties: Mapping[str, Any], layer: str, first: str, last: str) -> dict[str, Any]:
+#: What a feature's state and confidence are said as on its card, as the map's card says them.
+STATUS_WORDS = {"damaged": "Damaged", "destroyed": "Destroyed"}
+CONFIDENCE_WORDS = {"confirmed": "Confirmed", "probable": "Probable", "claimed": "Claimed"}
+#: A line of a description written `label: value`, as the map's card reads one (`lib/map/layerCard.js`).
+CARD_FIELD = re.compile(r"^([^\s:][^:]{0,46}?)\s*:[ \t]+(\S.*)$")
+#: What a card lists of a feature's own fields, and how long each value runs.
+MAX_CARD_ROWS = 30
+MAX_CARD_VALUE = 600
+#: The fields a layer's feature carries for Azimut itself, never one of its own columns.
+OWN_FIELDS = frozenset({
+    "name", "description", "category", "colour", "icon", "key", "symbol", "group", "date", "date_end", "status",
+    "bearing", "links", "provenance", "confidence", "credit", "picture", "index", "line_width", "line_dash",
+    "line_arrow", "area_fill", "fill_opacity", "marker_size", "label", "label_size", "icon_scale", "stroke_width",
+    "show_label", "event", "icon_mode", "icon_name", "colour_name", "icon_meaning", "states", "entity_id",
+    "follows", "followed", "proof_id", "media_id", "sheet_row", "entity_type", "entity_label", "entity_picture",
+    "media", "proof", "picture_label", "picture_type", "picture_path", "synced",
+})
+
+
+def _layer_card(properties: Mapping[str, Any], layer: str, first: str, last: str, *, status: str = "",
+                kind: str = "", coords: Any = None, columns: bool = False) -> dict[str, Any]:
+    """A feature's card as the map's own shows it: its name, its day, its state and who placed
+    it, its words with each `label: value` line a row, its links, where it is or how long and
+    large, and its credit. ``columns``, for a layer made elsewhere, adds every other column its
+    source gave the feature; a personal layer's own fields are Azimut's, its columns its words."""
     card: dict[str, Any] = {"title": _cut(" ".join(str(properties.get("name") or layer).split()), 160)}
     card["day"] = _span(first, last)
-    words = _plain_text(properties.get("description"))
+    words, rows = _card_words(properties.get("description"))
     if words:
         card["text"] = _cut(words, 700)
+    if columns:
+        rows.extend(_own_columns(properties))
+    if rows:
+        card["rows"] = rows[:MAX_CARD_ROWS]
+    facts = [STATUS_WORDS.get(status or str(properties.get("status") or ""), ""),
+             "Geolocated by someone else" if properties.get("provenance") == "external" else "",
+             CONFIDENCE_WORDS.get(str(properties.get("confidence") or ""), ""),
+             _cut(" ".join(str(properties.get("colour_name") or "").split()), 40),
+             _cut(" ".join(str(properties.get("icon_meaning") or "").split()), 40)]
+    if any(facts):
+        card["facts"] = " · ".join(fact for fact in facts if fact)
     links = [str(link) for link in properties.get("links") or [] if notesources.web(str(link))]
     if links:
         card["source"] = {"label": notesources.host(links[0]) or "Source", "url": links[0]}
         if len(links) > 1:
-            card["links"] = [{"label": notesources.host(link) or "Source", "url": link} for link in links[1:6]]
+            card["links"] = [{"label": notesources.host(link) or "Source", "url": link} for link in links[1:10]]
+    if kind == "point" and isinstance(coords, list) and len(coords) == 2:
+        card["at"] = [round(float(coords[1]), 5), round(float(coords[0]), 5)]
+    elif kind in ("line", "area"):
+        size = _card_size(kind, coords)
+        if size:
+            card["size"] = size
     credit = " ".join(str(properties.get("credit") or "").split())
     if credit:
         card["credit"] = _cut(credit, 200)
@@ -1228,6 +1291,86 @@ def _layer_card(properties: Mapping[str, Any], layer: str, first: str, last: str
     # a layer's first group, named for nobody, says nothing more than the layer does
     card["kicker"] = f"{layer} · {named}" if named and named not in (layer, "Features") else layer
     return card
+
+
+def _card_words(value: Any) -> tuple[str, list[dict[str, str]]]:
+    """A description as its prose and its `label: value` rows, line by line in its order."""
+    prose: list[str] = []
+    rows: list[dict[str, str]] = []
+    for line in _plain_text(value).split("\n"):
+        found = CARD_FIELD.match(line.strip())
+        if found and len(found.group(1)) <= 48:
+            rows.append({"label": found.group(1).strip(), "value": _cut(found.group(2).strip(), MAX_CARD_VALUE)})
+        elif line.strip():
+            prose.append(line)
+    return "\n".join(prose), rows
+
+
+def _own_columns(properties: Mapping[str, Any]) -> list[dict[str, str]]:
+    """Every column a feature carries beyond what Azimut keeps for itself, as a row each:
+    an imported map's own fields, said as the source named them."""
+    rows: list[dict[str, str]] = []
+    for key, value in properties.items():
+        if not isinstance(key, str) or key in OWN_FIELDS or key.startswith(("$", "_")) or "path" in key.lower():
+            continue
+        if isinstance(value, bool) or value is None or isinstance(value, (dict, list)):
+            continue
+        text = " ".join(_plain_text(value).split())
+        label = " ".join(key.split())
+        if text and label and len(label) <= 48:
+            rows.append({"label": label, "value": _cut(text, MAX_CARD_VALUE)})
+    return rows
+
+
+def _card_size(kind: str, coords: Any) -> str:
+    """How long a line runs, how much ground an area covers, as the map's card says it."""
+    try:
+        if kind == "line":
+            metres = sum(_metres(part) for part in coords)
+            return f"Length {_distance(metres)}" if metres > 0 else ""
+        area = perimeter = 0.0
+        for polygon in coords:
+            outer, *holes = polygon
+            area += max(0.0, _ground_area(outer) - sum(_ground_area(hole) for hole in holes))
+            perimeter += _metres(outer)
+    except (TypeError, ValueError, IndexError):
+        return ""
+    if area <= 0:
+        return ""
+    said = f"{area / 1e6:.2f} km²" if area >= 1e5 else f"{round(area):,} m²"
+    return f"Area {said} · Perimeter {_distance(perimeter)}"
+
+
+def _metres(points: list[list[float]]) -> float:
+    """A line's length along the ground, in metres."""
+    total = 0.0
+    for (lon1, lat1), (lon2, lat2) in zip(points, points[1:]):
+        p1, p2 = math.radians(lat1), math.radians(lat2)
+        dp, dl = p2 - p1, math.radians(lon2 - lon1)
+        a = math.sin(dp / 2) ** 2 + math.cos(p1) * math.cos(p2) * math.sin(dl / 2) ** 2
+        total += 2 * 6371008.8 * math.asin(min(1.0, math.sqrt(a)))
+    return total
+
+
+def _ground_area(ring: list[list[float]]) -> float:
+    """A ring's area on the ground in square metres, flat about its own latitude."""
+    if len(ring) < 3:
+        return 0.0
+    middle = math.radians(sum(point[1] for point in ring) / len(ring))
+    flat = [(point[0] * 111320.0 * math.cos(middle), point[1] * 110540.0) for point in ring]
+    return abs(_area(flat))
+
+
+def _distance(metres: float) -> str:
+    return f"{metres / 1000:.1f} km" if metres >= 1000 else f"{round(metres)} m"
+
+
+def _history(states: list[tuple[Any, str, str, str]]) -> list[dict[str, str]]:
+    """What a feature followed over time was, day by day: none for one with a single state."""
+    if len(states) < 2:
+        return []
+    return [{"day": _span(first, last), "status": STATUS_WORDS.get(status, "")} for _, status, first, last in states
+            if first or last][:20]
 
 
 def _span(first: str, last: str) -> str:
@@ -1618,18 +1761,32 @@ class _Icons:
         self.case = case
         self.used: dict[str, dict[str, Any]] = {}
 
-    def symbol(self, symbol: str, colour: str, status: str = "") -> str:
+    def symbol(self, symbol: str, colour: str, status: str = "", external: bool = False) -> str:
         known = drawings()
         if symbol not in known.get("badges", {}) and symbol not in known.get("plain", {}):
             symbol = "pin"
-        key = f"s-{symbol}-{colour.lstrip('#')}" + (f"-{status}" if status else "")
-        self.used.setdefault(key, {"symbol": symbol, "colour": colour, "status": status})
+        key = f"s-{symbol}-{colour.lstrip('#')}" + (f"-{status}" if status else "") + ("-x" if external else "")
+        icon: dict[str, Any] = {"symbol": symbol, "colour": colour, "status": status}
+        if external:
+            icon["external"] = True
+        self.used.setdefault(key, icon)
         return key
 
-    def layer_icon(self, layer: str, icon: str, properties: Mapping[str, Any]) -> str:
+    @staticmethod
+    def badge(symbol: str) -> bool:
+        return symbol in drawings().get("badges", {})
+
+    def layer_icon(self, layer: str, icon: str, properties: Mapping[str, Any], *, status: str = "",
+                   external: bool = False) -> str:
+        """One of the analyst's icons a layer wears: as it is, or its silhouette in a disc of the
+        feature's colour (`icon_mode`), with its status strokes and an external point's dashed rim."""
         from . import maplayers
 
-        key = f"i-{maplayers.digest(f'{layer}/{icon}'.encode())[:12]}"
+        colour = _hex(properties.get("colour")) or "#0072b2"
+        disc = properties.get("icon_mode") == "disc"
+        base = f"i-{maplayers.digest(f'{layer}/{icon}'.encode())[:12]}"
+        key = base + (f"-d{colour.lstrip('#')}" if disc else "") + (f"-{status}" if status else "") + \
+            ("-x" if external else "")
         if key in self.used:
             return key
         if sum(1 for one in self.used.values() if "png" in one) >= MAX_ICONS:
@@ -1638,7 +1795,28 @@ class _Icons:
             data = maplayers.icon(self.case, layer, icon)
         except Exception:
             return ""
-        self.used[key] = {"png": data, "colour": _hex(properties.get("colour")) or "#0072b2"}
+        look: dict[str, Any] = {"png": data, "colour": colour}
+        try:
+            with Image.open(BytesIO(data)) as opened:
+                picture = opened.convert("RGBA")
+        except Exception:
+            picture = None
+        if picture is not None:
+            look["size"] = list(picture.size)
+            if disc:
+                box = picture.getchannel("A").getbbox()
+                if box:
+                    cropped = BytesIO()
+                    picture.crop(box).save(cropped, "PNG")
+                    look["png"] = cropped.getvalue()
+                    look["size"] = [box[2] - box[0], box[3] - box[1]]
+        if disc:
+            look["mode"] = "disc"
+        if status:
+            look["status"] = status
+        if external:
+            look["external"] = True
+        self.used[key] = look
         return key
 
 
@@ -1669,8 +1847,9 @@ def glyph_ink(colour: str) -> str:
 
 
 def marker_parts(symbol: str, colour: str, status: str = "", *, proof: bool = False,
-                 pov: bool = False) -> list[dict[str, Any]]:
-    """Every shape a marker is made of, in drawing order (`markerParts` in the map)."""
+                 pov: bool = False, external: bool = False) -> list[dict[str, Any]]:
+    """Every shape a marker is made of, in drawing order (`markerParts` in the map): a point
+    somebody else geolocated (``external``) wears a dashed rim instead of a solid one."""
     known = drawings()
     layers = known.get("badges", {}).get(symbol)
     plain = known.get("plain", {})
@@ -1688,7 +1867,8 @@ def marker_parts(symbol: str, colour: str, status: str = "", *, proof: bool = Fa
     if layers is None:
         shape = plain.get(symbol) or plain.get("pin", "")
         filled = symbol in ("circle", "star", "flag")
-        parts.append({"d": shape, "stroke": "#fff", "width": 4, "scale": _PLAIN[0], "offset": _PLAIN[1]})
+        parts.append({"d": shape, "stroke": "#fff", "width": 4, "scale": _PLAIN[0], "offset": _PLAIN[1],
+                      **({"dash": "2.2 1.5"} if external else {})})
         parts.append({"d": shape, "fill": colour if filled else None, "stroke": colour, "width": 2.4,
                       "scale": _PLAIN[0], "offset": _PLAIN[1]})
         across = (32.0, 26.6, 13.0)
@@ -1696,7 +1876,7 @@ def marker_parts(symbol: str, colour: str, status: str = "", *, proof: bool = Fa
         ink = glyph_ink(colour)
         parts.append({"d": _ring(_CENTRE, _CENTRE, _DISC + 1.6), "fill": _HALO, "scale": 1, "offset": 0})
         parts.append({"d": _ring(_CENTRE, _CENTRE, _DISC), "fill": colour, "stroke": "#fff", "width": 2.5,
-                      "scale": 1, "offset": 0})
+                      "scale": 1, "offset": 0, **({"dash": "6 4"} if external else {})})
         for layer in layers:
             mode, d = layer[0], layer[1]
             options = layer[2] if len(layer) > 2 and isinstance(layer[2], dict) else {}
@@ -1705,6 +1885,13 @@ def marker_parts(symbol: str, colour: str, status: str = "", *, proof: bool = Fa
             parts.append({"d": d, "fill": paint if solid else None, "stroke": None if solid else paint,
                           "width": options.get("width", 2.2 if mode == "line" else 1.3),
                           "rotate": options.get("rotate", 0), "scale": _GLYPH[0], "offset": _GLYPH[1]})
+    parts.extend(_status_parts(status, across))
+    return parts
+
+
+def _status_parts(status: str, across: tuple[float, float, float]) -> list[dict[str, Any]]:
+    """The stroke a damaged marker wears, two for a destroyed one, each on a dark bed."""
+    parts: list[dict[str, Any]] = []
     x, y, reach = across
     strokes = []
     if status == "destroyed":
@@ -1722,26 +1909,67 @@ def symbol_svg(key: str, icon: Mapping[str, Any], prefix: str = "az-map") -> str
     """One pictogram as an SVG `symbol` a marker `use`s, 64 units square, its id
     ``{prefix}-mk-{key}`` so two maps of a page never share one."""
     if "png" in icon:
-        data = base64.b64encode(icon["png"]).decode("ascii")
-        return (f'<symbol id="{prefix}-mk-{key}" viewBox="0 0 64 64"><image href="data:image/png;base64,{data}" '
-                f'x="8" y="8" width="48" height="48"/></symbol>')
+        return _own_symbol(key, icon, prefix)
     parts = marker_parts(icon.get("symbol", "pin"), icon.get("colour", "#0072b2"), icon.get("status", ""),
-                         proof=bool(icon.get("proof")), pov=bool(icon.get("pov")))
-    drawn: list[str] = []
-    for part in parts:
-        transform = ""
-        if part.get("scale", 1) != 1 or part.get("offset", 0):
-            transform = f' transform="translate({part["offset"]:g} {part["offset"]:g}) scale({part["scale"]:g})'
-            if part.get("rotate"):
-                transform += f' rotate({part["rotate"]:g} 12 12)'
-            transform += '"'
-        fill = f'fill="{_paint(part["fill"])}"' if part.get("fill") else 'fill="none"'
-        stroke = ""
-        if part.get("stroke"):
-            width = float(part.get("width") or 1)
-            stroke = f' stroke="{_paint(part["stroke"])}" stroke-width="{width:g}" stroke-linecap="round" stroke-linejoin="round"'
-        drawn.append(f'<path d="{part["d"]}" {fill}{stroke}{transform}/>')
-    return f'<symbol id="{prefix}-mk-{key}" viewBox="0 0 64 64">{"".join(drawn)}</symbol>'
+                         proof=bool(icon.get("proof")), pov=bool(icon.get("pov")), external=bool(icon.get("external")))
+    return f'<symbol id="{prefix}-mk-{key}" viewBox="0 0 64 64">{"".join(_part_svg(part) for part in parts)}</symbol>'
+
+
+#: Where an own icon's silhouette sits in a disc, and the share of its own pixels a picture
+#: drawn as it is takes (`OWN_GLYPH`, `OWN_IMAGE_RATIO` in lib/map/markerGlyphs.js).
+OWN_GLYPH = 36.0
+OWN_IMAGE_RATIO = 0.7
+
+
+def _own_symbol(key: str, icon: Mapping[str, Any], prefix: str) -> str:
+    """One of the analyst's icons as a marker: as it is, centred at the share of its pixels the
+    map draws it at (past the marker's square when it is large), or its silhouette inked in a
+    disc of its colour; its status strokes and dashed rim over it, as the map draws them."""
+    data = base64.b64encode(icon["png"]).decode("ascii")
+    colour = str(icon.get("colour") or "#0072b2")
+    width, height = (icon.get("size") or [48 / OWN_IMAGE_RATIO, 48 / OWN_IMAGE_RATIO])[:2]
+    status, external = str(icon.get("status") or ""), bool(icon.get("external"))
+    if icon.get("mode") == "disc":
+        ink = glyph_ink(colour)
+        fit = OWN_GLYPH / max(float(width), float(height), 1.0)
+        w, h = float(width) * fit, float(height) * fit
+        under = [_part_svg({"d": _ring(_CENTRE, _CENTRE, _DISC + 1.6), "fill": _HALO, "scale": 1, "offset": 0}),
+                 _part_svg({"d": _ring(_CENTRE, _CENTRE, _DISC), "fill": colour, "stroke": "#fff", "width": 2.5,
+                            "scale": 1, "offset": 0, **({"dash": "6 4"} if external else {})})]
+        filter_id = f"{prefix}-ink-{ink.lstrip('#')}"
+        picture = (f'<image href="data:image/png;base64,{data}" x="{32 - w / 2:g}" y="{32 - h / 2:g}" '
+                   f'width="{w:g}" height="{h:g}" data-ink="{ink}" filter="url(#{filter_id})"/>')
+        ink_filter = (f'<filter id="{filter_id}" x="0" y="0" width="1" height="1"><feFlood flood-color="{ink}"/>'
+                      f'<feComposite in2="SourceAlpha" operator="in"/></filter>')
+        over = [_part_svg(part) for part in _status_parts(status, (32.0, 32.0, 15.0))]
+        return (f'{ink_filter}<symbol id="{prefix}-mk-{key}" viewBox="0 0 64 64">{"".join(under)}{picture}'
+                f'{"".join(over)}</symbol>')
+    w, h = float(width) * OWN_IMAGE_RATIO, float(height) * OWN_IMAGE_RATIO
+    side = max(64.0, math.ceil(max(w, h) / 2) * 2)
+    rim = [_part_svg({"d": _ring(_CENTRE, _CENTRE, _DISC), "stroke": "#fff", "width": 2.5, "dash": "6 4",
+                      "scale": 1, "offset": 0})] if external else []
+    over = rim + [_part_svg(part) for part in _status_parts(status, (32.0, 32.0, 15.0))]
+    large = f' overflow="visible" data-side="{side:g}"' if side > 64 else ""
+    return (f'<symbol id="{prefix}-mk-{key}" viewBox="0 0 64 64"{large}><image href="data:image/png;base64,{data}" '
+            f'x="{32 - w / 2:g}" y="{32 - h / 2:g}" width="{w:g}" height="{h:g}"/>{"".join(over)}</symbol>')
+
+
+def _part_svg(part: Mapping[str, Any]) -> str:
+    """One shape of a marker as an SVG path, in the box it is drawn in."""
+    transform = ""
+    if part.get("scale", 1) != 1 or part.get("offset", 0):
+        transform = f' transform="translate({part["offset"]:g} {part["offset"]:g}) scale({part["scale"]:g})'
+        if part.get("rotate"):
+            transform += f' rotate({part["rotate"]:g} 12 12)'
+        transform += '"'
+    fill = f'fill="{_paint(part["fill"])}"' if part.get("fill") else 'fill="none"'
+    stroke = ""
+    if part.get("stroke"):
+        width = float(part.get("width") or 1)
+        stroke = f' stroke="{_paint(part["stroke"])}" stroke-width="{width:g}" stroke-linecap="round" stroke-linejoin="round"'
+    if part.get("dash"):
+        stroke += f' stroke-dasharray="{part["dash"]}"'
+    return f'<path d="{part["d"]}" {fill}{stroke}{transform}/>'
 
 
 def _paint(colour: str) -> str:
@@ -1861,7 +2089,7 @@ def svg(derived: Derived, *, day: str | None = None, ident: str = "az-map") -> s
                 mark = str(style.get("icon") or "")
             placed.append({"id": feature["id"], "x": x, "y": y, "attrs": attrs, "icon": mark, "alpha": alpha, "off": off,
                            "size": float(style.get("size") or 1), "label": feature["label"] if style.get("label") else "",
-                           "colour": colour})
+                           "colour": colour, "marks": _marks(style)})
             continue
         d = _path(feature, project)
         if not d:
@@ -1895,7 +2123,7 @@ def svg(derived: Derived, *, day: str | None = None, ident: str = "az-map") -> s
                          f'{dash}{marker}/></g>')
         else:
             fill_mode = style.get("fill", "")
-            opacity = style.get("opacity", 0.22)
+            opacity = style.get("opacity", 0.18)
             if fill_mode == "none":
                 fill = 'fill="none"'
             elif fill_mode == "hatch":
@@ -1924,10 +2152,11 @@ def svg(derived: Derived, *, day: str | None = None, ident: str = "az-map") -> s
                            f'x2="{at_x:.1f}" y2="{at_y:.1f}"/><circle cx="{x:.1f}" cy="{y:.1f}" r="{2.6 * unit:.2f}" '
                            f'fill="{one["colour"]}"/></g>')
         scale = MARKER_PX * one["size"] * unit / MARKER
+        wedge, top, faint = one["marks"]
         points.append((y, f'<g {one["attrs"]} data-x="{x:.1f}" data-y="{y:.1f}" data-s="{one["size"]:g}" '
                           f'data-colour="{_attr(one["colour"])}"'
                           f' transform="translate({at_x:.1f} {at_y:.1f}) scale({scale:.4f})"{one["alpha"]}>'
-                          f'<use href="#{ident}-mk-{one["icon"]}" x="-32" y="-32" width="64" height="64"/></g>'))
+                          f'{wedge}<use href="#{ident}-mk-{one["icon"]}" x="-32" y="{top}" width="64" height="64"{faint}/></g>'))
         if one["label"]:
             labels.append((at_x, at_y, one["label"], one["id"], one["off"]))
     points.sort(key=lambda row: row[0])
@@ -1941,6 +2170,27 @@ def svg(derived: Derived, *, day: str | None = None, ident: str = "az-map") -> s
             f'<g class="az-leaders" aria-hidden="true">{"".join(leaders)}</g>'
             f'<g class="az-points">{"".join(row[1] for row in points)}</g>'
             f'<g class="az-labels" aria-hidden="true">{written}</g></svg>')
+
+
+#: The wedge a marker looking one way wears just outside its rim, in its 64 units about its middle,
+#: as the map draws it (`bearingImage` in lib/map/addedLayer.js); and where a plain marker's square
+#: stands so its tip is on its point (the map's bottom anchor, 7.7 of its 64 units below the tip).
+BEARING_WEDGE = "M0 -45L9 -32H-9Z"
+TIP_TOP = -56.3
+#: How strongly a point of each confidence is drawn (`CONFIDENCE_OPACITY` in the map).
+CONFIDENCE_OPACITY = {"probable": 0.8, "claimed": 0.55}
+
+
+def _marks(style: Mapping[str, Any]) -> tuple[str, str, str]:
+    """What a point's marker wears beyond its pictogram, as the map draws it: the wedge saying
+    which way it looks, its square raised to stand on its tip, and how faint its confidence is."""
+    bearing = style.get("bearing")
+    wedge = (f'<path class="az-bearing" d="{BEARING_WEDGE}" transform="rotate({float(bearing):g})" fill="#fff" '
+             f'stroke="rgba(0,0,0,.6)" stroke-width="3" stroke-linejoin="round"/>'
+             if isinstance(bearing, (int, float)) and not isinstance(bearing, bool) else "")
+    top = f"{TIP_TOP:g}" if style.get("tip") else "-32"
+    faint = CONFIDENCE_OPACITY.get(str(style.get("confidence") or ""))
+    return wedge, top, f' opacity="{faint:g}"' if faint else ""
 
 
 def _labels(labels: list[tuple[float, float, str, str, str]], unit: float, width: float, height: float, *,
@@ -2180,9 +2430,10 @@ def _ground_image(data: Mapping[str, Any], ground: Any, size: tuple[int, int],
 def _icon_from_key(key: str, style: Mapping[str, Any]) -> dict[str, Any]:
     if key.startswith("proof"):
         return {"proof": True, "pov": key == "proof-pov", "colour": style.get("color", PROOF_COLOUR)}
-    match = re.match(r"^s-(.+?)-([0-9a-fA-F]{6})(?:-(damaged|destroyed))?$", key)
+    match = re.match(r"^s-(.+?)-([0-9a-fA-F]{6})(?:-(damaged|destroyed))?(-x)?$", key)
     if match:
-        return {"symbol": match.group(1), "colour": f"#{match.group(2)}", "status": match.group(3) or ""}
+        return {"symbol": match.group(1), "colour": f"#{match.group(2)}", "status": match.group(3) or "",
+                "external": bool(match.group(4))}
     return {"symbol": "pin", "colour": style.get("color", "#0072b2"), "status": style.get("status", "")}
 
 
@@ -2204,7 +2455,8 @@ def _marker_image(icon: Mapping[str, Any], side: int) -> Image.Image:
     draw = ImageDraw.Draw(image)
     unit = big / MARKER
     for part in marker_parts(str(icon.get("symbol") or "pin"), str(icon.get("colour") or "#0072b2"),
-                             str(icon.get("status") or ""), proof=bool(icon.get("proof")), pov=bool(icon.get("pov"))):
+                             str(icon.get("status") or ""), proof=bool(icon.get("proof")), pov=bool(icon.get("pov")),
+                             external=bool(icon.get("external"))):
         scale, offset = float(part.get("scale") or 1), float(part.get("offset") or 0)
         turn = math.radians(float(part.get("rotate") or 0))
 

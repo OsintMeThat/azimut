@@ -102,10 +102,10 @@ afterEach(async () => {
 });
 
 describe('the starts', () => {
-  it('lists the blank page, From the case, then the ready notes and the analyst’s own, as radio buttons', async () => {
+  it('lists the blank page, From the case, Web map, then the ready notes and the analyst’s own, as radio buttons', async () => {
     await open();
     expect(dialog().querySelector('[role="radiogroup"]').getAttribute('aria-labelledby')).toBe('notebook-note-start');
-    expect(tileIds()).toEqual(['blank', 'from-case', 'factcheck', 't:1']);
+    expect(tileIds()).toEqual(['blank', 'from-case', 'web-map', 'factcheck', 't:1']);
     expect(tile('factcheck').textContent).toContain('Fact-check');
     expect(tile('factcheck').textContent).toContain('A claim, tested');
     expect(tile('from-case').textContent).toContain('From the case');
@@ -219,6 +219,28 @@ describe('creating', () => {
   });
 });
 
+describe('Web map', () => {
+  const LAYERS = { layers: [{ name: 'Vehicles', title: 'Vehicles by kind', features: 54 }, { name: 'Line', title: 'Front line', features: 1, tracked: true }] };
+
+  it('asks for the layers it shows, names itself after them, and hands them over to be made', async () => {
+    get.mockImplementation(async (url) => (url.includes('/notes/maps/sources') ? LAYERS : { items: [] }));
+    await open({ start: 'web-map' });
+    await settle(0);
+    expect(get.mock.calls.map(([url]) => url)).toContain('/api/cases/case-a/notes/maps/sources');
+    const create = button('Create');
+    expect(create.disabled).toBe(true);
+    const boxes = [...dialog().querySelectorAll('input[type="checkbox"]')];
+    expect(boxes).toHaveLength(2);
+    boxes[0].click();
+    flushSync();
+    expect(create.disabled).toBe(false);
+    expect(titleField().placeholder).toBe('Vehicles by kind');
+    create.click();
+    await settle(0);
+    expect(oncreate).toHaveBeenCalledWith({ title: 'Vehicles by kind', folder: '', webmap: { layers: ['Vehicles'] } });
+  });
+});
+
 describe('From the case', () => {
   it('asks its questions under the tiles: every day the geolocations cover, on the case clock, and the count', async () => {
     await open({ start: 'from-case' });
@@ -232,7 +254,7 @@ describe('From the case', () => {
     expect(fromCalls()).toHaveLength(1);
     expect(button('Create').disabled).toBe(false);
     // the tiles are still there to pick another start
-    expect(tileIds()).toHaveLength(4);
+    expect(tileIds()).toHaveLength(5);
   });
 
   it('has nothing of it on screen for another start', async () => {

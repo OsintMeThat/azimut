@@ -13,6 +13,9 @@
    * start that writes a note of every geolocation of a period (`NewNoteDialog.svelte`).
    * The five that show what a report holds stand in a row of their own, with a press
    * that opens them filled in the example case (`lib/exampleCase.js`).
+   *
+   * Web maps (`lib/notes/webMap.js`) have a row of their own, each shown by its map's
+   * ground, with the address GitHub Pages last published it at.
    */
   import { untrack } from 'svelte';
   import { api } from '../../lib/api.js';
@@ -25,6 +28,9 @@
   import SearchInput from '../../components/SearchInput.svelte';
   import PageThumb from './PageThumb.svelte';
   import { FROM_CASE_LOOK, FROM_CASE_SAMPLE } from '../../lib/notes/fromCase.js';
+  import { isWebMap } from '../../lib/notes/webMap.js';
+  import { fileUrl } from '../../lib/fileUrl.js';
+  import WebMapThumb from './WebMapThumb.svelte';
 
   let {
     caseId,
@@ -58,10 +64,11 @@
     .sort((a, b) => (sort === 'name'
       ? a.title.localeCompare(b.title)
       : String(b.updated_at ?? '').localeCompare(String(a.updated_at ?? '')))));
-  const reports = $derived(shown.filter(isReport));
-  const others = $derived(shown.filter((row) => !isReport(row)));
+  const webMaps = $derived(shown.filter(isWebMap));
+  const reports = $derived(shown.filter((row) => isReport(row) && !isWebMap(row)));
+  const others = $derived(shown.filter((row) => !isReport(row) && !isWebMap(row)));
   /** The cards in the order they are on screen, which a Shift-press run follows. */
-  const order = $derived([...reports.map((row) => row.id), 'case', ...others.map((row) => row.id)]);
+  const order = $derived([...webMaps.map((row) => row.id), ...reports.map((row) => row.id), 'case', ...others.map((row) => row.id)]);
   const selecting = $derived(armed || selected.length > 0);
   const picked = $derived(new Set(selected));
 
@@ -173,6 +180,33 @@
   </div>
 {/snippet}
 
+{#snippet mapCard(row)}
+  {@const on = picked.has(row.id)}
+  <div class="note-card map-card" class:on class:selecting>
+    <button type="button" class="open" onclick={(event) => press(row.id, event)} title={selecting ? `Pick ${row.title}` : `Open ${row.title}`}>
+      <WebMapThumb width={96} picture={row.map?.picture ? fileUrl(caseId, row.map.picture) : ''} />
+      <span class="map-said">
+        <span class="name">{row.title}</span>
+        {#if row.map?.address}
+          <span class="address" title="Where GitHub Pages last published it">{row.map.address.replace(/^https:\/\//, '')}</span>
+        {:else}
+          <span class="said">Not published yet</span>
+        {/if}
+        {#if row.updated_at}<span class="said">{said(row)}</span>{/if}
+      </span>
+    </button>
+    {#if row.map?.address}
+      <a class="visit" href={row.map.address} target="_blank" rel="noreferrer" title="Open the published page" aria-label={`Open ${row.title} online`}>
+        <Icon name="external" size={13} /></a>
+    {/if}
+    <input type="checkbox" class="pick" checked={on} aria-label={`Pick ${row.title}`}
+      title="Pick it, Shift-click for a run"
+      onclick={(event) => pick(row.id, event.shiftKey)} />
+    <button type="button" class="more" aria-label={`Actions for ${row.title}`} title="More"
+      onclick={(event) => onmenu({ id: row.id, title: row.title }, event.currentTarget)}><Icon name="more" size={15} /></button>
+  </div>
+{/snippet}
+
 {#snippet tile(item, guide = undefined)}
   <button type="button" class="tile" title="A new note from it, opened at once" data-guide={guide}
     onclick={() => onstart({ name: item.start, body: item.body, folder: item.folder, look: item.look })}>
@@ -214,6 +248,12 @@
         {/each}
       </div>
     {:else}
+      {#if webMaps.length}
+        <h4>Web maps · {webMaps.length}</h4>
+        <div class="cards maps">
+          {#each webMaps as row (row.id)}{@render mapCard(row)}{/each}
+        </div>
+      {/if}
       {#if reports.length}
         <h4>Reports · {reports.length}</h4>
         <div class="cards" data-guide="notebook.reports">
@@ -274,6 +314,11 @@
               <span class="stage"><PageThumb name="Geolocations, 1–14 March 2026" body={FROM_CASE_SAMPLE} look={FROM_CASE_LOOK} width={118} /></span>
               <span class="tile-name">From the case</span>
               <span class="tile-said">A period's geolocations</span>
+            </button>
+            <button type="button" class="tile" title="Your layers on a page of their own, to publish" onclick={() => onnew('web-map')}>
+              <span class="stage"><WebMapThumb width={128} /></span>
+              <span class="tile-name">Web map</span>
+              <span class="tile-said">Your layers on a page of their own</span>
             </button>
           {/if}
         {/each}
@@ -384,4 +429,10 @@
     padding: 7px 8px 7px 14px; border: 1px solid var(--border-strong); border-radius: 999px; background: var(--bg-2); box-shadow: var(--shadow-2);
   }
   .count { margin-right: 6px; color: var(--text-1); font-size: var(--fs-sm); font-weight: 600; }
+  .cards.maps { grid-template-columns: repeat(auto-fill, minmax(340px, 1fr)); }
+  .map-card .open { flex-direction: row; align-items: flex-start; gap: 12px; min-height: 0; }
+  .map-said { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+  .address { color: var(--accent); font-size: var(--fs-xs); overflow-wrap: anywhere; }
+  .visit { position: absolute; right: 8px; bottom: 8px; padding: 4px; border-radius: var(--r-sm); color: var(--text-2); }
+  .visit:hover { color: var(--text-1); background: var(--bg-3); }
 </style>

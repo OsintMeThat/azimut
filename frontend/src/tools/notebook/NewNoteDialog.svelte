@@ -3,15 +3,19 @@
    * New note: what it starts from, a title if one is wanted, and a folder.
    *
    * The starts are tiles, each drawn by its first page as it prints: a blank page,
-   * *From the case*, the ready notes, then the analyst's own templates. *From the
-   * case* asks its questions under the tiles and writes the note from the count on
-   * screen (`FromCaseFields.svelte`). With no title typed the note takes the name the
+   * *From the case*, *Web map*, the ready notes, then the analyst's own templates. *From
+   * the case* asks its questions under the tiles and writes the note from the count on
+   * screen (`FromCaseFields.svelte`). *Web map* asks which layers it shows and makes a
+   * note that is one map on its own page (`WebMapFields.svelte`, `lib/notes/webMap.js`). With no title typed the note takes the name the
    * field shows, made free against the notes already in the case.
    */
   import Modal from '../../components/Modal.svelte';
   import FolderSelect from '../../components/FolderSelect.svelte';
   import PageThumb from './PageThumb.svelte';
   import FromCaseFields from './FromCaseFields.svelte';
+  import WebMapFields from './WebMapFields.svelte';
+  import WebMapThumb from './WebMapThumb.svelte';
+  import { WEB_MAP_LOOK } from '../../lib/notes/webMap.js';
   import { freeTitle } from '../../lib/notes/ready.js';
   import { fromCaseAsk } from '../../lib/notes/fromCaseAsk.svelte.js';
   import { FROM_CASE_LOOK, FROM_CASE_SAMPLE } from '../../lib/notes/fromCase.js';
@@ -25,7 +29,8 @@
     folders = [],
     /** The names of the notes already in the case, so the new one gets a free one. */
     taken = [],
-    /** Called with `{ title, folder, body, look }`; the dialog stays until it settles, and the caller says what failed. */
+    /** Called with `{ title, folder, body, look }`, or `{ title, folder, webmap: { layers } }` for a web map;
+     *  the dialog stays until it settles, and the caller says what failed. */
     oncreate,
     onclose,
   } = $props();
@@ -36,8 +41,13 @@
     body: FROM_CASE_SAMPLE, folder: '', look: FROM_CASE_LOOK,
   };
 
-  /** The blank page first, then From the case, then the rest as they come. */
-  const tiles = $derived(starts.flatMap((item) => (item.id === 'blank' ? [item, CASE_TILE] : [item])));
+  const WEB_MAP = 'web-map';
+  const MAP_TILE = {
+    id: WEB_MAP, name: 'Web map', start: 'Web map', note: 'Your layers on a page of their own', body: '', folder: '', look: WEB_MAP_LOOK,
+  };
+
+  /** The blank page first, then From the case and Web map, then the rest as they come. */
+  const tiles = $derived(starts.flatMap((item) => (item.id === 'blank' ? [item, CASE_TILE, MAP_TILE] : [item])));
 
   let chosen = $state('');
   let title = $state('');
@@ -49,12 +59,16 @@
     : tiles.some((item) => item.id === start) ? start : (tiles[0]?.id ?? ''));
   const pickedTile = $derived(tiles.find((item) => item.id === pickedId) ?? null);
   const fromCase = $derived(pickedId === FROM_CASE);
+  const webMap = $derived(pickedId === WEB_MAP);
+  /** The layers a web map shows, and the name they make together. */
+  let mapLayers = $state([]);
+  let mapNamed = $state('');
 
   const ask = fromCaseAsk({ caseId: () => caseId, active: () => fromCase });
 
-  const named = $derived(fromCase ? ask.title : (pickedTile?.start ?? pickedTile?.name ?? ''));
+  const named = $derived(fromCase ? ask.title : webMap ? (mapNamed || 'Web map') : (pickedTile?.start ?? pickedTile?.name ?? ''));
   const placeholder = $derived(freeTitle(named, taken));
-  const canCreate = $derived(!creating && Boolean(pickedTile) && (!fromCase || ask.ready));
+  const canCreate = $derived(!creating && Boolean(pickedTile) && (!fromCase || ask.ready) && (!webMap || mapLayers.length > 0));
 
   async function create() {
     if (!canCreate) return;
@@ -63,11 +77,13 @@
     const name = title.trim() || placeholder;
     const into = folder;
     const writing = fromCase ? ask.note(name) : null;
+    const layers = webMap ? [...mapLayers] : null;
     creating = true;
     try {
       await oncreate?.(writing
         ? { title: writing.title, folder: into, body: writing.body, look: FROM_CASE_LOOK }
-        : { title: name, folder: into || item.folder || '', body: item.body ?? '', look: item.look ?? null });
+        : layers ? { title: name, folder: into, webmap: { layers } }
+          : { title: name, folder: into || item.folder || '', body: item.body ?? '', look: item.look ?? null });
     } catch {
       // the caller says what failed; the dialog stays, ready for another press
     } finally {
@@ -111,7 +127,7 @@
           <button type="button" role="radio" class="tile" class:on={pickedId === tile.id} aria-checked={pickedId === tile.id}
             tabindex={pickedId === tile.id ? 0 : -1} data-start={tile.id} title={tile.note}
             onclick={() => (chosen = tile.id)} onkeydown={walk}>
-            <span class="stage"><PageThumb name={tile.start ?? tile.name} body={tile.body} look={tile.look} width={88} /></span>
+            <span class="stage">{#if tile.id === WEB_MAP}<WebMapThumb width={110} />{:else}<PageThumb name={tile.start ?? tile.name} body={tile.body} look={tile.look} width={88} />{/if}</span>
             <span class="tile-name">{tile.name}</span>
             <span class="tile-said">{tile.note}</span>
           </button>
@@ -121,11 +137,13 @@
 
     {#if fromCase}
       <FromCaseFields {ask} />
+    {:else if webMap}
+      <WebMapFields {caseId} bind:chosen={mapLayers} bind:named={mapNamed} />
     {/if}
 
     <div class="actions">
       <button type="button" class="btn" onclick={onclose}>Cancel</button>
-      <button type="button" class="btn btn-primary" disabled={!canCreate} onclick={create}>{creating ? 'Creating…' : 'Create'}</button>
+      <button type="button" class="btn btn-primary" disabled={!canCreate} onclick={create}>{creating ? (webMap ? 'Filing its ground…' : 'Creating…') : 'Create'}</button>
     </div>
   </div>
 </Modal>

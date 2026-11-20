@@ -71,6 +71,8 @@
     ondownload = null,
     /** `(row)`: put the layer in the note pinned beside as a map; offered while a note is. */
     onmap = null,
+    /** `(row)`: make the layer a web map, a note that is its map on a page of its own, and open it. */
+    onwebmap = null,
     /** The layer an act is running on, so its buttons can say so. */
     busy = '',
     /** The head's Refresh is going through every followed layer. */
@@ -332,6 +334,13 @@
             <button type="button" class="icon-act" aria-label={`Put ${row.title} in “${shortTitle(pinned.current.title)}” as a map`}
               title={`As a map in “${shortTitle(pinned.current.title)}”`} onclick={() => onmap(row)}>
               <Icon name="mapArea" size={13} />
+            </button>
+          {/if}
+          {#if onwebmap}
+            <button type="button" class="icon-act" aria-label={`Publish ${row.title} as a web map`} disabled={busy === row.name}
+              title={busy === row.name ? 'Filing its ground…' : 'Publish as a web map…: a note that is this layer’s map on a page of its own'}
+              onclick={() => onwebmap(row)}>
+              <Icon name="globe" size={13} />
             </button>
           {/if}
           {#if ondownload}<button class="icon-act" aria-label={`Download ${row.title}`} title="Download layer" onclick={() => ondownload(row)}><Icon name="download" size={13} /></button>{/if}

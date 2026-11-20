@@ -11,7 +11,8 @@
  * `header` and `footer` are the late keys: a band of three one-line slots that
  * replaces the style's own running header or footer, written only once a slot is
  * filled, so a look that never used them reads and writes as it always did. `web`,
- * how the HTML page is laid out, is one too: the server keeps it only once set.
+ * how the HTML page is laid out, is one too: the server keeps it only once set. So is
+ * `counter`, the GoatCounter site a map page's web folder counts its readers on.
  *
  * The style is the profile: it says what the document carries after its text, the
  * sources list and how it is written, the five annexes and how strict the check is
@@ -24,6 +25,7 @@
  * (`annexListOf`).
  */
 import { api } from '../api.js';
+import { counterCode } from '../goatcounterSetup.js';
 
 export const DEFAULT_LOOK = Object.freeze({
   style: 'plain',
@@ -309,6 +311,7 @@ export const SOURCES = [
 export const WEBS = [
   { id: '', label: 'Article' },
   { id: 'story', label: 'Story' },
+  { id: 'map', label: 'Map page' },
 ];
 
 /** The styles that print no list of sources unless it is turned on, as Azimut ships them. */
@@ -411,6 +414,7 @@ export function normaliseLook(look) {
   const date = String(cover.date ?? '');
   const header = bandOf(given.header);
   const footer = bandOf(given.footer);
+  const counter = counterCode(given.counter) || '';
   return {
     style: pick(given.style, STYLES, DEFAULT_LOOK.style),
     font: pick(given.font ?? '', FONTS, ''),
@@ -440,6 +444,7 @@ export function normaliseLook(look) {
     annexes: annexesOf(given.annexes),
     ...(header && { header }),
     ...(footer && { footer }),
+    ...(counter && { counter }),
   };
 }
 

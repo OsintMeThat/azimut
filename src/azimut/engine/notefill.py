@@ -83,6 +83,16 @@ def _one_line(value: object) -> str:
     return " ".join(value.split())[:MAX_IDENTITY] if isinstance(value, str) else ""
 
 
+def _site(value: object) -> str:
+    """A site's address as Settings keeps it, checked as a web folder's address is; "" for none."""
+    from .notes_web import NotesWebError, address
+
+    try:
+        return address(value if isinstance(value, str) else "")
+    except NotesWebError:
+        return ""
+
+
 @dataclass(frozen=True)
 class Identity:
     """Who signs a report, and where their pictures are on this machine."""
@@ -92,6 +102,9 @@ class Identity:
     organisation: str = ""
     logo: Path | None = None
     signature: Path | None = None
+    #: The analyst's own site, as GitHub Pages last said it is (Settings › Publishing), which a
+    #: map page's header links their name to; "" while publishing is not set up.
+    site: str = ""
 
     @classmethod
     def from_settings(cls) -> "Identity":
@@ -102,6 +115,7 @@ class Identity:
             name, role, organisation,
             logo=logo if logo.is_file() else None,
             signature=signature if signature.is_file() else None,
+            site=_site(settings.get("github_site")),
         )
 
     def values(self, day: date) -> dict[str, str]:

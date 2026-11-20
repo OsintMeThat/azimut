@@ -52,10 +52,15 @@ as the picture lays them (each chart its own SVG, the map the page's own, the wo
 text), then its one source line. On a phone the columns become one, in the text's order.
 A web folder also carries the whole page as one picture, a press away.
 
-**Two layouts.** The look's `web` lays the page out as an article, or as a story whose
+**Three layouts.** The look's `web` lays the page out as an article, or as a story whose
 pictures hold still while the words after each go by (`_scenes`, the `::: story` markup
-reused). The text is the same in both, only grouped; the reader script and style sheet
-do the rest, and the page still reads top to bottom without them.
+reused), or as a map page (a web map): the note's first map on the whole page under its
+title, a subtitle and the analyst's name, with a panel beside it for its layers, a search
+through its features and the note's other words (`_map_page`, `reader.mappage.js` and
+`reader.mappage.css`, which only a map page carries). The text is the same in each, only
+grouped; the reader script and style sheet do the rest, and the page still reads top to
+bottom without them. A map page's web folder may count its readers on the analyst's own
+GoatCounter site (`counter`, `reader.count.js`), the one host it then reaches beside its map's.
 
 **As a folder.** Given a `Folder`, the same page is laid out for the web
 (`engine/notes_web.py`): each picture, clip, font and the reader's own two files go
@@ -84,7 +89,7 @@ from dataclasses import dataclass, field
 from datetime import date, datetime
 from io import BytesIO
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Callable, Iterable
+from typing import TYPE_CHECKING, Any, Callable, Iterable, Mapping
 from urllib.parse import unquote, unquote_to_bytes, urlsplit
 from xml.etree import ElementTree
 
@@ -133,6 +138,16 @@ FIGURE_ASSET_NAMES = ("reader.chart.css", "reader.infographic.css")
 #: What a page holding a table with a settings line adds to the style sheet (its stripes,
 #: colours, density, caption and folding), kept apart for the same reason.
 TABLE_ASSET_NAMES = ("reader.table.css",)
+#: What a map page adds: its layout, its panel's script spliced after the map's, and, in a web
+#: folder whose look names a GoatCounter site, the counter beside the page.
+MAPPAGE_ASSET_NAMES = ("reader.mappage.css", "reader.mappage.js", "reader.count.js")
+#: The host a map page's counter reaches, under the analyst's own site code: GoatCounter, which
+#: counts with no cookie (https://www.goatcounter.com). Only a web folder calls it, once online.
+COUNTER_HOST = "https://{code}.goatcounter.com"
+#: The first map of a page as `_map_figure` writes it, whole: its data closes it.
+MAP_FIGURE = re.compile(r'<figure class="az-figure az-map[^"]*" data-kind="map".*?</script>\n</figure>\n', re.S)
+#: What a map page says when its note holds no map, and reads as an article.
+NO_MAP_PAGE = "This map page holds no map, so it reads as an article. Put a map in it with / › Interactive map."
 #: What the page may load: nothing but what it holds.
 CSP = (
     "default-src 'none'; img-src data:; media-src data:; font-src data:; style-src 'unsafe-inline'; "
@@ -551,6 +566,8 @@ class _Page:
         self.streamed: set[str] = set()
         #: Whether its maps go live online: a folder's, holding one, given what it takes.
         self.live = False
+        #: Whether it is laid out as a map page (`_map_page`), its first map on the whole page.
+        self.map_page = False
         #: Each map's steps, `(label, day)`, by its figure's id: the cards a story gives it.
         self._map_steps: dict[str, list[tuple[str, str, str, str]]] = {}
         #: The figure each proof shown in the page stands in, by its record, which a map's card links to.
@@ -638,13 +655,57 @@ class _Page:
         # the Editions annex is the corrections and the editions before them: it takes their place
         corrections = "" if profile.editions else self._corrections(changes, earlier)
         footer = self._footer(printed)
-        contents = self._contents(bool(sources), bool(corrections), listed)
         warning = f'<p class="az-graphic-warning" role="note">{_text(GRAPHIC_WARNING)}</p>\n' if self.graphic else ""
+        if self.look.web == "map":
+            laid = self._map_page(title, body, f"{sources}{annexes}{corrections}{footer}")
+            if laid is not None:
+                return self._assemble(title, warning + laid)
+            self._warn(NO_MAP_PAGE, None, md.OTHER)
+        contents = self._contents(bool(sources), bool(corrections), listed)
         # the contents, the text and its end matter share one box, which the contents
         # rail stays inside: it never runs into the footer
         page = (f'{warning}{head}<div class="az-page">\n{contents}<main class="az-body" id="main">\n{body}</main>\n'
                 f"{sources}{annexes}{corrections}</div>\n{footer}")
         return self._assemble(title, page)
+
+    def _map_page(self, title: str, body: str, end: str) -> str | None:
+        """A map page: its title, a subtitle (the look's own, else the note's first paragraph) and
+        the analyst's name over its first map, which the reader lays on the whole window, and the
+        note's other words, its sources and its footer in a section the reader puts in the panel
+        beside it. Read without script or printed, the same parts follow one another. None when the
+        note holds no map."""
+        found = MAP_FIGURE.search(body)
+        if found is None:
+            return None
+        self.map_page = True
+        figure = found.group(0)
+        rest = body[:found.start()] + body[found.end():]
+        subtitle = _text(" ".join(self.look.cover.subtitle.split()))
+        if not subtitle:
+            first = re.search(r'<p dir="auto">(.*?)</p>\n?', rest, re.S)
+            if first is not None:
+                subtitle = first.group(1)
+                rest = rest[:first.start()] + rest[first.end():]
+        identity = self.cited.identity
+        who = identity.organisation or identity.name
+        by = ""
+        if identity.site:
+            words = who or urlsplit(identity.site).hostname or identity.site
+            by = (f'<a class="az-mappage-site" href="{_attr(identity.site)}" target="_blank" '
+                  f'rel="noopener noreferrer">{_text(words)}</a>')
+        elif who:
+            by = f'<span class="az-mappage-site">{_text(who)}</span>'
+        views = ""
+        if self.folder is not None and self.look.counter:
+            views = f'<span class="az-mappage-views" data-counter="{_attr(self.look.counter)}" hidden></span>'
+        said = f'<p class="az-mappage-sub" dir="auto">{subtitle}</p>\n' if subtitle else ""
+        signed = f'<p class="az-mappage-by">{by}{views}</p>\n' if by or views else ""
+        head = (f'<header class="az-mappage-head" id="top">\n<div class="az-mappage-titles">'
+                f'<h1 class="az-title" dir="auto">{_text(title)}</h1>\n{said}</div>\n{signed}</header>\n')
+        words = f'<div class="az-body az-mappage-text">\n{rest}</div>\n' if rest.strip() else ""
+        about = f'<section class="az-mappage-about" id="about" aria-label="About this map">\n{words}{end}</section>\n'
+        return (f'<div class="az-mappage">\n{head}<main class="az-mappage-main" id="main">\n{figure}</main>\n'
+                f"{about}</div>\n")
 
     def _assemble(self, title: str, page: str) -> bytes:
         """The page with its clips and timecodes settled, wrapped in its document."""
@@ -652,16 +713,19 @@ class _Page:
         live = self.folder.live if self.folder is not None and mapped else None
         self.live = live is not None
         charted = bool(self.charts or self.infographics)
+        paged = mapped and self.map_page
         reader_css = (_asset("reader.css") + (_asset("reader.map.css") if mapped else "")
+                      + (_asset("reader.mappage.css") if paged else "")
                       + (_asset("reader.mapset.css") if mapped and self.mapset else "")
                       + (_asset("reader.chart.css") if charted else "")
                       + (_asset("reader.infographic.css") if self.infographics else "")
                       + (_asset("reader.table.css") if self.table_looks else "")
                       + (_asset(live.sheet) if live is not None else ""))
         reader = _asset("reader.js")
-        reader_js = reader.replace(MAP_SLOT, _asset("reader.map.js"), 1) if mapped else reader
+        map_js = _asset("reader.map.js") + (_asset("reader.mappage.js") if paged else "")
+        reader_js = reader.replace(MAP_SLOT, map_js, 1) if mapped else reader
         # what the reader writes itself is drawn in the page's face, a map's words with it
-        own = (_asset("reader.map.js") + _asset("reader.map.css")) if mapped else ""
+        own = (map_js + _asset("reader.map.css")) if mapped else ""
         if live is not None:
             own += _asset(live.module)
         fonts = _font_faces(self.look, self.theme, _visible_text(page) + title + own + "".join(self._chart_words),
@@ -688,6 +752,12 @@ class _Page:
             script = f'<script src="{code_file}"></script>\n'
             if live is not None:
                 said += self._live_config(live)
+            if paged and self.look.counter:
+                # the analyst's own counter: its one host let in, its script beside the page
+                host = COUNTER_HOST.format(code=self.look.counter)
+                policy = widen_policy(policy, {"img-src": (host,), "connect-src": (host,)})
+                counter = self.folder.put(_asset("reader.count.js").encode("utf-8"), "reader-count", ".js")
+                script += f'<script src="{counter}"></script>\n'
         top = (
             f'<!doctype html>\n<html lang="en" dir="auto" data-look="{self.look.style}" data-font="{self.look.font}"'
             f'{tlp}{web} data-edition="{edition}"{accent}>\n<head>\n<meta charset="utf-8">\n'
@@ -2026,7 +2096,7 @@ class _Page:
         self._map_steps[ident] = [(str(step.get("label") or ""), str(step.get("day") or ""), str(step.get("text") or ""),
                                    str(step.get("name") or "")) for step in derived.data.get("steps") or []]
         self._map_credits.extend(str(one) for one in derived.data.get("credits") or [] if one)
-        figure = _map_figure(derived, ident, self._caption(block.title, "Map"))
+        figure = _map_figure(derived, ident, self._caption(block.title, "Map"), keyed=self.look.web == "map")
         self.mapset = self.mapset or _map_set(derived)
         self.dark_maps = self.dark_maps or derived.data.get("base") == "dark"
         streamed = urlsplit(str((derived.data.get("imagery") or {}).get("tiles") or ""))
@@ -2626,7 +2696,23 @@ def _placed(project: notes_maps._Projector, bounds: list[float], width: float, h
             f"width:{(right - left) / width * 100:.4f}%;height:{(bottom - top) / height * 100:.4f}%")
 
 
-def _map_figure(derived: notes_maps.Derived, ident: str, caption: str) -> str:
+def widen_policy(policy: str, extra: Mapping[str, Iterable[str]]) -> str:
+    """A page's policy with more sources for some directives, a directive it lacks added with
+    them alone (so `default-src 'none'` still holds for the rest)."""
+    directives: dict[str, list[str]] = {}
+    for part in policy.split(";"):
+        words = part.split()
+        if words:
+            directives.setdefault(words[0], []).extend(words[1:])
+    for name, sources in extra.items():
+        kept = directives.setdefault(name, [])
+        if kept == ["'none'"]:
+            kept.clear()
+        kept.extend(source for source in sources if source not in kept)
+    return "; ".join(f"{name} {' '.join(sources)}" for name, sources in directives.items())
+
+
+def _map_figure(derived: notes_maps.Derived, ident: str, caption: str, *, keyed: bool = False) -> str:
     """The figure a map stands in. Its stage holds the ground and the drawing, which read
     whole with no script and in print; its data rides along unread for the reader's
     script (the ground's address named by the picture's id, so the file holds it once).
@@ -2676,7 +2762,7 @@ def _map_figure(derived: notes_maps.Derived, ident: str, caption: str) -> str:
         shown = (f'<p class="az-map-day">As on <time datetime="{data["day"]}">{_text(spoken)}</time>, '
                  f'one of {len(days)} days</p>\n')
     shown_legend = derived.display.get("legend", "shown")
-    legend = "" if shown_legend == "hidden" else _map_legend(derived.legend, ident)
+    legend = "" if shown_legend == "hidden" else _map_legend(derived.legend, ident, keyed=keyed)
     if legend and shown_legend == "folded":
         legend = f'<details class="az-map-key"><summary>Legend</summary>\n{legend}</details>\n'
     credits = _map_credits(data.get("credits") or [])
@@ -2690,8 +2776,9 @@ def _map_figure(derived: notes_maps.Derived, ident: str, caption: str) -> str:
             f'<script type="application/json" class="az-map-data">{script}</script>\n</figure>\n')
 
 
-def _map_legend(rows: list[dict[str, Any]], ident: str) -> str:
-    """What each colour and pictogram stands for, a layer's groups under its name."""
+def _map_legend(rows: list[dict[str, Any]], ident: str, *, keyed: bool = False) -> str:
+    """What each colour and pictogram stands for, a layer's groups under its name. ``keyed``, on a
+    map page, each row says the group and kind of feature it stands for, which its switcher reads."""
     if not rows:
         return ""
     layers = list(dict.fromkeys(str(row.get("layer") or "") for row in rows))
@@ -2719,7 +2806,9 @@ def _map_legend(rows: list[dict[str, Any]], ident: str) -> str:
                           f'width="24" height="14" rx="2" fill="{colour}" fill-opacity=".28" stroke="{colour}" '
                           f'stroke-width="2"/></svg>')
             count = int(row.get("count") or 0)
-            items.append(f'<li data-layer="{_attr(layer)}" data-group="{_attr(str(row.get("label") or ""))}">'
+            key = (f' data-kind="{_attr(str(row.get("kind") or ""))}" '
+                   f'data-key="{_attr(str(row.get("group", row.get("label")) or ""))}"' if keyed else "")
+            items.append(f'<li data-layer="{_attr(layer)}" data-group="{_attr(str(row.get("label") or ""))}"{key}>'
                          f'{swatch}<span class="az-key-name" dir="auto">{_text(str(row.get("label") or layer))}</span>'
                          f'<span class="az-key-count">{count}</span></li>')
     return f'<ul class="az-map-legend" aria-label="Legend">{"".join(items)}</ul>\n'

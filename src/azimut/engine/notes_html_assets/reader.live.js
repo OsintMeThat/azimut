@@ -39,8 +39,14 @@ const OWN_BASES = {
   dark: { opens: 'map', switch: false, style: 'dark' },
   topographic: { opens: 'satellite', switch: true, filed: 'Topographic (as filed)', hint: 'The topographic map filed with the map, as in the report' },
 };
-/** What a mark's name is set in, as in the drawing (`LABEL_PX` of reader.map.js). */
-const LABEL_PX = 12.5;
+/** What a mark's name is set in, under it, as in the drawing (`LABEL_PX` of reader.map.js). */
+const LABEL_PX = 11;
+/** A marker looking one way: the wedge outside its rim, in its 64 units about its middle (`BEARING_WEDGE`). */
+const WEDGE = 'M0 -45L9 -32H-9Z';
+/** Where a plain marker's square stands so its tip is on its point, in its 64 units (`TIP_TOP`). */
+const TIP_TOP = -56.3;
+/** How strongly a point of each confidence is drawn, as the app's map draws it. */
+const CONFIDENCE_ALPHA = { probable: 0.8, claimed: 0.55 };
 /** What the base map owes, as OpenFreeMap asks it to be said. */
 const BASE_CREDIT = [
   ['OpenFreeMap', 'https://openfreemap.org'],
@@ -128,11 +134,10 @@ function iconOf(feature) {
   return String(style.icon || '');
 }
 
-/** How a line is dashed, as the drawing dashes it: its own dash, else how sure it is. */
+/** How a line is dashed, as the app's map dashes it: its own dash, else probable dashed and claimed dotted. */
 function dashOf(style) {
   if (style.dash === 'dashed' || style.dash === 'dotted') return style.dash;
-  if (style.confidence === 'claimed' || style.confidence === 'probable') return style.confidence;
-  return '';
+  return { probable: 'dashed', claimed: 'dotted' }[style.confidence] || '';
 }
 
 /**
@@ -153,6 +158,9 @@ export function geojson(data) {
     if (feature.kind === 'point') {
       properties.icon = iconOf(feature);
       properties.s = number(style.size, 1);
+      if (Number.isFinite(Number(style.bearing)) && style.bearing !== null && style.bearing !== '') properties.bearing = Number(style.bearing);
+      if (style.tip) properties.tip = true;
+      properties.sure = CONFIDENCE_ALPHA[style.confidence] || 1;
       geometry = { type: 'Point', coordinates: feature.coords };
     } else if (feature.kind === 'line') {
       geometry = { type: 'MultiLineString', coordinates: feature.coords };
@@ -167,7 +175,7 @@ export function geojson(data) {
       }
     } else if (feature.kind === 'area') {
       properties.fill = ['none', 'hatch', 'solid'].includes(style.fill) ? style.fill : 'solid';
-      properties.opacity = number(style.opacity, 0.22);
+      properties.opacity = number(style.opacity, 0.18);
       geometry = { type: 'MultiPolygon', coordinates: feature.coords };
     }
     if (geometry) features.push({ type: 'Feature', id: properties.id, geometry, properties });
@@ -215,13 +223,14 @@ export function layers() {
     { id: 'az-line-halo', type: 'line', source: FEATURES, base: lines,
       layout: { 'line-cap': 'round', 'line-join': 'round' },
       paint: { 'line-color': '#ffffff', 'line-width': ['+', ['get', 'width'], 3],
-        'line-opacity': alpha(['case', ['any', state('picked'), state('hover')], 0.95, 0.5]) } },
+        // no halo but on the one pointed at or picked, as the app's map draws a line
+        'line-opacity': alpha(['case', ['any', state('picked'), state('hover')], 0.95, 0]) } },
     { id: 'az-line', type: 'line', source: FEATURES, base: ['all', lines, ['!', ['has', 'dash']]],
       layout: { 'line-cap': 'round', 'line-join': 'round' },
-      paint: { 'line-color': ['get', 'color'], 'line-width': ['get', 'width'], 'line-opacity': alpha(1) } },
+      paint: { 'line-color': ['get', 'color'], 'line-width': ['get', 'width'], 'line-opacity': alpha(0.9) } },
     { id: 'az-line-dash', type: 'line', source: FEATURES, base: ['all', lines, ['has', 'dash']],
       layout: { 'line-cap': 'round', 'line-join': 'round' },
-      paint: { 'line-color': ['get', 'color'], 'line-width': ['get', 'width'], 'line-opacity': alpha(1), 'line-dasharray': DASHES } },
+      paint: { 'line-color': ['get', 'color'], 'line-width': ['get', 'width'], 'line-opacity': alpha(0.9), 'line-dasharray': DASHES } },
     { id: 'az-arrows', type: 'symbol', source: ARROWS, base: true,
       layout: { 'icon-image': ['concat', 'arrow-', ['slice', ['get', 'color'], 1]], 'icon-size': ['/', ['get', 'width'], 2],
         'icon-rotate': ['get', 'turn'], 'icon-rotation-alignment': 'map', 'icon-allow-overlap': true, 'icon-ignore-placement': true },
@@ -230,9 +239,17 @@ export function layers() {
       // a glow round the mark, past its edge as the drawing's drop shadow is
       paint: { 'circle-radius': ['*', 21, ['get', 's']], 'circle-color': '#ffffff', 'circle-blur': 0.55,
         'circle-opacity': ['case', state('away'), 0, state('picked'), 0.9, state('hover'), 0.65, state('new'), 0.75, 0] } },
-    { id: 'az-points', type: 'symbol', source: FEATURES, base: kind('point'),
-      layout: { 'icon-image': ['get', 'icon'], 'icon-size': ['get', 's'], 'icon-allow-overlap': true, 'icon-ignore-placement': true },
+    { id: 'az-bearing', type: 'symbol', source: FEATURES, base: ['all', kind('point'), ['has', 'bearing']],
+      // which way a marker looks: a wedge outside its rim, under it, turned with the map
+      layout: { 'icon-image': 'az-bearing', 'icon-size': ['get', 's'], 'icon-rotate': ['get', 'bearing'], 'icon-rotation-alignment': 'map',
+        'icon-allow-overlap': true, 'icon-ignore-placement': true },
       paint: { 'icon-opacity': ['case', state('away'), 0, alpha(1)] } },
+    { id: 'az-points', type: 'symbol', source: FEATURES, base: kind('point'),
+      // a plain marker stands on its tip, a badge or an icon on its middle
+      layout: { 'icon-image': ['get', 'icon'], 'icon-size': ['get', 's'], 'icon-allow-overlap': true, 'icon-ignore-placement': true,
+        'icon-anchor': ['case', ['has', 'tip'], 'bottom', 'center'],
+        'icon-offset': ['case', ['has', 'tip'], ['literal', [0, ((64 + TIP_TOP) * MARKER_PX) / 64]], ['literal', [0, 0]]] },
+      paint: { 'icon-opacity': ['case', state('away'), 0, ['*', alpha(1), ['coalesce', ['get', 'sure'], 1]]] } },
   ];
 }
 
@@ -282,10 +299,14 @@ function loaded(doc, src) {
 export async function pictogram(symbol, side = ICON_PX) {
   const doc = symbol.ownerDocument;
   const win = doc.defaultView;
+  // an icon drawn past the marker's square keeps all of it, on a larger picture about the same middle
+  const units = Math.max(64, Number(symbol.getAttribute('data-side')) || 64);
+  side = Math.round((side * units) / 64);
   const made = canvasOf(doc, side);
   if (!made || typeof win.Path2D !== 'function') return null;
   const { context } = made;
-  context.scale(side / 64, side / 64);
+  context.scale(side / units, side / units);
+  context.translate((units - 64) / 2, (units - 64) / 2);
   for (const part of symbol.children) {
     context.save();
     if (part.localName === 'path') {
@@ -299,11 +320,29 @@ export async function pictogram(symbol, side = ICON_PX) {
         context.lineWidth = Number(part.getAttribute('stroke-width')) || 1;
         context.lineCap = 'round';
         context.lineJoin = 'round';
+        const dash = String(part.getAttribute('stroke-dasharray') || '').split(/[\s,]+/).map(Number).filter((one) => one > 0);
+        context.setLineDash?.(dash);
         context.stroke(shape);
+        context.setLineDash?.([]);
       }
     } else if (part.localName === 'image') {
       const picture = await loaded(doc, part.getAttribute('href') || '');
-      if (picture) context.drawImage(picture, Number(part.getAttribute('x')) || 0, Number(part.getAttribute('y')) || 0, Number(part.getAttribute('width')) || 64, Number(part.getAttribute('height')) || 64);
+      const [x, y, w, h] = ['x', 'y', 'width', 'height'].map((name, at) => Number(part.getAttribute(name)) || (at > 1 ? 64 : 0));
+      const ink = part.getAttribute('data-ink');
+      // a silhouette in a disc is inked in the disc's glyph colour, as the drawing's filter inks it
+      const inked = picture && ink ? canvasOf(doc, side) : null;
+      if (inked) {
+        inked.context.setTransform(context.getTransform());
+        inked.context.drawImage(picture, x, y, w, h);
+        inked.context.setTransform(1, 0, 0, 1, 0, 0);
+        inked.context.globalCompositeOperation = 'source-in';
+        inked.context.fillStyle = ink;
+        inked.context.fillRect(0, 0, side, side);
+        context.save();
+        context.setTransform(1, 0, 0, 1, 0, 0);
+        context.drawImage(inked.canvas, 0, 0);
+        context.restore();
+      } else if (picture) context.drawImage(picture, x, y, w, h);
     }
     context.restore();
   }
@@ -344,6 +383,27 @@ function arrow(doc, colour) {
   return context.getImageData(0, 0, 40, 40);
 }
 
+/**
+ * The wedge a marker looking one way wears, pointing up before it is turned, as the drawing draws it:
+ * on a square half as wide again as the marker's, as the app's map draws it, so its tip has room.
+ */
+function wedge(doc) {
+  const side = ICON_PX * 1.5;
+  const made = canvasOf(doc, side);
+  if (!made || typeof doc.defaultView.Path2D !== 'function') return null;
+  const { context } = made;
+  context.scale(ICON_PX / 64, ICON_PX / 64);
+  context.translate(48, 48);
+  const shape = new doc.defaultView.Path2D(WEDGE);
+  context.lineJoin = 'round';
+  context.lineWidth = 3;
+  context.strokeStyle = 'rgba(0, 0, 0, 0.6)';
+  context.stroke(shape);
+  context.fillStyle = '#ffffff';
+  context.fill(shape);
+  return context.getImageData(0, 0, side, side);
+}
+
 /** A mark with no pictogram of its own: a disc of its colour, ringed white. */
 function disc(doc, colour) {
   const made = canvasOf(doc, ICON_PX);
@@ -374,6 +434,7 @@ async function pictures(map, figure, shaped) {
   }
   const add = (name, image, ratio = 1) => { if (image && !map.hasImage?.(name)) map.addImage(name, image, { pixelRatio: ratio }); };
   for (const [key, symbol] of keys) add(key, await pictogram(symbol), ICON_PX / MARKER_PX);
+  if (shaped.features.features.some((feature) => feature.properties.bearing != null)) add('az-bearing', wedge(doc), ICON_PX / MARKER_PX);
   for (const colour of colours) {
     add(`hatch-${colour.slice(1)}`, hatch(doc, colour), 1);
     add(`arrow-${colour.slice(1)}`, arrow(doc, colour), 4);
@@ -440,6 +501,8 @@ export function mount(figure, said, maplibre) {
   let base = data.ground?.src || imagery ? own?.opens || FIRST_BASE : 'map';
   let day = '';
   let past = [];
+  /** What a map page's layer switcher took off the map, read off the drawing as its past is. */
+  let off = new Set();
   /** What the reader shares once the map is handed over (`attach`), null till then. */
   let shared = null;
   let ready = false;
@@ -507,9 +570,12 @@ export function mount(figure, said, maplibre) {
       day = next || '';
       // the drawing has already read which of its lines and areas are gone (`setDay`)
       past = [...stage.querySelectorAll('.az-f.az-past')].map((node) => node.dataset.id);
+      // and which a map page's layer switcher took off
+      off = new Set([...stage.querySelectorAll('.az-f.az-hidden')].map((node) => node.dataset.id));
+      const kept = off.size ? [['!', ['in', ['get', 'id'], ['literal', [...off]]]]] : [];
       for (const layer of drawn) {
         if (!map.getLayer?.(layer.id)) continue;
-        map.setFilter(layer.id, layer.past ? ['all', layer.base, ['in', ['get', 'id'], ['literal', past]]] : ['all', layer.base, onDay(day)]);
+        map.setFilter(layer.id, layer.past ? ['all', layer.base, ['in', ['get', 'id'], ['literal', past]]] : ['all', layer.base, onDay(day), ...kept]);
       }
       if (!quiet && before && !still()) {
         const shown = (feature) => (!feature.from || feature.from <= day) && (!feature.until || day <= feature.until);
@@ -526,6 +592,11 @@ export function mount(figure, said, maplibre) {
       if (smooth && !still()) map.flyTo({ ...camera, duration: STEP_MS, essential: true });
       else map.jumpTo(camera);
       flash(focus);
+    },
+    /** Where it looks, `{center, zoom}`, for a map page's address. */
+    where() {
+      const center = map.getCenter();
+      return { center: [center.lng, center.lat], zoom: map.getZoom() };
     },
     /** The whole map, as the drawing shows it. */
     whole() {
@@ -674,6 +745,7 @@ export function mount(figure, said, maplibre) {
     });
     map.on('move', place);
     map.on('resize', place);
+    map.on('moveend', () => figure.dispatchEvent(new win.CustomEvent('az-moved')));
   }
 
   /** The feature under a press, the marks first; never a mark spread away from that spot. */
@@ -712,7 +784,7 @@ export function mount(figure, said, maplibre) {
     over.setAttribute('viewBox', `0 0 ${w} ${h}`);
     const shown = [];
     for (const feature of data.features || []) {
-      if (feature.kind !== 'point') continue;
+      if (feature.kind !== 'point' || off.has(String(feature.id))) continue;
       if (day && ((feature.from && feature.from > day) || (feature.until && day > feature.until))) continue;
       const at = map.project(feature.coords);
       if (at.x < -60 || at.y < -60 || at.x > w + 60 || at.y > h + 60) continue;
@@ -739,7 +811,14 @@ export function mount(figure, said, maplibre) {
       const mark = svgNode(doc, 'g', { class: `az-f az-point${picked === one.id ? ' az-picked' : ''}`, 'data-id': one.id,
         transform: `translate(${x.toFixed(1)} ${y.toFixed(1)}) scale(${((MARKER_PX * size) / 64).toFixed(4)})` });
       const icon = iconOf(feature);
-      mark.append(svgNode(doc, 'use', { href: `#${ident}-mk-${icon}`, x: -32, y: -32, width: 64, height: 64 }));
+      const style = feature.style || {};
+      if (Number.isFinite(Number(style.bearing)) && style.bearing !== null && style.bearing !== '') {
+        mark.append(svgNode(doc, 'path', { class: 'az-bearing', d: WEDGE, transform: `rotate(${Number(style.bearing)})`, fill: '#fff',
+          stroke: 'rgba(0,0,0,.6)', 'stroke-width': 3, 'stroke-linejoin': 'round' }));
+      }
+      const use = svgNode(doc, 'use', { href: `#${ident}-mk-${icon}`, x: -32, y: style.tip ? TIP_TOP : -32, width: 64, height: 64 });
+      if (CONFIDENCE_ALPHA[style.confidence]) use.setAttribute('opacity', String(CONFIDENCE_ALPHA[style.confidence]));
+      mark.append(use);
       marks.push([y, mark]);
     }
     leaders.replaceChildren(...lines);
@@ -759,11 +838,14 @@ export function mount(figure, said, maplibre) {
       if (!feature.style?.label || crowded.has(one.id) || !feature.label) continue;
       const [x, y] = atOf.get(one.id);
       const words = String(feature.label).slice(0, 34);
-      const left = x + 15;
-      const box4 = [left, y - LABEL_PX * 0.7, left + words.length * LABEL_PX * 0.56, y + LABEL_PX * 0.5];
+      // under its mark, as the app's map writes it
+      const size = number(feature.style?.label_size, LABEL_PX);
+      const span = words.length * size * 0.56;
+      const base = y + size * 1.75;
+      const box4 = [x - span / 2, base - size * 0.8, x + span / 2, base + size * 0.25];
       if (taken.some((other) => box4[0] < other[2] && other[0] < box4[2] && box4[1] < other[3] && other[1] < box4[3])) continue;
       taken.push(box4);
-      const text = svgNode(doc, 'text', { class: 'az-label', x: left.toFixed(1), y: (y + LABEL_PX * 0.35).toFixed(1), 'font-size': LABEL_PX });
+      const text = svgNode(doc, 'text', { class: 'az-label', x: x.toFixed(1), y: base.toFixed(1), 'font-size': size, 'text-anchor': 'middle' });
       text.textContent = words;
       names.push(text);
     }

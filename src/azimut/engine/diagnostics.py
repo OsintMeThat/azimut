@@ -376,7 +376,8 @@ def bundled_parts() -> dict[str, bool]:
         "pdf_fonts": faces and subsetter,
         "report_reader": all((notes_html.ASSETS / name).is_file()
                              for name in (*notes_html.ASSET_NAMES, *notes_html.MAP_ASSET_NAMES,
-                                          *notes_html.FIGURE_ASSET_NAMES, *notes_html.TABLE_ASSET_NAMES)),
+                                          *notes_html.FIGURE_ASSET_NAMES, *notes_html.TABLE_ASSET_NAMES,
+                                          *notes_html.MAPPAGE_ASSET_NAMES)),
         "extension": bool(extinstall.bundled_version()) and bool(extinstall.payload_digest()),
         "scrapers": versions,
         "buildings": buildings.self_check(),
