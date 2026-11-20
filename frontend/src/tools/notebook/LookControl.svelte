@@ -40,6 +40,7 @@
   import { prefs } from '../../lib/state.svelte.js';
   import { faceFamily, loadNoteFont, noteFonts } from '../../lib/notes/noteFonts.js';
   import { recentColours } from '../../lib/recentColours.svelte.js';
+  import { COUNTER_SAID, COUNTER_STEPS, GOATCOUNTER_SIGNUP, counterCode } from '../../lib/goatcounterSetup.js';
   import { foldText } from '../../lib/textFold.js';
   import Icon from '../../components/Icon.svelte';
   import FloatingMenu from '../../components/FloatingMenu.svelte';
@@ -190,6 +191,19 @@
     if (hex) recentColours.keep(hex);
   }
 
+  /** What the counter's field holds, kept once it is left, and whether what it holds names no site. */
+  let counterDraft = $state('');
+  let counterWrong = $state(false);
+  $effect(() => { counterDraft = whole.counter ?? ''; });
+  function commitCounter() {
+    const code = counterCode(counterDraft);
+    if (code === null) { counterWrong = true; return; }
+    counterWrong = false;
+    counterDraft = code;
+    set({ counter: code });
+  }
+  const WEB_HELP = { '': LOOK_HELP.webArticle, story: LOOK_HELP.webStory, map: LOOK_HELP.webMap };
+
   function typedSubtitle(value) {
     subtitle = value;
     clearTimeout(subtitleTimer);
@@ -303,10 +317,31 @@
             <div class="seg" role="radiogroup" aria-label="Web page" title={LOOK_HELP.web}>
               {#each WEBS as web (web.id)}
                 <button type="button" class:on={whole.web === web.id} role="radio" aria-checked={whole.web === web.id}
-                  title={web.id ? LOOK_HELP.webStory : LOOK_HELP.webArticle} onclick={() => set({ web: web.id })}>{web.label}</button>
+                  title={WEB_HELP[web.id]} onclick={() => set({ web: web.id })}>{web.label}</button>
               {/each}
             </div>
           </div>
+          {#if whole.web === 'map'}
+            <!-- a map page's one setting of its own: the reader count, optional, its setup said here -->
+            <div class="map-page">
+              <p class="said">{LOOK_HELP.webMap}.</p>
+              <label class="row" title={LOOK_HELP.counter}>
+                <span class="key">View counter</span>
+                <input class="input" value={counterDraft} placeholder="GoatCounter code" spellcheck="false" autocomplete="off"
+                  aria-invalid={counterWrong} title={LOOK_HELP.counter}
+                  oninput={(event) => { counterDraft = event.currentTarget.value; counterWrong = false; }} onblur={commitCounter}
+                  onkeydown={(event) => { if (event.key === 'Enter') commitCounter(); }} />
+              </label>
+              {#if counterWrong}<p class="said wrong">That is not a GoatCounter code: letters, digits and hyphens, as in mycode.goatcounter.com.</p>{/if}
+              <details class="counter-how">
+                <summary>How to get one</summary>
+                <ol>
+                  {#each COUNTER_STEPS as [step, how] (step)}<li><b>{step}.</b> {how}</li>{/each}
+                </ol>
+                <p class="said">{COUNTER_SAID} <a href={GOATCOUNTER_SIGNUP} target="_blank" rel="noreferrer">Open GoatCounter</a></p>
+              </details>
+            </div>
+          {/if}
           <p class="said settings-said" title={LOOK_HELP.stylesSettings}><Icon name="settings" size={12} /> What each style carries by default: Settings › Publishing › Styles</p>
 
         {:else if tab === 'text'}
@@ -694,6 +729,13 @@
   .switch input:checked + .track .knob { transform: translateX(11px); background: var(--accent-text); }
   .switch input:focus-visible + .track { outline: 2px solid var(--accent); outline-offset: 2px; }
   .said { margin: 0; color: var(--text-3); font-size: var(--fs-xs); line-height: 1.4; }
+  .said.wrong { color: var(--danger); }
+  .map-page { display: flex; flex-direction: column; gap: 8px; margin-top: -4px; }
+  .counter-how { color: var(--text-3); font-size: var(--fs-xs); line-height: 1.45; }
+  .counter-how > summary { width: fit-content; cursor: pointer; color: var(--text-2); }
+  .counter-how ol { margin: 6px 0; padding-left: 18px; }
+  .counter-how li + li { margin-top: 3px; }
+  .counter-how b { color: var(--text-2); font-weight: 600; }
   .picture { display: flex; flex-direction: column; gap: 8px; min-width: 0; }
   .picked { display: flex; align-items: center; gap: 4px; min-width: 0; }
   .pick { flex: 1; min-width: 0; justify-content: flex-start; }

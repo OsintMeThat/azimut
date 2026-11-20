@@ -59,6 +59,8 @@ export const LOOK_HELP = {
   web: 'How the HTML page is laid out; the PDF is the same either way',
   webArticle: 'One column of text, the pictures wider than it',
   webStory: 'Each picture held still while the words after it scroll by',
+  webMap: 'The note’s first map on the whole page, its layers, a search and the other words beside it',
+  counter: 'Your GoatCounter site’s code, to show how many people read the published page',
   tabStyle: 'What the document is, and what it adds: contents, numbers, sources, annexes, web page',
   tabText: 'The typeface and the size of the text',
   tabPage: 'The paper size, the accent colour and the marking',

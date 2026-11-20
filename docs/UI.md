@@ -7096,6 +7096,18 @@ reading edges the same way); a suggested point does not, what the case made itse
 (captures, frames) does not, and a file a proof was made from is shown by its proof. A
 note holds at most 200, with a line naming the cut.
 
+**Web map**, beside From the case (the home's tile, and a tile of New note), makes a note
+that is one map on a page of its own, to publish as a note is: New note asks a title and
+the layers it shows, ticked in the Interactive map picker's list; **Create** puts the map
+as any map is put (framed on its layers, its ground filed once) and opens a Web article laid
+out as a **Map page** (`lib/notes/webMap.js`). My layers makes one from a layer in one
+press: the globe on its row, *Publish as a web map…*, makes the note and opens the Notebook
+on it. Its map settings card sets the rest, and Export › Web folder or Publish to GitHub
+Pages puts it online, again at the same address. The home lists web maps in a row of their
+own, **Web maps**, each card showing its map's ground small and the address GitHub Pages
+last published it at, with a press that opens it (`GET /notes/index` adds `map: {picture,
+address}` to such a row).
+
 **Several at once.** *Select* puts a box on every card; Shift-click picks a run,
 *Select all* the folder shown, Escape leaves. A bar at the foot says how many are
 picked and offers **Export** (one PDF, HTML page or web folder per note, into the notes destination)
@@ -7544,6 +7556,34 @@ reaches the picture under them.
 as in the article. Without script, printed or with motion turned down, a story reads top to
 bottom as the article does.
 
+**Map page.** The *Web page* row's third choice, **Map page**, lays the HTML page out as a web
+map (`engine/notes_html.py` `_map_page`, its sheet and script `reader.mappage.css` and
+`reader.mappage.js`, which only such a page carries). The note's first map takes the window
+under a header: the title, a subtitle (the Cover's subtitle, else the note's first paragraph)
+and the analyst's name or organisation from Settings › Publishing, linked to the site GitHub
+Pages last gave when there is one. The map is held as on the whole screen (whole in its
+middle, the wheel and one finger its own, no Ctrl), its timeline and credit under it, and a
+panel beside it holds **Find on the map** (every word of a feature, its name, group, layer,
+day and columns, local; a result opens on a day it is on, its row switched back on, the map
+moved to it and its card open), **Layers** (the legend, each row a switch for its group and
+each layer's name for all of its rows), its steps and the note's other words, sources and
+footer. On a phone the header keeps the title on a line with a **Layers** button that opens
+the panel as a sheet over the map, and a card is a sheet of its own. Where the map looks is
+kept in the address as `#zoom/lat/lon` (a tile's zoom, as OpenStreetMap writes it), read on
+the way in and written as the map moves, never a step of the history, and only once it has
+moved. **Full screen** asks the browser's own for the whole page; where the browser has none
+the button is gone, the page holding the window already. Without script or printed, the
+title, the map and the words follow one another. A map page whose note holds no map reads as
+an article and the check says so. Its one setting of its own, under the row, is the optional
+**View counter**: the code of the analyst's own free GoatCounter site (`counter`, the code or
+its address pasted), with *How to get one* folded under it (sign up, tick *Allow adding
+visitor counts on your website* in GoatCounter's Settings, paste the code;
+`lib/goatcounterSetup.js`). Only the web folder carries it (`reader.count.js`): read online,
+the page counts the visit with GoatCounter's pixel, no cookie, and asks the site its count,
+shown as *N views* under the title; when it refuses, says nothing to read or does not answer
+within four seconds, the line stays hidden. The single HTML file counts nothing, and Azimut
+itself never calls GoatCounter.
+
 **Web folder.** The export dialog's format switch reads *PDF · HTML page · Web folder ·
 WordPress draft*. A **Web folder** is the note's public edition as a folder ready to put
 online, so a post on X can link to it with a picture card (an HTML file cannot be attached
@@ -7643,7 +7683,16 @@ timeline under the map shows the day large, steps through the days on its slider
 Play, and shows each feature only on its days, a line or an area that moved leaving its
 last place faint and dashed. A map's steps (a plate's, else one a proof in date order) are
 short chips that fly the map there on their day; in a Story, the map is the stage and each
-step is a card that flies it. **Full screen**, the corners button under the zoom (its own
+step is a card that flies it. A feature's card says what the map's own card says: its name, its
+day, its state, who placed it (*Geolocated by someone else*) and how sure it is, its picture, its
+words with each `label: value` line a row (addresses in them links), each column a layer made
+elsewhere carries, its history when it was followed over time, its links, its coordinates, a
+line's length or an area's size and perimeter, and its credit; a long run folds under *Read all*.
+Its marks are drawn as the map draws them: a badge or an own icon (as it is, or its silhouette in a
+disc of its colour) on its middle, a plain marker standing on its tip, a wedge saying which way it
+looks, a dashed rim for a point somebody else placed, a probable point fainter and a claimed one
+fainter still, a probable line dashed and a claimed one dotted, its name under it.
+**Full screen**, the corners button under the zoom (its own
 group, so it never covers them), puts the figure on the whole screen with the browser's own full
 screen: the map as large as the screen holds it, whole in its middle and filling it as it zooms,
 and beside it one dark panel (under it on a screen taller than wide or a map at least twice as
@@ -8234,10 +8283,10 @@ A letter a face lacks prints in the Noto face of its script. Templates carry bot
 Its **Sources** switch is on for Report, Web article, Brief and Journal and off for
 Plain until set; templates carry it and every switch of *What it includes*, each kept
 only once set (`sources_style`, `annexes`, `link_check`, `sources_list`), so a look that never used
-them reads as an older Azimut wrote it. Its **Web page** row, *Article* or
-*Story*, lays out the HTML page only (see *Story* above); it is kept only once set to
-Story, so a look that never used it reads as an older Azimut wrote it, and templates
-carry it.
+them reads as an older Azimut wrote it. Its **Web page** row, *Article*, *Story* or
+*Map page*, lays out the HTML page only (see *Story* and *Map page* above); it is kept only
+once set, so a look that never used it reads as an older Azimut wrote it, and templates
+carry it, as they carry a map page's view counter (`counter`, kept only once set).
 
 The PDF keeps what a reader needs to check the work. A chip naming a record with a
 web address (a bookmark's page, an account's profile, a file's source; an archived

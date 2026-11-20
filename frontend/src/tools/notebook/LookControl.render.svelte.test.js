@@ -353,12 +353,12 @@ describe('the Look panel', () => {
     expect(changes.at(-1).sources).toBe('');
   });
 
-  it('lays the web page out as an article or a story, the article until set, and hands the choice up', () => {
+  it('lays the web page out as an article, a story or a map page, the article until set, and hands the choice up', () => {
     openPanel();
     goTo('Style');
     const group = panel().querySelector('[role="radiogroup"][aria-label="Web page"]');
     const choices = [...group.querySelectorAll('[role="radio"]')];
-    expect(choices.map((choice) => choice.textContent.trim())).toEqual(['Article', 'Story']);
+    expect(choices.map((choice) => choice.textContent.trim())).toEqual(['Article', 'Story', 'Map page']);
     expect(choices.every((choice) => choice.title)).toBe(true);
     expect(choices[0].getAttribute('aria-checked')).toBe('true');
     expect(tabNamed('Style').querySelector('.dot')).toBeNull();
@@ -371,6 +371,29 @@ describe('the Look panel', () => {
     pressed('Article').click();
     flushSync();
     expect(changes.at(-1).web).toBe('');
+    // only a map page asks for a view counter
+    expect(panel().querySelector('[placeholder="GoatCounter code"]')).toBeNull();
+  });
+
+  it('asks a map page for its optional view counter, says how to get one, and keeps a code read from an address', () => {
+    props.look = normaliseLook({ style: 'article', web: 'map' });
+    openPanel();
+    goTo('Style');
+    const field = panel().querySelector('[placeholder="GoatCounter code"]');
+    expect(field).not.toBeNull();
+    expect(panel().querySelector('.counter-how').textContent).toContain('Allow adding visitor counts on your website');
+    expect(panel().querySelector('.counter-how').textContent).toContain('Free');
+    field.value = 'https://My-Desk.goatcounter.com/';
+    field.dispatchEvent(new Event('input', { bubbles: true }));
+    field.dispatchEvent(new Event('blur'));
+    flushSync();
+    expect(changes.at(-1)).toMatchObject({ web: 'map', counter: 'my-desk' });
+    field.value = 'not a code';
+    field.dispatchEvent(new Event('input', { bubbles: true }));
+    field.dispatchEvent(new Event('blur'));
+    flushSync();
+    expect(panel().textContent).toContain('That is not a GoatCounter code');
+    expect(changes.at(-1).counter).toBe('my-desk');
   });
 
   it('offers a template the list of sources too', () => {

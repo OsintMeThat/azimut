@@ -12,6 +12,7 @@
   import { api } from '../lib/api.js';
   import { mapRequest, proofsPeriod } from '../lib/notes/mapPut.js';
   import Modal from './Modal.svelte';
+  import MapLayerList from './MapLayerList.svelte';
 
   let { caseId, onput, onclose, load = (id) => api.get(`/api/cases/${encodeURIComponent(id)}/notes/maps/sources`) } = $props();
 
@@ -48,10 +49,6 @@
     provider,
   }));
   const ready = $derived(Boolean(asked.layers?.length || asked.plate || asked.proofs));
-
-  function toggle(name) {
-    chosen = chosen.includes(name) ? chosen.filter((one) => one !== name) : [...chosen, name];
-  }
 
   /** Where an empty map opens: on the case's layers when it has some, else on the world. */
   const home = $derived.by(() => {
@@ -100,18 +97,7 @@
       </div>
 
       {#if source === 'layers'}
-        <div class="list" role="group" aria-label="Layers">
-          {#each layers as layer (layer.name)}
-            <label class="row">
-              <input type="checkbox" checked={chosen.includes(layer.name)} onchange={() => toggle(layer.name)} />
-              <span class="name">{layer.title}</span>
-              {#if layer.tracked}<small class="tag" title="Its dated edits play on the map's timeline">Over time</small>{/if}
-              <small>{layer.features}</small>
-            </label>
-          {:else}
-            <p class="said">This case has no layer yet.</p>
-          {/each}
-        </div>
+        <MapLayerList {layers} bind:chosen />
       {:else}
         <div class="list" role="radiogroup" aria-label="Map plates">
           {#each plates as one (one.name)}
@@ -170,7 +156,6 @@
   .list .row + .row { border-top: 1px solid var(--border); }
   .row .name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .row small { color: var(--text-3); font-variant-numeric: tabular-nums; }
-  .row .tag { padding: 1px 6px; border-radius: 999px; background: var(--surface-2); color: var(--text-2); }
   .proofs { border: 1px solid var(--border); border-radius: 8px; }
   .period { display: flex; gap: 8px; padding: 0 10px 10px; }
   .period label { flex: 1; display: flex; flex-direction: column; gap: 3px; font-size: 12px; color: var(--text-2); }

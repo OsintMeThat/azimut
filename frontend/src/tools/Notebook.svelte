@@ -92,6 +92,7 @@
   import NoteEditor from '../components/NoteEditor.svelte';
   import NotesHome from './notebook/NotesHome.svelte';
   import NewNoteDialog from './notebook/NewNoteDialog.svelte';
+  import { makeWebMap } from '../lib/notes/webMap.js';
   import LookControl from './notebook/LookControl.svelte';
   import PagePane from './notebook/PagePane.svelte';
   import InfographicBuilder from './notebook/InfographicBuilder.svelte';
@@ -492,6 +493,13 @@
   /** What the New note dialog hands over; the dialog stays open when the note could not be made. */
   async function saveNewNote(start) {
     try {
+      if (start.webmap) {
+        // a web map: its map put first, its ground filed, then the note that is that map's page
+        const note = await makeWebMap(caseId, { title: start.title, folder: start.folder, layers: start.webmap.layers });
+        noteModal = null;
+        show(note.id);
+        return;
+      }
       await make(start);
       noteModal = null;
     } catch (error) {
