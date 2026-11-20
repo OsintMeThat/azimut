@@ -442,6 +442,10 @@ export function mount(figure, said, maplibre) {
   let hovered = null;
   const away = new Set();
   const flashes = new Map();
+  /** The map's size as last laid out, and the view it had when the figure took the whole screen. */
+  let laid = [box.clientWidth, box.clientHeight];
+  let back = null;
+  map.on('resize', () => { laid = [box.clientWidth, box.clientHeight]; });
 
   // -- what it draws ----------------------------------------------------------------------------
 
@@ -522,7 +526,29 @@ export function mount(figure, said, maplibre) {
       if (picked) setState(picked, { picked: true });
       place();
     },
+    /**
+     * The figure took the whole screen (`on`) or gave it back. The map is sized again on the same
+     * middle, as much closer as what it showed can be while all of it stays in sight, and back again
+     * to the view it had when it comes back unmoved. On the whole screen there is no page to scroll,
+     * so it takes the wheel and one finger as its own.
+     */
+    screen(on) {
+      const [w0, h0] = laid;
+      if (on) back = { center: map.getCenter(), zoom: map.getZoom() };
+      const unmoved = !on && back?.full && stillAt(back.full);
+      map.resize?.();
+      const [w1, h1] = laid;
+      if (unmoved) map.jumpTo({ center: back.center, zoom: back.zoom });
+      else if (w0 && h0 && w1 && h1) map.jumpTo({ center: map.getCenter(), zoom: map.getZoom() + Math.log2(Math.min(w1 / w0, h1 / h0)) });
+      if (on) back.full = { center: map.getCenter(), zoom: map.getZoom() };
+      else back = null;
+      if (on) map.cooperativeGestures?.disable?.();
+      else map.cooperativeGestures?.enable?.();
+      place();
+    },
   };
+  const stillAt = (view) => Math.abs(map.getZoom() - view.zoom) < 1e-3
+    && Math.abs(map.getCenter().lng - view.center.lng) < 1e-6 && Math.abs(map.getCenter().lat - view.center.lat) < 1e-6;
 
   function setState(id, values) {
     if (!byId.has(id)) return;
@@ -762,13 +788,19 @@ export function mount(figure, said, maplibre) {
   function tools() {
     const bar = make(doc, 'div', { class: 'az-map-tools' });
     const tool = (act, text, label) => make(doc, 'button', { type: 'button', 'data-act': act, title: label, 'aria-label': label }, text);
-    bar.append(tool('in', '+', 'Zoom in'), tool('out', '−', 'Zoom out'), tool('fit', '⤢', 'The whole map'));
+    const zooms = make(doc, 'div', { class: 'az-map-zoom' });
+    zooms.append(tool('in', '+', 'Zoom in'), tool('out', '−', 'Zoom out'), tool('fit', '⤢', 'The whole map'));
+    bar.append(zooms);
+    // the drawing's own screen button, which the reader says as it goes (`screen` in reader.map.js)
+    const screen = stage.querySelector('.az-map-screen');
+    if (screen && reader.screen) bar.append(screen.cloneNode(true));
     bar.addEventListener('click', (event) => {
       const act = event.target.closest?.('button')?.dataset.act;
       const duration = still() ? 0 : 260;
       if (act === 'in') map.zoomIn({ duration });
       else if (act === 'out') map.zoomOut({ duration });
       else if (act === 'fit') controls.whole();
+      else if (act === 'full') reader.screen();
     });
     holder.append(bar);
     // the north arrow the drawing wears, over the live map too
@@ -839,6 +871,8 @@ export function mount(figure, said, maplibre) {
     shared = reader.attach(controls);
     controls.day(shared.day, { quiet: true });
     if (shared.picked) controls.pick(shared.picked);
+    // taken over on the whole screen: the map's gestures are its own already
+    if (shared.full) map.cooperativeGestures?.disable?.();
   }
 
   /** Shown in the drawing's place, fading in over it. */

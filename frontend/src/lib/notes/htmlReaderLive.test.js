@@ -61,6 +61,7 @@ function fakeMapLibre({ fails = false, styleError = false, sources = { base: { t
       this.moves = [];
       this.camera = { center: [43.5, 12.75], zoom: 10 };
       this.picks = [];
+      this.cooperativeGestures = { on: true, enable() { this.on = true; }, disable() { this.on = false; } };
       const doc = options.container.ownerDocument;
       this.canvasContainer = doc.createElement('div');
       this.canvas = doc.createElement('canvas');
@@ -94,7 +95,7 @@ function fakeMapLibre({ fails = false, styleError = false, sources = { base: { t
     getZoom() { return this.camera.zoom; }
     getCenter() { return { lng: this.camera.center[0], lat: this.camera.center[1] }; }
     flyTo(options) { this.moves.push(['fly', options]); }
-    jumpTo(options) { this.moves.push(['jump', options]); }
+    jumpTo(options) { this.moves.push(['jump', options]); Object.assign(this.camera, options.center ? { center: [options.center.lng ?? options.center[0], options.center.lat ?? options.center[1]] } : {}, 'zoom' in options ? { zoom: options.zoom } : {}); }
     easeTo(options) { this.moves.push(['ease', options]); }
     fitBounds(bounds, options) { this.moves.push(['fit', bounds, options]); }
     cameraForBounds() { return { center: [43.495, 12.745], zoom: 15 }; }
@@ -102,8 +103,10 @@ function fakeMapLibre({ fails = false, styleError = false, sources = { base: { t
     zoomOut() { this.moves.push(['out']); }
     getCanvas() { return this.canvas; }
     getCanvasContainer() { return this.canvasContainer; }
+    resize() { this.resizes = (this.resizes || 0) + 1; this.fire('resize'); }
     remove() { this.removed = true; }
   }
+  Map.prototype.cooperativeGestures = null;
   return { library: { Map }, made };
 }
 
@@ -146,7 +149,7 @@ describe('a map in a web folder, read online', () => {
     expect(figure.querySelector('.az-gl').classList.contains('az-on')).toBe(true);
     expect(figure.classList.contains('az-gl-on')).toBe(true);
     expect(figure.querySelector('.az-map-stage').inert).toBe(true);
-    expect([...figure.querySelectorAll('.az-gl .az-map-tools button')].map((button) => button.getAttribute('aria-label'))).toEqual(['Zoom in', 'Zoom out', 'The whole map']);
+    expect([...figure.querySelectorAll('.az-gl .az-map-tools button')].map((button) => button.getAttribute('aria-label'))).toEqual(['Zoom in', 'Zoom out', 'The whole map', 'Full screen']);
     expect(figure.querySelector('.az-gl-credit').textContent).toBe('Imagery: Esri, test · OpenFreeMap · © OpenMapTiles · Data from OpenStreetMap');
   });
 
@@ -213,6 +216,44 @@ describe('a map in a web folder, read online', () => {
     // a spread mark takes a press as the drawing's does
     doc.querySelector('.az-gl-over .az-f[data-id="l1f1"]').dispatchEvent(new window.MouseEvent('click', { bubbles: true }));
     expect(doc.querySelector('.az-map-card .az-map-card-title').textContent).toBe('#2');
+  });
+
+  it('takes the whole screen from its own button: sized again as much closer, every gesture its own, and back to its view unmoved', async () => {
+    const { doc, figure, map } = await live();
+    let holder = null;
+    Object.defineProperty(doc, 'fullscreenElement', { configurable: true, get: () => holder });
+    window.HTMLElement.prototype.requestFullscreen = async function requestFullscreen() { holder = this; doc.dispatchEvent(new window.Event('fullscreenchange')); };
+    doc.exitFullscreen = async () => { holder = null; doc.dispatchEvent(new window.Event('fullscreenchange')); };
+    const box = figure.querySelector('.az-gl-map');
+    const button = figure.querySelector('.az-gl .az-map-screen button');
+    expect(button.getAttribute('aria-label')).toBe('Full screen');
+    // the screen twice as large as the page's map: the same middle, one zoom closer
+    Object.defineProperty(box, 'clientWidth', { configurable: true, get: () => 1600 });
+    Object.defineProperty(box, 'clientHeight', { configurable: true, get: () => 1300 });
+    button.dispatchEvent(new window.MouseEvent('click', { bubbles: true }));
+    for (let turn = 0; turn < 4; turn += 1) await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(holder).toBe(figure);
+    expect(map.resizes).toBe(1);
+    expect(map.getZoom()).toBeCloseTo(11, 6);
+    expect(map.cooperativeGestures.on).toBe(false);
+    // both of its buttons say how to come back: the drawing's under it, and its own
+    expect([...figure.querySelectorAll('[data-act="full"]')].map((one) => one.getAttribute('aria-label'))).toEqual(['Exit full screen', 'Exit full screen']);
+    // given back unmoved, it shows the view it had
+    Object.defineProperty(box, 'clientWidth', { configurable: true, get: () => 800 });
+    Object.defineProperty(box, 'clientHeight', { configurable: true, get: () => 574 });
+    button.dispatchEvent(new window.MouseEvent('click', { bubbles: true }));
+    for (let turn = 0; turn < 4; turn += 1) await new Promise((resolve) => setTimeout(resolve, 0));
+    expect([holder, map.resizes, map.getZoom(), map.cooperativeGestures.on]).toEqual([null, 2, 10, true]);
+    // moved on the whole screen, it keeps what it shows, as much farther
+    button.dispatchEvent(new window.MouseEvent('click', { bubbles: true }));
+    for (let turn = 0; turn < 4; turn += 1) await new Promise((resolve) => setTimeout(resolve, 0));
+    map.camera.zoom = 12;
+    Object.defineProperty(box, 'clientWidth', { configurable: true, get: () => 400 });
+    Object.defineProperty(box, 'clientHeight', { configurable: true, get: () => 287 });
+    window.dispatchEvent(new window.KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }));
+    for (let turn = 0; turn < 4; turn += 1) await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(holder).toBeNull();
+    expect(map.getZoom()).toBeCloseTo(11, 6);
   });
 
   it('switches its base between the ground as filed and the map, crediting the imagery while it shows', async () => {

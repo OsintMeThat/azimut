@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from 'vitest';
-import { followFullscreen, leaveFullscreen, overlayHost, portal, toggleFullscreen } from './fullscreen.js';
+import { followFullscreen, holdScreen, leaveFullscreen, overlayHost, portal, toggleFullscreen } from './fullscreen.js';
 
 // Minimal DOM stand-ins: the action only ever appends and removes, so a couple
 // of objects tracking parentage are enough (no jsdom in this suite).
@@ -225,5 +225,70 @@ describe('leaveFullscreen', () => {
     const doc = makeScreenDoc();
     leaveFullscreen(doc);
     expect(doc.exitFullscreen).not.toHaveBeenCalled();
+  });
+});
+
+describe('holdScreen', () => {
+  /** A page's window: where it is scrolled, and its keys, heard while capturing as a browser's are. */
+  function makeWindow() {
+    const win = new EventTarget();
+    win.scrollX = 0;
+    win.scrollY = 640;
+    win.scrollTo = vi.fn();
+    return win;
+  }
+  /** A part of the page, wearing classes. */
+  function makePart(doc) {
+    const part = makeTool(doc);
+    part.classes = new Set();
+    part.classList = { add: (name) => part.classes.add(name), remove: (name) => part.classes.delete(name) };
+    return part;
+  }
+  const escape = (win) => win.dispatchEvent(Object.assign(new Event('keydown', { cancelable: true }), { key: 'Escape' }));
+
+  it('hands a part of the page the screen and takes it back on a press, Esc or the browser’s own exit', async () => {
+    const doc = makeScreenDoc();
+    doc.defaultView = makeWindow();
+    const part = makePart(doc);
+    const heard = [];
+    const held = holdScreen(part, (on) => heard.push(on), { doc });
+    await held.toggle();
+    expect([doc.fullscreenElement, held.full]).toEqual([part, true]);
+    await held.toggle();
+    expect([doc.fullscreenElement, held.full]).toEqual([null, false]);
+    await held.toggle(true);
+    escape(doc.defaultView);
+    await Promise.resolve();
+    expect(doc.exitFullscreen).toHaveBeenCalledTimes(2);
+    await held.toggle(true);
+    doc.fullscreenElement = null;
+    doc.fire();
+    expect(heard).toEqual([true, false, true, false, true, false]);
+    // Esc is its own only while it holds the screen
+    escape(doc.defaultView);
+    expect(doc.exitFullscreen).toHaveBeenCalledTimes(2);
+    held.destroy();
+  });
+
+  it('covers the window itself where the browser has no full screen for it, or refuses it, the page found where it was', async () => {
+    const doc = makeScreenDoc();
+    doc.defaultView = makeWindow();
+    const part = makePart(doc);
+    delete part.requestFullscreen;
+    const heard = [];
+    const held = holdScreen(part, (on) => heard.push(on), { doc, covered: 'is-on-top' });
+    await held.toggle();
+    expect([...part.classes, held.full]).toEqual(['is-on-top', true]);
+    escape(doc.defaultView);
+    expect([part.classes.size, held.full]).toEqual([0, false]);
+    expect(doc.defaultView.scrollTo).toHaveBeenCalledWith(0, 640);
+    const refused = makePart(doc);
+    refused.requestFullscreen = vi.fn(async () => { throw new TypeError('Permissions check failed'); });
+    const other = holdScreen(refused, (on) => heard.push(on), { doc, covered: 'is-on-top' });
+    await other.toggle();
+    expect([...refused.classes]).toEqual(['is-on-top']);
+    other.destroy();
+    expect(refused.classes.size).toBe(0);
+    expect(heard).toEqual([true, false, true, false]);
   });
 });

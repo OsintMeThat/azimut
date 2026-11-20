@@ -9,6 +9,8 @@
   container-type: inline-size;
 }
 .az-gl.az-on { opacity: 1; visibility: visible; transition: opacity .6s var(--ease); }
+/* on the whole screen (reader.map.css) the live map fills the map's whole place, whatever its shape */
+@media screen { .az-full .az-gl { right: 0; bottom: 0; width: auto; aspect-ratio: auto; } }
 /* MapLibre's sheet comes after this one and sets its map relative: held to the stage's box */
 .az-gl > .az-gl-map { position: absolute; inset: 0; }
 .az-gl .maplibregl-canvas { outline: none; }

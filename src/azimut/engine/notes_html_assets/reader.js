@@ -639,9 +639,10 @@
         follow();
       }
       // the step being read is the last whose top has passed the line, measured as the page
-      // scrolls: an observer's margins are not kept inside the Page pane's frame
+      // scrolls: an observer's margins are not kept inside the Page pane's frame. A map or a
+      // picture holding the screen keeps its step, whatever the window does meanwhile
       function follow() {
-        if (!section.classList.contains('az-live')) return;
+        if (!section.classList.contains('az-live') || doc.fullscreenElement || root.classList.contains('az-locked')) return;
         const box = section.getBoundingClientRect();
         if (!box.height || box.bottom < 0 || box.top > window.innerHeight) return;
         const line = window.innerHeight * 0.6;

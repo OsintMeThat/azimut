@@ -507,3 +507,111 @@ describe('moving the map in Draw', () => {
     expect(map().querySelector('.cm-map-file-view').disabled).toBe(false);
   });
 });
+
+describe('the map on the whole screen', () => {
+  let screen;
+  afterEach(() => screen?.restore());
+  const full = () => map().querySelector('.cm-map-full-btn');
+  const stage = () => map().querySelector('.cm-map-stage');
+  const card = () => map().querySelector('.cm-map-card');
+  const viewBox = () => map().querySelector('.cm-map-drawing svg').getAttribute('viewBox').split(' ').map(Number);
+  /** The map's overlay laid out at `width` by `height`, as the screen lays it, a press landing where it says. */
+  function laid(width, height) {
+    const over = map().querySelector('.cm-map-over');
+    over.getBoundingClientRect = () => ({ left: 0, top: 0, width, height, right: width, bottom: height });
+    return over;
+  }
+  const at = (over, type, x, y) => over.dispatchEvent(new MouseEvent(type, { bubbles: true, cancelable: true, button: 0, clientX: x, clientY: y }));
+  const escape = (target) => target.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }));
+  const tool = (words) => [...panel().querySelectorAll('.cm-map-act')].find((node) => node.textContent === words);
+
+  it('puts the card on the whole screen from the map’s corner and back, its line in the note kept as tall', async () => {
+    const { fakeScreen } = await import('../../fullscreen.fixture.js');
+    screen = fakeScreen();
+    editor();
+    await settle();
+    expect([full().getAttribute('aria-label'), full().title]).toEqual(['Full screen', 'The map on the whole screen']);
+    expect(full().parentNode).toBe(stage());
+    Object.defineProperty(map(), 'offsetHeight', { configurable: true, get: () => 466 });
+    press(full());
+    await settle();
+    // the card, its bar and tabs with it
+    expect(document.fullscreenElement).toBe(card());
+    expect(card().classList.contains('cm-map-full')).toBe(true);
+    expect(card().querySelector('.cm-map-bar')).not.toBeNull();
+    expect(map().style.minHeight).toBe('466px');
+    expect([full().getAttribute('aria-label'), full().title]).toEqual(['Exit full screen', 'Back to the note (Esc)']);
+    press(full());
+    await settle();
+    expect(screen.exit).toHaveBeenCalledTimes(1);
+    expect([card().classList.contains('cm-map-full'), map().style.minHeight, full().getAttribute('aria-label')]).toEqual([false, '', 'Full screen']);
+    // the browser's own exit says it too
+    press(full());
+    await settle();
+    screen.leave();
+    expect(card().classList.contains('cm-map-full')).toBe(false);
+  });
+
+  it('gives the screen back on the first Esc, a line being drawn keeping its corners, and gives the line up on the second', async () => {
+    const { fakeScreen } = await import('../../fullscreen.fixture.js');
+    screen = fakeScreen();
+    await opened('Draw');
+    press(tool('Line'));
+    const over = laid(1600, 1000);
+    at(over, 'pointerdown', 300, 300);
+    at(over, 'pointerdown', 600, 400);
+    press(full());
+    await settle();
+    expect(document.fullscreenElement).toBe(card());
+    escape(stage());
+    await settle();
+    expect(document.fullscreenElement).toBeNull();
+    expect(map().querySelectorAll('.cm-map-corner')).toHaveLength(2);
+    expect(stage().dataset.tool).toBe('line');
+    expect(panel().hidden).toBe(false);
+    escape(stage());
+    await settle();
+    expect(map().querySelectorAll('.cm-map-corner')).toHaveLength(0);
+    expect(stage().dataset.tool).toBeUndefined();
+    expect(server.asked.filter((one) => one.path.endsWith('/features'))).toEqual([]);
+  });
+
+  it('lays the map again on its new size in Draw: the same middle, more on its sides, a corner landing where it is pressed', async () => {
+    const { fakeScreen } = await import('../../fullscreen.fixture.js');
+    screen = fakeScreen();
+    await opened('Draw');
+    let over = laid(1600, 1000);
+    press(map().querySelector('.cm-map-zoom-in'));
+    await new Promise((resolve) => setTimeout(resolve, 400));
+    expect(viewBox()).toEqual([400, 250, 800, 500]);
+    // the screen is wider than the map: the same part, as large, more of the map on both sides
+    over = laid(2400, 1000);
+    press(full());
+    await settle();
+    expect(viewBox()).toEqual([200, 250, 1200, 500]);
+    expect(Number(stage().dataset.zoom)).toBe(2);
+    press(tool('Point'));
+    at(over, 'pointerdown', 600, 250);
+    await settle();
+    const [lon, lat] = server.asked.find((one) => one.path.endsWith('/features')).body.coords;
+    const [wantLon, wantLat] = projection(DESCRIBED.bounds, DESCRIBED.frame).from([200 + 600 / 2, 250 + 250 / 2]);
+    expect(lon).toBeCloseTo(wantLon, 9);
+    expect(lat).toBeCloseTo(wantLat, 9);
+    // given back, the stage is the map's shape again and the view as it was
+    over = laid(1600, 1000);
+    press(full());
+    await settle();
+    expect(viewBox()).toEqual([400, 250, 800, 500]);
+  });
+
+  it('covers the window itself where the browser gives the card no full screen, and Esc gives it back', async () => {
+    delete HTMLElement.prototype.requestFullscreen;
+    editor();
+    await settle();
+    press(full());
+    await settle();
+    expect([...card().classList]).toEqual(expect.arrayContaining(['cm-map-full', 'cm-map-covered']));
+    escape(document.body);
+    expect(card().classList.contains('cm-map-full') || card().classList.contains('cm-map-covered')).toBe(false);
+  });
+});

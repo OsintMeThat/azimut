@@ -13,7 +13,8 @@
  *
  * The builder sits outside the editor, whose themes style the card: the panel takes the
  * editor's theme classes (`themes`, `EditorView.themeClasses`), as CodeMirror's own tooltips
- * do when they are drawn elsewhere.
+ * do when they are drawn elsewhere. Its map's corner button puts the panel on the whole screen
+ * as a map of the note does, its settings beside the map there.
  */
 import { MapEditing } from './mapBlock.js';
 import { readMap } from './mapText.js';
@@ -58,6 +59,14 @@ class MapPanel extends MapEditing {
 
   get sizedBy() {
     return SIZED_BY;
+  }
+
+  get screenNode() {
+    return this.box ?? null;
+  }
+
+  get screenBack() {
+    return 'the infographic';
   }
 
   /** Its lines as the note holds them now, or null when the panel is no longer a map. */

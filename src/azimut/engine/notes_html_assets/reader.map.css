@@ -61,9 +61,11 @@
 @keyframes az-arrive { 0% { opacity: 0; } 30% { opacity: 1; filter: drop-shadow(0 0 7px #fff); } }
 .az-map-stage.az-held { cursor: grabbing; }
 .az-map-stage.az-moving .az-map-world { will-change: transform; }
-/* the tools: zoom, and the whole map again */
-.az-map-tools { position: absolute; z-index: 3; top: .75rem; left: .75rem; display: flex; flex-direction: column; border-radius: 6px; background: rgba(16, 18, 22, .78); box-shadow: 0 6px 18px -8px rgba(0, 0, 0, .6); backdrop-filter: blur(8px); overflow: hidden; }
-.az-map-tools button { width: 2.25rem; height: 2.25rem; padding: 0; border: 0; background: none; color: #f2f3f5; font: 500 1.15rem/1 var(--sans); cursor: pointer; }
+/* the tools: zoom and the whole map again, and apart under them the whole screen */
+.az-map-tools { position: absolute; z-index: 3; top: .75rem; left: .75rem; display: flex; flex-direction: column; align-items: flex-start; gap: .5rem; }
+.az-map-tools > div { display: flex; flex-direction: column; border-radius: 6px; background: rgba(16, 18, 22, .78); box-shadow: 0 6px 18px -8px rgba(0, 0, 0, .6); backdrop-filter: blur(8px); overflow: hidden; }
+.az-map-tools button { display: grid; place-items: center; width: 2.25rem; height: 2.25rem; padding: 0; border: 0; background: none; color: #f2f3f5; font: 500 1.15rem/1 var(--sans); cursor: pointer; }
+.az-map-tools svg { width: 1.05rem; height: 1.05rem; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
 .az-map-tools button + button { border-top: 1px solid rgba(255, 255, 255, .12); }
 .az-map-tools button:hover { background: rgba(255, 255, 255, .12); }
 .az-map-tools button:disabled { opacity: .35; cursor: default; background: none; }
@@ -122,6 +124,9 @@
 .az-map-ticks > li { position: absolute; top: 0; width: 1px; height: .45rem; background: var(--muted); opacity: .45; }
 .az-map-ticks > li[data-month]::after { content: attr(data-month); position: absolute; top: .75rem; left: 0; transform: translateX(-50%); color: var(--muted); font-size: .6875rem; white-space: nowrap; opacity: 1; }
 .az-map-ticks > li[data-month] { height: .7rem; opacity: .9; }
+.az-map-ticks > li.az-unnamed::after { content: none; }
+.az-map-ticks > li.az-start::after { transform: none; }
+.az-map-ticks > li.az-end::after { transform: translateX(-100%); }
 /* a map's own steps: where it looks and on which day, a press each; a long row slides, faded at its edge */
 .az-map-steps-row { --fade-start: #000; --fade-end: #000; margin: .8rem 0 0; }
 .az-map-steps-row.az-fade-start { --fade-start: transparent; }
@@ -157,6 +162,50 @@
   [data-web="story"] .az-live .az-story-figures > [data-kind="map"] :is(.az-map-time, figcaption) { width: min(var(--stage-w), calc((var(--stage-h) - 8rem) * var(--r, 1.6))); justify-self: center; }
   [data-web="story"] .az-live .az-story-figures .az-map-time { --paper: #0f1012; --ink: #fff; --muted: rgba(255, 255, 255, .62); --rule: rgba(255, 255, 255, .22); color: #fff; }
   .az-live .az-story-figures > [data-kind="map"] .az-map-card { width: min(19rem, 46%); }
+}
+/* the whole screen, in every layout: the map as large as the screen holds it, and beside it (under it on a
+   screen taller than wide) one panel of what goes with it, its timeline first, on the dark of a picture
+   opened large. The drawing stands whole in the middle and fills it as it zooms; a live map fills it all */
+@media screen {
+  .az-map.az-full {
+    position: fixed !important; inset: 0 !important; z-index: 2147483000; display: grid !important;
+    grid-template: minmax(min(18rem, 56vh), 1fr) auto / minmax(0, 1fr) !important; gap: .75rem; width: auto !important; max-width: none; height: 100%;
+    margin: 0 !important; padding: max(.75rem, env(safe-area-inset-top)) max(.75rem, env(safe-area-inset-right)) max(.75rem, env(safe-area-inset-bottom)) max(.75rem, env(safe-area-inset-left)) !important;
+    overflow: hidden; background: #0f1012; color: #e9eaec; color-scheme: dark; opacity: 1 !important; visibility: visible !important;
+  }
+  .az-map.az-full > *, .az-map-side > * { width: auto !important; max-width: none; margin: 0 !important; justify-self: stretch !important; }
+  .az-map.az-full > .az-map-frame { position: relative; min-height: 0; }
+  .az-map-side {
+    display: grid; grid-template-columns: minmax(0, 1fr); align-content: start; gap: 1rem; min-height: 0; max-height: 42vh; overflow: auto;
+    overscroll-behavior: contain; scrollbar-width: thin;
+    --paper: #0f1012; --ink: #fff; --ink-2: rgba(255, 255, 255, .84); --muted: rgba(255, 255, 255, .62); --rule: rgba(255, 255, 255, .22);
+    --tint: rgba(255, 255, 255, .12); --accent-soft: rgba(255, 255, 255, .08); --accent-ink: color-mix(in srgb, var(--az-accent) 40%, #fff);
+  }
+  .az-full .az-map-stage { height: 100%; aspect-ratio: auto; background: none; touch-action: none; }
+  .az-full .az-map-world { right: auto; bottom: auto; overflow: hidden; }
+  .az-full .az-map-svg { clip-path: inset(var(--az-t, 0) var(--az-r, 0) var(--az-b, 0) var(--az-l, 0)); }
+  .az-full .az-map-stage > .az-map-tools { top: calc(var(--az-t, 0px) + .75rem); left: calc(var(--az-l, 0px) + .75rem); }
+  .az-full .az-map-stage > .az-map-north { top: calc(var(--az-t, 0px) + .75rem); right: calc(var(--az-r, 0px) + .75rem); }
+  .az-full .az-map-stage > .az-map-scale { left: calc(var(--az-l, 0px) + .75rem); bottom: calc(var(--az-b, 0px) + .65rem); }
+  .az-map-side :is(.az-map-legend, .az-map-key) { display: flex !important; }
+  .az-map-side .az-map-key { display: block !important; }
+  .az-map-side .az-map-steps-row { display: block !important; }
+}
+/* a screen wider than tall: the panel beside the map, as tall as the screen, the steps each in sight; a map
+   much wider than tall keeps the panel under it */
+@media screen and (min-width: 40rem) and (min-aspect-ratio: 5/4) {
+  .az-map.az-full:not(.az-map-wide) { grid-template: minmax(0, 1fr) / minmax(0, 1fr) minmax(15rem, 20rem) !important; column-gap: 1.75rem; }
+  .az-full:not(.az-map-wide) > .az-map-side { max-height: none; gap: 1.25rem; }
+  .az-full:not(.az-map-wide) .az-map-time { grid-template-columns: auto minmax(0, 1fr); }
+  .az-full:not(.az-map-wide) .az-map-track { grid-column: 1 / -1; }
+  .az-full:not(.az-map-wide) .az-map-steps { flex-wrap: wrap; overflow: visible; mask-image: none; }
+  .az-full.az-map-wide > .az-map-side { max-height: 34vh; }
+}
+@media screen and (min-width: 48rem) {
+  .az-full:not(.az-gl-on) .az-map-card { top: calc(var(--az-t, 0px) + .75rem); right: calc(var(--az-r, 0px) + .75rem); max-height: calc(100% - var(--az-t, 0px) - var(--az-b, 0px) - 1.5rem); }
+}
+@media screen and (max-width: 47.99rem) {
+  .az-full .az-map-card { position: absolute; inset: auto .5rem .5rem; width: auto; max-height: 62%; margin: 0; box-shadow: 0 18px 44px -14px rgba(0, 0, 0, .7); }
 }
 @media print {
   .az-map-tools, .az-map-hint, .az-map-time, .az-map-steps-row, .az-map-card, .az-map-card-step { display: none !important; }

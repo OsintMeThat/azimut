@@ -1,5 +1,5 @@
 import { readFileSync } from 'node:fs';
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { Window } from 'happy-dom';
 
 /**
@@ -42,13 +42,16 @@ async function report(body = FIGURE, { web = '' } = {}) {
 const pointer = (node, type) => node.dispatchEvent(new window.PointerEvent(type, { bubbles: true, cancelable: true, button: 0, pointerId: 1, clientX: 20, clientY: 20 }));
 const tap = (node) => { pointer(node, 'pointerdown'); pointer(node, 'pointerup'); };
 const key = (node, name) => node.dispatchEvent(new window.KeyboardEvent('keydown', { key: name, bubbles: true, cancelable: true }));
+const settle = async () => {
+  for (let turn = 0; turn < 4; turn += 1) await new Promise((resolve) => setTimeout(resolve, 0));
+};
 const width = (doc) => Number(doc.querySelector('svg.az-map-svg').getAttribute('viewBox').split(' ')[2]);
 const shape = (doc, id) => doc.querySelector(`.az-f[data-id="${id}"]`);
 
 describe('a map in the report', () => {
   it('is built over its drawing: the tools, a timeline of its days on the last one, and its steps', async () => {
     const doc = await report();
-    expect([...doc.querySelectorAll('.az-map-tools button')].map((button) => button.getAttribute('aria-label'))).toEqual(['Zoom in', 'Zoom out', 'The whole map']);
+    expect([...doc.querySelectorAll('.az-map-tools button')].map((button) => button.getAttribute('aria-label'))).toEqual(['Zoom in', 'Zoom out', 'The whole map', 'Full screen']);
     const slider = doc.querySelector('.az-map-time input[type="range"]');
     expect([slider.max, slider.value]).toEqual(['4', '4']);
     expect(doc.querySelector('.az-map-now-day').textContent).toBe('16 Nov 2026');
@@ -158,6 +161,161 @@ function withData(change) {
     return `${open}${JSON.stringify(data)}${close}`;
   });
 }
+
+describe('a map on the whole screen', () => {
+  /** The browser's own full screen for an element, as a browser has it: a request, who holds it, and its event. */
+  function fakeScreen(doc) {
+    const screen = { holder: null, asked: 0, exits: 0 };
+    const give = (next) => {
+      screen.holder = next;
+      doc.dispatchEvent(new window.Event('fullscreenchange'));
+    };
+    Object.defineProperty(doc, 'fullscreenElement', { configurable: true, get: () => screen.holder });
+    window.HTMLElement.prototype.requestFullscreen = async function requestFullscreen() { screen.asked += 1; give(this); };
+    doc.exitFullscreen = async () => { screen.exits += 1; give(null); };
+    screen.leave = () => give(null);
+    return screen;
+  }
+  /** The stage laid out at `w` by `h`, as the screen lays it once the figure holds it. */
+  function laidAt(doc, w, h) {
+    const stage = doc.querySelector('.az-map-stage');
+    Object.defineProperty(stage, 'clientWidth', { configurable: true, get: () => w });
+    Object.defineProperty(stage, 'clientHeight', { configurable: true, get: () => h });
+  }
+  const press = (node) => node.dispatchEvent(new window.MouseEvent('click', { bubbles: true }));
+  const screenButton = (doc) => doc.querySelector('[data-act="full"]');
+  const box = (doc) => doc.querySelector('svg.az-map-svg').getAttribute('viewBox').split(' ').map(Number);
+
+  it('takes the whole screen on its button, its timeline, steps and legend with it, and gives it back on the button, Esc or the browser’s exit', async () => {
+    const doc = await report();
+    const screen = fakeScreen(doc);
+    const figure = doc.querySelector('figure.az-map');
+    const button = screenButton(doc);
+    expect([button.getAttribute('aria-label'), button.title]).toEqual(['Full screen', 'The map on the whole screen']);
+    expect(button.closest('.az-map-screen').parentNode).toBe(doc.querySelector('.az-map-tools'));
+    press(button);
+    await settle();
+    // the figure itself, so what goes with the map comes along
+    expect(screen.holder).toBe(figure);
+    expect(figure.classList.contains('az-full')).toBe(true);
+    for (const part of ['.az-map-time', '.az-map-steps-row', '.az-map-legend']) expect(figure.querySelector(part)).not.toBeNull();
+    expect([button.getAttribute('aria-label'), button.title]).toEqual(['Exit full screen', 'Back to the page (Esc)']);
+    expect(button.querySelector('path').getAttribute('d')).toMatch(/^M8 3v3/);
+    press(button);
+    await settle();
+    expect([screen.exits, figure.classList.contains('az-full'), button.getAttribute('aria-label')]).toEqual([1, false, 'Full screen']);
+    // Esc, before the card or anything else hears it
+    press(button);
+    await settle();
+    key(figure.querySelector('.az-f[data-id="p0"]'), 'Escape');
+    await settle();
+    expect([screen.exits, figure.classList.contains('az-full')]).toEqual([2, false]);
+    // the browser's own exit
+    press(button);
+    await settle();
+    screen.leave();
+    expect(figure.classList.contains('az-full')).toBe(false);
+    expect(button.getAttribute('aria-label')).toBe('Full screen');
+  });
+
+  it('covers the window where the browser has no full screen for it, the page held still and found where it was', async () => {
+    const doc = await report();
+    delete window.HTMLElement.prototype.requestFullscreen;
+    const figure = doc.querySelector('figure.az-map');
+    const main = doc.querySelector('main');
+    window.scrollTo = vi.fn();
+    Object.defineProperty(window, 'scrollY', { configurable: true, value: 1234 });
+    press(screenButton(doc));
+    await settle();
+    expect([...figure.classList]).toEqual(expect.arrayContaining(['az-full', 'az-overlay']));
+    // the page under it does not scroll, and nothing round the map paints over it
+    expect(doc.documentElement.classList.contains('az-locked')).toBe(true);
+    expect(main.style.zIndex).toBe('2147483000');
+    expect(screenButton(doc).getAttribute('aria-label')).toBe('Exit full screen');
+    key(doc.body, 'Escape');
+    expect(figure.classList.contains('az-full') || figure.classList.contains('az-overlay')).toBe(false);
+    expect(doc.documentElement.classList.contains('az-locked')).toBe(false);
+    expect(main.style.zIndex).toBe('');
+    expect(window.scrollTo).toHaveBeenCalledWith(0, 1234);
+    // a frame that may not have the screen refuses it: the figure covers the window as well
+    window.HTMLElement.prototype.requestFullscreen = async () => { throw new TypeError('Permissions check failed'); };
+    press(screenButton(doc));
+    await settle();
+    expect(figure.classList.contains('az-overlay')).toBe(true);
+    press(screenButton(doc));
+    expect(figure.classList.contains('az-overlay')).toBe(false);
+  });
+
+  it('lays the drawing again on the screen’s size: the same middle, larger, the map whole in the middle of a stage of another shape', async () => {
+    const doc = await report();
+    fakeScreen(doc);
+    doc.querySelector('[data-act="in"]').dispatchEvent(new window.MouseEvent('click', { bubbles: true }));
+    const [x, y, w, h] = box(doc);
+    const middle = [x + w / 2, y + h / 2];
+    // the screen is wider than the map: the same part shows, more of it on the sides, nothing squeezed
+    laidAt(doc, 1600, 574.15);
+    press(screenButton(doc));
+    await settle();
+    const [x2, y2, w2, h2] = box(doc);
+    expect(x2 + w2 / 2).toBeCloseTo(middle[0], 0);
+    expect(y2 + h2 / 2).toBeCloseTo(middle[1], 0);
+    expect(h2).toBeCloseTo(h, 0);
+    expect(w2 / h2).toBeCloseTo(1600 / 574.15, 3);
+    // the whole map stands in the middle, clipped to what the page frames
+    doc.querySelector('[data-act="fit"]').dispatchEvent(new window.MouseEvent('click', { bubbles: true }));
+    const world = doc.querySelector('.az-map-world');
+    expect(Number.parseFloat(world.style.width)).toBe(800);
+    expect(world.style.transform).toBe('translate(400.00px, 0.00px) scale(1.00000)');
+    // how far each edge of the map is from the stage's: what the drawing clips to, where its tools go
+    const frame = doc.querySelector('.az-map-frame');
+    expect(['t', 'r', 'b', 'l'].map((edge) => frame.style.getPropertyValue(`--az-${edge}`))).toEqual(['0.0px', '400.0px', '0.0px', '400.0px']);
+    // given back, it is the map's shape again
+    laidAt(doc, 800, 574);
+    press(screenButton(doc));
+    await settle();
+    expect(world.style.width).toBe('');
+    expect(['t', 'r', 'b', 'l'].map((edge) => frame.style.getPropertyValue(`--az-${edge}`))).toEqual(['', '', '', '']);
+    expect(box(doc)).toEqual([0, 0, 1600, 1148.3]);
+  });
+
+  it('zooms with the wheel alone on the whole screen, where there is no page to scroll', async () => {
+    const doc = await report();
+    fakeScreen(doc);
+    const stage = doc.querySelector('.az-map-stage');
+    const whole = box(doc)[2];
+    stage.dispatchEvent(new window.WheelEvent('wheel', { bubbles: true, cancelable: true, deltaY: -100 }));
+    expect(box(doc)[2]).toBe(whole);
+    expect(doc.querySelector('.az-map-hint').classList.contains('az-on')).toBe(true);
+    press(screenButton(doc));
+    await settle();
+    stage.dispatchEvent(new window.WheelEvent('wheel', { bubbles: true, cancelable: true, deltaY: -100 }));
+    expect(box(doc)[2] / (whole / 1.25)).toBeCloseTo(1, 3);
+  });
+
+  it('names a day on its timeline only where the name has room, the one at an end set inside the track', async () => {
+    const doc = await report();
+    const ticks = doc.querySelector('.az-map-ticks');
+    const said = () => [...ticks.querySelectorAll('li[data-month]')].map((tick) => [tick.dataset.month, tick.className]);
+    // laid out wide, every day is named
+    Object.defineProperty(ticks, 'clientWidth', { configurable: true, get: () => 700 });
+    window.dispatchEvent(new window.Event('resize'));
+    expect(said()).toEqual([['6 Oct', 'az-start'], ['14 Oct', ''], ['20 Oct', ''], ['15 Nov', ''], ['16 Nov', 'az-end']]);
+    // narrow, as beside a map on the whole screen: the names that would run into one another are left out
+    Object.defineProperty(ticks, 'clientWidth', { configurable: true, get: () => 200 });
+    window.dispatchEvent(new window.Event('resize'));
+    expect(said().filter(([, name]) => !name.includes('az-unnamed')).map(([day]) => day)).toEqual(['6 Oct', '20 Oct', '15 Nov']);
+  });
+
+  it('gives the screen back before it is printed', async () => {
+    const doc = await report();
+    const screen = fakeScreen(doc);
+    press(screenButton(doc));
+    await settle();
+    window.dispatchEvent(new window.Event('beforeprint'));
+    await settle();
+    expect([screen.exits, doc.querySelector('figure.az-map').classList.contains('az-full')]).toEqual([1, false]);
+  });
+});
 
 describe('a map shown otherwise, as its block says', () => {
   it('has no timeline when it says so, and still shows its day', async () => {

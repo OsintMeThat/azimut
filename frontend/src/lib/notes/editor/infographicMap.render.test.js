@@ -233,6 +233,30 @@ describe('a map panel of an infographic, in the builder', () => {
     expect(closed).toHaveBeenCalledTimes(1);
   });
 
+  it('puts the panel on the whole screen from its map’s corner, its settings beside the map, Esc giving it back before the card closes', async () => {
+    const { fakeScreen } = await import('../../fullscreen.fixture.js');
+    const screen = fakeScreen();
+    try {
+      const host = opened();
+      await settle();
+      const box = host.querySelector('.ib-map');
+      const button = box.querySelector('.cm-map-stage .cm-map-full-btn');
+      expect(button.getAttribute('aria-label')).toBe('Full screen');
+      press(button);
+      await settle();
+      expect(document.fullscreenElement).toBe(box);
+      expect(box.classList.contains('cm-map-full')).toBe(true);
+      expect(box.querySelector('.cm-map-settings').hidden).toBe(false);
+      expect(button.title).toBe('Back to the infographic (Esc)');
+      box.querySelector('.cm-map-settings').dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }));
+      await settle();
+      expect([document.fullscreenElement, box.classList.contains('cm-map-full')]).toEqual([null, false]);
+      expect(closed).not.toHaveBeenCalled();
+    } finally {
+      screen.restore();
+    }
+  });
+
   it('reads its lines again when the page changes them, and draws again', async () => {
     opened();
     await settle();

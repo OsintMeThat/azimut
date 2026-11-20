@@ -77,7 +77,7 @@ const typing = (target) => Boolean(target?.closest?.('input, textarea, select, [
  * The map drawn in `stage` from `described` (the card's answer: its bounds, frame, ground, its
  * close-ups and SVG), with `groundUrl` the ground's address and `pictureUrl(path)` a close-up's.
  * Answers `{ arm(tool, done), disarm, show(shapes), armed, project, navigate(on), navigating,
- * view, whole, seen(), destroy }`: `done(answer)` gets the rectangle `[w, s, e, n]`, the point
+ * view, whole, seen(), refit(), destroy }`: `done(answer)` gets the rectangle `[w, s, e, n]`, the point
  * `[lon, lat]` or the corners `[[lon, lat], …]`; `show` lays shapes over it, each `{ kind:
  * 'box' | 'area' | 'line' | 'point', coords, colour, dashed, label }`. `navigable` starts it
  * moving, on `view` (one `onview(view, { whole })` handed out before), and `onview` hears it
@@ -420,7 +420,8 @@ export function mapSurface(stage, described, {
     };
     const zoomIn = press('cm-map-zoom-in', { label: 'Zoom in', iconName: 'plus', alone: true, title: 'Zoom in (+)' }, () => zoomBy(2));
     const zoomOut = press('cm-map-zoom-out', { label: 'Zoom out', iconName: 'minus', alone: true, title: 'Zoom out (−)' }, () => zoomBy(0.5));
-    const whole = press('cm-map-whole', { label: 'Whole map', iconName: 'maximize', title: 'The map’s own frame again (0)' }, () => toWhole());
+    // the corners mean the whole screen (`MapEditing`'s button); the map's own frame again is a reset
+    const whole = press('cm-map-whole', { label: 'Whole map', iconName: 'reset', title: 'The map’s own frame again (0)' }, () => toWhole());
     // the wheel over the buttons zooms the map as it does over the map, rather than scroll the note
     bar.addEventListener('wheel', turned, { passive: false });
     const ruler = document.createElement('div');
@@ -698,6 +699,15 @@ export function mapSurface(stage, described, {
     navigate,
     zoomBy,
     toWhole,
+    /**
+     * Lay the map again on the stage's size now (the card took the whole screen or gave it back):
+     * the view keeps its middle and how much closer than the whole map it looks, so the same part
+     * shows larger or smaller, and a corner in progress stays where it was put.
+     */
+    refit() {
+      land();
+      paint();
+    },
     /** What the stage shows now, as `[west, south, east, north]`. */
     seen() {
       const [vx, vy, vw, vh] = shownWindow();

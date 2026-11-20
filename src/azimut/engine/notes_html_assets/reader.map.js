@@ -36,6 +36,11 @@
   }
   /** A crowd larger than this is a count to press while the map can still move in on it. */
   const BUBBLE_FROM = 12;
+  /** The app's full-screen icon (`maximize`, `minimize` in components/Icon.svelte): corners out to take the screen, in to give it back. */
+  const CORNERS = {
+    out: 'M8 3H5a2 2 0 0 0-2 2v3m18 0V5a2 2 0 0 0-2-2h-3M3 16v3a2 2 0 0 0 2 2h3m8 0h3a2 2 0 0 0 2-2v-3',
+    in: 'M8 3v3a2 2 0 0 1-2 2H3m18 0h-3a2 2 0 0 1-2-2V3M3 16h3a2 2 0 0 1 2 2v3m8 0v-3a2 2 0 0 1 2-2h3',
+  };
   /**
    * Where each of `points` (`{id, x, y}` in pixels) stands once spread; a mark alone is not in it.
    * With `bubbles`, a crowd past `from` (`BUBBLE_FROM`, or the map's own `crowds`) is left out and
@@ -167,6 +172,8 @@
     let clashTimer = 0;
     /** A live map that has taken the drawing over (reader.live.js), which then moves and draws it. */
     let engine = null;
+    /** Whether the figure holds the whole screen (`screen`), where the stage takes the screen's shape. */
+    let full = false;
 
     stage.tabIndex = 0;
     stage.setAttribute('aria-label', `${stage.getAttribute('aria-label') || 'Map'}. Plus and minus zoom, the arrows move it`);
@@ -176,21 +183,46 @@
     }
 
     const size = () => ({ w: stage.clientWidth || 1, h: stage.clientHeight || 1 });
-    /** The ground's pixels a CSS pixel shows at the whole map, read off the picture it holds. */
-    const fit = () => size().w / W;
+    /**
+     * The ground's pixels a CSS pixel shows at the whole map, read off the picture it holds. The stage
+     * is the map's shape, but on the whole screen it is the screen's, the map held whole in its middle.
+     */
+    const fit = () => (full ? Math.min(size().w / W, size().h / H) : size().w / W);
+    /** The world's size on the stage at the whole map: the stage itself, but on the whole screen. */
+    const span = () => (full ? { w: W * fit(), h: H * fit() } : size());
+    /** The point of the map at the stage's middle as the view was last laid: a stage sized again keeps it there. */
+    let laid = null;
+    /** The view of the whole map: the world in the stage's middle. */
+    const whole = () => ({ k: 1, x: (size().w - span().w) / 2, y: (size().h - span().h) / 2 });
 
-    /** The world never leaves the stage: its top left stays above and left of the stage's. */
+    /**
+     * The world never leaves the stage: its top left stays above and left of the stage's. Narrower
+     * than the stage, as on the whole screen, it stands in the stage's middle that way.
+     */
     function paint() {
       const { w, h } = size();
       view.k = Math.min(most, Math.max(1, view.k));
-      view.x = Math.min(0, Math.max(w - w * view.k, view.x));
-      view.y = Math.min(0, Math.max(h - h * view.k, view.y));
-      if (world) world.style.transform = `translate(${view.x.toFixed(2)}px, ${view.y.toFixed(2)}px) scale(${view.k.toFixed(5)})`;
+      const ww = span().w * view.k;
+      const wh = span().h * view.k;
+      view.x = ww < w ? (w - ww) / 2 : Math.min(0, Math.max(w - ww, view.x));
+      view.y = wh < h ? (h - wh) / 2 : Math.min(0, Math.max(h - wh, view.y));
+      laid = { x: (w / 2 - view.x) / (fit() * view.k), y: (h / 2 - view.y) / (fit() * view.k) };
+      if (world) {
+        world.style.width = full ? `${span().w.toFixed(2)}px` : '';
+        world.style.height = full ? `${span().h.toFixed(2)}px` : '';
+        world.style.transform = `translate(${view.x.toFixed(2)}px, ${view.y.toFixed(2)}px) scale(${view.k.toFixed(5)})`;
+      }
       // a closer picture shows once the ground under it would blur
-      const sharp = (ground?.naturalWidth || W) / ((Number.parseFloat(ground?.style.width || '') / 100 || 1) * size().w);
+      const sharp = (ground?.naturalWidth || W) / ((Number.parseFloat(ground?.style.width || '') / 100 || 1) * span().w);
       for (const detail of details) detail.classList.toggle('az-on', view.k > sharp * 0.9);
       const unit = 1 / (fit() * view.k);
-      svg.setAttribute('viewBox', `${(-view.x * unit).toFixed(3)} ${(-view.y * unit).toFixed(3)} ${(W / view.k).toFixed(3)} ${(H / view.k).toFixed(3)}`);
+      const [shownW, shownH] = full ? [w * unit, h * unit] : [W / view.k, H / view.k];
+      svg.setAttribute('viewBox', `${(-view.x * unit).toFixed(3)} ${(-view.y * unit).toFixed(3)} ${shownW.toFixed(3)} ${shownH.toFixed(3)}`);
+      // on the whole screen the drawing shows what the page frames and nothing round it (the world clips its own
+      // ground), its tools, north arrow, scale and card on its corners: how far each edge of the map is from the stage's
+      for (const [edge, room] of [['t', view.y], ['r', w - view.x - ww], ['b', h - view.y - wh], ['l', view.x]]) {
+        stage.parentNode.style.setProperty(`--az-${edge}`, full ? `${Math.max(0, room).toFixed(1)}px` : '');
+      }
       // where each mark stands at this zoom: its own place, or spread round one it shares
       const px = 1 / unit;
       const spread = arrange(points.filter((node) => !node.classList.contains('az-off'))
@@ -316,30 +348,42 @@
     /** Where a view of the map engine's (`{center, zoom}`) puts the stage. */
     function placed(target) {
       const { w, h } = size();
-      const z0 = Math.log2(w / (512 * spanX));
+      const z0 = Math.log2(span().w / (512 * spanX));
       const k = Math.min(most, Math.max(1, 2 ** ((Number(target?.zoom) || z0) - z0)));
       const [cx, cy] = target?.center ? project(target.center[0], target.center[1]) : [W / 2, H / 2];
       const f = fit();
       return { k, x: w / 2 - cx * f * k, y: h / 2 - cy * f * k };
     }
 
-    /* the tools */
+    /* the tools: the zoom, and apart under it the whole screen */
     const tools = make('div', { class: 'az-map-tools' });
     const tool = (act, text, label) => make('button', { type: 'button', 'data-act': act, title: label, 'aria-label': label }, text);
-    tools.append(tool('in', '+', 'Zoom in'), tool('out', '−', 'Zoom out'), tool('fit', '⤢', 'The whole map'));
+    const zooms = make('div', { class: 'az-map-zoom' });
+    zooms.append(tool('in', '+', 'Zoom in'), tool('out', '−', 'Zoom out'), tool('fit', '⤢', 'The whole map'));
+    const screenButton = tool('full', '', '');
+    const icon = doc.createElementNS(svg.namespaceURI, 'svg');
+    icon.setAttribute('viewBox', '0 0 24 24');
+    icon.setAttribute('aria-hidden', 'true');
+    icon.append(doc.createElementNS(svg.namespaceURI, 'path'));
+    screenButton.append(icon);
+    const screens = make('div', { class: 'az-map-screen' });
+    screens.append(screenButton);
+    tools.append(zooms, screens);
     stage.append(tools);
     tools.addEventListener('click', (event) => {
       const act = event.target.closest('button')?.dataset.act;
       if (act === 'in') zoom(2);
       else if (act === 'out') zoom(0.5);
-      else if (act === 'fit') fly({ k: 1, x: 0, y: 0 }, 600);
+      else if (act === 'fit') fly(whole(), 600);
+      else if (act === 'full') screen();
       event.stopPropagation();
     });
     const hint = make('div', { class: 'az-map-hint', 'aria-hidden': 'true' }, `${/Mac|iPhone|iPad/.test(navigator.platform || '') ? '⌘' : 'Ctrl'} + scroll to zoom the map`);
     stage.append(hint);
     let hinted = 0;
     stage.addEventListener('wheel', (event) => {
-      if (!(event.ctrlKey || event.metaKey)) {
+      // on the whole screen there is no page to scroll: the wheel zooms
+      if (!(event.ctrlKey || event.metaKey || full)) {
         clearTimeout(hinted);
         hint.classList.add('az-on');
         hinted = setTimeout(() => hint.classList.remove('az-on'), 1300);
@@ -418,7 +462,7 @@
       const moves = { ArrowLeft: [80, 0], ArrowRight: [-80, 0], ArrowUp: [0, 80], ArrowDown: [0, -80] };
       const factors = { '+': 2, '=': 2, '-': 0.5, 0: 0 };
       if (Object.hasOwn(factors, event.key)) {
-        if (factors[event.key]) zoom(factors[event.key]); else fly({ k: 1, x: 0, y: 0 }, 500);
+        if (factors[event.key]) zoom(factors[event.key]); else fly(whole(), 500);
       } else if (moves[event.key] && view.k > 1.001) {
         fly({ k: view.k, x: view.x + moves[event.key][0], y: view.y + moves[event.key][1] }, 220);
       } else if (event.key === 'Escape' && picked) close();
@@ -480,7 +524,8 @@
       const links = make('ul', { class: 'az-map-card-links' });
       if (said.proof?.figure) {
         const item = link(`See ${said.proof.name || 'the proof'} ↓`, said.proof.figure, { class: 'az-map-card-proof' });
-        item.firstChild.addEventListener('click', (event) => { event.preventDefault(); go(said.proof.figure); });
+        // the proof is in the page: the screen is given back first
+        item.firstChild.addEventListener('click', (event) => { event.preventDefault(); screen(false).then(() => requestAnimationFrame(() => go(said.proof.figure))); });
         links.append(item);
       } else if (said.proof?.posted) links.append(link('Posted proof ↗', said.proof.posted, { class: 'az-map-card-proof' }));
       if (said.source?.url) links.append(link(`Source: ${said.source.label || 'web'} ↗`, said.source.url));
@@ -540,6 +585,27 @@
       else paint();
     }
     let slider = null;
+    /**
+     * The ticks that name a day or a month: each says it only where it has room after the last one
+     * that does, and one at an end of the track is set inside it rather than across its edge.
+     */
+    let named = [];
+    function months() {
+      const across = named[0]?.parentNode.clientWidth;
+      if (!across) return;
+      let end = -Infinity;
+      for (const tick of named) {
+        const middle = (Number.parseFloat(tick.style.left) / 100) * across;
+        const half = tick.dataset.month.length * 3.4;
+        const first = middle - half < -8;
+        const last = !first && middle + half > across + 8;
+        const left = first ? middle : last ? middle - 2 * half : middle - half;
+        tick.classList.toggle('az-start', first);
+        tick.classList.toggle('az-end', last);
+        tick.classList.toggle('az-unnamed', left < end + 6);
+        if (left >= end + 6) end = left + 2 * half;
+      }
+    }
     let nowDay = null;
     let nowCount = null;
     let playing = 0;
@@ -571,6 +637,7 @@
         if (days.length <= 120 || tick.dataset.month) ticks.append(tick);
       });
       track.append(slider, ticks);
+      named = all('li[data-month]', ticks);
       time.append(play, now, track);
       after.after(time);
       slider.addEventListener('input', () => { stop(); setDay(days[Number(slider.value)] || currentDay); });
@@ -651,24 +718,110 @@
       // as deep as the ground stays sharp: each of its pixels drawn at most two and a half wide; a ground
       // laid on part of a map framed otherwise is as wide as the share of the stage it covers
       const groundShare = Number.parseFloat(ground?.style.width || '') / 100 || 1;
-      most = Math.max(3, Math.min(24, ((ground?.naturalWidth || W * 2) / (groundShare * size().w)) * 2.5));
+      most = Math.max(3, Math.min(24, ((ground?.naturalWidth || W * 2) / (groundShare * span().w)) * 2.5));
       for (const detail of details) {
         const share = Number.parseFloat(detail.style.width) / 100;
-        if (share > 0 && detail.naturalWidth) most = Math.max(most, Math.min(48, (detail.naturalWidth / (share * size().w)) * 2.5));
+        if (share > 0 && detail.naturalWidth) most = Math.max(most, Math.min(48, (detail.naturalWidth / (share * span().w)) * 2.5));
       }
       paint();
     };
-    window.addEventListener('resize', () => {
-      const { w, h } = size();
-      const mid = { x: (w / 2 - view.x) / view.k, y: (h / 2 - view.y) / view.k };
+    /** The stage sized again: the world grows with it, the point at its middle kept there. */
+    function refit() {
+      if (laid) {
+        const { w, h } = size();
+        const f = fit() * view.k;
+        view.x = w / 2 - laid.x * f;
+        view.y = h / 2 - laid.y * f;
+      }
       settle();
-      Object.assign(view, { x: w / 2 - mid.x * view.k, y: h / 2 - mid.y * view.k });
-      paint();
+      months();
+    }
+    window.addEventListener('resize', refit);
+
+    /* the whole screen: the figure takes it, its timeline, steps, legend and cards with it. Where the
+       browser gives none to a part of the page (Safari on an iPhone, a frame that may not), the figure
+       covers the window instead, the page held still under it and found where it was after */
+    /** Where the page was when the figure took the screen, found there again after. */
+    let wasAt = null;
+    /** While the figure covers the window itself: each box round it, lifted over the rest of the page. */
+    let covered = null;
+    const escaped = (event) => {
+      if (event.key !== 'Escape') return;
+      event.preventDefault();
+      event.stopPropagation();
+      screen(false);
+    };
+    /** Take the whole screen, give it back (`on` false), or the other of the two; settles once it has. */
+    function screen(on = !full) {
+      if (on === full) return Promise.resolve();
+      if (!on) {
+        if (covered) uncover();
+        return doc.fullscreenElement === figure ? doc.exitFullscreen().catch(() => {}) : Promise.resolve();
+      }
+      wasAt = { x: window.scrollX, y: window.scrollY };
+      if (figure.requestFullscreen && doc.fullscreenEnabled !== false) return figure.requestFullscreen().catch(cover);
+      cover();
+      return Promise.resolve();
+    }
+    function cover() {
+      if (full) return;
+      covered = { lifted: [] };
+      for (let node = figure.parentElement; node && node !== doc.body; node = node.parentElement) {
+        covered.lifted.push([node, node.style.zIndex]);
+        node.style.zIndex = '2147483000';
+      }
+      root.classList.add('az-locked');
+      figure.classList.add('az-overlay');
+      changed(true);
+    }
+    function uncover() {
+      const { lifted } = covered;
+      covered = null;
+      for (const [node, value] of lifted) node.style.zIndex = value;
+      root.classList.remove('az-locked');
+      figure.classList.remove('az-overlay');
+      changed(false);
+    }
+    /** What the screen buttons say: the drawing's, and the live map's copy of it. */
+    function labelled(button) {
+      button.setAttribute('aria-label', full ? 'Exit full screen' : 'Full screen');
+      button.title = full ? 'Back to the page (Esc)' : 'The map on the whole screen';
+      button.querySelector('path')?.setAttribute('d', full ? CORNERS.in : CORNERS.out);
+    }
+    /** On the whole screen, what goes with the map in one panel beside it (under it on a phone), in the page's order. */
+    let side = null;
+    function changed(on) {
+      full = on;
+      if (on) {
+        side = make('div', { class: 'az-map-side' });
+        side.append(...[...figure.children].filter((node) => !node.matches('.az-map-frame, script')));
+        figure.append(side);
+      } else if (side) {
+        stage.parentNode.after(...side.children);
+        side.remove();
+        side = null;
+      }
+      figure.classList.toggle('az-full', on);
+      for (const button of all('[data-act="full"]', figure)) labelled(button);
+      window[on ? 'addEventListener' : 'removeEventListener']('keydown', escaped, true);
+      refit();
+      engine?.screen?.(on);
+      // the page under the figure moved while it was away from it: it is found where it was
+      if (!on && wasAt) window.scrollTo(wasAt.x, wasAt.y);
+      if (!on) wasAt = null;
+    }
+    labelled(screenButton);
+    // a map much wider than tall holds the screen's width, what goes with it under it
+    figure.classList.toggle('az-map-wide', W / H >= 2);
+    doc.addEventListener('fullscreenchange', () => {
+      const on = doc.fullscreenElement === figure;
+      if (on !== full && !covered) changed(on);
     });
     if (ground && !ground.complete) ground.addEventListener('load', settle, { once: true });
     for (const detail of details) if (!detail.complete) detail.addEventListener('load', settle, { once: true });
-    window.addEventListener('beforeprint', () => { close(); Object.assign(view, { k: 1, x: 0, y: 0 }); paint(); });
+    window.addEventListener('beforeprint', () => { screen(false); close(); Object.assign(view, whole()); paint(); });
     settle();
+    months();
     if (currentDay) setDay(currentDay, { quiet: true });
 
     /** What the stage shows, as `[west, south, east, north]`. */
@@ -691,25 +844,27 @@
       open,
       close,
       seen,
+      screen,
       /** A story's card: its own step, or the whole map as on its last day for the card of words. */
       story: (index) => {
         if (index == null || index === '') {
           if (days.length) setDay(data.day || days[days.length - 1]);
-          if (engine) engine.whole(); else fly({ k: 1, x: 0, y: 0 }, 1100);
+          if (engine) engine.whole(); else fly(whole(), 1100);
         } else step(Number(index));
       },
       /**
-       * Hand the map to a live one (`{day, look, whole, pick}`, reader.live.js), which from then on
-       * draws it and is moved by the timeline, the steps and the story; `null` takes it back. The
-       * drawing stays under it, out of reach. Answers what the live map starts from and what it
-       * shares with the drawing: the day, the card open, how marks are spread and a crowd drawn.
+       * Hand the map to a live one (`{day, look, whole, pick, screen}`, reader.live.js), which from
+       * then on draws it and is moved by the timeline, the steps, the story and the whole screen;
+       * `null` takes it back. The drawing stays under it, out of reach. Answers what the live map
+       * starts from and what it shares with the drawing: the day, the card open, whether the figure
+       * holds the whole screen, how marks are spread and a crowd drawn.
        */
       attach(live) {
         engine = live || null;
         stage.inert = Boolean(engine);
         if (engine) stage.setAttribute('aria-hidden', 'true');
         else { stage.removeAttribute('aria-hidden'); paint(); }
-        return { day: currentDay, picked: picked?.dataset.id || null, arrange, bubble, crowdFrom };
+        return { day: currentDay, picked: picked?.dataset.id || null, full, arrange, bubble, crowdFrom };
       },
     };
   }

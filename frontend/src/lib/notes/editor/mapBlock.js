@@ -17,18 +17,23 @@
  * corner goes down exactly where it is meant; the view is never written, and leaving Draw shows
  * the block's own again. *File the ground for this view* files the picture of what it shows
  * then (`POST /notes/maps/detail`) as one more `detail:` line, one Undo step.
+ *
+ * The button in the map's corner puts the card on the whole screen (`lib/fullscreen.js`), its
+ * bar, tabs, Draw tools and hint with it, the map laid again on its new size. Esc gives the
+ * screen back first: a shape being drawn keeps its corners, and a second Esc gives it up.
  */
 import { isolateHistory } from '@codemirror/commands';
 import { Transaction } from '@codemirror/state';
 
 import { fileUrl } from '../../fileUrl.js';
+import { holdScreen } from '../../fullscreen.js';
 import {
   drawFeature, describeMap, editFeature, fileGround, fileView, forgetMaps, makeOwnLayer, removeFeature, restoreFeature,
 } from '../mapSettings.svelte.js';
 import { rovingToolbar } from '../pictureSize.js';
 import { MAP_BLOCK } from '../syntax.js';
 import { registerBlock } from './blocks.js';
-import { button } from './gridMenu.js';
+import { button, icon } from './gridMenu.js';
 import { heldHeight, holdHeight, moveHeight, releaseHeight } from './heights.js';
 import { drawingsTitle, mapSettings } from './mapCard.js';
 import { NAV_HINT, NAV_TOOL_HINT, TOOL_HINTS, mapSurface } from './mapSurface.js';
@@ -85,7 +90,8 @@ function saidOf(map) {
  * as the note holds them now), `edit(change)` (its lines changed as one Undo step),
  * `say(message, actions, kind)`, `sheetMap` (*From a sheet…*, when the note can), `measure()`
  * (after it changed height), `sizedBy` (what sets its width when its host does, said in place
- * of Size); and its nodes, `box`, `stage`, `said`, `hint` and `settingsPanel`.
+ * of Size); and its nodes, `box`, `stage`, `said`, `hint`, `settingsPanel` and `screenNode`
+ * (what takes the whole screen), with `screenBack`, where Esc goes back to.
  */
 export class MapEditing {
   constructor() {
@@ -101,9 +107,15 @@ export class MapEditing {
     this.looking = null;
     this.lookingOn = '';
     this.hinted = null;
+    /** The whole screen (`holdScreen`), made on the first press of its button. */
+    this.screen = null;
+    this.screenButton = null;
   }
 
   measure() {}
+
+  /** Before the card leaves its place for the whole screen, and once it is back (`on` false). */
+  keepPlace() {}
 
   renderSaid() {
     if (!this.said) return;
@@ -172,6 +184,7 @@ export class MapEditing {
       view: this.lookingOn === bounds ? this.looking : null,
       onview: (view) => this.viewed(view, bounds),
     });
+    this.stage.append(this.screenToggle());
     this.stage.classList.toggle('cm-map-plain', !ground);
     if (this.surface.navigating) this.viewed(this.surface.view, bounds);
     this.hinted = null;
@@ -247,6 +260,46 @@ export class MapEditing {
       parts.push(press);
     }
     this.hint.replaceChildren(...parts);
+    this.measure();
+  }
+
+  // -- the whole screen --
+
+  /** The button in the map's corner that puts the card on the whole screen, and takes it back. */
+  screenToggle() {
+    if (!this.screenButton) {
+      const node = button('cm-map-full-btn cm-map-ui', { label: 'Full screen', iconName: 'maximize', alone: true, title: 'The map on the whole screen' });
+      node.addEventListener('mousedown', (event) => event.preventDefault());
+      node.addEventListener('click', (event) => {
+        event.stopPropagation();
+        void this.toggleScreen();
+      });
+      this.screenButton = node;
+    }
+    return this.screenButton;
+  }
+
+  /** Put the card on the whole screen, give it back (`on` false), or the other of the two. */
+  toggleScreen(on) {
+    if (!this.screenNode || this.gone) return Promise.resolve();
+    this.screen ??= holdScreen(this.screenNode, (full) => this.screened(full), { covered: 'cm-map-covered' });
+    const wanted = on ?? !this.screen.full;
+    if (wanted && !this.screen.full) this.keepPlace(true);
+    return this.screen.toggle(wanted);
+  }
+
+  /** The card took the whole screen or gave it back: its button says the other, its map is laid again on its size. */
+  screened(on) {
+    if (this.gone) return;
+    this.screenNode.classList.toggle('cm-map-full', on);
+    const node = this.screenButton;
+    if (node) {
+      node.replaceChildren(icon(on ? 'minimize' : 'maximize'));
+      node.setAttribute('aria-label', on ? 'Exit full screen' : 'Full screen');
+      node.title = on ? `Back to ${this.screenBack} (Esc)` : 'The map on the whole screen';
+    }
+    if (!on) this.keepPlace(false);
+    this.surface?.refit();
     this.measure();
   }
 
@@ -440,6 +493,7 @@ export class MapEditing {
   }
 
   destroy() {
+    this.screen?.destroy();
     this.gone = true;
     this.surface?.destroy();
     this.settings?.destroy();
@@ -483,6 +537,19 @@ class MapBox extends MapEditing {
     return this.handlers.sheetMap ?? null;
   }
 
+  get screenNode() {
+    return this.card ?? null;
+  }
+
+  get screenBack() {
+    return 'the note';
+  }
+
+  /** The note keeps the map's line as tall while its card is on the whole screen, so nothing under it moves. */
+  keepPlace(on) {
+    this.box.style.minHeight = on ? `${this.box.offsetHeight}px` : '';
+  }
+
   range() {
     let from;
     try {
@@ -515,6 +582,7 @@ class MapBox extends MapEditing {
     box.className = 'cm-block cm-block-map cm-map-block';
     box.dataset.block = 'map';
     const card = element('div', 'cm-map-card');
+    this.card = card;
     if (this.writable) card.append(this.makeBar());
     else card.append(element('div', 'cm-played-head', 'Map · interactive in HTML, a picture in the PDF'));
     this.settingsPanel = element('div', 'cm-map-settings cm-map-ui');
@@ -727,6 +795,44 @@ const THEME = {
   '.cm-map-zoom-btn + .cm-map-zoom-btn': { borderLeft: '1px solid rgba(255, 255, 255, .14)' },
   '.cm-map-zoom-btn:hover, .cm-map-zoom-btn:focus-visible': { background: 'rgba(255, 255, 255, .13)', outline: 'none' },
   '.cm-map-zoom-btn:disabled': { opacity: '.38', cursor: 'default', background: 'none' },
+  // the whole screen: its button in the map's top right corner, clear of the zoom on the left
+  '.cm-map-full-btn': {
+    position: 'absolute', zIndex: '3', top: '10px', right: '10px', display: 'inline-grid', placeItems: 'center', width: '30px', height: '30px',
+    padding: '0', border: 'none', borderRadius: '7px', background: 'rgba(16, 18, 22, .8)', boxShadow: '0 6px 18px -8px rgba(0, 0, 0, .6)',
+    backdropFilter: 'blur(8px)', color: '#f2f3f5', cursor: 'pointer',
+  },
+  '.cm-map-full-btn:hover, .cm-map-full-btn:focus-visible': { background: 'rgba(48, 52, 58, .92)', outline: 'none' },
+  '.cm-map-full-btn:focus-visible': { boxShadow: '0 0 0 2px var(--accent)' },
+  // on the whole screen the card keeps its bar, tabs and hint, its settings beside the map, and its
+  // map takes the rest: the map's own shape in the middle, or all of it while it moves in Draw
+  '.cm-map-full, &.cm-map-full': { boxSizing: 'border-box', background: 'var(--bg-1)', color: 'var(--text-1)', overflow: 'hidden' },
+  // the panel wears the editor's theme classes, whose root rule holds it relative and a column: overruled here
+  '.cm-map-covered, &.cm-map-covered': { position: 'fixed !important', inset: '0', zIndex: '2000' },
+  '.cm-map-card.cm-map-full': {
+    display: 'grid', gridTemplateColumns: 'minmax(0, 1fr) clamp(360px, 34vw, 500px)', gridTemplateRows: 'auto minmax(0, 1fr) auto', height: '100%',
+  },
+  '.cm-map-card.cm-map-full > .cm-map-bar': { gridArea: '1 / 1 / 2 / 3' },
+  '.cm-map-card.cm-map-full > .cm-map-settings': { gridArea: '2 / 2 / 4 / 3', minHeight: '0', overflowY: 'auto', borderBottom: 'none', borderLeft: '1px solid var(--border)' },
+  '.cm-map-card.cm-map-full > .cm-map-holder': { gridArea: '2 / 1' },
+  '.cm-map-card.cm-map-full > .cm-map-hint': { gridArea: '3 / 1' },
+  '.cm-map-card.cm-map-full:has(> .cm-map-settings[hidden]) > :is(.cm-map-holder, .cm-map-hint)': { gridColumn: '1 / -1' },
+  // a step beside the map: its number, day and arrows, then its name and its words, as in a panel's card
+  '.cm-map-card.cm-map-full .cm-map-step': { gridTemplateColumns: '26px minmax(0, 1fr) repeat(4, 26px)', rowGap: '4px' },
+  '.cm-map-card.cm-map-full .cm-map-step > :is(.cm-map-step-n, .cm-map-step-day, .cm-map-icon-btn)': { gridRow: '1' },
+  '.cm-map-card.cm-map-full .cm-map-step > .cm-map-step-n': { gridColumn: '1' },
+  '.cm-map-card.cm-map-full .cm-map-step > .cm-map-step-day': { gridColumn: '2' },
+  '.cm-map-card.cm-map-full .cm-map-step > .cm-map-step-label': { gridColumn: '2 / -1', gridRow: '2' },
+  '.cm-map-card.cm-map-full .cm-map-step > .cm-map-step-words': { gridColumn: '2 / -1', gridRow: '3' },
+  '.cm-map-full .cm-map-holder, &.cm-map-full .cm-map-holder': { minHeight: '0', display: 'grid', placeItems: 'center', containerType: 'size' },
+  '.cm-map-full .cm-map-stage, &.cm-map-full .cm-map-stage': { width: 'min(100cqw, 100cqh * var(--r, 1.6))', maxHeight: 'none', margin: '0' },
+  '.cm-map-full .cm-map-stage.cm-map-nav, &.cm-map-full .cm-map-stage.cm-map-nav': { width: '100%', height: '100%', aspectRatio: 'auto' },
+  '.cm-map-full .cm-map-said, &.cm-map-full .cm-map-said': { display: 'none' },
+  '.cm-map-full .cm-map-hint, &.cm-map-full .cm-map-hint': { margin: '0 12px 12px' },
+  // an infographic's panel: its settings, made for a narrow card, beside the map
+  '&.ib-map.cm-map-full': { display: 'grid !important', gridTemplateColumns: 'minmax(0, 1fr) minmax(300px, 380px)', gridTemplateRows: 'minmax(0, 1fr) auto' },
+  '&.ib-map.cm-map-full > .cm-map-holder': { gridArea: '1 / 1' },
+  '&.ib-map.cm-map-full > .cm-map-hint': { gridArea: '2 / 1' },
+  '&.ib-map.cm-map-full > .cm-map-settings': { gridArea: '1 / 2 / 3 / 3', maxHeight: 'none', borderTop: 'none', borderLeft: '1px solid var(--border)' },
   '.cm-map-ruler': {
     position: 'absolute', zIndex: '2', left: '12px', bottom: '10px', padding: '1px 4px 0', boxSizing: 'border-box', minWidth: '24px',
     border: '1.5px solid rgba(255, 255, 255, .92)', borderTop: 'none', color: '#fff', font: '600 11px/1.25 var(--font-sans)',

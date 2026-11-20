@@ -7576,8 +7576,11 @@ the folder (`assets/maplibre-<version>/`, its licence as `LICENSE-maplibre.txt`,
 the build's `static/vendor/maplibre/`) and turns each map into a live one over OpenFreeMap's
 free vector map, in the same figure: the same features as layers in their colours, dashes,
 fills and pictograms, a moved line faint where it stood, marks spread or counted as the
-drawing does them, the same cards, legend, timeline, steps and Story, and the same keys
-(Tab through the features, Enter for a card, the arrows, + and −, 0 for the whole map).
+drawing does them, the same cards, legend, timeline, steps and Story, the same keys
+(Tab through the features, Enter for a card, the arrows, + and −, 0 for the whole map) and the
+same Full screen button, where the live map fills the whole map's place, as much closer as what it
+showed can be while all of it stays in sight, takes every gesture as its own, and comes back to the
+view it had when given back unmoved.
 It opens on the ground the map was filed with, laid at its bounds over OpenFreeMap's map
 under its place names, its credit in the corner, so it takes over from the drawing as it
 stands; *Map · Satellite (as filed)* switches to the map alone and back. No live satellite
@@ -7640,8 +7643,21 @@ timeline under the map shows the day large, steps through the days on its slider
 Play, and shows each feature only on its days, a line or an area that moved leaving its
 last place faint and dashed. A map's steps (a plate's, else one a proof in date order) are
 short chips that fly the map there on their day; in a Story, the map is the stage and each
-step is a card that flies it. Without script and in print, the map is as on its last day,
-said under it. The PDF prints it as a picture of that day, its credit under it. The check
+step is a card that flies it. **Full screen**, the corners button under the zoom (its own
+group, so it never covers them), puts the figure on the whole screen with the browser's own full
+screen: the map as large as the screen holds it, whole in its middle and filling it as it zooms,
+and beside it one dark panel (under it on a screen taller than wide or a map at least twice as
+wide as tall) holding its timeline, steps, legend and caption in the page's order, its cards
+opening over the map. There the wheel and one finger zoom and move it with no Ctrl and no page to
+scroll, and the drawing shows only what the page frames, its tools on its corners. Esc, the same
+button (*Exit full screen*) or the browser's own exit give the page back where it was, the map
+laid again on its size each way, a Story keeping its step meanwhile. Where the browser gives a
+part of the page no full screen (Safari on an iPhone, a frame that may not), the figure covers the
+window itself, the page under it held still and found where it was after. The button never
+prints, and printing gives the screen back first. A timeline names a day or a month only where
+the name has room after the last one named, the one at an end set inside the track. Without
+script and in print, the map is as on its last day, said under it. The PDF prints it as a picture
+of that day, its credit under it. The check
 before export names a layer, a plate or a picture no longer in the case at its line, a
 map with no ground, and one past 8 MB. A layer, a plate or a ground a map names is a use:
 its delete names the note.
@@ -7674,8 +7690,8 @@ at its first drawing and named in the block (`layer:`), so it is case data used,
 trashed like any other, never a line of the block; each is listed with its name, colour, first and
 last day and *On the map*, and its toast has an Undo. In Draw the map moves, so a corner goes down
 where it is meant: the wheel, a pinch, + and − zoom it about the pointer, a drag moves it, and 0 or
-*Whole map* shows its frame again, whole and undistorted, what lies outside the frame dimmed, a scale
-in its corner. With a tool in hand a press still puts a corner down, and Space+drag or the middle
+*Whole map* (its reset arrow, since the corners mean full screen) shows its frame again, whole and
+undistorted, what lies outside the frame dimmed, a scale in its corner. With a tool in hand a press still puts a corner down, and Space+drag or the middle
 button moves the map; the line under the map says so. It is drawn on the ground and its close-ups
 (`detail:`), each from its own pixels, a close-up shown where the ground would blur, and plain where
 the case holds no picture: opening Draw fetches nothing, moving never writes a line, and leaving Draw
@@ -7683,7 +7699,14 @@ shows the block's own view again. Once the map has moved, **File the ground for 
 picture of what it shows on that press (Esri, or the base's own map), cited again when that view was
 filed before, as one more `detail:` line and one Undo step. It is a close-up rather than a new
 ground, so the map's ground, frame and printed picture stay as they were; a map keeps 8, and offline
-the press says so and the map keeps what it has. **Time**: the timeline on or off, the day it
+the press says so and the map keeps what it has. **Full screen**, the corners button in the map's
+top right, puts the whole card on the screen, most useful for Draw on a laptop: its bar on top, its
+tabs and tools beside the map, the hint under it, the map taking the rest (its own shape in the
+middle, or all of it while Draw moves it, laid again on its size with the same middle). The note
+keeps the map's line as tall meanwhile. Esc gives the screen back first, so a line or an area being
+drawn keeps its corners, and a second Esc gives it up; the button (*Exit full screen*) and the
+browser's own exit do the same. An infographic's map panel in the builder has the same button, its
+settings beside the map there. **Time**: the timeline on or off, the day it
 opens on (a day of its own becomes a stop of the slider), Play's pace; the steps, its plate's or its
 proofs' until one is changed, then its own (`step: day | label | lat, lon, zoom | proof | words`):
 moved, framed by a rectangle dragged on the map, named, given their words, taken out or added.

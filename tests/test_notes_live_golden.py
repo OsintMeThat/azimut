@@ -56,11 +56,13 @@ LOOKS = {"article": NoteLook(), "story": NoteLook.model_validate({"web": "story"
 #: a page holding one carries, then a table that fits stopped being a frame of its own on a phone,
 #: then a story's picture rules stopped reaching a picture wall's frames and its cards let a press
 #: through to the stage.
+#: 2026-11-20: a map's tools gained the whole screen as a group of their own, the timeline names a day
+#: only where it has room, and the whole screen's own rules came in, all in reader.map.css; nothing else.
 GOLDEN = {
-    "single-article": "607cf79645b59a015821c1319fc7682bc54566d04b2715904792c611ed2d636b",
-    "single-story": "7961602e98e15623dd051130c2617a33cff1926998ab615b0f5f75258efa132b",
-    "folder-article": "8971dc63dff98cb05979a41653f427afc938c9fe33b58fbcba42b4f5078a6dbb",
-    "folder-story": "d584afd3d8dca6b3e848c9906fc6df721a59d85c556d2e0a06b604868a414e25",
+    "single-article": "69984ed27d099dd0584264322aed979141a1b817a602737b89f2b6ed66a8b017",
+    "single-story": "ef3714008eb6cff3f571e067a06c540d958517f732db9a9db377e2710bb9678d",
+    "folder-article": "491baacc09ce810617eca475f3173cf76811725fc764b7b7a5547f14dd570781",
+    "folder-story": "75c32d81b36067cbd9c29e19014d91d779b698e5457273ce392a65a784577745",
 }
 
 
