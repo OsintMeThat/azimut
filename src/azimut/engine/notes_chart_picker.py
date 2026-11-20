@@ -31,8 +31,9 @@ from . import notes_charts as nc
 #: The width a kind is laid out at in the gallery, in CSS pixels: narrower than a page,
 #: so its words read at the size of a thumbnail.
 THUMB_WIDTH = 420.0
-#: What a count of rows is called when nothing names what the rows are.
+#: What a count of rows is called when nothing names what the rows are, and a wall's.
 ROWS_NOUN = "rows"
+PICTURES_NOUN = "pictures"
 
 
 @dataclass(frozen=True)
@@ -90,6 +91,15 @@ def settings_for(kind: nc.Kind, block: nc.ChartBlock) -> dict[str, str]:
     table = block.table
     assert table is not None
     out: dict[str, str] = {"kind": kind.name}
+    if kind.propose is not None:
+        # a kind that reads its own columns (a picture wall) says which itself
+        out.update(kind.propose(block))
+        for key in block.extra:
+            if key not in kind.keys:
+                out[key] = ""
+        if block.bars:
+            out["bars"] = ""
+        return out
     if not block.count:
         out["count"] = count_column(table)
     colour = block.colour_by
@@ -151,7 +161,12 @@ def applied(block: nc.ChartBlock, settings: dict[str, str]) -> nc.ChartBlock:
             changes["count"] = nc.ROWS if value.casefold() == nc.ROWS else value
         elif key in fields:
             changes[fields[key]] = value
-    drawn = replace(block, extra={key: value for key, value in block.extra.items() if settings.get(key, value)})
+    extra = {key: value for key, value in block.extra.items() if settings.get(key, value)}
+    # a kind's own settings the picker writes (a wall's picture column) are read as written
+    kind_now = nc.kind_named(changes.get("kind") or block.kind)
+    extra.update({key: value for key, value in settings.items()
+                  if value and kind_now is not None and key in kind_now.keys})
+    drawn = replace(block, extra=extra)
     for name, value in changes.items():
         setattr(drawn, name, value)
     return drawn
@@ -171,5 +186,5 @@ def title_for(reading: nc.Reading) -> str:
     Empty for a kind that counts nothing (key figures, a timeline, a line)."""
     if not reading.kind.counts or reading.table is None:
         return ""
-    noun = nc.noun_of(reading) or (ROWS_NOUN if reading.count is None else "")
+    noun = nc.noun_of(reading) or (PICTURES_NOUN if reading.kind.per_row else ROWS_NOUN if reading.count is None else "")
     return nc.propose_title(reading, noun)

@@ -35,6 +35,8 @@ Past the chain:
 - a note's charts and infographics (`engine/notecharts.py`, `notes_infographic.py`): the
   sheet or the other note an infographic's ``data:`` or a chart's ``from:`` reads its rows
   from, by entity id. The rows are copied in, but *Read again* and the check read the source;
+- a note's picture walls (`engine/notes_chart_wall.py`): each picture a row shows, a chip
+  or its id alone, by entity id;
 - a note's written links (`notelinks.outside_links`): each finds the item the case
   holds at its address, the file downloaded from that post, the bookmark of that
   page, the capture of that view or the proof imported from that post
@@ -268,6 +270,28 @@ def _note_figures(text: str) -> Iterator[Lean]:
             yield Lean(target, FROM_HOW)
 
 
+#: What a picture is to the note whose picture wall shows it.
+WALL_HOW = "shows it in a picture wall"
+
+
+def _note_walls(text: str) -> Iterator[Lean]:
+    """The pictures a note's picture walls show, each row's, an infographic's panels included."""
+    from . import notes_chart_wall
+
+    for body in notecharts.chart_bodies(text):
+        block = notes_charts.parse_block(body)
+        kind = notes_charts.effective_kind(block)
+        if kind is None or kind.name != notes_charts.PICTURE_WALL.name or block.table is None:
+            continue
+        column = notes_chart_wall.picture_column(block.table, (block.extra.get("picture") or "").strip())
+        if column is None:
+            continue
+        for row in block.table.cells:
+            ref = notes_chart_wall.picture_ref(row[column]) if column < len(row) else ""
+            if ref and notes_maps.ENTITY_ID.match(ref):
+                yield Lean(ref, WALL_HOW)
+
+
 def _origin_target(origin: str) -> str:
     """The entity id a ``sheet:<id>`` or ``note:<id>#<anchor>`` names, or ""."""
     kind, _, rest = str(origin or "").partition(":")
@@ -303,6 +327,8 @@ def _read_note(path: Path) -> tuple[tuple[Lean, ...], tuple[str, ...]]:
     leans = tuple(_note_maps(text)) if "::: map" in text or ":::map" in text else ()
     if "sheet:" in text or "note:" in text:
         leans += tuple(dict.fromkeys(_note_figures(text)))
+    if "chart" in text:
+        leans += tuple(dict.fromkeys(_note_walls(text)))
     addresses = tuple(notelinks.outside_links(text)) if "http" in text else ()
     with _cache_lock:
         _notes[key] = (stamp, leans, addresses)

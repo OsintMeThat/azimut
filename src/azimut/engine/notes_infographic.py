@@ -499,6 +499,8 @@ class Page:
     #: The colours every chart of it paints with, and the note around it.
     palette: list[dict[str, str]] = field(default_factory=list)
     note_text: str = ""
+    #: Finds the case's pictures a picture wall panel shows (`notecharts.case_pictures`).
+    pictures: nc.PictureLookup | None = None
 
     @property
     def panels(self) -> list[Drawn]:
@@ -606,6 +608,9 @@ def read(case: "Case | None", body: str, *, look: "NoteLook | None" = None, pale
     if palette is None:
         palette = nc.case_palette(case) if case is not None else []
     colours, readings = _shared_palette(graphic, theme, palette, note_text)
+    from .notecharts import case_pictures
+
+    pictures = case_pictures(case)
     shared = _shared_column(graphic, readings)
     warnings: list[tuple[str, str, int | None]] = [(f"The infographic: {why}.", nc.OTHER_KIND, line)
                                                    for line, _, why in graphic.unread]
@@ -631,7 +636,7 @@ def read(case: "Case | None", body: str, *, look: "NoteLook | None" = None, pale
         if panel.kind == CHART:
             reading = readings.get(position)
             shares = _shares(reading, shared)
-            _chart_panel(drawn, theme, colours, note_text, shares, warnings, says_floor(graphic))
+            _chart_panel(drawn, theme, colours, note_text, shares, warnings, says_floor(graphic), pictures)
             if reading is not None:
                 floors = floors or reading.floor
                 if shares:
@@ -665,7 +670,7 @@ def read(case: "Case | None", body: str, *, look: "NoteLook | None" = None, pale
     if floors and title and NUMBER_WORD.search(title) and not nc.TITLE_FLOOR.search(title):
         warnings.append((f'The infographic "{nc._cut(title, 60)}" counts at least: say so in its title.',
                          nc.OTHER_KIND, graphic.where.get("title")))
-    return Page(graphic, theme, bands, legend, shared, credits, warnings, width, colours, note_text)
+    return Page(graphic, theme, bands, legend, shared, credits, warnings, width, colours, note_text, pictures)
 
 
 def relaid(page: Page, drawn: Drawn, width: float) -> nc.Layout | None:
@@ -673,7 +678,8 @@ def relaid(page: Page, drawn: Drawn, width: float) -> nc.Layout | None:
     if drawn.panel.kind != CHART or drawn.chart is None:
         return None
     return nc.layout(nc.parse_block(drawn.panel.body), theme=page.theme, palette=page.palette,
-                     note_text=page.note_text, width=width, title=True, legend=not drawn.shares, credit=False)
+                     note_text=page.note_text, width=width, title=True, legend=not drawn.shares, credit=False,
+                     pictures=page.pictures)
 
 
 def _offset(warning: tuple[str, str, int | None], panel: Panel) -> tuple[str, str, int | None]:
@@ -697,7 +703,8 @@ def _floor_title(check: nc.Check) -> bool:
 
 
 def _chart_panel(drawn: Drawn, theme: nc.ChartTheme, palette: Sequence[Mapping[str, str]], note_text: str,
-                 shares: bool, warnings: list[tuple[str, str, int | None]], floor_said: bool = False) -> None:
+                 shares: bool, warnings: list[tuple[str, str, int | None]], floor_said: bool = False,
+                 pictures: nc.PictureLookup | None = None) -> None:
     block = nc.parse_block(drawn.panel.body)
     if block.table is None or not block.table.headers:
         warnings.append(_offset(("A chart of the infographic holds no table: write its rows under its settings.",
@@ -708,7 +715,7 @@ def _chart_panel(drawn: Drawn, theme: nc.ChartTheme, palette: Sequence[Mapping[s
         return
     pad = theme.pad
     chart = nc.layout(block, theme=theme, palette=palette, note_text=note_text, width=drawn.w + 2 * pad,
-                      title=True, legend=not shares, credit=False)
+                      title=True, legend=not shares, credit=False, pictures=pictures)
     drawn.chart = chart
     drawn.shares = shares
     drawn.marks = [kinds_module.shifted(mark, -pad, -pad) for mark in chart.marks[1:]]

@@ -53,7 +53,8 @@ the map's last day, its credit under it. Nothing is fetched to print it.
 **Charts.** A `::: chart` block prints as a picture at 300 dpi across the frame, drawn
 from its table in the note's look and the case's colours (`engine/notecharts.py`), and
 captioned as every figure is: its title under it, numbered when the look numbers
-figures. With `show: chart and table` its table prints under it.
+figures. With `show: chart and table` its table prints under it. A picture wall taller
+than a page is laid again with smaller frames so it stands on one, its words kept.
 
 **Infographics.** A `:::: infographic` block prints on a page of its own, laid out in its
 two columns as one picture (`engine/notes_infographic.py`), at 300 dpi across the frame.
@@ -2123,7 +2124,10 @@ class _Builder:
         if not chart.drawable:
             return chart, None
         pixels = CHART_PIXELS_LIGHT if self.light else CHART_PIXELS
-        picture = chart.png(pixels, dpi=None if self.light else CHART_DPI)
+        # a kind that can (a picture wall) lays itself smaller to stand on one page, its words
+        # kept at their size; the page it starts on takes it a little smaller when it has room
+        room = self.theme.room * chart.layout.width / self._frame()
+        picture = chart.png(pixels, dpi=None if self.light else CHART_DPI, room=room)
         with PILImage.open(BytesIO(picture)) as opened:
             return chart, (picture, opened.size)
 

@@ -203,7 +203,8 @@
       if (!box) build();
       const figure = source.closest('figure');
       opener = source;
-      picture.src = image.currentSrc || image.src;
+      // a wall's frame shows a small picture and opens a larger one
+      picture.src = source.dataset.large || image.currentSrc || image.src;
       picture.alt = image.alt || '';
       box.setAttribute('aria-label', image.alt || 'Picture');
       caption.replaceChildren();
@@ -213,6 +214,7 @@
       if (said) caption.append(said.cloneNode(true));
       if (owed) credit.append(owed.cloneNode(true));
       for (const node of all('[id]', box)) node.removeAttribute('id');
+      for (const node of [...all('[hidden]', caption), ...all('[hidden]', credit)]) node.removeAttribute('hidden');
       if (box.showModal) box.showModal(); else box.setAttribute('open', '');
       root.classList.add('az-locked');
       view.scale = 1;
