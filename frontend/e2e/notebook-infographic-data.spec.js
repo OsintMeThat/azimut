@@ -90,7 +90,8 @@ test('a sheet set as the infographic’s data, changed, then read again into eve
   await line.getByRole('button', { name: 'Choose data…' }).click();
   const menu = page.locator('.float-menu[aria-label="Data"]');
   await expect(menu.locator('.dp-rec')).toHaveText('Recommended');
-  await expect(menu.locator('.fm-item .fm-grow')).toHaveText(['Vehicle register', 'Sightings', 'Register', 'New data…']);
+  // the page's own panels give it columns to start a sheet with, then a paste or a file
+  await expect(menu.locator('.fm-item .fm-grow')).toHaveText(['Vehicle register', 'Sightings', 'Register', 'New sheet with its columns', 'New data…']);
   await menu.locator('.fm-item', { hasText: 'Vehicle register' }).click();
   await expect.poll(() => saved(state)).toContain('data: sheet:s1\n');
   // the two charts copied from the register take it, their rows read in; the key figures stay

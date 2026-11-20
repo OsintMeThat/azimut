@@ -76,7 +76,7 @@ test('a map of an exported page takes the whole screen and gives the page back w
   await expect.poll(async () => (await stage.boundingBox()).width).toBeCloseTo(before.width, 0);
   // what went with the map is back under it, in the page's order
   expect(await figure.evaluate((node) => [...node.children].map((child) => child.className || child.localName)))
-    .toEqual(['az-map-frame', 'az-map-day', 'az-map-time', 'az-map-steps-row', 'az-map-legend', 'figcaption', 'az-map-data']);
+    .toEqual(['az-map-frame', 'az-map-day', 'az-map-time', 'az-map-steps-row', 'az-map-step-said', 'az-map-legend', 'figcaption', 'az-map-data']);
   expect(refused).toEqual([]);
 });
 
