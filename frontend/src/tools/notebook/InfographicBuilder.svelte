@@ -37,6 +37,12 @@
    * page's data by its columns' names, a column the data does not name asked, and without
    * data, or for a column filled by hand, a panel opens its own form. One change, one Undo; the
    * band the page already says is kept.
+   *
+   * In the extension's panel it slides over the note (`components/NotePanel.svelte`): `back`
+   * puts *Back to the note* first in its bar in place of Close, and `preview` draws the page at
+   * its top, since the note it is drawn in is out of sight, each panel pressable to open its
+   * card; beside the builder once the panel is wide. Without the app's `tools` around it, the
+   * data's sheet is only named and To Post, which opens Post, is not offered.
    */
   import { untrack } from 'svelte';
   import { api } from '../../lib/api.js';
@@ -54,6 +60,7 @@
   import { chartForm, chartSettings, rowsSaid, scratchGallery, starterBlock } from '../../lib/notes/editor/chartCard.js';
   import { OWN_ROWS, compareRows, readChart, withSettings, withTable } from '../../lib/notes/editor/chartText.js';
   import Icon from '../../components/Icon.svelte';
+  import BackButton from '../../components/BackButton.svelte';
   import FloatingMenu from '../../components/FloatingMenu.svelte';
   import DataPicker from '../../components/DataPicker.svelte';
   import FigureTemplatePicker from '../../components/FigureTemplatePicker.svelte';
@@ -73,6 +80,14 @@
     from = 0,
     panel = null,
     onclose,
+    /** Where the way out goes, said on a Back button first in the bar in place of Close: `Back to the note`. */
+    back = '',
+    /** Whether the page is drawn at the top, its panels pressable: where the note is out of sight. */
+    preview = false,
+    /** Whether the app's tools are around it: the data's sheet opens in Sheet, To Post opens Post. */
+    tools = true,
+    /** More of the bar, before Close: the panel's Undo and save state. */
+    bar = undefined,
   } = $props();
 
   /** The looks, said as the export dialog says them. */
@@ -243,6 +258,24 @@
     if (carded === index) { closeCard(); return; }
     closeCard();
     carded = index;
+  }
+
+  // -- the page drawn at the top, where the note is out of sight ---------------------
+  let panelList = $state(null);
+  /** Whether the page at the top is folded to its line, for more room below. */
+  let folded = $state(false);
+  /** A panel pressed on the page: its row picked, its card open, its row brought to the top. */
+  function pickPanel(index) {
+    const one = read?.panels[index];
+    if (!one) return;
+    if (carded === index) focused = index;
+    else pressRow(index, one);
+    requestAnimationFrame(() => panelList?.querySelectorAll(':scope > .ib-panel')[index]?.scrollIntoView({ block: 'start' }));
+  }
+  /** A panel's words on the page, as its box's title says them. */
+  function hitWords(one) {
+    const kind = one.chart ? one.chart[0].toUpperCase() + one.chart.slice(1) : KIND_WORDS[one.kind] ?? one.kind;
+    return `${one.title ? `${one.title} · ` : ''}${kind} · press to edit`;
   }
   // the card is drawn once its place is, and drawn again as the panel's lines change
   $effect(() => {
@@ -512,22 +545,55 @@
   }
 </script>
 
-<aside class="ib" aria-label="Infographic builder">
-  <header class="ib-bar">
-    <Icon name="grid" size={15} />
-    <h2 class="ib-name">Infographic</h2>
-    <button type="button" class="btn btn-ghost btn-xs" title="Close the builder" aria-label="Close the builder" onclick={() => onclose?.()}>
-      <Icon name="x" size={14} /></button>
+<aside class="ib" class:ib-previews={preview} class:ib-folded={preview && folded} aria-label="Infographic builder">
+  <header class="ib-bar" class:ib-backs={back}>
+    {#if back}
+      <BackButton label={back} title="Back to the note, every change already written" onclick={() => onclose?.()} />
+      <h2 class="ib-name ib-name-after"><Icon name="grid" size={13} /><span>Infographic</span></h2>
+      {@render bar?.()}
+    {:else}
+      <Icon name="grid" size={15} />
+      <h2 class="ib-name">Infographic</h2>
+      {@render bar?.()}
+      <button type="button" class="btn btn-ghost btn-xs" title="Close the builder" aria-label="Close the builder" onclick={() => onclose?.()}>
+        <Icon name="x" size={14} /></button>
+    {/if}
   </header>
   {#if !read}
     <p class="ib-none">This infographic is no longer in the note.</p>
   {:else}
+    {#if preview}
+      <section class="ib-preview" aria-label="The page">
+        <div class="ib-preview-head">
+          <span class="ib-head">The page <span class="ib-aside">{folded ? '' : 'press a panel to edit it'}</span></span>
+          <button type="button" class="ib-fold" aria-expanded={!folded} title={folded ? 'Show the page as it prints' : 'Fold the page, for more room below'}
+            onclick={() => (folded = !folded)}><Icon name={folded ? 'chevronDown' : 'chevronUp'} size={13} /><span>{folded ? 'Show' : 'Fold'}</span></button>
+        </div>
+        {#if !folded}
+          <div class="ib-preview-body">
+            {#if drawing?.svg}
+              <div class="ib-page" style:aspect-ratio={`${drawing.width} / ${drawing.height}`} style:--ib-ratio={drawing.width / drawing.height}>
+                {@html drawing.svg}
+                {#each drawing.panels ?? [] as one (one.index)}
+                  <button type="button" class="ib-hit" class:ib-hit-on={carded === one.index || (carded < 0 && focused === one.index)}
+                    style:left={`${(one.x / drawing.width) * 100}%`} style:top={`${(one.y / drawing.height) * 100}%`}
+                    style:width={`${(one.w / drawing.width) * 100}%`} style:height={`${(one.h / drawing.height) * 100}%`}
+                    title={hitWords(one)} aria-label={hitWords(one)} onclick={() => pickPanel(one.index)}></button>
+                {/each}
+              </div>
+            {:else}
+              <p class="ib-note ib-drawing">Drawing the page…</p>
+            {/if}
+          </div>
+        {/if}
+      </section>
+    {/if}
     <div class="ib-scroll">
       <section class="ib-part ib-data" aria-labelledby="ib-data">
         <h3 class="ib-head" id="ib-data">Data <span class="ib-aside">what its charts are drawn from</span></h3>
         <p class="ib-data-line">
           <Icon name={data.data?.kind === 'sheet' ? 'grid' : 'table'} size={14} />
-          {#if data.data?.kind === 'sheet' && data.data.found}
+          {#if tools && data.data?.kind === 'sheet' && data.data.found}
             <button type="button" class="ib-data-name ib-data-open" title="Open it in the Sheet tool" onclick={openData}>{dataName}</button>
           {:else}
             <span class="ib-data-name" class:ib-data-gone={data.data && !data.data.found}>{dataName}</span>
@@ -560,7 +626,7 @@
 
       <section class="ib-part" aria-labelledby="ib-panels">
         <h3 class="ib-head" id="ib-panels">Panels <span class="ib-aside">drag to reorder</span></h3>
-        <ol class="ib-panels">
+        <ol class="ib-panels" bind:this={panelList}>
           {#each read.panels as one, index (`${index}:${one.kind}`)}
             <li class="ib-panel" class:ib-over={over === index && dragging !== index} class:ib-picked={focused === index}
               draggable="true"
@@ -697,8 +763,10 @@
       <button type="button" class="btn btn-primary btn-sm" aria-haspopup="menu" title="One picture of the whole page"
         onclick={(event) => (exportAnchor = exportAnchor ? null : event.currentTarget)}>
         <Icon name="download" size={13} /> Export as a picture <Icon name="chevronDown" size={12} /></button>
-      <button type="button" class="btn btn-sm" title="Open Post with the page as one picture, nothing posted" disabled={!noteKey} onclick={toPost}>
-        <Icon name="post" size={13} /> To Post</button>
+      {#if tools}
+        <button type="button" class="btn btn-sm" title="Open Post with the page as one picture, nothing posted" disabled={!noteKey} onclick={toPost}>
+          <Icon name="post" size={13} /> To Post</button>
+      {/if}
     </footer>
   {/if}
 </aside>
@@ -876,4 +944,42 @@
   .ib-card :global(.ib-map .cm-map-step > .cm-map-step-label) { grid-column: 2 / -1; grid-row: 2; }
   .ib-card :global(.ib-map .cm-map-step > .cm-map-step-words) { grid-column: 2 / -1; grid-row: 3; }
   .ib-foot { display: flex; gap: 8px; padding: 10px 14px; border-top: 1px solid var(--border); background: var(--bg-1); }
+  /* the way back first, then what this is, then what the panel adds to the bar */
+  .ib-bar.ib-backs { gap: 6px; padding-left: 8px; }
+  .ib-name-after { flex: 1; display: inline-flex; align-items: center; gap: 5px; min-width: 0; color: var(--text-2); font-weight: 600; }
+  .ib-name-after span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  /* the page drawn at the top, held in a third of the height; its panels pressable */
+  .ib-preview { flex: none; padding: 8px 14px 12px; border-bottom: 1px solid var(--border); background: var(--bg-0); }
+  .ib-folded .ib-preview { padding-bottom: 8px; }
+  .ib-preview-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+  .ib-preview-head .ib-head { margin: 0; gap: 8px; justify-content: flex-start; }
+  .ib-fold {
+    display: inline-flex; align-items: center; gap: 3px; padding: 2px 6px; border: none; border-radius: var(--r-sm); background: none;
+    color: var(--text-3); font: inherit; font-size: var(--fs-xs); cursor: pointer;
+  }
+  .ib-fold:hover, .ib-fold:focus-visible { color: var(--text-1); background: var(--bg-3); }
+  .ib-preview-body { display: flex; justify-content: center; margin-top: 8px; }
+  .ib-page {
+    position: relative; width: min(100%, calc(30vh * var(--ib-ratio))); border-radius: 3px; overflow: hidden; background: #fff;
+    box-shadow: 0 1px 3px rgba(0, 0, 0, .35);
+  }
+  .ib-page :global(svg) { display: block; width: 100%; height: 100%; }
+  .ib-hit {
+    position: absolute; padding: 0; border: 1.5px solid transparent; border-radius: 3px; background: transparent; cursor: pointer;
+  }
+  .ib-hit:hover, .ib-hit:focus-visible { border-color: color-mix(in srgb, var(--accent) 65%, transparent); background: color-mix(in srgb, var(--accent) 6%, transparent); outline: none; }
+  .ib-hit.ib-hit-on { border-color: var(--accent); background: color-mix(in srgb, var(--accent) 9%, transparent); }
+  .ib-drawing { padding: 18px 0; }
+  /* a wide panel: the page beside the builder, as tall as the panel lets it */
+  @container (min-width: 700px) {
+    .ib.ib-previews:not(.ib-folded) { display: grid; grid-template-columns: minmax(0, 1fr) 360px; grid-template-rows: auto minmax(0, 1fr) auto; }
+    .ib.ib-previews:not(.ib-folded) > .ib-bar { grid-column: 1 / -1; }
+    .ib.ib-previews:not(.ib-folded) > .ib-preview {
+      grid-column: 1; grid-row: 2 / 4; min-height: 0; overflow: auto; padding: 12px 18px 18px; border-bottom: none; border-right: 1px solid var(--border);
+    }
+    .ib.ib-previews:not(.ib-folded) > .ib-scroll { grid-column: 2; grid-row: 2; }
+    .ib.ib-previews:not(.ib-folded) > .ib-foot { grid-column: 2; grid-row: 3; }
+    .ib.ib-previews:not(.ib-folded) .ib-page { width: min(100%, calc((100vh - 110px) * var(--ib-ratio))); }
+  }
+  @container (min-width: 960px) { .ib.ib-previews:not(.ib-folded) { grid-template-columns: minmax(0, 1fr) 400px; } }
 </style>

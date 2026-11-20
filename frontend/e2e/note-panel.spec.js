@@ -36,7 +36,7 @@ const host = (src) => `<!doctype html><meta charset="utf-8"><body style="margin:
 
 const SECOND = { id: 'dock-fire', name: 'Dock fire', scratch: false, entities: [], links: [], folders: [] };
 
-async function framedNote(page, { testParent = true, cases = undefined } = {}) {
+async function framedNote(page, { testParent = true, cases = undefined, note = '', routes = null } = {}) {
   const fixture = await installAppFixture(page, {
     newEntityId: 'b_new',
     catalog: [CAPTURE],
@@ -44,7 +44,7 @@ async function framedNote(page, { testParent = true, cases = undefined } = {}) {
     ...(cases ? { cases } : {}),
   });
   const written = [];
-  let text = '';
+  let text = note;
   await page.route(`**/api/cases/${CASE_ID}/notes`, async (route) => {
     if (route.request().method() === 'PUT') {
       text = route.request().postDataJSON().text;
@@ -61,6 +61,8 @@ async function framedNote(page, { testParent = true, cases = undefined } = {}) {
   });
   const src = `/#notebook?case=${CASE_ID}&note=case&solo=1&panel=1${testParent ? '&testParent=1' : ''}`;
   await page.route('**/panel-host.html', (route) => route.fulfill({ contentType: 'text/html', body: host(src) }));
+  // a spec's own answers, over the fixture's
+  await routes?.(page);
   await page.goto('/panel-host.html');
   return { fixture, written, looked, frame: page.frameLocator('iframe') };
 }
@@ -75,10 +77,10 @@ const put = (id, fields) => ({ azimut: 'note-put', v: 1, id, ...fields });
 test('a quote, a cite and a capture sent from the extension\'s page land in the panel\'s note, each with Undo', async ({ page }) => {
   const { fixture, written, looked, frame } = await framedNote(page);
 
-  // the case, the note, its Look, Write | Page and Add, and nothing else
+  // the case, the note, Ready to publish?, its Look, Write | Page, Add and Open in Azimut, and nothing else
   await expect(frame.locator('.panel-bar .case')).toHaveText('Browser Test');
   await expect(frame.locator('.panel-bar button.which')).toContainText('Case notes');
-  await expect(frame.locator('.panel-bar button')).toHaveText(['Browser Test', 'Case notes', /Look/, 'Write', 'Page', 'Add']);
+  await expect(frame.locator('.panel-bar button')).toHaveText(['Browser Test', 'Case notes', 'Ready', /Look/, 'Write', 'Page', 'Add', 'Open in Azimut']);
   await expect.poll(() => told(page)).toContainEqual({
     azimut: 'note-panel', v: 1, state: 'ready', caseId: CASE_ID, noteId: 'case', title: 'Case notes',
   });
@@ -231,4 +233,50 @@ test('the panel switches to another case in place, from its bar', async ({ page 
   const address = await frame.locator(':root').evaluate(() => location.hash);
   expect(address).toContain(`case=${SECOND.id}`);
   expect(address).toContain('note=case');
+});
+
+test('an infographic pressed in the panel opens its builder over the note; a change is written, and Back shows it in the note', async ({ page }) => {
+  const NOTE = ['Seen at the quay.', '', ':::: infographic', 'title: At the quay', '',
+    '::: chart', 'kind: key figures', '| Figure | Words |', '| --- | --- |', '| 12 | trucks |', ':::', '',
+    '### Where they lie', 'Six groups.', '::::', ''].join('\n');
+  // the server's drawing of the page: its title written in it, a box per panel
+  const drawing = (route) => {
+    const title = /^title: (.*)$/m.exec(route.request().postDataJSON().text)?.[1] ?? '';
+    return route.fulfill({ json: {
+      svg: `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 400 300" width="400" height="300"><rect width="400" height="300" fill="#fff"/>`
+        + `<text x="20" y="40" font-size="22">${title}</text></svg>`,
+      width: 400, height: 300, look: 'report', legend: { column: '', values: [] }, warnings: [],
+      panels: [
+        { index: 0, kind: 'chart', chart: 'key figures', title: '', width: 'wide', x: 10, y: 60, w: 380, h: 100 },
+        { index: 1, kind: 'words', title: 'Where they lie', width: 'wide', x: 10, y: 180, w: 380, h: 100 },
+      ],
+    } });
+  };
+  const { fixture, written, frame } = await framedNote(page, { note: NOTE, routes: async (tab) => {
+    await tab.route(`**/api/cases/${CASE_ID}/notes/infographic`, drawing);
+    await tab.route(`**/api/cases/${CASE_ID}/layer-palette`, (route) => route.fulfill({ json: { colours: [], icons: [] } }));
+  } });
+  await expect(frame.locator('.cm-ig-hit')).toHaveCount(2);
+
+  await frame.locator('.cm-ig-hit').nth(1).click();
+  const builder = frame.getByRole('complementary', { name: 'Infographic builder' });
+  await expect(builder).toBeVisible();
+  // over the note, across the panel, the way back first in its bar
+  const box = await builder.boundingBox();
+  expect(box.width).toBeGreaterThan(350);
+  await expect(builder.locator('.ib-bar button').first()).toHaveText('Back to the note');
+  await expect(builder.locator('.ib-page text')).toHaveText('At the quay');
+  await expect(builder.locator('.ib-hit.ib-hit-on')).toHaveCount(1);
+
+  const title = builder.locator('.ib-field', { hasText: 'Title' }).locator('input');
+  await title.fill('At the quay at dawn');
+  await title.press('Enter');
+  await expect.poll(() => written.at(-1) ?? '').toContain(':::: infographic\ntitle: At the quay at dawn\n');
+  await expect(builder.locator('.ib-page text')).toHaveText('At the quay at dawn');
+
+  await builder.getByRole('button', { name: 'Back to the note' }).click();
+  await expect(builder).toHaveCount(0);
+  await expect(frame.locator('.cm-ig-frame text')).toHaveText('At the quay at dawn');
+  await expect(frame.locator('.cm-content')).toContainText('Seen at the quay.');
+  fixture.expectNoUnexpectedRequests();
 });

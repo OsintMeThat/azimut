@@ -40,6 +40,7 @@
   import { onDestroy, onMount, untrack } from 'svelte';
   import { Compartment, EditorState, Transaction } from '@codemirror/state';
   import { EditorView } from '@codemirror/view';
+  import { redo, undo, undoDepth } from '@codemirror/commands';
   import { api } from '../lib/api.js';
   import { toast, reloadCase, prefs, uiState } from '../lib/state.svelte.js';
   import { foldText } from '../lib/textFold.js';
@@ -181,6 +182,8 @@
     get source() { return template || !caseId ? null : (id) => sourceItem(caseId, id, { note: ownId }); },
     media: (event, at) => dropMedia(event, at),
     opener: (entity) => (template || !tools ? null : openerFor(entity)),
+    /** Whether a record cited opens in the case: not without the app's tools around the note, where a citation card offers its page alone. */
+    get inCase() { return tools; },
     sourceable: (entity) => (template || !caseId ? false : canStateSourceOf(caseId, entity)),
     stateSource: (entity, url) => stateSourceOf(caseId, entity, url),
     get statePosted() { return template || !caseId ? null : (entity, url) => statePostedOf(caseId, entity, url); },
@@ -393,6 +396,11 @@
      * still reads `expected`: the infographic builder's edits. Answers whether it landed.
      */
     replace: (from, to, insert, expected) => Boolean(view && !readOnly && replaceBlock(view, from, to, insert, expected)),
+    /** Take back the last change, or make it again, as Ctrl+Z and Ctrl+Shift+Z in the note would: the builder over the note in the extension's panel. */
+    undo: () => Boolean(view && !readOnly && undo(view)),
+    redo: () => Boolean(view && !readOnly && redo(view)),
+    /** Whether there is a change to take back. */
+    canUndo: () => Boolean(view && !readOnly && undoDepth(view.state) > 0),
     /** The editor's theme classes, for a block's card drawn outside it: an infographic's map panel in the builder. */
     themeClasses: () => view?.themeClasses ?? '',
     /** *From a sheet…* for a map outside the note's own blocks (an infographic's map panel), null when the note cannot. */

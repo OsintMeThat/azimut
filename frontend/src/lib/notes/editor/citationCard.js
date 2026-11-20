@@ -300,7 +300,8 @@ export function cardModel(said, { canEdit = false, handlers = {} } = {}) {
   } else if (web) rows.push({ label: 'Archived', value: 'Not archived', tone: 'warn' });
   if (item.sha256) rows.push({ label: 'SHA-256', value: shortHash(item.sha256), full: item.sha256, tone: 'mono' });
   rows.push({ label: 'In this note', value: cited });
-  if (said.entity && (handlers.opener || handlers.open)) {
+  // without the app around the note (the extension's panel) there is no case to open it in: Open page says where it lives
+  if (said.entity && handlers.inCase !== false && (handlers.opener || handlers.open)) {
     const opener = handlers.opener?.(said.entity);
     actions.push({ id: 'open', label: opener?.label ?? 'Open', title: opener ? `${opener.label}, where it was made` : 'Open it in the case', icon: 'enter' });
   }

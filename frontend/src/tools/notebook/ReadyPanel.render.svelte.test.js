@@ -83,4 +83,27 @@ describe('the Ready to publish? panel', () => {
     [...dialog.querySelectorAll('button')].find((button) => button.textContent.includes('Export…')).click();
     expect(onexport).toHaveBeenCalledOnce();
   });
+
+  it('in the extension\'s panel, opens the note in Azimut to export it, and offers only the fixes it can do there', () => {
+    const onexport = vi.fn();
+    const ready = readReady({
+      note: 'n1', title: 'Lead', internal: 0, links: [], pov: [{ text: 'Quay', line: 4 }],
+      warnings: [{ text: '1 count reads as exact: "12 trucks".', line: 2, kind: 'count', group: 'words', items: [{ text: '12 trucks', url: '', line: 2 }] }],
+      ready: { format: 'pdf', edition: 'internal', claims: [{ text: 'Seized at dawn', id: 'c1', line: 6 }], pictures: [], gone: [], unarchived: [], unseen: [] },
+    });
+    const dialog = open({ ready, tools: false, onexport });
+    const pressable = () => [...dialog.querySelectorAll('button')].map((button) => button.textContent.trim());
+    // the count is written as in the Notebook; Round them is the export's, Open the claim is Details'
+    expect(pressable()).toContain('Say “at least”');
+    expect(pressable()).not.toContain('Round them');
+    expect(pressable()).not.toContain('Open the claim');
+    // each line keeps its Go to, and the three still count
+    expect(dialog.querySelectorAll('[data-kind="pov"], [data-kind="claim"]')).toHaveLength(2);
+    expect(dialog.querySelector('[role="status"]').textContent).toContain('3 to look at.');
+    expect(pressable()).not.toContain('Export…');
+    const azimut = [...dialog.querySelectorAll('button')].find((button) => button.textContent.trim() === 'Open in Azimut');
+    expect(azimut.title).toBe('Open this note in Azimut, in a tab, to export it');
+    azimut.click();
+    expect(onexport).toHaveBeenCalledOnce();
+  });
 });

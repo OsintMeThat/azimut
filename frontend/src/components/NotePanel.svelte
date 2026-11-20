@@ -16,6 +16,13 @@
    * browser tab in front can give (its map, its page, the words selected there), asked
    * of the extension when the menu opens and done by it, then a source to cite as the
    * note on the side offers. What the extension does comes back as a put.
+   *
+   * What the Notebook offers around a note reaches the panel three ways. A press on an
+   * infographic slides its builder over the note (`InfographicBuilder`, its page drawn at
+   * the top), each gesture one Undo, with *Back to the note*. The bar's Ready to publish?
+   * badge opens the same panel over the note (`notebook/ReadyBadge.svelte`). And **Open
+   * in Azimut** opens the note in the Notebook in a tab of its own, for Export, Editions
+   * and What changed: a press in the frame opens a tab without the extension's help.
    */
   import { flushSync, onDestroy, onMount, untrack } from 'svelte';
   import { fetchAllEntities } from '../lib/catalog.js';
@@ -39,7 +46,9 @@
   import NotePicker from './NotePicker.svelte';
   import NoteSaved from './NoteSaved.svelte';
   import Toasts from './Toasts.svelte';
+  import InfographicBuilder from '../tools/notebook/InfographicBuilder.svelte';
   import LookControl from '../tools/notebook/LookControl.svelte';
+  import ReadyBadge from '../tools/notebook/ReadyBadge.svelte';
   import ViewModes from '../tools/notebook/ViewModes.svelte';
 
   /** How long the Add menu waits for the extension to say what the tab is, before it offers to allow it. */
@@ -65,6 +74,8 @@
   let sourcing = $state(null);
   let tab = $state(null);
   let waiting;
+  // the infographic builder over the note: `{ from, panel, opened }` while it is open, null else
+  let builder = $state(null);
 
   const caseId = $derived(caseState.current?.id ?? '');
   const title = $derived(noteId ? entities.find((entity) => entity.id === noteId)?.label ?? 'Note' : 'Case notes');
@@ -144,6 +155,7 @@
 
   function show(id, note) {
     const previous = doc;
+    builder = null;
     doc = id ? openNote(id, note) : null;
     noteId = id ? note ?? null : null;
     editor = null;
@@ -186,10 +198,11 @@
     keepPageView('panel', on);
   }
 
-  /** Back to the text, drawn before what lands in it or is gone to there. */
+  /** Back to the text, drawn before what lands in it or is gone to there: the pages and the builder make way. */
   function toWrite() {
-    if (!page) return;
-    setPage(false);
+    if (!page && !builder) return;
+    builder = null;
+    if (page) setPage(false);
     flushSync();
   }
 
@@ -308,6 +321,59 @@
     return landed ? { ok: true } : { ok: false, error: problem || 'Nothing was put in the note' };
   }
 
+  // -- the infographic builder, over the note --------------------------------------
+  /** An infographic pressed, or one just made by `/`: `{ from, panel }`, the block's offset and the panel pressed. */
+  function openBuilder(at) {
+    builder = { ...at, opened: (builder?.opened ?? 0) + 1 };
+  }
+
+  // a note taken by another tab can no longer be written from here
+  $effect(() => { if (doc?.elsewhere) untrack(() => { builder = null; }); });
+
+  // the keyboard follows the builder over the note, unless a card it opened took it
+  let sheet = $state(null);
+  $effect(() => {
+    const over = sheet;
+    if (!over) return;
+    const frame = requestAnimationFrame(() => {
+      if (!over.contains(document.activeElement)) over.querySelector('.ib-bar button')?.focus();
+    });
+    return () => cancelAnimationFrame(frame);
+  });
+
+  /** Whether the builder's Undo has a change of the note to take back. */
+  const canUndo = $derived.by(() => {
+    void doc?.text;
+    return Boolean(builder && editor?.canUndo?.());
+  });
+
+  const TYPING = 'textarea, select, [contenteditable="true"], input:not([type="checkbox"]):not([type="radio"]):not([type="range"]):not([type="color"])';
+  /** Ctrl+Z and Ctrl+Shift+Z over the builder, outside a field, take back and make again the note's last change. */
+  function sheetKey(event) {
+    if (!(event.ctrlKey || event.metaKey) || event.altKey || event.target?.closest?.(TYPING)) return;
+    const key = event.key.toLowerCase();
+    if (key !== 'z' && key !== 'y') return;
+    event.preventDefault();
+    if (key === 'y' || event.shiftKey) editor?.redo?.();
+    else editor?.undo?.();
+  }
+
+  // -- Open in Azimut -----------------------------------------------------------------
+  /**
+   * The note in the Notebook, in a tab of its own: its Export, Editions and What changed.
+   * The tab is opened inside the press, then sent to the note once it is written; the
+   * panel then shows the note taken there, with Edit here to take it back.
+   */
+  async function openInAzimut() {
+    const opened = window.open('', '_blank');
+    if (!opened) {
+      toast('The browser refused a new tab. Allow pop-ups for Azimut', 'warn', 8000);
+      return;
+    }
+    if (doc) await flush(doc);
+    opened.location.href = `${location.pathname}${location.search}${buildHash('notebook', { case: caseId, note: noteId ?? CASE_NOTES, solo: '1' })}`;
+  }
+
   /** A chip pressed in the panel opens what it cites on the web, when it is a page. */
   function openSource(entity) {
     const address = [entity?.attrs?.url, entity?.attrs?.source_url].find((value) => typeof value === 'string' && /^https?:\/\//i.test(value));
@@ -318,29 +384,47 @@
 <div class="note-panel">
   {#if caseId && doc}
     <header class="panel-bar">
-      <button type="button" class="case" title="Pick the case shown here" aria-haspopup="menu"
-        onclick={(event) => { picking = null; casing = casing ? null : event.currentTarget; }}>
-        <span>{caseState.current?.name}</span><Icon name="chevronDown" size={11} />
-      </button>
-      <span class="slash" aria-hidden="true">/</span>
-      <button type="button" class="which" title="Pick the note shown here" aria-haspopup="menu"
-        onclick={(event) => { casing = null; picking = picking ? null : event.currentTarget; }}>
-        <span>{title}</span><Icon name="chevronDown" size={12} />
-      </button>
-      <span class="spacer"></span>
-      <NoteSaved {doc} />
-      <LookControl {look} onchange={pickLook} {entities} disabled={!look} text={doc?.text ?? ''} />
-      <ViewModes {page} inPlace onchange={setPage} />
-      <button type="button" class="btn btn-ghost btn-sm add" title="Add from the tab in front, or cite a source" aria-haspopup="menu"
-        aria-label="Add" aria-expanded={Boolean(adding)} onclick={(event) => openAdding(event.currentTarget)}>
-        <Icon name="plus" size={14} /><span>Add</span></button>
+      <div class="where">
+        <button type="button" class="case" title="Pick the case shown here" aria-haspopup="menu"
+          onclick={(event) => { picking = null; casing = casing ? null : event.currentTarget; }}>
+          <span>{caseState.current?.name}</span><Icon name="chevronDown" size={11} />
+        </button>
+        <span class="slash" aria-hidden="true">/</span>
+        <button type="button" class="which" title="Pick the note shown here" aria-haspopup="menu"
+          onclick={(event) => { casing = null; picking = picking ? null : event.currentTarget; }}>
+          <span>{title}</span><Icon name="chevronDown" size={12} />
+        </button>
+        <NoteSaved {doc} />
+      </div>
+      <div class="acts">
+        <ReadyBadge {caseId} {noteId} {title} {doc} {editor} onexport={openInAzimut} ongo={jump} />
+        <span class="spacer"></span>
+        <LookControl {look} onchange={pickLook} {entities} disabled={!look} text={doc?.text ?? ''} />
+        <ViewModes {page} inPlace onchange={setPage} />
+        <button type="button" class="btn btn-ghost btn-sm add" title="Add from the tab in front, or cite a source" aria-haspopup="menu"
+          aria-label="Add" aria-expanded={Boolean(adding)} onclick={(event) => openAdding(event.currentTarget)}>
+          <Icon name="plus" size={14} /><span>Add</span></button>
+        <button type="button" class="btn btn-ghost btn-sm open" title="Open this note in Azimut, in a tab: Export, Editions, What changed"
+          aria-label="Open in Azimut" onclick={openInAzimut}>
+          <Icon name="external" size={14} /><span>Open in Azimut</span></button>
+      </div>
     </header>
     <NotePages {page} {caseId} {noteId} {title} {doc} {entities} {look} onjump={jump}>
       {#key doc}
         <NoteEditor {doc} {caseId} {entities} compact tools={false} onopen={openSource} onnote={pick} oncover={coverWritten}
-          onready={(handle) => (editor = handle)} onarrive={toWrite} placeholder="Write as you read. Type @ to cite, / for more." />
+          oninfographic={openBuilder} onready={(handle) => (editor = handle)} onarrive={toWrite}
+          placeholder="Write as you read. Type @ to cite, / for more." />
       {/key}
     </NotePages>
+    {#if builder && editor && doc.loaded}
+      <!-- svelte-ignore a11y_no_static_element_interactions -->
+      <div class="panel-sheet" bind:this={sheet} onkeydown={sheetKey}>
+        {#key builder.opened}
+          <InfographicBuilder {caseId} {noteId} text={doc.text} {editor} from={builder.from} panel={builder.panel}
+            back="Back to the note" preview tools={false} bar={builderBar} onclose={() => (builder = null)} />
+        {/key}
+      </div>
+    {/if}
   {:else if started}
     <p class="none"><Icon name="note" size={28} />
       <span>Open a case in Azimut, or pick one in the extension's map panel, then open the note again.</span></p>
@@ -387,13 +471,33 @@
   <AddSource {caseId} anchor={sourcing} onpick={addSource} onclose={() => (sourcing = null)} />
 {/if}
 
+{#snippet builderBar()}
+  <button type="button" class="btn btn-ghost btn-sm" title="Undo the last change to the note (Ctrl+Z)" aria-label="Undo" disabled={!canUndo}
+    onclick={() => editor?.undo()}><Icon name="undo" size={14} /></button>
+  <NoteSaved {doc} />
+{/snippet}
+
 <Toasts />
 
 <style>
-  .note-panel { height: 100%; display: flex; flex-direction: column; min-height: 0; background: var(--bg-1); container-type: inline-size; }
-  .panel-bar {
-    display: flex; align-items: center; gap: 4px; min-height: 38px; padding: 4px 10px; border-bottom: 1px solid var(--border);
+  .note-panel {
+    position: relative; height: 100%; display: flex; flex-direction: column; min-height: 0; background: var(--bg-1); container-type: inline-size;
   }
+  /* the builder over the whole panel, its bar in place of the panel's */
+  .panel-sheet {
+    position: absolute; inset: 0; z-index: 20; display: flex; flex-direction: column; min-height: 0; background: var(--bg-1);
+    box-shadow: -8px 0 24px rgba(0, 0, 0, .25); animation: sheet-in 200ms var(--ease);
+  }
+  @keyframes sheet-in { from { transform: translateX(100%); } }
+  @media (prefers-reduced-motion: reduce) { .panel-sheet { animation: none; } }
+  .panel-sheet > :global(.ib) { flex: 1; border-left: none; }
+  .panel-bar {
+    display: flex; align-items: center; gap: 4px 6px; min-height: 38px; padding: 4px 10px; border-bottom: 1px solid var(--border);
+  }
+  /* where the note is, then what can be done with it: one row, two in a narrow panel */
+  .where { flex: 1 1 auto; display: flex; align-items: center; gap: 4px; min-width: 0; }
+  .acts { flex: none; display: flex; align-items: center; gap: 4px; }
+  .acts .spacer { display: none; }
   .case, .which {
     display: inline-flex; align-items: center; min-width: 0; padding: 4px 6px; border: none; border-radius: var(--r-sm);
     background: none; font: inherit; font-size: var(--fs-sm); cursor: pointer;
@@ -405,12 +509,19 @@
   .case:hover, .which:hover { background: var(--bg-3); }
   .case:hover { color: var(--text-1); }
   .slash { flex: none; color: var(--text-3); }
-  .spacer { flex: 1; }
-  .add { display: inline-flex; align-items: center; gap: 4px; flex: none; }
-  /* narrow: the case and the note keep their room; Add is its plus, Look its brush */
-  @container (max-width: 440px) { .panel-bar :global(.look-open .current) { display: none; } }
-  @container (max-width: 400px) { .add span { display: none; } }
-  @container (max-width: 340px) { .panel-bar { gap: 2px; padding-left: 6px; padding-right: 6px; } .panel-bar :global(.look-open .word) { display: none; } }
+  .add, .open { display: inline-flex; align-items: center; gap: 4px; flex: none; }
+  /* short of room on one row: Open in Azimut is its arrow, the Ready badge its count, the Look its brush and word */
+  @container (max-width: 1000px) { .open span, .panel-bar :global(.ready-badge:not(.clear) .ready-words) { display: none; } }
+  @container (max-width: 900px) { .panel-bar :global(.look-open .current) { display: none; } }
+  /* a narrow panel: the case and the note on their own row, the actions under them */
+  @container (max-width: 560px) {
+    .panel-bar { flex-wrap: wrap; padding-bottom: 5px; }
+    .where, .acts { flex: 1 1 100%; }
+    .acts .spacer { display: block; flex: 1; }
+  }
+  @container (min-width: 381px) and (max-width: 560px) { .panel-bar :global(.ready-badge:not(.clear) .ready-words) { display: inline; } }
+  @container (max-width: 380px) { .add span { display: none; } }
+  @container (max-width: 340px) { .panel-bar { padding-left: 6px; padding-right: 6px; } .panel-bar :global(.look-open .word) { display: none; } }
   /* two lines to an item of the tab's part: what it does, then what it holds */
   .fm-grow small { display: block; margin-top: 1px; color: var(--text-3); font-size: 11px; line-height: 1.3; white-space: normal; overflow-wrap: anywhere; }
   .none {

@@ -147,9 +147,12 @@ describe('the note in the extension\'s panel', () => {
     await panel();
     expect(target.querySelector('.case').textContent).toBe('Harbour strike');
     expect(target.querySelector('button.which').textContent).toContain('Port lead');
-    // the case, the note, the note's look, Write | Page and Add: none of the dock's Notebook, own tab or close
+    // the case and the note; then Ready to publish?, the note's look, Write | Page, Add and Open in Azimut:
+    // none of the dock's Notebook, own tab or close
+    await vi.waitFor(() => expect(target.querySelector('.ready-badge')).not.toBeNull());
     expect([...target.querySelectorAll('.panel-bar button')].map((button) => button.textContent.trim()))
-      .toEqual(['Harbour strike', 'Port lead', 'LookReport', 'Write', 'Page', 'Add']);
+      .toEqual(['Harbour strike', 'Port lead', 'Ready', 'LookReport', 'Write', 'Page', 'Add', 'Open in Azimut']);
+    expect([...target.querySelectorAll('.panel-bar > div')].map((group) => group.className.split(' ')[0])).toEqual(['where', 'acts']);
     expect(pinnedNote()).toEqual({ caseId: 'case-a', noteId: 'n1', title: 'Port lead' });
     await vi.waitFor(() => expect(told()).toContainEqual({
       azimut: 'note-panel', v: 1, state: 'ready', caseId: 'case-a', noteId: 'n1', title: 'Port lead', to: '*',
@@ -404,8 +407,8 @@ describe('the Look in the panel\'s bar', () => {
   it('sits between Saved and Write | Page, names the note\'s style, and is read with the note', async () => {
     await panel();
     const bar = target.querySelector('.panel-bar');
-    const order = [...bar.children].map((node) => node.className || node.tagName);
-    expect(order.indexOf(lookButton().className)).toBeGreaterThan(order.findIndex((name) => String(name).includes('said')));
+    const order = [...bar.querySelectorAll('.said, .look-open, .modes')].map((node) => ['said', 'look-open', 'modes'].find((name) => node.classList.contains(name)));
+    expect(order).toEqual(['said', 'look-open', 'modes']);
     expect(lookButton().nextElementSibling.className).toContain('modes');
     expect(lookButton().textContent).toContain('Report');
     expect(get).toHaveBeenCalledWith('/api/cases/case-a/notes/n1/look');
@@ -810,5 +813,175 @@ describe('Add in the panel\'s bar', () => {
     keep.click();
     await vi.waitFor(() => expect(post).toHaveBeenCalledWith('/api/cases/case-a/entities', expect.objectContaining({ type: 'bookmark' })));
     await vi.waitFor(() => expect(uiState.toasts.some((item) => item.message === 'Put in “Port lead”')).toBe(true));
+  });
+});
+
+describe('what the Notebook offers around the note, in the panel', () => {
+  const GRAPHIC = [
+    ':::: infographic', 'title: At the quay', '',
+    '::: chart', 'kind: key figures', '| Figure | Words |', '| --- | --- |', '| 12 | trucks |', ':::', '',
+    '### Where they lie', 'Six groups.', '::::',
+  ].join('\n');
+  const NOTE = `Seen at the quay.\n\n${GRAPHIC}\n\nAfter.`;
+  /** The page the server draws: two boxes, the key figures across the top, the words under them. */
+  const DRAWN = {
+    svg: '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100" width="100" height="100"></svg>', width: 100, height: 100,
+    panels: [
+      { index: 0, kind: 'chart', chart: 'key figures', title: '', width: 'wide', x: 0, y: 0, w: 100, h: 40 },
+      { index: 1, kind: 'words', title: 'Where they lie', width: 'half', x: 0, y: 50, w: 50, h: 40 },
+    ],
+    legend: { column: '', values: [] }, warnings: [],
+  };
+  /** What the check before export says of the note: a count read as exact, a point of view, a claim citing nothing. */
+  const CHECKED = {
+    notes: [{
+      note: 'n1', title: 'Port lead', internal: 0, links: [], pov: [{ text: 'Quay', line: 0 }],
+      warnings: [{ text: '1 count reads as exact: "12 trucks".', line: 0, kind: 'count', group: 'words', items: [{ text: '12 trucks', url: '', line: 0 }] }],
+      ready: { format: 'pdf', edition: 'internal', style: 'report', tlp: '', claims: [{ text: 'Seized at dawn', id: 'c1', line: 0 }], pictures: [], gone: [], unarchived: [], unseen: [] },
+    }],
+  };
+  const sheet = () => target.querySelector('.panel-sheet');
+  const builder = () => sheet()?.querySelector('[aria-label="Infographic builder"]');
+  const inBuilder = (words) => [...builder().querySelectorAll('button')].find((button) => button.textContent.trim() === words
+    || button.getAttribute('aria-label') === words);
+  async function noteText() {
+    const { EditorView } = await import('@codemirror/view');
+    return EditorView.findFromDOM(target.querySelector('.cm-editor')).state.doc.toString();
+  }
+  const press = (node) => node.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, cancelable: true, button: 0 }));
+  const checks = () => post.mock.calls.filter(([url]) => url.endsWith('/notes/pdf/check'));
+
+  beforeEach(() => {
+    post.mockImplementation(async (url, body) => {
+      if (url.endsWith('/notes/infographic')) return DRAWN;
+      if (url.endsWith('/notes/pdf/check')) return CHECKED;
+      if (url.endsWith('/entities')) return { id: 'b_new', ...body };
+      return { redirects: {} };
+    });
+  });
+
+  it('slides the infographic builder over the note on a panel pressed, its page at the top, and goes back to the note', async () => {
+    written = NOTE;
+    await panel();
+    await vi.waitFor(() => expect(target.querySelectorAll('.cm-ig-hit')).toHaveLength(2));
+    expect(target.querySelector('.cm-ig-edit')).not.toBeNull();
+    press(target.querySelectorAll('.cm-ig-hit')[1]);
+    await settle();
+    expect(builder()).not.toBeNull();
+    // the way back first in its bar, in place of Close
+    const back = builder().querySelector('.ib-bar button');
+    expect(back.textContent.trim()).toBe('Back to the note');
+    expect(inBuilder('Close the builder')).toBeUndefined();
+    // the page at the top, the panel pressed lit; nothing that opens a tool the panel has not
+    await vi.waitFor(() => expect(builder().querySelectorAll('.ib-hit')).toHaveLength(2));
+    expect(builder().querySelectorAll('.ib-hit')[1].classList.contains('ib-hit-on')).toBe(true);
+    expect(builder().querySelectorAll('.ib-panel')[1].classList.contains('ib-picked')).toBe(true);
+    expect(inBuilder('To Post')).toBeUndefined();
+    expect(inBuilder('Undo').disabled).toBe(true);
+
+    // a gesture is one change of the note, and the builder's Undo takes it back
+    builder().querySelectorAll('.ib-panel')[1].querySelector('.ib-width[title="Half the page: a column"]').click();
+    await settle();
+    expect(await noteText()).toContain('widths: wide, half');
+    expect(inBuilder('Undo').disabled).toBe(false);
+    inBuilder('Undo').click();
+    await settle();
+    expect(await noteText()).toBe(NOTE);
+    expect(inBuilder('Undo').disabled).toBe(true);
+    // Ctrl+Z over the builder, outside a field, does the same
+    builder().querySelectorAll('.ib-panel')[0].querySelector('.ib-width[title="Half the page: a column"]').click();
+    await settle();
+    expect(await noteText()).toContain('widths: half, wide');
+    builder().dispatchEvent(new KeyboardEvent('keydown', { key: 'z', ctrlKey: true, bubbles: true, cancelable: true }));
+    await settle();
+    expect(await noteText()).toBe(NOTE);
+
+    back.click();
+    await settle();
+    expect(sheet()).toBeNull();
+    expect(target.querySelector('.cm-block-infographic')).not.toBeNull();
+  });
+
+  it('closes the builder for another note, and for what the extension puts in the note', async () => {
+    written = NOTE;
+    await panel();
+    await vi.waitFor(() => expect(target.querySelectorAll('.cm-ig-hit')).toHaveLength(2));
+    press(target.querySelector('.cm-ig-edit'));
+    await settle();
+    expect(builder()).not.toBeNull();
+    send({ azimut: 'note-put', v: 1, id: 'put-b', action: 'cite', url: PAGE, title: 'Strike' });
+    await vi.waitFor(() => expect(told()).toContainEqual({ azimut: 'note-put-done', v: 1, id: 'put-b', ok: true, to: EXT }));
+    expect(sheet()).toBeNull();
+    press(target.querySelector('.cm-ig-edit'));
+    await settle();
+    expect(builder()).not.toBeNull();
+    target.querySelector('button.which').click();
+    await settle();
+    [...document.querySelectorAll('.float-menu button')].find((row) => row.textContent.trim() === 'Case notes').click();
+    await settle();
+    expect(sheet()).toBeNull();
+  });
+
+  it('says in its bar what Ready to publish? would list, and opens the same panel over the note, with the fixes the panel can do', async () => {
+    written = 'There were 12 trucks.';
+    await panel();
+    const badge = await vi.waitFor(() => {
+      const found = target.querySelector('.ready-badge');
+      expect(found).not.toBeNull();
+      return found;
+    });
+    // a count, a point of view and a claim: three to look at, as the panel lists them
+    expect(badge.textContent.trim()).toBe('3 to look at');
+    expect(badge.getAttribute('aria-label')).toBe('Ready to publish? 3 to look at');
+    expect(checks()[0]).toEqual(['/api/cases/case-a/notes/pdf/check', { notes: ['n1'], edition: 'internal', format: 'pdf', ready: true },
+      expect.anything()]);
+    badge.click();
+    await settle();
+    const dialog = await vi.waitFor(() => {
+      const found = document.querySelector('[role="dialog"][aria-label="Ready to publish?"]');
+      expect(found?.querySelector('.groups')).toBeTruthy();
+      return found;
+    });
+    const pressable = () => [...dialog.querySelectorAll('button')].map((button) => button.textContent.trim());
+    expect(pressable()).not.toContain('Round them');
+    expect(pressable()).not.toContain('Open the claim');
+    // Say “at least” writes in the note, one Undo, then the check is asked again
+    const asked = checks().length;
+    [...dialog.querySelectorAll('button')].find((button) => button.textContent.trim() === 'Say “at least”').click();
+    await vi.waitFor(async () => expect(await noteText()).toBe('There were at least 12 trucks.'));
+    await vi.waitFor(() => expect(checks().length).toBeGreaterThan(asked));
+  });
+
+  it('opens the note in Azimut\'s Notebook, in a tab, from the bar and from Ready to publish?', async () => {
+    const opened = { location: { href: '' } };
+    const open = vi.spyOn(window, 'open').mockReturnValue(opened);
+    await panel();
+    const button = target.querySelector('.panel-bar button.open');
+    expect(button.getAttribute('aria-label')).toBe('Open in Azimut');
+    expect(button.title).toBe('Open this note in Azimut, in a tab: Export, Editions, What changed');
+    button.click();
+    // the tab is asked for inside the press, then sent to the note once it is written
+    expect(open).toHaveBeenCalledWith('', '_blank');
+    await vi.waitFor(() => expect(opened.location.href).toBe('/#notebook?case=case-a&note=n1&solo=1'));
+
+    opened.location.href = '';
+    await vi.waitFor(() => expect(target.querySelector('.ready-badge')).not.toBeNull());
+    target.querySelector('.ready-badge').click();
+    await settle();
+    const foot = await vi.waitFor(() => {
+      const found = [...document.querySelectorAll('[role="dialog"] button')].find((one) => one.textContent.trim() === 'Open in Azimut');
+      expect(found).toBeDefined();
+      return found;
+    });
+    foot.click();
+    await vi.waitFor(() => expect(opened.location.href).toBe('/#notebook?case=case-a&note=n1&solo=1'));
+    expect(document.querySelector('[role="dialog"][aria-label="Ready to publish?"]')).toBeNull();
+
+    // a browser that refuses the tab says how to allow it
+    open.mockReturnValue(null);
+    target.querySelector('.panel-bar button.open').click();
+    await settle();
+    expect(uiState.toasts.some((item) => item.message === 'The browser refused a new tab. Allow pop-ups for Azimut')).toBe(true);
+    open.mockRestore();
   });
 });
