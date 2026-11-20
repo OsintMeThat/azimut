@@ -12,13 +12,18 @@
  * the page still never fetches a tile. What is drawn on the map (an area to highlight with
  * its words, a point, a line, an area) goes into a personal layer of the case the block
  * names, made at the first drawing, each with its own Undo in the toast that says it.
+ *
+ * While its Draw tab is open the map moves under the analyst (`editor/mapSurface.js`), so a
+ * corner goes down exactly where it is meant; the view is never written, and leaving Draw shows
+ * the block's own again. *File the ground for this view* files the picture of what it shows
+ * then (`POST /notes/maps/detail`) as one more `detail:` line, one Undo step.
  */
 import { isolateHistory } from '@codemirror/commands';
 import { Transaction } from '@codemirror/state';
 
 import { fileUrl } from '../../fileUrl.js';
 import {
-  drawFeature, describeMap, editFeature, fileGround, forgetMaps, makeOwnLayer, removeFeature, restoreFeature,
+  drawFeature, describeMap, editFeature, fileGround, fileView, forgetMaps, makeOwnLayer, removeFeature, restoreFeature,
 } from '../mapSettings.svelte.js';
 import { rovingToolbar } from '../pictureSize.js';
 import { MAP_BLOCK } from '../syntax.js';
@@ -26,8 +31,8 @@ import { registerBlock } from './blocks.js';
 import { button } from './gridMenu.js';
 import { heldHeight, holdHeight, moveHeight, releaseHeight } from './heights.js';
 import { drawingsTitle, mapSettings } from './mapCard.js';
-import { TOOL_HINTS, mapSurface } from './mapSurface.js';
-import { readMap, withMapSettings } from './mapText.js';
+import { NAV_HINT, NAV_TOOL_HINT, TOOL_HINTS, mapSurface } from './mapSurface.js';
+import { BASES, readMap, withMapSettings } from './mapText.js';
 import { blocksIn, openSource } from './ranges.js';
 import { noteHandlers } from './state.js';
 import { lineChanges } from './tableText.js';
@@ -37,6 +42,12 @@ import { BlockWidget, markPicked, sourceButton } from './widgets.js';
 const MAP_HEIGHT = 420;
 /** What a base's press says while its picture is filed. */
 const FILING = { satellite: 'Filing the imagery…', map: 'Filing the street map…', topographic: 'Filing the topographic map…', dark: 'Filing the street map…' };
+/** What *File the ground for this view* files, by base, and what it says while it does. */
+const VIEW_GROUND = { satellite: 'the imagery', map: 'the street map', topographic: 'the topographic map', dark: 'the street map' };
+const FILING_VIEW = {
+  satellite: 'Filing the imagery of this view…', map: 'Filing the street map of this view…',
+  topographic: 'Filing the topographic map of this view…', dark: 'Filing the street map of this view…',
+};
 
 function element(tag, className, text) {
   const node = document.createElement(tag);
@@ -86,6 +97,10 @@ export class MapEditing {
     this.surface = null;
     this.tab = 'look';
     this.gone = false;
+    /** Where the map looks while Draw is open (`editor/mapView.js`), and the bounds it was taken on. */
+    this.looking = null;
+    this.lookingOn = '';
+    this.hinted = null;
   }
 
   measure() {}
@@ -109,6 +124,7 @@ export class MapEditing {
   /** Read the map again as it shows now, and draw it; the drawing it had stays, paler, till then. */
   describe() {
     if (!this.caseId) {
+      this.dropSurface();
       this.stage.replaceChildren(element('p', 'cm-map-note', 'A map is drawn in a note of a case.'));
       return;
     }
@@ -120,6 +136,7 @@ export class MapEditing {
       this.stage.classList.remove('cm-map-loading');
       if (answer?.error) {
         this.described = null;
+        this.dropSurface();
         this.stage.replaceChildren(element('p', 'cm-map-note cm-map-failed', `Map not drawn: ${answer.error}`));
         this.settings?.refresh();
         return;
@@ -143,22 +160,93 @@ export class MapEditing {
   }
 
   draw() {
-    const armed = this.surface?.armed;
-    this.surface?.disarm();
+    this.surface?.destroy();
     const ground = this.described.ground;
+    const bounds = JSON.stringify(this.described.bounds ?? null);
     this.surface = mapSurface(this.stage, this.described, {
       groundUrl: ground ? fileUrl(this.caseId, ground.path) : '',
-      onarmed: (tool) => this.showHint(tool),
+      pictureUrl: (path) => fileUrl(this.caseId, path),
+      onarmed: () => this.showHint(),
+      // drawn again on the same bounds (a feature put, a close-up filed), the map keeps where it looked
+      navigable: this.navigable(),
+      view: this.lookingOn === bounds ? this.looking : null,
+      onview: (view) => this.viewed(view, bounds),
     });
     this.stage.classList.toggle('cm-map-plain', !ground);
-    if (armed) this.showHint(null);
+    if (this.surface.navigating) this.viewed(this.surface.view, bounds);
+    this.hinted = null;
+    this.showHint();
     this.settings?.refresh();
   }
 
-  showHint(tool) {
-    this.hint.hidden = !tool;
-    this.hint.textContent = tool ? TOOL_HINTS[tool] ?? '' : '';
-    this.box.classList.toggle('cm-map-drawing-on', Boolean(tool));
+  /** The map's surface put down, its keys let go, as a map that is not drawn has none. */
+  dropSurface() {
+    this.surface?.destroy();
+    this.surface = null;
+    this.showHint();
+  }
+
+  // -- moving the map, in Draw --
+
+  /** Whether the map moves under the analyst: while its Draw tab is open on a map drawn. */
+  navigable() {
+    return Boolean(this.settings && this.settings.tab === 'draw' && this.described);
+  }
+
+  /** Let the map move as the tab open asks; leaving Draw shows the block's own view again. */
+  syncNav() {
+    const on = this.navigable();
+    this.surface?.navigate(on);
+    if (!on) {
+      this.looking = null;
+      this.lookingOn = '';
+    }
+    this.showHint();
+  }
+
+  viewed(view, bounds) {
+    this.looking = view;
+    this.lookingOn = bounds;
+    this.showHint();
+  }
+
+  /**
+   * The line under the map: the tool's words while one is armed, how to move the map while Draw
+   * is open (with a tool, how to move it without putting a corner down), and once the map has
+   * moved, *File the ground for this view*. Written again only when what it says changes.
+   */
+  showHint() {
+    if (!this.hint) return;
+    const tool = this.surface?.armed ?? null;
+    const moving = Boolean(this.surface?.navigating);
+    const whole = !moving || this.surface.whole;
+    const wide = moving && this.surface.view.k < 1 - 1e-3;
+    const filing = this.busy.startsWith('view:') ? this.busy.slice(5) : '';
+    const said = [tool, moving, whole, wide, filing, this.busy ? 'busy' : '', this.map?.base].join('|');
+    if (said === this.hinted) return;
+    this.hinted = said;
+    const shown = Boolean(tool || moving);
+    this.hint.hidden = !shown;
+    this.box.classList.toggle('cm-map-drawing-on', shown);
+    if (!shown) {
+      this.hint.replaceChildren();
+      this.measure();
+      return;
+    }
+    const words = tool ? [TOOL_HINTS[tool] ?? '', moving ? NAV_TOOL_HINT : ''].filter(Boolean).join(' ') : NAV_HINT;
+    const parts = [element('span', 'cm-map-hint-words', words)];
+    if (moving && !whole && this.writable && this.caseId) {
+      const base = this.map?.base || 'satellite';
+      const press = button('cm-map-act cm-map-file-view', {
+        label: filing || 'File the ground for this view', iconName: 'satellite',
+        title: wide ? 'Zoom in to the whole map or closer first' : `Files ${VIEW_GROUND[base] ?? 'the imagery'} of what the map shows now with it`,
+      });
+      press.disabled = Boolean(this.busy) || wide;
+      press.addEventListener('mousedown', (event) => event.preventDefault());
+      press.addEventListener('click', () => this.fileView());
+      parts.push(press);
+    }
+    this.hint.replaceChildren(...parts);
     this.measure();
   }
 
@@ -172,6 +260,7 @@ export class MapEditing {
   setBusy(words) {
     this.busy = words;
     this.settings?.refresh();
+    this.showHint();
   }
 
   /**
@@ -199,6 +288,32 @@ export class MapEditing {
     }
   }
 
+  /**
+   * *File the ground for this view*: the picture of what the map shows now filed on this press,
+   * cited again when that view was filed before, and written as one more `detail:` line, one Undo
+   * step. Offline it says so and the map keeps what it has.
+   */
+  async fileView() {
+    if (!this.caseId || this.busy || !this.surface?.navigating) return;
+    const text = this.text();
+    if (text == null) return;
+    const base = BASES.includes(this.map.base) ? this.map.base : 'satellite';
+    const [west, south, east, north] = this.surface.seen();
+    this.setBusy(`view:${FILING_VIEW[base] ?? 'Filing…'}`);
+    try {
+      const answer = await fileView(this.caseId, { text, base, west, south, east, north });
+      if (this.gone) return;
+      const fresh = answer.detail !== this.map.ground && !this.map.details.includes(answer.detail);
+      if (fresh) this.write({ detail: answer.details ?? [...this.map.details, answer.detail] });
+      if (answer.filed?.length) forgetMaps();
+      this.say(fresh ? 'Ground filed for this view' : 'This view’s ground was filed already');
+    } catch (error) {
+      this.say(error?.message || 'The map keeps what it has', [], 'warn');
+    } finally {
+      this.setBusy('');
+    }
+  }
+
   /** Arm `tool` on the map, the card's choice answered with what it drew. */
   arm(tool, done) {
     if (!this.surface) return;
@@ -206,8 +321,9 @@ export class MapEditing {
       this.stage.blur();
       done(answer);
     });
-    // the whole map in view, where the tool is used
+    // the whole map in view, where the tool is used, and the line under it that says how
     this.stage.scrollIntoView?.({ block: 'nearest' });
+    if (!this.hint.hidden) this.hint.scrollIntoView?.({ block: 'nearest' });
     this.stage.focus({ preventScroll: true });
   }
 
@@ -288,6 +404,7 @@ export class MapEditing {
   onTab(id) {
     this.tab = id;
     this.surface?.disarm();
+    this.syncNav();
   }
 
   /** Open or close the settings on the map, on `tab`; open, its tabs take the keyboard. */
@@ -318,12 +435,13 @@ export class MapEditing {
     } else if (tab) this.settings.open(tab);
     this.settingsButton?.setAttribute('aria-pressed', String(open));
     if (open && focus) this.settings.focus();
+    this.syncNav();
     this.measure();
   }
 
   destroy() {
     this.gone = true;
-    this.surface?.disarm();
+    this.surface?.destroy();
     this.settings?.destroy();
   }
 }
@@ -500,14 +618,14 @@ export class MapWidget extends BlockWidget {
     new MapBox(box, this, view);
     markPicked(box, this.picked);
     box.addEventListener('mousedown', (event) => {
-      if (event.button !== 0 || event.target.closest('.cm-map-ui, .cm-map-armed, a')) return;
+      if (event.button !== 0 || event.target.closest('.cm-map-ui, .cm-map-armed, .cm-map-nav, a')) return;
       event.preventDefault();
       // a press picks the map, which stays drawn; a double press opens its settings
       view.dispatch({ selection: { anchor: view.posAtDOM(box) } });
       view.focus();
     });
     box.addEventListener('dblclick', (event) => {
-      if (event.target.closest('.cm-map-ui, .cm-map-armed')) return;
+      if (event.target.closest('.cm-map-ui, .cm-map-armed, .cm-map-nav')) return;
       event.preventDefault();
       if (box.map.writable) box.map.toggleSettings(true);
       else openSource(view, box.map.range());
@@ -526,7 +644,7 @@ export class MapWidget extends BlockWidget {
   }
 
   ignoreEvent(event) {
-    return event.type !== 'mousedown' || Boolean(event.target?.closest?.('.cm-map-ui, .cm-map-armed'));
+    return event.type !== 'mousedown' || Boolean(event.target?.closest?.('.cm-map-ui, .cm-map-armed, .cm-map-nav'));
   }
 
   destroy(dom) {
@@ -573,7 +691,12 @@ const THEME = {
   '.cm-map-world': { position: 'absolute', inset: '0', filter: 'saturate(.62) brightness(.86) contrast(1.04)', pointerEvents: 'none' },
   '.cm-map-stage[data-base="dark"] .cm-map-world': { filter: 'grayscale(1) invert(1) brightness(.82) contrast(1.1)' },
   '.cm-map-stage:is([data-base="map"], [data-base="topographic"]) .cm-map-world': { filter: 'saturate(.8) brightness(.94)' },
-  '.cm-map-ground': { position: 'absolute', maxWidth: 'none !important', margin: '0 !important', pointerEvents: 'none' },
+  '.cm-map-ground, .cm-map-detail': { position: 'absolute', maxWidth: 'none !important', margin: '0 !important', pointerEvents: 'none' },
+  // a close-up shows where the ground would blur, or where it does not reach (`editor/mapSurface.js`)
+  '.cm-map-ground': { zIndex: '1' },
+  '.cm-map-detail': { visibility: 'hidden', zIndex: '0' },
+  '.cm-map-detail.cm-map-detail-on': { visibility: 'visible' },
+  '.cm-map-detail.cm-map-detail-over': { zIndex: '2' },
   '.cm-map-drawing, .cm-map-drawing > svg, .cm-map-over': { position: 'absolute', inset: '0', width: '100%', height: '100%' },
   '.cm-map-drawing svg .az-off, .cm-map-drawing svg .az-clash': { opacity: '0', visibility: 'hidden' },
   '.cm-map-drawing svg .az-past': { opacity: '.38', visibility: 'visible' },
@@ -585,6 +708,32 @@ const THEME = {
   '.cm-map-over': { pointerEvents: 'none', overflow: 'visible' },
   '.cm-map-armed .cm-map-over': { pointerEvents: 'auto', cursor: 'crosshair' },
   '.cm-map-armed': { boxShadow: '0 0 0 2px var(--accent)' },
+  // in Draw the map moves: a drag with nothing in hand, Space+drag or the middle button with a tool
+  '.cm-map-nav .cm-map-over': { pointerEvents: 'auto', cursor: 'grab', touchAction: 'none' },
+  '.cm-map-nav.cm-map-armed .cm-map-over': { cursor: 'crosshair' },
+  '.cm-map-nav.cm-map-space .cm-map-over': { cursor: 'grab' },
+  '.cm-map-nav.cm-map-panning .cm-map-over': { cursor: 'grabbing' },
+  '.cm-map-outside': { fill: 'rgba(12, 14, 18, .45)' },
+  '.cm-map-rim': { fill: 'none', stroke: 'rgba(255, 255, 255, .8)', strokeWidth: '1.2px', strokeDasharray: '5 4', vectorEffect: 'non-scaling-stroke' },
+  '.cm-map-zoom': {
+    position: 'absolute', zIndex: '3', top: '10px', left: '10px', display: 'flex', borderRadius: '7px', overflow: 'hidden',
+    background: 'rgba(16, 18, 22, .8)', boxShadow: '0 6px 18px -8px rgba(0, 0, 0, .6)', backdropFilter: 'blur(8px)',
+    fontFamily: 'var(--font-sans)', fontSize: '12px',
+  },
+  '.cm-map-zoom-btn': {
+    display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: '6px', minWidth: '32px', height: '30px', padding: '0 9px',
+    border: 'none', background: 'none', color: '#f2f3f5', font: 'inherit', fontWeight: '600', cursor: 'pointer', whiteSpace: 'nowrap',
+  },
+  '.cm-map-zoom-btn + .cm-map-zoom-btn': { borderLeft: '1px solid rgba(255, 255, 255, .14)' },
+  '.cm-map-zoom-btn:hover, .cm-map-zoom-btn:focus-visible': { background: 'rgba(255, 255, 255, .13)', outline: 'none' },
+  '.cm-map-zoom-btn:disabled': { opacity: '.38', cursor: 'default', background: 'none' },
+  '.cm-map-ruler': {
+    position: 'absolute', zIndex: '2', left: '12px', bottom: '10px', padding: '1px 4px 0', boxSizing: 'border-box', minWidth: '24px',
+    border: '1.5px solid rgba(255, 255, 255, .92)', borderTop: 'none', color: '#fff', font: '600 11px/1.25 var(--font-sans)',
+    textShadow: '0 1px 2px rgba(0, 0, 0, .9)', whiteSpace: 'nowrap', pointerEvents: 'none',
+  },
+  '.cm-map-ruler[hidden]': { display: 'none' },
+  '.cm-map-plain .cm-map-ruler': { borderColor: 'rgba(32, 37, 43, .85)', color: '#20252b', textShadow: 'none' },
   '.cm-map-box': { fill: 'rgba(255, 255, 255, .08)', stroke: '#fff', vectorEffect: 'non-scaling-stroke' },
   '.cm-map-box-new': { strokeDasharray: '6 4', stroke: 'var(--accent)' },
   '.cm-map-box-label': { fill: '#fff', fontFamily: 'var(--font-sans)', fontWeight: '700', paintOrder: 'stroke', stroke: 'rgba(12, 14, 18, .8)', strokeWidth: '3px' },
@@ -594,9 +743,12 @@ const THEME = {
   '.cm-map-holder > .cm-map-said': { left: '22px', bottom: '22px' },
   '.cm-map-drawing-on .cm-map-said': { display: 'none' },
   '.cm-map-hint': {
+    display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: '6px 12px',
     margin: '0 12px 10px', padding: '6px 10px', borderRadius: '6px', background: 'var(--accent-soft)', color: 'var(--text-1)',
     fontFamily: 'var(--font-sans)', fontSize: '12px',
   },
+  '.cm-map-hint-words': { flex: '1 1 260px', minWidth: '0' },
+  '.cm-map-hint .cm-map-file-view': { flex: 'none', height: '26px' },
   '.cm-map-hint[hidden]': { display: 'none' },
   '.cm-map-settings': {
     display: 'flex', flexDirection: 'column', gap: '0', background: 'var(--bg-2)', borderBottom: '1px solid var(--border)',

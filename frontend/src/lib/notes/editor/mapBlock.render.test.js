@@ -10,7 +10,7 @@ import { undo } from '@codemirror/commands';
  * and an area, a point or a line drawn on the map into the layer the map names.
  */
 
-const server = vi.hoisted(() => ({ asked: [], described: null, ground: null, feature: null }));
+const server = vi.hoisted(() => ({ asked: [], described: null, ground: null, feature: null, detail: null }));
 vi.mock('../../api.js', async (original) => {
   const real = await original();
   return {
@@ -23,6 +23,7 @@ vi.mock('../../api.js', async (original) => {
         if (path.endsWith('/notes/maps/ground')) return server.ground(body);
         if (path.endsWith('/notes/maps/layer')) return { name: 'The front, drawn', title: 'The front, drawn' };
         if (path.endsWith('/notes/maps/features')) return server.feature(body);
+        if (path.endsWith('/notes/maps/detail')) return server.detail(body);
         throw new Error(`not stood in: ${path}`);
       }),
       patch: vi.fn(async (path, body) => {
@@ -38,6 +39,7 @@ vi.mock('../../api.js', async (original) => {
 });
 
 const { focusedState, noteExtensions, setNoteCase } = await import('../liveMarkdown.js');
+const { projection } = await import('./mapSurface.js');
 const { forgetMaps } = await import('../mapSettings.svelte.js');
 
 const BLOCK = [
@@ -71,6 +73,7 @@ beforeEach(() => {
   server.described = () => DESCRIBED;
   server.ground = () => ({ ground: 'e_osm', details: ['e_osm2'], view: '12.73976, 43.51350, 12.05', filed: ['e_osm', 'e_osm2'], base: 'map' });
   server.feature = (body) => ({ layer: body.layer, key: 'k1' });
+  server.detail = () => ({ detail: 'e_view1', details: ['e_view1'], filed: ['e_view1'] });
   forgetMaps();
 });
 afterEach(() => {
@@ -306,5 +309,201 @@ describe('drawing on the map', () => {
     expect(server.asked.find((one) => one.path.endsWith('/features')).body).toMatchObject({ layer: 'Own', kind: 'point', coords: [expect.closeTo(43.5, 6), expect.any(Number)] });
     expect(server.asked.some((one) => one.path.endsWith('/notes/maps/layer'))).toBe(false);
     expect(block()).toBe(BLOCK);
+  });
+});
+
+describe('moving the map in Draw', () => {
+  /** The map's overlay as wide as its frame, so a press lands where it says and the whole map fills the stage. */
+  function overlay() {
+    const over = map().querySelector('.cm-map-over');
+    over.getBoundingClientRect = () => ({ left: 0, top: 0, width: 1600, height: 1000, right: 1600, bottom: 1000 });
+    return over;
+  }
+  const at = (over, type, x, y, button = 0) => over.dispatchEvent(new MouseEvent(type, { bubbles: true, cancelable: true, button, clientX: x, clientY: y }));
+  /** A turn of the wheel at a point of the stage (happy-dom's WheelEvent keeps no pointer of its own). */
+  const wheel = (over, x, y, deltaY) => {
+    const event = new WheelEvent('wheel', { bubbles: true, cancelable: true, deltaY });
+    Object.defineProperties(event, { clientX: { value: x }, clientY: { value: y } });
+    over.dispatchEvent(event);
+  };
+  const key = (target, type, name) => target.dispatchEvent(new KeyboardEvent(type, { key: name, bubbles: true, cancelable: true }));
+  const stage = () => map().querySelector('.cm-map-stage');
+  const viewBox = () => map().querySelector('.cm-map-drawing svg').getAttribute('viewBox');
+  const tool = (words) => [...panel().querySelectorAll('.cm-map-act')].find((node) => node.textContent === words);
+  const hint = () => map().querySelector('.cm-map-hint');
+  const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+  /** Longitude and latitude at a point of the frame, as the engine draws the map's bounds. */
+  const lonLat = ([x, y]) => projection(DESCRIBED.bounds, DESCRIBED.frame).from([x, y]);
+
+  it('moves only in Draw, with its zoom on the map and how to use it under it, fetching nothing', async () => {
+    await opened('Look');
+    expect(stage().classList.contains('cm-map-nav')).toBe(false);
+    expect(map().querySelector('.cm-map-zoom')).toBeNull();
+    press(tab('Draw'));
+    await settle();
+    expect(stage().classList.contains('cm-map-nav')).toBe(true);
+    expect([...map().querySelectorAll('.cm-map-zoom button')].map((node) => node.getAttribute('aria-label') ?? node.textContent))
+      .toEqual(['Zoom in', 'Zoom out', 'Whole map']);
+    expect(hint().hidden).toBe(false);
+    expect(hint().textContent).toBe('Scroll or pinch to zoom, drag to move the map, 0 for the whole map.');
+    expect(map().querySelector('.cm-map-file-view'), 'at its own frame there is no view to file').toBeNull();
+    expect(server.asked.map((one) => one.path)).toEqual(['/api/cases/c1/notes/maps/describe']);
+    press(tab('Time'));
+    await settle();
+    expect(stage().classList.contains('cm-map-nav')).toBe(false);
+    expect(hint().hidden).toBe(true);
+  });
+
+  it('zooms about the pointer, and a point pressed at that zoom lands where it was pressed', async () => {
+    await opened('Draw');
+    const over = overlay();
+    for (let turn = 0; turn < 6; turn += 1) wheel(over, 400, 250, -100);
+    const k = Math.exp(0.22 * 6);
+    expect(Number(stage().dataset.zoom)).toBeCloseTo(k, 2);
+    // the window is the frame seen k times closer, the point under the pointer kept
+    const [x, y, width, height] = viewBox().split(' ').map(Number);
+    expect(width).toBeCloseTo(1600 / k, 2);
+    expect(height).toBeCloseTo(1000 / k, 2);
+    expect(x + (400 / 1600) * width).toBeCloseTo(400, 2);
+    expect(y + (250 / 1000) * height).toBeCloseTo(250, 2);
+    // the marks keep their size: drawn k times smaller in the map's units
+    press(tool('Point'));
+    at(overlay(), 'pointerdown', 400, 250);
+    await settle();
+    const [lon, lat] = server.asked.find((one) => one.path.endsWith('/features')).body.coords;
+    const [wantLon, wantLat] = lonLat([400, 250]);
+    expect(lon).toBeCloseTo(wantLon, 9);
+    expect(lat).toBeCloseTo(wantLat, 9);
+    expect(lon).toBeCloseTo(43.45, 9);
+    // drawn again, the map keeps where it looked
+    expect(Number(stage().dataset.zoom)).toBeCloseTo(k, 2);
+  });
+
+  it('puts a line’s corners where they are pressed after a move, Space+drag and the middle button moving it without a corner', async () => {
+    await opened('Draw');
+    let over = overlay();
+    for (let turn = 0; turn < 5; turn += 1) wheel(over, 800, 500, -100);
+    press(tool('Line'));
+    over = overlay();
+    stage().focus();
+    const before = viewBox();
+    key(stage(), 'keydown', ' ');
+    at(over, 'pointerdown', 900, 600);
+    at(over, 'pointermove', 700, 500);
+    at(over, 'pointerup', 700, 500);
+    key(stage(), 'keyup', ' ');
+    expect(viewBox()).not.toBe(before);
+    expect(map().querySelectorAll('.cm-map-corner')).toHaveLength(0);
+    const moved = viewBox();
+    at(over, 'pointerdown', 800, 500, 1);
+    at(over, 'pointermove', 860, 520, 1);
+    at(over, 'pointerup', 860, 520, 1);
+    expect(viewBox()).not.toBe(moved);
+    expect(map().querySelectorAll('.cm-map-corner')).toHaveLength(0);
+    expect(hint().querySelector('.cm-map-hint-words').textContent).toBe('Press each corner of the line, then press the last one again or Enter. '
+      + 'Backspace takes a corner back. Space+drag or the middle button moves the map.');
+    // a corner pressed lands on the point of the map shown there (the window read back to a thousandth of a unit)
+    const [x, y, width, height] = viewBox().split(' ').map(Number);
+    const frameAt = ([px, py]) => [x + (px / 1600) * width, y + (py / 1000) * height];
+    at(over, 'pointerdown', 300, 300);
+    at(over, 'pointerdown', 1200, 700);
+    key(stage(), 'keydown', 'Enter');
+    await settle();
+    const drawn = server.asked.find((one) => one.path.endsWith('/features')).body;
+    expect(drawn.kind).toBe('line');
+    [frameAt([300, 300]), frameAt([1200, 700])].forEach((point, index) => {
+      expect(drawn.coords[index][0]).toBeCloseTo(lonLat(point)[0], 6);
+      expect(drawn.coords[index][1]).toBeCloseTo(lonLat(point)[1], 6);
+    });
+  });
+
+  it('shows its frame again on Whole map or 0, and leaving Draw shows the block’s own view, no line written', async () => {
+    await opened('Draw');
+    const over = overlay();
+    for (let turn = 0; turn < 4; turn += 1) wheel(over, 300, 300, -100);
+    expect(viewBox()).not.toBe('0 0 1600 1000');
+    const whole = [...map().querySelectorAll('.cm-map-zoom button')].find((node) => node.textContent === 'Whole map');
+    expect(whole.disabled).toBe(false);
+    press(whole);
+    await wait(400);
+    expect(viewBox()).toBe('0 0 1600 1000');
+    expect(whole.disabled).toBe(true);
+    wheel(over, 300, 300, -100);
+    stage().focus();
+    key(stage(), 'keydown', '0');
+    await wait(400);
+    expect(viewBox()).toBe('0 0 1600 1000');
+    for (let turn = 0; turn < 4; turn += 1) wheel(over, 300, 300, -100);
+    press(tab('Look'));
+    await settle();
+    expect(stage().classList.contains('cm-map-nav')).toBe(false);
+    expect(viewBox()).toBe('0 0 1600 1000');
+    expect(block()).toBe(BLOCK);
+    expect(server.asked.map((one) => one.path)).toEqual(['/api/cases/c1/notes/maps/describe']);
+  });
+
+  it('zooms twice as close a press of +, two presses in a row four times, about its middle', async () => {
+    await opened('Draw');
+    overlay();
+    const [zoomIn, zoomOut] = map().querySelectorAll('.cm-map-zoom button');
+    press(zoomIn);
+    press(zoomIn);
+    await wait(400);
+    expect(Number(stage().dataset.zoom)).toBe(4);
+    expect(viewBox()).toBe('600 375 400 250');
+    stage().focus();
+    key(stage(), 'keydown', '-');
+    await wait(400);
+    expect(Number(stage().dataset.zoom)).toBe(2);
+    press(zoomOut);
+    press(zoomOut);
+    await wait(400);
+    expect(Number(stage().dataset.zoom)).toBe(0.5);
+    expect(zoomOut.disabled, 'half the whole map is as far out as it goes').toBe(true);
+  });
+
+  it('lays the close-ups the block files once the map moves, each from its file in the case', async () => {
+    server.described = () => ({ ...DESCRIBED, details: [{ id: 'e_d1', path: 'media/close one.png', bounds: [43.45, 12.7, 43.5, 12.73] }] });
+    await opened('Look');
+    expect(map().querySelector('img.cm-map-detail')).toBeNull();
+    press(tab('Draw'));
+    await settle();
+    const detail = map().querySelector('img.cm-map-detail');
+    expect(detail.getAttribute('src')).toBe('/files/c1/media/close%20one.png');
+    expect(Number.parseFloat(detail.style.left)).toBeCloseTo(25, 6);
+    expect(Number.parseFloat(detail.style.width)).toBeCloseTo(25, 6);
+  });
+
+  it('files the ground for the view it shows as one more close-up, one line and one Undo step', async () => {
+    await opened('Draw');
+    const over = overlay();
+    for (let turn = 0; turn < 6; turn += 1) wheel(over, 400, 250, -100);
+    const file = map().querySelector('.cm-map-file-view');
+    expect(file.textContent).toBe('File the ground for this view');
+    press(file);
+    await settle();
+    const asked = server.asked.find((one) => one.path.endsWith('/notes/maps/detail')).body;
+    const [x, y, width, height] = viewBox().split(' ').map(Number);
+    const [west, north] = lonLat([x, y]);
+    const [east, south] = lonLat([x + width, y + height]);
+    expect(asked).toMatchObject({ text: BLOCK, base: 'satellite' });
+    for (const [side, want] of Object.entries({ west, south, east, north })) expect(asked[side]).toBeCloseTo(want, 6);
+    expect(lines()).toEqual(['::: map', 'title: The front', 'layer: Front line', 'layer: Vehicles', 'proofs: 2026-10-19..2026-11-02',
+      'ground: e_g1', 'detail: e_view1', 'view: 12.73976, 43.51350, 12.05', ':::']);
+    expect(handlers.tableToast).toHaveBeenCalledWith('Ground filed for this view', [], undefined);
+    undo(view);
+    expect(block()).toBe(BLOCK);
+  });
+
+  it('says why a view cannot be filed offline, and the map keeps what it has', async () => {
+    server.detail = () => { throw new Error('The imagery of this view could not be fetched, so the map keeps what it has. Try again once online.'); };
+    await opened('Draw');
+    const over = overlay();
+    wheel(over, 400, 250, -100);
+    press(map().querySelector('.cm-map-file-view'));
+    await settle();
+    expect(block()).toBe(BLOCK);
+    expect(handlers.tableToast).toHaveBeenCalledWith('The imagery of this view could not be fetched, so the map keeps what it has. Try again once online.', [], 'warn');
+    expect(map().querySelector('.cm-map-file-view').disabled).toBe(false);
   });
 });

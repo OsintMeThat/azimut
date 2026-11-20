@@ -7672,7 +7672,18 @@ light fill, its words on its middle, proposed as its size, *about 15 km²*), *Po
 takes a corner back, Escape gives up); each lands in a personal layer of the case made for the map
 at its first drawing and named in the block (`layer:`), so it is case data used, bundled and
 trashed like any other, never a line of the block; each is listed with its name, colour, first and
-last day and *On the map*, and its toast has an Undo. **Time**: the timeline on or off, the day it
+last day and *On the map*, and its toast has an Undo. In Draw the map moves, so a corner goes down
+where it is meant: the wheel, a pinch, + and − zoom it about the pointer, a drag moves it, and 0 or
+*Whole map* shows its frame again, whole and undistorted, what lies outside the frame dimmed, a scale
+in its corner. With a tool in hand a press still puts a corner down, and Space+drag or the middle
+button moves the map; the line under the map says so. It is drawn on the ground and its close-ups
+(`detail:`), each from its own pixels, a close-up shown where the ground would blur, and plain where
+the case holds no picture: opening Draw fetches nothing, moving never writes a line, and leaving Draw
+shows the block's own view again. Once the map has moved, **File the ground for this view** files the
+picture of what it shows on that press (Esri, or the base's own map), cited again when that view was
+filed before, as one more `detail:` line and one Undo step. It is a close-up rather than a new
+ground, so the map's ground, frame and printed picture stay as they were; a map keeps 8, and offline
+the press says so and the map keeps what it has. **Time**: the timeline on or off, the day it
 opens on (a day of its own becomes a stop of the slider), Play's pace; the steps, its plate's or its
 proofs' until one is changed, then its own (`step: day | label | lat, lon, zoom | proof | words`):
 moved, framed by a rectangle dragged on the map, named, given their words, taken out or added.

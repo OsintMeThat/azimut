@@ -1,8 +1,8 @@
 /**
  * What a map's settings card asks of the case (`api/notemaps.py`): the map as it shows now,
- * read for the card to draw it and draw on it; the ground of another base or frame, filed on
- * the press that picks it; a map started from nothing; and the points, lines and areas drawn
- * on it, kept in a personal layer of the case the block names.
+ * read for the card to draw it and draw on it; the ground of another base or frame, or of the
+ * view its Draw tab shows, filed on the press that asks for it; a map started from nothing; and
+ * the points, lines and areas drawn on it, kept in a personal layer of the case the block names.
  *
  * What is drawn on a map is case data, not a line of the note, so the Page pane is told
  * (`mapsChanged`) and draws the page again at once, as it does when a picture's source is
@@ -54,6 +54,14 @@ export function forgetMaps() {
 /** The ground of `base` filed for the map as framed now: `{ ground, details, view, filed, base }`. */
 export function fileGround(caseId, { text, base: wanted, provider }, { post = api.post } = {}) {
   return post(`${base(caseId)}/ground`, { text, base: wanted, ...(provider ? { provider } : {}) });
+}
+
+/**
+ * The ground of what a map's Draw tab shows now, `{ west, south, east, north }`, filed on the
+ * press as a close-up of the map: `{ detail, details, filed }`, `details` its `detail` lines.
+ */
+export function fileView(caseId, { text, base: wanted, west, south, east, north }, { post = api.post } = {}) {
+  return post(`${base(caseId)}/detail`, { text, base: wanted, west, south, east, north });
 }
 
 /** A map from nothing: `{ title, west, south, east, north, base, provider }` → `{ text, filed, layer }`. */

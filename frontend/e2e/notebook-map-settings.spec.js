@@ -5,7 +5,9 @@ import { CASE_ID, installAppFixture } from './app.fixture.js';
  * A map's settings on its card in the drawn note: the base filed on its press, the day the
  * timeline opens on and Play's pace, each one line of the block and one Undo step, and an area
  * outlined on the map into a layer of the map's own. Then a map from nothing: a place framed
- * on the app's map, put in the note, a point put on its card. The server is stood in for.
+ * on the app's map, put in the note, a point put on its card. Then the Draw tab's map moved:
+ * zoomed in, a point put where it is pressed, its whole frame again, and nothing of the view
+ * written. The server is stood in for.
  */
 
 const BLOCK = ['::: map', 'title: The front', 'layer: Front line', 'proofs: 2026-10-19..2026-11-02', 'ground: e_g1',
@@ -118,7 +120,8 @@ test('a map’s settings change its base and its timeline, each one line, and an
   // an area outlined on the map, its size said, in a layer made for the map
   await settings.getByRole('tab', { name: 'Draw' }).click();
   await settings.getByRole('button', { name: 'Area to highlight' }).click();
-  await expect(map.locator('.cm-map-hint')).toHaveText('Press each corner round the area to highlight, then the first one again or Enter.');
+  await expect(map.locator('.cm-map-hint-words')).toHaveText('Press each corner round the area to highlight, then the first one again or Enter. '
+    + 'Space+drag or the middle button moves the map.');
   const box = await map.locator('.cm-map-stage').boundingBox();
   for (const [x, y] of [[0.3, 0.3], [0.5, 0.3], [0.5, 0.55], [0.3, 0.55]]) await page.mouse.click(box.x + box.width * x, box.y + box.height * y);
   await page.mouse.click(box.x + box.width * 0.3, box.y + box.height * 0.3);
@@ -165,4 +168,69 @@ test('a map from nothing frames a place, lands in the note on its Draw tab, and 
   await expect.poll(() => state.features.length).toBe(1);
   expect(state.features[0]).toMatchObject({ layer: 'Drawn on the quay', kind: 'point' });
   expect(state.features[0].coords[0]).toBeCloseTo(43.5, 2);
+});
+
+test('in Draw the map moves: zoomed in, a point lands where it is pressed, then its whole frame, nothing of the view written', async ({ page, browserName }) => {
+  test.skip(browserName !== 'chromium', 'one browser is enough for the card');
+  const outside = [];
+  page.on('request', (request) => {
+    const { hostname } = new URL(request.url());
+    if (!['127.0.0.1', 'localhost'].includes(hostname)) outside.push(request.url());
+  });
+  const state = await notebook(page, `# Lead\n\nSeen at the quay.\n\n${BLOCK}\n\nAfter.\n`);
+  await page.goto('/#notebook');
+  await page.locator('button[title="Open Lead"]').click();
+  const map = page.locator('.cm-map-block');
+  await expect(map.locator('.cm-map-drawing svg')).toBeVisible();
+  await map.getByRole('button', { name: 'Draw' }).click();
+  const stage = map.locator('.cm-map-stage');
+  await expect(stage).toHaveClass(/cm-map-nav/);
+  await expect(map.locator('.cm-map-hint-words')).toHaveText('Scroll or pinch to zoom, drag to move the map, 0 for the whole map.');
+  await stage.scrollIntoViewIfNeeded();
+  const box = await stage.boundingBox();
+  // the whole map: the frame (1600 by 1000 of its units) fitted whole in the middle of the stage
+  const scale = Math.min(box.width / 1600, box.height / 1000);
+  const whole = [800 - box.width / scale / 2, 500 - box.height / scale / 2, box.width / scale, box.height / scale];
+  const viewBox = async () => (await map.locator('.cm-map-drawing svg').getAttribute('viewBox')).split(' ').map(Number);
+  const isWhole = async () => (await viewBox()).every((value, index) => Math.abs(value - whole[index]) < 0.05);
+  expect(await isWhole()).toBe(true);
+
+  // the wheel zooms about the pointer, which stays over the same place of the map
+  const aim = [box.width * 0.25, box.height * 0.3];
+  const under = [800 + (aim[0] - box.width / 2) / scale, 500 + (aim[1] - box.height / 2) / scale];
+  await page.mouse.move(box.x + aim[0], box.y + aim[1]);
+  for (let turn = 0; turn < 5; turn += 1) await page.mouse.wheel(0, -100);
+  await expect.poll(async () => Number(await stage.getAttribute('data-zoom'))).toBeGreaterThan(2.5);
+  await expect(map.getByRole('button', { name: 'File the ground for this view' })).toBeVisible();
+
+  // a point put there lands on that place, in longitude and latitude
+  await map.getByRole('button', { name: 'Point', exact: true }).click();
+  await expect(map.locator('.cm-map-hint-words')).toHaveText('Press where the point goes. Esc cancels. Space+drag or the middle button moves the map.');
+  const now = await stage.boundingBox();
+  await page.mouse.click(now.x + aim[0], now.y + aim[1]);
+  await expect.poll(() => state.features.length).toBe(1);
+  const [lon, lat] = state.features[0].coords;
+  const mercY = (value) => 0.5 - Math.log((1 + Math.sin((value * Math.PI) / 180)) / (1 - Math.sin((value * Math.PI) / 180))) / (4 * Math.PI);
+  const unmercY = (y) => (Math.atan(Math.sinh(Math.PI * (1 - 2 * y))) * 180) / Math.PI;
+  // within a pixel at this zoom: a few metres
+  expect(Math.abs(lon - (43.4 + (0.2 * under[0]) / 1600))).toBeLessThan(2e-4);
+  expect(Math.abs(lat - unmercY(mercY(12.8) + ((mercY(12.68) - mercY(12.8)) * under[1]) / 1000))).toBeLessThan(2e-4);
+  // drawn again with the point, the map stays where it looked
+  await expect.poll(() => blockOf(state.written.at(-1) ?? '')).toContain('layer: The front, drawn');
+  expect(Number(await stage.getAttribute('data-zoom'))).toBeGreaterThan(2.5);
+
+  // Whole map shows the block's own frame again
+  await map.getByRole('button', { name: 'Whole map' }).click();
+  await expect.poll(isWhole).toBe(true);
+  await expect(map.getByRole('button', { name: 'Whole map' })).toBeDisabled();
+
+  // leaving Draw holds the map still; the block gained the drawing's layer and nothing else
+  await page.mouse.move(now.x + aim[0], now.y + aim[1]);
+  await page.mouse.wheel(0, -200);
+  await expect.poll(isWhole).toBe(false);
+  await map.getByRole('tab', { name: 'Look' }).click();
+  await expect(stage).not.toHaveClass(/cm-map-nav/);
+  expect(await viewBox()).toEqual([0, 0, 1600, 1000]);
+  expect(blockOf(state.written.at(-1))).toBe(BLOCK.replace('layer: Front line', 'layer: Front line\nlayer: The front, drawn'));
+  expect(outside, 'Draw reaches nothing outside the app').toEqual([]);
 });

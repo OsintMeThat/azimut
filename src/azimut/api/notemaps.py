@@ -39,6 +39,9 @@ DETAIL_GAIN = 1.5
 DETAIL_FROM = 1.2
 #: The basemap a map's ground is taken from unless the put names another.
 DEFAULT_PROVIDER = "esri-world-imagery"
+#: The closest a view filed from the Draw tab is framed at (the map engine's zoom): past it the
+#: imagery holds no sharper tile, so the picture filed covers more than the view, at its best.
+VIEW_MOST = 18.0
 
 
 class MapIn(BaseModel):
@@ -206,7 +209,8 @@ def _file_ground(case_id: str, lat: float, lon: float, zoom: float, provider_id:
 # The card on a map in the drawn note (`editor/mapBlock.js`) writes each choice as a line
 # of the block itself, one Undo step a choice. These answer what it asks of the case: what
 # the map shows now, drawn as the page draws it, so the card can be drawn on; the ground of
-# another base or frame, filed on the press that picks it; a map started from nothing; and
+# another base or frame, or of the view its Draw tab shows, filed on the press that asks for
+# it; a map started from nothing; and
 # the points, lines and areas drawn on it, which are features of a personal layer the block
 # names, never lines of the block.
 
@@ -284,6 +288,14 @@ def describe_map(case_id: str, body: BlockIn) -> dict[str, Any]:
         path = str(((record or {}).get("attrs") or {}).get("path") or "")
         if path:
             ground = {"id": block.ground, "path": path, "bounds": data["ground"]["bounds"]}
+    # its close-ups, which the Draw tab lays where they stand once the map moves closer than its ground holds
+    details = []
+    for entity_id in block.details:
+        record = case.get_entity(entity_id) if notes_maps.ENTITY_ID.match(entity_id) else None
+        path = str(((record or {}).get("attrs") or {}).get("path") or "")
+        found = notes_maps._ground(case, entity_id, encode=None, side=0) if path else None
+        if found is not None:
+            details.append({"id": entity_id, "path": path, "bounds": found["bounds"]})
     steps = []
     for step in data.get("steps") or []:
         view = step.get("view") or {}
@@ -295,7 +307,7 @@ def describe_map(case_id: str, body: BlockIn) -> dict[str, Any]:
     return {
         "title": block.title, "base": block.shown_base(), "bounds": data["bounds"], "frame": [width, height],
         "extent": notes_maps._features_bounds(data["features"], None) if data["features"] else None,
-        "view": data["view"], "ground": ground, "svg": notes_maps.svg(derived, ident="cm-map"),
+        "view": data["view"], "ground": ground, "details": details, "svg": notes_maps.svg(derived, ident="cm-map"),
         "layers": layers, "others": others, "drawings": drawings,
         "proofs": {"count": len(days), "first": min(days) if days else "", "last": max(days) if days else ""},
         "days": data.get("days") or [], "day": data.get("day") or "", "steps": steps, "own_steps": bool(block.steps),
@@ -367,6 +379,49 @@ def file_ground(case_id: str, body: GroundIn) -> dict[str, Any]:
     view = f"{lat:.5f}, {lon:.5f}, {notes_maps._num(zoom, 2)}"
     return {"ground": str(ground["id"]), "details": details, "view": view, "filed": filed,
             "base": "" if body.base == "satellite" else body.base}
+
+
+class ViewIn(BlockIn):
+    #: What the Draw tab shows when the press is made.
+    west: float = Field(ge=-180, le=180, allow_inf_nan=False)
+    south: float = Field(ge=-85, le=85, allow_inf_nan=False)
+    east: float = Field(ge=-180, le=180, allow_inf_nan=False)
+    north: float = Field(ge=-85, le=85, allow_inf_nan=False)
+    base: Literal["satellite", "map", "topographic", "dark"] = "satellite"
+    provider: str = Field(default=DEFAULT_PROVIDER, max_length=200)
+
+
+@router.post("/cases/{case_id}/notes/maps/detail")
+def file_view(case_id: str, body: ViewIn) -> dict[str, Any]:
+    """The ground of the view a map's Draw tab shows, filed on this press as one more close-up
+    of the map (a ``detail``), the way a step's is filed: laid over the ground where it stands,
+    so the ground, the frame and the page's picture of the map stay as they were. A view filed
+    before is cited again, nothing fetched. Answers the ``detail`` lines to write and what was
+    filed fresh; refuses when the map holds every close-up it keeps, and when the imagery cannot
+    be fetched, the map keeping what it has."""
+    get_case(case_id)
+    if not (body.west < body.east and body.south < body.north):
+        raise HTTPException(status_code=422, detail="Move the map onto a place first")
+    block = _block_of(body.text)
+    if len(block.details) >= notes_maps.MAX_DETAILS:
+        raise HTTPException(status_code=422, detail=f"This map keeps {notes_maps.MAX_DETAILS} close-ups at most. "
+                                                    "Take one out in its source first.")
+    lat, lon, zoom = notes_maps.fit_view([body.west, body.south, body.east, body.north], FRAME_W, FRAME_H,
+                                         pad=0.0, most=VIEW_MOST)
+    provider = BASE_PROVIDERS.get(body.base, body.provider or DEFAULT_PROVIDER)
+    try:
+        detail, fresh = _file_ground(case_id, lat, lon, zoom, provider)
+    except HTTPException as exc:
+        if exc.status_code in (404, 422):
+            raise
+        word = {"map": "street map", "topographic": "topographic map", "dark": "street map"}.get(body.base, "imagery")
+        raise HTTPException(status_code=503, detail=f"The {word} of this view could not be fetched, so the map keeps "
+                                                    "what it has. Try again once online.") from exc
+    ident = str(detail["id"])
+    details = list(block.details)
+    if ident not in details and ident != block.ground:
+        details.append(ident)
+    return {"detail": ident, "details": details, "filed": [ident] if fresh else []}
 
 
 class ScratchIn(BaseModel):
