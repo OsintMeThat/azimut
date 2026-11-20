@@ -9,7 +9,10 @@
 .az-mappage-head .az-title { margin: 0; font: 700 clamp(1.4rem, 1rem + 1.4vw, 2.1rem)/1.15 var(--head); letter-spacing: -.01em; text-wrap: balance; }
 .az-mappage-sub { margin: .35rem 0 0; max-width: 60em; font: 400 1rem/1.45 var(--ui); color: var(--ink-2); }
 .az-mappage-by { display: flex; flex-wrap: wrap; align-items: baseline; gap: .2rem 1rem; margin: .5rem 0 0; font: 600 .8125rem/1.3 var(--ui); color: var(--muted); }
-.az-mappage-site { color: inherit; }
+.az-mappage-site { display: inline-flex; align-items: center; gap: .5rem; color: inherit; }
+.az-mappage-site .az-my-logo { height: 1.75rem; width: auto; }
+.az-mappage-handle { font-weight: 500; color: inherit; }
+.az-mappage-mark { display: none; }
 .az-mappage-views { font-weight: 500; font-variant-numeric: tabular-nums; }
 .az-mappage-views[hidden] { display: none; }
 .az-mappage-main > .az-map { margin: 0 var(--gutter) 1.5rem; }
@@ -46,7 +49,16 @@
   .az-js .az-mappage-sub { margin-top: .15rem; font-size: .875rem; display: -webkit-box; -webkit-line-clamp: 2; line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
   .az-js .az-mappage-by { flex: none; margin: 0; flex-direction: column; align-items: flex-end; gap: .15rem; text-align: right; }
   .az-js .az-mappage-site { color: #fff; text-decoration: none; }
-  .az-js a.az-mappage-site:hover { text-decoration: underline; }
+  .az-js a.az-mappage-site:hover, .az-js a.az-mappage-handle:hover { text-decoration: underline; }
+  /* the logo and handle on the map, above its scale */
+  .az-js .az-map-frame > .az-mappage-mark {
+    position: absolute; left: .75rem; bottom: 2.5rem; z-index: 4; display: inline-flex; align-items: center; gap: .45rem;
+    padding: .2rem .7rem .2rem .2rem; border-radius: 999px; background: rgba(15, 16, 18, .74); color: #fff;
+    font: 600 .8125rem/1 var(--ui); text-decoration: none;
+  }
+  .az-js .az-map-frame > .az-mappage-mark .az-my-logo { height: 1.6rem; width: auto; }
+  .az-js .az-map-frame > a.az-mappage-mark:hover span { text-decoration: underline; }
+  .az-js .az-mappage-handle { color: rgba(255, 255, 255, .72); text-decoration: none; }
   .az-js .az-mappage-main { grid-area: map; display: grid; min-height: 0; min-width: 0; }
   .az-js .az-mappage-main > .az-map {
     display: grid; grid-template-rows: minmax(0, 1fr) auto auto; gap: 0; width: auto; max-width: none; min-height: 0; margin: 0;

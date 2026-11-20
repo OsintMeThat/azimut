@@ -91,6 +91,38 @@ def test_a_map_page_says_the_looks_subtitle_and_the_analysts_name_linked_to_thei
     assert '<span class="az-mappage-site">A. Analyst</span>' in page
 
 
+def test_a_map_page_header_carries_the_analysts_logo_with_their_name_and_their_handle(tmp_path, monkeypatch):
+    """Settings › Publishing's logo goes before the name, both opening the Website, and the
+    proofs' handle follows, opening the X account it names; another platform's stays unlinked."""
+    logo = tmp_path / "logo.png"
+    Image.new("RGB", (200, 200), (120, 60, 200)).save(logo, "PNG")
+    who = notefill.Identity(name="A. Analyst", logo=logo, site="https://desk.example.org/", handle="@desk_maps")
+    page, _, _ = _page(tmp_path, monkeypatch, identity=who)
+    head = page[page.index('<header class="az-mappage-head"'):page.index("</header>")]
+    site = head[head.index('<a class="az-mappage-site" href="https://desk.example.org/"'):]
+    assert site.index('class="az-my-logo"') < site.index("A. Analyst</a>")
+    assert ('<a class="az-mappage-handle" href="https://x.com/desk_maps" target="_blank" rel="noopener noreferrer">'
+            '@desk_maps</a>') in head
+    # the same logo and handle on the map itself, for a phone's header and a screenshot
+    main = page[page.index('<main class="az-mappage-main"'):page.index("</main>")]
+    mark = main[main.index('<a class="az-mappage-mark" href="https://x.com/desk_maps"'):]
+    assert main.index('figure class="az-figure az-map') < main.index("az-mappage-mark")
+    assert mark.index('class="az-my-logo"') < mark.index("<span>@desk_maps</span></a>")
+    other = notefill.Identity(name="A. Analyst", handle="@desk.bsky.social")
+    page, _, _ = _page(tmp_path, monkeypatch, identity=other)
+    assert '<span class="az-mappage-handle">@desk.bsky.social</span>' in page
+    assert 'class="az-my-logo"' not in page[page.index('<header class="az-mappage-head"'):page.index("</header>")]
+
+
+def test_the_handle_comes_from_the_proofs_setting_and_names_an_x_account_only_when_it_is_one(monkeypatch):
+    monkeypatch.setattr(notefill.config, "load_settings", lambda: {"report_name": "A. Analyst",
+                                                                   "signature_handle": " @desk_maps "})
+    assert notefill.Identity.from_settings().handle == "@desk_maps"
+    assert notefill.Identity(handle="desk_maps").handle_url() == "https://x.com/desk_maps"
+    assert notefill.Identity(handle="@desk.bsky.social").handle_url() == ""
+    assert notefill.Identity().handle_url() == ""
+
+
 def test_a_map_page_with_no_map_reads_as_an_article_and_says_so(tmp_path, monkeypatch):
     page, rendered, _ = _page(tmp_path, monkeypatch, text="Words, and no map.\n")
     assert 'class="az-mappage' not in page and '<main class="az-body" id="main">' in page

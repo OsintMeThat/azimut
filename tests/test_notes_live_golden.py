@@ -65,11 +65,12 @@ LOOKS = {"article": NoteLook(), "story": NoteLook.model_validate({"web": "story"
 #: on the merged branch, are those twenty-three lines and nothing else.
 #: 2026-11-20: a map step's words under its name, on its story card and under the row of steps: four
 #: lines of reader.map.css, nothing else.
+#: 2026-11-20: the analyst's name and logo link to their Website: four lines of reader.css, nothing else.
 GOLDEN = {
-    "single-article": "0b4e5163c41f1d1366ec993ddd3cb3f65bcafbeaca557e39ee37c5f2e7f879f9",
-    "single-story": "ab22570ec12c39ecc74eab2ac8b235728b5a7f905089c3aa0aac2315544182aa",
-    "folder-article": "07f44dbb8f78c5ddcbdf1bdde5feaed7a5b3efb637bc2e46d4c22aacad356099",
-    "folder-story": "7bd63e48df2b520dabe0a26ca7f67a7a846e0bb024f0204361afcc080c1ce043",
+    "single-article": "2b3715a8e1bf0235fd46d6d86745d039fd0bb1474cec6b23be27f5f180b93711",
+    "single-story": "141ec3b328b437ccdf4c18a6d1783ae3a50e1666053e6fb47f4dda269d3f60dd",
+    "folder-article": "6fdeb533989c6a606940d5ba1115aa4237fe2a0f83589587c140e1f966874a9f",
+    "folder-story": "705b6d3913bedc8517d156288fa4ccc6fdf2d1832203a2487c33b04edc111fc8",
 }
 
 

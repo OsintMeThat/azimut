@@ -7560,9 +7560,12 @@ bottom as the article does.
 map (`engine/notes_html.py` `_map_page`, its sheet and script `reader.mappage.css` and
 `reader.mappage.js`, which only such a page carries). The note's first map takes the window
 under a header: the title, a subtitle (the Cover's subtitle, else the note's first paragraph)
-and the analyst's name or organisation from Settings › Publishing, linked to its **Website**
-when one is set there, and standing unlinked otherwise (never the GitHub Pages site's root,
-which may hold no page). The map is held as on the whole screen (whole in its
+and the analyst's logo and name or organisation from Settings › Publishing, linked to its
+**Website** when one is set there, and standing unlinked otherwise (never the GitHub Pages
+site's root, which may hold no page), then the account handle of *On proofs*, linked to the X
+account it names (another platform's stands unlinked). The same logo and handle sit in the
+map's own lower-left corner, where a phone, whose header has no room for them, and a
+screenshot of the map keep them. The map is held as on the whole screen (whole in its
 middle, the wheel and one finger its own, no Ctrl), its timeline and credit under it, and a
 panel beside it holds **Find on the map** (every word of a feature, its name, group, layer,
 day and columns, local; a result opens on a day it is on, its row switched back on, the map
@@ -8695,7 +8698,9 @@ in each page. The settings backup carries them with every other template.
 *On proofs* (the account handle). *In reports* holds the **Logo** (the picture the proof
 composer and the Map plate already use), **Name**, **Role** and **Organisation** (one
 line each, 80 characters at most), the **Website** (an `https` address, typed with or without
-it, which a web map's header links the name to; refused with what is wrong otherwise) and the **Signature**, a PNG of a handwritten
+it, which the name and the logo link to wherever a document shows them: the byline, the
+cover, the signature at the end, a web map's header, in the page, the PDF and the WordPress
+draft; refused with what is wrong otherwise) and the **Signature**, a PNG of a handwritten
 signature up to 1 MB, a transparent one recommended; each field says what it takes and
 where it prints. The settings backup carries them all.
 

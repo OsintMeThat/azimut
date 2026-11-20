@@ -16,6 +16,9 @@
     const shownOn = (feature, day) => !day || ((!feature.from || feature.from <= day) && (!feature.until || day <= feature.until));
     page.classList.add('az-paged-page');
     map.page();
+    /* the analyst's logo and handle, in the map's own corner */
+    const mark = page.querySelector('.az-mappage-mark');
+    if (mark) figure.querySelector('.az-map-frame')?.append(mark);
 
     const panel = make('aside', { class: 'az-mappage-panel', id: 'az-mappage-panel', 'aria-label': 'Layers and search' });
     const shut = make('button', { type: 'button', class: 'az-mappage-shut', 'aria-label': 'Close the panel', title: 'Close' }, '×');

@@ -801,7 +801,8 @@ class NotePage(FPDF):
                 self.set_x(left)
                 self.set_font(self.theme.heading_family, "", 10)
                 self.set_text_color(*theme.ink)
-                self.multi_cell(frame, 5.2, byline, align=Align.L, new_x=XPos.LMARGIN, new_y=YPos.NEXT)
+                self.multi_cell(frame, 5.2, byline, align=Align.L, new_x=XPos.LMARGIN, new_y=YPos.NEXT,
+                                link=self.signer.site)
             self.ln(7)
             self.set_x(left)
             self.set_font(self.theme.heading_family, "B", 10)
@@ -842,7 +843,11 @@ class NotePage(FPDF):
             tall = COVER_LOGO_HEIGHT
             drawn = min(COVER_LOGO_WIDTH, tall * wide / high)
             tall = drawn * high / wide
-            self.place_picture(path, x=x, y=top + (COVER_LOGO_HEIGHT - tall) / 2, w=drawn, h=tall)
+            y = top + (COVER_LOGO_HEIGHT - tall) / 2
+            self.place_picture(path, x=x, y=y, w=drawn, h=tall)
+            site = self.signer.site if self.signer is not None and name == "my-logo" else ""
+            if site:
+                self.link(x, y, drawn, tall, site)
             x += drawn + 7.0
 
     def signature_block(self, left: float, width: float) -> float:
@@ -865,7 +870,7 @@ class NotePage(FPDF):
             self.set_x(left)
             self.set_font(self.theme.heading_family, "B", 9.5)
             self.set_text_color(*self.theme.ink)
-            self.cell(width, 5, signer.name, new_x=XPos.LMARGIN, new_y=YPos.NEXT)
+            self.cell(width, 5, signer.name, new_x=XPos.LMARGIN, new_y=YPos.NEXT, link=signer.site)
             credentials = signer.credentials()
             if credentials:
                 self.set_x(left)

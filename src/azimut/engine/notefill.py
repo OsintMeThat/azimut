@@ -83,6 +83,12 @@ def _one_line(value: object) -> str:
     return " ".join(value.split())[:MAX_IDENTITY] if isinstance(value, str) else ""
 
 
+#: An X account as Settings › Publishing keeps it (`@name`, the @ optional): what a handle must
+#: be for its words to link to the account. Another platform's handle (a Bluesky domain) shows
+#: unlinked.
+X_HANDLE = re.compile(r"@?([A-Za-z0-9_]{1,15})")
+
+
 def site_of(value: object) -> str:
     """A site's address as Settings keeps it, checked as a web folder's address is; "" for none."""
     from .notes_web import NotesWebError, address
@@ -102,9 +108,12 @@ class Identity:
     organisation: str = ""
     logo: Path | None = None
     signature: Path | None = None
-    #: The analyst's own site, as Settings › Publishing › Website keeps it, which a map page's
-    #: header links their name to; "" while none is set, the name then standing unlinked.
+    #: The analyst's own site, as Settings › Publishing › Website keeps it, which their name and
+    #: logo link to wherever a document shows them; "" while none is set, both then unlinked.
     site: str = ""
+    #: The account handle Settings › Publishing stamps on proofs (`@name`), which a map page's
+    #: header shows beside the name; "" while none is set.
+    handle: str = ""
 
     @classmethod
     def from_settings(cls) -> "Identity":
@@ -116,6 +125,7 @@ class Identity:
             logo=logo if logo.is_file() else None,
             signature=signature if signature.is_file() else None,
             site=site_of(settings.get("report_site")),
+            handle=_one_line(settings.get("signature_handle")),
         )
 
     def values(self, day: date) -> dict[str, str]:
@@ -134,6 +144,11 @@ class Identity:
     def credentials(self) -> str:
         """The line under a signature: `Role · Organisation`, either alone, or ""."""
         return " · ".join(part for part in (self.role, self.organisation) if part)
+
+    def handle_url(self) -> str:
+        """The X account the handle names, or "" when it is not an X handle."""
+        found = X_HANDLE.fullmatch(self.handle)
+        return f"https://x.com/{found.group(1)}" if found else ""
 
     def picture(self, name: str) -> Path | None:
         """The file one of the three pictures is, or None while it is not set."""
