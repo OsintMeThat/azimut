@@ -19,8 +19,10 @@ page and where it stands on it (`cover.mode`, `cover.top`): a reader that drops
 them prints the style's cover, and the lines meant for the own page as text. And
 the analyst's own header and footer (`header`, `footer`), written only once a slot
 holds something: a reader that drops them prints the style's own. And how the HTML
-page is laid out (`web`): an article, or a story whose pictures hold still while their
-words scroll by. The PDF never reads it. And which list of sources the document ends on
+page is laid out (`web`): an article, a story whose pictures hold still while their
+words scroll by, or a map page, the note's map on the whole page under its title. The PDF
+never reads it. A map page may name the GoatCounter site that counts its readers (`counter`),
+which only its web folder calls, once read online. And which list of sources the document ends on
 (`sources_list`): the generated one, the note's own section, or both; and the same for the
 How this was made and Geolocations annexes against the note's own Method or Geolocations
 section (`method_list`, `geolocations_list`).
@@ -75,8 +77,12 @@ Size = Literal["", "small", "large"]
 #: The numbered list of sources at the end: "" keeps the style's own, else on or off.
 Sources = Literal["", "on", "off"]
 #: How the HTML page is laid out: "" an article, "story" each picture held still
-#: beside the words that follow it. The PDF prints the same either way.
-Web = Literal["", "story"]
+#: beside the words that follow it, "map" the note's first map on the whole page, its
+#: other words beside it (a web map). The PDF prints the same either way.
+Web = Literal["", "story", "map"]
+#: A GoatCounter site's code, the part of its address before `.goatcounter.com`: what a
+#: map page's web folder counts its readers with. "" counts nobody.
+COUNTER = r"^([a-z0-9](?:[a-z0-9-]{0,48}[a-z0-9])?)?$"
 #: How the sources list writes each source: "" keeps the style's own. `academic` is a
 #: journal's reference list (author, "title", outlet, day, address, archived copy,
 #: accessed), `web` the outlet, the title and the day, `short` the form notes always had.
@@ -103,7 +109,7 @@ ANNEXES: tuple[str, ...] = ("geolocations", "credits", "method", "limits", "edit
 #: Keys a look writes only once they leave their default, so a look that never used
 #: them is stored, served and bundled exactly as an older Azimut wrote it.
 LATE_KEYS = ("font", "size", "sources", "web", "sources_style", "link_check", "sources_list", "method_list",
-             "geolocations_list")
+             "geolocations_list", "counter")
 #: The page bands under the same rule: one with nothing in it is not written.
 BAND_KEYS = ("header", "footer")
 #: The longest a header or footer slot is, in characters: one line of a page's edge.
@@ -335,6 +341,8 @@ class NoteLook(BaseModel):
     #: note's own Method or Geolocations section (`notes_markdown.OWN_SECTIONS`).
     method_list: SourcesList = ""
     geolocations_list: SourcesList = ""
+    #: The GoatCounter site a map page's web folder counts its readers with (`COUNTER`).
+    counter: str = Field(default="", pattern=COUNTER)
     header: PageBand = Field(default_factory=PageBand)
     footer: PageBand = Field(default_factory=PageBand)
 
@@ -358,6 +366,11 @@ class NoteLook(BaseModel):
     @classmethod
     def lower_case(cls, value: str) -> str:
         return value.lower()
+
+    @field_validator("counter", mode="before")
+    @classmethod
+    def counter_code(cls, value: Any) -> Any:
+        return value.strip().lower() if isinstance(value, str) else value
 
     @property
     def is_default(self) -> bool:

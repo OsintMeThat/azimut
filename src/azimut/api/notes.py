@@ -408,8 +408,32 @@ def notes_index(case_id: str) -> dict[str, Any]:
             # how it prints, null for the plain default, and how many chapters it pulls in
             "look": look.model_dump(mode="json") if look is not None else None,
             "includes": len(notetext.included_ids(text)),
+            **({"map": _web_map_row(case, note_id, text)} if look is not None and look.web == "map" else {}),
         })
     return {"items": items}
+
+
+def _web_map_row(case: Case, note_id: str, text: str) -> dict[str, str]:
+    """What a web map's card shows beyond a note's: the small picture of its map's ground, and
+    the address GitHub Pages last published it at; each "" while there is none."""
+    from ..engine import notes_maps, thumbnails
+
+    picture = ""
+    blocks = notes_maps.blocks_in(text)
+    ground = blocks[0].ground if blocks else ""
+    entity = case.get_entity(ground) if ground and notes_maps.ENTITY_ID.match(ground) else None
+    attrs = (entity or {}).get("attrs") or {}
+    for path in (thumbnails.thumb_relpath(str(attrs.get("sha256") or ""), "image"), attrs.get("thumb"), attrs.get("path")):
+        if isinstance(path, str) and path:
+            try:
+                if case.resolve_inside(path).is_file():
+                    picture = path
+                    break
+            except CaseError:
+                continue
+    published = next((str(record.get("address") or "") for record in _read_editions(case, note_id)
+                      if record.get("format") == GITHUB and record.get("address")), "")
+    return {"picture": picture, "address": published}
 
 
 @router.get("/{case_id}/notes/search")

@@ -58,11 +58,14 @@ LOOKS = {"article": NoteLook(), "story": NoteLook.model_validate({"web": "story"
 #: through to the stage.
 #: 2026-11-20: a map's tools gained the whole screen as a group of their own, the timeline names a day
 #: only where it has room, and the whole screen's own rules came in, all in reader.map.css; nothing else.
+#: 2026-11-20, web maps: a feature's card gained its facts, rows, history and place, its words fold as
+#: one, a line wears no halo until pointed at and a mark's name is set lighter, as the app's map draws
+#: them; fifteen lines of reader.map.css, read line by line, and nothing else.
 GOLDEN = {
-    "single-article": "69984ed27d099dd0584264322aed979141a1b817a602737b89f2b6ed66a8b017",
-    "single-story": "ef3714008eb6cff3f571e067a06c540d958517f732db9a9db377e2710bb9678d",
-    "folder-article": "491baacc09ce810617eca475f3173cf76811725fc764b7b7a5547f14dd570781",
-    "folder-story": "75c32d81b36067cbd9c29e19014d91d779b698e5457273ce392a65a784577745",
+    "single-article": "01b88eb97e7bc2cc45564dc447d2022e0ab834f897ad2d1a2dab801ccc8dc956",
+    "single-story": "84963df02c6160ade1ec1f9b731ee617cd063ed8e96d0dd246675876cd456f89",
+    "folder-article": "5cce282c03037084a6261619da1effcb266d2a63b3432b6b762d9bd965a91527",
+    "folder-story": "4ba11c8b37e03c009fb34b67bedaf50c77cdf19f07fc1c3be0b18530cd89db92",
 }
 
 

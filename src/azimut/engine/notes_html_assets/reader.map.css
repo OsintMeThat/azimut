@@ -23,10 +23,10 @@
 .az-map-detail.az-on { opacity: 1; }
 .az-map-svg { position: absolute; inset: 0; display: block; width: 100%; height: 100%; max-width: none; overflow: hidden; }
 .az-map-svg .az-off, .az-map-svg .az-clash { opacity: 0; visibility: hidden; }
-.az-map-svg .az-halo { fill: none; stroke: rgba(255, 255, 255, .5); }
+.az-map-svg .az-halo { fill: none; stroke: transparent; }
 .az-map-svg .az-stroke { fill: none; }
 .az-map-svg :is(.az-halo, .az-stroke) { vector-effect: non-scaling-stroke; stroke-linecap: round; stroke-linejoin: round; }
-.az-map-svg .az-label { fill: #fff; stroke: rgba(12, 14, 18, .86); stroke-width: 4px; paint-order: stroke; font-family: var(--ui); font-weight: 700; letter-spacing: .01em; pointer-events: none; }
+.az-map-svg .az-label { fill: #fff; stroke: rgba(12, 14, 18, .86); stroke-width: 4px; paint-order: stroke; font-family: var(--ui); font-weight: 600; letter-spacing: .01em; pointer-events: none; }
 .az-map-svg .az-past { opacity: .38; visibility: visible; pointer-events: none; }
 .az-map-svg .az-leaders { filter: drop-shadow(0 0 1px rgba(10, 12, 15, .95)); pointer-events: none; }
 .az-map-svg .az-leader line { stroke: rgba(255, 255, 255, .92); stroke-width: 1.2px; vector-effect: non-scaling-stroke; }
@@ -92,13 +92,22 @@
 .az-map-card-title { margin: 0 0 .25rem; font: 700 1.0625rem/1.3 var(--head); color: var(--ink); text-wrap: balance; }
 .az-map-card-day { margin: 0 0 .55rem; font-weight: 600; font-size: .8125rem; color: var(--accent-ink); font-variant-numeric: tabular-nums; }
 .az-map-card-text { margin: 0 0 .7rem; color: var(--ink-2); white-space: pre-line; overflow-wrap: anywhere; }
-.az-map-card-text.az-long { max-height: 9.5em; overflow: hidden; mask-image: linear-gradient(#000 70%, transparent); }
 .az-map-card-more { margin: -.4rem 0 .6rem; padding: 0; border: 0; background: none; color: var(--accent-ink); font: 600 .8125rem/1.4 var(--ui); cursor: pointer; }
 .az-map-card-links { display: flex; flex-wrap: wrap; gap: .35rem .5rem; margin: 0; padding: .65rem 0 0; border-top: 1px solid var(--rule); list-style: none; }
 .az-map-card-links a { display: inline-flex; align-items: center; gap: .3rem; padding: .25rem .6rem; border: 1px solid var(--rule); border-radius: 999px; font: 600 .75rem/1.3 var(--ui); text-decoration: none; white-space: nowrap; }
 .az-map-card-links a:hover { border-color: var(--az-accent); background: var(--accent-soft); }
 .az-map-card-links .az-map-card-proof { border-color: var(--az-accent); background: var(--accent-soft); }
 .az-map-card-credit { margin: .55rem 0 0; font-size: .75rem; color: var(--muted); }
+/* a card, as the app's map writes one: its state and who placed it, each `label: value` line a row */
+.az-map-card-facts { margin: -.25rem 0 .55rem; font: 600 .75rem/1.4 var(--ui); color: var(--muted); }
+.az-map-card-rows { display: grid; gap: .3rem; margin: 0 0 .7rem; font-size: .8125rem; }
+.az-map-card-rows > div { display: grid; grid-template-columns: minmax(5rem, 34%) minmax(0, 1fr); gap: .6rem; }
+.az-map-card-rows dt { color: var(--muted); font-weight: 600; overflow-wrap: anywhere; }
+.az-map-card-rows dd { margin: 0; color: var(--ink-2); overflow-wrap: anywhere; }
+.az-map-card-history { display: grid; gap: .15rem; margin: 0 0 .7rem; padding: 0; list-style: none; font-size: .8125rem; color: var(--ink-2); }
+.az-map-card-words.az-long { max-height: 13em; overflow: hidden; mask-image: linear-gradient(#000 72%, transparent); }
+.az-map-card-words .az-map-card-text:last-child, .az-map-card-words > :last-child { margin-bottom: .7rem; }
+.az-map-card-where { margin: 0 0 .6rem; font: 500 .75rem/1.4 var(--mono); color: var(--muted); user-select: all; }
 .az-map-card-close {
   position: absolute; z-index: 1; top: .5rem; right: .5rem; width: 1.9rem; height: 1.9rem; padding: 0; border: 0; border-radius: 50%;
   background: rgba(16, 18, 22, .66); color: #fff; font: 400 1.2rem/1 var(--sans); cursor: pointer; backdrop-filter: blur(6px);

@@ -336,7 +336,8 @@ describe('what the live map is made of', () => {
     };
     const { features, arrows } = geojson(data);
     expect(arrows.features.map((one) => [one.properties.id, one.properties.turn])).toEqual([['a', 0], ['b', 90], ['b', -90]]);
-    expect(features.features[1].properties.dash).toBe('claimed');
-    expect(features.features[2].properties).toMatchObject({ fill: 'hatch', opacity: 0.22, alpha: 0.5, color: '#abcdef' });
+    // a claimed line dotted, a probable one dashed, as the app's map draws them
+    expect(features.features[1].properties.dash).toBe('dotted');
+    expect(features.features[2].properties).toMatchObject({ fill: 'hatch', opacity: 0.18, alpha: 0.5, color: '#abcdef' });
   });
 });

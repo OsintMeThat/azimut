@@ -9,7 +9,8 @@
      what every reader of the map shares; `figure.azMap` is how the story drives it */
   const MARKER_PX = 26;
   const MARKER_UNITS = 64;
-  const LABEL_PX = 12.5;
+  /** A mark's name, written under it as the app's map writes it: its own size, else this. */
+  const LABEL_PX = 11;
   const mercX = (lon) => (lon + 180) / 360;
   const mercY = (lat) => {
     const sine = Math.sin((Math.max(-85.0511, Math.min(85.0511, lat)) * Math.PI) / 180);
@@ -174,6 +175,12 @@
     let engine = null;
     /** Whether the figure holds the whole screen (`screen`), where the stage takes the screen's shape. */
     let full = false;
+    /** A map page's map (`page`): the page's whole room is its own, as the whole screen is, for good. */
+    let paged = false;
+    /** The features a map page's layer switcher took off the map, whatever their days. */
+    const hidden = new Set();
+    /** Where a map page's address asked the map to look, which a live map taking over looks at too. */
+    let asked = null;
 
     stage.tabIndex = 0;
     stage.setAttribute('aria-label', `${stage.getAttribute('aria-label') || 'Map'}. Plus and minus zoom, the arrows move it`);
@@ -262,9 +269,12 @@
           continue;
         }
         if (!anchor?.azAt) continue;
-        label.setAttribute('x', (anchor.azAt[0] + 15 * unit).toFixed(2));
-        label.setAttribute('y', (anchor.azAt[1] + LABEL_PX * 0.35 * unit).toFixed(2));
-        label.setAttribute('font-size', (LABEL_PX * unit).toFixed(3));
+        // under its mark, as the app's map writes it: its top a little under the mark's middle
+        const size = Number(byId.get(label.dataset.for)?.style?.label_size) || LABEL_PX;
+        label.setAttribute('x', anchor.azAt[0].toFixed(2));
+        label.setAttribute('y', (anchor.azAt[1] + size * 1.75 * unit).toFixed(2));
+        label.setAttribute('text-anchor', 'middle');
+        label.setAttribute('font-size', (size * unit).toFixed(3));
         label.style.strokeWidth = `${(3.2 * unit).toFixed(3)}px`;
       }
       scale();
@@ -272,6 +282,7 @@
       tools?.querySelector('[data-act="in"]')?.toggleAttribute('disabled', view.k >= most - 0.01);
       clearTimeout(clashTimer);
       clashTimer = setTimeout(clashes, 90);
+      figure.dispatchEvent(new CustomEvent('az-moved'));
     }
 
     /** Names written beside their marks, each kept off those already written, top first. */
@@ -511,15 +522,37 @@
       kicker.append(dot, document.createTextNode(said.kicker || feature.layer || ''));
       body.append(kicker, make('p', { class: 'az-map-card-title', dir: 'auto' }, said.title || feature.label || 'Feature'));
       if (said.day) body.append(make('p', { class: 'az-map-card-day' }, said.day));
-      if (said.text) {
-        const text = make('p', { class: 'az-map-card-text', dir: 'auto' }, said.text);
-        body.append(text);
-        if (said.text.length > 320) {
-          text.classList.add('az-long');
+      if (said.facts) body.append(make('p', { class: 'az-map-card-facts' }, said.facts));
+      // its words, then each `label: value` line and column it carries as a row, a long run folded
+      const words = make('div', { class: 'az-map-card-words' });
+      if (said.text) words.append(linked(make('p', { class: 'az-map-card-text', dir: 'auto' }), said.text));
+      if (said.rows?.length) {
+        const rows = make('dl', { class: 'az-map-card-rows' });
+        for (const row of said.rows) {
+          const line = make('div');
+          line.append(make('dt', { dir: 'auto' }, row.label), linked(make('dd', { dir: 'auto' }), row.value));
+          rows.append(line);
+        }
+        words.append(rows);
+      }
+      if (said.history?.length) {
+        const history = make('ol', { class: 'az-map-card-history', 'aria-label': 'Over time' });
+        for (const one of said.history) history.append(make('li', {}, one.status ? `${one.day}: ${one.status}` : one.day));
+        words.append(history);
+      }
+      if (words.children.length) {
+        body.append(words);
+        if ((said.text || '').length + (said.rows || []).reduce((sum, row) => sum + row.label.length + row.value.length, 0) > 360) {
+          words.classList.add('az-long');
           const more = make('button', { type: 'button', class: 'az-map-card-more' }, 'Read all');
-          more.addEventListener('click', () => { text.classList.remove('az-long'); more.remove(); });
+          more.addEventListener('click', () => { words.classList.remove('az-long'); more.remove(); });
           body.append(more);
         }
+      }
+      if (said.at || said.size) {
+        const where = make('p', { class: 'az-map-card-where' }, said.at ? `${said.at[0].toFixed(5)}, ${said.at[1].toFixed(5)}` : said.size);
+        if (said.at) where.title = 'Latitude, longitude';
+        body.append(where);
       }
       const links = make('ul', { class: 'az-map-card-links' });
       if (said.proof?.figure) {
@@ -538,6 +571,18 @@
       card.scrollTop = 0;
       shut.focus({ preventScroll: true });
     }
+    /** Words written into `node`, each web address in them a link of its own. */
+    function linked(node, text) {
+      let at = 0;
+      for (const found of String(text).matchAll(/https?:\/\/[^\s<>"'`]+/g)) {
+        const address = found[0].replace(/[.,;:!?)\]}>'"]+$/, '');
+        if (found.index > at) node.append(text.slice(at, found.index));
+        node.append(make('a', { href: address, target: '_blank', rel: 'noopener noreferrer' }, address));
+        at = found.index + address.length;
+      }
+      if (at < text.length) node.append(text.slice(at));
+      return node;
+    }
     function close() {
       if (card.hidden) return;
       card.hidden = true;
@@ -553,7 +598,9 @@
       currentDay = day;
       const latest = new Map();
       for (const node of shapes) {
-        const on = (!node.dataset.from || node.dataset.from <= day) && (!node.dataset.until || day <= node.dataset.until);
+        const on = (!node.dataset.from || node.dataset.from <= day) && (!node.dataset.until || day <= node.dataset.until)
+          && !hidden.has(node.dataset.id);
+        node.classList.toggle('az-hidden', hidden.has(node.dataset.id));
         const was = !node.classList.contains('az-off');
         node.classList.toggle('az-off', !on);
         node.classList.remove('az-past');
@@ -563,7 +610,7 @@
           node.classList.add('az-new');
           setTimeout(() => node.classList.remove('az-new'), 1500);
         }
-        if (!on && node.dataset.until && node.dataset.until < day && node.dataset.of && !node.classList.contains('az-point')) {
+        if (!on && !hidden.has(node.dataset.id) && node.dataset.until && node.dataset.until < day && node.dataset.of && !node.classList.contains('az-point')) {
           const before = latest.get(node.dataset.of);
           if (!before || before.dataset.until < node.dataset.until) latest.set(node.dataset.of, node);
         }
@@ -752,7 +799,9 @@
       screen(false);
     };
     /** Take the whole screen, give it back (`on` false), or the other of the two; settles once it has. */
-    function screen(on = !full) {
+    function screen(on) {
+      if (paged) return pageScreen(on);
+      if (on === undefined) on = !full;
       if (on === full) return Promise.resolve();
       if (!on) {
         if (covered) uncover();
@@ -782,11 +831,18 @@
       figure.classList.remove('az-overlay');
       changed(false);
     }
+    /** A map page holds its window already: the whole screen is the browser's own, for the whole page. */
+    function pageScreen(on = !doc.fullscreenElement) {
+      if (on && !doc.fullscreenElement && root.requestFullscreen && doc.fullscreenEnabled !== false) return root.requestFullscreen().catch(() => {});
+      if (!on && doc.fullscreenElement) return doc.exitFullscreen().catch(() => {});
+      return Promise.resolve();
+    }
     /** What the screen buttons say: the drawing's, and the live map's copy of it. */
     function labelled(button) {
-      button.setAttribute('aria-label', full ? 'Exit full screen' : 'Full screen');
-      button.title = full ? 'Back to the page (Esc)' : 'The map on the whole screen';
-      button.querySelector('path')?.setAttribute('d', full ? CORNERS.in : CORNERS.out);
+      const on = paged ? Boolean(doc.fullscreenElement) : full;
+      button.setAttribute('aria-label', on ? 'Exit full screen' : 'Full screen');
+      button.title = on ? 'Back to the page (Esc)' : 'The map on the whole screen';
+      button.querySelector('path')?.setAttribute('d', on ? CORNERS.in : CORNERS.out);
     }
     /** On the whole screen, what goes with the map in one panel beside it (under it on a phone), in the page's order. */
     let side = null;
@@ -814,12 +870,16 @@
     // a map much wider than tall holds the screen's width, what goes with it under it
     figure.classList.toggle('az-map-wide', W / H >= 2);
     doc.addEventListener('fullscreenchange', () => {
+      if (paged) {
+        for (const button of all('[data-act="full"]', figure)) labelled(button);
+        return;
+      }
       const on = doc.fullscreenElement === figure;
       if (on !== full && !covered) changed(on);
     });
     if (ground && !ground.complete) ground.addEventListener('load', settle, { once: true });
     for (const detail of details) if (!detail.complete) detail.addEventListener('load', settle, { once: true });
-    window.addEventListener('beforeprint', () => { screen(false); close(); Object.assign(view, whole()); paint(); });
+    window.addEventListener('beforeprint', () => { if (!paged) screen(false); close(); Object.assign(view, whole()); paint(); });
     settle();
     months();
     if (currentDay) setDay(currentDay, { quiet: true });
@@ -837,9 +897,49 @@
       return [west, south, east, north];
     }
 
+    /** Where the map looks, `{center, zoom}` as the map engine counts them, and the day it shows. */
+    function where() {
+      if (engine?.where) return { ...engine.where(), day: currentDay };
+      const { w, h } = size();
+      const unit = 1 / (fit() * view.k);
+      const mx = x0 + ((-view.x + w / 2) * unit / W) * spanX;
+      const my = y0 + ((-view.y + h / 2) * unit / H) * spanY;
+      const zoom = Math.log2(span().w / (512 * spanX)) + Math.log2(view.k);
+      return { center: [mx * 360 - 180, (Math.atan(Math.sinh(Math.PI * (1 - 2 * my))) * 180) / Math.PI], zoom, day: currentDay };
+    }
+
     return {
       fly: (target, ms) => (engine ? engine.look(target, { smooth: ms !== 0 }) : fly(placed(target), ms)),
       day: (day) => setDay(day),
+      where,
+      /** Look where `target` says (`{center, zoom}`) at once, the live map too once it takes over. */
+      look(target) {
+        asked = target;
+        if (engine) engine.look(target, { smooth: false }); else fly(placed(target), 0);
+      },
+      /** The features a map page's switcher takes off the map, whatever their days (`ids`, all of them). */
+      hide(ids) {
+        hidden.clear();
+        for (const id of ids || []) hidden.add(String(id));
+        setDay(currentDay, { quiet: true });
+      },
+      /**
+       * Make the map a map page's: its window is the map's own, as on the whole screen (the map whole
+       * in its middle, the wheel and one finger its own), for good; the screen button then asks the
+       * browser's whole screen for the page.
+       */
+      page() {
+        if (paged) return;
+        paged = true;
+        full = true;
+        figure.classList.add('az-paged');
+        for (const button of all('[data-act="full"]', figure)) labelled(button);
+        if (!root.requestFullscreen || doc.fullscreenEnabled === false) screens.hidden = true;
+        refit();
+        // the page's room changes with no resize of the window (its faces loading, its header wrapping): the map follows it
+        if (typeof ResizeObserver === 'function') new ResizeObserver(() => refit()).observe(stage);
+        engine?.screen?.(true);
+      },
       step,
       open,
       close,
@@ -861,10 +961,12 @@
        */
       attach(live) {
         engine = live || null;
+        if (engine && asked) engine.look(asked, { smooth: false });
+        asked = null;
         stage.inert = Boolean(engine);
         if (engine) stage.setAttribute('aria-hidden', 'true');
         else { stage.removeAttribute('aria-hidden'); paint(); }
-        return { day: currentDay, picked: picked?.dataset.id || null, full, arrange, bubble, crowdFrom };
+        return { day: currentDay, picked: picked?.dataset.id || null, full, arrange, bubble, crowdFrom, paged };
       },
     };
   }
@@ -875,6 +977,7 @@
       try { data = JSON.parse(figure.querySelector('script.az-map-data')?.textContent || 'null'); } catch { data = null; }
       if (data?.features) figure.azMap = mapOf(figure, data);
     }
+    if (typeof mapPage === 'function') mapPage();
     online();
   }
 
