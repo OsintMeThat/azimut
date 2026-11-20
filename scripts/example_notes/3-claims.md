@@ -36,14 +36,20 @@ source: posts of 15 and 16 March and the proofs of this case
 ## How the first claim spread
 
 ```mermaid
-%% legend c1: Claim
-%% legend c2: What the pictures show
 flowchart LR
-  A["@saltmere_breaking: the lighthouse has fallen"]:::c1 --> B["Reposted, no picture"]:::c1
-  B --> C["The old pier's light is down"]:::c2
-  C --> D["The lighthouse stands"]:::c2
-  classDef c1 fill:#fbe3d6,stroke:#d55e00,color:#5a2400
-  classDef c2 fill:#d9f0e6,stroke:#009e73,color:#00422f
+  n1["@saltmere_breaking: the lighthouse has fallen"]
+  n2["Reposted, no picture"]
+  n3["The old pier's light is down"]
+  n4("The lighthouse stands")
+  n1 --> n2
+  n2 -.->|"the pictures"| n3
+  n3 --> n4
+  classDef c1 fill:#fbe3d6,stroke:#d55e00,color:#202124
+  classDef c2 fill:#d9f0e6,stroke:#009e73,color:#202124
+  class n1,n2 c1
+  class n3,n4 c2
+  %% legend c1: Claim
+  %% legend c2: What the pictures show
 ```
 
 ## Claim 1: the lighthouse

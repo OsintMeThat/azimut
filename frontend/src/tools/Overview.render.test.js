@@ -100,6 +100,8 @@ vi.mock('../lib/analysisSearch.svelte.js', () => ({ setAnalysisFilter, leaveAnal
 
 const openEntity = vi.fn();
 vi.mock('../lib/navigate.js', () => ({ openEntity, openGuide: vi.fn(), openTour: vi.fn(), openWhatsNew: vi.fn() }));
+const openExampleCase = vi.fn(async () => true);
+vi.mock('../lib/exampleCase.js', async (importOriginal) => ({ ...(await importOriginal()), openExampleCase }));
 
 // The registry is served by the backend and never loaded here, so the families it
 // would answer with are stated instead: without them every type falls into "other"
@@ -450,6 +452,15 @@ describe('with no case open', () => {
     create.click();
     await settle();
     expect(createCase).toHaveBeenCalledWith('Kharkiv strike');
+  });
+
+  it('opens the fictional example case in one press, saying what it is', async () => {
+    await open();
+    const press = [...target.querySelectorAll('.door-foot button')].find((b) => b.textContent.trim() === 'Open the example case');
+    expect(press.title).toBe('A fictional case with every kind of note filled in, made on this computer');
+    press.click();
+    await settle();
+    expect(openExampleCase).toHaveBeenCalledTimes(1);
   });
 
   it('refuses to create a case with no name', async () => {

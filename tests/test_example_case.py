@@ -8,9 +8,11 @@ these read the bundle as shipped.
 
 from __future__ import annotations
 
+import json
 import re
 import socket
 import zipfile
+from pathlib import Path
 
 import pytest
 
@@ -18,6 +20,8 @@ from azimut.engine import examplecase
 from jobwait import WAIT
 
 FICTIONAL = "> [!note] Fictional example."
+#: Where the notes the bundle holds are written, before `scripts/example_case.py` builds it.
+SOURCES = Path(__file__).resolve().parents[1] / "scripts" / "example_notes"
 #: The ceiling the shipped bundle answers to: a few MB, the price of real photographs.
 MOST_BYTES = 5_000_000
 
@@ -142,3 +146,25 @@ def test_its_html_page_reads_whole(client):
     # the wall and the map are there, and nothing is fetched by the page
     assert "az-wall" in html or "az-pictures" in html
     assert not re.search(r"<img[^>]+src=\"https?://", html)
+
+
+def test_the_bundle_holds_the_notes_as_written_in_scripts(client):
+    """A note changed in `scripts/example_notes/` and not built again would ship stale."""
+    case_id = _made(client)["case_id"]
+    held = {note["title"]: (note["id"], client.get(f"/api/cases/{case_id}/notes/{note['id']}").json()["text"])
+            for note in _notes(client, case_id)}
+    sources = sorted(SOURCES.glob("*.md"))
+    assert len(sources) == len(held)
+    for source in sources:
+        text = source.read_text(encoding="utf-8")
+        head, body = text.split("\n---\n", 1)
+        fields = dict(line.split(": ", 1) for line in head.removeprefix("---\n").splitlines())
+        assert fields["title"] in held, source.name
+        note_id, written = held[fields["title"]]
+        # what the build fills in (`{{name}}`) may be anything; every other character is as written
+        pattern = "".join(re.escape(part) if index % 2 == 0 else r"[\s\S]*?"
+                          for index, part in enumerate(re.split(r"\{\{[a-z0-9:-]+\}\}", body)))
+        assert re.fullmatch(pattern, written), f"{source.name}: build the example case again"
+        look = client.get(f"/api/cases/{case_id}/notes/{note_id}/look").json()["look"]
+        for key, value in json.loads(fields["look"]).items():
+            assert look[key] == value, (source.name, key)

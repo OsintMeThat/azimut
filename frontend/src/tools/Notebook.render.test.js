@@ -150,6 +150,17 @@ describe('the home', () => {
     expect(target.querySelector('[data-guide="notebook.from-case"]').textContent).toContain('From the case');
   });
 
+  it('shows the five that show what a report holds in a row of their own, filled a press away in the example case', () => {
+    const heading = [...target.querySelectorAll('h4')].find((one) => one.textContent === 'Reports with figures');
+    expect(heading).toBeTruthy();
+    const row = heading.closest('.section-head').nextElementSibling;
+    expect([...row.querySelectorAll('.tile-name')].map((one) => one.textContent)).toEqual([
+      'Front-line analysis', 'Equipment losses register', 'Strike and damage assessment', 'Claim against footage',
+      'Story article for the web',
+    ]);
+    expect(buttonNamed('See them filled in the example case')?.title).toBe('A fictional case with every kind of note filled in, made on this computer');
+  });
+
   it('opens a note, draws it, and goes back to the cards', async () => {
     target.querySelector('button[title="Open Old lead"]').click();
     await settle();

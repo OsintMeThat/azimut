@@ -188,6 +188,8 @@ presses *Read the guide* on it, which opens the guide on its start page.
   workspace, where there is nothing to summarise and nothing on screen that says what
   the rail means: what Azimut is, the rail drawn as the sequence it is, a field that
   names the first case, and the cases already in the workspace when there are any.
+  Beside *Take the tour*, **Open the example case** makes the fictional example case and
+  opens it on its notes (see *The example case* under Notebook).
 - **The guide opens over the tools** (`components/GuideDialog.svelte`, data in
   `lib/guide.js`), from the `?` in the topbar on the tool being stood in, from Home on
   its start, from Settings on its own page. The tool underneath does not move, and
@@ -7034,14 +7036,42 @@ notes that print in a look other than Plain or hold chapters, each card saying i
 style and its chapter count. **Start from** shows every template by its first page,
 drawn from the real PDF when the tile comes into view and kept for the session:
 ready ones (Blank, Geolocation report, Chronolocation, Media verification, Incident
-brief (5W), Source profile, Daily SITREP, Fact-check, Investigation log) and **Your
-templates**. A press makes the note at once in the template's look, named after it
+brief (5W), Source profile, Daily SITREP, Fact-check, Investigation log), then, in a row
+of their own under **Reports with figures**, five that show what a report can hold
+(Front-line analysis, Equipment losses register, Strike and damage assessment, Claim
+against footage, Story article for the web), and **Your templates**. Their figures come
+set up and empty, never with a number of their own: a chart opens on its form, a picture
+wall on *Fill from the case*, a map on its settings, an infographic on its Data bar, each
+with a guidance line saying what goes there. The front-line analysis is a Report with
+its own cover whose web page is a Story and which carries the Geolocations, How this was
+made and Limits annexes; its timeline and the claim check's are coloured by a *Kind*
+column (Claim, Geolocated); the story's picture wall shows one group a step. The row's
+*See them filled in the example case* opens the example case. A press makes the note at once in the template's look, named after it
 and numbered when the name is taken, with its title selected to retype. **New note**
 opens one dialog (`NewNoteDialog.svelte`): what to start from as tiles drawn by their
 first page (Blank, From the case, the ready notes, your templates; one Tab stop, the
 arrows pick), an optional title whose placeholder is the name the note gets, and a
 folder. A card's ⋯ opens it, pins it to the
 side, opens it in its own tab, exports it, lists its editions, or deletes it.
+
+**The example case** is a fictional case anyone can open to see a report filled
+(`engine/examplecase.py`, `lib/exampleCase.js`): an invented island, Saltmere, an invented
+storm of 14 to 15 March 2026 and invented accounts, told through real public-domain
+photographs of other storms and places, each credited in its Details and in
+`assets/example/CREDITS.md`. One press (the front door's *Open the example case*, or the
+gallery's link) imports the bundle the app ships, `assets/example/example-case.azimut.zip`,
+as Import case does (`POST /api/cases/example`): a new ordinary case named *Example case
+(fictional)*, nothing fetched, no key asked; pressed again while it is there, it opens it.
+It opens on the Notebook, where four notes made from the showcase templates are filled: a
+story for the web (held scenes, a before and after, a map with steps over a ground
+picture of its own, a picture wall a story walks group by group, a timeline coloured by
+kind), a losses register (its infographic reading the case's sheet through its Data bar,
+a set table, a chart, a wall, the sheet on a map), a claim checked against proofs
+(verdict callouts, a coloured claims table, short timeline labels, a diagram, a
+correction) and a damage brief. Every note opens on a callout saying the story is
+invented. `scripts/example_case.py` builds the bundle from `scripts/example_notes/`,
+fetching the photographs from Wikimedia Commons only then; a note changed there is
+built again with `uv run python scripts/example_case.py`.
 
 **From the case**, beside Blank, writes a note of every geolocation of a period
 (`GET /notes/from-case`, nothing fetched). Its tile opens New note on it, whose
