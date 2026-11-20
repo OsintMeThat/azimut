@@ -56,6 +56,8 @@ export const IMAGERY_HINTS = {
 };
 /** Said under Sentinel-2 on a map framed closer than about 3 km across, where its 10 m pixels show. */
 export const SENTINEL_BLUR = 'Sentinel-2 is 10 m: details this close will blur.';
+/** What a map that names no imagery shows its readers, under the one its ground was filed from. */
+export const AS_FILED = (name) => `Readers see only the picture filed: press ${name} to show the imagery everywhere.`;
 const BLUR_KM = 3;
 export const SIZE_NAMES = { half: 'Half', wide: 'Wide', full: 'Full height' };
 export const LEGEND_NAMES = { shown: 'Shown', folded: 'Folded', hidden: 'Hidden' };
@@ -81,7 +83,7 @@ const longDay = (day) => {
 };
 
 /** A row of choices, one pressed: `options` are `{ value, label, title }`. */
-export function segmented(label, options, value, onChange, { busy = '' } = {}) {
+export function segmented(label, options, value, onChange, { busy = '', again = false } = {}) {
   const row = element('div', 'cm-map-field');
   row.append(element('span', 'cm-map-field-name', label));
   const group = element('div', 'cm-chart-seg');
@@ -96,7 +98,7 @@ export function segmented(label, options, value, onChange, { busy = '' } = {}) {
     choice.disabled = Boolean(busy);
     choice.addEventListener('mousedown', (event) => event.preventDefault());
     choice.addEventListener('click', () => {
-      if (option.value !== value) onChange(option.value);
+      if (option.value !== value || again) onChange(option.value);
     });
     group.append(choice);
   }
@@ -298,11 +300,14 @@ export function mapSettings(panel, ctx) {
    */
   function imageryField(map, described, busy) {
     const value = map.imagery || described?.imagery || '';
+    // a map that names none draws its ground as filed: the one it came from stays pressable, to name it
+    const filed = !map.imagery && Boolean(value);
     const row = segmented('Imagery', IMAGERY.map((one) => ({ value: one, label: IMAGERY_NAMES[one], title: IMAGERY_HINTS[one] })),
       value, (one) => {
         esriPicked = one === 'esri';
         ctx.imagery(one);
-      }, { busy: busy.startsWith('imagery') ? busy.slice(8) : '' });
+      }, { busy: busy.startsWith('imagery') ? busy.slice(8) : '', again: filed });
+    if (filed) row.append(element('p', 'cm-map-note', AS_FILED(IMAGERY_NAMES[value] ?? value)));
     if (value === 'esri' && esriPicked) row.append(element('p', 'cm-map-note', ESRI_TERMS));
     else if (value === 'sentinel' && acrossKm(map.frame ?? described?.bounds) < BLUR_KM) row.append(element('p', 'cm-map-note', SENTINEL_BLUR));
     return row;

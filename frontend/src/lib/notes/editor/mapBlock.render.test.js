@@ -209,12 +209,19 @@ describe('each choice is one line and one Undo step', () => {
     await opened();
     expect(radio('Imagery', 'Sentinel-2 · free').getAttribute('aria-checked')).toBe('true');
     expect(named('Imagery').closest('.cm-map-field').textContent).toContain('Sentinel-2 is 10 m: details this close will blur.');
+    server.asked.length = 0;
     server.described = () => ({ ...DESCRIBED, imagery: 'esri' });
     forgetMaps();
     view.destroy();
     await opened();
     expect(radio('Imagery', 'Esri · sharper').getAttribute('aria-checked')).toBe('true');
-    expect(named('Imagery').closest('.cm-map-field').querySelector('.cm-map-note')).toBeNull();
+    // named nowhere, it is drawn as filed: the row says so, and its checked choice still names it
+    const row = named('Imagery').closest('.cm-map-field');
+    expect([...row.querySelectorAll('.cm-map-note')].map((node) => node.textContent))
+      .toEqual(['Readers see only the picture filed: press Esri · sharper to show the imagery everywhere.']);
+    press(radio('Imagery', 'Esri · sharper'));
+    await settle();
+    expect(server.asked.find((one) => one.path.endsWith('/ground')).body.text).toContain('\nimagery: esri\n');
     view.destroy();
     editor(NOTE.replace(BLOCK, BLOCK.replace('\n:::', '\nbase: map\n:::')));
     await settle();

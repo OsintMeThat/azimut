@@ -7571,8 +7571,11 @@ panel beside it holds **Find on the map** (every word of a feature, its name, gr
 day and columns, local; a result opens on a day it is on, its row switched back on, the map
 moved to it and its card open), **Layers** (the legend, each row a switch for its group and
 each layer's name for all of its rows), its steps and the note's other words, sources and
-footer. On a phone the header keeps the title on a line with a **Layers** button that opens
-the panel as a sheet over the map, and a card is a sheet of its own. Where the map looks is
+footer. The header's **Layers** button folds the panel away and brings it back, the map taking
+the width; the panel opens with the page only on a screen 64rem wide or more, so a tablet, a
+phone on its side or a small window opens on the map alone. On a phone the header keeps the
+title on a line with that button, which opens the panel as a sheet over the map, and a card is a
+sheet of its own. Where the map looks is
 kept in the address as `#zoom/lat/lon` (a tile's zoom, as OpenStreetMap writes it), read on
 the way in and written as the map moves, never a step of the history, and only once it has
 moved. **Full screen** asks the browser's own for the whole page; where the browser has none
@@ -7731,7 +7734,8 @@ that picks it as a put files its ground (OpenStreetMap, OpenTopoMap, and OpenStr
 dark), a view filed before cited again with nothing fetched, and refused with the map left as it
 was when the imagery cannot be fetched; under *Satellite*, its imagery, *Sentinel-2 · free* or
 *Esri · sharper* (`imagery`), its ground and close-ups filed again from it on the press as one Undo
-(a map that names none shows the one its ground came from), Esri saying once under the choice that
+(a map that names none shows the one its ground came from, says its readers see only the
+picture filed, and names it on a press of that choice), Esri saying once under the choice that
 its terms limit reuse, so publishing it is the analyst's responsibility, and Sentinel-2 on a map
 framed narrower than about 3 km that its 10 m pixels will blur; the frame, a rectangle dragged on
 the map or *Fit to what it shows* (`frame: west, south, east, north`), the ground laid where it
