@@ -324,6 +324,20 @@ describe('a map shown otherwise, as its block says', () => {
     expect(shape(doc, 'l1f1').classList.contains('az-off')).toBe(false);
   });
 
+  it('opens on the part its block opens it on, held whole, and its whole map is a press away', async () => {
+    const whole = width(await report());
+    const doc = await report(withData((data) => { data.opens = [43.45, 12.7, 43.55, 12.78]; }));
+    // held whole on the stage's shape: as close as its height lets it be, more of its sides shown
+    expect(width(doc)).toBeLessThan(whole * 0.6);
+    const [west, south, east, north] = doc.querySelector('figure.az-map').azMap.seen();
+    expect(west).toBeLessThanOrEqual(43.45 + 1e-6);
+    expect(east).toBeGreaterThanOrEqual(43.55 - 1e-6);
+    expect(south).toBeCloseTo(12.7, 2);
+    expect(north).toBeCloseTo(12.78, 2);
+    doc.querySelector('[data-act="fit"]').dispatchEvent(new window.MouseEvent('click', { bubbles: true }));
+    expect(width(doc)).toBeCloseTo(whole, 1);
+  });
+
   it('plays its days at its own pace, and takes its scale away when it says so', async () => {
     const doc = await report(withData((data) => { data.speed = 2200; data.scale = 'off'; }));
     expect(doc.querySelector('.az-map-scale')).toBeNull();

@@ -430,7 +430,7 @@ def test_a_put_files_the_ground_once_and_answers_the_block(client, tiles_here):
     cid, case = _case(client)
     name = _markers(client, cid)
     sources = client.get(f"/api/cases/{cid}/notes/maps/sources").json()
-    assert [row["name"] for row in sources["layers"]] == [name] and sources["provider"] == "esri-world-imagery"
+    assert [row["name"] for row in sources["layers"]] == [name] and sources["provider"] == "s2cloudless~2025"
     first = client.post(f"/api/cases/{cid}/notes/maps", json={"title": "Losses", "layers": [name]}).json()
     block = notes_maps.parse_block(first["text"].split("\n", 1)[1].rsplit("\n", 1)[0])
     assert block.layers == [name] and block.ground == first["ground"]["id"] and block.view is not None
@@ -866,7 +866,7 @@ DRAW_VIEW = {"west": 43.490, "south": 12.740, "east": 43.502, "north": 12.748}
 def test_the_draw_tabs_view_is_filed_as_a_close_up_its_ground_kept_and_cited_again(client, tiles_here):
     cid, case = _case(client)
     vehicles = _markers(client, cid)
-    put = client.post(f"/api/cases/{cid}/notes/maps", json={"layers": [vehicles]}).json()
+    put = client.post(f"/api/cases/{cid}/notes/maps", json={"layers": [vehicles], "provider": "esri-world-imagery"}).json()
     asked = len(tiles_here)
     filed = client.post(f"/api/cases/{cid}/notes/maps/detail", json={"text": put["text"], **DRAW_VIEW}).json()
     assert filed["detail"] != put["ground"]["id"]
@@ -1059,3 +1059,170 @@ def test_the_pdf_the_picture_and_the_html_page_read_a_map_panel_as_a_notes_map(c
     panel = panel[:panel.index("</figure>")]
     assert 'class="az-map-north"' in panel and 'data-base="dark"' in panel and 'data-steps="1"' in panel
     assert '<details class="az-map-key"><summary>Legend</summary>' in panel
+
+
+# -- the imagery: Sentinel-2 or Esri, streamed live, filed for the file and the PDF ----------------
+
+
+def _block(text: str) -> notes_maps.MapBlock:
+    return notes_maps.parse_block(text.split("\n", 1)[1].rsplit("\n", 1)[0])
+
+
+def _provider_of(case: Case, entity_id: str) -> str:
+    return case.media_items_by_paths([case.get_entity(entity_id)["attrs"]["path"]])[0]["source"]["provider"]
+
+
+@pytest.mark.parametrize("line, field, value", [
+    ("imagery: sentinel", "imagery", "sentinel"), ("Imagery: ESRI", "imagery", "esri"), ("bounds: ground", "bounds", "ground"),
+])
+def test_imagery_and_bounds_read_their_one_line(line, field, value):
+    block = notes_maps.parse_block(f"layer: Front\n{line}")
+    assert getattr(block, field) == value and block.unread == []
+
+
+@pytest.mark.parametrize("line", ["imagery: google", "imagery: sentinel-1", "bounds: world", "bounds: off"])
+def test_imagery_or_bounds_it_cannot_read_is_kept_to_be_said(line):
+    assert notes_maps.parse_block(f"layer: Front\n{line}").unread == [line]
+
+
+def test_imagery_is_written_after_the_base_and_bounds_after_the_frame():
+    block = notes_maps.parse_block("layer: Front\nbounds: ground\nframe: 43.4, 12.6, 43.6, 12.8\nimagery: esri\n"
+                                   "hide: Vehicles\nbase: map\nview: 12.7, 43.5, 12")
+    assert notes_maps.block_text(block).split("\n") == [
+        "::: map", "layer: Front", "view: 12.70000, 43.50000, 12", "base: map", "imagery: esri", "hide: Vehicles",
+        "frame: 43.40000, 12.60000, 43.60000, 12.80000", "bounds: ground", ":::"]
+
+
+def test_a_put_files_sentinel_2_unless_it_names_esri_and_its_block_says_which(client, tiles_here):
+    cid, case = _case(client)
+    vehicles = _markers(client, cid)
+    sources = client.get(f"/api/cases/{cid}/notes/maps/sources").json()
+    assert sources["provider"] == "s2cloudless~2025"
+    assert sources["providers"][:2] == [{"id": "s2cloudless~2025", "label": "Sentinel-2 · free"},
+                                        {"id": "esri-world-imagery", "label": "Esri · sharper"}]
+    put = client.post(f"/api/cases/{cid}/notes/maps", json={"layers": [vehicles]}).json()
+    block = _block(put["text"])
+    assert block.imagery == "sentinel" and "imagery: sentinel" in put["text"].split("\n")
+    assert tiles_here and all("tiles.maps.eox.at" in url and "s2cloudless-2025" in url for url in tiles_here)
+    assert _provider_of(case, block.ground) == "s2cloudless~2025"
+    credit = notes_maps.derive(case, block).data["ground"]["credit"]
+    assert credit.startswith("Imagery: EOxCloudless https://cloudless.eox.at") and credit.endswith("a year's mosaic, not a day")
+    asked = len(tiles_here)
+    esri = client.post(f"/api/cases/{cid}/notes/maps", json={"layers": [vehicles], "provider": "esri-world-imagery"}).json()
+    assert _block(esri["text"]).imagery == "esri" and _provider_of(case, _block(esri["text"]).ground) == "esri-world-imagery"
+    assert all("arcgisonline" in url for url in tiles_here[asked:])
+    other = client.post(f"/api/cases/{cid}/notes/maps", json={"layers": [vehicles], "provider": "osm"}).json()
+    assert _block(other["text"]).imagery == "", "another basemap's ground is drawn as filed"
+
+
+def test_a_ground_is_filed_from_the_imagery_its_block_names_and_from_esri_when_it_names_none(client, tiles_here):
+    cid, case = _case(client)
+    vehicles = _markers(client, cid)
+    put = client.post(f"/api/cases/{cid}/notes/maps", json={"layers": [vehicles], "provider": "osm"}).json()
+    plain = put["text"]
+    for imagery, provider in (("", "esri-world-imagery"), ("sentinel", "s2cloudless~2025"), ("esri", "esri-world-imagery")):
+        text = plain.replace("\n:::", f"\nimagery: {imagery}\n:::") if imagery else plain
+        ground = client.post(f"/api/cases/{cid}/notes/maps/ground", json={"text": text, "base": "satellite"}).json()
+        assert _provider_of(case, ground["ground"]) == provider, imagery
+        detail = client.post(f"/api/cases/{cid}/notes/maps/detail", json={"text": text, **DRAW_VIEW}).json()
+        assert _provider_of(case, detail["detail"]) == provider, imagery
+    # another base takes its own map, whatever the imagery
+    street = client.post(f"/api/cases/{cid}/notes/maps/ground",
+                         json={"text": plain.replace("\n:::", "\nimagery: sentinel\n:::"), "base": "map"}).json()
+    assert _provider_of(case, street["ground"]) == "osm"
+
+
+def test_satellite_still_files_no_capture_of_a_years_mosaic(client, tiles_here):
+    cid, _ = _case(client)
+    for provider in ("s2cloudless", "s2cloudless~2025"):
+        refused = client.post(f"/api/cases/{cid}/satellite/capture", json={
+            "lat": 12.76, "lon": 43.5, "zoom": 12, "width": 800, "height": 500, "provider": provider})
+        assert refused.status_code == 422 and "view-only" in refused.json()["detail"]
+    assert tiles_here == []
+
+
+def test_a_view_closer_than_its_map_is_where_the_page_opens_it_and_its_ground_is_filed_whole_again(client, tiles_here):
+    cid, case = _case(client)
+    vehicles = _markers(client, cid)
+    put = client.post(f"/api/cases/{cid}/notes/maps", json={"layers": [vehicles]}).json()
+    block = _block(put["text"])
+    whole = notes_maps.derive(case, block).data
+    assert "opens" not in whole, "a put's view frames the whole map"
+    # Draw › Open here: the view of a part of it
+    lat, lon, zoom = notes_maps.fit_view([DRAW_VIEW["west"], DRAW_VIEW["south"], DRAW_VIEW["east"], DRAW_VIEW["north"]],
+                                         1200, 750, pad=0)
+    text = put["text"].replace(next(line for line in put["text"].split("\n") if line.startswith("view: ")),
+                               f"view: {lat:.5f}, {lon:.5f}, {zoom:.2f}")
+    opens = notes_maps.derive(case, _block(text)).data["opens"]
+    assert opens[0] <= DRAW_VIEW["west"] + 1e-4 and opens[2] >= DRAW_VIEW["east"] - 1e-4
+    assert opens[2] - opens[0] < (whole["bounds"][2] - whole["bounds"][0]) / 2
+    # the ground filed again on another press covers what it covered, the view kept for the page
+    again = client.post(f"/api/cases/{cid}/notes/maps/ground", json={"text": text, "base": "satellite"}).json()
+    refiled = notes_maps.derive(case, _block(text.replace(block.ground, again["ground"]))).data
+    assert refiled["bounds"] == pytest.approx(whole["bounds"], abs=2e-4) and refiled["opens"] == opens
+    twice = client.post(f"/api/cases/{cid}/notes/maps/ground", json={"text": text, "base": "satellite"}).json()
+    assert twice["ground"] == again["ground"] and twice["filed"] == []
+
+
+def test_a_live_map_streams_the_imagery_its_block_names_and_keeps_its_reader_inside_when_asked(client):
+    cid, case = _case(client)
+    name = _tracked_line(case)
+    plain = notes_maps.derive(case, notes_maps.parse_block(f"layer: {name}")).data
+    assert not {"imagery", "inside", "opens"} & set(plain)
+    sentinel = notes_maps.derive(case, notes_maps.parse_block(f"layer: {name}\nimagery: sentinel\nbounds: ground")).data
+    assert sentinel["imagery"]["tiles"].startswith("https://tiles.maps.eox.at/") and sentinel["imagery"]["native"] == 14
+    assert sentinel["imagery"]["link"] == "https://cloudless.eox.at"
+    assert sentinel["imagery"]["credit"].endswith("Contains modified Copernicus Sentinel data 2025) · "
+                                                  "CC BY-NC-SA 4.0, non-commercial use, a year's mosaic, not a day")
+    assert sentinel["inside"] is True
+    esri = notes_maps.derive(case, notes_maps.parse_block(f"layer: {name}\nimagery: esri")).data["imagery"]
+    assert esri["tiles"].startswith("https://services.arcgisonline.com/") and esri["credit"].startswith("Imagery: Esri")
+    dark = notes_maps.derive(case, notes_maps.parse_block(f"layer: {name}\nimagery: esri\nbase: dark")).data
+    assert "imagery" not in dark, "a street or a dark base streams no imagery"
+
+
+def test_the_check_says_esris_terms_for_a_public_page_only(client, tiles_here):
+    cid, case = _case(client)
+    vehicles = _markers(client, cid)
+    put = client.post(f"/api/cases/{cid}/notes/maps", json={"title": "Losses", "layers": [vehicles],
+                                                             "provider": "esri-world-imagery"}).json()
+    said = 'The map "Losses": Esri’s terms limit reuse, so publishing it is your responsibility.'
+    note = _note_with(client, cid, f"# Front\n\n> [!internal]\n> Ours.\n\n{put['text']}\n")["id"]
+    route = f"/api/cases/{cid}/notes/pdf/check"
+
+    def warned(**body) -> list[dict]:
+        return client.post(route, json={"notes": [note], **body}).json()["notes"][0]["warnings"]
+
+    for body in ({"format": "html", "edition": "public"}, {"format": "web"}):
+        found = [warning for warning in warned(**body) if warning["text"] == said]
+        assert len(found) == 1 and found[0]["kind"] == "other", body
+    for body in ({"format": "html", "edition": "internal"}, {"format": "pdf", "edition": "public"}):
+        assert not [warning for warning in warned(**body) if "Esri" in warning["text"]], body
+    ready = client.post(route, json={"notes": [note], "format": "html", "edition": "public", "ready": True}).json()
+    assert next(one for one in ready["notes"][0]["warnings"] if one["text"] == said)["group"] == "figures"
+    # Sentinel-2 says nothing
+    sentinel = put["text"].replace("imagery: esri", "imagery: sentinel")
+    other = _note_with(client, cid, f"# Front\n\n{sentinel}\n", title="Free")["id"]
+    public = client.post(route, json={"notes": [other], "format": "html", "edition": "public"}).json()["notes"][0]
+    assert not [warning for warning in public["warnings"] if "Esri" in warning["text"]]
+
+
+def test_the_card_says_esris_terms_in_the_checks_words():
+    source = (Path(__file__).resolve().parents[1] / "frontend" / "src" / "lib" / "notes" / "editor" / "mapText.js").read_text("utf-8")
+    assert f"export const ESRI_TERMS = '{notes_maps.ESRI_TERMS}';" in source
+
+
+@pytest.mark.parametrize("frame", [(43.4336, 12.65808, 43.7528, 12.98971), (43.455, 12.68, 43.56, 12.77),
+                                   (43.49, 12.74, 43.502, 12.748)])
+def test_a_ground_filed_for_a_frame_holds_all_of_it(client, tiles_here, frame):
+    """Rounded down, a frame's edge fell a fraction of a pixel outside its ground and the card said
+    part of it had no ground, as many times as it was filed again (seen on Bab al-Mandab's map)."""
+    cid, case = _case(client)
+    vehicles = _markers(client, cid)
+    put = client.post(f"/api/cases/{cid}/notes/maps", json={"layers": [vehicles]}).json()
+    text = put["text"].replace("\n:::", "\nframe: " + ", ".join(f"{value:.5f}" for value in frame) + "\n:::")
+    for imagery in ("sentinel", "esri"):
+        filed = client.post(f"/api/cases/{cid}/notes/maps/ground",
+                            json={"text": text.replace("imagery: sentinel", f"imagery: {imagery}"), "base": "satellite"}).json()
+        bounds = notes_maps.derive(case, _block(text.replace(put["ground"]["id"], filed["ground"]))).data["ground"]["bounds"]
+        assert bounds[0] <= frame[0] and bounds[1] <= frame[1] and bounds[2] >= frame[2] and bounds[3] >= frame[3], imagery

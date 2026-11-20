@@ -16,7 +16,8 @@
  * While its Draw tab is open the map moves under the analyst (`editor/mapSurface.js`), so a
  * corner goes down exactly where it is meant; the view is never written, and leaving Draw shows
  * the block's own again. *File the ground for this view* files the picture of what it shows
- * then (`POST /notes/maps/detail`) as one more `detail:` line, one Undo step.
+ * then (`POST /notes/maps/detail`) as one more `detail:` line, and *Open here* writes it as the
+ * block's `view:`, where the page opens the map, each one Undo step.
  *
  * The button in the map's corner puts the card on the whole screen (`lib/fullscreen.js`), its
  * bar, tabs, Draw tools and hint with it, the map laid again on its new size. Esc gives the
@@ -37,7 +38,7 @@ import { button, icon } from './gridMenu.js';
 import { heldHeight, holdHeight, moveHeight, releaseHeight } from './heights.js';
 import { drawingsTitle, mapSettings } from './mapCard.js';
 import { NAV_HINT, NAV_TOOL_HINT, TOOL_HINTS, mapSurface } from './mapSurface.js';
-import { BASES, readMap, withMapSettings } from './mapText.js';
+import { BASES, fitView, readMap, viewText, withMapSettings } from './mapText.js';
 import { blocksIn, openSource } from './ranges.js';
 import { noteHandlers } from './state.js';
 import { lineChanges } from './tableText.js';
@@ -49,6 +50,8 @@ const MAP_HEIGHT = 420;
 const FILING = { satellite: 'Filing the imagery…', map: 'Filing the street map…', topographic: 'Filing the topographic map…', dark: 'Filing the street map…' };
 /** What *File the ground for this view* files, by base, and what it says while it does. */
 const VIEW_GROUND = { satellite: 'the imagery', map: 'the street map', topographic: 'the topographic map', dark: 'the street map' };
+/** What a press on Imagery says while its ground is filed. */
+const FILING_IMAGERY = { sentinel: 'Filing Sentinel-2…', esri: 'Filing Esri…' };
 const FILING_VIEW = {
   satellite: 'Filing the imagery of this view…', map: 'Filing the street map of this view…',
   topographic: 'Filing the topographic map of this view…', dark: 'Filing the street map of this view…',
@@ -258,6 +261,16 @@ export class MapEditing {
       press.addEventListener('mousedown', (event) => event.preventDefault());
       press.addEventListener('click', () => this.fileView());
       parts.push(press);
+      // where the page opens the map: a note's map with a ground, never an infographic's picture of one
+      if (!this.sizedBy && this.described?.ground) {
+        const open = button('cm-map-act cm-map-open-here', {
+          label: 'Open here', iconName: 'flag', title: wide ? 'Zoom in to the whole map or closer first' : 'The page opens the map on this view',
+        });
+        open.disabled = Boolean(this.busy) || wide;
+        open.addEventListener('mousedown', (event) => event.preventDefault());
+        open.addEventListener('click', () => this.openHere());
+        parts.push(open);
+      }
     }
     this.hint.replaceChildren(...parts);
     this.measure();
@@ -321,15 +334,17 @@ export class MapEditing {
    * was filed before), then the base, the ground and its close-ups written as one step.
    * `reframe` files the ground again for the frame the map has.
    */
-  async base(value, { reframe = false } = {}) {
+  async base(value, { reframe = false, imagery = '' } = {}) {
     if (!this.caseId || this.busy) return;
     const text = this.text();
     if (text == null) return;
-    this.setBusy(`base:${FILING[value] ?? 'Filing…'}`);
+    this.setBusy(imagery ? `imagery:${FILING_IMAGERY[imagery] ?? 'Filing…'}` : `base:${FILING[value] ?? 'Filing…'}`);
     try {
-      const answer = await fileGround(this.caseId, { text, base: value });
+      // the imagery picked is the block's as the server files it, and written with its ground
+      const answer = await fileGround(this.caseId, { text: imagery ? withMapSettings(text, { imagery }) : text, base: value });
       if (this.gone) return;
       const changes = { base: answer.base ?? '', ground: answer.ground, detail: answer.details ?? [] };
+      if (imagery) changes.imagery = imagery;
       // a ground filed for a frame looks where the frame is
       if (reframe || !this.map.view) changes.view = answer.view;
       this.write(changes);
@@ -365,6 +380,12 @@ export class MapEditing {
     } finally {
       this.setBusy('');
     }
+  }
+
+  /** *Open here*: what the map shows now in Draw written as its `view:`, where the page opens it, one Undo step. */
+  openHere() {
+    if (this.busy || !this.surface?.navigating) return;
+    if (this.write({ view: viewText(fitView(this.surface.seen())) })) this.say('The page opens the map here');
   }
 
   /** Arm `tool` on the map, the card's choice answered with what it drew. */
@@ -477,6 +498,7 @@ export class MapEditing {
         state: () => (this.gone ? null : { map: this.map, described: this.described, busy: this.busy }),
         write: (changes) => this.write(changes),
         base: (value, options) => this.base(value, options),
+        imagery: (value) => this.base('satellite', { imagery: value }),
         arm: (tool, done) => this.arm(tool, done),
         draw: (kind, coords, extra) => this.drawn(kind, coords, extra),
         edit: (row, changes) => this.editDrawn(row, changes),

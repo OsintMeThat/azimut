@@ -23,9 +23,12 @@ const MIN_ZOOM = 1;
 /**
  * The base a map with a ground opens on: `satellite`, the ground as filed over OpenFreeMap's map,
  * so the live map takes over from the drawing as it stands and a step looks at the pictures filed
- * for it; or `map`, OpenFreeMap's map alone, which a map with no ground always opens on.
+ * for it; or `map`, OpenFreeMap's map alone, which a map with no ground always opens on. A map
+ * whose block names its imagery (`data.imagery`) streams it instead, from its own host in the
+ * reader's browser, sharp at every zoom, and opens on it.
  */
 const FIRST_BASE = 'satellite';
+const IMAGERY = 'az-imagery';
 /**
  * A map's own base (`base:` in its block) as the live map draws it: a street map or a dark one is
  * OpenFreeMap's own style alone, sharper than the picture filed for the page; a topographic map is
@@ -403,12 +406,15 @@ export function mount(figure, said, maplibre) {
   holder.append(box);
   stage.after(holder);
   const own = OWN_BASES[data.base] || null;
+  const imagery = data.imagery?.tiles ? data.imagery : null;
   let map;
   try {
     map = new maplibre.Map({
       container: box,
       style: (own?.style && said[own.style]) || said.style,
-      bounds: data.bounds,
+      bounds: data.opens || data.bounds,
+      // a map that keeps its reader on its ground stops at its edges
+      ...(data.inside && data.bounds ? { maxBounds: [data.bounds.slice(0, 2), data.bounds.slice(2, 4)] } : {}),
       fitBoundsOptions: { padding: 0 },
       attributionControl: false,
       cooperativeGestures: true,
@@ -431,7 +437,7 @@ export function mount(figure, said, maplibre) {
   const shaped = geojson(data);
   const byId = new Map((data.features || []).map((feature) => [String(feature.id), feature]));
   const drawn = layers();
-  let base = data.ground?.src ? own?.opens || FIRST_BASE : 'map';
+  let base = data.ground?.src || imagery ? own?.opens || FIRST_BASE : 'map';
   let day = '';
   let past = [];
   /** What the reader shares once the map is handed over (`attach`), null till then. */
@@ -457,17 +463,23 @@ export function mount(figure, said, maplibre) {
     const below = map.getStyle?.()?.layers || [];
     const last = below.findLastIndex((layer) => layer.type !== 'symbol');
     const names = below[last + 1]?.id;
+    const muted = { 'raster-saturation': -0.38, 'raster-brightness-max': 0.86, 'raster-contrast': 0.04 };
+    const visible = { visibility: base === 'satellite' ? 'visible' : 'none' };
+    if (imagery) {
+      // the imagery the block names, from its host: Azimut fetched none of it, the filed ground stays the page's
+      map.addSource(IMAGERY, { type: 'raster', tiles: [imagery.tiles], tileSize: 256, maxzoom: number(imagery.native, 19) });
+      map.addLayer({ id: IMAGERY, type: 'raster', source: IMAGERY, layout: visible, paint: muted }, names);
+    }
     const grounds = [];
-    if (data.ground?.bounds) grounds.push({ id: 'az-ground', src: pictureOf(data.ground.src), bounds: data.ground.bounds });
-    (data.details || []).forEach((detail, index) => {
+    if (data.ground?.bounds && !imagery) grounds.push({ id: 'az-ground', src: pictureOf(data.ground.src), bounds: data.ground.bounds });
+    (imagery ? [] : data.details || []).forEach((detail, index) => {
       if (detail?.bounds) grounds.push({ id: `az-detail-${index + 1}`, src: pictureOf(detail.src), bounds: detail.bounds });
     });
     for (const { id, src, bounds } of grounds) {
       if (!src) continue;
-      const [west, south, east, north] = bounds;
-      map.addSource(id, { type: 'image', url: src, coordinates: [[west, north], [east, north], [east, south], [west, south]] });
-      map.addLayer({ id, type: 'raster', source: id, layout: { visibility: base === 'satellite' ? 'visible' : 'none' },
-        paint: { 'raster-saturation': -0.38, 'raster-brightness-max': 0.86, 'raster-contrast': 0.04, 'raster-fade-duration': 0 } }, names);
+      const [w, s, e, n] = bounds;
+      map.addSource(id, { type: 'image', url: src, coordinates: [[w, n], [e, n], [e, s], [w, s]] });
+      map.addLayer({ id, type: 'raster', source: id, layout: visible, paint: { ...muted, 'raster-fade-duration': 0 } }, names);
     }
     for (const layer of drawn) {
       const { base: shown, past: faint, ...spec } = layer;
@@ -806,15 +818,16 @@ export function mount(figure, said, maplibre) {
     // the north arrow the drawing wears, over the live map too
     const north = stage.querySelector('.az-map-north');
     if (north) holder.append(north.cloneNode(true));
-    if (data.ground?.src && (!own || own.switch)) {
+    if ((data.ground?.src || imagery) && (!own || own.switch)) {
       const choice = make(doc, 'div', { class: 'az-gl-base', role: 'group', 'aria-label': 'Base map' });
       const option = (value, words, hint) => {
         const button = make(doc, 'button', { type: 'button', 'data-base': value, title: hint, 'aria-pressed': String(base === value) }, words);
         button.addEventListener('click', () => choose(value));
         return button;
       };
-      choice.append(option('map', 'Map', 'OpenFreeMap, from OpenStreetMap'),
-        option('satellite', own?.filed || 'Satellite (as filed)', own?.hint || 'The imagery filed with the map, as in the report'));
+      choice.append(option('map', 'Map', 'OpenFreeMap, from OpenStreetMap'), imagery
+        ? option('satellite', 'Satellite', imagery.name || 'Satellite imagery')
+        : option('satellite', own?.filed || 'Satellite (as filed)', own?.hint || 'The imagery filed with the map, as in the report'));
       holder.append(choice);
     }
     ruler = data.scale === 'off' ? null : make(doc, 'div', { class: 'az-map-scale', 'aria-hidden': 'true' });
@@ -826,7 +839,7 @@ export function mount(figure, said, maplibre) {
   /** The base the map is drawn on: OpenFreeMap's map, or the ground as filed over it. */
   function choose(value) {
     base = value === 'satellite' ? 'satellite' : 'map';
-    for (const id of ['az-ground', ...(data.details || []).map((_, index) => `az-detail-${index + 1}`)]) {
+    for (const id of [IMAGERY, 'az-ground', ...(data.details || []).map((_, index) => `az-detail-${index + 1}`)]) {
       if (map.getLayer?.(id)) map.setLayoutProperty(id, 'visibility', base === 'satellite' ? 'visible' : 'none');
     }
     for (const button of holder.querySelectorAll('.az-gl-base button')) button.setAttribute('aria-pressed', String(button.dataset.base === base));
@@ -837,7 +850,11 @@ export function mount(figure, said, maplibre) {
   function credits() {
     if (!credit) return;
     const parts = [];
-    if (base === 'satellite' && data.ground?.credit) parts.push(make(doc, 'span', { class: 'az-gl-imagery' }, data.ground.credit));
+    // the imagery streamed says whose it is, linked where its owner asks; the ground as filed, its own credit
+    if (base === 'satellite' && imagery?.credit) {
+      parts.push(/^https:\/\//.test(imagery.link || '') ? make(doc, 'a', { class: 'az-gl-imagery', href: imagery.link, target: '_blank', rel: 'noopener noreferrer' }, imagery.credit)
+        : make(doc, 'span', { class: 'az-gl-imagery' }, imagery.credit));
+    } else if (base === 'satellite' && data.ground?.credit) parts.push(make(doc, 'span', { class: 'az-gl-imagery' }, data.ground.credit));
     for (const [words, href] of BASE_CREDIT) parts.push(make(doc, 'a', { href, target: '_blank', rel: 'noopener noreferrer' }, words));
     credit.replaceChildren(...parts.flatMap((part, index) => (index ? [make(doc, 'span', { class: 'az-gl-dot' }, ' · '), part] : [part])));
   }

@@ -203,7 +203,7 @@ proof for publication.
 | ✅ **Note to Post** | To Post sends a note's public edition, or the passage selected, to Post as the pieces of a Free post thread; internal passages never leave, and what stays out is said once. |
 | ✅ **HTML report** | Writes a note as one self-contained page readable offline beside the PDF (a before/after swipe, playable clips, zoomable pictures, a citation's source on hover, verify links, the edition's hash), laid out as an article or as a story of held pictures. |
 | ✅ **Report on the web** | Writes a note as a folder ready to host, with its link card and the GitHub Pages steps, publishes it to the analyst's own GitHub Pages in one press, or sends it to WordPress as a draft. |
-| ✅ **Maps in reports** | Puts the case's layers, a Map plate or a period's proofs in a note as a map read day by day, its marks opening their cards: offline in the file, live over OpenFreeMap once hosted, a picture in the PDF; set from its card (base, layers, frame, timeline, steps, cards) and drawn on at any zoom, from an area to highlight to a map started from nothing. |
+| ✅ **Maps in reports** | Puts the case's layers, a Map plate or a period's proofs in a note as a map read day by day, its marks opening their cards: offline in the file, live over OpenFreeMap once hosted, a picture in the PDF; set from its card (base, Sentinel-2 or Esri imagery streamed live, layers, frame, timeline, steps, cards) and drawn on at any zoom, from an area to highlight to a map started from nothing. |
 | ✅ **Charts and infographics** | Draws a note's table as one of fifteen kinds of chart picked by its picture, a wall of the case's own pictures among them, in the case's colours and saying "at least" where a count is a floor, and lays charts, a map and key figures out as an infographic page or one picture, read from one of the case's sheets. |
 | ✅ **Charts from scratch** | Every kind of chart starts from a form made for it, drawn as it is filled, and can fill from the case's dated events or a table's counts. |
 | ✅ **Diagrams from a form** | Makes a flow, a network, an organisation, a timeline, a mind map or a sequence in a form, drawn as it is filled in the case's colours with a legend, a network from the Graph or a timeline from the case's dated events, and keeps plain Mermaid underneath. |
@@ -620,12 +620,19 @@ stops making sense.
   sprites: the readers' browsers reach it when
   they read the page online, Azimut itself never does, and the export dialog says so once
   with a tick to keep the maps offline. MapLibre runs from the folder's own files, its
-  worker one of them (no `blob:`), and no live satellite tile is ever fetched. A map's base
+  worker one of them (no `blob:`). A map whose block names its imagery (`imagery: sentinel`
+  or `esri`) streams it the same way, so its page's policy also lets in that one host, EOX's
+  `tiles.maps.eox.at` or Esri's `services.arcgisonline.com` (`notes_web.live_csp`, no other
+  host ever), and Azimut fetches none of it; the HTML file and the PDF keep the ground filed
+  on the put's press. Sentinel-2 cloudless is filed only as a note map's ground, credited as a
+  year's mosaic, not a day, and Satellite still refuses it as a capture. A map's base
   other than its imagery (a street, topographic or dark map) is filed by Azimut from
   OpenStreetMap or OpenTopoMap on the press that picks it, as a capture is, and its page
   fetches none. Accepted risk (owner's choice, 2026-11-18): a
   public HTML report may carry Esri and Google imagery, its credit kept beside the
-  picture and in its lightbox; a Street View or Yandex capture is warned about once by
+  picture and in its lightbox, and a note's map on Esri is the analyst's call (owner's
+  choice, 2026-11-20): the card says once and the check before a public export says again
+  that Esri's terms limit reuse, never refusing it; a Street View or Yandex capture is warned about once by
   the check before export and never refused. Decoded note pictures are kept between renders in a
   cache capped at 40 entries and 64 MB, and the preview's lighter copies (re-encoded,
   so with no metadata either) in one capped at 400 entries and 96 MB. Three routes take a picture drawn in the

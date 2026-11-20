@@ -166,6 +166,10 @@ LIVE_DARK = f"{LIVE_HOST}/styles/dark"
 #: (style, tiles, glyphs, sprites) and drawn, and the page's own files fetched, as the map
 #: reads the filed ground. Its worker is a file of the folder, which `script-src 'self'` allows.
 LIVE_SOURCES: dict[str, tuple[str, ...]] = {"connect-src": ("'self'", LIVE_HOST), "img-src": (LIVE_HOST,)}
+#: The satellite imagery a live map may stream when its block names one (`imagery:`,
+#: `notes_maps.live_imagery`): EOX's Sentinel-2 cloudless and Esri World Imagery, their tiles
+#: fetched and drawn. A page's policy lets in only the hosts its own maps stream from.
+IMAGERY_HOSTS = ("https://tiles.maps.eox.at", "https://services.arcgisonline.com")
 #: The check's words when the maps cannot go live.
 LIVE_MISSING = "Its maps stay offline: this copy of Azimut was built without the live map's files."
 
@@ -233,6 +237,13 @@ def folder_csp(extra: Mapping[str, Iterable[str]] | None = None) -> str:
         kept = directives.setdefault(name, [])
         kept.extend(source for source in sources if source not in kept)
     return "; ".join(f"{name} {' '.join(sources)}" for name, sources in directives.items())
+
+
+def live_csp(streamed: Iterable[str] = ()) -> str:
+    """The policy of a page with a live map (`LIVE_SOURCES`), and of the imagery hosts its maps
+    stream from those of `IMAGERY_HOSTS` named in ``streamed``; any other is never let in."""
+    hosts = [host for host in IMAGERY_HOSTS if host in set(streamed)]
+    return folder_csp({name: (*sources, *hosts) for name, sources in LIVE_SOURCES.items()})
 
 
 def address(value: str | None) -> str:
@@ -362,8 +373,8 @@ def live_maps() -> html_engine.LiveMaps | None:
         return None
     if not LIVE_VERSION.match(version) or not all(files.values()) or not licence:
         return None
-    return html_engine.LiveMaps(csp=folder_csp(LIVE_SOURCES), style=LIVE_STYLE, dark=LIVE_DARK, version=version, files=files,
-                                licence=licence)
+    return html_engine.LiveMaps(csp=live_csp(), style=LIVE_STYLE, dark=LIVE_DARK, version=version, files=files,
+                                licence=licence, streaming=live_csp)
 
 
 def write(made: WebBuild, dest_dir: Path) -> Path:
@@ -693,8 +704,8 @@ def _inside(root: Path, relative: str) -> Path:
 
 
 __all__ = [
-    "ADDRESS", "HOW_TO", "INDEX", "LIVE_DARK", "LIVE_HOST", "LIVE_LICENSE", "LIVE_MISSING", "LIVE_SOURCES", "LIVE_STYLE",
-    "LIVE_VENDOR", "MAX_ADDRESS", "NOJEKYLL", "NO_ADDRESS", "NotesWebError", "PAGES_CARD", "PAGES_INTRO",
+    "ADDRESS", "HOW_TO", "IMAGERY_HOSTS", "INDEX", "LIVE_DARK", "LIVE_HOST", "LIVE_LICENSE", "LIVE_MISSING",
+    "LIVE_SOURCES", "LIVE_STYLE", "LIVE_VENDOR", "MAX_ADDRESS", "NOJEKYLL", "NO_ADDRESS", "NotesWebError", "PAGES_CARD", "PAGES_INTRO",
     "PAGES_PUBLIC", "PAGES_STEPS", "PAGES_UPDATE", "SHARE", "SHARE_SIZE", "UPLOAD", "WEB_DIR", "WebBuild", "address",
     "build", "folder_csp", "folder_name", "how_to", "live_maps", "share_card", "write",
 ]

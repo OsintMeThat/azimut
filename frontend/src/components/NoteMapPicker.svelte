@@ -3,13 +3,15 @@
    * `/` › Interactive map: what a map in the note shows. The case's layers, or one of its
    * Map plates (its layers as it draws them, its days and steps), and the proofs of a
    * period over either. The ground is taken once, on Put, from the imagery picked
-   * (`lib/notes/mapPut.js`); the page never fetches it again.
+   * (`lib/notes/mapPut.js`), Sentinel-2 unless another is: the PDF and the HTML file keep
+   * that picture, and a web folder's live map streams the same imagery.
    *
    * **Start an empty map** frames a place instead (`NoteMapStart.svelte`, loaded on that
    * press with the map it shows) and puts a map of its own, drawn on in the note.
    */
   import { onMount } from 'svelte';
   import { api } from '../lib/api.js';
+  import { ESRI_TERMS } from '../lib/notes/editor/mapText.js';
   import { mapRequest, proofsPeriod } from '../lib/notes/mapPut.js';
   import Modal from './Modal.svelte';
 
@@ -146,7 +148,7 @@
           </select>
         </label>
       {/if}
-      <p class="said">The ground is fetched once, now, and kept in the case. The page never fetches it.</p>
+      <p class="said">{provider === 'esri-world-imagery' ? ESRI_TERMS : 'The ground is fetched once, now, and kept in the case.'}</p>
     {/if}
     <div class="actions">
       <button type="button" class="btn btn-ghost start" disabled={!sources} title="Frame a place, then put points, lines and areas on it"

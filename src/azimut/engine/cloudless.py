@@ -5,7 +5,9 @@ the one before, for the first two), pixel by pixel, so it carries no single date
 That is the opposite of what a capture filed as evidence must be, so the basemap is
 shown and never captured (`Provider.capturable` off), and wherever it is printed it
 is said to be a year's mosaic, never a day. A plate uses it as a ground for a wide
-map, where a seamless, cloudless picture of a country is what the reader needs.
+map, where a seamless, cloudless picture of a country is what the reader needs, and
+so may a note's map (`imagery: sentinel`): its ground is the one picture filed from it,
+as a background (`api/notemaps._file_ground`), and a web folder's live map streams it.
 
 Key-less WMTS at `tiles.maps.eox.at`, asked only when the analyst picks this ground.
 Its pixels are 10 m, native to level 14; the map magnifies past it.
@@ -27,6 +29,10 @@ MAX_NATIVE_ZOOM = 14
 MAX_ZOOM = 17
 #: The years free for any use; the others are for non-commercial use only.
 FREE_FOR_ANY_USE = frozenset({2016})
+#: The page EOX's credit links to, online.
+SITE = "https://cloudless.eox.at"
+#: What its credit adds wherever a note's map shows it: it is no one day's picture.
+MOSAIC = "a year's mosaic, not a day"
 
 
 def layer(year: int) -> str:
@@ -54,7 +60,7 @@ def licence(year: int) -> str:
 def attribution(year: int) -> str:
     """The credit EOX asks for, word for word, then the licence it is given under."""
     return (
-        f"EOxCloudless https://cloudless.eox.at by EOX IT Services GmbH "
+        f"EOxCloudless {SITE} by EOX IT Services GmbH "
         f"(Contains modified Copernicus Sentinel data {data_years(year)}) · {licence(year)}"
     )
 

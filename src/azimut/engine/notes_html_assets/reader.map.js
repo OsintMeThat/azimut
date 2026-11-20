@@ -194,6 +194,16 @@
     let laid = null;
     /** The view of the whole map: the world in the stage's middle. */
     const whole = () => ({ k: 1, x: (size().w - span().w) / 2, y: (size().h - span().h) / 2 });
+    /** The view the map opens on: the part of it its block opens on (`data.opens`), held whole, else all of it. */
+    function opening() {
+      if (!Array.isArray(data.opens) || data.opens.length !== 4) return whole();
+      const [x0, y0] = project(data.opens[0], data.opens[3]);
+      const [x1, y1] = project(data.opens[2], data.opens[1]);
+      const { w, h } = size();
+      const f = fit();
+      const k = Math.max(1, Math.min(w / Math.max(1e-9, (x1 - x0) * f), h / Math.max(1e-9, (y1 - y0) * f)));
+      return { k, x: w / 2 - ((x0 + x1) / 2) * f * k, y: h / 2 - ((y0 + y1) / 2) * f * k };
+    }
 
     /**
      * The world never leaves the stage: its top left stays above and left of the stage's. Narrower
@@ -820,6 +830,7 @@
     if (ground && !ground.complete) ground.addEventListener('load', settle, { once: true });
     for (const detail of details) if (!detail.complete) detail.addEventListener('load', settle, { once: true });
     window.addEventListener('beforeprint', () => { screen(false); close(); Object.assign(view, whole()); paint(); });
+    if (data.opens) Object.assign(view, opening());
     settle();
     months();
     if (currentDay) setDay(currentDay, { quiet: true });

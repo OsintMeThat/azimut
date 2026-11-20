@@ -3,8 +3,10 @@
  * short tabs so no choice hides another:
  *
  * - **Look**: its title, the base it is drawn on (satellite as filed, a street map, a
- *   topographic one, a dark one), its frame (dragged on the map, or fitted to what it
- *   shows), its size, its legend, a north arrow and the scale; *Apply a template…* sets a
+ *   topographic one, a dark one), a satellite map's imagery (Sentinel-2 or Esri, its ground
+ *   filed on the press), its frame (dragged on the map, or fitted to what it shows) and
+ *   whether a live map keeps its readers inside it, its size, its legend, a north arrow and
+ *   the scale; *Apply a template…* sets a
  *   map template's look (Settings › Templates › Figures), its layers, frame and steps kept;
  * - **Layers**: each layer on or off and its colour from the case's palette, another
  *   layer added, the proofs of a period (only where each was filmed, or every point),
@@ -22,7 +24,8 @@
 import { button, icon } from './gridMenu.js';
 import { openFigurePicker } from '../figureTemplatePicker.js';
 import {
-  BASES, CARD_PARTS, CROWDS, LEGENDS, SIZES, SPEEDS, aboutArea, areaKm2, colourText, fitView, frameText, stepValue, viewBounds,
+  BASES, CARD_PARTS, CROWDS, ESRI_TERMS, IMAGERY, LEGENDS, SIZES, SPEEDS, aboutArea, areaKm2, colourText, fitView, frameText, stepValue,
+  viewBounds,
 } from './mapText.js';
 
 function element(tag, className, text) {
@@ -46,6 +49,14 @@ export const BASE_HINTS = {
   topographic: 'A topographic map from OpenTopoMap, filed once now',
   dark: 'The street map drawn dark, filed once now',
 };
+export const IMAGERY_NAMES = { sentinel: 'Sentinel-2 · free', esri: 'Esri · sharper' };
+export const IMAGERY_HINTS = {
+  sentinel: 'EOX’s cloudless mosaic of a year, free with its credit (CC BY-NC-SA 4.0)',
+  esri: 'Esri World Imagery, credited on the map, under Esri’s terms',
+};
+/** Said under Sentinel-2 on a map framed closer than about 3 km across, where its 10 m pixels show. */
+export const SENTINEL_BLUR = 'Sentinel-2 is 10 m: details this close will blur.';
+const BLUR_KM = 3;
 export const SIZE_NAMES = { half: 'Half', wide: 'Wide', full: 'Full height' };
 export const LEGEND_NAMES = { shown: 'Shown', folded: 'Folded', hidden: 'Hidden' };
 export const SIZE_HINTS = { half: 'Half the text’s width', wide: 'The article’s width', full: 'As tall as the screen' };
@@ -160,7 +171,8 @@ export function paletteOf(named = []) {
  * The settings of a map, drawn in `panel`. `ctx` answers and does what the card asks:
  * `state()` the map as it stands, `{ map, described, busy }` (`readMap`, the describe
  * answer, the press under way); `write(changes)` one choice; `base(value)` the base filed
- * and written; `arm(tool, done)` a tool armed on the map; `draw(kind, coords, extra)`,
+ * and written; `imagery(value)` a satellite map's imagery, its ground filed and written with
+ * it; `arm(tool, done)` a tool armed on the map; `draw(kind, coords, extra)`,
  * `edit(row, changes)` and `remove(row)` what is drawn; `addLayer(name)` another layer;
  * `fromSheet()`, when the note can, a layer made from a sheet and put on the map;
  * `sizedBy`, when the map's host sets its width (an infographic's panel), the words said in
@@ -179,6 +191,8 @@ export function mapSettings(panel, ctx) {
   let current = ctx.tab ?? 'look';
   /** The step whose frame is shown on the map, while the Time tab is open. */
   let pickedStep = -1;
+  /** Whether Esri was picked on this card: its terms are said under the choice, once, while it stays picked. */
+  let esriPicked = false;
 
   function renderTabs() {
     tabs.replaceChildren(...TABS.map((tab) => {
@@ -222,6 +236,9 @@ export function mapSettings(panel, ctx) {
       textField('Title', map.title, (value) => ctx.write({ title: value }), { placeholder: 'What the map shows' }));
     const base = segmented('Base', BASES.map((value) => ({ value, label: BASE_NAMES[value], title: BASE_HINTS[value] })),
       map.base || 'satellite', (value) => ctx.base(value), { busy: busy.startsWith('base') ? busy.slice(5) : '' });
+    // an infographic's panel is a picture: its imagery and its reader's reach stay as they were
+    const live = !ctx.sizedBy && ctx.imagery;
+    const imagery = live && (map.base || 'satellite') === 'satellite' ? imageryField(map, described, busy) : null;
     const frame = element('div', 'cm-map-field');
     frame.append(element('span', 'cm-map-field-name', 'Frame'));
     const actions = element('div', 'cm-map-actions');
@@ -238,6 +255,17 @@ export function mapSettings(panel, ctx) {
       back.addEventListener('mousedown', (event) => event.preventDefault());
       back.addEventListener('click', () => ctx.write({ frame: '' }));
       actions.append(back);
+    }
+    if (live) {
+      const keep = element('label', 'cm-map-check');
+      keep.title = 'The live map stops at the frame’s edges';
+      const box = element('input');
+      box.type = 'checkbox';
+      box.checked = map.bounds === 'ground';
+      box.setAttribute('aria-label', 'Keep readers inside the frame');
+      box.addEventListener('change', () => ctx.write({ bounds: box.checked ? 'ground' : '' }));
+      keep.append(box, element('span', '', 'Keep readers inside'));
+      actions.append(keep);
     }
     frame.append(actions);
     const said = frameSaid(map, described);
@@ -259,7 +287,24 @@ export function mapSettings(panel, ctx) {
       segmented('North arrow', [{ value: 'off', label: 'Off' }, { value: 'on', label: 'On' }], map.north === 'on' ? 'on' : 'off', (value) => ctx.write({ north: value === 'on' ? 'on' : '' })),
       segmented('Scale', ['off', '', 'on'].map((value) => ({ value, label: SCALE_NAMES[value], title: SCALE_HINTS[value] })), map.scale, (value) => ctx.write({ scale: value })),
     );
-    return [title, base, frame, grid, templateLine(map)];
+    return [title, base, imagery, frame, grid, templateLine(map)];
+  }
+
+  /**
+   * Imagery, under a satellite base: Sentinel-2 or Esri, its ground filed on the press. A map that
+   * names none shows the one its ground came from. Esri's terms are said once it is picked; Sentinel-2
+   * says it blurs on a map framed closer than about 3 km across.
+   */
+  function imageryField(map, described, busy) {
+    const value = map.imagery || described?.imagery || '';
+    const row = segmented('Imagery', IMAGERY.map((one) => ({ value: one, label: IMAGERY_NAMES[one], title: IMAGERY_HINTS[one] })),
+      value, (one) => {
+        esriPicked = one === 'esri';
+        ctx.imagery(one);
+      }, { busy: busy.startsWith('imagery') ? busy.slice(8) : '' });
+    if (value === 'esri' && esriPicked) row.append(element('p', 'cm-map-note', ESRI_TERMS));
+    else if (value === 'sentinel' && acrossKm(map.frame ?? described?.bounds) < BLUR_KM) row.append(element('p', 'cm-map-note', SENTINEL_BLUR));
+    return row;
   }
 
   /** Size, where the host sets the map's width: what says so. */
@@ -597,6 +642,13 @@ export function moved(steps, from, to) {
   const [one] = next.splice(from, 1);
   next.splice(to, 0, one);
   return next;
+}
+
+/** How wide `[west, south, east, north]` is across its middle, in km; Infinity when it is not known. */
+export function acrossKm(bounds) {
+  if (!Array.isArray(bounds) || bounds.length !== 4) return Infinity;
+  const [west, south, east, north] = bounds;
+  return (east - west) * 111.32 * Math.cos((((south + north) / 2) * Math.PI) / 180);
 }
 
 /** The title a map's own layer of drawings takes. */

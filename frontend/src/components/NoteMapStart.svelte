@@ -69,7 +69,9 @@
   function start() {
     if (!engine) return;
     const { west, south, east, north } = engine.viewBounds();
-    const provider = base === 'satellite' && providers.some((one) => one.id === providerId) ? providerId : undefined;
+    // a year of Sentinel-2 cloudless shown here is the one the list names
+    const listed = providers.find((one) => one.id === providerId || one.id.split('~')[0] === providerId);
+    const provider = base === 'satellite' ? listed?.id : undefined;
     onstart?.({ title: title.replace(/\s+/g, ' ').trim(), west, south, east, north, base, ...(provider ? { provider } : {}) });
   }
 </script>

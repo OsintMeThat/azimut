@@ -8,12 +8,16 @@
 /** The keys a block reads, in the order the engine writes them (`block_text`, `settings_lines`). */
 export const MAP_ORDER = [
   'title', 'plate', 'layer', 'proofs', 'ground', 'detail', 'view',
-  'base', 'hide', 'colour', 'proof points', 'labels', 'crowds', 'north', 'scale', 'frame',
+  'base', 'imagery', 'hide', 'colour', 'proof points', 'labels', 'crowds', 'north', 'scale', 'frame', 'bounds',
   'timeline', 'opens on', 'speed', 'card', 'size', 'legend', 'step',
 ];
 /** The keys written once a line each, many to a block. */
 export const MANY = new Set(['layer', 'detail', 'hide', 'colour', 'step']);
 export const BASES = ['satellite', 'map', 'topographic', 'dark'];
+/** Where a satellite map's ground is filed from (`imagery:`), the free one first (`IMAGERY_PROVIDERS`). */
+export const IMAGERY = ['sentinel', 'esri'];
+/** Said once Esri is picked, word for word as the check before a public export says it (`ESRI_TERMS` in `engine/notes_maps.py`). */
+export const ESRI_TERMS = 'Esri’s terms limit reuse, so publishing it is your responsibility.';
 export const CARD_PARTS = ['picture', 'sentence', 'source', 'verify'];
 export const CROWDS = ['off', '8', '12', '20'];
 export const SPEEDS = ['slow', 'normal', 'fast'];
@@ -81,6 +85,11 @@ export function stepValue(step) {
   return stepText(step);
 }
 
+/** A view (`[lat, lon, zoom]`) as its line writes it (`block_text`). */
+export function viewText(view) {
+  return `${Number(view[0]).toFixed(5)}, ${Number(view[1]).toFixed(5)}, ${trim(view[2], 2)}`;
+}
+
 /** A frame as its line writes it. */
 export function frameText(frame) {
   return frame.map((value) => Number(value).toFixed(5)).join(', ');
@@ -98,8 +107,8 @@ export function colourText(name, colour) {
 export function readMap(source) {
   const read = {
     title: '', layers: [], plate: '', proofs: '', ground: '', details: [], view: null,
-    base: '', hidden: [], colours: {}, proofPoints: '', labels: '', crowds: '', north: '', scale: '', frame: null,
-    timeline: '', opensOn: '', speed: '', card: null, size: '', legend: '', steps: [],
+    base: '', imagery: '', hidden: [], colours: {}, proofPoints: '', labels: '', crowds: '', north: '', scale: '', frame: null,
+    bounds: '', timeline: '', opensOn: '', speed: '', card: null, size: '', legend: '', steps: [],
   };
   for (const raw of String(source ?? '').split('\n')) {
     if (/^\s*:::/.test(raw)) continue;
