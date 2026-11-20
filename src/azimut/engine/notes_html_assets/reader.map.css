@@ -196,7 +196,7 @@
   }
   .az-full .az-map-stage { height: 100%; aspect-ratio: auto; background: none; touch-action: none; }
   .az-full .az-map-world { right: auto; bottom: auto; overflow: hidden; }
-  .az-full .az-map-svg { clip-path: inset(var(--az-t, 0) var(--az-r, 0) var(--az-b, 0) var(--az-l, 0)); }
+  .az-full .az-map-svg:not(.az-gl-over) { clip-path: inset(var(--az-t, 0) var(--az-r, 0) var(--az-b, 0) var(--az-l, 0)); }
   .az-full .az-map-stage > .az-map-tools { top: calc(var(--az-t, 0px) + .75rem); left: calc(var(--az-l, 0px) + .75rem); }
   .az-full .az-map-stage > .az-map-north { top: calc(var(--az-t, 0px) + .75rem); right: calc(var(--az-r, 0px) + .75rem); }
   .az-full .az-map-stage > .az-map-scale { left: calc(var(--az-l, 0px) + .75rem); bottom: calc(var(--az-b, 0px) + .65rem); }

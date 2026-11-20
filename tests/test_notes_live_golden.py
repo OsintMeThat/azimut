@@ -66,11 +66,12 @@ LOOKS = {"article": NoteLook(), "story": NoteLook.model_validate({"web": "story"
 #: 2026-11-20: a map step's words under its name, on its story card and under the row of steps: four
 #: lines of reader.map.css, nothing else.
 #: 2026-11-20: the analyst's name and logo link to their Website: four lines of reader.css, nothing else.
+#: 2026-11-20: the whole screen's clip spares the live map's own marks: one selector of reader.map.css, nothing else.
 GOLDEN = {
-    "single-article": "2b3715a8e1bf0235fd46d6d86745d039fd0bb1474cec6b23be27f5f180b93711",
-    "single-story": "141ec3b328b437ccdf4c18a6d1783ae3a50e1666053e6fb47f4dda269d3f60dd",
-    "folder-article": "6fdeb533989c6a606940d5ba1115aa4237fe2a0f83589587c140e1f966874a9f",
-    "folder-story": "705b6d3913bedc8517d156288fa4ccc6fdf2d1832203a2487c33b04edc111fc8",
+    "single-article": "b4d59a27d554aee75ab5884f88aab58a5793200c9200666fb83ec1aaef254e0b",
+    "single-story": "619ccd3c84080a29e4d0d5d8d688010f36358c91568315b122971222082f2961",
+    "folder-article": "a86018d6a61c48cbebb80499ca09dc4b5f49963944c4d2a6f7d331397b66951e",
+    "folder-story": "2de923a4261fda6920e841c8f4268843a26f49ebba8a154be151085a3961ee1f",
 }
 
 

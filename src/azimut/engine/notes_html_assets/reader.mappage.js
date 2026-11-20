@@ -21,13 +21,15 @@
     if (mark) figure.querySelector('.az-map-frame')?.append(mark);
 
     const panel = make('aside', { class: 'az-mappage-panel', id: 'az-mappage-panel', 'aria-label': 'Layers and search' });
-    const shut = make('button', { type: 'button', class: 'az-mappage-shut', 'aria-label': 'Close the panel', title: 'Close' }, '×');
+    /* on a phone the panel is a sheet at the foot of the map, folded down to this bar, which brings it up and folds it again */
+    const bar = make('button', { type: 'button', class: 'az-mappage-fold', 'aria-controls': panel.id, 'aria-expanded': 'false' });
+    bar.append(make('span', { class: 'az-mappage-grip', 'aria-hidden': 'true' }), make('span', { class: 'az-mappage-fold-name' }, 'Layers and search'));
     const section = (name, ...parts) => {
       const box = make('section', { class: 'az-mappage-part' });
       box.append(make('h2', { class: 'az-mappage-label' }, name), ...parts);
       return box;
     };
-    panel.append(shut);
+    panel.append(bar);
 
     /* the search: every word of a feature, its name, its group and layer, its day and each of its columns */
     const fold = (text) => String(text || '').normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase();
@@ -126,24 +128,18 @@
         : feature.at || (feature.kind === 'line' ? feature.coords?.[0]?.[Math.floor((feature.coords[0].length - 1) / 2)] : feature.coords?.[0]?.[0]?.[0]);
       if (coords) map.fly({ center: coords, zoom: Math.max(at.zoom, 14) });
       map.open(feature.id);
-      if (!beside()) sheet(false);
+      sheet(false);
     }
 
-    /* the panel behind a button in the header: a column beside the map that folds away on a wider screen,
-       open from the start only where the map keeps room beside it; a sheet over the map on a phone */
-    const beside = () => query('(min-width: 48rem)').matches;
-    const menu = make('button', { type: 'button', class: 'az-mappage-menu', 'aria-controls': panel.id, 'aria-expanded': 'false' }, 'Layers');
-    page.querySelector('.az-mappage-head')?.append(menu);
-    function sheet(on, { focus = true } = {}) {
+    /* the sheet's bar, a phone's only: a column beside the map on a wider screen has nothing to fold */
+    function sheet(on) {
       page.classList.toggle('az-mappage-open', on);
-      menu.setAttribute('aria-expanded', String(on));
-      if (on && focus) field.focus({ preventScroll: true });
+      bar.setAttribute('aria-expanded', String(on));
+      if (!on) panel.scrollTop = 0;
     }
-    sheet(query('(min-width: 64rem)').matches, { focus: false });
-    menu.addEventListener('click', () => sheet(!page.classList.contains('az-mappage-open')));
-    shut.addEventListener('click', () => { sheet(false); menu.focus({ preventScroll: true }); });
+    bar.addEventListener('click', () => sheet(!page.classList.contains('az-mappage-open')));
     panel.addEventListener('keydown', (event) => {
-      if (event.key === 'Escape' && !beside() && page.classList.contains('az-mappage-open')) { event.stopPropagation(); sheet(false); menu.focus({ preventScroll: true }); }
+      if (event.key === 'Escape' && page.classList.contains('az-mappage-open')) { event.stopPropagation(); sheet(false); bar.focus({ preventScroll: true }); }
     });
 
     /* where the map looks, in the address: read on the way in, written as it moves, never a step of the history. Its
