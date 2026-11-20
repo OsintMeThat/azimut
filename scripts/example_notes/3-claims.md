@@ -44,8 +44,8 @@ flowchart LR
   n1 --> n2
   n2 -.->|"the pictures"| n3
   n3 --> n4
-  classDef c1 fill:#fbe3d6,stroke:#d55e00,color:#202124
-  classDef c2 fill:#d9f0e6,stroke:#009e73,color:#202124
+  classDef c1 fill:#f8e5d6,stroke:#d55e00,color:#202124
+  classDef c2 fill:#d6efe9,stroke:#009e73,color:#202124
   class n1,n2 c1
   class n3,n4 c2
   %% legend c1: Claim
