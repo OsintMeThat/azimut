@@ -859,6 +859,68 @@ def test_a_base_that_cannot_be_fetched_keeps_the_ground_and_says_so(client, tile
                                         "Try again once online.")
 
 
+#: What a map's Draw tab shows once moved closer: a part of its ground, as the card sends it.
+DRAW_VIEW = {"west": 43.490, "south": 12.740, "east": 43.502, "north": 12.748}
+
+
+def test_the_draw_tabs_view_is_filed_as_a_close_up_its_ground_kept_and_cited_again(client, tiles_here):
+    cid, case = _case(client)
+    vehicles = _markers(client, cid)
+    put = client.post(f"/api/cases/{cid}/notes/maps", json={"layers": [vehicles]}).json()
+    asked = len(tiles_here)
+    filed = client.post(f"/api/cases/{cid}/notes/maps/detail", json={"text": put["text"], **DRAW_VIEW}).json()
+    assert filed["detail"] != put["ground"]["id"]
+    assert filed["details"] == [filed["detail"]] and filed["filed"] == [filed["detail"]]
+    assert len(tiles_here) > asked and all("arcgisonline" in url for url in tiles_here[asked:])
+    # the picture holds the whole view, sharper than the ground
+    path = case.get_entity(filed["detail"])["attrs"]["path"]
+    sidecar = case.media_items_by_paths([path])[0]["source"]
+    west, south, east, north = notes_maps.ground_bounds(sidecar)
+    assert west <= DRAW_VIEW["west"] and south <= DRAW_VIEW["south"]
+    assert east >= DRAW_VIEW["east"] and north >= DRAW_VIEW["north"]
+    assert sidecar["zoom"] > case.media_items_by_paths([put["ground"]["attrs"]["path"]])[0]["source"]["zoom"]
+    # the same view again is cited, nothing fetched
+    asked = len(tiles_here)
+    again = client.post(f"/api/cases/{cid}/notes/maps/detail", json={"text": put["text"], **DRAW_VIEW}).json()
+    assert again["detail"] == filed["detail"] and again["filed"] == [] and len(tiles_here) == asked
+    # written as one more line, the card lays it where it stands, still fetching nothing
+    text = put["text"].replace("\n:::", f"\ndetail: {filed['detail']}\n:::")
+    already = client.post(f"/api/cases/{cid}/notes/maps/detail", json={"text": text, **DRAW_VIEW}).json()
+    assert already["details"] == [filed["detail"]] and already["filed"] == []
+    described = client.post(f"/api/cases/{cid}/notes/maps/describe", json={"text": text}).json()
+    assert described["ground"]["id"] == put["ground"]["id"] and len(tiles_here) == asked
+    assert described["details"] == [{"id": filed["detail"], "path": path, "bounds": [west, south, east, north]}]
+    # a street map's view is a street map's close-up
+    street = client.post(f"/api/cases/{cid}/notes/maps/detail",
+                         json={"text": text, "base": "map", **DRAW_VIEW}).json()
+    assert street["details"] == [filed["detail"], street["detail"]]
+    street_path = case.get_entity(street["detail"])["attrs"]["path"]
+    assert case.media_items_by_paths([street_path])[0]["source"]["provider"] == "osm"
+
+
+def test_a_view_offline_or_one_close_up_too_many_keeps_the_map_and_says_so(client, tiles_here, monkeypatch):
+    cid, _ = _case(client)
+    vehicles = _markers(client, cid)
+    put = client.post(f"/api/cases/{cid}/notes/maps", json={"layers": [vehicles]}).json()
+    asked = len(tiles_here)
+    full = put["text"].replace("\n:::", "".join(f"\ndetail: e_{number:010d}" for number in range(8)) + "\n:::")
+    refused = client.post(f"/api/cases/{cid}/notes/maps/detail", json={"text": full, **DRAW_VIEW})
+    assert refused.status_code == 422
+    assert refused.json()["detail"] == "This map keeps 8 close-ups at most. Take one out in its source first."
+    nowhere = client.post(f"/api/cases/{cid}/notes/maps/detail",
+                          json={"text": put["text"], **DRAW_VIEW, "east": DRAW_VIEW["west"]})
+    assert nowhere.status_code == 422 and len(tiles_here) == asked
+
+    def offline(_client, _url):
+        raise OSError("no network")
+
+    monkeypatch.setattr(tiles, "_default_fetch", offline)
+    refused = client.post(f"/api/cases/{cid}/notes/maps/detail", json={"text": put["text"], **DRAW_VIEW})
+    assert refused.status_code == 503
+    assert refused.json()["detail"] == ("The imagery of this view could not be fetched, so the map keeps what it has. "
+                                        "Try again once online.")
+
+
 def test_an_empty_map_is_a_layer_of_its_own_and_a_ground_drawn_on_from_its_card(client, tiles_here):
     cid, case = _case(client)
     started = client.post(f"/api/cases/{cid}/notes/maps/scratch", json={
