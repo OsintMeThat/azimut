@@ -63,11 +63,13 @@ LOOKS = {"article": NoteLook(), "story": NoteLook.model_validate({"web": "story"
 #: one, a line wears no halo until pointed at and a mark's name is set lighter, as the app's map draws
 #: them; fifteen lines of reader.map.css, read line by line, and nothing else. Both changes together,
 #: on the merged branch, are those twenty-three lines and nothing else.
+#: 2026-11-20: a map step's words under its name, on its story card and under the row of steps: four
+#: lines of reader.map.css, nothing else.
 GOLDEN = {
-    "single-article": "16e212d23e93b0e3843c08a3a50e0f3bff417a0ccc525eac9a00f97d581a164a",
-    "single-story": "5fe1e870d32c2f70a973756f91d2991687c62a1869e7acf64e81d27dd7efcf75",
-    "folder-article": "a89f11bc30016958d99740b6e8a79b4ff079400a76d4e3c03301ba268cfe3154",
-    "folder-story": "758148d03eb6e2eea765e599b8279f8dbdfe5e48f3e3ff3b7cfb2c9987b79c06",
+    "single-article": "0b4e5163c41f1d1366ec993ddd3cb3f65bcafbeaca557e39ee37c5f2e7f879f9",
+    "single-story": "ab22570ec12c39ecc74eab2ac8b235728b5a7f905089c3aa0aac2315544182aa",
+    "folder-article": "07f44dbb8f78c5ddcbdf1bdde5feaed7a5b3efb637bc2e46d4c22aacad356099",
+    "folder-story": "7bd63e48df2b520dabe0a26ca7f67a7a846e0bb024f0204361afcc080c1ce043",
 }
 
 
