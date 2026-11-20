@@ -68,6 +68,7 @@
   import { openEntity } from '../../lib/navigate.js';
   import { dataLabel, dataPanel, dataSaid, dataState, readData } from '../../lib/notes/editor/infographicData.js';
   import { dataOf, inheritingPanels, withDataRows, withDataSource } from '../../lib/notes/editor/infographicText.js';
+  import { chartSeed, infographicSeed } from '../../lib/notes/dataSeed.js';
 
   let {
     caseId,
@@ -773,6 +774,7 @@
 
 {#if dataPick}
   <DataPicker {caseId} noteId={noteKey} noteText={editor?.text?.() ?? text} anchor={dataPick.anchor}
+    seed={block ? (dataPick.panel >= 0 ? chartSeed(panelText(block.source, dataPick.panel)) : infographicSeed(block.source)) : null}
     current={dataPick.panel >= 0 ? read?.panels[dataPick.panel]?.origin ?? '' : (block ? dataOf(block.source) : '')}
     inherit={dataPick.panel >= 0 && data.data?.found ? { label: dataName } : null}
     onpick={(choice) => (dataPick.panel >= 0 ? choosePanelSource(dataPick.panel, choice) : chooseData(choice))}

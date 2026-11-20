@@ -87,6 +87,25 @@ const KIND_HEADS = {
   waffle: { category: 'Part', count: 'Count' },
 };
 
+/**
+ * The columns a new sheet for a chart of `kind` starts with: what its form reads, in the
+ * order its table writes them, so the chart reads the sheet as soon as it is filled.
+ * [] for a kind with no form.
+ */
+export function columnsFor(kind) {
+  const form = FORMS[formKind(kind)];
+  if (!form) return [];
+  const heads = { ...HEADS[form.family], ...(KIND_HEADS[formKind(kind)] ?? {}) };
+  const order = {
+    timeline: ['when', 'what', 'colour'],
+    figures: ['figure', 'words'],
+    categories: form.split ? ['category', 'split', 'count'] : ['category', 'count'],
+    line: ['x', 'value', 'series'],
+    pictures: ['picture', 'label', 'words', 'group', 'colour'],
+  }[form.family];
+  return order.map((key) => heads[key]);
+}
+
 /** What the drawing says while the form holds no row yet. */
 export const EMPTY_SAID = {
   timeline: 'Add an event or a period: the timeline is drawn as you fill it.',

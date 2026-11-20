@@ -57,7 +57,7 @@ export function readPaste({ html = '', text = '' } = {}) {
  * `file`. Answers `{ id, title, others }`, `others` the titles of a workbook's other tabs,
  * filed beside it; throws the route's reason.
  */
-export async function createData({ caseId, name, grid = null, header = grid?.header, file = null }, { post = api.post } = {}) {
+export async function createData({ caseId, name, grid = null, header = grid?.header, file = null, rename = null }, { post = api.post } = {}) {
   const root = `/api/cases/${encodeURIComponent(caseId)}/sheets`;
   const title = String(name ?? '').trim();
   if (file && fileKind(file.name) === 'xlsx') {
@@ -74,7 +74,10 @@ export async function createData({ caseId, name, grid = null, header = grid?.hea
     const made = await post(`${root}/import`, { title, text });
     return { id: made.id, title: made.label, others: [] };
   }
-  const { columns, rows } = gridToSheet(grid, { header });
+  const read = gridToSheet(grid, { header });
+  // the columns a figure reads take the names it reads them by (`dataSeed.renamed`)
+  const columns = rename ? rename(read.columns) : read.columns;
+  const { rows } = read;
   if (!columns.length) throw new Error('paste a table first');
   const made = await post(root, { title, columns, rows });
   return { id: made.id, title: made.label, others: [] };

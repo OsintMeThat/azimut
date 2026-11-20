@@ -670,7 +670,7 @@
 {/if}
 
 {#if dataPick}
-  <DataPicker {caseId} noteId={ownId} noteText={dataPick.noteText} anchor={dataPick.anchor} current={dataPick.current ?? ''}
+  <DataPicker {caseId} noteId={ownId} noteText={dataPick.noteText} anchor={dataPick.anchor} current={dataPick.current ?? ''} seed={dataPick.seed ?? null}
     onpick={(choice) => { const asked = dataPick; dataPick = null; asked?.onpick?.(choice); }}
     onclose={() => { dataPick = null; }} />
 {/if}

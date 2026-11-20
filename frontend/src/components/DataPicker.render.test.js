@@ -21,7 +21,7 @@ vi.mock('../lib/api.js', () => ({
     get: vi.fn(),
   },
 }));
-vi.mock('../lib/state.svelte.js', () => ({ toast: vi.fn(), reloadCase: vi.fn(async () => {}) }));
+vi.mock('../lib/state.svelte.js', () => ({ toast: vi.fn(), reloadCase: vi.fn(async () => {}), uiState: {} }));
 const { default: DataPicker } = await import('./DataPicker.svelte');
 const { toast } = await import('../lib/state.svelte.js');
 
@@ -128,5 +128,34 @@ describe('New data…', () => {
     await settle();
     expect(document.querySelector('.nd-warn').textContent).toContain('No table in this');
     expect(button('Make the sheet').disabled).toBe(true);
+  });
+});
+
+
+describe('a new sheet made for the figure', () => {
+  const SEED = { title: 'The announcements', columns: ['When', 'What happened'], rows: [['5 Oct 2026', 'Offensive opens']] };
+  const item = (words) => [...document.querySelectorAll('.fm-item')].find((one) => one.textContent.includes(words));
+
+  it('keeps the figure’s rows as a sheet and picks it, its columns as they are', async () => {
+    const { onpick } = await open({ seed: SEED });
+    await settle();
+    item('New sheet from these rows').click();
+    await settle();
+    const made = server.asked.find((one) => one.path === '/api/cases/c1/sheets');
+    expect(made.body).toEqual({ title: 'The announcements', columns: ['When', 'What happened'], rows: [['5 Oct 2026', 'Offensive opens']] });
+    expect(onpick).toHaveBeenCalledWith(expect.objectContaining({ origin: 'sheet:e_new' }));
+    expect(toast.mock.calls.at(-1)[3]).toMatchObject({ label: 'Open in Sheet' });
+  });
+
+  it('makes an empty sheet with the columns the figure reads, and offers no rows the figure has not got', async () => {
+    const { onpick } = await open({ seed: { ...SEED, rows: [] } });
+    await settle();
+    expect(item('New sheet from these rows')).toBeUndefined();
+    item('New sheet with its columns').click();
+    await settle();
+    const made = server.asked.find((one) => one.path === '/api/cases/c1/sheets');
+    expect(made.body.columns).toEqual(['When', 'What happened']);
+    expect(made.body.rows).toEqual([['', ''], ['', ''], ['', '']]);
+    expect(onpick).toHaveBeenCalledWith(expect.objectContaining({ origin: 'sheet:e_new' }));
   });
 });

@@ -14,10 +14,12 @@
   import FloatingMenu from './FloatingMenu.svelte';
   import Icon from './Icon.svelte';
   import Modal from './Modal.svelte';
-  import { reloadCase, toast } from '../lib/state.svelte.js';
+  import { reloadCase, toast, uiState } from '../lib/state.svelte.js';
   import { chartSources } from '../lib/notes/editor/chartFigure.js';
   import { readData, rowsWord, sourceChoices } from '../lib/notes/editor/infographicData.js';
   import { createData, fileKind, gridToSheet, readPaste } from '../lib/notes/newData.js';
+  import { blankRows, matchColumns, renamed } from '../lib/notes/dataSeed.js';
+  import { api } from '../lib/api.js';
 
   let {
     caseId,
@@ -33,6 +35,11 @@
     onclose,
     /** What lists the case's sheets (`GET /notes/figure/sources`). */
     sources = chartSources,
+    /**
+     * `{ title, columns, rows }` (`lib/notes/dataSeed.js`): what the figure reads now, for a
+     * new sheet made from its rows or with its columns, and the columns a paste is matched to.
+     */
+    seed = null,
   } = $props();
 
   let step = $state('menu');
@@ -62,6 +69,29 @@
     onpick?.({ origin, data });
   }
 
+  // -- a sheet made for the figure ------------------------------------------------------
+  /**
+   * A new sheet of the case from the figure's own rows, or with only its columns and a few
+   * blank rows, then picked as its source: the figure reads it at once, and the Sheet tool
+   * fills it.
+   */
+  async function makeFor(withRows) {
+    if (!seed?.columns?.length || making) return;
+    making = true;
+    try {
+      const rows = withRows ? seed.rows : blankRows(seed.columns);
+      const made = await api.post(`/api/cases/${encodeURIComponent(caseId)}/sheets`, { title: seed.title, columns: seed.columns, rows });
+      await reloadCase();
+      toast(withRows ? `Kept its rows as the sheet “${made.label}”.` : `The sheet “${made.label}” has its columns: fill it in the Sheet tool.`,
+        'ok', 8000, { label: 'Open in Sheet', onClick: () => { uiState.openSheet = made.id; uiState.tool = 'sheet'; } });
+      await pick(`sheet:${made.id}`);
+    } catch (error) {
+      toast(`Sheet not made: ${error.message}`, 'warn');
+    } finally {
+      making = false;
+    }
+  }
+
   // -- New data… --------------------------------------------------------------------
   let name = $state('');
   let text = $state('');
@@ -74,6 +104,9 @@
   const sheet = $derived(grid ? gridToSheet(grid, { header }) : null);
   const workbook = $derived(Boolean(file && fileKind(file.name) === 'xlsx'));
   const ready = $derived(Boolean((file || sheet?.columns.length) && (workbook || name.trim())));
+  // the columns the figure reads that the paste does not name, each matched to one pasted
+  let matches = $state([]);
+  $effect(() => { matches = sheet && seed?.columns?.length ? matchColumns(seed.columns, sheet.columns) : []; });
   $effect(() => { if (grid) header = grid.header; });
 
   function pasted(event) {
@@ -108,7 +141,7 @@
     if (!ready || making) return;
     making = true;
     try {
-      const made = await createData({ caseId, name, grid, header, file });
+      const made = await createData({ caseId, name, grid, header, file, rename: (columns) => renamed(columns, matches) });
       await reloadCase();
       const others = made.others.length ? ` ${made.others.length === 1 ? 'Its other tab' : `Its ${made.others.length} other tabs`} too: ${made.others.join(', ')}.` : '';
       toast(`Kept as the sheet “${made.title}”: the Sheet tool shows it.${others}`, 'ok', 5000);
@@ -160,6 +193,16 @@
       {/if}
     </div>
     <div class="fm-sep"></div>
+    {#if seed?.rows?.length}
+      <button type="button" class="fm-item" title="A sheet of the case holding these rows, which the figure then reads"
+        disabled={making} onclick={() => makeFor(true)}>
+        <Icon name="table" size={14} /><span class="fm-grow">New sheet from these rows</span><small class="dp-hint">{rowsWord(seed.rows.length)}</small></button>
+    {/if}
+    {#if seed?.columns?.length}
+      <button type="button" class="fm-item" title={`An empty sheet with the columns this figure reads: ${seed.columns.join(', ')}`}
+        disabled={making} onclick={() => makeFor(false)}>
+        <Icon name="plus" size={14} /><span class="fm-grow">New sheet with its columns</span><small class="dp-hint">{seed.columns.slice(0, 3).join(', ')}{seed.columns.length > 3 ? '…' : ''}</small></button>
+    {/if}
     <button type="button" class="fm-item" title="A table pasted, an .xlsx or a CSV, kept as a new sheet of the case"
       onclick={() => (step = 'new')}>
       <Icon name="plus" size={14} /><span class="fm-grow">New data…</span><small class="dp-hint">paste, .xlsx, CSV</small></button>
@@ -188,6 +231,19 @@
             </table>
           </div>
           <label class="nd-check"><input type="checkbox" bind:checked={header} /> The first row names the columns</label>
+          {#if matches.length}
+            <div class="nd-match" role="group" aria-label="Match the columns">
+              <p class="nd-said">The figure reads these columns: pick the pasted one for each.</p>
+              {#each matches as match, index (match.want)}
+                <label class="nd-field nd-match-row"><span class="nd-word">{match.want}</span>
+                  <select class="input" value={match.from} title={`The pasted column read as ${match.want}`}
+                    onchange={(event) => { matches[index] = { ...match, from: event.currentTarget.value }; }}>
+                    <option value="">None</option>
+                    {#each sheet.columns as column (column)}<option value={column}>{column}</option>{/each}
+                  </select></label>
+              {/each}
+            </div>
+          {/if}
         {:else if text.trim()}
           <p class="nd-said nd-warn">No table in this: copy cells from a spreadsheet, or a table from a page.</p>
         {/if}

@@ -26,6 +26,7 @@
 import { isolateHistory } from '@codemirror/commands';
 import { Transaction } from '@codemirror/state';
 import { ViewPlugin } from '@codemirror/view';
+import { chartSeed } from '../dataSeed.js';
 
 import { MAX_COLOUR_NAME, MAX_PALETTE, layerPalette } from '../../map/layerPalette.svelte.js';
 import { rovingToolbar } from '../pictureSize.js';
@@ -488,6 +489,7 @@ class ChartBox {
     this.handlers.pickData?.({
       anchor,
       current: setting(this.chart, 'from'),
+      seed: chartSeed(this.widget.source),
       onpick: ({ origin, data }) => {
         if (origin && data?.text) this.edit((source) => withTable(withSettings(source, { from: origin }), data.text));
       },

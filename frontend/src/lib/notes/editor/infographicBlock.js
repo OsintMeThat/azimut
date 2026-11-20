@@ -18,6 +18,7 @@
  */
 import { isolateHistory } from '@codemirror/commands';
 import { ViewPlugin } from '@codemirror/view';
+import { infographicSeed } from '../dataSeed.js';
 
 import { api } from '../../api.js';
 import { onMapsTouched } from '../mapSettings.svelte.js';
@@ -241,6 +242,7 @@ class DataLine {
     this.handlers.pickData?.({
       anchor,
       current: dataOf(this.widget.source),
+      seed: infographicSeed(this.widget.source),
       onpick: ({ origin, data }) => {
         if (origin && data?.text) rewrite(this.view, this.box, (source) => withDataSource(source, origin, data.text).text);
       },

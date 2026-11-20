@@ -8026,9 +8026,16 @@ builder's name opening it in the Sheet tool), its rows (*first 500 of 620* when 
 fewer), how many panels read it, and *changed since* when their rows differ from it, with
 **Read again (all panels)** and **Change…**. Read again copies the data's rows, read now, into
 every panel that takes it, as one Undo. Change… lists the case's sheets first, marked
-*Recommended* (the Sheet tool or Excel edits them), then the tables of this note, then **New
+*Recommended* (the Sheet tool or Excel edits them), then the tables of this note, then the new
+sheets made for the figure (`lib/notes/dataSeed.js`): **New sheet from these rows**, the rows the
+figure holds kept as a sheet named after its title, and **New sheet with its columns**, an empty
+sheet with three blank rows and the columns the figure reads (a chart's own table's, else its
+kind's: a timeline's *When*, *What happened* and *Kind*; an infographic's, those its charts
+read), each picked at once and offering *Open in Sheet*; then **New
 data…**: a name, and a table pasted (the grid's own paste reader: a spreadsheet's or a page's
-HTML table, or its tab-separated cells, with a preview and *The first row names the columns*),
+HTML table, or its tab-separated cells, with a preview and *The first row names the columns*,
+then **Match the columns** for each column the figure reads that the paste does not name, its
+nearest pasted column preselected and renamed in the new sheet so the figure reads it),
 or an .xlsx (every tab filed as a sheet named as its tab, the first the data) or a CSV, kept as
 a new sheet of the case. The one picked becomes `data:` as one Undo; the first time a page gets
 data, the charts copied from a table of its columns take it, their `from:` taken out and the
