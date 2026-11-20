@@ -305,6 +305,40 @@ describe('the settings, on the chart', () => {
     expect(text()).toBe(CHARTED);
   });
 
+  it('says how a story page shows a picture wall with groups, whole or one group per step, each one line', async () => {
+    const WALL = { name: 'pictures', label: 'Picture wall', counts: true, per_row: true, parts: false, stacked: false, style: 'report',
+      keys: ['picture', 'label', 'words', 'shape', 'flag', 'flags', 'story'] };
+    server.figure = () => answer({ kind: WALL, title: 'At least 2 vehicles, one by one' });
+    const block = (...settings) => ['::: chart', 'kind: pictures', 'title: At least 2 vehicles, one by one', ...settings, 'picture: Picture', 'label: #',
+      '| Picture | # | Model | Grade |', '| --- | --- | --- | --- |', '| e_0000000001 | #1 | Streit Cougar | Confirmed |',
+      '| e_0000000002 | #2 | BATT UMG | Almost sure |', ':::'].join('\n');
+    const WALLED = `Words.\n\n${block('by: Model', 'colour by: Grade')}\n`;
+    await opened(WALLED);
+    const story = () => card().querySelector('[aria-label="In a story"]');
+    const choices = () => [...story().querySelectorAll('button')].map((node) => [node.textContent, node.getAttribute('aria-checked')]);
+    expect(choices()).toEqual([['Whole wall', 'true'], ['One group per step', 'false']]);
+    press(story().querySelectorAll('button')[1]);
+    expect(text()).toBe(WALLED.replace('label: #\n', 'label: #\nstory: one group per step\n'));
+    await settle();
+    expect(choices()).toEqual([['Whole wall', 'false'], ['One group per step', 'true']]);
+    undo(view);
+    expect(text()).toBe(WALLED);
+    view.destroy();
+
+    // the same words written another way read the same, and Whole wall takes the line out
+    const STEPPED = `Words.\n\n${block('by: Model', 'colour by: Grade', 'story: Groups')}\n`;
+    await opened(STEPPED);
+    expect(choices()).toEqual([['Whole wall', 'false'], ['One group per step', 'true']]);
+    press(story().querySelectorAll('button')[0]);
+    expect(text()).toBe(STEPPED.replace('story: Groups\n', ''));
+    view.destroy();
+
+    // a wall of one group has nothing to step through
+    await opened(`Words.\n\n${block('colour by: Grade')}\n`);
+    expect(story()).toBeNull();
+    expect(card().querySelector('[aria-label="Shape"]')).not.toBeNull();
+  });
+
   it('shows the table or not, and takes a whole look, each one line', async () => {
     await opened();
     const show = card().querySelector('[aria-label="Show"]');

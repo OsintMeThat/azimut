@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import base64
 import io
+import math
 import re
 from pathlib import Path
 from xml.etree import ElementTree
@@ -22,6 +23,7 @@ from PIL import Image
 
 from azimut.engine import notecharts, notes_chart_picker, notes_chart_wall as wall, notes_charts as nc
 from azimut.engine import notes_html, notes_infographic, notes_pdf, uses
+from azimut.engine.notelook import NoteLook
 from azimut.workspace import Case
 
 from notecase import make_case, make_note
@@ -98,7 +100,7 @@ def test_the_wall_is_a_kind_written_by_its_words_and_reads_its_own_settings():
         assert nc.kind_named(word).name == "pictures"
     kind = nc.KINDS["pictures"]
     assert kind.label == "Picture wall" and kind.per_row and kind.sort == "as written"
-    assert kind.keys == ("picture", "label", "words", "shape", "flag", "flags")
+    assert kind.keys == ("picture", "label", "words", "shape", "flag", "flags", "story")
     block = _wall(SIX, f"{GROUPED}\nshape: 4:3\nwords: State")
     assert block.extra == {"shape": "4:3", "words": "State"}
     assert "shape: 4:3" in nc.block_text(block) and not block.unread
@@ -278,6 +280,52 @@ def test_a_flag_stands_before_a_groups_name(frames):
     assert "az-wall-flag" in root.get("class") and root.find(f"{SVG}title").text == "Flag of BATT UMG"
 
 
+def test_story_says_how_a_story_page_shows_the_wall_and_the_check_names_what_it_cannot_read(frames):
+    assert wall.story_steps("") is False and wall.story_steps("whole wall") is False
+    assert wall.story_steps("One group per step") is True and wall.story_steps("groups") is True
+    assert wall.story_steps("sideways") is None
+    block = _wall(SIX, f"{GROUPED}\nstory: {wall.STORY_STEPS}")
+    assert block.extra == {"story": wall.STORY_STEPS} and not block.unread
+    assert f"story: {wall.STORY_STEPS}" in nc.block_text(block)
+    assert not any("story" in check.message for check in nc.read(block, pictures=frames).checks)
+    unread = nc.read(_wall(SIX, f"{GROUPED}\nstory: sideways"), pictures=frames)
+    [said] = [check for check in unread.checks if "story" in check.message]
+    assert said.message == 'A chart cannot read "story: sideways": write one group per step, or leave it out for the whole wall.'
+    assert said.line is not None
+    alone = nc.read(_wall(SIX, f"colour by: Grade\nstory: {wall.STORY_STEPS}"), pictures=frames)
+    assert any(check.message == "A chart has no groups to step through in a story: name them with by:, or the story "
+                                "shows it whole." for check in alone.checks)
+    # every other painter draws it as it always did
+    assert nc.layout(_wall(SIX, f"{GROUPED}\nstory: {wall.STORY_STEPS}"), pictures=frames).height == \
+        nc.layout(_wall(SIX, GROUPED), pictures=frames).height
+
+
+def test_a_story_steps_through_the_groups_a_long_one_cut_into_even_parts():
+    def group(name: str, count: int) -> wall.Group:
+        return wall.Group(name, "", [wall.Item(row, "", None, f"#{row}", "", "", None) for row in range(count)])
+
+    steps = wall.stage_steps([group("Streit Cougar", 7), group("Confirmed", 25), group("BATT UMG", 1), group("Big", 40)])
+    assert [(step.group, step.start, step.end) for step in steps] == [
+        (0, 0, 7), (1, 0, 13), (1, 13, 25), (2, 0, 1), (3, 0, 14), (3, 14, 28), (3, 28, 40)]
+    assert all(step.end - step.start <= wall.STAGE_MOST for step in steps)
+    # the largest frames that let every frame of a step stand on the stage, more to a line when nearly as large
+    laid = {count: wall.stage_grid(count, 1.5)[:2] for count in (1, 2, 3, 4, 7, 9, 12, 16)}
+    assert laid == {1: (1, 1), 2: (2, 1), 3: (2, 2), 4: (2, 2), 7: (3, 3), 9: (3, 3), 12: (4, 3), 16: (4, 4)}
+    for count in range(1, wall.STAGE_MOST + 1):
+        for ratio in (1.5, 1.0, 16 / 9, 2 / 3):
+            across, rows, cell = wall.stage_grid(count, ratio)
+            assert (rows - 1) * across < count <= rows * across
+            assert across * cell + (across - 1) * wall.STAGE_GAP_X <= wall.STAGE_WIDTH + 0.01
+            assert rows * (cell / ratio + wall.STAGE_UNDER) + (rows - 1) * wall.STAGE_GAP_Y <= wall.STAGE_HEIGHT + 0.01
+            assert cell <= wall.STAGE_LARGEST
+    # what a step's card counts: each grade its frames wear, in the legend's order
+    paint = nc.Paint("#184f95")
+    items = [wall.Item(index, "", None, "", "", value, paint)
+             for index, value in enumerate(["Almost sure", "Confirmed", "", "Almost sure"])]
+    assert [(value, count) for value, count, _ in wall.tally(items, ["Confirmed", "Almost sure"])] == [
+        ("Confirmed", 1), ("Almost sure", 2)]
+
+
 def test_a_table_describes_every_frame_for_a_screen_reader(frames):
     chart = nc.layout(_wall(SIX, GROUPED), pictures=frames)
     assert chart.table_head == ["#", "State", "Model", "Grade"]
@@ -412,6 +460,96 @@ def test_sixty_pictures_keep_the_html_page_light(client):
     figure = re.search(r'<figure class="az-figure az-chart-figure az-wall-figure".*?</figure>\n', page, re.S).group(0)
     # each frame's two pictures stay under 40 KB together, so sixty weigh a few MB at most
     assert len(figure) < 60 * 40_000
+
+
+def _story(case: Case, text: str) -> str:
+    return notes_html.render(case, title="Losses", text=text, look=NoteLook(web="story")).html.decode("utf-8")
+
+
+def test_in_a_story_the_wall_breaks_out_between_the_scenes_in_the_stages_paints(client):
+    """Never held on a stage whole, where sixty pictures cannot fit: it ends the scene before
+    it, as a table does, and stands in the body at the window's width, its bars and its
+    legend carrying the dark stage's paints beside the page's own."""
+    cid = make_case(client, "Wall story")
+    case = Case.open(cid)
+    ids = _upload(client, cid, 7)
+    wall_text = _note_wall(ids[:6]).replace("by: Model\n", "by: Model\nflags: Streit Cougar = star\n")
+    text = (f"## The road\n\n[[media:{ids[6]}|Above]]\n\nWords about the road.\n\n"
+            + wall_text.split("\n\n", 1)[1] + "\nWords after the wall.\n")
+    page = _story(case, text)
+    main = page.split('<main class="az-body" id="main">', 1)[1]
+    scene = main.index('<section class="az-story az-scenes"')
+    figure = main.index('<figure class="az-figure az-chart-figure az-wall-figure"')
+    assert scene < main.index("Words about the road.") < main.index("</section>", scene) < figure
+    # it stands in the body, never in a story's stage
+    assert main.count('<section class="az-story') == 1 and "az-wall-stage" not in main
+    wall_html = re.search(r'<figure class="az-figure az-chart-figure az-wall-figure".*?</figure>\n', main, re.S).group(0)
+    grade = {grade.name: grade for grade in nc.GRADES}
+    assert f'--bar:{grade["Confirmed"].light};--bar-d:{grade["Confirmed"].dark}' in wall_html
+    legend = re.search(r'<p class="az-wall-legend">.*?</p>', wall_html, re.S).group(0)
+    assert legend.count(";--bar-d:") == 2
+    # its flag is drawn again for the dark band, which shows that one
+    assert wall_html.count('class="az-wall-flag az-flag-') == 1 and wall_html.count('class="az-wall-flag az-wall-flag-dark ') == 1
+    assert main.index("Words after the wall.") > figure and "Words after" not in wall_html
+    # an article carries the page's own paints only, and the same frames
+    article = notes_html.render(case, title="Losses", text=text).html.decode("utf-8").split('<main class="az-body"', 1)[1]
+    assert "--bar-d:" not in article and "az-wall-flag-dark" not in article
+    assert article.count('class="az-zoom az-wall-zoom"') == page.count('class="az-zoom az-wall-zoom"') == 6
+    # the style sheet keeps the story's picture rules off the wall's frames, and dresses the band
+    reader = (Path(notes_html.ASSETS) / "reader.css").read_text(encoding="utf-8")
+    rules = re.findall(r"([^{}]*\.az-story-figures :is\(([^)]*)\)[^{}]*)\{", reader)
+    sized = [selector for selector, inside in rules if "img" in inside or "az-zoom" in inside]
+    assert len(sized) == 5 and all(":where(:not(.az-wall *))" in selector for selector in sized)
+    sheet = (Path(notes_html.ASSETS) / "reader.chart.css").read_text(encoding="utf-8")
+    assert '.az-js[data-web="story"] .az-body > .az-wall-figure' in sheet and "var(--bar-d, var(--bar))" in sheet
+
+
+def test_one_group_per_step_makes_the_wall_a_story_of_its_own(client):
+    """`story: one group per step`: each group a step on the dark stage, its frames large,
+    laid as the stage holds them, its card beside them saying its count and its grades; a
+    group of more than `STAGE_MOST` takes several steps. Its title and legend lead it, its
+    credit and its numbers close it. An article, and a wall of one group, draw it whole."""
+    cid = make_case(client, "Wall steps")
+    case = Case.open(cid)
+    ids = _upload(client, cid, 6)
+    rows = [ids[index % 6] for index in range(24)]
+    text = _note_wall(rows).replace("by: Model\n", f"by: Model\nstory: {wall.STORY_STEPS}\n")
+    page = _story(case, text)
+    found = re.search(r'<section class="az-story az-wall-story" id="chart-1" data-chart="pictures" data-steps="(\d+)".*?'
+                      r"</section>\n(?=</main>|<)", page, re.S)
+    assert found is not None and "az-wall-figure" not in page.split('<main class="az-body"', 1)[1]
+    section = found.group(0)
+    # 12 Streit Cougars, then 12 Oshkosh M-ATVs: one step each, each 4 across and 3 down
+    assert found.group(1) == "2"
+    stages = re.findall(r'<figure class="az-figure az-wall-stage" data-kind="chart" data-step="(\d)" '
+                        r'style="--az-n:\d;--az-cols:(\d+);--az-rows:(\d+)">', section)
+    assert stages == [("1", "4", "3"), ("2", "4", "3")]
+    assert section.count('class="az-zoom az-wall-zoom"') == 24 and section.count("data-large=") == 24
+    # a frame on the stage is read at its size there, larger than the wall's slot
+    shown = re.search(r'<img src="data:image/jpeg;base64,([^"]+)"', section).group(1)
+    width = Image.open(io.BytesIO(base64.b64decode(shown))).size[0]
+    assert width == math.ceil(wall.stage_grid(12, 1.5)[2] * 2) and width > notes_html.WALL_SLOT * 2
+    cards = re.findall(r'<div class="az-story-step az-wall-card" data-step="(\d)" style="--az-n:\d">(.*?)</div>\n', section)
+    assert [number for number, _ in cards] == ["1", "2"]
+    first = cards[0][1]
+    assert '<span class="az-wall-name" dir="auto">Streit Cougar</span><span class="az-wall-count">12</span>' in first
+    grades = re.findall(r'<li class="az-wall-key"><i class="az-wall-bar" style="--bar:(#\w+)"></i>([\w ]+) <b>(\d+)</b></li>', first)
+    grade = {grade.name: grade for grade in nc.GRADES}
+    assert grades == [(grade["Confirmed"].light, "Confirmed", "6"), (grade["Almost sure"].light, "Almost sure", "6")]
+    lead = re.search(r'<div class="az-story-lead">(.*?)</div>\n', section, re.S).group(1)
+    assert "At least 24 vehicles, one by one" in lead and "az-wall-legend" in lead and ";--bar-d:" in lead
+    end = section.split('<div class="az-wall-end">', 1)[1]
+    assert "Source: The two videos" in end and '<details class="az-chart-numbers">' in end
+    # a group longer than a step holds is cut into even parts, the card saying which
+    long = _story(case, text.replace("Oshkosh M-ATV", "Streit Cougar", 8))
+    parts = re.findall(r'<p class="az-wall-part">Pictures (\d+)–(\d+) of (\d+)</p>', long)
+    assert parts == [("1", "10", "20"), ("11", "20", "20")] and 'data-steps="3"' in long
+    # an article, and a story whose wall has one group, draw the whole wall
+    body = lambda page: page.split('<main class="az-body"', 1)[1]  # noqa: E731
+    article = body(notes_html.render(case, title="Losses", text=text).html.decode("utf-8"))
+    assert "az-wall-story" not in article and article.count('<section class="az-wall-group"') == 2
+    single = body(_story(case, text.replace("by: Model\n", "")))
+    assert "az-wall-story" not in single and "az-wall-figure" in single
 
 
 def test_the_pdf_prints_the_wall_at_300_dpi_on_one_page(client):

@@ -599,8 +599,13 @@ describe('the story layout', () => {
     expect(screen).toContain('grid-template-columns: minmax(0, 62fr) minmax(0, 38fr); gap: 0; margin-block: 3.5rem; background: #0f1012;');
     // the picture kept whole, the column of what is said of it the picture's own width
     expect(screen).toContain('grid-template-columns: minmax(min(20rem, var(--stage-w)), min-content)');
-    expect(screen).toMatch(/:is\(\.az-zoom img, \.az-compare > \.az-before, video, \.az-poster\) \{\s+width: auto; max-width: var\(--stage-w\);/);
+    // a picture wall's frames keep the wall's own sizes (`reader.chart.css`)
+    expect(screen).toMatch(/:is\(\.az-zoom img, \.az-compare > \.az-before, video, \.az-poster\):where\(:not\(\.az-wall \*\)\) \{\s+width: auto; max-width: var\(--stage-w\);/);
     expect(screen).not.toContain('object-fit: cover');
+    // on a phone the cards pass over the stage, and a press between them reaches its picture
+    const narrow = CSS.slice(CSS.indexOf('@media screen and (max-width: 63.99rem)'));
+    expect(narrow).toMatch(/\.az-live \.az-story-steps \{[^}]*pointer-events: none;/);
+    expect(narrow).toMatch(/\.az-live \.az-story-step \{[^}]*pointer-events: auto;/);
     // printed, none of it: the story reads as the article does
     expect(CSS.slice(CSS.indexOf('@media print {'))).not.toContain('#0f1012');
   });

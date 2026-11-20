@@ -9,7 +9,7 @@
  *   sheet instead;
  * - **the settings**: only what a chart is about, in plain words: its title, what it
  *   counts, by what, coloured by what (a picture wall's groups, the colour of the bar under
- *   each picture and their shape), its icons for a chart of glyphs (`chartIcons.js`),
+ *   each picture, their shape and how a story shows it), its icons for a chart of glyphs (`chartIcons.js`),
  *   whether its table shows under it, and its look (Report, Book, Dark), each a whole
  *   preset; the colours it chose on its own, and the press that keeps them for the case;
  *   and *Edit the data*, the kind's form, when its rows are in the form's shape.
@@ -232,6 +232,11 @@ export const KEEPABLE = ['order', 'grade', 'chart'];
 /** What keeping them says it does, on the button and in the toast. */
 export const KEEP_SAID = 'Name these colours in the case, so every chart, map and layer paints them the same';
 
+/** A wall a story page steps through, one group a step (`notes_chart_wall.STORY_STEPS`), and every way it may be written. */
+export const WALL_STEPS = 'one group per step';
+const STEP_WORDS = /^(?:one group (?:per|a) step|group by group|by group|groups|steps)$/;
+export const wallSteps = (written) => STEP_WORDS.test(String(written ?? '').toLowerCase().split(/\s+/).filter(Boolean).join(' '));
+
 /** The looks a chart takes, as the card names them. */
 export const STYLE_NAMES = { report: 'Report', book: 'Book', dark: 'Dark' };
 export const SHOW_NAMES = { chart: 'Chart', 'chart and table': 'Chart and table' };
@@ -394,6 +399,11 @@ export function chartSettings(panel, { state, write, keep = null, source = null,
       const shape = setting(chart, 'shape') || WALL_SHAPES[0];
       fields.push(segmented('Shape', WALL_SHAPES.map((value) => ({ value, label: value })), shape,
         (value) => write({ shape: value === WALL_SHAPES[0] ? '' : value })));
+      // a story page shows the wall whole between its scenes, or steps through its groups
+      if (by) {
+        fields.push(segmented('In a story', [{ value: '', label: 'Whole wall' }, { value: WALL_STEPS, label: 'One group per step' }],
+          wallSteps(setting(chart, 'story')) ? WALL_STEPS : '', (value) => write({ story: value })));
+      }
     } else if (kind.counts !== false) {
       const count = setting(chart, 'count');
       fields.push(select('Count', choices.count, chosen(choices.count, count) || (count ? count : ROWS), (value) => write(cardChanges('count', value, { kind }))));

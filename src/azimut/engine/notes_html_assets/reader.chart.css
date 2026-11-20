@@ -67,8 +67,73 @@ svg.az-chart-phone, svg.az-chart-on-dark { display: none; }
 .az-wall-rule { flex-basis: 100%; height: 0; margin: .2rem 0 0; border: 0; border-top: 1px solid var(--rule); }
 .az-wall-foot { margin-top: 1rem; font: 400 .75rem/1.45 var(--ui); color: var(--muted); }
 .az-wall-foot p { margin: 0; }
+/* a wall in a story is never held on the stage whole: it breaks out the window's width between the
+   scenes, in the stage's colours. One group a step, each group is a scene: its frames large on the
+   stage, as many to a line as --az-cols says, and its card beside them its count and its grades */
+.az-wall-flag-dark { display: none; }
+.az-wall-title { margin: 0 0 .9rem; font: 600 1.0625rem/1.4 var(--ui); color: var(--ink); }
+.az-wall-end { order: 9999; font: 400 .875rem/1.5 var(--ui); color: var(--ink-2); }
+.az-wall-card .az-wall-head { margin-bottom: .6rem; font-size: 1.0625rem; }
+.az-wall-part { margin: -.25rem 0 .6rem; font: 400 .8125rem/1.3 var(--ui); color: var(--muted); }
+.az-wall-card .az-wall-grades { display: grid; justify-items: start; gap: .4rem; margin: 0; padding: 0; list-style: none; font: 400 .875rem/1.3 var(--ui); color: var(--ink-2); }
+.az-wall-card .az-wall-grades > li { margin: 0; padding: 0; }
+.az-wall-grades .az-wall-bar { width: 1.6rem; margin: 0; }
+/* read in order, each group's grades stand under its frames, at the wall's width */
+.az-wall-story:not(.az-live) > :is(.az-story-lead, .az-wall-end), .az-wall-story:not(.az-live) .az-wall-card { width: 100%; max-width: var(--wide); margin-inline: auto; }
+.az-wall-story:not(.az-live) .az-wall-card > .az-wall-head { display: none; }
+.az-wall-story:not(.az-live) .az-wall-card .az-wall-grades { display: flex; flex-wrap: wrap; gap: .35rem 1.2rem; font-size: .8125rem; }
+.az-wall-story:not(.az-live) .az-story-figures > figure { margin: 1.5rem auto .5rem; }
+@media screen and (prefers-reduced-motion: no-preference) {
+  .az-js[data-web="story"] .az-body > .az-wall-figure {
+    display: flex; flex-direction: column; grid-column: full; width: auto; margin-block: 3.5rem;
+    padding: clamp(2.5rem, 7vh, 4.5rem) var(--gutter) clamp(2rem, 6vh, 3.5rem); background: #0f1012;
+  }
+  .az-js[data-web="story"] .az-body > .az-wall-figure > * { width: 100%; max-width: var(--wide); margin-inline: auto; }
+  /* its title heads the band, as a scene's lead does */
+  .az-js[data-web="story"] .az-body > .az-wall-figure > figcaption { order: -1; flex-direction: row; margin: 0 auto 1.1rem; }
+  .az-js[data-web="story"] .az-body > .az-wall-figure > figcaption > .az-caption { flex: 1 1 auto; min-width: 0; font: 600 1.0625rem/1.4 var(--ui); color: var(--ink); }
+  /* beside a scene, one dark band with it */
+  .az-js[data-web="story"] .az-body > :is(.az-story.az-live:has(+ .az-wall-figure), .az-wall-figure:has(+ .az-story.az-live)) { margin-bottom: 0; }
+  .az-js[data-web="story"] .az-body > :is(.az-story.az-live + .az-wall-figure, .az-wall-figure + .az-story.az-live) { margin-top: 0; }
+  :is(.az-js[data-web="story"] .az-body > .az-wall-figure, [data-web="story"] .az-wall-story.az-live > :not(.az-story-steps)) {
+    --ink: #fff; --ink-2: rgba(255, 255, 255, .8); --muted: rgba(255, 255, 255, .6); --rule: rgba(255, 255, 255, .2); --tint: rgba(255, 255, 255, .07);
+    --accent-ink: color-mix(in srgb, var(--az-accent) 40%, #fff); color: #e9eaec;
+  }
+  :is(.az-js[data-web="story"] .az-body > .az-wall-figure, [data-web="story"] .az-wall-story.az-live > :not(.az-story-steps)) .az-wall-bar { background: var(--bar-d, var(--bar)); }
+  :is(.az-js[data-web="story"] .az-body > .az-wall-figure, [data-web="story"] .az-wall-story.az-live > :not(.az-story-steps)) .az-wall-bar[data-hatch] {
+    background: repeating-linear-gradient(-45deg, var(--bar-d, var(--bar)) 0 2px, var(--hatch-d, var(--hatch)) 2px 4.5px);
+  }
+  :is(.az-js[data-web="story"] .az-body > .az-wall-figure, [data-web="story"] .az-wall-story.az-live > :not(.az-story-steps)) .az-wall-bar[data-outline] {
+    background: none; box-shadow: inset 0 0 0 1.5px var(--bar-d, var(--bar));
+  }
+  :is(.az-js[data-web="story"] .az-body > .az-wall-figure, [data-web="story"] .az-wall-story.az-live > :not(.az-story-steps)) .az-wall-flag:not(.az-wall-flag-dark) { display: none; }
+  :is(.az-js[data-web="story"] .az-body > .az-wall-figure, [data-web="story"] .az-wall-story.az-live > :not(.az-story-steps)) .az-wall-flag-dark { display: block; }
+  /* one group a step: the stage's room shared out among its lines, the frames never wider than 27.5rem */
+  [data-web="story"] .az-wall-story.az-live .az-story-figures > .az-wall-stage { grid-template-columns: minmax(0, 1fr); }
+  [data-web="story"] .az-live .az-wall-stage .az-wall { --az-room: calc(var(--stage-h) - 2.6rem); }
+  [data-web="story"] .az-live .az-wall-stage .az-wall-flow {
+    --az-cell: min((100cqi - (var(--az-cols) - 1) * var(--az-gap)) / var(--az-cols),
+      ((var(--az-room) - (var(--az-rows) - 1) * .65rem) / var(--az-rows) - 1.9rem) * var(--az-ratio), 27.5rem);
+    justify-content: center;
+  }
+  [data-web="story"] .az-live .az-wall-stage .az-wall-items { display: grid; grid-template-columns: repeat(var(--az-cols), var(--az-cell)); }
+  [data-web="story"] .az-live .az-wall-stage .az-wall-head { margin-bottom: .7rem; font-size: 1.25rem; }
+  [data-web="story"] .az-live .az-wall-stage .az-wall-count { font-size: 1.5rem; }
+  [data-web="story"] .az-live .az-wall-stage .az-wall-flag { height: 1.15rem; }
+  [data-web="story"] .az-live .az-wall-stage figcaption.az-wall-label { margin-top: .3rem; font-size: .8125rem; }
+  [data-web="story"] .az-wall-story.az-live > .az-story-lead { width: min(var(--measure), 100% - 2 * var(--stage-pad)); margin-inline: 0; }
+  [data-web="story"] .az-wall-story.az-live > .az-wall-end { grid-column: 1; padding: 0 var(--stage-pad) 3rem; }
+  [data-web="story"] .az-wall-story.az-live > .az-wall-end .az-wall-foot { margin-top: 0; }
+  [data-web="story"] .az-wall-story.az-live .az-wall-card:not(:last-child) { margin-bottom: 55vh; }
+}
+/* narrower than a laptop, the frames stand in the stage's upper part, over which the cards pass */
+@media screen and (max-width: 63.99rem) {
+  [data-web="story"] .az-live .az-wall-stage .az-wall { --az-room: calc(48svh - 2.75rem); }
+  [data-web="story"] .az-wall-story.az-live .az-wall-card:not(:last-child) { margin-bottom: 75svh; }
+}
 @media print {
   .az-wall .az-wall-zoom::after { content: none; }
+  .az-wall-card { display: none !important; }
   .az-wall-group { break-inside: avoid; }
   svg.az-chart-wide:not(.az-chart-on-dark) { display: block !important; max-height: 200mm; }
   svg.az-chart-phone, svg.az-chart-on-dark, .az-chart-numbers { display: none !important; }
