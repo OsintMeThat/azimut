@@ -506,7 +506,8 @@
           </div>
           {#if (whole.signed || whole.cover.marks.length) && signingMissing}
             <p class="said">{signingMissing}
-              <button type="button" class="link" onclick={openPublishingSettings}>Settings › Publishing</button></p>
+              <button type="button" class="link" title="Open Settings › Publishing, where the name, logo and signature are set"
+                onclick={openPublishingSettings}>Settings › Publishing</button></p>
           {/if}
 
         {:else}

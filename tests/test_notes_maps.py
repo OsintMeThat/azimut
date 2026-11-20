@@ -371,7 +371,8 @@ def test_a_story_card_of_a_map_step_says_its_words_under_its_name(client, monkey
     derived = _fixture_map()
     derived.data["steps"][1]["text"] = "A government camera films the convoy at the foot of the hills."
     monkeypatch.setattr(notes_maps, "derive", lambda *args, **kwargs: derived)
-    rendered = notes_html.render(case, title="Map", text="::: map\ntitle: The line\n:::\n", look=NoteLook(web="story"))
+    text = "::: map\ntitle: The line\n:::\n\nWhat the line shows.\n"
+    rendered = notes_html.render(case, title="Map", text=text, look=NoteLook(web="story"))
     page = rendered.html.decode()
     card = re.search(r'<div class="az-story-step az-map-card-step"[^>]*data-map-step="1"[^>]*>(.*?)</div>', page, re.S).group(1)
     assert '<p class="az-map-step-label" dir="auto">The road</p>' in card

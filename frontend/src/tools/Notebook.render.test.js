@@ -240,7 +240,7 @@ describe('the home', () => {
     await settle();
     const dialog = document.body.querySelector('[role="dialog"][aria-label="New note"]');
     const starts = [...dialog.querySelectorAll('[role="radio"][data-start]')].map((one) => one.dataset.start);
-    expect(starts.slice(0, 3)).toEqual(['blank', 'from-case', 'geolocation']);
+    expect(starts.slice(0, 4)).toEqual(['blank', 'from-case', 'web-map', 'geolocation']);
     // the analyst's own templates come after the ready notes
     expect(starts.at(-1)).toBe('t:t1');
     expect(dialog.querySelector('[data-start="t:t1"]').textContent).toContain('House write-up');

@@ -21,7 +21,7 @@ describe('a Notebook template as a file', () => {
 
   it('carries no picture or day of a case, even if one slipped in', async () => {
     const text = await noteTemplateFile({ name: 'x', data: { body: '', look: { cover: { on: true, image: 'm1', date: '2026-01-02' } } } }).text();
-    expect(JSON.parse(text).data.look.cover).toEqual({ on: true, mode: '', top: false, subtitle: '', image: '', date: '' });
+    expect(JSON.parse(text).data.look.cover).toEqual({ on: true, mode: '', top: false, subtitle: '', image: '', date: '', marks: [] });
     const crafted = JSON.stringify({ azimut_note_template: 1, name: 'y', data: { body: '', look: { cover: { image: 'm9' } } } });
     expect(readNoteTemplateFile(crafted).data.look.cover.image).toBe('');
   });

@@ -115,7 +115,7 @@ describe('a look', () => {
   });
 
   it('keeps the web page\'s layout as set, an article for anything else, as the server reads it', () => {
-    expect(WEBS.map((web) => [web.id, web.label])).toEqual([['', 'Article'], ['story', 'Story']]);
+    expect(WEBS.map((web) => [web.id, web.label])).toEqual([['', 'Article'], ['story', 'Story'], ['map', 'Map page']]);
     expect(normaliseLook(null).web).toBe('');
     expect(normaliseLook({ web: 'story' }).web).toBe('story');
     expect(normaliseLook({ web: 'scroll' }).web).toBe('');
@@ -124,7 +124,7 @@ describe('a look', () => {
     expect(templateLook({ style: 'report', web: 'story' }).web).toBe('story');
     // the server's own list, read off its source, so a layout added on one end fails here
     const server = readFileSync(new URL('../../../../src/azimut/engine/notelook.py', import.meta.url), 'utf8');
-    expect(server).toContain('Web = Literal["", "story"]');
+    expect(server).toContain('Web = Literal["", "story", "map"]');
     expect(server).toMatch(/LATE_KEYS = \([^)]*"web"/);
   });
 
