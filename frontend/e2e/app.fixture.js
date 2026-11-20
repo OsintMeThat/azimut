@@ -849,6 +849,9 @@ export async function installAppFixture(page, options = {}) {
   const trashGroups = [...(options.trashGroups ?? [])];
   const trashWrites = [];
   const bundleCalls = [];
+  // the presses on Open the example case, and the case they make: the fixture's own, under its name
+  const exampleCalls = [];
+  const exampleCase = { ...caseOverview, name: 'Example case (fictional)' };
   // The case's saved search grids, held across requests: a sweep auto-saves, so
   // what was marked is readable from what was written.
   const fixtureGrids = new Map();
@@ -1233,6 +1236,15 @@ export async function installAppFixture(page, options = {}) {
     if (path === '/api/cases/bundles/inspect' && request.method() === 'POST') {
       bundleCalls.push({ kind: 'inspect' });
       return json(route, bundlePreview ?? { detail: 'No bundle fixture' }, bundlePreview ? 200 : 400);
+    }
+    // the example case, imported from the bundle the app ships: its job lands at once
+    if (path === '/api/cases/example' && request.method() === 'POST') {
+      exampleCalls.push('make');
+      if (!fixtureCases.some((item) => item.id === exampleCase.id)) fixtureCases.push(exampleCase);
+      return json(route, { case_id: exampleCase.id, name: exampleCase.name, job_id: 'example-job', state: 'queued' });
+    }
+    if (path === `/api/cases/${exampleCase.id}/bundle/jobs/example-job`) {
+      return json(route, { id: 'example-job', kind: 'bundle_import', state: 'ready', error: null });
     }
     if (path === '/api/cases') {
       return json(route, fixtureCases.map((item) => ({ entity_count: 1, ...item })));
@@ -2469,11 +2481,13 @@ export async function installAppFixture(page, options = {}) {
     draftWrites,
     publishWrites,
     bundleCalls,
+    exampleCalls,
     geoQueries,
     settingsWrites,
     folderWrites,
     exportWrites,
     expectNoUnexpectedRequests: () => expect(unexpected).toEqual([]),
+    unexpected: () => [...unexpected],
   };
 }
 
