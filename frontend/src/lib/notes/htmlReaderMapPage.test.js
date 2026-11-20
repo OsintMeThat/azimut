@@ -179,6 +179,31 @@ describe('a map page', () => {
     expect(bar.getAttribute('aria-expanded')).toBe('false');
   });
 
+  it('follows a finger dragging its bar, settles the way it was pulled, and takes a short drag as nothing', async () => {
+    const doc = await mapPage({ wide: false });
+    const page = doc.querySelector('.az-mappage');
+    const panel = doc.querySelector('.az-mappage-panel');
+    const bar = doc.querySelector('.az-mappage-fold');
+    const finger = (type, y) => bar.dispatchEvent(new window.PointerEvent(type, { pointerId: 7, clientY: y, button: 0, bubbles: true }));
+    const drag = (from, to) => { finger('pointerdown', from); for (let y = from; Math.sign(to - from) * (to - y) > 0; y += Math.sign(to - from) * 20) finger('pointermove', y); finger('pointermove', to); };
+    drag(640, 420);
+    // the sheet comes with the finger before it is let go
+    expect(panel.style.transform).toMatch(/^translateY\(/);
+    finger('pointerup', 420);
+    bar.dispatchEvent(new window.MouseEvent('click', { bubbles: true }));
+    expect(page.classList.contains('az-mappage-open')).toBe(true);
+    expect(bar.getAttribute('aria-expanded')).toBe('true');
+    expect(panel.style.transform).toBe('');
+    await settle();
+    drag(200, 420);
+    finger('pointerup', 420);
+    expect(page.classList.contains('az-mappage-open')).toBe(false);
+    // a short pull falls back where it was
+    drag(640, 610);
+    finger('pointerup', 610);
+    expect(page.classList.contains('az-mappage-open')).toBe(false);
+  });
+
   it("keeps the panel beside the map on a wider screen, with no button to hide it", async () => {
     const doc = await mapPage();
     expect(doc.querySelector('.az-mappage-head button')).toBeNull();
