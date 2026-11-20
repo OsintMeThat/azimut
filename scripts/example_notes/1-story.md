@@ -35,7 +35,7 @@ layer: Storm damage
 ground: {{ground}}
 north: on
 legend: shown
-step: 2026-03-14 | Before the storm | {{at-road}}, 15.6 | | The marina, Beach Road and the beach, two days before the storm.
+step: 2026-03-15 | The morning after | {{at-road}}, 15.6 | | The marina, Beach Road and the beach at first light.
 step: 2026-03-15 | The marina at first light | {{at-marina}}, 16.4 | | The surge left boats on the bank round the marina basin and flooded the low streets.
 step: 2026-03-15 | Beach Road under sand | {{at-road}}, 16.2 | | Sand covers the road its whole length.
 step: 2026-03-15 | The old pier and the launch | {{at-pier}}, 16.4 | {{proof-pier}} | The pier lost its end; the launch lies upright on the beach.

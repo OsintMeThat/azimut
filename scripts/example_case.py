@@ -241,6 +241,21 @@ SCENES: dict[str, tuple[str, tuple[float, float, float, float], int]] = {
     "salt-marsh": ("marsh", (0.0, 0.0, 1.0, 1.0), 1280),
 }
 
+#: What each picture is called in the case, and so in a note's sources.
+SCENE_TITLES = {
+    "quay": "The marina quay, 15 March", "marina": "The marina canal, 15 March", "launch": "The launch on the beach, 15 March",
+    "pier": "The old pier, 15 March", "lighthouse": "Cape Hallow lighthouse, 16 March",
+    "salt-marsh": "A yacht in the salt marsh, 16 March",
+}
+
+#: The case's named colours, so a value reads the same in every chart, table and map.
+PALETTE = (
+    ("Claim", "#d55e00"), ("Geolocated", "#009e73"), ("Press", "#0072b2"),
+    ("False", "#c0392b"), ("Misleading", "#e69f00"),
+    ("Destroyed", "#7f1d1d"), ("Severe", "#b8492f"), ("Moderate", "#f0a14a"),
+    ("Ashore", "#3a7dbf"), ("Damaged", "#e3b23c"), ("Sunk", "#1b2a49"), ("Capsized", "#cc79a7"),
+)
+
 #: The two panels of NOAA's picture, by their pixels at 1920 across: before, then after, with
 #: their dates and the arrows NOAA drew left out.
 PANELS = ((22, 167, 948, 1008), (975, 167, 1901, 1008))
@@ -309,13 +324,12 @@ def build(client: Any, cache: Path) -> str:
     def link(source: str, target: str, verb: str) -> None:
         _ok(client.post(at("/links"), json={"from_id": source, "to_id": target, "type": verb}))
 
-    def upload(name: str, data: bytes, photo: Photo, words: str) -> str:
+    def upload(name: str, data: bytes, photo: Photo, title: str) -> str:
         filed = _ok(client.post(at("/media/upload"), files={"file": (name, data, "image/jpeg")},
                                 data={"source_url": photo.page}))
         path = filed["item"]["path"]
-        credit = f"{words}\n\nPhoto: {photo.author}, {photo.taken}. Public domain. What it shows: {photo.shows}."
-        _ok(client.patch(at("/media"), json={"path": path, "notes": credit}))
-        return path
+        credit = f"Photo: {photo.author}, {photo.taken}. Public domain. What it shows: {photo.shows}."
+        return _ok(client.patch(at("/media"), json={"path": path, "notes": credit, "title": title})).get("path", path)
 
     def lookup(path: str) -> str:
         return _ok(client.get(at("/entities/lookup"), params={"attr": "path", "value": path}))["entity"]["id"]
@@ -326,11 +340,11 @@ def build(client: Any, cache: Path) -> str:
         frame = crop(fetch(cache, boat.photo), boat.box, 480, ratio=1.5)
         name = f"boat-{boat.number:02d}.jpg"
         paths[name] = upload(name, jpeg(frame, 78), PHOTOS[boat.photo],
-                             f"#{boat.number}, {boat.kind.lower()}, {boat.status.lower()}: a frame of the register.")
+                             f"Boat {boat.number:02d}, {boat.kind.lower()}, {boat.status.lower()}")
         ids[f"boat-{boat.number:02d}"] = lookup(paths[name])
     for scene, (key, box, width) in SCENES.items():
         picture = crop(fetch(cache, key), box, width)
-        paths[scene] = upload(f"{scene}.jpg", jpeg(picture, 80), PHOTOS[key], "")
+        paths[scene] = upload(f"{scene}.jpg", jpeg(picture, 80), PHOTOS[key], SCENE_TITLES[scene])
         ids[scene] = lookup(paths[scene])
 
     # -- the ground under the maps, and the beach road before and after ----------------------------
@@ -397,7 +411,8 @@ def build(client: Any, cache: Path) -> str:
                 for key, (handle, about) in ACCOUNTS.items()}
     ids.update({f"account-{key}": value for key, value in accounts.items()})
     for label, when, role, confidence, who, number in CLAIMS:
-        page = entity("bookmark", f"{ACCOUNTS[who][0]} post {number}", {"url": post(who, number)})
+        day = f"{int(when[8:10])} Mar"  # every post is of March 2026
+        page = entity("bookmark", f"{ACCOUNTS[who][0]}, {day}", {"url": post(who, number)})
         claim = entity("claim", label, {"when": f"{when}:00Z", "when_zone": ZONE, "time_role": role, "confidence": confidence})
         link(accounts[who], page, "posted")
         link(claim, page, "cites")
@@ -461,6 +476,12 @@ def build(client: Any, cache: Path) -> str:
         "geometry": {"type": "Polygon", "coordinates": [[[lo, la] for la, lo in flood + flood[:1]]]},
         "name": "Flooded round the marina", "colour": "#0072b2", "at": "2026-03-15",
         "description": "Water over the quay and the low streets at first light."}))
+    surge = [ground_point(x, y, size) for x, y in ((0, 300), (330, 410), (720, 640), (926, 780), (926, 841), (640, 841),
+                                                    (300, 560), (0, 380))]
+    _ok(client.post(at(f"/map-layers/{name}/shapes"), json={
+        "geometry": {"type": "Polygon", "coordinates": [[[lo, la] for la, lo in surge + surge[:1]]]},
+        "name": "Hit by the surge", "colour": "#d55e00", "at": "2026-03-15", "line_dash": "dashed", "fill_opacity": 0.12,
+        "description": "The beach and the houses between it and the road, under sand or without a roof."}))
     road = [ground_point(x, y, size) for x, y in ((0, 250), (330, 372), (700, 600), (926, 760))]
     _ok(client.post(at(f"/map-layers/{name}/shapes"), json={
         "geometry": {"type": "LineString", "coordinates": [[lo, la] for la, lo in road]},
@@ -478,6 +499,9 @@ def build(client: Any, cache: Path) -> str:
             "lat": places[place][0], "lon": places[place][1], "name": label, "colour": colour, "symbol": symbol,
             "description": words, "at": day, "picture": ids[shown]}))
     ids["layer-damage"] = layer.get("title") or "Storm damage"
+
+    # -- one colour a meaning, in every note: the case's own palette -----------------------------
+    _ok(client.put(at("/layer-palette"), json={"colours": [{"name": name, "colour": colour} for name, colour in PALETTE]}))
 
     # -- the notes ---------------------------------------------------------------------------------
     ids.update({f"at-{key}": coords(value) for key, value in places.items()})
@@ -571,8 +595,8 @@ def _tables(ids: dict[str, str]) -> dict[str, str]:
                              [[chip(b), f"#{b.number}", b.status, b.kind, b.grade] for b in BOATS]),
         "table:wall-by-status": _table(["Picture", "#", "Type", "Status", "Grade"],
                                        [[chip(b), f"#{b.number}", b.kind, b.status, b.grade] for b in BOATS]),
-        "table:register": _table(["#", "Picture", "Type", "Status", "Grade", "Seen in", "First seen"],
-                                 [[f"#{b.number}", chip(b), b.kind, b.status, b.grade, b.seen, b.first] for b in BOATS]),
+        "table:register": _table(["#", "Type", "Status", "Grade", "Seen in", "First seen"],
+                                 [[f"#{b.number}", b.kind, b.status, b.grade, b.seen, b.first] for b in BOATS]),
         "table:by-type": _table(["Type", "Grade"], [[b.kind, b.grade] for b in BOATS]),
     }
 

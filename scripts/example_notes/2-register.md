@@ -1,10 +1,14 @@
 ---
 title: Boats lost at Saltmere, the register
-look: {"style": "report", "numbered": true, "toc": true}
+look: {"style": "report", "numbered": true}
 ---
 > [!note] Fictional example. Saltmere, its storm of 14 and 15 March 2026 and every account quoted here are invented, to show what a note can hold. The photographs are real, public-domain pictures of other storms and places, each credited in the case.
 
 > [!note] Every count is a minimum: each boat is counted once, across the marina survey, two walks and the drone flight of 15 and 16 March.
+
+Each boat the pictures show lost, sunk or damaged by the storm of 14 and 15 March has one row in the register, its type, what became of it and how sure its type is. The count stops on 16 March, with the drone flight.
+
+The register is the case's sheet [[entity:{{sheet}}|Boat register]]: the infographic, the chart and the map below all read it, and say so when it changes.
 
 ## At a glance
 
@@ -15,7 +19,7 @@ look: {"style": "report", "numbered": true, "toc": true}
 {{table:register}}
 {search=always fold=20 first-column stripes colour="Grade" density=compact caption="Every boat the pictures show, once" source="Marina survey, harbour and beach walks, drone flight"}
 
-One row per boat, from the case's sheet [[entity:{{sheet}}|Boat register]]. The grade says how sure its type is, not how badly it was hit.
+One row per boat. The grade says how sure its type is, not how badly it was hit.
 
 ## By type
 
