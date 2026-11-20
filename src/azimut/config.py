@@ -197,6 +197,9 @@ DEFAULT_SETTINGS: dict[str, Any] = {
     # The analyst's own site, linked from a web map's header (`notefill.Identity.site`);
     # an https address, or "" for none, when the name stands unlinked.
     "report_site": "",
+    # Whether a published document ends on "Made with Azimut", linked to the project: off
+    # until the analyst turns it on in Settings › Publishing.
+    "report_credit_azimut": False,
     # What each note style carries by default, as Settings › Publishing › Styles changed
     # it: by style, only what differs from Azimut's own (`engine/notelook.py`, PROFILES),
     # each of the sources list, how it is written, the five annexes and how strict the

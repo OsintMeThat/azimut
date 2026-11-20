@@ -188,6 +188,7 @@ class PrefsIn(BaseModel):
     report_organisation: str | None = Field(default=None, max_length=REPORT_TEXT_MAX)
     # the analyst's own site, linked from a web map's header; "" takes it away
     report_site: str | None = Field(default=None, max_length=REPORT_TEXT_MAX)
+    report_credit_azimut: bool | None = None  # a published document ends on "Made with Azimut"
     # what each note style carries by default, the whole table as Settings shows it;
     # only what differs from Azimut's own is kept, and {} is Azimut's own throughout
     note_styles: dict[notelook.Style, notelook.StyleChoices] | None = None
@@ -272,6 +273,7 @@ def _prefs(settings: dict[str, Any]) -> dict[str, Any]:
         "signature_handle": settings.get("signature_handle", DEFAULT_SIGNATURE_HANDLE),
         **{key: _report_text(settings, key) for key in REPORT_KEYS},
         "report_site": notefill.site_of(settings.get("report_site")),
+        "report_credit_azimut": settings.get("report_credit_azimut") is True,
         # what each style carries, Settings' changes over Azimut's own, and Azimut's own beside it
         "note_styles": {style: profile.as_json() for style, profile in
                         notelook.styles_table(settings.get(notelook.SETTINGS_KEY)).items()},
@@ -466,6 +468,8 @@ def _apply_prefs(settings: dict[str, Any], body: PrefsIn) -> None:
             settings[key] = value
     if body.report_site is not None:
         settings["report_site"] = _report_site(body.report_site)
+    if body.report_credit_azimut is not None:
+        settings["report_credit_azimut"] = body.report_credit_azimut
     if body.note_styles is not None:
         given = {style: choices.model_dump(exclude_none=True) for style, choices in body.note_styles.items()}
         settings[notelook.SETTINGS_KEY] = notelook.saved_styles(given)
@@ -929,6 +933,7 @@ class ImportedSettings(BaseModel):
     report_role: str = Field(default="", max_length=REPORT_TEXT_MAX)
     report_organisation: str = Field(default="", max_length=REPORT_TEXT_MAX)
     report_site: str = Field(default="", max_length=REPORT_TEXT_MAX)
+    report_credit_azimut: bool = False
     # what each note style carries: only what differs from Azimut's own, read the way
     # the app reads its own (a value this build cannot read keeps Azimut's)
     note_styles: dict[str, Any] = Field(default_factory=dict, max_length=16)

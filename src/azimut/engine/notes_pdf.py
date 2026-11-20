@@ -1018,6 +1018,22 @@ class _Builder:
             self.cited.listed[COUNT] = counts_listed(self._counts)
         self._sources()
         self._annexes()
+        self._made_with()
+
+    def _made_with(self) -> None:
+        """`Made with Azimut` and its version, linked to the project, when Settings › Publishing asks."""
+        pdf = self.pdf
+        if pdf.signer is None or not pdf.signer.credit:
+            return
+        self._end_entry()
+        pdf.ln(8)
+        if pdf.will_page_break(6):
+            pdf.add_page()
+        pdf.set_x(pdf.l_margin)
+        pdf.set_font(self.theme.heading_family, "", 8.5)
+        pdf.set_text_color(*self.theme.muted)
+        pdf.cell(pdf.get_string_width(notefill.MADE_WITH) + 1, 5, notefill.MADE_WITH, link=notefill.AZIMUT_SITE,
+                 new_x=XPos.LMARGIN, new_y=YPos.NEXT)
 
     def _page_begins(self) -> None:
         self._page_lines[self.pdf.page] = self._line
