@@ -7493,14 +7493,18 @@ default) or a **Story**, for the Page pane's HTML view and every HTML export; th
 the same either way. A story opens on the whole window: the cover's picture, else the
 first picture in the note that came from somewhere (it has a credit), under a dark
 gradient with the title over it and its credit kept, or a large title alone when there is
-none. Then each picture and the words after it, up to the next picture, heading, table or
-diagram, are a scene: the picture is held still and whole on a dark stage the width of the
-window, its caption and credit under it at its own width, while its words go by in white
-cards beside it (over its lower part below a laptop's width), and the next scene's picture
-fades in over it.
+none. Then each picture and the words after it, up to the next picture, heading, table,
+diagram or picture wall, are a scene: the picture is held still and whole on a dark stage
+the width of the window, its caption and credit under it at its own width, while its words go
+by in white cards beside it (over its lower part below a laptop's width), and the next scene's
+picture fades in over it.
 Pictures that follow one another share a stage; one with no words after it stays on until
 the next. Words with no picture before them, tables, code, diagrams, the sources and the
-corrections read as in the article, and the contents are the bar at every width.
+corrections read as in the article, and the contents are the bar at every width. A picture
+wall is never held on a stage: it breaks out the window's width between the scenes, on a dark
+band in the stage's colours with its title over it, and joins a scene beside it. Its frames
+keep the wall's own sizes and open in the lightbox. On a phone, a press between two cards
+reaches the picture under them.
 `::: steps` and `::: story` blocks, internal boxes, the lightbox and the pair's slider work
 as in the article. Without script, printed or with motion turned down, a story reads top to
 bottom as the article does.
@@ -7700,10 +7704,20 @@ t.me*). The HTML report and the web folder show a real grid, as many frames to a
 width holds (ten wide, three on a phone). Each picture is sized for its slot, about 12 KB, and opens
 larger in the page's lightbox with its label, its group, its value and its own credit; that copy is
 at most 480 px on its long side in one file, 640 in a folder, where it is read only when opened. An
-infographic panel, *Export*, To Post and the PDF draw it as any chart. The check names a frame with
-no picture, drawn empty, and a picture no longer in the case. Each picture, chip or id, is a use of
-its media (`engine/uses.py`, *shows it in a picture wall*) for the Media library's Unused filter
-and every delete's preview.
+infographic panel, *Export*, To Post and the PDF draw it as any chart. In a Story page it breaks
+out between the scenes, on a dark band, its bars in the dark look's paints; `story: one group
+per step` (*In a story* on its settings, offered once it has groups) makes each group a scene of
+its own instead. The stage shows that group alone, its name, count
+and flag over its frames, as large as the stage holds them all, laid by how many it has
+(`stage_grid`); a group of more than 16 takes as many steps as it needs, cut into even parts.
+The white card beside it says its name and count, and how many of its frames wear each grade,
+with *Pictures 1–13 of 25* on a part. Its title and legend lead it, and its credit and numbers
+close it. With motion turned down, without script or printed, each group's grades stand under
+its frames instead (print leaves them out), and an article, the PDF and every picture draw the
+whole wall. The check names a frame with no picture, drawn empty, a picture no longer in the
+case, a `story:` it cannot read, and a story stepping through a wall with no groups. Each
+picture, chip or id, is a use of its media (`engine/uses.py`, *shows it in a picture wall*) for
+the Media library's Unused filter and every delete's preview.
 
 **Making a chart in the editor** (`editor/chartBlock.js`, `chartCard.js`, `chartText.js`).
 A chart is chosen by its picture. *Chart* in a table's grid bar, or `/` › *Chart* in
@@ -7811,11 +7825,11 @@ part or row its own, written as `icons: Streit Cougar = own:…, Al-Wahsh = armo
 vehicle`, first the icon whose name names it, else the chart's, and says which took a
 name. Silhouette rows also get a **Flag** row, None or one per category (`flags:`), the
 flag named like each row taken first; a picture wall gets the Flag row alone, a flag a group, and
-its settings say **Groups**, **Bar coloured by** and **Shape** in place of Count, By and
-Coloured by. Each button opens the picker: the library by group,
-the app's badges by group and three shapes, a search, and **Import SVG…**, Settings ›
-Icons' own import, whose icon is worn at once and joins the library. An infographic's
-panel card is the same card.
+its settings say **Groups**, **Bar coloured by**, **Shape** and, once it has groups, **In a
+story** (*Whole wall* or *One group per step*) in place of Count, By and Coloured by. Each
+button opens the picker: the library by group, the app's badges by group and three shapes, a
+search, and **Import SVG…**, Settings › Icons' own import, whose icon is worn at once and joins
+the library. An infographic's panel card is the same card.
 Every choice writes its own line in the engine's order and is one Undo step. A press on a
 bar button picks the chart first, so the note stays where it is when a panel takes the
 keyboard. A double press or Enter opens its settings; a locked note shows the drawing.
