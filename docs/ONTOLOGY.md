@@ -273,6 +273,11 @@ Three modelling calls the table alone does not show:
   feature only changes that layer and journals the last twenty removals for Undo.
   Deleting the entity keeps the marker at its last point; its stored ID becomes
   active again on Trash restore.
+  A feature's `picture` names a media item (a picture or a video), a capture or a proof
+  its card shows, without following it: the marker keeps its own point. It wins over
+  what a followed entity shows in the card. The stored feature keeps the ID alone; a
+  picture in the Trash leaves the card without one until restored. It is a use of
+  that entity (`engine/uses.py`), not a graph edge.
   The delete preview lists graph relations and layer memberships. Proof coordinates
   stay in their specs, independently of any place entity.
 

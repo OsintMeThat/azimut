@@ -14,6 +14,12 @@ nearest to the point it was last drawn at, which is the one it was added from.
 **A link to an entity that is gone is hidden, not dropped.** The stored id stays,
 so restoring the entity from the Trash links the marker again, with nothing to
 migrate.
+
+**A feature can also show a picture without following it**: ``picture`` names a
+file, a capture or a proof of the case, drawn in the feature's card while the
+feature keeps its own point. It wins over what a followed item shows. The stored
+copy keeps the id alone; a rendered one names the file (`card_pictures`), and one
+whose picture sits in the Trash shows none until it comes back.
 """
 
 from __future__ import annotations
@@ -35,6 +41,12 @@ LINKABLE_TYPES = ("place", "capture", "compare-session", "horizon-view", "proof"
 SAME_SPOT = 1.0
 #: Types that state their point in their own attributes.
 _OWN_POINT = ("place", "compare-session", "horizon-view")
+#: What a feature's ``picture`` may name.
+PICTURE_TYPES = ("media", "capture", "proof")
+#: The kinds of file a card can show.
+PICTURE_KINDS = ("image", "video")
+#: What a rendered copy says of a feature's ``picture``, never kept in the stored one.
+PICTURE_SHOWN = ("picture_path", "picture_label", "picture_type")
 
 
 def _distance(first: tuple[float, float], second: tuple[float, float]) -> float:
@@ -106,6 +118,7 @@ def follow(case: Case, features: list[dict[str, Any]], *, rendered: bool) -> Non
     a proof, the footage it rests on. The working copy itself only has its points
     refreshed and keeps every id.
     """
+    show_pictures(case, features, rendered=rendered)
     moved = positions(case, features)
     labels: dict[str, dict[str, Any] | None] = {}
     shown: dict[str, dict[str, str]] = {}
@@ -305,6 +318,74 @@ def digest_part(case: Case, features: list[dict[str, Any]]) -> list[Any]:
     """What a drawing depends on outside the layer: its links and where they stand."""
     return sorted([key, None if point is None else [round(point[0], 7), round(point[1], 7)]]
                   for key, point in positions(case, features).items())
+
+
+# -- a picture in the card ----------------------------------------------------------------
+
+
+def can_picture(entity: dict[str, Any] | None) -> bool:
+    """Whether a card can show this item: a picture or a video, a capture or a proof."""
+    if entity is None or entity.get("type") not in PICTURE_TYPES:
+        return False
+    return entity["type"] != "media" or (entity.get("attrs") or {}).get("kind") in PICTURE_KINDS
+
+
+def card_pictures(case: Case, ids: list[str]) -> dict[str, dict[str, str]]:
+    """What a card shows of each picture named, by its id: its file, its name and its type.
+
+    The file is the small picture the case already made (a proof's own, a file's
+    thumbnail), else the picture itself; a video with no thumbnail yet shows none. An
+    id the case no longer holds, or that names nothing a card can show, is left out.
+    """
+    wanted = list(dict.fromkeys(one for one in ids if one))
+    if not wanted:
+        return {}
+    entities = [entity for entity in case.entities_by_ids(wanted) if can_picture(entity)]
+    thumbs = case.media_thumbs([entity["id"] for entity in entities if entity["type"] != "proof"])
+    found: dict[str, dict[str, str]] = {}
+    for entity in entities:
+        attrs = entity.get("attrs") or {}
+        if entity["type"] == "proof":
+            path = str(attrs.get("thumb") or attrs.get("path") or "")
+        else:
+            path = thumbs.get(entity["id"]) or (str(attrs.get("path") or "") if attrs.get("kind") == "image" else "")
+        found[entity["id"]] = {"picture_label": str(entity.get("label") or ""), "picture_type": str(entity["type"]),
+                               **({"picture_path": path} if path else {})}
+    return found
+
+
+def show_pictures(case: Case, features: list[dict[str, Any]], *, rendered: bool = True) -> None:
+    """Name each feature's picture in a rendered copy, in place (`PICTURE_SHOWN`).
+
+    A rendered copy whose picture is gone takes its id off too, so nothing draws it;
+    the stored copy keeps the id alone, which a restore from the Trash shows again.
+    """
+    wanted: list[dict[str, Any]] = []
+    for feature in features:
+        properties = feature["properties"]
+        for field in PICTURE_SHOWN:
+            properties.pop(field, None)
+        if rendered and isinstance(properties.get("picture"), str) and properties["picture"]:
+            wanted.append(properties)
+    if not wanted:
+        return
+    shown = card_pictures(case, [properties["picture"] for properties in wanted])
+    for properties in wanted:
+        said = shown.get(properties["picture"])
+        if said is None:
+            properties.pop("picture", None)
+        else:
+            properties.update(said)
+
+
+def pictures_part(case: Case, features: list[dict[str, Any]]) -> list[Any]:
+    """What a drawing's cards depend on outside the layer: each picture named and what it shows now."""
+    named = [(str(properties.get("key") or ""), properties["picture"]) for feature in features
+             if isinstance((properties := feature["properties"]).get("picture"), str) and properties["picture"]]
+    if not named:
+        return []
+    shown = card_pictures(case, [picture for _key, picture in named])
+    return [[key, picture, shown.get(picture)] for key, picture in named]
 
 
 def linkable(case: Case) -> list[dict[str, Any]]:
