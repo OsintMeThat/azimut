@@ -72,11 +72,11 @@
     return () => window.removeEventListener('click', outside, true);
   });
   const needle = $derived(query.trim().toLowerCase());
-  /** A search reads what a feature says: its name, its note, its day, its status, its sources. */
+  /** A search reads what a feature says: its name, its note, its day, its status, its sources, its card's picture. */
   const matches = (feature) => {
     if (!needle) return true;
     const said = feature.properties;
-    return [said.name, said.entity_label, said.description, said.date, said.status, said.confidence, ...(said.links ?? [])]
+    return [said.name, said.entity_label, said.picture_label, said.description, said.date, said.status, said.confidence, ...(said.links ?? [])]
       .some((value) => String(value ?? '').toLowerCase().includes(needle));
   };
   const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];

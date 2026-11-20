@@ -491,6 +491,8 @@ async function personalFixture(page, { imported = false, shared = false, count =
   const exports = [];
   const shapeSerial = new Map();
   const rows = [];
+  /** The case's pictures a card can show, by id: their names. */
+  const pictures = new Map();
   await page.route(`**/api/cases/${CASE_ID}/horizon/views`, (route) => route.fulfill({ json: [] }));
   const casePlace = { id: 'shared-place', label: 'Case gate', type: 'place', attrs: { lat: 48.85, lon: 2.35 } };
   let placeAlive = shared;
@@ -578,6 +580,9 @@ async function personalFixture(page, { imported = false, shared = false, count =
       // what the server adds to a marker that follows a case item
       if (properties.entity_id) Object.assign(properties, { entity_type: 'place',
         entity_label: properties.entity_id === casePlace.id ? casePlace.label : properties.name });
+      // and what it names of the picture its card shows
+      if (pictures.has(properties.picture)) Object.assign(properties, { picture_path: `media/.thumbs/${properties.picture}.png`,
+        picture_label: pictures.get(properties.picture), picture_type: 'media' });
       return { ...feature, properties };
     });
     const answer = () => ({ layer: row, groups: ownGroups, checkpoint: checkpoints.has(name) ? 'c'.repeat(32) : null, document: { type: 'FeatureCollection', features: visibleFeatures() } });
@@ -731,7 +736,7 @@ async function personalFixture(page, { imported = false, shared = false, count =
     }
     return route.fallback();
   });
-  return { rows, collections, groups, uploads, exports, get promotions() { return promotions; },
+  return { rows, collections, groups, uploads, exports, pictures, get promotions() { return promotions; },
     get deleted() { return deleted; }, get placeAlive() { return placeAlive; } };
 }
 
@@ -1151,4 +1156,53 @@ test('Done leaves a layer followed over time on its day, its track still marked'
   await expect(panel).toHaveCount(0);
   await unfold();
   await expect(ticks).toHaveCount(1);
+});
+
+test('a feature’s Picture is found by its number, one press each, and shows whole in its card while the marker stays', async ({ page }) => {
+  const fixture = await personalFixture(page);
+  const crop = (id, label) => ({ id, type: 'media', label, attrs: { kind: 'image' }, thumb: `media/.thumbs/${id}.png` });
+  const asked = [];
+  await page.route(`**/api/cases/${CASE_ID}/catalog/entities**`, (route) => {
+    asked.push(new URL(route.request().url()).searchParams.get('q'));
+    return route.fulfill({ json: { items: [crop('e_crop07', 'Vehicle 07'), crop('e_crop17', 'Vehicle 17')], next_cursor: null } });
+  });
+  // a small picture, wider than tall, as a vehicle's crop is
+  const png = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAADwAAAAoCAIAAAAt2Q6oAAAAXElEQVR42u3XMQ3AMAwEwCQqGIMokoDIXIABYTilkKVVo97PHk4vD3a9Ri+7pZUNAw0NDQ0NDQ39Zo710Zn5tOaMsB7Q0NDQ0NDQ0NDQn3kCFi90TUNDQ0P/Hn0D5Q8FIGuOZv4AAAAASUVORK5CYII=', 'base64');
+  await page.route(`**/files/${CASE_ID}/media/.thumbs/**`, (route) => route.fulfill({ body: png, contentType: 'image/png' }));
+  fixture.pictures.set('e_crop07', 'Vehicle 07');
+  await page.goto('/#satellite?ll=48.85,2.35&z=16'); await awaitMapReady(page);
+  const panel = await createPersonalLayer(page, 'Vehicles by kind');
+  await tools(page).getByRole('button', { name: 'Add markers', exact: true }).click();
+  await chooseIcon(page, tools(page), 'Style', 'Star');
+  const map = await page.locator('.map').boundingBox();
+  await page.mouse.click(map.x + map.width * 0.4, map.y + map.height * 0.5); await page.keyboard.press('Escape');
+  await expect(panel.getByText('1 feature', { exact: true })).toBeVisible();
+  const marker = () => fixture.collections.get(fixture.rows[0].name)[0];
+  if (!(await panel.getByLabel('Feature name', { exact: true }).isVisible())) await panel.getByRole('button', { name: 'Marker 1', exact: true }).click();
+  const name = panel.getByLabel('Feature name', { exact: true });
+  await name.fill('#7'); await name.press('Enter');
+  await expect.poll(() => marker().properties.name).toBe('#7');
+  const where = structuredClone(marker().geometry);
+
+  await panel.locator('.fold[data-section="picture"]').click();
+  await expect(panel.getByText('With 7 in the name', { exact: true })).toBeVisible();
+  const list = panel.getByRole('list', { name: 'Pictures of the case', exact: true });
+  // 17 holds a 7, not the number 7
+  await expect(list.getByRole('listitem')).toHaveCount(1);
+  expect(asked).toContain('7');
+  await page.screenshot({ path: test.info().outputPath('picture-field-offered.png') });
+  await list.getByRole('button', { name: /Vehicle 07/ }).click();
+  await expect.poll(() => marker().properties.picture).toBe('e_crop07');
+  await expect(panel.locator('.current-name')).toHaveText('Vehicle 07');
+  await expect(panel.locator('.fold[data-section="picture"]')).toBeVisible();
+  expect(marker().geometry).toEqual(where);
+  await page.screenshot({ path: test.info().outputPath('picture-field-set.png') });
+
+  await tools(page).getByRole('button', { name: 'Done', exact: true }).click();
+  await clickCard(page, map.x + map.width * 0.4, map.y + map.height * 0.5 - 9);
+  const shown = page.locator('.layer-card .layer-card-picture.whole');
+  await expect(shown).toHaveAttribute('title', 'Open “Vehicle 07”');
+  await expect(shown.locator('img')).toHaveAttribute('src', /e_crop07\.png$/);
+  await expect(page.locator('.layer-card')).toContainText('#7');
+  await page.screenshot({ path: test.info().outputPath('picture-in-card.png') });
 });

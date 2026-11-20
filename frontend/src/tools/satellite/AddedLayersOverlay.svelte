@@ -23,7 +23,7 @@
   import { paths } from '../../components/Icon.svelte';
   import { personalLayers } from '../../lib/map/personalLayers.svelte.js';
   import { openFollowed } from '../../lib/map/followed.js';
-  import { fileUrl } from '../../lib/fileUrl.js';
+  import { cardPictures } from '../../lib/map/layerPicture.js';
   import { asOf, isTracked } from '../../lib/map/layerHistory.js';
   import { landAt } from '../../lib/map/landings.js';
 
@@ -138,21 +138,8 @@
     return (key) => layerIconUrl(caseId, row.name, key, iconVersion(layers.find((item) => item.name === row.name) ?? row));
   }
 
-  /**
-   * What an own marker follows, on its card, each opened on a press: the footage
-   * first, then the proof geolocating it, or the file alone.
-   */
-  function followedPictures(properties) {
-    if (!properties.entity_id) return [];
-    const proof = properties.entity_type === 'proof';
-    const label = properties.entity_label || 'Untitled';
-    return [
-      properties.source_picture && { src: fileUrl(caseId, properties.source_picture), caption: 'Source',
-        title: `Open the footage “${properties.source_label || 'Untitled'}”`, open: () => openFollowed(caseId, properties.source_id) },
-      properties.entity_picture && { src: fileUrl(caseId, properties.entity_picture), caption: proof ? 'Proof' : 'Source',
-        title: proof ? `Open the proof “${label}”` : `Open “${label}”`, open: () => openFollowed(caseId, properties.entity_id) },
-    ].filter(Boolean);
-  }
+  /** What an own feature's card shows, each opened where it is worked on (`cardPictures`). */
+  const followedPictures = (properties) => cardPictures(properties, caseId, (id) => openFollowed(caseId, id));
 
   function drop(name) {
     const entry = live.get(name);
@@ -424,6 +411,8 @@
   }
   :global(.layer-card-picture:hover), :global(.layer-card-picture:focus-visible) { border-color: var(--accent); }
   :global(.layer-card-picture img) { display: block; width: 100%; height: 96px; object-fit: cover; }
+  /* the picture a feature names for its card, whole and across it: a 3:2 box until it loads, then its own shape */
+  :global(.layer-card-picture.whole img) { height: auto; max-height: 220px; aspect-ratio: auto 3 / 2; object-fit: contain; }
   :global(.layer-card-picture span) {
     position: absolute; left: 4px; bottom: 4px; padding: 0 5px; border-radius: 999px;
     background: rgb(0 0 0 / 0.65); color: #fff; font-size: 10px;

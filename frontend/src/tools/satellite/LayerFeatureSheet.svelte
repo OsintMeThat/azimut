@@ -6,7 +6,7 @@
 <script>
   /**
    * What the selected features of a personal layer say, as a sheet of folding
-   * sections: the case item it follows, its status, its sources, a note, its
+   * sections: the case item it follows, the picture its card shows, its status, its sources, a note, its
    * details (group, day, position), then how it is drawn under Look. A folded
    * section says what it holds on its line, so a sheet stays short: only the
    * sections the analyst opens stay open, from one feature to the next.
@@ -21,6 +21,7 @@
   import FloatingMenu from '../../components/FloatingMenu.svelte';
   import LayerSelectionStyle from './LayerSelectionStyle.svelte';
   import LayerFeatureWhen from './LayerFeatureWhen.svelte';
+  import LayerPicturePicker from './LayerPicturePicker.svelte';
   import { linesOf } from '../../lib/map/layerHit.js';
   import { facingLabel } from '../../lib/map/turnRing.js';
   import { formatArea, formatDistance, pathLength, polygonArea } from '../../lib/measure.js';
@@ -133,6 +134,10 @@
   const originSaid = $derived(origin === null ? 'Several' : origin === 'external' ? 'By others' : 'By me');
   const sourcesSaid = $derived([...(one ? form?.links ?? [] : []).map(host), originSaid].join(' · '));
   const noteSaid = $derived(String(form?.description ?? '').replace(/\s+/g, ' ').trim());
+  /** The picture its card shows, as the layer last named it. */
+  const pictured = $derived(one?.properties.picture ? { path: one.properties.picture_path ?? '',
+    label: one.properties.picture_label ?? '', type: one.properties.picture_type ?? '' } : null);
+  const pictureSaid = $derived(form?.picture && form.picture === one?.properties.picture ? pictured.label || 'Untitled' : '');
   const daySaid = $derived(tracked ? '' : one && hasHistory(one) ? spanLabel(spanOf(one)) : day === null ? 'Several days' : day ? momentLabel(day) : '');
   const detailsSaid = $derived([groups.length > 1 ? (group === null ? 'Several groups' : their?.name ?? '') : '', daySaid,
     measured ? measured[1] : position].filter(Boolean).join(' · '));
@@ -235,6 +240,14 @@
             </span>
           </div>
         </div>
+      {/if}
+    {/if}
+
+    {#if one}
+      {@render head('picture', 'Picture', pictureSaid, HELP.picture)}
+      {#if opened.has('picture')}
+        <LayerPicturePicker caseId={controller.editor?.caseId ?? caseState.current?.id} feature={oneKey} name={one.properties.name ?? ''} value={form.picture ?? ''}
+          shown={pictured} disabled={busy} onpick={(id) => set('picture', id)} onopen={onfollowed} />
       {/if}
     {/if}
 
