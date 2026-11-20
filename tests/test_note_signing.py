@@ -108,3 +108,52 @@ def test_the_wordpress_draft_bylines_and_signs_the_post(signer):
     ended = notes_wordpress.build(None, title="Bridge", text=TEXT, look=_look(signed="end"), identity=signer)
     assert ended.content.index("one burned") < ended.content.index("<strong>Alex Doe</strong><br>Analyst · Open Desk")
     assert any(upload.alt == "Signature" for upload in ended.uploads)
+
+
+SITE = "https://desk.example.org/"
+
+
+def _uris(pdf: bytes) -> list[str]:
+    """Every link a PDF's pages hold."""
+    found = []
+    for page in PdfReader(io.BytesIO(pdf)).pages:
+        for annotation in page.get("/Annots") or []:
+            action = annotation.get_object().get("/A") or {}
+            if "/URI" in action:
+                found.append(str(action["/URI"]))
+    return found
+
+
+def test_the_name_and_the_logo_link_to_the_website_wherever_a_document_shows_them(tmp_path):
+    """With a Website in Settings › Publishing the name under the title, on the cover and after
+    the last section, and the analyst's own logo, open it; never the Azimut mark."""
+    signer = notefill.Identity("Alex Doe", "Analyst", "Open Desk", logo=_png(tmp_path / "logo.png", (300, 300)),
+                               signature=_png(tmp_path / "signature.png"), site=SITE)
+    link = f'<a class="az-site-link" href="{SITE}" target="_blank" rel="noopener noreferrer">'
+    look = _look(signed="title", cover={"on": True, "marks": ["azimut", "logo", "signature"]})
+    body = notes_html.render(None, title="Bridge", text=TEXT, look=look, identity=signer).html.decode().split("</style>")[-1]
+    assert f'<p class="az-byline" dir="auto">By {link}Alex Doe</a>, Analyst · Open Desk</p>' in body
+    assert f'<span class="az-signer">{link}Alex Doe</a></span>' in body
+    marks = body[body.index('<p class="az-cover-marks">'):]
+    marks = marks[:marks.index("</p>")]
+    assert marks.count(link) == 1 and marks.index(link) < marks.index('class="az-my-logo"')
+    assert marks.index('class="az-logo"') < marks.index(link)
+    ended = notes_html.render(None, title="Bridge", text=TEXT, look=_look(signed="end"), identity=signer).html.decode()
+    assert f'<span class="az-signer">{link}Alex Doe</a></span>' in ended.split("</style>")[-1]
+    # the PDF: the byline, the cover's name and logo
+    printed = notes_pdf.render(None, title="Bridge", text=TEXT, look=look, identity=signer)
+    assert _uris(printed.pdf).count(SITE) >= 3
+    paged = notes_pdf.render(None, title="Bridge", text=TEXT, look=_look(signed="title"), identity=signer)
+    assert SITE in _uris(paged.pdf)
+    # the WordPress draft
+    draft = notes_wordpress.build(None, title="Bridge", text=TEXT, look=_look(signed="title"), identity=signer)
+    assert f'<em>By <a href="{SITE}">Alex Doe</a>, Analyst · Open Desk</em>' in draft.content
+    ended = notes_wordpress.build(None, title="Bridge", text=TEXT, look=_look(signed="end"), identity=signer)
+    assert f'<strong><a href="{SITE}">Alex Doe</a></strong>' in ended.content
+
+
+def test_with_no_website_the_name_and_the_logo_stay_unlinked(signer):
+    look = _look(signed="title", cover={"on": True, "marks": ["logo", "signature"]})
+    body = notes_html.render(None, title="Bridge", text=TEXT, look=look, identity=signer).html.decode().split("</style>")[-1]
+    assert "az-site-link" not in body
+    assert SITE not in _uris(notes_pdf.render(None, title="Bridge", text=TEXT, look=look, identity=signer).pdf)

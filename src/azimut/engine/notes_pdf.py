@@ -1564,7 +1564,8 @@ class _Builder:
         pdf.set_x(pdf.l_margin)
         pdf.set_font(theme.heading_family, "", 9.5)
         pdf.set_text_color(*theme.ink)
-        pdf.multi_cell(pdf.epw, 5, byline, align=Align.L, new_x=XPos.LMARGIN, new_y=YPos.NEXT)
+        pdf.multi_cell(pdf.epw, 5, byline, align=Align.L, new_x=XPos.LMARGIN, new_y=YPos.NEXT,
+                       link=self.pdf.signer.site)
         pdf.ln(after)
 
     def _signed_end(self) -> None:

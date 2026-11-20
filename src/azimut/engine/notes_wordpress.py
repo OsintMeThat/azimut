@@ -511,6 +511,11 @@ def _link(href: str, inner: str) -> str:
     return f'<a href="{_attr(href)}">{inner}</a>'
 
 
+def _to_site(identity: notefill.Identity, inner: str) -> str:
+    """The analyst's name linked to their Website (Settings › Publishing), as it is while none is set."""
+    return _link(identity.site, inner) if identity.site else inner
+
+
 def _posted(url: str) -> str:
     """`Posted on X`, linked to the post the analyst published an item in."""
     return _link(url, f"Posted on {_text(report._platform(url))}")
@@ -576,7 +581,8 @@ class _Writer:
         identity = self.cited.identity
         # the post's title is WordPress's own: a byline asked for opens the content under it
         if self.look.signed == "title" and identity.byline():
-            out.append(paragraph(f"<em>{_text(identity.byline())}</em>"))
+            rest = identity.byline()[len(f"By {identity.name}"):]
+            out.append(paragraph(f"<em>By {_to_site(identity, _text(identity.name))}{_text(rest)}</em>"))
         for piece in pieces:
             if piece.kind == "chapter":
                 out.append(self._heading(" ".join(piece.text.split()), piece.depth))
@@ -1103,7 +1109,7 @@ class _Writer:
         said = [separator(), *signature]
         if identity.name:
             credentials = identity.credentials()
-            said.append(paragraph(f"<strong>{_text(identity.name)}</strong>"
+            said.append(paragraph(f"<strong>{_to_site(identity, _text(identity.name))}</strong>"
                                   + (f"<br>{_text(credentials)}" if credentials else "")))
         return said
 

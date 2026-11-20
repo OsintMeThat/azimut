@@ -688,13 +688,28 @@ class _Page:
                 rest = rest[:first.start()] + rest[first.end():]
         identity = self.cited.identity
         who = identity.organisation or identity.name
+        logo = self._built_in(notefill.MY_LOGO, inline=True)
         by = ""
         if identity.site:
             words = who or urlsplit(identity.site).hostname or identity.site
             by = (f'<a class="az-mappage-site" href="{_attr(identity.site)}" target="_blank" '
-                  f'rel="noopener noreferrer">{_text(words)}</a>')
-        elif who:
-            by = f'<span class="az-mappage-site">{_text(who)}</span>'
+                  f'rel="noopener noreferrer">{logo}{_text(words)}</a>')
+        elif who or logo:
+            by = f'<span class="az-mappage-site">{logo}{_text(who)}</span>'
+        if identity.handle:
+            account = identity.handle_url()
+            by += (f'<a class="az-mappage-handle" href="{_attr(account)}" target="_blank" rel="noopener noreferrer">'
+                   f'{_text(identity.handle)}</a>' if account else
+                   f'<span class="az-mappage-handle">{_text(identity.handle)}</span>')
+        # the same signature on the map itself, which the reader's script lays in its corner: a
+        # phone's header has no room for it, and a screenshot of the map keeps it
+        shown = identity.handle or who
+        target = identity.handle_url() if identity.handle else identity.site
+        inner = f'{logo}<span>{_text(shown)}</span>' if shown else logo
+        mark = ""
+        if inner:
+            mark = (f'<a class="az-mappage-mark" href="{_attr(target)}" target="_blank" rel="noopener noreferrer">{inner}</a>'
+                    if target else f'<span class="az-mappage-mark">{inner}</span>')
         views = ""
         if self.folder is not None and self.look.counter:
             views = f'<span class="az-mappage-views" data-counter="{_attr(self.look.counter)}" hidden></span>'
@@ -704,7 +719,7 @@ class _Page:
                 f'<h1 class="az-title" dir="auto">{_text(title)}</h1>\n{said}</div>\n{signed}</header>\n')
         words = f'<div class="az-body az-mappage-text">\n{rest}</div>\n' if rest.strip() else ""
         about = f'<section class="az-mappage-about" id="about" aria-label="About this map">\n{words}{end}</section>\n'
-        return (f'<div class="az-mappage">\n{head}<main class="az-mappage-main" id="main">\n{figure}</main>\n'
+        return (f'<div class="az-mappage">\n{head}<main class="az-mappage-main" id="main">\n{figure}{mark}</main>\n'
                 f"{about}</div>\n")
 
     def _assemble(self, title: str, page: str) -> bytes:
@@ -946,9 +961,11 @@ class _Page:
                  f'<h1 class="az-title" dir="auto">{_text(title)}</h1>\n']
         if look.cover.subtitle:
             lines.append(f'<p class="az-standfirst" dir="auto">{_text(look.cover.subtitle)}</p>\n')
-        byline = self.cited.identity.byline() if look.signed == "title" else ""
+        identity = self.cited.identity
+        byline = identity.byline() if look.signed == "title" else ""
         if byline:
-            lines.append(f'<p class="az-byline" dir="auto">{_text(byline)}</p>\n')
+            rest = byline[len(f"By {identity.name}"):]
+            lines.append(f'<p class="az-byline" dir="auto">By {self._to_site(_text(identity.name))}{_text(rest)}</p>\n')
         lines.append(f'<p class="az-dateline"><time class="az-date" datetime="{self.day.isoformat()}">'
                      f"{_text(notes_style.long_date(self.day))}</time></p>\n")
         if look.cover.on:
@@ -961,8 +978,9 @@ class _Page:
     def _cover_marks(self) -> str:
         """The logos and the signature the style's cover asks for (`NoteCover.marks`)."""
         marks = self.look.cover.marks
-        logos = "".join(self._built_in(name, inline=True) for mark, name in
-                        (("azimut", notefill.LOGO), ("logo", notefill.MY_LOGO)) if mark in marks)
+        logos = "".join(self._to_site(self._built_in(name, inline=True)) if name == notefill.MY_LOGO
+                        else self._built_in(name, inline=True)
+                        for mark, name in (("azimut", notefill.LOGO), ("logo", notefill.MY_LOGO)) if mark in marks)
         said = f'<p class="az-cover-marks">{logos}</p>\n' if logos else ""
         if "signature" in marks:
             said += self._signature("az-cover-signed")
@@ -975,9 +993,17 @@ class _Page:
         credentials = identity.credentials()
         if not picture and not identity.name:
             return ""
-        name = f'<span class="az-signer">{_text(identity.name)}</span>' if identity.name else ""
+        name = f'<span class="az-signer">{self._to_site(_text(identity.name))}</span>' if identity.name else ""
         role = f'<span class="az-credentials">{_text(credentials)}</span>' if credentials and identity.name else ""
         return f'<div class="az-signed {kind}">{picture}{name}{role}</div>\n'
+
+    def _to_site(self, inner: str) -> str:
+        """The analyst's name or logo linked to their Website (Settings › Publishing), as it is
+        while none is set."""
+        site = self.cited.identity.site
+        if not site or not inner:
+            return inner
+        return f'<a class="az-site-link" href="{_attr(site)}" target="_blank" rel="noopener noreferrer">{inner}</a>'
 
     def _tlp(self) -> str:
         label = TLP_LABELS.get(self.look.tlp)

@@ -43,7 +43,7 @@ function withCard(id, card) {
   });
 }
 
-async function mapPage({ hash = '', wide = true, url = 'https://desk.github.io/maps/road/', script = READER, fetch = null, figure = FIGURE } = {}) {
+async function mapPage({ hash = '', wide = true, url = 'https://desk.github.io/maps/road/', script = READER, fetch = null, figure = FIGURE, mark = '' } = {}) {
   window = new Window({
     url: `${url}${hash}`, width: wide ? 1440 : 390, height: 900,
     settings: { enableJavaScriptEvaluation: true, suppressInsecureJavaScriptEnvironmentWarning: true },
@@ -56,7 +56,7 @@ async function mapPage({ hash = '', wide = true, url = 'https://desk.github.io/m
   }
   if (fetch) window.fetch = fetch;
   window.document.write(`<!doctype html><html lang="en" data-look="article" data-web="map"><head><style>${CSS}</style></head>`
-    + `<body>${PAGE.replace('FIGURE', () => figure)}<script>${script}</script></body></html>`);
+    + `<body>${PAGE.replace('FIGURE', () => figure + mark)}<script>${script}</script></body></html>`);
   await window.happyDOM.waitUntilComplete();
   return window.document;
 }
@@ -67,6 +67,15 @@ const shape = (doc, id) => doc.querySelector(`.az-f[data-id="${id}"]`);
 const settle = (ms = 0) => new Promise((resolve) => setTimeout(resolve, ms));
 
 describe('a map page', () => {
+  it("lays the analyst's logo and handle in the map's own corner, where a phone and a screenshot keep them", async () => {
+    const mark = '<a class="az-mappage-mark" href="https://x.com/desk_maps"><img class="az-my-logo" alt="Logo"><span>@desk_maps</span></a>';
+    const doc = await mapPage({ mark, wide: false });
+    const moved = doc.querySelector('.az-map-frame > .az-mappage-mark');
+    expect(moved).not.toBeNull();
+    expect(moved.getAttribute('href')).toBe('https://x.com/desk_maps');
+    expect(doc.querySelectorAll('.az-mappage-mark')).toHaveLength(1);
+  });
+
   it('lays its map on the window and puts its search, layers, steps and words in a panel beside it', async () => {
     const doc = await mapPage();
     const figure = doc.querySelector('figure.az-map');
