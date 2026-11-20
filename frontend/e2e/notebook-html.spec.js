@@ -312,3 +312,96 @@ test('the Page pane shows the note as its HTML page, and the export dialog write
   expect(state.exported.at(-1)).toEqual({ notes: ['n1'], diagrams: {}, edition: 'internal', round_pov: true, changes: '' });
   await expect(page.getByText('1 HTML page written')).toBeVisible();
 });
+
+test.describe('the Page pane on the whole screen', () => {
+  // a screen the size of the window, which a browser's full screen takes
+  test.use({ viewport: { width: 1440, height: 900 }, screen: { width: 1440, height: 900 } });
+
+  test('the HTML page at the screen’s width, then a phone’s, and back as it was; the PDF too', async ({ page, browserName }) => {
+    test.skip(browserName !== 'chromium', 'one browser is enough for the frame');
+    const pictures = await drawPictures(page, COLOURS);
+    const state = await notebook(page, reportHtml(pictures));
+    await page.goto('/#notebook');
+    await page.locator('button[title="Open Lead"]').click();
+    await expect(page.locator('.cm-content')).toContainText('Seen at the quay.');
+    await page.locator('[data-guide="notebook.view"]').getByRole('button', { name: 'Page' }).click();
+    const pane = page.locator('.page-pane');
+    await pane.getByRole('group', { name: 'Format' }).getByRole('button', { name: 'HTML' }).click();
+    const shown = page.locator('.html-page iframe.shown');
+    const frame = page.frameLocator('.html-page iframe.shown');
+    await expect(frame.locator('h1.az-title')).toHaveText('Ambush on the Wadi Sahm road');
+    // read down to a part of the page in the pane
+    await frame.locator('#the-register').evaluate((node) => node.scrollIntoView({ block: 'start', behavior: 'instant' }));
+    await page.waitForTimeout(200);
+    const read = await frame.locator('html').evaluate(() => Math.round(scrollY));
+    expect(read).toBeGreaterThan(0);
+    const inPane = await shown.boundingBox();
+    await shown.evaluate((node) => { node.dataset.before = 'yes'; });
+    const asked = state.htmlPreviews.length;
+
+    await pane.getByRole('button', { name: 'Full screen' }).click();
+    const bar = page.locator('.screen-bar');
+    await expect(bar.getByRole('button', { name: /Exit/ })).toBeFocused();
+    expect(await page.evaluate(() => document.fullscreenElement?.classList.contains('stage') || document.querySelector('.stage.covering') !== null)).toBe(true);
+    // the same frame fills the screen under the bar, the page inside laid out at that width: the contents a rail in its margin
+    const [wide, high] = await page.evaluate(() => [innerWidth, innerHeight]);
+    expect([wide, high]).toEqual([1440, 900]);
+    await expect.poll(async () => (await shown.boundingBox()).width).toBe(wide);
+    const whole = await shown.boundingBox();
+    const above = await bar.boundingBox();
+    expect([whole.x, whole.y, whole.y + whole.height]).toEqual([0, above.y + above.height, high]);
+    expect([above.x, above.y, above.width]).toEqual([0, 0, wide]);
+    expect(await shown.getAttribute('data-before')).toBe('yes');
+    expect(await frame.locator('html').evaluate(() => innerWidth)).toBe(wide);
+    await expect(frame.locator('.az-contents')).not.toHaveClass(/az-bar/);
+    // the part read is still at the top of the view, though the lines are longer
+    const nearTop = () => frame.locator('#the-register').evaluate((node) => {
+      const top = node.getBoundingClientRect().top;
+      return top > -80 && top < 200;
+    });
+    await expect.poll(nearTop).toBe(true);
+    expect(state.htmlPreviews.length).toBe(asked);
+
+    // a phone's width: a frame 390 px wide, the page laid out for a phone, the same line in view
+    await bar.getByRole('group', { name: 'Width' }).getByRole('button', { name: 'Phone' }).click();
+    await expect.poll(async () => (await shown.boundingBox()).width).toBe(390);
+    expect(await frame.locator('html').evaluate(() => innerWidth)).toBe(390);
+    await expect(frame.locator('.az-contents')).toHaveClass(/az-bar/);
+    await expect(frame.locator('.az-contents-toggle')).toBeVisible();
+    await expect.poll(nearTop).toBe(true);
+
+    // Esc gives the pane back as it was, read to the same place
+    await page.keyboard.press('Escape');
+    await expect(bar).toHaveCount(0);
+    expect(await page.evaluate(() => document.fullscreenElement)).toBeNull();
+    await expect.poll(async () => JSON.stringify(await shown.boundingBox())).toBe(JSON.stringify(inPane));
+    await expect.poll(() => frame.locator('html').evaluate(() => Math.round(scrollY))).toBe(read);
+    await expect(pane.getByRole('button', { name: 'Full screen' })).toBeFocused();
+    expect(state.htmlPreviews.length).toBe(asked);
+
+    // the PDF's pages, larger on the whole screen with the page read kept in view, and back as they were
+    await page.route(`**/api/cases/${CASE_ID}/notes/preview`, (route) => pdfAnswer(route, [0, 2, 4, 6]));
+    await pane.getByRole('group', { name: 'Format' }).getByRole('button', { name: 'PDF' }).click();
+    const pages = pane.locator('.pages');
+    await expect(pages.locator('.sheet')).toHaveCount(4);
+    /** How far into its third page the view starts, as a share of the page. */
+    const into = () => pages.evaluate((node) => {
+      const sheet = node.querySelectorAll('.sheet')[2].getBoundingClientRect();
+      return (node.getBoundingClientRect().top - sheet.top) / sheet.height;
+    });
+    await pages.evaluate((node) => {
+      const sheet = node.querySelectorAll('.sheet')[2].getBoundingClientRect();
+      node.scrollTop += sheet.top - node.getBoundingClientRect().top + sheet.height * 0.25;
+    });
+    const [scrolled, share, narrow] = [await pages.evaluate((node) => node.scrollTop), await into(), (await pages.locator('.sheet').first().boundingBox()).width];
+    await pane.getByRole('button', { name: 'Full screen' }).click();
+    await expect(bar.getByRole('group', { name: 'Width' })).toHaveCount(0);
+    await expect.poll(async () => (await pages.locator('.sheet').first().boundingBox()).width).toBe(900);
+    expect(narrow).toBeLessThan(900);
+    expect(Math.abs((await into()) - share)).toBeLessThan(0.02);
+    await bar.getByRole('button', { name: /Exit/ }).click();
+    await expect(bar).toHaveCount(0);
+    await expect.poll(() => pages.evaluate((node) => node.scrollTop)).toBe(scrolled);
+    expect((await pages.locator('.sheet').first().boundingBox()).width).toBe(narrow);
+  });
+});

@@ -7,6 +7,11 @@
    * first, then the two are swapped at once, so the pages never blink while a
    * note is typed. A press on a page hands its index up. `overlay(index, size)`
    * draws over a page, in a box the page's size (`size` in PDF points).
+   *
+   * The pane made wider or narrower lays the pages out again at once, the line at
+   * the top of the view kept there, each page's old drawing stretched until the new
+   * one is ready. `readTo()` says where the pages are read to, and `backTo` goes
+   * there again once they have that width back (the whole screen given back).
    */
   import { onDestroy, tick, untrack } from 'svelte';
   import { drawPage, openPdf, releaseCanvas } from '../lib/notes/pdfjs.js';
@@ -93,6 +98,9 @@
     const old = shown.canvases.get(index);
     if (old && old !== canvas) releaseCanvas(old);
     shown.canvases.set(index, canvas);
+    // the drawing fills its page, stretched for a moment while the page is resized
+    canvas.style.width = '100%';
+    canvas.style.height = '100%';
     (slot.querySelector(':scope > .ink') ?? slot).replaceChildren(canvas);
   }
 
@@ -123,23 +131,77 @@
     return Math.max(160, Math.min(900, room || 520));
   }
 
-  // the pane resized: the pages in view are drawn again at the new width, behind the old ones
+  // the pane resized: the pages laid out again at once, and those in view drawn again at
+  // the new width, behind the old ones
   let resizeTimer;
   $effect(() => {
     if (!scroller) return;
     width = pageWidth();
     if (typeof ResizeObserver === 'undefined') return;
     const watch = new ResizeObserver(() => {
+      const at = pageWidth();
+      if (Math.abs(at - width) >= 1) void relayout(at);
       clearTimeout(resizeTimer);
       resizeTimer = setTimeout(redraw, 160);
     });
     watch.observe(scroller);
-    return () => { watch.disconnect(); clearTimeout(resizeTimer); };
+    return () => { watch.disconnect(); clearTimeout(resizeTimer); clearTimeout(backTimer); };
   });
+
+  /** The page at the top of the view, how far down it the view starts, or how far above it. */
+  function spotNow() {
+    if (!scroller) return null;
+    const top = scroller.getBoundingClientRect().top;
+    for (const index of [...slots.keys()].sort((a, b) => a - b)) {
+      const box = slots.get(index).getBoundingClientRect();
+      if (box.height && box.bottom > top) return { index, into: box.top < top ? (top - box.top) / box.height : 0, gap: Math.max(0, box.top - top) };
+    }
+    return null;
+  }
+
+  function keepSpot(spot) {
+    const node = spot && slots.get(spot.index);
+    if (!node || !scroller) return;
+    const box = node.getBoundingClientRect();
+    scroller.scrollTop += box.top - (scroller.getBoundingClientRect().top + spot.gap - spot.into * box.height);
+  }
+
+  /** Where `backTo` goes once the pages have its width again, for a moment. */
+  let back = null;
+  let backTimer;
+
+  /** The pages laid out `at` wide, the view kept on the line it showed, or taken back where it was. */
+  async function relayout(at) {
+    const spot = spotNow();
+    width = at;
+    await tick();
+    if (back && Math.abs(back.width - at) < 1) {
+      scroller.scrollTop = back.top;
+      back = null;
+    } else keepSpot(spot);
+  }
+
+  /** How far down the pages are read, at the width they are laid out. */
+  export function readTo() {
+    return scroller ? { top: scroller.scrollTop, width } : null;
+  }
+
+  /** Back to where `readTo` said: now when the pages have its width, else once they have it again. */
+  export function backTo(spot) {
+    if (!spot || !scroller) return;
+    clearTimeout(backTimer);
+    if (Math.abs(spot.width - width) < 1) {
+      back = null;
+      scroller.scrollTop = spot.top;
+      return;
+    }
+    back = spot;
+    backTimer = setTimeout(() => (back = null), 1000);
+  }
 
   async function redraw() {
     const at = pageWidth();
-    width = at;
+    if (Math.abs(at - width) >= 1) await relayout(at);
     if (!shown || Math.abs(at - shown.width) < 2) return;
     const current = shown;
     current.width = at;

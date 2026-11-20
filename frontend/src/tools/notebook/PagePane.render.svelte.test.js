@@ -434,3 +434,207 @@ describe('PDF or HTML', () => {
     expect(asked).toHaveLength(1);
   });
 });
+
+describe('Full screen', () => {
+  const settle = async () => {
+    for (let round = 0; round < 4; round += 1) {
+      await tick();
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    }
+    flushSync();
+  };
+  /** Two frames of the browser's own, for the rAFs the pane waits on as it is given back. */
+  const frames = () => new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => setTimeout(resolve, 0))));
+  const stage = () => target.querySelector('.page-pane > .stage');
+  const bar = () => stage().querySelector('.screen-bar');
+  const press = (selector) => target.querySelector(selector).click();
+  const widths = () => bar()?.querySelector('[role="group"][aria-label="Width"]');
+  const pick = (group, name) => [...group.querySelectorAll('button')].find((button) => button.textContent.trim() === name).click();
+
+  /** The browser's full screen, given to the element that asks; `refuse` makes it say no. */
+  function browserScreen({ refuse = false } = {}) {
+    let holder = null;
+    Object.defineProperty(document, 'fullscreenElement', { configurable: true, get: () => holder });
+    Object.defineProperty(document, 'fullscreenEnabled', { configurable: true, get: () => true });
+    const change = () => document.dispatchEvent(new Event('fullscreenchange'));
+    HTMLElement.prototype.requestFullscreen = vi.fn(async function request() {
+      if (refuse) throw new TypeError('Permissions check failed');
+      holder = this;
+      change();
+    });
+    document.exitFullscreen = vi.fn(async () => {
+      holder = null;
+      change();
+    });
+    return {
+      leave: () => { holder = null; change(); },
+      restore: () => {
+        delete document.fullscreenElement;
+        delete document.fullscreenEnabled;
+        delete HTMLElement.prototype.requestFullscreen;
+        delete document.exitFullscreen;
+      },
+    };
+  }
+  let screen = null;
+  afterEach(() => {
+    screen?.restore();
+    screen = null;
+  });
+
+  it('hands the preview’s own box the screen from the bar, the same frames inside, and Exit gives it back', async () => {
+    screen = browserScreen();
+    localStorage.setItem('azimut:note-page-format', 'html');
+    await pane({ title: 'Lead' });
+    const before = [...target.querySelectorAll('.html-page iframe')];
+    const button = target.querySelector('.pane-bar button[aria-label="Full screen"]');
+    expect(button.title).toBe('Show the preview on the whole screen');
+    expect(bar()).toBeNull();
+    button.click();
+    await settle();
+    expect(HTMLElement.prototype.requestFullscreen.mock.contexts[0]).toBe(stage());
+    expect(stage().classList.contains('full')).toBe(true);
+    expect(bar().textContent).toContain('Lead');
+    expect(bar().textContent).toContain('As the file reads in a browser');
+    expect(bar().querySelector('[role="group"][aria-label="Format"] [aria-pressed="true"]').textContent).toBe('HTML');
+    // the same preview, larger: no frame drawn anew, no new page asked for
+    expect([...stage().querySelectorAll('.html-page iframe')]).toEqual(before);
+    const exit = bar().querySelector('button.exit');
+    expect(exit.title).toBe('Back to the note (Esc)');
+    expect(document.activeElement).toBe(exit);
+    exit.click();
+    await settle();
+    expect(document.exitFullscreen).toHaveBeenCalledTimes(1);
+    expect(bar()).toBeNull();
+    expect(stage().classList.contains('full')).toBe(false);
+    expect(document.activeElement).toBe(button);
+  });
+
+  it('follows the browser’s own exit, and Esc', async () => {
+    screen = browserScreen();
+    await pane({});
+    press('.pane-bar button[aria-label="Full screen"]');
+    await settle();
+    screen.leave();
+    await settle();
+    expect(bar()).toBeNull();
+    press('.pane-bar button[aria-label="Full screen"]');
+    await settle();
+    window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }));
+    await settle();
+    expect(document.exitFullscreen).toHaveBeenCalledTimes(1);
+    expect(bar()).toBeNull();
+  });
+
+  it('covers the window itself where the browser refuses, and Esc gives the pane back', async () => {
+    screen = browserScreen({ refuse: true });
+    await pane({});
+    press('.pane-bar button[aria-label="Full screen"]');
+    await settle();
+    expect(stage().classList.contains('covering')).toBe(true);
+    expect(bar()).not.toBeNull();
+    window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }));
+    await settle();
+    expect(stage().classList.contains('covering')).toBe(false);
+    expect(bar()).toBeNull();
+    // a browser with no full screen for a part of the page at all
+    screen.restore();
+    screen = null;
+    press('.pane-bar button[aria-label="Full screen"]');
+    await settle();
+    expect(stage().classList.contains('covering')).toBe(true);
+    bar().querySelector('button.exit').click();
+    await settle();
+    expect(stage().classList.contains('covering')).toBe(false);
+  });
+
+  it('reads the HTML page at a desktop’s, a tablet’s or a phone’s width, and the PDF at its own', async () => {
+    screen = browserScreen();
+    localStorage.setItem('azimut:note-page-format', 'html');
+    await pane({});
+    expect(stage().dataset.width).toBe('desktop');
+    press('.pane-bar button[aria-label="Full screen"]');
+    await settle();
+    const choices = [...widths().querySelectorAll('button')];
+    expect(choices.map((button) => [button.textContent.trim(), button.title])).toEqual([
+      ['Desktop', 'As wide as the screen'], ['Tablet', '820 px wide, as on a tablet'], ['Phone', '390 px wide, as on a phone'],
+    ]);
+    expect(choices[0].getAttribute('aria-pressed')).toBe('true');
+    expect(stage().dataset.width).toBe('desktop');
+    pick(widths(), 'Phone');
+    flushSync();
+    expect(stage().dataset.width).toBe('phone');
+    expect(widths().querySelector('[aria-pressed="true"]').textContent).toBe('Phone');
+    pick(widths(), 'Tablet');
+    flushSync();
+    expect(stage().dataset.width).toBe('tablet');
+    // the PDF's pages keep their own size: no width to pick
+    pick(bar().querySelector('[role="group"][aria-label="Format"]'), 'PDF');
+    await settle();
+    expect(widths()).toBeNull();
+    expect(stage().dataset.width).toBe('desktop');
+    expect(stage().querySelector('.sheet')).not.toBeNull();
+    pick(bar().querySelector('[role="group"][aria-label="Format"]'), 'HTML');
+    await settle();
+    expect(stage().dataset.width).toBe('tablet');
+    // back in the pane the page takes the pane's width, the choice kept for the next time
+    bar().querySelector('button.exit').click();
+    await settle();
+    expect(stage().dataset.width).toBe('desktop');
+    press('.pane-bar button[aria-label="Full screen"]');
+    await settle();
+    expect(stage().dataset.width).toBe('tablet');
+  });
+
+  it('keeps drawing the note while it holds the screen', async () => {
+    screen = browserScreen();
+    localStorage.setItem('azimut:note-page-format', 'html');
+    target = document.createElement('div');
+    document.body.append(target);
+    const props = $state({ caseId: 'c1', note: 'n1', text: 'x', look: { style: 'report' } });
+    app = mount(PagePane, { target, props });
+    await settle();
+    press('.pane-bar button[aria-label="Full screen"]');
+    await settle();
+    const asked = askedHtml.length;
+    props.text = 'x and y';
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    await settle();
+    expect(askedHtml.length).toBe(asked + 1);
+    expect(askedHtml.at(-1).text).toBe('x and y');
+    expect(bar()).not.toBeNull();
+  });
+
+  it('gives the pane back where it was read to, the HTML page as the pages', async () => {
+    screen = browserScreen();
+    localStorage.setItem('azimut:note-page-format', 'html');
+    await pane({});
+    const shown = () => stage().querySelector('.html-page iframe.shown') ?? stage().querySelectorAll('.html-page iframe')[1];
+    const frame = shown();
+    const said = (y) => window.dispatchEvent(new MessageEvent('message', { data: { azimutPage: y }, source: frame.contentWindow }));
+    stage().querySelectorAll('.html-page iframe').forEach((node) => node.dispatchEvent(new Event('load')));
+    flushSync();
+    said(640);
+    press('.pane-bar button[aria-label="Full screen"]');
+    await settle();
+    said(2400);
+    const told = vi.spyOn(shown().contentWindow, 'postMessage');
+    bar().querySelector('button.exit').click();
+    await settle();
+    await frames();
+    expect(told).toHaveBeenCalledWith({ azimutScroll: 640 }, '*');
+
+    // the PDF's pages, scrolled in the pane and further on the whole screen
+    pick(target.querySelector('.pane-bar [role="group"][aria-label="Format"]'), 'PDF');
+    await settle();
+    const pages = stage().querySelector('.pages');
+    pages.scrollTop = 300;
+    press('.pane-bar button[aria-label="Full screen"]');
+    await settle();
+    pages.scrollTop = 1200;
+    bar().querySelector('button.exit').click();
+    await settle();
+    await frames();
+    expect(pages.scrollTop).toBe(300);
+  });
+});
