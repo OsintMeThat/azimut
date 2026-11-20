@@ -27,7 +27,7 @@
 | Esri Wayback | no | — | yes | yes (a release never changes) | static string, release in provenance |
 | OpenStreetMap | no | — | yes | yes | static string |
 | OpenTopoMap | no | — | yes | yes | static string (CC-BY-SA² ) |
-| Sentinel-2 cloudless (EOX) | no | — | **no** (a year's mosaic, no single date) | yes | EOX's words for the year shown, with its licence |
+| Sentinel-2 cloudless (EOX) | no | — | **no** (a year's mosaic, no single date); filed only as a note map's ground | yes | EOX's words for the year shown, with its licence |
 | **Mapbox Satellite** | yes | access token in URL | yes | yes¹ | `© Mapbox © OpenStreetMap © Maxar` (Mapbox's attribution rules for a satellite style) |
 | **Google Satellite** | yes | **session token** | yes (flattened+attributed only) | **NO** | dynamic copyright from viewport endpoint |
 | **Google Satellite (Maps JS)** | yes | key in script URL⁴ | screen crops only (user-initiated grab, attribution burned) | n/a (widget) | `Map data © Google` + the widget's own credits |
@@ -747,7 +747,11 @@ world a year, assembled pixel by pixel from many passes of that year (and of the
 one before, for 2016 and 2018). It is the opposite of what the imagery dating rule
 asks of evidence, so it is a basemap to show and never to capture: `capturable` is
 off, and wherever it is printed it says a year's mosaic, never a day. Map plates
-use it for the wide map a reader needs to see a country without clouds or seams.
+use it for the wide map a reader needs to see a country without clouds or seams, and
+a note's map takes it by default (`imagery: sentinel`): its ground is the one picture
+filed from it, as the map's background and credited as a year's mosaic, not a day,
+while Satellite still refuses it as a capture; a web folder's live map streams it in
+the reader's browser.
 
 | | |
 |---|---|

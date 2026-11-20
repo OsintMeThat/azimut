@@ -7627,7 +7627,10 @@ and edit (`title`, one `layer` a line, `plate`, `proofs`, `ground`, one `detail`
 `view`, and the settings below), drawn in the note as the page draws it (`engine/notes_maps.py`). The
 put frames the map on what it shows (a plate's own view for a plate) and files the ground
 under it once, on the press, the way Add › This view files a capture: twice the frame's
-resolution, from the imagery picked (Esri World Imagery by default), its credit kept. A
+resolution, from the imagery picked, its credit kept: *Sentinel-2 · free* by default (EOX's
+cloudless mosaic of its newest year, credited as a year's mosaic, not a day), *Esri · sharper*
+(under it, one line: Esri's terms limit reuse, so publishing it is the analyst's responsibility)
+or another basemap, the block saying which of the first two (`imagery: sentinel` or `esri`). A
 plate's step that frames the map closer than that gets a sharper picture of its own frame.
 Offline, the block is written with no ground and the map draws on a plain background. In
 the HTML page the map is the ground muted under the layers' marks, lines and areas in
@@ -7659,7 +7662,9 @@ the name has room after the last one named, the one at an end set inside the tra
 script and in print, the map is as on its last day, said under it. The PDF prints it as a picture
 of that day, its credit under it. The check
 before export names a layer, a plate or a picture no longer in the case at its line, a
-map with no ground, and one past 8 MB. A layer, a plate or a ground a map names is a use:
+map with no ground, and one past 8 MB; for a public HTML page, a web folder, GitHub Pages or a
+WordPress draft it says once of a map on Esri that Esri's terms limit reuse, so publishing it
+is the analyst's responsibility, which never stops the export. A layer, a plate or a ground a map names is a use:
 its delete names the note.
 
 **A map's settings.** In the drawn note a map is the page's own drawing over its ground, read
@@ -7671,9 +7676,14 @@ reads and draws as it always did, in every reader. **Look**: the title; the base
 ground as filed), *Map*, *Topographic* or *Dark* (`base`), each other base filed once on the press
 that picks it as a put files its ground (OpenStreetMap, OpenTopoMap, and OpenStreetMap again drawn
 dark), a view filed before cited again with nothing fetched, and refused with the map left as it
-was when the imagery cannot be fetched; the frame, a rectangle dragged on the map or *Fit to what it
-shows* (`frame: west, south, east, north`), the ground laid where it stands and a part it does not
-cover shown plain, with *File the ground for this frame*; the size, *Half*, *Wide* or *Full height*;
+was when the imagery cannot be fetched; under *Satellite*, its imagery, *Sentinel-2 · free* or
+*Esri · sharper* (`imagery`), its ground and close-ups filed again from it on the press as one Undo
+(a map that names none shows the one its ground came from), Esri saying once under the choice that
+its terms limit reuse, so publishing it is the analyst's responsibility, and Sentinel-2 on a map
+framed narrower than about 3 km that its 10 m pixels will blur; the frame, a rectangle dragged on
+the map or *Fit to what it shows* (`frame: west, south, east, north`), the ground laid where it
+stands and a part it does not cover shown plain, with *File the ground for this frame*, and *Keep
+readers inside* (`bounds: ground`), which stops a live map at the frame's edges; the size, *Half*, *Wide* or *Full height*;
 the legend, *Shown*, *Folded* or *Hidden*; a north arrow; the scale, *Off*, *Page* or *Page + PDF*;
 **Apply a template…**, a map template's look of Settings → Templates → Figure templates written
 as one Undo, its layers, frame and steps kept, another base filed on the press as picking it does.
@@ -7696,8 +7706,11 @@ button moves the map; the line under the map says so. It is drawn on the ground 
 (`detail:`), each from its own pixels, a close-up shown where the ground would blur, and plain where
 the case holds no picture: opening Draw fetches nothing, moving never writes a line, and leaving Draw
 shows the block's own view again. Once the map has moved, **File the ground for this view** files the
-picture of what it shows on that press (Esri, or the base's own map), cited again when that view was
-filed before, as one more `detail:` line and one Undo step. It is a close-up rather than a new
+picture of what it shows on that press (the map's imagery, or the base's own map), cited again when
+that view was filed before, as one more `detail:` line and one Undo step. **Open here** beside it
+writes what the map shows as its `view:`, one Undo step and nothing fetched: the HTML page and the
+live map open there, *The whole map* a press away, while the PDF prints it whole and a ground filed
+again still covers the whole map. It is a close-up rather than a new
 ground, so the map's ground, frame and printed picture stay as they were; a map keeps 8, and offline
 the press says so and the map keeps what it has. **Full screen**, the corners button in the map's
 top right, puts the whole card on the screen, most useful for Draw on a laptop: its bar on top, its
@@ -7713,14 +7726,18 @@ moved, framed by a rectangle dragged on the map, named, given their words, taken
 **Cards**: what a feature's card shows, its picture, its sentence, its source and its verify links.
 The offline map, the live map, the PDF's picture and an infographic's map panel each honour what
 applies to them: the live map draws *Map* and *Dark* in OpenFreeMap's own styles, sharper than the
-picture filed, and a *Topographic* map as filed with a switch to OpenFreeMap's; the PDF prints a
+picture filed, a *Topographic* map as filed with a switch to OpenFreeMap's, and a satellite map
+that names its imagery by streaming it in the reader's browser from EOX or Esri under its marks,
+sharp at every zoom, credited in its corner (EOX's credit linked to its site), Azimut fetching
+none of it and the PDF and the HTML file keeping the ground filed; the PDF prints a
 half map half wide, a north arrow and the scale when it says *Page + PDF*, and the day the map
 opens on. A layer's lines and areas whose names are on the map write them on their middle.
 
 **A map from nothing.** `/` › *Interactive map* › **Start an empty map** frames a place on the
 app's own map, opened by that press (a place name or coordinates found on **Find**, the case's own
 gazetteer first and the geocoder after, never on a keystroke, or the map panned), with a title and
-a base. **Start the map** files the ground of the frame and makes the map a personal layer of its
+a base. **Start the map** files the ground of the frame from the imagery the map shows (Sentinel-2
+or Esri written as its `imagery`) and makes the map a personal layer of its
 own (`POST /notes/maps/scratch`); it lands as a put does, Undo sending both to the Trash, and opens
 on its Draw tab.
 

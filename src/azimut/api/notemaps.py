@@ -5,6 +5,9 @@ frames the map on it (the plate's own view for a plate) and files the ground und
 the way Add › This view files a capture: tiles fetched once, on the press, stitched at
 twice the frame's resolution, filed with its provider's credit, and cited again rather
 than filed twice for the same view. The answer is the `::: map` block the note takes.
+Its imagery is EOX's Sentinel-2 cloudless unless the put names another, and the block
+says which (`imagery: sentinel` or `esri`), so every ground filed for it after comes from
+the same imagery and a web folder's live map streams it.
 
 A plate's steps that frame the map closer than that ground holds each get a sharper
 picture of their own frame (a ``detail``), so a step lands on ground as sharp as the
@@ -18,13 +21,14 @@ until it is put in again.
 from __future__ import annotations
 
 import math
+from dataclasses import replace
 from typing import Any, Literal
 
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
 
 from .. import layout
-from ..engine import maplayers, notes_maps, tiles
+from ..engine import cloudless, maplayers, notes_maps, tiles
 from ..workspace import Case
 from .cases import get_case
 
@@ -37,8 +41,12 @@ GROUND_GAIN = 2
 DETAIL_GAIN = 1.5
 #: How many zoom levels past the map's own a step looks before it gets a detail.
 DETAIL_FROM = 1.2
-#: The basemap a map's ground is taken from unless the put names another.
-DEFAULT_PROVIDER = "esri-world-imagery"
+#: The basemap a satellite map's ground is taken from when its block names no imagery.
+DEFAULT_PROVIDER = notes_maps.IMAGERY_PROVIDERS["esri"]
+#: The imagery a map put in a note is filed from unless the put names another: free, with its credit.
+NEW_MAP_PROVIDER = notes_maps.IMAGERY_PROVIDERS["sentinel"]
+#: What the put's imagery list calls the two a map can stream (`imagery:`), the free one first.
+IMAGERY_LABELS = {NEW_MAP_PROVIDER: "Sentinel-2 · free", DEFAULT_PROVIDER: "Esri · sharper"}
 #: The closest a view filed from the Draw tab is framed at (the map engine's zoom): past it the
 #: imagery holds no sharper tile, so the picture filed covers more than the view, at its best.
 VIEW_MOST = 18.0
@@ -50,7 +58,21 @@ class MapIn(BaseModel):
     plate: str = Field(default="", max_length=120)
     #: `all`, a period `2026-09-01..2026-11-15` (either end open) or one day; "" for none.
     proofs: str = Field(default="", max_length=40)
-    provider: str = Field(default=DEFAULT_PROVIDER, max_length=200)
+    provider: str = Field(default=NEW_MAP_PROVIDER, max_length=200)
+
+
+def imagery_of(provider_id: str) -> str:
+    """The `imagery:` word a basemap is filed as: `sentinel` for any year of EOX's cloudless,
+    `esri` for World Imagery, "" for another, whose ground is drawn as filed."""
+    if provider_id.partition(cloudless.VARIANT_SEP)[0] == cloudless.BASE_ID:
+        return "sentinel"
+    return "esri" if provider_id == DEFAULT_PROVIDER else ""
+
+
+def provider_for(block: notes_maps.MapBlock, base: str, asked: str = "") -> str:
+    """The basemap a ground of ``block`` is filed from on ``base``: another base's own map, else the
+    imagery the block names, else the one asked, else Esri, as a block that names none always was."""
+    return BASE_PROVIDERS.get(base) or notes_maps.IMAGERY_PROVIDERS.get(block.imagery) or asked or DEFAULT_PROVIDER
 
 
 @router.get("/cases/{case_id}/notes/maps/sources")
@@ -71,11 +93,12 @@ def map_sources(case_id: str) -> dict[str, Any]:
         plates.append({"name": path.stem, "title": path.stem, "layers": len(plate["layers"]),
                        "steps": len(plate["steps"]), "days": len(plate["days"])})
     days = _proof_days(case)
-    providers = [{"id": provider.id, "label": provider.label} for provider in tiles.all_providers()
-                 if provider.capturable and not provider.widget and not provider.needs_key]
+    providers = [{"id": NEW_MAP_PROVIDER, "label": IMAGERY_LABELS[NEW_MAP_PROVIDER]}]
+    providers += [{"id": provider.id, "label": IMAGERY_LABELS.get(provider.id, provider.label)}
+                  for provider in tiles.all_providers() if provider.capturable and not provider.widget and not provider.needs_key]
     return {"layers": layers, "plates": plates,
             "proofs": {"count": len(days), "first": min(days) if days else "", "last": max(days) if days else ""},
-            "providers": providers, "provider": DEFAULT_PROVIDER}
+            "providers": providers, "provider": NEW_MAP_PROVIDER}
 
 
 def _proof_days(case: Case) -> list[str]:
@@ -99,7 +122,9 @@ def put_map(case_id: str, body: MapIn) -> dict[str, Any]:
     if notes_maps.proof_period(body.proofs) is None and body.proofs.strip():
         raise HTTPException(status_code=422, detail="Write the proofs' period as 2026-09-01..2026-11-15, or all")
     block = notes_maps.MapBlock(title=" ".join(body.title.split()), layers=list(dict.fromkeys(body.layers)),
-                                plate=body.plate.strip(), proofs=" ".join(body.proofs.split()))
+                                plate=body.plate.strip(), proofs=" ".join(body.proofs.split()),
+                                imagery=imagery_of(body.provider))
+    provider = provider_for(block, "satellite", body.provider)
     if block.empty():
         raise HTTPException(status_code=422, detail="Pick a layer, a plate or the proofs to map")
     derived = notes_maps.derive(case, block)
@@ -119,9 +144,9 @@ def put_map(case_id: str, body: MapIn) -> dict[str, Any]:
     ground, fresh = None, False
     filed: list[str] = []
     try:
-        ground, fresh = _file_ground(case_id, lat, lon, zoom, body.provider)
+        ground, fresh = _file_ground(case_id, lat, lon, zoom, provider)
         for step in _close_steps(derived.data.get("steps") or [], zoom):
-            detail, made = _file_ground(case_id, step[0], step[1], step[2], body.provider, gain=DETAIL_GAIN)
+            detail, made = _file_ground(case_id, step[0], step[1], step[2], provider, gain=DETAIL_GAIN)
             if str(detail["id"]) not in block.details:
                 block.details.append(str(detail["id"]))
                 if made:
@@ -185,22 +210,30 @@ def _file_ground(case_id: str, lat: float, lon: float, zoom: float, provider_id:
         provider = tiles.get_provider(provider_id)
     except KeyError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
+    if imagery_of(provider.id) == "sentinel":
+        # A year's cloudless mosaic is never filed as evidence: it holds no one day, so Satellite's
+        # capture route still refuses it (`Provider.capturable`). A note map's ground is not evidence
+        # but the map's background, its credit saying wherever it is shown that it is a year's mosaic,
+        # not a day (`notes_maps.ground_credit`), so this is the one place a picture is filed from it.
+        provider = replace(provider, capturable=True)
     if not provider.capturable or provider.widget:
         raise HTTPException(status_code=422, detail=f"{provider.label} cannot be the ground of a map")
     xyz = zoom + 1
     level = min(provider.max_zoom, max(1, math.ceil(xyz + math.log2(gain))))
     while True:
         gain = 2 ** (level - xyz)
-        width, height = round(FRAME_W * gain), round(FRAME_H * gain)
+        # rounded up, so the picture holds the whole frame asked: rounded down, a frame's edge fell a
+        # fraction of a pixel outside it and the card said that part had no ground
+        width, height = math.ceil(FRAME_W * gain - 1e-6), math.ceil(FRAME_H * gain - 1e-6)
         if (width <= tiles.SIZE_MAX and height <= tiles.SIZE_MAX) or level <= 1:
             break
         level -= 1
     width = max(256, min(width, tiles.SIZE_MAX))
     height = max(256, min(height, tiles.SIZE_MAX))
-    answer = satellite.capture(case_id, satellite.CaptureIn(
+    answer = satellite.file_capture(case_id, satellite.CaptureIn(
         lat=lat, lon=lon, zoom=level, width=width, height=height, provider=provider.id,
         marker_style="none", reuse=True,
-    ))
+    ), provider)
     return answer["entity"], not answer.get("reused")
 
 
@@ -283,11 +316,15 @@ def describe_map(case_id: str, body: BlockIn) -> dict[str, Any]:
     others = [{"name": row["name"], "title": row["title"], "features": row["features"]}
               for row in rows.values() if row["name"] not in {name for name, _ in named}]
     ground = None
+    imagery = block.imagery
     if block.ground and data.get("ground"):
         record = case.get_entity(block.ground) if notes_maps.ENTITY_ID.match(block.ground) else None
-        path = str(((record or {}).get("attrs") or {}).get("path") or "")
+        attrs = (record or {}).get("attrs") or {}
+        path = str(attrs.get("path") or "")
         if path:
             ground = {"id": block.ground, "path": path, "bounds": data["ground"]["bounds"]}
+        # a block that names no imagery shows the one its ground was filed from
+        imagery = imagery or imagery_of(str(attrs.get("provider") or ""))
     # its close-ups, which the Draw tab lays where they stand once the map moves closer than its ground holds
     details = []
     for entity_id in block.details:
@@ -305,7 +342,8 @@ def describe_map(case_id: str, body: BlockIn) -> dict[str, Any]:
                       "view": [center[1], center[0], view.get("zoom")] if center[0] is not None else None})
     days = _proof_days(case)
     return {
-        "title": block.title, "base": block.shown_base(), "bounds": data["bounds"], "frame": [width, height],
+        "title": block.title, "base": block.shown_base(), "imagery": imagery, "bounds": data["bounds"],
+        "frame": [width, height],
         "extent": notes_maps._features_bounds(data["features"], None) if data["features"] else None,
         "view": data["view"], "ground": ground, "details": details, "svg": notes_maps.svg(derived, ident="cm-map"),
         "layers": layers, "others": others, "drawings": drawings,
@@ -352,12 +390,17 @@ def file_ground(case_id: str, body: GroundIn) -> dict[str, Any]:
     derived = notes_maps.derive(case, block)
     if block.frame is not None:
         lat, lon, zoom = notes_maps.fit_view(list(block.frame), FRAME_W, FRAME_H, pad=0.0, most=16.0)
+    elif derived.data.get("ground"):
+        # the ground it has, filed again: its view may only say where the page opens (Draw › Open here);
+        # read as a view line writes it, so the same ground framed again is the same view, cited
+        fitted = notes_maps.fit_view(list(derived.data["ground"]["bounds"]), FRAME_W, FRAME_H, pad=0.0, most=VIEW_MOST)
+        lat, lon, zoom = round(fitted[0], 5), round(fitted[1], 5), round(fitted[2], 2)
     elif block.view is not None:
         lat, lon, zoom = block.view[:3]
     else:
         lon, lat = derived.data["view"]["center"]
         zoom = float(derived.data["view"]["zoom"])
-    provider = BASE_PROVIDERS.get(body.base, body.provider or DEFAULT_PROVIDER)
+    provider = provider_for(block, body.base, body.provider)
     filed: list[str] = []
     details: list[str] = []
     try:
@@ -408,7 +451,7 @@ def file_view(case_id: str, body: ViewIn) -> dict[str, Any]:
                                                     "Take one out in its source first.")
     lat, lon, zoom = notes_maps.fit_view([body.west, body.south, body.east, body.north], FRAME_W, FRAME_H,
                                          pad=0.0, most=VIEW_MOST)
-    provider = BASE_PROVIDERS.get(body.base, body.provider or DEFAULT_PROVIDER)
+    provider = provider_for(block, body.base, body.provider)
     try:
         detail, fresh = _file_ground(case_id, lat, lon, zoom, provider)
     except HTTPException as exc:
@@ -457,8 +500,10 @@ def start_map(case_id: str, body: ScratchIn) -> dict[str, Any]:
                                                     "Start the map again once online.") from exc
     row = own_layer(case, title)
     entity = case.find_entity(attr="spec", value=layout.layer_spec_rel(row["name"]))
+    # the imagery the place was framed on, which the map's card then shows chosen
     block = notes_maps.MapBlock(title=title, layers=[row["name"]], ground=str(ground["id"]), view=(lat, lon, zoom, 0.0),
-                                base="" if body.base == "satellite" else body.base)
+                                base="" if body.base == "satellite" else body.base,
+                                imagery=imagery_of(provider) if body.base == "satellite" else "")
     filed = ([str(ground["id"])] if fresh else []) + ([str(entity["id"])] if entity else [])
     return {"text": notes_maps.block_text(block), "filed": filed, "layer": row["name"], "ground": ground,
             "warnings": []}

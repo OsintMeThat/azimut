@@ -34,6 +34,11 @@ one more line, and a block without them reads and draws as it always did:
   ``dark``. Each other base is a ground of its own, filed once on the press that picks it
   (OpenStreetMap, OpenTopoMap, and OpenStreetMap again drawn dark), so the page still
   fetches nothing; a live map draws ``map`` and ``dark`` from OpenFreeMap's own styles.
+- ``imagery``: ``sentinel`` (EOX's Sentinel-2 cloudless, its newest year, free with its
+  credit) or ``esri`` (Esri World Imagery, sharper, under Esri's terms), where a satellite
+  map's ground is filed from; a web folder's live map streams it in the reader's browser.
+  Left out, the ground is filed from Esri and the live map draws it as filed. A map put
+  in a note takes ``sentinel`` unless the put names Esri.
 - ``hide`` takes a layer the map names (by a line or its plate) off it, one a line;
   ``colour: Front line = #d55e00`` paints every feature of a layer in one colour.
 - ``proof points``: ``filmed`` shows a proof only where it was filmed from, ``every``
@@ -44,7 +49,8 @@ one more line, and a block without them reads and draws as it always did:
 - ``north: on`` draws a north arrow; ``scale: off`` takes the scale away, ``scale: on``
   also prints it on the PDF's picture.
 - ``frame: west, south, east, north`` is the part of the world the map shows, by default
-  its ground's.
+  its ground's; ``bounds: ground`` keeps a live map's reader inside it. A ``view`` closer
+  than the frame (Draw › *Open here*) is where the page opens the map.
 - ``timeline: off`` hides the days' slider; ``opens on`` is the day the map opens on
   (its last by default); ``speed`` is Play's pace, ``slow``, ``normal`` or ``fast``.
 - ``step: day | label | lat, lon, zoom | proof | words``, one a line, are the map's own
@@ -93,7 +99,7 @@ from typing import TYPE_CHECKING, Any, Callable, Iterable, Iterator, Mapping
 from PIL import Image, ImageDraw, ImageEnhance, ImageFont, ImageOps
 
 from .. import layout
-from . import notesources
+from . import cloudless, notesources, tiles
 
 if TYPE_CHECKING:
     from ..workspace import Case
@@ -103,10 +109,16 @@ BLOCK = "map"
 TOKEN = "az_map"
 #: The keys a block reads; anything else is said by the check.
 KEYS = ("title", "layer", "layers", "plate", "proofs", "ground", "detail", "view",
-        "base", "hide", "colour", "proof points", "labels", "crowds", "north", "scale", "frame",
-        "timeline", "opens on", "speed", "step", "card", "size", "legend")
+        "base", "imagery", "hide", "colour", "proof points", "labels", "crowds", "north", "scale", "frame",
+        "bounds", "timeline", "opens on", "speed", "step", "card", "size", "legend")
 #: The bases a map is drawn on, the first the default.
 BASES = ("satellite", "map", "topographic", "dark")
+#: The imagery a satellite map's ground is filed from (`imagery:`), by its word: EOX's newest
+#: Sentinel-2 cloudless year, or Esri World Imagery. A block that names none is filed from Esri.
+IMAGERY_PROVIDERS = {"sentinel": cloudless.variant_id(cloudless.NEWEST), "esri": "esri-world-imagery"}
+#: What the check before a public export says of a map on Esri imagery, word for word as the
+#: map's card says it (`ESRI_TERMS` in `editor/mapText.js`). It never stops the export.
+ESRI_TERMS = "Esri’s terms limit reuse, so publishing it is your responsibility."
 #: What a feature's card may show, in its order.
 CARD_PARTS = ("picture", "sentence", "source", "verify")
 SIZES = ("half", "wide", "full")
@@ -186,6 +198,8 @@ class MapBlock:
     view: tuple[float, float, float, float] | None = None
     # -- how it is shown, each "" (or empty) for the default --
     base: str = ""
+    #: ``sentinel`` or ``esri`` (`IMAGERY_PROVIDERS`), "" for the ground as filed.
+    imagery: str = ""
     hidden: list[str] = field(default_factory=list)
     #: A layer's one colour, by its name.
     colours: dict[str, str] = field(default_factory=dict)
@@ -197,6 +211,8 @@ class MapBlock:
     scale: str = ""
     #: ``(west, south, east, north)``.
     frame: tuple[float, float, float, float] | None = None
+    #: ``ground``: a live map's reader is kept inside the map's frame.
+    bounds: str = ""
     timeline: str = ""
     opens_on: str = ""
     speed: str = ""
@@ -245,13 +261,14 @@ def proof_period(written: str) -> tuple[str, str] | None:
 
 #: The words each one-word setting takes, by its key.
 CHOICES: dict[str, tuple[str, ...]] = {
-    "base": BASES, "proof points": ("filmed", "every"), "labels": ("on", "off"), "north": ("on", "off"),
-    "scale": ("on", "off"), "timeline": ("on", "off"), "speed": tuple(SPEEDS), "size": SIZES, "legend": LEGENDS,
+    "base": BASES, "imagery": tuple(IMAGERY_PROVIDERS), "proof points": ("filmed", "every"), "labels": ("on", "off"),
+    "north": ("on", "off"), "scale": ("on", "off"), "bounds": ("ground",), "timeline": ("on", "off"),
+    "speed": tuple(SPEEDS), "size": SIZES, "legend": LEGENDS,
 }
 #: Where each setting of a block reads, as the attribute it fills.
-FIELDS = {"base": "base", "proof points": "proof_points", "labels": "labels", "north": "north", "scale": "scale",
-          "timeline": "timeline", "speed": "speed", "size": "size", "legend": "legend", "crowds": "crowds",
-          "opens on": "opens_on"}
+FIELDS = {"base": "base", "imagery": "imagery", "proof points": "proof_points", "labels": "labels", "north": "north",
+          "scale": "scale", "bounds": "bounds", "timeline": "timeline", "speed": "speed", "size": "size",
+          "legend": "legend", "crowds": "crowds", "opens on": "opens_on"}
 
 
 def parse_block(body: str) -> MapBlock:
@@ -453,6 +470,8 @@ def settings_lines(block: MapBlock) -> list[str]:
     lines: list[str] = []
     if block.base and block.base != BASES[0]:
         lines.append(f"base: {block.base}")
+    if block.imagery:
+        lines.append(f"imagery: {block.imagery}")
     lines.extend(f"hide: {name}" for name in block.hidden)
     lines.extend(f"colour: {name} = {colour}" for name, colour in block.colours.items())
     for key in ("proof points", "labels", "crowds"):
@@ -464,6 +483,8 @@ def settings_lines(block: MapBlock) -> list[str]:
         lines.append(f"scale: {block.scale}")
     if block.frame is not None:
         lines.append("frame: " + ", ".join(f"{value:.5f}" for value in block.frame))
+    if block.bounds:
+        lines.append(f"bounds: {block.bounds}")
     for key in ("timeline", "opens on", "speed"):
         if getattr(block, FIELDS[key]):
             lines.append(f"{key}: {getattr(block, FIELDS[key])}")
@@ -752,6 +773,12 @@ def derive(
         "credits": credits,
     }
     data.update(_shown(block))
+    streamed = live_imagery(block)
+    if streamed is not None:
+        data["imagery"] = streamed
+    opens = _opening(block.view, bounds)
+    if opens is not None:
+        data["opens"] = opens
     out.display = {key: value for key, value in (("size", block.size), ("legend", block.legend)) if value}
     out.data = data
     out.weight += len(json.dumps(data, separators=(",", ":"), ensure_ascii=False)) - (len(ground["src"]) if ground else 0)
@@ -773,11 +800,47 @@ def _shown(block: MapBlock) -> dict[str, Any]:
         shown["north"] = True
     if block.scale:
         shown["scale"] = block.scale
+    if block.bounds == "ground":
+        shown["inside"] = True
     if block.timeline == "off":
         shown["timeline"] = False
     if block.speed and block.speed != "normal":
         shown["speed"] = SPEEDS[block.speed]
     return shown
+
+
+def live_imagery(block: MapBlock) -> dict[str, Any] | None:
+    """The imagery a web folder's live map streams in the reader's browser for a satellite map
+    that names one (`imagery:`): its tiles, the level its own pixels stop at, its credit and
+    where the credit links; None keeps the ground as filed. Azimut fetches none of it."""
+    if not block.imagery or block.shown_base() != BASES[0]:
+        return None
+    provider = tiles.get_provider(IMAGERY_PROVIDERS[block.imagery])
+    if block.imagery == "sentinel":
+        return {"tiles": provider.url, "native": cloudless.MAX_NATIVE_ZOOM, "name": f"Sentinel-2, {cloudless.MOSAIC}",
+                "credit": f"Imagery: {provider.attribution}, {cloudless.MOSAIC}", "link": cloudless.SITE}
+    return {"tiles": provider.url, "native": provider.max_zoom, "name": provider.label,
+            "credit": f"Imagery: {provider.attribution}"}
+
+
+#: Where a view frames the world (`view:`), as the card's Draw tab and a put measure it.
+VIEW_FRAME = (1200.0, 750.0)
+
+
+def _opening(view: tuple[float, float, float, float] | None, bounds: list[float]) -> list[float] | None:
+    """Where the page opens the map: the part of its frame its ``view`` shows (Draw › *Open
+    here*), or None for the whole map, which a view that frames all of it, as a put writes
+    it, always is."""
+    if view is None:
+        return None
+    west, south, east, north = bounds_of_view(view[0], view[1], view[2], *VIEW_FRAME)
+    west, south = max(west, bounds[0]), max(south, bounds[1])
+    east, north = min(east, bounds[2]), min(north, bounds[3])
+    if east <= west or north <= south:
+        return None
+    if east - west > (bounds[2] - bounds[0]) * 0.9 and north - south > (bounds[3] - bounds[1]) * 0.9:
+        return None
+    return [_round(value) for value in (west, south, east, north)]
 
 
 def _own_steps(written: list[Step], out: Derived) -> list[dict[str, Any]]:
@@ -1524,6 +1587,8 @@ def ground_bounds(sidecar: Mapping[str, Any]) -> list[float] | None:
 
 def ground_credit(sidecar: Mapping[str, Any]) -> str:
     words = " ".join(str(sidecar.get("attribution") or sidecar.get("provider_label") or "").split())
+    if words and str(sidecar.get("provider") or "").partition(cloudless.VARIANT_SEP)[0] == cloudless.BASE_ID:
+        words = f"{words}, {cloudless.MOSAIC}"
     day = str(sidecar.get("imagery_date") or "")
     if day and DAY.match(day[:10]):
         spoken = notesources.spoken_day(day[:10] + ("~" if sidecar.get("imagery_exact") is False else ""))

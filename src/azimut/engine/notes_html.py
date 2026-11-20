@@ -288,6 +288,9 @@ class LiveMaps:
     #: The reader's own part for it, and its style, beside the reader's.
     module: str = "reader.live.js"
     sheet: str = "reader.live.css"
+    #: The policy of a page whose maps also stream their imagery from these hosts
+    #: (`notes_web.live_csp`, which lets in only the imagery's own); None keeps `csp`.
+    streaming: Callable[[Iterable[str]], str] | None = None
 
 
 @dataclass(frozen=True)
@@ -544,6 +547,8 @@ class _Page:
         #: and whether one is drawn on a dark base, which a live map draws in its dark style.
         self.mapset = False
         self.dark_maps = False
+        #: The hosts its maps stream their imagery from once live (`notes_maps.live_imagery`).
+        self.streamed: set[str] = set()
         #: Whether its maps go live online: a folder's, holding one, given what it takes.
         self.live = False
         #: Each map's steps, `(label, day)`, by its figure's id: the cards a story gives it.
@@ -674,6 +679,8 @@ class _Page:
         else:
             # the reader's two files beside the page, which its policy lets in from the folder only
             policy = self.folder.csp if live is None else live.csp
+            if live is not None and live.streaming is not None and self.streamed:
+                policy = live.streaming(sorted(self.streamed))
             said = self.folder.head(self.description) if self.folder.head is not None else ""
             sheet = self.folder.put(self._folder_css(reader_css), "reader", ".css")
             styles = f'<link rel="stylesheet" id="az-reader" href="{sheet}">\n'
@@ -2010,6 +2017,11 @@ class _Page:
         for message, kind, offset in derived.warnings:
             line = self._line if self._fixed or offset is None else self._line + offset
             self._warn(message, line, kind if kind in WARNING_KINDS else md.OTHER)
+        if self.public and block.imagery == "esri" and block.shown_base() == notes_maps.BASES[0]:
+            # said once a map, never in the way: a page put online carries Esri's pictures
+            offset = block.where.get("imagery")
+            line = self._line if self._fixed or offset is None else self._line + offset
+            self._warn(f'The map "{md.cut_text(block.title or "Map", 60)}": {notes_maps.ESRI_TERMS}', line, md.OTHER)
         self.pov.extend((said, self._line) for said in derived.pov)
         self._map_steps[ident] = [(str(step.get("label") or ""), str(step.get("day") or ""), str(step.get("text") or ""),
                                    str(step.get("name") or "")) for step in derived.data.get("steps") or []]
@@ -2017,6 +2029,9 @@ class _Page:
         figure = _map_figure(derived, ident, self._caption(block.title, "Map"))
         self.mapset = self.mapset or _map_set(derived)
         self.dark_maps = self.dark_maps or derived.data.get("base") == "dark"
+        streamed = urlsplit(str((derived.data.get("imagery") or {}).get("tiles") or ""))
+        if streamed.scheme == "https" and streamed.netloc:
+            self.streamed.add(f"https://{streamed.netloc}")
         return figure if self.folder is None else self._lift_data(figure, ident)
 
     # -- charts -----------------------------------------------------------------------

@@ -122,6 +122,21 @@ def test_only_a_page_with_a_live_map_widens_its_policy_and_only_to_openfreemap(c
     assert notes_web.LIVE_LICENSE not in built.files and b'id="az-gl"' not in built.files["index.html"]
 
 
+def test_a_live_map_that_streams_its_imagery_widens_the_policy_to_that_host_alone(client, vendor):
+    _, case, note = _map_note(client)
+    for imagery, host in (("sentinel", "https://tiles.maps.eox.at"), ("esri", "https://services.arcgisonline.com")):
+        streamed = case.create_note(f"Streams {imagery}", "", content="# Front\n\n::: map\ntitle: The line\nlayer: "
+                                    f"{_tracked_line(case, title=f'Line {imagery}')}\nimagery: {imagery}\n:::\n")["id"]
+        page = notes_web.build(case, streamed).files["index.html"]
+        policy = _policy(page)
+        assert policy == notes_web.live_csp([host])
+        assert set(re.findall(r"https://[\w.-]+", policy)) == {notes_web.LIVE_HOST, host}
+        assert f"connect-src 'self' {notes_web.LIVE_HOST} {host}" in policy and f"img-src 'self' {notes_web.LIVE_HOST} {host}" in policy
+    # a host the imagery list does not hold is never let in, and a map that streams none widens nothing
+    assert notes_web.live_csp(["https://tiles.example.org"]) == notes_web.folder_csp(notes_web.LIVE_SOURCES)
+    assert _policy(notes_web.build(case, note).files["index.html"]) == LIVE_POLICY
+
+
 def test_maps_kept_offline_are_the_html_reports_and_reach_nothing(client, vendor):
     _, case, note = _map_note(client)
     built = notes_web.build(case, note, live=False)

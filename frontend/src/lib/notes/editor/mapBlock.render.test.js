@@ -41,6 +41,7 @@ vi.mock('../../api.js', async (original) => {
 const { focusedState, noteExtensions, setNoteCase } = await import('../liveMarkdown.js');
 const { projection } = await import('./mapSurface.js');
 const { forgetMaps } = await import('../mapSettings.svelte.js');
+const { ESRI_TERMS, fitView, viewText } = await import('./mapText.js');
 
 const BLOCK = [
   '::: map', 'title: The front', 'layer: Front line', 'layer: Vehicles', 'proofs: 2026-10-19..2026-11-02', 'ground: e_g1',
@@ -163,6 +164,72 @@ describe('each choice is one line and one Undo step', () => {
     expect(server.asked.find((one) => one.path.endsWith('/ground')).body).toEqual({ text: BLOCK, base: 'map' });
     expect(lines()).toEqual(['::: map', 'title: The front', 'layer: Front line', 'layer: Vehicles', 'proofs: 2026-10-19..2026-11-02',
       'ground: e_osm', 'detail: e_osm2', 'view: 12.73976, 43.51350, 12.05', 'base: map', ':::']);
+    undo(view);
+    expect(block()).toBe(BLOCK);
+  });
+
+  it('files the imagery picked on its press, then writes it with its ground as one step', async () => {
+    server.ground = () => ({ ground: 'e_s2', details: [], view: '12.73976, 43.51350, 12.05', filed: ['e_s2'], base: '' });
+    await opened();
+    expect(named('Imagery').querySelector('[aria-checked="true"]')).toBeNull();
+    expect(radio('Imagery', 'Sentinel-2 · free').title).toContain('free with its credit');
+    press(radio('Imagery', 'Sentinel-2 · free'));
+    await settle();
+    expect(server.asked.find((one) => one.path.endsWith('/ground')).body).toEqual({ text: BLOCK.replace('\n:::', '\nimagery: sentinel\n:::'), base: 'satellite' });
+    expect(lines()).toEqual(['::: map', 'title: The front', 'layer: Front line', 'layer: Vehicles', 'proofs: 2026-10-19..2026-11-02',
+      'ground: e_s2', 'view: 12.73976, 43.51350, 12.05', 'imagery: sentinel', ':::']);
+    expect(radio('Imagery', 'Sentinel-2 · free').getAttribute('aria-checked')).toBe('true');
+    expect(panel().textContent).not.toContain(ESRI_TERMS);
+    undo(view);
+    expect(block()).toBe(BLOCK);
+  });
+
+  it('says Esri’s terms once Esri is picked, in one line under the choice, and never on a card opened later', async () => {
+    server.ground = () => ({ ground: 'e_esri', details: [], view: '12.73976, 43.51350, 12.05', filed: [], base: '' });
+    await opened();
+    press(radio('Imagery', 'Esri · sharper'));
+    await settle();
+    expect(lines()).toContain('imagery: esri');
+    const said = () => [...named('Imagery').closest('.cm-map-field').querySelectorAll('.cm-map-note')].filter((node) => node.textContent === ESRI_TERMS);
+    expect(said()).toHaveLength(1);
+    press(radio('Size', 'Half'));
+    await settle();
+    expect(said()).toHaveLength(1);
+    // the card closed and opened again: picked before, Esri says nothing more
+    press(map().querySelector('.cm-map-settings-btn'));
+    press(map().querySelector('.cm-map-settings-btn'));
+    await settle();
+    expect(radio('Imagery', 'Esri · sharper').getAttribute('aria-checked')).toBe('true');
+    expect(said()).toHaveLength(0);
+    expect(document.querySelector('[role="dialog"]')).toBeNull();
+  });
+
+  it('shows the imagery a map that names none was filed from, says Sentinel-2 blurs close in, and only under Satellite', async () => {
+    server.described = () => ({ ...DESCRIBED, imagery: 'sentinel', bounds: [43.49, 12.74, 43.51, 12.75] });
+    await opened();
+    expect(radio('Imagery', 'Sentinel-2 · free').getAttribute('aria-checked')).toBe('true');
+    expect(named('Imagery').closest('.cm-map-field').textContent).toContain('Sentinel-2 is 10 m: details this close will blur.');
+    server.described = () => ({ ...DESCRIBED, imagery: 'esri' });
+    forgetMaps();
+    view.destroy();
+    await opened();
+    expect(radio('Imagery', 'Esri · sharper').getAttribute('aria-checked')).toBe('true');
+    expect(named('Imagery').closest('.cm-map-field').querySelector('.cm-map-note')).toBeNull();
+    view.destroy();
+    editor(NOTE.replace(BLOCK, BLOCK.replace('\n:::', '\nbase: map\n:::')));
+    await settle();
+    press(map().querySelector('.cm-map-settings-btn'));
+    await settle();
+    expect(named('Imagery')).toBeNull();
+  });
+
+  it('keeps a live map’s readers inside its frame on a tick, one line', async () => {
+    await opened();
+    const keep = named('Keep readers inside the frame');
+    expect(keep.closest('label').textContent).toBe('Keep readers inside');
+    keep.checked = true;
+    keep.dispatchEvent(new Event('change', { bubbles: true }));
+    expect(lines().slice(-2)).toEqual(['bounds: ground', ':::']);
     undo(view);
     expect(block()).toBe(BLOCK);
   });
@@ -491,6 +558,27 @@ describe('moving the map in Draw', () => {
     expect(lines()).toEqual(['::: map', 'title: The front', 'layer: Front line', 'layer: Vehicles', 'proofs: 2026-10-19..2026-11-02',
       'ground: e_g1', 'detail: e_view1', 'view: 12.73976, 43.51350, 12.05', ':::']);
     expect(handlers.tableToast).toHaveBeenCalledWith('Ground filed for this view', [], undefined);
+    undo(view);
+    expect(block()).toBe(BLOCK);
+  });
+
+  it('opens the page’s map on the view it shows, written as its view line, one Undo step', async () => {
+    await opened('Draw');
+    const over = overlay();
+    expect(map().querySelector('.cm-map-open-here')).toBeNull();
+    for (let turn = 0; turn < 6; turn += 1) wheel(over, 400, 250, -100);
+    const open = map().querySelector('.cm-map-open-here');
+    expect(open.textContent).toBe('Open here');
+    press(open);
+    const [x, y, width, height] = viewBox().split(' ').map(Number);
+    const [west, north] = lonLat([x, y]);
+    const [east, south] = lonLat([x + width, y + height]);
+    const written = lines().find((line) => line.startsWith('view: '));
+    expect(written).toBe(`view: ${viewText(fitView([west, south, east, north]))}`);
+    expect(written).not.toBe('view: 12.73976, 43.51350, 12.05');
+    expect(lines().filter((line) => line.startsWith('view: '))).toHaveLength(1);
+    expect(server.asked.some((one) => one.path.endsWith('/ground') || one.path.endsWith('/detail'))).toBe(false);
+    expect(handlers.tableToast).toHaveBeenCalledWith('The page opens the map here', [], undefined);
     undo(view);
     expect(block()).toBe(BLOCK);
   });

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
-  aboutArea, areaKm2, fitView, frameOf, readMap, stepOf, stepText, viewBounds, withMapSettings,
+  aboutArea, areaKm2, fitView, frameOf, readMap, stepOf, stepText, viewBounds, viewText, withMapSettings,
 } from './mapText.js';
 
 /**
@@ -64,6 +64,16 @@ describe('a setting written', () => {
     // a line before the view goes before it, the steps last
     expect(withMapSettings(source, { ground: 'e_g1', step: [' | Quay'] }).split('\n').slice(-5))
       .toEqual(['layer: B', 'ground: e_g1', 'view: 1, 2, 3', 'step: | Quay', ':::']);
+  });
+
+  it('writes the imagery after the base and the bounds after the frame, as the engine does, and a view as its line does', () => {
+    const framed = withMapSettings(OLD, { frame: '43.40000, 12.60000, 43.60000, 12.80000', north: 'on', base: 'map' });
+    const both = withMapSettings(framed, { bounds: 'ground', imagery: 'Sentinel' });
+    expect(both.split('\n').slice(-7)).toEqual(['view: 12.73976, 43.51350, 12.05', 'base: map', 'imagery: Sentinel', 'north: on',
+      'frame: 43.40000, 12.60000, 43.60000, 12.80000', 'bounds: ground', ':::']);
+    expect(readMap(both)).toMatchObject({ imagery: 'sentinel', bounds: 'ground' });
+    expect(readMap(OLD)).toMatchObject({ imagery: '', bounds: '' });
+    expect(viewText([12.7, 43.5, 14.4123])).toBe('12.70000, 43.50000, 14.41');
   });
 
   it('leaves a source that is no map block as it is', () => {

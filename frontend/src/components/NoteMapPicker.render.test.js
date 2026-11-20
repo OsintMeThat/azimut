@@ -71,6 +71,21 @@ describe('the map picker', () => {
     expect(onput).toHaveBeenCalledWith({ title: 'Where they were left', plate: 'Losses', proofs: '2026-10-18..2026-11-15', provider: 'esri-world-imagery' });
   });
 
+  it('puts a map on Sentinel-2 unless another is picked, and says Esri’s terms under Esri', async () => {
+    const providers = [{ id: 's2cloudless~2025', label: 'Sentinel-2 · free' }, { id: 'esri-world-imagery', label: 'Esri · sharper' }];
+    const { onput } = await open({ ...SOURCES, providers, provider: 's2cloudless~2025' });
+    expect([...document.querySelectorAll('.field select option')].map((node) => node.textContent)).toEqual(['Sentinel-2 · free', 'Esri · sharper']);
+    expect(document.querySelector('.map-picker .said').textContent).toBe('The ground is fetched once, now, and kept in the case.');
+    check(rows()[0].querySelector('input'));
+    button('Put the map').click();
+    expect(onput).toHaveBeenCalledWith({ title: 'Front, north', layers: ['Front, north'], provider: 's2cloudless~2025' });
+    unmount(app);
+    app = null;
+    target.remove();
+    await open({ ...SOURCES, providers, provider: 'esri-world-imagery' });
+    expect(document.querySelector('.map-picker .said').textContent).toBe('Esri’s terms limit reuse, so publishing it is your responsibility.');
+  });
+
   it('offers no plate a case does not hold, and no proofs it has not dated', async () => {
     await open({ ...SOURCES, plates: [], proofs: { count: 0, first: '', last: '' } });
     expect(button('A Map plate').disabled).toBe(true);

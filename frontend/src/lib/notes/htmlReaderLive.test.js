@@ -281,6 +281,57 @@ describe('a map in a web folder, read online', () => {
     expect(figure.querySelector('.az-gl-credit').textContent).toBe('OpenFreeMap · © OpenMapTiles · Data from OpenStreetMap');
   });
 
+  /** The fixture's map, its data changed by `change`, made live. */
+  async function liveWith(change) {
+    const doc = await report();
+    const figure = doc.querySelector('figure.az-map');
+    const script = figure.querySelector('script.az-map-data');
+    script.textContent = JSON.stringify(change(JSON.parse(script.textContent)));
+    const { library, made } = fakeMapLibre();
+    const [mounted] = await start([figure], SAID, { maplibre: library, now: true });
+    return { figure, controls: await mounted, map: made[0] };
+  }
+  const SENTINEL = {
+    tiles: 'https://tiles.maps.eox.at/wmts/1.0.0/s2cloudless-2025_3857/default/GoogleMapsCompatible/{z}/{y}/{x}.jpg', native: 14,
+    name: 'Sentinel-2, a year’s mosaic, not a day', link: 'https://cloudless.eox.at',
+    credit: 'Imagery: EOxCloudless https://cloudless.eox.at by EOX IT Services GmbH (Contains modified Copernicus Sentinel data 2025) · CC BY-NC-SA 4.0, non-commercial use, a year’s mosaic, not a day',
+  };
+
+  it('streams the imagery its block names under its marks in place of the ground filed, credited and linked while it shows', async () => {
+    const { figure, controls, map } = await liveWith((data) => ({ ...data, imagery: SENTINEL }));
+    expect(controls).not.toBeNull();
+    expect(map.sources['az-imagery']).toEqual({ type: 'raster', tiles: [SENTINEL.tiles], tileSize: 256, maxzoom: 14 });
+    expect(map.sources['az-ground']).toBeUndefined();
+    const imagery = map.layers.find((layer) => layer.id === 'az-imagery');
+    expect([imagery.before, imagery.layout.visibility]).toEqual(['place-names', 'visible']);
+    expect(map.layers.findIndex((layer) => layer.id === 'az-imagery')).toBeLessThan(map.layers.findIndex((layer) => layer.id === 'az-points'));
+    const [plain, satellite] = figure.querySelectorAll('.az-gl-base button');
+    expect([satellite.textContent, satellite.title]).toEqual(['Satellite', SENTINEL.name]);
+    const credit = figure.querySelector('.az-gl-credit .az-gl-imagery');
+    expect([credit.tagName, credit.getAttribute('href'), credit.textContent]).toEqual(['A', 'https://cloudless.eox.at', SENTINEL.credit]);
+    plain.dispatchEvent(new window.MouseEvent('click', { bubbles: true }));
+    expect(map.layout['az-imagery.visibility']).toBe('none');
+    expect(figure.querySelector('.az-gl-imagery')).toBeNull();
+  });
+
+  it('streams its imagery with no ground filed, and keeps the ground as filed when its block names none', async () => {
+    const streamed = await liveWith((data) => ({ ...data, ground: null, imagery: { ...SENTINEL, link: 'javascript:alert(1)' } }));
+    expect(streamed.map.sources['az-imagery']).toBeTruthy();
+    expect(streamed.figure.querySelector('.az-gl-base')).not.toBeNull();
+    expect(streamed.figure.querySelector('.az-gl-imagery').tagName).toBe('SPAN');
+    await window.happyDOM.close();
+    const filed = await liveWith((data) => data);
+    expect(filed.map.sources['az-imagery']).toBeUndefined();
+    expect(filed.map.sources['az-ground'].type).toBe('image');
+    expect(filed.map.options.maxBounds).toBeUndefined();
+  });
+
+  it('keeps its reader inside its frame when its block says so, and opens where its block opens it', async () => {
+    const { map } = await liveWith((data) => ({ ...data, inside: true, opens: [43.45, 12.7, 43.52, 12.75] }));
+    expect(map.options.maxBounds).toEqual([[43.4, 12.68], [43.6, 12.82]]);
+    expect(map.options.bounds).toEqual([43.45, 12.7, 43.52, 12.75]);
+  });
+
   it('with motion turned down, jumps rather than flies and lights nothing', async () => {
     const { doc, map } = await live({ reduced: true });
     doc.querySelectorAll('.az-map-steps button')[1].dispatchEvent(new window.MouseEvent('click', { bubbles: true }));

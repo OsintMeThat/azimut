@@ -1668,11 +1668,19 @@ def _attached(case: Case, answer: dict[str, Any]) -> dict[str, Any]:
 
 @router.post("/cases/{case_id}/satellite/capture")
 def capture(case_id: str, body: CaptureIn) -> dict[str, Any]:
-    case = get_case(case_id)
+    get_case(case_id)
     try:
         provider = tiles.get_provider(body.provider)
     except KeyError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
+    return file_capture(case_id, body, provider)
+
+
+def file_capture(case_id: str, body: CaptureIn, provider: tiles.Provider) -> dict[str, Any]:
+    """A capture of ``body``'s view filed from ``provider``, resolved by the caller: the route's,
+    or a note map's ground (`api/notemaps._file_ground`), the one caller that may file a picture
+    from a basemap no capture is otherwise taken from."""
+    case = get_case(case_id)
 
     # Everything that decides the pixels: the same key is the same picture.
     key = snapshots.view_key(

@@ -19,6 +19,7 @@ function described(text) {
   const own = /layer: Drawn on the quay/.test(text);
   return {
     title: own ? 'Drawn on the quay' : 'The front', base: /base: map/.test(text) ? 'map' : 'satellite',
+    imagery: /imagery: (\w+)/.exec(text)?.[1] ?? '',
     bounds: [43.4, 12.68, 43.6, 12.8], frame: [1600, 1000], extent: [43.45, 12.69, 43.57, 12.79],
     view: { center: [43.5, 12.74], zoom: 12, bearing: 0 },
     ground: { id: 'e_g1', path: 'media/ground.png', bounds: [43.4, 12.68, 43.6, 12.8] }, svg: SVG,
@@ -57,7 +58,9 @@ async function notebook(page, start = '# Lead\n\nSeen at the quay.\n') {
     if (path === '/maps/describe') return route.fulfill({ json: described(request.postDataJSON().text) });
     if (path === '/maps/ground') {
       state.grounds.push(request.postDataJSON());
-      return route.fulfill({ json: { ground: 'e_osm', details: [], view: '12.73976, 43.51350, 12.05', filed: ['e_osm'], base: 'map' } });
+      // a satellite ground is filed from the imagery the block names; another base, from its own map
+      const satellite = request.postDataJSON().base === 'satellite';
+      return route.fulfill({ json: { ground: satellite ? 'e_s2' : 'e_osm', details: [], view: '12.73976, 43.51350, 12.05', filed: [satellite ? 'e_s2' : 'e_osm'], base: satellite ? '' : 'map' } });
     }
     if (path === '/maps/layer') {
       state.layers.push(request.postDataJSON());
@@ -132,6 +135,30 @@ test('a map’s settings change its base and its timeline, each one line, and an
   expect(state.features[0].coords).toHaveLength(4);
   await expect.poll(() => blockOf(state.written.at(-1) ?? '')).toContain('layer: The front, drawn');
   await expect(page.getByText('Area highlighted in the layer of this map')).toBeVisible();
+});
+
+test('a map’s imagery: Sentinel-2 files its ground and writes its line, Esri says its terms once, never in a dialog', async ({ page, browserName }) => {
+  test.skip(browserName !== 'chromium', 'one browser is enough for the card');
+  const state = await notebook(page, `# Lead\n\nSeen at the quay.\n\n${BLOCK}\n\nAfter.\n`);
+  await page.goto('/#notebook');
+  await page.locator('button[title="Open Lead"]').click();
+  const map = page.locator('.cm-map-block');
+  await expect(map.locator('.cm-map-drawing svg')).toBeVisible();
+  await map.getByRole('button', { name: 'Settings' }).click();
+  const settings = map.getByRole('group', { name: 'Map settings' }).first();
+  const imagery = settings.getByRole('radiogroup', { name: 'Imagery' });
+  await expect(imagery.getByRole('radio')).toHaveText(['Sentinel-2 · free', 'Esri · sharper']);
+
+  await imagery.getByRole('radio', { name: 'Sentinel-2 · free' }).click();
+  await expect(imagery.getByRole('radio', { name: 'Sentinel-2 · free' })).toHaveAttribute('aria-checked', 'true');
+  expect(state.grounds).toEqual([{ text: BLOCK.replace('\n:::', '\nimagery: sentinel\n:::'), base: 'satellite' }]);
+  await expect.poll(() => blockOf(state.written.at(-1) ?? '')).toBe(BLOCK.replace('ground: e_g1', 'ground: e_s2').replace('\n:::', '\nimagery: sentinel\n:::'));
+  await expect(settings.getByText('Esri’s terms limit reuse, so publishing it is your responsibility.')).toHaveCount(0);
+
+  await imagery.getByRole('radio', { name: 'Esri · sharper' }).click();
+  await expect.poll(() => blockOf(state.written.at(-1) ?? '')).toContain('imagery: esri');
+  await expect(settings.getByText('Esri’s terms limit reuse, so publishing it is your responsibility.')).toHaveCount(1);
+  await expect(page.getByRole('dialog')).toHaveCount(0);
 });
 
 test('a map from nothing frames a place, lands in the note on its Draw tab, and takes a point', async ({ page, browserName }) => {
