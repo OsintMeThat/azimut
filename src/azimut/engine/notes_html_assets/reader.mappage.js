@@ -126,21 +126,24 @@
         : feature.at || (feature.kind === 'line' ? feature.coords?.[0]?.[Math.floor((feature.coords[0].length - 1) / 2)] : feature.coords?.[0]?.[0]?.[0]);
       if (coords) map.fly({ center: coords, zoom: Math.max(at.zoom, 14) });
       map.open(feature.id);
-      sheet(false);
+      if (!beside()) sheet(false);
     }
 
-    /* on a phone the panel is a sheet over the map, behind a button in the header */
+    /* the panel behind a button in the header: a column beside the map that folds away on a wider screen,
+       open from the start only where the map keeps room beside it; a sheet over the map on a phone */
+    const beside = () => query('(min-width: 48rem)').matches;
     const menu = make('button', { type: 'button', class: 'az-mappage-menu', 'aria-controls': panel.id, 'aria-expanded': 'false' }, 'Layers');
     page.querySelector('.az-mappage-head')?.append(menu);
-    function sheet(on) {
+    function sheet(on, { focus = true } = {}) {
       page.classList.toggle('az-mappage-open', on);
       menu.setAttribute('aria-expanded', String(on));
-      if (on) field.focus({ preventScroll: true });
+      if (on && focus) field.focus({ preventScroll: true });
     }
+    sheet(query('(min-width: 64rem)').matches, { focus: false });
     menu.addEventListener('click', () => sheet(!page.classList.contains('az-mappage-open')));
     shut.addEventListener('click', () => { sheet(false); menu.focus({ preventScroll: true }); });
     panel.addEventListener('keydown', (event) => {
-      if (event.key === 'Escape' && page.classList.contains('az-mappage-open')) { event.stopPropagation(); sheet(false); menu.focus({ preventScroll: true }); }
+      if (event.key === 'Escape' && !beside() && page.classList.contains('az-mappage-open')) { event.stopPropagation(); sheet(false); menu.focus({ preventScroll: true }); }
     });
 
     /* where the map looks, in the address: read on the way in, written as it moves, never a step of the history. Its
