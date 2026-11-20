@@ -7719,6 +7719,30 @@ case, a `story:` it cannot read, and a story stepping through a wall with no gro
 picture, chip or id, is a use of its media (`engine/uses.py`, *shows it in a picture wall*) for
 the Media library's Unused filter and every delete's preview.
 
+**A timeline** (`kind: timeline`, or `chronology`, `sequence`; `engine/notes_chart_timeline.py`) is
+rows of *Day · What · Until*, a row with an *Until* day a period. `layout:` lays it four ways:
+- **across**: one line of days, each point's label beside its day, the labels taking turns above and
+  below the line. A label keeps a comfortable width even when the next day is close: it takes the
+  lowest lane where it meets no label and no stem, or reaches a free place in its lane by a bent
+  leader. Each lane is as tall as its own labels, and the labels take five lanes at most, both sides
+  together; a timeline too crowded for that is drawn numbered, and its card says so. Periods are
+  bands under the scale, the points then all above;
+- **numbered**: a numbered dot on the line for each event, lifted above its neighbour where days are
+  close, and the words in a list under it, two columns from a frame 520 pixels wide;
+- **list**: one row an event, its day in a gutter, a rule, a dot for a point and a bar for a period,
+  the year said on the first day and where it changes;
+- **auto**, or no line: up to 8 events across, up to 20 numbered, more as a list, and always a list
+  on a phone, since the page's drawing for a phone is its own. A picture of fixed size (X, 4:5, 1:1)
+  and the PDF page take Auto's choice when it fits their frame, else the first other that does,
+  else the shortest.
+
+`colour by:` names a column whose values colour each event (a kind: claim, geolocated, press), with
+the legend every chart draws, so the words need not say it; the hover, the alt text and the
+numbers say each event's kind. `labels: short` keeps each event's day and its first words, cut after
+its first clause or 30 letters. The page and the editor show the rest on hover; the PDF, every
+picture (Export, To Post, WordPress, an infographic's picture) prints the words whole, since a cut
+sentence on paper would drop its *(claim)*.
+
 **Making a chart in the editor** (`editor/chartBlock.js`, `chartCard.js`, `chartText.js`).
 A chart is chosen by its picture. *Chart* in a table's grid bar, or `/` › *Chart* in
 Figures, shows every kind the table fits, each already drawn from its real rows
@@ -7748,8 +7772,11 @@ the keyboard in the first field; the drawing says what to add until a row holds 
 then follows every field. One form is open in a note at a time.
 - **Timeline**: *＋ Event* (a day at the day, the month or the year: a calendar, a month and
   its year, or a year; written `5 Oct 2026`, `Oct 2026`, `2026`) and *＋ Period* (from and
-  until), then what happened. The table is `| When | What happened |`, with `| Until |` once a
-  row is a period; a cell the chart cannot read as a day stays as written and says so.
+  until), then what happened and its kind (Claim, Geolocated and Press offered until one is
+  written). The table is `| When | What happened |`, with `| Until |` once a row is a period and
+  `| Kind |` with `colour by: Kind` once a row has a kind; a cell the chart cannot read as a day
+  stays as written and says so. **Layout** (Auto, Across, Numbered, List, Auto saying what it
+  drew) and **Short labels** write `layout:` and `labels: short`.
 - **Key figures**: *＋ Figure*, the figure as written and the line under it, with an *at least*
   tick written `at least 60`; a floor typed in the figure (`60+`, `≥ 60`) ticks it.
 - **Bars, columns, pie, donut, segments, circles** (two or three), **stacked bars and
@@ -7826,10 +7853,13 @@ vehicle`, first the icon whose name names it, else the chart's, and says which t
 name. Silhouette rows also get a **Flag** row, None or one per category (`flags:`), the
 flag named like each row taken first; a picture wall gets the Flag row alone, a flag a group, and
 its settings say **Groups**, **Bar coloured by**, **Shape** and, once it has groups, **In a
-story** (*Whole wall* or *One group per step*) in place of Count, By and Coloured by. Each
-button opens the picker: the library by group, the app's badges by group and three shapes, a
-search, and **Import SVG…**, Settings › Icons' own import, whose icon is worn at once and joins
-the library. An infographic's panel card is the same card.
+story** (*Whole wall* or *One group per step*) in place of Count, By and Coloured by. A
+timeline's say **Layout** (Auto saying what it drew, or that an across too crowded was
+numbered), **Coloured by** (its columns that are neither its days nor its words) and
+**Labels**, Full or Short. Each button opens the picker: the library by group, the app's
+badges by group and three shapes, a search, and **Import SVG…**, Settings › Icons' own
+import, whose icon is worn at once and joins the library. An infographic's panel card is the
+same card.
 Every choice writes its own line in the engine's order and is one Undo step. A press on a
 bar button picks the chart first, so the note stays where it is when a panel takes the
 keyboard. A double press or Enter opens its settings; a locked note shows the drawing.

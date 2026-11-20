@@ -1059,6 +1059,10 @@ const THEME = {
     marginLeft: '6px', padding: '0', border: 'none', background: 'none', color: 'var(--info)', font: 'inherit', cursor: 'pointer', textDecoration: 'underline',
   },
   '.cm-chart-looks .cm-chart-field': { flexDirection: 'row', alignItems: 'center', gap: '10px' },
+  // a timeline's Layout takes two of the three columns, what it drew said under it
+  '.cm-chart-columns > .cm-chart-span': { gridColumn: 'span 2' },
+  '.cm-chart-span .cm-chart-seg': { alignSelf: 'flex-start' },
+  '.cm-chart-field-note': { color: 'var(--text-3)', fontSize: '11px' },
   // where the rows come from, on top of the settings
   '.cm-chart-data': { flexDirection: 'row', alignItems: 'baseline', flexWrap: 'wrap', gap: '4px 10px' },
   '.cm-chart-data > .cm-chart-field-name': { flex: 'none', width: '64px' },

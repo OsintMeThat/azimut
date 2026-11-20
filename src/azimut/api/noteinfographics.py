@@ -67,7 +67,7 @@ def infographic(case_id: str, body: InfographicIn) -> Response | dict[str, Any]:
     note_text, look = _note_and_look(case, body.note, body.look)
     lines = notes_infographic.block_of(body.text)
     page = notes_infographic.read(case, lines, look=look, note_text=note_text, light=body.format == "json",
-                                  origins=body.origins)
+                                  origins=body.origins, still=body.format == "png")
     if not page.panels:
         raise HTTPException(status_code=422, detail="the infographic holds no panel: put a chart, a map or words in it")
     headers = {"Cache-Control": "no-store", "X-Content-Type-Options": "nosniff"}

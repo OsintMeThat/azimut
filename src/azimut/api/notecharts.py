@@ -213,16 +213,19 @@ def chart_counts(case_id: str, body: CountsIn) -> dict[str, Any]:
 def _kind_said(chart: notecharts.Chart) -> dict[str, Any]:
     """The kind a chart is drawn as, and what of it the editor's card asks: whether it
     counts, a row at a time (a picture wall), draws parts or stacks, which kind it turns
-    into, the look it takes, and for a kind of glyphs or flags the values each given its own."""
+    into, the look it takes, for a kind of glyphs or flags the values each given its own,
+    and for a timeline the layout its page's drawing took."""
     kind = notes_charts.effective_kind(chart.block)
     if kind is None:
         return {}
+    laid = chart.layout.facts.get("layout")
     return {"name": kind.name, "label": kind.label, "counts": kind.counts, "parts": kind.parts,
             "stacked": kind.stacked, "up": kind.up, "turns": kind.turns, "per_row": kind.per_row,
             "style": notecharts.theme_of(chart.look, chart.block).name,
             # what the card's Icon and Flag rows read: the settings this kind takes, and the
             # values a glyph each is given for
-            "keys": list(kind.keys), **({"values": chart.values} if chart.values else {})}
+            "keys": list(kind.keys), **({"values": chart.values} if chart.values else {}),
+            **({"layout": laid} if isinstance(laid, str) else {})}
 
 
 #: How many of a chart's colours ride in the header.

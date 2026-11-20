@@ -2153,7 +2153,7 @@ class _Builder:
 
         note_text = "\n".join(piece.text for piece in self._pieces if piece.kind == "text")
         page = notes_infographic.read(self.case, tokens[index].content, look=self.look, note_text=note_text,
-                                      light=self.light)
+                                      light=self.light, still=True)
         line = self._line
         for message, kind, offset in page.warnings:
             self._warn(message, line if self._fixed or offset is None else line + offset,

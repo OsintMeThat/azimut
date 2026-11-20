@@ -3,6 +3,8 @@
 .az-body > .az-chart-figure { grid-column: text; }
 svg.az-chart { display: block; width: 100%; max-width: 100%; height: auto; margin-inline: auto; overflow: visible; }
 svg.az-chart-phone { max-width: 28rem; }
+/* words cut short (a timeline's short labels) say the rest on hover */
+svg.az-chart text:has(> title) { cursor: help; }
 svg.az-chart-phone, svg.az-chart-on-dark { display: none; }
 @media screen and (max-width: 37.99rem) {
   svg.az-chart-wide:not(.az-chart-on-dark) { display: none; }

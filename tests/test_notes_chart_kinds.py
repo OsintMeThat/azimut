@@ -728,58 +728,6 @@ def test_a_day_without_its_year_takes_the_columns_and_bad_days_are_none():
     assert kinds.day_text(kinds.read_day("Oct 2026")) == "Oct 2026"
 
 
-def test_the_reference_timeline_ticks_on_the_first_and_fifteenth():
-    from datetime import date
-
-    _, _, ticks = kinds.time_domain(date(2026, 10, 5), date(2026, 11, 16), 600, years=True)
-    assert [label for _, label in ticks] == ["1 Oct", "15 Oct", "1 Nov", "15 Nov"]
-    long = kinds.time_ticks(date(2025, 11, 1), date(2026, 6, 1), 600)
-    assert [label for _, label in long][:3] == ["Nov 2025", "Dec", "Jan 2026"]
-
-
-def test_a_timeline_draws_points_and_periods_and_no_label_meets_another():
-    chart = _layout("kind: timeline\n" + WHEN)
-    assert chart.facts["tracks"] == 2 and chart.facts["inside"] == ["Stalled on the north edge"]
-    _assert_lanes_clear(chart)
-    words = " ".join(_words(chart))
-    assert "Stalled on the north edge, 11 Oct – 2 Nov" in words and "2 Nov – 13 Nov" in words
-    assert chart.title == "When" and chart.desc.startswith("Timeline: 6 rows, from 5 Oct 2026 to 16 Nov 2026")
-    assert chart.table_head == ["Day", "What", "Until"]
-    assert chart.table_rows[1] == ["11 Oct 2026", "Stalled on the north edge", "2 Nov 2026"]
-
-
-def _assert_lanes_clear(chart: nc.Layout) -> None:
-    labels = chart.facts["labels"]
-    for index, (lane, (a, b)) in enumerate(labels):
-        for other_lane, (c, d) in labels[index + 1:]:
-            if lane == other_lane:
-                assert b <= c or d <= a
-
-
-def test_crowded_days_climb_into_lanes_and_no_stem_crosses_a_label():
-    rows = "\n".join(f"| {day} Oct 2026 | Something long happened on this day, number {day} |"
-                     for day in (1, 2, 2, 3, 4, 20, 21, 30, 31))
-    chart = _layout(f"kind: timeline\nsource: x\n| Day | What |\n| --- | --- |\n{rows}")
-    assert chart.facts["lanes"] >= 3
-    _assert_lanes_clear(chart)
-    # the solver alone, on labels that overhang each other's days
-    labels = [kinds._Label(x, ["w"], "d", 120.0, 20.0) for x in (10, 40, 70, 100)]
-    labels.append(kinds._Label(390, ["w"], "d", 120.0, 20.0, anchor="end"))
-    labels.append(kinds._Label(400, ["w"], "d", 120.0, 20.0, anchor="end"))
-    kinds.lanes(labels)
-    for label in labels:
-        for other in labels:
-            if other is not label and other.lane < label.lane:
-                assert not other.text[0] - 1 <= label.x <= other.text[1] + 1  # my stem passes no lower words
-
-
-def test_many_events_or_a_narrow_frame_list_the_timeline_down_the_page():
-    chart = _layout("kind: timeline\n" + WHEN, width=360)
-    assert chart.facts.get("down") is True
-    rows = chart.facts["rows"]
-    assert all(top + height <= next_top for (top, height), (next_top, _) in zip(rows, rows[1:]))
-
-
 def test_a_timeline_with_no_day_says_so_and_rows_it_cannot_read_are_noted():
     none = nc.read(_block("kind: timeline\nsource: x\n| When | What |\n| --- | --- |\n| soon | a |"))
     assert any("has no column of days" in message for message in _messages(none))

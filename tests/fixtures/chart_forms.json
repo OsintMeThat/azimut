@@ -8,30 +8,37 @@
     "heads": {
      "when": "When",
      "what": "What happened",
-     "until": "Until"
+     "until": "Until",
+     "colour": "Kind"
     },
     "rows": [
      {
       "when": "18 Oct 2026",
       "what": "Giants Brigades on a peak of the Kahbub Mountains",
-      "until": ""
+      "until": "",
+      "colour": ""
      },
      {
       "when": "Oct 2026",
       "what": "The front moves north",
-      "until": ""
+      "until": "",
+      "colour": ""
      },
      {
       "when": "10 Nov 2026",
       "what": "Presence northeast of Huwayrib",
-      "until": "14 Nov 2026"
+      "until": "14 Nov 2026",
+      "colour": ""
      },
      {
       "when": "2026",
       "what": "The year of the offensive",
-      "until": ""
+      "until": "",
+      "colour": ""
      }
-    ]
+    ],
+    "layout": "auto",
+    "short": false
    },
    "block": "::: chart\nkind: timeline\n| When | What happened | Until |\n| --- | --- | --- |\n| 18 Oct 2026 | Giants Brigades on a peak of the Kahbub Mountains | |\n| Oct 2026 | The front moves north | |\n| 10 Nov 2026 | Presence northeast of Huwayrib | 14 Nov 2026 |\n| 2026 | The year of the offensive | |\n:::",
    "engine": {
@@ -41,6 +48,50 @@
      "Oct 2026: The front moves north",
      "18 Oct 2026: Giants Brigades on a peak of the Kahbub Mountains",
      "10 Nov 2026 to 14 Nov 2026: Presence northeast of Huwayrib"
+    ],
+    "proposed": ""
+   }
+  },
+  {
+   "name": "a timeline coloured by kind, numbered, its labels short",
+   "kind": "timeline",
+   "model": {
+    "heads": {
+     "when": "When",
+     "what": "What happened",
+     "until": "Until",
+     "colour": "Kind"
+    },
+    "rows": [
+     {
+      "when": "5 Oct 2026",
+      "what": "Offensive opens, Dhubab airport taken, the strait claimed",
+      "until": "",
+      "colour": "Claim"
+     },
+     {
+      "when": "19 Oct 2026",
+      "what": "Government footage on the north edge of the peninsula",
+      "until": "",
+      "colour": "Geolocated"
+     },
+     {
+      "when": "15 Nov 2026",
+      "what": "Withdrawal announced",
+      "until": "",
+      "colour": "Press"
+     }
+    ],
+    "layout": "numbered",
+    "short": true
+   },
+   "block": "::: chart\nkind: timeline\ncolour by: Kind\nlayout: numbered\nlabels: short\n| When | What happened | Kind |\n| --- | --- | --- |\n| 5 Oct 2026 | Offensive opens, Dhubab airport taken, the strait claimed | Claim |\n| 19 Oct 2026 | Government footage on the north edge of the peninsula | Geolocated |\n| 15 Nov 2026 | Withdrawal announced | Press |\n:::",
+   "engine": {
+    "kind": "timeline",
+    "lines": [
+     "5 Oct 2026: Offensive opens, Dhubab airport taken, the strait claimed (Claim)",
+     "19 Oct 2026: Government footage on the north edge of the peninsula (Geolocated)",
+     "15 Nov 2026: Withdrawal announced (Press)"
     ],
     "proposed": ""
    }
