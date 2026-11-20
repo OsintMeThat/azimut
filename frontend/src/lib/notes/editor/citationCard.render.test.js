@@ -191,6 +191,12 @@ describe('what the card says', () => {
     expect(model.actions.map((one) => one.label)).toEqual(['Open in Geo Proof', 'Copy reference']);
   });
 
+  it('in the extension\'s panel, where no case is around the note: its page and its copy, never an Open that leads nowhere', () => {
+    const panel = { ...handlers, opener: null, inCase: false };
+    expect(cardModel(known('v1'), { handlers: panel }).actions.map((one) => one.id)).toEqual(['page', 'copy']);
+    expect(cardModel(known('p53'), { handlers: panel }).actions.map((one) => one.id)).toEqual(['copy']);
+  });
+
   it('of what the list of sources leaves out: nothing to copy', () => {
     const model = cardModel(known('q1'), { handlers });
     expect(model.rows.map((row) => row.label)).toEqual(['In this note']);

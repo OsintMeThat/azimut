@@ -8,6 +8,10 @@
    * It reads only. A fix is pressed here and done by the Notebook with the action that
    * exists elsewhere (`onfix`), after which the check is asked again; Undo takes back
    * one that edited the note.
+   *
+   * Without the app's `tools` around the note (the extension's panel), nothing exports
+   * there: the foot opens the note in Azimut instead (`onexport`), and the fixes only the
+   * Notebook can do are left out (`readyLines`).
    */
   import Icon from '../../components/Icon.svelte';
   import Modal from '../../components/Modal.svelte';
@@ -29,13 +33,15 @@
     busy = '',
     /** Opened from the export dialog: its foot goes back there. */
     fromExport = false,
+    /** Whether the app's tools are around the note; without them the foot opens it in Azimut to export. */
+    tools = true,
     onfix = () => {},
     ongo = () => {},
     onclose = () => {},
     onexport = () => {},
   } = $props();
 
-  const groups = $derived(readyLines(ready, { canEdit, rounded }));
+  const groups = $derived(readyLines(ready, { canEdit, rounded, tools }));
   const issues = $derived(issueCount(groups));
 </script>
 
@@ -87,6 +93,9 @@
     <span class="note">Nothing changes until you press a fix; Undo takes back one that wrote in the note.</span>
     {#if fromExport}
       <button type="button" class="btn btn-primary" onclick={onclose}>Back to the export</button>
+    {:else if !tools}
+      <button type="button" class="btn btn-primary" onclick={onexport} title="Open this note in Azimut, in a tab, to export it">
+        <Icon name="external" size={14} /> Open in Azimut</button>
     {:else}
       <button type="button" class="btn btn-primary" onclick={onexport} title="Export this note as a PDF, an HTML page or a web folder">
         <Icon name="download" size={14} /> Export…</button>

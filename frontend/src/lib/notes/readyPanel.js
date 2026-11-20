@@ -131,9 +131,11 @@ export function tlpLabel(tlp) {
  * `issue` is what the badge counts: something to look at, as against what the panel
  * only says (the edition, the marking, the weight under its budget). `fix` is
  * `{ id, label, title, ... }`; a fix that edits the note is offered only while it is
- * open in the editor (`canEdit`), else the line keeps its Go to.
+ * open in the editor (`canEdit`), else the line keeps its Go to. Without the app's
+ * `tools` around the note (the extension's panel), the two fixes only the Notebook can
+ * do are not offered: *Round them*, which its export does, and *Open the claim*, in Details.
  */
-export function readyLines(ready, { canEdit = false, rounded = false } = {}) {
+export function readyLines(ready, { canEdit = false, rounded = false, tools = true } = {}) {
   const groups = Object.fromEntries(GROUP_IDS.map((id) => [id, []]));
   if (!ready) return groups;
   const add = (group, line) => groups[group].push({ issue: true, line: null, ...line });
@@ -167,7 +169,7 @@ export function readyLines(ready, { canEdit = false, rounded = false } = {}) {
   for (const [index, claim] of ready.claims.entries()) {
     add('words', {
       key: `c${index}`, kind: 'claim', text: `The claim “${claim.text}” cites no source.`, line: claim.line,
-      fix: claim.id ? { id: 'claim', label: 'Open the claim', title: 'Open it in Details, to say what it rests on', entity: claim.id } : null,
+      fix: claim.id && tools ? { id: 'claim', label: 'Open the claim', title: 'Open it in Details, to say what it rests on', entity: claim.id } : null,
     });
   }
   if (ready.gone.length) {
@@ -188,7 +190,7 @@ export function readyLines(ready, { canEdit = false, rounded = false } = {}) {
       key: 'pov', kind: 'pov', line: ready.pov[0].line, items: ready.pov, issue: !rounded,
       text: rounded ? `${plural(ready.pov.length, 'point of view', 'points of view')} rounded to about 150 m in the export.`
         : `${one ? 'A point of view is' : `${ready.pov.length} points of view are`} shown to the metre.`,
-      fix: rounded ? { id: 'unround', label: 'Keep them exact', title: 'Show them to the metre, as written' }
+      fix: !tools ? null : rounded ? { id: 'unround', label: 'Keep them exact', title: 'Show them to the metre, as written' }
         : { id: 'round', label: 'Round them', title: 'Round them to about 150 m in the export; the note keeps them as written' },
     });
   }
