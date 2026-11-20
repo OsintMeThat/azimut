@@ -209,6 +209,18 @@ describe('the picture bar', () => {
     expect(view.contentDOM.querySelector('.picture-source-field')).toBeNull();
   });
 
+  it('reads Posted ✓ for a proof Post marked posted, holding the post\'s address', () => {
+    const proof = { id: 'm1', type: 'proof', label: 'Proof 28',
+      attrs: { path: 'proofs/28.png', posted: [{ site: 'x', at: '2026-11-09T10:00:00Z', url: 'https://x.com/me/status/7' }] } };
+    editor('[[media:m1|Proof 28]]\n\nAfter', { handlers: { statePosted: vi.fn(async () => {}) }, entities: [proof] });
+    const posted = bar().querySelector('[data-posted]');
+    expect(posted.textContent).toBe('Posted ✓');
+    expect(posted.title).toContain('Now: https://x.com/me/status/7');
+    posted.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, cancelable: true, button: 0 }));
+    expect(view.contentDOM.querySelector('.picture-source-field').value).toBe('https://x.com/me/status/7');
+    view.destroy();
+  });
+
   it('offers no Posted… on a picture that is not a proof, nor where it cannot be kept', () => {
     editor('[[media:m1|Roof]]\n\nAfter', { handlers: { statePosted: vi.fn() } });
     expect(bar().querySelector('[data-posted]')).toBeNull();

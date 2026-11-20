@@ -9,7 +9,7 @@
  */
 import {
   CAPTION_HELP, GRAPHIC_HELP, PICTURE_ALIGNS, PICTURE_SIZES, POSTED_HELP, SOURCE_HELP, blockAlignAt, captionField, isGraphic,
-  nearestSize, pictureLine, picturesIn, replacedLine, rovingToolbar, sizeWidth, sizedLine, sourceField,
+  nearestSize, pictureLine, picturesIn, postedAddress, replacedLine, rovingToolbar, sizeWidth, sizedLine, sourceField,
 } from '../pictureSize.js';
 import { registerBlock } from './blocks.js';
 import { openCasePicker, pickerTheme } from './casePicker.js';
@@ -107,7 +107,7 @@ function sizeBar(box, source, info, handlers = {}, blockAlign = '') {
     bar.append(open);
   }
   if (entity?.type === 'proof' && handlers.statePosted) {
-    const kept = entity.attrs?.posted_url ?? '';
+    const kept = postedAddress(entity);
     const posted = document.createElement('button');
     posted.type = 'button';
     posted.className = 'cm-size-posted';
@@ -143,7 +143,7 @@ function openPosted(view, box, entity) {
   box.classList.add('cm-captioning');
   const field = sourceField({
     help: POSTED_HELP,
-    value: entity.attrs?.posted_url ?? '',
+    value: postedAddress(entity),
     write: (url) => handlers.statePosted(entity, url),
     done: (by) => {
       box.classList.remove('cm-captioning');

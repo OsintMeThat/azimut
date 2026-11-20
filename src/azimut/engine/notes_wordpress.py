@@ -511,6 +511,11 @@ def _link(href: str, inner: str) -> str:
     return f'<a href="{_attr(href)}">{inner}</a>'
 
 
+def _posted(url: str) -> str:
+    """`Posted on X`, linked to the post the analyst published an item in."""
+    return _link(url, f"Posted on {_text(report._platform(url))}")
+
+
 # -- the walk -----------------------------------------------------------------------------
 
 
@@ -1057,7 +1062,8 @@ class _Writer:
         caption = self._caption(title, words)
         kind = "proof" if (record or {}).get("type") == "proof" else "picture"
         dates = self._dates(source, credit) if kind == "proof" else ""
-        said = "<br>".join(part for part in (caption, credit, dates) if part)
+        posted = _posted(source.posted) if source is not None and source.posted else ""
+        said = "<br>".join(part for part in (caption, credit, posted, dates) if part)
         library = self._library_caption(title or words, source)
         out: list[str]
         sides = self._sides(relative, source) if kind == "picture" else None
@@ -1380,6 +1386,8 @@ class _Writer:
             else:
                 said.append(_text(part.text))
         links = [_link(address, f"Check on {_text(site)}") for site, address in source.verify]
+        if style == "web" and source.posted and source.posted not in (source.address, source.archive):
+            links.append(_posted(source.posted))
         if source.sha256:
             links.append(f"SHA-256 <code>{source.sha256}</code>")
         line = "".join(said)
@@ -1399,9 +1407,11 @@ class _Writer:
                 head = ["<tr>" + "".join(f"<th>{name}</th>" for name in ("Proof", "Place", "Day", "Coordinates")) + "</tr>"]
                 rows = []
                 for place in annexes.geolocations:
+                    # the number opens the proof's entry in the sources, its name the post it went out in
                     number = f'<a href="#source-{place.number}">[{place.number}]</a> ' if place.number else ""
+                    proof = _link(place.posted, _text(place.proof)) if place.posted else _text(place.proof)
                     coords = _link(place.link, _text(place.coords)) if place.coords else ""
-                    rows.append(f"<tr><td>{number}{_text(place.proof)}</td><td>{_text(place.where)}</td>"
+                    rows.append(f"<tr><td>{number}{proof}</td><td>{_text(place.where)}</td>"
                                 f"<td>{_text(place.day)}</td><td>{coords}</td></tr>")
                 out.append(table(head, rows))
             elif key == "credits":
@@ -1432,7 +1442,7 @@ class _Writer:
         if source.archive and source.archive != source.address:
             links.append(_link(source.archive, "Archived copy"))
         if source.posted and source.posted not in (source.address, source.archive):
-            links.append(_link(source.posted, f"Posted on {_text(report._platform(source.posted))}"))
+            links.append(_posted(source.posted))
         links.extend(_link(address, f"Check on {_text(site)}") for site, address in source.verify)
         if source.sha256:
             links.append(f"SHA-256 <code>{source.sha256}</code>")

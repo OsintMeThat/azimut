@@ -5686,7 +5686,9 @@ never posts, and pressing Post on X or Bluesky stays the analyst's.
   record of the post, not a source, since it is no evidence. A changed link replaces
   the old one there, Not posted takes the post's entry off, and deleting the draft keeps
   it, since the post did go out. The proof's Details show *Posted on X · 9 Nov · link*,
-  or *Posted on X · 9 Nov* with no link, and Add to notes writes a *Posted* section.
+  or *Posted on X · 9 Nov* with no link, and Add to notes writes a *Posted* section. A
+  report links the proof to the latest post with a link, unless its *Posted at* names
+  another.
 - **The extension's word** on a thread it handed out reaches the composer through the
   bridge (`lib/extBridge.js`): the hand-off names the draft it came from (`draft`, the
   draft's name, written first so it exists). A link the extension caught once the post
@@ -7991,7 +7993,9 @@ draft, and only when they have something to say (`engine/noteannexes.py`):
 - **Geolocations**: a table of every proof the note cites, its source number, the place
   it depicts and how far off its point may be, its day (*about*, or a span), and its
   coordinates linked to the map; a point filmed from says *Where it was filmed*, rounded
-  when the export rounds them.
+  when the export rounds them. A proof's name opens the post the analyst published of
+  it, else its entry in the sources, and its number always opens that entry. A cell of
+  a PDF table holds one link, so there the number stands in a narrow column of its own.
 - **Credits**: the imagery (providers and their credit lines, a proof's panels' too),
   the terrain, the maps drawn in the note, the accounts whose posts it shows by site,
   and the typefaces with their licence.
@@ -8074,7 +8078,9 @@ carry it.
 
 The PDF keeps what a reader needs to check the work. A chip naming a record with a
 web address (a bookmark's page, an account's profile, a file's source; an archived
-copy only when there is nothing else) is a link, links in tables stay links, and
+copy only when there is nothing else) is a link; a chip naming a proof the analyst
+published opens that post instead, in every format, its `[n]` still reaching its
+sources (the HTML page says *Open the post on X* on hover). Links in tables stay links, and
 decimal coordinates open OpenStreetMap at that point. Photo metadata (EXIF, GPS,
 XMP, IPTC) is never put in the PDF: a JPEG goes in without those blocks and a photo
 turned by its EXIF is drawn upright.
@@ -8154,8 +8160,11 @@ and zoom kept. Each of these is one change, which one Undo takes back. The bar a
 a picture brought in by hand with no address (a link stated, never fetched). A proof
 also offers *Posted…*, in the note as on the Page pane: where it was published, on X or elsewhere,
 kept on the proof (`posted_url`, a field of its Details too, an emptied field taking it
-off). The PDF then links the picture to the post and adds *Posted:* and the address
-under its credit, and lists it under the proof in the sources; the Page pane draws its
+off). A proof Post marked posted with a link needs nothing here: with no address stated,
+its latest such post is the one (`urltitles.own_posts`), and the button reads *Posted ✓*
+either way. The PDF then links the picture to the post and adds *Posted:* and the address
+under its credit, the HTML page and WordPress add *Posted on X*, and every format lists it
+under the proof in the sources; the Page pane draws its
 pages again as soon as either address is kept. None of the bar
 prints, and the bar wraps onto two rows in a narrow note. Go to from a warning lands on
 the picture with its bar in reach. The picture picker lists proofs beside pictures.

@@ -173,6 +173,28 @@ def test_the_index_reads_the_case_once_and_answers_every_page_from_it(client):
     assert len(urltitles.AddressIndex(None)) == 0
 
 
+def test_where_a_proof_went_out_is_its_stated_address_then_post_s_latest_first():
+    def post(url):
+        return {"site": "x", "at": "2026-11-09T10:00:00Z", **({"url": url} if url else {})}
+
+    posts = [post("https://x.com/me/status/1"), post(None), post("https://x.com/me/status/2")]
+    assert urltitles.own_posts({"posted_url": " https://x.com/me/status/9 ", "posted": posts}) == [
+        "https://x.com/me/status/9", "https://x.com/me/status/2", "https://x.com/me/status/1"]
+    assert urltitles.own_posts({"posted_url": "https://x.com/me/status/2", "posted": posts}) == [
+        "https://x.com/me/status/2", "https://x.com/me/status/1"]
+    assert urltitles.own_posts({"posted_url": "a friend", "posted": [None, "x", {"url": "ftp://host/1"}]}) == []
+    assert urltitles.own_posts(None) == [] and urltitles.own_posts({"posted": "yes"}) == []
+
+
+def test_a_post_post_marked_for_a_proof_is_the_case_s_own_work(client):
+    cid = client.post("/api/cases", json={"name": "Own posts"}).json()["id"]
+    case = Case.open(cid)
+    case.add_entity("proof", "Posted", attrs={"path": "proofs/Posted.png", "posted": [
+        {"site": "x", "at": "2026-11-09T10:00:00Z", "url": "https://x.com/me/status/11"}]}, by="proof-composer")
+    index = urltitles.AddressIndex(case)
+    assert index.own_work("https://twitter.com/me/status/11") and not index.own_work("https://x.com/me/status/12")
+
+
 @pytest.mark.parametrize("bad", ["port strike", "ftp://host/x", "https://example.org/" + "a" * 2100])
 def test_the_lookup_refuses_what_is_not_a_web_address(client, bad):
     cid = client.post("/api/cases", json={"name": "Refused"}).json()["id"]

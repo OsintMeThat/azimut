@@ -1287,13 +1287,27 @@ class _Builder:
                    family=theme.body_family, color=theme.ink, bottom=gap)
 
     def _annex_geolocations(self, annexes: noteannexes.Annexes) -> None:
-        rows: list[list[list[Run]]] = [[[Run("Proof")], [Run("Place")], [Run("Day")], [Run("Coordinates")]]]
+        """A row per proof: its name opens the post the analyst published of it, else its
+        entry in the sources. A cell of a PDF table holds one link, so a numbered row's
+        number stands in a column of its own and keeps the jump to the entry."""
+        numbered = any(place.number for place in annexes.geolocations)
+        rows: list[list[list[Run]]] = [[*([[Run("")]] if numbered else []), [Run("Proof")], [Run("Place")], [Run("Day")],
+                                        [Run("Coordinates")]]]
         for place in annexes.geolocations:
-            label = f"[{place.number}] {place.proof}" if place.number else place.proof
-            proof = [Run(label, entry=place.number)] if place.number else [Run(label, link=place.posted)]
-            rows.append([proof, [Run(place.where)], [Run(place.day)],
+            number = [[Run(f"[{place.number}]", entry=place.number) if place.number else Run("")]] if numbered else []
+            proof = [Run(place.proof, link=place.posted) if place.posted else Run(place.proof, entry=place.number)]
+            rows.append([*number, proof, [Run(place.where)], [Run(place.day)],
                          [Run(place.coords, link=place.link)] if place.coords else [Run("")]])
-        self._table(rows, 1)
+        if not numbered:
+            self._table(rows, 1)
+            return
+        # the numbers' column as wide as its widest number and the cell's padding, the rest as the text shares it
+        pdf = self.pdf
+        pdf.set_font(self.theme.body_family, size=9 * self.theme.scale)
+        widest = max(pdf.get_string_width(f"[{place.number}]") for place in annexes.geolocations)
+        first = min(15.0, (widest + 6.0) / pdf.epw * 100)
+        rest = _column_widths([[_plain(cell) for cell in row[1:]] for row in rows], 4)
+        self._table(rows, 1, widths=[first, *(share * (100 - first) / 100 for share in rest)])
 
     def _annex_credits(self, annexes: noteannexes.Annexes) -> None:
         theme = self.theme
@@ -2559,9 +2573,10 @@ class _Builder:
 
         A PDF is read away from the app, so a reference to another entity cannot
         link into it. A record with a web address of its own (a bookmark's page,
-        an account's profile, the page a file came from) links there and reads as
-        a link; any other stays visible as a reference, and turns quiet and italic
-        once the entity it named has been deleted from the case. Without a case (a
+        an account's profile, the page a file came from, the post a proof went out
+        in) links there and reads as a link; any other stays visible as a reference,
+        and turns quiet and italic once the entity it named has been deleted from the
+        case. Without a case (a
         template's preview) every reference reads as a live one.
         """
         href = _attr(token, "href")
@@ -2888,7 +2903,7 @@ class _Builder:
         pdf.rect(left, top, width, bottom - top, style="D")
 
     def _table(self, rows: list[list[list[Run]]], header_rows: int,
-               look: notes_tables.TableLook = notes_tables.DEFAULT) -> None:
+               look: notes_tables.TableLook = notes_tables.DEFAULT, widths: list[float] | None = None) -> None:
         """A table, its header row repeated on each page it runs onto.
 
         A cell is one text in one face, so its runs' styling goes; its link stays.
@@ -2898,7 +2913,8 @@ class _Builder:
         Its settings line (`engine/notes_tables.py`) asks what paper can give: stripes,
         or none where the style stripes; each row tinted by its value in a column, that
         cell more; a compact density; a header printed once; a caption and a source under
-        it. A table with none prints as it always did.
+        it. A table with none prints as it always did. ``widths`` shares the width out
+        when the caller knows better than the text's length.
         """
         pdf = self.pdf
         theme = self.theme
@@ -2949,7 +2965,7 @@ class _Builder:
             if striped:
                 pdf.set_fill_color(*WHITE)
             with pdf.table(
-                col_widths=_column_widths(texts, columns),
+                col_widths=widths or _column_widths(texts, columns),
                 line_height=(4.3 if look.compact else 5.0) * scale,
                 text_align=Align.L,
                 padding=(1.0, 1.6) if look.compact else (1.6, 2.2),
@@ -2974,7 +2990,7 @@ class _Builder:
         pdf.set_draw_color(*theme.rule)
         pdf.set_line_width(0.2)
         with pdf.table(
-            col_widths=_column_widths(texts, columns),
+            col_widths=widths or _column_widths(texts, columns),
             line_height=(4.0 if look.compact else 4.6) * scale,
             text_align=Align.L,
             padding=(1.0, 1.8) if look.compact else (1.7, 2.4),

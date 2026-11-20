@@ -792,3 +792,66 @@ def test_where_a_proof_was_posted_is_a_field_of_its_details(client, sourced):
 
     declared = {attr.key: attr for attr in entities.entity_type("proof").attrs}
     assert declared["posted_url"].kind == "url"
+
+
+#: Where Post was told a post about the proof went out (`api/drafts._proof_posts`).
+POST_LINK = "https://x.com/osint_unit/status/1890000000000000002"
+
+
+def _post_about(client, cid: str, made, url: str | None, *, posted: bool = True) -> None:
+    """A Geolocation post about the fixture's proof, marked posted (or not) as Post's home marks one."""
+    saved = client.post(f"/api/cases/{cid}/drafts", json={
+        "title": "Strike post", "state": {"kind": "geolocation", "proofPng": made["proof"]["path"], "target": "x"}})
+    assert saved.status_code == 200
+    marked = client.put(f"/api/cases/{cid}/drafts/{saved.json()['name']}/publish", json={"posted": posted, "url": url})
+    assert marked.status_code == 200
+
+
+def test_a_proof_post_marked_posted_with_a_link_is_where_a_report_links_it(client, sourced):
+    """Post keeps the post on the proof (`posted`), Details and the Notebook its stated
+    address (`posted_url`): a report reads both, the stated one first."""
+    cid, case, made = sourced
+    _post_about(client, cid, made, POST_LINK)
+    assert notesources.Reader(case).entity(made["proof"]["id"]).posted == POST_LINK
+    client.patch(f"/api/cases/{cid}/entities/{made['proof']['id']}", json={"attrs": {"posted_url": POSTED_URL}})
+    assert notesources.Reader(case).entity(made["proof"]["id"]).posted == POSTED_URL
+    client.patch(f"/api/cases/{cid}/entities/{made['proof']['id']}", json={"attrs": {"posted_url": ""}})
+    assert notesources.Reader(case).entity(made["proof"]["id"]).posted == POST_LINK
+    # taken back in Post, the proof is no longer posted anywhere a reader can open
+    _post_about(client, cid, made, None, posted=False)
+    assert notesources.Reader(case).entity(made["proof"]["id"]).posted == ""
+
+
+def test_a_post_marked_posted_with_no_link_leaves_the_proof_unlinked(client, sourced):
+    cid, case, made = sourced
+    _post_about(client, cid, made, None)
+    assert case.get_entity(made["proof"]["id"])["attrs"]["posted"]
+    assert notesources.Reader(case).entity(made["proof"]["id"]).posted == ""
+
+
+def test_a_proof_named_in_the_text_opens_its_post_its_number_its_sources(sourced):
+    """The owner's own table of geolocations names each proof with a chip: pressed, it
+    opens the post the analyst published, and the `[n]` after it still opens the entry."""
+    cid, case, made = sourced
+    text = f"# Strike\n\nSee [[entity:{made['proof']['id']}|the proof]].\n"
+    on = look(style="report", sources="on")
+
+    def in_the_text(data: bytes) -> list[str]:
+        # a report lists its sources from a page of their own: the first page is the text
+        first = PdfReader(BytesIO(data)).pages[0]
+        return [str((one.get_object().get("/A") or {}).get("/URI")) for one in first.get("/Annots") or []
+                if (one.get_object().get("/A") or {}).get("/URI")]
+
+    # never posted, a proof's chip opens what it was made from, as before
+    assert in_the_text(notes_pdf.render(case, title="Strike", text=text, look=on).pdf) == [POST_URL]
+    case.update_entity(made["proof"]["id"], {"attrs": {"posted_url": POSTED_URL}})
+    pdf = notes_pdf.render(case, title="Strike", text=text, look=on)
+    assert in_the_text(pdf.pdf) == [POSTED_URL]
+    assert (0, 1) in internal_links(pdf.pdf), "the number still jumps to the proof's entry"
+    from azimut.engine import notes_html, notes_wordpress
+
+    page = notes_html.render(case, title="Strike", text=text, look=on).html.decode()
+    assert (f'<a class="az-ref" href="{POSTED_URL}" target="_blank" rel="noopener noreferrer" '
+            f'title="Open the post on X">the proof</a><a class="az-cite" href="#src-1"') in page
+    draft = notes_wordpress.build(case, title="Strike", text=text, look=on)
+    assert f'<a href="{POSTED_URL}">the proof</a>' in draft.content

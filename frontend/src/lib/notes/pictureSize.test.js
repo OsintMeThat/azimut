@@ -3,7 +3,7 @@ import { describe, expect, it, vi } from 'vitest';
 import {
   CAPTION_MAX, PAGE_TALL, PICTURE_SIZES, POSTED_HELP, captionField, cleanCaption, pictureAt, pictureLine, picturesIn, readAttrs, rovingToolbar,
   BLOCK_OPEN, CORNERS, blockAlignAt, blockSide, sameRef, sizeWidth, sizedLine, writeAttrs, sourceField,
-  casePictures, isGraphic, nearestSize, pictureReference, replacedLine, storyZoom, withGraphic, withZoom, zoomText,
+  casePictures, isGraphic, nearestSize, pictureReference, postedAddress, replacedLine, storyZoom, withGraphic, withZoom, zoomText,
 } from './pictureSize.js';
 
 describe('a picture line', () => {
@@ -267,6 +267,25 @@ describe('the address field under a picture', () => {
     expect(write).not.toHaveBeenCalled();
     expect(field.getAttribute('aria-invalid')).toBe('true');
     expect(field.getAttribute('aria-label')).toBe('Source');
+  });
+});
+
+describe('where a proof was posted', () => {
+  // the order `urltitles.own_posts` reads them in, so the button and the report agree
+  const post = (url, at = '2026-11-09T10:00:00Z') => ({ site: 'x', at, ...(url ? { url } : {}) });
+
+  it('is the address stated on the proof, else the latest post Post was given a link for', () => {
+    const posted = [post('https://x.com/me/status/1'), post('https://x.com/me/status/2'), post(null)];
+    expect(postedAddress({ attrs: { posted_url: ' https://x.com/me/status/9 ', posted } })).toBe('https://x.com/me/status/9');
+    expect(postedAddress({ attrs: { posted_url: '', posted } })).toBe('https://x.com/me/status/2');
+    expect(postedAddress({ attrs: { posted: [post(null)] } })).toBe('');
+  });
+
+  it('is nothing for a proof never posted, or a record that is not an address', () => {
+    expect(postedAddress({ attrs: {} })).toBe('');
+    expect(postedAddress(null)).toBe('');
+    expect(postedAddress({ attrs: { posted_url: 'a friend', posted: 'yes' } })).toBe('');
+    expect(postedAddress({ attrs: { posted: [null, 'x', { url: 'ftp://host/1' }] } })).toBe('');
   });
 });
 

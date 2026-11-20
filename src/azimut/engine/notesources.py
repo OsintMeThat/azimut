@@ -74,7 +74,8 @@ FILE_TYPES = links.EMBEDDED_TYPES
 #: The attr an archived copy is kept under (a bookmark's declared field).
 ARCHIVE = "archive_url"
 #: Where the analyst published an item of their own, a proof on X say (a proof's
-#: declared field). Not where it comes from: a report links the item to it.
+#: declared field). Not where it comes from: a report links the item to it. A proof
+#: Post marked posted with a link is read the same way (`urltitles.own_posts`).
 POSTED = "posted_url"
 
 #: What kind of thing a source is.
@@ -232,10 +233,12 @@ class Source:
 
     @property
     def link(self) -> str:
-        """Where a reference to it links: its address, its archived copy, else the
-        first address along its origins. A reader wants the page itself and only
-        falls back on the snapshot."""
-        return self.address or self.archive or self.traced_address
+        """Where a reference to it links: where the analyst published it, else its
+        address, its archived copy, else the first address along its origins. A proof
+        named in the text opens the post that showed it, the citation after it still
+        reaching its sources; a reader wants the page itself and only falls back on the
+        snapshot."""
+        return self.posted or self.address or self.archive or self.traced_address
 
     def imagery(self) -> str:
         """`Esri World Imagery, about 12 March 2024 · Maxar`: whose imagery and of
@@ -479,7 +482,7 @@ class Reader:
             address=address,
             archive=archive,
             archived=archived,
-            posted=web(attrs.get(POSTED)),
+            posted=next(iter(urltitles.own_posts(attrs)), ""),
             author=author,
             published=timeline.media_published(sidecar) or "" if not imagery else "",
             collected=collected,

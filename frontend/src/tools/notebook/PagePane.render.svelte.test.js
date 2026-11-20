@@ -237,6 +237,19 @@ describe('the way back, and a source', () => {
     expect(sheet(0).querySelector('.caption-here')).toBeNull();
   });
 
+  it('read Posted ✓ for a proof Post marked posted with a link, as the report links it', async () => {
+    const proofs = [
+      { id: 'm1', type: 'capture', label: 'Roof', attrs: { path: 'media/roof.png' } },
+      { id: 'm2', type: 'proof', label: 'Proof 28', attrs: { path: 'proofs/28.png',
+        posted: [{ site: 'x', at: '2026-11-09T10:00:00Z', url: 'https://x.com/me/status/5' }] } },
+    ];
+    await pane({ onresize: vi.fn(), entities: proofs, text: TEXT });
+    expect(buttons(0)).toContain('Posted ✓');
+    [...sheet(0).querySelectorAll('.picture-bar button')].find((button) => button.textContent.trim() === 'Posted ✓').click();
+    flushSync();
+    expect(sheet(0).querySelector('.caption-here input[type="url"]').value).toBe('https://x.com/me/status/5');
+  });
+
   it('draw the pages again when the case states where a picture comes from or was posted, and only then', async () => {
     const props = $state({ onresize: vi.fn(), entities: ENTITIES, text: TEXT });
     target = document.createElement('div');
@@ -253,6 +266,11 @@ describe('the way back, and a source', () => {
     flushSync();
     expect(asked.length).toBe(before + 1);
     expect(asked.at(-1).text).toBe(TEXT);
+    // a post Post marked posted with a link is where the report links the proof too
+    const post = { site: 'x', at: '2026-11-09T10:00:00Z', url: 'https://x.com/me/status/4' };
+    props.entities = [{ ...ENTITIES[0], type: 'proof', attrs: { ...ENTITIES[0].attrs, posted: [post] } }, props.entities[1]];
+    flushSync();
+    expect(asked.length).toBe(before + 2);
   });
 
   it('draw the pages again when Settings changes who signs: a new logo, a signature or a name', async () => {

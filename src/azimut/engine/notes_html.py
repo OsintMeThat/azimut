@@ -1391,7 +1391,9 @@ class _Page:
             if source is None:
                 return '<span class="az-ref az-gone">', "</span>", 0
             if source.link:
-                return f'<a class="az-ref" {_outward(source.link)}>', "</a>", number
+                # a proof the analyst published opens its post, and says so on hover
+                said = f' title="Open the post on {_attr(_platform(source.posted))}"' if source.posted else ""
+                return f'<a class="az-ref" {_outward(source.link)}{said}>', "</a>", number
             return '<span class="az-ref">', "</span>", number
         if href.startswith("#"):
             if ANCHOR.match(href[1:]):
@@ -2262,11 +2264,13 @@ class _Page:
         return "".join(out), listed
 
     def _annex_geolocations(self, annexes: noteannexes.Annexes) -> str:
+        """A row per proof: its number opens its entry in the sources, its name the post
+        the analyst published of it."""
         rows: list[str] = []
         for place in annexes.geolocations:
             number = f"{_cite(place.number)} " if place.number else ""
-            proof = (f'<a class="az-posted" {_outward(place.posted)}>{_text(place.proof)}</a>' if place.posted
-                     else _text(place.proof))
+            proof = (f'<a {_outward(place.posted)} title="Open the post on {_attr(_platform(place.posted))}">'
+                     f"{_text(place.proof)}</a>" if place.posted else _text(place.proof))
             coords = f'<a class="az-coords" {_outward(place.link)}><bdi>{place.coords}</bdi></a>' if place.coords else ""
             rows.append(f'<tr><td dir="auto">{number}{proof}</td><td dir="auto">{_text(place.where)}</td>'
                         f"<td>{_text(place.day)}</td><td>{coords}</td></tr>")

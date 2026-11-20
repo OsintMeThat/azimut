@@ -53,6 +53,9 @@ FILED = _ORDER
 IMPORTED_FROM = "published_url"
 #: Where the analyst published a proof of their own (`notesources.POSTED`): the case's own work.
 POSTED_AT = "posted_url"
+#: What Post keeps on a proof each time a post about it went out (`api/drafts._proof_posts`):
+#: `{site, at, url}`, the url only when the post was given one, the latest last.
+POSTS = "posted"
 #: Every type that holds an address, in the order a link to it is answered.
 INDEXED = (*_ORDER, "proof")
 
@@ -82,6 +85,17 @@ def _web(url: Any) -> Any:
     if parts.scheme not in ("http", "https") or not parts.hostname:
         return None
     return parts
+
+
+def own_posts(attrs: Any) -> list[str]:
+    """Every address the analyst published a proof at, the one a report links first: the
+    address stated on the proof (`posted_url`, its Details or a note's *Posted…*), then
+    each post Post was told went out with a link, the latest first. Each http(s), once."""
+    if not isinstance(attrs, dict):
+        return []
+    held = attrs.get(POSTS)
+    posts = [one.get("url") for one in reversed(held) if isinstance(one, dict)] if isinstance(held, list) else []
+    return list(dict.fromkeys(str(one).strip() for one in (attrs.get(POSTED_AT), *posts) if _web(one) is not None))
 
 
 def _tracking(key: str) -> bool:
@@ -220,8 +234,8 @@ class AddressIndex:
     A file of the case keeps the post it came from (`source_url`), a bookmark its page,
     a capture the map view it was taken of, and a proof imported from somebody's post
     that post (`published_url`). A page held by several is answered in that order, the
-    first filed first. A proof's `posted_url`, where the analyst published it, is kept
-    apart: a link to it is the case's own work rather than a source.
+    first filed first. Where the analyst published a proof (`own_posts`) is kept apart: a
+    link to it is the case's own work rather than a source.
 
     ``case`` may be None, or something that cannot page its entities (a template, a
     test's stand-in): the index is then empty and answers nothing.
@@ -244,9 +258,8 @@ class AddressIndex:
                 if key:
                     at = str((entity.get("provenance") or {}).get("at") or "")
                     found.setdefault(key, []).append((INDEXED.index(kind), at, entity))
-                posted = url_key(attrs.get(POSTED_AT)) if kind == "proof" else ""
-                if posted:
-                    self.own.add(posted)
+                if kind == "proof":
+                    self.own.update(url_key(one) for one in own_posts(attrs))
             cursor = page.get("next_cursor")
             if not cursor:
                 break

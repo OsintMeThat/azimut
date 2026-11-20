@@ -348,11 +348,21 @@ export const SOURCE_HELP = {
 /** What a proof's Posted… says on the Page pane: where the analyst published it. */
 export const POSTED_HELP = {
   label: 'Posted at',
-  button: 'Where you published this proof, on X or elsewhere: the PDF links the proof there',
+  button: 'Where you published this proof, on X or elsewhere: reports link the proof there',
   field: 'Enter keeps it, an empty field takes it off, Escape leaves it',
   placeholder: 'https://… where you posted this proof',
   refused: 'The address must be an http(s) one',
 };
+
+/**
+ * Where proof `entity` was published, as a report links it (`urltitles.own_posts`): the
+ * address stated on it, else the latest post Post was told went out with a link, or ''.
+ */
+export function postedAddress(entity) {
+  const web = (value) => (typeof value === 'string' && /^https?:\/\/\S+$/i.test(value.trim()) ? value.trim() : '');
+  const posts = Array.isArray(entity?.attrs?.posted) ? entity.attrs.posted : [];
+  return web(entity?.attrs?.posted_url) || posts.map((one) => web(one?.url)).filter(Boolean).at(-1) || '';
+}
 
 /**
  * The one-line field a picture's source is stated in: an address only the analyst

@@ -36,8 +36,8 @@
   import { createPreview, htmlPreview, pageLine } from '../../lib/notes/preview.js';
   import { HTML, PDF, keepFormat, readFormat } from '../../lib/notes/formats.js';
   import {
-    CAPTION_HELP, PICTURE_ALIGNS, PICTURE_SIZES, POSTED_HELP, SOURCE_HELP, blockAlignAt, captionField, pictureAt, pictureLine, rovingToolbar, sizeWidth,
-    sourceField,
+    CAPTION_HELP, PICTURE_ALIGNS, PICTURE_SIZES, POSTED_HELP, SOURCE_HELP, blockAlignAt, captionField, pictureAt, pictureLine, postedAddress,
+    rovingToolbar, sizeWidth, sourceField,
   } from '../../lib/notes/pictureSize.js';
   import { openerFor } from '../../lib/notes/openers.js';
   import { jumpFor } from '../../lib/notes/warnings.js';
@@ -131,7 +131,7 @@
     const entity = entityOf(picture);
     const field = sourceField({
       help: POSTED_HELP,
-      value: entity?.attrs?.posted_url ?? '',
+      value: postedAddress(entity),
       write: (url) => statePostedOf(caseId, entity, url),
       done: (by) => {
         if (by === 'keyboard') node.previousElementSibling?.querySelector('button.posted')?.focus({ preventScroll: true });
@@ -228,15 +228,15 @@
   let lastRequest = null;
 
   // What the case says of a picture, which prints under it: where it comes from and
-  // where it was posted. Stated here, in the note or in Details, the pages are drawn
-  // again at once, as no text changed to ask for them.
+  // where it was posted. Stated here, in the note, in Details or by Post, the pages are
+  // drawn again at once, as no text changed to ask for them.
   // Who signs prints too: a logo, a signature or a name changed in Settings is drawn
   // again at once, the note beside it untouched; and so is a map, once what is drawn on
   // its card changed the layer it names (`lib/notes/mapSettings.svelte.js`).
   const stated = $derived([
     entities
-      .filter((entity) => entity.attrs?.source_url || entity.attrs?.posted_url)
-      .map((entity) => `${entity.id}=${entity.attrs.source_url ?? ''}|${entity.attrs.posted_url ?? ''}`)
+      .filter((entity) => entity.attrs?.source_url || postedAddress(entity))
+      .map((entity) => `${entity.id}=${entity.attrs.source_url ?? ''}|${postedAddress(entity)}`)
       .join(','),
     prefs.picturesRev, prefs.logoRev, prefs.reportName, prefs.reportRole, prefs.reportOrganisation, mapsChanged.rev,
   ].join('\n'));
@@ -344,10 +344,11 @@
                 onclick={() => { captioning = null; posting = null; stating = captionKey(picture); }}>Source…</button>
             {/if}
             {#if entity?.type === 'proof'}
-              <button type="button" class="posted" class:kept={Boolean(entity.attrs?.posted_url)}
-                title={entity.attrs?.posted_url ? `${POSTED_HELP.button}. Now: ${entity.attrs.posted_url}` : POSTED_HELP.button}
+              {@const posted = postedAddress(entity)}
+              <button type="button" class="posted" class:kept={Boolean(posted)}
+                title={posted ? `${POSTED_HELP.button}. Now: ${posted}` : POSTED_HELP.button}
                 aria-expanded={posting === captionKey(picture)}
-                onclick={() => { captioning = null; stating = null; posting = captionKey(picture); }}>{entity.attrs?.posted_url ? 'Posted ✓' : 'Posted…'}</button>
+                onclick={() => { captioning = null; stating = null; posting = captionKey(picture); }}>{posted ? 'Posted ✓' : 'Posted…'}</button>
             {/if}
             {#if opener}
               <button type="button" class="open" title={`${opener.label}, where this picture was made`} onclick={() => opener.open()}>{opener.label}</button>

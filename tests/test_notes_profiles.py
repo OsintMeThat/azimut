@@ -12,9 +12,12 @@ from __future__ import annotations
 
 import hashlib
 import json
+import re
+from io import BytesIO
 from pathlib import Path
 
 import pytest
+from pypdf import PdfReader
 
 from azimut import config
 from azimut.engine import noteannexes, notelook, notes_html, notes_markdown, notes_pdf, notes_wordpress, notesources
@@ -371,6 +374,104 @@ def test_wordpress_writes_the_same_sources_and_annexes(sourced):
     assert "<em>port-authority.example.org</em>" in draft.content and "accessed 13 March 2026" in draft.content
     assert 'id="annex-method"' in draft.content and "How this was made" in draft.content
     assert "Editions and corrections" in draft.content and "The berth number." in draft.content
+
+
+# -- where a proof's name opens --------------------------------------------------------------
+
+#: Where the analyst published the fixture's proof.
+POSTED = "https://x.com/osint_unit/status/1890000000000000001"
+
+
+def _links_on(data: bytes, marker: str) -> list[tuple[str, str]]:
+    """Each link on the last page holding ``marker``, as (the words under it, squashed, and
+    its address, or `entry` for a jump inside the document)."""
+    found: list[tuple[str, str]] = []
+    for page in PdfReader(BytesIO(data)).pages:
+        words: list[tuple[float, float, str]] = []
+
+        def keep(text, cm, tm, *_):
+            if text.strip():
+                words.append((tm[4] * cm[0] + cm[4], tm[5] * cm[3] + cm[5], text))
+
+        if marker not in page.extract_text(visitor_text=keep):
+            continue
+        found = []
+        for annotation in page.get("/Annots") or []:
+            link = annotation.get_object()
+            x0, y0, x1, y1 = (float(value) for value in link["/Rect"])
+            action = link.get("/A") or {}
+            under = "".join(text for x, y, text in words if x0 - 1 <= x <= x1 + 1 and y0 - 2 <= y <= y1 + 2)
+            found.append((squash(under), str(action["/URI"]) if action.get("/URI") else "entry"))
+    return found
+
+
+def _proof_number(page: str) -> int:
+    """The proof's number in the sources, as the HTML page's annex cites it."""
+    row = re.search(r'data-annex="geolocations".*?<tbody>(.*?)</tbody>', page, re.S)
+    assert row is not None
+    return int(re.search(r'href="#src-(\d+)"', row.group(1)).group(1))
+
+
+def test_a_geolocation_s_name_opens_its_post_and_its_number_its_entry_in_every_format(sourced):
+    """The owner pressed a proof in the Geolocations annex and got its source: its name
+    opens the post the analyst published of it, its number still the proof's entry."""
+    _, case, made = sourced
+    _geolocated(case, made)
+    case.update_entity(made["proof"]["id"], {"attrs": {"posted_url": POSTED}})
+    text = _note(made)
+    page = notes_html.render(case, title="Strike", text=text, look=look(style="report"), created=CREATED).html.decode()
+    number = _proof_number(page)
+    assert (f'<a class="az-cite" href="#src-{number}" data-src="{number}">[{number}]</a> <a href="{POSTED}" '
+            'target="_blank" rel="noopener noreferrer" title="Open the post on X">Strike geolocated</a>') in page
+    # a PDF table's cell holds one link: the number stands in a column of its own
+    pdf = notes_pdf.render(case, title="Strike", text=text, look=look(style="report"), created=CREATED).pdf
+    links = _links_on(pdf, "Coordinates")
+    assert (f"[{number}]", "entry") in links and ("Strikegeolocated", POSTED) in links
+    draft = notes_wordpress.build(case, title="Strike", text=text, look=look(style="report"))
+    assert (f'<a href="#source-{number}">[{number}]</a> <a href="{POSTED}">Strike geolocated</a></td>'
+            in draft.content)
+
+
+def test_a_geolocation_never_posted_opens_its_entry_as_before(sourced):
+    _, case, made = sourced
+    _geolocated(case, made)
+    text = _note(made)
+    page = notes_html.render(case, title="Strike", text=text, look=look(style="report"), created=CREATED).html.decode()
+    number = _proof_number(page)
+    assert f'data-src="{number}">[{number}]</a> Strike geolocated</td>' in page
+    pdf = notes_pdf.render(case, title="Strike", text=text, look=look(style="report"), created=CREATED).pdf
+    links = _links_on(pdf, "Coordinates")
+    assert (f"[{number}]", "entry") in links and ("Strikegeolocated", "entry") in links
+    draft = notes_wordpress.build(case, title="Strike", text=text, look=look(style="report"))
+    assert f'<a href="#source-{number}">[{number}]</a> Strike geolocated</td>' in draft.content
+
+
+def test_a_geolocation_unnumbered_keeps_one_column_its_name_opening_the_post(sourced):
+    _, case, made = sourced
+    _geolocated(case, made)
+    case.update_entity(made["proof"]["id"], {"attrs": {"posted_url": POSTED}})
+    pdf = notes_pdf.render(case, title="Strike", text=_note(made), look=look(style="report", sources="off"),
+                           created=CREATED).pdf
+    printed = pdf_text(pdf)
+    assert "Geolocations" in printed and "Sources" not in printed
+    assert ("Strikegeolocated", POSTED) in _links_on(pdf, "Coordinates")
+    assert not any(re.fullmatch(r"\[\d+\]", words) for words, _ in _links_on(pdf, "Coordinates"))
+
+
+def test_wordpress_says_where_a_proof_was_posted_under_it_and_in_web_sources(sourced):
+    """The HTML page says *Posted on X* under a posted proof and in a web list of sources;
+    the WordPress draft said neither."""
+    _, case, made = sourced
+    case.update_entity(made["proof"]["id"], {"attrs": {"posted_url": POSTED}})
+    said = f'<a href="{POSTED}">Posted on X</a>'
+    for style in ("report", "article"):
+        draft = notes_wordpress.build(case, title="Strike", text=_note(made), look=look(style=style)).content
+        captions = re.findall(r'<figcaption class="wp-element-caption">(.*?)</figcaption>', draft, re.S)
+        assert sum(said in one for one in captions) == 1, style
+        entries = re.findall(r'<li id="source-\d+">(.*?)</li>', draft, re.S)
+        assert sum(said in one for one in entries) == (1 if style == "article" else 0), style
+        if style == "report":  # the academic entry says it in its own words, linked
+            assert any(f'published at <a href="{POSTED}">' in one for one in entries)
 
 
 # -- the check before export ----------------------------------------------------------------
