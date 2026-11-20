@@ -99,7 +99,7 @@ from typing import TYPE_CHECKING, Any, Callable, Iterable, Iterator, Mapping
 from PIL import Image, ImageDraw, ImageEnhance, ImageFont, ImageOps
 
 from .. import layout
-from . import cloudless, notesources, tiles
+from . import cloudless, notesources, tiles, urltitles
 
 if TYPE_CHECKING:
     from ..workspace import Case
@@ -700,6 +700,7 @@ def derive(
         if len(features) > MAX_FEATURES:
             warn(f"{said} draws its first {MAX_FEATURES} features of {len(features)}.", "other")
             features = features[:MAX_FEATURES]
+        _cards_proofs(case, features, anchors=anchors)
         _cards_media(case, features, encode=encode if pictured else None, card_side=card_side, out=out)
         if block.steps:
             steps = _own_steps(block.steps, out)
@@ -1386,6 +1387,39 @@ def _span(first: str, last: str) -> str:
 def _plain_text(value: Any) -> str:
     text = re.sub(r"<[^>]+>", " ", str(value or ""))
     return "\n".join(" ".join(line.split()) for line in text.split("\n") if line.strip())
+
+
+def _cards_proofs(case: "Case", features: list[dict[str, Any]], *, anchors: Mapping[str, str]) -> None:
+    """A marker showing a proof of the case, as its own picture or as the item it follows, links
+    to that proof as the proof's own point does: its figure when the page holds it, else where
+    the analyst posted it."""
+    made: dict[str, dict[str, str] | None] = {}
+    for feature in features:
+        card = feature.get("card")
+        if not isinstance(card, dict) or "proof" in card:
+            continue
+        for wanted in (feature.get("picture"), feature.get("entity")):
+            if not wanted:
+                continue
+            if wanted not in made:
+                made[wanted] = _proof_link(case, str(wanted), anchors)
+            if made[wanted] is not None:
+                card["proof"] = dict(made[wanted] or {})
+                break
+
+
+def _proof_link(case: "Case", entity_id: str, anchors: Mapping[str, str]) -> dict[str, str] | None:
+    """Where a card sends its reader to see a proof, or None for anything but a proof that the
+    page holds or that was posted."""
+    record = case.get_entity(entity_id) if ENTITY_ID.match(entity_id) else None
+    if not record or record.get("type") != "proof":
+        return None
+    said = {"name": _cut(str(record.get("label") or "Proof"), 120)}
+    anchor = anchors.get(entity_id)
+    if anchor:
+        return {**said, "figure": f"#{anchor}"}
+    posted = next(iter(urltitles.own_posts(record.get("attrs"))), "")
+    return {**said, "posted": posted} if posted else None
 
 
 def _cards_media(case: "Case", features: list[dict[str, Any]], *, encode: Encode | None, card_side: int,
