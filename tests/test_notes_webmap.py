@@ -262,3 +262,21 @@ def test_a_web_maps_row_shows_its_grounds_picture_and_where_it_was_published(cli
     case.update_entity(note["id"], {"attrs": {"editions": [published]}})
     row = next(one for one in client.get(f"/api/cases/{cid}/notes/index").json()["items"] if one["title"] == "Road map")
     assert row["map"]["address"] == "https://desk.github.io/maps/road-map/"
+
+
+def test_the_header_links_the_name_only_to_the_site_set_in_settings(client):
+    """The web map's header links the analyst's name to the Website of Settings › Publishing,
+    never to the GitHub Pages site root, which may hold no page; with none set, no link."""
+    from azimut import config
+
+    put = client.put("/api/settings/prefs", json={"report_name": "A. Analyst", "report_site": "desk.example.org"})
+    assert put.status_code == 200, put.text
+    assert client.get("/api/settings").json()["report_site"] == "https://desk.example.org/"
+    settings = config.load_settings()
+    settings["github_site"] = "https://desk.github.io/"
+    config.save_settings(settings)
+    assert notefill.Identity.from_settings().site == "https://desk.example.org/"
+    assert client.put("/api/settings/prefs", json={"report_site": ""}).status_code == 200
+    assert notefill.Identity.from_settings().site == ""
+    refused = client.put("/api/settings/prefs", json={"report_site": "http://desk.example.org"})
+    assert refused.status_code == 422 and "website" in refused.json()["detail"].lower()

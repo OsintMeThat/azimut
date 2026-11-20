@@ -724,6 +724,7 @@
     const steps = data.steps || [];
     let stepButtons = [];
     let stepRow = null;
+    let stepSaid = null;
     function step(index, { smooth = true, card: show = false } = {}) {
       const chosen = steps[index];
       if (!chosen) return;
@@ -732,6 +733,12 @@
       if (engine) engine.look(chosen.view, { smooth, focus: chosen.focus || [] });
       else fly(placed(chosen.view), smooth ? 1300 : 0);
       stepButtons.forEach((button, i) => (i === index ? button.setAttribute('aria-current', 'step') : button.removeAttribute('aria-current')));
+      // the step's own words under the row: its name, then what it says
+      if (stepSaid) {
+        stepSaid.replaceChildren();
+        if (chosen.text && chosen.label) stepSaid.append(make('b', {}, chosen.label), ' ', chosen.text);
+        else if (chosen.text) stepSaid.append(chosen.text);
+      }
       const current = stepButtons[index];
       if (current && stepRow && stepRow.scrollWidth > stepRow.clientWidth) {
         stepRow.scrollTo?.({ left: current.offsetLeft - stepRow.clientWidth / 2 + current.offsetWidth / 2, behavior: motion() });
@@ -760,6 +767,8 @@
       const row = make('div', { class: 'az-map-steps-row' });
       row.append(stepRow);
       (figure.querySelector('.az-map-time') || after).after(row);
+      stepSaid = make('p', { class: 'az-map-step-said', 'aria-live': 'polite' });
+      row.after(stepSaid);
       // a row longer than the map fades at the edge it goes on past
       const edges = () => {
         const more = stepRow.scrollWidth - stepRow.clientWidth;

@@ -164,6 +164,10 @@
 .az-map-step-day { margin: 0 0 .3rem; font: 700 .75rem/1.3 var(--ui); letter-spacing: .06em; text-transform: uppercase; color: var(--accent-ink); }
 .az-map-step-label { margin: 0; font: 600 1.05rem/1.4 var(--head); }
 .az-map-step-name { margin: .45rem 0 0; font: 500 .8125rem/1.3 var(--ui); color: var(--muted); }
+.az-map-step-words { margin: .45rem 0 0; font: 400 .95rem/1.5 var(--body); color: var(--ink-2); }
+.az-map-step-said { margin: .5rem 0 0; font: 400 .9375rem/1.5 var(--body); color: var(--ink-2); }
+.az-map-step-said:empty { display: none; }
+.az-map-step-said b { color: var(--ink); font-weight: 600; }
 @media screen {
   .az-live .az-story-figures > [data-kind="map"] .az-map-legend, .az-live .az-story-figures > [data-kind="map"] .az-map-steps-row { display: none; }
   [data-web="story"] .az-live .az-story-figures > figure[data-kind="map"] { grid-template-columns: minmax(0, 1fr); align-content: center; }

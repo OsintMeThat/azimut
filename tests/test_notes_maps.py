@@ -362,6 +362,25 @@ def test_the_story_layout_gives_a_map_a_stage_and_a_card_to_each_of_its_steps(cl
     assert "Seen on the heights." in scene
 
 
+def test_a_story_card_of_a_map_step_says_its_words_under_its_name(client, monkeypatch):
+    """A step with a name and words (`step: day | name | … | words`) shows both on its card,
+    not only its name."""
+    from azimut.engine.notelook import NoteLook
+
+    cid, case = _case(client)
+    derived = _fixture_map()
+    derived.data["steps"][1]["text"] = "A government camera films the convoy at the foot of the hills."
+    monkeypatch.setattr(notes_maps, "derive", lambda *args, **kwargs: derived)
+    rendered = notes_html.render(case, title="Map", text="::: map\ntitle: The line\n:::\n", look=NoteLook(web="story"))
+    page = rendered.html.decode()
+    card = re.search(r'<div class="az-story-step az-map-card-step"[^>]*data-map-step="1"[^>]*>(.*?)</div>', page, re.S).group(1)
+    assert '<p class="az-map-step-label" dir="auto">The road</p>' in card
+    assert '<p class="az-map-step-words" dir="auto">A government camera films the convoy at the foot of the hills.</p>' in card
+    # a step with words and no name says its words once, as its name
+    first = re.search(r'<div class="az-story-step az-map-card-step"[^>]*data-map-step="0"[^>]*>(.*?)</div>', page, re.S).group(1)
+    assert "az-map-step-words" not in first and "Seen on the heights." in first
+
+
 # -- the check ---------------------------------------------------------------------------------
 
 

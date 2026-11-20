@@ -42,6 +42,7 @@ export const prefs = $state({
   reportName: '',
   reportRole: '',
   reportOrganisation: '',
+  reportSite: '',
   noteStyles: null, // what each note style carries, Settings › Publishing › Styles over Azimut's own (lib/notes/look.js)
   logoSet: false, // the logo of Settings › Publishing is on disk (azimut:my-logo)
   logoRev: '', // changes with the logo on disk, so its address does too (lib/myLogo.js)
@@ -134,6 +135,7 @@ export function applyPrefs(s) {
   if (s.report_name !== undefined) prefs.reportName = s.report_name;
   if (s.report_role !== undefined) prefs.reportRole = s.report_role;
   if (s.report_organisation !== undefined) prefs.reportOrganisation = s.report_organisation;
+  if (s.report_site !== undefined) prefs.reportSite = s.report_site;
   if (s.note_styles !== undefined) prefs.noteStyles = s.note_styles;
   if (s.signature !== undefined) prefs.logoSet = Boolean(s.signature);
   if (s.logo_rev !== undefined) prefs.logoRev = s.logo_rev;

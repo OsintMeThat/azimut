@@ -129,6 +129,11 @@ describe('a map in the report', () => {
     expect(doc.querySelector('.az-map-now-day').textContent).toBe('20 Oct 2026');
     expect(width(doc)).toBeLessThan(whole);
     expect(doc.querySelector('.az-map-steps button').getAttribute('aria-current')).toBe('step');
+    // what the step says shows under the row, not only on hover
+    expect(doc.querySelector('.az-map-step-said').textContent).toBe('Seen on the heights.');
+    doc.querySelectorAll('.az-map-steps button')[1].dispatchEvent(new window.MouseEvent('click', { bubbles: true }));
+    expect(doc.querySelector('.az-map-step-said').textContent).toBe('');
+    doc.querySelector('.az-map-steps button').dispatchEvent(new window.MouseEvent('click', { bubbles: true }));
     const card = doc.querySelector('.az-map-card');
     expect(card.querySelector('.az-map-card-title').textContent).toBe('Heights');
     expect(card.querySelector('.az-map-card-proof').getAttribute('href')).toBe('#fig-1');

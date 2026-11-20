@@ -28,6 +28,7 @@ export const PUBLISHING_HELP = {
   name: 'Your name, printed where a note says {name}, as in its Signature block',
   role: 'Your role, printed where a note says {role}',
   organisation: 'Your organisation, printed where a note says {organisation}',
+  site: 'Your own site, linked from the name on your web maps',
   signature: 'A picture of your handwritten signature, shown by a note\'s Signature block',
   signatureRemove: 'Take your signature off every note that shows it',
   wordpressSite: 'The WordPress site a note is sent to as a draft',

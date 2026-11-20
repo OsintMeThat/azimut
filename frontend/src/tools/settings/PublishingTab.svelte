@@ -248,6 +248,14 @@
     <input class="input who" value={prefs.reportOrganisation} maxlength={REPORT_FIELD_MAX} placeholder="Open Source Desk" title={HELP.organisation}
       onchange={(event) => saveLine('report_organisation', event.currentTarget.value)} />
   </label>
+  <label class="row" title={HELP.site}>
+    <span class="row-label">
+      <span>Website</span>
+      <span class="row-hint">Linked from your name on your web maps. Left empty, the name has no link.</span>
+    </span>
+    <input class="input who" type="url" value={prefs.reportSite} maxlength={REPORT_FIELD_MAX} placeholder="osint.example.org" title={HELP.site}
+      onchange={(event) => saveLine('report_site', event.currentTarget.value)} />
+  </label>
   <div class="row">
     <div class="row-label" title={HELP.signature}>
       <span>Signature</span>

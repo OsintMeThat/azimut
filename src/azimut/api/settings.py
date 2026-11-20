@@ -29,6 +29,7 @@ from ..engine import (
     google_tiles,
     iconlibrary,
     iconvector,
+    notefill,
     notelook,
     notes_web,
     notes_wordpress,
@@ -68,6 +69,20 @@ TEMPLATE_ID = r"^[A-Za-z0-9_-]{1,64}$"
 DEFAULT_PROOF_TEMPLATE = config.DEFAULT_SETTINGS["proof_template"]
 DEFAULT_SIGNATURE_HANDLE = config.DEFAULT_SETTINGS["signature_handle"]
 REPORT_KEYS = ("report_name", "report_role", "report_organisation")
+
+
+def _report_site(value: str) -> str:
+    """The analyst's site as typed, checked as a web folder's address is: `https://` and a
+    named site, or "" to take it away; anything else is refused with what is wrong."""
+    text = value.strip()
+    if text and "://" not in text:
+        text = f"https://{text}"
+    if not text:
+        return ""
+    try:
+        return notes_web.address(text)
+    except notes_web.NotesWebError as exc:
+        raise HTTPException(status_code=422, detail=f"The website: {exc}") from exc
 
 
 def _one_line(value: Any) -> Any:
@@ -171,6 +186,8 @@ class PrefsIn(BaseModel):
     report_name: str | None = Field(default=None, max_length=REPORT_TEXT_MAX)
     report_role: str | None = Field(default=None, max_length=REPORT_TEXT_MAX)
     report_organisation: str | None = Field(default=None, max_length=REPORT_TEXT_MAX)
+    # the analyst's own site, linked from a web map's header; "" takes it away
+    report_site: str | None = Field(default=None, max_length=REPORT_TEXT_MAX)
     # what each note style carries by default, the whole table as Settings shows it;
     # only what differs from Azimut's own is kept, and {} is Azimut's own throughout
     note_styles: dict[notelook.Style, notelook.StyleChoices] | None = None
@@ -254,6 +271,7 @@ def _prefs(settings: dict[str, Any]) -> dict[str, Any]:
         "reverse_prefill": bool(settings.get("reverse_prefill", True)),
         "signature_handle": settings.get("signature_handle", DEFAULT_SIGNATURE_HANDLE),
         **{key: _report_text(settings, key) for key in REPORT_KEYS},
+        "report_site": notefill.site_of(settings.get("report_site")),
         # what each style carries, Settings' changes over Azimut's own, and Azimut's own beside it
         "note_styles": {style: profile.as_json() for style, profile in
                         notelook.styles_table(settings.get(notelook.SETTINGS_KEY)).items()},
@@ -446,6 +464,8 @@ def _apply_prefs(settings: dict[str, Any], body: PrefsIn) -> None:
         value = getattr(body, key)
         if value is not None:
             settings[key] = value
+    if body.report_site is not None:
+        settings["report_site"] = _report_site(body.report_site)
     if body.note_styles is not None:
         given = {style: choices.model_dump(exclude_none=True) for style, choices in body.note_styles.items()}
         settings[notelook.SETTINGS_KEY] = notelook.saved_styles(given)
@@ -908,6 +928,7 @@ class ImportedSettings(BaseModel):
     report_name: str = Field(default="", max_length=REPORT_TEXT_MAX)
     report_role: str = Field(default="", max_length=REPORT_TEXT_MAX)
     report_organisation: str = Field(default="", max_length=REPORT_TEXT_MAX)
+    report_site: str = Field(default="", max_length=REPORT_TEXT_MAX)
     # what each note style carries: only what differs from Azimut's own, read the way
     # the app reads its own (a value this build cannot read keeps Azimut's)
     note_styles: dict[str, Any] = Field(default_factory=dict, max_length=16)

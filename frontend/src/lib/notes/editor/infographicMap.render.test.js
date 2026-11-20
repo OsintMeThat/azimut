@@ -155,6 +155,9 @@ describe('a map panel of an infographic, in the builder', () => {
     expect(named(host, 'Size')).toBeNull();
     expect(host.querySelector('.cm-map-sized').textContent).toBe(`Size${SIZED_BY}`);
     for (const group of ['Base', 'Legend', 'North arrow', 'Scale']) expect(named(host, group), group).toBeTruthy();
+    // a panel is a live map on the web page and a picture filed from its imagery, as a note's map is
+    expect(named(host, 'Imagery'), 'Imagery').toBeTruthy();
+    expect(named(host, 'Keep readers inside the frame')).toBeTruthy();
   });
 
   it('writes a layer hidden in the panel’s own lines, inside the page, as one Undo step', async () => {

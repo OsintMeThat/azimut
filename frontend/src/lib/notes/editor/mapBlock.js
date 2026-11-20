@@ -261,8 +261,8 @@ export class MapEditing {
       press.addEventListener('mousedown', (event) => event.preventDefault());
       press.addEventListener('click', () => this.fileView());
       parts.push(press);
-      // where the page opens the map: a note's map with a ground, never an infographic's picture of one
-      if (!this.sizedBy && this.described?.ground) {
+      // where the page opens the map, a note's or an infographic panel's: one with a ground
+      if (this.described?.ground) {
         const open = button('cm-map-act cm-map-open-here', {
           label: 'Open here', iconName: 'flag', title: wide ? 'Zoom in to the whole map or closer first' : 'The page opens the map on this view',
         });

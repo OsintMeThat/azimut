@@ -194,6 +194,9 @@ DEFAULT_SETTINGS: dict[str, Any] = {
     "report_name": "",
     "report_role": "",
     "report_organisation": "",
+    # The analyst's own site, linked from a web map's header (`notefill.Identity.site`);
+    # an https address, or "" for none, when the name stands unlinked.
+    "report_site": "",
     # What each note style carries by default, as Settings › Publishing › Styles changed
     # it: by style, only what differs from Azimut's own (`engine/notelook.py`, PROFILES),
     # each of the sources list, how it is written, the five annexes and how strict the

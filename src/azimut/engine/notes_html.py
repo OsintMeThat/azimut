@@ -1447,9 +1447,11 @@ class _Page:
                 when = (f'<p class="az-map-step-day"><time datetime="{day}">'
                         f'{_text(notes_style.long_date(date.fromisoformat(day)))}</time></p>') if day else ""
                 said = f'<p class="az-map-step-label" dir="auto">{_text(label or text or name)}</p>'
+                # the step's own words under its name, as its row in the card says them
+                more = f'<p class="az-map-step-words" dir="auto">{_text(text)}</p>' if label and text else ""
                 whose = f'<p class="az-map-step-name" dir="auto">{_text(name)}</p>' if name and (label or text) else ""
                 steps.append(f'<div class="az-story-step az-map-card-step" data-step="{number}" '
-                             f'data-map-step="{position}" style="--az-n:{number}">{when}{said}{whose}</div>\n')
+                             f'data-map-step="{position}" style="--az-n:{number}">{when}{said}{more}{whose}</div>\n')
         return (f'<section class="az-story az-scenes" data-steps="{len(run)}">\n'
                 f'<div class="az-story-figures">\n{"".join(figures)}</div>\n'
                 f'<div class="az-story-steps">\n{"".join(steps)}</div>\n</section>\n')

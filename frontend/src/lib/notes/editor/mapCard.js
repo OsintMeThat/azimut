@@ -236,8 +236,9 @@ export function mapSettings(panel, ctx) {
       textField('Title', map.title, (value) => ctx.write({ title: value }), { placeholder: 'What the map shows' }));
     const base = segmented('Base', BASES.map((value) => ({ value, label: BASE_NAMES[value], title: BASE_HINTS[value] })),
       map.base || 'satellite', (value) => ctx.base(value), { busy: busy.startsWith('base') ? busy.slice(5) : '' });
-    // an infographic's panel is a picture: its imagery and its reader's reach stay as they were
-    const live = !ctx.sizedBy && ctx.imagery;
+    // an infographic's map panel is a live map on the web page as a note's map is, and its
+    // imagery is the ground its picture is filed from: both take the same two choices
+    const live = Boolean(ctx.imagery);
     const imagery = live && (map.base || 'satellite') === 'satellite' ? imageryField(map, described, busy) : null;
     const frame = element('div', 'cm-map-field');
     frame.append(element('span', 'cm-map-field-name', 'Frame'));
