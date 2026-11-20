@@ -248,3 +248,35 @@ def test_a_full_cases_card_picture_travels_in_its_bundle(client):
     assert (review["picture"], review["picture_label"]) == (case.find_entity(attr="path", value=full.photo)["id"],
                                                             case.find_entity(attr="path", value=full.photo)["label"])
     assert client.get(f"/files/{landed.id}/{review['picture_path']}").status_code == 200
+
+
+def test_a_marker_showing_a_proof_links_to_where_it_was_posted_or_to_its_figure(client, owner):
+    """As a proof's own point does: the page's figure when it holds the proof, else the post."""
+    case = Case.open(owner)
+    proof = client.post(f"/api/cases/{owner}/proofs", json={
+        "title": "19 Oct, north edge", "png_base64": base64.b64encode(_png_bytes((10, 10, 10))).decode(),
+        "spec": {"panels": [], "points": [{"coords": "12.737, 43.501"}], "coordsText": "12.737, 43.501"}})
+    assert proof.status_code == 200, proof.text
+    proof_id = proof.json()["id"]
+    case.update_entity(proof_id, {"attrs": {"posted_url": "https://x.com/desk/status/2112959890822218106"}})
+    frame = entity_of(owner, _upload(client, owner, "Vehicle 07.png", (20, 20, 200)))
+    row = create(client, owner, "Geolocations")
+    add(client, owner, row, name="19 Oct", picture=proof_id)
+    add(client, owner, row, name="#7", picture=frame["id"])
+
+    text = f"# Map\n\n::: map\ntitle: Geolocations\nlayer: {row['name']}\n:::\n"
+    cards = {feature["card"]["title"]: feature["card"]
+             for feature in _map_data(notes_html.render(case, title="Map", text=text).html)["features"]}
+    assert cards["19 Oct"]["proof"] == {"name": "19 Oct, north edge",
+                                        "posted": "https://x.com/desk/status/2112959890822218106"}
+    assert "proof" not in cards["#7"]
+    # with the proof a figure of the page, the card sends the reader to it instead
+    shown = f"# Map\n\n[[media:{proof_id}|Figure 1]]\n\n" + text[len("# Map\n\n"):]
+    cards = {feature["card"]["title"]: feature["card"]
+             for feature in _map_data(notes_html.render(case, title="Map", text=shown).html)["features"]}
+    assert cards["19 Oct"]["proof"]["figure"].startswith("#")
+    # a map whose cards show no picture still links the proof
+    bare = f"# Map\n\n::: map\ntitle: Geolocations\nlayer: {row['name']}\ncard: sentence\n:::\n"
+    cards = {feature["card"]["title"]: feature["card"]
+             for feature in _map_data(notes_html.render(case, title="Map", text=bare).html)["features"]}
+    assert cards["19 Oct"]["proof"]["posted"].endswith("2112959890822218106")
