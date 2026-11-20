@@ -753,7 +753,8 @@ class _Writer:
         title band, every panel and the sources; then each chart's numbers under "The
         numbers", one table a chart, for a reader the picture says nothing to."""
         # where the rows came from is the PDF's and the HTML page's check, as for a chart here
-        page = notes_infographic.read(self.case, token.content, look=self.look, note_text=self._note_text, origins=False)
+        page = notes_infographic.read(self.case, token.content, look=self.look, note_text=self._note_text, origins=False,
+                                      still=True)
         self.warnings.extend(message for message, _, _ in page.warnings)
         if not page.panels:
             return []

@@ -597,12 +597,13 @@ def _shares(reading: nc.Reading | None, shared: str) -> bool:
 
 def read(case: "Case | None", body: str, *, look: "NoteLook | None" = None, palette: Sequence[Mapping[str, str]] | None = None,
          note_text: str = "", maps: bool = True, light: bool = False, width: float = PAGE_WIDTH,
-         origins: bool = True) -> Page:
+         origins: bool = True, still: bool = False) -> Page:
     """An infographic's lines laid out ``width`` CSS pixels wide, in the note's look and
     the case's colours. ``maps`` False reads a map's data without painting its picture or
     saying what its check finds: the HTML page draws and checks its maps as every map;
     ``light`` paints it smaller (the Page pane). ``origins`` False leaves where the rows
-    came from to the editor, whose Data bar reads it as the note is typed (`data_warnings`)."""
+    came from to the editor, whose Data bar reads it as the note is typed (`data_warnings`).
+    ``still`` lays its charts for a picture nothing hovers over (`notes_charts.Box.still`)."""
     graphic = parse_block(body)
     theme = theme_of(graphic, look)
     if palette is None:
@@ -636,7 +637,7 @@ def read(case: "Case | None", body: str, *, look: "NoteLook | None" = None, pale
         if panel.kind == CHART:
             reading = readings.get(position)
             shares = _shares(reading, shared)
-            _chart_panel(drawn, theme, colours, note_text, shares, warnings, says_floor(graphic), pictures)
+            _chart_panel(drawn, theme, colours, note_text, shares, warnings, says_floor(graphic), pictures, still)
             if reading is not None:
                 floors = floors or reading.floor
                 if shares:
@@ -704,7 +705,7 @@ def _floor_title(check: nc.Check) -> bool:
 
 def _chart_panel(drawn: Drawn, theme: nc.ChartTheme, palette: Sequence[Mapping[str, str]], note_text: str,
                  shares: bool, warnings: list[tuple[str, str, int | None]], floor_said: bool = False,
-                 pictures: nc.PictureLookup | None = None) -> None:
+                 pictures: nc.PictureLookup | None = None, still: bool = False) -> None:
     block = nc.parse_block(drawn.panel.body)
     if block.table is None or not block.table.headers:
         warnings.append(_offset(("A chart of the infographic holds no table: write its rows under its settings.",
@@ -715,7 +716,7 @@ def _chart_panel(drawn: Drawn, theme: nc.ChartTheme, palette: Sequence[Mapping[s
         return
     pad = theme.pad
     chart = nc.layout(block, theme=theme, palette=palette, note_text=note_text, width=drawn.w + 2 * pad,
-                      title=True, legend=not shares, credit=False, pictures=pictures)
+                      title=True, legend=not shares, credit=False, pictures=pictures, still=still)
     drawn.chart = chart
     drawn.shares = shares
     drawn.marks = [kinds_module.shifted(mark, -pad, -pad) for mark in chart.marks[1:]]

@@ -37,6 +37,7 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from . import notes_chart_kinds as kinds_module
 from . import notes_chart_picker as picker
+from . import notes_chart_timeline
 from . import notes_charts as nc
 from . import notes_infographic as ni
 from . import notes_maps as nm
@@ -144,7 +145,7 @@ def _drawn_block(block: nc.ChartBlock) -> tuple[nc.ChartBlock, list[str]]:
     if kind.name in TYPED:
         used = {index for index in (0, 1) if index < len(headers)}
     elif kind.name == "timeline":
-        start, until, what = kinds_module._timeline_columns(reading)
+        start, until, what = notes_chart_timeline.timeline_columns(reading)
         used = {index for index in (start, what, until) if index is not None}
         out.by = headers[what] if what is not None else ""
         out.count = ""
