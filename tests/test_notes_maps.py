@@ -749,13 +749,15 @@ def test_a_map_shown_otherwise_carries_its_sheet_its_size_legend_north_and_base(
     cid, case = _case(client)
     line = _tracked_line(case)
     plain = notes_html.render(case, title="Map", text=f"::: map\nlayer: {line}\n:::\n").html.decode()
-    assert ".az-map-north" not in plain and "az-size-" not in plain and "data-base" not in plain
+    # the settings' own sheet (`reader.mapset.css`) comes only with a map that sets something;
+    # the map's own sheet names the north arrow too, for its place in full screen
+    assert ".az-map-north svg" not in plain and "az-size-" not in plain and "data-base" not in plain
     shown = notes_html.render(case, title="Map", text=f"::: map\nlayer: {line}\nsize: half\nlegend: folded\nnorth: on\n"
                                                       "base: dark\nscale: off\n:::\n").html.decode()
     assert 'class="az-figure az-map az-size-half"' in shown
     assert '<details class="az-map-key"><summary>Legend</summary>' in shown
     assert 'class="az-map-north" role="img" aria-label="North is up"' in shown and 'data-base="dark"' in shown
-    assert ".az-map-north {" in shown and '"scale":"off"' in shown and '"base":"dark"' in shown
+    assert ".az-map-north svg" in shown and '"scale":"off"' in shown and '"base":"dark"' in shown
     hidden = notes_html.render(case, title="Map", text=f"::: map\nlayer: {line}\nlegend: hidden\n:::\n").html.decode()
     assert 'class="az-map-legend"' not in hidden
 
