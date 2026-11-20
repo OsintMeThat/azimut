@@ -67,6 +67,8 @@ SIDE_LANES = 3
 #: Room between two labels of a lane, and between two lanes (a bent leader runs in it).
 LABEL_GAP = 10.0
 LANE_GAP = 12.0
+#: How far apart two dots of the same day stand on the line, centre to centre: a dot and its ring.
+DOT_PITCH = 13.0
 #: The least room between a stem and words or another leader it passes, so two lines never seem one.
 STEM_ROOM = 5.0
 #: The search for a side's lanes gives up past this many steps and tries one lane more.
@@ -444,6 +446,9 @@ def _across(events: list[Event], theme: "ChartTheme", box: "Box", words: _Words)
 
     points = [event for event in events if not event.period]
     periods = [event for event in events if event.period]
+    # points of one day, or nearly, stand side by side on the line, each with its own stem
+    xs = {id(event): x for event, x in zip(points, spread([at(event.start.day) for event in points], DOT_PITCH,
+                                                          left, right))}
     sides: list[list[Event]] = [points, []] if periods else [points[0::2], points[1::2]]
     inner = right - left
     reach = max(50.0, min(110.0, inner * 0.16))
@@ -452,7 +457,7 @@ def _across(events: list[Event], theme: "ChartTheme", box: "Box", words: _Words)
     # every way to lay each side, at three widths of label: the lightest that keeps to the lanes
     best: tuple[float, list[list[_Label]], list[_Way]] | None = None
     for width in (widest, widest * 0.78, max(96.0, widest * 0.6)):
-        laid = [[_label_of(event, at(event.start.day), width, theme, words) for event in side] for side in sides]
+        laid = [[_label_of(event, xs[id(event)], width, theme, words) for event in side] for side in sides]
         ways = [_ways(labels, most, left, right, reach) for labels in laid]
         for above_way in ways[0]:
             for below_way in ways[1]:
@@ -511,6 +516,30 @@ def _across(events: list[Event], theme: "ChartTheme", box: "Box", words: _Words)
                           "days": [label.x for label in [*above, *below]],
                           "bends": sum(1 for label in [*above, *below] if label.bend),
                           "tracks": tracks, "inside": inside, "axis": axis})
+
+
+def spread(xs: list[float], pitch: float, left: float, right: float) -> list[float]:
+    """Each x where its dot is drawn: dots closer than ``pitch`` to the first of their run
+    are set side by side, the run centred on where its days fall, inside the line."""
+    order = sorted(range(len(xs)), key=lambda index: xs[index])
+    placed = list(xs)
+    run: list[int] = []
+
+    def lay(members: list[int]) -> None:
+        middle = sum(xs[index] for index in members) / len(members)
+        width = (len(members) - 1) * pitch
+        start = min(max(middle - width / 2, left), right - width)
+        for step, index in enumerate(members):
+            placed[index] = start + step * pitch
+
+    for index in order:
+        if run and xs[index] - xs[run[0]] >= pitch:
+            lay(run)
+            run = []
+        run.append(index)
+    if run:
+        lay(run)
+    return placed
 
 
 def _tick(x: float, y: float, text: str, theme: "ChartTheme", box: "Box") -> "Text":

@@ -363,3 +363,24 @@ def test_an_infographic_panel_lays_it_and_its_picture_prints_the_words_whole():
 def test_the_page_says_the_words_cut_short_can_be_hovered():
     chart = (notes_html.ASSETS / "reader.chart.css").read_text(encoding="utf-8")
     assert "svg.az-chart text:has(> title) { cursor: help; }" in chart
+
+
+def test_points_of_one_day_stand_side_by_side_each_with_its_own_dot():
+    from azimut.engine import notes_chart_timeline as tl
+
+    # two events on 5 Oct, one on 9 Oct far enough away to keep its place
+    placed = tl.spread([100.0, 100.0, 160.0], tl.DOT_PITCH, 0.0, 400.0)
+    assert placed[1] - placed[0] == pytest.approx(tl.DOT_PITCH)
+    assert (placed[0] + placed[1]) / 2 == pytest.approx(100.0) and placed[2] == pytest.approx(160.0)
+    # a run against the line's end stays inside it
+    assert min(tl.spread([1.0, 1.0, 1.0], tl.DOT_PITCH, 0.0, 400.0)) >= 0.0
+
+
+def test_the_across_layout_draws_a_dot_for_each_event_of_the_same_day():
+    rows = ("source: x\n| Day | What |\n| --- | --- |\n| 2026-10-05 | Offensive opens |\n"
+            "| 2026-10-05 | The strait claimed taken |\n| 2026-10-09 | Cleared, says Riyadh |")
+    chart = _chart("layout: across\n", rows=rows, width=640)
+    days = chart.facts["days"]
+    assert len(days) == 3 and len({round(day, 1) for day in days}) == 3
+    circles = [mark for mark in _flat(chart.marks) if isinstance(mark, nc.Circle)]
+    assert len({round(circle.cx, 1) for circle in circles}) == 3
