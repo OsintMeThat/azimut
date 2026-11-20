@@ -63,13 +63,22 @@ function saidOf(map) {
   ].filter(Boolean);
 }
 
-/** A map drawn in the note, kept on its box (`box.map`). */
-class MapBox {
-  constructor(box, widget, view) {
-    this.box = box;
-    this.view = view;
-    this.widget = widget;
-    this.map = readMap(widget.source);
+/**
+ * A map worked on through its settings card (`editor/mapCard.js`): drawn on its stage from the
+ * engine's answer, each choice written into its lines as one Undo step, a base filed on the
+ * press that picks it, and what is drawn on it kept in a personal layer of the case. A map
+ * block of the note (`MapBox`) is one, and so is an infographic's map panel in the builder
+ * (`editor/infographicMap.js`): each says where its lines are and how they are written.
+ *
+ * What one is given: `caseId`, `writable`, `source` (its lines as drawn), `text()` (its lines
+ * as the note holds them now), `edit(change)` (its lines changed as one Undo step),
+ * `say(message, actions, kind)`, `sheetMap` (*From a sheet…*, when the note can), `measure()`
+ * (after it changed height), `sizedBy` (what sets its width when its host does, said in place
+ * of Size); and its nodes, `box`, `stage`, `said`, `hint` and `settingsPanel`.
+ */
+export class MapEditing {
+  constructor() {
+    this.map = null;
     this.described = null;
     this.asked = null;
     this.busy = '';
@@ -77,124 +86,25 @@ class MapBox {
     this.surface = null;
     this.tab = 'look';
     this.gone = false;
-    box.map = this;
-    this.build();
-    this.describe();
   }
 
-  get info() {
-    return this.widget.info;
-  }
-
-  get handlers() {
-    return this.view.state.facet(noteHandlers);
-  }
-
-  get writable() {
-    return this.widget.writable && !this.view.state.readOnly;
-  }
-
-  get caseId() {
-    return this.info.caseId ?? '';
-  }
-
-  range() {
-    let from;
-    try {
-      from = this.view.posAtDOM(this.box);
-    } catch {
-      return null;
-    }
-    return blocksIn(this.view.state, from).find((block) => block.from === from && block.kind === 'map') ?? null;
-  }
-
-  /** The map worked on is the one picked: the cursor goes to its start, so the note keeps it drawn where it is. */
-  pick() {
-    const range = this.range();
-    const { main } = this.view.state.selection;
-    if (range && !(main.empty && main.head === range.from)) this.view.dispatch({ selection: { anchor: range.from } });
-  }
-
-  // -- drawing --
-
-  build() {
-    const { box } = this;
-    box.className = 'cm-block cm-block-map cm-map-block';
-    box.dataset.block = 'map';
-    const card = element('div', 'cm-map-card');
-    if (this.writable) card.append(this.makeBar());
-    else card.append(element('div', 'cm-played-head', 'Map · interactive in HTML, a picture in the PDF'));
-    this.settingsPanel = element('div', 'cm-map-settings cm-map-ui');
-    this.settingsPanel.hidden = true;
-    this.settingsPanel.addEventListener('keydown', (event) => {
-      if (event.key !== 'Escape' || this.surface?.armed) return;
-      event.preventDefault();
-      event.stopPropagation();
-      this.toggleSettings(false);
-      this.settingsButton?.focus({ preventScroll: true });
-    });
-    this.stage = element('div', 'cm-map-stage');
-    this.stage.tabIndex = -1;
-    this.said = element('div', 'cm-map-said');
-    this.hint = element('p', 'cm-map-hint cm-map-ui');
-    this.hint.hidden = true;
-    const holder = element('div', 'cm-map-holder');
-    holder.append(this.stage, this.said);
-    card.append(this.settingsPanel, holder, this.hint);
-    box.append(card);
-    if (!this.writable) box.append(sourceButton(this.view, box));
-    this.renderSaid();
-  }
-
-  makeBar() {
-    const bar = element('div', 'cm-map-bar cm-map-ui');
-    bar.setAttribute('role', 'toolbar');
-    bar.setAttribute('aria-label', 'Map');
-    bar.append(element('span', 'cm-map-bar-name', 'Map'), element('span', 'cm-map-bar-said', 'interactive in HTML, a picture in the PDF'));
-    bar.append(element('span', 'cm-chart-spring'));
-    const tool = (className, options, run) => {
-      const node = button(`cm-chart-tool ${className}`, options);
-      node.addEventListener('mousedown', (event) => event.preventDefault());
-      node.addEventListener('click', () => {
-        this.pick();
-        run(node);
-      });
-      bar.append(node);
-      return node;
-    };
-    this.drawButton = tool('cm-map-draw', { label: 'Draw', iconName: 'edit', title: 'An area to highlight, a point, a line or an area, on the map' },
-      () => this.toggleSettings(true, 'draw'));
-    this.settingsButton = tool('cm-map-settings-btn', { label: 'Settings', iconName: 'sliders', title: 'Base, layers, frame, timeline, steps and cards' },
-      () => this.toggleSettings());
-    this.settingsButton.setAttribute('aria-pressed', 'false');
-    const source = button('cm-chart-tool cm-chart-source', { label: 'Edit the source', alone: true, title: 'Edit the source' });
-    source.dataset.editSource = 'true';
-    source.addEventListener('mousedown', (event) => {
-      if (event.button !== 0) return;
-      event.preventDefault();
-      this.toSource();
-    });
-    source.addEventListener('click', (event) => {
-      if (event.detail === 0) this.toSource();
-    });
-    bar.append(source);
-    rovingToolbar(bar);
-    return bar;
-  }
+  measure() {}
 
   renderSaid() {
+    if (!this.said) return;
     const title = element('strong', '', this.map.title || 'Map');
     this.said.replaceChildren(title, ...saidOf(this.map).map((part) => element('span', '', part)));
   }
 
-  update(widget) {
-    const before = this.widget;
-    this.widget = widget;
-    this.map = readMap(widget.source);
+  /** Its lines read again: drawn again when they changed, else its card said again. */
+  reread(source, changed) {
+    this.map = readMap(source);
     this.renderSaid();
-    if (widget.source !== before.source || widget.info.caseId !== before.info.caseId) this.describe();
+    if (changed) this.describe();
     else this.settings?.refresh();
   }
+
+  // -- drawing --
 
   /** Read the map again as it shows now, and draw it; the drawing it had stays, paler, till then. */
   describe() {
@@ -203,7 +113,7 @@ class MapBox {
       return;
     }
     this.stage.classList.add('cm-map-loading');
-    const asked = describeMap({ caseId: this.caseId, text: this.widget.source });
+    const asked = describeMap({ caseId: this.caseId, text: this.source });
     this.asked = asked;
     asked.then((answer) => {
       if (this.gone || this.asked !== asked) return;
@@ -222,7 +132,7 @@ class MapBox {
         this.opened = true;
         this.toggleSettings(true, 'draw', { focus: false });
       }
-      this.view.requestMeasure();
+      this.measure();
     });
   }
 
@@ -249,7 +159,7 @@ class MapBox {
     this.hint.hidden = !tool;
     this.hint.textContent = tool ? TOOL_HINTS[tool] ?? '' : '';
     this.box.classList.toggle('cm-map-drawing-on', Boolean(tool));
-    this.view.requestMeasure();
+    this.measure();
   }
 
   // -- writing --
@@ -257,25 +167,6 @@ class MapBox {
   /** Write `changes` (`{ key: value }`, '' or [] taking lines out) as one step. */
   write(changes) {
     return this.edit((source) => withMapSettings(source, changes));
-  }
-
-  /** Change the block's text with `change(source)`, as one step Undo takes back. */
-  edit(change) {
-    if (!this.writable) return false;
-    const range = this.range();
-    if (!range) return false;
-    const source = this.view.state.sliceDoc(range.from, range.to);
-    const next = change(source);
-    if (next === source) return false;
-    this.view.dispatch({
-      changes: lineChanges(source, next).map((piece) => ({ from: range.from + piece.from, to: range.from + piece.to, insert: piece.insert })),
-      annotations: [isolateHistory.of('full'), Transaction.userEvent.of('input.map')],
-    });
-    return true;
-  }
-
-  say(message, actions = [], kind) {
-    this.handlers.tableToast?.(message, actions, kind);
   }
 
   setBusy(words) {
@@ -290,11 +181,11 @@ class MapBox {
    */
   async base(value, { reframe = false } = {}) {
     if (!this.caseId || this.busy) return;
-    const range = this.range();
-    if (!range) return;
+    const text = this.text();
+    if (text == null) return;
     this.setBusy(`base:${FILING[value] ?? 'Filing…'}`);
     try {
-      const answer = await fileGround(this.caseId, { text: this.view.state.sliceDoc(range.from, range.to), base: value });
+      const answer = await fileGround(this.caseId, { text, base: value });
       if (this.gone) return;
       const changes = { base: answer.base ?? '', ground: answer.ground, detail: answer.details ?? [] };
       // a ground filed for a frame looks where the frame is
@@ -379,7 +270,7 @@ class MapBox {
       if (row?.name && !this.map.layers.includes(row.name)) this.write({ layer: [...this.map.layers, row.name] });
       else this.describe();
     };
-    this.handlers.sheetMap?.({
+    this.sheetMap?.({
       onmade: (row) => {
         put(row);
         this.say(`Layer “${row.title}” made from its sheet: ${row.made?.points ?? row.features} points`);
@@ -392,6 +283,12 @@ class MapBox {
   }
 
   // -- the settings --
+
+  /** A tab of its card picked: a tool armed for another is put down. */
+  onTab(id) {
+    this.tab = id;
+    this.surface?.disarm();
+  }
 
   /** Open or close the settings on the map, on `tab`; open, its tabs take the keyboard. */
   toggleSettings(open = this.settingsPanel.hidden, tab = null, { focus = true } = {}) {
@@ -406,7 +303,7 @@ class MapBox {
       this.settingsPanel.hidden = false;
       this.settings = mapSettings(this.settingsPanel, {
         tab: tab ?? this.tab,
-        onTab: (id) => { this.tab = id; this.surface?.disarm(); },
+        onTab: (id) => this.onTab(id),
         state: () => (this.gone ? null : { map: this.map, described: this.described, busy: this.busy }),
         write: (changes) => this.write(changes),
         base: (value, options) => this.base(value, options),
@@ -415,23 +312,179 @@ class MapBox {
         edit: (row, changes) => this.editDrawn(row, changes),
         remove: (row) => this.removed(row),
         overlay: (shapes) => this.surface?.show(shapes),
-        fromSheet: this.handlers.sheetMap ? () => this.fromSheet() : null,
+        fromSheet: this.sheetMap ? () => this.fromSheet() : null,
+        sizedBy: this.sizedBy,
       });
     } else if (tab) this.settings.open(tab);
     this.settingsButton?.setAttribute('aria-pressed', String(open));
     if (open && focus) this.settings.focus();
-    this.view.requestMeasure();
-  }
-
-  toSource() {
-    const range = this.range();
-    if (range) openSource(this.view, range);
+    this.measure();
   }
 
   destroy() {
     this.gone = true;
     this.surface?.disarm();
     this.settings?.destroy();
+  }
+}
+
+/** A map drawn in the note, kept on its box (`box.map`). */
+class MapBox extends MapEditing {
+  constructor(box, widget, view) {
+    super();
+    this.box = box;
+    this.view = view;
+    this.widget = widget;
+    this.map = readMap(widget.source);
+    box.map = this;
+    this.build();
+    this.describe();
+  }
+
+  get info() {
+    return this.widget.info;
+  }
+
+  get handlers() {
+    return this.view.state.facet(noteHandlers);
+  }
+
+  get writable() {
+    return this.widget.writable && !this.view.state.readOnly;
+  }
+
+  get caseId() {
+    return this.info.caseId ?? '';
+  }
+
+  get source() {
+    return this.widget.source;
+  }
+
+  get sheetMap() {
+    return this.handlers.sheetMap ?? null;
+  }
+
+  range() {
+    let from;
+    try {
+      from = this.view.posAtDOM(this.box);
+    } catch {
+      return null;
+    }
+    return blocksIn(this.view.state, from).find((block) => block.from === from && block.kind === 'map') ?? null;
+  }
+
+  /** Its lines as the note holds them now, or null when it is no longer there. */
+  text() {
+    const range = this.range();
+    return range ? this.view.state.sliceDoc(range.from, range.to) : null;
+  }
+
+  measure() {
+    this.view.requestMeasure();
+  }
+
+  /** The map worked on is the one picked: the cursor goes to its start, so the note keeps it drawn where it is. */
+  pick() {
+    const range = this.range();
+    const { main } = this.view.state.selection;
+    if (range && !(main.empty && main.head === range.from)) this.view.dispatch({ selection: { anchor: range.from } });
+  }
+
+  build() {
+    const { box } = this;
+    box.className = 'cm-block cm-block-map cm-map-block';
+    box.dataset.block = 'map';
+    const card = element('div', 'cm-map-card');
+    if (this.writable) card.append(this.makeBar());
+    else card.append(element('div', 'cm-played-head', 'Map · interactive in HTML, a picture in the PDF'));
+    this.settingsPanel = element('div', 'cm-map-settings cm-map-ui');
+    this.settingsPanel.hidden = true;
+    this.settingsPanel.addEventListener('keydown', (event) => {
+      if (event.key !== 'Escape' || this.surface?.armed) return;
+      event.preventDefault();
+      event.stopPropagation();
+      this.toggleSettings(false);
+      this.settingsButton?.focus({ preventScroll: true });
+    });
+    this.stage = element('div', 'cm-map-stage');
+    this.stage.tabIndex = -1;
+    this.said = element('div', 'cm-map-said');
+    this.hint = element('p', 'cm-map-hint cm-map-ui');
+    this.hint.hidden = true;
+    const holder = element('div', 'cm-map-holder');
+    holder.append(this.stage, this.said);
+    card.append(this.settingsPanel, holder, this.hint);
+    box.append(card);
+    if (!this.writable) box.append(sourceButton(this.view, box));
+    this.renderSaid();
+  }
+
+  makeBar() {
+    const bar = element('div', 'cm-map-bar cm-map-ui');
+    bar.setAttribute('role', 'toolbar');
+    bar.setAttribute('aria-label', 'Map');
+    bar.append(element('span', 'cm-map-bar-name', 'Map'), element('span', 'cm-map-bar-said', 'interactive in HTML, a picture in the PDF'));
+    bar.append(element('span', 'cm-chart-spring'));
+    const tool = (className, options, run) => {
+      const node = button(`cm-chart-tool ${className}`, options);
+      node.addEventListener('mousedown', (event) => event.preventDefault());
+      node.addEventListener('click', () => {
+        this.pick();
+        run(node);
+      });
+      bar.append(node);
+      return node;
+    };
+    this.drawButton = tool('cm-map-draw', { label: 'Draw', iconName: 'edit', title: 'An area to highlight, a point, a line or an area, on the map' },
+      () => this.toggleSettings(true, 'draw'));
+    this.settingsButton = tool('cm-map-settings-btn', { label: 'Settings', iconName: 'sliders', title: 'Base, layers, frame, timeline, steps and cards' },
+      () => this.toggleSettings());
+    this.settingsButton.setAttribute('aria-pressed', 'false');
+    const source = button('cm-chart-tool cm-chart-source', { label: 'Edit the source', alone: true, title: 'Edit the source' });
+    source.dataset.editSource = 'true';
+    source.addEventListener('mousedown', (event) => {
+      if (event.button !== 0) return;
+      event.preventDefault();
+      this.toSource();
+    });
+    source.addEventListener('click', (event) => {
+      if (event.detail === 0) this.toSource();
+    });
+    bar.append(source);
+    rovingToolbar(bar);
+    return bar;
+  }
+
+  update(widget) {
+    const before = this.widget;
+    this.widget = widget;
+    this.reread(widget.source, widget.source !== before.source || widget.info.caseId !== before.info.caseId);
+  }
+
+  /** Change the block's text with `change(source)`, as one step Undo takes back. */
+  edit(change) {
+    if (!this.writable) return false;
+    const range = this.range();
+    if (!range) return false;
+    const source = this.view.state.sliceDoc(range.from, range.to);
+    const next = change(source);
+    if (next === source) return false;
+    this.view.dispatch({
+      changes: lineChanges(source, next).map((piece) => ({ from: range.from + piece.from, to: range.from + piece.to, insert: piece.insert })),
+      annotations: [isolateHistory.of('full'), Transaction.userEvent.of('input.map')],
+    });
+    return true;
+  }
+
+  say(message, actions = [], kind) {
+    this.handlers.tableToast?.(message, actions, kind);
+  }
+
+  toSource() {
+    const range = this.range();
+    if (range) openSource(this.view, range);
   }
 }
 

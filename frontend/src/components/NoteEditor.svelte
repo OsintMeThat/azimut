@@ -393,6 +393,10 @@
      * still reads `expected`: the infographic builder's edits. Answers whether it landed.
      */
     replace: (from, to, insert, expected) => Boolean(view && !readOnly && replaceBlock(view, from, to, insert, expected)),
+    /** The editor's theme classes, for a block's card drawn outside it: an infographic's map panel in the builder. */
+    themeClasses: () => view?.themeClasses ?? '',
+    /** *From a sheet…* for a map outside the note's own blocks (an infographic's map panel), null when the note cannot. */
+    get sheetMap() { return handlers.sheetMap; },
     /** Write the cover page at the top, unless there is one: Look › Cover was turned to Your own page. */
     cover: () => Boolean(view && !readOnly && insertCover(view, { focus: false })),
   };

@@ -7869,15 +7869,20 @@ note named by `data:` or `from:` is used (`engine/uses.py`): its delete names th
 main chart, a donut and its map, each made from the note's own tables by the chart's kind
 picker, never numbers it does not hold; a note with none gets an empty page and a line saying
 how to fill it. The page is drawn
-in the note as the server draws it; a press on a panel or on **Edit** opens the builder beside
-the note: the title band, the panels (drag or Alt+↑/↓ to reorder, Half or Wide, × takes one out,
+in the note as the server draws it; a press on **Edit** opens the builder beside the note, and a
+press on a chart or a map of the page opens it with that panel's card open: the title band, the panels (drag or Alt+↑/↓ to reorder, Half or Wide, × takes one out,
 **Add a panel** shows the page's data first, then each table of the note, drawn as every kind it
 fits by the chart's kind picker (a panel made of the data takes it, with no `from:`), the chart
 picked written as one under its table would be, its rows and `from:` with it, then every kind
 *From scratch*, the picker's own cards, the one picked written with its columns and `rows: own`
 and its form opened in its card, and the note's maps, with Words to fill in; pressing a chart's
 row opens the chart's own settings card under it, title, count, by, colour and *Edit the data*,
-its form, each choice written inside the page as one Undo), the look, **One legend for Grade, at
+its form, each choice written inside the page as one Undo; pressing a map's row opens the map's
+own card under it (`editor/infographicMap.js`), its map drawn to frame, step and draw on, then
+Look, Layers, Draw, Time and Cards as on a map of the note, each choice one line of the panel
+inside the page and one Undo, a drawing kept in a personal layer the panel names and the page in
+the note drawn again with it; only Size gives way, since the page sets a panel's width, and says
+*Set on its row above: Half or Wide*), the look, **One legend for Grade, at
 the top**, the
 colours and where each comes from (*Keep these colours for the case* names them in the case's
 palette), what the check says, **Export as a picture** (X 16:9, 4:5, 1:1, the PDF page, SVG)

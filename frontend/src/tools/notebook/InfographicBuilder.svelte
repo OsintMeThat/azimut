@@ -20,7 +20,10 @@
    * Pressing a chart's row opens the chart's own settings card (`editor/chartCard.js`) under
    * it: title, what it counts, by what, coloured by what, and Edit the data, the kind's form;
    * each choice writes that panel's lines inside the infographic, one Undo each. The look is
-   * the page's, set once below.
+   * the page's, set once below. A map's row opens the map's own card (`editor/infographicMap.js`):
+   * the map drawn, to frame and draw on, and its five tabs, each choice one Undo inside the page,
+   * Size left to the row's Half or Wide. A press on a panel of the page in the note opens the
+   * builder with that panel's card open.
    *
    * On top, the **Data** bar: what the page's charts are drawn from (`data:`, a sheet of the
    * case or a table of a note), its rows, how many panels read it and whether it changed since
@@ -46,6 +49,7 @@
     removePanel, withLegend, withPanelText, withSetting, withWidth,
   } from '../../lib/notes/editor/infographicText.js';
   import { chartPanel, noteMaps, noteTables } from '../../lib/notes/editor/infographicPanels.js';
+  import { mapPanel } from '../../lib/notes/editor/infographicMap.js';
   import { chartKinds, drawChart } from '../../lib/notes/editor/chartFigure.js';
   import { chartForm, chartSettings, rowsSaid, scratchGallery, starterBlock } from '../../lib/notes/editor/chartCard.js';
   import { OWN_ROWS, compareRows, readChart, withSettings, withTable } from '../../lib/notes/editor/chartText.js';
@@ -189,8 +193,10 @@
   // -- the panels ----------------------------------------------------------------------
   let dragging = $state(-1);
   let over = $state(-1);
-  // the panel pressed in the note, picked once when the builder opens
+  // the panel pressed in the note, picked once when the builder opens, its card open
   let focused = $state((() => panel)());
+  /** Whether a panel opens a card of its settings: a chart's or a map's. */
+  const carding = (one) => one?.kind === 'chart' || one?.kind === 'map';
   function drop(target) {
     // a title typed in a card is written first, to the panel it is about
     if (dragging >= 0 && target >= 0 && dragging !== target) {
@@ -215,7 +221,9 @@
 
   // -- a chart panel's settings: the chart's own card, writing inside the page ---------
   /** The panel whose card is open, its index, or -1, and whether it shows its settings or its form. */
-  let carded = $state(-1);
+  let carded = $state((() => (panel !== null && carding(read?.panels[panel]) ? panel : -1))());
+  /** The tab a map's card opens on: the one picked last. */
+  let mapTab = $state('look');
   let cardForm = $state(false);
   let cardHost = $state(null);
   let cardDrawn = $state(null);
@@ -231,7 +239,7 @@
   }
   function pressRow(index, one) {
     focused = index;
-    if (one.kind !== 'chart') return;
+    if (!carding(one)) return;
     if (carded === index) { closeCard(); return; }
     closeCard();
     carded = index;
@@ -247,8 +255,10 @@
     untrack(() => {
       host.replaceChildren();
       host.classList.remove('cf-form');
+      const isMap = read?.panels[index]?.kind === 'map';
+      host.classList.toggle('ib-map-card', isMap);
       const write = (changes) => edit((source) => withPanelText(source, index, withSettings(panelText(source, index), changes)));
-      made = card = form
+      made = card = isMap ? openMap(host, index) : form
         ? chartForm(host, {
           state: () => ({ source: block ? panelText(block.source, index) : '', drawn: cardDrawn }),
           // rows its form writes are the panel's own: the page's data never takes them over
@@ -268,12 +278,31 @@
         });
       card.focus();
     });
+    // its row and as much of it as fits, in sight
+    const shown = requestAnimationFrame(() => reveal(host));
     // a picker the card opened goes with it, the builder closed included
-    return () => made?.destroy();
+    return () => {
+      cancelAnimationFrame(shown);
+      made?.destroy();
+    };
   });
+  /** A card just opened brought into the builder's sight: all of it, else its row at the top. */
+  function reveal(host) {
+    const scroller = host.closest('.ib-scroll');
+    const row = host.closest('.ib-card-row')?.previousElementSibling;
+    if (!scroller || !row) return;
+    const view = scroller.getBoundingClientRect();
+    const below = host.getBoundingClientRect().bottom - view.bottom;
+    if (below > 0) scroller.scrollBy({ top: Math.min(below, row.getBoundingClientRect().top - view.top) });
+  }
   $effect(() => {
     const now = cardText;
     if (!now || !caseId) return;
+    // a map's card reads its lines again, and draws itself
+    if (untrack(() => read?.panels[carded]?.kind) === 'map') {
+      untrack(() => card?.update?.(now));
+      return;
+    }
     let live = true;
     drawChart({ caseId, noteId: noteKey, text: now }).then((answer) => {
       if (!live) return;
@@ -283,6 +312,33 @@
     untrack(() => card?.refresh());
     return () => { live = false; };
   });
+  /** A map panel's own card in `host`: each choice its lines written inside the page, one Undo. */
+  function openMap(host, index) {
+    const own = (source) => (readInfographic(source).panels[index]?.kind === 'map' ? panelText(source, index) : null);
+    return mapPanel(host, {
+      caseId,
+      source: block ? panelText(block.source, index) : '',
+      text: () => {
+        const one = infographicsIn(editor?.text?.() ?? '')[k];
+        return one ? own(one.source) : null;
+      },
+      edit: (change) => edit((source) => {
+        const lines = own(source);
+        return lines === null ? source : withPanelText(source, index, change(lines));
+      }),
+      say: (message, actions = [], kind = 'info') => toast(message, kind, actions.length ? 8000 : 4000, actions.length ? actions : null),
+      sheetMap: editor?.sheetMap ?? null,
+      themes: editor?.themeClasses?.() ?? '',
+      tab: mapTab,
+      onTab: (id) => (mapTab = id),
+      // Escape: the card closes, the keyboard back on its row
+      onclose: () => {
+        const row = host.closest('.ib-card-row')?.previousElementSibling?.querySelector('.ib-panel-name');
+        closeCard();
+        row?.focus();
+      },
+    });
+  }
   /** What a panel's row says of its rows: read from the data (changed since), or its own source. */
   function panelFrom(index) {
     if (data.panels.differs.includes(index)) return 'data changed';
@@ -505,7 +561,7 @@
       <section class="ib-part" aria-labelledby="ib-panels">
         <h3 class="ib-head" id="ib-panels">Panels <span class="ib-aside">drag to reorder</span></h3>
         <ol class="ib-panels">
-          {#each read.panels as one, index (`${index}:${one.kind}:${one.title}`)}
+          {#each read.panels as one, index (`${index}:${one.kind}`)}
             <li class="ib-panel" class:ib-over={over === index && dragging !== index} class:ib-picked={focused === index}
               draggable="true"
               ondragstart={(event) => { dragging = index; event.dataTransfer?.setData('text/plain', String(index)); }}
@@ -515,8 +571,8 @@
               ondragend={() => { dragging = -1; over = -1; }}>
               <span class="ib-grip" title="Drag to reorder, or Alt+↑ and Alt+↓"><Icon name="grip" size={13} /></span>
               <Icon name={PANEL_ICONS[one.kind] ?? 'chart'} size={13} />
-              <button type="button" class="ib-panel-name" aria-expanded={one.kind === 'chart' ? carded === index : undefined}
-                title={one.kind === 'chart' ? `${one.title || panelName(one)} · its settings · Alt+↑ and Alt+↓ move it`
+              <button type="button" class="ib-panel-name" aria-expanded={carding(one) ? carded === index : undefined}
+                title={carding(one) ? `${one.title || panelName(one)} · its settings · Alt+↑ and Alt+↓ move it`
                   : `${one.title || panelName(one)} · Alt+↑ and Alt+↓ move it`}
                 onfocus={() => (focused = index)} onclick={() => pressRow(index, one)} onkeydown={(event) => rowKey(event, index)}>
                 <span class="ib-panel-title">{one.title || panelName(one)}</span>
@@ -536,7 +592,7 @@
             {#if carded === index}
               <li class="ib-card-row">
                 <div class="ib-card" bind:this={cardHost}></div>
-                {#if !cardForm}<p class="ib-note">The look is the page’s, set under Look.</p>{/if}
+                {#if !cardForm && one.kind === 'chart'}<p class="ib-note">The look is the page’s, set under Look.</p>{/if}
               </li>
             {/if}
           {/each}
@@ -786,5 +842,38 @@
   .ib-scratch :global(.cf-scratch-needs) { font-size: 10.5px; }
   .ib-card:global(.cf-form) { padding: 10px; border-bottom: none; }
   .ib-card :global(.cm-chart-edit-data) { margin-left: 0; font-size: var(--fs-xs); font-weight: 600; }
+  /* a map panel's card: the map, then its tabs (`editor/infographicMap.js`), each field over its choice at the builder's width */
+  .ib-card:global(.ib-map-card) { padding: 0; gap: 0; overflow: hidden; }
+  .ib-card :global(.ib-map) { height: auto; font-size: var(--fs-sm); }
+  .ib-card :global(.ib-map .cm-map-holder) { padding: 8px; }
+  .ib-card :global(.ib-map .cm-map-hint) { margin: 0 8px 8px; }
+  .ib-card :global(.ib-map .cm-map-settings) { border-top: 1px solid var(--border); border-bottom: none; }
+  .ib-card :global(.ib-map .cm-map-tabs) { gap: 0; padding: 4px 4px 0; }
+  .ib-card :global(.ib-map .cm-map-tab) { padding: 0 9px; }
+  .ib-card :global(.ib-map .cm-map-tab-body) { gap: 12px; padding: 10px 10px 12px; }
+  .ib-card :global(.ib-map .cm-map-field), .ib-card :global(.ib-map .cm-map-grid .cm-map-field) { grid-template-columns: minmax(0, 1fr); gap: 4px; }
+  .ib-card :global(.ib-map .cm-map-field > *), .ib-card :global(.ib-map .cm-map-steps > .cm-map-act) { grid-column: 1; }
+  .ib-card :global(.ib-map .cm-map-field-name:empty) { display: none; }
+  .ib-card :global(.ib-map .cm-map-grid) { grid-template-columns: minmax(0, 1fr); gap: 12px; }
+  .ib-card :global(.ib-map .cm-chart-seg) { justify-self: start; max-width: 100%; }
+  .ib-card :global(.ib-map .cm-chart-seg-btn) { min-width: 0; padding: 0 8px; overflow: hidden; text-overflow: ellipsis; }
+  /* a layer: its switch, colours, name and count, then its colour under them */
+  .ib-card :global(.ib-map .cm-map-list .cm-map-row:not(.cm-map-drawn-row)) { flex-wrap: wrap; row-gap: 5px; }
+  .ib-card :global(.ib-map .cm-map-row:not(.cm-map-drawn-row) > .cm-map-row-name) { flex: 1 1 0; }
+  .ib-card :global(.ib-map .cm-map-row:not(.cm-map-drawn-row) > .cm-map-colour) { flex: 1 0 calc(100% - 22px); margin-left: 22px; width: auto; }
+  /* a drawing: its kind, name and ×, then its colour and On the map, then its days */
+  .ib-card :global(.ib-map .cm-map-drawn-row > *) { order: 3; }
+  .ib-card :global(.ib-map .cm-map-drawn-row > :is(.cm-map-kind, .cm-map-name, .cm-map-icon-btn)) { order: 1; }
+  .ib-card :global(.ib-map .cm-map-drawn-row > :is(.cm-map-colour, .cm-map-check)) { order: 2; }
+  .ib-card :global(.ib-map .cm-map-drawn-row > .cm-map-name) { flex: 1 1 calc(100% - 64px); }
+  .ib-card :global(.ib-map .cm-map-drawn-row > .cm-map-colour) { flex: 1 1 100px; width: auto; }
+  .ib-card :global(.ib-map .cm-map-drawn-row > .cm-map-date) { flex: 1 1 96px; width: auto; padding-inline: 5px; }
+  /* a step: its number, day and arrows, then its name and its words */
+  .ib-card :global(.ib-map .cm-map-step) { grid-template-columns: 26px minmax(0, 1fr) repeat(4, 26px); row-gap: 4px; }
+  .ib-card :global(.ib-map .cm-map-step > :is(.cm-map-step-n, .cm-map-step-day, .cm-map-icon-btn)) { grid-row: 1; }
+  .ib-card :global(.ib-map .cm-map-step > .cm-map-step-n) { grid-column: 1; }
+  .ib-card :global(.ib-map .cm-map-step > .cm-map-step-day) { grid-column: 2; }
+  .ib-card :global(.ib-map .cm-map-step > .cm-map-step-label) { grid-column: 2 / -1; grid-row: 2; }
+  .ib-card :global(.ib-map .cm-map-step > .cm-map-step-words) { grid-column: 2 / -1; grid-row: 3; }
   .ib-foot { display: flex; gap: 8px; padding: 10px 14px; border-top: 1px solid var(--border); background: var(--bg-1); }
 </style>

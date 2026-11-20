@@ -6,7 +6,7 @@
  *
  * What is drawn on a map is case data, not a line of the note, so the Page pane is told
  * (`mapsChanged`) and draws the page again at once, as it does when a picture's source is
- * stated.
+ * stated; so is an infographic drawn in the note, whose map panels may show it (`onMapsTouched`).
  */
 import { api } from '../api.js';
 
@@ -15,10 +15,20 @@ const base = (caseId) => `/api/cases/${encodeURIComponent(caseId)}/notes/maps`;
 /** Bumped each time what a map draws changes outside its block: the Page pane reads it. */
 export const mapsChanged = $state({ rev: 0 });
 
+/** What hears a map's layer change outside a component: an infographic's page in the note. */
+const hearing = new Set();
+
+/** Hear each time what a map draws changes outside its block; answers how to stop. */
+export function onMapsTouched(listener) {
+  hearing.add(listener);
+  return () => hearing.delete(listener);
+}
+
 /** Say a map's layer changed: what reads it, the Page pane and the cards, read it again. */
 export function touchMaps() {
   mapsChanged.rev += 1;
   described.clear();
+  for (const listener of hearing) listener();
 }
 
 /** The last answers, by case and text, kept while a card is drawn again (a pick, a scroll). */
