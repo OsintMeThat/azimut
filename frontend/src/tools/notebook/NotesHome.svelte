@@ -250,6 +250,8 @@
         </div>
       {:else if !reports.length}
         <p class="empty-note">No note yet. Start one from below, or with New note.</p>
+      {:else}
+        <p class="empty-note">Every note here is a report, listed above.</p>
       {/if}
 
       {#if templates.length}
