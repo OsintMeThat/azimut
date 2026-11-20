@@ -8350,8 +8350,10 @@ browser's side panel (Chrome) or sidebar (Firefox) on the app's own note, framed
 `#notebook?case=…&note=…&solo=1&panel=1` (`components/NotePanel.svelte`), one copy of
 the note with the app's. Its bar picks the case (the workspace's cases and scratch
 sessions, the open one marked), then the note with its picker (Case notes and the
-case's notes), then the save state, **Look** (the Notebook's own, its panel as wide as
-the space allows), **Write | Page** and **Add (+)**. Picking a case writes the note shown, then switches in place to the note pinned
+case's notes), then the save state, the **Ready to publish?** badge, **Look** (the Notebook's own,
+its panel as wide as the space allows), **Write | Page**, **Add (+)** and **Open in Azimut** (↗).
+Under 560 px the bar takes two rows, the case and the note over the actions, which shed their
+words as the panel narrows. Picking a case writes the note shown, then switches in place to the note pinned
 to the side for that case, else Case notes; the address keeps the new case and note,
 and the extension follows: its map panel, Capture and right-click items go to that
 case, and a case picked in the map panel reopens the note on it. Firefox opens its
@@ -8364,6 +8366,29 @@ with no *Open in…* nor ⌖, and a chip opens the record's address in a new tab
 `case` the app's last case opens, with no `note` the note pinned to the side or Case
 notes, and a pick is kept in the address. With no case it says *Open a case in Azimut,
 or pick one in the extension's map panel, then open the note again.*
+
+**What the Notebook offers, in the panel.** A press on an infographic, on one of its panels
+or on its Edit, and `/` › Infographic, slide its builder over the whole panel
+(`InfographicBuilder`), *Back to the note* first in its bar, then Undo and the save state.
+The page is drawn at its top in a third of the height, the panel worked on lit, and a press on
+a panel there opens its card; *Fold* gives the room back, and a panel wider than 700 px sets
+the page beside the builder. Each gesture is one change of the note, so one Undo, from the
+bar's Undo, Ctrl+Z over the builder outside a field, or in the note once back. The data's
+sheet is named rather than opened and To Post is left out, there being no Sheet nor Post
+beside the panel. A put from the extension, another note picked, or the note taken by another
+tab closes it. The **Ready to publish?** badge reads the check the export would make, as the
+Notebook's does, and opens the same panel over the note: its fixes write in the note, archive
+the links or file them as bookmarks, and leave out *Round them* and *Open the claim*, which only
+the Notebook can do. Its foot and the bar's **Open in Azimut** open the note in the Notebook in
+a tab of its own (`#notebook?case=…&note=…&solo=1`) for Export, Editions and What changed; the
+press in the frame opens the tab, so the extension is not asked. The panel then shows the note
+taken there, with *Edit here*. Every other block works in the panel as in the Notebook (a
+chart and its form, a picture wall, a map card and its Draw and steps, a diagram's form, a
+table's settings, a picture's bar, the Story look, a Data bar), except what needs a tool around
+the note: a coordinate has no ⌖, a picture and a citation card no *Open in…* (the card offers
+the record's page alone), and an empty picture cell no *Cut a frame*. A chip opens only a
+record with a web address. Export, Editions, To Post from a selection, Keep as template, Pin to
+the side and Delete stay in the Notebook.
 
 While the panel holds a note, a right-click on any page offers **Cite this page**
 (**Cite this post** on X, Bluesky or Telegram), **Quote the selection** and **Capture
