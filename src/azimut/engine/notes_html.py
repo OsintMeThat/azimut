@@ -1275,8 +1275,8 @@ class _Page:
 
     def _scenes(self, parts: list[str]) -> list[str]:
         """The story layout: each picture and the words after it, up to the next picture,
-        heading, table or diagram, made a scene, and the scenes that follow one another
-        one story (`_story`'s markup), its pictures held still while their words scroll.
+        heading, table, diagram or picture wall, made a scene, and the scenes that follow
+        one another one story (`_story`'s markup), its pictures held still while their words scroll.
         Words with no picture before them, and everything else, stay as the article has
         them; a picture with no words after it stays a figure unless its neighbours have
         some."""
@@ -1316,7 +1316,8 @@ class _Page:
         aligned = re.search(r'data-align="(left|right)"', opening)
         if kind is None or kind.group(1) not in SCENE_FIGURES or aligned or (width and width.group(1) != "100%"):
             return "other"
-        return "picture"
+        # a picture wall never fits a stage whole: it breaks out between the scenes, as a table does
+        return "other" if 'data-chart="pictures"' in opening else "picture"
 
     def _scene_story(self, run: list[tuple[str, list[str]]]) -> str:
         figures: list[str] = []
@@ -2052,52 +2053,53 @@ class _Page:
         group's name, count and flag over its frames, which flow and wrap with the page's
         width. Each frame is its picture at the size of its slot, a press opening it larger
         in the page's lightbox with its label and its credit; its bar and its words under it.
-        The numbers fold under it, as a chart's do."""
+        The numbers fold under it, as a chart's do. In a story it carries the stage's dark
+        paints beside its own, for the band it breaks out in (`_scene_kind`), and with
+        ``story: one group per step`` it is a story of its own (`_wall_story`)."""
         drawing = chart.layout
-        theme = drawing.theme
         groups = notes_chart_wall.wall_facts(drawing.facts)
         ratio = float(drawing.facts.get("ratio") or 1.5)
         slot = (math.ceil(WALL_SLOT * notes_charts.SVG_PIXELS), math.ceil(WALL_SLOT * notes_charts.SVG_PIXELS / ratio))
         bars = bool(drawing.facts.get("bars"))
+        night = _WallNight(chart.drawn(dark=True)) if self.look.web == "story" else _WallNight(None)
         legend = ""
         if drawing.legend:
-            keys = "".join(f'<span class="az-wall-key"><i class="az-wall-bar"{_bar_style(swatch.paint)}></i>'
-                           f"{_text(swatch.value)} <b>{_text(notes_charts.number_text(swatch.total))}</b></span>"
-                           for swatch in drawing.legend)
+            keys = "".join(f'<span class="az-wall-key"><i class="az-wall-bar"{_bar_style(swatch.paint, night.key(at))}>'
+                           f"</i>{_text(swatch.value)} <b>{_text(notes_charts.number_text(swatch.total))}</b></span>"
+                           for at, swatch in enumerate(drawing.legend))
             legend = f'<p class="az-wall-legend">{keys}</p>\n'
-        parts: list[str] = []
-        separated = False
-        for number, group in enumerate(groups):
-            if group.last and not separated and number:
-                parts.append('<div class="az-wall-rule" role="separator"></div>')
-                separated = True
-            head = ""
-            if group.name:
-                flag = notes_chart_wall.flag_svg(group.flag, theme, f"{ident}-flag-{number}", group.name) \
-                    if group.flag else ""
-                count = f'<span class="az-wall-count{" az-wall-lit" if group.lit else ""}">{len(group.items)}</span>'
-                head = (f'<p class="az-wall-head">{flag}<span class="az-wall-name" dir="auto">{_text(group.name)}</span>'
-                        f"{count}</p>")
-            items = "".join(self._wall_item(item, group, slot, bars) for item in group.items)
-            label = f"{group.name}: {len(group.items)}" if group.name else f"{len(group.items)} pictures"
-            parts.append(f'<section class="az-wall-group" aria-label="{_attr(label)}">{head}'
-                         f'<div class="az-wall-items">{items}</div></section>')
         foot = "".join(f'<p class="az-wall-note">{_text(note)}</p>' for note in drawing.notes)
         if drawing.credit:
             foot += f'<p class="az-wall-credit">{_text(drawing.credit)}</p>'
-        shape = f"--az-ratio:{ratio:.4f}"
-        wall = (f'<div class="az-wall" style="{shape}" role="group" aria-label="{_attr(chart.title or "Picture wall")}">\n'
-                f"{legend}<div class=\"az-wall-flow\">{''.join(parts)}</div>\n"
-                + (f'<div class="az-wall-foot">{foot}</div>\n' if foot else "") + "</div>\n")
+        foot = f'<div class="az-wall-foot">{foot}</div>\n' if foot else ""
         table = chart.block.table
         shown = chart.block.shows_table() and table is not None
         numbers = "" if shown else (
             f'<details class="az-chart-numbers"><summary>{notecharts.THE_NUMBERS}</summary>\n'
             f"{notes_charts.data_table_html(drawing, caption=False)}</details>\n")
         caption = self._caption(chart.title, "Chart")
-        figure = (f'<figure class="az-figure az-chart-figure az-wall-figure" data-kind="chart" data-chart="pictures" '
-                  f'id="{ident}">\n{wall}<figcaption>{caption}{numbers}</figcaption>\n</figure>\n')
-        out = [figure if self.folder is None else self._lift_data(figure, ident)]
+        if night.layout is not None and notes_chart_wall.story_steps(chart.block.extra.get("story", "")) \
+                and sum(1 for group in groups if group.name) > 1:
+            made = self._wall_story(chart, ident, groups, ratio, night, legend, caption, foot + numbers)
+        else:
+            parts: list[str] = []
+            separated = False
+            for number, group in enumerate(groups):
+                if group.last and not separated and number:
+                    parts.append('<div class="az-wall-rule" role="separator"></div>')
+                    separated = True
+                head = self._wall_head(group, f"{ident}-flag-{number}", drawing.theme, night) if group.name else ""
+                items = "".join(self._wall_item(item, group, slot, bars, night.paint(number, at))
+                                for at, item in enumerate(group.items))
+                label = f"{group.name}: {len(group.items)}" if group.name else f"{len(group.items)} pictures"
+                parts.append(f'<section class="az-wall-group" aria-label="{_attr(label)}">{head}'
+                             f'<div class="az-wall-items">{items}</div></section>')
+            wall = (f'<div class="az-wall" style="--az-ratio:{ratio:.4f}" role="group" '
+                    f'aria-label="{_attr(chart.title or "Picture wall")}">\n'
+                    f"{legend}<div class=\"az-wall-flow\">{''.join(parts)}</div>\n{foot}</div>\n")
+            made = (f'<figure class="az-figure az-chart-figure az-wall-figure" data-kind="chart" data-chart="pictures" '
+                    f'id="{ident}">\n{wall}<figcaption>{caption}{numbers}</figcaption>\n</figure>\n')
+        out = [made if self.folder is None else self._lift_data(made, ident)]
         if shown and table is not None:
             block_line = self._block_line
             self._block_line = line + table.line
@@ -2108,8 +2110,67 @@ class _Page:
                 self._block_line = block_line
         return out
 
+    def _wall_story(self, chart: notecharts.Chart, ident: str, groups: list[notes_chart_wall.Group], ratio: float,
+                    night: "_WallNight", legend: str, caption: str, foot: str) -> str:
+        """A wall a story steps through, one group a step (``story: one group per step``),
+        in `_story`'s markup so the reader moves it as any story. Each step is a group, or a
+        part of a long one (`notes_chart_wall.stage_steps`): its frames large on the dark
+        stage, laid as `stage_grid` says and sized to the real stage by the style sheet, its
+        name, count and flag over them; its card beside them says its count and its grades.
+        Its title and legend lead it; its credit and its numbers close it."""
+        drawing = chart.layout
+        bars = bool(drawing.facts.get("bars"))
+        order = [swatch.value for swatch in drawing.legend]
+        figures: list[str] = []
+        cards: list[str] = []
+        for number, step in enumerate(notes_chart_wall.stage_steps(groups), 1):
+            group = groups[step.group]
+            shown = group.items[step.start:step.end]
+            across, rows, cell = notes_chart_wall.stage_grid(len(shown), ratio)
+            slot = (math.ceil(cell * notes_charts.SVG_PIXELS), math.ceil(cell * notes_charts.SVG_PIXELS / ratio))
+            items = "".join(self._wall_item(item, group, slot, bars, night.paint(step.group, step.start + at))
+                            for at, item in enumerate(shown))
+            head = self._wall_head(group, f"{ident}-flag-{number}", drawing.theme, night)
+            label = f"{group.name}: {len(group.items)}"
+            figures.append(f'<figure class="az-figure az-wall-stage" data-kind="chart" data-step="{number}" '
+                           f'style="--az-n:{number};--az-cols:{across};--az-rows:{rows}">'
+                           f'<div class="az-wall" style="--az-ratio:{ratio:.4f}"><div class="az-wall-flow">'
+                           f'<section class="az-wall-group" aria-label="{_attr(label)}">{head}'
+                           f'<div class="az-wall-items">{items}</div></section></div></div></figure>\n')
+            flag = notes_chart_wall.flag_svg(group.flag, drawing.theme, f"{ident}-card-{number}", group.name) \
+                if group.flag else ""
+            count = f'<span class="az-wall-count{" az-wall-lit" if group.lit else ""}">{len(group.items)}</span>'
+            part = (f'<p class="az-wall-part">Pictures {step.start + 1}–{step.end} of {len(group.items)}</p>'
+                    if step.end - step.start < len(group.items) else "")
+            grades = "".join(f'<li class="az-wall-key"><i class="az-wall-bar"{_bar_style(paint)}></i>{_text(value)} '
+                             f"<b>{_text(notes_charts.number_text(many))}</b></li>"
+                             for value, many, paint in notes_chart_wall.tally(group.items, order))
+            cards.append(f'<div class="az-story-step az-wall-card" data-step="{number}" style="--az-n:{number}">'
+                         f'<p class="az-wall-head">{flag}<span class="az-wall-name" dir="auto">{_text(group.name)}</span>'
+                         f"{count}</p>{part}" + (f'<ul class="az-wall-grades">{grades}</ul>' if grades else "")
+                         + "</div>\n")
+        title = f'<p class="az-wall-title">{caption.strip()}</p>' if caption else ""
+        return (f'<section class="az-story az-wall-story" id="{ident}" data-chart="pictures" data-steps="{len(cards)}" '
+                f'aria-label="{_attr(chart.title or "Picture wall")}" style="--az-ratio:{ratio:.4f}">\n'
+                f'<div class="az-story-lead">{title}{legend}</div>\n'
+                f'<div class="az-story-figures">\n{"".join(figures)}</div>\n'
+                f'<div class="az-story-steps">\n{"".join(cards)}</div>\n'
+                + (f'<div class="az-wall-end">{foot}</div>\n' if foot else "") + "</section>\n")
+
+    def _wall_head(self, group: notes_chart_wall.Group, ident: str, theme: notes_charts.ChartTheme,
+                   night: "_WallNight") -> str:
+        """A group's name, its count and its flag, the flag drawn again for a dark stage in a story."""
+        flag = ""
+        if group.flag:
+            flag = notes_chart_wall.flag_svg(group.flag, theme, ident, group.name)
+            if night.layout is not None:
+                flag += notes_chart_wall.flag_svg(group.flag, night.layout.theme, f"{ident}-dark", group.name).replace(
+                    'class="az-wall-flag ', 'class="az-wall-flag az-wall-flag-dark ', 1)
+        count = f'<span class="az-wall-count{" az-wall-lit" if group.lit else ""}">{len(group.items)}</span>'
+        return f'<p class="az-wall-head">{flag}<span class="az-wall-name" dir="auto">{_text(group.name)}</span>{count}</p>'
+
     def _wall_item(self, item: notes_chart_wall.Item, group: notes_chart_wall.Group, slot: tuple[int, int],
-                   bars: bool) -> str:
+                   bars: bool, dark: notes_charts.Paint | None = None) -> str:
         """One frame of a wall: its picture in its slot, opening larger, its bar and its words."""
         said = ", ".join(part for part in (item.said, group.name, item.value) if part) or "Picture"
         frame = item.frame
@@ -2128,7 +2189,7 @@ class _Page:
         if not picture:
             picture = f'<span class="az-wall-empty" role="img" aria-label="{_attr(said)}">{notes_chart_wall.NO_PICTURE}</span>'
         # a row with no value keeps its bar's place, empty, so the words under the frames line up
-        painted = _bar_style(item.paint) or ' style="--bar:transparent"'
+        painted = _bar_style(item.paint, dark) or ' style="--bar:transparent"'
         bar = f'<i class="az-wall-bar"{painted}></i>' if bars else ""
         words = ""
         if item.label or item.words:
@@ -2210,7 +2271,8 @@ class _Page:
                        f"{_text(notes_infographic.sentence(page.credit))}</p>\n")
         whole = ""
         if self.folder is not None:
-            drawn_page = notes_infographic.read(self.case, body, look=self.look, note_text=self._note_text, origins=False)
+            drawn_page = notes_infographic.read(self.case, body, look=self.look, note_text=self._note_text, origins=False,
+                                                still=True)
             picture = notes_infographic.picture(drawn_page, "page")
             address = self.folder.put(picture, graphic.title or "infographic", ".png")
             whole = (f'<p class="az-ig-whole"><a href="{_attr(address)}" download>'
@@ -3044,14 +3106,38 @@ def _img(uri: str, size: tuple[int, int], alt: str, classes: str = "") -> str:
     return f'<img{kind} src="{uri}" alt="{_attr(alt)}"{sized} decoding="async">'
 
 
-def _bar_style(paint: notes_charts.Paint | None) -> str:
-    """A wall's bar in a value's paint, as the chart paints it: filled, hatched or outlined."""
+def _bar_style(paint: notes_charts.Paint | None, dark: notes_charts.Paint | None = None) -> str:
+    """A wall's bar in a value's paint, as the chart paints it: filled, hatched or outlined;
+    given the paint it takes on a story's dark stage, that one too (``--bar-d``)."""
     if paint is None:
         return ""
     style = f"--bar:{paint.colour}"
+    if dark is not None and dark.colour != paint.colour:
+        style += f";--bar-d:{dark.colour}"
     if paint.hatch:
-        return f' style="{style};--hatch:{paint.hatch}" data-hatch'
+        style += f";--hatch:{paint.hatch}"
+        if dark is not None and dark.hatch and dark.hatch != paint.hatch:
+            style += f";--hatch-d:{dark.hatch}"
+        return f' style="{style}" data-hatch'
     return f' style="{style}" data-outline' if paint.outline else f' style="{style}"'
+
+
+@dataclass
+class _WallNight:
+    """A wall drawn again in the dark look, for the paints its bars and flags take on a
+    story's dark stage; None out of a story."""
+
+    layout: notes_charts.Layout | None
+
+    def paint(self, group: int, item: int) -> notes_charts.Paint | None:
+        groups = notes_chart_wall.wall_facts(self.layout.facts) if self.layout is not None else []
+        if group < len(groups) and item < len(groups[group].items):
+            return groups[group].items[item].paint
+        return None
+
+    def key(self, at: int) -> notes_charts.Paint | None:
+        legend = self.layout.legend if self.layout is not None else []
+        return legend[at].paint if at < len(legend) else None
 
 
 def _zoom_button(picture: str, alt: str) -> str:

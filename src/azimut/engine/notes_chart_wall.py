@@ -32,6 +32,12 @@ largest frames that let the whole wall fit.
 **Its pictures** are the case's own files (`notes_charts.Frame`), read by each painter at
 its own size; the credit line names where they come from, read from the media. A cell
 naming no picture of the case is drawn as an empty frame, and the check says which.
+
+**In a story page** (`notes_html`) the wall is never held on the stage whole: it breaks out
+the window's width between the scenes, in the stage's dark colours. ``story: one group per
+step`` makes each group a scene of its own instead: its frames large on the stage, as many as
+the stage holds (`stage_steps`, `stage_grid`), a card beside them saying its count and its
+grades. Every other painter reads the wall as it always does.
 """
 
 from __future__ import annotations
@@ -73,9 +79,29 @@ PICTURE_HEADER = re.compile(r"\b(?:pictures?|photos?|photographs?|images?|frames
 LABEL_HEADER = re.compile(r"^(?:#|n[o°º]?\.?|nr\.?|id|ref\.?|label|name)$", re.I)
 NONE_WORDS = ("none", "no", "nothing", "")
 #: The settings a wall reads beyond the common ones.
-KEYS = ("picture", "label", "words", "shape", "flag", "flags")
+KEYS = ("picture", "label", "words", "shape", "flag", "flags", "story")
 #: What an empty frame says.
 NO_PICTURE = "No picture"
+#: How a story page shows the wall (``story:``), by the words that write it: whole between its
+#: scenes (False), or one group a step on the story's stage (True). The editor writes the first
+#: of each.
+STORY_STEPS = "one group per step"
+STORY_WORDS = {"whole": False, "whole wall": False, "wall": False, STORY_STEPS: True,
+               "one group a step": True, "group by group": True, "by group": True, "groups": True, "steps": True}
+#: The stage a story steps through a wall's groups on, in CSS pixels: what a laptop's window
+#: leaves it under a group's name. The page sizes the frames to the real one (`reader.chart.css`).
+STAGE_WIDTH = 800.0
+STAGE_HEIGHT = 700.0
+#: Room between frames on the stage, and what stands under each (its bar and its label).
+STAGE_GAP_X = 6.0
+STAGE_GAP_Y = 10.4
+STAGE_UNDER = 28.0
+#: The most frames one step holds: a longer group takes as many steps as it needs.
+STAGE_MOST = 16
+#: The widest a frame stands on the stage, and how much smaller a layout of more frames to a
+#: line may be and still be taken, a stage being wider than tall.
+STAGE_LARGEST = 440.0
+STAGE_WIDER = 0.9
 
 
 def picture_ref(cell: str) -> str:
@@ -86,6 +112,12 @@ def picture_ref(cell: str) -> str:
     if found:
         return found.group(1)
     return text if PICTURE_ID.match(text) else ""
+
+
+def story_steps(written: str) -> bool | None:
+    """Whether ``story:`` asks a story page to step through the groups, one a step; None when
+    it cannot be read. Left out, the whole wall."""
+    return STORY_WORDS.get(" ".join(str(written or "").casefold().split()) or "whole")
 
 
 def shape_of(written: str) -> tuple[int, int] | None:
@@ -462,6 +494,59 @@ def plot_pictures(reading: "Reading", theme: "ChartTheme", box: "Box") -> "Plot"
                           "wall": groups, "groups": [(group.name, len(group.items)) for group in groups]})
 
 
+# -- in a story -------------------------------------------------------------------------------
+
+
+@dataclass(frozen=True)
+class Step:
+    """One step a story takes through a wall: its group's place, and the frames it shows."""
+
+    group: int
+    start: int
+    end: int
+
+
+def stage_steps(groups: list[Group]) -> list[Step]:
+    """One step a group, a group of more than `STAGE_MOST` frames cut into as few even parts
+    as hold them, so no frame is left out and none stands too small to read."""
+    out: list[Step] = []
+    for index, group in enumerate(groups):
+        count = len(group.items)
+        size = math.ceil(count / max(1, math.ceil(count / STAGE_MOST))) if count else 1
+        out.extend(Step(index, start, min(count, start + size)) for start in range(0, count, size))
+    return out
+
+
+def stage_cell(count: int, across: int, ratio: float) -> float:
+    """A frame's width on the nominal stage, ``count`` frames laid ``across`` to a line."""
+    rows = math.ceil(count / across)
+    wide = (STAGE_WIDTH - (across - 1) * STAGE_GAP_X) / across
+    tall = ((STAGE_HEIGHT - (rows - 1) * STAGE_GAP_Y) / rows - STAGE_UNDER) * ratio
+    return min(wide, tall, STAGE_LARGEST)
+
+
+def stage_grid(count: int, ratio: float) -> tuple[int, int, float]:
+    """How a step lays ``count`` frames: across, lines, and a frame's width on the nominal
+    stage. The largest frames that let them all stand on it, or more to a line when those
+    are nearly as large, since the stage is wider than tall."""
+    count = max(1, count)
+    cells = {across: stage_cell(count, across, ratio) for across in range(1, count + 1)}
+    largest = max(cells.values())
+    across = max(across for across, cell in cells.items() if cell >= largest * STAGE_WIDER)
+    return across, math.ceil(count / across), cells[across]
+
+
+def tally(items: list[Item], order: list[str]) -> list[tuple[str, int, "Paint | None"]]:
+    """The values of the colour column ``items`` wear, each with how many and its paint, in
+    the legend's ``order``; a frame with no value is not counted."""
+    found: dict[str, list[Item]] = {}
+    for item in items:
+        if item.value:
+            found.setdefault(item.value, []).append(item)
+    ranked = sorted(found, key=lambda value: order.index(value) if value in order else len(order))
+    return [(value, len(found[value]), found[value][0].paint) for value in ranked]
+
+
 def _data_table(reading: "Reading", groups: list[Group]) -> tuple[list[str], list[list[str]]]:
     """The frames as a table a screen reader reads: label, words, group, colour value."""
     table = reading.table
@@ -569,7 +654,8 @@ def credits(reading: "Reading") -> list[str]:
 
 def check_pictures(reading: "Reading") -> list["Check"]:
     """No column of pictures, one a setting names that is not there, rows with no picture or
-    one the case no longer holds, a shape it cannot read; then the flags, as silhouette rows'."""
+    one the case no longer holds, a shape or a ``story:`` it cannot read, a story stepping
+    through groups it does not have; then the flags, as silhouette rows'."""
     from . import notes_chart_kinds as kinds
 
     out: list[Check] = []
@@ -610,6 +696,13 @@ def check_pictures(reading: "Reading") -> list["Check"]:
     if shape_of(extra.get("shape", "")) is None:
         out.append(kinds._check(reading, f'cannot read "shape: {extra.get("shape", "")[:20]}": write 3:2, 4:3, 1:1, '
                                          f"16:9, 4:5 or 2:3.", "shape"))
+    steps = story_steps(extra.get("story", ""))
+    if steps is None:
+        out.append(kinds._check(reading, f'cannot read "story: {extra.get("story", "")[:24]}": write '
+                                         f"{STORY_STEPS}, or leave it out for the whole wall.", "story"))
+    elif steps and reading.by is None:
+        out.append(kinds._check(reading, "has no groups to step through in a story: name them with by:, or the "
+                                         "story shows it whole.", "story"))
     return out + kinds.check_glyphs(reading)
 
 

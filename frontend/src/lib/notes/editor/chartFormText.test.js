@@ -3,11 +3,12 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
 
-import { OWN_ROWS, withSettings } from './chartText.js';
+import { OWN_ROWS, readChart, withSettings } from './chartText.js';
 import { inherits } from './infographicText.js';
 import {
-  FORMS, SCRATCH_KINDS, atPrecision, baseHeading, caseDay, countedRows, eventRows, formKind, hasRows, leftOutSaid, pictureCell, pictureRef,
-  pictureRows, readColours, readFloor, readForm, readWhen, starterBlock, wallPictureColumn, writeColours, writeForm, writeWhen,
+  FORMS, SCRATCH_KINDS, TIMELINE_LAYOUTS, atPrecision, baseHeading, caseDay, countedRows, eventRows, formKind, hasRows, layoutSaid, leftOutSaid,
+  pictureCell, pictureRef, pictureRows, readColours, readFloor, readForm, readWhen, starterBlock, timelineColumns, timelineLayout,
+  wallPictureColumn, writeColours, writeForm, writeWhen,
 } from './chartFormText.js';
 
 /**
@@ -215,5 +216,45 @@ describe('a picture wall', () => {
       { picture: '[[media:e_1|vehicle-07.jpg]]', label: '#7', words: '', group: '', colour: '' },
       { picture: '[[media:e_2|Harbour at dawn.png]]', label: 'Harbour at dawn', words: '', group: '', colour: '' },
     ]);
+  });
+});
+
+describe('a timeline’s kinds, layout and labels', () => {
+  const BLOCK = ['::: chart', 'kind: timeline', 'colour by: Kind', 'layout: numbered', 'labels: short', '| Day | What | Kind |', '| --- | --- | --- |',
+    '| 9 Oct 2026 | The strait announced cleared | Claim |', '| 19 Oct 2026 | Footage on the north edge | Geolocated |', ':::'].join('\n');
+
+  it('reads the column its events are coloured by, its layout and its short labels', () => {
+    const { model } = readForm(BLOCK);
+    expect(model.heads).toEqual({ when: 'Day', what: 'What', until: 'Until', colour: 'Kind' });
+    expect(model.rows[0]).toEqual({ when: '9 Oct 2026', what: 'The strait announced cleared', until: '', colour: 'Claim' });
+    expect(model.layout).toBe('numbered');
+    expect(model.short).toBe(true);
+    // a layout it does not know reads as Auto; a column no setting names is still more than it reads
+    expect(readForm(BLOCK.replace('layout: numbered', 'layout: diagonal')).model.layout).toBe('auto');
+    expect(readForm(BLOCK.replace('colour by: Kind\n', '')).form).toBe(null);
+  });
+
+  it('writes the kinds’ column and its line only once an event has one, and Auto and full labels as no line', () => {
+    const { model } = readForm(BLOCK);
+    expect(writeForm(BLOCK, 'timeline', model)).toBe(BLOCK);
+    const plain = writeForm(BLOCK, 'timeline', { ...model, layout: 'auto', short: false, rows: model.rows.map((row) => ({ ...row, colour: '' })) });
+    expect(plain).toBe(['::: chart', 'kind: timeline', '| Day | What |', '| --- | --- |', '| 9 Oct 2026 | The strait announced cleared |',
+      '| 19 Oct 2026 | Footage on the north edge |', ':::'].join('\n'));
+    const started = readForm(starterBlock('timeline')).model;
+    const one = writeForm(starterBlock('timeline'), 'timeline', { ...started, layout: 'list', rows: [{ when: '5 Oct 2026', what: 'Offensive opens', until: '', colour: 'Claim' }] });
+    expect(one).toBe(['::: chart', 'kind: timeline', 'colour by: Kind', 'layout: list', '| When | What happened | Kind |', '| --- | --- | --- |',
+      '| 5 Oct 2026 | Offensive opens | Claim |', ':::'].join('\n'));
+  });
+
+  it('offers to colour by the columns that are neither its days nor its words, and says the layout drawn', () => {
+    const table = readChart(BLOCK).table;
+    expect(timelineColumns(table, readChart(BLOCK))).toEqual({ when: 'Day', what: 'What', until: '', colours: ['Kind'] });
+    expect(timelineColumns(table, readChart(BLOCK.replace('colour by: Kind\n', ''))).colours).toEqual(['Kind']);
+    expect(timelineLayout(readChart(BLOCK))).toBe('numbered');
+    expect(layoutSaid('auto', 'numbered')).toBe('Drawn numbered here');
+    expect(layoutSaid('across', 'numbered')).toBe('Too crowded across: drawn numbered');
+    expect(layoutSaid('list', 'list')).toBe('');
+    expect(layoutSaid('auto', undefined)).toBe('');
+    expect(TIMELINE_LAYOUTS.map((one) => one.value)).toEqual(['auto', 'across', 'numbered', 'list']);
   });
 });

@@ -181,17 +181,24 @@ class Chart:
         return _cut(f"{head.rstrip('.')}. {lines}." if lines else head, MAX_ALT)
 
     def drawn(self, width: float = DOCUMENT_WIDTH, *, dark: bool = False, title: bool = not IN_DOCUMENT,
-              room: float | None = None) -> Layout:
+              room: float | None = None, still: bool = False) -> Layout:
         """The chart laid out again: another width, the dark look, with its title, within
-        ``room`` (a page) for a kind that lays itself smaller to fit."""
+        ``room`` (a page) for a kind that lays itself smaller to fit, ``still`` for a
+        picture nothing hovers over (`notes_charts.Box.still`)."""
         theme = theme_of(self.look, self.block, dark=dark)
         return notes_charts.layout(self.block, theme=theme, palette=self.palette, note_text=self.note_text,
-                                   width=width, title=title, pictures=self.pictures, room=room)
+                                   width=width, title=title, pictures=self.pictures, room=room, still=still)
 
     def png(self, width_px: int, *, dpi: int | None = None, room: float | None = None) -> bytes:
-        """The document's drawing painted ``width_px`` pixels wide; taller than ``room`` (a
-        page's height, in the document's CSS pixels), laid again to stand within it."""
-        drawing = self.layout if room is None or self.layout.height <= room else self.drawn(room=room)
+        """The document's drawing painted ``width_px`` pixels wide, as a picture nothing hovers
+        over: laid again when the page's drawing cut words it shows whole on hover (a
+        timeline's short labels), or when it is taller than ``room`` (a page's height, in the
+        document's CSS pixels), to stand within it."""
+        hovers = bool(self.layout.facts.get("short"))
+        if hovers or (room is not None and self.layout.height > room):
+            drawing = self.drawn(room=room, still=True)
+        else:
+            drawing = self.layout
         return notes_charts.render_png(drawing, width_px, dpi=dpi)
 
     def picture(self, destination: str) -> bytes:

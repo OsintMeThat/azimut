@@ -22,9 +22,9 @@ Other Markdown readers show the settings as a paragraph, then the table.
 **The settings** (`KEYS`; every other line is named by the check, never a crash):
 - ``kind``: bars, columns, stacked bars, stacked columns, or one of the kinds
   `notes_chart_kinds` draws (pie, donut, segments, pictograms, silhouette rows, waffle,
-  key figures, timeline, line, circles) or the picture wall `notes_chart_wall` draws,
-  registered at this module's foot. ``bars:
-  across`` or ``bars: up`` turns a bar kind, and stands a segmented bar up.
+  key figures, line, circles), the timeline `notes_chart_timeline` draws (``layout``,
+  ``labels``) or the picture wall `notes_chart_wall` draws, registered at this module's
+  foot. ``bars: across`` or ``bars: up`` turns a bar kind, and stands a segmented bar up.
 - ``count``: the number column, or ``rows`` to count rows. Left out, a table with one
   number column counts it, and any other counts rows.
 - ``by``: the column whose values are the bars (the first text column if left out).
@@ -816,13 +816,16 @@ def nice_scale(largest: float, *, most: int = 5, whole: bool = True) -> Scale:
 class Box:
     """Where a kind lays its plot: ``height`` None lets it take what it needs, and
     ``room``, when given, is the most it should (a page): a kind that can lay itself
-    smaller to stay within it (a picture wall) does, and takes no more than it needs."""
+    smaller to stay within it (a picture wall) does, and takes no more than it needs.
+    ``still`` is a drawing nothing hovers over (a PDF, a picture): words a page would show
+    whole on hover (a timeline's short labels) are printed whole."""
 
     x: float
     y: float
     width: float
     height: float | None = None
     room: float | None = None
+    still: bool = False
 
 
 @dataclass
@@ -1853,7 +1856,7 @@ def _fit(text: str, width: float, size: float, the_face: Face, bold: bool) -> st
 def layout(block: ChartBlock, *, theme: ChartTheme | None = None, palette: Sequence[Mapping[str, str]] = (),
            note_text: str = "", width: float = 640.0, height: float | None = None,
            title: bool = True, noun: str = "", legend: bool = True, credit: bool = True,
-           pictures: PictureLookup | None = None, room: float | None = None) -> Layout:
+           pictures: PictureLookup | None = None, room: float | None = None, still: bool = False) -> Layout:
     """The chart laid out ``width`` CSS pixels wide: the title (unless the page's own figure
     caption carries it), the caption, the legend, the plot, the notes and the credit line.
     ``height`` fixes the frame (a picture for X or a square), the plot taking what is left;
@@ -1861,7 +1864,8 @@ def layout(block: ChartBlock, *, theme: ChartTheme | None = None, palette: Seque
     kind that can lay itself smaller (a picture wall) stays within.
     ``legend`` and ``credit`` False leave those two to a page that draws them once for
     several charts (an infographic): `Layout.legend` and `Layout.credit` still say them.
-    ``pictures`` finds the case's pictures a picture wall shows."""
+    ``pictures`` finds the case's pictures a picture wall shows; ``still`` lays it for a
+    painter nothing hovers over (`Box.still`)."""
     theme = theme or theme_for(block.style or "report")
     reading = read(block, theme=theme, palette=palette, note_text=note_text, pictures=pictures)
     width = max(240.0, float(width))
@@ -1902,7 +1906,7 @@ def layout(block: ChartBlock, *, theme: ChartTheme | None = None, palette: Seque
     _, foot_height = _foot(notes, drawn_credit, theme, pad, inner)
     box_height = None if height is None else max(40.0, height - y - foot_height - pad)
     box_room = None if room is None or height is not None else max(40.0, room - y - foot_height - pad)
-    plot = reading.kind.plot(reading, theme, Box(pad, y, inner, box_height, box_room))
+    plot = reading.kind.plot(reading, theme, Box(pad, y, inner, box_height, box_room, still))
     if plot.legend is not None:
         swatches_said = plot.legend
     y += plot.height if box_height is None else max(box_height, plot.height)
@@ -2437,23 +2441,24 @@ DESTINATIONS: dict[str, Destination] = {
 def render(block: ChartBlock, destination: str = "page", *, theme: ChartTheme | None = None,
            palette: Sequence[Mapping[str, str]] = (), note_text: str = "", title: bool = True,
            pictures: PictureLookup | None = None) -> bytes:
-    """The chart as a PNG for one of `DESTINATIONS`. A frame of fixed size that cannot
-    hold every bar at its words' size is laid wider and drawn smaller, never cut."""
+    """The chart as a PNG for one of `DESTINATIONS`, laid as a picture nothing hovers
+    over (`Box.still`). A frame of fixed size that cannot hold every bar at its words'
+    size is laid wider and drawn smaller, never cut."""
     where = DESTINATIONS.get(destination) or DESTINATIONS["page"]
     design = where.design
     if where.height is None:
         chart = layout(block, theme=theme, palette=palette, note_text=note_text, width=design, title=title,
-                       pictures=pictures)
+                       pictures=pictures, still=True)
     else:
         ratio = where.height / where.width
         chart = layout(block, theme=theme, palette=palette, note_text=note_text, width=design,
-                       height=design * ratio, title=title, pictures=pictures)
+                       height=design * ratio, title=title, pictures=pictures, still=True)
         for _ in range(4):
             if chart.height <= design * ratio + 0.5:
                 break
             design *= chart.height / (design * ratio) * 1.02
             chart = layout(block, theme=theme, palette=palette, note_text=note_text, width=design,
-                           height=design * ratio, title=title, pictures=pictures)
+                           height=design * ratio, title=title, pictures=pictures, still=True)
     return render_png(chart, where.width, height=where.height, dpi=where.dpi)
 
 
@@ -2725,8 +2730,11 @@ WAFFLE = register(Kind("waffle", "Waffle", _kinds.plot_waffle, words=("waffle ch
 KEY_FIGURES = register(Kind("key figures", "Key figures", _kinds.plot_figures,
                             words=("figures", "stat tiles", "tiles", "stats"), fits=_kinds.fits_figures,
                             sort="as written", legend=False, counts=False))
-TIMELINE = register(Kind("timeline", "Timeline", _kinds.plot_timeline, words=("time line", "chronology", "sequence"),
-                         fits=_kinds.fits_timeline, sort="as written", counts=False, check=_kinds.check_timeline))
+from . import notes_chart_timeline as _timeline  # noqa: E402  (the timeline draws with this module's marks)
+
+TIMELINE = register(Kind("timeline", "Timeline", _timeline.plot_timeline, words=("time line", "chronology", "sequence"),
+                         keys=_timeline.KEYS, fits=_timeline.fits_timeline, sort="as written", counts=False,
+                         check=_timeline.check_timeline))
 LINE = register(Kind("line", "Line", _kinds.plot_line, words=("line chart", "lines"), fits=_kinds.fits_line,
                      sort="as written", legend=False, counts=False, check=_kinds.check_line))
 CIRCLES = register(Kind("circles", "Circles", _kinds.plot_circles, words=("circle comparison", "compare circles"),

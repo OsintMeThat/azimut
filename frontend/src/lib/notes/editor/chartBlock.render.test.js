@@ -305,6 +305,40 @@ describe('the settings, on the chart', () => {
     expect(text()).toBe(CHARTED);
   });
 
+  it('says how a story page shows a picture wall with groups, whole or one group per step, each one line', async () => {
+    const WALL = { name: 'pictures', label: 'Picture wall', counts: true, per_row: true, parts: false, stacked: false, style: 'report',
+      keys: ['picture', 'label', 'words', 'shape', 'flag', 'flags', 'story'] };
+    server.figure = () => answer({ kind: WALL, title: 'At least 2 vehicles, one by one' });
+    const block = (...settings) => ['::: chart', 'kind: pictures', 'title: At least 2 vehicles, one by one', ...settings, 'picture: Picture', 'label: #',
+      '| Picture | # | Model | Grade |', '| --- | --- | --- | --- |', '| e_0000000001 | #1 | Streit Cougar | Confirmed |',
+      '| e_0000000002 | #2 | BATT UMG | Almost sure |', ':::'].join('\n');
+    const WALLED = `Words.\n\n${block('by: Model', 'colour by: Grade')}\n`;
+    await opened(WALLED);
+    const story = () => card().querySelector('[aria-label="In a story"]');
+    const choices = () => [...story().querySelectorAll('button')].map((node) => [node.textContent, node.getAttribute('aria-checked')]);
+    expect(choices()).toEqual([['Whole wall', 'true'], ['One group per step', 'false']]);
+    press(story().querySelectorAll('button')[1]);
+    expect(text()).toBe(WALLED.replace('label: #\n', 'label: #\nstory: one group per step\n'));
+    await settle();
+    expect(choices()).toEqual([['Whole wall', 'false'], ['One group per step', 'true']]);
+    undo(view);
+    expect(text()).toBe(WALLED);
+    view.destroy();
+
+    // the same words written another way read the same, and Whole wall takes the line out
+    const STEPPED = `Words.\n\n${block('by: Model', 'colour by: Grade', 'story: Groups')}\n`;
+    await opened(STEPPED);
+    expect(choices()).toEqual([['Whole wall', 'false'], ['One group per step', 'true']]);
+    press(story().querySelectorAll('button')[0]);
+    expect(text()).toBe(STEPPED.replace('story: Groups\n', ''));
+    view.destroy();
+
+    // a wall of one group has nothing to step through
+    await opened(`Words.\n\n${block('colour by: Grade')}\n`);
+    expect(story()).toBeNull();
+    expect(card().querySelector('[aria-label="Shape"]')).not.toBeNull();
+  });
+
   it('shows the table or not, and takes a whole look, each one line', async () => {
     await opened();
     const show = card().querySelector('[aria-label="Show"]');
@@ -317,6 +351,53 @@ describe('the settings, on the chart', () => {
     expect(text()).toBe(CHARTED.replace('from: note:n1#count', 'from: note:n1#count\nstyle: book'));
     undo(view);
     expect(text()).toBe(CHARTED);
+  });
+});
+
+describe('a timeline’s settings', () => {
+  const TIMELINE = { name: 'timeline', label: 'Timeline', counts: false, parts: false, stacked: false, style: 'report', keys: ['layout', 'labels'], layout: 'numbered' };
+  const BLOCK = ['::: chart', 'kind: timeline', 'title: The announcements', '| Day | What | Kind |', '| --- | --- | --- |',
+    '| 9 Oct 2026 | The strait announced cleared | Claim |', '| 19 Oct 2026 | Footage on the north edge | Geolocated |', ':::'].join('\n');
+  const DOC = `Words.\n\n${BLOCK}\n`;
+
+  it('lays it out, colours it by a column and shortens its labels, each one line and one Undo', async () => {
+    server.figure = () => answer({ kind: TIMELINE, title: 'The announcements', proposed: '' });
+    editor(DOC);
+    await settle();
+    press(tool('settings'));
+    // what a timeline is about: not a count nor a by, but its layout, its colours and its labels
+    expect(field('Count')).toBe(null);
+    expect(field('By')).toBe(null);
+    const layout = () => field('Layout');
+    expect([...layout().querySelectorAll('button')].map((one) => [one.textContent, one.getAttribute('aria-checked')]))
+      .toEqual([['Auto', 'true'], ['Across', 'false'], ['Numbered', 'false'], ['List', 'false']]);
+    expect(layout().querySelector('button').title).toBe('Up to 8 events across, up to 20 numbered, more as a list; always a list on a phone');
+    expect(layout().closest('.cm-chart-field').querySelector('.cm-chart-field-note').textContent).toBe('Drawn numbered here');
+    press(layout().querySelectorAll('button')[1]);
+    expect(text()).toBe(DOC.replace('title: The announcements\n', 'title: The announcements\nlayout: across\n'));
+    undo(view);
+    expect(text()).toBe(DOC);
+    // neither the days nor the words colour it
+    expect([...field('Coloured by').options].map((option) => option.textContent)).toEqual(['One colour', 'Kind']);
+    choose('Coloured by', 'Kind');
+    expect(text()).toBe(DOC.replace('title: The announcements\n', 'title: The announcements\ncolour by: Kind\n'));
+    undo(view);
+    const labels = field('Labels');
+    expect([...labels.querySelectorAll('button')].map((one) => [one.textContent, one.getAttribute('aria-checked')]))
+      .toEqual([['Full', 'true'], ['Short', 'false']]);
+    press(labels.querySelectorAll('button')[1]);
+    expect(text()).toBe(DOC.replace('title: The announcements\n', 'title: The announcements\nlabels: short\n'));
+    undo(view);
+    expect(text()).toBe(DOC);
+  });
+
+  it('says when an across too crowded for its lanes was numbered', async () => {
+    server.figure = () => answer({ kind: TIMELINE, title: 'The announcements', proposed: '' });
+    editor(DOC.replace('title: The announcements\n', 'title: The announcements\nlayout: across\n'));
+    await settle();
+    press(tool('settings'));
+    expect(field('Layout').querySelectorAll('button')[1].getAttribute('aria-checked')).toBe('true');
+    expect(card().querySelector('.cm-chart-field-note').textContent).toBe('Too crowded across: drawn numbered');
   });
 });
 

@@ -9,7 +9,8 @@
  *   sheet instead;
  * - **the settings**: only what a chart is about, in plain words: its title, what it
  *   counts, by what, coloured by what (a picture wall's groups, the colour of the bar under
- *   each picture and their shape), its icons for a chart of glyphs (`chartIcons.js`),
+ *   each picture, their shape and how a story shows it; a timeline's layout and its short
+ *   labels), its icons for a chart of glyphs (`chartIcons.js`),
  *   whether its table shows under it, and its look (Report, Book, Dark), each a whole
  *   preset; the colours it chose on its own, and the press that keeps them for the case;
  *   and *Edit the data*, the kind's form, when its rows are in the form's shape.
@@ -25,7 +26,7 @@
  */
 import { button, openPopover } from './gridMenu.js';
 import { chartKinds } from './chartFigure.js';
-import { WALL_SHAPES, readForm } from './chartFormText.js';
+import { SHORT_SAID, TIMELINE_LAYOUTS, WALL_SHAPES, layoutSaid, readForm, timelineColumns, timelineLayout } from './chartFormText.js';
 import { scratchCards, titleField } from './chartForm.js';
 import { chartIcons } from './chartIcons.js';
 import { ROWS, SHOWS, STYLES, setting } from './chartText.js';
@@ -232,6 +233,11 @@ export const KEEPABLE = ['order', 'grade', 'chart'];
 /** What keeping them says it does, on the button and in the toast. */
 export const KEEP_SAID = 'Name these colours in the case, so every chart, map and layer paints them the same';
 
+/** A wall a story page steps through, one group a step (`notes_chart_wall.STORY_STEPS`), and every way it may be written. */
+export const WALL_STEPS = 'one group per step';
+const STEP_WORDS = /^(?:one group (?:per|a) step|group by group|by group|groups|steps)$/;
+export const wallSteps = (written) => STEP_WORDS.test(String(written ?? '').toLowerCase().split(/\s+/).filter(Boolean).join(' '));
+
 /** The looks a chart takes, as the card names them. */
 export const STYLE_NAMES = { report: 'Report', book: 'Book', dark: 'Dark' };
 export const SHOW_NAMES = { chart: 'Chart', 'chart and table': 'Chart and table' };
@@ -293,8 +299,9 @@ function select(label, options, value, onChange, { none = '' } = {}) {
   return row;
 }
 
-function segmented(label, options, value, onChange) {
+function segmented(label, options, value, onChange, { title = '' } = {}) {
   const row = element('div', 'cm-chart-field');
+  if (title) row.title = title;
   row.append(element('span', 'cm-chart-field-name', label));
   const group = element('div', 'cm-chart-seg');
   group.setAttribute('role', 'radiogroup');
@@ -304,6 +311,7 @@ function segmented(label, options, value, onChange) {
     choice.type = 'button';
     choice.setAttribute('role', 'radio');
     choice.setAttribute('aria-checked', String(option.value === value));
+    if (option.title) choice.title = option.title;
     choice.addEventListener('mousedown', (event) => event.preventDefault());
     choice.addEventListener('click', () => {
       if (option.value !== value) onChange(option.value);
@@ -385,7 +393,18 @@ export function chartSettings(panel, { state, write, keep = null, source = null,
     title.render();
     renderData(chart, kind);
     const fields = [];
-    if (kind.per_row) {
+    const timeline = kind.name === 'timeline';
+    if (timeline) {
+      // a timeline reads its own columns: how it is laid, and the column whose values colour its events
+      const asked = timelineLayout(chart);
+      const layout = segmented('Layout', TIMELINE_LAYOUTS, asked, (value) => write({ layout: value === 'auto' ? '' : value }));
+      layout.classList.add('cm-chart-span');
+      const said = layoutSaid(asked, kind.layout);
+      if (said) layout.append(element('span', 'cm-chart-field-note', said));
+      fields.push(layout);
+      const colours = timelineColumns(chart.table, chart).colours.map((value) => ({ value, label: value }));
+      fields.push(select('Coloured by', colours, chosen(colours, setting(chart, 'colour by')), (value) => write({ 'colour by': value }), { none: 'One colour' }));
+    } else if (kind.per_row) {
       // a picture wall counts its rows: its groups, the colour of the bar under each picture, their shape
       const by = chosen(choices.colour, setting(chart, 'by'));
       fields.push(select('Groups', choices.colour, by, (value) => write(cardChanges('by', value, { kind })), { none: 'One group' }));
@@ -394,6 +413,11 @@ export function chartSettings(panel, { state, write, keep = null, source = null,
       const shape = setting(chart, 'shape') || WALL_SHAPES[0];
       fields.push(segmented('Shape', WALL_SHAPES.map((value) => ({ value, label: value })), shape,
         (value) => write({ shape: value === WALL_SHAPES[0] ? '' : value })));
+      // a story page shows the wall whole between its scenes, or steps through its groups
+      if (by) {
+        fields.push(segmented('In a story', [{ value: '', label: 'Whole wall' }, { value: WALL_STEPS, label: 'One group per step' }],
+          wallSteps(setting(chart, 'story')) ? WALL_STEPS : '', (value) => write({ story: value })));
+      }
     } else if (kind.counts !== false) {
       const count = setting(chart, 'count');
       fields.push(select('Count', choices.count, chosen(choices.count, count) || (count ? count : ROWS), (value) => write(cardChanges('count', value, { kind }))));
@@ -412,6 +436,9 @@ export function chartSettings(panel, { state, write, keep = null, source = null,
     columns.hidden = !fields.length;
     icons.refresh();
     looks.replaceChildren(
+      ...(timeline ? [segmented('Labels', [{ value: 'full', label: 'Full' }, { value: 'short', label: 'Short' }],
+        setting(chart, 'labels').toLowerCase() === 'short' ? 'short' : 'full', (value) => write({ labels: value === 'short' ? 'short' : '' }),
+        { title: SHORT_SAID })] : []),
       segmented('Show', SHOWS.map((value) => ({ value, label: SHOW_NAMES[value] })), setting(chart, 'show') || 'chart',
         (value) => write(cardChanges('show', value, { kind }))),
       segmented('Style', STYLES.map((value) => ({ value, label: STYLE_NAMES[value] })), setting(chart, 'style') || kind.style || 'report',
