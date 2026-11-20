@@ -6,8 +6,8 @@ import { describe, expect, it } from 'vitest';
 import { OWN_ROWS, withSettings } from './chartText.js';
 import { inherits } from './infographicText.js';
 import {
-  FORMS, SCRATCH_KINDS, atPrecision, baseHeading, caseDay, countedRows, eventRows, formKind, hasRows, leftOutSaid, readColours, readFloor, readForm,
-  readWhen, starterBlock, writeColours, writeForm, writeWhen,
+  FORMS, SCRATCH_KINDS, atPrecision, baseHeading, caseDay, countedRows, eventRows, formKind, hasRows, leftOutSaid, pictureCell, pictureRef,
+  pictureRows, readColours, readFloor, readForm, readWhen, starterBlock, wallPictureColumn, writeColours, writeForm, writeWhen,
 } from './chartFormText.js';
 
 /**
@@ -171,5 +171,49 @@ describe('Fill from the case', () => {
     expect(countedRows(answer, 'line')).toEqual({ series: ['Identified', 'Almost sure'], rows: [{ x: 'MRAP', values: ['8', '2'] }, { x: 'APC', values: ['3', ''] }] });
     expect(leftOutSaid(answer)).toBe('Left out: 2 with no value, 1 total row.');
     expect(leftOutSaid({})).toBe('');
+  });
+});
+
+describe('a picture wall', () => {
+  it('reads a picture by its chip or its id, as the engine does', () => {
+    expect(pictureRef('[[media:e_13b435e301|Vehicles one by one.jpg]]')).toBe('e_13b435e301');
+    expect(pictureRef('[[entity:e_13b435e301|Proof 17]]')).toBe('e_13b435e301');
+    expect(pictureRef(' e_13b435e301 ')).toBe('e_13b435e301');
+    expect(pictureRef('#7')).toBe('');
+    expect(pictureCell({ id: 'e_1', label: 'a [b] | c.jpg' })).toBe('[[media:e_1|a b  c.jpg]]');
+    expect(formKind('gallery')).toBe('pictures');
+    expect(formKind('Picture wall')).toBe('pictures');
+  });
+
+  it('finds its column of pictures, and reads a wall written by hand with its words left', () => {
+    expect(wallPictureColumn(['#', 'Frame'], [['#1', 'e_0000000001'], ['#2', '[[media:e_0000000002|b]]']])).toBe(1);
+    expect(wallPictureColumn(['Picture', '#'], [])).toBe(0);
+    const block = '::: chart\nkind: picture wall\nby: Model\ncolour by: Grade\n| Frame | # | State | Model | Grade |\n| --- | --- | --- | --- | --- |\n'
+      + '| [[media:e_0000000001|v1.jpg]] | #1 | burned | Cougar | Confirmed |\n:::';
+    const read = readForm(block);
+    expect(read.kind).toBe('pictures');
+    expect(read.model.heads).toEqual({ picture: 'Frame', label: '#', words: 'State', group: 'Model', colour: 'Grade' });
+    expect(read.model.rows).toEqual([{ picture: '[[media:e_0000000001|v1.jpg]]', label: '#1', words: 'burned', group: 'Cougar', colour: 'Confirmed' }]);
+    // a column past what the wall reads is edited as a table
+    expect(readForm(block.replace('| Frame |', '| Frame | Video |').replace('| --- |', '| --- | --- |').replace('| [[media', '| v1 | [[media')).form).toBe(null);
+  });
+
+  it('writes the group and the colour only once a row holds one, and the shape past the first', () => {
+    const empty = '::: chart\nkind: pictures\n:::';
+    const model = { heads: { picture: 'Picture', label: '#', words: 'Words', group: 'Group', colour: 'Grade' }, rows: [
+      { picture: 'e_0000000001', label: '#1', words: '', group: '', colour: '' }], shape: '3:2' };
+    expect(writeForm(empty, 'pictures', model)).toBe('::: chart\nkind: pictures\npicture: Picture\nlabel: #\n| Picture | # |\n| --- | --- |\n| e_0000000001 | #1 |\n:::');
+    const grouped = writeForm(empty, 'pictures', { ...model, shape: '1:1', rows: [{ ...model.rows[0], group: 'Cougar' }] });
+    expect(grouped).toContain('by: Group\n');
+    expect(grouped).toContain('shape: 1:1\n');
+    expect(grouped).toContain('| e_0000000001 | #1 | Cougar |');
+  });
+
+  it('adds the pictures picked from the case a row each, labelled by the number in their name', () => {
+    const entities = [{ id: 'e_1', label: 'vehicle-07.jpg' }, { id: 'e_2', label: 'Harbour at dawn.png' }, { id: 'e_3', label: 'held.jpg' }];
+    expect(pictureRows(entities, [{ picture: '[[media:e_3|held.jpg]]' }])).toEqual([
+      { picture: '[[media:e_1|vehicle-07.jpg]]', label: '#7', words: '', group: '', colour: '' },
+      { picture: '[[media:e_2|Harbour at dawn.png]]', label: 'Harbour at dawn', words: '', group: '', colour: '' },
+    ]);
   });
 });

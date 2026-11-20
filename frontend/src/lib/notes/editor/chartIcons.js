@@ -7,7 +7,8 @@
  *   row's categories, as the engine lists them) its own, written as `icons: Streit Cougar =
  *   own:…, Oshkosh M-ATV = armoured vehicle` (`engine/notes_chart_kinds.py`). Pressed, it
  *   first gives each value the icon named like it, else the chart's icon, and says which.
- * - **Flag**, for silhouette rows: none, or one per category, written as `flags:`.
+ * - **Flag**, for silhouette rows and a picture wall's groups (which take no icon): none, or
+ *   one per category, written as `flags:`.
  * - **The picker**: the analyst's library by group, the app's badges by group and three
  *   plain shapes, with a search, and **Import SVG…**: the same import as Settings › Icons
  *   (`iconImport.js` through `iconLibrary`), its icon taken at once.
@@ -597,7 +598,7 @@ export function chartIcons(host, { state, write, library = iconLibrary }) {
   function refresh() {
     const { chart, drawn } = state() ?? {};
     const keys = drawn?.kind?.keys ?? [];
-    if (!chart || !keys.includes('icon')) {
+    if (!chart || !(keys.includes('icon') || keys.includes('flags'))) {
       host.hidden = true;
       host.replaceChildren();
       return;
@@ -611,7 +612,8 @@ export function chartIcons(host, { state, write, library = iconLibrary }) {
     const values = drawn?.kind?.values ?? [];
     // the rows are drawn again on every change: the keyboard stays on the control it was on
     const focused = host.contains(document.activeElement) ? document.activeElement.dataset.key : null;
-    const rows = [iconRow(chart, values)];
+    // a picture wall wears no icon, only a flag a group
+    const rows = keys.includes('icon') ? [iconRow(chart, values)] : [];
     if (keys.includes('flags')) rows.push(flagRow(chart, values));
     host.replaceChildren(...rows);
     if (focused) [...host.querySelectorAll('[data-key]')].find((node) => node.dataset.key === focused)?.focus({ preventScroll: true });

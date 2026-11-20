@@ -22,7 +22,8 @@ Other Markdown readers show the settings as a paragraph, then the table.
 **The settings** (`KEYS`; every other line is named by the check, never a crash):
 - ``kind``: bars, columns, stacked bars, stacked columns, or one of the kinds
   `notes_chart_kinds` draws (pie, donut, segments, pictograms, silhouette rows, waffle,
-  key figures, timeline, line, circles), registered at this module's foot. ``bars:
+  key figures, timeline, line, circles) or the picture wall `notes_chart_wall` draws,
+  registered at this module's foot. ``bars:
   across`` or ``bars: up`` turns a bar kind, and stands a segmented bar up.
 - ``count``: the number column, or ``rows`` to count rows. Left out, a table with one
   number column counts it, and any other counts rows.
@@ -82,6 +83,12 @@ that draws its own legend (a donut beside its parts) says so. A kind of parts re
 ``by`` column as its colours when none is written; a kind that reads its own columns (a
 timeline) counts nothing, so no title is proposed from a sum, and gives its own
 description and data table. Painters never know a kind.
+
+**Pictures of the case** (a picture wall's frames) are `Frame`s: the layout holds which
+picture goes in which box, and each painter reads it from the case's own files at its own
+size (`Frame.at`), the editor's and the page's SVG at twice its CSS pixels, the PDF at 300
+dpi. ``pictures`` (a lookup the document passes, `notecharts.case_pictures`) finds them;
+without one a frame is drawn empty.
 """
 
 from __future__ import annotations
@@ -93,9 +100,10 @@ import re
 from dataclasses import dataclass, field
 from functools import lru_cache
 from io import BytesIO
+from pathlib import Path
 from typing import TYPE_CHECKING, Any, Callable, Mapping, Sequence, Union
 
-from PIL import Image, ImageDraw, ImageFont
+from PIL import Image, ImageDraw, ImageFont, ImageOps
 
 from . import pdffonts
 from .notetext import COMMENT, EMPHASIS, ENTITY_REF, IMAGE, LINK, MEDIA_REF
@@ -806,12 +814,15 @@ def nice_scale(largest: float, *, most: int = 5, whole: bool = True) -> Scale:
 
 @dataclass(frozen=True)
 class Box:
-    """Where a kind lays its plot: ``height`` None lets it take what it needs."""
+    """Where a kind lays its plot: ``height`` None lets it take what it needs, and
+    ``room``, when given, is the most it should (a page): a kind that can lay itself
+    smaller to stay within it (a picture wall) does, and takes no more than it needs."""
 
     x: float
     y: float
     width: float
     height: float | None = None
+    room: float | None = None
 
 
 @dataclass
@@ -870,6 +881,14 @@ class Kind:
     counts: bool = True
     #: The kind's own checks, said after the common ones (a waffle's whole, an icon).
     check: Callable[["Reading"], list["Check"]] | None = None
+    #: One row is one thing drawn (a picture wall's frame): its rows are counted, never a column.
+    per_row: bool = False
+    #: Words a ``highlight`` may name past the values and the categories (a frame's label).
+    held: Callable[["Reading"], set[str]] | None = None
+    #: What the credit line owes past the table and the ``source`` line (a wall's pictures).
+    credits: Callable[["Reading"], list[str]] | None = None
+    #: The settings the picker writes for this kind, past the common ones (`notes_chart_picker`).
+    propose: Callable[["ChartBlock"], dict[str, str]] | None = None
 
 
 KINDS: dict[str, Kind] = {}
@@ -981,6 +1000,8 @@ class Reading:
     all_rows: int
     #: Bars past `MAX_BARS` summed in one.
     summed: int = 0
+    #: Finds a picture of the case a cell names (`Frame`), None outside a case.
+    pictures: "PictureLookup | None" = None
 
     @property
     def total(self) -> float:
@@ -1003,11 +1024,12 @@ class Reading:
 
 
 def read(block: ChartBlock, *, theme: ChartTheme | None = None, palette: Sequence[Mapping[str, str]] = (),
-         note_text: str = "") -> Reading:
+         note_text: str = "", pictures: "PictureLookup | None" = None) -> Reading:
     """The rows a block keeps, what each counts, and every value's colour.
 
     ``palette`` is the case's named colours (`case_palette`); ``note_text`` the note
-    around the block, read only for whether it calls its figures minimums.
+    around the block, read only for whether it calls its figures minimums; ``pictures``
+    finds the case's pictures a cell names (a picture wall's).
     """
     theme = theme or theme_for(block.style or "report")
     kind = effective_kind(block) or next(iter(KINDS.values()))
@@ -1021,7 +1043,8 @@ def read(block: ChartBlock, *, theme: ChartTheme | None = None, palette: Sequenc
         checks.append(Check(message, kind_of, where, fix))
 
     _check_lines(block, kind, said, warn)
-    empty = Reading(block, kind, table, None, None, None, [], {}, [], [], {}, {}, False, False, checks, [], 0)
+    empty = Reading(block, kind, table, None, None, None, [], {}, [], [], {}, {}, False, False, checks, [], 0,
+                    pictures=pictures)
     if table is None or not table.headers:
         warn(f"{said} holds no table: write its rows under its settings.", MISSING)
         return empty
@@ -1029,9 +1052,10 @@ def read(block: ChartBlock, *, theme: ChartTheme | None = None, palette: Sequenc
         warn(f"{said}: its table needs a line of dashes under its header.", line=table.line)
     rows = table.rows
     empty.all_rows = len(rows)
-    count = _count_column(block, table, rows, said, warn) if kind.counts else None
+    count = _count_column(block, table, rows, said, warn) if kind.counts and not kind.per_row else None
     by = _named_column(block.by, table, said, "by", warn)
-    if by is None:
+    if by is None and not kind.per_row:
+        # a wall with no ``by`` is one group, not a group per picture
         by = next((index for index in range(len(table.headers)) if index != count and not _numeric(rows, index)), 0)
     colour = _named_column(block.colour_by, table, said, "colour by", warn) if block.colour_by else None
     if colour is None and kind.parts and not block.colour_by:
@@ -1129,7 +1153,7 @@ def read(block: ChartBlock, *, theme: ChartTheme | None = None, palette: Sequenc
         for segment in category.segments:
             totals[segment.value] = totals.get(segment.value, 0.0) + segment.amount
     reading = Reading(block, kind, table, count, by, colour, kept, amounts, categories, values, totals, paints,
-                      floor, graded, checks, left_out, len(rows), summed)
+                      floor, graded, checks, left_out, len(rows), summed, pictures)
     _check_reading(reading, said, warn)
     return reading
 
@@ -1354,11 +1378,14 @@ def _check_reading(reading: Reading, said: str, warn: Callable[..., None]) -> No
         warn(f"{said} draws {len(reading.categories)} columns, too many for their names: bars read them across.",
              key="kind", fix=(("kind", "stacked bars" if reading.kind.stacked else "bars"),))
     held = {value.casefold() for value in reading.values} | {category.name.casefold() for category in reading.categories}
+    if reading.kind.held is not None:
+        held |= {word.casefold() for word in reading.kind.held(reading)}
     for value in block.highlight:
         if value.casefold() not in held:
             warn(f'{said} highlights "{_cut(value, 40)}", which no row holds.', key="highlight")
     if reading.kind.counts and reading.floor and not TITLE_FLOOR.search(block.title or ""):
-        proposal = propose_title(reading)
+        # a wall's rows are pictures when nothing else says what they are
+        proposal = propose_title(reading, (noun_of(reading) or "pictures") if reading.kind.per_row else "")
         if block.title:
             message = f'"{_cut(block.title, 60)}" counts at least: say so in its title.'
         else:
@@ -1384,7 +1411,8 @@ def _lower(word: str) -> str:
 def noun_of(reading: Reading) -> str:
     """What a chart counts, read off its title (``Vehicles by model``) or its count column."""
     title = (reading.block.title or "").strip()
-    match = re.match(r"^(?:at least\s+)?(?:[\d.,]+\s+)?(?P<noun>[^\d,].*?)\s*,?\s+(?:by|per|across|in)\s", title, re.I)
+    # the noun stops at a comma: "At least 60 vehicles, one by one" counts vehicles
+    match = re.match(r"^(?:at least\s+)?(?:[\d.,]+\s+)?(?P<noun>[^\d,][^,]*?)\s*,?\s+(?:by|per|across|in)\s", title, re.I)
     if match and match.group("noun").casefold() not in NOT_A_NOUN:
         return _lower(match.group("noun"))
     counted = re.search(r"\b\d[\d,.]*\s+((?:[A-Za-z-]+\s+){0,2}[A-Za-z-]+s)\b", title)
@@ -1428,12 +1456,16 @@ def axis_name(reading: Reading) -> str:
 
 
 def sources_cited(reading: Reading) -> list[str]:
-    """The sources the table's cells cite, by their label, first seen first."""
+    """The sources the table's cells cite, by their label, first seen first. A wall's
+    column of pictures shows them rather than cites them: its media credit themselves."""
     found: list[str] = []
     if reading.table is None:
         return found
+    shown = _wall.columns(reading).picture if reading.kind.per_row else None
     for row in reading.table.cells:
-        for cell in row:
+        for column, cell in enumerate(row):
+            if column == shown:
+                continue
             for match in ENTITY_REF.finditer(cell):
                 label = " ".join(match.group(2).split())
                 if label and label not in found:
@@ -1446,17 +1478,21 @@ def sources_cited(reading: Reading) -> list[str]:
 
 
 def credit_line(reading: Reading) -> str:
-    """The line under a chart that says where its numbers come from."""
+    """The line under a chart that says where its numbers come from, then what its
+    pictures owe (a wall's, from the media they are)."""
     written = reading.block.source.strip()
     cited = [label for label in sources_cited(reading) if label.casefold() not in written.casefold()]
     if len(cited) > MAX_CREDITS:
         cited = [*cited[:MAX_CREDITS], f"and {len(cited) - MAX_CREDITS} more"]
+    owed = reading.kind.credits(reading) if reading.kind.credits is not None and reading.table is not None else []
     if written and re.match(r"^(?:sources?|credits?|data)\b", written, re.I):
-        return "; ".join([written, *cited]) if cited else written
-    parts = [part for part in [written, *cited] if part]
-    if not parts:
-        return ""
-    return f"{'Sources' if len(parts) > 1 else 'Source'}: {'; '.join(parts)}"
+        said = "; ".join([written, *cited]) if cited else written
+    else:
+        parts = [part for part in [written, *cited] if part]
+        said = f"{'Sources' if len(parts) > 1 else 'Source'}: {'; '.join(parts)}" if parts else ""
+    if not owed:
+        return said
+    return ". ".join(part.rstrip(".") for part in [said, *owed] if part)
 
 
 def left_notes(reading: Reading) -> list[str]:
@@ -1558,14 +1594,17 @@ class Group:
 
 @dataclass(frozen=True)
 class Picture:
-    """A picture in a box: an icon of the analyst's own, later a frame on a wall. ``data``
+    """A picture in a box: an icon of the analyst's own, or a frame on a wall. ``data``
     is a PNG or a JPEG; ``cover`` fills the box and crops what is past it, else the whole
     picture is fitted in the box, centred.
 
     An icon kept as a vector too carries it: ``vector``, its shapes as `iconvector` cleaned
     them (already in the part's colour for a silhouette), ``view`` the part of them drawn,
     and ``clip`` the share of its width shown (``data`` is cut the same). The SVG painter
-    draws the shapes and the PNG painter the picture."""
+    draws the shapes and the PNG painter the picture.
+
+    A picture of the case carries its ``source`` instead of bytes, read by each painter at
+    the size it paints the box (`Frame.at`), cropped to the box's shape."""
 
     x: float
     y: float
@@ -1576,6 +1615,92 @@ class Picture:
     vector: str = ""
     view: tuple[float, float, float, float] = (0.0, 0.0, 0.0, 0.0)
     clip: tuple[float, float] = (0.0, 1.0)
+    source: "Frame | None" = None
+
+
+#: The JPEG quality a frame of the case is written at, and the most pixels it is asked for.
+FRAME_QUALITY = 84
+MAX_FRAME_SIDE = 2400
+#: How many frames at one size are kept, so a layout painted twice reads each file once.
+FRAMES_KEPT = 320
+
+
+@dataclass(frozen=True)
+class Frame:
+    """A picture of the case a chart shows (a wall's frame), read from the case's own files
+    and never the network: ``files`` smallest first (its thumbnail, then the picture), the
+    first that covers the size asked being read. ``credit`` says where it comes from, as a
+    picture's credit line does."""
+
+    key: str
+    label: str = ""
+    files: tuple[Path, ...] = ()
+    credit: str = ""
+
+    def at(self, width: int, height: int) -> bytes:
+        """The picture ``width`` × ``height`` pixels, cropped about its middle to that
+        shape: a JPEG, or nothing when no file of it can be read."""
+        width = max(1, min(int(width), MAX_FRAME_SIDE))
+        height = max(1, min(int(height), MAX_FRAME_SIDE))
+        stamps = tuple(_stamp(path) for path in self.files)
+        return _frame_picture(self.files, stamps, width, height)
+
+    def original(self) -> Path | None:
+        """The file a larger copy is read from (a page's lightbox): the picture itself,
+        its thumbnail when the picture is gone."""
+        for path in reversed(self.files):
+            if _stamp(path) is not None:
+                return path
+        return None
+
+
+#: Finds a picture of the case by the id a cell names (`Frame`), or None.
+PictureLookup = Callable[[str], "Frame | None"]
+
+
+def _stamp(path: Path) -> tuple[int, int] | None:
+    try:
+        stat = path.stat()
+    except OSError:
+        return None
+    return (stat.st_mtime_ns, stat.st_size)
+
+
+@lru_cache(maxsize=FRAMES_KEPT)
+def _frame_picture(files: tuple[Path, ...], stamps: tuple[tuple[int, int] | None, ...], width: int,
+                   height: int) -> bytes:
+    """``files``' first picture that covers ``width`` × ``height`` (the last whatever its
+    size), upright, cropped about its middle to that shape and brought to that size."""
+    readable = [(path, stamp) for path, stamp in zip(files, stamps) if stamp is not None]
+    for number, (path, _) in enumerate(readable):
+        last = number == len(readable) - 1
+        try:
+            with Image.open(path) as opened:
+                if opened.width * opened.height > MAX_PICTURE_PIXELS:
+                    continue
+                scale = max(width / max(opened.width, 1), height / max(opened.height, 1))
+                if scale > 1.0 and not last:
+                    continue  # a thumbnail smaller than the box: the picture itself is read
+                if opened.format == "JPEG":
+                    # a large JPEG decoded at the nearest size its blocks give, past the box
+                    opened.draft("RGB", (math.ceil(opened.width * scale), math.ceil(opened.height * scale)))
+                picture = ImageOps.exif_transpose(opened).convert("RGB")
+        except Exception:  # an unreadable file leaves the next one, or an empty frame
+            continue
+        wanted = width / height
+        if picture.width / picture.height > wanted:
+            cut = round(picture.height * wanted)
+            left = (picture.width - cut) // 2
+            picture = picture.crop((left, 0, left + max(1, cut), picture.height))
+        else:
+            cut = round(picture.width / wanted)
+            top = (picture.height - cut) // 2
+            picture = picture.crop((0, top, picture.width, top + max(1, cut)))
+        picture = picture.resize((width, height), Image.Resampling.LANCZOS)
+        buffer = BytesIO()
+        picture.save(buffer, "JPEG", quality=FRAME_QUALITY, optimize=True)
+        return buffer.getvalue()
+    return b""
 
 
 Mark = Union[Rect, Line, Shape, Circle, Text, Group, Picture]
@@ -1727,14 +1852,18 @@ def _fit(text: str, width: float, size: float, the_face: Face, bold: bool) -> st
 
 def layout(block: ChartBlock, *, theme: ChartTheme | None = None, palette: Sequence[Mapping[str, str]] = (),
            note_text: str = "", width: float = 640.0, height: float | None = None,
-           title: bool = True, noun: str = "", legend: bool = True, credit: bool = True) -> Layout:
+           title: bool = True, noun: str = "", legend: bool = True, credit: bool = True,
+           pictures: PictureLookup | None = None, room: float | None = None) -> Layout:
     """The chart laid out ``width`` CSS pixels wide: the title (unless the page's own figure
     caption carries it), the caption, the legend, the plot, the notes and the credit line.
-    ``height`` fixes the frame (a picture for X or a square), the plot taking what is left.
+    ``height`` fixes the frame (a picture for X or a square), the plot taking what is left;
+    ``room``, with no ``height``, is the most the frame should take (a PDF page), which a
+    kind that can lay itself smaller (a picture wall) stays within.
     ``legend`` and ``credit`` False leave those two to a page that draws them once for
-    several charts (an infographic): `Layout.legend` and `Layout.credit` still say them."""
+    several charts (an infographic): `Layout.legend` and `Layout.credit` still say them.
+    ``pictures`` finds the case's pictures a picture wall shows."""
     theme = theme or theme_for(block.style or "report")
-    reading = read(block, theme=theme, palette=palette, note_text=note_text)
+    reading = read(block, theme=theme, palette=palette, note_text=note_text, pictures=pictures)
     width = max(240.0, float(width))
     pad = theme.pad
     inner = width - 2 * pad
@@ -1772,7 +1901,8 @@ def layout(block: ChartBlock, *, theme: ChartTheme | None = None, palette: Seque
     drawn_credit = credit_said if credit else ""
     _, foot_height = _foot(notes, drawn_credit, theme, pad, inner)
     box_height = None if height is None else max(40.0, height - y - foot_height - pad)
-    plot = reading.kind.plot(reading, theme, Box(pad, y, inner, box_height))
+    box_room = None if room is None or height is not None else max(40.0, room - y - foot_height - pad)
+    plot = reading.kind.plot(reading, theme, Box(pad, y, inner, box_height, box_room))
     if plot.legend is not None:
         swatches_said = plot.legend
     y += plot.height if box_height is None else max(box_height, plot.height)
@@ -2137,6 +2267,10 @@ STACKED_COLUMNS = register(Kind("stacked columns", "Stacked columns", _plot_up, 
 # -- the SVG painter ------------------------------------------------------------------------------------
 
 
+#: A picture of the case in an SVG holds twice its CSS pixels, sharp on a dense screen.
+SVG_PIXELS = 2
+
+
 def svg(chart: Layout, *, ident: str = "az-chart", transparent: bool = False,
         faces: Mapping[str, str] | None = None) -> str:
     """The chart as an SVG a page holds inline: real text in the note's faces (``faces``
@@ -2198,10 +2332,12 @@ def svg(chart: Layout, *, ident: str = "az-chart", transparent: bool = False,
         elif isinstance(mark, Picture) and mark.vector and mark.view[2] > 0 and mark.view[3] > 0:
             out.append(_vector(mark, clips, ident))
         elif isinstance(mark, Picture):
-            kind = picture_type(mark.data)
+            data = mark.data or (mark.source.at(math.ceil(mark.w * SVG_PIXELS), math.ceil(mark.h * SVG_PIXELS))
+                                 if mark.source is not None else b"")
+            kind = picture_type(data)
             if kind:
-                fit = "xMidYMid slice" if mark.cover else "xMidYMid meet"
-                out.append(f'<image href="data:image/{kind};base64,{base64.b64encode(mark.data).decode("ascii")}" '
+                fit = "xMidYMid slice" if mark.cover or mark.source is not None else "xMidYMid meet"
+                out.append(f'<image href="data:image/{kind};base64,{base64.b64encode(data).decode("ascii")}" '
                            f'x="{_n(mark.x)}" y="{_n(mark.y)}" width="{_n(mark.w)}" height="{_n(mark.h)}" '
                            f'preserveAspectRatio="{fit}"/>')
         elif isinstance(mark, Text):
@@ -2299,23 +2435,25 @@ DESTINATIONS: dict[str, Destination] = {
 
 
 def render(block: ChartBlock, destination: str = "page", *, theme: ChartTheme | None = None,
-           palette: Sequence[Mapping[str, str]] = (), note_text: str = "", title: bool = True) -> bytes:
+           palette: Sequence[Mapping[str, str]] = (), note_text: str = "", title: bool = True,
+           pictures: PictureLookup | None = None) -> bytes:
     """The chart as a PNG for one of `DESTINATIONS`. A frame of fixed size that cannot
     hold every bar at its words' size is laid wider and drawn smaller, never cut."""
     where = DESTINATIONS.get(destination) or DESTINATIONS["page"]
     design = where.design
     if where.height is None:
-        chart = layout(block, theme=theme, palette=palette, note_text=note_text, width=design, title=title)
+        chart = layout(block, theme=theme, palette=palette, note_text=note_text, width=design, title=title,
+                       pictures=pictures)
     else:
         ratio = where.height / where.width
         chart = layout(block, theme=theme, palette=palette, note_text=note_text, width=design,
-                       height=design * ratio, title=title)
+                       height=design * ratio, title=title, pictures=pictures)
         for _ in range(4):
             if chart.height <= design * ratio + 0.5:
                 break
             design *= chart.height / (design * ratio) * 1.02
             chart = layout(block, theme=theme, palette=palette, note_text=note_text, width=design,
-                           height=design * ratio, title=title)
+                           height=design * ratio, title=title, pictures=pictures)
     return render_png(chart, where.width, height=where.height, dpi=where.dpi)
 
 
@@ -2436,6 +2574,13 @@ def picture_type(data: bytes) -> str:
 
 
 def _paint_picture(canvas: Image.Image, mark: Picture, unit: float) -> None:
+    if mark.source is not None and not mark.data:
+        box_w, box_h = max(1, round(mark.w * unit)), max(1, round(mark.h * unit))
+        data = mark.source.at(box_w, box_h)
+        if picture_type(data):
+            with Image.open(BytesIO(data)) as opened:
+                canvas.paste(opened.convert("RGB"), (round(mark.x * unit), round(mark.y * unit)))
+        return
     if not picture_type(mark.data):
         return
     try:
@@ -2586,3 +2731,11 @@ LINE = register(Kind("line", "Line", _kinds.plot_line, words=("line chart", "lin
                      sort="as written", legend=False, counts=False, check=_kinds.check_line))
 CIRCLES = register(Kind("circles", "Circles", _kinds.plot_circles, words=("circle comparison", "compare circles"),
                         fits=_kinds.fits_circles, legend=False, parts=True, check=_kinds.check_circles))
+
+from . import notes_chart_wall as _wall  # noqa: E402  (the wall draws with this module's marks)
+
+PICTURE_WALL = register(Kind("pictures", "Picture wall", _wall.plot_pictures,
+                             words=("picture wall", "gallery", "photo wall", "pictures wall", "wall of pictures"),
+                             keys=_wall.KEYS, fits=_wall.fits_pictures, sort="as written", per_row=True,
+                             check=_wall.check_pictures, held=_wall.held, credits=_wall.credits,
+                             propose=_wall.propose))

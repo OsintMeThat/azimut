@@ -74,13 +74,13 @@ afterEach(() => {
   document.body.replaceChildren();
 });
 
-function editor(doc) {
+function editor(doc, entities = []) {
   const parent = document.createElement('div');
   document.body.append(parent);
   const handlers = { tableToast: vi.fn(), open: vi.fn(), noteKey: 'c1:n1', noteId: 'n1' };
   view = new EditorView({ parent, state: EditorState.create({ doc, extensions: noteExtensions({ handlers, readOnly: false, mode: 'drawn' }) }) });
   view.setState(focusedState(view.state.update({ selection: EditorSelection.cursor(doc.length) }).state));
-  view.dispatch({ effects: setNoteCase.of({ caseId: 'c1', entities: [] }) });
+  view.dispatch({ effects: setNoteCase.of({ caseId: 'c1', entities }) });
   view.focus = vi.fn();
   return view;
 }
@@ -106,8 +106,8 @@ function fill(node, value) {
 const add = (id) => press(form().querySelector(`.cf-add[data-add="${id}"]`));
 const chartOf = (lines) => ['::: chart', ...lines, ':::'].join('\n');
 
-async function fromScratch(kind, doc = 'Words.\n') {
-  editor(doc);
+async function fromScratch(kind, doc = 'Words.\n', entities = []) {
+  editor(doc, entities);
   startChart(view);
   await settle();
   press(view.dom.querySelector(`.cm-chart-picker button.cf-scratch[data-kind="${kind}"]`));
@@ -357,5 +357,73 @@ describe('Edit the data', () => {
     await settle();
     press(view.dom.querySelector('.cm-chart-settings'));
     expect(view.dom.querySelector('.cm-chart-data').hidden).toBe(true);
+  });
+});
+
+describe('a picture wall from scratch', () => {
+  const picture = (id, label, folder = 'crops') => ({ id, type: 'media', label, attrs: { path: `media/${folder}/${label}`, folder, kind: 'image' } });
+  const ENTITIES = [picture('e_0000000001', 'vehicle-01.jpg'), picture('e_0000000002', 'vehicle-02.jpg'), picture('e_0000000010', 'vehicle-10.jpg'),
+    picture('e_0000000099', 'map.png', '')];
+
+  it('picks each picture from the case, then its words, group and colour, each one Undo; the shape is one press', async () => {
+    drawnKind = { name: 'pictures', label: 'Picture wall', counts: true, per_row: true, keys: ['picture', 'label', 'words', 'shape', 'flag', 'flags'] };
+    await fromScratch('pictures', 'Words.\n', ENTITIES);
+    const STARTER = chartOf(['kind: pictures', 'picture: Picture', 'label: #', '| Picture | # |', '| --- | --- |']);
+    expect(text()).toBe(`Words.\n\n${STARTER}\n`);
+    expect(view.dom.querySelector('.cm-chart-empty').textContent).toBe('Add a picture of the case: the wall is drawn as you fill it.');
+    // the first row's picture takes the keyboard; pressed, it opens the case's pictures
+    expect(document.activeElement).toBe(field(0, 'picture'));
+    expect(field(0, 'picture').classList.contains('cf-picture-empty')).toBe(true);
+    press(field(0, 'picture'));
+    const picker = view.dom.querySelector('.cm-picker');
+    expect([...picker.querySelectorAll('.cm-picker-name')].map((node) => node.textContent)).toEqual(['map.png', 'vehicle-01.jpg', 'vehicle-02.jpg', 'vehicle-10.jpg']);
+    press(picker.querySelector('[data-entity-pick="e_0000000002"]'));
+    const ONE = chartOf(['kind: pictures', 'picture: Picture', 'label: #', '| Picture | # |', '| --- | --- |', '| [[media:e_0000000002|vehicle-02.jpg]] | |']);
+    expect(text()).toBe(`Words.\n\n${ONE}\n`);
+    expect(field(0, 'picture').querySelector('.cf-picture-name').textContent).toBe('vehicle-02.jpg');
+    expect(document.activeElement).toBe(field(0, 'label'));
+
+    fill(field(0, 'label'), '#2');
+    fill(field(0, 'words'), 'burned');
+    fill(field(0, 'group'), 'Streit Cougar');
+    fill(field(0, 'colour'), 'Confirmed');
+    const FILLED = chartOf(['kind: pictures', 'by: Group', 'colour by: Grade', 'picture: Picture', 'label: #', 'words: Words',
+      '| Picture | # | Words | Group | Grade |', '| --- | --- | --- | --- | --- |', '| [[media:e_0000000002|vehicle-02.jpg]] | #2 | burned | Streit Cougar | Confirmed |']);
+    expect(text()).toBe(`Words.\n\n${FILLED}\n`);
+    // the grades are offered as its colour, the groups typed as its group
+    expect([...form().querySelectorAll(`#${field(0, 'colour').getAttribute('list')} option`)].map((node) => node.value))
+      .toEqual(['Confirmed', 'Almost sure', 'Strong doubt', 'Set aside']);
+    expect([...form().querySelectorAll(`#${field(0, 'group').getAttribute('list')} option`)].map((node) => node.value)).toEqual(['Streit Cougar']);
+
+    const square = [...form().querySelectorAll('.cf-seg-btn')].find((node) => node.textContent === '1:1');
+    press(square);
+    expect(text()).toBe(`Words.\n\n${FILLED.replace('words: Words', 'words: Words\nshape: 1:1')}\n`);
+    undo(view);
+    expect(text()).toBe(`Words.\n\n${FILLED}\n`);
+    undo(view);
+    expect(text()).toContain('| [[media:e_0000000002|vehicle-02.jpg]] | #2 | burned | Streit Cougar |\n:::');
+  });
+
+  it('fills from a folder of the case’s pictures, labelled by their number, the ones it shows left unticked', async () => {
+    drawnKind = { name: 'pictures', label: 'Picture wall', counts: true, per_row: true, keys: [] };
+    const BLOCK = chartOf(['kind: pictures', 'picture: Picture', 'label: #', '| Picture | # |', '| --- | --- |', '| [[media:e_0000000002|vehicle-02.jpg]] | #2 |']);
+    editor(`Words.\n\n${BLOCK}\n`, ENTITIES);
+    await settle();
+    view.dom.querySelector('.cm-chart-block').chart.toggleForm(true);
+    press(form().querySelector('.cf-fill-open'));
+    const folder = form().querySelector('.cf-fill select');
+    expect([...folder.options].map((option) => option.textContent)).toEqual(['Every folder', 'No folder', 'crops']);
+    folder.value = 'crops';
+    folder.dispatchEvent(new Event('change', { bubbles: true }));
+    const lines = [...form().querySelectorAll('.cf-fill-line')];
+    expect(lines.map((line) => [line.querySelector('input').checked, line.querySelector('.cf-fill-words').textContent])).toEqual([
+      [true, 'vehicle-01.jpg'], [false, 'vehicle-02.jpg'], [true, 'vehicle-10.jpg']]);
+    expect(lines[1].querySelector('.cf-fill-said').textContent).toBe('already in the wall');
+    const go = form().querySelector('.cf-go');
+    expect(go.textContent).toContain('Add 2 pictures');
+    press(go);
+    expect(text()).toBe(`Words.\n\n${BLOCK.replace('#2 |\n:::', '#2 |\n| [[media:e_0000000001|vehicle-01.jpg]] | #1 |\n| [[media:e_0000000010|vehicle-10.jpg]] | #10 |\n:::')}\n`);
+    undo(view);
+    expect(text()).toBe(`Words.\n\n${BLOCK}\n`);
   });
 });

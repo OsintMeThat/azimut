@@ -22,14 +22,14 @@ export function forgetPickerThumbs() {
 }
 
 /** The address of the small picture a record shows, when one is known. */
-function thumbOf(caseId, entity, made) {
+export function thumbOf(caseId, entity, made) {
   if (entity.type === 'proof') return fileUrl(caseId, entity.attrs.thumb || entity.attrs.path);
   const thumb = made.get(entity.attrs.path);
   return thumb ? fileUrl(caseId, thumb) : '';
 }
 
-/** Ask the case once for the small pictures of `entities` it has not said yet. */
-async function readThumbs(caseId, entities, post) {
+/** Ask the case once for the small pictures of `entities` it has not said yet: a map of path to small picture. */
+export async function readThumbs(caseId, entities, post = api.post) {
   const known = thumbs.get(caseId) ?? new Map();
   thumbs.set(caseId, known);
   const paths = entities.filter((entity) => entity.type !== 'proof' && !known.has(entity.attrs.path)).map((entity) => entity.attrs.path);

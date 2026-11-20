@@ -8,9 +8,12 @@
  * and what happened; key figures as written with the line under them and an *at least*
  * tick; categories and their counts, a split for the stacked kinds, a colour from the
  * case's palette or an icon from the library; a waffle's whole; a line's values along days
- * or numbers, a column a series. Rows are added, dragged by their grip, moved with Alt+↑/↓
- * and taken out. The title field is the settings card's own, with the title the data
- * proposes, *at least* included.
+ * or numbers, a column a series; a picture wall's pictures of the case, each picked from
+ * the case's own (`casePicker.js`) with its label, its words, its group and its colour,
+ * and the shape they are cropped to. Rows are added, dragged by their grip, moved with
+ * Alt+↑/↓ and taken out. The title field is the settings card's own, with the title the data
+ * proposes, *at least* included. A wall's *Fill from the case* adds a folder of the case's
+ * pictures at once, each labelled by the number in its name.
  *
  * **What it writes is the chart block itself**, so it reopens here, or as a grid through
  * The numbers. A cell nobody changed is written back as it was, chips and links kept. An
@@ -24,11 +27,14 @@
  * block's words in place, the one being typed in left alone, so the keyboard stays put.
  */
 import { axisZone } from '../../caseAxis.svelte.js';
+import { fetchAllEntities } from '../../catalog.js';
 import { layerPalette } from '../../map/layerPalette.svelte.js';
+import { casePictures } from '../pictureSize.js';
+import { readThumbs, thumbOf } from './casePicker.js';
 import { caseEvents, chartCounts, chartRows, chartSources } from './chartFigure.js';
 import {
-  CHART_COLOURS, FORMS, PRECISIONS, atPrecision, countedRows, eventRows, filled, isoDay, leftOutSaid, readFloor, readForm,
-  readWhen, writeForm, writeWhen,
+  CHART_COLOURS, FORMS, GRADE_WORDS, PRECISIONS, WALL_SHAPES, atPrecision, countedRows, eventRows, filled, isoDay, leftOutSaid,
+  pictureCell, pictureRef, pictureRows, readFloor, readForm, readWhen, writeForm, writeWhen,
 } from './chartFormText.js';
 import { glyphLabel, glyphNode, glyphWord, openGlyphPicker, readGlyph } from './chartIcons.js';
 import { readChart, setting, withSettings } from './chartText.js';
@@ -127,6 +133,7 @@ const SKETCH = {
   waffle: '<g class="k-c1f"><rect x="14" y="3" width="6" height="6"/><rect x="21" y="3" width="6" height="6"/><rect x="28" y="3" width="6" height="6"/><rect x="35" y="3" width="6" height="6"/><rect x="42" y="3" width="6" height="6"/><rect x="14" y="10" width="6" height="6"/><rect x="21" y="10" width="6" height="6"/><rect x="28" y="10" width="6" height="6"/></g><g class="k-soft"><rect x="35" y="10" width="6" height="6"/><rect x="42" y="10" width="6" height="6"/><rect x="14" y="17" width="6" height="6"/><rect x="21" y="17" width="6" height="6"/><rect x="28" y="17" width="6" height="6"/><rect x="35" y="17" width="6" height="6"/><rect x="42" y="17" width="6" height="6"/><rect x="14" y="24" width="6" height="6"/><rect x="21" y="24" width="6" height="6"/><rect x="28" y="24" width="6" height="6"/><rect x="35" y="24" width="6" height="6"/><rect x="42" y="24" width="6" height="6"/><rect x="14" y="31" width="6" height="6"/><rect x="21" y="31" width="6" height="6"/><rect x="28" y="31" width="6" height="6"/><rect x="35" y="31" width="6" height="6"/><rect x="42" y="31" width="6" height="6"/></g>',
   line: '<path d="M4 34.5h56" class="k-axis"/><path d="M6 28 18 22l12 4 12-12 14-6" class="k-line k-c1s"/><path d="M6 32l12-3 12-6 12 2 14-4" class="k-line k-c2s"/><circle cx="56" cy="8" r="2.4" class="k-c1f"/><circle cx="56" cy="21" r="2.4" class="k-c2f"/>',
   circles: '<circle cx="20" cy="21" r="14" class="k-c1f"/><circle cx="44" cy="25" r="8" class="k-c2f"/><circle cx="57" cy="29" r="4" class="k-c3f"/>',
+  pictures: '<rect x="3" y="2" width="15" height="2.6" rx="1" class="k-mute"/><rect x="3" y="7" width="12" height="8" rx="1" class="k-soft"/><rect x="17" y="7" width="12" height="8" rx="1" class="k-soft"/><rect x="31" y="7" width="12" height="8" rx="1" class="k-soft"/><rect x="45" y="7" width="12" height="8" rx="1" class="k-soft"/><rect x="3" y="16.5" width="12" height="1.8" class="k-c1f"/><rect x="17" y="16.5" width="12" height="1.8" class="k-c1f"/><rect x="31" y="16.5" width="12" height="1.8" class="k-c2f"/><rect x="45" y="16.5" width="12" height="1.8" class="k-c3f"/><rect x="3" y="22" width="11" height="2.6" rx="1" class="k-mute"/><rect x="33" y="22" width="12" height="2.6" rx="1" class="k-mute"/><rect x="3" y="27" width="12" height="8" rx="1" class="k-soft"/><rect x="17" y="27" width="12" height="8" rx="1" class="k-soft"/><rect x="33" y="27" width="12" height="8" rx="1" class="k-soft"/><rect x="3" y="36.5" width="12" height="1.8" class="k-c2f"/><rect x="17" y="36.5" width="12" height="1.8" class="k-c1f"/><rect x="33" y="36.5" width="12" height="1.8" class="k-c3f"/>',
 };
 
 /** A kind drawn as a small sketch for the gallery: shapes only, never a number. */
@@ -164,6 +171,7 @@ const ADDS = {
   figures: [{ id: 'figure', label: 'Figure', title: 'A figure as written and the line under it' }],
   categories: [{ id: 'category', label: 'Category', title: 'A category and its count' }],
   line: [{ id: 'row', label: 'Row', title: 'A value along, and one value a series' }],
+  pictures: [{ id: 'picture', label: 'Picture', title: 'A picture of the case, and what it shows' }],
 };
 
 const blankRow = (family, series = 1) => ({
@@ -171,6 +179,7 @@ const blankRow = (family, series = 1) => ({
   figures: { figure: '', words: '', floor: false },
   categories: { category: '', split: '', count: '' },
   line: { x: '', values: Array.from({ length: series }, () => '') },
+  pictures: { picture: '', label: '', words: '', group: '', colour: '' },
 }[family]);
 
 /** What an empty form says under its columns. */
@@ -179,6 +188,7 @@ const EMPTY_HINT = {
   figures: 'No figure yet: ＋ Figure, then the figure as written and the line under it.',
   categories: 'No category yet: ＋ Category, then its name and its count.',
   line: 'No row yet: ＋ Row, then the value along and one value a series.',
+  pictures: 'No picture yet: ＋ Picture, or Fill from the case with a folder of them.',
 };
 
 /** What Fill from the case reads, on its button and at its head. */
@@ -187,12 +197,14 @@ const FILL_TITLES = {
   figures: 'Counts read from a note’s table or a sheet',
   categories: 'Counts read from a note’s table or a sheet',
   line: 'Values over days read from a note’s table or a sheet',
+  pictures: 'Pictures of the case, a folder at a time',
 };
 const FILL_SAID = {
   timeline: 'The days of the case’s proofs and the events of its Timeline. Nothing is written until you add them.',
   figures: 'Each value of a column counted, or a column of numbers summed, from a note’s table or a sheet: one figure a value.',
   categories: 'Each value of a column counted, or a column of numbers summed, from a note’s table or a sheet.',
   line: 'Rows counted, or a column of numbers summed, day by day, from a note’s table or a sheet.',
+  pictures: 'The case’s pictures, a row each, labelled by the number in their name. Nothing is written until you add them.',
 };
 
 /** How long a day picked with a calendar's arrows rests before it is written, in ms. */
@@ -205,14 +217,19 @@ const stripped = (row) => {
   return cells;
 };
 
+/** Each form's own lists of suggestions (a wall's groups and colours), told apart by this. */
+let lists = 0;
+
 /**
  * The form of the chart `state()` answers, `{ source, drawn }` (the block's text and the
  * figure route's answer), drawn in `panel`. `write(source)` writes the block's new text as
- * one step. `caseId` lets it fill from the case; `onClose` is Escape and its ×. Answers
- * `{ node, refresh, commit, focus, destroy }`; `focus` puts the keyboard in the first field
- * to fill, a new row's when it holds none.
+ * one step. `caseId` lets it fill from the case; `onClose` is Escape and its ×. A picture
+ * wall reads the case's records from `entities()` (else it asks the case for its pictures)
+ * and picks one with `pickPicture(anchor, onPick)` (the note's case picker); without it, a
+ * picture is written as its id. Answers `{ node, refresh, commit, focus, destroy }`; `focus`
+ * puts the keyboard in the first field to fill, a new row's when it holds none.
  */
-export function chartForm(panel, { state, write, caseId = '', palette = layerPalette, onClose = null }) {
+export function chartForm(panel, { state, write, caseId = '', palette = layerPalette, onClose = null, entities = null, pickPicture = null }) {
   panel.classList.add('cf-form');
   panel.setAttribute('role', 'group');
   panel.setAttribute('aria-label', 'The chart’s data');
@@ -256,7 +273,12 @@ export function chartForm(panel, { state, write, caseId = '', palette = layerPal
   fillBox.setAttribute('aria-label', 'Fill from the case');
   const after = element('div', 'cf-after');
   const said = element('p', 'cf-said');
-  panel.replaceChildren(head, titleBox, extra, grid, adds, fillBox, after, said);
+  lists += 1;
+  const groupList = element('datalist');
+  groupList.id = `cf-groups-${lists}`;
+  const colourList = element('datalist');
+  colourList.id = `cf-colours-${lists}`;
+  panel.replaceChildren(head, titleBox, extra, grid, adds, fillBox, after, said, groupList, colourList);
   if (caseId) palette.load?.(caseId);
 
   panel.addEventListener('keydown', (event) => {
@@ -519,6 +541,7 @@ export function chartForm(panel, { state, write, caseId = '', palette = layerPal
       figures: () => plainText(row.figure) || `figure ${index + 1}`,
       categories: () => plainText(row.category) || `row ${index + 1}`,
       line: () => plainText(row.x) || `row ${index + 1}`,
+      pictures: () => plainText(row.label) || plainText(row.picture) || `picture ${index + 1}`,
     }[family]();
   }
 
@@ -600,6 +623,26 @@ export function chartForm(panel, { state, write, caseId = '', palette = layerPal
       }));
       if (form.colours) cells.append(swatch(read, plainText(row.category)));
       if (form.icons) cells.append(iconButton(read, plainText(row.category)));
+    } else if (family === 'pictures') {
+      const { model } = read;
+      const listed = (input, list, className) => {
+        if (list) input.setAttribute('list', list.id);
+        input.classList.add(className);
+        return input;
+      };
+      cells.append(pictureField(row, index), listed(textInput({
+        value: shownCell(row.label), placeholder: model.heads.label, label: model.heads.label, field: 'label',
+        commit: (typed) => setCell(index, 'label', typedCell(row.label, typed)),
+      }), null, 'cf-wall-label'), textInput({
+        value: shownCell(row.words), placeholder: model.heads.words, label: model.heads.words, field: 'words', wide: true,
+        commit: (typed) => setCell(index, 'words', typedCell(row.words, typed)),
+      }), listed(textInput({
+        value: shownCell(row.group), placeholder: model.heads.group, label: model.heads.group, field: 'group',
+        commit: (typed) => setCell(index, 'group', typedCell(row.group, typed)),
+      }), groupList, 'cf-wall-group'), listed(textInput({
+        value: shownCell(row.colour), placeholder: model.heads.colour, label: model.heads.colour, field: 'colour',
+        commit: (typed) => setCell(index, 'colour', typedCell(row.colour, typed)),
+      }), colourList, 'cf-wall-colour'));
     } else {
       if (read.model.days) {
         const precision = rowPrecision(row, index);
@@ -672,6 +715,16 @@ export function chartForm(panel, { state, write, caseId = '', palette = layerPal
         if (old === active) made.focus({ preventScroll: true });
       }
     }
+    if (family === 'pictures') {
+      for (const key of ['label', 'words', 'group', 'colour']) set(key, shownCell(row[key]));
+      if (!pickPicture) set('picture', row.picture);
+      const old = line.querySelector('[data-field="picture"]');
+      if (pickPicture && old && old.dataset.ref !== pictureRef(row.picture)) {
+        const made = pictureField(row, index);
+        old.replaceWith(made);
+        if (old === active) made.focus({ preventScroll: true });
+      }
+    }
     if (family === 'line') {
       if (!read.model.days) set('x', shownCell(row.x));
       (row.values ?? []).forEach((value, at) => set(`value-${at}`, value));
@@ -686,6 +739,103 @@ export function chartForm(panel, { state, write, caseId = '', palette = layerPal
       if (input.value !== value) input.value = value;
       box.dataset.was = when.empty ? '' : writeWhen(when);
     }
+  }
+
+  // -- a wall's pictures --
+
+  /** The case's records read for a wall when the editor gives none, and the small pictures asked of them. */
+  let caseEntities = null;
+  let reading = null;
+  let thumbs = new Map();
+
+  function knownEntities() {
+    const given = typeof entities === 'function' ? entities() : entities;
+    if (Array.isArray(given)) return given;
+    if (caseEntities === null && caseId && !reading) {
+      reading = fetchAllEntities(caseId, { types: ['media', 'capture', 'proof'] }).then((found) => {
+        caseEntities = found;
+        if (!gone) render(true);
+        return found;
+      }, () => {
+        caseEntities = [];
+        return [];
+      });
+    }
+    return caseEntities ?? [];
+  }
+
+  const entityOf = (ref) => (ref ? knownEntities().find((entity) => entity.id === ref) ?? null : null);
+
+  /** Ask once for the small pictures of the records shown, then show them. */
+  function askThumbs(list) {
+    if (!caseId) return;
+    const wanted = list.filter((entity) => entity?.attrs?.path && entity.type !== 'proof' && !thumbs.has(entity.attrs.path));
+    if (!wanted.length) return;
+    Promise.resolve(readThumbs(caseId, wanted)).then((known) => {
+      if (gone || !known) return;
+      thumbs = known;
+      for (const node of panel.querySelectorAll('.cf-picture-thumb:empty')) {
+        const entity = entityOf(node.dataset.ref);
+        const src = entity ? thumbOf(caseId, entity, thumbs) : '';
+        if (src) node.append(thumbImage(src));
+      }
+    });
+  }
+
+  function thumbImage(src) {
+    const image = element('img');
+    image.alt = '';
+    image.loading = 'lazy';
+    image.decoding = 'async';
+    image.src = src;
+    return image;
+  }
+
+  /** A row's picture: its small picture and its name, a press picking another; written as its id where nothing picks. */
+  function pictureField(row, index) {
+    const ref = pictureRef(row.picture);
+    if (!pickPicture) {
+      return textInput({
+        value: row.picture, placeholder: 'e_… or [[media:…]]', label: 'Picture', field: 'picture',
+        commit: (typed) => setCell(index, 'picture', typed),
+      });
+    }
+    const entity = entityOf(ref);
+    const known = knownEntities();
+    const name = entity?.label || plainText(row.picture) || ref;
+    const node = element('button', `cf-picture${ref ? '' : ' cf-picture-empty'}${ref && !entity && known.length ? ' cf-picture-gone' : ''}`);
+    node.type = 'button';
+    node.dataset.field = 'picture';
+    node.dataset.ref = ref;
+    node.setAttribute('aria-haspopup', 'dialog');
+    node.setAttribute('aria-label', ref ? `Picture: ${name}. Press to pick another` : 'Pick a picture of the case');
+    node.title = !ref ? 'Pick a picture of the case' : entity ? entity.label : 'This picture is no longer in the case';
+    const thumb = element('span', 'cf-picture-thumb');
+    thumb.dataset.ref = ref;
+    const src = entity && caseId ? thumbOf(caseId, entity, thumbs) : '';
+    if (src) thumb.append(thumbImage(src));
+    else if (entity) askThumbs([entity]);
+    node.append(thumb, element('span', 'cf-picture-name', ref ? name : 'Pick…'));
+    return pressable(node, () => choosePicture(node, index));
+  }
+
+  function choosePicture(anchor, index) {
+    pickPicture?.(anchor, (entity) => {
+      if (!entity?.id) return;
+      changeRows((rows) => {
+        if (rows[index]) rows[index].picture = pictureCell(entity);
+      });
+      body.querySelector(`[data-row="${index}"] [data-field="label"]`)?.focus();
+    });
+  }
+
+  /** The groups the rows hold and the grades, offered as each row's group and colour are typed. */
+  function renderLists(read) {
+    if (read.form.family !== 'pictures') return;
+    const values = (key) => [...new Set(read.model.rows.map((row) => plainText(row[key]).trim()).filter(Boolean))];
+    groupList.replaceChildren(...values('group').map((value) => choiceOf(value, value)));
+    const colours = [...new Set([...GRADE_WORDS, ...values('colour')])];
+    colourList.replaceChildren(...colours.map((value) => choiceOf(value, value)));
   }
 
   // -- colours and icons --
@@ -805,13 +955,16 @@ export function chartForm(panel, { state, write, caseId = '', palette = layerPal
 
   // -- gestures on rows --
 
-  function addRow(type) {
+  function addRow(type, { pick = false } = {}) {
     const read = now();
     if (!read?.form) return;
     if (read.model.rows.length >= (read.form.most ?? Infinity)) return;
     draft = { family: read.form.family, type, row: blankRow(read.form.family, read.model.series?.length ?? 1) };
     render(true);
-    body.querySelector(`[data-row="${read.model.rows.length}"] [data-field]:not(.cf-precision):not([type="checkbox"])`)?.focus();
+    const first = body.querySelector(`[data-row="${read.model.rows.length}"] [data-field]:not(.cf-precision):not([type="checkbox"])`);
+    first?.focus();
+    // a wall's new row is a picture first: its picker opens at once
+    if (pick && read.form.family === 'pictures' && pickPicture && first) choosePicture(first, read.model.rows.length);
   }
 
   function removeRow(index) {
@@ -910,6 +1063,10 @@ export function chartForm(panel, { state, write, caseId = '', palette = layerPal
       cells.append(named('', 'cf-col-tag'), named('Precision', 'cf-col-precision'), named(model.heads.when, 'cf-col-when'), named(model.heads.what, 'cf-wide'));
     } else if (family === 'figures') {
       cells.append(named('', 'cf-col-tick'), named(model.heads.figure, 'cf-col-figure'), named(model.heads.words, 'cf-wide'));
+    } else if (family === 'pictures') {
+      cells.append(editable('picture', 'Name of the pictures', 'cf-col-picture'), editable('label', 'Name of the labels', 'cf-wall-label'),
+        editable('words', 'Name of the words', 'cf-wide'), editable('group', 'Name of the groups', 'cf-wall-group'),
+        editable('colour', 'Name of the colours', 'cf-wall-colour'));
     } else if (family === 'categories') {
       cells.append(editable('category', 'Name of the categories', 'cf-wide'));
       if (form.split) cells.append(editable('split', 'Name of the split'));
@@ -973,6 +1130,27 @@ export function chartForm(panel, { state, write, caseId = '', palette = layerPal
       row.append(element('span', 'cf-hint', 'Along'), along);
       parts.push(row);
     }
+    if (form.family === 'pictures') {
+      const shapes = element('div', 'cf-seg');
+      shapes.setAttribute('role', 'radiogroup');
+      shapes.setAttribute('aria-label', 'Shape of the pictures');
+      const now2 = model.shape || WALL_SHAPES[0];
+      for (const value of WALL_SHAPES) {
+        const choice = element('button', 'cf-seg-btn', value);
+        choice.type = 'button';
+        choice.setAttribute('role', 'radio');
+        choice.setAttribute('aria-checked', String(now2 === value));
+        choice.title = `Every picture cropped to ${value}`;
+        shapes.append(pressable(choice, () => {
+          if (now2 === value) return;
+          setModel((next) => { next.shape = value; });
+          render(true);
+        }));
+      }
+      const row = element('div', 'cf-along');
+      row.append(element('span', 'cf-hint', 'Shape'), shapes);
+      parts.push(row);
+    }
     if (form.whole) {
       const row = element('div', 'cf-whole');
       const whole = model.whole ?? { name: '', amount: '' };
@@ -997,7 +1175,7 @@ export function chartForm(panel, { state, write, caseId = '', palette = layerPal
       const node = button('cf-add', { label: `＋ ${one.label}`, title: full ? `${form.label} compare ${most} at most` : one.title });
       node.disabled = full;
       node.dataset.add = one.id;
-      return pressable(node, () => addRow(one.id));
+      return pressable(node, () => addRow(one.id, { pick: true }));
     });
     if (form.family === 'line') {
       const series = button('cf-add', { label: '＋ Series', title: 'Another column of values, drawn as its own line' });
@@ -1067,6 +1245,7 @@ export function chartForm(panel, { state, write, caseId = '', palette = layerPal
       renderExtra(read);
       renderAdds(read);
       renderAfter(read);
+      renderLists(read);
       if (inside && !active.isConnected) {
         const found = inside.head ? heading.querySelector(`[data-head="${inside.head}"]`)
           : inside.row !== undefined ? body.querySelector(`[data-row="${inside.row}"] [data-field="${inside.field}"]`) : null;
@@ -1094,6 +1273,7 @@ export function chartForm(panel, { state, write, caseId = '', palette = layerPal
     }
     const most = read.form.most ?? Infinity;
     for (const add of adds.querySelectorAll('[data-add]')) if (add.dataset.add !== 'series') add.disabled = read.model.rows.length >= most;
+    renderLists(read);
     const source = after.querySelector('[data-source]');
     const written = setting(readChart(read.source), 'source');
     if (source && source !== active && source.value !== written) {
@@ -1115,6 +1295,7 @@ export function chartForm(panel, { state, write, caseId = '', palette = layerPal
       return;
     }
     if (read.form.family === 'timeline') fillEvents();
+    else if (read.form.family === 'pictures') fillPictures();
     else fillCounts(read);
   }
 
@@ -1217,6 +1398,87 @@ export function chartForm(panel, { state, write, caseId = '', palette = layerPal
     sayGo();
     ask(true);
     from.focus();
+  }
+
+  /** A wall's Fill from the case: the case's pictures by folder, ticked, added a row each. */
+  function fillPictures() {
+    const where = element('label', 'cf-fill-field');
+    const folder = element('select', 'cf-select');
+    folder.setAttribute('aria-label', 'Folder');
+    where.append(element('span', 'cf-hint', 'Folder'), folder);
+    const fields = element('div', 'cf-fill-fields');
+    fields.append(where);
+    const status = element('p', 'cf-hint cf-fill-status', 'Reading the case…');
+    status.setAttribute('role', 'status');
+    const list = element('ul', 'cf-fill-list');
+    list.setAttribute('aria-label', 'Pictures it would add');
+    let proposed = [];
+    const { foot, go } = fillFoot('Add them', () => {
+      const ticked = proposed.filter((one) => one.ticked).map((one) => one.entity);
+      if (!ticked.length) return;
+      toggleFill(false);
+      changeRows((rows, read) => {
+        const at = rows.findIndex((row) => row.draft);
+        rows.splice(at >= 0 ? at : rows.length, 0, ...pictureRows(ticked, read.model.rows));
+      });
+      adds.querySelector('.cf-fill-open')?.focus();
+    });
+    const sayGo = () => {
+      const count = proposed.filter((one) => one.ticked).length;
+      said2(go, count ? `Add ${count} picture${count === 1 ? '' : 's'}` : 'Add them');
+      go.disabled = !count;
+    };
+    const every = () => casePictures(knownEntities(), '', { limit: 5000 })
+      .sort((a, b) => String(a.attrs?.folder ?? '').localeCompare(String(b.attrs?.folder ?? ''))
+        || String(a.label).localeCompare(String(b.label), undefined, { numeric: true }));
+    const show = () => {
+      const all = every();
+      const held = new Set((now()?.model?.rows ?? []).map((row) => pictureRef(row.picture)).filter(Boolean));
+      const chosen = folder.value;
+      const shown = all.filter((entity) => chosen === '*' || (entity.attrs?.folder ?? '') === chosen);
+      proposed = shown.map((entity) => ({ entity, ticked: chosen !== '*' && !held.has(entity.id), held: held.has(entity.id) }));
+      list.replaceChildren(...proposed.map((one, index) => {
+        const item = element('li', 'cf-fill-item');
+        const label = element('label', 'cf-fill-line cf-fill-picture');
+        const tick = element('input');
+        tick.type = 'checkbox';
+        tick.checked = one.ticked;
+        tick.addEventListener('change', () => {
+          proposed[index].ticked = tick.checked;
+          sayGo();
+        });
+        const thumb = element('span', 'cf-picture-thumb');
+        thumb.dataset.ref = one.entity.id;
+        const src = caseId ? thumbOf(caseId, one.entity, thumbs) : '';
+        if (src) thumb.append(thumbImage(src));
+        label.append(tick, thumb, element('span', 'cf-fill-words', one.entity.label));
+        if (one.held) label.append(element('span', 'cf-fill-said', 'already in the wall'));
+        item.append(label);
+        return item;
+      }));
+      askThumbs(shown.slice(0, 200));
+      status.textContent = all.length
+        ? `${shown.length} picture${shown.length === 1 ? '' : 's'}${chosen === '*' ? ' in the case: tick the ones to add' : ' in this folder'}.`
+        : 'The case holds no picture yet.';
+      sayGo();
+    };
+    const fill = () => {
+      const all = every();
+      const folders = [...new Set(all.map((entity) => entity.attrs?.folder ?? ''))];
+      folder.replaceChildren(choiceOf('Every folder', '*'), ...folders.map((name) => choiceOf(name || 'No folder', name)));
+      folder.value = folders.length === 1 ? folders[0] : '*';
+      show();
+    };
+    folder.addEventListener('change', show);
+    fillBox.replaceChildren(fillHead('pictures'), fields, status, list, foot);
+    sayGo();
+    if (!Array.isArray(typeof entities === 'function' ? entities() : entities) && caseEntities === null) {
+      knownEntities();
+      Promise.resolve(reading).then(() => {
+        if (filling) fill();
+      });
+    } else fill();
+    folder.focus();
   }
 
   function fillCounts(read) {

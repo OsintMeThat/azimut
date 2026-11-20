@@ -479,6 +479,17 @@ def test_the_full_case_s_written_link_is_read_as_a_use(client):
     assert "links to its page" in touched["Map"]
 
 
+def test_the_full_case_s_picture_wall_is_read_as_a_use(client):
+    """A picture wall names its pictures in a note's text, by id alone where no chip makes a
+    graph edge: the full case holds one, and its picture must be what the note leans on."""
+    full = fullcase.build_full_case(client)
+    case = Case.open(full.case_id)
+    leans = {(holder.rel, lean.target, lean.how) for holder, lean in uses_engine._records(case)}
+    assert (full.map_note, full.wall_picture_id, uses_engine.WALL_HOW) in leans
+    touched = _touched(_impact(client, full.case_id, ids=[full.wall_picture_id]))
+    assert uses_engine.WALL_HOW in touched["Map"]
+
+
 # -- the gate: the filter and the dialog are one rule --------------------------------
 
 

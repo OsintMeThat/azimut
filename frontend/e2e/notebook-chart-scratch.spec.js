@@ -81,7 +81,7 @@ test('a timeline, then a donut, made from scratch in their forms, and a timeline
 
   // every kind, with no table in the note, each saying what it needs
   let picker = await slashChart(page);
-  await expect(picker.locator('button.cf-scratch')).toHaveCount(14);
+  await expect(picker.locator('button.cf-scratch')).toHaveCount(15);
   await expect(picker.getByRole('button', { name: /^Timeline, from scratch/ })).toContainText('Days and what happened');
   await picker.getByRole('button', { name: /^Timeline, from scratch/ }).click();
   const chart = page.locator('.cm-chart-block').first();

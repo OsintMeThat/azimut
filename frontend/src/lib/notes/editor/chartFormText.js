@@ -12,7 +12,10 @@
  *   the stacked kinds, the counts' heading saying `(at least)` when they are floors, with
  *   `count:`, `by:`, `colour by:`, `colours:`, `icons:` and a waffle's `of:`;
  * - **line**: `| Day | Value |`, or one row a value of a series, `| Day | Series | Value |`,
- *   with `by:`, `count:` and `colour by:`.
+ *   with `by:`, `count:` and `colour by:`;
+ * - **pictures** (a picture wall): `| Picture | # |` then the words, the group and the
+ *   colour each row holds, a picture of the case a row (`[[media:id|label]]`), with
+ *   `picture:`, `label:`, `words:`, `by:`, `colour by:` and `shape:`.
  *
  * A block whose table holds more than its kind's form reads (a register counted row by
  * row, more columns) is not read into a form: it is edited as a table.
@@ -43,6 +46,7 @@ export const FORMS = {
   waffle: { family: 'categories', label: 'Waffle', needs: 'A part and its whole', colours: true, whole: true },
   line: { family: 'line', label: 'Line', needs: 'Days or numbers and a value per series' },
   circles: { family: 'categories', label: 'Circles', needs: 'Two or three amounts to compare', colours: true, most: 3 },
+  pictures: { family: 'pictures', label: 'Picture wall', needs: 'A picture of the case a row' },
 };
 
 /** The kinds in the gallery's order. */
@@ -58,6 +62,7 @@ const KIND_WORDS = {
   squares: 'waffle', grid: 'waffle', figures: 'key figures', 'stat tiles': 'key figures', tiles: 'key figures', stats: 'key figures',
   'time line': 'timeline', chronology: 'timeline', sequence: 'timeline', 'line chart': 'line', lines: 'line',
   'circle comparison': 'circles', 'compare circles': 'circles',
+  'picture wall': 'pictures', gallery: 'pictures', 'photo wall': 'pictures', 'pictures wall': 'pictures', 'wall of pictures': 'pictures',
 };
 
 /** The kind a block's `kind:` names, as the engine reads it; bars when it names none. */
@@ -73,6 +78,7 @@ const HEADS = {
   figures: { figure: 'Figure', words: 'What it says' },
   categories: { category: 'Category', count: 'Count', split: 'Split' },
   line: { x: 'Day', value: 'Value', series: 'Series' },
+  pictures: { picture: 'Picture', label: '#', words: 'Words', group: 'Group', colour: 'Grade' },
 };
 const KIND_HEADS = {
   circles: { category: 'Name', count: 'Amount' },
@@ -85,6 +91,7 @@ export const EMPTY_SAID = {
   figures: 'Add a figure: the tiles are drawn as you fill them.',
   categories: 'Add a category and its count: the chart is drawn as you fill it.',
   line: 'Add a row of values: the line is drawn as you fill it.',
+  pictures: 'Add a picture of the case: the wall is drawn as you fill it.',
 };
 
 // -- days ---------------------------------------------------------------------------------
@@ -224,7 +231,7 @@ export function readForm(source, kindName = '') {
   const heads = { ...HEADS[form.family], ...(KIND_HEADS[kind] ?? {}) };
   const headers = table?.header ?? [];
   const rows = table?.rows ?? [];
-  const read = { timeline: readTimeline, figures: readFigures, categories: readCategories, line: readLine }[form.family];
+  const read = { timeline: readTimeline, figures: readFigures, categories: readCategories, line: readLine, pictures: readPictures }[form.family];
   const model = read({ chart, kind, form, heads, headers, rows });
   if (model.why) return notFit(kind, model.why);
   return { kind, form, model };
@@ -348,6 +355,102 @@ function readLine({ chart, heads, headers, rows }) {
   return { ...out, series: names, rows: [...byX.values()].map((row) => ({ x: row.x, values: names.map((_, at) => row.values[at] ?? '') })) };
 }
 
+// -- a picture wall --------------------------------------------------------------------------
+
+/** A cell naming a picture of the case: a media or an entity chip, or its id alone (`notes_chart_wall.picture_ref`). */
+const PICTURE_CHIP = /\[\[(?:media|entity):([A-Za-z0-9_-]+)\|[^\]\n]+\]\]/;
+const PICTURE_ID = /^e_[0-9A-Za-z]{4,40}$/;
+const PICTURE_HEADER = /\b(?:pictures?|photos?|photographs?|images?|frames?|stills?|thumbnails?|screenshots?)\b/i;
+const LABEL_HEADER = /^(?:#|n[o°º]?\.?|nr\.?|id|ref\.?|label|name)$/i;
+/** The shapes a wall's pictures are cropped to (`notes_chart_wall.SHAPES`), the first its own. */
+export const WALL_SHAPES = ['3:2', '4:3', '1:1', '16:9'];
+/** The grades the bar under a frame reads in their ramp (`notes_charts.GRADES`), offered as its colour values. */
+export const GRADE_WORDS = ['Confirmed', 'Almost sure', 'Strong doubt', 'Set aside'];
+
+/** The id of the picture a cell names, or ''. */
+export function pictureRef(cell) {
+  const text = String(cell ?? '').trim();
+  const chip = PICTURE_CHIP.exec(text);
+  if (chip) return chip[1];
+  return PICTURE_ID.test(text) ? text : '';
+}
+
+/** The column of pictures: the one `picture:` names, else the first mostly of pictures, else one named for them. */
+export function wallPictureColumn(headers, rows, said = '') {
+  if (said) return columnNamed(headers, said);
+  let named = -1;
+  for (let column = 0; column < headers.length; column += 1) {
+    const cells = rows.map((row) => row[column] ?? '').filter((cell) => cell.trim());
+    const held = cells.filter((cell) => pictureRef(cell)).length;
+    if (held && held * 2 >= cells.length) return column;
+    if (named < 0 && PICTURE_HEADER.test(plainText(headers[column])) && (held || !rows.length)) named = column;
+  }
+  return named;
+}
+
+function readPictures({ chart, heads, headers, rows }) {
+  const shape = setting(chart, 'shape');
+  const empty = { heads, rows: [], shape };
+  if (!headers.length) return empty;
+  const picture = wallPictureColumn(headers, rows, setting(chart, 'picture'));
+  if (picture < 0) return { why: 'Its table has no column of pictures: edit it as a table.' };
+  const labelSaid = setting(chart, 'label');
+  const label = labelSaid ? columnNamed(headers, labelSaid) : headers.findIndex((header, at) => at !== picture && LABEL_HEADER.test(plainText(header).trim()));
+  const group = columnNamed(headers, setting(chart, 'by'));
+  const colour = columnNamed(headers, setting(chart, 'colour by'));
+  const wordsSaid = setting(chart, 'words');
+  const used = new Set([picture, label, group, colour].filter((at) => at >= 0));
+  const words = /^(?:none|no|nothing)$/i.test(wordsSaid) ? -1 : wordsSaid ? columnNamed(headers, wordsSaid)
+    : headers.findIndex((_, at) => !used.has(at));
+  if (words >= 0) used.add(words);
+  if (headers.length > used.size) return { why: SEVERAL };
+  const head = (at, fallback) => (at >= 0 ? plainText(headers[at]) || fallback : fallback);
+  const cell = (row, at) => (at >= 0 ? row[at] ?? '' : '');
+  return {
+    heads: { picture: head(picture, heads.picture), label: head(label, heads.label), words: head(words, heads.words), group: head(group, heads.group), colour: head(colour, heads.colour) },
+    rows: rows.map((row) => ({ picture: cell(row, picture), label: cell(row, label), words: cell(row, words), group: cell(row, group), colour: cell(row, colour) })),
+    shape: empty.shape,
+  };
+}
+
+function writePictures(model) {
+  const rows = model.rows.filter(filled);
+  const has = (key) => rows.some((row) => plainText(row[key]).trim());
+  const columns = ['picture', 'label', ...['words', 'group', 'colour'].filter(has)];
+  const header = columns.map((key) => model.heads[key]);
+  return {
+    settings: {
+      picture: model.heads.picture,
+      label: model.heads.label,
+      words: has('words') ? model.heads.words : '',
+      by: has('group') ? model.heads.group : '',
+      'colour by': has('colour') ? model.heads.colour : '',
+      shape: model.shape && model.shape !== WALL_SHAPES[0] ? model.shape : '',
+      count: '',
+    },
+    table: tableOf(header, rows.map((row) => columns.map((key) => row[key] ?? '')), []),
+  };
+}
+
+/** A picture of the case as a wall's cell writes it: `[[media:id|label]]`. */
+export function pictureCell(entity) {
+  return `[[media:${entity.id}|${String(entity.label ?? '').replace(/[[\]|\n]/g, '').trim() || 'Picture'}]]`;
+}
+
+/**
+ * The rows a wall gains from pictures of the case picked in Fill from the case, in their
+ * order: each its chip, and as its label the number its name holds (`vehicle-07.jpg` is
+ * `#7`), else its name. A picture the wall shows already is left out.
+ */
+export function pictureRows(entities, rows = []) {
+  const held = new Set(rows.map((row) => pictureRef(row.picture)).filter(Boolean));
+  return entities.filter((entity) => !held.has(entity.id)).map((entity) => {
+    const name = String(entity.label ?? '').replace(/\.[A-Za-z0-9]{2,5}$/, '');
+    const number = /(\d+)(?!.*\d)/.exec(name);
+    return { picture: pictureCell(entity), label: number ? `#${Number(number[1])}` : name, words: '', group: '', colour: '' };
+  });
+}
+
 // -- writing a form into a block ------------------------------------------------------------
 
 const RIGHT = 'right';
@@ -369,7 +472,7 @@ export function countHeading(name, floor) {
 export function writeForm(source, kind, model) {
   const form = FORMS[kind];
   if (!form) return source;
-  const write = { timeline: writeTimeline, figures: writeFigures, categories: writeCategories, line: writeLine }[form.family];
+  const write = { timeline: writeTimeline, figures: writeFigures, categories: writeCategories, line: writeLine, pictures: writePictures }[form.family];
   const { settings, table } = write(model, form);
   return withTable(withSettings(source, settings), table);
 }

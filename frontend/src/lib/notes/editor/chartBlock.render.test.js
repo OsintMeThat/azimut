@@ -470,7 +470,7 @@ describe('/ › Chart', () => {
     const picker = view.dom.querySelector('.cm-chart-picker');
     expect(picker.querySelector('.cm-chart-picker-said').textContent).toBe('Every kind has a form made for it');
     expect([...picker.querySelectorAll('.cm-chart-picker-part')].map((node) => node.textContent)).toEqual(['From scratch']);
-    expect(picker.querySelectorAll('button.cf-scratch')).toHaveLength(14);
+    expect(picker.querySelectorAll('button.cf-scratch')).toHaveLength(15);
     expect(document.activeElement).toBe(picker.querySelector('button.cf-scratch[data-kind="timeline"]'));
     expect(text()).toBe('Words.\n');
   });

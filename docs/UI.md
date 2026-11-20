@@ -7678,6 +7678,33 @@ picture* read it. It writes nothing, refuses a block past 256 KB, and says the c
 its headers, each warning with the settings that fix it, the title the data proposes and
 the kind it is drawn as.
 
+**A picture wall** (`kind: pictures`, or `picture wall`, `gallery`; `engine/notes_chart_wall.py`)
+is one real picture of the case a row, lined up by group: every vehicle seen, one frame each. Its
+table holds the picture (`[[media:e_…|label]]`, or the id alone; `picture:` names the column when
+the first column of pictures is not it), a label (`#7`; `label:`, else a column named `#`, `No.`,
+`ID`, `Label` or `Name`) and the words after it (`words:`, else the first column no other setting
+reads; `words: none` shows none). `by:` groups the rows, each group with its name, its count and its
+flag (`flags:` as silhouette rows read it, or `flag:` a column). `colour by:` draws a thin bar under
+each picture, with the legend and the grades' ramp. `order`, `only`, `sort` and `last` (after a
+rule) read as on every chart; `highlight` names a group (its count in the accent, the other groups'
+bars greyed), a value of the colour column, or one frame's label (ringed in the accent). Every
+picture is cropped about its middle to one shape, 3:2 unless `shape:` says 4:3, 1:1, 16:9, 4:5 or
+2:3. The rows are counted, so a floor's title says *at least*. Groups stand side by side while a
+line has room for their frames and their name; one longer than a line wraps. Free, a frame is
+about 78 CSS pixels wide, seven across a page; a picture for X, 4:5 or 1:1 and the PDF page take the
+largest frames that let the whole wall fit, so sixty vehicles print on one page at 300 dpi. The
+pictures are the case's own files, never the network: each painter reads the thumbnail, or the file
+when the thumbnail is smaller than its box, at the size it draws it (twice its CSS pixels in the
+editor's SVG), and the credit line names where they come from as the media say (*Pictures: x.com,
+t.me*). The HTML report and the web folder show a real grid, as many frames to a line as the page's
+width holds (ten wide, three on a phone). Each picture is sized for its slot, about 12 KB, and opens
+larger in the page's lightbox with its label, its group, its value and its own credit; that copy is
+at most 480 px on its long side in one file, 640 in a folder, where it is read only when opened. An
+infographic panel, *Export*, To Post and the PDF draw it as any chart. The check names a frame with
+no picture, drawn empty, and a picture no longer in the case. Each picture, chip or id, is a use of
+its media (`engine/uses.py`, *shows it in a picture wall*) for the Media library's Unused filter
+and every delete's preview.
+
 **Making a chart in the editor** (`editor/chartBlock.js`, `chartCard.js`, `chartText.js`).
 A chart is chosen by its picture. *Chart* in a table's grid bar, or `/` › *Chart* in
 Figures, shows every kind the table fits, each already drawn from its real rows
@@ -7699,7 +7726,7 @@ the block is its lines.
 
 **A chart from scratch** (`editor/chartForm.js`, `chartFormText.js`). `/` › *Chart* shows every
 kind, with a table in the note or none: the kinds its one table fits come first, drawn from its
-rows, then *From scratch*, the fourteen kinds each with a sketch and one line of what it needs
+rows, then *From scratch*, the fifteen kinds each with a sketch and one line of what it needs
 (*Timeline: days and what happened*, *Key figures: a figure and what it says*, *Waffle: a part
 and its whole*…). The one picked is written where `/` was typed with its kind and its columns,
 no row, as one Undo step, and its form opens on the chart, between its bar and its drawing,
@@ -7722,6 +7749,11 @@ then follows every field. One form is open in a note at a time.
 - **Line**: days or numbers along (*Days* / *Numbers*), *＋ Row*, a value for each series,
   *＋ Series* for another line; one series is `| Day | Value |`, several are one row a value,
   `| Day | Series | Value |` with `colour by: Series`.
+- **Picture wall**: *＋ Picture* opens the case's pictures (the note's own picker), then the
+  row's label, its words, its group and its colour (the grades offered, and the groups typed
+  already); **Shape** 3:2, 4:3, 1:1 or 16:9. The table is `| Picture | # |`, then the words, the
+  group and the colour once a row holds one, written with `picture:`, `label:`, `words:`, `by:`
+  and `colour by:`. In the infographic builder a picture is written as its id.
 
 Every form has the title field with the title the data proposes, *at least* included, a
 *Source* field for the credit line, rows dragged by their grip or moved with Alt+↑ and Alt+↓,
@@ -7748,7 +7780,9 @@ The kinds of categories, key figures and a line count a note's table or a sheet 
 for a line, its days read as one however written), a split or a line for each value, and
 rows counted one each or a column of numbers summed. The counts are listed with what was left
 out (no value, no number, a total row); a floor among the numbers summed ticks *at least*;
-*Write these 5 rows* replaces the form's rows as one step.
+*Write these 5 rows* replaces the form's rows as one step. A picture wall gets the case's
+pictures by folder, ticked; *Add 12 pictures* adds a row each, labelled by the number in its
+file's name (`vehicle-07.jpg` is `#7`), and one the wall shows already is listed unticked.
 
 The chart is drawn as the server draws it, kept by its text. Its bar: **Kind** (the
 picker again, its title, columns and rows kept; a kind of parts writes its column as its
@@ -7776,7 +7810,9 @@ For pictograms and silhouette rows the settings add an **Icon** row (`chartIcons
 part or row its own, written as `icons: Streit Cougar = own:…, Al-Wahsh = armoured
 vehicle`, first the icon whose name names it, else the chart's, and says which took a
 name. Silhouette rows also get a **Flag** row, None or one per category (`flags:`), the
-flag named like each row taken first. Each button opens the picker: the library by group,
+flag named like each row taken first; a picture wall gets the Flag row alone, a flag a group, and
+its settings say **Groups**, **Bar coloured by** and **Shape** in place of Count, By and
+Coloured by. Each button opens the picker: the library by group,
 the app's badges by group and three shapes, a search, and **Import SVG…**, Settings ›
 Icons' own import, whose icon is worn at once and joins the library. An infographic's
 panel card is the same card.

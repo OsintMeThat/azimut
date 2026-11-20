@@ -99,6 +99,7 @@ from . import (
     noteannexes,
     notecharts,
     notefill,
+    notes_chart_wall,
     notes_charts,
     notes_infographic,
     notes_maps,
@@ -139,6 +140,12 @@ CSP = (
 )
 #: The weight a file aims to stay under; clips are left out first to keep it there.
 MAX_BYTES = 25 * 1024 * 1024
+#: A picture wall's frame: the widest its slot is drawn on a page, in CSS pixels (its
+#: picture holds twice that), and the long side of the picture its lightbox opens, in a
+#: folder and in one file.
+WALL_SLOT = 120
+WALL_LARGE_SIDE = 640
+WALL_INLINE_SIDE = 480
 #: The longest side of a picture in the file, and in the Page pane's lighter copy.
 PICTURE_SIDE = 2400
 PREVIEW_SIDE = 1200
@@ -2004,6 +2011,8 @@ class _Page:
         self.charts += 1
         ident = f"chart-{self.charts}"
         self.ids.add(ident)
+        if chart.layout.kind == notes_charts.PICTURE_WALL.name:
+            return self._wall(chart, ident, line)
         faces = self._chart_faces(chart.layout.theme)
         drawings = [("wide", False, chart.layout), ("phone", False, chart.drawn(notecharts.PHONE_WIDTH))]
         if self.look.web == "story":
@@ -2037,6 +2046,120 @@ class _Page:
             finally:
                 self._block_line = block_line
         return parts
+
+    def _wall(self, chart: notecharts.Chart, ident: str, line: int) -> list[str]:
+        """A picture wall as a real grid (`engine/notes_chart_wall.py`): its legend, then each
+        group's name, count and flag over its frames, which flow and wrap with the page's
+        width. Each frame is its picture at the size of its slot, a press opening it larger
+        in the page's lightbox with its label and its credit; its bar and its words under it.
+        The numbers fold under it, as a chart's do."""
+        drawing = chart.layout
+        theme = drawing.theme
+        groups = notes_chart_wall.wall_facts(drawing.facts)
+        ratio = float(drawing.facts.get("ratio") or 1.5)
+        slot = (math.ceil(WALL_SLOT * notes_charts.SVG_PIXELS), math.ceil(WALL_SLOT * notes_charts.SVG_PIXELS / ratio))
+        bars = bool(drawing.facts.get("bars"))
+        legend = ""
+        if drawing.legend:
+            keys = "".join(f'<span class="az-wall-key"><i class="az-wall-bar"{_bar_style(swatch.paint)}></i>'
+                           f"{_text(swatch.value)} <b>{_text(notes_charts.number_text(swatch.total))}</b></span>"
+                           for swatch in drawing.legend)
+            legend = f'<p class="az-wall-legend">{keys}</p>\n'
+        parts: list[str] = []
+        separated = False
+        for number, group in enumerate(groups):
+            if group.last and not separated and number:
+                parts.append('<div class="az-wall-rule" role="separator"></div>')
+                separated = True
+            head = ""
+            if group.name:
+                flag = notes_chart_wall.flag_svg(group.flag, theme, f"{ident}-flag-{number}", group.name) \
+                    if group.flag else ""
+                count = f'<span class="az-wall-count{" az-wall-lit" if group.lit else ""}">{len(group.items)}</span>'
+                head = (f'<p class="az-wall-head">{flag}<span class="az-wall-name" dir="auto">{_text(group.name)}</span>'
+                        f"{count}</p>")
+            items = "".join(self._wall_item(item, group, slot, bars) for item in group.items)
+            label = f"{group.name}: {len(group.items)}" if group.name else f"{len(group.items)} pictures"
+            parts.append(f'<section class="az-wall-group" aria-label="{_attr(label)}">{head}'
+                         f'<div class="az-wall-items">{items}</div></section>')
+        foot = "".join(f'<p class="az-wall-note">{_text(note)}</p>' for note in drawing.notes)
+        if drawing.credit:
+            foot += f'<p class="az-wall-credit">{_text(drawing.credit)}</p>'
+        shape = f"--az-ratio:{ratio:.4f}"
+        wall = (f'<div class="az-wall" style="{shape}" role="group" aria-label="{_attr(chart.title or "Picture wall")}">\n'
+                f"{legend}<div class=\"az-wall-flow\">{''.join(parts)}</div>\n"
+                + (f'<div class="az-wall-foot">{foot}</div>\n' if foot else "") + "</div>\n")
+        table = chart.block.table
+        shown = chart.block.shows_table() and table is not None
+        numbers = "" if shown else (
+            f'<details class="az-chart-numbers"><summary>{notecharts.THE_NUMBERS}</summary>\n'
+            f"{notes_charts.data_table_html(drawing, caption=False)}</details>\n")
+        caption = self._caption(chart.title, "Chart")
+        figure = (f'<figure class="az-figure az-chart-figure az-wall-figure" data-kind="chart" data-chart="pictures" '
+                  f'id="{ident}">\n{wall}<figcaption>{caption}{numbers}</figcaption>\n</figure>\n')
+        out = [figure if self.folder is None else self._lift_data(figure, ident)]
+        if shown and table is not None:
+            block_line = self._block_line
+            self._block_line = line + table.line
+            try:
+                tokens = md.parse(table.text())
+                out.extend(part for part in self._parts_of(tokens, 0, len(tokens)) if part)
+            finally:
+                self._block_line = block_line
+        return out
+
+    def _wall_item(self, item: notes_chart_wall.Item, group: notes_chart_wall.Group, slot: tuple[int, int],
+                   bars: bool) -> str:
+        """One frame of a wall: its picture in its slot, opening larger, its bar and its words."""
+        said = ", ".join(part for part in (item.said, group.name, item.value) if part) or "Picture"
+        frame = item.frame
+        picture = ""
+        if frame is not None:
+            data = frame.at(*slot)
+            if data:
+                source = self._wall_file(data, "image/jpeg", item.label or frame.label or "picture")
+                large = self._wall_large(frame)
+                size = (slot[0] // notes_charts.SVG_PIXELS, slot[1] // notes_charts.SVG_PIXELS)
+                image = (f'<img src="{source}" alt="{_attr(said)}" width="{size[0]}" height="{size[1]}" '
+                         f'loading="lazy" decoding="async">')
+                opens = f' data-large="{_attr(large)}"' if large else ""
+                picture = (f'<button class="az-zoom az-wall-zoom" type="button" aria-label="Open larger: {_attr(said)}"'
+                           f"{opens}>{image}</button>")
+        if not picture:
+            picture = f'<span class="az-wall-empty" role="img" aria-label="{_attr(said)}">{notes_chart_wall.NO_PICTURE}</span>'
+        # a row with no value keeps its bar's place, empty, so the words under the frames line up
+        painted = _bar_style(item.paint) or ' style="--bar:transparent"'
+        bar = f'<i class="az-wall-bar"{painted}></i>' if bars else ""
+        words = ""
+        if item.label or item.words:
+            label = f"<b>{_text(item.label)}</b>" if item.label else ""
+            words = f'<figcaption class="az-wall-label">{label}{" " if label and item.words else ""}{_text(item.words)}</figcaption>'
+        credit = ""
+        if frame is not None and picture.startswith("<button"):
+            owed = self._credit(self.cited.reader.entity(frame.key), 0)
+            credit = owed.replace('<span class="az-credit">', '<span class="az-credit" hidden>', 1) if owed else ""
+        lit = " az-wall-lit" if item.lit else ""
+        return (f'<figure class="az-wall-item{lit}">{picture}{bar}{words}'
+                f'<span class="az-caption" hidden>{_text(" · ".join(part for part in (item.said, group.name, item.value) if part))}</span>'
+                f"{credit}</figure>")
+
+    def _wall_file(self, data: bytes, mime: str, name: str) -> str:
+        if self.folder is not None:
+            return self.folder.put(data, name, FILE_SUFFIXES.get(mime, ".jpg"))
+        return f"data:{mime};base64,{base64.b64encode(data).decode('ascii')}"
+
+    def _wall_large(self, frame: notes_charts.Frame) -> str:
+        """A frame's picture as the lightbox opens it: larger, its own file's, at most
+        `WALL_LARGE_SIDE` on its long side in a folder and `WALL_INLINE_SIDE` in one file;
+        none in the Page pane's lighter copy."""
+        path = frame.original()
+        if path is None or self.light:
+            return ""
+        made = PICTURES.get(path, WALL_LARGE_SIDE if self.folder is not None else WALL_INLINE_SIDE)
+        if made is None:
+            return ""
+        data, mime, _ = made
+        return self._wall_file(data, mime, frame.label or "picture")
 
     # -- infographics -------------------------------------------------------------------
 
@@ -2919,6 +3042,16 @@ def _img(uri: str, size: tuple[int, int], alt: str, classes: str = "") -> str:
     kind = f' class="{classes}"' if classes else ""
     sized = f' width="{size[0]}" height="{size[1]}"' if size[0] and size[1] else ""
     return f'<img{kind} src="{uri}" alt="{_attr(alt)}"{sized} decoding="async">'
+
+
+def _bar_style(paint: notes_charts.Paint | None) -> str:
+    """A wall's bar in a value's paint, as the chart paints it: filled, hatched or outlined."""
+    if paint is None:
+        return ""
+    style = f"--bar:{paint.colour}"
+    if paint.hatch:
+        return f' style="{style};--hatch:{paint.hatch}" data-hatch'
+    return f' style="{style}" data-outline' if paint.outline else f' style="{style}"'
 
 
 def _zoom_button(picture: str, alt: str) -> str:

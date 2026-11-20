@@ -11,7 +11,9 @@ figure route share around that, so none of them reads a chart its own way:
   one colour in every chart, layer and plate of the case;
 - **what the check says** (`Chart.warnings`): the engine's checks at their lines, and
   whether the rows still match where they were copied from (``from:``, `origin_rows`);
-- **its pictures** (`png`, `svg`), and the one filed in the case for Post (`file_for_post`).
+- **its pictures** (`png`, `svg`), and the one filed in the case for Post (`file_for_post`);
+- **the case's pictures a picture wall shows** (`case_pictures`): each read from the case's
+  own files, its thumbnail first, and credited as its media say, never fetched.
 
 **In a document the title is the figure's caption.** A PDF, an HTML page and a
 WordPress draft caption a chart as they caption every figure (``Figure 3.`` and its
@@ -35,7 +37,7 @@ import unicodedata
 from collections import Counter
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
-from pathlib import PurePosixPath
+from pathlib import Path, PurePosixPath
 from typing import TYPE_CHECKING, Any, Callable
 
 from . import notelook, notes_chart_kinds, notes_chart_picker, notes_charts
@@ -84,6 +86,63 @@ def palette(case: "Case | None") -> list[dict[str, str]]:
     return notes_charts.case_palette(case) if case is not None else []
 
 
+def case_pictures(case: "Case | None") -> notes_charts.PictureLookup | None:
+    """Finds a picture of the case by the id a cell names (a picture wall's): a media, a
+    capture or a proof, read from its own file with its thumbnail first (a video by its
+    still), and its credit as a picture's credit line says it. Each id is read once.
+    None outside a case."""
+    if case is None:
+        return None
+    from . import notesources
+
+    reader = notesources.Reader(case)
+    found: dict[str, notes_charts.Frame | None] = {}
+
+    def look(ref: str) -> notes_charts.Frame | None:
+        if ref not in found:
+            found[ref] = _frame(case, reader, ref)
+        return found[ref]
+
+    return look
+
+
+def _frame(case: "Case", reader: Any, ref: str) -> notes_charts.Frame | None:
+    from . import thumbnails
+    from .links import EMBEDDED_TYPES
+
+    if not re.match(r"^[A-Za-z0-9_-]{1,64}$", ref or ""):
+        return None
+    record = case.get_entity(ref)
+    attrs = (record or {}).get("attrs") or {}
+    if record is None or record.get("type") not in EMBEDDED_TYPES or not attrs.get("path"):
+        return None
+    sha = str(attrs.get("sha256") or "")
+    video = attrs.get("kind") == "video"
+    named: list[str] = []
+    if record.get("type") == "proof" and attrs.get("thumb"):
+        named.append(str(attrs["thumb"]))
+    still = thumbnails.thumb_relpath(sha, "video" if video else "image") if sha else None
+    if still:
+        named.append(still)
+    if not video:
+        named.append(str(attrs["path"]))
+    files: list[Path] = []
+    for relative in named:
+        try:
+            files.append(case.resolve_inside(relative))
+        except Exception:  # a path that leaves the case is no picture of it
+            continue
+    if not files:
+        return None
+    try:
+        source = reader.entity(ref)
+        credit = source.credit() if source is not None else None
+    except Exception:  # a case whose index cannot say leaves the picture uncredited
+        credit = None
+    return notes_charts.Frame(ref, str(record.get("label") or ""), tuple(files),
+                              credit.value if credit is not None else "")
+
+
 @dataclass
 class Chart:
     """One `::: chart` block as a document reads it: the block, its look and colours,
@@ -107,6 +166,8 @@ class Chart:
     #: The values a kind of glyphs gives each its own glyph (`notes_chart_kinds.glyph_values`),
     #: listed by the card's Icon and Flag rows.
     values: list[str] = field(default_factory=list)
+    #: Finds the case's pictures a picture wall shows (`case_pictures`).
+    pictures: notes_charts.PictureLookup | None = None
 
     @property
     def drawable(self) -> bool:
@@ -119,20 +180,25 @@ class Chart:
         lines = "; ".join(self.layout.lines)
         return _cut(f"{head.rstrip('.')}. {lines}." if lines else head, MAX_ALT)
 
-    def drawn(self, width: float = DOCUMENT_WIDTH, *, dark: bool = False, title: bool = not IN_DOCUMENT) -> Layout:
-        """The chart laid out again: another width, the dark look, with its title."""
+    def drawn(self, width: float = DOCUMENT_WIDTH, *, dark: bool = False, title: bool = not IN_DOCUMENT,
+              room: float | None = None) -> Layout:
+        """The chart laid out again: another width, the dark look, with its title, within
+        ``room`` (a page) for a kind that lays itself smaller to fit."""
         theme = theme_of(self.look, self.block, dark=dark)
         return notes_charts.layout(self.block, theme=theme, palette=self.palette, note_text=self.note_text,
-                                   width=width, title=title)
+                                   width=width, title=title, pictures=self.pictures, room=room)
 
-    def png(self, width_px: int, *, dpi: int | None = None) -> bytes:
-        """The document's drawing painted ``width_px`` pixels wide."""
-        return notes_charts.render_png(self.layout, width_px, dpi=dpi)
+    def png(self, width_px: int, *, dpi: int | None = None, room: float | None = None) -> bytes:
+        """The document's drawing painted ``width_px`` pixels wide; taller than ``room`` (a
+        page's height, in the document's CSS pixels), laid again to stand within it."""
+        drawing = self.layout if room is None or self.layout.height <= room else self.drawn(room=room)
+        return notes_charts.render_png(drawing, width_px, dpi=dpi)
 
     def picture(self, destination: str) -> bytes:
         """A picture standing alone for one of `notes_charts.DESTINATIONS`, its title drawn."""
         return notes_charts.render(self.block, destination, theme=theme_of(self.look, self.block),
-                                   palette=self.palette, note_text=self.note_text, title=True)
+                                   palette=self.palette, note_text=self.note_text, title=True,
+                                   pictures=self.pictures)
 
 
 def read(case: "Case | None", body: str, *, look: NoteLook | None = None, note_text: str = "",
@@ -142,15 +208,17 @@ def read(case: "Case | None", body: str, *, look: NoteLook | None = None, note_t
     look = look or DEFAULT_LOOK
     block = notes_charts.parse_block(body)
     colours = palette(case)
+    pictures = case_pictures(case)
     drawing = notes_charts.layout(block, theme=theme_of(look, block), palette=colours, note_text=note_text,
-                                  width=DOCUMENT_WIDTH, title=not IN_DOCUMENT)
-    chart = Chart(block, look, colours, note_text, drawing, drawing.title)
+                                  width=DOCUMENT_WIDTH, title=not IN_DOCUMENT, pictures=pictures)
+    chart = Chart(block, look, colours, note_text, drawing, drawing.title, pictures=pictures)
     chart.warnings = [check.as_warning() for check in drawing.checks]
     chart.fixes = [check.fix for check in drawing.checks]
     if block.table is not None and block.table.headers:
-        reading = notes_charts.read(block, theme=theme_of(look, block), palette=colours, note_text=note_text)
+        reading = notes_charts.read(block, theme=theme_of(look, block), palette=colours, note_text=note_text,
+                                    pictures=pictures)
         chart.proposed = notes_chart_picker.title_for(reading)
-        if notes_chart_kinds.ICONS in reading.kind.keys:
+        if notes_chart_kinds.ICONS in reading.kind.keys or notes_chart_kinds.FLAGS in reading.kind.keys:
             chart.values = notes_chart_kinds.glyph_values(reading)[:notes_charts.MAX_BARS]
     if origins and case is not None and block.origin:
         said = origin_warning(case, block)
@@ -182,13 +250,14 @@ def gallery(case: "Case | None", body: str, *, look: NoteLook | None = None, not
     look = look or DEFAULT_LOOK
     block = notes_charts.parse_block(body)
     colours = palette(case)
+    pictures = case_pictures(case)
     shown: list[dict[str, Any]] = []
     for index, proposal in enumerate(notes_chart_picker.proposals(block)):
         drawn = notes_chart_picker.applied(block, proposal.settings)
         theme = theme_of(look, drawn)
-        reading = notes_charts.read(drawn, theme=theme, palette=colours, note_text=note_text)
+        reading = notes_charts.read(drawn, theme=theme, palette=colours, note_text=note_text, pictures=pictures)
         drawing = notes_charts.layout(drawn, theme=theme, palette=colours, note_text=note_text,
-                                      width=notes_chart_picker.THUMB_WIDTH, title=False)
+                                      width=notes_chart_picker.THUMB_WIDTH, title=False, pictures=pictures)
         shown.append({"kind": proposal.kind, "label": proposal.label, "settings": proposal.settings,
                       "title": notes_chart_picker.title_for(reading),
                       "svg": notes_charts.svg(drawing, ident=f"az-pick-{index}")})
