@@ -144,14 +144,14 @@ export function createMyLayersState({ api, layers, caseId, notify, reloadCase,
       colour: properties.colour || '#0072b2', symbol: properties.symbol || 'pin', group: properties.group ?? '',
       date: properties.date ?? '', bearing: properties.bearing ?? '',
       links: [...(properties.links ?? [])], provenance: properties.provenance ?? '',
-      confidence: properties.confidence ?? '', credit: properties.credit ?? '',
+      confidence: properties.confidence ?? '', credit: properties.credit ?? '', picture: properties.picture ?? '',
       ...Object.fromEntries(STYLE.map((field) => [field, properties[field] ?? ''])) };
   };
   /** How a feature is drawn beyond its colour and icon (`layerediting.STYLE_FIELDS`). */
   const STYLE = ['line_width', 'line_dash', 'line_arrow', 'area_fill', 'fill_opacity', 'marker_size', 'label', 'label_size'];
   const NUMBERS = ['line_width', 'fill_opacity', 'marker_size', 'label_size'];
   /** The fields an edit clears by sending nothing, as the backend's `CLEARABLE`. */
-  const CLEARABLE = ['date', 'status', 'bearing', 'links', 'provenance', 'confidence', 'credit', ...STYLE];
+  const CLEARABLE = ['date', 'status', 'bearing', 'links', 'provenance', 'confidence', 'credit', 'picture', ...STYLE];
   /** What the panel changed on the selected feature, as the patch that saves it. */
   function formPatch() {
     if (!selected || !form) return {};

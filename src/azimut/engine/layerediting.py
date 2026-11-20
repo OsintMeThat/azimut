@@ -54,7 +54,7 @@ STYLE_FIELDS = ("line_width", "line_dash", "line_arrow", "area_fill", "fill_opac
                 "label", "label_size")
 #: How sure the analyst is of a feature, which a dash says on the map.
 CONFIDENCES = ("confirmed", "probable", "claimed")
-CLEARABLE = ("date", "status", "bearing", "links", "provenance", "confidence", "credit") + STYLE_FIELDS
+CLEARABLE = ("date", "status", "bearing", "links", "provenance", "confidence", "credit", "picture") + STYLE_FIELDS
 #: The group fields a feature inherits when it sets none of its own.
 GROUP_STYLE = ("line_dash", "line_arrow", "area_fill", "fill_opacity")
 #: How a group styles its features: each its own, one colour (each keeps its icon), one style.
@@ -477,6 +477,9 @@ def render_digest(case: Case, spec: dict[str, Any], content: str | None = None) 
     # likewise a case that names no icons
     if meanings := icon_names(case):
         looks += json.dumps(meanings)
+    # and a layer whose cards show no picture: one that does redraws when its picture goes or comes back
+    if pictures := layerlinks.pictures_part(case, spec["document"]["features"]):
+        looks += json.dumps(pictures, sort_keys=True)
     return maplayers.digest(((content or digest(spec)) + looks).encode())
 
 
@@ -543,6 +546,9 @@ def _create(
         properties.pop("place_id", None)
         properties.pop("entity_id", None)
         properties.pop("synced", None)
+        # a copy's cards keep their picture, named by its id alone as a stored copy is
+        for field in layerlinks.PICTURE_SHOWN:
+            properties.pop(field, None)
         properties["key"] = uuid.uuid4().hex
     parsed = maplayers._collection(features, title=title, fmt="geojson")
     with case.lock:
@@ -648,14 +654,23 @@ def read(case: Case, name: str) -> dict[str, Any]:
                 "checkpoint": (spec.get("edit_checkpoint") or {}).get("id")}
 
 
-def apply_fields(properties: dict[str, Any], changes: dict[str, Any]) -> None:
+def apply_fields(properties: dict[str, Any], changes: dict[str, Any], case: Case | None = None) -> None:
     """Check and set what a feature says beyond its name and style.
 
     Each field is absent rather than empty when unset, and an edit clears one by
     sending nothing for it: `date` is a day, `status` one of `STATUSES`, `bearing`
-    degrees from north, `links` the addresses it rests on, and `provenance` says
-    "external" for a point somebody else geolocated.
+    degrees from north, `links` the addresses it rests on, `provenance` says
+    "external" for a point somebody else geolocated, and `picture` names the file,
+    capture or proof of ``case`` its card shows (`layerlinks.can_picture`).
     """
+    if "picture" in changes:
+        picture = str(changes["picture"] or "")
+        if picture:
+            if case is None or not layerlinks.can_picture(case.get_entity(picture)):
+                raise maplayers.LayerError("a card's picture is a picture, a video, a capture or a proof of the case")
+            properties["picture"] = picture
+        else:
+            properties.pop("picture", None)
     if "date" in changes:
         day = maplayers.iso_day(changes["date"] or "")
         if changes["date"] and not day:
@@ -1153,7 +1168,7 @@ def add_marker(
             category=target["name"], colour=colour,
         )
         properties.update({"key": key, "symbol": symbol, "group": target["id"], "icon": icon})
-        apply_fields(properties, fields)
+        apply_fields(properties, fields, case)
         marker = {"type": "Feature", "geometry": {"type": "Point", "coordinates": [lon, lat]},
                   "properties": properties}
         _born(spec, marker, at)
@@ -1226,7 +1241,7 @@ def update_marker(case: Case, layer: str, key: str, changes: dict[str, Any]) -> 
             status = fields.pop("status") or ""
         if status is not _KEEP and status not in ("", *STATUSES):
             raise maplayers.LayerError("a status is damaged or destroyed")
-        apply_fields(properties, fields)
+        apply_fields(properties, fields, case)
         if moment is not None and drop:
             drop_state(stored, moment)
         elif moment is not None and (shape is not None or status is not _KEEP):
@@ -1242,7 +1257,10 @@ def update_marker(case: Case, layer: str, key: str, changes: dict[str, Any]) -> 
         if unknown:
             set_end_unknown(stored)
         row = _save(case, layer, spec)
-        return {"layer": row, "marker": copy.deepcopy(stored), "groups": _groups(spec),
+        # the feature as the editor reads it, its card's picture named
+        answer = copy.deepcopy(stored)
+        layerlinks.show_pictures(case, [answer])
+        return {"layer": row, "marker": answer, "groups": _groups(spec),
                 "icons": spec.get(ICON_META) or {}}
 
 
@@ -1484,7 +1502,7 @@ def edit_selection(case: Case, layer: str, keys: list[str], *, changes: dict[str
                     props[field] = value
             apply_fields(props, {field: value for field, value in changes.items() if field in CLEARABLE
                                  and not ((moment is not None or props.get("states")) and field == "status")
-                                 and not (props.get("states") and field == "date")})
+                                 and not (props.get("states") and field == "date")}, case)
             if start is not None:
                 set_start(by_key[key], start)
             if end is not None:
@@ -1801,7 +1819,7 @@ def add_shape(case: Case, layer: str, *, geometry: dict[str, Any], name: str,
         properties = maplayers._properties(name=name.strip() or f"{word} {sequence}",
                                            description=description, colour=colour, category=target["name"])
         properties.update(key=uuid.uuid4().hex, group=target["id"], symbol="pin")
-        apply_fields(properties, fields)
+        apply_fields(properties, fields, case)
         shape = {"type": "Feature", "geometry": geometry, "properties": properties}
         _born(spec, shape, at)
         features.append(shape)

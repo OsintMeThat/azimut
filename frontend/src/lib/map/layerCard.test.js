@@ -184,6 +184,20 @@ describe('what a personal feature says on its card', () => {
     expect([...element.querySelectorAll('.layer-card-picture')].map((one) => one.textContent)).toEqual(['Proof']);
     expect(layerCard('Front', { pictures })({ name: 'Own' }, null).querySelector('.layer-card-pictures')).toBeNull();
   });
+
+  it('shows the picture a feature names for its card whole, with no caption over it', () => {
+    const open = vi.fn();
+    const pictures = () => [{ src: '/files/c/media/.thumbs/v7.jpg', caption: '', whole: true, title: 'Open “Vehicle 07”', open }];
+    const element = layerCard('Vehicles', { coords: () => '', pictures })({ name: '#7', description: 'Oshkosh M-ATV (identified)' }, null);
+    const [shown] = element.querySelectorAll('.layer-card-picture');
+    expect(shown.classList.contains('whole')).toBe(true);
+    expect(shown.querySelector('span')).toBeNull();
+    expect(shown.title).toBe('Open “Vehicle 07”');
+    // above what the feature says of it
+    expect(shown.compareDocumentPosition(element.querySelector('.layer-card-body')) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    shown.click();
+    expect(open).toHaveBeenCalled();
+  });
 });
 
 describe('the size of a line or an area on its card', () => {

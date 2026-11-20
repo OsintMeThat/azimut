@@ -194,7 +194,8 @@ export function layerCard(title, { coords = formatCoords, copy = null, pictures 
 
     // What a personal marker follows, each shown and opened from its picture: the
     // footage first, then the proof that geolocates it. `pictures` answers a list of
-    // `{ src, caption, title, open }`.
+    // `{ src, caption, title, open, whole }`, `whole` for a picture shown uncropped
+    // across the card, as the one a feature names for its card is.
     const shown = (pictures?.(properties) ?? []).filter((one) => one.src);
     if (shown.length) {
       const row = document.createElement('div');
@@ -202,7 +203,7 @@ export function layerCard(title, { coords = formatCoords, copy = null, pictures 
       for (const one of shown) {
         const button = document.createElement('button');
         button.type = 'button';
-        button.className = 'layer-card-picture';
+        button.className = one.whole ? 'layer-card-picture whole' : 'layer-card-picture';
         button.title = one.title;
         const image = document.createElement('img');
         image.src = one.src;
@@ -210,9 +211,12 @@ export function layerCard(title, { coords = formatCoords, copy = null, pictures 
         image.loading = 'lazy';
         // a thumbnail the cache let go: the card reads on without it
         image.addEventListener('error', () => button.remove());
-        const caption = document.createElement('span');
-        caption.textContent = one.caption;
-        button.append(image, caption);
+        button.append(image);
+        if (one.caption) {
+          const caption = document.createElement('span');
+          caption.textContent = one.caption;
+          button.append(caption);
+        }
         button.addEventListener('click', (event) => { event.stopPropagation(); one.open(); });
         row.append(button);
       }

@@ -39,6 +39,7 @@ export const LAYER_HELP = {
   credit: 'Printed in the credits of a plate that draws it',
   note: 'What it shows and what it rests on',
   evidence: 'The case item it follows, opened from its picture',
+  picture: 'A picture of the case shown in its card, the marker staying where it is',
   details: 'Its group, its day and where it stands',
   toGroup: 'Back to what its group says',
   // a group's settings

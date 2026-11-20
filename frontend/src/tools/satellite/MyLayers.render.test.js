@@ -335,6 +335,30 @@ describe('personal layers', () => {
     expect(onfollowed.mock.calls).toEqual([['v1'], ['p1']]);
   });
 
+  it('sets the picture a feature’s card shows from its sheet in one press, and takes it off', async () => {
+    const { api: server } = await import('../../lib/api.js');
+    server.get.mockImplementation(async (url) => (String(url).includes('/catalog/entities')
+      ? { items: [{ id: 'e7', type: 'media', label: 'Vehicle 07', attrs: { kind: 'image' }, thumb: 'media/.thumbs/7.jpg' }] }
+      : { colours: [] }));
+    const point = { properties: { key: 'm1', name: '#7', group: 'g' }, geometry: { type: 'Point', coordinates: [43.5, 12.7] } };
+    const { controller, api } = await editing({ features: [point] });
+    controller.select('m1');
+    show(LayerFeatureSheet, { controller });
+    unfold('picture');
+    await settle(); flushSync();
+    expect(document.querySelector('.said').textContent).toBe('With 7 in the name');
+    document.querySelector('.rows button').click();
+    await controller.whenSaved(); await settle(); flushSync();
+    expect(api.patch).toHaveBeenCalledWith('/api/cases/case/map-layers/work/markers/m1', { picture: 'e7' });
+    expect(document.querySelector('.current-name').textContent).toBe('Vehicle 07');
+    [...document.querySelectorAll('.text-act')].find((node) => node.textContent === 'Remove').click();
+    await controller.whenSaved(); await settle(); flushSync();
+    expect(api.patch).toHaveBeenLastCalledWith('/api/cases/case/map-layers/work/markers/m1', { picture: null });
+    // the sheet keeps a section open from one feature to the next: folded for the tests after this one
+    fold('picture');
+    server.get.mockImplementation(async () => ({ colours: [] }));
+  });
+
   it('edits a line by its colour, with no icon, direction or place promotion', () => {
     const line = { properties: { key: 'line', name: 'Road' }, geometry: { type: 'LineString', coordinates: [[2, 48], [2.01, 48]] } };
     show(MyLayers, { controller: picked(line) });
@@ -831,14 +855,14 @@ describe('what the sheet says on hover', () => {
     const controller = picked(line, { groups: [{ id: 'g', name: 'Markers', stroke: 2 }, { id: 'h', name: 'Posts' }] });
     controller.form = { ...controller.form, ...looks };
     show(LayerFeatureSheet, { controller });
-    fold('status', 'sources', 'note', 'details', 'look');
+    fold('picture', 'status', 'sources', 'note', 'details', 'look');
     const heads = [...document.querySelectorAll('.fold')];
-    expect(heads.map((head) => head.querySelector('.fold-name').textContent)).toEqual(['Status', 'Sources', 'Note', 'Details', 'Look']);
+    expect(heads.map((head) => head.querySelector('.fold-name').textContent)).toEqual(['Picture', 'Status', 'Sources', 'Note', 'Details', 'Look']);
     expect(heads.every((head) => head.title)).toBe(true);
     // a folded section says what it holds, so a short sheet still reads whole
-    expect(heads[3].querySelector('.fold-holds').textContent).toMatch(/^Markers · \d[\d.,]* km$/);
+    expect(heads[4].querySelector('.fold-holds').textContent).toMatch(/^Markers · \d[\d.,]* km$/);
     expect(document.querySelector('[aria-label="Line dash"]')).toBeNull();
-    const look = heads[4];
+    const look = heads[5];
     expect(look.title).toBe('How it is drawn: its size, line, fill and name');
     expect(look.textContent).toContain('Width · Dash');
     // the rows inside each section are named on hover too

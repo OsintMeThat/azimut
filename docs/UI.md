@@ -2633,7 +2633,14 @@ view; a feature picked on the map unfolds its group and brings its row into view
 Several features, or one whose row the search or a folded group hides, open it above
 the list. It holds its style and name, then sections that fold to one line saying
 what they hold, the ones opened staying open from one feature to the next.
-**Evidence** shows the case item a marker follows. **Status**: for a marker, **–**
+**Evidence** shows the case item a marker follows. **Picture** sets a file, a capture
+or a proof of the case its card shows, the marker keeping its own point. Folded, it names
+the one set; open, it lists first the pictures holding the feature's number on its own
+(a feature "#7" is offered "Vehicle 07" and "#7 M-ATV", never "17"), else the newest, and
+**Find a picture by name** looks through the rest. A press or Enter sets one, so a layer of
+sixty vehicles is linked one press each, the section staying open from one feature to
+the next. The one set shows small with its name; a press opens it, **Change** picks
+another and **Remove** takes it off. **Status**: for a marker, **–**
 (nothing said, the first choice, since most markers are no building), **Damaged** or
 **Destroyed**, drawn on the map as a stroke or a cross across the marker (a line or
 an area has no status); beside it how sure, **Sure**, **Likely** or **Claimed**, a
@@ -2833,8 +2840,9 @@ these again, except a field rewritten by hand in the marker, which stays the
 analyst's. A file marker made before its proof becomes the proof's on that save,
 and a second marker of the same geolocation in one layer goes, kept for Undo. Its
 sheet opens on the footage, then the proof, each picture opening it; the
-marker's card on the map shows the same two. A case item can be shown in several
-layers without another case entity.
+marker's card on the map shows the same two. A picture set in the sheet's **Picture**
+shows instead, whole across the card, on every map that draws the layer and in a note's
+map. A case item can be shown in several layers without another case entity.
 Geo Proof's coordinate rows offer the same from the proof. A point's ⋯ goes a
 step at a time: the case's layers, the one used last first; then the layer's
 groups, when it has several; then, for a group whose features each have their own
@@ -7586,7 +7594,8 @@ with its + and − buttons, a double press, Ctrl and the wheel, two fingers or t
 never deeper than its ground stays sharp, and moves by a drag; marks that would cover one
 another are spread round their place with a thin leader to each true spot, and a crowd of
 more than twelve is a count to press until the map can show them apart. A press or Enter
-on a mark opens its card: the picture or the clip's still, the day, its words, the source,
+on a mark opens its card: the picture or the clip's still (the one a feature names for its
+card, else what it follows), the day, its words, the source,
 the proof's figure in the page, the links that check it. With more than one day, a
 timeline under the map shows the day large, steps through the days on its slider or with
 Play, and shows each feature only on its days, a line or an area that moved leaving its

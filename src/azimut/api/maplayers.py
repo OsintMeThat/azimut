@@ -154,6 +154,8 @@ class MarkerFields(BaseModel):
     confidence: str | None = Field(default=None, max_length=20)
     #: Whose work a copied feature is, said in the credits of a plate that draws it.
     credit: str | None = Field(default=None, max_length=layerediting.MAX_CREDIT)
+    #: The file, capture or proof of the case its card shows, by its id; "" or null takes it off.
+    picture: str | None = Field(default=None, max_length=64, pattern=r"^[A-Za-z0-9_-]*$")
     line_width: float | None = Field(default=None, allow_inf_nan=False)
     line_dash: str | None = Field(default=None, max_length=10)
     line_arrow: str | None = Field(default=None, max_length=10)

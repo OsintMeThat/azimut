@@ -1018,6 +1018,7 @@ def _layer_features(case: "Case", name: str, index: int, frame: dict[str, Any] |
                     "layer": title,
                     "group": category,
                     "entity": str(properties.get("entity_id") or "") or None,
+                    "picture": str(properties.get("picture") or "") or None,
                 })
                 row = legend.setdefault((category, kind), {
                     "label": category if category and category != layerediting.DEFAULT_GROUP else "",
@@ -1183,20 +1184,28 @@ def _plain_text(value: Any) -> str:
 
 def _cards_media(case: "Case", features: list[dict[str, Any]], *, encode: Encode | None, card_side: int,
                  out: Derived) -> None:
-    """A marker following a picture or a proof of the case shows it in its card."""
+    """A marker following a picture or a proof of the case shows it in its card, and a
+    feature naming a picture of its own (`picture`, `engine/layerlinks.py`) shows that
+    one instead, its marker staying where it is."""
     if encode is None:
         return
     made: dict[str, dict[str, Any] | None] = {}
     for feature in features:
         entity_id = feature.pop("entity", None)
-        if not entity_id or "media" in feature["card"]:
+        picture = feature.pop("picture", None)
+        if "media" in feature["card"]:
             continue
-        if entity_id not in made:
-            made[entity_id] = _entity_picture(case, entity_id, encode, card_side, out)
-        if made[entity_id] is not None:
-            feature["card"]["media"] = made[entity_id]
+        for wanted in (picture, entity_id):
+            if not wanted:
+                continue
+            if wanted not in made:
+                made[wanted] = _entity_picture(case, wanted, encode, card_side, out)
+            if made[wanted] is not None:
+                feature["card"]["media"] = made[wanted]
+                break
     for feature in features:
         feature.pop("entity", None)
+        feature.pop("picture", None)
 
 
 def _entity_picture(case: "Case", entity_id: str, encode: Encode, side: int, out: Derived) -> dict[str, Any] | None:

@@ -1443,10 +1443,11 @@
     for (const entry of main.layers ?? []) {
       for (const feature of keptOf(addedLayers.collection(entry.name), entry)?.features ?? []) {
         const said = feature.properties ?? {};
-        const path = said.entity_picture || said.source_picture;
+        // the picture a feature names for its card first, as its card shows it
+        const path = said.picture_path || said.entity_picture || said.source_picture;
         const point = anchor(feature.geometry);
         if (!path || !point || out.length >= 60) continue;
-        out.push({ key: `${entry.name}/${said.key ?? out.length}`, path, title: said.name || said.entity_label || 'Feature',
+        out.push({ key: `${entry.name}/${said.key ?? out.length}`, path, title: said.name || said.picture_label || said.entity_label || 'Feature',
           at: point.map((value) => Math.round(value * 1e6) / 1e6), of: main.id });
       }
     }

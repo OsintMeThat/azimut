@@ -732,8 +732,10 @@ def build_full_case(
         shared = client.post(f"/api/cases/{case_id}/map-layers/{personal_name}/links",
                              json={"items": [{"id": full.place_id, "lat": 48.8584, "lon": 2.2945}], "group": group_id})
         assert shared.status_code == 200, shared.text
+        # its card shows the photo, which stands somewhere else: a use of the photo
         added = client.post(f"/api/cases/{case_id}/map-layers/{personal_name}/markers",
-                            json={"lat": 48.8, "lon": 2.3, "name": "Review point", "symbol": "star"})
+                            json={"lat": 48.8, "lon": 2.3, "name": "Review point", "symbol": "star",
+                                  "picture": photo_entity["id"]})
         assert added.status_code == 200, added.text
         # A marker in the analyst's own icon: the layer takes its copy, so the case
         # carries the picture and how it is drawn wherever it goes.
