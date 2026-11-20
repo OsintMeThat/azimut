@@ -8,7 +8,8 @@
  *   Enter picks, Escape closes; from `/`, its foot offers the rows of another note or a
  *   sheet instead;
  * - **the settings**: only what a chart is about, in plain words: its title, what it
- *   counts, by what, coloured by what, its icons for a chart of glyphs (`chartIcons.js`),
+ *   counts, by what, coloured by what (a picture wall's groups, the colour of the bar under
+ *   each picture and their shape), its icons for a chart of glyphs (`chartIcons.js`),
  *   whether its table shows under it, and its look (Report, Book, Dark), each a whole
  *   preset; the colours it chose on its own, and the press that keeps them for the case;
  *   and *Edit the data*, the kind's form, when its rows are in the form's shape.
@@ -24,7 +25,7 @@
  */
 import { button, openPopover } from './gridMenu.js';
 import { chartKinds } from './chartFigure.js';
-import { readForm } from './chartFormText.js';
+import { WALL_SHAPES, readForm } from './chartFormText.js';
 import { scratchCards, titleField } from './chartForm.js';
 import { chartIcons } from './chartIcons.js';
 import { ROWS, SHOWS, STYLES, setting } from './chartText.js';
@@ -384,7 +385,16 @@ export function chartSettings(panel, { state, write, keep = null, source = null,
     title.render();
     renderData(chart, kind);
     const fields = [];
-    if (kind.counts !== false) {
+    if (kind.per_row) {
+      // a picture wall counts its rows: its groups, the colour of the bar under each picture, their shape
+      const by = chosen(choices.colour, setting(chart, 'by'));
+      fields.push(select('Groups', choices.colour, by, (value) => write(cardChanges('by', value, { kind })), { none: 'One group' }));
+      const colours = choices.colour.filter((option) => option.value.toLowerCase() !== setting(chart, 'by').toLowerCase());
+      fields.push(select('Bar coloured by', colours, chosen(colours, setting(chart, 'colour by')), (value) => write(cardChanges('colour by', value, { kind })), { none: 'No bar' }));
+      const shape = setting(chart, 'shape') || WALL_SHAPES[0];
+      fields.push(segmented('Shape', WALL_SHAPES.map((value) => ({ value, label: value })), shape,
+        (value) => write({ shape: value === WALL_SHAPES[0] ? '' : value })));
+    } else if (kind.counts !== false) {
       const count = setting(chart, 'count');
       fields.push(select('Count', choices.count, chosen(choices.count, count) || (count ? count : ROWS), (value) => write(cardChanges('count', value, { kind }))));
       // a kind of parts is drawn by its colour column when it has one, else by its by column

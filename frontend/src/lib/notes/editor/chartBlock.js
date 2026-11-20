@@ -31,6 +31,7 @@ import { MAX_COLOUR_NAME, MAX_PALETTE, layerPalette } from '../../map/layerPalet
 import { rovingToolbar } from '../pictureSize.js';
 import { registerBlock } from './blocks.js';
 import { EXPORTS, chartRows, chartSources, drawChart, exportChart, forgetDrawings, keptDrawing } from './chartFigure.js';
+import { openCasePicker } from './casePicker.js';
 import { chartSettings, openKindPicker } from './chartCard.js';
 import { chartForm } from './chartForm.js';
 import { EMPTY_SAID, FORMS, hasRows, readForm, starterBlock } from './chartFormText.js';
@@ -459,6 +460,9 @@ class ChartBox {
         },
         write: (next) => this.edit(() => next),
         caseId: this.info.caseId ?? '',
+        // a picture wall's pictures: the case's records the note knows, picked as a note's picture is
+        entities: () => this.info.entities ?? [],
+        pickPicture: (anchor, onPick) => openCasePicker(this.view, anchor, { title: 'A picture for the wall', pick: onPick }),
         onClose: () => {
           this.toggleForm(false);
           this.kindButton?.focus({ preventScroll: true });

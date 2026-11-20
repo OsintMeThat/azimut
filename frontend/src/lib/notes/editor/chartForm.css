@@ -122,6 +122,28 @@
 .cf-icon:hover, .cf-icon:focus-visible { border-color: var(--info); outline: none; }
 .cf-empty { margin: 4px 0 2px 28px; color: var(--text-3); font-size: 12px; }
 
+/* a picture wall's row: its picture, its label, its words, its group and its colour */
+.cf-picture {
+  flex: none; display: inline-flex; align-items: center; gap: 6px; width: 132px; height: 30px; padding: 2px 6px 2px 2px;
+  border: 1px solid var(--border-strong); border-radius: 5px; background: var(--bg-1); color: var(--text-1); font: inherit; font-size: 12px;
+  text-align: left; cursor: pointer;
+}
+.cf-picture:hover, .cf-picture:focus-visible { border-color: var(--info); outline: none; }
+.cf-picture-empty { border-style: dashed; color: var(--text-3); }
+.cf-picture-gone { border-color: color-mix(in srgb, var(--warn) 70%, var(--border-strong)); }
+.cf-picture-thumb {
+  flex: none; display: inline-flex; width: 36px; height: 24px; border-radius: 3px; overflow: hidden; background: var(--bg-3);
+}
+.cf-picture-thumb img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.cf-picture-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.cf-col-picture { width: 132px; flex: none; }
+.cf-wall-label { width: 64px; flex: none; }
+.cf-wall-group { flex: 1 1 110px; }
+.cf-wall-colour { width: 112px; flex: none; }
+.cf-input.cf-wall-group { flex: 1 1 110px; }
+.cf-fill-picture { align-items: center; }
+.cf-fill-picture .cf-picture-thumb { width: 42px; height: 28px; }
+
 .cf-adds { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; padding-left: 28px; }
 .cf-add {
   height: 26px; padding: 0 10px; border: 1px solid color-mix(in srgb, var(--accent) 45%, transparent); border-radius: 13px;
