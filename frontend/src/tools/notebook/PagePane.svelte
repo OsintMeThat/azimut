@@ -30,8 +30,14 @@
    * write (`notes/html/preview`), drawn the same way and shown as a browser reads it
    * (`HtmlPage.svelte`). The choice is kept for this browser (`lib/notes/formats.js`).
    * A template, which belongs to no case, shows its pages.
+   *
+   * **Full screen** hands the preview's own box the screen (`lib/fullscreen.js`), or
+   * covers the window with it where the browser refuses: the same preview, still drawn
+   * again as the note changes, the HTML page laid out at the screen's width, a
+   * tablet's or a phone's. Esc, Exit or the browser's own exit give the pane back
+   * where it was read to.
    */
-  import { onDestroy, untrack } from 'svelte';
+  import { onDestroy, tick, untrack } from 'svelte';
   import { prefs } from '../../lib/state.svelte.js';
   import { createPreview, htmlPreview, pageLine } from '../../lib/notes/preview.js';
   import { HTML, PDF, keepFormat, readFormat } from '../../lib/notes/formats.js';
@@ -45,6 +51,7 @@
   import { canStateSourceOf, statePostedOf, stateSourceOf } from '../../lib/notes/sources.js';
   import { INTERNAL, editionOf, keepEdition } from '../../lib/notes/editions.svelte.js';
   import { mapsChanged } from '../../lib/notes/mapSettings.svelte.js';
+  import { holdScreen } from '../../lib/fullscreen.js';
   import Icon from '../../components/Icon.svelte';
   import PagePreview from '../../components/PagePreview.svelte';
   import EditionSwitch from './EditionSwitch.svelte';
@@ -74,6 +81,51 @@
     format = value;
     keepFormat('page', value);
   }
+  /** The widths the HTML page is read at on the whole screen; Desktop is the screen's own. */
+  const WIDTHS = [
+    { id: 'desktop', label: 'Desktop', title: 'As wide as the screen' },
+    { id: 'tablet', label: 'Tablet', title: '820 px wide, as on a tablet' },
+    { id: 'phone', label: 'Phone', title: '390 px wide, as on a phone' },
+  ];
+  /** The preview's own box, which takes the screen, and whether it holds it (`holdScreen`). */
+  let stage = $state(null);
+  let full = $state(false);
+  /** Which of `WIDTHS` the HTML page is read at there, kept for the visit. */
+  let width = $state('desktop');
+  let screen = null;
+  let screenButton = $state(null);
+  let exitButton = $state(null);
+  let htmlView = $state(null);
+  let pdfView = $state(null);
+  /** Where the preview was read to as it took the screen, given back as it leaves. */
+  let before = null;
+  const viewOf = (format) => (format === HTML ? htmlView : pdfView);
+
+  /** The preview on the whole screen, back in the pane (`on` false), or the other of the two. */
+  function wholeScreen(on) {
+    if (!stage) return Promise.resolve();
+    screen ??= holdScreen(stage, screened, { covered: 'covering' });
+    const wanted = on ?? !screen.full;
+    if (wanted && !screen.full) before = { format: shows, at: viewOf(shows)?.readTo() };
+    return screen.toggle(wanted);
+  }
+
+  function screened(on) {
+    full = on;
+    if (on) {
+      void tick().then(() => exitButton?.focus({ preventScroll: true }));
+      return;
+    }
+    const spot = before;
+    before = null;
+    screenButton?.focus({ preventScroll: true });
+    // once the pane has its own size back
+    void tick().then(() => requestAnimationFrame(() => requestAnimationFrame(() => {
+      if (spot && spot.format === shows) viewOf(shows)?.backTo(spot.at);
+    })));
+  }
+  onDestroy(() => screen?.destroy());
+
   /** The HTML page drawn last, kept while the next is drawn. */
   let html = $state('');
   let error = $state('');
@@ -279,6 +331,8 @@
         <Icon name={warningsFolded ? 'chevronDown' : 'chevronUp'} size={11} />
       </button>
     {/if}
+    <button type="button" class="whole" bind:this={screenButton} aria-label="Full screen" title="Show the preview on the whole screen"
+      onclick={() => void wholeScreen(true)}><Icon name="maximize" size={13} /></button>
   </div>
   {#if warnings.length && !warningsFolded}
     <ul class="warnings" id="page-warnings" aria-label="Warnings">
@@ -296,12 +350,41 @@
     </ul>
   {/if}
   {#if error}<p class="error" role="alert"><Icon name="alert" size={12} /> {error}</p>{/if}
-  {#if shows === HTML}
-    <HtmlPage {html} label="The note as an HTML page" />
-  {:else}
-    <PagePreview {data} label="Pages of the PDF" onerror={(message) => (error = message)} onpages={(n) => (count = n)}
-      onpage={(index) => onjump(pageLine(pages, index))} overlay={pictures.length ? marks : null} />
-  {/if}
+  <div class="stage" class:full bind:this={stage} data-width={full && shows === HTML ? width : 'desktop'}>
+    {#if full}
+      <div class="screen-bar">
+        <span class="screen-said">{#if title}<strong>{title}</strong>{/if}
+          <span>{#if shows === HTML}As the file reads in a browser{:else if count}{count} page{count === 1 ? '' : 's'}{/if}</span></span>
+        <div class="screen-tools">
+          {#if caseId}<FormatSwitch tight page value={shows} onchange={setFormat} />{/if}
+          {#if shows === HTML}
+            <div class="widths" role="group" aria-label="Width">
+              {#each WIDTHS as choice (choice.id)}
+                <button type="button" class:on={width === choice.id} aria-pressed={width === choice.id} title={choice.title}
+                  onclick={() => (width = choice.id)}>{choice.label}</button>
+              {/each}
+            </div>
+          {/if}
+        </div>
+        <div class="screen-end">
+          {#if busy}<span class="busy">Updating…</span>{/if}
+          <button type="button" class="exit" bind:this={exitButton} title="Back to the note (Esc)" onclick={() => void wholeScreen(false)}>
+            <Icon name="minimize" size={13} /> Exit <kbd>Esc</kbd>
+          </button>
+        </div>
+      </div>
+    {/if}
+    <div class="view">
+      <div class="frame">
+        {#if shows === HTML}
+          <HtmlPage bind:this={htmlView} {html} label="The note as an HTML page" />
+        {:else}
+          <PagePreview bind:this={pdfView} {data} label="Pages of the PDF" onerror={(message) => (error = message)} onpages={(n) => (count = n)}
+            onpage={(index) => onjump(pageLine(pages, index))} overlay={pictures.length ? marks : null} />
+        {/if}
+      </div>
+    </div>
+  </div>
 </aside>
 
 {#snippet marks(index, size)}
@@ -382,6 +465,55 @@
   }
   .said { flex: 1; }
   .busy { color: var(--text-3); }
+  .whole {
+    display: inline-flex; align-items: center; justify-content: center; flex: none; width: 22px; height: 22px; margin: -2px -6px -2px -2px;
+    padding: 0; border: none; border-radius: var(--r-sm); background: none; color: var(--text-3); cursor: pointer;
+  }
+  .whole:hover { background: var(--bg-3); color: var(--text-1); }
+  .whole:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+  /* the preview's own box, which takes the screen: the page in a frame of the width picked */
+  .stage { flex: 1; min-height: 0; display: flex; flex-direction: column; background: var(--bg-0); }
+  .stage:global(.covering) { position: fixed; inset: 0; z-index: 2000; }
+  .view { flex: 1; min-height: 0; display: flex; justify-content: center; }
+  .frame { flex: 1 1 auto; min-width: 0; min-height: 0; display: flex; flex-direction: column; }
+  .stage:not([data-width='desktop']) .view { padding: 20px 16px; background: var(--bg-3); }
+  .stage[data-width='tablet'] .frame { flex: 0 1 820px; }
+  .stage[data-width='phone'] .frame { flex: 0 1 390px; }
+  .stage:not([data-width='desktop']) .frame {
+    overflow: hidden; border-radius: 10px; box-shadow: 0 0 0 1px var(--border-strong), var(--shadow-2);
+  }
+  .screen-bar {
+    flex: none; display: grid; grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr); align-items: center; gap: 16px;
+    height: 40px; padding: 0 10px 0 16px; border-bottom: 1px solid var(--border); background: var(--bg-1); color: var(--text-3);
+    font-size: var(--fs-xs);
+  }
+  .screen-said { min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+  .screen-said strong { margin-right: 8px; color: var(--text-1); font-size: var(--fs-sm); font-weight: 600; }
+  .screen-tools { display: flex; align-items: center; gap: 10px; }
+  .screen-end { display: flex; align-items: center; justify-content: flex-end; gap: 12px; }
+  .widths { display: inline-flex; flex: none; border: 1px solid var(--border); border-radius: var(--r-md); overflow: hidden; }
+  .widths button {
+    padding: 2px 9px; border: none; border-left: 1px solid var(--border); background: var(--bg-1); color: var(--text-2);
+    font: inherit; font-size: var(--fs-xs); cursor: pointer; white-space: nowrap;
+  }
+  .widths button:first-child { border-left: none; }
+  .widths button:hover:not(.on) { background: var(--bg-3); color: var(--text-1); }
+  .widths button.on { background: var(--bg-3); color: var(--text-1); font-weight: 600; box-shadow: inset 0 -2px 0 var(--accent); }
+  .widths button:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+  .exit {
+    display: inline-flex; align-items: center; gap: 6px; height: 26px; padding: 0 5px 0 9px; border: 1px solid var(--border);
+    border-radius: var(--r-md); background: var(--bg-1); color: var(--text-1); font: inherit; cursor: pointer;
+  }
+  .exit:hover { background: var(--bg-3); }
+  .exit:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+  .exit kbd {
+    padding: 0 4px; border: 1px solid var(--border); border-radius: 3px; color: var(--text-3); font: inherit; font-size: 10px; line-height: 15px;
+  }
+  /* a narrow window (the extension's panel): the switches and Exit, the title left out */
+  @media (max-width: 640px) {
+    .screen-bar { grid-template-columns: auto minmax(0, 1fr); padding-left: 10px; }
+    .screen-said { display: none; }
+  }
   .warned {
     display: inline-flex; align-items: center; gap: 4px; padding: 2px 6px; margin: -2px -6px -2px 0; border: none; border-radius: var(--r-sm);
     background: none; color: var(--warn); font: inherit; cursor: pointer;

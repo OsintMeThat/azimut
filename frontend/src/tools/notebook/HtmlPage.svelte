@@ -3,12 +3,32 @@
    * The app's own lines in the page it shows, never in an exported file: start where
    * the last page was read to, and say where this one is scrolled to. Inline, which
    * the page's own policy allows, and talking only to the window that holds it.
+   *
+   * The frame made wider or narrower (the pane dragged, the whole screen, a phone's
+   * width) keeps the line read at the top of the view where it was, rather than the
+   * same number of pixels down a page that wrapped again. The window holding it can
+   * send it back to a scroll it read before (`{ azimutScroll }`), kept through the
+   * resize still under way.
    */
   export function keptScroll(html, top) {
     const y = Math.max(0, Math.round(Number(top) || 0));
     const script = `<script>(function(){var y=${y};function go(){if(y)window.scrollTo({top:y,behavior:'instant'});}`
       + `if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',go);else go();`
-      + `var t;addEventListener('scroll',function(){clearTimeout(t);t=setTimeout(function(){`
+      // the block of the reading across a line near the top of the view (below a bar the page keeps
+      // there), never one held still on the screen, and how far into it the line falls
+      + `var spot=null,back=null,held=false,s,t;function line(){return Math.min(96,innerHeight/4);}`
+      + `function still(n){for(;n&&n!==document.body;n=n.parentElement){var p=getComputedStyle(n).position;if(p==='sticky'||p==='fixed')return true;}return false;}`
+      + `function mark(){var all=document.querySelectorAll('h1,h2,h3,h4,h5,h6,p,li,figure,blockquote,pre,tr,dt,dd'),at=line();`
+      + `for(var i=0;i<all.length;i++){var r=all[i].getBoundingClientRect();`
+      + `if(r.height&&r.bottom>at&&!still(all[i])){spot={n:all[i],top:r.top,into:r.top<at?(at-r.top)/r.height:0};return;}}spot=null;}`
+      + `function keep(){if(back!==null){window.scrollTo({top:back,behavior:'instant'});return;}if(!spot||!spot.n.isConnected)return;`
+      + `var r=spot.n.getBoundingClientRect();window.scrollBy({top:r.top-(spot.into?line()-spot.into*r.height:spot.top),behavior:'instant'});}`
+      + `function hold(){held=true;clearTimeout(s);s=setTimeout(function(){held=false;back=null;mark();},300);}`
+      + `addEventListener('load',function(){if(!held)mark();});`
+      + `addEventListener('resize',function(){keep();requestAnimationFrame(keep);hold();});`
+      + `addEventListener('message',function(e){if(e.source!==parent||!e.data||typeof e.data.azimutScroll!=='number')return;`
+      + `back=Math.max(0,e.data.azimutScroll);keep();hold();});`
+      + `addEventListener('scroll',function(){clearTimeout(t);t=setTimeout(function(){if(!held)mark();`
       + `parent.postMessage({azimutPage:Math.round(scrollY)},'*');},80);},{passive:true});})();<\/script>`;
     const text = String(html ?? '');
     const end = text.lastIndexOf('</body>');
@@ -67,6 +87,17 @@
     done[index] = frames[index].doc;
     if (!frames[index].doc || frames[index].ticket !== ticket) return;
     shown = index;
+  }
+
+  /** How far down the page shown is read, in pixels. */
+  export function readTo() {
+    return top;
+  }
+
+  /** The page shown read from `y` again, and the next one drawn opening there too. */
+  export function backTo(y) {
+    top = Math.max(0, Number(y) || 0);
+    elements[shown]?.contentWindow?.postMessage({ azimutScroll: top }, '*');
   }
 
   function heard(event) {

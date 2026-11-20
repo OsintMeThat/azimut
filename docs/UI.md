@@ -8338,6 +8338,16 @@ paragraph written under the heading (and any guidance there), which one Undo tak
 A link's warning lands on the link's line. A template's pages give no such warnings, since a
 template is guidance by design.
 
+**Full screen.** The corners at the end of the pane's bar put the preview, PDF or HTML, on
+the whole screen: the same preview, drawn again as the note changes, never a new window
+or a new export. A bar above it keeps the note's title, **PDF | HTML**, **Exit** (Esc) and,
+for the HTML page, **Desktop**, **Tablet** (820 px) or **Phone** (390 px): the page is read
+at that width with the layout a reader gets there (the story, the contents rail, the
+phone's bar). The width picked is kept for the visit. Esc, Exit or the browser's own exit
+give the pane back where it was read to. Where the browser gives no part of a page the
+screen, the preview covers the window instead. Made wider or narrower, the pages and the
+HTML page keep the line read at the top of the view.
+
 **Pictures and pages.** Hovering a picture, in the note or on its page in the Page
 pane, offers **XXS**, **XS**, **S**, **M**, **L** and **Full**, left, centre or right, and **Caption**,
 written on its line as `{width=… align=… caption="…"}`. In the note a size shows on the
