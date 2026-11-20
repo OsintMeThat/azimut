@@ -114,6 +114,9 @@ describe('the ready templates', () => {
       expect(all).toMatch(/^::: map$/m);
       expect(all).toMatch(/^::: story$/m);
       expect(all).toMatch(/^> \[!limits\] /m);
+      // a timeline coloured by what each row is, and a wall a story walks group by group
+      for (const id of ['frontline', 'claims']) expect(named(id).body, id).toContain('kind: timeline\ncolour by: Kind\n| When | What happened | Kind |');
+      expect(named('story').body).toContain('story: one group per step');
     });
 
     it('say how their tables show, in a settings line the grid reads', () => {
