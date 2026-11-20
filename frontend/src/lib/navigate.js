@@ -442,6 +442,12 @@ export function openIconSettings() {
   uiState.tool = 'settings';
 }
 
+/** Open Settings on Publishing, where the name, logo and signature a document is signed with are set. */
+export function openPublishingSettings() {
+  uiState.settingsTab = 'publishing';
+  uiState.tool = 'settings';
+}
+
 /** Open Settings on the Capture extension tab, where the pairing token is. */
 export function openExtensionSettings() {
   uiState.settingsTab = 'extension';

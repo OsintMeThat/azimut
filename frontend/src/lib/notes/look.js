@@ -32,7 +32,7 @@ export const DEFAULT_LOOK = Object.freeze({
   page: 'a4',
   accent: '',
   tlp: '',
-  cover: Object.freeze({ on: false, mode: '', top: false, subtitle: '', image: '', date: '' }),
+  cover: Object.freeze({ on: false, mode: '', top: false, subtitle: '', image: '', date: '', marks: Object.freeze([]) }),
   toc: false,
   numbered: false,
   sources: '',
@@ -42,8 +42,23 @@ export const DEFAULT_LOOK = Object.freeze({
   sources_list: '',
   method_list: '',
   geolocations_list: '',
+  signed: '',
   annexes: Object.freeze({}),
 });
+
+/** What the style's cover may carry beside its title, in the order it is kept (`notelook.COVER_MARKS`). */
+export const COVER_MARKS = [
+  { id: 'azimut', label: 'Azimut logo' },
+  { id: 'logo', label: 'My logo' },
+  { id: 'signature', label: 'Signature' },
+];
+
+/** Where the document is signed with the analyst's name ("" nowhere). */
+export const SIGNED = [
+  { id: '', label: 'Off' },
+  { id: 'title', label: 'Under the title' },
+  { id: 'end', label: 'At the end' },
+];
 
 /**
  * Each style, in the order the Look lists them, what it gives in a line, and the
@@ -410,6 +425,7 @@ export function normaliseLook(look) {
       subtitle: String(cover.subtitle ?? '').slice(0, SUBTITLE_MAX),
       image: String(cover.image ?? ''),
       date: DAY.test(date) ? date : '',
+      marks: COVER_MARKS.map((mark) => mark.id).filter((id) => Array.isArray(cover.marks) && cover.marks.includes(id)),
     },
     toc: Boolean(given.toc),
     numbered: Boolean(given.numbered),
@@ -420,6 +436,7 @@ export function normaliseLook(look) {
     sources_list: pick(given.sources_list ?? '', SOURCES_LISTS, ''),
     method_list: pick(given.method_list ?? '', SOURCES_LISTS, ''),
     geolocations_list: pick(given.geolocations_list ?? '', SOURCES_LISTS, ''),
+    signed: pick(given.signed ?? '', SIGNED, ''),
     annexes: annexesOf(given.annexes),
     ...(header && { header }),
     ...(footer && { footer }),
@@ -439,7 +456,7 @@ export function sectionsSet(look) {
       || whole.geolocations_list !== '' || Object.keys(whole.annexes).length > 0,
     text: Boolean(whole.font || whole.size),
     page: whole.page !== DEFAULT_LOOK.page || Boolean(whole.accent || whole.tlp),
-    cover: whole.cover.on,
+    cover: whole.cover.on || whole.signed !== '',
     bands: Boolean(whole.header || whole.footer),
   };
 }

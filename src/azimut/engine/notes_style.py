@@ -36,7 +36,7 @@ import types
 from dataclasses import dataclass, field, replace
 from datetime import date
 from pathlib import Path
-from typing import Callable, Sequence
+from typing import Any, Callable, Sequence
 
 from fpdf import FPDF
 from fpdf.enums import Align, XPos, YPos
@@ -394,6 +394,8 @@ class NotePage(FPDF):
         #: while it is not set (`PageBand`).
         self.band_words: dict[str, str] = {}
         self.band_picture: Callable[[str], tuple[Path, tuple[int, int]] | None] = lambda name: None
+        #: Who signs (`notefill.Identity`): its byline, credentials and pictures.
+        self.signer: Any = None
         self._widths: dict[tuple[object, ...], float] = {}
 
     #: The most text widths one document keeps (`get_string_width`).
@@ -793,13 +795,24 @@ class NotePage(FPDF):
                 self.set_font(self.theme.aside_family, "I", 13.5)
                 self.set_text_color(*theme.muted)
                 self.multi_cell(frame, 6.6, look.cover.subtitle, align=Align.L, new_x=XPos.LMARGIN, new_y=YPos.NEXT)
+            byline = self.signer.byline() if self.signer is not None and look.signed == "title" else ""
+            if byline:
+                self.ln(2.5)
+                self.set_x(left)
+                self.set_font(self.theme.heading_family, "", 10)
+                self.set_text_color(*theme.ink)
+                self.multi_cell(frame, 5.2, byline, align=Align.L, new_x=XPos.LMARGIN, new_y=YPos.NEXT)
             self.ln(7)
             self.set_x(left)
             self.set_font(self.theme.heading_family, "B", 10)
             self.set_text_color(*theme.accent_dark)
             self.cell(frame, 5, long_date(self.day))
+            if "signature" in look.cover.marks:
+                self.set_xy(left, self.get_y() + 12.0)
+                self.signature_block(left, frame)
 
             label = TLP_LABELS.get(look.tlp)
+            self._cover_logos(left, (height - 30.0 - 16.0) if label is not None else height - 26.0)
             if label is not None:
                 foot = height - 30.0
                 self.set_draw_color(*theme.rule)
@@ -813,6 +826,61 @@ class NotePage(FPDF):
             self.tlp_mark(width - left, 7.4)
             self.tlp_mark(width - left, height - 30.0 + 4.0)
         self.set_auto_page_break(True, margin=theme.margin_bottom)
+
+    def _cover_logos(self, left: float, top: float) -> None:
+        """The Azimut mark and the analyst's logo the cover asks for, side by side at
+        its foot, each at most `COVER_LOGO_HEIGHT` tall."""
+        names = [name for mark, name in (("azimut", "logo"), ("logo", "my-logo")) if mark in self.look.cover.marks]
+        x = left
+        for name in names:
+            found = self.band_picture(name)
+            if found is None:
+                continue
+            path, (wide, high) = found
+            if wide <= 0 or high <= 0:
+                continue
+            tall = COVER_LOGO_HEIGHT
+            drawn = min(COVER_LOGO_WIDTH, tall * wide / high)
+            tall = drawn * high / wide
+            self.place_picture(path, x=x, y=top + (COVER_LOGO_HEIGHT - tall) / 2, w=drawn, h=tall)
+            x += drawn + 7.0
+
+    def signature_block(self, left: float, width: float) -> float:
+        """The analyst's handwritten signature, then their name and credentials, from
+        the cursor down; returns how tall it was. Nothing without a name or a picture."""
+        signer = self.signer
+        if signer is None:
+            return 0.0
+        top = self.get_y()
+        found = self.band_picture("my-signature")
+        if found is not None:
+            path, (wide, high) = found
+            if wide > 0 and high > 0:
+                tall = SIGNATURE_HEIGHT
+                drawn = min(SIGNATURE_WIDTH, tall * wide / high)
+                tall = drawn * high / wide
+                self.place_picture(path, x=left, y=self.get_y(), w=drawn, h=tall)
+                self.set_y(self.get_y() + tall + 1.5)
+        if signer.name:
+            self.set_x(left)
+            self.set_font(self.theme.heading_family, "B", 9.5)
+            self.set_text_color(*self.theme.ink)
+            self.cell(width, 5, signer.name, new_x=XPos.LMARGIN, new_y=YPos.NEXT)
+            credentials = signer.credentials()
+            if credentials:
+                self.set_x(left)
+                self.set_font(self.theme.heading_family, "", 8.5)
+                self.set_text_color(*self.theme.muted)
+                self.multi_cell(width, 4.4, credentials, align=Align.L, new_x=XPos.LMARGIN, new_y=YPos.NEXT)
+        return self.get_y() - top
+
+    def signature_height(self) -> float:
+        """How tall `signature_block` will be, to keep it on one page."""
+        signer = self.signer
+        if signer is None:
+            return 0.0
+        tall = SIGNATURE_HEIGHT + 1.5 if self.band_picture("my-signature") is not None else 0.0
+        return tall + (5.0 + (4.4 if signer.credentials() else 0.0) if signer.name else 0.0)
 
     def _contours(self, ground: RGB, field_height: float) -> None:
         """A quiet pattern of rings for a cover with no picture: a bearing plot's
@@ -905,6 +973,12 @@ BAND_WORD = re.compile(r"\{(title|date|name|role|organisation|page|pages)\}")
 #: A slot's text size, and the tallest a picture in one is, in millimetres.
 BAND_SIZE = 7.5
 BAND_PICTURE_HEIGHT = 5.0
+#: The cover's logos (`NoteCover.marks`): at most this tall and wide, in mm.
+COVER_LOGO_HEIGHT = 11.0
+COVER_LOGO_WIDTH = 42.0
+#: A handwritten signature: at most this tall and wide, in mm.
+SIGNATURE_HEIGHT = 15.0
+SIGNATURE_WIDTH = 55.0
 
 KICKERS = {"plain": "AZIMUT NOTES", "report": "REPORT", "brief": "BRIEF", "journal": "LOG", "article": "ARTICLE"}
 

@@ -624,6 +624,8 @@ class _Page:
             self.cited.listed[COUNT] = md.counts_listed(self._counts)
         body = self._scrub("".join(self.out))
         self.description = self._describe(body)
+        if self.look.signed == "end":
+            body += self._signature("az-signed-end")
         sources = self._sources()
         earlier = list(earlier)
         profile = self.cited.profile
@@ -867,12 +869,38 @@ class _Page:
                  f'<h1 class="az-title" dir="auto">{_text(title)}</h1>\n']
         if look.cover.subtitle:
             lines.append(f'<p class="az-standfirst" dir="auto">{_text(look.cover.subtitle)}</p>\n')
+        byline = self.cited.identity.byline() if look.signed == "title" else ""
+        if byline:
+            lines.append(f'<p class="az-byline" dir="auto">{_text(byline)}</p>\n')
         lines.append(f'<p class="az-dateline"><time class="az-date" datetime="{self.day.isoformat()}">'
                      f"{_text(notes_style.long_date(self.day))}</time></p>\n")
+        if look.cover.on:
+            lines.append(self._cover_marks())
         if look.cover.on and look.cover.image:
             lines.append(self._cover_picture(look.cover.image))
         lines.append("</header>\n")
         return "".join(lines)
+
+    def _cover_marks(self) -> str:
+        """The logos and the signature the style's cover asks for (`NoteCover.marks`)."""
+        marks = self.look.cover.marks
+        logos = "".join(self._built_in(name, inline=True) for mark, name in
+                        (("azimut", notefill.LOGO), ("logo", notefill.MY_LOGO)) if mark in marks)
+        said = f'<p class="az-cover-marks">{logos}</p>\n' if logos else ""
+        if "signature" in marks:
+            said += self._signature("az-cover-signed")
+        return said
+
+    def _signature(self, kind: str) -> str:
+        """The handwritten signature, the name and the credentials, or "" with none of them."""
+        identity = self.cited.identity
+        picture = self._built_in(notefill.MY_SIGNATURE, inline=True)
+        credentials = identity.credentials()
+        if not picture and not identity.name:
+            return ""
+        name = f'<span class="az-signer">{_text(identity.name)}</span>' if identity.name else ""
+        role = f'<span class="az-credentials">{_text(credentials)}</span>' if credentials and identity.name else ""
+        return f'<div class="az-signed {kind}">{picture}{name}{role}</div>\n'
 
     def _tlp(self) -> str:
         label = TLP_LABELS.get(self.look.tlp)

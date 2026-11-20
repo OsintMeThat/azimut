@@ -232,6 +232,40 @@ describe('the Look panel', () => {
     expect(changes.at(-1)).toMatchObject({ cover: { on: true }, toc: true, numbered: true });
   });
 
+  it('puts the logos and the signature on the cover, the ones not set in Settings greyed', () => {
+    Object.assign(prefs, { logoSet: false, signatureSet: true, reportName: 'Alex Doe' });
+    props.look = normaliseLook({ cover: { on: true } });
+    openPanel();
+    goTo('Cover');
+    const marks = panel().querySelector('[aria-label="On the cover"]');
+    expect([...marks.querySelectorAll('button')].map((button) => button.textContent.trim()))
+      .toEqual(['Azimut logo', 'My logo', 'Signature']);
+    expect(pressed('My logo').disabled).toBe(true);
+    pressed('Signature').click();
+    flushSync();
+    pressed('Azimut logo').click();
+    flushSync();
+    // kept in their own order, whatever order they were pressed in
+    expect(changes.at(-1).cover.marks).toEqual(['azimut', 'signature']);
+    pressed('Signature').click();
+    flushSync();
+    expect(changes.at(-1).cover.marks).toEqual(['azimut']);
+  });
+
+  it('signs the document under the title or at the end, even with no cover, and says what is missing', () => {
+    Object.assign(prefs, { logoSet: false, signatureSet: false, reportName: '' });
+    openPanel();
+    goTo('Cover');
+    const signed = panel().querySelector('[aria-label="Signed"]');
+    expect([...signed.querySelectorAll('button')].map((button) => button.textContent.trim()))
+      .toEqual(['Off', 'Under the title', 'At the end']);
+    pressed('At the end').click();
+    flushSync();
+    expect(changes.at(-1)).toMatchObject({ signed: 'end', cover: { on: false } });
+    expect(panel().textContent).toContain('No name set to sign with.');
+    expect(pressed('Settings › Publishing')).toBeTruthy();
+  });
+
   it('saves a subtitle once typing stops, or when the field is left', () => {
     vi.useFakeTimers();
     props.look = normaliseLook({ cover: { on: true } });
@@ -475,7 +509,7 @@ describe('the Look panel', () => {
     expect(changes.at(-1).cover).toMatchObject({ on: true, mode: '' });
     expect(panel().textContent).toContain('Subtitle');
     // each field has its label on the one column the cover's own label is on
-    expect([...panel().querySelectorAll('.section > .row')].map((row) => row.querySelector('.key').textContent)).toEqual(['Cover', 'Subtitle', 'Picture', 'Day']);
+    expect([...panel().querySelectorAll('.section > .row')].map((row) => row.querySelector('.key').textContent)).toEqual(['Cover', 'Subtitle', 'Picture', 'Day', 'On the cover', 'Signed']);
     pressed('Your own page').click();
     flushSync();
     expect(changes.at(-1).cover).toMatchObject({ on: true, mode: 'own', top: false });

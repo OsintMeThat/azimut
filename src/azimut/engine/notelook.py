@@ -103,16 +103,24 @@ ANNEXES: tuple[str, ...] = ("geolocations", "credits", "method", "limits", "edit
 #: Keys a look writes only once they leave their default, so a look that never used
 #: them is stored, served and bundled exactly as an older Azimut wrote it.
 LATE_KEYS = ("font", "size", "sources", "web", "sources_style", "link_check", "sources_list", "method_list",
-             "geolocations_list")
+             "geolocations_list", "signed")
 #: The page bands under the same rule: one with nothing in it is not written.
 BAND_KEYS = ("header", "footer")
 #: The longest a header or footer slot is, in characters: one line of a page's edge.
 BAND_SLOT_MAX = 120
 #: The cover's keys under the same rule: a cover of the style's own, centred, writes neither.
-COVER_LATE_KEYS = ("mode", "top")
+COVER_LATE_KEYS = ("mode", "top", "marks")
 #: What the cover is: "" the style's (title, subtitle, picture, day), or "own", the
 #: lines above `<!-- cover -->` as a page of their own (`engine/notefill.py`).
 CoverMode = Literal["", "own"]
+#: What the style's cover carries beside its title: the app's mark, the analyst's logo
+#: and their signature (the handwritten picture with their name, role and organisation),
+#: each from Settings › Publishing (`notefill.Identity`).
+CoverMark = Literal["azimut", "logo", "signature"]
+COVER_MARKS: tuple[str, ...] = ("azimut", "logo", "signature")
+#: Where the document is signed with the analyst's name: "" nowhere, "title" a byline
+#: under the title, "end" their signature after the last section.
+Signed = Literal["", "title", "end"]
 
 
 @dataclass(frozen=True)
@@ -240,6 +248,8 @@ class NoteCover(BaseModel):
     mode: CoverMode = ""
     #: The own page starts at the top rather than centred down the page.
     top: StrictBool = False
+    #: What the style's cover carries beside the title, in `COVER_MARKS` order.
+    marks: list[CoverMark] = Field(default_factory=list, max_length=3)
 
     @model_serializer(mode="wrap")
     def _late_keys_only_when_set(self, handler: SerializerFunctionWrapHandler) -> dict[str, Any]:
@@ -253,6 +263,11 @@ class NoteCover(BaseModel):
     def own(self) -> bool:
         """Whether the note prints its own first page."""
         return self.on and self.mode == "own"
+
+    @field_validator("marks")
+    @classmethod
+    def marks_in_order(cls, value: list[str]) -> list[str]:
+        return [mark for mark in COVER_MARKS if mark in value]
 
     @field_validator("subtitle")
     @classmethod
@@ -335,6 +350,7 @@ class NoteLook(BaseModel):
     #: note's own Method or Geolocations section (`notes_markdown.OWN_SECTIONS`).
     method_list: SourcesList = ""
     geolocations_list: SourcesList = ""
+    signed: Signed = ""
     header: PageBand = Field(default_factory=PageBand)
     footer: PageBand = Field(default_factory=PageBand)
 

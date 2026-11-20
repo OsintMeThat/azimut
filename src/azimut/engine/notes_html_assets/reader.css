@@ -112,6 +112,13 @@ body > .az-graphic-warning {
 .az-standfirst { max-width: 30em; margin-block: 0 2rem; font: 400 clamp(1.2rem, 1rem + .7vw, 1.5rem) / 1.45 var(--body); color: var(--ink-2); text-wrap: balance; }
 .az-dateline { display: flex; flex-wrap: wrap; justify-content: center; gap: .35rem 1.25rem; margin: 0; font: 600 .8125rem/1.45 var(--ui); letter-spacing: .06em; text-transform: uppercase; color: var(--muted); }
 .az-dateline::before { content: ""; flex-basis: 100%; height: 2px; max-width: 2.5rem; margin: 0 auto .9rem; background: var(--az-accent); }
+.az-byline { margin: 0 0 1rem; font: 500 .95rem/1.4 var(--ui); color: var(--ink-2); }
+.az-cover-marks { display: flex; justify-content: center; align-items: center; gap: 1.5rem; margin: 1.25rem 0 0; }
+.az-cover-marks img { height: 2.2rem; width: auto; }
+.az-signed { display: flex; flex-direction: column; align-items: center; gap: .15rem; margin: 1.5rem 0 0; font: .875rem/1.4 var(--ui); color: var(--muted); }
+.az-signed img { height: 3.2rem; width: auto; margin-bottom: .25rem; }
+.az-signer { font-weight: 700; color: var(--ink); }
+.az-signed-end { align-items: flex-start; margin-top: 3rem; padding-top: 1rem; border-top: 1px solid var(--rule); }
 .az-cover-figure { width: 100%; margin: clamp(2.5rem, 6vw, 4rem) 0 0; text-align: start; }
 .az-cover-figure img { display: block; width: 100%; }
 .az-cover[data-cover="own"] { justify-items: stretch; text-align: start; }
@@ -486,6 +493,7 @@ html:not(.az-js) .az-graphic:focus-within img { filter: none; transform: none; }
 [data-web="story"] .az-cover:has(> .az-cover-figure) .az-title { text-shadow: 0 2px 28px rgba(0, 0, 0, .55); }
 [data-web="story"] .az-cover:has(> .az-cover-figure) :is(.az-standfirst, .az-tlp-note) { color: rgba(255, 255, 255, .86); }
 [data-web="story"] .az-cover:has(> .az-cover-figure) :is(.az-dateline, .az-kicker) { color: rgba(255, 255, 255, .72); }
+[data-web="story"] .az-cover:has(> .az-cover-figure) :is(.az-byline, .az-signed, .az-signer) { color: rgba(255, 255, 255, .86); }
 [data-web="story"] .az-cover:not([data-cover="own"])::after {
   content: "Scroll"; position: absolute; left: 50%; bottom: 1.5rem; padding-bottom: 1.75rem; transform: translateX(-50%);
   font: 600 .6875rem/1 var(--ui); letter-spacing: .2em; text-transform: uppercase; opacity: .6;

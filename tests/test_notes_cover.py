@@ -107,7 +107,7 @@ def kinds(out) -> list[tuple[str, int | None, str]]:
 
 
 def test_the_cover_s_new_keys_are_written_only_once_they_are_set():
-    assert notelook.COVER_LATE_KEYS == ("mode", "top")
+    assert notelook.COVER_LATE_KEYS == ("mode", "top", "marks")
     assert look(cover={"on": True}).model_dump(mode="json")["cover"] == {
         "on": True, "subtitle": "", "image": "", "date": "",
     }

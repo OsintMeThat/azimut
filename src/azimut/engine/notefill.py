@@ -108,6 +108,19 @@ class Identity:
         """Every placeholder but `{title}`, which is each note's own."""
         return {"date": long_date(day), "name": self.name, "role": self.role, "organisation": self.organisation}
 
+    def byline(self) -> str:
+        """`By Name, Role · Organisation`, or "" with no name to sign with."""
+        if not self.name:
+            return ""
+        said = f"By {self.name}"
+        if self.role:
+            said += f", {self.role}"
+        return f"{said} · {self.organisation}" if self.organisation else said
+
+    def credentials(self) -> str:
+        """The line under a signature: `Role · Organisation`, either alone, or ""."""
+        return " · ".join(part for part in (self.role, self.organisation) if part)
+
     def picture(self, name: str) -> Path | None:
         """The file one of the three pictures is, or None while it is not set."""
         if name == LOGO:

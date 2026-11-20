@@ -767,3 +767,18 @@ test('For › Report adds the report\'s annexes to the Page pane, and a switch t
   await includes.locator('[data-include="method"]').getByRole('button', { name: /reset/i }).click();
   await expect(sheets).toHaveCount(7);
 });
+
+test('Look › Cover signs the note at the end and puts the Azimut logo on the cover', async ({ page }) => {
+  const state = await notebook(page);
+  await openLead(page);
+  await page.locator('[data-guide="notebook.look"]').click();
+  await page.getByRole('tab', { name: 'Cover' }).click();
+  // signing needs no cover: the note is signed after its last section
+  await page.getByRole('radiogroup', { name: 'Signed' }).getByRole('radio', { name: 'At the end' }).click();
+  await expect.poll(() => state.looks.n1?.signed).toBe('end');
+  await page.getByRole('radiogroup', { name: 'Cover page' }).getByRole('radio', { name: "The style's" }).click();
+  const marks = page.getByRole('group', { name: 'On the cover' });
+  await marks.getByRole('button', { name: 'Azimut logo' }).click();
+  await expect.poll(() => state.looks.n1?.cover).toMatchObject({ on: true, marks: ['azimut'] });
+  await expect(marks.getByRole('button', { name: 'Azimut logo' })).toHaveAttribute('aria-pressed', 'true');
+});

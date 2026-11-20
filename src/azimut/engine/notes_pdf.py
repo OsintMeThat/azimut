@@ -512,6 +512,7 @@ def render(
         document.set_creation_date(created)
     document.band_words = {**values, "title": title}
     document.band_picture = _band_picture(identity)
+    document.signer = identity
     bands = [slot for band in (look.header, look.footer) for slot in (band.left, band.center, band.right) if slot]
     _warn_bands(cited, bands, identity, named="name" in empty)
     words = "\n".join([title, look.cover.subtitle, *(piece.text for piece in shown), *cited.words(),
@@ -1011,6 +1012,7 @@ class _Builder:
             self._end_entry()
         if not drawn:
             self._aside("This note is empty.")
+        self._signed_end()
         if self._counts:
             self._warn(counts_said([phrase for phrase, _ in self._counts]), self._counts[0][1], COUNT)
             self.cited.listed[COUNT] = counts_listed(self._counts)
@@ -1547,8 +1549,43 @@ class _Builder:
             self._report_title(title)
         elif style == "journal":
             self._journal_title(title)
+        if style == "brief" and not self._covered:
+            self._byline()
         if self._promoted is not None:
             self._verdict()
+
+    def _byline(self, *, after: float = 4.0) -> None:
+        """`By Name, Role · Organisation` under the title, when the look signs there."""
+        byline = self.pdf.signer.byline() if self.look.signed == "title" and self.pdf.signer is not None else ""
+        if not byline:
+            return
+        pdf, theme = self.pdf, self.theme
+        pdf.ln(1.5)
+        pdf.set_x(pdf.l_margin)
+        pdf.set_font(theme.heading_family, "", 9.5)
+        pdf.set_text_color(*theme.ink)
+        pdf.multi_cell(pdf.epw, 5, byline, align=Align.L, new_x=XPos.LMARGIN, new_y=YPos.NEXT)
+        pdf.ln(after)
+
+    def _signed_end(self) -> None:
+        """The analyst's signature after the last section, before the sources, when the look
+        signs there: kept on one page, under a short rule."""
+        pdf = self.pdf
+        if self.look.signed != "end" or pdf.signer is None:
+            return
+        height = pdf.signature_height()
+        if not height:
+            return
+        self._end_entry()
+        pdf.ln(8)
+        if pdf.will_page_break(height + 6):
+            pdf.add_page()
+        left = pdf.l_margin
+        pdf.set_draw_color(*self.theme.rule)
+        pdf.set_line_width(0.25)
+        pdf.line(left, pdf.get_y(), left + 30.0, pdf.get_y())
+        pdf.ln(4)
+        pdf.signature_block(left, pdf.epw)
 
     def _plain_title(self, title: str) -> None:
         pdf = self.pdf
@@ -1560,6 +1597,7 @@ class _Builder:
         pdf.set_font(theme.heading_family, "B", 22)
         pdf.set_text_color(24, 24, 24)
         pdf.multi_cell(theme.frame, 9, title, new_x=XPos.LMARGIN, new_y=YPos.NEXT)
+        self._byline(after=0)
         pdf.ln(2)
         pdf.set_draw_color(*theme.accent)
         pdf.set_line_width(0.45)
@@ -1587,6 +1625,7 @@ class _Builder:
             pdf.set_font(theme.aside_family, "I", 12.5)
             pdf.set_text_color(*theme.muted)
             pdf.multi_cell(pdf.epw, 6.2, look.cover.subtitle, align=Align.L, new_x=XPos.LMARGIN, new_y=YPos.NEXT)
+        self._byline(after=0)
         pdf.ln(5)
         pdf.set_draw_color(*theme.rule)
         pdf.set_line_width(0.3)
@@ -1612,6 +1651,7 @@ class _Builder:
             pdf.set_font(theme.aside_family, "I", 11.5)
             pdf.set_text_color(*theme.muted)
             pdf.multi_cell(pdf.epw, 5.8, look.cover.subtitle, align=Align.L, new_x=XPos.LMARGIN, new_y=YPos.NEXT)
+        self._byline(after=0)
         pdf.ln(3.5)
         pdf.set_draw_color(*theme.accent)
         pdf.set_line_width(0.6)

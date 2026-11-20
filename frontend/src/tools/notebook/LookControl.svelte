@@ -33,10 +33,11 @@
   import { tick, untrack } from 'svelte';
   import { LOOK_HELP } from '../../lib/notes/lookHelp.js';
   import {
-    ANNEXES, BANDS, BAND_MAX, COVERS, FONTS, LINK_CHECKS, PAGES, SIZES, SLOTS, SLOT_LOGOS, SOURCES_LISTS, SOURCES_STYLES, STYLES, SUBTITLE_MAX, TLPS,
+    ANNEXES, BANDS, BAND_MAX, COVER_MARKS, COVERS, FONTS, LINK_CHECKS, PAGES, SIZES, SLOTS, SLOT_LOGOS, SOURCES_LISTS, SOURCES_STYLES, STYLES, SUBTITLE_MAX, TLPS,
     OWN_SECTIONS, WEBS, annexListOf, bandStyleOwn, coverChoice, coverFor, includesSummary, lookFont, normaliseLook, ownSection, ownSources, profileChanged,
-    profileOf, sectionsSet, slotText, styleLabel, styleOwn as ownWords, stylesTable, withProfile,
+    profileOf, SIGNED, sectionsSet, slotText, styleLabel, styleOwn as ownWords, stylesTable, withProfile,
   } from '../../lib/notes/look.js';
+  import { openPublishingSettings } from '../../lib/navigate.js';
   import { prefs } from '../../lib/state.svelte.js';
   import { faceFamily, loadNoteFont, noteFonts } from '../../lib/notes/noteFonts.js';
   import { recentColours } from '../../lib/recentColours.svelte.js';
@@ -83,6 +84,28 @@
   const whole = $derived(normaliseLook(look));
   const coverIs = $derived(coverChoice(whole));
   const COVER_HELP = { off: LOOK_HELP.coverOff, style: LOOK_HELP.coverStyle, own: LOOK_HELP.coverOwn };
+  const MARK_HELP = { azimut: LOOK_HELP.markAzimut, logo: LOOK_HELP.markLogo, signature: LOOK_HELP.markSignature };
+  const SIGNED_HELP = { '': LOOK_HELP.signedOff, title: LOOK_HELP.signedTitle, end: LOOK_HELP.signedEnd };
+
+  /** Whether what a cover mark shows is set in Settings › Publishing (the app's own logo always is). */
+  function markMissing(id) {
+    if (id === 'logo') return !prefs.logoSet;
+    if (id === 'signature') return !prefs.signatureSet && !prefs.reportName;
+    return false;
+  }
+
+  /** What is missing for the document to be signed as asked, in one line, or ''. */
+  const signingMissing = $derived.by(() => {
+    if (whole.signed && !prefs.reportName) return 'No name set to sign with.';
+    if (whole.cover.marks.includes('logo') && !prefs.logoSet) return 'No logo set.';
+    if (whole.cover.marks.includes('signature') && !prefs.signatureSet && !prefs.reportName) return 'No signature or name set.';
+    return '';
+  });
+
+  function toggleMark(id) {
+    const marks = whole.cover.marks.includes(id) ? whole.cover.marks.filter((one) => one !== id) : [...whole.cover.marks, id];
+    set({ cover: { marks } });
+  }
   $effect(() => { subtitle = whole.cover.subtitle; });
   // a field takes what the look keeps, except while it only differs by the spaces the look trims
   $effect(() => {
@@ -416,6 +439,18 @@
               </div>
               {@render day()}
             {/if}
+            <div class="row top" title={LOOK_HELP.marks}>
+              <span class="key">On the cover</span>
+              <div class="marks" role="group" aria-label="On the cover">
+                {#each COVER_MARKS as mark (mark.id)}
+                  {@const missing = markMissing(mark.id)}
+                  {@const on = whole.cover.marks.includes(mark.id)}
+                  <button type="button" class="mark" class:on aria-pressed={on} disabled={missing && !on}
+                    title={missing ? `${MARK_HELP[mark.id]}. ${LOOK_HELP.setInSettings}` : MARK_HELP[mark.id]}
+                    onclick={() => toggleMark(mark.id)}>{mark.label}</button>
+                {/each}
+              </div>
+            </div>
           {:else if coverIs === 'own'}
             <p class="said">{LOOK_HELP.coverOwn}.</p>
             <p class="said">{LOOK_HELP.coverCorner}.</p>
@@ -424,6 +459,19 @@
               {@render toggle('Centred down the page', LOOK_HELP.centred, !whole.cover.top, (on) => set({ cover: { top: !on } }))}
             </div>
             {#if !template}{@render day()}{/if}
+          {/if}
+          <div class="row" title={LOOK_HELP.signed}>
+            <span class="key">Signed</span>
+            <div class="seg" role="radiogroup" aria-label="Signed">
+              {#each SIGNED as place (place.id)}
+                <button type="button" class:on={whole.signed === place.id} role="radio" aria-checked={whole.signed === place.id}
+                  title={SIGNED_HELP[place.id]} onclick={() => set({ signed: place.id })}>{place.label}</button>
+              {/each}
+            </div>
+          </div>
+          {#if (whole.signed || whole.cover.marks.length) && signingMissing}
+            <p class="said">{signingMissing}
+              <button type="button" class="link" onclick={openPublishingSettings}>Settings › Publishing</button></p>
           {/if}
 
         {:else}
@@ -659,6 +707,14 @@
   }
   .seg button:first-child { border-left: none; }
   .seg button.on { background: var(--accent); color: var(--accent-text); font-weight: 600; }
+  .marks { display: flex; flex-wrap: wrap; gap: 4px; }
+  .mark {
+    padding: 4px 10px; border: 1px solid var(--border); border-radius: var(--r-md); background: var(--bg-2); color: var(--text-2);
+    font: inherit; font-size: var(--fs-xs); cursor: pointer;
+  }
+  .mark.on { border-color: var(--accent); background: var(--accent); color: var(--accent-text); font-weight: 600; }
+  .mark:disabled { opacity: .55; cursor: not-allowed; }
+  .said .link { padding: 0; border: none; background: none; color: var(--accent); font: inherit; text-decoration: underline; cursor: pointer; }
   .accent { display: flex; align-items: center; flex-wrap: wrap; gap: 4px; min-width: 0; }
   .accent input[type='color'] {
     flex: none; width: 28px; height: 22px; padding: 0; border: 1px solid var(--border); border-radius: var(--r-sm); background: none; cursor: pointer;

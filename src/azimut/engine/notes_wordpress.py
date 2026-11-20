@@ -573,6 +573,10 @@ class _Writer:
         if tlp is not None:
             meaning = report.TLP_MEANINGS.get(self.look.tlp, "")
             out.append(paragraph(f"<strong>{_text(tlp[0])}</strong>{f' {_text(meaning)}' if meaning else ''}"))
+        identity = self.cited.identity
+        # the post's title is WordPress's own: a byline asked for opens the content under it
+        if self.look.signed == "title" and identity.byline():
+            out.append(paragraph(f"<em>{_text(identity.byline())}</em>"))
         for piece in pieces:
             if piece.kind == "chapter":
                 out.append(self._heading(" ".join(piece.text.split()), piece.depth))
@@ -591,6 +595,8 @@ class _Writer:
                 out.extend(self._walk(parsed.tokens, parsed.start, len(parsed.tokens)))
         if self.graphic:
             out.insert(0, paragraph(f"<em>{_text('This article holds graphic pictures, each folded until pressed.')}</em>"))
+        if self.look.signed == "end":
+            out.extend(self._signed_end())
         out.extend(self._sources())
         out.extend(self._annexes())
         return "\n\n".join(part for part in out if part) + "\n"
@@ -1086,6 +1092,20 @@ class _Writer:
             self.graphic = True
             return [details(GRAPHIC_SUMMARY, out)]
         return out
+
+    def _signed_end(self) -> list[str]:
+        """The analyst's signature after the last section: the picture, then the name and
+        credentials, under a separator."""
+        identity = self.cited.identity
+        signature = self._built_in(notefill.MY_SIGNATURE) if identity.picture(notefill.MY_SIGNATURE) else []
+        if not signature and not identity.name:
+            return []
+        said = [separator(), *signature]
+        if identity.name:
+            credentials = identity.credentials()
+            said.append(paragraph(f"<strong>{_text(identity.name)}</strong>"
+                                  + (f"<br>{_text(credentials)}" if credentials else "")))
+        return said
 
     def _built_in(self, name: str) -> list[str]:
         """The analyst's logo or signature, as a picture of its own; the app's logo

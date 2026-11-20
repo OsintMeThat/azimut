@@ -58,11 +58,12 @@ LOOKS = {"article": NoteLook(), "story": NoteLook.model_validate({"web": "story"
 #: through to the stage.
 #: 2026-11-20: a map's tools gained the whole screen as a group of their own, the timeline names a day
 #: only where it has room, and the whole screen's own rules came in, all in reader.map.css; nothing else.
+#: 2026-11-20: the reader's sheet gained the byline's and the signature's rules (eight lines); nothing else.
 GOLDEN = {
-    "single-article": "69984ed27d099dd0584264322aed979141a1b817a602737b89f2b6ed66a8b017",
-    "single-story": "ef3714008eb6cff3f571e067a06c540d958517f732db9a9db377e2710bb9678d",
-    "folder-article": "491baacc09ce810617eca475f3173cf76811725fc764b7b7a5547f14dd570781",
-    "folder-story": "75c32d81b36067cbd9c29e19014d91d779b698e5457273ce392a65a784577745",
+    "single-article": "208e28f19cb103c35922e1caa599b8038a8d107cae8996a0f44d6ae0c72f83c9",
+    "single-story": "cc81acc6a64c6803bb2a6fd210c6f1bf84f38d820dc9b7b06ee43682c7b944cd",
+    "folder-article": "0ee29314db5e74b75cc7702348ef1a9758fe65122895307cb13d25f5e2fa7067",
+    "folder-story": "0a9e019d71733463f4d312f7167c10eff6b5e8a56a90da8678bbd416e05fc411",
 }
 
 

@@ -81,7 +81,7 @@ describe('a look', () => {
     const look = normaliseLook({ style: 'brief', accent: '#A0B1C2', cover: { on: 1, subtitle: 'x'.repeat(300) }, extra: true });
     expect(look.style).toBe('brief');
     expect(look.accent).toBe('#a0b1c2');
-    expect(look.cover).toEqual({ on: true, mode: '', top: false, subtitle: 'x'.repeat(200), image: '', date: '' });
+    expect(look.cover).toEqual({ on: true, mode: '', top: false, subtitle: 'x'.repeat(200), image: '', date: '', marks: [] });
     expect('extra' in look).toBe(false);
     expect(normaliseLook({ style: 'poster', page: 'a3', tlp: 'blue', accent: 'red' })).toMatchObject({
       style: 'plain', page: 'a4', tlp: '', accent: '',
@@ -149,8 +149,17 @@ describe('a look', () => {
 
   it('keeps no picture and no day in a template', () => {
     const look = templateLook({ style: 'report', font: 'modern', size: 'small', cover: { on: true, subtitle: 'Draft', image: 'm1', date: '2026-11-04' } });
-    expect(look.cover).toEqual({ on: true, mode: '', top: false, subtitle: 'Draft', image: '', date: '' });
+    expect(look.cover).toEqual({ on: true, mode: '', top: false, subtitle: 'Draft', image: '', date: '', marks: [] });
     expect(look).toMatchObject({ font: 'modern', size: 'small' });
+  });
+
+  it('keeps the marks of a cover in their order and only the ones it knows, and where it is signed', () => {
+    const look = normaliseLook({ cover: { marks: ['signature', 'nope', 'azimut', 'azimut'] }, signed: 'end' });
+    expect(look.cover.marks).toEqual(['azimut', 'signature']);
+    expect(look.signed).toBe('end');
+    expect(normaliseLook({ signed: 'everywhere' }).signed).toBe('');
+    // signing counts as something set on the Cover tab, even with no cover
+    expect(sectionsSet({ signed: 'title' }).cover).toBe(true);
   });
 
   it('prints no cover, the style\'s, or the analyst\'s own page, set to the top or centred', () => {

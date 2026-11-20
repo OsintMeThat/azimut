@@ -8189,11 +8189,18 @@ Every style takes A4 or Letter, an accent (the style's own, a recent colour or a
 pasted hex), a TLP marking (FIRST TLP 2.0 colours, top right and in the footer of
 every page), a cover page, a contents page and numbered headings and figures. PDF
 bookmarks follow the headings. **Cover** is *Off*, *The style's* (a subtitle, a picture
-from the case's media, a day) or **Your own page**: what the note holds above a line
+from the case's media, a day, and **On the cover**: the *Azimut logo*, *My logo* and the
+*Signature*, the handwritten picture with the name, role and organisation, each from
+Settings › Publishing and greyed while it is not set there) or **Your own page**: what the note holds above a line
 `<!-- cover -->` (drawn in the editor as *End of the cover page*) prints alone on page 1,
 with no running header, footer or page number, the TLP label kept, centred down the
 page unless *Centred down the page* is off, its headings set larger and kept out of the
-contents; the note then starts on page 2. A `::: top-left`, `::: top-right`,
+contents; the note then starts on page 2. **Signed**, on the same tab and with or without a cover, puts the
+analyst's name on the document: *Under the title* writes *By Name, Role · Organisation*
+under the title (on the cover when there is one), *At the end* their signature, name and
+credentials after the last section, before the sources, in the PDF, the HTML page, the
+web folder, the story and the WordPress draft. A look that never set it prints as before;
+with no name set, the tab says so and opens Settings › Publishing. A `::: top-left`, `::: top-right`,
 `::: bottom-left` or `::: bottom-right` block there is pinned to that corner of the page,
 within half its width, and the rest is centred in the room the corners leave (or starts
 under the top ones); anywhere else such a block prints aligned to its side. The editor
