@@ -29,6 +29,7 @@ export const CHART_KEYS = {
   // what a kind reads besides (`Kind.keys` in `engine/notes_charts.py`)
   centre: 'centre', center: 'center', icon: 'icon', 'per glyph': 'per glyph', flag: 'flag', of: 'of', squares: 'squares',
   icons: 'icons', flags: 'flags', picture: 'picture', label: 'label', words: 'words', shape: 'shape',
+  layout: 'layout', labels: 'labels',
 };
 
 /** The order the Notebook writes settings in (`notes_charts.WRITTEN_ORDER`), a kind's own next, then the last ones. */

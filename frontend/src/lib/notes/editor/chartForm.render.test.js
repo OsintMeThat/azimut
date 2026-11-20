@@ -173,6 +173,48 @@ describe('a timeline from scratch', () => {
     expect(form().querySelectorAll('.cf-row:not(.cf-heading)')).toHaveLength(2);
   });
 
+  it('colours an event by its kind, lays it out and shortens its labels, each one Undo', async () => {
+    drawnKind = { name: 'timeline', label: 'Timeline', counts: false, layout: 'across' };
+    const BLOCK = chartOf(['kind: timeline', '| When | What happened |', '| --- | --- |', '| 9 Oct 2026 | The strait announced cleared |',
+      '| 19 Oct 2026 | Footage on the north edge |']);
+    editor(`Words.\n\n${BLOCK}\n`);
+    await settle();
+    view.dom.querySelector('.cm-chart-block').chart.toggleForm(true);
+    await settle();
+    // a kind a row, offered from a few before any is written
+    const kind = field(0, 'colour');
+    const offered = () => [...document.getElementById(field(0, 'colour').getAttribute('list')).querySelectorAll('option')].map((one) => one.value);
+    expect(offered()).toEqual(['Claim', 'Geolocated', 'Press']);
+    expect(form().querySelector('.cf-heading').textContent).toContain('Kind');
+    fill(kind, 'Claim');
+    const KINDED = chartOf(['kind: timeline', 'colour by: Kind', '| When | What happened | Kind |', '| --- | --- | --- |',
+      '| 9 Oct 2026 | The strait announced cleared | Claim |', '| 19 Oct 2026 | Footage on the north edge | |']);
+    expect(text()).toBe(`Words.\n\n${KINDED}\n`);
+    expect(offered()).toEqual(['Claim']);
+    // its layout, Auto saying what it drew
+    await settle();
+    const layout = () => form().querySelector('[aria-label="Layout"]');
+    expect([...layout().querySelectorAll('button')].map((one) => [one.textContent, one.getAttribute('aria-checked')]))
+      .toEqual([['Auto', 'true'], ['Across', 'false'], ['Numbered', 'false'], ['List', 'false']]);
+    expect(form().querySelector('.cf-layout-said').textContent).toBe('Drawn across here');
+    press(layout().querySelectorAll('button')[2]);
+    const NUMBERED = KINDED.replace('colour by: Kind\n', 'colour by: Kind\nlayout: numbered\n');
+    expect(text()).toBe(`Words.\n\n${NUMBERED}\n`);
+    expect(layout().querySelectorAll('button')[2].getAttribute('aria-checked')).toBe('true');
+    // short labels
+    const short = form().querySelector('[data-extra="short"]');
+    expect(short.closest('label').title).toBe('Each event’s day and first words; the page shows the rest on hover, the PDF and pictures print them whole');
+    short.checked = true;
+    short.dispatchEvent(new Event('change', { bubbles: true }));
+    expect(text()).toBe(`Words.\n\n${NUMBERED.replace('layout: numbered\n', 'layout: numbered\nlabels: short\n')}\n`);
+    undo(view);
+    expect(text()).toBe(`Words.\n\n${NUMBERED}\n`);
+    undo(view);
+    expect(text()).toBe(`Words.\n\n${KINDED}\n`);
+    undo(view);
+    expect(text()).toBe(`Words.\n\n${BLOCK}\n`);
+  });
+
   it('writes a day moved with the calendar’s arrows once it rests, as one step', async () => {
     const BLOCK = chartOf(['kind: timeline', '| When | What happened |', '| --- | --- |', '| 18 Oct 2026 | First |']);
     editor(`Words.\n\n${BLOCK}\n`);

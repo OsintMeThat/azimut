@@ -320,6 +320,53 @@ describe('the settings, on the chart', () => {
   });
 });
 
+describe('a timeline’s settings', () => {
+  const TIMELINE = { name: 'timeline', label: 'Timeline', counts: false, parts: false, stacked: false, style: 'report', keys: ['layout', 'labels'], layout: 'numbered' };
+  const BLOCK = ['::: chart', 'kind: timeline', 'title: The announcements', '| Day | What | Kind |', '| --- | --- | --- |',
+    '| 9 Oct 2026 | The strait announced cleared | Claim |', '| 19 Oct 2026 | Footage on the north edge | Geolocated |', ':::'].join('\n');
+  const DOC = `Words.\n\n${BLOCK}\n`;
+
+  it('lays it out, colours it by a column and shortens its labels, each one line and one Undo', async () => {
+    server.figure = () => answer({ kind: TIMELINE, title: 'The announcements', proposed: '' });
+    editor(DOC);
+    await settle();
+    press(tool('settings'));
+    // what a timeline is about: not a count nor a by, but its layout, its colours and its labels
+    expect(field('Count')).toBe(null);
+    expect(field('By')).toBe(null);
+    const layout = () => field('Layout');
+    expect([...layout().querySelectorAll('button')].map((one) => [one.textContent, one.getAttribute('aria-checked')]))
+      .toEqual([['Auto', 'true'], ['Across', 'false'], ['Numbered', 'false'], ['List', 'false']]);
+    expect(layout().querySelector('button').title).toBe('Up to 8 events across, up to 20 numbered, more as a list; always a list on a phone');
+    expect(layout().closest('.cm-chart-field').querySelector('.cm-chart-field-note').textContent).toBe('Drawn numbered here');
+    press(layout().querySelectorAll('button')[1]);
+    expect(text()).toBe(DOC.replace('title: The announcements\n', 'title: The announcements\nlayout: across\n'));
+    undo(view);
+    expect(text()).toBe(DOC);
+    // neither the days nor the words colour it
+    expect([...field('Coloured by').options].map((option) => option.textContent)).toEqual(['One colour', 'Kind']);
+    choose('Coloured by', 'Kind');
+    expect(text()).toBe(DOC.replace('title: The announcements\n', 'title: The announcements\ncolour by: Kind\n'));
+    undo(view);
+    const labels = field('Labels');
+    expect([...labels.querySelectorAll('button')].map((one) => [one.textContent, one.getAttribute('aria-checked')]))
+      .toEqual([['Full', 'true'], ['Short', 'false']]);
+    press(labels.querySelectorAll('button')[1]);
+    expect(text()).toBe(DOC.replace('title: The announcements\n', 'title: The announcements\nlabels: short\n'));
+    undo(view);
+    expect(text()).toBe(DOC);
+  });
+
+  it('says when an across too crowded for its lanes was numbered', async () => {
+    server.figure = () => answer({ kind: TIMELINE, title: 'The announcements', proposed: '' });
+    editor(DOC.replace('title: The announcements\n', 'title: The announcements\nlayout: across\n'));
+    await settle();
+    press(tool('settings'));
+    expect(field('Layout').querySelectorAll('button')[1].getAttribute('aria-checked')).toBe('true');
+    expect(card().querySelector('.cm-chart-field-note').textContent).toBe('Too crowded across: drawn numbered');
+  });
+});
+
 describe('Keep these colours for the case', () => {
   const COLOURS = [
     { value: 'identified', colour: '#184F95', origin: 'grade' },

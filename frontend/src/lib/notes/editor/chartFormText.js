@@ -5,7 +5,9 @@
  *
  * Four families of table:
  *
- * - **timeline**: `| When | What happened |`, and `| Until |` once a row is a period;
+ * - **timeline**: `| When | What happened |`, `| Until |` once a row is a period, and a
+ *   `| Kind |` that colours each event (`colour by:`) once one says it, with `layout:` and
+ *   `labels: short`;
  * - **figures** (key figures): `| Figure | What it says |`, a floor written `at least 41`;
  * - **categories** (bars, columns, the stacked kinds, pie, donut, segments, pictograms,
  *   silhouette rows, waffle, circles): `| Category | Count |`, `| Split |` between them for
@@ -74,7 +76,7 @@ export function formKind(word) {
 
 /** The headings a form's table starts with, by family and by kind. */
 const HEADS = {
-  timeline: { when: 'When', what: 'What happened', until: 'Until' },
+  timeline: { when: 'When', what: 'What happened', until: 'Until', colour: 'Kind' },
   figures: { figure: 'Figure', words: 'What it says' },
   categories: { category: 'Category', count: 'Count', split: 'Split' },
   line: { x: 'Day', value: 'Value', series: 'Series' },
@@ -239,8 +241,60 @@ export function readForm(source, kindName = '') {
 
 const SEVERAL = 'Its table holds more columns than this kind reads: edit it as a table.';
 
+/** A timeline's layouts (`notes_chart_timeline.LAYOUTS`), Auto first: what its `layout:` line writes. */
+export const TIMELINE_LAYOUTS = [
+  { value: 'auto', label: 'Auto', title: 'Up to 8 events across, up to 20 numbered, more as a list; always a list on a phone' },
+  { value: 'across', label: 'Across', title: 'The days on one line, each label beside its day, above and below' },
+  { value: 'numbered', label: 'Numbered', title: 'A numbered dot on the line for each event, its words in a list under it' },
+  { value: 'list', label: 'List', title: 'One row an event, its day on the left' },
+];
+/** The kinds an event is offered under before any is written (`colour by:` paints them). */
+export const EVENT_KINDS = ['Claim', 'Geolocated', 'Press'];
+/** What `labels: short` does, said once for the form and the card. */
+export const SHORT_SAID = 'Each event’s day and first words; the page shows the rest on hover, the PDF and pictures print them whole';
+
+/**
+ * What the form and the card say of the layout drawn, beside the one asked: what Auto took
+ * on the page, or that an across too crowded for its lanes was numbered; '' otherwise.
+ */
+export function layoutSaid(asked, drawn) {
+  const name = TIMELINE_LAYOUTS.find((one) => one.value === drawn)?.label.toLowerCase();
+  if (!name || (asked !== 'auto' && asked === drawn)) return '';
+  return asked === 'auto' ? `Drawn ${name} here` : `Too crowded across: drawn ${name}`;
+}
+
+/**
+ * A timeline's columns as the engine reads them (`notes_chart_timeline.timeline_columns`):
+ * `{ when, what, until }` by name, and `colours`, the columns of words its events may be
+ * coloured by, which are neither its days nor its words.
+ */
+export function timelineColumns(table, chart) {
+  const headers = table?.header ?? [];
+  const rows = table?.rows ?? [];
+  const name = (at) => (at >= 0 ? plainText(headers[at]) || `Column ${at + 1}` : '');
+  const days = dayColumns(headers, rows);
+  const start = days[0] ?? -1;
+  const until = headers.map((_, at) => at).find((at) => at !== start && UNTIL_HEADER.test(plainText(headers[at]))
+    && dayCells(rows, at).some((cell) => readWhen(cell).precision !== 'text')) ?? (days.length > 1 ? days[1] : -1);
+  const colour = columnNamed(headers, setting(chart, 'colour by'));
+  const by = columnNamed(headers, setting(chart, 'by'));
+  const what = by >= 0 && !days.includes(by) ? by
+    : headers.findIndex((_, at) => !days.includes(at) && at !== colour && !(rows.length && numericColumn(rows, at)));
+  const colours = headers.map((_, at) => at).filter((at) => !days.includes(at) && at !== until && at !== what
+    && !(rows.length && numericColumn(rows, at))).map(name);
+  return { when: name(start), what: name(what), until: name(until), colours };
+}
+
+/** A timeline's `layout:` as the form and the card choose it: one of `TIMELINE_LAYOUTS`, Auto when it names none. */
+export function timelineLayout(chart) {
+  const written = setting(chart, 'layout').toLowerCase();
+  return TIMELINE_LAYOUTS.some((one) => one.value === written) ? written : 'auto';
+}
+
 function readTimeline({ chart, heads, headers, rows }) {
-  if (!headers.length) return { heads, rows: [] };
+  const layout = timelineLayout(chart);
+  const short = setting(chart, 'labels').toLowerCase() === 'short';
+  if (!headers.length) return { heads, rows: [], layout, short };
   const days = dayColumns(headers, rows);
   const start = days[0] ?? (rows.length ? -1 : Math.max(0, headers.findIndex((header) => DAY_HEADER.test(plainText(header)))));
   if (start < 0) return { why: 'Its table has no column of days.' };
@@ -248,12 +302,20 @@ function readTimeline({ chart, heads, headers, rows }) {
     && (!rows.length || dayCells(rows, column).some((cell) => readWhen(cell).precision !== 'text')));
   const until = ends[0] ?? (days.length > 1 ? days[1] : -1);
   const by = columnNamed(headers, setting(chart, 'by'));
-  const what = by >= 0 && by !== start && by !== until ? by
-    : headers.findIndex((_, column) => column !== start && column !== until && !(rows.length && numericColumn(rows, column)));
-  if (headers.length > [start, what, until].filter((column) => column >= 0).length) return { why: SEVERAL };
+  const named = columnNamed(headers, setting(chart, 'colour by'));
+  const colour = named >= 0 && named !== start && named !== until ? named : -1;
+  const what = by >= 0 && by !== start && by !== until && by !== colour ? by
+    : headers.findIndex((_, column) => column !== start && column !== until && column !== colour && !(rows.length && numericColumn(rows, column)));
+  if (headers.length > [start, what, until, colour].filter((column) => column >= 0).length) return { why: SEVERAL };
+  const cell = (row, at) => (at >= 0 ? row[at] ?? '' : '');
   return {
-    heads: { when: plainText(headers[start]) || heads.when, what: what >= 0 ? plainText(headers[what]) : heads.what, until: until >= 0 ? plainText(headers[until]) : heads.until },
-    rows: rows.map((row) => ({ when: row[start] ?? '', what: what >= 0 ? row[what] ?? '' : '', until: until >= 0 ? row[until] ?? '' : '' })),
+    heads: {
+      when: plainText(headers[start]) || heads.when, what: what >= 0 ? plainText(headers[what]) : heads.what,
+      until: until >= 0 ? plainText(headers[until]) : heads.until, colour: colour >= 0 ? plainText(headers[colour]) || heads.colour : heads.colour,
+    },
+    rows: rows.map((row) => ({ when: cell(row, start), what: cell(row, what), until: cell(row, until), colour: cell(row, colour) })),
+    layout,
+    short,
   };
 }
 
@@ -479,9 +541,16 @@ export function writeForm(source, kind, model) {
 
 function writeTimeline(model) {
   const rows = model.rows.filter(filled);
-  const periods = rows.some((row) => String(row.until ?? '').trim());
-  const header = periods ? [model.heads.when, model.heads.what, model.heads.until] : [model.heads.when, model.heads.what];
-  return { settings: {}, table: tableOf(header, rows.map((row) => (periods ? [row.when, row.what, row.until] : [row.when, row.what])), []) };
+  const has = (key) => rows.some((row) => plainText(row[key] ?? '').trim());
+  const columns = ['when', 'what', ...['until', 'colour'].filter(has)];
+  return {
+    settings: {
+      'colour by': has('colour') ? model.heads.colour : '',
+      layout: model.layout && model.layout !== 'auto' ? model.layout : '',
+      labels: model.short ? 'short' : '',
+    },
+    table: tableOf(columns.map((key) => model.heads[key]), rows.map((row) => columns.map((key) => row[key] ?? '')), []),
+  };
 }
 
 function writeFigures(model) {

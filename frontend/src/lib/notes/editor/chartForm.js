@@ -33,8 +33,8 @@ import { casePictures } from '../pictureSize.js';
 import { readThumbs, thumbOf } from './casePicker.js';
 import { caseEvents, chartCounts, chartRows, chartSources } from './chartFigure.js';
 import {
-  CHART_COLOURS, FORMS, GRADE_WORDS, PRECISIONS, WALL_SHAPES, atPrecision, countedRows, eventRows, filled, isoDay, leftOutSaid,
-  pictureCell, pictureRef, pictureRows, readFloor, readForm, readWhen, writeForm, writeWhen,
+  CHART_COLOURS, EVENT_KINDS, FORMS, GRADE_WORDS, PRECISIONS, SHORT_SAID, TIMELINE_LAYOUTS, WALL_SHAPES, atPrecision, countedRows, eventRows, filled,
+  isoDay, layoutSaid, leftOutSaid, pictureCell, pictureRef, pictureRows, readFloor, readForm, readWhen, writeForm, writeWhen,
 } from './chartFormText.js';
 import { glyphLabel, glyphNode, glyphWord, openGlyphPicker, readGlyph } from './chartIcons.js';
 import { readChart, setting, withSettings } from './chartText.js';
@@ -175,7 +175,7 @@ const ADDS = {
 };
 
 const blankRow = (family, series = 1) => ({
-  timeline: { when: '', what: '', until: '' },
+  timeline: { when: '', what: '', until: '', colour: '' },
   figures: { figure: '', words: '', floor: false },
   categories: { category: '', split: '', count: '' },
   line: { x: '', values: Array.from({ length: series }, () => '') },
@@ -569,6 +569,15 @@ export function chartForm(panel, { state, write, caseId = '', palette = layerPal
         value: shownCell(row.what), placeholder: period ? 'What went on' : 'What happened', label: 'What happened', field: 'what', wide: true,
         commit: (typed) => setCell(index, 'what', typedCell(row.what, typed)),
       }));
+      // its kind colours its dot, with a legend, so the words need not say it
+      const kind = textInput({
+        value: shownCell(row.colour), placeholder: read.model.heads.colour, label: read.model.heads.colour, field: 'colour',
+        commit: (typed) => setCell(index, 'colour', typedCell(row.colour, typed)),
+      });
+      kind.setAttribute('list', colourList.id);
+      kind.classList.add('cf-wall-colour');
+      kind.title = 'Its kind (a claim, a geolocation, a press report): its dot takes the kind’s colour';
+      cells.append(kind);
     } else if (family === 'figures') {
       const tick = element('label', 'cf-tick');
       const box = element('input');
@@ -695,7 +704,10 @@ export function chartForm(panel, { state, write, caseId = '', palette = layerPal
       input.value = value;
       input.dataset.was = value;
     };
-    if (family === 'timeline') set('what', shownCell(row.what));
+    if (family === 'timeline') {
+      set('what', shownCell(row.what));
+      set('colour', shownCell(row.colour));
+    }
     if (family === 'figures') {
       set('figure', shownCell(row.figure));
       set('words', shownCell(row.words));
@@ -831,8 +843,13 @@ export function chartForm(panel, { state, write, caseId = '', palette = layerPal
 
   /** The groups the rows hold and the grades, offered as each row's group and colour are typed. */
   function renderLists(read) {
-    if (read.form.family !== 'pictures') return;
     const values = (key) => [...new Set(read.model.rows.map((row) => plainText(row[key]).trim()).filter(Boolean))];
+    if (read.form.family === 'timeline') {
+      const kinds = values('colour');
+      colourList.replaceChildren(...(kinds.length ? kinds : EVENT_KINDS).map((value) => choiceOf(value, value)));
+      return;
+    }
+    if (read.form.family !== 'pictures') return;
     groupList.replaceChildren(...values('group').map((value) => choiceOf(value, value)));
     const colours = [...new Set([...GRADE_WORDS, ...values('colour')])];
     colourList.replaceChildren(...colours.map((value) => choiceOf(value, value)));
@@ -1060,7 +1077,8 @@ export function chartForm(panel, { state, write, caseId = '', palette = layerPal
       return input;
     };
     if (family === 'timeline') {
-      cells.append(named('', 'cf-col-tag'), named('Precision', 'cf-col-precision'), named(model.heads.when, 'cf-col-when'), named(model.heads.what, 'cf-wide'));
+      cells.append(named('', 'cf-col-tag'), named('Precision', 'cf-col-precision'), named(model.heads.when, 'cf-col-when'), named(model.heads.what, 'cf-wide'),
+        named(model.heads.colour, 'cf-wall-colour'));
     } else if (family === 'figures') {
       cells.append(named('', 'cf-col-tick'), named(model.heads.figure, 'cf-col-figure'), named(model.heads.words, 'cf-wide'));
     } else if (family === 'pictures') {
@@ -1129,6 +1147,37 @@ export function chartForm(panel, { state, write, caseId = '', palette = layerPal
       const row = element('div', 'cf-along');
       row.append(element('span', 'cf-hint', 'Along'), along);
       parts.push(row);
+    }
+    if (form.family === 'timeline') {
+      const layouts = element('div', 'cf-seg');
+      layouts.setAttribute('role', 'radiogroup');
+      layouts.setAttribute('aria-label', 'Layout');
+      const laid = model.layout || 'auto';
+      for (const one of TIMELINE_LAYOUTS) {
+        const choice = element('button', 'cf-seg-btn', one.label);
+        choice.type = 'button';
+        choice.setAttribute('role', 'radio');
+        choice.setAttribute('aria-checked', String(laid === one.value));
+        choice.title = one.title;
+        layouts.append(pressable(choice, () => {
+          if (laid === one.value) return;
+          setModel((next) => { next.layout = one.value; });
+          render(true);
+        }));
+      }
+      const row = element('div', 'cf-along');
+      const drawn = element('span', 'cf-hint cf-layout-said', layoutSaid(laid, read.drawn?.kind?.layout));
+      drawn.dataset.extra = 'layout-said';
+      row.append(element('span', 'cf-hint', 'Layout'), layouts, drawn);
+      const tick = element('label', 'cf-tick');
+      const box = element('input');
+      box.type = 'checkbox';
+      box.checked = Boolean(model.short);
+      box.dataset.extra = 'short';
+      box.addEventListener('change', () => setModel((next) => { next.short = box.checked; }));
+      tick.append(box, element('span', '', 'Short labels'));
+      tick.title = SHORT_SAID;
+      parts.push(row, tick);
     }
     if (form.family === 'pictures') {
       const shapes = element('div', 'cf-seg');
@@ -1264,6 +1313,10 @@ export function chartForm(panel, { state, write, caseId = '', palette = layerPal
     }
     const floor = extra.querySelector('[data-extra="floor"]');
     if (floor && floor !== active) floor.checked = Boolean(read.model.floor);
+    const short = extra.querySelector('[data-extra="short"]');
+    if (short && short !== active) short.checked = Boolean(read.model.short);
+    const drawnLayout = extra.querySelector('[data-extra="layout-said"]');
+    if (drawnLayout) drawnLayout.textContent = layoutSaid(read.model.layout || 'auto', read.drawn?.kind?.layout);
     for (const [field, value] of [['whole-name', shownCell(read.model.whole?.name ?? '')], ['whole', read.model.whole?.amount ?? '']]) {
       const input = extra.querySelector(`[data-field="${field}"]`);
       if (input && input !== active && input.value !== value) {
