@@ -1,0 +1,13 @@
+# Example case (fictional)
+
+Saltmere, its storm of 14 and 15 March 2026 and every account here are invented, to show what Azimut holds once a case is filled. The photographs are real, public-domain pictures of other storms and places: each one's source, author and licence is in its Details.
+
+Four notes, each made from a ready template of the Notebook:
+
+- [[entity:{{note-1-story}}|The night the sea came into Saltmere]], a story for the web: Look › Web page is set to Story.
+- [[entity:{{note-2-register}}|Boats lost at Saltmere, the register]]: a register, its infographic, a chart and a picture wall.
+- [[entity:{{note-3-claims}}|Did the lighthouse fall? Three claims against the pictures]]: claims set against proofs.
+- [[entity:{{note-4-damage}}|Damage on Beach Road, an assessment]]: a brief with a before and after.
+
+- [ ] Open a note and press Page, then HTML
+- [ ] Export the story as a web folder
