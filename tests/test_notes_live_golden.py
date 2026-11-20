@@ -67,11 +67,12 @@ LOOKS = {"article": NoteLook(), "story": NoteLook.model_validate({"web": "story"
 #: lines of reader.map.css, nothing else.
 #: 2026-11-20: the analyst's name and logo link to their Website: four lines of reader.css, nothing else.
 #: 2026-11-20: the whole screen's clip spares the live map's own marks: one selector of reader.map.css, nothing else.
+#: 2026-11-20: a footer's Made with Azimut line: two lines of reader.css, nothing else.
 GOLDEN = {
-    "single-article": "b4d59a27d554aee75ab5884f88aab58a5793200c9200666fb83ec1aaef254e0b",
-    "single-story": "619ccd3c84080a29e4d0d5d8d688010f36358c91568315b122971222082f2961",
-    "folder-article": "a86018d6a61c48cbebb80499ca09dc4b5f49963944c4d2a6f7d331397b66951e",
-    "folder-story": "2de923a4261fda6920e841c8f4268843a26f49ebba8a154be151085a3961ee1f",
+    "single-article": "8f0195d08cb740a06ccbdaad58d37eaf0b1add7fa7f28274a77f44d0a568976e",
+    "single-story": "87f1687a649dbe6ad5b31220b440d89daf8677670ed2e0c90e8fd84afaa1a992",
+    "folder-article": "026fafca16ccc6895c755d279a69a8cc0c89d20459b62e34ba6a6414656a321d",
+    "folder-story": "5513099a9e816191c48c5046a958b58057ace1612b2ea14e713b10404218fc8e",
 }
 
 

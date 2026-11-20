@@ -157,3 +157,32 @@ def test_with_no_website_the_name_and_the_logo_stay_unlinked(signer):
     body = notes_html.render(None, title="Bridge", text=TEXT, look=look, identity=signer).html.decode().split("</style>")[-1]
     assert "az-site-link" not in body
     assert SITE not in _uris(notes_pdf.render(None, title="Bridge", text=TEXT, look=look, identity=signer).pdf)
+
+
+def test_a_document_ends_on_made_with_azimut_only_when_settings_ask(tmp_path):
+    """Settings › Publishing's Credit Azimut: the page's footer, the PDF's last line and the
+    WordPress draft's, each linked to the project; nothing while it is off."""
+    credited = notefill.Identity("Alex Doe", credit=True)
+    said = notefill.MADE_WITH
+    assert said.startswith("Made with Azimut ") and said.split()[-1][0].isdigit()
+    page = notes_html.render(None, title="Bridge", text=TEXT, look=_look(), identity=credited).html.decode()
+    footer = page[page.index('<footer class="az-footer">'):]
+    assert (f'<p class="az-made"><a href="{notefill.AZIMUT_SITE}" target="_blank" rel="noopener noreferrer">'
+            f"{said}</a></p>") in footer
+    printed = notes_pdf.render(None, title="Bridge", text=TEXT, look=_look(), identity=credited)
+    assert said in _pages(printed.pdf)[-1] and notefill.AZIMUT_SITE in _uris(printed.pdf)
+    draft = notes_wordpress.build(None, title="Bridge", text=TEXT, look=_look(), identity=credited)
+    assert draft.content.rstrip().endswith(f'<em><a href="{notefill.AZIMUT_SITE}">{said}</a></em></p>\n<!-- /wp:paragraph -->')
+    # off, as a new installation has it
+    plain = notefill.Identity("Alex Doe")
+    assert 'class="az-made"' not in notes_html.render(None, title="Bridge", text=TEXT, look=_look(), identity=plain).html.decode()
+    assert said not in " ".join(_pages(notes_pdf.render(None, title="Bridge", text=TEXT, look=_look(), identity=plain).pdf))
+    assert said not in notes_wordpress.build(None, title="Bridge", text=TEXT, look=_look(), identity=plain).content
+
+
+def test_credit_azimut_is_a_setting_kept_with_the_others(client):
+    assert client.get("/api/settings").json()["report_credit_azimut"] is False
+    assert notefill.Identity.from_settings().credit is False
+    assert client.put("/api/settings/prefs", json={"report_credit_azimut": True}).status_code == 200
+    assert client.get("/api/settings").json()["report_credit_azimut"] is True
+    assert notefill.Identity.from_settings().credit is True

@@ -30,7 +30,7 @@ from pathlib import Path
 from typing import Callable, Mapping
 from urllib.parse import urlsplit
 
-from .. import config
+from .. import __version__, config
 from .notes_style import long_date
 from .notetext import FENCE, INCLUDE
 
@@ -83,6 +83,9 @@ def _one_line(value: object) -> str:
     return " ".join(value.split())[:MAX_IDENTITY] if isinstance(value, str) else ""
 
 
+#: Where a document's credit sends its reader, and what it says: the app and its version.
+AZIMUT_SITE = "https://github.com/OsintMeThat/azimut"
+MADE_WITH = f"Made with Azimut {__version__}"
 #: An X account as Settings › Publishing keeps it (`@name`, the @ optional): what a handle must
 #: be for its words to link to the account. Another platform's handle (a Bluesky domain) shows
 #: unlinked.
@@ -114,6 +117,8 @@ class Identity:
     #: The account handle Settings › Publishing stamps on proofs (`@name`), which a map page's
     #: header shows beside the name; "" while none is set.
     handle: str = ""
+    #: Whether a document ends on `MADE_WITH`, linked to `AZIMUT_SITE` (Settings › Publishing).
+    credit: bool = False
 
     @classmethod
     def from_settings(cls) -> "Identity":
@@ -126,6 +131,7 @@ class Identity:
             signature=signature if signature.is_file() else None,
             site=site_of(settings.get("report_site")),
             handle=_one_line(settings.get("signature_handle")),
+            credit=settings.get("report_credit_azimut") is True,
         )
 
     def values(self, day: date) -> dict[str, str]:

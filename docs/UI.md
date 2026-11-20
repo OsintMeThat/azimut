@@ -8705,7 +8705,9 @@ composer and the Map plate already use), **Name**, **Role** and **Organisation**
 line each, 80 characters at most), the **Website** (an `https` address, typed with or without
 it, which the name and the logo link to wherever a document shows them: the byline, the
 cover, the signature at the end, a web map's header, in the page, the PDF and the WordPress
-draft; refused with what is wrong otherwise) and the **Signature**, a PNG of a handwritten
+draft; refused with what is wrong otherwise), **Credit Azimut** (off by default: a published
+page's footer, the PDF's last line and the WordPress draft's then say *Made with Azimut* and
+its version, linked to the project's GitHub) and the **Signature**, a PNG of a handwritten
 signature up to 1 MB, a transparent one recommended; each field says what it takes and
 where it prints. The settings backup carries them all.
 

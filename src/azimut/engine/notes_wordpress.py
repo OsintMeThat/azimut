@@ -605,6 +605,8 @@ class _Writer:
             out.extend(self._signed_end())
         out.extend(self._sources())
         out.extend(self._annexes())
+        if self.cited.identity.credit:
+            out.append(paragraph(f"<em>{_link(notefill.AZIMUT_SITE, _text(notefill.MADE_WITH))}</em>"))
         return "\n\n".join(part for part in out if part) + "\n"
 
     def _prescan(self, pieces: list[md.Piece], blocks: dict[int, list[md.Block]]) -> None:

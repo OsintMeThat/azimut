@@ -2683,9 +2683,13 @@ class _Page:
 
     def _footer(self, printed: str) -> str:
         edition = "Public edition" if self.public else "Internal edition"
+        made = ""
+        if self.cited.identity.credit:
+            made = (f'\n<p class="az-made"><a href="{notefill.AZIMUT_SITE}" target="_blank" rel="noopener noreferrer">'
+                    f"{_text(notefill.MADE_WITH)}</a></p>")
         return (f'<footer class="az-footer">\n<p><span class="az-edition">{edition}</span> · '
                 f'<time datetime="{self.day.isoformat()}">{_text(notes_style.long_date(self.day))}</time> · '
-                f'<span class="az-fingerprint">Source SHA-256 <code>{printed}</code></span></p>\n</footer>\n')
+                f'<span class="az-fingerprint">Source SHA-256 <code>{printed}</code></span></p>{made}\n</footer>\n')
 
 
 # -- a chart's drawing ----------------------------------------------------------------

@@ -29,6 +29,7 @@ export const PUBLISHING_HELP = {
   role: 'Your role, printed where a note says {role}',
   organisation: 'Your organisation, printed where a note says {organisation}',
   site: 'Your own site, linked from your name and logo in notes and web maps',
+  credit: 'End what you publish with Made with Azimut and its version, linked to the project',
   signature: 'A picture of your handwritten signature, shown by a note\'s Signature block',
   signatureRemove: 'Take your signature off every note that shows it',
   wordpressSite: 'The WordPress site a note is sent to as a draft',

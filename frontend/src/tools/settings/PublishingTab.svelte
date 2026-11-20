@@ -251,11 +251,24 @@
   <label class="row" title={HELP.site}>
     <span class="row-label">
       <span>Website</span>
-      <span class="row-hint">Linked from your name on your web maps. Left empty, the name has no link.</span>
+      <span class="row-hint">Linked from your name and logo in your notes and web maps. Left empty, they have no link.</span>
     </span>
     <input class="input who" type="url" value={prefs.reportSite} maxlength={REPORT_FIELD_MAX} placeholder="osint.example.org" title={HELP.site}
       onchange={(event) => saveLine('report_site', event.currentTarget.value)} />
   </label>
+  <div class="row">
+    <div class="row-label" title={HELP.credit}>
+      <span>Credit Azimut</span>
+      <span class="row-hint">Ends a published page, PDF or WordPress draft with Made with Azimut and its version.</span>
+    </div>
+    <input
+      type="checkbox"
+      checked={prefs.reportCreditAzimut}
+      onchange={(event) => { prefs.reportCreditAzimut = event.currentTarget.checked; savePrefs({ report_credit_azimut: event.currentTarget.checked }); }}
+      aria-label="Credit Azimut"
+      title={HELP.credit}
+    />
+  </div>
   <div class="row">
     <div class="row-label" title={HELP.signature}>
       <span>Signature</span>

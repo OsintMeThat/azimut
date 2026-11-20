@@ -578,6 +578,8 @@ html:not(.az-js) .az-graphic:focus-within img { filter: none; transform: none; }
 .az-this-edition::marker { content: "\2192  "; }
 .az-footer { margin-top: 5rem; padding: 2.25rem 0 3rem; border-top: 1px solid var(--rule); background: var(--tint); font: 400 .75rem/1.6 var(--ui); color: var(--muted); }
 .az-footer > * { width: min(var(--measure), 100% - 2 * var(--gutter)); margin: 0 auto; }
+.az-footer > .az-made { margin-top: .35rem; }
+.az-made a { color: inherit; }
 .az-edition { font-weight: 700; color: var(--ink); }
 
 /* the lightbox, made by reader.js */
