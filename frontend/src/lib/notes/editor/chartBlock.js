@@ -53,7 +53,7 @@ import { button, icon, openMenu } from './gridMenu.js';
 import { heldHeight, holdHeight, moveHeight, releaseHeight } from './heights.js';
 import { blockAt } from './puts.js';
 import { blocksIn, openSource, settle } from './ranges.js';
-import { rowsGrid, writeLocalCells, writeSheetCells } from './rowsGrid.js';
+import { chartReads, rowsGrid, writeLocalCells, writeSheetCells } from './rowsGrid.js';
 import { noteCase, noteHandlers } from './state.js';
 import { registerTableChart } from './tableGrid.js';
 import { gridAt } from './tablePictures.js';
@@ -706,15 +706,16 @@ class ChartBox {
     const typed = mode === OWN || ((mode === LOCAL || mode === SHEET) && (state === 'same' || state === 'differs'));
     const writable = this.writable && typed;
     const idle = this.idleColumns();
+    const reads = chartReads(this.chart, { kind: this.drawn?.kind?.name, idle });
     const key = `${mode}|${writable}|${this.rowsTools().map((one) => one.label).join(',')}`;
     if (this.rows && key === this.rowsKey && this.numbersBody.contains(this.rows.box)) {
-      this.rows.update({ ...this.rows.widget, table, info: this.info, idle });
+      this.rows.update({ ...this.rows.widget, table, info: this.info, idle, reads });
       return;
     }
     this.dropRows();
     const box = element('div');
     this.numbersBody.replaceChildren(box);
-    this.rows = rowsGrid(box, this.view, { host: this.rowsHost, table, info: this.info, writable, idle });
+    this.rows = rowsGrid(box, this.view, { host: this.rowsHost, table, info: this.info, writable, idle, reads });
     this.rowsKey = key;
   }
 
