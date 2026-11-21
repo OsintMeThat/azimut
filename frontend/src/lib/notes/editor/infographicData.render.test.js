@@ -5,9 +5,10 @@ import { EditorSelection, EditorState } from '@codemirror/state';
 import { undo, undoDepth } from '@codemirror/commands';
 
 /**
- * The Data line of an infographic drawn in the note, and a chart's source line: what the data
- * is, its rows and whether it changed since, Read again (all panels) and Change…, each written
- * as one Undo step of exact bytes.
+ * The Data line of an infographic drawn in the note, and a chart's: what the data is, said as
+ * a chart's Data line says it, its rows and the panels that read it, and Change…; the panels
+ * that read it follow it by themselves, one Undo step of exact bytes, and a view that cannot
+ * write draws the fresh rows without writing.
  */
 
 const server = vi.hoisted(() => ({ rows: null, asked: [] }));
@@ -54,11 +55,11 @@ afterEach(() => {
   document.body.replaceChildren();
 });
 
-function editor(doc) {
+function editor(doc, { readOnly = false } = {}) {
   const parent = document.createElement('div');
   document.body.append(parent);
-  handlers = { tableToast: vi.fn(), open: vi.fn(), noteKey: 'c1:n1', noteId: 'n1', infographic: vi.fn(), pickData: vi.fn() };
-  view = new EditorView({ parent, state: EditorState.create({ doc, extensions: noteExtensions({ handlers, readOnly: false, mode: 'drawn' }) }) });
+  handlers = { tableToast: vi.fn(), open: vi.fn(), inCase: true, noteKey: 'c1:n1', noteId: 'n1', infographic: vi.fn(), pickData: vi.fn() };
+  view = new EditorView({ parent, state: EditorState.create({ doc, extensions: noteExtensions({ handlers, readOnly, mode: 'drawn' }) }) });
   view.setState(focusedState(view.state.update({ selection: EditorSelection.cursor(0) }).state));
   view.dispatch({ effects: setNoteCase.of({ caseId: 'c1', entities: [] }) });
   view.focus = vi.fn();
@@ -68,56 +69,70 @@ function editor(doc) {
 const settle = async () => {
   for (let step = 0; step < 8; step += 1) await new Promise((resolve) => setTimeout(resolve, 0));
 };
-const press = (node) => node.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, cancelable: true, button: 0 }));
 const line = () => view.dom.querySelector('.cm-ig-data');
-const act = (name) => line().querySelector(`[data-ig-act="${name}"]`);
+const act = () => line().querySelector('.cm-ig-data-act');
+const change = () => line().querySelector('.cm-ig-data-change');
 const text = () => view.state.doc.toString();
 const graphic = () => infographicsIn(text())[0].source;
+const FOLLOWED = NOTE.replace(`${LOST}`, LOST.replace(REGISTER, EDITED));
 
 describe('the Data line of an infographic in the note', () => {
-  it('says the sheet, its rows, the panels that read it and that it changed since', async () => {
-    editor(NOTE);
-    await settle();
-    expect(line().textContent).toBe('DataSheet “Vehicle register”3 rows · 1 panel read it · changed sinceRead again (all panels)Change…');
-    expect(server.asked.find((one) => one.path.endsWith('/rows')).body).toEqual({ origin: 'sheet:e_s1' });
-    // the drawing leaves where the rows came from to this line
-    expect(server.asked.find((one) => one.path.endsWith('/notes/infographic')).body.origins).toBe(false);
-  });
-
-  it('reads the data again into the panels that take it, typed-in figures left alone, as one Undo', async () => {
-    editor(NOTE);
-    await settle();
-    press(act('again'));
-    await settle();
-    expect(server.asked.filter((one) => one.path.endsWith('/rows')).length).toBeGreaterThan(1);
-    expect(readChart(panelText(graphic(), 1)).table.rows).toHaveLength(3);
-    expect(panelText(graphic(), 0)).toBe(FIGURES);
-    expect(undoDepth(view.state)).toBe(1);
-    undo(view);
-    expect(text()).toBe(NOTE);
-  });
-
-  it('says nothing to read again once the rows match, and a sheet gone in red', async () => {
+  it('says the sheet as a chart’s Data line does, its rows and the panels that read it', async () => {
     server.rows = () => ({ found: true, name: 'Vehicle register', text: REGISTER, rows: 2 });
     editor(NOTE);
     await settle();
-    expect(act('again')).toBeNull();
-    expect(line().querySelector('.cm-ig-data-said').textContent).toBe('2 rows · 1 panel read it');
-    view.destroy();
-    server.rows = () => ({ found: false, name: '', text: '', rows: 0 });
-    forgetDrawings();
-    editor(NOTE.replace('Losses', 'Gone'));
+    expect(line().textContent).toBe('DataSheet “Vehicle register”·Open in Sheet2 rows · 1 panel read itChange…');
+    expect(server.asked.find((one) => one.path.endsWith('/rows')).body).toEqual({ origin: 'sheet:e_s1' });
+    // the drawing leaves where the rows came from to this line
+    expect(server.asked.find((one) => one.path.endsWith('/notes/infographic')).body.origins).toBe(false);
+    act().click();
+    expect(handlers.open).toHaveBeenCalledWith({ id: 'e_s1', type: 'sheet' });
+    expect(text()).toBe(NOTE);
+  });
+
+  it('copies the sheet’s new rows into the panels that read it by itself, typed-in figures left alone, as one Undo', async () => {
+    editor(NOTE);
     await settle();
-    expect(line().querySelector('.cm-ig-data-gone').textContent).toBe('A sheet no longer in the case');
+    expect(text()).toBe(FOLLOWED);
+    expect(readChart(panelText(graphic(), 1)).table.rows).toHaveLength(3);
+    expect(panelText(graphic(), 0)).toBe(FIGURES);
+    expect(undoDepth(view.state)).toBe(1);
+    expect(line().textContent).not.toContain('Read again');
+    // Undo brings the old copy back, and it stays, said as such
+    undo(view);
+    expect(text()).toBe(NOTE);
+    await new Promise((resolve) => setTimeout(resolve, 340));
+    await settle();
+    expect(text()).toBe(NOTE);
+    expect(line().querySelector('.cm-ig-data-state').textContent).toBe('an older copy, kept by Undo');
+  });
+
+  it('draws the fresh rows where the note cannot be written, and writes nothing', async () => {
+    // a title of its own: the pages drawn are kept by their text
+    const note = NOTE.replace('title: At least 2 vehicles lost', 'title: Seen, not written');
+    editor(note, { readOnly: true });
+    await settle();
+    expect(text()).toBe(note);
+    const drawn = server.asked.filter((one) => one.path.endsWith('/notes/infographic')).map((one) => one.body.text);
+    expect(drawn.at(-1)).toContain('| Kirpi | Confirmed |');
+  });
+
+  it('says a sheet gone, the panels keeping their copy', async () => {
+    server.rows = () => ({ found: false, name: '', text: '', rows: 0 });
+    editor(NOTE);
+    await settle();
+    expect(line().querySelector('.cm-ig-data-name').textContent).toBe('A sheet no longer in the case');
+    expect(line().querySelector('.cm-ig-data-state').textContent).toBe('the chart keeps its copy');
+    expect(text()).toBe(NOTE);
   });
 
   it('Change… opens the source picker, and the one picked is the page’s data, its panels read in, as one Undo', async () => {
     const before = NOTE.replace('data: sheet:e_s1\n', '');
     editor(before);
     await settle();
-    expect(line().querySelector('.cm-ig-data-name').textContent).toBe('None');
-    expect(act('change').textContent).toBe('Choose data…');
-    press(act('change'));
+    expect(line().querySelector('.cm-ig-data-name').textContent).toBe('Each panel’s own rows');
+    expect(change().textContent).toBe('Choose data…');
+    change().click();
     expect(handlers.pickData).toHaveBeenCalledTimes(1);
     const asked = handlers.pickData.mock.calls[0][0];
     expect(asked.current).toBe('');
@@ -130,10 +145,11 @@ describe('the Data line of an infographic in the note', () => {
   });
 });
 
-describe('a chart’s source line', () => {
+describe('a chart’s Data line', () => {
   const CHART = `::: chart\nkind: bars\ntitle: Lost\ncount: rows\nby: Model\nfrom: sheet:e_s1\n${REGISTER}\n:::`;
 
   it('says where the rows come from on top of its settings, and Change… writes the source picked and its rows as one Undo', async () => {
+    server.rows = () => ({ found: true, name: 'Vehicle register', text: REGISTER, rows: 2 });
     const note = `# Losses\n\n${CHART}\n\nAfter.\n`;
     editor(note);
     await settle();
@@ -141,11 +157,12 @@ describe('a chart’s source line', () => {
     chart.querySelector('.cm-chart-settings').click();
     await settle();
     const data = chart.querySelector('.cm-chart-data');
-    expect(data.querySelector('.cm-chart-data-name').textContent).toBe('Sheet “Vehicle register”');
-    expect(data.querySelector('.cm-chart-data-state').textContent).toBe('changed since');
+    expect(data.textContent).toBe('DataSheet “Vehicle register”·Open in SheetChange…');
     data.querySelector('.cm-chart-data-change').click();
     const asked = handlers.pickData.mock.calls[0][0];
     expect(asked.current).toBe('sheet:e_s1');
+    // rows from elsewhere may be kept as the chart's own
+    expect(asked.own).toBe(true);
     asked.onpick({ origin: 'note:n1#register', data: { found: true, text: EDITED } });
     const written = readChart(text().slice(text().indexOf('::: chart')));
     expect(setting(written, 'from')).toBe('note:n1#register');
@@ -153,5 +170,7 @@ describe('a chart’s source line', () => {
     expect(undoDepth(view.state)).toBe(1);
     undo(view);
     expect(text()).toBe(note);
+    asked.onpick({ own: true });
+    expect(text()).toBe(note.replace('from: sheet:e_s1\n', ''));
   });
 });

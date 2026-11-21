@@ -5,12 +5,14 @@
  * note (`tools/notebook/InfographicBuilder.svelte`), a chart's or a map's settings card open
  * at the panel pressed; its `</>` opens the source.
  *
- * Under its head, the **Data** line: what `data:` names, its rows, how many panels read it
- * and whether it changed since (`editor/infographicData.js`), then *Read again (all panels)*
- * and *Change…* (the source picker, `components/DataPicker.svelte`), each one change and one
- * Undo. It is said again as the note changes, and read afresh when the block comes back into
- * sight (the Notebook shown again, a sheet edited in the Sheet tool meanwhile) or the window
- * does (a sheet edited in Excel).
+ * Under its head, the **Data** line, said as a chart's is (`editor/dataLine.js`): what
+ * `data:` names and the press that edits it there (*Open in Sheet*, *Go to the table*), its
+ * rows and how many panels read it (`editor/infographicData.js`), then *Change…* (the source
+ * picker, `components/DataPicker.svelte`), one change and one Undo. It is said again as the
+ * note changes, and read afresh when the block comes back into sight (the Notebook shown
+ * again, a sheet edited in the Sheet tool meanwhile) or the window does (a sheet edited in
+ * Excel). The panels that take the data, and a panel with a source of its own, follow it by
+ * themselves (`editor/follow.js`): one step Undo takes back.
  *
  * A point, a line or an area drawn on a map, in the builder's map panel or on a map of the
  * note, is case data rather than a line of the page: the pages holding a map panel are drawn
@@ -23,11 +25,14 @@ import { infographicSeed } from '../dataSeed.js';
 import { api } from '../../api.js';
 import { onMapsTouched } from '../mapSettings.svelte.js';
 import { registerBlock } from './blocks.js';
-import { dataLabel, dataSaid, dataState } from './infographicData.js';
-import {
-  INFOGRAPHIC_CLOSE, INFOGRAPHIC_OPEN, dataOf, infographicsIn, inheritingPanels, readInfographic, withDataRows, withDataSource,
-} from './infographicText.js';
+import { compareRows, readChart } from './chartText.js';
+import { LOCAL, SHEET, drawDataLine, sourceOf } from './dataLine.js';
+import { followChanges, followSource, heldBack, settled } from './follow.js';
+import { tablesOf } from './gridEdits.js';
+import { dataSaid, dataState, pageWords, readData } from './infographicData.js';
+import { INFOGRAPHIC_CLOSE, INFOGRAPHIC_OPEN, dataOf, infographicsIn, ownSourcePanels, panelText, readInfographic, withDataSource } from './infographicText.js';
 import { noteHandlers } from './state.js';
+import { applyChanges } from './tableText.js';
 import { blockWidget } from './widgets.js';
 
 /**
@@ -110,13 +115,13 @@ function drawInfographic(box, widget, view) {
   }
   page.append(el('p', 'cm-ig-empty', 'Drawing the infographic…'));
   drawPage(page, widget, builds);
-  // drawn again when a map it shows changed, the page it had kept till then
-  if (MAP_PANEL.test(widget.source)) box.igRedraw = () => drawPage(page, widget, builds);
+  // drawn again when a map it shows changed, the page it had kept till then; a view that cannot write draws the fresh rows
+  box.igRedraw = (source = widget.source) => drawPage(page, widget, builds, source);
 }
 
-/** The page drawn in `page`, its panels' boxes over it. */
-function drawPage(page, widget, builds) {
-  const asked = drawingOf(widget.info?.caseId, widget.info?.noteId, widget.source);
+/** The page drawn in `page`, its panels' boxes over it: `source`, the block's own text unless a read-only view drew fresh rows in. */
+function drawPage(page, widget, builds, source = widget.source) {
+  const asked = drawingOf(widget.info?.caseId, widget.info?.noteId, source);
   page.igAsked = asked;
   asked.then((drawn) => {
     if (page.igAsked !== asked) return;
@@ -166,7 +171,7 @@ function rewrite(view, box, change) {
   return next !== one.source && replaceBlock(view, one.from, one.to, next, one.source);
 }
 
-/** What the note says of a block's data, said again whenever asked. */
+/** What the note says of a block's data, said again whenever asked; the panels that read it follow it. */
 class DataLine {
   constructor(node, box, widget, view) {
     this.node = node;
@@ -194,14 +199,17 @@ class DataLine {
     return this.widget.writable && !this.view.state.readOnly;
   }
 
+  get noteId() {
+    return this.handlers.noteId ?? '';
+  }
+
   ask(fresh = false) {
-    const noteId = this.handlers.noteId ?? '';
-    return dataState({ caseId: this.widget.info?.caseId, noteId, noteText: this.view.state.doc.toString(), source: this.widget.source, fresh });
+    return dataState({ caseId: this.widget.info?.caseId, noteId: this.noteId, noteText: this.view.state.doc.toString(), source: this.widget.source, fresh });
   }
 
   async refresh({ fresh = false } = {}) {
     const run = ++this.asked;
-    if (!this.widget.info?.caseId || (!dataOf(this.widget.source) && !this.writable)) {
+    if (!this.widget.info?.caseId || (!dataOf(this.widget.source) && !this.writable && !ownSourcePanels(this.widget.source).length)) {
       this.node.hidden = true;
       return;
     }
@@ -209,32 +217,68 @@ class DataLine {
     if (run !== this.asked || !this.node.isConnected) return;
     this.state = state;
     this.render();
+    await this.follow(state, fresh, run);
+  }
+
+  /**
+   * The panels that read the data, and each panel with a source of its own, follow what they
+   * read: the note rewritten as one step (`followSource`); a view that cannot write draws the
+   * fresh rows instead.
+   */
+  async follow(state, fresh, run) {
+    const sources = [];
+    const origin = dataOf(this.widget.source);
+    if (state.data?.found) sources.push({ origin, text: state.data.text, differs: state.panels.differs.length > 0 });
+    const read = readInfographic(this.widget.source);
+    const own = [...new Set(ownSourcePanels(this.widget.source).map((index) => read.panels[index].origin.trim()))];
+    for (const one of own) {
+      const data = await readData({ caseId: this.widget.info?.caseId, noteId: this.noteId, noteText: this.view.state.doc.toString(), origin: one, fresh })
+        .catch(() => null);
+      if (run !== this.asked) return;
+      if (!data?.found) continue;
+      const differs = ownSourcePanels(this.widget.source).some((index) => {
+        if (read.panels[index].origin.trim() !== one) return false;
+        const { table } = readChart(panelText(this.widget.source, index));
+        return table && compareRows(table, data.table) === 'differs';
+      });
+      sources.push({ origin: one, text: data.text, differs });
+    }
+    let shown = this.widget.source;
+    for (const source of sources) {
+      if (!source.differs) settled(this.view, source.origin, source.text);
+      else if (this.writable) followSource(this.view, source.origin, source.text);
+      else shown = applyChanges(shown, followChanges(shown, source.origin, source.text));
+    }
+    if (shown !== this.widget.source) this.box.igRedraw?.(shown);
   }
 
   render() {
     const { data, panels } = this.state;
-    const parts = [el('span', 'cm-ig-data-word', 'Data')];
-    const name = el('span', `cm-ig-data-name${data && !data.found ? ' cm-ig-data-gone' : ''}`, data ? dataLabel(data) : 'None');
-    parts.push(name, el('span', 'cm-ig-data-said', dataSaid(data, panels)));
-    if (this.writable && data?.found && panels.differs.length) {
-      parts.push(act('again', 'Read again (all panels)', `Copy the rows of ${dataLabel(data)} into the ${panels.inheriting.length} panels that read it`, 'cm-ig-data-strong'));
-    }
-    if (this.writable && this.handlers.pickData && this.widget.info?.caseId) {
-      parts.push(act('change', data ? 'Change…' : 'Choose data…', 'A sheet of the case, a table of this note, or new data'));
-    }
+    const origin = dataOf(this.widget.source);
+    const { mode, id } = sourceOf(origin, this.noteId);
+    const held = Boolean(data?.found && panels.differs.length && this.writable && heldBack(this.view, origin, data.text));
+    const words = pageWords(origin, data, { noteId: this.noteId, held });
+    const canAct = (act) => (act === 'sheet' ? Boolean(this.handlers.inCase && this.handlers.open)
+      : act === 'table' ? (mode === LOCAL ? data?.found : Boolean(this.handlers.note)) : false);
+    drawDataLine(this.node, words, {
+      prefix: 'cm-ig',
+      act: words.act && canAct(words.act.id) ? (act) => this.act(act, { mode, id, data }) : null,
+      said: dataSaid(data, panels),
+      change: this.writable && this.handlers.pickData && this.widget.info?.caseId ? (anchor) => this.change(anchor) : null,
+      changeLabel: data ? 'Change…' : 'Choose data…',
+    });
     this.node.hidden = false;
-    this.node.replaceChildren(...parts);
   }
 
-  /** Read again (all panels): the data's rows, read now, into every panel that takes it, as one change. */
-  async readAgain() {
-    const state = await this.ask(true);
-    this.state = state;
-    if (!state.data?.found) {
-      this.render();
-      return;
-    }
-    rewrite(this.view, this.box, (source) => withDataRows(source, state.data.text, inheritingPanels(source, state.data.columns)));
+  /** Open in Sheet, or Go to the table: where the page's rows live. */
+  act(id, { mode, id: where, data }) {
+    if (id === 'sheet') this.handlers.open?.({ id: where, type: 'sheet' });
+    else if (mode === LOCAL) {
+      const found = tablesOf(this.view.state).find((table) => table.line === data?.line);
+      if (!found) return;
+      this.view.dispatch({ selection: { anchor: found.from }, scrollIntoView: true });
+      this.view.focus();
+    } else if (mode !== SHEET) this.handlers.note?.(where);
   }
 
   /** Change…: the source picker under the press; the one picked is the page's data, as one change. */
@@ -250,27 +294,9 @@ class DataLine {
   }
 }
 
-function act(name, label, title, extra = '') {
-  const node = el('button', `cm-ig-data-act${extra ? ` ${extra}` : ''}`, label);
-  node.type = 'button';
-  node.dataset.igAct = name;
-  node.title = title;
-  return node;
-}
-
-/** A Data line's button pressed: Read again (all panels), or Change…. */
-function dataAct(acting, box) {
-  if (acting.dataset.igAct === 'again') void box.igData?.readAgain();
-  else if (acting.dataset.igAct === 'change') box.igData?.change(acting);
-}
-
-/** A press on Edit or on a panel: the builder opens beside the note, at that panel; on the Data line, its act. */
+/** A press on Edit or on a panel: the builder opens beside the note, at that panel; the Data line's presses act on their click. */
 function press(target, box, view) {
-  const acting = target.closest('[data-ig-act]');
-  if (acting) {
-    dataAct(acting, box);
-    return;
-  }
+  if (target.closest('.cm-ig-data')) return;
   const open = view.state.facet(noteHandlers).infographic;
   if (!open) return;
   const from = view.posAtDOM(box);
@@ -301,14 +327,15 @@ const THEME = {
   '.cm-ig-data[hidden]': { display: 'none' },
   '.cm-ig-data-word': { color: 'var(--text-3)', fontWeight: '650', letterSpacing: '0.06em', textTransform: 'uppercase', fontSize: '0.88em' },
   '.cm-ig-data-name': { color: 'var(--text-1)', fontWeight: '600' },
-  '.cm-ig-data-gone': { color: 'var(--danger)' },
-  '.cm-ig-data-said': { flex: '1 1 auto', color: 'var(--text-2)' },
-  '.cm-ig-data-act': {
-    padding: '1px 9px', border: '1px solid var(--border-strong)', borderRadius: '4px', background: 'var(--bg-3)', color: 'var(--text-1)',
-    font: 'inherit', cursor: 'pointer', whiteSpace: 'nowrap',
+  '.cm-ig-data-dot': { color: 'var(--text-3)' },
+  '.cm-ig-data-state': { color: 'var(--warn)' },
+  '.cm-ig-data-said': { color: 'var(--text-2)' },
+  '.cm-ig-data-spring': { flex: '1' },
+  '.cm-ig-use': {
+    padding: '0', border: 'none', background: 'none', color: 'var(--info)', font: 'inherit', cursor: 'pointer', textDecoration: 'underline',
+    textDecorationColor: 'color-mix(in srgb, var(--info) 40%, transparent)', textUnderlineOffset: '2px', whiteSpace: 'nowrap',
   },
-  '.cm-ig-data-act:hover, .cm-ig-data-act:focus-visible': { borderColor: 'var(--accent)', color: 'var(--accent)' },
-  '.cm-ig-data-strong': { borderColor: 'color-mix(in srgb, var(--accent) 55%, transparent)', background: 'var(--accent-soft)', fontWeight: '600' },
+  '.cm-ig-use:hover, .cm-ig-use:focus-visible': { color: 'var(--text-1)', outline: 'none' },
   '.cm-ig-frame': { position: 'relative', lineHeight: '0' },
   '.cm-ig-frame > svg': { display: 'block', width: '100%', height: 'auto' },
   '.cm-ig-hit': {
@@ -358,15 +385,8 @@ registerBlock({
   close: INFOGRAPHIC_CLOSE,
   widget: blockWidget,
   draw: (box, widget, view) => drawInfographic(box, widget, view),
-  bar: '.cm-ig-edit, .cm-ig-hit, .cm-ig-data-act',
+  bar: '.cm-ig-edit, .cm-ig-hit, .cm-ig-use',
   press,
-  listen: (box) => {
-    // a keyboard's Enter on the Data line's buttons, which the mouse presses on its way down
-    box.addEventListener('click', (event) => {
-      const acting = event.detail === 0 ? event.target.closest?.('[data-ig-act]') : null;
-      if (acting) dataAct(acting, box);
-    });
-  },
   extensions: [watchData],
   atomic: true,
   height: 900,

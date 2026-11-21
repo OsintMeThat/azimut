@@ -5,10 +5,10 @@ import { history, undo, undoDepth } from '@codemirror/commands';
 vi.mock('../../api.js', () => ({ api: { post: vi.fn(() => new Promise(() => {})), postBytes: vi.fn(() => new Promise(() => {})) } }));
 
 import {
-  dataLabel, dataPanel, dataPanels, dataSaid, dataState, readData, sourceChoices,
+  dataPanel, dataPanels, dataSaid, dataState, pageWords, readData, sourceChoices,
 } from './infographicData.js';
 import {
-  WRITTEN_ORDER, dataOf, infographicsIn, inheritingPanels, inherits, ownSourcePanels, panelText, readInfographic, withDataRows,
+  WRITTEN_ORDER, dataOf, infographicsIn, inheritingPanels, inherits, ownSourcePanels, panelText, readInfographic,
   withDataSource, withSetting,
 } from './infographicText.js';
 import { readChart, setting } from './chartText.js';
@@ -16,8 +16,9 @@ import { replaceBlock } from './infographicBlock.js';
 
 /**
  * An infographic's data (`infographicData.js`, `infographicText.js`): `data:` names a sheet or
- * a table of a note, the chart panels whose columns it holds take it, Change… and Read again
- * (all panels) each write the page as one change, so one Undo gives the note back.
+ * a table of a note, the chart panels whose columns it holds take it, and Change… writes the
+ * page as one change, so one Undo gives the note back; the panels follow the data by
+ * themselves (`follow.test.js`).
  */
 
 const REGISTER = ['| Model | Made in | Grade |', '| --- | --- | --- |', '| Streit Cougar | UAE | Confirmed |', '| Al-Wahsh | Jordan | Almost sure |'].join('\n');
@@ -95,26 +96,16 @@ describe('Change…', () => {
   });
 });
 
-describe('Read again (all panels)', () => {
-  it('copies the data’s rows into the panels that take it only, as one Undo', () => {
-    const set = withSetting(BLOCK, 'data', 'sheet:s1');
-    const note = NOTE.replace(BLOCK, set);
-    const after = gesture(note, (source) => withDataRows(source, EDITED, inheritingPanels(source, ['Model', 'Made in', 'Grade'])));
-    expect(readChart(panelText(after, 2)).table.rows).toHaveLength(3);
-    expect(readChart(panelText(after, 1)).table.rows).toHaveLength(2);
-    expect(panelText(after, 0)).toBe(FIGURES);
-  });
-});
-
 describe('what the bar says', () => {
-  it('reads a sheet from the server, fresh when asked, and says its rows, its readers and whether it changed since', async () => {
+  it('reads a sheet from the server, fresh when asked, and says it as a chart’s Data line does, with its rows and its readers', async () => {
     const rows = vi.fn(async () => sheetData(EDITED, 3));
     const source = withSetting(BLOCK, 'data', 'sheet:s1');
     const state = await dataState({ caseId: 'c1', noteId: 'n1', noteText: NOTE, source, fresh: true }, { rows });
     expect(rows).toHaveBeenCalledWith({ caseId: 'c1', origin: 'sheet:s1', fresh: true });
-    expect(dataLabel(state.data)).toBe('Sheet “Vehicle register”');
+    expect(pageWords('sheet:s1', state.data)).toMatchObject({ name: 'Sheet “Vehicle register”', act: { id: 'sheet', label: 'Open in Sheet' }, state: '' });
+    expect(pageWords('sheet:s1', state.data, { held: true }).state).toBe('an older copy, kept by Undo');
     expect(state.panels).toEqual({ inheriting: [2], own: [1, 3], differs: [2] });
-    expect(dataSaid(state.data, state.panels)).toBe('3 rows · 1 panel read it · changed since');
+    expect(dataSaid(state.data, state.panels)).toBe('3 rows · 1 panel read it');
     const same = dataPanels(source, (await readData({ caseId: 'c1', origin: 'sheet:s1' }, { rows: async () => sheetData() })));
     expect(same.differs).toEqual([]);
   });
@@ -123,9 +114,9 @@ describe('what the bar says', () => {
     const long = await readData({ caseId: 'c1', origin: 'sheet:s1' }, { rows: async () => sheetData(REGISTER, 620) });
     expect(dataSaid(long, { inheriting: [], own: [], differs: [] })).toBe('first 2 of 620 rows · no panel reads it yet');
     const gone = await readData({ caseId: 'c1', origin: 'sheet:s1' }, { rows: async () => ({ found: false, name: '', text: '' }) });
-    expect(dataLabel(gone)).toBe('A sheet no longer in the case');
-    expect(dataSaid(gone, dataPanels(BLOCK, gone))).toBe('its panels keep the rows they copied');
-    expect(dataSaid(null, {})).toBe('each panel keeps its own rows');
+    expect(pageWords('sheet:s1', gone)).toEqual({ name: 'A sheet no longer in the case', act: null, state: 'the chart keeps its copy' });
+    expect(dataSaid(gone, dataPanels(BLOCK, gone))).toBe('');
+    expect(pageWords('', null).name).toBe('Each panel’s own rows');
   });
 
   it('reads a table of this very note as it is typed, without asking', async () => {
@@ -133,7 +124,8 @@ describe('what the bar says', () => {
     const data = await readData({ caseId: 'c1', noteId: 'n1', noteText: NOTE, origin: 'note:n1#the-register' }, { rows });
     expect(rows).not.toHaveBeenCalled();
     expect(data).toMatchObject({ found: true, local: true, name: 'The register', rows: 2, columns: ['Model', 'Made in', 'Grade'] });
-    expect(dataLabel(data)).toBe('Table “The register” of this note');
+    expect(pageWords('note:n1#the-register', data, { noteId: 'n1' }).name).toBe('Table “The register” of this note');
+    expect(pageWords('note:n2#the-register', { ...data, local: false, name: 'Register' }, { noteId: 'n1' }).name).toBe('Table “The register” of the note “Register”');
   });
 });
 
