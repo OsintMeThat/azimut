@@ -7,7 +7,7 @@
  * asked on mount; `siteReadOf` takes its answer down to what the hub shows, so a field the server
  * leaves out reads as empty rather than break a panel.
  */
-import { ALL_CHIP, KIND_CHIP, LIMITS_AMBER, LIMITS_RED, SITE_LIMIT_BYTES, placeOf } from './websiteSetup.js';
+import { ALL_CHIP, KIND_CHIP, LIMITS_AMBER, LIMITS_RED, NUMBERS_HOME, SITE_LIMIT_BYTES, placeOf } from './websiteSetup.js';
 import { webLink } from './wordpressSetup.js';
 
 // -- the read ---------------------------------------------------------------------------------------
@@ -219,4 +219,87 @@ export function countingOf(prefs) {
   if (prefs.siteStats === 'goatcounter' && prefs.siteStatsCode) return 'goatcounter';
   if (prefs.siteStats === 'cloudflare' && prefs.siteStatsToken) return 'cloudflare';
   return '';
+}
+
+// -- the numbers -----------------------------------------------------------------------------------
+
+/** Most rows the panel keeps of an answer, as the server bounds it (`sitestats.MAX_PAGES`, `MAX_RANKED`). */
+const MAX_PAGES = 500;
+const MAX_RANKED = 10;
+
+const countsOf = (value) => ({ views: count(value?.views), visits: count(value?.visits) });
+
+/**
+ * The numbers as `POST /api/publishing/cloudflare/numbers` answers them (`engine/sitestats.py`), what the
+ * server left out read as nothing: `pages` (each `{ path, page, week, month }`, `page` the path within the
+ * site's folder, '' its home, null outside it), `total`, `referrers` ranked by the visits they sent,
+ * `countries`, whether the 30 days were `sampled`, and the `address` the server read the site at.
+ */
+export function numbersOf(answer) {
+  const list = (value, max) => (Array.isArray(value) ? value.slice(0, max) : []);
+  const pages = list(answer?.pages, MAX_PAGES)
+    .filter((one) => typeof one?.path === 'string' && one.path.startsWith('/'))
+    .map((one) => ({ path: line(one.path, 512), page: typeof one.page === 'string' ? line(one.page, 512) : null, week: countsOf(one.week), month: countsOf(one.month) }));
+  const referrers = list(answer?.referrers, MAX_RANKED)
+    .map((one) => ({ host: line(one?.host, 253), ...countsOf(one) }))
+    .filter((one) => one.visits > 0)
+    .sort((a, b) => b.visits - a.visits);
+  const countries = list(answer?.countries, MAX_RANKED).map((one) => ({ country: line(one?.country, 64), ...countsOf(one) }));
+  return {
+    address: webLink(answer?.address),
+    pages,
+    total: { week: countsOf(answer?.total?.week), month: countsOf(answer?.total?.month) },
+    referrers,
+    countries,
+    sampled: answer?.sampled === true,
+  };
+}
+
+/**
+ * The rows of the numbers' table: each page of the site as the read of the site names it (the article
+ * whose folder holds it, with its title and its address; pages within one article summed), the home,
+ * then what the read does not know, by its path. `read` is the session's read or null; `address` is
+ * where the site is served, for the links. Ranked by their 30 days, then their 7.
+ */
+export function numbersRows(numbers, read = null, address = '') {
+  if (!numbers) return [];
+  const base = webLink(address) || numbers.address;
+  const origin = (() => {
+    try {
+      return new URL(base).origin;
+    } catch {
+      return '';
+    }
+  })();
+  // the longest folder first, so a nested one wins over its parent
+  const folders = [...(read?.items ?? [])].sort((a, b) => b.folder.length - a.folder.length);
+  const rows = new Map();
+  for (const one of numbers.pages) {
+    const item = one.page ? folders.find((entry) => one.page === `${entry.folder}/` || one.page.startsWith(`${entry.folder}/`)) : null;
+    const row = item
+      ? { key: `item:${item.folder}`, title: item.title, href: item.address || onSite(base, `${item.folder}/`), known: true }
+      : one.page === ''
+        ? { key: 'home', title: NUMBERS_HOME, href: base, known: true }
+        : { key: `path:${one.path}`, title: one.path, href: origin ? `${origin}${one.path}` : '', known: false };
+    const kept = rows.get(row.key);
+    if (kept) {
+      kept.week = { views: kept.week.views + one.week.views, visits: kept.week.visits + one.week.visits };
+      kept.month = { views: kept.month.views + one.month.views, visits: kept.month.visits + one.month.visits };
+    } else {
+      rows.set(row.key, { ...row, week: { ...one.week }, month: { ...one.month } });
+    }
+  }
+  return [...rows.values()].sort((a, b) => b.month.views - a.month.views || b.week.views - a.week.views || a.title.localeCompare(b.title));
+}
+
+/** A country as Cloudflare names it, an ISO code such as `FR`, said in English; the code itself when it is no known region. */
+export function countryOf(code) {
+  const value = line(code, 64);
+  if (!value) return 'Unknown';
+  if (!/^[A-Za-z]{2}$/.test(value)) return value;
+  try {
+    return new Intl.DisplayNames(['en'], { type: 'region' }).of(value.toUpperCase()) || value;
+  } catch {
+    return value;
+  }
 }

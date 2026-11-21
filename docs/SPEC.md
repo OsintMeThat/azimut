@@ -206,6 +206,7 @@ proof for publication.
 | ✅ **Your website** | Every publish to GitHub Pages also keeps the analyst's site: a card and a list picture with each article, then its list, feed and sitemap, the lists between markers in their own pages (a default home when they have none), pages kept off the lists, a way back to the site on each page, a warning when a folder was changed on GitHub since, and readers counted on GoatCounter or Cloudflare when asked; only files Azimut made are ever written. |
 | ✅ **Website settings** | Sets the site in one tab (title, line and credit, GitHub Pages and WordPress, how readers are counted, Update the site, the Legal notice starter), and the publish dialog adds a category, Article or Page and a list picture. |
 | ✅ **Website hub** | Settings › Website as the site's hub, in panels: a live preview of its name and logo, a read of what it holds with a delete, its limits, readers and upkeep; Unlisted joins Article and Page. |
+| ✅ **Reader numbers** | Reads each article's page views over 7 and 30 days, the site's total, referrers and countries from Cloudflare Web Analytics on a press, with a read-only token kept on this computer. |
 | ✅ **Your own bar** | Articles carry the site's own header from `azimut-bar.html` in place of Azimut's bar, cleaned and kept apart from the article's styles, and Update the site changes it in every article. |
 | ✅ **Places on the site** | An article may carry a place for a map of the site's articles, kept with its note, offered only when the note names one point, and carried by its card and `articles.json`. |
 | ✅ **Maps in reports** | Puts the case's layers, a Map plate or a period's proofs in a note as a map read day by day, its marks opening their cards: offline in the file, live over OpenFreeMap once hosted, a picture in the PDF; set from its card (base, Sentinel-2 or Esri imagery streamed live, layers, frame, timeline, steps, cards) and drawn on at any zoom, from an area to highlight to a map started from nothing. |
@@ -514,6 +515,17 @@ stops making sense.
   out of the backup. What it publishes is public: a Pages site is readable by anyone
   with the address, even from a private repository, which is why only the public edition
   goes.
+  *Read the numbers* (Settings › Website › Readers, a site counted by Cloudflare Web
+  Analytics) is the one press that asks how many read the site: one GraphQL query to
+  `https://api.cloudflare.com/client/v4/graphql` and nowhere else, over https with timeouts,
+  the answer read up to 2 MB and no redirect followed, never on a read, a save or at
+  startup. The API token rides in the Authorization header only; the analyst makes it with
+  Account Analytics, Read, the one permission it needs, and it is kept in `publishing.json`
+  like the GitHub token, 0600, out of the backup and never sent back to the browser beyond
+  its last four characters. The account ID and the site tag go as the query's variables and
+  are ordinary settings the backup carries. What comes back (paths, referrer hosts,
+  countries, counts) is bounded and shown as text, a path as a link only on the site's own
+  address.
   *Archive every link* of a note is the one press that sends a note's sources out: one
   link at a time it asks `archive.org/wayback/available` for the page's newest copy and,
   unless one under 30 days old is reused, `web.archive.org/save/` for a new one, over https
@@ -662,8 +674,8 @@ stops making sense.
   `https://static.cloudflareinsights.com/beacon.min.js`; the page's policy then lets in
   exactly `https://static.cloudflareinsights.com` (script) and `https://cloudflareinsights.com`
   (connect) and nothing else, the readers' browsers reach them and Azimut never does, and
-  with the count off a page has neither host nor script. Its token is printed in every page,
-  so it is no secret and travels in the settings backup. A map's base
+  with the count off a page has neither host nor script. Its site token is printed in every
+  page, so it is no secret and travels in the settings backup. A map's base
   other than its imagery (a street, topographic or dark map) is filed by Azimut from
   OpenStreetMap or OpenTopoMap on the press that picks it, as a capture is, and its page
   fetches none. Accepted risk (owner's choice, 2026-11-18): a

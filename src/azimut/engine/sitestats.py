@@ -43,10 +43,8 @@ from typing import Any, Mapping
 import httpx
 
 from .. import __version__
-from .site import CLOUDFLARE_ID
 
 API = "https://api.cloudflare.com/client/v4/graphql"
-API_HOST = "api.cloudflare.com"
 TIMEOUT = httpx.Timeout(30.0, connect=10.0)
 #: The most the answer may weigh.
 MAX_ANSWER = 2 * 1024 * 1024
@@ -60,8 +58,6 @@ MAX_COUNT = 10**12
 WEEK = 7
 MONTH = 30
 
-#: An account ID and a site tag as Cloudflare shows them: 32 hexadecimal digits.
-ACCOUNT_ID = SITE_TAG = CLOUDFLARE_ID
 #: An API token: what a Bearer header carries (RFC 6750's characters).
 API_TOKEN = re.compile(r"^[A-Za-z0-9._~+/=-]{20,255}$")
 
@@ -110,24 +106,8 @@ class StatsError(Exception):
         self.status = status
 
 
-def account_id(value: str | None) -> str:
-    """An account ID as Cloudflare shows it, lower case; "" for none."""
-    return _hex(value, ACCOUNT_ID, "That does not read as a Cloudflare account ID: 32 letters and digits.")
-
-
-def site_tag(value: str | None) -> str:
-    """A Web Analytics site tag, lower case; "" for none."""
-    return _hex(value, SITE_TAG, "That does not read as a site tag: 32 letters and digits.")
-
-
-def _hex(value: str | None, pattern: re.Pattern[str], refused: str) -> str:
-    text = (value or "").strip().lower()
-    if text and not pattern.match(text):
-        raise StatsError(refused)
-    return text
-
-
 def api_token(value: str) -> str:
+    """The API token as typed, trimmed, once it reads as one a Bearer header carries."""
     token = value.strip()
     if not API_TOKEN.match(token):
         raise StatsError("That does not read as a Cloudflare API token: copy it whole, as Cloudflare showed it.")
