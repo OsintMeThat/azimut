@@ -507,8 +507,8 @@ def test_the_privacy_starter_is_the_same_page_for_everyone_with_the_counting_eac
 
 def test_the_site_copy_is_the_contracts():
     assert site.SITE_INTRO.startswith("Publish your notes as a simple website on GitHub Pages")
-    assert [lead for lead, _ in site.SITE_OWN] == ["Your own home page", "A page per category", "Your own domain",
-                                                  "Your own scripts"]
+    assert [lead for lead, _ in site.SITE_OWN] == ["Your own home page", "Your own bar", "A page per category",
+                                                  "Your own domain", "Your own scripts"]
     assert githubpages.OURS == ("index.html", "share.jpg")
 
 

@@ -414,8 +414,9 @@ def _site_press(target: GitHubTarget, gh: github.GitHub) -> github.Pages | dict[
 @router.post("/github/site")
 def update_github_site() -> dict[str, Any]:
     """Update the site: rebuild its list, feed, sitemap, marked pages and home from the cards the
-    repository holds, in one commit, with no note published. Only files Azimut made are written;
-    with nothing to change, nothing is committed (``updated`` is false)."""
+    repository holds, and give each article page the bar the site asks for (`azimut-bar.html`, else
+    Azimut's), in one commit, with no note published. Only files Azimut made are written; with
+    nothing to change, nothing is committed (``updated`` is false)."""
     target = _needs_target()
     try:
         with github.client() as http:
@@ -423,7 +424,7 @@ def update_github_site() -> dict[str, Any]:
             found = _site_press(target, gh)
             if isinstance(found, dict):
                 return found
-            plan = sitesync.planner(gh, target.account, target.repo, site_for(target, found.url))
+            plan = sitesync.updater(gh, target.account, target.repo, site_for(target, found.url))
             done = github.update_site(gh, target.account, target.repo, target.branch, found.root,
                                       "Update the site", plan)
     except github.GitHubError as exc:
@@ -458,8 +459,9 @@ def read_github_categories() -> dict[str, Any]:
 def read_github_site() -> dict[str, Any]:
     """Read what the site holds, for Settings › Website › Articles: its cards (every article, map and
     page, unlisted ones too, each with its weight and whether `/github/site/delete` takes it), its
-    categories with the pages that list them, whose home it has, its legal and privacy pages, the last
-    commit, and what the site and the repository weigh. Keeps the categories it found. Reads only."""
+    categories with the pages that list them, whose home it has, whose bar its articles carry (``bar``,
+    `yours` for its own `azimut-bar.html`, else `azimut`), its legal and privacy pages, the last commit,
+    and what the site and the repository weigh. Keeps the categories it found. Reads only."""
     target = _needs_target()
     try:
         with github.client() as http:
@@ -474,7 +476,7 @@ def read_github_site() -> dict[str, Any]:
     except github.GitHubError as exc:
         raise HTTPException(status_code=502, detail=str(exc)) from exc
     keep_categories(surveyed.found)
-    return {"ok": True, "address": home.address, "home": surveyed.home, "items": surveyed.items,
+    return {"ok": True, "address": home.address, "home": surveyed.home, "bar": surveyed.bar, "items": surveyed.items,
             "categories": surveyed.categories, "marked": surveyed.marked, "legal": surveyed.legal,
             "privacy": surveyed.privacy,
             "last": {"date": read.date, "message": read.message} if read.date else None,

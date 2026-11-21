@@ -1871,6 +1871,9 @@ def _github_record(item: dict[str, Any]) -> dict[str, Any] | None:
     tree = item.get("tree")
     if isinstance(tree, str) and githubpages.SHA1.match(tree):
         record["tree"] = tree
+    bare = item.get("bare_sha256")
+    if isinstance(bare, str) and SHA256.match(bare):
+        record["bare_sha256"] = bare
     changes = item.get("changes")
     if isinstance(changes, str) and changes.strip():
         record["changes"] = " ".join(changes.split())[:MAX_CHANGES]
@@ -1889,7 +1892,8 @@ def _github_page_state(record: dict[str, Any]) -> str:
     try:
         with githubpages.client() as http:
             return githubpages.page_state(githubpages.GitHub(target.token, http), owner, repo, record["branch"],
-                                          f"{record['path']}/{web_engine.INDEX}", record["sha256"])
+                                          f"{record['path']}/{web_engine.INDEX}", record["sha256"],
+                                          record.get("bare_sha256", ""))
     except githubpages.GitHubError as exc:
         raise HTTPException(status_code=502, detail=str(exc)) from exc
 
@@ -1960,10 +1964,11 @@ def github_check(case_id: str, note_id: str, body: GitHubCheckIn) -> dict[str, A
                 return {"checked": False, "exists": False, "edited": False, "warning": ""}
             folder = f"{pages.root}{short}"
             now = githubpages.folder_tree(gh, target.account, target.repo, target.branch, folder)
+            before = _published_tree(case, note_id, f"{target.account}/{target.repo}", target.branch, folder)
+            # a bar Update the site changed is no edit of the analyst's
+            edited = githubpages.changed_since(gh, target.account, target.repo, before, now)
     except githubpages.GitHubError as exc:
         raise HTTPException(status_code=502, detail=str(exc)) from exc
-    before = _published_tree(case, note_id, f"{target.account}/{target.repo}", target.branch, folder)
-    edited = bool(before and now and now != before)
     return {"checked": True, "exists": bool(now), "edited": edited, "warning": site_engine.HAND_EDITED if edited else ""}
 
 
@@ -2043,10 +2048,12 @@ def github_publish(case_id: str, note_id: str, body: GitHubPublishIn) -> dict[st
         "branch": target.branch,
         "path": published.folder,
         "commit": published.commit,
-        "sha256": made.sha256,
+        "sha256": published.page or made.sha256,
         "text_sha256": made.text_sha256,
         "tree": published.tree,
     }
+    if published.bare and published.bare != record["sha256"]:
+        record["bare_sha256"] = published.bare
     if changes:
         record["changes"] = changes[:MAX_CHANGES]
     _record_edition(case, note_id, record, text=made.printed)
@@ -2059,7 +2066,7 @@ def github_publish(case_id: str, note_id: str, body: GitHubPublishIn) -> dict[st
         "repository": repository,
         "branch": target.branch,
         "commit": published.commit,
-        "sha256": made.sha256,
+        "sha256": record["sha256"],
         "at": record["at"],
         "uploaded": published.uploaded,
         "reused": published.reused,

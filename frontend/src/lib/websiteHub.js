@@ -61,6 +61,8 @@ export function siteReadOf(answer) {
   return {
     address: webLink(answer?.address),
     home: HOMES.includes(answer?.home) ? answer.home : 'none',
+    // whose bar the articles carry: the site's own azimut-bar.html, else Azimut's
+    bar: answer?.bar === 'yours' ? 'yours' : 'azimut',
     items: list(answer?.items).map(itemOf).filter(Boolean),
     truncated: size.site === null,
     categories: list(answer?.categories).map((entry) => ({

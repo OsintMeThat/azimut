@@ -1,6 +1,6 @@
 <script>
   /**
-   * Make it yours: the four ways to change what Azimut makes for the site, each with the line of the
+   * Make it yours: the five ways to change what Azimut makes for the site, each with the line of the
    * web folder's own how-to (`SITE_OWN`, the engine's words) and, where it helps, what to write.
    */
   import Icon from '../../../components/Icon.svelte';

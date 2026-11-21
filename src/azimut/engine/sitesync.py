@@ -21,11 +21,24 @@ sitemap do not keep it.
 
 **What a read tells** (`survey`, Settings › Website › Articles) is the same reading and no
 writing: the cards as items, newest first, the categories in use and the marked pages that list
-each, whose home the site has, and the pages a site is expected to have.
+each, whose home the site has, whose bar its articles carry, and the pages a site is expected to have.
+
+**The bar** of an article page is the site's own when its root holds `azimut-bar.html`
+(`site.own_bar`), read by blob id like the rest, and Azimut's otherwise; a file absent costs no
+read. A publish gives its page that bar (`RootPlan.bar`). Update the site (`updater`) gives it to
+every article page Azimut published whose bar differs, between the page's markers and nothing else,
+in the same commit as the lists and within its bounds (`githubpages.MAX_FILES`, `MAX_TOTAL_BYTES`).
+To know which bar the pages carry without reading them all, `articles.json` keeps it as `bar`
+(`azimut`, or the id of the site's own): Update the site writes it once every page carries that bar,
+a publish keeps it while the bar it gives is that one and drops it otherwise, a delete keeps it. With
+it matching, Update the site reads no page; without, it reads each article page once (remembered by
+blob id, at most `MAX_BAR_PAGE_BYTES` each) and writes it again.
 """
 
 from __future__ import annotations
 
+import hashlib
+import json
 import threading
 from collections import OrderedDict
 from dataclasses import dataclass, field
@@ -49,6 +62,13 @@ TOO_MANY_PAGES_READ = (f"The site holds more than {site.MAX_PAGES} pages with no
 #: The folders a site keeps its legal notice and its privacy page in, by the names sites give them.
 LEGAL_FOLDERS = ("legal-notice", "legal", "imprint", "impressum", "mentions-legales")
 PRIVACY_FOLDERS = ("privacy", "privacy-policy", "privacy-notice", "confidentialite")
+#: The bar Azimut's own pages carry, as `articles.json` keeps it (`BAR_KEY`) and a read says it.
+AZIMUT_BAR = "azimut"
+BAR_KEY = "bar"
+#: The most an article page may weigh for Update the site to change its bar.
+MAX_BAR_PAGE_BYTES = 8 * 1024 * 1024
+BARS_LEFT = ("Azimut changed the bar of as many articles as one commit holds: press Update the site again "
+             "for the others.")
 
 _kept: OrderedDict[str, bytes] = OrderedDict()
 _plain: OrderedDict[str, None] = OrderedDict()
@@ -110,6 +130,37 @@ class _Files:
             return sha in _plain
 
 
+def bars_too_large(count: int) -> str:
+    """What Update the site says of the article pages it could not read to change their bar."""
+    pages = "1 article page is" if count == 1 else f"{count} article pages are"
+    return f"{pages} too large for Azimut to change the bar: publish {'it' if count == 1 else 'them'} again."
+
+
+#: Which bar each page read carries, by its blob id: "" none (no markers), `AZIMUT_BAR`, or the id of another.
+_bars: OrderedDict[str, str] = OrderedDict()
+
+
+def _bar_known(sha: str) -> str | None:
+    with _lock:
+        return _bars.get(sha)
+
+
+def _bar_kept(sha: str, kind: str) -> None:
+    with _lock:
+        _bars[sha] = kind
+        _bars.move_to_end(sha)
+        while len(_bars) > 4000:
+            _bars.popitem(last=False)
+
+
+def bar_kind(inner: bytes | None) -> str:
+    """Which bar a page's markers hold (`site.bar_in`): "" for a page with none, `AZIMUT_BAR`, or the id
+    of the bar it carries."""
+    if inner is None:
+        return ""
+    return AZIMUT_BAR if site.is_azimut_bar(inner) else hashlib.sha1(inner, usedforsecurity=False).hexdigest()
+
+
 def _no_marker(sha: str) -> None:
     with _lock:
         _plain[sha] = None
@@ -122,7 +173,24 @@ def planner(gh: githubpages.GitHub, owner: str, repo: str, home_site: Site) -> g
     published and its card (neither for an update of the site alone)."""
 
     def plan(level: str, folder: str, card: Card | None) -> RootPlan:
-        return make_plan(gh, owner, repo, home_site, githubpages.read_tree(gh, owner, repo, level), folder, card)
+        tree = githubpages.read_tree(gh, owner, repo, level)
+        made = make_plan(gh, owner, repo, home_site, tree, folder, card)
+        _publish_bar(gh, owner, repo, tree, made)
+        return made
+
+    return plan
+
+
+def updater(gh: githubpages.GitHub, owner: str, repo: str, home_site: Site) -> githubpages.Planner:
+    """The plan of Update the site: the publish's plan with no note, and every article page Azimut
+    published given the bar the site asks for now (`bars`)."""
+
+    def plan(level: str, folder: str, card: Card | None) -> RootPlan:
+        tree = githubpages.read_tree(gh, owner, repo, level)
+        made = make_plan(gh, owner, repo, home_site, tree, folder, card)
+        if tree.complete and made.categories is not None:
+            bars(gh, owner, repo, home_site, tree, made)
+        return made
 
     return plan
 
@@ -134,7 +202,12 @@ def remover(gh: githubpages.GitHub, owner: str, repo: str, home_site: Site) -> g
     def plan(level: str, folder: str, card: Card | None) -> RootPlan:
         tree = githubpages.read_tree(gh, owner, repo, level)
         left = {path: sha for path, sha in tree.entries.items() if path != folder and not path.startswith(f"{folder}/")}
-        return make_plan(gh, owner, repo, home_site, githubpages.TreeRead(left, tree.complete), folder, None)
+        made = make_plan(gh, owner, repo, home_site, githubpages.TreeRead(left, tree.complete), folder, None)
+        if tree.complete and made.categories is not None:
+            # a folder gone takes no bar with it: the other pages carry the one they did
+            files = _Files(gh, owner, repo, left)
+            _record(made, files, left, _recorded(files, left))
+        return made
 
     return plan
 
@@ -252,6 +325,146 @@ def _sitemap_pages(existing: str | None, home: Site, entries: dict[str, str], li
     return list(dict.fromkeys(["/", *kept, *marked, *(page["address"] for page in pages)]))
 
 
+# -- the bar of the article pages ---------------------------------------------------------------------
+
+
+def _site_bar(files: _Files, tree: githubpages.TreeRead, warnings: list[str]) -> tuple[str, str]:
+    """The site's own bar as an article page carries it ("" for none: Azimut's), and its kind
+    (`bar_kind`). With no `azimut-bar.html` nothing is read; one past its bound is not read either."""
+    if site.OWN_BAR not in tree.entries:
+        return "", AZIMUT_BAR
+    size = tree.sizes.get(site.OWN_BAR)
+    data = files.read(site.OWN_BAR, site.MAX_OWN_BAR_BYTES) if size is None or size <= site.MAX_OWN_BAR_BYTES else None
+    if data is None:
+        warnings.append(site.OWN_BAR_TOO_LARGE)
+        return "", AZIMUT_BAR
+    inner, said = site.own_bar(data)
+    if said:
+        warnings.append(said)
+    return inner, bar_kind(inner.encode("utf-8")) if inner else AZIMUT_BAR
+
+
+def _recorded(files: _Files, entries: dict[str, str]) -> str | None:
+    """The bar `articles.json` says every article page carries, None when it says none or is not Azimut's."""
+    text = files.text(site.ARTICLES, MAX_LIST_BYTES) if site.ARTICLES in entries else None
+    try:
+        payload = json.loads(text) if text is not None else None
+    except ValueError:
+        return None
+    if not isinstance(payload, dict) or payload.get("format") != site.SITE_FORMAT:
+        return None
+    said = payload.get(BAR_KEY)
+    return said if isinstance(said, str) and said else None
+
+
+def _record(plan: RootPlan, files: _Files, entries: dict[str, str], state: str | None) -> None:
+    """`articles.json` as the plan leaves it, with ``state`` as the bar every article page carries
+    (None for none known), where Azimut owns that file; written only where it then differs."""
+    data = plan.files.get(site.ARTICLES)
+    if data is None:
+        text = files.text(site.ARTICLES, MAX_LIST_BYTES) if site.ARTICLES in entries else None
+        if text is None or not site.owns_articles(text):
+            return
+        data = text.encode("utf-8")
+    try:
+        payload = json.loads(data)
+    except ValueError:
+        return
+    if not isinstance(payload, dict):
+        return
+    payload.pop(BAR_KEY, None)
+    if state is not None:
+        payload[BAR_KEY] = state
+    out = (json.dumps(payload, indent=1, ensure_ascii=False) + "\n").encode("utf-8")
+    sha = githubpages.blob_sha(out)
+    if sha == entries.get(site.ARTICLES):
+        plan.files.pop(site.ARTICLES, None)
+    else:
+        plan.files[site.ARTICLES] = out
+        _remember(sha, out)
+
+
+def _publish_bar(gh: githubpages.GitHub, owner: str, repo: str, tree: githubpages.TreeRead, plan: RootPlan) -> None:
+    """What a publish adds to its plan for the bar: the site's own for its page (`RootPlan.bar`), and
+    `articles.json`'s record kept while that bar is the one every page carries, dropped otherwise."""
+    if not tree.complete:
+        return
+    files = _Files(gh, owner, repo, tree.entries)
+    inner, kind = _site_bar(files, tree, plan.warnings)
+    plan.bar = inner or None
+    if plan.categories is not None:
+        recorded = _recorded(files, tree.entries)
+        _record(plan, files, tree.entries, recorded if recorded == kind else None)
+
+
+def _logo_of(folder: str, held: set[str], entries: dict[str, str], home: Site) -> str:
+    """The logo Azimut's bar shows in an article's folder: the site's own as the folder holds it, else
+    the one the folder was published with, else none (and none for a site with no logo)."""
+    if home.logo is None:
+        return ""
+    logos = sorted(path for path in held if site.LOGO_FILE.match(path))
+    same = githubpages.blob_sha(home.logo)
+    return next((path for path in logos if entries.get(f"{folder}/{path}") == same), logos[0] if logos else "")
+
+
+def bars(gh: githubpages.GitHub, owner: str, repo: str, home: Site, tree: githubpages.TreeRead, plan: RootPlan) -> None:
+    """Give every article page Azimut published the bar the site asks for now, in ``plan``: the site's
+    own (`azimut-bar.html`) or Azimut's. Only a folder Azimut published (`githubpages.deletable`) whose
+    card is no map's, only a page with the bar's markers, only one whose bar differs, and only between
+    its markers; within one commit's bounds. A page carrying Azimut's bar keeps it as it is."""
+    files = _Files(gh, owner, repo, tree.entries)
+    entries = tree.entries
+    inner, kind = _site_bar(files, tree, plan.warnings)
+    recorded = _recorded(files, entries)
+    if recorded == kind:
+        _record(plan, files, entries, kind)
+        return
+    held = _held(entries)
+    frame = site.frame_of(home)
+    # room is kept for `articles.json`, which says at the end which bar the pages carry
+    spare = site.ARTICLES not in plan.files
+    count = len(plan.files) + spare
+    weight = sum(len(data) for data in plan.files.values()) + (MAX_LIST_BYTES if spare else 0)
+    large = 0
+    for folder in _card_folders(entries):
+        data = files.read(f"{folder}/{site.CARD}", site.MAX_CARD_BYTES)
+        card = site.read_card(folder, data) if data is not None else None
+        if card is None or card["layout"] == "map" or not githubpages.deletable(folder, held.get(folder, set()), True):
+            continue
+        path = f"{folder}/{site.HOME}"
+        known = _bar_known(entries[path])
+        page = None
+        if known is None:
+            page = files.read(path, MAX_BAR_PAGE_BYTES)
+            if page is None:
+                large += 1
+                continue
+            known = bar_kind(site.bar_in(page))
+            _bar_kept(entries[path], known)
+        if known in ("", kind):
+            continue
+        page = page if page is not None else files.read(path, MAX_BAR_PAGE_BYTES)
+        if page is None:
+            large += 1
+            continue
+        barred = site.with_bar(page, inner or site.bar(frame, _logo_of(folder, held.get(folder, set()), entries, home)))
+        if barred is None:
+            continue
+        if count + 1 > githubpages.MAX_FILES or weight + len(barred) > githubpages.MAX_TOTAL_BYTES:
+            plan.warnings.append(BARS_LEFT)
+            _record(plan, files, entries, None)
+            return
+        plan.files[path] = barred
+        count, weight = count + 1, weight + len(barred)
+        sha = githubpages.blob_sha(barred)
+        _bar_kept(sha, kind)
+        _remember(sha, barred)
+    if large:
+        # a page left with another bar: nothing says they all carry it, so the next press looks again
+        plan.warnings.append(bars_too_large(large))
+    _record(plan, files, entries, None if large else kind)
+
+
 # -- reading the site, writing nothing -------------------------------------------------------------
 
 
@@ -269,6 +482,8 @@ class Survey:
     privacy: str = ""
     warnings: list[str] = field(default_factory=list)
     found: list[str] | None = None
+    #: Whose bar the article pages carry: `yours` when the site's `azimut-bar.html` reads as one, else `azimut`.
+    bar: str = AZIMUT_BAR
     #: What the site's files weigh in bytes, None when the tree was too long to read whole.
     bytes: int | None = None
 
@@ -351,6 +566,7 @@ def survey(gh: githubpages.GitHub, owner: str, repo: str, home: Site, tree: gith
     # the root page: Azimut's home, the analyst's own, or none; and every page whose lists Azimut fills
     root = files.text(site.HOME, site.MAX_PAGE_BYTES) if site.HOME in entries else None
     out.home = "none" if site.HOME not in entries else "azimut" if root is not None and site.owns_home(root) else "yours"
+    out.bar = "yours" if _site_bar(files, tree, out.warnings)[0] else AZIMUT_BAR
     listed: dict[str, list[str]] = {}
 
     def mark(path: str, text: str) -> None:
