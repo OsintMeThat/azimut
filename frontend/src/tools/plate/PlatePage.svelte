@@ -93,6 +93,8 @@
     top = 0,
     /** The plate as written (`JSON.stringify(spec)`), when the editor has it already: the drawing follows it. */
     written = '',
+    /** `(map)`: the day a map draws its dated layers on when it is not the plate's, else null. */
+    layersDay = () => null,
   } = $props();
 
   const size = $derived(pageSize(spec.page));
@@ -411,6 +413,8 @@
     clearTimeout(heldTimer);
     heldTimer = setTimeout(() => { held = ''; }, 3200);
   }
+  /** The plate's time as a map reads its layers: on its own day when it draws them on its imagery's. */
+  const timeOf = (element) => { const day = layersDay(element); return day ? { ...time, at: day } : time; };
   const lockedMap = (element) => element.kind === 'map' && !framingFor(element).own && !framingFor(element).first;
   /** The other map of a map's group, as a comparison's pair is grouped; none outside a group. */
   const pairedMap = (element) => (element.group ? spec.elements.find((item) => item.kind === 'map' && item.group === element.group && item.id !== element.id) ?? null : null);
@@ -701,7 +705,7 @@
     style:background={paperStyle} role="presentation">
     <!-- a map is built once: another ground, a date or an overlay is laid on it -->
     {#each maps as element (element.id)}
-      <PlateMap {element} view={viewOf(element)} {time} {caseId} {rows} {providers} {relief} font={spec.theme.font}
+      <PlateMap {element} view={viewOf(element)} time={timeOf(element)} {caseId} {rows} {providers} {relief} font={spec.theme.font}
         interactive={framing === element.id} away={!shownOn(element, at, stepPlace)} glide={playing ? glide : 0}
         onview={(view, frame, placer) => reported(element, view, frame, placer)}
         onname={(hit) => (nameMenu = { element, ...hit })}

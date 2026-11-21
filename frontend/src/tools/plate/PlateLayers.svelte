@@ -4,7 +4,9 @@
    * A plate keeps no data of its own: each map is drawn on a ground and draws some of
    * the case's layers, as the Map keeps them. This says it map by map: the ground and
    * the day its picture was taken, each of the case's layers ticked when the map draws
-   * it, a dated one marked, since the plate draws it as it stood on its day.
+   * it, a dated one marked, since the plate draws it as it stood on its day. A map on a
+   * picture of one day can draw its dated layers as they stood that day instead, so a
+   * picture of the past never shows what came after it.
    *
    * A tick draws a layer or takes it off, as the inspector's own list does. The rest of
    * a layer's look (its role, groups, days, colours, hidden features) stays in the
@@ -14,7 +16,7 @@
   import Icon from '../../components/Icon.svelte';
   import { isTracked } from '../../lib/map/layerHistory.js';
   import { drawnOn } from '../../lib/plate/toLayer.js';
-  import { groundSaid, layeredMaps, withLayer } from '../../lib/plate/source.js';
+  import { groundSaid, imageryDay, layeredMaps, withLayer } from '../../lib/plate/source.js';
 
   let {
     spec,
@@ -70,6 +72,11 @@
       <p class="ground" title={ground.undated ? 'Stitched from pictures of several days, so it says no day' : ground.drawn ? 'Drawn from map data, so it has no day of its own' : 'The day its picture was taken'}>
         <span class="key">Ground</span> {ground.name}{#if ground.when}{' · '}<strong>{ground.when}</strong>{:else if ground.undated}{' · '}<span class="quiet">several days</span>{/if}
       </p>
+      {#if imageryDay(map, { releases }) && !template}
+        <label class="own-day" title="Draws the dated layers as they stood on the day this map's picture was taken, not on the plate's day">
+          <input type="checkbox" checked={map.layers_on === 'imagery'} onchange={(event) => (map.layers_on = event.currentTarget.checked ? 'imagery' : 'plate')} />
+          Layers as they stood that day</label>
+      {/if}
       {#if template}
         <p class="note">A template keeps no layers: a plate made from it draws the case's.</p>
       {:else if !rows.length}
@@ -122,6 +129,7 @@
   .map-head h5 { flex: 1; min-width: 0; margin: 0; overflow: hidden; color: var(--text-1); font-size: 12px; font-weight: 600; text-overflow: ellipsis; white-space: nowrap; }
   .ground { margin: 0; color: var(--text-2); font-size: 11px; line-height: 1.35; }
   .ground .key { color: var(--text-3); }
+  .own-day { display: flex; align-items: center; gap: 6px; color: var(--text-1); font-size: 11px; cursor: pointer; }
   .ground strong { color: var(--text-1); font-weight: 600; }
   .quiet { color: var(--text-3); }
   .layers { display: grid; gap: 2px; margin: 0; padding: 0; list-style: none; }

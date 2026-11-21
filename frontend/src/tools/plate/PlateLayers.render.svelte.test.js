@@ -40,6 +40,17 @@ describe('where the plate\'s maps get what they draw', () => {
     expect(sections()[1].textContent).toContain('Draws no layer yet');
   });
 
+  it('lets a map on a picture of one day draw its layers as they stood that day, and only such a map', () => {
+    const { spec } = show([{ id: 'm', kind: 'map', basemap: 'esri-wayback', release: 41, layers: [] },
+      { id: 'n', kind: 'map', basemap: 'esri-world-imagery', layers: [] }]);
+    const boxes = [...document.body.querySelectorAll('.own-day input')];
+    expect(boxes).toHaveLength(1);
+    boxes[0].click(); flushSync();
+    expect(spec.elements[0].layers_on).toBe('imagery');
+    boxes[0].click(); flushSync();
+    expect(spec.elements[0].layers_on).toBe('plate');
+  });
+
   it('draws a layer on a map, or takes it off, at a tick', () => {
     const { spec } = show([{ id: 'm', kind: 'map', basemap: 'plain', layers: [] }]);
     const front = [...document.body.querySelectorAll('li')].find((li) => li.textContent.includes('Front line')).querySelector('input');

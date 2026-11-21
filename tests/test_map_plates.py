@@ -570,6 +570,18 @@ def test_a_3d_map_keeps_its_tilt_its_heights_and_its_ridges(client, owner):
     assert map_["overlays"] == ["relief", "railway", "power", "seamarks"]
 
 
+def test_a_map_draws_its_layers_on_the_plate_s_day_unless_told_its_imagery_s(client, owner):
+    spec = plate_spec()
+    assert save(client, owner, spec=spec).status_code == 200
+    # a plate saved before the choice existed reads as it always has
+    assert client.get(f"/api/cases/{owner}/map-plates/Situation").json()["spec"]["elements"][0]["layers_on"] == "plate"
+    spec["elements"][0].update({"basemap": "esri-wayback", "release": 41, "layers_on": "imagery"})
+    assert save(client, owner, spec=spec, rename_from="Situation").status_code == 200
+    assert client.get(f"/api/cases/{owner}/map-plates/Situation").json()["spec"]["elements"][0]["layers_on"] == "imagery"
+    spec["elements"][0]["layers_on"] = "yesterday"
+    assert save(client, owner, spec=spec, rename_from="Situation").status_code == 422
+
+
 def test_a_transition_plays_its_frames_before_its_beat_holds(tmp_path):
     command = mapplates.tween_command("ffmpeg", tmp_path / "t%04d.png", 3, 24, tmp_path / "w.mp4")
     at = command.index(str(tmp_path / "t%04d.png"))

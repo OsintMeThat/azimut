@@ -35,7 +35,7 @@
   import GroundSwatch from './GroundSwatch.svelte';
   import { TEXT_STYLES, styled } from '../../lib/plate/design.js';
   import { drawnOn } from '../../lib/plate/toLayer.js';
-  import { withLayer } from '../../lib/plate/source.js';
+  import { imageryDay, withLayer } from '../../lib/plate/source.js';
   import { ROLE_LIST, withRole } from '../../lib/plate/roles.js';
   import { spanTo, withHidden } from '../../lib/plate/kept.js';
   import { countryNames } from '../../lib/plate/spotlight.js';
@@ -808,6 +808,11 @@
 
       <PlateSection title="Layers" summary={`${(element.layers ?? []).length} drawn`}>
       {@const drawn = drawnOn(spec, element.id).length}
+      {#if imageryDay(element, { releases })}
+        <label class="check" title="Draws the dated layers as they stood on the day this map's picture was taken, not on the plate's day">
+          <input type="checkbox" checked={element.layers_on === 'imagery'} onchange={(event) => (element.layers_on = event.currentTarget.checked ? 'imagery' : 'plate')} />
+          Layers as they stood on {momentLabel(imageryDay(element, { releases }))}</label>
+      {/if}
       {#if !rows.length}<p class="note">The case has no map layers yet. Draw on the plate from Add, or make one here.</p>{/if}
       <div class="tools wide">
         {#if onnewlayer}<button type="button" class="btn btn-xs" title="A new case layer, opened for editing in the Map where this map looks"

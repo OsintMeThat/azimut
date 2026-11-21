@@ -39,6 +39,19 @@ export function groundSaid(map, { grounds = [], releases = [], years = [] } = {}
   return { name, when: '', drawn: false, undated: true };
 }
 
+/** The day a map's picture was taken, `YYYY-MM-DD`: a Wayback release's or a Sentinel-2 pass's; '' for a ground with no single day. */
+export function imageryDay(map, { releases = [] } = {}) {
+  const day = map?.basemap === WAYBACK_ID ? releaseOf(map, releases)?.date : map?.basemap === SENTINEL_ID ? map.acquired : '';
+  return DAY.test(String(day ?? '')) ? day : '';
+}
+
+/**
+ * The day a map draws its dated layers on, when it is not the plate's: the day of its
+ * imagery, once the map is told to (`layers_on`) and that day is known; else null, and
+ * the map reads the plate's day as every map does.
+ */
+export const layersDayOf = (map, { releases = [] } = {}) => (map?.layers_on === 'imagery' ? imageryDay(map, { releases }) || null : null);
+
 /** The maps that draw the case's layers, in the page's order: insets draw none. */
 export const layeredMaps = (spec) => (spec?.elements ?? []).filter((element) => element.kind === 'map');
 

@@ -6740,7 +6740,12 @@ map, it names the ground with the day its picture was taken (a Wayback release, 
 Sentinel-2 pass, a cloudless year; imagery stitched from several days says so), then the
 case's layers, those the map draws first and ticked. A tick draws a layer or takes it
 off; a layer followed over time is marked **dated**, since the plate draws it as it stood
-on its day. **Open in the Map** edits a layer the analyst draws where the map looks,
+on its day. A map on a picture of one day (a Wayback release, a Sentinel-2 pass) offers
+**Layers as they stood that day**, here and in its inspector: its dated layers, its
+legend, the counts and the labels tied to its features then read that day rather than
+the plate's, so a picture of the past never shows what came after it; the other maps
+keep the plate's day, and a map whose day is not known yet keeps it too.
+**Open in the Map** edits a layer the analyst draws where the map looks,
 Back coming back; the map's gear opens its settings in the inspector, where the rest of a
 layer's look is set; **New layer here** and **Make a layer of the N drawn here** sit under
 each map. The list stays on the tab it was left on.

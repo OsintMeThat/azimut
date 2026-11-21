@@ -103,7 +103,7 @@
   import NewPlateDialog from './plate/NewPlateDialog.svelte';
   import TemplateSketch from './plate/TemplateSketch.svelte';
   import { inspectorWidth, layout, listWidth, saveLayout, toggleFold, togglePanel } from '../lib/plate/layout.svelte.js';
-  import { groundSaid, imagerySaid } from '../lib/plate/source.js';
+  import { groundSaid, imagerySaid, layersDayOf } from '../lib/plate/source.js';
   import { comparisonOnPlate } from '../lib/plate/fromCompare.js';
   import PlateLayers from './plate/PlateLayers.svelte';
   import PlateFromCase from './plate/PlateFromCase.svelte';
@@ -1479,6 +1479,8 @@
   // -- what the page shows beside its maps --------------------------------------------
 
   const symbolNames = Object.fromEntries(symbols.map((choice) => [choice.id, choice.label]));
+  /** The day a map draws its dated layers on when it is told its imagery's, else null and the plate's (`source.layersDayOf`). */
+  const layersDay = (map) => layersDayOf(map, { releases });
   const since = $derived(time.since === 'previous' ? 'the state before' : momentLabel(time.since));
   const legend = $derived.by(() => {
     if (!spec) return {};
@@ -1487,13 +1489,15 @@
       const map = elements.find((item) => item.id === element.of);
       if (!map) continue;
       const live = views[map.id];
+      // a map drawing its layers on its imagery's day lists them as they stood then
+      const own = layersDay(map);
       out[element.id] = legendRows({ ...map, offmap: element.offmap, off: element.off, order: element.order, names: element.names, extra: element.extra }, {
         rows, collection: (name) => layerRead(addedLayers.collection(name)), view: live?.view, frame: live?.frame, place: live?.project,
-        days: legendDays ?? [at],
+        days: own ? [own] : legendDays ?? [at],
         standing: (row, feature, day) => (isTracked(row) && hasHistory(feature) ? stateAt(feature, day ?? '￿') : feature),
         past: (row, collection, day) => (isTracked(row) ? asOf(collection, day, { trail: time.trail !== false, since: time.since ?? null, window: time.window ?? null }).features : []),
         colourName: (hex) => layerPalette.nameOf(hex), symbolName: (id) => symbolNames[id] ?? id, categoryColour, newColour: NEW_COLOUR, ink: spec.theme.ink,
-        newLabel: `New on ${momentLabel(at)}`, trailLabel: at ? `Before ${momentLabel(at)}` : 'The state before',
+        newLabel: `New on ${momentLabel(own ?? at)}`, trailLabel: (own ?? at) ? `Before ${momentLabel(own ?? at)}` : 'The state before',
         gainedLabel: `Gained since ${since}`, lostLabel: `Lost since ${since}`,
       });
     }
@@ -1541,7 +1545,7 @@
     const feature = kept.features?.find((item) => item.properties?.key === element.ref.key);
     if (!feature) return false;
     const row = rows.find((item) => item.name === element.ref.layer);
-    return !(row && isTracked(row) && hasHistory(feature)) || !!stateAt(feature, at ?? '￿');
+    return !(row && isTracked(row) && hasHistory(feature)) || !!stateAt(feature, (layersDay(map) ?? at) ?? '￿');
   }
   const numbers = $derived(spec ? numbered(elements, at, refShown, place) : []);
   /** The pictures the main map's features carry, offered to a picture that points at its feature. */
@@ -1580,7 +1584,7 @@
     return (main.layers ?? []).flatMap((entry) => {
       const row = rows.find((item) => item.name === entry.name);
       return (keptOf(layerRead(addedLayers.collection(entry.name)), entry)?.features ?? [])
-        .map((feature) => (row && isTracked(row) ? stateAt(feature, at ?? '￿') : feature))
+        .map((feature) => (row && isTracked(row) ? stateAt(feature, (layersDay(main) ?? at) ?? '￿') : feature))
         .filter((feature) => feature && !(entry.hidden ?? []).includes(feature.properties?.category) && inFrame(feature.geometry, live.view, live.frame, 0, place));
     });
   });
@@ -2149,7 +2153,7 @@
             {time} stepPlace={place} {playing} {speed} bind:views {decor} bind:overflow {grounds} ghosts={ghosts && playable}
             {framingFor} onmapview={mapView} onkeep={keepFraming} beat={shownKey} follows={followsMap} {written} onnamelabel={nameToLabel}
             {glide} oncontext={(id, point) => (id ? elementMenu(id, point) : pageMenu(point))}
-            onmap={(id, handle) => handles.set(id, handle)} top={focus ? 44 : 0} onlayers={plate.template ? null : showLayers} onsameview={sameView} />
+            onmap={(id, handle) => handles.set(id, handle)} top={focus ? 44 : 0} onlayers={plate.template ? null : showLayers} onsameview={sameView} {layersDay} />
         {/key}
         {#if focus}
           <div class="focus-bar" role="toolbar" aria-label="The plate">

@@ -372,6 +372,9 @@ class Element(Strict):
     terrain: FiniteFloat = Field(default=0, ge=0, le=3)
     #: A 3D map traces the ridges' crests over its ground.
     ridges: bool = False
+    #: The day the map draws its dated layers on: the plate's own, or the day its imagery was
+    #: taken (a Wayback release, a Sentinel-2 pass), so a map of the past shows them as they stood then.
+    layers_on: Literal["plate", "imagery"] = "plate"
     # writing
     text: str = Field(default="", max_length=MAX_TEXT)
     #: The text style it was last set in (`frontend/src/lib/plate/design.js`); none, set by hand.
