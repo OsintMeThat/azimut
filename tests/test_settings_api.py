@@ -1161,6 +1161,18 @@ def test_extension_hand_off_switches_default_on_and_round_trip(client):
     assert client.get("/api/settings").json()["reverse_prefill"] is False
 
 
+def test_support_heart_beats_by_default_and_the_switch_round_trips(client):
+    """On out of the box so the tip stays findable; off for anyone the motion distracts."""
+    assert client.get("/api/settings").json()["support_heartbeat"] is True
+
+    saved = client.put("/api/settings/prefs", json={"support_heartbeat": False}).json()
+    assert saved["support_heartbeat"] is False
+    assert client.get("/api/settings").json()["support_heartbeat"] is False
+
+    back = client.put("/api/settings/prefs", json={"support_heartbeat": True}).json()
+    assert back["support_heartbeat"] is True
+
+
 def test_map_tabs_share_one_camera_by_default_and_the_switch_round_trips(client):
     assert client.get("/api/settings").json()["map_sync"] is True
 

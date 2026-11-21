@@ -2,7 +2,8 @@
   /**
    * How every tool prints a coordinate, a distance and an area, plus where the
    * maps open, how much the 3D views draw on this computer, what saving a proof
-   * does with its point, and how Reverse Search reaches an engine.
+   * does with its point, how Reverse Search reaches an engine, and whether the
+   * Support heart beats.
    *
    * Preferences save on change and the server answers with the canonical value,
    * so nothing here keeps a draft the rest of the app cannot see.
@@ -18,8 +19,11 @@
     saveHome,
     proofPlaceAuto = $bindable(),
     reversePrefill = $bindable(),
+    supportHeartbeat = $bindable(),
     mapSync = $bindable(),
   } = $props();
+
+  const HEARTBEAT_TITLE = 'The Support heart at the foot of the rail beats once every ten minutes until you open it';
 
   const COORD_CHOICES = [
     { id: 'dd', label: 'Decimal' },
@@ -175,6 +179,26 @@
       bind:checked={reversePrefill}
       onchange={() => savePrefs({ reverse_prefill: reversePrefill })}
       aria-label="Let the extension open the engine with the image"
+    />
+  </div>
+</section>
+
+<section class="group" data-guide="settings.support">
+  <h3>Support</h3>
+  <div class="row">
+    <div class="row-label">
+      <span title={HEARTBEAT_TITLE}>Let the heart beat</span>
+      <span class="row-hint">
+        Once every ten minutes the app is in sight, until you open Support. Never with
+        reduced motion.
+      </span>
+    </div>
+    <input
+      type="checkbox"
+      bind:checked={supportHeartbeat}
+      onchange={() => savePrefs({ support_heartbeat: supportHeartbeat })}
+      title={HEARTBEAT_TITLE}
+      aria-label="Let the Support heart beat"
     />
   </div>
 </section>
