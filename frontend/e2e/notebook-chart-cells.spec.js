@@ -53,6 +53,8 @@ test('a day typed in French shows the day the chart draws, and a cell that is no
 
   // the column says what it takes, the other what the drawing does with it, and the empty cell what to write
   await expect(numbers.locator('thead .cm-grid-head[data-col="0"] .cm-grid-expects')).toHaveText('Days');
+  // on hover, its part and two ways of writing a day
+  await expect(numbers.locator('thead .cm-grid-head[data-col="0"] .cm-grid-expects')).toHaveAttribute('title', 'The day each event starts, e.g. 5 Mar 2026 or 2026-03-05');
   await expect(numbers.locator('thead .cm-grid-head[data-col="1"] .cm-grid-expects')).toHaveText('Words');
   await expect(cell(2, 0).locator('.cm-grid-text')).toHaveAttribute('data-placeholder', '5 Mar 2026');
 
@@ -77,6 +79,7 @@ test('a day typed in French shows the day the chart draws, and a cell that is no
   const unread = cell(0, 0).locator('.cm-grid-text');
   await expect(unread).toHaveClass(/cm-grid-unread/);
   await expect(unread).toHaveAttribute('title', 'Not read as a day. Try 5 Mar 2026, 05/03/2026 or 2026-03-05, in any language.');
-  await expect(unread).toHaveCSS('text-decoration-style', 'dotted');
+  // a warning's wavy line, in the warning's colour
+  await expect(unread).toHaveCSS('text-decoration-style', 'wavy');
   await expect(cell(0, 0).locator('.cm-grid-reading')).toHaveCount(0);
 });

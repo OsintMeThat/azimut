@@ -20,10 +20,12 @@ export const NUMBERS = 'numbers';
 
 /** The tag a column's heading takes. */
 export const EXPECTS = { [DAYS]: 'Days', [NUMBERS]: 'Numbers' };
+/** Two ways of writing what a column takes, said on hover. */
+export const EXAMPLES = { [DAYS]: '5 Mar 2026 or 2026-03-05', [NUMBERS]: '1 200 or at least 60' };
 /** What the tag says on hover. */
 export const EXPECTS_TITLE = {
-  [DAYS]: 'The chart reads this column as days',
-  [NUMBERS]: 'The chart reads this column as numbers',
+  [DAYS]: `The chart reads this column as days, e.g. ${EXAMPLES[DAYS]}`,
+  [NUMBERS]: `The chart reads this column as numbers, e.g. ${EXAMPLES[NUMBERS]}`,
 };
 /**
  * The tag a heading of a chart's rows takes for what its drawing does with the column, by
@@ -64,9 +66,10 @@ export const ROLE_TITLE = {
   filter: 'The chart keeps or leaves out rows by this column',
 };
 
-/** The roles whose cells are days or amounts: only these may say `Days` or `Numbers`. A grade
- * written 1, 2, 3 that colours the bars is a colour, not an amount the chart adds up. */
-export const VALUE_ROLES = new Set(['count', 'start', 'until', 'along', 'height']);
+/** How the drawing reads the cells of a column by its role: a timeline's days, a count's or a
+ * line's amounts, a line's run either (`null`, by its cells). Every other part (a grade written
+ * 1, 2, 3 that colours the bars) is read as written, never as days or amounts. */
+export const ROLE_READS = { start: DAYS, until: DAYS, count: NUMBERS, height: NUMBERS, along: null };
 
 /** What an empty cell shows. */
 export const EXAMPLE = { [DAYS]: '5 Mar 2026', [NUMBERS]: '1 200' };
@@ -82,9 +85,34 @@ export const UNREAD = {
  * with the column (`role`, a key of `ROLES`).
  */
 export function headingTag(read, role) {
-  if (read) return { text: EXPECTS[read.kind], title: EXPECTS_TITLE[read.kind] };
+  if (read) {
+    // a timeline's Until says what it is, then how to write it
+    const part = typeof role === 'string' && Object.hasOwn(ROLE_READS, role) ? ROLE_TITLE[role] : '';
+    return { text: EXPECTS[read.kind], title: part ? `${part}, e.g. ${EXAMPLES[read.kind]}` : EXPECTS_TITLE[read.kind] };
+  }
   if (typeof role === 'string' && Object.hasOwn(ROLES, role)) return { text: ROLES[role], title: ROLE_TITLE[role] };
   return null;
+}
+
+/**
+ * The columns a drawing reads as days or as numbers when the engine names each column's part
+ * (`roles`, see `ROLE_READS`): `Map(column → { kind, decimal })`, every cell of such a column
+ * checked, however few of them read yet. A timeline's Until written `ongoing` is underlined.
+ */
+export function roleReads(table, roles) {
+  const reads = new Map();
+  if (!table?.header?.length) return reads;
+  const { rows } = table;
+  roles.forEach((role, column) => {
+    if (typeof role !== 'string' || !Object.hasOwn(ROLE_READS, role)) return;
+    const kind = ROLE_READS[role] ?? (dayColumn(rows, column) ? DAYS : NUMBERS);
+    if (kind === DAYS) {
+      reads.set(column, { kind });
+      return;
+    }
+    reads.set(column, { kind, decimal: separators(rows.map((row) => row[column] ?? '')).decimal });
+  });
+  return reads;
 }
 
 const FAMILY_DAYS = new Set(['timeline', 'line']);

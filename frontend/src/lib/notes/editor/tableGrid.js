@@ -1352,9 +1352,10 @@ const THEME = {
     fontSize: '10.5px', fontWeight: '500', lineHeight: '16px', whiteSpace: 'nowrap',
   },
   '.cm-grid-reading': { marginLeft: '0.5em', color: 'var(--text-3)', fontSize: '0.92em', whiteSpace: 'nowrap' },
+  // a cell the chart cannot read: a warning's wavy line, as a spelling checker marks a word
   '.cm-grid-unread': {
-    textDecorationLine: 'underline', textDecorationStyle: 'dotted', textDecorationColor: 'var(--warn)', textDecorationThickness: '1.5px',
-    textUnderlineOffset: '3px',
+    textDecorationLine: 'underline', textDecorationStyle: 'wavy', textDecorationColor: 'var(--warn)', textDecorationThickness: '1.5px',
+    textUnderlineOffset: '3px', textDecorationSkipInk: 'none',
   },
   '.cm-grid-text.cm-grid-example:empty::before': { fontStyle: 'normal', opacity: '0.75' },
   '.cm-grid-idle-mark': {

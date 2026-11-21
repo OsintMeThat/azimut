@@ -28,7 +28,7 @@
 import { isolateHistory } from '@codemirror/commands';
 import { Transaction } from '@codemirror/state';
 
-import { NUMBERS, VALUE_ROLES, cellSays, columnReads, headingTag, readsKey } from '../../cellHints.js';
+import { NUMBERS, cellSays, columnReads, headingTag, readsKey, roleReads } from '../../cellHints.js';
 import { Grid } from './tableGrid.js';
 import { chartRows } from './chartFigure.js';
 import { FORMS, formKind } from './chartFormText.js';
@@ -343,20 +343,19 @@ export async function writeSheetCells(view, { caseId, written, found, cells }) {
 }
 
 /**
- * The columns of a chart's rows it reads as days or as numbers (`lib/cellHints.js`
- * `columnReads`), by its kind (`kind`, the one it is drawn as, else its `kind:` line):
+ * The columns of a chart's rows it reads as days or as numbers. Once drawn, by the part the
+ * engine names for each column (`roles`, `lib/cellHints.js` `roleReads`); before, guessed from
+ * its kind (`kind`, the one it is drawn as, else its `kind:` line) and its cells (`columnReads`):
  * none it does not draw (`idle`), and never the categories a chart counts by, however
  * they are written.
  */
 export function chartReads(chart, { kind = '', idle = new Set(), roles = NO_ROLES } = {}) {
   const table = chart?.table;
   if (!table) return NO_READS;
+  // the engine named each column's part: it says which read as days or amounts, every cell checked
+  if (roles.some(Boolean)) return roleReads(table, roles);
   const family = FORMS[formKind(kind || setting(chart, 'kind'))]?.family ?? '';
   const skip = new Set(idle);
-  // a column the engine names a part other than days or amounts is never read as either
-  roles.forEach((role, column) => {
-    if (role && !VALUE_ROLES.has(role)) skip.add(column);
-  });
   const by = fold(setting(chart, 'by'));
   const named = by ? table.header.findIndex((header) => fold(header) === by) : -1;
   if (family === 'categories' && named >= 0) skip.add(named);
