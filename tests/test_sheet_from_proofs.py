@@ -374,8 +374,11 @@ def test_a_refresh_with_nothing_new_writes_nothing(client):
     """The refresh runs by itself, on every open and every change of the case: one that
     found nothing new must leave the file, its stamp and its sidecar exactly as they were."""
     case_id = make_case(client)
-    a_proof(client, case_id, "Alpha")
+    # a description written on Windows: the file holds its line breaks as LF, which must
+    # not read as a change on every run
+    add(client, case_id, "proof", "Alpha", notes="first line\r\nsecond line")
     sheet = read_sheet(client, case_id, build(client, case_id)["id"])
+    assert cell(sheet, 0, "Description") == "first line\nsecond line"
     case = get_case_(case_id)
     path = case.resolve_inside(sheet["path"])
     sidecar = sheet_engine.sidecar(case, case.get_entity(sheet["id"]))

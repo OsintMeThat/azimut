@@ -525,7 +525,7 @@ def _refresh(
         # Kept to the columns the sheet has: a sheet built before a column existed keeps
         # its own shape, and a link into a column it lacks would be dropped by the save
         # and restated by the next refresh, a change every time and a write for nothing.
-        cells = item["cells"]
+        cells = {name: sheet_engine.as_written(value) for name, value in item["cells"].items()}
         cell_links = {name: entity_id for name, entity_id in item["links"].items() if name in index}
         standing = standing_at.get(item["match"])
         if standing is not None and standing in where:

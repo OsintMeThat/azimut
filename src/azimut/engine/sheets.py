@@ -190,6 +190,17 @@ def _clean_cell(value: Any) -> str:
     return text
 
 
+def as_written(value: Any) -> str:
+    """A cell as the file will hold it, for a caller comparing what it would write with
+    what is there: a refresh that compared the raw text would find a carriage return
+    changed on every run, and write every time. A cell past the bound is handed back as it
+    is, for the write to refuse."""
+    try:
+        return _clean_cell(value)
+    except SheetError:
+        return "" if value is None else str(value)
+
+
 def normalize(columns: list[Any], rows: list[Any]) -> tuple[list[str], list[list[str]]]:
     """The table as it will be written: named columns, square rows, keyed rows.
 
