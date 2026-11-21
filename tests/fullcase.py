@@ -111,6 +111,11 @@ class FullCase:
     map_note_id: str = ""  # a note holding a map: it names a layer, a plate and its ground
     map_note: str = ""
     wall_picture_id: str = ""  # a picture the map note's picture wall shows, named by its id alone
+    social_post_id: str = ""  # someone's post kept for a note: its record and its owned pictures
+    social_post: str = ""
+    social_post_files: str = ""  # its author's profile picture, which travels with it
+    social_picture: str = ""  # the picture it shows, filed as media of its own
+    post_note_id: str = ""  # a note drawing that post
     sheet_id: str = ""
     sheet: str = ""  # the CSV, which is the sheet
     sheet_meta: str = ""  # the sidecar beside it
@@ -784,6 +789,9 @@ def build_full_case(
     full.map_note_id = mapped.json()["id"]
     full.map_note = mapped.json()["attrs"]["path"]
 
+    # -- someone's post, kept for a note: read from a Bluesky stood in for, never the network
+    _plant_social_post(client, case_id, full)
+
     # -- the graph as the analyst arranged it ---------------------------------
     # Not an artifact and not an assertion: where a node was dragged to, in one
     # reading. Planted here so the trash and bundle gates cover it — a pin has to
@@ -896,6 +904,39 @@ def build_full_case(
     ).json()["items"]
     full.entity_types = {e["type"] for e in entities}
     return full
+
+
+def _plant_social_post(client, case_id: str, full: FullCase) -> None:
+    """A post from Bluesky kept in the case (`engine/socialposts.py`): its record, its
+    author's profile picture beside it, its picture filed as media, and a note drawing it."""
+    import httpx
+    from azimut.engine import socialposts
+    from fakeposts import BLUESKY_URL, Sites
+    from jobwait import job_result
+
+    sites = Sites()
+    real = socialposts.client
+    socialposts.client = lambda transport=None: real(httpx.MockTransport(sites.handle))
+    try:
+        job = client.post(f"/api/cases/{case_id}/social-posts/fetch", json={"links": [BLUESKY_URL]})
+        assert job.status_code == 200, job.text
+        answer = job_result(client, job.json()["job_id"])["results"][0]
+    finally:
+        socialposts.client = real
+    assert answer.get("id"), answer
+    full.social_post_id = answer["id"]
+    entity = client.get(f"/api/cases/{case_id}/entities/lookup", params={"attr": "url", "value": BLUESKY_URL}).json()
+    assert entity["entity"]["id"] == full.social_post_id, entity
+    full.social_post = entity["entity"]["attrs"]["spec"]
+    full.social_post_files = layout.social_post_files_rel(Path(full.social_post).stem)
+    described = client.post(f"/api/cases/{case_id}/social-posts/describe",
+                            json={"text": f"post: {full.social_post_id}"}).json()
+    full.social_picture = described["posts"][0]["pictures"][0]["media"]
+    note = client.post(f"/api/cases/{case_id}/notes", json={"title": "Post", "content": (
+        f"The checkpoint emptied.\n\n::: post\npost: {full.social_post_id}\nhighlight: no vehicles left\n"
+        "translation: Aucun véhicule.\n:::\n")})
+    assert note.status_code == 200, note.text
+    full.post_note_id = note.json()["id"]
 
 
 def _add_horizon_find(client, case_id: str, full: FullCase) -> None:

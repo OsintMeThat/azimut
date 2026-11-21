@@ -2202,6 +2202,21 @@ class _Builder:
         with PILImage.open(BytesIO(picture)) as opened:
             return chart, (picture, opened.size)
 
+    def _on_az_post(self, tokens: list[Token], index: int, align: Align) -> int:
+        """A `::: post` block as the card the note draws (`engine/notes_posts.py`): who
+        posted it, the words with what the analyst highlighted, the pictures, the day, the
+        proof it is geolocated by and the links, kept whole on a page."""
+        from . import notes_posts, socialposts
+
+        drawn = socialposts.card(self.case, tokens[index].content)
+        if not drawn.posts:
+            if drawn.missing:
+                self._aside(socialposts.MISSING_SAID)
+            return index + 1
+        numbers = [self.cited.number(self.cited.reader.entity(post.id)) for post in drawn.posts]
+        notes_posts.PdfCard(self, drawn, numbers).draw()
+        return index + 1
+
     def _on_az_infographic(self, tokens: list[Token], index: int, align: Align) -> int:
         """A `:::: infographic` block on a page of its own: its panels in two columns, its
         title band and its one source line, drawn as one picture across the frame and cut

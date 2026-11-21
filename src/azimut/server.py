@@ -357,7 +357,7 @@ def create_app() -> FastAPI:
         horizon_buildings, horizon_finds, horizon_views, horizon_work, icons, impact, ingest, inspect, mapplates, maplayers, media,
         notecharts, noteinfographics, notemaps, notes, notes_archive, plates, postclips,
         proofimports, proofs, publishing,
-        proposals, satellite, settings, sheetproofs, sheets, templates, terrain,
+        proposals, satellite, settings, sheetproofs, sheets, socialposts, templates, terrain,
     )
     from .engine import sheets as sheet_engine
 
@@ -396,6 +396,8 @@ def create_app() -> FastAPI:
     app.include_router(proofimports.router)
     app.include_router(proposals.router)
     app.include_router(drafts.router)
+    # `/post` in a note: the one road that reads a post from X or Bluesky, on a press.
+    app.include_router(socialposts.router)
     app.include_router(files.router)
     app.include_router(folders.router)
     app.include_router(settings.router)

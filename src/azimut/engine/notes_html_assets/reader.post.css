@@ -1,0 +1,107 @@
+/* a post from X or Bluesky the case keeps (engine/notes_posts.py), carried only by a page drawing one:
+   a card in the page's own faces and colours, never a screenshot of the site */
+.az-body > .az-post { grid-column: text; width: min(100%, 35rem); justify-self: start; margin: 1.75rem 0 2.25rem; }
+.az-post-card { border: 1px solid var(--rule); border-radius: 14px; background: var(--paper); overflow: hidden; font: 400 1rem/1.5 var(--ui); color: var(--ink); }
+.az-post-item { position: relative; padding: 1rem 1.15rem .8rem; }
+.az-post-head { display: flex; align-items: center; gap: .65rem; min-width: 0; }
+.az-post-avatar {
+  flex: none; display: grid; place-items: center; width: 2.5rem; height: 2.5rem; border-radius: 50%; overflow: hidden;
+  background: linear-gradient(135deg, var(--az-a, #3c5a6e), var(--az-b, #20323e)); color: #fff; font: 600 .875rem/1 var(--ui); letter-spacing: .02em;
+}
+.az-post-avatar img { display: block; width: 100%; height: 100%; object-fit: cover; }
+.az-post-who { display: flex; flex-direction: column; min-width: 0; line-height: 1.25; }
+.az-post-who b { font: 600 .9375rem/1.25 var(--ui); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.az-post-handle { color: var(--muted); font-size: .84rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.az-post-site, .az-post-num { margin-left: auto; display: inline-flex; align-items: center; gap: .35rem; color: var(--muted); font: 400 .75rem/1 var(--ui); font-variant-numeric: tabular-nums; }
+.az-post-site svg { width: .95rem; height: .95rem; }
+.az-post-text { margin: .75rem 0 0; font: 400 1.0625rem/1.55 var(--ui); overflow-wrap: anywhere; }
+.az-post-text > p { margin: 0; white-space: pre-line; text-align: start; }
+.az-post-text > p + p { margin-top: .6em; }
+.az-post-text > p[dir="rtl"] { font-size: 1.22em; line-height: 1.65; }
+.az-post mark {
+  background: var(--accent-soft); color: inherit; padding: 0 2px; border-radius: 2px;
+  text-decoration: underline 2px var(--az-accent); text-underline-offset: 4px; text-decoration-skip-ink: none;
+  -webkit-box-decoration-break: clone; box-decoration-break: clone;
+}
+.az-post-translation { margin: .65rem 0 0; padding: 2px 0 2px .75rem; border-left: 3px solid var(--az-accent); color: var(--ink-2); font: 400 .9375rem/1.55 var(--ui); white-space: pre-line; }
+.az-post-translation small { display: block; color: var(--muted); font: 600 .66rem/1.6 var(--ui); letter-spacing: .07em; text-transform: uppercase; }
+.az-post-media { display: grid; gap: 4px; margin-top: .75rem; border-radius: 12px; overflow: hidden; }
+.az-post-media:not([data-count="1"]) { grid-template-columns: 1fr 1fr; }
+.az-post-media[data-count="3"] > :first-child { grid-row: span 2; }
+.az-post-shot { position: relative; display: block; aspect-ratio: 4 / 3; overflow: hidden; background: var(--tint); }
+.az-post-shot[data-alone] { aspect-ratio: auto; max-height: 28rem; }
+.az-post-shot img { display: block; width: 100%; height: 100%; object-fit: cover; }
+.az-post-shot[data-alone] img { height: auto; max-height: 28rem; }
+.az-post-media[data-count="3"] > :first-child { aspect-ratio: auto; }
+.az-post-blank { background: #2a2c30; }
+.az-post-play { position: absolute; inset: 0; display: grid; place-items: center; }
+.az-post-play::before { content: ""; width: 3.25rem; height: 3.25rem; border-radius: 50%; background: rgba(0, 0, 0, .55); }
+.az-post-play::after {
+  content: ""; position: absolute; left: 50%; top: 50%; margin: -.6rem 0 0 -.3rem;
+  border-left: 1rem solid #fff; border-top: .62rem solid transparent; border-bottom: .62rem solid transparent;
+}
+.az-post-dur { position: absolute; left: .5rem; bottom: .5rem; padding: 1px 6px; border-radius: 4px; background: rgba(0, 0, 0, .62); color: #fff; font: 500 .75rem/1.4 var(--ui); }
+.az-post-foot {
+  display: flex; flex-wrap: wrap; align-items: center; gap: .3rem .9rem; margin-top: .75rem; padding-top: .65rem;
+  border-top: 1px solid var(--tint); color: var(--muted); font: 400 .78rem/1.5 var(--ui);
+}
+.az-post-foot a { color: var(--accent-ink); text-decoration: none; }
+.az-post-foot a:hover { text-decoration: underline; }
+.az-post-links { margin-left: auto; display: inline-flex; flex-wrap: wrap; gap: .75rem; }
+.az-post-proof { display: inline-flex; align-items: center; gap: .3rem; padding: 1px .55rem 1px .45rem; border-radius: 999px; background: var(--accent-soft); color: var(--accent-ink); font-weight: 600; }
+.az-post-proof svg { width: .75rem; height: .75rem; }
+
+/* a thread: the posts one after another on one card, a line joining their pictures of who wrote them */
+.az-post-thread .az-post-item + .az-post-item { border-top: 1px dashed var(--rule); }
+.az-post-thread .az-post-item > :not(.az-post-head, .az-post-foot) { margin-left: 3.15rem; }
+.az-post-thread .az-post-item:not(:last-child)::after { content: ""; position: absolute; left: calc(1.15rem + 1.25rem - 1px); top: 3.9rem; bottom: -1rem; width: 2px; background: var(--rule); }
+
+/* the quote: the words alone, large, the name under them */
+.az-post[data-form="quote"] { margin-block: 2rem 2.5rem; padding: .25rem 0 .25rem 1.35rem; border-left: 3px solid var(--az-accent); }
+.az-post blockquote.az-post-quote { margin: 0; padding: 0; border: 0; background: none; color: var(--ink); font-style: normal; }
+.az-post-quote > p { margin: 0 0 .6rem; font: italic 400 1.5rem/1.4 var(--body); color: var(--ink); }
+.az-post-quote > p[dir="rtl"] { font-style: normal; text-align: right; }
+.az-post-quote .az-post-translation { margin-bottom: .6rem; }
+.az-post figcaption.az-post-by { display: flex; flex-wrap: nowrap; align-items: flex-start; gap: .5rem; margin-top: .6rem; font: 400 .84rem/1.6 var(--ui); color: var(--muted); }
+.az-post-by > span:last-child { min-width: 0; }
+.az-post-by .az-post-avatar { width: 1.5rem; height: 1.5rem; margin-top: .05rem; font-size: .62rem; }
+.az-post-by b { color: var(--ink); font-weight: 600; }
+.az-post-by a { color: var(--accent-ink); }
+.az-post-by .az-post-proof { padding-block: 0; }
+
+/* compact: one line a post, for annexes and lists of sources */
+.az-post[data-form="compact"] { margin-block: 1.25rem 1.75rem; }
+.az-post-line {
+  display: grid; grid-template-columns: 1.75rem minmax(0, 1fr) auto; align-items: center; gap: .65rem; padding: .6rem 0;
+  border-bottom: 1px solid var(--rule); color: inherit; text-decoration: none;
+}
+.az-post-line:first-child { border-top: 1px solid var(--rule); }
+.az-post-line:hover .az-post-line-text { color: var(--accent-ink); }
+.az-post-line .az-post-avatar { width: 1.75rem; height: 1.75rem; font-size: .68rem; }
+.az-post-line-words { display: flex; flex-direction: column; min-width: 0; }
+.az-post-line-who { color: var(--muted); font: 400 .8rem/1.35 var(--ui); }
+.az-post-line-who b { color: var(--ink); font-weight: 600; }
+.az-post-line-text { font: 400 .875rem/1.4 var(--ui); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.az-post-thumb { width: 4rem; height: 2.75rem; border-radius: 6px; object-fit: cover; }
+.az-post-cite { margin: .4rem 0 0; font: 400 .78rem/1.4 var(--ui); color: var(--muted); }
+
+/* the story layout: the card on a dark band, as its stage is */
+@media screen {
+  [data-web="story"] .az-body > .az-post:not([data-form="quote"]) {
+    --paper: #181b1f; --ink: #e9e7e2; --ink-2: #cfcdc7; --muted: #9a9b97; --rule: #2c2f34; --tint: #1f2226;
+    --accent-ink: color-mix(in srgb, var(--az-accent) 45%, #fff); --accent-soft: color-mix(in srgb, var(--az-accent) 16%, transparent);
+    grid-column: full; width: auto; justify-self: stretch; display: grid; justify-items: center; margin-block: 3rem;
+    padding: clamp(2rem, 6vh, 3.5rem) var(--gutter); background: #0f1012; color: var(--ink);
+  }
+  [data-web="story"] .az-body > .az-post > :is(.az-post-card, .az-post-line, .az-post-cite) { width: min(100%, 35rem); }
+}
+@media (max-width: 40rem) {
+  .az-post-item { padding: .85rem .9rem .7rem; }
+  .az-post-thread .az-post-item > :not(.az-post-head, .az-post-foot) { margin-left: 0; }
+  .az-post-thread .az-post-item::after { display: none; }
+  .az-post-quote > p { font-size: 1.3rem; }
+}
+@media print {
+  .az-post-card, .az-post-line { break-inside: avoid; }
+  .az-post-shot[data-alone] img, .az-post-shot[data-alone] { max-height: 90mm; }
+}

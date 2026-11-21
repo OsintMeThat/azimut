@@ -684,6 +684,8 @@ class _Writer:
                 out.extend(self._chart(token))
             elif kind == md.INFOGRAPHIC_TOKEN:
                 out.extend(self._infographic(token))
+            elif kind == md.POST_TOKEN:
+                out.extend(self._post(token))
             index = stop
         return [part for part in out if part]
 
@@ -761,6 +763,23 @@ class _Writer:
                     + "</tr>" for row in chart.layout.table_rows]
             out.append(details(notecharts.THE_NUMBERS, [table(head, rows)]))
         return out
+
+    def _post(self, token: Token) -> list[str]:
+        """A `::: post` block as a static card of blocks (`engine/notes_posts.py`), its
+        profile picture and pictures uploaded as the note's others are."""
+        from . import notes_posts, socialposts
+
+        drawn = socialposts.card(self.case, token.content)
+        if not drawn.posts:
+            return [paragraph(f"<em>{_text(socialposts.MISSING_SAID)}</em>")] if drawn.missing else []
+        numbers = [self.cited.number(self.cited.reader.entity(post.id)) for post in drawn.posts]
+        cite = "".join(_cite(number) for number in dict.fromkeys(numbers) if number)
+        return notes_posts.wordpress_card(
+            drawn, upload=lambda path, alt, side: self._picture(path, alt, "", side=side), paragraph=paragraph,
+            image=image, quote=quote, ref=_ref, cite=cite,
+            group=lambda inner: block("group", f'<div class="wp-block-group azimut-post">{nested(inner)}</div>',
+                                      {"className": "azimut-post"}),
+        )
 
     def _infographic(self, token: Token) -> list[str]:
         """A `:::: infographic` block as one picture of the whole page, its alt text the

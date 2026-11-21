@@ -15,8 +15,9 @@ one note two ways, so what they share lives here and nowhere else:
   the two blocks that tell a story in pictures (`::: steps`, `::: story`), in which
   every picture opens a step and the words after it are that step's, and the blocks
   each renderer draws whole (`TOKEN_BLOCKS`): a map (`::: map`, read by
-  `engine/notes_maps.py`) and a chart (`::: chart`, read by `engine/notes_charts.py`),
-  each handed on as one token holding its lines (`az_map`, `az_chart`);
+  `engine/notes_maps.py`), a chart (`::: chart`, read by `engine/notes_charts.py`) and a
+  post (`::: post`, read by `engine/socialposts.py`), each handed on as one token holding
+  its lines (`az_map`, `az_chart`, `az_post`);
 - the callouts a quote opens with (`> [!confirmed]`) and the tasks a list holds;
 - the own cover (the lines above `<!-- cover -->`, `cover_piece`);
 - what a picture's braces say (`image_options`), and a table's settings line
@@ -66,9 +67,12 @@ CHART_TOKEN = "az_chart"
 #: a fence of four colons so the blocks inside keep their own. Read before them, whole.
 INFOGRAPHIC = "infographic"
 INFOGRAPHIC_TOKEN = "az_infographic"
+#: A post from X or Bluesky the case keeps (`engine/socialposts.py`), drawn as a card.
+POST = "post"
+POST_TOKEN = "az_post"
 #: The blocks a renderer draws whole, by name, and the one token each becomes
 #: (`block_token`): every renderer has an `_on_<token>` for each.
-TOKEN_BLOCKS: dict[str, str] = {MAP: MAP_TOKEN, CHART: CHART_TOKEN, INFOGRAPHIC: INFOGRAPHIC_TOKEN}
+TOKEN_BLOCKS: dict[str, str] = {MAP: MAP_TOKEN, CHART: CHART_TOKEN, INFOGRAPHIC: INFOGRAPHIC_TOKEN, POST: POST_TOKEN}
 
 
 #: How deep chapters nest: a report's chapter may hold chapters of its own, and
@@ -84,7 +88,7 @@ COMMENT = re.compile(r"\A(?:\s*<!--.*?-->)+\s*\Z", re.S)
 MERMAID_INFO = re.compile(r"^\s*mermaid\b")
 IMAGE_ATTRS = re.compile(r"!\[([^\]]*)\]\((\S+?)(?:\s+[\"']([^\"']*)[\"'])?\)\s*\{([^}\n]+)\}")
 ALIGNMENT_BLOCK = re.compile(
-    rf"^:::[ \t]*({'|'.join((*ALIGNMENT_NAMES, *CORNER_NAMES, *FIGURE_BLOCKS, MAP, CHART))})[ \t]*\n(.*?)^:::[ \t]*$",
+    rf"^:::[ \t]*({'|'.join((*ALIGNMENT_NAMES, *CORNER_NAMES, *FIGURE_BLOCKS, MAP, CHART, POST))})[ \t]*\n(.*?)^:::[ \t]*$",
     re.S | re.M,
 )
 #: A block of blocks, four colons deep, closed by four colons alone.
@@ -739,7 +743,7 @@ class Block:
     #: The corner of the own cover it is pinned to (`CORNER_NAMES`), or "".
     corner: str = ""
     #: `steps` or `story` for a block of pictures told as steps (`FIGURE_BLOCKS`), `map`,
-    #: `chart` or `infographic` for a block drawn whole (`TOKEN_BLOCKS`), or "".
+    #: `chart`, `infographic` or `post` for a block drawn whole (`TOKEN_BLOCKS`), or "".
     kind: str = ""
 
 
@@ -909,6 +913,8 @@ class Cited:
         self._outside: dict[str, tuple[str, str, int | None, Source]] = {}
         #: The links behind each grouped line, by the line's kind.
         self.listed: dict[str, list[dict[str, Any]]] = {}
+        #: The words of the posts the document draws (`::: post`), which its fonts must carry.
+        self.post_words: list[str] = []
         #: What the Ready to publish? panel reads beyond the warnings (`engine/noteready.py`):
         #: each picture with whether a reader is told what it shows and whose it is
         #: (``pictures``), each record cited (``records``), each outside page linked
@@ -1000,7 +1006,27 @@ class Cited:
                         self.limits_section = True
                     elif token.type == "inline":
                         self._inline(token, line, piece.fixed)
+                    elif token.type == POST_TOKEN:
+                        self._posts(token, line)
         self._finish()
+
+    def _posts(self, token: Token, line: int) -> None:
+        """A `::: post` block's posts, each a source the document cites; one the case no
+        longer keeps, or a link not read yet, said where the block is."""
+        from . import socialposts
+
+        if self.case is None:
+            return
+        self.post_words.extend(socialposts.words(socialposts.card(self.case, token.content)))
+        for entry in socialposts.parse_block(token.content).entries:
+            source = self.reader.entity(entry.value) if entry.kind == "post" else None
+            if source is not None and source.type == socialposts.TYPE:
+                self._cited.append(source)
+            elif entry.kind == "link":
+                self._once(f"post-link:{entry.value}", f'The post "{cut_text(entry.value, 80)}" is not kept in the '
+                           "case yet: Try again on it in the note.", line, MISSING)
+            else:
+                self._once(f"record:{entry.value}", "A post this note shows is no longer in the case.", line, MISSING)
 
     def _inline(self, token: Token, line: int, fixed: bool) -> None:
         at = line
@@ -1200,10 +1226,10 @@ class Cited:
             self._warn(message, line, kind)
 
     def words(self) -> list[str]:
-        """What the sources list prints, for the fonts to cover."""
+        """What the sources list prints, and the posts the document draws, for the fonts to cover."""
         if self.annex is None:
-            return []
-        said: list[str] = []
+            return list(self.post_words)
+        said: list[str] = list(self.post_words)
         style = self.profile.sources_style
         for entry in self.annex.entries:
             source = entry.source

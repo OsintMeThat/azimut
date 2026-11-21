@@ -91,6 +91,7 @@ jobs:
               "azimut/engine/notes_html_assets/reader.chart.css",
               "azimut/engine/notes_html_assets/reader.infographic.css",
               "azimut/engine/notes_html_assets/reader.table.css",
+              "azimut/engine/notes_html_assets/reader.post.css",
               "azimut/engine/notes_html_assets/markers.json",
               "azimut/engine/notes_html_assets/reader.live.js",
               "azimut/engine/notes_html_assets/reader.live.css",
