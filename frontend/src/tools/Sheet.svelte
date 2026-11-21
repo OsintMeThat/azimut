@@ -5975,8 +5975,8 @@
   .cell-reading { flex: none; margin-left: 6px; color: var(--text-3); font-size: var(--fs-xs); white-space: nowrap; }
   .cell-example { flex: none; color: var(--text-3); opacity: 0.75; white-space: nowrap; }
   .cell .value.unread {
-    text-decoration-line: underline; text-decoration-style: dotted; text-decoration-color: var(--warn);
-    text-decoration-thickness: 1.5px; text-underline-offset: 3px;
+    text-decoration-line: underline; text-decoration-style: wavy; text-decoration-color: var(--warn);
+    text-decoration-thickness: 1.5px; text-underline-offset: 3px; text-decoration-skip-ink: none;
   }
   .cell-url { color: var(--accent); text-decoration: none; margin-right: 8px; }
   .cell-url:hover { text-decoration: underline; }

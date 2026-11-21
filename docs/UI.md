@@ -6169,7 +6169,7 @@ says what it is checking.
     period it covers**, which is what that does — it files nothing there.
   - A date or number column says **Days** or **Numbers** in its heading. A cell written
     otherwise than a chart prints it shows the reading after its words, muted (`31/01/2026`
-    shows `31 Jan 2026`); one its role does not read is underlined and its `?` says on hover
+    shows `31 Jan 2026`); one its role does not read takes a warning's wavy line and its `?` says on hover
     what would; an empty one shows `5 Mar 2026` or `1 200`, grey. The cell keeps its words.
   - A **picture** column draws each cell as the picture it names, in the row, with the full
     size one click away. Two things count as one: an address, and **a file this case
@@ -8109,12 +8109,14 @@ as the figure route names it (`roles` in `X-Chart-Kind`), with a hover line: a w
 *Icon* and *Flag*; a timeline's *When*, *Words* and *Until*; a line's *Along* and *Height*;
 *Filter* for the column an `only` reads. Key figures read every column and name none. A column
 a timeline or a line reads as days, or a chart reads as numbers, says *Days* or *Numbers*
-instead, decided as the engine decides it (`lib/cellHints.js`), and only where its part is a
-day or an amount: a grade written 1, 2, 3 that colours the bars says *Colour*. A column the drawing does not
+instead, by the part the engine names (`roles`, `lib/cellHints.js` `roleReads`): a timeline's
+start and *Until*, a count, a line's height. Every cell of such a column is checked, however
+few read yet, and a grade written 1, 2, 3 that colours the bars says *Colour*. Their hover says
+the part and two ways of writing it (`e.g. 5 Mar 2026 or 2026-03-05`). A column the drawing does not
 read stays, greyed and marked *not drawn*, never refused. A cell written otherwise than
 the chart prints it shows the reading after its words, muted (`5 mars 2026` shows `5 Mar
-2026`, `60+` shows `at least 60`); one that does not read is underlined with a hover saying
-what would; an empty one shows `5 Mar 2026` or `1 200`, grey. What was typed stays. Its own rows
+2026`, `60+` shows `at least 60`); one that does not read takes a warning's wavy line, its hover
+saying what would (an *Until* written `ongoing`); an empty one shows `5 Mar 2026` or `1 200`, grey. What was typed stays. Its own rows
 take every gesture of a table (Row, Column, *Paste from a spreadsheet*, each column's and row's
 menu), each a change of the changed lines, one Undo; its bar ends with *As a form* where the
 kind's form fits, and a wall's *Fill from the case…*. Rows that live elsewhere are typed in where

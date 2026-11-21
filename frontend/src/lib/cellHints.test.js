@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { DAYS, EXAMPLE, NUMBERS, ROLES, ROLE_TITLE, UNREAD, cellSays, columnReads, headingTag, momentText, readsKey, sheetExpects, sheetSays } from './cellHints.js';
+import { DAYS, EXAMPLE, NUMBERS, ROLES, ROLE_TITLE, UNREAD, cellSays, columnReads, headingTag, momentText, readsKey, roleReads, sheetExpects, sheetSays } from './cellHints.js';
 
 /**
  * A grid says what the chart reads: the column its kind, each cell what was understood,
@@ -38,8 +38,13 @@ describe('the columns a chart reads', () => {
 
 describe('the one tag a heading takes', () => {
   it('says Days or Numbers first, else what the drawing does with the column, else nothing', () => {
-    expect(headingTag({ kind: DAYS }, 'start')).toEqual({ text: 'Days', title: 'The chart reads this column as days' });
-    expect(headingTag({ kind: NUMBERS, decimal: '.' }, 'count')).toEqual({ text: 'Numbers', title: 'The chart reads this column as numbers' });
+    // Days or Numbers, and on hover the column's part and two ways of writing it
+    expect(headingTag({ kind: DAYS }, 'start')).toEqual({ text: 'Days', title: 'The day each event starts, e.g. 5 Mar 2026 or 2026-03-05' });
+    expect(headingTag({ kind: DAYS }, 'until')).toEqual({ text: 'Days', title: 'The day a period runs until, e.g. 5 Mar 2026 or 2026-03-05' });
+    expect(headingTag({ kind: NUMBERS, decimal: '.' }, 'count')).toEqual({ text: 'Numbers', title: 'The chart adds up this column, e.g. 1 200 or at least 60' });
+    // no part named (key figures, a sheet): how the chart reads it, with the same two ways
+    expect(headingTag({ kind: DAYS }, '')).toEqual({ text: 'Days', title: 'The chart reads this column as days, e.g. 5 Mar 2026 or 2026-03-05' });
+    expect(headingTag({ kind: NUMBERS }, undefined)).toEqual({ text: 'Numbers', title: 'The chart reads this column as numbers, e.g. 1 200 or at least 60' });
     expect(headingTag(undefined, 'words')).toEqual({ text: 'Words', title: 'The words under each picture' });
     expect(headingTag(undefined, 'groups')).toEqual({ text: 'Groups', title: 'The chart groups its rows by this column' });
     // a column not drawn, a role it does not know, or a word of every object: no tag
@@ -135,5 +140,27 @@ describe('a sheet’s date and number columns', () => {
     expect(momentText({ shape: 'moment', text: '2026-03' })).toBe('Mar 2026');
     expect(momentText({ shape: 'moment', text: '2026' })).toBe('2026');
     expect(momentText({ shape: 'time', text: '01:57' })).toBe('01:57');
+  });
+});
+
+describe('the columns a drawing reads by the part the engine names', () => {
+  it('checks every cell of a timeline’s When and Until, however few read yet', () => {
+    const rows = [['5 Mar 2026', 'Fire', 'ongoing'], ['7 Mar 2026', 'Smoke', 'mi-octobre'], ['8 Mar 2026', 'Ash', '']];
+    const reads = roleReads(table(['When', 'What', 'Until'], rows), ['start', 'event', 'until']);
+    expect(readsKey(reads)).toBe('0:days,2:days');
+  });
+
+  it('reads a count and a height as numbers, with the decimal mark their cells use, and a line’s run by its cells', () => {
+    const counted = roleReads(table(['Model', 'Count', 'Grade'], [['Kirpi', '1,5', '1'], ['Cougar', '2,25', '2']]), ['groups', 'count', 'colour']);
+    expect([...counted]).toEqual([[1, { kind: NUMBERS, decimal: ',' }]]);
+    expect(readsKey(roleReads(table(['Day', 'Ships'], [['5 Mar 2026', '12'], ['6 Mar 2026', '9']]), ['along', 'height']))).toBe('0:days,1:numbers.');
+    expect(readsKey(roleReads(table(['Km', 'Height'], [['1', '120'], ['2', '180']]), ['along', 'height']))).toBe('0:numbers.,1:numbers.');
+  });
+
+  it('reads no other part, and no column the drawing leaves out', () => {
+    const rows = [['a', '#1', 'destroyed', 'Kirpi', '1']];
+    expect(roleReads(table(['Picture', '#', 'State', 'Model', 'Grade'], rows), ['picture', 'label', 'words', 'groups', 'colour']).size).toBe(0);
+    expect(roleReads(table(['When', 'Note'], [['5 Mar 2026', 'x']]), ['start', '']).size).toBe(1);
+    expect(roleReads(table(['A'], [['x']]), ['constructor']).size).toBe(0);
   });
 });

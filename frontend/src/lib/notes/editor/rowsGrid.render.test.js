@@ -211,7 +211,7 @@ describe('what the chart reads in its rows', () => {
     await opened(note);
     // Days before its role (the day each event starts); the other column says its part
     expect(tag(0).textContent).toBe('Days');
-    expect(tag(0).title).toBe('The chart reads this column as days');
+    expect(tag(0).title).toBe('The day each event starts, e.g. 5 Mar 2026 or 2026-03-05');
     expect(tag(1).textContent).toBe('Words');
     expect(tag(1).title).toBe('The words of each event');
     expect(reading(0, 0)).toBe('5 Mar 2026');
@@ -222,6 +222,21 @@ describe('what the chart reads in its rows', () => {
     expect(words(0, 0).firstChild.textContent).toBe('5 mars 2026');
     expect(reading(0, 1)).toBe('');
     expect(text()).toBe(note);
+  });
+
+  it('checks a timeline’s Until though no cell of it reads yet: each one written otherwise is underlined', async () => {
+    server.kind = { name: 'timeline', label: 'Timeline', counts: false, roles: ['start', 'event', 'until'] };
+    const table = '| When | What happened | Until |\n| --- | --- | --- |\n| 5 Mar 2026 | Fire | ongoing |\n| 7 Mar 2026 | Smoke | mi-octobre |\n| 8 Mar 2026 | Ash |  |';
+    await opened(`Words.\n\n${chartOf(['kind: timeline', table])}\n`);
+    expect(tag(2).textContent).toBe('Days');
+    expect(tag(2).title).toBe('The day a period runs until, e.g. 5 Mar 2026 or 2026-03-05');
+    for (const row of [0, 1]) {
+      expect(words(row, 2).classList.contains('cm-grid-unread')).toBe(true);
+      expect(words(row, 2).title).toBe('Not read as a day. Try 5 Mar 2026, 05/03/2026 or 2026-03-05, in any language.');
+    }
+    // an empty Until is a single day, not a mistake: an example, never a line under it
+    expect(words(2, 2).classList.contains('cm-grid-unread')).toBe(false);
+    expect(words(2, 2).dataset.placeholder).toBe('5 Mar 2026');
   });
 
   it('underlines a cell it does not read, says what would, and shows an example in an empty one', async () => {
