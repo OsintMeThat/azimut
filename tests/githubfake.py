@@ -3,7 +3,9 @@
 Blobs, trees, commits and refs as the REST API's Git database answers them, a repository, its
 Pages site and its builds. No test reaches GitHub, and none needs an account: the calls are held
 to GitHub's REST reference (docs.github.com), not to a live site. Shared by the tests of
-publishing a note (`test_githubpages.py`) and of the site that publish keeps (`test_site_publish.py`).
+publishing a note (`test_githubpages.py`), of the site that publish keeps (`test_site_publish.py`) and of
+reading and deleting from it (`test_site_hub.py`). A tree entry with a null `sha` deletes what it names, a
+subfolder included, as GitHub's Git database does.
 """
 
 from __future__ import annotations
@@ -39,6 +41,8 @@ class FakeGitHub:
         self.build_status = "building"
         #: whether a recursive listing says it was cut short, as GitHub's does for a huge tree
         self.truncated = False
+        #: the committer date every commit made from now on carries, as the Git database says it
+        self.commit_date = "2026-11-21T13:55:52Z"
 
     # the object store ------------------------------------------------------------------
 
@@ -56,7 +60,8 @@ class FakeGitHub:
     def commit(self, tree: str, parents: list[str], message: str) -> str:
         payload = json.dumps([tree, parents, message, len(self.objects)]).encode()
         sha = _sha("commit", payload)
-        self.objects[sha] = ("commit", {"tree": tree, "parents": parents, "message": message})
+        self.objects[sha] = ("commit", {"tree": tree, "parents": parents, "message": message,
+                                        "date": self.commit_date})
         return sha
 
     def write_tree(self, base: str | None, entries: list[dict[str, Any]]) -> str:
@@ -108,8 +113,9 @@ class FakeGitHub:
     def make_repo(self, full: str = "octo/articles", *, files: dict[str, bytes] | None = None,
                   pages: bool = True, branch: str = "main", empty: bool = False, url: str = "") -> None:
         owner, name = full.split("/")
+        #: ``size`` is what the repository answers for its weight in KiB, history included; None leaves it out
         repo: dict[str, Any] = {"owner": owner, "name": name, "private": False, "default_branch": branch,
-                                "refs": {}, "pages": None}
+                                "refs": {}, "pages": None, "size": 2048}
         self.repos[full.lower()] = repo
         if not empty:
             content = files or {"README.md": b"# articles\n"}
@@ -167,8 +173,11 @@ class FakeGitHub:
         method = request.method
         empty = not repo["refs"]
         if tail == "":
-            return httpx.Response(200, json={"full_name": f"{repo['owner']}/{repo['name']}", "private": repo["private"],
-                                             "default_branch": repo["default_branch"]})
+            said = {"full_name": f"{repo['owner']}/{repo['name']}", "private": repo["private"],
+                    "default_branch": repo["default_branch"]}
+            if repo["size"] is not None:
+                said["size"] = repo["size"]
+            return httpx.Response(200, json=said)
         if tail == "/pages":
             if method == "GET":
                 return httpx.Response(200, json=repo["pages"]) if repo["pages"] else httpx.Response(404, json={})
@@ -227,7 +236,9 @@ class FakeGitHub:
             found = self.objects.get(git[len("commits/"):])
             if not found or found[0] != "commit":
                 return httpx.Response(404, json={})
-            return httpx.Response(200, json={"sha": git[len("commits/"):], "tree": {"sha": found[1]["tree"]}})
+            return httpx.Response(200, json={"sha": git[len("commits/"):], "tree": {"sha": found[1]["tree"]},
+                                             "message": found[1]["message"],
+                                             "committer": {"name": "octo", "date": found[1]["date"]}})
         if git == "commits" and method == "POST":
             sha = self.commit(body["tree"], body["parents"], body["message"])
             assert "author" not in body and "committer" not in body, "the author is the token's own account"
@@ -238,7 +249,7 @@ class FakeGitHub:
             if not found or found[0] != "tree":
                 return httpx.Response(404, json={})
             if request.url.params.get("recursive"):
-                listed = [{"path": path, "type": "blob", "sha": _sha("blob", data), "mode": "100644"}
+                listed = [{"path": path, "type": "blob", "sha": _sha("blob", data), "mode": "100644", "size": len(data)}
                           for path, data in self.walk(sha).items()]
             else:
                 listed = [{"path": name, **entry} for name, entry in found[1].items()]

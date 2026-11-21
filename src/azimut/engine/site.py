@@ -370,6 +370,15 @@ class Card:
         return (json.dumps(card, indent=1, ensure_ascii=False) + "\n").encode("utf-8")
 
 
+def is_card(data: bytes) -> bool:
+    """Whether a file is a card Azimut wrote, by its format alone."""
+    try:
+        card = json.loads(data)
+    except ValueError:
+        return False
+    return isinstance(card, dict) and card.get("format") == CARD_FORMAT
+
+
 def card_date(data: bytes) -> str:
     """The date a card already in the repository carries, "" when it holds none that reads."""
     try:
