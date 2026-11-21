@@ -485,6 +485,10 @@ def test_the_figure_route_names_the_columns_a_chart_draws_so_the_others_show_as_
     assert drawn(SMALL) == [0, 1]
     figures = "::: chart\nkind: key figures\nsource: x\n| Figure | What it says |\n| --- | --- |\n| 41 | vehicles |\n:::"
     assert drawn(figures) is None
+    # a timeline's Until is drawn as soon as a row holds a day in it, so it is never marked
+    timeline = ("::: chart\nkind: timeline\nsource: x\n| Day | What | Until | Note |\n| --- | --- | --- | --- |\n"
+                "| 10 Sep 2026 | Mocha taken | | aside |\n| 5 Oct 2026 | Offensive opens | | aside |\n:::")
+    assert drawn(timeline) == [0, 1, 2]
 
 
 @pytest.mark.parametrize("size, pixels", [("page", (1960, None)), ("x", (1600, 900)), ("portrait", (1080, 1350)),

@@ -1201,6 +1201,8 @@ def drawn_columns(reading: Reading) -> list[int] | None:
         from . import notes_chart_timeline as timeline
 
         used.update(timeline.timeline_columns(reading))
+        # a column named for an end is drawn as soon as a row holds a day in it
+        used.update(index for index, header in enumerate(table.headers) if timeline.END_HEADER.search(header))
     elif kind.name == "line":
         from . import notes_chart_kinds as kinds
 

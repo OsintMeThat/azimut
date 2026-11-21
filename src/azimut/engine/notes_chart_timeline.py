@@ -108,6 +108,10 @@ class Event:
         return self.end is not None and self.end.day > self.start.day
 
 
+#: A column named for where a period ends.
+END_HEADER = re.compile(r"until|end|to\b|till", re.I)
+
+
 def timeline_columns(reading: "Reading") -> tuple[int | None, int | None, int | None]:
     """The columns of a timeline's rows: its first day, the day a period runs until, and its words."""
     table = reading.table
@@ -118,7 +122,7 @@ def timeline_columns(reading: "Reading") -> tuple[int | None, int | None, int | 
     start = days[0] if days else None
     # a column named for an end holds periods even when one row alone has one
     ends = [index for index in range(len(table.headers)) if index != start
-            and re.search(r"until|end|to\b|till", table.headers[index], re.I)
+            and END_HEADER.search(table.headers[index])
             and any(index < len(row) and kinds.read_day(row[index]) is not None for row in rows)]
     until = next((index for index in days[1:] if index in ends), ends[0] if ends else days[1] if len(days) > 1 else None)
     what = None
