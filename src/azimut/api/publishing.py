@@ -190,12 +190,10 @@ def github_settings() -> GitHubTarget:
 
 
 def _logo() -> bytes | None:
-    """The analyst's logo, as the site's pages carry it; None with none, or one that is no PNG."""
-    try:
-        data = config.signature_path().read_bytes()
-    except OSError:
-        return None
-    return data if config.valid_signature(data) else None
+    """The logo the site's pages carry: the site's own, else the Publishing logo; None with
+    neither, or with one that is no PNG."""
+    found = config.site_logo()
+    return found[0] if found else None
 
 
 def site_for(target: GitHubTarget, address: str) -> site.Site:
@@ -216,6 +214,7 @@ def _github_state() -> dict[str, Any]:
         # what the site is called here, whatever Settings left empty read from: its title, whether
         # it has a logo, and the categories the last read of the site found, for the publish dialog
         "website": {"title": found.title if target.account else "", "logo": found.logo is not None,
+                    "logo_from": (config.site_logo() or (b"", ""))[1],
                     "counting": found.stats if found.counter or found.beacon else ""},
         "categories": site.categories_read(config.load_settings().get("github_categories")),
     }

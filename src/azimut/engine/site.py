@@ -154,7 +154,7 @@ class Site:
     stats: str = ""
     code: str = ""
     token: str = ""
-    #: The analyst's logo (`signature.png`), or None for none.
+    #: The logo the site carries (`config.site_logo`: its own, else the Publishing logo), or None for none.
     logo: bytes | None = field(default=None, repr=False)
 
     @property
