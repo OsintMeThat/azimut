@@ -111,6 +111,9 @@ test('the hub opens on its Overview, walks its tabs by click and by keyboard, an
   await expect(steps.nth(0)).toContainText('octo/articles on main');
   await expect(steps.nth(4)).toContainText('Read the site, in Articles, to tell.');
   await expect(panel(page, 'Overview')).toContainText('1 of 6 done. 2 need a read of the site.');
+  // no tip cards: what a press does is said beside the press
+  await expect(panel(page, 'Overview').getByRole('heading', { level: 3 })).toHaveText(['Write', 'Publish', 'GitHub keeps it', 'Readers find it',
+    'Your site, step by step']);
   await steps.nth(2).getByRole('button', { name: 'Identity' }).click();
   await expect(tab(page, 'Identity')).toHaveAttribute('aria-selected', 'true');
   await expect(panel(page, 'Identity')).toBeVisible();
@@ -229,6 +232,7 @@ test('Articles reads the site on a press only, lists what it holds, and deletes 
   await expect(rows(page).nth(2)).toContainText('Map');
   await expect(rows(page).nth(2)).toContainText('290 MB');
   await expect(rows(page).nth(4)).toContainText('Unlisted');
+  await expect(articles.locator('.del-said')).toHaveText('Delete takes an article down, and off the lists, the feed and the sitemap, in one commit.');
   await expect(first.getByRole('link', { name: /Open/ })).toHaveAttribute('href', 'https://octo.github.io/articles/bab-el-mandab-2026/');
   // an article that stands somewhere shows its pin, and one that does not shows none
   const pin = first.locator('.pin');
@@ -392,9 +396,14 @@ test('Update the site asks GitHub on its press only, from Upkeep or from the her
   await expect(press).toBeEnabled();
   expect(asked).toEqual([]);
   await press.click();
-  await expect(section).toContainText('Updating octo/articles…');
-  await expect(hero(page)).toContainText('Updating octo/articles…');
+  // both presses say it, with a spinner, and wait
+  for (const busy of [section.getByRole('button', { name: 'Updating…' }), hero(page).getByRole('button', { name: 'Updating…' })]) {
+    await expect(busy).toBeDisabled();
+    await expect(busy).toHaveAttribute('aria-busy', 'true');
+    await expect(busy.locator('.busy-spin')).toBeVisible();
+  }
   await expect(section).toContainText('The site is updated: 2 files written.');
+  await expect(press).toBeEnabled();
   await expect(section.getByRole('list', { name: 'To mind' })).toContainText('feed.xml is yours');
   await expect(hero(page)).toContainText(/Updated today at \d\d:\d\d/);
   expect(asked).toEqual(['POST']);
@@ -527,12 +536,16 @@ test('the publish dialog puts a note online Unlisted, in no list', async ({ page
   const { dialog, published } = await openPublish(page);
   const role = dialog.getByRole('radiogroup', { name: 'On the site' });
   await expect(role.getByRole('radio')).toHaveText(['Article', 'Page', 'Unlisted']);
+  // never published to this site: it starts on Unlisted, with the line that says why beside the choice
+  await expect(role.getByRole('radio', { name: 'Unlisted' })).toHaveAttribute('aria-checked', 'true');
+  await expect(dialog).toContainText('Unlisted lets you read it online before you announce it.');
+  await role.getByRole('radio', { name: 'Article' }).click();
   await expect(dialog).toContainText('Goes on octo\'s home page and in its feed.');
   await role.getByRole('radio', { name: 'Unlisted' }).click();
   await expect(role.getByRole('radio', { name: 'Unlisted' })).toHaveAttribute('aria-checked', 'true');
   await expect(role.getByRole('radio', { name: 'Unlisted' })).toHaveAttribute('title', 'Put it online without listing it anywhere');
   await expect(dialog).toContainText('Online at its address only, in no list, feed or sitemap.');
-  await expect(dialog.getByRole('textbox', { name: 'Category' })).toHaveCount(0);
+  await expect(dialog.getByRole('combobox', { name: 'Category' })).toHaveCount(0);
   await dialog.getByRole('button', { name: 'Publish to GitHub Pages' }).click();
   await expect.poll(() => published.length).toBe(1);
   expect(published[0]).toMatchObject({ role: 'unlisted' });
