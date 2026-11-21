@@ -107,6 +107,23 @@ describe('the settings pane', () => {
 });
 
 describe('a tab asked for from elsewhere', () => {
+describe('a settings backup restored', () => {
+  it('says what it brought back, the site logo among the pictures', async () => {
+    rail()[TABS.indexOf('storage')].click();
+    flushSync();
+    api.post.mockImplementationOnce(async () => ({ imported: ['site_title', 'site_stats'], templates: 1, signature: true, site_logo: true,
+      report_signature: false, icons: 0 }));
+    const input = pane().querySelector('input[type="file"][accept*="json"]');
+    const file = new File([JSON.stringify({ settings: { site_title: 'Octo Desk' } })], 'azimut-settings.json', { type: 'application/json' });
+    Object.defineProperty(input, 'files', { value: [file], configurable: true });
+    input.dispatchEvent(new Event('change', { bubbles: true }));
+    await vi.waitFor(() => expect(uiState.toasts.map((entry) => entry.message)).toContain(
+      'Backup restored: 2 settings, 1 template, logo, site logo'));
+    expect(api.post).toHaveBeenCalledWith('/api/settings/import', { settings: { site_title: 'Octo Desk' } });
+    uiState.toasts.splice(0);
+  });
+});
+
   it('opens on Website, where the export dialogs send the analyst to set GitHub Pages or WordPress up', () => {
     uiState.tool = 'settings';
     uiState.settingsTab = 'website';

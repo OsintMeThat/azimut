@@ -384,7 +384,9 @@
   }
 
   async function importSettings(event) {
-    const file = event.currentTarget.files?.[0];
+    // the event's target is gone once the first await returns: keep the input to clear it after
+    const input = event.currentTarget;
+    const file = input.files?.[0];
     if (!file) return;
     try {
       const parsed = JSON.parse(await file.text());
@@ -406,7 +408,7 @@
     } catch (e) {
       toast(`Could not import the backup: ${e.message}`, 'danger');
     } finally {
-      event.currentTarget.value = '';
+      input.value = '';
     }
   }
 
