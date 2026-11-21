@@ -26,7 +26,7 @@ function type(text) {
 describe('the Add panel', () => {
   it('opens on every group, its field ready to type in', () => {
     show();
-    expect(heads()).toEqual(['Maps', 'On the map', 'Round the map', 'Writing', 'Blocks', 'Signing', 'Pictures and shapes', 'Slides']);
+    expect(heads()).toEqual(['From the case', 'Maps', 'On the map', 'Round the map', 'Writing', 'Blocks', 'Signing', 'Pictures and shapes', 'Slides']);
     expect(document.activeElement).toBe(field());
   });
 
@@ -54,9 +54,17 @@ describe('the Add panel', () => {
     expect(calls.onadd).toHaveBeenCalledWith('number');
   });
 
-  it('offers no step and no video to a template, which plays nothing', () => {
+  it('offers no step and no video to a template, which plays nothing, and nothing from the case, which it keeps none of', () => {
     show({ template: true });
     expect(heads()).not.toContain('Slides');
+    expect(heads()).not.toContain('From the case');
     expect(tiles()).not.toContain('Video');
+    expect(tiles()).not.toContain('Comparison');
+  });
+
+  it('finds a comparison of the case by the words it is asked by', () => {
+    show();
+    type('before after');
+    expect(tiles()).toEqual(['Comparison']);
   });
 });

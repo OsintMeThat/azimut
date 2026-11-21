@@ -3,8 +3,8 @@
    * What can be added to the page, in a panel opened from Add or the A key. Its
    * field finds an element by a word and Enter adds the first one found; the arrows
    * walk the tiles. A tool placed by pressing the map stays lit while it is armed,
-   * and a second press on it puts it down. A template plays nothing, so it offers
-   * no step and no video.
+   * and a second press on it puts it down. A template plays nothing and keeps no
+   * case's work, so it offers no step, no video, and nothing from the case.
    */
   import Icon from '../../components/Icon.svelte';
   import FloatingMenu from '../../components/FloatingMenu.svelte';
@@ -15,7 +15,7 @@
   let query = $state('');
   let field = $state(null);
   let grid = $state(null);
-  const groups = $derived(findAdds(query).filter((group) => !template || !group.plays));
+  const groups = $derived(findAdds(query).filter((group) => !template || (!group.plays && !group.cased)));
   const first = $derived(groups[0]?.items[0]?.[0] ?? null);
 
   $effect(() => { field?.focus(); });

@@ -103,8 +103,10 @@
   import NewPlateDialog from './plate/NewPlateDialog.svelte';
   import TemplateSketch from './plate/TemplateSketch.svelte';
   import { inspectorWidth, layout, listWidth, saveLayout, toggleFold, togglePanel } from '../lib/plate/layout.svelte.js';
-  import { imagerySaid } from '../lib/plate/source.js';
+  import { groundSaid, imagerySaid } from '../lib/plate/source.js';
+  import { comparisonOnPlate } from '../lib/plate/fromCompare.js';
   import PlateLayers from './plate/PlateLayers.svelte';
+  import PlateFromCase from './plate/PlateFromCase.svelte';
   import { plateTabs } from '../lib/plate/oneTab.js';
   import { buildHash, readSolo, splitHash } from '../lib/hash.js';
   import { settlePlace } from '../lib/backButton.js';
@@ -161,6 +163,8 @@
   let creating = $state(false);
   /** The button the Add panel opens under, while it is open. */
   let adding = $state(null);
+  /** Add › From the case, open: `{ anchor }`. */
+  let fromCase = $state(null);
   let addButton = $state(null);
   let focusAdd = $state(null);
   /** The page alone, the panels called back over it one by one. Never kept: it is a moment. */
@@ -191,15 +195,14 @@
     api.get('/api/terrain/sources').then((info) => { relief = info; }, () => {});
     api.get('/api/satellite/cloudless/years').then((answer) => { years = answer?.years ?? []; }, () => {});
   });
-  /** The Wayback releases, read when a map is first set on one: the dates a dated ground offers. */
-  let releasesAsked = false;
+  /** The Wayback releases, read when a map is first set on one: the dates a dated ground offers. Read once; a failure lets the next ask try again. */
+  let releasesRead = null;
   function readReleases() {
-    if (releasesAsked) return;
-    releasesAsked = true;
-    api.get('/api/satellite/wayback/releases').then((answer) => {
+    releasesRead ??= api.get('/api/satellite/wayback/releases').then((answer) => {
       releases = (answer?.releases ?? []).map((entry) => ({ release: entry.release ?? entry.number, date: entry.date ?? entry.label ?? '' }))
         .filter((entry) => entry.release);
-    }, () => { releasesAsked = false; });
+    }, () => { releasesRead = null; });
+    return releasesRead;
   }
   $effect(() => { if (plate?.spec.elements.some((element) => element.basemap === WAYBACK_ID)) untrack(readReleases); });
 
@@ -936,6 +939,7 @@
   function add(kind) {
     if (!spec) return;
     if (kind === 'step') { if (!plate.template) newStep(); return; }
+    if (kind === 'comparison') { if (!plate.template) fromCase = { anchor: focus ? focusAdd : addButton }; return; }
     if (SEQUENCES[kind]) { if (!plate.template) addSequence(kind); return; }
     const was = placing;
     placing = null;
@@ -1003,6 +1007,39 @@
     // what is made while a step is shown belongs to it
     if (stepId && !element.step) Object.assign(element, bornAt(at, playable, stepId));
     put(element);
+  }
+
+  /**
+   * A comparison of the case from Add › From the case: as two live maps side by side, each
+   * on its side's ground and day, grouped, a badge on each saying its day, and saying what a
+   * plate could not draw; or as the newest image kept from it, Compare's marks included.
+   */
+  async function putComparison(row, how) {
+    const { width, height } = pageSize(spec.page);
+    const born = (element) => (stepId && !element.step ? { ...element, ...bornAt(at, playable, stepId) } : element);
+    if (how === 'picture') {
+      const picture = (row.kept ?? []).at(-1);
+      if (!picture) return;
+      put(born({ id: newId('image'), kind: 'image', name: row.title || row.session, src: picture.path, fit: 'contain',
+        box: [width / 2 - 50, height / 2 - 30, 100, 60].map((value) => Math.round(value * 10) / 10) }));
+      return;
+    }
+    if (mapCount(spec.elements) + 2 > MAX_MAPS) { toast(TOO_MANY_MAPS, 'warn', 6000); return; }
+    let session;
+    try { session = await api.get(`/api/cases/${plate.caseId ?? caseId}/compare/sessions/${encodeURIComponent(row.session)}`); }
+    catch (error) { toast(error?.message ?? 'The comparison could not be read', 'danger'); return; }
+    if ([session?.spec?.a, session?.spec?.b].some((side) => side?.provider === WAYBACK_ID)) await readReleases();
+    // a pass not picked yet has no day to write: the badge says Before or After
+    const dayOf = (map) => (map.basemap === SENTINEL_ID && !map.acquired ? '' : groundSaid(map, { grounds, releases, years }).when);
+    const made = comparisonOnPlate(session, { width, height, offered: grounds.map(([id]) => id), layers: mainMap(spec)?.layers ?? [],
+      theme: spec.theme, newId, group: newId('g'), dayOf });
+    put(...made.elements.map(born));
+    selection = made.elements.map((element) => element.id);
+    if (made.lost.length) {
+      const named = [...new Set(made.lost)].map((id) => providers.find((entry) => entry.id === id)?.label ?? id);
+      const keyed = made.lost.some((id) => providers.find((entry) => entry.id === id)?.needs_key);
+      toast(`${named.join(' and ')} laid on World Imagery: a plate cannot draw ${named.length === 1 ? 'it' : 'them'}${keyed ? ' until its account is set up in Settings › Imagery' : ''}`, 'warn', 8000);
+    }
   }
 
   /** The country under `point` lit on map `of`, the rest of the world drawn back, on the plate's day or step `day`. */
@@ -1140,6 +1177,11 @@
     uiState.editLayer = { name: row.name, title: row.title, view: { lat: view.lat, lon: view.lon, zoom: view.zoom + 1 } };
     uiState.tool = 'satellite';
   }
+  /** A map framed as the other map of its group is, on the day or step shown (a comparison's pair). */
+  function sameView(map) {
+    const other = spec.elements.find((item) => item.kind === 'map' && item.group && item.group === map.group && item.id !== map.id);
+    if (other) mapView(map, { ...(views[other.id]?.view ?? framingFor(other).view) });
+  }
   /** The list shown on its Layers tab, `map` picked, from the map's own bar. */
   function showLayers(map) {
     selection = [map.id];
@@ -1153,10 +1195,6 @@
     if (!inspectorShown) panel('inspector');
     if (layout.folded.includes('Layers')) toggleFold('Layers');
   }
-  // the Layers tab says a Wayback map's day, read once the tab is open on one
-  $effect(() => {
-    if (listShown && layout.tab === 'layers' && spec?.elements.some((element) => element.kind === 'map' && element.basemap === WAYBACK_ID)) untrack(readReleases);
-  });
 
   /** What was drawn by hand on this map, made into a layer of the case it then draws in its place; Undo puts it back. */
   async function keepDrawn(map) {
@@ -2090,7 +2128,7 @@
             {time} stepPlace={place} {playing} {speed} bind:views {decor} bind:overflow {grounds} ghosts={ghosts && playable}
             {framingFor} onmapview={mapView} onkeep={keepFraming} beat={shownKey} follows={followsMap} {written} onnamelabel={nameToLabel}
             {glide} oncontext={(id, point) => (id ? elementMenu(id, point) : pageMenu(point))}
-            onmap={(id, handle) => handles.set(id, handle)} top={focus ? 44 : 0} onlayers={plate.template ? null : showLayers} />
+            onmap={(id, handle) => handles.set(id, handle)} top={focus ? 44 : 0} onlayers={plate.template ? null : showLayers} onsameview={sameView} />
         {/key}
         {#if focus}
           <div class="focus-bar" role="toolbar" aria-label="The plate">
@@ -2167,6 +2205,10 @@
     <PlateContextMenu menu={contextMenu} onclose={() => (contextMenu = null)} />
     {#if adding}
       <PlateAdd anchor={adding} {placing} template={!!plate.template} onadd={add} onclose={() => (adding = null)} />
+    {/if}
+    {#if fromCase}
+      <PlateFromCase anchor={fromCase.anchor} caseId={plate.caseId ?? caseId ?? ''} room={MAX_MAPS - mapCount(plate.spec.elements)}
+        onpick={putComparison} onclose={() => (fromCase = null)} />
     {/if}
   {:else if !caseState.current}
     <NoCase icon="plate" what="lay out a map plate" />

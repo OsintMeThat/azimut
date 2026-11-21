@@ -71,6 +71,8 @@
     oncontext = null,
     /** `(map)`: the case's layers a map draws, shown in the list's Layers tab. */
     onlayers = null,
+    /** `(map)`: the map framed as the other map of its group; offered only where there is one. */
+    onsameview = null,
     /** `[id, label]` of the grounds a plate's maps can be drawn on. */
     grounds = [],
     /** Draw the annotations of the plate's other days, faintly. */
@@ -410,6 +412,8 @@
     heldTimer = setTimeout(() => { held = ''; }, 3200);
   }
   const lockedMap = (element) => element.kind === 'map' && !framingFor(element).own && !framingFor(element).first;
+  /** The other map of a map's group, as a comparison's pair is grouped; none outside a group. */
+  const pairedMap = (element) => (element.group ? spec.elements.find((item) => item.kind === 'map' && item.group === element.group && item.id !== element.id) ?? null : null);
 
   /**
    * Drag one of an element's ground points over its map: `at`, `to`, a zone's corner
@@ -812,6 +816,7 @@
           <PlateMapBar {element} {grounds} framing={framing === element.id} view={framed?.view ?? element.view}
             keep={framed && !framed.first ? !framed.own : null} onview={(next) => onmapview(element, next)}
             onkeep={(keep) => onkeep?.(element, keep)} onlayers={onlayers ? () => onlayers(element) : null}
+            onsameview={onsameview && pairedMap(element) ? () => onsameview(element) : null}
             onframe={() => { if (lockedMap(element)) { sayHeld(); return; } framing = framing === element.id ? '' : element.id; selection = [element.id]; }} />
         </div>
       {/each}

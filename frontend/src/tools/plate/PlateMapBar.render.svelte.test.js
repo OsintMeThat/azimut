@@ -26,6 +26,19 @@ describe('a plate map\'s own bar', () => {
     expect(asked).toBe(1);
   });
 
+  it('frames a map as the other map of its group at a press, never while it keeps the framing before it', () => {
+    let asked = 0;
+    show({ kind: 'map', view: { lat: 0, lon: 0, zoom: 5, bearing: 0 }, basemap: 'plain', overlays: [] }, { onsameview: () => { asked += 1; } });
+    button('Same view as the other map').click();
+    expect(asked).toBe(1);
+    unmount(held); held = null; document.body.innerHTML = '';
+    show({ kind: 'map', view: { lat: 0, lon: 0, zoom: 5, bearing: 0 }, basemap: 'plain', overlays: [] }, { onsameview: () => {}, keep: true });
+    expect(button('Same view as the other map').disabled).toBe(true);
+    unmount(held); held = null; document.body.innerHTML = '';
+    show({ kind: 'map', view: { lat: 0, lon: 0, zoom: 5, bearing: 0 }, basemap: 'plain', overlays: [] });
+    expect(button('Same view as the other map')).toBeNull();
+  });
+
   it('says a map that draws none of the case\'s layers, and has no such button for an inset or with nowhere to show them', () => {
     show({ kind: 'map', view: { lat: 0, lon: 0, zoom: 5, bearing: 0 }, basemap: 'plain', overlays: [], layers: [] }, { onlayers: () => {} });
     expect(button('Layers').textContent.trim()).toBe('No layer');

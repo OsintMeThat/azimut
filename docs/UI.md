@@ -6700,7 +6700,7 @@ middle-button drag anywhere) moves it, and **Fit** brings it back; an undo keeps
 where the page is. **Add** in the header (or the A key) opens a panel whose field
 finds an element by a word, Enter adding the first one found, and groups what
 goes on a page by where it goes:
-**Maps** (a map, a **Detail** of the main map with lines to the ground it shows,
+**From the case** (work already done in the case, below), **Maps** (a map, a **Detail** of the main map with lines to the ground it shows,
 an inset), **On the map** (a label, a **Map
 text**, a **Symbol**, a number, an arrow, a **Line**, a distance, range rings, a view cone, a zone, a
 spotlight, a **Country focus**, each placed by pressing the map), **Round the map**
@@ -6714,6 +6714,18 @@ without the air of the app's corner), **Pictures and shapes** (a picture, the si
 a box, an ellipse, a rule) and **Slides** (a slide, a video, and ready sequences:
 **Reveal in four beats**, **Zoom in**, a **Title card** and an **End card**). A tool placed by pressing the map is put down by a second press
 on it, or Esc.
+
+**From the case › Comparison** lists the pairs saved in Compare, read when it opens, each
+with its picture and its two days. A press lays one as two live maps side by side,
+grouped, each on its side's ground and day (a Wayback release, a Sentinel-2 pass) and
+framed where the comparison looks, its export frame filling the map when it drew one; a
+badge on each says its day, else Before or After, and both draw the main map's layers.
+A side on a ground a plate cannot draw (radar, fires, night lights, a source whose
+account is not set up) is laid on World Imagery, and the plate says so. **Picture** sets
+the newest image kept from it instead, Compare's marks and highlights included, and
+**Open in Compare** goes back to it. The plate keeps no link to the comparison: either
+changes on its own afterwards. A map grouped with another carries **Same view as the
+other map** on its bar, which frames it as the other is on the day or slide shown.
 
 **Layers**, the list's second tab, says where the maps get what they draw, since a plate
 keeps no data of its own: each map is drawn on a ground and draws some of the case's

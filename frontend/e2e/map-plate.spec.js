@@ -1016,6 +1016,36 @@ test('the Layers tab says where each map gets what it draws, and ticks the case\
   await expect(page.locator('.list .row', { hasText: 'Map' })).toHaveCount(1);
 });
 
+test('a comparison of the case goes on the plate as two maps on their days, or as the picture kept from it', async ({ page }) => {
+  const store = await plateFixture(page);
+  const ground = (id, label) => ({ id, label, url: `https://tiles.invalid/${id}/{z}/{x}/{y}.png`, attribution: 'Browser fixture', max_zoom: 19, tile_size: 256, imagery: true });
+  await page.route('**/api/satellite/providers', (route) => route.fulfill({ json: [ground('esri-world-imagery', 'Esri World Imagery'), ground('esri-wayback', 'Esri Wayback')] }));
+  await page.route('**/api/satellite/wayback/releases', (route) => route.fulfill({ json: { releases: [{ release: 41, date: '2024-03-12' }] } }));
+  const row = { id: 'c1', key: 'c1', kind: 'comparison', session: 'energodar', title: 'Energodar', imagery_a: '2024-03-12', imagery_b: null,
+    thumbnail: null, kept: [{ path: 'media/energodar.png', title: 'Energodar kept' }] };
+  await page.route(`**/api/cases/${CASE_ID}/satellite/index`, (route) => route.fulfill({ json: [row] }));
+  await page.route(`**/api/cases/${CASE_ID}/compare/sessions/energodar`, (route) => route.fulfill({ json: { title: 'Energodar', spec: { version: 2,
+    camera: { lat: 47.5, lon: 34.6, zoom: 16, bearing: 0 }, a: { provider: 'esri-wayback', wayback_release: 41 }, b: { provider: 'sentinel1-radar' } } } }));
+  await page.goto('/#plate');
+  await newPlate(page);
+  await expect(page.locator('.plate-map')).toHaveCount(2);
+  await addOnPage(page, 'Comparison');
+  const panel = page.getByRole('dialog', { name: 'From the case' });
+  await expect(panel.locator('.days')).toHaveText('12 Mar 2024 → After');
+  await panel.locator('.main').click();
+  // a side a plate cannot draw is laid on World Imagery, and the plate says so
+  await expect(page.getByText('laid on World Imagery')).toBeVisible();
+  await expect(page.locator('.plate-map')).toHaveCount(4);
+  const paired = () => (lastSave(store)?.spec.elements ?? []).filter((element) => element.group);
+  await expect.poll(() => paired().filter((element) => element.kind === 'map').map((map) => [map.basemap, map.release ?? null]))
+    .toEqual([['esri-wayback', 41], ['esri-world-imagery', null]]);
+  await expect.poll(() => paired().filter((element) => element.role === 'badge').map((badge) => badge.text)).toEqual(['12 Mar 2024', 'After']);
+  // the picture kept from it, Compare's marks and all
+  await addOnPage(page, 'Comparison');
+  await panel.getByRole('button', { name: 'Picture' }).click();
+  await expect.poll(() => lastSave(store)?.spec.elements.find((element) => element.kind === 'image')?.src).toBe('media/energodar.png');
+});
+
 test('an empty slide takes a copy of the one before it from the pill over the page', async ({ page }) => {
   const store = await plateFixture(page);
   await page.goto('/#plate');
