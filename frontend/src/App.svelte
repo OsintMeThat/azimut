@@ -784,6 +784,20 @@
   .support-rail .heart.beat {
     animation: heartbeat 1.2s ease-in-out;
   }
+  /* the icons are drawn in outline, so the beat fills this one as well */
+  .support-rail .heart.beat :global(svg) {
+    animation: heartfill 1.2s ease-in-out;
+  }
+  @keyframes heartfill {
+    0%,
+    100% {
+      fill: transparent;
+    }
+    15%,
+    60% {
+      fill: var(--accent);
+    }
+  }
   @keyframes heartbeat {
     0%,
     100% {
@@ -808,7 +822,8 @@
     }
   }
   @media (prefers-reduced-motion: reduce) {
-    .support-rail .heart.beat {
+    .support-rail .heart.beat,
+    .support-rail .heart.beat :global(svg) {
       animation: none;
     }
   }
