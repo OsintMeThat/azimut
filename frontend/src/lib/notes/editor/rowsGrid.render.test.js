@@ -90,7 +90,8 @@ const numbers = () => view.dom.querySelector('.cm-chart-numbers');
 const cell = (row, col) => numbers().querySelector(`.cm-grid-cell[data-row="${row}"][data-col="${col}"]`);
 const field = () => numbers().querySelector('.cm-grid-input');
 function typeIn(row, col, words) {
-  mouse(cell(row, col));
+  // a press lands on the cell's words, which make way for its field
+  mouse(cell(row, col).querySelector('.cm-grid-text') ?? cell(row, col));
   field().value = words;
   field().dispatchEvent(new Event('input', { bubbles: true }));
   field().dispatchEvent(new KeyboardEvent('keydown', { key: 'Tab', bubbles: true, cancelable: true }));
@@ -108,6 +109,10 @@ describe('its own rows', () => {
     await opened(note);
     expect(numbers().querySelector('.cm-chart-numbers-data').textContent).toBe('DataIts own rows');
     expect([...numbers().querySelectorAll('.cm-rows-bar button')].map((node) => node.textContent)).toEqual(['Row', 'Column', 'Paste from a spreadsheet']);
+    mouse(cell(1, 0).querySelector('.cm-grid-text'));
+    // the chart around it leaves the press to the grid: the keyboard stays in the cell
+    expect(view.focus).not.toHaveBeenCalled();
+    expect(document.activeElement).toBe(field());
     typeIn(1, 0, 'Kirpi II');
     expect(text()).toBe(note.replace('| Kirpi | Almost sure | S02 |', '| Kirpi II | Almost sure | S02 |'));
     expect(undoDepth(view.state)).toBe(1);

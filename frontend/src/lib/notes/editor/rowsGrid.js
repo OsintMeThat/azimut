@@ -133,13 +133,20 @@ export class RowsGrid extends Grid {
     return bar;
   }
 
-  /** Outside the note (the infographic builder), leaving writes the cell and leaves the note's cursor where it is. */
+  /**
+   * Leaving writes the cell. Escape picks the chart where it is, the note left where it is
+   * scrolled to; outside the note (the infographic builder), the note's cursor stays put.
+   */
   leave(where) {
-    if (!this.host.outside || where === 'stay' || where === 'blur') return super.leave(where);
+    if (where === 'stay' || where === 'blur' || (where !== 'pick' && !this.host.outside)) return super.leave(where);
     const grid = this.write([this.step(this.close())]);
     grid.dropGhost();
     grid.setPick(null);
-    this.host.left?.(where);
+    if (this.host.outside) this.host.left?.(where);
+    else {
+      this.view.dispatch({ selection: { anchor: this.anchorFor('pick') } });
+      this.view.focus();
+    }
     return grid;
   }
 

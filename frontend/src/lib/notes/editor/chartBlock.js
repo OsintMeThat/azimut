@@ -786,15 +786,17 @@ export class ChartWidget extends BlockWidget {
     // eslint-disable-next-line no-new
     new ChartBox(box, this, view);
     markPicked(box, this.picked);
+    // a press its own parts took (a cell of The numbers, whose words make way for its field) is theirs
+    const theirs = (event) => event.defaultPrevented || !event.target.isConnected || Boolean(event.target.closest('.cm-chart-ui, a'));
     box.addEventListener('mousedown', (event) => {
-      if (event.button !== 0 || event.target.closest('.cm-chart-ui, a')) return;
+      if (event.button !== 0 || theirs(event)) return;
       event.preventDefault();
       // a press picks the chart, which stays drawn; a double press opens its settings
       view.dispatch({ selection: { anchor: view.posAtDOM(box) } });
       view.focus();
     });
     box.addEventListener('dblclick', (event) => {
-      if (event.target.closest('.cm-chart-ui')) return;
+      if (theirs(event)) return;
       event.preventDefault();
       box.chart.toggleSettings(true);
     });
@@ -812,12 +814,26 @@ export class ChartWidget extends BlockWidget {
   }
 
   ignoreEvent(event) {
-    return event.type !== 'mousedown' || Boolean(event.target?.closest?.('.cm-chart-ui'));
+    return event.type !== 'mousedown' || event.defaultPrevented || event.target?.isConnected === false || Boolean(event.target?.closest?.('.cm-chart-ui'));
   }
 
   destroy(dom) {
     releaseHeight(dom);
     dom.chart?.destroy();
+  }
+
+  /**
+   * What its drawn height is kept by: its settings, its columns and how many rows it has, not
+   * what its cells say, so a cell typed in The numbers keeps the height it was drawn at and
+   * the note never jumps while the chart is drawn again.
+   */
+  heightKey() {
+    if (!this.chartKey) {
+      const chart = readChart(this.source);
+      const lines = chart.tableFrom < 0 ? chart.lines : [...chart.lines.slice(0, chart.tableFrom), ...chart.lines.slice(chart.tableTo + 1)];
+      this.chartKey = JSON.stringify(['chart', lines, chart.table?.header ?? null, chart.table?.rows.length ?? 0, this.info.caseId ?? '', this.writable]);
+    }
+    return this.chartKey;
   }
 
   /** The height it was last drawn at, its settings or numbers open included, else a drawing's. */
@@ -1223,7 +1239,8 @@ const THEME = {
   '.cm-chart-data-dot': { color: 'var(--text-3)' },
   '.cm-chart-data .cm-chart-use': { marginLeft: '0' },
   '.cm-chart-data-state': { color: 'var(--warn)' },
-  '.cm-chart-data-spring': { flex: '1' },
+  // Change… stands at the line's end, and at the end of the next one when the name is long
+  '.cm-chart-data .cm-chart-data-change': { marginLeft: 'auto' },
   '.cm-chart-colours': { flexDirection: 'row', alignItems: 'baseline', flexWrap: 'wrap', gap: '6px 10px', paddingLeft: '74px' },
   '.cm-chart-colours[hidden]': { display: 'none' },
   '.cm-chart-swatches': { display: 'inline-flex', flexWrap: 'wrap', gap: '4px 10px', flex: '1 1 0', minWidth: '0' },
