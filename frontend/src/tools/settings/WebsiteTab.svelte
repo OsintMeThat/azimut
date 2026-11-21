@@ -158,7 +158,7 @@
   <OverviewPanel active={tab === 'overview'} {prefs} {github} {ready} {address} {counting} {logoFrom} {fallbackName} ongo={show} />
   <IdentityPanel active={tab === 'identity'} {prefs} {savePrefs} bind:name={nameText} bind:tagline={taglineText} {account} {fallbackName} {shownName}
     {logoFrom} {logoUrl} {address} />
-  <HostingPanel active={tab === 'hosting'} {github} {ready} {address} {readKey} onchange={(value) => (github = value)} />
+  <HostingPanel active={tab === 'hosting'} {ready} {address} {readKey} onchange={(value) => (github = value)} />
   <ArticlesPanel active={tab === 'articles'} {ready} {github} {readKey} />
   <ReadersPanel active={tab === 'readers'} {prefs} {savePrefs} {address} />
   <UpkeepPanel active={tab === 'upkeep'} {ready} {github} {updated} {needs} {setUp} onupdate={update} onsetup={after} />
@@ -210,13 +210,7 @@
   .hub :global(.hub-line > svg) { flex: none; }
   .hub :global(.hub-line[data-state='ok']) { color: var(--ok); }
   .hub :global(.hub-line[data-state='error']) { color: var(--danger); }
-  .hub :global(.hub-line[data-state='busy']) { color: var(--text-2); }
   .hub :global(.hub-line .when) { color: var(--text-3); white-space: nowrap; }
-
-  .hub :global(.hub-spinner) { flex: none; width: 11px; height: 11px; border-radius: 50%; border: 2px solid color-mix(in srgb, var(--accent) 25%, transparent);
-    border-top-color: var(--accent); animation: hub-spin 0.9s linear infinite; }
-  @keyframes -global-hub-spin { to { transform: rotate(360deg); } }
-  @media (prefers-reduced-motion: reduce) { .hub :global(.hub-spinner) { animation: none; } }
 
   .hub :global(.hub-warnings) { list-style: none; margin: 8px 0 0; padding: 0; display: flex; flex-direction: column; gap: 3px; color: var(--warn);
     font-size: var(--fs-xs); line-height: 1.5; }

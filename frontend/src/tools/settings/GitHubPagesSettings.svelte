@@ -6,17 +6,18 @@
    * The account, the repository and the branch save when a field is left; the token
    * goes up once when typed and never comes back, only whether one is kept and its
    * last four characters (`lib/githubPages.js`). Nothing here reaches GitHub but its
-   * presses: Test connection, then Create the repository or Turn on Pages when the
+   * presses, each saying so with a spinner while it waits: Test connection, then Create the repository or Turn on Pages when the
    * test found them missing (`components/GitHubSetupPress.svelte`). The steps are the
    * export dialog's too (`lib/githubPagesSetup.js`), open while something is missing. The tab
    * holding it is handed each state read (`onchange`), for Update the site to know whether it is set up.
    */
+  import BusyLabel from '../../components/BusyLabel.svelte';
   import Icon from '../../components/Icon.svelte';
   import GitHubSetupPress from '../../components/GitHubSetupPress.svelte';
   import HubCard from './website/HubCard.svelte';
   import HubField from './website/HubField.svelte';
   import { toast } from '../../lib/state.svelte.js';
-  import { WEBSITE_HELP as HELP } from '../../lib/websiteSetup.js';
+  import { BUSY, WEBSITE_HELP as HELP } from '../../lib/websiteSetup.js';
   import { forgetGitHub, readGitHub, saveGitHub, testGitHub } from '../../lib/githubPages.js';
   import {
     DEFAULT_BRANCH, DEFAULT_REPO, GITHUB_FIELDS, GITHUB_FREE, PAGES_BY_HAND, PAGES_PUBLIC, PAGES_SIGNUP, PAGES_STEPS, TOKEN_MORE,
@@ -143,13 +144,12 @@
       autocomplete="new-password" spellcheck="false" disabled={state === null} title={HELP.githubToken} />
   </HubField>
   <div class="actions">
-    <button type="button" class="btn btn-sm" onclick={test} disabled={!ready || saving || tested === 'testing'} title={HELP.githubTest}>
-      Test connection</button>
+    <button type="button" class="btn btn-sm" onclick={test} disabled={!ready || saving || tested === 'testing'} aria-busy={tested === 'testing'}
+      title={HELP.githubTest}><BusyLabel busy={tested === 'testing'} text={BUSY.test}>Test connection</BusyLabel></button>
     <button type="button" class="btn btn-ghost btn-sm" onclick={forget} disabled={!state || (!state.account && !state.token.set)}
       title={HELP.githubForget}>Forget</button>
-    <span class="said hub-line" role="status" data-state={tested === 'testing' ? 'busy' : tested?.ok ? 'ok' : tested ? 'error' : ''}>
-      {#if tested === 'testing'}<span class="hub-spinner" aria-hidden="true"></span> Asking GitHub about {state.account}/{state.repo}…
-      {:else if tested}<Icon name={tested.ok ? 'check' : 'alert'} size={12} /> {tested.text}
+    <span class="said hub-line" role="status" data-state={tested === 'testing' ? '' : tested?.ok ? 'ok' : tested ? 'error' : ''}>
+      {#if tested && tested !== 'testing'}<Icon name={tested.ok ? 'check' : 'alert'} size={12} /> {tested.text}
       {:else if ready}<span>Articles go to {state.base}<em>short-name</em>/</span>{/if}
     </span>
   </div>

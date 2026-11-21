@@ -806,28 +806,50 @@ describe('Upkeep: Update the site', () => {
     expect(post).not.toHaveBeenCalled();
   });
 
-  it('asks GitHub on its press only, shows it working in both places, and says the site is up to date', async () => {
+  it('asks GitHub on its press only, shows it working on both presses, and says the site is up to date', async () => {
     await show();
     expect(section('Update the site').getAttribute('data-guide')).toBe('settings.update-site');
     expect(update().disabled).toBe(false);
     expect(post).not.toHaveBeenCalled();
     let answer;
     post.mockImplementation(() => new Promise((resolve) => { answer = resolve; }));
-    update().click();
+    const presses = [update(), button('Update the site', hero())];
+    presses[0].click();
     await settle();
     expect(post).toHaveBeenCalledWith('/api/publishing/github/site');
-    expect(said().dataset.state).toBe('busy');
-    expect(said().textContent).toContain('Updating octo/articles…');
-    expect(update().disabled).toBe(true);
-    // the hero says it too, and cannot be pressed again
-    expect(hero().textContent).toContain('Updating octo/articles…');
-    expect(button('Update the site', hero()).disabled).toBe(true);
+    // the press says it, with a spinner; the hero's is the same press, and cannot be pressed again
+    for (const press of presses) {
+      expect(press.textContent.trim()).toBe('Updating…');
+      expect(press.querySelector('.busy-spin')).not.toBeNull();
+      expect(press.disabled).toBe(true);
+      expect(press.getAttribute('aria-busy')).toBe('true');
+    }
+    expect(said().textContent.trim()).toBe('');
     answer({ ok: true, updated: false, commit: '', written: [], warnings: [], categories: [] });
     await settle();
     expect(said().textContent).toContain('The site is up to date.');
     expect(said().dataset.state).toBe('ok');
     expect(hero().querySelector('[data-state="ok"]').textContent).toMatch(/^Updated today at \d\d:\d\d$/);
-    expect(update().disabled).toBe(false);
+    for (const press of presses) {
+      expect(press.textContent.trim()).toBe('Update the site');
+      expect(press.disabled).toBe(false);
+    }
+  });
+
+  it('is the same press again after a failed update', async () => {
+    await show();
+    let fail;
+    post.mockImplementation(() => new Promise((_, reject) => { fail = reject; }));
+    const press = update();
+    press.click();
+    await settle();
+    expect(press.textContent.trim()).toBe('Updating…');
+    fail(new Error('GitHub refused the token.'));
+    await settle();
+    expect(press.textContent.trim()).toBe('Update the site');
+    expect(press.disabled).toBe(false);
+    expect(press.querySelector('.busy-spin')).toBeNull();
+    expect(said().dataset.state).toBe('error');
   });
 
   it('is pressed from the hero as well, the same press, saying when', async () => {

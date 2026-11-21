@@ -16,7 +16,7 @@
   import { dropFolder, siteRead } from '../../../lib/siteRead.svelte.js';
   import { chipsOf, formatBytes, itemsFor, kindOf, pathOf } from '../../../lib/websiteHub.js';
   import {
-    COLUMNS, DELETE_CONFIRM, DELETE_PRESS, DELETE_TITLE, NO_CATEGORY, OPEN_ITEM, OUTSIDE_AZIMUT, READ_FIRST, READ_FIRST_TITLE, READ_NONE, READ_NONE_TITLE,
+    BUSY, COLUMNS, DELETE_CONFIRM, DELETE_PRESS, DELETE_TITLE, NO_CATEGORY, OPEN_ITEM, OUTSIDE_AZIMUT, READ_FIRST, READ_FIRST_TITLE, READ_NONE, READ_NONE_TITLE,
     TOO_MANY, WEBSITE_HELP as HELP, dayShort, deleteSaid, deletedSaid, placeDegrees,
   } from '../../../lib/websiteSetup.js';
   import KindBadge from './KindBadge.svelte';
@@ -76,7 +76,7 @@
 </script>
 
 <div class="toolbar">
-  <ReadSiteButton {ready} {repository} key={readKey} said={said ?? setUpSaid} />
+  <ReadSiteButton {ready} key={readKey} said={said ?? setUpSaid} />
   {#if chips.length}
     <span class="chips" role="group" aria-label="Show">
       {#each chips as chip (chip.id)}
@@ -153,7 +153,7 @@
 
 {#if confirming}
   <ConfirmDialog title={DELETE_TITLE} message={deleteSaid(confirming.folder, repository)} confirmLabel={DELETE_CONFIRM}
-    tone="danger" busy={deleting} onconfirm={confirm} oncancel={() => { if (!deleting) confirming = null; }} />
+    busyLabel={BUSY.delete} tone="danger" busy={deleting} onconfirm={confirm} oncancel={() => { if (!deleting) confirming = null; }} />
 {/if}
 
 <style>

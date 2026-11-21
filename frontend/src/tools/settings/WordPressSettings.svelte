@@ -5,14 +5,15 @@
    * The address and the username save when a field is left; the application password
    * goes up once when typed and never comes back, only whether one is kept and its
    * last four characters (`lib/wordpress.js`). Nothing here reaches the site but Test
-   * connection, on its press. The steps are the export dialog's too (`lib/wordpressSetup.js`),
+   * connection, on its press, which says so with a spinner while it waits. The steps are the export dialog's too (`lib/wordpressSetup.js`),
    * open while something is missing.
    */
+  import BusyLabel from '../../components/BusyLabel.svelte';
   import Icon from '../../components/Icon.svelte';
   import HubCard from './website/HubCard.svelte';
   import HubField from './website/HubField.svelte';
   import { toast } from '../../lib/state.svelte.js';
-  import { WEBSITE_HELP as HELP } from '../../lib/websiteSetup.js';
+  import { BUSY, WEBSITE_HELP as HELP } from '../../lib/websiteSetup.js';
   import { forgetWordPress, readWordPress, saveWordPress, testWordPress } from '../../lib/wordpress.js';
   import {
     PASSWORD_WHERE, WORDPRESS_COM, WORDPRESS_FIELDS, WORDPRESS_FREE, WORDPRESS_GUIDE, siteHost, wordpressReady,
@@ -123,13 +124,12 @@
       autocomplete="new-password" spellcheck="false" disabled={state === null} title={HELP.wordpressPassword} />
   </HubField>
   <div class="actions">
-    <button type="button" class="btn btn-sm" onclick={test} disabled={!ready || saving || tested === 'testing'} title={HELP.wordpressTest}>
-      Test connection</button>
+    <button type="button" class="btn btn-sm" onclick={test} disabled={!ready || saving || tested === 'testing'} aria-busy={tested === 'testing'}
+      title={HELP.wordpressTest}><BusyLabel busy={tested === 'testing'} text={BUSY.test}>Test connection</BusyLabel></button>
     <button type="button" class="btn btn-ghost btn-sm" onclick={forget} disabled={!state || (!state.site && !state.user && !state.password.set)}
       title={HELP.wordpressForget}>Forget</button>
-    <span class="said hub-line" role="status" data-state={tested === 'testing' ? 'busy' : tested?.ok ? 'ok' : tested ? 'error' : ''}>
-      {#if tested === 'testing'}<span class="hub-spinner" aria-hidden="true"></span> Signing in to {siteHost(state?.site)}…
-      {:else if tested}<Icon name={tested.ok ? 'check' : 'alert'} size={12} /> {tested.text}
+    <span class="said hub-line" role="status" data-state={tested === 'testing' ? '' : tested?.ok ? 'ok' : tested ? 'error' : ''}>
+      {#if tested && tested !== 'testing'}<Icon name={tested.ok ? 'check' : 'alert'} size={12} /> {tested.text}
       {:else if ready}Drafts go to {siteHost(state.site)} as {state.user}.{/if}
     </span>
   </div>

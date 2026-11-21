@@ -7705,7 +7705,8 @@ replaces its page; git keeps every earlier version. When the repository is missi
 Pages is off, the press writes nothing and the dialog offers **Create the repository** or
 **Turn on Pages**, each saying what it does; a token that may not do it is told the way
 on github.com. While GitHub is not set up, the press shows how to connect it and a way to
-Settings › Website. `POST /notes/{id}/github` does it (`engine/githubpages.py`), and
+Settings › Website. While it works the press reads *Publishing…* beside a spinner, as **Read the site**
+reads *Reading…*, and the dialog says *Making the folder and sending it to octo/articles…*. `POST /notes/{id}/github` does it (`engine/githubpages.py`), and
 `POST /api/publishing/github/build` answers the watch.
 
 **Your site.** The same press keeps the site beside the folder, in the same commit
@@ -8943,7 +8944,10 @@ tab is in the tab order, and the publish dialog's *Name the site* opens Identity
 `site_title`, `site_tagline`, `site_credit_azimut`, `site_stats`, `site_stats_code` and
 `site_stats_token`, which save when a field is left and travel in the settings backup. The words are in
 `lib/websiteSetup.js`, what is worked out of them in `lib/websiteHub.js`, one component per panel in
-`tools/settings/website/`.
+`tools/settings/website/`. Every press that waits on an answer says so on itself: disabled, its words
+turned to *Reading…*, *Updating…*, *Testing…*, *Deleting…*, *Starting…* (or *Creating…*, *Turning on…*
+for the setup presses) beside a small spinner, and the same press again once the answer comes, a
+failure included (`components/BusyLabel.svelte`, the one spinner of the hub and the publish window).
 
 **The read.** **Read the site** (`POST /api/publishing/github/site/read`), on Articles and in Hosting's
 Limits, reads the branch's tree and cards and writes nothing: its address, whether the home page is
@@ -9023,7 +9027,7 @@ site's address, each with a **Copy** press.
 **Upkeep.** *Keep it in shape*. **Update the site** is one press that rebuilds the home, list, feed and sitemap
 from the articles on GitHub, and gives each article the bar the site asks for (below), in one commit, with no
 note published (`POST /api/publishing/github/site`), also
-in the hero: it shows a spinner, then *The site is up to date.* or how many files were written and when, with
+in the hero: the press reads *Updating…*, then *The site is up to date.* or how many files were written and when, with
 what the server says to mind, or the last change the read found. It is disabled until GitHub is set up, saying
 so on hover, and a missing repository or a Pages that is off shows the press that makes it. **Who writes what**
 says which files are Azimut's and which stay the analyst's, with the pages the read found marked and

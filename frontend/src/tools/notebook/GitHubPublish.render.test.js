@@ -210,6 +210,55 @@ it('reads the site\'s categories on a press of its own, and says what the read f
   expect(target.querySelector('#export-category-said').textContent).toContain('too many files');
 });
 
+it('says it is reading on the press, with a spinner, and is the same press again after a failure', async () => {
+  serve();
+  let fail;
+  post.mockImplementation(() => new Promise((_, reject) => { fail = reject; }));
+  show();
+  await settle();
+  const press = button('Read the site');
+  press.click();
+  await settle();
+  expect(press.textContent.trim()).toBe('Reading…');
+  expect(press.querySelector('.busy-spin')).not.toBeNull();
+  expect(press.disabled).toBe(true);
+  expect(press.getAttribute('aria-busy')).toBe('true');
+  fail(new Error('GitHub did not answer.'));
+  await settle();
+  expect(press.textContent.trim()).toBe('Read the site');
+  expect(press.disabled).toBe(false);
+  expect(press.querySelector('.busy-spin')).toBeNull();
+  expect(target.querySelector('[role="alert"]').textContent).toContain('GitHub did not answer.');
+});
+
+it('says what it sends while it publishes, and Replace it waits with it', async () => {
+  serve();
+  let release;
+  post.mockImplementation(async (path) => {
+    if (path.endsWith('/github/check')) return TAKEN;
+    if (path.endsWith('/pdf/diagrams')) return { diagrams: [] };
+    return new Promise((resolve) => { release = () => resolve(PUBLISHED); });
+  });
+  show();
+  await settle();
+  await live.publish();
+  await settle();
+  const replace = button('Replace it');
+  const publishing = live.publish();
+  await settle();
+  expect(bound.busy).toBe(true);
+  expect(target.querySelector('.sending').textContent.trim()).toBe('Making the folder and sending it to octo/articles…');
+  expect(target.querySelector('.sending .busy-spin')).not.toBeNull();
+  expect(replace.textContent.trim()).toBe('Publishing…');
+  expect(replace.disabled).toBe(true);
+  expect(button('Pick another address').disabled).toBe(true);
+  release();
+  expect((await publishing).published).toBe(true);
+  await settle();
+  expect(bound.busy).toBe(false);
+  expect(target.querySelector('.sending')).toBeNull();
+});
+
 it('shows the press that sets the site up when the read finds Pages off', async () => {
   serve();
   post.mockResolvedValue({ ok: false, needs: 'pages', detail: 'Pages is off for octo/articles.' });

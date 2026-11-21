@@ -127,6 +127,11 @@ export function updateSaid(answer) {
   return count ? `The site is updated: ${count} file${count === 1 ? '' : 's'} written.` : 'The site is updated.';
 }
 
+/** What a press says while it waits on its answer, beside a small spinner (`components/BusyLabel.svelte`). */
+export const BUSY = Object.freeze({
+  read: 'Reading…', publish: 'Publishing…', update: 'Updating…', delete: 'Deleting…', test: 'Testing…', start: 'Starting…',
+});
+
 export const LEGAL_PRESS = 'Start a Legal notice page';
 export const LEGAL_SAID = 'It names GitHub as the host and leaves the publisher lines to you.';
 export const LEGAL_NO_CASE = 'Open a case first: the page is a note of that case';
@@ -209,9 +214,6 @@ export function readersSaid(counter) {
 }
 export function changedSaid(when) {
   return `Last change ${when}`;
-}
-export function updatingSaid(repository) {
-  return `Updating ${repository}…`;
 }
 export function updatedSaid(when) {
   return `Updated ${when}`;
@@ -373,9 +375,6 @@ export const LIMITS_LINK_TEXT = 'GitHub\'s limits';
 export const READ_PRESS = 'Read the site';
 export const READ_AGAIN = 'Read the site again';
 export const READ_NOT_SET = 'Set up GitHub Pages under Hosting first';
-export function readingSaid(repository) {
-  return `Reading ${repository}…`;
-}
 export function readAtSaid(when) {
   return `Read ${when}`;
 }
@@ -422,7 +421,6 @@ export const PAGES_NOTE = 'Each starts as a note in the open case, with the host
 export const PRIVACY_PRESS = 'Start a Privacy page';
 export const PRIVACY_SAID = 'It names the host and what the counter records.';
 export const PAGE_ON_SITE = 'On the site';
-export const STARTING = 'Starting…';
 
 // readers
 

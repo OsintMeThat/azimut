@@ -132,21 +132,43 @@ describe('reading the site', () => {
     expect(button('Read the site again')).toBeTruthy();
   });
 
-  it('shows it working, and presses once even when pressed twice', async () => {
+  it('says it is reading on the press itself, with a spinner, and presses once even when pressed twice', async () => {
     await show();
     let answer;
     serve({ read: () => new Promise((resolve) => { answer = resolve; }) });
-    button('Read the site').click();
+    const press = button('Read the site');
+    press.click();
     await settle();
-    expect(status().textContent).toContain('Reading octo/articles…');
-    expect(status().dataset.state).toBe('busy');
-    expect(button('Read the site').disabled).toBe(true);
-    button('Read the site').click();
+    expect(press.textContent.trim()).toBe('Reading…');
+    expect(press.querySelector('.busy-spin')).not.toBeNull();
+    expect(press.disabled).toBe(true);
+    expect(press.getAttribute('aria-busy')).toBe('true');
+    // the press says it, so the line beside it says nothing more
+    expect(status().textContent.trim()).toBe('');
+    press.click();
     await settle();
     expect(asks('/api/publishing/github/site/read')).toHaveLength(1);
     answer(READ);
     await settle();
     expect(rows()).toHaveLength(6);
+    expect(press.textContent.trim()).toBe('Read the site again');
+    expect(press.querySelector('.busy-spin')).toBeNull();
+    expect(press.getAttribute('aria-busy')).toBe('false');
+  });
+
+  it('is the same press again after a failed read', async () => {
+    await show();
+    let fail;
+    serve({ read: () => new Promise((_, reject) => { fail = reject; }) });
+    const press = button('Read the site');
+    press.click();
+    await settle();
+    expect(press.disabled).toBe(true);
+    fail(new Error('GitHub did not answer.'));
+    await settle();
+    expect(press.textContent.trim()).toBe('Read the site');
+    expect(press.disabled).toBe(false);
+    expect(press.querySelector('.busy-spin')).toBeNull();
   });
 
   it('cannot read while GitHub is not set up, and says so on hover', async () => {
@@ -355,6 +377,32 @@ describe('deleting an article', () => {
     expect(status().textContent).toMatch(/^Read today at/);
   });
 
+  it('says it is deleting on the confirm press, with a spinner, and is the same press again when refused', async () => {
+    await show();
+    await readSite();
+    let fail;
+    serve({ deleted: () => new Promise((_, reject) => { fail = reject; }) });
+    button('Delete', row('bab')).click();
+    await settle();
+    const confirm = button('Delete from the site', dialog());
+    confirm.click();
+    await settle();
+    expect(confirm.textContent.trim()).toBe('Deleting…');
+    expect(confirm.querySelector('.busy-spin')).not.toBeNull();
+    expect(confirm.disabled).toBe(true);
+    expect(confirm.getAttribute('aria-busy')).toBe('true');
+    expect(button('Cancel', dialog()).disabled).toBe(true);
+    fail(refused(409, 'The branch changed on GitHub while Azimut was deleting: press Delete again.'));
+    await settle();
+    // refused, the dialog is gone and the row's own Delete is there to press again
+    expect(dialog()).toBeNull();
+    expect(button('Delete', row('bab')).disabled).toBe(false);
+    button('Delete', row('bab')).click();
+    await settle();
+    expect(button('Delete from the site', dialog()).textContent.trim()).toBe('Delete from the site');
+    expect(button('Delete from the site', dialog()).querySelector('.busy-spin')).toBeNull();
+  });
+
   it('says only that the folder went when the server counted nothing it removed', async () => {
     await show();
     await readSite();
@@ -469,6 +517,26 @@ describe('pages every site should have', () => {
     start('Start a Privacy page').click();
     await settle();
     expect(uiState.openNotebook).toEqual({ noteId: 'n3' });
+  });
+
+  it('says it is starting on the press, with a spinner, and is the same press again after a failure', async () => {
+    caseState.current = { id: 'c1', name: 'Port strike' };
+    await show();
+    let fail;
+    post.mockImplementation(() => new Promise((_, reject) => { fail = reject; }));
+    const press = start('Start a Legal notice page');
+    press.click();
+    await settle();
+    expect(press.textContent.trim()).toBe('Starting…');
+    expect(press.querySelector('.busy-spin')).not.toBeNull();
+    expect(press.getAttribute('aria-busy')).toBe('true');
+    // one at a time: the other press waits too
+    expect(start('Start a Privacy page').disabled).toBe(true);
+    fail(new Error('The case is read-only.'));
+    await settle();
+    expect(press.textContent.trim()).toBe('Start a Legal notice page');
+    expect(press.querySelector('.busy-spin')).toBeNull();
+    expect(press.disabled).toBe(false);
   });
 
   it('says when a page could not be started, and stays on Settings', async () => {

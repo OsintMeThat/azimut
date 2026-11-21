@@ -9,6 +9,7 @@
    * within minutes. What the publish had to say of the site (`site.warnings`: a list left as it
    * was, a file that is the analyst's) is listed under it.
    */
+  import BusyLabel from '../../components/BusyLabel.svelte';
   import Icon from '../../components/Icon.svelte';
   import { copyText } from '../../lib/clipboard.js';
   import { watchBuild } from '../../lib/githubPages.js';
@@ -59,8 +60,7 @@
     <p class="line bad" role="alert"><Icon name="alert" size={15} />
       <span>Published, but GitHub could not build the page{detail ? `: ${detail.replace(/\.$/, '')}` : ''}.</span></p>
   {:else}
-    <p class="line" role="status"><span class="spinner" aria-hidden="true"></span>
-      <span>Published to {result.repository}. GitHub is building the page…</span></p>
+    <p class="line" role="status"><BusyLabel busy text="Published to {result.repository}. GitHub is building the page…" /></p>
     <p class="quiet">Usually about a minute. It will live at {result.address}</p>
   {/if}
   <div class="actions">
@@ -91,8 +91,4 @@
   .minded :global(svg) { flex: none; margin-top: 2px; }
   .actions { display: flex; gap: 8px; margin-top: 4px; }
   .actions .btn { display: inline-flex; align-items: center; gap: 5px; text-decoration: none; }
-  .spinner { flex: none; width: 13px; height: 13px; border-radius: 50%; border: 2px solid color-mix(in srgb, var(--accent) 25%, transparent);
-    border-top-color: var(--accent); animation: spin 0.9s linear infinite; }
-  @keyframes spin { to { transform: rotate(360deg); } }
-  @media (prefers-reduced-motion: reduce) { .spinner { animation: none; } }
 </style>

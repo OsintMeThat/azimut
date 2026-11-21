@@ -86,6 +86,25 @@ it('tests the connection on its press and says who it signed in as, or why not',
   expect(target.textContent).toContain('WordPress refused the password');
 });
 
+it('says it is testing on the press, with a spinner, and is the same press again after a failure', async () => {
+  get.mockResolvedValue({ wordpress: SET });
+  live = mount(WordPressSettings, { target });
+  await settle();
+  let fail;
+  post.mockImplementation(() => new Promise((_, reject) => { fail = reject; }));
+  const press = button('Test connection');
+  press.click();
+  await settle();
+  expect(press.textContent.trim()).toBe('Testing…');
+  expect(press.querySelector('.busy-spin')).not.toBeNull();
+  expect(press.disabled).toBe(true);
+  fail(new Error('The site did not answer.'));
+  await settle();
+  expect(press.textContent.trim()).toBe('Test connection');
+  expect(press.disabled).toBe(false);
+  expect(target.querySelector('.said').dataset.state).toBe('error');
+});
+
 it('forgets the site on this computer', async () => {
   get.mockResolvedValue({ wordpress: SET });
   del.mockResolvedValue(NOTHING);

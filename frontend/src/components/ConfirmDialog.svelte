@@ -1,4 +1,5 @@
 <script>
+  import BusyLabel from './BusyLabel.svelte';
   import Icon from './Icon.svelte';
   import { portal } from '../lib/fullscreen.js';
   import { isTopOverlay, joinOverlays } from '../lib/overlayStack.js';
@@ -25,6 +26,8 @@
     impact = null,
     restorable = '',
     confirmLabel = 'Confirm',
+    // what the confirm button says, beside a spinner, while `busy`
+    busyLabel = 'Working…',
     cancelLabel = 'Cancel',
     tone = 'default', // 'danger' | 'default'
     icon = tone === 'danger' ? 'trash' : 'folderMinus',
@@ -116,8 +119,9 @@
         class="btn {tone === 'danger' ? 'btn-danger' : 'btn-primary'}"
         onclick={onconfirm}
         disabled={busy || reaching || blocked}
+        aria-busy={busy}
       >
-        {busy ? 'Working…' : confirmLabel}
+        <BusyLabel {busy} text={busyLabel}>{confirmLabel}</BusyLabel>
       </button>
     </div>
   </div>

@@ -43,6 +43,7 @@
    * up and the press that follows publishes anyway: a warning, never a stop, and a check that fails just
    * publishes. A folder Azimut did not make is never replaced, so that one offers another address only.
    */
+  import BusyLabel from '../../components/BusyLabel.svelte';
   import Icon from '../../components/Icon.svelte';
   import GitHubSetupPress from '../../components/GitHubSetupPress.svelte';
   import { prefs, toast, uiState } from '../../lib/state.svelte.js';
@@ -54,7 +55,7 @@
   import { foldText } from '../../lib/textFold.js';
   import { siteName } from '../../lib/websiteHub.js';
   import {
-    AUTHOR_IMAGE_LABEL, AUTHOR_IMAGE_NONE, AUTHOR_LABEL, AUTHOR_MAX,
+    AUTHOR_IMAGE_LABEL, AUTHOR_IMAGE_NONE, AUTHOR_LABEL, AUTHOR_MAX, BUSY,
     CATEGORY_MAX, CATEGORY_SAID, HAND_EDITED, LIST_IMAGE_COVER, NO_NAME_PRESS, ON_SITE, PICK_ANOTHER, PLACE_COORDS_LABEL, PLACE_COORDS_PLACEHOLDER,
     PLACE_NAME_LABEL, PLACE_NAME_MAX, PLACE_NAME_PLACEHOLDER, PLACE_TITLE, PLACE_WHY, REPLACE_PRESS, WEBSITE_HELP as HELP, noNameSaid, onSiteSaid,
     placeText, placeUseSaid, readPlace, takenOutsideSaid, takenSaid,
@@ -485,8 +486,8 @@
           <datalist id="export-categories">
             {#each suggestions as name (name)}<option value={name}></option>{/each}
           </datalist>
-          <button type="button" class="btn btn-ghost btn-sm" onclick={readSite} disabled={reading || busy} title={HELP.publishRead}>
-            {reading ? 'Reading…' : 'Read the site'}</button>
+          <button type="button" class="btn btn-ghost btn-sm" onclick={readSite} disabled={reading || busy} aria-busy={reading}
+            title={HELP.publishRead}><BusyLabel busy={reading} text={BUSY.read}>Read the site</BusyLabel></button>
         </div>
         <p id="export-category-said" class="address-said" role="status">{readSaid || CATEGORY_SAID}</p>
         <span class="lbl">Picture in the list</span>
@@ -524,8 +525,7 @@
     </div>
 
     {#if busy}
-      <p class="sending" role="status"><span class="spinner" aria-hidden="true"></span>
-        Making the folder and sending it to {github.account}/{github.repo}…</p>
+      <p class="sending" role="status"><BusyLabel busy text="Making the folder and sending it to {github.account}/{github.repo}…" /></p>
     {/if}
     {#if held}
       <div class="held" role="alert">
@@ -536,7 +536,8 @@
             <button type="button" class="btn btn-sm" title={HELP.publishStop} onclick={() => (held = null)}>Don't publish</button>
           {:else}
             {#if held.ours}
-              <button type="button" class="btn btn-sm" disabled={busy} title={HELP.publishReplace} onclick={() => onpublish()}>{REPLACE_PRESS}</button>
+              <button type="button" class="btn btn-sm" disabled={busy} aria-busy={busy} title={HELP.publishReplace}
+                onclick={() => onpublish()}><BusyLabel {busy} text={BUSY.publish}>{REPLACE_PRESS}</BusyLabel></button>
             {/if}
             <button type="button" class="btn btn-sm" disabled={busy} title={HELP.publishPickAnother} onclick={pickAnother}>{PICK_ANOTHER}</button>
           {/if}
@@ -612,10 +613,6 @@
   .place-why { color: var(--text-3); font-size: var(--fs-xs); }
   .gh :global(.needs) { margin-top: 6px; }
   .sending { display: flex; align-items: center; gap: 7px; margin: 4px 0 0; color: var(--text-2); font-size: var(--fs-xs); }
-  .spinner { flex: none; width: 11px; height: 11px; border-radius: 50%; border: 2px solid color-mix(in srgb, var(--accent) 25%, transparent);
-    border-top-color: var(--accent); animation: spin 0.9s linear infinite; }
-  @keyframes spin { to { transform: rotate(360deg); } }
-  @media (prefers-reduced-motion: reduce) { .spinner { animation: none; } }
   .held { display: flex; flex-direction: column; align-items: flex-start; gap: 6px; margin-top: 6px; border: 1px solid color-mix(in srgb, var(--warn) 45%, var(--border));
     border-radius: var(--r-md); padding: 8px 12px; background: color-mix(in srgb, var(--warn) 7%, var(--bg-1)); }
   .held p { display: flex; align-items: center; gap: 6px; margin: 0; color: var(--text-1); font-size: var(--fs-sm); overflow-wrap: anywhere; }
