@@ -17,20 +17,24 @@
    * the one picked is written with its columns and no row, and its form opens in its card
    * (`editor/chartForm.js`). Nothing is made of numbers the note does not hold.
    *
-   * Pressing a chart's row opens the chart's own settings card (`editor/chartCard.js`) under
-   * it: title, what it counts, by what, coloured by what, and Edit the data, the kind's form;
-   * each choice writes that panel's lines inside the infographic, one Undo each. The look is
+   * Pressing a chart's row opens its card under it: its Data line (Page data or Own rows, one
+   * press apart, where the rows live and the press that edits them there), then Settings, the
+   * chart's own card (`editor/chartCard.js`: title, what it counts, by what, coloured by what),
+   * or The numbers, its rows in the grid a chart's numbers are (`editor/panelRows.js`), with
+   * *As a form* where the kind's form fits; each choice writes that panel's lines inside the
+   * infographic, one Undo each. The look is
    * the page's, set once below. A map's row opens the map's own card (`editor/infographicMap.js`):
    * the map drawn, to frame and draw on, and its five tabs, each choice one Undo inside the page,
    * Size left to the row's Half or Wide. A press on a panel of the page in the note opens the
    * builder with that panel's card open.
    *
-   * On top, the **Data** bar: what the page's charts are drawn from (`data:`, a sheet of the
-   * case or a table of a note), its rows, how many panels read it and whether it changed since
-   * (`editor/infographicData.js`), with *Read again (all panels)* and *Change…* (the source
-   * picker, `components/DataPicker.svelte`), each one change and one Undo. With data, Add a
-   * panel offers the data's rows first, and a panel's card says where its rows come from. A
-   * chart made from scratch, or whose rows its form wrote, says `rows: own` and never takes it.
+   * On top, the **Data** bar, said as a chart's Data line is (`editor/dataLine.js`): what the
+   * page's charts are drawn from (`data:`, a sheet of the case or a table of a note), the press
+   * that edits it there, its rows and how many panels read it (`editor/infographicData.js`),
+   * and *Change…* (the source picker, `components/DataPicker.svelte`), one change and one Undo.
+   * The panels that read it follow it by themselves (`editor/follow.js`). With data, Add a
+   * panel offers the data's rows first. A chart made from scratch, or whose rows its form
+   * wrote, says `rows: own` and never takes it.
    *
    * **Start from a template…** lays the page out as a figure template of Settings › Templates ›
    * Figures, or a ready one (`components/FigureTemplatePicker.svelte`): its panels read the
@@ -58,7 +62,9 @@
   import { mapPanel } from '../../lib/notes/editor/infographicMap.js';
   import { chartKinds, drawChart } from '../../lib/notes/editor/chartFigure.js';
   import { chartForm, chartSettings, rowsSaid, scratchGallery, starterBlock } from '../../lib/notes/editor/chartCard.js';
-  import { OWN_ROWS, compareRows, readChart, withSettings, withTable } from '../../lib/notes/editor/chartText.js';
+  import { OWN_ROWS, compareRows, readChart, setting, withSettings, withTable } from '../../lib/notes/editor/chartText.js';
+  import { ELSEWHERE, LOCAL, OWN, anchorName, dataWords, sourceOf } from '../../lib/notes/editor/dataLine.js';
+  import { readForm } from '../../lib/notes/editor/chartFormText.js';
   import Icon from '../../components/Icon.svelte';
   import BackButton from '../../components/BackButton.svelte';
   import FloatingMenu from '../../components/FloatingMenu.svelte';
@@ -66,8 +72,8 @@
   import FigureTemplatePicker from '../../components/FigureTemplatePicker.svelte';
   import { pageFromTemplate } from '../../lib/notes/figureTemplates.js';
   import { openEntity } from '../../lib/navigate.js';
-  import { dataLabel, dataPanel, dataSaid, dataState, readData } from '../../lib/notes/editor/infographicData.js';
-  import { dataOf, inheritingPanels, withDataRows, withDataSource } from '../../lib/notes/editor/infographicText.js';
+  import { dataPanel, dataSaid, dataState, pageWords, readData } from '../../lib/notes/editor/infographicData.js';
+  import { dataOf, withDataSource } from '../../lib/notes/editor/infographicText.js';
   import { chartSeed, infographicSeed } from '../../lib/notes/dataSeed.js';
 
   let {
@@ -148,7 +154,10 @@
     const run = ++dataAsked;
     const answer = await dataState({ caseId, noteId: noteKey, noteText: now, source: one.source, fresh })
       .catch((error) => ({ data: { error: error?.message ?? String(error) }, panels: { inheriting: [], own: [], differs: [] } }));
-    if (run === dataAsked) data = answer;
+    if (run !== dataAsked) return;
+    data = answer;
+    // the panels that read the data follow it by themselves, one step Undo takes back
+    if (answer.data?.found && answer.panels.differs.length) editor?.follow?.(dataOf(one.source), answer.data.text);
   }
   // said again soon after the note changes, and when the window comes back (a sheet edited meanwhile)
   $effect(() => {
@@ -165,22 +174,14 @@
   $effect(() => {
     if (uiState.tool === 'notebook') untrack(() => readDataNow({ fresh: true }));
   });
-  const dataName = $derived(data.data ? dataLabel(data.data) : 'None');
+  const dataOrigin = $derived(block ? dataOf(block.source) : '');
+  /** The Data bar's words, a chart's own: where the page's rows live and the press that edits them there. */
+  const dataWordsNow = $derived(pageWords(dataOrigin, data.data, {
+    noteId: noteKey,
+    held: Boolean(data.data?.found && data.panels.differs.length && editor?.heldBack?.(dataOrigin, data.data.text)),
+  }));
+  const dataName = $derived(dataWordsNow.name);
   const dataLine = $derived(dataSaid(data.data, data.panels));
-  /** Read again (all panels): the data's rows, read now, into every panel that takes it, as one change. */
-  async function readAgainAll() {
-    const now = editor?.text?.() ?? text;
-    const one = infographicsIn(now)[k];
-    if (!one) return;
-    const fresh = await dataState({ caseId, noteId: noteKey, noteText: now, source: one.source, fresh: true });
-    data = fresh;
-    if (!fresh.data?.found) return;
-    closeCard();
-    const count = fresh.panels.inheriting.length;
-    if (edit((source) => withDataRows(source, fresh.data.text, inheritingPanels(source, fresh.data.columns)))) {
-      toast(`${count} panel${count === 1 ? '' : 's'} read again from ${dataLabel(fresh.data)}`, 'ok', 3000);
-    }
-  }
   /** Change…: the page's data set to the source picked, the panels that fit it taking it, as one change. */
   function chooseData({ origin, data: picked }) {
     dataPick = null;
@@ -189,13 +190,24 @@
     let made = null;
     if (edit((source) => { made = withDataSource(source, origin, picked.text); return made.text; })) {
       const count = made.panels.length;
-      toast(`Data: ${dataLabel(picked)}. ${count ? `${count} panel${count === 1 ? ' reads' : 's read'} it.` : 'No panel has its columns yet: Add a panel draws one from it.'}`, 'ok', 4000);
+      const name = pageWords(origin, picked, { noteId: noteKey }).name;
+      toast(`Data: ${name}. ${count ? `${count} panel${count === 1 ? ' reads' : 's read'} it.` : 'No panel has its columns yet: Add a panel draws one from it.'}`, 'ok', 4000);
     }
     readDataNow();
   }
-  function openData() {
-    const origin = data.data?.origin ?? '';
-    if (data.data?.kind === 'sheet' && data.data.found) openEntity({ id: origin.replace(/^\s*sheet\s*:\s*/i, ''), type: 'sheet' });
+  /** Whether a Data line's press can act here: a sheet opens where the app's tools are around the builder. */
+  function canAct(act, mode) {
+    if (act === 'sheet') return tools;
+    if (act === 'table') return mode === LOCAL || tools;
+    return act === 'edit';
+  }
+  /** Open in Sheet, or Go to the table: where the rows `origin` names live. */
+  function actOn(act, origin, found = null) {
+    const { mode, id } = sourceOf(origin, noteKey);
+    if (act === 'sheet') openEntity({ id, type: 'sheet' });
+    else if (act === 'table' && mode === LOCAL) {
+      if (Number.isInteger(found?.line)) editor?.jump?.(found.line);
+    } else if (act === 'table' && mode === ELSEWHERE) openEntity({ id, type: 'note' });
   }
 
   // -- the title band ------------------------------------------------------------------
@@ -241,7 +253,10 @@
   /** The tab a map's card opens on: the one picked last. */
   let mapTab = $state('look');
   let cardForm = $state(false);
+  /** What a chart's card shows under its Data line: its settings, or its rows in a grid. */
+  let cardTab = $state('settings');
   let cardHost = $state(null);
+  let rowsHost = $state(null);
   let cardDrawn = $state(null);
   let card = null;
   const cardText = $derived(carded >= 0 && block ? panelText(block.source, carded) : '');
@@ -251,6 +266,7 @@
     card = null;
     carded = -1;
     cardForm = false;
+    cardTab = 'settings';
     cardDrawn = null;
   }
   function pressRow(index, one) {
@@ -283,7 +299,8 @@
     const host = cardHost;
     const index = carded;
     const form = cardForm;
-    if (!host || index < 0) return;
+    const tab = cardTab;
+    if (!host || index < 0 || (tab === 'rows' && !form && read?.panels[index]?.kind === 'chart')) return;
     // made once per panel opened: what it reads later is read when it is drawn again, not here
     let made = null;
     untrack(() => {
@@ -306,8 +323,6 @@
             return { chart: readChart(now), drawn: cardDrawn };
           },
           write,
-          source: caseId ? { said: () => panelSource(index), change: (anchor) => (dataPick = { anchor, panel: index }) } : null,
-          editData: () => { card?.commit(); cardForm = true; },
           templates: true,
         });
       card.focus();
@@ -373,41 +388,95 @@
       },
     });
   }
-  /** What a panel's row says of its rows: read from the data (changed since), or its own source. */
+  /** What a panel's row says of its rows: the page's data, its own rows, or a source of its own. */
   function panelFrom(index) {
-    if (data.panels.differs.includes(index)) return 'data changed';
-    if (data.panels.inheriting.includes(index)) return 'from the data';
-    return data.panels.own.includes(index) ? 'its own source' : '';
+    if (read?.panels[index]?.kind !== 'chart' || !data.data?.found) return data.panels.own.includes(index) ? 'its own source' : '';
+    if (data.panels.inheriting.includes(index)) return 'page data';
+    return data.panels.own.includes(index) ? 'its own source' : 'own rows';
   }
 
-  /** Where panel `index`'s rows come from, for its card's Data line. */
-  let ownSource = $state({ origin: '', name: '', state: '' });
-  function panelSource(index) {
-    if (data.panels.inheriting.includes(index)) {
-      return { name: `The infographic’s: ${dataName}`, state: data.panels.differs.includes(index) ? 'differs' : '' };
-    }
-    const origin = read?.panels[index]?.origin ?? '';
-    if (!origin || ownSource.origin !== origin) return { name: origin ? 'Its own source' : '', state: '' };
-    return { name: ownSource.name, state: ownSource.state };
-  }
-  // a panel with its own `from:`: its source read when its card opens
+  /** A panel with its own `from:`: that source read when its card opens, for its Data line. */
+  let ownSource = $state({ origin: '', data: null });
   $effect(() => {
     const origin = carded >= 0 ? read?.panels[carded]?.origin ?? '' : '';
     if (!origin || !caseId) return;
     let live = true;
     readData({ caseId, noteId: noteKey, noteText: untrack(() => editor?.text?.() ?? text), origin }).then((found) => {
       if (!live) return;
+      ownSource = { origin, data: found };
+      // a panel's own source is followed as the page's data is
       const now = carded >= 0 ? readChart(panelText(block?.source ?? '', carded)).table : null;
-      ownSource = { origin, name: dataLabel(found), state: !found.found ? 'gone' : now && compareRows(now, found.table) !== 'same' ? 'differs' : '' };
-      untrack(() => card?.refresh());
+      if (found.found && now && compareRows(now, found.table) === 'differs') editor?.follow?.(origin, found.text);
     });
     return () => { live = false; };
   });
-  // the card's Data line says again what the bar says, the data read afresh
+  /** Whether panel `index` reads the page's data rather than rows of its own. */
+  const pageData = (index) => data.panels.inheriting.includes(index);
+  /** The words of panel `index`'s Data line: the page's data, a source of its own, or its own rows. */
+  function panelWords(index) {
+    if (pageData(index)) return dataWordsNow;
+    const origin = read?.panels[index]?.origin ?? '';
+    if (!origin) return dataWords({ mode: OWN });
+    const { mode, anchor } = sourceOf(origin, noteKey);
+    const found = ownSource.origin === origin ? ownSource.data : null;
+    if (!found) return dataWords({ mode, name: mode === ELSEWHERE ? anchorName(anchor) : '' });
+    return pageWords(origin, found, { noteId: noteKey });
+  }
+  /** The origin panel `index`'s rows live at, for its Data line's press. */
+  const panelOriginOf = (index) => (pageData(index) ? dataOrigin : read?.panels[index]?.origin ?? '');
+  /** Its Data line's press: Edit opens its rows, Open in Sheet the sheet, Go to the table the table. */
+  function panelAct(index, act) {
+    if (act === 'edit') {
+      card?.commit();
+      cardForm = false;
+      cardTab = 'rows';
+      return;
+    }
+    const origin = panelOriginOf(index);
+    actOn(act, origin, pageData(index) ? data.data : ownSource.origin === origin ? ownSource.data : null);
+  }
+  /** Page data or Own rows, one press: the page's rows copied in, or the panel's kept as its own. */
+  function setPanelRows(index, page) {
+    if (page === pageData(index)) return;
+    if (page) choosePanelSource(index, { inherit: true });
+    else edit((source) => withPanelText(source, index, withSettings(panelText(source, index), { from: '', rows: OWN_ROWS })));
+  }
+
+  // its rows in the grid a chart's numbers are, written through the note (`editor/panelRows.js`)
+  let rowsGrid = null;
   $effect(() => {
-    void data;
-    untrack(() => card?.refresh());
+    const host = rowsHost;
+    const index = carded;
+    if (!host || index < 0 || cardTab !== 'rows' || cardForm) return;
+    untrack(() => {
+      rowsGrid = editor?.panelGrid?.(host, {
+        k,
+        index,
+        columns: () => (data.data?.found ? data.data.columns : null),
+        idle: () => idleOf(cardDrawn, readChart(panelText(block?.source ?? '', index)).table),
+        tools: () => (readForm(panelText(block?.source ?? '', index), cardDrawn?.kind?.name ?? '').form
+          ? [{ label: 'As a form', iconName: 'sliders', title: 'Its rows in a form made for its kind', run: () => { cardForm = true; } }] : []),
+        say: (words) => toast(words, 'warn', 6000),
+      }) ?? null;
+    });
+    return () => {
+      rowsGrid?.destroy();
+      rowsGrid = null;
+    };
   });
+  $effect(() => {
+    void cardText;
+    void cardDrawn;
+    void data;
+    untrack(() => rowsGrid?.refresh());
+  });
+  /** The columns a panel's drawing does not read (`drawn`, its kind's), greyed in its grid. */
+  function idleOf(drawn, table) {
+    const read = drawn?.kind?.drawn;
+    if (!Array.isArray(read) || !table) return new Set();
+    return new Set(table.header.map((_, at) => at).filter((at) => !read.includes(at)));
+  }
+
   /** A panel's Change…: the infographic's data, or a source of its own, its rows read in, as one change. */
   function choosePanelSource(index, choice) {
     dataPick = null;
@@ -594,18 +663,17 @@
         <h3 class="ib-head" id="ib-data">Data <span class="ib-aside">what its charts are drawn from</span></h3>
         <p class="ib-data-line">
           <Icon name={data.data?.kind === 'sheet' ? 'grid' : 'table'} size={14} />
-          {#if tools && data.data?.kind === 'sheet' && data.data.found}
-            <button type="button" class="ib-data-name ib-data-open" title="Open it in the Sheet tool" onclick={openData}>{dataName}</button>
-          {:else}
-            <span class="ib-data-name" class:ib-data-gone={data.data && !data.data.found}>{dataName}</span>
+          <span class="ib-data-name" class:ib-data-gone={data.data && !data.data.found}>{dataName}</span>
+          {#if dataWordsNow.act && canAct(dataWordsNow.act.id, sourceOf(dataOrigin, noteKey).mode)}
+            <span class="ib-dot">·</span>
+            <button type="button" class="ib-link" title={dataWordsNow.act.title}
+              onclick={() => actOn(dataWordsNow.act.id, dataOrigin, data.data)}>{dataWordsNow.act.label}</button>
           {/if}
         </p>
-        <p class="ib-data-said" class:ib-data-changed={data.panels.differs.length > 0}>{dataLine}</p>
+        {#if dataWordsNow.state || dataLine}
+          <p class="ib-data-said" class:ib-data-changed={Boolean(dataWordsNow.state)}>{dataWordsNow.state || dataLine}</p>
+        {/if}
         <div class="ib-data-acts">
-          {#if data.data?.found && data.panels.differs.length}
-            <button type="button" class="btn btn-primary btn-sm" title={`Copy the rows of ${dataName} into the ${data.panels.inheriting.length} panels that read it`}
-              onclick={readAgainAll}><Icon name="reset" size={13} /> Read again (all panels)</button>
-          {/if}
           <button type="button" class="btn btn-sm" title="A sheet of the case, a table of this note, or new data"
             onclick={(event) => (dataPick = { anchor: event.currentTarget, panel: -1 })}>{data.data ? 'Change…' : 'Choose data…'}</button>
         </div>
@@ -658,8 +726,44 @@
             </li>
             {#if carded === index}
               <li class="ib-card-row">
-                <div class="ib-card" bind:this={cardHost}></div>
-                {#if !cardForm && one.kind === 'chart'}<p class="ib-note">The look is the page’s, set under Look.</p>{/if}
+                {#if one.kind === 'chart' && !cardForm}
+                  {@const words = panelWords(index)}
+                  <div class="ib-rows-head">
+                    {#if data.data?.found}
+                      <span class="ib-seg" role="radiogroup" aria-label="Its rows">
+                        <button type="button" class="ib-seg-btn" role="radio" aria-checked={pageData(index)}
+                          title={`The page’s data, ${dataName}, as the other panels read it`} onclick={() => setPanelRows(index, true)}>Page data</button>
+                        <button type="button" class="ib-seg-btn" role="radio" aria-checked={!pageData(index)}
+                          title="Rows of its own, kept in this panel" onclick={() => setPanelRows(index, false)}>Own rows</button>
+                      </span>
+                    {/if}
+                    <p class="ib-data-line ib-panel-data">
+                      <span class="ib-word">Data</span>
+                      <span class="ib-data-name" class:ib-data-gone={words.state && !words.act}>{words.name}</span>
+                      {#if words.act && canAct(words.act.id, sourceOf(panelOriginOf(index), noteKey).mode)}
+                        <span class="ib-dot">·</span>
+                        <button type="button" class="ib-link" title={words.act.title} onclick={() => panelAct(index, words.act.id)}>{words.act.label}</button>
+                      {/if}
+                      {#if words.state}<span class="ib-data-state">{words.state}</span>{/if}
+                      <span class="ib-spring"></span>
+                      {#if caseId}
+                        <button type="button" class="ib-link" title="Read its rows from a sheet, a table of this note, or the page’s data"
+                          onclick={(event) => (dataPick = { anchor: event.currentTarget, panel: index })}>Change…</button>
+                      {/if}
+                    </p>
+                    <span class="ib-tabs" role="tablist" aria-label="Its card">
+                      <button type="button" class="ib-tab" role="tab" aria-selected={cardTab === 'settings'} onclick={() => (cardTab = 'settings')}>Settings</button>
+                      <button type="button" class="ib-tab" role="tab" aria-selected={cardTab === 'rows'} onclick={() => { card?.commit(); cardTab = 'rows'; }}>The numbers</button>
+                    </span>
+                  </div>
+                {/if}
+                {#if one.kind === 'chart' && !cardForm && cardTab === 'rows'}
+                  <div class={`ib-rows ${editor?.themeClasses?.() ?? ''}`} bind:this={rowsHost}></div>
+                  {#if !readChart(panelText(block?.source ?? '', index)).table}<p class="ib-note">This panel holds no rows yet.</p>{/if}
+                {:else}
+                  <div class="ib-card" bind:this={cardHost}></div>
+                  {#if !cardForm && one.kind === 'chart'}<p class="ib-note">The look is the page’s, set under Look.</p>{/if}
+                {/if}
               </li>
             {/if}
           {/each}
@@ -870,6 +974,41 @@
   .ib-warning::before { content: ''; flex: none; width: 5px; height: 5px; margin-top: .45em; border-radius: 50%; background: var(--warn); }
   .ib-warning[data-kind='missing']::before { background: var(--danger); }
   .ib-card-row { list-style: none; padding: 2px 0 8px 22px; }
+  /* a chart panel's card: Page data or Own rows, where its rows live, then Settings or The numbers */
+  .ib-rows-head { display: flex; flex-direction: column; gap: 7px; margin-bottom: 8px; }
+  .ib-seg { display: inline-flex; align-self: flex-start; border: 1px solid var(--border-strong); border-radius: 6px; overflow: hidden; }
+  .ib-seg-btn {
+    height: 24px; padding: 0 11px; border: none; border-right: 1px solid var(--border); background: var(--bg-1); color: var(--text-2);
+    font: inherit; font-size: var(--fs-xs); cursor: pointer;
+  }
+  .ib-seg-btn:last-child { border-right: none; }
+  .ib-seg-btn:hover, .ib-seg-btn:focus-visible { color: var(--text-1); background: var(--bg-3); outline: none; }
+  .ib-seg-btn[aria-checked='true'] { background: var(--accent-soft); color: var(--text-1); font-weight: 600; box-shadow: inset 0 -2px 0 var(--accent); }
+  .ib-panel-data { flex-wrap: wrap; gap: 2px 6px; font-size: var(--fs-xs); }
+  .ib-panel-data .ib-data-name { font-size: var(--fs-xs); }
+  .ib-dot { color: var(--text-3); }
+  .ib-link {
+    padding: 0; border: none; background: none; color: var(--info); font: inherit; font-size: var(--fs-xs); cursor: pointer;
+    text-decoration: underline; text-decoration-color: color-mix(in srgb, var(--info) 40%, transparent); text-underline-offset: 2px; white-space: nowrap;
+  }
+  .ib-link:hover, .ib-link:focus-visible { color: var(--text-1); outline: none; }
+  .ib-data-line .ib-link { font-size: var(--fs-sm); }
+  .ib-panel-data .ib-link { font-size: var(--fs-xs); }
+  .ib-data-state { color: var(--warn); }
+  .ib-spring { flex: 1; }
+  .ib-tabs { display: flex; gap: 2px; border-bottom: 1px solid var(--border); }
+  .ib-tab {
+    margin-bottom: -1px; padding: 4px 10px; border: none; border-bottom: 2px solid transparent; background: none; color: var(--text-2);
+    font: inherit; font-size: var(--fs-xs); cursor: pointer;
+  }
+  .ib-tab:hover, .ib-tab:focus-visible { color: var(--text-1); outline: none; }
+  .ib-tab[aria-selected='true'] { color: var(--text-1); border-bottom-color: var(--accent); font-weight: 600; }
+  /* its rows: the note tables' grid, at the builder's width, its rows scrolling under a fixed height */
+  .ib-rows { font-size: var(--fs-sm); }
+  .ib-rows :global(.cm-grid-frame) { border: 1px solid var(--border-strong); border-radius: var(--r-sm); overflow: hidden; background: var(--bg-0);
+    font-family: var(--font-sans); line-height: 1.45; }
+  .ib-rows :global(.cm-grid-scroll) { max-height: 340px; overflow: auto; }
+  .ib-rows :global(.cm-grid thead th) { position: sticky; top: 0; z-index: 1; }
   .ib-card { display: flex; flex-direction: column; gap: 9px; padding: 10px; border: 1px solid var(--border); border-radius: var(--r-sm);
     background: var(--bg-2); }
   .ib-card :global(.cm-chart-field) { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
