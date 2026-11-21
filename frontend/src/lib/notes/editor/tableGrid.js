@@ -174,12 +174,20 @@ function replaceWith(text) {
 
 let pickedGrid = null;
 
+/** No column greyed. */
+const NONE = new Set();
+
 /**
  * One table drawn as a grid, kept on its box (`box.grid`). It draws the table its
  * widget holds and, when the widget changes, draws again only the cells that
  * changed, never the one being typed in.
+ *
+ * A chart's rows are drawn by the same grid (`editor/rowsGrid.js` extends it): where
+ * its table stands (`from`), whether it is shown whole, where the cursor goes on leaving
+ * (`anchorFor`), whether rows and columns can be added and moved (`structural`), and the
+ * columns its drawing does not read (`widget.idle`, greyed and marked) are the hooks.
  */
-class Grid {
+export class Grid {
   constructor(box, widget, view) {
     this.box = box;
     this.view = view;
@@ -233,6 +241,16 @@ class Grid {
   textAt(row, col) {
     if (row === -1) return this.table.header[col] ?? '';
     return this.table.rows[row]?.[col] ?? '';
+  }
+
+  /** Whether rows and columns are added, moved and deleted here, or only cells typed in. */
+  get structural() {
+    return true;
+  }
+
+  /** The columns drawn greyed, marked "not drawn": a chart's columns its drawing does not read. */
+  get idle() {
+    return this.widget.idle ?? NONE;
   }
 
   // -- drawing --
@@ -304,6 +322,7 @@ class Grid {
 
   render() {
     const saved = this.saveEdit();
+    this.idleDrawn = [...this.idle].join(',');
     this.quiet = true;
     this.renderHead();
     this.renderBody();
@@ -352,7 +371,7 @@ class Grid {
     row.append(element('th', 'cm-grid-corner'));
     const widths = columnWidths(this.table);
     this.table.header.forEach((_, col) => {
-      const cell = element('th', 'cm-grid-head cm-grid-cell');
+      const cell = element('th', `cm-grid-head cm-grid-cell${this.idle.has(col) ? ' cm-grid-idle' : ''}`);
       cell.style.minWidth = widths[col];
       cell.scope = 'col';
       cell.dataset.row = '-1';
@@ -378,7 +397,7 @@ class Grid {
     line.dataset.row = String(row);
     const number = element('th', 'cm-grid-num');
     number.scope = 'row';
-    if (this.writable && !ghost) {
+    if (this.writable && !ghost && this.structural) {
       const press = button('cm-grid-rowbtn', { label: String(row + 1), title: 'Insert, duplicate, move or delete this row' });
       press.setAttribute('aria-label', `Row ${row + 1}`);
       press.setAttribute('aria-haspopup', 'menu');
@@ -388,7 +407,7 @@ class Grid {
     } else number.textContent = ghost ? '+' : String(row + 1);
     line.append(number);
     for (let col = 0; col < this.table.header.length; col += 1) {
-      const cell = element('td', 'cm-grid-cell');
+      const cell = element('td', `cm-grid-cell${this.idle.has(col) ? ' cm-grid-idle' : ''}`);
       cell.dataset.row = String(row);
       cell.dataset.col = String(col);
       line.append(cell);
@@ -413,7 +432,13 @@ class Grid {
       const inner = element('div', `cm-grid-head-in${align === 'right' ? ' cm-grid-end' : align === 'center' ? ' cm-grid-middle' : ''}`);
       if (!text) words.dataset.placeholder = `Column ${col + 1}`;
       inner.append(words);
-      if (this.writable) {
+      if (this.idle.has(col)) {
+        const mark = element('span', 'cm-grid-idle-mark');
+        mark.textContent = 'not drawn';
+        mark.title = 'The chart does not draw this column; it is kept with its rows';
+        inner.append(mark);
+      }
+      if (this.writable && this.structural) {
         const menu = button('cm-grid-colbtn', { label: `${columnName(this.table, col)}: sort, insert, move, align, fill, delete`, iconName: 'chevronDown', alone: true });
         menu.setAttribute('aria-haspopup', 'menu');
         menu.addEventListener('mousedown', (event) => event.preventDefault());
@@ -455,9 +480,14 @@ class Grid {
     this.foot.append(toggle);
   }
 
+  /** Keep whether the table is shown whole: the note's tables keep it by name, across their redraws. */
+  keepWhole(whole) {
+    showTableWhole(this.view, this.widget.tableId, whole);
+  }
+
   setWhole(whole) {
     if (this.isWhole() === whole) return;
-    showTableWhole(this.view, this.widget.tableId, whole);
+    this.keepWhole(whole);
     this.quiet = true;
     const saved = this.saveEdit();
     this.renderBody();
@@ -481,7 +511,8 @@ class Grid {
     this.widget = widget;
     this.table = widget.table;
     markSettings(this.settings, widget.look);
-    if (before.header.length !== this.table.header.length) {
+    const idle = [...this.idle].join(',');
+    if (before.header.length !== this.table.header.length || idle !== this.idleDrawn) {
       this.ghost = false;
       this.render();
       return;
@@ -545,6 +576,7 @@ class Grid {
     }
     if (this.editing) this.leave('stay');
     const ghost = row === this.table.rows.length;
+    if (ghost && !this.structural) return false;
     if (ghost && !this.ghost) {
       this.ghost = true;
       this.body.append(this.makeRow(row, pictureColumns(this.table), true));
@@ -650,7 +682,7 @@ class Grid {
     const grid = this.write([this.step(done)]);
     const rows = grid.table.rows.length;
     if (row < rows && grid.ghost) grid.dropGhost();
-    if (row > rows) {
+    if (row > rows || (row === rows && !grid.structural)) {
       grid.leave('after');
       return;
     }
@@ -675,14 +707,18 @@ class Grid {
     grid.dropGhost();
     if (where === 'stay' || where === 'blur') return grid;
     grid.setPick(null);
-    const { state } = this.view;
-    const found = tableNear(state, from);
-    let anchor = from;
-    if (where === 'before' && from > 0) anchor = settle(state, from - 1);
-    if (where === 'after' && found) anchor = found.end < state.doc.length ? settle(state, found.end + 1) : found.end;
-    this.view.dispatch({ selection: { anchor }, scrollIntoView: true });
+    this.view.dispatch({ selection: { anchor: this.anchorFor(where, from) }, scrollIntoView: true });
     this.view.focus();
     return grid;
+  }
+
+  /** Where the editor's cursor goes as the grid is left: on the table ('pick'), or before or after it. */
+  anchorFor(where, from = this.from) {
+    const { state } = this.view;
+    const found = tableNear(state, from);
+    if (where === 'before' && from > 0) return settle(state, from - 1);
+    if (where === 'after' && found) return found.end < state.doc.length ? settle(state, found.end + 1) : found.end;
+    return from;
   }
 
   blurred(input) {
@@ -726,7 +762,7 @@ class Grid {
       act = () => this.leave('pick');
     } else if ((event.key === 'ArrowUp' || event.key === 'ArrowDown') && event.altKey && !mod && !event.shiftKey) {
       const to = event.key === 'ArrowUp' ? row - 1 : row + 1;
-      if (row >= 0 && !edit.ghost && to >= 0 && to < rows) act = () => this.moveRowTo(row, to, col);
+      if (row >= 0 && !edit.ghost && to >= 0 && to < rows && this.structural) act = () => this.moveRowTo(row, to, col);
       else act = () => {};
     } else if (event.key === 'ArrowUp' && plainKey && !event.shiftKey && this.onEdgeLine(input, false)) {
       act = () => (row === -1 ? this.leave('before') : this.go(row - 1, col));
@@ -753,7 +789,7 @@ class Grid {
   pasted(event) {
     const data = event.clipboardData;
     const made = data && pastedTable({ html: data.getData('text/html'), text: data.getData('text/plain') });
-    if (!made || !this.editing) return;
+    if (!made || !this.editing || !this.structural) return;
     event.preventDefault();
     const { row, col } = this.editing;
     const cells = made.grid.cells.slice(0, MAX_ROWS);
@@ -766,11 +802,16 @@ class Grid {
 
   // -- picking a cell, for a picture to land in --
 
+  /** Whether a tool's Put in lands in the cell picked here. */
+  get picks() {
+    return true;
+  }
+
   setPick(row, col) {
     if (pickedGrid && pickedGrid !== this) pickedGrid.clearPick();
     this.pick = row === null ? null : { row, col };
     pickedGrid = this.pick ? this : null;
-    const index = tablesOf(this.view.state).findIndex((found) => found.from === this.from);
+    const index = this.picks ? tablesOf(this.view.state).findIndex((found) => found.from === this.from) : -1;
     pickCell(this.handlers.noteKey, this.pick && index >= 0 ? { table: index, ...this.pick } : null);
     this.markPick();
   }
@@ -1081,7 +1122,7 @@ class Grid {
       }
       // the frame around the grid, or a note that cannot be written: the press picks the block
       event.preventDefault();
-      view.dispatch({ selection: { anchor: this.from } });
+      view.dispatch({ selection: { anchor: this.anchorFor('pick') } });
       view.focus();
     });
     box.addEventListener('click', (event) => {
@@ -1300,6 +1341,14 @@ const THEME = {
   },
   '.cm-grid thead th': { background: 'var(--bg-2)', color: 'var(--text-2)', fontWeight: '650', verticalAlign: 'middle' },
   '.cm-grid-head .cm-grid-text': { color: 'var(--text-2)', flex: '1', minWidth: '0' },
+  // a column the chart does not draw stays with its rows, greyed and marked
+  '.cm-grid .cm-grid-idle': { background: 'color-mix(in srgb, var(--text-1) 3.5%, transparent)' },
+  '.cm-grid .cm-grid-idle .cm-grid-text, .cm-grid .cm-grid-idle .cm-chip': { color: 'var(--text-3)' },
+  '.cm-grid .cm-grid-idle .cm-grid-thumb': { opacity: '0.55' },
+  '.cm-grid-idle-mark': {
+    flex: 'none', marginRight: '4px', padding: '0 5px', border: '1px dashed var(--border-strong)', borderRadius: '3px', color: 'var(--text-3)',
+    fontSize: '10.5px', fontWeight: '500', lineHeight: '16px', whiteSpace: 'nowrap',
+  },
   '.cm-grid-head-in': { display: 'flex', alignItems: 'center', gap: '2px', paddingRight: '4px' },
   '.cm-grid-head-in.cm-grid-end .cm-grid-text': { textAlign: 'right' },
   '.cm-grid-head-in.cm-grid-middle .cm-grid-text': { textAlign: 'center' },

@@ -76,7 +76,6 @@
     correctionFor, editionOf, editionOfAll, keepCorrection, keepEdition, listEditions, PUBLIC, showEdition,
   } from '../lib/notes/editions.svelte.js';
   import { badgeWords, checkReady, issueCount, readyLines, runFix } from '../lib/notes/readyPanel.js';
-  import { chartRows } from '../lib/notes/editor/chartFigure.js';
   import { bookmarkLinks } from '../lib/notes/sources.js';
   import { addressProblem, keepAddress, readAddress } from '../lib/notes/webAddress.js';
   import { LOOK_HELP } from '../lib/notes/lookHelp.js';
@@ -893,11 +892,8 @@
     readyBusy = line.key;
     try {
       const again = await runFix(line, {
-        noteId: of.noteId,
-        caseId,
         text: () => editor?.text() ?? '',
         write: writeReady,
-        rows: chartRows,
         archive: () => (archiveOf = { noteId: of.noteId, title: of.title }),
         bookmark: async (links) => {
           const plan = await readPlan(caseId, of.noteId).catch(() => null);

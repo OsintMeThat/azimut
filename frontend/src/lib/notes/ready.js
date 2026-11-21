@@ -530,7 +530,7 @@ export const READY_NOTES = [
         '::::',
       ].join('\n'),
       '',
-      '<!--? Its Data bar takes the register: keep it as a sheet of the case, then Change… picks it and Read again follows it. -->',
+      '<!--? Its Data bar takes the register: keep it as a sheet of the case, then Change… picks it, and the panels follow it. -->',
       '',
       '## Register',
       '',

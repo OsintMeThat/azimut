@@ -77,9 +77,9 @@ describe('what each form writes', () => {
   it('opens no form on a table it cannot hold, and says why', () => {
     const register = '::: chart\nkind: bars\ncount: rows\nby: Model\n| Model | Grade |\n| --- | --- |\n| A | identified |\n| B | almost sure |\n:::';
     expect(readForm(register).form).toBeNull();
-    expect(readForm(register).why).toBe('Its rows are counted, one a line: edit them as a table.');
+    expect(readForm(register).why).toBe('Its rows are counted, one a line: type them in The numbers.');
     const wide = '::: chart\nkind: timeline\n| When | What | Where | Who |\n| --- | --- | --- | --- |\n| 1 Oct 2026 | A | B | C |\n| 2 Oct 2026 | A | B | C |\n:::';
-    expect(readForm(wide).why).toBe('Its table holds more columns than this kind reads: edit it as a table.');
+    expect(readForm(wide).why).toBe('Its table holds more columns than this form reads: type its rows in The numbers.');
     expect(readForm('::: chart\nkind: radar\n| A | B |\n| --- | --- |\n:::').form).toBeNull();
   });
 
@@ -195,8 +195,16 @@ describe('a picture wall', () => {
     expect(read.kind).toBe('pictures');
     expect(read.model.heads).toEqual({ picture: 'Frame', label: '#', words: 'State', group: 'Model', colour: 'Grade' });
     expect(read.model.rows).toEqual([{ picture: '[[media:e_0000000001|v1.jpg]]', label: '#1', words: 'burned', group: 'Cougar', colour: 'Confirmed' }]);
-    // a column past what the wall reads is edited as a table
-    expect(readForm(block.replace('| Frame |', '| Frame | Video |').replace('| --- |', '| --- | --- |').replace('| [[media', '| v1 | [[media')).form).toBe(null);
+    // a column past what the wall reads is kept, cell for cell, after the ones it does
+    const wider = block.replace('| Grade |', '| Grade | Video |').replace('| --- |\n', '| --- | --- |\n').replace('| Confirmed |', '| Confirmed | v1 |');
+    const kept = readForm(wider);
+    expect(kept.model.extras).toEqual(['Video']);
+    expect(kept.model.rows[0].extra).toEqual(['v1']);
+    const added = { ...kept.model, rows: [...kept.model.rows, { picture: 'e_0000000002', label: '#2', words: '', group: '', colour: '' }] };
+    expect(readChart(writeForm(wider, 'pictures', added)).text.split('\n').slice(-2)).toEqual([
+      '| [[media:e_0000000001|v1.jpg]] | #1 | burned | Cougar | Confirmed | v1 |',
+      '| e_0000000002 | #2 | | | | |',
+    ]);
   });
 
   it('writes the group and the colour only once a row holds one, and the shape past the first', () => {

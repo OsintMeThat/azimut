@@ -90,8 +90,10 @@ test('a timeline is laid numbered, coloured by its kind and its labels shortened
   await expect(chart.locator('.cm-chart-figure svg title')).toHaveText('numbered short by kind');
   expect(drawn.at(-1)).toBe(SHORT.replace('How the front fell.\n\n', '').trimEnd());
 
-  // the form: a new event and its kind, the layout and the labels as the card left them
-  await card.getByRole('button', { name: 'Edit the data' }).click();
+  // the form, from The numbers that the Data line's Edit opens: a new event and its kind,
+  // the layout and the labels as the card left them
+  await card.locator('.cm-chart-data').getByRole('button', { name: 'Edit' }).click();
+  await chart.getByRole('group', { name: 'The numbers' }).getByRole('button', { name: 'As a form' }).click();
   const form = chart.getByRole('group', { name: 'The chart’s data' });
   await expect(form.getByRole('radiogroup', { name: 'Layout' }).getByRole('radio', { name: 'Numbered' })).toHaveAttribute('aria-checked', 'true');
   await expect(form.getByLabel('Short labels')).toBeChecked();

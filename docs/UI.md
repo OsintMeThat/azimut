@@ -6489,14 +6489,16 @@ says what it is checking.
   chart's settings, name a sheet as their data (`data: sheet:<id>`, `from: sheet:<id>`) and
   list the case's sheets first. *New data…* there makes a sheet from a table pasted, an
   .xlsx or a CSV, named in the Notebook, and the Sheet tool then shows it like any other. The
-  charts keep a copy of its rows, but **what is published reads the sheet as it is now**:
-  the PDF, the HTML page and its web folder, Story, the Map page, WordPress, To Post and the
-  Ready check draw every chart and panel from its sheet's current rows, whether or not the
-  note was opened since (`notecharts.with_current_rows`). The copy is drawn only once the
-  sheet is gone or holds none of the chart's columns, and the Ready check says so then. A
-  table of another note (`from: note:…`) is followed the same way. A cell the sheet links
-  to the case comes back to the note as its chip, so a picture wall reads its pictures from
-  a sheet. A sheet a note's figure reads is counted as used, and its delete names that note.
+  charts keep a copy of its rows, which follows a row edited here or in Excel by itself the
+  next time the note sees the sheet, one step Undo takes back; a cell typed in a chart's
+  numbers is written here. **What is published reads the sheet as it is now**: the PDF, the
+  HTML page and its web folder, Story, the Map page, WordPress, To Post and the Ready check
+  draw every chart and panel from its sheet's current rows, whether or not the note was
+  opened since (`notecharts.with_current_rows`). The copy is drawn only once the sheet is
+  gone or holds none of the chart's columns, and the Ready check says so then. A table of
+  another note (`from: note:…`) is followed the same way. A cell the sheet links to the case
+  comes back to the note as its chip, so a picture wall reads its pictures from a sheet. A
+  sheet a note's figure reads is counted as used, and its delete names that note.
 - **A sheet whose rows have places goes on a map in one press.** **Show on a map**, in the
   header beside Export, opens a small dialog that proposes its columns from what the sheet
   already says of them (a role set first, else what the cells look like) and lets each be
@@ -7380,8 +7382,8 @@ only the panel asks (`engine/noteready.py`), so its counts are the dialog's. Fiv
   holds nothing of (**Bookmark them**, which files each as a bookmark in *Links of
   “<note>”*, nothing fetched), and the pages the last archive run found gone.
 - **Figures**: a picture whose words are only a label with no caption (no alt text), or
-  that nothing names the owner of; a chart whose rows changed since they were copied
-  (**Read again**) or whose title should say *at least* (the chart's own fix); a map with
+  that nothing names the owner of; a chart whose title should say *at least* (the chart's
+  own fix), or whose source is gone or no longer has its columns; a map with
   no ground; the points of view shown to the metre (**Round them**, for the export only).
 - **Edition**: the internal passages and the edition checked, said once, and the TLP
   marking, or that there is none.
@@ -7968,9 +7970,11 @@ row moved or taken out, a precision, a colour, an icon and a fill is one Undo st
 moved with the calendar's arrows is written once it rests. What the form writes is the
 ordinary block, a cell nobody changed written back as it was, so a chart reopens in its form,
 or as a grid through The numbers; `tests/fixtures/chart_forms.json` holds what each kind's
-form writes, drawn by the engine's tests too. Settings › *Edit the data* and The numbers ›
-*Edit the data* open it again when the chart's rows are in its kind's shape; rows counted
-one a line or columns past its kind's are edited as a table.
+form writes, drawn by the engine's tests too. *As a form*, on The numbers' bar, opens it again
+when the chart's rows are in its kind's shape; rows counted one a line or columns past its
+kind's are typed in The numbers. A wall keeps a column it does not read (a register's own
+*State*), cell for cell after the ones it does, so its form, and its *Fill from the case…*,
+also on The numbers' bar, stay one press away.
 
 **Fill from the case** stands beside the add buttons and lists what it would take before
 writing it (`engine/notes_chart_fill.py`, read only). A timeline gets the case's dated events
@@ -7996,13 +8000,41 @@ or Dark; a colour column stacks bars and columns, none makes them plain; the col
 chose on its own, the grades' ramp included, with *Keep these colours for the case*, the
 infographic builder's own press, its toast offering Undo since the case's palette is no
 step of the note and naming what the case could not take: a colour it names already, a
-name past 40 letters, past its 12 colours), **Read again**
-(only once the table its rows came from changed, compared on the chart's own columns, in any
-order: a table of this note as it is typed, another note's table or a sheet as the server
-reads it, `POST /notes/figure/rows`, asked again when The numbers open), **The numbers** (its rows, a line each,
-whether they still match, *Go to the table* and *Edit them as text*) and **Export** (a
-picture for X, 4:5, 1:1, the PDF page, or an SVG, downloaded with its title as its name).
-What the check says shows under it, each fix one press (*Add “at least” to the title*).
+name past 40 letters, past its 12 colours), **The numbers** and **Export** (a picture for X,
+4:5, 1:1, the PDF page, or an SVG, downloaded with its title as its name).
+
+**The numbers** is a grid to type in under the drawing, the note tables' own (`editor/rowsGrid.js`
+over `editor/tableGrid.js`): its cells drawn with their chips, links and pictures, `@`, Tab,
+Enter, the arrows and Escape, a picture of the case dropped on a cell, and *N more rows · show
+all* past 30 rows. A column the drawing does not read (the figure route names the ones it does,
+`drawn` in `X-Chart-Kind`) stays, greyed and marked *not drawn*, never refused. Its own rows
+take every gesture of a table (Row, Column, *Paste from a spreadsheet*, each column's and row's
+menu), each a change of the changed lines, one Undo; its bar ends with *As a form* where the
+kind's form fits, and a wall's *Fill from the case…*. Rows that live elsewhere are typed in where
+they live: a cell of a table of this note is written in the table and in the copy as one change,
+one Undo; a cell of a sheet is saved in the sheet (`editor/throughSheet.js`, the sheet's own
+save with its stamp, read again and tried once on a conflict), then the copy follows it. A row
+that reads otherwise there now, a column the sheet fills itself (a date stamp, a computed or a
+locked column) or a cell linked to a record of the case is drawn back as it was and offers
+*Open in Sheet*. A table of another note is shown, not typed in. The block's `</>` gives its
+source.
+
+**The Data line** (`editor/dataLine.js`), on top of The numbers and of the settings, says where
+the rows live in one line, the same on a chart, an infographic and a builder panel: *Its own
+rows · Edit* (Edit opens The numbers, the keyboard in its first cell), *Sheet “Register” · Open
+in Sheet*, *Table “Count” of this note · Go to the table*, or *of the note “Register”*, then
+*Change…* (the source picker, which also offers *Its own rows* to keep the copy and follow
+nothing). A source that no longer has the chart's columns, or is gone, is said in one short
+clause, and the chart keeps its copy.
+
+**Rows follow their source by themselves** (`editor/follow.js`). When
+the editor finds a table or a sheet changed (a chart coming into sight, the Notebook shown
+again, the window back, the note opened or typed in), it rewrites every copy of that source in
+the note, charts and infographic panels alike, as one transaction added to the history: Ctrl+Z
+brings the old copy back, and it stays, the line saying *an older copy, kept by Undo*, until
+the source changes again. A view that cannot write draws the fresh rows and writes nothing.
+
+What the check says shows under the chart, each fix one press (*Add “at least” to the title*).
 With no `count:` line a chart sums its one column of amounts and the check names it, one
 press writing it; a column read as shares (a `%`, a confidence, a ratio, a rate, by its header
 or its cells) is never summed on its own, so the rows are counted and the check says why.
@@ -8099,10 +8131,9 @@ a copy of the rows, so the page reads the same tomorrow. Key figures typed in ke
 rows, a chart made from scratch or whose rows its form wrote says `rows: own` and keeps them
 whatever its columns, and a panel with its own `from:` keeps its own source. On top of the block drawn in the
 note and of the builder, one **Data** line says the source (*Sheet “Vehicle register”*, the
-builder's name opening it in the Sheet tool), its rows (*first 500 of 620* when a chart holds
-fewer), how many panels read it, and *changed since* when their rows differ from it, with
-**Read again (all panels)** and **Change…**. Read again copies the data's rows, read now, into
-every panel that takes it, as one Undo. Change… lists the case's sheets first, marked
+line's *Open in Sheet* opening it in the Sheet tool), its rows (*first 500 of 620* when a chart
+holds fewer), how many panels read it, and **Change…**. The panels that take the data follow it
+by themselves, one Undo for all of them, as a chart's rows do. Change… lists the case's sheets first, marked
 *Recommended* (the Sheet tool or Excel edits them), then the tables of this note, then the new
 sheets made for the figure (`lib/notes/dataSeed.js`): **New sheet from these rows**, the rows the
 figure holds kept as a sheet named after its title, and **New sheet with its columns**, an empty
@@ -8117,11 +8148,12 @@ or an .xlsx (every tab filed as a sheet named as its tab, the first the data) or
 a new sheet of the case. The one picked becomes `data:` as one Undo; the first time a page gets
 data, the charts copied from a table of its columns take it, their `from:` taken out and the
 rows read in. The line reads the data again as the note changes, when the Notebook is shown
-again after another tool, and when the window comes back. A panel's card in the builder, and a
-chart's settings in the note, start with the same **Data** line, *Change…* opening the same
-picker (a panel can also take the infographic's data back). The check before export says, at
-its line, data no longer in the case and each panel whose rows differ from it or from its own
-source; the builder's drawing leaves that to the Data line (`origins: false`). A sheet or a
+again after another tool, and when the window comes back. A chart panel's card in the builder
+says **Page data** or **Own rows**, one press apart (the page's rows copied in, or the panel's
+kept as `rows: own`), then the same **Data** line as a chart's, *Change…* opening the same
+picker, then **Settings** or **The numbers**: its rows in the same grid (`editor/panelRows.js`),
+typed in where they live, as on a chart. The check before export says, at its line, data no
+longer in the case; the builder's drawing leaves that to the Data line (`origins: false`). A sheet or a
 note named by `data:` or `from:` is used (`engine/uses.py`): its delete names the note.
 
 `/` › **Infographic** (Figures) writes a starter from what the note holds: its key figures, its
@@ -8135,8 +8167,9 @@ fits by the chart's kind picker (a panel made of the data takes it, with no `fro
 picked written as one under its table would be, its rows and `from:` with it, then every kind
 *From scratch*, the picker's own cards, the one picked written with its columns and `rows: own`
 and its form opened in its card, and the note's maps, with Words to fill in; pressing a chart's
-row opens the chart's own settings card under it, title, count, by, colour and *Edit the data*,
-its form, each choice written inside the page as one Undo; pressing a map's row opens the map's
+row opens its card under it: Page data or Own rows, its Data line, then the chart's own
+settings (title, count, by, colour) or its rows in The numbers, *As a form* there opening its
+form, each choice written inside the page as one Undo; pressing a map's row opens the map's
 own card under it (`editor/infographicMap.js`), its map drawn to frame, step and draw on, then
 Look, Layers, Draw, Time and Cards as on a map of the note, each choice one line of the panel
 inside the page and one Undo, a drawing kept in a personal layer the panel names and the page in

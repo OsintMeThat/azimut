@@ -1,7 +1,7 @@
 /**
  * An infographic's data, as its Data bar says it (`editor/infographicBlock.js`, the builder's
- * top): what `data:` names (a sheet of the case, or a table of a note), its rows read now, and
- * which panels take it. The source picker's choices are listed here too, so the builder, the
+ * top, in a chart's words, `editor/dataLine.js`): what `data:` names (a sheet of the case, or a
+ * table of a note), its rows read now, and which panels take it. The source picker's choices are listed here too, so the builder, the
  * block in the note and a chart's settings card offer the same ones in the same order: the
  * case's sheets first (recommended), then the tables of this note, then *New data…*.
  *
@@ -10,6 +10,7 @@
  */
 import { chartRows } from './chartFigure.js';
 import { compareRows, headingAbove, newChart, originFor, readChart, readOrigin, tableUnder } from './chartText.js';
+import { ELSEWHERE, anchorName, dataWords, sourceOf } from './dataLine.js';
 import { noteTables } from './infographicPanels.js';
 import { dataOf, inheritingPanels, ownSourcePanels, panelText } from './infographicText.js';
 import { parseTable, plainText, tablesIn } from './tableText.js';
@@ -32,7 +33,7 @@ export async function readData({ caseId, noteId = '', noteText = '', origin, fre
     const table = line >= 0 ? tablesIn(noteText).find((one) => one.line === line) : null;
     const heading = table ? headingAbove(noteText, line) : '';
     if (!table) return { origin, kind: 'note', local: true, found: false, name: said.anchor ? `the table under “${said.anchor}”` : 'the table' };
-    return found({ origin, kind: 'note', local: true, name: heading || 'a table of this note', text: noteText.slice(table.from, table.to), line });
+    return found({ origin, kind: 'note', local: true, name: heading, text: noteText.slice(table.from, table.to), line });
   }
   if (!caseId) return { origin, kind: said.kind, found: false, name: '' };
   const answer = await rows({ caseId, origin, fresh });
@@ -47,12 +48,17 @@ function found(data) {
   return { ...data, found: Boolean(table), table, rows, total: Math.max(rows, data.total ?? 0), columns: (table?.header ?? []).map((cell) => plainText(cell)) };
 }
 
-/** The data's name as the bar says it: Sheet “Register”, Table “The register” of this note, Table in “Note”. */
-export function dataLabel(data) {
-  if (!data) return 'None';
-  if (!data.found) return data.kind === 'sheet' ? 'A sheet no longer in the case' : 'A table no longer in the case';
-  if (data.kind === 'sheet') return `Sheet “${data.name}”`;
-  return data.local ? `Table “${data.name}” of this note` : `Table in “${data.name}”`;
+/**
+ * The words of the page's Data line, a chart's own (`dataLine.dataWords`): `data` as
+ * `readData` answers it (null without `data:`), `origin` what `data:` says, `noteId` the note
+ * it stands in, `held` once Undo kept an older copy.
+ */
+export function pageWords(origin, data, { noteId = '', held = false } = {}) {
+  if (!data) return { name: 'Each panel’s own rows', act: null, state: '' };
+  if (data.error) return { name: origin, act: null, state: '' };
+  const { mode, anchor } = sourceOf(origin, noteId);
+  const elsewhere = mode === ELSEWHERE;
+  return dataWords({ mode, name: elsewhere ? anchorName(anchor) : data.name, note: elsewhere ? data.name : '', state: !data.found ? 'gone' : held ? 'held' : '' });
 }
 
 /**
@@ -70,17 +76,15 @@ export function dataPanels(source, data) {
   return { inheriting, own, differs };
 }
 
-/** What the bar says after the name: its rows, how many panels read it, whether it changed since. */
+/** What the bar says after the name: its rows and how many panels read it. */
 export function dataSaid(data, panels) {
-  if (!data) return 'each panel keeps its own rows';
+  if (!data) return '';
   if (data.error) return `not read: ${data.error}`;
-  if (!data.found) return 'its panels keep the rows they copied';
+  if (!data.found) return '';
   const reading = panels.inheriting.length;
   // a chart holds its first rows only: the bar says so rather than a smaller count
   const count = data.total > data.rows ? `first ${data.rows} of ${data.total} rows` : rowsWord(data.rows);
-  const parts = [count, reading ? `${reading} panel${reading === 1 ? '' : 's'} read it` : 'no panel reads it yet'];
-  if (panels.differs.length) parts.push('changed since');
-  return parts.join(' · ');
+  return [count, reading ? `${reading} panel${reading === 1 ? '' : 's'} read it` : 'no panel reads it yet'].join(' · ');
 }
 
 /** The data of the infographic `source`, read now, with what its panels make of it: `{ data, panels }`; `data` null without `data:`. */

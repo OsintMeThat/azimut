@@ -12,11 +12,11 @@
  *   each picture, their shape and how a story shows it; a timeline's layout and its short
  *   labels), its icons for a chart of glyphs (`chartIcons.js`),
  *   whether its table shows under it, and its look (Report, Book, Dark), each a whole
- *   preset; the colours it chose on its own, and the press that keeps them for the case;
- *   and *Edit the data*, the kind's form, when its rows are in the form's shape.
+ *   preset; the colours it chose on its own, and the press that keeps them for the case.
  *   They open on the chart itself, between its bar and its drawing, so each choice is
- *   seen as it is made. Given a `source`, a line on top says where its rows come from,
- *   with *Change…* (the source picker, `components/DataPicker.svelte`). Given
+ *   seen as it is made. Given `data`, its Data line stands on top (`editor/dataLine.js`):
+ *   where its rows come from, the press that edits them there, and *Change…* (the source
+ *   picker, `components/DataPicker.svelte`). Given
  *   `templates`, *Apply a template…* sets a chart template's kind and settings over its
  *   own rows, the template's columns matched to the chart's by name
  *   (`lib/notes/figureTemplatePicker.js`).
@@ -26,7 +26,8 @@
  */
 import { button, openPopover } from './gridMenu.js';
 import { chartKinds } from './chartFigure.js';
-import { SHORT_SAID, TIMELINE_LAYOUTS, WALL_SHAPES, layoutSaid, readForm, timelineColumns, timelineLayout } from './chartFormText.js';
+import { SHORT_SAID, TIMELINE_LAYOUTS, WALL_SHAPES, layoutSaid, timelineColumns, timelineLayout } from './chartFormText.js';
+import { drawDataLine } from './dataLine.js';
 import { scratchCards, titleField } from './chartForm.js';
 import { chartIcons } from './chartIcons.js';
 import { ROWS, SHOWS, STYLES, setting } from './chartText.js';
@@ -50,10 +51,10 @@ export const PICKER_COLUMNS = 4;
 /** What the picker says under the kinds: changing a chart's kind, a table's chart, rows copied from elsewhere, none. */
 const FOOT = {
   chart: 'The title, the columns and the rows stay; only the drawing changes.',
-  table: 'Only the kinds this table fits are here. Its rows are copied under it, and Read again brings them up to date.',
-  copied: 'Only the kinds these rows fit are here. They are copied into this note, and Read again brings them up to date.',
+  table: 'Only the kinds this table fits are here. Its rows are copied under it and follow the table.',
+  copied: 'Only the kinds these rows fit are here. They are copied into this note and follow their source.',
   scratch: 'A kind from scratch opens a form made for it, the chart drawn as you fill it.',
-  both: 'A kind drawn from this table copies its rows under it, Read again keeping them up to date; one from scratch opens a form made for it.',
+  both: 'A kind drawn from this table copies its rows under it, which follow the table; one from scratch opens a form made for it.',
 };
 
 /** The heads of the picker's two parts. */
@@ -201,25 +202,13 @@ export function openKindPicker(view, anchor, {
 
 // -- the settings ------------------------------------------------------------------------
 
-/** What the Data line says of where the rows are now. */
-const DATA_STATES = { differs: 'changed since', gone: 'no longer in the case' };
-
-/** The Data line on top of the card: where the chart's rows come from, and Change…. */
-function dataLine(source) {
+/** The Data line on top of the card: where the chart's rows come from, its press, and Change…. */
+function dataLine(data) {
   const node = element('div', 'cm-chart-field cm-chart-data');
-  const name = element('span', 'cm-chart-data-name');
-  const state = element('span', 'cm-chart-data-state');
-  const change = button('cm-chart-use cm-chart-data-change', { label: 'Change…', title: 'Read its rows from a sheet, a table of this note, or new data' });
-  change.addEventListener('mousedown', (event) => event.preventDefault());
-  change.addEventListener('click', () => source.change(change));
-  node.append(element('span', 'cm-chart-field-name', 'Data'), name, state, change);
   return {
     node,
     refresh() {
-      const said = source.said() ?? {};
-      name.textContent = said.name || 'Its own rows';
-      state.textContent = DATA_STATES[said.state] ?? '';
-      state.hidden = !state.textContent;
+      drawDataLine(node, data.said(), { act: data.act, change: data.change });
     },
   };
 }
@@ -327,13 +316,13 @@ function segmented(label, options, value, onChange, { title = '' } = {}) {
  * drawing, so every choice is seen at once on the chart). `state()` answers the chart
  * as it stands, `{ chart, drawn }` (`readChart`, the figure's answer), read again on each
  * `refresh()`; `write(changes)` writes one choice. A kind of parts is drawn by one
- * column, its parts: choosing it writes `by` and takes `colour by` out. `source`, given,
- * is `{ said(), change(anchor) }`: `said()` answers `{ name, state }` for the Data line
- * (`state` '', `differs` or `gone`), `change` opens the source picker. Answers `{
- * refresh, commit, focus, destroy }`, `commit` writing a title typed and not yet written,
- * `destroy` closing what the card opened over the page as it closes.
+ * column, its parts: choosing it writes `by` and takes `colour by` out. `data`, given, is
+ * `{ said(), act(id), change(anchor) }`: `said()` answers the Data line's words
+ * (`dataLine.dataWords`), `act` runs its press, `change`, given, opens the source picker.
+ * Answers `{ refresh, commit, focus, destroy }`, `commit` writing a title typed and not yet
+ * written, `destroy` closing what the card opened over the page as it closes.
  */
-export function chartSettings(panel, { state, write, keep = null, source = null, editData = null, templates = false }) {
+export function chartSettings(panel, { state, write, keep = null, data = null, templates = false }) {
   panel.setAttribute('role', 'group');
   panel.setAttribute('aria-label', 'Chart settings');
   // the title field stays the same element while the panel is drawn again, so typing in it is never lost
@@ -342,14 +331,11 @@ export function chartSettings(panel, { state, write, keep = null, source = null,
   const looks = element('div', 'cm-chart-looks');
   const icons = chartIcons(element('div'), { state, write });
   const colours = element('div', 'cm-chart-field cm-chart-colours');
-  const data = source ? dataLine(source) : null;
-  // Edit the data stands on the Data line where there is one, else on a line of its own
-  const edit = data ? data.node : element('div', 'cm-chart-field cm-chart-data');
+  const line = data ? dataLine(data) : null;
   /** The template picker this card opened, closed with it. */
   let closePicker = null;
   const template = templates ? templateLine() : null;
-  panel.replaceChildren(...(data ? [data.node] : []), ...title.nodes, ...(data ? [] : [edit]), columns, icons.node, looks, colours,
-    ...(template ? [template] : []));
+  panel.replaceChildren(...(line ? [line.node] : []), ...title.nodes, columns, icons.node, looks, colours, ...(template ? [template] : []));
 
   /** Apply a template…: a chart template's kind and settings over the chart's own rows, one Undo. */
   function templateLine() {
@@ -368,30 +354,11 @@ export function chartSettings(panel, { state, write, keep = null, source = null,
     return node;
   }
 
-  /** Edit the data: the kind's form, when the chart's rows are in its shape. */
-  function renderData(chart, kind) {
-    const fits = Boolean(editData) && Boolean(readForm(chart.lines.join('\n'), kind.name ?? '').form);
-    const held = edit.querySelector('.cm-chart-edit-data');
-    if (!data) edit.hidden = !fits;
-    if (!fits) {
-      held?.remove();
-      if (!data) edit.replaceChildren();
-      return;
-    }
-    if (held) return;
-    const open = button('cm-chart-use cm-chart-edit-data', { label: 'Edit the data', title: 'Its rows in a form made for its kind' });
-    open.addEventListener('mousedown', (event) => event.preventDefault());
-    open.addEventListener('click', () => editData());
-    if (!data) edit.append(element('span', 'cm-chart-field-name', 'Data'));
-    edit.append(open);
-  }
-
   function render() {
     const { chart, drawn } = state();
     const kind = drawn?.kind ?? {};
     const choices = cardChoices(chart.table);
     title.render();
-    renderData(chart, kind);
     const fields = [];
     const timeline = kind.name === 'timeline';
     if (timeline) {
@@ -445,7 +412,7 @@ export function chartSettings(panel, { state, write, keep = null, source = null,
         (value) => write(cardChanges('style', value, { kind }))),
     );
     renderColours(drawn?.colours ?? []);
-    data?.refresh();
+    line?.refresh();
     if (focused) [...panel.querySelectorAll('[aria-label]')].find((node) => node.getAttribute('aria-label') === focused)?.focus({ preventScroll: true });
   }
 

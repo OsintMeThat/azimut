@@ -14,8 +14,10 @@ describe('a warning', () => {
   it('keeps the kinds the server gives, and reads anything else as other', () => {
     expect(WARNING_KINDS).toEqual([
       'missing', 'unsourced', 'open-task', 'local-link', 'empty-section', 'setting', 'other', 'internal', 'count', 'address',
-      'unarchived', 'unseen', 'stale',
+      'unarchived', 'unseen',
     ]);
+    // a chart's rows that moved on are no warning any more: a server that still says so reads as other
+    expect(warningKind('stale')).toBe('other');
     for (const kind of WARNING_KINDS) expect(warningKind(kind)).toBe(kind);
     expect(warningKind('shiny')).toBe('other');
     expect(warningKind(undefined)).toBe('other');

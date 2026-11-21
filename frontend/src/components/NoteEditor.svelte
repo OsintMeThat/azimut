@@ -69,6 +69,8 @@
   import { mapOffer } from '../lib/notes/mapPut.js';
   import { EMPTY_INFOGRAPHIC } from '../lib/notes/editor/infographicText.js';
   import { replaceBlock } from '../lib/notes/editor/infographicBlock.js';
+  import { followSource, heldBack } from '../lib/notes/editor/follow.js';
+  import { panelGrid } from '../lib/notes/editor/panelRows.js';
   import { starterFor } from '../lib/notes/editor/infographicPanels.js';
   import { putInNote } from '../lib/notes/putInNote.svelte.js';
   import NoteMapPicker from './NoteMapPicker.svelte';
@@ -403,6 +405,12 @@
     canUndo: () => Boolean(view && !readOnly && undoDepth(view.state) > 0),
     /** The editor's theme classes, for a block's card drawn outside it: an infographic's map panel in the builder. */
     themeClasses: () => view?.themeClasses ?? '',
+    /** A panel's rows of an infographic as a grid in the builder, written through the note (`editor/panelRows.js`). */
+    panelGrid: (box, options) => (view ? panelGrid(view, box, options) : null),
+    /** Every copy of a source's rows in the note brought up to `rows`, one step Undo takes back (`editor/follow.js`). */
+    follow: (origin, rows) => Boolean(view && !readOnly && followSource(view, origin, rows)),
+    /** Whether Undo kept an older copy of that source than `rows`. */
+    heldBack: (origin, rows) => Boolean(view && heldBack(view, origin, rows)),
     /** *From a sheet…* for a map outside the note's own blocks (an infographic's map panel), null when the note cannot. */
     get sheetMap() { return handlers.sheetMap; },
     /** Write the cover page at the top, unless there is one: Look › Cover was turned to Your own page. */
@@ -671,6 +679,7 @@
 
 {#if dataPick}
   <DataPicker {caseId} noteId={ownId} noteText={dataPick.noteText} anchor={dataPick.anchor} current={dataPick.current ?? ''} seed={dataPick.seed ?? null}
+    own={Boolean(dataPick.own)}
     onpick={(choice) => { const asked = dataPick; dataPick = null; asked?.onpick?.(choice); }}
     onclose={() => { dataPick = null; }} />
 {/if}

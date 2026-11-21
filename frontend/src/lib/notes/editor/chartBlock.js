@@ -13,10 +13,17 @@
  *   what it needs; the one picked is written with its columns and no row, and its form
  *   opens on it (`editor/chartForm.js`), the chart drawn under it as it is filled.
  * - **Its bar**: Kind (the picker again, the chart's own settings kept), Settings (the
- *   card: title, count, by, coloured by, show, style, *Keep these colours for the case*,
- *   and *Edit the data*, the form again), Read again (once the table its rows came from
- *   changed, in this note, another one or a sheet), The numbers (its rows, and the way to
- *   the table or the form), Export (a picture for X, 4:5, 1:1, the PDF page, or an SVG).
+ *   card: where its rows come from, title, count, by, coloured by, show, style, *Keep these
+ *   colours for the case*), The numbers, Export (a picture for X, 4:5, 1:1, the PDF page,
+ *   or an SVG).
+ * - **The numbers**: its Data line (`editor/dataLine.js`), then its rows as a grid to type
+ *   in, the note tables' own (`editor/rowsGrid.js`), a column the drawing does not read
+ *   greyed and marked "not drawn". Its own rows take every gesture of a table, the form (*As
+ *   a form*) where its kind's fits, and a wall's *Fill from the case…*; rows from a table of
+ *   this note or a sheet are typed in where they live (`editor/throughSheet.js`).
+ * - **Its source**: rows copied from a table or a sheet follow it by themselves, one step
+ *   Undo takes back (`editor/follow.js`), asked as the chart comes into sight, the window
+ *   comes back or the note changes.
  * - **Its checks**: what the check before export says of it, in the honesty rules'
  *   words, under it, with a one-press fix where the check offers one.
  *
@@ -39,19 +46,20 @@ import { EMPTY_SAID, FORMS, hasRows, readForm, starterBlock } from './chartFormT
 import {
   CHART_OPEN, chartOfTable, compareRows, fixLabel, headingAbove, newChart, readChart, readOrigin, setting, tableUnder, withSettings, withTable,
 } from './chartText.js';
+import { ELSEWHERE, LOCAL, OWN, SHEET, anchorName, dataWords, drawDataLine, sourceOf } from './dataLine.js';
+import { followSource, heldBack, settled } from './follow.js';
 import { tablesOf } from './gridEdits.js';
 import { button, icon, openMenu } from './gridMenu.js';
 import { heldHeight, holdHeight, moveHeight, releaseHeight } from './heights.js';
 import { blockAt } from './puts.js';
-import { blocksIn, openSource } from './ranges.js';
+import { blocksIn, openSource, settle } from './ranges.js';
+import { rowsGrid, writeLocalCells, writeSheetCells } from './rowsGrid.js';
 import { noteCase, noteHandlers } from './state.js';
 import { registerTableChart } from './tableGrid.js';
 import { gridAt } from './tablePictures.js';
-import { lineChanges, parseTable, plainText } from './tableText.js';
+import { lineChanges, parseTable } from './tableText.js';
 import { BlockWidget, markPicked, sourceButton } from './widgets.js';
 
-/** The rows The numbers shows before it says how many more. */
-export const NUMBERS_SHOWN = 60;
 /** A chart's height before it is drawn, in pixels. */
 const CHART_HEIGHT = 440;
 
@@ -83,15 +91,42 @@ class ChartBox {
     this.asked = null;
     this.origin = null;
     this.originAsked = null;
+    this.fresh = null;
     this.settings = null;
     this.form = null;
+    this.rows = null;
+    this.rowsKey = '';
     this.numbersOpen = false;
     this.gone = false;
+    const chart = this;
+    // what the grid of its rows asks of the block it stands in (`editor/rowsGrid.js`)
+    this.rowsHost = {
+      whole: false,
+      get mode() {
+        return chart.source().mode;
+      },
+      start: () => this.tableStart(),
+      anchor: (where) => this.anchorAround(where),
+      tools: () => this.rowsTools(),
+      writeCells: (found, cells) => this.writeCells(found, cells),
+      toSource: () => this.toSource(),
+    };
     box.chart = this;
     this.build();
     this.draw();
     this.refreshOrigin();
     this.openFresh();
+    this.watch();
+  }
+
+  /** Back in sight (the Notebook shown again, the chart scrolled to), rows from elsewhere are read afresh. */
+  watch() {
+    if (typeof IntersectionObserver === 'undefined') return;
+    this.seen = new IntersectionObserver((entries) => {
+      if (this.gone || !this.box.isConnected) this.seen?.disconnect();
+      else if (this.origin?.elsewhere && entries.some((entry) => entry.isIntersecting)) this.refreshOrigin({ fresh: true });
+    });
+    this.seen.observe(this.box);
   }
 
   /** A chart written from scratch a moment ago opens its form, the keyboard in its first field. */
@@ -133,6 +168,25 @@ class ChartBox {
     return blocksIn(this.view.state, from).find((block) => block.from === from && block.kind === 'chart') ?? null;
   }
 
+  /** Where the chart's table starts in the note, its header line, or -1. */
+  tableStart() {
+    const range = this.range();
+    if (!range) return -1;
+    const chart = readChart(this.view.state.sliceDoc(range.from, range.to));
+    if (chart.tableFrom < 0) return -1;
+    return range.from + chart.lines.slice(0, chart.tableFrom).reduce((sum, line) => sum + line.length + 1, 0);
+  }
+
+  /** Where the cursor goes as the grid of its rows is left: on the chart, or around it. */
+  anchorAround(where) {
+    const range = this.range();
+    if (!range) return this.view.state.selection.main.head;
+    const { state } = this.view;
+    if (where === 'before') return range.from > 0 ? settle(state, range.from - 1) : range.from;
+    if (where === 'after') return range.to < state.doc.length ? settle(state, range.to + 1) : range.to;
+    return range.from;
+  }
+
   /**
    * The chart worked on is the one picked: the cursor goes to its start, so the note
    * keeps it drawn where it is when a panel takes the keyboard, rather than a block
@@ -144,10 +198,14 @@ class ChartBox {
     if (range && !(main.empty && main.head === range.from)) this.view.dispatch({ selection: { anchor: range.from } });
   }
 
+  /** Where the rows live, as `from:` says: `{ mode, id, anchor }` (`dataLine.sourceOf`). */
+  source() {
+    return sourceOf(setting(this.chart, 'from'), this.noteId);
+  }
+
   /** Whether the rows came from a table of this very note, which the editor reads as it is typed. */
   local() {
-    const origin = readOrigin(setting(this.chart, 'from'));
-    return Boolean(origin && origin.kind === 'note' && this.noteId && origin.id === this.noteId);
+    return this.source().mode === LOCAL;
   }
 
   /** Whether the editor says itself whether the rows still match where they came from: always, once `from:` names a note or a sheet. */
@@ -179,6 +237,8 @@ class ChartBox {
     this.checks.setAttribute('aria-label', 'What the check says of this chart');
     this.numbers = element('div', 'cm-chart-numbers cm-chart-ui');
     this.numbers.hidden = true;
+    this.numbers.setAttribute('role', 'group');
+    this.numbers.setAttribute('aria-label', 'The numbers');
     frame.append(this.formPanel, this.settingsPanel, this.figure, this.checks, this.numbers);
     box.append(frame);
     if (!this.writable) box.append(sourceButton(this.view, box));
@@ -202,9 +262,7 @@ class ChartBox {
     this.settingsButton = tool('cm-chart-settings', { label: 'Settings', iconName: 'sliders', title: 'Title, what it counts, by what, and its look' },
       () => this.toggleSettings());
     this.settingsButton.setAttribute('aria-pressed', 'false');
-    this.againButton = tool('cm-chart-again', { label: 'Read again', iconName: 'reset' }, () => this.readAgain());
-    this.againButton.hidden = true;
-    this.numbersButton = tool('cm-chart-numbers-btn', { label: 'The numbers', iconName: 'table', title: 'The rows it is drawn from' }, () => this.toggleNumbers());
+    this.numbersButton = tool('cm-chart-numbers-btn', { label: 'The numbers', iconName: 'table', title: 'Its rows, to type in' }, () => this.toggleNumbers());
     this.numbersButton.setAttribute('aria-pressed', 'false');
     tool('cm-chart-export', { label: 'Export', iconName: 'download', title: 'A picture for X, 4:5, 1:1, the PDF page, or an SVG' }, (node) => this.exportMenu(node));
     bar.append(element('span', 'cm-chart-spring'));
@@ -228,11 +286,17 @@ class ChartBox {
     const before = this.widget;
     this.widget = widget;
     this.chart = readChart(widget.source);
+    if (widget.source !== before.source) this.fresh = null;
     if (widget.source !== before.source || widget.info.caseId !== before.info.caseId) this.draw();
     this.refreshOrigin();
     if (this.numbersOpen) this.renderNumbers();
     this.settings?.refresh();
     this.form?.refresh();
+  }
+
+  /** The block's text as drawn: a view that cannot write draws the rows its source holds now. */
+  shownSource() {
+    return this.fresh ? withTable(this.widget.source, this.fresh) : this.widget.source;
   }
 
   draw() {
@@ -255,7 +319,7 @@ class ChartBox {
       this.view.requestMeasure();
       return;
     }
-    const request = { caseId, noteId: this.noteId, text: this.widget.source, origins: !this.readsOrigin() };
+    const request = { caseId, noteId: this.noteId, text: this.shownSource(), origins: !this.readsOrigin() };
     const kept = keptDrawing(request);
     if (kept) {
       this.show(kept);
@@ -287,6 +351,7 @@ class ChartBox {
       this.renderChecks(answer.checks);
     }
     this.nameKind();
+    if (this.numbersOpen) this.renderNumbers();
     this.settings?.refresh();
     this.form?.refresh();
     this.view.requestMeasure();
@@ -319,9 +384,9 @@ class ChartBox {
   }
 
   /**
-   * Whether the rows still match where they were copied from: a table of this note, read
-   * as it is typed, or another note's table or a sheet, asked of the server
-   * (`chartRows`, kept a few seconds; `fresh` asks now).
+   * Whether the rows still match where they came from: a table of this note, read as it
+   * is typed, or another note's table or a sheet, asked of the server (`chartRows`, kept a
+   * few seconds; `fresh` asks now). Rows that moved on are followed (`editor/follow.js`).
    */
   refreshOrigin({ fresh = false } = {}) {
     const written = setting(this.chart, 'from');
@@ -331,10 +396,13 @@ class ChartBox {
       this.originAsked = asked;
       asked.then((answer) => {
         if (this.gone || this.originAsked !== asked || answer.error) return;
-        const name = origin.kind === 'sheet' ? `the sheet “${answer.name}”` : `the table in “${answer.name}”`;
-        this.showOrigin(answer.found
-          ? { state: compareRows(this.chart.table, parseTable(answer.text)), text: answer.text, name, elsewhere: true }
-          : { state: 'gone', name: origin.kind === 'sheet' ? 'the sheet it came from' : 'the table it came from', elsewhere: true });
+        if (!answer.found) {
+          this.showOrigin({ state: 'gone', name: '', elsewhere: true });
+          return;
+        }
+        const state = compareRows(this.chart.table, parseTable(answer.text));
+        this.showOrigin({ state, text: answer.text, name: answer.name, elsewhere: true });
+        this.follow(written, state, answer.text);
       });
       return;
     }
@@ -345,23 +413,76 @@ class ChartBox {
       const line = tableUnder(text, origin.anchor);
       const found = line >= 0 ? tablesOf(this.view.state).find((table) => table.line === line) : null;
       state = found
-        ? { state: compareRows(this.chart.table, found.table), found, name: tableName(text, line) }
-        : { state: 'gone', name: origin.anchor ? `the table under “${origin.anchor}”` : 'the table it came from' };
+        ? { state: compareRows(this.chart.table, found.table), found, name: headingAbove(text, line), text: text.slice(found.from, found.to) }
+        : { state: 'gone', name: '' };
     }
     this.showOrigin(state);
+    // the note is being drawn: its copy is written once the drawing is done
+    if (state?.text) setTimeout(() => !this.gone && this.follow(written, state.state, state.text), 0);
   }
 
-  /** Say whether the rows match where they came from: Read again on the bar when they do not, and in The numbers. */
-  showOrigin(state) {
-    const was = this.origin?.state;
-    this.origin = state;
-    if (this.againButton) {
-      const differs = state?.state === 'differs';
-      this.againButton.hidden = !differs;
-      this.againButton.title = differs ? `${state.name[0].toUpperCase()}${state.name.slice(1)} changed: copy its rows again` : '';
+  /**
+   * Rows that moved on are copied in by themselves, every copy of that source at once, one
+   * step Undo takes back (`followSource`); a view that cannot write draws them instead.
+   */
+  follow(written, state, text) {
+    if (state === 'same') {
+      settled(this.view, written, text);
+      if (this.fresh) {
+        this.fresh = null;
+        this.draw();
+      }
+      return;
     }
-    if (this.numbersOpen && was !== state?.state) this.renderNumbers();
-    if (was !== state?.state) this.settings?.refresh();
+    if (state !== 'differs') return;
+    if (this.writable) followSource(this.view, written, text);
+    else if (this.fresh !== text) {
+      this.fresh = text;
+      this.draw();
+    }
+  }
+
+  /** Say where the rows are and whether they match, on The numbers and the settings' Data line. */
+  showOrigin(state) {
+    const was = this.origin;
+    this.origin = state;
+    if (was?.state === state?.state && was?.name === state?.name && was?.text === state?.text) return;
+    if (this.numbersOpen) this.renderNumbers();
+    this.settings?.refresh();
+  }
+
+  /** The Data line's words (`editor/dataLine.js`). */
+  dataSaid() {
+    const written = setting(this.chart, 'from');
+    const { mode, anchor } = this.source();
+    const known = this.origin;
+    let state = known?.state === 'gone' || known?.state === 'columns' ? known.state : '';
+    if (known?.state === 'differs' && known.text && this.writable && heldBack(this.view, written, known.text)) state = 'held';
+    if (mode === ELSEWHERE) return dataWords({ mode, name: anchorName(anchor), note: known?.name ?? '', state });
+    return dataWords({ mode, name: known?.name ?? '', state });
+  }
+
+  /** The Data line's press: Edit opens the grid of its rows, Open in Sheet the sheet, Go to the table the table. */
+  dataAct(id) {
+    const { mode, id: where } = this.source();
+    if (id === 'edit') {
+      this.toggleSettings(false);
+      this.toggleNumbers(true);
+      this.rows?.edit(this.rows.table.rows.length ? 0 : -1, 0);
+    } else if (id === 'sheet') {
+      if (this.handlers.inCase && this.handlers.open) this.handlers.open({ id: where, type: 'sheet' });
+    } else if (id === 'table') {
+      if (mode === LOCAL) this.goToTable();
+      else this.handlers.note?.(where);
+    }
+  }
+
+  /** Whether the Data line offers its press: a sheet opens only where the app's tools are around the note. */
+  canAct(id) {
+    if (id === 'edit') return this.writable;
+    if (id === 'sheet') return Boolean(this.handlers.inCase && this.handlers.open);
+    if (id === 'table') return this.local() ? Boolean(this.origin?.found) : Boolean(this.handlers.note);
+    return false;
   }
 
   // -- the bar's gestures --
@@ -416,8 +537,11 @@ class ChartBox {
         state: () => (this.gone ? null : { chart: this.chart, drawn: this.drawn }),
         write: (changes) => this.write(changes),
         keep: this.info.caseId ? (values) => this.keepColours(values) : null,
-        editData: () => this.toggleForm(true),
-        source: this.info.caseId && this.handlers.pickData ? { said: () => this.sourceSaid(), change: (anchor) => this.changeSource(anchor) } : null,
+        data: {
+          said: () => this.dataSaid(),
+          act: (id) => this.canAct(id) && this.dataAct(id),
+          change: this.canChange() ? (anchor) => this.changeSource(anchor) : null,
+        },
         templates: true,
       });
     }
@@ -431,11 +555,17 @@ class ChartBox {
     return Boolean(readForm(this.widget.source, this.drawn?.kind?.name ?? '').form);
   }
 
+  /** Whether the chart is a picture wall, whose form fills from the case's pictures. */
+  isWall() {
+    return FORMS[readForm(this.widget.source, this.drawn?.kind?.name ?? '').kind]?.family === 'pictures';
+  }
+
   /**
    * Open or close the kind's form on the chart, between its bar and its drawing, so every
-   * row filled is seen drawn under it; open, the keyboard goes to the first field to fill.
+   * row filled is seen drawn under it; open, the keyboard goes to the first field to fill,
+   * or with `fill`, to *Fill from the case*.
    */
-  toggleForm(open = this.formPanel.hidden) {
+  toggleForm(open = this.formPanel.hidden, { fill = false } = {}) {
     if (!this.writable) return;
     if (!open) {
       if (!this.form) return;
@@ -470,28 +600,26 @@ class ChartBox {
         },
       });
     }
-    this.form.focus();
+    if (fill) this.form.fill?.();
+    else this.form.focus();
     this.view.requestMeasure();
   }
 
-  /** Where the rows come from, for the settings' Data line: `{ name, state }`. */
-  sourceSaid() {
-    const origin = readOrigin(setting(this.chart, 'from'));
-    if (!origin) return { name: '', state: '' };
-    const known = this.origin;
-    if (!known) return { name: origin.kind === 'sheet' ? 'A sheet' : 'A table', state: '' };
-    const name = known.name.replace(/^the sheet /, 'Sheet ');
-    return { name: `${name[0].toUpperCase()}${name.slice(1)}`, state: known.state === 'differs' || known.state === 'gone' ? known.state : '' };
+  /** Whether Change… is offered: the source picker, in a note of a case that can be written. */
+  canChange() {
+    return Boolean(this.info.caseId && this.handlers.pickData && this.writable);
   }
 
-  /** Change…: the source picker; the one picked writes `from:` and its rows, as one step. */
+  /** Change…: the source picker; the one picked writes `from:` and its rows, as one step; *Its own rows* takes `from:` out. */
   changeSource(anchor) {
     this.handlers.pickData?.({
       anchor,
       current: setting(this.chart, 'from'),
       seed: chartSeed(this.widget.source),
-      onpick: ({ origin, data }) => {
-        if (origin && data?.text) this.edit((source) => withTable(withSettings(source, { from: origin }), data.text));
+      own: Boolean(setting(this.chart, 'from')),
+      onpick: ({ origin, data, own }) => {
+        if (own) this.write({ from: '' });
+        else if (origin && data?.text) this.edit((source) => withTable(withSettings(source, { from: origin }), data.text));
       },
     });
   }
@@ -516,13 +644,6 @@ class ChartBox {
     }
   }
 
-  readAgain() {
-    const found = this.origin?.found;
-    const text = found ? this.view.state.sliceDoc(found.from, found.to) : this.origin?.text;
-    if (!text) return;
-    this.edit((source) => withTable(source, text));
-  }
-
   toggleNumbers(open = !this.numbersOpen) {
     this.numbersOpen = open;
     this.numbersButton?.setAttribute('aria-pressed', String(open));
@@ -531,57 +652,86 @@ class ChartBox {
       this.renderNumbers();
       // rows from elsewhere are asked again as they are looked at
       if (this.origin?.elsewhere) this.refreshOrigin({ fresh: true });
-    }
+    } else this.dropRows();
     this.view.requestMeasure();
   }
 
-  renderNumbers() {
-    const { table } = this.chart;
-    const parts = [];
-    if (!table) parts.push(element('p', 'cm-chart-said', 'This chart holds no rows yet.'));
-    else {
-      const sheet = element('table', 'cm-chart-rows');
-      const head = element('tr');
-      for (const cell of table.header) head.append(element('th', '', plainText(cell)));
-      const thead = element('thead');
-      thead.append(head);
-      const body = element('tbody');
-      for (const row of table.rows.slice(0, NUMBERS_SHOWN)) {
-        const line = element('tr');
-        row.forEach((cell, at) => {
-          const node = element('td', '', plainText(cell));
-          node.title = plainText(cell);
-          if (table.align[at] === 'right') node.style.textAlign = 'right';
-          line.append(node);
-        });
-        body.append(line);
-      }
-      sheet.append(thead, body);
-      const scroll = element('div', 'cm-chart-rows-scroll');
-      scroll.append(sheet);
-      parts.push(scroll);
-      if (table.rows.length > NUMBERS_SHOWN) parts.push(element('p', 'cm-chart-said', `And ${table.rows.length - NUMBERS_SHOWN} more rows.`));
+  dropRows() {
+    this.rows?.leave('stay');
+    this.rows?.destroy();
+    this.rows = null;
+    this.rowsKey = '';
+  }
+
+  /** The columns the drawing does not read (`drawn` in its kind), greyed in the grid. */
+  idleColumns() {
+    const drawn = this.drawn?.kind?.drawn;
+    const width = this.chart.table?.header.length ?? 0;
+    if (!Array.isArray(drawn)) return new Set();
+    const read = new Set(drawn);
+    return new Set(Array.from({ length: width }, (_, at) => at).filter((at) => !read.has(at)));
+  }
+
+  /** The presses the grid's bar ends with: As a form where the kind's form fits, and a wall's Fill from the case. */
+  rowsTools() {
+    if (!this.writable || this.source().mode !== OWN || !this.hasForm()) return [];
+    const tools = [{ className: 'cm-rows-form', label: 'As a form', iconName: 'sliders', title: 'Its rows in a form made for its kind', run: () => this.toggleForm(true) }];
+    if (this.isWall() && this.info.caseId) {
+      tools.push({ className: 'cm-rows-fill', label: 'Fill from the case…', iconName: 'download', title: 'Pictures of the case, a folder at a time',
+        run: () => this.toggleForm(true, { fill: true }) });
     }
-    const said = element('div', 'cm-chart-numbers-said');
-    const origin = this.origin;
-    const words = !origin ? (setting(this.chart, 'from') ? 'Copied from another note or a sheet.' : 'These rows are the chart’s own.')
-      : origin.state === 'same' ? `Same as ${origin.name}.`
-        : origin.state === 'differs' ? `${origin.name[0].toUpperCase()}${origin.name.slice(1)} changed since they were copied.`
-          : origin.state === 'columns' ? `${origin.name[0].toUpperCase()}${origin.name.slice(1)} no longer has these columns.`
-            : `${origin.name[0].toUpperCase()}${origin.name.slice(1)} is no longer in ${origin.elsewhere ? 'the case' : 'this note'}.`;
-    said.append(element('span', origin?.state === 'same' ? 'cm-chart-same' : '', words));
-    const act = (label, run, className = '') => {
-      const node = button(`cm-chart-link ${className}`, { label });
-      node.addEventListener('mousedown', (event) => event.preventDefault());
-      node.addEventListener('click', run);
-      said.append(node);
-    };
-    if (origin?.state === 'differs' && this.writable) act('Read again', () => this.readAgain(), 'cm-chart-link-strong');
-    if (origin?.found) act('Go to the table', () => this.goToTable());
-    if (this.writable && this.hasForm()) act('Edit the data', () => this.toggleForm(true));
-    if (this.writable) act('Edit them as text', () => this.toSource());
-    parts.push(said);
-    this.numbers.replaceChildren(...parts);
+    return tools;
+  }
+
+  /** The numbers: the Data line, then the rows as a grid to type in (`editor/rowsGrid.js`). */
+  renderNumbers() {
+    if (!this.numbersLine) {
+      this.numbersLine = element('div', 'cm-chart-data cm-chart-numbers-data');
+      this.numbersBody = element('div', 'cm-chart-numbers-body');
+      this.numbers.replaceChildren(this.numbersLine, this.numbersBody);
+    }
+    const words = this.dataSaid();
+    drawDataLine(this.numbersLine, words, {
+      act: words.act && this.canAct(words.act.id) && words.act.id !== 'edit' ? (id) => this.dataAct(id) : null,
+      change: this.canChange() ? (anchor) => this.changeSource(anchor) : null,
+    });
+    const { table } = this.chart;
+    if (!table) {
+      this.dropRows();
+      this.numbersBody.replaceChildren(element('p', 'cm-chart-said', 'This chart holds no rows yet.'));
+      return;
+    }
+    const { mode } = this.source();
+    const state = this.origin?.state;
+    const typed = mode === OWN || ((mode === LOCAL || mode === SHEET) && (state === 'same' || state === 'differs'));
+    const writable = this.writable && typed;
+    const idle = this.idleColumns();
+    const key = `${mode}|${writable}|${this.rowsTools().map((one) => one.label).join(',')}`;
+    if (this.rows && key === this.rowsKey && this.numbersBody.contains(this.rows.box)) {
+      this.rows.update({ ...this.rows.widget, table, info: this.info, idle });
+      return;
+    }
+    this.dropRows();
+    const box = element('div');
+    this.numbersBody.replaceChildren(box);
+    this.rows = rowsGrid(box, this.view, { host: this.rowsHost, table, info: this.info, writable, idle });
+    this.rowsKey = key;
+  }
+
+  /** A cell typed in rows that live elsewhere: written there, then the copy follows. */
+  async writeCells(found, cells) {
+    const written = setting(this.chart, 'from');
+    const { mode } = this.source();
+    const refused = mode === LOCAL ? writeLocalCells(this.view, written, found, cells)
+      : mode === SHEET ? await writeSheetCells(this.view, { caseId: this.info.caseId, written, found, cells }) : '';
+    if (refused && !this.gone) this.refuse(refused, mode === SHEET ? 'sheet' : 'table');
+  }
+
+  /** A cell that could not be written where its rows live: drawn as it was, and the way to edit it there. */
+  refuse(message, where = '') {
+    this.rows?.redraw({ refused: true });
+    const actions = where && this.canAct(where) ? [{ label: where === 'sheet' ? 'Open in Sheet' : 'Go to the table', onClick: () => this.dataAct(where) }] : [];
+    this.handlers.tableToast?.(message, actions, 'warn');
   }
 
   goToTable() {
@@ -618,6 +768,8 @@ class ChartBox {
 
   destroy() {
     this.gone = true;
+    this.seen?.disconnect();
+    this.rows?.destroy();
     this.settings?.destroy();
     this.form?.destroy();
   }
@@ -634,15 +786,17 @@ export class ChartWidget extends BlockWidget {
     // eslint-disable-next-line no-new
     new ChartBox(box, this, view);
     markPicked(box, this.picked);
+    // a press its own parts took (a cell of The numbers, whose words make way for its field) is theirs
+    const theirs = (event) => event.defaultPrevented || !event.target.isConnected || Boolean(event.target.closest('.cm-chart-ui, a'));
     box.addEventListener('mousedown', (event) => {
-      if (event.button !== 0 || event.target.closest('.cm-chart-ui, a')) return;
+      if (event.button !== 0 || theirs(event)) return;
       event.preventDefault();
       // a press picks the chart, which stays drawn; a double press opens its settings
       view.dispatch({ selection: { anchor: view.posAtDOM(box) } });
       view.focus();
     });
     box.addEventListener('dblclick', (event) => {
-      if (event.target.closest('.cm-chart-ui')) return;
+      if (theirs(event)) return;
       event.preventDefault();
       box.chart.toggleSettings(true);
     });
@@ -660,12 +814,26 @@ export class ChartWidget extends BlockWidget {
   }
 
   ignoreEvent(event) {
-    return event.type !== 'mousedown' || Boolean(event.target?.closest?.('.cm-chart-ui'));
+    return event.type !== 'mousedown' || event.defaultPrevented || event.target?.isConnected === false || Boolean(event.target?.closest?.('.cm-chart-ui'));
   }
 
   destroy(dom) {
     releaseHeight(dom);
     dom.chart?.destroy();
+  }
+
+  /**
+   * What its drawn height is kept by: its settings, its columns and how many rows it has, not
+   * what its cells say, so a cell typed in The numbers keeps the height it was drawn at and
+   * the note never jumps while the chart is drawn again.
+   */
+  heightKey() {
+    if (!this.chartKey) {
+      const chart = readChart(this.source);
+      const lines = chart.tableFrom < 0 ? chart.lines : [...chart.lines.slice(0, chart.tableFrom), ...chart.lines.slice(chart.tableTo + 1)];
+      this.chartKey = JSON.stringify(['chart', lines, chart.table?.header ?? null, chart.table?.rows.length ?? 0, this.info.caseId ?? '', this.writable]);
+    }
+    return this.chartKey;
   }
 
   /** The height it was last drawn at, its settings or numbers open included, else a drawing's. */
@@ -701,11 +869,18 @@ function openChart(view, block) {
   return true;
 }
 
-/** After the note changes, each chart says again whether its rows match the table they came from. */
+/**
+ * After the note changes, each chart says again whether its rows match the table they came
+ * from; when the window comes back (a sheet edited in Excel), it reads them afresh.
+ */
 const watchOrigins = ViewPlugin.fromClass(class {
   constructor(view) {
     this.view = view;
     this.timer = null;
+    this.back = () => {
+      for (const box of this.view.contentDOM.querySelectorAll('.cm-chart-block')) box.chart?.refreshOrigin({ fresh: true });
+    };
+    window.addEventListener('focus', this.back);
   }
 
   update(update) {
@@ -718,6 +893,7 @@ const watchOrigins = ViewPlugin.fromClass(class {
 
   destroy() {
     clearTimeout(this.timer);
+    window.removeEventListener('focus', this.back);
   }
 });
 
@@ -947,14 +1123,12 @@ const THEME = {
   },
   '.cm-chart-spring': { flex: '1' },
   '.cm-chart-tool': TOOL,
-  // what a chart shows only at times (Read again, its checks, its numbers) stays out of sight when hidden
+  // what a chart shows only at times (its checks, its numbers) stays out of sight when hidden
   '.cm-chart-tool[hidden], .cm-chart-ui[hidden], .cm-chart-proposed[hidden]': { display: 'none' },
   '.cm-chart-tool:hover, .cm-chart-tool:focus-visible': { background: 'var(--bg-3)', color: 'var(--text-1)', outline: 'none' },
   '.cm-chart-tool:focus-visible': { outline: '2px solid var(--accent)', outlineOffset: '1px' },
   '.cm-chart-tool svg': { flex: 'none', opacity: '0.85' },
   '.cm-chart-kind': { color: 'var(--text-1)', fontWeight: '600' },
-  '.cm-chart-again': { color: 'var(--accent)', fontWeight: '600', background: 'var(--accent-soft)' },
-  '.cm-chart-again:hover, .cm-chart-again:focus-visible': { background: 'var(--accent)', color: 'var(--accent-text)' },
   '.cm-chart-tool[aria-pressed="true"]': { background: 'var(--bg-3)', color: 'var(--text-1)' },
   '.cm-chart-source': { padding: '0 7px', minWidth: '28px', justifyContent: 'center' },
   '.cm-chart-source::before': { content: '"</>"', fontFamily: 'var(--font-mono)', fontSize: '11px' },
@@ -964,11 +1138,6 @@ const THEME = {
   '.cm-chart-said': { margin: '0', padding: '26px 16px', color: 'var(--text-3)', textAlign: 'center' },
   '.cm-chart-empty': { padding: '34px 16px', fontSize: '13px' },
   '.cm-chart-field.cm-chart-data[hidden]': { display: 'none' },
-  '.cm-chart-data .cm-chart-edit-data': {
-    display: 'inline-flex', alignItems: 'center', height: '26px', margin: '0', padding: '0 12px', border: '1px solid color-mix(in srgb, var(--accent) 45%, transparent)',
-    borderRadius: '13px', background: 'var(--accent-soft)', color: 'var(--text-1)', fontSize: '12.5px', fontWeight: '600', textDecoration: 'none',
-  },
-  '.cm-chart-data .cm-chart-edit-data:hover, .cm-chart-data .cm-chart-edit-data:focus-visible': { background: 'var(--accent)', color: 'var(--accent-text)', outline: 'none' },
   '.cm-chart-failed': { color: 'var(--danger)' },
   '.cm-chart-checks': {
     listStyle: 'none', margin: '0', padding: '7px 12px', borderTop: '1px solid var(--border)', background: 'var(--bg-1)',
@@ -984,22 +1153,19 @@ const THEME = {
   },
   '.cm-chart-fix:hover, .cm-chart-fix:focus-visible': { background: 'var(--accent)', color: 'var(--accent-text)', outline: 'none' },
   '.cm-chart-numbers': { borderTop: '1px solid var(--border)', background: 'var(--bg-1)' },
-  '.cm-chart-rows-scroll': { maxHeight: '280px', overflow: 'auto', scrollbarWidth: 'thin', scrollbarColor: 'var(--border-strong) transparent' },
-  'table.cm-chart-rows': { width: '100%', borderCollapse: 'separate', borderSpacing: '0', fontSize: '12px', fontVariantNumeric: 'tabular-nums' },
-  // a row a line: a long cell is cut, its words whole on hover, and the table scrolls sideways
-  '.cm-chart-rows th, .cm-chart-rows td': {
-    padding: '4px 10px', borderBottom: '1px solid var(--border)', borderRight: '1px solid var(--border)', textAlign: 'left', verticalAlign: 'top',
-    color: 'var(--text-1)', maxWidth: '18em', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
-  },
-  '.cm-chart-rows th': { position: 'sticky', top: '0', background: 'var(--bg-2)', color: 'var(--text-2)', fontWeight: '600', zIndex: '1' },
-  '.cm-chart-numbers-said': { display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: '6px 12px', padding: '7px 12px', color: 'var(--text-2)' },
-  '.cm-chart-same': { color: 'var(--ok)' },
+  '.cm-chart-numbers-data': { padding: '7px 12px', borderBottom: '1px solid var(--border)' },
+  '.cm-chart-numbers-body > .cm-chart-said': { padding: '14px 16px' },
+  // the grid of its rows sits in the chart's frame: no frame of its own, its rows scrolling under a fixed height
+  '.cm-chart-numbers .cm-grid-frame': { border: 'none', borderRadius: '0', background: 'var(--bg-0)' },
+  '.cm-chart-numbers .cm-grid-scroll': { maxHeight: '340px', overflowY: 'auto' },
+  '.cm-chart-numbers .cm-grid thead th': { position: 'sticky', top: '0', zIndex: '1' },
+  '.cm-chart-numbers .cm-rows-bar': { background: 'var(--bg-1)' },
+  '.cm-rows-form, .cm-rows-fill': { color: 'var(--text-1)' },
   '.cm-chart-link': {
     padding: '0', border: 'none', background: 'none', color: 'var(--info)', font: 'inherit', cursor: 'pointer', textDecoration: 'underline',
     textDecorationColor: 'color-mix(in srgb, var(--info) 40%, transparent)', textUnderlineOffset: '2px',
   },
   '.cm-chart-link:hover, .cm-chart-link:focus-visible': { color: 'var(--text-1)', outline: 'none' },
-  '.cm-chart-link-strong': { color: 'var(--accent)', fontWeight: '600' },
   // the kind picker stands over the note, as the grid's menus do
   '.cm-chart-picker': {
     position: 'fixed', zIndex: '60', background: 'var(--bg-2)', border: '1px solid var(--border-strong)', borderRadius: '9px',
@@ -1065,12 +1231,16 @@ const THEME = {
   '.cm-chart-columns > .cm-chart-span': { gridColumn: 'span 2' },
   '.cm-chart-span .cm-chart-seg': { alignSelf: 'flex-start' },
   '.cm-chart-field-note': { color: 'var(--text-3)', fontSize: '11px' },
-  // where the rows come from, on top of the settings
-  '.cm-chart-data': { flexDirection: 'row', alignItems: 'baseline', flexWrap: 'wrap', gap: '4px 10px' },
+  // where the rows come from, one line on top of the settings and of The numbers
+  '.cm-chart-data': { flexDirection: 'row', alignItems: 'baseline', flexWrap: 'wrap', gap: '4px 8px', display: 'flex' },
   '.cm-chart-data > .cm-chart-field-name': { flex: 'none', width: '64px' },
+  '.cm-chart-numbers-data > .cm-chart-field-name': { width: 'auto', marginRight: '4px' },
   '.cm-chart-data-name': { color: 'var(--text-1)', fontWeight: '600' },
+  '.cm-chart-data-dot': { color: 'var(--text-3)' },
+  '.cm-chart-data .cm-chart-use': { marginLeft: '0' },
   '.cm-chart-data-state': { color: 'var(--warn)' },
-  '.cm-chart-data-state[hidden]': { display: 'none' },
+  // Change… stands at the line's end, and at the end of the next one when the name is long
+  '.cm-chart-data .cm-chart-data-change': { marginLeft: 'auto' },
   '.cm-chart-colours': { flexDirection: 'row', alignItems: 'baseline', flexWrap: 'wrap', gap: '6px 10px', paddingLeft: '74px' },
   '.cm-chart-colours[hidden]': { display: 'none' },
   '.cm-chart-swatches': { display: 'inline-flex', flexWrap: 'wrap', gap: '4px 10px', flex: '1 1 0', minWidth: '0' },

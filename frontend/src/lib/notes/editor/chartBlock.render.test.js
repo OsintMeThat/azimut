@@ -6,8 +6,9 @@ import { undo } from '@codemirror/commands';
 
 /**
  * A chart in the drawn note: made from a table by its picture, drawn as the server
- * draws it, its bar's Kind, Settings, Read again, The numbers and Export, its checks
- * with their one-press fixes, every choice one Undo step of exact bytes.
+ * draws it, its bar's Kind, Settings, The numbers and Export, its checks with their
+ * one-press fixes, its rows following where they came from by themselves, every choice
+ * one Undo step of exact bytes.
  */
 
 const server = vi.hoisted(() => ({ figure: null, kinds: null, rows: null, sources: null, palette: [], asked: [] }));
@@ -100,7 +101,7 @@ afterEach(() => {
 function editor(doc, { readOnly = false, mode = 'drawn', noteId = 'n1' } = {}) {
   const parent = document.createElement('div');
   document.body.append(parent);
-  handlers = { tableToast: vi.fn(), open: vi.fn(), noteKey: `c1:${noteId}`, noteId };
+  handlers = { tableToast: vi.fn(), open: vi.fn(), note: vi.fn(), inCase: true, noteKey: `c1:${noteId}`, noteId };
   view = new EditorView({ parent, state: EditorState.create({ doc, extensions: noteExtensions({ handlers, readOnly, mode }) }) });
   view.setState(focusedState(view.state.update({ selection: EditorSelection.cursor(0) }).state));
   view.dispatch({ effects: setNoteCase.of({ caseId: 'c1', entities: [] }) });
@@ -153,7 +154,7 @@ describe('a chart made from a table', () => {
     expect(text()).toBe(NOTE);
   });
 
-  it('names the n-th table under a heading, so Read again finds that one', async () => {
+  it('names the n-th table under a heading, so its rows follow that one', async () => {
     const two = `## Count\n\n| A | N |\n| --- | --- |\n| x | 1 |\n\n${TABLE}\n`;
     editor(two);
     press(view.dom.querySelectorAll('.cm-grid-chart')[1]);
@@ -203,7 +204,7 @@ describe('the chart drawn', () => {
     view.destroy();
     editor(CHARTED);
     expect([...chart().querySelectorAll('.cm-chart-bar button')].map((node) => node.getAttribute('aria-label') ?? node.textContent))
-      .toEqual(['Kind: Stacked', 'Settings', 'Read again', 'The numbers', 'Export', 'Edit the source']);
+      .toEqual(['Kind: Stacked', 'Settings', 'The numbers', 'Export', 'Edit the source']);
     setNoteMode(view, 'markdown');
     expect(chart()).toBeNull();
     expect(view.contentDOM.textContent).toContain('::: chartkind: stacked bars');
@@ -453,21 +454,24 @@ describe('Keep these colours for the case', () => {
 });
 
 describe('the bar', () => {
-  it('reads the rows again once the table they came from changed, as one step', async () => {
+  it('follows the table its rows came from by itself, one step Undo takes back and keeps', async () => {
     editor(CHARTED);
     await settle();
-    expect(tool('again').hidden).toBe(true);
     const at = text().indexOf('| Al-Wahsh | almost sure | 2 |');
     view.dispatch({ changes: { from: at + 2, to: at + 10, insert: 'Al Wahsh' } });
-    await new Promise((resolve) => setTimeout(resolve, 260));
-    expect(tool('again').hidden).toBe(false);
-    expect(tool('again').title).toBe('The table under “Count” changed: copy its rows again');
     const edited = text();
-    press(tool('again'));
+    await new Promise((resolve) => setTimeout(resolve, 260));
+    await settle();
     expect(text()).toBe(edited.replace(`${TABLE}\n:::`, `${TABLE.replace('Al-Wahsh', 'Al Wahsh')}\n:::`));
-    expect(tool('again').hidden).toBe(true);
+    expect(chart().querySelector('.cm-chart-again')).toBeNull();
+    // Undo brings the old copy back, and it stays: the same rows are not followed twice
     undo(view);
     expect(text()).toBe(edited);
+    await new Promise((resolve) => setTimeout(resolve, 260));
+    await settle();
+    expect(text()).toBe(edited);
+    press(tool('numbers-btn'));
+    expect(chart().querySelector('.cm-chart-data-state').textContent).toBe('an older copy, kept by Undo');
   });
 
   it('opens the numbers it is drawn from, and says where they came from', async () => {
@@ -476,10 +480,12 @@ describe('the bar', () => {
     press(tool('numbers-btn'));
     const numbers = chart().querySelector('.cm-chart-numbers');
     expect(numbers.hidden).toBe(false);
-    expect([...numbers.querySelectorAll('th')].map((cell) => cell.textContent)).toEqual(['Model', 'Grade', 'At least']);
+    expect([...numbers.querySelectorAll('thead .cm-grid-text')].map((cell) => cell.textContent)).toEqual(['Model', 'Grade', 'At least']);
     expect(numbers.querySelectorAll('tbody tr')).toHaveLength(2);
-    expect(numbers.querySelector('.cm-chart-numbers-said span').textContent).toBe('Same as the table under “Count”.');
-    press([...numbers.querySelectorAll('.cm-chart-link')].find((node) => node.textContent === 'Go to the table'));
+    expect(numbers.querySelector('.cm-chart-numbers-data').textContent).toBe('DataTable “Count” of this note·Go to the table');
+    // no Edit them as text: the bar's </> gives the source
+    expect([...numbers.querySelectorAll('button')].map((node) => node.textContent)).not.toContain('Edit them as text');
+    press(numbers.querySelector('.cm-chart-data-act'));
     expect(view.state.selection.main.head).toBe(CHARTED.indexOf(TABLE));
   });
 
@@ -613,37 +619,40 @@ describe('Copy rows from another note or a sheet', () => {
   });
 });
 
-describe('Read again, for rows from another note or a sheet', () => {
+describe('rows from another note or a sheet', () => {
   const FROM_OTHER = CHARTED.replace('from: note:n1#count', 'from: note:n2#count');
   const FROM_SHEET = CHARTED.replace('from: note:n1#count', 'from: sheet:s1');
 
-  it('asks the server for the rows, offers Read again once they differ, and copies them in as one step', async () => {
+  it('asks the server for the rows, and copies them in by themselves as one step Undo takes back', async () => {
     server.rows = () => ({ found: true, name: 'Register', text: OTHER });
     editor(FROM_OTHER);
     await settle();
     // the editor says itself whether they match: the drawing is asked without the origin check
     expect(figureAsks()[0].body.origins).toBe(false);
     expect(server.asked.find((one) => one.path.endsWith('/rows')).body).toEqual({ origin: 'note:n2#count' });
-    expect(tool('again').hidden).toBe(false);
-    expect(tool('again').title).toBe('The table in “Register” changed: copy its rows again');
-    press(tool('numbers-btn'));
-    await settle();
-    const said = chart().querySelector('.cm-chart-numbers-said');
-    expect(said.querySelector('span').textContent).toBe('The table in “Register” changed since they were copied.');
-    press([...said.querySelectorAll('.cm-chart-link')].find((node) => node.textContent === 'Read again'));
     expect(text()).toBe(FROM_OTHER.replace(`${TABLE}\n:::`, `${OTHER}\n:::`));
     undo(view);
     expect(text()).toBe(FROM_OTHER);
+    press(tool('numbers-btn'));
+    await settle();
+    const said = chart().querySelector('.cm-chart-numbers-data');
+    expect(said.textContent).toBe('DataTable “Count” of the note “Register”·Go to the tablean older copy, kept by Undo');
+    // a table of another note is shown, never typed in
+    expect(chart().querySelector('.cm-rows-grid').classList.contains('cm-grid-locked')).toBe(true);
+    press(said.querySelector('.cm-chart-data-act'));
+    expect(handlers.note).toHaveBeenCalledWith('n2');
   });
 
-  it('says a sheet’s rows are the same, and a source gone from the case', async () => {
+  it('names the sheet and opens it, and says a source gone from the case', async () => {
     server.rows = () => ({ found: true, name: 'Sightings', text: TABLE });
     editor(FROM_SHEET);
     await settle();
-    expect(tool('again').hidden).toBe(true);
     press(tool('numbers-btn'));
     await settle();
-    expect(chart().querySelector('.cm-chart-numbers-said span').textContent).toBe('Same as the sheet “Sightings”.');
+    const said = () => chart().querySelector('.cm-chart-numbers-data');
+    expect(said().textContent).toBe('DataSheet “Sightings”·Open in Sheet');
+    press(said().querySelector('.cm-chart-data-act'));
+    expect(handlers.open).toHaveBeenCalledWith({ id: 's1', type: 'sheet' });
     view.destroy();
     forgetDrawings();
     server.rows = () => ({ found: false, name: '', text: '' });
@@ -651,7 +660,15 @@ describe('Read again, for rows from another note or a sheet', () => {
     await settle();
     press(tool('numbers-btn'));
     await settle();
-    expect(chart().querySelector('.cm-chart-numbers-said span').textContent).toBe('The sheet it came from is no longer in the case.');
-    expect(tool('again').hidden).toBe(true);
+    expect(said().textContent).toBe('DataA sheet no longer in the casethe chart keeps its copy');
+    expect(text()).toBe(FROM_SHEET);
+  });
+
+  it('draws the sheet’s rows where the note cannot be written, and writes nothing', async () => {
+    server.rows = () => ({ found: true, name: 'Sightings', text: OTHER });
+    editor(FROM_SHEET, { readOnly: true });
+    await settle();
+    expect(text()).toBe(FROM_SHEET);
+    expect(figureAsks().at(-1).body.text).toBe(CHART.replace('from: note:n1#count', 'from: sheet:s1').replace(`${TABLE}\n:::`, `${OTHER}\n:::`));
   });
 });
