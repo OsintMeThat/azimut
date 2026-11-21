@@ -14,6 +14,9 @@ A newer copy fetched from Settings (``engine/scrapers.py``) wins in the child
 exactly as it used to win in-process: through ``PYTHONPATH`` for a pip install,
 through the runtime finder in the binary, whose own importer answers before any
 path entry. Each read is a fresh process, so an update never waits for a restart.
+
+An X post gallery-dl read without its words gets them from X's embed read
+(`xwords.fill`), on every road here: the listing, the post and the download.
 """
 
 from __future__ import annotations
@@ -27,7 +30,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from . import scrapers
+from . import scrapers, xwords
 
 #: What the release binary is started with to act as gallery-dl.
 FROZEN_FLAG = "--run-gallery-dl"
@@ -160,6 +163,7 @@ def listing(url: str, extra: list[str]) -> list[tuple[str, dict[str, Any]]]:
             raise GalleryError(str(message[1].get("message") or ""), message[1].get("error", ""))
         if message[0] == 3:  # Message.Url, a downloadable file
             files.append((message[1], message[2]))
+    xwords.fill(*(kwdict for _, kwdict in files))
     return files
 
 
@@ -191,6 +195,7 @@ def post(url: str, extra: list[str]) -> tuple[dict[str, Any] | None, list[tuple[
         meta = files[0][1]
     if meta is None and finished.returncode:
         raise _failure(finished)
+    xwords.fill(meta, *(kwdict for _, kwdict in files))
     return meta, files
 
 
@@ -223,7 +228,9 @@ def download(
         kwdict = json.loads(meta.read_text(encoding="utf-8"))
     except (OSError, ValueError):
         kwdict = {}
-    return path, kwdict if isinstance(kwdict, dict) else {}
+    kwdict = kwdict if isinstance(kwdict, dict) else {}
+    xwords.fill(kwdict)
+    return path, kwdict
 
 
 def run_frozen(argv: list[str]) -> int:

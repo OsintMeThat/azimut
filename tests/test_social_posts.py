@@ -14,13 +14,13 @@ import re
 from pathlib import Path
 
 import pytest
-from fakeposts import BLUESKY_URL, X_TEXT_URL, X_URL, Sites, bluesky_thread, x_listing
+from fakeposts import BLUESKY_URL, X_TEXT_URL, X_URL, Sites, bluesky_thread, x_embed, x_listing
 from jobwait import job_result
 from pypdf import PdfReader
 
 from azimut import config, layout
 from azimut.api.cases import get_case
-from azimut.engine import notes_html, notes_pdf, notes_wordpress, notefill, socialposts, uses
+from azimut.engine import notes_html, notes_pdf, notes_wordpress, notefill, socialposts, uses, xwords
 from azimut.engine.notelook import NoteLook
 
 
@@ -141,6 +141,51 @@ def test_a_text_only_x_post_is_a_post(client, sites):
     [post] = drawn["posts"]
     assert post["text"] == "All units have left the coastal sector." and post["pictures"] == []
     assert post["when"] == "15 Nov 2026 · 05:12 UTC" and post["site_label"] == "X"
+
+
+def test_an_x_post_gallery_dl_gave_no_words_takes_them_from_x_s_embed_read_once(client, sites):
+    # X's newer answer keeps a post's words where gallery-dl 1.32.21 does not look, so its
+    # `content` came back empty and the card had no text.
+    sites.x = x_listing("", video=True)
+    sites.x_embed = x_embed("Convoy south of the port &amp; the bridge: https://t.co/aaa (1/3) https://t.co/pic",
+                            urls={"https://t.co/aaa": "https://x.com/redseadesk/status/1990000000000000005"},
+                            picture="https://t.co/pic")
+    case_id = _case(client)
+    [answer] = _read(client, case_id, X_URL)
+    [post] = _describe(client, case_id, f"post: {answer['id']}")["posts"]
+    assert post["text"] == ("Convoy south of the port & the bridge: "
+                            "https://x.com/redseadesk/status/1990000000000000005 (1/3)")
+    asked = [request for request in sites.requests if request.url.host == "cdn.syndication.twimg.com"]
+    assert len(asked) == 1, "asked once for the post, not once per file"
+    assert asked[0].url.params["id"] == "1990000000000000001" and asked[0].url.params["token"] == "4tnrp481eua"
+
+
+def test_an_x_post_is_kept_without_words_when_x_s_embed_read_cannot_say_them(client, sites):
+    sites.x = x_listing("")
+    case_id = _case(client)
+    [answer] = _read(client, case_id, X_URL)
+    [post] = _describe(client, case_id, f"post: {answer['id']}")["posts"]
+    assert post["text"] == "" and len(post["pictures"]) == 1
+
+
+def test_a_post_kept_without_words_is_read_again_on_the_next_paste(client, sites):
+    # Kept blank while gallery-dl could not see X's words: pasting it again mends it in place.
+    sites.x = x_listing("")
+    case_id = _case(client)
+    [first] = _read(client, case_id, X_URL)
+    sites.offline = True
+    [still] = _read(client, case_id, X_URL)
+    assert still["id"] == first["id"], "a failed read keeps the post as it was"
+    sites.offline = False
+    sites.x_embed = x_embed("Convoy south of the port.")
+    xwords._said.clear()  # a minute later: X's embed read is asked again
+    [again] = _read(client, case_id, X_URL)
+    assert again["id"] == first["id"]
+    [post] = _describe(client, case_id, f"post: {first['id']}")["posts"]
+    assert post["text"] == "Convoy south of the port."
+    went = sites.outside
+    _read(client, case_id, X_URL)
+    assert sites.outside == went, "a post with its words is never read again"
 
 
 def test_an_x_wall_asks_for_a_session_and_says_so(client, sites):

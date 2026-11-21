@@ -1207,6 +1207,44 @@ def test_gallery_dl_fallback_downloads_single_image(client, monkeypatch):
 
 
 
+@pytest.mark.parametrize("words", ["", "Impact on the substation"])
+def test_gallery_dl_download_of_an_x_post_takes_missing_words_from_x(client, monkeypatch, words):
+    """X's newer answer keeps a post's words where gallery-dl 1.32.21 does not look, so its
+    `content` came back empty: the download takes X's embed read's words for its title and
+    description, asked once though the post is listed then downloaded, never when
+    gallery-dl had them."""
+    import httpx
+
+    from azimut.engine import media as media_engine
+    from azimut.engine import xwords
+    from azimut.workspace import Case
+
+    cid = client.post("/api/cases", json={"name": "XWords"}).json()["id"]
+    case = Case.open(cid)
+    _install_failing_ydl(monkeypatch)
+    asked = []
+
+    def embed(request):
+        asked.append(request)
+        return httpx.Response(200, json={"__typename": "Tweet", "id_str": "1990000000000000009",
+                                         "text": "Impact on the substation https://t.co/pic",
+                                         "entities": {"media": [{"url": "https://t.co/pic"}]}})
+
+    real = xwords.client
+    monkeypatch.setattr(xwords, "client", lambda transport=None: real(httpx.MockTransport(embed)))
+    monkeypatch.setattr(xwords, "_said", {})
+    items = [("https://pbs.twimg.com/media/abc.jpg", {
+        "category": "twitter", "tweet_id": 1990000000000000009, "filename": "abc", "extension": "jpg",
+        "content": words, "author": {"nick": "someone"}, "date": "2024-05-01 12:34:56",
+    })]
+    _install_fake_gallery_dl(monkeypatch, items)
+
+    result = media_engine.download_url(case, "https://x.com/u/status/1990000000000000009")
+    assert result["item"]["title"] == "Impact on the substation"
+    assert result["item"]["source"]["description"] == "Impact on the substation"
+    assert len(asked) == (0 if words else 1)
+
+
 def test_ytdlp_failure_does_not_print_to_the_terminal(client, monkeypatch, capsys, caplog):
     """An image-only post makes yt-dlp report "No video could be found", then
     gallery-dl downloads it anyway. Nothing about that working download may

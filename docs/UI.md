@@ -8257,8 +8257,11 @@ files downloaded from a post, and the analyst's own posts published from Post. A
 case holds is drawn at once, with no network. A pasted link is read once, on **Add**: the
 block goes in the note at once and says *Reading the post from X…* until the post is kept.
 Then its `link:` line becomes `post: <id>` (`engine/socialposts.py`). X is read through
-gallery-dl, without cookies first, then once with the session the downloads keep. Bluesky
-is read through its public API with no account. Each read keeps the words, the name, the
+gallery-dl, without cookies first, then once with the session the downloads keep. Words
+gallery-dl does not find (X moved them where 1.32.21 does not look) come from X's embed
+read, `cdn.syndication.twimg.com`, on the same press (`engine/xwords.py`); a download from
+X takes them the same way. A post kept without words is read again the next time its link
+is pasted. Bluesky is read through its public API with no account. Each read keeps the words, the name, the
 handle, the day and time, the profile picture and the pictures (a video and its still). The
 pictures land in Media as downloads from the post. A failed read keeps the block and says
 why, with **Try again**. X's wall offers a browser's session, as Media's downloads do.
