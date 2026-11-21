@@ -135,6 +135,15 @@ describe('Settings sections', () => {
     expect(general).toContain('so it\n        searches straight away');
   });
 
+  it('switches the Support heartbeat from General, checked by default, with a hover', () => {
+    expect(general).toContain('support_heartbeat: supportHeartbeat');
+    expect(shell).toContain('supportHeartbeat = s.support_heartbeat ?? true');
+    expect(shell).toContain('bind:supportHeartbeat');
+    expect(general).toContain('Let the heart beat');
+    expect(general).toMatch(/<span title=\{HEARTBEAT_TITLE\}>Let the heart beat/);
+    expect(general).toMatch(/title=\{HEARTBEAT_TITLE\}\s+aria-label="Let the Support heart beat"/);
+  });
+
   it('switches the shared map view from General, checked by default', () => {
     expect(general).toContain('map_sync: mapSync');
     expect(shell).toContain('mapSync = s.map_sync ?? true');

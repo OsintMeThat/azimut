@@ -37,6 +37,7 @@ export const prefs = $state({
   postPrefill: true, // let the capture extension fill that composer on Publish
   postAltText: false, // Post shows an Alt text field under each picture (lib/postAlt.js)
   reversePrefill: true, // let it hand the image to the engine on Reverse Search
+  supportHeartbeat: true, // the rail's Support heart beats now and then (lib/supportBeat.js)
   signatureHandle: '', // account handle stamped onto proofs that opt into it
   // who signs a report: what a note's {name}, {role} and {organisation} print
   reportName: '',
@@ -139,6 +140,7 @@ export function applyPrefs(s) {
   if (s.post_prefill !== undefined) prefs.postPrefill = s.post_prefill;
   if (s.post_alt_text !== undefined) prefs.postAltText = s.post_alt_text;
   if (s.reverse_prefill !== undefined) prefs.reversePrefill = s.reverse_prefill;
+  if (s.support_heartbeat !== undefined) prefs.supportHeartbeat = s.support_heartbeat;
   if (s.signature_handle !== undefined) prefs.signatureHandle = s.signature_handle; // '' = none
   if (s.report_name !== undefined) prefs.reportName = s.report_name;
   if (s.report_role !== undefined) prefs.reportRole = s.report_role;

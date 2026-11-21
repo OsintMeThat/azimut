@@ -188,6 +188,7 @@ class PrefsIn(BaseModel):
     post_prefill: bool | None = None  # let the extension fill that composer
     post_alt_text: bool | None = None  # an Alt text field under each picture of a post
     reverse_prefill: bool | None = None  # let it open an engine with the image
+    support_heartbeat: bool | None = None  # the rail's Support heart beats now and then
     signature_handle: str | None = None  # account handle stamped on opted-in proofs
     # who signs a report: filled into a note's {name}, {role} and {organisation}
     report_name: str | None = Field(default=None, max_length=REPORT_TEXT_MAX)
@@ -297,6 +298,7 @@ def _prefs(settings: dict[str, Any]) -> dict[str, Any]:
         "post_prefill": bool(settings.get("post_prefill", True)),
         "post_alt_text": bool(settings.get("post_alt_text", False)),
         "reverse_prefill": bool(settings.get("reverse_prefill", True)),
+        "support_heartbeat": bool(settings.get("support_heartbeat", True)),
         "signature_handle": settings.get("signature_handle", DEFAULT_SIGNATURE_HANDLE),
         **{key: _report_text(settings, key) for key in REPORT_KEYS},
         "report_site": notefill.site_of(settings.get("report_site")),
@@ -488,6 +490,8 @@ def _apply_prefs(settings: dict[str, Any], body: PrefsIn) -> None:
         settings["post_alt_text"] = bool(body.post_alt_text)
     if body.reverse_prefill is not None:
         settings["reverse_prefill"] = bool(body.reverse_prefill)
+    if body.support_heartbeat is not None:
+        settings["support_heartbeat"] = bool(body.support_heartbeat)
     if body.signature_handle is not None:
         settings["signature_handle"] = body.signature_handle.strip()[:64]
     for key in REPORT_KEYS:
@@ -959,6 +963,7 @@ class ImportedSettings(BaseModel):
     post_prefill: bool = True
     post_alt_text: bool = False
     reverse_prefill: bool = True
+    support_heartbeat: bool = True
     signature_handle: str = Field(default=DEFAULT_SIGNATURE_HANDLE, max_length=64)
     report_name: str = Field(default="", max_length=REPORT_TEXT_MAX)
     report_role: str = Field(default="", max_length=REPORT_TEXT_MAX)

@@ -343,6 +343,7 @@
   let postTarget = $state('x');
   let postPrefill = $state(true);
   let reversePrefill = $state(true);
+  let supportHeartbeat = $state(true); // the rail's Support heart beats now and then
   let updateOnStart = $state(true); // pop a notice on load when a release is out
   // whether saving a proof files its point as a place, or asks first
   let proofPlaceAuto = $state(true);
@@ -561,6 +562,7 @@
     postTarget = s.post_target ?? 'x';
     postPrefill = s.post_prefill ?? true;
     reversePrefill = s.reverse_prefill ?? true;
+    supportHeartbeat = s.support_heartbeat ?? true;
     updateOnStart = s.update_check_on_start ?? true;
     proofPlaceAuto = s.proof_place_auto ?? true;
     mapSync = s.map_sync ?? true;
@@ -943,6 +945,7 @@
           {saveHome}
           bind:proofPlaceAuto
           bind:reversePrefill
+          bind:supportHeartbeat
           bind:mapSync
         />
       {/if}

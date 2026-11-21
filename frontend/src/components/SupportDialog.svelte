@@ -1,15 +1,23 @@
 <script>
   /**
-   * Support & feedback: a tip, a vote, an idea, the Discord, a problem. Opened from the rail and from
+   * Support & feedback: a tip, a vote, an idea, the Discord, a problem, and who makes it. Opened from the rail and from
    * nowhere else, it never comes to the analyst, and nothing here reaches the network
    * until a link is pressed. A block waits for its link (lib/support.js).
    */
   import Icon from './Icon.svelte';
   import Modal from './Modal.svelte';
   import { openIssueReport } from '../lib/navigate.js';
-  import { DISCORD_URL, FEEDBACK_FORM_URL, KOFI_URL, TIP_LINE_SECONDS, drawTipLine } from '../lib/support.js';
+  import {
+    DISCORD_URL,
+    FEEDBACK_FORM_URL,
+    KOFI_URL,
+    SITE_URL,
+    TIP_LINE_SECONDS,
+    drawTipLine,
+  } from '../lib/support.js';
 
-  let { kofi = KOFI_URL, form = FEEDBACK_FORM_URL, discord = DISCORD_URL, onclose } = $props();
+  let { kofi = KOFI_URL, form = FEEDBACK_FORM_URL, discord = DISCORD_URL, site = SITE_URL, onclose } = $props();
+  const siteName = $derived(site ? new URL(site).host : '');
 
   // The line turns on its own unless a pointer or the keyboard rests on it, or the
   // system asks for less motion. Its box keeps the height of the longest, so the tip
@@ -52,21 +60,30 @@
   <div class="choices">
     {#if form}
       <a class="choice" href={form} target="_blank" rel="noreferrer">
-        Vote on what comes next <Icon name="external" size={12} />
+        <span class="say"><span class="what">Vote on what comes next</span><span class="why">Pick what gets built first</span></span>
+        <Icon name="external" size={12} />
       </a>
       <a class="choice" href={form} target="_blank" rel="noreferrer">
-        Suggest an idea <Icon name="external" size={12} />
+        <span class="say"><span class="what">Suggest an idea</span><span class="why">A few words are enough</span></span>
+        <Icon name="external" size={12} />
       </a>
     {/if}
     {#if discord}
       <a class="choice" href={discord} target="_blank" rel="noreferrer">
-        Join the Discord <Icon name="external" size={12} />
+        <span class="say"><span class="what">Join the Discord</span><span class="why">Questions, ideas and news</span></span>
+        <Icon name="external" size={12} />
       </a>
     {/if}
     <button type="button" class="choice" onclick={report}>
-      Report a problem <Icon name="arrowRight" size={13} />
+      <span class="say"><span class="what">Report a problem</span><span class="why">A ready report you send yourself</span></span>
+      <Icon name="arrowRight" size={13} />
     </button>
   </div>
+  {#if site}
+    <p class="made">
+      Made by one analyst · <a href={site} target="_blank" rel="noreferrer">{siteName}</a>
+    </p>
+  {/if}
 </Modal>
 
 <style>
@@ -103,10 +120,34 @@
     }
   }
   .tip {
-    display: inline-flex;
+    display: flex;
     align-items: center;
+    justify-content: center;
     gap: 7px;
+    width: 100%;
     text-decoration: none;
+  }
+  .say {
+    display: grid;
+    gap: 1px;
+  }
+  .why {
+    color: var(--text-3);
+    font-size: var(--fs-xs);
+  }
+  .made {
+    margin: 12px 0 0;
+    padding-top: 10px;
+    border-top: 1px solid var(--border);
+    color: var(--text-3);
+    font-size: var(--fs-xs);
+    text-align: center;
+  }
+  .made a {
+    color: var(--text-2);
+  }
+  .made a:hover {
+    color: var(--accent);
   }
   .choices {
     display: grid;

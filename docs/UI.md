@@ -32,9 +32,13 @@ to the OSINT Me That Discord, and a problem report that leads to Settings → Sy
 A block stays hidden until its link exists in `lib/support.js`, and a release refuses a stand-in link. A line from
 `TIP_LINES` sits above the tip: drawn when the dialog opens, turned by a press or every
 ten seconds, held while a pointer or the keyboard rests on it and still under reduced
-motion, in a box sized to the longest so the button never moves. The tip also has a
-quiet link in Home's footer and one line on the last page of What's new. Nothing reaches
-the network before a press, and there is no setting, reminder, counter or donor feature.
+motion, in a box sized to the longest so the button never moves. Each choice says in one
+grey line what it is for, and the foot names who makes Azimut with a link to the site.
+The rail's heart is the one warm icon there, and it beats once every ten minutes the app
+is in sight (`lib/supportBeat.js`) until Support is opened that session: never under
+reduced motion, and Settings › General has the switch (`support_heartbeat`). The tip
+also has a quiet link in Home's footer and one line on the last page of What's new.
+Nothing reaches the network before a press, and there is no counter or donor feature.
 
 **While a scene is geolocated, a pill sits beside the case**: *Geolocating*, the scene's
 colour, its time and label, and its two counts (below): the captures gathered for it, which

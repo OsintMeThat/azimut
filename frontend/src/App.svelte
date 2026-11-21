@@ -37,6 +37,7 @@
   import { listenToGuide } from './lib/guideWindow.js';
   import { openFindExample } from './lib/findExample.js';
   import { leaveFullscreen } from './lib/fullscreen.js';
+  import { startSupportBeat } from './lib/supportBeat.js';
   import { createToolLoader } from './lib/toolLoader.js';
   import { loadEntityTypes } from './lib/entityTypes.svelte.js';
   import Icon from './components/Icon.svelte';
@@ -262,6 +263,23 @@
 
   let paletteOpen = $state(false);
   let supportOpen = $state(false);
+
+  // The Support heart beats once every ten minutes the app is in sight
+  // (lib/supportBeat.js) until Support is opened this session. Settings › General
+  // can stop it, and reduced motion never starts it. Each beat re-mounts the heart,
+  // so its animation plays once a beat whatever happened to the last one.
+  let supportSeen = $state(false);
+  let supportBeats = $state(0);
+  const lessMotion = globalThis.matchMedia?.('(prefers-reduced-motion: reduce)')?.matches === true;
+  $effect(() => {
+    if (!prefs.supportHeartbeat || supportSeen || lessMotion) return;
+    return startSupportBeat({ beat: () => (supportBeats += 1) });
+  });
+
+  function openSupport() {
+    supportOpen = true;
+    supportSeen = true;
+  }
 
   // The first scene ever kept points once at where it waits (lib/sceneHints.js): the
   // sidebar's toggle while it is closed, its To-do tab while it shows another view.
@@ -537,10 +555,12 @@
       </button>
       <button
         class="rail-btn support-rail"
-        onclick={() => (supportOpen = true)}
+        onclick={openSupport}
         title="Support & feedback"
       >
-        <Icon name="heart" size={19} />
+        {#key supportBeats}
+          <span class="heart" class:beat={supportBeats > 0}><Icon name="heart" size={19} /></span>
+        {/key}
         <span>Support</span>
       </button>
       <button
@@ -753,6 +773,33 @@
   /* pinned to the foot of the rail, away from the workspace switches */
   .support-rail {
     margin-top: auto;
+  }
+  /* the one warm icon of the rail, so the tip is found without a word said */
+  .support-rail .heart {
+    display: flex;
+    color: var(--accent);
+  }
+  .support-rail .heart.beat {
+    animation: heartbeat 0.9s ease-in-out;
+  }
+  @keyframes heartbeat {
+    0%,
+    30%,
+    60%,
+    100% {
+      transform: scale(1);
+    }
+    15% {
+      transform: scale(1.22);
+    }
+    45% {
+      transform: scale(1.14);
+    }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .support-rail .heart.beat {
+      animation: none;
+    }
   }
   .canvas {
     flex: 1;
