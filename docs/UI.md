@@ -8843,15 +8843,18 @@ backup carries it.
 
 **Settings › Website.** The tab after Publishing is the hub of the site Azimut makes of the notes
 published to GitHub Pages, and all of it is optional: a site works with it left empty. It is wider
-than the other sections, in cards. A **hero** shows the site at a glance: its logo, name and tagline as
-they read now (what is being typed included), its address, `GitHub Pages · account/repo · branch`, the
-readers' counter in use, and, once the site is read, how many articles, maps, pages and unlisted pages it
-lists with its size, and the last change on GitHub (*Site not read yet* before), with **Open the site** and
-**Update the site**. Under it a sticky bar of panels (`data-guide="settings.website-hub"`): **Overview**,
-**Identity**, **Hosting**, **Articles** (with how many cards it holds once read), **Readers**,
-**Upkeep**, **Make it yours**, then a divider and **WordPress**. One panel shows at a time and all stay
-mounted, so what was typed or opened is still there; the arrow keys walk the bar, and the publish
-dialog's *Name the site* opens Identity (`website:identity`). The settings are the preferences
+than the other sections, in cards, and lays itself out by its own width rather than the window's (the
+case sidebar may take part of it): two columns when there is room, one when not. A **hero** shows the
+site at a glance: its logo, name and tagline as they read now (what is being typed included), its address
+(*No address until GitHub Pages is set up* before), `GitHub Pages · account/repo · branch`, the readers'
+counter in use, and, once the site is read, how many articles, maps, pages and unlisted pages it holds
+with its size and the last change on GitHub (*Not read yet* before), with **Open the site** and **Update
+the site**. Its two lines of facts keep their places, so a read or an update changes words, not the
+layout. Under it a sticky bar of tabs (`data-guide="settings.website-hub"`): **Overview**, **Identity**,
+**Hosting**, **Articles** (with how many cards it holds once read), **Readers**, **Upkeep**, **Make it
+yours**, then a divider and **WordPress**. One panel shows at a time and all stay mounted, so what was
+typed or opened is still there; the arrow keys, Home and End walk the bar with the focus, only the open
+tab is in the tab order, and the publish dialog's *Name the site* opens Identity (`website:identity`). The settings are the preferences
 `site_title`, `site_tagline`, `site_credit_azimut`, `site_stats`, `site_stats_code` and
 `site_stats_token`, which save when a field is left and travel in the settings backup. The words are in
 `lib/websiteSetup.js`, what is worked out of them in `lib/websiteHub.js`, one component per panel in
@@ -8871,36 +8874,46 @@ last two naming the repository and the site) and the three things each publish a
 list, the feed, the sitemap). *Your site, step by step* is a checklist of six: connect GitHub Pages, name
 the site, pick its logo, count readers (optional), a legal notice (optional) and publish a first
 article. Each says its state (done, to do, or *Read the site, in Articles, to tell.* for the two that need a
-read), is counted in a progress bar, and opens the panel where it is done. Three tips follow (*Try before
-you announce* with Unlisted, *Take an article down*, *Change the name or the logo*), and a fourth, *The
-site is getting big*, once the site passes 80 % of 1 GB, linking to Hosting.
+read, or *The site holds too many files to read.* after a read GitHub cut short), is counted in a progress
+bar, and opens the panel where it is done. Three tips follow (*Try before you announce* with Unlisted, *Take
+an article down*, *Change the name or the logo*), and a fourth, *The site is getting big*, once the site
+passes 80 % of 1 GB, with **See the limits** opening Hosting.
 
 **Identity.** *What readers see*: **Site name** (left empty, the name set in Settings › Publishing, else
 the GitHub account, said under the field), **Tagline**, **Site logo** and **Made with Azimut** (on by
 default, which ends Azimut's home page on the credit and its version; an article keeps *Credit Azimut* of
 Publishing), beside a preview of **Article bar**, **Home page** and **Feed** that follows what is typed,
-with the site's own articles and categories once read and the page's credit as the switch says. The logo is
-a PNG of the site's own (`POST /api/settings/site-logo`, up to 2 MB, checked in the browser and again by the
-server); without one the site uses the Publishing logo, and **Use the Publishing logo**
-(`DELETE /api/settings/site-logo`) gives it back. The picture shown is the one the pages carry, read from
-`GET /api/settings/site-logo.png`. When the read found a home page of the analyst's own, a line says Azimut
+with the site's own articles, categories and pages once read and the page's credit as the switch says, drawn
+in the site's paper and ink whatever the app's theme. The logo is a PNG of the site's own (**Choose a
+picture…**, `POST /api/settings/site-logo`, up to 2 MB, checked in the browser and again by the server, what
+is refused said under it); without one the site uses the Publishing logo, and **Use the Publishing logo**
+(`DELETE /api/settings/site-logo`) gives it back, or **Remove the logo** when there is no Publishing logo to
+go back to. The picture shown is the one the pages carry, read from `GET /api/settings/site-logo.png`. When the read found a home page of the analyst's own, a line says Azimut
 fills its lists and leaves its header alone. The settings backup carries `site-logo.png`.
 
-**Hosting.** *Where the site lives*: the **GitHub Pages** settings below, **The address** (GitHub's, or the
+**Hosting.** *Where the site lives*: the **GitHub Pages** card below, **The address** (GitHub's, or the
 analyst's own domain), how to point a domain of one's own at Pages, and **Limits**. Two bars say how much of
 GitHub's gigabyte the site and its repository (history included) weigh once read (*Read the site to see its
-size.* before, with a press), amber from 80 % and red from 95 %, over the seven limits GitHub Pages holds a
-site to and a link to GitHub's own page.
+size.* before, with a press, in the same place so the list under them never moves), green, amber from 80 %
+and red from 95 %, each with its percentage, over the seven limits GitHub Pages holds a site to and a link
+to GitHub's own page. A site GitHub cut short says *Size unknown: the site holds too many files to read.*
+in place of its bar, and a repository GitHub gave no size for says so.
 
 **Articles.** *What's on the site*: after **Read the site**, a chip per category, then Maps, Pages and
-Unlisted when there are some, and a row per card with its picture, title, address, category, kind
-(Article, Map, Page, Unlisted), date and weight, an **Open** link and a **Delete** press. **Delete** asks
-first (*Delete this article from the site?*, saying the folder, the repository, one commit and that the note
-stays in the case), and only its confirmation reaches GitHub
+Unlisted when there are some, each counting its rows, and a row per card with its picture (or its kind's
+mark), title, address, category, kind (Article, Map, Page, Unlisted), date and weight, an **Open** link and
+a **Delete** press: a table when the hub is wide, the facts under each title when it is not, a long title
+cut with an ellipsis. Only a card the read says Azimut published has **Delete** (`deletable`); the others,
+such as an old WordPress export's nested folders, say *Outside Azimut* and, on hover, *Made outside Azimut:
+delete it on GitHub*. **Delete** asks first (*Delete this article from the site?*, saying the folder, the
+repository, one commit and that the note stays in the case), and only its confirmation reaches GitHub
 (`POST /api/publishing/github/site/delete`): the folder goes and the lists, feed, sitemap and
-`articles.json` are rewritten in the same commit, the server refusing any folder Azimut did not publish. The
-row then leaves the list and everything that counted it, and *Deleted folder/: N files written.* says what
-was done; a branch that moved on GitHub says to press again, the dialog staying open. Below, the three kinds
+`articles.json` are rewritten in the same commit. The row then leaves the list and everything that counted
+it, and the line beside Read the site says *Deleted folder/: N files written.* (*Deleted folder/.* when the
+server counted none), until the next read. A refusal is said on that line in the server's words, the row
+staying: a folder Azimut did not publish, one too large to read, or a branch that moved on GitHub meanwhile
+(press Delete again); a folder already gone leaves the list. A site GitHub cut short lists nothing and says
+so, with GitHub's word. Below, the three kinds
 (Article, Page, Unlisted) with when each is for, the **Categories** the read found with their pages, and
 **Pages every site should have**: **Start a Legal notice page** and **Start a Privacy page** each make a note of
 that name in the open case, naming the host (the Privacy page also what counting the site does), and open the
@@ -8949,7 +8962,8 @@ only network call, on its press. **Forget** takes the three away. *How to connec
 says each field and where WordPress shows it, open while something is missing; the export
 dialog shows the same steps (`lib/wordpressSetup.js`).
 
-**GitHub Pages.** The card of Hosting sets where a note's web folder is published, with a *Set up* badge once it is:
+**GitHub Pages.** The card of Hosting sets where a note's web folder is published, its title saying *Not set
+up*, *Set up* once an account and a token are kept, or *Connected* once Test connection passed:
 **Account** (the username or the organisation), **Repository** (`articles` by default),
 **Branch** (`main`) and **Token**, a fine-grained personal access token. The three names
 save when a field is left, are checked as GitHub names them, and travel in the settings
