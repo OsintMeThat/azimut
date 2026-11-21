@@ -1,14 +1,16 @@
 <script>
   /**
    * Where a figure's rows come from: the infographic's Data bar's *Change…*, and a chart's
-   * settings card's. A menu under the press lists the case's sheets first (recommended: the
-   * Sheet tool or Excel edits them, and Read again brings every chart up to date), then the
+   * Data line's. A menu under the press lists the case's sheets first (recommended: the
+   * Sheet tool or Excel edits them, and every chart drawn from one follows it), then the
    * tables of this note, then **New data…**: a table pasted, an .xlsx or a CSV, named and kept
    * as a new sheet of the case (`lib/notes/newData.js`), which the Sheet tool then shows.
    *
    * The one picked is read at once (`editor/infographicData.js`'s `readData`) and handed to
    * `onpick({ origin, data })`; `inherit`, given (a panel of an infographic), offers the page's
-   * own data first, handed as `onpick({ inherit: true })`. Nothing here writes the note.
+   * own data first, handed as `onpick({ inherit: true })`; `own`, given (a chart whose rows
+   * come from elsewhere), offers to keep the rows as its own, `onpick({ own: true })`.
+   * Nothing here writes the note.
    */
   import { onMount } from 'svelte';
   import FloatingMenu from './FloatingMenu.svelte';
@@ -31,6 +33,8 @@
     current = '',
     /** `{ label }`: the page's own data, offered first to a panel of an infographic. */
     inherit = null,
+    /** Whether *Its own rows* is offered: the rows kept in the figure, no source followed. */
+    own = false,
     onpick,
     onclose,
     /** What lists the case's sheets (`GET /notes/figure/sources`). */
@@ -165,8 +169,14 @@
           <Icon name="grid" size={14} /><span class="fm-grow">The infographic’s data</span><small class="dp-hint">{inherit.label}</small></button>
         <div class="fm-sep"></div>
       {/if}
+      {#if own}
+        <button type="button" class="fm-item" title="Keep these rows in the chart, typed in its numbers; no source is followed"
+          onclick={() => onpick?.({ own: true })}>
+          <Icon name="table" size={14} /><span class="fm-grow">Its own rows</span><small class="dp-hint">keep the copy</small></button>
+        <div class="fm-sep"></div>
+      {/if}
       <p class="fm-head dp-head">Sheets of the case
-        <span class="dp-rec" title="A sheet is edited in the Sheet tool or in Excel, and Read again brings every chart drawn from it up to date">Recommended</span></p>
+        <span class="dp-rec" title="A sheet is edited in the Sheet tool or in Excel, and every chart drawn from it follows">Recommended</span></p>
       {#if sheets === null}
         <p class="fm-note">Listing the case’s sheets…</p>
       {:else if failed}
@@ -260,7 +270,7 @@
       {#if workbook}
         <p class="nd-note">Each tab is kept as a sheet named as its tab; the first one is the data.</p>
       {/if}
-      <p class="nd-note">Kept as a sheet of the case: the Sheet tool or Excel edits it, and Read again brings the charts up to date.</p>
+      <p class="nd-note">Kept as a sheet of the case: the Sheet tool or Excel edits it, and the charts drawn from it follow.</p>
       <footer class="nd-foot">
         <button type="button" class="btn btn-sm" onclick={() => onclose?.()}>Cancel</button>
         <button type="submit" class="btn btn-primary btn-sm" disabled={!ready || making}>{making ? 'Making…' : 'Make the sheet'}</button>

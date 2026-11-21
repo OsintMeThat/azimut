@@ -335,28 +335,3 @@ export function chartBlockAt(text, line) {
   }
   return null;
 }
-
-/**
- * Where a chart's rows came from, read now, as Read again copies them: a table of this
- * note (`noteId`, read off `text`), another note's or a sheet's (`rows`, asked of the
- * server). `{ state, text, name }`, `state` `'same'`, `'differs'`, `'columns'` or `'gone'`;
- * null when the chart names no source it can read again.
- */
-export async function chartOrigin(chart, { text = '', noteId = '', caseId = '', rows = null, fresh = true } = {}) {
-  const written = setting(chart, 'from');
-  const origin = readOrigin(written);
-  if (!origin || !chart.table) return null;
-  if (origin.kind === 'note' && noteId && origin.id === noteId) {
-    const lines = String(text ?? '').split('\n');
-    const at = tableUnder(text, origin.anchor);
-    const found = at >= 0 ? noteTables(lines).find((table) => table.line === at) : null;
-    if (!found) return { state: 'gone', text: '', name: origin.anchor ? `the table under “${origin.anchor}”` : 'the table it came from' };
-    const tableText = lines.slice(found.line, found.end + 1).join('\n');
-    return { state: compareRows(chart.table, parseTable(tableText)), text: tableText, name: headingAbove(text, found.line) };
-  }
-  if (!rows || !caseId) return null;
-  const answer = await rows({ caseId, origin: written, fresh });
-  if (!answer || answer.error) return null;
-  if (!answer.found) return { state: 'gone', text: '', name: origin.kind === 'sheet' ? 'the sheet it came from' : 'the table it came from' };
-  return { state: compareRows(chart.table, parseTable(answer.text)), text: answer.text, name: answer.name };
-}

@@ -372,33 +372,35 @@ describe('a donut from scratch', () => {
   });
 });
 
-describe('Edit the data', () => {
-  it('opens the form from the chart’s settings and from The numbers, not for rows counted one a line', async () => {
+describe('As a form', () => {
+  it('opens from The numbers, which the Data line’s Edit opens, not for rows counted one a line', async () => {
     drawnKind = { name: 'donut', label: 'Donut', counts: true, parts: true };
     const BLOCK = chartOf(['kind: donut', 'count: Count', 'by: Category', '| Category | Count |', '| --- | ---: |', '| MRAP | 23 |', '| APC | 9 |']);
     editor(`Words.\n\n${BLOCK}\n`);
     await settle();
     const box = view.dom.querySelector('.cm-chart-block');
     press(box.querySelector('.cm-chart-settings'));
-    const edit = box.querySelector('.cm-chart-edit-data');
-    expect(edit.textContent).toBe('Edit the data');
-    press(edit);
+    const data = box.querySelector('.cm-chart-settings-panel .cm-chart-data');
+    expect(data.textContent).toBe('DataIts own rows·Edit');
+    press(data.querySelector('.cm-chart-data-act'));
     expect(box.querySelector('.cm-chart-settings-panel').hidden).toBe(true);
+    expect(box.querySelector('.cm-chart-numbers').hidden).toBe(false);
+    // the keyboard is in its first cell
+    expect(document.activeElement.classList.contains('cm-grid-input')).toBe(true);
+    const asForm = box.querySelector('.cm-rows-form');
+    expect(asForm.textContent).toBe('As a form');
+    press(asForm);
     expect(form().hidden).toBe(false);
     expect(field(1, 'category').value).toBe('APC');
-    form().dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }));
-    expect(form().hidden).toBe(true);
-    press(box.querySelector('.cm-chart-numbers-btn'));
-    const link = [...box.querySelectorAll('.cm-chart-link')].find((node) => node.textContent === 'Edit the data');
-    press(link);
-    expect(form().hidden).toBe(false);
     view.destroy();
 
     drawnKind = { name: 'bars', label: 'Bars', counts: true };
     editor(`Words.\n\n${chartOf(['kind: bars', 'count: rows', 'by: Model', '| Model | Grade |', '| --- | --- |', '| A | identified |', '| B | almost sure |'])}\n`);
     await settle();
-    press(view.dom.querySelector('.cm-chart-settings'));
-    expect(view.dom.querySelector('.cm-chart-data').hidden).toBe(true);
+    press(view.dom.querySelector('.cm-chart-numbers-btn'));
+    expect(view.dom.querySelector('.cm-rows-form')).toBeNull();
+    // its rows are typed in the grid instead
+    expect(view.dom.querySelectorAll('.cm-chart-numbers .cm-grid-add-row')).toHaveLength(1);
   });
 });
 
