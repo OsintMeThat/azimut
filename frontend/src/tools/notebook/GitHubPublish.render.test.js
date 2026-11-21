@@ -177,11 +177,32 @@ it('while GitHub is not set up, a press shows the way to Settings and publishes 
 
 const publishOk = () => post.mockImplementation(async (path) => (path.endsWith('/pdf/diagrams') ? { diagrams: [] } : PUBLISHED));
 const category = () => target.querySelector('#export-category');
-const options = () => [...target.querySelectorAll('#export-categories option')].map((node) => node.getAttribute('value'));
+const categoryShown = () => category().textContent.trim();
 const choice = (name) => [...target.querySelectorAll('[role="radiogroup"][aria-label="On the site"] [role="radio"]')].find((node) => node.textContent.trim() === name);
+const option = (name) => [...document.querySelectorAll('[role="option"]')].find((node) => node.textContent.trim() === name);
+/** What the category's list holds, opened by a press and closed by another. */
+const options = async () => {
+  category().click();
+  await settle();
+  const found = [...document.querySelectorAll('[role="option"]')].map((node) => node.textContent.trim());
+  category().click();
+  await settle();
+  return found;
+};
+const pickCategory = async (name) => {
+  category().click();
+  await settle();
+  option(name).click();
+  await settle();
+};
+/** A new category typed in the field New category… opens, ended with Enter. */
 const typeCategory = async (value) => {
-  category().value = value;
-  category().dispatchEvent(new Event('input', { bubbles: true }));
+  await pickCategory('New category…');
+  const field = category();
+  field.value = value;
+  field.dispatchEvent(new Event('input', { bubbles: true }));
+  await settle();
+  field.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
   await settle();
 };
 
@@ -189,10 +210,12 @@ it('suggests the categories the site uses and the note\'s own, from what this ma
   serve({ github: { ...SET, categories: ['Conflict Watch', 'Methods & Tools'] }, look: { category: 'Harbour' } });
   show();
   await settle();
-  expect(category().value).toBe('Harbour');
-  expect(category().getAttribute('list')).toBe('export-categories');
-  expect(options()).toEqual(['Conflict Watch', 'Methods & Tools', 'Harbour']);
-  expect(category().maxLength).toBe(60);
+  expect(categoryShown()).toBe('Harbour');
+  // an app list, never the system's: none, what the site uses with the note's own, and a new one
+  expect(category().tagName).toBe('BUTTON');
+  expect(category().getAttribute('role')).toBe('combobox');
+  expect(target.querySelector('datalist, select')).toBeNull();
+  expect(await options()).toEqual(['No category', 'Conflict Watch', 'Methods & Tools', 'Harbour', 'New category…']);
   expect(post).not.toHaveBeenCalled();
 });
 
@@ -201,11 +224,11 @@ it('reads the site\'s categories on a press of its own, and says what the read f
   post.mockResolvedValue({ ok: true, categories: ['Investigations', 'Conflict Watch'], warnings: ['The site holds too many files for Azimut to read.'] });
   show();
   await settle();
-  expect(options()).toEqual([]);
+  expect(await options()).toEqual(['No category', 'New category…']);
   button('Read the site').click();
   await settle();
   expect(post).toHaveBeenCalledWith('/api/publishing/github/categories');
-  expect(options()).toEqual(['Investigations', 'Conflict Watch']);
+  expect(await options()).toEqual(['No category', 'Investigations', 'Conflict Watch', 'New category…']);
   expect(target.querySelector('#export-category-said').textContent).toContain('2 categories on the site.');
   expect(target.querySelector('#export-category-said').textContent).toContain('too many files');
 });
@@ -270,20 +293,42 @@ it('shows the press that sets the site up when the read finds Pages off', async 
   expect(button('Turn on Pages')).toBeTruthy();
 });
 
-it('sends the category typed, a new one included, and none when it is emptied', async () => {
+it('sends the category picked, a new one typed included, and none when No category is picked', async () => {
   serve({ github: { ...SET, categories: ['Conflict Watch'] }, look: { category: 'Harbour' } });
   publishOk();
   show();
   await settle();
   await typeCategory('  Port   news ');
-  expect(category().value).toBe(' Port news ');
+  expect(categoryShown()).toBe('Port news');
   await live.publish();
   expect(post.mock.calls.at(-1)[1]).toMatchObject({ category: 'Port news', role: 'article' });
-  await typeCategory('');
+  await pickCategory('No category');
+  expect(categoryShown()).toBe('No category');
   await live.publish();
   expect(post.mock.calls.at(-1)[1]).toMatchObject({ category: '' });
+  await pickCategory('Conflict Watch');
+  await live.publish();
+  expect(post.mock.calls.at(-1)[1]).toMatchObject({ category: 'Conflict Watch' });
   await typeCategory('x'.repeat(90));
-  expect(category().value).toHaveLength(60);
+  expect(categoryShown()).toHaveLength(60);
+});
+
+it('walks the category\'s list with the keys and picks with Enter', async () => {
+  serve({ github: { ...SET, categories: ['Conflict Watch', 'Methods & Tools'] }, look: {} });
+  publishOk();
+  show();
+  await settle();
+  const key = async (name) => {
+    category().dispatchEvent(new KeyboardEvent('keydown', { key: name, bubbles: true, cancelable: true }));
+    await settle();
+  };
+  category().focus();
+  await key('m');
+  expect([...document.querySelectorAll('[role="option"]')].map((node) => node.textContent.trim())).toEqual(['Methods & Tools', 'New category…']);
+  await key('Enter');
+  expect(categoryShown()).toBe('Methods & Tools');
+  await live.publish();
+  expect(post.mock.calls.at(-1)[1]).toMatchObject({ category: 'Methods & Tools' });
 });
 
 it('starts the Article or Page choice from the look, and a page needs no category or list picture', async () => {
@@ -300,7 +345,7 @@ it('starts the Article or Page choice from the look, and a page needs no categor
   expect(post.mock.calls.at(-1)[1]).toMatchObject({ role: 'page' });
   choice('Article').click();
   await settle();
-  expect(category().value).toBe('Harbour');
+  expect(categoryShown()).toBe('Harbour');
   expect(target.textContent).toContain('Picture in the list');
   await live.publish();
   expect(post.mock.calls.at(-1)[1]).toMatchObject({ role: 'article', category: 'Harbour' });

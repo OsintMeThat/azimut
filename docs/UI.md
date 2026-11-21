@@ -7738,10 +7738,13 @@ folder Azimut did not make says so and offers another address only, since a publ
 **On the site.** For a published article the dialog's GitHub branch adds, under the address:
 **Article** or **Page** (an article is in the site's list and feed, a page is off every list and
 linked from the home's header; it starts from the note's look), and for an article a **Category**
-and the **Picture in the list**. The category is a field that suggests what the site already
-uses and the note's own (`github.categories`, kept from the last read of the site), a new one
-typed is a new category, empty is none, 60 characters at most; **Read the site** reads them
-again (`POST /api/publishing/github/categories`, on its press, reads only). The picture is the
+and the **Picture in the list**. The category is a list drawn as the app's menus are, never the
+system's own (`components/PickList.svelte`): **No category**, then what the site already uses and
+the note's own (`github.categories`, kept from the last read of the site), then **New category…**,
+which turns it into a field for a new one, 60 characters at most. The focus stays on it: the arrows,
+Home and End walk the list, Enter or Space picks, Escape closes it, and letters typed filter it;
+**Read the site** reads the categories again (`POST /api/publishing/github/categories`, on its
+press, reads only). The picture is the
 cover's by default, or one of the case's pictures picked as the cover picture is, kept in the
 look as it is picked (`list_image`) with a way back to the cover. The category and the role go
 up with the press and are kept in the look; whatever the dialog changes in the look is handed to

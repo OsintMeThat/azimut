@@ -13,8 +13,8 @@
    * press that sets it up shows here (`components/GitHubSetupPress.svelte`); while
    * GitHub is not set up, a Publish shows the way to Settings › Website.
    *
-   * **On the site.** The note's Category (a field suggesting what the site already uses,
-   * read again on a press of its own), whether it is an Article, in the site's list, a
+   * **On the site.** The note's Category (a list drawn as the app's menus are, `components/PickList.svelte`:
+   * none, what the site already uses, read again on a press of its own, and a new one typed), whether it is an Article, in the site's list, a
    * Page, off it and linked from its header, or Unlisted, online at its address and in no list,
    * and the Picture its card has in the list. One line says where the note will appear, naming the
    * site for an Article; while Settings › Website holds no title, another says what the site is then
@@ -46,6 +46,7 @@
   import BusyLabel from '../../components/BusyLabel.svelte';
   import Icon from '../../components/Icon.svelte';
   import GitHubSetupPress from '../../components/GitHubSetupPress.svelte';
+  import PickList from '../../components/PickList.svelte';
   import { prefs, toast, uiState } from '../../lib/state.svelte.js';
   import { categoriesOf, checkFolder, placeOffer, publishNote, readCategories, readGitHub } from '../../lib/githubPages.js';
   import {
@@ -56,7 +57,7 @@
   import { siteName } from '../../lib/websiteHub.js';
   import {
     AUTHOR_IMAGE_LABEL, AUTHOR_IMAGE_NONE, AUTHOR_LABEL, AUTHOR_MAX, BUSY,
-    CATEGORY_MAX, CATEGORY_SAID, HAND_EDITED, LIST_IMAGE_COVER, NO_NAME_PRESS, ON_SITE, PICK_ANOTHER, PLACE_COORDS_LABEL, PLACE_COORDS_PLACEHOLDER,
+    CATEGORY_MAX, CATEGORY_NEW, CATEGORY_NEW_PLACEHOLDER, CATEGORY_NONE, CATEGORY_SAID, HAND_EDITED, LIST_IMAGE_COVER, NO_NAME_PRESS, ON_SITE, PICK_ANOTHER, PLACE_COORDS_LABEL, PLACE_COORDS_PLACEHOLDER,
     PLACE_NAME_LABEL, PLACE_NAME_MAX, PLACE_NAME_PLACEHOLDER, PLACE_TITLE, PLACE_WHY, REPLACE_PRESS, WEBSITE_HELP as HELP, noNameSaid, onSiteSaid,
     placeText, placeUseSaid, readPlace, takenOutsideSaid, takenSaid,
   } from '../../lib/websiteSetup.js';
@@ -480,12 +481,11 @@
       {#if role === 'article'}
         <label class="lbl" for="export-category" title={HELP.publishCategory}>Category</label>
         <div class="category-line">
-          <input id="export-category" class="input" list="export-categories" value={category} maxlength={CATEGORY_MAX}
-            spellcheck="false" autocomplete="off" placeholder="No category" title={HELP.publishCategory} aria-describedby="export-category-said"
-            oninput={(event) => typeCategory(event.currentTarget.value)} />
-          <datalist id="export-categories">
-            {#each suggestions as name (name)}<option value={name}></option>{/each}
-          </datalist>
+          <div class="category-pick">
+            <PickList id="export-category" value={category} options={suggestions} emptyLabel={CATEGORY_NONE} newLabel={CATEGORY_NEW}
+              newPlaceholder={CATEGORY_NEW_PLACEHOLDER} maxlength={CATEGORY_MAX} title={HELP.publishCategory} label="Category"
+              describedby="export-category-said" onpick={typeCategory} />
+          </div>
           <button type="button" class="btn btn-ghost btn-sm" onclick={readSite} disabled={reading || busy} aria-busy={reading}
             title={HELP.publishRead}><BusyLabel busy={reading} text={BUSY.read}>Read the site</BusyLabel></button>
         </div>
@@ -590,7 +590,7 @@
   .choice button.on { background: var(--bg-3); color: var(--text-1); font-weight: 600; box-shadow: inset 0 -2px 0 var(--accent); }
   .choice button:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
   .category-line { display: flex; align-items: center; gap: 6px; }
-  .category-line .input { flex: 1; min-width: 0; }
+  .category-pick { flex: 1; min-width: 0; }
   .picked { display: flex; align-items: center; gap: 4px; min-width: 0; }
   .pick { display: inline-flex; align-items: center; gap: 6px; min-width: 0; max-width: 100%; }
   .pick span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }

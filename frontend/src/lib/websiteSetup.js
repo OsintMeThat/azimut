@@ -509,7 +509,11 @@ export function noNameSaid(fallback) {
 }
 export const NO_NAME_PRESS = 'Name the site';
 
-export const CATEGORY_SAID = 'Pick one the site uses or type a new one. Left empty, the article has none.';
+export const CATEGORY_SAID = 'Pick one the site uses, or make a new one.';
+/** The category's list: none first, then the site's, then a new one typed. */
+export const CATEGORY_NONE = 'No category';
+export const CATEGORY_NEW = 'New category…';
+export const CATEGORY_NEW_PLACEHOLDER = 'New category';
 export const LIST_IMAGE_COVER = 'The cover picture';
 export const AUTHOR_LABEL = 'Author';
 export const AUTHOR_IMAGE_LABEL = 'Author picture';
