@@ -1182,6 +1182,41 @@ def _check_lines(block: ChartBlock, kind: Kind, said: str,
             warn(f'{said}: a {kind.label.lower()} chart does not read "{key}".', key=key)
 
 
+def drawn_columns(reading: Reading) -> list[int] | None:
+    """The columns of a chart's table its drawing reads, by index, in order: what the
+    editor's numbers keep plain while it greys the others as not drawn. None for a kind
+    that reads every column it holds (key figures), so none is ever marked."""
+    table = reading.table
+    if table is None or not table.headers:
+        return None
+    kind = reading.kind
+    used: set[int | None] = {reading.colour, *(table.column(only.column) for only in reading.block.only)}
+    if kind.per_row:
+        from . import notes_chart_wall as wall
+
+        found = wall.columns(reading)
+        flag = (reading.block.extra.get("flag") or "").strip()
+        used.update((found.picture, found.label, found.words, reading.by, table.column(flag) if flag else None))
+    elif kind.name == "timeline":
+        from . import notes_chart_timeline as timeline
+
+        used.update(timeline.timeline_columns(reading))
+    elif kind.name == "line":
+        from . import notes_chart_kinds as kinds
+
+        x, y, _days = kinds._line_columns(reading)
+        used.update((x, y))
+    elif kind.counts:
+        used.update((reading.count, reading.by))
+        for key in ("icon", "flag"):
+            said = (reading.block.extra.get(key) or "").strip()
+            if said:
+                used.add(table.column(said))
+    else:
+        return None
+    return sorted(index for index in used if index is not None)
+
+
 def reads_as_share(table: Table, column: int) -> bool:
     """Whether a column holds shares rather than amounts: its header says a percentage, a
     confidence, a ratio or a rate, or half its cells end in ``%``. Summing those means nothing."""

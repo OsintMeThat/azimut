@@ -465,6 +465,28 @@ def test_the_figure_route_names_the_values_a_chart_of_glyphs_gives_an_icon_each(
     assert bars["keys"] == [] and "values" not in bars
 
 
+def test_the_figure_route_names_the_columns_a_chart_draws_so_the_others_show_as_not_drawn(client):
+    """The numbers grey a column the drawing never reads: a wall's extra column, a register's
+    columns a count does not use. A kind that reads every column names none."""
+    cid, _ = _case(client)
+
+    def drawn(block: str) -> list[int] | None:
+        return json.loads(client.post(f"/api/cases/{cid}/notes/figure", json={"text": block}).headers["x-chart-kind"]).get("drawn")
+
+    wall = ("::: chart\nkind: pictures\nsource: x\n| Picture | # | Model | State |\n| --- | --- | --- | --- |\n"
+            "| e_aaaa1111 | #1 | Kirpi | destroyed |\n| e_bbbb2222 | #2 | Cougar | captured |\n:::")
+    # picture, label and words: State is no group and no colour, so nothing draws it
+    assert drawn(wall) == [0, 1, 2]
+    assert drawn(wall.replace("source: x", "source: x\nby: State")) == [0, 1, 2, 3]
+    register = ("::: chart\nkind: bars\ncount: rows\nby: Model\nsource: x\n| # | Model | Grade | Seen in |\n| --- | --- | --- | --- |\n"
+                "| 1 | Kirpi | Confirmed | S01 |\n| 2 | Cougar | Almost sure | S02 |\n:::")
+    assert drawn(register) == [1]
+    assert drawn(register.replace("by: Model", "by: Model\ncolour by: Grade")) == [1, 2]
+    assert drawn(SMALL) == [0, 1]
+    figures = "::: chart\nkind: key figures\nsource: x\n| Figure | What it says |\n| --- | --- |\n| 41 | vehicles |\n:::"
+    assert drawn(figures) is None
+
+
 @pytest.mark.parametrize("size, pixels", [("page", (1960, None)), ("x", (1600, 900)), ("portrait", (1080, 1350)),
                                           ("square", (1080, 1080))])
 def test_the_figure_route_paints_a_picture_for_each_destination(client, size, pixels):
