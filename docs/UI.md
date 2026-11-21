@@ -6158,7 +6158,16 @@ says what it is checking.
     the media entity so the graph knows the row rests on it. Only the address kind reaches
     the network, which the panel says before the role is chosen. A cell holding neither is
     shown as written and marked, never refused; an absolute path names a disk this case does
-    not travel with, so nothing is drawn for it.
+    not travel with, so nothing is drawn for it. A cell **linked** to a picture of the case
+    (a file, a capture, a proof) draws that picture's thumbnail beside its words, larger in
+    tall rows; a video draws its still, or its chip when the case has none. In a picture
+    column the cell's `@` leads with the case's pictures and their thumbnails, and a picture
+    dragged onto a cell from the Media library, the case sidebar or Files links it.
+  - **A note's chips become the sheet's own links.** A cell arriving as
+    `[[media:e_…|#1]]` or `[[entity:e_…|label]]`, from *New sheet from these rows*, a paste
+    or an import, is stored as its label with the link behind it (`engine/sheets.adopt_chips`),
+    and a column of pictures becomes a picture column unless it already has a role. A sheet
+    that still holds the code reads the same way and is written so on its next save.
   - A **source** column declares where the pages a row rests on are written. Links are
     already live in any cell without a role, so what declaring one buys is a promotion that
     knows which column to file as bookmarks.
@@ -6221,17 +6230,22 @@ says what it is checking.
   with its source address, the proof that answers for it however many steps down (a proof
   on a frame answers for the video), and that proof's place. A row starts *done* when a
   proof already answers and *to do* otherwise, so the count is true the day it is built.
-  The case's columns are locked, Status and Notes are the analyst's. Refresh files the
-  files imported since and moves a row to *done* once a proof answers it, from *to do* or
+  The case's columns are locked, Status and Notes are the analyst's. It adds the files
+  imported since and moves a row to *done* once a proof answers it, from *to do* or
   *in progress* only: *ruled out* or a word of the analyst's stays. The Media Library's
   **Worklist** opens it, building it on the first press, and a second press opens the same
   one rather than a twin.
-  - **Refresh is a press, never automatic.** A sheet that rewrote itself when it was opened
-    would move a file under somebody who came to read it, and it would fight the stamp that
-    keeps two readers of one file from overwriting each other. It files the proofs and the
-    points added since, restates the columns the case owns, and says what it did. A row is
-    found again by its proof and its place, so a sheet built when this shape was one row
-    per proof keeps its rows and its columns, and gains a row per point it lacked.
+  - **Both follow the case by themselves.** There is no Refresh button: the sheet is
+    brought level when it opens, when the case changes under it (a proof filed, a file
+    imported, anywhere), and when the Sheet home lists it. In its place a short line says
+    *Follows the case*, and for a few seconds after a change what it brought (*2 rows
+    added*); a toast says so only when rows were added. It is safe unasked because the
+    server writes only on a real change and answers *unchanged* otherwise, adds and
+    restates only the columns the case owns, and keeps the stamp: a file that moved on is
+    read again and tried once more, silently. It files the proofs and the points added
+    since and restates the case's columns. A row is found again by its proof and its place,
+    so a sheet built when this shape was one row per proof keeps its rows and its columns,
+    and gains a row per point it lacked.
   - **It adds and never removes.** A proof deleted since the build keeps its row, its notes
     and its colour, and answers NO under *In case*. Filtering on that column groups them so
     they can be deleted in one gesture — but that is the analyst's call, because the notes
@@ -6475,9 +6489,14 @@ says what it is checking.
   chart's settings, name a sheet as their data (`data: sheet:<id>`, `from: sheet:<id>`) and
   list the case's sheets first. *New data…* there makes a sheet from a table pasted, an
   .xlsx or a CSV, named in the Notebook, and the Sheet tool then shows it like any other. The
-  charts keep a copy of its rows; a row edited here, or in Excel, makes the Notebook say the
-  data changed since, and *Read again (all panels)* copies it in. A sheet a note's figure
-  reads is counted as used, and its delete names that note.
+  charts keep a copy of its rows, but **what is published reads the sheet as it is now**:
+  the PDF, the HTML page and its web folder, Story, the Map page, WordPress, To Post and the
+  Ready check draw every chart and panel from its sheet's current rows, whether or not the
+  note was opened since (`notecharts.with_current_rows`). The copy is drawn only once the
+  sheet is gone or holds none of the chart's columns, and the Ready check says so then. A
+  table of another note (`from: note:…`) is followed the same way. A cell the sheet links
+  to the case comes back to the note as its chip, so a picture wall reads its pictures from
+  a sheet. A sheet a note's figure reads is counted as used, and its delete names that note.
 - **A sheet whose rows have places goes on a map in one press.** **Show on a map**, in the
   header beside Export, opens a small dialog that proposes its columns from what the sheet
   already says of them (a role set first, else what the cells look like) and lets each be
