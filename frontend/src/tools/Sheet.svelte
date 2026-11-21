@@ -512,8 +512,33 @@
         uiState.openSheet = null;
         open(asked);
       }
+      if (!openId) void followBuilt(id);
     } catch {
       sheets = [];
+    }
+  }
+
+  /**
+   * On the home, each worklist the case built is brought level with it from its file, so
+   * the list counts what the case holds. Cheap: a worklist the case has nothing new for
+   * answers `unchanged` and nothing is written. An open sheet follows the case itself.
+   */
+  let following = false;
+  async function followBuilt(id) {
+    const built = sheets.filter((sheet) => sheet.shape);
+    if (following || !built.length) return;
+    following = true;
+    try {
+      const answers = await Promise.all(
+        built.map((sheet) => api.post(`/api/cases/${id}/sheets/${sheet.id}/refresh`, {}).catch(() => null)),
+      );
+      if (id !== caseId || openId || !answers.some((answer) => answer?.status === 'saved')) return;
+      const again = await api.get(`/api/cases/${id}/sheets`);
+      if (id === caseId && !openId) sheets = again.sheets ?? sheets;
+    } catch {
+      // The list stands as it was read.
+    } finally {
+      following = false;
     }
   }
 
@@ -624,6 +649,7 @@
       openId = id;
       settlePlace('sheet', place(), { navigate: true });
       rememberOpened(caseId, id);
+      void syncWithCase();
     } catch (error) {
       toast(error.message || 'This sheet could not be opened.', 'danger');
     } finally {
@@ -2364,44 +2390,88 @@
   const refreshable = $derived(Object.keys(meta.built ?? {}).length > 0);
   /** Which of the two built shapes: one row per imported file, or one per proof. */
   const builtFiles = $derived(meta.roles?.File?.kind === 'locked');
-  let refreshing = $state(false);
+  /** What the last refresh did, said for a few seconds beside the search. */
+  let synced = $state('');
+  let syncedTimer = null;
+  let syncing = false;
+  let syncAgain = null;
 
   /**
-   * Bring a proofs sheet level with the case, on a press.
+   * Bring a sheet built out of the case level with it, by itself.
    *
-   * Never on open. A sheet that rewrites itself when it is looked at is a sheet whose file
-   * moves under an analyst who only wanted to read it, and it would fight the stamp — which
-   * exists precisely so two readers of one file cannot silently overwrite each other.
+   * Run when the sheet opens and whenever the case changes under it: a proof filed or a
+   * file imported elsewhere lands in `My geolocations` or `Files to geolocate` without a
+   * press. It is safe to run unasked because the server writes only on a real change and
+   * answers `unchanged` otherwise, adds and restates only what the case owns, and keeps
+   * the stamp (`api/sheets.refresh_sheet`).
    *
-   * Nothing is ever removed here. A proof deleted since the build keeps its row and says NO
-   * in its `In case` column: the notes on that row are the analyst's, and throwing them away
-   * to tidy the table is not a decision this button gets to make.
+   * What the grid holds is written first, so the refresh reads the table the analyst sees.
+   * It waits while a cell is being typed in or a conflict stands: both are the analyst's.
+   * A file that moved on disk is read again by the server, which answers the table it
+   * refreshed, and the grid takes it as it takes a reload.
    */
-  async function refreshFromCase() {
-    if (refreshing || !openId) return;
-    refreshing = true;
+  async function syncWithCase() {
+    if (!refreshable || !openId || !caseId || syncing) return;
+    syncing = true;
+    const id = openId;
     try {
-      const answer = await api.post(`/api/cases/${caseId}/sheets/${openId}/refresh`, {
+      await flush();
+      if (openId !== id || conflict) return;
+      if (editing || saveState === 'dirty' || saveState === 'failed') {
+        // Somebody is typing: come back once they have stopped.
+        clearTimeout(syncAgain);
+        syncAgain = setTimeout(() => void syncWithCase(), 3000);
+        return;
+      }
+      const sent = revision;
+      const answer = await api.post(`/api/cases/${caseId}/sheets/${id}/refresh`, {
         columns: table.columns,
         rows: table.rows,
         meta,
         stamp,
       });
-      adopt({ ...answer, title });
-      await reloadCase();
-      const said = [
-        answer.added ? `${answer.added} row${answer.added === 1 ? '' : 's'} added` : '',
-        answer.gone
-          ? `${answer.gone} ${builtFiles ? 'file' : 'proof'}${answer.gone === 1 ? '' : 's'} no longer in the case`
-          : '',
-      ].filter(Boolean);
-      toast(said.length ? `${said.join(', ')}.` : 'Already level with the case.');
-    } catch (error) {
-      toast(error.message || 'This sheet could not be refreshed.', 'danger');
+      if (openId !== id || answer.status !== 'saved') return;
+      if (revision !== sent) {
+        // A cell typed while the refresh was out: the file holds the refresh, the grid the
+        // keystroke. The grid's next save writes what it holds, and the refresh after it
+        // adds the rows again.
+        stamp = answer.stamp ?? stamp;
+        clearTimeout(syncAgain);
+        syncAgain = setTimeout(() => void syncWithCase(), 1500);
+        return;
+      }
+      adopt({ ...answer, title }, { reset: Boolean(answer.reread) });
+      tellSynced(answer.added ?? 0);
+    } catch {
+      // A refresh that could not run leaves the sheet as it was; the next change tries again.
     } finally {
-      refreshing = false;
+      syncing = false;
     }
   }
+
+  /** Say what the refresh did, beside the search for a few seconds, and in a toast when it
+   *  added rows: those are worth hearing about from another tool. */
+  function tellSynced(added) {
+    const rows = `${added} row${added === 1 ? '' : 's'}`;
+    synced = added ? `${rows} added` : 'Up to date with the case';
+    if (added) toast(`${title}: ${rows} added from the case.`);
+    clearTimeout(syncedTimer);
+    syncedTimer = setTimeout(() => (synced = ''), 4000);
+  }
+
+  // The case changed under the open sheet: a proof filed, a file imported, anywhere.
+  let syncedRev = untrack(() => caseState.rev);
+  $effect(() => {
+    const rev = caseState.rev;
+    if (rev === syncedRev) return;
+    syncedRev = rev;
+    untrack(() => void syncWithCase());
+  });
+
+  $effect(() => () => {
+    clearTimeout(syncedTimer);
+    clearTimeout(syncAgain);
+  });
 
   function previewBuild(declaration) {
     return api.post(`/api/cases/${caseId}/sheets/${openId}/proofs/preview`, {
@@ -4060,15 +4130,14 @@
   {:else}
     <div class="question">
       {#if refreshable}
-        <!-- Beside the search rather than up in the header: it acts on the rows, and this
-             bar is the one that does. Pressed, never automatic — refreshing on open would
-             rewrite a file somebody opened to read. It adds and never removes. -->
-        <button class="btn btn-ghost btn-sm" disabled={refreshing} onclick={refreshFromCase}
-                title={builtFiles
-                  ? 'Add the files imported since, and mark done the ones a proof now answers'
-                  : 'Add the proofs filed since, and restate the columns the case owns'}>
-          <Icon name="reset" size={13} /> {refreshing ? 'Refreshing' : 'Refresh'}
-        </button>
+        <!-- Where Refresh was: the sheet follows the case by itself now, and this says so,
+             and for a moment what the last change brought. -->
+        <span class="follows" class:fresh={Boolean(synced)} role="status"
+              title={builtFiles
+                ? 'Adds the files imported since and marks done the ones a proof answers, by itself'
+                : 'Adds the proofs filed since and restates the columns the case owns, by itself'}>
+          <Icon name={synced ? 'check' : 'reset'} size={12} /> {synced || 'Follows the case'}
+        </span>
       {/if}
       <div class="search" data-guide="sheet.search">
         <Icon name="search" size={13} />
@@ -5393,6 +5462,13 @@
   }
   .search { display: flex; align-items: center; gap: 6px; color: var(--text-3); }
   .search .input { width: 220px; }
+  /* A sheet built out of the case says it follows it, and what the last change brought. */
+  .follows {
+    display: inline-flex; align-items: center; gap: 5px; padding: 0 4px;
+    font-size: var(--fs-xs); color: var(--text-3); white-space: nowrap;
+    transition: color 0.2s;
+  }
+  .follows.fresh { color: var(--ok); }
   .count { font-size: var(--fs-sm); color: var(--text-3); }
   .count strong { color: var(--text-1); font-weight: 600; }
   /* The cell under the cursor. Flat against the grid it belongs to — a bar of its own

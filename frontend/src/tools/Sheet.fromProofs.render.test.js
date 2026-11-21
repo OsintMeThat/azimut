@@ -7,8 +7,9 @@
  * first time they do — while still opening the entity behind them, which is the one thing
  * that separates `locked` from the other roles the app writes.
  *
- * And Refresh is a **press**, offered only where there is something to refresh. A sheet
- * that rewrote itself on open would move a file under somebody who came to read it.
+ * And it follows the case **by itself**: on open and whenever the case changes, it asks the
+ * server to bring it level, which writes only when the case has something new. A sheet the
+ * case has nothing new for is left exactly as it was read.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { flushSync, mount, unmount } from 'svelte';
@@ -57,6 +58,7 @@ const PLAIN_SHEET = {
 };
 
 let sheet = PROOFS_SHEET;
+const UNCHANGED = { status: 'unchanged', added: 0, updated: 0, gone: 0 };
 
 const get = vi.fn();
 const put = vi.fn(async (_path, body) => ({ status: 'saved', stamp: '2000-64', ...body }));
@@ -130,6 +132,7 @@ beforeEach(async () => {
   get.mockReset();
   put.mockClear();
   post.mockReset();
+  post.mockImplementation(async (path) => (path.endsWith('/refresh') ? UNCHANGED : {}));
   toast.mockClear();
   get.mockImplementation(route);
   const { caseState } = await import('../components/views.fixture.svelte.js');
@@ -182,21 +185,36 @@ describe('the columns the case owns', () => {
   });
 });
 
-describe('bringing the sheet level with the case', () => {
-  it('offers Refresh on a sheet that was built out of the case', async () => {
-    await open();
-    expect(button('Refresh')).not.toBeUndefined();
-  });
+describe('following the case by itself', () => {
+  const refreshes = () => post.mock.calls.filter(([path]) => path.endsWith('/refresh'));
+  const follows = () => target.querySelector('.follows');
 
-  it('offers it on nothing else, because there would be nothing to refresh', async () => {
-    sheet = PLAIN_SHEET;
+  it('says a sheet built out of the case follows it, where Refresh used to be', async () => {
     await open();
     expect(button('Refresh')).toBeUndefined();
+    expect(follows().textContent.trim()).toBe('Follows the case');
   });
 
-  it('sends the table on screen with its stamp, and says what came back', async () => {
+  it('says nothing of the kind on any other sheet, and asks nothing', async () => {
+    sheet = PLAIN_SHEET;
     await open();
-    post.mockResolvedValue({
+    expect(follows()).toBeNull();
+    expect(refreshes()).toHaveLength(0);
+  });
+
+  it('asks on open, sending the table on screen with its stamp, and writes nothing unchanged', async () => {
+    await open();
+    const [[path, body]] = refreshes();
+    expect(path).toBe('/api/cases/case-a/sheets/e_sheet/refresh');
+    expect(body.stamp).toBe('1000-64');
+    expect(body.rows).toHaveLength(2);
+    expect(put).not.toHaveBeenCalled();
+    expect(rows()).toHaveLength(2);
+    expect(toast).not.toHaveBeenCalled();
+  });
+
+  it('takes the rows the case added and says so, in a toast and beside the search', async () => {
+    post.mockImplementation(async (path) => (path.endsWith('/refresh') ? {
       status: 'saved',
       columns: sheet.columns,
       rows: [...sheet.rows, ['r3', 'New shot', '', '', '', 'YES', 'done', '']],
@@ -205,38 +223,19 @@ describe('bringing the sheet level with the case', () => {
       added: 1,
       updated: 0,
       gone: 1,
-    });
-    button('Refresh').click();
-    await settle();
-
-    const [path, body] = post.mock.calls[0];
-    expect(path).toBe('/api/cases/case-a/sheets/e_sheet/refresh');
-    expect(body.stamp).toBe('1000-64');
-    expect(body.rows).toHaveLength(2);
-    expect(toast).toHaveBeenCalledWith('1 row added, 1 proof no longer in the case.');
+    } : {}));
+    await open();
     expect(rows()).toHaveLength(3);
+    expect(toast).toHaveBeenCalledWith('My geolocations: 1 row added from the case.');
+    expect(follows().textContent.trim()).toBe('1 row added');
   });
 
-  it('says so plainly when the sheet was already level', async () => {
+  it('asks again when the case changes while the sheet is open', async () => {
     await open();
-    post.mockResolvedValue({
-      status: 'saved',
-      columns: sheet.columns,
-      rows: sheet.rows,
-      meta: sheet.meta,
-      stamp: '3000-64',
-      added: 0,
-      updated: 0,
-      gone: 0,
-    });
-    button('Refresh').click();
+    expect(refreshes()).toHaveLength(1);
+    const { caseState } = await import('../components/views.fixture.svelte.js');
+    caseState.rev += 1;
     await settle();
-    expect(toast).toHaveBeenCalledWith('Already level with the case.');
-  });
-
-  it('never runs on its own: opening the sheet writes nothing', async () => {
-    await open();
-    expect(post).not.toHaveBeenCalled();
-    expect(put).not.toHaveBeenCalled();
+    expect(refreshes()).toHaveLength(2);
   });
 });
