@@ -330,7 +330,7 @@ const THEME = {
   '.cm-ig-data-dot': { color: 'var(--text-3)' },
   '.cm-ig-data-state': { color: 'var(--warn)' },
   '.cm-ig-data-said': { color: 'var(--text-2)' },
-  '.cm-ig-data-spring': { flex: '1' },
+  '.cm-ig-data-change': { marginLeft: 'auto' },
   '.cm-ig-use': {
     padding: '0', border: 'none', background: 'none', color: 'var(--info)', font: 'inherit', cursor: 'pointer', textDecoration: 'underline',
     textDecorationColor: 'color-mix(in srgb, var(--info) 40%, transparent)', textUnderlineOffset: '2px', whiteSpace: 'nowrap',

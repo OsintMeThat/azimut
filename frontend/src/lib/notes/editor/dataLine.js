@@ -90,7 +90,6 @@ export function drawDataLine(node, words, { act = null, change = null, changeLab
   if (words.state) parts.push(element('span', `${prefix}-data-state`, words.state));
   if (said) parts.push(element('span', `${prefix}-data-said`, said));
   if (change) {
-    parts.push(element('span', `${prefix}-data-spring`));
     const press = button(`${prefix}-use ${prefix}-data-change`, { label: changeLabel, title: 'Read its rows from a sheet, a table of this note, or keep its own' });
     press.addEventListener('mousedown', (event) => event.preventDefault());
     press.addEventListener('click', () => change(press));

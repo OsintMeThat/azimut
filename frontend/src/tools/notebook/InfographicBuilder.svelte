@@ -745,9 +745,8 @@
                         <button type="button" class="ib-link" title={words.act.title} onclick={() => panelAct(index, words.act.id)}>{words.act.label}</button>
                       {/if}
                       {#if words.state}<span class="ib-data-state">{words.state}</span>{/if}
-                      <span class="ib-spring"></span>
                       {#if caseId}
-                        <button type="button" class="ib-link" title="Read its rows from a sheet, a table of this note, or the page’s data"
+                        <button type="button" class="ib-link ib-change" title="Read its rows from a sheet, a table of this note, or the page’s data"
                           onclick={(event) => (dataPick = { anchor: event.currentTarget, panel: index })}>Change…</button>
                       {/if}
                     </p>
@@ -995,7 +994,7 @@
   .ib-data-line .ib-link { font-size: var(--fs-sm); }
   .ib-panel-data .ib-link { font-size: var(--fs-xs); }
   .ib-data-state { color: var(--warn); }
-  .ib-spring { flex: 1; }
+  .ib-change { margin-left: auto; }
   .ib-tabs { display: flex; gap: 2px; border-bottom: 1px solid var(--border); }
   .ib-tab {
     margin-bottom: -1px; padding: 4px 10px; border: none; border-bottom: 2px solid transparent; background: none; color: var(--text-2);
