@@ -476,6 +476,7 @@ def refresh_proofs(
         key_column=TITLE_COLUMN,
         born=lambda cells: "done",
         row_match=lambda built_id, row_links: _match(built_id, row_links.get(PLACE_COLUMN, "")),
+        spare=lambda item: _match(item["id"], ""),
     )
 
 
@@ -490,6 +491,7 @@ def _refresh(
     born: Any,
     row_match: Any,
     advance: Any = None,
+    spare: Any = None,
 ) -> dict[str, Any]:
     """The refresh both fixed shapes share: rewrite the case's columns on the rows that
     stand for an item, add a row for each item that has none, count the rows whose entity
@@ -498,7 +500,9 @@ def _refresh(
     An item is ``{id, match, cells, links}``: the entity a row is built from, the key it
     is found again by, and what it fills. ``row_match`` reads that key back off a standing
     row. ``born`` is the status a new row starts at; ``advance`` may move a standing row's
-    status on, and returns None to leave it alone.
+    status on, and returns None to leave it alone. ``spare`` names, for an item with no row
+    of its own, the key of a standing row it may take over instead of filing a second one:
+    a proof's row from before it had a place, for the first place it gains.
 
     ``changed`` is whether any of that differs from what was handed in: a row added, a
     cell restated, a link or a record moved. False is what lets the refresh run by itself
@@ -521,6 +525,7 @@ def _refresh(
     where = {row[key_at]: position for position, row in enumerate(table) if key_at < len(row)}
     status_at = index.get(STATUS_COLUMN)
     updated, added = 0, 0
+    claimed: set[str] = set()
     for item in items:
         # Kept to the columns the sheet has: a sheet built before a column existed keeps
         # its own shape, and a link into a column it lacks would be dropped by the save
@@ -528,7 +533,12 @@ def _refresh(
         cells = {name: sheet_engine.as_written(value) for name, value in item["cells"].items()}
         cell_links = {name: entity_id for name, entity_id in item["links"].items() if name in index}
         standing = standing_at.get(item["match"])
-        if standing is not None and standing in where:
+        if (standing is None or standing in claimed) and spare is not None:
+            offered = standing_at.get(spare(item))
+            if offered is not None and offered not in claimed and spare(item) != item["match"]:
+                standing = offered
+        if standing is not None and standing in where and standing not in claimed:
+            claimed.add(standing)
             row = table[where[standing]]
             for name, value in cells.items():
                 position = index.get(name)

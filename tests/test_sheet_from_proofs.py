@@ -220,6 +220,30 @@ def test_refresh_adds_a_point_added_to_a_proof_and_keeps_the_others(client):
     assert cell(fresh, 0, "Notes") == "checked"
 
 
+def test_a_proof_placed_after_it_was_filed_fills_its_row_rather_than_filing_another(client):
+    """The refresh runs by itself, so a proof filed and placed a moment later is seen in
+    between: its place lands on the row it already has, and a second place gets a row."""
+    case_id = make_case(client)
+    proof = a_proof(client, case_id, "Camp gate")
+    sheet = read_sheet(client, case_id, build(client, case_id)["id"])
+    put_cell(sheet, 0, "Notes", "second angle wanted")
+    gate = add(client, case_id, "place", "Gate", lat=12.8, lon=43.5)["id"]
+    link(case_id, proof, gate, "depicts")
+
+    answer = post_sheet(client, case_id, sheet["id"], "refresh", sheet)
+    assert answer.status_code == 200, answer.text
+    assert answer.json()["added"] == 0
+    fresh = read_sheet(client, case_id, sheet["id"])
+    assert len(fresh["rows"]) == 1
+    assert cell(fresh, 0, "Place") == "Gate" and cell(fresh, 0, "Notes") == "second angle wanted"
+
+    tower = add(client, case_id, "place", "Tower", lat=12.9, lon=43.5)["id"]
+    link(case_id, proof, tower, "depicts")
+    again = post_sheet(client, case_id, sheet["id"], "refresh", fresh)
+    assert again.json()["added"] == 1
+    assert sorted(cell(read_sheet(client, case_id, sheet["id"]), row, "Place") for row in range(2)) == ["Gate", "Tower"]
+
+
 def test_a_sheet_built_with_the_old_columns_keeps_them_on_refresh(client):
     case_id = make_case(client)
     place = add(client, case_id, "place", "Rooftop", lat=47.1, lon=37.5)["id"]
