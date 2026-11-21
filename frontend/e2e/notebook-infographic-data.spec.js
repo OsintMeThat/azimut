@@ -4,9 +4,9 @@ import { CASE_ID, installAppFixture } from './app.fixture.js';
 /**
  * An infographic's Data line, in the note: a sheet of the case set as its data from the
  * source picker (the charts copied from a table of its columns take it, their rows read in),
- * changed to another sheet, then a row of that sheet edited elsewhere: the line says it
- * changed since, and Read again (all panels) copies the rows into every panel that reads it,
- * key figures typed in left alone, one Undo taking it back.
+ * changed to another sheet, then a row of that sheet edited elsewhere: back in the window,
+ * every panel that reads it follows by itself, key figures typed in left alone, one Undo
+ * taking it back and keeping the older copy.
  */
 
 const ROWS = ['| Model | Grade |', '| --- | --- |', '| Streit Cougar | Confirmed |', '| Al-Wahsh | Almost sure |'];
@@ -78,13 +78,12 @@ const saved = (state) => /^:::: infographic\n[\s\S]*?\n::::$/m.exec(String(state
 const rowsOf = (graphic) => graphic.split(/^::: chart$/m).slice(1)
   .map((panel) => panel.split('\n').filter((line) => line.startsWith('| ') && !line.startsWith('| ---')).length - 1);
 
-test('a sheet set as the infographic’s data, changed, then read again into every panel that reads it', async ({ page }) => {
+test('a sheet set as the infographic’s data, changed, then followed by every panel that reads it', async ({ page }) => {
   const state = await notebook(page);
   await page.goto('/#notebook');
   await page.locator('button[title="Open Losses"]').click();
   const line = page.locator('.cm-block-infographic .cm-ig-data');
-  await expect(line).toContainText('None');
-  await expect(line).toContainText('each panel keeps its own rows');
+  await expect(line).toContainText('Each panel’s own rows');
 
   // Choose data…: the sheets first, recommended; the one picked is the page's data
   await line.getByRole('button', { name: 'Choose data…' }).click();
@@ -108,18 +107,17 @@ test('a sheet set as the infographic’s data, changed, then read again into eve
   await expect(line).toContainText('2 rows · 2 panels read it');
   await expect(line.getByRole('button', { name: 'Read again (all panels)' })).toHaveCount(0);
 
-  // a row added to the sheet elsewhere: back in the window, the line says it changed since
+  // a row added to the sheet elsewhere: back in the window, the panels follow by themselves
+  const before = state.written.at(-1);
   SHEETS.s2.rows.push(['Harrow Tygor E1', 'Almost sure']);
   await page.evaluate(() => window.dispatchEvent(new Event('focus')));
-  await expect(line).toContainText('changed since');
-  const before = state.written.at(-1);
-  await line.getByRole('button', { name: 'Read again (all panels)' }).click();
   await expect.poll(() => rowsOf(saved(state))).toEqual([1, 3, 3]);
-  await expect(line).not.toContainText('changed since');
   expect(saved(state)).toContain('| Harrow Tygor E1 | Almost sure |');
+  await expect(line).toContainText('3 rows · 2 panels read it');
 
-  // one Undo takes the whole Read again back
+  // one Undo takes the whole following back, and the older copy stays, said as such
   await page.locator('.cm-content').focus();
   await page.keyboard.press('Control+z');
   await expect.poll(() => state.written.at(-1)).toBe(before);
+  await expect(line).toContainText('an older copy, kept by Undo');
 });

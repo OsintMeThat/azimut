@@ -4,8 +4,8 @@ import { CASE_ID, installAppFixture } from './app.fixture.js';
 /**
  * A chart made in the note from a table: Chart in the grid's bar shows the kinds the
  * table fits drawn from its rows, the one picked is written under the table and drawn,
- * its title is set on the chart and taken back by Undo, Read again follows the table it
- * came from, and Export downloads the picture for X. The server is stood in for.
+ * its title is set on the chart and taken back by Undo, its rows follow the table they came
+ * from by themselves, and Export downloads the picture for X. The server is stood in for.
  */
 
 const at = '2026-10-01T10:00:00Z';
@@ -62,7 +62,7 @@ async function withNote(page, text = NOTE) {
 
 const last = (written) => () => written.at(-1) ?? '';
 
-test('a chart is picked by its picture from a table, set on itself, read again and exported', async ({ page, browserName }) => {
+test('a chart is picked by its picture from a table, set on itself, follows its table and is exported', async ({ page, browserName }) => {
   test.skip(browserName !== 'chromium', 'one browser is enough for the gestures');
   const { written, asked } = await withNote(page);
 
@@ -92,18 +92,15 @@ test('a chart is picked by its picture from a table, set on itself, read again a
   await page.keyboard.press('Control+z');
   await expect.poll(last(written)).toBe(CHARTED);
 
-  // a row of the table changed: Read again copies it into the chart
-  await expect(chart.getByRole('button', { name: 'Read again' })).toBeHidden();
-  await page.locator('.cm-grid-cell[data-row="1"][data-col="1"]').click();
+  // a row of the table changed: the chart's copy follows by itself, no press
+  await expect(chart.getByRole('button', { name: 'Read again' })).toHaveCount(0);
+  await page.locator('.cm-grid-block .cm-grid-cell[data-row="1"][data-col="1"]').click();
   await page.keyboard.press('Control+a');
   await page.keyboard.type('identified');
   await page.keyboard.press('Tab');
   await page.keyboard.press('Escape');
-  await expect(chart.getByRole('button', { name: 'Read again' })).toBeVisible();
-  await chart.getByRole('button', { name: 'Read again' }).click();
   const moved = TABLE.replace('| Al-Wahsh | almost sure | 2 |', '| Al-Wahsh | identified | 2 |');
   await expect.poll(last(written)).toBe(`Who made them.\n\n## Count\n\n${moved}\n\n${CHART.replace(TABLE, moved)}\n\nAfter.`);
-  await expect(chart.getByRole('button', { name: 'Read again' })).toBeHidden();
 
   // the picture for X, downloaded from the route
   await chart.getByRole('button', { name: 'Export' }).click();
