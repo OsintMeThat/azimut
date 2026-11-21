@@ -283,6 +283,44 @@ describe('a web folder’s view counter', () => {
   });
 });
 
+describe('a page of a site that counts its readers', () => {
+  /** The pixels a page's script asked for, with its meta and body as given; `fetch` stands the network in. */
+  async function counted(head, body = '<h1>A story</h1>', fetch = vi.fn(), url = 'https://desk.github.io/articles/story/') {
+    window = new Window({ url, settings: { enableJavaScriptEvaluation: true, suppressInsecureJavaScriptEnvironmentWarning: true } });
+    const pixels = [];
+    window.Image = class { set src(value) { pixels.push(value); } };
+    window.fetch = fetch;
+    window.document.write(`<!doctype html><html><head><title>The story</title>${head}</head><body>${body}<script>${COUNTER}</script></body></html>`);
+    await window.happyDOM.waitUntilComplete();
+    return pixels;
+  }
+
+  it('counts the visit from the site’s meta with the pixel alone, asking no count back', async () => {
+    const fetch = vi.fn();
+    const pixels = await counted('<meta name="az-counter" content="desk">', undefined, fetch);
+    expect(pixels).toHaveLength(1);
+    expect(pixels[0]).toMatch(/^https:\/\/desk\.goatcounter\.com\/count\?p=%2Farticles%2Fstory%2F&t=The%20story&rnd=/);
+    expect(fetch).not.toHaveBeenCalled();
+  });
+
+  it('counts nothing with no code, a code that is none, or a page read from the disk', async () => {
+    expect(await counted('')).toEqual([]);
+    expect(await counted('<meta name="az-counter" content="not a code">')).toEqual([]);
+    expect(await counted('<meta name="az-counter" content="desk">', undefined, vi.fn(), 'file:///articles/story/index.html')).toEqual([]);
+  });
+
+  it('still says the views of a map page, whose line holds the code', async () => {
+    const fetch = vi.fn(() => Promise.resolve({ ok: true, json: () => Promise.resolve({ count: '12' }) }));
+    const pixels = await counted('<meta name="az-counter" content="desk">',
+      '<span class="az-mappage-views" data-counter="desk" hidden></span>', fetch);
+    await settle(10);
+    expect(pixels).toHaveLength(1);
+    expect(fetch).toHaveBeenCalledOnce();
+    const line = window.document.querySelector('.az-mappage-views');
+    expect([line.hidden, line.textContent]).toEqual([false, '12 views']);
+  });
+});
+
 describe('the live map draws a layer as the app’s map does', () => {
   const data = {
     features: [

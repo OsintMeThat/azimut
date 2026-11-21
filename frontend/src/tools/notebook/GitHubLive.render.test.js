@@ -26,10 +26,10 @@ afterEach(() => {
   target.remove();
 });
 
-function show(answer) {
+function show(answer, result = RESULT) {
   let release;
   const watch = vi.fn((commit, { signal }) => new Promise((resolve) => { release = () => resolve(answer); signal.addEventListener('abort', () => resolve({ state: 'stopped' })); }));
-  live = mount(GitHubLive, { target, props: { result: RESULT, watch } });
+  live = mount(GitHubLive, { target, props: { result, watch } });
   return { watch, release: () => release() };
 }
 
@@ -75,4 +75,27 @@ it('stops watching when the dialog closes', async () => {
   unmount(live);
   live = null;
   expect(signal.aborted).toBe(true);
+});
+
+it('lists what the publish had to say of the site under the page, and nothing when it had none', async () => {
+  show({ state: 'built' }, { ...RESULT, site: { written: ['articles.json'], warnings: ['The site holds too many files for Azimut to read: its home, list, feed and sitemap were left as they were.'] } });
+  await settle();
+  const list = target.querySelector('ul[aria-label="To mind"]');
+  expect([...list.querySelectorAll('li')].map((node) => node.textContent.trim())).toEqual(
+    ['The site holds too many files for Azimut to read: its home, list, feed and sitemap were left as they were.']);
+  unmount(live);
+  show({ state: 'built' }, { ...RESULT, site: { written: [], warnings: [] }, edited: false });
+  await settle();
+  expect(target.querySelector('ul[aria-label="To mind"]')).toBeNull();
+});
+
+it('says a folder changed on GitHub was replaced only when the press had not warned of it', async () => {
+  show({ state: 'built' }, { ...RESULT, edited: true, told: false, site: { warnings: ['Mind this.'] } });
+  await settle();
+  expect([...target.querySelectorAll('ul[aria-label="To mind"] li')].map((node) => node.textContent.trim())).toEqual(
+    ['That folder had been changed on GitHub since you published it: this publish replaced it.', 'Mind this.']);
+  unmount(live);
+  show({ state: 'built' }, { ...RESULT, edited: true, told: true });
+  await settle();
+  expect(target.querySelector('ul[aria-label="To mind"]')).toBeNull();
 });

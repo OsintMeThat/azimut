@@ -219,6 +219,22 @@ DEFAULT_SETTINGS: dict[str, Any] = {
     "github_repo": "articles",
     "github_branch": "main",
     "github_site": "",
+    # The categories the site's cards and marked pages named when a press last read the
+    # site, so the publish dialog can suggest them without asking GitHub; cleared with
+    # github_site when the repository changes (engine/site.py).
+    "github_categories": [],
+    # The analyst's website on GitHub Pages (engine/site.py): its title (empty reads the
+    # report name, else the GitHub account), the line under it, whether its home page ends
+    # on "Made with Azimut" (articles keep report_credit_azimut), and how readers are
+    # counted on every page of it: "" nobody, "goatcounter" (site_stats_code is the
+    # site's code) or "cloudflare" (site_stats_token is its public beacon token, which
+    # every page prints, so it is no secret and the backup carries it).
+    "site_title": "",
+    "site_tagline": "",
+    "site_credit_azimut": True,
+    "site_stats": "",
+    "site_stats_code": "",
+    "site_stats_token": "",
     # Pairing token for the capture browser extension (api/ingest.py). Minted
     # lazily on first use, shown once in Settings, pasted into the extension.
     # Empty means "not minted yet" — never a valid credential.

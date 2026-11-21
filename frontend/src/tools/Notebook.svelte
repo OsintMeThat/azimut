@@ -108,6 +108,7 @@
   import ConfirmDialog from '../components/ConfirmDialog.svelte';
   import WordPressDraft from './notebook/WordPressDraft.svelte';
   import GitHubPublish from './notebook/GitHubPublish.svelte';
+  import { WEBSITE_HELP } from '../lib/websiteSetup.js';
   import GitHubLive from './notebook/GitHubLive.svelte';
   import ExportFolderPicker from '../components/ExportFolderPicker.svelte';
   import FloatingMenu from '../components/FloatingMenu.svelte';
@@ -183,6 +184,8 @@
   // GitHub Pages, in the Web folder branch: its Publish, and the page once published
   let githubPublish = $state(null);
   let githubSet = $state(false);
+  // the folder on GitHub was found changed: the next press publishes anyway
+  let githubWarned = $state(false);
   let githubProblem = $state('');
   let githubBusy = $state(false);
   let githubDone = $state(null);
@@ -412,6 +415,23 @@
   /** `/` › Cover page wrote the page: the look prints it alone on page 1. */
   function coverWritten() {
     if (look && coverChoice(look) !== 'own') void changeLook(ownCover(look));
+  }
+
+  /**
+   * The look of the note the export dialog works on, read again after the dialog changed it (its
+   * category, role and list picture are kept in the look), so a look saved from here never drops them.
+   */
+  async function readOpenLook(noteId) {
+    const id = caseId;
+    const key = noteId === CASE_NOTES ? null : noteId;
+    if (!id || !opened || (opened.noteId ?? null) !== key) return;
+    const mine = ++lookWrites;
+    try {
+      const fresh = await readLook(id, key);
+      if (mine === lookWrites && id === caseId && (opened?.noteId ?? null) === key) look = fresh;
+    } catch {
+      /* the look on screen stays; the next save is the one that may drop what the dialog set */
+    }
   }
 
   /** A look picked in the header: shown at once, kept beside the note. */
@@ -1244,9 +1264,10 @@
         <div class="web-fields">
           {#if !several}
             <GitHubPublish bind:this={githubPublish} bind:address={webAddress} bind:connected={githubSet}
-              bind:problem={githubProblem} bind:busy={githubBusy} {caseId} noteId={exportIds[0]} title={exportTitle}
-              prepare={async () => { if (doc) await flush(doc); }} onaddress={(value) => { webAddressTyped = true; keepAddress(caseId, exportIds[0], value); }}
-              onleave={closeExport} />
+              bind:problem={githubProblem} bind:busy={githubBusy} bind:warned={githubWarned} {caseId} noteId={exportIds[0]} title={exportTitle}
+              entities={graphEntities} prepare={async () => { if (doc) await flush(doc); }}
+              onaddress={(value) => { webAddressTyped = true; keepAddress(caseId, exportIds[0], value); }}
+              onlook={() => readOpenLook(exportIds[0])} onleave={closeExport} />
           {/if}
           {#if !several && !githubSet}
             <label class="dest-label" for="export-address">Address it will live at</label>
@@ -1360,9 +1381,10 @@
               : several ? `Export ${exportIds.length} ${html ? 'HTML pages' : 'PDFs'}` : `Export ${named}`}</button>
           {#if web && !several}
             <button class={githubSet ? 'btn btn-primary' : 'btn'} disabled={githubBusy || exportBusy || (githubSet && Boolean(problem))}
-              onclick={runPublish} title={githubSet ? 'Put the folder online in your GitHub repository, one commit'
-                : 'Publish to your own GitHub Pages site, once it is set up in Settings › Publishing'}>
-              {githubBusy ? 'Publishing…' : 'Publish to GitHub Pages'}</button>
+              onclick={runPublish} title={githubWarned ? WEBSITE_HELP.publishAnyway
+                : githubSet ? 'Put the folder online in your GitHub repository, one commit'
+                : 'Publish to your own GitHub Pages site, once it is set up in Settings › Website'}>
+              {githubBusy ? 'Publishing…' : githubWarned ? 'Publish anyway' : 'Publish to GitHub Pages'}</button>
           {/if}
         {:else if draftSent?.edit}
           <a class="btn btn-primary" href={draftSent.edit} target="_blank" rel="noopener noreferrer"

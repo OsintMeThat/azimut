@@ -1,4 +1,4 @@
-"""REST API for Settings › Publishing: the WordPress site a note is sent to as a
+"""REST API for Settings › Website: the WordPress site a note is sent to as a
 draft, and the GitHub Pages site a note's web folder is published to.
 
 The site's address and the username are ordinary settings (`wordpress_site`,
@@ -9,8 +9,10 @@ GitHub token are kept apart, in ``publishing.json`` (`engine/publishsecrets.py`)
 never sent back: the browser learns only whether one is set and its last four characters.
 
 Nothing here reaches the network but its presses: **Test connection** for either
-service, and for GitHub **Create the repository**, **Turn on Pages** and the watch of
-a page being built (`/github/build`, asked by the export dialog after a publish).
+service, and for GitHub **Create the repository**, **Turn on Pages**, **Update the site**
+(`/github/site`, which rebuilds the site's list, feed, sitemap and home without a note),
+**Read the categories** (`/github/categories`) and the watch of a page being built
+(`/github/build`, asked by the export dialog after a publish).
 Reading these settings, saving them and forgetting them stay on this machine. Sending
 a note is the Notebook's (`/notes/{note}/wordpress` and `/notes/{note}/github`,
 `api/notes.py`).
@@ -29,7 +31,7 @@ from .. import config
 from ..engine import githubpages as github
 from ..engine import notes_web
 from ..engine import notes_wordpress as wordpress
-from ..engine import publishsecrets
+from ..engine import publishsecrets, site, sitesync
 
 router = APIRouter(prefix="/api/publishing", tags=["publishing"])
 
@@ -68,7 +70,7 @@ def _state() -> dict[str, Any]:
 
 @router.get("")
 def read_publishing() -> dict[str, Any]:
-    """What Settings › Publishing shows of each service: never a secret, never fetched."""
+    """What Settings › Website shows of each service: never a secret, never fetched."""
     return {WORDPRESS: _state(), GITHUB: _github_state()}
 
 
@@ -187,8 +189,23 @@ def github_settings() -> GitHubTarget:
                         token=token if TOKEN.match(token) else "")
 
 
+def _logo() -> bytes | None:
+    """The analyst's logo, as the site's pages carry it; None with none, or one that is no PNG."""
+    try:
+        data = config.signature_path().read_bytes()
+    except OSError:
+        return None
+    return data if config.valid_signature(data) else None
+
+
+def site_for(target: GitHubTarget, address: str) -> site.Site:
+    """The site as Settings › Website describes it, served at ``address``."""
+    return site.from_settings(config.load_settings(), address=address, account=target.account, logo=_logo())
+
+
 def _github_state() -> dict[str, Any]:
     target = github_settings()
+    found = site_for(target, target.base)
     return {
         "account": target.account,
         "repo": target.repo,
@@ -196,7 +213,21 @@ def _github_state() -> dict[str, Any]:
         "site": target.site,
         "base": target.base if target.account else "",
         "token": publishsecrets.status(GITHUB),
+        # what the site is called here, whatever Settings left empty read from: its title, whether
+        # it has a logo, and the categories the last read of the site found, for the publish dialog
+        "website": {"title": found.title if target.account else "", "logo": found.logo is not None,
+                    "counting": found.stats if found.counter or found.beacon else ""},
+        "categories": site.categories_read(config.load_settings().get("github_categories")),
     }
+
+
+def keep_categories(categories: list[str] | None) -> None:
+    """Keep the categories a read of the site found, for the dialog to suggest without asking GitHub."""
+    if categories is None:
+        return
+    kept = site.categories_read(categories)
+    if kept != site.categories_read(config.load_settings().get("github_categories")):
+        config.update_settings(lambda settings: settings.update(github_categories=kept))
 
 
 def keep_site(target: GitHubTarget, url: str) -> None:
@@ -228,6 +259,7 @@ def save_github(body: GitHubIn) -> dict[str, Any]:
         if moved:
             # another repository is another site: its address is read again on the next press
             settings["github_site"] = ""
+            settings["github_categories"] = []
 
     if account is not None or repo is not None or branch is not None:
         config.update_settings(apply)
@@ -240,7 +272,8 @@ def forget_github() -> dict[str, Any]:
     go back to what they were before anything was set."""
     publishsecrets.forget(GITHUB)
     config.update_settings(lambda settings: settings.update(
-        github_account="", github_repo=github.DEFAULT_REPO, github_branch=github.DEFAULT_BRANCH, github_site=""))
+        github_account="", github_repo=github.DEFAULT_REPO, github_branch=github.DEFAULT_BRANCH, github_site="",
+        github_categories=[]))
     return _github_state()
 
 
@@ -249,7 +282,7 @@ def _connection(target: GitHubTarget, gh: github.GitHub) -> dict[str, Any]:
     login = github.whoami(gh)
     said: dict[str, Any] = {"ok": False, "login": login, "repository": f"{target.account}/{target.repo}",
                             "exists": False, "empty": False, "private": False, "pages": None,
-                            "base": target.base, "needs": "", "detail": "", "warnings": []}
+                            "base": target.base, "needs": "", "detail": "", "warnings": [], "workflow": False}
     repo = github.repository(gh, target.account, target.repo)
     if repo is None:
         said.update(needs="repository", detail=f"There is no repository {target.account}/{target.repo} "
@@ -265,7 +298,8 @@ def _connection(target: GitHubTarget, gh: github.GitHub) -> dict[str, Any]:
         said.update(needs="pages", detail=f"Pages is off for {target.account}/{target.repo}.")
         return said
     keep_site(target, pages.url)
-    said.update(ok=True, pages=pages.said(), base=pages.url, warnings=pages_warnings(target, pages, repo.private))
+    said.update(ok=True, pages=pages.said(), base=pages.url, warnings=pages_warnings(target, pages, repo.private),
+                workflow=pages.build_type == "workflow")
     return said
 
 
@@ -275,7 +309,7 @@ def pages_warnings(target: GitHubTarget, pages: github.Pages, private: bool) -> 
         warnings.append(f"Pages serves the {pages.branch} branch, not {target.branch}: "
                         f"set Branch to {pages.branch}.")
     if pages.build_type == "workflow":
-        warnings.append("Pages here is built by a GitHub Actions workflow, which decides what goes live.")
+        warnings.append(site.WORKFLOW_NOTICE)
     if private:
         warnings.append("The repository is private, but its Pages site is public.")
     return warnings
@@ -352,3 +386,62 @@ def github_build(body: BuildIn) -> dict[str, Any]:
     except github.GitHubError as exc:
         raise HTTPException(status_code=502, detail=str(exc)) from exc
     return {"state": state.state, "detail": state.detail}
+
+
+def _site_press(target: GitHubTarget, gh: github.GitHub) -> github.Pages | dict[str, Any]:
+    """The Pages site of the repository, or the answer that says what is missing."""
+    repo = github.repository(gh, target.account, target.repo)
+    repository = f"{target.account}/{target.repo}"
+    if repo is None:
+        return {"ok": False, "needs": "repository",
+                "detail": f"There is no repository {repository} that this token can reach."}
+    pages = github.pages(gh, target.account, target.repo)
+    if pages is None:
+        return {"ok": False, "needs": "pages", "detail": f"Pages is off for {repository}."}
+    if pages.branch and pages.branch != target.branch:
+        raise HTTPException(status_code=409, detail=pages_warnings(target, pages, False)[0])
+    keep_site(target, pages.url)
+    return pages
+
+
+@router.post("/github/site")
+def update_github_site() -> dict[str, Any]:
+    """Update the site: rebuild its list, feed, sitemap, marked pages and home from the cards the
+    repository holds, in one commit, with no note published. Only files Azimut made are written;
+    with nothing to change, nothing is committed (``updated`` is false)."""
+    target = _needs_target()
+    try:
+        with github.client() as http:
+            gh = github.GitHub(target.token, http, patience=github.MAX_PATIENCE)
+            found = _site_press(target, gh)
+            if isinstance(found, dict):
+                return found
+            plan = sitesync.planner(gh, target.account, target.repo, site_for(target, found.url))
+            done = github.update_site(gh, target.account, target.repo, target.branch, found.root,
+                                      "Update the site", plan)
+    except github.GitHubError as exc:
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
+    assert done is not None
+    keep_categories(done.categories)
+    return {"ok": True, "updated": bool(done.root), "commit": done.commit if done.root else "",
+            "written": done.root, "warnings": done.warnings,
+            "categories": site.categories_read(config.load_settings().get("github_categories"))}
+
+
+@router.post("/github/categories")
+def read_github_categories() -> dict[str, Any]:
+    """Read the site for the categories it holds, in its cards and in the `section="…"` of its
+    marked pages, and keep them for the publish dialog to suggest. Reads only."""
+    target = _needs_target()
+    try:
+        with github.client() as http:
+            gh = github.GitHub(target.token, http)
+            found = _site_press(target, gh)
+            if isinstance(found, dict):
+                return found
+            plan = sitesync.planner(gh, target.account, target.repo, site_for(target, found.url))
+            read = github.read_site(gh, target.account, target.repo, target.branch, found.root, plan)
+    except github.GitHubError as exc:
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
+    keep_categories(read.categories)
+    return {"ok": True, "categories": site.categories_read(read.categories), "warnings": read.warnings}

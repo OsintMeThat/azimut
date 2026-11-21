@@ -2,13 +2,13 @@
   /**
    * The press that sets GitHub Pages up when something is missing, said beside it:
    * **Create the repository** while the repository is not there, **Turn on Pages**
-   * while Pages is off. Settings › Publishing shows it after Test connection, and the
-   * export dialog after a Publish that found it missing. Each reaches GitHub on its
+   * while Pages is off. Settings › Website shows it after Test connection and Update the site,
+   * and the export dialog after a Publish that found it missing. Each reaches GitHub on its
    * press only (`lib/githubPages.js`). When the token may not do it, the way on
    * github.com shows in its place (`lib/githubPagesSetup.js`).
    */
   import Icon from './Icon.svelte';
-  import { PUBLISHING_HELP as HELP } from '../lib/publishingHelp.js';
+  import { WEBSITE_HELP as HELP } from '../lib/websiteSetup.js';
   import { createRepository, turnOnPages } from '../lib/githubPages.js';
   import {
     CREATE_SAID, PAGES_BY_HAND, PAGES_ON_SAID, REPO_STEPS, newRepositoryLink, pagesSettingsLink,

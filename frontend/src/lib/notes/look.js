@@ -12,7 +12,10 @@
  * replaces the style's own running header or footer, written only once a slot is
  * filled, so a look that never used them reads and writes as it always did. `web`,
  * how the HTML page is laid out, is one too: the server keeps it only once set. So is
- * `counter`, the GoatCounter site a map page's web folder counts its readers on.
+ * `counter`, the GoatCounter site a map page's web folder counts its readers on. And what the
+ * note is on the analyst's site, `category`, `role` (a page, off the site's lists) and
+ * `list_image` (the picture of its line in the list), which the publish dialog chooses and the
+ * Look only carries, so that saving a look never drops them.
  *
  * The style is the profile: it says what the document carries after its text, the
  * sources list and how it is written, the five annexes and how strict the check is
@@ -403,6 +406,8 @@ function annexesOf(value) {
   for (const annex of ANNEXES) if (given[annex.id] === 'on' || given[annex.id] === 'off') kept[annex.id] = given[annex.id];
   return kept;
 }
+/** The longest a category's name is (`notelook.CATEGORY_MAX`). */
+const CATEGORY_MAX = 60;
 const HEX = /^#[0-9a-f]{6}$/;
 const DAY = /^\d{4}-\d{2}-\d{2}$/;
 
@@ -415,6 +420,9 @@ export function normaliseLook(look) {
   const header = bandOf(given.header);
   const footer = bandOf(given.footer);
   const counter = counterCode(given.counter) || '';
+  const category = String(given.category ?? '').split(/\s+/).filter(Boolean).join(' ').slice(0, CATEGORY_MAX);
+  const role = given.role === 'page' ? 'page' : '';
+  const listImage = /^[A-Za-z0-9_-]{1,64}$/.test(String(given.list_image ?? '')) ? String(given.list_image) : '';
   return {
     style: pick(given.style, STYLES, DEFAULT_LOOK.style),
     font: pick(given.font ?? '', FONTS, ''),
@@ -445,6 +453,9 @@ export function normaliseLook(look) {
     ...(header && { header }),
     ...(footer && { footer }),
     ...(counter && { counter }),
+    ...(category && { category }),
+    ...(role && { role }),
+    ...(listImage && { list_image: listImage }),
   };
 }
 
@@ -469,7 +480,9 @@ export function sectionsSet(look) {
 /** A look a template can carry: no picture and no day of a case. */
 export function templateLook(look) {
   const whole = normaliseLook(look);
-  return { ...whole, cover: { ...whole.cover, image: '', date: '' } };
+  const kept = { ...whole, cover: { ...whole.cover, image: '', date: '' } };
+  delete kept.list_image;
+  return kept;
 }
 
 /** The look a report made from the home starts with: a cover, then the contents. */

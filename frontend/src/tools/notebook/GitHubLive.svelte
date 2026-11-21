@@ -6,14 +6,16 @@
    * It asks after the commit's build for a bounded time (`watchBuild`, `lib/githubPages.js`)
    * and stops asking when the dialog closes. Past that time it says the page is
    * published and GitHub is still building it, which is no failure: the address works
-   * within minutes.
+   * within minutes. What the publish had to say of the site (`site.warnings`: a list left as it
+   * was, a file that is the analyst's) is listed under it.
    */
   import Icon from '../../components/Icon.svelte';
   import { copyText } from '../../lib/clipboard.js';
   import { watchBuild } from '../../lib/githubPages.js';
+  import { REPLACED_EDITED } from '../../lib/websiteSetup.js';
 
   let {
-    /** What Publish answered: `{ address, repository, commit, removed }`. */
+    /** What Publish answered: `{ address, repository, commit, removed, edited, site: { warnings }, told }`. */
     result,
     /** Stands in for `watchBuild` in tests. */
     watch = watchBuild,
@@ -35,6 +37,12 @@
     });
     return () => controller.abort();
   });
+
+  // what the site says to mind; a folder changed on GitHub is said here only when the press was not warned of it
+  const minded = $derived([
+    ...(result?.edited && !result?.told ? [REPLACED_EDITED] : []),
+    ...(Array.isArray(result?.site?.warnings) ? result.site.warnings : []),
+  ]);
 
   const removed = $derived(Number.isInteger(result?.removed) && result.removed > 0
     ? ` · ${result.removed} earlier file${result.removed === 1 ? '' : 's'} removed` : '');
@@ -61,6 +69,11 @@
     <button type="button" class="btn btn-sm" title="Copy the page's address, to share it on X"
       onclick={() => copyText(result.address, { said: 'Link copied' })}><Icon name="copy" size={13} /> Copy link</button>
   </div>
+  {#if minded.length}
+    <ul class="minded" aria-label="To mind">
+      {#each minded as warning, index (index)}<li><Icon name="alert" size={12} /> {warning}</li>{/each}
+    </ul>
+  {/if}
   <p class="quiet mono">{result.repository} · commit {String(result.commit ?? '').slice(0, 7)}{removed}</p>
 </section>
 
@@ -73,6 +86,9 @@
   .line a { color: var(--accent); font-weight: 600; }
   .quiet { margin: 0; color: var(--text-3); font-size: var(--fs-xs); overflow-wrap: anywhere; }
   .mono { font-family: var(--font-mono); }
+  .minded { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 3px; color: var(--warn); font-size: var(--fs-xs); }
+  .minded li { display: flex; align-items: flex-start; gap: 5px; overflow-wrap: anywhere; }
+  .minded :global(svg) { flex: none; margin-top: 2px; }
   .actions { display: flex; gap: 8px; margin-top: 4px; }
   .actions .btn { display: inline-flex; align-items: center; gap: 5px; text-decoration: none; }
   .spinner { flex: none; width: 13px; height: 13px; border-radius: 50%; border: 2px solid color-mix(in srgb, var(--accent) 25%, transparent);

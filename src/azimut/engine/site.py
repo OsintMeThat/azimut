@@ -1,0 +1,646 @@
+"""The analyst's website on GitHub Pages: its cards, its list, its feed and its sitemap.
+
+Every article Azimut publishes carries a card, `article.json`, in its folder. Each
+publish reads the cards of the whole site and writes what is made from them: the list
+(`articles.json`), the feed (`feed.xml`), the sitemap (`sitemap.xml`) and the lists
+between `<!-- azimut:articles … -->` markers in the pages that carry them. This is the
+pure half, which touches no file and no network: `engine/sitesync.py` gathers the
+repository's state and `engine/githubpages.py` commits the result in the one publish
+commit. The default home page is `engine/sitehome.py`.
+
+**Who owns what.** Azimut only ever writes a file it made; everything else in the
+repository is the analyst's.
+
+- An article folder is Azimut's when it holds Azimut's marker files (`githubpages.OURS`).
+- `articles.json` is Azimut's when its `format` is `azimut-site/1`.
+- `feed.xml` is Azimut's when its channel holds `<generator>Azimut</generator>`.
+- `sitemap.xml` is Azimut's when the comment `<!-- generator: Azimut -->` follows its
+  XML declaration.
+- The root `index.html` is Azimut's when it holds `<meta name="generator" content="Azimut
+  <version>">`. With none, Azimut writes its default home; with one that is not its own, it
+  never rewrites it and only fills its markers.
+- The content between `<!-- azimut:articles … -->` and `<!-- /azimut:articles -->` is
+  Azimut's, in the root `index.html` and in `<folder>/index.html` one level down for a folder
+  holding no card. Everything outside the markers is never touched.
+
+A file Azimut would write but does not own is left as it is, and the rest still happens.
+
+**The card** (format `azimut-article/1`): title, summary, date (`YYYY-MM-DD`), category,
+author, role (`article` or `page`), layout (`article`, `story` or `map`), image (relative to
+the folder), links (the folders of the site the page points to) and maps (written by hand
+for maps kept elsewhere: Azimut writes none). The folder holding the card, relative to the
+site root, is the article's address.
+
+A map page cited by an article shows as a link under that article, never as its own line; a
+map nothing cites keeps its own line so it is never lost. A page (`role: "page"`) is on no
+list: it is in `articles.json` under `pages`, and the default home's header links it.
+"""
+
+from __future__ import annotations
+
+import html
+import json
+import re
+from dataclasses import dataclass, field, replace
+from datetime import date, datetime, timezone
+from email.utils import format_datetime
+from typing import Any, Mapping
+from urllib.parse import urlsplit
+
+from .notelook import CATEGORY_MAX
+
+CARD = "article.json"
+CARD_FORMAT = "azimut-article/1"
+SITE_FORMAT = "azimut-site/1"
+ARTICLES = "articles.json"
+FEED = "feed.xml"
+SITEMAP = "sitemap.xml"
+HOME = "index.html"
+#: The folders a site holds that no card lives in.
+SKIP = frozenset({".git", "theme", "wp-content"})
+MARKER = re.compile(r"<!-- azimut:articles(?P<attrs>[^>]*?)-->.*?<!-- /azimut:articles -->", re.S)
+ATTR = re.compile(r'(\w+)="([^"]*)"')
+MONTHS = ("January", "February", "March", "April", "May", "June", "July", "August",
+          "September", "October", "November", "December")
+
+#: How many cards a site is read for, and how large one may be: past either, the list is
+#: left as it was rather than the publish failing.
+MAX_CARDS = 500
+MAX_CARD_BYTES = 64 * 1024
+#: How many marked pages one publish looks through, and how large one may be.
+MAX_PAGES = 60
+MAX_PAGE_BYTES = 2 * 1024 * 1024
+#: How many lines the feed carries.
+FEED_ITEMS = 30
+#: What a card's words are bounded to, so a hand-edited card cannot swell a page.
+MAX_TITLE = 300
+MAX_SUMMARY = 1000
+MAX_LINKS = 60
+MAX_MAPS = 60
+
+ARTICLE = "article"
+PAGE = "page"
+LAYOUTS = ("article", "story", "map")
+#: The page's own counting readers: GoatCounter's host under the analyst's site code, and the
+#: two hosts Cloudflare Web Analytics needs, which a page's policy lets in and no other.
+GOATCOUNTER_HOST = "https://{code}.goatcounter.com"
+CLOUDFLARE_SCRIPT_HOST = "https://static.cloudflareinsights.com"
+CLOUDFLARE_CONNECT_HOST = "https://cloudflareinsights.com"
+STATS = ("", "goatcounter", "cloudflare")
+COUNTER_CODE = re.compile(r"^[a-z0-9](?:[a-z0-9-]{0,48}[a-z0-9])?$")
+BEACON_TOKEN = re.compile(r"^[A-Za-z0-9_-]{8,64}$")
+AZIMUT_REPO = "https://github.com/OsintMeThat/azimut"
+
+# -- what the tool says about it (Settings › Website, HOW-TO-PUBLISH.md) ------------------------
+
+SITE_TITLE = "Website"
+SITE_INTRO = ("Publish your notes as a simple website on GitHub Pages: a home page and the list of your "
+              "articles, kept up to date each time you publish.")
+SITE_STAYS_YOURS = "The site stays yours to change, and Azimut only ever rewrites the files it made."
+SITE_OWN_TITLE = "Make it yours"
+#: Each way to make the site one's own: its lead, then what to do.
+SITE_OWN: tuple[tuple[str, str], ...] = (
+    ("Your own home page", "write your `index.html` and put `<!-- azimut:articles -->` "
+                           "`<!-- /azimut:articles -->` where the list goes."),
+    ("A page per category", 'the same markers with `section="Investigations"` list that category only.'),
+    ("Your own domain", "buy one, then point it to GitHub Pages "
+                        "([GitHub's guide](https://docs.github.com/en/pages/configuring-a-custom-domain-for-your-github-pages-site))."),
+    ("Your own scripts", "`articles.json` lists every article with its title, date, category and picture."),
+)
+LEGAL_SENTENCE = "Depending on your country, a website may need a legal notice."
+LEGAL_TITLE = "Legal notice"
+#: GitHub's address, as its privacy statement gives it (docs.github.com, read on 2026-11-21).
+LEGAL_HOST = "GitHub, Inc., 88 Colin P. Kelly Jr. St., San Francisco, CA 94107, United States"
+HAND_EDITED = "This folder was changed on GitHub since you published it: publishing replaces it."
+WORKFLOW_NOTICE = "Pages here is built by a GitHub Actions workflow: its build must copy Azimut's folders through to the site."
+TREE_TOO_LONG = ("The site holds too many files for Azimut to read: its home, list, feed and sitemap "
+                 "were left as they were.")
+TOO_MANY_CARDS = (f"The site holds more than {MAX_CARDS} cards: its home, list, feed and sitemap "
+                  "were left as they were.")
+
+
+def legal_notice() -> str:
+    """The starter text of the Legal notice page: the host named, the publisher's own lines
+    left for the analyst to fill in."""
+    return (f"## Publisher\n\nName:\n\nAddress:\n\nContact:\n\n## Host\n\n"
+            f"This website is hosted by GitHub Pages, a service of {LEGAL_HOST}.\n")
+
+
+# -- the site ------------------------------------------------------------------------------------
+
+
+@dataclass(frozen=True)
+class Placement:
+    """How a note is published to the site: the site, and what the publish dialog chose for
+    this note. ``category`` and ``role`` left as None are the note's own, kept in its look."""
+
+    site: "Site"
+    category: str | None = None
+    role: str | None = None
+
+
+@dataclass(frozen=True)
+class Site:
+    """The site as Settings › Website describes it, and the address it is served at."""
+
+    title: str
+    #: Where the site is served, with its closing slash (`githubpages.site_base`).
+    address: str
+    tagline: str = ""
+    #: Who an article is by when its card says nobody else: the report name, else the title.
+    author: str = ""
+    #: Whether the default home ends on "Made with Azimut" (`site_credit_azimut`).
+    credit: bool = True
+    stats: str = ""
+    code: str = ""
+    token: str = ""
+    #: The analyst's logo (`signature.png`), or None for none.
+    logo: bytes | None = field(default=None, repr=False)
+
+    @property
+    def prefix(self) -> str:
+        """The address's path with no closing slash: "" on a domain's root, else `/articles`."""
+        return urlsplit(self.address).path.rstrip("/")
+
+    @property
+    def counter(self) -> str:
+        """The GoatCounter site code that counts the pages, or "" for none."""
+        return self.code if self.stats == "goatcounter" else ""
+
+    @property
+    def beacon(self) -> str:
+        """The Cloudflare Web Analytics token that counts the pages, or "" for none."""
+        return self.token if self.stats == "cloudflare" else ""
+
+
+def one_line(value: Any, limit: int) -> str:
+    return " ".join(value.split())[:limit] if isinstance(value, str) else ""
+
+
+def from_settings(settings: Mapping[str, Any], *, address: str, account: str, logo: bytes | None = None) -> Site:
+    """The site as the saved settings say it, each part read again as Settings checks it: a
+    count whose code or token does not read as one counts nobody."""
+    report = one_line(settings.get("report_name"), 80)
+    title = one_line(settings.get("site_title"), 120) or report or account
+    stats = settings.get("site_stats") if settings.get("site_stats") in STATS else ""
+    code = str(settings.get("site_stats_code") or "").strip().lower()
+    token = str(settings.get("site_stats_token") or "").strip()
+    if stats == "goatcounter" and not COUNTER_CODE.match(code):
+        stats = ""
+    if stats == "cloudflare" and not BEACON_TOKEN.match(token):
+        stats = ""
+    return Site(title=title, address=address, tagline=one_line(settings.get("site_tagline"), 200),
+                author=report or title, credit=settings.get("site_credit_azimut") is not False,
+                stats=str(stats), code=code if COUNTER_CODE.match(code) else "",
+                token=token if BEACON_TOKEN.match(token) else "", logo=logo)
+
+
+#: The settings of Settings › Website that are read and written as preferences.
+PREF_KEYS = ("site_title", "site_tagline", "site_credit_azimut", "site_stats", "site_stats_code", "site_stats_token")
+
+
+def prefs_of(settings: Mapping[str, Any]) -> dict[str, Any]:
+    """The website's settings as Settings shows them: each bounded, and a part that does not read
+    as one shown empty. What is saved is not changed, so a count named but missing its code shows so."""
+    stats, code, token = settings.get("site_stats"), str(settings.get("site_stats_code") or ""), \
+        str(settings.get("site_stats_token") or "")
+    return {
+        "site_title": one_line(settings.get("site_title"), 120),
+        "site_tagline": one_line(settings.get("site_tagline"), 200),
+        "site_credit_azimut": settings.get("site_credit_azimut") is not False,
+        "site_stats": stats if stats in STATS else "",
+        "site_stats_code": code.strip().lower() if COUNTER_CODE.match(code.strip().lower()) else "",
+        "site_stats_token": token.strip() if BEACON_TOKEN.match(token.strip()) else "",
+    }
+
+
+def categories_read(value: Any) -> list[str]:
+    """The categories a site was last read to hold, as saved: lines of a few words, no two alike."""
+    if not isinstance(value, list):
+        return []
+    return sorted({one for one in (one_line(item, CATEGORY_MAX) for item in value[:200]) if one})[:100]
+
+
+def cloudflare_tag(token: str) -> str:
+    """The script Cloudflare Web Analytics asks for, which counts a page's readers with no cookie."""
+    return (f"<script type='module' src='{CLOUDFLARE_SCRIPT_HOST}/beacon.min.js' "
+            f"data-cf-beacon='{{\"token\": \"{token}\"}}'></script>")
+
+
+def stats_sources(counter: str = "", beacon: str = "") -> dict[str, tuple[str, ...]]:
+    """What a counting page adds to its policy: the one host of each count it makes, and nothing else."""
+    extra: dict[str, tuple[str, ...]] = {}
+    if counter:
+        host = GOATCOUNTER_HOST.format(code=counter)
+        extra["img-src"] = (host,)
+        extra["connect-src"] = (host,)
+    if beacon:
+        extra["script-src"] = (CLOUDFLARE_SCRIPT_HOST,)
+        extra["connect-src"] = (*extra.get("connect-src", ()), CLOUDFLARE_CONNECT_HOST)
+    return extra
+
+
+# -- the back-to-site bar --------------------------------------------------------------------------
+
+BAR_STYLE = """<style>
+.az-site-bar{position:sticky;top:0;z-index:50;display:flex;align-items:center;gap:.6rem;padding:.45rem 1rem;
+background:rgba(255,255,255,.94);backdrop-filter:blur(6px);border-bottom:1px solid #dedad3;
+font:500 .9rem/1 az-head,system-ui,-apple-system,"Segoe UI",Roboto,Arial,sans-serif}
+.az-site-bar a{color:#1f2023;text-decoration:none;display:flex;align-items:center;gap:.5rem}
+.az-site-bar img{width:1.5rem;height:1.5rem;border-radius:50%}
+.az-site-bar .back{margin-left:auto;color:#62676f}
+.az-site-bar a:hover{color:#1f4e79}
+.az-site-crumb{display:inline-flex;align-items:center;gap:.4rem;margin-bottom:.35rem;color:inherit;opacity:.75;text-decoration:none;
+font:500 .8rem/1 az-head,system-ui,-apple-system,"Segoe UI",Roboto,Arial,sans-serif}
+.az-site-crumb:hover{opacity:1}
+.az-site-crumb img{width:1.1rem;height:1.1rem;border-radius:50%}
+.az-site-crumb::before{content:"← "}
+</style>"""
+
+
+@dataclass(frozen=True)
+class Frame:
+    """How a page published to the site is framed (`notes_html.Folder.frame`): the way back to
+    the site, and the counts every page of it makes. A web folder exported by hand has none."""
+
+    title: str
+    #: Where the site's home is from the page, which is always one folder down.
+    home: str = "../"
+    logo: bytes | None = field(default=None, repr=False)
+    counter: str = ""
+    beacon: str = ""
+
+
+def frame_of(site: Site) -> Frame:
+    return Frame(title=site.title, logo=site.logo, counter=site.counter, beacon=site.beacon)
+
+
+def bar(frame: Frame, logo: str) -> str:
+    """The bar above an article: the site's logo and title linking home, and All articles
+    on the right. ``logo`` is the address of the logo's file in the page's folder, "" for none."""
+    home = html.escape(frame.home)
+    picture = f'<img src="{html.escape(logo)}" alt="">' if logo else ""
+    return (f'{BAR_STYLE}<nav class="az-site-bar" aria-label="Site"><a href="{home}">{picture}'
+            f'{html.escape(frame.title)}</a><a class="back" href="{home}">All articles</a></nav>')
+
+
+def crumb(frame: Frame, logo: str) -> str:
+    """The way home on a map page, which fills the screen: a small link inside the map's own
+    header, never a bar above it."""
+    picture = f'<img src="{html.escape(logo)}" alt="">' if logo else ""
+    return (f'{BAR_STYLE}<a class="az-site-crumb" href="{html.escape(frame.home)}">{picture}'
+            f'{html.escape(frame.title)}</a>')
+
+
+# -- ownership --------------------------------------------------------------------------------------
+
+_GENERATOR_HOME = re.compile(r'<meta\s+name="generator"\s+content="Azimut \d[^"]*"\s*/?>')
+_GENERATOR_SITEMAP = re.compile(r"\A\s*<\?xml[^>]*\?>\s*<!-- generator: Azimut -->")
+
+
+def owns_articles(text: str) -> bool:
+    try:
+        data = json.loads(text)
+    except ValueError:
+        return False
+    return isinstance(data, dict) and data.get("format") == SITE_FORMAT
+
+
+def owns_feed(text: str) -> bool:
+    return "<generator>Azimut</generator>" in text
+
+
+def owns_sitemap(text: str) -> bool:
+    return _GENERATOR_SITEMAP.match(text) is not None
+
+
+def owns_home(text: str) -> bool:
+    """Whether the root page is the default home Azimut wrote: its generator carries a version,
+    which an article page's does not, so a page of the analyst's made by Azimut is never taken."""
+    return _GENERATOR_HOME.search(text) is not None
+
+
+# -- the card ------------------------------------------------------------------------------------
+
+
+@dataclass(frozen=True)
+class Card:
+    """The card Azimut writes into a published folder."""
+
+    title: str
+    summary: str
+    date: str
+    category: str = ""
+    author: str = ""
+    role: str = ARTICLE
+    layout: str = "article"
+    image: str = ""
+    links: tuple[str, ...] = ()
+
+    def dated(self, day: str) -> "Card":
+        return replace(self, date=day)
+
+    def as_json(self) -> bytes:
+        card = {"format": CARD_FORMAT, "title": self.title, "summary": self.summary, "date": self.date,
+                "category": self.category, "author": self.author, "role": self.role, "layout": self.layout,
+                "image": self.image, "links": list(self.links), "maps": []}
+        return (json.dumps(card, indent=1, ensure_ascii=False) + "\n").encode("utf-8")
+
+
+def card_date(data: bytes) -> str:
+    """The date a card already in the repository carries, "" when it holds none that reads."""
+    try:
+        card = json.loads(data)
+        day = card.get("date") if isinstance(card, dict) else None
+        return date.fromisoformat(day).isoformat() if isinstance(day, str) and len(day) == 10 else ""
+    except ValueError:
+        return ""
+
+
+def links_of(page: str, site: Site, own: str) -> tuple[str, ...]:
+    """The folders of the site a page links to, read from its markup: an `<a>` to the site's own
+    address (a folder under it) or to the folder above (`../folder/`), as the page that is one
+    folder down writes them. The page's own folder and the way home are not among them."""
+    found: dict[str, None] = {}
+    for href in re.findall(r'<a\b[^>]*?\shref="([^"]*)"', page):
+        href = html.unescape(href)
+        if href.startswith(site.address):
+            rest = href[len(site.address):]
+        elif href.startswith("../"):
+            rest = href[3:]
+        else:
+            continue
+        rest = re.split(r"[?#]", rest, maxsplit=1)[0].strip("/").removesuffix("index.html").strip("/")
+        if rest and rest != own and ".." not in rest.split("/") and len(rest) <= 200:
+            found[rest] = None
+    return tuple(found)[:MAX_LINKS]
+
+
+def day_label(day: str) -> str:
+    d = date.fromisoformat(day)
+    return f"{d.day} {MONTHS[d.month - 1]} {d.year}"
+
+
+def slug(text: str) -> str:
+    return re.sub(r"[^a-z0-9]+", "-", text.lower().replace("&", "")).strip("-")
+
+
+def _address(value: Any) -> str:
+    """An address a card may name: on the site (`/…`) or `https://`; never a scheme that runs."""
+    text = value.strip() if isinstance(value, str) else ""
+    if len(text) > 400 or any(char in text for char in "\"'<>\\ \r\n\t"):
+        return ""
+    return text if (text.startswith("/") and not text.startswith("//")) or text.startswith("https://") else ""
+
+
+def read_card(folder: str, data: bytes) -> dict[str, Any] | None:
+    """One card as a line of the list is made from it, or None when it is not a card Azimut
+    reads: another format, no title or day, past the bounds. ``folder`` is where it was found,
+    relative to the site root."""
+    if len(data) > MAX_CARD_BYTES:
+        return None
+    try:
+        card = json.loads(data)
+    except ValueError:
+        return None
+    if not isinstance(card, dict) or card.get("format") != CARD_FORMAT:
+        return None
+    title = one_line(card.get("title"), MAX_TITLE)
+    day = card.get("date")
+    try:
+        if not title or not isinstance(day, str) or len(day) != 10:
+            return None
+        date.fromisoformat(day)
+    except ValueError:
+        return None
+    given = card.get("image")
+    image = given.strip() if isinstance(given, str) else ""
+    if image and not image.startswith(("/", "https://")):
+        image = f"/{folder}/{image}"
+    layout = card.get("layout")
+    links: list[Any] = card["links"] if isinstance(card.get("links"), list) else []
+    maps: list[Any] = card["maps"] if isinstance(card.get("maps"), list) else []
+    kept_maps = []
+    for one in maps[:MAX_MAPS]:
+        where = _address(one.get("address")) if isinstance(one, dict) else ""
+        words = one_line(one.get("title"), MAX_TITLE) if isinstance(one, dict) else ""
+        if where and words:
+            kept_maps.append({"title": words, "address": where})
+    return {
+        "folder": folder,
+        "address": f"/{folder}/",
+        "title": title,
+        "summary": one_line(card.get("summary"), MAX_SUMMARY),
+        "date": day,
+        "date_label": day_label(day),
+        "category": one_line(card.get("category"), 80),
+        "author": one_line(card.get("author"), 120),
+        "layout": layout if layout in LAYOUTS else "article",
+        "image": _address(image),
+        "role": PAGE if card.get("role") == PAGE else ARTICLE,
+        "links": [str(one).strip("/")[:200] for one in links[:MAX_LINKS] if isinstance(one, str)],
+        "maps": kept_maps,
+    }
+
+
+def line_of(card: Card, folder: str) -> dict[str, Any]:
+    """The line a new card is, as `read_card` reads it back from the file it will be."""
+    made = read_card(folder, card.as_json())
+    assert made is not None
+    return made
+
+
+# -- the list --------------------------------------------------------------------------------------
+
+
+def map_view(cards: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Every map page, newest first, each with the article that cites it (if one does)."""
+    citing = {link: c for c in cards if c["role"] != PAGE and c["layout"] != "map" for link in c["links"]}
+    out = []
+    for card in cards:
+        if card["layout"] != "map" or card["role"] == PAGE:
+            continue
+        entry = {k: v for k, v in card.items() if k not in ("folder", "links", "maps", "role")}
+        by = citing.get(card["folder"])
+        entry["article"] = {"title": by["title"], "address": by["address"]} if by else None
+        out.append(entry)
+    out.sort(key=lambda e: (e["date"], e["title"]), reverse=True)
+    return out
+
+
+def listing(cards: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """The lines of the list: maps folded under the articles citing them, pages left out."""
+    shown = [c for c in cards if c["role"] != PAGE]
+    maps = {c["folder"]: c for c in shown if c["layout"] == "map"}
+    cited: set[str] = set()
+    lines = []
+    for card in shown:
+        if card["layout"] == "map":
+            continue
+        entry = {k: v for k, v in card.items() if k not in ("folder", "links", "role")}
+        entry["maps"] = list(card["maps"])
+        for link in card["links"]:
+            if link in maps:
+                cited.add(link)
+                entry["maps"].append({"title": maps[link]["title"], "address": maps[link]["address"]})
+        lines.append(entry)
+    for folder, card in maps.items():
+        if folder not in cited:
+            lines.append({k: v for k, v in card.items() if k not in ("folder", "links", "role")})
+    lines.sort(key=lambda e: (e["date"], e["title"]), reverse=True)
+    return lines
+
+
+def pages_of(cards: list[dict[str, Any]]) -> list[dict[str, str]]:
+    """The pages, which no list shows: their title and address, by title."""
+    found = [{"title": c["title"], "address": c["address"]} for c in cards if c["role"] == PAGE]
+    return sorted(found, key=lambda p: (p["title"].casefold(), p["address"]))
+
+
+def categories_of(cards: list[dict[str, Any]]) -> list[str]:
+    return sorted({c["category"] for c in cards if c["category"]})
+
+
+def _at(prefix: str, address: str) -> str:
+    """An address on the site as a page of it links it: under the site's own path, which a
+    domain's root has none of."""
+    return f"{prefix}{address}" if address.startswith("/") else address
+
+
+def render_maps(maps: list[dict[str, Any]], limit: int = 0, prefix: str = "") -> str:
+    chosen = maps[:limit] if limit else maps
+    if not chosen:
+        return '<p class="az-empty">No maps yet.</p>'
+    e = html.escape
+    out = ['<ol class="az-list az-maps">']
+    for m in chosen:
+        home = e(_at(prefix, m["address"]))
+        out.append(f'<li class="az-item is-map" data-category="{slug(m["category"])}">')
+        if m["image"]:
+            out.append(f'<a class="az-cover" href="{home}" tabindex="-1" aria-hidden="true">'
+                       f'<img src="{e(_at(prefix, m["image"]))}" alt="" loading="lazy" decoding="async"></a>')
+        if m["category"]:
+            out.append(f'<span class="az-category">{e(m["category"])}</span>')
+        out.append(f'<h2 class="az-title"><a href="{home}">{e(m["title"])}</a></h2>')
+        out.append(f'<p class="az-meta"><time datetime="{m["date"]}">{m["date_label"]}</time></p>')
+        if m["summary"]:
+            out.append(f'<p class="az-summary">{e(m["summary"])}</p>')
+        links = [f'<a class="az-more" href="{home}">Open the map →</a>']
+        if m["article"]:
+            links.append(f'<a class="az-from" href="{e(_at(prefix, m["article"]["address"]))}">'
+                         f'{e(m["article"]["title"])}</a>')
+        out.append(f'<p class="az-links">{"".join(links)}</p>')
+        out.append("</li>")
+    out.append("</ol>")
+    return "\n".join(out)
+
+
+def render(lines: list[dict[str, Any]], site_title: str, section: str = "", limit: int = 0, prefix: str = "") -> str:
+    chosen = [e for e in lines if not section or e["category"] == section]
+    if limit:
+        chosen = chosen[:limit]
+    if not chosen:
+        return '<p class="az-empty">No articles yet.</p>'
+    e = html.escape
+    out = ['<ol class="az-list">']
+    for a in chosen:
+        kind = " is-map" if a["layout"] == "map" else ""
+        home = e(_at(prefix, a["address"]))
+        out.append(f'<li class="az-item{kind}" data-category="{slug(a["category"])}">')
+        if a["image"]:
+            out.append(f'<a class="az-cover" href="{home}" tabindex="-1" aria-hidden="true">'
+                       f'<img src="{e(_at(prefix, a["image"]))}" alt="" loading="lazy" decoding="async"></a>')
+        if a["category"]:
+            out.append(f'<span class="az-category">{e(a["category"])}</span>')
+        out.append(f'<h2 class="az-title"><a href="{home}">{e(a["title"])}</a></h2>')
+        by = f' · {e(a["author"])}' if a["author"] and a["author"] != site_title else ""
+        out.append(f'<p class="az-meta"><time datetime="{a["date"]}">{a["date_label"]}</time>{by}</p>')
+        if a["summary"]:
+            out.append(f'<p class="az-summary">{e(a["summary"])}</p>')
+        links = [f'<a class="az-more" href="{home}">Continue reading →</a>']
+        links += [f'<a class="az-map" href="{e(_at(prefix, m["address"]))}">{e(m["title"])}</a>' for m in a["maps"]]
+        out.append(f'<p class="az-links">{"".join(links)}</p>')
+        out.append("</li>")
+    out.append("</ol>")
+    return "\n".join(out)
+
+
+def sections_of(text: str) -> list[str]:
+    """The categories a page's markers ask for with `section="…"`."""
+    found = []
+    for marker in MARKER.finditer(text):
+        attrs = {k: html.unescape(v) for k, v in ATTR.findall(marker.group("attrs"))}
+        if attrs.get("section"):
+            found.append(attrs["section"])
+    return found
+
+
+def fill(text: str, lines: list[dict[str, Any]], maps: list[dict[str, Any]], site_title: str, prefix: str = "") -> str:
+    """The page with every marked list filled; the page as it was when it has no marker."""
+
+    def one(m: re.Match[str]) -> str:
+        # The page holds the attributes as HTML ("Methods &amp; Tools"); the cards hold plain text.
+        attrs = {k: html.unescape(v) for k, v in ATTR.findall(m.group("attrs"))}
+        try:
+            limit = int(attrs.get("limit", "0") or 0)
+        except ValueError:
+            limit = 0
+        if attrs.get("layout") == "map":
+            body = render_maps(maps, limit, prefix)
+        else:
+            body = render(lines, site_title, attrs.get("section", ""), limit, prefix)
+        return f"<!-- azimut:articles{m.group('attrs')}-->\n{body}\n<!-- /azimut:articles -->"
+
+    return MARKER.sub(one, text)
+
+
+# -- the feed, the sitemap, the list as a file -------------------------------------------------
+
+
+def feed(lines: list[dict[str, Any]], site: Site) -> str:
+    base = site.address.rstrip("/")
+    e = html.escape
+    items = []
+    for a in lines[:FEED_ITEMS]:
+        link = a["address"] if a["address"].startswith("http") else base + a["address"]
+        when = datetime.fromisoformat(a["date"]).replace(hour=12, tzinfo=timezone.utc)
+        cat = f"<category>{e(a['category'])}</category>" if a["category"] else ""
+        items.append(f"<item><title>{e(a['title'])}</title><link>{e(link)}</link>"
+                     f'<guid isPermaLink="true">{e(link)}</guid><pubDate>{format_datetime(when)}</pubDate>'
+                     f"{cat}<description>{e(a['summary'])}</description></item>")
+    return ('<?xml version="1.0" encoding="utf-8"?>\n'
+            '<rss version="2.0" xmlns:atom="http://www.w3.org/2005/Atom"><channel>'
+            f"<title>{e(site.title)}</title><link>{e(site.address)}</link>"
+            f"<description>{e(site.tagline or site.title)}</description><language>en</language>"
+            "<generator>Azimut</generator>"
+            f'<atom:link href="{e(base)}/feed.xml" rel="self" type="application/rss+xml"/>'
+            + "".join(items) + "</channel></rss>\n")
+
+
+def sitemap(lines: list[dict[str, Any]], maps: list[dict[str, Any]], pages: list[str], site: Site) -> str:
+    """The sitemap: ``pages`` are paths on the site (the home, the marked pages, the pages),
+    then the articles and the maps."""
+    base = site.address.rstrip("/")
+    urls = [base + p for p in pages] + [base + a["address"] for a in [*lines, *maps] if a["address"].startswith("/")]
+    body = "".join(f"<url><loc>{html.escape(u)}</loc></url>" for u in dict.fromkeys(urls))
+    return ('<?xml version="1.0" encoding="utf-8"?>\n<!-- generator: Azimut -->\n'
+            f'<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">{body}</urlset>\n')
+
+
+def sitemap_paths(text: str, site: Site) -> list[str]:
+    """The paths on the site an earlier sitemap listed, in its order."""
+    base = site.address.rstrip("/")
+    found = []
+    for loc in re.findall(r"<loc>(.*?)</loc>", text):
+        url = html.unescape(loc)
+        if url.startswith(base + "/"):
+            found.append(url[len(base):])
+    return found
+
+
+def articles_json(lines: list[dict[str, Any]], maps: list[dict[str, Any]], pages: list[dict[str, str]],
+                  site: Site) -> str:
+    """The list as a file, for the analyst's own scripts: every address is on the site, from its root."""
+    payload = {"format": SITE_FORMAT, "site": {"title": site.title, "address": site.address},
+               "articles": lines, "maps": maps, "pages": pages}
+    return json.dumps(payload, indent=1, ensure_ascii=False) + "\n"

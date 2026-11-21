@@ -203,6 +203,8 @@ proof for publication.
 | ✅ **Note to Post** | To Post sends a note's public edition, or the passage selected, to Post as the pieces of a Free post thread; internal passages never leave, and what stays out is said once. |
 | ✅ **HTML report** | Writes a note as one self-contained page readable offline beside the PDF (a before/after swipe, playable clips, zoomable pictures, a citation's source on hover, verify links, the edition's hash), laid out as an article or as a story of held pictures. |
 | ✅ **Report on the web** | Writes a note as a folder ready to host, with its link card and the GitHub Pages steps, publishes it to the analyst's own GitHub Pages in one press, or sends it to WordPress as a draft. |
+| ✅ **Your website** | Every publish to GitHub Pages also keeps the analyst's site: a card and a list picture with each article, then its list, feed and sitemap, the lists between markers in their own pages (a default home when they have none), pages kept off the lists, a way back to the site on each page, a warning when a folder was changed on GitHub since, and readers counted on GoatCounter or Cloudflare when asked; only files Azimut made are ever written. |
+| ✅ **Website settings** | Sets the site in one tab (title, line and credit, GitHub Pages and WordPress, how readers are counted, Update the site, the Legal notice starter), and the publish dialog adds a category, Article or Page and a list picture. |
 | ✅ **Maps in reports** | Puts the case's layers, a Map plate or a period's proofs in a note as a map read day by day, its marks opening their cards: offline in the file, live over OpenFreeMap once hosted, a picture in the PDF; set from its card (base, Sentinel-2 or Esri imagery streamed live, layers, frame, timeline, steps, cards) and drawn on at any zoom, from an area to highlight to a map started from nothing. |
 | ✅ **Web maps** | Makes a note that is the analyst's own layers on a page of their own, from Notebook › New or a layer's row, drawn and carded as the app's map draws them, with a layer switcher, a search, the timeline and each view in its address, published as a web folder or to GitHub Pages and counting its readers on the analyst's own GoatCounter when asked. |
 | ✅ **Charts and infographics** | Draws a note's table as one of fifteen kinds of chart picked by its picture, a wall of the case's own pictures among them, in the case's colours and saying "at least" where a count is a floor, and lays charts, a map and key figures out as an infographic page or one picture, read from one of the case's sheets. |
@@ -470,7 +472,7 @@ stops making sense.
   outside the workspace, 0600 and holding a path; deleting the copy a move set
   aside acts on this process's own memory, never on a path from the request.
   Sending a note to WordPress is the one press that writes to a site outside: it
-  reaches only the address set in Settings › Publishing, https or http on this machine,
+  reaches only the address set in Settings › Website, https or http on this machine,
   checked when typed and again when read, with the analyst's application password by
   Basic auth, timeouts, no redirect followed, uploads bounded, and only ever a draft;
   Test connection and Send are its only calls, never one on a read or at startup. The
@@ -482,9 +484,17 @@ stops making sense.
   https with the API version pinned, timeouts, answers read up to a bound and a redirect
   followed only while it stays there; the token rides in the Authorization header, never
   in an address, a log or an answer to the browser. Its calls are Test connection,
-  Create the repository, Turn on Pages, Publish (the folder's files as blobs, two trees,
-  one commit, a fast-forward of the branch), the bounded watch of that build and an
-  edition's Check, each on a press, never on a read or at startup. Names, the short name
+  Create the repository, Turn on Pages, Publish (the folder's files and the site's own as
+  blobs, trees, one commit, a fast-forward of the branch), Update the site (the same
+  without a note), Read the categories, the check before a press that a folder was not
+  changed on GitHub since, the bounded watch of that build and an edition's Check, each on a
+  press, never on a read or at startup. Keeping the site reads its tree once and each card
+  and page to fill by blob id, bounded (500 cards of 64 KB, 60 pages of 2 MB; past a bound,
+  or in a tree GitHub cuts short, the list is left as it was, said, and the publish goes
+  through) and remembered by blob id; Azimut writes only files it made (its folders, a
+  `articles.json`, `feed.xml` and `sitemap.xml` that carry its marks, a root page that
+  carries its generator with a version, and the content between `azimut:articles` markers)
+  and leaves every other file as it is. Names, the short name
   and every path are checked at the edge, a folder Azimut did not make is never
   replaced, and the folder is bounded in files and weight before anything is sent. The
   token is a fine-grained one the analyst limits to the one repository (Contents and
@@ -632,7 +642,16 @@ stops making sense.
   its web folder's `img-src` and `connect-src`, for its own small script (`reader.count.js`)
   to count the visit with GoatCounter's pixel, no cookie, and read the count back; the
   readers' browsers reach it, never Azimut, the single HTML file never holds it, and a
-  page with no code set has neither the host nor the script. A map's base
+  page with no code set has neither the host nor the script. A site that counts its readers
+  (Settings › Website) carries the same on every page it publishes and on its default home,
+  the site's code serving where the page names none. Accepted risk (owner's choice,
+  2026-11-21): Cloudflare Web Analytics, a third-party script, opt-in and cookieless, is
+  loaded by every page of such a site before `</body>` from
+  `https://static.cloudflareinsights.com/beacon.min.js`; the page's policy then lets in
+  exactly `https://static.cloudflareinsights.com` (script) and `https://cloudflareinsights.com`
+  (connect) and nothing else, the readers' browsers reach them and Azimut never does, and
+  with the count off a page has neither host nor script. Its token is printed in every page,
+  so it is no secret and travels in the settings backup. A map's base
   other than its imagery (a street, topographic or dark map) is filed by Azimut from
   OpenStreetMap or OpenTopoMap on the press that picks it, as a capture is, and its page
   fetches none. Accepted risk (owner's choice, 2026-11-18): a

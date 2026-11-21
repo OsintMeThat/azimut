@@ -36,6 +36,7 @@ from ..engine import (
     reveal,
     scrapers,
     sentinel,
+    site as site_engine,
     tiles,
     updates,
     workspacemove,
@@ -50,6 +51,12 @@ SIGNATURE_B64_MAX_CHARS = 4 * (config.SIGNATURE_MAX_BYTES // 3 + 1) + 1024
 REPORT_SIGNATURE_B64_MAX_CHARS = 4 * (config.REPORT_SIGNATURE_MAX_BYTES // 3 + 1) + 1024
 #: Who signs a report: the name, the role and the organisation, one line each.
 REPORT_TEXT_MAX = 80
+#: The analyst's website: how long its title and the line under it may be, and what a GoatCounter
+#: site code and a Cloudflare Web Analytics token look like ("" for none).
+SITE_TITLE_MAX = 120
+SITE_TAGLINE_MAX = 200
+SITE_CODE = r"^([a-z0-9](?:[a-z0-9-]{0,48}[a-z0-9])?)?$"
+SITE_TOKEN = r"^([A-Za-z0-9_-]{8,64})?$"
 
 router = APIRouter(prefix="/api", tags=["settings"])
 
@@ -189,6 +196,16 @@ class PrefsIn(BaseModel):
     # the analyst's own site, linked from a web map's header; "" takes it away
     report_site: str | None = Field(default=None, max_length=REPORT_TEXT_MAX)
     report_credit_azimut: bool | None = None  # a published document ends on "Made with Azimut"
+    # the analyst's website (Settings › Website, engine/site.py): its title ("" reads the report
+    # name, else the GitHub account), the line under it, whether its home ends on "Made with
+    # Azimut", and how its readers are counted: "" nobody, "goatcounter" with the site's code, or
+    # "cloudflare" with its public token
+    site_title: str | None = Field(default=None, max_length=SITE_TITLE_MAX)
+    site_tagline: str | None = Field(default=None, max_length=SITE_TAGLINE_MAX)
+    site_credit_azimut: bool | None = None
+    site_stats: Literal["", "goatcounter", "cloudflare"] | None = None
+    site_stats_code: str | None = Field(default=None, pattern=SITE_CODE)
+    site_stats_token: str | None = Field(default=None, pattern=SITE_TOKEN)
     # what each note style carries by default, the whole table as Settings shows it;
     # only what differs from Azimut's own is kept, and {} is Azimut's own throughout
     note_styles: dict[notelook.Style, notelook.StyleChoices] | None = None
@@ -209,10 +226,20 @@ class PrefsIn(BaseModel):
     # where each kind of export lands (engine/exportdir.py); "" = the case folder
     export_dirs: dict[str, str] | None = None
 
-    @field_validator(*REPORT_KEYS, mode="before")
+    @field_validator(*REPORT_KEYS, "site_title", "site_tagline", mode="before")
     @classmethod
     def report_one_line(cls, value: Any) -> Any:
         return _one_line(value)
+
+    @field_validator("site_stats_code", mode="before")
+    @classmethod
+    def counter_code(cls, value: Any) -> Any:
+        return value.strip().lower() if isinstance(value, str) else value
+
+    @field_validator("site_stats_token", mode="before")
+    @classmethod
+    def beacon_token(cls, value: Any) -> Any:
+        return value.strip() if isinstance(value, str) else value
 
 
 def _detect_view(saved: Any) -> dict[str, Any]:
@@ -274,6 +301,7 @@ def _prefs(settings: dict[str, Any]) -> dict[str, Any]:
         **{key: _report_text(settings, key) for key in REPORT_KEYS},
         "report_site": notefill.site_of(settings.get("report_site")),
         "report_credit_azimut": settings.get("report_credit_azimut") is True,
+        **site_engine.prefs_of(settings),
         # what each style carries, Settings' changes over Azimut's own, and Azimut's own beside it
         "note_styles": {style: profile.as_json() for style, profile in
                         notelook.styles_table(settings.get(notelook.SETTINGS_KEY)).items()},
@@ -470,6 +498,9 @@ def _apply_prefs(settings: dict[str, Any], body: PrefsIn) -> None:
         settings["report_site"] = _report_site(body.report_site)
     if body.report_credit_azimut is not None:
         settings["report_credit_azimut"] = body.report_credit_azimut
+    for key in site_engine.PREF_KEYS:
+        if getattr(body, key) is not None:
+            settings[key] = getattr(body, key)
     if body.note_styles is not None:
         given = {style: choices.model_dump(exclude_none=True) for style, choices in body.note_styles.items()}
         settings[notelook.SETTINGS_KEY] = notelook.saved_styles(given)
@@ -934,6 +965,15 @@ class ImportedSettings(BaseModel):
     report_organisation: str = Field(default="", max_length=REPORT_TEXT_MAX)
     report_site: str = Field(default="", max_length=REPORT_TEXT_MAX)
     report_credit_azimut: bool = False
+    # the analyst's website: each part read as Settings reads it, so one this build cannot read is
+    # none rather than a refused backup
+    site_title: str = Field(default="", max_length=SITE_TITLE_MAX)
+    site_tagline: str = Field(default="", max_length=SITE_TAGLINE_MAX)
+    site_credit_azimut: bool = True
+    site_stats: str = ""
+    site_stats_code: str = Field(default="", max_length=64)
+    site_stats_token: str = Field(default="", max_length=128)
+    github_categories: list[str] = Field(default_factory=list, max_length=100)
     # what each note style carries: only what differs from Azimut's own, read the way
     # the app reads its own (a value this build cannot read keeps Azimut's)
     note_styles: dict[str, Any] = Field(default_factory=dict, max_length=16)
@@ -1004,6 +1044,33 @@ class ImportedSettings(BaseModel):
             return notes_web.address(value)
         except notes_web.NotesWebError:
             return ""
+
+    @field_validator("github_categories", mode="before")
+    @classmethod
+    def readable_github_categories(cls, value: Any) -> Any:
+        return site_engine.categories_read(value)
+
+    @field_validator("site_title", "site_tagline", mode="before")
+    @classmethod
+    def readable_site_line(cls, value: Any) -> Any:
+        return _one_line(value)
+
+    @field_validator("site_stats")
+    @classmethod
+    def readable_site_stats(cls, value: str) -> str:
+        return value if value in site_engine.STATS else ""
+
+    @field_validator("site_stats_code")
+    @classmethod
+    def readable_site_stats_code(cls, value: str) -> str:
+        code = value.strip().lower()
+        return code if site_engine.COUNTER_CODE.match(code) else ""
+
+    @field_validator("site_stats_token")
+    @classmethod
+    def readable_site_stats_token(cls, value: str) -> str:
+        token = value.strip()
+        return token if site_engine.BEACON_TOKEN.match(token) else ""
 
     @field_validator("note_styles", mode="before")
     @classmethod

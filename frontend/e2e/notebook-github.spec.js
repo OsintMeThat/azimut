@@ -20,6 +20,9 @@ const COMMIT = '3f1c9a2'.padEnd(40, '0');
 const note = (id, label) => ({
   id, type: 'note', label, attrs: { path: `notes/${id}.md`, folder: '' }, provenance: { by: 'user', at, status: 'confirmed' },
 });
+const picture = (id, label) => ({
+  id, type: 'media', label, attrs: { path: `media/${id}.jpg` }, provenance: { by: 'user', at, status: 'confirmed' },
+});
 
 async function shoot(page, name) {
   if (!SHOTS) return;
@@ -27,14 +30,14 @@ async function shoot(page, name) {
   await page.screenshot({ path: `${SHOTS}/${name}.png` });
 }
 
-async function stand(page, { pages = true } = {}) {
-  const catalog = [note('n1', 'Port strike')];
+async function stand(page, { pages = true, categories = [], edited = false, look = { style: 'report' }, editions = [] } = {}) {
+  const catalog = [note('n1', 'Port strike'), picture('e_pier', 'Pier at dawn'), picture('e_harbour', 'Harbour')];
   const github = { account: 'octo', repo: 'articles', branch: 'main', site: '', base: 'https://octo.github.io/articles/',
-    token: { set: true, hint: '…wxyz' } };
+    token: { set: true, hint: '…wxyz' }, categories };
   await installAppFixture(page, { catalog, github });
   const state = {
     text: '## What we saw\n\nSmoke over the pier at dawn.\n\n> [!internal]\n> Who told us.\n',
-    pages, published: [], builds: 0, presses: [], editions: [],
+    pages, published: [], builds: 0, presses: [], editions, look, looks: [], lookReads: 0, checks: 0,
   };
   await page.route(`**/api/cases/${CASE_ID}/catalog/entities**`, (route) =>
     route.fulfill({ json: { items: catalog, next_cursor: null, total: catalog.length } }));
@@ -45,6 +48,9 @@ async function stand(page, { pages = true } = {}) {
     if (path.endsWith('/pages')) {
       state.pages = true;
       return route.fulfill({ json: { ok: true, base: 'https://octo.github.io/articles/', pages: { url: 'https://octo.github.io/articles/' } } });
+    }
+    if (path.endsWith('/categories')) {
+      return route.fulfill({ json: { ok: true, categories: ['Investigations', 'Conflict Watch'], warnings: [] } });
     }
     if (path.endsWith('/build')) {
       state.builds += 1;
@@ -72,6 +78,11 @@ async function stand(page, { pages = true } = {}) {
       return route.fulfill({ json: { notes: body.notes.map((id) => ({ note: id, title: 'Port strike', internal: 1, weight: 2_400_000,
         links: [], pov: [], earlier: 0, warnings: [{ text: '1 internal passage left out.', line: null, kind: 'internal' }] })) } });
     }
+    if (path === '/n1/github/check') {
+      state.checks += 1;
+      return route.fulfill({ json: { checked: true, exists: true, edited,
+        warning: edited ? 'This folder was changed on GitHub since you published it: publishing replaces it.' : '' } });
+    }
     if (path === '/n1/github') {
       const body = request.postDataJSON();
       if (!state.pages) {
@@ -83,10 +94,18 @@ async function stand(page, { pages = true } = {}) {
         path: body.short_name, commit: COMMIT, sha256: 'a'.repeat(64), text_sha256: 'b'.repeat(64) }];
       return route.fulfill({ json: { published: true, address: `https://octo.github.io/articles/${body.short_name}/`,
         repository: 'octo/articles', branch: 'main', commit: COMMIT, sha256: 'a'.repeat(64), at: '2026-11-18T19:00:00Z',
-        uploaded: 9, reused: 0, removed: 0, warnings: [] } });
+        uploaded: 9, reused: 0, removed: 0, edited, site: { written: ['articles.json'], warnings: state.siteWarnings ?? [] }, warnings: [] } });
     }
     if (path === '/n1/editions') return route.fulfill({ json: { editions: state.editions } });
-    if (/^\/[\w-]+\/look$/.test(path)) return route.fulfill({ json: { look: { style: 'report' } } });
+    if (/^\/[\w-]+\/look$/.test(path)) {
+      if (method === 'PUT') {
+        state.look = request.postDataJSON();
+        state.looks.push(state.look);
+        return route.fulfill({ json: { look: state.look } });
+      }
+      state.lookReads += 1;
+      return route.fulfill({ json: { look: state.look } });
+    }
     if (path === '/n1') {
       if (method === 'PUT') { state.text = request.postDataJSON().text; return route.fulfill({ json: { status: 'saved' } }); }
       return route.fulfill({ json: { text: state.text } });
@@ -138,7 +157,8 @@ test('a note goes live on GitHub Pages on one press, and its editions list the p
   await expect(open).toHaveAttribute('target', '_blank');
   await expect(dialog.getByRole('button', { name: 'Copy link' })).toBeVisible();
   // its maps go live online unless the dialog's Keep its maps offline is ticked
-  expect(state.published).toEqual([{ short_name: 'port-strike', diagrams: {}, round_pov: false, changes: '', offline_maps: false }]);
+  expect(state.published).toEqual([{ short_name: 'port-strike', diagrams: {}, round_pov: false, changes: '', offline_maps: false,
+    category: '', role: 'article' }]);
   await shoot(page, 'dialog-github-live');
   await dialog.getByRole('button', { name: 'Done' }).click();
 
@@ -167,4 +187,85 @@ test('Pages turned off is turned on from the dialog by its own press', async ({ 
   expect(state.presses).toEqual(['/api/publishing/github/pages']);
   await dialog.getByRole('button', { name: 'Publish to GitHub Pages' }).click();
   await expect(dialog.locator('.line.done')).toContainText(`Live at ${ADDRESS}`);
+});
+
+test('the dialog says what the note is on the site: its category, Article or Page and its list picture', async ({ page }) => {
+  const state = await stand(page, { look: { style: 'report', category: 'Harbour' }, categories: ['Conflict Watch'] });
+  const dialog = await openWebFolder(page);
+  // started from the note's look, suggesting what the site and the note hold, reaching nothing
+  const category = dialog.locator('#export-category');
+  await expect(category).toHaveValue('Harbour');
+  await expect(dialog.locator('#export-categories option')).toHaveCount(2);
+  const role = dialog.getByRole('radiogroup', { name: 'On the site' });
+  await expect(role.getByRole('radio', { name: 'Article' })).toHaveAttribute('aria-checked', 'true');
+  await expect(dialog).toContainText('In the site\'s list and its feed.');
+  await expect(dialog.getByRole('button', { name: 'The cover picture' })).toBeVisible();
+  expect(state.presses).toEqual([]);
+  await shoot(page, 'dialog-github-site');
+
+  // the site's own categories are read on a press of their own
+  await dialog.getByRole('button', { name: 'Read the site' }).click();
+  await expect(dialog).toContainText('2 categories on the site.');
+  await expect(dialog.locator('#export-categories option')).toHaveCount(3);
+  expect(state.presses).toEqual(['/api/publishing/github/categories']);
+
+  // a new category typed, a picture of the list picked and kept in the look as it is picked
+  await category.fill('Port news');
+  const reads = state.lookReads;
+  await dialog.getByRole('button', { name: 'The cover picture' }).click();
+  await dialog.getByPlaceholder('Find a picture…').fill('pier');
+  await dialog.getByRole('button', { name: 'Pier at dawn' }).click();
+  await expect(dialog.getByRole('button', { name: 'Pier at dawn' })).toBeVisible();
+  await expect.poll(() => state.looks.length).toBe(1);
+  expect(state.looks[0]).toMatchObject({ style: 'report', list_image: 'e_pier' });
+  // the look was read as it stood before it was written, and again for the Notebook, which holds the note's look
+  await expect.poll(() => state.lookReads).toBeGreaterThanOrEqual(reads + 2);
+
+  // a page is off the list: no category or picture to give
+  await role.getByRole('radio', { name: 'Page' }).click();
+  await expect(dialog).toContainText('Off the list, linked from the site\'s header.');
+  await expect(category).toHaveCount(0);
+  await role.getByRole('radio', { name: 'Article' }).click();
+  await expect(category).toHaveValue('Port news');
+  await dialog.getByRole('button', { name: 'Publish to GitHub Pages' }).click();
+  await expect(dialog.locator('.line.done')).toContainText(`Live at ${ADDRESS}`);
+  expect(state.published).toHaveLength(1);
+  expect(state.published[0]).toMatchObject({ short_name: 'port-strike', category: 'Port news', role: 'article' });
+  // a note published for the first time is never checked against a folder
+  expect(state.checks).toBe(0);
+});
+
+test('a folder changed on GitHub is said before it is replaced, and replaced on one more press', async ({ page }) => {
+  const published = { at: '2026-11-18T19:00:00Z', edition: 'public', format: 'github', file: 'port-strike', address: ADDRESS,
+    repository: 'octo/articles', branch: 'main', path: 'port-strike', commit: COMMIT, sha256: 'a'.repeat(64), text_sha256: 'b'.repeat(64) };
+  const state = await stand(page, { edited: true, editions: [published] });
+  const dialog = await openWebFolder(page);
+  await dialog.getByRole('button', { name: 'Publish to GitHub Pages' }).click();
+  const warning = dialog.getByRole('alert').filter({ hasText: 'This folder was changed on GitHub since you published it' });
+  await expect(warning).toContainText('publishing replaces it.');
+  await expect(dialog.getByRole('button', { name: 'Publish anyway' })).toBeVisible();
+  await shoot(page, 'dialog-github-edited');
+  expect(state.checks).toBe(1);
+  expect(state.published).toEqual([]);
+
+  // stopping leaves everything as it was
+  await warning.getByRole('button', { name: "Don't publish" }).click();
+  await expect(warning).toHaveCount(0);
+  await expect(dialog.getByRole('button', { name: 'Publish to GitHub Pages' })).toBeVisible();
+  await dialog.getByRole('button', { name: 'Publish to GitHub Pages' }).click();
+  await expect(dialog.getByRole('button', { name: 'Publish anyway' })).toBeVisible();
+  await dialog.getByRole('button', { name: 'Publish anyway' }).click();
+  await expect(dialog.locator('.line.done')).toContainText(`Live at ${ADDRESS}`);
+  expect(state.published).toHaveLength(1);
+  // asked once per warning: the second press went straight through
+  expect(state.checks).toBe(2);
+});
+
+test('what the site had to say of itself is listed under the page once published', async ({ page }) => {
+  const state = await stand(page);
+  state.siteWarnings = ['The site holds too many files for Azimut to read: its home, list, feed and sitemap were left as they were.'];
+  const dialog = await openWebFolder(page);
+  await dialog.getByRole('button', { name: 'Publish to GitHub Pages' }).click();
+  await expect(dialog.locator('.line.done')).toContainText(`Live at ${ADDRESS}`);
+  await expect(dialog.getByRole('list', { name: 'To mind' })).toContainText('The site holds too many files for Azimut to read');
 });

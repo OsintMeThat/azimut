@@ -47,12 +47,12 @@ it('shows the steps of Settings while no site is set, and the way there', async 
   post.mockResolvedValue(CHECK);
   show();
   await settle();
-  expect(target.textContent).toContain('Connect your WordPress site once');
+  expect(target.textContent).toContain('Connect your WordPress site once, in Settings › Website.');
   expect(target.textContent).toContain('Users › Profile');
   expect(target.textContent).toMatch(/Free: application passwords/);
   expect(bound.ready).toBe(false);
   [...target.querySelectorAll('button')].find((node) => node.textContent.includes('Open Settings')).click();
-  expect(uiState).toMatchObject({ tool: 'settings', settingsTab: 'publishing' });
+  expect(uiState).toMatchObject({ tool: 'settings', settingsTab: 'website' });
 });
 
 it('says where the draft goes and what goes with it, reaching nothing', async () => {

@@ -1,5 +1,5 @@
 """A note's web folder published to GitHub Pages in one press (`engine/githubpages.py`,
-`POST /notes/{id}/github`, Settings › Publishing › GitHub Pages).
+`POST /notes/{id}/github`, Settings › Website › GitHub Pages).
 
 GitHub is stood in for by a small Git object store behind `httpx.MockTransport`: blobs,
 trees, commits and refs as the REST API's Git database answers them, the repository,
@@ -9,14 +9,13 @@ calls are held to GitHub's REST reference (docs.github.com), not to a live site.
 
 from __future__ import annotations
 
-import base64
 import hashlib
 import json
 import logging
 import re
 import stat
 import sys
-from typing import Any, Callable
+from typing import Any
 
 import httpx
 import pytest
@@ -26,241 +25,10 @@ from azimut.engine import githubpages, notes_web, publishsecrets
 from azimut.workspace import Case
 
 from ambushfixture import _ground, _image
+from githubfake import TOKEN, FakeGitHub
 from notecase import make_case, make_note
 
-TOKEN = "github_pat_11ABCDEFG0" + "x" * 72
 SECRET = "The second source asked not to be named"
-
-
-def _sha(kind: str, payload: bytes) -> str:
-    return hashlib.sha1(kind.encode() + b" %d\0" % len(payload) + payload).hexdigest()
-
-
-class FakeGitHub:
-    """api.github.com as far as publishing a folder needs it: one account, its
-    repositories, each a Git object store with refs, a Pages site and its builds."""
-
-    def __init__(self, login: str = "octo") -> None:
-        self.login = login
-        self.objects: dict[str, tuple[str, Any]] = {}
-        self.repos: dict[str, dict[str, Any]] = {}
-        self.requests: list[httpx.Request] = []
-        #: (method, path pattern) -> a response, or a callable making one, answered in place
-        self.fail: dict[tuple[str, str], Callable[[httpx.Request], httpx.Response] | httpx.Response] = {}
-        self.build_status = "building"
-
-    # the object store ------------------------------------------------------------------
-
-    def blob(self, data: bytes) -> str:
-        sha = _sha("blob", data)
-        self.objects[sha] = ("blob", data)
-        return sha
-
-    def tree(self, entries: dict[str, dict[str, str]]) -> str:
-        payload = json.dumps(sorted(entries.items())).encode()
-        sha = _sha("tree", payload)
-        self.objects[sha] = ("tree", dict(entries))
-        return sha
-
-    def commit(self, tree: str, parents: list[str], message: str) -> str:
-        payload = json.dumps([tree, parents, message, len(self.objects)]).encode()
-        sha = _sha("commit", payload)
-        self.objects[sha] = ("commit", {"tree": tree, "parents": parents, "message": message})
-        return sha
-
-    def write_tree(self, base: str | None, entries: list[dict[str, Any]]) -> str:
-        top = dict(self.objects[base][1]) if base else {}
-        nested: dict[str, list[dict[str, Any]]] = {}
-        for entry in entries:
-            first, _, rest = entry["path"].partition("/")
-            if rest:
-                nested.setdefault(first, []).append({**entry, "path": rest})
-                continue
-            if "content" in entry:
-                sha = self.blob(entry["content"].encode())
-            else:
-                sha = entry["sha"]
-            if sha is None:
-                top.pop(first, None)
-                continue
-            assert sha in self.objects, f"tree names an object GitHub does not have: {sha}"
-            top[first] = {"mode": entry["mode"], "type": entry["type"], "sha": sha}
-        for first, inner in nested.items():
-            below = top[first]["sha"] if first in top and top[first]["type"] == "tree" else None
-            top[first] = {"mode": "040000", "type": "tree", "sha": self.write_tree(below, inner)}
-        return self.tree(top)
-
-    def walk(self, tree: str, prefix: str = "") -> dict[str, bytes]:
-        found: dict[str, bytes] = {}
-        for name, entry in self.objects[tree][1].items():
-            if entry["type"] == "tree":
-                found.update(self.walk(entry["sha"], f"{prefix}{name}/"))
-            else:
-                found[f"{prefix}{name}"] = self.objects[entry["sha"]][1]
-        return found
-
-    def files(self, repo: str = "octo/articles", branch: str = "main") -> dict[str, bytes]:
-        head = self.repos[repo]["refs"][branch]
-        return self.walk(self.objects[head][1]["tree"])
-
-    def history(self, repo: str = "octo/articles", branch: str = "main") -> list[dict[str, Any]]:
-        commits = []
-        sha: str | None = self.repos[repo]["refs"][branch]
-        while sha:
-            commits.append(self.objects[sha][1])
-            parents = self.objects[sha][1]["parents"]
-            sha = parents[0] if parents else None
-        return commits
-
-    # the repositories ------------------------------------------------------------------
-
-    def make_repo(self, full: str = "octo/articles", *, files: dict[str, bytes] | None = None,
-                  pages: bool = True, branch: str = "main", empty: bool = False, url: str = "") -> None:
-        owner, name = full.split("/")
-        repo: dict[str, Any] = {"owner": owner, "name": name, "private": False, "default_branch": branch,
-                                "refs": {}, "pages": None}
-        self.repos[full.lower()] = repo
-        if not empty:
-            content = files or {"README.md": b"# articles\n"}
-            tree = self.write_tree(None, [{"path": path, "mode": "100644", "type": "blob", "sha": self.blob(data)}
-                                          for path, data in content.items()])
-            repo["refs"][branch] = self.commit(tree, [], "Initial commit")
-        if pages:
-            self.pages_on(repo, branch, url)
-
-    def pages_on(self, repo: dict[str, Any], branch: str, url: str = "") -> dict[str, Any]:
-        repo["pages"] = {"html_url": url or f"https://{repo['owner'].lower()}.github.io/{repo['name']}/",
-                         "status": "built", "build_type": "legacy", "cname": None,
-                         "source": {"branch": branch, "path": "/"}}
-        return repo["pages"]
-
-    def transport(self) -> httpx.MockTransport:
-        return httpx.MockTransport(self.handle)
-
-    # the API ---------------------------------------------------------------------------
-
-    def handle(self, request: httpx.Request) -> httpx.Response:
-        self.requests.append(request)
-        assert request.url.host == "api.github.com" and request.url.scheme == "https", request.url
-        assert TOKEN not in str(request.url), "the token went into an address"
-        for (method, pattern), answer in list(self.fail.items()):
-            if request.method == method and re.fullmatch(pattern, request.url.path):
-                return answer(request) if callable(answer) else answer
-        return self.answer(request)
-
-    def answer(self, request: httpx.Request) -> httpx.Response:
-        """What GitHub answers when nothing is made to fail."""
-        if request.headers.get("authorization") != f"Bearer {TOKEN}":
-            return httpx.Response(401, json={"message": "Bad credentials"})
-        assert request.headers.get("x-github-api-version") == githubpages.API_VERSION
-        path = request.url.path
-        body = json.loads(request.content) if request.content else None
-        if path == "/user":
-            return httpx.Response(200, json={"login": self.login, "id": 1})
-        if path in ("/user/repos",) or re.fullmatch(r"/orgs/[^/]+/repos", path):
-            owner = self.login if path == "/user/repos" else path.split("/")[2]
-            full = f"{owner}/{body['name']}"
-            if full.lower() in self.repos:
-                return httpx.Response(422, json={"message": "Repository creation failed."})
-            self.make_repo(full, pages=False, empty=not body.get("auto_init"))
-            return httpx.Response(201, json={"full_name": full, "default_branch": "main", "private": body["private"]})
-        match = re.fullmatch(r"/repos/([^/]+)/([^/]+)(/.*)?", path)
-        if not match:
-            return httpx.Response(404, json={"message": "Not Found"})
-        repo = self.repos.get(f"{match[1]}/{match[2]}".lower())
-        if repo is None:
-            return httpx.Response(404, json={"message": "Not Found"})
-        return self.repo(request, repo, match[3] or "", body)
-
-    def repo(self, request: httpx.Request, repo: dict[str, Any], tail: str, body: Any) -> httpx.Response:
-        method = request.method
-        empty = not repo["refs"]
-        if tail == "":
-            return httpx.Response(200, json={"full_name": f"{repo['owner']}/{repo['name']}", "private": repo["private"],
-                                             "default_branch": repo["default_branch"]})
-        if tail == "/pages":
-            if method == "GET":
-                return httpx.Response(200, json=repo["pages"]) if repo["pages"] else httpx.Response(404, json={})
-            if repo["pages"]:
-                return httpx.Response(409, json={"message": "GitHub Pages is already enabled."})
-            if body["source"]["branch"] not in repo["refs"]:
-                return httpx.Response(422, json={"message": "The branch does not exist."})
-            return httpx.Response(201, json=self.pages_on(repo, body["source"]["branch"]))
-        if tail == "/pages/builds/latest":
-            head = repo["refs"].get(repo["pages"]["source"]["branch"]) if repo["pages"] else None
-            if head is None:
-                return httpx.Response(404, json={})
-            return httpx.Response(200, json={"status": self.build_status, "commit": head,
-                                             "error": {"message": "Page build failed." if self.build_status == "errored"
-                                                       else None}})
-        if tail.startswith("/contents/"):
-            where = tail[len("/contents/"):]
-            if method == "PUT":
-                tree = self.write_tree(None, [{"path": where, "mode": "100644", "type": "blob",
-                                               "sha": self.blob(base64.b64decode(body["content"]))}])
-                repo["refs"][body.get("branch") or repo["default_branch"]] = self.commit(tree, [], body["message"])
-                return httpx.Response(201, json={"commit": {}})
-            branch = request.url.params.get("ref") or repo["default_branch"]
-            if empty or branch not in repo["refs"]:
-                return httpx.Response(404, json={"message": "Not Found"})
-            found = self.files(f"{repo['owner']}/{repo['name']}".lower(), branch).get(where)
-            if found is None:
-                return httpx.Response(404, json={"message": "Not Found"})
-            assert request.headers["accept"] == "application/vnd.github.raw+json"
-            return httpx.Response(200, content=found)
-        if not tail.startswith("/git/"):
-            return httpx.Response(404, json={"message": "Not Found"})
-        if empty:
-            return httpx.Response(409, json={"message": "Git Repository is empty."})
-        git = tail[len("/git/"):]
-        if git.startswith("ref/heads/") and method == "GET":
-            sha = repo["refs"].get(git[len("ref/heads/"):])
-            return httpx.Response(200, json={"object": {"sha": sha, "type": "commit"}}) if sha else \
-                httpx.Response(404, json={"message": "Not Found"})
-        if git == "refs" and method == "POST":
-            branch = body["ref"].removeprefix("refs/heads/")
-            if branch in repo["refs"]:
-                return httpx.Response(422, json={"message": "Reference already exists"})
-            repo["refs"][branch] = body["sha"]
-            return httpx.Response(201, json={"ref": body["ref"], "object": {"sha": body["sha"]}})
-        if git.startswith("refs/heads/") and method == "PATCH":
-            branch = git[len("refs/heads/"):]
-            current = repo["refs"].get(branch)
-            if current is None:
-                return httpx.Response(422, json={"message": "Reference does not exist"})
-            if not body.get("force") and current not in self.objects[body["sha"]][1]["parents"]:
-                return httpx.Response(422, json={"message": "Update is not a fast forward"})
-            repo["refs"][branch] = body["sha"]
-            return httpx.Response(200, json={"object": {"sha": body["sha"]}})
-        if git.startswith("commits/") and method == "GET":
-            found = self.objects.get(git[len("commits/"):])
-            if not found or found[0] != "commit":
-                return httpx.Response(404, json={})
-            return httpx.Response(200, json={"sha": git[len("commits/"):], "tree": {"sha": found[1]["tree"]}})
-        if git == "commits" and method == "POST":
-            sha = self.commit(body["tree"], body["parents"], body["message"])
-            assert "author" not in body and "committer" not in body, "the author is the token's own account"
-            return httpx.Response(201, json={"sha": sha})
-        if git.startswith("trees/") and method == "GET":
-            sha = git[len("trees/"):]
-            found = self.objects.get(sha)
-            if not found or found[0] != "tree":
-                return httpx.Response(404, json={})
-            if request.url.params.get("recursive"):
-                listed = [{"path": path, "type": "blob", "sha": _sha("blob", data), "mode": "100644"}
-                          for path, data in self.walk(sha).items()]
-            else:
-                listed = [{"path": name, **entry} for name, entry in found[1].items()]
-            return httpx.Response(200, json={"sha": sha, "tree": listed, "truncated": False})
-        if git == "trees" and method == "POST":
-            return httpx.Response(201, json={"sha": self.write_tree(body.get("base_tree"), body["tree"])})
-        if git == "blobs" and method == "POST":
-            assert body["encoding"] == "base64"
-            return httpx.Response(201, json={"sha": self.blob(base64.b64decode(body["content"]))})
-        return httpx.Response(404, json={"message": "Not Found"})
-
-    def posted(self, kind: str) -> list[httpx.Request]:
-        return [request for request in self.requests if request.method == "POST" and request.url.path.endswith(kind)]
 
 
 @pytest.fixture()
@@ -373,6 +141,12 @@ def test_a_folder_past_the_bounds_or_with_a_path_out_of_it_is_refused():
 # -- publishing -----------------------------------------------------------------------------
 
 
+def said_tree(fake: FakeGitHub, folder: str) -> str:
+    """The id of a folder's tree on the branch now, which the note's record keeps."""
+    head = fake.repos["octo/articles"]["refs"]["main"]
+    return fake.objects[fake.objects[head][1]["tree"]][1][folder]["sha"]
+
+
 def test_one_press_commits_the_folder_in_one_commit_and_the_note_keeps_its_record(client, fake, published):
     before = fake.repos["octo/articles"]["refs"]["main"]
     answer = client.post(published["url"], json={"short_name": "port-strike"})
@@ -407,7 +181,7 @@ def test_one_press_commits_the_folder_in_one_commit_and_the_note_keeps_its_recor
     assert editions[0] == {
         "at": said["at"], "edition": "public", "format": "github", "file": "port-strike", "address": address,
         "repository": "octo/articles", "branch": "main", "path": "port-strike", "commit": said["commit"],
-        "sha256": said["sha256"], "text_sha256": editions[0]["text_sha256"]}
+        "sha256": said["sha256"], "text_sha256": editions[0]["text_sha256"], "tree": said_tree(fake, "port-strike")}
     assert client.get("/api/publishing").json()["github"]["site"] == "https://octo.github.io/articles/"
 
 
@@ -432,7 +206,8 @@ def test_a_second_press_replaces_the_folder_and_git_keeps_the_history(client, fa
     first = client.post(published["url"], json={"short_name": "port-strike"}).json()
     before = set(fake.files())
     uploads = len(fake.posted("/git/blobs"))
-    assert first["uploaded"] == uploads and first["removed"] == 0
+    # the folder's files, and the site's own beside it (its list, feed, sitemap and home)
+    assert first["uploaded"] + len(first["site"]["written"]) == uploads and first["removed"] == 0
     # the picture leaves the note: its file leaves the page, in the same commit
     client.put(f"/api/cases/{published['cid']}/notes/{published['note']}",
                json={"text": "## What we saw\n\nSmoke over the pier.\n"})
@@ -449,7 +224,8 @@ def test_a_second_press_replaces_the_folder_and_git_keeps_the_history(client, fa
     assert [commit["message"] for commit in history[:2]] == ["Publish Port strike"] * 2
     assert history[0]["parents"] == [first["commit"]]
     # what the earlier copy held already is named, not sent again
-    assert said["reused"] >= 1 and len(fake.posted("/git/blobs")) - uploads == said["uploaded"]
+    assert said["reused"] >= 1
+    assert len(fake.posted("/git/blobs")) - uploads == said["uploaded"] + len(said["site"]["written"])
     editions = client.get(f"/api/cases/{published['cid']}/notes/{published['note']}/editions").json()["editions"]
     assert [edition["commit"] for edition in editions[:2]] == [said["commit"], first["commit"]]
 
@@ -729,7 +505,8 @@ def test_the_token_is_kept_apart_owner_only_and_never_sent_back(client, fake, pu
     state = client.get("/api/publishing").json()["github"]
     assert state == {"account": "octo", "repo": "articles", "branch": "main",
                      "site": "https://octo.github.io/articles/", "base": "https://octo.github.io/articles/",
-                     "token": {"set": True, "hint": f"…{TOKEN[-4:]}"}}
+                     "token": {"set": True, "hint": f"…{TOKEN[-4:]}"},
+                     "website": {"title": "octo", "logo": False, "counting": ""}, "categories": []}
     for path in ("/api/publishing", "/api/settings", "/api/settings/export",
                  f"/api/cases/{published['cid']}/notes/{published['note']}/editions"):
         assert TOKEN not in client.get(path).text, path
@@ -747,7 +524,8 @@ def test_the_token_is_kept_apart_owner_only_and_never_sent_back(client, fake, pu
     assert publishsecrets.read("github") == TOKEN
     forgotten = client.delete("/api/publishing/github").json()
     assert forgotten == {"account": "", "repo": "articles", "branch": "main", "site": "", "base": "",
-                         "token": {"set": False, "hint": ""}}
+                         "token": {"set": False, "hint": ""}, "website": {"title": "", "logo": False, "counting": ""},
+                         "categories": []}
     assert publishsecrets.read("github") == ""
 
 

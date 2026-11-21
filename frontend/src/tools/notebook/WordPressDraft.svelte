@@ -8,7 +8,7 @@
    * this branch alone. Only Send reaches the site (`lib/wordpress.js`), and the dialog's
    * own button calls `send()`. The public edition is the one sent;
    * the draft ends on WordPress's own Publish button. While the site is not set, the
-   * steps of Settings › Publishing show here (`lib/wordpressSetup.js`).
+   * steps of Settings › Website show here (`lib/wordpressSetup.js`).
    */
   import Icon from '../../components/Icon.svelte';
   import { uiState } from '../../lib/state.svelte.js';
@@ -78,7 +78,7 @@
 
   function openSettings() {
     onleave();
-    uiState.settingsTab = 'publishing';
+    uiState.settingsTab = 'website';
     uiState.tool = 'settings';
   }
 
@@ -90,14 +90,14 @@
     <p class="quiet" role="status">Reading…</p>
   {:else if !setUp}
     <div class="setup">
-      <p class="lead"><Icon name="info" size={13} /> Connect your WordPress site once, in Settings › Publishing.</p>
+      <p class="lead"><Icon name="info" size={13} /> Connect your WordPress site once, in Settings › Website.</p>
       <dl>
         {#each WORDPRESS_FIELDS as [name, said] (name)}<dt>{name}</dt><dd>{said}</dd>{/each}
       </dl>
       <p class="quiet">{WORDPRESS_FREE}</p>
       <p class="quiet">{WORDPRESS_COM}</p>
-      <button type="button" class="btn btn-sm" title="Open Settings on Publishing, where the site is set" onclick={openSettings}>
-        Open Settings › Publishing</button>
+      <button type="button" class="btn btn-sm" title="Open Settings on Website, where the site is set" onclick={openSettings}>
+        Open Settings › Website</button>
     </div>
   {:else}
     <p class="where">

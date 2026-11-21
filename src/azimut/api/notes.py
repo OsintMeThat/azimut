@@ -67,7 +67,7 @@ no address was given, since X then shows no picture card, and whether its maps g
 over OpenFreeMap once online, which `offline_maps` on the export turns down.
 
 **WordPress.** `/notes/{id}/wordpress` sends the note's public edition to the site set
-in Settings › Publishing as a draft (`engine/notes_wordpress.py`), its diagrams as the
+in Settings › Website as a draft (`engine/notes_wordpress.py`), its diagrams as the
 PNG the browser drew. The note keeps a record of it among its editions with
 `format: "wordpress"`, the site, the post and its two links; sending again updates that
 draft while it is still one. With `check: true` it says what would go and what would
@@ -75,11 +75,19 @@ stay out, and reaches nothing.
 
 **GitHub Pages.** `/notes/{id}/github` builds the note's web folder for the address its
 short name will have on the analyst's GitHub Pages site and commits it to the
-repository of Settings › Publishing in one commit (`engine/githubpages.py`). The note
+repository of Settings › Website in one commit (`engine/githubpages.py`). The note
 keeps a record of it among its editions with `format: "github"`: the address, the
-repository, the branch, the folder, the commit and the page's SHA-256. Check reads the
-page back from the repository on its press and compares; there is nothing to show on
-this machine, so the dialog opens the address instead.
+repository, the branch, the folder, the commit, the page's SHA-256 and the id of the
+folder's tree, which `/github/check` compares with the folder on GitHub before a later press
+(a warning when it was changed there; it never blocks). Check reads the page back from the
+repository on its press and compares; there is nothing to show on this machine, so the dialog
+opens the address instead.
+
+**The site.** The same press also keeps the analyst's website up to date (`engine/site.py`):
+the folder carries a card and the picture of its line in the site's list, with the category and
+the role (article or page) the dialog chose, stored in the note's look; and in the same commit
+the site's list, feed, sitemap, marked pages and default home are rebuilt where Azimut made them.
+`/notes/legal-notice` makes the starter note of the Legal notice page.
 """
 
 from __future__ import annotations
@@ -112,6 +120,8 @@ from ..engine import notediff, noteeditions
 from ..engine import notefill, notefromcase, notelinks, notepieces, noteready, notesources, notetext
 from ..engine import pdffonts
 from ..engine import reveal as reveal_engine
+from ..engine import site as site_engine
+from ..engine import sitesync
 from ..engine import urltitles
 from ..workspace import Case, CaseError
 from .cases import get_case
@@ -692,11 +702,12 @@ def write_look(case_id: str, note_id: str, body: notelook.NoteLook) -> dict[str,
     note shows, as one in its text is."""
     case = get_case(case_id)
     _require_note(case, note_id)
-    if body.cover.image:
-        picture = case.get_entity(body.cover.image) or {}
-        kind = (picture.get("attrs") or {}).get("kind")
-        if picture.get("type") not in link_engine.EMBEDDED_TYPES or kind in ("video", "audio"):
-            raise HTTPException(status_code=422, detail="the cover picture must be a picture in this case")
+    for chosen, what in ((body.cover.image, "cover"), (body.list_image, "list")):
+        if chosen:
+            picture = case.get_entity(chosen) or {}
+            kind = (picture.get("attrs") or {}).get("kind")
+            if picture.get("type") not in link_engine.EMBEDDED_TYPES or kind in ("video", "audio"):
+                raise HTTPException(status_code=422, detail=f"the {what} picture must be a picture in this case")
     notelook.save(case, note_id, body)
     if note_id != CASE_NOTE:
         link_engine.sync_embedded(
@@ -1737,7 +1748,7 @@ def _record_draft(case: Case, note_id: str, record: dict[str, Any], *, text: str
 
 @router.post("/{case_id}/notes/{note_id}/wordpress")
 def wordpress_draft(case_id: str, note_id: str, body: WordPressDraftIn) -> dict[str, Any]:
-    """Send the note's public edition to the WordPress site of Settings › Publishing as
+    """Send the note's public edition to the WordPress site of Settings › Website as
     a draft, or with ``check`` say what would go. Nothing is ever published: the draft
     ends on WordPress's own Publish button."""
     from .publishing import wordpress_settings
@@ -1768,7 +1779,7 @@ def wordpress_draft(case_id: str, note_id: str, body: WordPressDraftIn) -> dict[
     if body.check:
         return {**said, "ready": bool(site and user and password)}
     if not (site and user and password):
-        raise HTTPException(status_code=409, detail="WordPress is not set up yet: Settings › Publishing › WordPress.")
+        raise HTTPException(status_code=409, detail="WordPress is not set up yet: Settings › Website › WordPress.")
     try:
         with wordpress_engine.client() as http:
             sent = wordpress_engine.send(draft, wordpress_engine.Site(site, user, password, http),
@@ -1814,6 +1825,17 @@ class GitHubPublishIn(BaseModel):
     round_pov: bool = False
     changes: str = Field(default="", max_length=MAX_CHANGES)
     offline_maps: bool = False
+    #: The note's category and role on the site as the dialog chose them, kept in its look for
+    #: the next press: left out (None) they are the look's own, `category: ""` is none, and a
+    #: page stays off the site's lists.
+    category: str | None = Field(default=None, max_length=notelook.CATEGORY_MAX + 20)
+    role: Literal["article", "page"] | None = None
+
+
+class GitHubCheckIn(BaseModel):
+    """The short name a press would publish under, for the check before it."""
+
+    short_name: str = Field(max_length=githubpages.MAX_SHORT + 20)
 
 
 def _github_record(item: dict[str, Any]) -> dict[str, Any] | None:
@@ -1837,6 +1859,9 @@ def _github_record(item: dict[str, Any]) -> dict[str, Any] | None:
     record: dict[str, Any] = {"at": at, "edition": notes_markdown.PUBLIC, "format": GITHUB, "file": file,
                               "address": where, "repository": repository, "branch": branch, "path": path,
                               "commit": commit, "sha256": sha, "text_sha256": text_sha}
+    tree = item.get("tree")
+    if isinstance(tree, str) and githubpages.SHA1.match(tree):
+        record["tree"] = tree
     changes = item.get("changes")
     if isinstance(changes, str) and changes.strip():
         record["changes"] = " ".join(changes.split())[:MAX_CHANGES]
@@ -1860,18 +1885,74 @@ def _github_page_state(record: dict[str, Any]) -> str:
         raise HTTPException(status_code=502, detail=str(exc)) from exc
 
 
+def _published_tree(case: Case, note_id: str, repository: str, branch: str, path: str) -> str:
+    """The id of the folder's tree as the note's latest publish there left it, "" when no
+    record holds one (a publish from before the tree was kept)."""
+    for record in _read_editions(case, note_id):
+        if (record.get("format") == GITHUB and record["repository"] == repository and record["branch"] == branch
+                and record["path"] == path):
+            return str(record.get("tree") or "")
+    return ""
+
+
+def _kept_in_look(case: Case, note_id: str, category: str | None, role: str | None) -> None:
+    """What the dialog chose for the note on the site, kept in its look for the next press."""
+    if category is None and role is None:
+        return
+    look = notelook.stored(case, note_id) or notelook.DEFAULT
+    changed: dict[str, Any] = {}
+    if category is not None:
+        changed["category"] = " ".join(category.split())[:notelook.CATEGORY_MAX]
+    if role is not None:
+        changed["role"] = "" if role == "article" else role
+    if any(getattr(look, key) != value for key, value in changed.items()):
+        notelook.save(case, note_id, look.model_copy(update=changed))
+
+
+@router.post("/{case_id}/notes/{note_id}/github/check")
+def github_check(case_id: str, note_id: str, body: GitHubCheckIn) -> dict[str, Any]:
+    """The check before publishing, on its press: whether the folder this publish would replace
+    was changed on GitHub since this Azimut last published it. ``edited`` is true then, and
+    ``warning`` says so; publishing is never blocked. Reads only."""
+    from .publishing import github_settings
+
+    case = get_case(case_id)
+    _require_note(case, note_id)
+    target = github_settings()
+    if not target.ready:
+        raise HTTPException(status_code=409, detail=githubpages.NOT_SET)
+    try:
+        short = githubpages.short_name(body.short_name)
+    except githubpages.GitHubError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    try:
+        with githubpages.client() as http:
+            gh = githubpages.GitHub(target.token, http)
+            pages = githubpages.pages(gh, target.account, target.repo)
+            if pages is None:
+                return {"checked": False, "exists": False, "edited": False, "warning": ""}
+            folder = f"{pages.root}{short}"
+            now = githubpages.folder_tree(gh, target.account, target.repo, target.branch, folder)
+    except githubpages.GitHubError as exc:
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
+    before = _published_tree(case, note_id, f"{target.account}/{target.repo}", target.branch, folder)
+    edited = bool(before and now and now != before)
+    return {"checked": True, "exists": bool(now), "edited": edited, "warning": site_engine.HAND_EDITED if edited else ""}
+
+
 @router.post("/{case_id}/notes/{note_id}/github")
 def github_publish(case_id: str, note_id: str, body: GitHubPublishIn) -> dict[str, Any]:
     """Publish the note's public edition to the analyst's GitHub Pages site: its web
     folder, built for the address it will have, committed as `<short-name>/` in one
-    commit. The press reaches GitHub; nothing else does.
+    commit with the site's list, feed, sitemap and home rebuilt beside it where Azimut made
+    them. The press reaches GitHub; nothing else does.
 
     When the repository is missing or Pages is off, it says so (``needs``) and writes
     nothing: making the repository and turning Pages on are presses of their own
     (`api/publishing.py`). Once committed, the note keeps a record of it among its
     editions, and the dialog watches the build (`/api/publishing/github/build`).
     """
-    from .publishing import pages_warnings, github_settings, keep_site
+    from .publishing import github_settings, keep_categories, keep_site, pages_warnings, site_for
 
     case = get_case(case_id)
     _require_note(case, note_id)
@@ -1906,18 +1987,22 @@ def github_publish(case_id: str, note_id: str, body: GitHubPublishIn) -> dict[st
             except web_engine.NotesWebError as exc:
                 raise HTTPException(status_code=422, detail=str(exc)) from exc
             now = _now()
+            placement = site_engine.Placement(site_for(target, pages.url), category=body.category, role=body.role)
             try:
                 made = web_engine.build(
                     case, note_id, base_url=where, diagrams=diagrams, round_pov=body.round_pov, changes=changes,
                     earlier=_read_editions(case, note_id), homonym=len(peers.get(title.casefold(), [])) >= 2,
-                    now=now, live=not body.offline_maps,
+                    now=now, live=not body.offline_maps, placement=placement,
                 )
             except (html_engine.NotesHtmlError, web_engine.NotesWebError) as exc:
                 raise HTTPException(status_code=422, detail=str(exc)) from exc
             # the how-to is for putting the folder online by hand: a published page has no use for it
             files = {path: data for path, data in made.files.items() if path != web_engine.HOW_TO}
-            published = githubpages.publish(gh, target.account, target.repo, target.branch, files,
-                                            f"{pages.root}{short}", f"Publish {title}")
+            folder = f"{pages.root}{short}"
+            published = githubpages.publish(
+                gh, target.account, target.repo, target.branch, files, folder, f"Publish {title}", card=made.card,
+                plan=sitesync.planner(gh, target.account, target.repo, placement.site),
+                expected_tree=_published_tree(case, note_id, repository, target.branch, folder))
     except githubpages.GitHubError as exc:
         raise HTTPException(status_code=502, detail=str(exc)) from exc
     record: dict[str, Any] = {
@@ -1932,10 +2017,13 @@ def github_publish(case_id: str, note_id: str, body: GitHubPublishIn) -> dict[st
         "commit": published.commit,
         "sha256": made.sha256,
         "text_sha256": made.text_sha256,
+        "tree": published.tree,
     }
     if changes:
         record["changes"] = changes[:MAX_CHANGES]
     _record_edition(case, note_id, record, text=made.printed)
+    _kept_in_look(case, note_id, body.category, body.role)
+    keep_categories(published.categories)
     return {
         "published": True,
         "address": where,
@@ -1947,6 +2035,26 @@ def github_publish(case_id: str, note_id: str, body: GitHubPublishIn) -> dict[st
         "uploaded": published.uploaded,
         "reused": published.reused,
         "removed": published.removed,
+        "edited": published.edited,
+        "site": {"written": published.root, "warnings": published.warnings},
         "warnings": [f"{title}: {warning}"[:MAX_WARNING_CHARS]
                      for warning, kind in zip(made.warnings, made.warning_kinds) if kind != web_engine.UPLOAD],
     }
+
+
+# -- the Legal notice page ---------------------------------------------------------
+
+
+@router.post("/{case_id}/notes/legal-notice")
+def legal_notice(case_id: str) -> dict[str, Any]:
+    """Start the Legal notice page: a note titled "Legal notice" that is a page of the site (off its
+    lists, linked from its header), whose text names the host and leaves the publisher's own
+    lines for the analyst. Pressed again it finds the one made, rather than making a second."""
+    case = get_case(case_id)
+    for listed in _notes_on_disk(case):
+        if (listed.id != CASE_NOTE and listed.title == site_engine.LEGAL_TITLE and listed.look is not None
+                and listed.look.role == site_engine.PAGE):
+            return {"id": listed.id, "title": listed.title, "created": False}
+    note = case.create_note(site_engine.LEGAL_TITLE, "", site_engine.legal_notice())
+    notelook.save(case, note["id"], notelook.NoteLook(role="page"))
+    return {"id": note["id"], "title": site_engine.LEGAL_TITLE, "created": True}

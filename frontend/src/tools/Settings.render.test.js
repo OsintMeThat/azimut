@@ -11,7 +11,7 @@
 import { describe, expect, it, afterEach, beforeEach, vi } from 'vitest';
 import { flushSync, mount, unmount } from 'svelte';
 import { api } from '../lib/api.js';
-import { prefs, templatesState } from '../lib/state.svelte.js';
+import { prefs, templatesState, uiState } from '../lib/state.svelte.js';
 
 // The proof-template editor draws its sample page; here onto a stand-in that keeps the nodes.
 vi.mock('konva', async () => ({ default: (await import('../lib/konva.fixture.js')).FakeKonva }));
@@ -65,7 +65,7 @@ function settingsBlob() {
 
 const { default: Settings } = await import('./Settings.svelte');
 
-const TABS = ['general', 'publishing', 'imagery', 'templates', 'icons', 'extension', 'storage', 'system'];
+const TABS = ['general', 'publishing', 'website', 'imagery', 'templates', 'icons', 'extension', 'storage', 'system'];
 
 let live = null;
 
@@ -106,6 +106,18 @@ describe('the settings pane', () => {
   });
 });
 
+describe('a tab asked for from elsewhere', () => {
+  it('opens on Website, where the export dialogs send the analyst to set GitHub Pages or WordPress up', () => {
+    uiState.tool = 'settings';
+    uiState.settingsTab = 'website';
+    flushSync();
+    expect(rail().find((node) => node.classList.contains('active')).textContent.trim()).toBe('Website');
+    expect(pane().textContent).toContain('Publish your notes as a simple website');
+    expect(uiState.settingsTab).toBeNull();
+    uiState.tool = 'satellite';
+  });
+});
+
 describe('each section', () => {
   const show = (id) => {
     rail()[TABS.indexOf(id)].click();
@@ -137,11 +149,33 @@ describe('each section', () => {
 
   it('Publishing states the mention, who a report is from, and the proofs\' handle', () => {
     const text = show('publishing');
-    expect([...pane().querySelectorAll('h3')].map((h) => h.textContent)).toEqual(['Post', 'In reports', 'Styles', 'On proofs', 'WordPress', 'GitHub Pages']);
+    expect([...pane().querySelectorAll('h3')].map((h) => h.textContent)).toEqual(['Post', 'In reports', 'Styles', 'On proofs']);
     for (const words of ['Logo', 'Name', 'Role', 'Organisation', 'Signature', 'Your account handle']) expect(text).toContain(words);
     // each field says what it takes, in the tool
     expect(text).toContain('at most 80 characters');
     expect(text).toContain('up to 1 MB');
+  });
+
+  it('Website states the site, where a note goes, the statistics, the update and the legal notice', () => {
+    const text = show('website');
+    expect([...pane().querySelectorAll('h3')].map((h) => h.textContent)).toEqual(
+      ['Website', 'Site', 'GitHub Pages', 'WordPress', 'Statistics', 'Update the site', 'Legal notice']);
+    for (const words of ['Title', 'Tagline', 'Made with Azimut', 'Count readers with', 'Make it yours', 'Start a Legal notice page']) {
+      expect(text).toContain(words);
+    }
+  });
+
+  it('Website saves the site under its own keys, as preferences', async () => {
+    show('website');
+    api.put.mockImplementation(async (path, patch) => ({ ...settingsBlob(), ...patch }));
+    api.put.mockClear();
+    const title = pane().querySelector('input[maxlength="120"]');
+    title.value = ' Open  Desk ';
+    title.dispatchEvent(new Event('change', { bubbles: true }));
+    await vi.waitFor(() => expect(prefs.siteTitle).toBe('Open Desk'));
+    expect(api.put).toHaveBeenCalledWith('/api/settings/prefs', { site_title: 'Open Desk' });
+    api.put.mockImplementation(async () => settingsBlob());
+    prefs.siteTitle = '';
   });
 
   it('Publishing shows the mention a Bluesky post will take, and saves it only once edited', async () => {
