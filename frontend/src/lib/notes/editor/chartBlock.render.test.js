@@ -318,6 +318,8 @@ describe('the settings, on the chart', () => {
     const story = () => card().querySelector('[aria-label="In a story"]');
     const choices = () => [...story().querySelectorAll('button')].map((node) => [node.textContent, node.getAttribute('aria-checked')]);
     expect(choices()).toEqual([['Whole wall', 'true'], ['One group per step', 'false']]);
+    // its two choices of three words take two of the card's three columns, never cut by one
+    expect(story().closest('.cm-chart-field').classList.contains('cm-chart-span')).toBe(true);
     press(story().querySelectorAll('button')[1]);
     expect(text()).toBe(WALLED.replace('label: #\n', 'label: #\nstory: one group per step\n'));
     await settle();

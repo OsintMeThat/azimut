@@ -1230,7 +1230,6 @@ const THEME = {
   '.cm-chart-looks .cm-chart-field': { flexDirection: 'row', alignItems: 'center', gap: '10px' },
   // a timeline's Layout takes two of the three columns, what it drew said under it
   '.cm-chart-columns > .cm-chart-span': { gridColumn: 'span 2' },
-  '.cm-chart-span .cm-chart-seg': { alignSelf: 'flex-start' },
   '.cm-chart-field-note': { color: 'var(--text-3)', fontSize: '11px' },
   // where the rows come from, one line on top of the settings and of The numbers
   '.cm-chart-data': { flexDirection: 'row', alignItems: 'baseline', flexWrap: 'wrap', gap: '4px 8px', display: 'flex' },
@@ -1248,12 +1247,18 @@ const THEME = {
   '.cm-chart-swatch': { display: 'inline-flex', alignItems: 'center', gap: '5px', color: 'var(--text-2)', fontSize: '11.5px' },
   '.cm-chart-swatch::before': { content: '""', width: '10px', height: '10px', borderRadius: '2px', background: 'var(--swatch)' },
   '.cm-chart-keep': { marginLeft: '0' },
-  '.cm-chart-seg': { display: 'inline-flex', border: '1px solid var(--border-strong)', borderRadius: '6px', overflow: 'hidden' },
-  '.cm-chart-seg-btn': {
-    height: '26px', padding: '0 11px', border: 'none', borderRight: '1px solid var(--border)', background: 'var(--bg-1)', color: 'var(--text-2)',
-    font: 'inherit', cursor: 'pointer', whiteSpace: 'nowrap',
+  // as wide as its choices, never wider than its column: choices that do not fit go to a
+  // second line, and a choice longer than the column wraps its words, so none is ever cut.
+  // Each choice's right and bottom rules slide 1px under the frame, so only inner ones show.
+  '.cm-chart-seg': {
+    display: 'inline-flex', flexWrap: 'wrap', alignSelf: 'flex-start', justifySelf: 'start', maxWidth: '100%',
+    border: '1px solid var(--border-strong)', borderRadius: '6px', overflow: 'hidden',
   },
-  '.cm-chart-seg-btn:last-child': { borderRight: 'none' },
+  '.cm-chart-seg-btn': {
+    flex: '1 1 auto', minHeight: '27px', margin: '0 -1px -1px 0', padding: '3px 11px', border: 'none',
+    borderRight: '1px solid var(--border)', borderBottom: '1px solid var(--border)', background: 'var(--bg-1)', color: 'var(--text-2)',
+    font: 'inherit', lineHeight: '1.25', cursor: 'pointer',
+  },
   '.cm-chart-seg-btn:hover, .cm-chart-seg-btn:focus-visible': { color: 'var(--text-1)', background: 'var(--bg-3)', outline: 'none' },
   '.cm-chart-seg-btn[aria-checked="true"]': {
     background: 'var(--accent-soft)', color: 'var(--text-1)', fontWeight: '600', boxShadow: 'inset 0 -2px 0 var(--accent)',

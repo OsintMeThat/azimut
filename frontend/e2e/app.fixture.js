@@ -672,6 +672,23 @@ export async function fakeGoogleMaps(page) {
 }
 
 /**
+ * Every row of choices in `scope` (a chart's or a map's settings) shows each choice whole:
+ * none runs past its frame, none has its words cut. A row too wide for its column wraps.
+ */
+export async function expectChoicesWhole(scope) {
+  const cut = await scope.locator('.cm-chart-seg').evaluateAll((groups) => groups.flatMap((group) => {
+    const frame = group.getBoundingClientRect();
+    return [...group.children]
+      .filter((choice) => {
+        const box = choice.getBoundingClientRect();
+        return box.right > frame.right + 1 || box.bottom > frame.bottom + 1 || choice.scrollWidth > choice.clientWidth + 1;
+      })
+      .map((choice) => `${group.getAttribute('aria-label')}: ${choice.textContent}`);
+  }));
+  expect(cut).toEqual([]);
+}
+
+/**
  * A PDF of `count` A4 pages, each saying its number or its label, written by hand: what the
  * Notebook's Page pane and its template pictures are answered with, so PDF.js
  * draws real pages in the browser without a server behind it.

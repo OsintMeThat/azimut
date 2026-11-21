@@ -382,8 +382,11 @@ export function chartSettings(panel, { state, write, keep = null, data = null, t
         (value) => write({ shape: value === WALL_SHAPES[0] ? '' : value })));
       // a story page shows the wall whole between its scenes, or steps through its groups
       if (by) {
-        fields.push(segmented('In a story', [{ value: '', label: 'Whole wall' }, { value: WALL_STEPS, label: 'One group per step' }],
-          wallSteps(setting(chart, 'story')) ? WALL_STEPS : '', (value) => write({ story: value })));
+        const story = segmented('In a story', [{ value: '', label: 'Whole wall' }, { value: WALL_STEPS, label: 'One group per step' }],
+          wallSteps(setting(chart, 'story')) ? WALL_STEPS : '', (value) => write({ story: value }));
+        // two choices of three words do not fit a third of the card: it takes two columns
+        story.classList.add('cm-chart-span');
+        fields.push(story);
       }
     } else if (kind.counts !== false) {
       const count = setting(chart, 'count');

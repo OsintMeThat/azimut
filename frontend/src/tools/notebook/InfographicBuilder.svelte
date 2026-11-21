@@ -1063,8 +1063,7 @@
   .ib-card :global(.ib-map .cm-map-field > *), .ib-card :global(.ib-map .cm-map-steps > .cm-map-act) { grid-column: 1; }
   .ib-card :global(.ib-map .cm-map-field-name:empty) { display: none; }
   .ib-card :global(.ib-map .cm-map-grid) { grid-template-columns: minmax(0, 1fr); gap: 12px; }
-  .ib-card :global(.ib-map .cm-chart-seg) { justify-self: start; max-width: 100%; }
-  .ib-card :global(.ib-map .cm-chart-seg-btn) { min-width: 0; padding: 0 8px; overflow: hidden; text-overflow: ellipsis; }
+  .ib-card :global(.ib-map .cm-chart-seg-btn) { padding: 3px 8px; }
   /* a layer: its switch, colours, name and count, then its colour under them */
   .ib-card :global(.ib-map .cm-map-list .cm-map-row:not(.cm-map-drawn-row)) { flex-wrap: wrap; row-gap: 5px; }
   .ib-card :global(.ib-map .cm-map-row:not(.cm-map-drawn-row) > .cm-map-row-name) { flex: 1 1 0; }
