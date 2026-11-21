@@ -116,6 +116,21 @@ export function cellWords(cell) {
   return chipOf(cell)?.label ?? cell;
 }
 
+/** The ids the cells of a sheet's `picture` columns link. Mirrors `engine/sheets.picture_links`. */
+export function pictureLinks(meta) {
+  const columns = new Set(
+    Object.entries(meta?.roles ?? {})
+      .filter(([, role]) => role?.kind === 'picture')
+      .map(([name]) => name),
+  );
+  if (!columns.size) return [];
+  const found = new Set();
+  for (const cells of Object.values(meta?.links ?? {})) {
+    for (const [name, id] of Object.entries(cells ?? {})) if (columns.has(name) && id) found.add(id);
+  }
+  return [...found];
+}
+
 /**
  * What a `picture` cell draws, or null.
  *

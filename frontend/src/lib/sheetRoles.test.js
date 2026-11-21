@@ -36,6 +36,7 @@ import {
   cellPicture,
   cellWords,
   chipOf,
+  pictureLinks,
   pictureUrl,
   parseWhen,
   precisionMetres,
@@ -151,6 +152,15 @@ describe('the role record', () => {
     // With no link, the address or the case path it holds, as before.
     expect(cellPicture('media/quai.jpg', null, pictures)).toMatchObject({ kind: 'case', value: 'media/quai.jpg' });
     expect(cellPicture('to be found', null, pictures)).toBeNull();
+  });
+
+  it('lists the pictures a sheet links from its picture columns only', () => {
+    const meta = {
+      roles: { Picture: { kind: 'picture' }, Where: { kind: 'choice', values: [] } },
+      links: { r1: { Picture: 'e_a', Where: 'e_place' }, r2: { Picture: 'e_b' }, r3: { Picture: 'e_a' } },
+    };
+    expect(pictureLinks(meta)).toEqual(['e_a', 'e_b']);
+    expect(pictureLinks({ links: meta.links })).toEqual([]);
   });
 
   it('shows a chip still held as text by its label, never the code', () => {

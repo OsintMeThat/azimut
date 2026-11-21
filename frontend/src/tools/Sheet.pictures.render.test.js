@@ -135,6 +135,7 @@ describe('a picture column of a sheet made from a wall', () => {
     expect(params.get('previews')).toBe('true');
     // the cell's words are not a search for a picture called "#1"
     expect(params.get('q')).toBeNull();
+    expect(document.body.textContent).toContain('Point this cell at a picture');
     const chips = [...document.querySelectorAll('.picker .types .chip')];
     expect(chips[0].textContent.trim()).toBe('Pictures');
     expect(chips[0].classList.contains('on')).toBe(true);

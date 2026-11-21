@@ -138,6 +138,7 @@
     parseWhen,
     cellPicture,
     cellWords,
+    pictureLinks,
     precisionMetres,
     readsCell,
     suggestProgressColumn,
@@ -3740,13 +3741,24 @@
         table = setCells(table, [{ row, column, value: entity.label ?? '' }]);
       }
     });
-    if (roles[table.columns[column]]?.kind === 'picture') void learnPictures([entity.id]);
   }
 
-  /** What a picture just linked draws, so its thumbnail shows before the next read. */
+  /** The ids already asked about, pictures or not, so a link to a place is asked once. */
+  const askedPictures = new Set();
+
+  // A picture column's links the grid cannot draw yet: one just made with the `@` picker,
+  // or a column just given the picture role. Asked once each, so the thumbnail shows
+  // before the next read.
+  $effect(() => {
+    const missing = pictureLinks(meta).filter((id) => !pictures[id] && !askedPictures.has(id));
+    if (missing.length) untrack(() => void learnPictures(missing));
+  });
+
+  /** What these linked pictures draw. */
   async function learnPictures(ids) {
-    const wanted = ids.filter((id) => id && !pictures[id]);
+    const wanted = ids.filter((id) => id && !pictures[id] && !askedPictures.has(id));
     if (!wanted.length || !openId || !caseId) return;
+    for (const id of wanted) askedPictures.add(id);
     try {
       const answer = await api.post(`/api/cases/${caseId}/sheets/${openId}/pictures`, { ids: wanted });
       pictures = { ...pictures, ...(answer.pictures ?? {}) };
@@ -5316,7 +5328,8 @@
 {/if}
 
 {#if linking}
-  <Modal title="Point this cell at an entity" onclose={() => (linking = null)} width="580px">
+  <Modal title={roles[table.columns[linking.column]]?.kind === 'picture' ? 'Point this cell at a picture' : 'Point this cell at an entity'}
+         onclose={() => (linking = null)} width="580px">
     <SheetEntityPicker
       {caseId}
       pictures={roles[table.columns[linking.column]]?.kind === 'picture'}
