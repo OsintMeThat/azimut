@@ -310,7 +310,7 @@ describe('what the read lists', () => {
     await show();
     const kinds = [...panel().querySelectorAll('.kinds section')];
     expect(kinds.map((node) => node.querySelector('.kind').textContent)).toEqual(['Article', 'Page', 'Unlisted']);
-    expect(kinds[2].textContent).toContain('Online at its address only. For a test, or a draft to show someone.');
+    expect(kinds[2].textContent).toContain('Online at its address only, and out of search engines. For a test, or a draft to show someone.');
     expect(panel().textContent).toContain('You pick the kind in the publish window, each time you publish a note.');
   });
 

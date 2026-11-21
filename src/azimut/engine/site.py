@@ -54,7 +54,8 @@ A map page cited by an article shows as a link under that article, never as its 
 map nothing cites keeps its own line so it is never lost. A page (`role: "page"`) is on no
 list: it is in `articles.json` under `pages`, and the default home's header links it. An
 unlisted page (`role: "unlisted"`) is online at its address and nowhere else: in no list, no feed,
-no sitemap, no `articles.json`, and its category adds none; a card that names it never folds it
+no sitemap, no `articles.json`, its head asks search engines not to index it (`notes_web`), and its
+category adds none; a card that names it never folds it
 under itself, and Read the site (`sitesync.survey`) still shows it.
 """
 
@@ -72,7 +73,7 @@ from urllib.parse import urlsplit
 
 from pydantic import ValidationError
 
-from .notelook import CATEGORY_MAX, NotePlace
+from .notelook import CATEGORY_MAX, NoteLook, NotePlace
 
 CARD = "article.json"
 CARD_FORMAT = "azimut-article/1"
@@ -197,6 +198,10 @@ class Placement:
     role: str | None = None
     #: The place the card carries (`NotePlace`), None for none, or `OWN_PLACE` for the look's own.
     place: NotePlace | None | Literal["own"] = OWN_PLACE
+
+    def role_of(self, look: NoteLook) -> str:
+        """What the note is on the site: the role the dialog chose, else its look's (`NoteLook.role`)."""
+        return self.role if self.role is not None else look.role
 
     def card_place(self, kept: NotePlace | None) -> NotePlace | None:
         """The place the card carries: the one the dialog chose, else ``kept``, the look's."""

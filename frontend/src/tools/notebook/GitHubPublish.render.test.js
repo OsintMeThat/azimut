@@ -18,7 +18,7 @@ const SET = { account: 'octo', repo: 'articles', branch: 'main', site: '', token
 const PUBLISHED = { published: true, address: 'https://octo.github.io/articles/port-strike/', repository: 'octo/articles', commit: 'c'.repeat(40) };
 
 /** The server as the dialog asks it: the site's state, the note's look, its editions and the point it offers. */
-function serve({ github = SET, look = {}, editions = [], offer = null } = {}) {
+function serve({ github = SET, look = {}, editions = [GITHUB_EDITION], offer = null } = {}) {
   get.mockImplementation(async (path) => {
     if (path === '/api/publishing') return { github };
     if (path.endsWith('/look')) {
@@ -373,6 +373,68 @@ it('offers Unlisted beside Article and Page: no category or list picture, said i
   await settle();
   await live.publish();
   expect(post.mock.calls.at(-1)[1]).toMatchObject({ role: 'unlisted' });
+});
+
+it('starts a note never published to this site on Unlisted, and on the role it last went up with after', async () => {
+  serve({ editions: [], look: {} });
+  publishOk();
+  show();
+  await settle();
+  expect(get).toHaveBeenCalledWith('/api/cases/c1/notes/n1/editions');
+  expect(choice('Unlisted').getAttribute('aria-checked')).toBe('true');
+  expect(target.textContent).toContain('Online at its address only, in no list, feed or sitemap.');
+  await live.publish();
+  expect(publishes().at(-1)[1]).toMatchObject({ role: 'unlisted' });
+  // a page published to another site is no page of this one
+  unmount(live);
+  live = null;
+  serve({ editions: [{ ...GITHUB_EDITION, repository: 'someone/else' }, { ...GITHUB_EDITION, format: 'web' }], look: {} });
+  show();
+  await settle();
+  expect(choice('Unlisted').getAttribute('aria-checked')).toBe('true');
+  // published here before: the look's role, an article
+  unmount(live);
+  live = null;
+  serve({ editions: [{ ...GITHUB_EDITION, repository: 'Octo/Articles' }], look: {} });
+  show();
+  await settle();
+  expect(choice('Article').getAttribute('aria-checked')).toBe('true');
+  // a page the look names stays a page, first publish or not
+  unmount(live);
+  live = null;
+  serve({ editions: [], look: { role: 'page' } });
+  show();
+  await settle();
+  expect(choice('Page').getAttribute('aria-checked')).toBe('true');
+});
+
+it('keeps the role picked before the editions are read, and an Article when they cannot be read', async () => {
+  serve({ editions: [], look: {} });
+  let answer;
+  get.mockImplementation(async (path) => {
+    if (path === '/api/publishing') return { github: SET };
+    if (path.endsWith('/editions')) return new Promise((resolve) => { answer = resolve; });
+    if (path.endsWith('/place')) return { suggested: null };
+    return { look: {} };
+  });
+  show();
+  await settle();
+  choice('Page').click();
+  await settle();
+  answer({ editions: [] });
+  await settle();
+  expect(choice('Page').getAttribute('aria-checked')).toBe('true');
+  unmount(live);
+  live = null;
+  get.mockImplementation(async (path) => {
+    if (path === '/api/publishing') return { github: SET };
+    if (path.endsWith('/editions')) throw new Error('offline');
+    if (path.endsWith('/place')) return { suggested: null };
+    return { look: {} };
+  });
+  show();
+  await settle();
+  expect(choice('Article').getAttribute('aria-checked')).toBe('true');
 });
 
 it('says where an article will appear, naming the site by its title, else by what it falls back to', async () => {

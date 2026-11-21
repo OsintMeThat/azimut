@@ -7737,7 +7737,8 @@ folder Azimut did not make says so and offers another address only, since a publ
 
 **On the site.** For a published article the dialog's GitHub branch adds, under the address:
 **Article** or **Page** (an article is in the site's list and feed, a page is off every list and
-linked from the home's header; it starts from the note's look), and for an article a **Category**
+linked from the home's header; it starts from the note's look, and a note its editions say was never
+published to this site starts on **Unlisted**, so a first publish is read before it is announced), and for an article a **Category**
 and the **Picture in the list**. The category is a list drawn as the app's menus are, never the
 system's own (`components/PickList.svelte`): **No category**, then what the site already uses and
 the note's own (`github.categories`, kept from the last read of the site), then **New category…**,
@@ -9015,7 +9016,8 @@ that name in the open case, naming the host (the Privacy page also what counting
 Notebook on it; pressed again, the one made. With no case open they are disabled and say to open one first,
 and a page the read found says *On the site*. No other legal advice is given. The kind of a note is picked
 in the publish dialog, which also offers **Unlisted** (online at its address, in no list, feed, sitemap or
-`articles.json`), says where the note will appear (*Goes on Octo Desk's home page and in its feed.*) and, while
+`articles.json`, its head carrying `<meta name="robots" content="noindex">` so a link shared to try it stays
+out of search engines, which an article or a page never carries), says where the note will appear (*Goes on Octo Desk's home page and in its feed.*) and, while
 Settings › Website holds no title, what the site then shows as, with a press to name it.
 
 **Readers.** *Who reads it*. **Count readers** is off by default, with three buttons: Off, GoatCounter and

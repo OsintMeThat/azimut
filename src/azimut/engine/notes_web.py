@@ -19,6 +19,9 @@ than `data:` addresses, so the page is light and each file is fetched once.
 subtitle or the first paragraph), Open Graph and Twitter tags pointing at
 `share.jpg`, and, once the analyst gives the address the folder will live at
 (`address`), the canonical address, with every card address absolute as X needs.
+A page published to a site as Unlisted also asks search engines not to index it
+(`<meta name="robots" content="noindex">`), so a link shared to try it stays out of them;
+an article or a page never does.
 The folder is named after that address's last part, so a later export replaces the
 same page; with none it is `<note>-<day>`.
 
@@ -356,7 +359,9 @@ def build(
     face = author_face(case, look.author_image) if look.author_image else None
     if look.author_image and face is None:
         said.append(AUTHOR_IMAGE_GONE)
-    folder = html_engine.Folder(csp=folder_csp(), head=lambda description: _head(title, description, where),
+    # online at its address only: kept out of search engines too
+    hidden = placement is not None and placement.role_of(look) == site_engine.UNLISTED
+    folder = html_engine.Folder(csp=folder_csp(), head=lambda description: _head(title, description, where, hidden=hidden),
                                 live=vendor, frame=site_engine.frame_of(placement.site) if placement else None,
                                 author_face=face[0] if face is not None else "")
     # a note someone else wrote is signed with their name, under the title unless the look signs it at the end
@@ -415,7 +420,7 @@ def _site_card(placement: site_engine.Placement, case: "Case", look: NoteLook, r
     site = placement.site
     page = rendered.html.decode("utf-8")
     category = placement.category if placement.category is not None else look.category
-    role = placement.role if placement.role is not None else look.role
+    role = placement.role_of(look)
     picture = None
     if look.list_image:
         picture = _list_picture(case, look.list_image)
@@ -780,10 +785,11 @@ def _spaced(draw: ImageDraw.ImageDraw, at: tuple[float, float], text: str, face:
 # -- the head and small helpers ------------------------------------------------------
 
 
-def _head(title: str, description: str, where: str) -> str:
-    """What the page's head says of it to a site that draws its link."""
+def _head(title: str, description: str, where: str, *, hidden: bool = False) -> str:
+    """What the page's head says of it to a site that draws its link; ``hidden``, an Unlisted page of
+    the site, also asks search engines to leave it out."""
     image = f"{where}{SHARE}" if where else SHARE
-    lines = []
+    lines = ['<meta name="robots" content="noindex">'] if hidden else []
     if description:
         lines.append(f'<meta name="description" content="{_attr(description)}">')
     if where:

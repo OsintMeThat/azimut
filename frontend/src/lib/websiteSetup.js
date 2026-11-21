@@ -402,7 +402,7 @@ export function deletedSaid(folder, answer) {
 export const KINDS = Object.freeze([
   ['article', 'In the site\'s list, its feed and its sitemap.'],
   ['page', 'Off the lists, linked from the site\'s header. For About or Legal notice.'],
-  ['unlisted', 'Online at its address only. For a test, or a draft to show someone.'],
+  ['unlisted', 'Online at its address only, and out of search engines. For a test, or a draft to show someone.'],
 ]);
 export const KINDS_NOTE = 'You pick the kind in the publish window, each time you publish a note.';
 export const CATEGORIES_TITLE = 'Categories';

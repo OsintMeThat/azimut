@@ -508,6 +508,29 @@ def test_a_map_page_keeps_its_own_counter_over_the_sites(client, monkeypatch, tm
     assert 'data-counter="mine"' in page and 'name="az-counter" content="mine"' in page and "desk.goatcounter" not in page
 
 
+def test_only_an_unlisted_page_asks_search_engines_to_leave_it_out(client, tmp_path):
+    cid = make_case(client, "Roles")
+    made = make_note(client, cid, title="Port strike", content="Smoke over the pier.\n")
+    case = Case.open(cid)
+    where = "https://octo.github.io/articles/port-strike/"
+    desk = site.Site(title="The Desk", address="https://octo.github.io/articles/")
+
+    def head(placement: site.Placement | None) -> str:
+        page = notes_web.build(case, made["id"], base_url=where, placement=placement).files["index.html"].decode()
+        return page[:page.index("</head>")]
+
+    noindex = '<meta name="robots" content="noindex">'
+    assert noindex in head(site.Placement(desk, role="unlisted"))
+    for role in ("article", "page"):
+        assert "robots" not in head(site.Placement(desk, role=role)), role
+    # a web folder exported to disk is no page of the site
+    assert "robots" not in head(None)
+    # left to the look, the look's role decides
+    client.put(f"/api/cases/{cid}/notes/{made['id']}/look", json={"role": "unlisted"})
+    assert noindex in head(site.Placement(desk))
+    assert "robots" not in head(site.Placement(desk, role="article"))
+
+
 def test_a_note_asked_to_be_a_map_page_that_holds_no_map_is_an_article_in_its_card(client, tmp_path):
     cid = make_case(client, "NoMap")
     made = make_note(client, cid, title="No map", content="Words.\n")

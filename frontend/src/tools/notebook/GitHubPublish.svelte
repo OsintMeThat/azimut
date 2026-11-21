@@ -19,9 +19,10 @@
    * and the Picture its card has in the list. One line says where the note will appear, naming the
    * site for an Article; while Settings › Website holds no title, another says what the site is then
    * called, with a press to name it there.
-   * Each starts from the note's look; the category and the role go up with the publish and
-   * are kept in the look, the picture is kept in the look as it is picked. Whatever changes
-   * the look is told (`onlook`), so the Notebook never saves an older one over it.
+   * Each starts from the note's look, except that a note its editions say was never published to this site
+   * starts on Unlisted, so a first publish can be read before it is announced. The category and the role go
+   * up with the publish and are kept in the look, the picture is kept in the look as it is picked. Whatever
+   * changes the look is told (`onlook`), so the Notebook never saves an older one over it.
    *
    * **Author.** Who wrote the note, for an article written by someone else: its page is signed with
    * that name and the site's lists name it. Empty is the analyst, the name its placeholder shows. Beside
@@ -53,6 +54,7 @@
   import {
     GITHUB_FREE, MAX_SHORT, PAGES_PUBLIC, githubReady, shortNameFrom, shortNameOf, shortNameProblem,
   } from '../../lib/githubPagesSetup.js';
+  import { listEditions } from '../../lib/notes/editions.svelte.js';
   import { readLook, writeLook } from '../../lib/notes/look.js';
   import { foldText } from '../../lib/textFold.js';
   import { siteName } from '../../lib/websiteHub.js';
@@ -104,6 +106,10 @@
 
   // what the note is on the site: read from its look once the dialog shows, and sent with the publish
   let loaded = $state(false);
+  // the role the look keeps, '' for an article or none, null until read; and whether the note was never published
+  // to this site (null until its editions say), which starts it on Unlisted
+  let ownRole = $state(null);
+  let fresh = $state(null);
   let category = $state('');
   let role = $state('article');
   let listImage = $state('');
@@ -165,7 +171,7 @@
       if (!live) return;
       ownCategory = look.category ?? '';
       if (!touched.category) category = ownCategory;
-      if (!touched.role) role = look.role === 'page' || look.role === 'unlisted' ? look.role : 'article';
+      ownRole = look.role === 'page' || look.role === 'unlisted' ? look.role : '';
       if (!touched.place) {
         coords = placeText(look.place);
         placeName = look.place?.name ?? '';
@@ -178,6 +184,23 @@
       loaded = true;
     }).catch(() => {});
     return () => { live = false; };
+  });
+
+  // whether the note was ever published to this site: its records name the repository. Unread, it is as before
+  $effect(() => {
+    if (!ready) return;
+    const site = `${github.account}/${github.repo}`.toLowerCase();
+    let live = true;
+    listEditions(caseId, noteId)
+      .then((list) => { if (live) fresh = !list.some((edition) => edition.format === 'github' && String(edition.repository ?? '').toLowerCase() === site); })
+      .catch(() => { if (live) fresh = false; });
+    return () => { live = false; };
+  });
+
+  // the role shown: the look's page or unlisted, else Unlisted for a first publish here, else Article; a choice made stands
+  $effect(() => {
+    if (ownRole === null || touched.role) return;
+    role = ownRole || (fresh ? 'unlisted' : 'article');
   });
 
   // the point the note offers for its place, read from the case once GitHub is set up; a failed read offers none
