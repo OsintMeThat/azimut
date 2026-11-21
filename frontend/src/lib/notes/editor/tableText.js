@@ -26,12 +26,13 @@
  * the table's own text), for the editor to dispatch as one transaction.
  */
 
+import { ENTITY_REF, MEDIA_REF, blankCell as blank, dayParts, digits, monthWord, plainText, readDay, readNumber, separators } from '../../cellRead.js';
 import { readLook } from './tableLook.js';
 
+export { plainText, readNumber };
+
 // ── What the renderers rewrite before they split a row ─────────────────────────
-// The same patterns as `engine/notetext.py` and `lib/markdown.js`.
-const ENTITY_REF = /\[\[entity:([A-Za-z0-9_-]+)\|([^\]]+)\]\]/g;
-const MEDIA_REF = /\[\[media:([A-Za-z0-9_-]+)\|([^\]]+)\]\](?:\{([^}\n]+)\})?/g;
+// The chips' patterns are `lib/cellRead.js`'s, the same as `engine/notetext.py` and `lib/markdown.js`.
 const IMAGE_ATTRS = /!\[([^\]]*)\]\((\S+?)(?:\s+["']([^"']*)["'])?\)\s*\{([^}\n]+)\}/g;
 
 /** The most rows a pasted or imported table keeps; a line under it names the cut. */
@@ -991,182 +992,11 @@ function dateKeys(texts) {
 
 // ── Reading cells as words, numbers and dates ───────────────────────────────────
 
-/** A cell's Markdown as the words it shows: chips and links as their labels, no marks. */
-export function plainText(markdown) {
-  return String(markdown ?? '')
-    .replace(MEDIA_REF, (_match, _id, label) => label)
-    .replace(ENTITY_REF, (_match, _id, label) => label)
-    .replace(/!\[([^\]]*)\]\([^)]*\)(?:\{[^}\n]*\})?/g, '$1')
-    .replace(/\[([^\]]*)\]\([^)]*\)/g, '$1')
-    .replace(/<((?:https?|mailto):[^>\s]+)>/g, '$1')
-    .replace(/<\/?[A-Za-z][^>]*>/g, '')
-    .replace(/(\*\*|__|~~)(?=\S)([\s\S]*?\S)\1/g, '$2')
-    .replace(/(^|[^\w*])([*_])(?=\S)([\s\S]*?\S)\2(?![\w*])/g, '$1$3')
-    .replace(/(`+)([\s\S]*?)\1/g, '$2')
-    .replace(/\\([!-/:-@[-`{-~])/g, '$1')
-    .trim();
-}
-
 /** Whether a row reads as a total: its first cell in bold, or naming a total. */
 export function isTotalRow(cells) {
   const first = (cells ?? []).find((cell) => String(cell).trim()) ?? '';
   if (/^\s*(\*\*|__)[\s\S]+\1\s*$/.test(first)) return true;
   return /^(?:total|totals|grand total|subtotal|sum|overall)\b/i.test(plainText(first));
-}
-
-const PLACEHOLDER = /^(?:[-–—‒?]+|n\/?a)$/i;
-const blank = (text) => {
-  const plain = plainText(text);
-  return !plain || PLACEHOLDER.test(plain);
-};
-
-const FLOOR = /^(?:≥|>=|⩾|>|at least|no (?:fewer|less) than|more than|over|min(?:imum)?\.?(?=\s|\d|$))\s*/i;
-const CEILING = /^(?:≤|<=|⩽|<|up to|at most|no more than|fewer than|less than|under|max(?:imum)?\.?(?=\s|\d|$))\s*/i;
-const APPROX = /^(?:~|≈|∼|about|around|approx(?:imately|\.)?|roughly|nearly|almost|some|circa|ca\.|c\.)\s*/i;
-const CURRENCY = /^(?:US\$|A\$|C\$|HK\$|NZ\$|\$|€|£|¥|₹|₽|₺|₴|₪|﷼|(?:USD|EUR|GBP|JPY|CNY|RUB|UAH|TRY|SAR|AED|YER|ILS|IRR|CHF|CAD|AUD|INR|EGP|QAR|KWD|OMR|JOD|LBP|SYP|IQD)(?=[\s\d]))\s?/;
-const NUMBER = /^(\d{1,3}(?:([,.' \u00a0\u202f’])\d{3})(?:\2\d{3})*(?!\d)|\d+)([.,]\d+)?/;
-const MULTIPLIER = /^(?:\s?(bn|billion|billions|mn|million|millions|thousand)\b|(k|K|M|Mn|B|Bn)(?![\p{L}\d]))/u;
-const SCALE = { k: 1e3, K: 1e3, thousand: 1e3, M: 1e6, Mn: 1e6, mn: 1e6, million: 1e6, millions: 1e6, B: 1e9, Bn: 1e9, bn: 1e9, billion: 1e9, billions: 1e9 };
-const UNIT = /^(?:\s?(%|‰|°[CF]?|€|£|\$|¥|₽|₺|₴|₪)|\s?(USD|EUR|GBP|AED|SAR|YER)|\s?([a-zµ][a-zµ²³/]{0,3})(?![\p{L}\d])|\s([\p{L}][\p{L}’'-]{0,15}))/iu;
-const RANGE = /^\s*(?:[-–—]|to)\s*/i;
-
-/**
- * The number a written cell holds, or null when it is not one: `41`, `1 234,5`,
- * `$8.3M`, `80%`, `≥ 41` or `41+` (a floor), `up to 20` (a ceiling), `~12` (about).
- * `8–10` is a range: no single value, its two ends in `range`. `decimal` says which
- * of `.` and `,` is the decimal mark when the cell alone cannot tell (`1,234`).
- * @returns {null | { value: number|null, range: [number, number]|null, floor: boolean, ceiling: boolean, approx: boolean, unit: string, decimal: '.'|',', thousands: string }}
- */
-export function readNumber(text, { decimal } = {}) {
-  let rest = plainText(text);
-  if (!rest || PLACEHOLDER.test(rest)) return null;
-  const date = readDate(rest);
-  if (date && date.length === rest.length) return null;
-  const reading = { value: null, range: null, floor: false, ceiling: false, approx: false, unit: '', decimal: decimal ?? '.', thousands: '' };
-  for (let changed = true; changed;) {
-    changed = false;
-    for (const [pattern, flag] of [[FLOOR, 'floor'], [CEILING, 'ceiling'], [APPROX, 'approx']]) {
-      const match = pattern.exec(rest);
-      if (match && match[0]) {
-        reading[flag] = true;
-        rest = rest.slice(match[0].length);
-        changed = true;
-      }
-    }
-  }
-  const tail = /\s*(?:\+|\s(?:or|and) more|\s(?:or (?:less|fewer)))$/i.exec(rest);
-  if (tail) {
-    if (/less|fewer/i.test(tail[0])) reading.ceiling = true;
-    else reading.floor = true;
-    rest = rest.slice(0, rest.length - tail[0].length);
-  }
-  const first = readAmount(rest, decimal);
-  if (!first) return null;
-  rest = rest.slice(first.length);
-  reading.unit = first.unit;
-  reading.thousands = first.thousands;
-  if (first.decimal) reading.decimal = first.decimal;
-  const between = RANGE.exec(rest);
-  if (between && rest.length > between[0].length) {
-    const second = readAmount(rest.slice(between[0].length), decimal);
-    if (!second || rest.length !== between[0].length + second.length) return null;
-    // `8-10M` scales both ends; `$120k-$250k` each its own
-    reading.range = [scaled(first.value, first.scaled ? first.scale : second.scale), scaled(second.value, second.scale)];
-    reading.unit = first.unit || second.unit;
-    return reading;
-  }
-  if (rest.trim()) return null;
-  reading.value = scaled(first.value, first.scale);
-  return reading;
-}
-
-/** `8.3` times a million as 8300000, not 8300000.000000001. */
-function scaled(value, scale) {
-  return scale === 1 ? value : Number((value * scale).toPrecision(15));
-}
-
-/** One amount at the start of `text`: sign, currency, digits, scale and unit. */
-function readAmount(text, decimal) {
-  let at = 0;
-  let unit = '';
-  let sign = 1;
-  if (/^[-−]/.test(text)) {
-    sign = -1;
-    at += 1;
-  }
-  const currency = CURRENCY.exec(text.slice(at));
-  if (currency) {
-    unit = currency[0].trim();
-    at += currency[0].length;
-  }
-  if (sign === 1 && /^[-−]/.test(text.slice(at))) {
-    sign = -1;
-    at += 1;
-  }
-  const number = NUMBER.exec(text.slice(at));
-  if (!number) return null;
-  at += number[0].length;
-  const [, whole, group, fraction] = number;
-  let value;
-  let thousands = '';
-  let mark = fraction ? fraction[0] : '';
-  if (group && fraction && fraction[0] === group) return null;
-  if (group && !fraction && (group === ',' || group === '.') && whole.split(group).length === 2 && group === decimal) {
-    value = Number(whole.replace(group, '.'));
-    mark = group;
-  } else {
-    if (group) thousands = group;
-    value = Number(whole.split(group || '\u0000').join('') + (fraction ? `.${fraction.slice(1)}` : ''));
-  }
-  let scale = 1;
-  let scaled = false;
-  const multiplier = MULTIPLIER.exec(text.slice(at));
-  if (multiplier) {
-    scale = SCALE[multiplier[1] ?? multiplier[2]];
-    scaled = true;
-    at += multiplier[0].length;
-  }
-  const suffix = UNIT.exec(text.slice(at));
-  if (suffix) {
-    const word = suffix[1] ?? suffix[2] ?? suffix[3] ?? suffix[4];
-    if (!MONTHS[monthKey(word)] && !/^(?:to|or|and)$/i.test(word)) {
-      unit = unit || word;
-      at += suffix[0].length;
-    }
-  }
-  return { value: sign * value, scale, scaled, unit, thousands, decimal: mark, length: at };
-}
-
-/**
- * Which of `.` and `,` is a column's decimal mark, and what groups its thousands:
- * a cell holding both says it, `1,5` says comma, `12.7590` says point, `1,234,567`
- * says the comma groups thousands. Nothing telling leaves `fallback`.
- */
-function separators(texts, fallback) {
-  let comma = 0;
-  let point = 0;
-  const groups = [];
-  for (const text of texts) {
-    const core = /\d[\d,.' \u00a0\u202f’]*\d|\d/.exec(plainText(text))?.[0];
-    if (!core) continue;
-    const match = NUMBER.exec(core);
-    if (!match) continue;
-    const [whole, , group, fraction] = [match[0], match[1], match[2], match[3]];
-    if (fraction) {
-      if (fraction[0] === ',') comma += 1;
-      else point += 1;
-    }
-    if (group) {
-      groups.push(group);
-      if (!fraction && (group === ',' || group === '.') && whole.split(group).length > 2) {
-        if (group === ',') point += 0.5;
-        else comma += 0.5;
-      }
-    }
-  }
-  const decimal = comma > point ? ',' : point > comma ? '.' : fallback ?? '.';
-  const thousands = mostCommon(groups.filter((group) => group !== decimal), '');
-  return { decimal, thousands };
 }
 
 /**
@@ -1205,25 +1035,6 @@ export function readColumns(table, { decimal } = {}) {
   return table.header.map((header, column) => ({ column, header, ...readColumn(header, table.rows.map((row) => row[column]), { decimal }) }));
 }
 
-const MONTHS = {
-  jan: 1, january: 1, janv: 1, janvier: 1,
-  feb: 2, february: 2, fev: 2, fevr: 2, fevrier: 2,
-  mar: 3, march: 3, mars: 3,
-  apr: 4, april: 4, avr: 4, avril: 4,
-  may: 5, mai: 5,
-  jun: 6, june: 6, juin: 6,
-  jul: 7, july: 7, juil: 7, juillet: 7,
-  aug: 8, august: 8, aout: 8,
-  sep: 9, sept: 9, september: 9, septembre: 9,
-  oct: 10, october: 10, octobre: 10,
-  nov: 11, november: 11, novembre: 11,
-  dec: 12, december: 12, decembre: 12,
-};
-
-function monthKey(word) {
-  return String(word ?? '').toLowerCase().normalize('NFD').replace(/\p{M}/gu, '').replace(/\.$/, '');
-}
-
 const ISO_DATE = /^(\d{4})[-/.](\d{1,2})(?:[-/.](\d{1,2}))?(?:[T ](\d{1,2}):(\d{2}))?(?!\d)/;
 const NUMERIC_DATE = /^(\d{1,2})[/.-](\d{1,2})[/.-](\d{4}|\d{2})(?!\d)/;
 const DAY_MONTH = /^(\d{1,2})(?:st|nd|rd|th|er)?(?:\s*[-–—]\s*\d{1,2}(?:st|nd|rd|th)?)?\s+(\p{L}+)\.?(?:,?\s+(\d{4}))?(?![\p{L}\d])/u;
@@ -1231,13 +1042,20 @@ const MONTH_DAY = /^(\p{L}+)\.?\s+(\d{1,2})(?:st|nd|rd|th)?(?:\s*[-–—]\s*\d{
 const MONTH_YEAR = /^(\p{L}+)\.?\s+(\d{4})(?!\d)/u;
 
 /**
- * The date a cell starts with: `2026-11-13`, `13/11/2026`, `13 Nov 2026`,
- * `Nov 13, 2026`, `Nov 2026`, `13 Nov`, or a span like `4-6 Nov` (its first day).
- * English and French month names. `length` is how much of the text it took.
+ * The date a cell starts with, for sorting: a day `lib/cellRead.js` reads whole, in any
+ * language (`13 Nov 2026`, `13 novembre 2026`, `13/11/2026`, `Nov 2026`, `13 Nov`), else
+ * one the cell starts with, `2026-11-13 14:30`, `13/11/26` or a span like `4-6 Nov` (its
+ * first day). A month or a year alone is not one: a heading as often as a day, and a count.
+ * `length` is how much of the text it took.
  * @returns {null | { year: number|null, month: number, day: number|null, minutes: number, length: number }}
  */
 export function readDate(text) {
-  const value = plainText(text);
+  const value = digits(plainText(text));
+  const whole = readDay(value);
+  if (whole && whole.precision !== 'year' && (whole.precision === 'day' || whole.year)) {
+    const { year, month, day } = dayParts(whole);
+    return { year: whole.year ? year : null, month, day: whole.precision === 'day' ? day : null, minutes: 0, length: value.length };
+  }
   const valid = (year, month, day, minutes, length) => (month >= 1 && month <= 12 && (day === null || (day >= 1 && day <= 31))
     ? { year, month, day, minutes, length } : null);
   let match = ISO_DATE.exec(value);
@@ -1253,11 +1071,11 @@ export function readDate(text) {
     return valid(year, month, day, 0, match[0].length);
   }
   match = DAY_MONTH.exec(value);
-  if (match && MONTHS[monthKey(match[2])]) return valid(match[3] ? Number(match[3]) : null, MONTHS[monthKey(match[2])], Number(match[1]), 0, match[0].length);
+  if (match && monthWord(match[2])) return valid(match[3] ? Number(match[3]) : null, monthWord(match[2]), Number(match[1]), 0, match[0].length);
   match = MONTH_DAY.exec(value);
-  if (match && MONTHS[monthKey(match[1])]) return valid(match[3] ? Number(match[3]) : null, MONTHS[monthKey(match[1])], Number(match[2]), 0, match[0].length);
+  if (match && monthWord(match[1])) return valid(match[3] ? Number(match[3]) : null, monthWord(match[1]), Number(match[2]), 0, match[0].length);
   match = MONTH_YEAR.exec(value);
-  if (match && MONTHS[monthKey(match[1])]) return valid(Number(match[2]), MONTHS[monthKey(match[1])], null, 0, match[0].length);
+  if (match && monthWord(match[1])) return valid(Number(match[2]), monthWord(match[1]), null, 0, match[0].length);
   return null;
 }
 
