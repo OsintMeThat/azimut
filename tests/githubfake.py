@@ -4,8 +4,9 @@ Blobs, trees, commits and refs as the REST API's Git database answers them, a re
 Pages site and its builds. No test reaches GitHub, and none needs an account: the calls are held
 to GitHub's REST reference (docs.github.com), not to a live site. Shared by the tests of
 publishing a note (`test_githubpages.py`), of the site that publish keeps (`test_site_publish.py`) and of
-reading and deleting from it (`test_site_hub.py`). A tree entry with a null `sha` deletes what it names, a
-subfolder included, as GitHub's Git database does.
+reading and deleting from it (`test_site_hub.py`). A tree entry with a null `sha` deletes the file it names, as
+GitHub documents; of a folder, or of a path the tree does not hold, the fake refuses it with a 422. A folder
+whose files are all deleted is gone, as Git keeps no empty tree.
 """
 
 from __future__ import annotations
@@ -21,6 +22,10 @@ import httpx
 from azimut.engine import githubpages
 
 TOKEN = "github_pat_11ABCDEFG0" + "x" * 72
+
+
+class Rejected(Exception):
+    """A tree GitHub would refuse: the API answers 422 with this as its message."""
 
 
 def _sha(kind: str, payload: bytes) -> str:
@@ -77,22 +82,35 @@ class FakeGitHub:
             else:
                 sha = entry["sha"]
             if sha is None:
-                top.pop(first, None)
+                # GitHub documents a null sha as deleting a file: of a tree, or of a path the tree
+                # does not hold, it says nothing, and the fake refuses both
+                if entry["type"] != "blob" or first not in top or top[first]["type"] != "blob":
+                    raise Rejected(f"tree.sha cannot be null for {entry['type']} {first!r}")
+                top.pop(first)
                 continue
             assert sha in self.objects, f"tree names an object GitHub does not have: {sha}"
             top[first] = {"mode": entry["mode"], "type": entry["type"], "sha": sha}
         for first, inner in nested.items():
             below = top[first]["sha"] if first in top and top[first]["type"] == "tree" else None
-            top[first] = {"mode": "040000", "type": "tree", "sha": self.write_tree(below, inner)}
+            made = self.write_tree(below, inner)
+            if self.objects[made][1]:
+                top[first] = {"mode": "040000", "type": "tree", "sha": made}
+            else:
+                # Git keeps no empty folder: one whose files were all deleted is gone
+                top.pop(first, None)
         return self.tree(top)
 
     def walk(self, tree: str, prefix: str = "") -> dict[str, bytes]:
-        found: dict[str, bytes] = {}
+        return {path: self.objects[sha][1] for path, (sha, _mode) in self.walk_modes(tree, prefix).items()}
+
+    def walk_modes(self, tree: str, prefix: str = "") -> dict[str, tuple[str, str]]:
+        """Every file under a tree: its blob's id and the mode it was committed in."""
+        found: dict[str, tuple[str, str]] = {}
         for name, entry in self.objects[tree][1].items():
             if entry["type"] == "tree":
-                found.update(self.walk(entry["sha"], f"{prefix}{name}/"))
+                found.update(self.walk_modes(entry["sha"], f"{prefix}{name}/"))
             else:
-                found[f"{prefix}{name}"] = self.objects[entry["sha"]][1]
+                found[f"{prefix}{name}"] = (entry["sha"], entry["mode"])
         return found
 
     def files(self, repo: str = "octo/articles", branch: str = "main") -> dict[str, bytes]:
@@ -249,14 +267,17 @@ class FakeGitHub:
             if not found or found[0] != "tree":
                 return httpx.Response(404, json={})
             if request.url.params.get("recursive"):
-                listed = [{"path": path, "type": "blob", "sha": _sha("blob", data), "mode": "100644", "size": len(data)}
-                          for path, data in self.walk(sha).items()]
+                listed = [{"path": path, "type": "blob", "sha": blob, "mode": mode, "size": len(self.objects[blob][1])}
+                          for path, (blob, mode) in self.walk_modes(sha).items()]
             else:
                 listed = [{"path": name, **entry} for name, entry in found[1].items()]
             return httpx.Response(200, json={"sha": sha, "tree": listed,
                                              "truncated": bool(self.truncated and request.url.params.get("recursive"))})
         if git == "trees" and method == "POST":
-            return httpx.Response(201, json={"sha": self.write_tree(body.get("base_tree"), body["tree"])})
+            try:
+                return httpx.Response(201, json={"sha": self.write_tree(body.get("base_tree"), body["tree"])})
+            except Rejected as refused:
+                return httpx.Response(422, json={"message": str(refused)})
         if git.startswith("blobs/") and method == "GET":
             found = self.objects.get(git[len("blobs/"):])
             if not found or found[0] != "blob":

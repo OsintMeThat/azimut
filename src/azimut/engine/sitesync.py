@@ -278,11 +278,24 @@ def _on_site(address: str, home: Site) -> str:
     return home.address.rstrip("/") + address if address.startswith("/") else address
 
 
-def _item(card: dict[str, Any], home: Site, weight: int) -> dict[str, Any]:
+def _item(card: dict[str, Any], home: Site, weight: int, held: set[str]) -> dict[str, Any]:
+    # a card the list reads is a card of azimut-article/1, so the delete's guard (`githubpages.deletable`)
+    # is asked of the folder's name and files, which this tree holds already
     return {"folder": card["folder"], "address": _on_site(card["address"], home), "title": card["title"],
             "summary": card["summary"], "date": card["date"], "date_label": card["date_label"],
             "category": card["category"], "role": card["role"], "layout": card["layout"],
-            "image": _on_site(card["image"], home) if card["image"] else "", "bytes": weight}
+            "image": _on_site(card["image"], home) if card["image"] else "", "bytes": weight,
+            "deletable": githubpages.deletable(card["folder"], held, True)}
+
+
+def _held(entries: dict[str, str]) -> dict[str, set[str]]:
+    """The files of each folder at the site's root, by their paths from that folder."""
+    held: dict[str, set[str]] = {}
+    for path in entries:
+        top, _, rest = path.partition("/")
+        if rest:
+            held.setdefault(top, set()).add(rest)
+    return held
 
 
 def _weights(sizes: dict[str, int], folders: list[str]) -> dict[str, int]:
@@ -328,7 +341,8 @@ def survey(gh: githubpages.GitHub, owner: str, repo: str, home: Site, tree: gith
     cards.sort(key=lambda card: (card["date"], card["title"]), reverse=True)
     weight = _weights(tree.sizes, [card["folder"] for card in cards])
     out.bytes = sum(tree.sizes.values())
-    out.items = [_item(card, home, weight[card["folder"]]) for card in cards]
+    held = _held(entries)
+    out.items = [_item(card, home, weight[card["folder"]], held.get(card["folder"], set())) for card in cards]
     counts: dict[str, int] = {}
     for card in cards:
         if card["role"] == site.ARTICLE and card["category"]:

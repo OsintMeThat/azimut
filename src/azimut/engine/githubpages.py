@@ -52,8 +52,10 @@ later publish can say the folder was changed on GitHub since. Rebuilding those r
 without a note is `update_site`. Reading what the site holds, for Settings › Website, is
 `read_branch`: the same reads as a publish's plan, plus the head commit's date and first line,
 and nothing written. Taking a folder off the site is `delete_folder`: one commit that removes
-the folder (a tree entry with a null `sha` and mode `040000`, posted over `base_tree`) and
-rewrites the root files from the site as it will be without it; only a folder Azimut published.
+the folder file by file (a tree entry with a null `sha` for each blob the folder's recursive
+listing gave, in the mode it gave, posted over `base_tree`: GitHub documents a null `sha` for a
+file, and Git drops the folders it empties) and rewrites the root files from the site as it will
+be without it; only a folder Azimut published, and never one whose listing GitHub cut short.
 """
 
 from __future__ import annotations
@@ -65,7 +67,7 @@ import re
 import time
 from dataclasses import dataclass, field
 from datetime import datetime
-from typing import Any, Callable, Mapping
+from typing import Any, Callable, Iterable, Mapping
 from urllib.parse import quote, urljoin, urlsplit
 
 import httpx
@@ -137,6 +139,7 @@ NOT_SET = "GitHub Pages is not set up yet: Settings › Website › GitHub Pages
 PUBLISH_MOVED = "The branch changed on GitHub while Azimut was publishing: press Publish again."
 DELETE_MOVED = "The branch changed on GitHub while Azimut was deleting: press Delete again."
 NOT_OURS = "Azimut deletes only the folders it published."
+TOO_MANY_FILES = "The folder holds more files than Azimut can read: delete it on GitHub."
 GONE = "That folder is not on the site any more."
 
 
@@ -171,7 +174,7 @@ class FolderGone(NotFound):
 
 
 class NotOurs(GitHubError):
-    """The folder to delete is not one Azimut published: it is never deleted."""
+    """The folder to delete is not one Azimut deletes: not one it published, or too large to read whole."""
 
 
 class RateLimited(GitHubError):
@@ -951,12 +954,26 @@ def read_branch(gh: GitHub, owner: str, repo: str, branch: str, root: str) -> Br
     return BranchRead(read_tree(gh, owner, repo, opened.level), opened.date, opened.message)
 
 
+def deletable_name(folder: str) -> bool:
+    """Whether a folder's name is one Azimut could have published: a short name at the site's root,
+    which is none of the folders no card lives in (`site.SKIP`)."""
+    return "/" not in folder and folder not in site_engine.SKIP and bool(SHORT.match(folder))
+
+
+def deletable(folder: str, held: Iterable[str], card: bool) -> bool:
+    """Whether `delete_folder` takes ``folder``: the one guard of the delete and of what the read
+    says can be deleted. ``held`` are the paths of the folder's files relative to it, ``card`` whether
+    its `article.json` is a card of `azimut-article/1`."""
+    files = set(held)
+    return deletable_name(folder) and card and site_engine.CARD in files and all(part in files for part in OURS)
+
+
 @dataclass
 class Deleted:
     commit: str
     folder: str
-    #: How many files the folder held, None when GitHub cut its listing short.
-    removed: int | None
+    #: How many files the folder held.
+    removed: int
     #: The files written at the site's root, the words to say about them, and the categories read.
     root: list[str] = field(default_factory=list)
     warnings: list[str] = field(default_factory=list)
@@ -969,9 +986,10 @@ def delete_folder(gh: GitHub, owner: str, repo: str, branch: str, root: str, fol
     root files ``plan`` names for the site as it will be without it.
 
     Only a folder Azimut published goes: one level down, holding a card of `azimut-article/1`
-    and Azimut's own files (`OURS`), else `NotOurs`; a folder that is not there is `FolderGone`.
-    The branch moving on GitHub meanwhile is `BranchMoved`, with nothing changed."""
-    if ("/" in folder or folder in site_engine.SKIP or not SHORT.match(folder)):
+    and Azimut's own files (`OURS`), else `NotOurs`, as is a folder whose listing GitHub cut short
+    (more files than Azimut ever publishes); a folder that is not there is `FolderGone`. The
+    branch moving on GitHub meanwhile is `BranchMoved`, with nothing changed."""
+    if not deletable_name(folder):
         raise NotOurs(NOT_OURS, 422)
     above = [part for part in root.strip("/").split("/") if part]
     opened = _open(gh, owner, repo, branch, above)
@@ -982,18 +1000,24 @@ def delete_folder(gh: GitHub, owner: str, repo: str, branch: str, root: str, fol
         raise FolderGone(GONE, 404)
     listing = _dict(gh.call("GET", _repo_path(owner, repo, f"/git/trees/{_sha(found.get('sha'))}"),
                             query={"recursive": "1"}, doing="read the article's files"))
+    if listing.get("truncated"):
+        raise NotOurs(TOO_MANY_FILES, 422)
     listed = listing.get("tree")
-    held = {str(item.get("path")): str(item.get("sha")) for item in (listed if isinstance(listed, list) else [])
-            if isinstance(item, dict) and item.get("type") == "blob" and isinstance(item.get("sha"), str)}
+    blobs = [item for item in (listed if isinstance(listed, list) else [])
+             if isinstance(item, dict) and item.get("type") == "blob" and isinstance(item.get("sha"), str)]
+    held = {str(item.get("path")): str(item.get("sha")) for item in blobs}
     card = read_blob(gh, owner, repo, held[site_engine.CARD], site_engine.MAX_CARD_BYTES) \
         if site_engine.CARD in held else None
-    if not (all(part in held for part in OURS) and card is not None and site_engine.is_card(card)):
+    if not deletable(folder, held, card is not None and site_engine.is_card(card)):
         raise NotOurs(NOT_OURS, 422)
     made = plan(opened.level, folder, None)
-    entries: list[dict[str, Any]] = [{"path": folder, "mode": "040000", "type": "tree", "sha": None}]
+    # the folder goes file by file, each in the mode the listing gave it; Git drops the folders it empties
+    entries: list[dict[str, Any]] = [
+        {"path": f"{folder}/{item.get('path')}", "mode": str(item.get("mode") or "100644"), "type": "blob", "sha": None}
+        for item in sorted(blobs, key=lambda one: str(one.get("path")))]
     entries += _root_entries(gh, owner, repo, made, folder, pace=len(made.files) > PACE_FROM)
     sha = _land(gh, owner, repo, branch, opened, above, entries, message, moved=DELETE_MOVED)
-    return Deleted(commit=sha, folder=folder, removed=None if listing.get("truncated") else len(held),
+    return Deleted(commit=sha, folder=folder, removed=len(held),
                    root=sorted(made.files), warnings=list(made.warnings), categories=made.categories)
 
 
@@ -1019,7 +1043,7 @@ __all__ = [
     "API", "API_VERSION", "BAD_TOKEN", "BranchMoved", "BranchRead", "Build", "Conflict", "DEFAULT_BRANCH",
     "DEFAULT_REPO", "Deleted", "FolderGone", "GitHub", "GitHubError", "NOT_SET", "NotFound", "NotOurs", "Pages",
     "Published", "RateLimited", "Repository", "account_name", "article_address", "blob_sha", "branch_name",
-    "build_state", "client", "create_repository", "delete_folder", "folder_tree", "head", "page_state", "pages",
-    "publish", "read_blob", "read_branch", "read_site", "read_tree", "repository", "repository_name", "short_name",
-    "site_base", "turn_on_pages", "update_site", "whoami",
+    "build_state", "client", "create_repository", "deletable", "deletable_name", "delete_folder", "folder_tree",
+    "head", "page_state", "pages", "publish", "read_blob", "read_branch", "read_site", "read_tree", "repository",
+    "repository_name", "short_name", "site_base", "turn_on_pages", "update_site", "whoami",
 ]

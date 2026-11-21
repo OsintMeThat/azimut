@@ -207,7 +207,7 @@ def test_the_read_lists_every_card_newest_first_with_addresses_on_the_site(clien
          "article", "article")]
     first = said["items"][0]
     assert list(first) == ["folder", "address", "title", "summary", "date", "date_label", "category", "role",
-                           "layout", "image", "bytes"]
+                           "layout", "image", "bytes", "deletable"]
     assert first["address"] == f"https://osintmethat.com/{ARTICLES}/"
     assert first["title"] == "The fall of the Bab al-Mandab front, Sep-Nov 2026"
     assert first["date"] == "2026-11-20" and first["date_label"] == "20 November 2026"
@@ -574,6 +574,50 @@ def test_delete_refuses_a_folder_azimut_did_not_publish_and_writes_nothing(clien
     assert not _written(fake) and len(fake.history()) == 1
 
 
+def test_each_item_says_whether_a_delete_would_take_it_and_the_delete_agrees(client, fake):
+    fake.make_repo(files={
+        "README.md": b"x", "index.html": b"<h1>Mine</h1>",
+        **_folder("good", "Good", "2026-11-25"),
+        **_folder("2026/01/05/nested", "Nested", "2026-11-24"),
+        "no-files/article.json": _card_file("No files", "2026-11-23"),
+        "no-index/article.json": _card_file("No index", "2026-11-22"), "no-index/share.jpg": b"jpg",
+        "no-share/article.json": _card_file("No share", "2026-11-21"), "no-share/index.html": b"x",
+        **_folder("Upper", "Upper case", "2026-11-20"),
+        **_folder("with_assets", "With assets", "2026-11-19"), "with_assets/assets/a.png": b"png"})
+    _connect(client)
+    said = {item["folder"]: item["deletable"] for item in client.post(READ).json()["items"]}
+    assert said == {"good": True, "2026/01/05/nested": False, "no-files": False, "no-index": False,
+                    "no-share": False, "Upper": False, "with_assets": True}
+    # the delete takes exactly what the read said it would, and writes nothing for the others
+    for folder, deletable in said.items():
+        answer = client.post(DELETE, json={"folder": folder})
+        assert (answer.status_code == 200) == deletable, (folder, answer.text)
+        assert deletable or answer.json()["detail"] == "Azimut deletes only the folders it published."
+    assert len(fake.history()) == 3
+    left = {item["folder"] for item in client.post(READ).json()["items"]}
+    assert left == {folder for folder, deletable in said.items() if not deletable}
+
+
+def test_the_live_sites_root_folders_are_deletable_and_its_nested_cards_are_not(client, fake):
+    _the_live_site(client, fake)
+    said = {item["folder"]: item["deletable"] for item in client.post(READ).json()["items"]}
+    assert said[ARTICLES] is True and said["bab-el-mandab-2026-map"] is True
+    assert said["operation-absolute-resolve-map"] is True
+    assert [folder for folder, deletable in said.items() if not deletable] == [
+        folder for folder in said if "/" in folder] and len(said) == 7
+
+
+def test_the_one_guard_of_the_delete_and_of_the_read():
+    ours = ("article.json", *githubpages.OURS, "assets/x.png")
+    assert githubpages.deletable("port-strike", ours, True) is True
+    assert githubpages.deletable("port-strike", ours, False) is False
+    assert githubpages.deletable("port-strike", ("article.json", "index.html"), True) is False
+    assert githubpages.deletable("port-strike", ("index.html", "share.jpg"), True) is False
+    for name in ("a/b", "theme", ".git", "wp-content", "Upper", "", "..", "a b"):
+        assert githubpages.deletable_name(name) is False and githubpages.deletable(name, ours, True) is False
+    assert githubpages.deletable_name("port-strike") and githubpages.deletable_name("a_b-2")
+
+
 def test_delete_asks_for_a_name_and_never_a_path_to_walk(client, fake):
     fake.make_repo()
     _connect(client)
@@ -611,12 +655,24 @@ def test_delete_says_what_is_missing_and_what_github_said(client, fake):
     assert len(fake.history()) == 1 and "older/index.html" in fake.files()
 
 
-def test_delete_from_a_tree_github_cut_short_still_removes_the_folder_and_says_the_lists_were_left(client, fake):
+def test_delete_of_a_folder_github_cut_short_is_refused_before_anything_is_written(client, fake):
     fake.make_repo(files={"README.md": b"x", **_folder("older", "Older")})
     _connect(client)
     fake.truncated = True
+    answer = client.post(DELETE, json={"folder": "older"})
+    assert answer.status_code == 422
+    assert answer.json()["detail"] == "The folder holds more files than Azimut can read: delete it on GitHub."
+    assert not _written(fake) and len(fake.history()) == 1 and "older/index.html" in fake.files()
+
+
+def test_delete_from_a_site_too_large_to_read_still_removes_the_folder_and_says_the_lists_were_left(
+        client, fake, monkeypatch):
+    fake.make_repo(files={"README.md": b"x", **_folder("older", "Older")})
+    _connect(client)
+    # the site's own listing is more than Azimut reads; the folder's is not
+    monkeypatch.setattr(githubpages, "MAX_TREE", 50)
     said = client.post(DELETE, json={"folder": "older"}).json()
-    assert said["ok"] is True and said["removed"] is None and said["written"] == []
+    assert said["ok"] is True and said["removed"] == 3 and said["written"] == []
     assert said["warnings"] == [site.TREE_TOO_LONG]
     assert not [path for path in fake.files() if path.startswith("older/")]
 
@@ -629,10 +685,52 @@ def test_a_delete_reads_the_site_once_and_reaches_only_github(client, fake):
     recursive = [request for request in fake.requests if request.method == "GET"
                  and "/git/trees/" in request.url.path and request.url.params.get("recursive")]
     assert len(recursive) == 2
-    deleting = [request for request in fake.posted("/git/trees") if b'"sha": null' in request.content
-                or b'"sha":null' in request.content]
-    assert len(deleting) == 1 and json.loads(deleting[0].content)["tree"][0] == {
-        "path": ARTICLES, "mode": "040000", "type": "tree", "sha": None}
+    # the folder goes file by file: a null sha for each blob, none for a folder
+    trees = [json.loads(request.content)["tree"] for request in fake.posted("/git/trees")]
+    deleting = [entries for entries in trees if any(entry["sha"] is None for entry in entries)]
+    assert len(deleting) == 1
+    assert [entry for entry in deleting[0] if entry["sha"] is None] == [
+        {"path": f"{ARTICLES}/{name}", "mode": "100644", "type": "blob", "sha": None}
+        for name in ("article.json", "index.html", "share.jpg")]
+    assert not [entry for entry in deleting[0] if entry["type"] == "tree"]
+
+
+def test_a_delete_keeps_each_files_mode_and_leaves_no_empty_folder_behind(client, fake):
+    fake.make_repo(files={"README.md": b"x", **_folder("older", "Older"), "older/assets/deep/a.png": b"png",
+                          "older/run.sh": b"#!/bin/sh\n", "kept/notes.txt": b"mine"})
+    # one file committed as executable: the mode its listing gives is the one the deletion carries
+    head = fake.repos["octo/articles"]["refs"]["main"]
+    tree = fake.write_tree(fake.objects[head][1]["tree"], [
+        {"path": "older/run.sh", "mode": "100755", "type": "blob", "sha": fake.blob(b"#!/bin/sh\n")}])
+    fake.repos["octo/articles"]["refs"]["main"] = fake.commit(tree, [head], "executable")
+    _connect(client)
+    said = client.post(DELETE, json={"folder": "older"}).json()
+    assert said["ok"] is True and said["removed"] == 5
+    sent = [entry for request in fake.posted("/git/trees") for entry in json.loads(request.content)["tree"]
+            if entry["sha"] is None]
+    assert {entry["path"]: entry["mode"] for entry in sent}["older/run.sh"] == "100755"
+    assert {entry["mode"] for entry in sent} == {"100644", "100755"}
+    # the folder and its subfolders are gone from the tree, not left empty; what is not Azimut's stays
+    head = fake.repos["octo/articles"]["refs"]["main"]
+    top = fake.objects[fake.objects[head][1]["tree"]][1]
+    assert "older" not in top and "kept" in top
+    assert not [path for path in fake.files() if path.startswith("older/")]
+
+
+def test_the_fake_refuses_what_github_does_not_document_as_a_deletion(fake):
+    """A null sha deletes a file; it is a 422 for a folder and for a path the tree does not hold."""
+    fake.make_repo(files={"a/one.txt": b"1", "b.txt": b"2"})
+    gh = githubpages.GitHub(TOKEN, githubpages.client(fake.transport()))
+    base = fake.objects[fake.repos["octo/articles"]["refs"]["main"]][1]["tree"]
+
+    def post(entries: list[dict[str, Any]]) -> httpx.Response:
+        return gh.http.post(f"{githubpages.API}/repos/octo/articles/git/trees", json={"base_tree": base, "tree": entries},
+                            headers={"Authorization": f"Bearer {TOKEN}", "X-GitHub-Api-Version": githubpages.API_VERSION})
+
+    assert post([{"path": "a", "mode": "040000", "type": "tree", "sha": None}]).status_code == 422
+    assert post([{"path": "a/missing.txt", "mode": "100644", "type": "blob", "sha": None}]).status_code == 422
+    assert post([{"path": "nothing.txt", "mode": "100644", "type": "blob", "sha": None}]).status_code == 422
+    assert post([{"path": "a/one.txt", "mode": "100644", "type": "blob", "sha": None}]).status_code == 201
 
 
 # -- the Privacy page starter ----------------------------------------------------------------------------------
