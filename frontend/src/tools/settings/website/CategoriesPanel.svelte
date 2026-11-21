@@ -15,7 +15,6 @@
    *
    * Nothing is asked of GitHub until a press; the read is the session's (`lib/siteRead.svelte.js`).
    */
-  import BusyLabel from '../../../components/BusyLabel.svelte';
   import ConfirmDialog from '../../../components/ConfirmDialog.svelte';
   import Icon from '../../../components/Icon.svelte';
   import GitHubSetupPress from '../../../components/GitHubSetupPress.svelte';

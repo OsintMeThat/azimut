@@ -17,18 +17,19 @@ const press = async (key, node = trigger()) => {
 };
 
 /** The list as the publish window holds it: its value handed back as the dialog keeps it. */
-function show({ value = '', options: given = ['Conflict Watch', 'Methods & Tools', 'Élections'] } = {}) {
+function show({ value = '', options: given = ['Conflict Watch', 'Methods & Tools', 'Élections'], disabled = false } = {}) {
   const state = $state({ value });
   const onpick = vi.fn((next) => { state.value = next; });
+  const ondone = vi.fn();
   held = mount(PickList, {
     target: document.body,
     props: {
       get value() { return state.value; }, options: given, emptyLabel: 'No category', newLabel: 'New category…', newPlaceholder: 'New category',
-      maxlength: 60, id: 'export-category', title: 'The category this article is listed under on the site', label: 'Category', onpick,
+      maxlength: 60, id: 'export-category', title: 'The category this article is listed under on the site', label: 'Category', onpick, ondone, disabled,
     },
   });
   flushSync();
-  return { state, onpick };
+  return { state, onpick, ondone };
 }
 
 describe('a value picked from a list drawn as the app draws it', () => {
@@ -175,5 +176,36 @@ describe('a value picked from a list drawn as the app draws it', () => {
     field.dispatchEvent(new FocusEvent('blur'));
     await settle();
     expect(trigger().textContent.trim()).toBe('x'.repeat(60));
+  });
+
+  it('says a choice made once it is made, never a letter typed or an Escape, for a list acted on at once', async () => {
+    const { ondone } = show({ value: 'Conflict Watch' });
+    trigger().click();
+    await settle();
+    [...document.querySelectorAll('[role="option"]')][2].click();
+    await settle();
+    expect(ondone).toHaveBeenLastCalledWith('Methods & Tools', false);
+    trigger().click();
+    await settle();
+    [...document.querySelectorAll('[role="option"]')].at(-1).click();
+    await settle();
+    const field = document.querySelector('input.pick-field');
+    field.value = 'Deep dives';
+    field.dispatchEvent(new Event('input', { bubbles: true }));
+    await settle();
+    expect(ondone).toHaveBeenCalledTimes(1);
+    await press('Enter', field);
+    expect(ondone).toHaveBeenLastCalledWith('Deep dives', true);
+    trigger().click();
+    await settle();
+    [...document.querySelectorAll('[role="option"]')].at(-1).click();
+    await settle();
+    await press('Escape', document.querySelector('input.pick-field'));
+    expect(ondone).toHaveBeenCalledTimes(2);
+  });
+
+  it('can be held shut while something else is under way', async () => {
+    show({ disabled: true });
+    expect(trigger().disabled).toBe(true);
   });
 });
