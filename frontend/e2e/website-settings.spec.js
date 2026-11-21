@@ -764,4 +764,13 @@ test('draws every panel, dark and light', async ({ page }) => {
   await page.screenshot({ path: `${SHOTS}/articles-900-dark.png` });
   await tab(page, 'Overview').click();
   await page.screenshot({ path: `${SHOTS}/overview-900-dark.png` });
+  // a site with no home page yet: the step's own press
+  await page.setViewportSize({ width: 1280, height: 1000 });
+  await page.unroute('**/api/publishing/github/site/read');
+  await page.route('**/api/publishing/github/site/read', (route) => route.fulfill({ json: { ...READ, home: 'none', items: [], categories: [], marked: [] } }));
+  await tab(page, 'Articles').click();
+  await panel(page, 'Articles').getByRole('button', { name: 'Read the site again' }).click();
+  await tab(page, 'Overview').click();
+  await expect(panel(page, 'Overview').getByRole('button', { name: 'Put it online' })).toBeVisible();
+  await shoot('overview-home');
 });
