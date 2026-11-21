@@ -65,7 +65,8 @@ def test_a_chart_block_is_one_token_holding_its_lines_at_its_line():
     assert charts[0].tokens[0].content.strip("\n") == notecharts.block_of(ARMOURED)
     # the line of the block's first setting, which every warning of it counts from
     assert NOTE.split("\n")[charts[0].line] == "kind: stacked bars"
-    assert md.TOKEN_BLOCKS == {md.MAP: md.MAP_TOKEN, md.CHART: md.CHART_TOKEN, md.INFOGRAPHIC: md.INFOGRAPHIC_TOKEN}
+    assert md.TOKEN_BLOCKS == {md.MAP: md.MAP_TOKEN, md.CHART: md.CHART_TOKEN, md.INFOGRAPHIC: md.INFOGRAPHIC_TOKEN,
+                               md.POST: md.POST_TOKEN}
 
 
 def test_a_block_written_inside_a_code_fence_is_an_example_shown_as_text():
