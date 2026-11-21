@@ -85,9 +85,10 @@ opens the address instead.
 
 **The site.** The same press also keeps the analyst's website up to date (`engine/site.py`):
 the folder carries a card and the picture of its line in the site's list, with the category and
-the role (article or page) the dialog chose, stored in the note's look; and in the same commit
+the role (article, page or unlisted) the dialog chose, stored in the note's look; and in the same commit
 the site's list, feed, sitemap, marked pages and default home are rebuilt where Azimut made them.
-`/notes/legal-notice` makes the starter note of the Legal notice page.
+`/notes/legal-notice` and `/notes/privacy-notice` make the starter notes of the Legal notice and
+Privacy pages.
 """
 
 from __future__ import annotations
@@ -107,7 +108,7 @@ from fastapi import APIRouter, HTTPException, Query, Response
 from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
 
-from .. import errors, layout
+from .. import config, errors, layout
 from ..engine import exportdir
 from ..engine import githubpages
 from ..engine import links as link_engine
@@ -121,7 +122,7 @@ from ..engine import notefill, notefromcase, notelinks, notepieces, noteready, n
 from ..engine import pdffonts
 from ..engine import reveal as reveal_engine
 from ..engine import site as site_engine
-from ..engine import sitesync
+from ..engine import siteplace, sitesync
 from ..engine import urltitles
 from ..workspace import Case, CaseError
 from .cases import get_case
@@ -1827,9 +1828,17 @@ class GitHubPublishIn(BaseModel):
     offline_maps: bool = False
     #: The note's category and role on the site as the dialog chose them, kept in its look for
     #: the next press: left out (None) they are the look's own, `category: ""` is none, and a
-    #: page stays off the site's lists.
+    #: page or an unlisted page stays off the site's lists.
     category: str | None = Field(default=None, max_length=notelook.CATEGORY_MAX + 20)
-    role: Literal["article", "page"] | None = None
+    role: Literal["article", "page", "unlisted"] | None = None
+    #: Where the note stands on a map of the site's articles, kept in its look the same way: left
+    #: out it is the look's own, `null` is none.
+    place: notelook.NotePlace | None = None
+
+    @property
+    def chosen_place(self) -> notelook.NotePlace | None | Literal["own"]:
+        """The place the dialog chose, None for none, or `site.OWN_PLACE` when it said nothing of it."""
+        return self.place if "place" in self.model_fields_set else site_engine.OWN_PLACE
 
 
 class GitHubCheckIn(BaseModel):
@@ -1862,6 +1871,9 @@ def _github_record(item: dict[str, Any]) -> dict[str, Any] | None:
     tree = item.get("tree")
     if isinstance(tree, str) and githubpages.SHA1.match(tree):
         record["tree"] = tree
+    bare = item.get("bare_sha256")
+    if isinstance(bare, str) and SHA256.match(bare):
+        record["bare_sha256"] = bare
     changes = item.get("changes")
     if isinstance(changes, str) and changes.strip():
         record["changes"] = " ".join(changes.split())[:MAX_CHANGES]
@@ -1880,7 +1892,8 @@ def _github_page_state(record: dict[str, Any]) -> str:
     try:
         with githubpages.client() as http:
             return githubpages.page_state(githubpages.GitHub(target.token, http), owner, repo, record["branch"],
-                                          f"{record['path']}/{web_engine.INDEX}", record["sha256"])
+                                          f"{record['path']}/{web_engine.INDEX}", record["sha256"],
+                                          record.get("bare_sha256", ""))
     except githubpages.GitHubError as exc:
         raise HTTPException(status_code=502, detail=str(exc)) from exc
 
@@ -1909,6 +1922,24 @@ def _kept_in_look(case: Case, note_id: str, category: str | None, role: str | No
         notelook.save(case, note_id, look.model_copy(update=changed))
 
 
+def _place_kept(case: Case, note_id: str, place: notelook.NotePlace | None | Literal["own"]) -> None:
+    """The place the dialog chose, kept in the note's look for the next press; nothing when it said none."""
+    if isinstance(place, str):
+        return
+    look = notelook.stored(case, note_id) or notelook.DEFAULT
+    if look.place != place:
+        notelook.save(case, note_id, look.model_copy(update={"place": place}))
+
+
+@router.get("/{case_id}/notes/{note_id}/place")
+def suggested_place(case_id: str, note_id: str) -> dict[str, Any]:
+    """The point the publish dialog offers for the note's place on the site's map, or None
+    (`engine/siteplace.py`): offered only, never kept until the analyst takes it. Reads the case only."""
+    case = get_case(case_id)
+    _require_note(case, note_id)
+    return {"suggested": siteplace.suggest(case, note_id)}
+
+
 @router.post("/{case_id}/notes/{note_id}/github/check")
 def github_check(case_id: str, note_id: str, body: GitHubCheckIn) -> dict[str, Any]:
     """The check before publishing, on its press: whether the folder this publish would replace
@@ -1933,10 +1964,11 @@ def github_check(case_id: str, note_id: str, body: GitHubCheckIn) -> dict[str, A
                 return {"checked": False, "exists": False, "edited": False, "warning": ""}
             folder = f"{pages.root}{short}"
             now = githubpages.folder_tree(gh, target.account, target.repo, target.branch, folder)
+            before = _published_tree(case, note_id, f"{target.account}/{target.repo}", target.branch, folder)
+            # a bar Update the site changed is no edit of the analyst's
+            edited = githubpages.changed_since(gh, target.account, target.repo, before, now)
     except githubpages.GitHubError as exc:
         raise HTTPException(status_code=502, detail=str(exc)) from exc
-    before = _published_tree(case, note_id, f"{target.account}/{target.repo}", target.branch, folder)
-    edited = bool(before and now and now != before)
     return {"checked": True, "exists": bool(now), "edited": edited, "warning": site_engine.HAND_EDITED if edited else ""}
 
 
@@ -1987,7 +2019,8 @@ def github_publish(case_id: str, note_id: str, body: GitHubPublishIn) -> dict[st
             except web_engine.NotesWebError as exc:
                 raise HTTPException(status_code=422, detail=str(exc)) from exc
             now = _now()
-            placement = site_engine.Placement(site_for(target, pages.url), category=body.category, role=body.role)
+            placement = site_engine.Placement(site_for(target, pages.url), category=body.category, role=body.role,
+                                              place=body.chosen_place)
             try:
                 made = web_engine.build(
                     case, note_id, base_url=where, diagrams=diagrams, round_pov=body.round_pov, changes=changes,
@@ -2015,14 +2048,17 @@ def github_publish(case_id: str, note_id: str, body: GitHubPublishIn) -> dict[st
         "branch": target.branch,
         "path": published.folder,
         "commit": published.commit,
-        "sha256": made.sha256,
+        "sha256": published.page or made.sha256,
         "text_sha256": made.text_sha256,
         "tree": published.tree,
     }
+    if published.bare and published.bare != record["sha256"]:
+        record["bare_sha256"] = published.bare
     if changes:
         record["changes"] = changes[:MAX_CHANGES]
     _record_edition(case, note_id, record, text=made.printed)
     _kept_in_look(case, note_id, body.category, body.role)
+    _place_kept(case, note_id, body.chosen_place)
     keep_categories(published.categories)
     return {
         "published": True,
@@ -2030,7 +2066,7 @@ def github_publish(case_id: str, note_id: str, body: GitHubPublishIn) -> dict[st
         "repository": repository,
         "branch": target.branch,
         "commit": published.commit,
-        "sha256": made.sha256,
+        "sha256": record["sha256"],
         "at": record["at"],
         "uploaded": published.uploaded,
         "reused": published.reused,
@@ -2042,7 +2078,20 @@ def github_publish(case_id: str, note_id: str, body: GitHubPublishIn) -> dict[st
     }
 
 
-# -- the Legal notice page ---------------------------------------------------------
+# -- the Legal notice and Privacy pages -------------------------------------------
+
+
+def _starter_page(case_id: str, title: str, text: str) -> dict[str, Any]:
+    """The note a starter page is: the one of that title that is already a page of the site, else a
+    new one with ``text``, whose role is page."""
+    case = get_case(case_id)
+    for listed in _notes_on_disk(case):
+        if (listed.id != CASE_NOTE and listed.title == title and listed.look is not None
+                and listed.look.role == site_engine.PAGE):
+            return {"id": listed.id, "title": listed.title, "created": False}
+    note = case.create_note(title, "", text)
+    notelook.save(case, note["id"], notelook.NoteLook(role="page"))
+    return {"id": note["id"], "title": title, "created": True}
 
 
 @router.post("/{case_id}/notes/legal-notice")
@@ -2050,11 +2099,12 @@ def legal_notice(case_id: str) -> dict[str, Any]:
     """Start the Legal notice page: a note titled "Legal notice" that is a page of the site (off its
     lists, linked from its header), whose text names the host and leaves the publisher's own
     lines for the analyst. Pressed again it finds the one made, rather than making a second."""
-    case = get_case(case_id)
-    for listed in _notes_on_disk(case):
-        if (listed.id != CASE_NOTE and listed.title == site_engine.LEGAL_TITLE and listed.look is not None
-                and listed.look.role == site_engine.PAGE):
-            return {"id": listed.id, "title": listed.title, "created": False}
-    note = case.create_note(site_engine.LEGAL_TITLE, "", site_engine.legal_notice())
-    notelook.save(case, note["id"], notelook.NoteLook(role="page"))
-    return {"id": note["id"], "title": site_engine.LEGAL_TITLE, "created": True}
+    return _starter_page(case_id, site_engine.LEGAL_TITLE, site_engine.legal_notice())
+
+
+@router.post("/{case_id}/notes/privacy-notice")
+def privacy_notice(case_id: str) -> dict[str, Any]:
+    """Start the Privacy page the same way: a note titled "Privacy", a page of the site, whose text
+    names the host and what counting the site does (Settings › Website), as saved now."""
+    stats = site_engine.from_settings(config.load_settings(), address="", account="").stats
+    return _starter_page(case_id, site_engine.PRIVACY_TITLE, site_engine.privacy_notice(stats))

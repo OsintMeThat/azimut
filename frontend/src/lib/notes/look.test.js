@@ -135,6 +135,9 @@ describe('a look', () => {
     expect([set.category, set.role, set.list_image]).toEqual(['Conflict Watch', 'page', 'e_ab12']);
     expect(normaliseLook(set)).toEqual(set);
     expect(normaliseLook({ role: 'article', list_image: 'not an id', category: 'x'.repeat(90) }).category).toHaveLength(60);
+    // unlisted is a role too: online, in no list
+    expect(normaliseLook({ role: 'unlisted' }).role).toBe('unlisted');
+    expect('role' in normaliseLook({ role: 'secret' })).toBe(false);
     const unset = normaliseLook({ role: 'article', list_image: 'not an id' });
     expect('role' in unset || 'list_image' in unset).toBe(false);
     expect(isPlainLook({ category: 'Harbour' })).toBe(false);
@@ -144,6 +147,20 @@ describe('a look', () => {
     const server = readFileSync(new URL('../../../../src/azimut/engine/notelook.py', import.meta.url), 'utf8');
     expect(server).toMatch(/LATE_KEYS = \([^)]*"category"[^)]*"role"[^)]*"list_image"/);
     expect(server).toContain('CATEGORY_MAX = 60');
+  });
+
+  it('carries the place on the site\'s map, and a template never does', () => {
+    expect('place' in normaliseLook(null)).toBe(false);
+    const placed = normaliseLook({ style: 'article', place: { lat: 12.725004, lon: 43.5075, name: 'Bab al-Mandab' } });
+    expect(placed.place).toEqual({ lat: 12.725004, lon: 43.5075, name: 'Bab al-Mandab' });
+    expect(normaliseLook(placed)).toEqual(placed);
+    expect(isPlainLook({ place: placed.place })).toBe(false);
+    for (const bad of [{ lat: 86, lon: 1 }, { lat: '1', lon: 2 }, '12, 43', { lat: 1 }]) expect('place' in normaliseLook({ place: bad })).toBe(false);
+    expect('place' in templateLook(placed)).toBe(false);
+    // the bounds are the server's, read off its source
+    const server = readFileSync(new URL('../../../../src/azimut/engine/notelook.py', import.meta.url), 'utf8');
+    expect(server).toContain('PLACE_LAT_MAX = 85');
+    expect(server).toContain('PLACE_NAME_MAX = 80');
   });
 
   it('lists the sources at the end for every style but Plain, unless set', () => {

@@ -385,7 +385,9 @@
   }
 
   async function importSettings(event) {
-    const file = event.currentTarget.files?.[0];
+    // the event's target is gone once the first await returns: keep the input to clear it after
+    const input = event.currentTarget;
+    const file = input.files?.[0];
     if (!file) return;
     try {
       const parsed = JSON.parse(await file.text());
@@ -395,6 +397,7 @@
         `${r.imported.length} setting${r.imported.length === 1 ? '' : 's'}`,
         r.templates ? `${r.templates} template${r.templates === 1 ? '' : 's'}` : null,
         r.signature ? 'logo' : null,
+        r.site_logo ? 'site logo' : null,
         r.report_signature ? 'signature' : null,
         r.icons ? `${r.icons} icon${r.icons === 1 ? '' : 's'}` : null,
       ].filter(Boolean);
@@ -406,7 +409,7 @@
     } catch (e) {
       toast(`Could not import the backup: ${e.message}`, 'danger');
     } finally {
-      event.currentTarget.value = '';
+      input.value = '';
     }
   }
 
@@ -928,7 +931,7 @@
       {/each}
     </nav>
 
-    <div class="pane settings-pane">
+    <div class="pane settings-pane" class:wide={tab === 'website'}>
       {#if loadError}
         <div class="load-error" role="alert">
           <Icon name="alert" size={15} />
@@ -965,7 +968,7 @@
       {/if}
 
       {#if tab === 'website'}
-        <WebsiteTab {prefs} {savePrefs} />
+        <WebsiteTab {prefs} {savePrefs} bind:focus={focusCard} />
       {/if}
 
       {#if tab === 'imagery'}
@@ -1212,6 +1215,11 @@
     overflow-y: auto;
     padding: 6px 18px 32px;
     max-width: 640px;
+  }
+
+  /* the Website tab is a hub of cards and tables, which a line of settings is not */
+  .pane.wide {
+    max-width: 1120px;
   }
 
   /* The path can be long, so the button sits after it and never squeezes it. */

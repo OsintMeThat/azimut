@@ -142,6 +142,43 @@ def test_a_page_is_on_no_list_and_is_listed_under_pages_by_title():
     assert all(line["maps"] == [] for line in site.listing(cards))
 
 
+def test_an_unlisted_page_is_in_no_list_no_feed_no_sitemap_and_adds_no_category():
+    cards = [_card("story", title="A story", category="Harbour"),
+             _card("draft", title="A draft", category="Secret", role="unlisted"),
+             _card("legal", title="Legal notice", role="page")]
+    assert [card["role"] for card in cards] == ["article", "unlisted", "page"]
+    assert [line["title"] for line in site.listing(cards)] == ["A story"]
+    assert site.map_view(cards) == [] and site.pages_of(cards) == [{"title": "Legal notice", "address": "/legal/"}]
+    assert site.categories_of(cards) == ["Harbour"]
+    lines, maps, pages = site.listing(cards), site.map_view(cards), site.pages_of(cards)
+    made = site.articles_json(lines, maps, pages, THE_SITE)
+    assert "draft" not in made and "A draft" not in made
+    assert "A draft" not in site.feed(lines, THE_SITE) and "/draft/" not in site.sitemap(lines, maps, ["/"], THE_SITE)
+    assert "A draft" not in site.render(lines, THE_SITE.title)
+    # a card that names another role, or none, is an article
+    assert _card("x", role="post")["role"] == "article" and _card("y")["role"] == "article"
+
+
+def test_an_unlisted_map_has_no_line_and_an_unlisted_article_never_shows_as_what_cites_a_map():
+    cards = [_card("map", layout="map", title="The map", role="unlisted"),
+             _card("story", title="Story", links=["map"]),
+             _card("quiet", title="Quiet", role="unlisted", links=["cited"]),
+             _card("cited", layout="map", title="Cited")]
+    # the unlisted map is not folded under the article that links it, and the listed map is not
+    # said to come from the unlisted article that links it
+    assert [(line["title"], line["maps"]) for line in site.listing(cards)] == [("Story", []), ("Cited", [])]
+    assert [(m["title"], m["article"]) for m in site.map_view(cards)] == [("Cited", None)]
+
+
+def test_the_sitemap_never_keeps_an_unlisted_page_an_earlier_sitemap_listed():
+    cards = [_card("draft", role="unlisted"), _card("story", title="Story")]
+    lines, maps = site.listing(cards), site.map_view(cards)
+    old = site.sitemap(lines, maps, ["/", "/draft/"], THE_SITE)
+    answering = {"draft/index.html": "x", "story/index.html": "x"}
+    assert sitesync._sitemap_pages(old, THE_SITE, answering, lines, maps, [], []) == ["/", "/draft/"]
+    assert sitesync._sitemap_pages(old, THE_SITE, answering, lines, maps, [], [], {"/draft/"}) == ["/"]
+
+
 def test_a_map_an_article_cites_folds_under_it_and_a_map_nothing_cites_keeps_its_own_line():
     cards = [_card("story", links=["cited-map"], title="Story"), _card("cited-map", layout="map", title="Cited"),
              _card("lost-map", layout="map", title="Lost", date="2026-01-01")]
@@ -157,16 +194,19 @@ def test_a_limit_and_an_empty_list_say_what_they_are():
     lines = site.listing([_card(f"a{n}", date=f"2026-01-0{n}") for n in range(1, 5)])
     assert site.render(lines, "Site", limit=2).count('<li class="az-item') == 2
     assert site.render(lines, "Site", section="Nothing") == '<p class="az-empty">No articles yet.</p>'
-    assert site.render_maps([]) == '<p class="az-empty">No maps yet.</p>'
+    assert site.render_maps([], "Site") == '<p class="az-empty">No maps yet.</p>'
     page = '<!-- azimut:articles limit="1" --><!-- /azimut:articles -->\n<!-- azimut:articles layout="map" --><!-- /azimut:articles -->'
     filled = site.fill(page, lines, [], "Site")
     assert filled.count('<li class="az-item') == 1 and "No maps yet." in filled
 
 
-def test_the_authors_name_shows_unless_it_is_the_sites_own():
+def test_the_authors_name_shows_unless_it_is_the_sites_own_on_articles_and_maps():
     lines = site.listing([_card("a", author="Someone"), _card("b", author="Site", date="2026-01-01")])
     shown = site.render(lines, "Site")
     assert "· Someone" in shown and "· Site" not in shown
+    maps = site.map_view([_card("m", layout="map", author="Guest"), _card("n", layout="map", author="Site")])
+    drawn = site.render_maps(maps, "Site")
+    assert "· Guest" in drawn and "· Site" not in drawn
 
 
 def test_a_site_under_a_path_links_under_it_and_a_domain_root_links_as_the_prototype_did():
@@ -437,10 +477,41 @@ def test_the_legal_notice_names_the_host_and_leaves_the_publisher_lines():
     assert site.LEGAL_SENTENCE == "Depending on your country, a website may need a legal notice."
 
 
+def test_the_privacy_starter_is_the_same_page_for_everyone_with_the_counting_each_choice_names():
+    assert site.PRIVACY_TITLE == "Privacy"
+
+    def page(counting: str) -> str:
+        return ("## Cookies\n\nThis site sets no cookies and has no accounts, forms or newsletter.\n\n"
+                f"## Counting readers\n\n{counting}\n\n"
+                "## Host\n\nGitHub, which hosts the site on GitHub Pages, logs visitors' IP addresses for "
+                "security, as its documentation says.\n\n"
+                "## Your data\n\nFor any question about your data, write to:\n\n"
+                "You can also complain to your country's data protection authority.\n")
+
+    assert site.privacy_notice("") == page("This site does not count its readers.")
+    assert site.privacy_notice("goatcounter") == page(
+        "Visits are counted with GoatCounter, which sets no cookie and keeps no personal data: "
+        "the site sees totals only.")
+    assert site.privacy_notice("cloudflare") == page(
+        "Visits are counted with Cloudflare Web Analytics, which stores nothing on your device: your browser "
+        "sends Cloudflare the page's address and how it loaded, and the site sees totals only.")
+    assert list(site.COUNTING_SAID) == list(site.STATS)
+    # a count it does not know is none
+    assert site.privacy_notice("tracker") == site.privacy_notice("")
+    for stats in site.STATS:
+        text = site.privacy_notice(stats)
+        # it names the host, and not a person, an address or a link for the link check to flag
+        assert "## Host" in text and "GitHub Pages" in text and "logs visitors' IP addresses" in text
+        assert "## Your data" in text and "write to:\n\n" in text
+        assert not any(mark in text for mark in ("@", "http", "](", "www.")) and not any(c.isdigit() for c in text)
+    assert "GoatCounter" not in site.privacy_notice("") + site.privacy_notice("cloudflare")
+    assert "Cloudflare" not in site.privacy_notice("") + site.privacy_notice("goatcounter")
+
+
 def test_the_site_copy_is_the_contracts():
     assert site.SITE_INTRO.startswith("Publish your notes as a simple website on GitHub Pages")
-    assert [lead for lead, _ in site.SITE_OWN] == ["Your own home page", "A page per category", "Your own domain",
-                                                  "Your own scripts"]
+    assert [lead for lead, _ in site.SITE_OWN] == ["Your own home page", "Your own bar", "A page per category",
+                                                  "Your own domain", "Your own scripts"]
     assert githubpages.OURS == ("index.html", "share.jpg")
 
 

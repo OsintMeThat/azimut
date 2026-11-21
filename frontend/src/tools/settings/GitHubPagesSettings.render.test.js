@@ -123,3 +123,32 @@ it('forgets the account and the token on this computer', async () => {
   expect(field('your-name').value).toBe('');
   expect(button('Forget').disabled).toBe(true);
 });
+
+it('says whether it is set up beside its title, and Connected once a test passed', async () => {
+  get.mockResolvedValue({ github: NOTHING });
+  live = mount(GitHubPagesSettings, { target });
+  await settle();
+  const pill = () => target.querySelector('h3 .hub-pill');
+  expect(pill().textContent).toBe('Not set up');
+  unmount(live);
+  get.mockResolvedValue({ github: SET });
+  live = mount(GitHubPagesSettings, { target });
+  await settle();
+  expect(pill().textContent).toBe('Set up');
+  expect(pill().classList.contains('ok')).toBe(true);
+  post.mockResolvedValue({ ok: true, login: 'octo', base: 'https://octo.github.io/articles/', warnings: [] });
+  button('Test connection').click();
+  await settle();
+  expect(pill().textContent).toBe('Connected');
+});
+
+it('names each field beside its input, with what it takes under it', async () => {
+  get.mockResolvedValue({ github: SET });
+  live = mount(GitHubPagesSettings, { target });
+  await settle();
+  for (const [id, name] of [['github-account', 'Account'], ['github-repo', 'Repository'], ['github-branch', 'Branch'], ['github-token', 'Token']]) {
+    expect(target.querySelector(`label[for="${id}"]`).textContent).toBe(name);
+    expect(target.querySelector(`#${id}`).getAttribute('title')).toBeTruthy();
+  }
+  expect(target.querySelector('label[for="github-account"]').closest('.hub-field').textContent).toContain('Your GitHub username');
+});

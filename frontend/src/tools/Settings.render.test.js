@@ -101,8 +101,26 @@ describe('the settings pane', () => {
     for (const [index] of TABS.entries()) {
       rail()[index].click();
       flushSync();
-      expect(pane().querySelectorAll('section.group, .workspace-folder').length).toBeGreaterThan(0);
+      // a section of groups, or the Website hub of cards
+      expect(pane().querySelectorAll('section.group, .workspace-folder, .hub .hub-card').length).toBeGreaterThan(0);
     }
+  });
+});
+
+describe('a settings backup restored', () => {
+  it('says what it brought back, the site logo among the pictures', async () => {
+    rail()[TABS.indexOf('storage')].click();
+    flushSync();
+    api.post.mockImplementationOnce(async () => ({ imported: ['site_title', 'site_stats'], templates: 1, signature: true, site_logo: true,
+      report_signature: false, icons: 0 }));
+    const input = pane().querySelector('input[type="file"][accept*="json"]');
+    const file = new File([JSON.stringify({ settings: { site_title: 'Octo Desk' } })], 'azimut-settings.json', { type: 'application/json' });
+    Object.defineProperty(input, 'files', { value: [file], configurable: true });
+    input.dispatchEvent(new Event('change', { bubbles: true }));
+    await vi.waitFor(() => expect(uiState.toasts.map((entry) => entry.message)).toContain(
+      'Backup restored: 2 settings, 1 template, logo, site logo'));
+    expect(api.post).toHaveBeenCalledWith('/api/settings/import', { settings: { site_title: 'Octo Desk' } });
+    uiState.toasts.splice(0);
   });
 });
 
@@ -113,6 +131,17 @@ describe('a tab asked for from elsewhere', () => {
     flushSync();
     expect(rail().find((node) => node.classList.contains('active')).textContent.trim()).toBe('Website');
     expect(pane().textContent).toContain('Publish your notes as a simple website');
+    expect(uiState.settingsTab).toBeNull();
+    uiState.tool = 'satellite';
+  });
+
+  it('opens on the panel of Website that is named after it, as the publish dialog names Identity', () => {
+    uiState.tool = 'settings';
+    uiState.settingsTab = 'website:identity';
+    flushSync();
+    expect(rail().find((node) => node.classList.contains('active')).textContent.trim()).toBe('Website');
+    expect(pane().querySelector('[role="tab"][aria-selected="true"]').textContent.trim()).toBe('Identity');
+    expect(pane().querySelector('#hub-panel-identity').hidden).toBe(false);
     expect(uiState.settingsTab).toBeNull();
     uiState.tool = 'satellite';
   });
@@ -156,13 +185,18 @@ describe('each section', () => {
     expect(text).toContain('up to 1 MB');
   });
 
-  it('Website states the site, where a note goes, the statistics, the update and the legal notice', () => {
+  it('Website is the hub of the site: a bar of panels, wider than the other sections, and in them the site, where a note goes, the readers, the update and the legal notice', () => {
     const text = show('website');
-    expect([...pane().querySelectorAll('h3')].map((h) => h.textContent)).toEqual(
-      ['Website', 'Site', 'GitHub Pages', 'WordPress', 'Statistics', 'Update the site', 'Legal notice']);
-    for (const words of ['Title', 'Tagline', 'Made with Azimut', 'Count readers with', 'Make it yours', 'Start a Legal notice page']) {
+    expect([...pane().querySelectorAll('[role="tab"]')].map((node) => node.textContent.trim())).toEqual(
+      ['Overview', 'Identity', 'Hosting', 'Articles', 'Readers', 'Upkeep', 'Make it yours', 'WordPress']);
+    for (const words of ['Site name', 'Tagline', 'Made with Azimut', 'GitHub Pages', 'Count readers', 'Update the site', 'Limits', 'Start a Legal notice page',
+      'Start a Privacy page', 'Who writes what', 'Your own home page']) {
       expect(text).toContain(words);
     }
+    expect(pane().classList.contains('wide')).toBe(true);
+    rail()[TABS.indexOf('general')].click();
+    flushSync();
+    expect(pane().classList.contains('wide')).toBe(false);
   });
 
   it('Website saves the site under its own keys, as preferences', async () => {

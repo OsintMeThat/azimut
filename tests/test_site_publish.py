@@ -401,9 +401,9 @@ def test_a_page_published_to_the_site_has_the_way_back_and_counts_no_one_by_defa
     client.post(note["url"], json={"short_name": "port-strike"})
     files = fake.files()
     page = files["port-strike/index.html"].decode()
-    assert re.search(r'<body><style>.*?</style><nav class="az-site-bar" aria-label="Site"><a href="\.\./">'
+    assert re.search(r'<body><!-- azimut:bar --><style>.*?</style><nav class="az-site-bar" aria-label="Site"><a href="\.\./">'
                      r'<img src="assets/[0-9a-f]{8}-site-logo\.png" alt="">The Desk</a>'
-                     r'<a class="back" href="\.\./">All articles</a></nav>\n', page, re.S)
+                     r'<a class="back" href="\.\./">All articles</a></nav><!-- /azimut:bar -->\n', page, re.S)
     assert any(path.endswith("-site-logo.png") and data == logo.getvalue() for path, data in files.items())
     assert "goatcounter" not in page and "cloudflare" not in page and "az-counter" not in page
     assert _policy(page)["script-src"] == ["'self'"] and "connect-src" not in _policy(page)
@@ -645,8 +645,10 @@ def test_a_site_served_from_docs_keeps_all_of_it_under_docs(client, fake, note):
             "docs/azimut-site/site.css", "docs/port-strike/article.json"} <= set(files)
     assert not [path for path in files if path in ("index.html", "articles.json", "feed.xml", "sitemap.xml")]
     assert json.loads(files["docs/articles.json"])["articles"][0]["address"] == "/port-strike/"
+    # the first update learns which bar the articles carry and keeps it in the list, under docs/ too
     said = client.post("/api/publishing/github/site").json()
-    assert said["updated"] is False
+    assert said["written"] == ["articles.json"] and json.loads(fake.files()["docs/articles.json"])["bar"] == "azimut"
+    assert client.post("/api/publishing/github/site").json()["updated"] is False
 
 
 # -- bounds: what is too much is said, never a failed publish ---------------------------------------------------
