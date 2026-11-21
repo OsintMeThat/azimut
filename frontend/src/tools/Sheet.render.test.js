@@ -2085,6 +2085,41 @@ describe('a column that knows what it holds', () => {
     expect(text(rows()[0])[1]).toBe('Pont nord');
   });
 
+  it('says a date or number column in its heading, and in each cell what a chart reads in it', async () => {
+    await openBinder({
+      columns: ['id', 'Title', 'Date', 'Rounds'],
+      rows: [
+        ['r1', 'Quai sud', '5 mars 2026', '1 200'],
+        ['r2', 'Pont nord', '', ''],
+        ['r3', 'Gare est', 'AFTER', 'a dozen'],
+        ['r4', 'Port', '5 Mar 2026', '60+'],
+      ],
+      meta: {
+        ...structuredClone(BINDER.meta),
+        progress: null,
+        roles: { Date: { kind: 'when', shape: 'date', dayFirst: true }, Rounds: { kind: 'number', summary: 'sum', unit: '' } },
+      },
+    });
+    const tags = [...target.querySelectorAll('.head .cell.heading')].map((heading) => heading.querySelector('.col-expects')?.textContent.trim() ?? '');
+    expect(tags).toEqual(['', '', 'Days', 'Numbers']);
+    const cellOf = (row, column) => rows()[row].querySelectorAll('.cell:not(.gutter)')[column];
+    // what was understood, after the words, which stay as typed
+    expect(cellOf(0, 2).querySelector('.value').textContent).toBe('5 mars 2026');
+    expect(cellOf(0, 2).querySelector('.cell-reading').textContent).toBe('5 Mar 2026');
+    expect(cellOf(3, 2).querySelector('.cell-reading')).toBeNull();
+    expect(cellOf(0, 3).querySelector('.cell-reading')).toBeNull();
+    expect(cellOf(3, 3).querySelector('.cell-reading').textContent).toBe('at least 60');
+    // what to write in an empty one
+    expect(cellOf(1, 2).querySelector('.cell-example').textContent).toBe('5 Mar 2026');
+    expect(cellOf(1, 3).querySelector('.cell-example').textContent).toBe('1 200');
+    // what does not read: underlined, the badge kept, both saying what would
+    const day = 'Not read as a day. Try 5 Mar 2026, 05/03/2026 or 2026-03-05, in any language.';
+    expect(cellOf(2, 2).querySelector('.value.unread').title).toBe(day);
+    expect(cellOf(2, 2).querySelector('.badge.bad').title).toBe(day);
+    expect(cellOf(2, 3).querySelector('.badge.bad').title).toBe('Not read as a number. Try 1200, 1 200, 1,5 or at least 60.');
+    expect(text(rows()[2])).toEqual(['r3', 'Gare est', 'AFTER', 'a dozen']);
+  });
+
   it('gives a number column the one answer it was told to give, in its own unit', async () => {
     await openBinder({
       columns: ['id', 'Title', 'Share'],

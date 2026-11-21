@@ -39,6 +39,8 @@ import re
 from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING, Any
 
+from . import cellread
+
 if TYPE_CHECKING:
     from ..workspace import Case
 
@@ -593,6 +595,11 @@ def parse_when(text: Any, role: dict[str, Any] | None = None) -> dict[str, Any] 
     sheet's title, and giving it a date here would be inventing evidence. ``shape`` says
     which of the two a reading is, and what a Claim does about the missing date is
     `claim_moment`'s business, out loud.
+
+    A cell none of those read falls back to the one reader of a day (`cellread.read_day`),
+    so ``5 mars 2026`` or ``March 2026`` is a moment at its precision: ``2026-03-05``,
+    ``2026-03``, ``2026``. Only a day that says its year: a year invented for ``5 mars``
+    would be invented evidence too.
     """
     body = str(text or "").strip()
     if not body:
@@ -625,7 +632,17 @@ def parse_when(text: Any, role: dict[str, Any] | None = None) -> dict[str, Any] 
         day = int(three if isoish else (one if day_first else two))
         month = int(two if isoish else (two if day_first else one))
         return _moment(year, month, day, *slash.groups()[3:])
-    return None
+    # only a cell no shape above matched: one they refused (`03/13/2026` day first) stays so
+    return _day_moment(body)
+
+
+def _day_moment(body: str) -> dict[str, Any] | None:
+    """A cell `cellread.read_day` reads, with its year, as a moment at its precision."""
+    found = cellread.read_day(body)
+    if found is None or not found.year:
+        return None
+    date = found.day.isoformat()[:{"year": 4, "month": 7}.get(found.precision, 10)]
+    return {"shape": "moment", "date": date, "clock": "", "text": date}
 
 
 def _moment(

@@ -383,6 +383,19 @@ describe('a column of numbers', () => {
     expect(parseNumber('>100')).toBe(100);
   });
 
+  it('reads past its own grammar what the charts read in a cell', () => {
+    expect(parseNumber('1 200 €')).toBe(1200);
+    expect(parseNumber('at least 60')).toBe(60);
+    expect(parseNumber('60+')).toBe(60);
+    expect(parseNumber('$8.3M')).toBe(8300000);
+    expect(parseNumber('٦٠')).toBe(60);
+    // its own grammar first: a comma is the decimal mark there
+    expect(parseNumber('1,500')).toBe(1.5);
+    // a range, a day and words are no single number
+    expect(parseNumber('8–10')).toBeNull();
+    expect(parseNumber('5 mars 2026')).toBeNull();
+  });
+
   it('refuses a digit buried in prose', () => {
     // `Only 9 in service?` is a real cell. Extracting the 9 would also turn `AB-123` into
     // 123, and a total built on that is a total nobody can check.
@@ -599,6 +612,24 @@ describe('reading a moment', () => {
     expect(parseWhen('32/01/2026')).toBeNull();
     expect(parseWhen('03/13/2026')).toBeNull();
     expect(parseWhen('25:00')).toBeNull();
+  });
+
+  it('reads a day the charts read, in any language, at its precision and only with its year', () => {
+    expect(parseWhen('5 mars 2026')).toMatchObject({ shape: 'moment', text: '2026-03-05' });
+    expect(parseWhen('5 марта 2026 г.')).toMatchObject({ shape: 'moment', text: '2026-03-05' });
+    expect(parseWhen('2026年3月5日').text).toBe('2026-03-05');
+    expect(parseWhen('mars 2026')).toMatchObject({ shape: 'moment', text: '2026-03', key: Date.UTC(2026, 2, 1) });
+    expect(parseWhen('2026')).toMatchObject({ shape: 'moment', text: '2026' });
+    // a day without its year would be a year invented
+    expect(parseWhen('5 mars')).toBeNull();
+    expect(parseWhen('Mars rover')).toBeNull();
+    // a slash form the column's convention refuses stays refused
+    expect(parseWhen('25/03/2026', { dayFirst: false })).toBeNull();
+  });
+
+  it('never offers a column of bare years as dates, an amount reads the same', () => {
+    expect(detectRole(['1200', '1500', '2500'])).not.toBe('when');
+    expect(detectRole(['mars 2026', 'avril 2026', 'mai 2026'])).toBe('when');
   });
 
   it('refuses an hour that would roll over into the next day', () => {
@@ -1002,7 +1033,8 @@ describe('the cells a lens cannot read', () => {
 
   it('answers per kind, and calls a point off the globe unreadable', () => {
     expect(readsCell({ kind: 'number' }, '1 200')).toBe(true);
-    expect(readsCell({ kind: 'number' }, 'about 12')).toBe(false);
+    expect(readsCell({ kind: 'number' }, 'about 12')).toBe(true);
+    expect(readsCell({ kind: 'number' }, 'a dozen')).toBe(false);
     expect(readsCell({ kind: 'latlon' }, '48.85, 2.35')).toBe(true);
     expect(readsCell({ kind: 'latlon' }, '148.85, 2.35')).toBe(false);
     expect(readsCell({ kind: 'when', dayFirst: true }, '31/01/2026')).toBe(true);
@@ -1018,7 +1050,7 @@ describe('the cells a lens cannot read', () => {
   it('counts what a column reads against what it holds', () => {
     const table = {
       columns: ['id', 'Count'],
-      rows: [['r1', '3'], ['r2', 'about 12'], ['r3', '']],
+      rows: [['r1', '3'], ['r2', 'a dozen'], ['r3', '']],
     };
     expect(readable(table, 1, { kind: 'number' })).toEqual({ total: 2, read: 1, unreadable: 1 });
   });

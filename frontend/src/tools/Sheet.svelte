@@ -144,6 +144,7 @@
     suggestProgressColumn,
     tickState,
   } from '../lib/sheetRoles.js';
+  import { EXPECTS, EXPECTS_TITLE, sheetExpects, sheetSays } from '../lib/cellHints.js';
   import { backLinks, rowLabel, rowTargets } from '../lib/sheetRows.js';
   import { SHEET_TEMPLATES, sheetTemplate, templateMeta } from '../lib/sheetTemplates.js';
   import { canBuild, columnKinds } from '../lib/sheetBuild.js';
@@ -1868,6 +1869,14 @@
       return false;
     }
     return !readsCell(role, table.rows[rowIndex][column.index]);
+  }
+
+  /** What a cell of a date or number column says of itself (`lib/cellHints.js`): an example
+   *  when empty, why it does not read, or how the chart reads it when written otherwise.
+   *  null where the column expects neither, or the app writes it. */
+  function cellSaysAt(rowIndex, column) {
+    if (appFilled(column.name)) return null;
+    return sheetSays(roles[column.name], table.rows[rowIndex][column.index]);
   }
 
   /** The unit to write after this cell, or nothing. Only where the column asked for it
@@ -4558,6 +4567,12 @@
                   </span>
                 {/if}
               </button>
+              {#if sheetExpects(roles[column.name]) && !appFilled(column.name)}
+                <!-- What the column takes, said where the analyst writes in it -->
+                <span class="col-expects" title={EXPECTS_TITLE[sheetExpects(roles[column.name])]}>
+                  {EXPECTS[sheetExpects(roles[column.name])]}
+                </span>
+              {/if}
             {/if}
             <!-- The heading's two visible doors. The funnel stays lit whether or not the
                  heading is hovered: hiding the one gesture made a hundred times a day
@@ -4624,6 +4639,7 @@
                  role per frame of scrolling. -->
             {@const chips = chipsFor(rowIndex, column)}
             {@const unit = unitOf(rowIndex, column)}
+            {@const says = cellSaysAt(rowIndex, column)}
             <!-- The grid owns the keyboard: arrows move the cursor, Enter opens
                  the editor, and typing a character starts one (`onKey`). A
                  handler per cell would be a second, divergent model. -->
@@ -4741,13 +4757,17 @@
                       <span class="badge bad" title="Not a case file or an address">?</span>
                     {/if}
                   {/if}
-                {:else if unreadable(rowIndex, column)}
+                {:else if says ? says.unread : unreadable(rowIndex, column)}
                   <!-- Shown as it is, and marked. The value stays — the file keeps the
                        words — but a number column that quietly skipped this cell would
                        be a total the analyst cannot check. -->
-                  <span class="value">{table.rows[rowIndex][column.index]}</span>
-                  <span class="badge bad"
-                        title="Not read as {ROLE_MARKS[roles[column.name].kind].label.toLowerCase()}">?</span>
+                  {@const why = says?.unread ?? `Not read as ${ROLE_MARKS[roles[column.name].kind].label.toLowerCase()}`}
+                  <span class="value" class:unread={says?.unread} title={says?.unread}>{table.rows[rowIndex][column.index]}</span>
+                  <span class="badge bad" title={why}>?</span>
+                {:else if says?.example}
+                  <!-- An empty cell of a date or number column shows what to write, grey -->
+                  <span class="cell-example" aria-hidden="true">{says.example}</span>
+                  <span class="value"></span>
                 {:else if links.length}
                   <!-- A URL is worth opening, and worth reading as its host: a
                        hundred and twenty characters of query string in a cell
@@ -4777,6 +4797,10 @@
                   </span>
                 {:else}
                   <span class="value" class:linked>{cellWords(table.rows[rowIndex][column.index])}</span>
+                {/if}
+                {#if says?.reading}
+                  <!-- How the chart reads a cell written otherwise; the cell keeps its words -->
+                  <span class="cell-reading" title="How a chart reads this cell">{says.reading}</span>
                 {/if}
                 {#if String(column.name).toLowerCase() === ID_COLUMN}
                   <button class="cell-open" title="Open this row"
@@ -5943,6 +5967,17 @@
      same word on every row, and reading it at full weight four hundred times is reading
      the column rather than the values. */
   .cell-unit { flex: none; color: var(--text-3); font-size: var(--fs-xs); }
+  /* what a date or number column takes, and what its cells read as (`lib/cellHints.js`) */
+  .col-expects {
+    flex: none; padding: 0 5px; border-radius: 3px; background: var(--bg-3); color: var(--text-3);
+    font-size: 10.5px; font-weight: 500; line-height: 16px; white-space: nowrap;
+  }
+  .cell-reading { flex: none; margin-left: 6px; color: var(--text-3); font-size: var(--fs-xs); white-space: nowrap; }
+  .cell-example { flex: none; color: var(--text-3); opacity: 0.75; white-space: nowrap; }
+  .cell .value.unread {
+    text-decoration-line: underline; text-decoration-style: dotted; text-decoration-color: var(--warn);
+    text-decoration-thickness: 1.5px; text-underline-offset: 3px;
+  }
   .cell-url { color: var(--accent); text-decoration: none; margin-right: 8px; }
   .cell-url:hover { text-decoration: underline; }
   .cell.cursor { outline: 2px solid var(--accent); outline-offset: -2px; }

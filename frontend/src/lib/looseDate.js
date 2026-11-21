@@ -11,7 +11,8 @@
  *   advanced syntax still works and nothing a proof holds can be re-read into
  *   something else;
  * - otherwise a day is day-first (`24/10/2025`, `24.10.2025`), a month is
- *   `10/2025` or a name (`Oct 2025`, `octobre 2025`), a year is four digits;
+ *   `10/2025` or a name in any language (`Oct 2025`, `octobre 2025`, `март 2025`,
+ *   read by `lib/cellRead.js` as the charts read a cell), a year is four digits;
  * - `~` or "about" means approximate, a `?` means uncertain, both mean both;
  * - a time (`14:30`, `14h30`) makes it a timestamp, local unless a zone
  *   follows (`UTC`, `Z`, `+02:00`, `UTC+2`);
@@ -21,41 +22,19 @@
  * it again gives the same stored value — `looseDate.test.js` holds both
  * directions to every example the profile documents.
  */
-import { foldText } from './textFold.js';
+import { MONTH_NAMES, dayWords, digits } from './cellRead.js';
 import { validateTemporalValue } from './timeline.js';
-
-const MONTH_ABBR = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
-
-// English and French month names, accents folded, full and short. The base every
-// machine reads, whatever its languages.
-const MONTH_WORDS = new Map(
-  [
-    ['january', 'jan', 'janvier', 'janv'],
-    ['february', 'feb', 'fevrier', 'fevr', 'fev'],
-    ['march', 'mar', 'mars'],
-    ['april', 'apr', 'avril', 'avr'],
-    ['may', 'mai'],
-    ['june', 'jun', 'juin'],
-    ['july', 'jul', 'juillet', 'juil'],
-    ['august', 'aug', 'aout'],
-    ['september', 'sep', 'sept', 'septembre'],
-    ['october', 'oct', 'octobre'],
-    ['november', 'nov', 'novembre'],
-    ['december', 'dec', 'decembre'],
-  ].flatMap((words, index) => words.map((word) => [word, index + 1]))
-);
 
 export const LOOSE_DATE_HINT =
   'A day as dd/mm/yyyy, or Oct 2025, or 2025. Start with ~ for about, end with ? if unsure. A time like 14:30 UTC, or two dates joined by "to", work too.';
 
 const HELP = 'Try 24/10/2025, Oct 2025, 2025, 24/10/2025 14:30 UTC, or two dates joined by "to".';
 
-const fold = foldText;
 const pad = (value, size = 2) => String(value).padStart(size, '0');
 
 /** `{ value }` in the stored profile, or `{ value: null, error }`. Empty reads as ''. */
 export function parseLooseDate(input) {
-  const text = String(input ?? '').trim().replace(/\s+/g, ' ');
+  const text = digits(input).trim().replace(/\s+/g, ' ');
   if (!text) return { value: '', error: '' };
   if (validateTemporalValue(text).valid) return { value: text, error: '' };
 
@@ -131,7 +110,7 @@ function friendlyPart(part) {
   const date = /^(\d{4})(?:-(\d{2})(?:-(\d{2}))?)?([~?%])?$/.exec(part);
   if (date) {
     const [, year, month, day, marker = ''] = date;
-    const body = day ? `${day}/${month}/${year}` : month ? `${MONTH_ABBR[Number(month) - 1]} ${year}` : year;
+    const body = day ? `${day}/${month}/${year}` : month ? `${MONTH_NAMES[Number(month) - 1]} ${year}` : year;
     const approx = marker === '~' || marker === '%' ? '~' : '';
     const unsure = marker === '?' || marker === '%' ? '?' : '';
     return `${approx}${body}${unsure}`;
@@ -243,22 +222,10 @@ function readDate(text) {
   match = /^(\d{2,4})$/.exec(text);
   if (match) return day(match[1]);
 
-  // Words: a month name, a year, and perhaps a day, in either order.
-  const tokens = fold(text).replace(/[,.،]/g, ' ').split(/\s+/).filter(Boolean);
-  const local = browserMonthWords();
-  let year = '';
-  let month = 0;
-  let dayOf = '';
-  for (const token of tokens) {
-    const word = MONTH_WORDS.get(token) ?? local.months.get(token);
-    if (local.fillers.has(token)) continue;
-    if (word && !month) month = word;
-    else if (/^\d{4}$/.test(token) && !year) year = token;
-    else if (/^\d{1,2}(?:st|nd|rd|th|er)?$/.test(token) && !dayOf) dayOf = token.replace(/\D/g, '');
-    else return fail(HELP);
-  }
-  if (!year || !month) return fail(HELP);
-  return day(year, String(month), dayOf || undefined);
+  // Words: a month in any language, a year, and perhaps a day, in any order.
+  const words = dayWords(text);
+  if (!words?.year) return fail(HELP);
+  return day(String(words.year), String(words.month), words.day === null ? undefined : String(words.day));
 }
 
 function day(year, month, dayOf) {
@@ -272,71 +239,4 @@ function write(part) {
   if (part.time) return `${part.date}T${part.time}${part.zone}`;
   const marker = part.approx && part.unsure ? '%' : part.approx ? '~' : part.unsure ? '?' : '';
   return `${part.date}${marker}`;
-}
-
-/**
- * The month names of the languages this browser is set to, read from `Intl` rather
- * than typed into a table: `12 марта 2026`, `12 de marzo de 2026`, `12 במרץ 2026`.
- *
- * Each month is taken in the four shapes a date is written in, on its own and inside
- * a date, long and short, because a language like Russian or Greek spells the month
- * differently in each (`март`, `марта`). The words a date wraps around its parts in
- * that language (`de`, `г.`) are read the same way and skipped. Folded like every
- * other word here, and never sent anywhere: the server only ever sees the stored
- * value.
- */
-export function monthWordsFor(languages = []) {
-  const months = new Map();
-  const fillers = new Set();
-  const shapes = [
-    { month: 'long' }, { month: 'short' },
-    { day: 'numeric', month: 'long', year: 'numeric' }, { day: 'numeric', month: 'short', year: 'numeric' },
-  ];
-  for (const language of languages) {
-    for (const shape of shapes) {
-      let format;
-      try {
-        format = new Intl.DateTimeFormat(language, { ...shape, timeZone: 'UTC', calendar: 'gregory' });
-      } catch {
-        continue;
-      }
-      for (let index = 0; index < 12; index += 1) {
-        const parts = format.formatToParts(new Date(Date.UTC(2026, index, 12)));
-        parts.forEach((part, at) => {
-          if (part.type === 'literal') {
-            for (const word of fold(part.value).split(/[\s,.،]+/)) {
-              if (word && !/\d/.test(word)) fillers.add(word);
-            }
-            return;
-          }
-          if (part.type !== 'month') return;
-          const word = fold(part.value).replace(/\.$/, '');
-          if (!word || /\d/.test(word)) return;
-          if (!months.has(word)) months.set(word, index + 1);
-          // Hebrew writes "in March" as one word, `במרץ`: a literal that runs straight
-          // into the month is part of how the month is written.
-          const before = /(\S+)$/.exec(fold(parts[at - 1]?.type === 'literal' ? parts[at - 1].value : ''));
-          if (before && !/\d/.test(before[1]) && !months.has(before[1] + word)) {
-            months.set(before[1] + word, index + 1);
-          }
-        });
-      }
-    }
-  }
-  for (const word of months.keys()) fillers.delete(word);
-  for (const word of MONTH_WORDS.keys()) fillers.delete(word);
-  return { months, fillers };
-}
-
-let cachedFor = null;
-let cached = { months: new Map(), fillers: new Set() };
-
-function browserMonthWords() {
-  const languages = [...(globalThis.navigator?.languages ?? [])];
-  const key = languages.join(',');
-  if (key !== cachedFor) {
-    cachedFor = key;
-    cached = monthWordsFor(languages);
-  }
-  return cached;
 }

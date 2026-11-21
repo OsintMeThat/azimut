@@ -17,7 +17,7 @@ import pytest
 from PIL import Image
 
 from azimut.engine import notecharts, notefill, notes_chart_timeline as timeline, notes_charts as nc, notes_html
-from azimut.engine import notes_infographic
+from azimut.engine import cellread, notes_infographic
 
 ANNOUNCEMENTS = """title: The announcements
 source: press reports and my geolocations
@@ -138,7 +138,7 @@ def test_labels_take_turns_above_and_below_the_line():
     chart = _chart("layout: across\n", width=640)
     axis = chart.facts["axis"]
     dates = [text for text in _texts(chart) if text.bold and re.match(r"^\d+ \w{3}$", text.text)]
-    order = sorted(dates, key=lambda text: date(2026, timeline.kinds.MONTHS[text.text.split()[1].lower()],
+    order = sorted(dates, key=lambda text: date(2026, cellread.month_word(text.text.split()[1]),
                                                   int(text.text.split()[0])))
     sides = [text.y < axis for text in order]
     assert sides == [index % 2 == 0 for index in range(len(order))]

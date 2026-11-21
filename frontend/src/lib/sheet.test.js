@@ -400,7 +400,7 @@ describe('asking a column something other than a value', () => {
   it('asks a column for the cells its own type cannot read', () => {
     const table = {
       columns: ['id', 'Count'],
-      rows: [['r1', '3'], ['r2', 'about 12'], ['r3', '']],
+      rows: [['r1', '3'], ['r2', 'a dozen'], ['r3', '']],
     };
     const roles = { Count: { kind: 'number' } };
     const filters = toggleFilterFill({}, 'Count', 'unreadable');
@@ -424,7 +424,7 @@ describe('asking a column something other than a value', () => {
 describe('asking a column for a range', () => {
   const distances = () => ({
     columns: ['id', 'Distance'],
-    rows: [['r1', '2'], ['r2', '12'], ['r3', 'about 5'], ['r4', '']],
+    rows: [['r1', '2'], ['r2', '12'], ['r3', 'five or so'], ['r4', '']],
   });
 
   it('keeps the rows between the two bounds and drops what it cannot read', () => {

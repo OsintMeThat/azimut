@@ -46,17 +46,22 @@ class Proposal:
     settings: dict[str, str]
 
 
-def _whole(cell: str) -> bool:
-    number = nc.read_number(cell)
-    return isinstance(number, nc.Number) and "%" not in cell and abs(number.value - round(number.value)) < 1e-9
+def _whole(rows: list[list[str]], column: int) -> bool:
+    """Whether every filled cell of a column is a whole number, not a share."""
+    decimal = nc.column_decimal(rows, column)
+    for row in rows:
+        if row[column]:
+            number = nc.read_number(row[column], decimal)
+            if not isinstance(number, nc.Number) or "%" in row[column] or abs(number.value - round(number.value)) >= 1e-9:
+                return False
+    return True
 
 
 def count_column(table: nc.Table) -> str:
     """What a chart of this table counts: its one column of whole numbers, else its rows. A
     column of shares (a confidence, a ratio: `notes_charts.reads_as_share`) is never one."""
     rows, _, numbers = kinds_module._shape(table)
-    whole = [column for column in numbers if all(_whole(row[column]) for row in rows if row[column])
-             and not nc.reads_as_share(table, column)]
+    whole = [column for column in numbers if _whole(rows, column) and not nc.reads_as_share(table, column)]
     return table.headers[whole[0]] if len(whole) == 1 else nc.ROWS
 
 
