@@ -130,4 +130,3 @@ def test_a_warning_goes_in_the_group_its_kind_or_its_line_says():
     assert group("missing", 2, 'Picture "X" is no longer in the case.', figures, {2}) == "figures"
     assert group("other", None, "The page weighs 30 MB, past the 25 MB it aims for.", figures, set()) == "reach"
     assert group("setting", None, "Your logo is not set.", figures, set()) == "edition"
-    assert group("stale", 5, "Its rows differ.", figures, set()) == "figures"

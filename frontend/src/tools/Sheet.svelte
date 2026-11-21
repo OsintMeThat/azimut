@@ -136,7 +136,9 @@
     nearbyPairs,
     parseLatLon,
     parseWhen,
-    pictureRef,
+    cellPicture,
+    cellWords,
+    pictureLinks,
     precisionMetres,
     readsCell,
     suggestProgressColumn,
@@ -173,7 +175,7 @@
   import SheetRowPanel from '../components/SheetRowPanel.svelte';
   import { shortcut } from '../lib/keys.js';
   import { middleClickPaste } from '../lib/clipboardPaste.js';
-  import { carriesOutsideFiles, leftZone } from '../lib/drag.js';
+  import { carriesEntities, carriesOutsideFiles, droppedEntities, leftZone } from '../lib/drag.js';
 
   const HEAD_H = 32;
   /** How long the two lines above the grid may be. Mirrors `engine/sheets.MAX_DESCRIPTION`,
@@ -313,6 +315,10 @@
   /** Entity id → what it is called, for the pieces a row carries. Presentation only: the
    *  sidecar holds ids, and this is what the read answers so the panel can name them. */
   let pieces = $state({});
+  /** Entity id → what a `picture` cell linking it draws: its label, image or video, and the
+   *  case file of its thumbnail (`engine/sheets.picture_info`). Answered by the read and by
+   *  every save, and asked for a link the grid has just made. */
+  let pictures = $state({});
   /** The two lines above the grid, while they are being written. */
   let describing = $state(false);
   let describeText = $state('');
@@ -507,8 +513,33 @@
         uiState.openSheet = null;
         open(asked);
       }
+      if (!openId) void followBuilt(id);
     } catch {
       sheets = [];
+    }
+  }
+
+  /**
+   * On the home, each worklist the case built is brought level with it from its file, so
+   * the list counts what the case holds. Cheap: a worklist the case has nothing new for
+   * answers `unchanged` and nothing is written. An open sheet follows the case itself.
+   */
+  let following = false;
+  async function followBuilt(id) {
+    const built = sheets.filter((sheet) => sheet.shape);
+    if (following || !built.length) return;
+    following = true;
+    try {
+      const answers = await Promise.all(
+        built.map((sheet) => api.post(`/api/cases/${id}/sheets/${sheet.id}/refresh`, {}).catch(() => null)),
+      );
+      if (id !== caseId || openId || !answers.some((answer) => answer?.status === 'saved')) return;
+      const again = await api.get(`/api/cases/${id}/sheets`);
+      if (id === caseId && !openId) sheets = again.sheets ?? sheets;
+    } catch {
+      // The list stands as it was read.
+    } finally {
+      following = false;
     }
   }
 
@@ -619,6 +650,7 @@
       openId = id;
       settlePlace('sheet', place(), { navigate: true });
       rememberOpened(caseId, id);
+      void syncWithCase();
     } catch (error) {
       toast(error.message || 'This sheet could not be opened.', 'danger');
     } finally {
@@ -644,6 +676,7 @@
     // the entity is renamed — and merged rather than replaced, since a save answers no
     // pieces and one attached a second ago would lose its name.
     if (sheet.pieces) pieces = { ...pieces, ...sheet.pieces };
+    if (sheet.pictures) pictures = { ...pictures, ...sheet.pictures };
     if (reset) {
       resetView();
       history.reset();
@@ -914,6 +947,7 @@
         table = { columns: saved.columns, rows: saved.rows };
         assigned = false;
       }
+      if (saved.pictures) pictures = { ...pictures, ...saved.pictures };
       saveState = 'saved';
     } catch (error) {
       saveState = 'failed';
@@ -1269,7 +1303,15 @@
    * the media entity so the graph knows the row rests on it.
    */
   function onDrop(event) {
-    if (!carriesOutsideFiles(event)) return;
+    if (!carriesOutsideFiles(event)) {
+      const dropped = droppedEntities(event);
+      const cell = event.target?.closest?.('[data-row]');
+      const row = Number(cell?.dataset?.row ?? -1);
+      if ((!dropped.ids.length && !dropped.paths.length) || row < 0) return;
+      event.preventDefault();
+      void linkDropped(row, Number(cell.dataset.column), dropped);
+      return;
+    }
     event.preventDefault();
     dropping = false;
     const file = event.dataTransfer?.files?.[0];
@@ -2349,44 +2391,88 @@
   const refreshable = $derived(Object.keys(meta.built ?? {}).length > 0);
   /** Which of the two built shapes: one row per imported file, or one per proof. */
   const builtFiles = $derived(meta.roles?.File?.kind === 'locked');
-  let refreshing = $state(false);
+  /** What the last refresh did, said for a few seconds beside the search. */
+  let synced = $state('');
+  let syncedTimer = null;
+  let syncing = false;
+  let syncAgain = null;
 
   /**
-   * Bring a proofs sheet level with the case, on a press.
+   * Bring a sheet built out of the case level with it, by itself.
    *
-   * Never on open. A sheet that rewrites itself when it is looked at is a sheet whose file
-   * moves under an analyst who only wanted to read it, and it would fight the stamp — which
-   * exists precisely so two readers of one file cannot silently overwrite each other.
+   * Run when the sheet opens and whenever the case changes under it: a proof filed or a
+   * file imported elsewhere lands in `My geolocations` or `Files to geolocate` without a
+   * press. It is safe to run unasked because the server writes only on a real change and
+   * answers `unchanged` otherwise, adds and restates only what the case owns, and keeps
+   * the stamp (`api/sheets.refresh_sheet`).
    *
-   * Nothing is ever removed here. A proof deleted since the build keeps its row and says NO
-   * in its `In case` column: the notes on that row are the analyst's, and throwing them away
-   * to tidy the table is not a decision this button gets to make.
+   * What the grid holds is written first, so the refresh reads the table the analyst sees.
+   * It waits while a cell is being typed in or a conflict stands: both are the analyst's.
+   * A file that moved on disk is read again by the server, which answers the table it
+   * refreshed, and the grid takes it as it takes a reload.
    */
-  async function refreshFromCase() {
-    if (refreshing || !openId) return;
-    refreshing = true;
+  async function syncWithCase() {
+    if (!refreshable || !openId || !caseId || syncing) return;
+    syncing = true;
+    const id = openId;
     try {
-      const answer = await api.post(`/api/cases/${caseId}/sheets/${openId}/refresh`, {
+      await flush();
+      if (openId !== id || conflict) return;
+      if (editing || saveState === 'dirty' || saveState === 'failed') {
+        // Somebody is typing: come back once they have stopped.
+        clearTimeout(syncAgain);
+        syncAgain = setTimeout(() => void syncWithCase(), 3000);
+        return;
+      }
+      const sent = revision;
+      const answer = await api.post(`/api/cases/${caseId}/sheets/${id}/refresh`, {
         columns: table.columns,
         rows: table.rows,
         meta,
         stamp,
       });
-      adopt({ ...answer, title });
-      await reloadCase();
-      const said = [
-        answer.added ? `${answer.added} row${answer.added === 1 ? '' : 's'} added` : '',
-        answer.gone
-          ? `${answer.gone} ${builtFiles ? 'file' : 'proof'}${answer.gone === 1 ? '' : 's'} no longer in the case`
-          : '',
-      ].filter(Boolean);
-      toast(said.length ? `${said.join(', ')}.` : 'Already level with the case.');
-    } catch (error) {
-      toast(error.message || 'This sheet could not be refreshed.', 'danger');
+      if (openId !== id || answer.status !== 'saved') return;
+      if (revision !== sent) {
+        // A cell typed while the refresh was out: the file holds the refresh, the grid the
+        // keystroke. The grid's next save writes what it holds, and the refresh after it
+        // adds the rows again.
+        stamp = answer.stamp ?? stamp;
+        clearTimeout(syncAgain);
+        syncAgain = setTimeout(() => void syncWithCase(), 1500);
+        return;
+      }
+      adopt({ ...answer, title }, { reset: Boolean(answer.reread) });
+      tellSynced(answer.added ?? 0);
+    } catch {
+      // A refresh that could not run leaves the sheet as it was; the next change tries again.
     } finally {
-      refreshing = false;
+      syncing = false;
     }
   }
+
+  /** Say what the refresh did, beside the search for a few seconds, and in a toast when it
+   *  added rows: those are worth hearing about from another tool. */
+  function tellSynced(added) {
+    const rows = `${added} row${added === 1 ? '' : 's'}`;
+    synced = added ? `${rows} added` : 'Up to date with the case';
+    if (added) toast(`${title}: ${rows} added from the case.`);
+    clearTimeout(syncedTimer);
+    syncedTimer = setTimeout(() => (synced = ''), 4000);
+  }
+
+  // The case changed under the open sheet: a proof filed, a file imported, anywhere.
+  let syncedRev = untrack(() => caseState.rev);
+  $effect(() => {
+    const rev = caseState.rev;
+    if (rev === syncedRev) return;
+    syncedRev = rev;
+    untrack(() => void syncWithCase());
+  });
+
+  $effect(() => () => {
+    clearTimeout(syncedTimer);
+    clearTimeout(syncAgain);
+  });
 
   function previewBuild(declaration) {
     return api.post(`/api/cases/${caseId}/sheets/${openId}/proofs/preview`, {
@@ -3657,6 +3743,64 @@
     });
   }
 
+  /** The ids already asked about, pictures or not, so a link to a place is asked once. */
+  const askedPictures = new Set();
+
+  // A picture column's links the grid cannot draw yet: one just made with the `@` picker,
+  // or a column just given the picture role. Asked once each, so the thumbnail shows
+  // before the next read.
+  $effect(() => {
+    const missing = pictureLinks(meta).filter((id) => !pictures[id] && !askedPictures.has(id));
+    if (missing.length) untrack(() => void learnPictures(missing));
+  });
+
+  /** What these linked pictures draw. */
+  async function learnPictures(ids) {
+    const wanted = ids.filter((id) => id && !pictures[id] && !askedPictures.has(id));
+    if (!wanted.length || !openId || !caseId) return;
+    for (const id of wanted) askedPictures.add(id);
+    try {
+      const answer = await api.post(`/api/cases/${caseId}/sheets/${openId}/pictures`, { ids: wanted });
+      pictures = { ...pictures, ...(answer.pictures ?? {}) };
+    } catch {
+      // The cell keeps its words and its link; the next read draws the picture.
+    }
+  }
+
+  /**
+   * A picture of the case dropped on a cell: one from the Media library, or a file or a
+   * proof pulled out of the case sidebar or Files. The cell links it, as the `@` picker
+   * would, and an empty cell takes its name.
+   */
+  async function linkDropped(rowIndex, columnIndex, dropped) {
+    const at = pictureColumn(columnIndex);
+    if (at === -1) {
+      toast('Declare a column a picture first, then drop the image on it.', 'danger');
+      return;
+    }
+    let answer;
+    try {
+      answer = await api.post(`/api/cases/${caseId}/sheets/${openId}/pictures`, dropped);
+    } catch (error) {
+      toast(error.message || 'That picture could not be linked.', 'danger');
+      return;
+    }
+    const found = answer.pictures ?? {};
+    const id = [...dropped.ids, ...Object.values(answer.paths ?? {})].find((one) => found[one]);
+    if (!id) {
+      toast('Only a picture of the case can be dropped on a cell.', 'danger');
+      return;
+    }
+    pictures = { ...pictures, ...found };
+    const key = rowKey(table.columns, table.rows[rowIndex]);
+    structural(() => {
+      meta = setLink(meta, key, table.columns[at], id);
+      if (!String(table.rows[rowIndex][at] ?? '').trim()) {
+        table = setCells(table, [{ row: rowIndex, column: at, value: found[id].label ?? '' }]);
+      }
+    });
+  }
+
   function detach(row, column) {
     const key = rowKey(table.columns, table.rows[row]);
     linking = null;
@@ -3998,15 +4142,14 @@
   {:else}
     <div class="question">
       {#if refreshable}
-        <!-- Beside the search rather than up in the header: it acts on the rows, and this
-             bar is the one that does. Pressed, never automatic — refreshing on open would
-             rewrite a file somebody opened to read. It adds and never removes. -->
-        <button class="btn btn-ghost btn-sm" disabled={refreshing} onclick={refreshFromCase}
-                title={builtFiles
-                  ? 'Add the files imported since, and mark done the ones a proof now answers'
-                  : 'Add the proofs filed since, and restate the columns the case owns'}>
-          <Icon name="reset" size={13} /> {refreshing ? 'Refreshing' : 'Refresh'}
-        </button>
+        <!-- Where Refresh was: the sheet follows the case by itself now, and this says so,
+             and for a moment what the last change brought. -->
+        <span class="follows" class:fresh={Boolean(synced)} role="status"
+              title={builtFiles
+                ? 'Adds the files imported since and marks done the ones a proof answers, by itself'
+                : 'Adds the proofs filed since and restates the columns the case owns, by itself'}>
+          <Icon name={synced ? 'check' : 'reset'} size={12} /> {synced || 'Follows the case'}
+        </span>
       {/if}
       <div class="search" data-guide="sheet.search">
         <Icon name="search" size={13} />
@@ -4323,7 +4466,15 @@
 
     <div class="grid-panel">
     <div class="grid-wrap" class:dropping
-         ondragover={(event) => { if (!carriesOutsideFiles(event)) return; event.preventDefault(); dropping = true; }}
+         ondragover={(event) => {
+           if (carriesOutsideFiles(event)) {
+             event.preventDefault();
+             dropping = true;
+           } else if (carriesEntities(event) && event.target?.closest?.('[data-row]')) {
+             // A picture of the case over a cell: the cell is where it lands.
+             event.preventDefault();
+           }
+         }}
          ondragleave={(event) => { if (leftZone(event)) dropping = false; }}
          ondrop={onDrop}
          role="presentation">
@@ -4564,19 +4715,25 @@
                     </button>
                   {/if}
                 {:else if roles[column.name]?.kind === 'picture'}
-                  {@const shot = pictureRef(table.rows[rowIndex][column.index])}
-                  {@const url = shot?.kind === 'case' ? fileUrl(caseId, shot.value) : shot?.value}
-                  <!-- A picture the case holds, or an address. The case's own files are why
-                       a frame can be dropped on a row: a geolocation index is worked on the
-                       images in the case folder, and only a `case` cell stays on the
-                       machine. -->
+                  {@const shot = cellPicture(table.rows[rowIndex][column.index], linkOf(rowIndex, column.name), pictures)}
+                  {@const url = shot?.kind === 'case' ? fileUrl(caseId, shot.value) : shot?.kind === 'url' ? shot.value : null}
+                  <!-- A picture the case holds, linked or named by its path, or an address.
+                       The case's own files are why a frame can be dropped on a row: a
+                       geolocation index is worked on the images in the case folder, and
+                       only a `case` cell stays on the machine. -->
                   {#if url}
-                    <a class="cell-shot" href={url} target="_blank" rel="noreferrer noopener"
-                       title={shot.value} onclick={(event) => event.stopPropagation()}>
+                    <a class="cell-shot" class:video={shot.video} href={url} target="_blank" rel="noreferrer noopener"
+                       title={shot.label} onclick={(event) => event.stopPropagation()}>
                       <img src={url} alt="" loading="lazy" />
                     </a>
                     <span class="value">
-                      {shot.kind === 'case' ? shot.value : linkLabel(shot.value)}
+                      {shot.kind === 'url' ? linkLabel(shot.value) : shot.label}
+                    </span>
+                  {:else if shot?.kind === 'chip'}
+                    <!-- A video the case holds no still of: its chip, since there is no file
+                         to draw. -->
+                    <span class="cell-chip" title={shot.video ? 'A video of the case' : 'An item of the case'}>
+                      <Icon name={shot.video ? 'video' : 'image'} size={11} />{shot.label}
                     </span>
                   {:else}
                     <span class="value">{table.rows[rowIndex][column.index]}</span>
@@ -4619,7 +4776,7 @@
                     {/each}
                   </span>
                 {:else}
-                  <span class="value" class:linked>{table.rows[rowIndex][column.index]}</span>
+                  <span class="value" class:linked>{cellWords(table.rows[rowIndex][column.index])}</span>
                 {/if}
                 {#if String(column.name).toLowerCase() === ID_COLUMN}
                   <button class="cell-open" title="Open this row"
@@ -5171,10 +5328,12 @@
 {/if}
 
 {#if linking}
-  <Modal title="Point this cell at an entity" onclose={() => (linking = null)} width="580px">
+  <Modal title={roles[table.columns[linking.column]]?.kind === 'picture' ? 'Point this cell at a picture' : 'Point this cell at an entity'}
+         onclose={() => (linking = null)} width="580px">
     <SheetEntityPicker
       {caseId}
-      cellText={table.rows[linking.row]?.[linking.column] ?? ''}
+      pictures={roles[table.columns[linking.column]]?.kind === 'picture'}
+      cellText={cellWords(table.rows[linking.row]?.[linking.column] ?? '')}
       current={linkOf(linking.row, table.columns[linking.column])}
       onpick={attach}
       onclear={() => detach(linking.row, linking.column)}
@@ -5316,6 +5475,13 @@
   }
   .search { display: flex; align-items: center; gap: 6px; color: var(--text-3); }
   .search .input { width: 220px; }
+  /* A sheet built out of the case says it follows it, and what the last change brought. */
+  .follows {
+    display: inline-flex; align-items: center; gap: 5px; padding: 0 4px;
+    font-size: var(--fs-xs); color: var(--text-3); white-space: nowrap;
+    transition: color 0.2s;
+  }
+  .follows.fresh { color: var(--ok); }
   .count { font-size: var(--fs-sm); color: var(--text-3); }
   .count strong { color: var(--text-1); font-weight: 600; }
   /* The cell under the cursor. Flat against the grid it belongs to — a bar of its own
@@ -5800,6 +5966,21 @@
     border-radius: 2px; background: var(--bg-3);
   }
   .cell-shot img { width: 100%; height: 100%; object-fit: cover; }
+  /* A tall row has room to tell twenty frames of one wall apart. */
+  .grid.tall .cell-shot { width: 96px; height: 64px; }
+  /* A video's still, marked as one. */
+  .cell-shot.video { position: relative; }
+  .cell-shot.video::after {
+    content: ''; position: absolute; right: 3px; bottom: 3px;
+    border-style: solid; border-width: 4px 0 4px 7px; border-color: transparent transparent transparent #fff;
+    filter: drop-shadow(0 0 1px #000);
+  }
+  /* A picture of the case with no file to draw: named, as the Notebook names it. */
+  .cell-chip {
+    display: inline-flex; align-items: center; gap: 4px; min-width: 0; padding: 1px 6px;
+    border: 1px solid var(--border); border-radius: var(--r-sm); background: var(--bg-2);
+    color: var(--text-1); font-size: var(--fs-xs); overflow: hidden; white-space: nowrap; text-overflow: ellipsis;
+  }
   .cell .value mark {
     background: var(--accent-soft); color: var(--accent); border-radius: 2px;
   }

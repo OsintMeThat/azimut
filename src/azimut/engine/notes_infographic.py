@@ -48,11 +48,10 @@ before its first panel (`KEYS`):
   ``note:<id>#<heading>`` (a table of a note).
 
 **The data.** A chart panel with no ``from:`` of its own, whose columns the data all
-holds, *inherits* it (`inherits`): its rows are still copied in, so the page reads the same
-tomorrow, and the data says when they moved on. A panel whose columns the data does not
-hold (key figures typed in) keeps its own rows; one with its own ``from:`` keeps its own
-source. *Read again (all panels)* is the editor's: it copies the data's rows into every
-panel that inherits it, as one change.
+holds, *inherits* it (`inherits`). Every document draws such a panel, and one with its own
+``from:``, from its source's rows as they are now (`follow`); the rows copied into the panel
+are what it shows once the source is gone. A panel whose columns the data does not hold
+(key figures typed in) keeps its own rows.
 
 **The panels**, in the text's order: a `::: chart` block, a `::: map` block, or words
 (the headings and paragraphs between two blocks, one panel). A wide panel spans the
@@ -167,8 +166,8 @@ MIN_PICTURE = 1080
 WIDE_KINDS = ("key figures", "timeline")
 NO_PANEL = "The infographic holds no panel: put a chart, a map or a few words inside it."
 NO_SOURCE = "The infographic names no source: give its charts a source line."
-DATA_GONE = ("The infographic's data is no longer in the case: its panels keep the rows they copied, but cannot "
-             "read them again. Change its data, or name it again.")
+DATA_GONE = ("The infographic's data is no longer in the case, so its panels show the rows copied into them. "
+             "Change its data, or name it again.")
 
 SETTING_LINE = re.compile(r"^([A-Za-z][A-Za-z ]{0,24}?)\s*:\s?(.*)$")
 COMMENT_ONLY = re.compile(r"^\s*(?:<!--.*?-->\s*)+$", re.S)
@@ -406,10 +405,35 @@ def inherits(panel: Panel, columns: Sequence[str]) -> bool:
     return all(_fold(header) in held for header in table.headers if _fold(header))
 
 
+def follow(case: "Case | None", graphic: Infographic) -> Infographic:
+    """The page with each chart panel's rows those of where they come from, as they are
+    now (`notecharts.with_current_rows`): its own ``from:``, or the page's ``data:`` for a
+    panel that inherits it. What every document draws, so a sheet edited since the note
+    was last opened is published as it stands. Each source is read once."""
+    if case is None or not graphic.panels:
+        return graphic
+    from . import notecharts
+
+    sources: dict[str, notecharts.Source | None] = {}
+    data = None
+    if graphic.data:
+        sources[graphic.data.strip()] = data = notecharts.read_source(case, graphic.data)
+    panels: list[Panel] = []
+    for panel in graphic.panels:
+        if own_origin(panel):
+            panel = replace(panel, body=notecharts.with_current_rows(case, panel.body, sources=sources))
+        elif data is not None and inherits(panel, data.headers):
+            panel = replace(panel, body=notecharts.with_current_rows(case, panel.body, origin=graphic.data,
+                                                                     sources=sources))
+        panels.append(panel)
+    return replace(graphic, panels=panels)
+
+
 def data_warnings(case: "Case", graphic: Infographic) -> list[tuple[str, str, int | None]]:
-    """What the check says of where the page's rows came from, each at its line: its data no
-    longer in the case, a panel that inherits it whose rows differ from it, and a panel's
-    own ``from:`` gone or moved on (`notecharts.origin_warning`). Each source is read once."""
+    """What the check says of where the page's rows come from, each at its line, when a
+    document cannot draw them as they are now: its data no longer in the case, and a panel's
+    own ``from:`` gone or without its columns (`notecharts.origin_warning`). Each source is
+    read once."""
     from . import notecharts
 
     read: dict[str, tuple[str, list[str], list[list[str]]] | None] = {}
@@ -420,28 +444,17 @@ def data_warnings(case: "Case", graphic: Infographic) -> list[tuple[str, str, in
         return read[origin]
 
     out: list[tuple[str, str, int | None]] = []
-    data = rows_of(case, graphic.data) if graphic.data else None
-    if graphic.data and data is None:
+    if graphic.data and rows_of(case, graphic.data) is None:
         out.append((DATA_GONE, nc.MISSING, graphic.where.get("data")))
     for panel in graphic.panels:
-        if panel.kind != CHART:
+        if panel.kind != CHART or not own_origin(panel):
             continue
         block = nc.parse_block(panel.body)
         if block.table is None or not block.table.headers:
             continue
-        if own_origin(panel):
-            said = notecharts.origin_warning(case, block, read=rows_of)
-            if said is not None:
-                out.append(_offset(said, panel))
-            continue
-        if data is None or not inherits(panel, data[1]):
-            continue
-        name, headers, rows = data
-        if notecharts.compare_rows(block.table, headers, rows) != notecharts.DIFFERS:
-            continue
-        chart = f'The chart "{nc._cut(block.title, 60)}"' if block.title else "A chart of the infographic"
-        out.append(_offset((f'{chart}: its rows differ from the infographic\'s data, "{nc._cut(name, 40)}". '
-                            f"Read again (all panels) brings them up to date.", nc.OTHER_KIND, None), panel))
+        said = notecharts.origin_warning(case, block, read=rows_of)
+        if said is not None:
+            out.append(_offset(said, panel))
     return out
 
 
@@ -604,7 +617,7 @@ def read(case: "Case | None", body: str, *, look: "NoteLook | None" = None, pale
     ``light`` paints it smaller (the Page pane). ``origins`` False leaves where the rows
     came from to the editor, whose Data bar reads it as the note is typed (`data_warnings`).
     ``still`` lays its charts for a picture nothing hovers over (`notes_charts.Box.still`)."""
-    graphic = parse_block(body)
+    graphic = follow(case, parse_block(body))
     theme = theme_of(graphic, look)
     if palette is None:
         palette = nc.case_palette(case) if case is not None else []

@@ -14,12 +14,14 @@ What each test is really guarding:
   error, and dropping it would let the build decide which proofs count;
 - the coordinates come off the graph on every read, so the sheet never holds a stale
   copy of a place somebody moved;
-- pressing refresh adds and never removes, because the notes on a row are the analyst's;
+- a refresh adds and never removes, because the notes on a row are the analyst's, and one
+  that finds nothing new writes nothing, since it runs by itself;
 - a proof deleted afterwards leaves its row standing and says so in `In case`, which is
   the one thing the ordinary dead-link sweep cannot express.
 """
 
 from azimut.engine import sheetfromcase as fromcase_engine
+from azimut.engine import sheets as sheet_engine
 
 from test_sheet_bridge import add, make_case, post_sheet, read_sheet
 
@@ -218,6 +220,30 @@ def test_refresh_adds_a_point_added_to_a_proof_and_keeps_the_others(client):
     assert cell(fresh, 0, "Notes") == "checked"
 
 
+def test_a_proof_placed_after_it_was_filed_fills_its_row_rather_than_filing_another(client):
+    """The refresh runs by itself, so a proof filed and placed a moment later is seen in
+    between: its place lands on the row it already has, and a second place gets a row."""
+    case_id = make_case(client)
+    proof = a_proof(client, case_id, "Camp gate")
+    sheet = read_sheet(client, case_id, build(client, case_id)["id"])
+    put_cell(sheet, 0, "Notes", "second angle wanted")
+    gate = add(client, case_id, "place", "Gate", lat=12.8, lon=43.5)["id"]
+    link(case_id, proof, gate, "depicts")
+
+    answer = post_sheet(client, case_id, sheet["id"], "refresh", sheet)
+    assert answer.status_code == 200, answer.text
+    assert answer.json()["added"] == 0
+    fresh = read_sheet(client, case_id, sheet["id"])
+    assert len(fresh["rows"]) == 1
+    assert cell(fresh, 0, "Place") == "Gate" and cell(fresh, 0, "Notes") == "second angle wanted"
+
+    tower = add(client, case_id, "place", "Tower", lat=12.9, lon=43.5)["id"]
+    link(case_id, proof, tower, "depicts")
+    again = post_sheet(client, case_id, sheet["id"], "refresh", fresh)
+    assert again.json()["added"] == 1
+    assert sorted(cell(read_sheet(client, case_id, sheet["id"]), row, "Place") for row in range(2)) == ["Gate", "Tower"]
+
+
 def test_a_sheet_built_with_the_old_columns_keeps_them_on_refresh(client):
     case_id = make_case(client)
     place = add(client, case_id, "place", "Rooftop", lat=47.1, lon=37.5)["id"]
@@ -230,11 +256,16 @@ def test_a_sheet_built_with_the_old_columns_keeps_them_on_refresh(client):
     sheet["meta"]["roles"] = {
         name: role for name, role in sheet["meta"]["roles"].items() if name in old
     }
+    # Nothing new in the case: the old shape is what it is, and nothing is written.
+    quiet = post_sheet(client, case_id, sheet["id"], "refresh", sheet)
+    assert quiet.status_code == 200, quiet.text
+    assert quiet.json()["status"] == "unchanged"
+    a_proof(client, case_id, "Second shot")
 
     answer = post_sheet(client, case_id, sheet["id"], "refresh", sheet)
 
     assert answer.status_code == 200, answer.text
-    assert answer.json()["added"] == 0
+    assert answer.json()["added"] == 1
     assert answer.json()["columns"] == old
 
 
@@ -307,8 +338,10 @@ def test_refresh_leaves_the_analysts_own_columns_alone(client):
     sheet = read_sheet(client, case_id, build(client, case_id)["id"])
     put_cell(sheet, 0, "Status", "in progress")
     put_cell(sheet, 0, "Notes", "waiting on the second angle")
+    a_proof(client, case_id, "Bravo")
     saved = post_sheet(client, case_id, sheet["id"], "refresh", sheet)
     assert saved.status_code == 200, saved.text
+    assert saved.json()["added"] == 1
 
     fresh = read_sheet(client, case_id, sheet["id"])
     assert cell(fresh, 0, "Status") == "in progress"
@@ -337,7 +370,10 @@ def test_refresh_never_removes_a_row_and_says_the_proof_is_gone(client):
     sheet = read_sheet(client, case_id, build(client, case_id)["id"])
     sheet_id = sheet["id"]
     put_cell(sheet, 1, "Notes", "worth keeping")
-    assert post_sheet(client, case_id, sheet_id, "refresh", sheet).status_code == 200
+    assert client.put(
+        f"/api/cases/{case_id}/sheets/{sheet_id}",
+        json={k: sheet[k] for k in ("columns", "rows", "meta", "stamp")},
+    ).status_code == 200
 
     client.delete(f"/api/cases/{case_id}/entities/{dropped}")
 
@@ -356,6 +392,64 @@ def test_refresh_never_removes_a_row_and_says_the_proof_is_gone(client):
     answer = post_sheet(client, case_id, sheet_id, "refresh", fresh)
     assert answer.json()["gone"] == 1
     assert answer.json()["added"] == 0
+
+
+def test_a_refresh_with_nothing_new_writes_nothing(client):
+    """The refresh runs by itself, on every open and every change of the case: one that
+    found nothing new must leave the file, its stamp and its sidecar exactly as they were."""
+    case_id = make_case(client)
+    # a description written on Windows: the file holds its line breaks as LF, which must
+    # not read as a change on every run
+    add(client, case_id, "proof", "Alpha", notes="first line\r\nsecond line")
+    sheet = read_sheet(client, case_id, build(client, case_id)["id"])
+    assert cell(sheet, 0, "Description") == "first line\nsecond line"
+    case = get_case_(case_id)
+    path = case.resolve_inside(sheet["path"])
+    sidecar = sheet_engine.sidecar(case, case.get_entity(sheet["id"]))
+    before = (path.read_bytes(), sidecar.read_bytes(), path.stat().st_mtime_ns)
+
+    for asked in (sheet, None):
+        answer = (post_sheet(client, case_id, sheet["id"], "refresh", asked) if asked else
+                  client.post(f"/api/cases/{case_id}/sheets/{sheet['id']}/refresh", json={}))
+        assert answer.status_code == 200, answer.text
+        assert answer.json() == {"status": "unchanged", "added": 0, "updated": 0, "gone": 0}
+    assert (path.read_bytes(), sidecar.read_bytes(), path.stat().st_mtime_ns) == before
+    assert read_sheet(client, case_id, sheet["id"])["stamp"] == sheet["stamp"]
+
+
+def test_a_refresh_sent_without_a_table_reads_the_file(client):
+    """What the Sheet home asks of a worklist it lists, with no grid open on it."""
+    case_id = make_case(client)
+    a_proof(client, case_id, "Alpha")
+    sheet_id = build(client, case_id)["id"]
+    a_proof(client, case_id, "Bravo")
+
+    answer = client.post(f"/api/cases/{case_id}/sheets/{sheet_id}/refresh", json={})
+    assert answer.status_code == 200, answer.text
+    assert answer.json()["status"] == "saved" and answer.json()["added"] == 1 and answer.json()["reread"]
+    assert [row[1] for row in read_sheet(client, case_id, sheet_id)["rows"]] == ["Alpha", "Bravo"]
+
+
+def test_a_refresh_meeting_a_file_that_moved_reads_it_again_and_keeps_what_it_holds(client):
+    """The stamp is kept: a spreadsheet's edit is never overwritten. The refresh reads the
+    file again and tries once more, silently."""
+    case_id = make_case(client)
+    a_proof(client, case_id, "Alpha")
+    held = read_sheet(client, case_id, build(client, case_id)["id"])
+    moved = read_sheet(client, case_id, held["id"])
+    put_cell(moved, 0, "Notes", "typed in a spreadsheet")
+    assert client.put(
+        f"/api/cases/{case_id}/sheets/{held['id']}",
+        json={k: moved[k] for k in ("columns", "rows", "meta", "stamp")},
+    ).status_code == 200
+    a_proof(client, case_id, "Bravo")
+
+    answer = post_sheet(client, case_id, held["id"], "refresh", held)
+    assert answer.status_code == 200, answer.text
+    assert answer.json()["reread"] and answer.json()["added"] == 1
+    fresh = read_sheet(client, case_id, held["id"])
+    assert cell(fresh, 0, "Notes") == "typed in a spreadsheet"
+    assert [row[1] for row in fresh["rows"]] == ["Alpha", "Bravo"]
 
 
 def test_a_row_nobody_built_is_left_out_of_the_in_case_column(client):

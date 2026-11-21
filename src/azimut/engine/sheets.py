@@ -33,6 +33,7 @@ import csv
 import io
 import json
 import os
+import re
 import tempfile
 import uuid
 from datetime import UTC, datetime
@@ -187,6 +188,17 @@ def _clean_cell(value: Any) -> str:
     if len(text) > MAX_CELL:
         raise SheetError(f"a cell holds at most {MAX_CELL} characters")
     return text
+
+
+def as_written(value: Any) -> str:
+    """A cell as the file will hold it, for a caller comparing what it would write with
+    what is there: a refresh that compared the raw text would find a carriage return
+    changed on every run, and write every time. A cell past the bound is handed back as it
+    is, for the write to refuse."""
+    try:
+        return _clean_cell(value)
+    except SheetError:
+        return "" if value is None else str(value)
 
 
 def normalize(columns: list[Any], rows: list[Any]) -> tuple[list[str], list[list[str]]]:
@@ -696,6 +708,128 @@ def sync_mentions(case: "Case", sheet_id: str, meta: dict[str, Any]) -> None:
     case.sync_links(sheet_id, link_engine.MENTIONS, wanted, by="sheet", own_only=True)
 
 
+# -- a note's chips, and the pictures a cell links -----------------------------
+
+#: A cell holding one chip of the Notebook and nothing else: ``[[media:id|label]]`` (a
+#: picture's size may follow it in braces) or ``[[entity:id|label]]``, the label left out
+#: at times. The note's own patterns (`notetext.MEDIA_REF`, `ENTITY_REF`), held to the cell.
+CHIP_CELL = re.compile(r"^\[\[(media|entity):([A-Za-z0-9_-]+)(?:\|([^\]\n]*))?\]\](?:\{[^}\n]*\})?$")
+
+#: What a picture of the case is, for a `picture` column: a media that is an image or a
+#: video, a capture, a proof.
+PICTURE_TYPES = ("media", "capture", "proof")
+PICTURE_KINDS = ("image", "video")
+#: A file a browser draws as it is, when the case has no thumbnail of it.
+DRAWN_SUFFIXES = (".jpg", ".jpeg", ".png", ".gif", ".webp", ".avif", ".bmp")
+#: How wide a column made a `picture` column by its chips is drawn, unless the sidecar
+#: already says: room for a tall row's thumbnail and a label beside it.
+PICTURE_WIDTH = 200
+
+
+def adopt_chips(
+    case: "Case", columns: list[str], rows: list[list[str]], meta: Any
+) -> tuple[list[list[str]], dict[str, Any]]:
+    """The table with every cell that is a Notebook chip written as its label, and the
+    sidecar pointing that cell at the chip's id.
+
+    A note writes a picture of the case as ``[[media:e_85695cfa32|#1]]``, and a chart's
+    rows, a note's table and a picture wall carry it as written. A sheet made from them
+    (*New sheet from these rows*), a pasted table or an imported file showed that code in
+    the cell, which nobody can read and nobody will type. A sheet already has its own way
+    to point a cell at the case, the link in the sidecar, so the chip becomes that: its
+    label in the file, its id in ``links``.
+
+    Done here, on every way into a sheet (a create, a save, a read), so an import, a paste
+    and a sheet made from a chart agree. A read does it in memory, the way it restates a
+    computed column, so an old sheet holding chips reads right and its next save settles
+    the file.
+
+    A column whose new links all point at pictures of the case becomes a `picture` column,
+    unless the analyst already gave it a role, and is drawn wide enough for a thumbnail
+    and its label unless it already has a width.
+    """
+    held = meta if isinstance(meta, dict) else {}
+    key_at = key_index(columns)
+    found: list[tuple[list[str], int, str, str]] = []
+    for row in rows:
+        for at, cell in enumerate(row):
+            if at == key_at or at >= len(columns) or "[[" not in cell:
+                continue
+            chip = CHIP_CELL.match(cell.strip())
+            if chip is not None:
+                found.append((row, at, chip.group(2), (chip.group(3) or "").strip()))
+    if not found:
+        return rows, held
+    named = {
+        str(entity["id"]): str(entity.get("label") or "")
+        for entity in case.entities_by_ids([entity_id for _, _, entity_id, label in found if not label])
+    }
+    links = {str(key): dict(cells) for key, cells in (held.get("links") or {}).items() if isinstance(cells, dict)}
+    by_column: dict[str, set[str]] = {}
+    for row, at, entity_id, label in found:
+        row[at] = label or named.get(entity_id) or entity_id
+        links.setdefault(str(row[key_at]), {})[columns[at]] = entity_id
+        by_column.setdefault(columns[at], set()).add(entity_id)
+    roles = dict(held.get("roles") or {}) if isinstance(held.get("roles"), dict) else {}
+    widths = dict(held.get("widths") or {}) if isinstance(held.get("widths"), dict) else {}
+    pictures = set(picture_info(case, [entity_id for ids in by_column.values() for entity_id in ids]))
+    for column, ids in by_column.items():
+        if column not in roles and ids <= pictures:
+            roles[column] = {"kind": "picture"}
+            widths.setdefault(column, PICTURE_WIDTH)
+    return rows, {**held, "links": links, "roles": roles, "widths": widths}
+
+
+def picture_info(case: "Case", ids: list[str]) -> dict[str, dict[str, str]]:
+    """What each of these ids is as a picture of the case: its label, its type, image or
+    video, and the case file a cell draws it from (its thumbnail, or the picture itself
+    when the case has no thumbnail of it). A video with no thumbnail draws nothing and its
+    cell shows its chip. Ids that are no picture are left out.
+
+    The sidecar stores ids and only ids, so the grid asks this to draw a `picture` cell
+    that links a media, the way `_pieces` names what a row carries.
+    """
+    wanted = list(dict.fromkeys(str(entity_id) for entity_id in ids if entity_id))
+    if not wanted:
+        return {}
+    entities = [entity for entity in case.entities_by_ids(wanted) if entity.get("type") in PICTURE_TYPES]
+    media = [str(entity["id"]) for entity in entities if entity.get("type") == "media"]
+    kinds = case.media_kinds(media) if media else {}
+    thumbs = case.media_thumbs(media) if media else {}
+    found: dict[str, dict[str, str]] = {}
+    for entity in entities:
+        entity_id = str(entity["id"])
+        attrs = entity.get("attrs") or {}
+        kind = str(kinds.get(entity_id) or attrs.get("kind") or "") if entity.get("type") == "media" else "image"
+        if kind not in PICTURE_KINDS:
+            continue
+        path = str(attrs.get("path") or "")
+        recorded = attrs.get("thumb") if isinstance(attrs.get("thumb"), str) else ""
+        drawn = path if kind == "image" and path.casefold().endswith(DRAWN_SUFFIXES) else ""
+        found[entity_id] = {
+            "label": str(entity.get("label") or ""),
+            "type": str(entity.get("type") or ""),
+            "kind": kind,
+            "thumb": str(thumbs.get(entity_id) or recorded or drawn),
+        }
+    return found
+
+
+def picture_links(meta: dict[str, Any]) -> list[str]:
+    """The ids the cells of a sheet's `picture` columns link, in reading order."""
+    columns = {
+        name for name, role in (meta.get("roles") or {}).items()
+        if isinstance(role, dict) and role.get("kind") == "picture"
+    }
+    if not columns:
+        return []
+    return list(dict.fromkeys(
+        str(entity_id)
+        for cells in (meta.get("links") or {}).values() if isinstance(cells, dict)
+        for name, entity_id in cells.items() if name in columns and entity_id
+    ))
+
+
 # -- files --------------------------------------------------------------------
 
 
@@ -808,14 +942,25 @@ def create(
     backed by two different files, with nothing on screen to tell them apart. Taking the
     stem back is what makes the rule this module states hold at birth: the name *is* the
     filename.
+
+    Rows that arrive holding the Notebook's chips are born with their labels in the file
+    and their links in the sidecar (`adopt_chips`), so the sheet mentions what they cite
+    from its first moment.
     """
     names, table = normalize(
         columns if columns is not None else ["Subject", "Status", "Notes"],
         rows if rows is not None else [],
     )
+    table, meta = adopt_chips(case, names, table, {})
     rel = target(case, layout.slugify(title, "Sheet"))
     write_atomic(case.resolve_inside(rel), to_csv(names, table), encoding=CSV_ENCODING)
-    return case.add_entity("sheet", Path(rel).stem, {"path": rel}, by="sheet")
+    entity = case.add_entity("sheet", Path(rel).stem, {"path": rel}, by="sheet")
+    if meta.get("links"):
+        clean = drop_dead_links(case, clean_meta(meta, names, table))
+        _, meta_path = _paths(case, entity)
+        write_atomic(meta_path, json.dumps(clean, ensure_ascii=False, indent=2), encoding="utf-8")
+        sync_mentions(case, str(entity["id"]), clean)
+    return entity
 
 
 def discard(case: "Case", entity: dict[str, Any]) -> None:
@@ -865,6 +1010,9 @@ def read(case: "Case", entity_id: str) -> dict[str, Any]:
     except (OSError, ValueError):
         stored = None
     clean = clean_meta(stored, columns, rows)
+    # A chip a sheet still holds as text is read as its label and its link, in memory like
+    # everything here: the next save is what writes it so (`adopt_chips`).
+    rows, clean = adopt_chips(case, columns, rows, clean)
     # A link the case cannot answer for is not shown as one. In memory only: reading
     # never writes, so the file settles on the next save.
     clean = drop_dead_links(case, clean)
@@ -892,6 +1040,7 @@ def read(case: "Case", entity_id: str) -> dict[str, Any]:
         "stamp": token,
         "dropped_roles": dropped,
         "pieces": _pieces(case, clean),
+        "pictures": picture_info(case, picture_links(clean)),
         "assigned": ID_COLUMN
         not in [_clean_cell(name).strip().casefold() for name in _heading(raw)],
     }
@@ -975,6 +1124,8 @@ def write(
     if expected is not None and stamp(path) != expected:
         raise SheetConflict("this file changed on disk since it was opened")
     names, table = normalize(columns, rows)
+    # A pasted table's chips, or an old sheet's, become labels and links here.
+    table, meta = adopt_chips(case, names, table, meta)
     clean = clean_meta(meta, names, table)
     # A grid that has been open since before a delete still holds the link it made then,
     # and a save is exactly where that dead id would land back on disk.
@@ -989,7 +1140,13 @@ def write(
     )
     write_atomic(path, to_csv(names, table), encoding=CSV_ENCODING)
     write_atomic(meta_path, json.dumps(clean, ensure_ascii=False, indent=2), encoding="utf-8")
-    return {"columns": names, "rows": table, "meta": clean, "stamp": stamp(path)}
+    return {
+        "columns": names,
+        "rows": table,
+        "meta": clean,
+        "stamp": stamp(path),
+        "pictures": picture_info(case, picture_links(clean)),
+    }
 
 
 def write_meta(case: "Case", entity_id: str, meta: Any) -> dict[str, Any]:

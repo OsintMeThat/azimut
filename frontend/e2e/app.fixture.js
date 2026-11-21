@@ -921,9 +921,15 @@ export async function installAppFixture(page, options = {}) {
   const sheetWrites = [];
   let sheetTick = 1000;
   const nextStamp = () => `${(sheetTick += 1)}-70`;
-  const makeSheet = (title, columns, rows = [], meta = null) => {
+  const makeSheet = (title, columns, rows = [], meta = null, extra = {}) => {
     const id = `sheet-${fixtureSheets.size + 1}`;
     const held = {
+      // What the read answers beside the table: each linked picture's thumbnail, and the
+      // shape a sheet built out of the case was built as.
+      pictures: extra.pictures ?? {},
+      shape: extra.shape ?? null,
+      // Rows the case holds and the sheet does not yet: what its next refresh adds.
+      fromCase: [],
       id,
       title,
       path: `sheets/${title}.csv`,
@@ -948,9 +954,10 @@ export async function installAppFixture(page, options = {}) {
     assigned: false,
     dropped_roles: [],
     pieces: {},
+    pictures: structuredClone(held.pictures),
   });
-  for (const [title, columns, rows, meta] of options.sheets ?? []) {
-    makeSheet(title, columns, rows, meta);
+  for (const [title, columns, rows, meta, extra] of options.sheets ?? []) {
+    makeSheet(title, columns, rows, meta, extra);
   }
 
   const timelineEntity = (id) => fixtureCatalog.find((entity) => entity.id === id)
@@ -2324,6 +2331,7 @@ export async function installAppFixture(page, options = {}) {
           title: held.title,
           rows: held.rows.length,
           columns: held.columns.length,
+          shape: held.shape,
         })),
       });
     }
@@ -2331,6 +2339,22 @@ export async function installAppFixture(page, options = {}) {
       const body = request.postDataJSON();
       const made = makeSheet(body.title, body.columns ?? ['Subject', 'Status', 'Notes']);
       return json(route, { id: made.id, label: made.title, type: 'sheet', attrs: { path: made.path } });
+    }
+    // A built worklist brought level with the case: unchanged, or the rows the case gained.
+    const followMatch = path.match(new RegExp(`^/api/cases/${caseId}/sheets/([^/]+)/(refresh|pictures)$`));
+    if (followMatch && fixtureSheets.has(followMatch[1]) && request.method() === 'POST') {
+      const held = fixtureSheets.get(followMatch[1]);
+      const body = request.postDataJSON() ?? {};
+      if (followMatch[2] === 'pictures') {
+        const ids = body.ids ?? [];
+        return json(route, { pictures: Object.fromEntries(ids.filter((id) => held.pictures[id]).map((id) => [id, held.pictures[id]])), paths: {} });
+      }
+      if (!held.fromCase.length) return json(route, { status: 'unchanged', added: 0, updated: 0, gone: 0 });
+      const added = held.fromCase.splice(0);
+      held.rows = [...held.rows, ...added.map((row, at) => [`r${held.rows.length + at + 1}`, ...row])];
+      held.stamp = nextStamp();
+      sheetWrites.push({ id: held.id, kind: 'refresh', rows: held.rows.length });
+      return json(route, { status: 'saved', ...sheetPayload(held), reread: false, added: added.length, updated: 0, gone: 0 });
     }
     const sheetMatch = path.match(new RegExp(`^/api/cases/${caseId}/sheets/([^/]+)(/meta|/stamp)?$`));
     if (sheetMatch && fixtureSheets.has(sheetMatch[1])) {
@@ -2477,6 +2501,8 @@ export async function installAppFixture(page, options = {}) {
       return held.stamp;
     },
     sheetOnDisk: (id) => fixtureSheets.get(id),
+    /** Play the case gaining what a built worklist lists: a proof filed elsewhere. */
+    fileInCase: (id, row) => fixtureSheets.get(id).fromCase.push(row),
     trashWrites,
     draftWrites,
     publishWrites,
