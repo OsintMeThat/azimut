@@ -33,6 +33,9 @@ import {
   parseOffset,
   picturePath,
   pictureRef,
+  cellPicture,
+  cellWords,
+  chipOf,
   pictureUrl,
   parseWhen,
   precisionMetres,
@@ -128,6 +131,34 @@ describe('the role record', () => {
       value: 'https://a.org/1.jpg',
     });
     expect(pictureRef('to be found')).toBeNull();
+  });
+
+  it('draws a cell linked to a picture of the case from its thumbnail, under its words', () => {
+    const pictures = {
+      e_frame1: { label: 'frame-1', type: 'media', kind: 'image', thumb: 'media/.thumbs/f1.jpg' },
+      e_clip1: { label: 'clip-1', type: 'media', kind: 'video', thumb: 'media/.thumbs/c1.jpg' },
+      e_clip2: { label: 'clip-2', type: 'media', kind: 'video', thumb: '' },
+    };
+    expect(cellPicture('#1', 'e_frame1', pictures)).toEqual({
+      kind: 'case', value: 'media/.thumbs/f1.jpg', label: '#1', id: 'e_frame1', video: false,
+    });
+    // A video draws its still, marked as one; with no still it is its chip.
+    expect(cellPicture('#2', 'e_clip1', pictures)).toMatchObject({ kind: 'case', video: true });
+    expect(cellPicture('', 'e_clip2', pictures)).toEqual({ kind: 'chip', value: '', label: 'clip-2', id: 'e_clip2', video: true });
+    // A cell still holding the Notebook's code is read as its link: the picture and the label.
+    expect(cellPicture('[[media:e_frame1|#1]]', null, pictures)).toMatchObject({ kind: 'case', label: '#1' });
+    expect(cellPicture('[[media:e_gone|#9]]', null, pictures)).toMatchObject({ kind: 'chip', label: '#9' });
+    // With no link, the address or the case path it holds, as before.
+    expect(cellPicture('media/quai.jpg', null, pictures)).toMatchObject({ kind: 'case', value: 'media/quai.jpg' });
+    expect(cellPicture('to be found', null, pictures)).toBeNull();
+  });
+
+  it('shows a chip still held as text by its label, never the code', () => {
+    expect(chipOf('[[media:e_85695cfa32|#1]]')).toEqual({ id: 'e_85695cfa32', label: '#1' });
+    expect(chipOf('[[entity:e_1|Rooftop]]{width=40%}')).toEqual({ id: 'e_1', label: 'Rooftop' });
+    expect(chipOf('see [[entity:e_1|Rooftop]]')).toBeNull();
+    expect(cellWords('[[media:e_85695cfa32|#1]]')).toBe('#1');
+    expect(cellWords('plain words')).toBe('plain words');
   });
 
   it('refuses a path that names a disk this case does not travel with', () => {

@@ -136,7 +136,8 @@
     nearbyPairs,
     parseLatLon,
     parseWhen,
-    pictureRef,
+    cellPicture,
+    cellWords,
     precisionMetres,
     readsCell,
     suggestProgressColumn,
@@ -173,7 +174,7 @@
   import SheetRowPanel from '../components/SheetRowPanel.svelte';
   import { shortcut } from '../lib/keys.js';
   import { middleClickPaste } from '../lib/clipboardPaste.js';
-  import { carriesOutsideFiles, leftZone } from '../lib/drag.js';
+  import { carriesEntities, carriesOutsideFiles, droppedEntities, leftZone } from '../lib/drag.js';
 
   const HEAD_H = 32;
   /** How long the two lines above the grid may be. Mirrors `engine/sheets.MAX_DESCRIPTION`,
@@ -313,6 +314,10 @@
   /** Entity id → what it is called, for the pieces a row carries. Presentation only: the
    *  sidecar holds ids, and this is what the read answers so the panel can name them. */
   let pieces = $state({});
+  /** Entity id → what a `picture` cell linking it draws: its label, image or video, and the
+   *  case file of its thumbnail (`engine/sheets.picture_info`). Answered by the read and by
+   *  every save, and asked for a link the grid has just made. */
+  let pictures = $state({});
   /** The two lines above the grid, while they are being written. */
   let describing = $state(false);
   let describeText = $state('');
@@ -644,6 +649,7 @@
     // the entity is renamed — and merged rather than replaced, since a save answers no
     // pieces and one attached a second ago would lose its name.
     if (sheet.pieces) pieces = { ...pieces, ...sheet.pieces };
+    if (sheet.pictures) pictures = { ...pictures, ...sheet.pictures };
     if (reset) {
       resetView();
       history.reset();
@@ -914,6 +920,7 @@
         table = { columns: saved.columns, rows: saved.rows };
         assigned = false;
       }
+      if (saved.pictures) pictures = { ...pictures, ...saved.pictures };
       saveState = 'saved';
     } catch (error) {
       saveState = 'failed';
@@ -1269,7 +1276,15 @@
    * the media entity so the graph knows the row rests on it.
    */
   function onDrop(event) {
-    if (!carriesOutsideFiles(event)) return;
+    if (!carriesOutsideFiles(event)) {
+      const dropped = droppedEntities(event);
+      const cell = event.target?.closest?.('[data-row]');
+      const row = Number(cell?.dataset?.row ?? -1);
+      if ((!dropped.ids.length && !dropped.paths.length) || row < 0) return;
+      event.preventDefault();
+      void linkDropped(row, Number(cell.dataset.column), dropped);
+      return;
+    }
     event.preventDefault();
     dropping = false;
     const file = event.dataTransfer?.files?.[0];
@@ -3655,6 +3670,53 @@
         table = setCells(table, [{ row, column, value: entity.label ?? '' }]);
       }
     });
+    if (roles[table.columns[column]]?.kind === 'picture') void learnPictures([entity.id]);
+  }
+
+  /** What a picture just linked draws, so its thumbnail shows before the next read. */
+  async function learnPictures(ids) {
+    const wanted = ids.filter((id) => id && !pictures[id]);
+    if (!wanted.length || !openId || !caseId) return;
+    try {
+      const answer = await api.post(`/api/cases/${caseId}/sheets/${openId}/pictures`, { ids: wanted });
+      pictures = { ...pictures, ...(answer.pictures ?? {}) };
+    } catch {
+      // The cell keeps its words and its link; the next read draws the picture.
+    }
+  }
+
+  /**
+   * A picture of the case dropped on a cell: one from the Media library, or a file or a
+   * proof pulled out of the case sidebar or Files. The cell links it, as the `@` picker
+   * would, and an empty cell takes its name.
+   */
+  async function linkDropped(rowIndex, columnIndex, dropped) {
+    const at = pictureColumn(columnIndex);
+    if (at === -1) {
+      toast('Declare a column a picture first, then drop the image on it.', 'danger');
+      return;
+    }
+    let answer;
+    try {
+      answer = await api.post(`/api/cases/${caseId}/sheets/${openId}/pictures`, dropped);
+    } catch (error) {
+      toast(error.message || 'That picture could not be linked.', 'danger');
+      return;
+    }
+    const found = answer.pictures ?? {};
+    const id = [...dropped.ids, ...Object.values(answer.paths ?? {})].find((one) => found[one]);
+    if (!id) {
+      toast('Only a picture of the case can be dropped on a cell.', 'danger');
+      return;
+    }
+    pictures = { ...pictures, ...found };
+    const key = rowKey(table.columns, table.rows[rowIndex]);
+    structural(() => {
+      meta = setLink(meta, key, table.columns[at], id);
+      if (!String(table.rows[rowIndex][at] ?? '').trim()) {
+        table = setCells(table, [{ row: rowIndex, column: at, value: found[id].label ?? '' }]);
+      }
+    });
   }
 
   function detach(row, column) {
@@ -4323,7 +4385,15 @@
 
     <div class="grid-panel">
     <div class="grid-wrap" class:dropping
-         ondragover={(event) => { if (!carriesOutsideFiles(event)) return; event.preventDefault(); dropping = true; }}
+         ondragover={(event) => {
+           if (carriesOutsideFiles(event)) {
+             event.preventDefault();
+             dropping = true;
+           } else if (carriesEntities(event) && event.target?.closest?.('[data-row]')) {
+             // A picture of the case over a cell: the cell is where it lands.
+             event.preventDefault();
+           }
+         }}
          ondragleave={(event) => { if (leftZone(event)) dropping = false; }}
          ondrop={onDrop}
          role="presentation">
@@ -4564,19 +4634,25 @@
                     </button>
                   {/if}
                 {:else if roles[column.name]?.kind === 'picture'}
-                  {@const shot = pictureRef(table.rows[rowIndex][column.index])}
-                  {@const url = shot?.kind === 'case' ? fileUrl(caseId, shot.value) : shot?.value}
-                  <!-- A picture the case holds, or an address. The case's own files are why
-                       a frame can be dropped on a row: a geolocation index is worked on the
-                       images in the case folder, and only a `case` cell stays on the
-                       machine. -->
+                  {@const shot = cellPicture(table.rows[rowIndex][column.index], linkOf(rowIndex, column.name), pictures)}
+                  {@const url = shot?.kind === 'case' ? fileUrl(caseId, shot.value) : shot?.kind === 'url' ? shot.value : null}
+                  <!-- A picture the case holds, linked or named by its path, or an address.
+                       The case's own files are why a frame can be dropped on a row: a
+                       geolocation index is worked on the images in the case folder, and
+                       only a `case` cell stays on the machine. -->
                   {#if url}
-                    <a class="cell-shot" href={url} target="_blank" rel="noreferrer noopener"
-                       title={shot.value} onclick={(event) => event.stopPropagation()}>
+                    <a class="cell-shot" class:video={shot.video} href={url} target="_blank" rel="noreferrer noopener"
+                       title={shot.label} onclick={(event) => event.stopPropagation()}>
                       <img src={url} alt="" loading="lazy" />
                     </a>
                     <span class="value">
-                      {shot.kind === 'case' ? shot.value : linkLabel(shot.value)}
+                      {shot.kind === 'url' ? linkLabel(shot.value) : shot.label}
+                    </span>
+                  {:else if shot?.kind === 'chip'}
+                    <!-- A video the case holds no still of: its chip, since there is no file
+                         to draw. -->
+                    <span class="cell-chip" title={shot.video ? 'A video of the case' : 'An item of the case'}>
+                      <Icon name={shot.video ? 'video' : 'image'} size={11} />{shot.label}
                     </span>
                   {:else}
                     <span class="value">{table.rows[rowIndex][column.index]}</span>
@@ -4619,7 +4695,7 @@
                     {/each}
                   </span>
                 {:else}
-                  <span class="value" class:linked>{table.rows[rowIndex][column.index]}</span>
+                  <span class="value" class:linked>{cellWords(table.rows[rowIndex][column.index])}</span>
                 {/if}
                 {#if String(column.name).toLowerCase() === ID_COLUMN}
                   <button class="cell-open" title="Open this row"
@@ -5174,7 +5250,8 @@
   <Modal title="Point this cell at an entity" onclose={() => (linking = null)} width="580px">
     <SheetEntityPicker
       {caseId}
-      cellText={table.rows[linking.row]?.[linking.column] ?? ''}
+      pictures={roles[table.columns[linking.column]]?.kind === 'picture'}
+      cellText={cellWords(table.rows[linking.row]?.[linking.column] ?? '')}
       current={linkOf(linking.row, table.columns[linking.column])}
       onpick={attach}
       onclear={() => detach(linking.row, linking.column)}
@@ -5800,6 +5877,21 @@
     border-radius: 2px; background: var(--bg-3);
   }
   .cell-shot img { width: 100%; height: 100%; object-fit: cover; }
+  /* A tall row has room to tell twenty frames of one wall apart. */
+  .grid.tall .cell-shot { width: 96px; height: 64px; }
+  /* A video's still, marked as one. */
+  .cell-shot.video { position: relative; }
+  .cell-shot.video::after {
+    content: ''; position: absolute; right: 3px; bottom: 3px;
+    border-style: solid; border-width: 4px 0 4px 7px; border-color: transparent transparent transparent #fff;
+    filter: drop-shadow(0 0 1px #000);
+  }
+  /* A picture of the case with no file to draw: named, as the Notebook names it. */
+  .cell-chip {
+    display: inline-flex; align-items: center; gap: 4px; min-width: 0; padding: 1px 6px;
+    border: 1px solid var(--border); border-radius: var(--r-sm); background: var(--bg-2);
+    color: var(--text-1); font-size: var(--fs-xs); overflow: hidden; white-space: nowrap; text-overflow: ellipsis;
+  }
   .cell .value mark {
     background: var(--accent-soft); color: var(--accent); border-radius: 2px;
   }

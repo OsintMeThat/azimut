@@ -12,13 +12,21 @@
    * catalog summary, and a list that is populated before a key is pressed. Narrowing
    * by type is one click and it says how big each answer is first — the same rule the
    * catalog's own filter menu follows, so nobody picks a term and lands on nothing.
+   *
+   * A `picture` column's cell asks for a picture, so the picker leads with the case's
+   * pictures (`pictures`): the files, captures and proofs, each with its thumbnail, and
+   * the rest one press away under Everything.
    */
   import { untrack } from 'svelte';
   import Icon from './Icon.svelte';
   import { api } from '../lib/api.js';
   import { entityIcon } from '../lib/entityIcon.js';
+  import { fileUrl } from '../lib/fileUrl.js';
 
-  let { caseId, cellText = '', current = null, onpick, onclear, onclose } = $props();
+  let { caseId, cellText = '', current = null, pictures = false, onpick, onclear, onclose } = $props();
+
+  /** The types a picture of the case is: a file, a capture, a proof. Asked as one filter. */
+  const PICTURES = 'media,capture,proof';
 
   /** One page. Not a ceiling: `next_cursor` carries the rest, and the count above the
    *  list says how much rest there is — a case of a thousand entities is walkable
@@ -39,8 +47,8 @@
   /** Seeded from the cell once, then the analyst's to change. Untracked on purpose:
    *  a picker that reset the box every time the cell behind it changed would fight
    *  whoever is typing in it. */
-  let query = $state(untrack(() => String(cellText ?? '').trim()));
-  let type = $state(null);
+  let query = $state(untrack(() => (pictures ? '' : String(cellText ?? '').trim())));
+  let type = $state(untrack(() => (pictures ? PICTURES : null)));
   let order = $state('label');
   let items = $state([]);
   let cursor = $state(null);
@@ -73,6 +81,8 @@
     const params = new URLSearchParams({ limit: String(PAGE), order: chosen });
     if (term) params.set('q', term);
     if (wanted) params.set('type', wanted);
+    // The thumbnail each picture already has, cached or recorded: nothing is made.
+    if (pictures) params.set('previews', 'true');
     if (from) params.set('cursor', from);
     return api.get(`/api/cases/${caseId}/catalog/entities?${params}`);
   }
@@ -145,8 +155,13 @@
   <input class="input" autofocus placeholder="Find an entity by name" bind:value={query}
          aria-label="Find an entity" onkeydown={onKey} />
 
-  {#if counts.length}
+  {#if counts.length || pictures}
     <div class="types">
+      {#if pictures}
+        <button class="chip" class:on={type === PICTURES} onclick={() => (type = PICTURES)}>
+          <Icon name="image" size={11} /> Pictures
+        </button>
+      {/if}
       <button class="chip" class:on={!type} onclick={() => (type = null)}>
         Everything <small>{total}</small>
       </button>
@@ -174,11 +189,15 @@
     </div>
   </div>
 
-  <div class="results" bind:this={listElement}>
+  <div class="results" class:shots={pictures} bind:this={listElement}>
     {#each items as entity, index (entity.id)}
       <button class="result" class:on={index === highlighted} class:linked={entity.id === current}
               onclick={() => onpick(entity)} onpointerenter={() => (highlighted = index)}>
-        <Icon name={entityIcon(entity)} size={14} />
+        {#if pictures && entity.thumb}
+          <img class="thumb" src={fileUrl(caseId, entity.thumb)} alt="" loading="lazy" />
+        {:else}
+          <Icon name={entityIcon(entity)} size={14} />
+        {/if}
         <span class="label">{entity.label}</span>
         {#if entity.folder}<small class="folder">{entity.folder}</small>{/if}
         <small class="type">{entity.type}</small>
@@ -188,6 +207,8 @@
       <p class="hint">
         {#if loading}
           Looking.
+        {:else if type === PICTURES && !query.trim()}
+          This case holds no pictures yet. Everything lists what it holds.
         {:else if query.trim() || type}
           Nothing in this case matches. {total} {total === 1 ? 'entity' : 'entities'} filed in
           all; clear the box to see them.
@@ -258,6 +279,10 @@
   .result.on { box-shadow: inset 2px 0 0 var(--accent); }
   .result.linked { color: var(--accent); }
   .result .label { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .thumb {
+    width: 48px; height: 32px; object-fit: cover; border-radius: 2px; background: var(--bg-3);
+  }
+  .shots .result { padding-block: 4px; }
   .result small { color: var(--text-3); font-size: var(--fs-xs); }
   .result .folder { font-family: var(--font-mono); }
   .result .type {

@@ -58,7 +58,9 @@ export function startMediaDrag(event, item) {
   transfer.effectAllowed = 'move';
   transfer.setData(
     MEDIA_DRAG,
-    JSON.stringify([{ path: item.path, title: item.title ?? item.filename, folder: item.folder ?? '' }])
+    JSON.stringify([
+      { path: item.path, title: item.title ?? item.filename, folder: item.folder ?? '', id: item.entity_id ?? '' },
+    ])
   );
 }
 
@@ -83,4 +85,42 @@ export function droppedMedia(event) {
       label: String(item.title ?? item.path),
       attrs: { path: item.path, folder: String(item.folder ?? '') },
     }));
+}
+
+/** An entity id as the case sidebar and Files hand it over, as text. */
+const ENTITY_ID = /^[a-z]+_[A-Za-z0-9]{4,40}$/;
+
+/** A drag from inside the page that may carry the case's entities: a Media library file,
+ *  or rows of the case sidebar or of Files, which hand their ids over as text. Read off
+ *  the types alone, the only part of a drag a `dragover` may look at. */
+export const carriesEntities = (event) => {
+  const types = typesOf(event);
+  return types.includes(PAGE_DRAG) && (types.includes(MEDIA_DRAG) || types.includes('text/plain'));
+};
+
+/**
+ * The entities a drop from inside the page carries, as `{ ids, paths }`: the ids the
+ * sidebar and Files write as text, and the Media library's files by their entity when the
+ * library knew it, by their path otherwise. Nothing for a drag from outside the page.
+ */
+export function droppedEntities(event) {
+  const types = typesOf(event);
+  const out = { ids: [], paths: [] };
+  if (!types.includes(PAGE_DRAG)) return out;
+  if (types.includes(MEDIA_DRAG)) {
+    let list;
+    try {
+      list = JSON.parse(event.dataTransfer?.getData(MEDIA_DRAG) || '[]');
+    } catch {
+      list = [];
+    }
+    for (const item of Array.isArray(list) ? list : []) {
+      if (typeof item?.id === 'string' && item.id) out.ids.push(item.id);
+      else if (typeof item?.path === 'string' && item.path) out.paths.push(item.path);
+    }
+    return out;
+  }
+  const text = String(event.dataTransfer?.getData('text/plain') ?? '');
+  out.ids = [...new Set(text.split(/[\s,]+/).filter((word) => ENTITY_ID.test(word)))];
+  return out;
 }

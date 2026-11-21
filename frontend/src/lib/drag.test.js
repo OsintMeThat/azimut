@@ -6,8 +6,10 @@ import { fileURLToPath } from 'node:url';
 import {
   MEDIA_DRAG,
   PAGE_DRAG,
+  carriesEntities,
   carriesMedia,
   carriesOutsideFiles,
+  droppedEntities,
   droppedMedia,
   leftZone,
   startMediaDrag,
@@ -146,6 +148,34 @@ describe('a media on its way to a folder', () => {
     expect(droppedMedia(dragEvent('drop', transfer({ [MEDIA_DRAG]: '[{"path":""},{}]' })))).toEqual([]);
     expect(droppedMedia(dragEvent('drop', transfer()))).toEqual([]);
     expect(carriesMedia(dragEvent('dragover', transfer({ Files: '' })))).toBe(false);
+  });
+});
+
+describe('a picture of the case dropped on a sheet cell', () => {
+  it('reads the Media library file by its entity, else by its path', () => {
+    const data = transfer({ [PAGE_DRAG]: '1' });
+    startMediaDrag(dragEvent('dragstart', data), { path: 'media/a.jpg', filename: 'a.jpg', entity_id: 'e_abc12345' });
+    const drop = dragEvent('drop', data);
+    expect(carriesEntities(drop)).toBe(true);
+    expect(droppedEntities(drop)).toEqual({ ids: ['e_abc12345'], paths: [] });
+    const unknown = transfer({ [PAGE_DRAG]: '1' });
+    startMediaDrag(dragEvent('dragstart', unknown), { path: 'media/b.jpg', filename: 'b.jpg' });
+    expect(droppedEntities(dragEvent('drop', unknown))).toEqual({ ids: [], paths: ['media/b.jpg'] });
+  });
+
+  it('reads the ids the sidebar and Files hand over as text, and no other word', () => {
+    const sidebar = transfer({ [PAGE_DRAG]: '1', 'text/plain': 'e_abc12345 e_def67890' });
+    expect(droppedEntities(dragEvent('drop', sidebar)).ids).toEqual(['e_abc12345', 'e_def67890']);
+    const files = transfer({ [PAGE_DRAG]: '1', 'text/plain': 'e_abc12345,e_abc12345' });
+    expect(droppedEntities(dragEvent('drop', files)).ids).toEqual(['e_abc12345']);
+    const words = transfer({ [PAGE_DRAG]: '1', 'text/plain': 'a sentence dragged out of a note' });
+    expect(droppedEntities(dragEvent('drop', words)).ids).toEqual([]);
+  });
+
+  it('takes nothing from outside the page', () => {
+    const desktop = transfer({ Files: '', 'text/plain': 'e_abc12345' });
+    expect(carriesEntities(dragEvent('dragover', desktop))).toBe(false);
+    expect(droppedEntities(dragEvent('drop', desktop))).toEqual({ ids: [], paths: [] });
   });
 });
 

@@ -96,6 +96,52 @@ export function pictureRef(cell) {
   return path ? { kind: 'case', value: path } : null;
 }
 
+/** A cell holding one Notebook chip and nothing else. Mirrors `engine/sheets.CHIP_CELL`. */
+const CHIP_CELL = /^\[\[(media|entity):([A-Za-z0-9_-]+)(?:\|([^\]\n]*))?\]\](?:\{[^}\n]*\})?$/;
+
+/**
+ * A chip the cell still holds as text, as `{ id, label }`, or null.
+ *
+ * The engine reads a chip as the sheet's own link on every save and every read
+ * (`engine/sheets.adopt_chips`), so a cell only holds one for the moment between a paste
+ * and the save that settles it. The grid shows its label meanwhile, never the code.
+ */
+export function chipOf(cell) {
+  const found = CHIP_CELL.exec(String(cell ?? '').trim());
+  return found ? { id: found[2], label: (found[3] ?? '').trim() || found[2] } : null;
+}
+
+/** The words a cell shows: its text, or a chip's label. */
+export function cellWords(cell) {
+  return chipOf(cell)?.label ?? cell;
+}
+
+/**
+ * What a `picture` cell draws, or null.
+ *
+ * A cell linked to a picture of the case draws that picture's thumbnail under its words,
+ * `pictures` being what the read answers for each linked id (`engine/sheets.picture_info`).
+ * A video the case holds no still of has no file to draw, so it shows as a chip. With no
+ * link it is the address or the case path it holds (`pictureRef`), as before.
+ *
+ * Answers `{ kind, value, label, id, video }`: `kind` is `case` (a case file), `url` (an
+ * address) or `chip`; `value` the file or the address.
+ */
+export function cellPicture(cell, linked, pictures) {
+  const chip = chipOf(cell);
+  const id = chip?.id ?? linked ?? null;
+  const label = chip?.label ?? String(cell ?? '');
+  const known = id ? pictures?.[id] : null;
+  if (known) {
+    const video = known.kind === 'video';
+    if (known.thumb) return { kind: 'case', value: known.thumb, label: label || known.label, id, video };
+    return { kind: 'chip', value: '', label: label || known.label, id, video };
+  }
+  if (chip) return { kind: 'chip', value: '', label, id, video: false };
+  const shot = pictureRef(cell);
+  return shot ? { ...shot, label: shot.value, id: linked ?? null, video: false } : null;
+}
+
 /** The state vocabulary a column starts with. Ordered, least done first: that order
  *  *is* the ranking the sort reads, so reordering the list reorders the column. */
 export const STATE_DEFAULTS = ['to do', 'in progress', 'done', 'ruled out'];
