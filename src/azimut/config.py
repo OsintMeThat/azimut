@@ -23,6 +23,7 @@ asks the question — every path is built from :func:`workspace_root`.
             ├── publishing.json       # publishing credentials (engine/publishsecrets.py)
             ├── report-signature.png  # the handwritten signature reports print
             ├── signature.png # the analyst's logo
+            ├── site-logo.png # the website's own logo, when it has one
             ├── settings.json
             └── templates.json
 
@@ -181,6 +182,10 @@ DEFAULT_SETTINGS: dict[str, Any] = {
     # with no extension installed it changes nothing: the button copies or saves
     # the image and opens the page, as it always did.
     "reverse_prefill": True,
+    # Whether the Support heart at the foot of the rail beats once every ten minutes
+    # the app is in sight, until Support is opened that session. On, so the tip stays
+    # findable; the switch is there for anyone the motion distracts.
+    "support_heartbeat": True,
     # The handle stamped onto proofs when a proof/template enables it. Empty
     # means no account-handle slot can render.
     "signature_handle": "",
@@ -537,6 +542,16 @@ def logo_original_path() -> Path:
     return settings_dir() / "logo-original.png"
 
 
+def site_logo_path() -> Path:
+    """The picture of the analyst's website, when it has one of its own.
+
+    The site's pages carry it in place of the Publishing logo (``signature.png``),
+    which they fall back to (`site_logo`). Under the logo's rule: app-wide, beside
+    settings.json, never copied into a case, and carried by a settings backup.
+    """
+    return settings_dir() / "site-logo.png"
+
+
 def report_signature_path() -> Path:
     """A picture of the analyst's handwritten signature, which a report prints
     where its text writes ``![Signature](azimut:my-signature)``.
@@ -588,6 +603,20 @@ def valid_signature(data: bytes, limit: int = SIGNATURE_MAX_BYTES) -> bool:
     Settings upload and a restored settings backup, each under its own cap.
     """
     return 0 < len(data) <= limit and data.startswith(PNG_MAGIC)
+
+
+def site_logo() -> tuple[bytes, str] | None:
+    """The logo the analyst's website carries and where it comes from: its own
+    (``"site"``), else the Publishing logo (``"publishing"``), else None. Each counts
+    only while it passes `valid_signature`, so a file dropped in by hand is no logo."""
+    for path, source in ((site_logo_path(), "site"), (signature_path(), "publishing")):
+        try:
+            data = path.read_bytes() if path.stat().st_size <= SIGNATURE_MAX_BYTES else b""
+        except OSError:
+            continue
+        if valid_signature(data):
+            return data, source
+    return None
 
 
 def write_private(path: Path, data: bytes) -> None:

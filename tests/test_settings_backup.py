@@ -1,7 +1,7 @@
 """Settings backup (export/import) and the lazy pairing-token mint.
 
 The backup is one JSON file carrying everything portable that isn't a case:
-settings, templates and the signature logo. Two invariants are worth more than
+settings, templates and the logos. Two invariants are worth more than
 the individual cases below — every exported setting can be imported back (the
 drift gate), and machine-bound paths never travel.
 """
@@ -209,6 +209,44 @@ def test_a_frame_that_does_not_read_restores_the_logo_plain(client):
     assert config.load_settings()["logo_look"] is None
 
 
+SITE_PNG = config.PNG_MAGIC + b"the website's own logo"
+
+
+def test_the_site_logo_travels_in_the_backup_beside_the_publishing_logo(client):
+    client.post("/api/settings/signature", files={"file": ("logo.png", PNG, "image/png")})
+    client.post("/api/settings/site-logo", files={"file": ("site.png", SITE_PNG, "image/png")})
+    blob = bundle_of(client)
+    assert base64.b64decode(blob["site_logo_png"]) == SITE_PNG and base64.b64decode(blob["signature_png"]) == PNG
+    # a fresh machine: neither logo
+    client.delete("/api/settings/site-logo")
+    client.delete("/api/settings/signature")
+    res = client.post("/api/settings/import", json=blob).json()
+    assert res["site_logo"] is True and res["signature"] is True
+    assert config.site_logo_path().read_bytes() == SITE_PNG and config.signature_path().read_bytes() == PNG
+    assert client.get("/api/settings").json()["site_logo"] is True
+
+
+def test_a_backup_without_a_site_logo_leaves_the_one_here_alone(client):
+    assert bundle_of(client)["site_logo_png"] == ""
+    client.post("/api/settings/site-logo", files={"file": ("site.png", SITE_PNG, "image/png")})
+    res = client.post("/api/settings/import", json={"settings": {"units": "imperial"}}).json()
+    assert res["site_logo"] is False and config.site_logo_path().read_bytes() == SITE_PNG
+
+
+def test_a_site_logo_no_gate_passes_is_dropped_coming_in_and_left_out_going_out(client):
+    for encoded in (base64.b64encode(b"GIF89a not really an image").decode(), "not base64 at all!!",
+                    base64.b64encode(PNG + b"\x00" * config.SIGNATURE_MAX_BYTES).decode()):
+        res = client.post("/api/settings/import", json={"settings": {"units": "imperial"}, "site_logo_png": encoded})
+        assert res.status_code == 200 and res.json()["site_logo"] is False
+        assert not config.site_logo_path().exists()
+    assert client.post("/api/settings/import", json={"site_logo_png": "A" * 10_000_000}).status_code == 422
+    # a file dropped in by hand that no gate saw is not exported
+    config.write_private(config.site_logo_path(), b"GIF89a not really an image")
+    assert bundle_of(client)["site_logo_png"] == ""
+    config.write_private(config.site_logo_path(), PNG + b"\x00" * (config.SIGNATURE_MAX_BYTES + 1))
+    assert bundle_of(client)["site_logo_png"] == ""
+
+
 def test_export_leaves_the_login_session_behind(client):
     """cookies.txt is a live session: it stays on the machine that made it.
 
@@ -326,7 +364,8 @@ def test_an_unknown_browser_lands_on_none(client):
 def test_an_older_backup_without_the_new_sections_still_imports(client):
     """A file written before templates, the logo and the icons travelled: settings only."""
     res = client.post("/api/settings/import", json={"settings": {"units": "imperial"}}).json()
-    assert res == {"imported": ["units"], "templates": 0, "signature": False, "report_signature": False, "icons": 0}
+    assert res == {"imported": ["units"], "templates": 0, "signature": False, "site_logo": False,
+                   "report_signature": False, "icons": 0}
     assert client.get("/api/settings").json()["units"] == "imperial"
 
 

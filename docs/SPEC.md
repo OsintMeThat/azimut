@@ -205,6 +205,9 @@ proof for publication.
 | ✅ **Report on the web** | Writes a note as a folder ready to host, with its link card and the GitHub Pages steps, publishes it to the analyst's own GitHub Pages in one press, or sends it to WordPress as a draft. |
 | ✅ **Your website** | Every publish to GitHub Pages also keeps the analyst's site: a card and a list picture with each article, then its list, feed and sitemap, the lists between markers in their own pages (a default home when they have none), pages kept off the lists, a way back to the site on each page, a warning when a folder was changed on GitHub since, and readers counted on GoatCounter or Cloudflare when asked; only files Azimut made are ever written. |
 | ✅ **Website settings** | Sets the site in one tab (title, line and credit, GitHub Pages and WordPress, how readers are counted, Update the site, the Legal notice starter), and the publish dialog adds a category, Article or Page and a list picture. |
+| ✅ **Website hub** | Settings › Website as the site's hub, in panels: a live preview of its name and logo, a read of what it holds with a delete, its limits, readers and upkeep; Unlisted joins Article and Page. |
+| ✅ **Your own bar** | Articles carry the site's own header from `azimut-bar.html` in place of Azimut's bar, cleaned and kept apart from the article's styles, and Update the site changes it in every article. |
+| ✅ **Places on the site** | An article may carry a place for a map of the site's articles, kept with its note, offered only when the note names one point, and carried by its card and `articles.json`. |
 | ✅ **Maps in reports** | Puts the case's layers, a Map plate or a period's proofs in a note as a map read day by day, its marks opening their cards: offline in the file, live over OpenFreeMap once hosted, a picture in the PDF; set from its card (base, Sentinel-2 or Esri imagery streamed live, layers, frame, timeline, steps, cards) and drawn on at any zoom, from an area to highlight to a map started from nothing. |
 | ✅ **Web maps** | Makes a note that is the analyst's own layers on a page of their own, from Notebook › New or a layer's row, drawn and carded as the app's map draws them, with a layer switcher, a search, the timeline and each view in its address, published as a web folder or to GitHub Pages and counting its readers on the analyst's own GoatCounter when asked. |
 | ✅ **Charts and infographics** | Draws a note's table as one of fifteen kinds of chart picked by its picture, a wall of the case's own pictures among them, in the case's colours and saying "at least" where a count is a floor, and lays charts, a map and key figures out as an infographic page or one picture, read from one of the case's sheets. |
@@ -494,8 +497,16 @@ stops making sense.
   or in a tree GitHub cuts short, the list is left as it was, said, and the publish goes
   through) and remembered by blob id; Azimut writes only files it made (its folders, a
   `articles.json`, `feed.xml` and `sitemap.xml` that carry its marks, a root page that
-  carries its generator with a version, and the content between `azimut:articles` markers)
-  and leaves every other file as it is. Names, the short name
+  carries its generator with a version, the content between `azimut:articles` markers, and
+  the bar between `azimut:bar` markers of its own article pages) and leaves every other file
+  as it is. The site's own bar, `azimut-bar.html` (64 KB at most, past which the articles keep
+  Azimut's), is HTML from the analyst's repository put into every article page, so it is
+  read token by token and written again: no `<script>`, `on*` handler, frame, object, form,
+  `<base>`, `<meta>`, `<link>`, SVG animation or address but http(s), mailto and tel, inside a
+  declarative shadow root that keeps its styles and the article's apart, under the page's
+  own policy (inline styles; pictures and fonts from the site only). Update the site reads
+  each article page (8 MB at most) only when `articles.json` does not say which bar they all
+  carry. Names, the short name
   and every path are checked at the edge, a folder Azimut did not make is never
   replaced, and the folder is bounded in files and weight before anything is sent. The
   token is a fine-grained one the analyst limits to the one repository (Contents and

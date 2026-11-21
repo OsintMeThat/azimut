@@ -30,14 +30,14 @@ async function shoot(page, name) {
   await page.screenshot({ path: `${SHOTS}/${name}.png` });
 }
 
-async function stand(page, { pages = true, categories = [], edited = false, look = { style: 'report' }, editions = [] } = {}) {
+async function stand(page, { pages = true, categories = [], edited = false, look = { style: 'report' }, editions = [], settings = {}, offer = null } = {}) {
   const catalog = [note('n1', 'Port strike'), picture('e_pier', 'Pier at dawn'), picture('e_harbour', 'Harbour')];
   const github = { account: 'octo', repo: 'articles', branch: 'main', site: '', base: 'https://octo.github.io/articles/',
     token: { set: true, hint: '…wxyz' }, categories };
-  await installAppFixture(page, { catalog, github });
+  await installAppFixture(page, { catalog, github, settings });
   const state = {
     text: '## What we saw\n\nSmoke over the pier at dawn.\n\n> [!internal]\n> Who told us.\n',
-    pages, published: [], builds: 0, presses: [], editions, look, looks: [], lookReads: 0, checks: 0,
+    pages, published: [], builds: 0, presses: [], editions, look, looks: [], lookReads: 0, checks: 0, offers: 0,
   };
   await page.route(`**/api/cases/${CASE_ID}/catalog/entities**`, (route) =>
     route.fulfill({ json: { items: catalog, next_cursor: null, total: catalog.length } }));
@@ -97,6 +97,10 @@ async function stand(page, { pages = true, categories = [], edited = false, look
         uploaded: 9, reused: 0, removed: 0, edited, site: { written: ['articles.json'], warnings: state.siteWarnings ?? [] }, warnings: [] } });
     }
     if (path === '/n1/editions') return route.fulfill({ json: { editions: state.editions } });
+    if (path === '/n1/place') {
+      state.offers += 1;
+      return route.fulfill({ json: { suggested: offer } });
+    }
     if (/^\/[\w-]+\/look$/.test(path)) {
       if (method === 'PUT') {
         state.look = request.postDataJSON();
@@ -158,7 +162,7 @@ test('a note goes live on GitHub Pages on one press, and its editions list the p
   await expect(dialog.getByRole('button', { name: 'Copy link' })).toBeVisible();
   // its maps go live online unless the dialog's Keep its maps offline is ticked
   expect(state.published).toEqual([{ short_name: 'port-strike', diagrams: {}, round_pov: false, changes: '', offline_maps: false,
-    category: '', role: 'article' }]);
+    category: '', role: 'article', place: null }]);
   await shoot(page, 'dialog-github-live');
   await dialog.getByRole('button', { name: 'Done' }).click();
 
@@ -198,7 +202,10 @@ test('the dialog says what the note is on the site: its category, Article or Pag
   await expect(dialog.locator('#export-categories option')).toHaveCount(2);
   const role = dialog.getByRole('radiogroup', { name: 'On the site' });
   await expect(role.getByRole('radio', { name: 'Article' })).toHaveAttribute('aria-checked', 'true');
-  await expect(dialog).toContainText('In the site\'s list and its feed.');
+  // no title in Settings › Website: the site is called by its account, and the line says so, with a way to name it
+  await expect(dialog).toContainText('Goes on octo\'s home page and in its feed.');
+  await expect(dialog).toContainText('Your site has no name yet: it shows as octo.');
+  await expect(dialog.getByRole('button', { name: 'Name the site' })).toBeVisible();
   await expect(dialog.getByRole('button', { name: 'The cover picture' })).toBeVisible();
   expect(state.presses).toEqual([]);
   await shoot(page, 'dialog-github-site');
@@ -221,10 +228,14 @@ test('the dialog says what the note is on the site: its category, Article or Pag
   // the look was read as it stood before it was written, and again for the Notebook, which holds the note's look
   await expect.poll(() => state.lookReads).toBeGreaterThanOrEqual(reads + 2);
 
-  // a page is off the list: no category or picture to give
+  // a page is off the list: no category or picture to give, and an unlisted one is in no list at all
   await role.getByRole('radio', { name: 'Page' }).click();
   await expect(dialog).toContainText('Off the list, linked from the site\'s header.');
   await expect(category).toHaveCount(0);
+  await role.getByRole('radio', { name: 'Unlisted' }).click();
+  await expect(dialog).toContainText('Online at its address only, in no list, feed or sitemap.');
+  await expect(category).toHaveCount(0);
+  await expect(dialog.getByRole('button', { name: 'Pier at dawn' })).toHaveCount(0);
   await role.getByRole('radio', { name: 'Article' }).click();
   await expect(category).toHaveValue('Port news');
   await dialog.getByRole('button', { name: 'Publish to GitHub Pages' }).click();
@@ -233,6 +244,85 @@ test('the dialog says what the note is on the site: its category, Article or Pag
   expect(state.published[0]).toMatchObject({ short_name: 'port-strike', category: 'Port news', role: 'article' });
   // a note published for the first time is never checked against a folder
   expect(state.checks).toBe(0);
+});
+
+test('an article is placed on the site\'s map by hand or by the note\'s offer, never filled without a press', async ({ page }) => {
+  const offer = { lat: 12.7250041, lon: 43.5075, name: 'Bab al-Mandab', from: 'place', label: 'Bab al-Mandab' };
+  const state = await stand(page, { offer });
+  const dialog = await openWebFolder(page);
+  const place = dialog.getByRole('group', { name: 'Place on the site\'s map' });
+  const coords = place.getByRole('textbox', { name: 'Coordinates' });
+  const name = place.getByRole('textbox', { name: 'Place name' });
+  const said = place.getByRole('status');
+  // empty, and the note's one place offered as a press with its rule, filled by nothing
+  await expect(coords).toHaveValue('');
+  await expect(name).toHaveValue('');
+  await expect(said).toHaveText('Optional. Left empty, the article has no pin on the site\'s map.');
+  const use = place.getByRole('button', { name: 'Use 12.7250, 43.5075 · Bab al-Mandab' });
+  await expect(use).toBeVisible();
+  await expect(use).toHaveAttribute('title', 'Fill the place with the point this note names');
+  await expect(place).toContainText('The one place the note names.');
+  await expect(coords).toHaveAttribute('title', 'Where this article stands on the site\'s map, pasted as lat, lon');
+  await expect(name).toHaveAttribute('title', 'The name of the place, shown on its pin');
+  expect(state.offers).toBe(1);
+  expect(state.presses).toEqual([]);
+  await shoot(page, 'dialog-github-place');
+
+  // what is typed is read in place, and what is no place holds Publish back
+  await coords.fill('the strait');
+  await expect(said).toHaveText('That does not read as a point: paste it as lat, lon, such as 12.725, 43.5075.');
+  await expect(coords).toHaveAttribute('aria-invalid', 'true');
+  await expect(dialog.getByRole('button', { name: 'Publish to GitHub Pages' })).toBeDisabled();
+  await coords.fill('86, 43.5');
+  await expect(said).toHaveText('The latitude must be between -85 and 85, where web maps stop.');
+  await coords.fill('');
+  await expect(dialog.getByRole('button', { name: 'Publish to GitHub Pages' })).toBeEnabled();
+
+  // taken on its press only: the point, and its name
+  await use.click();
+  await expect(coords).toHaveValue('12.725004, 43.5075');
+  await expect(name).toHaveValue('Bab al-Mandab');
+  await expect(said).toHaveText('Reads as 12.725004° N, 43.5075° E.');
+  await expect(use).toHaveCount(0);
+  await name.fill('Bab al-Mandab, Yemen');
+  await dialog.getByRole('button', { name: 'Publish to GitHub Pages' }).click();
+  await expect(dialog.locator('.line.done')).toContainText(`Live at ${ADDRESS}`);
+  expect(state.published[0]).toMatchObject({ place: { lat: 12.725004, lon: 43.5075, name: 'Bab al-Mandab, Yemen' } });
+});
+
+test('a place the note keeps opens in the dialog, and emptied it goes up as none', async ({ page }) => {
+  const kept = { lat: -33.9, lon: 18.42, name: 'Cape Town' };
+  const state = await stand(page, { look: { style: 'report', place: kept }, offer: { lat: 1, lon: 2, name: 'Elsewhere', from: 'map', label: 'A map' } });
+  const dialog = await openWebFolder(page);
+  const place = dialog.getByRole('group', { name: 'Place on the site\'s map' });
+  await expect(place.getByRole('textbox', { name: 'Coordinates' })).toHaveValue('-33.9, 18.42');
+  await expect(place.getByRole('textbox', { name: 'Place name' })).toHaveValue('Cape Town');
+  await expect(place.getByRole('status')).toHaveText('Reads as 33.9° S, 18.42° E.');
+  // the note's own place stands: nothing is offered over it
+  await expect(place.getByRole('button', { name: /^Use / })).toHaveCount(0);
+  await place.getByRole('textbox', { name: 'Coordinates' }).fill('');
+  await place.getByRole('textbox', { name: 'Place name' }).fill('');
+  await dialog.getByRole('button', { name: 'Publish to GitHub Pages' }).click();
+  await expect(dialog.locator('.line.done')).toContainText(`Live at ${ADDRESS}`);
+  expect(state.published[0].place).toBeNull();
+});
+
+test('the dialog names the site by its title, and says nothing of a name it has', async ({ page }) => {
+  await stand(page, { settings: { site_title: 'Octo Desk' } });
+  const dialog = await openWebFolder(page);
+  await expect(dialog).toContainText('Goes on Octo Desk\'s home page and in its feed.');
+  await expect(dialog).not.toContainText('has no name yet');
+  await expect(dialog.getByRole('button', { name: 'Name the site' })).toHaveCount(0);
+});
+
+test('the dialog says the site has no name yet, and opens Settings on Identity to name it', async ({ page }) => {
+  await stand(page);
+  const dialog = await openWebFolder(page);
+  await expect(dialog).toContainText('Your site has no name yet: it shows as octo.');
+  await dialog.getByRole('button', { name: 'Name the site' }).click();
+  await expect(page).toHaveURL(/#settings/);
+  await expect(page.getByRole('tab', { name: 'Identity' })).toHaveAttribute('aria-selected', 'true');
+  await expect(page.getByLabel('Site name')).toBeVisible();
 });
 
 test('a folder changed on GitHub is said before it is replaced, and replaced on one more press', async ({ page }) => {

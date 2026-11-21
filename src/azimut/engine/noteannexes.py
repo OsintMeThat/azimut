@@ -197,20 +197,13 @@ def build(
 
 
 def _geolocations(case: "Case", entries: list[Source], numbers: dict[str, int], *, round_pov: bool) -> list[Place]:
-    from . import satellite
-
     found: list[Place] = []
     for source in entries:
         if source.type != "proof" or not source.entity_id:
             continue
         record = case.get_entity(source.entity_id) or {}
         attrs = record.get("attrs") or {}
-        try:
-            points = [point for point in satellite.spec_points(_spec(case, attrs)) if not point.get("proposed")]
-        except Exception:  # a spec the app cannot read says nothing more
-            points = []
-        # the place concluded on, else where the material was filmed from
-        point = next((one for one in points if not one.get("pov")), points[0] if points else None)
+        point = concluded_point(case, attrs)
         place, radius = _depicted(case, source.entity_id)
         row = Place(number=numbers.get(source.key, 0), proof=source.label or "Proof", place=place,
                     day=_when(str(attrs.get("when") or "")), radius=radius, posted=source.posted)
@@ -224,18 +217,30 @@ def _geolocations(case: "Case", entries: list[Source], numbers: dict[str, int], 
                 row.rounded = row.pov and round_pov
                 row.lat, row.lon = (round(lat, 3), round(lon, 3)) if row.rounded else (lat, lon)
             label = " ".join(str(point.get("label") or "").split())
-            row.place = row.place or (label if _names_a_place(label) else "")
+            row.place = row.place or (label if names_a_place(label) else "")
         found.append(row)
         if len(found) >= MAX_ROWS:
             break
     return found
 
 
+def concluded_point(case: "Case", attrs: dict[str, Any]) -> dict[str, Any] | None:
+    """The point a proof concluded on, as its Geolocations row prints it: its first checked point
+    that is not where the material was filmed from, else where it was filmed from; None for none."""
+    from . import satellite
+
+    try:
+        points = [point for point in satellite.spec_points(_spec(case, attrs)) if not point.get("proposed")]
+    except Exception:  # a spec the app cannot read says nothing more
+        points = []
+    return next((one for one in points if not one.get("pov")), points[0] if points else None)
+
+
 #: A point's label that names nothing: `POV`, a timecode, coordinates.
 _NO_NAME = re.compile(r"^~?\s*pov$", re.I)
 
 
-def _names_a_place(label: str) -> bool:
+def names_a_place(label: str) -> bool:
     """Whether a point's label is a name (`Camp gate`), not `POV`, a timecode or coordinates."""
     return bool(label) and not _NO_NAME.match(label) and re.search(r"[^\W\d_]{3,}", label) is not None
 
@@ -269,30 +274,37 @@ def _spec(case: "Case", attrs: dict[str, Any]) -> dict[str, Any]:
     return loaded if isinstance(loaded, dict) else {}
 
 
-def _depicted(case: "Case", proof_id: str) -> tuple[str, str]:
-    """The place a proof depicts, by a confirmed edge, and how far its point may be off."""
+def depicted_place(case: "Case", proof_id: str) -> dict[str, Any] | None:
+    """The place a proof depicts, by a confirmed edge: its record, or None for none."""
     links_of = getattr(case, "links_of", None)
     if links_of is None:
-        return "", ""
+        return None
     try:
         edges = links_of(proof_id)
     except Exception:
-        return "", ""
+        return None
     for edge in edges:
         if edge.get("type") != "depicts" or edge.get("from") != proof_id:
             continue
         if (edge.get("provenance") or {}).get("status") == "suggested":
             continue
         place = case.get_entity(str(edge.get("to") or "")) or {}
-        if place.get("type") != "place":
-            continue
-        radius = (place.get("attrs") or {}).get("radius_m")
-        said = ""
-        if isinstance(radius, (int, float)) and math.isfinite(radius) and radius > 0:
-            said = f"within {radius / 1000:g} km" if radius >= 1000 else f"within {round(radius)} m"
-        name = " ".join(str(place.get("label") or "").split())
-        return (name if _names_a_place(name) else ""), said
-    return "", ""
+        if place.get("type") == "place":
+            return place
+    return None
+
+
+def _depicted(case: "Case", proof_id: str) -> tuple[str, str]:
+    """The place a proof depicts, by a confirmed edge, and how far its point may be off."""
+    place = depicted_place(case, proof_id)
+    if place is None:
+        return "", ""
+    radius = (place.get("attrs") or {}).get("radius_m")
+    said = ""
+    if isinstance(radius, (int, float)) and math.isfinite(radius) and radius > 0:
+        said = f"within {radius / 1000:g} km" if radius >= 1000 else f"within {round(radius)} m"
+    name = " ".join(str(place.get("label") or "").split())
+    return (name if names_a_place(name) else ""), said
 
 
 # -- credits --------------------------------------------------------------------

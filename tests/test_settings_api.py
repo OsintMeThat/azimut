@@ -2,6 +2,8 @@
 
 import json
 import os
+import stat
+import sys
 
 import httpx
 import pytest
@@ -1159,6 +1161,18 @@ def test_extension_hand_off_switches_default_on_and_round_trip(client):
     assert client.get("/api/settings").json()["reverse_prefill"] is False
 
 
+def test_support_heart_beats_by_default_and_the_switch_round_trips(client):
+    """On out of the box so the tip stays findable; off for anyone the motion distracts."""
+    assert client.get("/api/settings").json()["support_heartbeat"] is True
+
+    saved = client.put("/api/settings/prefs", json={"support_heartbeat": False}).json()
+    assert saved["support_heartbeat"] is False
+    assert client.get("/api/settings").json()["support_heartbeat"] is False
+
+    back = client.put("/api/settings/prefs", json={"support_heartbeat": True}).json()
+    assert back["support_heartbeat"] is True
+
+
 def test_map_tabs_share_one_camera_by_default_and_the_switch_round_trips(client):
     assert client.get("/api/settings").json()["map_sync"] is True
 
@@ -1373,6 +1387,79 @@ def test_a_frame_whose_original_went_missing_is_not_handed_back(client):
     frame(client)
     config.logo_original_path().unlink()
     assert client.get("/api/settings").json()["logo_look"] is None
+
+
+# ---- the website's own logo: its pages carry it, else the Publishing logo -----
+
+SITE_PNG = config.PNG_MAGIC + b"\x00 the site's own logo"
+
+
+def test_the_site_logo_is_absent_by_default_and_the_site_has_no_logo(client):
+    assert client.get("/api/settings").json()["site_logo"] is False
+    assert client.get("/api/settings/site-logo.png").status_code == 404
+    assert config.site_logo() is None
+
+
+def test_the_site_logo_upload_serve_and_delete(client):
+    saved = client.post("/api/settings/site-logo", files={"file": ("logo.png", SITE_PNG, "image/png")})
+    assert saved.status_code == 200 and saved.json() == {"site_logo": True}
+    body = client.get("/api/settings").json()
+    assert body["site_logo"] is True and body["signature"] is False
+    served = client.get("/api/settings/site-logo.png")
+    assert served.status_code == 200 and served.content == SITE_PNG
+    assert served.headers["content-type"] == "image/png" and served.headers["cache-control"] == "no-cache"
+    assert config.site_logo() == (SITE_PNG, "site")
+    # replacing it overwrites in place; deleting is idempotent
+    other = config.PNG_MAGIC + b"\x00 second"
+    client.post("/api/settings/site-logo", files={"file": ("b.png", other, "image/png")})
+    assert client.get("/api/settings/site-logo.png").content == other
+    assert client.delete("/api/settings/site-logo").json() == {"site_logo": False}
+    assert client.delete("/api/settings/site-logo").json() == {"site_logo": False}
+    assert client.get("/api/settings").json()["site_logo"] is False
+    assert client.get("/api/settings/site-logo.png").status_code == 404
+
+
+def test_the_site_uses_its_own_logo_else_the_publishing_one_else_none(client):
+    client.post("/api/settings/signature", files={"file": ("logo.png", PNG, "image/png")})
+    # no logo of its own: the Publishing logo is what the site uses, and the Publishing logo stays its own
+    assert client.get("/api/settings/site-logo.png").content == PNG
+    assert client.get("/api/settings").json()["site_logo"] is False
+    assert config.site_logo() == (PNG, "publishing")
+    client.post("/api/settings/site-logo", files={"file": ("s.png", SITE_PNG, "image/png")})
+    assert client.get("/api/settings/site-logo.png").content == SITE_PNG
+    assert client.get("/api/settings/signature.png").content == PNG
+    # back to the Publishing logo, which the delete never touched
+    client.delete("/api/settings/site-logo")
+    assert client.get("/api/settings/site-logo.png").content == PNG
+    assert client.get("/api/settings").json()["signature"] is True
+    # and deleting the Publishing logo leaves a site with none
+    client.delete("/api/settings/signature")
+    assert client.get("/api/settings/site-logo.png").status_code == 404
+
+
+def test_a_site_logo_that_is_no_png_is_refused_like_the_publishing_logo(client):
+    bad = client.post("/api/settings/site-logo", files={"file": ("logo.png", b"GIF89a...", "image/png")})
+    assert bad.status_code == 422 and "PNG" in bad.json()["detail"]
+    huge = config.PNG_MAGIC + b"\x00" * config.SIGNATURE_MAX_BYTES
+    assert client.post("/api/settings/site-logo", files={"file": ("logo.png", huge, "image/png")}).status_code == 413
+    assert client.get("/api/settings").json()["site_logo"] is False and not config.site_logo_path().exists()
+
+
+def test_a_site_logo_file_that_is_no_png_is_no_logo_and_the_publishing_one_stands_in(client):
+    """A file dropped into the settings folder by hand has been through no gate."""
+    config.write_private(config.signature_path(), PNG)
+    config.write_private(config.site_logo_path(), b"GIF89a not really an image")
+    assert config.site_logo() == (PNG, "publishing")
+    config.write_private(config.site_logo_path(), config.PNG_MAGIC + b"\x00" * (config.SIGNATURE_MAX_BYTES + 1))
+    assert config.site_logo() == (PNG, "publishing")
+    assert client.get("/api/settings/site-logo.png").content == PNG
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="POSIX file modes")
+def test_the_site_logo_is_owner_only_beside_the_settings(client):
+    client.post("/api/settings/site-logo", files={"file": ("logo.png", SITE_PNG, "image/png")})
+    assert config.site_logo_path().parent == config.settings_dir()
+    assert stat.S_IMODE(os.stat(config.site_logo_path()).st_mode) == 0o600
 
 
 # ---- download cookies: the login session gated media needs -------------------

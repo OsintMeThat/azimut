@@ -9,6 +9,8 @@
    * open while something is missing.
    */
   import Icon from '../../components/Icon.svelte';
+  import HubCard from './website/HubCard.svelte';
+  import HubField from './website/HubField.svelte';
   import { toast } from '../../lib/state.svelte.js';
   import { WEBSITE_HELP as HELP } from '../../lib/websiteSetup.js';
   import { forgetWordPress, readWordPress, saveWordPress, testWordPress } from '../../lib/wordpress.js';
@@ -99,76 +101,61 @@
   }
 </script>
 
-<section class="group wordpress" data-guide="settings.wordpress" aria-label="WordPress">
-  <h3>WordPress</h3>
-  <p class="intro">Send a note to your own WordPress site as a draft, pictures and sources included. You publish it there.</p>
-  <label class="row" title={HELP.wordpressSite}>
-    <span class="row-label">
-      <span>Site address</span>
-      <span class="row-hint">{WORDPRESS_FIELDS[0][1]}</span>
-    </span>
-    <input class="input wide" bind:value={site} onchange={saveSite} placeholder="https://example.org" spellcheck="false"
+<HubCard label="WordPress" guide="settings.wordpress" title="WordPress">
+  {#snippet aside()}
+    {#if ready}<span class="hub-pill ok">Set up</span>{:else if state}<span class="hub-pill">Not set up</span>{/if}
+  {/snippet}
+  <p class="lead">Send a note to your own WordPress site as a draft, pictures and sources included. You publish it there.</p>
+  <HubField id="wordpress-site" label="Site address" hint={WORDPRESS_FIELDS[0][1]}>
+    <input id="wordpress-site" class="input" bind:value={site} onchange={saveSite} placeholder="https://example.org" spellcheck="false"
       autocomplete="url" disabled={state === null} title={HELP.wordpressSite} />
-  </label>
-  <label class="row" title={HELP.wordpressUser}>
-    <span class="row-label">
-      <span>Username</span>
-      <span class="row-hint">{WORDPRESS_FIELDS[1][1]}</span>
-    </span>
-    <input class="input wide" bind:value={user} onchange={saveUser} placeholder="editor" spellcheck="false"
+  </HubField>
+  <HubField id="wordpress-user" label="Username" hint={WORDPRESS_FIELDS[1][1]}>
+    <input id="wordpress-user" class="input" bind:value={user} onchange={saveUser} placeholder="editor" spellcheck="false"
       autocomplete="username" disabled={state === null} title={HELP.wordpressUser} />
-  </label>
-  <label class="row" title={HELP.wordpressPassword}>
-    <span class="row-label">
-      <span>Application password</span>
-      <span class="row-hint">
-        {#if state?.password.set}Kept on this computer{state.password.hint ? `, ending ${state.password.hint.replace('…', '')}` : ''}. Type a new one to replace it.
-        {:else}Made in {PASSWORD_WHERE}. Kept on this computer only, never in a backup.{/if}
-      </span>
-    </span>
-    <input class="input wide mono" type="password" bind:value={password} onchange={savePassword}
+  </HubField>
+  <HubField id="wordpress-password" label="Application password"
+    hint={state?.password.set
+      ? `Kept on this computer${state.password.hint ? `, ending ${state.password.hint.replace('…', '')}` : ''}. Type a new one to replace it.`
+      : `Made in ${PASSWORD_WHERE}. Kept on this computer only, never in a backup.`}>
+    <input id="wordpress-password" class="input hub-mono" type="password" bind:value={password} onchange={savePassword}
       placeholder={state?.password.set ? `•••• •••• ${state.password.hint.replace('…', '')}` : 'abcd EFGH 1234 ijkl MNOP 6789'}
       autocomplete="new-password" spellcheck="false" disabled={state === null} title={HELP.wordpressPassword} />
-  </label>
-  <div class="row actions">
-    <span class="said" role="status" data-state={tested === 'testing' ? 'testing' : tested?.ok ? 'ok' : tested ? 'error' : ''}>
-      {#if tested === 'testing'}Signing in to {siteHost(state?.site)}…
+  </HubField>
+  <div class="actions">
+    <button type="button" class="btn btn-sm" onclick={test} disabled={!ready || saving || tested === 'testing'} title={HELP.wordpressTest}>
+      Test connection</button>
+    <button type="button" class="btn btn-ghost btn-sm" onclick={forget} disabled={!state || (!state.site && !state.user && !state.password.set)}
+      title={HELP.wordpressForget}>Forget</button>
+    <span class="said hub-line" role="status" data-state={tested === 'testing' ? 'busy' : tested?.ok ? 'ok' : tested ? 'error' : ''}>
+      {#if tested === 'testing'}<span class="hub-spinner" aria-hidden="true"></span> Signing in to {siteHost(state?.site)}…
       {:else if tested}<Icon name={tested.ok ? 'check' : 'alert'} size={12} /> {tested.text}
       {:else if ready}Drafts go to {siteHost(state.site)} as {state.user}.{/if}
     </span>
-    <button class="btn btn-sm" onclick={test} disabled={!ready || saving || tested === 'testing'} title={HELP.wordpressTest}>
-      Test connection</button>
-    <button class="btn btn-ghost btn-sm" onclick={forget} disabled={!state || (!state.site && !state.user && !state.password.set)}
-      title={HELP.wordpressForget}>Forget</button>
   </div>
   {#if state}
-    <details class="how" open={!ready}>
+    <details class="how hub-how" open={!ready}>
       <summary title={HELP.wordpressHow}>How to connect a site</summary>
       <dl>
         {#each WORDPRESS_FIELDS as [name, said] (name)}
           <dt>{name}</dt><dd>{said}</dd>
         {/each}
       </dl>
-      <p class="note">{WORDPRESS_FREE}</p>
-      <p class="note">{WORDPRESS_COM}</p>
-      <a class="guide" href={WORDPRESS_GUIDE} target="_blank" rel="noopener noreferrer" title={HELP.wordpressGuide}>
+      <p class="note-line">{WORDPRESS_FREE}</p>
+      <p class="note-line">{WORDPRESS_COM}</p>
+      <a class="hub-ext" href={WORDPRESS_GUIDE} target="_blank" rel="noopener noreferrer" title={HELP.wordpressGuide}>
         WordPress's guide to application passwords <Icon name="external" size={11} /></a>
     </details>
   {/if}
-</section>
+</HubCard>
 
 <style>
-  .wide { width: 300px; flex-shrink: 0; }
-  .mono { font-family: var(--font-mono); }
-  label.row { cursor: default; }
-  .actions { justify-content: flex-end; gap: 8px; margin-top: 4px; }
-  .said { flex: 1; min-width: 0; display: inline-flex; align-items: center; gap: 5px; color: var(--text-3); font-size: var(--fs-xs); }
-  .said[data-state='ok'] { color: var(--ok); }
-  .said[data-state='error'] { color: var(--danger); }
-  .how { margin-top: 10px; border: 1px solid var(--border); border-radius: var(--r-md); padding: 6px 12px 10px; background: var(--bg-1); }
-  .how summary { cursor: pointer; color: var(--text-2); font-size: var(--fs-sm); padding: 2px 0; }
+  .lead { margin: 0 0 6px; color: var(--text-2); font-size: var(--fs-sm); line-height: 1.5; }
+  .actions { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-top: 10px; }
+  .said { flex: 1 1 200px; margin-left: 4px; }
   .how dl { display: grid; grid-template-columns: max-content 1fr; gap: 6px 14px; margin: 10px 0 2px; font-size: var(--fs-xs); }
   .how dt { color: var(--text-1); font-weight: 600; }
   .how dd { margin: 0; color: var(--text-2); line-height: 1.5; }
-  .guide { display: inline-flex; align-items: center; gap: 4px; margin-top: 8px; font-size: var(--fs-xs); color: var(--accent); }
+  .how .hub-ext { margin-top: 8px; }
+  .note-line { margin: 6px 0 0; color: var(--text-3); font-size: var(--fs-xs); line-height: 1.5; }
 </style>

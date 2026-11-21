@@ -11,13 +11,14 @@ function show(props = {}) {
   const onclose = vi.fn();
   const target = document.createElement('div');
   document.body.append(target);
-  live = mount(SupportDialog, { target, props: { kofi: 'https://ko-fi.invalid/test', form: 'https://forms.invalid/test', discord: 'https://discord.invalid/test', onclose, ...props } });
+  live = mount(SupportDialog, { target, props: { kofi: 'https://ko-fi.invalid/test', form: 'https://forms.invalid/test', discord: 'https://discord.invalid/test', site: '', onclose, ...props } });
   flushSync();
   return { onclose };
 }
 
 const links = () => [...document.querySelectorAll('.modal a')];
-const text = (node) => node.textContent.trim();
+// a choice's name, without the line under it that says what it is for
+const text = (node) => (node.querySelector('.what') ?? node).textContent.trim();
 const said = () => text(document.querySelector('.modal .words'));
 
 afterEach(() => {
@@ -57,6 +58,32 @@ describe('Support & feedback', () => {
     expect(discord.getAttribute('href')).toBe('https://discord.invalid/test');
     const choices = [...document.querySelectorAll('.modal .choices .choice')].map(text);
     expect(choices).toEqual(['Join the Discord', 'Report a problem']);
+  });
+
+  it('says under each choice what it is for, in one short line', () => {
+    show();
+    const choices = [...document.querySelectorAll('.modal .choices .choice')];
+    expect(choices.map(text)).toEqual(['Vote on what comes next', 'Suggest an idea', 'Join the Discord', 'Report a problem']);
+    for (const choice of choices) {
+      const why = choice.querySelector('.why')?.textContent.trim() ?? '';
+      expect(why.length).toBeGreaterThan(0);
+      expect(why.length).toBeLessThanOrEqual(40);
+    }
+  });
+
+  it('names who makes Azimut at its foot, opening the site only on a press', () => {
+    show({ site: 'https://site.invalid' });
+    const made = document.querySelector('.modal .made');
+    expect(made.textContent).toContain('Made by one analyst');
+    const link = made.querySelector('a');
+    expect(text(link)).toBe('site.invalid');
+    expect(link.getAttribute('href')).toBe('https://site.invalid');
+    expect(link.getAttribute('target')).toBe('_blank');
+    expect(link.getAttribute('rel')).toBe('noreferrer');
+    unmount(live);
+    document.body.innerHTML = '';
+    show();
+    expect(document.querySelector('.modal .made')).toBeNull();
   });
 
   it('says one of its lines above the tip, and none without a tip', () => {

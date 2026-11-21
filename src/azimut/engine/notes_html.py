@@ -804,7 +804,8 @@ class _Page:
             if beacon:
                 tail = site_engine.cloudflare_tag(beacon) + "\n"
             if not paged:
-                above = self._way_home(site_engine.bar)
+                # between markers, so Update the site can give it the site's own bar (`engine/site.py`)
+                above = self._way_home(site_engine.marked_bar)
         top = (
             f'<!doctype html>\n<html lang="en" dir="auto" data-look="{self.look.style}" data-font="{self.look.font}"'
             f'{tlp}{web} data-edition="{edition}"{accent}>\n<head>\n<meta charset="utf-8">\n'

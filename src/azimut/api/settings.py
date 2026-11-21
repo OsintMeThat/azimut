@@ -1,7 +1,9 @@
 """REST API for app-wide keys, preferences, usage and proof branding.
 
 Keys and branding stay together under ``.azimut/settings/`` in the workspace
-directory, outside cases and exports.
+directory, outside cases and exports. Branding is the logo (`/settings/signature`), the
+website's own logo (`/settings/site-logo`: POST, DELETE, and GET of the one the site uses,
+its own else the logo) and the handwritten signature (`/settings/report-signature`).
 """
 
 from __future__ import annotations
@@ -188,6 +190,7 @@ class PrefsIn(BaseModel):
     post_prefill: bool | None = None  # let the extension fill that composer
     post_alt_text: bool | None = None  # an Alt text field under each picture of a post
     reverse_prefill: bool | None = None  # let it open an engine with the image
+    support_heartbeat: bool | None = None  # the rail's Support heart beats now and then
     signature_handle: str | None = None  # account handle stamped on opted-in proofs
     # who signs a report: filled into a note's {name}, {role} and {organisation}
     report_name: str | None = Field(default=None, max_length=REPORT_TEXT_MAX)
@@ -297,6 +300,7 @@ def _prefs(settings: dict[str, Any]) -> dict[str, Any]:
         "post_prefill": bool(settings.get("post_prefill", True)),
         "post_alt_text": bool(settings.get("post_alt_text", False)),
         "reverse_prefill": bool(settings.get("reverse_prefill", True)),
+        "support_heartbeat": bool(settings.get("support_heartbeat", True)),
         "signature_handle": settings.get("signature_handle", DEFAULT_SIGNATURE_HANDLE),
         **{key: _report_text(settings, key) for key in REPORT_KEYS},
         "report_site": notefill.site_of(settings.get("report_site")),
@@ -333,6 +337,8 @@ def get_settings() -> dict[str, Any]:
         # whether a logo is on disk — the proof composer's signature control is
         # dead until one is, so it needs to know without fetching the pixels
         "signature": config.signature_path().is_file(),
+        # whether the website has a logo of its own, apart from that one
+        "site_logo": config.site_logo_path().is_file(),
         # changes with the logo, so every tool asks for the one on disk now
         "logo_rev": _logo_rev(),
         # how the logo editor framed it, or None for the picture as picked
@@ -488,6 +494,8 @@ def _apply_prefs(settings: dict[str, Any], body: PrefsIn) -> None:
         settings["post_alt_text"] = bool(body.post_alt_text)
     if body.reverse_prefill is not None:
         settings["reverse_prefill"] = bool(body.reverse_prefill)
+    if body.support_heartbeat is not None:
+        settings["support_heartbeat"] = bool(body.support_heartbeat)
     if body.signature_handle is not None:
         settings["signature_handle"] = body.signature_handle.strip()[:64]
     for key in REPORT_KEYS:
@@ -748,9 +756,9 @@ def export_settings() -> Response:
     """Download everything app-wide that isn't a case, so another machine can be
     set up identically (POST /settings/import).
 
-    Five things in one: portable settings, templates.json, the signature logo (with
-    the picture a framed one was drawn from) and the handwritten signature reports
-    print, each base64-encoded, and the icon
+    Six things in one: portable settings, templates.json, the signature logo (with
+    the picture a framed one was drawn from), the website's own logo and the
+    handwritten signature reports print, each base64-encoded, and the icon
     library, each icon's PNG base64-encoded. It carries the user's own API keys by
     design — it's a local download of secrets that already live in their workspace.
 
@@ -784,6 +792,7 @@ def export_settings() -> Response:
         "signature_png": _signature_b64(),
         # the picture a framed logo was drawn from, so it can be framed again there
         "logo_original_png": _signature_b64(config.logo_original_path()),
+        "site_logo_png": _signature_b64(config.site_logo_path()),
         "report_signature_png": _signature_b64(config.report_signature_path(), config.REPORT_SIGNATURE_MAX_BYTES),
         "icons": iconlibrary.backup(),
     }
@@ -959,6 +968,7 @@ class ImportedSettings(BaseModel):
     post_prefill: bool = True
     post_alt_text: bool = False
     reverse_prefill: bool = True
+    support_heartbeat: bool = True
     signature_handle: str = Field(default=DEFAULT_SIGNATURE_HANDLE, max_length=64)
     report_name: str = Field(default="", max_length=REPORT_TEXT_MAX)
     report_role: str = Field(default="", max_length=REPORT_TEXT_MAX)
@@ -1208,6 +1218,8 @@ class ImportIn(BaseModel):
     signature_png: str = Field(default="", max_length=SIGNATURE_B64_MAX_CHARS)
     #: The picture a framed logo was drawn from, bounded and gated as the logo.
     logo_original_png: str = Field(default="", max_length=SIGNATURE_B64_MAX_CHARS)
+    #: The website's own logo, bounded and gated as the logo is.
+    site_logo_png: str = Field(default="", max_length=SIGNATURE_B64_MAX_CHARS)
     #: The handwritten signature reports print, bounded and gated the same way.
     report_signature_png: str = Field(default="", max_length=REPORT_SIGNATURE_B64_MAX_CHARS)
     #: The icon library, each picture re-encoded as an import would be (`iconlibrary.restore`).
@@ -1258,11 +1270,12 @@ def import_settings(body: ImportIn) -> dict[str, Any]:
         if not original:
             config.logo_original_path().unlink(missing_ok=True)
         _set_logo_look(logo_look if original else None)
+    site_logo = _restore_picture(body.site_logo_png, config.site_logo_path(), config.SIGNATURE_MAX_BYTES)
     report_signature = _restore_picture(
         body.report_signature_png, config.report_signature_path(), config.REPORT_SIGNATURE_MAX_BYTES
     )
     icons = iconlibrary.restore([icon.model_dump() for icon in body.icons]) if body.icons else 0
-    return {"imported": applied, "templates": templates, "signature": signature,
+    return {"imported": applied, "templates": templates, "signature": signature, "site_logo": site_logo,
             "report_signature": report_signature, "icons": icons}
 
 
@@ -1472,6 +1485,32 @@ def delete_signature() -> dict[str, Any]:
     config.logo_original_path().unlink(missing_ok=True)
     _set_logo_look(None)
     return {"signature": False}
+
+
+# ---- the website's own logo: its pages carry it, else the Publishing logo ----------
+
+
+@router.post("/settings/site-logo")
+async def put_site_logo(file: UploadFile) -> dict[str, Any]:
+    """Give the website a logo of its own. PNG only, and small, as the logo is."""
+    config.write_private(config.site_logo_path(), await _read_logo(file))
+    return {"site_logo": True}
+
+
+@router.delete("/settings/site-logo")
+def delete_site_logo() -> dict[str, Any]:
+    """Back to the Publishing logo."""
+    config.site_logo_path().unlink(missing_ok=True)
+    return {"site_logo": False}
+
+
+@router.get("/settings/site-logo.png")
+def get_site_logo() -> Response:
+    """The logo the website uses now: its own, else the Publishing logo."""
+    found = config.site_logo()
+    if found is None:
+        raise HTTPException(status_code=404, detail="no logo for the site")
+    return Response(content=found[0], media_type="image/png", headers=NO_CACHE)
 
 
 # ---- the handwritten signature a report prints (azimut:my-signature) ----------

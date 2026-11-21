@@ -21,7 +21,7 @@ import httpx
 import pytest
 
 from azimut import config
-from azimut.engine import githubpages, notes_web, publishsecrets
+from azimut.engine import githubpages, notes_web, publishsecrets, site
 from azimut.workspace import Case
 
 from ambushfixture import _ground, _image
@@ -181,7 +181,9 @@ def test_one_press_commits_the_folder_in_one_commit_and_the_note_keeps_its_recor
     assert editions[0] == {
         "at": said["at"], "edition": "public", "format": "github", "file": "port-strike", "address": address,
         "repository": "octo/articles", "branch": "main", "path": "port-strike", "commit": said["commit"],
-        "sha256": said["sha256"], "text_sha256": editions[0]["text_sha256"], "tree": said_tree(fake, "port-strike")}
+        "sha256": said["sha256"], "text_sha256": editions[0]["text_sha256"], "tree": said_tree(fake, "port-strike"),
+        # the page's id with no bar, which an edition's Check reads past a bar Update the site changed
+        "bare_sha256": hashlib.sha256(site.without_bar(page)).hexdigest()}
     assert client.get("/api/publishing").json()["github"]["site"] == "https://octo.github.io/articles/"
 
 
@@ -506,7 +508,7 @@ def test_the_token_is_kept_apart_owner_only_and_never_sent_back(client, fake, pu
     assert state == {"account": "octo", "repo": "articles", "branch": "main",
                      "site": "https://octo.github.io/articles/", "base": "https://octo.github.io/articles/",
                      "token": {"set": True, "hint": f"…{TOKEN[-4:]}"},
-                     "website": {"title": "octo", "logo": False, "counting": ""}, "categories": []}
+                     "website": {"title": "octo", "logo": False, "logo_from": "", "counting": ""}, "categories": []}
     for path in ("/api/publishing", "/api/settings", "/api/settings/export",
                  f"/api/cases/{published['cid']}/notes/{published['note']}/editions"):
         assert TOKEN not in client.get(path).text, path
@@ -524,8 +526,8 @@ def test_the_token_is_kept_apart_owner_only_and_never_sent_back(client, fake, pu
     assert publishsecrets.read("github") == TOKEN
     forgotten = client.delete("/api/publishing/github").json()
     assert forgotten == {"account": "", "repo": "articles", "branch": "main", "site": "", "base": "",
-                         "token": {"set": False, "hint": ""}, "website": {"title": "", "logo": False, "counting": ""},
-                         "categories": []}
+                         "token": {"set": False, "hint": ""}, "categories": [],
+                         "website": {"title": "", "logo": False, "logo_from": "", "counting": ""}}
     assert publishsecrets.read("github") == ""
 
 

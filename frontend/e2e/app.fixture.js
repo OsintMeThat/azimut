@@ -10,6 +10,13 @@ const PANEL_SVG = `
     <circle cx="520" cy="76" r="34" fill="#f4c95d"/>
   </svg>`;
 
+// A round mark standing for a site's logo, drawn in the page's amber.
+const SITE_LOGO_SVG = `
+  <svg xmlns="http://www.w3.org/2000/svg" width="96" height="96">
+    <circle cx="48" cy="48" r="46" fill="#e8a33d"/>
+    <path d="M48 14 62 52 48 44 34 52Z" fill="#141414"/>
+  </svg>`;
+
 // A real raster tile, not an SVG: the map engine decodes tiles into bitmaps,
 // and `createImageBitmap` refuses SVG. 16px of dark ground and a green ridge,
 // scaled up over the tile — enough to tell imagery from an empty map in a
@@ -125,6 +132,7 @@ const settings = {
   post_template: '',
   signature_handle: '',
   signature: false,
+  site_logo: false,
   export_dirs: { notes: '', media: '', proofs: '' },
   api_keys: {},
   providers_enabled: {},
@@ -1183,6 +1191,12 @@ export async function installAppFixture(page, options = {}) {
     }
     if (path === '/api/settings/signature.png') {
       return route.fulfill({ status: 404, body: '' });
+    }
+    // the logo Settings › Website's pages carry: none, unless a spec gives the site one (`siteLogo`) or routes its own
+    if (path === '/api/settings/site-logo.png') {
+      return options.siteLogo
+        ? route.fulfill({ contentType: 'image/svg+xml', body: SITE_LOGO_SVG })
+        : route.fulfill({ status: 404, body: '' });
     }
     if (path === '/api/settings') return json(route, fixtureSettings);
     // Settings › Website reads its WordPress site and its GitHub Pages site from this machine: none set here
