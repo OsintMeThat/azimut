@@ -7200,7 +7200,7 @@ written, or the toolbar's **+** open one menu in five parts: **Text** (headings,
 a to-do, a quote, **Callout ›** with its six kinds, Internal, code, today's date, a dated
 log entry), **Media** (a case picture, an image from a file, **Steps** and **Story**, an
 empty `::: steps` or `::: story` block, the cursor after it, drawn as its strip, your logo), **From the
-case** (a case item, an **Interactive map**, a note included as a chapter), **Layout**
+case** (a case item, a **Post from X or Bluesky**, an **Interactive map**, a note included as a chapter), **Layout**
 (a divider, a page break, the cover page, **Alignment ›**, **Cover corner ›**, a
 signature, **Field ›** for the words the PDF fills in) and **Figures** (a table, a
 chart, a diagram, an infographic), the table asking rows by columns on a small grid (3 by 3 unless picked) or a
@@ -8213,6 +8213,38 @@ A picture of a fixed shape sets the rows side by side in strips until the page i
 shape as it gets, and pads the rest with paper: nothing cut. `POST /notes/infographic` draws a
 block for the builder (SVG, panel boxes, legend, check), as an SVG file or as a picture, and
 writes nothing.
+
+**Posts.** `/` › *Post from X or Bluesky* asks for a link, one per line for a thread (x.com,
+twitter.com and its mirrors, bsky.app), or offers what the case holds: posts kept already,
+files downloaded from a post, and the analyst's own posts published from Post. A post the
+case holds is drawn at once, with no network. A pasted link is read once, on **Add**: the
+block goes in the note at once and says *Reading the post from X…* until the post is kept.
+Then its `link:` line becomes `post: <id>` (`engine/socialposts.py`). X is read through
+gallery-dl, without cookies first, then once with the session the downloads keep. Bluesky
+is read through its public API with no account. Each read keeps the words, the name, the
+handle, the day and time, the profile picture and the pictures (a video and its still). The
+pictures land in Media as downloads from the post. A failed read keeps the block and says
+why, with **Try again**. X's wall offers a browser's session, as Media's downloads do.
+Nothing is read because a note opened.
+
+The block is drawn as every document draws it (`engine/notes_posts.py`), never with the
+site's widget: who posted it, the words, the analyst's translation under them, the
+pictures, the day it went out, the day it was kept and **View on X**. **Geolocated · Proof N** shows when a proof of the case
+comes from the post: one of its files came from that address, or the proof was published
+there. In the note it opens the proof; in a page it goes where the proof was published.
+No counters. The bar's **Settings** holds **Form** (*Card*, *Quote*: the words alone,
+large, the name under them; *Compact*: one line a post, for annexes and lists of sources),
+the highlights, a **Translation** per post, **Hide the profile picture** (initials on the
+account's colours in its place, as when none could be kept) and **QR code in the PDF**.
+Several posts in one block make a thread, numbered as published. Words selected in the
+drawn post offer **Highlight**, kept as the exact passage (`highlight:`), each line one
+Undo step. Arabic and other right-to-left words are set from the right in the page and
+the PDF, each paragraph by its own words, so an Arabic place name over English sets each part
+its own way. The HTML page draws the card in its own look, on a dark band in a Story, its
+pictures inside the file (`reader.post.css`, carried only by a page holding one). The PDF
+keeps a card whole on a page, its name, *View on X* and the QR code linked to the post.
+A WordPress draft gets a group of blocks with its pictures uploaded. A post a block draws
+is a source of the note, listed with the others, and To Post hands it on as its link.
 
 **To Post.** In the open note's ⋯, kept out of the header, *To Post* opens Post on a Free post thread made of the
 note's public edition, or of the stretch selected in it, which its title then says;

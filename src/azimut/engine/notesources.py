@@ -432,7 +432,9 @@ class Reader:
         if not author and entity_id and path:
             author = self._posted_by(entity_id)
         collected = ""
-        if path or kind == "bookmark":
+        if kind == "social-post":
+            collected = _day(((record or {}).get("provenance") or {}).get("at"))
+        elif path or kind == "bookmark":
             provenance = (record or {}).get("provenance") or {}
             collected = next(
                 (day for day in (_day(sidecar.get("fetched_at")), _day(attrs.get("fetched_at")),
@@ -449,7 +451,11 @@ class Reader:
         attribution = copernicus_credit.normalise_attribution(
             _line(sidecar.get("attribution")), *(reading.day.rstrip("~") for reading in readings)
         ) if imagery or route in (HORIZON, PLATE) else ""
-        if kind == "account":
+        if kind == "social-post":
+            # someone's post the case keeps: its author and its day are its record's own
+            noun, what = "Post", POST
+            author = author or _post_author(attrs)
+        elif kind == "account":
             noun, what = "Account", ACCOUNT
         elif kind == "bookmark":
             noun, what = "Web page", PAGE
@@ -484,7 +490,8 @@ class Reader:
             archived=archived,
             posted=next(iter(urltitles.own_posts(attrs)), ""),
             author=author,
-            published=timeline.media_published(sidecar) or "" if not imagery else "",
+            published=(_day(attrs.get("posted_at")) if kind == "social-post"
+                       else timeline.media_published(sidecar) or "" if not imagery else ""),
             collected=collected,
             arrival="made" if derived or kind == "proof" else ARRIVALS.get(route, "collected"),
             readings=readings,
@@ -1146,6 +1153,15 @@ def spoken_day(reading: str | None) -> str:
     except ValueError:
         pass
     return f"about {text}{clock}" if about else f"{text}{clock}"
+
+
+def _post_author(attrs: dict[str, Any]) -> str:
+    """`Coast Monitor (@coast_monitor)`: who wrote a kept post, as its record says."""
+    name = _line(attrs.get("author"))
+    handle = _line(attrs.get("handle"))
+    if name and handle and name.lower() != handle.lower():
+        return f"{name} (@{handle})"
+    return f"@{handle}" if handle else name
 
 
 def _seen(sidecar: dict[str, Any]) -> str:

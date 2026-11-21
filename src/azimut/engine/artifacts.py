@@ -152,6 +152,9 @@ KINDS: dict[str, Kind] = {
         ),
     ),
     "post": Kind(path_attr="draft"),
+    # Someone's post kept for a note: its record, and its author's profile picture and its
+    # videos' stills beside it. Its pictures and videos are media of their own.
+    "social-post": Kind(path_attr="spec", companions=(Named(layout.social_post_files_rel),)),
     "inspect-session": Kind(path_attr="spec"),
     # The exported picture is media of its own, as with a comparison: a proof may
     # already rest on it, so it outlives the layout. The preview travels because

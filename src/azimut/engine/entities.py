@@ -540,6 +540,16 @@ ENTITY_TYPES: tuple[EntityType, ...] = (
                hint="a file the case collected: image, video, audio or document"),
     EntityType("capture", "Capture", COLLECTED, "satellite", ATTESTATION,
                hint="a map screenshot, with the provider and view it was taken from"),
+    # Someone's post on X or Bluesky, kept so a note can draw it (`engine/socialposts.py`):
+    # its words, who posted it and when in its record, its pictures and videos as media of
+    # the case. Gathered, not written, and a wrapper round those media and words, as a
+    # bookmark is round its page. The words are kept as fetched, never typed.
+    EntityType("social-post", "Social post", COLLECTED, "external", ATTESTATION,
+               hint="a post from X or Bluesky, kept with its words, author and pictures",
+               attrs=(
+                   Attr("archive_url", "Archived copy", kind="url",
+                        hint="a snapshot that survives the post being deleted"),
+               )),
     # -- documents ------------------------------------------------------------
     # `when` is the one fact a proof states that its own pixels cannot: the file
     # it rests on may carry no date at all, and the date a video was uploaded is

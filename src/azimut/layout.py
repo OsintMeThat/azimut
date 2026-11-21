@@ -66,6 +66,9 @@ HORIZON_FINDS_DIR = "finds"
 ANALYSIS_DIR = ".analysis"
 #: Saved Grid Search state.
 SEARCH_DIR = ".search"
+#: Posts from X or Bluesky kept for a note to draw: each one's words and who posted it,
+#: beside a folder holding its profile picture and its videos' stills.
+SOCIAL_POSTS_DIR = ".posts"
 #: Source and personal map layers, managed through the Layers panel.
 LAYERS_DIR = ".layers"
 #: The parsed GeoJSON a layer is drawn from. Derived from the snapshot or spec
@@ -102,6 +105,7 @@ CASE_SUBDIRS = (
     SEARCH_DIR,
     LAYERS_DIR,
     MAPPLATE_DIR,
+    SOCIAL_POSTS_DIR,
 )
 
 #: Deleted artifacts wait here, hidden at the case root. Outside `CASE_SUBDIRS`
@@ -573,6 +577,17 @@ def sheet_meta_rel(name: str) -> str:
 
 def draft_rel(name: str) -> str:
     return f"{DRAFTS_DIR}/{name}.json"
+
+
+def social_post_rel(name: str) -> str:
+    """A post from X or Bluesky as the case keeps it (`engine/socialposts.py`)."""
+    return f"{SOCIAL_POSTS_DIR}/{name}.json"
+
+
+def social_post_files_rel(name: str) -> str:
+    """The pictures a kept post owns: its author's profile picture and its videos' stills.
+    Its own pictures and videos are media of the case."""
+    return f"{SOCIAL_POSTS_DIR}/{name}.files"
 
 
 def session_rel(name: str) -> str:

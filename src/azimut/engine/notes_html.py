@@ -138,6 +138,8 @@ FIGURE_ASSET_NAMES = ("reader.chart.css", "reader.infographic.css")
 #: What a page holding a table with a settings line adds to the style sheet (its stripes,
 #: colours, density, caption and folding), kept apart for the same reason.
 TABLE_ASSET_NAMES = ("reader.table.css",)
+#: What a page drawing a post from X or Bluesky (`::: post`) adds, for the same reason.
+POST_ASSET_NAMES = ("reader.post.css",)
 #: What a map page adds: its layout, its panel's script spliced after the map's, and, in a web
 #: folder whose look names a GoatCounter site, the counter beside the page.
 MAPPAGE_ASSET_NAMES = ("reader.mappage.css", "reader.mappage.js", "reader.count.js")
@@ -574,6 +576,8 @@ class _Page:
         self._proof_anchors: dict[str, str] = {}
         self.charts = 0
         self.infographics = 0
+        #: The posts it draws (`::: post`), whose cards the page then styles (`reader.post.css`).
+        self.posts = 0
         #: Tables with a settings line, whose rules the page then carries (`reader.table.css`).
         self.table_looks = 0
         #: The words the page's charts draw, which its faces must carry.
@@ -735,6 +739,7 @@ class _Page:
                       + (_asset("reader.chart.css") if charted else "")
                       + (_asset("reader.infographic.css") if self.infographics else "")
                       + (_asset("reader.table.css") if self.table_looks else "")
+                      + (_asset("reader.post.css") if self.posts else "")
                       + (_asset(live.sheet) if live is not None else ""))
         reader = _asset("reader.js")
         map_js = _asset("reader.map.js") + (_asset("reader.mappage.js") if paged else "")
@@ -1195,6 +1200,23 @@ class _Page:
     def _on_az_infographic(self, tokens: list[Token], index: int) -> int:
         self.out.append(self._infographic(tokens[index].content))
         return index + 1
+
+    def _on_az_post(self, tokens: list[Token], index: int) -> int:
+        self.out.append(self._post(tokens[index].content))
+        return index + 1
+
+    def _post(self, body: str) -> str:
+        """A post from X or Bluesky the case keeps, drawn as a card in the page's look
+        (`engine/notes_posts.py`), its pictures inside the page, linked to its source."""
+        from . import notes_posts, socialposts
+
+        drawn = socialposts.card(self.case, body)
+        if not drawn.posts:
+            return _aside(socialposts.MISSING_SAID) if drawn.missing else ""
+        self.posts += 1
+        numbers = [self.cited.number(self.cited.reader.entity(post.id)) for post in drawn.posts]
+        cite = "".join(_cite(number) for number in dict.fromkeys(numbers) if number)
+        return notes_posts.html_card(drawn, lambda path, side, name: self._picture(path, side, name), cite=cite)
 
     def _on_html_block(self, tokens: list[Token], index: int) -> int:
         # shown as what it is, never run, and never with a comment in it

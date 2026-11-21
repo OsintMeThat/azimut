@@ -186,6 +186,7 @@ export const SLASH_COMMANDS = [
   { id: 'upload', label: 'Image from a file', icon: 'upload', words: 'upload picture file', action: 'upload', hint: 'Added to the case’s media' },
   { id: 'map', label: 'Interactive map', icon: 'mapArea', words: 'map layers plate proofs front timeline slider interactive', action: 'map', hint: 'Layers, a plate or proofs, in HTML', notes: true },
   { id: 'include', label: 'Include a note', icon: 'note', words: 'chapter report embed note', action: 'include', hint: 'As a chapter', notes: true },
+  { id: 'post', label: 'Post from X or Bluesky', icon: 'quote', words: 'post tweet x twitter bluesky bsky social thread embed quote source', action: 'post', hint: 'Drawn by Azimut, kept in the case', notes: true },
   { id: 'hint', label: 'Guidance', icon: 'help', words: 'hint guide help template', hint: 'Grey, never printed', template: true },
   { id: 'table', label: 'Table', icon: 'table', words: 'grid columns rows spreadsheet csv file', block: TABLE, action: 'table', hint: 'Rows by columns, or from a file' },
   { id: 'chart', label: 'Chart', icon: 'chart', words: 'chart graph bars pie donut pictograms waffle timeline figures plot', action: 'chart', hint: 'Drawn from a table, picked by its picture' },
@@ -225,7 +226,7 @@ export const SLASH_COMMANDS = [
 export const INSERT_SECTIONS = [
   { id: 'text', label: 'Text', ids: ['h1', 'h2', 'h3', 'bullet', 'numbered', 'task', 'quote', 'callout', 'callout-internal', 'code', 'date', 'entry', 'hint'] },
   { id: 'media', label: 'Media', ids: ['picture', 'upload', 'steps', 'story', 'my-logo'] },
-  { id: 'case', label: 'From the case', ids: ['cite', 'map', 'include'] },
+  { id: 'case', label: 'From the case', ids: ['cite', 'post', 'map', 'include'] },
   { id: 'layout', label: 'Layout', ids: ['divider', 'pagebreak', 'cover', 'align', 'corner', 'signature', 'field'] },
   { id: 'figures', label: 'Figures', ids: ['table', 'chart', 'diagram', 'infographic'] },
 ];

@@ -32,6 +32,9 @@
    * `/` › Interactive map asks what a map shows (`NoteMapPicker.svelte`) and puts it at
    * the cursor the way a tool's put lands, Undo included (`lib/notes/mapPut.js`).
    *
+   * `/` › Post from X or Bluesky asks for a link or a post the case holds
+   * (`NotePostPicker.svelte`) and puts its block at the cursor (`editor/postBlock.js`).
+   *
    * A table is a grid (`lib/notes/editor/tableGrid.js`): `/` › Table asks its size or
    * reads a file, a pasted spreadsheet becomes one, and while a cell is picked a
    * tool's picture lands in it. An empty picture cell whose row names a video and a
@@ -74,6 +77,10 @@
   import { starterFor } from '../lib/notes/editor/infographicPanels.js';
   import { putInNote } from '../lib/notes/putInNote.svelte.js';
   import NoteMapPicker from './NoteMapPicker.svelte';
+  import NotePostPicker from './NotePostPicker.svelte';
+  import { readPosts } from '../lib/notes/postCards.js';
+  import { keepRead } from '../lib/notes/editor/postBlock.js';
+  import { postBlockText } from '../lib/notes/editor/postText.js';
   import DataPicker from './DataPicker.svelte';
   import SheetMapDialog from './SheetMapDialog.svelte';
   import Icon from './Icon.svelte';
@@ -121,6 +128,8 @@
   let uploading = $state(false);
   let including = $state(false);
   let mapping = $state(false);
+  /** Whether `/` › Post from X or Bluesky is asking which post. */
+  let posting = $state(false);
   /** The source picker a figure asked for: `{ anchor, current, onpick }` and the note as it was then, or null. */
   let dataPick = $state(null);
   /** A map card asking for a layer made from a sheet: `{ onmade, onupdated }`. */
@@ -173,6 +182,7 @@
     get point() { return tools ? gotoPoint : null; },
     picture: () => { pictureOpen = true; },
     map: () => { if (caseId && !template) mapping = true; },
+    post: () => { if (caseId && !template) posting = true; },
     cover: () => writeCover(),
     upload: () => picker?.click(),
     image: (file) => upload(file),
@@ -424,6 +434,19 @@
     void putInNote(mapOffer({ caseId, request }), { target: { caseId, noteId: doc?.noteId ?? null, title: '', editor: api_ } });
   }
 
+  /**
+   * `/` › Post from X or Bluesky: the block goes in at once. Posts the case keeps are drawn;
+   * pasted links are read now, on this press, and named by their kept posts once read.
+   */
+  async function putPosts({ ids = [], links = [] }) {
+    posting = false;
+    if (!view || readOnly) return;
+    insertAtCursor(view, postBlockText({ ids, links }), { block: true });
+    if (!links.length) return;
+    const results = await readPosts({ caseId, links });
+    if (view) keepRead(view, results);
+  }
+
   /** `/` › Cover page: the page at the top, and the look that prints it alone on page 1. */
   async function writeCover() {
     if (!view || readOnly) return;
@@ -668,6 +691,11 @@
 
 {#if mapping}
   <NoteMapPicker {caseId} onclose={() => { mapping = false; view?.focus(); }} onput={putMap} />
+{/if}
+
+{#if posting}
+  <NotePostPicker {caseId} onclose={() => { posting = false; view?.focus(); }}
+    onlinks={(links) => putPosts({ links })} onposts={(ids) => putPosts({ ids })} />
 {/if}
 
 {#if sheetMapping}

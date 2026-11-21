@@ -13,6 +13,7 @@ import './tableBlock.js';
 import './tableGrid.js';
 import './pictureBlock.js';
 import './chartBlock.js';
+import './postBlock.js';
 import './breakBlocks.js';
 import './ruleBlock.js';
 import './htmlBlock.js';

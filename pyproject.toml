@@ -56,6 +56,10 @@ dependencies = [
     # get the same reader and no build step. Reading only: the case's own table is a
     # CSV, and writing xlsx would be a second artifact format to keep honest.
     "openpyxl>=3.1,<4",
+    # The QR code a post's card can carry in a PDF, so a reader of the paper reaches
+    # the post (engine/notes_posts.py). Pure Python, one wheel for every platform,
+    # no dependency of its own; drawn as the page's own squares, never a picture.
+    "segno>=1.6,<2",
     # Text shaping, and not optional: without it Arabic comes out unjoined and
     # Burmese mis-stacked — text that looks like text and is wrong, which is
     # worse than text that is missing. fpdf2 uses it when it is importable,

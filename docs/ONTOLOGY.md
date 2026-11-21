@@ -139,7 +139,7 @@ to one clause — no full stop, no em-dash, under a hundred characters.
 | `asset` | it is owned, appears, sits somewhere | `vehicle`, `vessel`, `aircraft`, `structure` |
 | `class` | a model the case counts with, never one particular object | `equipment-type` |
 | `identifier` | a handle on a system | `account`, `email`, `phone`, `domain`, `ip`, `network` |
-| `collected` | bytes gathered into the case rather than written, so one may depict a place | `media`, `capture` |
+| `collected` | bytes gathered into the case rather than written, so one may depict a place | `media`, `capture`, `social-post` |
 | `document` | it is read rather than gathered: made or consulted | `proof`, `post`, `note`, `sheet`, `inspect-session`, `collage`, `map-plate`, `compare-session`, `horizon-view`, `horizon-find`, `map-layer`, `analysis-zones`, `analysis-area`, `analysis-follow-up`, `analysis-run`, `bookmark` |
 | `place` | a point, never a thing | `place` |
 | `claim` | a statement about the graph, carrying its own reasoning | `claim` |
@@ -168,7 +168,7 @@ picture of the case is about it. The line that matters is between the first two 
 | Role | Reads as | Members | In the drawing |
 |---|---|---|---|
 | `subject` | the case is about it | `person`, `organization`, `vehicle`, `vessel`, `aircraft`, `structure`, `equipment-type`, `account`, `email`, `phone`, `domain`, `ip`, `network`, `media`, `place`, `claim` | a node |
-| `attestation` | a wrapper around something the case already holds | `bookmark`, `proof`, `capture` | folded into the edge that carries its provenance, drawn or not (below) |
+| `attestation` | a wrapper around something the case already holds | `bookmark`, `proof`, `capture`, `social-post` | folded into the edge that carries its provenance, drawn or not (below) |
 | `annex` | consulted rather than seen, hanging off one node | `note`, `sheet`, `inspect-session`, `collage`, `compare-session`, `horizon-view`, `horizon-find`, `map-layer`, `analysis-zones`, `analysis-area`, `analysis-follow-up`, `analysis-run` | out of the case readings, drawn by **My work** |
 | `deliverable` | what the case produced | `post`, `map-plate` | out of the case readings, drawn by **My work** |
 
@@ -187,6 +187,7 @@ answer by omission (`tests/test_entities.py`).
 |---|---|---|---|---|---|---|
 | `media` | collected | subject | ✅ | media-library | `path`, `sha256`, `source_url?`; a figure filed for a note also `plate_spec`/`plate_day`/`plate_step` (a Map plate page, sidecar source `map-plate`) or `analysis_view`/`analysis_surface` (a Timeline or Graph reading, source `analysis-view`), and `view_key` for reuse | yes (+ sidecar) |
 | `capture` | collected | attestation | ✅ | satellite | `coords`, `lat`, `lon`, `plus_code`, `zoom`, `bearing`, `path`, `geo?` | yes (image) |
+| `social-post` | collected | attestation | ✅ | note (`/post`) | `spec` (json): the words, who posted it, when, its pictures as media paths; `url`, `post_key`, `site`, `handle`, `author`, `posted_at`, `archive_url?` | yes (spec + profile picture and video stills) |
 | `place` | place | subject | ✅ | satellite, ingest, enrich, map layers | `aliases?`, `coords`, `lat`, `lon`, `plus_code`, `zoom`, `bearing`, `notes?`, `geo?`, `source_url?`, `site?`, `enrich_coord_key?`, `layer_origin?`, plus the precision fields below | no (a point) |
 | `proof` | document | attestation | ✅ | proof-composer | `spec` (json), `path` (png), `imagery_credits` (read-only, written by each save), `posted_url` (where the analyst published it; a report links the proof there), `published_url` (read-only: the post an imported proof's picture came from) | yes |
 | `post` | document | deliverable | ✅ | post-composer | `draft` (json) | yes |

@@ -37,6 +37,8 @@ Past the chain:
   from, by entity id. The rows are copied in, but every document draws them from the source;
 - a note's picture walls (`engine/notes_chart_wall.py`): each picture a row shows, a chip
   or its id alone, by entity id;
+- a note's posts (`::: post`, `engine/socialposts.py`): each post it draws by its record,
+  and a kept post's pictures and videos by media path;
 - a note's written links (`notelinks.outside_links`): each finds the item the case
   holds at its address, the file downloaded from that post, the bookmark of that
   page, the capture of that view or the proof imported from that post
@@ -65,7 +67,7 @@ from typing import TYPE_CHECKING, Any, Callable, Iterable, Iterator
 from .. import layout
 from ..workspace import CaseError
 from . import horizon_finds, horizon_views, inspectwork, mapplates, maplayers, notecharts, notelinks, notes_charts
-from . import notes_infographic, notes_maps, sheets
+from . import notes_infographic, notes_maps, sheets, socialposts
 from . import links as link_engine
 from . import urltitles
 
@@ -185,6 +187,15 @@ def _work(data: dict[str, Any]) -> Iterator[Lean]:
                 yield Lean(path, "gathers it for a scene to geolocate")
 
 
+def _social_post(data: dict[str, Any]) -> Iterator[Lean]:
+    # Its profile picture and its videos' stills are its own files, not uses.
+    pictures = data.get("pictures")
+    for picture in pictures if isinstance(pictures, list) else []:
+        path = picture.get("media") if isinstance(picture, dict) else None
+        if isinstance(path, str) and path:
+            yield Lean(path, "plays it in a post" if picture.get("kind") == "video" else "shows it in a post")
+
+
 def _routine(data: dict[str, Any]) -> Iterator[Lean]:
     # The pairs `delete_entities_deep` reads before it refuses to delete an area.
     pairs = data.get("area_dates")
@@ -206,6 +217,7 @@ _FOLDERS: tuple[tuple[str, str, Callable[[dict[str, Any]], Iterator[Lean]], str]
     (layout.LAYERS_DIR, "*.json", _layer, maplayers.ENTITY_TYPE),
     (f"proofs/{layout.META_DIR}", "*.json", _proof, "proof"),
     (layout.ANALYSIS_DIR, "followups-*.json", _routine, "analysis-follow-up"),
+    (layout.SOCIAL_POSTS_DIR, "*.json", _social_post, socialposts.TYPE),
 )
 
 # What each record says, kept while the file is unchanged. Bounded, because a long
@@ -277,6 +289,17 @@ def _note_figures(text: str) -> Iterator[Lean]:
             yield Lean(target, FROM_HOW)
 
 
+#: What a kept post is to the note that draws it.
+POST_HOW = "is a post drawn in it"
+
+
+def _note_posts(text: str) -> Iterator[Lean]:
+    """The posts a note's `::: post` blocks draw, each by its record."""
+    for block in socialposts.blocks_in(text):
+        for ident in block.ids:
+            yield Lean(ident, POST_HOW)
+
+
 #: What a picture is to the note whose picture wall shows it.
 WALL_HOW = "shows it in a picture wall"
 
@@ -336,6 +359,8 @@ def _read_note(path: Path) -> tuple[tuple[Lean, ...], tuple[str, ...]]:
         leans += tuple(dict.fromkeys(_note_figures(text)))
     if "chart" in text:
         leans += tuple(dict.fromkeys(_note_walls(text)))
+    if "post" in text:
+        leans += tuple(dict.fromkeys(_note_posts(text)))
     addresses = tuple(notelinks.outside_links(text)) if "http" in text else ()
     with _cache_lock:
         _notes[key] = (stamp, leans, addresses)

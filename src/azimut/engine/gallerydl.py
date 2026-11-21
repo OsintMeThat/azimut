@@ -163,6 +163,37 @@ def listing(url: str, extra: list[str]) -> list[tuple[str, dict[str, Any]]]:
     return files
 
 
+def post(url: str, extra: list[str]) -> tuple[dict[str, Any] | None, list[tuple[str, dict[str, Any]]]]:
+    """A post's own metadata and its files, without downloading any.
+
+    The metadata is what gallery-dl says of the post itself (its first directory
+    message): a post with no picture, which `listing` sees as nothing at all, still has
+    its words and its author there. X says it only when asked (`text-tweets`).
+    """
+    finished = run([*_BASE_ARGS, *extra, *option("extractor.twitter.text-tweets", True), "-j", url])
+    try:
+        messages = json.loads(finished.stdout)
+    except ValueError:
+        raise _failure(finished) from None
+    meta: dict[str, Any] | None = None
+    files: list[tuple[str, dict[str, Any]]] = []
+    for message in messages if isinstance(messages, list) else []:
+        if not isinstance(message, list) or not message:
+            continue
+        if message[0] == -1:
+            said = message[1] if len(message) > 1 and isinstance(message[1], dict) else {}
+            raise GalleryError(str(said.get("message") or ""), str(said.get("error") or ""))
+        if message[0] == 2 and meta is None and isinstance(message[-1], dict):
+            meta = message[-1]
+        elif message[0] == 3 and len(message) > 2 and isinstance(message[2], dict):
+            files.append((str(message[1]), message[2]))
+    if meta is None and files:
+        meta = files[0][1]
+    if meta is None and finished.returncode:
+        raise _failure(finished)
+    return meta, files
+
+
 def download(
     url: str, index: int, into: Path, extra: list[str]
 ) -> tuple[Path, dict[str, Any]] | None:

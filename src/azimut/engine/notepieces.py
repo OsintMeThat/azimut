@@ -12,7 +12,8 @@ the pieces into posts and cuts long text with its own counter (`tools/post/start
   picture or a video of the case, by its case-relative path, with ``"alt"`` for a chart;
 - ``{"kind": "proof", "name": …, "id": …}`` for a Geo Proof's picture, by the proof's
   name;
-- ``{"kind": "source", "url": …, "label": …}`` for a paragraph that is only a link.
+- ``{"kind": "source", "url": …, "label": …}`` for a paragraph that is only a link, and
+  for each post a ``::: post`` block draws, by its address.
 
 A case reference reads as its label, and a written link as its words then its address
 (a link a reader cannot open keeps its words only).
@@ -246,6 +247,8 @@ class _Reading:
                 self._chart(token)
             elif token.type == notes_markdown.INFOGRAPHIC_TOKEN:
                 self._infographic(token)
+            elif token.type == notes_markdown.POST_TOKEN:
+                self._posts(token)
             else:
                 self._leave(token)
             index = end
@@ -265,6 +268,18 @@ class _Reading:
         self._add({"kind": "media", "path": filed["path"], "type": "image", "id": filed["id"], "alt": chart.title})
         if chart.block.shows_table():
             self.left["tables"] += 1
+
+    def _posts(self, token: Token) -> None:
+        """A `::: post` block as each post's link, which a post on X or Bluesky quotes it by."""
+        from . import socialposts
+
+        drawn = socialposts.card(self.case, token.content)
+        if not drawn.posts:
+            self.left["other"] += 1
+            return
+        self._say("")
+        for post in drawn.posts:
+            self._add({"kind": "source", "url": post.url, "label": f"@{post.handle}" if post.handle else post.name})
 
     def _infographic(self, token: Token) -> None:
         """An infographic as one picture of its page at X's 16:9, filed in the case, its

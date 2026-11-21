@@ -2000,6 +2000,11 @@ class _Builder:
                 unsized = 1.0
         elif token.type == "az_infographic":
             return theme.leading * 2  # its own page, which the heading opened for it
+        elif token.type == "az_post":
+            from . import notes_posts, socialposts
+
+            # the card, or its first post when a thread runs over a page, kept whole
+            return notes_posts.PdfCard(self, socialposts.card(self.case, token.content)).first_height() or theme.leading * 2
         elif token.type == "table_open":
             # the header row and the first row under it, which fpdf2 keeps together
             line, pad = (5.0, 1.6) if theme.plain else (4.6, 1.7)
@@ -2201,6 +2206,21 @@ class _Builder:
         picture = chart.png(pixels, dpi=None if self.light else CHART_DPI, room=room)
         with PILImage.open(BytesIO(picture)) as opened:
             return chart, (picture, opened.size)
+
+    def _on_az_post(self, tokens: list[Token], index: int, align: Align) -> int:
+        """A `::: post` block as the card the note draws (`engine/notes_posts.py`): who
+        posted it, the words with what the analyst highlighted, the pictures, the day, the
+        proof it is geolocated by and the links, kept whole on a page."""
+        from . import notes_posts, socialposts
+
+        drawn = socialposts.card(self.case, tokens[index].content)
+        if not drawn.posts:
+            if drawn.missing:
+                self._aside(socialposts.MISSING_SAID)
+            return index + 1
+        numbers = [self.cited.number(self.cited.reader.entity(post.id)) for post in drawn.posts]
+        notes_posts.PdfCard(self, drawn, numbers).draw()
+        return index + 1
 
     def _on_az_infographic(self, tokens: list[Token], index: int, align: Align) -> int:
         """A `:::: infographic` block on a page of its own: its panels in two columns, its

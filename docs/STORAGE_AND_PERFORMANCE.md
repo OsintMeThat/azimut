@@ -126,6 +126,7 @@ for a case to fit under it on Windows, and names it as a warning elsewhere.
     .layers/      # added map layers: spec, snapshot, icons
       .cache/     #   parsed GeoJSON, rebuilt from the snapshot
     .mapplates/   # map plates: the layout round the case's maps, and its preview
+    .posts/       # posts from X or Bluesky a note draws: words, author, when; profile picture and video stills
     .trash/       # deleted artifacts grouped by delete action, in numbered slots
 ```
 
