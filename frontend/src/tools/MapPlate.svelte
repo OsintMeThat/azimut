@@ -81,7 +81,7 @@
     transitionsOf, unsettled, withoutMaps, withoutStep, restacked, stepOf, bornOn } from '../lib/plate/page.js';
   import { TWEEN_FPS, changes, playedTransit, transitionInto as transitionIntoBeat, transitionPlan, tweenFrames } from '../lib/plate/tween.js';
   import { defaultSize } from '../lib/plate/words.js';
-  import { FIRST_SECONDS, beatClips, beats, boundSeconds, captionOf, clipRange, daySeconds, gifPoster, isGif, plateSeconds, playDays, posterKey, posterOf, totalSeconds, videoDays } from '../lib/plate/clip.js';
+  import { FIRST_SECONDS, beatClips, beats, boundSeconds, captionOf, clipRange, daySeconds, gifPoster, isGif, linkedMedia, plateSeconds, playDays, posterKey, posterOf, totalSeconds, videoDays } from '../lib/plate/clip.js';
   import { legendRows } from '../lib/plate/legend.js';
   import { numbered, pasted, placeLabels, tableRows } from '../lib/plate/arrange.js';
   import { drawOver, pictureKey } from '../lib/plate/draw.js';
@@ -936,10 +936,12 @@
   }
 
   const BLOCK_KINDS = new Set(BLOCK_ADDS.map(([kind]) => kind));
+  /** Add › From the case: each tile, and the section of the panel it opens on. */
+  const FROM_CASE = { comparison: 'comparison', proof: 'proof', located: 'media' };
   function add(kind) {
     if (!spec) return;
     if (kind === 'step') { if (!plate.template) newStep(); return; }
-    if (kind === 'comparison') { if (!plate.template) fromCase = { anchor: focus ? focusAdd : addButton }; return; }
+    if (FROM_CASE[kind]) { if (!plate.template) fromCase = { anchor: focus ? focusAdd : addButton, what: FROM_CASE[kind] }; return; }
     if (SEQUENCES[kind]) { if (!plate.template) addSequence(kind); return; }
     const was = placing;
     placing = null;
@@ -1014,6 +1016,21 @@
    * on its side's ground and day, grouped, a badge on each saying its day, and saying what a
    * plate could not draw; or as the newest image kept from it, Compare's marks included.
    */
+  /** What Add › From the case picked, laid on the page: a comparison, a proof's picture, or a placed file pointing at its place. */
+  function putFromCase({ what, row, how }) {
+    if (what === 'comparison') { putComparison(row, how); return; }
+    const main = mainMap(spec);
+    if (what === 'proof') {
+      const point = row.points?.[0];
+      const element = linked('image', main, row.png, point ? [point.lon, point.lat].map((value) => Math.round(value * 1e6) / 1e6) : null);
+      if (element) element.name = row.title || row.name;
+      return;
+    }
+    const media = linkedMedia({ media_path: row.path, media_kind: row.media_kind });
+    if (!media) return;
+    const element = linked(media.as === 'video' ? 'video' : 'image', main, row.path, [row.lon, row.lat].map((value) => Math.round(value * 1e6) / 1e6));
+    if (element && row.title) element.name = row.title;
+  }
   async function putComparison(row, how) {
     const { width, height } = pageSize(spec.page);
     const born = (element) => (stepId && !element.step ? { ...element, ...bornAt(at, playable, stepId) } : element);
@@ -1310,17 +1327,21 @@
       ? [{ label: 'Add video', icon: 'video', title: 'Plays it on a slide, pointing at this place', run: () => linked('video', map, hit.media.path, at) }]
       : [{ label: 'Add linked picture', icon: 'image', title: 'Sets it on the page, pointing at this place', run: () => linked('image', map, hit.media.path, at) }];
   }
-  /** A video or a picture added as Add makes it, showing `path` and pointing at `point` on `map`; a video says its source. */
+  /**
+   * A video or a picture added as Add makes it, showing `path` and pointing at `point` on `map`
+   * (set on the page alone without a map); a video says its source. The element made, or none.
+   */
   function linked(kind, map, path, point) {
     const before = new Set(spec.elements.map((item) => item.id));
     add(kind);
     const element = spec.elements.find((item) => !before.has(item.id) && item.kind === kind);
-    if (!element) return;
-    Object.assign(element, { src: path, at: point, of: map.id, leader: 'straight', ...(kind === 'image' ? { data: null } : {}) });
-    if (kind !== 'video') return;
+    if (!element) return null;
+    Object.assign(element, { src: path, ...(map && point ? { at: point, of: map.id, leader: 'straight' } : {}), ...(kind === 'image' ? { data: null } : {}) });
+    if (kind !== 'video') return element;
     api.get(`/api/cases/${plate.caseId ?? caseId}/media/item?path=${encodeURIComponent(path)}`)
       .then((item) => { if (element.src === path && !element.text) element.text = captionOf(item); })
       .catch(() => { /* the line stays empty, to be written by hand */ });
+    return element;
   }
   function oneItems(element) {
     const owed = element.kind === 'credits' && spec.elements.filter((item) => item.kind === 'credits').length < 2;
@@ -2208,7 +2229,7 @@
     {/if}
     {#if fromCase}
       <PlateFromCase anchor={fromCase.anchor} caseId={plate.caseId ?? caseId ?? ''} room={MAX_MAPS - mapCount(plate.spec.elements)}
-        onpick={putComparison} onclose={() => (fromCase = null)} />
+        what={fromCase.what} mapped={!!mainMap(plate.spec)} onpick={putFromCase} onclose={() => (fromCase = null)} />
     {/if}
   {:else if !caseState.current}
     <NoCase icon="plate" what="lay out a map plate" />

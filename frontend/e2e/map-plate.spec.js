@@ -1031,7 +1031,7 @@ test('a comparison of the case goes on the plate as two maps on their days, or a
   await expect(page.locator('.plate-map')).toHaveCount(2);
   await addOnPage(page, 'Comparison');
   const panel = page.getByRole('dialog', { name: 'From the case' });
-  await expect(panel.locator('.days')).toHaveText('12 Mar 2024 → After');
+  await expect(panel.locator('.sub')).toHaveText('12 Mar 2024 → After');
   await panel.locator('.main').click();
   // a side a plate cannot draw is laid on World Imagery, and the plate says so
   await expect(page.getByText('laid on World Imagery')).toBeVisible();
@@ -1044,6 +1044,35 @@ test('a comparison of the case goes on the plate as two maps on their days, or a
   await addOnPage(page, 'Comparison');
   await panel.getByRole('button', { name: 'Picture' }).click();
   await expect.poll(() => lastSave(store)?.spec.elements.find((element) => element.kind === 'image')?.src).toBe('media/energodar.png');
+});
+
+test('a Geo Proof and the footage placed on the map go on the plate from the case, each pointing at its place', async ({ page }) => {
+  const store = await plateFixture(page);
+  await page.route(`**/api/cases/${CASE_ID}/proofs`, (route) => route.fulfill({ json: [{ name: 'p-1', title: 'Depot strike', png: 'proofs/p-1.png',
+    thumb: null, when: '2025-10-03', place: 'Energodar', points: [{ lat: 48.86, lon: 2.31 }] }] }));
+  await page.route(`**/api/cases/${CASE_ID}/satellite/media`, (route) => route.fulfill({ json: [{ key: 'm1@48.86,2.32', id: 'm1', path: 'media/strike.mp4',
+    media_kind: 'video', title: 'Strike', lat: 48.86, lon: 2.32, thumbnail: null }] }));
+  await page.goto('/#plate');
+  await newPlate(page);
+  await expect(page.locator('.plate-map')).toHaveCount(2);
+  const main = () => lastSave(store)?.spec.elements.find((element) => element.kind === 'map').id;
+  await addOnPage(page, 'Geo Proof');
+  const panel = page.getByRole('dialog', { name: 'From the case' });
+  await panel.locator('.main', { hasText: 'Depot strike' }).click();
+  await expect.poll(() => {
+    const picture = lastSave(store)?.spec.elements.find((element) => element.kind === 'image');
+    return picture && [picture.src, picture.name, picture.at, picture.of === main()];
+  }).toEqual(['proofs/p-1.png', 'Depot strike', [2.31, 48.86], true]);
+  // a video placed on the map plays on a slide of its own, pointing at its place
+  await addOnPage(page, 'Footage on the map');
+  await panel.getByRole('tab', { name: 'Footage on the map' }).click();
+  await panel.locator('.main', { hasText: 'Strike' }).click();
+  await expect(page.locator('.steps [role="option"]')).toHaveCount(2);
+  await expect.poll(() => {
+    const spec = lastSave(store)?.spec;
+    const video = spec?.elements.find((element) => element.kind === 'video');
+    return video && [video.src, video.at, video.step === spec.steps?.now?.[0]?.id];
+  }).toEqual(['media/strike.mp4', [2.32, 48.86], true]);
 });
 
 test('an empty slide takes a copy of the one before it from the pill over the page', async ({ page }) => {

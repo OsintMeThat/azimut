@@ -16,8 +16,15 @@ const INDEX = [
   { id: 'c2', kind: 'comparison', session: 'port', title: '', imagery_a: null, imagery_b: null, kept: [] },
 ];
 
+const PROOFS = [{ name: 'p-1', title: 'Depot strike', png: 'proofs/p-1.png', thumb: '.thumbs/p-1.jpg', when: '2025-10-03', place: 'Energodar, Ukraine',
+  points: [{ lat: 47.5, lon: 34.6 }] }, { name: 'p-2', title: 'Unfinished', png: null, points: [] }];
+const MEDIA = [{ key: 'm1@1,2', path: 'media/strike.mp4', media_kind: 'video', title: 'Strike', lat: 47.5, lon: 34.6, country_en: 'Ukraine' },
+  { key: 'm2@1,2', path: 'media/loop.gif', media_kind: 'image', title: 'Loop', lat: 47.5, lon: 34.6 },
+  { key: 'm3@1,2', path: 'media/roof.jpg', media_kind: 'image', title: 'Roof', lat: 47.5, lon: 34.6 },
+  { key: 'm4@1,2', path: 'media/notes.pdf', media_kind: 'document', title: 'Notes', lat: 47.5, lon: 34.6 }];
+
 async function show(props = {}, index = INDEX) {
-  get.mockImplementation(async () => index);
+  get.mockImplementation(async (url) => (url.endsWith('/proofs') ? PROOFS : url.endsWith('/satellite/media') ? MEDIA : index));
   const anchor = document.createElement('button');
   document.body.append(anchor);
   const calls = { onpick: vi.fn(), onclose: vi.fn() };
@@ -32,21 +39,21 @@ const rows = () => [...document.body.querySelectorAll('.rows li')];
 describe('the case\'s work, from Add', () => {
   it('reads the case when it opens, and lists its comparisons with their two days', async () => {
     await show();
-    expect(get).toHaveBeenCalledWith('/api/cases/c1/satellite/index');
+    expect(get.mock.calls).toEqual([['/api/cases/c1/satellite/index']]);
     expect(rows().map((row) => row.querySelector('.title').textContent)).toEqual(['Energodar', 'port']);
-    expect(rows()[0].querySelector('.days').textContent).toBe('4 Mar 2022 → 2 Nov 2025');
-    expect(rows()[1].querySelector('.days').textContent).toBe('Before → After');
+    expect(rows()[0].querySelector('.sub').textContent).toBe('4 Mar 2022 → 2 Nov 2025');
+    expect(rows()[1].querySelector('.sub').textContent).toBe('Before → After');
     expect(rows()[0].querySelector('img').getAttribute('src')).toContain('.thumbs/energodar.jpg');
   });
 
   it('lays a pair as two maps at a press, or its newest kept image, and says when none is kept', async () => {
     const calls = await show();
     rows()[0].querySelector('.main').click();
-    expect(calls.onpick).toHaveBeenCalledWith(INDEX[1], 'maps');
+    expect(calls.onpick).toHaveBeenCalledWith({ what: 'comparison', row: INDEX[1], how: 'maps' });
     expect(calls.onclose).toHaveBeenCalled();
     const picture = (row) => [...row.querySelectorAll('button')].find((button) => button.textContent.includes('Picture'));
     picture(rows()[0]).click();
-    expect(calls.onpick).toHaveBeenLastCalledWith(INDEX[1], 'picture');
+    expect(calls.onpick).toHaveBeenLastCalledWith({ what: 'comparison', row: INDEX[1], how: 'picture' });
     expect(picture(rows()[1]).disabled).toBe(true);
     expect(picture(rows()[1]).title).toContain('Keep one in Compare');
   });
@@ -55,6 +62,37 @@ describe('the case\'s work, from Add', () => {
     await show({ room: 1 });
     expect(document.body.textContent).toContain('eight maps at most');
     expect(rows()[0].querySelector('.main').disabled).toBe(true);
+  });
+
+  it('opens on the section asked, reads each section only when shown, and lists proofs with a picture', async () => {
+    const calls = await show({ what: 'proof' });
+    expect(get.mock.calls).toEqual([['/api/cases/c1/proofs']]);
+    expect(rows().map((row) => row.querySelector('.title').textContent)).toEqual(['Depot strike']);
+    expect(rows()[0].querySelector('.sub').textContent).toBe('3 Oct 2025 · Energodar, Ukraine');
+    rows()[0].querySelector('.main').click();
+    expect(calls.onpick).toHaveBeenCalledWith({ what: 'proof', row: PROOFS[0], how: '' });
+  });
+
+  it('lists the footage and photos placed on the map, a GIF played as a video, nothing it cannot show', async () => {
+    await show({ what: 'media' });
+    expect(get.mock.calls).toEqual([['/api/cases/c1/satellite/media']]);
+    expect(rows().map((row) => row.querySelector('.sub').textContent)).toEqual(['Video, on a slide · Ukraine', 'Video, on a slide', 'Photo']);
+    const tab = [...document.body.querySelectorAll('[role="tab"]')].find((node) => node.textContent === 'Comparisons');
+    tab.click(); flushSync(); await tick(); await tick(); flushSync();
+    expect(get.mock.calls.at(-1)).toEqual(['/api/cases/c1/satellite/index']);
+    expect(rows()).toHaveLength(2);
+  });
+
+  it('says what was picked even when closing the panel takes it off the page first', async () => {
+    const picked = [];
+    await show({ what: 'proof', onclose: () => { unmount(held); held = null; }, onpick: (choice) => picked.push(choice) });
+    rows()[0].querySelector('.main').click();
+    expect(picked).toEqual([{ what: 'proof', row: PROOFS[0], how: '' }]);
+  });
+
+  it('says a picture will not point at its place when the page has no map', async () => {
+    await show({ what: 'proof', mapped: false });
+    expect(document.body.textContent).toContain('No map on the page');
   });
 
   it('says how to make one when the case has none', async () => {

@@ -60,6 +60,7 @@ describe('the Add panel', () => {
     expect(heads()).not.toContain('From the case');
     expect(tiles()).not.toContain('Video');
     expect(tiles()).not.toContain('Comparison');
+    expect(tiles()).not.toContain('Geo Proof');
   });
 
   it('finds a comparison of the case by the words it is asked by', () => {

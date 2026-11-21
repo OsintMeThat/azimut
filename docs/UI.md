@@ -6726,6 +6726,12 @@ the newest image kept from it instead, Compare's marks and highlights included, 
 **Open in Compare** goes back to it. The plate keeps no link to the comparison: either
 changes on its own afterwards. A map grouped with another carries **Same view as the
 other map** on its bar, which frames it as the other is on the day or slide shown.
+**Geo Proof** lists the case's proofs with a picture, each with its day and place, and
+sets one on the page pointing at its point; **Footage on the map** lists the videos and
+photos the case placed on the map (the same files a right-click on a marker offers), a
+video played on a slide of its own and a photo set on the page, each pointing at its
+place. On a page with no map, what goes on points at nothing, and the panel says so.
+Each list is read when its tab is first shown.
 
 **Layers**, the list's second tab, says where the maps get what they draw, since a plate
 keeps no data of its own: each map is drawn on a ground and draws some of the case's

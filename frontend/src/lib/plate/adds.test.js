@@ -19,6 +19,9 @@ describe('what can be added to a plate', () => {
     expect(kinds(findAdds('title'))).toEqual(['note', 'text', 'title-block', 'seq-title']);
     expect(kinds(findAdds('photo'))).toEqual(['image']);
     expect(kinds(findAdds('QR'))).toEqual(['qr']);
+    // the case's own work is found by what it is
+    expect(kinds(findAdds('before after'))).toEqual(['comparison']);
+    expect(kinds(findAdds('footage'))).toEqual(['located', 'video']);
   });
 
   it('offers one kind of map, which a word for 3D finds: its 3D is a box on it', () => {

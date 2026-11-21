@@ -8,7 +8,8 @@ import { SEQUENCE_ADDS } from './sequences.js';
 
 /** `[kind, label, icon, words]`, by group. */
 export const ADDS = [
-  { title: 'From the case', cased: true, note: 'Work already done in the case', items: [['comparison', 'Comparison', 'compare', 'compare pair before after two dates change wayback']] },
+  { title: 'From the case', cased: true, note: 'Work already done in the case', items: [['comparison', 'Comparison', 'compare', 'compare pair before after two dates change wayback'],
+    ['proof', 'Geo Proof', 'proof', 'geolocation proof picture point'], ['located', 'Footage on the map', 'media', 'footage placed located marker angle camera']] },
   { title: 'Maps', items: [['map', 'Map', 'satellite', 'ground 3d relief terrain tilt heights'], ['detail', 'Detail', 'zoomInset', 'zoom magnifier closer'],
     ['inset', 'Inset map', 'mapArea', 'locator overview']] },
   { title: 'On the map', note: 'Press the map to place it', items: [['label', 'Label', 'pin', 'callout name'],
