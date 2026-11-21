@@ -145,6 +145,9 @@
   // a branch opened afresh has published nothing yet, and warned of nothing
   busy = false;
   warned = false;
+  // publishing, read here and handed up (`busy`): the dialog's own copy may not be reactive
+  let working = $state(false);
+  $effect(() => { busy = working; });
 
   $effect(() => {
     let live = true;
@@ -379,13 +382,13 @@
    * asks for one more press first (`warned`).
    */
   export async function publish({ roundPov = false, changes = '', offlineMaps = false } = {}) {
-    if (busy) return null;
+    if (working) return null;
     if (!ready) {
       setupShown = true;
       return null;
     }
     if (wrong || placeWrong) return null;
-    busy = true;
+    working = true;
     failed = '';
     needs = null;
     setUp = '';
@@ -420,7 +423,7 @@
       failed = error.message;
       return null;
     } finally {
-      busy = false;
+      working = false;
     }
   }
 
@@ -515,7 +518,7 @@
               newPlaceholder={CATEGORY_NEW_PLACEHOLDER} maxlength={CATEGORY_MAX} title={HELP.publishCategory} label="Category"
               describedby="export-category-said" onpick={typeCategory} />
           </div>
-          <button type="button" class="btn btn-ghost btn-sm" onclick={readSite} disabled={reading || busy} aria-busy={reading}
+          <button type="button" class="btn btn-ghost btn-sm" onclick={readSite} disabled={reading || working} aria-busy={reading}
             title={HELP.publishRead}><BusyLabel busy={reading} text={BUSY.read}>Read the site</BusyLabel></button>
         </div>
         <p id="export-category-said" class="address-said" role="status">{readSaid || CATEGORY_SAID}</p>
@@ -531,7 +534,7 @@
         </div>
         {@render picker('list')}
         <button type="button" class="more" aria-expanded={placeShown} aria-controls="export-more" title={HELP.publishMore}
-          onclick={() => (moreOpen = !placeShown)}><Icon name="chevronRight" size={12} />{MORE_OPTIONS}</button>
+          onclick={() => { if (!placeWrong) moreOpen = !moreOpen; }}><Icon name="chevronRight" size={12} />{MORE_OPTIONS}</button>
         {#if placeShown}
           <div class="place" id="export-more" role="group" aria-label={PLACE_TITLE}>
             <span class="lbl">{PLACE_TITLE}</span>
@@ -558,7 +561,7 @@
       {/if}
     </div>
 
-    {#if busy}
+    {#if working}
       <p class="sending" role="status"><BusyLabel busy text="Making the folder and sending it to {github.account}/{github.repo}…" /></p>
     {/if}
     {#if held}
@@ -570,10 +573,10 @@
             <button type="button" class="btn btn-sm" title={HELP.publishStop} onclick={() => (held = null)}>Don't publish</button>
           {:else}
             {#if held.ours}
-              <button type="button" class="btn btn-sm" disabled={busy} aria-busy={busy} title={HELP.publishReplace}
-                onclick={() => onpublish()}><BusyLabel {busy} text={BUSY.publish}>{REPLACE_PRESS}</BusyLabel></button>
+              <button type="button" class="btn btn-sm" disabled={working} aria-busy={working} title={HELP.publishReplace}
+                onclick={() => onpublish()}><BusyLabel busy={working} text={BUSY.publish}>{REPLACE_PRESS}</BusyLabel></button>
             {/if}
-            <button type="button" class="btn btn-sm" disabled={busy} title={HELP.publishPickAnother} onclick={pickAnother}>{PICK_ANOTHER}</button>
+            <button type="button" class="btn btn-sm" disabled={working} title={HELP.publishPickAnother} onclick={pickAnother}>{PICK_ANOTHER}</button>
           {/if}
         </div>
       </div>

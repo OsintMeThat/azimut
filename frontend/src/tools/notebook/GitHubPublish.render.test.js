@@ -801,7 +801,7 @@ it('names what another note left at the address, and Replace it publishes over i
   expect(await live.publish()).toBeNull();
   await settle();
   expect(publishes()).toEqual([]);
-  expect(target.querySelector('[role="alert"]').textContent.trim()).toBe('This address already holds “Harbour fire”. Replace it?');
+  expect(target.querySelector('[role="alert"] p').textContent.trim()).toBe('This address already holds “Harbour fire”. Replace it?');
   expect(bound.warned).toBe(true);
   for (const name of ['Replace it', 'Pick another address']) expect(button(name).getAttribute('title')).toBeTruthy();
   button('Replace it').click();
@@ -846,7 +846,7 @@ it('offers only another address for a folder Azimut did not make, and a press ch
   await settle();
   await live.publish();
   await settle();
-  expect(target.querySelector('[role="alert"]').textContent.trim()).toBe('This address already holds “harbour”, which Azimut did not make.');
+  expect(target.querySelector('[role="alert"] p').textContent.trim()).toBe('This address already holds “harbour”, which Azimut did not make.');
   expect(button('Replace it')).toBeUndefined();
   expect(button('Pick another address')).toBeTruthy();
   expect(bound.warned).toBe(false);
