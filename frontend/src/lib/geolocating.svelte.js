@@ -16,7 +16,7 @@ import { api } from './api.js';
 import { onEvent } from './events.js';
 import { gatheredScene, openScenes, sceneCount, withProofs } from './sceneQueue.js';
 import { retimedBy } from './sceneRetime.svelte.js';
-import { uiState } from './state.svelte.js';
+import { caseState, uiState } from './state.svelte.js';
 
 /** `scene` is the queue's row for it (`video`, `id`, `start`, `end`, `label`, `state`,
  *  `captures`, `abandoned`, `since`), or null. */
@@ -60,7 +60,8 @@ export async function readGeolocating(caseId) {
   const asked = ++tickets;
   try {
     const { geolocating: scene } = await api.get(`${base(caseId)}/geolocating`);
-    holdNewer(caseId, scene, asked);
+    // its row in the To-do says the same counts as the pill
+    if (holdNewer(caseId, scene, asked)) mirror(scene);
     return scene;
   } catch (e) {
     if (geolocating.caseId === caseId && asked >= applied) geolocating.error = e.message;
@@ -105,9 +106,12 @@ export async function stopGeolocating(caseId) {
 
 // Whether the queue held may be behind what the server has: a capture gathered or a
 // scene renamed while only its number was shown (`holdSceneCount`), and the read in
-// flight, which a second surface opening at the same moment shares.
+// flight, which a second surface opening at the same moment shares. A queue read before
+// the case last reloaded is behind too (`readAt`): what a scene counts may have moved
+// while only the number was kept in step.
 let stale = false;
 let reading = null;
+let readAt = null;
 
 /** Read the scenes still to prove, by file. */
 export function readSceneQueue(caseId) {
@@ -119,6 +123,7 @@ export function readSceneQueue(caseId) {
   sceneQueue.busy = true;
   sceneQueue.error = '';
   stale = false;
+  readAt = caseState.rev;
   const asked = ++tickets;
   const read = (async () => {
     try {
@@ -144,9 +149,10 @@ export function readSceneQueue(caseId) {
 /** Read the queue unless the one held for this case is up to date, or being read. */
 export function ensureSceneQueue(caseId) {
   if (!caseId) return Promise.resolve(null);
-  if (reading?.caseId === caseId) return reading.read;
+  const current = readAt === caseState.rev;
+  if (reading?.caseId === caseId && current) return reading.read;
   const kept = queueHolders > 0 || countHolders > 0;
-  if (kept && sceneQueue.caseId === caseId && sceneQueue.files && !stale) return Promise.resolve(null);
+  if (kept && sceneQueue.caseId === caseId && sceneQueue.files && !stale && current) return Promise.resolve(null);
   return readSceneQueue(caseId);
 }
 
@@ -364,7 +370,7 @@ function rowOf(caseId, video, id) {
   return sceneQueue.files.find((file) => file.video === video)?.scenes?.find((scene) => scene.id === id) ?? null;
 }
 
-/** The queue's row for the scene held, told what the pill was told. */
+/** The queue's row for the scene held, told what the pill was told: both its counts. */
 function mirror(scene) {
   const row = scene ? rowOf(geolocating.caseId, scene.video, scene.id) : null;
   if (!row) return;
@@ -372,6 +378,7 @@ function mirror(scene) {
   row.state = scene.state;
   if (Number.isInteger(scene.captureCount)) row.captureCount = scene.captureCount;
   else delete row.captureCount;
+  if (Number.isInteger(scene.footage)) row.footage = scene.footage;
 }
 
 /**

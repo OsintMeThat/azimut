@@ -523,7 +523,11 @@ def save_work(case: "Case", subject: str, spec: dict[str, Any], guard: SceneGuar
         kept = guard(scenes, [s for s in previous.get("scenes") or [] if isinstance(s, dict)]) if guard and found else []
         if kept:
             scenes.sort(key=_scene_order)
-        moved = _scene_lines(previous.get("scenes") if found else None) != _scene_lines(scenes)
+        # what the scenes show moved too: a frame added to the strip or taken off counts
+        # in them (`scenes.Footage`), so the pill and the To-do read their counts again
+        moved = _scene_lines(previous.get("scenes") if found else None) != _scene_lines(scenes) or bool(
+            scenes and _instants(previous.get("frames") if found else None) != _instants(frames)
+        )
         if found:
             _keep_scene_state(scenes, previous.get("scenes"))
         active = spec.get("activeFrameId")
@@ -557,6 +561,14 @@ def _scene_lines(scenes: Any) -> list[tuple[Any, ...]]:
     """What a save can change about a file's scenes, to tell one that did from the many
     autosaves that did not. The server's own fields (`SCENE_STATE`) are not among it."""
     return [tuple(s.get(key) for key in _SCENE_KEYS) for s in scenes or [] if isinstance(s, dict)]
+
+
+def _instants(frames: Any) -> list[float]:
+    """The instants of a strip's frames, sorted: what the strip gives a video's scenes."""
+    return sorted(
+        float(time) for frame in frames or []
+        if isinstance(frame, dict) and isinstance(time := frame.get("time"), (int, float)) and not isinstance(time, bool)
+    )
 
 
 def _keep_scene_state(scenes: list[dict[str, Any]], stored: Any) -> None:
@@ -1336,6 +1348,9 @@ def save_collage(
     `name` is the stem the tool has it open under, absent for one never saved. A new
     collage takes the next free name; a rename lands on a free name or not at all,
     since two entities pointing at one file cannot be merged sensibly.
+
+    ``pieces_moved`` holds the pieces before and after when the save changed them, for
+    the video they come from to say its scenes' counts moved, and is empty otherwise.
     """
     body = _clean_collage(spec)
     with case.lock:
@@ -1359,6 +1374,8 @@ def save_collage(
 
             renames.rename_record(case, COLLAGE_TYPE, old_rel, rel)
         previous = _read(case.resolve_inside(rel)) or {}
+        # the files and instants it lays out, before and after: a video's scenes count it
+        before, after = _pieces(previous), _pieces(body)
         written = {
             "azimut_collage": COLLAGE_VERSION,
             "title": final,
@@ -1371,7 +1388,7 @@ def save_collage(
         _write(case.resolve_inside(rel), written)
         if case.find_entity(attr="spec", value=rel) is None:
             case.add_entity(COLLAGE_TYPE, final, attrs={"spec": rel}, by=PRODUCER)
-    return {"name": final, "title": final}
+    return {"name": final, "title": final, "pieces_moved": [before, after] if before != after else []}
 
 
 def _preview_image(raw: bytes) -> "Image.Image":

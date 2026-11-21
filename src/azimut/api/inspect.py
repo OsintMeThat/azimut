@@ -735,8 +735,8 @@ def save_work(case_id: str, body: WorkIn) -> dict[str, Any]:
         saved = geolocate.save_work(case, body.path, body.spec)
     except CaseError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
-    # its scenes moved: the To-do and the extension's queue read them again. An autosave
-    # that changed nothing about them says nothing.
+    # its scenes moved, or the strip's frames they count: the pill, the To-do and the
+    # extension's queue read them again. An autosave that changed neither says nothing.
     if saved.pop("scenes_moved"):
         events.publish({"type": "scenes", "case_id": case.id, "video": body.path})
     return saved
@@ -779,11 +779,17 @@ def load_collage(case_id: str, name: str) -> dict[str, Any]:
 def save_collage(case_id: str, body: CollageIn) -> dict[str, Any]:
     case = get_case(case_id)
     try:
-        return inspectwork.save_collage(case, body.name, body.title, body.spec)
+        saved = inspectwork.save_collage(case, body.name, body.title, body.spec)
     except inspectwork.NameTaken as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
     except CaseError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
+    # A collage of one video's frames counts in that video's scenes: laid out anew, or
+    # no longer, their counts moved, and the pill and the To-do read them again.
+    videos = {found[0] for pieces in saved.pop("pieces_moved") if (found := scenes_engine.collage_video(case, pieces))}
+    for video in sorted(videos):
+        events.publish({"type": "scenes", "case_id": case.id, "video": video})
+    return saved
 
 
 @router.put("/cases/{case_id}/collages/{name}/thumb")

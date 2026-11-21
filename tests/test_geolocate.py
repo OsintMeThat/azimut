@@ -671,6 +671,49 @@ def test_each_scene_counts_what_its_video_gives_it_beside_what_the_map_gave_it(c
     assert _queue(client, cid)["geolocating"]["footage"] == 3
 
 
+@needs_ffmpeg
+def test_what_a_video_gives_its_scenes_moving_says_their_counts_moved(client, tmp_path, monkeypatch):
+    """A frame added to the strip or taken off, and a collage of the video laid out anew,
+    say so as a scene's time moving does: the pill and the To-do read their counts again.
+    An autosave that moved neither says nothing, nor does the strip of a file with no
+    scene, which nothing counts."""
+    from azimut.api import events
+
+    cid = _case(client)
+    video = _video(client, cid, tmp_path)
+    scenes = [{"id": "pass", "start": 1.0, "end": 2.0, "label": ""}]
+
+    def save(frames, scenes=scenes):
+        res = client.put(f"/api/cases/{cid}/inspect/work", json={"path": video, "spec": {"frames": frames, "scenes": scenes}})
+        assert res.status_code == 200, res.text
+
+    save([])
+    heard: list[dict] = []
+    monkeypatch.setattr(events, "publish", heard.append)
+    told = {"type": "scenes", "case_id": cid, "video": video}
+    frame = {"id": "f1", "path": video, "time": 1.5}
+
+    save([frame])
+    assert heard == [told]
+    save([frame])
+    assert heard == [told]
+    save([])
+    assert heard == [told, told]
+
+    heard.clear()
+    name = _collage(client, cid, "Quay", [(video, 1.5), (video, 1.7)])
+    assert heard == [told]
+    _collage(client, cid, "Quay", [(video, 1.5), (video, 1.7)], name=name)
+    assert heard == [told]
+    _collage(client, cid, "Quay", [(video, 1.5)], name=name)
+    assert heard == [told, told]
+
+    save([], scenes=[])
+    heard.clear()
+    save([frame], scenes=[])
+    assert heard == []
+
+
 def test_a_file_with_no_title_is_named_by_its_file_name_without_the_extension():
     from azimut.engine import scenes as scenes_engine
 

@@ -12,10 +12,10 @@ vi.mock('./api.js', () => {
   return { api: { get: request('GET'), put: request('PUT'), del: request('DELETE'), post: request('POST') } };
 });
 
-vi.mock('./state.svelte.js', () => ({ uiState: { tool: 'inspect', geolocateRef: null } }));
+vi.mock('./state.svelte.js', () => ({ uiState: { tool: 'inspect', geolocateRef: null }, caseState: { rev: 0 } }));
 
 const { dispatch } = await import('./events.js');
-const { uiState } = await import('./state.svelte.js');
+const { caseState, uiState } = await import('./state.svelte.js');
 const {
   abandonScene, ensureSceneQueue, geolocateScene, geolocating, holdSceneCount, holdSceneQueue, joinScenes, markToGeolocate, sceneEdit,
   readGeolocating, readSceneQueue, restoreScene, sceneQueue, scenesWaiting, startGeolocating, stopGeolocating, unjoinScenes,
@@ -196,6 +196,38 @@ describe('the queue', () => {
     // and with nothing holding it at all, whatever is there is not trusted
     await ensureSceneQueue('c1');
     expect(calls).toHaveLength(3);
+  });
+
+  it('reads a queue held for its number again once the case reloaded since', async () => {
+    answers.set('GET /api/cases/c1/scenes/queue', { files: [], geolocating: null });
+    const release = holdSceneCount();
+    await ensureSceneQueue('c1');
+    await ensureSceneQueue('c1');
+    expect(calls).toHaveLength(1);
+    // a frame filed or a proof saved while only the number was shown: a scene's counts
+    // may have moved, so the To-do opened next reads the queue rather than the one held
+    caseState.rev += 1;
+    await ensureSceneQueue('c1');
+    await ensureSceneQueue('c1');
+    release();
+    expect(calls).toHaveLength(2);
+  });
+
+  it('does not lean on a read asked before the case reloaded', async () => {
+    const answered = [];
+    const { api } = await import('./api.js');
+    const spy = vi.spyOn(api, 'get').mockImplementation(() => new Promise((resolve) => answered.push(resolve)));
+    const first = ensureSceneQueue('c1');
+    ensureSceneQueue('c1');
+    expect(answered).toHaveLength(1);
+    caseState.rev += 1;
+    const second = ensureSceneQueue('c1');
+    expect(answered).toHaveLength(2);
+    answered[0]({ files: [{ video: 'old.mp4', title: 'old', scenes: [] }], geolocating: null });
+    answered[1]({ files: [{ video: 'new.mp4', title: 'new', scenes: [] }], geolocating: null });
+    await Promise.all([first, second]);
+    spy.mockRestore();
+    expect(sceneQueue.files.map((file) => file.video)).toEqual(['new.mp4']);
   });
 
   it('keeps the later of two reads, whichever lands first', async () => {
@@ -493,6 +525,17 @@ describe('a nudge, shown before the server is read again', () => {
     await tick();
     expect(geolocating.scene.captures).toEqual(['media/cap-1.png']);
     expect(sceneQueue.files[0].scenes[0]).toMatchObject({ captures: ['media/cap-1.png'], state: 'progress' });
+  });
+
+  it('tells the queue’s row both counts a read of the pill says', async () => {
+    const files = [{ video: VIDEO, title: 'clip', scenes: [{ ...HELD, footage: 0 }] }];
+    answers.set('GET /api/cases/c1/scenes/queue', { files, geolocating: { ...HELD, footage: 0 } });
+    await readSceneQueue('c1');
+    // two frames added to the strip and a capture gathered since the queue was read
+    const now = { ...HELD, footage: 2, captures: ['media/cap-1.png'], state: 'progress' };
+    answers.set('GET /api/cases/c1/geolocating', { geolocating: now });
+    await readGeolocating('c1');
+    expect(sceneQueue.files[0].scenes[0]).toMatchObject({ footage: 2, captures: ['media/cap-1.png'], state: 'progress' });
   });
 
   it('leaves a scene it knows nothing of to the read', async () => {

@@ -2,8 +2,9 @@
   import { ensureSceneQueue, readSceneQueue } from '../../lib/geolocating.svelte.js';
 
   // The sidebar and the Overview can both show the group, and every trigger below
-  // fires in each of them: one read answers all. Mounting asks only for a queue that
-  // is up to date, which the sidebar's count may already hold; a reload reads it again.
+  // fires in each of them: one read answers all. Mounting and a reload ask only for a
+  // queue that is up to date, which the sidebar's count may already hold: one read
+  // before the case last reloaded is not (`ensureSceneQueue`).
   let timer = null;
   let target = null;
   let again = false;
@@ -106,15 +107,11 @@
   onDestroy(hold());
   // kept in step by the module's nudges while it is shown, and only then
   onDestroy(holdSceneQueue());
-  let mounted = null;
   $effect(() => {
     const id = caseId;
     void caseState.rev;
     if (!id) return;
-    untrack(() => {
-      reread(id, mounted === id);
-      mounted = id;
-    });
+    untrack(() => reread(id, false));
   });
   // What was unfolded or half-typed belonged to the case before.
   $effect(() => {
