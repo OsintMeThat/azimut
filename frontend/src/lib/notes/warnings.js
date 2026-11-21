@@ -16,8 +16,8 @@
  * which the dialog folds under the line (`linksSummary`). The Page pane says the line.
  * A style that checks each link (a report's, `engine/notelook.py`) sends one warning per
  * link instead, each with its own line and no `items`. The counts read as exact are one
- * line too, each count listed under it as an item with its line and no address. A chart
- * whose rows moved on since they were copied is `stale`.
+ * line too, each count listed under it as an item with its line and no address. A chart's
+ * rows are drawn from where they came from as they are now, so none is said to have moved on.
  *
  * The same check, asked with `ready`, is what the Ready to publish? panel reads
  * (`readyPanel.js`).
@@ -27,7 +27,7 @@ import { api } from '../api.js';
 /** What a warning is about (`engine/notes_pdf.py`); anything else reads as `other`. */
 export const WARNING_KINDS = [
   'missing', 'unsourced', 'open-task', 'local-link', 'empty-section', 'setting', 'other', 'internal', 'count', 'address',
-  'unarchived', 'unseen', 'stale',
+  'unarchived', 'unseen',
 ];
 
 /** How many links a folded list names before it counts the rest. */

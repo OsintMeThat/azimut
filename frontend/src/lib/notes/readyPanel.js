@@ -14,8 +14,8 @@
  * Reading the panel writes nothing. A fix is the action that already exists elsewhere:
  * *Say “at least”* writes the words before a count, *Add “at least” to the title* the
  * chart's own fix, each as one Undo step (`atLeastChange`, `chartFixChange`); a chart's
- * rows follow their source in the editor by themselves (`editor/follow.js`), so a line
- * about rows that moved on, from a server that still says one, has no fix; *Archive every link…*
+ * rows follow their source by themselves (`editor/follow.js`) and are drawn from it as it
+ * is now, so nothing here reads them again; *Archive every link…*
  * opens the archive dialog, the one press that reaches the network; *Bookmark them*
  * files each page as a bookmark, nothing fetched; *Round them* rounds the points of view
  * in the export, the note never rewritten.
