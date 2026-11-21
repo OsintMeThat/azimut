@@ -126,7 +126,8 @@ function caretAt(cell, text, event) {
     node = found?.startContainer;
     offset = found?.startOffset ?? 0;
   }
-  if (!node || !words?.contains(node) || node.nodeType !== 3) return null;
+  // a press on what the chart reads in it (`editor/rowsGrid.js`) is past the words
+  if (!node || !words?.contains(node) || node.nodeType !== 3 || node.parentElement?.closest('.cm-grid-reading')) return null;
   return Math.min(text.length, offset);
 }
 
@@ -1345,6 +1346,17 @@ const THEME = {
   '.cm-grid .cm-grid-idle': { background: 'color-mix(in srgb, var(--text-1) 3.5%, transparent)' },
   '.cm-grid .cm-grid-idle .cm-grid-text, .cm-grid .cm-grid-idle .cm-chip': { color: 'var(--text-3)' },
   '.cm-grid .cm-grid-idle .cm-grid-thumb': { opacity: '0.55' },
+  // what a chart reads in a column of its rows (`editor/rowsGrid.js`, `lib/cellHints.js`)
+  '.cm-grid-expects': {
+    flex: 'none', marginRight: '2px', padding: '0 5px', borderRadius: '3px', background: 'var(--bg-3)', color: 'var(--text-3)',
+    fontSize: '10.5px', fontWeight: '500', lineHeight: '16px', whiteSpace: 'nowrap',
+  },
+  '.cm-grid-reading': { marginLeft: '0.5em', color: 'var(--text-3)', fontSize: '0.92em', whiteSpace: 'nowrap' },
+  '.cm-grid-unread': {
+    textDecorationLine: 'underline', textDecorationStyle: 'dotted', textDecorationColor: 'var(--warn)', textDecorationThickness: '1.5px',
+    textUnderlineOffset: '3px',
+  },
+  '.cm-grid-text.cm-grid-example:empty::before': { fontStyle: 'normal', opacity: '0.75' },
   '.cm-grid-idle-mark': {
     flex: 'none', marginRight: '4px', padding: '0 5px', border: '1px dashed var(--border-strong)', borderRadius: '3px', color: 'var(--text-3)',
     fontSize: '10.5px', fontWeight: '500', lineHeight: '16px', whiteSpace: 'nowrap',

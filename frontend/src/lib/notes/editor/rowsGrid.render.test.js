@@ -197,3 +197,79 @@ describe('rows that live elsewhere', () => {
     expect(handlers.open).toHaveBeenCalledWith({ id: 'e_s1', type: 'sheet' });
   });
 });
+
+describe('what the chart reads in its rows', () => {
+  const TIMELINE = { name: 'timeline', label: 'Timeline', counts: false, drawn: [0, 1] };
+  const DAYS_TABLE = '| When | What happened |\n| --- | --- |\n| 5 mars 2026 | Fire |\n| 2026-03-07 | Smoke |\n| 8 Mar 2026 | Ash |\n| Mars rover | Dust |\n|  | Rain |';
+  const reading = (row, col) => cell(row, col).querySelector('.cm-grid-reading')?.textContent ?? '';
+  const words = (row, col) => cell(row, col).querySelector('.cm-grid-text');
+  const tag = (col) => cell(-1, col).querySelector('.cm-grid-expects');
+
+  it('says a column of days in its heading, and in each cell the day the chart draws', async () => {
+    server.kind = TIMELINE;
+    const note = `Words.\n\n${chartOf(['kind: timeline', DAYS_TABLE])}\n`;
+    await opened(note);
+    expect(tag(0).textContent).toBe('Days');
+    expect(tag(0).title).toBe('The chart reads this column as days');
+    expect(tag(1)).toBeNull();
+    expect(reading(0, 0)).toBe('5 Mar 2026');
+    expect(reading(1, 0)).toBe('7 Mar 2026');
+    // written as the chart prints it: nothing more to say
+    expect(reading(2, 0)).toBe('');
+    // the cell keeps its words, the reading comes after them
+    expect(words(0, 0).firstChild.textContent).toBe('5 mars 2026');
+    expect(reading(0, 1)).toBe('');
+    expect(text()).toBe(note);
+  });
+
+  it('underlines a cell it does not read, says what would, and shows an example in an empty one', async () => {
+    server.kind = TIMELINE;
+    await opened(`Words.\n\n${chartOf(['kind: timeline', DAYS_TABLE])}\n`);
+    expect(words(3, 0).classList.contains('cm-grid-unread')).toBe(true);
+    expect(words(3, 0).title).toBe('Not read as a day. Try 5 Mar 2026, 05/03/2026 or 2026-03-05, in any language.');
+    expect(words(4, 0).dataset.placeholder).toBe('5 Mar 2026');
+    expect(words(4, 0).textContent).toBe('');
+    expect(words(4, 1).dataset.placeholder).toBeUndefined();
+  });
+
+  it('follows what is typed, and never rewrites it', async () => {
+    server.kind = TIMELINE;
+    const note = `Words.\n\n${chartOf(['kind: timeline', DAYS_TABLE])}\n`;
+    await opened(note);
+    typeIn(4, 0, '9 mars 2026');
+    await settle();
+    expect(text()).toBe(note.replace('|  | Rain |', '| 9 mars 2026 | Rain |'));
+    expect(reading(4, 0)).toBe('9 Mar 2026');
+    typeIn(0, 0, 'Mars rover');
+    await settle();
+    expect(words(0, 0).classList.contains('cm-grid-unread')).toBe(true);
+  });
+
+  it('says a column of numbers, and the number the chart draws where it is written otherwise', async () => {
+    server.kind = { name: 'bars', label: 'Bars', counts: true, drawn: [0, 1] };
+    const table = '| Model | Count |\n| --- | --- |\n| Cougar | 1 200 |\n| Kirpi | 60+ |\n| Otokar | about 12 |\n| Ural | lots |\n| Kamaz |  |';
+    await opened(`Words.\n\n${chartOf(['kind: bars', 'by: Model', 'count: Count', table])}\n`);
+    expect(tag(0)).toBeNull();
+    expect(tag(1).textContent).toBe('Numbers');
+    expect(reading(0, 1)).toBe('');
+    expect(reading(1, 1)).toBe('at least 60');
+    expect(reading(2, 1)).toBe('12');
+    expect(words(3, 1).title).toBe('Not read as a number. Try 1200, 1 200, 1,5 or at least 60.');
+    expect(words(4, 1).dataset.placeholder).toBe('1 200');
+  });
+
+  it('reads a comma as the decimal mark of a column that says so', async () => {
+    server.kind = { name: 'bars', label: 'Bars', counts: true, drawn: [0, 1] };
+    const table = '| Model | Count |\n| --- | --- |\n| Cougar | 1,5 |\n| Kirpi | 2,25 |\n| Otokar | 1,500 |';
+    await opened(`Words.\n\n${chartOf(['kind: bars', 'by: Model', 'count: Count', table])}\n`);
+    expect([0, 1, 2].map((row) => reading(row, 1))).toEqual(['1.5', '2.25', '1.5']);
+  });
+
+  it('says nothing of a column the chart does not draw', async () => {
+    server.kind = { name: 'bars', label: 'Bars', counts: true, drawn: [0] };
+    const table = '| Model | Count |\n| --- | --- |\n| Cougar | 60+ |\n| Kirpi | 12 |';
+    await opened(`Words.\n\n${chartOf(['kind: bars', 'count: rows', 'by: Model', table])}\n`);
+    expect(tag(1)).toBeNull();
+    expect(reading(0, 1)).toBe('');
+  });
+});

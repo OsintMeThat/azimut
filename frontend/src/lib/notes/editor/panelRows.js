@@ -11,7 +11,7 @@
 import { readChart, setting } from './chartText.js';
 import { ELSEWHERE, LOCAL, OWN, SHEET, sourceOf } from './dataLine.js';
 import { dataOf, infographicsIn, inherits, readInfographic } from './infographicText.js';
-import { rowsGrid, writeLocalCells, writeSheetCells } from './rowsGrid.js';
+import { chartReads, rowsGrid, writeLocalCells, writeSheetCells } from './rowsGrid.js';
 import { noteCase, noteHandlers } from './state.js';
 
 const sum = (lines) => lines.reduce((total, line) => total + line.length + 1, 0);
@@ -88,7 +88,8 @@ export function panelGrid(view, box, { k, index, columns = () => null, idle = ()
     const { mode } = host;
     const writable = !view.state.readOnly && mode !== ELSEWHERE;
     const next = `${mode}|${writable}|${host.tools().map((one) => one.label).join(',')}`;
-    const spec = { host, table, info: view.state.field(noteCase), writable, idle: idle() };
+    const skip = idle();
+    const spec = { host, table, info: view.state.field(noteCase), writable, idle: skip, reads: chartReads(at.chart, { idle: skip }) };
     if (grid && next === key) {
       grid.update({ ...grid.widget, ...spec });
       return;
