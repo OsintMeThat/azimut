@@ -1,15 +1,15 @@
 <script>
   /**
-   * Support & feedback: a tip, a vote, an idea, a problem. Opened from the rail and from
+   * Support & feedback: a tip, a vote, an idea, the Discord, a problem. Opened from the rail and from
    * nowhere else, it never comes to the analyst, and nothing here reaches the network
    * until a link is pressed. A block waits for its link (lib/support.js).
    */
   import Icon from './Icon.svelte';
   import Modal from './Modal.svelte';
   import { openIssueReport } from '../lib/navigate.js';
-  import { FEEDBACK_FORM_URL, KOFI_URL, TIP_LINE_SECONDS, drawTipLine } from '../lib/support.js';
+  import { DISCORD_URL, FEEDBACK_FORM_URL, KOFI_URL, TIP_LINE_SECONDS, drawTipLine } from '../lib/support.js';
 
-  let { kofi = KOFI_URL, form = FEEDBACK_FORM_URL, onclose } = $props();
+  let { kofi = KOFI_URL, form = FEEDBACK_FORM_URL, discord = DISCORD_URL, onclose } = $props();
 
   // The line turns on its own unless a pointer or the keyboard rests on it, or the
   // system asks for less motion. Its box keeps the height of the longest, so the tip
@@ -56,6 +56,11 @@
       </a>
       <a class="choice" href={form} target="_blank" rel="noreferrer">
         Suggest an idea <Icon name="external" size={12} />
+      </a>
+    {/if}
+    {#if discord}
+      <a class="choice" href={discord} target="_blank" rel="noreferrer">
+        Join the Discord <Icon name="external" size={12} />
       </a>
     {/if}
     <button type="button" class="choice" onclick={report}>

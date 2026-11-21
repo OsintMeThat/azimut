@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { FEEDBACK_FORM_URL, KOFI_URL, TIP_LINES, TIP_LINE_SECONDS, drawTipLine } from './support.js';
+import { DISCORD_URL, FEEDBACK_FORM_URL, KOFI_URL, TIP_LINES, TIP_LINE_SECONDS, drawTipLine } from './support.js';
 
 describe('the support links', () => {
   it('lead to Ko-fi or nowhere, never to a page somebody else could claim', () => {
@@ -8,6 +8,10 @@ describe('the support links', () => {
 
   it('use https where a form is set', () => {
     expect(FEEDBACK_FORM_URL).toMatch(/^$|^https:\/\//);
+  });
+
+  it('invite to Discord through its own invite host or nowhere', () => {
+    expect(DISCORD_URL).toMatch(/^$|^https:\/\/discord\.(gg|invalid)\/[\w-]+$/);
   });
 });
 

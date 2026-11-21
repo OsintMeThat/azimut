@@ -27,9 +27,9 @@ in `frontend/src/lib/workspaces.js` and appear as tabs, never as new rail entrie
 | **Compose** | Geo Proof, Post, Map plate, Notebook | Report Builder, GIF maker |
 
 **Support sits at the foot of the rail, above the theme switch, and is not a workspace.**
-It opens one small dialog: a tip on Ko-fi, a form to vote or suggest an idea, and a
-problem report that leads to Settings → System. A block stays hidden until its link
-exists in `lib/support.js`, and a release refuses a stand-in link. A line from
+It opens one small dialog: a tip on Ko-fi, a form to vote or suggest an idea, an invite
+to the OSINT Me That Discord, and a problem report that leads to Settings → System.
+A block stays hidden until its link exists in `lib/support.js`, and a release refuses a stand-in link. A line from
 `TIP_LINES` sits above the tip: drawn when the dialog opens, turned by a press or every
 ten seconds, held while a pointer or the keyboard rests on it and still under reduced
 motion, in a box sized to the longest so the button never moves. The tip also has a

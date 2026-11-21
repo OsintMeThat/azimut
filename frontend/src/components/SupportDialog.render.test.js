@@ -11,7 +11,7 @@ function show(props = {}) {
   const onclose = vi.fn();
   const target = document.createElement('div');
   document.body.append(target);
-  live = mount(SupportDialog, { target, props: { kofi: 'https://ko-fi.invalid/test', form: 'https://forms.invalid/test', onclose, ...props } });
+  live = mount(SupportDialog, { target, props: { kofi: 'https://ko-fi.invalid/test', form: 'https://forms.invalid/test', discord: 'https://discord.invalid/test', onclose, ...props } });
   flushSync();
   return { onclose };
 }
@@ -31,7 +31,7 @@ afterEach(() => {
 describe('Support & feedback', () => {
   it('opens every link in its own tab, telling it nothing of the app', () => {
     show();
-    expect(links().map(text)).toEqual(['Tip on Ko-fi', 'Vote on what comes next', 'Suggest an idea']);
+    expect(links().map(text)).toEqual(['Tip on Ko-fi', 'Vote on what comes next', 'Suggest an idea', 'Join the Discord']);
     for (const link of links()) {
       expect(link.getAttribute('target')).toBe('_blank');
       expect(link.getAttribute('rel')).toBe('noreferrer');
@@ -39,15 +39,24 @@ describe('Support & feedback', () => {
   });
 
   it('hides a block until its link exists, and still takes a problem', () => {
-    show({ kofi: '', form: '' });
+    show({ kofi: '', form: '', discord: '' });
     expect(links()).toEqual([]);
     expect(document.querySelector('.modal').textContent).not.toContain('tip');
     expect(document.querySelector('.modal button.choice').textContent).toContain('Report a problem');
   });
 
-  it('shows the tip alone while no form is set', () => {
-    show({ form: '' });
+  it('shows the tip alone while no form or Discord is set', () => {
+    show({ form: '', discord: '' });
     expect(links().map(text)).toEqual(['Tip on Ko-fi']);
+  });
+
+  it('offers the Discord without a form, above the problem report', () => {
+    show({ form: '' });
+    expect(links().map(text)).toEqual(['Tip on Ko-fi', 'Join the Discord']);
+    const discord = links()[1];
+    expect(discord.getAttribute('href')).toBe('https://discord.invalid/test');
+    const choices = [...document.querySelectorAll('.modal .choices .choice')].map(text);
+    expect(choices).toEqual(['Join the Discord', 'Report a problem']);
   });
 
   it('says one of its lines above the tip, and none without a tip', () => {
