@@ -91,7 +91,7 @@ export function panelGrid(view, box, { k, index, columns = () => null, kind = ()
     const next = `${mode}|${writable}|${host.tools().map((one) => one.label).join(',')}`;
     const drawn = kind();
     const { roles, idle } = chartColumns(drawn, table);
-    const spec = { host, table, info: view.state.field(noteCase), writable, idle, roles, reads: chartReads(at.chart, { kind: drawn?.name, idle }) };
+    const spec = { host, table, info: view.state.field(noteCase), writable, idle, roles, reads: chartReads(at.chart, { kind: drawn?.name, idle, roles }) };
     if (grid && next === key) {
       grid.update({ ...grid.widget, ...spec });
       return;

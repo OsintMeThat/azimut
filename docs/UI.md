@@ -8064,7 +8064,8 @@ as the figure route names it (`roles` in `X-Chart-Kind`), with a hover line: a w
 *Icon* and *Flag*; a timeline's *When*, *Words* and *Until*; a line's *Along* and *Height*;
 *Filter* for the column an `only` reads. Key figures read every column and name none. A column
 a timeline or a line reads as days, or a chart reads as numbers, says *Days* or *Numbers*
-instead, decided as the engine decides it (`lib/cellHints.js`). A column the drawing does not
+instead, decided as the engine decides it (`lib/cellHints.js`), and only where its part is a
+day or an amount: a grade written 1, 2, 3 that colours the bars says *Colour*. A column the drawing does not
 read stays, greyed and marked *not drawn*, never refused. A cell written otherwise than
 the chart prints it shows the reading after its words, muted (`5 mars 2026` shows `5 Mar
 2026`, `60+` shows `at least 60`); one that does not read is underlined with a hover saying

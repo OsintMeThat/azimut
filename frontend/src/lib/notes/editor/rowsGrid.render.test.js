@@ -261,6 +261,16 @@ describe('what the chart reads in its rows', () => {
     expect(words(4, 1).dataset.placeholder).toBe('1 200');
   });
 
+  it('says Colour, not Numbers, of a grade written in numbers that colours the bars', async () => {
+    server.kind = { name: 'bars', label: 'Bars', counts: true, roles: ['groups', 'count', 'colour'] };
+    const table = '| Model | Count | Grade |\n| --- | --- | --- |\n| Cougar | 12 | 1 |\n| Kirpi | 7 | 2 |\n| Otokar | 3 | 3 |';
+    await opened(`Words.\n\n${chartOf(['kind: bars', 'by: Model', 'count: Count', 'colour by: Grade', table])}\n`);
+    expect([0, 1, 2].map((col) => tag(col).textContent)).toEqual(['Groups', 'Numbers', 'Colour']);
+    // its cells are values to colour by: no reading, no example, never underlined
+    expect(words(0, 2).title).toBe('');
+    expect(reading(0, 2)).toBe('');
+  });
+
   it('reads a comma as the decimal mark of a column that says so', async () => {
     server.kind = { name: 'bars', label: 'Bars', counts: true, roles: ['groups', 'count'] };
     const table = '| Model | Count |\n| --- | --- |\n| Cougar | 1,5 |\n| Kirpi | 2,25 |\n| Otokar | 1,500 |';

@@ -64,6 +64,10 @@ export const ROLE_TITLE = {
   filter: 'The chart keeps or leaves out rows by this column',
 };
 
+/** The roles whose cells are days or amounts: only these may say `Days` or `Numbers`. A grade
+ * written 1, 2, 3 that colours the bars is a colour, not an amount the chart adds up. */
+export const VALUE_ROLES = new Set(['count', 'start', 'until', 'along', 'height']);
+
 /** What an empty cell shows. */
 export const EXAMPLE = { [DAYS]: '5 Mar 2026', [NUMBERS]: '1 200' };
 /** What a cell that does not read says on hover. */

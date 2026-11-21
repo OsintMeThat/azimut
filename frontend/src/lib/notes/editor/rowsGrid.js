@@ -28,7 +28,7 @@
 import { isolateHistory } from '@codemirror/commands';
 import { Transaction } from '@codemirror/state';
 
-import { NUMBERS, cellSays, columnReads, headingTag, readsKey } from '../../cellHints.js';
+import { NUMBERS, VALUE_ROLES, cellSays, columnReads, headingTag, readsKey } from '../../cellHints.js';
 import { Grid } from './tableGrid.js';
 import { chartRows } from './chartFigure.js';
 import { FORMS, formKind } from './chartFormText.js';
@@ -348,11 +348,15 @@ export async function writeSheetCells(view, { caseId, written, found, cells }) {
  * none it does not draw (`idle`), and never the categories a chart counts by, however
  * they are written.
  */
-export function chartReads(chart, { kind = '', idle = new Set() } = {}) {
+export function chartReads(chart, { kind = '', idle = new Set(), roles = NO_ROLES } = {}) {
   const table = chart?.table;
   if (!table) return NO_READS;
   const family = FORMS[formKind(kind || setting(chart, 'kind'))]?.family ?? '';
   const skip = new Set(idle);
+  // a column the engine names a part other than days or amounts is never read as either
+  roles.forEach((role, column) => {
+    if (role && !VALUE_ROLES.has(role)) skip.add(column);
+  });
   const by = fold(setting(chart, 'by'));
   const named = by ? table.header.findIndex((header) => fold(header) === by) : -1;
   if (family === 'categories' && named >= 0) skip.add(named);

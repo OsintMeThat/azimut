@@ -698,7 +698,7 @@ class ChartBox {
     const typed = mode === OWN || ((mode === LOCAL || mode === SHEET) && (state === 'same' || state === 'differs'));
     const writable = this.writable && typed;
     const { roles, idle } = chartColumns(this.drawn?.kind, table);
-    const reads = chartReads(this.chart, { kind: this.drawn?.kind?.name, idle });
+    const reads = chartReads(this.chart, { kind: this.drawn?.kind?.name, idle, roles });
     const key = `${mode}|${writable}|${this.rowsTools().map((one) => one.label).join(',')}`;
     if (this.rows && key === this.rowsKey && this.numbersBody.contains(this.rows.box)) {
       this.rows.update({ ...this.rows.widget, table, info: this.info, idle, roles, reads });
