@@ -7,9 +7,23 @@
   import Icon from './Icon.svelte';
   import Modal from './Modal.svelte';
   import { openIssueReport } from '../lib/navigate.js';
-  import { FEEDBACK_FORM_URL, KOFI_URL } from '../lib/support.js';
+  import { FEEDBACK_FORM_URL, KOFI_URL, TIP_LINE_SECONDS, drawTipLine } from '../lib/support.js';
 
   let { kofi = KOFI_URL, form = FEEDBACK_FORM_URL, onclose } = $props();
+
+  // The line turns on its own unless a pointer or the keyboard rests on it, or the
+  // system asks for less motion. Its box keeps the height of the longest, so the tip
+  // button never moves under the cursor.
+  let line = $state(drawTipLine(''));
+  let held = $state(false);
+  const still = globalThis.matchMedia?.('(prefers-reduced-motion: reduce)')?.matches === true;
+
+  $effect(() => {
+    const shown = line;
+    if (!kofi || held || still) return;
+    const timer = setTimeout(() => (line = drawTipLine(shown)), TIP_LINE_SECONDS * 1000);
+    return () => clearTimeout(timer);
+  });
 
   function report() {
     openIssueReport();
@@ -19,7 +33,18 @@
 
 <Modal title="Support & feedback" {onclose} width="360px">
   {#if kofi}
-    <p class="words">Azimut is free. If it helps your work, a tip helps keep it going.</p>
+    <button
+      type="button"
+      class="words"
+      title="Another one"
+      onclick={() => (line = drawTipLine(line))}
+      onpointerenter={() => (held = true)}
+      onpointerleave={() => (held = false)}
+      onfocus={() => (held = true)}
+      onblur={() => (held = false)}
+    >
+      {#key line}<span class="said">{line}</span>{/key}
+    </button>
     <a class="btn btn-primary tip" href={kofi} target="_blank" rel="noreferrer">
       <Icon name="heart" size={14} /> Tip on Ko-fi <Icon name="external" size={12} />
     </a>
@@ -41,9 +66,36 @@
 
 <style>
   .words {
+    display: block;
+    width: 100%;
+    min-height: calc(3 * 1.45em);
     margin: 0 0 12px;
+    padding: 0;
+    border: 0;
+    background: none;
     color: var(--text-2);
+    font: inherit;
     font-size: var(--fs-sm);
+    line-height: 1.45;
+    text-align: left;
+    cursor: pointer;
+  }
+  .words:hover {
+    color: var(--text-1);
+  }
+  .said {
+    display: block;
+    animation: said 0.25s ease-out;
+  }
+  @keyframes said {
+    from {
+      opacity: 0;
+    }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .said {
+      animation: none;
+    }
   }
   .tip {
     display: inline-flex;

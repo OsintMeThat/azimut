@@ -1,6 +1,6 @@
 import { test, expect } from '@playwright/test';
 import { installAppFixture } from './app.fixture.js';
-import { KOFI_URL } from '../src/lib/support.js';
+import { KOFI_URL, TIP_LINES } from '../src/lib/support.js';
 
 test('opens from the rail, reaches nothing until a link is pressed, and steps aside', async ({ page }) => {
   const fixture = await installAppFixture(page);
@@ -26,6 +26,29 @@ test('opens from the rail, reaches nothing until a link is pressed, and steps as
   await expect(rail).toBeFocused();
   expect(outside).toEqual([]);
   fixture.expectNoUnexpectedRequests();
+});
+
+test('turns its line on a press without ever moving the tip under the cursor', async ({ page }) => {
+  await installAppFixture(page);
+  await page.goto('/#media');
+  await page.locator('.rail').getByRole('button', { name: 'Support', exact: true }).click();
+  const dialog = page.getByRole('dialog', { name: 'Support & feedback' });
+  const words = dialog.locator('.words');
+  const tip = dialog.getByRole('link', { name: 'Tip on Ko-fi' });
+  const firstTip = await tip.boundingBox();
+  const firstWords = await words.boundingBox();
+
+  const seen = new Set();
+  for (let press = 0; press < 400 && seen.size < TIP_LINES.length; press += 1) {
+    const line = (await words.textContent()).trim();
+    expect(TIP_LINES).toContain(line);
+    seen.add(line);
+    expect(await tip.boundingBox()).toEqual(firstTip);
+    expect((await words.boundingBox()).height).toBe(firstWords.height);
+    await words.click();
+    await expect(words).not.toHaveText(line);
+  }
+  expect(seen.size).toBe(TIP_LINES.length);
 });
 
 test('takes a problem to the report in Settings', async ({ page }) => {
