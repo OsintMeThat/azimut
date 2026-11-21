@@ -518,7 +518,7 @@
   </div>
 {:else if githubRead}
   <!-- with GitHub off, who wrote the note can still be said, so it travels with the case -->
-  <div class="site" role="group" aria-label={AUTHOR_LABEL}>{@render authorFields()}</div>
+  <div class="site alone" role="group" aria-label={AUTHOR_LABEL}>{@render authorFields()}</div>
 {/if}
 {#if !ready && setupShown && github !== null}
   <div class="setup" role="group" aria-label="Set up GitHub Pages">
@@ -547,6 +547,7 @@
   .link { padding: 0; border: 0; background: none; font: inherit; color: var(--accent); cursor: pointer; text-decoration: underline; }
   .link:hover { color: var(--accent-hover); }
   .site { display: flex; flex-direction: column; gap: 4px; margin-top: 8px; }
+  .site.alone { margin-top: 0; font-size: var(--fs-sm); }
   .choice { display: inline-flex; align-self: flex-start; border: 1px solid var(--border); border-radius: var(--r-md); overflow: hidden; }
   .choice button { padding: 3px 12px; border: none; border-left: 1px solid var(--border); background: var(--bg-1); color: var(--text-2);
     font: inherit; font-size: var(--fs-xs); cursor: pointer; }

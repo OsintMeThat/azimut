@@ -16,12 +16,19 @@ an import to leave out unless the analyst keeps them (`engine/bundles.py`):
 Only `HEAD_BYTES` are read of each file, so the check costs next to nothing on any case. The
 names and their extensions are read the same on every system, never from the system's own
 table of file types.
+
+One place is Azimut's own: the web folders a note is exported as, under the tool's `exports/`
+(`WEB_EXPORTS`), carry the page's scripts (`reader.js`, the live map's library). A `.js` there
+whose first bytes are no program passes, so moving one's own case keeps its web folders whole;
+anywhere else a `.js` is a script, and a program named `.js` is one everywhere.
 """
 
 from __future__ import annotations
 
 import struct
 from pathlib import PurePosixPath
+
+from .. import layout
 
 #: How much of a file the screen reads.
 HEAD_BYTES = 64
@@ -32,7 +39,7 @@ PROGRAM_SUFFIXES = frozenset({
 })
 JAVA_SUFFIXES = frozenset({".jar", ".class"})
 SCRIPT_SUFFIXES = frozenset({
-    ".bat", ".cmd", ".ps1", ".psm1", ".vbs", ".vbe", ".js", ".jse", ".wsf", ".wsh", ".hta", ".sct", ".msc",
+    ".bat", ".cmd", ".ps1", ".psm1", ".vbs", ".vbe", ".js", ".mjs", ".jse", ".wsf", ".wsh", ".hta", ".sct", ".msc",
     ".reg", ".sh", ".bash", ".zsh", ".csh", ".ksh", ".command", ".py", ".pyw", ".pyc", ".scpt", ".applescript",
 })
 INSTALLER_SUFFIXES = frozenset({
@@ -45,6 +52,10 @@ MACRO_SUFFIXES = frozenset({
 })
 #: A macOS app is a folder: every file under one goes with it.
 APP_SUFFIX = ".app"
+#: Where a case keeps the web folders its notes are exported as, by its path in the case folder (a
+#: bundle of format 2), and the scripts those pages carry.
+WEB_EXPORTS = f"{layout.TOOL_DIR}/exports/"
+WEB_SCRIPT_SUFFIXES = frozenset({".js", ".mjs"})
 
 #: The names that claim a picture, a video or a sound, as the screen reads them.
 PICTURE_SUFFIXES = frozenset({
@@ -199,6 +210,8 @@ def reason(name: str, head: bytes) -> str:
     found = _program(head)
     if found:
         return found
+    if suffix in WEB_SCRIPT_SUFFIXES and name.startswith(WEB_EXPORTS):
+        return ""
     if suffix in PROGRAM_SUFFIXES:
         return PROGRAM
     if suffix in JAVA_SUFFIXES:

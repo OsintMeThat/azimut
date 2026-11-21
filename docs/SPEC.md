@@ -693,10 +693,12 @@ stops making sense.
   routes are not trusted to a list: `tests/test_hardening.py` walks them.
   Case imports extract only unique, non-symlink members declared
   by the manifest and matching its SHA-256, and refuse a database holding a table, an
-  index, a view or a trigger a fresh one does not (`bundles.expected_objects`). What could
+  index, a view or a trigger a fresh one does not, SQLite's statistics aside
+  (`bundles.expected_objects`). What could
   run when opened (a program, a script, an installer, a shortcut, a document with macros)
   and a file named as a picture, a video or a sound that is none, read from its first 64
-  bytes (`engine/filescreen.py`), are listed before the import and left out of it unless
+  bytes (`engine/filescreen.py`), the scripts of the case's own exported web folders
+  aside, are listed before the import and left out of it unless
   the analyst keeps them. Accepted risk: a kept file is written as it came, with no mark of
   where it came from, and a disguised file is judged by its first bytes only. Password-protected bundles seal the
   complete ZIP with chunked AES-256-GCM and a scrypt-derived key; filenames stay

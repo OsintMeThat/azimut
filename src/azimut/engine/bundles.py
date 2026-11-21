@@ -17,8 +17,8 @@ bundles still import, and the folder migration reshapes them on first open.
 (portable names, no link, a bounded count, the room on the disk, a manifest whose digests
 hold, the database's version, integrity and references), two are aimed at a stranger's case:
 
-- its database holds no table, index, view or trigger that Azimut's own schema does not
-  (`_foreign_objects`): a trigger would fire on Azimut's own writes. What is expected is read
+- its database holds no table, index, view or trigger that Azimut's own schema does not,
+  SQLite's statistics aside (`_foreign_objects`): a trigger would fire on Azimut's own writes. What is expected is read
   from a fresh database, which holds every older release's objects too, since a migration only
   ever adds them; a bundle holding anything else is refused;
 - what could run when opened, and a file whose name claims a picture, a video or a sound its
@@ -1204,14 +1204,21 @@ def expected_objects() -> frozenset[tuple[str, str]]:
         return frozenset((kind, name) for kind, name in conn.execute("SELECT type, name FROM sqlite_master"))
 
 
+#: SQLite's statistics, which `ANALYZE` and `PRAGMA optimize` write (and so any tool an analyst
+#: opens a case database with): they steer the query planner and run nothing.
+_STATISTICS = re.compile(r"^sqlite_stat[1-4]$")
+
+
 def _foreign_objects(conn: sqlite3.Connection) -> list[str]:
     """What a received database holds that Azimut never makes: any trigger or view, a table or an
-    index of another name, a virtual table. Read from the schema alone, nothing in it is run."""
+    index of another name but SQLite's statistics, a virtual table. Read from the schema alone,
+    nothing in it is run."""
     expected = expected_objects()
     found = []
     for kind, name, sql in conn.execute("SELECT type, name, sql FROM sqlite_master"):
         virtual = isinstance(sql, str) and sql.lstrip()[:20].upper().startswith("CREATE VIRTUAL")
-        if (kind, name) not in expected or virtual:
+        statistics = kind == "table" and isinstance(name, str) and _STATISTICS.match(name) is not None
+        if virtual or ((kind, name) not in expected and not statistics):
             found.append(f"{kind} {str(name)[:60]}")
     return sorted(found)
 

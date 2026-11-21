@@ -1118,11 +1118,12 @@ temporary disk requirement, available space and protection state. The check also
 names, file by file with its reason, what could run when opened (*a Windows
 program*, *a script*, *an installer*, *a shortcut*, *a document with macros*, *a
 macOS app*) and what is named as a picture, a video or a sound and is none
-(*named .jpg but not a picture*), read from the first bytes of each: *N files could
+(*named .jpg but not a picture*), read from the first bytes of each, the scripts of
+the case's own exported web folders aside: *N files could
 run as a program or are not what their name says. The import leaves them out.* An
 **Import them too** box, off at every check, keeps them. The toast that opens the
 case says what it left out. A bundle whose database holds a table, an index, a view
-or a trigger Azimut never makes is refused. Confirmation
+or a trigger Azimut never makes is refused; SQLite's own statistics are not a reason. Confirmation
 always creates a new case, waits for the durable
 import job, then opens it. It never replaces or merges an existing case.
 Confirmed entities and relations remain confirmed in the imported case.

@@ -965,7 +965,7 @@ describe('the check before export', () => {
       const looks = () => get.mock.calls.filter(([url]) => url.endsWith('/n1/look')).length;
       // the case's pictures are the list's to pick from; the one picked is kept in the look, and the Notebook reads it again
       const before = looks();
-      dialog().querySelector('button.pick').click();
+      dialog().querySelector('button[data-pick="list"]').click();
       flushSync();
       expect([...dialog().querySelectorAll('.picture-row')].map((node) => node.textContent.trim())).toEqual(['Pier at dawn']);
       dialog().querySelector('.picture-row').click();
