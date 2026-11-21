@@ -7724,9 +7724,14 @@ instead. The commit then rebuilds, only where Azimut made them, `articles.json`,
 pages (`section="…"` for one category, `layout="map"` for the maps, `limit="N"`), and, when the
 root holds no home page or holds Azimut's, writes a default one with tabs by category. A
 page (role *page*) stays off every list and is linked from the default home's header. The
-category and the role are kept in the note's look; a check before the press
-(`POST /notes/{id}/github/check`, on a press) says *This folder was changed on GitHub since
-you published it: publishing replaces it.* and never blocks. `POST /api/publishing/github/site`
+category and the role are kept in the note's look. Every press asks a check first
+(`POST /notes/{id}/github/check`, a read): a folder the note's own records name that was changed
+on GitHub since says *This folder was changed on GitHub since you published it: publishing replaces
+it.*, and an address holding anything else, another note's article, map or page, says *This address
+already holds “Harbour fire”. Replace it?* (its card's title, else its page's `<title>`, else the
+folder's name) with **Replace it** and **Pick another address**, which puts a free short name such as
+`port-strike-2` in the field and the focus on it. Neither blocks, and the next press publishes; a
+folder Azimut did not make says so and offers another address only, since a publish refuses it. `POST /api/publishing/github/site`
 (Update the site) does the same rebuild with no note, committing only when something differs.
 
 **On the site.** For a published article the dialog's GitHub branch adds, under the address:
@@ -7771,11 +7776,14 @@ category, and emptying the coordinates takes it off at the next publish. A page 
 shows no place and sends none. The card and the line of `articles.json` carry it only when set;
 the format stays `azimut-article/1`.
 
-**Before it replaces a folder.** For a note published there before, the press first asks
-whether the folder was changed on GitHub since this Azimut published it. If it was, the dialog
-says *This folder was changed on GitHub since you published it: publishing replaces it.* with
-**Don't publish**, and the button reads **Publish anyway**; one more press publishes. It never
-blocks, a check that fails just publishes, and typing another short name starts over.
+**Before it replaces a folder.** The press first asks what the address holds. The note's own folder,
+one its records name, changed on GitHub since this Azimut published it says *This folder was changed
+on GitHub since you published it: publishing replaces it.* with **Don't publish**. Another article,
+map or page there says *This address already holds “Harbour fire”. Replace it?* with **Replace it**,
+which publishes, and **Pick another address**, which fills in a free short name and focuses the field.
+Either way the button reads **Publish anyway** and one more press publishes. A folder Azimut did not
+make offers another address only. It never blocks, a check that fails just publishes, and typing
+another short name starts over.
 
 **Maps.** `/` › *Interactive map* asks what a map shows: some of the case's layers, or one
 of its Map plates (its layers as it draws them, its days, its steps and how each frames the

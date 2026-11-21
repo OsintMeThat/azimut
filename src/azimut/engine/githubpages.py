@@ -40,7 +40,9 @@ served from (`/`, or `docs/`), without its `HOW-TO-PUBLISH.md` (that is for putt
 it online by hand), and `.nojekyll` beside it at that root, so Pages serves the files
 as they are. The message is "Publish <note title>"; the author is the token's own
 account, as GitHub sets it. A folder of that name that Azimut did not make is refused,
-never replaced.
+never replaced. Before the press, `spot` finds the folder and the names beside it, `holder` says
+what a folder there holds (its card's title, else its page's), and `free_name` a short name
+nothing holds, so the dialog can name what a publish would replace.
 
 **The site**: in the same commit, what the site's list is made of (`engine/sitesync.py`
 plans it, `engine/site.py` makes it): `articles.json`, `feed.xml`, `sitemap.xml`, the
@@ -969,18 +971,80 @@ def changed_since(gh: GitHub, owner: str, repo: str, before: str, now: str) -> b
     return listed is None or not _bars_only(gh, owner, repo, before, listed)
 
 
-def folder_tree(gh: GitHub, owner: str, repo: str, branch: str, folder: str) -> str:
-    """The id of ``folder``'s tree on ``branch`` as it is now, "" when there is no such folder
-    (or no such branch): what a publish compares with the tree it last left there."""
+@dataclass(frozen=True)
+class Spot:
+    """Where a publish would put a folder: the id of the tree a folder of that name has on the branch
+    now ("" for none), and every name at the site's root beside it, files included."""
+
+    tree: str = ""
+    names: frozenset[str] = frozenset()
+
+
+def spot(gh: GitHub, owner: str, repo: str, branch: str, folder: str) -> Spot:
+    """``folder`` on ``branch`` as it is now: its tree, which a publish compares with the one it last
+    left there, and the names at the site's root, which a free short name is found among. An empty
+    spot when there is no such branch."""
     *above, name = folder.split("/")
     try:
         opened = _open(gh, owner, repo, branch, above)
     except GitHubError:
-        return ""
+        return Spot()
     if opened.created:
-        return ""
+        return Spot()
     found = next((item for item in opened.top if item.get("path") == name and item.get("type") == "tree"), None)
-    return _sha(found.get("sha")) if found is not None else ""
+    return Spot(_sha(found.get("sha")) if found is not None else "",
+                frozenset(str(item["path"]) for item in opened.top if isinstance(item.get("path"), str)))
+
+
+#: The most of a folder's page read for its `<title>`, when the folder holds no card.
+MAX_TITLE_PAGE = 2 * 1024 * 1024
+
+
+@dataclass(frozen=True)
+class Holder:
+    """What a folder already on the site is, as the check before a publish names it."""
+
+    #: Its card's title, else its page's `<title>`, else the folder's name.
+    title: str
+    #: Whether Azimut made it (its marker files, `OURS`): a publish replaces only such a folder.
+    ours: bool
+
+
+def holder(gh: GitHub, owner: str, repo: str, tree: str, name: str) -> Holder:
+    """What the folder ``name``, whose tree is ``tree``, holds: its title and whether Azimut made it.
+    Reads its own listing, then its card or its page, each bounded; a part that cannot be read names
+    it by its folder."""
+    if not SHA1.match(tree):
+        return Holder(name, False)
+    try:
+        listing = _dict(gh.call("GET", _repo_path(owner, repo, f"/git/trees/{tree}"), doing="read the article's files"))
+    except NotFound:
+        return Holder(name, False)
+    entries = listing.get("tree")
+    files = {str(item.get("path")): str(item.get("sha")) for item in (entries if isinstance(entries, list) else [])
+             if isinstance(item, dict) and item.get("type") == "blob" and isinstance(item.get("sha"), str)}
+    title = ""
+    if site_engine.CARD in files:
+        card = read_blob(gh, owner, repo, files[site_engine.CARD], site_engine.MAX_CARD_BYTES)
+        title = site_engine.card_title(card) if card is not None else ""
+    if not title and notes_web.INDEX in files:
+        page = read_blob(gh, owner, repo, files[notes_web.INDEX], MAX_TITLE_PAGE)
+        title = site_engine.page_title(page) if page is not None else ""
+    return Holder(title or name, all(part in files for part in OURS))
+
+
+def free_name(short: str, taken: Iterable[str]) -> str:
+    """A short name beside ``short`` that nothing at the site's root holds: `port-strike-2`, then `-3`,
+    and on from the number a name already ends on. "" when none is free within a hundred."""
+    names = {name.casefold() for name in taken}
+    ending = re.fullmatch(r"(.+?)-(\d{1,3})", short)
+    stem, start = (ending.group(1), int(ending.group(2)) + 1) if ending else (short, 2)
+    for number in range(start, start + 100):
+        suffix = f"-{number}"
+        made = f"{stem[:MAX_SHORT - len(suffix)].rstrip('-_')}{suffix}"
+        if SHORT.match(made) and made.casefold() not in names:
+            return made
+    return ""
 
 
 def update_site(gh: GitHub, owner: str, repo: str, branch: str, root: str, message: str,
@@ -1112,9 +1176,9 @@ def _tree(gh: GitHub, owner: str, repo: str, shas: Mapping[str, str]) -> str:
 
 __all__ = [
     "API", "API_VERSION", "BAD_TOKEN", "BranchMoved", "BranchRead", "Build", "Conflict", "DEFAULT_BRANCH",
-    "DEFAULT_REPO", "Deleted", "FolderGone", "GitHub", "GitHubError", "NOT_SET", "NotFound", "NotOurs", "Pages",
-    "Published", "RateLimited", "Repository", "account_name", "article_address", "blob_sha", "branch_name",
-    "build_state", "changed_since", "client", "create_repository", "deletable", "deletable_name", "delete_folder", "folder_tree",
-    "head", "page_state", "pages", "publish", "read_blob", "read_branch", "read_site", "read_tree", "repository",
-    "repository_name", "short_name", "site_base", "turn_on_pages", "update_site", "whoami",
+    "DEFAULT_REPO", "Deleted", "FolderGone", "GitHub", "GitHubError", "Holder", "NOT_SET", "NotFound", "NotOurs", "Pages",
+    "Published", "RateLimited", "Repository", "Spot", "account_name", "article_address", "blob_sha", "branch_name",
+    "build_state", "changed_since", "client", "create_repository", "deletable", "deletable_name", "delete_folder", "free_name",
+    "head", "holder", "page_state", "pages", "publish", "read_blob", "read_branch", "read_site", "read_tree", "repository",
+    "repository_name", "short_name", "site_base", "spot", "turn_on_pages", "update_site", "whoami",
 ]

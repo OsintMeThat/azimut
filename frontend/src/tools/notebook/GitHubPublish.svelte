@@ -36,9 +36,12 @@
    * it with the rule it was read by, and only while the coordinates are empty: nothing is ever filled without
    * that press. It goes up with the publish and is kept in the look like the category; emptied, it is gone.
    *
-   * **Before it replaces a folder.** A note published here before is checked first: when the
-   * folder was changed on GitHub since, the dialog says so and `warned` is up, and the press
-   * that follows publishes anyway. A warning, never a stop; a check that fails just publishes.
+   * **Before it replaces a folder.** Every press asks the check first (`checkFolder`). A folder no record
+   * of this note names is another's: the dialog names what it holds and offers **Replace it**, which
+   * publishes on (`onpublish`), or **Pick another address**, which puts a free short name in the field
+   * and the focus on it. The note's own folder changed on GitHub since is said too. Either way `warned` is
+   * up and the press that follows publishes anyway: a warning, never a stop, and a check that fails just
+   * publishes. A folder Azimut did not make is never replaced, so that one offers another address only.
    */
   import Icon from '../../components/Icon.svelte';
   import GitHubSetupPress from '../../components/GitHubSetupPress.svelte';
@@ -47,15 +50,14 @@
   import {
     GITHUB_FREE, MAX_SHORT, PAGES_PUBLIC, githubReady, shortNameFrom, shortNameOf, shortNameProblem,
   } from '../../lib/githubPagesSetup.js';
-  import { listEditions } from '../../lib/notes/editions.svelte.js';
   import { readLook, writeLook } from '../../lib/notes/look.js';
   import { foldText } from '../../lib/textFold.js';
   import { siteName } from '../../lib/websiteHub.js';
   import {
     AUTHOR_IMAGE_LABEL, AUTHOR_IMAGE_NONE, AUTHOR_LABEL, AUTHOR_MAX,
-    CATEGORY_MAX, CATEGORY_SAID, HAND_EDITED, LIST_IMAGE_COVER, NO_NAME_PRESS, ON_SITE, PLACE_COORDS_LABEL, PLACE_COORDS_PLACEHOLDER,
-    PLACE_NAME_LABEL, PLACE_NAME_MAX, PLACE_NAME_PLACEHOLDER, PLACE_TITLE, PLACE_WHY, WEBSITE_HELP as HELP, noNameSaid, onSiteSaid,
-    placeText, placeUseSaid, readPlace,
+    CATEGORY_MAX, CATEGORY_SAID, HAND_EDITED, LIST_IMAGE_COVER, NO_NAME_PRESS, ON_SITE, PICK_ANOTHER, PLACE_COORDS_LABEL, PLACE_COORDS_PLACEHOLDER,
+    PLACE_NAME_LABEL, PLACE_NAME_MAX, PLACE_NAME_PLACEHOLDER, PLACE_TITLE, PLACE_WHY, REPLACE_PRESS, WEBSITE_HELP as HELP, noNameSaid, onSiteSaid,
+    placeText, placeUseSaid, readPlace, takenOutsideSaid, takenSaid,
   } from '../../lib/websiteSetup.js';
 
   let {
@@ -72,7 +74,7 @@
     /** What is wrong with the short name or the article's place, or ''. */
     problem = $bindable(''),
     busy = $bindable(false),
-    /** Whether the folder on GitHub was found changed, so the next press publishes anyway. */
+    /** Whether the check found something at the address, so the next press publishes anyway. */
     warned = $bindable(false),
     /** Writes what the editor still holds, before the note is read from disk. */
     prepare = async () => {},
@@ -82,6 +84,8 @@
     onlook = () => {},
     /** Called when the analyst leaves the dialog for Settings. */
     onleave = () => {},
+    /** Publishes as the dialog's own button does: Replace it is that press, the analyst warned. */
+    onpublish = () => {},
   } = $props();
 
   let github = $state(null);
@@ -120,8 +124,12 @@
   // typed before the look came, so what was typed is kept
   let touched = { category: false, role: false, place: false, author: false };
 
-  // the folder on GitHub was found changed: the next press publishes anyway. Read here, and handed up (`warned`)
-  let held = $state(false);
+  // what the check found at the address, until the analyst answers: { kind: 'edited' }, or { kind: 'taken',
+  // title, ours, free } for another's folder. The next press publishes anyway, unless Azimut did not make it
+  let held = $state(null);
+  // a folder Azimut did not make is never replaced: that press checks again rather than publish
+  const replaceable = $derived(held !== null && (held.kind === 'edited' || held.ours));
+  let shortField = $state(null);
 
   // a branch opened afresh has published nothing yet, and warned of nothing
   busy = false;
@@ -143,7 +151,7 @@
   const wrong = $derived(ready ? shortNameProblem(short) : '');
   $effect(() => { connected = ready; });
   $effect(() => { problem = wrong || placeWrong; });
-  $effect(() => { warned = held; });
+  $effect(() => { warned = replaceable; });
 
   // the note's look: what it says it is on the site, and who wrote it, which is asked with GitHub off too
   $effect(() => {
@@ -213,7 +221,7 @@
     needs = null;
     failed = '';
     // the folder warned of is the one the short name named
-    held = false;
+    held = null;
     if (!shortNameProblem(short)) onaddress(`${base}${short}/`);
   }
 
@@ -309,17 +317,29 @@
   }
 
   /**
-   * Whether the folder this publish replaces was changed on GitHub since this Azimut put it
-   * there: asked only of a note published here before, and a check that fails says nothing.
+   * What stands at the address before a publish replaces it, or null for nothing to say: another
+   * article, map or page of the site (`taken`), or this note's own folder changed on GitHub since.
+   * A check that fails says nothing.
    */
-  async function handEdited() {
+  async function inTheWay() {
     try {
-      const before = await listEditions(caseId, noteId);
-      if (!before.some((edition) => edition.format === 'github')) return false;
-      return Boolean((await checkFolder(caseId, noteId, short))?.edited);
+      const answer = await checkFolder(caseId, noteId, short);
+      if (answer?.taken) {
+        return { kind: 'taken', title: String(answer.taken.title || short), ours: answer.taken.ours === true, free: String(answer.free ?? '') };
+      }
+      return answer?.edited ? { kind: 'edited' } : null;
     } catch {
-      return false;
+      return null;
     }
+  }
+
+  /** Leave what holds the address and take a free short name, the field focused to change it. */
+  function pickAnother() {
+    const free = held?.free ?? '';
+    held = null;
+    if (free) type(free);
+    shortField?.focus();
+    shortField?.select?.();
   }
 
   /**
@@ -342,10 +362,13 @@
       await prepare();
       // an author typed and left a moment ago is in the look before the page is made
       await authorSaving;
-      const told = held;
-      if (!told && await handEdited()) {
-        held = true;
-        return null;
+      const told = replaceable;
+      if (!told) {
+        const found = await inTheWay();
+        if (found) {
+          held = found;
+          return null;
+        }
       }
       onaddress(address);
       const answer = await publishNote(caseId, noteId, {
@@ -356,7 +379,7 @@
         ...((loaded || touched.place) && role === 'article' ? { place: placeRead.place } : {}),
       });
       if (answer?.published) {
-        held = false;
+        held = null;
         onlook();
         return { ...answer, told };
       }
@@ -429,7 +452,7 @@
     <label class="lbl" for="export-short">Address it will live at</label>
     <div class="address-line" class:bad={wrong}>
       <span class="base mono" title={base}>{base}</span>
-      <input id="export-short" class="input mono short" value={short} maxlength={MAX_SHORT} spellcheck="false" autocomplete="off"
+      <input id="export-short" class="input mono short" bind:this={shortField} value={short} maxlength={MAX_SHORT} spellcheck="false" autocomplete="off"
         aria-label="Short name" aria-invalid={wrong ? 'true' : undefined} aria-describedby="export-short-said"
         title="The last part of the page's address: lower case, digits and hyphens"
         oninput={(event) => type(event.currentTarget.value)} />
@@ -505,9 +528,19 @@
         Making the folder and sending it to {github.account}/{github.repo}…</p>
     {/if}
     {#if held}
-      <div class="edited" role="alert">
-        <p><Icon name="alert" size={13} /> {HAND_EDITED}</p>
-        <button type="button" class="btn btn-sm" title={HELP.publishStop} onclick={() => (held = false)}>Don't publish</button>
+      <div class="held" role="alert">
+        <p><Icon name="alert" size={13} />
+          {held.kind === 'edited' ? HAND_EDITED : held.ours ? takenSaid(held.title) : takenOutsideSaid(held.title)}</p>
+        <div class="held-presses">
+          {#if held.kind === 'edited'}
+            <button type="button" class="btn btn-sm" title={HELP.publishStop} onclick={() => (held = null)}>Don't publish</button>
+          {:else}
+            {#if held.ours}
+              <button type="button" class="btn btn-sm" disabled={busy} title={HELP.publishReplace} onclick={() => onpublish()}>{REPLACE_PRESS}</button>
+            {/if}
+            <button type="button" class="btn btn-sm" disabled={busy} title={HELP.publishPickAnother} onclick={pickAnother}>{PICK_ANOTHER}</button>
+          {/if}
+        </div>
       </div>
     {/if}
     {#if needs}
@@ -583,10 +616,11 @@
     border-top-color: var(--accent); animation: spin 0.9s linear infinite; }
   @keyframes spin { to { transform: rotate(360deg); } }
   @media (prefers-reduced-motion: reduce) { .spinner { animation: none; } }
-  .edited { display: flex; flex-direction: column; align-items: flex-start; gap: 6px; margin-top: 6px; border: 1px solid color-mix(in srgb, var(--warn) 45%, var(--border));
+  .held { display: flex; flex-direction: column; align-items: flex-start; gap: 6px; margin-top: 6px; border: 1px solid color-mix(in srgb, var(--warn) 45%, var(--border));
     border-radius: var(--r-md); padding: 8px 12px; background: color-mix(in srgb, var(--warn) 7%, var(--bg-1)); }
-  .edited p { display: flex; align-items: center; gap: 6px; margin: 0; color: var(--text-1); font-size: var(--fs-sm); }
-  .edited :global(svg) { flex: none; color: var(--warn); }
+  .held p { display: flex; align-items: center; gap: 6px; margin: 0; color: var(--text-1); font-size: var(--fs-sm); overflow-wrap: anywhere; }
+  .held p > :global(svg) { flex: none; color: var(--warn); }
+  .held-presses { display: flex; flex-wrap: wrap; gap: 6px; }
   .set-up { display: flex; align-items: center; gap: 5px; margin: 4px 0 0; color: var(--ok); font-size: var(--fs-xs); }
   .failed { display: flex; align-items: center; gap: 5px; margin: 4px 0 0; color: var(--danger); font-size: var(--fs-xs); overflow-wrap: anywhere; }
   .setup { display: flex; flex-direction: column; gap: 6px; margin-top: 8px; border: 1px solid var(--border); border-radius: var(--r-md);

@@ -1267,7 +1267,7 @@
               bind:problem={githubProblem} bind:busy={githubBusy} bind:warned={githubWarned} {caseId} noteId={exportIds[0]} title={exportTitle}
               entities={graphEntities} prepare={async () => { if (doc) await flush(doc); }}
               onaddress={(value) => { webAddressTyped = true; keepAddress(caseId, exportIds[0], value); }}
-              onlook={() => readOpenLook(exportIds[0])} onleave={closeExport} />
+              onlook={() => readOpenLook(exportIds[0])} onleave={closeExport} onpublish={runPublish} />
           {/if}
           {#if !several && !githubSet}
             <label class="dest-label" for="export-address">Address it will live at</label>

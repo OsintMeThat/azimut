@@ -64,7 +64,8 @@ afterEach(() => {
 /** The branch as the dialog holds it, its bindings read back as the dialog reads them. */
 function show({ address = '', title = 'Port strike', entities = [] } = {}) {
   bound.address = address;
-  const props = { caseId: 'c1', noteId: 'n1', title, entities, prepare: vi.fn(async () => {}), onaddress: vi.fn(), onlook: vi.fn(), onleave: vi.fn() };
+  const props = { caseId: 'c1', noteId: 'n1', title, entities, prepare: vi.fn(async () => {}), onaddress: vi.fn(), onlook: vi.fn(), onleave: vi.fn(),
+    onpublish: vi.fn() };
   for (const key of ['address', 'connected', 'problem', 'busy', 'warned']) {
     Object.defineProperty(props, key, { get: () => bound[key], set: (value) => { bound[key] = value; }, enumerable: true });
   }
@@ -547,10 +548,10 @@ it('lets the analyst stop at the warning, and asks again for another short name'
   expect(publishes()).toEqual([]);
 });
 
-it('publishes with no warning when the folder is as this Azimut left it, or the note was never published there', async () => {
+it('publishes with no warning when the folder is as this Azimut left it, or nothing holds the address', async () => {
   serve({ editions: [GITHUB_EDITION] });
   post.mockImplementation(async (path) => {
-    if (path.endsWith('/github/check')) return { checked: true, exists: true, edited: false, warning: '' };
+    if (path.endsWith('/github/check')) return { checked: true, exists: true, edited: false, warning: '', taken: null, free: '' };
     return path.endsWith('/pdf/diagrams') ? { diagrams: [] } : PUBLISHED;
   });
   show();
@@ -561,13 +562,85 @@ it('publishes with no warning when the folder is as this Azimut left it, or the 
   unmount(live);
   live = null;
   vi.clearAllMocks();
-  // a note with no page of its own on GitHub has nothing to be changed: the press asks nothing first
+  // a note never published here is checked too: another note may hold its address
   serve({ editions: [{ ...GITHUB_EDITION, format: 'web' }] });
-  publishOk();
+  post.mockImplementation(async (path) => {
+    if (path.endsWith('/github/check')) return { checked: true, exists: false, edited: false, warning: '', taken: null, free: '' };
+    return path.endsWith('/pdf/diagrams') ? { diagrams: [] } : PUBLISHED;
+  });
   show();
   await settle();
   expect((await live.publish()).published).toBe(true);
-  expect(checks()).toEqual([]);
+  expect(checks()).toHaveLength(1);
+  expect(target.querySelector('[role="alert"]')).toBeNull();
+});
+
+const TAKEN = { checked: true, exists: true, edited: false, warning: '', taken: { title: 'Harbour fire', ours: true }, free: 'port-strike-2' };
+const holding = (answer) => post.mockImplementation(async (path) => {
+  if (path.endsWith('/github/check')) return answer;
+  return path.endsWith('/pdf/diagrams') ? { diagrams: [] } : PUBLISHED;
+});
+
+it('names what another note left at the address, and Replace it publishes over it', async () => {
+  serve();
+  holding(TAKEN);
+  const props = show();
+  await settle();
+  expect(await live.publish()).toBeNull();
+  await settle();
+  expect(publishes()).toEqual([]);
+  expect(target.querySelector('[role="alert"]').textContent.trim()).toBe('This address already holds “Harbour fire”. Replace it?');
+  expect(bound.warned).toBe(true);
+  for (const name of ['Replace it', 'Pick another address']) expect(button(name).getAttribute('title')).toBeTruthy();
+  button('Replace it').click();
+  expect(props.onpublish).toHaveBeenCalledTimes(1);
+  // the press it stands for publishes without asking again: the analyst has the last word
+  const answer = await live.publish();
+  await settle();
+  expect(answer).toMatchObject({ published: true, told: true });
+  expect(checks()).toHaveLength(1);
+  expect(publishes()).toHaveLength(1);
+  expect(bound.warned).toBe(false);
+  expect(target.querySelector('[role="alert"]')).toBeNull();
+});
+
+it('Pick another address puts a free short name in the field and the focus on it', async () => {
+  serve();
+  holding(TAKEN);
+  const props = show();
+  await settle();
+  await live.publish();
+  await settle();
+  button('Pick another address').click();
+  await settle();
+  const input = target.querySelector('#export-short');
+  expect(input.value).toBe('port-strike-2');
+  expect(document.activeElement).toBe(input);
+  expect(bound.warned).toBe(false);
+  expect(target.querySelector('[role="alert"]')).toBeNull();
+  expect(props.onaddress).toHaveBeenLastCalledWith('https://octo.github.io/articles/port-strike-2/');
+  expect(bound.address).toBe('https://octo.github.io/articles/port-strike-2/');
+  expect(publishes()).toEqual([]);
+  // the new address is checked as any other
+  holding({ ...TAKEN, exists: false, taken: null, free: '' });
+  expect((await live.publish()).published).toBe(true);
+  expect(checks().at(-1)[1]).toEqual({ short_name: 'port-strike-2' });
+});
+
+it('offers only another address for a folder Azimut did not make, and a press checks again', async () => {
+  serve();
+  holding({ ...TAKEN, taken: { title: 'harbour', ours: false }, free: 'harbour-2' });
+  show();
+  await settle();
+  await live.publish();
+  await settle();
+  expect(target.querySelector('[role="alert"]').textContent.trim()).toBe('This address already holds “harbour”, which Azimut did not make.');
+  expect(button('Replace it')).toBeUndefined();
+  expect(button('Pick another address')).toBeTruthy();
+  expect(bound.warned).toBe(false);
+  expect(await live.publish()).toBeNull();
+  expect(checks()).toHaveLength(2);
+  expect(publishes()).toEqual([]);
 });
 
 it('publishes anyway when the check itself fails', async () => {
@@ -583,7 +656,7 @@ it('publishes anyway when the check itself fails', async () => {
   expect(target.querySelector('[role="alert"]')).toBeNull();
 });
 
-it('publishes when the editions cannot be read, as with a check that fails', async () => {
+it('publishes when the editions cannot be read', async () => {
   serve();
   get.mockImplementation(async (path) => {
     if (path === '/api/publishing') return { github: SET };
@@ -594,7 +667,7 @@ it('publishes when the editions cannot be read, as with a check that fails', asy
   show();
   await settle();
   expect((await live.publish()).published).toBe(true);
-  expect(checks()).toEqual([]);
+  expect(checks()).toHaveLength(1);
 });
 
 // -- who wrote it ---------------------------------------------------------------------------

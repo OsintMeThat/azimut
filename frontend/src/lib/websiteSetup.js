@@ -586,6 +586,17 @@ export function placeUseSaid(offer) {
 /** After publishing a note that replaced a folder the analyst had changed, and was not warned before. */
 export const REPLACED_EDITED = 'That folder had been changed on GitHub since you published it: this publish replaced it.';
 
+/** What the check before a publish says when the address holds another article, map or page. */
+export function takenSaid(title) {
+  return `This address already holds “${title}”. Replace it?`;
+}
+/** The same of a folder Azimut did not make, which a publish never replaces. */
+export function takenOutsideSaid(title) {
+  return `This address already holds “${title}”, which Azimut did not make.`;
+}
+export const REPLACE_PRESS = 'Replace it';
+export const PICK_ANOTHER = 'Pick another address';
+
 // -- on hover, one clause each --------------------------------------------------------------------
 
 /**
@@ -657,6 +668,8 @@ export const WEBSITE_HELP = {
   publishPlaceUse: 'Fill the place with the point this note names',
   publishAnyway: 'Replace the folder on GitHub with this version',
   publishStop: 'Leave the folder on GitHub as it is',
+  publishReplace: 'Publish this note in its place',
+  publishPickAnother: 'Leave it there and give this note a free address',
   // WordPress
   wordpressSite: 'The WordPress site a note is sent to as a draft',
   wordpressUser: 'The username you sign in to WordPress with',

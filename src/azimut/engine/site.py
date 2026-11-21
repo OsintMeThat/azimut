@@ -720,6 +720,28 @@ def card_date(data: bytes) -> str:
         return ""
 
 
+def card_title(data: bytes) -> str:
+    """The title a card Azimut wrote carries, on one line, "" when it is no such card or holds none."""
+    if len(data) > MAX_CARD_BYTES:
+        return ""
+    try:
+        card = json.loads(data)
+    except ValueError:
+        return ""
+    return one_line(card.get("title"), MAX_TITLE) if isinstance(card, dict) and card.get("format") == CARD_FORMAT else ""
+
+
+_TITLE = re.compile(rb"<title\b[^>]*>(.*?)</title\s*>", re.S | re.I)
+
+
+def page_title(data: bytes) -> str:
+    """The `<title>` of a page, its entities read and on one line, "" when it has none."""
+    found = _TITLE.search(data)
+    if found is None:
+        return ""
+    return one_line(html.unescape(found.group(1).decode("utf-8", "replace")), MAX_TITLE)
+
+
 def links_of(page: str, site: Site, own: str) -> tuple[str, ...]:
     """The folders of the site a page links to, read from its markup: an `<a>` to the site's own
     address (a folder under it) or to the folder above (`../folder/`), as the page that is one
