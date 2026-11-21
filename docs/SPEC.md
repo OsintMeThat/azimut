@@ -209,6 +209,9 @@ proof for publication.
 | ✅ **Your own bar** | Articles carry the site's own header from `azimut-bar.html` in place of Azimut's bar, cleaned and kept apart from the article's styles, and Update the site changes it in every article. |
 | ✅ **Places on the site** | An article may carry a place for a map of the site's articles, kept with its note, offered only when the note names one point, and carried by its card and `articles.json`. |
 | ✅ **Guest authors** | An article may name its own author and their picture, kept with its note so a bundle carries them, signed on its page and named in the site's lists. |
+| ✅ **Site categories** | Settings › Website adds, renames and deletes the site's categories and gives one article another on its line, each in one commit of its cards and lists, a rename recorded for the site's own pages; a site with its own home is told what its menu and pages ask. |
+| ✅ **Home before articles** | The Overview puts Azimut's home page online before any article, never over the analyst's own. |
+| ✅ **Map of places** | Azimut's home shows the articles that stand somewhere on a world map of Natural Earth land, a pin each, framed to fit, links without a script and cards with it. |
 | ✅ **Bundles from someone else** | An import refuses a case database holding what Azimut never makes, and names programs and disguised files before it starts, leaving them out unless the analyst keeps them. |
 | ✅ **Maps in reports** | Puts the case's layers, a Map plate or a period's proofs in a note as a map read day by day, its marks opening their cards: offline in the file, live over OpenFreeMap once hosted, a picture in the PDF; set from its card (base, Sentinel-2 or Esri imagery streamed live, layers, frame, timeline, steps, cards) and drawn on at any zoom, from an area to highlight to a map started from nothing. |
 | ✅ **Web maps** | Makes a note that is the analyst's own layers on a page of their own, from Notebook › New or a layer's row, drawn and carded as the app's map draws them, with a layer switcher, a search, the timeline and each view in its address, published as a web folder or to GitHub Pages and counting its readers on the analyst's own GoatCounter when asked. |
@@ -492,7 +495,8 @@ stops making sense.
   in an address, a log or an answer to the browser. Its calls are Test connection,
   Create the repository, Turn on Pages, Publish (the folder's files and the site's own as
   blobs, trees, one commit, a fast-forward of the branch), Update the site (the same
-  without a note), Read the categories, the check before a press that a folder was not
+  without a note), Read the categories, Rename or Delete a category and give one article another
+  (one commit of the cards concerned and the lists), the check before a press that a folder was not
   changed on GitHub since, the bounded watch of that build and an edition's Check, each on a
   press, never on a read or at startup. Keeping the site reads its tree once and each card
   and page to fill by blob id, bounded (500 cards of 64 KB, 60 pages of 2 MB; past a bound,
@@ -501,7 +505,8 @@ stops making sense.
   `articles.json`, `feed.xml` and `sitemap.xml` that carry its marks, a root page that
   carries its generator with a version, the content between `azimut:articles` markers, and
   the bar between `azimut:bar` markers of its own article pages) and leaves every other file
-  as it is. The site's own bar, `azimut-bar.html` (64 KB at most, past which the articles keep
+  as it is, but for the `category` of a card, wherever it lives, on a change of categories
+  the analyst asks for in Settings › Website. The site's own bar, `azimut-bar.html` (64 KB at most, past which the articles keep
   Azimut's), is HTML from the analyst's repository put into every article page, so it is
   read token by token and written again: no `<script>`, `on*` handler, frame, object, form,
   `<base>`, `<meta>`, `<link>`, SVG animation or address but http(s), mailto and tel, inside a

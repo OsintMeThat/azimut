@@ -50,7 +50,7 @@ from collections import OrderedDict
 from dataclasses import dataclass, field
 from typing import Any, Literal, Mapping
 
-from . import githubpages, site, sitehome
+from . import githubpages, site, siteatlas, sitehome
 from .githubpages import RootPlan
 from .site import Card, Site
 
@@ -355,7 +355,7 @@ def make_plan(gh: githubpages.GitHub, owner: str, repo: str, home: Site, tree: g
     if root not in entries or (current is not None and site.owns_home(current)):
         page = site.fill(sitehome.home(home, lines, maps, pages), lines, maps, home.title, prefix)
         put(root, page)
-        for path, data in sitehome.kit(home).items():
+        for path, data in sitehome.kit(home, atlas=bool(siteatlas.placed(lines))).items():
             if githubpages.blob_sha(data) != entries.get(path):
                 plan.files[path] = data
     elif current is not None:

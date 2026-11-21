@@ -421,7 +421,10 @@ as a red run of ours rather than a broken install for someone else.
 The map's offline city list is data, not a dependency:
 `src/azimut/engine/data/cities.tsv.gz`, about 770 KiB, trimmed from GeoNames
 (CC BY 4.0) by `python scripts/build_cities.py`. Rebuild it when it goes stale;
-nothing else reads it.
+nothing else reads it. The land of the map on a site's default home is data too:
+`src/azimut/engine/data/site_atlas.svg`, about 33 KiB, Natural Earth's 1:110m
+countries (public domain) from the map plate's `world.json`, made by
+`python scripts/make_site_atlas.py`, which a test holds the file to.
 
 **yt-dlp and gallery-dl are deliberately unbounded**: they track sites that
 change, so pinning them just schedules a breakage. They can also be updated
