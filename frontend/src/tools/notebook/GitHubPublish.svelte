@@ -189,10 +189,12 @@
     return () => { live = false; };
   });
 
-  // whether the note was ever published to this site: its records name the repository. Unread, it is as before
+  // whether the note was ever published to this site: its records name the repository. Records that cannot be
+  // read leave it on the look's role
+  const siteKey = $derived(ready ? `${github.account}/${github.repo}`.toLowerCase() : '');
   $effect(() => {
-    if (!ready) return;
-    const site = `${github.account}/${github.repo}`.toLowerCase();
+    const site = siteKey;
+    if (!site) return;
     let live = true;
     listEditions(caseId, noteId)
       .then((list) => { if (live) fresh = !list.some((edition) => edition.format === 'github' && String(edition.repository ?? '').toLowerCase() === site); })

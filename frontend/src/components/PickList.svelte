@@ -156,7 +156,7 @@
 {/if}
 
 {#if open && trigger}
-  <FloatingMenu anchor={trigger} below width={Math.max(trigger.offsetWidth || 0, 200)} role="presentation" label={label || undefined} onclose={close}>
+  <FloatingMenu anchor={trigger} below width={Math.max(trigger.offsetWidth || 0, 200)} role="presentation" onclose={close}>
     {#if query}<p class="fm-note pick-query"><Icon name="search" size={11} /><span>{query}</span></p>{/if}
     <ul class="pick-list" id={listId} role="listbox" aria-label={label || undefined}>
       {#each entries as entry, index (entry.fresh ? '\n new' : entry.none ? '\n none' : entry.value)}
