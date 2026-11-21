@@ -41,6 +41,15 @@ it online by hand), and `.nojekyll` beside it at that root, so Pages serves the 
 as they are. The message is "Publish <note title>"; the author is the token's own
 account, as GitHub sets it. A folder of that name that Azimut did not make is refused,
 never replaced.
+
+**The site**: in the same commit, what the site's list is made of (`engine/sitesync.py`
+plans it, `engine/site.py` makes it): `articles.json`, `feed.xml`, `sitemap.xml`, the
+lists between markers in the pages that carry them and the default home, each only where
+Azimut owns it. Reading the site is `GET git/trees/…?recursive=1` for the whole tree and
+`GET git/blobs/…` (raw) for each card and each page to fill, bounded in number and size.
+The commit keeps the sha of the folder's tree, which the note's record holds so that a
+later publish can say the folder was changed on GitHub since. Rebuilding those root files
+without a note is `update_site`.
 """
 
 from __future__ import annotations
@@ -59,6 +68,7 @@ import httpx
 
 from .. import __version__
 from . import notes_web
+from . import site as site_engine
 
 API = "https://api.github.com"
 API_HOST = "api.github.com"
@@ -89,6 +99,8 @@ DEFAULT_BRANCH = "main"
 NOJEKYLL = notes_web.NOJEKYLL
 #: What every Azimut web folder holds at its top, which is how one is known again.
 OURS = (notes_web.INDEX, notes_web.SHARE)
+#: The most a read of the whole tree may weigh, and one blob read to plan the site: a card, a page.
+MAX_TREE = 16 * 1024 * 1024
 #: The README an empty repository is started with before Pages can serve it.
 STARTER = b"# Articles\n\nReports published from Azimut, one folder each.\n"
 
@@ -130,6 +142,10 @@ class GitHubError(Exception):
 
 class NotFound(GitHubError):
     pass
+
+
+class TooLarge(GitHubError):
+    """An answer longer than the reader was told to take."""
 
 
 class Conflict(GitHubError):
@@ -302,7 +318,7 @@ class GitHub:
                 for chunk in response.iter_bytes():
                     kept += chunk
                     if len(kept) > cap:
-                        raise GitHubError("GitHub answered with more than Azimut reads at once.")
+                        raise TooLarge("GitHub answered with more than Azimut reads at once.")
             finally:
                 response.close()
         except httpx.TimeoutException as exc:
@@ -580,7 +596,63 @@ def turn_on_pages(gh: GitHub, owner: str, repo: str, branch: str) -> Pages:
     return _pages(_dict(made), owner, repo)
 
 
+# -- reading the site ------------------------------------------------------------------------
+
+
+@dataclass
+class TreeRead:
+    """Every file of a tree, by its path from the tree's root to its blob's id."""
+
+    entries: dict[str, str]
+    #: False when GitHub cut the listing short or it was more than Azimut reads.
+    complete: bool = True
+
+
+def read_tree(gh: GitHub, owner: str, repo: str, tree: str) -> TreeRead:
+    """Every file under ``tree`` (a site's root), in one request; an empty read for no tree."""
+    if not tree:
+        return TreeRead({})
+    try:
+        body = _dict(gh.call("GET", _repo_path(owner, repo, f"/git/trees/{tree}"), query={"recursive": "1"},
+                             doing="read the site's files", cap=MAX_TREE))
+    except TooLarge:
+        return TreeRead({}, complete=False)
+    found = body.get("tree")
+    listed = found if isinstance(found, list) else []
+    entries = {str(item.get("path")): str(item.get("sha")) for item in listed
+               if isinstance(item, dict) and item.get("type") == "blob" and isinstance(item.get("sha"), str)}
+    return TreeRead(entries, complete=not body.get("truncated"))
+
+
+def read_blob(gh: GitHub, owner: str, repo: str, sha: str, cap: int) -> bytes | None:
+    """A file's bytes by its blob's id, raw; None when it is more than ``cap`` or is gone."""
+    if not SHA1.match(sha):
+        return None
+    try:
+        return gh.call("GET", _repo_path(owner, repo, f"/git/blobs/{sha}"), accept="application/vnd.github.raw+json",
+                       doing="read a file of the site", cap=cap).body
+    except (TooLarge, NotFound):
+        return None
+
+
 # -- publishing ----------------------------------------------------------------------------
+
+
+@dataclass
+class RootPlan:
+    """What a publish does at the site's root beside the folder (`engine/sitesync.py`): the files
+    to write, by path from that root, each only where it differs; what to tell the analyst; and
+    the categories the site named, None when it was not read."""
+
+    files: dict[str, bytes] = field(default_factory=dict)
+    warnings: list[str] = field(default_factory=list)
+    categories: list[str] | None = None
+
+
+#: Plans the site's root from the id of its tree ("" when it has none yet), the name of the
+#: folder being published and its card, which replaces the one the tree holds for it (an update
+#: of the site alone has neither: "" and None).
+Planner = Callable[[str, str, "site_engine.Card | None"], RootPlan]
 
 
 @dataclass
@@ -592,6 +664,15 @@ class Published:
     removed: int | None
     created_branch: bool = False
     files: list[str] = field(default_factory=list)
+    #: The id of the folder's tree as committed, which a later publish compares the folder on
+    #: GitHub with.
+    tree: str = ""
+    #: Whether the folder on GitHub differed from the ``expected_tree`` it was replaced from.
+    edited: bool = False
+    #: The files written at the site's root, the words to say about them, and the categories read.
+    root: list[str] = field(default_factory=list)
+    warnings: list[str] = field(default_factory=list)
+    categories: list[str] | None = None
 
 
 def _bounded(files: Mapping[str, bytes]) -> None:
@@ -616,13 +697,19 @@ def _plain(path: str) -> None:
         raise GitHubError(f"a file of the folder has a name it cannot have: {path!r}")
 
 
-def publish(gh: GitHub, owner: str, repo: str, branch: str, files: Mapping[str, bytes], folder: str,
-            message: str) -> Published:
-    """Commit ``files`` as ``folder`` (`<short>` or `docs/<short>`) on ``branch``, in one
-    commit, with `.nojekyll` at the folder's root: the folder made whole, so a file the
-    new build no longer has is gone; everything else in the repository as it was."""
-    _bounded(files)
-    _plain(folder)
+@dataclass
+class _Branch:
+    """A branch's head and the trees above the site's root, as a publish finds them."""
+
+    parent: str
+    created: bool
+    base_tree: str
+    #: The tree of the site's root folder ("" when it is not there yet), and its own files.
+    level: str
+    top: list[dict[str, Any]]
+
+
+def _open(gh: GitHub, owner: str, repo: str, branch: str, above: list[str]) -> _Branch:
     parent = head(gh, owner, repo, branch)
     created = parent is None
     if parent is None:
@@ -633,8 +720,6 @@ def publish(gh: GitHub, owner: str, repo: str, branch: str, files: Mapping[str, 
     commit = _dict(gh.call("GET", _repo_path(owner, repo, f"/git/commits/{parent}"), doing="read the branch"))
     tree = _part(commit.get("tree"))
     base_tree = _sha(tree.get("sha"))
-
-    *above, name = folder.split("/")
     level = base_tree
     for part in above:
         entry = next((item for item in _entries(gh, owner, repo, level) if item.get("path") == part), None)
@@ -642,7 +727,81 @@ def publish(gh: GitHub, owner: str, repo: str, branch: str, files: Mapping[str, 
             level = ""
             break
         level = _sha(entry.get("sha"))
-    top = _entries(gh, owner, repo, level) if level else []
+    return _Branch(parent, created, base_tree, level, _entries(gh, owner, repo, level) if level else [])
+
+
+def _upload(gh: GitHub, owner: str, repo: str, data: bytes, *, pace: bool) -> str:
+    if pace and gh.writes:
+        gh.sleep(PACE_SECONDS)
+    made = _dict(gh.call("POST", _repo_path(owner, repo, "/git/blobs"), doing="upload the folder's files",
+                         body={"content": base64.b64encode(data).decode("ascii"), "encoding": "base64"}))
+    return _sha(made.get("sha"))
+
+
+def _land(gh: GitHub, owner: str, repo: str, branch: str, opened: _Branch, above: list[str],
+          entries: list[dict[str, Any]], message: str) -> str:
+    """Write the site root's tree from ``entries`` over what it holds, then the commit and the
+    branch's move as a fast-forward only. The commit's id."""
+    body: dict[str, Any] = {"tree": entries}
+    if opened.level:
+        body["base_tree"] = opened.level
+    site_tree = _sha(_dict(gh.call("POST", _repo_path(owner, repo, "/git/trees"), doing="write the folder",
+                                   body=body)).get("sha"))
+    if above:
+        # the site's root is a folder of the repository (`docs/`): it takes its place there
+        wrapped = _dict(gh.call("POST", _repo_path(owner, repo, "/git/trees"), doing="write the folder", body={
+            "base_tree": opened.base_tree,
+            "tree": [{"path": "/".join(above), "mode": "040000", "type": "tree", "sha": site_tree}]}))
+        site_tree = _sha(wrapped.get("sha"))
+    title = " ".join(message.split())[:MAX_TITLE] or "Publish"
+    made_commit = _dict(gh.call("POST", _repo_path(owner, repo, "/git/commits"), doing="commit the folder",
+                                body={"message": title, "tree": site_tree, "parents": [opened.parent]}))
+    sha = _sha(made_commit.get("sha"))
+    try:
+        if opened.created:
+            gh.call("POST", _repo_path(owner, repo, "/git/refs"), body={"ref": f"refs/heads/{branch}", "sha": sha},
+                    doing="make the branch")
+        else:
+            gh.call("PATCH", _repo_path(owner, repo, f"/git/refs/heads/{quote(branch)}"),
+                    body={"sha": sha, "force": False}, doing="move the branch")
+    except GitHubError as exc:
+        if exc.status == 422:
+            raise GitHubError("The branch changed on GitHub while Azimut was publishing: press Publish again.",
+                              422) from exc
+        raise
+    return sha
+
+
+def _root_entries(gh: GitHub, owner: str, repo: str, plan: RootPlan, taken: str, *, pace: bool) -> list[dict[str, Any]]:
+    """The tree entries of the files a plan writes at the site's root: each uploaded, none
+    inside ``taken``, the folder being published."""
+    entries = []
+    for path in sorted(plan.files):
+        _plain(path)
+        if taken and (path == taken or path.startswith(f"{taken}/")):
+            raise GitHubError(f"the site's own files may not go into the folder {taken}")
+        sha = _upload(gh, owner, repo, plan.files[path], pace=pace)
+        entries.append({"path": path, "mode": "100644", "type": "blob", "sha": sha})
+    return entries
+
+
+def publish(gh: GitHub, owner: str, repo: str, branch: str, files: Mapping[str, bytes], folder: str,
+            message: str, *, card: "site_engine.Card | None" = None, plan: Planner | None = None,
+            expected_tree: str = "") -> Published:
+    """Commit ``files`` as ``folder`` (`<short>` or `docs/<short>`) on ``branch``, in one
+    commit, with `.nojekyll` at the folder's root: the folder made whole, so a file the
+    new build no longer has is gone; everything else in the repository as it was.
+
+    With a ``card``, the folder carries it as `article.json`, dated as the card already in the
+    folder is when there is one (the first publication's day stands). With a ``plan`` the same
+    commit writes what it names at the site's root (`RootPlan`). ``expected_tree`` is the id of
+    the folder's tree as the last publish left it: the result says whether it is another now.
+    """
+    _bounded(files)
+    _plain(folder)
+    *above, name = folder.split("/")
+    opened = _open(gh, owner, repo, branch, above)
+    top = opened.top
     found = next((item for item in top if item.get("path") == name), None)
     old: dict[str, str] = {}
     complete = True
@@ -659,48 +818,79 @@ def publish(gh: GitHub, owner: str, repo: str, branch: str, files: Mapping[str, 
         if not all(part in old for part in OURS):
             raise GitHubError(f"The repository already has a folder named {name} that Azimut did not make: "
                               "give the article another short name.")
+    edited = bool(expected_tree and found is not None and found.get("sha") != expected_tree)
+    files = dict(files)
+    if card is not None:
+        earlier = None
+        if site_engine.CARD in old:
+            earlier = read_blob(gh, owner, repo, old[site_engine.CARD], site_engine.MAX_CARD_BYTES)
+        first = site_engine.card_date(earlier) if earlier else ""
+        card = card.dated(first) if first else card
+        files[site_engine.CARD] = card.as_json()
+    root = plan(opened.level, name, card) if plan is not None else RootPlan()
     have = set(old.values())
     wanted = {path: blob_sha(data) for path, data in files.items()}
     new = sorted(path for path, sha in wanted.items() if sha not in have)
-    pace = len(new) > PACE_FROM
+    pace = len(new) + len(root.files) > PACE_FROM
     shas: dict[str, str] = {}
     for path in sorted(files):
-        if path in new:
-            if pace and gh.writes:
-                gh.sleep(PACE_SECONDS)
-            made = _dict(gh.call("POST", _repo_path(owner, repo, "/git/blobs"), doing="upload the folder's files",
-                                 body={"content": base64.b64encode(files[path]).decode("ascii"),
-                                       "encoding": "base64"}))
-            shas[path] = _sha(made.get("sha"))
-        else:
-            shas[path] = wanted[path]
+        shas[path] = _upload(gh, owner, repo, files[path], pace=pace) if path in new else wanted[path]
     folder_tree = _tree(gh, owner, repo, shas)
-    root = "/".join(above)
-    entries_out: list[dict[str, Any]] = [{"path": folder, "mode": "040000", "type": "tree", "sha": folder_tree}]
+    entries_out: list[dict[str, Any]] = [{"path": name, "mode": "040000", "type": "tree", "sha": folder_tree}]
+    entries_out += _root_entries(gh, owner, repo, root, name, pace=pace)
     if not any(item.get("path") == NOJEKYLL and item.get("type") == "blob" for item in top):
-        entries_out.append({"path": f"{root}/{NOJEKYLL}" if root else NOJEKYLL, "mode": "100644", "type": "blob",
-                            "content": ""})
-    new_root = _dict(gh.call("POST", _repo_path(owner, repo, "/git/trees"), doing="write the folder",
-                             body={"base_tree": base_tree, "tree": entries_out}))
-    title = " ".join(message.split())[:MAX_TITLE] or "Publish"
-    made_commit = _dict(gh.call("POST", _repo_path(owner, repo, "/git/commits"), doing="commit the folder",
-                                body={"message": title, "tree": _sha(new_root.get("sha")), "parents": [parent]}))
-    sha = _sha(made_commit.get("sha"))
-    try:
-        if created:
-            gh.call("POST", _repo_path(owner, repo, "/git/refs"), body={"ref": f"refs/heads/{branch}", "sha": sha},
-                    doing="make the branch")
-        else:
-            gh.call("PATCH", _repo_path(owner, repo, f"/git/refs/heads/{quote(branch)}"),
-                    body={"sha": sha, "force": False}, doing="move the branch")
-    except GitHubError as exc:
-        if exc.status == 422:
-            raise GitHubError("The branch changed on GitHub while Azimut was publishing: press Publish again.",
-                              422) from exc
-        raise
+        entries_out.append({"path": NOJEKYLL, "mode": "100644", "type": "blob", "content": ""})
+    sha = _land(gh, owner, repo, branch, opened, above, entries_out, message)
     return Published(commit=sha, folder=folder, uploaded=len(new), reused=len(files) - len(new),
-                     removed=len(set(old) - set(files)) if complete else None, created_branch=created,
-                     files=sorted(files))
+                     removed=len(set(old) - set(files)) if complete else None, created_branch=opened.created,
+                     files=sorted(files), tree=folder_tree, edited=edited, root=sorted(root.files),
+                     warnings=list(root.warnings), categories=root.categories)
+
+
+def read_site(gh: GitHub, owner: str, repo: str, branch: str, root: str, plan: Planner) -> RootPlan:
+    """What an update of the site would write, with nothing committed: ``plan`` run on the site's
+    root as ``branch`` holds it now."""
+    above = [part for part in root.strip("/").split("/") if part]
+    opened = _open(gh, owner, repo, branch, above)
+    if opened.created:
+        raise GitHubError(f"The repository has no branch {branch}: turn on Pages for it first.")
+    return plan(opened.level, "", None)
+
+
+def folder_tree(gh: GitHub, owner: str, repo: str, branch: str, folder: str) -> str:
+    """The id of ``folder``'s tree on ``branch`` as it is now, "" when there is no such folder
+    (or no such branch): what a publish compares with the tree it last left there."""
+    *above, name = folder.split("/")
+    try:
+        opened = _open(gh, owner, repo, branch, above)
+    except GitHubError:
+        return ""
+    if opened.created:
+        return ""
+    found = next((item for item in opened.top if item.get("path") == name and item.get("type") == "tree"), None)
+    return _sha(found.get("sha")) if found is not None else ""
+
+
+def update_site(gh: GitHub, owner: str, repo: str, branch: str, root: str, message: str,
+                plan: Planner) -> Published | None:
+    """Rebuild the site's root files without publishing a note: one commit holding what ``plan``
+    names, or None, with nothing committed, when the site is up to date. ``root`` is the folder
+    Pages serves from, "" or `docs/`."""
+    above = [part for part in root.strip("/").split("/") if part]
+    opened = _open(gh, owner, repo, branch, above)
+    if opened.created:
+        raise GitHubError(f"The repository has no branch {branch}: turn on Pages for it first.")
+    made = plan(opened.level, "", None)
+    if not made.files:
+        return Published(commit=opened.parent, folder="", uploaded=0, reused=0, removed=None,
+                         warnings=list(made.warnings), categories=made.categories)
+    pace = len(made.files) > PACE_FROM
+    entries = _root_entries(gh, owner, repo, made, "", pace=pace)
+    if not any(item.get("path") == NOJEKYLL and item.get("type") == "blob" for item in opened.top):
+        entries.append({"path": NOJEKYLL, "mode": "100644", "type": "blob", "content": ""})
+    sha = _land(gh, owner, repo, branch, opened, above, entries, message)
+    return Published(commit=sha, folder="", uploaded=len(made.files), reused=0, removed=None,
+                     root=sorted(made.files), warnings=list(made.warnings), categories=made.categories)
 
 
 def _tree(gh: GitHub, owner: str, repo: str, shas: Mapping[str, str]) -> str:
@@ -724,7 +914,7 @@ def _tree(gh: GitHub, owner: str, repo: str, shas: Mapping[str, str]) -> str:
 __all__ = [
     "API", "API_VERSION", "BAD_TOKEN", "Build", "Conflict", "DEFAULT_BRANCH", "DEFAULT_REPO", "GitHub",
     "GitHubError", "NOT_SET", "NotFound", "Pages", "Published", "RateLimited", "Repository", "account_name",
-    "article_address", "blob_sha", "branch_name", "build_state", "client", "create_repository", "head",
-    "page_state", "pages", "publish", "repository", "repository_name", "short_name", "site_base", "turn_on_pages",
-    "whoami",
+    "article_address", "blob_sha", "branch_name", "build_state", "client", "create_repository", "folder_tree", "head",
+    "page_state", "pages", "publish", "read_blob", "read_site", "read_tree", "repository", "repository_name", "short_name", "site_base", "turn_on_pages",
+    "update_site", "whoami",
 ]

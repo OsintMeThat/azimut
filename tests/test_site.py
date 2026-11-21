@@ -136,8 +136,8 @@ def test_a_page_is_on_no_list_and_is_listed_under_pages_by_title():
     # a page that links a map does not fold it under itself
     cards.append(_card("map", layout="map", title="The map"))
     cards[0]["links"] = ["map"]
-    assert [line["title"] for line in site.listing(cards)] == ["The map", "A story"] or \
-        {line["title"] for line in site.listing(cards)} == {"The map", "A story"}
+    assert {line["title"] for line in site.listing(cards)} == {"The map", "A story"}
+    assert all(line["maps"] == [] for line in site.listing(cards))
 
 
 def test_a_map_an_article_cites_folds_under_it_and_a_map_nothing_cites_keeps_its_own_line():
