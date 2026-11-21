@@ -984,6 +984,7 @@ class ImportedSettings(BaseModel):
     site_stats_code: str = Field(default="", max_length=64)
     site_stats_token: str = Field(default="", max_length=128)
     github_categories: list[str] = Field(default_factory=list, max_length=100)
+    github_categories_added: list[str] = Field(default_factory=list, max_length=100)
     # what each note style carries: only what differs from Azimut's own, read the way
     # the app reads its own (a value this build cannot read keeps Azimut's)
     note_styles: dict[str, Any] = Field(default_factory=dict, max_length=16)
@@ -1055,7 +1056,7 @@ class ImportedSettings(BaseModel):
         except notes_web.NotesWebError:
             return ""
 
-    @field_validator("github_categories", mode="before")
+    @field_validator("github_categories", "github_categories_added", mode="before")
     @classmethod
     def readable_github_categories(cls, value: Any) -> Any:
         return site_engine.categories_read(value)

@@ -2075,7 +2075,8 @@ def github_publish(case_id: str, note_id: str, body: GitHubPublishIn) -> dict[st
     if changes:
         record["changes"] = changes[:MAX_CHANGES]
     _record_edition(case, note_id, record, text=made.printed)
-    _kept_in_look(case, note_id, body.category, body.role)
+    # the category the card carries: the dialog's, or the one the site gave the article since its last publish
+    _kept_in_look(case, note_id, published.category if published.category is not None else body.category, body.role)
     _place_kept(case, note_id, body.chosen_place)
     keep_categories(published.categories)
     return {

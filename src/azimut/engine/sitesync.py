@@ -19,9 +19,15 @@ the publish itself never fails for it.
 (`remover`): the folder's paths are read out of it first, so the lists, the feed and the
 sitemap do not keep it.
 
+**What a change of categories plans** (`recategorizer`, Settings › Website › Categories and an
+article's line) is the same, over the cards as the commit will make them: each card concerned with
+its `category` rewritten, and a rename kept in `articles.json` as `"renamed"` (`site.RENAMED`). It
+writes nothing for a site it cannot read whole, and never a page outside its markers.
+
 **What a read tells** (`survey`, Settings › Website › Articles) is the same reading and no
 writing: the cards as items, newest first, the categories in use and the marked pages that list
-each, whose home the site has, whose bar its articles carry, and the pages a site is expected to have.
+each (a category only a marked page names counts no article), whose home the site has, whose bar
+its articles carry, and the pages a site is expected to have.
 
 **The bar** of an article page is the site's own when its root holds `azimut-bar.html`
 (`site.own_bar`), read by blob id like the rest, and Azimut's otherwise; a file absent costs no
@@ -42,7 +48,7 @@ import json
 import threading
 from collections import OrderedDict
 from dataclasses import dataclass, field
-from typing import Any
+from typing import Any, Literal, Mapping
 
 from . import githubpages, site, sitehome
 from .githubpages import RootPlan
@@ -99,13 +105,18 @@ def _recall(sha: str) -> bytes | None:
 
 
 class _Files:
-    """The site's files as the branch holds them: by path, read by blob id when asked."""
+    """The site's files as the branch holds them: by path, read by blob id when asked. ``given`` are
+    files as the commit being planned will make them, read in place of the branch's."""
 
-    def __init__(self, gh: githubpages.GitHub, owner: str, repo: str, entries: dict[str, str]) -> None:
+    def __init__(self, gh: githubpages.GitHub, owner: str, repo: str, entries: dict[str, str],
+                 given: Mapping[str, bytes] | None = None) -> None:
         self.gh, self.owner, self.repo = gh, owner, repo
         self.entries = entries
+        self.given = dict(given or {})
 
     def read(self, path: str, cap: int) -> bytes | None:
+        if path in self.given:
+            return self.given[path] if len(self.given[path]) <= cap else None
         sha = self.entries.get(path)
         if sha is None:
             return None
@@ -212,6 +223,78 @@ def remover(gh: githubpages.GitHub, owner: str, repo: str, home_site: Site) -> g
     return plan
 
 
+# -- the categories, changed from Settings › Website -------------------------------------------------
+
+CATEGORY_TOO_LONG = "The site holds too many files for Azimut to read: nothing was changed."
+CATEGORY_TOO_MANY = f"The site holds more than {site.MAX_CARDS} cards: nothing was changed."
+CATEGORY_GONE = "No article on the site carries that category any more: read the site again."
+CATEGORY_MOVED = "The branch changed on GitHub while Azimut was changing the categories: press again."
+
+
+class Refused(githubpages.GitHubError):
+    """A change of categories the site cannot take as it is, with nothing written."""
+
+
+class CategoryGone(githubpages.NotFound):
+    """The category to rename or delete is on no card of the site (any more)."""
+
+
+@dataclass(frozen=True)
+class CategoryChange:
+    """What Settings › Website changes of the site's categories: ``name`` renamed ``to`` (`rename`, into
+    a category the site has already when it is one's name), ``name`` taken off every card that carries it
+    (`delete`), or the card of ``folder`` given ``to`` (`move`, "" for no category)."""
+
+    kind: Literal["rename", "delete", "move"]
+    name: str = ""
+    to: str = ""
+    folder: str = ""
+
+
+def recategorizer(gh: githubpages.GitHub, owner: str, repo: str, home: Site,
+                  change: CategoryChange) -> githubpages.Planner:
+    """The plan of a change of categories (`githubpages.update_site`): each card concerned with its
+    `category` rewritten and every other key as it was (`site.recategorized`), and the root files made
+    from the cards as they will be, the lists, the feed and the sitemap, with a rename kept in
+    `articles.json` (`site.RENAMED`) and its record of the bar as it was. A card of `azimut-article/1`
+    is changed wherever it lives. Nothing is written for a site Azimut cannot read whole (`Refused`), and
+    a category no card carries is `CategoryGone`, a folder holding no card `githubpages.FolderGone`."""
+
+    def plan(level: str, folder: str, card: Card | None) -> RootPlan:
+        tree = githubpages.read_tree(gh, owner, repo, level)
+        if not tree.complete:
+            raise Refused(CATEGORY_TOO_LONG, 422)
+        files = _Files(gh, owner, repo, tree.entries)
+        folders = _card_folders(tree.entries)
+        if len(folders) > site.MAX_CARDS:
+            raise Refused(CATEGORY_TOO_MANY, 422)
+        given: dict[str, bytes] = {}
+        found = False
+        for one in ([change.folder] if change.kind == "move" and change.folder in folders else
+                    [] if change.kind == "move" else folders):
+            path = f"{one}/{site.CARD}"
+            data = files.read(path, site.MAX_CARD_BYTES)
+            line = site.read_card(one, data) if data is not None else None
+            if line is None or (change.kind != "move" and line["category"] != change.name):
+                continue
+            found = True
+            if line["category"] != change.to:
+                made = site.recategorized(data, change.to) if data is not None else None
+                if made is not None:
+                    given[path] = made
+        if not found:
+            raise (githubpages.FolderGone(githubpages.GONE, 404) if change.kind == "move"
+                   else CategoryGone(CATEGORY_GONE, 404))
+        made = make_plan(gh, owner, repo, home, tree, "", None, given=given,
+                         rename=(change.name, change.to) if change.kind == "rename" else None)
+        made.files.update(given)
+        # the article pages carry the bar they did: the record of it stays as it was
+        _record(made, files, tree.entries, _recorded(files, tree.entries))
+        return made
+
+    return plan
+
+
 def _card_folders(entries: dict[str, str], leave: str = "") -> list[str]:
     """The folders of the tree that hold a card, but for ``leave`` and the folders no card lives in."""
     found = sorted(path[:-len(f"/{site.CARD}")] for path in entries if path.endswith(f"/{site.CARD}"))
@@ -236,12 +319,16 @@ def _pages_below(entries: dict[str, str]) -> list[str]:
 
 
 def make_plan(gh: githubpages.GitHub, owner: str, repo: str, home: Site, tree: githubpages.TreeRead,
-              folder: str, card: Card | None) -> RootPlan:
+              folder: str, card: Card | None, *, given: Mapping[str, bytes] | None = None,
+              rename: tuple[str, str] | None = None) -> RootPlan:
+    """The root files for the site as ``tree`` holds it, with ``card`` as the card of ``folder`` and the
+    files ``given`` as the commit will make them; ``rename`` is a category renamed, which the record in
+    `articles.json` keeps (`site.renamed_after`)."""
     plan = RootPlan()
     if not tree.complete:
         plan.warnings.append(site.TREE_TOO_LONG)
         return plan
-    files = _Files(gh, owner, repo, tree.entries)
+    files = _Files(gh, owner, repo, tree.entries, given)
     entries = tree.entries
     folders = _card_folders(entries, folder)
     if len(folders) + (1 if card is not None else 0) > site.MAX_CARDS:
@@ -293,12 +380,18 @@ def make_plan(gh: githubpages.GitHub, owner: str, repo: str, home: Site, tree: g
         sections += site.sections_of(text)
         put(path, site.fill(text, lines, maps, home.title, prefix))
 
-    # the list, the feed and the sitemap, each only where Azimut made it or there is none
-    for path, owns, make in ((site.ARTICLES, site.owns_articles, lambda: site.articles_json(lines, maps, pages, home)),
-                             (site.FEED, site.owns_feed, lambda: site.feed(lines, home))):
-        existing = files.text(path, MAX_LIST_BYTES) if path in entries else None
-        if path not in entries or (existing is not None and owns(existing)):
-            put(path, make())
+    # the list, the feed and the sitemap, each only where Azimut made it or there is none; the list keeps
+    # the record of the categories renamed, but for an old name a category of the site carries again
+    existing = files.text(site.ARTICLES, MAX_LIST_BYTES) if site.ARTICLES in entries else None
+    if site.ARTICLES not in entries or (existing is not None and site.owns_articles(existing)):
+        record = site.renamed_of(_payload(existing))
+        if rename is not None:
+            record = site.renamed_after(record, *rename)
+        put(site.ARTICLES, site.articles_json(lines, maps, pages, home,
+                                              site.renamed_kept(record, site.categories_of(cards))))
+    existing = files.text(site.FEED, MAX_LIST_BYTES) if site.FEED in entries else None
+    if site.FEED not in entries or (existing is not None and site.owns_feed(existing)):
+        put(site.FEED, site.feed(lines, home))
     existing = files.text(site.SITEMAP, MAX_LIST_BYTES) if site.SITEMAP in entries else None
     if site.SITEMAP not in entries or (existing is not None and site.owns_sitemap(existing)):
         hidden = {str(card["address"]) for card in cards if card["role"] == site.UNLISTED}
@@ -306,6 +399,14 @@ def make_plan(gh: githubpages.GitHub, owner: str, repo: str, home: Site, tree: g
                                                                     pages, hidden), home))
     plan.categories = sorted({*site.categories_of(cards), *sections})
     return plan
+
+
+def _payload(text: str | None) -> Any:
+    """A list file read as JSON, None for none or one that does not read."""
+    try:
+        return json.loads(text) if text is not None else None
+    except ValueError:
+        return None
 
 
 def _sitemap_pages(existing: str | None, home: Site, entries: dict[str, str], lines: list[dict[str, object]],
@@ -591,6 +692,9 @@ def survey(gh: githubpages.GitHub, owner: str, repo: str, home: Site, tree: gith
             _no_marker(entries[path])
             continue
         mark(f"{path.split('/')[0]}/", text)
+    # a category a marked page names that no listed card carries yet is one too, with no article
+    for name in listed:
+        counts.setdefault(name, 0)
     out.categories = [{"name": name, "count": count, "pages": listed.get(name, [])}
                       for name, count in sorted(counts.items(), key=lambda one: (-one[1], one[0].casefold()))]
     out.legal = _page_named(entries, out.items, LEGAL_FOLDERS, site.LEGAL_TITLE)
