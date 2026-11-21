@@ -5,5 +5,5 @@
  * `.invalid` never resolves (RFC 6761), so a stand-in can send nobody to a stranger's
  * page, and a release refuses one (tests/test_whats_new.py).
  */
-export const KOFI_URL = 'https://ko-fi.invalid/azimut';
+export const KOFI_URL = 'https://ko-fi.com/osintmethat';
 export const FEEDBACK_FORM_URL = '';

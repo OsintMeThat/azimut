@@ -11,7 +11,7 @@ from contextlib import closing
 
 import pytest
 import fullcase
-from legacy_case import rewind_case, unwrap_case, write_legacy_json_case
+from legacy_case import POST_WRAPPER_DIRS, rewind_case, unwrap_case, write_legacy_json_case
 
 from azimut import caselayout, config, layout, workspace
 from azimut.sqlite_backend import SQLITE_SCHEMA
@@ -436,6 +436,16 @@ def test_migrating_twice_leaves_the_slots_alone(tmp_workspace):
 
 
 # -- folder normalizer: the tool's files move into `azimut/` ----------------
+
+
+def test_every_case_folder_is_known_to_the_rewind_as_old_or_born_after_the_wrapper():
+    """A folder the layout gains is either one a flat case already had (moved by the
+    wrapper) or one born after it (`POST_WRAPPER_DIRS`, never at a case root). One that
+    is neither is rewound to the root, where the wrapper rightly leaves it as the
+    analyst's own: `.posts` broke four migration tests that way."""
+    before = set(layout.UNWRAPPED_ENTRIES) | set(layout.PRE_HIDDEN_DIRS.values())
+    assert set(layout.CASE_SUBDIRS) - before - POST_WRAPPER_DIRS == set()
+    assert POST_WRAPPER_DIRS <= set(layout.CASE_SUBDIRS), "a folder the layout no longer makes"
 
 
 def test_open_wraps_a_flat_case_and_keeps_every_artifact(tmp_workspace):

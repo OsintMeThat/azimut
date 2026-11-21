@@ -20,7 +20,8 @@ profile picture and a still of each video the platform gives one for.
   wall, with the session Settings holds, as the downloads do (`media.fetch_url`): tried
   without cookies first, then once with the stored session, else ``NeedsLogin``.
   A post with no picture is still a post: gallery-dl says its words when asked
-  (`text-tweets`).
+  (`text-tweets`). Words X sent in a shape gallery-dl does not read yet come from
+  X's embed read instead (`xwords`).
 - Bluesky through its public, keyless API (``app.bsky.feed.getPostThread`` on
   ``public.api.bsky.app``), whose answer holds the words, the author, the pictures and a
   video's still. The video itself comes through the downloader (`media.download_url`).
@@ -643,16 +644,34 @@ def fetch(case: "Case", text: str) -> dict[str, Any]:
     published posts, read from its draft. Anything else is read from its site: X without
     a session first, then once with the session Settings holds; Bluesky with no account.
     Raises `NotAPost`, `NeedsLogin` or `PostError`.
+
+    One kept post is read again: one a read kept with no words at all, since gallery-dl
+    1.32.21 could not see X's (`xwords`). It stays as kept when that read fails.
     """
     link = parse_link(text)
     if link is None:
         raise NotAPost("This is not the address of a post on X or Bluesky")
     held = held_post(case, link.key)
     if held is not None:
-        return held
+        if not _kept_without_words(case, held):
+            return held
+        try:
+            return _read_and_file(case, link)
+        except PostError:
+            return held
     mine = _own_draft(case, link)
     if mine is not None:
         return mine
+    return _read_and_file(case, link)
+
+
+def _kept_without_words(case: "Case", held: dict[str, Any]) -> bool:
+    spec = read_spec(case, held)
+    return spec is not None and spec.get("from") == "fetch" and not str(spec.get("text") or "").strip()
+
+
+def _read_and_file(case: "Case", link: Link) -> dict[str, Any]:
+    """The post read from its site and kept in the case."""
     if link.site == "bluesky":
         with client() as http:
             return file_post(case, read_bluesky(link, http), http=http)
