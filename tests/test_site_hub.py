@@ -207,11 +207,12 @@ def test_the_read_lists_every_card_newest_first_with_addresses_on_the_site(clien
          "article", "article")]
     first = said["items"][0]
     assert list(first) == ["folder", "address", "title", "summary", "date", "date_label", "category", "role",
-                           "layout", "image", "bytes", "deletable"]
+                           "layout", "image", "bytes", "author", "deletable"]
     assert first["address"] == f"https://osintmethat.com/{ARTICLES}/"
     assert first["title"] == "The fall of the Bab al-Mandab front, Sep-Nov 2026"
     assert first["date"] == "2026-11-20" and first["date_label"] == "20 November 2026"
     assert first["category"] == "Conflict Watch" and first["summary"]
+    assert first["author"] == "OSINT Me That" and "author_image" not in first
     assert first["image"] == f"https://osintmethat.com/{ARTICLES}/cover.jpg"
     assert said["items"][2]["address"] == (
         "https://osintmethat.com/2026/08/13/installing-azimut-the-complete-guide/")
