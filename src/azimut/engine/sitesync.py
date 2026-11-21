@@ -279,9 +279,9 @@ def recategorizer(gh: githubpages.GitHub, owner: str, repo: str, home: Site,
                 continue
             found = True
             if line["category"] != change.to:
-                made = site.recategorized(data, change.to) if data is not None else None
-                if made is not None:
-                    given[path] = made
+                rewritten = site.recategorized(data, change.to) if data is not None else None
+                if rewritten is not None:
+                    given[path] = rewritten
         if not found:
             raise (githubpages.FolderGone(githubpages.GONE, 404) if change.kind == "move"
                    else CategoryGone(CATEGORY_GONE, 404))
