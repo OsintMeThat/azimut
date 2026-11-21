@@ -474,19 +474,35 @@ def test_the_legal_notice_names_the_host_and_leaves_the_publisher_lines():
     assert site.LEGAL_SENTENCE == "Depending on your country, a website may need a legal notice."
 
 
-def test_the_privacy_starter_names_the_host_and_what_the_counting_does():
+def test_the_privacy_starter_is_the_same_page_for_everyone_with_the_counting_each_choice_names():
     assert site.PRIVACY_TITLE == "Privacy"
-    none, goat, cloud = (site.privacy_notice(stats) for stats in site.STATS)
-    for text in (none, goat, cloud):
-        assert "## Host" in text and "hosted by GitHub Pages" in text and "its own server logs" in text
-        assert "## Counting readers" in text and "## Contact" in text
-    assert "does not count its readers" in none and "GoatCounter" not in none and "Cloudflare" not in none
-    assert "GoatCounter, which sets no cookie and keeps no personal data" in goat and "Cloudflare" not in goat
-    assert "Cloudflare Web Analytics, which sets no cookie" in cloud and "GoatCounter" not in cloud
+
+    def page(counting: str) -> str:
+        return ("## Cookies\n\nThis site sets no cookies and has no accounts, forms or newsletter.\n\n"
+                f"## Counting readers\n\n{counting}\n\n"
+                "## Host\n\nGitHub, which hosts the site on GitHub Pages, logs visitors' IP addresses for "
+                "security, as its documentation says.\n\n"
+                "## Your data\n\nFor any question about your data, write to:\n\n"
+                "You can also complain to your country's data protection authority.\n")
+
+    assert site.privacy_notice("") == page("This site does not count its readers.")
+    assert site.privacy_notice("goatcounter") == page(
+        "Visits are counted with GoatCounter, which sets no cookie and keeps no personal data: "
+        "the site sees totals only.")
+    assert site.privacy_notice("cloudflare") == page(
+        "Visits are counted with Cloudflare Web Analytics, which stores nothing on your device: your browser "
+        "sends Cloudflare the page's address and how it loaded, and the site sees totals only.")
+    assert list(site.COUNTING_SAID) == list(site.STATS)
     # a count it does not know is none
-    assert site.privacy_notice("tracker") == none and site.privacy_notice("") == none
-    # one sentence under each heading, and no link for the link check to flag
-    assert "](" not in goat and "http" not in goat
+    assert site.privacy_notice("tracker") == site.privacy_notice("")
+    for stats in site.STATS:
+        text = site.privacy_notice(stats)
+        # it names the host, and not a person, an address or a link for the link check to flag
+        assert "## Host" in text and "GitHub Pages" in text and "logs visitors' IP addresses" in text
+        assert "## Your data" in text and "write to:\n\n" in text
+        assert not any(mark in text for mark in ("@", "http", "](", "www.")) and not any(c.isdigit() for c in text)
+    assert "GoatCounter" not in site.privacy_notice("") + site.privacy_notice("cloudflare")
+    assert "Cloudflare" not in site.privacy_notice("") + site.privacy_notice("goatcounter")
 
 
 def test_the_site_copy_is_the_contracts():

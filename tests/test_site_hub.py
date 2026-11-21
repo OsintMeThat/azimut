@@ -644,8 +644,8 @@ def test_the_privacy_starter_is_a_page_made_once_and_found_again(client):
     assert made.status_code == 200, made.text
     said = made.json()
     assert said["created"] is True and said["title"] == "Privacy" and said["id"]
-    text = json.dumps(client.get(f"/api/cases/{cid}/notes/{said['id']}").json())
-    assert "hosted by GitHub Pages" in text and "its own server logs" in text and "## Counting readers" in text
+    text = client.get(f"/api/cases/{cid}/notes/{said['id']}").json()["text"]
+    assert text == site.privacy_notice("") and "## Counting readers" in text and "logs visitors' IP addresses" in text
     assert client.get(f"/api/cases/{cid}/notes/{said['id']}/look").json()["look"]["role"] == "page"
     again = client.post(f"/api/cases/{cid}/notes/privacy-notice").json()
     assert again == {"id": said["id"], "title": "Privacy", "created": False}
@@ -656,22 +656,25 @@ def test_the_privacy_starter_is_a_page_made_once_and_found_again(client):
     assert client.post("/api/cases/nowhere/notes/privacy-notice").status_code == 404
 
 
-@pytest.mark.parametrize("prefs, said", [
-    ({}, "does not count its readers"),
-    ({"site_stats": "goatcounter", "site_stats_code": "desk"}, "GoatCounter, which sets no cookie and keeps no personal data"),
-    ({"site_stats": "cloudflare", "site_stats_token": "0123456789abcdef"}, "Cloudflare Web Analytics, which sets no cookie"),
+@pytest.mark.parametrize("prefs, counting, stats", [
+    ({}, "This site does not count its readers.", ""),
+    ({"site_stats": "goatcounter", "site_stats_code": "desk"},
+     "Visits are counted with GoatCounter, which sets no cookie and keeps no personal data: the site sees totals only.",
+     "goatcounter"),
+    ({"site_stats": "cloudflare", "site_stats_token": "0123456789abcdef"},
+     "Visits are counted with Cloudflare Web Analytics, which stores nothing on your device: your browser sends "
+     "Cloudflare the page's address and how it loaded, and the site sees totals only.", "cloudflare"),
     # a count named but missing its code counts nobody, and the page says so
-    ({"site_stats": "goatcounter"}, "does not count its readers"),
+    ({"site_stats": "goatcounter"}, "This site does not count its readers.", ""),
 ])
-def test_the_privacy_starter_names_what_the_site_counts_as_settings_has_it(client, prefs, said):
+def test_the_privacy_starter_names_what_the_site_counts_as_settings_has_it(client, prefs, counting, stats):
     if prefs:
         assert client.put("/api/settings/prefs", json=prefs).status_code == 200
     cid = make_case(client, "Privacy")
     note = client.post(f"/api/cases/{cid}/notes/privacy-notice").json()
-    body = json.dumps(client.get(f"/api/cases/{cid}/notes/{note['id']}").json())
-    assert said in body
-    for other in ("GoatCounter", "Cloudflare"):
-        assert (other in body) == (other in said)
+    text = client.get(f"/api/cases/{cid}/notes/{note['id']}").json()["text"]
+    assert text == site.privacy_notice(stats)
+    assert f"## Counting readers\n\n{counting}\n\n## Host" in text
 
 
 def test_the_site_hub_asks_nothing_of_github_for_the_starters(client, fake):

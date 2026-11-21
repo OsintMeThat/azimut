@@ -135,18 +135,23 @@ def legal_notice() -> str:
 #: What the Privacy page says of each way the site counts its readers (`STATS`).
 COUNTING_SAID = {
     "": "This site does not count its readers.",
-    "goatcounter": "Its pages are counted with GoatCounter, which sets no cookie and keeps no personal data.",
-    "cloudflare": "Its pages are counted with Cloudflare Web Analytics, which sets no cookie.",
+    "goatcounter": "Visits are counted with GoatCounter, which sets no cookie and keeps no personal data: "
+                   "the site sees totals only.",
+    "cloudflare": "Visits are counted with Cloudflare Web Analytics, which stores nothing on your device: your "
+                  "browser sends Cloudflare the page's address and how it loaded, and the site sees totals only.",
 }
 
 
 def privacy_notice(stats: str) -> str:
-    """The starter text of the Privacy page: the host named, and what counting the site does for
-    ``stats`` (`STATS`: none, GoatCounter or Cloudflare Web Analytics), the contact line left for
-    the analyst to fill in."""
-    return ("## Host\n\nThis website is hosted by GitHub Pages. GitHub keeps its own server logs of visits.\n\n"
+    """The starter text of the Privacy page: no cookie, what counting the site does for ``stats``
+    (`STATS`: none, GoatCounter or Cloudflare Web Analytics), the host's logs, and the line for the
+    analyst's contact left to fill in."""
+    return ("## Cookies\n\nThis site sets no cookies and has no accounts, forms or newsletter.\n\n"
             f"## Counting readers\n\n{COUNTING_SAID.get(stats, COUNTING_SAID[''])}\n\n"
-            "## Contact\n\nContact:\n")
+            "## Host\n\nGitHub, which hosts the site on GitHub Pages, logs visitors' IP addresses for security, "
+            "as its documentation says.\n\n"
+            "## Your data\n\nFor any question about your data, write to:\n\n"
+            "You can also complain to your country's data protection authority.\n")
 
 
 # -- the site ------------------------------------------------------------------------------------
