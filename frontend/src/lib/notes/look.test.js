@@ -135,6 +135,9 @@ describe('a look', () => {
     expect([set.category, set.role, set.list_image]).toEqual(['Conflict Watch', 'page', 'e_ab12']);
     expect(normaliseLook(set)).toEqual(set);
     expect(normaliseLook({ role: 'article', list_image: 'not an id', category: 'x'.repeat(90) }).category).toHaveLength(60);
+    // unlisted is a role too: online, in no list
+    expect(normaliseLook({ role: 'unlisted' }).role).toBe('unlisted');
+    expect('role' in normaliseLook({ role: 'secret' })).toBe(false);
     const unset = normaliseLook({ role: 'article', list_image: 'not an id' });
     expect('role' in unset || 'list_image' in unset).toBe(false);
     expect(isPlainLook({ category: 'Harbour' })).toBe(false);

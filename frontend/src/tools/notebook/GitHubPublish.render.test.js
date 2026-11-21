@@ -7,8 +7,10 @@ const post = vi.fn();
 const put = vi.fn();
 const drawDiagrams = vi.fn(async () => ({ k1: '<svg/>' }));
 const uiState = { tool: 'notebook', settingsTab: null };
+// what Settings › Website and Settings › Publishing hold of the site's name
+const prefs = { siteTitle: '', reportName: '' };
 vi.mock('../../lib/api.js', () => ({ api: { get, post, put } }));
-vi.mock('../../lib/state.svelte.js', () => ({ uiState, toast: vi.fn() }));
+vi.mock('../../lib/state.svelte.js', () => ({ uiState, prefs, toast: vi.fn() }));
 vi.mock('../../lib/notesExport.js', () => ({ drawDiagrams, asSvg: (svg) => svg }));
 const { default: GitHubPublish } = await import('./GitHubPublish.svelte');
 
@@ -49,6 +51,8 @@ beforeEach(() => {
   target = document.createElement('div');
   document.body.append(target);
   bound = { address: '', connected: false, problem: '', busy: false, warned: false };
+  prefs.siteTitle = '';
+  prefs.reportName = '';
 });
 afterEach(() => {
   if (live) unmount(live);
@@ -249,6 +253,66 @@ it('starts the Article or Page choice from the look, and a page needs no categor
   await live.publish();
   expect(post.mock.calls.at(-1)[1]).toMatchObject({ role: 'article', category: 'Harbour' });
   for (const node of [choice('Article'), choice('Page'), category(), button('Read the site')]) expect(node.getAttribute('title')).toBeTruthy();
+});
+
+it('offers Unlisted beside Article and Page: no category or list picture, said in a line, sent as the role', async () => {
+  serve({ look: { role: 'unlisted', category: 'Harbour' } });
+  publishOk();
+  show({ entities: PICTURES });
+  await settle();
+  expect(['Article', 'Page', 'Unlisted'].map((name) => choice(name) !== undefined)).toEqual([true, true, true]);
+  // started from the look, which keeps unlisted as a role of its own
+  expect(choice('Unlisted').getAttribute('aria-checked')).toBe('true');
+  expect(target.textContent).toContain('Online at its address only, in no list, feed or sitemap.');
+  expect(category()).toBeNull();
+  expect(target.textContent).not.toContain('Picture in the list');
+  expect(choice('Unlisted').getAttribute('title')).toBe('Put it online without listing it anywhere');
+  await live.publish();
+  expect(post.mock.calls.at(-1)[1]).toMatchObject({ role: 'unlisted' });
+  choice('Article').click();
+  await settle();
+  expect(target.textContent).not.toContain('Online at its address only');
+  choice('Unlisted').click();
+  await settle();
+  await live.publish();
+  expect(post.mock.calls.at(-1)[1]).toMatchObject({ role: 'unlisted' });
+});
+
+it('says where an article will appear, naming the site by its title, else by what it falls back to', async () => {
+  serve();
+  prefs.siteTitle = 'Octo Desk';
+  show();
+  await settle();
+  expect(target.textContent).toContain('Goes on Octo Desk\'s home page and in its feed.');
+  // named, there is nothing to tell about the name
+  expect(target.textContent).not.toContain('has no name yet');
+  expect(button('Name the site')).toBeUndefined();
+  choice('Page').click();
+  await settle();
+  expect(target.textContent).toContain('Off the list, linked from the site\'s header.');
+  expect(target.textContent).not.toContain('Goes on');
+});
+
+it('says the site has no name yet, what it shows as, and opens Settings on Identity to name it', async () => {
+  serve();
+  prefs.reportName = 'A. Analyst';
+  const props = show();
+  await settle();
+  expect(target.textContent).toContain('Goes on A. Analyst\'s home page and in its feed.');
+  expect(target.textContent).toContain('Your site has no name yet: it shows as A. Analyst.');
+  expect(button('Name the site').getAttribute('title')).toBe('Open Settings › Website, to name the site');
+  button('Name the site').click();
+  expect(props.onleave).toHaveBeenCalled();
+  expect(uiState).toMatchObject({ tool: 'settings', settingsTab: 'website:identity' });
+  expect(post).not.toHaveBeenCalled();
+});
+
+it('falls back to the GitHub account when there is no Publishing name either', async () => {
+  serve();
+  show();
+  await settle();
+  expect(target.textContent).toContain('Your site has no name yet: it shows as octo.');
+  expect(target.textContent).toContain('Goes on octo\'s home page and in its feed.');
 });
 
 it('sends neither when the look could not be read and nothing was chosen, so the note\'s own stands', async () => {

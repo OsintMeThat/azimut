@@ -30,11 +30,11 @@ async function shoot(page, name) {
   await page.screenshot({ path: `${SHOTS}/${name}.png` });
 }
 
-async function stand(page, { pages = true, categories = [], edited = false, look = { style: 'report' }, editions = [] } = {}) {
+async function stand(page, { pages = true, categories = [], edited = false, look = { style: 'report' }, editions = [], settings = {} } = {}) {
   const catalog = [note('n1', 'Port strike'), picture('e_pier', 'Pier at dawn'), picture('e_harbour', 'Harbour')];
   const github = { account: 'octo', repo: 'articles', branch: 'main', site: '', base: 'https://octo.github.io/articles/',
     token: { set: true, hint: '…wxyz' }, categories };
-  await installAppFixture(page, { catalog, github });
+  await installAppFixture(page, { catalog, github, settings });
   const state = {
     text: '## What we saw\n\nSmoke over the pier at dawn.\n\n> [!internal]\n> Who told us.\n',
     pages, published: [], builds: 0, presses: [], editions, look, looks: [], lookReads: 0, checks: 0,
@@ -198,7 +198,10 @@ test('the dialog says what the note is on the site: its category, Article or Pag
   await expect(dialog.locator('#export-categories option')).toHaveCount(2);
   const role = dialog.getByRole('radiogroup', { name: 'On the site' });
   await expect(role.getByRole('radio', { name: 'Article' })).toHaveAttribute('aria-checked', 'true');
-  await expect(dialog).toContainText('In the site\'s list and its feed.');
+  // no title in Settings › Website: the site is called by its account, and the line says so, with a way to name it
+  await expect(dialog).toContainText('Goes on octo\'s home page and in its feed.');
+  await expect(dialog).toContainText('Your site has no name yet: it shows as octo.');
+  await expect(dialog.getByRole('button', { name: 'Name the site' })).toBeVisible();
   await expect(dialog.getByRole('button', { name: 'The cover picture' })).toBeVisible();
   expect(state.presses).toEqual([]);
   await shoot(page, 'dialog-github-site');
@@ -221,10 +224,14 @@ test('the dialog says what the note is on the site: its category, Article or Pag
   // the look was read as it stood before it was written, and again for the Notebook, which holds the note's look
   await expect.poll(() => state.lookReads).toBeGreaterThanOrEqual(reads + 2);
 
-  // a page is off the list: no category or picture to give
+  // a page is off the list: no category or picture to give, and an unlisted one is in no list at all
   await role.getByRole('radio', { name: 'Page' }).click();
   await expect(dialog).toContainText('Off the list, linked from the site\'s header.');
   await expect(category).toHaveCount(0);
+  await role.getByRole('radio', { name: 'Unlisted' }).click();
+  await expect(dialog).toContainText('Online at its address only, in no list, feed or sitemap.');
+  await expect(category).toHaveCount(0);
+  await expect(dialog.getByRole('button', { name: 'Pier at dawn' })).toHaveCount(0);
   await role.getByRole('radio', { name: 'Article' }).click();
   await expect(category).toHaveValue('Port news');
   await dialog.getByRole('button', { name: 'Publish to GitHub Pages' }).click();
@@ -233,6 +240,24 @@ test('the dialog says what the note is on the site: its category, Article or Pag
   expect(state.published[0]).toMatchObject({ short_name: 'port-strike', category: 'Port news', role: 'article' });
   // a note published for the first time is never checked against a folder
   expect(state.checks).toBe(0);
+});
+
+test('the dialog names the site by its title, and says nothing of a name it has', async ({ page }) => {
+  await stand(page, { settings: { site_title: 'Octo Desk' } });
+  const dialog = await openWebFolder(page);
+  await expect(dialog).toContainText('Goes on Octo Desk\'s home page and in its feed.');
+  await expect(dialog).not.toContainText('has no name yet');
+  await expect(dialog.getByRole('button', { name: 'Name the site' })).toHaveCount(0);
+});
+
+test('the dialog says the site has no name yet, and opens Settings on Identity to name it', async ({ page }) => {
+  await stand(page);
+  const dialog = await openWebFolder(page);
+  await expect(dialog).toContainText('Your site has no name yet: it shows as octo.');
+  await dialog.getByRole('button', { name: 'Name the site' }).click();
+  await expect(page).toHaveURL(/#settings/);
+  await expect(page.getByRole('tab', { name: 'Identity' })).toHaveAttribute('aria-selected', 'true');
+  await expect(page.getByLabel('Site name')).toBeVisible();
 });
 
 test('a folder changed on GitHub is said before it is replaced, and replaced on one more press', async ({ page }) => {

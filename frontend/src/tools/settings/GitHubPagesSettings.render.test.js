@@ -123,3 +123,15 @@ it('forgets the account and the token on this computer', async () => {
   expect(field('your-name').value).toBe('');
   expect(button('Forget').disabled).toBe(true);
 });
+
+it('says it is set up once an account and a token are kept, and not before', async () => {
+  get.mockResolvedValue({ github: NOTHING });
+  live = mount(GitHubPagesSettings, { target });
+  await settle();
+  expect(target.querySelector('h3 .badge')).toBeNull();
+  unmount(live);
+  get.mockResolvedValue({ github: SET });
+  live = mount(GitHubPagesSettings, { target });
+  await settle();
+  expect(target.querySelector('h3 .badge').textContent).toBe('Set up');
+});

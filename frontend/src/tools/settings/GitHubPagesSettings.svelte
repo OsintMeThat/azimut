@@ -117,7 +117,7 @@
 </script>
 
 <section class="group github" data-guide="settings.github" aria-label="GitHub Pages">
-  <h3>GitHub Pages</h3>
+  <h3>GitHub Pages{#if ready}<span class="badge ok">Set up</span>{/if}</h3>
   <p class="intro">Publish a note's web folder to your own GitHub Pages site in one press, from the export dialog. You get an address to share on X.</p>
   <label class="row" title={HELP.githubAccount}>
     <span class="row-label"><span>Account</span><span class="row-hint">{hint('Account')}</span></span>
@@ -193,6 +193,7 @@
 
 <style>
   .wide { width: 300px; flex-shrink: 0; }
+  h3 .badge { text-transform: none; letter-spacing: 0; font-weight: 500; }
   .mono { font-family: var(--font-mono); }
   label.row { cursor: default; }
   .actions { justify-content: flex-end; gap: 8px; margin-top: 4px; }

@@ -14,8 +14,11 @@
    * GitHub is not set up, a Publish shows the way to Settings › Website.
    *
    * **On the site.** The note's Category (a field suggesting what the site already uses,
-   * read again on a press of its own), whether it is an Article, in the site's list, or a
-   * Page, off it and linked from its header, and the Picture its card has in the list.
+   * read again on a press of its own), whether it is an Article, in the site's list, a
+   * Page, off it and linked from its header, or Unlisted, online at its address and in no list,
+   * and the Picture its card has in the list. One line says where the note will appear, naming the
+   * site for an Article; while Settings › Website holds no title, another says what the site is then
+   * called, with a press to name it there.
    * Each starts from the note's look; the category and the role go up with the publish and
    * are kept in the look, the picture is kept in the look as it is picked. Whatever changes
    * the look is told (`onlook`), so the Notebook never saves an older one over it.
@@ -26,7 +29,7 @@
    */
   import Icon from '../../components/Icon.svelte';
   import GitHubSetupPress from '../../components/GitHubSetupPress.svelte';
-  import { toast, uiState } from '../../lib/state.svelte.js';
+  import { prefs, toast, uiState } from '../../lib/state.svelte.js';
   import { categoriesOf, checkFolder, publishNote, readCategories, readGitHub } from '../../lib/githubPages.js';
   import {
     GITHUB_FREE, MAX_SHORT, PAGES_PUBLIC, githubReady, shortNameFrom, shortNameOf, shortNameProblem,
@@ -34,8 +37,9 @@
   import { listEditions } from '../../lib/notes/editions.svelte.js';
   import { readLook, writeLook } from '../../lib/notes/look.js';
   import { foldText } from '../../lib/textFold.js';
+  import { siteName } from '../../lib/websiteHub.js';
   import {
-    CATEGORY_MAX, CATEGORY_SAID, HAND_EDITED, LIST_IMAGE_COVER, ON_SITE, ON_SITE_SAID, WEBSITE_HELP as HELP,
+    CATEGORY_MAX, CATEGORY_SAID, HAND_EDITED, LIST_IMAGE_COVER, NO_NAME_PRESS, ON_SITE, WEBSITE_HELP as HELP, noNameSaid, onSiteSaid,
   } from '../../lib/websiteSetup.js';
 
   let {
@@ -101,6 +105,9 @@
   });
 
   const base = $derived(github?.base ?? '');
+  // what the site is called: the title of Settings › Website, else what the server falls back to (the Publishing name, then the account)
+  const named = $derived(prefs.siteTitle.trim());
+  const siteCalled = $derived(named || siteName({ report: prefs.reportName, account: github?.account }));
   // read here, and handed up: the dialog's own copies may not be reactive
   const ready = $derived(githubReady(github));
   const wrong = $derived(ready ? shortNameProblem(short) : '');
@@ -116,7 +123,7 @@
       if (!live) return;
       ownCategory = look.category ?? '';
       if (!touched.category) category = ownCategory;
-      if (!touched.role) role = look.role === 'page' ? 'page' : 'article';
+      if (!touched.role) role = look.role === 'page' || look.role === 'unlisted' ? look.role : 'article';
       listImage = look.list_image ?? '';
       loaded = true;
     }).catch(() => {});
@@ -282,9 +289,9 @@
     setUp = 'Pages is on. Press Publish to GitHub Pages.';
   }
 
-  function openSettings() {
+  function openSettings(panel = '') {
     onleave();
-    uiState.settingsTab = 'website';
+    uiState.settingsTab = panel ? `website:${panel}` : 'website';
     uiState.tool = 'settings';
   }
 </script>
@@ -308,10 +315,15 @@
       <div class="choice" role="radiogroup" aria-label="On the site">
         {#each ON_SITE as choice (choice.id)}
           <button type="button" role="radio" aria-checked={role === choice.id} class:on={role === choice.id}
-            title={choice.id === 'page' ? HELP.publishPage : HELP.publishArticle} onclick={() => chooseRole(choice.id)}>{choice.label}</button>
+            title={{ page: HELP.publishPage, unlisted: HELP.publishUnlisted }[choice.id] ?? HELP.publishArticle}
+            onclick={() => chooseRole(choice.id)}>{choice.label}</button>
         {/each}
       </div>
-      <p class="address-said">{ON_SITE_SAID[role]}</p>
+      <p class="address-said" role="status">{onSiteSaid(role, siteCalled)}</p>
+      {#if !named && siteCalled}
+        <p class="address-said">{noNameSaid(siteCalled)}
+          <button type="button" class="link" title={HELP.publishName} onclick={() => openSettings('identity')}>{NO_NAME_PRESS}</button></p>
+      {/if}
       {#if role === 'article'}
         <label class="lbl" for="export-category" title={HELP.publishCategory}>Category</label>
         <div class="category-line">
@@ -373,7 +385,7 @@
     <p class="lead"><Icon name="info" size={13} /> Publish to your own GitHub Pages site in one press: connect GitHub once, in Settings › Website.</p>
     <p class="quiet">{GITHUB_FREE}</p>
     <p class="quiet">{PAGES_PUBLIC}</p>
-    <button type="button" class="btn btn-sm" title="Open Settings on Website, where GitHub Pages is set" onclick={openSettings}>
+    <button type="button" class="btn btn-sm" title="Open Settings on Website, where GitHub Pages is set" onclick={() => openSettings()}>
       Open Settings › Website</button>
   </div>
 {/if}
@@ -392,6 +404,8 @@
   .mono { font-family: var(--font-mono); font-size: var(--fs-sm); }
   .address-said { margin: 0; min-height: 1.2em; color: var(--text-3); font-size: var(--fs-xs); }
   .address-said.bad { color: var(--danger); }
+  .link { padding: 0; border: 0; background: none; font: inherit; color: var(--accent); cursor: pointer; text-decoration: underline; }
+  .link:hover { color: var(--accent-hover); }
   .site { display: flex; flex-direction: column; gap: 4px; margin-top: 8px; }
   .choice { display: inline-flex; align-self: flex-start; border: 1px solid var(--border); border-radius: var(--r-md); overflow: hidden; }
   .choice button { padding: 3px 12px; border: none; border-left: 1px solid var(--border); background: var(--bg-1); color: var(--text-2);

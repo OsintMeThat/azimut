@@ -13,7 +13,7 @@
  * filled, so a look that never used them reads and writes as it always did. `web`,
  * how the HTML page is laid out, is one too: the server keeps it only once set. So is
  * `counter`, the GoatCounter site a map page's web folder counts its readers on. And what the
- * note is on the analyst's site, `category`, `role` (a page, off the site's lists) and
+ * note is on the analyst's site, `category`, `role` (a page, off the site's lists, or unlisted, in none) and
  * `list_image` (the picture of its line in the list), which the publish dialog chooses and the
  * Look only carries, so that saving a look never drops them.
  *
@@ -421,7 +421,7 @@ export function normaliseLook(look) {
   const footer = bandOf(given.footer);
   const counter = counterCode(given.counter) || '';
   const category = String(given.category ?? '').split(/\s+/).filter(Boolean).join(' ').slice(0, CATEGORY_MAX);
-  const role = given.role === 'page' ? 'page' : '';
+  const role = given.role === 'page' || given.role === 'unlisted' ? given.role : '';
   const listImage = /^[A-Za-z0-9_-]{1,64}$/.test(String(given.list_image ?? '')) ? String(given.list_image) : '';
   return {
     style: pick(given.style, STYLES, DEFAULT_LOOK.style),

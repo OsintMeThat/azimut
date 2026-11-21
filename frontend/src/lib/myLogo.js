@@ -10,3 +10,12 @@ import { prefs } from './state.svelte.js';
 export function myLogoUrl() {
   return `/api/settings/signature.png?rev=${prefs.logoRev || 0}.${prefs.picturesRev}`;
 }
+
+/**
+ * Where the logo the analyst's site uses is read: its own picture, else the Publishing logo,
+ * which is the server's choice (`GET /api/settings/site-logo.png`). Either picture changing
+ * changes the address, so a site logo picked or put back shows at once.
+ */
+export function siteLogoUrl() {
+  return `/api/settings/site-logo.png?v=${prefs.logoRev || 0}.${prefs.picturesRev}`;
+}

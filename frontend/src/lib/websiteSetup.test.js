@@ -1,12 +1,17 @@
 import { describe, expect, it } from 'vitest';
-import { readFileSync } from 'node:fs';
+import { readFileSync, readdirSync } from 'node:fs';
 import * as setup from './websiteSetup.js';
 import {
-  CLOUDFLARE_STEPS, GOATCOUNTER_STEPS, LEGAL_SENTENCE, ON_SITE, SITE_OWN, STATS_CHOICES, WEBSITE_HELP, beaconToken, counterCode, ownParts, updateSaid,
+  CLOUDFLARE_STEPS, GOATCOUNTER_STEPS, HUB_LEADS, HUB_TABS, LEGAL_SENTENCE, LIMITS_LINES, ON_SITE, SITE_OWN, STATS_CHOICES, WEBSITE_HELP, beaconToken,
+  counterCode, deleteSaid, deletedSaid, flowSteps, nameFallbackSaid, noNameSaid, onSiteSaid, ownParts, sizeTipSaid, updateSaid,
 } from './websiteSetup.js';
 
 const read = (path) => readFileSync(new URL(path, import.meta.url), 'utf8');
-const TAB = read('../tools/settings/WebsiteTab.svelte');
+// the hub is the tab and one component per panel
+const PANELS = readdirSync(new URL('../tools/settings/website/', import.meta.url)).filter((name) => name.endsWith('.svelte'));
+const HUB_FILES = [read('../tools/settings/WebsiteTab.svelte'), ...PANELS.map((name) => read(`../tools/settings/website/${name}`))];
+const TAB = HUB_FILES.join('\n');
+const markupOf = (source) => source.slice(source.indexOf('</script>'));
 const GITHUB = read('../tools/settings/GitHubPagesSettings.svelte');
 const WORDPRESS = read('../tools/settings/WordPressSettings.svelte');
 const GITHUB_PRESS = read('../components/GitHubSetupPress.svelte');
@@ -47,9 +52,8 @@ describe('what Settings › Website says on hover', () => {
     }
   });
 
-  it.each([['the tab', TAB, 14], ['the WordPress section', WORDPRESS, 4], ['the GitHub Pages section', GITHUB, 7],
-    ['the GitHub setup press', GITHUB_PRESS, 2], ['the publish dialog', DIALOG, 8]])('titles every control of %s', (_, source, least) => {
-    const markup = source.slice(source.indexOf('</script>'));
+  it.each([['the hub', HUB_FILES.map(markupOf).join('\n'), 30], ['the WordPress section', markupOf(WORDPRESS), 4], ['the GitHub Pages section', markupOf(GITHUB), 7],
+    ['the GitHub setup press', markupOf(GITHUB_PRESS), 2], ['the publish dialog', markupOf(DIALOG), 8]])('titles every control of %s', (_, markup, least) => {
     const controls = tags(markup, /<(input|button|select|summary|a)\b/g);
     expect(controls.length).toBeGreaterThan(least);
     for (const control of controls) expect(control, control).toMatch(/\btitle=/);
@@ -139,5 +143,93 @@ describe('Make it yours', () => {
     for (const [, text] of SITE_OWN) {
       for (const part of ownParts(text)) if (part.text) expect(part.text).not.toMatch(/[`[\]]/);
     }
+  });
+});
+
+describe('the hub\'s panels', () => {
+  it('lists the panels in order with WordPress last, each with a heading and a line', () => {
+    expect(HUB_TABS.map((tab) => tab.id)).toEqual(['overview', 'identity', 'hosting', 'articles', 'readers', 'upkeep', 'yours', 'wordpress']);
+    expect(Object.keys(HUB_LEADS).sort()).toEqual(HUB_TABS.map((tab) => tab.id).sort());
+    for (const [id, [title, sub]] of Object.entries(HUB_LEADS)) {
+      expect(title, id).toMatch(/^[A-Z]/);
+      expect(sub, id).toMatch(/\.$/);
+      expect(`${title} ${sub}`, id).not.toContain('—');
+    }
+    expect(Object.isFrozen(HUB_TABS)).toBe(true);
+    // the overview says what the engine says of the site
+    expect(HUB_LEADS.overview[1]).toContain(setup.SITE_INTRO);
+    expect(HUB_LEADS.overview[1]).toContain(setup.SITE_STAYS_YOURS);
+  });
+
+  it('says each sentence of the panels plainly: a capital, a full stop, no em-dash', () => {
+    for (const name of ['NEEDS_READ', 'READ_FIRST', 'READ_NONE', 'KINDS_NOTE', 'CATEGORIES_SAID', 'CATEGORIES_NOTE', 'CATEGORIES_UNREAD', 'CATEGORIES_NONE',
+      'PAGES_NOTE', 'PRIVACY_SAID', 'FEED_SAID', 'SITEMAP_SAID', 'FOLLOW_NONE', 'OWNERS_UNREAD', 'LIMITS_UNREAD', 'ADDRESS_NONE', 'ADDRESS_NOTE', 'DOMAIN_SAID']) {
+      expect(setup[name], name).toMatch(/^[A-Z].*\.$/);
+      expect(setup[name], name).not.toContain('—');
+    }
+    for (const [, said] of setup.HUB_TIPS) expect(said).toMatch(/^[A-Z].*\.$/);
+    for (const [, how] of setup.CHORES) expect(how).toMatch(/^[A-Z].*\.$/);
+    for (const [, said] of setup.KINDS) expect(said).toMatch(/^[A-Z].*\.$/);
+    expect(setup.HUB_TIPS).toHaveLength(3);
+    expect(setup.CHORES).toHaveLength(5);
+  });
+
+  it('names the repository and the site in the flow once they are known', () => {
+    expect(flowSteps().map(([name]) => name)).toEqual(['Write', 'Publish', 'GitHub keeps it', 'Readers find it']);
+    expect(flowSteps()[2][1]).toBe('One folder per note in your repository.');
+    expect(flowSteps({ repository: 'octo/articles', host: 'octo.example' })[2][1]).toBe('One folder per note in octo/articles.');
+    expect(flowSteps({ repository: 'octo/articles', host: 'octo.example' })[3][1]).toBe('On octo.example, in its lists, its feed and search engines.');
+  });
+
+  it('says what an empty name falls back to, as the server reads it', () => {
+    expect(nameFallbackSaid({ report: 'A. Analyst', account: 'octo' })).toBe('Empty, it takes your Publishing name, A. Analyst.');
+    expect(nameFallbackSaid({ account: 'octo' })).toBe('Empty, it takes your GitHub account, octo.');
+    expect(nameFallbackSaid()).toBe('Empty, it takes the name set in Settings › Publishing, else your GitHub account.');
+  });
+
+  it('holds the limits as the contract gives them, with GitHub\'s own page', () => {
+    expect(LIMITS_LINES).toEqual([
+      'The site: 1 GB at most.',
+      'The repository: under 1 GB recommended, its history included.',
+      'Readers: 100 GB of traffic a month, a soft limit.',
+      'Builds: 10 an hour, a soft limit.',
+      'A file: 50 MB at most in Azimut. GitHub warns from 50 MB and refuses past 100 MB.',
+      'One publish: 200 MB and 1,000 files at most.',
+      'Not for a shop, a paid service, or passwords and card numbers.',
+    ]);
+    expect(setup.LIMITS_LINK).toBe('https://docs.github.com/en/pages/getting-started-with-github-pages/github-pages-limits');
+    expect(setup.SITE_LIMIT_BYTES).toBe(1024 ** 3);
+    expect([setup.LIMITS_AMBER, setup.LIMITS_RED]).toEqual([0.8, 0.95]);
+    expect(setup.HOSTING_DOMAIN_GUIDE).toBe(ownParts(SITE_OWN[2][1]).find((part) => part.href).href);
+    expect(sizeTipSaid('850 MB', 83)).toBe('It weighs 850 MB, 83% of the 1 GB GitHub Pages serves. Limits, in Hosting, says what that means.');
+  });
+});
+
+describe('the publish dialog\'s words', () => {
+  it('offers Article, Page and Unlisted, each said in a line', () => {
+    expect(ON_SITE.map((choice) => choice.id)).toEqual(['article', 'page', 'unlisted']);
+    expect(setup.ON_SITE_SAID.unlisted).toBe('Online at its address only, in no list, feed or sitemap.');
+    expect(WEBSITE_HELP.publishUnlisted).toBe('Put it online without listing it anywhere');
+    expect(Object.isFrozen(setup.ON_SITE_SAID)).toBe(true);
+  });
+
+  it('says where a note will appear, naming the site for an article', () => {
+    expect(onSiteSaid('article', 'Octo Desk')).toBe('Goes on Octo Desk\'s home page and in its feed.');
+    expect(onSiteSaid('article')).toBe('In the site\'s list and its feed.');
+    expect(onSiteSaid('page', 'Octo Desk')).toBe('Off the list, linked from the site\'s header.');
+    expect(onSiteSaid('unlisted', 'Octo Desk')).toBe('Online at its address only, in no list, feed or sitemap.');
+    expect(noNameSaid('octo')).toBe('Your site has no name yet: it shows as octo.');
+  });
+});
+
+describe('what a delete says', () => {
+  it('names the folder and the repository in the dialog, and what was written after', () => {
+    expect(deleteSaid('port-strike', 'octo/articles')).toBe('Deletes port-strike/ from octo/articles and takes it off the lists, the feed and the sitemap, in one commit. '
+      + 'The note stays in your case: publish it again to put it back.');
+    expect(setup.DELETE_TITLE).toBe('Delete this article from the site?');
+    expect(setup.DELETE_CONFIRM).toBe('Delete from the site');
+    expect(deletedSaid('port-strike', { written: ['articles.json', 'feed.xml', 'sitemap.xml'] })).toBe('Deleted port-strike/: 3 files written.');
+    expect(deletedSaid('port-strike', { written: ['feed.xml'] })).toBe('Deleted port-strike/: 1 file written.');
+    expect(deletedSaid('port-strike', null)).toBe('Deleted port-strike/: 0 files written.');
   });
 });

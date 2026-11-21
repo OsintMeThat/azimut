@@ -4,8 +4,8 @@
  *
  * Reading, saving and forgetting the account, the repository, the branch and the token
  * stay on this machine. Only presses reach GitHub: Test connection, Create the
- * repository, Turn on Pages, Update the site, Read the categories, the check before a
- * Publish, Publish, and the watch of the page being built after a
+ * repository, Turn on Pages, Update the site, Read the categories, Read the site, Delete an
+ * article, the check before a Publish, Publish, and the watch of the page being built after a
  * publish, which asks for a bounded time. The token goes up once, when typed, and never
  * comes back: the server answers whether one is kept and its last four characters.
  */
@@ -112,6 +112,41 @@ export function startLegalNotice(caseId) {
   return api.post(`/api/cases/${caseId}/notes/legal-notice`);
 }
 
+/** Start the Privacy page in a case, naming the host and the counting: `{ id, title, created }`, as the Legal notice does. */
+export function startPrivacyNotice(caseId) {
+  return api.post(`/api/cases/${caseId}/notes/privacy-notice`);
+}
+
+/**
+ * Read the site as GitHub holds it, writing nothing: its address, its home, every card with its weight, the
+ * categories, the pages that carry Azimut's markers, the legal and privacy pages, the last change and the
+ * site's size. `{ ok: true, … }`, or `{ ok: false, needs, detail }` when the repository is missing or Pages is
+ * off. A press of Articles; nothing reads it on mount.
+ */
+export function readSite() {
+  return api.post('/api/publishing/github/site/read');
+}
+
+/**
+ * Delete a folder Azimut published from the site, in one commit that also rewrites its lists, feed and sitemap.
+ * `{ ok: true, commit, folder, removed, written, warnings }`; the server refuses any folder Azimut did not make.
+ */
+export function deleteFromSite(folder) {
+  return api.post('/api/publishing/github/site/delete', { folder });
+}
+
+/** Give the site a logo of its own: `{ site_logo: true }`. The picture is a PNG, checked as the Publishing logo is. */
+export function uploadSiteLogo(file) {
+  const body = new FormData();
+  body.append('file', file, file.name || 'site-logo.png');
+  return api.post('/api/settings/site-logo', body);
+}
+
+/** Back to the Publishing logo: `{ site_logo: false }`. */
+export function removeSiteLogo() {
+  return api.del('/api/settings/site-logo');
+}
+
 /**
  * Publish a note's public edition to the site under `shortName`. Its Mermaid diagrams
  * are drawn here as SVG first, as a web folder holds them. The answer is either
@@ -127,7 +162,7 @@ export async function publishNote(caseId, noteId, { shortName, roundPov = false,
     offline_maps: Boolean(offlineMaps),
     // what the dialog chose for the site; left out, the note's look decides
     ...(typeof category === 'string' ? { category: category.replace(/\s+/g, ' ').trim().slice(0, CATEGORY_MAX) } : {}),
-    ...(role === 'article' || role === 'page' ? { role } : {}),
+    ...(role === 'article' || role === 'page' || role === 'unlisted' ? { role } : {}),
   });
   return answer?.published ? { ...answer, address: webLink(answer.address) } : answer;
 }

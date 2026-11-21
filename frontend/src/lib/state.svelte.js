@@ -53,6 +53,7 @@ export const prefs = $state({
   siteStatsToken: '', // the Cloudflare Web Analytics token
   noteStyles: null, // what each note style carries, Settings › Publishing › Styles over Azimut's own (lib/notes/look.js)
   logoSet: false, // the logo of Settings › Publishing is on disk (azimut:my-logo)
+  siteLogoSet: false, // the site has a logo of its own, beside settings.json (Settings › Website)
   logoRev: '', // changes with the logo on disk, so its address does too (lib/myLogo.js)
   signatureSet: false, // the handwritten signature picture is on disk (azimut:my-signature)
   picturesRev: 0, // bumped when either picture changes, so what shows them asks again
@@ -153,6 +154,7 @@ export function applyPrefs(s) {
   if (s.site_stats_token !== undefined) prefs.siteStatsToken = s.site_stats_token;
   if (s.note_styles !== undefined) prefs.noteStyles = s.note_styles;
   if (s.signature !== undefined) prefs.logoSet = Boolean(s.signature);
+  if (s.site_logo !== undefined) prefs.siteLogoSet = Boolean(s.site_logo);
   if (s.logo_rev !== undefined) prefs.logoRev = s.logo_rev;
   if (s.report_signature !== undefined) prefs.signatureSet = Boolean(s.report_signature);
   if (s.update_check_on_start !== undefined) prefs.updateCheckOnStart = s.update_check_on_start;

@@ -8841,46 +8841,101 @@ changes any of it. **Reset to Azimut's defaults** gives every style back what Az
 gives it. Only what differs from Azimut's own is kept (`note_styles`), and the settings
 backup carries it.
 
-**Settings › Website.** The tab after Publishing holds everything about the site Azimut makes
-and the two places a note is sent, and all of it is optional: a site works with it left empty.
-It opens on what the site is (*Publish your notes as a simple website on GitHub Pages…*, *The site
-stays yours to change, and Azimut only ever rewrites the files it made.*), then **Site**: **Title**
-(left empty, the name set in Settings › Publishing, else the GitHub account), **Tagline** (one line
-under it on the home page) and **Made with Azimut**, on by default, which ends the home page on
-the credit and its version (an article keeps *Credit Azimut* of Publishing). They save when a
-field is left, as preferences (`site_title`, `site_tagline`, `site_credit_azimut`), and travel in
-the settings backup. **WordPress** and **GitHub Pages** follow, then **Statistics**, **Update the
-site**, **Legal notice** and a folded **Make it yours**, below.
+**Settings › Website.** The tab after Publishing is the hub of the site Azimut makes of the notes
+published to GitHub Pages, and all of it is optional: a site works with it left empty. It is wider
+than the other sections, in cards. A **hero** shows the site at a glance: its logo, name and tagline as
+they read now (what is being typed included), its address, `GitHub Pages · account/repo · branch`, the
+readers' counter in use, and, once the site is read, how many articles, maps, pages and unlisted pages it
+lists with its size, and the last change on GitHub (*Site not read yet* before), with **Open the site** and
+**Update the site**. Under it a sticky bar of panels (`data-guide="settings.website-hub"`): **Overview**,
+**Identity**, **Hosting**, **Articles** (with how many cards it holds once read), **Readers**,
+**Upkeep**, **Make it yours**, then a divider and **WordPress**. One panel shows at a time and all stay
+mounted, so what was typed or opened is still there; the arrow keys walk the bar, and the publish
+dialog's *Name the site* opens Identity (`website:identity`). The settings are the preferences
+`site_title`, `site_tagline`, `site_credit_azimut`, `site_stats`, `site_stats_code` and
+`site_stats_token`, which save when a field is left and travel in the settings backup. The words are in
+`lib/websiteSetup.js`, what is worked out of them in `lib/websiteHub.js`, one component per panel in
+`tools/settings/website/`.
 
-**Statistics.** Off by default, with three buttons: Off, GoatCounter and Cloudflare Web
-Analytics, each saying in a line what it does, free and with no cookie. GoatCounter takes the
+**The read.** **Read the site** (`POST /api/publishing/github/site/read`), on Articles and in Hosting's
+Limits, reads the branch's tree and cards and writes nothing: its address, whether the home page is
+Azimut's or the analyst's, every card with its category, kind, date, picture and weight, the
+categories, the pages that carry Azimut's markers, the legal and privacy pages, the last change and the
+size of the site and its repository. It never runs on mount. The answer is kept for the session
+(`lib/siteRead.svelte.js`), so the hero, the Overview's checklist, Identity's preview, Hosting's bars,
+Upkeep's table and the Articles list show the same site; it is dropped when the repository changes. A
+missing repository or a Pages that is off shows the press that makes it, as the export dialog does.
+
+**Overview.** *How your site works*: four steps (Write, Publish, GitHub keeps it, Readers find it, the
+last two naming the repository and the site) and the three things each publish also refreshes (the home
+list, the feed, the sitemap). *Your site, step by step* is a checklist of six: connect GitHub Pages, name
+the site, pick its logo, count readers (optional), a legal notice (optional) and publish a first
+article. Each says its state (done, to do, or *Read the site, in Articles, to tell.* for the two that need a
+read), is counted in a progress bar, and opens the panel where it is done. Three tips follow (*Try before
+you announce* with Unlisted, *Take an article down*, *Change the name or the logo*), and a fourth, *The
+site is getting big*, once the site passes 80 % of 1 GB, linking to Hosting.
+
+**Identity.** *What readers see*: **Site name** (left empty, the name set in Settings › Publishing, else
+the GitHub account, said under the field), **Tagline**, **Site logo** and **Made with Azimut** (on by
+default, which ends Azimut's home page on the credit and its version; an article keeps *Credit Azimut* of
+Publishing), beside a preview of **Article bar**, **Home page** and **Feed** that follows what is typed,
+with the site's own articles and categories once read and the page's credit as the switch says. The logo is
+a PNG of the site's own (`POST /api/settings/site-logo`, up to 2 MB, checked in the browser and again by the
+server); without one the site uses the Publishing logo, and **Use the Publishing logo**
+(`DELETE /api/settings/site-logo`) gives it back. The picture shown is the one the pages carry, read from
+`GET /api/settings/site-logo.png`. When the read found a home page of the analyst's own, a line says Azimut
+fills its lists and leaves its header alone. The settings backup carries `site-logo.png`.
+
+**Hosting.** *Where the site lives*: the **GitHub Pages** settings below, **The address** (GitHub's, or the
+analyst's own domain), how to point a domain of one's own at Pages, and **Limits**. Two bars say how much of
+GitHub's gigabyte the site and its repository (history included) weigh once read (*Read the site to see its
+size.* before, with a press), amber from 80 % and red from 95 %, over the seven limits GitHub Pages holds a
+site to and a link to GitHub's own page.
+
+**Articles.** *What's on the site*: after **Read the site**, a chip per category, then Maps, Pages and
+Unlisted when there are some, and a row per card with its picture, title, address, category, kind
+(Article, Map, Page, Unlisted), date and weight, an **Open** link and a **Delete** press. **Delete** asks
+first (*Delete this article from the site?*, saying the folder, the repository, one commit and that the note
+stays in the case), and only its confirmation reaches GitHub
+(`POST /api/publishing/github/site/delete`): the folder goes and the lists, feed, sitemap and
+`articles.json` are rewritten in the same commit, the server refusing any folder Azimut did not publish. The
+row then leaves the list and everything that counted it, and *Deleted folder/: N files written.* says what
+was done; a branch that moved on GitHub says to press again, the dialog staying open. Below, the three kinds
+(Article, Page, Unlisted) with when each is for, the **Categories** the read found with their pages, and
+**Pages every site should have**: **Start a Legal notice page** and **Start a Privacy page** each make a note of
+that name in the open case, naming the host (the Privacy page also what counting the site does), and open the
+Notebook on it; pressed again, the one made. With no case open they are disabled and say to open one first,
+and a page the read found says *On the site*. No other legal advice is given. The kind of a note is picked
+in the publish dialog, which also offers **Unlisted** (online at its address, in no list, feed, sitemap or
+`articles.json`), says where the note will appear (*Goes on Octo Desk's home page and in its feed.*) and, while
+Settings › Website holds no title, what the site then shows as, with a press to name it.
+
+**Readers.** *Who reads it*. **Count readers** is off by default, with three buttons: Off, GoatCounter and
+Cloudflare Web Analytics, each saying in a line what it does, free and with no cookie. GoatCounter takes the
 site's code (or the site's address, which is read down to the code), Cloudflare its token (or the
-snippet it shows, read down to the token); an answer that is neither is said under the field and
-never sent, one the server accepts is kept (`site_stats`, `site_stats_code`, `site_stats_token`,
-in the settings backup, the token being public: every page prints it). The steps for each, field
-by field, stay open while the code or token is missing (`lib/websiteSetup.js`). A choice with no
-code says so rather than pretend to count, and counting starts with the next publish or Update
-the site.
+snippet it shows, read down to the token), with a link to Cloudflare's dashboard; an answer that is neither is
+said under the field and never sent, one the server accepts is kept (the token being public: every page prints
+it). The steps for each, field by field, stay open while the code or token is missing
+(`lib/websiteSetup.js`). A choice with no code says so rather than pretend to count, and counting starts with
+the next publish or Update the site. **Follow and find** gives the feed and the sitemap addresses, built from the
+site's address, each with a **Copy** press.
 
-**Update the site.** One press rebuilds the home, list, feed and sitemap from the articles on
-GitHub, in one commit, with no note published (`POST /api/publishing/github/site`): it shows a
-spinner, then *The site is up to date.* or how many files were written, with what the server
-says to mind. It is disabled until GitHub is set up, saying so on hover, and a missing repository
-or a Pages that is off shows the press that makes it, as the export dialog does.
+**Upkeep.** *Keep it in shape*. **Update the site** is one press that rebuilds the home, list, feed and sitemap
+from the articles on GitHub, in one commit, with no note published (`POST /api/publishing/github/site`), also
+in the hero: it shows a spinner, then *The site is up to date.* or how many files were written and when, with
+what the server says to mind, or the last change the read found. It is disabled until GitHub is set up, saying
+so on hover, and a missing repository or a Pages that is off shows the press that makes it. **Who writes what**
+says which files are Azimut's and which stay the analyst's, with the pages the read found marked. **Usual
+chores** gives the five (take an article down, move it to another category, rename the site or change its logo,
+fix a typo on GitHub, test an article before it shows).
 
-**Legal notice.** *Depending on your country, a website may need a legal notice.*, then **Start a
-Legal notice page**: it makes a note of that name in the open case, a page of the site, naming
-GitHub as the host and leaving the publisher lines to the analyst, and opens the Notebook on it;
-pressed again it opens the one made. With no case open the press is disabled and says to open
-one first. No other legal advice is given.
+**Make it yours.** Four cards, the ways to change what Azimut makes: write one's own `index.html` and put the
+`<!-- azimut:articles -->` markers where the list goes; the same markers with `section="…"` for a page per
+category; a domain of one's own, with GitHub's guide; and `articles.json` for one's own scripts. The words are
+the engine's (`engine/site.py`), which the folder's HOW-TO-PUBLISH.md carries too, and a test holds the two to
+the same text.
 
-**Make it yours.** Folded, four ways to change what Azimut makes: write one's own `index.html`
-and put the `<!-- azimut:articles -->` markers where the list goes; the same markers with
-`section="…"` for a page per category; a domain of one's own, with GitHub's guide; and
-`articles.json` for one's own scripts. The words are the engine's (`engine/site.py`), which the
-folder's HOW-TO-PUBLISH.md carries too, and a test holds the two to the same text.
-
-**WordPress.** A group of Settings › Website connects the site a note is sent
+**WordPress.** A panel of Settings › Website, apart from the GitHub site, connects the site a note is sent
 to: **Site address** (https, or http on this computer for a test site; a WordPress.com
 address is told it needs an OAuth app Azimut does not have), **Username**, and
 **Application password**, made in WordPress under Users › Profile › Application Passwords
@@ -8889,12 +8944,12 @@ field is left and travel in the settings backup; the password goes up once, is k
 `publishing.json` beside `settings.json` (owner-only, never in a backup) and never comes
 back: the field says *Kept on this computer, ending 6789*. **Test connection** signs in
 and says *Connected as … on …*, or one sentence on what went wrong (the password refused,
-no WordPress at the address, http, a timeout, an account below Author); it is the tab's
+no WordPress at the address, http, a timeout, an account below Author); it is the panel's
 only network call, on its press. **Forget** takes the three away. *How to connect a site*
 says each field and where WordPress shows it, open while something is missing; the export
 dialog shows the same steps (`lib/wordpressSetup.js`).
 
-**GitHub Pages.** The group after it, beside WordPress, sets where a note's web folder is published:
+**GitHub Pages.** The card of Hosting sets where a note's web folder is published, with a *Set up* badge once it is:
 **Account** (the username or the organisation), **Repository** (`articles` by default),
 **Branch** (`main`) and **Token**, a fine-grained personal access token. The three names
 save when a field is left, are checked as GitHub names them, and travel in the settings
