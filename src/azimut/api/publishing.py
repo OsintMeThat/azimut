@@ -457,9 +457,9 @@ def read_github_categories() -> dict[str, Any]:
 @router.post("/github/site/read")
 def read_github_site() -> dict[str, Any]:
     """Read what the site holds, for Settings › Website › Articles: its cards (every article, map and
-    page, unlisted ones too, each with its weight and whether `/github/site/delete` takes it), its categories with the pages that list them,
-    whose home it has, its legal and privacy pages, the last commit, and what the site and the
-    repository weigh. Keeps the categories it found. Reads only."""
+    page, unlisted ones too, each with its weight and whether `/github/site/delete` takes it), its
+    categories with the pages that list them, whose home it has, its legal and privacy pages, the last
+    commit, and what the site and the repository weigh. Keeps the categories it found. Reads only."""
     target = _needs_target()
     try:
         with github.client() as http:
@@ -490,8 +490,8 @@ def delete_github_folder(body: DeleteIn) -> dict[str, Any]:
     """Take an article's folder off the site, in one commit that also rewrites the list, the feed, the
     sitemap, the marked pages and Azimut's home from the site as it will be without it. Only a folder
     Azimut published goes, file by file (422 for any other and for one too large to read, 404 for one
-    that is gone); the branch moving on GitHub
-    meanwhile is a 409 with nothing changed. The note in the case is left as it is."""
+    that is gone); the branch moving on GitHub meanwhile is a 409 with nothing changed. The note in
+    the case is left as it is."""
     target = _needs_target()
     try:
         with github.client() as http:
