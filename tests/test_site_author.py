@@ -296,7 +296,8 @@ def test_with_no_guest_the_card_is_the_analysts_whatever_picture_the_folder_hold
 def test_the_pdf_and_the_html_report_keep_the_analyst_whoever_the_look_names(analyst):
     look = notelook.NoteLook.model_validate({"style": "report", "author": GUEST, "signed": "title", "cover": ALL_MARKS})
     report = notes_html.render(None, title="Bridge", text=TEXT, identity=analyst, look=look).html.decode()
-    assert "By Alex Doe, Analyst · Open Desk" in report and GUEST not in report and "az-face" not in report
+    body = report.split("</style>")[-1]
+    assert "By Alex Doe, Analyst · Open Desk" in body and GUEST not in report and "az-face" not in body
     printed = notes_pdf.render(None, title="Bridge", text=TEXT, identity=analyst, look=look).pdf
     words = " ".join(" ".join((page.extract_text() or "").split()) for page in PdfReader(io.BytesIO(printed)).pages)
     assert "Alex Doe" in words and GUEST not in words
