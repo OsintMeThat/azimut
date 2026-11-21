@@ -1,13 +1,13 @@
 /**
  * What Settings › Website works out of what it was given, kept out of the components so that it is
- * tested without drawing: the site as the last read found it, its kinds, filters and weights, the
- * checklist of the Overview, the name the site shows and the dates it says.
+ * tested without drawing: the site as the last read found it, its kinds, chips and weights, the name
+ * the site shows and its addresses. The words are `lib/websiteSetup.js`'s.
  *
  * The read is `POST /api/publishing/github/site/read` (`lib/githubPages.js`), pressed and never
  * asked on mount; `siteReadOf` takes its answer down to what the hub shows, so a field the server
  * leaves out reads as empty rather than break a panel.
  */
-import { LIMITS_AMBER, LIMITS_RED, NEEDS_READ, SITE_LIMIT_BYTES, TOO_MANY } from './websiteSetup.js';
+import { ALL_CHIP, KIND_CHIP, LIMITS_AMBER, LIMITS_RED, SITE_LIMIT_BYTES } from './websiteSetup.js';
 import { webLink } from './wordpressSetup.js';
 
 // -- the read ---------------------------------------------------------------------------------------
@@ -20,25 +20,24 @@ const line = (value, max = 300) => String(value ?? '').replace(/\s+/g, ' ').trim
 const count = (value) => (Number.isFinite(Number(value)) && Number(value) >= 0 ? Math.floor(Number(value)) : 0);
 /** A weight in bytes, or null when the server gave none: nothing is not zero. */
 const bytesOf = (value) => {
-  if (value === null || value === undefined || value === '') return null;
+  if (value === null || value === undefined || value === '' || typeof value === 'boolean') return null;
   const n = Number(value);
   return Number.isFinite(n) && n >= 0 ? Math.floor(n) : null;
 };
 
 /**
- * One card of the site, as a row shows it; `null` for an entry with no folder. A folder may be nested
- * (`2026/01/05/slug`, as a WordPress export lays them out), and only one the server says it would delete
- * (`deletable`) gets a Delete press.
+ * One card of the site, as a row shows it; null for an entry with no folder. A folder may be nested
+ * (`2026/01/05/slug`, as a WordPress export lays them out), and only one the server says it would
+ * delete (`deletable`) gets a Delete press.
  */
 function itemOf(raw) {
-  const folder = line(raw?.folder, 200);
+  const folder = line(raw?.folder, 200).replace(/^\/+|\/+$/g, '');
   if (!folder) return null;
   return {
     folder,
     deletable: raw?.deletable === true,
     address: webLink(raw?.address),
     title: line(raw?.title) || folder,
-    summary: line(raw?.summary, 600),
     date: line(raw?.date, 20),
     dateLabel: line(raw?.date_label, 40),
     category: line(raw?.category, 60),
@@ -49,19 +48,19 @@ function itemOf(raw) {
   };
 }
 
-/** The site as the last read found it, whatever the server left out filled with nothing. */
+/**
+ * The site as the last read found it, whatever the server left out filled with nothing. `truncated` is
+ * a read GitHub cut short (`size.site` null): it lists nothing, and says nothing of the site's home.
+ */
 export function siteReadOf(answer) {
   const list = (value) => (Array.isArray(value) ? value : []);
   const last = answer?.last && typeof answer.last === 'object' ? answer.last : null;
   const size = answer?.size && typeof answer.size === 'object' ? answer.size : {};
-  const items = list(answer?.items).map(itemOf).filter(Boolean);
-  const weight = bytesOf(size.site);
   return {
     address: webLink(answer?.address),
     home: HOMES.includes(answer?.home) ? answer.home : 'none',
-    items,
-    // GitHub cut the tree short: nothing was listed, so the site's size and its home page are unknown, not zero and none
-    truncated: weight === null && items.length === 0,
+    items: list(answer?.items).map(itemOf).filter(Boolean),
+    truncated: size.site === null,
     categories: list(answer?.categories).map((entry) => ({
       name: line(entry?.name, 60),
       count: count(entry?.count),
@@ -71,74 +70,44 @@ export function siteReadOf(answer) {
     legal: line(answer?.legal, 120),
     privacy: line(answer?.privacy, 120),
     last: last && line(last.date, 40) ? { date: line(last.date, 40), message: line(last.message, 120) } : null,
-    size: { site: weight, repository: bytesOf(size.repository) },
+    size: { site: bytesOf(size.site), repository: bytesOf(size.repository) },
     warnings: list(answer?.warnings).map((warning) => line(warning, 400)).filter(Boolean),
   };
 }
 
-/** The read without one folder: its item gone, the categories counted again, the pages it was no longer named. */
+/** The read without one folder, as the next read would find it: its row gone, the categories counted again, its weight off. */
 export function withoutFolder(read, folder) {
   if (!read) return read;
-  const items = read.items.filter((item) => item.folder !== folder);
-  const removed = read.items.find((item) => item.folder === folder);
+  const gone = read.items.find((item) => item.folder === folder);
+  if (!gone) return read;
+  const items = read.items.filter((item) => item !== gone);
   const listed = new Map();
   for (const item of items) if (item.role === 'article' && item.category) listed.set(item.category, (listed.get(item.category) ?? 0) + 1);
   const named = `${folder}/`;
-  const size = read.size.site !== null && removed?.bytes != null ? Math.max(0, read.size.site - removed.bytes) : read.size.site;
   return {
     ...read,
     items,
     categories: read.categories.filter((entry) => listed.has(entry.name)).map((entry) => ({ ...entry, count: listed.get(entry.name) })),
-    marked: read.marked.filter((page) => page !== named),
     legal: read.legal === named ? '' : read.legal,
     privacy: read.privacy === named ? '' : read.privacy,
-    size: { ...read.size, site: size },
+    size: { ...read.size, site: read.size.site !== null && gone.bytes !== null ? Math.max(0, read.size.site - gone.bytes) : read.size.site },
   };
 }
 
-// -- kinds, filters and counts ----------------------------------------------------------------------
+// -- kinds, chips and counts ------------------------------------------------------------------------
 
-export const KIND_LABEL = Object.freeze({ article: 'Article', map: 'Map', page: 'Page', unlisted: 'Unlisted' });
-
-/** What a row is called: unlisted and page win over what the card is laid out as. */
+/** What a row is: unlisted and page win over what the card is laid out as. */
 export function kindOf(item) {
   if (item.role === 'unlisted') return 'unlisted';
   if (item.role === 'page') return 'page';
   return item.layout === 'map' ? 'map' : 'article';
 }
 
-/** How many of each kind the site lists. */
+/** How many of each kind the site holds. */
 export function countsOf(items) {
   const found = { article: 0, map: 0, page: 0, unlisted: 0 };
   for (const item of items) found[kindOf(item)] += 1;
   return found;
-}
-
-const plural = (n, one, many = `${one}s`) => `${n} ${n === 1 ? one : many}`;
-
-/** `5 articles · 2 maps`, the kinds the site has and no other. */
-export function countsLine(items) {
-  const found = countsOf(items);
-  const parts = [
-    found.article && plural(found.article, 'article'),
-    found.map && plural(found.map, 'map'),
-    found.page && plural(found.page, 'page'),
-    found.unlisted && `${found.unlisted} unlisted`,
-  ].filter(Boolean);
-  return parts.length ? parts.join(' · ') : 'Nothing listed yet';
-}
-
-/** The chips over the list: All, each category the site uses, then Maps, Pages and Unlisted when there are some. */
-export function chipsOf(read) {
-  if (!read) return [];
-  const found = countsOf(read.items);
-  return [
-    { id: 'all', label: 'All', count: read.items.length },
-    ...read.categories.map((entry) => ({ id: `category:${entry.name}`, label: entry.name, count: entry.count })),
-    ...(found.map ? [{ id: 'map', label: 'Maps', count: found.map }] : []),
-    ...(found.page ? [{ id: 'page', label: 'Pages', count: found.page }] : []),
-    ...(found.unlisted ? [{ id: 'unlisted', label: 'Unlisted', count: found.unlisted }] : []),
-  ];
 }
 
 /** The items a chip keeps: a category its listed articles and maps, a kind its own, All every one. */
@@ -150,6 +119,20 @@ export function itemsFor(read, filter) {
     return items.filter((item) => item.role === 'article' && item.category === name);
   }
   return items.filter((item) => kindOf(item) === filter);
+}
+
+/**
+ * The chips over the list: All, each category the site uses, then Maps, Pages and Unlisted when there
+ * are some, each counting the rows it keeps.
+ */
+export function chipsOf(read) {
+  if (!read || read.truncated || !read.items.length) return [];
+  const chip = (id, label) => ({ id, label, count: itemsFor(read, id).length });
+  return [
+    chip('all', ALL_CHIP),
+    ...read.categories.map((entry) => chip(`category:${entry.name}`, entry.name)),
+    ...Object.entries(KIND_CHIP).map(([kind, label]) => chip(kind, label)),
+  ].filter((entry) => entry.id === 'all' || entry.count > 0);
 }
 
 // -- weights ----------------------------------------------------------------------------------------
@@ -169,7 +152,7 @@ export function formatBytes(bytes) {
   return `${text} ${units[at]}`;
 }
 
-/** How much of the limit a weight is, 0 upward (it can pass 1). */
+/** How much of the gigabyte a weight is, 0 upward (it can pass 1). */
 export function shareOf(bytes, limit = SITE_LIMIT_BYTES) {
   return bytes === null || bytes === undefined ? 0 : bytes / limit;
 }
@@ -186,25 +169,7 @@ export function percentOf(share) {
   return share > 0 && share < 0.01 ? 1 : Math.round(share * 100);
 }
 
-// -- dates ------------------------------------------------------------------------------------------
-
-const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
-const two = (n) => String(n).padStart(2, '0');
-
-/** `today at 13:55`, `yesterday at 13:55`, `20 Nov at 13:55`, or `20 Nov 2025` a year or more back; '' for no date. */
-export function whenLabel(value, now = new Date()) {
-  const at = value instanceof Date ? value : new Date(value);
-  if (!value || Number.isNaN(at.getTime())) return '';
-  const day = (date) => new Date(date.getFullYear(), date.getMonth(), date.getDate()).getTime();
-  const days = Math.round((day(now) - day(at)) / 86_400_000);
-  const clock = `${two(at.getHours())}:${two(at.getMinutes())}`;
-  if (days === 0) return `today at ${clock}`;
-  if (days === 1) return `yesterday at ${clock}`;
-  if (at.getFullYear() === now.getFullYear()) return `${at.getDate()} ${MONTHS[at.getMonth()]} at ${clock}`;
-  return `${at.getDate()} ${MONTHS[at.getMonth()]} ${at.getFullYear()}`;
-}
-
-// -- the site's name and address --------------------------------------------------------------------
+// -- the site's name, address and counter -----------------------------------------------------------
 
 /** The name the site shows: the one typed, else the Publishing name, else the GitHub account (`site.from_settings`). */
 export function siteName({ title = '', report = '', account = '' } = {}) {
@@ -220,7 +185,12 @@ export function hostOf(address) {
   }
 }
 
-/** The path a row shows under a title: the address's own, else the folder. */
+/** The address of a site without its scheme and last slash, `octo.github.io/articles`. */
+export function bareAddress(address) {
+  return String(address ?? '').replace(/^https?:\/\//, '').replace(/\/$/, '');
+}
+
+/** The path a row shows under its title: the address's own, else the folder. */
 export function pathOf(item) {
   try {
     return new URL(item.address).pathname;
@@ -240,88 +210,9 @@ export function ownDomain(base) {
   return Boolean(host) && !host.endsWith('.github.io');
 }
 
-// -- the checklist ----------------------------------------------------------------------------------
-
-/**
- * Which counter is really counting: the choice is made and its code or token is there.
- * A choice with nothing to count with counts nobody.
- */
+/** Which counter really counts: the choice is made and its code or token is there. A choice with nothing to count with counts nobody. */
 export function countingOf(prefs) {
   if (prefs.siteStats === 'goatcounter' && prefs.siteStatsCode) return 'goatcounter';
   if (prefs.siteStats === 'cloudflare' && prefs.siteStatsToken) return 'cloudflare';
   return '';
-}
-
-export const COUNTER_NAME = Object.freeze({ goatcounter: 'GoatCounter', cloudflare: 'Cloudflare Web Analytics' });
-
-/**
- * The six things that make a site, each `done`, `todo` or `unknown` (it needs a read of the site),
- * with what it says and the panel it opens. `optional` ones are marked, and still counted.
- */
-export function checklist({ ready, github, title, fallback, siteLogo, logoFrom, counting, stats, read }) {
-  const articles = read ? read.items.filter((item) => item.role === 'article').length : 0;
-  // what a read could not tell is as unknown as no read: a site too big to read lists nothing, which is no verdict
-  const unread = !read || read.truncated;
-  const why = !read ? NEEDS_READ : TOO_MANY;
-  return [
-    {
-      id: 'hosting', label: 'Connect GitHub Pages', go: 'hosting',
-      state: ready ? 'done' : 'todo',
-      said: ready ? `${github.account}/${github.repo} on ${github.branch}` : 'Add the account, the repository and the token.',
-    },
-    {
-      id: 'name', label: 'Name the site', go: 'identity',
-      state: title ? 'done' : 'todo',
-      said: title || (fallback ? `It shows as ${fallback} for now.` : 'It has no name yet.'),
-    },
-    {
-      id: 'logo', label: 'Pick the site\'s logo', go: 'identity',
-      state: siteLogo ? 'done' : 'todo',
-      said: siteLogo ? 'A logo of its own.' : logoFrom === 'publishing' ? 'Uses your Publishing logo for now.' : 'No logo yet.',
-    },
-    {
-      id: 'readers', label: 'Count readers', optional: true, go: 'readers',
-      state: counting ? 'done' : 'todo',
-      said: counting ? COUNTER_NAME[counting] : stats ? `${COUNTER_NAME[stats]} is picked: paste its ${stats === 'goatcounter' ? 'code' : 'token'}.` : 'Nobody is counted.',
-    },
-    {
-      id: 'legal', label: 'A legal notice', optional: true, go: 'articles', needsRead: true,
-      state: unread ? 'unknown' : read.legal ? 'done' : 'todo',
-      said: unread ? why : read.legal ? `${read.legal} is on the site` : 'No legal notice page on the site yet.',
-    },
-    {
-      id: 'first', label: 'Publish a first article', go: 'articles', needsRead: true,
-      state: unread ? 'unknown' : articles ? 'done' : 'todo',
-      said: unread ? why : articles ? plural(articles, 'article') + ' on the site' : 'Nothing is listed on the site yet.',
-    },
-  ];
-}
-
-/** `5 of 6 done`, and how many still wait for a read (`unread`) or could not be told by one (`unknown`). */
-export function progressOf(steps) {
-  const done = steps.filter((step) => step.state === 'done').length;
-  const unknown = steps.filter((step) => step.state === 'unknown');
-  return { done, total: steps.length, unknown: unknown.length, unread: unknown.filter((step) => step.said === NEEDS_READ).length };
-}
-
-// -- who writes what --------------------------------------------------------------------------------
-
-/**
- * The files of the site and whose they are. `home` is what the last read found of the root page
- * (`azimut`, `yours` or `none`), nothing before a read; `marked` the pages that carry Azimut's markers.
- */
-export function ownersOf(read) {
-  // a read that was cut short found no page, and no home page, which says nothing of the site
-  const known = read && !read.truncated ? read : null;
-  const yours = known?.home === 'yours';
-  const pages = (known?.marked ?? []).filter((page) => page !== '');
-  return [
-    { files: ['each article\'s folder'], who: 'Azimut', text: 'Replaces it when you publish that note again, and asks first if it changed on GitHub.' },
-    { files: ['articles.json', 'feed.xml', 'sitemap.xml'], who: 'Azimut', text: 'Rewrites them at each publish and update.' },
-    yours
-      ? { files: ['index.html'], who: 'You', text: 'Fills the list between its markers, nothing else.' }
-      : { files: ['index.html'], who: 'Azimut', text: 'Writes the default home page, until you write your own.' },
-    ...(pages.length ? [{ files: pages, who: 'You', text: 'Fills the list between their markers, nothing else.' }] : []),
-    { files: ['everything else'], who: 'You', text: 'Never touches it.' },
-  ];
 }

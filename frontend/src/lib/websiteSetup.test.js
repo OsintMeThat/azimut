@@ -2,8 +2,9 @@ import { describe, expect, it } from 'vitest';
 import { readFileSync, readdirSync } from 'node:fs';
 import * as setup from './websiteSetup.js';
 import {
-  CLOUDFLARE_STEPS, GOATCOUNTER_STEPS, HUB_LEADS, HUB_TABS, LEGAL_SENTENCE, LIMITS_LINES, ON_SITE, SITE_OWN, STATS_CHOICES, WEBSITE_HELP, beaconToken,
-  counterCode, deleteSaid, deletedSaid, flowSteps, nameFallbackSaid, noNameSaid, onSiteSaid, ownParts, sizeTipSaid, updateSaid,
+  CLOUDFLARE_STEPS, GOATCOUNTER_STEPS, HUB_LEADS, HUB_TABS, LEGAL_SENTENCE, LIMITS_LINES, NEEDS_READ, ON_SITE, SITE_OWN, STATS_CHOICES, TOO_MANY,
+  WEBSITE_HELP, barSaid, beaconToken, categoryPagesSaid, checklist, counterCode, countsSaid, dayShort, deleteSaid, deletedSaid, flowSteps,
+  nameFallbackSaid, noNameSaid, onSiteSaid, ownParts, ownersOf, progressSaid, sizeTipSaid, updateSaid, whenSaid,
 } from './websiteSetup.js';
 
 const read = (path) => readFileSync(new URL(path, import.meta.url), 'utf8');
@@ -162,14 +163,16 @@ describe('the hub\'s panels', () => {
   });
 
   it('says each sentence of the panels plainly: a capital, a full stop, no em-dash', () => {
-    for (const name of ['NEEDS_READ', 'READ_FIRST', 'READ_NONE', 'KINDS_NOTE', 'CATEGORIES_SAID', 'CATEGORIES_NOTE', 'CATEGORIES_UNREAD', 'CATEGORIES_NONE',
-      'PAGES_NOTE', 'PRIVACY_SAID', 'FEED_SAID', 'SITEMAP_SAID', 'FOLLOW_NONE', 'OWNERS_UNREAD', 'LIMITS_UNREAD', 'ADDRESS_NONE', 'ADDRESS_NOTE', 'DOMAIN_SAID']) {
+    for (const name of ['NEEDS_READ', 'TOO_MANY', 'READ_FIRST', 'READ_NONE', 'KINDS_NOTE', 'CATEGORIES_SAID', 'CATEGORIES_NOTE', 'CATEGORIES_UNREAD', 'CATEGORIES_NONE',
+      'PAGES_NOTE', 'PRIVACY_SAID', 'FEED_SAID', 'SITEMAP_SAID', 'FOLLOW_NONE', 'OWNERS_UNREAD', 'OWNERS_TRUNCATED', 'LIMITS_UNREAD', 'SIZE_UNKNOWN',
+      'REPOSITORY_UNKNOWN', 'ADDRESS_NONE', 'ADDRESS_NOTE', 'DOMAIN_SAID', 'COUNTING_SAID', 'SITE_LOGO_BIG', 'SITE_LOGO_NOT_PNG']) {
       expect(setup[name], name).toMatch(/^[A-Z].*\.$/);
       expect(setup[name], name).not.toContain('—');
     }
     for (const [, said] of setup.HUB_TIPS) expect(said).toMatch(/^[A-Z].*\.$/);
     for (const [, how] of setup.CHORES) expect(how).toMatch(/^[A-Z].*\.$/);
     for (const [, said] of setup.KINDS) expect(said).toMatch(/^[A-Z].*\.$/);
+    for (const said of Object.values(setup.SITE_LOGO_SAID)) expect(said).toMatch(/^[A-Z].*\.$/);
     expect(setup.HUB_TIPS).toHaveLength(3);
     expect(setup.CHORES).toHaveLength(5);
   });
@@ -201,7 +204,9 @@ describe('the hub\'s panels', () => {
     expect(setup.SITE_LIMIT_BYTES).toBe(1024 ** 3);
     expect([setup.LIMITS_AMBER, setup.LIMITS_RED]).toEqual([0.8, 0.95]);
     expect(setup.HOSTING_DOMAIN_GUIDE).toBe(ownParts(SITE_OWN[2][1]).find((part) => part.href).href);
-    expect(sizeTipSaid('850 MB', 83)).toBe('It weighs 850 MB, 83% of the 1 GB GitHub Pages serves. Limits, in Hosting, says what that means.');
+    expect(sizeTipSaid('850 MB', 83)).toBe('It weighs 850 MB, 83% of the 1 GB GitHub Pages serves.');
+    expect(barSaid('site', '312 MB')).toBe('Site: 312 MB of 1 GB');
+    expect(barSaid('repository', '1.4 GB')).toBe('Repository with its history: 1.4 GB of 1 GB recommended');
   });
 });
 
@@ -228,8 +233,97 @@ describe('what a delete says', () => {
       + 'The note stays in your case: publish it again to put it back.');
     expect(setup.DELETE_TITLE).toBe('Delete this article from the site?');
     expect(setup.DELETE_CONFIRM).toBe('Delete from the site');
-    expect(deletedSaid('port-strike', { written: ['articles.json', 'feed.xml', 'sitemap.xml'] })).toBe('Deleted port-strike/: 3 files written.');
-    expect(deletedSaid('port-strike', { written: ['feed.xml'] })).toBe('Deleted port-strike/: 1 file written.');
-    expect(deletedSaid('port-strike', null)).toBe('Deleted port-strike/: 0 files written.');
+    expect(deletedSaid('port-strike', { removed: 4, written: ['articles.json', 'feed.xml', 'sitemap.xml'] })).toBe('Deleted port-strike/: 3 files written.');
+    expect(deletedSaid('port-strike', { removed: 4, written: ['feed.xml'] })).toBe('Deleted port-strike/: 1 file written.');
+    // a site too large to read: the folder went, and no list was written
+    expect(deletedSaid('port-strike', { removed: 3, written: [] })).toBe('Deleted port-strike/: 0 files written.');
+    // the server counted nothing it removed: only that the folder went
+    expect(deletedSaid('port-strike', { removed: null, written: ['feed.xml'] })).toBe('Deleted port-strike/.');
+    expect(deletedSaid('port-strike', null)).toBe('Deleted port-strike/.');
+  });
+});
+
+describe('the words of a count, a kind and a time', () => {
+  it('says the kinds the site holds and no other', () => {
+    expect(countsSaid({ article: 5, map: 2 })).toBe('5 articles · 2 maps');
+    expect(countsSaid({ article: 1, map: 1, page: 1, unlisted: 2 })).toBe('1 article · 1 map · 1 page · 2 unlisted');
+    expect(countsSaid({})).toBe('Nothing on the site yet');
+  });
+
+  it('says today, yesterday, a day this year and a day of another year', () => {
+    const now = new Date(2026, 10, 21, 15, 0);
+    expect(whenSaid(new Date(2026, 10, 21, 13, 55), now)).toBe('today at 13:55');
+    expect(whenSaid(new Date(2026, 10, 20, 9, 5), now)).toBe('yesterday at 09:05');
+    expect(whenSaid(new Date(2026, 2, 12, 8, 0), now)).toBe('12 Mar at 08:00');
+    expect(whenSaid(new Date(2025, 11, 31, 8, 0), now)).toBe('31 Dec 2025');
+    expect(whenSaid('', now)).toBe('');
+    expect(whenSaid('not a date', now)).toBe('');
+    expect(dayShort('2026-11-20')).toBe('20 Nov 2026');
+    expect(dayShort('2026-01-05T10:00:00Z')).toBe('5 Jan 2026');
+    expect(dayShort('')).toBe('');
+    expect(dayShort('someday')).toBe('someday');
+  });
+
+  it('names the pages that list a category, or says it has none', () => {
+    expect(categoryPagesSaid(['investigations/'])).toBe('/investigations/ lists them');
+    expect(categoryPagesSaid(['a/', 'b/'])).toBe('/a/, /b/ list them');
+    expect(categoryPagesSaid([])).toBe('no page of its own');
+  });
+});
+
+describe('the checklist', () => {
+  const read = (more = {}) => ({ truncated: false, legal: '', items: [], ...more });
+  const base = { ready: true, repository: 'octo/articles', branch: 'main', fallback: 'octo', logoFrom: 'publishing', stats: '' };
+
+  it('says each state and where it is set, and asks for a read of what it cannot tell', () => {
+    const steps = checklist(base);
+    expect(steps.map((step) => [step.id, step.state, step.go])).toEqual([
+      ['hosting', 'done', 'hosting'], ['name', 'todo', 'identity'], ['logo', 'todo', 'identity'], ['readers', 'todo', 'readers'],
+      ['legal', 'unknown', 'articles'], ['first', 'unknown', 'articles']]);
+    expect(steps.map((step) => step.said)).toEqual(['octo/articles on main', 'It shows as octo for now.', 'Uses your Publishing logo for now.',
+      'Nobody is counted.', NEEDS_READ, NEEDS_READ]);
+    expect(steps.filter((step) => step.optional).map((step) => step.id)).toEqual(['readers', 'legal']);
+    expect(progressSaid(steps)).toBe('1 of 6 done. 2 need a read of the site.');
+  });
+
+  it('says what is left to do while nothing is set', () => {
+    const steps = checklist({ ready: false, logoFrom: '', stats: 'goatcounter' });
+    expect(steps.map((step) => step.said).slice(0, 4)).toEqual(['Add the account, the repository and the token.', 'It has no name yet.', 'No logo yet.',
+      'GoatCounter is picked: paste its code.']);
+    expect(checklist({ stats: 'cloudflare' })[3].said).toBe('Cloudflare Web Analytics is picked: paste its token.');
+  });
+
+  it('is done once the site is read and holds a legal notice and an article, and the logo and the name are the site\'s own', () => {
+    const steps = checklist({ ...base, title: 'Octo Desk', siteLogo: true, counting: 'cloudflare',
+      read: read({ legal: 'legal-notice/', items: [{ role: 'article' }, { role: 'page' }, { role: 'article' }] }) });
+    expect(steps.every((step) => step.state === 'done')).toBe(true);
+    expect(steps.map((step) => step.said).slice(1)).toEqual(['Octo Desk', 'A picture of its own.', 'Cloudflare Web Analytics', 'legal-notice/ is on the site.',
+      '2 articles on the site.']);
+    expect(progressSaid(steps)).toBe('6 of 6 done.');
+  });
+
+  it('says what a read found missing, and tells nothing from a read cut short', () => {
+    const empty = checklist({ ...base, read: read() });
+    expect(empty.slice(4).map((step) => [step.state, step.said])).toEqual([['todo', 'No legal notice on the site yet.'],
+      ['todo', 'Nothing is listed on the site yet.']]);
+    const cut = checklist({ ...base, read: read({ truncated: true }) });
+    expect(cut.slice(4).map((step) => [step.state, step.said])).toEqual([['unknown', TOO_MANY], ['unknown', TOO_MANY]]);
+    // a read was made: nothing more to read for
+    expect(progressSaid(cut)).toBe('1 of 6 done.');
+  });
+});
+
+describe('who writes what', () => {
+  it('shows the default home as Azimut\'s until a read says the analyst wrote one, and lists the pages the read found marked', () => {
+    const before = ownersOf(null);
+    expect(before.map((row) => [row.files.join(' '), row.who])).toEqual([
+      ['each article\'s folder', 'azimut'], ['articles.json feed.xml sitemap.xml', 'azimut'], ['index.html', 'azimut'], ['everything else', 'you']]);
+    const yours = ownersOf({ truncated: false, home: 'yours', marked: ['', 'investigations/', 'conflict-watch/'] });
+    expect(yours.map((row) => [row.files.join(' '), row.who])).toEqual([
+      ['each article\'s folder', 'azimut'], ['articles.json feed.xml sitemap.xml', 'azimut'], ['index.html', 'you'],
+      ['investigations/ conflict-watch/', 'you'], ['everything else', 'you']]);
+    expect(yours[2].text).toBe('Fills the list between its markers, nothing else.');
+    // a read cut short found no page: the table stays as before a read
+    expect(ownersOf({ truncated: true, home: 'none', marked: [] })).toEqual(before);
   });
 });
