@@ -93,7 +93,7 @@ export function readColours(headers) {
 
 /**
  * A chart drawn: `{ svg, title, proposed, kind, checks, colours }`, or `{ error }`: `kind` is what
- * it is drawn as (`{ name, label, counts, parts, stacked, style }`). `noteId` is the note it
+ * it is drawn as (`{ name, label, counts, parts, stacked, style, roles }`). `noteId` is the note it
  * stands in, read for its look; `origins` false leaves `from:` to the editor, which reads
  * the rows of its own note as they are typed.
  */

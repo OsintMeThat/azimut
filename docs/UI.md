@@ -8058,10 +8058,14 @@ name past 40 letters, past its 12 colours), **The numbers** and **Export** (a pi
 **The numbers** is a grid to type in under the drawing, the note tables' own (`editor/rowsGrid.js`
 over `editor/tableGrid.js`): its cells drawn with their chips, links and pictures, `@`, Tab,
 Enter, the arrows and Escape, a picture of the case dropped on a cell, and *N more rows · show
-all* past 30 rows. A column the drawing does not read (the figure route names the ones it does,
-`drawn` in `X-Chart-Kind`) stays, greyed and marked *not drawn*, never refused. A column a
-timeline or a line reads as days, or a chart reads as numbers, says *Days* or *Numbers* in its
-heading, decided as the engine decides it (`lib/cellHints.js`). A cell written otherwise than
+all* past 30 rows. Each heading says in one quiet word what the drawing does with its column,
+as the figure route names it (`roles` in `X-Chart-Kind`), with a hover line: a wall's *Picture*,
+*Label*, *Words*, *Groups*, *Colour* and *Flag*; a count's *Count*, *Groups* or *Parts*, *Colour*,
+*Icon* and *Flag*; a timeline's *When*, *Words* and *Until*; a line's *Along* and *Height*;
+*Filter* for the column an `only` reads. Key figures read every column and name none. A column
+a timeline or a line reads as days, or a chart reads as numbers, says *Days* or *Numbers*
+instead, decided as the engine decides it (`lib/cellHints.js`). A column the drawing does not
+read stays, greyed and marked *not drawn*, never refused. A cell written otherwise than
 the chart prints it shows the reading after its words, muted (`5 mars 2026` shows `5 Mar
 2026`, `60+` shows `at least 60`); one that does not read is underlined with a hover saying
 what would; an empty one shows `5 Mar 2026` or `1 200`, grey. What was typed stays. Its own rows
@@ -8209,7 +8213,7 @@ again after another tool, and when the window comes back. A chart panel's card i
 says **Page data** or **Own rows**, one press apart (the page's rows copied in, or the panel's
 kept as `rows: own`), then the same **Data** line as a chart's, *Change…* opening the same
 picker, then **Settings** or **The numbers**: its rows in the same grid (`editor/panelRows.js`),
-typed in where they live, as on a chart. The check before export says, at its line, data no
+each heading saying its column's part, typed in where they live, as on a chart. The check before export says, at its line, data no
 longer in the case; the builder's drawing leaves that to the Data line (`origins: false`). A sheet or a
 note named by `data:` or `from:` is used (`engine/uses.py`): its delete names the note.
 

@@ -6,9 +6,9 @@ import { undo, undoDepth } from '@codemirror/commands';
 
 /**
  * The numbers of a chart are a grid to type in, the note tables' own: its own rows take
- * every gesture of a table, one change of the changed line, one Undo; a column the chart
- * does not draw stays, greyed and marked; rows from a table of this note or a sheet are
- * typed in where they live.
+ * every gesture of a table, one change of the changed line, one Undo; each heading says
+ * what the drawing does with its column, and a column the chart does not draw stays,
+ * greyed and marked; rows from a table of this note or a sheet are typed in where they live.
  */
 
 const server = vi.hoisted(() => ({ kind: null, rows: null, sheet: null, saved: [], asked: [] }));
@@ -49,7 +49,7 @@ const { forgetDrawings } = await import('./chartFigure.js');
 const TABLE = '| Model | Grade | Seen in |\n| --- | --- | --- |\n| Cougar | Confirmed | S01 |\n| Kirpi | Almost sure | S02 |';
 const chartOf = (lines) => ['::: chart', ...lines, ':::'].join('\n');
 const OWN = chartOf(['kind: bars', 'count: rows', 'by: Model', TABLE]);
-const BARS = { name: 'bars', label: 'Bars', counts: true, drawn: [0] };
+const BARS = { name: 'bars', label: 'Bars', counts: true, roles: ['groups', '', ''] };
 
 let view;
 let handlers;
@@ -135,7 +135,7 @@ describe('its own rows', () => {
   });
 
   it('of a picture wall with a column it does not read: As a form and Fill from the case stay one press away', async () => {
-    server.kind = { name: 'pictures', label: 'Picture wall', counts: true, per_row: true, drawn: [0, 1, 2] };
+    server.kind = { name: 'pictures', label: 'Picture wall', counts: true, per_row: true, roles: ['picture', 'label', 'words', ''] };
     const wall = chartOf(['kind: pictures', '| Picture | # | Model | State |', '| --- | --- | --- | --- |', '| [[media:e_0000000001|v1.jpg]] | #1 | Kirpi | destroyed |']);
     const picture = { id: 'e_0000000001', type: 'media', label: 'v1.jpg', attrs: { path: 'media/crops/v1.jpg', folder: 'crops', kind: 'image' } };
     await opened(`Words.\n\n${wall}\n`, [picture]);
@@ -199,7 +199,7 @@ describe('rows that live elsewhere', () => {
 });
 
 describe('what the chart reads in its rows', () => {
-  const TIMELINE = { name: 'timeline', label: 'Timeline', counts: false, drawn: [0, 1] };
+  const TIMELINE = { name: 'timeline', label: 'Timeline', counts: false, roles: ['start', 'event'] };
   const DAYS_TABLE = '| When | What happened |\n| --- | --- |\n| 5 mars 2026 | Fire |\n| 2026-03-07 | Smoke |\n| 8 Mar 2026 | Ash |\n| Mars rover | Dust |\n|  | Rain |';
   const reading = (row, col) => cell(row, col).querySelector('.cm-grid-reading')?.textContent ?? '';
   const words = (row, col) => cell(row, col).querySelector('.cm-grid-text');
@@ -209,9 +209,11 @@ describe('what the chart reads in its rows', () => {
     server.kind = TIMELINE;
     const note = `Words.\n\n${chartOf(['kind: timeline', DAYS_TABLE])}\n`;
     await opened(note);
+    // Days before its role (the day each event starts); the other column says its part
     expect(tag(0).textContent).toBe('Days');
     expect(tag(0).title).toBe('The chart reads this column as days');
-    expect(tag(1)).toBeNull();
+    expect(tag(1).textContent).toBe('Words');
+    expect(tag(1).title).toBe('The words of each event');
     expect(reading(0, 0)).toBe('5 Mar 2026');
     expect(reading(1, 0)).toBe('7 Mar 2026');
     // written as the chart prints it: nothing more to say
@@ -246,10 +248,11 @@ describe('what the chart reads in its rows', () => {
   });
 
   it('says a column of numbers, and the number the chart draws where it is written otherwise', async () => {
-    server.kind = { name: 'bars', label: 'Bars', counts: true, drawn: [0, 1] };
+    server.kind = { name: 'bars', label: 'Bars', counts: true, roles: ['groups', 'count'] };
     const table = '| Model | Count |\n| --- | --- |\n| Cougar | 1 200 |\n| Kirpi | 60+ |\n| Otokar | about 12 |\n| Ural | lots |\n| Kamaz |  |';
     await opened(`Words.\n\n${chartOf(['kind: bars', 'by: Model', 'count: Count', table])}\n`);
-    expect(tag(0)).toBeNull();
+    expect(tag(0).textContent).toBe('Groups');
+    // Numbers before its role: the count the chart adds up
     expect(tag(1).textContent).toBe('Numbers');
     expect(reading(0, 1)).toBe('');
     expect(reading(1, 1)).toBe('at least 60');
@@ -259,14 +262,40 @@ describe('what the chart reads in its rows', () => {
   });
 
   it('reads a comma as the decimal mark of a column that says so', async () => {
-    server.kind = { name: 'bars', label: 'Bars', counts: true, drawn: [0, 1] };
+    server.kind = { name: 'bars', label: 'Bars', counts: true, roles: ['groups', 'count'] };
     const table = '| Model | Count |\n| --- | --- |\n| Cougar | 1,5 |\n| Kirpi | 2,25 |\n| Otokar | 1,500 |';
     await opened(`Words.\n\n${chartOf(['kind: bars', 'by: Model', 'count: Count', table])}\n`);
     expect([0, 1, 2].map((row) => reading(row, 1))).toEqual(['1.5', '2.25', '1.5']);
   });
 
+  it('says what the owner’s wall does with each of its five columns, and follows the drawing', async () => {
+    server.kind = { name: 'pictures', label: 'Picture wall', counts: true, per_row: true, roles: ['picture', 'label', 'words', 'groups', 'colour'] };
+    const wall = chartOf(['kind: pictures', 'picture: Picture', 'label: #', 'words: State', 'by: Model', 'colour by: Grade',
+      '| Picture | # | State | Model | Grade |', '| --- | --- | --- | --- | --- |', '| e_0000000001 | #1 | destroyed | Kirpi | Confirmed |']);
+    await opened(`Words.\n\n${wall}\n`);
+    const heads = () => [...numbers().querySelectorAll('thead .cm-grid-head')];
+    expect(heads().map((head) => head.querySelector('.cm-grid-expects')?.textContent)).toEqual(['Picture', 'Label', 'Words', 'Groups', 'Colour']);
+    expect(heads().map((head) => head.querySelector('.cm-grid-expects').title)).toEqual([
+      'The picture each frame shows', 'The label under each picture', 'The words under each picture',
+      'The chart groups its rows by this column', 'Each value takes its own colour']);
+    // one tag a heading, and every column drawn
+    expect(heads().map((head) => head.querySelectorAll('.cm-grid-expects').length)).toEqual([1, 1, 1, 1, 1]);
+    expect(numbers().querySelectorAll('.cm-grid-idle-mark')).toHaveLength(0);
+    // drawn again with the parts of two columns swapped: their headings follow
+    server.kind = { ...server.kind, roles: ['picture', 'label', 'groups', 'words', 'colour'] };
+    typeIn(0, 2, 'captured');
+    await settle();
+    expect(heads().map((head) => head.querySelector('.cm-grid-expects')?.textContent)).toEqual(['Picture', 'Label', 'Groups', 'Words', 'Colour']);
+    // and with State left out: its heading says not drawn, and no part
+    server.kind = { ...server.kind, roles: ['picture', 'label', '', 'groups', 'colour'] };
+    typeIn(0, 2, 'burned');
+    await settle();
+    expect(heads().map((head) => head.querySelector('.cm-grid-expects')?.textContent ?? '')).toEqual(['Picture', 'Label', '', 'Groups', 'Colour']);
+    expect(heads()[2].querySelector('.cm-grid-idle-mark').textContent).toBe('not drawn');
+  });
+
   it('says nothing of a column the chart does not draw', async () => {
-    server.kind = { name: 'bars', label: 'Bars', counts: true, drawn: [0] };
+    server.kind = { name: 'bars', label: 'Bars', counts: true, roles: ['groups', ''] };
     const table = '| Model | Count |\n| --- | --- |\n| Cougar | 60+ |\n| Kirpi | 12 |';
     await opened(`Words.\n\n${chartOf(['kind: bars', 'count: rows', 'by: Model', table])}\n`);
     expect(tag(1)).toBeNull();

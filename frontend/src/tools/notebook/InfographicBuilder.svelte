@@ -453,7 +453,7 @@
         k,
         index,
         columns: () => (data.data?.found ? data.data.columns : null),
-        idle: () => idleOf(cardDrawn, readChart(panelText(block?.source ?? '', index)).table),
+        kind: () => cardDrawn?.kind ?? null,
         tools: () => (readForm(panelText(block?.source ?? '', index), cardDrawn?.kind?.name ?? '').form
           ? [{ label: 'As a form', iconName: 'sliders', title: 'Its rows in a form made for its kind', run: () => { cardForm = true; } }] : []),
         say: (words) => toast(words, 'warn', 6000),
@@ -470,13 +470,6 @@
     void data;
     untrack(() => rowsGrid?.refresh());
   });
-  /** The columns a panel's drawing does not read (`drawn`, its kind's), greyed in its grid. */
-  function idleOf(drawn, table) {
-    const read = drawn?.kind?.drawn;
-    if (!Array.isArray(read) || !table) return new Set();
-    return new Set(table.header.map((_, at) => at).filter((at) => !read.includes(at)));
-  }
-
   /** A panel's Change…: the infographic's data, or a source of its own, its rows read in, as one change. */
   function choosePanelSource(index, choice) {
     dataPick = null;

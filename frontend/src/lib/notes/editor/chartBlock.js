@@ -17,10 +17,11 @@
  *   colours for the case*), The numbers, Export (a picture for X, 4:5, 1:1, the PDF page,
  *   or an SVG).
  * - **The numbers**: its Data line (`editor/dataLine.js`), then its rows as a grid to type
- *   in, the note tables' own (`editor/rowsGrid.js`), a column the drawing does not read
- *   greyed and marked "not drawn". Its own rows take every gesture of a table, the form (*As
- *   a form*) where its kind's fits, and a wall's *Fill from the case…*; rows from a table of
- *   this note or a sheet are typed in where they live (`editor/throughSheet.js`).
+ *   in, the note tables' own (`editor/rowsGrid.js`), each heading saying what the drawing
+ *   does with its column, one it does not read greyed and marked "not drawn". Its own rows
+ *   take every gesture of a table, the form (*As a form*) where its kind's fits, and a
+ *   wall's *Fill from the case…*; rows from a table of this note or a sheet are typed in
+ *   where they live (`editor/throughSheet.js`).
  * - **Its source**: rows copied from a table or a sheet follow it by themselves, one step
  *   Undo takes back (`editor/follow.js`), asked as the chart comes into sight, the window
  *   comes back or the note changes.
@@ -53,7 +54,7 @@ import { button, icon, openMenu } from './gridMenu.js';
 import { heldHeight, holdHeight, moveHeight, releaseHeight } from './heights.js';
 import { blockAt } from './puts.js';
 import { blocksIn, openSource, settle } from './ranges.js';
-import { chartReads, rowsGrid, writeLocalCells, writeSheetCells } from './rowsGrid.js';
+import { chartColumns, chartReads, rowsGrid, writeLocalCells, writeSheetCells } from './rowsGrid.js';
 import { noteCase, noteHandlers } from './state.js';
 import { registerTableChart } from './tableGrid.js';
 import { gridAt } from './tablePictures.js';
@@ -663,15 +664,6 @@ class ChartBox {
     this.rowsKey = '';
   }
 
-  /** The columns the drawing does not read (`drawn` in its kind), greyed in the grid. */
-  idleColumns() {
-    const drawn = this.drawn?.kind?.drawn;
-    const width = this.chart.table?.header.length ?? 0;
-    if (!Array.isArray(drawn)) return new Set();
-    const read = new Set(drawn);
-    return new Set(Array.from({ length: width }, (_, at) => at).filter((at) => !read.has(at)));
-  }
-
   /** The presses the grid's bar ends with: As a form where the kind's form fits, and a wall's Fill from the case. */
   rowsTools() {
     if (!this.writable || this.source().mode !== OWN || !this.hasForm()) return [];
@@ -705,17 +697,17 @@ class ChartBox {
     const state = this.origin?.state;
     const typed = mode === OWN || ((mode === LOCAL || mode === SHEET) && (state === 'same' || state === 'differs'));
     const writable = this.writable && typed;
-    const idle = this.idleColumns();
+    const { roles, idle } = chartColumns(this.drawn?.kind, table);
     const reads = chartReads(this.chart, { kind: this.drawn?.kind?.name, idle });
     const key = `${mode}|${writable}|${this.rowsTools().map((one) => one.label).join(',')}`;
     if (this.rows && key === this.rowsKey && this.numbersBody.contains(this.rows.box)) {
-      this.rows.update({ ...this.rows.widget, table, info: this.info, idle, reads });
+      this.rows.update({ ...this.rows.widget, table, info: this.info, idle, roles, reads });
       return;
     }
     this.dropRows();
     const box = element('div');
     this.numbersBody.replaceChildren(box);
-    this.rows = rowsGrid(box, this.view, { host: this.rowsHost, table, info: this.info, writable, idle, reads });
+    this.rows = rowsGrid(box, this.view, { host: this.rowsHost, table, info: this.info, writable, idle, roles, reads });
     this.rowsKey = key;
   }
 

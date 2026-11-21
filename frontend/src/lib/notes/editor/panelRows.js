@@ -11,7 +11,7 @@
 import { readChart, setting } from './chartText.js';
 import { ELSEWHERE, LOCAL, OWN, SHEET, sourceOf } from './dataLine.js';
 import { dataOf, infographicsIn, inherits, readInfographic } from './infographicText.js';
-import { chartReads, rowsGrid, writeLocalCells, writeSheetCells } from './rowsGrid.js';
+import { chartColumns, chartReads, rowsGrid, writeLocalCells, writeSheetCells } from './rowsGrid.js';
 import { noteCase, noteHandlers } from './state.js';
 
 const sum = (lines) => lines.reduce((total, line) => total + line.length + 1, 0);
@@ -43,11 +43,12 @@ export function panelOrigin(text, k, index, columns) {
 
 /**
  * The grid of panel `index`'s rows in `box`. `columns()` answers the page data's columns
- * (null while unread), `idle()` the columns its drawing does not read, `tools()` the presses
- * its bar ends with (As a form), `say(words)` a refusal, `onleave(where)` Escape or a step
- * past its edge. Answers `{ refresh, destroy }`; `refresh()` follows the note.
+ * (null while unread), `kind()` the kind the panel is drawn as (`X-Chart-Kind`, null while
+ * undrawn), whose `roles` say each heading's part and grey the columns not drawn, `tools()`
+ * the presses its bar ends with (As a form), `say(words)` a refusal, `onleave(where)` Escape
+ * or a step past its edge. Answers `{ refresh, destroy }`; `refresh()` follows the note.
  */
-export function panelGrid(view, box, { k, index, columns = () => null, idle = () => new Set(), tools = () => [], say = null, onleave = null }) {
+export function panelGrid(view, box, { k, index, columns = () => null, kind = () => null, tools = () => [], say = null, onleave = null }) {
   const text = () => view.state.doc.toString();
   const noteId = () => view.state.facet(noteHandlers).noteId ?? '';
   const origin = () => panelOrigin(text(), k, index, columns());
@@ -88,8 +89,9 @@ export function panelGrid(view, box, { k, index, columns = () => null, idle = ()
     const { mode } = host;
     const writable = !view.state.readOnly && mode !== ELSEWHERE;
     const next = `${mode}|${writable}|${host.tools().map((one) => one.label).join(',')}`;
-    const skip = idle();
-    const spec = { host, table, info: view.state.field(noteCase), writable, idle: skip, reads: chartReads(at.chart, { idle: skip }) };
+    const drawn = kind();
+    const { roles, idle } = chartColumns(drawn, table);
+    const spec = { host, table, info: view.state.field(noteCase), writable, idle, roles, reads: chartReads(at.chart, { kind: drawn?.name, idle }) };
     if (grid && next === key) {
       grid.update({ ...grid.widget, ...spec });
       return;

@@ -307,6 +307,65 @@ def test_kinds_that_fit_a_table_are_named_for_the_picker():
     assert nc.fitting(plain) == ["bars", "columns", "segments", "pictograms", "silhouette rows", "waffle", "circles"]
 
 
+# -- what the drawing does with each column ------------------------------------------------------------
+
+WALL = ("| Picture | # | Model | State | Grade |\n| --- | --- | --- | --- | --- |\n"
+        "| e_aaaa1111 | #1 | Kirpi | destroyed | Confirmed |\n| e_bbbb2222 | #2 | Cougar | captured | Almost sure |")
+
+
+def _roles(body: str) -> list[str] | None:
+    return nc.column_roles(nc.read(_block(body)))
+
+
+def test_a_wall_names_each_column_it_reads_as_written_and_as_it_picks_them():
+    """The owner's wall: every column has a part, the words included, once each is written."""
+    written = "kind: pictures\npicture: Picture\nlabel: #\nwords: State\nby: Model\ncolour by: Grade\n"
+    assert _roles(written + WALL) == ["picture", "label", "groups", "words", "colour"]
+    # left out, the pictures, the label and the words are found: the first column nothing else reads
+    assert _roles("kind: pictures\n" + WALL) == ["picture", "label", "words", "", ""]
+    assert _roles("kind: pictures\nwords: none\nflag: Grade\n" + WALL) == ["picture", "label", "", "", "flag"]
+
+
+def test_a_counting_kind_names_its_count_its_groups_its_colours_icons_and_flags():
+    register = ("| # | Model | Grade | Seen in |\n| --- | --- | --- | --- |\n"
+                "| 1 | Kirpi | Confirmed | S01 |\n| 2 | Cougar | Almost sure | S02 |")
+    assert _roles(f"kind: bars\ncount: rows\nby: Model\ncolour by: Grade\n{register}") == ["", "groups", "colour", ""]
+    # no by written: the first column of words; a filter's column is read too
+    assert _roles(f"kind: bars\nonly: Seen in is S01\n{register}") == ["", "groups", "", "filter"]
+    assert _roles(_body("armoured.md")) == ["groups", "colour", "count"]
+    glyphs = "| Maker | Country | Icon |\n| --- | --- | --- |\n| Streit | ae | car |\n| Oshkosh | us | truck |"
+    assert _roles(f"kind: silhouette rows\ncount: rows\nby: Maker\nflag: Country\nicon: Icon\n{glyphs}") == [
+        "groups", "flag", "icon"]
+    # a kind of parts draws its colour column's values as its parts, its by column's without one
+    shares = "| Model | Grade | At least |\n| --- | --- | --- |\n| A | Confirmed | 3 |\n| B | Almost sure | 4 |"
+    assert _roles(f"kind: pie\nby: Model\n{shares}") == ["parts", "", "count"]
+    assert _roles(f"kind: pie\nby: Model\ncolour by: Grade\n{shares}") == ["groups", "parts", "count"]
+
+
+def test_a_timeline_and_a_line_name_their_own_columns():
+    events = ("| Day | What | Until | Kind | Note |\n| --- | --- | --- | --- | --- |\n"
+              "| 10 Sep 2026 | Mocha taken | | claim | aside |\n| 5 Oct 2026 | Offensive opens | 9 Oct 2026 | press | aside |")
+    assert _roles(f"kind: timeline\ncolour by: Kind\n{events}") == ["start", "event", "until", "colour", ""]
+    years = "| Year | Strikes | Region |\n| --- | --- | --- |\n| 2021 | 3 | A |\n| 2022 | 5 | A |\n| 2023 | 4 | B |"
+    assert _roles(f"kind: line\n{years}") == ["along", "height", ""]
+    assert _roles(f"kind: line\ncolour by: Region\n{years}") == ["along", "height", "colour"]
+
+
+def test_key_figures_read_every_column_so_none_is_named():
+    assert _roles("kind: key figures\n| Figure | What it says |\n| --- | --- |\n| 41 | vehicles |") is None
+    assert nc.column_roles(nc.read(_block("kind: bars\ntitle: No table"))) is None
+
+
+def test_every_role_the_engine_names_has_its_words_in_the_editor():
+    """The numbers word each role themselves (`lib/cellHints.js`): a role with no tag would say nothing."""
+    source = (Path(__file__).resolve().parents[1] / "frontend/src/lib/cellHints.js").read_text(encoding="utf-8")
+    for name in ("ROLES", "ROLE_TITLE"):
+        body = re.search(rf"export const {name} = \{{\n(.*?)\n\}};", source, re.S)
+        assert body is not None, name
+        keys = re.findall(r"^\s+(\w+): '[^']+',$", body.group(1), re.M)
+        assert keys == list(nc.COLUMN_ROLES), name
+
+
 # -- honesty -----------------------------------------------------------------------------------
 
 
