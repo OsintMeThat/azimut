@@ -875,7 +875,12 @@ def _at(prefix: str, address: str) -> str:
     return f"{prefix}{address}" if address.startswith("/") else address
 
 
-def render_maps(maps: list[dict[str, Any]], limit: int = 0, prefix: str = "") -> str:
+def _by(author: str, site_title: str) -> str:
+    """The author after a line's date, left out when it is the site's own name."""
+    return f" · {html.escape(author)}" if author and author != site_title else ""
+
+
+def render_maps(maps: list[dict[str, Any]], site_title: str, limit: int = 0, prefix: str = "") -> str:
     chosen = maps[:limit] if limit else maps
     if not chosen:
         return '<p class="az-empty">No maps yet.</p>'
@@ -890,7 +895,8 @@ def render_maps(maps: list[dict[str, Any]], limit: int = 0, prefix: str = "") ->
         if m["category"]:
             out.append(f'<span class="az-category">{e(m["category"])}</span>')
         out.append(f'<h2 class="az-title"><a href="{home}">{e(m["title"])}</a></h2>')
-        out.append(f'<p class="az-meta"><time datetime="{m["date"]}">{m["date_label"]}</time></p>')
+        by = _by(m.get("author", ""), site_title)
+        out.append(f'<p class="az-meta"><time datetime="{m["date"]}">{m["date_label"]}</time>{by}</p>')
         if m["summary"]:
             out.append(f'<p class="az-summary">{e(m["summary"])}</p>')
         links = [f'<a class="az-more" href="{home}">Open the map →</a>']
@@ -921,7 +927,7 @@ def render(lines: list[dict[str, Any]], site_title: str, section: str = "", limi
         if a["category"]:
             out.append(f'<span class="az-category">{e(a["category"])}</span>')
         out.append(f'<h2 class="az-title"><a href="{home}">{e(a["title"])}</a></h2>')
-        by = f' · {e(a["author"])}' if a["author"] and a["author"] != site_title else ""
+        by = _by(a["author"], site_title)
         out.append(f'<p class="az-meta"><time datetime="{a["date"]}">{a["date_label"]}</time>{by}</p>')
         if a["summary"]:
             out.append(f'<p class="az-summary">{e(a["summary"])}</p>')
@@ -954,7 +960,7 @@ def fill(text: str, lines: list[dict[str, Any]], maps: list[dict[str, Any]], sit
         except ValueError:
             limit = 0
         if attrs.get("layout") == "map":
-            body = render_maps(maps, limit, prefix)
+            body = render_maps(maps, site_title, limit, prefix)
         else:
             body = render(lines, site_title, attrs.get("section", ""), limit, prefix)
         return f"<!-- azimut:articles{m.group('attrs')}-->\n{body}\n<!-- /azimut:articles -->"

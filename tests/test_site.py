@@ -194,16 +194,19 @@ def test_a_limit_and_an_empty_list_say_what_they_are():
     lines = site.listing([_card(f"a{n}", date=f"2026-01-0{n}") for n in range(1, 5)])
     assert site.render(lines, "Site", limit=2).count('<li class="az-item') == 2
     assert site.render(lines, "Site", section="Nothing") == '<p class="az-empty">No articles yet.</p>'
-    assert site.render_maps([]) == '<p class="az-empty">No maps yet.</p>'
+    assert site.render_maps([], "Site") == '<p class="az-empty">No maps yet.</p>'
     page = '<!-- azimut:articles limit="1" --><!-- /azimut:articles -->\n<!-- azimut:articles layout="map" --><!-- /azimut:articles -->'
     filled = site.fill(page, lines, [], "Site")
     assert filled.count('<li class="az-item') == 1 and "No maps yet." in filled
 
 
-def test_the_authors_name_shows_unless_it_is_the_sites_own():
+def test_the_authors_name_shows_unless_it_is_the_sites_own_on_articles_and_maps():
     lines = site.listing([_card("a", author="Someone"), _card("b", author="Site", date="2026-01-01")])
     shown = site.render(lines, "Site")
     assert "· Someone" in shown and "· Site" not in shown
+    maps = site.map_view([_card("m", layout="map", author="Guest"), _card("n", layout="map", author="Site")])
+    drawn = site.render_maps(maps, "Site")
+    assert "· Guest" in drawn and "· Site" not in drawn
 
 
 def test_a_site_under_a_path_links_under_it_and_a_domain_root_links_as_the_prototype_did():
