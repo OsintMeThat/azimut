@@ -562,7 +562,7 @@ def build_full_case(
     look = client.put(
         f"/api/cases/{case_id}/notes/{full.note_id}/look",
         json={"style": "report", "tlp": "amber", "toc": True, "cover": {"on": True, "subtitle": "Witness"},
-              "font": "book", "size": "large"},
+              "font": "book", "size": "large", "category": "Sources", "role": "page"},
     )
     assert look.status_code == 200, look.text
     case_look = client.put(f"/api/cases/{case_id}/notes/case/look", json={"style": "journal"})

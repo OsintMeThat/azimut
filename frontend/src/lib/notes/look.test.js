@@ -128,6 +128,24 @@ describe('a look', () => {
     expect(server).toMatch(/LATE_KEYS = \([^)]*"web"/);
   });
 
+  it('carries what the note is on the site, so that saving a look never drops it', () => {
+    const plain = normaliseLook(null);
+    for (const key of ['category', 'role', 'list_image']) expect(key in plain).toBe(false);
+    const set = normaliseLook({ category: '  Conflict   Watch ', role: 'page', list_image: 'e_ab12' });
+    expect([set.category, set.role, set.list_image]).toEqual(['Conflict Watch', 'page', 'e_ab12']);
+    expect(normaliseLook(set)).toEqual(set);
+    expect(normaliseLook({ role: 'article', list_image: 'not an id', category: 'x'.repeat(90) }).category).toHaveLength(60);
+    const unset = normaliseLook({ role: 'article', list_image: 'not an id' });
+    expect('role' in unset || 'list_image' in unset).toBe(false);
+    expect(isPlainLook({ category: 'Harbour' })).toBe(false);
+    // a template carries no picture of a case: not the list's either
+    expect(templateLook({ category: 'Harbour', list_image: 'e_ab12' })).toMatchObject({ category: 'Harbour' });
+    expect('list_image' in templateLook({ list_image: 'e_ab12' })).toBe(false);
+    const server = readFileSync(new URL('../../../../src/azimut/engine/notelook.py', import.meta.url), 'utf8');
+    expect(server).toMatch(/LATE_KEYS = \([^)]*"category"[^)]*"role"[^)]*"list_image"/);
+    expect(server).toContain('CATEGORY_MAX = 60');
+  });
+
   it('lists the sources at the end for every style but Plain, unless set', () => {
     expect(sourcesOn(null)).toBe(false);
     expect(sourcesOn({ style: 'plain' })).toBe(false);

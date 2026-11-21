@@ -1,0 +1,116 @@
+{
+ "format": "azimut-site/1",
+ "site": {
+  "title": "OSINT Me That",
+  "address": "https://osintmethat.com/"
+ },
+ "articles": [
+  {
+   "address": "/bab-el-mandab-2026/",
+   "title": "The fall of the Bab al-Mandab front, Sep-Nov 2026",
+   "summary": "On 9 October 2026, Saudi Arabia's ambassador to Yemen wrote on X that Bab al-Mandab had been \"cleared of the remnants of the Houthi militia\" (his post, 9 Oct), as AFP reported the next day (AFP via…",
+   "date": "2026-11-20",
+   "date_label": "20 November 2026",
+   "category": "Conflict Watch",
+   "author": "OSINT Me That",
+   "layout": "article",
+   "image": "/bab-el-mandab-2026/cover.jpg",
+   "maps": [
+    {
+     "title": "The Bab al-Mandab front on one map",
+     "address": "/bab-el-mandab-2026-map/"
+    }
+   ]
+  },
+  {
+   "address": "/2026/08/13/installing-azimut-the-complete-guide/",
+   "title": "Installing Azimut: the complete guide",
+   "summary": "Azimut keeps a whole open-source investigation in one plain folder on your own machine: the media you collected, the examination you ran on it, the geolocation you established, the entities and links you confirmed, the notes you wrote, and…",
+   "date": "2026-08-13",
+   "date_label": "13 August 2026",
+   "category": "Methods & Tools",
+   "author": "OSINT Me That",
+   "layout": "article",
+   "image": "/2026/08/13/installing-azimut-the-complete-guide/cover.jpg",
+   "maps": []
+  },
+  {
+   "address": "/2026/03/12/operation-absolute-resolve-the-night-maduro-was-taken-a-full-osint-reconstruction/",
+   "title": "Operation Absolute Resolve: The Night Maduro was Taken – A Full OSINT Reconstruction",
+   "summary": "On January 3, 2026, at 02:00 AM , the fate of Venezuela was irrevocably altered. This dossier marks the culmination of an extensive research cycle into Operation Absolute Resolve . It stands as a direct sequel to the previous investigation…",
+   "date": "2026-03-12",
+   "date_label": "12 March 2026",
+   "category": "Investigations",
+   "author": "OSINT Me That",
+   "layout": "article",
+   "image": "/2026/03/12/operation-absolute-resolve-the-night-maduro-was-taken-a-full-osint-reconstruction/cover.jpg",
+   "maps": [
+    {
+     "title": "Operation Absolute Resolve, the map",
+     "address": "/operation-absolute-resolve-map/"
+    }
+   ]
+  },
+  {
+   "address": "/2026/01/12/the-shadow-of-operation-absolute-resolve/",
+   "title": "The shadow of Operation Absolute Resolve",
+   "summary": "On January 3rd, 2026 , the world woke up to a scene that felt like geopolitical fiction: Nicolás Maduro , escorted by U.S. Federal Agents on the tarmac of New York Stewart International Airport .",
+   "date": "2026-01-12",
+   "date_label": "12 January 2026",
+   "category": "Investigations",
+   "author": "OSINT Me That",
+   "layout": "article",
+   "image": "/2026/01/12/the-shadow-of-operation-absolute-resolve/cover.jpg",
+   "maps": [
+    {
+     "title": "The map on Google My Maps",
+     "address": "https://www.google.com/maps/d/viewer?mid=18l5LA98CVgFqlXxnzPogEfny_a6wDiQ"
+    }
+   ]
+  },
+  {
+   "address": "/2026/01/05/lost-in-low-res-how-to-reconstruct-rare-military-patches-using-osint-and-ai/",
+   "title": "Lost in Low-Res: How to Reconstruct Rare Military Patches using OSINT and AI.",
+   "summary": "Some people wonder how to obtain patches when official info is almost impossible to find. Here’s a fun step-by-step method using OSINT with AI enhancement.",
+   "date": "2026-01-05",
+   "date_label": "5 January 2026",
+   "category": "Methods & Tools",
+   "author": "OSINT Me That",
+   "layout": "article",
+   "image": "/2026/01/05/lost-in-low-res-how-to-reconstruct-rare-military-patches-using-osint-and-ai/cover.jpg",
+   "maps": []
+  }
+ ],
+ "maps": [
+  {
+   "address": "/bab-el-mandab-2026-map/",
+   "title": "The Bab al-Mandab front on one map",
+   "summary": "Every vehicle left on the road and every video geolocated on this front, September to November 2026. Read the full analysis.",
+   "date": "2026-11-20",
+   "date_label": "20 November 2026",
+   "category": "Conflict Watch",
+   "author": "OSINT Me That",
+   "layout": "map",
+   "image": "/bab-el-mandab-2026-map/cover.jpg",
+   "article": {
+    "title": "The fall of the Bab al-Mandab front, Sep-Nov 2026",
+    "address": "/bab-el-mandab-2026/"
+   }
+  },
+  {
+   "address": "/operation-absolute-resolve-map/",
+   "title": "Operation Absolute Resolve, the map",
+   "summary": "Every located point of the night of 3 January 2026 in Venezuela, on one interactive map.",
+   "date": "2026-03-12",
+   "date_label": "12 March 2026",
+   "category": "Investigations",
+   "author": "OSINT Me That",
+   "layout": "map",
+   "image": "/operation-absolute-resolve-map/cover.jpg",
+   "article": {
+    "title": "Operation Absolute Resolve: The Night Maduro was Taken – A Full OSINT Reconstruction",
+    "address": "/2026/03/12/operation-absolute-resolve-the-night-maduro-was-taken-a-full-osint-reconstruction/"
+   }
+  }
+ ]
+}

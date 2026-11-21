@@ -22,7 +22,10 @@ holds something: a reader that drops them prints the style's own. And how the HT
 page is laid out (`web`): an article, a story whose pictures hold still while their
 words scroll by, or a map page, the note's map on the whole page under its title. The PDF
 never reads it. A map page may name the GoatCounter site that counts its readers (`counter`),
-which only its web folder calls, once read online. And which list of sources the document ends on
+which only its web folder calls, once read online. And what the note is on the analyst's site
+(`category`, `role`, `list_image`): the one category its list files it under, whether it is an
+article in the list or a page off it, and the picture its line in the list shows in place of the
+cover's (`engine/site.py`); the PDF and the page itself never read them. And which list of sources the document ends on
 (`sources_list`): the generated one, the note's own section, or both; and the same for the
 How this was made and Geolocations annexes against the note's own Method or Geolocations
 section (`method_list`, `geolocations_list`).
@@ -88,6 +91,12 @@ COUNTER = r"^([a-z0-9](?:[a-z0-9-]{0,48}[a-z0-9])?)?$"
 #: accessed), `web` the outlet, the title and the day, `short` the form notes always had.
 SourcesStyle = Literal["", "academic", "web", "short"]
 SOURCES_STYLES: tuple[str, ...] = ("academic", "web", "short")
+#: What a note is on the analyst's site: "" or "article", in the site's list, or "page", which
+#: stays off every list and is linked from the site's header (`engine/site.py`). An article is
+#: stored as nothing, like every default.
+Role = Literal["", "article", "page"]
+#: The longest a category's name is, in characters.
+CATEGORY_MAX = 60
 #: How the check before export names the outside links with no archived copy or no seen
 #: day: "" the style's own, `each` one line per link, `grouped` one line per kind.
 LinkCheck = Literal["", "each", "grouped"]
@@ -109,7 +118,7 @@ ANNEXES: tuple[str, ...] = ("geolocations", "credits", "method", "limits", "edit
 #: Keys a look writes only once they leave their default, so a look that never used
 #: them is stored, served and bundled exactly as an older Azimut wrote it.
 LATE_KEYS = ("font", "size", "sources", "web", "sources_style", "link_check", "sources_list", "method_list",
-             "geolocations_list", "signed", "counter")
+             "geolocations_list", "signed", "counter", "category", "role", "list_image")
 #: The page bands under the same rule: one with nothing in it is not written.
 BAND_KEYS = ("header", "footer")
 #: The longest a header or footer slot is, in characters: one line of a page's edge.
@@ -359,6 +368,13 @@ class NoteLook(BaseModel):
     signed: Signed = ""
     #: The GoatCounter site a map page's web folder counts its readers with (`COUNTER`).
     counter: str = Field(default="", pattern=COUNTER)
+    #: The one category the site's list files the note under; "" for none.
+    category: str = Field(default="", max_length=CATEGORY_MAX)
+    #: An article, or a page that stays off the site's lists.
+    role: Role = ""
+    #: A case media entity id: the picture the note's line in the site's list shows in place of
+    #: the cover's, or "" for the cover picture.
+    list_image: str = Field(default="", max_length=64, pattern=r"^[A-Za-z0-9_-]*$")
     header: PageBand = Field(default_factory=PageBand)
     footer: PageBand = Field(default_factory=PageBand)
 
@@ -387,6 +403,16 @@ class NoteLook(BaseModel):
     @classmethod
     def counter_code(cls, value: Any) -> Any:
         return value.strip().lower() if isinstance(value, str) else value
+
+    @field_validator("role", mode="before")
+    @classmethod
+    def article_is_the_default(cls, value: Any) -> Any:
+        return "" if value == "article" else value
+
+    @field_validator("category", mode="before")
+    @classmethod
+    def one_line_category(cls, value: Any) -> Any:
+        return " ".join(value.split()) if isinstance(value, str) else value
 
     @property
     def is_default(self) -> bool:
@@ -429,6 +455,13 @@ class TemplateLook(NoteLook):
         if cover.date:
             raise ValueError("a template's cover cannot hold a date")
         return cover
+
+    @field_validator("list_image")
+    @classmethod
+    def no_list_picture(cls, value: str) -> str:
+        if value:
+            raise ValueError("a template cannot hold a picture from a case")
+        return value
 
 
 def parse(value: Any) -> NoteLook | None:
@@ -519,6 +552,8 @@ def save(case: "Case", note_id: str, look: NoteLook) -> None:
 
 
 def cover_image_ids(look: NoteLook | None) -> list[str]:
-    """The media a look shows on its cover, which the note derives from as it does
-    from a picture in its text."""
-    return [look.cover.image] if look is not None and look.cover.image else []
+    """The media a look shows on its cover and in the site's list, which the note derives
+    from as it does from a picture in its text."""
+    if look is None:
+        return []
+    return [one for one in dict.fromkeys((look.cover.image, look.list_image)) if one]
