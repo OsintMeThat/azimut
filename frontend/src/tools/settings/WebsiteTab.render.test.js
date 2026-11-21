@@ -270,7 +270,7 @@ describe('the hero', () => {
 describe('the Overview', () => {
   const steps = () => [...panel('overview').querySelectorAll('.check li')];
   const stepOf = (label) => steps().find((node) => node.textContent.includes(label));
-  const tips = () => [...panel('overview').querySelectorAll('.hub-col h3')].map((node) => node.textContent);
+  const cards = () => [...panel('overview').querySelectorAll('.hub-card h3')].map((node) => node.textContent);
 
   it('shows the four steps from a note to a reader, naming the repository and the site', async () => {
     await show();
@@ -317,17 +317,20 @@ describe('the Overview', () => {
     expect(panel('overview').textContent).not.toContain('need a read');
   });
 
-  it('gives the three tips, and one more once the site passes four fifths of what Pages serves, opening Hosting', async () => {
+  it('holds no tips but the checklist, and one card beside it once the site passes four fifths of what Pages serves', async () => {
     await show();
-    expect(tips()).toEqual(['Try before you announce', 'Take an article down', 'Change the name or the logo']);
-    expect(panel('overview').textContent).toContain('Publish as Unlisted');
+    // what each press does is said beside it in its own panel, not in cards here
+    expect(cards()).toEqual(['Your site, step by step']);
+    expect(panel('overview').querySelector('.hub-card.tip')).toBeNull();
+    expect(panel('overview').querySelector('.hub-grid')).toBeNull();
     // 700 MB of the gigabyte is under four fifths
     await readSite({ ...READ, size: { site: 700 * MB, repository: null } });
     await open('Overview');
-    expect(tips()).toHaveLength(3);
+    expect(cards()).toEqual(['Your site, step by step']);
     await readSite({ ...READ, size: { site: 850 * MB, repository: null } });
     await open('Overview');
-    expect(tips()[0]).toBe('The site is getting big');
+    expect(cards()).toEqual(['Your site, step by step', 'The site is getting big']);
+    expect(panel('overview').querySelector('.hub-grid')).not.toBeNull();
     expect(panel('overview').textContent).toContain('It weighs 850 MB, 83% of the 1 GB GitHub Pages serves.');
     button('See the limits', panel('overview')).click();
     await settle();
@@ -339,6 +342,13 @@ describe('Identity', () => {
   const name = () => panel('identity').querySelector('#hub-site-name');
   const tagline = () => panel('identity').querySelector('#hub-site-tagline');
   const preview = () => panel('identity').querySelector('.paper');
+
+  it('says beside the name and the logo when a change of them reaches the site', async () => {
+    await show();
+    const card = panel('identity').querySelector('section[aria-label="Site"]');
+    expect(card.querySelector('.when-said').textContent)
+      .toBe('A new name or logo reaches the lists at the next publish or Update the site, and an article\'s bar when it is published again.');
+  });
 
   it('saves the name and the tagline once the field is left, spaces gathered, and says what an empty name falls back to', async () => {
     const { savePrefs: save } = await show();

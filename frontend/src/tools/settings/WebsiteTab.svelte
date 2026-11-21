@@ -4,7 +4,7 @@
    *
    * A hero shows the site at a glance (its logo, name, address, size and last change, with Open the
    * site and Update the site) over a bar of panels: **Overview** (how it works, a checklist of what is
-   * set, the tips), **Identity** (name, tagline, logo and credit with a live preview), **Hosting**
+   * set), **Identity** (name, tagline, logo and credit with a live preview), **Hosting**
    * (GitHub Pages, the address, the limits), **Articles** (what the site holds, read on a press),
    * **Readers** (counting, the feed and the sitemap), **Upkeep** (Update the site, who writes what,
    * the chores), **Make it yours**, then **WordPress**, which stands apart. Every panel stays mounted

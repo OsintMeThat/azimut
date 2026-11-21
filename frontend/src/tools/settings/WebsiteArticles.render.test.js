@@ -222,6 +222,18 @@ describe('reading the site', () => {
 });
 
 describe('what the read lists', () => {
+  it('says under the list, by its Delete presses, what a delete does, and nothing before a read', async () => {
+    await show();
+    expect(panel().querySelector('.del-said')).toBeNull();
+    await readSite();
+    expect(panel().querySelector('.del-said').textContent)
+      .toBe('Delete takes an article down, and off the lists, the feed and the sitemap, in one commit.');
+    // a list with nothing Azimut published has no Delete, and nothing to say of it
+    serve({ read: { ...READ, items: READ.items.map((entry) => ({ ...entry, deletable: false })) } });
+    await readSite();
+    expect(panel().querySelector('.del-said')).toBeNull();
+  });
+
   it('shows a row for each card with its picture, title, address, category, kind, date and weight', async () => {
     await show();
     await readSite();

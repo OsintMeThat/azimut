@@ -183,11 +183,15 @@ describe('the hub\'s panels', () => {
       expect(setup[name], name).toMatch(/^[A-Z].*\.$/);
       expect(setup[name], name).not.toContain('—');
     }
-    for (const [, said] of setup.HUB_TIPS) expect(said).toMatch(/^[A-Z].*\.$/);
     for (const [, how] of setup.CHORES) expect(how).toMatch(/^[A-Z].*\.$/);
     for (const [, said] of setup.KINDS) expect(said).toMatch(/^[A-Z].*\.$/);
     for (const said of Object.values(setup.SITE_LOGO_SAID)) expect(said).toMatch(/^[A-Z].*\.$/);
-    expect(setup.HUB_TIPS).toHaveLength(3);
+    // what the Overview's tips said stands beside the press it is about, and the tips are gone
+    expect(setup.HUB_TIPS).toBeUndefined();
+    for (const said of [setup.ON_SITE_TRY, setup.DELETE_SAID, setup.IDENTITY_SAID]) {
+      expect(said).toMatch(/^[A-Z].*\.$/);
+      expect(said).not.toContain('—');
+    }
     expect(setup.CHORES).toHaveLength(5);
   });
 

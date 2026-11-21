@@ -1,9 +1,9 @@
 <script>
   /**
-   * The Overview: the four steps from a note to a reader, the checklist of what is set and what is
-   * left, each step saying its state and opening the panel where it is done, and the tips, with one
-   * more once the site passes four fifths of what GitHub Pages serves. What only a read of the site
-   * can tell says so until it is read.
+   * The Overview: the four steps from a note to a reader and the checklist of what is set and what is
+   * left, each step saying its state and opening the panel where it is done, with a card beside it once
+   * the site passes four fifths of what GitHub Pages serves. What only a read of the site can tell says so
+   * until it is read. What a press does is said beside the press, in its own panel, not here.
    */
   import Icon from '../../../components/Icon.svelte';
   import HubCard from './HubCard.svelte';
@@ -11,7 +11,7 @@
   import { siteRead } from '../../../lib/siteRead.svelte.js';
   import { formatBytes, hostOf, percentOf, shareOf } from '../../../lib/websiteHub.js';
   import {
-    CHECKLIST_TITLE, FLOW_AFTER, FLOW_REFRESHES, HUB_LEADS, HUB_TABS, HUB_TIPS, LIMITS_AMBER, OPTIONAL, SIZE_TIP_GO, SIZE_TIP_TITLE,
+    CHECKLIST_TITLE, FLOW_AFTER, FLOW_REFRESHES, HUB_LEADS, HUB_TABS, LIMITS_AMBER, OPTIONAL, SIZE_TIP_GO, SIZE_TIP_TITLE,
     WEBSITE_HELP as HELP, checklist, flowSteps, progressSaid, sizeTipSaid,
   } from '../../../lib/websiteSetup.js';
 
@@ -56,7 +56,7 @@
   <p class="after">{FLOW_AFTER}
     {#each FLOW_REFRESHES as what (what)}<span class="hub-pill">{what}</span>{/each}</p>
 
-  <div class="hub-grid hub-gap">
+  <div class="hub-gap" class:hub-grid={big}>
     <HubCard title={CHECKLIST_TITLE} label={CHECKLIST_TITLE}>
       <p>{progressSaid(steps)}</p>
       <div class="progress" role="progressbar" aria-label="Steps done" aria-valuemin="0" aria-valuemax={steps.length} aria-valuenow={done}>
@@ -78,17 +78,12 @@
       </ul>
     </HubCard>
 
-    <div class="hub-col">
-      {#if big}
-        <HubCard title={SIZE_TIP_TITLE} label={SIZE_TIP_TITLE} tip>
-          <p>{big}</p>
-          <p><button type="button" class="hub-go" onclick={() => ongo('hosting')} title={HELP.hubGo}>{SIZE_TIP_GO}<Icon name="chevronRight" size={12} /></button></p>
-        </HubCard>
-      {/if}
-      {#each HUB_TIPS as [tip, said] (tip)}
-        <HubCard title={tip} tip><p>{said}</p></HubCard>
-      {/each}
-    </div>
+    {#if big}
+      <HubCard title={SIZE_TIP_TITLE} label={SIZE_TIP_TITLE} tip>
+        <p>{big}</p>
+        <p><button type="button" class="hub-go" onclick={() => ongo('hosting')} title={HELP.hubGo}>{SIZE_TIP_GO}<Icon name="chevronRight" size={12} /></button></p>
+      </HubCard>
+    {/if}
   </div>
 </HubPanel>
 

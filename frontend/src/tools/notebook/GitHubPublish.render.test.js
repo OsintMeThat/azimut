@@ -375,6 +375,15 @@ it('offers Unlisted beside Article and Page: no category or list picture, said i
   expect(post.mock.calls.at(-1)[1]).toMatchObject({ role: 'unlisted' });
 });
 
+it('says beside the role choice that Unlisted is how a page is tried', async () => {
+  serve();
+  show();
+  await settle();
+  const line = target.querySelector('.choice-line');
+  expect(line.querySelector('[role="radiogroup"]')).not.toBeNull();
+  expect(line.querySelector('.choice-said').textContent).toBe('Unlisted lets you read it online before you announce it.');
+});
+
 it('starts a note never published to this site on Unlisted, and on the role it last went up with after', async () => {
   serve({ editions: [], look: {} });
   publishOk();

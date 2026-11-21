@@ -11,7 +11,7 @@
   import { removeSiteLogo, uploadSiteLogo } from '../../../lib/githubPages.js';
   import { hostOf } from '../../../lib/websiteHub.js';
   import {
-    CREDIT_HINT, CREDIT_LABEL, HUB_LEADS, OWN_HOME_PILL, SITE_LOGO_BIG, SITE_LOGO_LABEL, SITE_LOGO_NOT_PNG, SITE_LOGO_PICK, SITE_LOGO_REMOVE,
+    CREDIT_HINT, CREDIT_LABEL, HUB_LEADS, IDENTITY_SAID, OWN_HOME_PILL, SITE_LOGO_BIG, SITE_LOGO_LABEL, SITE_LOGO_NOT_PNG, SITE_LOGO_PICK, SITE_LOGO_REMOVE,
     SITE_LOGO_RESET, SITE_LOGO_SAID, SITE_NAME_LABEL, TAGLINE_HINT, TAGLINE_LABEL, TAGLINE_MAX, TAGLINE_PLACEHOLDER, TITLE_HINT, TITLE_MAX, UNNAMED,
     WEBSITE_HELP as HELP, nameFallbackSaid, ownHomeSaid,
   } from '../../../lib/websiteSetup.js';
@@ -134,6 +134,7 @@
         <input id="hub-site-credit" class="switch" type="checkbox" checked={prefs.siteCreditAzimut} title={HELP.siteCredit}
           onchange={(event) => savePrefs({ site_credit_azimut: event.currentTarget.checked })} />
       </HubField>
+      <p class="hub-hint when-said">{IDENTITY_SAID}</p>
     </HubCard>
 
     <div class="side">
@@ -147,6 +148,7 @@
 
 <style>
   .side { min-width: 0; }
+  .when-said { margin-top: 4px; padding-top: 10px; border-top: 1px solid var(--border); }
   .logo-pick { display: flex; align-items: center; gap: 12px; }
   .well { display: block; flex: none; width: 52px; height: 52px; overflow: hidden; border-radius: 50%; background: #fff; border: 1px solid var(--border-strong); }
   .well img { width: 100%; height: 100%; object-fit: cover; }

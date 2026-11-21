@@ -60,7 +60,7 @@
   import { siteName } from '../../lib/websiteHub.js';
   import {
     AUTHOR_IMAGE_LABEL, AUTHOR_IMAGE_NONE, AUTHOR_LABEL, AUTHOR_MAX, BUSY,
-    CATEGORY_MAX, CATEGORY_NEW, CATEGORY_NEW_PLACEHOLDER, CATEGORY_NONE, CATEGORY_SAID, HAND_EDITED, LIST_IMAGE_COVER, NO_NAME_PRESS, ON_SITE, PICK_ANOTHER, PLACE_COORDS_LABEL, PLACE_COORDS_PLACEHOLDER,
+    CATEGORY_MAX, CATEGORY_NEW, CATEGORY_NEW_PLACEHOLDER, CATEGORY_NONE, CATEGORY_SAID, HAND_EDITED, LIST_IMAGE_COVER, NO_NAME_PRESS, ON_SITE, ON_SITE_TRY, PICK_ANOTHER, PLACE_COORDS_LABEL, PLACE_COORDS_PLACEHOLDER,
     MORE_OPTIONS, PLACE_LEAD, PLACE_NAME_LABEL, PLACE_NAME_MAX, PLACE_NAME_PLACEHOLDER, PLACE_TITLE, PLACE_WHY, REPLACE_PRESS, WEBSITE_HELP as HELP, noNameSaid, onSiteSaid,
     placeText, placeUseSaid, readPlace, takenOutsideSaid, takenSaid,
   } from '../../lib/websiteSetup.js';
@@ -497,12 +497,15 @@
 
     <div class="site" role="group" aria-label="On the site">
       <span class="lbl">On the site</span>
-      <div class="choice" role="radiogroup" aria-label="On the site">
-        {#each ON_SITE as choice (choice.id)}
-          <button type="button" role="radio" aria-checked={role === choice.id} class:on={role === choice.id}
-            title={{ page: HELP.publishPage, unlisted: HELP.publishUnlisted }[choice.id] ?? HELP.publishArticle}
-            onclick={() => chooseRole(choice.id)}>{choice.label}</button>
-        {/each}
+      <div class="choice-line">
+        <div class="choice" role="radiogroup" aria-label="On the site">
+          {#each ON_SITE as choice (choice.id)}
+            <button type="button" role="radio" aria-checked={role === choice.id} class:on={role === choice.id}
+              title={{ page: HELP.publishPage, unlisted: HELP.publishUnlisted }[choice.id] ?? HELP.publishArticle}
+              onclick={() => chooseRole(choice.id)}>{choice.label}</button>
+          {/each}
+        </div>
+        <span class="choice-said">{ON_SITE_TRY}</span>
       </div>
       <p class="address-said" role="status">{onSiteSaid(role, siteCalled)}</p>
       {#if !named && siteCalled}
@@ -619,6 +622,8 @@
   .link:hover { color: var(--accent-hover); }
   .site { display: flex; flex-direction: column; gap: 4px; margin-top: 8px; }
   .site.alone { margin-top: 0; font-size: var(--fs-sm); }
+  .choice-line { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 10px; }
+  .choice-said { color: var(--text-3); font-size: var(--fs-xs); }
   .choice { display: inline-flex; align-self: flex-start; border: 1px solid var(--border); border-radius: var(--r-md); overflow: hidden; }
   .choice button { padding: 3px 12px; border: none; border-left: 1px solid var(--border); background: var(--bg-1); color: var(--text-2);
     font: inherit; font-size: var(--fs-xs); cursor: pointer; }

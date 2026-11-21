@@ -275,13 +275,6 @@ export function progressSaid(steps) {
   return `${done} of ${steps.length} done.${more}`;
 }
 
-/** The three tips of the Overview, each a title and a line. */
-export const HUB_TIPS = Object.freeze([
-  ['Try before you announce', 'Publish as Unlisted: the page is online at its address but in no list, feed or sitemap.'],
-  ['Take an article down', 'Press Delete on its line in Articles: the lists, the feed and the sitemap forget it in the same commit.'],
-  ['Change the name or the logo', 'The lists change at the next publish or Update the site. Each article\'s bar changes when you publish it again.'],
-]);
-
 /** The tip shown once the site passes four fifths of what GitHub Pages serves. */
 export const SIZE_TIP_TITLE = 'The site is getting big';
 export function sizeTipSaid(weight, percent) {
@@ -292,6 +285,8 @@ export const SIZE_TIP_GO = 'See the limits';
 // identity
 
 export const SITE_NAME_LABEL = 'Site name';
+/** Said under the name and the logo: when what is changed there reaches the site. */
+export const IDENTITY_SAID = 'A new name or logo reaches the lists at the next publish or Update the site, and an article\'s bar when it is published again.';
 export const TAGLINE_LABEL = 'Tagline';
 export const TAGLINE_PLACEHOLDER = 'What the site is about';
 export const SITE_LOGO_LABEL = 'Site logo';
@@ -386,6 +381,8 @@ export const COLUMNS = Object.freeze(['Title', 'Category', 'Kind', 'Published', 
 export const NO_CATEGORY = 'no category';
 export const OPEN_ITEM = 'Open';
 export const DELETE_PRESS = 'Delete';
+/** Said under the list, by its Delete presses. */
+export const DELETE_SAID = 'Delete takes an article down, and off the lists, the feed and the sitemap, in one commit.';
 /** Said in place of Delete on a card the server would not delete, such as one a WordPress export made. */
 export const OUTSIDE_AZIMUT = 'Outside Azimut';
 export const DELETE_TITLE = 'Delete this article from the site?';
@@ -490,6 +487,8 @@ export const ON_SITE = Object.freeze([
   { id: 'page', label: 'Page' },
   { id: 'unlisted', label: 'Unlisted' },
 ]);
+/** Said beside the choice: Unlisted is how a page is tried. */
+export const ON_SITE_TRY = 'Unlisted lets you read it online before you announce it.';
 /** What a pick says, below the choice. */
 export const ON_SITE_SAID = Object.freeze({
   article: 'In the site\'s list and its feed.',

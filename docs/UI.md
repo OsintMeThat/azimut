@@ -7736,10 +7736,11 @@ folder Azimut did not make says so and offers another address only, since a publ
 (Update the site) does the same rebuild with no note, committing only when something differs.
 
 **On the site.** For a published article the dialog's GitHub branch adds, under the address:
-**Article** or **Page** (an article is in the site's list and feed, a page is off every list and
-linked from the home's header; it starts from the note's look, and a note its editions say was never
-published to this site starts on **Unlisted**, so a first publish is read before it is announced), and for an article a **Category**
-and the **Picture in the list**. The category is a list drawn as the app's menus are, never the
+**Article**, **Page** or **Unlisted** (an article is in the site's list and feed, a page is off every
+list and linked from the home's header; it starts from the note's look, and a note its editions say was
+never published to this site starts on **Unlisted**, so a first publish is read before it is announced),
+with one line beside the choice, *Unlisted lets you read it online before you announce it.*, and for an
+article a **Category** and the **Picture in the list**. The category is a list drawn as the app's menus are, never the
 system's own (`components/PickList.svelte`): **No category**, then what the site already uses and
 the note's own (`github.categories`, kept from the last read of the site), then **New category…**,
 which turns it into a field for a new one, 60 characters at most. The focus stays on it: the arrows,
@@ -8969,14 +8970,16 @@ list, the feed, the sitemap). *Your site, step by step* is a checklist of six: c
 the site, pick its logo, count readers (optional), a legal notice (optional) and publish a first
 article. Each says its state (done, to do, or *Read the site, in Articles, to tell.* for the two that need a
 read, or *The site holds too many files to read.* after a read GitHub cut short), is counted in a progress
-bar, and opens the panel where it is done. Three tips follow (*Try before you announce* with Unlisted, *Take
-an article down*, *Change the name or the logo*), and a fourth, *The site is getting big*, once the site
-passes 80 % of 1 GB, with **See the limits** opening Hosting.
+bar, and opens the panel where it is done. It takes the panel's width alone, and shares it with one card,
+*The site is getting big*, once the site passes 80 % of 1 GB, with **See the limits** opening Hosting. What a
+press does is said beside the press: Unlisted beside the role choice of the publish window, what a delete
+does under the Articles list, and when a new name or logo reaches the site under Identity's fields.
 
 **Identity.** *What readers see*: **Site name** (left empty, the name set in Settings › Publishing, else
 the GitHub account, said under the field), **Tagline**, **Site logo** and **Made with Azimut** (on by
 default, which ends Azimut's home page on the credit and its version; an article keeps *Credit Azimut* of
-Publishing), beside a preview of **Article bar**, **Home page** and **Feed** that follows what is typed,
+Publishing), then one line: *A new name or logo reaches the lists at the next publish or Update the site,
+and an article's bar when it is published again.*, beside a preview of **Article bar**, **Home page** and **Feed** that follows what is typed,
 with the site's own articles, categories and pages once read and the page's credit as the switch says, drawn
 in the site's paper and ink whatever the app's theme. The logo is a PNG of the site's own (**Choose a
 picture…**, `POST /api/settings/site-logo`, up to 2 MB, checked in the browser and again by the server, what
@@ -8999,7 +9002,8 @@ Unlisted when there are some, each counting its rows, and a row per card with it
 mark), title, address, a small pin with its place's name (or its coordinates) when the card has a place,
 category, kind (Article, Map, Page, Unlisted), date and weight, an **Open** link and
 a **Delete** press: a table when the hub is wide, the facts under each title when it is not, a long title
-cut with an ellipsis. Only a card the read says Azimut published has **Delete** (`deletable`); the others,
+cut with an ellipsis. Under the list, *Delete takes an article down, and off the lists, the feed and the
+sitemap, in one commit.* Only a card the read says Azimut published has **Delete** (`deletable`); the others,
 such as an old WordPress export's nested folders, say *Outside Azimut* and, on hover, *Made outside Azimut:
 delete it on GitHub*. **Delete** asks first (*Delete this article from the site?*, saying the folder, the
 repository, one commit and that the note stays in the case), and only its confirmation reaches GitHub

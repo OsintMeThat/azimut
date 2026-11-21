@@ -5,7 +5,8 @@
    * Open link and a Delete press. Nothing is asked of GitHub until Read the site, and a delete reaches
    * it on its confirmation only: the dialog says what goes, and the row leaves the list once GitHub
    * has the commit. Only a folder the server says it would delete has the press; the others were
-   * made outside Azimut and say so on hover. What the server refuses a delete with is the result line.
+   * made outside Azimut and say so on hover, and a line under the list says what a delete does. What the
+   * server refuses a delete with is the result line.
    * The rows are a table when the hub is wide, and a list with the facts under each title when not.
    * An article that stands somewhere on the site's map shows a small pin with its place under its address.
    */
@@ -16,7 +17,7 @@
   import { dropFolder, siteRead } from '../../../lib/siteRead.svelte.js';
   import { chipsOf, formatBytes, itemsFor, kindOf, pathOf } from '../../../lib/websiteHub.js';
   import {
-    BUSY, COLUMNS, DELETE_CONFIRM, DELETE_PRESS, DELETE_TITLE, NO_CATEGORY, OPEN_ITEM, OUTSIDE_AZIMUT, READ_FIRST, READ_FIRST_TITLE, READ_NONE, READ_NONE_TITLE,
+    BUSY, COLUMNS, DELETE_CONFIRM, DELETE_PRESS, DELETE_SAID, DELETE_TITLE, NO_CATEGORY, OPEN_ITEM, OUTSIDE_AZIMUT, READ_FIRST, READ_FIRST_TITLE, READ_NONE, READ_NONE_TITLE,
     TOO_MANY, WEBSITE_HELP as HELP, dayShort, deleteSaid, deletedSaid, placeDegrees,
   } from '../../../lib/websiteSetup.js';
   import KindBadge from './KindBadge.svelte';
@@ -149,6 +150,7 @@
       {/each}
     </ul>
   </div>
+  {#if shown.some((item) => item.deletable)}<p class="hub-hint del-said">{DELETE_SAID}</p>{/if}
 {/if}
 
 {#if confirming}
@@ -206,6 +208,7 @@
   .del { color: var(--danger); }
   .del:hover:not(:disabled) { background: var(--danger-soft); color: var(--danger); }
   .del, .outside { min-width: 72px; justify-content: center; }
+  .del-said { margin: 6px 2px 0; text-align: right; }
   .outside { padding: 0 4px; color: var(--text-3); font-size: 0.68rem; line-height: 1.25; text-align: center; white-space: nowrap; cursor: help; }
 
   /* too narrow for the presses beside the title: they go under the facts */
