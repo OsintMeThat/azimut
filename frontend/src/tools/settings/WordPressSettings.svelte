@@ -1,6 +1,6 @@
 <script>
   /**
-   * Settings › Publishing › WordPress: the site a note is sent to as a draft.
+   * Settings › Website › WordPress: the site a note is sent to as a draft.
    *
    * The address and the username save when a field is left; the application password
    * goes up once when typed and never comes back, only whether one is kept and its
@@ -10,7 +10,7 @@
    */
   import Icon from '../../components/Icon.svelte';
   import { toast } from '../../lib/state.svelte.js';
-  import { PUBLISHING_HELP as HELP } from '../../lib/publishingHelp.js';
+  import { WEBSITE_HELP as HELP } from '../../lib/websiteSetup.js';
   import { forgetWordPress, readWordPress, saveWordPress, testWordPress } from '../../lib/wordpress.js';
   import {
     PASSWORD_WHERE, WORDPRESS_COM, WORDPRESS_FIELDS, WORDPRESS_FREE, WORDPRESS_GUIDE, siteHost, wordpressReady,

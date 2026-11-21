@@ -4,7 +4,7 @@ import { CASE_ID, installAppFixture } from './app.fixture.js';
 
 /**
  * A note sent to WordPress as a draft, end to end in the browser: the site connected in
- * Settings › Publishing, the export dialog's WordPress branch saying where the draft goes
+ * Settings › Website, the export dialog's WordPress branch saying where the draft goes
  * and what stays out, Send, and Open in WordPress; then the note's Editions listing the
  * draft. The server and the site are stood in for: what is checked is what the browser
  * asks, and that nothing reaches WordPress before a press.
@@ -150,7 +150,7 @@ test('a site not set up shows the steps in the dialog and in Settings, and is co
   await expect(dialog).toContainText('Users › Profile');
   await expect(dialog.getByRole('button', { name: 'Send as a draft' })).toBeDisabled();
   await shoot(page, 'dialog-wordpress-setup');
-  await dialog.getByRole('button', { name: 'Open Settings › Publishing' }).click();
+  await dialog.getByRole('button', { name: 'Open Settings › Website' }).click();
 
   const section = page.getByRole('region', { name: 'WordPress', exact: true });
   await expect(section).toBeVisible();

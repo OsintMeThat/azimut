@@ -5,7 +5,8 @@ const drawDiagrams = vi.hoisted(() => vi.fn(async () => ({ k1: '<svg/>' })));
 vi.mock('./api.js', () => ({ api: { get, post, put, del } }));
 vi.mock('./notesExport.js', () => ({ drawDiagrams, asSvg: (svg) => svg }));
 
-const { publishNote, readGitHub, readState, saveGitHub, watchBuild } = await import('./githubPages.js');
+const { categoriesOf, checkFolder, publishNote, readCategories, readGitHub, readState, saveGitHub, startLegalNotice, updateSite, watchBuild } =
+  await import('./githubPages.js');
 
 afterEach(() => vi.clearAllMocks());
 
@@ -13,16 +14,43 @@ describe('the GitHub Pages site, as Settings and the dialog read it', () => {
   it('reads the site from this machine only, never a token', async () => {
     get.mockResolvedValue({ github: { account: 'octo', repo: 'articles', branch: 'main', site: '', token: { set: true, hint: '…abcd' } } });
     expect(await readGitHub()).toEqual({ account: 'octo', repo: 'articles', branch: 'main', site: '',
-      base: 'https://octo.github.io/articles/', token: { set: true, hint: '…abcd' } });
+      base: 'https://octo.github.io/articles/', token: { set: true, hint: '…abcd' },
+      website: { title: '', logo: false, counting: '' }, categories: [] });
     expect(get).toHaveBeenCalledWith('/api/publishing');
     expect(post).not.toHaveBeenCalled();
     // a server that knows nothing of GitHub yet reads as nothing set
     expect(readState(undefined)).toEqual({ account: '', repo: 'articles', branch: 'main', site: '', base: '',
-      token: { set: false, hint: '' } });
+      token: { set: false, hint: '' }, website: { title: '', logo: false, counting: '' }, categories: [] });
     expect(readState({ account: 'octo', site: 'javascript:alert(1)' }).site).toBe('');
     put.mockResolvedValue({ account: 'octo' });
     await saveGitHub({ token: 'github_pat_x' });
     expect(put).toHaveBeenCalledWith('/api/publishing/github', { token: 'github_pat_x' });
+  });
+
+  it('reads the website the server makes: its title as it reads, its logo, its counter and its categories', () => {
+    const read = readState({ account: 'octo', website: { title: 'Desk', logo: true, counting: 'cloudflare' },
+      categories: ['Conflict Watch', ' conflict  watch ', '', 'Methods & Tools', 7] });
+    expect(read.website).toEqual({ title: 'Desk', logo: true, counting: 'cloudflare' });
+    // once each, whatever the case, as many words as the look keeps
+    expect(read.categories).toEqual(['Conflict Watch', 'Methods & Tools', '7']);
+    expect(readState({ website: { counting: 'plausible' } }).website.counting).toBe('');
+    expect(categoriesOf(['x'.repeat(90)])[0]).toHaveLength(60);
+    expect(categoriesOf('Harbour')).toEqual([]);
+  });
+
+  it('reaches GitHub only on the presses: Update the site, Read the categories, the check, the Legal notice', async () => {
+    post.mockResolvedValue({ ok: true });
+    await updateSite();
+    expect(post).toHaveBeenLastCalledWith('/api/publishing/github/site');
+    await readCategories();
+    expect(post).toHaveBeenLastCalledWith('/api/publishing/github/categories');
+    await checkFolder('c1', 'n1', 'port-strike');
+    expect(post).toHaveBeenLastCalledWith('/api/cases/c1/notes/n1/github/check', { short_name: 'port-strike' });
+    await checkFolder('c1', null, 'port-strike');
+    expect(post).toHaveBeenLastCalledWith('/api/cases/c1/notes/case/github/check', { short_name: 'port-strike' });
+    await startLegalNotice('c1');
+    expect(post).toHaveBeenLastCalledWith('/api/cases/c1/notes/legal-notice');
+    expect(get).not.toHaveBeenCalled();
   });
 
   it('publishes with the diagrams drawn as SVG, the short name and what the dialog asked', async () => {
@@ -37,6 +65,13 @@ describe('the GitHub Pages site, as Settings and the dialog read it', () => {
     expect(post).toHaveBeenLastCalledWith('/api/cases/c1/notes/n1/github', {
       short_name: 'port-strike', diagrams: { k1: '<svg/>' }, round_pov: true, changes: 'Fixed a date.', offline_maps: false });
     expect(said.address).toBe('https://octo.github.io/articles/port-strike/');
+    // what the dialog chose for the site goes with it; a choice it did not make is left to the note's look
+    await publishNote('c1', 'n1', { shortName: 'port-strike', category: '  Conflict   Watch ', role: 'page' });
+    expect(post.mock.calls.at(-1)[1]).toMatchObject({ category: 'Conflict Watch', role: 'page' });
+    await publishNote('c1', 'n1', { shortName: 'port-strike', category: '', role: 'article' });
+    expect(post.mock.calls.at(-1)[1]).toMatchObject({ category: '', role: 'article' });
+    await publishNote('c1', 'n1', { shortName: 'port-strike', role: 'scroll' });
+    expect('category' in post.mock.calls.at(-1)[1] || 'role' in post.mock.calls.at(-1)[1]).toBe(false);
     post.mockImplementation(async (path) => (path.endsWith('/pdf/diagrams') ? { diagrams: [] }
       : { published: false, needs: 'pages', detail: 'Pages is off for octo/articles.' }));
     expect(await publishNote('c1', null, { shortName: 'x' })).toEqual({ published: false, needs: 'pages', detail: 'Pages is off for octo/articles.' });

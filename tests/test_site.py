@@ -9,6 +9,7 @@ data, so each is rebuilt here from the cards and held to the file.
 
 from __future__ import annotations
 
+import ast
 import json
 import re
 from pathlib import Path
@@ -16,7 +17,8 @@ from pathlib import Path
 import pytest
 
 from azimut import __version__
-from azimut.engine import githubpages, site, sitehome, sitesync
+from azimut.api import settings as settings_api
+from azimut.engine import githubpages, notelook, site, sitehome, sitesync
 from azimut.engine.site import Card, Frame, Site
 
 LIVE = Path(__file__).parent / "fixtures" / "site"
@@ -431,3 +433,49 @@ def test_the_site_copy_is_the_contracts():
     assert [lead for lead, _ in site.SITE_OWN] == ["Your own home page", "A page per category", "Your own domain",
                                                   "Your own scripts"]
     assert githubpages.OURS == ("index.html", "share.jpg")
+
+
+# -- the app says the engine's words ------------------------------------------------------------------
+
+FRONTEND = Path(__file__).resolve().parents[1] / "frontend" / "src" / "lib"
+
+
+def _js_strings(source: str, name: str) -> list[str]:
+    """The string literals an `export const <name> = …;` of a module holds, in order: one for a
+    string, every string of the lists for an array (flattened). The module's own words, so each is
+    single- or double-quoted with the escapes Python reads the same way."""
+    start = source.index(f"export const {name} =") + len(f"export const {name} =")
+    found: list[str] = []
+    at = start
+    while at < len(source):
+        char = source[at]
+        if char in "'\"":
+            end = at + 1
+            while source[end] != char:
+                end += 2 if source[end] == "\\" else 1
+            found.append(ast.literal_eval(source[at:end + 1]))
+            at = end
+        elif char == ";":
+            break
+        at += 1
+    return found
+
+
+def test_the_tab_and_the_dialog_say_the_engines_words():
+    """Settings › Website and the publish dialog carry their own copy of what `HOW-TO-PUBLISH.md`
+    says too (`lib/websiteSetup.js`): a word moved on one side fails here."""
+    source = (FRONTEND / "websiteSetup.js").read_text(encoding="utf-8")
+    for name in ("SITE_TITLE", "SITE_INTRO", "SITE_STAYS_YOURS", "SITE_OWN_TITLE", "LEGAL_SENTENCE", "HAND_EDITED",
+                 "WORKFLOW_NOTICE"):
+        assert _js_strings(source, name) == [getattr(site, name)], name
+    assert _js_strings(source, "SITE_OWN") == [word for pair in site.SITE_OWN for word in pair]
+    # the three ways readers are counted, by the engine's own names
+    choices = _js_strings(source, "STATS_CHOICES")
+    assert [choices[0], choices[2], choices[4]] == list(site.STATS)
+    assert (re.search(r"const TOKEN = /(.+)/;", source) or [None, ""])[1] == site.BEACON_TOKEN.pattern
+    code = (FRONTEND / "goatcounterSetup.js").read_text(encoding="utf-8")
+    assert re.search(r"const CODE = /(.+)/;", code).group(1) == site.COUNTER_CODE.pattern
+    # how long the settings a note and the tab keep may be, as the server bounds them
+    assert f"TITLE_MAX = {settings_api.SITE_TITLE_MAX};" in source
+    assert f"TAGLINE_MAX = {settings_api.SITE_TAGLINE_MAX};" in source
+    assert f"CATEGORY_MAX = {notelook.CATEGORY_MAX};" in source

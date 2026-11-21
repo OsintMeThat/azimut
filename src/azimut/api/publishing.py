@@ -1,4 +1,4 @@
-"""REST API for Settings › Publishing: the WordPress site a note is sent to as a
+"""REST API for Settings › Website: the WordPress site a note is sent to as a
 draft, and the GitHub Pages site a note's web folder is published to.
 
 The site's address and the username are ordinary settings (`wordpress_site`,
@@ -70,7 +70,7 @@ def _state() -> dict[str, Any]:
 
 @router.get("")
 def read_publishing() -> dict[str, Any]:
-    """What Settings › Publishing shows of each service: never a secret, never fetched."""
+    """What Settings › Website shows of each service: never a secret, never fetched."""
     return {WORDPRESS: _state(), GITHUB: _github_state()}
 
 

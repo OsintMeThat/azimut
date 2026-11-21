@@ -704,7 +704,7 @@ export const READY_NOTES = [
       '',
       '- ',
       '',
-      '<!--? Export › Web folder writes the page ready to host. Publish to GitHub Pages puts it online once Settings › Publishing holds your account. -->',
+      '<!--? Export › Web folder writes the page ready to host. Publish to GitHub Pages puts it online once Settings › Website holds your account. -->',
     ),
   },
 ];

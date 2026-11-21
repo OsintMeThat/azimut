@@ -133,7 +133,7 @@ export const PAGES = {
     lead: 'What applies to every case on this computer. General sets how points, units and the map tabs read.',
     shot: 'settings',
     marks: [
-      { anchor: 'settings.nav', title: 'Sections', text: 'General, Publishing, Imagery, Templates, Icons, the extension, Storage and System. A dot means something to install or update.' },
+      { anchor: 'settings.nav', title: 'Sections', text: 'General, Publishing, Website, Imagery, Templates, Icons, the extension, Storage and System. A dot means something to install or update.' },
       { anchor: 'settings.coordinates', title: 'Coordinates', text: 'How every tool writes a point, in decimal, in degrees or as MGRS. The case keeps decimal.' },
       { anchor: 'settings.units', title: 'Measurements', text: 'Metric, imperial or nautical, for the rulers and the readouts.' },
       { anchor: 'settings.home-view', title: 'Satellite home view', text: 'Where Satellite opens when the case gives it no place of its own.' },

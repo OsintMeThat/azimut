@@ -647,7 +647,7 @@ def test_the_check_reaches_nothing_and_says_what_would_go(client, sent_note):
 def test_a_site_not_set_up_is_said_and_nothing_is_sent(client, sent_note):
     client.delete("/api/publishing/wordpress")
     answer = client.post(sent_note["url"], json={})
-    assert answer.status_code == 409 and "Settings › Publishing" in answer.json()["detail"]
+    assert answer.status_code == 409 and "Settings › Website › WordPress" in answer.json()["detail"]
     assert client.post(sent_note["url"], json={"check": True}).json()["ready"] is False
     assert sent_note["fake"].requests == []
 

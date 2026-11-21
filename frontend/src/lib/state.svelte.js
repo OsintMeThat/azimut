@@ -44,6 +44,13 @@ export const prefs = $state({
   reportOrganisation: '',
   reportSite: '',
   reportCreditAzimut: false, // a published document ends on "Made with Azimut"
+  // the analyst's website (Settings › Website): its title and line, the credit on its home, and how readers are counted
+  siteTitle: '',
+  siteTagline: '',
+  siteCreditAzimut: true,
+  siteStats: '', // '' nobody, 'goatcounter' or 'cloudflare'
+  siteStatsCode: '', // the GoatCounter site's code
+  siteStatsToken: '', // the Cloudflare Web Analytics token
   noteStyles: null, // what each note style carries, Settings › Publishing › Styles over Azimut's own (lib/notes/look.js)
   logoSet: false, // the logo of Settings › Publishing is on disk (azimut:my-logo)
   logoRev: '', // changes with the logo on disk, so its address does too (lib/myLogo.js)
@@ -138,6 +145,12 @@ export function applyPrefs(s) {
   if (s.report_organisation !== undefined) prefs.reportOrganisation = s.report_organisation;
   if (s.report_site !== undefined) prefs.reportSite = s.report_site;
   if (s.report_credit_azimut !== undefined) prefs.reportCreditAzimut = s.report_credit_azimut;
+  if (s.site_title !== undefined) prefs.siteTitle = s.site_title;
+  if (s.site_tagline !== undefined) prefs.siteTagline = s.site_tagline;
+  if (s.site_credit_azimut !== undefined) prefs.siteCreditAzimut = s.site_credit_azimut;
+  if (s.site_stats !== undefined) prefs.siteStats = s.site_stats;
+  if (s.site_stats_code !== undefined) prefs.siteStatsCode = s.site_stats_code;
+  if (s.site_stats_token !== undefined) prefs.siteStatsToken = s.site_stats_token;
   if (s.note_styles !== undefined) prefs.noteStyles = s.note_styles;
   if (s.signature !== undefined) prefs.logoSet = Boolean(s.signature);
   if (s.logo_rev !== undefined) prefs.logoRev = s.logo_rev;

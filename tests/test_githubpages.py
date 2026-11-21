@@ -1,5 +1,5 @@
 """A note's web folder published to GitHub Pages in one press (`engine/githubpages.py`,
-`POST /notes/{id}/github`, Settings › Publishing › GitHub Pages).
+`POST /notes/{id}/github`, Settings › Website › GitHub Pages).
 
 GitHub is stood in for by a small Git object store behind `httpx.MockTransport`: blobs,
 trees, commits and refs as the REST API's Git database answers them, the repository,

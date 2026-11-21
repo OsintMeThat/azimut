@@ -28,6 +28,7 @@
   import ImageryTab from './settings/ImageryTab.svelte';
   import { ACCOUNT_STEPS } from '../lib/copernicusSetup.js';
   import PublishingTab from './settings/PublishingTab.svelte';
+  import WebsiteTab from './settings/WebsiteTab.svelte';
   import StorageTab from './settings/StorageTab.svelte';
   import SystemTab from './settings/SystemTab.svelte';
   import TemplatesTab from './settings/TemplatesTab.svelte';
@@ -39,6 +40,7 @@
   const TABS = [
     { id: 'general', label: 'General', icon: 'sliders' },
     { id: 'publishing', label: 'Publishing', icon: 'edit' },
+    { id: 'website', label: 'Website', icon: 'globe' },
     { id: 'imagery', label: 'Imagery', icon: 'key' },
     { id: 'templates', label: 'Templates', icon: 'layers' },
     { id: 'icons', label: 'Icons', icon: 'star' },
@@ -957,6 +959,10 @@
           bind:postPrefill
           bind:signatureHandle
         />
+      {/if}
+
+      {#if tab === 'website'}
+        <WebsiteTab {prefs} {savePrefs} />
       {/if}
 
       {#if tab === 'imagery'}

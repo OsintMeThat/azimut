@@ -7441,7 +7441,7 @@ stays out (internal passages, interactive maps, diagrams not drawn, pictures the
 show; a clip past the HTML page's budget, or one the site refuses, goes as its still and a
 link), what the note would warn about under *Before you send* (the branch checks the
 public edition itself), and the same points of view and *Round them to about 150 m* as
-HTML. One note at a time. While no site is set, it shows the setup steps of Settings › Publishing and a way
+HTML. One note at a time. While no site is set, it shows the setup steps of Settings › Website and a way
 there. **Send as a draft** uploads every picture without its metadata, with its alt text
 and caption, then makes the post: title, excerpt (the cover's subtitle, else the first
 paragraph), featured image (the cover picture, else the first credited one), and content
@@ -7664,7 +7664,7 @@ offline and its check says so once.
 **Publish to GitHub Pages.** Beside *Export web folder*, for one note, **Publish to GitHub
 Pages** puts the folder online in the analyst's own repository, on their press only
 (SPEC §8's one exception to no auto-posting). With GitHub set up in Settings ›
-Publishing, the address field is the site's own address, read on this machine
+Website, the address field is the site's own address, read on this machine
 (`https://octo.github.io/articles/`, or the custom domain Pages last gave), followed by a
 **short name** the analyst can change (lower case, digits, hyphens and underscores; said
 under the field and holding both buttons back when wrong). It starts as the last part of
@@ -7683,7 +7683,7 @@ replaces its page; git keeps every earlier version. When the repository is missi
 Pages is off, the press writes nothing and the dialog offers **Create the repository** or
 **Turn on Pages**, each saying what it does; a token that may not do it is told the way
 on github.com. While GitHub is not set up, the press shows how to connect it and a way to
-Settings › Publishing. `POST /notes/{id}/github` does it (`engine/githubpages.py`), and
+Settings › Website. `POST /notes/{id}/github` does it (`engine/githubpages.py`), and
 `POST /api/publishing/github/build` answers the watch.
 
 **Your site.** The same press keeps the site beside the folder, in the same commit
@@ -7703,6 +7703,25 @@ category and the role are kept in the note's look; a check before the press
 (`POST /notes/{id}/github/check`, on a press) says *This folder was changed on GitHub since
 you published it: publishing replaces it.* and never blocks. `POST /api/publishing/github/site`
 (Update the site) does the same rebuild with no note, committing only when something differs.
+
+**On the site.** For a published article the dialog's GitHub branch adds, under the address:
+**Article** or **Page** (an article is in the site's list and feed, a page is off every list and
+linked from the home's header; it starts from the note's look), and for an article a **Category**
+and the **Picture in the list**. The category is a field that suggests what the site already
+uses and the note's own (`github.categories`, kept from the last read of the site), a new one
+typed is a new category, empty is none, 60 characters at most; **Read the site** reads them
+again (`POST /api/publishing/github/categories`, on its press, reads only). The picture is the
+cover's by default, or one of the case's pictures picked as the cover picture is, kept in the
+look as it is picked (`list_image`) with a way back to the cover. The category and the role go
+up with the press and are kept in the look; whatever the dialog changes in the look is handed to
+the Notebook, which reads it again so that its next save never drops it. After a publish, what
+the site had to say (a list left as it was) is listed under *Live at*.
+
+**Before it replaces a folder.** For a note published there before, the press first asks
+whether the folder was changed on GitHub since this Azimut published it. If it was, the dialog
+says *This folder was changed on GitHub since you published it: publishing replaces it.* with
+**Don't publish**, and the button reads **Publish anyway**; one more press publishes. It never
+blocks, a check that fails just publishes, and typing another short name starts over.
 
 **Maps.** `/` › *Interactive map* asks what a map shows: some of the case's layers, or one
 of its Map plates (its layers as it draws them, its days, its steps and how each frames the
@@ -8790,7 +8809,46 @@ changes any of it. **Reset to Azimut's defaults** gives every style back what Az
 gives it. Only what differs from Azimut's own is kept (`note_styles`), and the settings
 backup carries it.
 
-**WordPress.** The last group of Settings › Publishing connects the site a note is sent
+**Settings › Website.** The tab after Publishing holds everything about the site Azimut makes
+and the two places a note is sent, and all of it is optional: a site works with it left empty.
+It opens on what the site is (*Publish your notes as a simple website on GitHub Pages…*, *The site
+stays yours to change, and Azimut only ever rewrites the files it made.*), then **Site**: **Title**
+(left empty, the name set in Settings › Publishing, else the GitHub account), **Tagline** (one line
+under it on the home page) and **Made with Azimut**, on by default, which ends the home page on
+the credit and its version (an article keeps *Credit Azimut* of Publishing). They save when a
+field is left, as preferences (`site_title`, `site_tagline`, `site_credit_azimut`), and travel in
+the settings backup. **WordPress** and **GitHub Pages** follow, then **Statistics**, **Update the
+site**, **Legal notice** and a folded **Make it yours**, below.
+
+**Statistics.** Off by default, with three buttons: Off, GoatCounter and Cloudflare Web
+Analytics, each saying in a line what it does, free and with no cookie. GoatCounter takes the
+site's code (or the site's address, which is read down to the code), Cloudflare its token (or the
+snippet it shows, read down to the token); an answer that is neither is said under the field and
+never sent, one the server accepts is kept (`site_stats`, `site_stats_code`, `site_stats_token`,
+in the settings backup, the token being public: every page prints it). The steps for each, field
+by field, stay open while the code or token is missing (`lib/websiteSetup.js`). A choice with no
+code says so rather than pretend to count, and counting starts with the next publish or Update
+the site.
+
+**Update the site.** One press rebuilds the home, list, feed and sitemap from the articles on
+GitHub, in one commit, with no note published (`POST /api/publishing/github/site`): it shows a
+spinner, then *The site is up to date.* or how many files were written, with what the server
+says to mind. It is disabled until GitHub is set up, saying so on hover, and a missing repository
+or a Pages that is off shows the press that makes it, as the export dialog does.
+
+**Legal notice.** *Depending on your country, a website may need a legal notice.*, then **Start a
+Legal notice page**: it makes a note of that name in the open case, a page of the site, naming
+GitHub as the host and leaving the publisher lines to the analyst, and opens the Notebook on it;
+pressed again it opens the one made. With no case open the press is disabled and says to open
+one first. No other legal advice is given.
+
+**Make it yours.** Folded, four ways to change what Azimut makes: write one's own `index.html`
+and put the `<!-- azimut:articles -->` markers where the list goes; the same markers with
+`section="…"` for a page per category; a domain of one's own, with GitHub's guide; and
+`articles.json` for one's own scripts. The words are the engine's (`engine/site.py`), which the
+folder's HOW-TO-PUBLISH.md carries too, and a test holds the two to the same text.
+
+**WordPress.** A group of Settings › Website connects the site a note is sent
 to: **Site address** (https, or http on this computer for a test site; a WordPress.com
 address is told it needs an OAuth app Azimut does not have), **Username**, and
 **Application password**, made in WordPress under Users › Profile › Application Passwords
@@ -8804,7 +8862,7 @@ only network call, on its press. **Forget** takes the three away. *How to connec
 says each field and where WordPress shows it, open while something is missing; the export
 dialog shows the same steps (`lib/wordpressSetup.js`).
 
-**GitHub Pages.** The group after it sets where a note's web folder is published:
+**GitHub Pages.** The group after it, beside WordPress, sets where a note's web folder is published:
 **Account** (the username or the organisation), **Repository** (`articles` by default),
 **Branch** (`main`) and **Token**, a fine-grained personal access token. The three names
 save when a field is left, are checked as GitHub names them, and travel in the settings
@@ -8822,7 +8880,8 @@ away. *How to set up GitHub Pages*, open while something is missing, says it is 
 public, how to make the repository, and how to make a token limited to that one
 repository with Contents and Pages set to Read and write, with a link to GitHub's token
 page with both picked (`lib/githubPagesSetup.js`, which the folder's own how-to shares).
-Every call goes to api.github.com, on a press only.
+Every call goes to api.github.com, on a press only. A site whose Pages is built by a workflow
+is told its build must copy Azimut's folders through.
 
 **The logo editor.** A picked logo opens *Edit logo* before it is saved, and **Edit…**
 opens it again. It cuts the logo to a rectangle, rounded corners or a circle, draws a

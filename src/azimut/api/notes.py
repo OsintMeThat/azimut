@@ -67,7 +67,7 @@ no address was given, since X then shows no picture card, and whether its maps g
 over OpenFreeMap once online, which `offline_maps` on the export turns down.
 
 **WordPress.** `/notes/{id}/wordpress` sends the note's public edition to the site set
-in Settings › Publishing as a draft (`engine/notes_wordpress.py`), its diagrams as the
+in Settings › Website as a draft (`engine/notes_wordpress.py`), its diagrams as the
 PNG the browser drew. The note keeps a record of it among its editions with
 `format: "wordpress"`, the site, the post and its two links; sending again updates that
 draft while it is still one. With `check: true` it says what would go and what would
@@ -75,7 +75,7 @@ stay out, and reaches nothing.
 
 **GitHub Pages.** `/notes/{id}/github` builds the note's web folder for the address its
 short name will have on the analyst's GitHub Pages site and commits it to the
-repository of Settings › Publishing in one commit (`engine/githubpages.py`). The note
+repository of Settings › Website in one commit (`engine/githubpages.py`). The note
 keeps a record of it among its editions with `format: "github"`: the address, the
 repository, the branch, the folder, the commit, the page's SHA-256 and the id of the
 folder's tree, which `/github/check` compares with the folder on GitHub before a later press
@@ -1748,7 +1748,7 @@ def _record_draft(case: Case, note_id: str, record: dict[str, Any], *, text: str
 
 @router.post("/{case_id}/notes/{note_id}/wordpress")
 def wordpress_draft(case_id: str, note_id: str, body: WordPressDraftIn) -> dict[str, Any]:
-    """Send the note's public edition to the WordPress site of Settings › Publishing as
+    """Send the note's public edition to the WordPress site of Settings › Website as
     a draft, or with ``check`` say what would go. Nothing is ever published: the draft
     ends on WordPress's own Publish button."""
     from .publishing import wordpress_settings
@@ -1779,7 +1779,7 @@ def wordpress_draft(case_id: str, note_id: str, body: WordPressDraftIn) -> dict[
     if body.check:
         return {**said, "ready": bool(site and user and password)}
     if not (site and user and password):
-        raise HTTPException(status_code=409, detail="WordPress is not set up yet: Settings › Publishing › WordPress.")
+        raise HTTPException(status_code=409, detail="WordPress is not set up yet: Settings › Website › WordPress.")
     try:
         with wordpress_engine.client() as http:
             sent = wordpress_engine.send(draft, wordpress_engine.Site(site, user, password, http),

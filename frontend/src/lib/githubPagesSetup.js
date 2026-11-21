@@ -28,7 +28,7 @@ export const PAGES_UPDATE = 'Export the note again from Azimut and upload its fo
 
 export const PAGES_CARD = 'The address typed in Azimut is what gives X its picture card, share.jpg in the folder. Without it, X shows the link alone.';
 
-// -- publishing from Azimut in one press (Settings › Publishing › GitHub Pages) --------
+// -- publishing from Azimut in one press (Settings › Website › GitHub Pages) --------
 
 /** The repository and the branch Settings starts from, as the server does (`engine/githubpages.py`). */
 export const DEFAULT_REPO = 'articles';

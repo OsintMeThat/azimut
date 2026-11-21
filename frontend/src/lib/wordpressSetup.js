@@ -1,7 +1,7 @@
 /**
  * How to connect a WordPress site, said the same way wherever it is needed.
  *
- * Settings › Publishing is where the three answers are typed in, and the Notebook's
+ * Settings › Website is where the three answers are typed in, and the Notebook's
  * export dialog shows the same steps while they are missing, so both read them here.
  * The address and the username are settings; the application password is kept apart,
  * on this machine only (`engine/publishsecrets.py`), and never read back.

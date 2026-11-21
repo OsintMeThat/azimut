@@ -12,6 +12,7 @@ test('keeps app settings in focused sections', async ({ page }) => {
   await expect(rail.getByRole('button')).toHaveText([
     'General',
     'Publishing',
+    'Website',
     'Imagery',
     'Templates',
     'Icons',

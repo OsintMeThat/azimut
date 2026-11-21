@@ -1,6 +1,6 @@
 <script>
   /**
-   * Settings › Publishing › GitHub Pages: the repository a note's web folder is
+   * Settings › Website › GitHub Pages: the repository a note's web folder is
    * published to in one press, from the export dialog.
    *
    * The account, the repository and the branch save when a field is left; the token
@@ -8,17 +8,20 @@
    * last four characters (`lib/githubPages.js`). Nothing here reaches GitHub but its
    * presses: Test connection, then Create the repository or Turn on Pages when the
    * test found them missing (`components/GitHubSetupPress.svelte`). The steps are the
-   * export dialog's too (`lib/githubPagesSetup.js`), open while something is missing.
+   * export dialog's too (`lib/githubPagesSetup.js`), open while something is missing. The tab
+   * holding it is handed each state read (`onchange`), for Update the site to know whether it is set up.
    */
   import Icon from '../../components/Icon.svelte';
   import GitHubSetupPress from '../../components/GitHubSetupPress.svelte';
   import { toast } from '../../lib/state.svelte.js';
-  import { PUBLISHING_HELP as HELP } from '../../lib/publishingHelp.js';
+  import { WEBSITE_HELP as HELP } from '../../lib/websiteSetup.js';
   import { forgetGitHub, readGitHub, saveGitHub, testGitHub } from '../../lib/githubPages.js';
   import {
     DEFAULT_BRANCH, DEFAULT_REPO, GITHUB_FIELDS, GITHUB_FREE, PAGES_BY_HAND, PAGES_PUBLIC, PAGES_SIGNUP, PAGES_STEPS, TOKEN_MORE,
     TOKEN_STEPS, githubReady, tokenLink,
   } from '../../lib/githubPagesSetup.js';
+
+  let { onchange = () => {} } = $props();
 
   let state = $state(null);
   let account = $state('');
@@ -48,6 +51,7 @@
 
   function take(value) {
     state = value;
+    onchange(value);
     account = value.account;
     repo = value.repo;
     branch = value.branch;
@@ -91,7 +95,10 @@
       tested = answer.ok
         ? { ok: true, text: `${who}${state.account}/${state.repo} is served at ${answer.base}`, warnings: answer.warnings ?? [] }
         : { ok: false, text: `${who}${answer.detail || 'GitHub did not answer as expected.'}`, needs: answer.needs ?? '', detail: answer.detail ?? '', warnings: [] };
-      if (answer.base) state = { ...state, site: answer.base, base: answer.base };
+      if (answer.base) {
+        state = { ...state, site: answer.base, base: answer.base };
+        onchange(state);
+      }
     } catch (error) {
       tested = { ok: false, text: error.message, warnings: [] };
     }

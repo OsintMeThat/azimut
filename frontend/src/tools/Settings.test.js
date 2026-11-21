@@ -94,7 +94,7 @@ describe('Workspace folder', () => {
 
 describe('Settings sections', () => {
   it('separates workflow preferences from app maintenance', () => {
-    for (const id of ['general', 'publishing', 'imagery', 'templates', 'extension', 'storage', 'system']) {
+    for (const id of ['general', 'publishing', 'website', 'imagery', 'templates', 'extension', 'storage', 'system']) {
       expect(shell).toContain(`id: '${id}'`);
     }
     expect(shell).toContain("let tab = $state('general')");
@@ -104,6 +104,7 @@ describe('Settings sections', () => {
     for (const [id, component] of [
       ['general', 'GeneralTab'],
       ['publishing', 'PublishingTab'],
+      ['website', 'WebsiteTab'],
       ['imagery', 'ImageryTab'],
       ['templates', 'TemplatesTab'],
       ['extension', 'ExtensionTab'],

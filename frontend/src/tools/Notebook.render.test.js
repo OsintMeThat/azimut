@@ -931,6 +931,65 @@ describe('the check before export', () => {
     expect(dialog().querySelector('.export-dest')).toBeNull();
   });
 
+  it('publishes to GitHub Pages with what the note is on the site, reads its look again after the dialog changed it, and asks for one press more when the folder was changed', async () => {
+    const SET = { account: 'octo', repo: 'articles', branch: 'main', site: '', token: { set: true, hint: '…wxyz' }, categories: ['Harbour'] };
+    const PUBLISHED = { at: '2026-11-18T19:00:00Z', edition: 'public', format: 'github', file: 'old-lead', address: 'https://octo.github.io/articles/old-lead/',
+      repository: 'octo/articles', commit: 'c'.repeat(40), sha256: 'a'.repeat(64), text_sha256: 'b'.repeat(64) };
+    ENTITIES.push({ id: 'm1', type: 'media', label: 'Pier at dawn', attrs: { path: 'media/pier.jpg' } });
+    try {
+      // the Notebook reads the case's entities as it opens: open it again on the one more
+      await unmount(component);
+      component = mount(Notebook, { target });
+      await settle();
+      const reading = get.getMockImplementation();
+      get.mockImplementation(async (url) => {
+        if (url === '/api/publishing') return { github: SET };
+        if (url.endsWith('/n1/editions')) return { editions: [PUBLISHED] };
+        return reading(url);
+      });
+      answerCheck((notes) => ({ notes: notes.map((note) => ({ note, title: 'Old lead', warnings: [], internal: 0 })) }));
+      const fallback = post.getMockImplementation();
+      post.mockImplementation(async (url, body) => {
+        if (url.endsWith('/n1/github/check')) return { checked: true, exists: true, edited: true, warning: '' };
+        if (url.endsWith('/n1/github')) {
+          return { published: true, address: PUBLISHED.address, repository: 'octo/articles', branch: 'main', commit: 'd'.repeat(40), edited: true,
+            site: { written: [], warnings: [] }, warnings: [] };
+        }
+        if (url.endsWith('/github/build')) return { state: 'built', detail: '' };
+        return fallback(url, body);
+      });
+      await exportFromNote();
+      [...dialog().querySelectorAll('[role="group"][aria-label="Format"] button')][2].click();
+      await settle();
+      expect(dialog().querySelector('#export-short').value).toBe('old-lead');
+      const looks = () => get.mock.calls.filter(([url]) => url.endsWith('/n1/look')).length;
+      // the case's pictures are the list's to pick from; the one picked is kept in the look, and the Notebook reads it again
+      const before = looks();
+      dialog().querySelector('button.pick').click();
+      flushSync();
+      expect([...dialog().querySelectorAll('.picture-row')].map((node) => node.textContent.trim())).toEqual(['Pier at dawn']);
+      dialog().querySelector('.picture-row').click();
+      await settle();
+      expect(put.mock.calls.filter(([url]) => url.endsWith('/n1/look')).at(-1)[1]).toMatchObject({ list_image: 'm1' });
+      expect(looks()).toBeGreaterThanOrEqual(before + 2);
+      // the folder was changed on GitHub: said, and the same button now publishes anyway
+      anyButton('Publish to GitHub Pages').click();
+      await settle();
+      expect(dialogText()).toContain('This folder was changed on GitHub since you published it: publishing replaces it.');
+      expect(post.mock.calls.filter(([url]) => url.endsWith('/n1/github'))).toHaveLength(0);
+      expect(anyButton('Publish to GitHub Pages')).toBeUndefined();
+      anyButton('Publish anyway').click();
+      await settle();
+      const [, sent] = post.mock.calls.find(([url]) => url.endsWith('/n1/github'));
+      expect(sent).toMatchObject({ short_name: 'old-lead', category: '', role: 'article' });
+      expect(dialog().querySelector('section[aria-label="Published to GitHub Pages"]')).not.toBeNull();
+      // the look the publish kept was read again for the Notebook
+      expect(looks()).toBeGreaterThanOrEqual(before + 3);
+    } finally {
+      ENTITIES.pop();
+    }
+  });
+
   it('forgets a check answered after the dialog was closed', async () => {
     const hold = holding();
     answerCheck((notes) => ({ notes: notes.map((note) => ({ note, title: 'Old lead', warnings: [ROOF] })) }), hold);

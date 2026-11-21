@@ -1,7 +1,7 @@
 """A note's web folder published to the analyst's own GitHub Pages site, in one press.
 
 The web folder (`engine/notes_web.py`) is a page to put online; this puts it there,
-in the repository the analyst named in Settings › Publishing, with the token they made
+in the repository the analyst named in Settings › Website, with the token they made
 for it. It is the one exception to "no auto-posting" (SPEC §8): a report page goes to
 the analyst's own site on their press in Azimut. Nothing here runs on a schedule, at
 startup or on a read.
@@ -126,8 +126,8 @@ PERMISSIONS = {
 }
 
 BAD_TOKEN = ("GitHub refused the token: it may be mistyped, expired or revoked. "
-             "Make a new one and paste it in Settings › Publishing.")
-NOT_SET = "GitHub Pages is not set up yet: Settings › Publishing › GitHub Pages."
+             "Make a new one and paste it in Settings › Website.")
+NOT_SET = "GitHub Pages is not set up yet: Settings › Website › GitHub Pages."
 
 
 class GitHubError(Exception):
