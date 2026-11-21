@@ -285,7 +285,8 @@ def _item(card: dict[str, Any], home: Site, weight: int, held: set[str]) -> dict
             "summary": card["summary"], "date": card["date"], "date_label": card["date_label"],
             "category": card["category"], "role": card["role"], "layout": card["layout"],
             "image": _on_site(card["image"], home) if card["image"] else "", "bytes": weight,
-            "deletable": githubpages.deletable(card["folder"], held, True)}
+            "deletable": githubpages.deletable(card["folder"], held, True),
+            **({"place": card["place"]} if "place" in card else {})}
 
 
 def _held(entries: dict[str, str]) -> dict[str, set[str]]:

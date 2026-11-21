@@ -25,7 +25,9 @@ never reads it. A map page may name the GoatCounter site that counts its readers
 which only its web folder calls, once read online. And what the note is on the analyst's site
 (`category`, `role`, `list_image`): the one category its list files it under, whether it is an
 article in the list, a page off it or an unlisted page that is in no list, and the picture its line in the list shows in place of the
-cover's (`engine/site.py`); the PDF and the page itself never read them. And which list of sources the document ends on
+cover's (`engine/site.py`); the PDF and the page itself never read them. So is where the note stands on a
+map of the site's articles (`place`), which most notes never have and none is given by itself
+(`engine/siteplace.py` only offers one). And which list of sources the document ends on
 (`sources_list`): the generated one, the note's own section, or both; and the same for the
 How this was made and Geolocations annexes against the note's own Method or Geolocations
 section (`method_list`, `geolocations_list`).
@@ -42,6 +44,7 @@ it is decided; Settings › Publishing › Styles changes it once for every note
 from __future__ import annotations
 
 import json
+import math
 from dataclasses import dataclass, fields, replace
 from datetime import date
 from typing import TYPE_CHECKING, Any, Literal
@@ -52,9 +55,11 @@ from pydantic import (
     Field,
     SerializerFunctionWrapHandler,
     StrictBool,
+    StrictFloat,
     ValidationError,
     field_validator,
     model_serializer,
+    model_validator,
 )
 
 if TYPE_CHECKING:
@@ -98,6 +103,11 @@ SOURCES_STYLES: tuple[str, ...] = ("academic", "web", "short")
 Role = Literal["", "article", "page", "unlisted"]
 #: The longest a category's name is, in characters.
 CATEGORY_MAX = 60
+#: How far north or south a note's place on the site's map may stand: web maps draw in Web
+#: Mercator, which stops at about 85 degrees.
+PLACE_LAT_MAX = 85
+#: The longest a place's name is, in characters: the label of its pin.
+PLACE_NAME_MAX = 80
 #: How the check before export names the outside links with no archived copy or no seen
 #: day: "" the style's own, `each` one line per link, `grouped` one line per kind.
 LinkCheck = Literal["", "each", "grouped"]
@@ -341,6 +351,48 @@ class NoteAnnexes(BaseModel):
         return {key: value for key, value in dict(handler(self)).items() if value}
 
 
+def place_problem(lat: float, lon: float, name: str = "") -> str:
+    """What keeps a point and a name from being a place on the site's map, "" when nothing does."""
+    if not (math.isfinite(lat) and math.isfinite(lon)):
+        return "the coordinates must be finite numbers"
+    if abs(lat) > PLACE_LAT_MAX:
+        return f"the latitude must be between -{PLACE_LAT_MAX} and {PLACE_LAT_MAX}, where web maps stop"
+    if abs(lon) > 180:
+        return "the longitude must be between -180 and 180"
+    if len(name) > PLACE_NAME_MAX:
+        return f"the name is longer than {PLACE_NAME_MAX} characters"
+    return ""
+
+
+class NotePlace(BaseModel):
+    """Where a note stands on a map of the analyst's site: a point in decimal degrees, kept to
+    six places (about 11 cm), and the name its pin is labelled with, "" for none."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    lat: StrictFloat
+    lon: StrictFloat
+    name: str = ""
+
+    @field_validator("lat", "lon")
+    @classmethod
+    def six_places(cls, value: float) -> float:
+        # `+ 0.0` keeps a point a hair south of the equator from being written `-0.0`
+        return round(value, 6) + 0.0 if math.isfinite(value) else value
+
+    @field_validator("name", mode="before")
+    @classmethod
+    def one_line_name(cls, value: Any) -> Any:
+        return " ".join(value.split()) if isinstance(value, str) else value
+
+    @model_validator(mode="after")
+    def on_the_map(self) -> "NotePlace":
+        problem = place_problem(self.lat, self.lon, self.name)
+        if problem:
+            raise ValueError(problem)
+        return self
+
+
 class NoteLook(BaseModel):
     """Every key optional, every missing one at its default; unknown keys refused."""
 
@@ -376,6 +428,9 @@ class NoteLook(BaseModel):
     #: A case media entity id: the picture the note's line in the site's list shows in place of
     #: the cover's, or "" for the cover picture.
     list_image: str = Field(default="", max_length=64, pattern=r"^[A-Za-z0-9_-]*$")
+    #: Where the note stands on a map of the site's articles, None for nowhere: the analyst's
+    #: alone to set, and written only once set.
+    place: NotePlace | None = None
     header: PageBand = Field(default_factory=PageBand)
     footer: PageBand = Field(default_factory=PageBand)
 
@@ -387,6 +442,8 @@ class NoteLook(BaseModel):
         for key in LATE_KEYS:
             if data.get(key) == "":
                 data.pop(key, None)
+        if data.get("place") is None:
+            data.pop("place", None)
         for key in BAND_KEYS:
             band = data.get(key)
             if isinstance(band, dict) and not any(band.values()):
@@ -462,6 +519,13 @@ class TemplateLook(NoteLook):
     def no_list_picture(cls, value: str) -> str:
         if value:
             raise ValueError("a template cannot hold a picture from a case")
+        return value
+
+    @field_validator("place")
+    @classmethod
+    def no_place(cls, value: NotePlace | None) -> NotePlace | None:
+        if value is not None:
+            raise ValueError("a template cannot hold an article's place")
         return value
 
 

@@ -31,6 +31,14 @@ the folder), links (the folders of the site the page points to) and maps (writte
 for maps kept elsewhere: Azimut writes none). The folder holding the card, relative to the
 site root, is the article's address.
 
+An article may also stand somewhere, for a map of the site's articles: `place`,
+`{"lat": 12.725004, "lon": 43.5075, "name": "Bab al-Mandab, Yemen"}`, in decimal degrees to six
+places, lat within ±85 and lon within ±180, its name at most 80 characters and "" for none
+(`notelook.NotePlace`). The key is written only when the note has a place, so a card without one
+is the card it always was; being optional, it keeps the format `azimut-article/1`. A line of
+`articles.json` carries it the same way, and a place a hand edit left unreadable is dropped, the
+line kept.
+
 A map page cited by an article shows as a link under that article, never as its own line; a
 map nothing cites keeps its own line so it is never lost. A page (`role: "page"`) is on no
 list: it is in `articles.json` under `pages`, and the default home's header links it. An
@@ -47,10 +55,12 @@ import re
 from dataclasses import dataclass, field, replace
 from datetime import date, datetime, timezone
 from email.utils import format_datetime
-from typing import Any, Mapping
+from typing import Any, Literal, Mapping
 from urllib.parse import urlsplit
 
-from .notelook import CATEGORY_MAX
+from pydantic import ValidationError
+
+from .notelook import CATEGORY_MAX, NotePlace
 
 CARD = "article.json"
 CARD_FORMAT = "azimut-article/1"
@@ -157,6 +167,10 @@ def privacy_notice(stats: str) -> str:
 # -- the site ------------------------------------------------------------------------------------
 
 
+#: What `Placement.place` holds while the dialog said nothing of the place: the look's own stands.
+OWN_PLACE: Literal["own"] = "own"
+
+
 @dataclass(frozen=True)
 class Placement:
     """How a note is published to the site: the site, and what the publish dialog chose for
@@ -165,6 +179,12 @@ class Placement:
     site: "Site"
     category: str | None = None
     role: str | None = None
+    #: The place the card carries (`NotePlace`), None for none, or `OWN_PLACE` for the look's own.
+    place: NotePlace | None | Literal["own"] = OWN_PLACE
+
+    def card_place(self, kept: NotePlace | None) -> NotePlace | None:
+        """The place the card carries: the one the dialog chose, else ``kept``, the look's."""
+        return kept if isinstance(self.place, str) else self.place
 
 
 @dataclass(frozen=True)
@@ -364,14 +384,19 @@ class Card:
     layout: str = "article"
     image: str = ""
     links: tuple[str, ...] = ()
+    #: Where the article stands on a map of the site's articles, None for nowhere.
+    place: NotePlace | None = None
 
     def dated(self, day: str) -> "Card":
         return replace(self, date=day)
 
     def as_json(self) -> bytes:
-        card = {"format": CARD_FORMAT, "title": self.title, "summary": self.summary, "date": self.date,
-                "category": self.category, "author": self.author, "role": self.role, "layout": self.layout,
-                "image": self.image, "links": list(self.links), "maps": []}
+        card: dict[str, Any] = {
+            "format": CARD_FORMAT, "title": self.title, "summary": self.summary, "date": self.date,
+            "category": self.category, "author": self.author, "role": self.role, "layout": self.layout,
+            "image": self.image, "links": list(self.links), "maps": []}
+        if self.place is not None:
+            card["place"] = self.place.model_dump(mode="json")
         return (json.dumps(card, indent=1, ensure_ascii=False) + "\n").encode("utf-8")
 
 
@@ -463,6 +488,7 @@ def read_card(folder: str, data: bytes) -> dict[str, Any] | None:
         words = one_line(one.get("title"), MAX_TITLE) if isinstance(one, dict) else ""
         if where and words:
             kept_maps.append({"title": words, "address": where})
+    place = read_place(card.get("place"))
     return {
         "folder": folder,
         "address": f"/{folder}/",
@@ -477,7 +503,21 @@ def read_card(folder: str, data: bytes) -> dict[str, Any] | None:
         "role": card["role"] if card.get("role") in ROLES else ARTICLE,
         "links": [str(one).strip("/")[:200] for one in links[:MAX_LINKS] if isinstance(one, str)],
         "maps": kept_maps,
+        **({"place": place} if place is not None else {}),
     }
+
+
+def read_place(value: Any) -> dict[str, Any] | None:
+    """A card's place as a line carries it, or None for none and for one that does not read as a
+    place (`notelook.NotePlace`): a hand edit's slip costs the article its pin, never its line."""
+    if not isinstance(value, dict):
+        return None
+    name = value.get("name")
+    try:
+        return NotePlace.model_validate({"lat": value.get("lat"), "lon": value.get("lon"),
+                                         "name": "" if name is None else name}).model_dump(mode="json")
+    except ValidationError:
+        return None
 
 
 def line_of(card: Card, folder: str) -> dict[str, Any]:

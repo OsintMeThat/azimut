@@ -122,7 +122,7 @@ from ..engine import notefill, notefromcase, notelinks, notepieces, noteready, n
 from ..engine import pdffonts
 from ..engine import reveal as reveal_engine
 from ..engine import site as site_engine
-from ..engine import sitesync
+from ..engine import siteplace, sitesync
 from ..engine import urltitles
 from ..workspace import Case, CaseError
 from .cases import get_case
@@ -1831,6 +1831,14 @@ class GitHubPublishIn(BaseModel):
     #: page or an unlisted page stays off the site's lists.
     category: str | None = Field(default=None, max_length=notelook.CATEGORY_MAX + 20)
     role: Literal["article", "page", "unlisted"] | None = None
+    #: Where the note stands on a map of the site's articles, kept in its look the same way: left
+    #: out it is the look's own, `null` is none.
+    place: notelook.NotePlace | None = None
+
+    @property
+    def chosen_place(self) -> notelook.NotePlace | None | Literal["own"]:
+        """The place the dialog chose, None for none, or `site.OWN_PLACE` when it said nothing of it."""
+        return self.place if "place" in self.model_fields_set else site_engine.OWN_PLACE
 
 
 class GitHubCheckIn(BaseModel):
@@ -1908,6 +1916,24 @@ def _kept_in_look(case: Case, note_id: str, category: str | None, role: str | No
         changed["role"] = "" if role == "article" else role
     if any(getattr(look, key) != value for key, value in changed.items()):
         notelook.save(case, note_id, look.model_copy(update=changed))
+
+
+def _place_kept(case: Case, note_id: str, place: notelook.NotePlace | None | Literal["own"]) -> None:
+    """The place the dialog chose, kept in the note's look for the next press; nothing when it said none."""
+    if isinstance(place, str):
+        return
+    look = notelook.stored(case, note_id) or notelook.DEFAULT
+    if look.place != place:
+        notelook.save(case, note_id, look.model_copy(update={"place": place}))
+
+
+@router.get("/{case_id}/notes/{note_id}/place")
+def suggested_place(case_id: str, note_id: str) -> dict[str, Any]:
+    """The point the publish dialog offers for the note's place on the site's map, or None
+    (`engine/siteplace.py`): offered only, never kept until the analyst takes it. Reads the case only."""
+    case = get_case(case_id)
+    _require_note(case, note_id)
+    return {"suggested": siteplace.suggest(case, note_id)}
 
 
 @router.post("/{case_id}/notes/{note_id}/github/check")
@@ -1988,7 +2014,8 @@ def github_publish(case_id: str, note_id: str, body: GitHubPublishIn) -> dict[st
             except web_engine.NotesWebError as exc:
                 raise HTTPException(status_code=422, detail=str(exc)) from exc
             now = _now()
-            placement = site_engine.Placement(site_for(target, pages.url), category=body.category, role=body.role)
+            placement = site_engine.Placement(site_for(target, pages.url), category=body.category, role=body.role,
+                                              place=body.chosen_place)
             try:
                 made = web_engine.build(
                     case, note_id, base_url=where, diagrams=diagrams, round_pov=body.round_pov, changes=changes,
@@ -2024,6 +2051,7 @@ def github_publish(case_id: str, note_id: str, body: GitHubPublishIn) -> dict[st
         record["changes"] = changes[:MAX_CHANGES]
     _record_edition(case, note_id, record, text=made.printed)
     _kept_in_look(case, note_id, body.category, body.role)
+    _place_kept(case, note_id, body.chosen_place)
     keep_categories(published.categories)
     return {
         "published": True,
