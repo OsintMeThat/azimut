@@ -8865,7 +8865,7 @@ tab is in the tab order, and the publish dialog's *Name the site* opens Identity
 
 **The read.** **Read the site** (`POST /api/publishing/github/site/read`), on Articles and in Hosting's
 Limits, reads the branch's tree and cards and writes nothing: its address, whether the home page is
-Azimut's or the analyst's, every card with its category, kind, date, picture and weight, the
+Azimut's or the analyst's, whether the articles carry the site's own bar (`bar`), every card with its category, kind, date, picture and weight, the
 categories, the pages that carry Azimut's markers, the legal and privacy pages, the last change and the
 size of the site and its repository. It never runs on mount. The answer is kept for the session
 (`lib/siteRead.svelte.js`), so the hero, the Overview's checklist, Identity's preview, Hosting's bars,
@@ -8892,7 +8892,8 @@ picture…**, `POST /api/settings/site-logo`, up to 2 MB, checked in the browser
 is refused said under it); without one the site uses the Publishing logo, and **Use the Publishing logo**
 (`DELETE /api/settings/site-logo`) gives it back, or **Remove the logo** when there is no Publishing logo to
 go back to. The picture shown is the one the pages carry, read from `GET /api/settings/site-logo.png`. When the read found a home page of the analyst's own, a line says Azimut
-fills its lists and leaves its header alone. The settings backup carries `site-logo.png`.
+fills its lists and leaves its header alone. When it found the site's own bar in use, **Article bar** shows its
+place, hatched, as *azimut-bar.html* and *Your own bar, on every article*, in place of Azimut's. The settings backup carries `site-logo.png`.
 
 **Hosting.** *Where the site lives*: the **GitHub Pages** card below, **The address** (GitHub's, or the
 analyst's own domain), how to point a domain of one's own at Pages, and **Limits**. Two bars say how much of
@@ -8937,19 +8938,37 @@ the next publish or Update the site. **Follow and find** gives the feed and the 
 site's address, each with a **Copy** press.
 
 **Upkeep.** *Keep it in shape*. **Update the site** is one press that rebuilds the home, list, feed and sitemap
-from the articles on GitHub, in one commit, with no note published (`POST /api/publishing/github/site`), also
+from the articles on GitHub, and gives each article the bar the site asks for (below), in one commit, with no
+note published (`POST /api/publishing/github/site`), also
 in the hero: it shows a spinner, then *The site is up to date.* or how many files were written and when, with
 what the server says to mind, or the last change the read found. It is disabled until GitHub is set up, saying
 so on hover, and a missing repository or a Pages that is off shows the press that makes it. **Who writes what**
-says which files are Azimut's and which stay the analyst's, with the pages the read found marked. **Usual
+says which files are Azimut's and which stay the analyst's, with the pages the read found marked and
+`azimut-bar.html`, *Copied into each article's bar.* **Usual
 chores** gives the five (take an article down, move it to another category, rename the site or change its logo,
 fix a typo on GitHub, test an article before it shows).
 
-**Make it yours.** Four cards, the ways to change what Azimut makes: write one's own `index.html` and put the
-`<!-- azimut:articles -->` markers where the list goes; the same markers with `section="…"` for a page per
-category; a domain of one's own, with GitHub's guide; and `articles.json` for one's own scripts. The words are
-the engine's (`engine/site.py`), which the folder's HOW-TO-PUBLISH.md carries too, and a test holds the two to
-the same text.
+**Make it yours.** Five cards, the ways to change what Azimut makes: write one's own `index.html` and put the
+`<!-- azimut:articles -->` markers where the list goes; **Your own bar**, a header of one's own; the same markers
+with `section="…"` for a page per category; a domain of one's own, with GitHub's guide; and `articles.json` for
+one's own scripts. The words are the engine's (`engine/site.py`), which the folder's HOW-TO-PUBLISH.md carries
+too, and a test holds the two to the same text.
+
+**Your own bar.** `azimut-bar.html` at the site's root holds the site's header and its `<style>`, 64 KB at most.
+Each publish and Update the site read it (by blob id, so once; nothing when it is absent) and every article
+page, Article or Story, carries it in place of Azimut's bar, between `<!-- azimut:bar -->` and
+`<!-- /azimut:bar -->` right after `<body>`; a map page keeps its crumb in the map's header. Azimut writes it
+again token by token: `<script>`, `on*` handlers, frames, objects, forms, `<template>`, `<base>`, `<meta>`,
+`<link>`, comments, SVG animation and any address but http(s), mailto and tel are dropped. It goes in a
+declarative shadow root (`<azimut-bar><template shadowrootmode="open">`), so the reader's rules never reach it
+and its own never reach the article; its `@font-face` rules go to the page, where a font is registered. An
+address relative to the site's root (`theme/logo.png`, `./`) is made the article's (`../theme/logo.png`), one
+from the root or absolute is kept; an `<svg>` with no width or height is held to 1.5em. Past 64 KB, or when it
+does not read as HTML, the articles keep Azimut's bar and the publish or the update says why. Update the site
+changes the bar of every article Azimut published whose bar differs, between the markers only, within one
+commit (1,000 files, 200 MB; past that it says to press again), and `articles.json` keeps which bar they all
+carry (`bar`), so the next press reads no page. A bar changed this way is no edit: the warning that a folder
+was changed on GitHub, and an edition's Check, look past it.
 
 **WordPress.** A panel of Settings › Website, apart from the GitHub site, connects the site a note is sent
 to: **Site address** (https, or http on this computer for a test site; a WordPress.com

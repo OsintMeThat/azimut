@@ -21,7 +21,7 @@ import httpx
 import pytest
 
 from azimut import config
-from azimut.engine import githubpages, notes_web, publishsecrets
+from azimut.engine import githubpages, notes_web, publishsecrets, site
 from azimut.workspace import Case
 
 from ambushfixture import _ground, _image
@@ -181,7 +181,9 @@ def test_one_press_commits_the_folder_in_one_commit_and_the_note_keeps_its_recor
     assert editions[0] == {
         "at": said["at"], "edition": "public", "format": "github", "file": "port-strike", "address": address,
         "repository": "octo/articles", "branch": "main", "path": "port-strike", "commit": said["commit"],
-        "sha256": said["sha256"], "text_sha256": editions[0]["text_sha256"], "tree": said_tree(fake, "port-strike")}
+        "sha256": said["sha256"], "text_sha256": editions[0]["text_sha256"], "tree": said_tree(fake, "port-strike"),
+        # the page's id with no bar, which an edition's Check reads past a bar Update the site changed
+        "bare_sha256": hashlib.sha256(site.without_bar(page)).hexdigest()}
     assert client.get("/api/publishing").json()["github"]["site"] == "https://octo.github.io/articles/"
 
 

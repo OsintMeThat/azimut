@@ -3,9 +3,10 @@
    * What the site's name, line, logo and credit look like, drawn as the three places a reader meets
    * them: the bar over an article, the home page and the feed, in the site's own paper and ink
    * (`engine/site.py`, `engine/sitehome.py`). It follows what is typed. With the site read, the lists
-   * show its latest articles, its categories and its pages; before, a sample stands in.
+   * show its latest articles, its categories and its pages; before, a sample stands in. A read that
+   * finds the site's own bar in use (`azimut-bar.html`) shows it in place of Azimut's.
    */
-  import { PREVIEWS, PREVIEW_SAMPLE as SAMPLE, WEBSITE_HELP as HELP } from '../../../lib/websiteSetup.js';
+  import { OWN_BAR_FILE, OWN_BAR_IN_USE, PREVIEWS, PREVIEW_SAMPLE as SAMPLE, WEBSITE_HELP as HELP } from '../../../lib/websiteSetup.js';
 
   let { name, tagline = '', logoUrl = '', credit = true, version = '', read = null } = $props();
 
@@ -30,10 +31,14 @@
 
   <figure class="paper" data-view={view} aria-label="Preview of the {viewName.toLowerCase()}">
     {#if view === 'bar'}
-      <div class="bar">
-        {#if logoUrl}<img class="lg" src={logoUrl} alt="" />{/if}
-        <b data-preview="name">{name}</b><span class="back">{SAMPLE.back}</span>
-      </div>
+      {#if read?.bar === 'yours'}
+        <div class="bar own" data-preview="own-bar"><span class="own-file">{OWN_BAR_FILE}</span><span class="back">{OWN_BAR_IN_USE}</span></div>
+      {:else}
+        <div class="bar">
+          {#if logoUrl}<img class="lg" src={logoUrl} alt="" />{/if}
+          <b data-preview="name">{name}</b><span class="back">{SAMPLE.back}</span>
+        </div>
+      {/if}
       <div class="art">
         {#if rows[0].category}<div class="kick">{rows[0].category}</div>{/if}
         <h4>{rows[0].title}</h4>
@@ -89,6 +94,10 @@
   .bar { display: flex; align-items: center; gap: 8px; padding: 8px 12px; border-bottom: 1px solid var(--rule); background: rgba(255, 255, 255, 0.94);
     font: 500 0.8rem/1 system-ui, sans-serif; }
   .back { margin-left: auto; flex: none; color: var(--muted); }
+  /* the site's own bar, which Azimut does not draw: its place, marked */
+  .bar.own { border-bottom-style: dashed; background: repeating-linear-gradient(135deg, #fff 0 6px, var(--tint) 6px 12px); }
+  .own-file { overflow: hidden; color: var(--ink); font: 500 0.72rem/1 ui-monospace, 'SF Mono', Menlo, Consolas, monospace; white-space: nowrap;
+    text-overflow: ellipsis; }
   .art { padding: 18px 20px 20px; }
   .art h4 { margin: 6px 0 4px; color: var(--ink); font: 700 1.15rem/1.2 system-ui, sans-serif; letter-spacing: -0.01em; text-transform: none; }
   .meta { margin: 0 0 12px; color: var(--muted); font: 400 0.68rem system-ui, sans-serif; }

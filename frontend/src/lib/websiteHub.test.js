@@ -50,9 +50,15 @@ describe('the read, as the hub holds it', () => {
     expect(siteReadOf({ items: [{ folder: 'x', deletable: 'yes' }, { folder: 'y' }] }).items.map((item) => item.deletable)).toEqual([false, false]);
   });
 
+  it('says whose bar the articles carry: the site\'s own only when the server says so', () => {
+    expect(siteReadOf({ ...ANSWER, bar: 'yours' }).bar).toBe('yours');
+    for (const bar of ['azimut', undefined, 'mine', true]) expect(siteReadOf({ ...ANSWER, bar }).bar, String(bar)).toBe('azimut');
+  });
+
   it('reads what the server left out as nothing, never as an error', () => {
     const read = siteReadOf({ ok: true });
-    expect(read).toMatchObject({ address: '', home: 'none', items: [], categories: [], marked: [], legal: '', privacy: '', last: null, warnings: [] });
+    expect(read).toMatchObject({ address: '', home: 'none', bar: 'azimut', items: [], categories: [], marked: [], legal: '', privacy: '', last: null,
+      warnings: [] });
     // a weight that is not given is not a weight of zero, and not a site cut short either
     expect(read.size).toEqual({ site: null, repository: null });
     expect(read.truncated).toBe(false);

@@ -414,12 +414,35 @@ test('Make it yours and WordPress have their panels', async ({ page }) => {
   const own = panel(page, 'Make it yours');
   await expect(own.getByRole('heading', { name: 'Your own home page' })).toBeVisible();
   await expect(own.locator('code').first()).toContainText('index.html');
+  const bar = own.getByRole('region', { name: 'Your own bar' });
+  await expect(bar).toContainText('azimut-bar.html at the site\'s root: articles carry it in place of Azimut\'s bar, maps keep theirs');
+  await expect(bar.locator('pre')).toContainText('<svg width="24" height="24">');
   await expect(own.getByRole('link', { name: /GitHub's guide/ }))
     .toHaveAttribute('href', 'https://docs.github.com/en/pages/configuring-a-custom-domain-for-your-github-pages-site');
   await tab(page, 'WordPress').click();
   await expect(panel(page, 'WordPress').getByRole('heading', { name: 'Also send to WordPress' })).toBeVisible();
   await expect(panel(page, 'WordPress').getByRole('region', { name: 'WordPress' })).toBeVisible();
   await expect(page.getByLabel('Site address')).toBeVisible();
+});
+
+test('a read that finds the site\'s own bar shows it in the article bar preview, and Upkeep says the file is the analyst\'s', async ({ page }) => {
+  const fixture = await openWebsite(page);
+  const asked = await standIn(page, { read: { ...READ, bar: 'yours' } });
+  await tab(page, 'Identity').click();
+  const paper = panel(page, 'Identity').locator('.paper');
+  await expect(paper.locator('[data-preview="own-bar"]')).toHaveCount(0);
+  await expect(paper).toContainText('All articles');
+  await tab(page, 'Articles').click();
+  await panel(page, 'Articles').getByRole('button', { name: 'Read the site' }).click();
+  await expect(rows(page)).toHaveCount(6);
+  await tab(page, 'Identity').click();
+  await expect(paper.locator('[data-preview="own-bar"]')).toHaveText('azimut-bar.htmlYour own bar, on every article');
+  await expect(paper).not.toContainText('All articles');
+  await tab(page, 'Upkeep').click();
+  const owners = panel(page, 'Upkeep').getByRole('region', { name: 'Who writes what' });
+  await expect(owners.getByRole('row', { name: /azimut-bar\.html/ })).toContainText('Copied into each article\'s bar.');
+  expect(asked).toEqual(['POST read']);
+  fixture.expectNoUnexpectedRequests();
 });
 
 test('the Legal notice and Privacy pages start in the open case, and cannot without one', async ({ page }) => {

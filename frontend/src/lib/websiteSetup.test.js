@@ -137,13 +137,26 @@ describe('Make it yours', () => {
     expect(ownParts('plain')).toEqual([{ text: 'plain' }]);
   });
 
-  it('holds the four ways, with no markup left over once cut', () => {
-    expect(SITE_OWN.map(([lead]) => lead)).toEqual(['Your own home page', 'A page per category', 'Your own domain', 'Your own scripts']);
+  it('holds the five ways, with no markup left over once cut', () => {
+    expect(SITE_OWN.map(([lead]) => lead)).toEqual(['Your own home page', 'Your own bar', 'A page per category', 'Your own domain', 'Your own scripts']);
     const links = SITE_OWN.flatMap(([, text]) => ownParts(text)).filter((part) => part.link);
     expect(links).toEqual([{ link: 'GitHub\'s guide', href: 'https://docs.github.com/en/pages/configuring-a-custom-domain-for-your-github-pages-site' }]);
     for (const [, text] of SITE_OWN) {
       for (const part of ownParts(text)) if (part.text) expect(part.text).not.toMatch(/[`[\]]/);
     }
+  });
+
+  it('says of the site\'s own bar where it goes, where it shows, what is dropped and what each picture needs', () => {
+    const text = Object.fromEntries(SITE_OWN)['Your own bar'];
+    expect(ownParts(text).filter((part) => part.code).map((part) => part.code)).toEqual(['<style>', 'azimut-bar.html', '<svg>', 'width', 'height']);
+    for (const said of ['at the site\'s root', 'in place of Azimut\'s bar', 'maps keep theirs', 'Update the site', 'Scripts are dropped',
+      'links start from the site\'s root']) expect(text, said).toContain(said);
+    expect(text).not.toContain('—');
+    const sample = setup.SITE_OWN_SAMPLES['Your own bar'].map(([, line]) => line).join('\n');
+    expect(sample).toContain(':host');
+    expect(sample).toContain('<svg width="24" height="24">');
+    expect(sample).toContain('href="./"');
+    expect(sample).not.toMatch(/<script|on\w+=/);
   });
 });
 
@@ -203,7 +216,7 @@ describe('the hub\'s panels', () => {
     expect(setup.LIMITS_LINK).toBe('https://docs.github.com/en/pages/getting-started-with-github-pages/github-pages-limits');
     expect(setup.SITE_LIMIT_BYTES).toBe(1024 ** 3);
     expect([setup.LIMITS_AMBER, setup.LIMITS_RED]).toEqual([0.8, 0.95]);
-    expect(setup.HOSTING_DOMAIN_GUIDE).toBe(ownParts(SITE_OWN[2][1]).find((part) => part.href).href);
+    expect(setup.HOSTING_DOMAIN_GUIDE).toBe(ownParts(Object.fromEntries(SITE_OWN)['Your own domain']).find((part) => part.href).href);
     expect(sizeTipSaid('850 MB', 83)).toBe('It weighs 850 MB, 83% of the 1 GB GitHub Pages serves.');
     expect(barSaid('site', '312 MB')).toBe('Site: 312 MB of 1 GB');
     expect(barSaid('repository', '1.4 GB')).toBe('Repository with its history: 1.4 GB of 1 GB recommended');
@@ -317,11 +330,13 @@ describe('who writes what', () => {
   it('shows the default home as Azimut\'s until a read says the analyst wrote one, and lists the pages the read found marked', () => {
     const before = ownersOf(null);
     expect(before.map((row) => [row.files.join(' '), row.who])).toEqual([
-      ['each article\'s folder', 'azimut'], ['articles.json feed.xml sitemap.xml', 'azimut'], ['index.html', 'azimut'], ['everything else', 'you']]);
+      ['each article\'s folder', 'azimut'], ['articles.json feed.xml sitemap.xml', 'azimut'], ['index.html', 'azimut'], ['azimut-bar.html', 'you'],
+      ['everything else', 'you']]);
+    expect(before[3].text).toBe('Copied into each article\'s bar.');
     const yours = ownersOf({ truncated: false, home: 'yours', marked: ['', 'investigations/', 'conflict-watch/'] });
     expect(yours.map((row) => [row.files.join(' '), row.who])).toEqual([
       ['each article\'s folder', 'azimut'], ['articles.json feed.xml sitemap.xml', 'azimut'], ['index.html', 'you'],
-      ['investigations/ conflict-watch/', 'you'], ['everything else', 'you']]);
+      ['investigations/ conflict-watch/', 'you'], ['azimut-bar.html', 'you'], ['everything else', 'you']]);
     expect(yours[2].text).toBe('Fills the list between its markers, nothing else.');
     // a read cut short found no page: the table stays as before a read
     expect(ownersOf({ truncated: true, home: 'none', marked: [] })).toEqual(before);

@@ -48,10 +48,12 @@ lists between markers in the pages that carry them and the default home, each on
 Azimut owns it. Reading the site is `GET git/trees/…?recursive=1` for the whole tree and
 `GET git/blobs/…` (raw) for each card and each page to fill, bounded in number and size.
 The commit keeps the sha of the folder's tree, which the note's record holds so that a
-later publish can say the folder was changed on GitHub since. Rebuilding those root files
-without a note is `update_site`. Reading what the site holds, for Settings › Website, is
-`read_branch`: the same reads as a publish's plan, plus the head commit's date and first line,
-and nothing written. Taking a folder off the site is `delete_folder`: one commit that removes
+later publish can say the folder was changed on GitHub since; a tree that differs only between
+the bar's markers of its pages, which Update the site changes, is no change (`changed_since`).
+The folder's page carries the site's own bar when the plan names one (`RootPlan.bar`).
+Rebuilding those root files, and the bar of every article page, without a note is
+`update_site`. Reading what the site holds, for Settings › Website, is `read_branch`: the
+same reads as a publish's plan, plus the head commit's date and first line, and nothing written. Taking a folder off the site is `delete_folder`: one commit that removes
 the folder file by file (a tree entry with a null `sha` for each blob the folder's recursive
 listing gave, in the mode it gave, posted over `base_tree`: GitHub documents a null `sha` for a
 file, and Git drops the folders it empties) and rewrites the root files from the site as it will
@@ -570,15 +572,20 @@ def build_state(gh: GitHub, owner: str, repo: str, commit: str) -> Build:
     return Build("building")
 
 
-def page_state(gh: GitHub, owner: str, repo: str, branch: str, path: str, sha256: str) -> str:
+def page_state(gh: GitHub, owner: str, repo: str, branch: str, path: str, sha256: str, bare: str = "") -> str:
     """Whether the page a publish committed is still the one on the branch:
-    `unchanged`, `changed` or `missing`. Reads it back, bounded."""
+    `unchanged`, `changed` or `missing`. Reads it back, bounded. ``bare`` is the page's id with
+    nothing between its bar's markers (`site.without_bar`): a page whose bar alone Update the site
+    changed since is unchanged."""
     try:
         answer = gh.call("GET", _repo_path(owner, repo, f"/contents/{quote(path)}"), query={"ref": branch},
                          accept="application/vnd.github.raw+json", doing="read the page", cap=MAX_PAGE)
     except NotFound:
         return "missing"
-    return "unchanged" if hashlib.sha256(answer.body).hexdigest() == sha256 else "changed"
+    if hashlib.sha256(answer.body).hexdigest() == sha256:
+        return "unchanged"
+    same = bool(bare) and hashlib.sha256(site_engine.without_bar(answer.body)).hexdigest() == bare
+    return "unchanged" if same else "changed"
 
 
 # -- setting up, each on its own press -----------------------------------------------------
@@ -681,6 +688,9 @@ class RootPlan:
     files: dict[str, bytes] = field(default_factory=dict)
     warnings: list[str] = field(default_factory=list)
     categories: list[str] | None = None
+    #: What the folder's article page carries between its bar's markers in place of the bar it was
+    #: built with: the site's own (`site.own_bar`); None keeps Azimut's.
+    bar: str | None = None
 
 
 #: Plans the site's root from the id of its tree ("" when it has none yet), the name of the
@@ -707,6 +717,10 @@ class Published:
     root: list[str] = field(default_factory=list)
     warnings: list[str] = field(default_factory=list)
     categories: list[str] | None = None
+    #: The SHA-256 of the folder's page as committed, and of it with nothing between its bar's
+    #: markers (`site.without_bar`), "" for a folder with no page.
+    page: str = ""
+    bare: str = ""
 
 
 def _bounded(files: Mapping[str, bytes]) -> None:
@@ -835,8 +849,9 @@ def publish(gh: GitHub, owner: str, repo: str, branch: str, files: Mapping[str, 
 
     With a ``card``, the folder carries it as `article.json`, dated as the card already in the
     folder is when there is one (the first publication's day stands). With a ``plan`` the same
-    commit writes what it names at the site's root (`RootPlan`). ``expected_tree`` is the id of
-    the folder's tree as the last publish left it: the result says whether it is another now.
+    commit writes what it names at the site's root (`RootPlan`), and the folder's page takes the
+    site's own bar when the plan names one. ``expected_tree`` is the id of the folder's tree as the
+    last publish left it: the result says whether it is another now, beyond the bar of its pages.
     """
     _bounded(files)
     _plain(folder)
@@ -859,7 +874,8 @@ def publish(gh: GitHub, owner: str, repo: str, branch: str, files: Mapping[str, 
         if not all(part in old for part in OURS):
             raise GitHubError(f"The repository already has a folder named {name} that Azimut did not make: "
                               "give the article another short name.")
-    edited = bool(expected_tree and found is not None and found.get("sha") != expected_tree)
+    edited = bool(expected_tree and found is not None and found.get("sha") != expected_tree
+                  and not (complete and _bars_only(gh, owner, repo, expected_tree, old)))
     files = dict(files)
     if card is not None:
         earlier = None
@@ -869,6 +885,12 @@ def publish(gh: GitHub, owner: str, repo: str, branch: str, files: Mapping[str, 
         card = card.dated(first) if first else card
         files[site_engine.CARD] = card.as_json()
     root = plan(opened.level, name, card) if plan is not None else RootPlan()
+    page = files.get(notes_web.INDEX)
+    if root.bar is not None and page is not None:
+        # the site's own bar, in place of Azimut's the page was built with; a map page has none to swap
+        page = site_engine.with_bar(page, root.bar) or page
+        files[notes_web.INDEX] = page
+        _bounded(files)
     have = set(old.values())
     wanted = {path: blob_sha(data) for path, data in files.items()}
     new = sorted(path for path, sha in wanted.items() if sha not in have)
@@ -885,7 +907,9 @@ def publish(gh: GitHub, owner: str, repo: str, branch: str, files: Mapping[str, 
     return Published(commit=sha, folder=folder, uploaded=len(new), reused=len(files) - len(new),
                      removed=len(set(old) - set(files)) if complete else None, created_branch=opened.created,
                      files=sorted(files), tree=folder_tree, edited=edited, root=sorted(root.files),
-                     warnings=list(root.warnings), categories=root.categories)
+                     warnings=list(root.warnings), categories=root.categories,
+                     page=hashlib.sha256(page).hexdigest() if page is not None else "",
+                     bare=hashlib.sha256(site_engine.without_bar(page)).hexdigest() if page is not None else "")
 
 
 def read_site(gh: GitHub, owner: str, repo: str, branch: str, root: str, plan: Planner) -> RootPlan:
@@ -896,6 +920,53 @@ def read_site(gh: GitHub, owner: str, repo: str, branch: str, root: str, plan: P
     if opened.created:
         raise GitHubError(f"The repository has no branch {branch}: turn on Pages for it first.")
     return plan(opened.level, "", None)
+
+
+#: The most pages of a folder looked into to tell a change of bar from an edit.
+MAX_BAR_PAGES = 4
+
+
+def _listing(gh: GitHub, owner: str, repo: str, tree: str) -> dict[str, str] | None:
+    """Every file under a folder's tree by its path, None when there is no such tree or GitHub cut it short."""
+    if not SHA1.match(tree):
+        return None
+    try:
+        body = _dict(gh.call("GET", _repo_path(owner, repo, f"/git/trees/{tree}"), query={"recursive": "1"},
+                             doing="read the article's files"))
+    except NotFound:
+        return None
+    found = body.get("tree")
+    if body.get("truncated") or not isinstance(found, list):
+        return None
+    return {str(item.get("path")): str(item.get("sha")) for item in found
+            if isinstance(item, dict) and item.get("type") == "blob" and isinstance(item.get("sha"), str)}
+
+
+def _bars_only(gh: GitHub, owner: str, repo: str, before: str, now: Mapping[str, str]) -> bool:
+    """Whether a folder's files ``now`` differ from its tree ``before`` only between the bar's markers
+    of its pages: what Update the site changes, which is not an edit. Reads the tree it was and each
+    page that differs, both sides, only when the trees differ."""
+    then = _listing(gh, owner, repo, before)
+    if then is None or set(then) != set(now):
+        return False
+    changed = sorted(path for path, sha in now.items() if then[path] != sha)
+    if len(changed) > MAX_BAR_PAGES or not all(path.endswith(".html") for path in changed):
+        return False
+    for path in changed:
+        old = read_blob(gh, owner, repo, then[path], MAX_PAGE)
+        new = read_blob(gh, owner, repo, now[path], MAX_PAGE)
+        if old is None or new is None or site_engine.without_bar(old) != site_engine.without_bar(new):
+            return False
+    return True
+
+
+def changed_since(gh: GitHub, owner: str, repo: str, before: str, now: str) -> bool:
+    """Whether a folder was changed on GitHub since a publish left it as the tree ``before``, ``now``
+    being its tree on the branch ("" for none): another tree, unless only the bar of its pages moved."""
+    if not before or not now or now == before:
+        return False
+    listed = _listing(gh, owner, repo, now)
+    return listed is None or not _bars_only(gh, owner, repo, before, listed)
 
 
 def folder_tree(gh: GitHub, owner: str, repo: str, branch: str, folder: str) -> str:
@@ -1043,7 +1114,7 @@ __all__ = [
     "API", "API_VERSION", "BAD_TOKEN", "BranchMoved", "BranchRead", "Build", "Conflict", "DEFAULT_BRANCH",
     "DEFAULT_REPO", "Deleted", "FolderGone", "GitHub", "GitHubError", "NOT_SET", "NotFound", "NotOurs", "Pages",
     "Published", "RateLimited", "Repository", "account_name", "article_address", "blob_sha", "branch_name",
-    "build_state", "client", "create_repository", "deletable", "deletable_name", "delete_folder", "folder_tree",
+    "build_state", "changed_since", "client", "create_repository", "deletable", "deletable_name", "delete_folder", "folder_tree",
     "head", "page_state", "pages", "publish", "read_blob", "read_branch", "read_site", "read_tree", "repository",
     "repository_name", "short_name", "site_base", "turn_on_pages", "update_site", "whoami",
 ]

@@ -22,6 +22,11 @@ repository is the analyst's.
 - The content between `<!-- azimut:articles … -->` and `<!-- /azimut:articles -->` is
   Azimut's, in the root `index.html` and in `<folder>/index.html` one level down for a folder
   holding no card. Everything outside the markers is never touched.
+- `azimut-bar.html` at the root is the analyst's: its header, which every article page carries
+  in place of Azimut's bar (`own_bar`), between `<!-- azimut:bar -->` and `<!-- /azimut:bar -->`
+  right after `<body>`. What is between those markers is Azimut's, in its own article folders
+  only; a map page has none. `articles.json` keeps which bar they carry as `bar`
+  (`engine/sitesync.py`).
 
 A file Azimut would write but does not own is left as it is, and the rest still happens.
 
@@ -47,6 +52,7 @@ import re
 from dataclasses import dataclass, field, replace
 from datetime import date, datetime, timezone
 from email.utils import format_datetime
+from html.parser import HTMLParser
 from typing import Any, Mapping
 from urllib.parse import urlsplit
 
@@ -107,6 +113,10 @@ SITE_OWN_TITLE = "Make it yours"
 SITE_OWN: tuple[tuple[str, str], ...] = (
     ("Your own home page", "write your `index.html` and put `<!-- azimut:articles -->` "
                            "`<!-- /azimut:articles -->` where the list goes."),
+    ("Your own bar", "put your header and its `<style>` in `azimut-bar.html` at the site's root: articles carry it "
+                     "in place of Azimut's bar, maps keep theirs, and Update the site brings an edit to all of them. "
+                     "Scripts are dropped, links start from the site's root, and each `<svg>` needs a `width` and "
+                     "a `height`."),
     ("A page per category", 'the same markers with `section="Investigations"` list that category only.'),
     ("Your own domain", "buy one, then point it to GitHub Pages "
                         "([GitHub's guide](https://docs.github.com/en/pages/configuring-a-custom-domain-for-your-github-pages-site))."),
@@ -318,6 +328,285 @@ def crumb(frame: Frame, logo: str) -> str:
     picture = f'<img src="{html.escape(logo)}" alt="">' if logo else ""
     return (f'{BAR_STYLE}<a class="az-site-crumb" href="{html.escape(frame.home)}">{picture}'
             f'{html.escape(frame.title)}</a>')
+
+
+# -- the bar between its markers, Azimut's or the site's own -----------------------------------------
+#
+# An article page starts with its bar between `<!-- azimut:bar -->` and `<!-- /azimut:bar -->`,
+# right after `<body>`, so that Update the site can change it in every article without a
+# republish. A map page has no bar, only its crumb, and so no markers.
+
+BAR_OPEN = b"<!-- azimut:bar -->"
+BAR_CLOSE = b"<!-- /azimut:bar -->"
+_BODY = re.compile(rb"<body\b[^>]*>")
+#: Where an article's folder keeps the site's logo its bar shows (`notes_html._way_home`).
+LOGO_FILE = re.compile(r"^assets/[0-9a-f]{8,16}-site-logo\.png$")
+
+
+def marked_bar(frame: Frame, logo: str) -> str:
+    """Azimut's bar (`bar`) between the markers, as an article page carries it."""
+    return f"{BAR_OPEN.decode()}{bar(frame, logo)}{BAR_CLOSE.decode()}"
+
+
+def _bar_span(page: bytes) -> tuple[int, int] | None:
+    """Where the bar is in a page: between the markers that open its body, and nowhere else."""
+    body = _BODY.search(page)
+    if body is None or not page.startswith(BAR_OPEN, body.end()):
+        return None
+    start = body.end() + len(BAR_OPEN)
+    end = page.find(BAR_CLOSE, start)
+    return (start, end) if end >= 0 else None
+
+
+def bar_in(page: bytes) -> bytes | None:
+    """What a page holds between its bar's markers, None for a page that has none."""
+    span = _bar_span(page)
+    return page[span[0]:span[1]] if span is not None else None
+
+
+def with_bar(page: bytes, inner: str) -> bytes | None:
+    """The page with ``inner`` between its bar's markers and every other byte as it was; None for
+    a page that has no markers, which is never changed."""
+    span = _bar_span(page)
+    if span is None:
+        return None
+    return page[:span[0]] + inner.encode("utf-8") + page[span[1]:]
+
+
+def without_bar(page: bytes) -> bytes:
+    """The page with nothing between its bar's markers: what is the same whichever bar it carries."""
+    span = _bar_span(page)
+    return page if span is None else page[:span[0]] + page[span[1]:]
+
+
+def is_azimut_bar(inner: bytes) -> bool:
+    """Whether what a page holds between its markers is Azimut's own bar, whatever its title and logo."""
+    return inner.startswith(BAR_STYLE.encode("utf-8") + b'<nav class="az-site-bar"')
+
+
+# -- the site's own bar: azimut-bar.html ---------------------------------------------------------
+#
+# The file holds the site's header and its own `<style>`. An article page carries it in place of
+# Azimut's bar, read and cleaned at each publish and Update the site:
+#
+# - it is put in a declarative shadow root (`<template shadowrootmode="open">` in `<azimut-bar>`),
+#   so the reader's rules never reach it and its rules never reach the article;
+# - its `@font-face` rules go to the page itself, where a font is registered, the rest stays inside;
+# - what could run or reach elsewhere is dropped: `<script>`, `<iframe>`, `<object>`, `<embed>`,
+#   `<template>`, `<form>`, `<base>`, `<meta>`, `<link>`, SVG animation, every `on*` attribute
+#   and every address that is not http(s), mailto or tel; comments go too;
+# - an address relative to the site's root (`theme/logo.png`, `./`) is made relative to the article,
+#   one folder down (`../theme/logo.png`); an absolute one or one from the root (`/theme/…`) is kept;
+# - an `<svg>` given no width or height is held to 1.5em, so a stylesheet missing never blows it up.
+#
+# Past `MAX_OWN_BAR_BYTES`, or when it does not read as HTML, the articles keep Azimut's bar and a
+# word says so. The page's policy (`notes_web.folder_csp`) lets in inline styles, and pictures and
+# fonts from the site itself only.
+
+OWN_BAR = "azimut-bar.html"
+MAX_OWN_BAR_BYTES = 64 * 1024
+OWN_BAR_TOO_LARGE = f"{OWN_BAR} is larger than {MAX_OWN_BAR_BYTES // 1024} KB: the articles keep Azimut's bar."
+OWN_BAR_UNREAD = f"{OWN_BAR} does not read as HTML: the articles keep Azimut's bar."
+#: What the bar's own sheet starts with: a box of its own, nothing inherited from the article, and
+#: an unsized picture held small. Its own rules come after, and win.
+OWN_BAR_BASE = (":host{all:initial;display:block}:where(svg:not([width])){width:1.5em}"
+                ":where(svg:not([height])){height:1.5em}:where(img){max-width:100%}")
+#: The element the site's bar lives in, which no rule of the reader names.
+OWN_BAR_HOST = "azimut-bar"
+
+_VOID = frozenset({"area", "base", "br", "col", "embed", "hr", "img", "input", "keygen", "link", "meta", "param",
+                   "source", "track", "wbr"})
+_HTML_KEPT = frozenset({
+    "a", "abbr", "address", "article", "aside", "b", "bdi", "bdo", "blockquote", "br", "button", "caption", "cite",
+    "code", "col", "colgroup", "data", "dd", "del", "details", "dfn", "div", "dl", "dt", "em", "figcaption", "figure",
+    "footer", "h1", "h2", "h3", "h4", "h5", "h6", "header", "hgroup", "hr", "i", "img", "input", "ins", "kbd", "label",
+    "li", "main", "mark", "menu", "nav", "ol", "p", "picture", "pre", "q", "rp", "rt", "ruby", "s", "samp", "search",
+    "section", "small", "source", "span", "strong", "sub", "summary", "sup", "svg", "table", "tbody", "td", "tfoot",
+    "th", "thead", "time", "tr", "u", "ul", "var", "wbr"})
+#: What an `<svg>` may hold, by the lower-case names the parser gives.
+_SVG_KEPT = frozenset({
+    "a", "circle", "clippath", "defs", "desc", "ellipse", "feblend", "fecolormatrix", "fecomposite", "fedropshadow",
+    "feflood", "fegaussianblur", "femerge", "femergenode", "feoffset", "filter", "g", "image", "line",
+    "lineargradient", "marker", "mask", "path", "pattern", "polygon", "polyline", "radialgradient", "rect", "stop",
+    "svg", "symbol", "text", "textpath", "title", "tspan", "use"})
+#: What goes with everything it holds.
+_DROPPED = frozenset({
+    "animate", "animatecolor", "animatemotion", "animatetransform", "applet", "audio", "base", "canvas", "datalist",
+    "dialog", "discard", "embed", "fencedframe", "foreignobject", "form", "frame", "frameset", "iframe", "link",
+    "math", "meta", "noembed", "noframes", "noscript", "object", "optgroup", "option", "param", "plaintext",
+    "portal", "script", "select", "set", "template", "textarea", "title", "track", "video", "xmp"})
+_ATTR_NAME = re.compile(r"^[a-z_:][a-z0-9_:.-]*$")
+_ATTRS_DROPPED = frozenset({
+    "action", "autofocus", "codebase", "data", "dynsrc", "formaction", "http-equiv", "is", "lowsrc", "manifest",
+    "nonce", "ping", "shadowroot", "shadowrootclonable", "shadowrootdelegatesfocus", "shadowrootmode",
+    "shadowrootserializable", "srcdoc", "xml:base"})
+_URL_ATTRS = frozenset({"background", "cite", "href", "longdesc", "poster", "src", "xlink:href"})
+_SCHEME = re.compile(r"^([A-Za-z][A-Za-z0-9+.-]*):")
+_SCHEMES = frozenset({"http", "https", "mailto", "tel"})
+_CUSTOM = re.compile(r"^[a-z][a-z0-9._]*-[a-z0-9._-]*$")
+_CSS_COMMENT = re.compile(r"/\*.*?\*/", re.S)
+_CSS_URL = re.compile(r"""url\(\s*(?:"([^"]*)"|'([^']*)'|([^)"'\s]*))\s*\)""", re.I)
+_CSS_IMPORT = re.compile(r"""@import\s+(?:"([^"]*)"|'([^']*)')""", re.I)
+_FONT_FACE = re.compile(r"@font-face\s*\{[^}]*\}", re.I)
+#: A face of the reader's own (`az-head`, `az-body`, …), which a face of the bar's must not replace.
+_READER_FACE = re.compile(r"""font-family\s*:\s*["']?az-""", re.I)
+
+
+def _from_root(address: str, home: str) -> str | None:
+    """An address of the bar as a page one folder down reads it: one relative to the site's root
+    made relative to the page, one from the root, absolute or a fragment kept; None for a scheme
+    that is not http(s), mailto or tel."""
+    text = address.strip()
+    scheme = _SCHEME.match(re.sub(r"[\x00-\x20\x7f]", "", text))
+    if scheme is not None:
+        return text if scheme.group(1).lower() in _SCHEMES else None
+    if text.startswith(("/", "#", "\\")):
+        return text
+    return home + text
+
+
+def _css_from_root(css: str, home: str) -> str:
+    """A stylesheet of the bar with its relative addresses made the page's, and no `<` left in it,
+    so it can never close the element it is in nor a marker."""
+
+    def moved(found: re.Match[str], form: str) -> str:
+        given = next(group for group in found.groups() if group is not None)
+        where = _from_root(given, home) if given.strip() else given
+        return form.format(given if where is None else where.replace('"', "%22"))
+
+    css = _CSS_URL.sub(lambda found: moved(found, 'url("{}")'), css)
+    css = _CSS_IMPORT.sub(lambda found: moved(found, '@import "{}"'), css)
+    return css.replace("<", "\\3c ")
+
+
+class _BarCleaner(HTMLParser):
+    """The site's bar read token by token and written again from what is kept: balanced, every
+    word and value escaped, so nothing it holds can close what Azimut puts it in."""
+
+    def __init__(self, home: str) -> None:
+        super().__init__(convert_charrefs=True)
+        self.home = home
+        self.out: list[str] = []
+        self.css: list[str] = []
+        #: the elements written and still open, the innermost last; those dropped whole, likewise
+        self.open: list[str] = []
+        self.skip: list[str] = []
+        self.styling = False
+
+    def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
+        self._start(tag, attrs, closed=False)
+
+    def handle_startendtag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
+        self._start(tag, attrs, closed=True)
+
+    def _start(self, tag: str, attrs: list[tuple[str, str | None]], *, closed: bool) -> None:
+        in_svg = "svg" in self.open
+        if self.skip:
+            if tag not in _VOID:
+                self.skip.append(tag)
+            return
+        if tag in _DROPPED and not (tag == "title" and in_svg):
+            # outside an <svg>, a browser reads `<script/>` as `<script>`: what follows is inside it
+            if tag not in _VOID and not (closed and in_svg):
+                self.skip.append(tag)
+            return
+        if tag == "style":
+            self.styling = not (closed and in_svg)
+            return
+        if not (tag in (_SVG_KEPT if in_svg else _HTML_KEPT) or _CUSTOM.match(tag)):
+            return  # an element Azimut does not know: its words stay, its tag goes
+        if tag in _VOID and not in_svg:
+            self.out.append(f"<{tag}{self._attrs(attrs)}>")
+        elif closed and in_svg:
+            self.out.append(f"<{tag}{self._attrs(attrs)}/>")
+        else:
+            self.out.append(f"<{tag}{self._attrs(attrs)}>")
+            if closed:
+                self.out.append(f"</{tag}>")
+            else:
+                self.open.append(tag)
+
+    def handle_endtag(self, tag: str) -> None:
+        if self.skip:
+            if tag in self.skip:
+                del self.skip[len(self.skip) - 1 - self.skip[::-1].index(tag):]
+            return
+        if tag == "style":
+            self.styling = False
+            return
+        if tag in self.open:
+            while self.open:
+                last = self.open.pop()
+                self.out.append(f"</{last}>")
+                if last == tag:
+                    break
+
+    def handle_data(self, data: str) -> None:
+        if self.skip:
+            return
+        if self.styling:
+            self.css.append(data)
+        else:
+            self.out.append(html.escape(data, quote=False))
+
+    def _attrs(self, attrs: list[tuple[str, str | None]]) -> str:
+        kept: dict[str, str] = {}
+        for name, given in attrs:
+            if name in kept or not _ATTR_NAME.match(name) or name.startswith("on") or name in _ATTRS_DROPPED:
+                continue
+            text = given or ""
+            value: str | None = text
+            if name in _URL_ATTRS:
+                value = _from_root(text, self.home)
+            elif name in ("srcset", "imagesrcset"):
+                value = self._srcset(text)
+            elif name == "style":
+                value = _css_from_root(_CSS_COMMENT.sub("", text), self.home)
+            if value is not None:
+                kept[name] = value
+        return "".join(f' {name}="{html.escape(value, quote=True)}"' for name, value in kept.items())
+
+    def _srcset(self, value: str) -> str | None:
+        out = []
+        for candidate in value.split(","):
+            parts = candidate.split()
+            if not parts:
+                continue
+            where = _from_root(parts[0], self.home)
+            if where is None:
+                return None
+            out.append(" ".join([where, *parts[1:]]))
+        return ", ".join(out)
+
+    def finish(self) -> str:
+        self.close()
+        while self.open:
+            self.out.append(f"</{self.open.pop()}>")
+        return "".join(self.out)
+
+
+def own_bar(data: bytes | None, home: str = "../") -> tuple[str, str]:
+    """The site's own bar (``data``, its `azimut-bar.html`) as an article page carries it between its
+    markers, for a page ``home`` below the site's root, and the word to say: ("", "") with no file,
+    ("", why) when it is past `MAX_OWN_BAR_BYTES` or does not read, and the page keeps Azimut's bar."""
+    if data is None:
+        return "", ""
+    if len(data) > MAX_OWN_BAR_BYTES:
+        return "", OWN_BAR_TOO_LARGE
+    try:
+        cleaner = _BarCleaner(home)
+        cleaner.feed(data.decode("utf-8").removeprefix("\ufeff"))
+        markup = cleaner.finish()
+    except (UnicodeDecodeError, AssertionError, ValueError):
+        return "", OWN_BAR_UNREAD
+    if not markup.strip():
+        return "", OWN_BAR_UNREAD
+    css = _css_from_root(_CSS_COMMENT.sub("", "\n".join(cleaner.css)), home)
+    faces = [face for face in _FONT_FACE.findall(css) if not _READER_FACE.search(face)]
+    sheet = _FONT_FACE.sub("", css).strip()
+    fonts = f"<style>{''.join(faces)}</style>" if faces else ""
+    return (f'{fonts}<{OWN_BAR_HOST}><template shadowrootmode="open"><style>{OWN_BAR_BASE}{sheet}</style>'
+            f"{markup}</template></{OWN_BAR_HOST}>"), ""
 
 
 # -- ownership --------------------------------------------------------------------------------------

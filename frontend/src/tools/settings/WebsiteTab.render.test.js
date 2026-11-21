@@ -436,6 +436,28 @@ describe('Identity', () => {
     await open('Identity');
     expect(panel('identity').querySelector('.own-home')).toBeNull();
   });
+
+  it('shows the site\'s own bar in the article bar preview once the read finds it in use', async () => {
+    await show();
+    expect(preview().querySelector('[data-preview="own-bar"]')).toBeNull();
+    expect(preview().querySelector('.bar [data-preview="name"]')).not.toBeNull();
+    await readSite({ ...READ, bar: 'yours' });
+    await open('Identity');
+    const own = preview().querySelector('[data-preview="own-bar"]');
+    expect(own.textContent).toBe('azimut-bar.htmlYour own bar, on every article');
+    expect(preview().querySelector('.bar [data-preview="name"]')).toBeNull();
+    expect(preview().textContent).toContain('The Bab front');
+    // the home page and the feed are Azimut's still
+    button('Home page', panel('identity')).click();
+    await settle();
+    expect(preview().querySelector('.brand [data-preview="name"]')).not.toBeNull();
+    await readSite({ ...READ, bar: 'azimut' });
+    await open('Identity');
+    button('Article bar', panel('identity')).click();
+    await settle();
+    expect(preview().querySelector('[data-preview="own-bar"]')).toBeNull();
+    expect(preview().textContent).toContain('All articles');
+  });
 });
 
 describe('the site logo', () => {
@@ -876,7 +898,9 @@ describe('Upkeep: who writes what, and the chores', () => {
     await show();
     expect([...panel('upkeep').querySelectorAll('.owners th')].map((node) => node.textContent)).toEqual(['File', 'Made by', 'What Azimut does']);
     expect(rows().map(([file, who]) => [file, who])).toEqual([
-      ['each article\'s folder', 'Azimut'], ['articles.jsonfeed.xmlsitemap.xml', 'Azimut'], ['index.html', 'Azimut'], ['everything else', 'You']]);
+      ['each article\'s folder', 'Azimut'], ['articles.jsonfeed.xmlsitemap.xml', 'Azimut'], ['index.html', 'Azimut'], ['azimut-bar.html', 'You'],
+      ['everything else', 'You']]);
+    expect(rows()[3][2]).toBe('Copied into each article\'s bar.');
     expect(panel('upkeep').textContent).toContain('Read the site, in Articles, to see which of your pages Azimut fills.');
   });
 
@@ -886,7 +910,7 @@ describe('Upkeep: who writes what, and the chores', () => {
     await open('Upkeep');
     expect(rows().map(([file, who]) => [file, who])).toEqual([
       ['each article\'s folder', 'Azimut'], ['articles.jsonfeed.xmlsitemap.xml', 'Azimut'], ['index.html', 'You'],
-      ['investigations/conflict-watch/', 'You'], ['everything else', 'You']]);
+      ['investigations/conflict-watch/', 'You'], ['azimut-bar.html', 'You'], ['everything else', 'You']]);
     expect(rows()[2][2]).toBe('Fills the list between its markers, nothing else.');
     expect(panel('upkeep').textContent).not.toContain('to see which of your pages');
   });
@@ -905,13 +929,17 @@ describe('Upkeep: who writes what, and the chores', () => {
 });
 
 describe('Make it yours and WordPress', () => {
-  it('gives the four ways to change what Azimut makes, in the engine\'s words, with what to write', async () => {
+  it('gives the five ways to change what Azimut makes, in the engine\'s words, with what to write', async () => {
     await show();
     const own = panel('yours').querySelector('[data-guide="settings.website-own"]');
     expect([...own.querySelectorAll('h3')].map((node) => node.textContent)).toEqual(
-      ['Your own home page', 'A page per category', 'Your own domain', 'Your own scripts']);
+      ['Your own home page', 'Your own bar', 'A page per category', 'Your own domain', 'Your own scripts']);
     expect([...own.querySelectorAll('code')].map((node) => node.textContent)).toContain('<!-- azimut:articles -->');
-    expect(own.querySelectorAll('pre')).toHaveLength(3);
+    expect(own.querySelectorAll('pre')).toHaveLength(4);
+    const bar = own.querySelector('section[aria-label="Your own bar"]');
+    expect(bar.querySelector('p').textContent).toMatch(/^Put your header and its <style> in azimut-bar\.html at the site's root: /);
+    expect([...bar.querySelectorAll('code')].map((node) => node.textContent)).toEqual(['<style>', 'azimut-bar.html', '<svg>', 'width', 'height']);
+    expect(bar.querySelector('pre').textContent).toContain('<svg width="24" height="24">');
     expect(own.querySelector('pre').textContent).toContain('<!-- azimut:articles -->');
     const link = own.querySelector('a');
     expect(link.getAttribute('href')).toBe('https://docs.github.com/en/pages/configuring-a-custom-domain-for-your-github-pages-site');
