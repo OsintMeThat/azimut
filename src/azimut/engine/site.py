@@ -274,6 +274,9 @@ def prefs_of(settings: Mapping[str, Any]) -> dict[str, Any]:
         "site_stats_token": token.strip() if BEACON_TOKEN.match(token.strip()) else "",
         "site_stats_account": cloudflare_id(settings.get("site_stats_account")),
         "site_stats_tag": cloudflare_id(settings.get("site_stats_tag")),
+        # whether that tag was found from the site token rather than typed by hand
+        "site_stats_tag_found": bool(cloudflare_id(settings.get("site_stats_tag"))
+                                     and BEACON_TOKEN.match(str(settings.get("site_stats_tag_from") or ""))),
     }
 
 

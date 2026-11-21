@@ -5,8 +5,9 @@ A site that counts its readers with Cloudflare Web Analytics (`engine/site.py`, 
 views and visits of each page over the last 7 and 30 days, the site's total, and the
 referrers and countries its visits came from. GoatCounter has its own page for that.
 
-**The call** is one GraphQL query to `https://api.cloudflare.com/client/v4/graphql`, and
-nowhere else, sent on the Read the numbers press only: nothing here runs on a schedule, at
+**The call** is one GraphQL query to `https://api.cloudflare.com/client/v4/graphql` (after
+the list of sites below, when the site tag must be found), and nowhere else, sent on the
+Read the numbers press only: nothing here runs on a schedule, at
 startup or on a read. It is a POST of `{"query", "variables"}` with the token in the
 `Authorization: Bearer` header (never in an address, never logged, never said back),
 timeouts, the answer read up to a bound and no redirect followed. From Cloudflare's
@@ -19,11 +20,17 @@ each a `message`. The dataset's own fields (`siteTag`, `datetime`, `requestPath`
 `refererHost`, `countryName`, `sum.visits`) are the ones Cloudflare's dashboard asks for:
 Cloudflare's docs list the dataset without them.
 
-**What it needs**, each set in Settings › Website › Readers: the account ID, the site tag
-of the Web Analytics site (which is not the site token every page prints) and an API token
-with Account Analytics, Read. The token is kept like the GitHub token
-(`engine/publishsecrets.py`); the account ID and the site tag are ordinary settings
-(`site_stats_account`, `site_stats_tag`), which the backup carries.
+**What it needs**, each set in Settings › Website › Readers: the account ID and an API token
+with two read-only permissions, Account Analytics and Account Settings. The query filters by
+the site tag of the Web Analytics site, which is not the site token every page prints: the
+press finds it by listing the account's sites (`GET accounts/{account}/rum/site_info/list`,
+read page by page, from Cloudflare's API reference) and taking the one whose `site_token` is
+the site token Readers holds. The tag found is remembered with the site token it was found
+for, so the next press asks no list; it is looked up again when the site token changes or
+when Cloudflare counts nothing under it. A tag typed by hand wins and is never looked up.
+The token is kept like the GitHub token (`engine/publishsecrets.py`); the account ID, the
+site tag and the site token it was found for are ordinary settings (`site_stats_account`,
+`site_stats_tag`, `site_stats_tag_from`), which the backup carries.
 
 **What it gives**, bounded: the pages, each path read down to the page of the site it is
 (`index.html` dropped, the site's folder taken off the front), 7 and 30 days side by side,
@@ -43,8 +50,13 @@ from typing import Any, Mapping
 import httpx
 
 from .. import __version__
+from .site import CLOUDFLARE_ID
 
 API = "https://api.cloudflare.com/client/v4/graphql"
+#: The account's Web Analytics sites, each with its site tag and its site token.
+SITES = "https://api.cloudflare.com/client/v4/accounts/{account}/rum/site_info/list"
+#: How many pages of that list are read, at most.
+MAX_SITE_PAGES = 20
 TIMEOUT = httpx.Timeout(30.0, connect=10.0)
 #: The most the answer may weigh.
 MAX_ANSWER = 2 * 1024 * 1024
@@ -61,7 +73,10 @@ MONTH = 30
 #: An API token: what a Bearer header carries (RFC 6750's characters).
 API_TOKEN = re.compile(r"^[A-Za-z0-9._~+/=-]{20,255}$")
 
-NOT_SET = "Fill in the account ID, the site tag and the API token first."
+NOT_SET = "Fill in the account ID, the API token and the site token first."
+NO_SITE = "No Web Analytics site in this account has the site token set in Readers."
+NEEDS_SETTINGS = ("The API token may not list this account's Web Analytics sites: give it Account Settings, "
+                  "Read, and check the account ID.")
 BAD_TOKEN = ("Cloudflare refused the API token: it may be mistyped, expired or deleted. "
              "Make a new one and paste it here.")
 NO_ACCESS = ("The API token may not read this account: give it Account Analytics, Read, "
@@ -99,11 +114,13 @@ MESSAGES: tuple[tuple[str, str], ...] = (
 
 class StatsError(Exception):
     """Something Cloudflare, the network or a setting stopped, said in one sentence.
-    ``status`` is Cloudflare's HTTP answer, 0 for none."""
+    ``status`` is Cloudflare's HTTP answer, 0 for none; ``needs`` is `tag` when typing the site tag
+    by hand gets round it."""
 
-    def __init__(self, message: str, status: int = 0) -> None:
+    def __init__(self, message: str, status: int = 0, *, needs: str = "") -> None:
         super().__init__(message)
         self.status = status
+        self.needs = needs
 
 
 def api_token(value: str) -> str:
@@ -341,16 +358,13 @@ def _checked(status: int, body: Any) -> Any:
     return body
 
 
-def read_numbers(http: httpx.Client, token: str, account: str, site: str, *, prefix: str = "", host: str = "",
-                 now: datetime | None = None) -> dict[str, Any]:
-    """Ask Cloudflare for the site's numbers, in one request: see `numbers_of` for what comes back,
-    with ``read_at``, the moment the windows end."""
-    if not (token and account and site):
-        raise StatsError(NOT_SET)
-    moment = (now or datetime.now(timezone.utc)).replace(microsecond=0)
-    payload = {"query": query(moment), "variables": {"account": account, "site": site}}
+def _ask(http: httpx.Client, method: str, url: str, token: str, *, payload: Any = None,
+         query_string: Mapping[str, str] | None = None) -> tuple[int, Any]:
+    """One request to Cloudflare with the token in its header: its status and its JSON, read up to a
+    bound, None for what is no JSON. A redirect is not followed."""
     try:
-        request = http.build_request("POST", API, json=payload, headers={"Authorization": f"Bearer {token}"})
+        request = http.build_request(method, url, json=payload, params=query_string,
+                                     headers={"Authorization": f"Bearer {token}"})
         response = http.send(request, stream=True)
         try:
             kept = bytearray()
@@ -370,9 +384,20 @@ def read_numbers(http: httpx.Client, token: str, account: str, site: str, *, pre
     if 300 <= status < 400:
         raise StatsError(MOVED, status)
     try:
-        body = json.loads(bytes(kept) or b"null")
+        return status, json.loads(bytes(kept) or b"null")
     except ValueError:
-        body = None
+        return status, None
+
+
+def read_numbers(http: httpx.Client, token: str, account: str, site: str, *, prefix: str = "", host: str = "",
+                 now: datetime | None = None) -> dict[str, Any]:
+    """Ask Cloudflare for the site's numbers, in one request: see `numbers_of` for what comes back,
+    with ``read_at``, the moment the windows end."""
+    if not (token and account and site):
+        raise StatsError(NOT_SET)
+    moment = (now or datetime.now(timezone.utc)).replace(microsecond=0)
+    payload = {"query": query(moment), "variables": {"account": account, "site": site}}
+    status, body = _ask(http, "POST", API, token, payload=payload)
     _checked(status, body)
     if not isinstance(body, dict):
         raise StatsError(UNREADABLE, status)
@@ -381,3 +406,56 @@ def read_numbers(http: httpx.Client, token: str, account: str, site: str, *, pre
     numbers["read_at"] = _stamp(moment)
     numbers["days"] = [WEEK, MONTH]
     return numbers
+
+
+def counted_nothing(numbers: Mapping[str, Any]) -> bool:
+    """Whether a read found no page view at all in 30 days, as a wrong site tag reads."""
+    return not numbers["pages"] and not numbers["total"]["month"]["views"]
+
+
+# -- the site tag, found from the site token ------------------------------------------------------
+
+
+def find_site_tag(http: httpx.Client, token: str, account: str, site_token: str) -> str:
+    """The site tag of the account's Web Analytics site whose site token is ``site_token``.
+
+    Lists the account's sites page by page (`GET accounts/{account}/rum/site_info/list`, which needs
+    Account Settings, Read), `MAX_SITE_PAGES` at most. A token that may not list them raises with
+    ``needs`` set to `tag`, as does an account where no site has that site token: the analyst then
+    types the tag by hand."""
+    if not (token and account and site_token):
+        raise StatsError(NOT_SET)
+    url = SITES.format(account=account)
+    for page in range(1, MAX_SITE_PAGES + 1):
+        status, body = _ask(http, "GET", url, token, query_string={"page": str(page)})
+        _listed(status, body)
+        sites = body.get("result") if isinstance(body, dict) else None
+        if not isinstance(sites, list):
+            raise StatsError(UNREADABLE, status)
+        for one in sites:
+            if isinstance(one, dict) and one.get("site_token") == site_token:
+                tag = one.get("site_tag")
+                tag = tag.strip().lower() if isinstance(tag, str) else ""
+                if not CLOUDFLARE_ID.match(tag):
+                    raise StatsError(UNREADABLE, status)
+                return tag
+        info = body.get("result_info") if isinstance(body, dict) else None
+        pages = info.get("total_pages") if isinstance(info, dict) else None
+        if not sites or not isinstance(pages, int) or isinstance(pages, bool) or page >= pages:
+            break
+    raise StatsError(NO_SITE, needs="tag")
+
+
+def _listed(status: int, body: Any) -> None:
+    """Nothing when the list came, else the sentence that says why not."""
+    if status == 401 or "invalid api token" in _message(body).lower():
+        raise StatsError(BAD_TOKEN, status)
+    if status == 403:
+        raise StatsError(NEEDS_SETTINGS, status, needs="tag")
+    if status == 429:
+        raise StatsError(RATE_LIMITED, status)
+    if status >= 500:
+        raise StatsError(f"Cloudflare is having trouble (HTTP {status}): try again in a moment.", status)
+    if status >= 300 or not isinstance(body, dict) or body.get("success") is False:
+        message = _message(body)
+        raise StatsError(f"Cloudflare would not list the account's sites{f': {message}' if message else ''}.", status)

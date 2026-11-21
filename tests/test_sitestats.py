@@ -26,6 +26,7 @@ from azimut.engine import publishsecrets, sitestats
 ACCOUNT = "0123456789abcdef0123456789abcdef"
 TAG = "fedcba9876543210fedcba9876543210"
 TOKEN = "Cf_" + "k" * 37
+SITE_TOKEN = "5ca1ab1e5ca1ab1e5ca1ab1e5ca1ab1e"
 NOW = datetime(2026, 11, 21, 12, 0, 0, tzinfo=timezone.utc)
 
 
@@ -54,16 +55,41 @@ def answer_of(**more: Any) -> dict[str, Any]:
     return {"data": {"viewer": {"accounts": [account]}}, "errors": None}
 
 
+def site(tag: str, token: str, host: str = "octo.github.io") -> dict[str, Any]:
+    """A Web Analytics site as the site_info list gives it (Cloudflare's API reference)."""
+    return {"auto_install": False, "created": "2026-11-01T10:00:00Z", "site_tag": tag, "site_token": token,
+            "snippet": f"<script data-cf-beacon='{{\"token\": \"{token}\"}}'></script>",
+            "rules": [{"host": host, "id": "r1", "inclusive": True, "is_paused": False, "paths": ["*"]}]}
+
+
 class FakeCloudflare:
-    """api.cloudflare.com's GraphQL endpoint, answering what the test says, every request kept."""
+    """api.cloudflare.com: the GraphQL endpoint answering what the test says, and the account's list
+    of Web Analytics sites, page by page. Every request is kept."""
 
     def __init__(self) -> None:
         self.requests: list[httpx.Request] = []
         self.answer: httpx.Response | Callable[[httpx.Request], httpx.Response] = httpx.Response(200, json=answer_of())
+        #: the account's sites, one list per page of the site_info list
+        self.sites: list[list[dict[str, Any]]] = [[site("0" * 32, "other-site-token-1"), site(TAG, SITE_TOKEN)]]
+        self.list_answer: httpx.Response | None = None
 
     def handle(self, request: httpx.Request) -> httpx.Response:
         self.requests.append(request)
+        if request.url.path == f"/client/v4/accounts/{ACCOUNT}/rum/site_info/list":
+            if self.list_answer is not None:
+                return self.list_answer
+            page = int(request.url.params.get("page", "1"))
+            found = self.sites[page - 1] if page <= len(self.sites) else []
+            return httpx.Response(200, json={"success": True, "errors": [], "messages": [], "result": found, "result_info": {
+                "count": len(found), "page": page, "per_page": 10, "total_count": sum(map(len, self.sites)),
+                "total_pages": len(self.sites)}})
+        assert request.url.path == "/client/v4/graphql", request.url
         return self.answer(request) if callable(self.answer) else self.answer
+
+    def asked(self) -> list[str]:
+        """What was asked, in order: `list 1` for a page of the sites, `graphql` for the numbers."""
+        return [f"list {request.url.params.get('page')}" if request.url.path.endswith("/list") else "graphql"
+                for request in self.requests]
 
     def transport(self) -> httpx.MockTransport:
         return httpx.MockTransport(self.handle)
@@ -82,9 +108,13 @@ def _read(fake: FakeCloudflare, **options: Any) -> dict[str, Any]:
         return sitestats.read_numbers(http, TOKEN, ACCOUNT, TAG, now=NOW, **options)
 
 
-def _set_up(client, *, github: bool = True) -> None:
-    saved = client.put("/api/settings/prefs", json={"site_stats": "cloudflare", "site_stats_account": ACCOUNT.upper(),
-                                                    "site_stats_tag": f" {TAG} "})
+def _set_up(client, *, github: bool = True, by_hand: bool = True) -> None:
+    """Cloudflare counting the site, the account ID and the API token set, and the site tag typed by
+    hand (`by_hand`) or left for the press to find from the site token."""
+    prefs = {"site_stats": "cloudflare", "site_stats_account": ACCOUNT.upper(), "site_stats_token": SITE_TOKEN}
+    if by_hand:
+        prefs["site_stats_tag"] = f" {TAG} "
+    saved = client.put("/api/settings/prefs", json=prefs)
     assert saved.status_code == 200, saved.text
     assert client.put("/api/publishing/cloudflare", json={"token": TOKEN}).status_code == 200
     if github:
@@ -313,6 +343,142 @@ def test_what_cloudflare_refused_comes_back_as_a_502_in_its_sentence(client, fak
     assert TOKEN not in refused.text
 
 
+# -- the site tag, found from the site token --------------------------------------------------------------
+
+NUMBERS = "/api/publishing/cloudflare/numbers"
+EMPTY = answer_of(pagesWeek=[], pagesMonth=[], totalWeek=[], totalMonth=[], referrers=[], countries=[])
+
+
+def test_the_site_tag_is_found_from_the_site_token_page_by_page_and_remembered(client, fake):
+    fake.sites = [[site("0" * 32, "other-site-token-1")], [site("1" * 32, "other-site-token-2"), site(TAG, SITE_TOKEN)]]
+    _set_up(client, by_hand=False)
+    answer = client.post(NUMBERS).json()
+    assert (answer["ok"], answer["tag"], answer["tag_found"]) == (True, TAG, True)
+    assert fake.asked() == ["list 1", "list 2", "graphql"]
+    listed = fake.requests[0]
+    assert (listed.method, listed.url.host, listed.url.path) == (
+        "GET", "api.cloudflare.com", f"/client/v4/accounts/{ACCOUNT}/rum/site_info/list")
+    assert listed.headers["authorization"] == f"Bearer {TOKEN}" and TOKEN not in str(listed.url)
+    assert json.loads(fake.requests[2].content)["variables"] == {"account": ACCOUNT, "site": TAG}
+    settings = config.load_settings()
+    assert (settings["site_stats_tag"], settings["site_stats_tag_from"]) == (TAG, SITE_TOKEN)
+    shown = client.get("/api/settings").json()
+    assert (shown["site_stats_tag"], shown["site_stats_tag_found"]) == (TAG, True)
+    # the next press asks no list
+    fake.requests.clear()
+    assert client.post(NUMBERS).json()["tag"] == TAG
+    assert fake.asked() == ["graphql"]
+
+
+def test_another_site_token_finds_its_own_tag(client, fake):
+    _set_up(client, by_hand=False)
+    client.post(NUMBERS)
+    other = "abcdabcdabcdabcdabcdabcdabcdabcd"
+    fake.sites = [[site("2" * 32, other)]]
+    client.put("/api/settings/prefs", json={"site_stats_token": other})
+    fake.requests.clear()
+    assert client.post(NUMBERS).json()["tag"] == "2" * 32
+    assert fake.asked() == ["list 1", "graphql"]
+    assert config.load_settings()["site_stats_tag_from"] == other
+
+
+def test_a_found_tag_counting_nothing_is_looked_up_again_once(client, fake):
+    _set_up(client, by_hand=False)
+    client.post(NUMBERS)
+    # the site was made again in Cloudflare: same site token, a new tag; the old one counts nothing
+    fake.sites = [[site("3" * 32, SITE_TOKEN)]]
+    fake.answer = lambda request: httpx.Response(
+        200, json=answer_of() if json.loads(request.content)["variables"]["site"] == "3" * 32 else EMPTY)
+    fake.requests.clear()
+    answer = client.post(NUMBERS).json()
+    assert fake.asked() == ["graphql", "list 1", "graphql"]
+    assert answer["tag"] == "3" * 32 and answer["pages"]
+    assert config.load_settings()["site_stats_tag"] == "3" * 32
+    # nothing again under the same tag: the empty numbers stand, with no third query
+    fake.answer = httpx.Response(200, json=EMPTY)
+    fake.requests.clear()
+    answer = client.post(NUMBERS).json()
+    assert fake.asked() == ["graphql", "list 1"]
+    assert answer["ok"] is True and answer["pages"] == []
+    # nor does a list that cannot be read take the numbers away
+    fake.list_answer = httpx.Response(403, json={"success": False, "errors": [{"code": 10000, "message": "Authentication error"}]})
+    fake.requests.clear()
+    assert client.post(NUMBERS).json()["ok"] is True
+
+
+@pytest.mark.parametrize("sites,refusal,said", [
+    ([[site("0" * 32, "other-site-token-1")]], None, sitestats.NO_SITE),
+    ([[]], None, sitestats.NO_SITE),
+    (None, httpx.Response(403, json={"success": False, "errors": [{"code": 10000, "message": "Authentication error"}]}),
+     sitestats.NEEDS_SETTINGS),
+])
+def test_a_tag_that_cannot_be_found_asks_for_it_by_hand_and_reads_nothing(client, fake, sites, refusal, said):
+    if sites is not None:
+        fake.sites = sites
+    fake.list_answer = refusal
+    _set_up(client, by_hand=False)
+    answer = client.post(NUMBERS)
+    assert answer.status_code == 200, answer.text
+    assert answer.json() == {"ok": False, "needs": "tag", "detail": said}
+    assert "graphql" not in fake.asked()
+    assert config.load_settings()["site_stats_tag"] == ""
+
+
+def test_a_tag_typed_by_hand_wins_and_is_never_looked_up(client, fake):
+    _set_up(client, by_hand=False)
+    client.post(NUMBERS)
+    hand = "4" * 32
+    client.put("/api/settings/prefs", json={"site_stats_tag": hand})
+    assert config.load_settings()["site_stats_tag_from"] == ""
+    assert client.get("/api/settings").json()["site_stats_tag_found"] is False
+    # even counting nothing, a hand tag is never second-guessed
+    fake.answer = httpx.Response(200, json=EMPTY)
+    fake.requests.clear()
+    answer = client.post(NUMBERS).json()
+    assert (answer["tag"], answer["tag_found"]) == (hand, False)
+    assert fake.asked() == ["graphql"]
+    # emptied, the next press finds it from the site token again
+    client.put("/api/settings/prefs", json={"site_stats_tag": ""})
+    fake.requests.clear()
+    assert client.post(NUMBERS).json()["tag"] == TAG
+    assert fake.asked() == ["list 1", "graphql"]
+
+
+def test_reading_with_neither_a_site_token_nor_a_tag_is_said_and_asks_nothing(client, fake):
+    client.put("/api/settings/prefs", json={"site_stats": "cloudflare", "site_stats_account": ACCOUNT})
+    client.put("/api/publishing/cloudflare", json={"token": TOKEN})
+    refused = client.post(NUMBERS)
+    assert refused.status_code == 409 and refused.json()["detail"] == sitestats.NOT_SET
+    assert fake.requests == []
+
+
+def test_the_list_is_read_within_bounds_and_says_what_went_wrong(fake):
+    fake.sites = [[site(f"{index:032x}", f"other-site-token-{index}")] for index in range(sitestats.MAX_SITE_PAGES + 5)]
+    with sitestats.client() as http:
+        with pytest.raises(sitestats.StatsError) as caught:
+            sitestats.find_site_tag(http, TOKEN, ACCOUNT, SITE_TOKEN)
+        assert (str(caught.value), caught.value.needs) == (sitestats.NO_SITE, "tag")
+        assert len(fake.requests) == sitestats.MAX_SITE_PAGES
+        for refusal, said in (
+            (httpx.Response(401, json={"success": False, "errors": [{"code": 10000, "message": "Authentication error"}]}),
+             sitestats.BAD_TOKEN),
+            (httpx.Response(400, json={"success": False, "errors": [{"code": 1000, "message": "Invalid API Token"}]}),
+             sitestats.BAD_TOKEN),
+            (httpx.Response(429, text=""), sitestats.RATE_LIMITED),
+            (httpx.Response(500, text=""), "Cloudflare is having trouble (HTTP 500): try again in a moment."),
+            (httpx.Response(400, json={"success": False, "errors": [{"code": 7003, "message": "Could not route"}]}),
+             "Cloudflare would not list the account's sites: Could not route."),
+            (httpx.Response(200, json={"success": True, "result": "sites"}), sitestats.UNREADABLE),
+            (httpx.Response(200, json={"success": True, "result": [site("not a tag", SITE_TOKEN)]}), sitestats.UNREADABLE),
+            (httpx.Response(302, headers={"location": "https://evil.example.org/"}), sitestats.MOVED),
+        ):
+            fake.list_answer = refusal
+            with pytest.raises(sitestats.StatsError) as caught:
+                sitestats.find_site_tag(http, TOKEN, ACCOUNT, SITE_TOKEN)
+            assert (str(caught.value), caught.value.needs) == (said, ""), refusal
+    assert {request.url.host for request in fake.requests} == {"api.cloudflare.com"}
+
+
 def test_the_api_token_is_kept_apart_owner_only_and_never_sent_back(client, fake, caplog):
     caplog.set_level(logging.DEBUG)
     assert client.get("/api/publishing").json()["cloudflare"] == {"token": {"set": False, "hint": ""}}
@@ -352,21 +518,24 @@ def test_the_ids_are_checked_where_they_are_typed(client):
 
 
 def test_the_backup_carries_the_ids_and_never_the_api_token(client, fake):
-    _set_up(client)
+    _set_up(client, by_hand=False)
+    client.post(NUMBERS)
     blob = client.get("/api/settings/export").json()
-    assert (blob["settings"]["site_stats_account"], blob["settings"]["site_stats_tag"]) == (ACCOUNT, TAG)
+    assert (blob["settings"]["site_stats_account"], blob["settings"]["site_stats_tag"],
+            blob["settings"]["site_stats_tag_from"]) == (ACCOUNT, TAG, SITE_TOKEN)
     assert TOKEN not in json.dumps(blob)
     client.put("/api/settings/prefs", json={"site_stats_account": "", "site_stats_tag": ""})
     client.delete("/api/publishing/cloudflare")
     assert client.post("/api/settings/import", json=blob).status_code == 200
     settings = client.get("/api/settings").json()
-    assert (settings["site_stats_account"], settings["site_stats_tag"]) == (ACCOUNT, TAG)
+    assert (settings["site_stats_account"], settings["site_stats_tag"], settings["site_stats_tag_found"]) == (ACCOUNT, TAG, True)
     assert client.get("/api/publishing").json()["cloudflare"]["token"]["set"] is False
     # an id that does not read as one is none, not a refused backup
-    res = client.post("/api/settings/import", json={"settings": {"site_stats_account": "nope", "site_stats_tag": "X" * 32}})
+    res = client.post("/api/settings/import", json={"settings": {"site_stats_account": "nope", "site_stats_tag": "X" * 32,
+                                                                 "site_stats_tag_from": "not a token!"}})
     assert res.status_code == 200, res.text
     stored = config.load_settings()
-    assert (stored["site_stats_account"], stored["site_stats_tag"]) == ("", "")
+    assert (stored["site_stats_account"], stored["site_stats_tag"], stored["site_stats_tag_from"]) == ("", "", "")
 
 
 # -- nothing reaches the network but the press -----------------------------------------------------------
@@ -394,10 +563,14 @@ def test_no_network_at_startup_on_a_read_or_a_save(monkeypatch, tmp_path):
         client.put("/api/settings/prefs", json={"site_stats_tag": ""})
         client.delete("/api/publishing/cloudflare")
         assert reached == []
-        # the press does reach out, and only to Cloudflare's API
+        # the press does reach out, and only to Cloudflare's API: the list of sites first while the tag
+        # is to be found, then the query once one is typed by hand
+        _set_up(client, by_hand=False)
+        assert client.post(NUMBERS).status_code == 502
         _set_up(client)
-        assert client.post("/api/publishing/cloudflare/numbers").status_code == 502
-    assert reached == ["https://api.cloudflare.com/client/v4/graphql"]
+        assert client.post(NUMBERS).status_code == 502
+    assert reached == [f"https://api.cloudflare.com/client/v4/accounts/{ACCOUNT}/rum/site_info/list?page=1",
+                       "https://api.cloudflare.com/client/v4/graphql"]
 
 
 def test_the_engine_reaches_api_cloudflare_com_and_nothing_else():

@@ -517,6 +517,9 @@ def _apply_prefs(settings: dict[str, Any], body: PrefsIn) -> None:
     for key in site_engine.PREF_KEYS:
         if getattr(body, key) is not None:
             settings[key] = getattr(body, key)
+    if body.site_stats_tag is not None:
+        # a tag typed by hand wins over one found from the site token, and is never looked up
+        settings["site_stats_tag_from"] = ""
     if body.note_styles is not None:
         given = {style: choices.model_dump(exclude_none=True) for style, choices in body.note_styles.items()}
         settings[notelook.SETTINGS_KEY] = notelook.saved_styles(given)
@@ -994,6 +997,7 @@ class ImportedSettings(BaseModel):
     site_stats_token: str = Field(default="", max_length=128)
     site_stats_account: str = Field(default="", max_length=64)
     site_stats_tag: str = Field(default="", max_length=64)
+    site_stats_tag_from: str = Field(default="", max_length=128)
     github_categories: list[str] = Field(default_factory=list, max_length=100)
     # what each note style carries: only what differs from Azimut's own, read the way
     # the app reads its own (a value this build cannot read keeps Azimut's)
@@ -1087,7 +1091,7 @@ class ImportedSettings(BaseModel):
         code = value.strip().lower()
         return code if site_engine.COUNTER_CODE.match(code) else ""
 
-    @field_validator("site_stats_token")
+    @field_validator("site_stats_token", "site_stats_tag_from")
     @classmethod
     def readable_site_stats_token(cls, value: str) -> str:
         token = value.strip()

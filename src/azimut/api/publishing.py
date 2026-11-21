@@ -18,7 +18,8 @@ service, and for GitHub **Create the repository**, **Turn on Pages**, **Update t
 articles, maps and pages it holds, with its home, categories and last commit; reads only),
 **Delete** an article's folder (`/github/site/delete`, one commit, only a folder Azimut published),
 the watch of a page being built (`/github/build`, asked by the export dialog after a publish), and
-**Read the numbers** (`/cloudflare/numbers`, one query to api.cloudflare.com, `engine/sitestats.py`).
+**Read the numbers** (`/cloudflare/numbers`, `engine/sitestats.py`: one query to api.cloudflare.com, after
+the list of the account's sites when the site tag must be found from the site token).
 Reading these settings, saving them and forgetting them stay on this machine. Sending
 a note is the Notebook's (`/notes/{note}/wordpress` and `/notes/{note}/github`,
 `api/notes.py`).
@@ -555,24 +556,53 @@ def forget_cloudflare() -> dict[str, Any]:
     return _cloudflare_state()
 
 
+def _remember_tag(tag: str, site_token: str) -> None:
+    """Keep a site tag found from the site token, with that token, so the next press asks no list."""
+    config.update_settings(lambda settings: settings.update(site_stats_tag=tag, site_stats_tag_from=site_token))
+
+
 @router.post("/cloudflare/numbers")
 def read_cloudflare_numbers() -> dict[str, Any]:
     """Read the site's numbers from Cloudflare Web Analytics: the page views and visits of each page
-    over 7 and 30 days, the totals, the referrers and the countries. One query, on the Read the
-    numbers press only; 409 until the account ID, the site tag and the API token are set, 502 with
-    what went wrong in one sentence."""
+    over 7 and 30 days, the totals, the referrers and the countries, on the Read the numbers press only.
+
+    The site tag the query filters by is the one typed by hand, else the one last found for the site
+    token Readers holds, else found now from that token by listing the account's sites, and kept. A
+    found tag under which Cloudflare counts nothing is looked up again once. 409 until the account ID,
+    the API token and the site token (or a tag) are set; ``{ok: false, needs: "tag", detail}`` when the
+    tag cannot be found (no site has that token, or the token may not list the sites), for the analyst
+    to type it; 502 with what went wrong in one sentence."""
     settings = config.load_settings()
     account = site.cloudflare_id(settings.get("site_stats_account"))
-    tag = site.cloudflare_id(settings.get("site_stats_tag"))
     token = publishsecrets.read(CLOUDFLARE)
-    if not (account and tag and sitestats.API_TOKEN.match(token)):
+    prefs = site.prefs_of(settings)
+    site_token = prefs["site_stats_token"]
+    tag = prefs["site_stats_tag"]
+    by_hand = bool(tag) and not prefs["site_stats_tag_found"]
+    known = by_hand or (bool(tag) and settings.get("site_stats_tag_from") == site_token)
+    if not (account and sitestats.API_TOKEN.match(token) and (known or site_token)):
         raise HTTPException(status_code=409, detail=sitestats.NOT_SET)
     target = github_settings()
     address = target.base if target.account else ""
+    options = {"prefix": sitestats.site_prefix(address), "host": urlsplit(address).hostname or ""}
     try:
         with sitestats.client() as http:
-            numbers = sitestats.read_numbers(http, token, account, tag, prefix=sitestats.site_prefix(address),
-                                             host=urlsplit(address).hostname or "")
+            if not known:
+                tag = sitestats.find_site_tag(http, token, account, site_token)
+                _remember_tag(tag, site_token)
+            numbers = sitestats.read_numbers(http, token, account, tag, **options)
+            if known and not by_hand and sitestats.counted_nothing(numbers):
+                try:
+                    again = sitestats.find_site_tag(http, token, account, site_token)
+                except sitestats.StatsError:
+                    # the list cannot say: the tag kept and its empty numbers stand
+                    again = tag
+                if again != tag:
+                    tag = again
+                    _remember_tag(tag, site_token)
+                    numbers = sitestats.read_numbers(http, token, account, tag, **options)
     except sitestats.StatsError as exc:
+        if exc.needs:
+            return {"ok": False, "needs": exc.needs, "detail": str(exc)}
         raise HTTPException(status_code=502, detail=str(exc)) from exc
-    return {"ok": True, "address": address, **numbers}
+    return {"ok": True, "address": address, "tag": tag, "tag_found": not by_hand, **numbers}
