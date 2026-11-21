@@ -43,6 +43,8 @@ export const TITLE_MAX = 120;
 export const TAGLINE_MAX = 200;
 /** The longest category, as a note's look keeps it (`engine/notelook.py`). */
 export const CATEGORY_MAX = 60;
+/** The longest author's name, as a note's look keeps it (`notelook.AUTHOR_MAX`). */
+export const AUTHOR_MAX = 120;
 
 /** The words of Make it yours cut into what a line shows: text, `code` and one link. */
 export function ownParts(text) {
@@ -511,6 +513,9 @@ export const NO_NAME_PRESS = 'Name the site';
 
 export const CATEGORY_SAID = 'Pick one the site uses or type a new one. Left empty, the article has none.';
 export const LIST_IMAGE_COVER = 'The cover picture';
+export const AUTHOR_LABEL = 'Author';
+export const AUTHOR_IMAGE_LABEL = 'Author picture';
+export const AUTHOR_IMAGE_NONE = 'No picture';
 
 // the place on the site's map: optional, never filled without a press
 
@@ -644,6 +649,9 @@ export const WEBSITE_HELP = {
   publishName: 'Open Settings › Website, to name the site',
   publishImage: 'The picture this article has in the site\'s list',
   publishImageClear: 'Back to the cover picture',
+  publishAuthor: 'Who wrote it, signed on its page and named in the site\'s lists',
+  publishAuthorImage: 'A small round picture before the author\'s name',
+  publishAuthorImageClear: 'No picture beside the author\'s name',
   publishPlace: 'Where this article stands on the site\'s map, pasted as lat, lon',
   publishPlaceName: 'The name of the place, shown on its pin',
   publishPlaceUse: 'Fill the place with the point this note names',

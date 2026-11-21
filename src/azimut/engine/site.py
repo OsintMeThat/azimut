@@ -44,6 +44,12 @@ is the card it always was; being optional, it keeps the format `azimut-article/1
 `articles.json` carries it the same way, and a place a hand edit left unreadable is dropped, the
 line kept.
 
+An article is by the note's own author when its look names one, else by the site's (`Site.author`).
+Its author's picture, `author_image`, is a file in its folder, `author.jpg` or `author.png`, and the
+key is written only when it has one. A line carries it from the site's root as it carries `image`, and
+a name a hand edit made anything else is dropped. A list names the author after the day, the picture
+before the name, unless the author is the site's own name: then neither shows.
+
 A map page cited by an article shows as a link under that article, never as its own line; a
 map nothing cites keeps its own line so it is never lost. A page (`role: "page"`) is on no
 list: it is in `articles.json` under `pages`, and the default home's header links it. An
@@ -205,7 +211,7 @@ class Site:
     #: Where the site is served, with its closing slash (`githubpages.site_base`).
     address: str
     tagline: str = ""
-    #: Who an article is by when its card says nobody else: the report name, else the title.
+    #: Who an article is by when its note names nobody else: the report name, else the title.
     author: str = ""
     #: Whether the default home ends on "Made with Azimut" (`site_credit_azimut`).
     credit: bool = True
@@ -361,6 +367,8 @@ BAR_CLOSE = b"<!-- /azimut:bar -->"
 _BODY = re.compile(rb"<body\b[^>]*>")
 #: Where an article's folder keeps the site's logo its bar shows (`notes_html._way_home`).
 LOGO_FILE = re.compile(r"^assets/[0-9a-f]{8,16}-site-logo\.png$")
+#: The author's picture as a card names it: a file at its folder's root (`notes_web.author_face`).
+AUTHOR_FILE = re.compile(r"^author\.(?:jpg|png)$")
 
 
 def marked_bar(frame: Frame, logo: str) -> str:
@@ -675,6 +683,8 @@ class Card:
     links: tuple[str, ...] = ()
     #: Where the article stands on a map of the site's articles, None for nowhere.
     place: NotePlace | None = None
+    #: The author's picture, a file in the folder (`AUTHOR_FILE`), "" for none.
+    author_image: str = ""
 
     def dated(self, day: str) -> "Card":
         return replace(self, date=day)
@@ -686,6 +696,8 @@ class Card:
             "image": self.image, "links": list(self.links), "maps": []}
         if self.place is not None:
             card["place"] = self.place.model_dump(mode="json")
+        if self.author_image:
+            card["author_image"] = self.author_image
         return (json.dumps(card, indent=1, ensure_ascii=False) + "\n").encode("utf-8")
 
 
@@ -778,6 +790,7 @@ def read_card(folder: str, data: bytes) -> dict[str, Any] | None:
         if where and words:
             kept_maps.append({"title": words, "address": where})
     place = read_place(card.get("place"))
+    face = card.get("author_image")
     return {
         "folder": folder,
         "address": f"/{folder}/",
@@ -793,6 +806,7 @@ def read_card(folder: str, data: bytes) -> dict[str, Any] | None:
         "links": [str(one).strip("/")[:200] for one in links[:MAX_LINKS] if isinstance(one, str)],
         "maps": kept_maps,
         **({"place": place} if place is not None else {}),
+        **({"author_image": f"/{folder}/{face}"} if isinstance(face, str) and AUTHOR_FILE.match(face) else {}),
     }
 
 
@@ -875,9 +889,16 @@ def _at(prefix: str, address: str) -> str:
     return f"{prefix}{address}" if address.startswith("/") else address
 
 
-def _by(author: str, site_title: str) -> str:
-    """The author after a line's date, left out when it is the site's own name."""
-    return f" · {html.escape(author)}" if author and author != site_title else ""
+def _by(line: dict[str, Any], site_title: str, prefix: str) -> str:
+    """The author after a line's date, their picture before their name; both left out when it is
+    the site's own name."""
+    author = line.get("author", "")
+    if not author or author == site_title:
+        return ""
+    face = line.get("author_image", "")
+    picture = (f'<img class="az-face" src="{html.escape(_at(prefix, face))}" alt="" width="20" height="20" '
+               f'loading="lazy" decoding="async">') if face else ""
+    return f" · {picture}{html.escape(author)}"
 
 
 def render_maps(maps: list[dict[str, Any]], site_title: str, limit: int = 0, prefix: str = "") -> str:
@@ -895,7 +916,7 @@ def render_maps(maps: list[dict[str, Any]], site_title: str, limit: int = 0, pre
         if m["category"]:
             out.append(f'<span class="az-category">{e(m["category"])}</span>')
         out.append(f'<h2 class="az-title"><a href="{home}">{e(m["title"])}</a></h2>')
-        by = _by(m.get("author", ""), site_title)
+        by = _by(m, site_title, prefix)
         out.append(f'<p class="az-meta"><time datetime="{m["date"]}">{m["date_label"]}</time>{by}</p>')
         if m["summary"]:
             out.append(f'<p class="az-summary">{e(m["summary"])}</p>')
@@ -927,7 +948,7 @@ def render(lines: list[dict[str, Any]], site_title: str, section: str = "", limi
         if a["category"]:
             out.append(f'<span class="az-category">{e(a["category"])}</span>')
         out.append(f'<h2 class="az-title"><a href="{home}">{e(a["title"])}</a></h2>')
-        by = _by(a["author"], site_title)
+        by = _by(a, site_title, prefix)
         out.append(f'<p class="az-meta"><time datetime="{a["date"]}">{a["date_label"]}</time>{by}</p>')
         if a["summary"]:
             out.append(f'<p class="az-summary">{e(a["summary"])}</p>')

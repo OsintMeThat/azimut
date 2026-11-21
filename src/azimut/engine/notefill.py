@@ -24,7 +24,7 @@ prints nothing, and the check before export says so.
 from __future__ import annotations
 
 import re
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import date
 from pathlib import Path
 from typing import Callable, Mapping
@@ -133,6 +133,14 @@ class Identity:
             handle=_one_line(settings.get("signature_handle")),
             credit=settings.get("report_credit_azimut") is True,
         )
+
+    def written_by(self, author: str) -> "Identity":
+        """Who signs a note someone else wrote (`NoteLook.author`): their name alone. The analyst's
+        role, organisation, handwritten signature, site and handle are the analyst's and stay off it;
+        the logo and the credit are the site's and stay. Itself while ``author`` is ""."""
+        if not author:
+            return self
+        return replace(self, name=author, role="", organisation="", signature=None, site="", handle="")
 
     def values(self, day: date) -> dict[str, str]:
         """Every placeholder but `{title}`, which is each note's own."""

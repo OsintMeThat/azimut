@@ -703,7 +703,7 @@ def write_look(case_id: str, note_id: str, body: notelook.NoteLook) -> dict[str,
     note shows, as one in its text is."""
     case = get_case(case_id)
     _require_note(case, note_id)
-    for chosen, what in ((body.cover.image, "cover"), (body.list_image, "list")):
+    for chosen, what in ((body.cover.image, "cover"), (body.list_image, "list"), (body.author_image, "author")):
         if chosen:
             picture = case.get_entity(chosen) or {}
             kind = (picture.get("attrs") or {}).get("kind")

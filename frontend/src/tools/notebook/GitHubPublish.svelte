@@ -23,6 +23,12 @@
    * are kept in the look, the picture is kept in the look as it is picked. Whatever changes
    * the look is told (`onlook`), so the Notebook never saves an older one over it.
    *
+   * **Author.** Who wrote the note, for an article written by someone else: its page is signed with
+   * that name and the site's lists name it. Empty is the analyst, the name its placeholder shows. Beside
+   * it, an optional picture of the author from the case's pictures, never a logo in its place. Both are
+   * kept in the look as they are left, with or without GitHub set up, so a note's author travels in its
+   * case's bundle and opens filled in on the machine that publishes it.
+   *
    * **Place on the site's map.** An Article may stand somewhere, for a map of the site's articles: its
    * coordinates pasted as `lat, lon` (or as the Sheet reads them) and a name for its pin, both optional and
    * empty for most notes. Under them, what the coordinates read as, or why they are no place, which holds the
@@ -46,6 +52,7 @@
   import { foldText } from '../../lib/textFold.js';
   import { siteName } from '../../lib/websiteHub.js';
   import {
+    AUTHOR_IMAGE_LABEL, AUTHOR_IMAGE_NONE, AUTHOR_LABEL, AUTHOR_MAX,
     CATEGORY_MAX, CATEGORY_SAID, HAND_EDITED, LIST_IMAGE_COVER, NO_NAME_PRESS, ON_SITE, PLACE_COORDS_LABEL, PLACE_COORDS_PLACEHOLDER,
     PLACE_NAME_LABEL, PLACE_NAME_MAX, PLACE_NAME_PLACEHOLDER, PLACE_TITLE, PLACE_WHY, WEBSITE_HELP as HELP, noNameSaid, onSiteSaid,
     placeText, placeUseSaid, readPlace,
@@ -78,6 +85,8 @@
   } = $props();
 
   let github = $state(null);
+  // whether GitHub's settings were read, so the author's fields stand alone only once GitHub is known to be off
+  let githubRead = $state(false);
   let short = $state('');
   let typed = false;
   // what Publish found missing: { needs, detail }, then what the press made of it
@@ -91,11 +100,17 @@
   let category = $state('');
   let role = $state('article');
   let listImage = $state('');
+  // who wrote the note and their picture, as the look keeps them; the name kept when the field is left
+  let author = $state('');
+  let ownAuthor = $state('');
+  let authorImage = $state('');
+  let authorSaving = Promise.resolve();
   // the look's own category, suggested with what the site uses
   let ownCategory = $state('');
   let reading = $state(false);
   let readSaid = $state('');
-  let picking = $state(false);
+  // which picture is being picked: '' none, 'list' or 'author'
+  let picking = $state('');
   let pictureQuery = $state('');
   // where the article stands on the site's map, as typed: the look's own until changed
   let coords = $state('');
@@ -103,7 +118,7 @@
   // the point the note offers, shown as a press and never filled without it
   let offer = $state(null);
   // typed before the look came, so what was typed is kept
-  let touched = { category: false, role: false, place: false };
+  let touched = { category: false, role: false, place: false, author: false };
 
   // the folder on GitHub was found changed: the next press publishes anyway. Read here, and handed up (`warned`)
   let held = $state(false);
@@ -114,7 +129,8 @@
 
   $effect(() => {
     let live = true;
-    readGitHub().then((value) => { if (live) github = value; }).catch(() => { if (live) github = null; });
+    readGitHub().then((value) => { if (live) github = value; }).catch(() => { if (live) github = null; })
+      .finally(() => { if (live) githubRead = true; });
     return () => { live = false; };
   });
 
@@ -129,9 +145,8 @@
   $effect(() => { problem = wrong || placeWrong; });
   $effect(() => { warned = held; });
 
-  // the note's look, once GitHub is known to be set up: what it says it is on the site
+  // the note's look: what it says it is on the site, and who wrote it, which is asked with GitHub off too
   $effect(() => {
-    if (!ready) return;
     let live = true;
     readLook(caseId, noteId).then((look) => {
       if (!live) return;
@@ -143,6 +158,9 @@
         placeName = look.place?.name ?? '';
       }
       listImage = look.list_image ?? '';
+      ownAuthor = look.author ?? '';
+      if (!touched.author) author = ownAuthor;
+      authorImage = look.author_image ?? '';
       loaded = true;
     }).catch(() => {});
     return () => { live = false; };
@@ -167,6 +185,9 @@
     .sort((a, b) => a.label.localeCompare(b.label))
     .slice(0, 60));
   const listPicture = $derived(entities.find((entity) => entity.id === listImage) ?? null);
+  const authorPicture = $derived(entities.find((entity) => entity.id === authorImage) ?? null);
+  // the name an article with no author of its own is by: the Publishing name, else the site's
+  const authorDefault = $derived(prefs.reportName.trim() || siteCalled || '');
 
   // the short name: the one this note's address ends on, else its title, until typed
   $effect(() => {
@@ -216,7 +237,32 @@
   function chooseRole(id) {
     touched.role = true;
     role = id;
-    picking = false;
+    picking = '';
+  }
+
+  function typeAuthor(value) {
+    touched.author = true;
+    author = value;
+  }
+
+  /** The author's name kept in the look as the field is left; empty, the article is the analyst's again. */
+  function saveAuthor() {
+    const next = author.split(/\s+/).filter(Boolean).join(' ').slice(0, AUTHOR_MAX);
+    author = next;
+    if (next === ownAuthor) return;
+    const before = ownAuthor;
+    ownAuthor = next;
+    authorSaving = keepInLook({ author: next }).catch((error) => {
+      ownAuthor = before;
+      toast(`Author not saved: ${error.message}`, 'danger');
+    });
+  }
+
+  /** One change kept in the look at once, read afresh: the Notebook may have changed it since this dialog read it. */
+  async function keepInLook(changes) {
+    const look = await readLook(caseId, noteId);
+    await writeLook(caseId, noteId, { ...look, ...changes });
+    onlook();
   }
 
   /** Read the site for the categories it uses, on this press only. */
@@ -244,21 +290,20 @@
     }
   }
 
-  /** A picture picked for the list, or none (the cover's): kept in the look at once, like the cover picture is. */
-  async function pickImage(entity) {
-    picking = false;
+  /** A picture picked for the list or the author, or none: kept in the look at once, like the cover picture is. */
+  async function pickImage(entity, which = picking) {
+    picking = '';
     pictureQuery = '';
-    const before = listImage;
+    const before = which === 'author' ? authorImage : listImage;
     const next = entity?.id ?? '';
     if (next === before) return;
-    listImage = next;
+    if (which === 'author') authorImage = next;
+    else listImage = next;
     try {
-      // the look as it is now: the Notebook may have changed it since this dialog read it
-      const look = await readLook(caseId, noteId);
-      await writeLook(caseId, noteId, { ...look, list_image: next });
-      onlook();
+      await keepInLook(which === 'author' ? { author_image: next } : { list_image: next });
     } catch (error) {
-      listImage = before;
+      if (which === 'author') authorImage = before;
+      else listImage = before;
       toast(`Picture not saved: ${error.message}`, 'danger');
     }
   }
@@ -295,6 +340,8 @@
     setUp = '';
     try {
       await prepare();
+      // an author typed and left a moment ago is in the look before the page is made
+      await authorSaving;
       const told = held;
       if (!told && await handEdited()) {
         held = true;
@@ -340,6 +387,43 @@
   }
 </script>
 
+{#snippet picker(which)}
+  {#if picking === which}
+    <div class="pictures">
+      <!-- svelte-ignore a11y_autofocus -->
+      <input class="input" bind:value={pictureQuery} placeholder="Find a picture…" autofocus
+        title={which === 'author' ? HELP.publishAuthorImage : HELP.publishImage}
+        onkeydown={(event) => { if (event.key === 'Escape') { event.stopPropagation(); picking = ''; } }} />
+      <div class="picture-list">
+        {#each pictures as entity (entity.id)}
+          <button type="button" class="picture-row" class:on={entity.id === (which === 'author' ? authorImage : listImage)}
+            title={entity.label} onclick={() => pickImage(entity, which)}><Icon name="image" size={12} /><span>{entity.label}</span></button>
+        {/each}
+        {#if !pictures.length}<p class="none">No picture in the case matches.</p>{/if}
+      </div>
+    </div>
+  {/if}
+{/snippet}
+
+{#snippet authorFields()}
+  <label class="lbl" for="export-author" title={HELP.publishAuthor}>{AUTHOR_LABEL}</label>
+  <input id="export-author" class="input" value={author} maxlength={AUTHOR_MAX} spellcheck="false" autocomplete="off"
+    placeholder={authorDefault} title={HELP.publishAuthor}
+    oninput={(event) => typeAuthor(event.currentTarget.value)} onchange={saveAuthor} />
+  <span class="lbl">{AUTHOR_IMAGE_LABEL}</span>
+  <div class="picked">
+    <button type="button" class="btn btn-sm pick" data-pick="author" title={HELP.publishAuthorImage}
+      onclick={() => (picking = picking === 'author' ? '' : 'author')}>
+      <Icon name="image" size={13} /><span>{authorPicture?.label ?? (authorImage ? 'No longer in the case' : AUTHOR_IMAGE_NONE)}</span>
+    </button>
+    {#if authorImage}
+      <button type="button" class="btn btn-ghost btn-sm" title={HELP.publishAuthorImageClear} aria-label="No author picture"
+        onclick={() => pickImage(null, 'author')}><Icon name="x" size={12} /></button>
+    {/if}
+  </div>
+  {@render picker('author')}
+{/snippet}
+
 {#if ready}
   <div class="gh" aria-label="GitHub Pages">
     <label class="lbl" for="export-short">Address it will live at</label>
@@ -368,6 +452,7 @@
         <p class="address-said">{noNameSaid(siteCalled)}
           <button type="button" class="link" title={HELP.publishName} onclick={() => openSettings('identity')}>{NO_NAME_PRESS}</button></p>
       {/if}
+      {@render authorFields()}
       {#if role === 'article'}
         <label class="lbl" for="export-category" title={HELP.publishCategory}>Category</label>
         <div class="category-line">
@@ -383,28 +468,15 @@
         <p id="export-category-said" class="address-said" role="status">{readSaid || CATEGORY_SAID}</p>
         <span class="lbl">Picture in the list</span>
         <div class="picked">
-          <button type="button" class="btn btn-sm pick" title={HELP.publishImage} onclick={() => (picking = !picking)}>
+          <button type="button" class="btn btn-sm pick" data-pick="list" title={HELP.publishImage} onclick={() => (picking = picking === 'list' ? '' : 'list')}>
             <Icon name="image" size={13} /><span>{listPicture?.label ?? (listImage ? 'No longer in the case' : LIST_IMAGE_COVER)}</span>
           </button>
           {#if listImage}
             <button type="button" class="btn btn-ghost btn-sm" title={HELP.publishImageClear} aria-label="Use the cover picture"
-              onclick={() => pickImage(null)}><Icon name="x" size={12} /></button>
+              onclick={() => pickImage(null, 'list')}><Icon name="x" size={12} /></button>
           {/if}
         </div>
-        {#if picking}
-          <div class="pictures">
-            <!-- svelte-ignore a11y_autofocus -->
-            <input class="input" bind:value={pictureQuery} placeholder="Find a picture…" autofocus title={HELP.publishImage}
-              onkeydown={(event) => { if (event.key === 'Escape') { event.stopPropagation(); picking = false; } }} />
-            <div class="picture-list">
-              {#each pictures as entity (entity.id)}
-                <button type="button" class="picture-row" class:on={entity.id === listImage} title={entity.label}
-                  onclick={() => pickImage(entity)}><Icon name="image" size={12} /><span>{entity.label}</span></button>
-              {/each}
-              {#if !pictures.length}<p class="none">No picture in the case matches.</p>{/if}
-            </div>
-          </div>
-        {/if}
+        {@render picker('list')}
         <div class="place" role="group" aria-label={PLACE_TITLE}>
           <span class="lbl">{PLACE_TITLE}</span>
           <div class="place-fields">
@@ -444,7 +516,11 @@
     {#if setUp}<p class="set-up" role="status"><Icon name="check" size={12} /> {setUp}</p>{/if}
     {#if failed}<p class="failed" role="alert"><Icon name="alert" size={12} /> {failed}</p>{/if}
   </div>
-{:else if setupShown && github !== null}
+{:else if githubRead}
+  <!-- with GitHub off, who wrote the note can still be said, so it travels with the case -->
+  <div class="site" role="group" aria-label={AUTHOR_LABEL}>{@render authorFields()}</div>
+{/if}
+{#if !ready && setupShown && github !== null}
   <div class="setup" role="group" aria-label="Set up GitHub Pages">
     <p class="lead"><Icon name="info" size={13} /> Publish to your own GitHub Pages site in one press: connect GitHub once, in Settings › Website.</p>
     <p class="quiet">{GITHUB_FREE}</p>

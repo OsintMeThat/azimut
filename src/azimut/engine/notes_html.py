@@ -269,6 +269,9 @@ class Folder:
     #: How a page published to a site is framed: the way back to the site and the counts its
     #: pages make (`engine/site.py`); None for a folder that is not on a site.
     frame: "site_engine.Frame | None" = None
+    #: The author's picture, a file at the folder's root (`notes_web.author_face`), shown small and
+    #: round before their name wherever the page names them; "" for none.
+    author_face: str = ""
     files: dict[str, bytes] = field(default_factory=dict)
     _named: dict[str, str] = field(default_factory=dict, repr=False)
 
@@ -708,12 +711,13 @@ class _Page:
         who = identity.organisation or identity.name
         logo = self._built_in(notefill.MY_LOGO, inline=True)
         by = ""
+        face = self._author_face() if who else ""
         if identity.site:
             words = who or urlsplit(identity.site).hostname or identity.site
             by = (f'<a class="az-mappage-site" href="{_attr(identity.site)}" target="_blank" '
-                  f'rel="noopener noreferrer">{logo}{_text(words)}</a>')
+                  f'rel="noopener noreferrer">{logo}{face}{_text(words)}</a>')
         elif who or logo:
-            by = f'<span class="az-mappage-site">{logo}{_text(who)}</span>'
+            by = f'<span class="az-mappage-site">{logo}{face}{_text(who)}</span>'
         if identity.handle:
             account = identity.handle_url()
             by += (f'<a class="az-mappage-handle" href="{_attr(account)}" target="_blank" rel="noopener noreferrer">'
@@ -1015,7 +1019,8 @@ class _Page:
         byline = identity.byline() if look.signed == "title" else ""
         if byline:
             rest = byline[len(f"By {identity.name}"):]
-            lines.append(f'<p class="az-byline" dir="auto">By {self._to_site(_text(identity.name))}{_text(rest)}</p>\n')
+            lines.append(f'<p class="az-byline" dir="auto">{self._author_face()}By {self._to_site(_text(identity.name))}'
+                         f'{_text(rest)}</p>\n')
         lines.append(f'<p class="az-dateline"><time class="az-date" datetime="{self.day.isoformat()}">'
                      f"{_text(notes_style.long_date(self.day))}</time></p>\n")
         if look.cover.on:
@@ -1043,9 +1048,16 @@ class _Page:
         credentials = identity.credentials()
         if not picture and not identity.name:
             return ""
-        name = f'<span class="az-signer">{self._to_site(_text(identity.name))}</span>' if identity.name else ""
+        name = (f'<span class="az-signer">{self._author_face()}{self._to_site(_text(identity.name))}</span>'
+                if identity.name else "")
         role = f'<span class="az-credentials">{_text(credentials)}</span>' if credentials and identity.name else ""
         return f'<div class="az-signed {kind}">{picture}{name}{role}</div>\n'
+
+    def _author_face(self) -> str:
+        """The author's picture, small and round before their name, on a web page that has one;
+        its words are the name beside it."""
+        face = self.folder.author_face if self.folder is not None else ""
+        return f'<img class="az-face" src="{_attr(face)}" alt="" width="40" height="40">' if face else ""
 
     def _to_site(self, inner: str) -> str:
         """The analyst's name or logo linked to their Website (Settings › Publishing), as it is
