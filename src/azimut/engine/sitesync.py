@@ -183,18 +183,21 @@ def make_plan(gh: githubpages.GitHub, owner: str, repo: str, home: Site, tree: g
             put(path, make())
     existing = files.text(site.SITEMAP, MAX_LIST_BYTES) if site.SITEMAP in entries else None
     if site.SITEMAP not in entries or (existing is not None and site.owns_sitemap(existing)):
+        hidden = {str(card["address"]) for card in cards if card["role"] == site.UNLISTED}
         put(site.SITEMAP, site.sitemap(lines, maps, _sitemap_pages(existing, home, entries, lines, maps, marked,
-                                                                    pages), home))
+                                                                    pages, hidden), home))
     plan.categories = sorted({*site.categories_of(cards), *sections})
     return plan
 
 
 def _sitemap_pages(existing: str | None, home: Site, entries: dict[str, str], lines: list[dict[str, object]],
-                   maps: list[dict[str, object]], marked: list[str], pages: list[dict[str, str]]) -> list[str]:
+                   maps: list[dict[str, object]], marked: list[str], pages: list[dict[str, str]],
+                   hidden: frozenset[str] | set[str] = frozenset()) -> list[str]:
     """The paths the sitemap lists before the articles and the maps: the home, then what the
-    sitemap listed already that still answers (the analyst's own pages, which no card names),
+    sitemap listed already that still answers (the analyst's own pages, which no card names, and
+    never an unlisted page of ``hidden``, which an earlier sitemap may have listed as an article),
     then the marked pages and the pages of the site."""
-    articles = {str(line["address"]) for line in [*lines, *maps]}
+    articles = {str(line["address"]) for line in [*lines, *maps]} | hidden
     kept = []
     for path in site.sitemap_paths(existing, home) if existing else []:
         relative = path.strip("/")

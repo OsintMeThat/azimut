@@ -142,6 +142,43 @@ def test_a_page_is_on_no_list_and_is_listed_under_pages_by_title():
     assert all(line["maps"] == [] for line in site.listing(cards))
 
 
+def test_an_unlisted_page_is_in_no_list_no_feed_no_sitemap_and_adds_no_category():
+    cards = [_card("story", title="A story", category="Harbour"),
+             _card("draft", title="A draft", category="Secret", role="unlisted"),
+             _card("legal", title="Legal notice", role="page")]
+    assert [card["role"] for card in cards] == ["article", "unlisted", "page"]
+    assert [line["title"] for line in site.listing(cards)] == ["A story"]
+    assert site.map_view(cards) == [] and site.pages_of(cards) == [{"title": "Legal notice", "address": "/legal/"}]
+    assert site.categories_of(cards) == ["Harbour"]
+    lines, maps, pages = site.listing(cards), site.map_view(cards), site.pages_of(cards)
+    made = site.articles_json(lines, maps, pages, THE_SITE)
+    assert "draft" not in made and "A draft" not in made
+    assert "A draft" not in site.feed(lines, THE_SITE) and "/draft/" not in site.sitemap(lines, maps, ["/"], THE_SITE)
+    assert "A draft" not in site.render(lines, THE_SITE.title)
+    # a card that names another role, or none, is an article
+    assert _card("x", role="post")["role"] == "article" and _card("y")["role"] == "article"
+
+
+def test_an_unlisted_map_has_no_line_and_an_unlisted_article_never_shows_as_what_cites_a_map():
+    cards = [_card("map", layout="map", title="The map", role="unlisted"),
+             _card("story", title="Story", links=["map"]),
+             _card("quiet", title="Quiet", role="unlisted", links=["cited"]),
+             _card("cited", layout="map", title="Cited")]
+    # the unlisted map is not folded under the article that links it, and the listed map is not
+    # said to come from the unlisted article that links it
+    assert [(line["title"], line["maps"]) for line in site.listing(cards)] == [("Story", []), ("Cited", [])]
+    assert [(m["title"], m["article"]) for m in site.map_view(cards)] == [("Cited", None)]
+
+
+def test_the_sitemap_never_keeps_an_unlisted_page_an_earlier_sitemap_listed():
+    cards = [_card("draft", role="unlisted"), _card("story", title="Story")]
+    lines, maps = site.listing(cards), site.map_view(cards)
+    old = site.sitemap(lines, maps, ["/", "/draft/"], THE_SITE)
+    answering = {"draft/index.html": "x", "story/index.html": "x"}
+    assert sitesync._sitemap_pages(old, THE_SITE, answering, lines, maps, [], []) == ["/", "/draft/"]
+    assert sitesync._sitemap_pages(old, THE_SITE, answering, lines, maps, [], [], {"/draft/"}) == ["/"]
+
+
 def test_a_map_an_article_cites_folds_under_it_and_a_map_nothing_cites_keeps_its_own_line():
     cards = [_card("story", links=["cited-map"], title="Story"), _card("cited-map", layout="map", title="Cited"),
              _card("lost-map", layout="map", title="Lost", date="2026-01-01")]
@@ -435,6 +472,21 @@ def test_the_legal_notice_names_the_host_and_leaves_the_publisher_lines():
     assert "GitHub, Inc., 88 Colin P. Kelly Jr. St., San Francisco, CA 94107, United States" in text
     assert "## Publisher" in text and "Name:\n" in text and "Contact:\n" in text
     assert site.LEGAL_SENTENCE == "Depending on your country, a website may need a legal notice."
+
+
+def test_the_privacy_starter_names_the_host_and_what_the_counting_does():
+    assert site.PRIVACY_TITLE == "Privacy"
+    none, goat, cloud = (site.privacy_notice(stats) for stats in site.STATS)
+    for text in (none, goat, cloud):
+        assert "## Host" in text and "hosted by GitHub Pages" in text and "its own server logs" in text
+        assert "## Counting readers" in text and "## Contact" in text
+    assert "does not count its readers" in none and "GoatCounter" not in none and "Cloudflare" not in none
+    assert "GoatCounter, which sets no cookie and keeps no personal data" in goat and "Cloudflare" not in goat
+    assert "Cloudflare Web Analytics, which sets no cookie" in cloud and "GoatCounter" not in cloud
+    # a count it does not know is none
+    assert site.privacy_notice("tracker") == none and site.privacy_notice("") == none
+    # one sentence under each heading, and no link for the link check to flag
+    assert "](" not in goat and "http" not in goat
 
 
 def test_the_site_copy_is_the_contracts():

@@ -411,7 +411,7 @@ def _site_card(placement: site_engine.Placement, case: "Case", look: NoteLook, r
     return site_engine.Card(
         title=title, summary=rendered.description, date=day.isoformat(),
         category=site_engine.one_line(category, notelook.CATEGORY_MAX),
-        author=site.author, role=site_engine.PAGE if role == site_engine.PAGE else site_engine.ARTICLE,
+        author=site.author, role=role if role in (site_engine.PAGE, site_engine.UNLISTED) else site_engine.ARTICLE,
         layout=rendered.layout, image=COVER if cover is not None else "",
         links=site_engine.links_of(page, site, name))
 
