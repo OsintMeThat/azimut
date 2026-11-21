@@ -130,6 +130,7 @@ export function updateSaid(answer) {
 /** What a press says while it waits on its answer, beside a small spinner (`components/BusyLabel.svelte`). */
 export const BUSY = Object.freeze({
   read: 'Reading…', publish: 'Publishing…', update: 'Updating…', delete: 'Deleting…', test: 'Testing…', start: 'Starting…',
+  rename: 'Renaming…', move: 'Moving…', home: 'Putting it online…',
 });
 
 export const LEGAL_PRESS = 'Start a Legal notice page';
@@ -144,6 +145,7 @@ export const HUB_TABS = Object.freeze([
   { id: 'identity', label: 'Identity' },
   { id: 'hosting', label: 'Hosting' },
   { id: 'articles', label: 'Articles' },
+  { id: 'categories', label: 'Categories' },
   { id: 'readers', label: 'Readers' },
   { id: 'upkeep', label: 'Upkeep' },
   { id: 'yours', label: 'Make it yours' },
@@ -156,6 +158,7 @@ export const HUB_LEADS = Object.freeze({
   identity: ['What readers see', 'The name, the line and the logo of the site. Type and watch the preview.'],
   hosting: ['Where the site lives', 'GitHub keeps the site\'s files and serves them for free. The token stays on this computer.'],
   articles: ['What\'s on the site', 'Every article, map and page the site holds, as GitHub keeps them. Nothing is read from GitHub until you press.'],
+  categories: ['How articles are grouped', 'Add, rename or delete a category. A change rewrites the articles that carry it and the lists, in one commit.'],
   readers: ['Who reads it', 'Count your readers, and help them follow and find the site.'],
   upkeep: ['Keep it in shape', 'What Azimut writes, what stays yours, and how to do the usual chores.'],
   yours: [SITE_OWN_TITLE, 'Azimut\'s site is a simple start. Change as much of it as you like: Azimut keeps filling the lists.'],
@@ -234,6 +237,10 @@ export const FLOW_AFTER = 'Each publish also refreshes';
 export const FLOW_REFRESHES = Object.freeze(['the home list', 'the feed', 'the sitemap']);
 
 export const CHECKLIST_TITLE = 'Your site, step by step';
+/** The step that puts Azimut's home page online before any article, its press, and the link that follows. */
+export const HOME_STEP = 'Put your home page online';
+export const HOME_PRESS = 'Put it online';
+export const HOME_SEE = 'See it';
 export const OPTIONAL = 'optional';
 export const NEEDS_READ = 'Read the site, in Articles, to tell.';
 /** What a read says when GitHub cut the tree short: the site holds more files than it lists. */
@@ -241,8 +248,9 @@ export const TOO_MANY = 'The site holds too many files to read.';
 export const TOO_MANY_SHORT = 'Too many files to read';
 
 /**
- * The six things that make a site, each `done`, `todo` or `unknown` (a read of the site tells), with
- * what it says and the panel it opens. The optional ones say so, and still count.
+ * The seven things that make a site, each `done`, `todo` or `unknown` (a read of the site tells), with
+ * what it says and the panel it opens. The optional ones say so, and still count. The home page's step has a
+ * press of its own (`act`): `online` while the read finds no home, `see` once it is there.
  */
 export function checklist({ ready = false, repository = '', branch = '', title = '', fallback = '', siteLogo = false, logoFrom = '', counting = '',
   stats = '', read = null } = {}) {
@@ -251,9 +259,16 @@ export function checklist({ ready = false, repository = '', branch = '', title =
   const why = read ? TOO_MANY : NEEDS_READ;
   const articles = read ? read.items.filter((item) => item.role === 'article').length : 0;
   const asked = stats === 'goatcounter' ? 'code' : 'token';
+  const home = read?.home;
   return [
     { id: 'hosting', label: 'Connect GitHub Pages', go: 'hosting', state: ready ? 'done' : 'todo',
       said: ready ? `${repository} on ${branch}` : 'Add the account, the repository and the token.' },
+    !ready ? { id: 'home', label: HOME_STEP, go: 'hosting', state: 'todo', said: 'Connect GitHub Pages first.' }
+      : unread ? { id: 'home', label: HOME_STEP, go: 'articles', state: 'unknown', said: why }
+        : home === 'none' ? { id: 'home', label: HOME_STEP, go: 'upkeep', state: 'todo', act: 'online',
+          said: 'The site has no home page yet. This one lists your articles as you publish them.' }
+          : { id: 'home', label: HOME_STEP, go: 'upkeep', state: 'done', act: 'see',
+            said: home === 'yours' ? 'Your own home page is online.' : 'Azimut\'s home page is online.' },
     { id: 'name', label: 'Name the site', go: 'identity', state: title ? 'done' : 'todo',
       said: title || (fallback ? `It shows as ${fallback} for now.` : 'It has no name yet.') },
     { id: 'logo', label: 'Pick the site\'s logo', go: 'identity', state: siteLogo ? 'done' : 'todo',
@@ -403,12 +418,11 @@ export const KINDS = Object.freeze([
 ]);
 export const KINDS_NOTE = 'You pick the kind in the publish window, each time you publish a note.';
 export const CATEGORIES_TITLE = 'Categories';
-export const CATEGORIES_SAID = 'Made in the publish window: pick one the site uses or type a new one.';
 export const CATEGORIES_NOTE = 'A category gets a page of its own with the markers in Make it yours.';
 export const CATEGORIES_UNREAD = 'Read the site to list its categories.';
 export const CATEGORIES_NONE = 'No category on the site yet.';
 export function categoryCountSaid(count) {
-  return plural(count, 'article');
+  return count ? plural(count, 'article') : CATEGORY_WAITING;
 }
 export function categoryPagesSaid(pages) {
   return pages.length ? `${pages.map((page) => `/${page}`).join(', ')} ${pages.length === 1 ? 'lists' : 'list'} them` : 'no page of its own';
@@ -460,7 +474,7 @@ export const OWNER_LABEL = Object.freeze({ azimut: 'Azimut', you: 'You' });
 export const CHORES_TITLE = 'Usual chores';
 export const CHORES = Object.freeze([
   ['Take an article down', 'Press Delete on its line in Articles. Deleted on GitHub instead, press Update the site so the lists, the feed and the sitemap forget it.'],
-  ['Move an article to another category', 'Publish its note again and pick the new category.'],
+  ['Move an article to another category', 'Pick the category on its line in Articles. Its page is not published again.'],
   ['Rename the site or change its logo', 'Update the site changes the lists and the feed. Each article\'s bar changes when you publish it again.'],
   ['Fix a typo on GitHub directly', 'Fine. The next publish of that note asks before it replaces your fix.'],
   ['Test an article before it shows', 'Publish it as Unlisted, then as Article once it is ready.'],
@@ -479,6 +493,80 @@ export const SITE_OWN_SAMPLES = Object.freeze({
   'A page per category': [['c', '<!-- azimut:articles section="Investigations" -->'], ['c', '<!-- /azimut:articles -->']],
   'Your own scripts': [['', '{ "title": "…", "date": "2026-11-20",'], ['', '  "category": "Conflict Watch", "image": "/…/cover.jpg" }']],
 });
+
+// categories
+
+/** Said beside the list: where a category is picked. */
+export const CATEGORIES_SAID = 'Pick one when you publish a note, or on an article\'s line in Articles.';
+export const CATEGORY_WAITING = 'No article yet';
+export const CATEGORY_ADD_LABEL = 'New category';
+export const CATEGORY_ADD_PLACEHOLDER = 'A name, such as Investigations';
+export const CATEGORY_ADD_PRESS = 'Add';
+/** Said under the field: what an added category is until an article carries it. */
+export const CATEGORY_ADD_SAID = 'It is offered when you publish and on each article\'s line, and reaches the site with its first article.';
+/** Why a name typed to add is not added, by what it is up against (`websiteHub.addProblem`). */
+export const CATEGORY_ADD_PROBLEM = Object.freeze({
+  site: 'The site has that category already.',
+  added: 'You added that category already.',
+});
+export function categoryAddedSaid(name) {
+  return `${name} is added.`;
+}
+export const CATEGORY_RENAME_PRESS = 'Rename';
+export const CATEGORY_DELETE_PRESS = 'Delete';
+export const CATEGORY_REMOVE_PRESS = 'Remove';
+export const CATEGORY_SAVE_PRESS = 'Save';
+export const CATEGORY_CANCEL_PRESS = 'Cancel';
+/** Said on a site whose home page is the analyst's own, and at an add there. */
+export const CATEGORIES_OWN_PAGES = 'Your site has its own pages: Azimut updates the articles and the lists; your menu and category pages are yours to change.';
+export const CATEGORY_ADD_OWN_PAGES = 'Add a page and a menu link for it if you want one; its articles already show in your lists.';
+export const RENAME_TITLE = 'Rename this category?';
+export const RENAME_CONFIRM = 'Rename';
+export const CATEGORY_DELETE_TITLE = 'Delete this category?';
+export const CATEGORY_DELETE_CONFIRM = 'Delete the category';
+
+/** `a`, `a and b`, `a, b and c`. */
+const listed = (names) => (names.length < 2 ? names.join('') : `${names.slice(0, -1).join(', ')} and ${names.at(-1)}`);
+
+/** What a rename touches: the cards that carry the name, and the category of the new name when the site has it. */
+export function renameSaid(name, to, count, into = 0) {
+  const said = `Renames ${name} to ${to} on ${plural(count, 'article')}, and in the lists and the feed, in one commit.`;
+  return into ? `${said} ${to} has ${plural(into, 'article')} already: they are listed together.` : said;
+}
+
+/** What a delete of a category touches: its articles stay, with none. */
+export function categoryDeleteSaid(name, count) {
+  return `Takes ${name} off ${plural(count, 'article')}, in one commit. They stay on the site, with no category.`;
+}
+
+/**
+ * What the analyst's own pages ask of a rename or a delete (`kind`) of a category they name: each page whose markers
+ * name it (`pages`, `investigations/`), and on a site whose home is their own (`own`), the menu. '' for nothing.
+ */
+export function ownPagesSaid(pages, kind, own = false) {
+  const said = [];
+  if (pages.length) {
+    const one = pages.length === 1;
+    const where = `Your ${one ? 'page' : 'pages'} ${listed(pages.map((page) => `/${page}`))} ${one ? 'lists' : 'list'} this category by name`;
+    const empty = `${one ? 'its list' : 'their lists'} will be empty`;
+    said.push(kind === 'rename' ? `${where}: change it there too, or ${empty}.` : `${where}: ${empty}.`);
+  }
+  if (own) said.push(kind === 'rename' ? 'Rename its link in your menu.' : 'Take its link out of your menu.');
+  return said.join(' ');
+}
+
+/** What a rename or a delete did, once GitHub has the commit. */
+export function categoryDoneSaid(kind, name, to, changed) {
+  return kind === 'rename' ? `${name} is ${to} now, on ${plural(changed, 'article')}.`
+    : `${name} is deleted: ${plural(changed, 'article')} left with no category.`;
+}
+
+/** What a change of one article's category did: `changed` false when it was in that one already. */
+export function movedSaid(title, to, changed = true) {
+  const where = to || 'no category';
+  if (!changed) return `“${title}” is in ${where} already.`;
+  return to ? `“${title}” is in ${to} now.` : `“${title}” has no category now.`;
+}
 
 // -- the publish dialog's fields ------------------------------------------------------------------
 
@@ -613,6 +701,7 @@ export const WEBSITE_HELP = {
   tabIdentity: 'The name, tagline and logo of the site, with a preview',
   tabHosting: 'Where the site lives, its address and its limits',
   tabArticles: 'What the site holds, read from GitHub on a press',
+  tabCategories: 'Add, rename or delete the categories of the site',
   tabReaders: 'Count the readers and give them the feed and the sitemap',
   tabUpkeep: 'Update the site, who writes which file and the usual chores',
   tabYours: 'Change as much of the site as you like',
@@ -639,6 +728,17 @@ export const WEBSITE_HELP = {
   sitePlace: 'Where this article stands on the site\'s map',
   siteDelete: 'Delete this folder from the site, and from its lists',
   siteDeleteOutside: 'Made outside Azimut: delete it on GitHub',
+  siteCategory: 'The category of this article, changed on GitHub as you pick it',
+  categoryName: 'The name of a category to add',
+  categoryAdd: 'Offer this category when you publish, until an article carries it',
+  categoryRename: 'Give this category another name on every article that carries it',
+  categoryRenameField: 'The new name of the category',
+  categorySave: 'Rename it, once you confirm',
+  categoryCancel: 'Keep the name as it is',
+  categoryDelete: 'Take this category off every article that carries it',
+  categoryRemove: 'Stop offering this category',
+  homeOnline: 'Write Azimut\'s home page, its feed and its sitemap on the site now',
+  homeSee: 'Open the home page in a new tab',
   legalStart: 'Make a page titled Legal notice in the open case, with the host named',
   privacyStart: 'Make a page titled Privacy in the open case, with the counting named',
   statsOff: 'Do not count the readers of the site',

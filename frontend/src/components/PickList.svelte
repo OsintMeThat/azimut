@@ -9,7 +9,9 @@
    * the keys (`aria-activedescendant`). The arrows, Home and End walk the list, Enter (or Space) picks,
    * Escape and Tab close it, and letters typed filter it, said at its top and taken back by Backspace;
    * picking New with letters typed starts the field on them. In the field, every letter is handed up
-   * as it is typed, Enter or leaving it ends it, and Escape gives the value back as it was.
+   * as it is typed, Enter or leaving it ends it, and Escape gives the value back as it was. `ondone` hears
+   * only a choice made: an option picked, or the field ended on what it holds (`typed` then true), never
+   * each letter nor an Escape, for a list whose pick is acted on at once.
    */
   import { tick } from 'svelte';
   import FloatingMenu from './FloatingMenu.svelte';
@@ -32,6 +34,9 @@
     describedby = undefined,
     /** Called with each value picked or typed. */
     onpick = () => {},
+    /** Called once a choice is made, with the value and whether it was typed: `(value, typed)`. */
+    ondone = () => {},
+    disabled = false,
   } = $props();
 
   const listId = `pick-${Math.random().toString(36).slice(2, 9)}`;
@@ -81,6 +86,7 @@
       return;
     }
     onpick(entry.value);
+    ondone(entry.value, false);
     trigger?.focus();
   }
 
@@ -126,6 +132,7 @@
     if (!typing) return;
     typing = false;
     onpick(keep ? draft.trim() : before);
+    if (keep) ondone(draft.trim(), true);
     await tick();
     trigger?.focus();
   }
@@ -149,7 +156,7 @@
 {:else}
   <button type="button" {id} class="input pick-trigger" bind:this={trigger} role="combobox" aria-haspopup="listbox" aria-expanded={open}
     aria-controls={open ? listId : undefined} aria-activedescendant={open ? optionId(active) : undefined} aria-label={label || undefined}
-    aria-describedby={describedby} {title} onclick={() => (open ? close() : show())} onkeydown={keys}>
+    aria-describedby={describedby} {title} {disabled} onclick={() => (open ? close() : show())} onkeydown={keys}>
     <span class="pick-value" class:pick-none={!value}>{value || emptyLabel}</span>
     <Icon name="chevronDown" size={13} />
   </button>

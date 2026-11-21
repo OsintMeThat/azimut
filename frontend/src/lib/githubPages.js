@@ -5,8 +5,9 @@
  * Reading, saving and forgetting the account, the repository, the branch and the token
  * stay on this machine. Only presses reach GitHub: Test connection, Create the
  * repository, Turn on Pages, Update the site, Read the categories, Read the site, Delete an
- * article, the check before a Publish, Publish, and the watch of the page being built after a
- * publish, which asks for a bounded time. The token goes up once, when typed, and never
+ * article, Rename or Delete a category and move an article to another, the check before a
+ * Publish, Publish, and the watch of the page being built after a publish, which asks for a
+ * bounded time. A category added in Settings is kept on this machine until an article carries it. The token goes up once, when typed, and never
  * comes back: the server answers whether one is kept and its last four characters.
  */
 import { api } from './api.js';
@@ -42,6 +43,8 @@ export function readState(state) {
       counting: ['goatcounter', 'cloudflare'].includes(state?.website?.counting) ? state.website.counting : '',
     },
     categories: categoriesOf(state?.categories),
+    // the categories added in Settings › Website that no article carries yet, kept on this machine
+    added: categoriesOf(state?.added),
   };
 }
 
@@ -144,6 +147,33 @@ export function readSite() {
  */
 export function deleteFromSite(folder) {
   return api.post('/api/publishing/github/site/delete', { folder });
+}
+
+/**
+ * Keep the categories added in Settings › Website, which no article carries yet, on this machine: the publish
+ * dialog and each article's line offer them. `{ added, categories }`; nothing reaches GitHub.
+ */
+export async function keepAddedCategories(names) {
+  const answer = await api.put('/api/publishing/github/categories/added', { names: categoriesOf(names) });
+  return { added: categoriesOf(answer?.added), categories: categoriesOf(answer?.categories) };
+}
+
+/**
+ * Rename a category of the site, in one commit of the cards that carry it and the lists:
+ * `{ ok: true, commit, changed, written, warnings, categories, added }`, or the `needs` answer.
+ */
+export function renameCategory(name, to) {
+  return api.post('/api/publishing/github/categories/rename', { name, to });
+}
+
+/** Take a category off every card that carries it, in one commit with the lists; the articles stay. */
+export function deleteCategory(name) {
+  return api.post('/api/publishing/github/categories/delete', { name });
+}
+
+/** Give one article of the site another category, '' for none: its card and the lists, in one commit. */
+export function moveToCategory(folder, category) {
+  return api.post('/api/publishing/github/site/category', { folder, category });
 }
 
 /** Give the site a logo of its own: `{ site_logo: true }`. The picture is a PNG, checked as the Publishing logo is. */

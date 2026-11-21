@@ -53,6 +53,11 @@ export function dropFolder(folder) {
   siteRead.data = withoutFolder(siteRead.data, folder);
 }
 
+/** Update the site wrote Azimut's home page: a site the read found with none has it now. */
+export function homeWritten() {
+  if (siteRead.data?.home === 'none') siteRead.data = { ...siteRead.data, home: 'azimut' };
+}
+
 /** Forget what was read: the repository changed, or GitHub was forgotten. */
 export function forgetRead() {
   siteRead.data = null;

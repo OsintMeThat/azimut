@@ -9,21 +9,33 @@
    * server refuses a delete with is the result line.
    * The rows are a table when the hub is wide, and a list with the facts under each title when not.
    * An article that stands somewhere on the site's map shows a small pin with its place under its address.
+   * An article's category is a list on its line (`components/PickList.svelte`): the site's categories, those
+   * added in Categories, or a new one typed; a choice goes to GitHub at once as one commit of its card and the
+   * lists (`moveToCategory`), the line saying so while it waits, and the read follows (`withCategories`).
    */
   import Icon from '../../../components/Icon.svelte';
   import ConfirmDialog from '../../../components/ConfirmDialog.svelte';
   import GitHubSetupPress from '../../../components/GitHubSetupPress.svelte';
-  import { deleteFromSite } from '../../../lib/githubPages.js';
+  import BusyLabel from '../../../components/BusyLabel.svelte';
+  import PickList from '../../../components/PickList.svelte';
+  import { deleteFromSite, moveToCategory } from '../../../lib/githubPages.js';
   import { dropFolder, siteRead } from '../../../lib/siteRead.svelte.js';
-  import { chipsOf, formatBytes, itemsFor, kindOf, pathOf } from '../../../lib/websiteHub.js';
+  import { categoryChoices, chipsOf, formatBytes, itemsFor, kindOf, pathOf, withCategories } from '../../../lib/websiteHub.js';
   import {
-    BUSY, COLUMNS, DELETE_CONFIRM, DELETE_PRESS, DELETE_SAID, DELETE_TITLE, NO_CATEGORY, OPEN_ITEM, OUTSIDE_AZIMUT, READ_FIRST, READ_FIRST_TITLE, READ_NONE, READ_NONE_TITLE,
-    TOO_MANY, WEBSITE_HELP as HELP, dayShort, deleteSaid, deletedSaid, placeDegrees,
+    BUSY, CATEGORY_MAX, CATEGORY_NEW, CATEGORY_NEW_PLACEHOLDER, CATEGORY_NONE, COLUMNS, DELETE_CONFIRM, DELETE_PRESS, DELETE_SAID, DELETE_TITLE, NO_CATEGORY,
+    OPEN_ITEM, OUTSIDE_AZIMUT, READ_FIRST, READ_FIRST_TITLE, READ_NONE, READ_NONE_TITLE, TOO_MANY, WEBSITE_HELP as HELP, dayShort, deleteSaid, deletedSaid,
+    movedSaid, placeDegrees,
   } from '../../../lib/websiteSetup.js';
   import KindBadge from './KindBadge.svelte';
   import ReadSiteButton from './ReadSiteButton.svelte';
 
-  let { ready = false, github = null, readKey = '' } = $props();
+  let {
+    ready = false,
+    github = null,
+    readKey = '',
+    /** Called with what the server keeps now once an article changed category: `{ added, categories }`. */
+    onchange = () => {},
+  } = $props();
 
   const KIND_ICON = { article: 'note', map: 'globe', page: 'file', unlisted: 'eyeOff' };
 
@@ -31,7 +43,9 @@
   // the row asked to be deleted, until answered
   let confirming = $state(null);
   let deleting = $state(false);
-  // what the last delete did: { state, text, warnings, at }
+  // the folder whose category is being changed on GitHub, '' for none
+  let moving = $state('');
+  // what the last delete or change of category did: { state, text, warnings, at }
   let deleted = $state(null);
   let setUp = $state('');
   // the pictures that did not load, shown as their kind's mark instead
@@ -43,6 +57,8 @@
   // a chip that went away with its last row leaves the whole list
   const current = $derived(chips.some((chip) => chip.id === filter) ? filter : 'all');
   const shown = $derived(itemsFor(read, current));
+  // what an article's line offers: the site's categories, then the ones added in Categories
+  const choices = $derived(categoryChoices(read, github?.added ?? []));
   // a delete is said until the next read
   const said = $derived(deleted && (!siteRead.at || deleted.at >= siteRead.at) ? deleted : null);
   const setUpSaid = $derived(setUp && !siteRead.needs && !said ? { state: 'ok', text: setUp } : null);
@@ -62,6 +78,30 @@
     } finally {
       confirming = null;
       deleting = false;
+    }
+  }
+
+  /** An article given another category on its line: one commit on GitHub, then the read follows. A field left empty changes nothing. */
+  async function move(item, value, typed) {
+    const to = String(value ?? '').replace(/\s+/g, ' ').trim().slice(0, CATEGORY_MAX);
+    if ((typed && !to) || to === item.category || moving) return;
+    moving = item.folder;
+    try {
+      const answer = await moveToCategory(item.folder, to);
+      if (answer?.ok === false && answer.needs) {
+        siteRead.needs = { needs: answer.needs === 'repository' ? 'repository' : 'pages', detail: String(answer.detail ?? '') };
+        return;
+      }
+      siteRead.data = withCategories(siteRead.data, { kind: 'move', folder: item.folder, to });
+      if (answer?.added) onchange({ added: answer.added, categories: answer.categories ?? [] });
+      deleted = { state: 'ok', text: movedSaid(item.title, to, Number(answer?.changed) > 0),
+        warnings: Array.isArray(answer?.warnings) ? answer.warnings : [], at: new Date() };
+    } catch (error) {
+      // a folder gone from the site is gone from the list too
+      if (error.status === 404) dropFolder(item.folder);
+      deleted = { state: 'error', text: error.message, warnings: [], at: new Date() };
+    } finally {
+      moving = '';
     }
   }
 
@@ -131,7 +171,19 @@
             {/if}
           </span>
           <span class="meta">
-            <span class="cat" class:muted={!item.category || item.role !== 'article'}>{item.role === 'article' && item.category ? item.category : NO_CATEGORY}</span>
+            {#if item.role === 'article'}
+              <span class="cat cat-pick" aria-busy={moving === item.folder}>
+                {#if moving === item.folder}
+                  <span class="moving"><BusyLabel busy text={BUSY.move} /></span>
+                {:else}
+                  <PickList value={item.category} options={choices} emptyLabel={CATEGORY_NONE} newLabel={CATEGORY_NEW} newPlaceholder={CATEGORY_NEW_PLACEHOLDER}
+                    maxlength={CATEGORY_MAX} label="Category of {item.title}" title={HELP.siteCategory} disabled={moving !== ''}
+                    ondone={(value, typed) => move(item, value, typed)} />
+                {/if}
+              </span>
+            {:else}
+              <span class="cat muted">{NO_CATEGORY}</span>
+            {/if}
             <span class="kind"><KindBadge {kind} /></span>
             <span class="d" title={item.dateLabel || undefined}>{dayShort(item.date) || item.dateLabel}</span>
             <span class="w">{formatBytes(item.bytes)}</span>
@@ -198,6 +250,14 @@
     font-size: var(--fs-xs); }
   .cat { overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
   .cat.muted { color: var(--text-3); font-style: italic; }
+  /* the category's list sits in the line as text until hovered, a field only when it is one */
+  .cat-pick { display: flex; min-width: 0; overflow: visible; }
+  .cat-pick :global(.pick-trigger) { width: 100%; max-width: 160px; min-height: 0; padding: 2px 6px; margin-left: -6px; border-color: transparent; background: transparent;
+    color: var(--text-2); font-size: var(--fs-xs); }
+  .cat-pick :global(.pick-trigger:hover), .cat-pick :global(.pick-trigger[aria-expanded='true']) { border-color: var(--border-strong); background: var(--bg-2); }
+  .cat-pick :global(.pick-trigger:focus-visible) { outline: 2px solid var(--accent); outline-offset: 1px; }
+  .cat-pick :global(.pick-field) { width: 100%; max-width: 160px; padding: 2px 6px; font-size: var(--fs-xs); }
+  .moving { display: inline-flex; align-items: center; gap: 5px; color: var(--text-3); font-size: var(--fs-xs); }
   .kind { order: -1; display: inline-flex; }
   .d, .w { color: var(--text-2); white-space: nowrap; font-variant-numeric: tabular-nums; }
   .w { color: var(--text-3); }

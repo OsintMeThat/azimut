@@ -2,9 +2,9 @@
 /**
  * Settings › Website › Articles, mounted: nothing is asked of GitHub until Read the site is pressed, what
  * the read lists (rows with their picture, address, category, kind, date and weight, chips that filter
- * them), the categories and the pages every site should have, and a delete that reaches GitHub only
- * through its confirmation, then takes the row off the list and out of every part that counted it, or
- * says why the server refused it.
+ * them), an article's category picked on its line and sent to GitHub at once, the pages every site
+ * should have, and a delete that reaches GitHub only through its confirmation, then takes the row off the
+ * list and out of every part that counted it, or says why the server refused it.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { flushSync, mount, unmount } from 'svelte';
@@ -45,6 +45,8 @@ const READ = {
 };
 /** What the api says of a refusal: the server's detail, and its status. */
 const refused = (status, detail) => Object.assign(new Error(detail), { status });
+const MOVED = { ok: true, commit: 'c'.repeat(40), changed: 1, written: ['articles.json', 'bab/article.json', 'feed.xml'], warnings: [],
+  categories: ['Conflict Watch', 'Harbour', 'Methods'], added: [] };
 const DELETED = (folder) => ({ ok: true, commit: 'c'.repeat(40), folder, removed: 4, written: ['articles.json', 'feed.xml', 'sitemap.xml'], warnings: [] });
 
 let live;
@@ -62,7 +64,7 @@ const dialog = () => document.querySelector('[role="alertdialog"]');
 const asks = (path) => post.mock.calls.filter(([called]) => called === path);
 
 /** The server as the panel asks it: the read, the delete and the page starters, each answered by the test. */
-function serve({ read = READ, github = SET, deleted = null } = {}) {
+function serve({ read = READ, github = SET, deleted = null, moved = null } = {}) {
   get.mockImplementation(async (path) => {
     if (path === '/api/publishing') return { github, wordpress: { site: '', user: '', password: { set: false, hint: '' } } };
     return {};
@@ -70,6 +72,7 @@ function serve({ read = READ, github = SET, deleted = null } = {}) {
   post.mockImplementation(async (path, body) => {
     if (path === '/api/publishing/github/site/read') return typeof read === 'function' ? read() : read;
     if (path === '/api/publishing/github/site/delete') return typeof deleted === 'function' ? deleted(body) : (deleted ?? DELETED(body.folder));
+    if (path === '/api/publishing/github/site/category') return typeof moved === 'function' ? moved(body) : (moved ?? MOVED);
     if (path.endsWith('/notes/privacy-notice')) return { id: 'n7', title: 'Privacy', created: true };
     if (path.endsWith('/notes/legal-notice')) return { id: 'n9', title: 'Legal notice', created: true };
     return {};
@@ -243,7 +246,7 @@ describe('what the read lists', () => {
     expect(first.querySelector('.t b').textContent).toBe('The Bab front');
     expect(first.querySelector('.t b').getAttribute('title')).toBe('The Bab front');
     expect(first.querySelector('.t small').textContent).toBe('/articles/bab/');
-    expect(first.querySelector('.cat').textContent).toBe('Conflict Watch');
+    expect(first.querySelector('.cat').textContent.trim()).toBe('Conflict Watch');
     expect(first.querySelector('.kind').textContent).toBe('Article');
     expect(first.querySelector('.d').textContent).toBe('20 Nov 2026');
     expect(first.querySelector('.d').getAttribute('title')).toBe('20 November 2026');
@@ -326,15 +329,11 @@ describe('what the read lists', () => {
     expect(panel().textContent).toContain('You pick the kind in the publish window, each time you publish a note.');
   });
 
-  it('lists the categories the read found with their articles and the pages that list them', async () => {
+  it('leaves the categories to their own panel', async () => {
     await show();
-    const categories = () => panel().querySelector('section[aria-label="Categories"]');
-    expect(categories().textContent).toContain('Read the site to list its categories.');
     await readSite();
-    const lines = [...categories().querySelectorAll('.cats li')];
-    expect(lines.map((node) => [node.querySelector('.name').textContent, node.querySelector('.count').textContent, node.querySelector('.pg').textContent]))
-      .toEqual([['Conflict Watch', '1 article', '/conflict-watch/ lists them'], ['Methods', '2 articles', 'no page of its own']]);
-    expect(categories().textContent).toContain('A category gets a page of its own with the markers in Make it yours.');
+    expect(panel().querySelector('section[aria-label="Categories"]')).toBeNull();
+    expect(target.querySelector('#hub-panel-categories section[aria-label="Categories"]')).not.toBeNull();
   });
 
   it('shares the read with the hero and the other panels', async () => {
@@ -349,6 +348,101 @@ describe('what the read lists', () => {
     await readSite();
     for (const control of panel().querySelectorAll('button, a, input, summary')) expect(control.getAttribute('title'), control.outerHTML.slice(0, 80)).toBeTruthy();
     expect(post.mock.calls.map(([path]) => path)).toEqual(['/api/publishing/github/site/read']);
+  });
+});
+
+describe('an article\'s category, on its line', () => {
+  const trigger = (folder) => row(folder).querySelector('.cat-pick [role="combobox"]');
+  const options = () => [...document.querySelectorAll('[role="listbox"] [role="option"]')];
+  const pick = async (folder, name) => {
+    trigger(folder).click();
+    await settle();
+    options().find((node) => node.textContent.trim() === name).click();
+    await settle();
+  };
+
+  it('is a list on each article\'s line, of the site\'s categories and the ones added here, and none on a page or an unlisted one', async () => {
+    await show({ ...SET, added: ['Harbour'] });
+    await readSite();
+    expect(trigger('bab').getAttribute('title')).toBe('The category of this article, changed on GitHub as you pick it');
+    expect(trigger('bab').getAttribute('aria-label')).toBe('Category of The Bab front');
+    expect(trigger('bab-map').textContent.trim()).toBe('No category');
+    expect(row('about').querySelector('.cat-pick')).toBeNull();
+    expect(row('draft').querySelector('.cat-pick')).toBeNull();
+    trigger('bab').click();
+    await settle();
+    expect(options().map((node) => node.textContent.trim())).toEqual(['No category', 'Conflict Watch', 'Methods', 'Harbour', 'New category…']);
+    // nothing reaches GitHub until a pick
+    expect(asks('/api/publishing/github/site/category')).toHaveLength(0);
+  });
+
+  it('sends a pick to GitHub at once, says it is moving on the line, then the read and the counts follow', async () => {
+    await show({ ...SET, added: ['Harbour'] });
+    await readSite();
+    let answer;
+    serve({ github: { ...SET, added: ['Harbour'] }, moved: () => new Promise((resolve) => { answer = resolve; }) });
+    await pick('bab', 'Harbour');
+    expect(asks('/api/publishing/github/site/category')).toEqual([['/api/publishing/github/site/category', { folder: 'bab', category: 'Harbour' }]]);
+    expect(row('bab').querySelector('.cat-pick').textContent.trim()).toBe('Moving…');
+    expect(row('bab').querySelector('.cat-pick .busy-spin')).not.toBeNull();
+    // one change at a time: the other lines wait
+    expect(trigger('guide').disabled).toBe(true);
+    answer(MOVED);
+    await settle();
+    expect(trigger('bab').textContent.trim()).toBe('Harbour');
+    expect(status().textContent).toContain('“The Bab front” is in Harbour now.');
+    expect(siteRead.data.categories.map((entry) => [entry.name, entry.count])).toEqual([['Methods', 2], ['Harbour', 1], ['Conflict Watch', 0]]);
+    expect(chip('Harbour').textContent).toContain('1');
+    // the added one is on the site now
+    expect([...target.querySelectorAll('#hub-panel-categories .cats li')].map((node) => node.dataset.category)).toEqual(['Methods', 'Harbour', 'Conflict Watch']);
+  });
+
+  it('takes an article out of its category, and changes nothing for the one it has already', async () => {
+    await show();
+    await readSite();
+    await pick('bab', 'Conflict Watch');
+    expect(asks('/api/publishing/github/site/category')).toHaveLength(0);
+    await pick('bab', 'No category');
+    expect(asks('/api/publishing/github/site/category')).toEqual([['/api/publishing/github/site/category', { folder: 'bab', category: '' }]]);
+    expect(status().textContent).toContain('“The Bab front” has no category now.');
+  });
+
+  it('takes a new category typed on the line once the field is left, and nothing for a field left empty', async () => {
+    await show();
+    await readSite();
+    trigger('guide').click();
+    await settle();
+    options().find((node) => node.textContent.includes('New category')).click();
+    await settle();
+    const field = row('guide').querySelector('.cat-pick input');
+    field.value = 'Deep  dives';
+    field.dispatchEvent(new Event('input', { bubbles: true }));
+    await settle();
+    expect(asks('/api/publishing/github/site/category')).toHaveLength(0);
+    field.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
+    await settle();
+    expect(asks('/api/publishing/github/site/category')).toEqual([['/api/publishing/github/site/category', { folder: 'guide', category: 'Deep dives' }]]);
+    post.mockClear();
+    trigger('bab').click();
+    await settle();
+    options().find((node) => node.textContent.includes('New category')).click();
+    await settle();
+    row('bab').querySelector('.cat-pick input').dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
+    await settle();
+    expect(asks('/api/publishing/github/site/category')).toHaveLength(0);
+  });
+
+  it('keeps the category when GitHub refuses, says why, and drops a line whose folder is gone', async () => {
+    await show();
+    await readSite();
+    serve({ moved: () => Promise.reject(refused(409, 'The branch changed on GitHub while Azimut was changing the categories: press again.')) });
+    await pick('bab', 'Methods');
+    expect(trigger('bab').textContent.trim()).toBe('Conflict Watch');
+    expect(status().textContent).toContain('press again');
+    expect(status().dataset.state).toBe('error');
+    serve({ moved: () => Promise.reject(refused(404, 'That folder is not on the site any more.')) });
+    await pick('guide', 'Conflict Watch');
+    expect(row('guide')).toBeNull();
   });
 });
 
@@ -383,7 +477,10 @@ describe('deleting an article', () => {
     expect(tab('Articles').querySelector('.count').textContent).toBe('5');
     expect(chip('Conflict Watch')).toBeUndefined();
     expect(siteRead.data.size.site).toBe(312 * MB - Math.round(4.2 * MB));
-    expect(panel().querySelectorAll('section[aria-label="Categories"] .cats li')).toHaveLength(1);
+    // a category its page names stays, with no article
+    const categories = [...target.querySelectorAll('#hub-panel-categories .cats li')];
+    expect(categories.map((node) => [node.dataset.category, node.querySelector('.cat-count').textContent]))
+      .toEqual([['Methods', '2 articles'], ['Conflict Watch', 'No article yet']]);
     // the next read says when it was read again
     await readSite();
     expect(status().textContent).toMatch(/^Read today at/);

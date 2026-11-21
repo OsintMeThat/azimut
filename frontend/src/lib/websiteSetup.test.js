@@ -7,6 +7,7 @@ import {
   nameFallbackSaid, noNameSaid, onSiteSaid, ownParts, ownersOf, placeDegrees, placeOf, placeText, placeUseSaid, progressSaid, readPlace, sizeTipSaid,
   updateSaid, whenSaid,
 } from './websiteSetup.js';
+import { categoryCountSaid, categoryDeleteSaid, categoryDoneSaid, movedSaid, ownPagesSaid, renameSaid } from './websiteSetup.js';
 
 const read = (path) => readFileSync(new URL(path, import.meta.url), 'utf8');
 // the hub is the tab and one component per panel
@@ -163,7 +164,7 @@ describe('Make it yours', () => {
 
 describe('the hub\'s panels', () => {
   it('lists the panels in order with WordPress last, each with a heading and a line', () => {
-    expect(HUB_TABS.map((tab) => tab.id)).toEqual(['overview', 'identity', 'hosting', 'articles', 'readers', 'upkeep', 'yours', 'wordpress']);
+    expect(HUB_TABS.map((tab) => tab.id)).toEqual(['overview', 'identity', 'hosting', 'articles', 'categories', 'readers', 'upkeep', 'yours', 'wordpress']);
     expect(Object.keys(HUB_LEADS).sort()).toEqual(HUB_TABS.map((tab) => tab.id).sort());
     for (const [id, [title, sub]] of Object.entries(HUB_LEADS)) {
       expect(title, id).toMatch(/^[A-Z]/);
@@ -296,38 +297,50 @@ describe('the checklist', () => {
   it('says each state and where it is set, and asks for a read of what it cannot tell', () => {
     const steps = checklist(base);
     expect(steps.map((step) => [step.id, step.state, step.go])).toEqual([
-      ['hosting', 'done', 'hosting'], ['name', 'todo', 'identity'], ['logo', 'todo', 'identity'], ['readers', 'todo', 'readers'],
-      ['legal', 'unknown', 'articles'], ['first', 'unknown', 'articles']]);
-    expect(steps.map((step) => step.said)).toEqual(['octo/articles on main', 'It shows as octo for now.', 'Uses your Publishing logo for now.',
+      ['hosting', 'done', 'hosting'], ['home', 'unknown', 'articles'], ['name', 'todo', 'identity'], ['logo', 'todo', 'identity'],
+      ['readers', 'todo', 'readers'], ['legal', 'unknown', 'articles'], ['first', 'unknown', 'articles']]);
+    expect(steps.map((step) => step.said)).toEqual(['octo/articles on main', NEEDS_READ, 'It shows as octo for now.', 'Uses your Publishing logo for now.',
       'Nobody is counted.', NEEDS_READ, NEEDS_READ]);
     expect(steps.filter((step) => step.optional).map((step) => step.id)).toEqual(['readers', 'legal']);
-    expect(progressSaid(steps)).toBe('1 of 6 done. 2 need a read of the site.');
+    expect(progressSaid(steps)).toBe('1 of 7 done. 3 need a read of the site.');
   });
 
   it('says what is left to do while nothing is set', () => {
     const steps = checklist({ ready: false, logoFrom: '', stats: 'goatcounter' });
-    expect(steps.map((step) => step.said).slice(0, 4)).toEqual(['Add the account, the repository and the token.', 'It has no name yet.', 'No logo yet.',
-      'GoatCounter is picked: paste its code.']);
-    expect(checklist({ stats: 'cloudflare' })[3].said).toBe('Cloudflare Web Analytics is picked: paste its token.');
+    expect(steps.map((step) => step.said).slice(0, 5)).toEqual(['Add the account, the repository and the token.', 'Connect GitHub Pages first.',
+      'It has no name yet.', 'No logo yet.', 'GoatCounter is picked: paste its code.']);
+    expect(steps[1].go).toBe('hosting');
+    expect(checklist({ stats: 'cloudflare' })[4].said).toBe('Cloudflare Web Analytics is picked: paste its token.');
   });
 
   it('is done once the site is read and holds a legal notice and an article, and the logo and the name are the site\'s own', () => {
     const steps = checklist({ ...base, title: 'Octo Desk', siteLogo: true, counting: 'cloudflare',
       read: read({ legal: 'legal-notice/', items: [{ role: 'article' }, { role: 'page' }, { role: 'article' }] }) });
     expect(steps.every((step) => step.state === 'done')).toBe(true);
-    expect(steps.map((step) => step.said).slice(1)).toEqual(['Octo Desk', 'A picture of its own.', 'Cloudflare Web Analytics', 'legal-notice/ is on the site.',
+    expect(steps.map((step) => step.said).slice(2)).toEqual(['Octo Desk', 'A picture of its own.', 'Cloudflare Web Analytics', 'legal-notice/ is on the site.',
       '2 articles on the site.']);
-    expect(progressSaid(steps)).toBe('6 of 6 done.');
+    expect(progressSaid(steps)).toBe('7 of 7 done.');
   });
 
   it('says what a read found missing, and tells nothing from a read cut short', () => {
     const empty = checklist({ ...base, read: read() });
-    expect(empty.slice(4).map((step) => [step.state, step.said])).toEqual([['todo', 'No legal notice on the site yet.'],
+    expect(empty.slice(5).map((step) => [step.state, step.said])).toEqual([['todo', 'No legal notice on the site yet.'],
       ['todo', 'Nothing is listed on the site yet.']]);
     const cut = checklist({ ...base, read: read({ truncated: true }) });
-    expect(cut.slice(4).map((step) => [step.state, step.said])).toEqual([['unknown', TOO_MANY], ['unknown', TOO_MANY]]);
+    expect(cut.slice(5).map((step) => [step.state, step.said])).toEqual([['unknown', TOO_MANY], ['unknown', TOO_MANY]]);
+    expect(cut[1]).toMatchObject({ state: 'unknown', said: TOO_MANY });
     // a read was made: nothing more to read for
-    expect(progressSaid(cut)).toBe('1 of 6 done.');
+    expect(progressSaid(cut)).toBe('1 of 7 done.');
+  });
+
+  it('offers to put the home page online only while the read finds none, then the way to see it', () => {
+    const none = checklist({ ...base, read: read({ home: 'none' }) })[1];
+    expect(none).toMatchObject({ id: 'home', label: 'Put your home page online', state: 'todo', act: 'online' });
+    expect(none.said).toBe('The site has no home page yet. This one lists your articles as you publish them.');
+    expect(checklist({ ...base, read: read({ home: 'azimut' }) })[1]).toMatchObject({ state: 'done', act: 'see', said: 'Azimut\'s home page is online.' });
+    // a home of the analyst's own is never written over: it is done, and has no press
+    expect(checklist({ ...base, read: read({ home: 'yours' }) })[1]).toMatchObject({ state: 'done', act: 'see', said: 'Your own home page is online.' });
+    expect(checklist({ ...base, read: null })[1].act).toBeUndefined();
   });
 });
 
@@ -383,5 +396,38 @@ describe('the place on the site\'s map', () => {
       expect(said).toMatch(/^[A-Z].*\.$/);
       expect(said).not.toContain('—');
     }
+  });
+});
+
+describe('what a change of categories says', () => {
+  it('names what a rename and a delete touch, and a category with no article', () => {
+    expect(renameSaid('Harbour', 'Ports', 3)).toBe('Renames Harbour to Ports on 3 articles, and in the lists and the feed, in one commit.');
+    expect(renameSaid('Roads', 'Harbour', 1, 2)).toBe(
+      'Renames Roads to Harbour on 1 article, and in the lists and the feed, in one commit. Harbour has 2 articles already: they are listed together.');
+    expect(categoryDeleteSaid('Harbour', 1)).toBe('Takes Harbour off 1 article, in one commit. They stay on the site, with no category.');
+    expect(categoryCountSaid(0)).toBe('No article yet');
+    expect(categoryCountSaid(2)).toBe('2 articles');
+  });
+
+  it('says what the analyst\'s own pages and menu ask of it, from the pages that name it, and nothing on Azimut\'s own site', () => {
+    expect(ownPagesSaid(['investigations/'], 'rename', true)).toBe(
+      'Your page /investigations/ lists this category by name: change it there too, or its list will be empty. Rename its link in your menu.');
+    expect(ownPagesSaid(['a/', 'b/', 'c/'], 'delete', false)).toBe('Your pages /a/, /b/ and /c/ list this category by name: their lists will be empty.');
+    expect(ownPagesSaid([], 'delete', true)).toBe('Take its link out of your menu.');
+    expect(ownPagesSaid([], 'rename', false)).toBe('');
+  });
+
+  it('says what was done', () => {
+    expect(categoryDoneSaid('rename', 'Harbour', 'Ports', 3)).toBe('Harbour is Ports now, on 3 articles.');
+    expect(categoryDoneSaid('delete', 'Harbour', '', 1)).toBe('Harbour is deleted: 1 article left with no category.');
+    expect(movedSaid('The pier', 'Ports')).toBe('“The pier” is in Ports now.');
+    expect(movedSaid('The pier', '')).toBe('“The pier” has no category now.');
+    expect(movedSaid('The pier', 'Ports', false)).toBe('“The pier” is in Ports already.');
+  });
+
+  it('keeps the standing line and the add line to the owner\'s words', () => {
+    expect(setup.CATEGORIES_OWN_PAGES).toBe(
+      'Your site has its own pages: Azimut updates the articles and the lists; your menu and category pages are yours to change.');
+    expect(setup.CATEGORY_ADD_OWN_PAGES).toBe('Add a page and a menu link for it if you want one; its articles already show in your lists.');
   });
 });

@@ -4,15 +4,16 @@
    *
    * A hero shows the site at a glance (its logo, name, address, size and last change, with Open the
    * site and Update the site) over a bar of panels: **Overview** (how it works, a checklist of what is
-   * set), **Identity** (name, tagline, logo and credit with a live preview), **Hosting**
-   * (GitHub Pages, the address, the limits), **Articles** (what the site holds, read on a press),
+   * set, with the press that puts the home page online), **Identity** (name, tagline, logo and credit with
+   * a live preview), **Hosting** (GitHub Pages, the address, the limits), **Articles** (what the site holds,
+   * read on a press, each article's category picked on its line), **Categories** (add, rename, delete),
    * **Readers** (counting, the feed and the sitemap), **Upkeep** (Update the site, who writes what,
    * the chores), **Make it yours**, then **WordPress**, which stands apart. Every panel stays mounted
    * and the others are hidden, so what was typed or opened is still there on the way back.
    *
    * Everything here is optional: a site works with it all left empty. Settings save on change as
    * preferences, the server answering with the canonical value. Nothing here reaches GitHub but Test
-   * connection, Update the site, Read the site, Delete and the setup presses (`lib/githubPages.js`),
+   * connection, Update the site, Read the site, Delete, the changes of categories and the setup presses (`lib/githubPages.js`),
    * each on its press, never on mount. The read is kept for the session (`lib/siteRead.svelte.js`) and
    * shared by the hero and the panels. The words are `lib/websiteSetup.js`'s, what is worked out of
    * them `lib/websiteHub.js`'s, and this file holds the hub's own small vocabulary of styles
@@ -20,6 +21,7 @@
    */
   import WordPressSettings from './WordPressSettings.svelte';
   import ArticlesPanel from './website/ArticlesPanel.svelte';
+  import CategoriesPanel from './website/CategoriesPanel.svelte';
   import HostingPanel from './website/HostingPanel.svelte';
   import HubPanel from './website/HubPanel.svelte';
   import IdentityPanel from './website/IdentityPanel.svelte';
@@ -31,7 +33,7 @@
   import { githubReady } from '../../lib/githubPagesSetup.js';
   import { updateSite } from '../../lib/githubPages.js';
   import { siteLogoUrl } from '../../lib/myLogo.js';
-  import { forgetRead, siteRead } from '../../lib/siteRead.svelte.js';
+  import { forgetRead, homeWritten, siteRead } from '../../lib/siteRead.svelte.js';
   import { countingOf, siteName } from '../../lib/websiteHub.js';
   import { HUB_LEADS, HUB_TABS, WEBSITE_HELP as HELP, updateSaid } from '../../lib/websiteSetup.js';
 
@@ -43,7 +45,7 @@
   } = $props();
 
   const HOVER = {
-    overview: HELP.tabOverview, identity: HELP.tabIdentity, hosting: HELP.tabHosting, articles: HELP.tabArticles,
+    overview: HELP.tabOverview, identity: HELP.tabIdentity, hosting: HELP.tabHosting, articles: HELP.tabArticles, categories: HELP.tabCategories,
     readers: HELP.tabReaders, upkeep: HELP.tabUpkeep, yours: HELP.tabYours, wordpress: HELP.tabWordpress,
   };
   const known = (id) => HUB_TABS.some((entry) => entry.id === id);
@@ -125,9 +127,16 @@
         return;
       }
       updated = { text: updateSaid(answer), at: new Date(), warnings: Array.isArray(answer?.warnings) ? answer.warnings : [] };
+      // a site with no home page has Azimut's now
+      if (Array.isArray(answer?.written) && answer.written.includes('index.html')) homeWritten();
     } catch (error) {
       updated = { error: error.message, at: new Date(), warnings: [] };
     }
+  }
+
+  /** What the server keeps of the categories now, after a press of Articles or Categories. */
+  function kept(answer) {
+    if (github && answer) github = { ...github, added: answer.added ?? github.added, categories: answer.categories ?? github.categories };
   }
 
   /** A setup press worked: a new repository has Pages off still, then all is ready. */
@@ -155,11 +164,13 @@
     {/each}
   </div>
 
-  <OverviewPanel active={tab === 'overview'} {prefs} {github} {ready} {address} {counting} {logoFrom} {fallbackName} ongo={show} />
+  <OverviewPanel active={tab === 'overview'} {prefs} {github} {ready} {address} {counting} {logoFrom} {fallbackName} {updated} ongo={show}
+    onupdate={update} />
   <IdentityPanel active={tab === 'identity'} {prefs} {savePrefs} bind:name={nameText} bind:tagline={taglineText} {account} {fallbackName} {shownName}
     {logoFrom} {logoUrl} {address} />
   <HostingPanel active={tab === 'hosting'} {ready} {address} {readKey} onchange={(value) => (github = value)} />
-  <ArticlesPanel active={tab === 'articles'} {ready} {github} {readKey} />
+  <ArticlesPanel active={tab === 'articles'} {ready} {github} {readKey} onchange={kept} />
+  <CategoriesPanel active={tab === 'categories'} {ready} {github} {readKey} onchange={kept} />
   <ReadersPanel active={tab === 'readers'} {prefs} {savePrefs} {address} />
   <UpkeepPanel active={tab === 'upkeep'} {ready} {github} {updated} {needs} {setUp} onupdate={update} onsetup={after} />
   <MakeItYoursPanel active={tab === 'yours'} />

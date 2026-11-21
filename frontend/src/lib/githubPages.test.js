@@ -5,7 +5,8 @@ const drawDiagrams = vi.hoisted(() => vi.fn(async () => ({ k1: '<svg/>' })));
 vi.mock('./api.js', () => ({ api: { get, post, put, del } }));
 vi.mock('./notesExport.js', () => ({ drawDiagrams, asSvg: (svg) => svg }));
 
-const { categoriesOf, checkFolder, publishNote, readCategories, readGitHub, readState, saveGitHub, startLegalNotice, updateSite, watchBuild } =
+const { categoriesOf, checkFolder, deleteCategory, keepAddedCategories, moveToCategory, publishNote, readCategories, readGitHub, readState, renameCategory,
+  saveGitHub, startLegalNotice, updateSite, watchBuild } =
   await import('./githubPages.js');
 
 afterEach(() => vi.clearAllMocks());
@@ -15,12 +16,12 @@ describe('the GitHub Pages site, as Settings and the dialog read it', () => {
     get.mockResolvedValue({ github: { account: 'octo', repo: 'articles', branch: 'main', site: '', token: { set: true, hint: '…abcd' } } });
     expect(await readGitHub()).toEqual({ account: 'octo', repo: 'articles', branch: 'main', site: '',
       base: 'https://octo.github.io/articles/', token: { set: true, hint: '…abcd' },
-      website: { title: '', logo: false, counting: '' }, categories: [] });
+      website: { title: '', logo: false, counting: '' }, categories: [], added: [] });
     expect(get).toHaveBeenCalledWith('/api/publishing');
     expect(post).not.toHaveBeenCalled();
     // a server that knows nothing of GitHub yet reads as nothing set
     expect(readState(undefined)).toEqual({ account: '', repo: 'articles', branch: 'main', site: '', base: '',
-      token: { set: false, hint: '' }, website: { title: '', logo: false, counting: '' }, categories: [] });
+      token: { set: false, hint: '' }, website: { title: '', logo: false, counting: '' }, categories: [], added: [] });
     expect(readState({ account: 'octo', site: 'javascript:alert(1)' }).site).toBe('');
     put.mockResolvedValue({ account: 'octo' });
     await saveGitHub({ token: 'github_pat_x' });
@@ -36,6 +37,21 @@ describe('the GitHub Pages site, as Settings and the dialog read it', () => {
     expect(readState({ website: { counting: 'plausible' } }).website.counting).toBe('');
     expect(categoriesOf(['x'.repeat(90)])[0]).toHaveLength(60);
     expect(categoriesOf('Harbour')).toEqual([]);
+    expect(readState({ added: ['Rail yards', 'rail yards', 3] }).added).toEqual(['Rail yards', '3']);
+  });
+
+  it('keeps an added category on this machine, and sends a change of categories to GitHub on its press only', async () => {
+    put.mockResolvedValue({ added: ['Bridges'], categories: ['Bridges', 'Harbour'] });
+    expect(await keepAddedCategories(['Bridges', ' bridges '])).toEqual({ added: ['Bridges'], categories: ['Bridges', 'Harbour'] });
+    expect(put).toHaveBeenCalledWith('/api/publishing/github/categories/added', { names: ['Bridges'] });
+    post.mockResolvedValue({ ok: true });
+    await renameCategory('Harbour', 'Ports');
+    expect(post).toHaveBeenLastCalledWith('/api/publishing/github/categories/rename', { name: 'Harbour', to: 'Ports' });
+    await deleteCategory('Harbour');
+    expect(post).toHaveBeenLastCalledWith('/api/publishing/github/categories/delete', { name: 'Harbour' });
+    await moveToCategory('2026/01/old', '');
+    expect(post).toHaveBeenLastCalledWith('/api/publishing/github/site/category', { folder: '2026/01/old', category: '' });
+    expect(get).not.toHaveBeenCalled();
   });
 
   it('reaches GitHub only on the presses: Update the site, Read the categories, the check, the Legal notice', async () => {
