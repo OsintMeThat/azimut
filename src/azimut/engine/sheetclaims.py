@@ -265,7 +265,8 @@ def plan(
     # like every other date this app reads, which is what the binders write; an ISO day is
     # unambiguous either way, and that is what the picker sends.
     read_day = sheetroles.parse_when(day) if day else None
-    if day and read_day is None:
+    # a whole day, never a month: an hour is placed on it
+    if day and (read_day is None or read_day["shape"] == "moment" and len(read_day["date"]) != 10):
         raise SheetError(f"'{day}' is not a date")
     day = read_day["date"] if read_day else ""
     named = [subject_column, when_column, estimate_column, method_column, place_column,

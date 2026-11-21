@@ -7860,7 +7860,13 @@ on its Draw tab.
 **Charts.** A `::: chart` block holds its settings as `key: value` lines above its own
 table (`kind`, `title`, `count`, `by`, `colour by`, `order`, `only`, `highlight`, `show`,
 `source`, `from` and the rest, `engine/notes_charts.py`), so the rows printed are the rows in
-the note. Pictograms and silhouette rows read `icon` (one glyph, or a column naming one a
+the note. Its cells are read by the one reader the browser shares (`engine/cellread.py`,
+`lib/cellRead.js`, agreeing on `cellReading.fixture.json`). A day is read in any of 113 languages:
+`5 mars 2026`, `05/03/2026`, `2026-03-05`, `March 2026`, `2026年3月5日`, or a month alone. A day
+without its year takes the column's. A number may carry a currency, `k`, `M` or `bn`, a unit,
+`~`, and `at least` or `60+` as a floor. `1,5` is one and a half, and `1,500` is fifteen hundred
+unless the column's other cells write their decimals with a comma. Sheet roles fall back on the
+same days, at their precision, and only when the cell says its year. Pictograms and silhouette rows read `icon` (one glyph, or a column naming one a
 row), `icons` (`Value = icon, …`, one a value) and, for rows, `flag` and `flags`; a row's
 own cell wins, then its value's, then the `icon` line. Every document draws it from that table in the note's look and the case's named
 colours (`engine/notecharts.py`), and captions it as every figure: its title under it,

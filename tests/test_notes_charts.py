@@ -169,7 +169,8 @@ def test_no_block_breaks_the_reading_or_the_painters(body):
 @pytest.mark.parametrize("cell, value, floor", [
     ("8", 8, False), ("1,234", 1234, False), ("1 234", 1234, False), ("≥ 41", 41, True), ("41+", 41, True),
     ("at least 60", 60, True), ("**35**", 35, False), ("$8.4M", 8.4e6, False), ("12.5%", 12.5, False),
-    ("~15", 15, False), ("0", 0, False), ("≥8", 8, True),
+    ("~15", 15, False), ("0", 0, False), ("≥8", 8, True), ("360 m", 360, False), ("min 5", 5, True),
+    ("1 200,5 €", 1200.5, False), ("٦٠", 60, False),
 ])
 def test_a_number_reads_as_a_cell_writes_it(cell, value, floor):
     number = nc.read_number(cell)
@@ -180,7 +181,7 @@ def test_a_number_reads_as_a_cell_writes_it(cell, value, floor):
 
 @pytest.mark.parametrize("cell, why", [
     ("", "empty"), ("–", "empty"), ("-3", "negative"), ("−2", "negative"), ("$8.3M-$15.7M", "range"),
-    ("8 to 15", "range"), ("n/a", "text"), ("360 m", "text"), ("min 5", "text"),
+    ("8 to 15", "range"), ("n/a", "text"), ("5 mars 2026", "text"), ("Mars", "text"),
 ])
 def test_a_cell_that_is_no_number_says_why(cell, why):
     assert nc.read_number(cell) == why

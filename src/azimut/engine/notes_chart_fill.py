@@ -196,6 +196,7 @@ def counts(headers: list[str], rows: list[list[str]], *, by: str, split: str = "
     when: dict[str, date] = {}
     blank = unread = totals = 0
     year = kinds.column_year(rows, [by_at]) if days else None
+    decimal = nc.column_decimal(rows, amount_at)
     for row in rows:
         if row and nc.TOTAL_ROW.match(nc.plain_cell(row[0])):
             totals += 1
@@ -211,7 +212,7 @@ def counts(headers: list[str], rows: list[list[str]], *, by: str, split: str = "
                 continue
             value = kinds.day_text(day, year=True)
         if amount_at is not None:
-            number = nc.read_number(row[amount_at]) if amount_at < len(row) else "empty"
+            number = nc.read_number(row[amount_at], decimal) if amount_at < len(row) else "empty"
             if not isinstance(number, nc.Number):
                 unread += 1
                 continue

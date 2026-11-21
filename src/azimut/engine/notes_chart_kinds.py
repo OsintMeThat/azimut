@@ -54,6 +54,7 @@ from typing import TYPE_CHECKING, Any, Callable, Sequence
 from PIL import Image
 
 from . import iconvector
+from .cellread import NO_YEAR, Day, read_day
 
 if TYPE_CHECKING:
     from .notes_charts import Box, Category, ChartTheme, Check, Mark, Paint, Plot, Reading, Swatch, Table
@@ -491,57 +492,7 @@ def written(reading: "Reading", column: int | None = None) -> Written:
     return Written(prefix, suffix, compact, billions, thousands)
 
 
-_MONTH_WORDS = (("jan", "january"), ("feb", "february"), ("mar", "march"), ("apr", "april"), ("may",),
-                ("jun", "june"), ("jul", "july"), ("aug", "august"), ("sep", "sept", "september"),
-                ("oct", "october"), ("nov", "november"), ("dec", "december"))
-MONTHS = {word: index for index, words in enumerate(_MONTH_WORDS, start=1) for word in words}
 MONTH_NAMES = ("Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec")
-_ISO = re.compile(r"^(\d{4})-(\d{1,2})(?:-(\d{1,2}))?$")
-_DAY_MONTH = re.compile(r"^(\d{1,2})(?:st|nd|rd|th)?\s+([A-Za-z]{3,9})\.?,?(?:\s+(\d{4}))?$")
-_MONTH_DAY = re.compile(r"^([A-Za-z]{3,9})\.?\s+(\d{1,2})(?:st|nd|rd|th)?,?(?:\s+(\d{4}))?$")
-_MONTH_YEAR = re.compile(r"^([A-Za-z]{3,9})\.?\s+(\d{4})$")
-_YEAR = re.compile(r"^(\d{4})$")
-#: The year a day written without one is placed in, when no cell says one: a leap year,
-#: never printed.
-NO_YEAR = 2000
-
-
-@dataclass(frozen=True)
-class Day:
-    """A day a cell names, how precisely (``day``, ``month``, ``year``) and whether it said its year."""
-
-    day: date
-    precision: str = "day"
-    year: bool = True
-
-
-def read_day(cell: str, year: int | None = None) -> Day | None:
-    """A cell's day: ``2026-10-05``, ``5 Oct 2026``, ``Oct 5, 2026``, ``5 Oct``, ``Oct 2026``
-    or ``2026``. A day with no year takes ``year``, else `NO_YEAR`, and says it had none."""
-    text = " ".join(nc.plain_cell(cell).split()).strip().rstrip(".")
-    if not text:
-        return None
-    try:
-        match = _ISO.match(text)
-        if match:
-            if match.group(3):
-                return Day(date(int(match.group(1)), int(match.group(2)), int(match.group(3))))
-            return Day(date(int(match.group(1)), int(match.group(2)), 1), "month")
-        match = _MONTH_YEAR.match(text)
-        if match and match.group(1).casefold() in MONTHS:
-            return Day(date(int(match.group(2)), MONTHS[match.group(1).casefold()], 1), "month")
-        match = _YEAR.match(text)
-        if match and 1000 <= int(match.group(1)) <= 2999:
-            return Day(date(int(match.group(1)), 1, 1), "year")
-        for pattern, day_at, month_at in ((_DAY_MONTH, 1, 2), (_MONTH_DAY, 2, 1)):
-            match = pattern.match(text)
-            if match and match.group(month_at).casefold() in MONTHS:
-                said = match.group(3)
-                return Day(date(int(said) if said else (year or NO_YEAR), MONTHS[match.group(month_at).casefold()],
-                                int(match.group(day_at))), year=bool(said or year))
-    except ValueError:
-        return None
-    return None
 
 
 def day_column(rows: list[list[str]], column: int) -> bool:
@@ -1812,7 +1763,8 @@ def _line_columns(reading: "Reading") -> tuple[int | None, int | None, bool]:
 
 
 def _years_or_steps(rows: list[list[str]], column: int) -> bool:
-    values = [nc.read_number(row[column]) for row in rows if column < len(row) and row[column]]
+    decimal = nc.column_decimal(rows, column)
+    values = [nc.read_number(row[column], decimal) for row in rows if column < len(row) and row[column]]
     numbers = [value.value for value in values if isinstance(value, nc.Number)]
     return len(set(numbers)) >= 2
 
@@ -1830,6 +1782,7 @@ def plot_line(reading: "Reading", theme: "ChartTheme", box: "Box") -> "Plot":
                     if found is not None):
         days = False  # years along: numbers, so the ticks are years and nothing finer
     year = column_year(rows, [x_column]) if days else None
+    x_decimal, y_decimal = nc.column_decimal(rows, x_column), nc.column_decimal(table.cells, y_column)
     floor = bool(nc.FLOOR_WORDS.search(table.headers[y_column]))
     series: dict[str, dict[float, float]] = {}
     order: list[str] = []
@@ -1839,9 +1792,9 @@ def plot_line(reading: "Reading", theme: "ChartTheme", box: "Box") -> "Plot":
             found = read_day(rows[index][x_column], year)
             x_value = float(found.day.toordinal()) if found else None
         else:
-            number = nc.read_number(rows[index][x_column])
+            number = nc.read_number(rows[index][x_column], x_decimal)
             x_value = number.value if isinstance(number, nc.Number) else None
-        y_number = nc.read_number(table.cells[index][y_column])
+        y_number = nc.read_number(table.cells[index][y_column], y_decimal)
         if x_value is None or not isinstance(y_number, nc.Number):
             unread += 1
             continue
@@ -2164,7 +2117,8 @@ def parts_columns(table: "Table", low: int, high: int, *, whole: bool = False) -
             found.append(column)
             continue
         if len(numbers) == 1:
-            values = [nc.read_number(row[numbers[0]]) for row in rows]
+            decimal = nc.column_decimal(rows, numbers[0])
+            values = [nc.read_number(row[numbers[0]], decimal) for row in rows]
             amounts = [value.value for value in values if isinstance(value, nc.Number)]
             if not amounts or sum(amounts) <= 0:
                 continue
@@ -2207,7 +2161,9 @@ def fits_figures(table: "Table") -> bool:
     figures_ok = all(row[0] and len(row[0]) <= 32 and re.search(r"\d", row[0]) for row in rows) and \
         not day_column(rows, 0)
     words = [row[1] for row in rows if len(row) > 1 and row[1]]
-    worded = len(words) * 2 >= len(rows) and all(not isinstance(nc.read_number(word), nc.Number) for word in words)
+    decimal = nc.column_decimal(rows, 1)
+    worded = len(words) * 2 >= len(rows) and all(not isinstance(nc.read_number(word, decimal), nc.Number)
+                                                 for word in words)
     return bool(figures_ok and worded)
 
 
@@ -2225,7 +2181,8 @@ def fits_circles(table: "Table") -> bool:
     rows, texts, numbers = _shape(table)
     if len(numbers) != 1 or not texts or not 2 <= len(rows) <= MAX_CIRCLES:
         return False
-    values = [nc.read_number(row[numbers[0]]) for row in rows]
+    decimal = nc.column_decimal(rows, numbers[0])
+    values = [nc.read_number(row[numbers[0]], decimal) for row in rows]
     return all(isinstance(value, nc.Number) and value.value > 0 for value in values)
 
 
@@ -2331,8 +2288,9 @@ def check_line(reading: "Reading") -> list["Check"]:
         return out
     table = reading.table
     if table is not None:
+        decimal = nc.column_decimal(table.cells, y)
         floor = bool(nc.FLOOR_WORDS.search(table.headers[y])) or any(
-            isinstance(number := nc.read_number(table.cells[row][y]), nc.Number) and number.floor
+            isinstance(number := nc.read_number(table.cells[row][y], decimal), nc.Number) and number.floor
             for row in reading.rows)
         if floor and not nc.TITLE_FLOOR.search(reading.block.title or ""):
             title = reading.block.title
