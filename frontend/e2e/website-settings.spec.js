@@ -267,7 +267,8 @@ test('Articles reads the site on a press only, lists what it holds, and deletes 
   await expect(nested).toHaveAttribute('title', 'Made outside Azimut: delete it on GitHub');
   // the hero and the categories carry the read too
   await expect(hero(page)).toContainText('3 articles · 1 map · 1 page · 1 unlisted · 312 MB');
-  await expect(panel(page, 'Categories').getByRole('region', { name: 'Categories' }).getByRole('listitem')).toHaveCount(2);
+  // the Categories panel, hidden behind its tab, holds them too
+  await expect(page.locator('#hub-panel-categories .cats li')).toHaveCount(2);
   // a picture fills its frame without stretching, and a long title stays on its line, cut with an ellipsis
   expect(await first.locator('.th img').evaluate((node) => getComputedStyle(node).objectFit)).toBe('cover');
   const long = nested.locator('.t b');
@@ -298,6 +299,7 @@ test('Articles reads the site on a press only, lists what it holds, and deletes 
   await expect(articles).toContainText('Deleted bab-el-mandab-2026/: 3 files written.');
   await expect(tab(page, 'Articles')).toContainText('5');
   // Conflict Watch has no article left, and its page still names it
+  await tab(page, 'Categories').click();
   const categories = panel(page, 'Categories').getByRole('region', { name: 'Categories' }).getByRole('listitem');
   await expect(categories).toHaveCount(2);
   await expect(categories.nth(1)).toContainText('Conflict Watch');

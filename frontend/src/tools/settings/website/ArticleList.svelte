@@ -278,7 +278,7 @@
     .act { justify-content: flex-start; margin-left: -4px; }
   }
   @container rows (min-width: 820px) {
-    .item { grid-template-columns: 84px minmax(0, 1fr) 118px 74px 84px 60px 142px; grid-template-areas: none; gap: 14px; }
+    .item { grid-template-columns: 84px minmax(0, 1fr) 132px 74px 84px 60px 142px; grid-template-areas: none; gap: 14px; }
     .head { display: grid; padding-top: 7px; padding-bottom: 7px; border-top: 0; background: var(--bg-2); color: var(--text-3); font-size: var(--fs-xs); }
     .rows { border-top: 1px solid var(--border); }
     .th, .t, .act { grid-area: auto; }

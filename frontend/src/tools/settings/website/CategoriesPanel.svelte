@@ -184,7 +184,7 @@
     <HubCard title={CATEGORIES_TITLE} label={CATEGORIES_TITLE}>
       <p>{CATEGORIES_SAID}</p>
       {#if !rows.length}
-        <p class="none">{known ? CATEGORIES_NONE : CATEGORIES_UNREAD}</p>
+        <p class="cats-none">{known ? CATEGORIES_NONE : CATEGORIES_UNREAD}</p>
       {:else}
         <ul class="cats">
           {#each rows as row (row.name)}
@@ -262,7 +262,7 @@
   .del:hover:not(:disabled) { background: var(--danger-soft); color: var(--danger); }
   .rename { grid-column: 1 / -1; display: flex; align-items: center; gap: 6px; }
   .rename .input { flex: 1; min-width: 0; }
-  .none { margin-top: 10px; color: var(--text-3); font-size: var(--fs-xs); }
+  .cats-none { margin-top: 10px; color: var(--text-3); font-size: var(--fs-xs); }
   .foot { margin-top: 10px; }
 
   .add { display: flex; gap: 6px; margin-top: 8px; }
