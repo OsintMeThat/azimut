@@ -121,9 +121,10 @@ def test_articles_at_one_spot_make_one_pin_and_the_rest_their_own():
     assert [line["title"] for line in chosen] == ["Bab", "Perim", "Caracas"]
     pins = siteatlas.pins(chosen, siteatlas.frame([siteatlas.project(43.5, 12.7), siteatlas.project(-66.9, 10.4)])[2])
     assert [[line["title"] for line in pin.lines] for pin in pins] == [["Bab", "Perim"], ["Caracas"]]
-    # framed on the Red Sea alone, the two are apart
-    alone = siteatlas.pins(chosen[:2], siteatlas.MIN_SPAN / 10)
-    assert len(alone) == 2
+    # framed as close as the map goes, a place a few degrees off stands apart
+    aden = _line("aden", "Gulf of Aden", "2026-09-01", (12.8, 47.5, "Gulf of Aden"))
+    assert len(siteatlas.pins([chosen[0], aden], siteatlas.MIN_SPAN)) == 2
+    assert len(siteatlas.pins(chosen[:2], siteatlas.MIN_SPAN)) == 1
 
 
 # -- the map on the home --------------------------------------------------------------------------------------------
