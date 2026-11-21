@@ -28,6 +28,7 @@ the moment either is edited.
 
 from __future__ import annotations
 
+import json
 from typing import TYPE_CHECKING, Any
 
 from . import entities as entity_engine
@@ -497,12 +498,17 @@ def _refresh(
     An item is ``{id, match, cells, links}``: the entity a row is built from, the key it
     is found again by, and what it fills. ``row_match`` reads that key back off a standing
     row. ``born`` is the status a new row starts at; ``advance`` may move a standing row's
-    status on, and returns None to leave it alone."""
+    status on, and returns None to leave it alone.
+
+    ``changed`` is whether any of that differs from what was handed in: a row added, a
+    cell restated, a link or a record moved. False is what lets the refresh run by itself
+    and write nothing when the case has nothing new."""
     key_at = sheet_engine.key_index(columns)
     index = {name: position for position, name in enumerate(columns)}
     links = {str(key): dict(cells) for key, cells in (meta.get("links") or {}).items()}
     promoted = {str(key): dict(cells) for key, cells in (meta.get("promoted") or {}).items()}
     built = {str(key): str(value) for key, value in (meta.get("built") or {}).items() if value}
+    before = _record(links, promoted, built)
 
     # Which row already stands for which item. The sidecar's own record rather than a
     # match on the text: the label is what changes, so matching on it would file a second
@@ -516,7 +522,11 @@ def _refresh(
     status_at = index.get(STATUS_COLUMN)
     updated, added = 0, 0
     for item in items:
-        cells, cell_links = item["cells"], item["links"]
+        # Kept to the columns the sheet has: a sheet built before a column existed keeps
+        # its own shape, and a link into a column it lacks would be dropped by the save
+        # and restated by the next refresh, a change every time and a write for nothing.
+        cells = item["cells"]
+        cell_links = {name: entity_id for name, entity_id in item["links"].items() if name in index}
         standing = standing_at.get(item["match"])
         if standing is not None and standing in where:
             row = table[where[standing]]
@@ -563,7 +573,13 @@ def _refresh(
         "added": added,
         "updated": updated,
         "gone": gone,
+        "changed": bool(added or updated or _record(links, promoted, built) != before),
     }
+
+
+def _record(*held: dict[str, Any]) -> str:
+    """What a refresh may rewrite in a sidecar, as one comparable string."""
+    return json.dumps(held, sort_keys=True)
 
 
 # -- the worklist shape: one row per file to geolocate ---------------------------

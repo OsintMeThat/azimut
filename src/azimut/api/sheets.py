@@ -609,13 +609,18 @@ def save_sheet(case_id: str, sheet_id: str, body: SheetSaveIn) -> dict[str, Any]
     return {"status": "saved", **saved}
 
 
-class SheetRefreshIn(SheetSaveIn):
-    """A sheet built out of the case, as the grid holds it, to be brought level with the case.
+class SheetRefreshIn(BaseModel):
+    """A sheet built out of the case, to be brought level with the case.
 
-    The table travels with the request for the same reason a move's does: the analyst
-    presses this on what is on screen, and the copy on disk may be a minute behind. The
-    stamp is presented and the write refused if the file moved underneath.
+    The grid sends the table it holds, which it has just saved, with the stamp of that
+    save. Sent without a table, the sheet is read from its file: what the Sheet home asks
+    of a worklist it lists, with no grid open on it.
     """
+
+    columns: list[str] | None = Field(default=None, max_length=sheet_engine.MAX_COLUMNS)
+    rows: list[list[str]] | None = Field(default=None, max_length=sheet_engine.MAX_ROWS)
+    meta: dict[str, Any] = Field(default_factory=dict)
+    stamp: str | None = Field(default=None, max_length=80)
 
 
 @router.post("/{case_id}/sheets/{sheet_id}/refresh")
@@ -625,34 +630,62 @@ def refresh_sheet(case_id: str, sheet_id: str, body: SheetRefreshIn) -> dict[str
     Proofs for `My geolocations`, imported files for `Files to geolocate`; the second
     also moves a status on to `done` once a proof answers for its file.
 
-    Pressed, never automatic. Refreshing on open would mean that looking at a sheet
-    changes it — and it would fight the stamp, which exists so that two readers of one
-    file cannot overwrite each other silently.
+    It runs by itself: when the sheet opens, when the case changes under it, and when the
+    Sheet home lists it. That is safe for three reasons, each of which the earlier
+    "pressed, never automatic" was guarding:
+
+    - **it writes only on a real change.** The refresh is compared with what it was given,
+      and a sheet the case has nothing new for answers ``unchanged`` with its file, its
+      stamp and its edges untouched, so looking at a sheet never rewrites it;
+    - **it adds and restates only what the case owns.** Rows are added, never removed, and
+      only the case's columns are rewritten: `Status`, `Notes` and the analyst's own
+      columns and rows are read and put back as they were;
+    - **it keeps the stamp.** The write presents the stamp of the table it refreshed, so
+      a spreadsheet that changed the file in between is never overwritten. On a conflict
+      the file is read again and the refresh tried once more, from what is on disk; a
+      second conflict is answered 409.
 
     Nothing is ever removed. A proof deleted since the build keeps its row and answers NO
     in `In case`; what happens to that row is the analyst's decision, because the notes on
     it are theirs.
     """
     case = get_case(case_id)
-    try:
-        fresh = fromcase_engine.refresh(case, body.columns, body.rows, body.meta)
-        saved = sheet_engine.write(
-            case, sheet_id, fresh["columns"], fresh["rows"], fresh["meta"], expected=body.stamp
-        )
-    except CaseError as exc:
-        raise HTTPException(status_code=404, detail=str(exc)) from exc
-    except sheet_engine.SheetConflict as exc:
-        raise HTTPException(status_code=409, detail=str(exc)) from exc
-    except sheet_engine.SheetError as exc:
-        raise HTTPException(status_code=422, detail=str(exc)) from exc
-    _sync_mentions(case, sheet_id, saved["meta"])
-    return {
-        "status": "saved",
-        **saved,
-        "added": fresh["added"],
-        "updated": fresh["updated"],
-        "gone": fresh["gone"],
-    }
+    held = body.columns is not None and body.rows is not None
+    for attempt in range(2):
+        try:
+            if held and attempt == 0:
+                columns, rows, meta, stamp = body.columns or [], body.rows or [], body.meta, body.stamp
+            else:
+                on_disk = sheet_engine.read(case, sheet_id)
+                columns, rows, meta, stamp = (
+                    on_disk["columns"], on_disk["rows"], on_disk["meta"], on_disk["stamp"]
+                )
+            fresh = fromcase_engine.refresh(case, columns, rows, meta)
+            if not fresh["changed"]:
+                return {"status": "unchanged", "added": 0, "updated": 0, "gone": fresh["gone"]}
+            saved = sheet_engine.write(
+                case, sheet_id, fresh["columns"], fresh["rows"], fresh["meta"], expected=stamp
+            )
+        except CaseError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+        except sheet_engine.SheetConflict as exc:
+            if attempt == 0:
+                continue
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+        except sheet_engine.SheetError as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
+        _sync_mentions(case, sheet_id, saved["meta"])
+        return {
+            "status": "saved",
+            **saved,
+            # Whether the table answered is the file read again rather than the one sent:
+            # the grid takes it whole, as it takes a reload.
+            "reread": attempt > 0 or not held,
+            "added": fresh["added"],
+            "updated": fresh["updated"],
+            "gone": fresh["gone"],
+        }
+    raise HTTPException(status_code=409, detail="this file changed on disk since it was opened")
 
 
 class SheetExportIn(BaseModel):
