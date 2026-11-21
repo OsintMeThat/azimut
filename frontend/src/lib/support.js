@@ -9,6 +9,8 @@ export const KOFI_URL = 'https://ko-fi.com/osintmethat';
 export const FEEDBACK_FORM_URL = '';
 /** A permanent invite to the OSINT Me That server, whose #azimut-help and #azimut-ideas serve Azimut. */
 export const DISCORD_URL = 'https://discord.gg/enCuR5m6SG';
+/** Who makes Azimut, named at the foot of the dialog. */
+export const SITE_URL = 'https://osintmethat.com';
 
 /**
  * The line above the tip. One is drawn each time the dialog opens and another every

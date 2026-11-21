@@ -182,6 +182,10 @@ DEFAULT_SETTINGS: dict[str, Any] = {
     # with no extension installed it changes nothing: the button copies or saves
     # the image and opens the page, as it always did.
     "reverse_prefill": True,
+    # Whether the Support heart at the foot of the rail beats once every ten minutes
+    # the app is in sight, until Support is opened that session. On, so the tip stays
+    # findable; the switch is there for anyone the motion distracts.
+    "support_heartbeat": True,
     # The handle stamped onto proofs when a proof/template enables it. Empty
     # means no account-handle slot can render.
     "signature_handle": "",
