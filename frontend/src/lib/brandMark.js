@@ -12,13 +12,13 @@ export const MARK = Object.freeze({
   east: 'M12 1.8 18.2 21.4 12 16.4Z',
 });
 
-/** Each letter's path and its shift along the line, in wordmark units. */
+/** Each letter's path and its shift along the line, in wordmark units; the M's shoulders bevelled, as in Wordmark.svelte. */
 export const LETTERS = Object.freeze([
   { d: 'M0 100 25 0h13.3l25 100', dx: 0 },
   { d: 'M13 69h37.3', dx: 0 },
   { d: 'M0 7.5h58L0 92.5h58', dx: 96.3 },
   { d: 'M0 0v100', dx: 193.3 },
-  { d: 'M0 100V0l38 58 38-58v100', dx: 232.3 },
+  { d: 'M0 100V0l38 58 38-58v100', dx: 232.3, join: 'bevel' },
   { d: 'M0 0v69a31 31 0 0 0 62 0V0', dx: 347.3 },
   { d: 'M0 7.5h58M29 7.5V100', dx: 430.3 },
 ]);
@@ -126,6 +126,7 @@ function strokeLetters(ctx, pathOf, ink, halo) {
     ctx.lineJoin = join;
     for (const letter of LETTERS) {
       ctx.save();
+      ctx.lineJoin = join === 'miter' && letter.join ? letter.join : join;
       ctx.translate(letter.dx, 0);
       ctx.stroke(pathOf(letter.d));
       ctx.restore();

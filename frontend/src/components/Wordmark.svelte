@@ -4,9 +4,10 @@
 
 <!-- AZIMUT, drawn rather than set: five of the six letters are pure straight
      lines, so the construction lives here instead of in a licensed font.
-     Cap height 100, stroke 15, butt caps and mitre joins. The A's apex is cut
-     flat: a mitred point there goes thin and sharp next to the squared-off M,
-     U and T. Letter positions carry pair kerning, not uniform spacing — evenly
+     Cap height 100, stroke 15, butt caps and mitre joins, but for the M's two
+     shoulders, bevelled: mitred, their points run far above the cap line, and the
+     box cut them into a broken-looking letter at large sizes. The A's apex is cut
+     flat: a mitred point there goes thin and sharp next to the M, U and T. Letter positions carry pair kerning, not uniform spacing — evenly
      spaced, the T's centred stem leaves a hole and it reads "AZIMU T".
      The same seven paths sit in docs/media/lockup-*.svg for the README, where
      there is no CSS to read the ink from; brandAssets.test.js holds them
@@ -23,7 +24,7 @@
     <path d="M13 69h37.3" />
     <path transform="translate(96.3 0)" d="M0 7.5h58L0 92.5h58" />
     <path transform="translate(193.3 0)" d="M0 0v100" />
-    <path transform="translate(232.3 0)" d="M0 100V0l38 58 38-58v100" />
+    <path transform="translate(232.3 0)" d="M0 100V0l38 58 38-58v100" stroke-miterlimit="1" />
     <path transform="translate(347.3 0)" d="M0 0v69a31 31 0 0 0 62 0V0" />
     <path transform="translate(430.3 0)" d="M0 7.5h58M29 7.5V100" />
   </g>

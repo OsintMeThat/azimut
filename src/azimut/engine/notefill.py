@@ -49,7 +49,7 @@ MY_SIGNATURE = "my-signature"
 PICTURES = (LOGO, MY_LOGO, MY_SIGNATURE)
 #: The Azimut lockup inked for a white page, and its size as the Notebook draws it.
 AZIMUT_LOGO = Path(__file__).resolve().parent.parent / "assets" / "brand" / "azimut.svg"
-AZIMUT_LOGO_SIZE = (606, 115)
+AZIMUT_LOGO_SIZE = (614, 127)
 #: What the check before export says about a picture the note shows and nobody set.
 NOT_SET = {
     MY_LOGO: "No logo set in Settings › Publishing.",
