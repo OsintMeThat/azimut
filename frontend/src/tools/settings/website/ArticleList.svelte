@@ -7,6 +7,7 @@
    * has the commit. Only a folder the server says it would delete has the press; the others were
    * made outside Azimut and say so on hover. What the server refuses a delete with is the result line.
    * The rows are a table when the hub is wide, and a list with the facts under each title when not.
+   * An article that stands somewhere on the site's map shows a small pin with its place under its address.
    */
   import Icon from '../../../components/Icon.svelte';
   import ConfirmDialog from '../../../components/ConfirmDialog.svelte';
@@ -16,7 +17,7 @@
   import { chipsOf, formatBytes, itemsFor, kindOf, pathOf } from '../../../lib/websiteHub.js';
   import {
     COLUMNS, DELETE_CONFIRM, DELETE_PRESS, DELETE_TITLE, NO_CATEGORY, OPEN_ITEM, OUTSIDE_AZIMUT, READ_FIRST, READ_FIRST_TITLE, READ_NONE, READ_NONE_TITLE,
-    TOO_MANY, WEBSITE_HELP as HELP, dayShort, deleteSaid, deletedSaid,
+    TOO_MANY, WEBSITE_HELP as HELP, dayShort, deleteSaid, deletedSaid, placeDegrees,
   } from '../../../lib/websiteSetup.js';
   import KindBadge from './KindBadge.svelte';
   import ReadSiteButton from './ReadSiteButton.svelte';
@@ -122,7 +123,12 @@
               <Icon name={KIND_ICON[kind]} size={16} />
             {/if}
           </span>
-          <span class="t"><b title={item.title}>{item.title}</b><small title={pathOf(item)}>{pathOf(item)}</small></span>
+          <span class="t"><b title={item.title}>{item.title}</b><small title={pathOf(item)}>{pathOf(item)}</small>
+            {#if item.place}
+              <small class="pin" title={`${HELP.sitePlace}, ${placeDegrees(item.place)}`}><Icon name="pin" size={10} />
+                <span>{item.place.name || placeDegrees(item.place)}</span></small>
+            {/if}
+          </span>
           <span class="meta">
             <span class="cat" class:muted={!item.category || item.role !== 'article'}>{item.role === 'article' && item.category ? item.category : NO_CATEGORY}</span>
             <span class="kind"><KindBadge {kind} /></span>
@@ -183,6 +189,9 @@
   .t b, .t small { display: block; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
   .t b { color: var(--text-1); font-weight: 500; }
   .t small { color: var(--text-3); font-family: var(--font-mono); font-size: 0.68rem; }
+  .t .pin { display: flex; align-items: center; gap: 3px; margin-top: 1px; color: var(--text-2); font-family: inherit; }
+  .t .pin :global(svg) { flex: none; color: var(--accent); }
+  .t .pin span { overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
   .meta { grid-area: meta; display: flex; flex-wrap: wrap; align-items: center; gap: 2px 10px; min-width: 0; align-self: start; color: var(--text-2);
     font-size: var(--fs-xs); }
   .cat { overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }

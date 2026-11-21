@@ -35,7 +35,7 @@ const READ = {
   ok: true, address: 'https://octo.github.io/articles/', home: 'azimut',
   items: [
     item('bab-el-mandab-2026', { title: 'The fall of the Bab al-Mandab front, Sep-Nov 2026', category: 'Conflict Watch', layout: 'story',
-      image: 'https://octo.github.io/articles/bab/cover.jpg', bytes: Math.round(4.2 * MB) }),
+      image: 'https://octo.github.io/articles/bab/cover.jpg', bytes: Math.round(4.2 * MB), place: { lat: 12.725004, lon: 43.5075, name: 'Bab al-Mandab, Yemen' } }),
     item('guide', { title: 'Installing Azimut: the complete guide', category: 'Methods & Tools', date: '2026-08-13', date_label: '13 August 2026',
       image: 'https://octo.github.io/articles/guide/cover.jpg', bytes: 12 * MB }),
     item('bab-map', { title: 'The Bab al-Mandab front on one map', layout: 'map', image: 'https://octo.github.io/articles/bab-map/cover.jpg', bytes: 290 * MB }),
@@ -230,6 +230,12 @@ test('Articles reads the site on a press only, lists what it holds, and deletes 
   await expect(rows(page).nth(2)).toContainText('290 MB');
   await expect(rows(page).nth(4)).toContainText('Unlisted');
   await expect(first.getByRole('link', { name: /Open/ })).toHaveAttribute('href', 'https://octo.github.io/articles/bab-el-mandab-2026/');
+  // an article that stands somewhere shows its pin, and one that does not shows none
+  const pin = first.locator('.pin');
+  await expect(pin).toHaveText('Bab al-Mandab, Yemen');
+  await expect(pin).toHaveAttribute('title', 'Where this article stands on the site\'s map, 12.725004° N, 43.5075° E');
+  await expect(pin.locator('svg')).toBeVisible();
+  await expect(rows(page).nth(1).locator('.pin')).toHaveCount(0);
   await expect(tab(page, 'Articles')).toContainText('6');
   // a card made outside Azimut has no Delete, and says on hover where to delete it
   const nested = rows(page).nth(5);
@@ -481,6 +487,7 @@ async function openPublish(page) {
         commit: 'c'.repeat(40), sha256: 'a'.repeat(64), at, uploaded: 3, reused: 0, removed: 0, edited: false, site: { written: [], warnings: [] }, warnings: [] } });
     }
     if (path === '/n1/editions') return route.fulfill({ json: { editions: [] } });
+    if (path === '/n1/place') return route.fulfill({ json: { suggested: null } });
     if (path === '/n1/look') return route.fulfill({ json: { look: request.method() === 'PUT' ? request.postDataJSON() : { style: 'report' } } });
     if (path === '/n1') return route.fulfill({ json: request.method() === 'PUT' ? { status: 'saved' } : { text: 'Smoke over the pier.' } });
     return route.fallback();

@@ -7689,7 +7689,8 @@ Settings › Website. `POST /notes/{id}/github` does it (`engine/githubpages.py`
 **Your site.** The same press keeps the site beside the folder, in the same commit
 (`engine/site.py`, `engine/sitesync.py`). The folder carries a card, `article.json`
 (title, summary, first publication's day, category, author, article or page, layout, links to
-the site's other folders), and `cover.jpg` (1200 by 630): the picture of the note's line in the
+the site's other folders, and its place on the site's map only when it has one), and `cover.jpg`
+(1200 by 630): the picture of the note's line in the
 site's list, made from the look's *list picture* when it has one, else the cover picture, a map
 page's ground or the first picture, so a designed cover for the list never replaces the
 article's own. Each page published to the site starts with a bar back to it (its logo and
@@ -7716,6 +7717,21 @@ look as it is picked (`list_image`) with a way back to the cover. The category a
 up with the press and are kept in the look; whatever the dialog changes in the look is handed to
 the Notebook, which reads it again so that its next save never drops it. After a publish, what
 the site had to say (a list left as it was) is listed under *Live at*.
+
+**Place on the site's map.** Under the picture, an article may say where it stands, for a map of the
+site's articles: **Coordinates**, pasted as `lat, lon` (or `12.725N 43.5075E`, or in degrees,
+minutes and seconds, read as the Sheet reads a cell), and a **Place name** of up to 80 characters
+that labels the pin. Both are optional and empty for most notes. Under them, *Reads as 12.725004° N,
+43.5075° E.*, or why the coordinates are no place (unreadable, a latitude past ±85 where web maps
+stop, a longitude past ±180), which holds Publish back. When the note names one obvious point, a
+press offers it, *Use 12.7250, 43.5075 · Bab al-Mandab*, beside its rule: *The one place the note
+names.* (a place, or proofs that all depict it), *Where the note's one proof concluded.*, or, with no
+place named, *Where the note's one map looks.* (`GET /notes/{id}/place`, `engine/siteplace.py`). It
+shows only while the coordinates are empty and fills nothing until pressed; a name already typed
+stays. The place goes up with the press (`place`, `null` for none), is kept in the look like the
+category, and emptying the coordinates takes it off at the next publish. A page or an unlisted page
+shows no place and sends none. The card and the line of `articles.json` carry it only when set;
+the format stays `azimut-article/1`.
 
 **Before it replaces a folder.** For a note published there before, the press first asks
 whether the folder was changed on GitHub since this Azimut published it. If it was, the dialog
@@ -8904,7 +8920,8 @@ in place of its bar, and a repository GitHub gave no size for says so.
 
 **Articles.** *What's on the site*: after **Read the site**, a chip per category, then Maps, Pages and
 Unlisted when there are some, each counting its rows, and a row per card with its picture (or its kind's
-mark), title, address, category, kind (Article, Map, Page, Unlisted), date and weight, an **Open** link and
+mark), title, address, a small pin with its place's name (or its coordinates) when the card has a place,
+category, kind (Article, Map, Page, Unlisted), date and weight, an **Open** link and
 a **Delete** press: a table when the hub is wide, the facts under each title when it is not, a long title
 cut with an ellipsis. Only a card the read says Azimut published has **Delete** (`deletable`); the others,
 such as an old WordPress export's nested folders, say *Outside Azimut* and, on hover, *Made outside Azimut:

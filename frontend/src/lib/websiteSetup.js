@@ -9,6 +9,7 @@
  * of the site holds and asks its words of this file.
  */
 import { COUNTER_STEPS, GOATCOUNTER_SIGNUP, counterCode } from './goatcounterSetup.js';
+import { parseLatLon } from './sheetRoles.js';
 
 export { GOATCOUNTER_SIGNUP, counterCode };
 
@@ -503,6 +504,73 @@ export const NO_NAME_PRESS = 'Name the site';
 
 export const CATEGORY_SAID = 'Pick one the site uses or type a new one. Left empty, the article has none.';
 export const LIST_IMAGE_COVER = 'The cover picture';
+
+// the place on the site's map: optional, never filled without a press
+
+/** How far north or south a place may stand, and the longest its name is (`notelook.PLACE_LAT_MAX`, `PLACE_NAME_MAX`). */
+export const PLACE_LAT_MAX = 85;
+export const PLACE_NAME_MAX = 80;
+export const PLACE_TITLE = 'Place on the site\'s map';
+export const PLACE_COORDS_LABEL = 'Coordinates';
+export const PLACE_NAME_LABEL = 'Place name';
+export const PLACE_COORDS_PLACEHOLDER = 'lat, lon';
+export const PLACE_NAME_PLACEHOLDER = 'Name on the pin';
+export const PLACE_EMPTY = 'Optional. Left empty, the article has no pin on the site\'s map.';
+export const PLACE_NAME_ALONE = 'A name needs coordinates: left so, the article has no pin.';
+export const PLACE_UNREAD = 'That does not read as a point: paste it as lat, lon, such as 12.725, 43.5075.';
+export const PLACE_LAT_BAD = `The latitude must be between -${PLACE_LAT_MAX} and ${PLACE_LAT_MAX}, where web maps stop.`;
+export const PLACE_LON_BAD = 'The longitude must be between -180 and 180.';
+/** Why a point is offered, by what the note names (`engine/siteplace.py`). */
+export const PLACE_WHY = Object.freeze({
+  place: 'The one place the note names.',
+  proof: 'Where the note\'s one proof concluded.',
+  map: 'Where the note\'s one map looks.',
+});
+
+/** A number kept to six places, as the server keeps it, `-0` read as `0`. */
+const sixPlaces = (value) => Number(value.toFixed(6)) + 0;
+
+/** A place as kept or offered, `{ lat, lon, name }`, or null when there is none or it does not read as one. */
+export function placeOf(value) {
+  if (!value || typeof value !== 'object') return null;
+  const { lat, lon } = value;
+  if (typeof lat !== 'number' || typeof lon !== 'number' || !Number.isFinite(lat) || !Number.isFinite(lon)) return null;
+  if (Math.abs(lat) > PLACE_LAT_MAX || Math.abs(lon) > 180) return null;
+  const name = typeof value.name === 'string' ? value.name.replace(/\s+/g, ' ').trim().slice(0, PLACE_NAME_MAX) : '';
+  return { lat: sixPlaces(lat), lon: sixPlaces(lon), name };
+}
+
+/**
+ * What the dialog's two fields hold: `place` to send, null for none; `problem`, why the coordinates are no
+ * place, which holds the publish back; and `said`, the line under the fields. The coordinates are read as the
+ * Sheet reads a cell (`sheetRoles.parseLatLon`): `12.725, 43.5075`, `12.725N 43.5075E` or degrees, minutes and seconds.
+ */
+export function readPlace(coords, name = '') {
+  const text = String(coords ?? '').trim();
+  const label = String(name ?? '').replace(/\s+/g, ' ').trim().slice(0, PLACE_NAME_MAX);
+  if (!text) return { place: null, problem: '', said: label ? PLACE_NAME_ALONE : PLACE_EMPTY };
+  const point = parseLatLon(text);
+  const problem = !point ? PLACE_UNREAD : Math.abs(point.lat) > PLACE_LAT_MAX ? PLACE_LAT_BAD : Math.abs(point.lon) > 180 ? PLACE_LON_BAD : '';
+  if (problem) return { place: null, problem, said: problem };
+  const place = { lat: sixPlaces(point.lat), lon: sixPlaces(point.lon), name: label };
+  return { place, problem: '', said: `Reads as ${placeDegrees(place)}.` };
+}
+
+/** `12.725004° N, 43.5075° E`: the point as it is kept, its hemispheres named so a pair typed the wrong way round shows. */
+export function placeDegrees(place) {
+  return `${Math.abs(place.lat)}° ${place.lat < 0 ? 'S' : 'N'}, ${Math.abs(place.lon)}° ${place.lon < 0 ? 'W' : 'E'}`;
+}
+
+/** The text a kept place gives back to the coordinates field: `12.725004, 43.5075`. */
+export function placeText(place) {
+  return place ? `${place.lat}, ${place.lon}` : '';
+}
+
+/** The press that takes the note's offer: `Use 12.7250, 43.5075 · Bab al-Mandab`. */
+export function placeUseSaid(offer) {
+  const point = `${offer.lat.toFixed(4)}, ${offer.lon.toFixed(4)}`;
+  return `Use ${point}${offer.name ? ` · ${offer.name}` : ''}`;
+}
 /** After publishing a note that replaced a folder the analyst had changed, and was not warned before. */
 export const REPLACED_EDITED = 'That folder had been changed on GitHub since you published it: this publish replaced it.';
 
@@ -542,6 +610,7 @@ export const WEBSITE_HELP = {
   siteRead: 'Read the site on GitHub, to list what it holds',
   siteFilter: 'Show only these on the list',
   siteOpenItem: 'Open this page on the site',
+  sitePlace: 'Where this article stands on the site\'s map',
   siteDelete: 'Delete this folder from the site, and from its lists',
   siteDeleteOutside: 'Made outside Azimut: delete it on GitHub',
   legalStart: 'Make a page titled Legal notice in the open case, with the host named',
@@ -568,6 +637,9 @@ export const WEBSITE_HELP = {
   publishName: 'Open Settings › Website, to name the site',
   publishImage: 'The picture this article has in the site\'s list',
   publishImageClear: 'Back to the cover picture',
+  publishPlace: 'Where this article stands on the site\'s map, pasted as lat, lon',
+  publishPlaceName: 'The name of the place, shown on its pin',
+  publishPlaceUse: 'Fill the place with the point this note names',
   publishAnyway: 'Replace the folder on GitHub with this version',
   publishStop: 'Leave the folder on GitHub as it is',
   // WordPress

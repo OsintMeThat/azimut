@@ -17,8 +17,8 @@ const { default: GitHubPublish } = await import('./GitHubPublish.svelte');
 const SET = { account: 'octo', repo: 'articles', branch: 'main', site: '', token: { set: true, hint: '…wxyz' } };
 const PUBLISHED = { published: true, address: 'https://octo.github.io/articles/port-strike/', repository: 'octo/articles', commit: 'c'.repeat(40) };
 
-/** The server as the dialog asks it: the site's state, the note's look and its editions. */
-function serve({ github = SET, look = {}, editions = [] } = {}) {
+/** The server as the dialog asks it: the site's state, the note's look, its editions and the point it offers. */
+function serve({ github = SET, look = {}, editions = [], offer = null } = {}) {
   get.mockImplementation(async (path) => {
     if (path === '/api/publishing') return { github };
     if (path.endsWith('/look')) {
@@ -26,6 +26,7 @@ function serve({ github = SET, look = {}, editions = [] } = {}) {
       return { look };
     }
     if (path.endsWith('/editions')) return { editions };
+    if (path.endsWith('/place')) return { suggested: offer };
     return {};
   });
   put.mockImplementation(async (path, body) => ({ look: body }));
@@ -112,7 +113,7 @@ it('publishes on the press and hands the answer up', async () => {
   // what the note is on the site goes with it, from its look as read
   expect(post).toHaveBeenLastCalledWith('/api/cases/c1/notes/n1/github', {
     short_name: 'port-strike', diagrams: { k1: '<svg/>' }, round_pov: true, changes: 'Fixed a date.', offline_maps: true,
-    category: '', role: 'article' });
+    category: '', role: 'article', place: null });
   expect(answer.published).toBe(true);
   expect(bound.busy).toBe(false);
   // the look it changed is told, for the Notebook to read it again
@@ -322,7 +323,7 @@ it('sends neither when the look could not be read and nothing was chosen, so the
   await settle();
   await live.publish();
   const body = post.mock.calls.at(-1)[1];
-  expect('category' in body || 'role' in body).toBe(false);
+  expect('category' in body || 'role' in body || 'place' in body).toBe(false);
   // a choice made anyway is a choice
   choice('Page').click();
   await settle();
@@ -365,6 +366,129 @@ it('says a picture was not kept, and shows the one it was', async () => {
   await settle();
   expect(target.querySelector('button.pick').textContent.trim()).toBe('Harbour');
   expect(props.onlook).not.toHaveBeenCalled();
+});
+
+// -- where the article stands on the site's map --------------------------------------------
+
+const KEPT = { lat: 12.725004, lon: 43.5075, name: 'Bab al-Mandab' };
+const OFFER = { lat: 12.7250041, lon: 43.5075, name: 'Bab al-Mandab', from: 'place', label: 'Bab al-Mandab' };
+const coords = () => target.querySelector('#export-place');
+const placeName = () => target.querySelector('#export-place-name');
+const placeSaid = () => target.querySelector('#export-place-said').textContent.trim();
+const offerPress = () => button('Use ');
+const fill = async (node, value) => {
+  node.value = value;
+  node.dispatchEvent(new Event('input', { bubbles: true }));
+  await settle();
+};
+
+it('starts the place from the look, reads what is typed, and holds the publish back while it is no place', async () => {
+  serve({ look: { place: KEPT } });
+  publishOk();
+  show();
+  await settle();
+  expect(coords().value).toBe('12.725004, 43.5075');
+  expect(placeName().value).toBe('Bab al-Mandab');
+  expect(placeName().maxLength).toBe(80);
+  expect(placeSaid()).toBe('Reads as 12.725004° N, 43.5075° E.');
+  expect([coords(), placeName()].map((node) => node.getAttribute('title'))).toEqual([
+    'Where this article stands on the site\'s map, pasted as lat, lon', 'The name of the place, shown on its pin']);
+  // a press that changes nothing keeps it
+  await live.publish();
+  expect(post.mock.calls.at(-1)[1]).toMatchObject({ place: KEPT });
+  await fill(coords(), 'the strait');
+  expect(placeSaid()).toBe('That does not read as a point: paste it as lat, lon, such as 12.725, 43.5075.');
+  expect(coords().getAttribute('aria-invalid')).toBe('true');
+  expect(bound.problem).toBe(placeSaid());
+  const sent = publishes().length;
+  expect(await live.publish()).toBeNull();
+  expect(publishes()).toHaveLength(sent);
+  await fill(coords(), '86, 43.5');
+  expect(bound.problem).toBe('The latitude must be between -85 and 85, where web maps stop.');
+  await fill(coords(), '33°54\'00"S 18°25\'12"E');
+  expect(placeSaid()).toBe('Reads as 33.9° S, 18.42° E.');
+  expect(bound.problem).toBe('');
+  await live.publish();
+  expect(post.mock.calls.at(-1)[1]).toMatchObject({ place: { lat: -33.9, lon: 18.42, name: 'Bab al-Mandab' } });
+  // emptied, the article has no place: the name alone is said to pin nothing
+  await fill(coords(), '');
+  expect(placeSaid()).toBe('A name needs coordinates: left so, the article has no pin.');
+  await fill(placeName(), '');
+  expect(placeSaid()).toBe('Optional. Left empty, the article has no pin on the site\'s map.');
+  await live.publish();
+  expect(post.mock.calls.at(-1)[1].place).toBeNull();
+});
+
+it('offers the note\'s one point as a press, with its rule, and fills nothing until it is pressed', async () => {
+  serve({ offer: OFFER });
+  publishOk();
+  show();
+  await settle();
+  expect(get).toHaveBeenCalledWith('/api/cases/c1/notes/n1/place');
+  expect(coords().value).toBe('');
+  expect(placeName().value).toBe('');
+  expect(offerPress().textContent.trim()).toBe('Use 12.7250, 43.5075 · Bab al-Mandab');
+  expect(offerPress().getAttribute('title')).toBe('Fill the place with the point this note names');
+  expect(target.querySelector('.place-why').textContent).toBe('The one place the note names.');
+  // not pressed, nothing is filled, nothing is kept and nothing goes up
+  await live.publish();
+  expect(post.mock.calls.at(-1)[1].place).toBeNull();
+  expect(put).not.toHaveBeenCalled();
+  offerPress().click();
+  await settle();
+  expect(coords().value).toBe('12.725004, 43.5075');
+  expect(placeName().value).toBe('Bab al-Mandab');
+  expect(offerPress()).toBeUndefined();
+  await live.publish();
+  expect(post.mock.calls.at(-1)[1]).toMatchObject({ place: KEPT });
+  // the analyst's own name is kept when the offer is taken again
+  await fill(coords(), '');
+  await fill(placeName(), 'The strait');
+  offerPress().click();
+  await settle();
+  expect(placeName().value).toBe('The strait');
+  expect(coords().value).toBe('12.725004, 43.5075');
+});
+
+it('never offers over a place the note keeps, and says the rule of a map\'s offer', async () => {
+  serve({ look: { place: { lat: -33.9, lon: 18.42, name: '' } }, offer: OFFER });
+  show();
+  await settle();
+  expect(coords().value).toBe('-33.9, 18.42');
+  expect(offerPress()).toBeUndefined();
+  unmount(live);
+  live = null;
+  serve({ offer: { lat: 12.6, lon: 43.4, name: '', from: 'map', label: 'The strait' } });
+  show();
+  await settle();
+  expect(offerPress().textContent.trim()).toBe('Use 12.6000, 43.4000');
+  expect(target.querySelector('.place-why').textContent).toBe('Where the note\'s one map looks.');
+  // an offer the server could not read is no offer
+  unmount(live);
+  live = null;
+  serve({ offer: { lat: 99, lon: 1, name: '', from: 'place', label: '' } });
+  show();
+  await settle();
+  expect(offerPress()).toBeUndefined();
+});
+
+it('shows a page or an unlisted page no place, sends none, and its place holds nothing back', async () => {
+  serve({ look: { role: 'page', place: KEPT }, offer: OFFER });
+  publishOk();
+  show();
+  await settle();
+  expect(coords()).toBeNull();
+  await live.publish();
+  expect('place' in post.mock.calls.at(-1)[1]).toBe(false);
+  choice('Article').click();
+  await settle();
+  await fill(coords(), 'nowhere');
+  expect(bound.problem).not.toBe('');
+  choice('Unlisted').click();
+  await settle();
+  expect(bound.problem).toBe('');
+  expect((await live.publish()).published).toBe(true);
+  expect('place' in post.mock.calls.at(-1)[1]).toBe(false);
 });
 
 // -- before it replaces a folder -----------------------------------------------------------

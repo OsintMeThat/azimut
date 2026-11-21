@@ -39,8 +39,18 @@ describe('the read, as the hub holds it', () => {
       warnings: ['One thing to mind.'] });
     expect(read.items).toHaveLength(6);
     expect(read.items[0]).toEqual({ folder: 'bab', deletable: true, address: 'https://news.example.org/bab/', title: 'The Bab front', date: '2026-11-20',
-      dateLabel: '20 November 2026', category: 'Conflict Watch', role: 'article', layout: 'story', image: 'https://news.example.org/bab/cover.jpg', bytes: BAB });
+      dateLabel: '20 November 2026', category: 'Conflict Watch', role: 'article', layout: 'story', image: 'https://news.example.org/bab/cover.jpg', bytes: BAB,
+      place: null });
     expect(read.categories).toEqual(ANSWER.categories);
+  });
+
+  it('keeps a row\'s place on the site\'s map when it reads as one, and none otherwise', () => {
+    const placed = (place) => siteReadOf({ items: [card('bab', { place })] }).items[0].place;
+    expect(placed({ lat: 12.7250041, lon: 43.5075, name: '  Bab al-Mandab,  Yemen ' })).toEqual({ lat: 12.725004, lon: 43.5075, name: 'Bab al-Mandab, Yemen' });
+    expect(placed({ lat: -33.9, lon: 18.42 })).toEqual({ lat: -33.9, lon: 18.42, name: '' });
+    for (const bad of [undefined, null, '12.7, 43.5', { lat: '12.7', lon: 43.5 }, { lat: 88, lon: 1 }, { lat: 1, lon: 181 }, { lat: Number.NaN, lon: 1 }]) {
+      expect(placed(bad)).toBeNull();
+    }
   });
 
   it('keeps a folder nested as a WordPress export lays it out, and whether the server would delete it', () => {

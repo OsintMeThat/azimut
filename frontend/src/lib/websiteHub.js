@@ -7,7 +7,7 @@
  * asked on mount; `siteReadOf` takes its answer down to what the hub shows, so a field the server
  * leaves out reads as empty rather than break a panel.
  */
-import { ALL_CHIP, KIND_CHIP, LIMITS_AMBER, LIMITS_RED, SITE_LIMIT_BYTES } from './websiteSetup.js';
+import { ALL_CHIP, KIND_CHIP, LIMITS_AMBER, LIMITS_RED, SITE_LIMIT_BYTES, placeOf } from './websiteSetup.js';
 import { webLink } from './wordpressSetup.js';
 
 // -- the read ---------------------------------------------------------------------------------------
@@ -45,6 +45,8 @@ function itemOf(raw) {
     layout: LAYOUTS.includes(raw?.layout) ? raw.layout : 'article',
     image: webLink(raw?.image),
     bytes: bytesOf(raw?.bytes),
+    // where it stands on the site's map, null for nowhere
+    place: placeOf(raw?.place),
   };
 }
 

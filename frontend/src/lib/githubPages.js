@@ -12,7 +12,7 @@
 import { api } from './api.js';
 import { asSvg, drawDiagrams } from './notesExport.js';
 import { DEFAULT_BRANCH, DEFAULT_REPO, siteBase } from './githubPagesSetup.js';
-import { CATEGORY_MAX } from './websiteSetup.js';
+import { CATEGORY_MAX, placeOf } from './websiteSetup.js';
 import { webLink } from './wordpressSetup.js';
 
 /**
@@ -107,6 +107,17 @@ export function checkFolder(caseId, noteId, shortName) {
   return api.post(`/api/cases/${caseId}/notes/${noteId || 'case'}/github/check`, { short_name: shortName });
 }
 
+/**
+ * The point a note offers for its place on the site's map, `{ lat, lon, name, from, label }`, or null when it
+ * names no one place (`engine/siteplace.py`). Reads the case only, and keeps nothing: the dialog shows it as a press.
+ */
+export async function placeOffer(caseId, noteId) {
+  const answer = await api.get(`/api/cases/${caseId}/notes/${noteId || 'case'}/place`);
+  const point = placeOf(answer?.suggested);
+  const from = answer?.suggested?.from;
+  return point && ['place', 'proof', 'map'].includes(from) ? { ...point, from, label: String(answer.suggested.label ?? '') } : null;
+}
+
 /** Start the Legal notice page in a case: `{ id, title, created }`; pressed again, the one made. */
 export function startLegalNotice(caseId) {
   return api.post(`/api/cases/${caseId}/notes/legal-notice`);
@@ -153,7 +164,8 @@ export function removeSiteLogo() {
  * `{ published: true, address, repository, commit, … }` or `{ published: false, needs, detail }`
  * when the repository is missing or Pages is off, nothing written.
  */
-export async function publishNote(caseId, noteId, { shortName, roundPov = false, changes = '', offlineMaps = false, category, role, ...drawing } = {}) {
+export async function publishNote(caseId, noteId, { shortName, roundPov = false, changes = '', offlineMaps = false, category, role, place,
+  ...drawing } = {}) {
   const note = noteId || 'case';
   const { diagrams: pending } = await api.post(`/api/cases/${caseId}/notes/pdf/diagrams`, { notes: [note], edition: 'public' });
   const diagrams = pending?.length ? await drawDiagrams(pending, { toPng: asSvg, ...drawing }) : {};
@@ -163,6 +175,8 @@ export async function publishNote(caseId, noteId, { shortName, roundPov = false,
     // what the dialog chose for the site; left out, the note's look decides
     ...(typeof category === 'string' ? { category: category.replace(/\s+/g, ' ').trim().slice(0, CATEGORY_MAX) } : {}),
     ...(role === 'article' || role === 'page' || role === 'unlisted' ? { role } : {}),
+    // where it stands on the site's map, null for nowhere
+    ...(place === null || (place && typeof place === 'object') ? { place } : {}),
   });
   return answer?.published ? { ...answer, address: webLink(answer.address) } : answer;
 }

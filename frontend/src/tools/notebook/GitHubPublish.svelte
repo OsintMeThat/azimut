@@ -23,6 +23,13 @@
    * are kept in the look, the picture is kept in the look as it is picked. Whatever changes
    * the look is told (`onlook`), so the Notebook never saves an older one over it.
    *
+   * **Place on the site's map.** An Article may stand somewhere, for a map of the site's articles: its
+   * coordinates pasted as `lat, lon` (or as the Sheet reads them) and a name for its pin, both optional and
+   * empty for most notes. Under them, what the coordinates read as, or why they are no place, which holds the
+   * publish back. When the note names one obvious point (`placeOffer`, `engine/siteplace.py`), a press offers
+   * it with the rule it was read by, and only while the coordinates are empty: nothing is ever filled without
+   * that press. It goes up with the publish and is kept in the look like the category; emptied, it is gone.
+   *
    * **Before it replaces a folder.** A note published here before is checked first: when the
    * folder was changed on GitHub since, the dialog says so and `warned` is up, and the press
    * that follows publishes anyway. A warning, never a stop; a check that fails just publishes.
@@ -30,7 +37,7 @@
   import Icon from '../../components/Icon.svelte';
   import GitHubSetupPress from '../../components/GitHubSetupPress.svelte';
   import { prefs, toast, uiState } from '../../lib/state.svelte.js';
-  import { categoriesOf, checkFolder, publishNote, readCategories, readGitHub } from '../../lib/githubPages.js';
+  import { categoriesOf, checkFolder, placeOffer, publishNote, readCategories, readGitHub } from '../../lib/githubPages.js';
   import {
     GITHUB_FREE, MAX_SHORT, PAGES_PUBLIC, githubReady, shortNameFrom, shortNameOf, shortNameProblem,
   } from '../../lib/githubPagesSetup.js';
@@ -39,7 +46,9 @@
   import { foldText } from '../../lib/textFold.js';
   import { siteName } from '../../lib/websiteHub.js';
   import {
-    CATEGORY_MAX, CATEGORY_SAID, HAND_EDITED, LIST_IMAGE_COVER, NO_NAME_PRESS, ON_SITE, WEBSITE_HELP as HELP, noNameSaid, onSiteSaid,
+    CATEGORY_MAX, CATEGORY_SAID, HAND_EDITED, LIST_IMAGE_COVER, NO_NAME_PRESS, ON_SITE, PLACE_COORDS_LABEL, PLACE_COORDS_PLACEHOLDER,
+    PLACE_NAME_LABEL, PLACE_NAME_MAX, PLACE_NAME_PLACEHOLDER, PLACE_TITLE, PLACE_WHY, WEBSITE_HELP as HELP, noNameSaid, onSiteSaid,
+    placeText, placeUseSaid, readPlace,
   } from '../../lib/websiteSetup.js';
 
   let {
@@ -53,7 +62,7 @@
     address = $bindable(''),
     /** Whether GitHub Pages is set up in Settings. */
     connected = $bindable(false),
-    /** What is wrong with the short name, or ''. */
+    /** What is wrong with the short name or the article's place, or ''. */
     problem = $bindable(''),
     busy = $bindable(false),
     /** Whether the folder on GitHub was found changed, so the next press publishes anyway. */
@@ -88,8 +97,13 @@
   let readSaid = $state('');
   let picking = $state(false);
   let pictureQuery = $state('');
+  // where the article stands on the site's map, as typed: the look's own until changed
+  let coords = $state('');
+  let placeName = $state('');
+  // the point the note offers, shown as a press and never filled without it
+  let offer = $state(null);
   // typed before the look came, so what was typed is kept
-  let touched = { category: false, role: false };
+  let touched = { category: false, role: false, place: false };
 
   // the folder on GitHub was found changed: the next press publishes anyway. Read here, and handed up (`warned`)
   let held = $state(false);
@@ -112,7 +126,7 @@
   const ready = $derived(githubReady(github));
   const wrong = $derived(ready ? shortNameProblem(short) : '');
   $effect(() => { connected = ready; });
-  $effect(() => { problem = wrong; });
+  $effect(() => { problem = wrong || placeWrong; });
   $effect(() => { warned = held; });
 
   // the note's look, once GitHub is known to be set up: what it says it is on the site
@@ -124,11 +138,27 @@
       ownCategory = look.category ?? '';
       if (!touched.category) category = ownCategory;
       if (!touched.role) role = look.role === 'page' || look.role === 'unlisted' ? look.role : 'article';
+      if (!touched.place) {
+        coords = placeText(look.place);
+        placeName = look.place?.name ?? '';
+      }
       listImage = look.list_image ?? '';
       loaded = true;
     }).catch(() => {});
     return () => { live = false; };
   });
+
+  // the point the note offers for its place, read from the case once GitHub is set up; a failed read offers none
+  $effect(() => {
+    if (!ready) return;
+    let live = true;
+    placeOffer(caseId, noteId).then((value) => { if (live) offer = value; }).catch(() => {});
+    return () => { live = false; };
+  });
+
+  const placeRead = $derived(readPlace(coords, placeName));
+  // only an article shows its place, so only its place can hold the publish back
+  const placeWrong = $derived(role === 'article' ? placeRead.problem : '');
 
   const suggestions = $derived(categoriesOf([...(github?.categories ?? []), ownCategory]));
   const pictures = $derived(entities
@@ -169,6 +199,18 @@
   function typeCategory(value) {
     touched.category = true;
     category = value.replace(/\s+/g, ' ').slice(0, CATEGORY_MAX);
+  }
+
+  function typePlace(value, name = placeName) {
+    touched.place = true;
+    coords = value;
+    placeName = name;
+  }
+
+  /** The note's offer taken, on its press only: its point, and its name unless one was typed. */
+  function useOffer() {
+    if (!offer) return;
+    typePlace(placeText(offer), placeName.trim() ? placeName : offer.name);
   }
 
   function chooseRole(id) {
@@ -246,7 +288,7 @@
       setupShown = true;
       return null;
     }
-    if (wrong) return null;
+    if (wrong || placeWrong) return null;
     busy = true;
     failed = '';
     needs = null;
@@ -263,6 +305,8 @@
         shortName: short, roundPov, changes, offlineMaps,
         ...(loaded || touched.category ? { category } : {}),
         ...(loaded || touched.role ? { role } : {}),
+        // an article's place as the fields hold it; for a page or an unlisted one, the look's own stays
+        ...((loaded || touched.place) && role === 'article' ? { place: placeRead.place } : {}),
       });
       if (answer?.published) {
         held = false;
@@ -361,6 +405,26 @@
             </div>
           </div>
         {/if}
+        <div class="place" role="group" aria-label={PLACE_TITLE}>
+          <span class="lbl">{PLACE_TITLE}</span>
+          <div class="place-fields">
+            <input id="export-place" class="input mono" value={coords} spellcheck="false" autocomplete="off"
+              placeholder={PLACE_COORDS_PLACEHOLDER} aria-label={PLACE_COORDS_LABEL} title={HELP.publishPlace}
+              aria-invalid={placeWrong ? 'true' : undefined} aria-describedby="export-place-said"
+              oninput={(event) => typePlace(event.currentTarget.value)} />
+            <input id="export-place-name" class="input" value={placeName} maxlength={PLACE_NAME_MAX} spellcheck="false"
+              autocomplete="off" placeholder={PLACE_NAME_PLACEHOLDER} aria-label={PLACE_NAME_LABEL} title={HELP.publishPlaceName}
+              oninput={(event) => typePlace(coords, event.currentTarget.value)} />
+          </div>
+          <p id="export-place-said" class="address-said" class:bad={placeWrong} role="status">{placeRead.said}</p>
+          {#if offer && !coords.trim()}
+            <p class="place-offer">
+              <button type="button" class="btn btn-sm" title={HELP.publishPlaceUse} onclick={useOffer}>
+                <Icon name="pin" size={12} /><span>{placeUseSaid(offer)}</span></button>
+              <span class="place-why">{PLACE_WHY[offer.from]}</span>
+            </p>
+          {/if}
+        </div>
       {/if}
     </div>
 
@@ -428,6 +492,14 @@
   .picture-row:hover { background: var(--bg-3); color: var(--text-1); }
   .picture-row.on { color: var(--accent); font-weight: 600; }
   .none { margin: 4px 6px; color: var(--text-3); font-size: var(--fs-xs); }
+  .place { display: flex; flex-direction: column; gap: 4px; margin-top: 4px; }
+  .place-fields { display: flex; gap: 6px; }
+  .place-fields .input { flex: 1 1 0; min-width: 0; }
+  .place-fields .input[aria-invalid='true'] { border-color: var(--danger); }
+  .place-offer { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; margin: 0; }
+  .place-offer .btn { display: inline-flex; align-items: center; gap: 6px; min-width: 0; max-width: 100%; }
+  .place-offer .btn span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .place-why { color: var(--text-3); font-size: var(--fs-xs); }
   .gh :global(.needs) { margin-top: 6px; }
   .sending { display: flex; align-items: center; gap: 7px; margin: 4px 0 0; color: var(--text-2); font-size: var(--fs-xs); }
   .spinner { flex: none; width: 11px; height: 11px; border-radius: 50%; border: 2px solid color-mix(in srgb, var(--accent) 25%, transparent);

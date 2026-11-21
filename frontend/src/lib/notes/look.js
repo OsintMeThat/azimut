@@ -13,9 +13,9 @@
  * filled, so a look that never used them reads and writes as it always did. `web`,
  * how the HTML page is laid out, is one too: the server keeps it only once set. So is
  * `counter`, the GoatCounter site a map page's web folder counts its readers on. And what the
- * note is on the analyst's site, `category`, `role` (a page, off the site's lists, or unlisted, in none) and
- * `list_image` (the picture of its line in the list), which the publish dialog chooses and the
- * Look only carries, so that saving a look never drops them.
+ * note is on the analyst's site, `category`, `role` (a page, off the site's lists, or unlisted, in none),
+ * `list_image` (the picture of its line in the list) and `place` (where it stands on the site's map), which
+ * the publish dialog chooses and the Look only carries, so that saving a look never drops them.
  *
  * The style is the profile: it says what the document carries after its text, the
  * sources list and how it is written, the five annexes and how strict the check is
@@ -29,6 +29,7 @@
  */
 import { api } from '../api.js';
 import { counterCode } from '../goatcounterSetup.js';
+import { placeOf } from '../websiteSetup.js';
 
 export const DEFAULT_LOOK = Object.freeze({
   style: 'plain',
@@ -423,6 +424,7 @@ export function normaliseLook(look) {
   const category = String(given.category ?? '').split(/\s+/).filter(Boolean).join(' ').slice(0, CATEGORY_MAX);
   const role = given.role === 'page' || given.role === 'unlisted' ? given.role : '';
   const listImage = /^[A-Za-z0-9_-]{1,64}$/.test(String(given.list_image ?? '')) ? String(given.list_image) : '';
+  const place = placeOf(given.place);
   return {
     style: pick(given.style, STYLES, DEFAULT_LOOK.style),
     font: pick(given.font ?? '', FONTS, ''),
@@ -456,6 +458,7 @@ export function normaliseLook(look) {
     ...(category && { category }),
     ...(role && { role }),
     ...(listImage && { list_image: listImage }),
+    ...(place && { place }),
   };
 }
 
@@ -477,11 +480,12 @@ export function sectionsSet(look) {
   };
 }
 
-/** A look a template can carry: no picture and no day of a case. */
+/** A look a template can carry: no picture, no day and no place of a case. */
 export function templateLook(look) {
   const whole = normaliseLook(look);
   const kept = { ...whole, cover: { ...whole.cover, image: '', date: '' } };
   delete kept.list_image;
+  delete kept.place;
   return kept;
 }
 

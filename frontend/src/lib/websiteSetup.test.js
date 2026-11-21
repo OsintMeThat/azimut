@@ -4,7 +4,8 @@ import * as setup from './websiteSetup.js';
 import {
   CLOUDFLARE_STEPS, GOATCOUNTER_STEPS, HUB_LEADS, HUB_TABS, LEGAL_SENTENCE, LIMITS_LINES, NEEDS_READ, ON_SITE, SITE_OWN, STATS_CHOICES, TOO_MANY,
   WEBSITE_HELP, barSaid, beaconToken, categoryPagesSaid, checklist, counterCode, countsSaid, dayShort, deleteSaid, deletedSaid, flowSteps,
-  nameFallbackSaid, noNameSaid, onSiteSaid, ownParts, ownersOf, progressSaid, sizeTipSaid, updateSaid, whenSaid,
+  nameFallbackSaid, noNameSaid, onSiteSaid, ownParts, ownersOf, placeDegrees, placeOf, placeText, placeUseSaid, progressSaid, readPlace, sizeTipSaid,
+  updateSaid, whenSaid,
 } from './websiteSetup.js';
 
 const read = (path) => readFileSync(new URL(path, import.meta.url), 'utf8');
@@ -325,5 +326,43 @@ describe('who writes what', () => {
     expect(yours[2].text).toBe('Fills the list between its markers, nothing else.');
     // a read cut short found no page: the table stays as before a read
     expect(ownersOf({ truncated: true, home: 'none', marked: [] })).toEqual(before);
+  });
+});
+
+describe('the place on the site\'s map', () => {
+  it('reads coordinates pasted as lat, lon, with hemispheres or in degrees, kept to six places', () => {
+    expect(readPlace('12.7250041, 43.5075', ' Bab  al-Mandab ')).toEqual({ place: { lat: 12.725004, lon: 43.5075, name: 'Bab al-Mandab' }, problem: '',
+      said: 'Reads as 12.725004° N, 43.5075° E.' });
+    expect(readPlace('33.9S 18.42E').place).toEqual({ lat: -33.9, lon: 18.42, name: '' });
+    expect(readPlace('33°54\'00"S 18°25\'12"E').place).toEqual({ lat: -33.9, lon: 18.42, name: '' });
+    expect(readPlace('-33.9 -70.5').said).toBe('Reads as 33.9° S, 70.5° W.');
+  });
+
+  it('says why coordinates are no place, and an empty field is no place and no problem', () => {
+    expect(readPlace('')).toEqual({ place: null, problem: '', said: setup.PLACE_EMPTY });
+    expect(readPlace('  ', 'Bab al-Mandab')).toEqual({ place: null, problem: '', said: setup.PLACE_NAME_ALONE });
+    expect(readPlace('Bab al-Mandab').problem).toBe(setup.PLACE_UNREAD);
+    expect(readPlace('12.7').problem).toBe(setup.PLACE_UNREAD);
+    expect(readPlace('85.1, 10').problem).toBe('The latitude must be between -85 and 85, where web maps stop.');
+    expect(readPlace('-89, 10').problem).toBe(setup.PLACE_LAT_BAD);
+    expect(readPlace('10, 180.5').problem).toBe(setup.PLACE_LON_BAD);
+    for (const text of ['Bab al-Mandab', '85.1, 10', '10, 180.5']) expect(readPlace(text).place).toBeNull();
+    // a name past its bound is cut, as the field's own bound cuts it
+    expect(readPlace('1.5, 2.5', 'x'.repeat(120)).place.name).toHaveLength(80);
+  });
+
+  it('reads a kept place back for the field and says an offer as its press', () => {
+    const kept = placeOf({ lat: 12.725004, lon: 43.5075, name: 'Bab al-Mandab' });
+    expect(placeText(kept)).toBe('12.725004, 43.5075');
+    expect(readPlace(placeText(kept), kept.name).place).toEqual(kept);
+    expect(placeText(null)).toBe('');
+    expect(placeUseSaid({ lat: 12.725004, lon: 43.5075, name: 'Bab al-Mandab' })).toBe('Use 12.7250, 43.5075 · Bab al-Mandab');
+    expect(placeUseSaid({ lat: 12.6, lon: 43.4, name: '' })).toBe('Use 12.6000, 43.4000');
+    expect(placeDegrees({ lat: -0.5, lon: -0.25 })).toBe('0.5° S, 0.25° W');
+    expect(Object.keys(setup.PLACE_WHY)).toEqual(['place', 'proof', 'map']);
+    for (const said of [...Object.values(setup.PLACE_WHY), setup.PLACE_EMPTY, setup.PLACE_NAME_ALONE, setup.PLACE_UNREAD, setup.PLACE_LAT_BAD, setup.PLACE_LON_BAD]) {
+      expect(said).toMatch(/^[A-Z].*\.$/);
+      expect(said).not.toContain('—');
+    }
   });
 });
