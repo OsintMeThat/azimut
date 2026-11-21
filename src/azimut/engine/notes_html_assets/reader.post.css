@@ -48,7 +48,7 @@
 .az-post-foot a { color: var(--accent-ink); text-decoration: none; }
 .az-post-foot a:hover { text-decoration: underline; }
 .az-post-links { margin-left: auto; display: inline-flex; flex-wrap: wrap; gap: .75rem; }
-.az-post-proof { display: inline-flex; align-items: center; gap: .3rem; padding: 1px .55rem 1px .45rem; border-radius: 999px; background: var(--accent-soft); color: var(--accent-ink); font-weight: 600; }
+.az-post-proof { display: inline-flex; align-items: center; gap: .3rem; text-decoration: none; padding: 1px .55rem 1px .45rem; border-radius: 999px; background: var(--accent-soft); color: var(--accent-ink); font-weight: 600; }
 .az-post-proof svg { width: .75rem; height: .75rem; }
 
 /* a thread: the posts one after another on one card, a line joining their pictures of who wrote them */

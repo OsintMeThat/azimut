@@ -2000,6 +2000,11 @@ class _Builder:
                 unsized = 1.0
         elif token.type == "az_infographic":
             return theme.leading * 2  # its own page, which the heading opened for it
+        elif token.type == "az_post":
+            from . import notes_posts, socialposts
+
+            # the card, or its first post when a thread runs over a page, kept whole
+            return notes_posts.PdfCard(self, socialposts.card(self.case, token.content)).first_height() or theme.leading * 2
         elif token.type == "table_open":
             # the header row and the first row under it, which fpdf2 keeps together
             line, pad = (5.0, 1.6) if theme.plain else (4.6, 1.7)

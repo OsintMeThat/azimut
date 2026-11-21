@@ -15,7 +15,6 @@ it. These three only read the case, never the network.
 
 from __future__ import annotations
 
-import sys
 from typing import Any
 
 from fastapi import APIRouter, HTTPException
@@ -52,8 +51,7 @@ def _answer(case: Any, link: str) -> dict[str, Any]:
     try:
         entity = socialposts.fetch(case, link)
     except socialposts.NeedsLogin as exc:
-        return {"link": link, "error": str(exc), "needs_auth": True, "refused": exc.refused,
-                "platform": sys.platform}
+        return {"link": link, "error": str(exc), "needs_auth": True, "refused": exc.refused}
     except socialposts.PostError as exc:
         return {"link": link, "error": str(exc)}
     return {"link": link, "id": entity["id"], "label": entity.get("label") or ""}

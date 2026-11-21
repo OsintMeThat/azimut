@@ -483,7 +483,8 @@ function footOf(answer, onproof) {
   const [first] = answer.posts;
   const foot = element('div', 'cm-post-foot');
   const when = answer.posts.length > 1 ? answer.span : first.when;
-  if (when) foot.append(element('span', 'cm-post-when', when));
+  const said = [when, first.captured ? `captured on ${first.captured}` : ''].filter(Boolean).join(' · ');
+  if (said) foot.append(element('span', 'cm-post-when', said));
   const seen = new Set();
   for (const post of answer.posts) {
     if (post.proof && !seen.has(post.proof.id)) {
@@ -797,6 +798,5 @@ registerBlock({
   open: openPost,
   atomic: true,
   height: POST_HEIGHT,
-  fields: '.cm-post-text, .cm-post-settings, select',
   theme: { ...THEME, ...POST_CARD_THEME },
 });

@@ -242,6 +242,15 @@ def test_a_published_post_of_the_analyst_is_read_from_its_draft(client, sites):
     assert sites.outside == 0
 
 
+def test_keeping_from_the_case_names_only_its_own_media_and_drafts(client, sites):
+    case_id = _case(client)
+    route = f"/api/cases/{case_id}/social-posts/from-case"
+    for asked in ({"media": "../case.json"}, {"media": "notes/a.md"}, {"draft": "../notes/a"}, {"draft": ".work"},
+                  {"media": "media/a.jpg", "draft": "a"}, {}):
+        assert client.post(route, json=asked).status_code == 422, asked
+    assert sites.outside == 0
+
+
 # -- the block --------------------------------------------------------------------------
 
 
@@ -344,7 +353,7 @@ def test_the_html_page_draws_the_card_in_its_own_look(kept):
     assert '<div class="az-post-text" dir="rtl" lang="ar"><p dir="rtl"><mark>رتل من المركبات</mark>' in card
     assert '<small>Translation</small>A column of vehicles heads south.' in card
     assert 'Coast Monitor' in card and '@coast_monitor' in card
-    assert '<time datetime="2026-11-15T05:12:00Z">15 Nov 2026 · 05:12 UTC</time>' in card
+    assert '<time datetime="2026-11-15T05:12:00Z">15 Nov 2026 · 05:12 UTC</time> · captured on ' in card
     assert 'href="https://x.com/coast_monitor/status/1990000000000000001"' in card
     assert 'Geolocated · Proof 12' in card and 'href="https://x.com/analyst_desk/status/55"' in card
     # every picture is inside the page, the profile picture too: nothing loads from the site;
@@ -411,6 +420,28 @@ def test_the_pdf_draws_the_card_with_its_link_and_a_qr_code(kept):
     assert X_URL in links and BLUESKY_URL in links
     assert links.count(X_URL) >= 3, "the name, View on X and the QR code each lead to the post"
     assert kept["sites"].outside == 0
+    # every stretch of words names its face in the page's stream, a script's fallback face too
+    for page in reader.pages:
+        assert _shown_without_a_face(page, reader) == 0
+
+
+def _shown_without_a_face(page, reader) -> int:
+    """How many stretches of text a page shows with no face set in its state (`Tf`)."""
+    from pypdf.generic import ContentStream
+
+    stack: list = []
+    face = None
+    missing = 0
+    for _operands, operator in ContentStream(page.get_contents(), reader).operations:
+        if operator == b"q":
+            stack.append(face)
+        elif operator == b"Q":
+            face = stack.pop() if stack else None
+        elif operator == b"Tf":
+            face = _operands[0]
+        elif operator in (b"Tj", b"TJ") and face is None:
+            missing += 1
+    return missing
 
 
 def test_without_the_qr_option_the_pdf_draws_no_code(kept):
@@ -465,3 +496,21 @@ def test_a_bluesky_reply_with_no_picture_and_a_quoted_post_with_one(client, site
     [answer] = _read(client, case_id, BLUESKY_URL)
     [post] = _describe(client, case_id, f"post: {answer['id']}")["posts"]
     assert post["text"] == "A reply, words only." and post["pictures"] == []
+
+
+def test_a_web_folder_carries_the_card_its_pictures_as_files_beside_the_page(client, kept):
+    from test_notes_pdf import exports_of
+
+    case_id = kept["case"].id
+    note_id = _note(client, case_id, f"Seen.\n\n::: post\npost: {kept['bluesky']}\n:::\n")
+    written = client.post(f"/api/cases/{case_id}/notes/web", json={"notes": [note_id]})
+    assert written.status_code == 200, written.text
+    folder = exports_of(case_id) / "web" / written.json()["written"][0]["file"]
+    page = (folder / "index.html").read_text(encoding="utf-8")
+    card = re.search(r'<figure class="az-figure az-post".*?</figure>', page, re.S).group(0)
+    shown = re.findall(r'src="([^"]+)"', card)
+    assert len(shown) == 2 and not any(one.startswith("data:") for one in shown)
+    assert all((folder / one).is_file() for one in shown)
+    sheet = re.search(r'<link rel="stylesheet" id="az-reader" href="([^"]+)"', page).group(1)
+    assert "/* a post from X or Bluesky" in (folder / sheet).read_text(encoding="utf-8")
+    assert kept["sites"].outside == 0

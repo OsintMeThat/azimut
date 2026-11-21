@@ -19,7 +19,8 @@ from __future__ import annotations
 import html
 import math
 import re
-from collections.abc import Callable
+from collections.abc import Callable, Iterator
+from contextlib import contextmanager
 from functools import partial
 from io import BytesIO
 from pathlib import Path
@@ -173,6 +174,10 @@ def _foot(drawn: Card, cite: str) -> str:
     first = drawn.posts[0]
     when = drawn.span if drawn.thread else first.when
     stamp = f'<time datetime="{_attr(first.posted_at)}">{_text(when)}</time>' if when else ""
+    captured = socialposts.said_day(first.captured_at)
+    if captured:
+        stamp += f'{" · " if stamp else ""}captured on {_text(captured)}'
+    stamp = f'<span class="az-post-when">{stamp}</span>' if stamp else ""
     proofs = []
     seen: set[str] = set()
     for post in drawn.posts:
@@ -316,6 +321,9 @@ def wordpress_card(drawn: Card, *, upload: Callable[[Path, str, int], int | None
             if index is not None:
                 inner.append(image(index, alt, href=post.url))
         when = drawn.span if drawn.thread else post.when
+        captured = socialposts.said_day(drawn.posts[0].captured_at)
+        if captured:
+            when = f"{when} · captured on {captured}" if when else f"captured on {captured}"
         if number == len(drawn.posts):
             inner.append(paragraph(f'{_text(when)}{" · " if when else ""}{links(drawn.posts[0])}{cite}'))
         out.append(group(inner))
@@ -422,6 +430,22 @@ class PdfCard:
         self.muted = self.theme.muted
         self.measuring = False
 
+    @contextmanager
+    def _local(self, **style: Any) -> Iterator[None]:
+        """fpdf2's local state, after which the face is set again on the page: a face first
+        set inside the state ends with it in the page's stream while fpdf2 still counts it
+        as set, and the next words would be drawn with none."""
+        with self.pdf.local_context(**style):
+            yield
+        self.pdf.current_font_is_set_on_page = False
+
+    def _cell(self, *args: Any, **kwargs: Any) -> None:
+        """One stretch of words, its face named in the page's stream each time: fpdf2 closes a
+        shaped stretch that falls back on a script's face inside a state of its own, and the
+        face it set there is gone for the next one."""
+        self.pdf.current_font_is_set_on_page = False
+        self.pdf.cell(*args, **kwargs)
+
     # -- the whole block ------------------------------------------------------------
 
     def draw(self) -> None:
@@ -431,18 +455,33 @@ class PdfCard:
         if drawn.form == "quote":
             self._fit(self._quote)
             return
-        if drawn.form == "compact":
-            for post in drawn.posts:
-                self._fit(partial(self._line, post))
-            pdf.ln(self.theme.gap)
-            return
-        whole = partial(self._card, drawn.posts)
-        if self._height(whole) <= pdf.page_break_trigger - pdf.t_margin - 2:
-            self._fit(whole)
-        else:
-            for post in drawn.posts:
-                self._fit(partial(self._card, [post]))
+        for part in self._parts():
+            self._fit(part)
         pdf.ln(self.theme.gap)
+
+    def _parts(self) -> list[Callable[[float], float]]:
+        """What is kept whole on a page, in order: the whole block when a page holds it,
+        else a post to a card, or a line at a time."""
+        drawn, pdf = self.drawn, self.pdf
+        room = pdf.page_break_trigger - pdf.t_margin - 2
+        if drawn.form == "compact":
+            whole = partial(self._lines, drawn.posts)
+            return [whole] if self._height(whole) <= room else [partial(self._line, post) for post in drawn.posts]
+        whole = partial(self._card, drawn.posts)
+        return [whole] if self._height(whole) <= room else [partial(self._card, [post]) for post in drawn.posts]
+
+    def first_height(self) -> float:
+        """How tall what the block draws first is, for a heading over it to be kept with it."""
+        if not self.drawn.posts:
+            return 0.0
+        if self.drawn.form == "quote":
+            return self._height(self._quote)
+        return self._height(self._parts()[0])
+
+    def _lines(self, posts: list[Post], top: float) -> float:
+        for post in posts:
+            top = self._line(post, top)
+        return top
 
     def _height(self, part: Callable[[float], float]) -> float:
         self.measuring = True
@@ -480,7 +519,7 @@ class PdfCard:
         for position, post in enumerate(posts):
             if position:
                 if not self.measuring:
-                    with pdf.local_context():
+                    with self._local():
                         pdf.set_draw_color(*self.theme.rule)
                         pdf.set_line_width(0.2)
                         pdf.set_dash_pattern(dash=0.8, gap=0.8)
@@ -494,7 +533,7 @@ class PdfCard:
             if not self.measuring:
                 self._qr(posts[0].url, self.left + self.width - self.PAD - self.QR, qr_top)
         if not self.measuring:
-            with pdf.local_context():
+            with self._local():
                 pdf.set_draw_color(*self.theme.rule)
                 pdf.set_line_width(0.25)
                 pdf.rect(self.left, top, self.width, bottom - top, style="D", round_corners=True, corner_radius=2.4)
@@ -510,20 +549,20 @@ class PdfCard:
         self._avatar(post, x, y, d)
         name_x = x + d + 2.2
         if not self.measuring:
-            with pdf.local_context():
+            with self._local():
                 pdf.set_font(self.sans, "B", 8.8 * self.theme.scale)
                 pdf.set_text_color(*self.theme.ink)
                 name = post.name or post.handle
                 pdf.set_xy(name_x - pdf.c_margin, y + 0.4)
-                pdf.cell(min(pdf.get_string_width(name) + 2 * pdf.c_margin, width - d - 12), 4.2, name, link=post.url)
+                self._cell(min(pdf.get_string_width(name) + 2 * pdf.c_margin, width - d - 12), 4.2, name, link=post.url)
                 pdf.set_font(self.sans, "", 7.6 * self.theme.scale)
                 pdf.set_text_color(*self.muted)
                 handle = " · ".join(part for part in (f"@{post.handle}" if post.handle else "", post.site_label) if part)
                 pdf.set_xy(name_x - pdf.c_margin, y + 4.4)
-                pdf.cell(pdf.get_string_width(handle) + 2 * pdf.c_margin, 3.6, handle)
+                self._cell(pdf.get_string_width(handle) + 2 * pdf.c_margin, 3.6, handle)
                 if number:
                     pdf.set_xy(x + width - 12, y + 2.0)
-                    pdf.cell(12, 3.6, number, align="R")
+                    self._cell(12, 3.6, number, align="R")
         y += d + 1.6
         for order, (rtl, part) in enumerate(post.paragraphs):
             size = self.size * (1.22 if rtl else 1.0)
@@ -599,7 +638,7 @@ class PdfCard:
             for (index, text), measured in order:
                 lit = segments[index][1]
                 if lit and text.strip():
-                    with pdf.local_context():
+                    with self._local():
                         pdf.set_fill_color(*self.soft)
                         pdf.rect(at - 0.3, y + 0.5, measured + 0.6, leading - 0.6, style="F")
                         pdf.set_draw_color(*self.accent)
@@ -608,7 +647,7 @@ class PdfCard:
                 pdf.set_font(family, style, size)
                 pdf.set_text_color(*(colour or self.theme.ink))
                 pdf.set_xy(at - pdf.c_margin, y)
-                pdf.cell(measured + 2 * pdf.c_margin, leading, text)
+                self._cell(measured + 2 * pdf.c_margin, leading, text)
                 at += measured
             y += leading
         return y + 0.6
@@ -618,17 +657,17 @@ class PdfCard:
         bar = 0.9
         top = y
         if not self.measuring:
-            with pdf.local_context():
+            with self._local():
                 pdf.set_font(self.sans, "B", 6.0 * self.theme.scale)
                 pdf.set_char_spacing(0.6)
                 pdf.set_text_color(*self.muted)
                 pdf.set_xy(x + bar + 2.4 - pdf.c_margin, y)
-                pdf.cell(40, 3.0, "TRANSLATION")
+                self._cell(40, 3.0, "TRANSLATION")
                 pdf.set_char_spacing(0)
         y = self._words([(words, False)], x + bar + 2.4, width - bar - 2.4, y + 3.0, size=self.size * 0.94,
                         rtl=socialposts.is_rtl(words), family=self.r._family, colour=self.theme.ink)
         if not self.measuring:
-            with pdf.local_context():
+            with self._local():
                 pdf.set_fill_color(*self.accent)
                 pdf.rect(x, top, bar, y - top - 0.6, style="F")
         return y
@@ -664,31 +703,34 @@ class PdfCard:
         if made is not None:
             self.r._picture(BytesIO(made[0]), x=x, y=y, w=w, h=h)
         else:
-            with pdf.local_context():
+            with self._local():
                 pdf.set_fill_color(42, 44, 48)
                 pdf.rect(x, y, w, h, style="F")
         if one.kind == "video":
             radius = min(w, h) * 0.13
             cx, cy = x + w / 2, y + h / 2
-            with pdf.local_context(fill_opacity=0.6):
+            with self._local(fill_opacity=0.6):
                 pdf.set_fill_color(0, 0, 0)
                 pdf.ellipse(cx - radius, cy - radius, 2 * radius, 2 * radius, style="F")
-            with pdf.local_context():
+            with self._local():
                 pdf.set_fill_color(*WHITE)
                 side = radius * 0.8
                 pdf.polygon([(cx - side * 0.4, cy - side * 0.55), (cx - side * 0.4, cy + side * 0.55), (cx + side * 0.6, cy)],
                             style="F")
             length = socialposts.said_duration(one.duration)
             if length:
-                with pdf.local_context():
+                # the wash and the words in two states one after the other: words drawn after a
+                # nested state ends would have lost their face in the page's own stream
+                pdf.set_font(self.sans, "", 6.4 * self.theme.scale)
+                label = pdf.get_string_width(length) + 2.4
+                with self._local(fill_opacity=0.65):
+                    pdf.set_fill_color(0, 0, 0)
+                    pdf.rect(x + 1.6, y + h - 5.2, label, 3.8, style="F")
+                with self._local():
                     pdf.set_font(self.sans, "", 6.4 * self.theme.scale)
-                    label = pdf.get_string_width(length) + 2.4
-                    with pdf.local_context(fill_opacity=0.65):
-                        pdf.set_fill_color(0, 0, 0)
-                        pdf.rect(x + 1.6, y + h - 5.2, label, 3.8, style="F")
                     pdf.set_text_color(*WHITE)
                     pdf.set_xy(x + 1.6, y + h - 5.2)
-                    pdf.cell(label, 3.8, length, align="C")
+                    self._cell(label, 3.8, length, align="C")
 
     def _avatar(self, post: Post, x: float, y: float, d: float) -> None:
         if self.measuring:
@@ -700,13 +742,13 @@ class PdfCard:
                 self.r._picture(BytesIO(made[0]), x=x, y=y, w=d, h=d)
             return
         first, second = post.tint
-        with pdf.local_context():
+        with self._local():
             pdf.set_fill_color(*_mix(rgb(first), rgb(second), 0.45))
             pdf.ellipse(x, y, d, d, style="F")
             pdf.set_font(self.sans, "B", d * 1.05)
             pdf.set_text_color(*WHITE)
             pdf.set_xy(x, y)
-            pdf.cell(d, d, post.initials, align="C")
+            self._cell(d, d, post.initials, align="C")
 
     # -- the last line ----------------------------------------------------------------
 
@@ -734,7 +776,7 @@ class PdfCard:
         leading = 3.6 * self.theme.scale
         y += 0.8
         if not self.measuring:
-            with pdf.local_context():
+            with self._local():
                 pdf.set_draw_color(*self.theme.tint if self.theme.tint != WHITE else self.theme.rule)
                 pdf.set_line_width(0.2)
                 pdf.line(x, y, x + width, y)
@@ -754,7 +796,7 @@ class PdfCard:
                 pdf.set_font(self.sans, "B" if accented and link == "" and "Geolocated" in text else "", size)
                 pdf.set_text_color(*(self.accent_ink if accented else self.muted))
                 pdf.set_xy(at - pdf.c_margin, y)
-                pdf.cell(measured + 2 * pdf.c_margin, leading, said, link=link or "")
+                self._cell(measured + 2 * pdf.c_margin, leading, said, link=link or "")
                 pdf.set_font(self.sans, "", size)
             at += measured
         return y + leading
@@ -769,7 +811,7 @@ class PdfCard:
         pdf = self.pdf
         side = self.QR
         cell = side / len(modules)
-        with pdf.local_context():
+        with self._local():
             pdf.set_fill_color(*self.theme.ink)
             for row, line in enumerate(modules):
                 for column, dark in enumerate(line):
@@ -779,7 +821,7 @@ class PdfCard:
             pdf.set_font(self.sans, "", 5.6 * self.theme.scale)
             pdf.set_text_color(*self.muted)
             pdf.set_xy(x - 2, y + side + 0.4)
-            pdf.cell(side + 4, 2.8, socialposts.short_address(url), align="C")
+            self._cell(side + 4, 2.8, socialposts.short_address(url), align="C")
 
     # -- the other two forms --------------------------------------------------------
 
@@ -817,11 +859,11 @@ class PdfCard:
                 pdf.set_text_color(*(self.theme.ink if style == "B" and not link else
                                      self.accent_ink if accented else self.muted))
                 pdf.set_xy(at - pdf.c_margin, y + 0.4)
-                pdf.cell(measured + 2 * pdf.c_margin, 3.8, text, link=link or "")
+                self._cell(measured + 2 * pdf.c_margin, 3.8, text, link=link or "")
             at += measured
         bottom = y + d + 1.0
         if not self.measuring:
-            with pdf.local_context():
+            with self._local():
                 pdf.set_fill_color(*self.accent)
                 pdf.rect(self.left, top, 0.9, bottom - top, style="F")
         return bottom + self.theme.gap
@@ -840,17 +882,17 @@ class PdfCard:
         who = " · ".join(part for part in (post.site_label, day) if part)
         text = " ".join((post.translation or post.text).split())
         if not self.measuring:
-            with pdf.local_context():
+            with self._local():
                 pdf.set_font(self.sans, "B", 7.8 * self.theme.scale)
                 pdf.set_text_color(*self.theme.ink)
                 name = post.name or post.handle
                 pdf.set_xy(words_x - pdf.c_margin, y)
-                pdf.cell(pdf.get_string_width(name) + 2 * pdf.c_margin, 3.4, name, link=post.url)
+                self._cell(pdf.get_string_width(name) + 2 * pdf.c_margin, 3.4, name, link=post.url)
                 named = pdf.get_string_width(name)
                 pdf.set_font(self.sans, "", 7.4 * self.theme.scale)
                 pdf.set_text_color(*self.muted)
                 pdf.set_xy(words_x + named - pdf.c_margin, y)
-                pdf.cell(pdf.get_string_width(f" · {who}") + 2 * pdf.c_margin, 3.4, f" · {who}")
+                self._cell(pdf.get_string_width(f" · {who}") + 2 * pdf.c_margin, 3.4, f" · {who}")
                 pdf.set_font(self.sans, "", 8.2 * self.theme.scale)
                 pdf.set_text_color(*self.theme.ink)
                 shown = text
@@ -858,14 +900,14 @@ class PdfCard:
                     shown = shown[:-1]
                 shown = shown if shown == text else shown.rstrip() + "…"
                 pdf.set_xy(words_x - pdf.c_margin, y + 3.6)
-                pdf.cell(words_w + 2 * pdf.c_margin, 4.0, shown, link=post.url)
+                self._cell(words_w + 2 * pdf.c_margin, 4.0, shown, link=post.url)
             if thumb is not None and thumb.path is not None:
                 made = cover_crop(thumb.path, 1.45, 300)
                 if made is not None:
                     self.r._picture(BytesIO(made[0]), x=x + width - 14.0, y=y, w=14.0, h=9.6)
         bottom = y + 10.0
         if not self.measuring:
-            with pdf.local_context():
+            with self._local():
                 pdf.set_draw_color(*self.theme.rule)
                 pdf.set_line_width(0.2)
                 pdf.line(x, bottom, x + width, bottom)

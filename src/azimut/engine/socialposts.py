@@ -114,8 +114,6 @@ TINTS = (
     ("#3c5a6e", "#20323e"), ("#2f6fb0", "#1a3d66"), ("#7a5230", "#4a2f19"), ("#4b6b3b", "#2b4120"),
     ("#6b3f66", "#3f223b"), ("#8a5a1c", "#57380e"), ("#2f6b68", "#1a4240"), ("#6e3b3b", "#432121"),
 )
-#: What the analyst can write in a block, and the keys that are the post's own.
-BLOCK_KEYS = ("post", "link", "highlight", "translation", "form", "avatar", "qr")
 #: A `::: post` block, as every renderer finds it.
 BLOCK = re.compile(r"^:::[ \t]*post[ \t]*\n(.*?)^:::[ \t]*$", re.S | re.M)
 ENTITY_ID = re.compile(r"^[A-Za-z0-9_-]{1,64}$")
@@ -201,12 +199,6 @@ def parse_link(text: Any) -> Link | None:
         if BLUESKY_ACTOR.match(actor) and BLUESKY_KEY.match(key):
             return Link("bluesky", actor, key)
     return None
-
-
-def links_in(text: str) -> list[str]:
-    """The addresses a paste holds, one per line or several on one, in order, each once."""
-    found = re.findall(r"(?:https?://)?[^\s<>\"']+", str(text or ""))
-    return list(dict.fromkeys(one for one in found if parse_link(one) is not None))
 
 
 # -- what a read brings back -----------------------------------------------------------
@@ -644,7 +636,7 @@ def held_post(case: "Case", key: str) -> dict[str, Any] | None:
     return items[0] if items else None
 
 
-def fetch(case: "Case", text: str, *, http: httpx.Client | None = None, again: bool = False) -> dict[str, Any]:
+def fetch(case: "Case", text: str) -> dict[str, Any]:
     """The post a pasted link names, kept in the case, read on the analyst's press.
 
     A post the case keeps already answers at once, and so does one of the analyst's own
@@ -655,21 +647,15 @@ def fetch(case: "Case", text: str, *, http: httpx.Client | None = None, again: b
     link = parse_link(text)
     if link is None:
         raise NotAPost("This is not the address of a post on X or Bluesky")
-    if not again:
-        held = held_post(case, link.key)
-        if held is not None:
-            return held
-        mine = _own_draft(case, link)
-        if mine is not None:
-            return mine
+    held = held_post(case, link.key)
+    if held is not None:
+        return held
+    mine = _own_draft(case, link)
+    if mine is not None:
+        return mine
     if link.site == "bluesky":
-        own = http or client()
-        try:
-            read = read_bluesky(link, own)
-            return file_post(case, read, http=own)
-        finally:
-            if http is None:
-                own.close()
+        with client() as http:
+            return file_post(case, read_bluesky(link, http), http=http)
     try:
         read = read_x(link)
         session = None
@@ -678,7 +664,7 @@ def fetch(case: "Case", text: str, *, http: httpx.Client | None = None, again: b
         if session is None:
             raise
         read = read_x(link, session)
-    return file_post(case, read, cookies=session, http=http)
+    return file_post(case, read, cookies=session)
 
 
 # -- made from what the case holds -----------------------------------------------------
@@ -722,6 +708,8 @@ def _draft_pictures(state: dict[str, Any]) -> list[str]:
 
 def from_draft(case: "Case", name: str) -> dict[str, Any]:
     """One of the analyst's own posts, from the Post draft that went out with its link."""
+    if not name or any(mark in name for mark in "/\\\x00") or name.startswith("."):
+        raise PostError("That post is no longer in the case")
     try:
         path = case.resolve_inside(layout.draft_rel(name))
         data = json.loads(path.read_text(encoding="utf-8"))
@@ -762,6 +750,8 @@ def from_draft(case: "Case", name: str) -> dict[str, Any]:
 def from_media(case: "Case", rel: str) -> dict[str, Any]:
     """A post the case downloaded a file from, made from what the download recorded:
     its words, who posted it and the day, and every file the case holds from it."""
+    if not rel.startswith("media/") or ".." in PurePosixPath(rel).parts:
+        raise PostError("That file is not one of the case's media")
     item = media_engine.read_item(case, rel)
     source = (item or {}).get("source") if isinstance(item, dict) else None
     if not isinstance(source, dict):

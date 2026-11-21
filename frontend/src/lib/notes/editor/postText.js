@@ -186,11 +186,6 @@ export function withKept(source, results) {
   });
 }
 
-/** The addresses a block still holds, not kept yet. */
-export function unreadLinks(source) {
-  return readPost(source).entries.filter((entry) => entry.kind === 'link').map((entry) => entry.value);
-}
-
 /**
  * A post's words as stretches, each highlighted or not: every passage the analyst kept,
  * found where it first stands, overlaps joined (`socialposts.marked`).

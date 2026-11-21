@@ -8177,7 +8177,7 @@ Nothing is read because a note opened.
 
 The block is drawn as every document draws it (`engine/notes_posts.py`), never with the
 site's widget: who posted it, the words, the analyst's translation under them, the
-pictures, the day and **View on X**. **Geolocated · Proof N** shows when a proof of the case
+pictures, the day it went out, the day it was kept and **View on X**. **Geolocated · Proof N** shows when a proof of the case
 comes from the post: one of its files came from that address, or the proof was published
 there. In the note it opens the proof; in a page it goes where the proof was published.
 No counters. The bar's **Settings** holds **Form** (*Card*, *Quote*: the words alone,
@@ -8187,7 +8187,8 @@ account's colours in its place, as when none could be kept) and **QR code in the
 Several posts in one block make a thread, numbered as published. Words selected in the
 drawn post offer **Highlight**, kept as the exact passage (`highlight:`), each line one
 Undo step. Arabic and other right-to-left words are set from the right in the page and
-the PDF. The HTML page draws the card in its own look, on a dark band in a Story, its
+the PDF, each paragraph by its own words, so an Arabic place name over English sets each part
+its own way. The HTML page draws the card in its own look, on a dark band in a Story, its
 pictures inside the file (`reader.post.css`, carried only by a page holding one). The PDF
 keeps a card whole on a page, its name, *View on X* and the QR code linked to the post.
 A WordPress draft gets a group of blocks with its pictures uploaded. A post a block draws

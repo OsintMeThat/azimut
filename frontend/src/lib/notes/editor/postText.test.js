@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
 import {
-  markedWords, pastedLinks, postBlockText, postLink, postParagraphs, quotedWords, readPost, readsRightToLeft, unreadLinks,
+  markedWords, pastedLinks, postBlockText, postLink, postParagraphs, quotedWords, readPost, readsRightToLeft,
   withAvatar, withForm, withHighlight,
   withKept, withQr, withTranslation, withoutHighlight, writePost,
 } from './postText.js';
@@ -61,7 +61,7 @@ describe('a post block', () => {
 
   it('writes a new block from posts kept and links not read yet', () => {
     expect(postBlockText({ ids: ['e_1'], links: ['https://x.com/a/status/9'] })).toBe('::: post\npost: e_1\nlink: https://x.com/a/status/9\n:::');
-    expect(unreadLinks(postBlockText({ links: ['https://x.com/a/status/9'] }))).toEqual(['https://x.com/a/status/9']);
+    expect(readPost(postBlockText({ links: ['https://x.com/a/status/9'] })).entries[0].kind).toBe('link');
   });
 
   it('changes one setting at a time, the others left as they were', () => {

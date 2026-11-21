@@ -234,7 +234,7 @@ describe('the drawing', () => {
     const drawn = drawPosts({ form: 'card', avatar: true, span: '16 Nov 2026 · 09:40 to 10:02 UTC', posts: [POST, second] }, { caseId: 'c1' });
     expect([...drawn.querySelectorAll('.cm-post-num')].map((node) => node.textContent)).toEqual(['1/2', '2/2']);
     expect(drawn.querySelectorAll('.cm-post-foot')).toHaveLength(1);
-    expect(drawn.querySelector('.cm-post-when').textContent).toBe('16 Nov 2026 · 09:40 to 10:02 UTC');
+    expect(drawn.querySelector('.cm-post-when').textContent).toBe('16 Nov 2026 · 09:40 to 10:02 UTC · captured on 17 Nov 2026');
   });
 
   it('sets right-to-left words from the right, initials on the account’s colours with no picture', () => {
