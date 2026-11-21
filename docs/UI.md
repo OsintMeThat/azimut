@@ -7686,6 +7686,24 @@ on github.com. While GitHub is not set up, the press shows how to connect it and
 Settings › Publishing. `POST /notes/{id}/github` does it (`engine/githubpages.py`), and
 `POST /api/publishing/github/build` answers the watch.
 
+**Your site.** The same press keeps the site beside the folder, in the same commit
+(`engine/site.py`, `engine/sitesync.py`). The folder carries a card, `article.json`
+(title, summary, first publication's day, category, author, article or page, layout, links to
+the site's other folders), and `cover.jpg` (1200 by 630): the picture of the note's line in the
+site's list, made from the look's *list picture* when it has one, else the cover picture, a map
+page's ground or the first picture, so a designed cover for the list never replaces the
+article's own. Each page published to the site starts with a bar back to it (its logo and
+title, *All articles* on the right), and a map page carries a small link inside its own header
+instead. The commit then rebuilds, only where Azimut made them, `articles.json`, `feed.xml` and
+`sitemap.xml`, fills the lists between `<!-- azimut:articles -->` markers in the analyst's own
+pages (`section="…"` for one category, `layout="map"` for the maps, `limit="N"`), and, when the
+root holds no home page or holds Azimut's, writes a default one with tabs by category. A
+page (role *page*) stays off every list and is linked from the default home's header. The
+category and the role are kept in the note's look; a check before the press
+(`POST /notes/{id}/github/check`, on a press) says *This folder was changed on GitHub since
+you published it: publishing replaces it.* and never blocks. `POST /api/publishing/github/site`
+(Update the site) does the same rebuild with no note, committing only when something differs.
+
 **Maps.** `/` › *Interactive map* asks what a map shows: some of the case's layers, or one
 of its Map plates (its layers as it draws them, its days, its steps and how each frames the
 map), and the proofs of a period over either, all of them or from one day to another. My
