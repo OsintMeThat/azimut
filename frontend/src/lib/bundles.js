@@ -7,11 +7,35 @@ export function inspectBundle(file, password = '') {
   return api.post('/api/cases/bundles/inspect', body);
 }
 
-export function startBundleImport(uploadId, password = '') {
+/** Import a checked upload; `keepFlagged` imports what the check flagged too, which is never the default. */
+export function startBundleImport(uploadId, password = '', keepFlagged = false) {
   return api.post('/api/cases/bundles/import', {
     upload_id: uploadId,
     password: password || null,
+    keep_flagged: keepFlagged === true,
   });
+}
+
+// -- what an import leaves out (`engine/filescreen.py`): named before, said after -------------------
+
+const plural = (count, one) => `${count} ${one}${count === 1 ? '' : 's'}`;
+
+/** The line over the files a bundle's check flagged: what they are, and that they stay out by default. */
+export function flaggedSaid(count) {
+  const one = count === 1;
+  return `${plural(count, 'file')} could run as a program or ${one ? 'is' : 'are'} not what ${one ? 'its' : 'their'} name says. `
+    + `The import leaves ${one ? 'it' : 'them'} out.`;
+}
+export const KEEP_FLAGGED = 'Import them too';
+export const KEEP_FLAGGED_HELP = 'Keep these files in the case: only for a bundle from someone you trust';
+
+/** What a finished import says: the case, and what it left out, the first few by name. */
+export function importedSaid(name, job) {
+  const left = Array.isArray(job?.left_out) ? job.left_out : [];
+  const count = Number.isInteger(job?.left_out_count) ? job.left_out_count : left.length;
+  if (!count) return `Imported “${name}”`;
+  const named = left.slice(0, 3).map((item) => item.name).join(', ');
+  return `Imported “${name}”, leaving out ${plural(count, 'file')}: ${named}${count > 3 ? '…' : ''}`;
 }
 
 export function discardBundleUpload(uploadId) {

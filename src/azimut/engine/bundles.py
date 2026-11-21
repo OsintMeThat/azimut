@@ -12,11 +12,25 @@ keeps the bundle's own two metadata members outside the case, so files called
 `bundle.json` and `bundle-header.json` remain valid analyst files. Format 1
 named members relative to the tool root and carried only the tool's half; those
 bundles still import, and the folder migration reshapes them on first open.
+
+**A bundle from someone else is read with distrust.** Beside the checks every import makes
+(portable names, no link, a bounded count, the room on the disk, a manifest whose digests
+hold, the database's version, integrity and references), two are aimed at a stranger's case:
+
+- its database holds no table, index, view or trigger that Azimut's own schema does not
+  (`_foreign_objects`): a trigger would fire on Azimut's own writes. What is expected is read
+  from a fresh database, which holds every older release's objects too, since a migration only
+  ever adds them; a bundle holding anything else is refused;
+- what could run when opened, and a file whose name claims a picture, a video or a sound its
+  first bytes are not (`engine/filescreen.py`), are listed by the inspect before anything is
+  imported, and the import leaves them out unless the analyst keeps them (`keep`). They are
+  read for their digest all the same, so a bundle that lies about them is still refused.
 """
 
 from __future__ import annotations
 
 import hashlib
+import io
 import json
 import logging
 import os
@@ -40,9 +54,9 @@ from cryptography.exceptions import InvalidTag
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 
 from .. import __version__, config, errors, layout
-from ..sqlite_backend import SQLITE_SCHEMA, SqliteCase
+from ..sqlite_backend import _SCHEMA, SQLITE_SCHEMA, SqliteCase
 from ..workspace import Case, CaseError, _now, _replace_with_retry, ensure_dir
-from . import updates, workqueue
+from . import filescreen, updates, workqueue
 
 _T = TypeVar("_T")
 
@@ -124,6 +138,11 @@ _PRECOMPRESSED = frozenset(
         ".zip", ".gz", ".bz2", ".xz", ".zst", ".7z", ".rar",
     }
 )
+
+#: How many of the files an import would leave out its inspect names; the count is always whole.
+MAX_FLAGGED_LISTED = 200
+#: The longest a flagged file's name is said, in characters.
+MAX_FLAGGED_NAME = 300
 
 EXPORT_JOB = "bundle-export"
 IMPORT_JOB = "bundle-import"
@@ -914,7 +933,114 @@ def inspect_bundle(source: Path, *, password: str | None = None) -> dict[str, An
         except (OSError, zipfile.BadZipFile, UnicodeDecodeError, json.JSONDecodeError) as exc:
             raise BundleError("invalid case bundle") from exc
     preview = {**_validate_header(header), "sealed": sealed, "path": str(source)}
-    return {**preview, **_space_preview(source, preview)}
+    flagged = _screen_bundle(source, int(preview["format_version"]), (password or "") if sealed else None)
+    return {**preview, **_space_preview(source, preview), "flagged": flagged[:MAX_FLAGGED_LISTED],
+            "flagged_count": len(flagged)}
+
+
+def _shown(name: str, version: int) -> str:
+    """A member as the analyst knows it: its path in the case folder."""
+    return name.removeprefix(f"{BUNDLE_ROOT}/") if version >= WRAPPED_MEMBERS else name
+
+
+def _flag(left: dict[str, str], name: str, why: str) -> None:
+    """Note a file left out, a macOS app once for the whole folder."""
+    where = filescreen.app_folder(name) if why == filescreen.MAC_APP else ""
+    left.setdefault((where or name)[:MAX_FLAGGED_NAME], why)
+
+
+def _screen_bundle(source: Path, version: int, password: str | None) -> list[dict[str, str]]:
+    """What an import of this bundle would leave out, read from each member's first bytes: a
+    sealed bundle is decrypted only where those bytes and its directory lie (`_SealedReader`)."""
+    left: dict[str, str] = {}
+    try:
+        stream: BinaryIO = (io.BufferedReader(_SealedReader(source, password), 64 * 1024) if password is not None
+                            else source.open("rb"))
+        with stream, zipfile.ZipFile(stream) as archive:
+            for info in archive.infolist():
+                if info.filename in (HEADER_NAME, MANIFEST_NAME) or info.is_dir():
+                    continue
+                with archive.open(info) as member:
+                    head = member.read(filescreen.HEAD_BYTES)
+                name = _shown(info.filename, version)
+                why = filescreen.reason(name, head)
+                if why:
+                    _flag(left, name, why)
+    except (OSError, zipfile.BadZipFile, ValueError, RuntimeError, NotImplementedError) as exc:
+        raise BundleError("invalid case bundle") from exc
+    return [{"name": name, "reason": why} for name, why in left.items()]
+
+
+class _SealedReader(io.RawIOBase):
+    """A sealed bundle read as the ZIP inside it, decrypting only the chunks a read reaches.
+
+    Each chunk is sealed on its own, under its index (`_EnvelopeWriter`), so the directory at
+    the end and the first bytes of each member are reached without decrypting the rest. Only
+    the inspect reads this way; the import decrypts and checks the whole stream."""
+
+    def __init__(self, source: Path, password: str) -> None:
+        super().__init__()
+        header, params = _read_envelope(source)
+        self._header = header
+        self._nonce = params["nonce_prefix"]
+        self._cipher = AESGCM(_derive_key(password, params["salt"], log_n=params["log_n"], r=params["r"],
+                                          p=params["p"]))
+        sealed = source.stat().st_size - _ENVELOPE.size
+        full = CHUNK_SIZE + 16
+        self._chunks = -(-sealed // full)
+        last = sealed - (self._chunks - 1) * full
+        if sealed <= 16 or last <= 16:
+            raise BundleError("the encrypted bundle is incomplete")
+        self._size = (self._chunks - 1) * CHUNK_SIZE + last - 16
+        self._raw = source.open("rb")
+        self._at = 0
+        self._kept: dict[int, bytes] = {}
+
+    def readable(self) -> bool:
+        return True
+
+    def seekable(self) -> bool:
+        return True
+
+    def tell(self) -> int:
+        return self._at
+
+    def seek(self, offset: int, whence: int = io.SEEK_SET) -> int:
+        base = {io.SEEK_SET: 0, io.SEEK_CUR: self._at, io.SEEK_END: self._size}[whence]
+        self._at = max(0, base + offset)
+        return self._at
+
+    def _chunk(self, index: int) -> bytes:
+        kept = self._kept.get(index)
+        if kept is None:
+            self._raw.seek(_ENVELOPE.size + index * (CHUNK_SIZE + 16))
+            sealed = self._raw.read(CHUNK_SIZE + 16)
+            nonce = self._nonce + index.to_bytes(8, "big")
+            try:
+                kept = self._cipher.decrypt(nonce, sealed, _aad(self._header, index, index == self._chunks - 1))
+            except InvalidTag as exc:
+                raise BundleError("wrong password or damaged bundle") from exc
+            # members are read in order: a few chunks kept cover the next ones and the directory
+            if len(self._kept) >= 4:
+                self._kept.pop(next(iter(self._kept)))
+            self._kept[index] = kept
+        return kept
+
+    def readinto(self, buffer: Any) -> int:
+        if self._at >= self._size:
+            return 0
+        index, offset = divmod(self._at, CHUNK_SIZE)
+        data = self._chunk(index)[offset:offset + len(buffer)]
+        buffer[:len(data)] = data
+        self._at += len(data)
+        return len(data)
+
+    def close(self) -> None:
+        # a reader refused before its file was opened has none to close
+        raw = getattr(self, "_raw", None)
+        if raw is not None:
+            raw.close()
+        super().close()
 
 
 def _decrypt_to(source: Path, target: Path, password: str) -> None:
@@ -967,14 +1093,16 @@ def _manifest(
 
 
 def _verify_and_extract(
-    archive_path: Path, case_root: Path, *, declared: int
-) -> dict[str, Any]:
-    """Check every member against the manifest, then write them out.
+    archive_path: Path, case_root: Path, *, declared: int, keep: bool = False
+) -> tuple[dict[str, Any], list[dict[str, str]]]:
+    """Check every member against the manifest, then write them out, with what was left out.
 
     `declared` is the format the pre-flight header announced, and it decides
     both which member names are legal and where they land. It is not trusted on
     that word alone: the header is verified against the manifest below, and the
     version it really carries has to be the one the names were checked against.
+    A member that could run or that is not what its name says (`engine/filescreen.py`)
+    is read for its digest and never written, unless ``keep``.
     """
     with zipfile.ZipFile(archive_path) as archive:
         infos, records = _manifest(archive, declared)
@@ -1021,6 +1149,7 @@ def _verify_and_extract(
         _require_extract_space(target, declared_total)
 
         total_written = 0
+        left: dict[str, str] = {}
         for info in infos[1:]:
             record = records[info.filename]
             expected_size = record["size"]
@@ -1031,11 +1160,17 @@ def _verify_and_extract(
                 # `_importable` proved the first component is exactly `case`.
                 relative = PurePosixPath(*relative.parts[1:])
             destination = target / relative
-            destination.parent.mkdir(parents=True, exist_ok=True)
             with archive.open(info) as src:
-                sink: BinaryIO = destination.open("wb")
-                with sink:
-                    while chunk := src.read(CHUNK_SIZE):
+                chunk = src.read(CHUNK_SIZE)
+                shown = _shown(info.filename, declared)
+                why = "" if keep else filescreen.reason(shown, chunk[:filescreen.HEAD_BYTES])
+                if why:
+                    _flag(left, shown, why)
+                else:
+                    destination.parent.mkdir(parents=True, exist_ok=True)
+                sink: BinaryIO | None = None if why else destination.open("wb")
+                try:
+                    while chunk:
                         if size + len(chunk) > expected_size:
                             raise BundleError(
                                 f"bundle member '{info.filename}' exceeds its declared size"
@@ -1045,12 +1180,40 @@ def _verify_and_extract(
                         total_written += len(chunk)
                         if total_written > declared_total:
                             raise BundleError("the bundle exceeds its declared total size")
-                        sink.write(chunk)
+                        if sink is not None:
+                            sink.write(chunk)
+                        chunk = src.read(CHUNK_SIZE)
+                finally:
+                    if sink is not None:
+                        sink.close()
             if size != expected_size or digest.hexdigest() != record["sha256"]:
                 raise BundleError(f"bundle member '{info.filename}' failed verification")
-            if _db_companion(info.filename, declared):
+            if _db_companion(info.filename, declared) and not why:
                 destination.unlink()
-        return header
+        return header, [{"name": name, "reason": why} for name, why in left.items()]
+
+
+def expected_objects() -> frozenset[tuple[str, str]]:
+    """The tables and indexes a case database may hold, by kind and name: those of a fresh one.
+
+    They are every older release's too, since a migration only ever adds a table or an index
+    (`store/migrations.py`, checked on the releases' own shapes by `tests/test_bundles.py`), so one
+    set answers for every schema an import takes. SQLite's own (`sqlite_autoindex_…`) come with it."""
+    with closing(sqlite3.connect(":memory:")) as conn:
+        conn.executescript(_SCHEMA)
+        return frozenset((kind, name) for kind, name in conn.execute("SELECT type, name FROM sqlite_master"))
+
+
+def _foreign_objects(conn: sqlite3.Connection) -> list[str]:
+    """What a received database holds that Azimut never makes: any trigger or view, a table or an
+    index of another name, a virtual table. Read from the schema alone, nothing in it is run."""
+    expected = expected_objects()
+    found = []
+    for kind, name, sql in conn.execute("SELECT type, name, sql FROM sqlite_master"):
+        virtual = isinstance(sql, str) and sql.lstrip()[:20].upper().startswith("CREATE VIRTUAL")
+        if (kind, name) not in expected or virtual:
+            found.append(f"{kind} {str(name)[:60]}")
+    return sorted(found)
 
 
 def _prepare_import_database(
@@ -1062,6 +1225,13 @@ def _prepare_import_database(
     name: str,
 ) -> None:
     with closing(sqlite3.connect(db_path)) as conn:
+        try:
+            foreign = _foreign_objects(conn)
+        except sqlite3.DatabaseError as exc:
+            raise BundleError("the case database could not be read") from exc
+        if foreign:
+            shown = ", ".join(foreign[:3]) + (f" and {len(foreign) - 3} more" if len(foreign) > 3 else "")
+            raise BundleError(f"the case database holds what Azimut never makes ({shown}), so it was not imported")
         row = conn.execute("SELECT value FROM meta WHERE key = 'schema_version'").fetchone()
         if row is None or int(row[0]) != declared_schema:
             raise BundleError("the case database does not match the bundle header")
@@ -1166,8 +1336,11 @@ def import_into(
     *,
     password: str | None = None,
     job: dict[str, Any] | None = None,
+    keep: bool = False,
 ) -> dict[str, Any]:
-    """Verify a bundle in staging, then swap it over a fresh destination shell."""
+    """Verify a bundle in staging, then swap it over a fresh destination shell. What could run
+    or is not what its name says is left out unless ``keep``, and named in the answer
+    (``left_out``) and in the job's payload, for whoever waits on it."""
     source = Path(source).expanduser()
     header = inspect_bundle(source, password=password)
     _require_import_space(source, header)
@@ -1191,8 +1364,8 @@ def import_into(
             _decrypt_to(source, decrypted, password or "")
             archive_path = decrypted
         try:
-            verified = _verify_and_extract(
-                archive_path, staging, declared=int(header["format_version"])
+            verified, left_out = _verify_and_extract(
+                archive_path, staging, declared=int(header["format_version"]), keep=keep
             )
         except UndeclaredState as exc:
             raise _refusal(header, str(exc)) from exc
@@ -1223,7 +1396,8 @@ def import_into(
             layout.tool_root(staging) / layout.HORIZON_DIR / layout.HORIZON_FINDS_DIR
         )
         if job is not None:
-            _install_running_job(staged_db, job)
+            said = {"left_out": left_out[:MAX_FLAGGED_LISTED], "left_out_count": len(left_out)}
+            _install_running_job(staged_db, {**job, "payload": {**(job.get("payload") or {}), **said}})
         layout.mark_import_scaffold(case.path)
         case.path.rename(old)
         # Unmarked before it takes the case's place, never after: a crash between the
@@ -1255,7 +1429,8 @@ def import_into(
                         payload={"path": item["path"]},
                     )
         shutil.rmtree(old)
-        return {"case_id": imported.id, "name": name, "origin_case_id": verified["origin_case_id"]}
+        return {"case_id": imported.id, "name": name, "origin_case_id": verified["origin_case_id"],
+                "left_out": left_out}
     except BaseException:
         shutil.rmtree(staging, ignore_errors=True)
         if old.exists() and not case.path.exists():
@@ -1298,9 +1473,11 @@ def queue_import(
     password: str | None = None,
     cleanup_source: bool = False,
     name: str | None = None,
+    keep: bool = False,
 ) -> tuple[Case, dict[str, Any]]:
     """Pre-flight, create the new case shell, then queue its import. ``name`` names the
-    case as it is, in place of the bundle's own name and its *(imported)*."""
+    case as it is, in place of the bundle's own name and its *(imported)*; ``keep`` keeps
+    what the import would leave out (`import_into`)."""
     header = inspect_bundle(source, password=password)
     _require_import_space(Path(source), header)
     case = create_import_case(name, as_is=True) if name else create_import_case(header["case_name"])
@@ -1312,6 +1489,7 @@ def queue_import(
             "source": str(Path(source).expanduser()),
             "sealed": header["sealed"],
             "cleanup_source": cleanup_source,
+            "keep": keep,
         },
         max_attempts=1,
     )
@@ -1359,6 +1537,7 @@ def _handle_import(case: Case, job: dict[str, Any]) -> None:
                 source,
                 password=password,
                 job=job,
+                keep=bool(job["payload"].get("keep")),
             )
             return
     except Exception as exc:

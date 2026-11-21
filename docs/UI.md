@@ -1114,7 +1114,15 @@ that a lost password cannot be recovered.
 
 **Import case** opens the browser's file picker for `.zip` and `.enc`, uploads
 the selected bundle for a pre-flight check, and shows its case name, size,
-temporary disk requirement, available space and protection state. Confirmation
+temporary disk requirement, available space and protection state. The check also
+names, file by file with its reason, what could run when opened (*a Windows
+program*, *a script*, *an installer*, *a shortcut*, *a document with macros*, *a
+macOS app*) and what is named as a picture, a video or a sound and is none
+(*named .jpg but not a picture*), read from the first bytes of each: *N files could
+run as a program or are not what their name says. The import leaves them out.* An
+**Import them too** box, off at every check, keeps them. The toast that opens the
+case says what it left out. A bundle whose database holds a table, an index, a view
+or a trigger Azimut never makes is refused. Confirmation
 always creates a new case, waits for the durable
 import job, then opens it. It never replaces or merges an existing case.
 Confirmed entities and relations remain confirmed in the imported case.
@@ -7702,7 +7710,9 @@ the site's other folders, and its place on the site's map only when it has one),
 (1200 by 630): the picture of the note's line in the
 site's list, made from the look's *list picture* when it has one, else the cover picture, a map
 page's ground or the first picture, so a designed cover for the list never replaces the
-article's own. Each page published to the site starts with a bar back to it (its logo and
+article's own. An article with an author picture carries `author.jpg` (or `author.png` when it
+holds transparency), 96 pixels square, made again from its pixels so that no place, camera or
+name the file held goes online, and its card names it as `author_image`. Each page published to the site starts with a bar back to it (its logo and
 title, *All articles* on the right), and a map page carries a small link inside its own header
 instead. The commit then rebuilds, only where Azimut made them, `articles.json`, `feed.xml` and
 `sitemap.xml`, fills the lists between `<!-- azimut:articles -->` markers in the analyst's own
@@ -7726,6 +7736,19 @@ look as it is picked (`list_image`) with a way back to the cover. The category a
 up with the press and are kept in the look; whatever the dialog changes in the look is handed to
 the Notebook, which reads it again so that its next save never drops it. After a publish, what
 the site had to say (a list left as it was) is listed under *Live at*.
+
+**Author.** Under the choice of Article, Page or Unlisted, for all three: **Author**, who wrote the
+note when it is not the analyst (a guest's investigation imported from their bundle), one line of up
+to 120 characters, its placeholder the name it falls back to (the Publishing name, else the site's);
+and **Author picture**, one of the case's pictures picked as the list picture is, *No picture* by
+default and never a logo in its place. Both are kept in the note's look as they are left
+(`author`, `author_image`), with GitHub set up or not, so a contributor sets them before exporting the
+case and they open filled in on the machine that publishes it; a Publish waits for an author just
+typed. The page is signed with that name alone (none of the analyst's role, organisation,
+handwritten signature or links), under the title unless the look signs at the end, the picture small
+and round before it; the card, `articles.json`, the read of the site and the lists name the author,
+the picture before the name, unless it is the site's own name. A picture gone from the case is said
+among the warnings and the page goes without it. A template carries neither.
 
 **Place on the site's map.** Under the picture, an article may say where it stands, for a map of the
 site's articles: **Coordinates**, pasted as `lat, lon` (or `12.725N 43.5075E`, or in degrees,

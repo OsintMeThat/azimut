@@ -14,8 +14,12 @@
     toast,
   } from '../lib/state.svelte.js';
   import {
+    KEEP_FLAGGED,
+    KEEP_FLAGGED_HELP,
     discardBundleUpload,
     downloadBundle as triggerBundleDownload,
+    flaggedSaid,
+    importedSaid,
     inspectBundle,
     startBundleExport,
     startBundleImport,
@@ -41,6 +45,8 @@
   let protectBundle = $state(false);
   let bundleBusy = $state(false);
   let bundlePreview = $state(null);
+  // what the check flagged goes in too: the analyst's choice for this bundle, off at every check
+  let keepFlagged = $state(false);
   let bundleError = $state('');
   let bundleJobController = null;
   let doctorTarget = $state(null);
@@ -191,6 +197,7 @@
     }
     bundleFile = event.currentTarget.files?.[0] ?? null;
     bundlePreview = null;
+    keepFlagged = false;
     bundleError = '';
   }
 
@@ -207,6 +214,7 @@
     bundleError = '';
     try {
       bundlePreview = await inspectBundle(bundleFile, bundlePassword);
+      keepFlagged = false;
     } catch (error) {
       bundlePreview = null;
       bundleError = error.message;
@@ -221,7 +229,7 @@
     bundleError = '';
     let started;
     try {
-      started = await startBundleImport(bundlePreview.upload_id, bundlePassword);
+      started = await startBundleImport(bundlePreview.upload_id, bundlePassword, keepFlagged);
     } catch (error) {
       bundleError = error.message;
       bundleBusy = false;
@@ -244,7 +252,8 @@
       }
       await refreshCaseList();
       await openCase(started.case_id);
-      toast(`Imported “${started.name}”`, 'ok', 4000);
+      const said = importedSaid(started.name, job);
+      toast(said, job.left_out_count ? 'warn' : 'ok', job.left_out_count ? 9000 : 4000);
     } catch (error) {
       if (error.name !== 'AbortError') {
         toast(error.message || 'Could not import the case', 'danger', 7000);
@@ -677,6 +686,22 @@
             temporary space, with {formatSize(bundlePreview.free_space_bytes)} available.
           </p>
         {/if}
+        {#if bundlePreview.flagged_count}
+          <div class="bundle-flagged" role="group" aria-label="Files left out">
+            <p class="bundle-space warn">{flaggedSaid(bundlePreview.flagged_count)}</p>
+            <ul class="flagged-list">
+              {#each bundlePreview.flagged ?? [] as item (item.name)}
+                <li><span class="flagged-name" title={item.name}>{item.name}</span><span class="flagged-why">{item.reason}</span></li>
+              {/each}
+              {#if bundlePreview.flagged_count > (bundlePreview.flagged ?? []).length}
+                <li class="flagged-more">and {bundlePreview.flagged_count - (bundlePreview.flagged ?? []).length} more</li>
+              {/if}
+            </ul>
+            <label class="keep-flagged" title={KEEP_FLAGGED_HELP}>
+              <input type="checkbox" bind:checked={keepFlagged} title={KEEP_FLAGGED_HELP} /> {KEEP_FLAGGED}
+            </label>
+          </div>
+        {/if}
       </div>
     {/if}
     {#if bundleError}<p class="err">{bundleError}</p>{/if}
@@ -1083,6 +1108,13 @@
   }
   .bundle-preview .bundle-space.warn { color: var(--warn); }
   .bundle-preview .bundle-space.danger { color: var(--danger); }
+  .bundle-flagged { grid-column: 1 / -1; display: flex; flex-direction: column; gap: 4px; }
+  .flagged-list { max-height: 140px; margin: 0; padding: 0; overflow-y: auto; list-style: none; }
+  .flagged-list li { display: flex; justify-content: space-between; gap: 10px; padding: 1px 0; }
+  .flagged-name { min-width: 0; overflow: hidden; color: var(--text-1); font-family: var(--font-mono); text-overflow: ellipsis; white-space: nowrap; }
+  .flagged-why { flex: none; color: var(--text-3); }
+  .flagged-more { color: var(--text-3); }
+  .keep-flagged { display: inline-flex; align-items: center; gap: 6px; color: var(--text-2); cursor: pointer; }
   .doctor-intro {
     margin: 0 0 14px;
     color: var(--text-3);

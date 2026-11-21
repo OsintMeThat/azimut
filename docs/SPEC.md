@@ -208,6 +208,8 @@ proof for publication.
 | ✅ **Website hub** | Settings › Website as the site's hub, in panels: a live preview of its name and logo, a read of what it holds with a delete, its limits, readers and upkeep; Unlisted joins Article and Page. |
 | ✅ **Your own bar** | Articles carry the site's own header from `azimut-bar.html` in place of Azimut's bar, cleaned and kept apart from the article's styles, and Update the site changes it in every article. |
 | ✅ **Places on the site** | An article may carry a place for a map of the site's articles, kept with its note, offered only when the note names one point, and carried by its card and `articles.json`. |
+| ✅ **Guest authors** | An article may name its own author and their picture, kept with its note so a bundle carries them, signed on its page and named in the site's lists. |
+| ✅ **Bundles from someone else** | An import refuses a case database holding what Azimut never makes, and names programs and disguised files before it starts, leaving them out unless the analyst keeps them. |
 | ✅ **Maps in reports** | Puts the case's layers, a Map plate or a period's proofs in a note as a map read day by day, its marks opening their cards: offline in the file, live over OpenFreeMap once hosted, a picture in the PDF; set from its card (base, Sentinel-2 or Esri imagery streamed live, layers, frame, timeline, steps, cards) and drawn on at any zoom, from an area to highlight to a map started from nothing. |
 | ✅ **Web maps** | Makes a note that is the analyst's own layers on a page of their own, from Notebook › New or a layer's row, drawn and carded as the app's map draws them, with a layer switcher, a search, the timeline and each view in its address, published as a web folder or to GitHub Pages and counting its readers on the analyst's own GoatCounter when asked. |
 | ✅ **Charts and infographics** | Draws a note's table as one of fifteen kinds of chart picked by its picture, a wall of the case's own pictures among them, in the case's colours and saying "at least" where a count is a floor, and lays charts, a map and key figures out as an infographic page or one picture, read from one of the case's sheets. |
@@ -690,7 +692,13 @@ stops making sense.
   a table, a note, a picture — is refused by size before it is parsed, and the
   routes are not trusted to a list: `tests/test_hardening.py` walks them.
   Case imports extract only unique, non-symlink members declared
-  by the manifest and matching its SHA-256. Password-protected bundles seal the
+  by the manifest and matching its SHA-256, and refuse a database holding a table, an
+  index, a view or a trigger a fresh one does not (`bundles.expected_objects`). What could
+  run when opened (a program, a script, an installer, a shortcut, a document with macros)
+  and a file named as a picture, a video or a sound that is none, read from its first 64
+  bytes (`engine/filescreen.py`), are listed before the import and left out of it unless
+  the analyst keeps them. Accepted risk: a kept file is written as it came, with no mark of
+  where it came from, and a disguised file is judged by its first bytes only. Password-protected bundles seal the
   complete ZIP with chunked AES-256-GCM and a scrypt-derived key; filenames stay
   encrypted and the password is never persisted in a job. Import temporarily
   stages a decrypted ZIP inside the incoming case directory. Imports validate
