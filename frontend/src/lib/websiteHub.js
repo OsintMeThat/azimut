@@ -227,7 +227,7 @@ export function countingOf(prefs) {
 const MAX_PAGES = 500;
 const MAX_RANKED = 10;
 
-const countsOf = (value) => ({ views: count(value?.views), visits: count(value?.visits) });
+const windowOf = (value) => ({ views: count(value?.views), visits: count(value?.visits) });
 
 /**
  * The numbers as `POST /api/publishing/cloudflare/numbers` answers them (`engine/sitestats.py`), what the
@@ -239,16 +239,16 @@ export function numbersOf(answer) {
   const list = (value, max) => (Array.isArray(value) ? value.slice(0, max) : []);
   const pages = list(answer?.pages, MAX_PAGES)
     .filter((one) => typeof one?.path === 'string' && one.path.startsWith('/'))
-    .map((one) => ({ path: line(one.path, 512), page: typeof one.page === 'string' ? line(one.page, 512) : null, week: countsOf(one.week), month: countsOf(one.month) }));
+    .map((one) => ({ path: line(one.path, 512), page: typeof one.page === 'string' ? line(one.page, 512) : null, week: windowOf(one.week), month: windowOf(one.month) }));
   const referrers = list(answer?.referrers, MAX_RANKED)
-    .map((one) => ({ host: line(one?.host, 253), ...countsOf(one) }))
+    .map((one) => ({ host: line(one?.host, 253), ...windowOf(one) }))
     .filter((one) => one.visits > 0)
     .sort((a, b) => b.visits - a.visits);
-  const countries = list(answer?.countries, MAX_RANKED).map((one) => ({ country: line(one?.country, 64), ...countsOf(one) }));
+  const countries = list(answer?.countries, MAX_RANKED).map((one) => ({ country: line(one?.country, 64), ...windowOf(one) }));
   return {
     address: webLink(answer?.address),
     pages,
-    total: { week: countsOf(answer?.total?.week), month: countsOf(answer?.total?.month) },
+    total: { week: windowOf(answer?.total?.week), month: windowOf(answer?.total?.month) },
     referrers,
     countries,
     sampled: answer?.sampled === true,

@@ -192,16 +192,21 @@ def test_an_answer_is_read_within_bounds_and_what_is_no_count_counts_nothing(fak
     odd = [group(-4, 2, requestPath="/neg/"), {"count": "12", "sum": None, "dimensions": {"requestPath": "/text/"}},
            {"count": True, "dimensions": {"requestPath": "/bool/"}}, "not a group", {"count": 5}]
     fake.answer = httpx.Response(200, json=answer_of(
-        pagesWeek=many, pagesMonth=odd, totalWeek=[], totalMonth="nothing",
+        pagesWeek=many, pagesMonth=many, totalWeek=[], totalMonth="nothing",
         referrers=[group(1, 1, refererHost=f"r{index}.example") for index in range(30)],
         countries=[group(1, 1, countryName="X" * 100)] * 30))
     numbers = _read(fake)
     assert len(numbers["pages"]) == sitestats.MAX_PAGES
-    assert {"path": "/neg/", "page": "neg/", "week": {"views": 0, "visits": 0}, "month": {"views": 0, "visits": 2}} in numbers["pages"]
     assert numbers["total"] == {"week": {"views": 0, "visits": 0}, "month": {"views": 0, "visits": 0}}
     assert numbers["sampled"] is False
     assert len(numbers["referrers"]) == sitestats.MAX_RANKED
     assert len(numbers["countries"]) == sitestats.MAX_RANKED and len(numbers["countries"][0]["country"]) == 64
+    fake.answer = httpx.Response(200, json=answer_of(pagesWeek=[], pagesMonth=odd))
+    assert sorted(_read(fake)["pages"], key=lambda one: one["path"]) == [
+        {"path": "/bool/", "page": "bool/", "week": {"views": 0, "visits": 0}, "month": {"views": 0, "visits": 0}},
+        {"path": "/neg/", "page": "neg/", "week": {"views": 0, "visits": 0}, "month": {"views": 0, "visits": 2}},
+        {"path": "/text/", "page": "text/", "week": {"views": 0, "visits": 0}, "month": {"views": 0, "visits": 0}},
+    ]
 
 
 # -- what went wrong ---------------------------------------------------------------------------------

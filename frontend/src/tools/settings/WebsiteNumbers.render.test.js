@@ -225,9 +225,11 @@ describe('reading the numbers', () => {
     expect(table.querySelector('tbody tr:last-child').classList.contains('unknown')).toBe(true);
     expect(card().textContent).toContain(NUMBERS_SAMPLED);
     const referrers = card().querySelector('section[aria-label="Where visits came from"]');
-    expect([...referrers.querySelectorAll('li')].map((node) => node.textContent.replace(/\s+/g, ' ').trim())).toEqual(['No referrer 40', 'news.ycombinator.com 30']);
+    const ranked = (section) => [...section.querySelectorAll('li')].map((node) => [...node.children].map((cell) => cell.textContent.trim()));
+    expect(ranked(referrers)).toEqual([['No referrer', '40'], ['news.ycombinator.com', '30']]);
+    expect(referrers.querySelector('li .rank-name').classList.contains('quiet-name')).toBe(true);
     const countries = card().querySelector('section[aria-label="Countries"]');
-    expect([...countries.querySelectorAll('li')].map((node) => node.textContent.replace(/\s+/g, ' ').trim())).toEqual(['France 800', 'United States 500']);
+    expect(ranked(countries)).toEqual([['France', '800'], ['United States', '500']]);
   });
 
   it('says so when Cloudflare counted nothing, and names the site tag as the likely cause', async () => {
