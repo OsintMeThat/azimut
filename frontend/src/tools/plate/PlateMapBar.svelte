@@ -9,7 +9,7 @@
    *   middle-drag or a double click held turns it too.
    * - **Tilt**: a map drawn in 3D leans further or less.
    * - **Ground**: the basemaps a plate offers, and what can be laid over them.
-   * - **Keep the previous framing**: on a played plate, a day or a step after the
+   * - **Map stays where it was**: on a played plate, a day or a slide after the
    *   first holds the framing before it until this is unticked; then the map moves
    *   for it alone.
    */
@@ -92,8 +92,8 @@
 <div class="map-bar" role="toolbar" aria-label="Map" tabindex="-1" onpointerdown={(event) => event.stopPropagation()}>
   {#if isMap}
     {#if keep !== null}
-      <label class="keep" title="This day or step shows the map as the one before it does">
-        <input type="checkbox" checked={keep} onchange={(event) => onkeep?.(event.currentTarget.checked)} /> Keep the previous framing</label>
+      <label class="keep" title="This day or slide shows the map as the one before it does">
+        <input type="checkbox" checked={keep} onchange={(event) => onkeep?.(event.currentTarget.checked)} /> Map stays where it was</label>
       <span class="rule"></span>
     {/if}
     <button type="button" class:on={framing} aria-pressed={framing} disabled={held} title={framing ? 'Done framing (Esc)' : 'Frame by the hand: zoom with the wheel, turn with a Shift-drag'}

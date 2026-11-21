@@ -25,7 +25,7 @@ export const ADDS = [
   { title: 'Signing', items: [['signature', 'Signature', 'edit', 'handle author'], ['brand', 'Made with Azimut', 'brand', 'mark logo']] },
   { title: 'Pictures and shapes', items: [['image', 'Picture', 'image', 'photo proof'], ['logo', 'Logo', 'shield', 'badge signature'],
     ['rect', 'Box', 'square', 'rectangle frame'], ['ellipse', 'Ellipse', 'circle', 'oval'], ['rule', 'Rule', 'lineSolid', 'separator divider']] },
-  { title: 'Playing', note: 'Played after the day', items: [['step', 'Step', 'stack', 'sequence beat'], ['video', 'Video', 'video', 'clip footage film'], ...SEQUENCE_ADDS] },
+  { title: 'Slides', plays: true, note: 'Played one after another in the video', items: [['step', 'Slide', 'stack', 'step sequence beat playing'], ['video', 'Video', 'video', 'clip footage film'], ...SEQUENCE_ADDS] },
 ];
 
 const plain = (text) => text.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase();

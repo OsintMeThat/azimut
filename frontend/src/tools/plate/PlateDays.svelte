@@ -132,7 +132,7 @@
   /** The moments of the day shown, played hour by hour. */
   const dayKeys = $derived(hours && at ? keys.filter((key) => dayPart(key) === dayPart(at)) : []);
   const hourSaid = (key) => (timed(key) ? key.slice(11) : 'Start of the day');
-  const stepsSaid = (count) => (count ? `${count} step${count === 1 ? '' : 's'}` : '');
+  const stepsSaid = (count) => (count ? `${count} slide${count === 1 ? '' : 's'}` : '');
 
   function said(notch) {
     const count = held(notch);

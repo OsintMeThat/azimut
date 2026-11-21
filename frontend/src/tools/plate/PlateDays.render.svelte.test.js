@@ -46,7 +46,7 @@ describe('the days a played plate goes through', () => {
     expect(ticks().map((tick) => tick.classList.contains('faded'))).toEqual([false, false, true, false]);
     expect(ticks()[2].title).toContain('hidden from the video');
     expect([...document.body.querySelectorAll('.dots')].map((dots) => dots.children.length)).toEqual([2, 3]);
-    expect(ticks()[3].title).toBe('2 Nov 2026, 5 steps');
+    expect(ticks()[3].title).toBe('2 Nov 2026, 5 slides');
     expect(handle().style.left).toBe(ticks()[1].style.left);
     expect([...document.body.querySelectorAll('.ends > span')].map((end) => end.textContent)).toEqual(['3 Oct', '2 Nov']);
     expect(document.body.querySelector('.overview')).toBeNull();
@@ -122,7 +122,7 @@ describe('a plate played hour by hour', () => {
     expect(hour.textContent.trim()).toBe('14:30');
     press(hour);
     const items = [...document.body.querySelectorAll('.float-menu .fm-item')];
-    expect(items.map((item) => item.textContent.trim())).toEqual(['09:001 step', '14:30']);
+    expect(items.map((item) => item.textContent.trim())).toEqual(['09:001 slide', '14:30']);
     expect(items[1].getAttribute('aria-checked')).toBe('true');
     press(items[0]);
     expect(calls.onpick).toHaveBeenLastCalledWith('2026-11-02T09:00');

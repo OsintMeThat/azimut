@@ -388,7 +388,7 @@ test('the credits stay on the page, and the export writes the page', async ({ pa
   await page.getByRole('button', { name: 'Export', exact: true }).click();
   const dialog = page.getByRole('dialog');
   // a plate with no layer followed over time has no days to play
-  await expect(dialog.getByText('Needs a layer followed over time on the plate.').first()).toBeVisible();
+  await expect(dialog.getByText('Needs a dated layer on the plate.').first()).toBeVisible();
   await dialog.getByRole('button', { name: 'Screen · 150 dpi' }).click();
   await dialog.getByRole('button', { name: 'Export', exact: true }).click();
   await expect.poll(() => store.exports.length, { timeout: 30_000 }).toBe(1);
@@ -462,7 +462,7 @@ test('a played plate goes To Post as its video', async ({ page }) => {
   await page.goto('/#plate');
   await newPlate(page);
   await expect(page.locator('.plate-map')).toHaveCount(2);
-  await addOnPage(page, 'Step');
+  await addOnPage(page, 'Slide');
   await expect(page.locator('.steps [role="option"]')).toHaveCount(2);
   await expect.poll(() => lastSave(store)?.spec.steps?.now?.length ?? 0).toBeGreaterThan(0);
   await page.getByRole('button', { name: 'Export', exact: true }).click();
@@ -506,10 +506,10 @@ test('a day plays its steps, and a step plays a video of the case', async ({ pag
   await expect(page.locator('.plate-map')).toHaveCount(2);
   // a plate with no layer followed over time has no play bar, and still takes steps
   await expect(page.locator('.timebar')).toHaveCount(0);
-  await addOnPage(page, 'Step');
+  await addOnPage(page, 'Slide');
   const tiles = page.locator('.steps [role="option"]');
   await expect(tiles).toHaveCount(2);
-  await expect(page.locator('.on-step')).toHaveText('Step 1: what you add belongs to it');
+  await expect(page.locator('.on-step')).toHaveText('Slide 1: what you add belongs to it');
   await addOnPage(page, 'Text');
   await page.getByLabel('Text', { exact: true }).fill('First strike');
   await expect.poll(() => {
@@ -657,8 +657,8 @@ test('a line and a text go on the map, a step frames the map its own way, and th
   await page.getByRole('group', { name: 'Text weight' }).getByRole('button', { name: 'Bold' }).click();
   await expect.poll(() => lastSave(store)?.spec.elements.find((element) => element.leader === 'none')?.weight).toBe(700);
   // a step keeps the day's framing until it is let go, then frames the map on its own
-  await addOnPage(page, 'Step');
-  await expect(page.locator('.on-step')).toHaveText('Step 1: what you add belongs to it');
+  await addOnPage(page, 'Slide');
+  await expect(page.locator('.on-step')).toHaveText('Slide 1: what you add belongs to it');
   await page.locator('.list').getByRole('button', { name: 'Map', exact: true }).click();
   const keep = page.locator('.map-bar .keep input');
   await expect(keep).toBeChecked();
@@ -673,7 +673,7 @@ test('a line and a text go on the map, a step frames the map its own way, and th
   }).toBeCloseTo(0.5, 1);
   // the video goes from the day to the step by the plate's transitions, once they are on
   await page.keyboard.press('Escape');
-  await page.getByLabel('Between the days and the steps').check();
+  await page.getByLabel('Between the days and the slides').check();
   await page.getByLabel('Blurred as it moves').uncheck();
   await expect.poll(() => {
     const moves = lastSave(store)?.spec.transitions;
@@ -687,7 +687,7 @@ test('a detail framed on a step and then deleted leaves no framing the server wo
   await newPlate(page);
   await expect(page.locator('.plate-map')).toHaveCount(2);
   await addOnPage(page, 'Detail');
-  await addOnPage(page, 'Step');
+  await addOnPage(page, 'Slide');
   await page.locator('.list').getByRole('button', { name: 'Detail', exact: true }).click();
   await page.locator('.map-bar .keep input').uncheck();
   const detailOf = (spec) => spec?.elements.find((element) => element.kind === 'map' && element.of);
@@ -773,11 +773,11 @@ test('each day and step holds its own time in the video, the export saying how l
   await page.goto('/#plate');
   await newPlate(page);
   await expect(page.locator('.plate-map')).toHaveCount(2);
-  await addOnPage(page, 'Step');
+  await addOnPage(page, 'Slide');
   const times = page.locator('.steps .time');
   await expect(times).toHaveText(['0:01', '0:03']);
   // a step's time, pressed, is set
-  await page.getByRole('button', { name: 'How long Step 1 holds' }).click();
+  await page.getByRole('button', { name: 'How long Slide 1 holds' }).click();
   const seconds = page.locator('.float-menu input[type="number"]');
   await expect(seconds).toBeFocused();
   await seconds.fill('2.5');
@@ -1179,7 +1179,7 @@ test('a plate on layers dated to the minute plays day by day until it is asked t
   await expect.poll(() => lastSave(store)?.spec.time).toMatchObject({ hours: true, at: '2026-10-09T15:00' });
 
   // a step made on the hour waits under its day when the plate goes back to days, keeping its hour
-  await page.getByRole('button', { name: 'Add a step' }).click();
+  await page.getByRole('button', { name: 'Add a slide' }).click();
   await expect.poll(() => Object.keys(lastSave(store)?.spec.steps ?? {})).toEqual(['2026-10-09T15:00']);
   await hours.click();
   await expect(ticks).toHaveCount(2);

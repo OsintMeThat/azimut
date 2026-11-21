@@ -22,7 +22,7 @@ const tiles = () => [...document.body.querySelectorAll('[role="option"]')];
 describe('the steps of a day', () => {
   it('lists the day, then each step with its length, the one shown marked', () => {
     show();
-    expect(tiles().map((tile) => tile.querySelector('.tile-name').textContent)).toEqual(['15 Oct 2026', 'Strike', 'Step 2']);
+    expect(tiles().map((tile) => tile.querySelector('.tile-name').textContent)).toEqual(['15 Oct 2026', 'Strike', 'Slide 2']);
     // every tile says how long it holds: the day the plate's seconds, a step with a clip at least the clip
     expect([...document.body.querySelectorAll('.time')].map((time) => time.textContent)).toEqual(['0:01', '0:08.5', '0:04.5']);
     expect(tiles()[1].getAttribute('aria-selected')).toBe('true');
@@ -33,7 +33,7 @@ describe('the steps of a day', () => {
     const calls = show();
     const right = (node) => { node.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true, clientX: 120, clientY: 40 })); flushSync(); };
     right(tiles()[2]);
-    const menu = document.body.querySelector('.float-menu[aria-label="Step"]');
+    const menu = document.body.querySelector('.float-menu[aria-label="Slide"]');
     expect(menu).not.toBeNull();
     // the same menu as its ⋯, nothing picked by the right-click
     [...menu.querySelectorAll('.fm-item')].find((item) => item.textContent.includes('Play it earlier')).click();
@@ -48,7 +48,7 @@ describe('the steps of a day', () => {
     const calls = show();
     tiles()[2].click(); tiles()[0].click();
     expect(calls.onpick.mock.calls).toEqual([['s2'], [null]]);
-    document.body.querySelector('button[aria-label="Add a step"]').click();
+    document.body.querySelector('button[aria-label="Add a slide"]').click();
     expect(calls.onadd).toHaveBeenCalledOnce();
   });
 
@@ -213,7 +213,7 @@ describe('a day with many steps', () => {
     expect(tiles()[1].querySelector('.badge').textContent).toBe('1');
     unmount(held); held = null; document.body.innerHTML = '';
     show({ steps: many(8), current: null });
-    expect(document.body.querySelector('.tally').textContent).toBe('8 steps');
+    expect(document.body.querySelector('.tally').textContent).toBe('8 slides');
     unmount(held); held = null; document.body.innerHTML = '';
     show({ steps: many(2) });
     expect(document.body.querySelector('.steps').classList.contains('compact')).toBe(false);
@@ -234,8 +234,8 @@ describe('a day with many steps', () => {
     lane.scrollLeft = 202;
     lane.dispatchEvent(new Event('scroll'));
     flushSync();
-    const before = document.body.querySelector('[aria-label="2 more steps before"]');
-    const after = document.body.querySelector('[aria-label="3 more steps after"]');
+    const before = document.body.querySelector('[aria-label="2 more slides before"]');
+    const after = document.body.querySelector('[aria-label="3 more slides after"]');
     expect([before.textContent, after.textContent]).toEqual(['2', '3']);
     after.click();
     expect(lane.scrollBy).toHaveBeenLastCalledWith({ left: 240, behavior: 'smooth' });
@@ -245,8 +245,8 @@ describe('a day with many steps', () => {
     lane.scrollLeft = 0;
     lane.dispatchEvent(new Event('scroll'));
     flushSync();
-    expect(document.body.querySelector('[aria-label="No step before"]').disabled).toBe(true);
-    expect(document.body.querySelector('[aria-label="5 more steps after"]')).not.toBeNull();
+    expect(document.body.querySelector('[aria-label="No slide before"]').disabled).toBe(true);
+    expect(document.body.querySelector('[aria-label="5 more slides after"]')).not.toBeNull();
   });
 
   it('goes from the day to its steps and back with the arrow keys', () => {

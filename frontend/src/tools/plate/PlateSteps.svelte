@@ -1,6 +1,7 @@
 <script>
   /**
-   * The steps of the plate's day, in its play bar beside the days: the day itself
+   * The steps of the plate's day, which the screen calls slides (the plate keeps them as
+   * `steps`), in its play bar beside the days: the day itself
    * first, then each step in the order it is played. A press shows one; what is added then
    * belongs to it. **+** adds a step after the one shown. A step is dragged to
    * another place, and its ⋯, always in sight, names it, sets how long it holds, cuts straight into it
@@ -156,7 +157,7 @@
     strip?.querySelector('[aria-selected="true"]')?.focus();
   }
 
-  const name = (step, index) => step.name || `Step ${index + 1}`;
+  const name = (step, index) => step.name || `Slide ${index + 1}`;
   const firstClip = (step) => clipsOf(elements, step)[0] ?? null;
   const owned = (step) => elements.filter((element) => element.step === step.id).length;
 
@@ -197,7 +198,7 @@
   }
 </script>
 
-<div class="steps" class:skipped={daySkipped} class:compact bind:this={strip} bind:clientWidth={width} role="listbox" aria-label="Steps of the day" tabindex="-1"
+<div class="steps" class:skipped={daySkipped} class:compact bind:this={strip} bind:clientWidth={width} role="listbox" aria-label="Slides of the day" tabindex="-1"
   ondragover={(event) => event.preventDefault()} ondrop={drop} onkeydown={arrows}>
   <div class="slot" role="presentation" oncontextmenu={(event) => context(event, { day: true })}>
     {#if !dayPlayed && onplayday}
@@ -209,7 +210,7 @@
       </button>
     {:else}
     <button type="button" class="tile day" class:on={!current} role="option" aria-selected={!current}
-      title={daySkipped ? 'Hidden from the video, with its steps. Its ⋯ shows it again' : 'The day itself, under its steps'}
+      title={daySkipped ? 'Hidden from the video, with its slides. Its ⋯ shows it again' : 'The day itself, shown under each of its slides'}
       onclick={() => onpick?.(null)}>
       <span class="thumb"><Icon name={daySkipped ? 'eyeOff' : 'plate'} size={14} /></span>
       <span class="tile-name">{dayLabel}</span>
@@ -227,8 +228,8 @@
   </div>
   {#if steps.length}
   {#if overflowing}
-    <button type="button" class="edge" disabled={!before} aria-label={before ? `${before} more ${before === 1 ? 'step' : 'steps'} before` : 'No step before'}
-      title="Scroll to the steps before" onclick={() => page(-1)}><Icon name="chevronLeft" size={12} />{before || ''}</button>
+    <button type="button" class="edge" disabled={!before} aria-label={before ? `${before} more ${before === 1 ? 'slide' : 'slides'} before` : 'No slide before'}
+      title="Scroll to the slides before" onclick={() => page(-1)}><Icon name="chevronLeft" size={12} />{before || ''}</button>
   {/if}
   <div class="lane" role="presentation" bind:this={lane} onscroll={measure} {@attach wheel}>
   {#each steps as step, index (step.id)}
@@ -250,7 +251,7 @@
         <span class="tile-name">{name(step, index)}</span>
       </button>
       <button type="button" class="time" aria-label={`How long ${name(step, index)} holds`}
-        title={clip ? 'How long this step holds in the video, at least its clip. Press to set it' : 'How long this step holds in the video. Press to set it'}
+        title={clip ? 'How long this slide holds in the video, at least its clip. Press to set it' : 'How long this slide holds in the video. Press to set it'}
         onclick={(event) => open({ step, index, anchor: event.currentTarget }, true)}>{timecode(stepSeconds(step, elements))}</button>
       <button type="button" class="more" aria-label={`Set ${name(step, index)}`} title="Name, length, order, remove"
         onclick={(event) => open({ step, index, anchor: event.currentTarget })}><Icon name="more" size={14} stroke={2.6} /></button>
@@ -258,14 +259,14 @@
   {/each}
   </div>
   {#if overflowing}
-    <button type="button" class="edge" disabled={!after} aria-label={after ? `${after} more ${after === 1 ? 'step' : 'steps'} after` : 'No step after'}
-      title="Scroll to the steps after" onclick={() => page(1)}>{after || ''}<Icon name="chevronRight" size={12} /></button>
+    <button type="button" class="edge" disabled={!after} aria-label={after ? `${after} more ${after === 1 ? 'slide' : 'slides'} after` : 'No slide after'}
+      title="Scroll to the slides after" onclick={() => page(1)}>{after || ''}<Icon name="chevronRight" size={12} /></button>
   {/if}
   {/if}
-  <button type="button" class="add" aria-label="Add a step" title={current ? 'Add a step after this one' : 'Add a step to this day, played after it'} onclick={() => onadd?.()}>
+  <button type="button" class="add" aria-label="Add a slide" title={current ? 'Add a slide after this one' : 'Add a slide to this day, played after it'} onclick={() => onadd?.()}>
     <Icon name="plus" size={14} /></button>
   {#if compact}
-    <span class="tally" title="The step shown, of the day's steps">{shownIndex >= 0 ? `${shownIndex + 1} / ${steps.length}` : `${steps.length} steps`}</span>
+    <span class="tally" title="The slide shown, of the day's slides">{shownIndex >= 0 ? `${shownIndex + 1} / ${steps.length}` : `${steps.length} slides`}</span>
   {/if}
 </div>
 
@@ -293,7 +294,7 @@
         <Icon name="minus" size={14} /><span class="fm-grow">Take it out of the play</span></button>
     {:else if onskipday}
       {#if !daySkipped}<div class="fm-sep"></div>{/if}
-      <button type="button" class="fm-item" title={daySkipped ? 'The play and the exports go through it again' : 'The play and the exports skip it and its steps; it stays here to edit'}
+      <button type="button" class="fm-item" title={daySkipped ? 'The play and the exports go through it again' : 'The play and the exports skip it and its slides; it stays here to edit'}
         onclick={() => { menu = null; onskipday(!daySkipped); }}>
         <Icon name={daySkipped ? 'eye' : 'eyeOff'} size={14} /><span class="fm-grow">{daySkipped ? 'Show in the video' : 'Hide from the video'}</span></button>
     {/if}
@@ -301,19 +302,19 @@
   </FloatingMenu>
 {:else if menu}
   {@const least = menu?.step ? leastSeconds(menu.step, elements) : 0}
-  <FloatingMenu anchor={menu?.anchor} at={menu?.at} width={230} label="Step" role="dialog" onclose={() => (menu = null)}>
+  <FloatingMenu anchor={menu?.anchor} at={menu?.at} width={230} label="Slide" role="dialog" onclose={() => (menu = null)}>
     <div class="fields">
-      <label title="What the strip and the list call it">Name<input class="input" maxlength="80" placeholder={`Step ${menu?.index + 1}`} value={menu?.step.name ?? ''}
+      <label title="What the strip and the list call it">Name<input class="input" maxlength="80" placeholder={`Slide ${menu?.index + 1}`} value={menu?.step.name ?? ''}
         onchange={(event) => onchange?.(menu?.step.id, { name: event.currentTarget.value.trim() })} /></label>
-      <label title={least ? 'Seconds this step holds in the video, never less than its clip' : 'Seconds this step holds in the video'}>Seconds
+      <label title={least ? 'Seconds this slide holds in the video, never less than its clip' : 'Seconds this slide holds in the video'}>Seconds
         <input class="input" type="number" min={Math.max(LEAST_SECONDS, least)} max={MOST_SECONDS} step="0.1" bind:this={secondsField}
           value={menu?.step ? stepSeconds(menu.step, elements) : ''} onchange={(event) => setStepSeconds(menu?.step, event.currentTarget.value)} /></label>
       {#if least}<p class="fm-note">At least {timecode(least)}, its longest clip; longer holds the clip's last frame.</p>{/if}
       {#if transitions}
-        <label class="cut" title="This step comes in at once, without the plate's transition"><input type="checkbox" checked={menu?.step.transition === 'none'}
+        <label class="cut" title="This slide comes in at once, without the plate's transition"><input type="checkbox" checked={menu?.step.transition === 'none'}
           onchange={(event) => onchange?.(menu?.step.id, { transition: event.currentTarget.checked ? 'none' : '' })} /> Cut straight in, no transition</label>
         {#if menu?.step.transition !== 'none'}
-          <label title="Seconds to reach this step, the plate's transition when empty">Transition, seconds
+          <label title="Seconds to reach this slide, the plate's transition when empty">Transition, seconds
             <input class="input" type="number" min="0.2" max="3" step="0.1" placeholder={String(transitionSeconds)} value={menu?.step.transition_seconds ?? ''}
               onchange={(event) => onchange?.(menu?.step.id, { transition_seconds: transitionOf(event.currentTarget.value) })} /></label>
         {/if}
@@ -325,7 +326,7 @@
     <button type="button" class="fm-item" disabled={menu?.index === steps.length - 1} onclick={() => { const { step, index } = menu; menu = null; onmove?.(step.id, index + 2); }}>
       <Icon name="chevronRight" size={14} /><span class="fm-grow">Play it later</span></button>
     {#if onduplicate}
-      <button type="button" class="fm-item" title="Copies this step, marks and framing included, to play right after it"
+      <button type="button" class="fm-item" title="Copies this slide, marks and framing included, to play right after it"
         onclick={() => { const { step } = menu; menu = null; onduplicate(step.id); }}><Icon name="copy" size={14} /><span class="fm-grow">Duplicate</span></button>
     {/if}
     <div class="fm-sep"></div>

@@ -20,7 +20,7 @@
    * day can play several videos one after another, each beside its place.
    *
    * A day or a step after the first keeps the framing before it until its map bar's
-   * "Keep the previous framing" is unticked; then its maps are framed for it alone.
+   * "Map stays where it was" is unticked; then its maps are framed for it alone.
    * With the video's transitions on, the MP4 goes from one to the next by a fade, the
    * maps moving to their new framing, and what is new fading in or drawn.
    *
@@ -719,7 +719,7 @@
   function setHours(on) {
     if (playing) stop();
     const made = withHours(spec, on, playDays(spec, layerMoments));
-    if (made.full) { toast(`${momentLabel(made.full)} would hold more than ${MAX_STEPS} steps day by day`, 'warn', 6000); return; }
+    if (made.full) { toast(`${momentLabel(made.full)} would hold more than ${MAX_STEPS} slides day by day`, 'warn', 6000); return; }
     Object.assign(spec, made);
   }
 
@@ -761,7 +761,7 @@
     Object.assign(spec, { steps: made.steps, framing: made.framing, elements: made.elements, transitions: made.transitions });
     spec.time.step = made.step;
     selection = [];
-    toast(`${SEQUENCES[kind].label} added: each step is renamed, timed or removed from its ⋯`, 'ok', 5000);
+    toast(`${SEQUENCES[kind].label} added: each slide is renamed, timed or removed from its ⋯`, 'ok', 5000);
   }
   /** A copy of a step right after it, shown at once. */
   function duplicateStep(id) {
@@ -777,7 +777,7 @@
     selection = selection.filter((sid) => plate.spec.elements.some((element) => element.id === sid));
   }
   /** A step as the strip names it: its own name, else its place in the day. */
-  const stepName = (index, day = at) => stepsOf(spec, day)[index]?.name || `Step ${index + 1}`;
+  const stepName = (index, day = at) => stepsOf(spec, day)[index]?.name || `Slide ${index + 1}`;
   /** The days and steps the play goes through, from the plate's day when it has none followed over time. */
   const sequence = $derived(spec ? beats(spec, playable ? videoPlayed : [at]) : []);
   /** How long a played export runs over `days`, each beat held its own seconds, an MP4's transitions included. */
@@ -1219,7 +1219,7 @@
     if (!hit.media || !point || plate.template) return [];
     const at = point.map((value) => Math.round(value * 1e6) / 1e6);
     return hit.media.as === 'video'
-      ? [{ label: 'Add video', icon: 'video', title: 'Plays it on a step, pointing at this place', run: () => linked('video', map, hit.media.path, at) }]
+      ? [{ label: 'Add video', icon: 'video', title: 'Plays it on a slide, pointing at this place', run: () => linked('video', map, hit.media.path, at) }]
       : [{ label: 'Add linked picture', icon: 'image', title: 'Sets it on the page, pointing at this place', run: () => linked('image', map, hit.media.path, at) }];
   }
   /** A video or a picture added as Add makes it, showing `path` and pointing at `point` on `map`; a video says its source. */
@@ -1257,8 +1257,8 @@
     if (element.kind === 'video') return [];
     if (element.step) {
       return ['sep',
-        element.carry ? { label: 'Only on this step', icon: 'clock', title: 'Shown on its step alone', run: () => (element.carry = false) }
-          : { label: 'On this step and after', icon: 'clock', title: 'Shown on its step and the steps after it', run: () => (element.carry = true) },
+        element.carry ? { label: 'Only on this slide', icon: 'clock', title: 'Shown on its slide alone', run: () => (element.carry = false) }
+          : { label: 'On this slide and the next ones', icon: 'clock', title: 'Shown on its slide and the slides after it', run: () => (element.carry = true) },
         { label: 'Put it on the whole day', icon: 'calendar', run: () => Object.assign(element, { step: null, carry: false, ...bornOn(at, playable) }) }];
     }
     if (stepIndex >= 0 && element.kind !== 'credits' && !MAP_KINDS.includes(element.kind)) {
@@ -1314,7 +1314,7 @@
     const fresh = pasted(copied, mainMap(spec)?.id, new Set(spec.elements.map((item) => item.id)))
       .map(({ step, carry, ...item }) => (stepId || (ON_THE_GROUND.includes(item.kind) && playable) ? { ...item, ...birth() } : item))
       .filter((item) => item.kind !== 'video' || item.step);
-    if (!fresh.length) { toast(copied.some((item) => item.kind === 'video') ? 'A video goes on a step: show one, then paste' : 'Put a map on the page first', 'warn'); return; }
+    if (!fresh.length) { toast(copied.some((item) => item.kind === 'video') ? 'A video goes on a slide: show one, then paste' : 'Put a map on the page first', 'warn'); return; }
     if (mapCount(spec.elements) + mapCount(fresh) > MAX_MAPS) { toast(TOO_MANY_MAPS, 'warn', 6000); return; }
     spec.elements = mapsFirst([...spec.elements, ...fresh]);
     selection = fresh.map((item) => item.id);
@@ -1721,7 +1721,7 @@
                 const start = pictures.count('tweens');
                 // a map on the move is drawn again by its own engine at each frame of the way
                 const sitting = (id) => handles.get(id)?.sitting?.(scale / PX_PER_MM) ?? null;
-                if (plan.move) exportSays(`Drawing the move to ${momentLabel(beat.day) || 'the next step'}…`, index, list.length);
+                if (plan.move) exportSays(`Drawing the move to ${momentLabel(beat.day) || 'the next slide'}…`, index, list.length);
                 for await (const canvas of tweenFrames(spec, scale, before, drawn, plan, changed, { sitting })) {
                   check();
                   await pictures.add('tweens', await canvasBlob(canvas, 'image/jpeg', 0.88));
@@ -1946,7 +1946,7 @@
   // the plate as a map a reader moves and plays in the HTML page, read as it was saved
   const noteMap = mapOffer({
     caseId: () => plate?.caseId,
-    hint: 'Its layers, days and steps, played in the HTML page; a picture in the PDF',
+    hint: 'Its layers, days and slides, played in the HTML page; a picture in the PDF',
     prepare: async () => { await autosave.flush(); if (!plate?.name) throw new Error('The plate is not saved yet'); },
     request: () => ({ title: plate?.title ?? '', plate: plate?.name ?? '' }),
   });
@@ -2074,7 +2074,7 @@
           <!-- fixed columns: what the day holds never moves the days' track; a narrow bar gives the steps a line of their own -->
           <div class="timebar" class:days={moments.length} class:narrow={barWidth > 0 && barWidth < NARROW_BAR} bind:clientHeight={barHeight} bind:clientWidth={barWidth}>
             <div class="controls">
-              <button type="button" class="play" aria-label={playing ? 'Pause' : 'Play'} title={playing ? 'Pause' : moments.length ? 'Play the days and their steps' : 'Play the steps'}
+              <button type="button" class="play" aria-label={playing ? 'Pause' : 'Play'} title={playing ? 'Pause' : moments.length ? 'Play the days and their slides' : 'Play the slides'}
                 disabled={sequence.length < 2} onclick={play}><Icon name={playing ? 'pause' : 'play'} size={14} /></button>
               <button type="button" class="speed" title="How fast the plate plays" onclick={() => (speed = speed === 1 ? 2 : speed === 2 ? 0.5 : 1)}>{speed}×</button>
               <button type="button" class="speed" class:on={loop} aria-pressed={loop} title="Start again from the beginning" onclick={() => (loop = !loop)}>Loop</button>

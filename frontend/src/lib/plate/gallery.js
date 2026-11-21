@@ -16,7 +16,7 @@ import { signatureWidth } from '../brandMark.js';
 /** The papers a ready plate is offered on, `[id, label, page]`, the first its own. */
 export const FORMATS = [
   ['report', 'Report, A4', { paper: 'a4', orientation: 'landscape' }],
-  ['slide', 'Post or slide, 16:9', { paper: 'screen', orientation: 'landscape' }],
+  ['slide', 'Screen or post, 16:9', { paper: 'screen', orientation: 'landscape' }],
   ['feed', 'Feed post, 4:5', { paper: 'social', orientation: 'portrait' }],
   ['square', 'Square', { paper: 'square', orientation: 'portrait' }],
   ['story', 'Story, 9:16', { paper: 'screen', orientation: 'portrait' }],

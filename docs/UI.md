@@ -6654,7 +6654,7 @@ a print or a post. **New plate** opens one screen, each choice answered until
 changed, so **Create plate** works at once: the layout on the left (the house layout,
 one of the ready plates or one of the analyst's templates, each drawn as its page),
 and on the right where the map looks (where the Map is looking, or round the layers
-picked), which of the case's layers it draws, the paper (a report, a slide or post, a
+picked), which of the case's layers it draws, the paper (a report, a screen or post, a
 feed post, a square, a story or a print) and the look, its own or another. **Map plate…** in the
 Map's capture menu opens the house layout at once. A new plate looks where the Map is
 looking, with the layers switched on there (the analyst's own layers when none is;
@@ -6711,7 +6711,7 @@ key figure, each laid out together in the page's colours), **Signing** (the anal
 the picture set in Settings → Publishing beside `{handle}` and the day, rewritten at
 will; and **Made with Azimut**, the app's mark and name set tight beside the words,
 without the air of the app's corner), **Pictures and shapes** (a picture, the signature picture as a logo,
-a box, an ellipse, a rule) and **Playing** (a step, a video, and ready sequences:
+a box, an ellipse, a rule) and **Slides** (a slide, a video, and ready sequences:
 **Reveal in four beats**, **Zoom in**, a **Title card** and an **End card**). A tool placed by pressing the map is put down by a second press
 on it, or Esc.
 
@@ -6738,9 +6738,9 @@ removes, Ctrl+C and Ctrl+V copy to this plate or another, Ctrl+D duplicates and
 Ctrl+Z undoes, after a press on the page: a key pressed on a button of the
 inspector never deletes. Escape lets the picked elements go. A right-click on an
 element, on the page or in the list, picks it and opens what can be done to it:
-duplicate, copy and paste, forward and back, hide, lock, the steps it shows on, and
+duplicate, copy and paste, forward and back, hide, lock, the slides it shows on, and
 remove; on several picked, group them too; on the paper, Add, paste, undo and redo. A
-right-click on a step or on the day in the strip opens its ⋯ menu where the pointer is.
+right-click on a slide or on the day in the strip opens its ⋯ menu where the pointer is.
 A **Detail**'s square
 on the map it is drawn from is picked by a press and dragged there to move what the
 detail shows; a locked detail only picks. Maps stay under the
@@ -6757,7 +6757,7 @@ ends) is dragged there by its handles, or as a whole by its own drawing. A label
 map keeps its place by the point it names when the map is moved or zoomed, and an
 arrow, a line, a distance or a zone goes with the ground. A **Map text** is words
 without a leader standing over their point: moved by the hand, it takes its point
-along, and on a day or a step framed otherwise it stays over it. A **Symbol** is one of
+along, and on a day or a slide framed otherwise it stays over it. A **Symbol** is one of
 the markers the case's layers draw (a tank, a drone, a checkpoint…), stamped by a press
 on the map, the tool staying in hand for the next; it stands over its point the same
 way, picked from the layers' palette with its colour, sized, turned, and shown damaged
@@ -6818,7 +6818,7 @@ hidden and brings them back.
 
 **Country focus**, on the map, lights the country pressed and draws the rest of the
 world back, darkened or faded toward the paper, at the strength set; another country
-is picked in its inspector. As every annotation it belongs to the day or step it is
+is picked in its inspector. As every annotation it belongs to the day or slide it is
 made on, so a video can come in wide and then light a country, the focus fading in
 with the transition. It is drawn on the page from the same Natural Earth countries as
 the globe inset, under a soft edge, as the outline is coarse at that scale; the
@@ -6826,7 +6826,7 @@ disputed areas touching the country stand half lit, dotted round, and a press in
 lights nothing. A map in 3D, tilted or seen as the whole globe, is read point by point
 through its camera, so the country is lit in perspective and the sky stays in the
 shade. A plate saved while the focus was the map's own has it moved onto the map as
-one of these, on every day and step.
+one of these, on every day and slide.
 
 There is one kind of map: its inspector's **Show the map in 3D** box stands it on its
 heights, tilted (from the bar, or to the degree in the inspector), the heights drawn as they are or up to three times as tall, said under it.
@@ -6859,7 +6859,7 @@ standing outside them is put on the day just set. The legend, `{count}`, the lab
 the tables leave out the same; the layer itself keeps them.
 A right-click on a marker that shows a file of the case (one added from a file, or from
 a proof resting on footage) also offers that file, and only there: **Add video** plays
-it on a step, **Add linked picture** sets a still on the page, each pointing at the
+it on a slide, **Add linked picture** sets a still on the page, each pointing at the
 marker and the video saying its source.
 A plate draws every point of a layer at every zoom, where the Map lets the ones that
 overlap drop out far out: a page leaving the app must not lose one. And
@@ -6932,72 +6932,72 @@ PNG; the paper's **Grain**, fine specks over the whole page and its maps as prin
 paper shows them, the same on the screen and in every export. A colour is picked from the page's own, the case's named colours and the last
 ones used, or the browser's picker.
 
-A plate that draws a layer followed over time has a day of its own, on a bar under
+A plate that draws a dated layer has a day of its own, on a bar under
 the page that steps through its changes, and plays them at three paces, once or in a
 loop, without writing a day into the plate until it stops. Its day is always a day of
 the calendar, today on its layers' clock for a new plate, never a "now" that would
 slide to the next day, so a plate reopens on the day it was left on; one saved on
 "now" before this moves to the day it was last saved, with what stood on it. The days
-played are its layers' changes, every day that holds steps, and every day added to
+played are its layers' changes, every day that holds slides, and every day added to
 the play: a day between two changes says so on its tile, **Add to the play**, and
-its ⋯ takes it out again while it holds no steps. Any other played day is
+its ⋯ takes it out again while it holds no slides. Any other played day is
 **hidden from the video** from its ⋯: it stays on the bar to edit, dashed with its
-steps and faint among the notches, and the play and every export skip it. Events stay on its
+slides and faint among the notches, and the play and every export skip it. Events stay on its
 maps, faded, unless the plate's past menu says how many days. What is added on the map
 (a label, an arrow, a zone, rings, a cone, a distance, a shape) **belongs to the day
 it is made on**: the next day starts without it. The inspector shows it from a first
 day to a last, each picked on a calendar of any day, or left open to the start or
 to the end; both open is every day, and an end moved past the other pulls it along.
-**Other days**, under the element list, lists another day's annotations, stretches
+**Other days' annotations**, under the element list, lists another day's annotations, stretches
 one to reach this day or carries it from this day on, and draws them faintly when
 asked. So a video shows each day's annotations, and only those.
 
 **The days sit on the bar as a row of notches**, one per day played, evenly apart
-whatever the calendar leaves between them, with dots under a notch for its steps. The
+whatever the calendar leaves between them, with dots under a notch for its slides. The
 track keeps its width whatever the day holds, and a drag lands only on a day the plate
 plays. Past what it can show apart, it holds a window of days around the day shown,
 moved a window at a time, and a thin line under it spans every day: a press or a drag
 there goes anywhere, and **Page Up** and **Page Down** jump a window. On layers dated to the minute, the plate plays **day by day**, each day shown as
 it ended, until **Hours** beside the date plays each moment on its own: a day's
 moments sit together, the hour is picked beside the date, and past what the track can
-show apart it keeps a notch a day. Back to days, each hour's steps follow their day's
+show apart it keeps a notch a day. Back to days, each hour's slides follow their day's
 own in order, and they return to their hours with **Hours**.
 
-**A day can hold steps**, played after it one by one. **Step**, in Add or at the end
+**A day can hold slides**, played after it one by one. **Slide**, in Add or at the end
 of the bar under the page, adds the first; from then on the bar shows the day itself
-and each step, beside the plate's days, and its **+** adds a step after the one shown.
-The day's tile and **+** stay put while the steps scroll between them, under the wheel
+and each slide, beside the plate's days, and its **+** adds a slide after the one shown.
+The day's tile and **+** stay put while the slides scroll between them, under the wheel
 too; past what fits, the tiles shrink to their number and time, an arrow each side
 says how many are out of sight, and a count says which one is shown. On a narrow
-window the steps take a line of their own.
+window the slides take a line of their own.
 **Every tile says how long it holds in the video, and a press on that time sets
 it**: the day its own seconds or, left alone, every day's (one second until set in
-the export), a step its own, never shorter than its longest clip, the clip staying on
-its last frame when the step holds longer. Play holds each one as the video does. A plate with no layer followed over time takes steps too,
+the export), a slide its own, never shorter than its longest clip, the clip staying on
+its last frame when the slide holds longer. Play holds each one as the video does. A plate with no dated layer takes slides too,
 on its one day, and has no bar under the page until it does.
-While a step is shown, a pill over the page says so and **what is added belongs to
-that step**, over what the day shows: the element list holds the day's elements and
-that step's, the step's marked. The inspector keeps a step's element on **This
-step** or **And after** (the steps after it, on the same day), or puts it back on
-the whole day; an element of the day goes **Only on** the step shown by a press. A
-step is dragged to another place in the strip, and its ⋯, always shown, names it, sets how long it
+While a slide is shown, a pill over the page says so and **what is added belongs to
+that slide**, over what the day shows: the element list holds the day's elements and
+that slide's, the slide's marked. The inspector keeps a slide's element on **This
+slide only** or **And the next ones** (the slides after it, on the same day), or puts it back on
+the whole day; an element of the day goes **Only on** the slide shown by a press. A
+slide is dragged to another place in the strip, and its ⋯, always shown, names it, sets how long it
 holds, moves it, duplicates it (what stands on it and its framing copied, the copy
 played right after it), or removes it with what stands on it. A ready sequence from
-Add puts its steps after the one shown and turns the video's transitions on:
+Add puts its slides after the one shown and turns the video's transitions on:
 **Reveal in four beats** (the region, the place, closer, the whole picture) and
 **Zoom in** frame the main map from where it looks, and a **Title card** or an **End
 card** covers the page with its paper and its words, sized to the page.
 
-**A day or a step frames a map its own way.** Past the first, each one shows the map
-as the one before it does, the map bar's **Keep the previous framing** ticked and the
-map holding still. Unticked, the map is framed there on its own, and the steps after it
+**A day or a slide frames a map its own way.** Past the first, each one shows the map
+as the one before it does, the map bar's **Map stays where it was** ticked and the
+map holding still. Unticked, the map is framed there on its own, and the slides after it
 follow until one frames it too. A label keeps its place on the page; on a day framed
 otherwise, its leader reaches to its point. Framing a map by the hand takes along the
-labels, pictures and videos pointing at it only when no other day or step showing them
+labels, pictures and videos pointing at it only when no other day or slide showing them
 frames it differently.
 
-**Video** puts a video on a step: on the one shown while it holds none, else on a new
-step after it. **Choose a video** lists the footage placed on the map first, set
+**Video** puts a video on a slide: on the one shown while it holds none, else on a new
+slide after it. **Choose a video** lists the footage placed on the map first, set
 pointing at its place, then every video and GIF of the case. A GIF plays round and
 round for the time set, on the page as in the MP4, its first picture standing for it
 in a still. The inspector plays a video, takes
@@ -7005,9 +7005,9 @@ the clip's start and end from the player (**Start here**, **End here**) or typed
 minutes and seconds, and plays the clip alone; a new clip takes the first ten seconds.
 **Sound** keeps the video's own sound, at a volume, and is off until asked. **Source**
 writes a line over the bottom of the video, read from the file's record (who posted
-it, where, when) and rewritten at will. The step holds at least as long as its longest clip.
+it, where, when) and rewritten at will. The slide holds at least as long as its longest clip.
 On the page the video holds on the clip's first frame, under the writing, and runs
-when the plate plays that step. Play goes through each day, then its steps, the
+when the plate plays that slide. Play goes through each day, then its slides, the
 clips running in their boxes. A picture's or a video's leader to its point is drawn
 while the map shows the point, and goes once the map is turned or framed away from it
 or the point falls past a 3D map's horizon.
@@ -7019,22 +7019,22 @@ copies the page to the clipboard, or writes a PDF of the paper size; for a playe
 plate, its days as an MP4, a GIF or an evolution sheet, the legend listing what any
 of them draws so it stays still. A video is 1280 or 1920 pixels along its long side,
 in the page's shape and both sides even (an upright story is 1080 × 1920). A plate
-with steps plays each day and then its steps, and the dialog says how long the video runs: in an MP4 each step's clips run in their
+with slides plays each day and then its slides, and the dialog says how long the video runs: in an MP4 each slide's clips run in their
 boxes, with their sound when it is kept, the frame and the source line over them; a
 GIF shows a clip by its first frame, and the evolution sheet keeps to the days.
 With **Video transitions** on (the page's inspector, once the plate plays), the MP4
-goes from one day or step to the next in the time set: the page fades into the next, a
+goes from one day or slide to the next in the time set: the page fades into the next, a
 map framed otherwise flies there, rising over a long way, drawn again at each frame so
 its marks keep their size, blurred as it goes fastest or sharp, its inset following
 and what is written over it placed through its camera as it leans,
 and what is new fades in or is drawn along its lines, or comes at once. The frames play
-at the video's own 30 a second. A step's ⋯ can cut straight into it, or give the
+at the video's own 30 a second. A slide's ⋯ can cut straight into it, or give the
 transition into it a time of its own (0.2 to 3 seconds). Play goes through the
 transitions as the video will, for as long: the map flies, what leaves fades, what is
-new fades in or is drawn, then the day or step holds its own seconds, and the dialog
+new fades in or is drawn, then the day or slide holds its own seconds, and the dialog
 counts each transition's own time in what the video runs. Everything goes into the folder saved for views.
 **To Post**, beside Export for a PNG, a sheet, a GIF or an MP4 (never a PDF), makes the
-same file and files it in the case instead, naming its plate, the day and step a page
+same file and files it in the case instead, naming its plate, the day and slide a page
 shows, and the credits on its face (`POST /map-plates/export` with `into=case`); the same
 file filed from the plate before is cited again. Post then opens on a Map plate post
 carrying it, told the plate's title, the day shown or the first and last days played
@@ -7753,7 +7753,7 @@ says *This folder was changed on GitHub since you published it: publishing repla
 blocks, a check that fails just publishes, and typing another short name starts over.
 
 **Maps.** `/` › *Interactive map* asks what a map shows: some of the case's layers, or one
-of its Map plates (its layers as it draws them, its days, its steps and how each frames the
+of its Map plates (its layers as it draws them, its days, its slides and how each frames the
 map), and the proofs of a period over either, all of them or from one day to another. My
 layers puts a layer in the note on the side from its row, and a Map plate offers *As an
 interactive map* beside its page, its sheet and its slides. Each lands as a put does, Undo

@@ -455,14 +455,14 @@
       {@const moves = transitionsOf(spec)}
       <PlateSection title="Video transitions" summary={moves.on ? `${moves.seconds.toFixed(1)} s` : 'Off'}>
       <label class="check"><input type="checkbox" checked={moves.on} onchange={(event) => (spec.transitions = { ...moves, on: event.currentTarget.checked })} />
-        Between the days and the steps</label>
+        Between the days and the slides</label>
       {#if moves.on}
         <div class="rows">
           <span class="key">Length</span>
           <span class="pair"><input type="range" aria-label="Transition length" min="0.2" max="3" step="0.1" value={moves.seconds}
             oninput={(event) => (spec.transitions = { ...moves, seconds: Number(event.currentTarget.value) })} /><span class="quiet">{moves.seconds.toFixed(1)} s</span></span>
           <span class="key">What is new</span>
-          <div class="segments" role="group" aria-label="What is new on a day or a step">
+          <div class="segments" role="group" aria-label="What is new on a day or a slide">
             {#each [['fade', 'Fades in'], ['draw', 'Is drawn'], ['none', 'At once']] as [value, label] (value)}
               <button type="button" aria-pressed={moves.appear === value} onclick={() => (spec.transitions = { ...moves, appear: value })}>{label}</button>
             {/each}
@@ -475,7 +475,7 @@
             <label class="sub"><input type="checkbox" checked={moves.blur} onchange={(event) => (spec.transitions = { ...moves, blur: event.currentTarget.checked })} /> Blurred as it moves</label>
           {/if}
         </div>
-        <p class="note">In the MP4. A step can still cut straight in, from its ⋯.</p>
+        <p class="note">In the MP4. A slide can still cut straight in, from its ⋯.</p>
       {/if}
       </PlateSection>
     {/if}
@@ -536,18 +536,18 @@
       <div class="days">
         <span class="key">Shown</span>
         {#if element.kind === 'video'}
-          <span class="quiet">On {step?.id === element.step ? step.name : 'its step'}, which runs as long as the clip</span>
+          <span class="quiet">On {step?.id === element.step ? step.name : 'its slide'}, which runs as long as the clip</span>
         {:else}
-          <div class="segments" role="group" aria-label="Steps it is shown on">
-            <button type="button" aria-pressed={!element.carry} onclick={() => (element.carry = false)}>This step</button>
-            <button type="button" aria-pressed={!!element.carry} onclick={() => (element.carry = true)}>And after</button>
+          <div class="segments" role="group" aria-label="Slides it is shown on">
+            <button type="button" aria-pressed={!element.carry} onclick={() => (element.carry = false)}>This slide only</button>
+            <button type="button" aria-pressed={!!element.carry} onclick={() => (element.carry = true)}>And the next ones</button>
           </div>
-          <p class="note wide">{#if !shownToday}Not on the step shown. {/if}<button type="button" class="text-act"
+          <p class="note wide">{#if !shownToday}Not on the slide shown. {/if}<button type="button" class="text-act"
             onclick={() => Object.assign(element, { step: null, carry: false, ...bornOn(at, playable) })}>Put it on the whole day</button></p>
         {/if}
       </div>
     {:else if step && element.kind !== 'credits' && !['map', 'inset'].includes(element.kind)}
-      <p class="note">On the whole day, under its steps. <button type="button" class="text-act"
+      <p class="note">On the whole day, under its slides. <button type="button" class="text-act"
         onclick={() => Object.assign(element, { step: step.id, carry: false, onward: null, until: null })}>Only on {step.name}</button></p>
     {/if}
 
@@ -587,8 +587,8 @@
       {@const held = !framed.own && !framed.first}
       {#if !framed.first}
         <label class="check keep"><input type="checkbox" checked={held} onchange={(event) => onkeep?.(element, event.currentTarget.checked)} />
-          Keep the previous framing</label>
-        <p class="note">{held ? 'This day or step shows the map as the one before it does.' : 'Framed here on its own; the steps after it follow, unless they frame it too.'}</p>
+          Map stays where it was</label>
+        <p class="note">{held ? 'This day or slide shows the map as the one before it does.' : 'Framed here on its own; the slides after it follow, unless they frame it too.'}</p>
       {/if}
       <button type="button" class="btn btn-sm frame" class:on={framing === element.id} disabled={held}
         title={framing === element.id ? 'Stop framing the map' : 'Pan, zoom and turn the map by the hand'} onclick={() => onframe(element)}>
@@ -1214,7 +1214,7 @@
           <input aria-label="GIF runs" value={timecode(range[1] - range[0])}
             onchange={(event) => { const value = readTimecode(event.currentTarget.value); if (value !== null && value > 0) element.clip = clipRange({ clip: [0, value] }); else event.currentTarget.value = timecode(range[1] - range[0]); }} />
         </div>
-        <p class="note">A GIF plays round and round for as long as it runs, and holds its step that long.</p>
+        <p class="note">A GIF plays round and round for as long as it runs, and holds its slide that long.</p>
       {:else if element.src}
         <p class="note file" title={element.src}>{fileName(element.src)}</p>
         <!-- svelte-ignore a11y_media_has_caption -->
@@ -1266,7 +1266,7 @@
           {/if}
         </span>
       </div>
-      <p class="note">The step runs as long as the clip.</p>
+      <p class="note">The slide runs as long as the clip.</p>
     {:else if element.kind === 'shape'}
       <div class="rows">
         <span class="key">Shape</span>

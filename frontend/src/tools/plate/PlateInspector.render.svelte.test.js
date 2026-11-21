@@ -78,7 +78,7 @@ describe('what belongs to a step', () => {
 
   it('is shown on its step, or carried to the steps after it, or put back on the whole day', () => {
     const note = onStep({ kind: 'text', step: 's1' });
-    press(act('And after'));
+    press(act('And the next ones'));
     expect(note.carry).toBe(true);
     press([...document.body.querySelectorAll('.days button')].find((button) => button.textContent === 'Put it on the whole day'));
     expect([note.step, note.onward, note.until]).toEqual([null, '2026-10-05', '2026-10-05']);

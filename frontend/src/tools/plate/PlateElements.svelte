@@ -161,7 +161,7 @@
             onclick={(event) => pick(event, element)} ondblclick={() => { naming = element.id; nameField = element.name || describe(element); }}
             title={MAP_KINDS.includes(element.kind) ? 'Maps stay under the page\'s writing. Double-click to name it.' : 'Double-click to name it'}>
             <Icon name={ICONS[element.kind] ?? 'square'} size={12} /><span class="row-name">{describe(element)}</span>
-            {#if element.step}<span class="tag step" title={element.carry ? 'On this step and the steps after it' : 'On this step only'}>Step</span>{/if}
+            {#if element.step}<span class="tag step" title={element.carry ? 'On this slide and the next ones' : 'On this slide only'}>Slide</span>{/if}
             {#if element.group}<span class="tag" title="Picked and moved with its group">G</span>{/if}
           </button>
           <button type="button" class="mini" class:on={element.hidden} aria-label={element.hidden ? `Show ${describe(element)}` : `Hide ${describe(element)}`}
@@ -176,7 +176,7 @@
   </ul>
 
   {#if playable}
-    <h4>Other days</h4>
+    <h4>Other days' annotations</h4>
     <label class="ghosts"><input type="checkbox" bind:checked={ghosts} /> Show them faintly</label>
     {#each otherDays as element (element.id)}
       <div class="other">

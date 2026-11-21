@@ -115,9 +115,9 @@
   <div class="formats" role="radiogroup" aria-label="Format">
     {#each FORMATS as [id, label, detail] (id)}
       {@const off = !offered(id)}
-      <label class:off class:on={format === id} title={off ? 'Needs a layer followed over time on the plate' : detail}>
+      <label class:off class:on={format === id} title={off ? (id === 'sheet' ? 'Needs a dated layer on the plate' : 'Needs a dated layer, or slides') : detail}>
         <input type="radio" bind:group={format} value={id} disabled={off} />
-        <strong>{label}</strong><span>{off ? (id === 'sheet' ? 'Needs a layer followed over time on the plate.' : 'Needs a layer followed over time, or steps.') : detail}</span>
+        <strong>{label}</strong><span>{off ? (id === 'sheet' ? 'Needs a dated layer on the plate.' : 'Needs a dated layer, or slides. + Slide under the page adds one.') : detail}</span>
       </label>
     {/each}
   </div>
@@ -147,7 +147,7 @@
   {:else}
     {#if moments.length >= 2}
       <div class="row">
-        <span title="Each day the plate's layers change or a step stands on">Days</span>
+        <span title="Each day the plate's layers change or a slide stands on">Days</span>
         <span class="days">
           <select aria-label="First day" title="The first day played" value={first} onchange={(event) => (first = event.currentTarget.value)}>
             {#each moments as moment (moment)}<option value={moment}>{momentLabel(moment)}</option>{/each}</select>
@@ -156,9 +156,9 @@
             {#each moments as moment (moment)}<option value={moment}>{momentLabel(moment)}</option>{/each}</select>
         </span>
       </div>
-      <p class="note">{days.length} {days.length === 1 ? 'day' : 'days'}, one picture each{days.length > 120 ? '; at most 120 go in' : ''}{stepped && format !== 'sheet' ? ', each followed by its steps' : ''}. The legend lists what any of them draws, so it stays still.</p>
+      <p class="note">{days.length} {days.length === 1 ? 'day' : 'days'}, one picture each{days.length > 120 ? '; at most 120 go in' : ''}{stepped && format !== 'sheet' ? ', each followed by its slides' : ''}. The legend lists what any of them draws, so it stays still.</p>
     {:else}
-      <p class="note">The page, then each of its steps.</p>
+      <p class="note">The page, then each of its slides.</p>
     {/if}
     {#if format !== 'sheet'}
       <div class="row">

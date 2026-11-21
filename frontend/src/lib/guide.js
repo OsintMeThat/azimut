@@ -775,7 +775,7 @@ export const PAGES = {
     ],
     tips: [
       { title: 'A new plate starts from the Map', text: 'A ready plate opens at once; New plate first picks its layout, layers, paper and look.' },
-      { title: 'Days and steps', text: 'A tracked layer is drawn on the plate’s day, and the video plays through its days.' },
+      { title: 'Days and slides', text: 'A dated layer is drawn on the plate’s day; the video plays its days, each followed by its slides.' },
       { title: 'Templates', text: 'Keep as template saves the layout without its data, to start other plates from.' },
       { title: 'Texts that fill themselves', text: '{date}, {case}, {title}, {scale} and {imagery} are written in when the page is drawn.' },
       { title: 'Focus', text: 'F sets one element apart, to adjust it without the rest of the page.' },

@@ -15,7 +15,7 @@
   let query = $state('');
   let field = $state(null);
   let grid = $state(null);
-  const groups = $derived(findAdds(query).filter((group) => !template || group.title !== 'Playing'));
+  const groups = $derived(findAdds(query).filter((group) => !template || !group.plays));
   const first = $derived(groups[0]?.items[0]?.[0] ?? null);
 
   $effect(() => { field?.focus(); });

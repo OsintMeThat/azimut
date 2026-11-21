@@ -680,7 +680,7 @@ export const STEP_SECONDS = 3;
 /** At most this many steps on one day. */
 export const MAX_STEPS = 30;
 /** The words that say so, wherever a step would be one too many. */
-export const TOO_MANY_STEPS = `A day holds ${MAX_STEPS} steps at most`;
+export const TOO_MANY_STEPS = `A day holds ${MAX_STEPS} slides at most`;
 
 /** The steps of the plate's day `at`, in order. */
 export const stepsOf = (spec, at) => spec?.steps?.[dayOf(at)] ?? [];

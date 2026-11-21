@@ -403,7 +403,7 @@
   let held = $state('');
   let heldTimer = null;
   function sayHeld() {
-    held = 'This map keeps the framing before it here. Untick “Keep the previous framing” to move it.';
+    held = 'This map keeps the framing before it here. Untick “Map stays where it was” to move it.';
     clearTimeout(heldTimer);
     heldTimer = setTimeout(() => { held = ''; }, 3200);
   }
