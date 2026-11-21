@@ -475,6 +475,37 @@ def sheet_media(case_id: str, sheet_id: str, body: SheetMediaIn) -> dict[str, An
     return {"media": found}
 
 
+class SheetPicturesIn(BaseModel):
+    """Entities a `picture` cell is about to link, by id or by the path of their file."""
+
+    ids: list[str] = Field(default_factory=list, max_length=MAX_POINTS)
+    paths: list[str] = Field(default_factory=list, max_length=MAX_POINTS)
+
+
+@router.post("/{case_id}/sheets/{sheet_id}/pictures")
+def sheet_pictures(case_id: str, sheet_id: str, body: SheetPicturesIn) -> dict[str, Any]:
+    """What each of these is as a picture of the case: its label, image or video, and the
+    file a cell draws it from (`engine/sheets.picture_info`).
+
+    What the grid asks when a cell starts linking a picture, from the `@` picker or from a
+    file of the Media library dropped on it, so the thumbnail shows before the next read.
+    A path is matched on the media index, which is the one place that says which entity
+    a file is. Ids that are no picture of the case are left out.
+    """
+    case = get_case(case_id)
+    _sheet_or_404(case, sheet_id)
+    by_path: dict[str, str] = {}
+    paths = [path for path in dict.fromkeys(text.strip() for text in body.paths) if path]
+    if paths:
+        try:
+            items = case.media_items_by_paths(paths[:500])
+        except CaseError as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
+        by_path = {str(item["path"]): str(item["entity_id"]) for item in items if item.get("entity_id")}
+    ids = [*body.ids, *by_path.values()]
+    return {"pictures": sheet_engine.picture_info(case, ids), "paths": by_path}
+
+
 class SheetLinksIn(BaseModel):
     """Addresses out of one column, to be asked whether they still answer."""
 
