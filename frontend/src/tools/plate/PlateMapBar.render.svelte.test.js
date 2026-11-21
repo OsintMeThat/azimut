@@ -17,6 +17,24 @@ const button = (label) => document.body.querySelector(`[aria-label="${label}"]`)
 const item = (label) => [...document.body.querySelectorAll('.fm-item')].find((node) => node.textContent.trim() === label);
 
 describe('a plate map\'s own bar', () => {
+  it('says how many of the case\'s layers the map draws, and opens them on a press', () => {
+    let asked = 0;
+    show({ kind: 'map', view: { lat: 0, lon: 0, zoom: 5, bearing: 0 }, basemap: 'plain', overlays: [], layers: [{ name: 'front' }, { name: 'strikes' }] },
+      { onlayers: () => { asked += 1; } });
+    expect(button('Layers').textContent.trim()).toBe('2 layers');
+    button('Layers').click();
+    expect(asked).toBe(1);
+  });
+
+  it('says a map that draws none of the case\'s layers, and has no such button for an inset or with nowhere to show them', () => {
+    show({ kind: 'map', view: { lat: 0, lon: 0, zoom: 5, bearing: 0 }, basemap: 'plain', overlays: [], layers: [] }, { onlayers: () => {} });
+    expect(button('Layers').textContent.trim()).toBe('No layer');
+    expect(button('Layers').classList.contains('none')).toBe(true);
+    unmount(held); held = null; document.body.innerHTML = '';
+    show({ kind: 'map', view: { lat: 0, lon: 0, zoom: 5, bearing: 0 }, basemap: 'plain', overlays: [], layers: [] });
+    expect(button('Layers')).toBeNull();
+  });
+
   it('turns the map a step either way, and a press on the compass puts north up', () => {
     const element = show({ kind: 'map', view: { lat: 0, lon: 0, zoom: 5, bearing: 10 }, basemap: 'plain', overlays: [] });
     button('Turn the map left').click();

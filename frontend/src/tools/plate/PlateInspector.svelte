@@ -35,6 +35,7 @@
   import GroundSwatch from './GroundSwatch.svelte';
   import { TEXT_STYLES, styled } from '../../lib/plate/design.js';
   import { drawnOn } from '../../lib/plate/toLayer.js';
+  import { withLayer } from '../../lib/plate/source.js';
   import { ROLE_LIST, withRole } from '../../lib/plate/roles.js';
   import { spanTo, withHidden } from '../../lib/plate/kept.js';
   import { countryNames } from '../../lib/plate/spotlight.js';
@@ -210,10 +211,7 @@
     element.overlays = list.includes(id) ? list.filter((item) => item !== id) : [...list, id];
   }
   function toggleLayer(row) {
-    const list = element.layers ?? [];
-    element.layers = list.some((entry) => entry.name === row.name)
-      ? list.filter((entry) => entry.name !== row.name)
-      : [...list, { name: row.name, hidden: [], stroke: 1, icons: 1 }];
+    element.layers = withLayer(element, row.name);
   }
   function moveLayer(entry, by) {
     const list = [...element.layers];

@@ -6715,6 +6715,18 @@ a box, an ellipse, a rule) and **Slides** (a slide, a video, and ready sequences
 **Reveal in four beats**, **Zoom in**, a **Title card** and an **End card**). A tool placed by pressing the map is put down by a second press
 on it, or Esc.
 
+**Layers**, the list's second tab, says where the maps get what they draw, since a plate
+keeps no data of its own: each map is drawn on a ground and draws some of the case's
+layers, as the Map keeps them, so an edit made in the Map shows on every plate. Map by
+map, it names the ground with the day its picture was taken (a Wayback release, a
+Sentinel-2 pass, a cloudless year; imagery stitched from several days says so), then the
+case's layers, those the map draws first and ticked. A tick draws a layer or takes it
+off; a layer followed over time is marked **dated**, since the plate draws it as it stood
+on its day. **Open in the Map** edits a layer the analyst draws where the map looks,
+Back coming back; the map's gear opens its settings in the inspector, where the rest of a
+layer's look is set; **New layer here** and **Make a layer of the N drawn here** sit under
+each map. The list stays on the tab it was left on.
+
 The list of elements on the left and the inspector on the right are widened by
 dragging their edge, a double click putting the width back, and put away from the
 header; both stay as they were left. The inspector's sections fold by their title,
@@ -6777,7 +6789,9 @@ ground round it. A picture can point at the ground, and the picture picker offer
 the proofs and footage the main map's features carry, set pointing at their place.
 
 A map picked on the page carries its own bar: **Frame**, a half step of zoom
-either way, a step to either side and a compass to turn it, and **Ground**. The
+either way, a step to either side and a compass to turn it, **Ground**, and how many
+of the case's layers it draws (**No layer**, in the accent, when it draws none), which
+opens the Layers tab. The
 grounds are drawn small as they look, in the bar's menu and in the inspector's
 **Ground** gallery. The plain ones are drawn from OpenStreetMap's vector tiles in a
 style each: **Plain**, **Light grey**, **Newsroom** (warm paper, its relief shaded by

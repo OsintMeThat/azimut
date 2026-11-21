@@ -1,7 +1,7 @@
 /**
  * How the plate editor is laid out round its page, kept between visits: the width
- * of the element list and of the inspector, whether each is shown, and the
- * inspector's folded sections. Focus is not kept: it is a moment, not a setting.
+ * of the element list and of the inspector, whether each is shown, the list's tab
+ * (what the page holds, or its maps' layers), and the inspector's folded sections. Focus is not kept: it is a moment, not a setting.
  */
 import { panelWidth } from '../panelWidth.js';
 
@@ -16,7 +16,7 @@ export function readLayout(raw) {
   try { value = typeof raw === 'string' ? JSON.parse(raw) : raw; } catch { value = null; }
   const folded = Array.isArray(value?.folded)
     ? [...new Set(value.folded.filter((title) => typeof title === 'string' && title && title.length <= 60))].slice(0, 40) : [];
-  return { list: value?.list !== false, inspector: value?.inspector !== false, folded };
+  return { list: value?.list !== false, inspector: value?.inspector !== false, folded, tab: value?.tab === 'layers' ? 'layers' : 'page' };
 }
 
 function stored() {
@@ -29,7 +29,7 @@ export const layout = $state({ ...stored(), listW: listWidth.clampWidth(listWidt
 
 export function saveLayout() {
   try {
-    localStorage.setItem(KEY, JSON.stringify({ list: layout.list, inspector: layout.inspector, folded: layout.folded }));
+    localStorage.setItem(KEY, JSON.stringify({ list: layout.list, inspector: layout.inspector, folded: layout.folded, tab: layout.tab }));
   } catch { /* a browser that keeps nothing still folds; it forgets on reload */ }
 }
 

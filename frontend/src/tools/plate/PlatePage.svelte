@@ -69,6 +69,8 @@
     onnamelabel = null,
     /** `(id, { x, y })`: a right-click on an element, or on the paper with `id` null. */
     oncontext = null,
+    /** `(map)`: the case's layers a map draws, shown in the list's Layers tab. */
+    onlayers = null,
     /** `[id, label]` of the grounds a plate's maps can be drawn on. */
     grounds = [],
     /** Draw the annotations of the plate's other days, faintly. */
@@ -809,7 +811,7 @@
         <div class="bar" style:left={px(element.box[0])} style:top={px(element.box[1])} style:transform="scale({1 / scale}) translate(6px, 6px)">
           <PlateMapBar {element} {grounds} framing={framing === element.id} view={framed?.view ?? element.view}
             keep={framed && !framed.first ? !framed.own : null} onview={(next) => onmapview(element, next)}
-            onkeep={(keep) => onkeep?.(element, keep)}
+            onkeep={(keep) => onkeep?.(element, keep)} onlayers={onlayers ? () => onlayers(element) : null}
             onframe={() => { if (lockedMap(element)) { sayHeld(); return; } framing = framing === element.id ? '' : element.id; selection = [element.id]; }} />
         </div>
       {/each}

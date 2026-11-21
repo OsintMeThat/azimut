@@ -87,8 +87,8 @@
   import { drawOver, pictureKey } from '../lib/plate/draw.js';
   import { inFrame, project, scaleRatio } from '../lib/plate/geo.js';
   import { WAYBACK_ID } from '../lib/wayback.js';
-  import { CLOUDLESS_ID, cloudlessSaid, cloudlessYear } from '../lib/plate/cloudless.js';
-  import { SENTINEL_ID, passCredit } from '../lib/plate/sentinelPass.js';
+  import { CLOUDLESS_ID } from '../lib/plate/cloudless.js';
+  import { SENTINEL_ID } from '../lib/plate/sentinelPass.js';
   import { endExport, exportShare, exportSays, plateExport, startExport, stopExport } from '../lib/plate/exportRun.svelte.js';
   import { countryAt } from '../lib/plate/spotlight.js';
   import { PLAIN_GROUNDS } from '../lib/plate/plainBasemap.js';
@@ -102,7 +102,9 @@
   import { formatCoords, formatMGRS } from '../lib/coords.js';
   import NewPlateDialog from './plate/NewPlateDialog.svelte';
   import TemplateSketch from './plate/TemplateSketch.svelte';
-  import { inspectorWidth, layout, listWidth, togglePanel } from '../lib/plate/layout.svelte.js';
+  import { inspectorWidth, layout, listWidth, saveLayout, toggleFold, togglePanel } from '../lib/plate/layout.svelte.js';
+  import { imagerySaid } from '../lib/plate/source.js';
+  import PlateLayers from './plate/PlateLayers.svelte';
   import { plateTabs } from '../lib/plate/oneTab.js';
   import { buildHash, readSolo, splitHash } from '../lib/hash.js';
   import { settlePlace } from '../lib/backButton.js';
@@ -1131,6 +1133,31 @@
     uiState.tool = 'satellite';
   }
 
+  /** A layer the analyst draws, opened for editing in the Map where `map` looks; Back comes back to the plate. */
+  async function openLayerInMap(map, row) {
+    await autosave.flush();
+    const view = views[map.id]?.view ?? map.view;
+    uiState.editLayer = { name: row.name, title: row.title, view: { lat: view.lat, lon: view.lon, zoom: view.zoom + 1 } };
+    uiState.tool = 'satellite';
+  }
+  /** The list shown on its Layers tab, `map` picked, from the map's own bar. */
+  function showLayers(map) {
+    selection = [map.id];
+    if (!listShown) panel('list');
+    layout.tab = 'layers';
+    saveLayout();
+  }
+  /** A map picked from the Layers tab, the inspector shown on its Layers section. */
+  function mapSettings(map) {
+    selection = [map.id];
+    if (!inspectorShown) panel('inspector');
+    if (layout.folded.includes('Layers')) toggleFold('Layers');
+  }
+  // the Layers tab says a Wayback map's day, read once the tab is open on one
+  $effect(() => {
+    if (listShown && layout.tab === 'layers' && spec?.elements.some((element) => element.kind === 'map' && element.basemap === WAYBACK_ID)) untrack(readReleases);
+  });
+
   /** What was drawn by hand on this map, made into a layer of the case it then draws in its place; Undo puts it back. */
   async function keepDrawn(map) {
     const title = `${plate?.title || 'Plate'}, drawn`;
@@ -1478,13 +1505,7 @@
   });
   const updated = $derived(rows.filter((row) => elements.some((element) => element.kind === 'map' && element.layers?.some((entry) => entry.name === row.name)))
     .map((row) => String(row.updated_at ?? '').slice(0, 10)).sort().at(-1) ?? '');
-  const imagery = $derived.by(() => {
-    const main = mainMap(spec);
-    if (main?.basemap === CLOUDLESS_ID) return cloudlessSaid(cloudlessYear(main, years));
-    if (main?.basemap === SENTINEL_ID) return passCredit(main);
-    if (main?.basemap !== WAYBACK_ID) return '';
-    return (releases.find((entry) => entry.release === main.release) ?? releases[0])?.date ?? '';
-  });
+  const imagery = $derived(imagerySaid(mainMap(spec), { releases, years }));
   /** Where the main map looks on the day or step shown: its middle, for `{coords}` and `{mgrs}`. */
   const middle = $derived.by(() => {
     const main = mainMap(spec);
@@ -2053,7 +2074,12 @@
       {#if listShown}
         <div class="dock left" style:width="{layout.listW}px" data-guide="plate.list">
           <PlateElements spec={plate.spec} bind:selection {at} {place} {playable} bind:ghosts {tokens} onrestack={restack} onhide={() => panel('list')}
-            oncontext={elementMenu} />
+            oncontext={elementMenu} bind:tab={() => layout.tab, (value) => { layout.tab = value; saveLayout(); }} layers={sourcePanel} />
+          {#snippet sourcePanel()}
+            <PlateLayers spec={plate.spec} {rows} {grounds} {releases} {years} template={!!plate.template}
+              onsettings={mapSettings} onopen={plate.template ? null : openLayerInMap} onnewlayer={plate.template ? null : newLayerHere}
+              onkeepdrawn={plate.template ? null : keepDrawn} />
+          {/snippet}
           <PanelEdge bind:width={layout.listW} helpers={listWidth} side="right" label="Resize the list" />
         </div>
       {/if}
@@ -2064,7 +2090,7 @@
             {time} stepPlace={place} {playing} {speed} bind:views {decor} bind:overflow {grounds} ghosts={ghosts && playable}
             {framingFor} onmapview={mapView} onkeep={keepFraming} beat={shownKey} follows={followsMap} {written} onnamelabel={nameToLabel}
             {glide} oncontext={(id, point) => (id ? elementMenu(id, point) : pageMenu(point))}
-            onmap={(id, handle) => handles.set(id, handle)} top={focus ? 44 : 0} />
+            onmap={(id, handle) => handles.set(id, handle)} top={focus ? 44 : 0} onlayers={plate.template ? null : showLayers} />
         {/key}
         {#if focus}
           <div class="focus-bar" role="toolbar" aria-label="The plate">

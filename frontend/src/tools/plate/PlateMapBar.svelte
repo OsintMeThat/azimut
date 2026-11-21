@@ -9,6 +9,8 @@
    *   middle-drag or a double click held turns it too.
    * - **Tilt**: a map drawn in 3D leans further or less.
    * - **Ground**: the basemaps a plate offers, and what can be laid over them.
+   * - **Layers**: how many of the case's layers the map draws; a press shows them in
+   *   the list's Layers tab, where they are ticked on and off.
    * - **Map stays where it was**: on a played plate, a day or a slide after the
    *   first holds the framing before it until this is unticked; then the map moves
    *   for it alone.
@@ -32,6 +34,8 @@
     keep = null,
     /** `(keep)`: the day or step shown keeps the framing before it, or frames the map its own way. */
     onkeep = null,
+    /** The case's layers this map draws, shown in the list's Layers tab; null where there is none to show. */
+    onlayers = null,
   } = $props();
 
   const isMap = $derived(element.kind === 'map');
@@ -123,6 +127,11 @@
   {/if}
   <button type="button" class="ground" bind:this={anchor} aria-expanded={menu} aria-label="Ground" title="The ground the map is drawn on"
     onclick={() => (menu = !menu)}><Icon name="satellite" size={13} /><span>{ground}</span><Icon name="chevronDown" size={11} /></button>
+  {#if isMap && onlayers}
+    {@const count = (element.layers ?? []).length}
+    <button type="button" class="ground" class:none={!count} aria-label="Layers" title="The case's layers this map draws: tick them in the list's Layers tab"
+      onclick={onlayers}><Icon name="layers" size={13} /><span>{count ? `${count} ${count === 1 ? 'layer' : 'layers'}` : 'No layer'}</span></button>
+  {/if}
 </div>
 
 {#if menu}
@@ -162,5 +171,7 @@
   .north { fill: #e5484d; }
   .south { fill: var(--text-3); }
   .ground span { max-width: 110px; overflow: hidden; text-overflow: ellipsis; }
+  /* a map that draws none of the case's layers says so where the eye is */
+  .ground.none { color: var(--accent); }
   .room { flex: none; width: 14px; }
 </style>

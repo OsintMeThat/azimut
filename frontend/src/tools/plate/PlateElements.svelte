@@ -13,6 +13,7 @@
    *   there by default.
    * - While a step is shown, the list holds the day's elements and that step's, the
    *   step's marked; another step's elements wait on their own step.
+   * - **Layers**, its second tab, says where the maps get what they draw (`PlateLayers.svelte`).
    */
   import Icon from '../../components/Icon.svelte';
   import { KIND_LABELS, MAP_KINDS, bringTo, carryOn, dated, fillTokens, landingIn, listedOf, periodSaid, shownOn } from '../../lib/plate/page.js';
@@ -36,6 +37,10 @@
     onhide = null,
     /** `(id, { x, y })`: a right-click on a row, which opens the element's menu. */
     oncontext = null,
+    /** The tab shown: 'page' for what the page holds, 'layers' for where its maps get what they draw. */
+    tab = $bindable('page'),
+    /** The Layers tab's content; without it the list has no tabs. */
+    layers = null,
   } = $props();
 
   const ICONS = { map: 'satellite', inset: 'mapArea', legend: 'list', text: 'text', label: 'pin', arrow: 'arrowRight', scale: 'ruler',
@@ -142,11 +147,23 @@
 
 <aside class="elements" aria-label="Elements" bind:this={asideEl}>
   <div class="head">
-    <h4>On the page <span class="count">{list.length}</span></h4>
+    {#if layers}
+      <div class="tabs" role="tablist" aria-label="The list">
+        <button type="button" role="tab" aria-selected={tab !== 'layers'} class:on={tab !== 'layers'} title="What the page holds, top first"
+          onclick={() => (tab = 'page')}>On the page <span class="count">{list.length}</span></button>
+        <button type="button" role="tab" aria-selected={tab === 'layers'} class:on={tab === 'layers'} data-guide="plate.layers"
+          title="Where the maps get what they draw: their ground and the case's layers" onclick={() => (tab = 'layers')}>Layers</button>
+      </div>
+    {:else}
+      <h4>On the page <span class="count">{list.length}</span></h4>
+    {/if}
     {#if onhide}
       <button type="button" class="mini shown" aria-label="Hide the list" title="Hide the list" onclick={onhide}><Icon name="chevronLeft" size={13} /></button>
     {/if}
   </div>
+  {#if layers && tab === 'layers'}
+    {@render layers()}
+  {:else}
   <ul class="list" class:sorting={!!dragged} bind:this={listEl}>
     {#each list as element, index (element.id)}
       <li class:drop-before={target === index} class:drop-after={target === list.length && index === list.length - 1}
@@ -188,12 +205,18 @@
       <p class="note">What you add belongs to the day shown, and other days' annotations wait here to come back.</p>
     {/each}
   {/if}
+  {/if}
 </aside>
 
 <style>
   .elements { width: 100%; height: 100%; overflow-y: auto; padding: 6px 10px 14px; background: var(--bg-1); }
   .head { display: flex; align-items: center; gap: 6px; margin-bottom: 4px; }
   .head h4 { flex: 1; margin: 6px 0; }
+  .tabs { display: flex; flex: 1; gap: 2px; margin: 2px 0; }
+  .tabs button { display: flex; align-items: center; padding: 4px 7px; border-radius: var(--r-sm); color: var(--text-3); font-size: 10px; font-weight: 700;
+    text-transform: uppercase; letter-spacing: .06em; cursor: pointer; }
+  .tabs button:hover { color: var(--text-1); }
+  .tabs button.on { background: var(--bg-3); color: var(--text-1); }
   h4 { margin: 12px 0 6px; color: var(--text-3); font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: .06em; }
   .count { margin-left: 4px; padding: 0 5px; border-radius: 999px; background: var(--bg-3); color: var(--text-2); font-weight: 600; letter-spacing: normal; }
   .list { list-style: none; margin: 0; padding: 0; }

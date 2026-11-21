@@ -10,12 +10,17 @@ beforeEach(() => {
 describe('the plate editor layout', () => {
   it('reads both panels shown and nothing folded from nothing or garbage', () => {
     for (const raw of [null, '', '{', '[]', '{"list":"no"}', 42]) {
-      expect(readLayout(raw)).toEqual({ list: true, inspector: true, folded: [] });
+      expect(readLayout(raw)).toEqual({ list: true, inspector: true, folded: [], tab: 'page' });
     }
   });
 
   it('keeps a panel put away and the folded titles, once each', () => {
-    expect(readLayout('{"list":false,"folded":["Grid","Grid",3,"","Layers"]}')).toEqual({ list: false, inspector: true, folded: ['Grid', 'Layers'] });
+    expect(readLayout('{"list":false,"folded":["Grid","Grid",3,"","Layers"]}')).toEqual({ list: false, inspector: true, folded: ['Grid', 'Layers'], tab: 'page' });
+  });
+
+  it('keeps the list on its Layers tab, and on what the page holds from anything else', () => {
+    expect(readLayout('{"tab":"layers"}').tab).toBe('layers');
+    for (const raw of ['{"tab":"maps"}', '{"tab":3}', '{}']) expect(readLayout(raw).tab).toBe('page');
   });
 
   it('folds a section by its title and remembers it', () => {

@@ -983,6 +983,39 @@ test('a day no layer changes on is added to the play from its tile, and let go f
   await expect(pill.locator('.pill-act')).toHaveCount(0);
 });
 
+test('the Layers tab says where each map gets what it draws, and ticks the case\'s layers on and off', async ({ page }) => {
+  const store = await plateFixture(page);
+  const front = { name: 'front', title: 'Front', source: { kind: 'editable' }, editable: true, hidden: [], features: 1,
+    categories: [], sha256: 'f1', icons: 0, track: { on: true, precision: 'day', zone: 'UTC' } };
+  await page.route(`**/api/cases/${CASE_ID}/map-layers`, (route) => route.fulfill({ json: [front] }));
+  await page.route(`**/api/cases/${CASE_ID}/map-layers/front/data**`, (route) => route.fulfill({ json: { type: 'FeatureCollection', features: [] } }));
+  store.plates.set('Front', { title: 'Front', updated_at: '2026-10-06T12:00:00Z', spec: {
+    page: { paper: 'a4', orientation: 'landscape' },
+    theme: { paper: '#ffffff', ink: '#15181e', accent: '#c8102e', font: 'inter', preset: '' },
+    time: { at: '2026-10-06', step: null, trail: true, since: null, window: 7, hold: 1 },
+    elements: [{ id: 'map', kind: 'map', box: [10, 20, 200, 150], view: { lat: 48.86, lon: 2.3, zoom: 12, bearing: 0 }, basemap: 'plain',
+      overlays: [], layers: [], grid: 'none' }] } });
+  await page.goto('/#plate');
+  await page.locator('.tile:not(.template) .open', { hasText: 'Front' }).click();
+  // the map's own bar says it draws none of the case's layers, and opens the tab
+  await page.locator('.list').getByRole('button', { name: 'Map', exact: true }).click();
+  await expect(page.locator('.map-bar').getByRole('button', { name: 'Layers' })).toHaveText('No layer');
+  await page.locator('.map-bar').getByRole('button', { name: 'Layers' }).click();
+  await expect(page.getByRole('tab', { name: 'Layers' })).toHaveAttribute('aria-selected', 'true');
+  const map = page.locator('.source section.map');
+  await expect(map.locator('.ground')).toContainText('Plain');
+  const row = map.locator('li', { hasText: 'Front' });
+  await expect(row.locator('.tag')).toHaveText('dated');
+  await row.locator('input').check();
+  await expect.poll(() => lastSave(store)?.spec.elements[0].layers.map((entry) => entry.name)).toEqual(['front']);
+  await expect(page.locator('.map-bar').getByRole('button', { name: 'Layers' })).toHaveText('1 layer');
+  await row.locator('input').uncheck();
+  await expect.poll(() => lastSave(store)?.spec.elements[0].layers).toEqual([]);
+  // the tab is remembered, and the other one lists the page again
+  await page.getByRole('tab', { name: /On the page/ }).click();
+  await expect(page.locator('.list .row', { hasText: 'Map' })).toHaveCount(1);
+});
+
 test('an empty slide takes a copy of the one before it from the pill over the page', async ({ page }) => {
   const store = await plateFixture(page);
   await page.goto('/#plate');
@@ -1192,7 +1225,7 @@ test('the days stay where they are whatever a day holds, and the wheel runs thro
   await lane.hover();
   await page.mouse.wheel(0, 400);
   await expect.poll(() => lane.evaluate((node) => node.scrollLeft)).toBeGreaterThan(0);
-  await expect(page.getByRole('button', { name: /more steps before/ })).toBeEnabled();
+  await expect(page.getByRole('button', { name: /more slides before/ })).toBeEnabled();
 
   // the calendar opens over the page, and the bar keeps its height
   await page.locator('.timebar .moment').click();
