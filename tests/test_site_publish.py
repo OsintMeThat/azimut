@@ -809,7 +809,7 @@ def test_the_settings_backup_carries_the_site_and_reads_what_it_cannot_as_none(c
 def test_the_website_settings_are_read_and_written_with_the_other_preferences(client):
     assert {key: client.get("/api/settings").json()[key] for key in site.PREF_KEYS} == {
         "site_title": "", "site_tagline": "", "site_credit_azimut": True, "site_stats": "",
-        "site_stats_code": "", "site_stats_token": ""}
+        "site_stats_code": "", "site_stats_token": "", "site_stats_account": "", "site_stats_tag": ""}
     for bad in ({"site_stats": "tracker"}, {"site_stats_code": "No Good"}, {"site_stats_token": "bad token!"},
                 {"site_title": "x" * 121}):
         assert client.put("/api/settings/prefs", json=bad).status_code == 422, bad

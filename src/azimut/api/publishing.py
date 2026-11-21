@@ -1,20 +1,24 @@
 """REST API for Settings › Website: the WordPress site a note is sent to as a
-draft, and the GitHub Pages site a note's web folder is published to.
+draft, the GitHub Pages site a note's web folder is published to, and the numbers
+Cloudflare Web Analytics keeps of its readers.
 
 The site's address and the username are ordinary settings (`wordpress_site`,
 `wordpress_user`), carried by a settings backup; so are the GitHub account, the
 repository and the branch (`github_account`, `github_repo`, `github_branch`) and the
-address Pages last said the site has (`github_site`). The application password and the
-GitHub token are kept apart, in ``publishing.json`` (`engine/publishsecrets.py`), and
-never sent back: the browser learns only whether one is set and its last four characters.
+address Pages last said the site has (`github_site`), and the Cloudflare account ID and
+site tag (`site_stats_account`, `site_stats_tag`, saved as Settings › Website's preferences).
+The application password, the GitHub token and the Cloudflare API token are kept apart, in
+``publishing.json`` (`engine/publishsecrets.py`), and never sent back: the browser learns
+only whether one is set and its last four characters.
 
 Nothing here reaches the network but its presses: **Test connection** for either
 service, and for GitHub **Create the repository**, **Turn on Pages**, **Update the site**
 (`/github/site`, which rebuilds the site's list, feed, sitemap and home without a note),
 **Read the categories** (`/github/categories`), **Read the site** (`/github/site/read`, the
 articles, maps and pages it holds, with its home, categories and last commit; reads only),
-**Delete** an article's folder (`/github/site/delete`, one commit, only a folder Azimut published)
-and the watch of a page being built (`/github/build`, asked by the export dialog after a publish).
+**Delete** an article's folder (`/github/site/delete`, one commit, only a folder Azimut published),
+the watch of a page being built (`/github/build`, asked by the export dialog after a publish), and
+**Read the numbers** (`/cloudflare/numbers`, one query to api.cloudflare.com, `engine/sitestats.py`).
 Reading these settings, saving them and forgetting them stay on this machine. Sending
 a note is the Notebook's (`/notes/{note}/wordpress` and `/notes/{note}/github`,
 `api/notes.py`).
@@ -25,6 +29,7 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass, field
 from typing import Any
+from urllib.parse import urlsplit
 
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
@@ -33,7 +38,7 @@ from .. import config
 from ..engine import githubpages as github
 from ..engine import notes_web
 from ..engine import notes_wordpress as wordpress
-from ..engine import publishsecrets, site, sitesync
+from ..engine import publishsecrets, site, sitestats, sitesync
 
 router = APIRouter(prefix="/api/publishing", tags=["publishing"])
 
@@ -73,7 +78,7 @@ def _state() -> dict[str, Any]:
 @router.get("")
 def read_publishing() -> dict[str, Any]:
     """What Settings › Website shows of each service: never a secret, never fetched."""
-    return {WORDPRESS: _state(), GITHUB: _github_state()}
+    return {WORDPRESS: _state(), GITHUB: _github_state(), CLOUDFLARE: _cloudflare_state()}
 
 
 @router.put("/wordpress")
@@ -515,3 +520,59 @@ def delete_github_folder(body: DeleteIn) -> dict[str, Any]:
     keep_categories(done.categories)
     return {"ok": True, "commit": done.commit, "folder": done.folder, "removed": done.removed, "written": done.root,
             "warnings": done.warnings}
+
+
+# -- Cloudflare Web Analytics: the site's numbers -------------------------------------------------
+
+CLOUDFLARE = "cloudflare"
+
+
+class CloudflareIn(BaseModel):
+    """The API token that reads the site's numbers. An empty one keeps the one kept: Forget is how
+    it goes."""
+
+    token: str | None = Field(default=None, max_length=publishsecrets.MAX_SECRET + 20)
+
+
+def _cloudflare_state() -> dict[str, Any]:
+    return {"token": publishsecrets.status(CLOUDFLARE)}
+
+
+@router.put("/cloudflare")
+def save_cloudflare(body: CloudflareIn) -> dict[str, Any]:
+    try:
+        if body.token:
+            publishsecrets.write(CLOUDFLARE, sitestats.api_token(body.token))
+    except (sitestats.StatsError, publishsecrets.SecretError) as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    return _cloudflare_state()
+
+
+@router.delete("/cloudflare")
+def forget_cloudflare() -> dict[str, Any]:
+    """Forget the API token on this machine; the account ID and the site tag stay, being no secret."""
+    publishsecrets.forget(CLOUDFLARE)
+    return _cloudflare_state()
+
+
+@router.post("/cloudflare/numbers")
+def read_cloudflare_numbers() -> dict[str, Any]:
+    """Read the site's numbers from Cloudflare Web Analytics: the page views and visits of each page
+    over 7 and 30 days, the totals, the referrers and the countries. One query, on the Read the
+    numbers press only; 409 until the account ID, the site tag and the API token are set, 502 with
+    what went wrong in one sentence."""
+    settings = config.load_settings()
+    account = site.cloudflare_id(settings.get("site_stats_account"))
+    tag = site.cloudflare_id(settings.get("site_stats_tag"))
+    token = publishsecrets.read(CLOUDFLARE)
+    if not (account and tag and sitestats.API_TOKEN.match(token)):
+        raise HTTPException(status_code=409, detail=sitestats.NOT_SET)
+    target = github_settings()
+    address = target.base if target.account else ""
+    try:
+        with sitestats.client() as http:
+            numbers = sitestats.read_numbers(http, token, account, tag, prefix=sitestats.site_prefix(address),
+                                             host=urlsplit(address).hostname or "")
+    except sitestats.StatsError as exc:
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
+    return {"ok": True, "address": address, **numbers}

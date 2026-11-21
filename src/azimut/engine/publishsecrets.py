@@ -1,12 +1,13 @@
 """The credentials Azimut publishes with, kept on this machine and nowhere else.
 
-A WordPress application password (and, later, a GitHub token) writes to the
-analyst's own site. It is a live write credential, so it lives in a file of its
-own, ``publishing.json`` beside ``settings.json`` (``config.settings_dir()``):
-owner-only (0600), written whole or not at all, and never in a settings backup,
-for the reason ``cookies.txt`` stays behind too: a live credential stays on the
-machine that made it. What goes with it and is no secret (the site's address,
-the username) is an ordinary setting, which the backup carries.
+A WordPress application password and a GitHub token write to the analyst's own
+site; a Cloudflare API token reads how many read it (`engine/sitestats.py`). Each is
+a live credential, so it lives in a file of its own, ``publishing.json`` beside
+``settings.json`` (``config.settings_dir()``): owner-only (0600), written whole or
+not at all, and never in a settings backup, for the reason ``cookies.txt`` stays
+behind too: a live credential stays on the machine that made it. What goes with it
+and is no secret (the site's address, the username, the Cloudflare account ID) is an
+ordinary setting, which the backup carries.
 
 The browser never reads a secret back. ``status`` answers whether one is set and
 its last four characters, which is all Settings shows.
@@ -24,9 +25,9 @@ from typing import Any
 from .. import config
 
 #: Each service and the one field its secret is kept under.
-FIELDS = {"wordpress": "password", "github": "token"}
+FIELDS = {"wordpress": "password", "github": "token", "cloudflare": "token"}
 #: How long a secret may be: an application password is 24 letters and digits with
-#: spaces, a GitHub token under a hundred characters.
+#: spaces, a GitHub or Cloudflare token under a hundred characters.
 MAX_SECRET = 256
 #: How many of its last characters a secret shows, and only once it is longer than that.
 HINT = 4
