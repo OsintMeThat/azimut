@@ -29,9 +29,10 @@
    * kept in the look as they are left, with or without GitHub set up, so a note's author travels in its
    * case's bundle and opens filled in on the machine that publishes it.
    *
-   * **Place on the site's map.** An Article may stand somewhere, for a map of the site's articles: its
+   * **Coordinates for this article.** An Article may stand somewhere, for a map of the site's articles: its
    * coordinates pasted as `lat, lon` (or as the Sheet reads them) and a name for its pin, both optional and
-   * empty for most notes. Under them, what the coordinates read as, or why they are no place, which holds the
+   * empty for most notes, so they fold under **More options**, shut each time the dialog opens unless the
+   * note has a place, and open while what is typed is no place, so a value is never hidden. Under them, what the coordinates read as, or why they are no place, which holds the
    * publish back. When the note names one obvious point (`placeOffer`, `engine/siteplace.py`), a press offers
    * it with the rule it was read by, and only while the coordinates are empty: nothing is ever filled without
    * that press. It goes up with the publish and is kept in the look like the category; emptied, it is gone.
@@ -58,7 +59,7 @@
   import {
     AUTHOR_IMAGE_LABEL, AUTHOR_IMAGE_NONE, AUTHOR_LABEL, AUTHOR_MAX, BUSY,
     CATEGORY_MAX, CATEGORY_NEW, CATEGORY_NEW_PLACEHOLDER, CATEGORY_NONE, CATEGORY_SAID, HAND_EDITED, LIST_IMAGE_COVER, NO_NAME_PRESS, ON_SITE, PICK_ANOTHER, PLACE_COORDS_LABEL, PLACE_COORDS_PLACEHOLDER,
-    PLACE_NAME_LABEL, PLACE_NAME_MAX, PLACE_NAME_PLACEHOLDER, PLACE_TITLE, PLACE_WHY, REPLACE_PRESS, WEBSITE_HELP as HELP, noNameSaid, onSiteSaid,
+    MORE_OPTIONS, PLACE_LEAD, PLACE_NAME_LABEL, PLACE_NAME_MAX, PLACE_NAME_PLACEHOLDER, PLACE_TITLE, PLACE_WHY, REPLACE_PRESS, WEBSITE_HELP as HELP, noNameSaid, onSiteSaid,
     placeText, placeUseSaid, readPlace, takenOutsideSaid, takenSaid,
   } from '../../lib/websiteSetup.js';
 
@@ -123,6 +124,8 @@
   let placeName = $state('');
   // the point the note offers, shown as a press and never filled without it
   let offer = $state(null);
+  // More options, where the place folds: shut each time the dialog opens, unless the note has a place
+  let moreOpen = $state(false);
   // typed before the look came, so what was typed is kept
   let touched = { category: false, role: false, place: false, author: false };
 
@@ -166,6 +169,7 @@
       if (!touched.place) {
         coords = placeText(look.place);
         placeName = look.place?.name ?? '';
+        if (look.place) moreOpen = true;
       }
       listImage = look.list_image ?? '';
       ownAuthor = look.author ?? '';
@@ -187,6 +191,8 @@
   const placeRead = $derived(readPlace(coords, placeName));
   // only an article shows its place, so only its place can hold the publish back
   const placeWrong = $derived(role === 'article' ? placeRead.problem : '');
+  // what holds the publish back is never folded away
+  const placeShown = $derived(moreOpen || Boolean(placeWrong));
 
   const suggestions = $derived(categoriesOf([...(github?.categories ?? []), ownCategory]));
   const pictures = $derived(entities
@@ -501,26 +507,31 @@
           {/if}
         </div>
         {@render picker('list')}
-        <div class="place" role="group" aria-label={PLACE_TITLE}>
-          <span class="lbl">{PLACE_TITLE}</span>
-          <div class="place-fields">
-            <input id="export-place" class="input mono" value={coords} spellcheck="false" autocomplete="off"
-              placeholder={PLACE_COORDS_PLACEHOLDER} aria-label={PLACE_COORDS_LABEL} title={HELP.publishPlace}
-              aria-invalid={placeWrong ? 'true' : undefined} aria-describedby="export-place-said"
-              oninput={(event) => typePlace(event.currentTarget.value)} />
-            <input id="export-place-name" class="input" value={placeName} maxlength={PLACE_NAME_MAX} spellcheck="false"
-              autocomplete="off" placeholder={PLACE_NAME_PLACEHOLDER} aria-label={PLACE_NAME_LABEL} title={HELP.publishPlaceName}
-              oninput={(event) => typePlace(coords, event.currentTarget.value)} />
+        <button type="button" class="more" aria-expanded={placeShown} aria-controls="export-more" title={HELP.publishMore}
+          onclick={() => (moreOpen = !placeShown)}><Icon name="chevronRight" size={12} />{MORE_OPTIONS}</button>
+        {#if placeShown}
+          <div class="place" id="export-more" role="group" aria-label={PLACE_TITLE}>
+            <span class="lbl">{PLACE_TITLE}</span>
+            <p class="address-said">{PLACE_LEAD}</p>
+            <div class="place-fields">
+              <input id="export-place" class="input mono" value={coords} spellcheck="false" autocomplete="off"
+                placeholder={PLACE_COORDS_PLACEHOLDER} aria-label={PLACE_COORDS_LABEL} title={HELP.publishPlace}
+                aria-invalid={placeWrong ? 'true' : undefined} aria-describedby="export-place-said"
+                oninput={(event) => typePlace(event.currentTarget.value)} />
+              <input id="export-place-name" class="input" value={placeName} maxlength={PLACE_NAME_MAX} spellcheck="false"
+                autocomplete="off" placeholder={PLACE_NAME_PLACEHOLDER} aria-label={PLACE_NAME_LABEL} title={HELP.publishPlaceName}
+                oninput={(event) => typePlace(coords, event.currentTarget.value)} />
+            </div>
+            <p id="export-place-said" class="address-said" class:bad={placeWrong} role="status">{placeRead.said}</p>
+            {#if offer && !coords.trim()}
+              <p class="place-offer">
+                <button type="button" class="btn btn-sm" title={HELP.publishPlaceUse} onclick={useOffer}>
+                  <Icon name="pin" size={12} /><span>{placeUseSaid(offer)}</span></button>
+                <span class="place-why">{PLACE_WHY[offer.from]}</span>
+              </p>
+            {/if}
           </div>
-          <p id="export-place-said" class="address-said" class:bad={placeWrong} role="status">{placeRead.said}</p>
-          {#if offer && !coords.trim()}
-            <p class="place-offer">
-              <button type="button" class="btn btn-sm" title={HELP.publishPlaceUse} onclick={useOffer}>
-                <Icon name="pin" size={12} /><span>{placeUseSaid(offer)}</span></button>
-              <span class="place-why">{PLACE_WHY[offer.from]}</span>
-            </p>
-          {/if}
-        </div>
+        {/if}
       {/if}
     </div>
 
@@ -603,7 +614,14 @@
   .picture-row:hover { background: var(--bg-3); color: var(--text-1); }
   .picture-row.on { color: var(--accent); font-weight: 600; }
   .none { margin: 4px 6px; color: var(--text-3); font-size: var(--fs-xs); }
-  .place { display: flex; flex-direction: column; gap: 4px; margin-top: 4px; }
+  .more { display: inline-flex; align-items: center; gap: 4px; align-self: flex-start; margin-top: 6px; padding: 2px 0; border: 0;
+    background: none; color: var(--text-2); font: inherit; font-size: var(--fs-xs); cursor: pointer; }
+  .more:hover { color: var(--text-1); }
+  .more:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: var(--r-sm); }
+  .more :global(svg) { flex: none; color: var(--text-3); transition: transform 0.15s var(--ease); }
+  .more[aria-expanded='true'] :global(svg) { transform: rotate(90deg); }
+  @media (prefers-reduced-motion: reduce) { .more :global(svg) { transition: none; } }
+  .place { display: flex; flex-direction: column; gap: 4px; padding-left: 16px; }
   .place-fields { display: flex; gap: 6px; }
   .place-fields .input { flex: 1 1 0; min-width: 0; }
   .place-fields .input[aria-invalid='true'] { border-color: var(--danger); }

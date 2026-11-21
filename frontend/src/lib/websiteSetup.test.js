@@ -354,7 +354,7 @@ describe('the place on the site\'s map', () => {
   });
 
   it('says why coordinates are no place, and an empty field is no place and no problem', () => {
-    expect(readPlace('')).toEqual({ place: null, problem: '', said: setup.PLACE_EMPTY });
+    expect(readPlace('')).toEqual({ place: null, problem: '', said: '' });
     expect(readPlace('  ', 'Bab al-Mandab')).toEqual({ place: null, problem: '', said: setup.PLACE_NAME_ALONE });
     expect(readPlace('Bab al-Mandab').problem).toBe(setup.PLACE_UNREAD);
     expect(readPlace('12.7').problem).toBe(setup.PLACE_UNREAD);
@@ -375,7 +375,7 @@ describe('the place on the site\'s map', () => {
     expect(placeUseSaid({ lat: 12.6, lon: 43.4, name: '' })).toBe('Use 12.6000, 43.4000');
     expect(placeDegrees({ lat: -0.5, lon: -0.25 })).toBe('0.5° S, 0.25° W');
     expect(Object.keys(setup.PLACE_WHY)).toEqual(['place', 'proof', 'map']);
-    for (const said of [...Object.values(setup.PLACE_WHY), setup.PLACE_EMPTY, setup.PLACE_NAME_ALONE, setup.PLACE_UNREAD, setup.PLACE_LAT_BAD, setup.PLACE_LON_BAD]) {
+    for (const said of [...Object.values(setup.PLACE_WHY), setup.PLACE_LEAD, setup.PLACE_NAME_ALONE, setup.PLACE_UNREAD, setup.PLACE_LAT_BAD, setup.PLACE_LON_BAD]) {
       expect(said).toMatch(/^[A-Z].*\.$/);
       expect(said).not.toContain('—');
     }

@@ -472,11 +472,64 @@ const coords = () => target.querySelector('#export-place');
 const placeName = () => target.querySelector('#export-place-name');
 const placeSaid = () => target.querySelector('#export-place-said').textContent.trim();
 const offerPress = () => button('Use ');
+const more = () => button('More options');
+const openMore = async () => {
+  if (more().getAttribute('aria-expanded') !== 'true') more().click();
+  await settle();
+};
 const fill = async (node, value) => {
   node.value = value;
   node.dispatchEvent(new Event('input', { bubbles: true }));
   await settle();
 };
+
+it('folds the coordinates under More options each time it opens, with what they are for', async () => {
+  serve({ offer: OFFER });
+  show();
+  await settle();
+  expect(more().getAttribute('aria-expanded')).toBe('false');
+  expect(more().getAttribute('title')).toBeTruthy();
+  expect(coords()).toBeNull();
+  expect(offerPress()).toBeUndefined();
+  more().click();
+  await settle();
+  expect(more().getAttribute('aria-expanded')).toBe('true');
+  const group = target.querySelector('[role="group"][aria-label="Coordinates for this article (optional)"]');
+  expect(group.id).toBe(more().getAttribute('aria-controls'));
+  expect(group.textContent).toContain('They show the article as a pin on the site\'s map.');
+  // the offer and its rule are as they were, inside
+  expect(offerPress().textContent.trim()).toBe('Use 12.7250, 43.5075 · Bab al-Mandab');
+  // nothing typed says nothing more under the fields
+  expect(placeSaid()).toBe('');
+  more().click();
+  await settle();
+  expect(coords()).toBeNull();
+  // opened again, it is shut once more
+  unmount(live);
+  live = null;
+  show();
+  await settle();
+  expect(more().getAttribute('aria-expanded')).toBe('false');
+});
+
+it('opens More options on a place the note keeps, and keeps it open while what is typed is no place', async () => {
+  serve({ look: { place: KEPT } });
+  show();
+  await settle();
+  expect(more().getAttribute('aria-expanded')).toBe('true');
+  expect(coords().value).toBe('12.725004, 43.5075');
+  await fill(coords(), 'the strait');
+  expect(bound.problem).not.toBe('');
+  more().click();
+  await settle();
+  // what holds the publish back is never folded away
+  expect(coords()).not.toBeNull();
+  expect(more().getAttribute('aria-expanded')).toBe('true');
+  await fill(coords(), '');
+  more().click();
+  await settle();
+  expect(coords()).toBeNull();
+});
 
 it('starts the place from the look, reads what is typed, and holds the publish back while it is no place', async () => {
   serve({ look: { place: KEPT } });
@@ -510,7 +563,7 @@ it('starts the place from the look, reads what is typed, and holds the publish b
   await fill(coords(), '');
   expect(placeSaid()).toBe('A name needs coordinates: left so, the article has no pin.');
   await fill(placeName(), '');
-  expect(placeSaid()).toBe('Optional. Left empty, the article has no pin on the site\'s map.');
+  expect(placeSaid()).toBe('');
   await live.publish();
   expect(post.mock.calls.at(-1)[1].place).toBeNull();
 });
@@ -520,6 +573,7 @@ it('offers the note\'s one point as a press, with its rule, and fills nothing un
   publishOk();
   show();
   await settle();
+  await openMore();
   expect(get).toHaveBeenCalledWith('/api/cases/c1/notes/n1/place');
   expect(coords().value).toBe('');
   expect(placeName().value).toBe('');
@@ -557,6 +611,7 @@ it('never offers over a place the note keeps, and says the rule of a map\'s offe
   serve({ offer: { lat: 12.6, lon: 43.4, name: '', from: 'map', label: 'The strait' } });
   show();
   await settle();
+  await openMore();
   expect(offerPress().textContent.trim()).toBe('Use 12.6000, 43.4000');
   expect(target.querySelector('.place-why').textContent).toBe('Where the note\'s one map looks.');
   // an offer the server could not read is no offer
@@ -565,6 +620,7 @@ it('never offers over a place the note keeps, and says the rule of a map\'s offe
   serve({ offer: { lat: 99, lon: 1, name: '', from: 'place', label: '' } });
   show();
   await settle();
+  await openMore();
   expect(offerPress()).toBeUndefined();
 });
 

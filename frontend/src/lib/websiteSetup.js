@@ -524,12 +524,14 @@ export const AUTHOR_IMAGE_NONE = 'No picture';
 /** How far north or south a place may stand, and the longest its name is (`notelook.PLACE_LAT_MAX`, `PLACE_NAME_MAX`). */
 export const PLACE_LAT_MAX = 85;
 export const PLACE_NAME_MAX = 80;
-export const PLACE_TITLE = 'Place on the site\'s map';
+/** The section the place folds into, shut every time the dialog opens unless the note has a place. */
+export const MORE_OPTIONS = 'More options';
+export const PLACE_TITLE = 'Coordinates for this article (optional)';
+export const PLACE_LEAD = 'They show the article as a pin on the site\'s map.';
 export const PLACE_COORDS_LABEL = 'Coordinates';
 export const PLACE_NAME_LABEL = 'Place name';
 export const PLACE_COORDS_PLACEHOLDER = 'lat, lon';
 export const PLACE_NAME_PLACEHOLDER = 'Name on the pin';
-export const PLACE_EMPTY = 'Optional. Left empty, the article has no pin on the site\'s map.';
 export const PLACE_NAME_ALONE = 'A name needs coordinates: left so, the article has no pin.';
 export const PLACE_UNREAD = 'That does not read as a point: paste it as lat, lon, such as 12.725, 43.5075.';
 export const PLACE_LAT_BAD = `The latitude must be between -${PLACE_LAT_MAX} and ${PLACE_LAT_MAX}, where web maps stop.`;
@@ -562,7 +564,7 @@ export function placeOf(value) {
 export function readPlace(coords, name = '') {
   const text = String(coords ?? '').trim();
   const label = String(name ?? '').replace(/\s+/g, ' ').trim().slice(0, PLACE_NAME_MAX);
-  if (!text) return { place: null, problem: '', said: label ? PLACE_NAME_ALONE : PLACE_EMPTY };
+  if (!text) return { place: null, problem: '', said: label ? PLACE_NAME_ALONE : '' };
   const point = parseLatLon(text);
   const problem = !point ? PLACE_UNREAD : Math.abs(point.lat) > PLACE_LAT_MAX ? PLACE_LAT_BAD : Math.abs(point.lon) > 180 ? PLACE_LON_BAD : '';
   if (problem) return { place: null, problem, said: problem };
@@ -665,6 +667,7 @@ export const WEBSITE_HELP = {
   publishAuthor: 'Who wrote it, signed on its page and named in the site\'s lists',
   publishAuthorImage: 'A small round picture before the author\'s name',
   publishAuthorImageClear: 'No picture beside the author\'s name',
+  publishMore: 'The article\'s coordinates, for the site\'s map',
   publishPlace: 'Where this article stands on the site\'s map, pasted as lat, lon',
   publishPlaceName: 'The name of the place, shown on its pin',
   publishPlaceUse: 'Fill the place with the point this note names',

@@ -7765,11 +7765,12 @@ the one at the end, and in a map page's header), and with no picture the name st
 the picture before the name, unless it is the site's own name. A picture gone from the case is said
 among the warnings and the page goes without it. A template carries neither.
 
-**Place on the site's map.** Under the picture, an article may say where it stands, for a map of the
-site's articles: **Coordinates**, pasted as `lat, lon` (or `12.725N 43.5075E`, or in degrees,
-minutes and seconds, read as the Sheet reads a cell), and a **Place name** of up to 80 characters
-that labels the pin. Both are optional and empty for most notes. Under them, *Reads as 12.725004° N,
-43.5075° E.*, or why the coordinates are no place (unreadable, a latitude past ±85 where web maps
+**Coordinates for this article (optional).** Under the picture, **More options** folds them away,
+shut each time the dialog opens unless the note already has a place, and held open while what is typed
+is no place, so a value is never hidden. Inside, one line, *They show the article as a pin on the site's
+map.*, then **Coordinates**, pasted as `lat, lon` (or `12.725N 43.5075E`, or in degrees, minutes and
+seconds, read as the Sheet reads a cell), and a **Place name** of up to 80 characters that labels the
+pin, both empty for most notes. Under them, *Reads as 12.725004° N, 43.5075° E.*, or why the coordinates are no place (unreadable, a latitude past ±85 where web maps
 stop, a longitude past ±180), which holds Publish back. When the note names one obvious point, a
 press offers it, *Use 12.7250, 43.5075 · Bab al-Mandab*, beside its rule: *The one place the note
 names.* (a place, or proofs that all depict it), *Where the note's one proof concluded.*, or, with no
