@@ -13,8 +13,9 @@
  *
  * Reading the panel writes nothing. A fix is the action that already exists elsewhere:
  * *Say “at least”* writes the words before a count, *Add “at least” to the title* the
- * chart's own fix, *Read again* the chart's rows from where they came from, each as one
- * Undo step (`atLeastChange`, `chartFixChange`, `readAgainChange`); *Archive every link…*
+ * chart's own fix, each as one Undo step (`atLeastChange`, `chartFixChange`); a chart's
+ * rows follow their source in the editor by themselves (`editor/follow.js`), so a line
+ * about rows that moved on, from a server that still says one, has no fix; *Archive every link…*
  * opens the archive dialog, the one press that reaches the network; *Bookmark them*
  * files each page as a bookmark, nothing fetched; *Round them* rounds the points of view
  * in the export, the note never rewritten.
@@ -23,7 +24,7 @@ import { api } from '../api.js';
 import { HTML_BUDGET, PDF, PUBLIC_ONLY, WEB, WORDPRESS, weightWords } from './formats.js';
 import { PUBLIC } from './editions.svelte.js';
 import { readWarning } from './warnings.js';
-import { chartBlockAt, chartOrigin, fixLabel, readChart, setting, withSettings, withTable } from './editor/chartText.js';
+import { chartBlockAt, fixLabel, withSettings } from './editor/chartText.js';
 
 /** The panel's groups, in its order. */
 export const GROUPS = [
@@ -162,8 +163,7 @@ export function readyLines(ready, { canEdit = false, rounded = false, tools = tr
       line.fix = { id: 'bookmark', label: links.length > 1 ? 'Bookmark them' : 'Bookmark it', links,
         title: links.length > 1 ? `File these ${links.length} pages as bookmarks of the case, seen today. Nothing is fetched`
           : 'File the page as a bookmark of the case, seen today. Nothing is fetched' };
-    } else if (warning.kind === 'stale' && canEdit) line.fix = { id: 'again', label: 'Read again', title: 'Copy the rows again from where they came from' };
-    else if (warning.fix && canEdit) line.fix = { id: 'chart', label: fixLabel(warning.fix), title: warning.fix.map(([name, value]) => `${name}: ${value}`).join('\n'), pairs: warning.fix };
+    } else if (warning.fix && canEdit) line.fix = { id: 'chart', label: fixLabel(warning.fix), title: warning.fix.map(([name, value]) => `${name}: ${value}`).join('\n'), pairs: warning.fix };
     add(warning.group, line);
   }
   for (const [index, claim] of ready.claims.entries()) {
@@ -270,29 +270,13 @@ export function chartFixChange(text, line, pairs) {
 }
 
 /**
- * Read again for the chart whose rows moved on (its warning on line `line`): the rows
- * copied again from where its `from:` says, as the chart's bar writes them; null when the
- * source is gone, has other columns, or matches already.
- */
-export async function readAgainChange(text, line, { noteId = '', caseId = '', rows = null } = {}) {
-  const block = Number.isInteger(line) ? chartBlockAt(text, line) : null;
-  if (!block) return null;
-  const chart = readChart(block.source);
-  if (!setting(chart, 'from')) return null;
-  const origin = await chartOrigin(chart, { text, noteId, caseId, rows });
-  if (!origin || origin.state !== 'differs' || !origin.text) return null;
-  const next = withTable(block.source, origin.text);
-  return next === block.source ? null : { from: block.from, to: block.to, insert: next, expected: block.source };
-}
-
-/**
  * Do the fix of one line with the actions the Notebook already has (`actions`):
- * `text()` the note in the editor, `write(change, missing)` one Undo step, `rows` the
- * chart's source reader, `archive()` the Archive every link dialog, `bookmark(links)`
+ * `text()` the note in the editor, `write(change, missing)` one Undo step,
+ * `archive()` the Archive every link dialog, `bookmark(links)`
  * the pages filed, `round(on)` the export's rounding, `open(id)` a record in Details.
  * Answers whether the check should be asked again.
  */
-export async function runFix(line, { noteId = '', caseId = '', text = () => '', write, rows, archive, bookmark, round, open } = {}) {
+export async function runFix(line, { text = () => '', write, archive, bookmark, round, open } = {}) {
   const fix = line?.fix;
   switch (fix?.id) {
     case 'atleast':
@@ -300,9 +284,6 @@ export async function runFix(line, { noteId = '', caseId = '', text = () => '', 
       return true;
     case 'chart':
       write(chartFixChange(text(), line.line, fix.pairs), 'That chart has changed since the check');
-      return true;
-    case 'again':
-      write(await readAgainChange(text(), line.line, { noteId, caseId, rows }), 'Its rows could not be read again: the source is gone or matches already');
       return true;
     case 'archive':
       archive();

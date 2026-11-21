@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 import {
-  atLeastChange, badgeWords, chartFixChange, checkEdition, checkFormat, checkedWords, issueCount, readAgainChange, readReady, readyLines, runFix,
+  atLeastChange, badgeWords, chartFixChange, checkEdition, checkFormat, checkedWords, issueCount, readReady, readyLines, runFix,
 } from './readyPanel.js';
 
 /** What the check answers for the owner's article, cut down: as the server words it. */
@@ -70,7 +70,8 @@ describe('the Ready panel', () => {
   it('offers each fix the check allows, and those that write in the note only while it is open', () => {
     const fixes = (canEdit) => Object.values(readyLines(readReady(ARTICLE, 'html'), { canEdit })).flat()
       .filter((line) => line.fix).map((line) => line.fix.id);
-    expect(fixes(true)).toEqual(['atleast', 'atleast', 'atleast', 'atleast', 'claim', 'archive', 'bookmark', 'chart', 'again', 'round']);
+    // rows that moved on follow their source in the editor: a server that still says so gets no fix
+    expect(fixes(true)).toEqual(['atleast', 'atleast', 'atleast', 'atleast', 'claim', 'archive', 'bookmark', 'chart', 'round']);
     expect(fixes(false)).toEqual(['claim', 'archive', 'bookmark', 'round']);
     const lines = Object.values(readyLines(readReady(ARTICLE, 'html'), { canEdit: true })).flat();
     expect(lines.find((line) => line.fix?.id === 'chart').fix.label).toBe('Add “at least” to the title');
@@ -131,26 +132,11 @@ describe('the fixes that write in the note', () => {
     expect(change.expected).toBe(text.slice(change.from, change.to));
     expect(chartFixChange(text, 0, [['title', 'X']])).toBeNull();
   });
-
-  it('reads a chart’s rows again from this note’s table or from elsewhere, as Read again does', async () => {
-    const table = '| Model | Grade |\n| --- | --- |\n| Cougar | Confirmed |\n| Kirpi | Almost sure |';
-    const text = `# Register\n\n${table}\n\n::: chart\ntitle: By model\nfrom: note:n1\n| Model | Grade |\n| --- | --- |\n| Cougar | Confirmed |\n:::\n`;
-    const line = text.split('\n').indexOf('from: note:n1');
-    const local = await readAgainChange(text, line, { noteId: 'n1' });
-    expect(local.insert).toContain('| Kirpi | Almost sure |');
-    const elsewhere = text.replace('from: note:n1', 'from: sheet:s1');
-    const rows = vi.fn(async () => ({ found: true, name: 'Register', text: table }));
-    const read = await readAgainChange(elsewhere, line, { noteId: 'n1', caseId: 'c1', rows });
-    expect(rows).toHaveBeenCalledWith({ caseId: 'c1', origin: 'sheet:s1', fresh: true });
-    expect(read.insert).toContain('| Kirpi | Almost sure |');
-    // the same rows already: nothing to read again
-    expect(await readAgainChange(text.replace('| Kirpi | Almost sure |\n', ''), line - 1, { noteId: 'n1' })).toBeNull();
-  });
 });
 
 describe('each fix is the action that exists elsewhere', () => {
   const actions = () => ({
-    noteId: 'n1', caseId: 'c1', text: () => 'We saw 12 trucks.', write: vi.fn(() => true), rows: vi.fn(),
+    text: () => 'We saw 12 trucks.', write: vi.fn(() => true),
     archive: vi.fn(), bookmark: vi.fn(async () => {}), round: vi.fn(), open: vi.fn(),
   });
 
