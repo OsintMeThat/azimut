@@ -774,26 +774,37 @@
   .support-rail {
     margin-top: auto;
   }
-  /* the one warm icon of the rail, so the tip is found without a word said */
+  /* grey like its neighbours; warm only while it beats or under the pointer */
   .support-rail .heart {
     display: flex;
+  }
+  .support-rail:hover .heart {
     color: var(--accent);
   }
   .support-rail .heart.beat {
-    animation: heartbeat 0.9s ease-in-out;
+    animation: heartbeat 1.2s ease-in-out;
   }
   @keyframes heartbeat {
     0%,
-    30%,
-    60%,
     100% {
       transform: scale(1);
+      color: inherit;
     }
     15% {
       transform: scale(1.22);
+      color: var(--accent);
+    }
+    30% {
+      transform: scale(1);
+      color: var(--accent);
     }
     45% {
       transform: scale(1.14);
+      color: var(--accent);
+    }
+    60% {
+      transform: scale(1);
+      color: var(--accent);
     }
   }
   @media (prefers-reduced-motion: reduce) {

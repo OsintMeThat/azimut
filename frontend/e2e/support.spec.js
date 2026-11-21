@@ -62,6 +62,9 @@ test('beats the heart every ten minutes in sight, until Support is opened', asyn
   const heart = support.locator('.heart');
   await expect(heart).toBeVisible();
   await expect(heart).not.toHaveClass(/beat/);
+  // grey like the rest of the rail between beats
+  const colour = (locator) => locator.evaluate((node) => getComputedStyle(node).color);
+  expect(await colour(heart)).toBe(await colour(support.locator('span').last()));
   await page.clock.fastForward('09:00');
   await expect(heart).not.toHaveClass(/beat/);
   await page.clock.fastForward('01:00');

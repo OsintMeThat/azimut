@@ -34,8 +34,8 @@ A block stays hidden until its link exists in `lib/support.js`, and a release re
 ten seconds, held while a pointer or the keyboard rests on it and still under reduced
 motion, in a box sized to the longest so the button never moves. Each choice says in one
 grey line what it is for, and the foot names who makes Azimut with a link to the site.
-The rail's heart is the one warm icon there, and it beats once every ten minutes the app
-is in sight (`lib/supportBeat.js`) until Support is opened that session: never under
+The rail's heart is grey like its neighbours and warm only under the pointer or while it
+beats, in the accent colour, once every ten minutes the app is in sight (`lib/supportBeat.js`) until Support is opened that session: never under
 reduced motion, and Settings › General has the switch (`support_heartbeat`). The tip
 also has a quiet link in Home's footer and one line on the last page of What's new.
 Nothing reaches the network before a press, and there is no counter or donor feature.
