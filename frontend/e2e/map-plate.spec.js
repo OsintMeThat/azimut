@@ -504,12 +504,19 @@ test('a day plays its steps, and a step plays a video of the case', async ({ pag
   await page.goto('/#plate');
   await newPlate(page);
   await expect(page.locator('.plate-map')).toHaveCount(2);
-  // a plate with no layer followed over time has no play bar, and still takes steps
-  await expect(page.locator('.timebar')).toHaveCount(0);
+  // a plate with no dated layer keeps the bar all the same, + Slide in sight, and its first slide moves nothing on the page
+  const bar = page.locator('.timebar');
+  await expect(bar.getByRole('button', { name: 'Add a slide' })).toHaveText('Slide');
+  await expect(bar.locator('.hint')).toContainText('make it a video');
+  const paper = page.locator('.viewport .page');
+  const [barBefore, paperBefore] = [await bar.boundingBox(), await paper.boundingBox()];
   await addOnPage(page, 'Slide');
   const tiles = page.locator('.steps [role="option"]');
   await expect(tiles).toHaveCount(2);
-  await expect(page.locator('.on-step')).toHaveText('Slide 1: what you add belongs to it');
+  await expect(bar.locator('.hint')).toHaveCount(0);
+  expect((await bar.boundingBox()).height).toBe(barBefore.height);
+  expect(await paper.boundingBox()).toEqual(paperBefore);
+  await expect(page.locator('.on-step')).toHaveText('Slide 1: what you add shows on it only');
   await addOnPage(page, 'Text');
   await page.getByLabel('Text', { exact: true }).fill('First strike');
   await expect.poll(() => {
@@ -658,7 +665,7 @@ test('a line and a text go on the map, a step frames the map its own way, and th
   await expect.poll(() => lastSave(store)?.spec.elements.find((element) => element.leader === 'none')?.weight).toBe(700);
   // a step keeps the day's framing until it is let go, then frames the map on its own
   await addOnPage(page, 'Slide');
-  await expect(page.locator('.on-step')).toHaveText('Slide 1: what you add belongs to it');
+  await expect(page.locator('.on-step')).toHaveText('Slide 1: what you add shows on it only');
   await page.locator('.list').getByRole('button', { name: 'Map', exact: true }).click();
   const keep = page.locator('.map-bar .keep input');
   await expect(keep).toBeChecked();
@@ -965,6 +972,36 @@ test('a day no layer changes on is added to the play from its tile, and let go f
   await page.locator('.float-menu').getByRole('button', { name: 'Take it out of the play' }).click();
   await expect.poll(() => lastSave(store)?.spec.days).toEqual([]);
   await expect(idle).toHaveCount(1);
+  // what is added belongs to the day shown, the pill over the page says so and offers it every day
+  await addOnPage(page, 'Box');
+  const pill = page.locator('.on-step.on-day');
+  await expect(pill).toContainText('6 Oct 2026: what you add shows on this day only');
+  const boxOf = () => lastSave(store)?.spec.elements.find((element) => element.kind === 'shape');
+  await expect.poll(() => boxOf()?.onward).toBe('2026-10-06');
+  await pill.getByRole('button', { name: 'Show it every day' }).click();
+  await expect.poll(() => [boxOf()?.onward ?? null, boxOf()?.until ?? null]).toEqual([null, null]);
+  await expect(pill.locator('.pill-act')).toHaveCount(0);
+});
+
+test('an empty slide takes a copy of the one before it from the pill over the page', async ({ page }) => {
+  const store = await plateFixture(page);
+  await page.goto('/#plate');
+  await newPlate(page);
+  await expect(page.locator('.plate-map')).toHaveCount(2);
+  await addOnPage(page, 'Slide');
+  await addOnPage(page, 'Text');
+  await page.getByLabel('Text', { exact: true }).fill('First strike');
+  await addOnPage(page, 'Slide');
+  const pill = page.locator('.on-step');
+  await expect(pill).toContainText('Slide 2: what you add shows on it only');
+  await pill.getByRole('button', { name: 'Copy the previous slide' }).click();
+  await expect.poll(() => {
+    const spec = lastSave(store)?.spec;
+    const steps = spec?.steps?.now ?? [];
+    const on = (spec?.elements ?? []).filter((element) => element.text === 'First strike').map((element) => element.step);
+    return steps.length === 2 && on.length === 2 && steps.every((step) => on.includes(step.id));
+  }).toBe(true);
+  await expect(pill.locator('.pill-act')).toHaveCount(0);
 });
 
 test('a feature is hidden on one map from its right-click or a click in the framed map, and a layer runs between two days', async ({ page }) => {

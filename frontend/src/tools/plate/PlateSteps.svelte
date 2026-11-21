@@ -12,6 +12,9 @@
    * play goes through can be hidden from the video from its ⋯: the editor still shows it
    * and its steps, dashed, and the play and every export skip them.
    *
+   * A plate that plays nothing yet keeps the strip all the same, as tall as it will be
+   * once it holds slides: the page's tile, and **+ Slide** saying what a slide is for.
+   *
    * Every tile says how long it holds in the video, and a press on that time sets it:
    * the day its own seconds or the plate's, a step its own, never shorter than its
    * longest clip (held longer, the clip stays on its last frame).
@@ -65,6 +68,10 @@
     /** Whether the video skips the day shown, and `(on)` to hide it from the video or show it again; null where a plate plays no days. */
     daySkipped = false,
     onskipday = null,
+    /** The day comes from the plate's dated layers, rather than being the page itself. */
+    dated = false,
+    /** The plate plays nothing yet: no days, no slides. The page's tile holds no time, and + says what a slide is for. */
+    still = false,
   } = $props();
 
   /** `{ step, index, anchor }` of the step being set, or `{ day: true, anchor }`; `at` in place of `anchor` for a right-click. */
@@ -210,12 +217,16 @@
       </button>
     {:else}
     <button type="button" class="tile day" class:on={!current} role="option" aria-selected={!current}
-      title={daySkipped ? 'Hidden from the video, with its slides. Its ⋯ shows it again' : 'The day itself, shown under each of its slides'}
+      title={daySkipped ? 'Hidden from the video, with its slides. Its ⋯ shows it again'
+        : still ? 'The page, as it is exported'
+        : dated ? 'The day as its layers draw it, shown under each of its slides' : 'The page, shown under each of its slides'}
       onclick={() => onpick?.(null)}>
-      <span class="thumb"><Icon name={daySkipped ? 'eyeOff' : 'plate'} size={14} /></span>
+      <span class="thumb"><Icon name={daySkipped ? 'eyeOff' : dated ? 'calendar' : 'plate'} size={14} /></span>
       <span class="tile-name">{dayLabel}</span>
     </button>
-    {#if daySkipped}
+    {#if still}
+      <!-- a picture alone holds no time in a video -->
+    {:else if daySkipped}
       <span class="time said">Hidden</span>
     {:else}
     <button type="button" class="time" class:own={dayOwn} aria-label={`How long ${dayLabel} holds`}
@@ -223,8 +234,10 @@
       onclick={(event) => open({ day: true, anchor: event.currentTarget }, true)}>{timecode(daySeconds)}</button>
     {/if}
     {/if}
+    {#if !still}
     <button type="button" class="more" aria-label={`Set ${dayLabel}`} title={!dayPlayed ? 'Add it to the play' : daySkipped ? 'Show it in the video' : 'How long it holds, or hide it'}
       onclick={(event) => open({ day: true, anchor: event.currentTarget })}><Icon name="more" size={14} stroke={2.6} /></button>
+    {/if}
   </div>
   {#if steps.length}
   {#if overflowing}
@@ -263,8 +276,11 @@
       title="Scroll to the slides after" onclick={() => page(1)}>{after || ''}<Icon name="chevronRight" size={12} /></button>
   {/if}
   {/if}
-  <button type="button" class="add" aria-label="Add a slide" title={current ? 'Add a slide after this one' : 'Add a slide to this day, played after it'} onclick={() => onadd?.()}>
-    <Icon name="plus" size={14} /></button>
+  <button type="button" class="add" class:said={still} aria-label="Add a slide" title={current ? 'Add a slide after this one' : 'Add a slide to this day, played after it'} onclick={() => onadd?.()}>
+    <Icon name="plus" size={14} />{#if still}<span>Slide</span>{/if}</button>
+  {#if still}
+    <span class="hint">One picture for now. Slides play one after another and make it a video.</span>
+  {/if}
   {#if compact}
     <span class="tally" title="The slide shown, of the day's slides">{shownIndex >= 0 ? `${shownIndex + 1} / ${steps.length}` : `${steps.length} slides`}</span>
   {/if}
@@ -382,6 +398,8 @@
   .more:hover, .more:focus-visible { background: var(--bg-3); color: var(--text-1); }
   .add { display: grid; place-items: center; width: 34px; flex: none; border: 1px dashed var(--border); border-radius: var(--r-sm); color: var(--text-2); cursor: pointer; }
   .add:hover { border-color: var(--accent); color: var(--text-1); }
+  .add.said { display: flex; align-items: center; gap: 4px; width: auto; padding: 0 10px; font-size: 11px; font-weight: 600; }
+  .hint { align-self: center; min-width: 0; overflow: hidden; color: var(--text-3); font-size: 11px; text-overflow: ellipsis; white-space: nowrap; }
   .fields { display: grid; gap: 6px; padding: 6px; }
   .fields label { display: grid; gap: 3px; color: var(--text-3); font-size: 11px; }
   .fields .input { height: 26px; font-size: var(--fs-xs); }

@@ -730,8 +730,14 @@
   const stepId = $derived(playBeat ? playBeat.step : exportTime ? exportStep : currentStep(spec, at)?.id ?? null);
   const place = $derived(spec ? placeOf(spec, at, stepId) : null);
   const daySteps = $derived(spec ? stepsOf(spec, at) : []);
-  /** The play bar under the page: the plate's days, the day's steps; nothing on a plate that plays nothing. */
-  const barShown = $derived(!!plate && !plate.template && (moments.length > 0 || daySteps.length > 0));
+  /**
+   * The play bar under the page: the plate's days and the day's steps. A plate that plays nothing
+   * yet keeps it too, as tall, with + Slide, so a sequence is in sight and the first slide moves
+   * nothing on the page. A template keeps no steps, and has none.
+   */
+  const barShown = $derived(!!plate && !plate.template);
+  /** The plate plays nothing yet: no days from its layers, no steps. */
+  const still = $derived(!moments.length && !daySteps.length);
   const stepIndex = $derived(daySteps.findIndex((item) => item.id === stepId));
   /** How long a played map flies to the next framing: the share of the transition the video gives the move, none where it cuts in. */
   const glide = $derived(transit?.plan.move ? ((transit.plan.first / TWEEN_FPS) * 1000) / speed : 0);
@@ -762,6 +768,23 @@
     spec.time.step = made.step;
     selection = [];
     toast(`${SEQUENCES[kind].label} added: each slide is renamed, timed or removed from its ⋯`, 'ok', 5000);
+  }
+  /**
+   * The picked elements a played plate shows on some days only, while a day (not a step) is shown:
+   * the pill over the page offers them every day, the rule that a mark belongs to its day kept.
+   */
+  const pickedDated = $derived(spec && playable && !stepId ? spec.elements.filter((element) => selection.includes(element.id) && (element.onward || element.until)) : []);
+  function everyDay() {
+    for (const element of pickedDated) Object.assign(element, { onward: null, until: null });
+  }
+  /** The step shown holds nothing of its own yet and follows another step: it can be that one's copy. */
+  const emptyStep = $derived(!!spec && stepIndex > 0 && !spec.elements.some((element) => element.step === stepId) && !spec.framing?.[stepId]);
+  /** The empty step shown made a copy of the one before it, marks and framing included, in its place. */
+  function copyPrevious() {
+    const previous = daySteps[stepIndex - 1];
+    if (!previous || !emptyStep) return;
+    dropStep(stepId);
+    duplicateStep(previous.id);
   }
   /** A copy of a step right after it, shown at once. */
   function duplicateStep(id) {
@@ -2067,7 +2090,11 @@
           </div>
         {/if}
         {#if stepId && !playing}
-          <p class="on-step">{stepName(stepIndex)}: what you add belongs to it</p>
+          <p class="on-step">{stepName(stepIndex)}: what you add shows on it only{#if emptyStep}<button type="button" class="pill-act"
+            title="Fills this slide with a copy of the one before it, marks and framing included" onclick={copyPrevious}>Copy the previous slide</button>{/if}</p>
+        {:else if playable && at && !playing && !focus}
+          <p class="on-step on-day">{momentLabel(at)}: what you add shows on this day only{#if pickedDated.length}<button type="button" class="pill-act"
+            title="Shows what is picked on every day the plate plays" onclick={everyDay}>Show {pickedDated.length === 1 ? 'it' : 'them'} every day</button>{/if}</p>
         {/if}
         {#if barShown}
           <!-- the plate's days and the day's steps on one bar; a plate that plays nothing has none, Add holds its first step -->
@@ -2085,6 +2112,7 @@
             {/if}
             <!-- the day itself and its steps, each tile saying how long it holds in the video -->
             <PlateSteps steps={daySteps} current={stepId} day={dayOf(at)} dayLabel={!at ? 'The page' : timed(at) ? at.slice(11) : momentLabel(at)} elements={plate.spec.elements}
+              dated={playable && !!at} {still}
               transitions={transitionsOf(plate.spec).on} transitionSeconds={transitionsOf(plate.spec).seconds} daySeconds={daySeconds(plate.spec, at)} dayOwn={!!plate.spec.holds?.[dayOf(at)]}
               plateSeconds={plateSeconds(plate.spec)} ondayhold={holdDay}
               {dayPlayed} dayPicked={(plate.spec.days ?? []).includes(dayOf(at))}
@@ -2315,6 +2343,12 @@
   .fb-rule { width: 1px; height: 18px; margin: 0 3px; background: var(--border); }
   .on-step { position: absolute; top: 10px; left: 50%; transform: translateX(-50%); z-index: 7; margin: 0; padding: 3px 12px; border-radius: 999px;
     background: var(--accent); color: var(--accent-text); font-size: 11px; font-weight: 600; pointer-events: none; white-space: nowrap; }
+  /* on a day the pill says the rule quietly; a step's is the accent, since what follows belongs to it alone */
+  .on-step.on-day { border: 1px solid var(--border); background: var(--bg-1); color: var(--text-2); font-weight: 500; }
+  .pill-act { margin-left: 8px; padding: 0 8px; border-radius: 999px; background: rgba(255, 255, 255, .22); color: inherit; font: inherit; font-weight: 700;
+    pointer-events: auto; cursor: pointer; }
+  .on-day .pill-act { background: var(--accent-soft); color: var(--accent); }
+  .pill-act:hover { text-decoration: underline; }
   .timebar { display: grid; grid-template-columns: auto minmax(0, 1fr); align-items: center; gap: 12px; padding: 6px 14px; border-top: 1px solid var(--border); background: var(--bg-1); }
   .timebar.days { grid-template-columns: auto minmax(280px, 34%) minmax(0, 1fr); }
   .controls { display: flex; align-items: center; gap: 8px; }

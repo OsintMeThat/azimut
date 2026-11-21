@@ -44,6 +44,25 @@ describe('the steps of a day', () => {
     expect(document.body.querySelector('.float-menu[aria-label="The day"]')).not.toBeNull();
   });
 
+  it('stands on a plate that plays nothing yet: the page alone, no time, and + Slide saying what a slide is for', () => {
+    const calls = show({ steps: [], current: null, dayLabel: 'The page', elements: [], still: true });
+    expect(tiles().map((tile) => tile.querySelector('.tile-name').textContent)).toEqual(['The page']);
+    expect(document.body.querySelector('.time')).toBeNull();
+    expect(document.body.querySelector('button[aria-label="Set The page"]')).toBeNull();
+    const add = document.body.querySelector('button[aria-label="Add a slide"]');
+    expect(add.textContent.trim()).toBe('Slide');
+    expect(document.body.querySelector('.hint').textContent).toContain('make it a video');
+    add.click();
+    expect(calls.onadd).toHaveBeenCalledOnce();
+  });
+
+  it('marks a day its dated layers draw apart from the page itself', () => {
+    show({ dated: true });
+    expect(tiles()[0].title).toBe('The day as its layers draw it, shown under each of its slides');
+    expect(document.body.querySelector('.hint')).toBeNull();
+    expect(document.body.querySelector('button[aria-label="Add a slide"]').textContent.trim()).toBe('');
+  });
+
   it('shows a step or the day on a press, and adds a step', () => {
     const calls = show();
     tiles()[2].click(); tiles()[0].click();

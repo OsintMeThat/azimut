@@ -6945,7 +6945,8 @@ its ⋯ takes it out again while it holds no slides. Any other played day is
 slides and faint among the notches, and the play and every export skip it. Events stay on its
 maps, faded, unless the plate's past menu says how many days. What is added on the map
 (a label, an arrow, a zone, rings, a cone, a distance, a shape) **belongs to the day
-it is made on**: the next day starts without it. The inspector shows it from a first
+it is made on**: the next day starts without it, and a pill over the page says so,
+offering **Show it every day** for what is picked. The inspector shows it from a first
 day to a last, each picked on a calendar of any day, or left open to the start or
 to the end; both open is every day, and an end moved past the other pulls it along.
 **Other days' annotations**, under the element list, lists another day's annotations, stretches
@@ -6974,7 +6975,9 @@ window the slides take a line of their own.
 it**: the day its own seconds or, left alone, every day's (one second until set in
 the export), a slide its own, never shorter than its longest clip, the clip staying on
 its last frame when the slide holds longer. Play holds each one as the video does. A plate with no dated layer takes slides too,
-on its one day, and has no bar under the page until it does.
+on its one day. Its bar stands under the page from the start, as tall as it will be: the
+page's tile and **+ Slide**, saying that slides make the picture a video, so the first
+slide moves nothing on the page.
 While a slide is shown, a pill over the page says so and **what is added belongs to
 that slide**, over what the day shows: the element list holds the day's elements and
 that slide's, the slide's marked. The inspector keeps a slide's element on **This
@@ -6982,7 +6985,9 @@ slide only** or **And the next ones** (the slides after it, on the same day), or
 the whole day; an element of the day goes **Only on** the slide shown by a press. A
 slide is dragged to another place in the strip, and its ⋯, always shown, names it, sets how long it
 holds, moves it, duplicates it (what stands on it and its framing copied, the copy
-played right after it), or removes it with what stands on it. A ready sequence from
+played right after it), or removes it with what stands on it. **+** adds an empty slide; while it
+holds nothing, the pill offers **Copy the previous slide**, which fills it with a copy of the
+slide before it, marks and framing included. A ready sequence from
 Add puts its slides after the one shown and turns the video's transitions on:
 **Reveal in four beats** (the region, the place, closer, the whole picture) and
 **Zoom in** frame the main map from where it looks, and a **Title card** or an **End
