@@ -217,7 +217,7 @@ def _line(author: str, face: str = "") -> dict[str, Any]:
 def test_a_guest_shows_in_the_lists_with_their_picture_and_the_sites_own_name_stays_hidden():
     guest, own = _line(GUEST, "author.png"), _line("The Desk", "author.png")
     listed = site.render([guest, own], "The Desk", prefix="/articles")
-    assert f'· <img class="az-face" src="/articles/story/author.png"' in listed and f">{GUEST}</p>" in listed
+    assert '· <img class="az-face" src="/articles/story/author.png"' in listed and f">{GUEST}</p>" in listed
     assert listed.count("az-face") == 1 and "· The Desk" not in listed
     maps = site.render_maps([{**guest, "article": None}], "The Desk")
     assert f">{GUEST}</p>" in maps and "az-face" in maps
