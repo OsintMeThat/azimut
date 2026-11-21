@@ -246,6 +246,28 @@ test('the dialog says what the note is on the site: its category, Article or Pag
   expect(state.checks).toBe(0);
 });
 
+test('a guest\'s name and picture are kept with the note as they are left, for every role', async ({ page }) => {
+  const state = await stand(page, { look: { style: 'report' } });
+  const dialog = await openWebFolder(page);
+  const author = dialog.locator('#export-author');
+  await expect(author).toHaveValue('');
+  await author.fill('Jane Guest');
+  await author.press('Tab');
+  await expect.poll(() => state.looks.length).toBe(1);
+  expect(state.looks[0]).toMatchObject({ style: 'report', author: 'Jane Guest' });
+  await dialog.getByRole('button', { name: 'No picture' }).click();
+  await dialog.getByPlaceholder('Find a picture…').fill('pier');
+  await dialog.getByRole('button', { name: 'Pier at dawn' }).click();
+  await expect.poll(() => state.looks.length).toBe(2);
+  expect(state.looks[1]).toMatchObject({ author: 'Jane Guest', author_image: 'e_pier' });
+  const role = dialog.getByRole('radiogroup', { name: 'On the site' });
+  for (const name of ['Page', 'Unlisted']) {
+    await role.getByRole('radio', { name }).click();
+    await expect(author).toHaveValue('Jane Guest');
+  }
+  await shoot(page, 'dialog-github-author');
+});
+
 test('an article is placed on the site\'s map by hand or by the note\'s offer, never filled without a press', async ({ page }) => {
   const offer = { lat: 12.7250041, lon: 43.5075, name: 'Bab al-Mandab', from: 'place', label: 'Bab al-Mandab' };
   const state = await stand(page, { offer });
