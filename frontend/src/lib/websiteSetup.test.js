@@ -417,19 +417,21 @@ describe('the numbers, read from Cloudflare', () => {
     expect(tileSaid({ views: 1, visits: 1 })).toBe('page view · 1 visit');
   });
 
-  it('says where each answer is found, field by field, free, and that the token only reads and stays here', () => {
-    expect(NUMBERS_STEPS.map(([step]) => step)).toEqual(['Account ID', 'Site tag', 'API token', 'Permission', 'Copy it']);
+  it('says where each answer is found, field by field as Cloudflare\'s token page reads, free, and that the token only reads and stays here', () => {
+    expect(NUMBERS_STEPS.map(([step]) => step)).toEqual(['Account ID', 'Token page', 'Token name', 'Permission policies', 'Permissions', 'Create it']);
     const said = NUMBERS_STEPS.map(([, text]) => text).join(' ');
-    for (const words of ['Copy account ID', 'siteTag~in=', 'Account API tokens', 'Custom token', 'Account Analytics', 'Read', 'shows it once']) {
+    for (const words of ['Copy account ID', 'Manage account › Account API tokens', 'Create a token', 'azimut-reader-numbers', 'Start from scratch (Custom)',
+      'Read analytics', 'Read all resources', 'Account Analytics: Read', 'Account Settings: Read', 'shows it once']) {
       expect(said, words).toContain(words);
     }
+    expect(setup.TAG_WHERE).toContain('siteTag~in=');
     for (const [, text] of NUMBERS_STEPS) {
       expect(text).toMatch(/^[A-Z]/);
       expect(text).toMatch(/\.$/);
       expect(text).not.toContain('—');
     }
-    expect(setup.NUMBERS_FREE).toMatch(/^Free/);
-    expect(setup.NUMBERS_STAYS).toContain('stays on this computer, never in a backup');
+    expect(setup.NUMBERS_FREE).toBe('Both permissions are free and only read.');
+    expect(setup.NUMBERS_STAYS).toBe('The token stays on this computer, never in a backup.');
     expect(setup.NUMBERS_GOATCOUNTER).toBe('Numbers are read from Cloudflare Web Analytics only; open GoatCounter\'s own page.');
   });
 });

@@ -517,15 +517,18 @@ stops making sense.
   goes.
   *Read the numbers* (Settings › Website › Readers, a site counted by Cloudflare Web
   Analytics) is the one press that asks how many read the site: one GraphQL query to
-  `https://api.cloudflare.com/client/v4/graphql` and nowhere else, over https with timeouts,
-  the answer read up to 2 MB and no redirect followed, never on a read, a save or at
-  startup. The API token rides in the Authorization header only; the analyst makes it with
-  Account Analytics, Read, the one permission it needs, and it is kept in `publishing.json`
-  like the GitHub token, 0600, out of the backup and never sent back to the browser beyond
-  its last four characters. The account ID and the site tag go as the query's variables and
-  are ordinary settings the backup carries. What comes back (paths, referrer hosts,
-  countries, counts) is bounded and shown as text, a path as a link only on the site's own
-  address.
+  `https://api.cloudflare.com/client/v4/graphql`, after, while the site tag is to be found,
+  the account's list of Web Analytics sites from the same host
+  (`/client/v4/accounts/{id}/rum/site_info/list`, 20 pages at most), and nowhere else, over
+  https with timeouts, each answer read up to 2 MB and no redirect followed, never on a
+  read, a save or at startup. The API token rides in the Authorization header only; the
+  analyst makes it with two read-only permissions, Account Analytics and Account Settings
+  (the second lists the sites so the tag is found from the public site token), and it is
+  kept in `publishing.json` like the GitHub token, 0600, out of the backup and never sent
+  back to the browser beyond its last four characters. The account ID and the site tag go as
+  the query's variables and are ordinary settings the backup carries, with the site token a
+  found tag came from. What comes back (paths, referrer hosts, countries, counts) is bounded
+  and shown as text, a path as a link only on the site's own address.
   *Archive every link* of a note is the one press that sends a note's sources out: one
   link at a time it asks `archive.org/wayback/available` for the page's newest copy and,
   unless one under 30 days old is reused, `web.archive.org/save/` for a new one, over https

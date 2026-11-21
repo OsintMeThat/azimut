@@ -367,21 +367,24 @@ test('readers are counted only when asked, with the setup said field by field', 
   fixture.expectNoUnexpectedRequests();
 });
 
-test('Numbers are read from Cloudflare on a press only, each article by its title, and a refusal is said', async ({ page }) => {
+test('Numbers are read from Cloudflare on a press only, each article by its title, the site tag found or typed, and a refusal said', async ({ page }) => {
   const counts = (views, visits = views) => ({ views, visits });
   const fixture = await openWebsite(page, {
     github,
     cloudflare: { token: { set: true, hint: '…kkkk' } },
-    settings: { site_stats: 'cloudflare', site_stats_token: TOKEN, site_stats_account: '0123456789abcdef0123456789abcdef',
-      site_stats_tag: 'fedcba9876543210fedcba9876543210' },
+    settings: { site_stats: 'cloudflare', site_stats_token: TOKEN, site_stats_account: '0123456789abcdef0123456789abcdef', site_stats_tag: '' },
   });
   await standIn(page);
+  const TAG = 'fedcba9876543210fedcba9876543210';
   const asked = [];
-  let refuse = false;
+  let refuse = '';
   await page.route('**/api/publishing/cloudflare/numbers', (route) => {
     asked.push(route.request().method());
-    if (refuse) {
+    if (refuse === 'busy') {
       return route.fulfill({ status: 502, json: { detail: 'Cloudflare asks Azimut to wait: try again in 5 minutes.' } });
+    }
+    if (refuse === 'tag') {
+      return route.fulfill({ json: { ok: false, needs: 'tag', detail: 'No Web Analytics site in this account has the site token set in Readers.' } });
     }
     return route.fulfill({ json: {
       ok: true, address: 'https://octo.github.io/articles/',
@@ -394,7 +397,7 @@ test('Numbers are read from Cloudflare on a press only, each article by its titl
       total: { week: counts(56, 42), month: counts(1346, 954) },
       referrers: [{ host: 'news.ycombinator.com', views: 30, visits: 30 }, { host: '', views: 40, visits: 40 }],
       countries: [{ country: 'FR', views: 800, visits: 600 }, { country: 'US', views: 500, visits: 300 }],
-      sampled: true, read_at: '2026-11-21T12:00:00Z', days: [7, 30],
+      sampled: true, read_at: '2026-11-21T12:00:00Z', days: [7, 30], tag: TAG, tag_found: true,
     } });
   });
 
@@ -420,13 +423,25 @@ test('Numbers are read from Cloudflare on a press only, each article by its titl
   await expect(numbers.getByRole('region', { name: 'Where visits came from' }).getByRole('listitem')).toHaveText([/No referrer\s*40/, /news\.ycombinator\.com\s*30/]);
   await expect(numbers.getByRole('region', { name: 'Countries' }).getByRole('listitem')).toHaveText([/France\s*800/, /United States\s*500/]);
   await expect(numbers).toContainText('so the 30-day counts are estimates');
+  // the site tag the press found shows in its field, folded away
+  const byHand = numbers.locator('details').filter({ hasText: 'Set the site tag by hand' });
+  await expect(byHand).not.toHaveAttribute('open', '');
+  await expect(numbers.getByLabel('Web Analytics site tag')).toHaveValue(TAG);
 
   // a refusal is said in its sentence, and the press stays
-  refuse = true;
+  refuse = 'busy';
   await numbers.getByRole('button', { name: 'Read again' }).click();
   await expect(numbers.locator('.press-line [role="status"]')).toHaveText('Cloudflare asks Azimut to wait: try again in 5 minutes.');
   await expect(numbers.getByRole('button', { name: 'Read again' })).toBeEnabled();
-  expect(asked).toEqual(['POST', 'POST']);
+  // a tag the press could not find opens its field, and one typed there is saved
+  refuse = 'tag';
+  await numbers.getByRole('button', { name: 'Read again' }).click();
+  await expect(numbers.locator('.press-line [role="status"]')).toHaveText('No Web Analytics site in this account has the site token set in Readers.');
+  await expect(byHand).toHaveAttribute('open', '');
+  await numbers.getByLabel('Web Analytics site tag').fill('0'.repeat(32));
+  await numbers.getByLabel('Web Analytics site tag').press('Tab');
+  await expect.poll(() => fixture.settingsWrites).toContainEqual({ site_stats_tag: '0'.repeat(32) });
+  expect(asked).toEqual(['POST', 'POST', 'POST']);
   fixture.expectNoUnexpectedRequests();
 });
 

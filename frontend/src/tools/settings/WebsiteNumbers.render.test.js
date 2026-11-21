@@ -1,10 +1,12 @@
 // @vitest-environment happy-dom
 /**
  * Settings › Website › Readers › Numbers, mounted: nothing is asked of Cloudflare until Read the numbers
- * is pressed; the account ID, the site tag and the API token set field by field, each checked before it
- * is sent, the token never shown again but its last characters; the press reading (disabled, a spinner,
- * Reading…), then the whole site, each article named by the session's read of the site and linked, the
- * referrers and the countries; an empty answer, a refusal, and GoatCounter sending its reader elsewhere.
+ * is pressed; the account ID and the API token set field by field, each checked before it is sent, the
+ * token never shown again but its last characters; the site tag found by the press and shown, or typed by
+ * hand under its fold, which opens when the press could not find it; the press reading (disabled, a
+ * spinner, Reading…), then the whole site, each article named by the session's read of the site and
+ * linked, the referrers and the countries; an empty answer, a refusal, and GoatCounter sending its reader
+ * elsewhere.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { flushSync, mount, unmount } from 'svelte';
@@ -22,7 +24,7 @@ const { forgetRead, siteRead } = await import('../../lib/siteRead.svelte.js');
 const { forgetNumbers, siteNumbers } = await import('../../lib/siteNumbers.svelte.js');
 const { siteReadOf } = await import('../../lib/websiteHub.js');
 const { default: WebsiteTab } = await import('./WebsiteTab.svelte');
-const { NUMBERS_NONE, NUMBERS_NOT_SET, NUMBERS_SAMPLED, NUMBERS_GOATCOUNTER } = await import('../../lib/websiteSetup.js');
+const { NUMBERS_NONE, NUMBERS_NOT_SET, NUMBERS_SAMPLED, NUMBERS_GOATCOUNTER, TAG_FOUND_HINT } = await import('../../lib/websiteSetup.js');
 
 const ACCOUNT = '0123456789abcdef0123456789abcdef';
 const TAG = 'fedcba9876543210fedcba9876543210';
@@ -45,8 +47,9 @@ const NUMBERS = {
   total: { week: counts(54, 40), month: counts(1347, 955) },
   referrers: [{ host: 'news.ycombinator.com', views: 30, visits: 30 }, { host: '', views: 40, visits: 40 }],
   countries: [{ country: 'FR', views: 800, visits: 600 }, { country: 'US', views: 500, visits: 300 }],
-  sampled: true, read_at: '2026-11-21T12:00:00Z', days: [7, 30],
+  sampled: true, read_at: '2026-11-21T12:00:00Z', days: [7, 30], tag: TAG, tag_found: true,
 };
+const NO_SITE = 'No Web Analytics site in this account has the site token set in Readers.';
 /** What the api says of a refusal: the server's detail, and its status. */
 const refused = (status, detail) => Object.assign(new Error(detail), { status });
 
@@ -59,6 +62,8 @@ const card = () => target.querySelector('section[aria-label="Numbers"]');
 const press = () => [...card().querySelectorAll('button')].find((node) => /^Read (the numbers|again)/.test(node.textContent.trim()));
 const status = () => card().querySelector('.press-line [role="status"]');
 const field = (label) => card().querySelector(`input[aria-label="${label}"]`);
+/** A fold of the card, by the words of its summary. */
+const fold = (words) => [...card().querySelectorAll('details')].find((node) => node.querySelector('summary').textContent.includes(words));
 const tab = (name) => [...target.querySelectorAll('[role="tab"]')].find((node) => node.textContent.trim().startsWith(name));
 const type = (input, value) => {
   input.value = value;
@@ -66,8 +71,9 @@ const type = (input, value) => {
   input.dispatchEvent(new Event('change', { bubbles: true }));
 };
 
+/** What Settings.svelte hands the tab, the server's answer adopted: a tag typed by hand is no found one. */
 function savePrefs(patch) {
-  const answer = { ...saved, ...patch };
+  const answer = { ...saved, ...patch, ...('site_stats_tag' in patch ? { site_stats_tag_found: false } : {}) };
   saved = answer;
   applyPrefs(answer);
   return Promise.resolve(answer);
@@ -94,7 +100,7 @@ beforeEach(() => {
   forgetNumbers();
   kept = { set: false, hint: '' };
   saved = { site_title: '', site_tagline: '', site_credit_azimut: true, site_stats: 'cloudflare', site_stats_code: '', site_stats_token: 'abcd1234',
-    site_stats_account: '', site_stats_tag: '', report_name: '', signature: false, site_logo: false };
+    site_stats_account: '', site_stats_tag: '', site_stats_tag_found: false, report_name: '', signature: false, site_logo: false };
   caseState.current = null;
   uiState.tool = 'settings';
   target = document.createElement('div');
@@ -116,11 +122,18 @@ describe('setting it up', () => {
     expect(card().querySelector('h3').textContent).toContain('Not set up');
     expect(press().disabled).toBe(true);
     expect(press().getAttribute('title')).toBe(NUMBERS_NOT_SET);
-    const steps = card().querySelector('details.hub-how');
+    const steps = fold('How to let Azimut read the numbers');
     expect(steps.open).toBe(true);
-    for (const words of ['Copy account ID', 'siteTag~in=', 'Account API tokens', 'Account Analytics', 'shows it once', 'Free', 'never in a backup']) {
+    for (const words of ['Copy account ID', 'Account API tokens', 'Create a token', 'azimut-reader-numbers', 'Start from scratch (Custom)',
+      'Account Analytics: Read', 'Account Settings: Read', 'shows it once', 'free and only read', 'never in a backup']) {
       expect(steps.textContent, words).toContain(words);
     }
+    // the site tag is found by the press: its field waits folded, saying so
+    const hand = fold('Set the site tag by hand');
+    expect(hand.open).toBe(false);
+    expect(hand.querySelector('summary').getAttribute('title')).toBe('Type the site tag yourself, for when Azimut cannot find it');
+    expect(hand.textContent).toContain('Left empty, Azimut finds it from the site token.');
+    expect(hand.textContent).toContain('siteTag~in=');
     expect(steps.querySelector('a').getAttribute('href')).toBe('https://developers.cloudflare.com/analytics/graphql-api/getting-started/authentication/api-token-auth/');
     // every field says what it is on hover
     for (const label of ['Cloudflare account ID', 'Web Analytics site tag', 'Cloudflare API token']) expect(field(label).getAttribute('title'), label).toBeTruthy();
@@ -128,7 +141,7 @@ describe('setting it up', () => {
     expect(get.mock.calls.every(([path]) => path === '/api/publishing')).toBe(true);
   });
 
-  it('checks the account ID and the site tag before saving them, read from the dashboard\'s address too', async () => {
+  it('checks the account ID and a site tag typed by hand before saving them, read from the dashboard\'s address too', async () => {
     const { savePrefs: save } = await show();
     type(field('Cloudflare account ID'), 'not an id');
     await settle();
@@ -144,10 +157,12 @@ describe('setting it up', () => {
     await settle();
     expect(save).toHaveBeenLastCalledWith({ site_stats_tag: TAG });
     expect(field('Web Analytics site tag').value).toBe(TAG);
+    // a tag typed by hand stays in sight
+    expect(fold('Set the site tag by hand').open).toBe(true);
   });
 
   it('keeps the API token on this computer, never showing it again but its end, and forgets it on a press', async () => {
-    await show({ site_stats_account: ACCOUNT, site_stats_tag: TAG });
+    await show({ site_stats_account: ACCOUNT });
     put.mockImplementation(async () => ({ token: { set: true, hint: '…kkkk' } }));
     type(field('Cloudflare API token'), 'too short');
     await settle();
@@ -164,7 +179,7 @@ describe('setting it up', () => {
     // set up now: the press is ready and the steps fold away
     expect(press().disabled).toBe(false);
     expect(card().querySelector('h3').textContent).toContain('Set up');
-    expect(card().querySelector('details.hub-how').open).toBe(false);
+    expect(fold('How to let Azimut read the numbers').open).toBe(false);
     del.mockImplementation(async () => ({ token: { set: false, hint: '' } }));
     const forget = [...card().querySelectorAll('button')].find((node) => node.textContent.trim() === 'Forget');
     expect(forget.getAttribute('title')).toBe('Forget the API token on this computer');
@@ -181,7 +196,7 @@ describe('reading the numbers', () => {
   });
 
   it('reads on the press only: disabled with a spinner while reading, then the site, its articles by title, its referrers and countries', async () => {
-    await show({ site_stats_account: ACCOUNT, site_stats_tag: TAG });
+    await show({ site_stats_account: ACCOUNT });
     siteRead.data = siteReadOf(READ);
     await settle();
     expect(post).not.toHaveBeenCalled();
@@ -230,9 +245,35 @@ describe('reading the numbers', () => {
     expect(referrers.querySelector('li .rank-name').classList.contains('quiet-name')).toBe(true);
     const countries = card().querySelector('section[aria-label="Countries"]');
     expect(ranked(countries)).toEqual([['France', '800'], ['United States', '500']]);
+    // the tag the server found shows in its field, folded, and the numbers stay
+    expect(field('Web Analytics site tag').value).toBe(TAG);
+    expect(fold('Set the site tag by hand').open).toBe(false);
+    expect(fold('Set the site tag by hand').textContent).toContain(TAG_FOUND_HINT);
+    expect(prefs.siteStatsTagFound).toBe(true);
+    expect(card().querySelector('table')).not.toBeNull();
   });
 
-  it('says so when Cloudflare counted nothing, and names the site tag as the likely cause', async () => {
+  it('opens the site tag field when the press could not find the tag, and takes one typed there', async () => {
+    const { savePrefs: save } = await show({ site_stats_account: ACCOUNT });
+    post.mockImplementation(async () => ({ ok: false, needs: 'tag', detail: NO_SITE }));
+    press().click();
+    await settle();
+    expect(status().getAttribute('data-state')).toBe('error');
+    expect(status().textContent.trim()).toBe(NO_SITE);
+    expect(fold('Set the site tag by hand').open).toBe(true);
+    expect(card().querySelector('table')).toBeNull();
+    type(field('Web Analytics site tag'), TAG);
+    await settle();
+    expect(save).toHaveBeenLastCalledWith({ site_stats_tag: TAG });
+    expect(prefs.siteStatsTagFound).toBe(false);
+    post.mockImplementation(async () => ({ ...NUMBERS, tag_found: false }));
+    press().click();
+    await settle();
+    expect(card().querySelector('table')).not.toBeNull();
+    expect(fold('Set the site tag by hand').open).toBe(true);
+  });
+
+  it('says so when Cloudflare counted nothing, and names what to check', async () => {
     await show({ site_stats_account: ACCOUNT, site_stats_tag: TAG });
     post.mockImplementation(async () => ({ ...NUMBERS, pages: [], total: { week: counts(0), month: counts(0) }, referrers: [], countries: [], sampled: false }));
     press().click();

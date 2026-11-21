@@ -4,15 +4,17 @@
    * (`lib/siteNumbers.svelte.js`). The whole site over 7 and 30 days, each article's page views with its
    * title linking to it, and the referrers and countries the visits came from, ranked.
    *
-   * Under them, where the numbers come from, field by field: the account ID and the site tag, saved as
-   * preferences once they read as such, and the API token, which goes up once when typed and never comes
-   * back (its last characters only), with Forget. The steps to find each stay open while one is missing
-   * (`lib/websiteSetup.js`). Nothing here reaches Cloudflare but the press; the token state is read from
-   * this computer on mount. Which article a page is comes from the session's read of the site
-   * (`lib/siteRead.svelte.js`); a page it does not know shows its path.
+   * Under them, where the numbers come from, field by field: the account ID, saved as a preference once
+   * it reads as one, and the API token, which goes up once when typed and never comes back (its last
+   * characters only), with Forget. The site tag is found by the press from the site token Readers holds;
+   * typing it by hand, folded under Set the site tag by hand, wins, and that fold opens when the press
+   * could not find it. The steps stay open while something is missing (`lib/websiteSetup.js`). Nothing
+   * here reaches Cloudflare but the press; the token state is read from this computer on mount. Which
+   * article a page is comes from the session's read of the site (`lib/siteRead.svelte.js`); a page it
+   * does not know shows its path.
    */
   import Icon from '../../../components/Icon.svelte';
-  import { toast } from '../../../lib/state.svelte.js';
+  import { applyPrefs, toast } from '../../../lib/state.svelte.js';
   import { siteRead } from '../../../lib/siteRead.svelte.js';
   import {
     forgetCloudflareToken, forgetNumbers, readCloudflare, runNumbers, saveCloudflareToken, siteNumbers,
@@ -21,7 +23,8 @@
   import {
     ACCOUNT_BAD, ACCOUNT_HINT, API_TOKEN_BAD, API_TOKEN_HINT, CLOUDFLARE_TOKEN_GUIDE, COUNTRIES_TITLE, NO_REFERRER, NUMBERS_AGAIN,
     NUMBERS_BUSY, NUMBERS_FIRST, NUMBERS_FREE, NUMBERS_HEAD, NUMBERS_INTRO, NUMBERS_NONE, NUMBERS_NOT_SET, NUMBERS_PRESS, NUMBERS_SAMPLED,
-    NUMBERS_SETUP, NUMBERS_STAYS, NUMBERS_STEPS, NUMBERS_TITLE, NUMBERS_TOTAL, RANKED_NONE, REFERRERS_TITLE, TAG_BAD, TAG_HINT,
+    NUMBERS_SETUP, NUMBERS_STAYS, NUMBERS_STEPS, NUMBERS_TITLE, NUMBERS_TOTAL, RANKED_NONE, REFERRERS_TITLE, TAG_BAD, TAG_FOUND_HINT, TAG_HAND_TITLE,
+    TAG_HINT, TAG_WHERE,
     WEBSITE_HELP as HELP, apiToken, apiTokenKeptSaid, cloudflareId, countSaid, readAtSaid, tileSaid, whenSaid,
   } from '../../../lib/websiteSetup.js';
   import HubCard from './HubCard.svelte';
@@ -49,9 +52,13 @@
   $effect(() => { accountText = prefs.siteStatsAccount; });
   $effect(() => { tagText = prefs.siteStatsTag; });
 
-  const key = $derived(`${prefs.siteStatsAccount}/${prefs.siteStatsTag}`);
-  const ready = $derived(Boolean(prefs.siteStatsAccount && prefs.siteStatsTag && cloud?.token.set));
-  // numbers read with another account or site tag are no numbers of this one
+  // a tag typed by hand, which wins over the site token; one the press found stands for the site token
+  const handTag = $derived(prefs.siteStatsTagFound ? '' : prefs.siteStatsTag);
+  const key = $derived(`${prefs.siteStatsAccount}/${prefs.siteStatsToken}/${handTag}`);
+  const ready = $derived(Boolean(prefs.siteStatsAccount && cloud?.token.set && (prefs.siteStatsToken || handTag)));
+  // the fold holding the tag field opens when the press could not find the tag, or one is typed there
+  const tagOpen = $derived(siteNumbers.needs === 'tag' || Boolean(handTag) || Boolean(tagProblem));
+  // numbers read with another account, site token or tag typed by hand are no numbers of this one
   $effect(() => {
     if (siteNumbers.key && siteNumbers.key !== key) forgetNumbers();
   });
@@ -60,6 +67,14 @@
   const rows = $derived(numbersRows(data, siteRead.data, address));
   const quiet = $derived(Boolean(data) && !rows.length && !data.total.month.views);
   const windows = $derived(data ? [['7 days', data.total.week], ['30 days', data.total.month]] : []);
+
+  /** The press: the numbers, and the site tag the server found and kept shown in its field. */
+  async function read() {
+    const answer = await runNumbers(key);
+    if (answer?.tag_found && typeof answer.tag === 'string' && answer.tag !== prefs.siteStatsTag) {
+      applyPrefs({ site_stats_tag: answer.tag, site_stats_tag_found: true });
+    }
+  }
 
   async function saveId(which) {
     const typed = which === 'account' ? accountText : tagText;
@@ -117,7 +132,7 @@
   <p>{NUMBERS_INTRO}</p>
 
   <div class="press-line">
-    <button type="button" class="btn btn-sm" onclick={() => runNumbers(key)} disabled={!ready || siteNumbers.busy} aria-busy={siteNumbers.busy}
+    <button type="button" class="btn btn-sm" onclick={read} disabled={!ready || siteNumbers.busy} aria-busy={siteNumbers.busy}
       title={ready ? HELP.statsNumbers : NUMBERS_NOT_SET}>
       <Icon name="download" size={12} />{data ? NUMBERS_AGAIN : NUMBERS_PRESS}</button>
     {#if siteNumbers.busy}
@@ -199,10 +214,6 @@
       <input id="hub-stats-account" class="input hub-mono" bind:value={accountText} onchange={() => saveId('account')} placeholder="0123456789abcdef…"
         spellcheck="false" autocomplete="off" aria-label="Cloudflare account ID" aria-invalid={accountProblem ? 'true' : undefined} title={HELP.statsAccount} />
     </HubField>
-    <HubField id="hub-stats-tag" label="Site tag" hint={TAG_HINT} problem={tagProblem}>
-      <input id="hub-stats-tag" class="input hub-mono" bind:value={tagText} onchange={() => saveId('tag')} placeholder="fedcba9876543210…"
-        spellcheck="false" autocomplete="off" aria-label="Web Analytics site tag" aria-invalid={tagProblem ? 'true' : undefined} title={HELP.statsTag} />
-    </HubField>
     <HubField id="hub-stats-api" label="API token" hint={cloud?.token.set ? apiTokenKeptSaid(cloud.token.hint) : API_TOKEN_HINT} problem={tokenProblem}>
       <span class="token-line">
         <input id="hub-stats-api" class="input hub-mono" type="password" bind:value={tokenText} onchange={saveToken}
@@ -212,6 +223,17 @@
       </span>
     </HubField>
   </div>
+
+  <details class="hub-how tag-hand" open={tagOpen}>
+    <summary title={HELP.statsTagHand}>{TAG_HAND_TITLE}</summary>
+    <div class="tag-field">
+      <HubField id="hub-stats-tag" label="Site tag" hint={prefs.siteStatsTagFound ? TAG_FOUND_HINT : TAG_HINT} problem={tagProblem}>
+        <input id="hub-stats-tag" class="input hub-mono" bind:value={tagText} onchange={() => saveId('tag')} placeholder="fedcba9876543210…"
+          spellcheck="false" autocomplete="off" aria-label="Web Analytics site tag" aria-invalid={tagProblem ? 'true' : undefined} title={HELP.statsTag} />
+      </HubField>
+    </div>
+    <p class="how-note">{TAG_WHERE}</p>
+  </details>
 
   <details class="hub-how" open={!ready}>
     <summary title={HELP.statsNumbersHow}>{NUMBERS_SETUP}</summary>
@@ -262,6 +284,7 @@
   .token-line { display: flex; align-items: center; gap: 8px; min-width: 0; }
   .token-line .input { flex: 1; min-width: 0; }
   .token-line .btn { flex: none; }
+  .tag-field { margin-top: 6px; }
   .how-note { margin: 6px 0 0; color: var(--text-3); font-size: var(--fs-xs); line-height: 1.5; }
   .hub-how .hub-ext { margin-top: 6px; }
 

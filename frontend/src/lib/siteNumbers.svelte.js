@@ -3,8 +3,9 @@
  * `engine/sitestats.py`), and the API token that reads them.
  *
  * `runNumbers` is the Read the numbers press and the only way out: nothing here runs on mount, and
- * the answer is kept for the session, never on disk. `key` is the account and site tag it was read
- * with, so a read of another site is dropped (`forgetNumbers`) rather than shown under it. Saving
+ * the answer is kept for the session, never on disk. `key` is the account, site token and hand-typed
+ * site tag it was read with, so a read of another site is dropped (`forgetNumbers`) rather than shown
+ * under it. Saving
  * and forgetting the token stay on this computer; the token goes up once, when typed, and never
  * comes back: the server answers whether one is kept and its last four characters.
  */
@@ -19,24 +20,36 @@ export const siteNumbers = $state({
   busy: false,
   /** What went wrong, in the server's words. */
   error: '',
-  /** The account and site tag they were read with, `account/tag`. */
+  /** What the press found missing: `tag` when the site tag could not be found and is to be typed. */
+  needs: '',
+  /** What they were read with, `account/site token/tag typed by hand`. */
   key: '',
 });
 
-/** Read the numbers once; a second press while one is running does nothing. */
+/**
+ * Read the numbers once; a second press while one is running does nothing. The answer, or null when
+ * nothing came: `{ tag, tag_found }` say which site tag was read and whether it was found from the site
+ * token, which the server keeps.
+ */
 export async function runNumbers(key = '') {
-  if (siteNumbers.busy) return false;
+  if (siteNumbers.busy) return null;
   siteNumbers.busy = true;
   siteNumbers.error = '';
+  siteNumbers.needs = '';
   try {
     const answer = await api.post('/api/publishing/cloudflare/numbers');
+    if (answer?.ok === false) {
+      siteNumbers.error = String(answer.detail ?? '');
+      siteNumbers.needs = answer.needs === 'tag' ? 'tag' : '';
+      return null;
+    }
     siteNumbers.data = numbersOf(answer);
     siteNumbers.at = new Date();
     siteNumbers.key = key;
-    return true;
+    return answer;
   } catch (error) {
     siteNumbers.error = error.message;
-    return false;
+    return null;
   } finally {
     siteNumbers.busy = false;
   }
@@ -47,6 +60,7 @@ export function forgetNumbers() {
   siteNumbers.data = null;
   siteNumbers.at = null;
   siteNumbers.error = '';
+  siteNumbers.needs = '';
   siteNumbers.key = '';
 }
 

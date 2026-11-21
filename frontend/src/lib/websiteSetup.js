@@ -440,9 +440,9 @@ export const NUMBERS_INTRO = 'Page views of each article over 7 and 30 days, rea
 export const NUMBERS_PRESS = 'Read the numbers';
 export const NUMBERS_AGAIN = 'Read again';
 export const NUMBERS_BUSY = 'Reading…';
-export const NUMBERS_NOT_SET = 'Fill in the account ID, the site tag and the API token first';
+export const NUMBERS_NOT_SET = 'Fill in the account ID, the API token and the site token first';
 export const NUMBERS_FIRST = 'Press Read the numbers to see what is read, and from where.';
-export const NUMBERS_NONE = 'No page view in 30 days: if readers came, check the site tag, which is not the site token.';
+export const NUMBERS_NONE = 'No page view in 30 days: if readers came, check the site token, and the site tag if you set it by hand.';
 export const NUMBERS_SAMPLED = 'Cloudflare samples what is older than 7 days, so the 30-day counts are estimates.';
 export const NUMBERS_GOATCOUNTER = 'Numbers are read from Cloudflare Web Analytics only; open GoatCounter\'s own page.';
 export const NUMBERS_HEAD = Object.freeze(['Page', '7 days', '30 days']);
@@ -461,21 +461,30 @@ export function tileSaid({ views = 0, visits = 0 } = {}) {
   return `${views === 1 ? 'page view' : 'page views'} · ${countSaid(visits)} ${visits === 1 ? 'visit' : 'visits'}`;
 }
 
-/** Where each answer is found in Cloudflare, field by field, and what the token may do. */
+/**
+ * Where each answer is found in Cloudflare, field by field, as its token page reads (Manage account ›
+ * Account API tokens › Create a token), and what the token may do: two read-only permissions, one to read
+ * the numbers, one to list the account's Web Analytics sites so the site tag is found from the site token.
+ */
 export const NUMBERS_SETUP = 'How to let Azimut read the numbers';
-export const NUMBERS_FREE = 'Free: Web Analytics and its numbers need no paid plan.';
-export const NUMBERS_STAYS = 'The API token only reads, and stays on this computer, never in a backup.';
+export const TOKEN_NAME = 'azimut-reader-numbers';
+export const NUMBERS_FREE = 'Both permissions are free and only read.';
+export const NUMBERS_STAYS = 'The token stays on this computer, never in a backup.';
 export const NUMBERS_STEPS = Object.freeze([
   ['Account ID', 'In Cloudflare\'s dashboard, press Ctrl+K (⌘K on a Mac), type Copy account ID and pick it.'],
-  ['Site tag', 'Open Web Analytics and press your site: the page\'s address holds siteTag~in= and the tag. Paste the address or the tag.'],
-  ['API token', 'Open Manage account › Account API tokens, press Create Token, then Get started beside Custom token.'],
-  ['Permission', 'Name it, then pick Account, Account Analytics and Read in the three boxes. Nothing else.'],
-  ['Copy it', 'Press Continue to summary, then Create Token, and copy the token: Cloudflare shows it once.'],
+  ['Token page', 'Open Manage account › Account API tokens and press Create a token.'],
+  ['Token name', `Type ${TOKEN_NAME}.`],
+  ['Permission policies', 'Pick Start from scratch (Custom): the Read analytics and Read all resources templates give far more than Azimut needs.'],
+  ['Permissions', 'Add two lines, Account Analytics: Read and Account Settings: Read.'],
+  ['Create it', 'Create the token and copy it, as Cloudflare shows it once, then paste it below.'],
 ]);
 export const CLOUDFLARE_TOKEN_GUIDE = 'https://developers.cloudflare.com/analytics/graphql-api/getting-started/authentication/api-token-auth/';
 export const ACCOUNT_HINT = 'From Copy account ID in Cloudflare\'s dashboard.';
-export const TAG_HINT = 'In the address of the site\'s page in Web Analytics, after siteTag~in=.';
-export const API_TOKEN_HINT = 'Account Analytics, Read. Kept on this computer only, never in a backup.';
+export const TAG_HAND_TITLE = 'Set the site tag by hand';
+export const TAG_HINT = 'Left empty, Azimut finds it from the site token.';
+export const TAG_FOUND_HINT = 'Found from the site token. A tag typed here wins.';
+export const TAG_WHERE = 'In Web Analytics, open your site: the page\'s address holds siteTag~in= and the tag. Paste the address or the tag.';
+export const API_TOKEN_HINT = 'Account Analytics and Account Settings, both Read. Kept on this computer only, never in a backup.';
 export const ACCOUNT_BAD = 'That does not read as an account ID: 32 letters and digits, a to f and 0 to 9.';
 export const TAG_BAD = 'That does not read as a site tag: 32 letters and digits, a to f and 0 to 9.';
 export const API_TOKEN_BAD = 'That does not read as a Cloudflare API token: copy it whole, as Cloudflare showed it.';
@@ -708,6 +717,7 @@ export const WEBSITE_HELP = {
   cloudflareDashboard: "Open Cloudflare's Web Analytics dashboard",
   statsAccount: 'Your Cloudflare account ID, 32 letters and digits',
   statsTag: 'The site tag Web Analytics gives the site, which is not its token',
+  statsTagHand: 'Type the site tag yourself, for when Azimut cannot find it',
   statsApiToken: 'A read-only Cloudflare API token, kept on this computer only',
   statsApiForget: 'Forget the API token on this computer',
   statsNumbers: 'Ask Cloudflare for the last 30 days of numbers',
