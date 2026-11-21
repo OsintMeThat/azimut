@@ -342,6 +342,32 @@ class Box:
     bar_width: float = 0.0
 
 
+@dataclass(frozen=True)
+class Sized:
+    """One of the note's own pictures (`NotePage.band_picture`) at the size it is drawn, in mm."""
+
+    path: Path
+    width: float
+    height: float
+
+
+@dataclass(frozen=True)
+class Signed:
+    """`NotePage.signature_block` laid out before it is drawn, so that `signature_height`
+    measures exactly what it draws: each part's place in mm, down from the block's top
+    and right of its left edge."""
+
+    #: The analyst's logo, beside the name or alone above the signature with no name.
+    logo: Sized | None
+    logo_top: float
+    #: Where the signature, the name and the credentials start across.
+    column: float
+    signature: Sized | None
+    signature_top: float
+    named_top: float
+    height: float
+
+
 class NotePage(FPDF):
     """The document a note becomes, with its furniture: header, footer, cover,
     table of contents and the boxes drawn behind text.
@@ -795,25 +821,35 @@ class NotePage(FPDF):
                 self.set_font(self.theme.aside_family, "I", 13.5)
                 self.set_text_color(*theme.muted)
                 self.multi_cell(frame, 6.6, look.cover.subtitle, align=Align.L, new_x=XPos.LMARGIN, new_y=YPos.NEXT)
+            # the analyst's logo stands by their name: beside the signature under the date,
+            # else beside the byline under the title, else alone under the date
+            logo = self.card_logo()
+            signs = "signature" in look.cover.marks
+            named = self.signer is not None and bool(self.signer.name)
             byline = self.signer.byline() if self.signer is not None and look.signed == "title" else ""
             if byline:
-                self.ln(2.5)
-                self.set_x(left)
-                self.set_font(self.theme.heading_family, "", 10)
-                self.set_text_color(*theme.ink)
-                self.multi_cell(frame, 5.2, byline, align=Align.L, new_x=XPos.LMARGIN, new_y=YPos.NEXT,
-                                link=self.signer.site)
+                beside = None if signs and named else logo
+                self.ln(2.5 if beside is None else 4.0)
+                self._cover_byline(left, frame, byline, beside)
+                logo = None if beside is not None else logo
             self.ln(7)
             self.set_x(left)
             self.set_font(self.theme.heading_family, "B", 10)
             self.set_text_color(*theme.accent_dark)
             self.cell(frame, 5, long_date(self.day))
-            if "signature" in look.cover.marks:
-                self.set_xy(left, self.get_y() + 12.0)
-                self.signature_block(left, frame)
 
             label = TLP_LABELS.get(look.tlp)
-            self._cover_logos(left, (height - 30.0 - 16.0) if label is not None else height - 26.0)
+            mark_top = (height - 30.0 - 16.0) if label is not None else height - 26.0
+            card = self.signature_height(frame, logo=logo) if signs else logo.height if logo is not None else 0.0
+            if card:
+                # 12 mm under the date's top, closer rather than into the foot when the title runs long
+                floor = mark_top if "azimut" in look.cover.marks else height - 30.0 if label is not None else height - 16.0
+                self.set_xy(left, self.get_y() + max(7.0, min(12.0, floor - 3.0 - card - self.get_y())))
+                if signs:
+                    self.signature_block(left, frame, logo=logo)
+                elif logo is not None:
+                    self._place_logo(logo, left, self.get_y())
+            self._cover_mark(left, mark_top)
             if label is not None:
                 foot = height - 30.0
                 self.set_draw_color(*theme.rule)
@@ -828,64 +864,128 @@ class NotePage(FPDF):
             self.tlp_mark(width - left, height - 30.0 + 4.0)
         self.set_auto_page_break(True, margin=theme.margin_bottom)
 
-    def _cover_logos(self, left: float, top: float) -> None:
-        """The Azimut mark and the analyst's logo the cover asks for, side by side at
-        its foot, each at most `COVER_LOGO_HEIGHT` tall."""
-        names = [name for mark, name in (("azimut", "logo"), ("logo", "my-logo")) if mark in self.look.cover.marks]
-        x = left
-        for name in names:
-            found = self.band_picture(name)
-            if found is None:
-                continue
-            path, (wide, high) = found
-            if wide <= 0 or high <= 0:
-                continue
-            tall = COVER_LOGO_HEIGHT
-            drawn = min(COVER_LOGO_WIDTH, tall * wide / high)
-            tall = drawn * high / wide
-            y = top + (COVER_LOGO_HEIGHT - tall) / 2
-            self.place_picture(path, x=x, y=y, w=drawn, h=tall)
-            site = self.signer.site if self.signer is not None and name == "my-logo" else ""
-            if site:
-                self.link(x, y, drawn, tall, site)
-            x += drawn + 7.0
+    def _cover_mark(self, left: float, top: float) -> None:
+        """The Azimut mark at the cover's foot when the cover asks for it, at most
+        `COVER_LOGO_HEIGHT` tall. The analyst's logo stands by their name instead."""
+        if "azimut" not in self.look.cover.marks:
+            return
+        mark = self._sized("logo", COVER_LOGO_HEIGHT, COVER_LOGO_WIDTH)
+        if mark is not None:
+            self.place_picture(mark.path, x=left, y=top + (COVER_LOGO_HEIGHT - mark.height) / 2,
+                               w=mark.width, h=mark.height)
 
-    def signature_block(self, left: float, width: float) -> float:
-        """The analyst's handwritten signature, then their name and credentials, from
-        the cursor down; returns how tall it was. Nothing without a name or a picture."""
+    def card_logo(self) -> Sized | None:
+        """The analyst's logo when the cover asks for it (`NoteCover.marks`) and Settings
+        has one, sized to stand by their name: at most `CARD_LOGO_HEIGHT` tall."""
+        if "logo" not in self.look.cover.marks:
+            return None
+        return self._sized("my-logo", CARD_LOGO_HEIGHT, CARD_LOGO_WIDTH)
+
+    def _sized(self, name: str, tallest: float, widest: float) -> Sized | None:
+        """A picture `band_picture` finds, at most ``tallest`` tall and ``widest`` wide."""
+        found = self.band_picture(name)
+        if found is None:
+            return None
+        path, (wide, high) = found
+        if wide <= 0 or high <= 0:
+            return None
+        drawn = min(widest, tallest * wide / high)
+        return Sized(path, drawn, drawn * high / wide)
+
+    def _place_logo(self, logo: Sized, x: float, y: float) -> None:
+        """The analyst's logo, linked to their Website when Settings has one."""
+        self.place_picture(logo.path, x=x, y=y, w=logo.width, h=logo.height)
+        site = self.signer.site if self.signer is not None else ""
+        if site:
+            self.link(x, y, logo.width, logo.height, site)
+
+    def _cover_byline(self, left: float, width: float, byline: str, logo: Sized | None) -> None:
+        """`By Name, Role · Organisation` under the cover's title, with ``logo`` left of it
+        and centred on it."""
+        column = left + logo.width + CARD_GAP if logo is not None else left
+        room = width - (column - left)
+        self.set_font(self.theme.heading_family, "", 10)
+        self.set_text_color(*self.theme.ink)
+        lines = self.multi_cell(room, 5.2, byline, align=Align.L, dry_run=True, output="LINES")
+        assert isinstance(lines, list)
+        text = 5.2 * len(lines)
+        top = self.get_y()
+        lift = max(0.0, (logo.height - text) / 2) if logo is not None else 0.0
+        self.set_xy(column, top + lift)
+        self.multi_cell(room, 5.2, byline, align=Align.L, new_x=XPos.LMARGIN, new_y=YPos.NEXT,
+                        link=self.signer.site)
+        if logo is not None:
+            self._place_logo(logo, left, top + lift + (text - logo.height) / 2)
+            self.set_y(max(self.get_y(), top + logo.height))
+
+    def _signed(self, width: float, logo: Sized | None) -> Signed:
+        """Where `signature_block` puts each part: the signature over the name, ``logo``
+        left of the name and credentials and centred on them, never above the block's
+        top; with no name the logo stands alone, above the signature."""
         signer = self.signer
-        if signer is None:
+        name = signer.name if signer is not None else ""
+        signature = self._sized("my-signature", SIGNATURE_HEIGHT, SIGNATURE_WIDTH) if signer is not None else None
+        y = logo.height + (CARD_GAP if signature is not None else 0.0) if logo is not None and not name else 0.0
+        beside = logo if logo is not None and name else None
+        column = beside.width + CARD_GAP if beside is not None else 0.0
+        signature_top = y
+        if signature is not None:
+            y += signature.height + 1.5
+        if not name:
+            return Signed(logo, 0.0, column, signature, signature_top, y, y)
+        text = 5.0 + 4.4 * self._credential_lines(width - column)
+        if beside is None:
+            return Signed(None, 0.0, column, signature, signature_top, y, y + text)
+        named_top = y + max(0.0, (beside.height - text) / 2 - y)
+        logo_top = named_top + (text - beside.height) / 2
+        return Signed(beside, logo_top, column, signature, signature_top, named_top,
+                      max(named_top + text, logo_top + beside.height))
+
+    def _credential_lines(self, width: float) -> int:
+        """How many lines `Role · Organisation` takes under the name, ``width`` wide."""
+        credentials = self.signer.credentials()
+        if not credentials:
+            return 0
+        with self.local_context():
+            self.set_font(self.theme.heading_family, "", 8.5)
+            lines = self.multi_cell(width, 4.4, credentials, align=Align.L, dry_run=True, output="LINES")
+        assert isinstance(lines, list)
+        return len(lines)
+
+    def signature_block(self, left: float, width: float, *, logo: Sized | None = None) -> float:
+        """The analyst's handwritten signature, then their name and credentials, from
+        the cursor down; returns how tall it was. Nothing without a name or a picture.
+        ``logo`` (`card_logo`) makes it the cover's author card, the logo left of the
+        name and credentials, or alone above the signature with no name to stand by."""
+        laid = self._signed(width, logo)
+        if not laid.height:
             return 0.0
         top = self.get_y()
-        found = self.band_picture("my-signature")
-        if found is not None:
-            path, (wide, high) = found
-            if wide > 0 and high > 0:
-                tall = SIGNATURE_HEIGHT
-                drawn = min(SIGNATURE_WIDTH, tall * wide / high)
-                tall = drawn * high / wide
-                self.place_picture(path, x=left, y=self.get_y(), w=drawn, h=tall)
-                self.set_y(self.get_y() + tall + 1.5)
-        if signer.name:
-            self.set_x(left)
+        if laid.logo is not None:
+            self._place_logo(laid.logo, left, top + laid.logo_top)
+        x, room = left + laid.column, width - laid.column
+        if laid.signature is not None:
+            self.place_picture(laid.signature.path, x=x, y=top + laid.signature_top,
+                               w=laid.signature.width, h=laid.signature.height)
+        signer = self.signer
+        if signer is not None and signer.name:
+            self.set_xy(x, top + laid.named_top)
             self.set_font(self.theme.heading_family, "B", 9.5)
             self.set_text_color(*self.theme.ink)
-            self.cell(width, 5, signer.name, new_x=XPos.LMARGIN, new_y=YPos.NEXT, link=signer.site)
+            self.cell(room, 5, signer.name, new_x=XPos.LMARGIN, new_y=YPos.NEXT, link=signer.site)
             credentials = signer.credentials()
             if credentials:
-                self.set_x(left)
+                self.set_x(x)
                 self.set_font(self.theme.heading_family, "", 8.5)
                 self.set_text_color(*self.theme.muted)
-                self.multi_cell(width, 4.4, credentials, align=Align.L, new_x=XPos.LMARGIN, new_y=YPos.NEXT)
-        return self.get_y() - top
+                self.multi_cell(room, 4.4, credentials, align=Align.L, new_x=XPos.LMARGIN, new_y=YPos.NEXT)
+        self.set_y(top + laid.height)
+        return laid.height
 
-    def signature_height(self) -> float:
-        """How tall `signature_block` will be, to keep it on one page."""
-        signer = self.signer
-        if signer is None:
-            return 0.0
-        tall = SIGNATURE_HEIGHT + 1.5 if self.band_picture("my-signature") is not None else 0.0
-        return tall + (5.0 + (4.4 if signer.credentials() else 0.0) if signer.name else 0.0)
+    def signature_height(self, width: float | None = None, *, logo: Sized | None = None) -> float:
+        """How tall `signature_block` will be with the same ``width`` (the page's frame by
+        default) and ``logo``, to keep it on one page."""
+        return self._signed(self.epw if width is None else width, logo).height
 
     def _contours(self, ground: RGB, field_height: float) -> None:
         """A quiet pattern of rings for a cover with no picture: a bearing plot's
@@ -978,9 +1078,14 @@ BAND_WORD = re.compile(r"\{(title|date|name|role|organisation|page|pages)\}")
 #: A slot's text size, and the tallest a picture in one is, in millimetres.
 BAND_SIZE = 7.5
 BAND_PICTURE_HEIGHT = 5.0
-#: The cover's logos (`NoteCover.marks`): at most this tall and wide, in mm.
+#: The Azimut mark at the cover's foot (`NoteCover.marks`): at most this tall and wide, in mm.
 COVER_LOGO_HEIGHT = 11.0
 COVER_LOGO_WIDTH = 42.0
+#: The analyst's logo by their name on the cover: at most this tall and wide, and the
+#: room between it and the name, in mm.
+CARD_LOGO_HEIGHT = 12.0
+CARD_LOGO_WIDTH = 36.0
+CARD_GAP = 4.5
 #: A handwritten signature: at most this tall and wide, in mm.
 SIGNATURE_HEIGHT = 15.0
 SIGNATURE_WIDTH = 55.0
