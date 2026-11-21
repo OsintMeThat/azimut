@@ -1167,41 +1167,59 @@ def _check_lines(block: ChartBlock, kind: Kind, said: str,
             warn(f'{said}: a {kind.label.lower()} chart does not read "{key}".', key=key)
 
 
-def drawn_columns(reading: Reading) -> list[int] | None:
-    """The columns of a chart's table its drawing reads, by index, in order: what the
-    editor's numbers keep plain while it greys the others as not drawn. None for a kind
-    that reads every column it holds (key figures), so none is ever marked."""
+#: What a chart's drawing does with a column of its rows (`column_roles`), each said in
+#: the column's heading in the editor's numbers (`frontend/src/lib/cellHints.js`, `ROLES`).
+COLUMN_ROLES: tuple[str, ...] = ("picture", "label", "words", "groups", "parts", "colour", "icon", "flag", "count",
+                                 "start", "until", "event", "along", "height", "filter")
+
+
+def column_roles(reading: Reading) -> list[str] | None:
+    """What a chart's drawing does with each column of its table, in order (`COLUMN_ROLES`),
+    "" for a column it does not read, which the editor's numbers grey as not drawn. A column
+    playing two parts says the first. None for a kind that reads every column it holds (key
+    figures), so none is ever named."""
     table = reading.table
     if table is None or not table.headers:
         return None
     kind = reading.kind
-    used: set[int | None] = {reading.colour, *(table.column(only.column) for only in reading.block.only)}
+    extra = reading.block.extra
+
+    def named(key: str) -> int | None:
+        said = (extra.get(key) or "").strip()
+        return table.column(said) if said else None
+
+    played: list[tuple[str, int | None]]
     if kind.per_row:
         from . import notes_chart_wall as wall
 
         found = wall.columns(reading)
-        flag = (reading.block.extra.get("flag") or "").strip()
-        used.update((found.picture, found.label, found.words, reading.by, table.column(flag) if flag else None))
+        played = [("picture", found.picture), ("label", found.label), ("words", found.words),
+                  ("groups", reading.by), ("colour", reading.colour), ("flag", named("flag"))]
     elif kind.name == "timeline":
         from . import notes_chart_timeline as timeline
 
-        used.update(timeline.timeline_columns(reading))
+        start, until, what = timeline.timeline_columns(reading)
+        played = [("start", start), ("until", until), ("event", what), ("colour", reading.colour)]
         # a column named for an end is drawn as soon as a row holds a day in it
-        used.update(index for index, header in enumerate(table.headers) if timeline.END_HEADER.search(header))
+        played += [("until", index) for index, header in enumerate(table.headers) if timeline.END_HEADER.search(header)]
     elif kind.name == "line":
         from . import notes_chart_kinds as kinds
 
         x, y, _days = kinds._line_columns(reading)
-        used.update((x, y))
+        played = [("along", x), ("height", y), ("colour", reading.colour)]
     elif kind.counts:
-        used.update((reading.count, reading.by))
-        for key in ("icon", "flag"):
-            said = (reading.block.extra.get(key) or "").strip()
-            if said:
-                used.add(table.column(said))
+        # a kind of parts draws its colour column's values as its parts, its by column's when it has none
+        parted = [("parts", reading.colour)] if kind.parts else []
+        played = [("count", reading.count), *parted, ("groups", reading.by), ("colour", reading.colour),
+                  ("icon", named("icon")), ("flag", named("flag"))]
     else:
         return None
-    return sorted(index for index in used if index is not None)
+    played += [("filter", table.column(only.column)) for only in reading.block.only]
+    roles = [""] * len(table.headers)
+    for role, index in played:
+        if index is not None and not roles[index]:
+            roles[index] = role
+    return roles
 
 
 def reads_as_share(table: Table, column: int) -> bool:

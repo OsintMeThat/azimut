@@ -1346,7 +1346,7 @@ const THEME = {
   '.cm-grid .cm-grid-idle': { background: 'color-mix(in srgb, var(--text-1) 3.5%, transparent)' },
   '.cm-grid .cm-grid-idle .cm-grid-text, .cm-grid .cm-grid-idle .cm-chip': { color: 'var(--text-3)' },
   '.cm-grid .cm-grid-idle .cm-grid-thumb': { opacity: '0.55' },
-  // what a chart reads in a column of its rows (`editor/rowsGrid.js`, `lib/cellHints.js`)
+  // what a chart reads in, or does with, a column of its rows (`editor/rowsGrid.js`, `lib/cellHints.js`)
   '.cm-grid-expects': {
     flex: 'none', marginRight: '2px', padding: '0 5px', borderRadius: '3px', background: 'var(--bg-3)', color: 'var(--text-3)',
     fontSize: '10.5px', fontWeight: '500', lineHeight: '16px', whiteSpace: 'nowrap',

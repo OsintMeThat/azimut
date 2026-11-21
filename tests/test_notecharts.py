@@ -467,30 +467,33 @@ def test_the_figure_route_names_the_values_a_chart_of_glyphs_gives_an_icon_each(
     assert bars["keys"] == [] and "values" not in bars
 
 
-def test_the_figure_route_names_the_columns_a_chart_draws_so_the_others_show_as_not_drawn(client):
-    """The numbers grey a column the drawing never reads: a wall's extra column, a register's
-    columns a count does not use. A kind that reads every column names none."""
+def test_the_figure_route_names_what_the_drawing_does_with_each_column_and_none_for_the_others(client):
+    """The numbers say each column's part in its heading and grey a column the drawing never
+    reads: a wall's extra column, a register's columns a count does not use. A kind that reads
+    every column names none."""
     cid, _ = _case(client)
 
-    def drawn(block: str) -> list[int] | None:
-        return json.loads(client.post(f"/api/cases/{cid}/notes/figure", json={"text": block}).headers["x-chart-kind"]).get("drawn")
+    def roles(block: str) -> list[str] | None:
+        kind = json.loads(client.post(f"/api/cases/{cid}/notes/figure", json={"text": block}).headers["x-chart-kind"])
+        assert "drawn" not in kind
+        return kind.get("roles")
 
     wall = ("::: chart\nkind: pictures\nsource: x\n| Picture | # | Model | State |\n| --- | --- | --- | --- |\n"
             "| e_aaaa1111 | #1 | Kirpi | destroyed |\n| e_bbbb2222 | #2 | Cougar | captured |\n:::")
     # picture, label and words: State is no group and no colour, so nothing draws it
-    assert drawn(wall) == [0, 1, 2]
-    assert drawn(wall.replace("source: x", "source: x\nby: State")) == [0, 1, 2, 3]
+    assert roles(wall) == ["picture", "label", "words", ""]
+    assert roles(wall.replace("source: x", "source: x\nby: Model\nwords: State")) == ["picture", "label", "groups", "words"]
     register = ("::: chart\nkind: bars\ncount: rows\nby: Model\nsource: x\n| # | Model | Grade | Seen in |\n| --- | --- | --- | --- |\n"
                 "| 1 | Kirpi | Confirmed | S01 |\n| 2 | Cougar | Almost sure | S02 |\n:::")
-    assert drawn(register) == [1]
-    assert drawn(register.replace("by: Model", "by: Model\ncolour by: Grade")) == [1, 2]
-    assert drawn(SMALL) == [0, 1]
+    assert roles(register) == ["", "groups", "", ""]
+    assert roles(register.replace("by: Model", "by: Model\ncolour by: Grade")) == ["", "groups", "colour", ""]
+    assert roles(SMALL) == ["groups", "count"]
     figures = "::: chart\nkind: key figures\nsource: x\n| Figure | What it says |\n| --- | --- |\n| 41 | vehicles |\n:::"
-    assert drawn(figures) is None
+    assert roles(figures) is None
     # a timeline's Until is drawn as soon as a row holds a day in it, so it is never marked
     timeline = ("::: chart\nkind: timeline\nsource: x\n| Day | What | Until | Note |\n| --- | --- | --- | --- |\n"
                 "| 10 Sep 2026 | Mocha taken | | aside |\n| 5 Oct 2026 | Offensive opens | | aside |\n:::")
-    assert drawn(timeline) == [0, 1, 2]
+    assert roles(timeline) == ["start", "event", "until", ""]
 
 
 @pytest.mark.parametrize("size, pixels", [("page", (1960, None)), ("x", (1600, 900)), ("portrait", (1080, 1350)),

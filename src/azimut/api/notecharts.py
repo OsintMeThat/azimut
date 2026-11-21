@@ -214,13 +214,14 @@ def _kind_said(chart: notecharts.Chart) -> dict[str, Any]:
     """The kind a chart is drawn as, and what of it the editor's card asks: whether it
     counts, a row at a time (a picture wall), draws parts or stacks, which kind it turns
     into, the look it takes, for a kind of glyphs or flags the values each given its own,
-    for a timeline the layout its page's drawing took, and the columns its drawing reads
-    (``drawn``), which the editor's numbers keep plain while they grey the others."""
+    for a timeline the layout its page's drawing took, and what its drawing does with each
+    column (``roles``, "" for one it does not read), which the editor's numbers say in each
+    heading, greying the columns with none."""
     kind = notes_charts.effective_kind(chart.block)
     if kind is None:
         return {}
     laid = chart.layout.facts.get("layout")
-    drawn = _drawn(chart)
+    roles = _roles(chart)
     return {"name": kind.name, "label": kind.label, "counts": kind.counts, "parts": kind.parts,
             "stacked": kind.stacked, "up": kind.up, "turns": kind.turns, "per_row": kind.per_row,
             "style": notecharts.theme_of(chart.look, chart.block).name,
@@ -228,16 +229,16 @@ def _kind_said(chart: notecharts.Chart) -> dict[str, Any]:
             # values a glyph each is given for
             "keys": list(kind.keys), **({"values": chart.values} if chart.values else {}),
             **({"layout": laid} if isinstance(laid, str) else {}),
-            **({"drawn": drawn} if drawn is not None else {})}
+            **({"roles": roles} if roles is not None else {})}
 
 
-def _drawn(chart: notecharts.Chart) -> list[int] | None:
-    """The columns of the chart's table its drawing reads, None when it reads them all."""
+def _roles(chart: notecharts.Chart) -> list[str] | None:
+    """What the drawing does with each column of the chart's table, None when it reads them all."""
     if chart.block.table is None or not chart.block.table.headers:
         return None
     reading = notes_charts.read(chart.block, theme=notecharts.theme_of(chart.look, chart.block), palette=chart.palette,
                                 note_text=chart.note_text, pictures=chart.pictures)
-    return notes_charts.drawn_columns(reading)
+    return notes_charts.column_roles(reading)
 
 
 #: How many of a chart's colours ride in the header.

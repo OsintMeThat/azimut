@@ -17,7 +17,8 @@
  *
  * A column the chart does not draw stays, greyed and marked "not drawn" (`widget.idle`).
  * A column it reads as days or as numbers says so in its heading, and each of its cells
- * says what the chart reads in it (`widget.reads`, `chartReads`, `lib/cellHints.js`).
+ * says what the chart reads in it (`widget.reads`, `chartReads`, `lib/cellHints.js`); any
+ * other column it draws says what the drawing does with it (`widget.roles`, `chartColumns`).
  *
  * `host` is the block the grid stands in: `start()` where its table's header line stands
  * in the note, `anchor(where)` where the cursor goes on leaving ('pick', 'before', 'after'),
@@ -27,7 +28,7 @@
 import { isolateHistory } from '@codemirror/commands';
 import { Transaction } from '@codemirror/state';
 
-import { EXPECTS, EXPECTS_TITLE, NUMBERS, cellSays, columnReads, readsKey } from '../../cellHints.js';
+import { NUMBERS, VALUE_ROLES, cellSays, columnReads, headingTag, readsKey } from '../../cellHints.js';
 import { Grid } from './tableGrid.js';
 import { chartRows } from './chartFigure.js';
 import { FORMS, formKind } from './chartFormText.js';
@@ -43,6 +44,7 @@ import { writeThroughSheet } from './throughSheet.js';
 
 const fold = (header) => plainText(header).split(/\s+/).join(' ').toLowerCase();
 const NO_READS = new Map();
+const NO_ROLES = [];
 
 function element(tag, className) {
   const node = document.createElement(tag);
@@ -92,28 +94,40 @@ export class RowsGrid extends Grid {
     return this.widget.reads ?? NO_READS;
   }
 
-  render() {
-    super.render();
-    this.readsDrawn = readsKey(this.reads);
+  /** What the drawing does with each column, '' for one it does not read (`chartColumns`). */
+  get roles() {
+    return this.widget.roles ?? NO_ROLES;
   }
 
-  /** A cell's words, then what the chart reads in it; a heading, then what its column holds. */
+  /** What the headings and cells say, as a key, to tell when they must be drawn again. */
+  saidKey() {
+    return `${readsKey(this.reads)}|${this.roles.join(',')}`;
+  }
+
+  render() {
+    super.render();
+    this.saidDrawn = this.saidKey();
+  }
+
+  /** A cell's words, then what the chart reads in it; a heading, then what its column holds or does. */
   fill(cell, pictures) {
     super.fill(cell, pictures);
     if (this.editing?.cell === cell) return;
     const row = Number(cell.dataset.row);
     const col = Number(cell.dataset.col);
     const read = this.reads.get(col);
-    if (!read) return;
     const words = cell.querySelector('.cm-grid-text');
     if (!words) return;
     if (row === -1) {
+      const said = headingTag(read, this.roles[col]);
+      if (!said) return;
       const tag = element('span', 'cm-grid-expects');
-      tag.textContent = EXPECTS[read.kind];
-      tag.title = EXPECTS_TITLE[read.kind];
+      tag.textContent = said.text;
+      tag.title = said.title;
       words.after(tag);
       return;
     }
+    if (!read) return;
     const says = cellSays(this.textAt(row, col), read);
     if (says?.example) {
       words.dataset.placeholder = says.example;
@@ -246,10 +260,10 @@ export class RowsGrid extends Grid {
   update(widget) {
     this.pending = null;
     super.update(widget);
-    // a column that turned to days, or to a comma for its decimals, says it in every cell
-    const key = readsKey(this.reads);
-    if (key === this.readsDrawn) return;
-    this.readsDrawn = key;
+    // a column that turned to days, to a comma for its decimals or to another role says it in every cell
+    const key = this.saidKey();
+    if (key === this.saidDrawn) return;
+    this.saidDrawn = key;
     this.quiet = true;
     const pictures = pictureColumns(this.table);
     for (const cell of this.sheet.querySelectorAll('.cm-grid-cell')) this.fill(cell, pictures);
@@ -334,11 +348,15 @@ export async function writeSheetCells(view, { caseId, written, found, cells }) {
  * none it does not draw (`idle`), and never the categories a chart counts by, however
  * they are written.
  */
-export function chartReads(chart, { kind = '', idle = new Set() } = {}) {
+export function chartReads(chart, { kind = '', idle = new Set(), roles = NO_ROLES } = {}) {
   const table = chart?.table;
   if (!table) return NO_READS;
   const family = FORMS[formKind(kind || setting(chart, 'kind'))]?.family ?? '';
   const skip = new Set(idle);
+  // a column the engine names a part other than days or amounts is never read as either
+  roles.forEach((role, column) => {
+    if (role && !VALUE_ROLES.has(role)) skip.add(column);
+  });
   const by = fold(setting(chart, 'by'));
   const named = by ? table.header.findIndex((header) => fold(header) === by) : -1;
   if (family === 'categories' && named >= 0) skip.add(named);
@@ -350,11 +368,24 @@ export function chartReads(chart, { kind = '', idle = new Set() } = {}) {
 }
 
 /**
+ * What a chart's drawing does with each column of its rows, as the engine names it (`roles`
+ * in the kind it is drawn as, `X-Chart-Kind`): `roles`, one a column ('' for one it does not
+ * read), and `idle`, the columns with none, greyed as not drawn. A kind that reads every
+ * column (key figures), or a chart not drawn yet, names none: no role, nothing idle.
+ */
+export function chartColumns(kind, table) {
+  if (!Array.isArray(kind?.roles)) return { roles: NO_ROLES, idle: new Set() };
+  const roles = (table?.header ?? []).map((_, at) => (typeof kind.roles[at] === 'string' ? kind.roles[at] : ''));
+  return { roles, idle: new Set(roles.flatMap((role, at) => (role ? [] : [at]))) };
+}
+
+/**
  * A grid of a chart's rows in `box`, for `host` (see the module): `table` the rows as the
  * note holds them, `info` the case (chips and pictures), `writable`, `idle` the columns
- * its drawing does not read, `reads` the ones it reads as days or numbers (`chartReads`).
- * Answers the grid; `update(spec)` draws it again from new rows.
+ * its drawing does not read and `roles` what it does with the others (`chartColumns`),
+ * `reads` the ones it reads as days or numbers (`chartReads`). Answers the grid;
+ * `update(spec)` draws it again from new rows.
  */
-export function rowsGrid(box, view, { host, table, info, writable, idle, reads }) {
-  return new RowsGrid(box, { host, table, info, writable, idle, reads, look: null, tableId: null }, view);
+export function rowsGrid(box, view, { host, table, info, writable, idle, roles, reads }) {
+  return new RowsGrid(box, { host, table, info, writable, idle, roles, reads, look: null, tableId: null }, view);
 }
