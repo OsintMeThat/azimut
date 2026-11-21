@@ -17,10 +17,11 @@
  *   with `by:`, `count:` and `colour by:`;
  * - **pictures** (a picture wall): `| Picture | # |` then the words, the group and the
  *   colour each row holds, a picture of the case a row (`[[media:id|label]]`), with
- *   `picture:`, `label:`, `words:`, `by:`, `colour by:` and `shape:`.
+ *   `picture:`, `label:`, `words:`, `by:`, `colour by:` and `shape:`. A column the wall
+ *   does not read (a register's own) is kept, cell for cell, after the ones it does.
  *
- * A block whose table holds more than its kind's form reads (a register counted row by
- * row, more columns) is not read into a form: it is edited as a table.
+ * Any other block whose table holds more than its kind's form reads (a register counted
+ * row by row, more columns) is not read into a form: its rows are typed in The numbers.
  */
 import { readPairs, writePairs } from './chartIcons.js';
 import { readChart, setting, withSettings, withTable } from './chartText.js';
@@ -258,7 +259,7 @@ export function readForm(source, kindName = '') {
   return { kind, form, model };
 }
 
-const SEVERAL = 'Its table holds more columns than this kind reads: edit it as a table.';
+const SEVERAL = 'Its table holds more columns than this form reads: type its rows in The numbers.';
 
 /** A timeline's layouts (`notes_chart_timeline.LAYOUTS`), Auto first: what its `layout:` line writes. */
 export const TIMELINE_LAYOUTS = [
@@ -360,7 +361,7 @@ function readCategories({ chart, kind, form, heads, headers, rows }) {
   if (count < 0) {
     const numeric = headers.map((_, column) => column).filter((column) => rows.length && numericColumn(rows, column));
     if (countSaid.toLowerCase() === 'rows' || numeric.length !== 1) {
-      if (rows.length) return { why: 'Its rows are counted, one a line: edit them as a table.' };
+      if (rows.length) return { why: 'Its rows are counted, one a line: type them in The numbers.' };
     }
     count = numeric[0] ?? headers.findIndex((header) => /count|amount|number|total/i.test(plainText(header)));
   }
@@ -474,7 +475,7 @@ function readPictures({ chart, heads, headers, rows }) {
   const empty = { heads, rows: [], shape };
   if (!headers.length) return empty;
   const picture = wallPictureColumn(headers, rows, setting(chart, 'picture'));
-  if (picture < 0) return { why: 'Its table has no column of pictures: edit it as a table.' };
+  if (picture < 0) return { why: 'Its table has no column of pictures: type its rows in The numbers.' };
   const labelSaid = setting(chart, 'label');
   const label = labelSaid ? columnNamed(headers, labelSaid) : headers.findIndex((header, at) => at !== picture && LABEL_HEADER.test(plainText(header).trim()));
   const group = columnNamed(headers, setting(chart, 'by'));
@@ -484,12 +485,17 @@ function readPictures({ chart, heads, headers, rows }) {
   const words = /^(?:none|no|nothing)$/i.test(wordsSaid) ? -1 : wordsSaid ? columnNamed(headers, wordsSaid)
     : headers.findIndex((_, at) => !used.has(at));
   if (words >= 0) used.add(words);
-  if (headers.length > used.size) return { why: SEVERAL };
+  // the columns it does not read stay with their rows, written back after the ones it does
+  const extras = headers.map((_, at) => at).filter((at) => !used.has(at));
   const head = (at, fallback) => (at >= 0 ? plainText(headers[at]) || fallback : fallback);
   const cell = (row, at) => (at >= 0 ? row[at] ?? '' : '');
   return {
     heads: { picture: head(picture, heads.picture), label: head(label, heads.label), words: head(words, heads.words), group: head(group, heads.group), colour: head(colour, heads.colour) },
-    rows: rows.map((row) => ({ picture: cell(row, picture), label: cell(row, label), words: cell(row, words), group: cell(row, group), colour: cell(row, colour) })),
+    rows: rows.map((row) => ({
+      picture: cell(row, picture), label: cell(row, label), words: cell(row, words), group: cell(row, group), colour: cell(row, colour),
+      ...(extras.length ? { extra: extras.map((at) => cell(row, at)) } : {}),
+    })),
+    ...(extras.length ? { extras: extras.map((at) => headers[at]) } : {}),
     shape: empty.shape,
   };
 }
@@ -498,7 +504,9 @@ function writePictures(model) {
   const rows = model.rows.filter(filled);
   const has = (key) => rows.some((row) => plainText(row[key]).trim());
   const columns = ['picture', 'label', ...['words', 'group', 'colour'].filter(has)];
-  const header = columns.map((key) => model.heads[key]);
+  const extras = model.extras ?? [];
+  const header = [...columns.map((key) => model.heads[key]), ...extras];
+  const cells = (row) => [...columns.map((key) => row[key] ?? ''), ...extras.map((_, at) => row.extra?.[at] ?? '')];
   return {
     settings: {
       picture: model.heads.picture,
@@ -509,7 +517,7 @@ function writePictures(model) {
       shape: model.shape && model.shape !== WALL_SHAPES[0] ? model.shape : '',
       count: '',
     },
-    table: tableOf(header, rows.map((row) => columns.map((key) => row[key] ?? '')), []),
+    table: tableOf(header, rows.map(cells), []),
   };
 }
 

@@ -1705,6 +1705,10 @@ export function chartForm(panel, { state, write, caseId = '', palette = layerPal
       }
       (body.querySelector('[data-field]:not(.cf-precision):not([type="checkbox"]):not(button)') ?? title.field).focus({ preventScroll: true });
     },
+    /** Fill from the case, opened: what a wall's grid offers on its bar. */
+    fill() {
+      if (!filling) toggleFill(true);
+    },
     destroy() {
       gone = true;
       closeSwatches();

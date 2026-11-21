@@ -151,11 +151,14 @@ export function putInCell(view, cell, text) {
   return { id, text: chip, cell: true };
 }
 
-/** The grid drawn for the table starting at `pos`, or null (`editor/tableGrid.js` hangs it on its box). */
+/**
+ * The grid drawn for the table starting at `pos`, or null (`editor/tableGrid.js` hangs it on
+ * its box): a table's own, or a chart's numbers, whose table stands inside its block.
+ */
 export function gridAt(view, pos) {
-  for (const box of view.contentDOM.querySelectorAll('.cm-grid-block')) {
+  for (const box of view.contentDOM.querySelectorAll('.cm-grid-block, .cm-rows-grid')) {
     try {
-      if (view.posAtDOM(box) === pos) return box.grid ?? null;
+      if (box.classList.contains('cm-rows-grid') ? box.grid?.from === pos : view.posAtDOM(box) === pos) return box.grid ?? null;
     } catch { /* a box being taken down */ }
   }
   return null;
