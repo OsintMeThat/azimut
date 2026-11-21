@@ -268,4 +268,10 @@
   @container card (min-width: 560px) {
     .ranked { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 24px; }
   }
+  /* a narrow card stacks its tiles and lets a title wrap rather than vanish behind its counts */
+  @container card (max-width: 420px) {
+    .tiles { grid-template-columns: minmax(0, 1fr); }
+    .numbers-table .num { width: 48px; }
+    .numbers-table tbody th { white-space: normal; overflow-wrap: break-word; }
+  }
 </style>
