@@ -908,6 +908,8 @@ class _Builder:
         self._figures = 0
         #: An infographic was drawn last: whatever comes next starts a page, so it keeps its own.
         self._page_after = False
+        #: The last run `_text_at` drew needed a script's face its own lacks (Arabic, say).
+        self._fell_back = False
         #: The page a heading opened for the infographic under it, which then starts there.
         self._infographic_led = 0
         #: The block of the note being walked, and the next one holding anything with where
@@ -3347,14 +3349,17 @@ class _Builder:
 
     def _text_at(self, x: float, y: float, text: str, height: float, *, link: str | int = "") -> None:
         """One run of text starting exactly at ``x``: a cell keeps a margin inside
-        its left edge, so the cell is moved out by it. Its face is named in the page's
-        stream each time: a run all in a script's face (Arabic) leaves that face set
-        there while fpdf2 still counts the run's own as set, and the next run's Latin
-        letters were drawn in the wrong face."""
+        its left edge, so the cell is moved out by it. After a run drawn in a script's
+        face (Arabic) its face is named in the page's stream again: that run leaves the
+        script's face set there while fpdf2 still counts the run's own as set, and the next
+        run's Latin letters were drawn in the wrong face."""
         pdf = self.pdf
-        pdf.current_font_is_set_on_page = False
+        if self._fell_back:
+            pdf.current_font_is_set_on_page = False
         pdf.set_xy(x - pdf.c_margin, y)
         pdf.cell(pdf.get_string_width(text) + 2 * pdf.c_margin, height, text, link=link or "")
+        cmap = getattr(pdf.current_font, "cmap", None)
+        self._fell_back = cmap is not None and any(ord(char) not in cmap for char in text if not char.isspace())
 
     def _left(self, align: Align, width: float) -> float:
         """Where fpdf2 puts a picture of this width aligned this way."""
