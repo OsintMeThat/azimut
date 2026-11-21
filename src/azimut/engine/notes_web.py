@@ -44,7 +44,13 @@ the report's paper under its accent rule.
 
 **How to publish** is said once, here (`PAGES_*`), and written into the folder as
 `HOW-TO-PUBLISH.md`; the app shows the same words (`frontend/src/lib/githubPagesSetup.js`,
-which a test holds to these).
+which a test holds to these). The website's own words (`site.SITE_*`) close it, and Settings ›
+Website says them too.
+
+**A folder published to a site** (`placement`, `engine/site.py`) also carries its card,
+`article.json`, and `cover.jpg`, the picture of its line in the site's list: the look's list
+picture, else its cover picture, a map page's ground or its first picture, else the link card
+itself. A page of the site starts with a bar back to it, and counts its readers when the site asks.
 
 Nothing is fetched and nothing is published from here: the folder is written to
 disk (`write`, swapped in by renames so it is whole or not there, on every OS).
@@ -69,6 +75,7 @@ from PIL import Image, ImageDraw, ImageFilter, ImageFont, ImageOps, Unidentified
 
 from . import dirswap, notelook, notes_style, pdffonts
 from . import notes_html as html_engine
+from . import site as site_engine
 from . import notes_markdown as md
 from .notelook import DEFAULT as DEFAULT_LOOK
 from .notelook import NoteLook
@@ -81,11 +88,17 @@ if TYPE_CHECKING:
 WEB_DIR = "web"
 INDEX = "index.html"
 SHARE = "share.jpg"
+#: What a folder published to a site adds: its card (`engine/site.py`) and the picture its line
+#: in the site's list shows.
+CARD = site_engine.CARD
+COVER = "cover.jpg"
 NOJEKYLL = ".nojekyll"
 HOW_TO = "HOW-TO-PUBLISH.md"
 #: The size X and every other site draws a large link card at.
 SHARE_SIZE = (1200, 630)
 SHARE_QUALITY = 88
+#: The list picture, as a card names it: the same size, a little lighter.
+COVER_QUALITY = 84
 #: The longest address a folder may be given.
 MAX_ADDRESS = 300
 #: How many files GitHub takes in one upload from its page.
@@ -208,6 +221,8 @@ class WebBuild:
     live: bool = False
     #: What the Ready to publish? panel reads beyond the warnings, as its page's.
     ready: dict[str, Any] = field(default_factory=dict)
+    #: The card a folder published to a site carries, and None for any other folder.
+    card: site_engine.Card | None = None
 
     def warn(self, message: str, line: int | None, kind: str) -> None:
         self.warnings.append(message)
@@ -306,6 +321,7 @@ def build(
     check: bool = False,
     now: datetime | None = None,
     live: bool = True,
+    placement: site_engine.Placement | None = None,
 ) -> WebBuild:
     """The web folder of one note, in memory: its files, its name, what to know of it.
 
@@ -315,6 +331,8 @@ def build(
     another. ``check`` lays it out as the export would to say its weight and what it
     warns about, the missing address included, and makes no card and writes no clip.
     ``live`` lets its maps go live online; False keeps them as the HTML report draws them.
+    ``placement`` makes it a page of the analyst's site: it gets the way back to the site, the
+    site's counts, a card and the picture of its line in the site's list (`engine/site.py`).
     """
     if edition != md.PUBLIC:
         raise NotesWebError("A web folder holds the public edition only.")
@@ -328,7 +346,7 @@ def build(
     day = date.fromisoformat(look.cover.date) if look.cover.date else when.date()
     vendor = live_maps() if live else None
     folder = html_engine.Folder(csp=folder_csp(), head=lambda description: _head(title, description, where),
-                                live=vendor)
+                                live=vendor, frame=site_engine.frame_of(placement.site) if placement else None)
     rendered = html_engine.render(
         case, title=title, text=text, look=look, note_id=note_id, resolve=md.case_resolver(case), created=when,
         public=True, diagrams=diagrams, round_pov=round_pov, changes=changes, earlier=earlier, check=check,
@@ -343,15 +361,23 @@ def build(
         files[LIVE_LICENSE] = vendor.licence
     name = folder_name(title, day, where, note_id=note_id if homonym else "")
     files[HOW_TO] = how_to(name, where).encode("utf-8")
+    card: site_engine.Card | None = None
+    said: list[str] = []
+    if placement is not None and not check:
+        card = _site_card(placement, case, look, rendered, files, said, title=title, day=rendered.day or day,
+                          name=name)
+        files[CARD] = card.as_json()
     made = WebBuild(
         files=files, name=name, title=title, address=where, maps=rendered.maps, live=rendered.live,
         warnings=list(rendered.warnings), warning_lines=list(rendered.warning_lines),
         warning_kinds=list(rendered.warning_kinds), listed=rendered.listed, sha256=hashlib.sha256(rendered.html).hexdigest(),
         text_sha256=rendered.text_sha256, printed=rendered.printed, internal=rendered.internal, links=rendered.links, pov=rendered.pov,
-        ready=rendered.ready,
+        ready=rendered.ready, card=card,
         weight=rendered.weight + sum(len(data) for path, data in files.items() if path not in folder.files
                                      and path != INDEX),
     )
+    for line in said:
+        made.warn(line, None, md.OTHER)
     if len(files) > MAX_UPLOAD_FILES:
         made.warn(f"The folder holds {len(files)} files; GitHub's upload page takes {MAX_UPLOAD_FILES} at a time, "
                   "so upload it in two goes.", None, UPLOAD)
@@ -360,6 +386,59 @@ def build(
     if live and rendered.maps and vendor is None:
         made.warn(LIVE_MISSING, None, md.OTHER)
     return made
+
+
+def _site_card(placement: site_engine.Placement, case: "Case", look: NoteLook, rendered: html_engine.RenderedHtml,
+               files: dict[str, bytes], said: list[str], *, title: str, day: date, name: str) -> site_engine.Card:
+    """The card a folder published to a site carries, and `cover.jpg` beside it: the picture of
+    its line in the site's list, made from the look's list picture, else the page's own (its
+    cover, a map page's ground, its first picture), else the link card as a last resort."""
+    site = placement.site
+    page = rendered.html.decode("utf-8")
+    category = placement.category if placement.category is not None else look.category
+    role = placement.role if placement.role is not None else look.role
+    picture = None
+    if look.list_image:
+        picture = _list_picture(case, look.list_image)
+        if picture is None:
+            said.append("The list picture is no longer in the case or could not be read; the cover picture "
+                        "stands in the site's list.")
+    cover = _list_cover(picture or rendered.picture)
+    if cover is None and SHARE in files:
+        cover = files[SHARE]
+    if cover is not None:
+        files[COVER] = cover
+    return site_engine.Card(
+        title=title, summary=rendered.description, date=day.isoformat(),
+        category=site_engine.one_line(category, notelook.CATEGORY_MAX),
+        author=site.author, role=site_engine.PAGE if role == site_engine.PAGE else site_engine.ARTICLE,
+        layout=rendered.layout, image=COVER if cover is not None else "",
+        links=site_engine.links_of(page, site, name))
+
+
+def _list_picture(case: "Case", entity_id: str) -> Path | None:
+    """The file of a case picture a look names for the site's list, None when it is no picture
+    there any more."""
+    record = case.get_entity(entity_id)
+    attrs = (record or {}).get("attrs") or {}
+    if not record or not attrs.get("path") or attrs.get("kind") in ("video", "audio"):
+        return None
+    try:
+        path = case.resolve_inside(str(attrs["path"]))
+    except Exception:
+        return None
+    return path if path.is_file() else None
+
+
+def _list_cover(path: Path | None) -> bytes | None:
+    """The 1200 by 630 JPEG of a line in the site's list, cut from a picture to fill it: upright,
+    progressive, with no metadata. None when there is no picture or it cannot be read."""
+    picture = _cover(path) if path is not None else None
+    if picture is None:
+        return None
+    buffer = BytesIO()
+    picture.convert("RGB").save(buffer, "JPEG", quality=COVER_QUALITY, optimize=True, progressive=True)
+    return buffer.getvalue()
 
 
 def live_maps() -> html_engine.LiveMaps | None:
@@ -409,10 +488,13 @@ def how_to(name: str, where: str) -> str:
         this = f"This folder, `{name}`, is made for {_md_line(where)}."
     else:
         this = f"This folder, `{name}`, was exported with no address, so X shows its link without the picture card."
+    own = "\n".join(f"- **{lead}**: {_md_line(what)}" for lead, what in site_engine.SITE_OWN)
     return (
         f"# Publish this folder on GitHub Pages\n\n{_md_line(PAGES_INTRO)}\n\n> {_md_line(PAGES_PUBLIC)}\n\n"
         f"{this}\n\n## Step by step\n\n{steps}\n\n## To update it\n\n{_md_line(PAGES_UPDATE)}\n\n"
-        f"## The picture card on X\n\n{_md_line(PAGES_CARD)}\n"
+        f"## The picture card on X\n\n{_md_line(PAGES_CARD)}\n\n"
+        f"## {site_engine.SITE_TITLE}\n\n{site_engine.SITE_INTRO}\n{site_engine.SITE_STAYS_YOURS}\n\n"
+        f"### {site_engine.SITE_OWN_TITLE}\n\n{own}\n"
     )
 
 
@@ -704,7 +786,7 @@ def _inside(root: Path, relative: str) -> Path:
 
 
 __all__ = [
-    "ADDRESS", "HOW_TO", "IMAGERY_HOSTS", "INDEX", "LIVE_DARK", "LIVE_HOST", "LIVE_LICENSE", "LIVE_MISSING",
+    "ADDRESS", "COVER", "HOW_TO", "IMAGERY_HOSTS", "INDEX", "LIVE_DARK", "LIVE_HOST", "LIVE_LICENSE", "LIVE_MISSING",
     "LIVE_SOURCES", "LIVE_STYLE", "LIVE_VENDOR", "MAX_ADDRESS", "NOJEKYLL", "NO_ADDRESS", "NotesWebError", "PAGES_CARD", "PAGES_INTRO",
     "PAGES_PUBLIC", "PAGES_STEPS", "PAGES_UPDATE", "SHARE", "SHARE_SIZE", "UPLOAD", "WEB_DIR", "WebBuild", "address",
     "build", "folder_csp", "folder_name", "how_to", "live_maps", "share_card", "write",

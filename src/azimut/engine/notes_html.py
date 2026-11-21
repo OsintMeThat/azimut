@@ -113,6 +113,7 @@ from . import (
     notesources,
     pdffonts,
 )
+from . import site as site_engine
 from . import thumbnails
 from . import notes_markdown as md
 from .media import media_kind
@@ -143,7 +144,7 @@ TABLE_ASSET_NAMES = ("reader.table.css",)
 MAPPAGE_ASSET_NAMES = ("reader.mappage.css", "reader.mappage.js", "reader.count.js")
 #: The host a map page's counter reaches, under the analyst's own site code: GoatCounter, which
 #: counts with no cookie (https://www.goatcounter.com). Only a web folder calls it, once online.
-COUNTER_HOST = "https://{code}.goatcounter.com"
+COUNTER_HOST = site_engine.GOATCOUNTER_HOST
 #: The first map of a page as `_map_figure` writes it, whole: its data closes it.
 MAP_FIGURE = re.compile(r'<figure class="az-figure az-map[^"]*" data-kind="map".*?</script>\n</figure>\n', re.S)
 #: What a map page says when its note holds no map, and reads as an article.
@@ -263,6 +264,9 @@ class Folder:
     head: Callable[[str], str] | None = None
     #: What makes its maps live online, or None to keep them as the HTML report draws them.
     live: "LiveMaps | None" = None
+    #: How a page published to a site is framed: the way back to the site and the counts its
+    #: pages make (`engine/site.py`); None for a folder that is not on a site.
+    frame: "site_engine.Frame | None" = None
     files: dict[str, bytes] = field(default_factory=dict)
     _named: dict[str, str] = field(default_factory=dict, repr=False)
 
@@ -354,6 +358,12 @@ class RenderedHtml:
     live: bool = False
     #: What the Ready to publish? panel reads beyond the warnings (`notes_markdown.Cited.ready`).
     ready: dict[str, Any] = field(default_factory=dict)
+    #: How it was laid out: `article`, `story`, or `map` when it is a map page; a note asked to be
+    #: a map page that holds no map reads as an article.
+    layout: str = "article"
+    #: The picture the site's list shows for it when its look names none: the cover's, else a map
+    #: page's ground, else the first picture the page shows.
+    picture: Path | None = None
 
 
 def render(
@@ -441,6 +451,8 @@ def render(
         maps=page.maps,
         live=page.live,
         ready=cited.ready,
+        layout=page.layout,
+        picture=page.picture,
     )
 
 
@@ -568,6 +580,8 @@ class _Page:
         self.live = False
         #: Whether it is laid out as a map page (`_map_page`), its first map on the whole page.
         self.map_page = False
+        #: The first map's ground, which stands in for a map page's picture.
+        self.ground: Path | None = None
         #: Each map's steps, `(label, day)`, by its figure's id: the cards a story gives it.
         self._map_steps: dict[str, list[tuple[str, str, str, str]]] = {}
         #: The figure each proof shown in the page stands in, by its record, which a map's card links to.
@@ -711,11 +725,14 @@ class _Page:
             mark = (f'<a class="az-mappage-mark" href="{_attr(target)}" target="_blank" rel="noopener noreferrer">{inner}</a>'
                     if target else f'<span class="az-mappage-mark">{inner}</span>')
         views = ""
-        if self.folder is not None and self.look.counter:
-            views = f'<span class="az-mappage-views" data-counter="{_attr(self.look.counter)}" hidden></span>'
+        counter = self._counter()
+        if counter:
+            views = f'<span class="az-mappage-views" data-counter="{_attr(counter)}" hidden></span>'
         said = f'<p class="az-mappage-sub" dir="auto">{subtitle}</p>\n' if subtitle else ""
         signed = f'<p class="az-mappage-by">{by}{views}</p>\n' if by or views else ""
-        head = (f'<header class="az-mappage-head" id="top">\n<div class="az-mappage-titles">'
+        # a site's way home rides in the map's own header, never above a page that fills the screen
+        way = self._way_home(site_engine.crumb)
+        head = (f'<header class="az-mappage-head" id="top">\n<div class="az-mappage-titles">{way}'
                 f'<h1 class="az-title" dir="auto">{_text(title)}</h1>\n{said}</div>\n{signed}</header>\n')
         words = f'<div class="az-body az-mappage-text">\n{rest}</div>\n' if rest.strip() else ""
         about = f'<section class="az-mappage-about" id="about" aria-label="About this map">\n{words}{end}</section>\n'
@@ -743,12 +760,15 @@ class _Page:
         own = (map_js + _asset("reader.map.css")) if mapped else ""
         if live is not None:
             own += _asset(live.module)
-        fonts = _font_faces(self.look, self.theme, _visible_text(page) + title + own + "".join(self._chart_words),
-                            self.folder)
+        on_site = self.folder.frame if self.folder is not None else None
+        framed = f"{on_site.title} All articles" if on_site is not None else ""
+        fonts = _font_faces(self.look, self.theme, _visible_text(page) + title + own + framed
+                            + "".join(self._chart_words), self.folder)
         accent = f' style="--az-accent:{self.look.accent}"' if self.look.accent else ""
         tlp = f' data-tlp="{self.look.tlp}"' if self.look.tlp else ""
         web = f' data-web="{self.look.web}"' if self.look.web else ""
         edition = md.PUBLIC if self.public else md.INTERNAL
+        above = tail = ""
         if self.folder is None:
             policy, said = CSP, ""
             css = reader_css.replace("</", "<\\/")
@@ -767,12 +787,19 @@ class _Page:
             script = f'<script src="{code_file}"></script>\n'
             if live is not None:
                 said += self._live_config(live)
-            if paged and self.look.counter:
-                # the analyst's own counter: its one host let in, its script beside the page
-                host = COUNTER_HOST.format(code=self.look.counter)
-                policy = widen_policy(policy, {"img-src": (host,), "connect-src": (host,)})
+            code = self._counter()
+            beacon = on_site.beacon if on_site is not None else ""
+            # the analyst's own counts: each one's host let in and nothing else
+            policy = widen_policy(policy, site_engine.stats_sources(code, beacon))
+            if code:
                 counter = self.folder.put(_asset("reader.count.js").encode("utf-8"), "reader-count", ".js")
                 script += f'<script src="{counter}"></script>\n'
+                if on_site is not None:
+                    said += f'<meta name="az-counter" content="{_attr(code)}">\n'
+            if beacon:
+                tail = site_engine.cloudflare_tag(beacon) + "\n"
+            if not paged:
+                above = self._way_home(site_engine.bar)
         top = (
             f'<!doctype html>\n<html lang="en" dir="auto" data-look="{self.look.style}" data-font="{self.look.font}"'
             f'{tlp}{web} data-edition="{edition}"{accent}>\n<head>\n<meta charset="utf-8">\n'
@@ -782,9 +809,9 @@ class _Page:
             '<meta name="generator" content="Azimut">\n'
             f"<title>{_text(title)}</title>\n{said}"
             f'{_wrapped("az-fonts", fonts, "style")}'
-            f"{styles}</head>\n<body>\n"
+            f"{styles}</head>\n<body>{above}\n"
         )
-        bottom = f"{script}</body>\n</html>\n"
+        bottom = f"{script}{tail}</body>\n</html>\n"
         frame = len((top + bottom).encode("utf-8"))
         settled = self._settle_clips(page, frame)
         document = top + settled + bottom
@@ -795,6 +822,23 @@ class _Page:
             self._warn(f"The page weighs {_megabytes(self.weight)}, past the {_megabytes(MAX_BYTES)} it aims for.",
                        None, md.OTHER)
         return data
+
+    def _counter(self) -> str:
+        """The GoatCounter site that counts this page once it is online: a map page's own, else
+        the site's; "" when it is no web folder or nobody counts it."""
+        if self.folder is None:
+            return ""
+        frame = self.folder.frame
+        return (self.look.counter if self.map_page else "") or (frame.counter if frame is not None else "")
+
+    def _way_home(self, draw: Callable[[site_engine.Frame, str], str]) -> str:
+        """The site's way back, drawn as ``draw`` says (the bar, or a map page's crumb), with its
+        logo as a file of the folder; "" for a page that is on no site."""
+        if self.folder is None or self.folder.frame is None:
+            return ""
+        frame = self.folder.frame
+        logo = self.folder.put(frame.logo, "site-logo", ".png") if frame.logo else ""
+        return draw(frame, logo)
 
     def _live_config(self, live: LiveMaps) -> str:
         """MapLibre's files and the reader's live part put in the folder, and where they
@@ -1858,6 +1902,22 @@ class _Page:
         self._heroes.append((hero, credited))
 
     @property
+    def layout(self) -> str:
+        return "map" if self.map_page else ("story" if self.look.web == "story" else "article")
+
+    @property
+    def picture(self) -> Path | None:
+        """The picture a list of articles shows for the page: the cover's, else a map page's
+        ground, else the first picture, else the ground of a map the note holds."""
+        if self._cover_hero is not None:
+            return self._cover_hero.path
+        if self.map_page and self.ground is not None:
+            return self.ground
+        if self._heroes:
+            return self._heroes[0][0].path
+        return self.ground
+
+    @property
     def hero(self) -> Hero | None:
         if self._cover_hero is not None:
             return self._cover_hero
@@ -2121,6 +2181,7 @@ class _Page:
             line = self._line if self._fixed or offset is None else self._line + offset
             self._warn(f'The map "{md.cut_text(block.title or "Map", 60)}": {notes_maps.ESRI_TERMS}', line, md.OTHER)
         self.pov.extend((said, self._line) for said in derived.pov)
+        self.ground = self.ground or derived.ground
         self._map_steps[ident] = [(str(step.get("label") or ""), str(step.get("day") or ""), str(step.get("text") or ""),
                                    str(step.get("name") or "")) for step in derived.data.get("steps") or []]
         self._map_credits.extend(str(one) for one in derived.data.get("credits") or [] if one)

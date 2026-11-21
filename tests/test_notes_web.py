@@ -389,8 +389,14 @@ def test_the_how_to_is_markdown_github_pages_reads_as_it_is(folder):
     for number, step in enumerate(notes_web.PAGES_STEPS, 1):
         assert f"\n{number}. " in text
     assert "Settings › Pages" in text and "free" in text and "public" in text
-    # nothing a Pages build would read as a template, and no address a page could take for markup
-    assert "{{" not in text and "{%" not in text and "<" not in text
+    # nothing a Pages build would read as a template, and no address a page could take for markup:
+    # the markers the website part shows are code, which no page runs
+    assert "{{" not in text and "{%" not in text and "<" not in re.sub(r"`[^`]*`", "", text)
+    # the website's words close it: what the site is, that it stays the analyst's, and four ways to make it theirs
+    assert "\n## Website\n" in text and "Azimut only ever rewrites the files it made." in text
+    assert "\n### Make it yours\n" in text and "- **Your own home page**: write your `index.html`" in text
+    assert "`<!-- azimut:articles -->` `<!-- /azimut:articles -->`" in text and '`section="Investigations"`' in text
+    assert "[GitHub's guide](https://docs.github.com/en/pages/configuring-a-custom-domain" in text
     bare = folder["bare"].files["HOW-TO-PUBLISH.md"].decode("utf-8")
     assert "exported with no address" in bare
 
