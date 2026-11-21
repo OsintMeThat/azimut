@@ -107,7 +107,7 @@
   const base = $derived(github?.base ?? '');
   // what the site is called: the title of Settings › Website, else what the server falls back to (the Publishing name, then the account)
   const named = $derived(prefs.siteTitle.trim());
-  const siteCalled = $derived(named || siteName({ report: prefs.reportName, account: github?.account }));
+  const siteCalled = $derived(named || github?.website?.title || siteName({ report: prefs.reportName, account: github?.account }));
   // read here, and handed up: the dialog's own copies may not be reactive
   const ready = $derived(githubReady(github));
   const wrong = $derived(ready ? shortNameProblem(short) : '');

@@ -6,24 +6,26 @@
    * a page it already holds says so. Nothing here reaches GitHub.
    */
   import Icon from '../../../components/Icon.svelte';
+  import HubCard from './HubCard.svelte';
   import { caseState, reloadCase, toast } from '../../../lib/state.svelte.js';
   import { openNotebook } from '../../../lib/navigate.js';
   import { startLegalNotice, startPrivacyNotice } from '../../../lib/githubPages.js';
   import { siteRead } from '../../../lib/siteRead.svelte.js';
   import {
-    LEGAL_NO_CASE, LEGAL_PRESS, LEGAL_SAID, LEGAL_SENTENCE, PAGES_NOTE, PAGES_TITLE, PAGE_ON_SITE, PRIVACY_PRESS, PRIVACY_SAID, WEBSITE_HELP as HELP,
+    LEGAL_NO_CASE, LEGAL_PRESS, LEGAL_SAID, LEGAL_SENTENCE, PAGES_NOTE, PAGES_TITLE, PAGE_ON_SITE, PRIVACY_PRESS, PRIVACY_SAID, STARTING,
+    WEBSITE_HELP as HELP,
   } from '../../../lib/websiteSetup.js';
-  import HubCard from './HubCard.svelte';
-
-  const caseId = $derived(caseState.current?.id ?? '');
-  const read = $derived(siteRead.data);
-  // which page is being made, so one press does not start two
-  let busy = $state('');
 
   const PAGES = [
     { id: 'legal', name: 'Legal notice', press: LEGAL_PRESS, said: LEGAL_SAID, help: HELP.legalStart, start: startLegalNotice, guide: 'settings.legal' },
-    { id: 'privacy', name: 'Privacy page', press: PRIVACY_PRESS, said: PRIVACY_SAID, help: HELP.privacyStart, start: startPrivacyNotice, guide: undefined },
+    { id: 'privacy', name: 'Privacy', press: PRIVACY_PRESS, said: PRIVACY_SAID, help: HELP.privacyStart, start: startPrivacyNotice, guide: undefined },
   ];
+
+  const caseId = $derived(caseState.current?.id ?? '');
+  // a read cut short found no page, which says nothing of the site
+  const read = $derived(siteRead.data && !siteRead.data.truncated ? siteRead.data : null);
+  // which page is being made, so one press does not start two
+  let busy = $state('');
 
   async function start(page) {
     if (!caseId || busy) return;
@@ -34,38 +36,37 @@
       await reloadCase().catch(() => {});
       openNotebook(note.id);
     } catch (error) {
-      toast(`Could not start the ${page.name}: ${error.message}`, 'danger');
+      toast(`Could not start the ${page.name} page: ${error.message}`, 'danger');
     } finally {
       busy = '';
     }
   }
 </script>
 
-<HubCard title={PAGES_TITLE}>
+<HubCard title={PAGES_TITLE} label={PAGES_TITLE}>
   <p>{LEGAL_SENTENCE}</p>
   <ul class="pages">
     {#each PAGES as page (page.id)}
       <li data-guide={page.guide}>
         <span class="what">
-          <span class="name">{page.name}
-            {#if read?.[page.id]}<span class="badge ok"><Icon name="check" size={11} /> {PAGE_ON_SITE}</span>{/if}</span>
+          <span class="name">{page.name}{#if read?.[page.id]}<span class="hub-pill ok" title={read[page.id]}><Icon name="check" size={10} />{PAGE_ON_SITE}</span>{/if}</span>
           <small>{page.said}</small>
         </span>
-        <button type="button" class="btn btn-sm" onclick={() => start(page)} disabled={!caseId || busy !== ''}
-          title={caseId ? page.help : LEGAL_NO_CASE}>{busy === page.id ? 'Starting…' : page.press}</button>
+        <button type="button" class="btn btn-sm" onclick={() => start(page)} disabled={!caseId || busy !== ''} aria-busy={busy === page.id}
+          title={caseId ? page.help : LEGAL_NO_CASE}>{busy === page.id ? STARTING : page.press}</button>
       </li>
     {/each}
   </ul>
-  <p class="hint">{PAGES_NOTE}</p>
+  <p class="hub-hint">{PAGES_NOTE}</p>
 </HubCard>
 
 <style>
-  .pages { list-style: none; margin: 8px 0 0; padding: 0; }
-  .pages li { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 8px 0; border-top: 1px solid var(--border); font-size: var(--fs-sm); }
+  .pages { list-style: none; margin: 10px 0 0; padding: 0; }
+  .pages li { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px 12px; padding: 9px 0; border-top: 1px solid var(--border); }
   .pages li:first-child { border-top: 0; }
-  .what { min-width: 0; display: flex; flex-direction: column; gap: 2px; }
-  .name { display: inline-flex; align-items: center; gap: 8px; flex-wrap: wrap; color: var(--text-1); }
-  .what small { color: var(--text-3); font-size: var(--fs-xs); line-height: 1.4; }
-  .badge { gap: 3px; }
-  p.hint { margin-top: 8px; }
+  .what { display: flex; flex-direction: column; gap: 2px; min-width: 0; flex: 1 1 180px; }
+  .name { display: inline-flex; flex-wrap: wrap; align-items: center; gap: 8px; color: var(--text-1); font-size: var(--fs-sm); }
+  .what small { color: var(--text-3); font-size: var(--fs-xs); line-height: 1.45; }
+  .pages .btn { flex: none; }
+  .hub-hint { margin-top: 10px; }
 </style>

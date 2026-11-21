@@ -3,7 +3,8 @@
  * Settings › Website › Articles, mounted: nothing is asked of GitHub until Read the site is pressed, what
  * the read lists (rows with their picture, address, category, kind, date and weight, chips that filter
  * them), the categories and the pages every site should have, and a delete that reaches GitHub only
- * through its confirmation, then takes the row off the list and out of every part that counted it.
+ * through its confirmation, then takes the row off the list and out of every part that counted it, or
+ * says why the server refused it.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { flushSync, mount, unmount } from 'svelte';
@@ -26,30 +27,39 @@ const NOTHING = { account: '', repo: 'articles', branch: 'main', site: '', base:
 const SET = { account: 'octo', repo: 'articles', branch: 'main', site: '', base: 'https://octo.github.io/articles/',
   token: { set: true, hint: '…wxyz' }, website: { title: 'Octo Desk', logo: false, counting: '' }, categories: [] };
 const item = (folder, more = {}) => ({ folder, address: `https://octo.github.io/articles/${folder}/`, title: `Title of ${folder}`, summary: '', date: '2026-11-20',
-  date_label: '20 November 2026', category: '', role: 'article', layout: 'article', image: '', bytes: MB, ...more });
+  date_label: '20 November 2026', category: '', role: 'article', layout: 'article', image: '', bytes: MB, deletable: true, ...more });
+const NESTED = '2026/01/05/lost-in-low-res';
 const READ = {
   ok: true, address: 'https://octo.github.io/articles/', home: 'azimut',
   items: [
     item('bab', { title: 'The Bab front', category: 'Conflict Watch', layout: 'story', image: 'https://octo.github.io/articles/bab/cover.jpg', bytes: Math.round(4.2 * MB) }),
-    item('guide', { title: 'Installing Azimut', category: 'Methods', date_label: '13 August 2026' }),
+    item('guide', { title: 'Installing Azimut', category: 'Methods', date: '2026-08-13', date_label: '13 August 2026' }),
     item('bab-map', { title: 'On one map', layout: 'map', bytes: 3 * MB }),
     item('about', { title: 'About', role: 'page', bytes: 2048 }),
     item('draft', { title: 'A draft', role: 'unlisted', category: 'Methods', bytes: 500 }),
+    item(NESTED, { title: 'Lost in Low-Res', category: 'Methods', date: '2026-01-05', date_label: '5 January 2026', deletable: false }),
   ],
-  categories: [{ name: 'Conflict Watch', count: 1, pages: ['conflict-watch/'] }, { name: 'Methods', count: 1, pages: [] }],
+  categories: [{ name: 'Conflict Watch', count: 1, pages: ['conflict-watch/'] }, { name: 'Methods', count: 2, pages: [] }],
   marked: ['', 'conflict-watch/'], legal: '', privacy: '', last: { date: '2026-11-21T13:55:52Z', message: 'Update the site' },
   size: { site: 312 * MB, repository: null }, warnings: [],
 };
+/** What the api says of a refusal: the server's detail, and its status. */
+const refused = (status, detail) => Object.assign(new Error(detail), { status });
+const DELETED = (folder) => ({ ok: true, commit: 'c'.repeat(40), folder, removed: 4, written: ['articles.json', 'feed.xml', 'sitemap.xml'], warnings: [] });
 
 let live;
 let target;
 const settle = async () => { for (let i = 0; i < 25; i++) await Promise.resolve(); flushSync(); };
 const panel = () => target.querySelector('#hub-panel-articles');
+const hero = () => target.querySelector('section[aria-label="The site at a glance"]');
 const tab = (name) => [...target.querySelectorAll('[role="tab"]')].find((node) => node.textContent.trim().startsWith(name));
 const button = (text, within = panel()) => [...within.querySelectorAll('button')].find((node) => node.textContent.trim().startsWith(text));
-const rows = () => [...panel().querySelectorAll('.rows .item:not(.head)')];
+const rows = () => [...panel().querySelectorAll('.rows .item')];
+const row = (folder) => panel().querySelector(`.rows .item[data-folder="${folder}"]`);
 const chip = (label) => [...panel().querySelectorAll('.chip')].find((node) => node.textContent.trim().startsWith(label));
+const status = () => panel().querySelector('.toolbar [role="status"]');
 const dialog = () => document.querySelector('[role="alertdialog"]');
+const asks = (path) => post.mock.calls.filter(([called]) => called === path);
 
 /** The server as the panel asks it: the read, the delete and the page starters, each answered by the test. */
 function serve({ read = READ, github = SET, deleted = null } = {}) {
@@ -59,7 +69,7 @@ function serve({ read = READ, github = SET, deleted = null } = {}) {
   });
   post.mockImplementation(async (path, body) => {
     if (path === '/api/publishing/github/site/read') return typeof read === 'function' ? read() : read;
-    if (path === '/api/publishing/github/site/delete') return typeof deleted === 'function' ? deleted(body) : (deleted ?? { ok: true, commit: 'c'.repeat(40), folder: body.folder, removed: 4, written: ['articles.json', 'feed.xml', 'sitemap.xml'], warnings: [] });
+    if (path === '/api/publishing/github/site/delete') return typeof deleted === 'function' ? deleted(body) : (deleted ?? DELETED(body.folder));
     if (path.endsWith('/notes/privacy-notice')) return { id: 'n7', title: 'Privacy', created: true };
     if (path.endsWith('/notes/legal-notice')) return { id: 'n9', title: 'Legal notice', created: true };
     return {};
@@ -79,6 +89,14 @@ const readSite = async () => {
   await settle();
 };
 
+/** Delete pressed on a row and confirmed in its dialog. */
+async function deleteRow(folder) {
+  button('Delete', row(folder)).click();
+  await settle();
+  button('Delete from the site', dialog()).click();
+  await settle();
+}
+
 beforeEach(() => {
   vi.clearAllMocks();
   forgetRead();
@@ -87,6 +105,7 @@ beforeEach(() => {
   uiState.tool = 'settings';
   uiState.openNotebook = null;
   target = document.createElement('div');
+  target.className = 'settings-pane';
   document.body.append(target);
 });
 afterEach(() => {
@@ -102,83 +121,81 @@ describe('reading the site', () => {
   it('asks GitHub nothing until Read the site is pressed, then once', async () => {
     await show();
     expect(post).not.toHaveBeenCalled();
-    expect(panel().textContent).toContain('The site is not read yet. Press Read the site to list its articles, maps and pages.');
-    expect(rows()).toHaveLength(0);
-    expect(tab('Articles').querySelector('.n')).toBeNull();
+    expect(panel().querySelector('.blank').textContent).toContain('Not read yet');
+    expect(panel().querySelector('.blank').textContent).toContain('Press Read the site to list its articles, maps and pages.');
     expect(button('Read the site').getAttribute('title')).toBe('Read the site on GitHub, to list what it holds');
     await readSite();
     expect(post).toHaveBeenCalledTimes(1);
     expect(post).toHaveBeenCalledWith('/api/publishing/github/site/read');
-    expect(put).not.toHaveBeenCalled();
-    expect(del).not.toHaveBeenCalled();
+    expect(rows()).toHaveLength(6);
+    expect(status().textContent).toMatch(/^Read today at \d\d:\d\d$/);
     expect(button('Read the site again')).toBeTruthy();
-    expect(panel().querySelector('.read-line .said').textContent).toMatch(/^\s*Read today at \d\d:\d\d\s*$/);
-    // the count of what the site holds is on the tab
-    expect(tab('Articles').querySelector('.n').textContent).toBe('5');
   });
 
   it('shows it working, and presses once even when pressed twice', async () => {
     await show();
     let answer;
-    post.mockImplementation(() => new Promise((resolve) => { answer = resolve; }));
+    serve({ read: () => new Promise((resolve) => { answer = resolve; }) });
     button('Read the site').click();
     await settle();
-    expect(panel().textContent).toContain('Reading octo/articles…');
-    expect(panel().querySelector('.spinner')).not.toBeNull();
-    expect(button('Reading…').disabled).toBe(true);
-    button('Reading…').click();
+    expect(status().textContent).toContain('Reading octo/articles…');
+    expect(status().dataset.state).toBe('busy');
+    expect(button('Read the site').disabled).toBe(true);
+    button('Read the site').click();
     await settle();
-    expect(post).toHaveBeenCalledTimes(1);
+    expect(asks('/api/publishing/github/site/read')).toHaveLength(1);
     answer(READ);
     await settle();
-    expect(panel().querySelector('.spinner')).toBeNull();
-    expect(rows()).toHaveLength(5);
+    expect(rows()).toHaveLength(6);
   });
 
   it('cannot read while GitHub is not set up, and says so on hover', async () => {
-    await show({ ...NOTHING, website: { title: '', logo: false, counting: '' }, categories: [] });
+    await show(NOTHING);
     expect(button('Read the site').disabled).toBe(true);
     expect(button('Read the site').getAttribute('title')).toBe('Set up GitHub Pages under Hosting first');
-    button('Read the site').click();
-    await settle();
-    expect(post).not.toHaveBeenCalled();
   });
 
   it('says what went wrong in the words the server gave, and what to mind', async () => {
     await show();
-    serve({ read: { ...READ, warnings: ['The site holds too many files for Azimut to read.'] } });
+    serve({ read: () => Promise.reject(new Error('GitHub is having trouble: try again in a minute.')) });
     await readSite();
-    expect([...panel().querySelectorAll('ul[aria-label="To mind"] li')].map((node) => node.textContent.trim())).toEqual(['The site holds too many files for Azimut to read.']);
-    post.mockRejectedValue(new Error('GitHub did not answer.'));
-    button('Read the site again').click();
-    await settle();
-    const said = panel().querySelector('.read-line .said');
-    expect(said.textContent).toContain('GitHub did not answer.');
-    expect(said.dataset.state).toBe('error');
+    expect(status().textContent).toContain('GitHub is having trouble: try again in a minute.');
+    expect(status().dataset.state).toBe('error');
+    serve({ read: { ...READ, warnings: ['The site holds more than 500 cards: Azimut shows the first 500.'] } });
+    await readSite();
+    expect(panel().querySelector('ul[aria-label="To mind"]').textContent).toContain('Azimut shows the first 500.');
   });
 
   it('shows the press that makes what is missing, then asks to read again', async () => {
     await show();
-    serve({ read: { ok: false, needs: 'repository', detail: 'There is no repository octo/articles that this token can reach.' } });
+    serve({ read: { ok: false, needs: 'pages', detail: 'Pages is off for octo/articles.' } });
     await readSite();
-    expect(panel().textContent).toContain('There is no repository octo/articles that this token can reach.');
-    post.mockResolvedValueOnce({ ok: true, repository: 'octo/articles' });
-    button('Create the repository').click();
-    await settle();
-    expect(panel().textContent).toContain('Pages is off for octo/articles.');
+    expect(status().textContent).toContain('Pages is off for octo/articles.');
     post.mockResolvedValueOnce({ ok: true, base: 'https://octo.github.io/articles/' });
     button('Turn on Pages').click();
     await settle();
-    expect(panel().textContent).toContain('Pages is on. Press Read the site.');
-    expect(panel().querySelector('.needs')).toBeNull();
+    expect(post).toHaveBeenLastCalledWith('/api/publishing/github/pages');
+    expect(status().textContent).toContain('Pages is on. Press Read the site.');
   });
 
   it('says the site lists nothing yet when the read finds nothing', async () => {
     await show();
-    serve({ read: { ok: true, address: 'https://octo.github.io/articles/', home: 'none', items: [], categories: [], marked: [], legal: '', privacy: '' } });
+    serve({ read: { ...READ, items: [], categories: [], home: 'none' } });
     await readSite();
-    expect(panel().textContent).toContain('The site lists nothing yet. Publish a note from the Notebook.');
     expect(rows()).toHaveLength(0);
+    expect(panel().querySelector('.blank').textContent).toContain('Nothing on the site yet');
+    expect(panel().querySelector('.blank').textContent).toContain('Publish a note from the Notebook and it shows here.');
+    expect(panel().querySelectorAll('.chip')).toHaveLength(0);
+  });
+
+  it('says a site too large to read is so, with GitHub\'s word, and lists nothing', async () => {
+    await show();
+    serve({ read: { ...READ, items: [], categories: [], home: 'none', size: { site: null, repository: null },
+      warnings: ['The site holds too many files for Azimut to read: nothing is shown.'] } });
+    await readSite();
+    expect(panel().querySelector('.blank').textContent).toContain('The site holds too many files to read.');
+    expect(panel().querySelector('ul[aria-label="To mind"]').textContent).toContain('The site holds too many files for Azimut to read: nothing is shown.');
+    expect(tab('Articles').querySelector('.count')).toBeNull();
   });
 });
 
@@ -186,205 +203,211 @@ describe('what the read lists', () => {
   it('shows a row for each card with its picture, title, address, category, kind, date and weight', async () => {
     await show();
     await readSite();
-    expect(rows().map((row) => row.dataset.folder)).toEqual(['bab', 'guide', 'bab-map', 'about', 'draft']);
-    const [bab, guide, map, page, draft] = rows();
-    expect(bab.querySelector('img.th').getAttribute('src')).toBe('https://octo.github.io/articles/bab/cover.jpg');
-    expect(bab.querySelector('img.th').getAttribute('referrerpolicy')).toBe('no-referrer');
-    expect(bab.querySelector('.t b').textContent).toBe('The Bab front');
-    expect(bab.querySelector('.t small').textContent).toBe('/articles/bab/');
-    expect(bab.querySelector('.cat').textContent).toBe('Conflict Watch');
-    expect(bab.querySelector('.kind').textContent).toBe('Article');
-    expect(bab.textContent).toContain('20 November 2026');
-    expect(bab.textContent).toContain('4.2 MB');
-    expect(guide.querySelector('img.th')).toBeNull();
-    expect(guide.textContent).toContain('13 August 2026');
-    expect(map.querySelector('.kind').textContent).toBe('Map');
-    expect(map.querySelector('.cat').textContent).toBe('no category');
-    expect(page.querySelector('.kind').textContent).toBe('Page');
-    expect(page.textContent).toContain('2 KB');
-    // an unlisted draft adds no category to the site: it shows none
-    expect(draft.querySelector('.kind').textContent).toBe('Unlisted');
-    expect(draft.querySelector('.cat').textContent).toBe('no category');
-    const open = bab.querySelector('a');
-    expect(open.getAttribute('href')).toBe('https://octo.github.io/articles/bab/');
-    expect(open.getAttribute('target')).toBe('_blank');
-    expect(open.getAttribute('rel')).toContain('noopener');
-    for (const control of panel().querySelectorAll('.rows a, .rows button')) expect(control.getAttribute('title')).toBeTruthy();
+    const first = row('bab');
+    expect(first.querySelector('.th img').getAttribute('src')).toBe('https://octo.github.io/articles/bab/cover.jpg');
+    expect(first.querySelector('.th img').getAttribute('referrerpolicy')).toBe('no-referrer');
+    expect(first.querySelector('.t b').textContent).toBe('The Bab front');
+    expect(first.querySelector('.t b').getAttribute('title')).toBe('The Bab front');
+    expect(first.querySelector('.t small').textContent).toBe('/articles/bab/');
+    expect(first.querySelector('.cat').textContent).toBe('Conflict Watch');
+    expect(first.querySelector('.kind').textContent).toBe('Article');
+    expect(first.querySelector('.d').textContent).toBe('20 Nov 2026');
+    expect(first.querySelector('.d').getAttribute('title')).toBe('20 November 2026');
+    expect(first.querySelector('.w').textContent).toBe('4.2 MB');
+    const link = first.querySelector('a.open');
+    expect(link.getAttribute('href')).toBe('https://octo.github.io/articles/bab/');
+    expect(link.getAttribute('target')).toBe('_blank');
+    expect(link.getAttribute('rel')).toContain('noopener');
+    expect(link.getAttribute('title')).toBe('Open this page on the site');
+    expect(button('Delete', first).getAttribute('title')).toBe('Delete this folder from the site, and from its lists');
+    // a card with no picture shows its kind's mark; a map, a page and an unlisted one say what they are, with no category
+    expect(row('bab-map').querySelector('.th img')).toBeNull();
+    expect(row('bab-map').querySelector('.th svg')).not.toBeNull();
+    expect(row('bab-map').querySelector('.kind').textContent).toBe('Map');
+    expect(row('about').querySelector('.kind').textContent).toBe('Page');
+    expect(row('about').querySelector('.cat').textContent).toBe('no category');
+    expect(row('draft').querySelector('.kind').textContent).toBe('Unlisted');
+    expect(row('draft').querySelector('.cat').textContent).toBe('no category');
+    expect(row('about').querySelector('.w').textContent).toBe('2 KB');
+    // the tab counts the rows
+    expect(tab('Articles').querySelector('.count').textContent).toBe('6');
+  });
+
+  it('shows the mark of the kind when a picture does not load', async () => {
+    await show();
+    await readSite();
+    row('bab').querySelector('.th img').dispatchEvent(new Event('error'));
+    await settle();
+    expect(row('bab').querySelector('.th img')).toBeNull();
+    expect(row('bab').querySelector('.th svg')).not.toBeNull();
+  });
+
+  it('gives no Delete to a card made outside Azimut, and says on hover to delete it on GitHub', async () => {
+    await show();
+    await readSite();
+    const nested = row(NESTED);
+    expect(nested.querySelector('.t small').textContent).toBe(`/articles/${NESTED}/`);
+    expect(button('Delete', nested)).toBeUndefined();
+    expect(nested.getAttribute('title')).toBe('Made outside Azimut: delete it on GitHub');
+    expect(nested.querySelector('.outside').textContent).toBe('Outside Azimut');
+    expect(row('bab').hasAttribute('title')).toBe(false);
   });
 
   it('refuses a link that is no web address, so a card cannot send the analyst anywhere else', async () => {
     await show();
     serve({ read: { ...READ, items: [item('x', { address: 'javascript:alert(1)', image: 'javascript:alert(2)' })] } });
     await readSite();
-    expect(rows()[0].querySelector('a')).toBeNull();
-    expect(rows()[0].querySelector('img')).toBeNull();
-    expect(rows()[0].querySelector('.t small').textContent).toBe('/x/');
+    expect(row('x').querySelector('a.open')).toBeNull();
+    expect(row('x').querySelector('img')).toBeNull();
   });
 
   it('filters by category, by Maps, Pages and Unlisted, and back to All', async () => {
     await show();
     await readSite();
     expect([...panel().querySelectorAll('.chip')].map((node) => node.textContent.trim())).toEqual(
-      ['All5', 'Conflict Watch1', 'Methods1', 'Maps1', 'Pages1', 'Unlisted1']);
+      ['All6', 'Conflict Watch1', 'Methods2', 'Maps1', 'Pages1', 'Unlisted1']);
     expect(chip('All').getAttribute('aria-pressed')).toBe('true');
     chip('Methods').click();
     await settle();
-    // an unlisted draft with a category is not one of the category's articles
-    expect(rows().map((row) => row.dataset.folder)).toEqual(['guide']);
+    // a category keeps its listed articles, never an unlisted one
+    expect(rows().map((node) => node.dataset.folder)).toEqual(['guide', NESTED]);
     expect(chip('Methods').getAttribute('aria-pressed')).toBe('true');
     chip('Maps').click();
     await settle();
-    expect(rows().map((row) => row.dataset.folder)).toEqual(['bab-map']);
-    chip('Pages').click();
-    await settle();
-    expect(rows().map((row) => row.dataset.folder)).toEqual(['about']);
+    expect(rows().map((node) => node.dataset.folder)).toEqual(['bab-map']);
     chip('Unlisted').click();
     await settle();
-    expect(rows().map((row) => row.dataset.folder)).toEqual(['draft']);
+    expect(rows().map((node) => node.dataset.folder)).toEqual(['draft']);
     chip('All').click();
     await settle();
-    expect(rows()).toHaveLength(5);
-    for (const node of panel().querySelectorAll('.chip')) expect(node.getAttribute('title')).toBeTruthy();
+    expect(rows()).toHaveLength(6);
+    for (const node of panel().querySelectorAll('.chip')) expect(node.getAttribute('title')).toBe('Show only these on the list');
   });
 
   it('says what the three kinds are, and that the kind is picked in the publish window', async () => {
     await show();
-    const kinds = [...panel().querySelectorAll('.kinds section')].map((node) => [node.querySelector('.kind').textContent, node.querySelector('p').textContent]);
-    expect(kinds).toEqual([
-      ['Article', 'In the site\'s list, its feed and its sitemap.'],
-      ['Page', 'Off the lists, linked from the site\'s header. For About or Legal notice.'],
-      ['Unlisted', 'Online at its address only. For a test, or a draft to show someone.']]);
+    const kinds = [...panel().querySelectorAll('.kinds section')];
+    expect(kinds.map((node) => node.querySelector('.kind').textContent)).toEqual(['Article', 'Page', 'Unlisted']);
+    expect(kinds[2].textContent).toContain('Online at its address only. For a test, or a draft to show someone.');
     expect(panel().textContent).toContain('You pick the kind in the publish window, each time you publish a note.');
   });
 
   it('lists the categories the read found with their articles and the pages that list them', async () => {
     await show();
-    expect(panel().textContent).toContain('Read the site to list its categories.');
+    const categories = () => panel().querySelector('section[aria-label="Categories"]');
+    expect(categories().textContent).toContain('Read the site to list its categories.');
     await readSite();
-    const cats = [...panel().querySelectorAll('.cats li')].map((node) => node.textContent.replace(/\s+/g, ' ').trim());
-    expect(cats).toEqual(['Conflict Watch 1 article conflict-watch/ lists it', 'Methods 1 article no page lists it']);
-    expect(panel().textContent).toContain('Made in the publish window: pick one the site uses or type a new one.');
-    expect(panel().textContent).toContain('A category gets a page of its own with the markers in Make it yours.');
-    serve({ read: { ...READ, categories: [] } });
-    button('Read the site again').click();
-    await settle();
-    expect(panel().textContent).toContain('No category on the site yet.');
+    const lines = [...categories().querySelectorAll('.cats li')];
+    expect(lines.map((node) => [node.querySelector('.name').textContent, node.querySelector('.count').textContent, node.querySelector('.pg').textContent]))
+      .toEqual([['Conflict Watch', '1 article', '/conflict-watch/ lists them'], ['Methods', '2 articles', 'no page of its own']]);
+    expect(categories().textContent).toContain('A category gets a page of its own with the markers in Make it yours.');
   });
 
   it('shares the read with the hero and the other panels', async () => {
     await show();
     await readSite();
-    const hero = target.querySelector('section[aria-label="The site at a glance"]');
-    expect(hero.textContent).toContain('2 articles · 1 map · 1 page · 1 unlisted · 312 MB');
-    tab('Overview').click();
-    await settle();
-    expect(target.querySelector('#hub-panel-overview .check li[data-state="done"]')).not.toBeNull();
+    expect(siteRead.data.items).toHaveLength(6);
+    expect(hero().textContent).toContain('3 articles · 1 map · 1 page · 1 unlisted · 312 MB');
   });
 
   it('keeps each press as a hover text, and the network rule on mount: nothing is asked before a press', async () => {
     await show();
-    expect(get.mock.calls.map(([path]) => path)).toEqual(['/api/publishing', '/api/publishing']);
-    expect(post).not.toHaveBeenCalled();
+    await readSite();
+    for (const control of panel().querySelectorAll('button, a, input, summary')) expect(control.getAttribute('title'), control.outerHTML.slice(0, 80)).toBeTruthy();
+    expect(post.mock.calls.map(([path]) => path)).toEqual(['/api/publishing/github/site/read']);
   });
 });
 
 describe('deleting an article', () => {
-  const ask = async (folder) => {
-    button('Delete', rows().find((row) => row.dataset.folder === folder)).click();
-    await settle();
-  };
-
   it('asks first, saying what goes and that the note stays, and reaches GitHub for nothing until it is confirmed', async () => {
     await show();
     await readSite();
-    post.mockClear();
-    await ask('bab');
-    expect(dialog().getAttribute('aria-label')).toBe('Delete this article from the site?');
+    button('Delete', row('bab')).click();
+    await settle();
+    expect(dialog().textContent).toContain('Delete this article from the site?');
     expect(dialog().textContent).toContain('Deletes bab/ from octo/articles and takes it off the lists, the feed and the sitemap, in one commit.');
     expect(dialog().textContent).toContain('The note stays in your case: publish it again to put it back.');
-    expect([...dialog().querySelectorAll('button')].map((node) => node.textContent.trim())).toEqual(['Cancel', 'Delete from the site']);
-    expect(post).not.toHaveBeenCalled();
-    // Cancel leaves the row and asks nothing
+    expect(asks('/api/publishing/github/site/delete')).toHaveLength(0);
     button('Cancel', dialog()).click();
     await settle();
     expect(dialog()).toBeNull();
-    expect(rows()).toHaveLength(5);
-    expect(post).not.toHaveBeenCalled();
+    expect(rows()).toHaveLength(6);
+    expect(asks('/api/publishing/github/site/delete')).toHaveLength(0);
   });
 
   it('deletes on its confirmation: one commit, the row leaves, and the result line says what was written', async () => {
     await show();
     await readSite();
-    post.mockClear();
-    await ask('bab');
-    button('Delete from the site', dialog()).click();
-    await settle();
-    expect(post).toHaveBeenCalledTimes(1);
-    expect(post).toHaveBeenCalledWith('/api/publishing/github/site/delete', { folder: 'bab' });
+    await deleteRow('bab');
+    expect(asks('/api/publishing/github/site/delete')).toEqual([['/api/publishing/github/site/delete', { folder: 'bab' }]]);
     expect(dialog()).toBeNull();
-    expect(rows().map((row) => row.dataset.folder)).toEqual(['guide', 'bab-map', 'about', 'draft']);
-    expect(panel().textContent).toContain('Deleted bab/: 3 files written.');
-    // what counted it counts again: the tab, the category it was alone in, the hero
-    expect(tab('Articles').querySelector('.n').textContent).toBe('4');
-    expect([...panel().querySelectorAll('.chip')].map((node) => node.textContent.trim())).not.toContain('Conflict Watch1');
-    expect(panel().textContent).not.toContain('conflict-watch/ lists it');
-    expect(target.querySelector('section[aria-label="The site at a glance"]').textContent).toContain('1 article · 1 map');
-    // the read itself was not asked again
-    expect(post.mock.calls.map(([path]) => path)).toEqual(['/api/publishing/github/site/delete']);
+    expect(row('bab')).toBeNull();
+    expect(rows()).toHaveLength(5);
+    expect(status().textContent).toContain('Deleted bab/: 3 files written.');
+    expect(status().dataset.state).toBe('ok');
+    // the tab, the hero, the chips and the categories count it no more, and its weight is off the site's
+    expect(tab('Articles').querySelector('.count').textContent).toBe('5');
+    expect(chip('Conflict Watch')).toBeUndefined();
+    expect(siteRead.data.size.site).toBe(312 * MB - Math.round(4.2 * MB));
+    expect(panel().querySelectorAll('section[aria-label="Categories"] .cats li')).toHaveLength(1);
+    // the next read says when it was read again
+    await readSite();
+    expect(status().textContent).toMatch(/^Read today at/);
+  });
+
+  it('says only that the folder went when the server counted nothing it removed', async () => {
+    await show();
+    await readSite();
+    serve({ deleted: (body) => ({ ...DELETED(body.folder), removed: null }) });
+    await deleteRow('guide');
+    expect(status().textContent).toContain('Deleted guide/.');
   });
 
   it('lists what the server says to mind', async () => {
     await show();
     await readSite();
-    serve({ deleted: { ok: true, commit: 'c'.repeat(40), folder: 'guide', removed: 2, written: ['feed.xml'], warnings: ['feed.xml is yours: it was left as it is.'] } });
-    await ask('guide');
-    button('Delete from the site', dialog()).click();
-    await settle();
-    expect(panel().textContent).toContain('Deleted guide/: 1 file written.');
-    expect([...panel().querySelectorAll('ul[aria-label="To mind"] li')].map((node) => node.textContent.trim())).toContain('feed.xml is yours: it was left as it is.');
+    serve({ deleted: (body) => ({ ...DELETED(body.folder), written: [], warnings: ['The site holds too many files for Azimut to read: its lists were left.'] }) });
+    await deleteRow('guide');
+    expect(status().textContent).toContain('Deleted guide/: 0 files written.');
+    expect(panel().querySelector('ul[aria-label="To mind"]').textContent).toContain('its lists were left');
   });
 
-  it('keeps the dialog and the row when GitHub moved on, says why, and deletes on the next press', async () => {
+  it.each([
+    [409, 'The branch changed on GitHub while Azimut was deleting: press Delete again.'],
+    [422, 'Azimut deletes only the folders it published.'],
+    [422, 'The folder holds more files than Azimut can read: delete it on GitHub.'],
+  ])('keeps the row when the server refuses with %s, and says why in the result line', async (code, detail) => {
     await show();
     await readSite();
-    let attempts = 0;
-    serve({ deleted: (body) => {
-      attempts += 1;
-      if (attempts === 1) throw new Error('The branch moved on GitHub meanwhile: press Delete again.');
-      return { ok: true, commit: 'd'.repeat(40), folder: body.folder, removed: 1, written: ['articles.json'], warnings: [] };
-    } });
-    await ask('about');
-    button('Delete from the site', dialog()).click();
-    await settle();
-    expect(dialog()).not.toBeNull();
-    expect(dialog().textContent).toContain('press Delete again');
-    expect(rows()).toHaveLength(5);
-    button('Delete from the site', dialog()).click();
-    await settle();
+    serve({ deleted: () => Promise.reject(refused(code, detail)) });
+    await deleteRow('bab');
     expect(dialog()).toBeNull();
-    expect(rows().map((row) => row.dataset.folder)).not.toContain('about');
-    expect(attempts).toBe(2);
+    expect(status().textContent).toContain(detail);
+    expect(status().dataset.state).toBe('error');
+    expect(row('bab')).not.toBeNull();
+    expect(rows()).toHaveLength(6);
+    // and deletes on the next press
+    serve();
+    await deleteRow('bab');
+    expect(row('bab')).toBeNull();
+    expect(status().textContent).toContain('Deleted bab/: 3 files written.');
   });
 
-  it('refuses nothing it did not publish by itself: the server says so and the row stays', async () => {
+  it('takes the row off when the folder is not on the site any more', async () => {
     await show();
     await readSite();
-    serve({ deleted: () => { throw new Error('Azimut deletes only the folders it published.'); } });
-    await ask('bab-map');
-    button('Delete from the site', dialog()).click();
-    await settle();
-    expect(dialog().textContent).toContain('Azimut deletes only the folders it published.');
-    expect(rows().map((row) => row.dataset.folder)).toContain('bab-map');
+    serve({ deleted: () => Promise.reject(refused(404, 'That folder is not on the site any more.')) });
+    await deleteRow('guide');
+    expect(status().textContent).toContain('That folder is not on the site any more.');
+    expect(row('guide')).toBeNull();
   });
 
   it('takes the legal notice off the site when its folder is deleted', async () => {
     await show();
-    serve({ read: { ...READ, items: [...READ.items, item('legal-notice', { title: 'Legal notice', role: 'page' })], legal: 'legal-notice/' } });
+    serve({ read: { ...READ, legal: 'legal-notice/', items: [...READ.items, item('legal-notice', { title: 'Legal notice', role: 'page' })] } });
     await readSite();
     expect(siteRead.data.legal).toBe('legal-notice/');
-    await ask('legal-notice');
-    button('Delete from the site', dialog()).click();
-    await settle();
+    await deleteRow('legal-notice');
     expect(siteRead.data.legal).toBe('');
   });
 });
@@ -454,7 +477,7 @@ describe('pages every site should have', () => {
     post.mockRejectedValue(new Error('The case is read-only.'));
     start('Start a Legal notice page').click();
     await settle();
-    expect(toast).toHaveBeenCalledWith('Could not start the Legal notice: The case is read-only.', 'danger');
+    expect(toast).toHaveBeenCalledWith('Could not start the Legal notice page: The case is read-only.', 'danger');
     start('Start a Privacy page').click();
     await settle();
     expect(toast).toHaveBeenLastCalledWith('Could not start the Privacy page: The case is read-only.', 'danger');
@@ -464,10 +487,10 @@ describe('pages every site should have', () => {
 
   it('says a page is on the site once the read found it, and not before', async () => {
     await show();
-    expect(pageRow('Legal notice').querySelector('.badge')).toBeNull();
+    expect(pageRow('Legal notice').querySelector('.hub-pill')).toBeNull();
     serve({ read: { ...READ, legal: 'legal-notice/', privacy: '' } });
     await readSite();
-    expect(pageRow('Legal notice').querySelector('.badge').textContent).toContain('On the site');
-    expect(pageRow('Privacy').querySelector('.badge')).toBeNull();
+    expect(pageRow('Legal notice').querySelector('.hub-pill').textContent).toContain('On the site');
+    expect(pageRow('Privacy').querySelector('.hub-pill')).toBeNull();
   });
 });

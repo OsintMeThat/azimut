@@ -1,24 +1,23 @@
 <script>
   /**
-   * A card of the hub: a title (or a heading of its own, for a badge beside it) over what it holds.
-   * `know` marks a tip with an amber edge. The paragraphs inside are the parent's, so they are styled
-   * here as `:global`.
+   * A card of the hub: a title, with what stands beside it (`aside`, a pill), over what it holds.
+   * `tip` marks a tip with an amber edge. Each card is a container of its own, so a field inside
+   * lays itself out by the card's width (`HubField.svelte`).
    */
-  let { title = '', heading = null, label = undefined, guide = undefined, know = false, children } = $props();
+  let { title = '', aside = null, label = undefined, guide = undefined, tip = false, children } = $props();
 </script>
 
-<section class="hub-card" class:know aria-label={label} data-guide={guide}>
-  {#if heading}<h3>{@render heading()}</h3>{:else if title}<h3>{title}</h3>{/if}
+<section class="hub-card" class:tip aria-label={label} data-guide={guide}>
+  {#if title}<h3>{title}{@render aside?.()}</h3>{/if}
   {@render children?.()}
 </section>
 
 <style>
-  .hub-card { min-width: 0; border: 1px solid var(--border); background: var(--bg-1); border-radius: 8px; padding: 14px 16px; }
-  .hub-card.know { border-left: 2px solid var(--accent); }
-  h3 { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; margin: 0 0 4px; font-size: var(--fs-md); font-weight: 600;
-    text-transform: none; letter-spacing: 0; color: var(--text-1); }
-  .hub-card :global(p) { margin: 0; color: var(--text-2); font-size: var(--fs-sm); line-height: 1.5; }
-  .hub-card :global(p.hint) { color: var(--text-3); font-size: var(--fs-xs); }
-  .hub-card :global(p + p) { margin-top: 6px; }
-  .hub-card :global(a) { color: var(--accent); }
+  .hub-card { container: card / inline-size; min-width: 0; padding: 14px 16px; border: 1px solid var(--border); border-radius: 8px; background: var(--bg-1); }
+  .hub-card.tip { border-left: 2px solid var(--accent); }
+  h3 { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; margin: 0 0 4px; color: var(--text-1); font-size: var(--fs-md); font-weight: 600;
+    line-height: 1.35; letter-spacing: 0; text-transform: none; }
+  /* the card's own paragraphs, weak enough for a class of the panel to restyle one */
+  :where(.hub-card) > :global(p) { margin: 0; color: var(--text-2); font-size: var(--fs-sm); line-height: 1.5; }
+  :where(.hub-card) > :global(p + p) { margin-top: 6px; }
 </style>

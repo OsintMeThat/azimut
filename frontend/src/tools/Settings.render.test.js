@@ -101,12 +101,12 @@ describe('the settings pane', () => {
     for (const [index] of TABS.entries()) {
       rail()[index].click();
       flushSync();
-      expect(pane().querySelectorAll('section.group, .workspace-folder').length).toBeGreaterThan(0);
+      // a section of groups, or the Website hub of cards
+      expect(pane().querySelectorAll('section.group, .workspace-folder, .hub .hub-card').length).toBeGreaterThan(0);
     }
   });
 });
 
-describe('a tab asked for from elsewhere', () => {
 describe('a settings backup restored', () => {
   it('says what it brought back, the site logo among the pictures', async () => {
     rail()[TABS.indexOf('storage')].click();
@@ -124,6 +124,7 @@ describe('a settings backup restored', () => {
   });
 });
 
+describe('a tab asked for from elsewhere', () => {
   it('opens on Website, where the export dialogs send the analyst to set GitHub Pages or WordPress up', () => {
     uiState.tool = 'settings';
     uiState.settingsTab = 'website';

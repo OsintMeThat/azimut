@@ -13,6 +13,8 @@
    */
   import Icon from '../../components/Icon.svelte';
   import GitHubSetupPress from '../../components/GitHubSetupPress.svelte';
+  import HubCard from './website/HubCard.svelte';
+  import HubField from './website/HubField.svelte';
   import { toast } from '../../lib/state.svelte.js';
   import { WEBSITE_HELP as HELP } from '../../lib/websiteSetup.js';
   import { forgetGitHub, readGitHub, saveGitHub, testGitHub } from '../../lib/githubPages.js';
@@ -116,58 +118,52 @@
   }
 </script>
 
-<section class="group github" data-guide="settings.github" aria-label="GitHub Pages">
-  <h3>GitHub Pages{#if ready}<span class="badge ok">Set up</span>{/if}</h3>
-  <p class="intro">Publish a note's web folder to your own GitHub Pages site in one press, from the export dialog. You get an address to share on X.</p>
-  <label class="row" title={HELP.githubAccount}>
-    <span class="row-label"><span>Account</span><span class="row-hint">{hint('Account')}</span></span>
-    <input class="input wide" bind:value={account} onchange={() => saveField('account', account)} placeholder="your-name"
+<HubCard label="GitHub Pages" guide="settings.github" title="GitHub Pages">
+  {#snippet aside()}
+    {#if tested?.ok}<span class="hub-pill ok">Connected</span>{:else if ready}<span class="hub-pill ok">Set up</span>{:else if state}<span class="hub-pill">Not set up</span>{/if}
+  {/snippet}
+  <HubField id="github-account" label="Account" hint={hint('Account')}>
+    <input id="github-account" class="input" bind:value={account} onchange={() => saveField('account', account)} placeholder="your-name"
       spellcheck="false" autocomplete="username" disabled={state === null} title={HELP.githubAccount} />
-  </label>
-  <label class="row" title={HELP.githubRepo}>
-    <span class="row-label"><span>Repository</span><span class="row-hint">{hint('Repository')}</span></span>
-    <input class="input wide" bind:value={repo} onchange={() => saveField('repo', repo)} placeholder={DEFAULT_REPO}
+  </HubField>
+  <HubField id="github-repo" label="Repository" hint={hint('Repository')}>
+    <input id="github-repo" class="input" bind:value={repo} onchange={() => saveField('repo', repo)} placeholder={DEFAULT_REPO}
       spellcheck="false" autocomplete="off" disabled={state === null} title={HELP.githubRepo} />
-  </label>
-  <label class="row" title={HELP.githubBranch}>
-    <span class="row-label"><span>Branch</span><span class="row-hint">{hint('Branch')}</span></span>
-    <input class="input wide" bind:value={branch} onchange={() => saveField('branch', branch)} placeholder={DEFAULT_BRANCH}
+  </HubField>
+  <HubField id="github-branch" label="Branch" hint={hint('Branch')}>
+    <input id="github-branch" class="input" bind:value={branch} onchange={() => saveField('branch', branch)} placeholder={DEFAULT_BRANCH}
       spellcheck="false" autocomplete="off" disabled={state === null} title={HELP.githubBranch} />
-  </label>
-  <label class="row" title={HELP.githubToken}>
-    <span class="row-label">
-      <span>Token</span>
-      <span class="row-hint">
-        {#if state?.token.set}Kept on this computer{state.token.hint ? `, ending ${state.token.hint.replace('…', '')}` : ''}. Paste a new one to replace it.
-        {:else}A fine-grained token for that one repository. Kept on this computer only, never in a backup.{/if}
-      </span>
-    </span>
-    <input class="input wide mono" type="password" bind:value={token} onchange={saveToken}
+  </HubField>
+  <HubField id="github-token" label="Token"
+    hint={state?.token.set
+      ? `Kept on this computer${state.token.hint ? `, ending ${state.token.hint.replace('…', '')}` : ''}. Paste a new one to replace it.`
+      : 'A fine-grained token for that one repository. Kept on this computer only, never in a backup.'}>
+    <input id="github-token" class="input hub-mono" type="password" bind:value={token} onchange={saveToken}
       placeholder={state?.token.set ? `github_pat_•••• ${state.token.hint.replace('…', '')}` : 'github_pat_…'}
       autocomplete="new-password" spellcheck="false" disabled={state === null} title={HELP.githubToken} />
-  </label>
-  <div class="row actions">
-    <span class="said" role="status" data-state={tested === 'testing' ? 'testing' : tested?.ok ? 'ok' : tested ? 'error' : ''}>
-      {#if tested === 'testing'}Asking GitHub about {state.account}/{state.repo}…
+  </HubField>
+  <div class="actions">
+    <button type="button" class="btn btn-sm" onclick={test} disabled={!ready || saving || tested === 'testing'} title={HELP.githubTest}>
+      Test connection</button>
+    <button type="button" class="btn btn-ghost btn-sm" onclick={forget} disabled={!state || (!state.account && !state.token.set)}
+      title={HELP.githubForget}>Forget</button>
+    <span class="said hub-line" role="status" data-state={tested === 'testing' ? 'busy' : tested?.ok ? 'ok' : tested ? 'error' : ''}>
+      {#if tested === 'testing'}<span class="hub-spinner" aria-hidden="true"></span> Asking GitHub about {state.account}/{state.repo}…
       {:else if tested}<Icon name={tested.ok ? 'check' : 'alert'} size={12} /> {tested.text}
       {:else if ready}<span>Articles go to {state.base}<em>short-name</em>/</span>{/if}
     </span>
-    <button class="btn btn-sm" onclick={test} disabled={!ready || saving || tested === 'testing'} title={HELP.githubTest}>
-      Test connection</button>
-    <button class="btn btn-ghost btn-sm" onclick={forget} disabled={!state || (!state.account && !state.token.set)}
-      title={HELP.githubForget}>Forget</button>
   </div>
   {#if tested?.warnings?.length}
-    <ul class="warnings" aria-label="To mind">
+    <ul class="hub-warnings" aria-label="To mind">
       {#each tested.warnings as warning, index (index)}<li><Icon name="alert" size={12} /> {warning}</li>{/each}
     </ul>
   {/if}
   {#if tested?.needs}
-    <GitHubSetupPress needs={tested.needs} github={state} detail={tested.detail} ondone={test} />
+    <div class="needs"><GitHubSetupPress needs={tested.needs} github={state} detail={tested.detail} ondone={test} /></div>
   {/if}
   {#if state}
-    <details class="how" open={!ready}>
-      <summary title={HELP.githubHow}>How to set up GitHub Pages</summary>
+    <details class="how hub-how" open={!ready}>
+      <summary title={HELP.githubHow}>How to make the repository and the token</summary>
       <p class="note-line">{GITHUB_FREE}</p>
       <p class="note-line public">{PAGES_PUBLIC}</p>
       <h4>The repository</h4>
@@ -178,40 +174,25 @@
       </ol>
       <h4>The token</h4>
       <ol>{#each TOKEN_STEPS as step, index (index)}<li>{step}</li>{/each}</ol>
-      <a class="guide" href={tokenLink(state.account)} target="_blank" rel="noopener noreferrer" title={HELP.githubTokenPage}>
+      <a class="hub-ext" href={tokenLink(state.account)} target="_blank" rel="noopener noreferrer" title={HELP.githubTokenPage}>
         Make the token on github.com <Icon name="external" size={11} /></a>
       <p class="note-line">{TOKEN_MORE}</p>
       <h4>Pages</h4>
       <p class="note-line">Press Test connection, then Turn on Pages if it is off.</p>
       <p class="note-line">{PAGES_BY_HAND}</p>
-      <dl>
-        {#each GITHUB_FIELDS as [name, said] (name)}<dt>{name}</dt><dd>{said}</dd>{/each}
-      </dl>
     </details>
   {/if}
-</section>
+</HubCard>
 
 <style>
-  .wide { width: 300px; flex-shrink: 0; }
-  h3 .badge { text-transform: none; letter-spacing: 0; font-weight: 500; }
-  .mono { font-family: var(--font-mono); }
-  label.row { cursor: default; }
-  .actions { justify-content: flex-end; gap: 8px; margin-top: 4px; }
-  .said { flex: 1; min-width: 0; display: inline-flex; align-items: center; gap: 5px; color: var(--text-3); font-size: var(--fs-xs); overflow-wrap: anywhere; }
+  .actions { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-top: 10px; }
+  .said { flex: 1 1 200px; margin-left: 4px; }
   .said em { font-style: normal; color: var(--text-2); }
-  .said[data-state='ok'] { color: var(--ok); }
-  .said[data-state='error'] { color: var(--danger); }
-  .warnings { list-style: none; margin: 6px 0 0; padding: 0; display: flex; flex-direction: column; gap: 3px; color: var(--warn); font-size: var(--fs-xs); }
-  .warnings li { display: flex; align-items: center; gap: 5px; }
-  .github :global(.needs) { margin-top: 8px; }
-  .how { margin-top: 10px; border: 1px solid var(--border); border-radius: var(--r-md); padding: 6px 12px 10px; background: var(--bg-1); }
-  .how summary { cursor: pointer; color: var(--text-2); font-size: var(--fs-sm); padding: 2px 0; }
+  .needs { margin-top: 10px; }
   .how h4 { margin: 10px 0 2px; color: var(--text-1); font-size: var(--fs-xs); font-weight: 600; }
-  .how ol { margin: 2px 0 4px; padding-left: 20px; display: flex; flex-direction: column; gap: 3px; color: var(--text-2); font-size: var(--fs-xs); line-height: 1.5; }
+  .how ol { margin-top: 2px; }
+  .how a { color: var(--accent); }
+  .how .hub-ext { margin-top: 4px; }
   .note-line { margin: 6px 0 0; color: var(--text-3); font-size: var(--fs-xs); line-height: 1.5; }
   .note-line.public { color: var(--warn); }
-  .how dl { display: grid; grid-template-columns: max-content 1fr; gap: 6px 14px; margin: 10px 0 2px; font-size: var(--fs-xs); }
-  .how dt { color: var(--text-1); font-weight: 600; }
-  .how dd { margin: 0; color: var(--text-2); line-height: 1.5; }
-  .guide { display: inline-flex; align-items: center; gap: 4px; margin-top: 4px; font-size: var(--fs-xs); color: var(--accent); }
 </style>

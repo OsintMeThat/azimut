@@ -2,7 +2,7 @@
 /**
  * Settings › Website as a hub, mounted: its bar of panels and the hero over them, the Overview's
  * checklist, Identity with its live preview and the site logo, Hosting with its limits, Readers (the
- * statistics choice with its code and token checked before they are sent, the feed and the sitemap),
+ * counting choice with its code and token checked before they are sent, the feed and the sitemap),
  * Upkeep (Update the site in each state it can answer, who writes what), Make it yours and WordPress.
  * The Articles panel has its own file (`WebsiteArticles.render.test.js`).
  */
@@ -27,17 +27,18 @@ const { HAND_EDITED, WORKFLOW_NOTICE } = await import('../../lib/websiteSetup.js
 
 const MB = 1024 * 1024;
 const GB = 1024 * MB;
-const NOTHING = { account: '', repo: 'articles', branch: 'main', site: '', base: '', token: { set: false, hint: '' } };
+const NOTHING = { account: '', repo: 'articles', branch: 'main', site: '', base: '', token: { set: false, hint: '' }, website: { title: '', logo: false },
+  categories: [] };
 const SET = { account: 'octo', repo: 'articles', branch: 'main', site: '', base: 'https://octo.github.io/articles/',
-  token: { set: true, hint: '…wxyz' }, website: { title: 'Octo Desk', logo: false, counting: '' }, categories: [] };
+  token: { set: true, hint: '…wxyz' }, website: { title: 'octo', logo: false, logo_from: '', counting: '' }, categories: [] };
 const CODE = '0123456789abcdef0123456789abcdef';
 const READ = {
   ok: true, address: 'https://octo.github.io/articles/', home: 'azimut',
   items: [
     { folder: 'bab', address: 'https://octo.github.io/articles/bab/', title: 'The Bab front', summary: '', date: '2026-11-20', date_label: '20 November 2026',
-      category: 'Conflict Watch', role: 'article', layout: 'story', image: 'https://octo.github.io/articles/bab/cover.jpg', bytes: 4 * MB },
+      category: 'Conflict Watch', role: 'article', layout: 'story', image: 'https://octo.github.io/articles/bab/cover.jpg', bytes: 4 * MB, deletable: true },
     { folder: 'bab-map', address: 'https://octo.github.io/articles/bab-map/', title: 'On one map', summary: '', date: '2026-11-19', date_label: '19 November 2026',
-      category: '', role: 'article', layout: 'map', image: '', bytes: 3 * MB },
+      category: '', role: 'article', layout: 'map', image: '', bytes: 3 * MB, deletable: true },
   ],
   categories: [{ name: 'Conflict Watch', count: 1, pages: ['conflict-watch/'] }],
   marked: ['', 'conflict-watch/'], legal: '', privacy: '', last: { date: '2026-11-21T13:55:52Z', message: 'Update the site' },
@@ -49,10 +50,12 @@ let target;
 let saved;
 const settle = async () => { for (let i = 0; i < 25; i++) await Promise.resolve(); flushSync(); };
 const section = (name) => target.querySelector(`section[aria-label="${name}"]`);
+const hero = () => section('The site at a glance');
 const panel = (id) => target.querySelector(`#hub-panel-${id}`);
 const tab = (name) => [...target.querySelectorAll('[role="tab"]')].find((node) => node.textContent.trim().startsWith(name));
 const button = (text, within = target) => [...within.querySelectorAll('button')].find((node) => node.textContent.trim().startsWith(text));
-const radio = (name) => [...target.querySelectorAll('[role="radiogroup"][aria-label="Count readers with"] [role="radio"]')].find((node) => node.textContent.trim() === name);
+const radio = (name) => [...target.querySelectorAll('[role="radiogroup"][aria-label="Count readers with"] [role="radio"]')]
+  .find((node) => node.textContent.trim() === name);
 const type = (input, value) => {
   input.value = value;
   input.dispatchEvent(new Event('input', { bubbles: true }));
@@ -62,6 +65,7 @@ const typeOnly = (input, value) => {
   input.value = value;
   input.dispatchEvent(new Event('input', { bubbles: true }));
 };
+const key = (node, name) => node.dispatchEvent(new KeyboardEvent('keydown', { key: name, bubbles: true }));
 /** The tab opened, as a press on it opens it. */
 const open = async (name) => {
   tab(name).click();
@@ -102,8 +106,9 @@ beforeEach(() => {
   applyPrefs(saved);
   caseState.current = null;
   uiState.tool = 'settings';
-  uiState.openNotebook = null;
   target = document.createElement('div');
+  // the pane the hub scrolls in, as Settings.svelte gives it
+  target.className = 'settings-pane';
   document.body.append(target);
 });
 afterEach(() => {
@@ -118,6 +123,7 @@ describe('the bar of panels', () => {
   it('lists the panels in order with WordPress after a divider, opens on the Overview and shows one panel at a time', async () => {
     await show();
     const bar = target.querySelector('[role="tablist"]');
+    expect(bar.getAttribute('aria-label')).toBe('Website');
     expect(bar.getAttribute('data-guide')).toBe('settings.website-hub');
     expect([...bar.querySelectorAll('[role="tab"]')].map((node) => node.textContent.trim())).toEqual(
       ['Overview', 'Identity', 'Hosting', 'Articles', 'Readers', 'Upkeep', 'Make it yours', 'WordPress']);
@@ -130,107 +136,141 @@ describe('the bar of panels', () => {
     expect(tab('Overview').getAttribute('aria-selected')).toBe('false');
     expect(panel('hosting').hidden).toBe(false);
     expect(panel('overview').hidden).toBe(true);
-    // each panel says what it holds, and is labelled by its tab
+    // each panel says what it holds, is labelled by its tab and controlled by it
     expect(panel('hosting').querySelector('h2').textContent).toBe('Where the site lives');
+    expect(panel('hosting').getAttribute('role')).toBe('tabpanel');
     expect(panel('hosting').getAttribute('aria-labelledby')).toBe(tab('Hosting').id);
+    expect(tab('Hosting').getAttribute('aria-controls')).toBe('hub-panel-hosting');
+    for (const node of target.querySelectorAll('[role="tab"]')) expect(node.getAttribute('title'), node.textContent).toBeTruthy();
   });
 
-  it('moves between the panels with the arrow keys, and keeps only the open tab in the tab order', async () => {
+  it('moves between the panels with the arrow keys, Home and End, and keeps only the open tab in the tab order', async () => {
     await show();
-    tab('Overview').dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowRight', bubbles: true }));
+    key(tab('Overview'), 'ArrowRight');
     await settle();
     expect(tab('Identity').getAttribute('aria-selected')).toBe('true');
+    expect(document.activeElement).toBe(tab('Identity'));
     expect(tab('Identity').tabIndex).toBe(0);
     expect(tab('Overview').tabIndex).toBe(-1);
-    tab('Identity').dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowLeft', bubbles: true }));
-    tab('Overview').dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowLeft', bubbles: true }));
+    key(tab('Identity'), 'ArrowLeft');
+    key(tab('Overview'), 'ArrowLeft');
     await settle();
-    // it wraps round to the last
+    // it wraps round to the last, and back to the first
     expect(tab('WordPress').getAttribute('aria-selected')).toBe('true');
-    tab('WordPress').dispatchEvent(new KeyboardEvent('keydown', { key: 'Home', bubbles: true }));
+    expect(panel('wordpress').hidden).toBe(false);
+    key(tab('WordPress'), 'ArrowRight');
+    await settle();
+    expect(tab('Overview').getAttribute('aria-selected')).toBe('true');
+    key(tab('Overview'), 'End');
+    await settle();
+    expect(tab('WordPress').getAttribute('aria-selected')).toBe('true');
+    key(tab('WordPress'), 'Home');
+    await settle();
+    expect(tab('Overview').getAttribute('aria-selected')).toBe('true');
+    // any other key is the browser's
+    key(tab('Overview'), 'ArrowDown');
     await settle();
     expect(tab('Overview').getAttribute('aria-selected')).toBe('true');
   });
 
   it('opens on the panel another part of the app asked for, once', async () => {
-    const props = { focus: 'identity' };
-    await show(SET, props);
+    const props = await show(SET, { focus: 'identity' });
     expect(tab('Identity').getAttribute('aria-selected')).toBe('true');
     expect(panel('identity').hidden).toBe(false);
+    expect(props.focus).toBe('identity');
+    await open('Hosting');
+    expect(panel('hosting').hidden).toBe(false);
   });
 
-  it('reaches nothing on mount but a local read, and puts a hover text on every control', async () => {
+  it('reaches nothing on mount but this machine, and puts a hover text on every control', async () => {
     await show();
-    // the GitHub Pages and WordPress sections each read what this machine kept
-    expect(get.mock.calls.map(([path]) => path)).toEqual(['/api/publishing', '/api/publishing']);
+    // the GitHub Pages and WordPress cards each read what this machine kept
+    expect(get.mock.calls.map(([path]) => path).sort()).toEqual(['/api/publishing', '/api/publishing']);
     expect(post).not.toHaveBeenCalled();
     expect(put).not.toHaveBeenCalled();
     expect(del).not.toHaveBeenCalled();
-    for (const control of target.querySelectorAll('input, button, summary, a')) {
-      expect(control.getAttribute('title') ?? control.closest('label')?.getAttribute('title'), control.outerHTML.slice(0, 80)).toBeTruthy();
+    for (const control of target.querySelectorAll('input, button, summary, a, select')) {
+      expect(control.getAttribute('title'), control.outerHTML.slice(0, 100)).toBeTruthy();
     }
   });
 });
 
 describe('the hero', () => {
-  it('shows the site as it reads now: logo, name, tagline, where it lives and that nothing is read yet', async () => {
+  it('shows the site as it reads now: logo, name, tagline, where it lives, and that nothing is read yet', async () => {
     applyPrefs({ site_title: 'Octo Desk', site_tagline: 'Clarity is the tool.', signature: true });
     await show();
-    const hero = section('The site at a glance');
-    expect(hero.getAttribute('data-guide')).toBe('settings.website');
-    expect(hero.querySelector('h1').textContent).toBe('Octo Desk');
-    expect(hero.querySelector('.tag').textContent).toBe('Clarity is the tool.');
+    expect(hero().getAttribute('data-guide')).toBe('settings.website');
+    expect(hero().querySelector('h1').textContent).toBe('Octo Desk');
+    expect(hero().querySelector('.tag').textContent).toBe('Clarity is the tool.');
     // with no logo of its own the site wears the Publishing logo, asked of the one address
-    expect(hero.querySelector('img.logo').getAttribute('src')).toMatch(/^\/api\/settings\/site-logo\.png\?v=/);
-    const link = hero.querySelector('.where a');
+    expect(hero().querySelector('.logo img').getAttribute('src')).toMatch(/^\/api\/settings\/site-logo\.png\?v=/);
+    const link = hero().querySelector('a.where');
     expect(link.textContent).toBe('octo.github.io/articles');
     expect(link.getAttribute('href')).toBe('https://octo.github.io/articles/');
     expect(link.getAttribute('target')).toBe('_blank');
-    expect(hero.textContent).toContain('GitHub Pages · octo/articles · main');
-    expect(hero.textContent).toContain('Site not read yet');
-    expect(hero.textContent).toContain('Readers not counted');
-    expect(hero.textContent).not.toContain('Last change');
-    expect(hero.querySelector('a.btn').getAttribute('href')).toBe('https://octo.github.io/articles/');
+    expect(hero().textContent).toContain('GitHub Pages · octo/articles · main');
+    expect(hero().textContent).toContain('Not read yet');
+    expect(hero().textContent).toContain('Readers not counted');
+    expect(hero().textContent).not.toContain('Last change');
+    const site = button('Update the site', hero());
+    expect(site.disabled).toBe(false);
+    expect(hero().querySelector('a.btn').getAttribute('href')).toBe('https://octo.github.io/articles/');
   });
 
-  it('falls back to the Publishing name, else the account, and wears no logo when there is none', async () => {
+  it('falls back to the Publishing name, else the account, and shows the globe when there is no logo', async () => {
     applyPrefs({ report_name: 'A. Analyst' });
     await show();
-    const hero = section('The site at a glance');
-    expect(hero.querySelector('h1').textContent).toBe('A. Analyst');
-    expect(hero.querySelector('img.logo')).toBeNull();
-    expect(hero.querySelector('.tag')).toBeNull();
+    expect(hero().querySelector('h1').textContent).toBe('A. Analyst');
+    expect(hero().querySelector('.logo img')).toBeNull();
+    expect(hero().querySelector('.logo.blank svg')).not.toBeNull();
+    expect(hero().querySelector('.tag')).toBeNull();
     applyPrefs({ report_name: '' });
     await settle();
-    expect(hero.querySelector('h1').textContent).toBe('octo');
+    expect(hero().querySelector('h1').textContent).toBe('octo');
+  });
+
+  it('shows the globe in place of a logo that does not load', async () => {
+    applyPrefs({ site_logo: true });
+    await show();
+    hero().querySelector('.logo img').dispatchEvent(new Event('error'));
+    await settle();
+    expect(hero().querySelector('.logo img')).toBeNull();
+    expect(hero().querySelector('.logo.blank')).not.toBeNull();
   });
 
   it('says its counts, its size, who counts the readers and the last change once the site is read', async () => {
     applyPrefs({ site_stats: 'cloudflare', site_stats_token: CODE });
     await show();
     await readSite();
-    const hero = section('The site at a glance');
-    expect(hero.textContent).toContain('1 article · 1 map · 312 MB');
-    expect(hero.textContent).toContain('Readers counted by Cloudflare Web Analytics');
-    expect(hero.textContent).toMatch(/Last change (today|yesterday|\d+ \w+) at \d\d:\d\d|Last change \d+ \w+ \d{4}/);
-    expect(hero.textContent).not.toContain('Site not read yet');
+    expect(hero().textContent).toContain('1 article · 1 map · 312 MB');
+    expect(hero().textContent).toContain('Readers counted by Cloudflare Web Analytics');
+    expect(hero().textContent).toMatch(/Last change (today|yesterday) at \d\d:\d\d|Last change \d+ \w+ (at \d\d:\d\d|\d{4})/);
+    expect(hero().textContent).not.toContain('Not read yet');
+  });
+
+  it('says a site too large to read is so, rather than counting nothing', async () => {
+    await show();
+    await readSite({ ...READ, items: [], home: 'none', size: { site: null, repository: GB }, warnings: ['The site holds too many files for Azimut to read.'] });
+    expect(hero().textContent).toContain('Too many files to read');
+    expect(hero().textContent).not.toContain('Nothing on the site yet');
   });
 
   it('has no address to open and cannot update while GitHub is not set up', async () => {
-    await show({ ...NOTHING, website: { title: '', logo: false, counting: '' }, categories: [] });
-    const hero = section('The site at a glance');
-    expect(hero.querySelector('.where a')).toBeNull();
-    const open = hero.querySelector('a.btn');
-    expect(open.getAttribute('aria-disabled')).toBe('true');
-    expect(open.hasAttribute('href')).toBe(false);
-    expect(button('Update the site', hero).disabled).toBe(true);
-    expect(button('Update the site', hero).getAttribute('title')).toBe('Set up GitHub Pages under Hosting first');
+    await show(NOTHING);
+    expect(hero().querySelector('a.where')).toBeNull();
+    expect(hero().textContent).toContain('No address until GitHub Pages is set up');
+    const site = hero().querySelector('a.btn');
+    expect(site.getAttribute('aria-disabled')).toBe('true');
+    expect(site.hasAttribute('href')).toBe(false);
+    expect(button('Update the site', hero()).disabled).toBe(true);
+    expect(button('Update the site', hero()).getAttribute('title')).toBe('Set up GitHub Pages under Hosting first');
   });
 });
 
 describe('the Overview', () => {
   const steps = () => [...panel('overview').querySelectorAll('.check li')];
   const stepOf = (label) => steps().find((node) => node.textContent.includes(label));
+  const tips = () => [...panel('overview').querySelectorAll('.hub-col h3')].map((node) => node.textContent);
 
   it('shows the four steps from a note to a reader, naming the repository and the site', async () => {
     await show();
@@ -239,7 +279,7 @@ describe('the Overview', () => {
     expect(flow[2].textContent).toContain('One folder per note in octo/articles.');
     expect(flow[3].textContent).toContain('On octo.github.io, in its lists, its feed and search engines.');
     expect(panel('overview').textContent).toContain('Each publish also refreshes');
-    expect([...panel('overview').querySelectorAll('.pill')].map((node) => node.textContent)).toEqual(['the home list', 'the feed', 'the sitemap']);
+    expect([...panel('overview').querySelectorAll('.after .hub-pill')].map((node) => node.textContent)).toEqual(['the home list', 'the feed', 'the sitemap']);
   });
 
   it('says the state of each step, asks for a read of what it cannot tell, and opens the panel where it is set', async () => {
@@ -249,21 +289,20 @@ describe('the Overview', () => {
     expect(stepOf('Connect GitHub Pages').textContent).toContain('octo/articles on main');
     expect(stepOf('Name the site').textContent).toContain('Octo Desk');
     expect(stepOf('Pick the site').textContent).toContain('Uses your Publishing logo for now.');
-    expect(stepOf('Count readers').textContent).toContain('optional');
+    expect(stepOf('Count readers').querySelector('.step-name').textContent).toBe('Count readers · optional');
     expect(stepOf('Count readers').textContent).toContain('Nobody is counted.');
     expect(stepOf('A legal notice').textContent).toContain('Read the site, in Articles, to tell.');
-    expect(stepOf('Publish a first article').textContent).toContain('Read the site, in Articles, to tell.');
     expect(panel('overview').textContent).toContain('2 of 6 done. 2 need a read of the site.');
     expect(panel('overview').querySelector('[role="progressbar"]').getAttribute('aria-valuenow')).toBe('2');
-    button('Identity ›', stepOf('Pick the site')).click();
+    button('Identity', stepOf('Pick the site')).click();
     await settle();
     expect(panel('identity').hidden).toBe(false);
     expect(tab('Identity').getAttribute('aria-selected')).toBe('true');
     await open('Overview');
-    button('Articles ›', stepOf('A legal notice')).click();
+    button('Articles', stepOf('A legal notice')).click();
     await settle();
     expect(panel('articles').hidden).toBe(false);
-    for (const go of panel('overview').querySelectorAll('.go')) expect(go.getAttribute('title')).toBeTruthy();
+    for (const go of panel('overview').querySelectorAll('.hub-go')) expect(go.getAttribute('title')).toBe('Open the panel where this is set');
   });
 
   it('is done once the site is read and holds an article and a legal notice, and the logo is the site\'s own', async () => {
@@ -272,17 +311,16 @@ describe('the Overview', () => {
     await readSite({ ...READ, legal: 'legal-notice/' });
     await open('Overview');
     expect(steps().map((node) => node.dataset.state)).toEqual(['done', 'done', 'done', 'done', 'done', 'done']);
-    expect(stepOf('A legal notice').textContent).toContain('legal-notice/ is on the site');
-    expect(stepOf('Publish a first article').textContent).toContain('2 articles on the site');
+    expect(stepOf('A legal notice').textContent).toContain('legal-notice/ is on the site.');
+    expect(stepOf('Publish a first article').textContent).toContain('2 articles on the site.');
     expect(panel('overview').textContent).toContain('6 of 6 done.');
     expect(panel('overview').textContent).not.toContain('need a read');
   });
 
-  it('gives the three tips, and a fourth once the site passes four fifths of what Pages serves', async () => {
+  it('gives the three tips, and one more once the site passes four fifths of what Pages serves, opening Hosting', async () => {
     await show();
-    const tips = () => [...panel('overview').querySelectorAll('.tips h3')].map((node) => node.textContent);
     expect(tips()).toEqual(['Try before you announce', 'Take an article down', 'Change the name or the logo']);
-    expect(panel('overview').querySelector('.tips').textContent).toContain('Publish as Unlisted');
+    expect(panel('overview').textContent).toContain('Publish as Unlisted');
     // 700 MB of the gigabyte is under four fifths
     await readSite({ ...READ, size: { site: 700 * MB, repository: null } });
     await open('Overview');
@@ -291,7 +329,7 @@ describe('the Overview', () => {
     await open('Overview');
     expect(tips()[0]).toBe('The site is getting big');
     expect(panel('overview').textContent).toContain('It weighs 850 MB, 83% of the 1 GB GitHub Pages serves.');
-    button('Hosting ›', panel('overview').querySelector('.tips')).click();
+    button('See the limits', panel('overview')).click();
     await settle();
     expect(panel('hosting').hidden).toBe(false);
   });
@@ -306,6 +344,7 @@ describe('Identity', () => {
     const { savePrefs: save } = await show();
     expect(name().getAttribute('maxlength')).toBe('120');
     expect(tagline().getAttribute('maxlength')).toBe('200');
+    expect(panel('identity').querySelector('label[for="hub-site-name"]').textContent).toBe('Site name');
     // empty, the name is the Publishing name, else the account
     expect(name().getAttribute('placeholder')).toBe('octo');
     expect(panel('identity').textContent).toContain('Empty, it takes your GitHub account, octo.');
@@ -322,7 +361,11 @@ describe('Identity', () => {
     expect(save).toHaveBeenLastCalledWith({ site_tagline: 'Clarity is the tool.' });
     expect(prefs.siteTitle).toBe('Open Desk');
     expect(prefs.siteTagline).toBe('Clarity is the tool.');
-    for (const control of [name(), tagline()]) expect(control.getAttribute('title')).toBeTruthy();
+    // left again unchanged, nothing more is saved
+    save.mockClear();
+    type(name(), 'Open Desk');
+    await settle();
+    expect(save).not.toHaveBeenCalled();
   });
 
   it('follows what is typed in the hero and in the three previews, before the field is even left', async () => {
@@ -331,12 +374,14 @@ describe('Identity', () => {
     typeOnly(tagline(), 'A line as typed.');
     await settle();
     expect(save).not.toHaveBeenCalled();
-    expect(section('The site at a glance').querySelector('h1').textContent).toBe('Live Desk');
-    expect(section('The site at a glance').querySelector('.tag').textContent).toBe('A line as typed.');
+    expect(hero().querySelector('h1').textContent).toBe('Live Desk');
+    expect(hero().querySelector('.tag').textContent).toBe('A line as typed.');
     // the bar over an article
     expect(preview().querySelector('[data-preview="name"]').textContent).toBe('Live Desk');
+    expect(preview().textContent).toContain('All articles');
     button('Home page', panel('identity')).click();
     await settle();
+    expect(button('Home page', panel('identity')).getAttribute('aria-pressed')).toBe('true');
     expect(preview().querySelector('[data-preview="name"]').textContent).toBe('Live Desk');
     expect(preview().querySelector('[data-preview="tagline"]').textContent).toBe('A line as typed.');
     expect(preview().querySelector('[data-preview="credit"]').textContent).toMatch(/^Made with Azimut/);
@@ -348,12 +393,13 @@ describe('Identity', () => {
     typeOnly(name(), '');
     await settle();
     expect(preview().querySelector('[data-preview="name"]').textContent).toBe('octo');
-    for (const press of panel('identity').querySelectorAll('.switch button')) expect(press.getAttribute('title')).toBeTruthy();
+    expect(hero().querySelector('h1').textContent).toBe('octo');
   });
 
   it('has the credit on by default, saves it when switched and takes it off the home preview', async () => {
     const { savePrefs: save } = await show();
-    const credit = target.querySelector('input[aria-label="Made with Azimut"]');
+    const credit = panel('identity').querySelector('#hub-site-credit');
+    expect(panel('identity').querySelector('label[for="hub-site-credit"]').textContent).toBe('Made with Azimut');
     expect(credit.checked).toBe(true);
     button('Home page', panel('identity')).click();
     await settle();
@@ -366,24 +412,26 @@ describe('Identity', () => {
     expect(preview().querySelector('[data-preview="credit"]')).toBeNull();
   });
 
-  it('shows the real articles and categories of a read site in the previews, a sample before', async () => {
+  it('shows the real articles, categories and pages of a read site in the previews, a sample before', async () => {
     await show();
     button('Home page', panel('identity')).click();
     await settle();
     expect(preview().textContent).toContain('The title of your latest article');
-    await readSite();
+    await readSite({ ...READ, items: [...READ.items, { folder: 'about', title: 'About', role: 'page', bytes: 10 }] });
     await open('Identity');
     expect(preview().textContent).toContain('The Bab front');
     expect(preview().textContent).toContain('Conflict Watch');
+    expect(preview().querySelector('.pages').textContent).toBe('About');
     expect(preview().textContent).not.toContain('The title of your latest article');
   });
 
   it('says the home page is the analyst\'s own when the read found one', async () => {
     await show();
-    expect(panel('identity').textContent).not.toContain('Your home page');
+    expect(panel('identity').querySelector('.own-home')).toBeNull();
     await readSite({ ...READ, home: 'yours' });
     await open('Identity');
-    expect(panel('identity').querySelector('.own-home').textContent).toContain('octo.github.io has a home page of your own: Azimut fills its lists and leaves its header as you wrote it.');
+    expect(panel('identity').querySelector('.own-home').textContent).toContain(
+      'octo.github.io has a home page of your own: Azimut fills its lists and leaves its header as you wrote it.');
     await readSite({ ...READ, home: 'azimut' });
     await open('Identity');
     expect(panel('identity').querySelector('.own-home')).toBeNull();
@@ -391,22 +439,24 @@ describe('Identity', () => {
 });
 
 describe('the site logo', () => {
-  const file = (bytes = [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 1, 2, 3], name = 'logo.png') => new File([new Uint8Array(bytes)], name, { type: 'image/png' });
+  const PNG = [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 1, 2, 3];
+  const file = (bytes = PNG, named = 'logo.png') => new File([new Uint8Array(bytes)], named, { type: 'image/png' });
   const input = () => panel('identity').querySelector('input[type="file"]');
   const pick = async (picked) => {
     Object.defineProperty(input(), 'files', { value: [picked], configurable: true });
     input().dispatchEvent(new Event('change', { bubbles: true }));
     await settle();
   };
-  const shown = () => panel('identity').querySelector('img.well');
+  const shown = () => panel('identity').querySelector('.well img');
+  const field = () => panel('identity').querySelector('.logo-pick').closest('.hub-field');
 
   it('says it uses the Publishing logo when it has none of its own, and offers a PNG to pick', async () => {
     applyPrefs({ signature: true });
     await show();
     expect(shown().getAttribute('src')).toMatch(/^\/api\/settings\/site-logo\.png\?v=/);
-    expect(panel('identity').textContent).toContain('The Publishing logo, the one on your reports.');
+    expect(field().textContent).toContain('The Publishing logo, the one on your reports.');
     expect(input().getAttribute('accept')).toBe('image/png');
-    expect(button('Choose a PNG…', panel('identity')).getAttribute('title')).toBe('Pick a square PNG as the logo of the site');
+    expect(button('Choose a picture…', panel('identity')).getAttribute('title')).toBe('Pick a square PNG as the logo of the site');
     // nothing to put back while the site has none of its own
     expect(button('Use the Publishing logo', panel('identity'))).toBeUndefined();
   });
@@ -414,8 +464,8 @@ describe('the site logo', () => {
   it('says there is no logo when neither is set, and shows no picture', async () => {
     await show();
     expect(shown()).toBeNull();
-    expect(panel('identity').textContent).toContain('A square PNG, up to 2 MB. The pages carry no logo until you pick one.');
-    expect(section('The site at a glance').querySelector('img.logo')).toBeNull();
+    expect(field().textContent).toContain('A square PNG, up to 2 MB. With none, the pages carry no logo.');
+    expect(hero().querySelector('.logo img')).toBeNull();
   });
 
   it('sends the picked PNG as the file, then shows it and asks the logo again', async () => {
@@ -432,71 +482,98 @@ describe('the site logo', () => {
     expect(prefs.picturesRev).toBe(before + 1);
     expect(toast).toHaveBeenCalledWith('Site logo saved', 'ok');
     expect(shown().getAttribute('src')).toContain(`.${before + 1}`);
-    expect(panel('identity').textContent).toContain('A picture of its own, on every page of the site.');
-    expect(section('The site at a glance').querySelector('img.logo')).not.toBeNull();
+    expect(field().textContent).toContain('The site\'s own picture, on each of its pages.');
+    expect(hero().querySelector('.logo img')).not.toBeNull();
   });
 
-  it('refuses a file that is no PNG or is over 2 MB, before sending anything', async () => {
+  it('refuses a file that is no PNG or is over 2 MB, before sending anything, and says so under the logo', async () => {
     await show();
     await pick(file([0xff, 0xd8, 0xff, 0xe0, 1, 2, 3, 4, 5, 6], 'logo.jpg'));
-    expect(toast).toHaveBeenLastCalledWith('The logo must be a PNG picture', 'danger');
+    expect(field().querySelector('[role="alert"]').textContent).toBe('The logo must be a PNG picture.');
     const big = file([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
     Object.defineProperty(big, 'size', { value: 3 * MB });
     await pick(big);
-    expect(toast).toHaveBeenLastCalledWith('The logo must be under 2 MB', 'danger');
+    expect(field().querySelector('[role="alert"]').textContent).toBe('The logo must be under 2 MB.');
     expect(post).not.toHaveBeenCalled();
     expect(prefs.siteLogoSet).toBe(false);
   });
 
-  it('says what the server refused and keeps what it had', async () => {
+  it('says what the server refused, keeps what it had, and clears the word on the next pick', async () => {
     await show();
-    post.mockRejectedValue(new Error('That is not a PNG picture.'));
+    post.mockRejectedValueOnce(new Error('That is not a PNG picture.'));
     await pick(file());
-    expect(toast).toHaveBeenLastCalledWith('Could not save the site logo: That is not a PNG picture.', 'danger');
+    expect(field().querySelector('[role="alert"]').textContent).toBe('That is not a PNG picture.');
     expect(prefs.siteLogoSet).toBe(false);
+    post.mockResolvedValueOnce({ site_logo: true });
+    await pick(file());
+    expect(field().querySelector('[role="alert"]')).toBeNull();
+    expect(prefs.siteLogoSet).toBe(true);
   });
 
   it('puts the Publishing logo back with Use the Publishing logo', async () => {
     applyPrefs({ site_logo: true, signature: true });
     await show();
-    expect(panel('identity').textContent).toContain('A picture of its own, on every page of the site.');
     del.mockResolvedValue({ site_logo: false });
     const before = prefs.picturesRev;
-    button('Use the Publishing logo', panel('identity')).click();
+    const back = button('Use the Publishing logo', panel('identity'));
+    expect(back.getAttribute('title')).toBe('Back to the logo of Settings › Publishing');
+    back.click();
     await settle();
     expect(del).toHaveBeenCalledWith('/api/settings/site-logo');
     expect(prefs.siteLogoSet).toBe(false);
     expect(prefs.picturesRev).toBe(before + 1);
-    expect(panel('identity').textContent).toContain('The Publishing logo, the one on your reports.');
+    expect(toast).toHaveBeenCalledWith('The site uses your Publishing logo again', 'ok');
+    expect(field().textContent).toContain('The Publishing logo, the one on your reports.');
     expect(button('Use the Publishing logo', panel('identity'))).toBeUndefined();
+  });
+
+  it('says Remove the logo when there is no Publishing logo to go back to', async () => {
+    applyPrefs({ site_logo: true, signature: false });
+    await show();
+    expect(button('Use the Publishing logo', panel('identity'))).toBeUndefined();
+    del.mockResolvedValue({ site_logo: false });
+    button('Remove the logo', panel('identity')).click();
+    await settle();
+    expect(del).toHaveBeenCalledWith('/api/settings/site-logo');
+    expect(toast).toHaveBeenCalledWith('Site logo removed', 'ok');
+    expect(shown()).toBeNull();
   });
 });
 
 describe('Hosting', () => {
-  const bar = (label) => panel('hosting').querySelector(`[role="meter"][aria-label="${label}"]`);
+  const meter = (label) => panel('hosting').querySelector(`[role="meter"][aria-label="${label}"]`);
 
   it('holds the GitHub Pages settings as a card, says it is set up, and gives the address with what to do for a domain of one\'s own', async () => {
     await show();
-    const github = panel('hosting').querySelector('section[aria-label="GitHub Pages"]');
-    expect(github.querySelector('.badge').textContent).toBe('Set up');
-    expect(panel('hosting').textContent).toContain('https://octo.github.io/articles/');
-    expect(panel('hosting').textContent).toContain('GitHub\'s address');
-    expect(panel('hosting').textContent).toContain('Set in the repository\'s CNAME file.');
-    expect(panel('hosting').textContent).toContain('A domain of your own');
-    const guide = [...panel('hosting').querySelectorAll('a')].find((node) => node.textContent.includes('GitHub\'s guide'));
+    const github = section('GitHub Pages');
+    expect(github.getAttribute('data-guide')).toBe('settings.github');
+    expect(github.querySelector('h3 .hub-pill').textContent).toBe('Set up');
+    expect(github.querySelector('label[for="github-account"]').textContent).toBe('Account');
+    expect(section('The address').textContent).toContain('https://octo.github.io/articles/');
+    expect(section('The address').querySelector('.hub-pill').textContent).toBe('GitHub\'s address');
+    expect(section('The address').textContent).toContain('Set in the repository\'s CNAME file.');
+    const guide = [...section('A domain of your own').querySelectorAll('a')].find((node) => node.textContent.includes('GitHub\'s guide'));
     expect(guide.getAttribute('href')).toBe('https://docs.github.com/en/pages/configuring-a-custom-domain-for-your-github-pages-site');
+  });
+
+  it('says Connected once a test passed', async () => {
+    await show();
+    post.mockResolvedValue({ ok: true, login: 'octo', base: 'https://octo.github.io/articles/', warnings: [] });
+    button('Test connection', panel('hosting')).click();
+    await settle();
+    expect(section('GitHub Pages').querySelector('h3 .hub-pill').textContent).toBe('Connected');
   });
 
   it('says the site has a domain of its own when its address is not on github.io', async () => {
     await show({ ...SET, site: 'https://news.example.org/', base: 'https://news.example.org/' });
-    expect(panel('hosting').textContent).toContain('Your own domain');
-    expect(panel('hosting').textContent).toContain('https://news.example.org/');
+    expect(section('The address').querySelector('.hub-pill.ok').textContent).toBe('Your own domain');
+    expect(section('The address').textContent).toContain('https://news.example.org/');
   });
 
-  it('is not set up with nothing set: no badge, and the address says to set up first', async () => {
-    await show({ ...NOTHING, website: { title: '', logo: false, counting: '' }, categories: [] });
-    expect(panel('hosting').querySelector('section[aria-label="GitHub Pages"] .badge')).toBeNull();
-    expect(panel('hosting').textContent).toContain('Set up GitHub Pages first, and the address shows here.');
+  it('is not set up with nothing set, and the address says to set up first', async () => {
+    await show(NOTHING);
+    expect(section('GitHub Pages').querySelector('h3 .hub-pill').textContent).toBe('Not set up');
+    expect(section('The address').textContent).toContain('Set up GitHub Pages first, and the address shows here.');
   });
 
   it('says its limits as the contract gives them, with GitHub\'s own page, and asks for a read to show the sizes', async () => {
@@ -515,8 +592,7 @@ describe('Hosting', () => {
     expect(link.getAttribute('href')).toBe('https://docs.github.com/en/pages/getting-started-with-github-pages/github-pages-limits');
     expect(link.getAttribute('title')).toBe('GitHub\'s own page of Pages limits');
     expect(limits.textContent).toContain('Read the site to see its size.');
-    expect(bar('Site').getAttribute('data-level')).toBe('none');
-    expect(bar('Site').hasAttribute('aria-valuenow')).toBe(false);
+    expect(limits.querySelector('[role="meter"]')).toBeNull();
   });
 
   it('reads the site from the limits too, on its press only, then draws both bars', async () => {
@@ -531,12 +607,15 @@ describe('Hosting', () => {
     expect(limits.textContent).toContain('Site: 312 MB of 1 GB');
     expect(limits.textContent).toContain('Repository with its history: 1.4 GB of 1 GB recommended');
     expect(limits.textContent).not.toContain('Read the site to see its size.');
-    // 312 MB of a gigabyte is under four fifths; the repository is past it
-    expect(bar('Site').getAttribute('data-level')).toBe('ok');
-    expect(bar('Site').getAttribute('aria-valuenow')).toBe('30');
-    expect(bar('Repository with its history').getAttribute('data-level')).toBe('danger');
-    expect(bar('Repository with its history').querySelector('i').style.width).toBe('100%');
-    expect(limits.querySelector('.usage').getAttribute('title')).toBe('How much the published site weighs, of the 1 GB GitHub Pages serves');
+    // 312 MB of a gigabyte is under four fifths; the repository is past it, and its bar stops at the end
+    expect(meter('Site').getAttribute('data-level')).toBe('ok');
+    expect(meter('Site').getAttribute('aria-valuenow')).toBe('30');
+    expect(meter('Repository with its history').getAttribute('data-level')).toBe('danger');
+    expect(meter('Repository with its history').getAttribute('aria-valuetext')).toBe('140%');
+    expect(meter('Repository with its history').querySelector('i').style.width).toBe('100%');
+    expect(meter('Site').closest('.meter-line').getAttribute('title')).toBe('How much the published site weighs, of the 1 GB GitHub Pages serves');
+    expect(meter('Repository with its history').closest('.meter-line').getAttribute('title'))
+      .toBe('How much the repository weighs with its history, of the 1 GB GitHub recommends');
   });
 
   it.each([[0.5, 'ok'], [0.79, 'ok'], [0.8, 'warn'], [0.94, 'warn'], [0.95, 'danger'], [1.2, 'danger']])(
@@ -544,13 +623,25 @@ describe('Hosting', () => {
       await show();
       await readSite({ ...READ, size: { site: Math.ceil(share * GB), repository: null } });
       await open('Hosting');
-      expect(bar('Site').getAttribute('data-level')).toBe(level);
-      // a repository the server gave no size for has no bar to draw
-      expect(bar('Repository with its history').getAttribute('data-level')).toBe('none');
+      expect(meter('Site').getAttribute('data-level')).toBe(level);
+      // a repository GitHub gave no size for has no bar, and says so
+      expect(meter('Repository with its history')).toBeNull();
+      expect(section('Limits').textContent).toContain('GitHub gave no size for the repository.');
     });
+
+  it('says the size is unknown for a site too large to read, and draws no bar for it', async () => {
+    await show();
+    await readSite({ ...READ, items: [], home: 'none', size: { site: null, repository: 200 * MB }, warnings: ['Too many files.'] });
+    await open('Hosting');
+    expect(section('Limits').textContent).toContain('Size unknown: the site holds too many files to read.');
+    expect(meter('Site')).toBeNull();
+    expect(meter('Repository with its history').getAttribute('data-level')).toBe('ok');
+  });
 });
 
 describe('Readers', () => {
+  const stats = () => section('Statistics');
+
   it('starts off, with no field and nobody counted, and says what each choice does in a line', async () => {
     await show();
     const choices = [...target.querySelectorAll('[aria-label="Count readers with"] [role="radio"]')];
@@ -558,9 +649,9 @@ describe('Readers', () => {
     expect(radio('Off').getAttribute('aria-checked')).toBe('true');
     expect(target.querySelector('input[aria-label="GoatCounter site code"]')).toBeNull();
     expect(target.querySelector('input[aria-label="Cloudflare token"]')).toBeNull();
-    expect(section('Statistics').getAttribute('data-guide')).toBe('settings.statistics');
-    expect(section('Statistics').textContent).toContain('Nobody is counted');
-    expect(section('Statistics').textContent).toContain('starts with the next publish or Update the site');
+    expect(stats().getAttribute('data-guide')).toBe('settings.statistics');
+    expect(stats().textContent).toContain('Nobody is counted');
+    expect(stats().textContent).toContain('starts with the next publish or Update the site');
     expect(target.querySelector('a[href^="https://dash.cloudflare.com/?to="]')).toBeNull();
   });
 
@@ -572,9 +663,9 @@ describe('Readers', () => {
     expect(radio('GoatCounter').getAttribute('aria-checked')).toBe('true');
     const code = target.querySelector('input[aria-label="GoatCounter site code"]');
     // named without its code, it says so rather than pretend to count
-    expect(section('Statistics').textContent).toContain('Paste the site code below for the count to start.');
+    expect(stats().textContent).toContain('Paste the site code below for the count to start.');
     // the steps are open while the code is missing, free, with the sign-up
-    const steps = section('Statistics').querySelector('details.how');
+    const steps = stats().querySelector('details.hub-how');
     expect(steps.open).toBe(true);
     expect(steps.textContent).toContain('Make a free account at goatcounter.com');
     expect(steps.querySelector('a').getAttribute('href')).toBe('https://www.goatcounter.com/signup');
@@ -583,14 +674,14 @@ describe('Readers', () => {
     await settle();
     expect(save).not.toHaveBeenCalled();
     expect(code.getAttribute('aria-invalid')).toBe('true');
-    expect(section('Statistics').querySelector('[role="alert"]').textContent).toContain('does not read as a GoatCounter code');
+    expect(stats().querySelector('[role="alert"]').textContent).toContain('does not read as a GoatCounter code');
     type(code, 'https://Desk-1.goatcounter.com/');
     await settle();
     expect(save).toHaveBeenLastCalledWith({ site_stats_code: 'desk-1' });
     expect(code.value).toBe('desk-1');
-    expect(section('Statistics').querySelector('[role="alert"]')).toBeNull();
-    expect(section('Statistics').textContent).toContain('Counting every page of the site.');
-    expect(section('Statistics').querySelector('details.how').open).toBe(false);
+    expect(stats().querySelector('[role="alert"]')).toBeNull();
+    expect(stats().textContent).toContain('Counting every page of the site.');
+    expect(stats().querySelector('details.hub-how').open).toBe(false);
     // emptied, the count has no code again: saved as none
     type(code, '');
     await settle();
@@ -604,27 +695,30 @@ describe('Readers', () => {
     expect(save).toHaveBeenLastCalledWith({ site_stats: 'cloudflare' });
     expect(target.querySelector('input[aria-label="GoatCounter site code"]')).toBeNull();
     const token = target.querySelector('input[aria-label="Cloudflare token"]');
-    expect(section('Statistics').textContent).toContain('Free. Loads one script from static.cloudflareinsights.com and counts with no cookie.');
-    const steps = section('Statistics').querySelector('details.how');
+    expect(stats().textContent).toContain('Free. Loads one script from static.cloudflareinsights.com and counts with no cookie.');
+    const steps = stats().querySelector('details.hub-how');
     expect(steps.open).toBe(true);
-    for (const said of ['Make a free account at cloudflare.com', 'Web Analytics', 'Add a site', 'Manage site', 'data-cf-beacon']) expect(steps.textContent, said).toContain(said);
+    for (const said of ['Make a free account at cloudflare.com', 'Web Analytics', 'Add a site', 'Manage site', 'data-cf-beacon']) {
+      expect(steps.textContent, said).toContain(said);
+    }
     expect([...steps.querySelectorAll('a')].map((node) => node.getAttribute('href'))).toEqual(
       ['https://dash.cloudflare.com/sign-up', 'https://developers.cloudflare.com/web-analytics/get-started/']);
-    const dashboard = [...section('Statistics').querySelectorAll('a')].find((node) => node.textContent.includes('Open Cloudflare\'s dashboard'));
+    const dashboard = [...stats().querySelectorAll('a')].find((node) => node.textContent.includes('Open Cloudflare\'s dashboard'));
     expect(dashboard.getAttribute('href')).toBe('https://dash.cloudflare.com/?to=/:account/web-analytics');
     expect(dashboard.getAttribute('target')).toBe('_blank');
     expect(dashboard.getAttribute('rel')).toContain('noopener');
+    expect(dashboard.getAttribute('title')).toBe('Open Cloudflare\'s Web Analytics dashboard');
     save.mockClear();
     type(token, 'too short');
     await settle();
     expect(save).not.toHaveBeenCalled();
-    expect(section('Statistics').querySelector('[role="alert"]').textContent).toContain('does not read as a Cloudflare token');
+    expect(stats().querySelector('[role="alert"]').textContent).toContain('does not read as a Cloudflare token');
     type(token, `<script defer src='https://static.cloudflareinsights.com/beacon.min.js' data-cf-beacon='{"token": "${CODE}"}'></script>`);
     await settle();
     expect(save).toHaveBeenLastCalledWith({ site_stats_token: CODE });
     expect(token.value).toBe(CODE);
-    expect(section('Statistics').querySelector('[role="alert"]')).toBeNull();
-    expect(section('Statistics').textContent).toContain('Counting every page of the site.');
+    expect(stats().querySelector('[role="alert"]')).toBeNull();
+    expect(stats().textContent).toContain('Counting every page of the site.');
   });
 
   it('turns off again, and shows the code the server kept after a backup restored it', async () => {
@@ -647,7 +741,7 @@ describe('Readers', () => {
 
   it('gives the feed and the sitemap addresses, built from the site\'s address, each with a Copy press', async () => {
     await show();
-    const follow = [...panel('readers').querySelectorAll('section')].find((node) => node.textContent.includes('Follow and find'));
+    const follow = section('Follow and find');
     expect([...follow.querySelectorAll('code')].map((node) => node.textContent)).toEqual([
       'https://octo.github.io/articles/feed.xml', 'https://octo.github.io/articles/sitemap.xml']);
     expect(follow.textContent).toContain('Readers subscribe to the feed with any feed reader.');
@@ -667,21 +761,22 @@ describe('Readers', () => {
     await show();
     await readSite({ ...READ, address: 'https://news.example.org/' });
     await open('Readers');
-    expect([...panel('readers').querySelectorAll('code')].map((node) => node.textContent)).toEqual([
+    expect([...section('Follow and find').querySelectorAll('code')].map((node) => node.textContent)).toEqual([
       'https://news.example.org/feed.xml', 'https://news.example.org/sitemap.xml']);
     unmount(live);
     forgetRead();
-    await show({ ...NOTHING, website: { title: '', logo: false, counting: '' }, categories: [] });
-    expect(panel('readers').textContent).toContain('Set up GitHub Pages first, and the addresses show here.');
-    for (const press of panel('readers').querySelectorAll('.copyline button')) expect(press.disabled).toBe(true);
+    await show(NOTHING);
+    expect(section('Follow and find').textContent).toContain('Set up GitHub Pages first, and the addresses show here.');
+    for (const press of section('Follow and find').querySelectorAll('button')) expect(press.disabled).toBe(true);
   });
 });
 
 describe('Upkeep: Update the site', () => {
   const update = () => button('Update the site', section('Update the site'));
+  const said = () => section('Update the site').querySelector('[role="status"]');
 
   it('waits for GitHub to be set up, and says so on hover', async () => {
-    await show({ ...NOTHING, website: { title: '', logo: false, counting: '' }, categories: [] });
+    await show(NOTHING);
     expect(update().disabled).toBe(true);
     expect(update().getAttribute('title')).toBe('Set up GitHub Pages under Hosting first');
     update().click();
@@ -689,8 +784,9 @@ describe('Upkeep: Update the site', () => {
     expect(post).not.toHaveBeenCalled();
   });
 
-  it('asks GitHub on its press only, shows it working, and says the site is up to date', async () => {
+  it('asks GitHub on its press only, shows it working in both places, and says the site is up to date', async () => {
     await show();
+    expect(section('Update the site').getAttribute('data-guide')).toBe('settings.update-site');
     expect(update().disabled).toBe(false);
     expect(post).not.toHaveBeenCalled();
     let answer;
@@ -698,29 +794,28 @@ describe('Upkeep: Update the site', () => {
     update().click();
     await settle();
     expect(post).toHaveBeenCalledWith('/api/publishing/github/site');
-    expect(section('Update the site').querySelector('.spinner')).not.toBeNull();
-    expect(section('Update the site').textContent).toContain('Updating octo/articles…');
+    expect(said().dataset.state).toBe('busy');
+    expect(said().textContent).toContain('Updating octo/articles…');
     expect(update().disabled).toBe(true);
     // the hero says it too, and cannot be pressed again
-    expect(section('The site at a glance').textContent).toContain('Updating octo/articles…');
-    expect(button('Update the site', section('The site at a glance')).disabled).toBe(true);
+    expect(hero().textContent).toContain('Updating octo/articles…');
+    expect(button('Update the site', hero()).disabled).toBe(true);
     answer({ ok: true, updated: false, commit: '', written: [], warnings: [], categories: [] });
     await settle();
-    expect(section('Update the site').querySelector('.spinner')).toBeNull();
-    expect(section('Update the site').querySelector('[role="status"]').textContent).toContain('The site is up to date.');
-    expect(section('The site at a glance').textContent).toContain('The site is up to date.');
+    expect(said().textContent).toContain('The site is up to date.');
+    expect(said().dataset.state).toBe('ok');
+    expect(hero().querySelector('[data-state="ok"]').textContent).toMatch(/^Updated today at \d\d:\d\d$/);
     expect(update().disabled).toBe(false);
   });
 
-  it('is pressed from the hero as well, the same press, saying its result in both places and when', async () => {
+  it('is pressed from the hero as well, the same press, saying when', async () => {
     await show();
     post.mockResolvedValue({ ok: true, updated: true, commit: 'c'.repeat(40), written: ['articles.json'], warnings: [], categories: [] });
-    button('Update the site', section('The site at a glance')).click();
+    button('Update the site', hero()).click();
     await settle();
     expect(post).toHaveBeenCalledTimes(1);
-    expect(section('Update the site').textContent).toContain('The site is updated: 1 file written.');
-    expect(section('Update the site').querySelector('.when').textContent).toMatch(/^today at \d\d:\d\d$/);
-    expect(section('The site at a glance').textContent).toContain('The site is updated: 1 file written.');
+    expect(said().textContent).toContain('The site is updated: 1 file written.');
+    expect(said().querySelector('.when').textContent).toMatch(/^· today at \d\d:\d\d$/);
   });
 
   it('says how many files it wrote, and lists the warnings under it', async () => {
@@ -729,20 +824,19 @@ describe('Upkeep: Update the site', () => {
       warnings: ['feed.xml is yours: it was left as it is.'], categories: ['Harbour'] });
     update().click();
     await settle();
-    expect(section('Update the site').textContent).toContain('The site is updated: 2 files written.');
+    expect(said().textContent).toContain('The site is updated: 2 files written.');
     expect([...section('Update the site').querySelectorAll('ul[aria-label="To mind"] li')].map((node) => node.textContent.trim())).toEqual(
       ['feed.xml is yours: it was left as it is.']);
   });
 
-  it('says what went wrong in the words the server gave', async () => {
+  it('says what went wrong in the words the server gave, here and in the hero', async () => {
     await show();
     post.mockRejectedValue(new Error('GitHub did not answer.'));
     update().click();
     await settle();
-    const said = section('Update the site').querySelector('[role="status"]');
-    expect(said.textContent).toContain('GitHub did not answer.');
-    expect(said.dataset.state).toBe('error');
-    expect(section('The site at a glance').querySelector('.status').dataset.state).toBe('error');
+    expect(said().textContent).toContain('GitHub did not answer.');
+    expect(said().dataset.state).toBe('error');
+    expect(hero().querySelector('[data-state="error"]').textContent).toContain('GitHub did not answer.');
   });
 
   it('says the last change on GitHub from the read, until it is pressed here', async () => {
@@ -757,7 +851,7 @@ describe('Upkeep: Update the site', () => {
     await show();
     post.mockResolvedValueOnce({ ok: false, needs: 'repository', detail: 'There is no repository octo/articles that this token can reach.' });
     // pressed from the hero, which sends the analyst where the press is
-    button('Update the site', section('The site at a glance')).click();
+    button('Update the site', hero()).click();
     await settle();
     expect(panel('upkeep').hidden).toBe(false);
     expect(section('Update the site').textContent).toContain('There is no repository octo/articles that this token can reach.');
@@ -770,16 +864,17 @@ describe('Upkeep: Update the site', () => {
     button('Turn on Pages', section('Update the site')).click();
     await settle();
     expect(post).toHaveBeenLastCalledWith('/api/publishing/github/pages');
-    expect(section('Update the site').textContent).toContain('Pages is on. Press Update the site.');
-    expect(section('Update the site').querySelector('.needs')).toBeNull();
+    expect(said().textContent).toContain('Pages is on. Press Update the site.');
+    expect(button('Turn on Pages', section('Update the site'))).toBeUndefined();
   });
 });
 
 describe('Upkeep: who writes what, and the chores', () => {
-  const rows = () => [...panel('upkeep').querySelectorAll('.own-table tbody tr')].map((row) => [...row.children].map((cell) => cell.textContent.trim()));
+  const rows = () => [...panel('upkeep').querySelectorAll('.owners tbody tr')].map((row) => [...row.children].map((cell) => cell.textContent.trim()));
 
   it('says which files are Azimut\'s and which stay the analyst\'s, the default home as Azimut\'s until a read says otherwise', async () => {
     await show();
+    expect([...panel('upkeep').querySelectorAll('.owners th')].map((node) => node.textContent)).toEqual(['File', 'Made by', 'What Azimut does']);
     expect(rows().map(([file, who]) => [file, who])).toEqual([
       ['each article\'s folder', 'Azimut'], ['articles.jsonfeed.xmlsitemap.xml', 'Azimut'], ['index.html', 'Azimut'], ['everything else', 'You']]);
     expect(panel('upkeep').textContent).toContain('Read the site, in Articles, to see which of your pages Azimut fills.');
@@ -799,12 +894,13 @@ describe('Upkeep: who writes what, and the chores', () => {
   it('gives the five usual chores, the first open, each with a hover text', async () => {
     await show();
     const chores = [...panel('upkeep').querySelectorAll('.chores details')];
-    expect(chores.map((node) => node.querySelector('summary').textContent)).toEqual([
+    expect(chores.map((node) => node.querySelector('summary').textContent.trim())).toEqual([
       'Take an article down', 'Move an article to another category', 'Rename the site or change its logo', 'Fix a typo on GitHub directly',
       'Test an article before it shows']);
     expect(chores.map((node) => node.open)).toEqual([true, false, false, false, false]);
     expect(chores[0].textContent).toContain('Press Delete on its line in Articles.');
     expect(chores[4].textContent).toContain('Publish it as Unlisted');
+    for (const node of chores) expect(node.querySelector('summary').getAttribute('title')).toBe('Show how to do it');
   });
 });
 
@@ -825,12 +921,13 @@ describe('Make it yours and WordPress', () => {
     expect(own.textContent).toContain('Write your index.html and put');
   });
 
-  it('keeps WordPress apart, with its own section', async () => {
+  it('keeps WordPress apart, as a card of its own', async () => {
     await show();
     await open('WordPress');
     expect(panel('wordpress').querySelector('h2').textContent).toBe('Also send to WordPress');
-    expect(panel('wordpress').querySelector('section[aria-label="WordPress"]').getAttribute('data-guide')).toBe('settings.wordpress');
-    expect(panel('hosting').querySelector('section[aria-label="WordPress"]')).toBeNull();
+    expect(section('WordPress').closest('#hub-panel-wordpress')).not.toBeNull();
+    expect(section('WordPress').getAttribute('data-guide')).toBe('settings.wordpress');
+    expect(section('WordPress').querySelector('label[for="wordpress-site"]').textContent).toBe('Site address');
   });
 });
 
@@ -839,7 +936,7 @@ describe('Test connection', () => {
     await show();
     await open('Hosting');
     post.mockResolvedValue({ ok: true, login: 'octo', base: 'https://octo.github.io/articles/', pages: 'Pages serves main.', warnings: [WORKFLOW_NOTICE], workflow: true });
-    button('Test connection').click();
+    button('Test connection', panel('hosting')).click();
     await settle();
     expect(post).toHaveBeenCalledWith('/api/publishing/github/test');
     const warnings = panel('hosting').querySelector('ul[aria-label="To mind"]');
@@ -859,11 +956,12 @@ describe('what the session keeps', () => {
     await show();
     expect(siteRead.data.items).toHaveLength(2);
     expect(post).not.toHaveBeenCalled();
-    expect(tab('Articles').textContent).toContain('2');
+    expect(tab('Articles').querySelector('.count').textContent).toBe('2');
     unmount(live);
     live = null;
     await show({ ...SET, repo: 'elsewhere', base: 'https://octo.github.io/elsewhere/' });
     expect(siteRead.data).toBeNull();
+    expect(tab('Articles').querySelector('.count')).toBeNull();
   });
 });
 
