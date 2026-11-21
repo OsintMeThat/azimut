@@ -345,6 +345,15 @@ def test_the_default_home_has_tabs_the_newest_large_and_the_marks_of_a_home_azim
     assert '<p class="site-intro">In a world of fragmented information' in page
 
 
+def test_a_tab_hides_the_large_first_article_when_it_is_of_another_category():
+    # The large first line's own `display` outranked `[hidden]`, so the newest article stayed
+    # under every tab; a filtered list also lays its lines out alike.
+    assert ".az-item[hidden]{display:none!important}" in sitehome.CSS
+    featured = re.findall(r"\.az-list:not\(\.az-maps\)[^ ]* \.az-item:first-child", sitehome.CSS)
+    assert featured and all(":not(.is-filtered)" in rule for rule in featured)
+    assert "classList.toggle('is-filtered', want !== '')" in sitehome.TABS_JS
+
+
 def test_the_credit_follows_its_setting_and_nothing_else():
     import dataclasses
 

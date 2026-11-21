@@ -60,10 +60,10 @@ img{max-width:100%;display:block}
 .site-tabs .count{opacity:.6;margin-left:.3rem}
 .az-list{list-style:none;margin:0;padding:0;display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:2.25rem 1.75rem}
 .az-item{display:flex;flex-direction:column;min-width:0}
-.az-item[hidden]{display:none}
-.az-list:not(.az-maps) .az-item:first-child{grid-column:1/-1;display:grid;grid-template-columns:3fr 2fr;gap:0 1.75rem;grid-auto-rows:min-content;align-content:center;align-items:start;padding-bottom:2.25rem;border-bottom:1px solid var(--rule)}
-.az-list:not(.az-maps) .az-item:first-child .az-cover{grid-row:1/span 6;margin:0}
-.az-list:not(.az-maps) .az-item:first-child .az-title{font-size:2rem}
+.az-item[hidden]{display:none!important}
+.az-list:not(.az-maps):not(.is-filtered) .az-item:first-child{grid-column:1/-1;display:grid;grid-template-columns:3fr 2fr;gap:0 1.75rem;grid-auto-rows:min-content;align-content:center;align-items:start;padding-bottom:2.25rem;border-bottom:1px solid var(--rule)}
+.az-list:not(.az-maps):not(.is-filtered) .az-item:first-child .az-cover{grid-row:1/span 6;margin:0}
+.az-list:not(.az-maps):not(.is-filtered) .az-item:first-child .az-title{font-size:2rem}
 .az-cover{display:block;aspect-ratio:1200/630;overflow:hidden;border-radius:.375rem;background:var(--tint);margin-bottom:.9rem}
 .az-cover img{width:100%;height:100%;object-fit:cover}
 .az-category{font:700 .72rem var(--head);text-transform:uppercase;letter-spacing:.08em;color:var(--accent)}
@@ -85,9 +85,9 @@ img{max-width:100%;display:block}
 .made-with a{color:var(--ink-2);text-decoration:none}
 .made-with a:hover{color:var(--accent)}
 @media (max-width:56rem){.az-list{grid-template-columns:repeat(2,minmax(0,1fr))}
-.az-list:not(.az-maps) .az-item:first-child{grid-template-columns:1fr}.az-list:not(.az-maps) .az-item:first-child .az-cover{grid-row:auto}}
+.az-list:not(.az-maps):not(.is-filtered) .az-item:first-child{grid-template-columns:1fr}.az-list:not(.az-maps):not(.is-filtered) .az-item:first-child .az-cover{grid-row:auto}}
 @media (max-width:36rem){.az-list{grid-template-columns:1fr}.site-top{flex-direction:column;align-items:flex-start}
-.az-list:not(.az-maps) .az-item:first-child .az-title{font-size:1.5rem}}
+.az-list:not(.az-maps):not(.is-filtered) .az-item:first-child .az-title{font-size:1.5rem}}
 """
 
 TABS_JS = """// The tabs filter the list in place; without script every article shows, which is fine.
@@ -104,6 +104,9 @@ TABS_JS = """// The tabs filter the list in place; without script every article 
       maps.hidden = !onMaps;
       articles.hidden = onMaps;
       items.forEach(function (item) { item.hidden = !onMaps && want !== '' && item.dataset.category !== want; });
+      // a filtered list shows its articles alike: the large first one is the whole list's newest
+      var list = articles.querySelector('.az-list');
+      if (list) list.classList.toggle('is-filtered', want !== '');
     });
   });
 })();
