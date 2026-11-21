@@ -27,9 +27,12 @@ in `frontend/src/lib/workspaces.js` and appear as tabs, never as new rail entrie
 | **Compose** | Geo Proof, Post, Map plate, Notebook | Report Builder, GIF maker |
 
 **Support sits at the foot of the rail, above the theme switch, and is not a workspace.**
-It opens one small dialog: a tip on Ko-fi, a form to vote or suggest an idea, and a
-problem report that leads to Settings → System. A block stays hidden until its link
-exists in `lib/support.js`, and a release refuses a stand-in link. The tip also has a
+It opens one small dialog: a tip on Ko-fi, a form to vote or suggest an idea, an invite
+to the OSINT Me That Discord, and a problem report that leads to Settings → System.
+A block stays hidden until its link exists in `lib/support.js`, and a release refuses a stand-in link. A line from
+`TIP_LINES` sits above the tip: drawn when the dialog opens, turned by a press or every
+ten seconds, held while a pointer or the keyboard rests on it and still under reduced
+motion, in a box sized to the longest so the button never moves. The tip also has a
 quiet link in Home's footer and one line on the last page of What's new. Nothing reaches
 the network before a press, and there is no setting, reminder, counter or donor feature.
 
@@ -6112,13 +6115,13 @@ says what it is checking.
     file holds. It can be repeated after every cell on request, which a column of shares
     wants and a column of distances mostly does not. `1 200` and `12,5` are read, and
     `~9` is read because an estimate is
-    still a number; a digit buried in prose is not, because extracting it would also turn
-    `AB-123` into 123. What it could not read is counted beside the answer and is one
+    still a number; past that, a cell is read as a chart reads one (`lib/cellRead.js`):
+    `1 200 €`, `at least 60`, `$8.3M`, `٦٠`. A digit buried in prose is not, because
+    extracting it would also turn `AB-123` into 123. What it could not read is counted beside the answer and is one
     click from being the only rows on screen.
   - **A comma is a decimal mark, everywhere and without a switch.** `12,5` is twelve and a
-    half, `1 200` and `1'200` are twelve hundred, and `1,234,567` is refused rather than
-    read as a million: two commas cannot both be decimal marks, and guessing would put a
-    value a thousand times out into a typed field with nothing said. The same reading
+    half, `1 200` and `1'200` are twelve hundred, and `1,234,567` is read as a chart
+    reads it, over a million, since two commas cannot both be decimal marks. The same reading
     settles a point, so `48,8` is one number and not a pair of coordinates — a pair needs a
     separator the comma cannot be mistaken for (`48,8566; 2,3522`, `48,8566 2,3522`) or a
     full stop already doing the job. Unlike the day-or-month order of a date, which a column
@@ -6147,8 +6150,14 @@ says what it is checking.
     the cell offers the picker made for it. Declared rather than guessed, so a column that
     is still empty can be told it holds times. A bare `hh:mm` stays a time of day: the
     binder writes `01:57` for an event whose date is in the sheet's title, and inventing
-    that date would be inventing evidence. The column can **open the Timeline on the
+    that date would be inventing evidence. A cell in none of the binders' forms is read as
+    a chart reads a day, in any language and at its precision (`5 mars 2026`, `mars
+    2026`), when it says its year. The column can **open the Timeline on the
     period it covers**, which is what that does — it files nothing there.
+  - A date or number column says **Days** or **Numbers** in its heading. A cell written
+    otherwise than a chart prints it shows the reading after its words, muted (`31/01/2026`
+    shows `31 Jan 2026`); one its role does not read is underlined and its `?` says on hover
+    what would; an empty one shows `5 Mar 2026` or `1 200`, grey. The cell keeps its words.
   - A **picture** column draws each cell as the picture it names, in the row, with the full
     size one click away. Two things count as one: an address, and **a file this case
     already holds**, written as the case-relative path a collaborator reads the same way in
@@ -7876,7 +7885,13 @@ on its Draw tab.
 **Charts.** A `::: chart` block holds its settings as `key: value` lines above its own
 table (`kind`, `title`, `count`, `by`, `colour by`, `order`, `only`, `highlight`, `show`,
 `source`, `from` and the rest, `engine/notes_charts.py`), so the rows printed are the rows in
-the note. Pictograms and silhouette rows read `icon` (one glyph, or a column naming one a
+the note. Its cells are read by the one reader the browser shares (`engine/cellread.py`,
+`lib/cellRead.js`, agreeing on `cellReading.fixture.json`). A day is read in any of 113 languages:
+`5 mars 2026`, `05/03/2026`, `2026-03-05`, `March 2026`, `2026年3月5日`, or a month alone. A day
+without its year takes the column's. A number may carry a currency, `k`, `M` or `bn`, a unit,
+`~`, and `at least` or `60+` as a floor. `1,5` is one and a half, and `1,500` is fifteen hundred
+unless the column's other cells write their decimals with a comma. Sheet roles fall back on the
+same days, at their precision, and only when the cell says its year. Pictograms and silhouette rows read `icon` (one glyph, or a column naming one a
 row), `icons` (`Value = icon, …`, one a value) and, for rows, `flag` and `flags`; a row's
 own cell wins, then its value's, then the `icon` line. Every document draws it from that table in the note's look and the case's named
 colours (`engine/notecharts.py`), and captions it as every figure: its title under it,
@@ -8060,7 +8075,12 @@ name past 40 letters, past its 12 colours), **The numbers** and **Export** (a pi
 over `editor/tableGrid.js`): its cells drawn with their chips, links and pictures, `@`, Tab,
 Enter, the arrows and Escape, a picture of the case dropped on a cell, and *N more rows · show
 all* past 30 rows. A column the drawing does not read (the figure route names the ones it does,
-`drawn` in `X-Chart-Kind`) stays, greyed and marked *not drawn*, never refused. Its own rows
+`drawn` in `X-Chart-Kind`) stays, greyed and marked *not drawn*, never refused. A column a
+timeline or a line reads as days, or a chart reads as numbers, says *Days* or *Numbers* in its
+heading, decided as the engine decides it (`lib/cellHints.js`). A cell written otherwise than
+the chart prints it shows the reading after its words, muted (`5 mars 2026` shows `5 Mar
+2026`, `60+` shows `at least 60`); one that does not read is underlined with a hover saying
+what would; an empty one shows `5 Mar 2026` or `1 200`, grey. What was typed stays. Its own rows
 take every gesture of a table (Row, Column, *Paste from a spreadsheet*, each column's and row's
 menu), each a change of the changed lines, one Undo; its bar ends with *As a form* where the
 kind's form fits, and a wall's *Fill from the case…*. Rows that live elsewhere are typed in where

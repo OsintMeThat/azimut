@@ -241,6 +241,14 @@ def test_a_day_written_the_binders_way_is_read_rather_than_pasted(client):
     refused = date_rows(client, case_id, sheet, tail="promote/preview", keys=[], day="not a day")
     assert refused.status_code == 422
 
+    worded = date_rows(
+        client, case_id, sheet, tail="promote/preview", keys=[sheet["rows"][0][0]], day="3 janvier 2026",
+    )
+    assert statements(worded)["rows"][0]["when"] == "2026-01-03T01:57:00"
+    # a month read in words is no day an hour can be placed on
+    month = date_rows(client, case_id, sheet, tail="promote/preview", keys=[], day="janvier 2026")
+    assert month.status_code == 422
+
 
 # -- an offset from an anchor --------------------------------------------------
 

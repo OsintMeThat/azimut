@@ -105,8 +105,9 @@ from typing import TYPE_CHECKING, Any, Callable, Mapping, Sequence, Union
 
 from PIL import Image, ImageDraw, ImageFont, ImageOps
 
-from . import pdffonts
-from .notetext import COMMENT, EMPHASIS, ENTITY_REF, IMAGE, LINK, MEDIA_REF
+from . import cellread, pdffonts
+from .cellread import CONTROL, plain_cell
+from .notetext import ENTITY_REF
 
 if TYPE_CHECKING:
     from ..workspace import Case
@@ -204,16 +205,7 @@ ROW_NUMBER = re.compile(r"^(?:#|n[o°º]?\.?|nr\.?|id|ref\.?|row)$", re.I)
 #: A column of shares, never summed on its own: percentages, confidences, ratios, rates.
 SHARE_HEADER = re.compile(r"%|\bper ?cent|\bpct\b|\bshare\b|\bratio\b|\brates?\b|\bconf(?:idence)?\b|"
                           r"\bprobability\b|\blikelihood\b|\bodds\b|\bproportion\b", re.I)
-#: What XML refuses and no chart should print.
-CONTROL = re.compile(r"[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]")
 WHOLLY_BOLD = re.compile(r"^\*\*[^*]+\*\*$|^__[^_]+__$")
-NUMBER = re.compile(
-    r"^(?P<floor>≥|>=)?\s*(?:~|≈|about|c\.|ca\.)?\s*"
-    r"(?P<sign>[-−–])?\s*[$€£]?\s*"
-    r"(?P<num>\d{1,3}(?:[,   ]\d{3})+(?:\.\d+)?|\d+(?:\.\d+)?|\.\d+)\s*"
-    r"(?P<mag>k|K|M|bn|B)?\s*%?\s*(?P<plus>\+)?$")
-RANGE = re.compile(r"\d[\d.,]*\s*[kKMB]?\s*(?:-|–|—|to)\s*[$€£]?\s*\d")
-MAGNITUDES = {"k": 1e3, "K": 1e3, "M": 1e6, "bn": 1e9, "B": 1e9}
 #: Words a count's column may be named that say nothing of what is counted.
 NOT_A_NOUN = {"count", "counts", "number", "numbers", "total", "totals", "n", "amount", "value", "values",
               "sum", "rows", "at least", "minimum", "figure", "figures", "how many", "#"}
@@ -499,18 +491,6 @@ def split_row(line: str) -> list[str]:
     return [cell[:MAX_CELL] for cell in cells]
 
 
-def plain_cell(cell: str) -> str:
-    """A cell as a reader says it: a chip by its label, a link by its words, no marks."""
-    text = COMMENT.sub("", CONTROL.sub("", cell))
-    text = MEDIA_REF.sub(lambda match: match.group(2), text)
-    text = ENTITY_REF.sub(lambda match: match.group(2), text)
-    text = IMAGE.sub(lambda match: match.group(1), text)
-    text = LINK.sub(lambda match: match.group(1), text)
-    text = EMPHASIS.sub("", text)
-    text = re.sub(r"\\([\\`*_{}\[\]()#+\-.!|~<>])", r"\1", text)
-    return " ".join(text.split())
-
-
 def table_text(headers: Sequence[str], cells: Sequence[Sequence[str]], align: Sequence[str] = ()) -> str:
     """A table as the Notebook writes it: a cell's ``|`` escaped, except inside ``[[…]]``."""
     def cell(value: str) -> str:
@@ -731,27 +711,31 @@ class Number:
     floor: bool = False
 
 
-def read_number(cell: str) -> Number | str:
-    """A cell's number, or why it is none: "empty", "range", "negative" or "text"."""
-    text = " ".join(plain_cell(cell).split())
+def read_number(cell: str, decimal: str | None = None) -> Number | str:
+    """A cell's number (`cellread.read_amount`), or why it is none: "empty", "range",
+    "negative" or "text". ``decimal`` is the column's decimal mark (`column_decimal`), so
+    ``1,5`` among ``2,25`` is one and a half."""
+    text = plain_cell(cell)
     if not text or text in ("-", "–", "—"):
         return "empty"
-    lowered = text.casefold()
-    floor = False
-    for word in ("at least", "minimum"):
-        if lowered.startswith(word + " "):
-            text, floor = text[len(word):].strip(), True
-            break
-    match = NUMBER.match(text)
-    if match is None:
-        return "range" if RANGE.search(text) else "text"
-    if match.group("sign"):
-        return "negative"
-    value = float(re.sub(r"[,   ]", "", match.group("num")))
-    value *= MAGNITUDES.get(match.group("mag") or "", 1.0)
-    if not math.isfinite(value):
+    found = cellread.read_amount(text, decimal)
+    if found is None:
         return "text"
-    return Number(value, floor or bool(match.group("floor")) or bool(match.group("plus")))
+    if found.value is None:
+        return "range"
+    if not math.isfinite(found.value):
+        return "text"
+    if found.value < 0:
+        return "negative"
+    return Number(found.value, found.floor)
+
+
+def column_decimal(rows: Sequence[Sequence[str]], column: int | None) -> str | None:
+    """The decimal mark a column's own cells say (`cellread.column_marks`): ``,`` when
+    ``1,5`` and ``2,25`` are in it, else ``.``."""
+    if column is None:
+        return None
+    return cellread.column_marks(row[column] for row in rows if column < len(row)).decimal
 
 
 def number_text(value: float) -> str:
@@ -1069,6 +1053,7 @@ def read(block: ChartBlock, *, theme: ChartTheme | None = None, palette: Sequenc
     left_out: list[tuple[int, str]] = []
     unnumbered: list[tuple[int, str, str]] = []
     filters = [(only, table.column(only.column)) for only in block.only]
+    decimal = column_decimal(table.cells, count)
     for only, column in filters:
         if column is None:
             warn(f'{said} keeps rows by "{_cut(only.column, 40)}", a column its table does not have.',
@@ -1088,7 +1073,7 @@ def read(block: ChartBlock, *, theme: ChartTheme | None = None, palette: Sequenc
         if count is None:
             amounts[index] = 1.0
         else:
-            number = read_number(table.cells[index][count])
+            number = read_number(table.cells[index][count], decimal)
             if isinstance(number, str):
                 left_out.append((index, number))
                 unnumbered.append((index, row[count], number))
@@ -1268,7 +1253,8 @@ def _numeric(rows: list[list[str]], column: int, *, most: bool = False) -> bool:
     """Whether a column holds numbers: all its cells, or with ``most`` at least half, so
     a count with one cell in error is still read as the count (and the cell is named)."""
     cells = [row[column] for row in rows if column < len(row) and row[column] and not TOTAL_ROW.match(row[0])]
-    numbers = sum(1 for cell in cells if isinstance(read_number(cell), Number))
+    decimal = column_decimal(rows, column)
+    numbers = sum(1 for cell in cells if isinstance(read_number(cell, decimal), Number))
     return bool(cells) and (numbers * 2 >= len(cells) if most else numbers == len(cells))
 
 

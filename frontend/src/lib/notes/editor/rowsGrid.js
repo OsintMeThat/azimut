@@ -16,6 +16,8 @@
  * - **a table of another note**: shown, never typed in.
  *
  * A column the chart does not draw stays, greyed and marked "not drawn" (`widget.idle`).
+ * A column it reads as days or as numbers says so in its heading, and each of its cells
+ * says what the chart reads in it (`widget.reads`, `chartReads`, `lib/cellHints.js`).
  *
  * `host` is the block the grid stands in: `start()` where its table's header line stands
  * in the note, `anchor(where)` where the cursor goes on leaving ('pick', 'before', 'after'),
@@ -25,18 +27,22 @@
 import { isolateHistory } from '@codemirror/commands';
 import { Transaction } from '@codemirror/state';
 
+import { EXPECTS, EXPECTS_TITLE, NUMBERS, cellSays, columnReads, readsKey } from '../../cellHints.js';
 import { Grid } from './tableGrid.js';
 import { chartRows } from './chartFigure.js';
-import { readOrigin, tableUnder } from './chartText.js';
+import { FORMS, formKind } from './chartFormText.js';
+import { readOrigin, setting, tableUnder } from './chartText.js';
 import { followSource, forgetFollow } from './follow.js';
 import { chain, tableNear, tablesOf } from './gridEdits.js';
 import { button } from './gridMenu.js';
 import { rovingToolbar } from '../pictureSize.js';
 import { OWN } from './dataLine.js';
+import { pictureColumns } from './tablePictures.js';
 import { plainText, setCell } from './tableText.js';
 import { writeThroughSheet } from './throughSheet.js';
 
 const fold = (header) => plainText(header).split(/\s+/).join(' ').toLowerCase();
+const NO_READS = new Map();
 
 function element(tag, className) {
   const node = document.createElement(tag);
@@ -79,6 +85,48 @@ export class RowsGrid extends Grid {
 
   isWhole() {
     return Boolean(this.host.whole);
+  }
+
+  /** The columns the chart reads as days or as numbers (`chartReads`). */
+  get reads() {
+    return this.widget.reads ?? NO_READS;
+  }
+
+  render() {
+    super.render();
+    this.readsDrawn = readsKey(this.reads);
+  }
+
+  /** A cell's words, then what the chart reads in it; a heading, then what its column holds. */
+  fill(cell, pictures) {
+    super.fill(cell, pictures);
+    if (this.editing?.cell === cell) return;
+    const row = Number(cell.dataset.row);
+    const col = Number(cell.dataset.col);
+    const read = this.reads.get(col);
+    if (!read) return;
+    const words = cell.querySelector('.cm-grid-text');
+    if (!words) return;
+    if (row === -1) {
+      const tag = element('span', 'cm-grid-expects');
+      tag.textContent = EXPECTS[read.kind];
+      tag.title = EXPECTS_TITLE[read.kind];
+      words.after(tag);
+      return;
+    }
+    const says = cellSays(this.textAt(row, col), read);
+    if (says?.example) {
+      words.dataset.placeholder = says.example;
+      words.classList.add('cm-grid-example');
+    } else if (says?.unread) {
+      words.classList.add('cm-grid-unread');
+      words.title = says.unread;
+    } else if (says?.reading) {
+      const reading = element('span', 'cm-grid-reading');
+      reading.textContent = says.reading;
+      reading.title = read.kind === NUMBERS ? 'The number the chart draws' : 'The day the chart draws';
+      words.append(reading);
+    }
   }
 
   keepWhole(whole) {
@@ -198,6 +246,14 @@ export class RowsGrid extends Grid {
   update(widget) {
     this.pending = null;
     super.update(widget);
+    // a column that turned to days, or to a comma for its decimals, says it in every cell
+    const key = readsKey(this.reads);
+    if (key === this.readsDrawn) return;
+    this.readsDrawn = key;
+    this.quiet = true;
+    const pictures = pictureColumns(this.table);
+    for (const cell of this.sheet.querySelectorAll('.cm-grid-cell')) this.fill(cell, pictures);
+    this.quiet = false;
   }
 
   /** Every cell drawn again, the one typed in left alone: after a write sent, or refused there. */
@@ -273,10 +329,32 @@ export async function writeSheetCells(view, { caseId, written, found, cells }) {
 }
 
 /**
+ * The columns of a chart's rows it reads as days or as numbers (`lib/cellHints.js`
+ * `columnReads`), by its kind (`kind`, the one it is drawn as, else its `kind:` line):
+ * none it does not draw (`idle`), and never the categories a chart counts by, however
+ * they are written.
+ */
+export function chartReads(chart, { kind = '', idle = new Set() } = {}) {
+  const table = chart?.table;
+  if (!table) return NO_READS;
+  const family = FORMS[formKind(kind || setting(chart, 'kind'))]?.family ?? '';
+  const skip = new Set(idle);
+  const by = fold(setting(chart, 'by'));
+  const named = by ? table.header.findIndex((header) => fold(header) === by) : -1;
+  if (family === 'categories' && named >= 0) skip.add(named);
+  const reads = columnReads(table, family, skip);
+  // no `by:` line: the categories are the first column, unless it is the only one of numbers
+  if (family === 'categories' && named < 0 && reads.get(0)?.kind === NUMBERS
+    && [...reads].some(([column, read]) => column > 0 && read.kind === NUMBERS)) reads.delete(0);
+  return reads;
+}
+
+/**
  * A grid of a chart's rows in `box`, for `host` (see the module): `table` the rows as the
  * note holds them, `info` the case (chips and pictures), `writable`, `idle` the columns
- * its drawing does not read. Answers the grid; `update(spec)` draws it again from new rows.
+ * its drawing does not read, `reads` the ones it reads as days or numbers (`chartReads`).
+ * Answers the grid; `update(spec)` draws it again from new rows.
  */
-export function rowsGrid(box, view, { host, table, info, writable, idle }) {
-  return new RowsGrid(box, { host, table, info, writable, idle, look: null, tableId: null }, view);
+export function rowsGrid(box, view, { host, table, info, writable, idle, reads }) {
+  return new RowsGrid(box, { host, table, info, writable, idle, reads, look: null, tableId: null }, view);
 }

@@ -272,8 +272,10 @@ def _cell(row: list[str], columns: list[str], name: str) -> str:
 
 
 def _day(cell: str, role: dict[str, Any] | None) -> str:
+    """The day a cell dates its point by; a month or a year alone dates none, as a layer's
+    point is dated to the day."""
     read = sheetroles.parse_when(cell, role)
-    return str(read["date"]) if read and read.get("shape") == "moment" else ""
+    return maplayers.iso_day(read["date"]) if read and read.get("shape") == "moment" else ""
 
 
 def _card(row: list[str], columns: list[str], choice: dict[str, Any], place: dict[str, Any]) -> str:

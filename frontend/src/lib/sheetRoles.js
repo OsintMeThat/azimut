@@ -17,6 +17,7 @@
  * Pure: text in, readings out. No DOM, no case, no fetch, and no import from
  * `lib/sheet.js` — that one imports this, and the arrow points one way.
  */
+import { MONTH_NAMES, dayParts, readAmount, readDay } from './cellRead.js';
 
 /** Every role a column may hold. Mirrors `engine/sheetroles.ROLE_KINDS`. `url` is the
  *  column a promotion files as sources, `row` points at another row of the same sheet,
@@ -491,7 +492,8 @@ export function detectRole(values) {
   // definition, and a column of coordinates with `To be found` in a third of its rows is
   // still a column of coordinates.
   if (share((value) => parseLatLon(value)) >= 0.66) return 'latlon';
-  if (share((value) => parseWhen(value)) >= 0.66) return 'when';
+  // a bare year reads as a moment, and is as often an amount (1200, 1500): it never makes a column one
+  if (share((value) => { const read = parseWhen(value); return Boolean(read) && !/^\d{4}$/.test(read.text); }) >= 0.66) return 'when';
   // Suggested off the extension alone, and never off "it is a URL": a column of sources
   // is URLs too, and turning one into a wall of thumbnails would fetch forty pages the
   // analyst never asked for.
@@ -524,7 +526,8 @@ const NUMBER_CELL = /^[~≈<>±]?\s*([+-]?[\d\u00a0 ']*\d(?:[.,]\d+)?)\s*%?$/;
  */
 export function parseNumber(text) {
   const match = String(text ?? '').trim().match(NUMBER_CELL);
-  if (!match) return null;
+  // past its own grammar, the one reader of a cell the charts read: `1 200 €`, `at least 60`, `٦٠`
+  if (!match) return readAmount(text)?.value ?? null;
   const digits = match[1].replace(/[\u00a0 ']/g, '').replace(',', '.');
   const value = Number(digits);
   return Number.isFinite(value) ? value : null;
@@ -795,7 +798,6 @@ export function offsetMoment(anchorAt, seconds) {
 
 const SLASH = /^(\d{1,4})[/.-](\d{1,2})[/.-](\d{2,4})(?:[ T]+(\d{1,2}):(\d{2})(?::(\d{2}))?)?$/;
 const CLOCK = /^(\d{1,2}):(\d{2})(?::(\d{2}))?$/;
-const MONTHS = 'jan feb mar apr may jun jul aug sep oct nov dec'.split(' ');
 const RFC = /^(?:\w{3},\s*)?(\d{1,2})\s+(\w{3})\w*\s+(\d{4})(?:\s+(\d{1,2}):(\d{2})(?::(\d{2}))?)?/i;
 
 /**
@@ -837,10 +839,30 @@ function utc(year, month, day, hour = 0, minute = 0, second = 0) {
  * the binder's `Local time` column holds `01:57` for an event whose date lives in the
  * sheet's title, and inventing a date for it would be inventing evidence. `shape` says
  * which of the two a reading is, and `key` sorts within its own shape.
+ *
+ * A cell in none of those shapes is read as the charts read a day (`lib/cellRead.js`), in
+ * any language, at its precision: `5 mars 2026` is `2026-03-05`, `mars 2026` is `2026-03`,
+ * `2026` is `2026`. Only with its year, for the same reason a clock gets no date. A cell in
+ * one of them that does not hold stays unread: `03/13/2026` in a column that writes the day
+ * first is a question for the analyst, not a month-first day.
  */
 export function parseWhen(text, role = {}) {
   const body = String(text ?? '').trim();
   if (!body) return null;
+  const own = ownWhen(body, role);
+  return own === undefined ? cellWhen(body) : own;
+}
+
+function cellWhen(body) {
+  const read = readDay(body);
+  if (!read?.year) return null;
+  const { year, month, day } = dayParts(read);
+  const size = { day: 10, month: 7, year: 4 }[read.precision];
+  return { shape: 'moment', key: Date.UTC(year, month - 1, day), text: read.date.slice(0, size) };
+}
+
+/** The binders' shapes: a reading, null for a cell in one of them that does not hold, undefined for none. */
+function ownWhen(body, role) {
   const dayFirst = role.dayFirst === undefined ? true : Boolean(role.dayFirst);
 
   const clock = body.match(CLOCK);
@@ -856,7 +878,7 @@ export function parseWhen(text, role = {}) {
 
   const rfc = body.match(RFC);
   if (rfc) {
-    const month = MONTHS.indexOf(rfc[2].slice(0, 3).toLowerCase()) + 1;
+    const month = MONTH_NAMES.findIndex((name) => name.toLowerCase() === rfc[2].slice(0, 3).toLowerCase()) + 1;
     if (month) {
       if (!clockHolds(Number(rfc[4] ?? 0), Number(rfc[5] ?? 0), Number(rfc[6] ?? 0))) return null;
       const key = utc(Number(rfc[3]), month, Number(rfc[1]), Number(rfc[4] ?? 0), Number(rfc[5] ?? 0), Number(rfc[6] ?? 0));
@@ -883,7 +905,7 @@ export function parseWhen(text, role = {}) {
       text: new Date(key).toISOString().slice(0, hour ? 16 : 10),
     };
   }
-  return null;
+  return undefined;
 }
 
 /**

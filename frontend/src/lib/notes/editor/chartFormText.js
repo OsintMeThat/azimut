@@ -23,6 +23,7 @@
  * Any other block whose table holds more than its kind's form reads (a register counted
  * row by row, more columns) is not read into a form: its rows are typed in The numbers.
  */
+import { DAY_HEADER, MONTH_NAMES, dayColumns, dayParts, readDay, realDay } from '../../cellRead.js';
 import { readPairs, writePairs } from './chartIcons.js';
 import { readChart, setting, withSettings, withTable } from './chartText.js';
 import { newTable, plainText, serializeTable } from './tableText.js';
@@ -118,19 +119,8 @@ export const EMPTY_SAID = {
 
 // -- days ---------------------------------------------------------------------------------
 
-const MONTH_NAMES = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
-const MONTH_LONG = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
-const MONTH_WORDS = {
-  jan: 1, january: 1, feb: 2, february: 2, mar: 3, march: 3, apr: 4, april: 4, may: 5, jun: 6, june: 6, jul: 7, july: 7, aug: 8, august: 8,
-  sep: 9, sept: 9, september: 9, oct: 10, october: 10, nov: 11, november: 11, dec: 12, december: 12,
-};
 /** The precisions a day is written at, as the engine reads them (`notes_chart_kinds.read_day`). */
 export const PRECISIONS = [{ value: 'day', label: 'Day' }, { value: 'month', label: 'Month' }, { value: 'year', label: 'Year' }];
-
-function realDay(year, month, day) {
-  const date = new Date(Date.UTC(year, month - 1, day));
-  return date.getUTCFullYear() === year && date.getUTCMonth() === month - 1 && date.getUTCDate() === day;
-}
 
 /**
  * A cell's day as the form edits it: `{ precision, year, month, day }` (numbers, `month` and
@@ -140,21 +130,11 @@ function realDay(year, month, day) {
 export function readWhen(cell) {
   const text = plainText(cell).trim().replace(/\.$/, '');
   if (!text) return { precision: 'day', year: 0, month: 0, day: 0, empty: true };
-  const month = (word) => MONTH_WORDS[String(word).toLowerCase().replace(/\.$/, '')] ?? 0;
-  const make = (precision, year, at = 0, day = 0) => {
-    if (year < 1000 || year > 2999) return null;
-    if (precision === 'day' && !realDay(year, at, day)) return null;
-    if (precision !== 'year' && !(at >= 1 && at <= 12)) return null;
-    return { precision, year, month: precision === 'year' ? 0 : at, day: precision === 'day' ? day : 0 };
-  };
-  let found = null;
-  let match = /^(\d{4})-(\d{1,2})(?:-(\d{1,2}))?$/.exec(text);
-  if (match) found = match[3] ? make('day', +match[1], +match[2], +match[3]) : make('month', +match[1], +match[2]);
-  else if ((match = /^([A-Za-z]{3,9})\.?\s+(\d{4})$/.exec(text))) found = make('month', +match[2], month(match[1]));
-  else if ((match = /^(\d{4})$/.exec(text))) found = make('year', +match[1]);
-  else if ((match = /^(\d{1,2})(?:st|nd|rd|th)?\s+([A-Za-z]{3,9})\.?,?\s+(\d{4})$/.exec(text))) found = make('day', +match[3], month(match[2]), +match[1]);
-  else if ((match = /^([A-Za-z]{3,9})\.?\s+(\d{1,2})(?:st|nd|rd|th)?,?\s+(\d{4})$/.exec(text))) found = make('day', +match[3], month(match[1]), +match[2]);
-  return found ?? { precision: 'text', text };
+  const read = readDay(cell);
+  // a day without its year is not a day of a year the form can edit
+  if (!read?.year) return { precision: 'text', text };
+  const { year, month, day } = dayParts(read);
+  return { precision: read.precision, year, month: read.precision === 'year' ? 0 : month, day: read.precision === 'day' ? day : 0 };
 }
 
 /** A day written as the chart prints it: `5 Oct 2026`, `Oct 2026`, `2026`; '' while it is not whole. */
@@ -184,7 +164,6 @@ const FLOOR_WORDS = /\bat least\b|\bminimum\b|≥|>=|\bor more\b|\bno fewer than
 const FLOOR_START = /^\s*(?:at least|no fewer than|minimum|≥|>=)\s*/i;
 const FLOOR_END = /\s*(?:\+|or more)\s*$/i;
 const UNTIL_HEADER = /until|end|to\b|till/i;
-const DAY_HEADER = /^\s*(?:when|days?|dates?|from|start|since)\b/i;
 const NUMBER_CELL = /^\s*(?:≥|>=)?\s*(?:~|≈|about|c\.|ca\.)?\s*[+-]?\d[\d,.  ]*\s*(?:k|m|bn|thousand|million|billion)?\s*\+?\s*%?\s*$/i;
 
 /** A figure or a count with its floor said apart: `{ text, floor }`. */
@@ -213,18 +192,6 @@ const numericColumn = (rows, column) => {
   return cells.length > 0 && cells.every(numberCell);
 };
 const dayCells = (rows, column) => rows.map((row) => row[column]).filter((cell) => plainText(cell));
-function dayColumns(headers, rows) {
-  const found = headers.map((_, column) => column).filter((column) => {
-    const cells = dayCells(rows, column);
-    const days = cells.filter((cell) => readWhen(cell).precision !== 'text').length;
-    return days >= 2 && days * 2 >= cells.length;
-  });
-  if (found.length) return found;
-  const named = headers.findIndex((header, column) => DAY_HEADER.test(plainText(header))
-    && dayCells(rows, column).every((cell) => readWhen(cell).precision !== 'text'));
-  return named >= 0 ? [named] : [];
-}
-
 /** `colours: Confirmed #184f95, UAE #eb6834` read as `[name, colour]` pairs. */
 export function readColours(text) {
   return String(text ?? '').split(',').map((part) => /^(.+?)\s+(#[0-9a-f]{6})$/i.exec(part.split(/\s+/).join(' ').trim()))
@@ -295,7 +262,7 @@ export function timelineColumns(table, chart) {
   const days = dayColumns(headers, rows);
   const start = days[0] ?? -1;
   const until = headers.map((_, at) => at).find((at) => at !== start && UNTIL_HEADER.test(plainText(headers[at]))
-    && dayCells(rows, at).some((cell) => readWhen(cell).precision !== 'text')) ?? (days.length > 1 ? days[1] : -1);
+    && dayCells(rows, at).some((cell) => readDay(cell) !== null)) ?? (days.length > 1 ? days[1] : -1);
   const colour = columnNamed(headers, setting(chart, 'colour by'));
   const by = columnNamed(headers, setting(chart, 'by'));
   const what = by >= 0 && !days.includes(by) ? by
@@ -319,7 +286,7 @@ function readTimeline({ chart, heads, headers, rows }) {
   const start = days[0] ?? (rows.length ? -1 : Math.max(0, headers.findIndex((header) => DAY_HEADER.test(plainText(header)))));
   if (start < 0) return { why: 'Its table has no column of days.' };
   const ends = headers.map((_, column) => column).filter((column) => column !== start && UNTIL_HEADER.test(plainText(headers[column]))
-    && (!rows.length || dayCells(rows, column).some((cell) => readWhen(cell).precision !== 'text')));
+    && (!rows.length || dayCells(rows, column).some((cell) => readDay(cell) !== null)));
   const until = ends[0] ?? (days.length > 1 ? days[1] : -1);
   const by = columnNamed(headers, setting(chart, 'by'));
   const named = columnNamed(headers, setting(chart, 'colour by'));
@@ -415,8 +382,8 @@ function readLine({ chart, heads, headers, rows }) {
   const series = seriesAt >= 0 && seriesAt !== x && seriesAt !== value ? seriesAt : -1;
   if (headers.length > [x, value, series].filter((column) => column >= 0).length) return { why: SEVERAL };
   // days along, unless every one is a bare year: the chart draws years as numbers, and so does the form
-  const xCells = dayCells(rows, x).map(readWhen);
-  const days = xCells.length ? xCells.filter((when) => when.precision !== 'text').length * 2 >= xCells.length && !xCells.every((when) => when.precision === 'year')
+  const xCells = dayCells(rows, x).map((cell) => readDay(cell));
+  const days = xCells.length ? xCells.filter(Boolean).length * 2 >= xCells.length && !xCells.every((when) => when?.precision === 'year')
     : !/^\s*(?:number|step|year|x)\b/i.test(plainText(headers[x]));
   const out = {
     heads: { x: plainText(headers[x]) || heads.x, value: value >= 0 ? plainText(headers[value]) || heads.value : heads.value, series: series >= 0 ? plainText(headers[series]) || heads.series : heads.series },

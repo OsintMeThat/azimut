@@ -1,0 +1,148 @@
+/**
+ * What a grid says of a column the chart reads as days or as numbers, and of each of its
+ * cells, so the analyst sees what to write and what was understood: The numbers of a chart
+ * (`notes/editor/rowsGrid.js`) and a sheet's `when` and `number` columns (`tools/Sheet.svelte`).
+ *
+ * - the column's heading takes a quiet tag, `Days` or `Numbers`;
+ * - a cell that reads but is written otherwise than the chart prints it shows the reading
+ *   after its words, muted (`5 mars 2026` shows `5 Mar 2026`);
+ * - a cell that does not read is underlined, and its title says what would;
+ * - an empty cell shows an example, grey.
+ *
+ * Nothing here writes a cell: what the analyst typed stays as typed.
+ */
+import { blankCell, dayColumn, dayColumns, dayText, numberText, plainText, readDay, readNumber, separators } from './cellRead.js';
+import { parseNumber, parseWhen } from './sheetRoles.js';
+
+export const DAYS = 'days';
+export const NUMBERS = 'numbers';
+
+/** The tag a column's heading takes. */
+export const EXPECTS = { [DAYS]: 'Days', [NUMBERS]: 'Numbers' };
+/** What the tag says on hover. */
+export const EXPECTS_TITLE = {
+  [DAYS]: 'The chart reads this column as days',
+  [NUMBERS]: 'The chart reads this column as numbers',
+};
+/** What an empty cell shows. */
+export const EXAMPLE = { [DAYS]: '5 Mar 2026', [NUMBERS]: '1 200' };
+/** What a cell that does not read says on hover. */
+export const UNREAD = {
+  [DAYS]: 'Not read as a day. Try 5 Mar 2026, 05/03/2026 or 2026-03-05, in any language.',
+  [NUMBERS]: 'Not read as a number. Try 1200, 1 200, 1,5 or at least 60.',
+};
+
+const FAMILY_DAYS = new Set(['timeline', 'line']);
+const FAMILY_NUMBERS = new Set(['figures', 'categories', 'line']);
+
+/**
+ * The columns a chart of `family` (`chartFormText.FORMS`) reads as days or as numbers, as
+ * the engine decides it: `Map(column → { kind, decimal })`. Days where the chart reads days
+ * (a timeline, a line), by `dayColumns`; numbers where three quarters of the filled cells
+ * read as one. `skip` holds the columns it does not read as either: the ones not drawn, and
+ * the categories a chart counts by.
+ */
+export function columnReads(table, family, skip = new Set()) {
+  const reads = new Map();
+  if (!table?.header?.length) return reads;
+  const { header, rows } = table;
+  if (FAMILY_DAYS.has(family)) {
+    for (const column of dayColumns(header, rows)) if (!skip.has(column)) reads.set(column, { kind: DAYS });
+  }
+  if (!FAMILY_NUMBERS.has(family)) return reads;
+  header.forEach((_, column) => {
+    // a column of days or years is never a column of amounts: `2024` prints 2024, not 2,024
+    if (reads.has(column) || skip.has(column) || dayColumn(rows, column)) return;
+    const texts = rows.map((row) => row[column] ?? '');
+    const marks = separators(texts);
+    const filled = texts.filter((text) => !blankCell(text)).length;
+    const count = texts.filter((text) => readNumber(text, { decimal: marks.decimal })?.value != null).length;
+    if (count > 0 && count >= 0.75 * filled) reads.set(column, { kind: NUMBERS, decimal: marks.decimal });
+  });
+  return reads;
+}
+
+/** A column's reading as a key, to tell when a grid must draw its cells again. */
+export function readsKey(reads) {
+  return [...reads].map(([column, read]) => `${column}:${read.kind}${read.decimal ?? ''}`).join(',');
+}
+
+const squash = (text) => text.toLowerCase().replace(/[\s'’]/g, '');
+
+/** The number as the chart prints it, and whether the cell already writes it so. */
+function numberSaid(plain, reading) {
+  const printed = `${reading.floor ? 'at least ' : ''}${numberText(reading.value)}`;
+  let core = squash(plain);
+  if (reading.thousands) core = core.split(reading.thousands).join('');
+  const unit = reading.unit.toLowerCase().replace(/\s/g, '');
+  if (unit && core.endsWith(unit)) core = core.slice(0, -unit.length);
+  else if (unit && core.startsWith(unit)) core = core.slice(unit.length);
+  return core === squash(printed).replace(/,/g, '') ? '' : printed;
+}
+
+/**
+ * What a cell of a column read as `read` (`columnReads`) says of itself: `{ example }` when
+ * empty, `{ unread }` (the title) when it does not read, `{ reading }` when it reads but is
+ * written otherwise than the chart prints it, else null. A dash or a `?` says unknown: null.
+ */
+export function cellSays(text, read) {
+  if (!read) return null;
+  const plain = plainText(text).split(/\s+/).join(' ').trim();
+  if (!plain) return { example: EXAMPLE[read.kind] };
+  if (blankCell(plain)) return null;
+  if (read.kind === DAYS) {
+    const day = readDay(plain);
+    if (!day) return { unread: UNREAD[DAYS] };
+    const printed = dayText(day);
+    return printed === plain ? null : { reading: printed };
+  }
+  const reading = readNumber(plain, { decimal: read.decimal });
+  if (reading?.value == null) return { unread: UNREAD[NUMBERS] };
+  const printed = numberSaid(plain, reading);
+  return printed ? { reading: printed } : null;
+}
+
+/** What a sheet's column says it holds, by its role: days for a `when` (not a column of bare clocks), numbers for a `number`. */
+export function sheetExpects(role) {
+  if (role?.kind === 'number') return NUMBERS;
+  return role?.kind === 'when' && role.shape !== 'time' ? DAYS : '';
+}
+
+/** A moment a sheet's `when` column read (`sheetRoles.parseWhen`), as the chart prints a day: `5 Mar 2026 06:42`. */
+export function momentText(read) {
+  if (read.shape !== 'moment') return read.text;
+  const [date, clock] = read.text.split('T');
+  const precision = { 4: 'year', 7: 'month' }[date.length] ?? 'day';
+  const day = dayText({ precision, date: `${date}-01-01`.slice(0, 10), year: true });
+  return clock ? `${day} ${clock}` : day;
+}
+
+/**
+ * What a sheet's cell says of itself under its column's role, as `cellSays`, read the way
+ * the role reads it (`sheetRoles.parseWhen`, `parseNumber`): `{ example }`, `{ unread }`,
+ * `{ reading }`, or `{}` when it is written as the chart prints it. null for a column that
+ * expects neither days nor numbers.
+ */
+export function sheetSays(role, cell) {
+  const kind = sheetExpects(role);
+  if (!kind) return null;
+  const plain = String(cell ?? '').split(/\s+/).join(' ').trim();
+  if (!plain) return { example: EXAMPLE[kind] };
+  if (kind === DAYS) {
+    const read = parseWhen(plain, role);
+    if (!read) return { unread: UNREAD[DAYS] };
+    const printed = momentText(read);
+    return printed === plain ? {} : { reading: printed };
+  }
+  const value = parseNumber(plain);
+  if (value === null) return { unread: UNREAD[NUMBERS] };
+  const reading = readNumber(plain);
+  // read alike by both: said as the chart says it; read by the sheet's own grammar
+  // (`1,500` is 1.5 there), the value it read
+  const printed = reading?.value === value ? numberSaid(plain, reading) : sameDigits(plain, numberText(value));
+  return printed ? { reading: printed } : {};
+}
+
+function sameDigits(plain, printed) {
+  return squash(plain) === squash(printed).replace(/,/g, '') ? '' : printed;
+}
