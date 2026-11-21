@@ -1075,6 +1075,29 @@ test('a Geo Proof and the footage placed on the map go on the plate from the cas
   }).toEqual(['media/strike.mp4', [2.32, 48.86], true]);
 });
 
+test('footage of one event filmed from several places is laid as its angles: a cone at each place and a slide each', async ({ page }) => {
+  const store = await plateFixture(page);
+  const filmed = (id, title, lon) => ({ key: `${id}@48.86,${lon}`, id, path: `media/${id}.mp4`, media_kind: 'video', title, lat: 48.86, lon, thumbnail: null });
+  await page.route(`**/api/cases/${CASE_ID}/satellite/media`, (route) => route.fulfill({ json: [filmed('roof', 'Roof', 2.30), filmed('street', 'Street', 2.32)] }));
+  await page.goto('/#plate');
+  await newPlate(page);
+  await expect(page.locator('.plate-map')).toHaveCount(2);
+  await addOnPage(page, 'Footage on the map');
+  const panel = page.getByRole('dialog', { name: 'From the case' });
+  await panel.getByLabel('Lay Roof as an angle').check();
+  await panel.getByLabel('Lay Street as an angle').check();
+  await panel.getByRole('button', { name: 'Lay 2 as angles' }).click();
+  await expect(page.getByText('each cone faces the middle of the places picked')).toBeVisible();
+  await expect(page.locator('.steps [role="option"]')).toHaveCount(3);
+  await expect.poll(() => {
+    const spec = lastSave(store)?.spec;
+    const cones = (spec?.elements ?? []).filter((element) => element.kind === 'cone');
+    const videos = (spec?.elements ?? []).filter((element) => element.kind === 'video');
+    return [cones.map((cone) => [cone.name, cone.bearing, cone.step ?? null]), (spec?.steps?.now ?? []).map((step) => step.name),
+      videos.map((video) => [video.src, video.step === spec.steps.now.find((step) => step.name.startsWith(video.name))?.id])];
+  }).toEqual([[['Angle 1', 90, null], ['Angle 2', 270, null]], ['Angle 1 · Roof', 'Angle 2 · Street'], [['media/roof.mp4', true], ['media/street.mp4', true]]]);
+});
+
 test('an empty slide takes a copy of the one before it from the pill over the page', async ({ page }) => {
   const store = await plateFixture(page);
   await page.goto('/#plate');

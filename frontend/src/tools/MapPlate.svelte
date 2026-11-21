@@ -105,6 +105,7 @@
   import { inspectorWidth, layout, listWidth, saveLayout, toggleFold, togglePanel } from '../lib/plate/layout.svelte.js';
   import { groundSaid, imagerySaid, layersDayOf } from '../lib/plate/source.js';
   import { comparisonOnPlate } from '../lib/plate/fromCompare.js';
+  import { anglesOf } from '../lib/plate/angles.js';
   import PlateLayers from './plate/PlateLayers.svelte';
   import PlateFromCase from './plate/PlateFromCase.svelte';
   import { plateTabs } from '../lib/plate/oneTab.js';
@@ -1016,9 +1017,10 @@
    * on its side's ground and day, grouped, a badge on each saying its day, and saying what a
    * plate could not draw; or as the newest image kept from it, Compare's marks included.
    */
-  /** What Add › From the case picked, laid on the page: a comparison, a proof's picture, or a placed file pointing at its place. */
+  /** What Add › From the case picked, laid on the page: a comparison, a proof's picture, a placed file pointing at its place, or files laid as angles. */
   function putFromCase({ what, row, how }) {
     if (what === 'comparison') { putComparison(row, how); return; }
+    if (what === 'angles') { layAngles(row); return; }
     const main = mainMap(spec);
     if (what === 'proof') {
       const point = row.points?.[0];
@@ -1030,6 +1032,30 @@
     if (!media) return;
     const element = linked(media.as === 'video' ? 'video' : 'image', main, row.path, [row.lon, row.lat].map((value) => Math.round(value * 1e6) / 1e6));
     if (element && row.title) element.name = row.title;
+  }
+  /**
+   * Files filmed from several places laid as angles of one event: on the day, a view cone at
+   * each place facing the middle of them all (`lib/plate/angles.js`); then a slide each,
+   * named for its angle, its file pointing at its place. The guess the cones make is said.
+   */
+  function layAngles(picked) {
+    const main = mainMap(spec);
+    if (!main) { toast('Put a map on the page first', 'warn'); return; }
+    if (playing) stop();
+    const { aimed, cones } = anglesOf(picked.map((row) => [row.lon, row.lat]));
+    const day = bornAt(at, playable, null);
+    put(...cones.map((cone, index) => ({ id: newId('cone'), kind: 'cone', name: `Angle ${index + 1}`, of: main.id, at: cone.at, box: [0, 0, 1, 1],
+      bearing: cone.bearing, spread: 50, reach: cone.reach, look: 'fill', width: 1, size: defaultSize('cone'), ...day })));
+    picked.forEach((row, index) => {
+      const slide = newStep();
+      if (!slide) return;
+      changeStep(slide, { name: `Angle ${index + 1}${row.title ? ` · ${row.title}` : ''}` });
+      const media = linkedMedia({ media_path: row.path, media_kind: row.media_kind });
+      const element = media && linked(media.as === 'video' ? 'video' : 'image', main, row.path, [row.lon, row.lat].map((value) => Math.round(value * 1e6) / 1e6));
+      if (element) element.name = `Angle ${index + 1}`;
+    });
+    toast(aimed ? `${picked.length} angles laid: each cone faces the middle of the places picked. Turn one in its inspector.`
+      : `${picked.length} angles laid: the files stand on one spot, so the cones face north. Turn them in their inspector.`, 'ok', 7000);
   }
   async function putComparison(row, how) {
     const { width, height } = pageSize(spec.page);

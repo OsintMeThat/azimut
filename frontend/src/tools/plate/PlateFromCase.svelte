@@ -11,7 +11,8 @@
    * - **Geo Proofs**: each proof's picture, set on the page pointing at its point.
    * - **Footage on the map**: what the case collected and placed on the map, a video
    *   played on a slide, a photo set on the page, each pointing at its place. The same
-   *   files a right-click on a marker offers, in one list.
+   *   files a right-click on a marker offers, in one list. Ticking several lays them as
+   *   **angles** of one event: a view cone at each place, a slide each for its file.
    */
   import Icon from '../../components/Icon.svelte';
   import FloatingMenu from '../../components/FloatingMenu.svelte';
@@ -51,6 +52,8 @@
   let shown = $state(null);
   const section = $derived(shown ?? what);
   let read = $state({});
+  /** The footage ticked to be laid as angles of one event, by key, in the order ticked. */
+  let ticked = $state([]);
   let failed = $state({});
 
   $effect(() => {
@@ -72,6 +75,13 @@
   const kept = (row) => (row.kept ?? []).at(-1) ?? null;
   const isVideo = (row) => linkedMedia({ media_path: row.path, media_kind: row.media_kind })?.as === 'video';
   const place = (row) => [row.geo?.name, row.country_en].filter(Boolean).join(', ');
+  const keyOf = (row) => row.key ?? `${row.path}@${row.lat},${row.lon}`;
+  const tick = (row) => { const key = keyOf(row); ticked = ticked.includes(key) ? ticked.filter((item) => item !== key) : [...ticked, key]; };
+  function layAngles() {
+    const picked = { what: 'angles', row: ticked.map((key) => rows.find((row) => keyOf(row) === key)).filter(Boolean), how: '' };
+    onclose?.();
+    onpick?.(picked);
+  }
 
   /** The row picked, its section read before the panel closes: a closed panel's props are gone. */
   function pick(row, how = '') {
@@ -144,8 +154,10 @@
     {:else}
       {#if !mapped}<p class="warn">No map on the page: what goes on does not point at its place.</p>{/if}
       <ul class="rows">
-        {#each rows as row (row.key ?? `${row.path}@${row.lat},${row.lon}`)}
+        {#each rows as row (keyOf(row))}
           <li>
+            <input type="checkbox" class="tick" aria-label={`Lay ${row.title || 'it'} as an angle`} title="Tick several to lay them as angles of one event"
+              checked={ticked.includes(keyOf(row))} disabled={!mapped} onchange={() => tick(row)} />
             <button type="button" class="main" title={isVideo(row) ? 'Plays on a slide of its own, pointing at its place' : 'Set on the page, pointing at its place'}
               onclick={() => pick(row)}>
               {#if row.thumbnail}<img src={fileUrl(caseId, row.thumbnail)} alt="" />{:else}<span class="thumb"><Icon name={isVideo(row) ? 'video' : 'image'} size={16} /></span>{/if}
@@ -157,6 +169,12 @@
           </li>
         {/each}
       </ul>
+      {#if mapped}
+        <div class="angles">
+          <span>{ticked.length < 2 ? 'Tick two or more filmed from different places to lay them as angles of one event.' : 'A cone at each place, facing the middle of them, and a slide each.'}</span>
+          <button type="button" class="btn btn-xs btn-primary" disabled={ticked.length < 2} onclick={layAngles}>Lay {ticked.length || ''} as angles</button>
+        </div>
+      {/if}
     {/if}
   {/if}
 </FloatingMenu>
@@ -180,6 +198,11 @@
   .text { display: grid; min-width: 0; }
   .title { overflow: hidden; font-size: 12px; font-weight: 600; text-overflow: ellipsis; white-space: nowrap; }
   .sub { overflow: hidden; color: var(--text-2); font-size: 11px; font-variant-numeric: tabular-nums; text-overflow: ellipsis; white-space: nowrap; }
+  .tick { flex: none; margin: 0 2px; cursor: pointer; }
+  .angles { display: flex; align-items: center; gap: 8px; margin: 8px 4px 2px; padding-top: 8px; border-top: 1px solid var(--border); color: var(--text-3);
+    font-size: 11px; line-height: 1.35; }
+  .angles span { flex: 1; }
+  .angles .btn { flex: none; }
   .open { display: grid; flex: none; place-items: center; width: 24px; height: 24px; border-radius: var(--r-sm); color: var(--text-2); cursor: pointer; }
   .open:hover { background: var(--bg-3); color: var(--text-1); }
 </style>

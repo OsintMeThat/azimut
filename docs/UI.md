@@ -6731,7 +6731,11 @@ sets one on the page pointing at its point; **Footage on the map** lists the vid
 photos the case placed on the map (the same files a right-click on a marker offers), a
 video played on a slide of its own and a photo set on the page, each pointing at its
 place. On a page with no map, what goes on points at nothing, and the panel says so.
-Each list is read when its tab is first shown.
+Each list is read when its tab is first shown. Ticking two files or more filmed from
+different places lays them as **angles** of one event: on the day, a view cone named
+for its angle at each place, facing the middle of them all (a guess the plate says, and
+north when the files stand on one spot), then a slide each, named for its angle, its
+file pointing at its place. A cone is turned in its inspector like any other.
 
 **Layers**, the list's second tab, says where the maps get what they draw, since a plate
 keeps no data of its own: each map is drawn on a ground and draws some of the case's
