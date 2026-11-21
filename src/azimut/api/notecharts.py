@@ -11,7 +11,7 @@ drawn small as every kind it fits, each with the settings it would be written wi
 `GET /api/cases/{id}/notes/figure/sources` lists what a chart's rows may be copied from, each
 note's tables and each sheet with the ``from:`` that names it (*Copy rows from…*), and `POST
 /api/cases/{id}/notes/figure/rows` answers the rows a ``from:`` names as a table's Markdown,
-what *Read again* writes when they came from another note or a sheet.
+the copy the editor keeps in the note when they come from another note or a sheet.
 
 A chart's form fills from the case (`engine/notes_chart_fill.py`): `GET
 /api/cases/{id}/notes/figure/events` lists the case's dated events within a period for a

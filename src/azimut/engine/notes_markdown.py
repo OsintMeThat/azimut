@@ -158,11 +158,8 @@ UNSEEN = "unseen"
 #: A count written as exact, with no "at least" or range before it (`exact_counts`): one
 #: line however many, each count listed beside it with its line.
 COUNT = "count"
-#: A chart whose rows differ from where they were copied from, which Read again brings up
-#: to date (`notecharts.origin_warning`).
-STALE = "stale"
 WARNING_KINDS = (MISSING, UNSOURCED, OPEN_TASK, LOCAL_LINK, EMPTY_SECTION, OTHER, LEFT_OUT, SETTING, UNARCHIVED, UNSEEN,
-                 COUNT, STALE)
+                 COUNT)
 #: How many links a reader cannot open are named one by one before the rest are counted.
 MAX_LOCAL_LINKS = 10
 #: How many links one grouped line lists; its count stays exact past it.

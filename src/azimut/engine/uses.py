@@ -34,7 +34,7 @@ Past the chain:
   one point fewer, as a proof added gives it one more;
 - a note's charts and infographics (`engine/notecharts.py`, `notes_infographic.py`): the
   sheet or the other note an infographic's ``data:`` or a chart's ``from:`` reads its rows
-  from, by entity id. The rows are copied in, but *Read again* and the check read the source;
+  from, by entity id. The rows are copied in, but every document draws them from the source;
 - a note's picture walls (`engine/notes_chart_wall.py`): each picture a row shows, a chip
   or its id alone, by entity id;
 - a note's written links (`notelinks.outside_links`): each finds the item the case

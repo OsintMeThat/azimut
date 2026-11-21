@@ -39,8 +39,8 @@ Other Markdown readers show the settings as a paragraph, then the table.
   at the end, after a rule (``Model open``).
 - ``show``: ``chart`` or ``chart and table``. ``caption``: the line under the title.
   ``source``: a credit line written by hand. ``style``: report, book or dark.
-- ``from``: where the rows were copied from, for *Read again*. Nothing here reads it:
-  the rows in the note are the chart (owner question 10).
+- ``from``: where the rows come from. Nothing here reads it: a document hands this module
+  the source's rows as they are now (`engine/notecharts.py`).
 
 **Honesty is built in, not offered.** A count is a floor when its column says *at
 least* (or ≥, minimum), when a cell says ``≥ 41`` or ``41+``, or when the note calls

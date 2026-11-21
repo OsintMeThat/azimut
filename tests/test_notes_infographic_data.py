@@ -1,7 +1,8 @@
 """An infographic's data (`engine/notes_infographic.py`): the ``data:`` line naming the sheet or
-the note's table its charts are drawn from, the panels that inherit it, what the check says
-when the data is gone or a panel's rows moved on, Read again (all panels) as the server reads
-the rows, the sheet named counted as used (`engine/uses.py`), and a sheet made from a paste."""
+the note's table its charts are drawn from, the panels that inherit it, every panel drawn from
+its source's rows as they are now, what the check says when the data is gone, the rows the
+editor copies in, the sheet named counted as used (`engine/uses.py`), and a sheet made from a
+paste."""
 
 from __future__ import annotations
 
@@ -95,30 +96,26 @@ def _data_warnings(case, graphic: str, **options) -> list[tuple[str, str, int | 
     return [warning for warning in page.warnings if "data" in warning[0] or "copied" in warning[0]]
 
 
-def test_the_check_says_when_the_data_moved_on_or_left_the_case(client):
+def test_the_check_says_nothing_while_the_data_stands_and_says_when_it_left_the_case(client):
     cid, case = _case(client)
     sheet = _sheet(case)
     origin = f"sheet:{sheet['id']}"
     graphic = _graphic(origin, FIGURES, _chart("stacked bars", "At least 3 vehicles, by model and grade", _table()))
-    # the panel holds the data's rows: nothing to say
     assert _data_warnings(case, graphic) == []
-    # a row edited in the Sheet tool: the panel that reads it says so, at its own fence
+    # a row edited in the Sheet tool: the panel that reads it is drawn from it, so nothing to say
     read = sheets_engine.read(case, sheet["id"])
     read["rows"][2][3] = "Confirmed"
     sheets_engine.write(case, sheet["id"], read["columns"], read["rows"], read["meta"])
+    assert _data_warnings(case, graphic) == []
+    # the sheet deleted: once, at the data's line, the panels drawing the rows they hold
+    assert client.delete(f"/api/cases/{cid}/entities/{sheet['id']}").status_code == 200
     body = _body(graphic)
-    fence = body.split("\n").index("::: chart", body.split("\n").index("::: chart") + 1)
-    assert _data_warnings(case, graphic) == [(
-        'The chart "At least 3 vehicles, by model and grade": its rows differ from the infographic\'s data, '
-        '"Vehicle register". Read again (all panels) brings them up to date.', "other", fence)]
+    assert _data_warnings(case, graphic) == [(ig.DATA_GONE, "missing", body.split("\n").index(f"data: {origin}"))]
     # the editor says it itself as the note is typed
     assert _data_warnings(case, graphic, origins=False) == []
-    # the sheet deleted: once, at the data's line, and no panel claims to differ from it
-    assert client.delete(f"/api/cases/{cid}/entities/{sheet['id']}").status_code == 200
-    assert _data_warnings(case, graphic) == [(ig.DATA_GONE, "missing", body.split("\n").index(f"data: {origin}"))]
 
 
-def test_a_panel_keeps_its_own_source_and_the_check_reads_it(client):
+def test_a_panel_keeps_its_own_source_and_is_drawn_from_it(client):
     cid, case = _case(client)
     register = f"# Register\n\n## Register\n\n{_table()}\n"
     note = make_note(client, cid, title="Register", content=register)
@@ -126,47 +123,52 @@ def test_a_panel_keeps_its_own_source_and_the_check_reads_it(client):
     graphic = _graphic(f"sheet:{sheet['id']}", _chart("bars", "Lost", _table(), origin=f"note:{note['id']}#register"))
     assert _data_warnings(case, graphic) == []
     client.put(f"/api/cases/{cid}/notes/{note['id']}", json={"text": register + "| Kirpi | Türkiye | Confirmed |\n"})
-    said = _data_warnings(case, graphic)
-    assert [message for message, _, _ in said] == [
-        'The chart "Lost": its rows differ from "Register", where they were copied from. Read them again to bring '
-        "them up to date."]
+    assert _data_warnings(case, graphic) == []
+    page = ig.read(case, _body(graphic), maps=False)
+    drawn = [panel for band in page.bands for panel in band.panels if panel.chart is not None]
+    assert any("Kirpi" in line for line in drawn[0].chart.lines)
+    # gone, its own copy is drawn and the check says so at its line
+    assert client.delete(f"/api/cases/{cid}/entities/{note['id']}").status_code == 200
+    assert [kind for _, kind, _ in _data_warnings(case, graphic)] == ["missing"]
 
 
-def test_read_again_for_all_panels_writes_the_rows_the_check_reads(client):
-    """The editor's Read again (all panels) copies the rows `POST /notes/figure/rows` answers into
-    every panel that inherits the data: once written, the check has nothing to say, and the
-    panel with rows of its own is left as it was."""
+def test_the_rows_route_answers_what_every_inheriting_panel_is_drawn_from(client):
+    """The editor copies the rows `POST /notes/figure/rows` answers into every panel that
+    inherits the data, and a document draws those rows whether the copy is current or not;
+    the panel with rows of its own is left as it was."""
     cid, case = _case(client)
     sheet = _sheet(case)
     origin = f"sheet:{sheet['id']}"
-    stale = _table(ROWS[:2])
-    graphic = _graphic(origin, FIGURES, _chart("bars", "Lost", stale), _chart("pie", "Grades", stale, colour=""))
-    assert len(_data_warnings(case, graphic)) == 2
+    old = _table(ROWS[:2])
+    graphic = _graphic(origin, FIGURES, _chart("bars", "Lost", old), _chart("pie", "Grades", old, colour=""))
     answer = client.post(f"/api/cases/{cid}/notes/figure/rows", json={"origin": origin}).json()
     assert answer["found"] and answer["rows"] == 3 and answer["name"] == "Vehicle register"
     page = ig.parse_block(_body(graphic))
     assert [ig.inherits(panel, COLUMNS) for panel in page.panels] == [False, True, True]
-    again = graphic.replace(stale, answer["text"])
-    assert _data_warnings(case, again) == []
-    assert FIGURES in again
+    followed = ig.follow(case, page)
+    assert [panel.body for panel in followed.panels][0] == page.panels[0].body
+    assert all(answer["text"] in panel.body for panel in followed.panels[1:])
+    assert _data_warnings(case, graphic) == []
 
 
-def test_the_pdf_and_the_html_check_say_where_the_rows_came_from(client):
+def test_the_pdf_and_the_html_draw_the_data_as_it_is_now(client):
     cid, case = _case(client)
     sheet = _sheet(case)
     graphic = _graphic(f"sheet:{sheet['id']}", _chart("bars", "Lost", _table(ROWS[:1])))
     note = f"# Losses\n\n{graphic}\n"
     for rendered in (notes_pdf.render(case, title="Losses", text=note, light=True),
                      notes_html.render(case, title="Losses", text=note)):
-        assert any("differ from the infographic's data" in message for message in rendered.warnings)
+        assert not any("differ" in message for message in rendered.warnings)
+    assert "Al-Wahsh" in notes_html.render(case, title="Losses", text=note).html.decode()
 
 
 def test_the_route_leaves_where_the_rows_came_from_to_the_editor_when_asked(client):
     cid, case = _case(client)
     sheet = _sheet(case)
     graphic = _graphic(f"sheet:{sheet['id']}", _chart("bars", "Lost", _table(ROWS[:1])))
+    assert client.delete(f"/api/cases/{cid}/entities/{sheet['id']}").status_code == 200
     said = client.post(f"/api/cases/{cid}/notes/infographic", json={"text": graphic}).json()["warnings"]
-    assert any("differ from the infographic's data" in warning["message"] for warning in said)
+    assert any(warning["message"] == ig.DATA_GONE for warning in said)
     quiet = client.post(f"/api/cases/{cid}/notes/infographic", json={"text": graphic, "origins": False}).json()["warnings"]
     assert not any("data" in warning["message"] for warning in quiet)
 

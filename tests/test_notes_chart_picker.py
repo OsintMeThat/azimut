@@ -155,10 +155,17 @@ def test_the_editor_reads_rows_of_its_own_note_itself(client):
     cid, _ = _case(client)
     note = make_note(client, cid, title="Register", content="# Register\n\n| Model |\n| --- |\n| Cougar |\n")
     chart = f"::: chart\ncount: rows\nby: Model\nsource: ours\nfrom: note:{note['id']}#register\n| Model |\n| --- |\n| Kirpi |\n:::"
+    # drawn from the note's table as it is now, so the rows that differ are nothing to say
     checked = client.post(f"/api/cases/{cid}/notes/figure", json={"text": chart})
-    assert any("rows differ" in said for said in json.loads(checked.headers["x-note-warnings"]))
+    assert "Cougar" in checked.text and "Kirpi" not in checked.text
+    assert not json.loads(checked.headers["x-note-warnings"])
+    # gone, the copy is drawn and the check says so, unless the editor says it itself
+    assert client.delete(f"/api/cases/{cid}/entities/{note['id']}").status_code == 200
+    gone = client.post(f"/api/cases/{cid}/notes/figure", json={"text": chart})
+    assert "Kirpi" in gone.text
+    assert any("no longer in the case" in said for said in json.loads(gone.headers["x-note-warnings"]))
     left = client.post(f"/api/cases/{cid}/notes/figure", json={"text": chart, "origins": False})
-    assert not any("rows differ" in said for said in json.loads(left.headers["x-note-warnings"]))
+    assert not any("no longer in the case" in said for said in json.loads(left.headers["x-note-warnings"]))
 
 
 # -- where the rows came from --------------------------------------------------------------------------

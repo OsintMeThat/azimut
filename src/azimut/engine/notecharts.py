@@ -9,8 +9,10 @@ figure route share around that, so none of them reads a chart its own way:
   draws it dark;
 - **the colours**: the case's named colours (`notes_charts.case_palette`), so a value is
   one colour in every chart, layer and plate of the case;
+- **its rows**: where ``from:`` names a sheet or a note's table still in the case, its rows
+  as they are now (`with_current_rows`), whichever document draws it;
 - **what the check says** (`Chart.warnings`): the engine's checks at their lines, and
-  whether the rows still match where they were copied from (``from:``, `origin_rows`);
+  when the rows cannot be read from where they came from (`origin_warning`);
 - **its pictures** (`png`, `svg`), and the one filed in the case for Post (`file_for_post`);
 - **the case's pictures a picture wall shows** (`case_pictures`): each read from the case's
   own files, its thumbnail first, and credited as its media say, never fetched.
@@ -24,9 +26,12 @@ picture that stands alone (a post, an exported picture) carries its title.
 the Notebook's *Copy rows from…*: ``note:<id>`` (the note's first table) or
 ``note:<id>#<heading>`` (the first table under that heading, named as its anchor),
 ``note:<id>#<heading>/<n>`` (its n-th table; ``#/<n>`` counts from the note's start, for
-a table under no heading), and ``sheet:<id>``. A chart's own rows are never a table there. The rows in the note are the chart; this only says when the source moved
-on: the source's rows, kept to the chart's own columns, are compared with the chart's,
-in any order. Anything else written there is not read.
+a table under no heading), and ``sheet:<id>``. A chart's own rows are never a table there.
+Every document draws the source's rows as they are now, so what is published never
+depends on the note having been opened since the sheet changed; the rows in the note are
+a copy, drawn only when the source is gone or no longer holds the chart's columns. A
+cell the sheet links to the case comes back as the note's chip. Anything else written
+there is not read.
 """
 
 from __future__ import annotations
@@ -210,10 +215,11 @@ class Chart:
 
 def read(case: "Case | None", body: str, *, look: NoteLook | None = None, note_text: str = "",
          origins: bool = True) -> Chart:
-    """A `::: chart` block's lines as a document reads them. ``note_text`` is the note
-    around it, for whether it calls its figures minimums; ``origins`` checks ``from:``."""
+    """A `::: chart` block's lines as a document reads them, its rows those of where they
+    came from as they are now (`with_current_rows`). ``note_text`` is the note around it,
+    for whether it calls its figures minimums; ``origins`` checks ``from:``."""
     look = look or DEFAULT_LOOK
-    block = notes_charts.parse_block(body)
+    block = notes_charts.parse_block(with_current_rows(case, body))
     colours = palette(case)
     pictures = case_pictures(case)
     drawing = notes_charts.layout(block, theme=theme_of(look, block), palette=colours, note_text=note_text,
@@ -278,40 +284,25 @@ def gallery(case: "Case | None", body: str, *, look: NoteLook | None = None, not
 Rows = tuple[str, list[str], list[list[str]]]
 
 
-def origin_rows(case: "Case", origin: str) -> Rows | None:
-    """What ``from:`` names, as ``(its name, headers, rows)``, each cell as a reader sees
-    it; None when it is no longer in the case or names nothing this reads."""
-    kind, _, rest = origin.strip().partition(":")
-    kind = kind.strip().casefold()
-    if kind == "note":
-        from . import notes_markdown
+@dataclass(frozen=True)
+class Source:
+    """What ``from:`` names, read once: its name, its columns and rows as a reader says
+    them (`origin_rows`), and the table's Markdown (`origin_table`)."""
 
-        ident, _, anchor = rest.strip().partition("#")
-        found = notes_markdown.read_note(case, ident.strip()) if ident.strip() else None
-        if found is None:
-            return None
-        table = _table_under(found[1], anchor.strip())
-        if table is None:
-            return None
-        return found[0], table.headers, table.rows
-    if kind == "sheet":
-        from . import sheets
-
-        try:
-            sheet = sheets.read(case, rest.strip())
-        except Exception:  # a sheet gone, or a record that is no sheet
-            return None
-        headers = [notes_charts.plain_cell(str(cell)) for cell in sheet.get("columns") or []]
-        rows = [[notes_charts.plain_cell(str(cell)) for cell in row] for row in sheet.get("rows") or []]
-        return str(sheet.get("title") or "Sheet"), headers, rows
-    return None
+    name: str
+    headers: list[str]
+    rows: list[list[str]]
+    text: str
 
 
-def origin_table(case: "Case", origin: str) -> tuple[str, str] | None:
-    """What ``from:`` names, as ``(its name, the table's Markdown)``: a note's table as it is
-    written there, chips and links kept, or a sheet's rows written as a table, its row keys
-    left out. What *Read again* writes into a chart whose rows came from elsewhere. None when
-    it is no longer in the case or names nothing this reads."""
+def read_source(case: "Case", origin: str) -> Source | None:
+    """What ``from:`` names, read once for both of its readings; None when it is no longer
+    in the case or names nothing this reads.
+
+    A note's table is its Markdown as written there, chips and links kept. A sheet's rows
+    are written as a table with its row keys left out, and a cell the sheet links to the
+    case written back as the note's chip (`_sheet_cell`): a picture wall reads its pictures
+    from a sheet that way, and a citation keeps pointing where the sheet points."""
     kind, _, rest = origin.strip().partition(":")
     kind = kind.strip().casefold()
     if kind == "note":
@@ -320,7 +311,9 @@ def origin_table(case: "Case", origin: str) -> tuple[str, str] | None:
         ident, _, anchor = rest.strip().partition("#")
         found = notes_markdown.read_note(case, ident.strip()) if ident.strip() else None
         table = _table_under(found[1], anchor.strip()) if found is not None else None
-        return (found[0], table.text()) if found is not None and table is not None else None
+        if found is None or table is None:
+            return None
+        return Source(found[0], table.headers, table.rows, table.text())
     if kind == "sheet":
         from . import sheets
 
@@ -328,14 +321,120 @@ def origin_table(case: "Case", origin: str) -> tuple[str, str] | None:
             sheet = sheets.read(case, rest.strip())
         except Exception:  # a sheet gone, or a record that is no sheet
             return None
+        name = str(sheet.get("title") or "Sheet")
         columns = [str(cell) for cell in sheet.get("columns") or []]
-        kept = [index for index, name in enumerate(columns) if name.strip().casefold() != sheets.ID_COLUMN]
+        rows = [[str(cell) for cell in row] for row in sheet.get("rows") or []]
+        plain = Source(name, [notes_charts.plain_cell(cell) for cell in columns],
+                       [[notes_charts.plain_cell(cell) for cell in row] for row in rows], "")
+        kept = [index for index, column in enumerate(columns) if column.strip().casefold() != sheets.ID_COLUMN]
         if not kept:
-            return None
-        rows = [[str(row[index]) if index < len(row) else "" for index in kept] for row in sheet.get("rows") or []]
-        return (str(sheet.get("title") or "Sheet"),
-                notes_charts.table_text([columns[index] for index in kept], rows[:notes_charts.MAX_ROWS]))
+            return plain
+        written = _sheet_cells(case, columns, rows[:notes_charts.MAX_ROWS], sheet.get("meta") or {})
+        text = notes_charts.table_text([columns[index] for index in kept],
+                                       [[row[index] if index < len(row) else "" for index in kept] for row in written])
+        return Source(name, plain.headers, plain.rows, text)
     return None
+
+
+def origin_rows(case: "Case", origin: str) -> Rows | None:
+    """What ``from:`` names, as ``(its name, headers, rows)``, each cell as a reader sees
+    it; None when it is no longer in the case or names nothing this reads."""
+    found = read_source(case, origin)
+    return (found.name, found.headers, found.rows) if found is not None else None
+
+
+def origin_table(case: "Case", origin: str) -> tuple[str, str] | None:
+    """What ``from:`` names, as ``(its name, the table's Markdown)``: what a chart drawn
+    from it holds (`with_current_rows`) and what the editor copies into the note. None
+    when it is no longer in the case, names nothing this reads, or is a sheet with no
+    column but its row keys."""
+    found = read_source(case, origin)
+    return (found.name, found.text) if found is not None and found.text else None
+
+
+def _chip_label(text: str) -> str:
+    """A label a chip can hold: on one line, with no square bracket to close it early."""
+    return " ".join(str(text).replace("[", "(").replace("]", ")").split())
+
+
+def _sheet_cells(case: "Case", columns: list[str], rows: list[list[str]], meta: dict[str, Any]) -> list[list[str]]:
+    """A sheet's rows with every cell it links to the case written as the note's chip:
+    ``[[media:id|label]]`` for a media, ``[[entity:id|label]]`` for anything else, the
+    cell's words its label. A cell of a `picture` column that holds the path of a media
+    of the case is written as that media's chip too, named as the case names it."""
+    from . import sheets
+
+    key_at = sheets.key_index(columns) if columns else 0
+    links = meta.get("links") or {}
+    roles = meta.get("roles") or {}
+    pictures = {name for name, role in roles.items() if isinstance(role, dict) and role.get("kind") == "picture"}
+    linked = [str(entity_id) for cells in links.values() if isinstance(cells, dict) for entity_id in cells.values()]
+    kinds = {str(entity["id"]): str(entity.get("type") or "") for entity in case.entities_by_ids(linked)} if linked else {}
+    paths: list[str] = []
+    for row in rows:
+        for index, name in enumerate(columns):
+            if name in pictures and index < len(row) and not (links.get(row[key_at]) or {}).get(name):
+                path = row[index].strip().replace("\\", "/")
+                if path and "://" not in path and not path.startswith("/") and ".." not in path:
+                    paths.append(path)
+    held = {str(item.get("path")): item for item in case.media_items_by_paths(list(dict.fromkeys(paths))[:500])
+            if item.get("entity_id")} if paths else {}
+    out: list[list[str]] = []
+    for row in rows:
+        cells = (links.get(row[key_at]) if key_at < len(row) else None) or {}
+        written = list(row)
+        for index, name in enumerate(columns):
+            if index == key_at or index >= len(row):
+                continue
+            entity_id = str(cells.get(name) or "")
+            words = row[index]
+            if entity_id and entity_id in kinds:
+                label = _chip_label(words) or entity_id
+                written[index] = (f"[[media:{entity_id}|{label}]]" if kinds[entity_id] == "media"
+                                  else f"[[entity:{entity_id}|{label}]]")
+            elif name in pictures and (item := held.get(words.strip().replace("\\", "/"))) is not None:
+                label = _chip_label(str(item.get("title") or "")) or _chip_label(words)
+                written[index] = f"[[media:{item['entity_id']}|{label}]]"
+        out.append(written)
+    return out
+
+
+def with_current_rows(case: "Case | None", body: str, *, origin: str = "",
+                      sources: dict[str, Source | None] | None = None) -> str:
+    """A chart's lines with its table replaced by the rows of where they came from, as
+    they are now.
+
+    What every document draws (`read`, and an infographic's panels), so a sheet or a note's
+    table edited since the note was last opened is published as it stands, whichever
+    export reads the note. ``origin`` names where the rows come from when the block's own
+    ``from:`` does not (an infographic's ``data:``). The copy in the note is drawn only when
+    the source is no longer in the case, or holds none of the chart's columns any more, and
+    the check says so then (`origin_warning`). ``sources`` keeps each source read once
+    across a page."""
+    if case is None:
+        return body
+    block = notes_charts.parse_block(body)
+    named = block.origin or origin
+    if not origin_known(named):
+        return body
+    key = named.strip()
+    if sources is not None and key in sources:
+        found = sources[key]
+    else:
+        found = read_source(case, named)
+        if sources is not None:
+            sources[key] = found
+    if found is None or not found.text:
+        return body
+    table = block.table
+    if table is not None and table.headers and compare_rows(table, found.headers, found.rows) == COLUMNS_GONE:
+        return body
+    lines = body.split("\n")
+    fresh = found.text.split("\n")
+    if table is None:
+        return "\n".join([*lines, *fresh])
+    lines[table.line:table.line + len(table.lines)] = fresh
+    return "\n".join(lines)
 
 
 def note_tables(text: str) -> list[tuple[str, str, notes_charts.Table]]:
@@ -442,30 +541,26 @@ def origin_known(origin: str) -> bool:
 
 def origin_warning(case: "Case", block: ChartBlock, *, read: Callable[["Case", str], Rows | None] | None = None
                    ) -> tuple[str, str, int | None] | None:
-    """What the check says of ``from:``: the source gone, or its rows moved on. ``read``
-    answers a source's rows (`origin_rows` by default; an infographic reads each once)."""
+    """What the check says of ``from:`` when a document cannot draw the source's rows as
+    they are now (`with_current_rows`): the source is no longer in the case, or holds none
+    of the chart's columns, so the copy in the note is drawn. Nothing while it stands.
+    ``read`` answers a source's rows (`origin_rows` by default; an infographic reads each
+    once)."""
     if not origin_known(block.origin) or block.table is None:
         return None
     said = f'The chart "{_cut(block.title, 60)}"' if block.title else "A chart"
     line = block.where.get("from")
     found = (read or origin_rows)(case, block.origin)
     if found is None:
-        return (f"{said}: its rows were copied from something no longer in the case, so they cannot be "
-                f"read again.", notes_charts.MISSING, line)
+        return (f"{said}: what its rows came from is no longer in the case, so it shows the rows copied "
+                f"into the note.", notes_charts.MISSING, line)
     name, headers, rows = found
-    state = compare_rows(block.table, headers, rows)
-    if state == COLUMNS_GONE:
-        return (f'{said}: "{_cut(name, 40)}", where its rows were copied from, no longer has its columns.',
-                notes_charts.OTHER_KIND, line)
-    if state == SAME:
-        return None
-    return (f'{said}: its rows differ from "{_cut(name, 40)}", where they were copied from. Read them again '
-            f"to bring them up to date.", STALE_KIND, line)
+    if compare_rows(block.table, headers, rows) == COLUMNS_GONE:
+        return (f'{said}: "{_cut(name, 40)}", where its rows come from, no longer has its columns, so it shows '
+                f"the rows copied into the note.", notes_charts.OTHER_KIND, line)
+    return None
 
 
-#: The check's kind for rows that moved on, which Read again brings up to date
-#: (`notes_markdown.STALE`, written out here as `notes_charts` writes its own kinds).
-STALE_KIND = "stale"
 #: What `compare_rows` says of a chart's rows against where they came from.
 SAME = "same"
 DIFFERS = "differs"

@@ -385,7 +385,7 @@ def test_the_check_says_a_floor_a_left_out_row_and_a_total_at_their_lines(client
         assert lines[said[blank][0]] == "by: Maker"
 
 
-def test_the_check_says_when_the_rows_moved_on_from_where_they_were_copied(client):
+def test_the_check_says_nothing_while_the_source_stands_and_says_when_it_is_gone(client):
     cid, case = _case(client)
     register = "# Register\n\n## Register\n\n| Model | Grade |\n| --- | --- |\n| Cougar | Confirmed |\n| M-ATV | Confirmed |\n"
     source = make_note(client, cid, title="Register", content=register)
@@ -393,19 +393,16 @@ def test_the_check_says_when_the_rows_moved_on_from_where_they_were_copied(clien
              f"from: note:{source['id']}#register\n"
              "| Model | Grade |\n| --- | --- |\n| M-ATV | Confirmed |\n| Cougar | Confirmed |\n:::\n")
     line = chart.split("\n").index(f"from: note:{source['id']}#register")
-    # the same rows in another order: nothing to say
     assert not notes_html.render(case, title="Vehicles", text=chart).warnings
+    # the source moved on: the document draws it as it is now, so there is nothing to say
     client.put(f"/api/cases/{cid}/notes/{source['id']}", json={"text": register + "| Kirpi | Almost sure |\n"})
     rendered = notes_pdf.render(case, title="Vehicles", text=chart)
-    said = dict(zip(rendered.warnings, zip(rendered.warning_lines, rendered.warning_kinds)))
-    moved = ('The chart "Vehicles by model": its rows differ from "Register", where they were copied from. '
-             "Read them again to bring them up to date.")
-    assert said[moved] == (line, "stale")
+    assert not [message for message in rendered.warnings if "Vehicles by model" in message]
     assert client.delete(f"/api/cases/{cid}/entities/{source['id']}").status_code == 200
     gone = notes_html.render(case, title="Vehicles", text=chart)
-    assert dict(zip(gone.warnings, gone.warning_kinds)) == {
-        'The chart "Vehicles by model": its rows were copied from something no longer in the case, so they '
-        "cannot be read again.": "missing"}
+    said = 'The chart "Vehicles by model": what its rows came from is no longer in the case, so it shows the rows ' \
+           "copied into the note."
+    assert dict(zip(gone.warnings, zip(gone.warning_lines, gone.warning_kinds))) == {said: (line, "missing")}
 
 
 def test_rows_copied_from_a_sheet_are_read_against_it(client):
@@ -417,8 +414,12 @@ def test_rows_copied_from_a_sheet_are_read_against_it(client):
         "| Cougar | Confirmed |\n| M-ATV | Almost sure |")
     assert notecharts.origin_warning(case, block) is None
     assert notecharts.origin_rows(case, f"sheet:{sheet['id']}")[1][-3:] == ["Model", "Grade", "Seen"]
+    # rows that differ are drawn from the sheet, so they are nothing to warn about
     block.table.cells[1][1] = "Confirmed"
-    assert "its rows differ" in notecharts.origin_warning(case, block)[0]
+    assert notecharts.origin_warning(case, block) is None
+    # a sheet with none of the chart's columns is
+    block.table.headers = ["Maker"]
+    assert "no longer has its columns" in notecharts.origin_warning(case, block)[0]
     # what names nothing this reads is not read
     block.origin = "layer:Vehicles"
     assert notecharts.origin_warning(case, block) is None

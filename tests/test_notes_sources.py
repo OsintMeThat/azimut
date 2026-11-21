@@ -596,7 +596,7 @@ def test_every_warning_has_a_kind(tmp_path):
     ]
     assert set(notes_pdf.WARNING_KINDS) == {
         "missing", "unsourced", "open-task", "local-link", "empty-section", "other", "internal", "setting",
-        "unarchived", "unseen", "count", "stale",
+        "unarchived", "unseen", "count",
     }
 
 

@@ -42,7 +42,6 @@ KIND_GROUPS = {
     md.COUNT: "words", md.EMPTY_SECTION: "words", md.OPEN_TASK: "words",
     md.UNARCHIVED: "sources", md.UNSEEN: "sources", md.LOCAL_LINK: "sources",
     md.SETTING: "edition", md.LEFT_OUT: "edition",
-    md.STALE: "figures",
     # a web folder's: the address it will live at, and how many files go up at once
     "address": "reach", "upload": "reach",
 }
