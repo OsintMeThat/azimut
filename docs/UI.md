@@ -7749,9 +7749,10 @@ and **Author picture**, one of the case's pictures picked as the list picture is
 default and never a logo in its place. Both are kept in the note's look as they are left
 (`author`, `author_image`), with GitHub set up or not, so a contributor sets them before exporting the
 case and they open filled in on the machine that publishes it; a Publish waits for an author just
-typed. The page is signed with that name alone (none of the analyst's role, organisation,
-handwritten signature or links), under the title unless the look signs at the end, the picture small
-and round before it; the card, `articles.json`, the read of the site and the lists name the author,
+typed. The page is signed with that name alone (none of the analyst's role, organisation, logo,
+handwritten signature or links), under the title unless the look signs at the end; the picture stands
+round where the analyst's logo would in the author card (beside the byline, the cover's signature or
+the one at the end, and in a map page's header), and with no picture the name stands alone; the card, `articles.json`, the read of the site and the lists name the author,
 the picture before the name, unless it is the site's own name. A picture gone from the case is said
 among the warnings and the page goes without it. A template carries neither.
 
@@ -8102,10 +8103,15 @@ name past 40 letters, past its 12 colours), **The numbers** and **Export** (a pi
 **The numbers** is a grid to type in under the drawing, the note tables' own (`editor/rowsGrid.js`
 over `editor/tableGrid.js`): its cells drawn with their chips, links and pictures, `@`, Tab,
 Enter, the arrows and Escape, a picture of the case dropped on a cell, and *N more rows · show
-all* past 30 rows. A column the drawing does not read (the figure route names the ones it does,
-`drawn` in `X-Chart-Kind`) stays, greyed and marked *not drawn*, never refused. A column a
-timeline or a line reads as days, or a chart reads as numbers, says *Days* or *Numbers* in its
-heading, decided as the engine decides it (`lib/cellHints.js`). A cell written otherwise than
+all* past 30 rows. Each heading says in one quiet word what the drawing does with its column,
+as the figure route names it (`roles` in `X-Chart-Kind`), with a hover line: a wall's *Picture*,
+*Label*, *Words*, *Groups*, *Colour* and *Flag*; a count's *Count*, *Groups* or *Parts*, *Colour*,
+*Icon* and *Flag*; a timeline's *When*, *Words* and *Until*; a line's *Along* and *Height*;
+*Filter* for the column an `only` reads. Key figures read every column and name none. A column
+a timeline or a line reads as days, or a chart reads as numbers, says *Days* or *Numbers*
+instead, decided as the engine decides it (`lib/cellHints.js`), and only where its part is a
+day or an amount: a grade written 1, 2, 3 that colours the bars says *Colour*. A column the drawing does not
+read stays, greyed and marked *not drawn*, never refused. A cell written otherwise than
 the chart prints it shows the reading after its words, muted (`5 mars 2026` shows `5 Mar
 2026`, `60+` shows `at least 60`); one that does not read is underlined with a hover saying
 what would; an empty one shows `5 Mar 2026` or `1 200`, grey. What was typed stays. Its own rows
@@ -8253,7 +8259,7 @@ again after another tool, and when the window comes back. A chart panel's card i
 says **Page data** or **Own rows**, one press apart (the page's rows copied in, or the panel's
 kept as `rows: own`), then the same **Data** line as a chart's, *Change…* opening the same
 picker, then **Settings** or **The numbers**: its rows in the same grid (`editor/panelRows.js`),
-typed in where they live, as on a chart. The check before export says, at its line, data no
+each heading saying its column's part, typed in where they live, as on a chart. The check before export says, at its line, data no
 longer in the case; the builder's drawing leaves that to the Data line (`origins: false`). A sheet or a
 note named by `data:` or `from:` is used (`engine/uses.py`): its delete names the note.
 
@@ -8461,7 +8467,9 @@ every page), a cover page, a contents page and numbered headings and figures. PD
 bookmarks follow the headings. **Cover** is *Off*, *The style's* (a subtitle, a picture
 from the case's media, a day, and **On the cover**: the *Azimut logo*, *My logo* and the
 *Signature*, the handwritten picture with the name, role and organisation, each from
-Settings › Publishing and greyed while it is not set there) or **Your own page**: what the note holds above a line
+Settings › Publishing and greyed while it is not set there. *My logo* stands left of the name
+and credentials under the date, or of the byline when only that names the analyst, and alone
+under the date with no name; the Azimut logo keeps the foot) or **Your own page**: what the note holds above a line
 `<!-- cover -->` (drawn in the editor as *End of the cover page*) prints alone on page 1,
 with no running header, footer or page number, the TLP label kept, centred down the
 page unless *Centred down the page* is off, its headings set larger and kept out of the

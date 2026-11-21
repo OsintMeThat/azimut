@@ -53,7 +53,7 @@ test('the owner’s wall: a column it does not draw is kept and marked, its rows
   const WALL = ['::: chart', 'kind: pictures', 'title: At least 3 vehicles, one frame each', '| Picture | # | Model | State |', '| --- | --- | --- | --- |',
     '| e_0000000001 | #1 | Streit Cougar | burned |', '| e_0000000002 | #2 | Streit Cougar | burned |', '| e_0000000003 | #3 | Oshkosh M-ATV | abandoned |', ':::'].join('\n');
   const NOTE = `Losses on the road.\n\n${WALL}\n`;
-  const PICTURES = { name: 'pictures', label: 'Picture wall', counts: true, per_row: true, keys: ['picture', 'label', 'words', 'shape'], drawn: [0, 1, 2] };
+  const PICTURES = { name: 'pictures', label: 'Picture wall', counts: true, per_row: true, keys: ['picture', 'label', 'words', 'shape'], roles: ['picture', 'label', 'words', ''] };
   const { written } = await withNote(page, NOTE, { kind: PICTURES });
   const chart = page.locator('.cm-chart-block');
   await expect(chart.locator('.cm-chart-figure svg')).toBeVisible();
@@ -61,7 +61,8 @@ test('the owner’s wall: a column it does not draw is kept and marked, its rows
   await chart.getByRole('button', { name: 'The numbers' }).click();
   const numbers = chart.getByRole('group', { name: 'The numbers' });
   await expect(numbers.locator('.cm-chart-numbers-data')).toHaveText('DataIts own rowsChange…');
-  // State is no group and no colour: kept, greyed and marked, never refused
+  // each column drawn says its part; State is no group and no colour: kept, greyed and marked, never refused
+  await expect(numbers.locator('thead .cm-grid-head .cm-grid-expects')).toHaveText(['Picture', 'Label', 'Words']);
   await expect(numbers.locator('thead .cm-grid-head[data-col="3"] .cm-grid-idle-mark')).toHaveText('not drawn');
   await expect(numbers.locator('.cm-grid-idle-mark')).toHaveCount(1);
   await expect(numbers.getByRole('button', { name: 'As a form' })).toBeVisible();
@@ -93,7 +94,7 @@ test('a chart drawn from a sheet follows the sheet by itself, and Ctrl+Z brings 
   const CHART = ['::: chart', 'kind: bars', 'title: At least 2 vehicles, by model', 'count: rows', 'by: Model', 'from: sheet:s1', TABLE, ':::'].join('\n');
   const NOTE = `Losses on the road.\n\n${CHART}\n\nAfter.\n`;
   const SHEET = `${TABLE}\n| Harrow Tygor E1 | Confirmed |`;
-  const BARS = { name: 'bars', label: 'Bars', counts: true, parts: false, stacked: false, keys: [], drawn: [0] };
+  const BARS = { name: 'bars', label: 'Bars', counts: true, parts: false, stacked: false, keys: [], roles: ['groups', ''] };
   const { written } = await withNote(page, NOTE, { kind: BARS, rows: () => ({ found: true, name: 'Vehicle register', text: SHEET, rows: 3 }) });
   const chart = page.locator('.cm-chart-block');
 

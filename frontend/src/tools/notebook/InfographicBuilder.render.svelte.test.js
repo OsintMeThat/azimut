@@ -25,9 +25,12 @@ vi.mock('../../lib/api.js', async (original) => {
         if (path.endsWith('/notes/infographic')) return { svg: '<svg viewBox="0 0 10 10"></svg>', width: 10, height: 10, panels: [], legend: {}, warnings: [] };
         return { rows: 0, kinds: [] };
       }),
-      postBytes: vi.fn(async () => ({
+      // key figures read every column; the bars draw their Model and leave the Grade
+      postBytes: vi.fn(async (path, body) => ({
         data: new TextEncoder().encode('<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 10 10"></svg>').buffer,
-        headers: new Headers({ 'X-Chart-Kind': JSON.stringify({ name: 'bars', label: 'Bars', counts: true, drawn: [0] }) }),
+        headers: new Headers({ 'X-Chart-Kind': JSON.stringify(body.text.includes('kind: key figures')
+          ? { name: 'key figures', label: 'Key figures', counts: false }
+          : { name: 'bars', label: 'Bars', counts: true, roles: ['groups', ''] }) }),
       })),
       get: vi.fn(async () => ({ colours: [], icons: [] })),
     },
@@ -167,6 +170,8 @@ describe('a chart panel’s rows', () => {
     await settle();
     const grid = target.querySelector('.ib-rows .cm-rows-grid');
     expect([...grid.querySelectorAll('thead .cm-grid-text')].map((node) => node.textContent)).toEqual(['Figure', 'Words']);
+    // key figures read every column: none is greyed
+    expect(grid.querySelectorAll('.cm-grid-idle-mark')).toHaveLength(0);
     const cell = grid.querySelector('.cm-grid-cell[data-row="0"][data-col="1"]');
     cell.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, cancelable: true, button: 0 }));
     const field = grid.querySelector('.cm-grid-input');
@@ -177,5 +182,18 @@ describe('a chart panel’s rows', () => {
     expect(undoDepth(view.state)).toBe(1);
     undo(view);
     expect(text()).toBe(NOTE);
+  });
+
+  it('say in each heading what the panel’s drawing does with the column, as a chart’s numbers do', async () => {
+    open();
+    await wait(300);
+    row(1).click();
+    await settle();
+    [...target.querySelectorAll('.ib-tab')].find((node) => node.textContent === 'The numbers').click();
+    await settle();
+    const heads = [...target.querySelectorAll('.ib-rows thead .cm-grid-head')];
+    expect(heads.map((head) => head.querySelector('.cm-grid-expects')?.textContent ?? '')).toEqual(['Groups', '']);
+    expect(heads[0].querySelector('.cm-grid-expects').title).toBe('The chart groups its rows by this column');
+    expect(heads.map((head) => head.querySelector('.cm-grid-idle-mark')?.textContent ?? '')).toEqual(['', 'not drawn']);
   });
 });

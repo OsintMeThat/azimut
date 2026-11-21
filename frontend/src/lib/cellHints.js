@@ -3,7 +3,8 @@
  * cells, so the analyst sees what to write and what was understood: The numbers of a chart
  * (`notes/editor/rowsGrid.js`) and a sheet's `when` and `number` columns (`tools/Sheet.svelte`).
  *
- * - the column's heading takes a quiet tag, `Days` or `Numbers`;
+ * - the column's heading takes a quiet tag, `Days` or `Numbers`; in The numbers, any other
+ *   column the drawing reads says what it does with it (`ROLES`), as the engine names it;
  * - a cell that reads but is written otherwise than the chart prints it shows the reading
  *   after its words, muted (`5 mars 2026` shows `5 Mar 2026`);
  * - a cell that does not read is underlined, and its title says what would;
@@ -24,6 +25,49 @@ export const EXPECTS_TITLE = {
   [DAYS]: 'The chart reads this column as days',
   [NUMBERS]: 'The chart reads this column as numbers',
 };
+/**
+ * The tag a heading of a chart's rows takes for what its drawing does with the column, by
+ * the role the engine names (`engine/notes_charts.py` `COLUMN_ROLES`), and what it says on hover.
+ */
+export const ROLES = {
+  picture: 'Picture',
+  label: 'Label',
+  words: 'Words',
+  groups: 'Groups',
+  parts: 'Parts',
+  colour: 'Colour',
+  icon: 'Icon',
+  flag: 'Flag',
+  count: 'Count',
+  start: 'When',
+  until: 'Until',
+  event: 'Words',
+  along: 'Along',
+  height: 'Height',
+  filter: 'Filter',
+};
+export const ROLE_TITLE = {
+  picture: 'The picture each frame shows',
+  label: 'The label under each picture',
+  words: 'The words under each picture',
+  groups: 'The chart groups its rows by this column',
+  parts: 'Each value is a part of the whole',
+  colour: 'Each value takes its own colour',
+  icon: 'The icon each row is drawn as',
+  flag: 'The flag shown beside each group',
+  count: 'The chart adds up this column',
+  start: 'The day each event starts',
+  until: 'The day a period runs until',
+  event: 'The words of each event',
+  along: 'The line runs along this column',
+  height: 'How high the line stands at each point',
+  filter: 'The chart keeps or leaves out rows by this column',
+};
+
+/** The roles whose cells are days or amounts: only these may say `Days` or `Numbers`. A grade
+ * written 1, 2, 3 that colours the bars is a colour, not an amount the chart adds up. */
+export const VALUE_ROLES = new Set(['count', 'start', 'until', 'along', 'height']);
+
 /** What an empty cell shows. */
 export const EXAMPLE = { [DAYS]: '5 Mar 2026', [NUMBERS]: '1 200' };
 /** What a cell that does not read says on hover. */
@@ -31,6 +75,17 @@ export const UNREAD = {
   [DAYS]: 'Not read as a day. Try 5 Mar 2026, 05/03/2026 or 2026-03-05, in any language.',
   [NUMBERS]: 'Not read as a number. Try 1200, 1 200, 1,5 or at least 60.',
 };
+
+/**
+ * The one tag a heading of a chart's rows takes, `{ text, title }`, or null: `Days` or
+ * `Numbers` where the chart reads them (`read`, `columnReads`), else what its drawing does
+ * with the column (`role`, a key of `ROLES`).
+ */
+export function headingTag(read, role) {
+  if (read) return { text: EXPECTS[read.kind], title: EXPECTS_TITLE[read.kind] };
+  if (typeof role === 'string' && Object.hasOwn(ROLES, role)) return { text: ROLES[role], title: ROLE_TITLE[role] };
+  return null;
+}
 
 const FAMILY_DAYS = new Set(['timeline', 'line']);
 const FAMILY_NUMBERS = new Set(['figures', 'categories', 'line']);

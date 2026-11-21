@@ -453,7 +453,7 @@
         k,
         index,
         columns: () => (data.data?.found ? data.data.columns : null),
-        idle: () => idleOf(cardDrawn, readChart(panelText(block?.source ?? '', index)).table),
+        kind: () => cardDrawn?.kind ?? null,
         tools: () => (readForm(panelText(block?.source ?? '', index), cardDrawn?.kind?.name ?? '').form
           ? [{ label: 'As a form', iconName: 'sliders', title: 'Its rows in a form made for its kind', run: () => { cardForm = true; } }] : []),
         say: (words) => toast(words, 'warn', 6000),
@@ -470,13 +470,6 @@
     void data;
     untrack(() => rowsGrid?.refresh());
   });
-  /** The columns a panel's drawing does not read (`drawn`, its kind's), greyed in its grid. */
-  function idleOf(drawn, table) {
-    const read = drawn?.kind?.drawn;
-    if (!Array.isArray(read) || !table) return new Set();
-    return new Set(table.header.map((_, at) => at).filter((at) => !read.includes(at)));
-  }
-
   /** A panel's Change…: the infographic's data, or a source of its own, its rows read in, as one change. */
   function choosePanelSource(index, choice) {
     dataPick = null;
@@ -1063,8 +1056,7 @@
   .ib-card :global(.ib-map .cm-map-field > *), .ib-card :global(.ib-map .cm-map-steps > .cm-map-act) { grid-column: 1; }
   .ib-card :global(.ib-map .cm-map-field-name:empty) { display: none; }
   .ib-card :global(.ib-map .cm-map-grid) { grid-template-columns: minmax(0, 1fr); gap: 12px; }
-  .ib-card :global(.ib-map .cm-chart-seg) { justify-self: start; max-width: 100%; }
-  .ib-card :global(.ib-map .cm-chart-seg-btn) { min-width: 0; padding: 0 8px; overflow: hidden; text-overflow: ellipsis; }
+  .ib-card :global(.ib-map .cm-chart-seg-btn) { padding: 3px 8px; }
   /* a layer: its switch, colours, name and count, then its colour under them */
   .ib-card :global(.ib-map .cm-map-list .cm-map-row:not(.cm-map-drawn-row)) { flex-wrap: wrap; row-gap: 5px; }
   .ib-card :global(.ib-map .cm-map-row:not(.cm-map-drawn-row) > .cm-map-row-name) { flex: 1 1 0; }

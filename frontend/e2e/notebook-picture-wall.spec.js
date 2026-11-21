@@ -1,5 +1,5 @@
 import { test, expect } from '@playwright/test';
-import { CASE_ID, installAppFixture } from './app.fixture.js';
+import { CASE_ID, expectChoicesWhole, installAppFixture } from './app.fixture.js';
 
 /**
  * A picture wall made from scratch in the note: `/` › Chart › Picture wall opens its form,
@@ -126,6 +126,9 @@ test('a picture wall from scratch: a picture picked from the case, its words, a 
   await expect(settings.getByLabel('Bar coloured by')).toHaveValue('Grade');
   await expect(settings.getByLabel('Count')).toHaveCount(0);
   await expect(settings.getByRole('radiogroup', { name: 'Flag' })).toBeVisible();
+  // every row of choices is seen whole, In a story's three-word choices too
+  await expect(settings.getByRole('radiogroup', { name: 'In a story' })).toBeVisible();
+  await expectChoicesWhole(settings);
   await settings.getByRole('radiogroup', { name: 'Shape' }).getByRole('radio', { name: '4:3' }).click();
   await expect.poll(last(written)).toBe(`${NOTE}\n\n${THREE.replace('words: Words', 'words: Words\nshape: 4:3')}\n`);
 });

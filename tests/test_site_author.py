@@ -14,8 +14,9 @@ from typing import Any
 import pytest
 from PIL import Image
 from pydantic import ValidationError
+from pypdf import PdfReader
 
-from azimut.engine import githubpages, notelook, notes_web, site, sitesync
+from azimut.engine import githubpages, notefill, notelook, notes_html, notes_pdf, notes_web, site, sitesync
 from azimut.workspace import Case
 
 from ambushfixture import _image
@@ -99,7 +100,8 @@ def test_a_guest_author_and_picture_go_from_the_look_to_the_page_the_card_the_li
     assert line["author"] == GUEST and line["author_image"] == "/guest-story/author.jpg"
     # the page is signed by the guest alone: never the analyst's name, role or organisation
     page = files["guest-story/index.html"].decode()
-    assert f'<img class="az-face" src="author.jpg" alt="" width="40" height="40">By {GUEST}</p>' in page
+    assert (f'<span class="az-author-logo"><img class="az-face" src="author.jpg" alt="" width="40" height="40"></span>'
+            f'By {GUEST}</p>') in page
     assert "A. Analyst" not in page and "Editor" not in page and "Desk ·" not in page
     # the list names the guest, the picture before the name
     home = files["index.html"].decode()
@@ -229,3 +231,72 @@ def test_a_card_naming_anything_but_its_own_picture_file_loses_the_picture_and_k
             "format": "azimut-article/1", "title": "T", "date": "2026-01-01", "author": GUEST,
             "author_image": face}).encode())
         assert line is not None and "author_image" not in line and line["author"] == GUEST
+
+
+# -- the author card: a guest's picture where the analyst's logo would stand, never the analyst's logo -----------
+
+TEXT = "## What was seen\n\nSmoke over the pier.\n"
+ALL_MARKS = {"on": True, "marks": ["azimut", "logo", "signature"]}
+
+
+@pytest.fixture()
+def analyst(tmp_path) -> notefill.Identity:
+    def png(name: str, size: tuple[int, int]) -> Any:
+        Image.new("RGB", size, (20, 20, 20)).save(tmp_path / name, "PNG")
+        return tmp_path / name
+
+    return notefill.Identity("Alex Doe", "Analyst", "Open Desk", logo=png("logo.png", (300, 300)),
+                             signature=png("signature.png", (400, 120)))
+
+
+def _web(identity: notefill.Identity, face: str = "", **look: Any) -> str:
+    """A web page's body as the folder lays it out, the author's picture at ``face`` in it."""
+    folder = notes_html.Folder(csp="", author_face=face)
+    page = notes_html.render(None, title="Bridge", text=TEXT, identity=identity, folder=folder,
+                             look=notelook.NoteLook.model_validate({"style": "article", **look})).html.decode()
+    return page.split("</style>")[-1]
+
+
+def test_a_guests_picture_stands_in_the_card_where_the_analysts_logo_would(analyst):
+    guest = analyst.written_by(GUEST)
+    body = _web(guest, "author.jpg", cover=ALL_MARKS)
+    card = body[body.index('<div class="az-signed az-cover-signed az-author">'):]
+    card = card[:card.index("</div>")]
+    assert card.index('<span class="az-author-logo"><img class="az-face" src="author.jpg"') \
+        < card.index(f'<span class="az-author-text"><span class="az-signer">{GUEST}</span>')
+    # never the analyst's logo, signature, name or credentials by another's name; the Azimut mark stays
+    assert "az-my-logo" not in body and "az-my-signature" not in body and "Alex Doe" not in body
+    assert "Open Desk" not in body and 'class="az-logo"' in body
+    # beside the byline, and in the card at the end, the same picture
+    bylined = _web(guest, "author.jpg", signed="title", cover={"on": True, "marks": ["logo"]})
+    assert '<p class="az-byline" dir="auto"><span class="az-author-logo"><img class="az-face" src="author.jpg"' in bylined
+    assert "az-my-logo" not in bylined and '<p class="az-author-logo">' not in bylined
+    ended = _web(guest, "author.jpg", signed="end")
+    assert '<div class="az-signed az-signed-end az-author"><span class="az-author-logo"><img class="az-face"' in ended
+
+
+def test_a_guest_with_no_picture_is_named_alone_and_a_picture_never_stands_alone(analyst):
+    guest = analyst.written_by(GUEST)
+    body = _web(guest, cover=ALL_MARKS)
+    assert f'<div class="az-signed az-cover-signed"><span class="az-signer">{GUEST}</span></div>' in body
+    assert "az-author-logo" not in body and "az-my-logo" not in body and "az-face" not in body
+    bylined = _web(guest, signed="title", cover={"on": True, "marks": ["logo"]})
+    assert f'<p class="az-byline" dir="auto">By {GUEST}</p>' in bylined and "az-my-logo" not in bylined
+    # with no name beside it under the date, the picture does not stand there by itself
+    unsigned = _web(guest, "author.jpg", cover={"on": True, "marks": ["logo"]})
+    assert "az-face" not in unsigned and "az-my-logo" not in unsigned
+
+
+def test_with_no_guest_the_card_is_the_analysts_whatever_picture_the_folder_holds(analyst):
+    body = _web(analyst, "author.jpg", cover=ALL_MARKS)
+    assert '<div class="az-signed az-cover-signed az-author"><span class="az-author-logo"><img class="az-my-logo"' in body
+    assert '<span class="az-signer">Alex Doe</span>' in body and "az-face" not in body
+
+
+def test_the_pdf_and_the_html_report_keep_the_analyst_whoever_the_look_names(analyst):
+    look = notelook.NoteLook.model_validate({"style": "report", "author": GUEST, "signed": "title", "cover": ALL_MARKS})
+    report = notes_html.render(None, title="Bridge", text=TEXT, identity=analyst, look=look).html.decode()
+    assert "By Alex Doe, Analyst · Open Desk" in report and GUEST not in report and "az-face" not in report
+    printed = notes_pdf.render(None, title="Bridge", text=TEXT, identity=analyst, look=look).pdf
+    words = " ".join(" ".join((page.extract_text() or "").split()) for page in PdfReader(io.BytesIO(printed)).pages)
+    assert "Alex Doe" in words and GUEST not in words

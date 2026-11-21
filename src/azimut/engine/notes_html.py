@@ -269,8 +269,8 @@ class Folder:
     #: How a page published to a site is framed: the way back to the site and the counts its
     #: pages make (`engine/site.py`); None for a folder that is not on a site.
     frame: "site_engine.Frame | None" = None
-    #: The author's picture, a file at the folder's root (`notes_web.author_face`), shown small and
-    #: round before their name wherever the page names them; "" for none.
+    #: The author's picture, a file at the folder's root (`notes_web.author_face`): a guest's stands
+    #: round where the analyst's logo would by their name (`_Page._author_face`); "" for none.
     author_face: str = ""
     files: dict[str, bytes] = field(default_factory=dict)
     _named: dict[str, str] = field(default_factory=dict, repr=False)
@@ -668,7 +668,8 @@ class _Page:
         body = self._scrub("".join(self.out))
         self.description = self._describe(body)
         if self.look.signed == "end":
-            body += self._signature("az-signed-end")
+            # a guest's picture stands left of their name, as on the cover's author card
+            body += self._signature("az-signed-end", self._author_face())
         sources = self._sources()
         earlier = list(earlier)
         profile = self.cited.profile
@@ -1016,47 +1017,64 @@ class _Page:
         if look.cover.subtitle:
             lines.append(f'<p class="az-standfirst" dir="auto">{_text(look.cover.subtitle)}</p>\n')
         identity = self.cited.identity
+        # the analyst's logo stands by their name, as in the PDF: beside the signature under
+        # the date, else beside the byline, else alone under the date. A guest's own picture
+        # stands where it would (`_author_face`), and never alone: the analyst's logo never
+        # stands by another's name
+        marks = look.cover.marks if look.cover.on else []
+        if identity.guest:
+            logo = self._author_face()
+        else:
+            logo = self._to_site(self._built_in(notefill.MY_LOGO, inline=True)) if "logo" in marks else ""
         byline = identity.byline() if look.signed == "title" else ""
         if byline:
             rest = byline[len(f"By {identity.name}"):]
-            lines.append(f'<p class="az-byline" dir="auto">{self._author_face()}By {self._to_site(_text(identity.name))}'
-                         f'{_text(rest)}</p>\n')
+            beside = "" if "signature" in marks and identity.name else logo
+            logo = "" if beside else logo
+            shown = f'<span class="az-author-logo">{beside}</span>' if beside else ""
+            lines.append(f'<p class="az-byline" dir="auto">{shown}By {self._to_site(_text(identity.name))}{_text(rest)}</p>\n')
+        if identity.guest and "signature" not in marks:
+            logo = ""
         lines.append(f'<p class="az-dateline"><time class="az-date" datetime="{self.day.isoformat()}">'
                      f"{_text(notes_style.long_date(self.day))}</time></p>\n")
         if look.cover.on:
-            lines.append(self._cover_marks())
+            lines.append(self._cover_marks(logo))
         if look.cover.on and look.cover.image:
             lines.append(self._cover_picture(look.cover.image))
         lines.append("</header>\n")
         return "".join(lines)
 
-    def _cover_marks(self) -> str:
-        """The logos and the signature the style's cover asks for (`NoteCover.marks`)."""
+    def _cover_marks(self, logo: str) -> str:
+        """Under the date, what the style's cover asks for (`NoteCover.marks`): the analyst's
+        ``logo`` left of their name and credentials under the signature, or alone with no
+        name to stand by; then the Azimut mark."""
         marks = self.look.cover.marks
-        logos = "".join(self._to_site(self._built_in(name, inline=True)) if name == notefill.MY_LOGO
-                        else self._built_in(name, inline=True)
-                        for mark, name in (("azimut", notefill.LOGO), ("logo", notefill.MY_LOGO)) if mark in marks)
-        said = f'<p class="az-cover-marks">{logos}</p>\n' if logos else ""
+        named = "signature" in marks and bool(self.cited.identity.name)
+        said = f'<p class="az-author-logo">{logo}</p>\n' if logo and not named else ""
         if "signature" in marks:
-            said += self._signature("az-cover-signed")
-        return said
+            said += self._signature("az-cover-signed", logo if named else "")
+        mark = self._built_in(notefill.LOGO, inline=True) if "azimut" in marks else ""
+        return said + (f'<p class="az-cover-marks">{mark}</p>\n' if mark else "")
 
-    def _signature(self, kind: str) -> str:
-        """The handwritten signature, the name and the credentials, or "" with none of them."""
+    def _signature(self, kind: str, logo: str = "") -> str:
+        """The handwritten signature, the name and the credentials, or "" with none of them;
+        ``logo`` left of the name and credentials, on the cover, makes it an author card."""
         identity = self.cited.identity
         picture = self._built_in(notefill.MY_SIGNATURE, inline=True)
         credentials = identity.credentials()
         if not picture and not identity.name:
             return ""
-        name = (f'<span class="az-signer">{self._author_face()}{self._to_site(_text(identity.name))}</span>'
-                if identity.name else "")
+        name = f'<span class="az-signer">{self._to_site(_text(identity.name))}</span>' if identity.name else ""
         role = f'<span class="az-credentials">{_text(credentials)}</span>' if credentials and identity.name else ""
+        if logo and name:
+            return (f'<div class="az-signed {kind} az-author"><span class="az-author-logo">{logo}</span>{picture}'
+                    f'<span class="az-author-text">{name}{role}</span></div>\n')
         return f'<div class="az-signed {kind}">{picture}{name}{role}</div>\n'
 
     def _author_face(self) -> str:
-        """The author's picture, small and round before their name, on a web page that has one;
-        its words are the name beside it."""
-        face = self.folder.author_face if self.folder is not None else ""
+        """A guest author's picture, round, where the analyst's logo would stand by their name, on a
+        web page that has one; "" for the analyst's own note. Its words are the name beside it."""
+        face = self.folder.author_face if self.folder is not None and self.cited.identity.guest else ""
         return f'<img class="az-face" src="{_attr(face)}" alt="" width="40" height="40">' if face else ""
 
     def _to_site(self, inner: str) -> str:

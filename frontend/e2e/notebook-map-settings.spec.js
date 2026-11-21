@@ -1,5 +1,5 @@
 import { test, expect } from '@playwright/test';
-import { CASE_ID, installAppFixture } from './app.fixture.js';
+import { CASE_ID, expectChoicesWhole, installAppFixture } from './app.fixture.js';
 
 /**
  * A map's settings on its card in the drawn note: the base filed on its press, the day the
@@ -148,6 +148,7 @@ test('a map’s imagery: Sentinel-2 files its ground and writes its line, Esri s
   const settings = map.getByRole('group', { name: 'Map settings' }).first();
   const imagery = settings.getByRole('radiogroup', { name: 'Imagery' });
   await expect(imagery.getByRole('radio')).toHaveText(['Sentinel-2 · free', 'Esri · sharper']);
+  await expectChoicesWhole(settings);
 
   await imagery.getByRole('radio', { name: 'Sentinel-2 · free' }).click();
   await expect(imagery.getByRole('radio', { name: 'Sentinel-2 · free' })).toHaveAttribute('aria-checked', 'true');

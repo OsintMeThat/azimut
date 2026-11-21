@@ -10,7 +10,7 @@ import { CASE_ID, installAppFixture } from './app.fixture.js';
 const at = '2026-10-01T10:00:00Z';
 const made = { by: 'user', at, status: 'confirmed' };
 const CATALOG = [{ id: 'n1', type: 'note', label: 'Strikes', attrs: { path: 'notes/Strikes.md', folder: '' }, provenance: made }];
-const TIMELINE = { name: 'timeline', label: 'Timeline', counts: false, keys: ['layout', 'labels'], drawn: [0, 1] };
+const TIMELINE = { name: 'timeline', label: 'Timeline', counts: false, keys: ['layout', 'labels'], roles: ['start', 'event'] };
 const svg = (rows) => `<svg xmlns="http://www.w3.org/2000/svg" class="az-chart az-chart-report" viewBox="0 0 640 220" width="640" height="220"><title>Strikes</title><desc>${rows}</desc><rect width="640" height="220" fill="#fff"/></svg>`;
 
 const CHART = ['::: chart', 'kind: timeline', 'title: Strikes', '| When | What happened |', '| --- | --- |',
@@ -51,9 +51,9 @@ test('a day typed in French shows the day the chart draws, and a cell that is no
   const numbers = chart.getByRole('group', { name: 'The numbers' });
   const cell = (row, col) => numbers.locator(`.cm-grid-cell[data-row="${row}"][data-col="${col}"]`);
 
-  // the column says what it takes, and the empty cell what to write
+  // the column says what it takes, the other what the drawing does with it, and the empty cell what to write
   await expect(numbers.locator('thead .cm-grid-head[data-col="0"] .cm-grid-expects')).toHaveText('Days');
-  await expect(numbers.locator('thead .cm-grid-head[data-col="1"] .cm-grid-expects')).toHaveCount(0);
+  await expect(numbers.locator('thead .cm-grid-head[data-col="1"] .cm-grid-expects')).toHaveText('Words');
   await expect(cell(2, 0).locator('.cm-grid-text')).toHaveAttribute('data-placeholder', '5 Mar 2026');
 
   await cell(2, 0).locator('.cm-grid-text').click();

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { DAYS, EXAMPLE, NUMBERS, UNREAD, cellSays, columnReads, momentText, readsKey, sheetExpects, sheetSays } from './cellHints.js';
+import { DAYS, EXAMPLE, NUMBERS, ROLES, ROLE_TITLE, UNREAD, cellSays, columnReads, headingTag, momentText, readsKey, sheetExpects, sheetSays } from './cellHints.js';
 
 /**
  * A grid says what the chart reads: the column its kind, each cell what was understood,
@@ -33,6 +33,25 @@ describe('the columns a chart reads', () => {
     expect(columnReads(table(['Year', 'Strikes'], rows), 'categories', new Set([1])).size).toBe(0);
     expect(columnReads(table(['Picture', '#'], [['a', '1'], ['b', '2']]), 'pictures').size).toBe(0);
     expect(readsKey(columnReads(table(['Year', 'Strikes'], rows), 'line'))).toBe('0:days,1:numbers.');
+  });
+});
+
+describe('the one tag a heading takes', () => {
+  it('says Days or Numbers first, else what the drawing does with the column, else nothing', () => {
+    expect(headingTag({ kind: DAYS }, 'start')).toEqual({ text: 'Days', title: 'The chart reads this column as days' });
+    expect(headingTag({ kind: NUMBERS, decimal: '.' }, 'count')).toEqual({ text: 'Numbers', title: 'The chart reads this column as numbers' });
+    expect(headingTag(undefined, 'words')).toEqual({ text: 'Words', title: 'The words under each picture' });
+    expect(headingTag(undefined, 'groups')).toEqual({ text: 'Groups', title: 'The chart groups its rows by this column' });
+    // a column not drawn, a role it does not know, or a word of every object: no tag
+    for (const role of ['', undefined, 'sparkle', 'constructor', 'toString']) expect(headingTag(undefined, role)).toBeNull();
+  });
+
+  it('words every role in one short word and one clause on hover', () => {
+    expect(Object.keys(ROLE_TITLE)).toEqual(Object.keys(ROLES));
+    for (const role of Object.keys(ROLES)) {
+      expect(ROLES[role]).toMatch(/^[A-Z][a-z]+$/);
+      expect(ROLE_TITLE[role]).not.toMatch(/[.;:—]/);
+    }
   });
 });
 

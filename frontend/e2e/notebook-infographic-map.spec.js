@@ -1,5 +1,5 @@
 import { test, expect } from '@playwright/test';
-import { CASE_ID, installAppFixture } from './app.fixture.js';
+import { CASE_ID, expectChoicesWhole, installAppFixture } from './app.fixture.js';
 
 /**
  * An infographic's map panel, set in the builder: a press on the map panel of the page drawn in
@@ -111,6 +111,8 @@ test('a press on an infographic’s map panel opens the map’s own card, each c
   expect(state.described[0]).toBe(MAP);
   await expect(card.getByText('Set on its row above: Half or Wide.')).toBeVisible();
   await expect(card.getByRole('radiogroup', { name: 'Size' })).toHaveCount(0);
+  // the builder's column is narrow: a row of choices too wide for it wraps, none is cut
+  await expectChoicesWhole(card);
 
   // a layer off: its line in the panel, the note's other lines as they were, one Undo
   await card.getByRole('tab', { name: 'Layers' }).click();

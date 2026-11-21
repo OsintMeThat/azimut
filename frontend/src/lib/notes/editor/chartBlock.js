@@ -17,10 +17,11 @@
  *   colours for the case*), The numbers, Export (a picture for X, 4:5, 1:1, the PDF page,
  *   or an SVG).
  * - **The numbers**: its Data line (`editor/dataLine.js`), then its rows as a grid to type
- *   in, the note tables' own (`editor/rowsGrid.js`), a column the drawing does not read
- *   greyed and marked "not drawn". Its own rows take every gesture of a table, the form (*As
- *   a form*) where its kind's fits, and a wall's *Fill from the case…*; rows from a table of
- *   this note or a sheet are typed in where they live (`editor/throughSheet.js`).
+ *   in, the note tables' own (`editor/rowsGrid.js`), each heading saying what the drawing
+ *   does with its column, one it does not read greyed and marked "not drawn". Its own rows
+ *   take every gesture of a table, the form (*As a form*) where its kind's fits, and a
+ *   wall's *Fill from the case…*; rows from a table of this note or a sheet are typed in
+ *   where they live (`editor/throughSheet.js`).
  * - **Its source**: rows copied from a table or a sheet follow it by themselves, one step
  *   Undo takes back (`editor/follow.js`), asked as the chart comes into sight, the window
  *   comes back or the note changes.
@@ -53,7 +54,7 @@ import { button, icon, openMenu } from './gridMenu.js';
 import { heldHeight, holdHeight, moveHeight, releaseHeight } from './heights.js';
 import { blockAt } from './puts.js';
 import { blocksIn, openSource, settle } from './ranges.js';
-import { chartReads, rowsGrid, writeLocalCells, writeSheetCells } from './rowsGrid.js';
+import { chartColumns, chartReads, rowsGrid, writeLocalCells, writeSheetCells } from './rowsGrid.js';
 import { noteCase, noteHandlers } from './state.js';
 import { registerTableChart } from './tableGrid.js';
 import { gridAt } from './tablePictures.js';
@@ -663,15 +664,6 @@ class ChartBox {
     this.rowsKey = '';
   }
 
-  /** The columns the drawing does not read (`drawn` in its kind), greyed in the grid. */
-  idleColumns() {
-    const drawn = this.drawn?.kind?.drawn;
-    const width = this.chart.table?.header.length ?? 0;
-    if (!Array.isArray(drawn)) return new Set();
-    const read = new Set(drawn);
-    return new Set(Array.from({ length: width }, (_, at) => at).filter((at) => !read.has(at)));
-  }
-
   /** The presses the grid's bar ends with: As a form where the kind's form fits, and a wall's Fill from the case. */
   rowsTools() {
     if (!this.writable || this.source().mode !== OWN || !this.hasForm()) return [];
@@ -705,17 +697,17 @@ class ChartBox {
     const state = this.origin?.state;
     const typed = mode === OWN || ((mode === LOCAL || mode === SHEET) && (state === 'same' || state === 'differs'));
     const writable = this.writable && typed;
-    const idle = this.idleColumns();
-    const reads = chartReads(this.chart, { kind: this.drawn?.kind?.name, idle });
+    const { roles, idle } = chartColumns(this.drawn?.kind, table);
+    const reads = chartReads(this.chart, { kind: this.drawn?.kind?.name, idle, roles });
     const key = `${mode}|${writable}|${this.rowsTools().map((one) => one.label).join(',')}`;
     if (this.rows && key === this.rowsKey && this.numbersBody.contains(this.rows.box)) {
-      this.rows.update({ ...this.rows.widget, table, info: this.info, idle, reads });
+      this.rows.update({ ...this.rows.widget, table, info: this.info, idle, roles, reads });
       return;
     }
     this.dropRows();
     const box = element('div');
     this.numbersBody.replaceChildren(box);
-    this.rows = rowsGrid(box, this.view, { host: this.rowsHost, table, info: this.info, writable, idle, reads });
+    this.rows = rowsGrid(box, this.view, { host: this.rowsHost, table, info: this.info, writable, idle, roles, reads });
     this.rowsKey = key;
   }
 
@@ -1230,7 +1222,6 @@ const THEME = {
   '.cm-chart-looks .cm-chart-field': { flexDirection: 'row', alignItems: 'center', gap: '10px' },
   // a timeline's Layout takes two of the three columns, what it drew said under it
   '.cm-chart-columns > .cm-chart-span': { gridColumn: 'span 2' },
-  '.cm-chart-span .cm-chart-seg': { alignSelf: 'flex-start' },
   '.cm-chart-field-note': { color: 'var(--text-3)', fontSize: '11px' },
   // where the rows come from, one line on top of the settings and of The numbers
   '.cm-chart-data': { flexDirection: 'row', alignItems: 'baseline', flexWrap: 'wrap', gap: '4px 8px', display: 'flex' },
@@ -1248,12 +1239,18 @@ const THEME = {
   '.cm-chart-swatch': { display: 'inline-flex', alignItems: 'center', gap: '5px', color: 'var(--text-2)', fontSize: '11.5px' },
   '.cm-chart-swatch::before': { content: '""', width: '10px', height: '10px', borderRadius: '2px', background: 'var(--swatch)' },
   '.cm-chart-keep': { marginLeft: '0' },
-  '.cm-chart-seg': { display: 'inline-flex', border: '1px solid var(--border-strong)', borderRadius: '6px', overflow: 'hidden' },
-  '.cm-chart-seg-btn': {
-    height: '26px', padding: '0 11px', border: 'none', borderRight: '1px solid var(--border)', background: 'var(--bg-1)', color: 'var(--text-2)',
-    font: 'inherit', cursor: 'pointer', whiteSpace: 'nowrap',
+  // as wide as its choices, never wider than its column: choices that do not fit go to a
+  // second line, and a choice longer than the column wraps its words, so none is ever cut.
+  // Each choice's right and bottom rules slide 1px under the frame, so only inner ones show.
+  '.cm-chart-seg': {
+    display: 'inline-flex', flexWrap: 'wrap', alignSelf: 'flex-start', justifySelf: 'start', maxWidth: '100%',
+    border: '1px solid var(--border-strong)', borderRadius: '6px', overflow: 'hidden',
   },
-  '.cm-chart-seg-btn:last-child': { borderRight: 'none' },
+  '.cm-chart-seg-btn': {
+    flex: '1 1 auto', minHeight: '27px', margin: '0 -1px -1px 0', padding: '3px 11px', border: 'none',
+    borderRight: '1px solid var(--border)', borderBottom: '1px solid var(--border)', background: 'var(--bg-1)', color: 'var(--text-2)',
+    font: 'inherit', lineHeight: '1.25', cursor: 'pointer',
+  },
   '.cm-chart-seg-btn:hover, .cm-chart-seg-btn:focus-visible': { color: 'var(--text-1)', background: 'var(--bg-3)', outline: 'none' },
   '.cm-chart-seg-btn[aria-checked="true"]': {
     background: 'var(--accent-soft)', color: 'var(--text-1)', fontWeight: '600', boxShadow: 'inset 0 -2px 0 var(--accent)',
