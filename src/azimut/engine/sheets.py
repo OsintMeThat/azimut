@@ -721,6 +721,9 @@ PICTURE_TYPES = ("media", "capture", "proof")
 PICTURE_KINDS = ("image", "video")
 #: A file a browser draws as it is, when the case has no thumbnail of it.
 DRAWN_SUFFIXES = (".jpg", ".jpeg", ".png", ".gif", ".webp", ".avif", ".bmp")
+#: How wide a column made a `picture` column by its chips is drawn, unless the sidecar
+#: already says: room for a tall row's thumbnail and a label beside it.
+PICTURE_WIDTH = 200
 
 
 def adopt_chips(
@@ -742,7 +745,8 @@ def adopt_chips(
     the file.
 
     A column whose new links all point at pictures of the case becomes a `picture` column,
-    unless the analyst already gave it a role.
+    unless the analyst already gave it a role, and is drawn wide enough for a thumbnail
+    and its label unless it already has a width.
     """
     held = meta if isinstance(meta, dict) else {}
     key_at = key_index(columns)
@@ -767,11 +771,13 @@ def adopt_chips(
         links.setdefault(str(row[key_at]), {})[columns[at]] = entity_id
         by_column.setdefault(columns[at], set()).add(entity_id)
     roles = dict(held.get("roles") or {}) if isinstance(held.get("roles"), dict) else {}
+    widths = dict(held.get("widths") or {}) if isinstance(held.get("widths"), dict) else {}
     pictures = set(picture_info(case, [entity_id for ids in by_column.values() for entity_id in ids]))
     for column, ids in by_column.items():
         if column not in roles and ids <= pictures:
             roles[column] = {"kind": "picture"}
-    return rows, {**held, "links": links, "roles": roles}
+            widths.setdefault(column, PICTURE_WIDTH)
+    return rows, {**held, "links": links, "roles": roles, "widths": widths}
 
 
 def picture_info(case: "Case", ids: list[str]) -> dict[str, dict[str, str]]:

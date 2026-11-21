@@ -55,6 +55,8 @@ def test_a_sheet_made_from_a_walls_rows_holds_labels_links_and_a_picture_column(
     assert [cell(sheet, row, "Picture") for row in range(2)] == ["#1", "#2"]
     assert [link_of(sheet, row, "Picture") for row in range(2)] == [first, second]
     assert sheet["meta"]["roles"]["Picture"] == {"kind": "picture"}
+    # wide enough for a thumbnail and its label
+    assert sheet["meta"]["widths"]["Picture"] == sheet_engine.PICTURE_WIDTH
     # the file holds the words, never the code
     text = Path(get_case_(case_id).resolve_inside(sheet["path"])).read_text(encoding="utf-8-sig")
     assert "[[" not in text and "#1" in text
