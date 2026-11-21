@@ -8417,7 +8417,9 @@ every page), a cover page, a contents page and numbered headings and figures. PD
 bookmarks follow the headings. **Cover** is *Off*, *The style's* (a subtitle, a picture
 from the case's media, a day, and **On the cover**: the *Azimut logo*, *My logo* and the
 *Signature*, the handwritten picture with the name, role and organisation, each from
-Settings › Publishing and greyed while it is not set there) or **Your own page**: what the note holds above a line
+Settings › Publishing and greyed while it is not set there. *My logo* stands left of the name
+and credentials under the date, or of the byline when only that names the analyst, and alone
+under the date with no name; the Azimut logo keeps the foot) or **Your own page**: what the note holds above a line
 `<!-- cover -->` (drawn in the editor as *End of the cover page*) prints alone on page 1,
 with no running header, footer or page number, the TLP label kept, centred down the
 page unless *Centred down the page* is off, its headings set larger and kept out of the

@@ -1011,32 +1011,41 @@ class _Page:
         if look.cover.subtitle:
             lines.append(f'<p class="az-standfirst" dir="auto">{_text(look.cover.subtitle)}</p>\n')
         identity = self.cited.identity
+        # the analyst's logo stands by their name, as in the PDF: beside the signature under
+        # the date, else beside the byline, else alone under the date
+        marks = look.cover.marks if look.cover.on else []
+        logo = self._to_site(self._built_in(notefill.MY_LOGO, inline=True)) if "logo" in marks else ""
         byline = identity.byline() if look.signed == "title" else ""
         if byline:
             rest = byline[len(f"By {identity.name}"):]
-            lines.append(f'<p class="az-byline" dir="auto">By {self._to_site(_text(identity.name))}{_text(rest)}</p>\n')
+            beside = "" if "signature" in marks and identity.name else logo
+            logo = "" if beside else logo
+            shown = f'<span class="az-author-logo">{beside}</span>' if beside else ""
+            lines.append(f'<p class="az-byline" dir="auto">{shown}By {self._to_site(_text(identity.name))}{_text(rest)}</p>\n')
         lines.append(f'<p class="az-dateline"><time class="az-date" datetime="{self.day.isoformat()}">'
                      f"{_text(notes_style.long_date(self.day))}</time></p>\n")
         if look.cover.on:
-            lines.append(self._cover_marks())
+            lines.append(self._cover_marks(logo))
         if look.cover.on and look.cover.image:
             lines.append(self._cover_picture(look.cover.image))
         lines.append("</header>\n")
         return "".join(lines)
 
-    def _cover_marks(self) -> str:
-        """The logos and the signature the style's cover asks for (`NoteCover.marks`)."""
+    def _cover_marks(self, logo: str) -> str:
+        """Under the date, what the style's cover asks for (`NoteCover.marks`): the analyst's
+        ``logo`` left of their name and credentials under the signature, or alone with no
+        name to stand by; then the Azimut mark."""
         marks = self.look.cover.marks
-        logos = "".join(self._to_site(self._built_in(name, inline=True)) if name == notefill.MY_LOGO
-                        else self._built_in(name, inline=True)
-                        for mark, name in (("azimut", notefill.LOGO), ("logo", notefill.MY_LOGO)) if mark in marks)
-        said = f'<p class="az-cover-marks">{logos}</p>\n' if logos else ""
+        named = "signature" in marks and bool(self.cited.identity.name)
+        said = f'<p class="az-author-logo">{logo}</p>\n' if logo and not named else ""
         if "signature" in marks:
-            said += self._signature("az-cover-signed")
-        return said
+            said += self._signature("az-cover-signed", logo if named else "")
+        mark = self._built_in(notefill.LOGO, inline=True) if "azimut" in marks else ""
+        return said + (f'<p class="az-cover-marks">{mark}</p>\n' if mark else "")
 
-    def _signature(self, kind: str) -> str:
-        """The handwritten signature, the name and the credentials, or "" with none of them."""
+    def _signature(self, kind: str, logo: str = "") -> str:
+        """The handwritten signature, the name and the credentials, or "" with none of them;
+        ``logo`` left of the name and credentials, on the cover, makes it an author card."""
         identity = self.cited.identity
         picture = self._built_in(notefill.MY_SIGNATURE, inline=True)
         credentials = identity.credentials()
@@ -1044,6 +1053,9 @@ class _Page:
             return ""
         name = f'<span class="az-signer">{self._to_site(_text(identity.name))}</span>' if identity.name else ""
         role = f'<span class="az-credentials">{_text(credentials)}</span>' if credentials and identity.name else ""
+        if logo and name:
+            return (f'<div class="az-signed {kind} az-author"><span class="az-author-logo">{logo}</span>{picture}'
+                    f'<span class="az-author-text">{name}{role}</span></div>\n')
         return f'<div class="az-signed {kind}">{picture}{name}{role}</div>\n'
 
     def _to_site(self, inner: str) -> str:

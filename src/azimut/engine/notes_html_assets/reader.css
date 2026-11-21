@@ -118,10 +118,19 @@ body > .az-graphic-warning {
 .az-signed { display: flex; flex-direction: column; align-items: center; gap: .15rem; margin: 1.5rem 0 0; font: .875rem/1.4 var(--ui); color: var(--muted); }
 .az-signed img { height: 3.2rem; width: auto; margin-bottom: .25rem; }
 .az-signer { font-weight: 700; color: var(--ink); }
+/* the analyst's logo by their name: left of the byline or of the cover's signature, or alone under the date */
+.az-author-logo { display: inline-flex; vertical-align: middle; }
+.az-author-logo img { height: 2.75rem; width: auto; max-width: 8rem; margin: 0; }
+.az-byline .az-author-logo { margin-inline-end: .75rem; }
+p.az-author-logo { display: flex; justify-content: center; margin: 1.5rem 0 0; }
+.az-author { display: grid; grid-template: ". sign" "logo text" / auto auto; justify-content: center; align-items: center; gap: 0 1rem; text-align: start; }
+.az-author > .az-author-logo { grid-area: logo; }
+.az-author > .az-my-signature { grid-area: sign; }
+.az-author-text { grid-area: text; display: flex; flex-direction: column; gap: .15rem; }
 /* the analyst's name and logo, linked to their Website when Settings › Publishing has one */
 .az-site-link { color: inherit; text-decoration: none; }
 a.az-site-link:hover { text-decoration: underline; }
-.az-cover-marks .az-site-link { display: inline-flex; }
+.az-author-logo .az-site-link { display: inline-flex; }
 .az-signed-end { align-items: flex-start; margin-top: 3rem; padding-top: 1rem; border-top: 1px solid var(--rule); }
 .az-cover-figure { width: 100%; margin: clamp(2.5rem, 6vw, 4rem) 0 0; text-align: start; }
 .az-cover-figure img { display: block; width: 100%; }
