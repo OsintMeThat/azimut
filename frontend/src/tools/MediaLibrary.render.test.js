@@ -502,7 +502,8 @@ describe('dragging a file out, and files in', () => {
     card().dispatchEvent(start);
     flushSync();
     expect(JSON.parse(start.dataTransfer.getData('application/x-azimut-media'))).toEqual([
-      { path: 'media/quai.jpg', title: 'quai.jpg', folder: '' },
+      // no entity known to this library item, so a drop finds it by its path
+      { path: 'media/quai.jpg', title: 'quai.jpg', folder: '', id: '' },
     ]);
     expect(card().classList.contains('dragging')).toBe(true);
     card().dispatchEvent(new Event('dragend', { bubbles: true }));
