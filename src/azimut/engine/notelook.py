@@ -24,7 +24,7 @@ words scroll by, or a map page, the note's map on the whole page under its title
 never reads it. A map page may name the GoatCounter site that counts its readers (`counter`),
 which only its web folder calls, once read online. And what the note is on the analyst's site
 (`category`, `role`, `list_image`): the one category its list files it under, whether it is an
-article in the list or a page off it, and the picture its line in the list shows in place of the
+article in the list, a page off it or an unlisted page that is in no list, and the picture its line in the list shows in place of the
 cover's (`engine/site.py`); the PDF and the page itself never read them. And which list of sources the document ends on
 (`sources_list`): the generated one, the note's own section, or both; and the same for the
 How this was made and Geolocations annexes against the note's own Method or Geolocations
@@ -91,10 +91,11 @@ COUNTER = r"^([a-z0-9](?:[a-z0-9-]{0,48}[a-z0-9])?)?$"
 #: accessed), `web` the outlet, the title and the day, `short` the form notes always had.
 SourcesStyle = Literal["", "academic", "web", "short"]
 SOURCES_STYLES: tuple[str, ...] = ("academic", "web", "short")
-#: What a note is on the analyst's site: "" or "article", in the site's list, or "page", which
-#: stays off every list and is linked from the site's header (`engine/site.py`). An article is
-#: stored as nothing, like every default.
-Role = Literal["", "article", "page"]
+#: What a note is on the analyst's site: "" or "article", in the site's list, "page", which
+#: stays off every list and is linked from the site's header, or "unlisted", online at its
+#: address and in no list, feed or sitemap (`engine/site.py`). An article is stored as nothing,
+#: like every default.
+Role = Literal["", "article", "page", "unlisted"]
 #: The longest a category's name is, in characters.
 CATEGORY_MAX = 60
 #: How the check before export names the outside links with no archived copy or no seen
@@ -370,7 +371,7 @@ class NoteLook(BaseModel):
     counter: str = Field(default="", pattern=COUNTER)
     #: The one category the site's list files the note under; "" for none.
     category: str = Field(default="", max_length=CATEGORY_MAX)
-    #: An article, or a page that stays off the site's lists.
+    #: An article, a page that stays off the site's lists, or an unlisted page.
     role: Role = ""
     #: A case media entity id: the picture the note's line in the site's list shows in place of
     #: the cover's, or "" for the cover picture.

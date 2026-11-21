@@ -85,9 +85,10 @@ opens the address instead.
 
 **The site.** The same press also keeps the analyst's website up to date (`engine/site.py`):
 the folder carries a card and the picture of its line in the site's list, with the category and
-the role (article or page) the dialog chose, stored in the note's look; and in the same commit
+the role (article, page or unlisted) the dialog chose, stored in the note's look; and in the same commit
 the site's list, feed, sitemap, marked pages and default home are rebuilt where Azimut made them.
-`/notes/legal-notice` makes the starter note of the Legal notice page.
+`/notes/legal-notice` and `/notes/privacy-notice` make the starter notes of the Legal notice and
+Privacy pages.
 """
 
 from __future__ import annotations
@@ -107,7 +108,7 @@ from fastapi import APIRouter, HTTPException, Query, Response
 from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
 
-from .. import errors, layout
+from .. import config, errors, layout
 from ..engine import exportdir
 from ..engine import githubpages
 from ..engine import links as link_engine
@@ -1827,9 +1828,9 @@ class GitHubPublishIn(BaseModel):
     offline_maps: bool = False
     #: The note's category and role on the site as the dialog chose them, kept in its look for
     #: the next press: left out (None) they are the look's own, `category: ""` is none, and a
-    #: page stays off the site's lists.
+    #: page or an unlisted page stays off the site's lists.
     category: str | None = Field(default=None, max_length=notelook.CATEGORY_MAX + 20)
-    role: Literal["article", "page"] | None = None
+    role: Literal["article", "page", "unlisted"] | None = None
 
 
 class GitHubCheckIn(BaseModel):
@@ -2042,7 +2043,20 @@ def github_publish(case_id: str, note_id: str, body: GitHubPublishIn) -> dict[st
     }
 
 
-# -- the Legal notice page ---------------------------------------------------------
+# -- the Legal notice and Privacy pages -------------------------------------------
+
+
+def _starter_page(case_id: str, title: str, text: str) -> dict[str, Any]:
+    """The note a starter page is: the one of that title that is already a page of the site, else a
+    new one with ``text``, whose role is page."""
+    case = get_case(case_id)
+    for listed in _notes_on_disk(case):
+        if (listed.id != CASE_NOTE and listed.title == title and listed.look is not None
+                and listed.look.role == site_engine.PAGE):
+            return {"id": listed.id, "title": listed.title, "created": False}
+    note = case.create_note(title, "", text)
+    notelook.save(case, note["id"], notelook.NoteLook(role="page"))
+    return {"id": note["id"], "title": title, "created": True}
 
 
 @router.post("/{case_id}/notes/legal-notice")
@@ -2050,11 +2064,12 @@ def legal_notice(case_id: str) -> dict[str, Any]:
     """Start the Legal notice page: a note titled "Legal notice" that is a page of the site (off its
     lists, linked from its header), whose text names the host and leaves the publisher's own
     lines for the analyst. Pressed again it finds the one made, rather than making a second."""
-    case = get_case(case_id)
-    for listed in _notes_on_disk(case):
-        if (listed.id != CASE_NOTE and listed.title == site_engine.LEGAL_TITLE and listed.look is not None
-                and listed.look.role == site_engine.PAGE):
-            return {"id": listed.id, "title": listed.title, "created": False}
-    note = case.create_note(site_engine.LEGAL_TITLE, "", site_engine.legal_notice())
-    notelook.save(case, note["id"], notelook.NoteLook(role="page"))
-    return {"id": note["id"], "title": site_engine.LEGAL_TITLE, "created": True}
+    return _starter_page(case_id, site_engine.LEGAL_TITLE, site_engine.legal_notice())
+
+
+@router.post("/{case_id}/notes/privacy-notice")
+def privacy_notice(case_id: str) -> dict[str, Any]:
+    """Start the Privacy page the same way: a note titled "Privacy", a page of the site, whose text
+    names the host and what counting the site does (Settings › Website), as saved now."""
+    stats = site_engine.from_settings(config.load_settings(), address="", account="").stats
+    return _starter_page(case_id, site_engine.PRIVACY_TITLE, site_engine.privacy_notice(stats))

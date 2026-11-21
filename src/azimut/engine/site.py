@@ -26,14 +26,17 @@ repository is the analyst's.
 A file Azimut would write but does not own is left as it is, and the rest still happens.
 
 **The card** (format `azimut-article/1`): title, summary, date (`YYYY-MM-DD`), category,
-author, role (`article` or `page`), layout (`article`, `story` or `map`), image (relative to
+author, role (`article`, `page` or `unlisted`), layout (`article`, `story` or `map`), image (relative to
 the folder), links (the folders of the site the page points to) and maps (written by hand
 for maps kept elsewhere: Azimut writes none). The folder holding the card, relative to the
 site root, is the article's address.
 
 A map page cited by an article shows as a link under that article, never as its own line; a
 map nothing cites keeps its own line so it is never lost. A page (`role: "page"`) is on no
-list: it is in `articles.json` under `pages`, and the default home's header links it.
+list: it is in `articles.json` under `pages`, and the default home's header links it. An
+unlisted page (`role: "unlisted"`) is online at its address and nowhere else: in no list, no feed,
+no sitemap, no `articles.json`, and its category adds none; a card that names it never folds it
+under itself, and Read the site (`sitesync.survey`) still shows it.
 """
 
 from __future__ import annotations
@@ -80,6 +83,8 @@ MAX_MAPS = 60
 
 ARTICLE = "article"
 PAGE = "page"
+UNLISTED = "unlisted"
+ROLES = (ARTICLE, PAGE, UNLISTED)
 LAYOUTS = ("article", "story", "map")
 #: The page's own counting readers: GoatCounter's host under the analyst's site code, and the
 #: two hosts Cloudflare Web Analytics needs, which a page's policy lets in and no other.
@@ -109,6 +114,7 @@ SITE_OWN: tuple[tuple[str, str], ...] = (
 )
 LEGAL_SENTENCE = "Depending on your country, a website may need a legal notice."
 LEGAL_TITLE = "Legal notice"
+PRIVACY_TITLE = "Privacy"
 #: GitHub's address, as its privacy statement gives it (docs.github.com, read on 2026-11-21).
 LEGAL_HOST = "GitHub, Inc., 88 Colin P. Kelly Jr. St., San Francisco, CA 94107, United States"
 HAND_EDITED = "This folder was changed on GitHub since you published it: publishing replaces it."
@@ -124,6 +130,28 @@ def legal_notice() -> str:
     left for the analyst to fill in."""
     return (f"## Publisher\n\nName:\n\nAddress:\n\nContact:\n\n## Host\n\n"
             f"This website is hosted by GitHub Pages, a service of {LEGAL_HOST}.\n")
+
+
+#: What the Privacy page says of each way the site counts its readers (`STATS`).
+COUNTING_SAID = {
+    "": "This site does not count its readers.",
+    "goatcounter": "Visits are counted with GoatCounter, which sets no cookie and keeps no personal data: "
+                   "the site sees totals only.",
+    "cloudflare": "Visits are counted with Cloudflare Web Analytics, which stores nothing on your device: your "
+                  "browser sends Cloudflare the page's address and how it loaded, and the site sees totals only.",
+}
+
+
+def privacy_notice(stats: str) -> str:
+    """The starter text of the Privacy page: no cookie, what counting the site does for ``stats``
+    (`STATS`: none, GoatCounter or Cloudflare Web Analytics), the host's logs, and the line for the
+    analyst's contact left to fill in."""
+    return ("## Cookies\n\nThis site sets no cookies and has no accounts, forms or newsletter.\n\n"
+            f"## Counting readers\n\n{COUNTING_SAID.get(stats, COUNTING_SAID[''])}\n\n"
+            "## Host\n\nGitHub, which hosts the site on GitHub Pages, logs visitors' IP addresses for security, "
+            "as its documentation says.\n\n"
+            "## Your data\n\nFor any question about your data, write to:\n\n"
+            "You can also complain to your country's data protection authority.\n")
 
 
 # -- the site ------------------------------------------------------------------------------------
@@ -154,7 +182,7 @@ class Site:
     stats: str = ""
     code: str = ""
     token: str = ""
-    #: The analyst's logo (`signature.png`), or None for none.
+    #: The logo the site carries (`config.site_logo`: its own, else the Publishing logo), or None for none.
     logo: bytes | None = field(default=None, repr=False)
 
     @property
@@ -347,6 +375,15 @@ class Card:
         return (json.dumps(card, indent=1, ensure_ascii=False) + "\n").encode("utf-8")
 
 
+def is_card(data: bytes) -> bool:
+    """Whether a file is a card Azimut wrote, by its format alone."""
+    try:
+        card = json.loads(data)
+    except ValueError:
+        return False
+    return isinstance(card, dict) and card.get("format") == CARD_FORMAT
+
+
 def card_date(data: bytes) -> str:
     """The date a card already in the repository carries, "" when it holds none that reads."""
     try:
@@ -437,7 +474,7 @@ def read_card(folder: str, data: bytes) -> dict[str, Any] | None:
         "author": one_line(card.get("author"), 120),
         "layout": layout if layout in LAYOUTS else "article",
         "image": _address(image),
-        "role": PAGE if card.get("role") == PAGE else ARTICLE,
+        "role": card["role"] if card.get("role") in ROLES else ARTICLE,
         "links": [str(one).strip("/")[:200] for one in links[:MAX_LINKS] if isinstance(one, str)],
         "maps": kept_maps,
     }
@@ -455,10 +492,10 @@ def line_of(card: Card, folder: str) -> dict[str, Any]:
 
 def map_view(cards: list[dict[str, Any]]) -> list[dict[str, Any]]:
     """Every map page, newest first, each with the article that cites it (if one does)."""
-    citing = {link: c for c in cards if c["role"] != PAGE and c["layout"] != "map" for link in c["links"]}
+    citing = {link: c for c in cards if c["role"] == ARTICLE and c["layout"] != "map" for link in c["links"]}
     out = []
     for card in cards:
-        if card["layout"] != "map" or card["role"] == PAGE:
+        if card["layout"] != "map" or card["role"] != ARTICLE:
             continue
         entry = {k: v for k, v in card.items() if k not in ("folder", "links", "maps", "role")}
         by = citing.get(card["folder"])
@@ -469,8 +506,9 @@ def map_view(cards: list[dict[str, Any]]) -> list[dict[str, Any]]:
 
 
 def listing(cards: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    """The lines of the list: maps folded under the articles citing them, pages left out."""
-    shown = [c for c in cards if c["role"] != PAGE]
+    """The lines of the list: maps folded under the articles citing them, pages and unlisted
+    pages left out."""
+    shown = [c for c in cards if c["role"] == ARTICLE]
     maps = {c["folder"]: c for c in shown if c["layout"] == "map"}
     cited: set[str] = set()
     lines = []
@@ -498,7 +536,8 @@ def pages_of(cards: list[dict[str, Any]]) -> list[dict[str, str]]:
 
 
 def categories_of(cards: list[dict[str, Any]]) -> list[str]:
-    return sorted({c["category"] for c in cards if c["category"]})
+    """The categories the site's cards name: an unlisted page adds none."""
+    return sorted({c["category"] for c in cards if c["category"] and c["role"] != UNLISTED})
 
 
 def _at(prefix: str, address: str) -> str:

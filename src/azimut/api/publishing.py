@@ -11,8 +11,10 @@ never sent back: the browser learns only whether one is set and its last four ch
 Nothing here reaches the network but its presses: **Test connection** for either
 service, and for GitHub **Create the repository**, **Turn on Pages**, **Update the site**
 (`/github/site`, which rebuilds the site's list, feed, sitemap and home without a note),
-**Read the categories** (`/github/categories`) and the watch of a page being built
-(`/github/build`, asked by the export dialog after a publish).
+**Read the categories** (`/github/categories`), **Read the site** (`/github/site/read`, the
+articles, maps and pages it holds, with its home, categories and last commit; reads only),
+**Delete** an article's folder (`/github/site/delete`, one commit, only a folder Azimut published)
+and the watch of a page being built (`/github/build`, asked by the export dialog after a publish).
 Reading these settings, saving them and forgetting them stay on this machine. Sending
 a note is the Notebook's (`/notes/{note}/wordpress` and `/notes/{note}/github`,
 `api/notes.py`).
@@ -190,12 +192,10 @@ def github_settings() -> GitHubTarget:
 
 
 def _logo() -> bytes | None:
-    """The analyst's logo, as the site's pages carry it; None with none, or one that is no PNG."""
-    try:
-        data = config.signature_path().read_bytes()
-    except OSError:
-        return None
-    return data if config.valid_signature(data) else None
+    """The logo the site's pages carry: the site's own, else the Publishing logo; None with
+    neither, or with one that is no PNG."""
+    found = config.site_logo()
+    return found[0] if found else None
 
 
 def site_for(target: GitHubTarget, address: str) -> site.Site:
@@ -216,6 +216,7 @@ def _github_state() -> dict[str, Any]:
         # what the site is called here, whatever Settings left empty read from: its title, whether
         # it has a logo, and the categories the last read of the site found, for the publish dialog
         "website": {"title": found.title if target.account else "", "logo": found.logo is not None,
+                    "logo_from": (config.site_logo() or (b"", ""))[1],
                     "counting": found.stats if found.counter or found.beacon else ""},
         "categories": site.categories_read(config.load_settings().get("github_categories")),
     }
@@ -388,8 +389,8 @@ def github_build(body: BuildIn) -> dict[str, Any]:
     return {"state": state.state, "detail": state.detail}
 
 
-def _site_press(target: GitHubTarget, gh: github.GitHub) -> github.Pages | dict[str, Any]:
-    """The Pages site of the repository, or the answer that says what is missing."""
+def _site_found(target: GitHubTarget, gh: github.GitHub) -> tuple[github.Repository, github.Pages] | dict[str, Any]:
+    """The repository and its Pages site, or the answer that says what is missing."""
     repo = github.repository(gh, target.account, target.repo)
     repository = f"{target.account}/{target.repo}"
     if repo is None:
@@ -401,7 +402,13 @@ def _site_press(target: GitHubTarget, gh: github.GitHub) -> github.Pages | dict[
     if pages.branch and pages.branch != target.branch:
         raise HTTPException(status_code=409, detail=pages_warnings(target, pages, False)[0])
     keep_site(target, pages.url)
-    return pages
+    return repo, pages
+
+
+def _site_press(target: GitHubTarget, gh: github.GitHub) -> github.Pages | dict[str, Any]:
+    """The Pages site of the repository, or the answer that says what is missing."""
+    found = _site_found(target, gh)
+    return found if isinstance(found, dict) else found[1]
 
 
 @router.post("/github/site")
@@ -445,3 +452,64 @@ def read_github_categories() -> dict[str, Any]:
         raise HTTPException(status_code=502, detail=str(exc)) from exc
     keep_categories(read.categories)
     return {"ok": True, "categories": site.categories_read(read.categories), "warnings": read.warnings}
+
+
+@router.post("/github/site/read")
+def read_github_site() -> dict[str, Any]:
+    """Read what the site holds, for Settings › Website › Articles: its cards (every article, map and
+    page, unlisted ones too, each with its weight and whether `/github/site/delete` takes it), its
+    categories with the pages that list them, whose home it has, its legal and privacy pages, the last
+    commit, and what the site and the repository weigh. Keeps the categories it found. Reads only."""
+    target = _needs_target()
+    try:
+        with github.client() as http:
+            gh = github.GitHub(target.token, http, patience=github.MAX_PATIENCE)
+            found = _site_found(target, gh)
+            if isinstance(found, dict):
+                return found
+            repo, pages = found
+            home = site_for(target, pages.url)
+            read = github.read_branch(gh, target.account, target.repo, target.branch, pages.root)
+            surveyed = sitesync.survey(gh, target.account, target.repo, home, read.tree)
+    except github.GitHubError as exc:
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
+    keep_categories(surveyed.found)
+    return {"ok": True, "address": home.address, "home": surveyed.home, "items": surveyed.items,
+            "categories": surveyed.categories, "marked": surveyed.marked, "legal": surveyed.legal,
+            "privacy": surveyed.privacy,
+            "last": {"date": read.date, "message": read.message} if read.date else None,
+            "size": {"site": surveyed.bytes, "repository": repo.size}, "warnings": surveyed.warnings}
+
+
+class DeleteIn(BaseModel):
+    folder: str = Field(max_length=300)
+
+
+@router.post("/github/site/delete")
+def delete_github_folder(body: DeleteIn) -> dict[str, Any]:
+    """Take an article's folder off the site, in one commit that also rewrites the list, the feed, the
+    sitemap, the marked pages and Azimut's home from the site as it will be without it. Only a folder
+    Azimut published goes, file by file (422 for any other and for one too large to read, 404 for one
+    that is gone); the branch moving on GitHub meanwhile is a 409 with nothing changed. The note in
+    the case is left as it is."""
+    target = _needs_target()
+    try:
+        with github.client() as http:
+            gh = github.GitHub(target.token, http, patience=github.MAX_PATIENCE)
+            found = _site_press(target, gh)
+            if isinstance(found, dict):
+                return found
+            plan = sitesync.remover(gh, target.account, target.repo, site_for(target, found.url))
+            done = github.delete_folder(gh, target.account, target.repo, target.branch, found.root, body.folder,
+                                        f"Delete {body.folder}", plan)
+    except github.NotOurs as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    except github.FolderGone as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except github.BranchMoved as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except github.GitHubError as exc:
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
+    keep_categories(done.categories)
+    return {"ok": True, "commit": done.commit, "folder": done.folder, "removed": done.removed, "written": done.root,
+            "warnings": done.warnings}

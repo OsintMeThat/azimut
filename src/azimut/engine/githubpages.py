@@ -13,7 +13,7 @@ followed only while it stays on that host over https. They are, from GitHub's RE
 reference (docs.github.com, read on 2026-11-18):
 
 - `GET /user`, who the token signs in as;
-- `GET /repos/{owner}/{repo}`, whether the repository is there;
+- `GET /repos/{owner}/{repo}`, whether the repository is there and what it weighs (`size`, KiB);
 - `GET /repos/{owner}/{repo}/pages`, whether Pages is on, its address (`html_url`,
   a custom domain included), the branch and folder it serves;
 - the Git database to commit the whole folder as **one commit**: `GET git/ref/heads/…`,
@@ -49,7 +49,13 @@ Azimut owns it. Reading the site is `GET git/trees/…?recursive=1` for the whol
 `GET git/blobs/…` (raw) for each card and each page to fill, bounded in number and size.
 The commit keeps the sha of the folder's tree, which the note's record holds so that a
 later publish can say the folder was changed on GitHub since. Rebuilding those root files
-without a note is `update_site`.
+without a note is `update_site`. Reading what the site holds, for Settings › Website, is
+`read_branch`: the same reads as a publish's plan, plus the head commit's date and first line,
+and nothing written. Taking a folder off the site is `delete_folder`: one commit that removes
+the folder file by file (a tree entry with a null `sha` for each blob the folder's recursive
+listing gave, in the mode it gave, posted over `base_tree`: GitHub documents a null `sha` for a
+file, and Git drops the folders it empties) and rewrites the root files from the site as it will
+be without it; only a folder Azimut published, and never one whose listing GitHub cut short.
 """
 
 from __future__ import annotations
@@ -61,7 +67,7 @@ import re
 import time
 from dataclasses import dataclass, field
 from datetime import datetime
-from typing import Any, Callable, Mapping
+from typing import Any, Callable, Iterable, Mapping
 from urllib.parse import quote, urljoin, urlsplit
 
 import httpx
@@ -115,6 +121,8 @@ SHORT = re.compile(r"^[a-z0-9](?:[a-z0-9_-]{0,78}[a-z0-9])?$")
 MAX_SHORT = 80
 SHA1 = re.compile(r"^[0-9a-f]{40}$")
 SHA256 = re.compile(r"^[0-9a-f]{64}$")
+#: A commit's date as GitHub's Git database says it, UTC or with an offset.
+COMMIT_DATE = re.compile(r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:Z|[+-]\d{2}:\d{2})$")
 
 #: What each permission is called on GitHub's token page.
 PERMISSIONS = {
@@ -128,6 +136,11 @@ PERMISSIONS = {
 BAD_TOKEN = ("GitHub refused the token: it may be mistyped, expired or revoked. "
              "Make a new one and paste it in Settings › Website.")
 NOT_SET = "GitHub Pages is not set up yet: Settings › Website › GitHub Pages."
+PUBLISH_MOVED = "The branch changed on GitHub while Azimut was publishing: press Publish again."
+DELETE_MOVED = "The branch changed on GitHub while Azimut was deleting: press Delete again."
+NOT_OURS = "Azimut deletes only the folders it published."
+TOO_MANY_FILES = "The folder holds more files than Azimut can read: delete it on GitHub."
+GONE = "That folder is not on the site any more."
 
 
 class GitHubError(Exception):
@@ -150,6 +163,18 @@ class TooLarge(GitHubError):
 
 class Conflict(GitHubError):
     pass
+
+
+class BranchMoved(GitHubError):
+    """The branch moved on GitHub while a commit was being made, so the move was refused."""
+
+
+class FolderGone(NotFound):
+    """The folder to delete is not on the site (any more)."""
+
+
+class NotOurs(GitHubError):
+    """The folder to delete is not one Azimut deletes: not one it published, or too large to read whole."""
 
 
 class RateLimited(GitHubError):
@@ -442,6 +467,8 @@ class Repository:
     full_name: str
     private: bool
     default_branch: str
+    #: What GitHub says the repository weighs, history included, in bytes (it says KiB); None for none.
+    size: int | None = None
 
 
 @dataclass
@@ -473,9 +500,11 @@ def repository(gh: GitHub, owner: str, repo: str) -> Repository | None:
     except NotFound:
         return None
     branch = body.get("default_branch")
+    size = body.get("size")
     return Repository(full_name=str(body.get("full_name") or f"{owner}/{repo}")[:200],
                       private=bool(body.get("private")),
-                      default_branch=branch if isinstance(branch, str) and BRANCH.match(branch) else "")
+                      default_branch=branch if isinstance(branch, str) and BRANCH.match(branch) else "",
+                      size=size * 1024 if isinstance(size, int) and not isinstance(size, bool) and size >= 0 else None)
 
 
 def pages(gh: GitHub, owner: str, repo: str) -> Pages | None:
@@ -606,10 +635,12 @@ class TreeRead:
     entries: dict[str, str]
     #: False when GitHub cut the listing short or it was more than Azimut reads.
     complete: bool = True
+    #: Each file's size in bytes as the listing gives it, by the same paths (none for a file it gives none for).
+    sizes: dict[str, int] = field(default_factory=dict)
 
 
 def read_tree(gh: GitHub, owner: str, repo: str, tree: str) -> TreeRead:
-    """Every file under ``tree`` (a site's root), in one request; an empty read for no tree."""
+    """Every file under ``tree`` (a site's root) with its size, in one request; an empty read for no tree."""
     if not tree:
         return TreeRead({})
     try:
@@ -619,9 +650,12 @@ def read_tree(gh: GitHub, owner: str, repo: str, tree: str) -> TreeRead:
         return TreeRead({}, complete=False)
     found = body.get("tree")
     listed = found if isinstance(found, list) else []
-    entries = {str(item.get("path")): str(item.get("sha")) for item in listed
-               if isinstance(item, dict) and item.get("type") == "blob" and isinstance(item.get("sha"), str)}
-    return TreeRead(entries, complete=not body.get("truncated"))
+    blobs = [item for item in listed
+             if isinstance(item, dict) and item.get("type") == "blob" and isinstance(item.get("sha"), str)]
+    entries = {str(item.get("path")): str(item.get("sha")) for item in blobs}
+    sizes = {str(item.get("path")): item["size"] for item in blobs
+             if isinstance(item.get("size"), int) and not isinstance(item.get("size"), bool) and item["size"] >= 0}
+    return TreeRead(entries, complete=not body.get("truncated"), sizes=sizes)
 
 
 def read_blob(gh: GitHub, owner: str, repo: str, sha: str, cap: int) -> bytes | None:
@@ -707,6 +741,9 @@ class _Branch:
     #: The tree of the site's root folder ("" when it is not there yet), and its own files.
     level: str
     top: list[dict[str, Any]]
+    #: The head commit's committer date and first message line, as GitHub says them ("" for none).
+    date: str = ""
+    message: str = ""
 
 
 def _open(gh: GitHub, owner: str, repo: str, branch: str, above: list[str]) -> _Branch:
@@ -727,7 +764,11 @@ def _open(gh: GitHub, owner: str, repo: str, branch: str, above: list[str]) -> _
             level = ""
             break
         level = _sha(entry.get("sha"))
-    return _Branch(parent, created, base_tree, level, _entries(gh, owner, repo, level) if level else [])
+    date = _part(commit.get("committer")).get("date")
+    words = str(commit.get("message") or "").strip().split("\n", 1)[0]
+    return _Branch(parent, created, base_tree, level, _entries(gh, owner, repo, level) if level else [],
+                   date=date if isinstance(date, str) and COMMIT_DATE.match(date) else "",
+                   message=" ".join(words.split())[:MAX_TITLE])
 
 
 def _upload(gh: GitHub, owner: str, repo: str, data: bytes, *, pace: bool) -> str:
@@ -739,9 +780,10 @@ def _upload(gh: GitHub, owner: str, repo: str, data: bytes, *, pace: bool) -> st
 
 
 def _land(gh: GitHub, owner: str, repo: str, branch: str, opened: _Branch, above: list[str],
-          entries: list[dict[str, Any]], message: str) -> str:
+          entries: list[dict[str, Any]], message: str, *, moved: str = PUBLISH_MOVED) -> str:
     """Write the site root's tree from ``entries`` over what it holds, then the commit and the
-    branch's move as a fast-forward only. The commit's id."""
+    branch's move as a fast-forward only. The commit's id; ``moved`` is what is said when the
+    branch moved on GitHub meanwhile."""
     body: dict[str, Any] = {"tree": entries}
     if opened.level:
         body["base_tree"] = opened.level
@@ -766,8 +808,7 @@ def _land(gh: GitHub, owner: str, repo: str, branch: str, opened: _Branch, above
                     body={"sha": sha, "force": False}, doing="move the branch")
     except GitHubError as exc:
         if exc.status == 422:
-            raise GitHubError("The branch changed on GitHub while Azimut was publishing: press Publish again.",
-                              422) from exc
+            raise BranchMoved(moved, 422) from exc
         raise
     return sha
 
@@ -893,6 +934,93 @@ def update_site(gh: GitHub, owner: str, repo: str, branch: str, root: str, messa
                      root=sorted(made.files), warnings=list(made.warnings), categories=made.categories)
 
 
+@dataclass
+class BranchRead:
+    """What a read of the site's branch holds: the files of its root and the head commit's
+    committer date and first message line ("" for none)."""
+
+    tree: TreeRead
+    date: str = ""
+    message: str = ""
+
+
+def read_branch(gh: GitHub, owner: str, repo: str, branch: str, root: str) -> BranchRead:
+    """The site's root as ``branch`` holds it now, with its head commit, and nothing committed.
+    ``root`` is the folder Pages serves from, "" or `docs/`."""
+    above = [part for part in root.strip("/").split("/") if part]
+    opened = _open(gh, owner, repo, branch, above)
+    if opened.created:
+        raise GitHubError(f"The repository has no branch {branch}: turn on Pages for it first.")
+    return BranchRead(read_tree(gh, owner, repo, opened.level), opened.date, opened.message)
+
+
+def deletable_name(folder: str) -> bool:
+    """Whether a folder's name is one Azimut could have published: a short name at the site's root,
+    which is none of the folders no card lives in (`site.SKIP`)."""
+    return "/" not in folder and folder not in site_engine.SKIP and bool(SHORT.match(folder))
+
+
+def deletable(folder: str, held: Iterable[str], card: bool) -> bool:
+    """Whether `delete_folder` takes ``folder``: the one guard of the delete and of what the read
+    says can be deleted. ``held`` are the paths of the folder's files relative to it, ``card`` whether
+    its `article.json` is a card of `azimut-article/1`."""
+    files = set(held)
+    return deletable_name(folder) and card and site_engine.CARD in files and all(part in files for part in OURS)
+
+
+@dataclass
+class Deleted:
+    commit: str
+    folder: str
+    #: How many files the folder held.
+    removed: int
+    #: The files written at the site's root, the words to say about them, and the categories read.
+    root: list[str] = field(default_factory=list)
+    warnings: list[str] = field(default_factory=list)
+    categories: list[str] | None = None
+
+
+def delete_folder(gh: GitHub, owner: str, repo: str, branch: str, root: str, folder: str, message: str,
+                  plan: Planner) -> Deleted:
+    """Take ``folder`` (a short name at the site's root) off ``branch`` in one commit, with the
+    root files ``plan`` names for the site as it will be without it.
+
+    Only a folder Azimut published goes: one level down, holding a card of `azimut-article/1`
+    and Azimut's own files (`OURS`), else `NotOurs`, as is a folder whose listing GitHub cut short
+    (more files than Azimut ever publishes); a folder that is not there is `FolderGone`. The
+    branch moving on GitHub meanwhile is `BranchMoved`, with nothing changed."""
+    if not deletable_name(folder):
+        raise NotOurs(NOT_OURS, 422)
+    above = [part for part in root.strip("/").split("/") if part]
+    opened = _open(gh, owner, repo, branch, above)
+    if opened.created:
+        raise GitHubError(f"The repository has no branch {branch}: turn on Pages for it first.")
+    found = next((item for item in opened.top if item.get("path") == folder and item.get("type") == "tree"), None)
+    if found is None:
+        raise FolderGone(GONE, 404)
+    listing = _dict(gh.call("GET", _repo_path(owner, repo, f"/git/trees/{_sha(found.get('sha'))}"),
+                            query={"recursive": "1"}, doing="read the article's files"))
+    if listing.get("truncated"):
+        raise NotOurs(TOO_MANY_FILES, 422)
+    listed = listing.get("tree")
+    blobs = [item for item in (listed if isinstance(listed, list) else [])
+             if isinstance(item, dict) and item.get("type") == "blob" and isinstance(item.get("sha"), str)]
+    held = {str(item.get("path")): str(item.get("sha")) for item in blobs}
+    card = read_blob(gh, owner, repo, held[site_engine.CARD], site_engine.MAX_CARD_BYTES) \
+        if site_engine.CARD in held else None
+    if not deletable(folder, held, card is not None and site_engine.is_card(card)):
+        raise NotOurs(NOT_OURS, 422)
+    made = plan(opened.level, folder, None)
+    # the folder goes file by file, each in the mode the listing gave it; Git drops the folders it empties
+    entries: list[dict[str, Any]] = [
+        {"path": f"{folder}/{item.get('path')}", "mode": str(item.get("mode") or "100644"), "type": "blob", "sha": None}
+        for item in sorted(blobs, key=lambda one: str(one.get("path")))]
+    entries += _root_entries(gh, owner, repo, made, folder, pace=len(made.files) > PACE_FROM)
+    sha = _land(gh, owner, repo, branch, opened, above, entries, message, moved=DELETE_MOVED)
+    return Deleted(commit=sha, folder=folder, removed=len(held),
+                   root=sorted(made.files), warnings=list(made.warnings), categories=made.categories)
+
+
 def _tree(gh: GitHub, owner: str, repo: str, shas: Mapping[str, str]) -> str:
     """The folder's own tree, made from nothing so it holds these files and no other,
     its subfolders first."""
@@ -912,9 +1040,10 @@ def _tree(gh: GitHub, owner: str, repo: str, shas: Mapping[str, str]) -> str:
 
 
 __all__ = [
-    "API", "API_VERSION", "BAD_TOKEN", "Build", "Conflict", "DEFAULT_BRANCH", "DEFAULT_REPO", "GitHub",
-    "GitHubError", "NOT_SET", "NotFound", "Pages", "Published", "RateLimited", "Repository", "account_name",
-    "article_address", "blob_sha", "branch_name", "build_state", "client", "create_repository", "folder_tree", "head",
-    "page_state", "pages", "publish", "read_blob", "read_site", "read_tree", "repository", "repository_name", "short_name", "site_base", "turn_on_pages",
-    "update_site", "whoami",
+    "API", "API_VERSION", "BAD_TOKEN", "BranchMoved", "BranchRead", "Build", "Conflict", "DEFAULT_BRANCH",
+    "DEFAULT_REPO", "Deleted", "FolderGone", "GitHub", "GitHubError", "NOT_SET", "NotFound", "NotOurs", "Pages",
+    "Published", "RateLimited", "Repository", "account_name", "article_address", "blob_sha", "branch_name",
+    "build_state", "client", "create_repository", "deletable", "deletable_name", "delete_folder", "folder_tree",
+    "head", "page_state", "pages", "publish", "read_blob", "read_branch", "read_site", "read_tree", "repository",
+    "repository_name", "short_name", "site_base", "turn_on_pages", "update_site", "whoami",
 ]
