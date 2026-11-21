@@ -425,6 +425,35 @@ def test_the_pdf_draws_the_card_with_its_link_and_a_qr_code(kept):
         assert _shown_without_a_face(page, reader) == 0
 
 
+@pytest.mark.parametrize("style", ["report", "brief"])
+def test_a_source_entry_keeps_the_handle_as_written_beside_an_arabic_name(client, sites, style):
+    """fpdf2 sets a piece of text from its first strong letter: an Arabic display name
+    before `(@handle)` turned the whole entry right to left, the handle printed backwards."""
+    listing = x_listing()
+    listing[0][1]["author"]["nick"] = "رصد الساحل"
+    sites.x = listing
+    case_id = _case(client)
+    (post,) = _read(client, case_id, X_URL)
+    rendered = notes_pdf.render(get_case(case_id), title="Coast road", look=NoteLook(style=style),
+                                text=f"Seen.\n\n::: post\npost: {post['id']}\n:::\n")
+    reader = PdfReader(io.BytesIO(rendered.pdf))
+    words = " ".join(page.extract_text() for page in reader.pages)
+    # pypdf reads a line's Arabic and Latin back in an order of its own, so the handle is
+    # looked for without its opening "(@"
+    assert ",)coast_monitor@(" not in words, "the handle was printed backwards"
+    # the Latin run after the Arabic name is drawn in its own face, not in the Arabic one
+    assert ("coast_monitor), “@coast_monitor:" if style == "report" else "coast_monitor) ·") in words, words
+    for page in reader.pages:
+        assert _shown_without_a_face(page, reader) == 0
+
+
+def test_a_run_is_cut_where_an_arabic_stretch_meets_latin_letters():
+    assert notes_pdf._direction_cuts("رصد الساحل (@coast)") == ["رصد الساحل", " (@coast)"]
+    assert notes_pdf._direction_cuts("posted by رصد الساحل") == ["posted by ", "رصد الساحل"]
+    assert notes_pdf._direction_cuts("“رصد الساحل”") == ["“رصد الساحل”"]
+    assert notes_pdf._direction_cuts("Coast Monitor (@coast)") == ["Coast Monitor (@coast)"]
+
+
 def _shown_without_a_face(page, reader) -> int:
     """How many stretches of text a page shows with no face set in its state (`Tf`)."""
     from pypdf.generic import ContentStream
@@ -499,13 +528,11 @@ def test_a_bluesky_reply_with_no_picture_and_a_quoted_post_with_one(client, site
 
 
 def test_a_web_folder_carries_the_card_its_pictures_as_files_beside_the_page(client, kept):
-    from test_notes_pdf import exports_of
-
     case_id = kept["case"].id
     note_id = _note(client, case_id, f"Seen.\n\n::: post\npost: {kept['bluesky']}\n:::\n")
     written = client.post(f"/api/cases/{case_id}/notes/web", json={"notes": [note_id]})
     assert written.status_code == 200, written.text
-    folder = exports_of(case_id) / "web" / written.json()["written"][0]["file"]
+    folder = layout.subdir(kept["case"].path, "exports") / "web" / written.json()["written"][0]["file"]
     page = (folder / "index.html").read_text(encoding="utf-8")
     card = re.search(r'<figure class="az-figure az-post".*?</figure>', page, re.S).group(0)
     shown = re.findall(r'src="([^"]+)"', card)

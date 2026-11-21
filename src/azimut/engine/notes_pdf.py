@@ -94,6 +94,7 @@ import hashlib
 import math
 import re
 import threading
+import unicodedata
 from collections import OrderedDict
 from dataclasses import dataclass, field, replace
 from datetime import date, datetime
@@ -1262,7 +1263,7 @@ class _Builder:
                     runs.append(Run(part.text[len(stuck):], color=theme.ink))
             else:
                 runs.append(Run(part.text, color=theme.ink))
-        return runs
+        return _one_direction(runs)
 
     # -- the annexes -------------------------------------------------------------
 
@@ -1416,7 +1417,7 @@ class _Builder:
                 if position:
                     runs.append(Run(", ", color=theme.muted))
                 runs.append(Run(f"[{number}]", color=theme.accent, entry=number))
-        return runs
+        return _one_direction(runs)
 
     def _address(self, prefix: str, address: str, size: float, leading: float) -> None:
         """An address in full, linked on every line it wraps over."""
@@ -3346,8 +3347,12 @@ class _Builder:
 
     def _text_at(self, x: float, y: float, text: str, height: float, *, link: str | int = "") -> None:
         """One run of text starting exactly at ``x``: a cell keeps a margin inside
-        its left edge, so the cell is moved out by it."""
+        its left edge, so the cell is moved out by it. Its face is named in the page's
+        stream each time: a run all in a script's face (Arabic) leaves that face set
+        there while fpdf2 still counts the run's own as set, and the next run's Latin
+        letters were drawn in the wrong face."""
         pdf = self.pdf
+        pdf.current_font_is_set_on_page = False
         pdf.set_xy(x - pdf.c_margin, y)
         pdf.cell(pdf.get_string_width(text) + 2 * pdf.c_margin, height, text, link=link or "")
 
@@ -3695,6 +3700,40 @@ _host = notesources.host
 
 #: A right-to-left letter: Hebrew, Arabic, Syriac, Thaana, N'Ko and their presentation forms.
 RTL = re.compile("[\u0590-\u08ff\ufb1d-\ufdff\ufe70-\ufeff]")
+
+
+def _direction_cuts(text: str) -> list[str]:
+    """``text`` cut where a right-to-left stretch meets Latin letters. What sits between
+    the two goes with the Latin side, so an Arabic name before `(@coast)` keeps its handle as written."""
+    pieces: list[str] = []
+    start, last, rtl_end = 0, "", 0
+    for at, char in enumerate(text):
+        kind = unicodedata.bidirectional(char)
+        if kind in ("R", "AL"):
+            if last == "L" and at > start:
+                pieces.append(text[start:at])
+                start = at
+            last, rtl_end = "R", at + 1
+        elif kind == "L":
+            if last == "R":
+                pieces.append(text[start:rtl_end])
+                start = rtl_end
+            last = "L"
+    pieces.append(text[start:])
+    return [piece for piece in pieces if piece]
+
+
+def _one_direction(runs: list[Run]) -> list[Run]:
+    """Each run cut into stretches of one direction. fpdf2 sets a piece of text from its
+    first strong letter, so an Arabic name before `(@handle)` turned the whole run right
+    to left in a source entry, the handle printed `(handle@)`."""
+    out: list[Run] = []
+    for run in runs:
+        cuts = _direction_cuts(run.text) if RTL.search(run.text) else [run.text]
+        out.extend(run if len(cuts) == 1 else replace(run, text=cut) for cut in cuts)
+    return out
+
+
 #: Where an address written inline may break: after one of `ADDRESS_BREAKS`, never inside `//`.
 ADDRESS_PIECE = re.compile(r"(?<=[/?&=#\-_.~+,;])(?!/)")
 
