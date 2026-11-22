@@ -62,3 +62,48 @@ export function wordUnder(items, x, y) {
   }
   return '';
 }
+
+/**
+ * The lines of a page's text as PDF.js reads it (`items`), top to bottom, each
+ * `{ top, text }`, `top` its height down the page as a fraction (`view` the page's box).
+ */
+export function pageLines(items, view) {
+  const [, y0 = 0, , y1 = 1] = view ?? [];
+  const tall = y1 - y0 || 1;
+  const rows = new Map();
+  for (const item of items ?? []) {
+    const text = String(item?.str ?? '');
+    const [, , , d = 0, e = 0, f = 0] = item?.transform ?? [];
+    if (!text.trim()) continue;
+    const height = Math.abs(Number(item?.height) || Number(d) || 0);
+    const key = Math.round(f);
+    const row = rows.get(key) ?? { top: 1 - (f + height - y0) / tall, parts: [] };
+    row.parts.push([e, text]);
+    rows.set(key, row);
+  }
+  return [...rows.values()]
+    .map((row) => ({ top: row.top, text: row.parts.sort((a, b) => a[0] - b[0]).map(([, text]) => text).join(' ').replace(/\s+/g, ' ').trim() }))
+    .sort((a, b) => a.top - b.top);
+}
+
+/** The words of the block a point of page `page` falls in: its lines from its top down to the next block's. */
+export function blockWords(spots, page, top, lines) {
+  const onPage = (spots ?? []).filter((spot) => spot.page === page);
+  let from = 0;
+  let to = 1;
+  for (const spot of onPage) {
+    if (spot.top <= top + 0.004) from = spot.top;
+    else { to = spot.top; break; }
+  }
+  return (lines ?? []).filter((line) => line.top >= from - 0.01 && line.top < to - 0.004).map((line) => line.text).join(' ').trim();
+}
+
+/** The address a link of a page (`annotations` as PDF.js reads them) points to at point (`x`, `y`), or "". */
+export function linkUnder(annotations, x, y) {
+  for (const note of annotations ?? []) {
+    const [x1, y1, x2, y2] = note?.rect ?? [];
+    if (typeof note?.url !== 'string' || !/^https?:\/\//i.test(note.url)) continue;
+    if (x >= Math.min(x1, x2) && x <= Math.max(x1, x2) && y >= Math.min(y1, y2) && y <= Math.max(y1, y2)) return note.url;
+  }
+  return '';
+}

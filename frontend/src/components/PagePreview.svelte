@@ -15,9 +15,9 @@
    */
   import { onDestroy, tick, untrack } from 'svelte';
   import { drawPage, openPdf, releaseCanvas } from '../lib/notes/pdfjs.js';
-  import { wordUnder } from '../lib/notes/spots.js';
+  import { linkUnder, pageLines, wordUnder } from '../lib/notes/spots.js';
 
-  let { data = null, onpage = null, ondouble = null, onerror = () => {}, onpages = () => {}, label = 'Pages', overlay = null } = $props();
+  let { data = null, onpage = null, ondouble = null, onmenu = null, onerror = () => {}, onpages = () => {}, label = 'Pages', overlay = null } = $props();
 
   const MARGIN = 800;
   const PAD = 18;
@@ -48,6 +48,33 @@
       }
     } catch { /* the place alone */ }
     ondouble(index, down, word);
+  }
+
+  /**
+   * A right-click on page `index`: its place, the word under it, the page's lines and the
+   * address of a link under it, as PDF.js reads the page, handed up with where the
+   * pointer is (`onmenu`). The browser's own menu is left only where no menu is asked for.
+   */
+  async function menu(event, index) {
+    if (!onmenu) return;
+    event.preventDefault();
+    const box = event.currentTarget.getBoundingClientRect();
+    const across = (event.clientX - box.left) / box.width;
+    const down = (event.clientY - box.top) / box.height;
+    const said = { index, top: down, word: '', lines: [], href: '', at: { x: event.clientX, y: event.clientY } };
+    try {
+      const page = await shown?.doc?.getPage?.(index + 1);
+      if (page) {
+        const [x0, y0, x1, y1] = page.view;
+        const x = x0 + across * (x1 - x0);
+        const y = y1 - down * (y1 - y0);
+        const content = await page.getTextContent();
+        said.word = wordUnder(content.items, x, y);
+        said.lines = pageLines(content.items, page.view);
+        said.href = linkUnder(await page.getAnnotations?.({ intent: 'display' }), x, y);
+      }
+    } catch { /* the place alone */ }
+    onmenu(said);
   }
   const near = new Set();
   let shown = null; // { doc, width, canvases: Map(index → canvas) }
@@ -296,7 +323,7 @@
       <button type="button" class="hit" title={ondouble ? `Page ${index + 1}: press to go to it in the note, double-click a word to go to that word`
         : onpage ? `Page ${index + 1}: go to it in the note` : `Page ${index + 1}`}
         aria-label={`Page ${index + 1} of ${sizes.length}`} onclick={() => onpage?.(index)}
-        ondblclick={(event) => double(event, index)}></button>
+        ondblclick={(event) => double(event, index)} oncontextmenu={(event) => menu(event, index)}></button>
       {#if overlay}{@render overlay(index, size)}{/if}
     </div>
   {/each}
