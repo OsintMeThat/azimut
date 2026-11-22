@@ -6,6 +6,7 @@ signature never stand by it, however its Settings fill them."""
 from __future__ import annotations
 
 import io
+import re
 
 import pytest
 from PIL import Image
@@ -110,6 +111,9 @@ def test_a_map_page_signs_with_the_guests_name_and_face_and_no_handle(client, de
     assert previewed.status_code == 200, previewed.text
     assert 'data-web="map"' in previewed.text
     _signed_by_the_guest(previewed.text)
+    # the mark the reader lays in the map's corner shows the guest's face beside their name, as the analyst's logo
+    corner = re.search(r'<(?:a|span) class="az-mappage-mark".*?</(?:a|span)>', previewed.text, re.S)
+    assert corner is not None and 'class="az-face"' in corner.group(0) and GUEST in corner.group(0)
     # published as a web folder, the face is a file of it
     folder = notes_web.build(Case.open(cid), note)
     face = next(name for name in folder.files if name.startswith(notes_html.AUTHOR_FACE))

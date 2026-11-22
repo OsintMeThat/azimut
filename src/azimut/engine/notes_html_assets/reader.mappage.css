@@ -58,6 +58,7 @@
     font: 600 .8125rem/1 var(--ui); text-decoration: none;
   }
   .az-js .az-map-frame > .az-mappage-mark .az-my-logo { height: 1.6rem; width: auto; }
+  .az-js .az-map-frame > .az-mappage-mark .az-face { width: 1.6rem; height: 1.6rem; }
   .az-js .az-map-frame > a.az-mappage-mark:hover span { text-decoration: underline; }
   .az-js .az-mappage-handle { color: rgba(255, 255, 255, .72); text-decoration: none; }
   .az-js .az-mappage-main { grid-area: map; display: grid; min-height: 0; min-width: 0; }

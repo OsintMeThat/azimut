@@ -832,7 +832,8 @@ class _Page:
         # phone's header has no room for it, and a screenshot of the map keeps it
         shown = identity.handle or who
         target = identity.handle_url() if identity.handle else identity.site
-        inner = f'{logo}<span>{_text(shown)}</span>' if shown else logo
+        # a guest's face stands there as the analyst's logo does: the picture whoever signs the map is known by
+        inner = f'{logo}{face}<span>{_text(shown)}</span>' if shown else logo + face
         mark = ""
         if inner:
             mark = (f'<a class="az-mappage-mark" href="{_attr(target)}" target="_blank" rel="noopener noreferrer">{inner}</a>'
