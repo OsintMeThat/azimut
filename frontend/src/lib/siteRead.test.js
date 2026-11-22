@@ -7,7 +7,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 const post = vi.fn();
 vi.mock('./api.js', () => ({ api: { post, get: vi.fn(), put: vi.fn(), del: vi.fn() } }));
-const { dropFolder, forgetRead, runRead, siteRead } = await import('./siteRead.svelte.js');
+const { dropFolder, forgetRead, homeWritten, runRead, siteRead } = await import('./siteRead.svelte.js');
 
 const ANSWER = {
   ok: true, address: 'https://octo.github.io/articles/', home: 'azimut', marked: [''], legal: '', privacy: '',
@@ -77,6 +77,20 @@ describe('the read', () => {
     expect(siteRead.key).toBe('');
     // nothing to take it out of: no error
     dropFolder('b');
+    expect(siteRead.data).toBeNull();
+  });
+
+  it('has Azimut\'s home once Update the site wrote it on a site the read found with none, and never over another', async () => {
+    post.mockResolvedValue({ ...ANSWER, home: 'none' });
+    await runRead('octo/articles@main');
+    homeWritten();
+    expect(siteRead.data.home).toBe('azimut');
+    post.mockResolvedValue({ ...ANSWER, home: 'yours' });
+    await runRead('octo/articles@main');
+    homeWritten();
+    expect(siteRead.data.home).toBe('yours');
+    forgetRead();
+    homeWritten();
     expect(siteRead.data).toBeNull();
   });
 });

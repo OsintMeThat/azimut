@@ -79,7 +79,8 @@ repository of Settings › Website in one commit (`engine/githubpages.py`). The 
 keeps a record of it among its editions with `format: "github"`: the address, the
 repository, the branch, the folder, the commit, the page's SHA-256 and the id of the
 folder's tree, which `/github/check` compares with the folder on GitHub before a later press
-(a warning when it was changed there; it never blocks). Check reads the page back from the
+(a warning when it was changed there; it never blocks). A folder no record of the note names is
+another's, and the same check names what it holds and a free short name beside it. Check reads the page back from the
 repository on its press and compares; there is nothing to show on this machine, so the dialog
 opens the address instead.
 
@@ -1898,14 +1899,21 @@ def _github_page_state(record: dict[str, Any]) -> str:
         raise HTTPException(status_code=502, detail=str(exc)) from exc
 
 
-def _published_tree(case: Case, note_id: str, repository: str, branch: str, path: str) -> str:
-    """The id of the folder's tree as the note's latest publish there left it, "" when no
-    record holds one (a publish from before the tree was kept)."""
+def _published_record(case: Case, note_id: str, repository: str, branch: str, path: str) -> dict[str, Any] | None:
+    """The record of the note's latest publish to that folder, None when it never published there:
+    how the check before a press tells the note's own folder from another's."""
     for record in _read_editions(case, note_id):
         if (record.get("format") == GITHUB and record["repository"] == repository and record["branch"] == branch
                 and record["path"] == path):
-            return str(record.get("tree") or "")
-    return ""
+            return record
+    return None
+
+
+def _published_tree(case: Case, note_id: str, repository: str, branch: str, path: str) -> str:
+    """The id of the folder's tree as the note's latest publish there left it, "" when no
+    record holds one (a publish from before the tree was kept)."""
+    record = _published_record(case, note_id, repository, branch, path)
+    return str(record.get("tree") or "") if record is not None else ""
 
 
 def _kept_in_look(case: Case, note_id: str, category: str | None, role: str | None) -> None:
@@ -1942,9 +1950,11 @@ def suggested_place(case_id: str, note_id: str) -> dict[str, Any]:
 
 @router.post("/{case_id}/notes/{note_id}/github/check")
 def github_check(case_id: str, note_id: str, body: GitHubCheckIn) -> dict[str, Any]:
-    """The check before publishing, on its press: whether the folder this publish would replace
-    was changed on GitHub since this Azimut last published it. ``edited`` is true then, and
-    ``warning`` says so; publishing is never blocked. Reads only."""
+    """The check before publishing, on its press. The folder is the note's own when one of its
+    records names it: ``edited`` then says it was changed on GitHub since, and ``warning`` says so.
+    Anything else at that address is another's, an article, a map or a page of the site: ``taken``
+    names it (`{title, ours}`, ``ours`` false for what Azimut did not make, which a publish refuses)
+    and ``free`` is a short name beside it that nothing holds. Publishing is never blocked. Reads only."""
     from .publishing import github_settings
 
     case = get_case(case_id)
@@ -1956,20 +1966,28 @@ def github_check(case_id: str, note_id: str, body: GitHubCheckIn) -> dict[str, A
         short = githubpages.short_name(body.short_name)
     except githubpages.GitHubError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
+    taken: dict[str, Any] | None = None
     try:
         with githubpages.client() as http:
             gh = githubpages.GitHub(target.token, http)
             pages = githubpages.pages(gh, target.account, target.repo)
             if pages is None:
-                return {"checked": False, "exists": False, "edited": False, "warning": ""}
+                return {"checked": False, "exists": False, "edited": False, "warning": "", "taken": None, "free": ""}
             folder = f"{pages.root}{short}"
-            now = githubpages.folder_tree(gh, target.account, target.repo, target.branch, folder)
-            before = _published_tree(case, note_id, f"{target.account}/{target.repo}", target.branch, folder)
+            now = githubpages.spot(gh, target.account, target.repo, target.branch, folder)
+            own = _published_record(case, note_id, f"{target.account}/{target.repo}", target.branch, folder)
             # a bar Update the site changed is no edit of the analyst's
-            edited = githubpages.changed_since(gh, target.account, target.repo, before, now)
+            edited = own is not None and githubpages.changed_since(gh, target.account, target.repo,
+                                                                    str(own.get("tree") or ""), now.tree)
+            if own is None and (now.tree or short in now.names):
+                found = (githubpages.holder(gh, target.account, target.repo, now.tree, short) if now.tree
+                         else githubpages.Holder(short, False))
+                taken = {"title": found.title, "ours": found.ours}
     except githubpages.GitHubError as exc:
         raise HTTPException(status_code=502, detail=str(exc)) from exc
-    return {"checked": True, "exists": bool(now), "edited": edited, "warning": site_engine.HAND_EDITED if edited else ""}
+    return {"checked": True, "exists": bool(now.tree), "edited": edited,
+            "warning": site_engine.HAND_EDITED if edited else "", "taken": taken,
+            "free": githubpages.free_name(short, now.names) if taken else ""}
 
 
 @router.post("/{case_id}/notes/{note_id}/github")
@@ -2057,7 +2075,8 @@ def github_publish(case_id: str, note_id: str, body: GitHubPublishIn) -> dict[st
     if changes:
         record["changes"] = changes[:MAX_CHANGES]
     _record_edition(case, note_id, record, text=made.printed)
-    _kept_in_look(case, note_id, body.category, body.role)
+    # the category the card carries: the dialog's, or the one the site gave the article since its last publish
+    _kept_in_look(case, note_id, published.category if published.category is not None else body.category, body.role)
     _place_kept(case, note_id, body.chosen_place)
     keep_categories(published.categories)
     return {

@@ -13,15 +13,16 @@
    * press that sets it up shows here (`components/GitHubSetupPress.svelte`); while
    * GitHub is not set up, a Publish shows the way to Settings › Website.
    *
-   * **On the site.** The note's Category (a field suggesting what the site already uses,
-   * read again on a press of its own), whether it is an Article, in the site's list, a
+   * **On the site.** The note's Category (a list drawn as the app's menus are, `components/PickList.svelte`:
+   * none, what the site already uses, read again on a press of its own, and a new one typed), whether it is an Article, in the site's list, a
    * Page, off it and linked from its header, or Unlisted, online at its address and in no list,
    * and the Picture its card has in the list. One line says where the note will appear, naming the
    * site for an Article; while Settings › Website holds no title, another says what the site is then
    * called, with a press to name it there.
-   * Each starts from the note's look; the category and the role go up with the publish and
-   * are kept in the look, the picture is kept in the look as it is picked. Whatever changes
-   * the look is told (`onlook`), so the Notebook never saves an older one over it.
+   * Each starts from the note's look, except that a note its editions say was never published to this site
+   * starts on Unlisted, so a first publish can be read before it is announced. The category and the role go
+   * up with the publish and are kept in the look, the picture is kept in the look as it is picked. Whatever
+   * changes the look is told (`onlook`), so the Notebook never saves an older one over it.
    *
    * **Author.** Who wrote the note, for an article written by someone else: its page is signed with
    * that name and the site's lists name it. Empty is the analyst, the name its placeholder shows. Beside
@@ -29,19 +30,25 @@
    * kept in the look as they are left, with or without GitHub set up, so a note's author travels in its
    * case's bundle and opens filled in on the machine that publishes it.
    *
-   * **Place on the site's map.** An Article may stand somewhere, for a map of the site's articles: its
+   * **Coordinates for this article.** An Article may stand somewhere, for a map of the site's articles: its
    * coordinates pasted as `lat, lon` (or as the Sheet reads them) and a name for its pin, both optional and
-   * empty for most notes. Under them, what the coordinates read as, or why they are no place, which holds the
+   * empty for most notes, so they fold under **More options**, shut each time the dialog opens unless the
+   * note has a place, and open while what is typed is no place, so a value is never hidden. Under them, what the coordinates read as, or why they are no place, which holds the
    * publish back. When the note names one obvious point (`placeOffer`, `engine/siteplace.py`), a press offers
    * it with the rule it was read by, and only while the coordinates are empty: nothing is ever filled without
    * that press. It goes up with the publish and is kept in the look like the category; emptied, it is gone.
    *
-   * **Before it replaces a folder.** A note published here before is checked first: when the
-   * folder was changed on GitHub since, the dialog says so and `warned` is up, and the press
-   * that follows publishes anyway. A warning, never a stop; a check that fails just publishes.
+   * **Before it replaces a folder.** Every press asks the check first (`checkFolder`). A folder no record
+   * of this note names is another's: the dialog names what it holds and offers **Replace it**, which
+   * publishes on (`onpublish`), or **Pick another address**, which puts a free short name in the field
+   * and the focus on it. The note's own folder changed on GitHub since is said too. Either way `warned` is
+   * up and the press that follows publishes anyway: a warning, never a stop, and a check that fails just
+   * publishes. A folder Azimut did not make is never replaced, so that one offers another address only.
    */
+  import BusyLabel from '../../components/BusyLabel.svelte';
   import Icon from '../../components/Icon.svelte';
   import GitHubSetupPress from '../../components/GitHubSetupPress.svelte';
+  import PickList from '../../components/PickList.svelte';
   import { prefs, toast, uiState } from '../../lib/state.svelte.js';
   import { categoriesOf, checkFolder, placeOffer, publishNote, readCategories, readGitHub } from '../../lib/githubPages.js';
   import {
@@ -52,10 +59,10 @@
   import { foldText } from '../../lib/textFold.js';
   import { siteName } from '../../lib/websiteHub.js';
   import {
-    AUTHOR_IMAGE_LABEL, AUTHOR_IMAGE_NONE, AUTHOR_LABEL, AUTHOR_MAX,
-    CATEGORY_MAX, CATEGORY_SAID, HAND_EDITED, LIST_IMAGE_COVER, NO_NAME_PRESS, ON_SITE, PLACE_COORDS_LABEL, PLACE_COORDS_PLACEHOLDER,
-    PLACE_NAME_LABEL, PLACE_NAME_MAX, PLACE_NAME_PLACEHOLDER, PLACE_TITLE, PLACE_WHY, WEBSITE_HELP as HELP, noNameSaid, onSiteSaid,
-    placeText, placeUseSaid, readPlace,
+    AUTHOR_IMAGE_LABEL, AUTHOR_IMAGE_NONE, AUTHOR_LABEL, AUTHOR_MAX, BUSY,
+    CATEGORY_MAX, CATEGORY_NEW, CATEGORY_NEW_PLACEHOLDER, CATEGORY_NONE, CATEGORY_SAID, HAND_EDITED, LIST_IMAGE_COVER, NO_NAME_PRESS, ON_SITE, ON_SITE_TRY, PICK_ANOTHER, PLACE_COORDS_LABEL, PLACE_COORDS_PLACEHOLDER,
+    MORE_OPTIONS, PLACE_LEAD, PLACE_NAME_LABEL, PLACE_NAME_MAX, PLACE_NAME_PLACEHOLDER, PLACE_TITLE, PLACE_WHY, REPLACE_PRESS, WEBSITE_HELP as HELP, noNameSaid, onSiteSaid,
+    placeText, placeUseSaid, readPlace, takenOutsideSaid, takenSaid,
   } from '../../lib/websiteSetup.js';
 
   let {
@@ -72,7 +79,7 @@
     /** What is wrong with the short name or the article's place, or ''. */
     problem = $bindable(''),
     busy = $bindable(false),
-    /** Whether the folder on GitHub was found changed, so the next press publishes anyway. */
+    /** Whether the check found something at the address, so the next press publishes anyway. */
     warned = $bindable(false),
     /** Writes what the editor still holds, before the note is read from disk. */
     prepare = async () => {},
@@ -82,6 +89,8 @@
     onlook = () => {},
     /** Called when the analyst leaves the dialog for Settings. */
     onleave = () => {},
+    /** Publishes as the dialog's own button does: Replace it is that press, the analyst warned. */
+    onpublish = () => {},
   } = $props();
 
   let github = $state(null);
@@ -97,6 +106,10 @@
 
   // what the note is on the site: read from its look once the dialog shows, and sent with the publish
   let loaded = $state(false);
+  // the role the look keeps, '' for an article or none, null until read; and whether the note was never published
+  // to this site (null until its editions say), which starts it on Unlisted
+  let ownRole = $state(null);
+  let fresh = $state(null);
   let category = $state('');
   let role = $state('article');
   let listImage = $state('');
@@ -117,15 +130,24 @@
   let placeName = $state('');
   // the point the note offers, shown as a press and never filled without it
   let offer = $state(null);
+  // More options, where the place folds: shut each time the dialog opens, unless the note has a place
+  let moreOpen = $state(false);
   // typed before the look came, so what was typed is kept
   let touched = { category: false, role: false, place: false, author: false };
 
-  // the folder on GitHub was found changed: the next press publishes anyway. Read here, and handed up (`warned`)
-  let held = $state(false);
+  // what the check found at the address, until the analyst answers: { kind: 'edited' }, or { kind: 'taken',
+  // title, ours, free } for another's folder. The next press publishes anyway, unless Azimut did not make it
+  let held = $state(null);
+  // a folder Azimut did not make is never replaced: that press checks again rather than publish
+  const replaceable = $derived(held !== null && (held.kind === 'edited' || held.ours));
+  let shortField = $state(null);
 
   // a branch opened afresh has published nothing yet, and warned of nothing
   busy = false;
   warned = false;
+  // publishing, read here and handed up (`busy`): the dialog's own copy may not be reactive
+  let working = $state(false);
+  $effect(() => { busy = working; });
 
   $effect(() => {
     let live = true;
@@ -143,7 +165,7 @@
   const wrong = $derived(ready ? shortNameProblem(short) : '');
   $effect(() => { connected = ready; });
   $effect(() => { problem = wrong || placeWrong; });
-  $effect(() => { warned = held; });
+  $effect(() => { warned = replaceable; });
 
   // the note's look: what it says it is on the site, and who wrote it, which is asked with GitHub off too
   $effect(() => {
@@ -152,10 +174,11 @@
       if (!live) return;
       ownCategory = look.category ?? '';
       if (!touched.category) category = ownCategory;
-      if (!touched.role) role = look.role === 'page' || look.role === 'unlisted' ? look.role : 'article';
+      ownRole = look.role === 'page' || look.role === 'unlisted' ? look.role : '';
       if (!touched.place) {
         coords = placeText(look.place);
         placeName = look.place?.name ?? '';
+        if (look.place) moreOpen = true;
       }
       listImage = look.list_image ?? '';
       ownAuthor = look.author ?? '';
@@ -164,6 +187,25 @@
       loaded = true;
     }).catch(() => {});
     return () => { live = false; };
+  });
+
+  // whether the note was ever published to this site: its records name the repository. Records that cannot be
+  // read leave it on the look's role
+  const siteKey = $derived(ready ? `${github.account}/${github.repo}`.toLowerCase() : '');
+  $effect(() => {
+    const site = siteKey;
+    if (!site) return;
+    let live = true;
+    listEditions(caseId, noteId)
+      .then((list) => { if (live) fresh = !list.some((edition) => edition.format === 'github' && String(edition.repository ?? '').toLowerCase() === site); })
+      .catch(() => { if (live) fresh = false; });
+    return () => { live = false; };
+  });
+
+  // the role shown: the look's page or unlisted, else Unlisted for a first publish here, else Article; a choice made stands
+  $effect(() => {
+    if (ownRole === null || touched.role) return;
+    role = ownRole || (fresh ? 'unlisted' : 'article');
   });
 
   // the point the note offers for its place, read from the case once GitHub is set up; a failed read offers none
@@ -177,6 +219,8 @@
   const placeRead = $derived(readPlace(coords, placeName));
   // only an article shows its place, so only its place can hold the publish back
   const placeWrong = $derived(role === 'article' ? placeRead.problem : '');
+  // what holds the publish back is never folded away
+  const placeShown = $derived(moreOpen || Boolean(placeWrong));
 
   const suggestions = $derived(categoriesOf([...(github?.categories ?? []), ownCategory]));
   const pictures = $derived(entities
@@ -213,7 +257,7 @@
     needs = null;
     failed = '';
     // the folder warned of is the one the short name named
-    held = false;
+    held = null;
     if (!shortNameProblem(short)) onaddress(`${base}${short}/`);
   }
 
@@ -309,17 +353,29 @@
   }
 
   /**
-   * Whether the folder this publish replaces was changed on GitHub since this Azimut put it
-   * there: asked only of a note published here before, and a check that fails says nothing.
+   * What stands at the address before a publish replaces it, or null for nothing to say: another
+   * article, map or page of the site (`taken`), or this note's own folder changed on GitHub since.
+   * A check that fails says nothing.
    */
-  async function handEdited() {
+  async function inTheWay() {
     try {
-      const before = await listEditions(caseId, noteId);
-      if (!before.some((edition) => edition.format === 'github')) return false;
-      return Boolean((await checkFolder(caseId, noteId, short))?.edited);
+      const answer = await checkFolder(caseId, noteId, short);
+      if (answer?.taken) {
+        return { kind: 'taken', title: String(answer.taken.title || short), ours: answer.taken.ours === true, free: String(answer.free ?? '') };
+      }
+      return answer?.edited ? { kind: 'edited' } : null;
     } catch {
-      return false;
+      return null;
     }
+  }
+
+  /** Leave what holds the address and take a free short name, the field focused to change it. */
+  function pickAnother() {
+    const free = held?.free ?? '';
+    held = null;
+    if (free) type(free);
+    shortField?.focus();
+    shortField?.select?.();
   }
 
   /**
@@ -328,13 +384,13 @@
    * asks for one more press first (`warned`).
    */
   export async function publish({ roundPov = false, changes = '', offlineMaps = false } = {}) {
-    if (busy) return null;
+    if (working) return null;
     if (!ready) {
       setupShown = true;
       return null;
     }
     if (wrong || placeWrong) return null;
-    busy = true;
+    working = true;
     failed = '';
     needs = null;
     setUp = '';
@@ -342,10 +398,13 @@
       await prepare();
       // an author typed and left a moment ago is in the look before the page is made
       await authorSaving;
-      const told = held;
-      if (!told && await handEdited()) {
-        held = true;
-        return null;
+      const told = replaceable;
+      if (!told) {
+        const found = await inTheWay();
+        if (found) {
+          held = found;
+          return null;
+        }
       }
       onaddress(address);
       const answer = await publishNote(caseId, noteId, {
@@ -356,7 +415,7 @@
         ...((loaded || touched.place) && role === 'article' ? { place: placeRead.place } : {}),
       });
       if (answer?.published) {
-        held = false;
+        held = null;
         onlook();
         return { ...answer, told };
       }
@@ -366,7 +425,7 @@
       failed = error.message;
       return null;
     } finally {
-      busy = false;
+      working = false;
     }
   }
 
@@ -429,7 +488,7 @@
     <label class="lbl" for="export-short">Address it will live at</label>
     <div class="address-line" class:bad={wrong}>
       <span class="base mono" title={base}>{base}</span>
-      <input id="export-short" class="input mono short" value={short} maxlength={MAX_SHORT} spellcheck="false" autocomplete="off"
+      <input id="export-short" class="input mono short" bind:this={shortField} value={short} maxlength={MAX_SHORT} spellcheck="false" autocomplete="off"
         aria-label="Short name" aria-invalid={wrong ? 'true' : undefined} aria-describedby="export-short-said"
         title="The last part of the page's address: lower case, digits and hyphens"
         oninput={(event) => type(event.currentTarget.value)} />
@@ -440,12 +499,15 @@
 
     <div class="site" role="group" aria-label="On the site">
       <span class="lbl">On the site</span>
-      <div class="choice" role="radiogroup" aria-label="On the site">
-        {#each ON_SITE as choice (choice.id)}
-          <button type="button" role="radio" aria-checked={role === choice.id} class:on={role === choice.id}
-            title={{ page: HELP.publishPage, unlisted: HELP.publishUnlisted }[choice.id] ?? HELP.publishArticle}
-            onclick={() => chooseRole(choice.id)}>{choice.label}</button>
-        {/each}
+      <div class="choice-line">
+        <div class="choice" role="radiogroup" aria-label="On the site">
+          {#each ON_SITE as choice (choice.id)}
+            <button type="button" role="radio" aria-checked={role === choice.id} class:on={role === choice.id}
+              title={{ page: HELP.publishPage, unlisted: HELP.publishUnlisted }[choice.id] ?? HELP.publishArticle}
+              onclick={() => chooseRole(choice.id)}>{choice.label}</button>
+          {/each}
+        </div>
+        <span class="choice-said">{ON_SITE_TRY}</span>
       </div>
       <p class="address-said" role="status">{onSiteSaid(role, siteCalled)}</p>
       {#if !named && siteCalled}
@@ -456,14 +518,13 @@
       {#if role === 'article'}
         <label class="lbl" for="export-category" title={HELP.publishCategory}>Category</label>
         <div class="category-line">
-          <input id="export-category" class="input" list="export-categories" value={category} maxlength={CATEGORY_MAX}
-            spellcheck="false" autocomplete="off" placeholder="No category" title={HELP.publishCategory} aria-describedby="export-category-said"
-            oninput={(event) => typeCategory(event.currentTarget.value)} />
-          <datalist id="export-categories">
-            {#each suggestions as name (name)}<option value={name}></option>{/each}
-          </datalist>
-          <button type="button" class="btn btn-ghost btn-sm" onclick={readSite} disabled={reading || busy} title={HELP.publishRead}>
-            {reading ? 'Reading…' : 'Read the site'}</button>
+          <div class="category-pick">
+            <PickList id="export-category" value={category} options={suggestions} emptyLabel={CATEGORY_NONE} newLabel={CATEGORY_NEW}
+              newPlaceholder={CATEGORY_NEW_PLACEHOLDER} maxlength={CATEGORY_MAX} title={HELP.publishCategory} label="Category"
+              describedby="export-category-said" onpick={typeCategory} />
+          </div>
+          <button type="button" class="btn btn-ghost btn-sm" onclick={readSite} disabled={reading || working} aria-busy={reading}
+            title={HELP.publishRead}><BusyLabel busy={reading} text={BUSY.read}>Read the site</BusyLabel></button>
         </div>
         <p id="export-category-said" class="address-said" role="status">{readSaid || CATEGORY_SAID}</p>
         <span class="lbl">Picture in the list</span>
@@ -477,37 +538,52 @@
           {/if}
         </div>
         {@render picker('list')}
-        <div class="place" role="group" aria-label={PLACE_TITLE}>
-          <span class="lbl">{PLACE_TITLE}</span>
-          <div class="place-fields">
-            <input id="export-place" class="input mono" value={coords} spellcheck="false" autocomplete="off"
-              placeholder={PLACE_COORDS_PLACEHOLDER} aria-label={PLACE_COORDS_LABEL} title={HELP.publishPlace}
-              aria-invalid={placeWrong ? 'true' : undefined} aria-describedby="export-place-said"
-              oninput={(event) => typePlace(event.currentTarget.value)} />
-            <input id="export-place-name" class="input" value={placeName} maxlength={PLACE_NAME_MAX} spellcheck="false"
-              autocomplete="off" placeholder={PLACE_NAME_PLACEHOLDER} aria-label={PLACE_NAME_LABEL} title={HELP.publishPlaceName}
-              oninput={(event) => typePlace(coords, event.currentTarget.value)} />
+        <button type="button" class="more" aria-expanded={placeShown} aria-controls="export-more" title={HELP.publishMore}
+          onclick={() => { if (!placeWrong) moreOpen = !moreOpen; }}><Icon name="chevronRight" size={12} />{MORE_OPTIONS}</button>
+        {#if placeShown}
+          <div class="place" id="export-more" role="group" aria-label={PLACE_TITLE}>
+            <span class="lbl">{PLACE_TITLE}</span>
+            <p class="address-said">{PLACE_LEAD}</p>
+            <div class="place-fields">
+              <input id="export-place" class="input mono" value={coords} spellcheck="false" autocomplete="off"
+                placeholder={PLACE_COORDS_PLACEHOLDER} aria-label={PLACE_COORDS_LABEL} title={HELP.publishPlace}
+                aria-invalid={placeWrong ? 'true' : undefined} aria-describedby="export-place-said"
+                oninput={(event) => typePlace(event.currentTarget.value)} />
+              <input id="export-place-name" class="input" value={placeName} maxlength={PLACE_NAME_MAX} spellcheck="false"
+                autocomplete="off" placeholder={PLACE_NAME_PLACEHOLDER} aria-label={PLACE_NAME_LABEL} title={HELP.publishPlaceName}
+                oninput={(event) => typePlace(coords, event.currentTarget.value)} />
+            </div>
+            <p id="export-place-said" class="address-said" class:bad={placeWrong} role="status">{placeRead.said}</p>
+            {#if offer && !coords.trim()}
+              <p class="place-offer">
+                <button type="button" class="btn btn-sm" title={HELP.publishPlaceUse} onclick={useOffer}>
+                  <Icon name="pin" size={12} /><span>{placeUseSaid(offer)}</span></button>
+                <span class="place-why">{PLACE_WHY[offer.from]}</span>
+              </p>
+            {/if}
           </div>
-          <p id="export-place-said" class="address-said" class:bad={placeWrong} role="status">{placeRead.said}</p>
-          {#if offer && !coords.trim()}
-            <p class="place-offer">
-              <button type="button" class="btn btn-sm" title={HELP.publishPlaceUse} onclick={useOffer}>
-                <Icon name="pin" size={12} /><span>{placeUseSaid(offer)}</span></button>
-              <span class="place-why">{PLACE_WHY[offer.from]}</span>
-            </p>
-          {/if}
-        </div>
+        {/if}
       {/if}
     </div>
 
-    {#if busy}
-      <p class="sending" role="status"><span class="spinner" aria-hidden="true"></span>
-        Making the folder and sending it to {github.account}/{github.repo}…</p>
+    {#if working}
+      <p class="sending" role="status"><BusyLabel busy text="Making the folder and sending it to {github.account}/{github.repo}…" /></p>
     {/if}
     {#if held}
-      <div class="edited" role="alert">
-        <p><Icon name="alert" size={13} /> {HAND_EDITED}</p>
-        <button type="button" class="btn btn-sm" title={HELP.publishStop} onclick={() => (held = false)}>Don't publish</button>
+      <div class="held" role="alert">
+        <p><Icon name="alert" size={13} />
+          {held.kind === 'edited' ? HAND_EDITED : held.ours ? takenSaid(held.title) : takenOutsideSaid(held.title)}</p>
+        <div class="held-presses">
+          {#if held.kind === 'edited'}
+            <button type="button" class="btn btn-sm" title={HELP.publishStop} onclick={() => (held = null)}>Don't publish</button>
+          {:else}
+            {#if held.ours}
+              <button type="button" class="btn btn-sm" disabled={working} aria-busy={working} title={HELP.publishReplace}
+                onclick={() => onpublish()}><BusyLabel busy={working} text={BUSY.publish}>{REPLACE_PRESS}</BusyLabel></button>
+            {/if}
+            <button type="button" class="btn btn-sm" disabled={working} title={HELP.publishPickAnother} onclick={pickAnother}>{PICK_ANOTHER}</button>
+          {/if}
+        </div>
       </div>
     {/if}
     {#if needs}
@@ -548,6 +624,8 @@
   .link:hover { color: var(--accent-hover); }
   .site { display: flex; flex-direction: column; gap: 4px; margin-top: 8px; }
   .site.alone { margin-top: 0; font-size: var(--fs-sm); }
+  .choice-line { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 10px; }
+  .choice-said { color: var(--text-3); font-size: var(--fs-xs); }
   .choice { display: inline-flex; align-self: flex-start; border: 1px solid var(--border); border-radius: var(--r-md); overflow: hidden; }
   .choice button { padding: 3px 12px; border: none; border-left: 1px solid var(--border); background: var(--bg-1); color: var(--text-2);
     font: inherit; font-size: var(--fs-xs); cursor: pointer; }
@@ -556,7 +634,7 @@
   .choice button.on { background: var(--bg-3); color: var(--text-1); font-weight: 600; box-shadow: inset 0 -2px 0 var(--accent); }
   .choice button:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
   .category-line { display: flex; align-items: center; gap: 6px; }
-  .category-line .input { flex: 1; min-width: 0; }
+  .category-pick { flex: 1; min-width: 0; }
   .picked { display: flex; align-items: center; gap: 4px; min-width: 0; }
   .pick { display: inline-flex; align-items: center; gap: 6px; min-width: 0; max-width: 100%; }
   .pick span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -569,7 +647,14 @@
   .picture-row:hover { background: var(--bg-3); color: var(--text-1); }
   .picture-row.on { color: var(--accent); font-weight: 600; }
   .none { margin: 4px 6px; color: var(--text-3); font-size: var(--fs-xs); }
-  .place { display: flex; flex-direction: column; gap: 4px; margin-top: 4px; }
+  .more { display: inline-flex; align-items: center; gap: 4px; align-self: flex-start; margin-top: 6px; padding: 2px 0; border: 0;
+    background: none; color: var(--text-2); font: inherit; font-size: var(--fs-xs); cursor: pointer; }
+  .more:hover { color: var(--text-1); }
+  .more:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: var(--r-sm); }
+  .more :global(svg) { flex: none; color: var(--text-3); transition: transform 0.15s var(--ease); }
+  .more[aria-expanded='true'] :global(svg) { transform: rotate(90deg); }
+  @media (prefers-reduced-motion: reduce) { .more :global(svg) { transition: none; } }
+  .place { display: flex; flex-direction: column; gap: 4px; padding-left: 16px; }
   .place-fields { display: flex; gap: 6px; }
   .place-fields .input { flex: 1 1 0; min-width: 0; }
   .place-fields .input[aria-invalid='true'] { border-color: var(--danger); }
@@ -579,14 +664,11 @@
   .place-why { color: var(--text-3); font-size: var(--fs-xs); }
   .gh :global(.needs) { margin-top: 6px; }
   .sending { display: flex; align-items: center; gap: 7px; margin: 4px 0 0; color: var(--text-2); font-size: var(--fs-xs); }
-  .spinner { flex: none; width: 11px; height: 11px; border-radius: 50%; border: 2px solid color-mix(in srgb, var(--accent) 25%, transparent);
-    border-top-color: var(--accent); animation: spin 0.9s linear infinite; }
-  @keyframes spin { to { transform: rotate(360deg); } }
-  @media (prefers-reduced-motion: reduce) { .spinner { animation: none; } }
-  .edited { display: flex; flex-direction: column; align-items: flex-start; gap: 6px; margin-top: 6px; border: 1px solid color-mix(in srgb, var(--warn) 45%, var(--border));
+  .held { display: flex; flex-direction: column; align-items: flex-start; gap: 6px; margin-top: 6px; border: 1px solid color-mix(in srgb, var(--warn) 45%, var(--border));
     border-radius: var(--r-md); padding: 8px 12px; background: color-mix(in srgb, var(--warn) 7%, var(--bg-1)); }
-  .edited p { display: flex; align-items: center; gap: 6px; margin: 0; color: var(--text-1); font-size: var(--fs-sm); }
-  .edited :global(svg) { flex: none; color: var(--warn); }
+  .held p { display: flex; align-items: center; gap: 6px; margin: 0; color: var(--text-1); font-size: var(--fs-sm); overflow-wrap: anywhere; }
+  .held p > :global(svg) { flex: none; color: var(--warn); }
+  .held-presses { display: flex; flex-wrap: wrap; gap: 6px; }
   .set-up { display: flex; align-items: center; gap: 5px; margin: 4px 0 0; color: var(--ok); font-size: var(--fs-xs); }
   .failed { display: flex; align-items: center; gap: 5px; margin: 4px 0 0; color: var(--danger); font-size: var(--fs-xs); overflow-wrap: anywhere; }
   .setup { display: flex; flex-direction: column; gap: 6px; margin-top: 8px; border: 1px solid var(--border); border-radius: var(--r-md);

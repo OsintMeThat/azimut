@@ -28,6 +28,9 @@ repository is the analyst's.
   only; a map page has none. `articles.json` keeps which bar they carry as `bar`
   (`engine/sitesync.py`).
 
+- A card's `category`, in any folder, is what Settings › Website changes when the analyst renames
+  or deletes a category or gives one article another; nothing else of a card it did not write.
+
 A file Azimut would write but does not own is left as it is, and the rest still happens.
 
 **The card** (format `azimut-article/1`): title, summary, date (`YYYY-MM-DD`), category,
@@ -54,7 +57,8 @@ A map page cited by an article shows as a link under that article, never as its 
 map nothing cites keeps its own line so it is never lost. A page (`role: "page"`) is on no
 list: it is in `articles.json` under `pages`, and the default home's header links it. An
 unlisted page (`role: "unlisted"`) is online at its address and nowhere else: in no list, no feed,
-no sitemap, no `articles.json`, and its category adds none; a card that names it never folds it
+no sitemap, no `articles.json`, its head asks search engines not to index it (`notes_web`), and its
+category adds none; a card that names it never folds it
 under itself, and Read the site (`sitesync.survey`) still shows it.
 """
 
@@ -67,12 +71,12 @@ from dataclasses import dataclass, field, replace
 from datetime import date, datetime, timezone
 from email.utils import format_datetime
 from html.parser import HTMLParser
-from typing import Any, Literal, Mapping
+from typing import Any, Iterable, Literal, Mapping
 from urllib.parse import urlsplit
 
 from pydantic import ValidationError
 
-from .notelook import CATEGORY_MAX, NotePlace
+from .notelook import CATEGORY_MAX, NoteLook, NotePlace
 
 CARD = "article.json"
 CARD_FORMAT = "azimut-article/1"
@@ -197,6 +201,10 @@ class Placement:
     role: str | None = None
     #: The place the card carries (`NotePlace`), None for none, or `OWN_PLACE` for the look's own.
     place: NotePlace | None | Literal["own"] = OWN_PLACE
+
+    def role_of(self, look: NoteLook) -> str:
+        """What the note is on the site: the role the dialog chose, else its look's (`NoteLook.role`)."""
+        return self.role if self.role is not None else look.role
 
     def card_place(self, kept: NotePlace | None) -> NotePlace | None:
         """The place the card carries: the one the dialog chose, else ``kept``, the look's."""
@@ -720,6 +728,28 @@ def card_date(data: bytes) -> str:
         return ""
 
 
+def card_title(data: bytes) -> str:
+    """The title a card Azimut wrote carries, on one line, "" when it is no such card or holds none."""
+    if len(data) > MAX_CARD_BYTES:
+        return ""
+    try:
+        card = json.loads(data)
+    except ValueError:
+        return ""
+    return one_line(card.get("title"), MAX_TITLE) if isinstance(card, dict) and card.get("format") == CARD_FORMAT else ""
+
+
+_TITLE = re.compile(rb"<title\b[^>]*>(.*?)</title\s*>", re.S | re.I)
+
+
+def page_title(data: bytes) -> str:
+    """The `<title>` of a page, its entities read and on one line, "" when it has none."""
+    found = _TITLE.search(data)
+    if found is None:
+        return ""
+    return one_line(html.unescape(found.group(1).decode("utf-8", "replace")), MAX_TITLE)
+
+
 def links_of(page: str, site: Site, own: str) -> tuple[str, ...]:
     """The folders of the site a page links to, read from its markup: an `<a>` to the site's own
     address (a folder under it) or to the folder above (`../folder/`), as the page that is one
@@ -1034,8 +1064,86 @@ def sitemap_paths(text: str, site: Site) -> list[str]:
 
 
 def articles_json(lines: list[dict[str, Any]], maps: list[dict[str, Any]], pages: list[dict[str, str]],
-                  site: Site) -> str:
-    """The list as a file, for the analyst's own scripts: every address is on the site, from its root."""
-    payload = {"format": SITE_FORMAT, "site": {"title": site.title, "address": site.address},
-               "articles": lines, "maps": maps, "pages": pages}
+                  site: Site, renamed: Mapping[str, str] | None = None) -> str:
+    """The list as a file, for the analyst's own scripts: every address is on the site, from its root.
+    ``renamed`` is the record of the categories renamed (`RENAMED`), written only when it holds one."""
+    payload: dict[str, Any] = {"format": SITE_FORMAT, "site": {"title": site.title, "address": site.address},
+                               "articles": lines, "maps": maps, "pages": pages}
+    if renamed:
+        payload[RENAMED] = dict(renamed)
     return json.dumps(payload, indent=1, ensure_ascii=False) + "\n"
+
+
+# -- the categories, changed from Settings › Website ------------------------------------------------
+#
+# A category lives in the cards that carry it. Renaming one, deleting one or moving one article to
+# another rewrites the `category` of the cards concerned and nothing else of them, in one commit with
+# the lists (`sitesync.recategorizer`): a card is how a site tells Azimut what an article is, so a card
+# of `azimut-article/1` is changed wherever it lives, a folder made outside Azimut included. Each rename
+# is kept in `articles.json` as `"renamed": {"Old name": "New name"}`, so that the site's own pages and
+# scripts can send a reader from the old category to the new: a chain keeps one step (A to B then B to
+# C records A and B both to C), the record outlives later publishes, and an old name a category of the
+# site carries again leaves it.
+
+RENAMED = "renamed"
+#: The most renames the record keeps, the oldest going first.
+MAX_RENAMED = 200
+
+
+def card_category(data: bytes | None) -> str | None:
+    """The category a card carries, read as a line of the list reads it; None for no card Azimut reads."""
+    if data is None or len(data) > MAX_CARD_BYTES:
+        return None
+    try:
+        card = json.loads(data)
+    except ValueError:
+        return None
+    if not isinstance(card, dict) or card.get("format") != CARD_FORMAT:
+        return None
+    return one_line(card.get("category"), 80)
+
+
+def recategorized(data: bytes, category: str) -> bytes | None:
+    """A card with ``category`` for its own and every other key as it was; None for a file that is no
+    card Azimut reads, which is never changed."""
+    if card_category(data) is None:
+        return None
+    card = json.loads(data)
+    card["category"] = category
+    return (json.dumps(card, indent=1, ensure_ascii=False) + "\n").encode("utf-8")
+
+
+def renamed_of(payload: Any) -> dict[str, str]:
+    """The renames a list file records, each a pair of names read as a card's category is; what does
+    not read as one is dropped."""
+    record = payload.get(RENAMED) if isinstance(payload, dict) else None
+    if not isinstance(record, dict):
+        return {}
+    found: dict[str, str] = {}
+    for old, new in list(record.items())[-MAX_RENAMED:]:
+        old_name, new_name = one_line(old, 80), one_line(new, 80)
+        if old_name and new_name and old_name != new_name:
+            found[old_name] = new_name
+    return found
+
+
+def renamed_after(record: Mapping[str, str], old: str, new: str) -> dict[str, str]:
+    """The record once ``old`` is renamed ``new``: every name that led to ``old`` leads to ``new``, so a
+    chain keeps one step, and a name that would lead to itself goes."""
+    made = {key: new if value == old else value for key, value in record.items() if key != old}
+    made[old] = new
+    kept = {key: value for key, value in made.items() if key != value}
+    return dict(list(kept.items())[-MAX_RENAMED:])
+
+
+def renamed_kept(record: Mapping[str, str], live: Iterable[str]) -> dict[str, str]:
+    """The record without the old names a category of the site carries again."""
+    carried = set(live)
+    return {old: new for old, new in record.items() if old not in carried}
+
+
+def category_kept(name: str) -> str:
+    """What a publish says when it kept the category the site gave its article since the last publish."""
+    if name:
+        return f"It stays in {name}, the category it was given on the site since your last publish."
+    return "It stays with no category, as it was left on the site since your last publish."

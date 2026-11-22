@@ -188,7 +188,7 @@ describe('each section', () => {
   it('Website is the hub of the site: a bar of panels, wider than the other sections, and in them the site, where a note goes, the readers, the update and the legal notice', () => {
     const text = show('website');
     expect([...pane().querySelectorAll('[role="tab"]')].map((node) => node.textContent.trim())).toEqual(
-      ['Overview', 'Identity', 'Hosting', 'Articles', 'Readers', 'Upkeep', 'Make it yours', 'WordPress']);
+      ['Overview', 'Identity', 'Hosting', 'Articles', 'Categories', 'Readers', 'Upkeep', 'Make it yours', 'WordPress']);
     for (const words of ['Site name', 'Tagline', 'Made with Azimut', 'GitHub Pages', 'Count readers', 'Update the site', 'Limits', 'Start a Legal notice page',
       'Start a Privacy page', 'Who writes what', 'Your own home page']) {
       expect(text).toContain(words);

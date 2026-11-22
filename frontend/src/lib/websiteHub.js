@@ -82,23 +82,81 @@ export function siteReadOf(answer) {
   };
 }
 
+/**
+ * The categories of a read worked out again from its items, as the server counts them: each with the listed
+ * articles that carry it, most first, then those a marked page names with no article yet. `pages` is the
+ * read's own list of the pages that name each, by name.
+ */
+export function categoriesFrom(items, pages = {}) {
+  const counts = new Map();
+  for (const item of items) if (item.role === 'article' && item.category) counts.set(item.category, (counts.get(item.category) ?? 0) + 1);
+  for (const [name, named] of Object.entries(pages)) if (named.length && !counts.has(name)) counts.set(name, 0);
+  const fold = (name) => name.toLowerCase();
+  return [...counts].map(([name, count]) => ({ name, count, pages: pages[name] ?? [] }))
+    .sort((a, b) => b.count - a.count || (fold(a.name) < fold(b.name) ? -1 : fold(a.name) > fold(b.name) ? 1 : 0));
+}
+
+/** The pages that name each category of a read, by its name. */
+const pagesOf = (read) => Object.fromEntries(read.categories.map((entry) => [entry.name, entry.pages]));
+
 /** The read without one folder, as the next read would find it: its row gone, the categories counted again, its weight off. */
 export function withoutFolder(read, folder) {
   if (!read) return read;
   const gone = read.items.find((item) => item.folder === folder);
   if (!gone) return read;
   const items = read.items.filter((item) => item !== gone);
-  const listed = new Map();
-  for (const item of items) if (item.role === 'article' && item.category) listed.set(item.category, (listed.get(item.category) ?? 0) + 1);
   const named = `${folder}/`;
   return {
     ...read,
     items,
-    categories: read.categories.filter((entry) => listed.has(entry.name)).map((entry) => ({ ...entry, count: listed.get(entry.name) })),
+    categories: categoriesFrom(items, pagesOf(read)),
     legal: read.legal === named ? '' : read.legal,
     privacy: read.privacy === named ? '' : read.privacy,
     size: { ...read.size, site: read.size.site !== null && gone.bytes !== null ? Math.max(0, read.size.site - gone.bytes) : read.size.site },
   };
+}
+
+/**
+ * The read once a change of categories is on GitHub, as the next read would find it: `rename` gives every card
+ * of `name` the name `to`, `delete` takes `name` off them, `move` gives the card of `folder` the category `to`
+ * ('' for none). The categories are counted again; the pages keep naming what they named.
+ */
+export function withCategories(read, change) {
+  if (!read || !change) return read;
+  const touches = (item) => (change.kind === 'move' ? item.folder === change.folder : item.category === change.name);
+  const to = change.kind === 'delete' ? '' : line(change.to, 60);
+  const items = read.items.map((item) => (touches(item) ? { ...item, category: to } : item));
+  return { ...read, items, categories: categoriesFrom(items, pagesOf(read)) };
+}
+
+/** How many cards of the read a rename or a delete of `name` changes: every card that carries it, whatever its kind. */
+export function carrying(read, name) {
+  return (read?.items ?? []).filter((item) => item.category === name).length;
+}
+
+/**
+ * The rows of the Categories panel: each category of the read (`count` its listed articles, `pages` those that
+ * name it), then each one added here that the read does not hold, `added`, with no article yet.
+ */
+export function categoryRows(read, added = []) {
+  const found = read && !read.truncated ? read.categories : [];
+  const known = new Set(found.map((entry) => entry.name.toLowerCase()));
+  return [...found.map((entry) => ({ ...entry, added: false })),
+    ...added.filter((name) => !known.has(name.toLowerCase())).map((name) => ({ name, count: 0, pages: [], added: true }))];
+}
+
+/** What a category typed to add is up against: '' when it may be added, `site` when the site has it, `added` when it was added here. */
+export function addProblem(name, read, added = []) {
+  const wanted = line(name, 60).toLowerCase();
+  if (!wanted) return 'empty';
+  if ((read?.categories ?? []).some((entry) => entry.name.toLowerCase() === wanted)) return 'site';
+  if (added.some((one) => one.toLowerCase() === wanted)) return 'added';
+  return '';
+}
+
+/** The categories an article's line offers: the site's, then the ones added here, each once. */
+export function categoryChoices(read, added = []) {
+  return categoryRows(read, added).map((row) => row.name);
 }
 
 // -- kinds, chips and counts ------------------------------------------------------------------------
