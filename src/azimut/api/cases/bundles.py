@@ -37,8 +37,9 @@ class ReviewExport(BaseModel):
     #: The picture beside the name: None keeps its look's, "" none, `logo` the exporter's own
     #: logo, else a picture of the case by its id.
     picture: str | None = Field(default=None, max_length=64, pattern=r"^[A-Za-z0-9_-]*$")
-    #: Whether the source videos the page never plays go too (`reviewexport.Contents.videos`).
-    videos: bool = True
+    #: Whether the source videos the page never plays go too (`reviewexport.Contents.videos`): not
+    #: unless asked.
+    videos: bool = False
 
 class BundleUpload(BundlePassword):
     upload_id: str = Field(min_length=32, max_length=32)

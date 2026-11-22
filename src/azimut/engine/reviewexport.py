@@ -29,7 +29,8 @@ and no stranger's HTML runs anywhere. What it holds is one article, never the wh
 
 **Source videos** (`Contents.videos`): a video the page only cites, never plays nor shows a still
 of (a frame's video, a proof's footage, a kept post's video with a still of its own), may leave its
-file behind, its record, sidecar and links still travelling; past `SITE_LIMIT` the dialog starts so.
+file behind, its record, sidecar and links still travelling. Its file stays behind unless asked for:
+the page and its maps read the same without it, and only a reviewer checking frames uses it.
 
 **What stays**: the rest of the case, its Trash and its jobs, and what the note's earlier
 publishing recorded (its editions, GitHub, WordPress and site records): the receiver starts
@@ -90,8 +91,8 @@ SUFFIX = ".azimut.zip"
 STAGING_PREFIX = ".review-"
 #: How many names of each group the dialog lists; its counts stay whole.
 MAX_NAMES = 12
-#: The largest file osintmethat.com/contribute takes, 1 GB as its form says it: past it the dialog
-#: starts with the source videos left behind, and says so.
+#: The largest file osintmethat.com/contribute takes, 1 GB as its form says it, which the dialog
+#: says a file passes.
 SITE_LIMIT = 1073741824
 
 #: The groups the dialog lists what leaves under, in its order: the key and the words.
@@ -172,8 +173,6 @@ class Contents:
     #: The source videos the page only cites and never plays or shows a frame of, by their file,
     #: with its size: a frame's video, a proof's footage, a kept post's video with its own still.
     videos: dict[str, int] = field(default_factory=dict)
-    #: Whether their files go too; without them their records, sidecars and links still travel.
-    send_videos: bool = True
 
     @property
     def size(self) -> int:
@@ -699,10 +698,10 @@ def exported_look(case: "Case", note_id: str, *, author: str | None = None,
 
 
 def contents(case: "Case", note_id: str, *, author: str | None = None, picture: str | None = None,
-             videos: bool = True) -> Contents:
+             videos: bool = False) -> Contents:
     """What exporting ``note_id`` for review carries, and what it leaves out: the one reading
-    the dialog shows and the export writes. ``videos`` False leaves the files of the source videos
-    the page never plays behind (`Contents.videos`)."""
+    the dialog shows and the export writes. The files of the source videos the page never plays
+    stay behind unless ``videos`` (`Contents.videos`)."""
     title = _note_title(case, note_id)
     look, logo = exported_look(case, note_id, author=author, picture=picture)
     reading = _Reading(case, note_id)
@@ -731,7 +730,6 @@ def _source_videos(case: "Case", reading: _Reading, send: bool) -> None:
         rel = str(attrs.get("path") or "")
         if attrs.get("kind") == "video" and rel in found.files:
             found.videos[rel] = found.files[rel]
-    found.send_videos = send
     if not send:
         for rel in found.videos:
             found.files.pop(rel, None)
@@ -772,7 +770,8 @@ def report_name() -> str:
 
 def preview(case: "Case", note_id: str, *, picture: str | None = None) -> dict[str, Any]:
     """What the dialog shows before the press: what leaves, what stays, who signs. ``size`` counts
-    the source videos (``videos``), which go unless the whole would pass `SITE_LIMIT` (``send_videos``)."""
+    the source videos (``videos``), which the dialog leaves behind until they are asked for, and
+    ``limit`` is what the site takes (`SITE_LIMIT`)."""
     look = notelook.stored(case, note_id) or notelook.DEFAULT
     own = look.author_image if look.author_image and picture_of(case, look.author_image) is not None else ""
     has_logo = config.signature_path().is_file()
@@ -785,7 +784,7 @@ def preview(case: "Case", note_id: str, *, picture: str | None = None) -> dict[s
     chosen = picture if picture is not None else (own or (LOGO if has_logo else ""))
     if chosen not in [one["value"] for one in choices]:
         chosen = ""
-    found = contents(case, note_id, picture=chosen)
+    found = contents(case, note_id, picture=chosen, videos=True)
     return {
         "title": found.title,
         "file": output_name(found.title),
@@ -794,7 +793,6 @@ def preview(case: "Case", note_id: str, *, picture: str | None = None) -> dict[s
         "map_count": len(found.maps),
         "size": found.size,
         "videos": {"count": len(found.videos), "size": sum(found.videos.values())},
-        "send_videos": not found.videos or found.size <= SITE_LIMIT,
         "limit": SITE_LIMIT,
         "internal": found.internal,
         "author": look.author or report_name(),
@@ -816,10 +814,10 @@ def output_path(title: str) -> Path:
 
 
 def export(case: "Case", note_id: str, *, author: str | None = None, picture: str | None = None,
-           videos: bool = True, output: Path | None = None) -> Path:
+           videos: bool = False, output: Path | None = None) -> Path:
     """Write the bundle of one note for review and return its path. The source case is only
     read; the copy is built beside the bundles and gone once this returns, however it ends.
-    ``videos`` False leaves the source videos' files behind (`contents`)."""
+    The source videos' files go only with ``videos`` (`contents`)."""
     found = contents(case, note_id, author=author, picture=picture, videos=videos)
     config.bundles_dir().mkdir(parents=True, exist_ok=True)
     target = Path(output) if output is not None else output_path(found.title)
@@ -1115,7 +1113,7 @@ def _addressed(case: "Case", text: str, filed: dict[str, str]) -> str:
 
 
 def queue(case: "Case", note_id: str, *, author: str | None = None, picture: str | None = None,
-          videos: bool = True) -> dict[str, Any]:
+          videos: bool = False) -> dict[str, Any]:
     """Queue one export for review, once what it was asked is checked; the file is named now."""
     title = _note_title(case, note_id)
     exported_look(case, note_id, author=author, picture=picture)
@@ -1133,7 +1131,7 @@ def _handle(case: "Case", job: dict[str, Any]) -> None:
     payload = job.get("payload") or {}
     try:
         export(case, str(payload.get("note") or ""), author=payload.get("author"), picture=payload.get("picture"),
-               videos=payload.get("videos") is not False, output=Path(str(payload.get("output") or "")))
+               videos=payload.get("videos") is True, output=Path(str(payload.get("output") or "")))
     except (ReviewExportError, bundles.BundleError) as exc:
         raise workqueue.JobRefused(str(exc)) from exc
 

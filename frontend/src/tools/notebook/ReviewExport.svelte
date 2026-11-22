@@ -15,7 +15,7 @@
   import { downloadBundle } from '../../lib/bundles.js';
   import { formatSize } from '../../lib/trash.js';
   import {
-    CONTRIBUTE, METADATA, VIDEOS_HELP, exportForReview, namesWords, readReview, revealBundles, sizeSaid, staysWords,
+    CONTRIBUTE, METADATA, VIDEOS_HELP, VIDEOS_WORDS, exportForReview, namesWords, readReview, revealBundles, sizeSaid, staysWords,
   } from '../../lib/notes/reviewExport.js';
 
   let {
@@ -34,8 +34,8 @@
   let author = $state('');
   let picture = $state('');
   let failed = $state('');
-  // the source videos' files go unless the whole would pass what the site takes (`send_videos`)
-  let sendVideos = $state(true);
+  // the source videos' files stay behind until asked for: the page reads the same without them
+  let sendVideos = $state(false);
   let reading = 0;
   const said = $derived(sizeSaid(shown, sendVideos));
 
@@ -50,10 +50,7 @@
     try {
       const answer = await readReview(caseId, noteId, choice);
       if (mine !== reading) return;
-      if (shown === null) {
-        author = answer.author ?? '';
-        sendVideos = answer.send_videos !== false;
-      }
+      if (shown === null) author = answer.author ?? '';
       shown = answer;
       picture = answer.picture ?? '';
     } catch (error) {
@@ -124,7 +121,7 @@
       </ul>
       {#if shown.videos?.count}
         <label class="review-videos" title={VIDEOS_HELP}>
-          <input type="checkbox" bind:checked={sendVideos} disabled={busy} /> Source videos ({formatSize(shown.videos.size)})</label>
+          <input type="checkbox" bind:checked={sendVideos} disabled={busy} /> Source videos ({formatSize(shown.videos.size)}): {VIDEOS_WORDS}</label>
       {/if}
       {#if said.line}<p class="review-limit" role="status">{said.line}</p>{/if}
     </section>

@@ -32,8 +32,12 @@ it('says the site\'s limit as its form says it', () => {
 it('weighs what leaves with the box as it stands, and says the limit only when it matters', () => {
   const GB = 1024 ** 3;
   const shown = { size: GB + 10, videos: { count: 1, size: 100 }, limit: GB };
-  expect(sizeSaid(shown, true)).toEqual({ size: GB + 10, line: 'This is over the 1 GB the site takes.' });
-  expect(sizeSaid(shown, false).size).toBe(GB - 90);
-  expect(sizeSaid(shown, false).line).toMatch(/^osintmethat\.com\/contribute takes files up to 1 GB, so the source videos stay behind/);
-  expect(sizeSaid({ ...shown, size: 200 }, false)).toEqual({ size: 100, line: '' });
+  // left behind, it fits; ticked, it is the videos that take it past
+  expect(sizeSaid(shown, false)).toEqual({ size: GB - 90, line: '' });
+  expect(sizeSaid(shown, true)).toEqual({ size: GB + 10, line: 'With them it is over the 1 GB osintmethat.com/contribute takes.' });
+  // past it even without them, whatever the box
+  const heavy = { ...shown, size: GB + 500 };
+  expect(sizeSaid(heavy, false).line).toBe('This is over the 1 GB the site takes.');
+  expect(sizeSaid(heavy, true).line).toBe('This is over the 1 GB the site takes.');
+  expect(sizeSaid({ ...shown, size: 200 }, true)).toEqual({ size: 200, line: '' });
 });
