@@ -19,9 +19,10 @@ internal passage blanked before anything is read (`notes_markdown.strip_internal
 and refused if one were still there. Guidance lines and HTML comments are dropped,
 raw HTML is shown as text, a case reference is its words with no record id, and a
 link to this machine, a private network or a case path keeps its words and loses
-its address. On a site, a link to a web map of the case that the site holds opens the map's
-page there (`Folder.maps`, `notelinks.SiteMaps`); elsewhere it is its words. Pictures are encoded again without their EXIF, GPS or text chunks, and
-a clip is copied without its container's metadata (`ffmpeg -map_metadata -1`).
+its address. On a site, a link to a web map of the case that the site holds opens the
+map's page there (`Folder.maps`, `notelinks.SiteMaps`); elsewhere it is its words.
+Pictures are encoded again without their EXIF, GPS or text chunks, and a clip is
+copied without its container's metadata (`ffmpeg -map_metadata -1`).
 
 **Its weight.** About 25 MB at most (`MAX_BYTES`). A picture is at most 2400 pixels
 on its long side, a JPEG unless it shows through somewhere. A clip goes in only when
@@ -114,12 +115,12 @@ from . import (
     noteannexes,
     notecharts,
     notefill,
+    notelinks,
     notes_chart_wall,
     notes_charts,
     notes_infographic,
     notes_maps,
     notes_style,
-    notelinks,
     notes_tables,
     notesources,
     pdffonts,
