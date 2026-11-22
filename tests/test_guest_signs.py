@@ -1,7 +1,7 @@
 """A note someone else wrote (`NoteLook.author`) is signed with their name and picture wherever it is
-read in HTML (`notefill.signing`): the Notebook's Page preview, an HTML file, a map page and a
-WordPress draft. The receiving desk's own name, logo and handle never stand by it, however its
-Settings fill them. The PDF keeps the analyst's own (`tests/test_site_author.py`)."""
+exported or read (`notefill.signing`): the PDF, the Notebook's Page preview, an HTML file, a map page
+and a WordPress draft. The receiving desk's own name, role, organisation, logo, handle and handwritten
+signature never stand by it, however its Settings fill them."""
 
 from __future__ import annotations
 
@@ -9,9 +9,10 @@ import io
 
 import pytest
 from PIL import Image
+from pypdf import PdfReader
 
 from azimut import config
-from azimut.engine import notes_html, notes_web, notes_wordpress, notelook
+from azimut.engine import notefill, noteeditions, notes_html, notes_pdf, notes_web, notes_wordpress, notelook
 from azimut.workspace import Case
 
 from test_notes_pdf import exports_of
@@ -19,6 +20,8 @@ from test_notes_pdf import exports_of
 GUEST = "Guest Analyst"
 RECEIVER = "Receiving Desk"
 HANDLE = "@receivingdesk"
+ROLE = "Desk editor"
+DESK = "Receiving Media"
 
 
 def _ok(response, what: str):
@@ -30,7 +33,8 @@ def _ok(response, what: str):
 def desk(client):
     """A case whose Settings name the receiving desk, its handle and its logo, and in it the
     guest's picture."""
-    config.update_settings(lambda settings: settings.update(report_name=RECEIVER, signature_handle=HANDLE))
+    config.update_settings(lambda settings: settings.update(report_name=RECEIVER, signature_handle=HANDLE,
+                                                            report_role=ROLE, report_organisation=DESK))
     config.signature_path().parent.mkdir(parents=True, exist_ok=True)
     Image.new("RGB", (120, 120), (200, 40, 40)).save(config.signature_path())
     cid = _ok(client.post("/api/cases", json={"name": "Desk"}), "case")["id"]
@@ -110,3 +114,34 @@ def test_a_map_page_signs_with_the_guests_name_and_face_and_no_handle(client, de
     folder = notes_web.build(Case.open(cid), note)
     face = next(name for name in folder.files if name.startswith(notes_html.AUTHOR_FACE))
     _signed_by_the_guest(folder.files[notes_web.INDEX].decode("utf-8"), face=face)
+
+
+def test_the_pdf_signs_with_the_guests_name_and_face(client, desk):
+    case = Case.open(desk["cid"])
+    config.report_signature_path().write_bytes(config.signature_path().read_bytes())
+    look = notelook.NoteLook.model_validate({"style": "report", "author": GUEST, "author_image": desk["face"],
+                                             "cover": {"on": True, "marks": ["logo", "signature"]},
+                                             "header": {"right": "azimut:my-logo"}})
+    printed = notes_pdf.render(case, title="Pier", text="Smoke over the pier, by {name}.\n", look=look)
+    words = " ".join(" ".join((page.extract_text() or "").split())
+                     for page in PdfReader(io.BytesIO(printed.pdf)).pages)
+    assert f"By {GUEST}" in words and f"by {GUEST}." in words
+    for receiver in (RECEIVER, ROLE, DESK, HANDLE):
+        assert receiver not in words
+    # the guest's face stands where the logo would: the receiver's logo and signature nowhere
+    shown = _pdf_pictures(printed.pdf)
+    face = notefill.case_picture(case, desk["face"])
+    assert face is not None
+    with Image.open(face) as picture:
+        guest_size = picture.size
+    assert guest_size in shown
+    assert (120, 120) not in shown  # the receiver's logo and its handwritten signature, both that square
+    # the text its editions compare names the guest too
+    said = noteeditions.printed_now(case, title="Pier", text="By {name}.\n", look=look, note_id="", resolve=None)
+    assert f"By {GUEST}." in said and RECEIVER not in said
+
+
+def _pdf_pictures(data: bytes) -> list[tuple[int, int]]:
+    """The size of every picture a PDF holds."""
+    reader = PdfReader(io.BytesIO(data))
+    return [(int(image.image.width), int(image.image.height)) for page in reader.pages for image in page.images]

@@ -496,7 +496,11 @@ def render(
     look = look or DEFAULT_LOOK
     theme = notes_style.theme_for(look)
     day = date.fromisoformat(look.cover.date) if look.cover.date else (created or datetime.now()).date()
-    identity = identity if identity is not None else notefill.Identity.from_settings()
+    # a note someone else wrote is signed with their name (`notefill.signing`), and their picture
+    # stands where the analyst's logo would
+    identity, look = notefill.signing(look, identity)
+    if identity.guest and look.author_image and case is not None:
+        identity = replace(identity, logo=notefill.case_picture(case, look.author_image))
     values = identity.values(day)
     #: Each placeholder left empty, with the first line it stands on.
     empty: dict[str, int] = {}
@@ -1674,7 +1678,9 @@ class _Builder:
         pdf = self.pdf
         if self.look.signed != "end" or pdf.signer is None:
             return
-        height = pdf.signature_height()
+        # a guest's picture stands by their name here as on the cover
+        face = pdf.card_logo() if pdf.signer.guest else None
+        height = pdf.signature_height(logo=face)
         if not height:
             return
         self._end_entry()
@@ -1686,7 +1692,7 @@ class _Builder:
         pdf.set_line_width(0.25)
         pdf.line(left, pdf.get_y(), left + 30.0, pdf.get_y())
         pdf.ln(4)
-        pdf.signature_block(left, pdf.epw)
+        pdf.signature_block(left, pdf.epw, logo=face)
 
     def _plain_title(self, title: str) -> None:
         pdf = self.pdf

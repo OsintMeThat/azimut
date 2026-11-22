@@ -82,7 +82,7 @@ from urllib.parse import unquote, urlsplit, urlunsplit
 
 from PIL import Image, ImageChops, ImageColor, ImageDraw, ImageFilter, ImageFont, ImageOps, UnidentifiedImageError
 
-from . import dirswap, notelinks, notelook, notes_maps, notes_style, pdffonts, siteatlas
+from . import dirswap, notefill, notelinks, notelook, notes_maps, notes_style, pdffonts, siteatlas
 from . import notes_html as html_engine
 from . import site as site_engine
 from . import notes_markdown as md
@@ -428,7 +428,7 @@ def _site_card(placement: site_engine.Placement, case: "Case", look: NoteLook, r
     role = placement.role_of(look)
     picture = None
     if look.list_image:
-        picture = html_engine.case_picture(case, look.list_image)
+        picture = notefill.case_picture(case, look.list_image)
         if picture is None:
             said.append("The list picture is no longer in the case or could not be read; the cover picture "
                         "stands in the site's list.")

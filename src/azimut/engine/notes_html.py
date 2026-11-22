@@ -416,27 +416,13 @@ AUTHOR_FACE_SIDE = 96
 AUTHOR_FACE_QUALITY = 86
 
 
-def case_picture(case: "Case", entity_id: str) -> Path | None:
-    """The file of a case picture a look names (for the site's list, beside its author's name), None
-    when it is no picture there any more."""
-    record = case.get_entity(entity_id)
-    attrs = (record or {}).get("attrs") or {}
-    if not record or not attrs.get("path") or attrs.get("kind") in ("video", "audio"):
-        return None
-    try:
-        path = case.resolve_inside(str(attrs["path"]))
-    except Exception:
-        return None
-    return path if path.is_file() else None
-
-
 def author_face(case: "Case", entity_id: str) -> tuple[str, bytes] | None:
     """The author's picture as a page shows it, a file of a web folder or inlined where there is
     none: its file name and its bytes, a square of `AUTHOR_FACE_SIDE` cut from the middle, upright,
     made again from its pixels so that nothing the file held besides them (its place, its camera,
     its author, its comments) goes online. None when it is no picture in the case any more or
     cannot be read."""
-    path = case_picture(case, entity_id)
+    path = notefill.case_picture(case, entity_id)
     if path is None:
         return None
     side = AUTHOR_FACE_SIDE

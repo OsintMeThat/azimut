@@ -293,13 +293,13 @@ def test_with_no_guest_the_card_is_the_analysts_whatever_picture_the_folder_hold
     assert '<span class="az-signer">Alex Doe</span>' in body and "az-face" not in body
 
 
-def test_the_html_report_signs_the_guest_and_the_pdf_keeps_the_analyst(analyst):
+def test_the_html_report_and_the_pdf_sign_the_guest(analyst):
     look = notelook.NoteLook.model_validate({"style": "report", "author": GUEST, "signed": "title", "cover": ALL_MARKS})
     report = notes_html.render(None, title="Bridge", text=TEXT, identity=analyst, look=look).html.decode()
     body = report.split("</style>")[-1]
-    # every page read in HTML is signed by the look's author (`notefill.signing`), never the analyst
+    # every export is signed by the look's author (`notefill.signing`), never the analyst
     assert f"By {GUEST}" in body and "Alex Doe" not in report and "Open Desk" not in report
     assert "az-my-logo" not in body
     printed = notes_pdf.render(None, title="Bridge", text=TEXT, identity=analyst, look=look).pdf
     words = " ".join(" ".join((page.extract_text() or "").split()) for page in PdfReader(io.BytesIO(printed)).pages)
-    assert "Alex Doe" in words and GUEST not in words
+    assert f"By {GUEST}" in words and "Alex Doe" not in words and "Open Desk" not in words and "Analyst" not in words
