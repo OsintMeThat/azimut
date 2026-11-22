@@ -29,7 +29,8 @@ the site it goes to (`api/notes.py`) and for the delete preview (`engine/uses.py
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any, Iterator
+from dataclasses import dataclass, field
+from typing import TYPE_CHECKING, Any, Iterator, Mapping
 from urllib.parse import urlsplit
 
 from ..workspace import CaseError
@@ -178,6 +179,24 @@ def linked_maps(case: "Case", text: str) -> list[str]:
         if known[value]:
             linked.append(value)
     return list(dict.fromkeys(linked))
+
+
+@dataclass(frozen=True)
+class SiteMaps:
+    """Where the web maps a page links to stand on the site it is published to: each map's
+    address there, by the map's id (``ids``) and by the `page_key` of every address the map
+    was published at (``addresses``), so a written link to it on another site finds it too."""
+
+    ids: Mapping[str, str] = field(default_factory=dict)
+    addresses: Mapping[str, str] = field(default_factory=dict)
+
+    def of(self, entity_id: str) -> str:
+        """The address on the site of the map a mention names, "" when it is none there."""
+        return self.ids.get(entity_id, "")
+
+    def instead_of(self, href: str) -> str:
+        """The address on the site of the map a written link is to, "" when it is none there."""
+        return self.addresses.get(page_key(href), "") if self.addresses else ""
 
 
 def sync_mentions(case: "Case", note_id: str, text: str) -> None:

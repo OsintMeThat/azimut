@@ -3,12 +3,21 @@ was published at (`notelinks.linked_maps`)."""
 
 from __future__ import annotations
 
+import dataclasses
+import json
+from pathlib import Path
 from typing import Any
 
-from azimut.engine import notelinks, notes_markdown
+import pytest
+from PIL import Image
+
+from azimut.engine import githubpages, notelinks, notes_maps, notes_markdown, site, sitesync
 from azimut.workspace import Case
 
+from githubfake import FakeGitHub
+from mapfixture import fixture_map
 from notecase import make_case, make_note
+from test_site_publish import DAY, _card, _connect
 
 MAP_LOOK = {"style": "article", "web": "map"}
 
@@ -94,3 +103,149 @@ def test_the_key_two_addresses_of_one_page_share():
     assert key("https://octo.github.io/articles/myindex.html") == "octo.github.io/articles/myindex.html"
     for nothing in ("", "mailto:a@b.org", "azimut://entity/e_1", "https://", "https://[bad/"):
         assert key(nothing) == ""
+
+
+# -- published to a site: the link opens the map's page there ---------------------------------------
+
+SITE = "https://octo.github.io/articles/"
+TOLD = 'target="_blank" rel="noopener noreferrer"'
+
+
+@pytest.fixture()
+def fake(monkeypatch):
+    stand_in = FakeGitHub()
+    real = githubpages.client
+    monkeypatch.setattr(githubpages, "client", lambda transport=None: real(stand_in.transport()))
+    monkeypatch.setattr(githubpages.time, "sleep", lambda seconds: None)
+    monkeypatch.setattr("azimut.api.notes._now", lambda: DAY.astimezone())
+    return stand_in
+
+
+@pytest.fixture(autouse=True)
+def an_empty_memory():
+    sitesync._kept.clear()
+    sitesync._plain.clear()
+    sitesync._weight = 0
+
+
+def _drawn_map(client, cid: str, monkeypatch, tmp_path, title: str = "The road") -> str:
+    """A web map whose map draws, so its card on the site says it is one."""
+    ground = tmp_path / "ground.png"
+    Image.new("RGB", (400, 300), (40, 160, 90)).save(ground, "PNG")
+    monkeypatch.setattr(notes_maps, "derive", lambda *_, **__: dataclasses.replace(fixture_map(), ground=ground))
+    made = make_note(client, cid, title=title, content="The road, in one line.\n\n::: map\ntitle: The road\nlayer: Front\n:::\n")
+    assert client.put(f"/api/cases/{cid}/notes/{made['id']}/look", json=MAP_LOOK).status_code == 200
+    return made["id"]
+
+
+def _publish(client, cid: str, note_id: str, short: str, role: str = "article") -> dict[str, Any]:
+    answer = client.post(f"/api/cases/{cid}/notes/{note_id}/github", json={"short_name": short, "role": role})
+    assert answer.status_code == 200 and answer.json()["published"], answer.text
+    return answer.json()
+
+
+def _maps(client, cid: str, note_id: str) -> list[dict[str, str]]:
+    answer = client.get(f"/api/cases/{cid}/notes/{note_id}/github/maps")
+    assert answer.status_code == 200, answer.text
+    return answer.json()["maps"]
+
+
+def test_a_link_to_a_map_the_site_holds_opens_its_page_there_and_folds_it_under_the_article(
+        client, fake, monkeypatch, tmp_path):
+    fake.make_repo()
+    _connect(client)
+    cid = make_case(client, "Road")
+    road = _drawn_map(client, cid, monkeypatch, tmp_path)
+    _publish(client, cid, road, "road-map")
+    article = make_note(client, cid, title="Port strike", content=f"Smoke over the pier: see [[entity:{road}|the road map]].\n")
+    assert _maps(client, cid, article["id"]) == [
+        {"id": road, "title": "The road", "address": f"{SITE}road-map/", "short": ""}]
+    _publish(client, cid, article["id"], "port-strike")
+    files = fake.files()
+    page = files["port-strike/index.html"].decode()
+    assert f'<a class="az-ref" href="{SITE}road-map/" {TOLD}>the road map</a>' in page
+    # the site reads it as a link to its own map: the card names it, the list folds it, the cover badges it
+    assert _card(files, "port-strike")["links"] == ["road-map"]
+    lines = json.loads(files["articles.json"])["articles"]
+    assert [line["title"] for line in lines] == ["Port strike"]
+    assert lines[0]["maps"] == [{"title": "The road", "address": "/road-map/"}]
+    # and a site that moves takes the link with it
+    moved = site.readdressed(files["port-strike/index.html"], SITE, "https://desk.example.org/", ["road-map", "port-strike"])
+    assert b'href="https://desk.example.org/road-map/"' in moved and f'href="{SITE}'.encode() not in moved
+
+
+def test_a_map_not_on_the_site_yet_is_said_its_link_reads_as_words_and_a_later_publish_links_it(
+        client, fake, monkeypatch, tmp_path):
+    fake.make_repo()
+    _connect(client)
+    cid = make_case(client, "Road")
+    road = _drawn_map(client, cid, monkeypatch, tmp_path)
+    article = make_note(client, cid, title="Port strike", content=f"See [[entity:{road}|the road map]].\n")
+    assert _maps(client, cid, article["id"]) == [{"id": road, "title": "The road", "address": "", "short": ""}]
+    _publish(client, cid, article["id"], "port-strike")
+    page = fake.files()["port-strike/index.html"].decode()
+    assert "the road map" in page and "road-map" not in page
+    assert _card(fake.files(), "port-strike")["links"] == []
+    # the map goes up by hand under its own name: the article's next publish finds its address
+    _publish(client, cid, road, "the-road")
+    assert _maps(client, cid, article["id"])[0]["address"] == f"{SITE}the-road/"
+    _publish(client, cid, article["id"], "port-strike")
+    page = fake.files()["port-strike/index.html"].decode()
+    assert f'<a class="az-ref" href="{SITE}the-road/" {TOLD}>the road map</a>' in page
+
+
+def test_a_map_published_to_another_site_only_offers_the_name_it_has_there(client, fake, monkeypatch, tmp_path):
+    fake.make_repo()
+    _connect(client)
+    cid = make_case(client, "Road")
+    road = _drawn_map(client, cid, monkeypatch, tmp_path)
+    Case.open(cid).update_entity(road, {"attrs": {"editions": [
+        _published("the-road", "https://octo.github.io/old/the-road/", repository="octo/old")]}})
+    article = make_note(client, cid, title="Port strike", content=f"See [[entity:{road}|the road map]].\n")
+    assert _maps(client, cid, article["id"]) == [{"id": road, "title": "The road", "address": "", "short": "the-road"}]
+
+
+def test_a_written_link_to_the_map_on_another_site_takes_its_address_on_this_one(client, fake, monkeypatch, tmp_path):
+    fake.make_repo()
+    _connect(client)
+    cid = make_case(client, "Road")
+    road = _drawn_map(client, cid, monkeypatch, tmp_path)
+    _publish(client, cid, road, "road-map")
+    case = Case.open(cid)
+    kept = case.get_entity(road)["attrs"]["editions"]
+    case.update_entity(road, {"attrs": {"editions": [
+        *kept, _published("road", "https://octo.github.io/old/road/", repository="octo/old")]}})
+    old = "https://octo.github.io/old/road/"
+    text = f"The [road map]({old}#top), also at {old} and [elsewhere](https://example.org/road/).\n"
+    article = make_note(client, cid, title="Port strike", content=text)
+    assert [row["id"] for row in _maps(client, cid, article["id"])] == [road]
+    _publish(client, cid, article["id"], "port-strike")
+    files = fake.files()
+    page = files["port-strike/index.html"].decode()
+    assert f'<a href="{SITE}road-map/" {TOLD}>road map</a>' in page
+    # the address written bare is the one it now opens
+    assert f'<a href="{SITE}road-map/" {TOLD}>{SITE}road-map/</a>' in page
+    assert old not in page and 'href="https://example.org/road/"' in page
+    assert _card(files, "port-strike")["links"] == ["road-map"]
+
+
+def test_a_map_named_only_in_an_internal_passage_is_none_of_the_public_pages(client, fake, monkeypatch, tmp_path):
+    fake.make_repo()
+    _connect(client)
+    cid = make_case(client, "Road")
+    road = _drawn_map(client, cid, monkeypatch, tmp_path)
+    article = make_note(client, cid, title="Port strike",
+                        content=f"Public words.\n\n> [!internal]\n> Later: [[entity:{road}|the road map]].\n")
+    assert _maps(client, cid, article["id"]) == []
+
+
+def test_off_a_site_a_link_to_a_map_is_its_words_as_before(client, monkeypatch, tmp_path):
+    cid = make_case(client, "Road")
+    road = _drawn_map(client, cid, monkeypatch, tmp_path)
+    Case.open(cid).update_entity(road, {"attrs": {"editions": [_published("road-map", f"{SITE}road-map/")]}})
+    article = make_note(client, cid, title="Port strike", content=f"See [[entity:{road}|the road map]].\n")
+    answer = client.post(f"/api/cases/{cid}/notes/html", json={"notes": [article["id"]], "edition": "public"})
+    assert answer.status_code == 200, answer.text
+    written = answer.json()["written"][0]
+    page = Path(answer.json()["path"], written["file"]).read_text(encoding="utf-8")
+    assert "the road map" in page and "road-map" not in page

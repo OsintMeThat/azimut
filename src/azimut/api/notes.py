@@ -84,6 +84,11 @@ another's, and the same check names what it holds and a free short name beside i
 repository on its press and compares; there is nothing to show on this machine, so the dialog
 opens the address instead.
 
+A link to a web map of the case (`notelinks.linked_maps`) opens the map's page on the same site,
+at the site's address, once a record of the map names that repository and branch (`_site_maps`);
+until then it reads as its words. `/github/maps` lists the maps the note links to and the address
+each has there, "" for none yet, so the dialog can offer to publish them first. It reads the case only.
+
 **The site.** The same press also keeps the analyst's website up to date (`engine/site.py`):
 the folder carries a card and the picture of its line in the site's list, with the category and
 the role (article, page or unlisted) the dialog chose, stored in the note's look; and in the same commit
@@ -1952,6 +1957,77 @@ def _place_kept(case: Case, note_id: str, place: notelook.NotePlace | None | Lit
         notelook.save(case, note_id, look.model_copy(update={"place": place}))
 
 
+def _public_text(case: Case, note_id: str) -> str:
+    """What the note's public edition prints, as text: its chapters in place, its internal passages out."""
+    title, text = _note_source(case, note_id)
+    return notes_markdown.printed_source(
+        notes_markdown.expand(title, text, resolve=_resolver(case), note_id=note_id, public=True))
+
+
+def _on_site(record: dict[str, Any], repository: str, branch: str) -> bool:
+    """Whether a record is of a publish to the site of ``repository`` and ``branch``."""
+    return (record.get("format") == GITHUB and record["repository"].casefold() == repository.casefold()
+            and record["branch"] == branch)
+
+
+def _site_maps(case: Case, note_id: str, repository: str, branch: str, base: str,
+               root: str | None = None) -> tuple[notelinks.SiteMaps, list[str]]:
+    """Where the web maps the note's public edition links to stand on the site of ``repository`` and
+    ``branch``, served at ``base``: their addresses there, by the site's address now rather than the one
+    a record kept; and the ids of every map it links to, in order, those the site does not hold among
+    them. ``root`` is the folder the site is served from, when known: a map published outside it is none."""
+    ids: dict[str, str] = {}
+    addresses: dict[str, str] = {}
+    linked = [map_id for map_id in notelinks.linked_maps(case, _public_text(case, note_id)) if map_id != note_id]
+    for map_id in linked:
+        records = _read_editions(case, map_id)
+        here = next((record for record in records if _on_site(record, repository, branch)
+                     and (root is None or record["path"] == f"{root}{record['file']}")), None)
+        try:
+            address = githubpages.article_address(base, here["file"]) if here is not None and base else ""
+        except web_engine.NotesWebError:
+            address = ""
+        if not address:
+            continue
+        ids[map_id] = address
+        for record in records:
+            key = notelinks.page_key(str(record.get("address") or ""))
+            if key:
+                addresses.setdefault(key, address)
+    return notelinks.SiteMaps(ids, addresses), linked
+
+
+def _map_short(case: Case, map_id: str) -> str:
+    """The short name a map not on the site yet would be published under there: the one it has on
+    another site, else the last part of the address a web folder of it was made for; "" for none."""
+    for record in _read_editions(case, map_id):
+        if record.get("format") == GITHUB:
+            return str(record["file"])
+        if record.get("format") == "web" and record.get("address"):
+            last = str(record["address"]).rstrip("/").rsplit("/", 1)[-1]
+            if githubpages.SHORT.match(last):
+                return last
+    return ""
+
+
+@router.get("/{case_id}/notes/{note_id}/github/maps")
+def github_maps(case_id: str, note_id: str) -> dict[str, Any]:
+    """The web maps the note's public edition links to, in order, each with its address on the site of
+    Settings › Website, "" while the site does not hold it, and the short name it would go up under.
+    The publish dialog reads it to say which maps are not on the site yet. Reads the case and the
+    settings only."""
+    from .publishing import github_settings
+
+    case = get_case(case_id)
+    _require_note(case, note_id)
+    target = github_settings()
+    if not target.account:
+        return {"maps": []}
+    found, linked = _site_maps(case, note_id, f"{target.account}/{target.repo}", target.branch, target.base)
+    return {"maps": [{"id": map_id, "title": _note_title(case, map_id), "address": found.of(map_id),
+                      "short": "" if found.of(map_id) else _map_short(case, map_id)} for map_id in linked]}
+
+
 @router.get("/{case_id}/notes/{note_id}/place")
 def suggested_place(case_id: str, note_id: str) -> dict[str, Any]:
     """The point the publish dialog offers for the note's place on the site's map, or None
@@ -2052,11 +2128,13 @@ def github_publish(case_id: str, note_id: str, body: GitHubPublishIn) -> dict[st
             now = _now()
             placement = site_engine.Placement(site_for(target, pages.url), category=body.category, role=body.role,
                                               place=body.chosen_place)
+            # each link to a map the site holds opens its page there; one it does not hold yet reads as words
+            maps, _ = _site_maps(case, note_id, repository, target.branch, pages.url, pages.root)
             try:
                 made = web_engine.build(
                     case, note_id, base_url=where, diagrams=diagrams, round_pov=body.round_pov, changes=changes,
                     earlier=_read_editions(case, note_id), homonym=len(peers.get(title.casefold(), [])) >= 2,
-                    now=now, live=not body.offline_maps, placement=placement,
+                    now=now, live=not body.offline_maps, placement=placement, maps=maps,
                 )
             except (html_engine.NotesHtmlError, web_engine.NotesWebError) as exc:
                 raise HTTPException(status_code=422, detail=str(exc)) from exc
