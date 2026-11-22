@@ -7739,6 +7739,15 @@ to about 150 m for that file only. `POST /notes/html/preview` makes the Page pan
 lighter copy, written nowhere and sandboxed. Inside `::: steps` and `::: story` every
 picture opens a step; the PDF prints both as written, each picture then its words.
 
+**Double-click to go there.** As a TeX viewer takes its source there, a double-click on
+the Page pane's preview takes the note to the line it comes from, the cursor on the word
+double-clicked in that paragraph. The PDF preview says where each block starts on its
+page and its line (`X-Note-Spots`, `lib/notes/spots.js`, PDF.js reading the word under the
+pointer); the HTML preview writes each element's line (`data-line`) and its frame says the
+line and the word it took. A block of a chapter takes the note to its include line. A
+single press on a PDF page still goes to where that page starts. No file written out
+carries the lines.
+
 **The HTML page, for its reader.** It reads like a long investigation online, in the
 note's look, on one axis down the middle of the window: the cover centred with its TLP
 label in FIRST's colours, a column of about 66 characters justified and hyphenated from a

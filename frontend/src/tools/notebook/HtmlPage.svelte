@@ -29,7 +29,11 @@
       + `addEventListener('message',function(e){if(e.source!==parent||!e.data||typeof e.data.azimutScroll!=='number')return;`
       + `back=Math.max(0,e.data.azimutScroll);keep();hold();});`
       + `addEventListener('scroll',function(){clearTimeout(t);t=setTimeout(function(){if(!held)mark();`
-      + `parent.postMessage({azimutPage:Math.round(scrollY)},'*');},80);},{passive:true});})();<\/script>`;
+      + `parent.postMessage({azimutPage:Math.round(scrollY)},'*');},80);},{passive:true});`
+      // a double-click says the note's line the element comes from, and the word it took, as a TeX viewer does
+      + `addEventListener('dblclick',function(e){var n=e.target&&e.target.closest?e.target.closest('[data-line]'):null;if(!n)return;`
+      + `var w=String(getSelection?getSelection():'').trim().slice(0,80);`
+      + `parent.postMessage({azimutLine:Number(n.getAttribute('data-line')),azimutWord:w},'*');});})();<\/script>`;
     const text = String(html ?? '');
     const end = text.lastIndexOf('</body>');
     return end < 0 ? `${text}${script}` : `${text.slice(0, end)}${script}${text.slice(end)}`;
@@ -59,7 +63,7 @@
    */
   import { onDestroy, untrack } from 'svelte';
 
-  let { html = '', label = 'The HTML page' } = $props();
+  let { html = '', label = 'The HTML page', online = null } = $props();
 
   let frames = $state([{ doc: '', ticket: 0 }, { doc: '', ticket: 0 }]);
   let shown = $state(0);
@@ -103,6 +107,11 @@
   function heard(event) {
     if (!elements.some((element) => element?.contentWindow && element.contentWindow === event.source)) return;
     if (event.source !== elements[shown]?.contentWindow) return;
+    const line = Number(event.data?.azimutLine);
+    if (Number.isInteger(line) && line >= 0) {
+      online?.(line, typeof event.data.azimutWord === 'string' ? event.data.azimutWord.slice(0, 80) : '');
+      return;
+    }
     const y = Number(event.data?.azimutPage);
     if (Number.isFinite(y) && y >= 0) top = y;
   }

@@ -8,6 +8,7 @@
  * a browser, so the diagrams the server could not draw are drawn here once, kept
  * under the key it gave, and the page is asked for again with them.
  */
+import { readSpots } from './spots.js';
 import { api } from '../api.js';
 import { asSvg, drawDiagrams } from '../notesExport.js';
 import { warningKind } from './warnings.js';
@@ -64,6 +65,7 @@ export async function fetchPreview({ caseId = '', note = 'case', title = '', tex
     diagrams: headerList(headers, 'X-Note-Diagrams').filter((item) => item && typeof item.key === 'string'),
     warnings: noteWarnings(headers),
     pictures: headerList(headers, 'X-Note-Pictures').filter(placedPicture),
+    spots: readSpots(headerList(headers, 'X-Note-Spots')),
     internal: internalHeader(headers),
   };
 }

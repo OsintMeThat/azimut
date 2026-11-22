@@ -84,3 +84,25 @@ describe('the page drawn again', () => {
     expect(frames[1].getAttribute('srcdoc')).toContain('<p>One</p>');
   });
 });
+
+describe('a double-click inside the HTML page', () => {
+  it('hands up the note\'s line and the word, said by the frame shown only', () => {
+    target = document.createElement('div');
+    document.body.append(target);
+    const online = vi.fn();
+    app = mount(HtmlPage, { target, props: { html: '<!doctype html><html><body><p data-line="4">Hi</p></body></html>', online } });
+    flushSync();
+    const frames = [...target.querySelectorAll('iframe')];
+    frames[1].dispatchEvent(new Event('load'));
+    flushSync();
+    // the page's own script says it from the frame on screen
+    expect(frames[1].getAttribute('srcdoc')).toContain("addEventListener('dblclick'");
+    const say = (frame, data) => window.dispatchEvent(new MessageEvent('message', { data, source: frame.contentWindow }));
+    say(frames[1], { azimutLine: 4, azimutWord: 'held' });
+    expect(online).toHaveBeenCalledWith(4, 'held');
+    // the hidden frame, or a line that is none, says nothing
+    say(frames[0], { azimutLine: 9, azimutWord: '' });
+    say(frames[1], { azimutLine: -2 });
+    expect(online).toHaveBeenCalledTimes(1);
+  });
+});

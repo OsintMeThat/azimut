@@ -121,7 +121,28 @@ export function underHeading(state, number) {
  * block) opens that block there. With `section` (a warning's Go to, `lib/notes/warnings.js`),
  * a heading's line takes the caret under the heading (`underHeading`).
  */
-export function jumpToLine(view, line, { section = false } = {}) {
+/**
+ * Where `word` stands in the paragraph from line `number` on (the paragraph's lines, up to a
+ * blank one): `{ from, to }` in the document, or null. Whole words first, then any stretch.
+ */
+export function wordInParagraph(state, number, word) {
+  const wanted = String(word ?? '').trim();
+  if (!wanted || wanted.length > 80) return null;
+  const escaped = wanted.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const whole = new RegExp(`(?<![\\p{L}\\p{N}])${escaped}(?![\\p{L}\\p{N}])`, 'iu');
+  const loose = new RegExp(escaped, 'iu');
+  for (const pattern of [whole, loose]) {
+    for (let at = number; at <= Math.min(state.doc.lines, number + 40); at += 1) {
+      const line = state.doc.line(at);
+      if (at > number && !line.text.trim()) break;
+      const found = pattern.exec(line.text);
+      if (found) return { from: line.from + found.index, to: line.from + found.index + found[0].length };
+    }
+  }
+  return null;
+}
+
+export function jumpToLine(view, line, { section = false, word = '' } = {}) {
   let number = Math.min(view.state.doc.lines, Math.max(1, Number(line) + 1));
   const under = section ? underHeading(view.state, number) : null;
   if (under?.line) number = under.line;
@@ -145,9 +166,11 @@ export function jumpToLine(view, line, { section = false } = {}) {
     view.focus();
     return;
   }
-  const effects = [EditorView.scrollIntoView(target.from, { y: 'center' })];
+  // a word double-clicked in the preview: the cursor on it, as a TeX viewer leaves it
+  const spot = word ? wordInParagraph(view.state, number, word) : null;
+  const effects = [EditorView.scrollIntoView(spot?.from ?? target.from, { y: 'center' })];
   if (block) effects.push(setOpenBlock.of({ from: block.from, to: block.to }));
-  view.dispatch({ selection: { anchor: target.from }, effects });
+  view.dispatch({ selection: spot ? { anchor: spot.from, head: spot.to } : { anchor: target.from }, effects });
   // a picture's line, shown as text, is lit as a picture is
   if (picture) lightLines(view, target.from, target.to);
   view.focus();

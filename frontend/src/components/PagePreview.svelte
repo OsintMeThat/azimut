@@ -15,8 +15,9 @@
    */
   import { onDestroy, tick, untrack } from 'svelte';
   import { drawPage, openPdf, releaseCanvas } from '../lib/notes/pdfjs.js';
+  import { wordUnder } from '../lib/notes/spots.js';
 
-  let { data = null, onpage = null, onerror = () => {}, onpages = () => {}, label = 'Pages', overlay = null } = $props();
+  let { data = null, onpage = null, ondouble = null, onerror = () => {}, onpages = () => {}, label = 'Pages', overlay = null } = $props();
 
   const MARGIN = 800;
   const PAD = 18;
@@ -26,6 +27,28 @@
   let sizes = $state([]);
 
   const slots = new Map();
+
+  /**
+   * A double-click on page `index`: how far down the page it fell, and the word under it as
+   * PDF.js reads the page's text, handed up (`ondouble(index, top, word)`). A word that cannot
+   * be read still hands the place up.
+   */
+  async function double(event, index) {
+    if (!ondouble) return;
+    const box = event.currentTarget.getBoundingClientRect();
+    const across = (event.clientX - box.left) / box.width;
+    const down = (event.clientY - box.top) / box.height;
+    let word = '';
+    try {
+      const page = await shown?.doc?.getPage?.(index + 1);
+      if (page) {
+        const [x0, y0, x1, y1] = page.view;
+        const content = await page.getTextContent();
+        word = wordUnder(content.items, x0 + across * (x1 - x0), y1 - down * (y1 - y0));
+      }
+    } catch { /* the place alone */ }
+    ondouble(index, down, word);
+  }
   const near = new Set();
   let shown = null; // { doc, width, canvases: Map(index → canvas) }
   let loads = 0;
@@ -270,8 +293,10 @@
     <div class="sheet" data-page={index} use:slot={index}
       style:width={`${width}px`} style:height={`${Math.round(width * (size.h / size.w))}px`}>
       <div class="ink"></div>
-      <button type="button" class="hit" title={onpage ? `Page ${index + 1}: go to it in the note` : `Page ${index + 1}`}
-        aria-label={`Page ${index + 1} of ${sizes.length}`} onclick={() => onpage?.(index)}></button>
+      <button type="button" class="hit" title={ondouble ? `Page ${index + 1}: press to go to it in the note, double-click a word to go to that word`
+        : onpage ? `Page ${index + 1}: go to it in the note` : `Page ${index + 1}`}
+        aria-label={`Page ${index + 1} of ${sizes.length}`} onclick={() => onpage?.(index)}
+        ondblclick={(event) => double(event, index)}></button>
       {#if overlay}{@render overlay(index, size)}{/if}
     </div>
   {/each}

@@ -40,6 +40,7 @@
   import { onDestroy, tick, untrack } from 'svelte';
   import { prefs } from '../../lib/state.svelte.js';
   import { createPreview, htmlPreview, pageLine } from '../../lib/notes/preview.js';
+  import { spotLine } from '../../lib/notes/spots.js';
   import { HTML, PDF, keepFormat, readFormat } from '../../lib/notes/formats.js';
   import {
     CAPTION_HELP, PICTURE_ALIGNS, PICTURE_SIZES, POSTED_HELP, SOURCE_HELP, blockAlignAt, captionField, pictureAt, pictureLine, postedAddress,
@@ -62,6 +63,8 @@
 
   let data = $state(null);
   let pages = $state([]);
+  /** Where each block of the PDF starts and its line (`lib/notes/spots.js`). */
+  let spots = $state([]);
   let count = $state(0);
   let warnings = $state([]);
   let pictures = $state([]);
@@ -203,6 +206,7 @@
     onresult: (answer) => {
       data = answer.data;
       pages = answer.pages;
+      spots = answer.spots ?? [];
       pictures = answer.pictures ?? [];
       if (shows !== PDF) return;
       warnings = answer.warnings ?? [];
@@ -386,10 +390,12 @@
     <div class="view">
       <div class="frame">
         {#if shows === HTML}
-          <HtmlPage bind:this={htmlView} {html} label="The note as an HTML page" />
+          <HtmlPage bind:this={htmlView} {html} label="The note as an HTML page"
+            online={(line, word) => onjump(line, word ? { word } : undefined)} />
         {:else}
           <PagePreview bind:this={pdfView} {data} label="Pages of the PDF" onerror={(message) => (error = message)} onpages={(n) => (count = n)}
-            onpage={(index) => onjump(pageLine(pages, index))} overlay={pictures.length ? marks : null} />
+            onpage={(index) => onjump(pageLine(pages, index))} overlay={pictures.length ? marks : null}
+            ondouble={(index, top, word) => onjump(spotLine(spots, pages, index, top), word ? { word } : undefined)} />
         {/if}
       </div>
     </div>

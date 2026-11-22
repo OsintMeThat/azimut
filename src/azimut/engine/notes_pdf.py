@@ -323,6 +323,11 @@ class Rendered:
     diagrams: list[tuple[str, str]] = field(default_factory=list)
     #: Where each picture of the note itself landed, for the Page pane.
     pictures: list["PagePicture"] = field(default_factory=list)
+    #: Where each block of the text starts, as (page, top, line): the page (0-based),
+    #: the top as a fraction of the page's height and the note's line (0-based), in
+    #: the order drawn. A double-click on the Page pane's preview finds its line by it,
+    #: as a TeX viewer finds its source. A block of a chapter says its include line.
+    spots: list[tuple[int, float, int]] = field(default_factory=list)
     #: The internal passages in the note and its chapters: printed in the internal
     #: edition, left out of the public one.
     internal: int = 0
@@ -558,6 +563,7 @@ def render(
         pages=builder.pages,
         diagrams=list(builder.missing.items()),
         pictures=builder.pictures,
+        spots=builder.spots,
         internal=passages[0],
         text_sha256=hashlib.sha256(source.encode("utf-8")).hexdigest(),
         printed=source,
@@ -906,6 +912,7 @@ class _Builder:
         self._remote_line: int | None = None
         self.images = 0
         self.pictures: list[PagePicture] = []
+        self.spots: list[tuple[int, float, int]] = []
         self._page_lines: dict[int, int] = {}
         self.missing: dict[str, str] = {}
         #: How deep inside nested lists the walk currently is.
@@ -1071,6 +1078,14 @@ class _Builder:
     def _page_begins(self) -> None:
         self._page_lines[self.pdf.page] = self._line
 
+    def _spot(self) -> None:
+        """Note where the line being drawn starts on its page (`Rendered.spots`), once per line."""
+        pdf = self.pdf
+        page = pdf.page - 1
+        if page < 0 or (self.spots and self.spots[-1][0] == page and self.spots[-1][2] == self._line):
+            return
+        self.spots.append((page, round(pdf.get_y() / pdf.h, 4), self._line))
+
     # -- the note's own cover ----------------------------------------------------
 
     def _own_cover(self, piece: Piece, parsed: list[_Block], end: int) -> None:
@@ -1109,6 +1124,7 @@ class _Builder:
             start = len(contents)
             links = len(pdf.pages[page].annots or [])
             pictures = len(self.pictures)
+            spots = len(self.spots)
             for block in flow:
                 self._block_line = piece.line + block.line
                 self._walk(block.tokens, block.start, ALIGNMENTS[block.align], stop=None)
@@ -1125,7 +1141,7 @@ class _Builder:
         if self.look.cover.top:
             return
         used = max(0.0, pdf.get_y() - region_top - theme.gap)
-        self._move_down(page, start, links, pictures, (region_bottom - region_top - used) / 2)
+        self._move_down(page, start, links, pictures, (region_bottom - region_top - used) / 2, spots)
 
     def _corner(self, piece: Piece, block: _Block, page: int) -> float:
         """Draw corner block ``block`` of the own cover in its corner of page ``page``,
@@ -1140,6 +1156,7 @@ class _Builder:
         start = len(contents)
         links = len(pdf.pages[page].annots or [])
         pictures = len(self.pictures)
+        spots = len(self.spots)
         top = pdf.t_margin
         pdf.set_xy(pdf.l_margin, top)
         self._block_line = piece.line + block.line
@@ -1156,12 +1173,12 @@ class _Builder:
             return 0.0
         height = max(0.0, pdf.get_y() - top - theme.gap)
         if block.corner.startswith("bottom"):
-            self._move_down(page, start, links, pictures, pdf.h - pdf.b_margin - top - height)
+            self._move_down(page, start, links, pictures, pdf.h - pdf.b_margin - top - height, spots)
         return height
 
-    def _move_down(self, page: int, start: int, links: int, pictures: int, drop: float) -> None:
+    def _move_down(self, page: int, start: int, links: int, pictures: int, drop: float, spots: int) -> None:
         """Move what page ``page`` drew since content offset ``start`` down by ``drop``
-        millimetres: its drawing, and the links and pictures it placed."""
+        millimetres: its drawing, and the links, pictures and spots it placed."""
         pdf = self.pdf
         if drop < 0.1:
             return
@@ -1177,6 +1194,8 @@ class _Builder:
             if picture.page == page - 1:
                 left, top, width, height = picture.box
                 picture.box = (left, top + drop / pdf.h, width, height)
+        self.spots[spots:] = [(at, round(top + drop / pdf.h, 4) if at == page - 1 else top, line)
+                              for at, top, line in self.spots[spots:]]
 
     def _cover_heading(self, runs: list[Run], tag: str, align: Align) -> None:
         """A heading on the note's own cover: set large, as a cover sets a title, and
@@ -1803,8 +1822,10 @@ class _Builder:
                 return drew, index + 1
             if token.map and not self._fixed:
                 self._line = self._block_line + token.map[0]
+                self._spot()
             elif self._fixed:
                 self._line = self._block_line
+                self._spot()
             if token is self._promoted:
                 index = _past(tokens, index)
                 continue
@@ -2476,7 +2497,7 @@ class _Builder:
     def _row_state(self) -> tuple[Any, ...]:
         """What drawing a row adds to, so a row taken back leaves nothing behind."""
         return (self._figures, self.images, self._remote, self._remote_line, len(self.warnings), len(self._counts),
-                dict(self.missing), len(self.pictures), len(self._limit_links))
+                dict(self.missing), len(self.pictures), len(self._limit_links), len(self.spots))
 
     def _take_back_row(self, page: int, start: int, links: int, kept: tuple[Any, ...]) -> None:
         """Undo a row drawn from content offset ``start`` of page ``page``: its drawing,
@@ -2490,9 +2511,9 @@ class _Builder:
         if annots is not None:
             del annots[links:]
         (self._figures, self.images, self._remote, self._remote_line, warnings, counts, missing, pictures,
-         limits) = kept
+         limits, spots) = kept
         del self.warnings[warnings:], self.warning_lines[warnings:], self.warning_kinds[warnings:]
-        del self._counts[counts:], self.pictures[pictures:], self._limit_links[limits:]
+        del self._counts[counts:], self.pictures[pictures:], self._limit_links[limits:], self.spots[spots:]
         self.missing = missing
 
     def _row_to_next_page(self, page: int, start: int, links: int, kept: tuple[Any, ...], top: float,
@@ -2537,6 +2558,8 @@ class _Builder:
                 picture.page = pdf.page - 1
                 picture.box = (left, picture_top + drop / pdf.h, width, picture_height)
         self._limit_links[kept[8]:] = [(link, pdf.page) for link, _ in self._limit_links[kept[8]:]]
+        self.spots[kept[9]:] = [(pdf.page - 1, round(spot_top + drop / pdf.h, 4), line) if at == page - 1 else (at, spot_top, line)
+                                for at, spot_top, line in self.spots[kept[9]:]]
         pdf.set_xy(pdf.l_margin, top + drop + height)
 
     def _row_height(self, tokens: list[Token], index: int) -> float:
