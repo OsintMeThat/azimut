@@ -71,11 +71,13 @@ LOOKS = {"article": NoteLook(), "story": NoteLook.model_validate({"web": "story"
 #: 2026-11-21: the analyst's logo stands by their name on the cover: nine lines of reader.css, and the
 #: logo link's rule moved from the cover's marks to the logo's own box; nothing else.
 #: 2026-11-21: a guest author's picture, round in the logo's place: two lines of reader.css, nothing else.
+#: 2026-11-22: footnotes, their raised letters and their Notes: eleven lines of reader.css; the base sheet
+#: put back gives the digests before, so nothing else.
 GOLDEN = {
-    "single-article": "486d668a76b4d97fd919c600a144234b5c6f7952978921a4b31ba7d71e7b3cfb",
-    "single-story": "4ff4f0438ea3c9c9109aaedbce5ad90fb56539fbb8eae9d88eea1f4971a58e05",
-    "folder-article": "43d93ba775cf835413f51cd5eed5d17d949f47603708fb9d6782bfb8fc383d81",
-    "folder-story": "67ab86e2f59f38d8d0e3c6de7a5754c65e8b61112f2f575fb48e7aedcf12cda2",
+    "single-article": "9050283dfff989eabe67905c97c766b21aa91f293fe0297faf3e62847de7f007",
+    "single-story": "7961afe3bbbb0f612e1df841a0c724797d9ab3cf7cef70f8bc189715b9b32c14",
+    "folder-article": "024d8add1f0ddcde5737b19f6b8240436ac12c430d30a4face15f3d79481c511",
+    "folder-story": "759dd23364f7553c2b5781aea41a1a7a55b929d6261918efbb62deb5997b0f15",
 }
 
 
