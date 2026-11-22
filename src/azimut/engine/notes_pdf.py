@@ -60,6 +60,12 @@ than a page is laid again with smaller frames so it stands on one, its words kep
 two columns as one picture (`engine/notes_infographic.py`), at 300 dpi across the frame.
 A page taller than a sheet breaks between its rows of panels, never through one.
 
+**Columns.** A `:::: columns` row prints its columns side by side across the frame, its
+written shares kept, a row of pictures only giving each column its picture's shape so
+they share one height with nothing cropped. A row never splits over two pages: drawn
+once where it starts, it moves whole to the next page when it runs past the foot of
+this one, and one taller than a page prints one column under the other.
+
 **Sources stay sources.** A PDF is read away from the case, so what the case knows
 about where something came from is printed rather than kept behind the app: a
 reference to a record with a web address links to it, a picture says under its
@@ -109,6 +115,7 @@ from urllib.parse import unquote, urlsplit
 from fpdf import FPDF
 from fpdf.enums import Align, XPos, YPos
 from fpdf.image_parsing import preload_image
+from fpdf.syntax import PDFArray
 from markdown_it.token import Token
 from PIL import Image as PILImage
 from PIL import ImageOps, UnidentifiedImageError
@@ -118,6 +125,8 @@ from .notelook import DEFAULT as DEFAULT_LOOK
 from .notelook import NoteLook
 from .notes_markdown import (
     CASE_CHAPTER,
+    COLUMN_CLOSE,
+    COLUMNS_OPEN,
     COMMENT,
     COORDINATES,
     COUNT,
@@ -145,6 +154,7 @@ from .notes_markdown import (
     footnote_letter,
     footnote_words,
     holds_footnotes,
+    inline_text,
     internal_passages,
     mermaid_sources,
     parse,
@@ -161,6 +171,7 @@ from .notes_markdown import Cited as _Cited
 from .notes_markdown import alignment_blocks as _alignment_blocks
 from .notes_markdown import bare_urls as _bare_urls
 from .notes_markdown import callout_kind as _callout_kind
+from .notes_markdown import column_spans as _column_spans
 from .notes_markdown import cover_piece as _cover_piece
 from .notes_markdown import cut_text as _cut_text
 from .notes_markdown import file_prefixes as _file_prefixes
@@ -212,6 +223,8 @@ MIN_FIT_PERCENT = 15
 #: it starts on, rather than leave the rest of that page blank. A width the
 #: analyst wrote is never changed.
 MAX_SHRINK = 0.25
+#: The room between two columns side by side (`:::: columns`), in mm.
+COLUMN_GAP = 5.0
 #: A picture with no width written stays within this share of the page down, so a
 #: phone screenshot is not a page tall. A diagram keeps the whole page, and a width
 #: the analyst wrote is theirs.
@@ -953,8 +966,12 @@ class _Builder:
         #: and whether the walk is drawing the note's own cover right now.
         self._covered = self.look.cover.on and not self.look.cover.own
         self._on_cover = False
-        #: The page's frame while a corner of the cover is drawn in half of it.
+        #: The page's frame while a corner of the cover is drawn in half of it, or a column.
         self._page_frame: float | None = None
+        #: Whether the walk is drawing a column of a row side by side (`:::: columns`), and
+        #: where that row starts down the page.
+        self._columned = False
+        self._column_top = 0.0
         pdf.on_page = self._page_begins
         self._render = DECODED.begin()
         pdf.place_picture = lambda source, **options: self._picture(source, **options)
@@ -1811,6 +1828,9 @@ class _Builder:
         if self._on_cover:
             self._cover_heading(runs, tag, align)
             return index + 3
+        if self._columned:
+            self._column_heading(runs, level)
+            return index + 3
         if self.theme.style == "journal" and tag == "h3":
             stamp = LOG_STAMP.match(_plain(runs))
             if stamp is not None:
@@ -2049,6 +2069,8 @@ class _Builder:
                 unsized = 1.0
         elif token.type == "az_infographic":
             return theme.leading * 2  # its own page, which the heading opened for it
+        elif token.type == COLUMNS_OPEN:
+            return self._row_height(tokens, index)
         elif token.type == "az_post":
             from . import notes_posts, socialposts
 
@@ -2313,6 +2335,259 @@ class _Builder:
         self._page_after = True
         return index + 1
 
+    # -- columns side by side -------------------------------------------------
+
+    def _on_az_columns_open(self, tokens: list[Token], index: int, align: Align) -> int:
+        """A `:::: columns` row, its columns side by side across the frame with `COLUMN_GAP`
+        between them, never split over two pages.
+
+        A row of pictures only gives each column the width its picture's shape asks, so
+        every picture stands at one height, nothing cropped, and shrinks as one to fit a
+        page when it is taller. Any other row takes the shares written. The row is drawn
+        once where it starts; one that runs past the foot of the page is moved whole to
+        the next (`_row_to_next_page`), and one taller than a page is taken back and
+        printed as written, one column under the other. On the note's own cover the
+        columns are printed one under the other too: the walk steps over the markers."""
+        spans, end = _column_spans(tokens, index)
+        if self._on_cover or self._columned or len(spans) < 2:
+            return index + 1
+        laid = self._row_layout(tokens, index, spans)
+        if laid is None:
+            return index + 1
+        boxes, _height = laid
+        return end if self._side_by_side(tokens, spans, boxes) else index + 1
+
+    def _row_frame(self) -> tuple[float, float]:
+        """Where a row of columns starts across the page, and how wide it is."""
+        pdf = self.pdf
+        return pdf.l_margin, min(pdf.epw, self._frame())
+
+    def _row_layout(
+        self, tokens: list[Token], index: int, spans: list[tuple[int, int, float]]
+    ) -> tuple[list[tuple[float, float]], float | None] | None:
+        """Each column's left edge and width, and, for a row of pictures, the height it
+        takes with its captions; nothing is drawn or counted. None when there is no room."""
+        left, frame = self._row_frame()
+        room = frame - COLUMN_GAP * (len(spans) - 1)
+        if room <= 0:
+            return None
+        pictures = self._row_pictures(tokens, spans) if tokens[index].meta.get("pictures") else None
+        if pictures is None:
+            boxes, x = [], left
+            for _, _, share in spans:
+                boxes.append((x, room * share))
+                x += room * share + COLUMN_GAP
+            return boxes, None
+        ratios = [natural[0] / natural[1] for natural, _, _ in pictures]
+        height = room / sum(ratios)
+        widths = [height * ratio for ratio in ratios]
+        below = max(self._below_in(width, caption, credit, left) for width, (_, caption, credit) in zip(widths, pictures))
+        pdf = self.pdf
+        tallest = min(self.theme.room, pdf.page_break_trigger - pdf.body_top - below - 2.0)
+        if height > tallest > 0:
+            # taller than a page: every picture shrinks as one, the row kept in the middle
+            widths = [width * tallest / height for width in widths]
+            height = tallest
+        used = sum(widths) + COLUMN_GAP * (len(widths) - 1)
+        x = left + (frame - used) / 2
+        boxes = []
+        for width in widths:
+            boxes.append((x, width))
+            x += width + COLUMN_GAP
+        return boxes, height + below + (0.0 if self.theme.plain else 0.6)
+
+    def _row_pictures(
+        self, tokens: list[Token], spans: list[tuple[int, int, float]]
+    ) -> list[tuple[tuple[int, int], tuple[str, str], "_Credit | None"]] | None:
+        """Each picture of a row of pictures, with its pixel size and what prints under it,
+        or None when one of them cannot be drawn: the row then takes its written shares,
+        and the column says what it could not show."""
+        found = []
+        for first, _end, _share in spans:
+            child = next((one for one in tokens[first + 1].children or [] if one.type == "image"), None)
+            peeked = self._peek_image(child) if child is not None else None
+            if child is None or peeked is None or not peeked[0][0] or not peeked[0][1]:
+                return None
+            options = _image_options(_attr(child, "src"))
+            words = options.caption or _attr(child, "title") or ("" if not self.look.numbered else child.content)
+            found.append((peeked[0], ("Figure 00" if self.look.numbered else "", words), peeked[1]))
+        return found
+
+    def _below_in(self, width: float, caption: tuple[str, str], credit: "_Credit | None", left: float) -> float:
+        """How tall a picture's caption and credit are in a column ``width`` wide."""
+        pdf = self.pdf
+        with self._inset(left - pdf.l_margin, pdf.w - pdf.r_margin - left - width):
+            return self._below(caption, credit, Align.L, width)
+
+    def _side_by_side(self, tokens: list[Token], spans: list[tuple[int, int, float]],
+                      boxes: list[tuple[float, float]]) -> bool:
+        """Draw each column in its box from the row's top, then keep the row whole: moved
+        to the next page when it ran past the foot of this one, or taken back (answering
+        False) when it is taller than a page."""
+        pdf = self.pdf
+        page, top = pdf.page, pdf.get_y()
+        contents = pdf.pages[page].contents
+        assert isinstance(contents, bytearray)
+        start = len(contents)
+        links = len(pdf.pages[page].annots or [])
+        kept = self._row_state()
+        # what the row draws with is said again at its start, so it can move to another page whole
+        self._say_state()
+        auto, margin = pdf.auto_page_break, pdf.b_margin
+        frame = self._page_frame
+        bottom = top
+        pdf.set_auto_page_break(False, margin)
+        self._columned = True
+        try:
+            for (first, _end, _share), (left, width) in zip(spans, boxes):
+                self._page_frame = width
+                with self._inset(left - pdf.l_margin, pdf.w - pdf.r_margin - left - width):
+                    pdf.set_xy(pdf.l_margin, top)
+                    self._column_top = top
+                    self._walk(tokens, first, Align.L, stop=COLUMN_CLOSE)
+                    bottom = max(bottom, pdf.get_y())
+        finally:
+            self._columned = False
+            self._page_frame = frame
+            pdf.set_auto_page_break(auto, margin)
+        height = bottom - top
+        if bottom <= pdf.page_break_trigger + 0.01:
+            pdf.set_xy(pdf.l_margin, bottom)
+            return True
+        if top <= pdf.body_top + 0.5 or height > pdf.page_break_trigger - pdf.body_top:
+            self._take_back_row(page, start, links, kept)
+            pdf.set_xy(pdf.l_margin, top)
+            return False
+        self._row_to_next_page(page, start, links, kept, top, height)
+        return True
+
+    def _say_state(self) -> None:
+        """Write the face, line width and colours fpdf2 counts as set into the page again:
+        what follows a stretch taken out of the page, or moved off it, must not lean on
+        what that stretch had set."""
+        pdf = self.pdf
+        pdf.current_font_is_set_on_page = False
+        pdf._out(f"{pdf.line_width * pdf.k:.2f} w")
+        if pdf.draw_color is not None:
+            pdf._out(pdf.draw_color.serialize().upper())
+        if pdf.fill_color is not None:
+            pdf._out(pdf.fill_color.serialize().lower())
+
+    def _row_state(self) -> tuple[Any, ...]:
+        """What drawing a row adds to, so a row taken back leaves nothing behind."""
+        return (self._figures, self.images, self._remote, self._remote_line, len(self.warnings), len(self._counts),
+                dict(self.missing), len(self.pictures), len(self._limit_links))
+
+    def _take_back_row(self, page: int, start: int, links: int, kept: tuple[Any, ...]) -> None:
+        """Undo a row drawn from content offset ``start`` of page ``page``: its drawing,
+        its links, its pictures and whatever it counted."""
+        pdf = self.pdf
+        contents = pdf.pages[page].contents
+        assert isinstance(contents, bytearray)
+        del contents[start:]
+        self._say_state()
+        annots = pdf.pages[page].annots
+        if annots is not None:
+            del annots[links:]
+        (self._figures, self.images, self._remote, self._remote_line, warnings, counts, missing, pictures,
+         limits) = kept
+        del self.warnings[warnings:], self.warning_lines[warnings:], self.warning_kinds[warnings:]
+        del self._counts[counts:], self.pictures[pictures:], self._limit_links[limits:]
+        self.missing = missing
+
+    def _row_to_next_page(self, page: int, start: int, links: int, kept: tuple[Any, ...], top: float,
+                          height: float) -> None:
+        """Move a row drawn from content offset ``start`` of page ``page`` to the top of a
+        new page, as one: its drawing, the links and pictures it placed and the places in
+        it a link points to. Nothing is laid out twice."""
+        pdf = self.pdf
+        contents = pdf.pages[page].contents
+        assert isinstance(contents, bytearray)
+        moved = bytes(contents[start:])
+        del contents[start:]
+        self._say_state()
+        annots = pdf.pages[page].annots
+        moving = list(annots[links:]) if annots is not None else []
+        if annots is not None:
+            del annots[links:]
+        pdf.add_page()
+        drop = pdf.get_y() - top
+        offset = drop * pdf.k
+        here = pdf.pages[pdf.page].contents
+        assert isinstance(here, bytearray)
+        here.extend(f"q 1 0 0 1 0 {-offset:.2f} cm\n".encode("ascii") + moved + b"Q\n")
+        # the fonts, pictures and states the row uses belong to the page it now stands on
+        pdf._resource_catalog.index_stream_resources(moved.decode("latin-1"), pdf.page)
+        landed = pdf.pages[pdf.page].annots
+        if landed is None:
+            landed = pdf.pages[pdf.page].annots = PDFArray()
+        for annotation in moving:
+            x1, y1, x2, y2 = (float(value) for value in str(annotation.rect).strip("[]").split())
+            annotation.rect = f"[{x1:.2f} {y1 - offset:.2f} {x2:.2f} {y2 - offset:.2f}]"
+            landed.append(annotation)
+        row_top = pdf.h_pt - top * pdf.k
+        for destination in [*pdf.links.values(), *pdf.named_destinations.values()]:
+            if getattr(destination, "page_number", None) == page and destination.top is not None \
+                    and destination.top <= row_top + 0.01:
+                destination.page_number = pdf.page
+                destination.top -= offset
+        for picture in self.pictures[kept[7]:]:
+            if picture.page == page - 1:
+                left, picture_top, width, picture_height = picture.box
+                picture.page = pdf.page - 1
+                picture.box = (left, picture_top + drop / pdf.h, width, picture_height)
+        self._limit_links[kept[8]:] = [(link, pdf.page) for link, _ in self._limit_links[kept[8]:]]
+        pdf.set_xy(pdf.l_margin, top + drop + height)
+
+    def _row_height(self, tokens: list[Token], index: int) -> float:
+        """How tall a row of columns will be, for a heading to be kept with it: exact for a
+        row of pictures, read off its columns' words and pictures for any other."""
+        theme = self.theme
+        spans, _ = _column_spans(tokens, index)
+        laid = self._row_layout(tokens, index, spans) if len(spans) >= 2 and not self._on_cover else None
+        if laid is None:
+            return theme.leading * 2
+        boxes, height = laid
+        if height is not None:
+            return height
+        tallest = 0.0
+        for (first, end, _), (_, width) in zip(spans, boxes):
+            tallest = max(tallest, self._column_estimate(tokens, first, end, width))
+        return max(theme.leading * 2, min(tallest, self.pdf.page_break_trigger - self.pdf.body_top))
+
+    def _column_estimate(self, tokens: list[Token], first: int, end: int, width: float) -> float:
+        """How tall a column's words and pictures stand at ``width``, near enough to keep a
+        heading with them: each line of words by its length, each picture by its shape."""
+        pdf, theme = self.pdf, self.theme
+        pdf.set_font(self._family, size=self._size)
+        height = 0.0
+        for position in range(first, end):
+            token = tokens[position]
+            if token.type != "inline":
+                continue
+            children = [child for child in token.children or [] if child.type != "softbreak"]
+            if len(children) == 1 and children[0].type == "image":
+                peeked = self._peek_image(children[0])
+                if peeked is not None:
+                    height += _fit(peeked[0], "100%", width, theme.room)[1] + 6.0
+                continue
+            words = inline_text(token)
+            if words.strip():
+                lines = math.ceil(pdf.get_string_width(" ".join(words.split())) / max(10.0, width - 8.0)) or 1
+                height += lines * self._leading + theme.gap
+        return height
+
+    def _column_heading(self, runs: list[Run], level: int) -> None:
+        """A heading inside a column: set as a heading of its rank is, at the column's
+        width, but never numbered, bookmarked or kept with a page of its own."""
+        theme, pdf = self.theme, self.pdf
+        rank = level if theme.plain else max(1, min(6, level - self._base + 1))
+        size, space = theme.headings.get(f"h{rank}", theme.headings["h6"])
+        if pdf.get_y() > self._column_top + 0.5:
+            pdf.ln(min(space, 3.0))
+        self._runs(runs, size=size, leading=size * 0.48, family=theme.heading_family, bold=True,
+                   color=theme.muted if rank >= 5 else theme.ink, bottom=1.4)
+
     def _on_blockquote_open(self, tokens: list[Token], index: int, align: Align) -> int:
         self._quoted += 1
         try:
@@ -2344,7 +2619,8 @@ class _Builder:
         # Only bar the part on this page: a quote that split has a second half
         # whose top is nowhere near where it started.
         if pdf.page == page:
-            side = self.theme.margin_side
+            # the page's edge, or the column's in a row side by side
+            side = pdf.l_margin if self._columned else self.theme.margin_side
             pdf.set_draw_color(*(callout[1] if callout else self.theme.accent))
             pdf.set_line_width(0.7)
             pdf.line(side + 0.4, top, side + 0.4, pdf.get_y() - self.theme.gap)
@@ -2996,7 +3272,7 @@ class _Builder:
         pdf.set_draw_color(*theme.rule)
         pdf.set_line_width(0.5)
         top = pdf.get_y()
-        if theme.plain:
+        if theme.plain and not self._columned:
             # the page's own frame, whatever the indentation, as it always was
             pdf.set_x(theme.margin_side + 2.5)
             width = theme.frame - 2.5
@@ -3180,15 +3456,20 @@ class _Builder:
         if resolved == PICTURE_NOT_SET:
             return True  # a picture Settings does not hold prints nothing; the check says so
         options = _image_options(_attr(token, "src"))
-        figure = (_picture_ref(options.source), options.width, options.align)
+        figure: tuple[str, str, str] | None = (_picture_ref(options.source), options.width, options.align)
         # an alignment written on the picture wins; else it stands as its block does
         place = ALIGNMENTS[options.align] if options.aligned else align
+        width_attr = options.width
+        if self._columned:
+            # a picture fills its column: the size and place written for the page are not
+            # read there, and the Page pane, which sizes a picture on the page, leaves it be
+            figure, place, width_attr = None, Align.L, "100%"
         # a caption written in the braces says more than a title, which is older
         title = options.caption or _attr(token, "title")
         if isinstance(resolved, _Picture) and resolved.built_in:
             # who made the document, not a figure of it: no number, no frame, and a
             # caption only when one is written
-            self._place(resolved.path, resolved.natural, options.width, place, ("", title),
+            self._place(resolved.path, resolved.natural, width_attr, place, ("", title),
                         figure=figure, framed=False)
             return True
         number = 0 if isinstance(resolved, str) else self.cited.number(resolved.source)
@@ -3199,12 +3480,12 @@ class _Builder:
                 self._aside(f"{message} Watch it at {resolved.url}{cited}", link=resolved.url)
                 return True
             caption = self._caption(title or f"Video: {token.content or 'untitled'}", token.content)
-            self._place(resolved.path, resolved.natural, options.width, place, caption,
+            self._place(resolved.path, resolved.natural, width_attr, place, caption,
                         figure=figure, video=True, credit=resolved.credit, number=number)
             return True
         caption = self._caption(title, token.content)
         if resolved == CASE_PICTURE and self.case is None:
-            self._placeholder(options.width, place, caption, figure=figure)
+            self._placeholder(width_attr, place, caption, figure=figure)
             return True
         if isinstance(resolved, str):
             if resolved == MEDIA_UNAVAILABLE:
@@ -3212,7 +3493,7 @@ class _Builder:
                 self._warn(f'Picture "{name}" is no longer in the case.', self._line, MISSING)
             self._aside(resolved)
             return True
-        self._place(resolved.path, resolved.natural, options.width, place, caption,
+        self._place(resolved.path, resolved.natural, width_attr, place, caption,
                     figure=figure, credit=resolved.credit, number=number,
                     posted=resolved.source.posted if resolved.source is not None else "")
         return True

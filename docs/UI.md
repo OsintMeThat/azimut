@@ -7334,7 +7334,7 @@ a to-do, a quote, a footnote, **Callout ›** with its six kinds, Internal, code
 log entry), **Media** (a case picture, an image from a file, **Steps** and **Story**, an
 empty `::: steps` or `::: story` block, the cursor after it, drawn as its strip, your logo), **From the
 case** (a case item, a **Post from X or Bluesky**, an **Interactive map**, a note included as a chapter), **Layout**
-(a divider, a page break, the cover page, **Alignment ›**, **Cover corner ›**, a
+(a divider, **Columns**, a page break, the cover page, **Alignment ›**, **Cover corner ›**, a
 signature, **Field ›** for the words the PDF fills in) and **Figures** (a table, a
 chart, a diagram, an infographic), the table asking rows by columns on a small grid (3 by 3 unless picked) or a
 file. Each entry has an icon, its name and a line under it; beside the list, the
@@ -8832,6 +8832,32 @@ comment prints. A video prints as its thumbnail with a play mark and its *Watch*
 credit, or as a line with that link when it has no thumbnail. A diagram prints at its
 size on screen. A caption is never parted from its picture, and a heading never stays
 alone at the foot of a page.
+
+**Columns.** A row of two or three columns sets pictures or words side by side
+(`lib/notes/columns.js`, `lib/notes/editor/columnsBlock.js`): `:::: columns` around one
+`::: column` block per column, a width written on one only when it is not shared
+(`::: column width=66%`). **/** → *Columns* writes two empty ones, the caret in the
+first; an empty column says *Type, or add a picture* and offers **Case picture** and
+**From a file**, or takes a file dropped on it. A row whose every column holding something
+holds one picture alone sets its pictures at one height, nothing cropped, each as wide
+as its shape asks; a row with words takes the widths its bar sets, **Equal**, **Wide
+left** or **Wide right** for two columns (three are always equal). The bar over the row
+sets **2** or **3** columns, a third's words going under the row when it is taken off,
+and its ⋯ opens the block menu, whose **Take apart** puts the columns one under the
+other. Hovering a picture in a column offers its caption, **Move left**, **Move right**,
+**Replace**, its tool, *Source…* and **Out of the row**, which puts it under the row on
+its own; a row left with one column is a row no more. A press on a column's words puts
+the caret there: that column's own lines stand where the column does and the others are
+drawn beside them, so the row keeps its shape while it is typed in. Tab goes to the next
+column (in a list it indents), Escape picks the row, the arrows leave it at its top and
+bottom, and what is typed never breaks the row's fences. A column's **/** offers only
+what fits in one: words, lists, quotes, callouts, case items and pictures, never a
+table, a chart, a map, a diagram or a page break. Two pictures become a row from the
+picture's own bar (**Side by side**, the second picked from the case) or by dragging one
+by its ⋮⋮ against the side of another, or of a row with room for a third, where *Beside*
+shows. The PDF prints a row at the text's width and never splits it across two pages; the
+HTML page, the web folder and WordPress set it side by side, and on a phone a row of
+pictures stays side by side while words and a picture go one under the other.
 
 **Steps and stories.** A `::: steps` or `::: story` block is drawn as a strip of its steps
 (`lib/notes/editor/playedBlock.js`), each picture numbered: a row of cards for steps, each

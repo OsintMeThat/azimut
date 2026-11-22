@@ -18,6 +18,9 @@ one note two ways, so what they share lives here and nowhere else:
   `engine/notes_maps.py`), a chart (`::: chart`, read by `engine/notes_charts.py`) and a
   post (`::: post`, read by `engine/socialposts.py`), each handed on as one token holding
   its lines (`az_map`, `az_chart`, `az_post`);
+- the columns (`:::: columns`), pictures or words side by side: each column's own
+  tokens between markers a renderer lays side by side and any other reader steps
+  over, reading the columns one under the other (`columns_blocks`);
 - the callouts a quote opens with (`> [!confirmed]`) and the tasks a list holds;
 - the own cover (the lines above `<!-- cover -->`, `cover_piece`);
 - what a picture's braces say (`image_options`), and a table's settings line
@@ -83,6 +86,32 @@ TOKEN_BLOCKS: dict[str, str] = {MAP: MAP_TOKEN, CHART: CHART_TOKEN, INFOGRAPHIC:
 FOOTNOTE_TOKEN = "az_footnote"
 #: Set in the parser's env while a footnote's words are read: a footnote holds no footnote.
 _IN_FOOTNOTE = "az_in_footnote"
+#: Pictures or words side by side: a fence of four colons holding `::: column` blocks,
+#: `::: column width=66%` for one given its share of the row. Its columns' tokens come
+#: between four markers holding no words: `COLUMNS_OPEN` (its `meta` says each printed
+#: column's share, ``widths``, and whether the row is only pictures, ``pictures``),
+#: then `COLUMN_OPEN` and `COLUMN_CLOSE` around each column, then `COLUMNS_CLOSE`. A
+#: renderer that lays them side by side has an `_on_az_columns_open`; any other reader
+#: steps over the markers and reads the columns one under the other.
+COLUMNS = "columns"
+COLUMNS_OPEN = "az_columns_open"
+COLUMNS_CLOSE = "az_columns_close"
+COLUMN_OPEN = "az_column_open"
+COLUMN_CLOSE = "az_column_close"
+COLUMN_MARKS = (COLUMNS_OPEN, COLUMN_OPEN, COLUMN_CLOSE, COLUMNS_CLOSE)
+#: A column's opening line, its share of the row in percent when it is given one.
+COLUMN_LINE = re.compile(r"^:::[ \t]*column\b([^\n]*)$")
+COLUMN_WIDTH = re.compile(r"\bwidth\s*=\s*(\d{1,3}(?:\.\d+)?)\s*%?")
+#: The narrowest and widest share a written width keeps, in percent.
+MIN_COLUMN, MAX_COLUMN = 10.0, 90.0
+#: What a column holds for the row to stand side by side: words, lists, quotes and
+#: callouts, headings and pictures. Anything else (a table, code, a rule, a block of its
+#: own) prints the row's columns one under the other.
+COLUMN_TOKENS = frozenset((
+    "paragraph_open", "paragraph_close", "inline", "heading_open", "heading_close",
+    "bullet_list_open", "bullet_list_close", "ordered_list_open", "ordered_list_close",
+    "list_item_open", "list_item_close", "blockquote_open", "blockquote_close",
+))
 
 
 #: How deep chapters nest: a report's chapter may hold chapters of its own, and
@@ -102,7 +131,7 @@ ALIGNMENT_BLOCK = re.compile(
     re.S | re.M,
 )
 #: A block of blocks, four colons deep, closed by four colons alone.
-WRAPPER_BLOCK = re.compile(r"^::::[ \t]*(infographic)[ \t]*\n(.*?)^::::[ \t]*$", re.S | re.M)
+WRAPPER_BLOCK = re.compile(r"^::::[ \t]*(infographic|columns)[ \t]*\n(.*?)^::::[ \t]*$", re.S | re.M)
 ATTR_PARAM = "__azimut_attrs"
 ATTR_VALUES = re.compile(r"\b(width|align)\s*=\s*([\w.%+-]+)")
 #: `caption="Smoke over the port"` in a picture's braces. Taken out before the
@@ -713,6 +742,10 @@ def alignment_blocks(text: str) -> list["Block"]:
         blocks.append(Block("left", parse(text[position : match.start()]), text.count("\n", 0, position)))
         name = match.group(1)
         line = text.count("\n", 0, match.start(2))
+        if name == COLUMNS:
+            blocks.extend(columns_blocks(match.group(2), line))
+            position = match.end()
+            continue
         if name in TOKEN_BLOCKS:
             blocks.append(Block("left", [block_token(name, match.group(2))], line, kind=name))
             position = match.end()
@@ -728,6 +761,165 @@ def alignment_blocks(text: str) -> list["Block"]:
         position = match.end()
     blocks.append(Block("left", parse(text[position:]), text.count("\n", 0, position)))
     return blocks
+
+
+@dataclass
+class Column:
+    """One `::: column` of a `:::: columns` block: its lines, where they start in the
+    block, and the share of the row it was given (None to share what is left)."""
+
+    lines: list[str]
+    first: int
+    width: float | None = None
+
+
+def read_columns(body: str) -> tuple[list[Column], list[tuple[int, list[str]]]]:
+    """A `:::: columns` block's columns, in order, and the lines written in it outside
+    any column, by where each stretch starts. A column left open runs to the block's end."""
+    columns: list[Column] = []
+    stray: list[tuple[int, list[str]]] = []
+    current: Column | None = None
+    for number, line in enumerate(body.split("\n")):
+        opened = COLUMN_LINE.match(line)
+        if opened:
+            width = COLUMN_WIDTH.search(opened.group(1))
+            current = Column([], number + 1, float(width.group(1)) if width else None)
+            columns.append(current)
+        elif current is not None and re.match(r"^:::[ \t]*$", line):
+            current = None
+        elif current is not None:
+            current.lines.append(line)
+        elif line.strip() and not re.match(r"^:{3,}[ \t]*$", line):
+            if stray and stray[-1][0] + len(stray[-1][1]) == number:
+                stray[-1][1].append(line)
+            else:
+                stray.append((number, [line]))
+    return columns, stray
+
+
+def column_widths(written: list[float | None]) -> list[float]:
+    """Each column's share of the row, as fractions adding to one. A written width is
+    kept between `MIN_COLUMN` and `MAX_COLUMN` percent and the columns without one share
+    what is left; widths that leave the others too little are not followed, every
+    column then taking an even share."""
+    count = len(written)
+    if not count:
+        return []
+    given = [min(MAX_COLUMN, max(MIN_COLUMN, width)) if width is not None else None for width in written]
+    free = sum(1 for width in given if width is None)
+    total = sum(width for width in given if width is not None)
+    if free == count or (free and 100 - total < MIN_COLUMN * free) or (not free and total <= 0):
+        return [1 / count] * count
+    rest = (100 - total) / free if free else 0.0
+    shares = [width if width is not None else rest for width in given]
+    whole = sum(shares)
+    return [share / whole for share in shares]
+
+
+def _marker(kind: str, line: int, meta: dict[str, Any] | None = None) -> Token:
+    token = Token(kind, "", 0)
+    token.block = True
+    token.map = [line, line + 1]
+    token.meta = meta or {}
+    return token
+
+
+def _shifted(tokens: list[Token], offset: int) -> list[Token]:
+    """``tokens`` with their lines counted from ``offset`` lines further down."""
+    for token in tokens:
+        if token.map:
+            token.map = [token.map[0] + offset, token.map[1] + offset]
+    return tokens
+
+
+def _lays_side_by_side(tokens: list[Token]) -> bool:
+    """Whether a column holds only what a column can: words, lists, quotes, headings and
+    pictures, a comment (which prints nothing) aside."""
+    for token in tokens:
+        if token.type in COLUMN_TOKENS:
+            continue
+        if token.type == "html_block" and COMMENT.match(token.content) and not PAGE_BREAK.match(token.content.strip()):
+            continue
+        return False
+    return True
+
+
+def _picture_only(tokens: list[Token]) -> bool:
+    """Whether a column is one picture and nothing else."""
+    if len(tokens) != 3 or tokens[0].type != "paragraph_open":
+        return False
+    children = [child for child in tokens[1].children or [] if child.type != "softbreak"]
+    return len(children) == 1 and children[0].type == "image"
+
+
+def columns_blocks(body: str, line: int) -> list[Block]:
+    """A `:::: columns` block whose lines start at ``line``, as the blocks every reader
+    walks. Its columns' tokens come between the markers (`COLUMN_MARKS`), each picture in
+    a paragraph of its own (`split_figures`). An empty column is not printed; one column
+    left is ordinary content. A column holding anything a column cannot (a table, code, a
+    block of its own, a page break) has the row printed as written, one column under the
+    other. Lines written outside the columns print under the row."""
+    columns, stray = read_columns(body)
+    if any(re.match(r"^:::", row) or PAGE_BREAK.match(row) for column in columns for row in column.lines):
+        return _stacked(body, line)
+    parsed: list[tuple[Column, list[Token]]] = []
+    for column in columns:
+        tokens = _shifted(split_figures(parse("\n".join(column.lines))), column.first)
+        if not tokens or not any(token.type != "html_block" for token in tokens):
+            continue
+        if not _lays_side_by_side(tokens):
+            return _stacked(body, line)
+        parsed.append((column, tokens))
+    after: list[Token] = []
+    for start, rows in stray:
+        after.extend(_shifted(parse("\n".join(rows)), start))
+    if len(parsed) < 2:
+        return [Block("left", [token for _, tokens in parsed for token in tokens] + after, line)]
+    pictures = all(_picture_only(tokens) for _, tokens in parsed)
+    widths = column_widths([column.width for column, _ in parsed])
+    out = [_marker(COLUMNS_OPEN, 0, {"widths": widths, "pictures": pictures, "count": len(parsed)})]
+    for position, (column, tokens) in enumerate(parsed):
+        out.append(_marker(COLUMN_OPEN, max(0, column.first - 1), {"width": widths[position], "index": position}))
+        out.extend(tokens)
+        out.append(_marker(COLUMN_CLOSE, column.first + len(column.lines)))
+    out.append(_marker(COLUMNS_CLOSE, body.count("\n") + 1))
+    return [Block("left", out + after, line, kind=COLUMNS)]
+
+
+def _stacked(body: str, line: int) -> list[Block]:
+    """A columns block printed as written, one column under the other: its fence lines
+    emptied, line numbers kept, every block inside read as it would be anywhere."""
+    rows = body.split("\n")
+    # a column's fences are emptied, a block written inside one keeps its own
+    opened: list[bool] = []
+    for number, row in enumerate(rows):
+        if COLUMN_LINE.match(row):
+            opened.append(True)
+            rows[number] = ""
+        elif re.match(r"^:::[ \t]*\S", row):
+            opened.append(False)
+        elif re.match(r"^:{3,}[ \t]*$", row) and (not opened or opened.pop()):
+            rows[number] = ""
+    blocks = alignment_blocks("\n".join(rows))
+    for block in blocks:
+        block.line += line
+    return blocks
+
+
+def column_spans(tokens: list[Token], index: int) -> tuple[list[tuple[int, int, float]], int]:
+    """The columns of the row whose `COLUMNS_OPEN` is at ``index``: each column's first
+    and end token and its share, and the index past the row's `COLUMNS_CLOSE`."""
+    spans: list[tuple[int, int, float]] = []
+    position = index + 1
+    while position < len(tokens) and tokens[position].type != COLUMNS_CLOSE:
+        if tokens[position].type == COLUMN_OPEN:
+            end = position + 1
+            while end < len(tokens) and tokens[end].type not in (COLUMN_CLOSE, COLUMNS_CLOSE):
+                end += 1
+            spans.append((position + 1, end, float(tokens[position].meta.get("width") or 0.0)))
+            position = end
+        position += 1
+    return spans, min(len(tokens), position + 1)
 
 
 def fenced_spans(text: str) -> list[tuple[int, int]]:
@@ -1643,7 +1835,7 @@ def prints(tokens: list[Token], index: int) -> bool:
     if token.type == "html_block":
         text = token.content.strip()
         return bool(text) and not PAGE_BREAK.match(text) and not COMMENT.match(text)
-    return token.type not in ("hr", "heading_open")
+    return token.type not in ("hr", "heading_open", *COLUMN_MARKS)
 
 
 def empty_sections(pieces: list[Piece], blocks: dict[int, list[Block]], *, journal: bool) -> list[tuple[str, int]]:

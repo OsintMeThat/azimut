@@ -10,6 +10,7 @@ import { fileUrl } from '../fileUrl.js';
 import { entityReference, mediaReference } from '../markdown.js';
 import { foldText } from '../textFold.js';
 import { CALLOUTS, calloutMarkdown } from './callouts.js';
+import { EMPTY_COLUMNS, EMPTY_FIRST } from './columns.js';
 import { PAGE_BREAK, hintLine } from './look.js';
 import { CORNERS, writeAttrs } from './pictureSize.js';
 import { PLACEHOLDERS, SIGNATURE_BLOCK, builtInLine } from './reportParts.js';
@@ -201,6 +202,10 @@ export const SLASH_COMMANDS = [
   { id: 'story', label: 'Story', icon: 'text', words: 'scrollytelling scroll narrative sticky zoom', block: STORY_BLOCK, hint: 'Words scroll beside a picture, in HTML' },
   { id: 'code', label: 'Code', icon: 'hash', words: 'code block monospace', block: '```\n\n```', hint: 'Kept as typed, in a fixed-width face' },
   { id: 'divider', label: 'Divider', icon: 'minus', words: 'rule line separator hr', block: '---', hint: 'A line across the page' },
+  {
+    id: 'columns', label: 'Columns', icon: 'columns', words: 'columns side by side two pictures images photos before after row gallery pair compare',
+    block: EMPTY_COLUMNS, hint: 'Pictures or words side by side',
+  },
   { id: 'pagebreak', label: 'Page break', icon: 'file', words: 'new page pdf break', block: PAGE_BREAK, hint: 'PDF only' },
   { id: 'cover', label: 'Cover page', icon: 'file', words: 'first page front title report', action: 'cover', hint: 'Page 1, as you write it' },
   { id: 'signature', label: 'Signature', icon: 'edit', words: 'sign name role organisation author', block: SIGNATURE_BLOCK, hint: 'From Settings › Publishing' },
@@ -229,7 +234,7 @@ export const INSERT_SECTIONS = [
   { id: 'text', label: 'Text', ids: ['h1', 'h2', 'h3', 'bullet', 'numbered', 'task', 'quote', 'footnote', 'callout', 'callout-internal', 'code', 'date', 'entry', 'hint'] },
   { id: 'media', label: 'Media', ids: ['picture', 'upload', 'steps', 'story', 'my-logo'] },
   { id: 'case', label: 'From the case', ids: ['cite', 'post', 'map', 'include'] },
-  { id: 'layout', label: 'Layout', ids: ['divider', 'pagebreak', 'cover', 'align', 'corner', 'signature', 'field'] },
+  { id: 'layout', label: 'Layout', ids: ['divider', 'columns', 'pagebreak', 'cover', 'align', 'corner', 'signature', 'field'] },
   { id: 'figures', label: 'Figures', ids: ['table', 'chart', 'diagram', 'infographic'] },
 ];
 
@@ -282,17 +287,32 @@ export function slashGroup(query) {
 }
 
 /**
+ * What a column of a row holds no room for: a block wider than words and pictures, or
+ * one about the page. A chart, a map or a table beside another is an infographic's.
+ */
+const NOT_IN_A_COLUMN = new Set([
+  'table', 'chart', 'diagram', 'infographic', 'steps', 'story', 'map', 'include', 'post', 'code', 'divider', 'columns',
+  'pagebreak', 'cover', 'signature', 'my-logo', 'align', 'corner',
+]);
+
+/** Whether `/` offers `command` in a column of a row. */
+export function fitsInColumn(command) {
+  return !NOT_IN_A_COLUMN.has(command.id) && !NOT_IN_A_COLUMN.has(command.group);
+}
+
+/**
  * The commands matching what is typed after `/`, best first, in the menu's order
  * when two match as well. With nothing typed, the bare list: every entry in its
  * part of the menu, a group's entries left under their group. A template offers
  * guidance and no chapter (a note of one case has no place in it); a note the
- * other way round.
+ * other way round. In a column of a row (`inColumn`), only what fits in one.
  */
-export function slashMatches(query, { template = false } = {}) {
+export function slashMatches(query, { template = false, inColumn = false } = {}) {
   places ??= menuPlaces();
   const order = (command) => places.get(command.id)?.order ?? Infinity;
   const wanted = foldText(String(query ?? '').trim());
-  const offered = SLASH_COMMANDS.filter((command) => (template ? !command.notes : !command.template));
+  const offered = SLASH_COMMANDS.filter((command) => (template ? !command.notes : !command.template))
+    .filter((command) => !inColumn || fitsInColumn(command));
   if (!wanted) return offered.filter((command) => !command.group).sort((a, b) => order(a) - order(b));
   const scored = [];
   for (const command of offered) {
@@ -341,8 +361,9 @@ export function slashInsert(command, { before = '', now = new Date() } = {}) {
   }
   const lead = alone ? '' : '\n\n';
   const text = `${lead}${command.block}\n`;
-  // inside the fence of a code block and on the first empty cell of a table; after a block of steps or a story, drawn as its strip
-  const inner = command.id === 'code' ? lead.length + 4 : command.id === 'table' ? text.length - 6 : text.length;
+  // inside the fence of a code block, on the first empty cell of a table, in a row's first column; after a block of steps or a story, drawn as its strip
+  const inner = command.id === 'code' ? lead.length + 4 : command.id === 'table' ? text.length - 6
+    : command.id === 'columns' ? lead.length + EMPTY_FIRST : text.length;
   return { text, cursor: inner };
 }
 

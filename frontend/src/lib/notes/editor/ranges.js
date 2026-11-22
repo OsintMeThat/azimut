@@ -18,8 +18,20 @@ export function blocksIn(state, from, to = from) {
   const found = [];
   state.field(drawn, false)?.between(Math.max(0, from), Math.min(state.doc.length, to), (start, end, value) => {
     const kind = blockKindOf(value.spec.widget);
-    if (kind) found.push({ from: start, to: end, kind });
+    // a piece of a row of columns being written in says the whole row it stands for
+    const row = value.spec.widget?.row;
+    if (kind) found.push({ from: start, to: end, kind, ...(row ? { row } : {}) });
   });
+  return found;
+}
+
+/** The drawn blocks of `blocksIn`, a row of columns being written in counted once, whole. */
+function wholeBlocks(state) {
+  const found = [];
+  for (const block of blocksIn(state, 0, state.doc.length)) {
+    if (!block.row) found.push(block);
+    else if (!found.some((one) => one.from === block.row.from)) found.push({ from: block.row.from, to: block.row.to, kind: block.kind });
+  }
   return found;
 }
 
@@ -80,7 +92,7 @@ const CONTAINERS = new Set(['list', 'quote', 'callout']);
  * handle sits on and moves.
  */
 export function blockRanges(state) {
-  const whole = blocksIn(state, 0, state.doc.length).map((block) => ({ ...block, drawn: true }));
+  const whole = wholeBlocks(state).map((block) => ({ ...block, drawn: true }));
   const found = [...whole];
   const tree = ensureSyntaxTree(state, state.doc.length, 200) ?? syntaxTree(state);
   const under = (pos) => whole.some((block) => pos >= block.from && pos <= block.to);

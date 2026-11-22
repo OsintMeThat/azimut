@@ -24,6 +24,9 @@
  * aligned block each line stands in, by line number), `count(name)` (the next
  * number of a kind, a chapter's), `standsWhole(range)` (nothing the parser found
  * inside is drawn) and `coverEnd()` (the 1-based line of the cover rule, 0 without).
+ * A kind written in place (a row of columns) also gets `decorate(range)` (any
+ * decoration), `cover(from, to)` (a stretch nothing else draws on) and `columns` (the
+ * style of the column each line stands in, by line number, which a block there takes).
  */
 import { EditorState, StateField, Transaction } from '@codemirror/state';
 import { Decoration, EditorView } from '@codemirror/view';
@@ -157,6 +160,7 @@ export function noteDecorations(state) {
     isOpen,
     inCode,
     aligns: new Map(), // the place of the aligned block each line stands in, by line number, for a picture there
+    columns: new Map(), // while a row of columns is written in, where its column's lines stand, by line number, for a block there
     line: (pos, className) => ranges.push(lineClass(className).range(pos)),
     lines: (from, to, className) => {
       for (let number = state.doc.lineAt(from).number; number <= state.doc.lineAt(to).number; number += 1) {
@@ -164,6 +168,9 @@ export function noteDecorations(state) {
       }
     },
     mark: (from, to, className) => ranges.push(Decoration.mark({ class: className }).range(from, to)),
+    // a kind that dresses its own lines while it is written in (a row of columns): any decoration, and a stretch nothing else draws on
+    decorate: (range) => ranges.push(range),
+    cover: (from, to) => covered.push([from, to]),
     count: (name) => {
       counts.set(name, (counts.get(name) ?? 0) + 1);
       return counts.get(name);
@@ -190,6 +197,9 @@ export function noteDecorations(state) {
       pinned: Boolean(found.pinned),
       picked: first.from === pick,
     });
+    // a block in the column being written in stands where that column does
+    const column = ctx.columns.get(first.number);
+    if (column) widget.column = column;
     ranges.push(Decoration.replace({ widget, block: true }).range(first.from, last.to));
   };
 
@@ -199,6 +209,8 @@ export function noteDecorations(state) {
       block(kind.name, found);
       return true;
     }
+    // a kind written in place (a row of columns) dresses its own lines while the cursor is in it, and shows its source once opened
+    if (kind.writtenIn && !inOpen(found.from, found.to)) return kind.writtenIn(ctx, found) !== false;
     opened.push([state.doc.lineAt(found.from).from, state.doc.lineAt(found.to).to]);
     return Boolean((kind.source ?? (kind.fence ? fenceSource : null))?.(ctx, found));
   };

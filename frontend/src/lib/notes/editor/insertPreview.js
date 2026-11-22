@@ -50,6 +50,9 @@ const ART = {
   upload: () => [picture('cm-ip-upload'), el('span', 'cm-ip-caption', 'photo.jpg, added to the case')],
   steps: () => [el('span', 'cm-ip-strip', [1, 2, 3].map((at) => el('span', 'cm-ip-step', picture(), el('span', 'cm-ip-badge', String(at)))))],
   story: () => [el('span', 'cm-ip-story', picture(), el('span', 'cm-ip-col', lines(3)))],
+  // a row of two pictures at one height, then words beside a picture
+  columns: () => [el('span', 'cm-ip-cols', picture('cm-ip-wide'), picture('cm-ip-tall')),
+    el('span', 'cm-ip-cols cm-ip-cols-words', el('span', 'cm-ip-col', lines(3)), picture())],
   logo: () => [el('span', 'cm-ip-row', el('span', 'cm-ip-logo', 'LOGO')), ...lines(2)],
   cite: () => [el('span', 'cm-ip-row', el('span', 'cm-ip-words', 'Seen at '), el('span', 'cm-ip-chip', '✓ Quay north'), el('span', 'cm-ip-words', ' on day 2.'))],
   footnote: () => [el('span', 'cm-ip-row', el('span', 'cm-ip-words', 'Open to both,'), el('span', 'cm-ip-fn', 'a'), el('span', 'cm-ip-words', ' for a century.')),
@@ -118,6 +121,7 @@ export function sampleMarkdown(command) {
     chart: '::: chart\nkind: stacked bars\ntitle: At least 41 vehicles, by model\ncount: At least\nby: Model\ncolour by: Grade\n| Model | Grade | At least |\n…\n:::',
     infographic: ':::: infographic\ntitle: At least 60 vehicles lost\n::: chart\nkind: key figures\n…\n:::\n::::',
     cover: '::: center\n# {title}\n{date}\n:::\n<!-- cover -->',
+    columns: ':::: columns\n::: column\n[[media:…|Photo]]\n:::\n::: column\nYour words\n:::\n::::',
   }[command.id];
   if (written) return written;
   if (command.line) return `${command.line}${command.line.startsWith('> [!') ? '' : 'Your words'}`.trimEnd();
@@ -211,6 +215,13 @@ export const previewLook = EditorView.theme({
   },
   '.cm-ip-story': { display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px', alignItems: 'center' },
   '.cm-ip-col': { display: 'flex', flexDirection: 'column', gap: '6px' },
+  '.cm-ip-cols': { display: 'flex', gap: '8px', alignItems: 'flex-start' },
+  '.cm-ip-cols + .cm-ip-cols': { marginTop: '8px' },
+  '.cm-ip-cols .cm-ip-picture': { height: '58px' },
+  '.cm-ip-cols .cm-ip-wide': { flex: '1.6 1 0' },
+  '.cm-ip-cols .cm-ip-tall': { flex: '0.8 1 0' },
+  '.cm-ip-cols-words .cm-ip-col': { flex: '2 1 0' },
+  '.cm-ip-cols-words .cm-ip-picture': { flex: '1 1 0', height: '40px' },
   '.cm-ip-logo': {
     display: 'inline-block', padding: '4px 8px', border: '1px dashed var(--border-strong)', borderRadius: '4px', color: 'var(--text-3)',
     fontSize: '10px', fontWeight: '700', letterSpacing: '0.1em',

@@ -63,7 +63,7 @@ MAX_PIECES = 200
 #: What ``left`` counts, in the order the Notebook says them.
 LEFT = ("internal", "tables", "diagrams", "other")
 #: The fence of an aligned block that a selection's cut left without its pair.
-ALIGN_FENCE = re.compile(r"^:::[ \t]*[\w-]*[ \t]*$")
+ALIGN_FENCE = re.compile(r"^:{3,4}[ \t]*[\w-]*(?:[ \t]+[A-Za-z][\w-]*=\S*)*[ \t]*$")
 #: Where a line of the note went on, kept apart from a break the analyst forced until
 #: the fences are read, then said as the space Markdown makes of it.
 SOFT = "\x00"

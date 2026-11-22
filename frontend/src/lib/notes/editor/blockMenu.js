@@ -7,6 +7,7 @@
 import { paths as iconPaths } from '../../../components/Icon.svelte';
 import { CALLOUTS } from '../callouts.js';
 import { CORNERS } from '../pictureSize.js';
+import { blockKind } from './blocks.js';
 import { blockRanges } from './ranges.js';
 import {
   INTERNAL_KINDS, SHAPES, TEXT_KINDS, alignBlock, alignOf, breakAbove, canBreakBefore, cornerBlock, cornerOf,
@@ -18,7 +19,7 @@ import {
 const KIND_NAMES = {
   paragraph: 'Paragraph', heading: 'Heading', list: 'List', quote: 'Quote', callout: 'Callout', code: 'Code', table: 'Table',
   rule: 'Divider', html: 'HTML', picture: 'Picture', diagram: 'Diagram', aligned: 'Aligned block', steps: 'Steps',
-  story: 'Story', map: 'Map', pagebreak: 'Page break', cover: 'End of the cover', include: 'Chapter',
+  story: 'Story', map: 'Map', pagebreak: 'Page break', cover: 'End of the cover', include: 'Chapter', columns: 'Columns',
 };
 const SHAPE_NAMES = { h1: 'Heading', h2: 'Subheading', h3: 'Small heading', bullet: 'Bulleted list', numbered: 'Numbered list', task: 'To-do list' };
 
@@ -47,7 +48,8 @@ const CORNER_ICONS = { 'top-left': 'cornerTL', 'top-right': 'cornerTR', 'bottom-
  * block is offered.
  */
 export function blockActions(state, block, blocks = blockRanges(state)) {
-  const entries = [];
+  // what a kind of block offers of its own (a row of columns taken apart) comes first
+  const entries = [...(blockKind(block.kind)?.actions?.(state, block) ?? [])];
   const internal = isInternal(state, block);
   const shape = shapeOf(state, block);
   // an internal passage is a wrapper: Make public takes it off, and what was inside is turned then

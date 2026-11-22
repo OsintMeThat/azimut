@@ -3,14 +3,15 @@
  * its bar while the note can be written: the sizes and places the PDF prints it at
  * (a size shows on the picture while the pointer is on it, and a corner dragged snaps
  * to the sizes), its caption (pressed, it is written in place), whether it is graphic,
- * another picture in its place, the tool it was made in, and a source or a posted
- * address to state. Each writes its braces, `{width=… align=… caption="…" graphic}`, in
+ * another picture in its place or beside it (a row of two columns), the tool it was
+ * made in, and a source or a posted address to state. Each writes its braces, `{width=… align=… caption="…" graphic}`, in
  * one change one Undo takes back. Open, its line is shown as written.
  */
 import {
-  CAPTION_HELP, GRAPHIC_HELP, PICTURE_ALIGNS, PICTURE_SIZES, POSTED_HELP, SOURCE_HELP, blockAlignAt, captionField, isGraphic,
-  nearestSize, pictureLine, picturesIn, postedAddress, replacedLine, rovingToolbar, sizeWidth, sizedLine, sourceField,
+  CAPTION_HELP, GRAPHIC_HELP, PICTURE_ALIGNS, PICTURE_LINE, PICTURE_SIZES, POSTED_HELP, SOURCE_HELP, blockAlignAt, captionField, isGraphic,
+  nearestSize, pictureLine, pictureReference, picturesIn, postedAddress, replacedLine, rovingToolbar, sizeWidth, sizedLine, sourceField,
 } from '../pictureSize.js';
+import { rowOf } from '../columns.js';
 import { registerBlock } from './blocks.js';
 import { openCasePicker, pickerTheme } from './casePicker.js';
 import { iconSvg } from './icon.js';
@@ -26,7 +27,7 @@ function pictureRatio(box) {
 }
 
 /** The case record a picture line shows, or null for an image read from an address. */
-function pictureEntity(info, picture) {
+export function pictureEntity(info, picture) {
   const id = /^media:([A-Za-z0-9_-]+)$/.exec(picture?.ref ?? '')?.[1];
   return id ? resolve(info, id) : null;
 }
@@ -36,7 +37,7 @@ function pictureEntity(info, picture) {
  * at. Then the way back to the tool it was made in, and a source to state when only
  * the analyst knows it. Neither of those two is ever printed.
  */
-function sizeBar(box, source, info, handlers = {}, blockAlign = '') {
+function sizeBar(box, source, info, handlers = {}, blockAlign = '', { inColumn = false } = {}) {
   const [picture] = picturesIn(source);
   const bar = document.createElement('div');
   bar.className = 'cm-size-bar';
@@ -95,6 +96,16 @@ function sizeBar(box, source, info, handlers = {}, blockAlign = '') {
   replace.setAttribute('aria-label', 'Replace…');
   replace.append(iconSvg('swap'));
   bar.append(caption, graphic, replace);
+  // a picture alone on its line can take another beside it, as a row of two columns
+  if (!inColumn) {
+    const beside = document.createElement('button');
+    beside.type = 'button';
+    beside.className = 'cm-size-beside';
+    beside.dataset.beside = 'true';
+    beside.title = 'Side by side: put another picture of the case beside it, at one height';
+    beside.append(iconSvg('columns'), document.createTextNode('Side by side'));
+    bar.append(beside);
+  }
   const entity = pictureEntity(info, picture);
   const opener = entity ? handlers.opener?.(entity) : null;
   if (opener) {
@@ -157,7 +168,7 @@ function openPosted(view, box, entity) {
 }
 
 /** Open the field a picture's source is stated in, under the picture drawn in `box`. */
-function openSourceField(view, box, entity) {
+export function openSourceField(view, box, entity) {
   if (box.querySelector('.picture-source-field')) return;
   const handlers = view.state.facet(noteHandlers);
   if (!handlers.stateSource) return;
@@ -208,8 +219,8 @@ export function openCaption(view, box, returnTo = null) {
   field.select();
 }
 
-/** A line holding nothing but one picture: `![…](…){…}` or `[[media:…]]{…}`. */
-export const PICTURE_LINE = /^\s*(?:!\[[^\]]*\]\([^)]*\)(?:\{[^}\n]*\})?|\[\[media:[A-Za-z0-9_-]+\|[^\]\n]+\]\](?:\{[^}\n]*\})?)\s*$/;
+/** A line holding nothing but one picture, said where every reader of a note finds it. */
+export { PICTURE_LINE };
 
 /** Show another picture of the case in place of the one drawn in `box`, its braces kept. */
 function replacePicture(view, box, entity) {
@@ -219,6 +230,15 @@ function replacePicture(view, box, entity) {
   const text = picture ? replacedLine(line.text, picture.ref, entity) : null;
   if (text === null || text === line.text) return false;
   view.dispatch({ changes: { from: line.from, to: line.to, insert: text }, userEvent: 'input' });
+  return true;
+}
+
+/** The picture drawn in `box` and the case picture `entity`, side by side in a row of two columns. */
+function putBeside(view, box, entity) {
+  if (view.state.readOnly || !box.isConnected) return false;
+  const line = view.state.doc.lineAt(view.posAtDOM(box));
+  if (!PICTURE_LINE.test(line.text)) return false;
+  view.dispatch({ changes: { from: line.from, to: line.to, insert: rowOf(line.text, pictureReference(entity)) }, selection: { anchor: line.from }, userEvent: 'input' });
   return true;
 }
 
@@ -236,6 +256,16 @@ function pressPictureBar(target, box, view) {
       pick: (entity) => {
         pickBlock(view, box, { focus: true });
         replacePicture(view, box, entity);
+      },
+    });
+    return;
+  }
+  if (target.closest('[data-beside]')) {
+    openCasePicker(view, target.closest('[data-beside]'), {
+      title: 'Put a picture beside it',
+      pick: (entity) => {
+        pickBlock(view, box, { focus: true });
+        putBeside(view, box, entity);
       },
     });
     return;
@@ -442,7 +472,7 @@ function clickPictureBar(event, box, view) {
   const button = event.target.closest('[data-size-bar] button');
   if (event.detail !== 0 || !button || button.dataset.editSource) return;
   const from = view.state.doc.lineAt(view.posAtDOM(box)).from;
-  if (button.dataset.open || button.dataset.source || button.dataset.posted || button.dataset.replace) {
+  if (button.dataset.open || button.dataset.source || button.dataset.posted || button.dataset.replace || button.dataset.beside) {
     pressPictureBar(button, box, view);
     return;
   }
@@ -471,7 +501,7 @@ registerBlock({
   // the size and place buttons over a picture, which carry its </>, while the note can be written
   tools: (box, widget, view) => {
     if (!widget.writable) return null;
-    const bar = sizeBar(box, widget.source, widget.info, view.state.facet(noteHandlers), widget.align);
+    const bar = sizeBar(box, widget.source, widget.info, view.state.facet(noteHandlers), widget.align, { inColumn: Boolean(widget.column) });
     bar.append(sourceButton(view, box, 'cm-size-edit'));
     return bar;
   },
@@ -519,6 +549,10 @@ registerBlock({
     '.cm-veil-said span': { color: 'rgba(255, 255, 255, .78)' },
     '.cm-size-bar button.cm-size-graphic': { gap: '4px', padding: '0 8px 0 6px' },
     '.cm-size-bar button.cm-size-replace': { minWidth: '26px', padding: '0' },
+    '.cm-size-bar button.cm-size-beside': { gap: '5px', padding: '0 8px 0 6px' },
+    // in a column being written in, a picture fills its column: no size or place of its own
+    '.cm-in-column .cm-size-bar [data-share], .cm-in-column .cm-size-bar [data-align], .cm-in-column .cm-picture-corner': { display: 'none' },
+    '.cm-in-column .cm-picture-frame': { width: '100% !important' },
     // dragged from its corner, a picture snaps to the sizes, the one it takes said on it
     '.cm-picture-corner': {
       position: 'absolute', bottom: '-5px', width: '14px', height: '14px', boxSizing: 'border-box', borderRadius: '3px',

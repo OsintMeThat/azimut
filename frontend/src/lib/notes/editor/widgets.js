@@ -109,6 +109,8 @@ export class BlockWidget extends WidgetType {
     this.align = align;
     this.pinned = pinned;
     this.picked = picked;
+    /** In a row of columns being written in, the place of its column on the page, as a style; '' elsewhere. */
+    this.column = '';
   }
 
   /** The kind of block this draws, as `editor/blocks.js` names it. */
@@ -119,7 +121,7 @@ export class BlockWidget extends WidgetType {
   /** Whether `other` draws the same, picked or not: a block that only gets picked keeps its element. */
   same(other) {
     if (other.kind !== this.kind || other.source !== this.source || other.info.caseId !== this.info.caseId
-      || other.writable !== this.writable || other.align !== this.align || other.pinned !== this.pinned
+      || other.writable !== this.writable || other.align !== this.align || other.pinned !== this.pinned || other.column !== this.column
       || !sameIdentity(other.info.identity, this.info.identity)) return false;
     // A tool that files something reads the case again: the same records come back as a
     // new list. The block is drawn again only when what it shows changed, so a picture
@@ -141,7 +143,7 @@ export class BlockWidget extends WidgetType {
 
   /** What its drawn height is kept by: what `same` compares (`holdHeight`). */
   heightKey() {
-    this.heldKey ??= JSON.stringify([this.kind, this.source, this.info.caseId ?? '', this.writable, this.align, this.pinned,
+    this.heldKey ??= JSON.stringify([this.kind, this.source, this.info.caseId ?? '', this.writable, this.align, this.pinned, this.column,
       Object.keys(NO_IDENTITY).map((key) => this.info.identity?.[key] ?? null), this.caseKey()]);
     return this.heldKey;
   }
@@ -162,6 +164,10 @@ export class BlockWidget extends WidgetType {
     box.className = `cm-block cm-block-${this.kind}${this.align ? ` cm-in-align-${this.align}` : ''}`;
     box.dataset.block = this.kind;
     box.title = 'Double-click to edit the source';
+    if (this.column) {
+      box.classList.add('cm-in-column');
+      box.style.cssText = this.column;
+    }
     markPicked(box, this.picked);
     (kind?.draw ?? drawMarkdown)(box, this, view);
     // a kind with a bar of its own puts the </> in it

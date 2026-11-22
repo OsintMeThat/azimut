@@ -52,7 +52,8 @@ NAME_CHARS = 32
 VALUE_CHARS = 40
 
 FENCE = re.compile(r"^\s*(`{3,}|~{3,})\s*([\w-]*)")
-OPEN = re.compile(r"^(:{3,})[ \t]*([A-Za-z][\w -]*?)[ \t]*$")
+#: A `:::` block opening, a column's share of its row (`::: column width=66%`) read past.
+OPEN = re.compile(r"^(:{3,})[ \t]*([A-Za-z][\w -]*?)(?:[ \t]+[A-Za-z][\w-]*=\S*)*[ \t]*$")
 CLOSE = re.compile(r"^:{3,}[ \t]*$")
 HEADING = re.compile(r"^\s{0,3}#{1,6}\s+\S")
 BULLET = re.compile(r"^\s*(?:[-*+]|\d+[.)])\s+")

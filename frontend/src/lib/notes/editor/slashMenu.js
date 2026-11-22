@@ -14,6 +14,7 @@ import { startCompletion } from '@codemirror/autocomplete';
 
 import { slashGroup, slashHint, slashInsert, slashMatches, slashSection } from '../syntax.js';
 import { openFootnoteField } from './bubble.js';
+import { columnAt } from './columnsRow.js';
 import { insertHintUsed } from './insertHint.js';
 import { plusAt } from './insertMenu.js';
 import { insertPreview } from './insertPreview.js';
@@ -127,7 +128,8 @@ export function slashSource(handlers, { template = false } = {}) {
     const { from, query, line } = typed;
     const before = context.state.sliceDoc(line.from, from);
     const group = slashGroup(query);
-    const commands = slashMatches(query, { template });
+    // in a column of a row, only what fits in one
+    const commands = slashMatches(query, { template, inColumn: Boolean(columnAt(context.state, from)) });
     return {
       from,
       filter: false,

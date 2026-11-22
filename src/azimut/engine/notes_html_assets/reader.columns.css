@@ -1,0 +1,16 @@
+/* columns: pictures or words side by side, each column its share of the row (a flex
+   grow set on it). A row of pictures grows each column by its picture's shape, so they
+   share one height, and stays side by side on a phone; any other row reads down there. */
+.az-body > .az-columns { margin: 2.25rem 0 2.75rem; }
+.az-body > .az-columns-pictures { grid-column: wide; }
+.az-columns { display: flex; gap: .875rem; align-items: flex-start; }
+.az-column { min-width: 0; }
+.az-column > :first-child { margin-top: 0; }
+.az-column > :last-child { margin-bottom: 0; }
+.az-column > .az-figure { margin: 0; }
+.az-column-heading { margin: 1.25rem 0 .5rem; font: 700 1.125rem/1.3 var(--head); }
+@media (max-width: 37.5rem) {
+  .az-columns:not(.az-columns-pictures) { flex-direction: column; gap: 1.25rem; }
+  .az-columns:not(.az-columns-pictures) > .az-column { flex: none !important; width: 100%; }
+  .az-columns-pictures { gap: .5rem; }
+}
