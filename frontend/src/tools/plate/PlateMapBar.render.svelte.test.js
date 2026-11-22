@@ -19,6 +19,11 @@ function show(element, props = {}) {
 }
 const button = (label) => document.body.querySelector(`[aria-label="${label}"]`);
 const item = (label) => [...document.body.querySelectorAll('.fm-item')].find((node) => node.textContent.trim() === label);
+/** A step from the bar's ⋯ menu, opened first when it is not. */
+function step(label) {
+  if (button('Zoom and turn').getAttribute('aria-expanded') !== 'true') { button('Zoom and turn').click(); flushSync(); }
+  return item(label);
+}
 
 describe('a plate map\'s own bar', () => {
   it('says how many of the case\'s layers the map draws, and opens them on a press', () => {
@@ -52,12 +57,29 @@ describe('a plate map\'s own bar', () => {
     expect(button('Layers')).toBeNull();
   });
 
+  it('keeps the frame, the compass and the ground in sight, and the steps of zoom and turn under its ⋯', () => {
+    show({ kind: 'map', view: { lat: 0, lon: 0, zoom: 5, bearing: 0 }, basemap: 'plain', overlays: [], layers: [] }, { onlayers: () => {}, onsameview: () => {} });
+    const bar = document.body.querySelector('.map-bar');
+    expect([...bar.querySelectorAll('button')].map((node) => node.getAttribute('aria-label')))
+      .toEqual(['Frame the map', 'Compass, 0°', 'Zoom and turn', 'Ground', 'Same view as the other map', 'Layers']);
+    expect(document.body.querySelector('.float-menu')).toBeNull();
+    button('Zoom and turn').click(); flushSync();
+    const menu = document.body.querySelector('.float-menu');
+    expect(menu.getAttribute('aria-label')).toBe('Zoom and turn');
+    // a map drawn flat has nothing to lean
+    expect([...menu.querySelectorAll('.fm-item')].map((node) => node.textContent.trim())).toEqual(['Zoom in', 'Zoom out', 'Turn 15° left', 'Turn 15° right']);
+    expect(menu.querySelector('.fm-head')).toBeNull();
+  });
+
   it('turns the map a step either way, and a press on the compass puts north up', () => {
     const element = show({ kind: 'map', view: { lat: 0, lon: 0, zoom: 5, bearing: 10 }, basemap: 'plain', overlays: [] });
-    button('Turn the map left').click();
+    step('Turn 15° left').click();
     expect(element.view.bearing).toBe(25);
-    button('Turn the map right').click(); button('Turn the map right').click();
+    // the menu stays open for the next step
+    step('Turn 15° right').click(); flushSync(); step('Turn 15° right').click();
     expect(element.view.bearing).toBe(-5);
+    button('Zoom and turn').click(); flushSync();
+    expect(document.body.querySelector('.float-menu')).toBeNull();
     const dial = document.body.querySelector('.dial');
     dial.dispatchEvent(new PointerEvent('pointerdown', { button: 0, bubbles: true }));
     window.dispatchEvent(new PointerEvent('pointerup'));
@@ -67,7 +89,7 @@ describe('a plate map\'s own bar', () => {
   it('keeps its hover words off a menu it has opened, so they never cover it', () => {
     show({ id: 'm', kind: 'map', basemap: 'esri-wayback', release: 41, view: { lat: 0, lon: 0, zoom: 4 }, layers: [] },
       { grounds: [['esri-wayback', 'World Imagery Wayback, dated']], releases: [{ release: 41, date: '2024-03-12' }] });
-    for (const label of ['Ground', 'Ground\'s day']) {
+    for (const label of ['Ground', 'Ground\'s day', 'Zoom and turn']) {
       expect(button(label).title).not.toBe('');
       button(label).click(); flushSync();
       expect(button(label).getAttribute('aria-expanded')).toBe('true');
@@ -79,7 +101,7 @@ describe('a plate map\'s own bar', () => {
 
   it('wraps a turn round the half circle', () => {
     const element = show({ kind: 'map', view: { lat: 0, lon: 0, zoom: 5, bearing: 175 }, basemap: 'plain', overlays: [] });
-    button('Turn the map left').click();
+    step('Turn 15° left').click();
     expect(element.view.bearing).toBe(-170);
   });
 
@@ -103,7 +125,7 @@ describe('a plate map\'s own bar', () => {
     let framed = 0;
     show({ kind: 'inset', basemap: 'plain', overlays: [] }, { onframe: () => { framed += 1; } });
     expect(button('Frame the map')).toBeNull();
-    expect(button('Turn the map left')).toBeNull();
+    expect(button('Zoom and turn')).toBeNull();
     expect(button('Ground')).not.toBeNull();
     unmount(held); held = null; document.body.innerHTML = '';
     show({ kind: 'map', view: { lat: 0, lon: 0, zoom: 5, bearing: 0 }, basemap: 'plain', overlays: [] }, { onframe: () => { framed += 1; } });
@@ -119,13 +141,14 @@ describe('a plate map\'s own bar', () => {
     const box = document.body.querySelector('.keep input');
     expect(box.checked).toBe(true);
     // held: the hand frames nothing here
-    expect(button('Zoom the map in').disabled).toBe(true);
-    expect(button('Turn the map left').disabled).toBe(true);
+    expect(button('Frame the map').disabled).toBe(true);
+    expect(document.body.querySelector('.dial').disabled).toBe(true);
+    for (const label of ['Zoom in', 'Zoom out', 'Turn 15° left', 'Turn 15° right']) expect(step(label).disabled).toBe(true);
     box.click();
     expect(kept).toEqual([false]);
     unmount(held); held = null; document.body.innerHTML = '';
     show(element, { view: { lat: 1, lon: 1, zoom: 9, bearing: 0 }, keep: false, onview: (next) => seen.push(next) });
-    button('Zoom the map in').click();
+    step('Zoom in').click();
     // the day's own framing moves, never the map's view under it
     expect(seen.at(-1)).toEqual({ lat: 1, lon: 1, zoom: 9.5, bearing: 0 });
     expect(element.view.zoom).toBe(5);
@@ -134,10 +157,16 @@ describe('a plate map\'s own bar', () => {
   it('says nothing of the framing before on the first day, and leans a map in 3D', () => {
     const element = show({ kind: 'map', view: { lat: 0, lon: 0, zoom: 5, bearing: 0, pitch: 50 }, terrain: 1.5, basemap: 'plain', overlays: [] });
     expect(document.body.querySelector('.keep')).toBeNull();
-    button('Tilt the map more').click();
+    step('Lean more').click(); flushSync();
     expect(element.view.pitch).toBe(60);
-    button('Tilt the map less').click(); button('Tilt the map less').click();
+    // how far it leans is said over its two steps
+    expect(document.body.querySelector('.float-menu .fm-head').textContent).toBe('Leans 60°');
+    step('Lean less').click(); flushSync(); step('Lean less').click(); flushSync();
     expect(element.view.pitch).toBe(40);
+    expect(document.body.querySelector('.float-menu .fm-head').textContent).toBe('Leans 40°');
+    element.view.pitch = 85; flushSync();
+    expect(step('Lean more').disabled).toBe(true);
+    expect(step('Zoom out').disabled).toBe(false);
   });
 
   it('lays the key-less layers of the Map over any ground', () => {

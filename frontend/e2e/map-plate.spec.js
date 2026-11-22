@@ -59,6 +59,13 @@ async function newPlate(page) {
   await page.getByRole('dialog', { name: 'New plate' }).getByRole('button', { name: 'Create plate' }).click();
 }
 
+/** A step of zoom, turn or lean from the picked map's ⋯, its menu closed after. */
+async function stepMap(page, label) {
+  await page.locator('.map-bar').getByRole('button', { name: 'Zoom and turn' }).click();
+  await page.getByRole('menu', { name: 'Zoom and turn' }).getByRole('menuitem', { name: label }).click();
+  await page.keyboard.press('Escape');
+}
+
 /** An element added from the Add panel, by its tile. */
 async function addOnPage(page, label) {
   await page.getByRole('button', { name: 'Add', exact: true }).click();
@@ -669,9 +676,11 @@ test('a line and a text go on the map, a step frames the map its own way, and th
   await page.locator('.list').getByRole('button', { name: 'Map', exact: true }).click();
   const keep = page.locator('.map-bar .keep input');
   await expect(keep).toBeChecked();
-  await expect(page.getByRole('button', { name: 'Zoom the map in' })).toBeDisabled();
+  await page.locator('.map-bar').getByRole('button', { name: 'Zoom and turn' }).click();
+  await expect(page.getByRole('menuitem', { name: 'Zoom in' })).toBeDisabled();
+  await page.keyboard.press('Escape');
   await keep.uncheck();
-  await page.getByRole('button', { name: 'Zoom the map in' }).click();
+  await stepMap(page, 'Zoom in');
   await expect.poll(() => {
     const spec = lastSave(store)?.spec;
     const step = spec?.steps?.now?.[0]?.id;
@@ -728,7 +737,7 @@ test('a step framed on its own moves its own videos with the map, and leaves the
   await page.locator('.steps .tile', { hasText: 'Two' }).click();
   await page.locator('.list').getByRole('button', { name: 'Map', exact: true }).click();
   await page.locator('.map-bar .keep input').uncheck();
-  await page.getByRole('button', { name: 'Zoom the map in' }).click();
+  await stepMap(page, 'Zoom in');
   const boxOf = (saved, id) => saved?.spec.elements.find((element) => element.id === id)?.box;
   await expect.poll(() => lastSave(store)?.spec.framing?.s2?.map?.zoom).toBeCloseTo(5.5, 2);
   // the step's own video follows its point, the first step's stays where it was put

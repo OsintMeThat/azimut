@@ -6896,11 +6896,14 @@ of a situation map. A zone is filled, hatched, glowing or outlined and can dim t
 ground round it. A picture can point at the ground, and the picture picker offers
 the proofs and footage the main map's features carry, set pointing at their place.
 
-A map picked on the page carries its own bar: **Frame**, a half step of zoom
-either way, a step to either side and a compass to turn it, **Ground**, the day of a
+A map picked on the page carries its own bar: **Frame**, a compass dragged to turn
+it (a press puts north up), **⋯**, **Ground**, the day of a
 ground that has one (a Wayback release, a Sentinel-2 pass, a cloudless year), and how many
 of the case's layers it draws (**No layer**, in the accent, when it draws none), which
-opens the Layers tab. A press on the day opens the ground's releases, its years or
+opens the Layers tab. **⋯** keeps the steps out of the way: **Zoom in** and **Zoom out** by
+a half step, **Turn 15° left** and **right**, and on a map in 3D **Lean more** and **Lean
+less** under how far it leans. It stays open for the next step, and a day or slide that
+keeps the framing before it greys them, as it does Frame and the compass. A press on the day opens the ground's releases, its years or
 Satellite's calendar, as the inspector's **Ground** section shows them, with **Layers as
 they stood that day** under them. On Sentinel-2 it picks the map alone, whose calendar
 the bar and the inspector share. The bar's words give way on a small map,
@@ -6956,7 +6959,7 @@ shade. A plate saved while the focus was the map's own has it moved onto the map
 one of these, on every day and slide.
 
 There is one kind of map: its inspector's **Show the map in 3D** box stands it on its
-heights, tilted (from the bar, or to the degree in the inspector), the heights drawn as they are or up to three times as tall, said under it.
+heights, tilted (from the bar's ⋯, or to the degree in the inspector), the heights drawn as they are or up to three times as tall, said under it.
 It is drawn on Satellite's globe, its ground, tints, contour lines, names and the
 case's layers laid on the relief; a browser without WebGL2 draws it flat and says so.
 **Ridge lines** traces the crests over it. A tilted map has no scale bar and no grid;

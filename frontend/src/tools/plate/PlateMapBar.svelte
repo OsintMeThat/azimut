@@ -3,11 +3,12 @@
    * The few things a plate's map is changed by, on the map itself while it is
    * picked: framing it by the hand, turning it, and the ground it is drawn on.
    *
-   * - **Zoom**: a half step in or out, round the map's middle.
-   * - **Turn**: a step to either side, or the compass dragged round; a press on the
-   *   compass puts north back up. While the map is framed, a Shift-drag, a
-   *   middle-drag or a double click held turns it too.
-   * - **Tilt**: a map drawn in 3D leans further or less.
+   * - **Frame**: the map framed by the hand, the wheel zooming it.
+   * - **Compass**: dragged round, it turns the map; a press puts north back up. While
+   *   the map is framed, a Shift-drag, a middle-drag or a double click held turns it too.
+   * - **⋯**: the steps a hand frames by, out of the way until asked: a half step of
+   *   zoom in or out round the map's middle, 15° to either side, and on a map drawn in
+   *   3D how far it leans, further or less. The menu stays open for the next step.
    * - **Ground**: the basemaps a plate offers, and what can be laid over them.
    * - **The ground's day**, on a ground that has one (a Wayback release, a Sentinel-2
    *   pass, a cloudless year): a press opens its releases, its years or Satellite's
@@ -73,6 +74,9 @@
   let menu = $state(false);
   let anchor = $state(null);
   let dial = $state(null);
+  /** The ⋯ menu of zoom, turn and lean steps, and its opener. */
+  let more = $state(false);
+  let moreAnchor = $state(null);
   /** The ground's day as the chip says it, '' on a ground with no day of its own. */
   const day = $derived(isMap ? groundDay(element, { releases, years }) : '');
   const looking = $derived(element.basemap === SENTINEL_ID && !element.acquired && sentinel?.map === element.id && sentinel.s2.latestBusy);
@@ -144,16 +148,6 @@
     {/if}
     <button type="button" class:on={framing} aria-pressed={framing} disabled={held} title={framing ? 'Done framing (Esc)' : 'Frame by the hand: zoom with the wheel, turn with a Shift-drag'}
       aria-label="Frame the map" onclick={onframe}><Icon name="move" size={14} />{#if framing}<span>Done</span>{/if}</button>
-    <button type="button" aria-label="Zoom the map out" title="Zoom out" disabled={held} onclick={() => zoom(-0.5)}><Icon name="minus" size={13} /></button>
-    <button type="button" aria-label="Zoom the map in" title="Zoom in" disabled={held} onclick={() => zoom(0.5)}><Icon name="plus" size={13} /></button>
-    <span class="rule"></span>
-    {#if leans}
-      <button type="button" aria-label="Tilt the map less" title="Lean less" disabled={held || pitch <= 0} onclick={() => tilt(-10)}><Icon name="chevronDown" size={13} /></button>
-      <span class="pitch" title="How far the map leans">{Math.round(pitch)}°</span>
-      <button type="button" aria-label="Tilt the map more" title="Lean more" disabled={held || pitch >= 85} onclick={() => tilt(10)}><Icon name="chevronUp" size={13} /></button>
-      <span class="rule"></span>
-    {/if}
-    <button type="button" aria-label="Turn the map left" title="Turn 15° left" disabled={held} onclick={() => turn(15)}><Icon name="rotateLeft" size={14} /></button>
     <button type="button" class="dial" bind:this={dial} aria-label={`Compass, ${Math.round(-bearing + 360) % 360}°`} disabled={held}
       title="Drag to turn the map. A press puts north up." onpointerdown={grabDial}>
       <svg viewBox="-12 -12 24 24" width="22" height="22" aria-hidden="true">
@@ -164,7 +158,8 @@
         </g>
       </svg>
     </button>
-    <button type="button" aria-label="Turn the map right" title="Turn 15° right" disabled={held} onclick={() => turn(-15)}><Icon name="rotateRight" size={14} /></button>
+    <button type="button" class="more" bind:this={moreAnchor} aria-expanded={more} aria-label="Zoom and turn"
+      title={more ? undefined : leans ? 'Zoom, turn or lean by a step' : 'Zoom or turn by a step'} onclick={() => (more = !more)}><Icon name="more" size={14} stroke={2.6} /></button>
     <span class="rule"></span>
   {/if}
   <button type="button" class="ground" bind:this={anchor} aria-expanded={menu} aria-label="Ground" title={menu ? undefined : 'The ground the map is drawn on'}
@@ -187,6 +182,23 @@
 {#if dayMenu && day}
   <FloatingMenu anchor={dayAnchor} width={260} column label="Ground's day" onclose={() => (dayMenu = false)}>
     <PlateGroundDay {element} {releases} {years} {sentinel} {template} menu />
+  </FloatingMenu>
+{/if}
+
+{#if more && isMap}
+  <!-- the menu stays open, so a few steps in a row are a few presses -->
+  <FloatingMenu anchor={moreAnchor} width={190} label="Zoom and turn" onclose={() => (more = false)}>
+    <button type="button" class="fm-item" role="menuitem" disabled={held} onclick={() => zoom(0.5)}><Icon name="plus" size={14} /><span class="fm-grow">Zoom in</span></button>
+    <button type="button" class="fm-item" role="menuitem" disabled={held} onclick={() => zoom(-0.5)}><Icon name="minus" size={14} /><span class="fm-grow">Zoom out</span></button>
+    <div class="fm-sep"></div>
+    <button type="button" class="fm-item" role="menuitem" disabled={held} onclick={() => turn(15)}><Icon name="rotateLeft" size={14} /><span class="fm-grow">Turn 15° left</span></button>
+    <button type="button" class="fm-item" role="menuitem" disabled={held} onclick={() => turn(-15)}><Icon name="rotateRight" size={14} /><span class="fm-grow">Turn 15° right</span></button>
+    {#if leans}
+      <div class="fm-sep"></div>
+      <div class="fm-head">Leans {Math.round(pitch)}°</div>
+      <button type="button" class="fm-item" role="menuitem" disabled={held || pitch >= 85} onclick={() => tilt(10)}><Icon name="chevronUp" size={14} /><span class="fm-grow">Lean more</span></button>
+      <button type="button" class="fm-item" role="menuitem" disabled={held || pitch <= 0} onclick={() => tilt(-10)}><Icon name="chevronDown" size={14} /><span class="fm-grow">Lean less</span></button>
+    {/if}
   </FloatingMenu>
 {/if}
 
@@ -216,10 +228,9 @@
     background: var(--bg-1); box-shadow: var(--shadow-2); white-space: nowrap; }
   button { display: flex; align-items: center; justify-content: center; gap: 4px; min-width: 28px; height: 28px; padding: 0 6px;
     border-radius: var(--r-sm); color: var(--text-2); font-size: var(--fs-xs); cursor: pointer; }
-  button:hover:not(:disabled) { background: var(--bg-3); color: var(--text-1); }
+  button:hover:not(:disabled), .more[aria-expanded='true'] { background: var(--bg-3); color: var(--text-1); }
   button:disabled { opacity: .4; cursor: default; }
   .keep { display: flex; align-items: center; gap: 5px; padding: 0 6px; color: var(--text-1); font-size: var(--fs-xs); cursor: pointer; }
-  .pitch { min-width: 26px; color: var(--text-2); font-size: var(--fs-xs); text-align: center; font-variant-numeric: tabular-nums; }
   button.on { background: var(--accent); color: var(--accent-text); }
   .rule { width: 1px; height: 18px; margin: 0 3px; background: var(--border); }
   .dial { padding: 0; cursor: grab; }
