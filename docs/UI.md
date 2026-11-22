@@ -6780,7 +6780,9 @@ will; and **Made with Azimut**, the app's mark and name set tight beside the wor
 without the air of the app's corner), **Pictures and shapes** (a picture, the signature picture as a logo,
 a box, an ellipse, a rule) and **Slides** (a slide, a video, and ready sequences:
 **Reveal in four beats**, **Zoom in**, a **Title card** and an **End card**). A tool placed by pressing the map is put down by a second press
-on it, or Esc.
+on it, or Esc. **Recent**, over the groups, offers back the last six tiles picked, the
+newest first, kept in this browser as the panels' widths are; it waits while a word is
+searched, and on a template it keeps only what a template offers.
 
 **From the case › Comparison** lists the pairs saved in Compare, read when it opens, each
 with its picture and its two days. A press lays one as two live maps side by side,

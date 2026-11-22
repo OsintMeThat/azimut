@@ -66,10 +66,10 @@ async function stepMap(page, label) {
   await page.keyboard.press('Escape');
 }
 
-/** An element added from the Add panel, by its tile. */
+/** An element added from the Add panel, by its tile in its group (Recent offers it again once picked). */
 async function addOnPage(page, label) {
   await page.getByRole('button', { name: 'Add', exact: true }).click();
-  await page.locator('.float-menu .tile', { hasText: new RegExp(`^${label}$`) }).click();
+  await page.locator('.float-menu .group:not(.recent) .tile', { hasText: new RegExp(`^${label}$`) }).click();
 }
 
 test('a new plate opens on the house layout and saves itself', async ({ page }) => {
@@ -288,6 +288,27 @@ test('symbols are stamped on the map one after the other, and the next takes the
   await page.keyboard.press('Escape');
   await page.mouse.click(box.x + box.width * 0.5, box.y + box.height * 0.3);
   await expect.poll(() => symbols().map((element) => element.symbol)).toEqual(['badge-crosshair', 'badge-tank', 'badge-tank']);
+});
+
+test('Add offers the tiles picked lately first, on the next plate too', async ({ page }) => {
+  await plateFixture(page);
+  await page.goto('/#plate');
+  await newPlate(page);
+  await expect(page.locator('.plate-map')).toHaveCount(2);
+  await page.getByRole('button', { name: 'Add', exact: true }).click();
+  await expect(page.locator('.float-menu .recent')).toHaveCount(0);
+  await page.keyboard.press('Escape');
+  await addOnPage(page, 'Box');
+  await addOnPage(page, 'Text');
+  await page.reload();
+  await newPlate(page);
+  await expect(page.locator('.plate-map')).toHaveCount(2);
+  await page.getByRole('button', { name: 'Add', exact: true }).click();
+  const recent = page.getByRole('region', { name: 'Recent' });
+  await expect(recent.locator('.tile')).toHaveText(['Text', 'Box']);
+  // a word searched hides the row
+  await page.getByLabel('Find an element').fill('box');
+  await expect(recent).toHaveCount(0);
 });
 
 test('an element moves by the keyboard, goes with Delete, and Undo brings it back', async ({ page }) => {
@@ -1497,7 +1518,7 @@ test('New plate keeps the layouts that answer what the plate shows, and a blank 
   // the comparisons were never read: Before and after was not picked
   expect(indexed).toBe(read);
   await page.keyboard.press('a');
-  await page.locator('.float-menu .tile', { hasText: /^Map$/ }).click();
+  await page.locator('.float-menu .group:not(.recent) .tile', { hasText: /^Map$/ }).click();
   await expect(hint).toHaveCount(0);
   await expect(page.locator('.plate-map')).toHaveCount(1);
   // the first map draws what a new plate would, on the ground of the page's look
