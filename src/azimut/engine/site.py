@@ -63,7 +63,8 @@ a name a hand edit made anything else is dropped. A list names the author after 
 before the name, unless the author is the site's own name: then neither shows.
 
 A map page cited by an article shows as a link under that article, never as its own line; a
-map nothing cites keeps its own line so it is never lost. A page (`role: "page"`) is on no
+map nothing cites keeps its own line so it is never lost. The first map an article with a cover
+cites is also a "Map" badge over that cover, for the lists that show no links. A page (`role: "page"`) is on no
 list: it is in `articles.json` under `pages`, and the default home's header links it. An
 unlisted page (`role: "unlisted"`) is online at its address and nowhere else: in no list, no feed,
 no sitemap, no `articles.json`, its head asks search engines not to index it (`notes_web`), and its
@@ -1159,6 +1160,20 @@ def _by(line: dict[str, Any], site_title: str, prefix: str) -> str:
     return f" · {picture}{html.escape(author)}"
 
 
+#: A folded map, sized in its markup so it never waits for a style sheet.
+MAP_ICON = ('<svg viewBox="0 0 24 24" width="14" height="14" aria-hidden="true" focusable="false">'
+            '<path d="M9 4 3 6v14l6-2 6 2 6-2V4l-6 2-6-2Zm0 0v14m6-12v14" fill="none" stroke="currentColor" '
+            'stroke-width="2" stroke-linejoin="round"/></svg>')
+
+
+def _on_map(first: dict[str, str], prefix: str) -> str:
+    """The badge over an article's cover that opens the first map it cites, so a list that shows
+    no links still shows the map. It follows the cover, never inside it: a link holds no link."""
+    title = html.escape(first["title"])
+    return (f'<a class="az-onmap" href="{html.escape(_at(prefix, first["address"]))}" title="{title}" '
+            f'aria-label="Map: {title}">{MAP_ICON}<span>Map</span></a>')
+
+
 def render_maps(maps: list[dict[str, Any]], site_title: str, limit: int = 0, prefix: str = "") -> str:
     chosen = maps[:limit] if limit else maps
     if not chosen:
@@ -1203,6 +1218,8 @@ def render(lines: list[dict[str, Any]], site_title: str, section: str = "", limi
         if a["image"]:
             out.append(f'<a class="az-cover" href="{home}" tabindex="-1" aria-hidden="true">'
                        f'<img src="{e(_at(prefix, a["image"]))}" alt="" loading="lazy" decoding="async"></a>')
+            if a["maps"]:
+                out.append(_on_map(a["maps"][0], prefix))
         if a["category"]:
             out.append(f'<span class="az-category">{e(a["category"])}</span>')
         out.append(f'<h2 class="az-title"><a href="{home}">{e(a["title"])}</a></h2>')

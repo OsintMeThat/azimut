@@ -190,6 +190,26 @@ def test_a_map_an_article_cites_folds_under_it_and_a_map_nothing_cites_keeps_its
                                                           ("Lost", None)]
 
 
+def test_a_cover_carries_a_map_badge_to_the_first_map_its_article_cites():
+    cards = [_card("story", links=["first-map", "second-map"], title="Story"),
+             _card("first-map", layout="map", title="First & map"), _card("second-map", layout="map", title="Second"),
+             _card("bare", title="Bare", date="2026-01-01"),
+             {**_card("plain", links=["first-map"], title="Plain", date="2026-01-02"), "image": ""}]
+    shown = site.render(site.listing(cards), "Site", prefix="/articles")
+    story, plain, bare = (shown.split(f'href="/articles/{name}/"', 1)[1].split("</li>", 1)[0]
+                          for name in ("story", "plain", "bare"))
+    # the badge follows the cover rather than sitting in it, and names the map it opens
+    assert story.index('<a class="az-onmap" href="/articles/first-map/" title="First &amp; map" '
+                       'aria-label="Map: First &amp; map">') > story.index("</a>")
+    assert story.count("az-onmap") == 1 and "<span>Map</span>" in story and 'width="14" height="14"' in story
+    # with no cover there is nothing to lay it on, and the map is still a link; no map, no badge
+    assert "az-onmap" not in plain and 'class="az-map" href="/articles/first-map/"' in plain
+    assert "az-onmap" not in bare
+    # a map's own card is already the way to that map
+    assert "az-onmap" not in site.render_maps(site.map_view(cards), "Site")
+    assert ".az-onmap{" in sitehome.CSS
+
+
 def test_a_limit_and_an_empty_list_say_what_they_are():
     lines = site.listing([_card(f"a{n}", date=f"2026-01-0{n}") for n in range(1, 5)])
     assert site.render(lines, "Site", limit=2).count('<li class="az-item') == 2

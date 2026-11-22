@@ -44,6 +44,7 @@ FACES = (("az-head", 400, "normal", "head-400"), ("az-head", 700, "normal", "hea
 #: The letters every face is cut to: what a page draws in Latin, and the marks the home writes.
 LATIN = (html_engine.ALWAYS_DRAWN + "".join(chr(code) for code in range(0x100, 0x180)) + "◎€")
 
+# A cover is 1200/630 and a margin in % counts the width, so the map badge's 52.5% is the cover's height.
 CSS = """:root{--paper:#fff;--ink:#1f2023;--ink-2:#3d4046;--muted:#62676f;--rule:#dedad3;--tint:#f6f4f0;--accent:#1f4e79;
 --head:az-head,system-ui,-apple-system,"Segoe UI",Roboto,Arial,sans-serif;--body:az-body,"Iowan Old Style","Palatino Linotype",Georgia,serif}
 *,*::before,*::after{box-sizing:border-box}
@@ -64,10 +65,15 @@ img{max-width:100%;display:block}
 .site-tabs button[aria-pressed="true"]{background:var(--ink);border-color:var(--ink);color:#fff}
 .site-tabs .count{opacity:.6;margin-left:.3rem}
 .az-list{list-style:none;margin:0;padding:0;display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:2.25rem 1.75rem}
-.az-item{display:flex;flex-direction:column;min-width:0}
+.az-item{display:flex;flex-direction:column;min-width:0;position:relative}
 .az-item[hidden]{display:none!important}
+.az-onmap{position:absolute;top:0;right:.6rem;margin-top:calc(52.5% - .6rem);transform:translateY(-100%);z-index:1;display:inline-flex;align-items:center;gap:.35rem;padding:.35rem .6rem .35rem .5rem;
+border-radius:.25rem;background:rgba(17,20,26,.78);color:#fff;font:700 .72rem/1 var(--head);text-transform:uppercase;letter-spacing:.08em;text-decoration:none}
+.az-onmap:hover,.az-onmap:focus-visible{background:var(--accent);color:#fff}
+.az-onmap:focus-visible{outline:2px solid #fff;outline-offset:2px}
 .az-list:not(.az-maps):not(.is-filtered) .az-item:first-child{grid-column:1/-1;display:grid;grid-template-columns:3fr 2fr;gap:0 1.75rem;grid-auto-rows:min-content;align-content:center;align-items:start;padding-bottom:2.25rem;border-bottom:1px solid var(--rule)}
 .az-list:not(.az-maps):not(.is-filtered) .az-item:first-child .az-cover{grid-row:1/span 6;margin:0}
+.az-list:not(.az-maps):not(.is-filtered) .az-item:first-child .az-onmap{grid-column:1/2;grid-row:1/span 6}
 .az-list:not(.az-maps):not(.is-filtered) .az-item:first-child .az-title{font-size:2rem}
 .az-cover{display:block;aspect-ratio:1200/630;overflow:hidden;border-radius:.375rem;background:var(--tint);margin-bottom:.9rem}
 .az-cover img{width:100%;height:100%;object-fit:cover}
