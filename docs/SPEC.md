@@ -226,6 +226,7 @@ proof for publication.
 | ✅ **Tables in reports** | Sets how a table shows from its own card: a search bar, sorting, folding a long one, stripes, rows coloured by a column, a caption and a source. |
 | ✅ **Sheet on a map** | Puts a sheet whose rows have places on the map as a layer in one press, coloured by a column, and updates it when the sheet changes without undoing the analyst's edits. |
 | ✅ **Figure templates** | Keeps an infographic's, a chart's or a map's look as a template without the case's data, three ready ones included, applied by matching its columns to the data's. |
+| ✅ **Columns** | Sets two or three columns of pictures or words side by side, pictures alone at one height with nothing cropped, written in place, made from `/`, a picture's bar or a drag, and printed side by side in every format. |
 | ✅ **Ready to publish?** | Lists before an export what a note still needs (exact counts, links never archived or seen, pictures with no credit or alt text, the marking, the weight), each fixed in one press where it can be. |
 | ✅ **Writing without Markdown** | Edits a note on its drawn page: a bubble on selected words, a handle on every block, one insert menu, tables as grids that take a spreadsheet's paste, pictures and stories set by hand, and no syntax shown while typing. |
 | ✅ **Sources fit to cite** | Finds the case item behind a written link, writes sources academic, web or short with the annexes a report, a web article or a brief carries, archives a note's links in one press, and shows what the case knows of a citation on hover. |

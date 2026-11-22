@@ -12,6 +12,8 @@ import './diagramBlock.js';
 import './tableBlock.js';
 import './tableGrid.js';
 import './pictureBlock.js';
+// a row of columns, after the picture it draws its pictures with: its fences are its own, so where it reads is free
+import './columnsBlock.js';
 import './chartBlock.js';
 import './postBlock.js';
 import './breakBlocks.js';
