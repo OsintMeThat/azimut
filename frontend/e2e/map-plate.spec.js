@@ -1196,6 +1196,37 @@ test('a feature is hidden on one map from its right-click or a click in the fram
   await expect(ticks).toHaveCount(2);
 });
 
+test('an area\'s name becomes a label of the plate to move by hand, the layer keeping its own', async ({ page }) => {
+  needsWebGL();
+  const store = await plateFixture(page);
+  const zones = { name: 'zones', title: 'Zones', source: { kind: 'editable' }, editable: true, hidden: [], features: 1, categories: [], sha256: 'z1', icons: 0 };
+  const ring = [[2.31, 48.855], [2.33, 48.855], [2.33, 48.865], [2.31, 48.865], [2.31, 48.855]];
+  await page.route(`**/api/cases/${CASE_ID}/map-layers`, (route) => route.fulfill({ json: [zones] }));
+  await page.route(`**/api/cases/${CASE_ID}/map-layers/zones/data**`, (route) => route.fulfill({ json: { type: 'FeatureCollection', features: [
+    { type: 'Feature', geometry: { type: 'Polygon', coordinates: [ring] }, properties: { key: 'yard', name: 'Depot yard', index: 0, category: 'Areas', show_label: true } }] } }));
+  store.plates.set('Zones', { title: 'Zones', updated_at: '2026-10-12T12:00:00Z', spec: {
+    page: { paper: 'a4', orientation: 'landscape' },
+    theme: { paper: '#ffffff', ink: '#15181e', accent: '#c8102e', font: 'inter', preset: '' },
+    time: { at: null, step: null, trail: true, since: null, window: null, hold: 1 },
+    elements: [{ id: 'map', kind: 'map', box: [10, 20, 200, 150], view: { lat: 48.86, lon: 2.32, zoom: 14, bearing: 0 }, basemap: 'plain',
+      overlays: [], layers: [{ name: 'zones', hidden: [], stroke: 1, icons: 1 }], grid: 'none' }] } });
+  await page.goto('/#plate');
+  await page.locator('.tile:not(.template) .open', { hasText: 'Zones' }).click();
+  const box = await page.locator('.plate-map').boundingBox();
+  const middle = { x: box.x + box.width / 2 + 20, y: box.y + box.height / 2 + 10 };
+  const offer = page.getByRole('menuitem', { name: 'Make its name a label to move' });
+  await expect(async () => {
+    await page.keyboard.press('Escape');
+    await page.mouse.click(middle.x, middle.y, { button: 'right' });
+    await expect(offer).toBeVisible({ timeout: 1000 });
+  }).toPass();
+  await offer.click();
+  const label = () => lastSave(store)?.spec.elements.find((element) => element.kind === 'label');
+  await expect.poll(() => label() && [label().text, label().ref, label().of, label().leader]).toEqual(['Depot yard', { layer: 'zones', key: 'yard' }, 'map', 'none']);
+  // the layer is left as it was: the plate writes the name, the layer keeps its own for the other maps
+  expect(lastSave(store).spec.elements[0].layers).toEqual([{ name: 'zones', hidden: [], stroke: 1, icons: 1 }]);
+});
+
 test('a feature is hidden the same way on a map in 3D, where the globe draws it', async ({ page }) => {
   needsWebGL();
   const store = await plateFixture(page);

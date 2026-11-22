@@ -1126,6 +1126,17 @@
     return element;
   }
 
+  /**
+   * A feature's name written as the plate's own text on the map where it was pressed, tied to
+   * the feature so it shows when the feature does: it moves and restyles, and the layer's own
+   * name for the feature is left out of this map while the label stands (PlatePage's
+   * `takenOf`). Deleting the label gives the layer's name back. The layer is never changed.
+   */
+  function featureNameLabel(map, hit) {
+    if (!hit?.name || !hit.key || !hit.at || !hit.point) return;
+    const page = [map.box[0] + hit.point[0] / PX_PER_MM, map.box[1] + hit.point[1] / PX_PER_MM];
+    put({ ...textOnMap(map.id, hit.at, page, hit.name), ref: { layer: hit.layer, key: hit.key } });
+  }
   /** A name of the ground, taken off it, written as the plate's own text on the map where it stood: it moves and restyles. */
   function nameToLabel(map, text, point, page) {
     const element = textOnMap(map.id, point, page, text);
@@ -1363,7 +1374,9 @@
     const hit = element.kind === 'map' ? handles.get(element.id)?.featureAt?.(at) : null;
     if (!hit) return [];
     return [...mediaItems(element, hit), { label: hit.name ? `Hide ${hit.name} on this map` : 'Hide this feature on this map', icon: 'eyeOff',
-      title: 'Only this map leaves it out, the layer keeps it', run: () => { element.layers = withHidden(element.layers, hit.layer, hit.id, true); } }, 'sep'];
+      title: 'Only this map leaves it out, the layer keeps it', run: () => { element.layers = withHidden(element.layers, hit.layer, hit.id, true); } },
+    ...(hit.named && hit.at ? [{ label: 'Make its name a label to move', icon: 'text', title: 'Its name becomes a label of this plate, tied to it, to move by hand; the layer keeps its own',
+      run: () => featureNameLabel(element, hit) }] : []), 'sep'];
   }
   /**
    * Over a feature that shows a file of the case, and only then: its video played on a
@@ -2203,7 +2216,8 @@
             {time} stepPlace={place} {playing} {speed} bind:views {decor} bind:overflow {grounds} ghosts={ghosts && playable}
             {framingFor} onmapview={mapView} onkeep={keepFraming} beat={shownKey} follows={followsMap} {written} onnamelabel={nameToLabel}
             {glide} oncontext={(id, point) => (id ? elementMenu(id, point) : pageMenu(point))}
-            onmap={(id, handle) => handles.set(id, handle)} top={focus ? 44 : 0} onlayers={plate.template ? null : showLayers} onsameview={sameView} {layersDay} />
+            onmap={(id, handle) => handles.set(id, handle)} top={focus ? 44 : 0} onlayers={plate.template ? null : showLayers} onsameview={sameView} {layersDay}
+            onfeaturelabel={featureNameLabel} />
         {/key}
         {#if focus}
           <div class="focus-bar" role="toolbar" aria-label="The plate">

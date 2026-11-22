@@ -89,6 +89,11 @@
     onname = null,
     /** `({ layer, id, name, client })`: a feature of a layer clicked while the map is framed. */
     onfeature = null,
+    /**
+     * The features whose names the plate writes itself on this map, as labels tied to them
+     * (`layer/key` each): the layer's own name for them is left out here, never twice.
+     */
+    takenNames = [],
   } = $props();
 
   const width = $derived(element.box[2] * PX_PER_MM);
@@ -365,7 +370,14 @@
     for (const entry of untrack(() => element.layers) ?? []) {
       const feature = drawn.get(entry.name)?.layer.featureUnder(point);
       const id = feature ? featureId(feature) : '';
-      if (id) return { layer: entry.name, id, name: String(feature.properties?.name ?? '').trim(), geometry: feature.geometry, media: linkedMedia(feature.properties) };
+      if (id) {
+        // where it was pressed, on the ground and on the map, for a name made a label there
+        const ground = engine.impl?.unproject?.([point.x, point.y]);
+        const key = typeof feature.properties?.key === 'string' ? feature.properties.key : '';
+        return { layer: entry.name, id, key, name: String(feature.properties?.name ?? '').trim(), geometry: feature.geometry, media: linkedMedia(feature.properties),
+          named: !!key && !!feature.properties?.show_label && !String(feature.geometry?.type ?? '').endsWith('Point'),
+          at: ground ? [ground.lng, ground.lat].map((value) => Math.round(value * 1e6) / 1e6) : null, point: [point.x, point.y] };
+      }
     }
     return null;
   }
@@ -657,10 +669,17 @@
   $effect(() => { void width; void height; queueMicrotask(() => { engine?.resize(); report(); }); });
 
   /** What one of the plate's layers draws: its features as read on the plate's day, at the plate's weight, size, colour and dash. */
-  function features(entry, data) {
+  function features(entry, data, taken = new Set()) {
     const stroke = entry.stroke ?? 1;
     const icons = entry.icons ?? stroke;
     const fill = fillProperties(entry.fill);
+    // a name the plate writes itself, as a label tied to its feature, is not written twice
+    if (taken.size) data = { ...data, features: data.features.map((feature) => {
+      if (!feature.properties?.show_label || !taken.has(feature.properties.key)) return feature;
+      const properties = { ...feature.properties };
+      delete properties.show_label;
+      return { ...feature, properties };
+    }) };
     if (stroke === 1 && icons === 1 && !entry.colour && !entry.dash && !fill) return data;
     return { ...data, features: data.features.map((feature) => ({ ...feature, properties: { ...feature.properties,
       stroke_width: (feature.properties.stroke_width ?? 2) * stroke, icon_scale: (feature.properties.icon_scale ?? 1) * icons,
@@ -678,6 +697,7 @@
   $effect(() => {
     const wanted = element.kind === 'map' ? element.layers ?? [] : [];
     void JSON.stringify(wanted);
+    void takenNames.join('|');
     const [at, trail, since, days, hours] = JSON.parse(reading);
     const available = rows;
     const resting = away;
@@ -710,7 +730,8 @@
         drawn.set(entry.name, held);
       }
       const record = held;
-      const look = JSON.stringify([row.sha256, entry.stroke ?? 1, entry.icons ?? 1, entry.colour ?? '', entry.dash ?? '', entry.fill ?? '', entry.hidden]);
+      const taken = new Set(untrack(() => takenNames).filter((name) => name.startsWith(`${entry.name}/`)).map((name) => name.slice(entry.name.length + 1)));
+      const look = JSON.stringify([row.sha256, entry.stroke ?? 1, entry.icons ?? 1, entry.colour ?? '', entry.dash ?? '', entry.fill ?? '', entry.hidden, [...taken]]);
       work.push(addedLayers.drawing(caseId, row.name).then((collection) => {
         if (drawn.get(entry.name) !== record) return;
         // a day where nothing of the layer moved reads the same, and the engine is spared cutting it again
@@ -719,7 +740,7 @@
         if (record.data === data && record.look === look) return;
         record.data = data;
         record.look = look;
-        const set = record.layer.set(features(entry, data), { categories: row.categories, hidden: entry.hidden ?? [], period: null });
+        const set = record.layer.set(features(entry, data, taken), { categories: row.categories, hidden: entry.hidden ?? [], period: null });
         restack(wanted);
         return set;
       }).catch(() => {}));

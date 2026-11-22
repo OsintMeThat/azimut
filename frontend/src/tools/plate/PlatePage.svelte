@@ -71,6 +71,8 @@
     oncontext = null,
     /** `(map)`: the case's layers a map draws, shown in the list's Layers tab. */
     onlayers = null,
+    /** `(map, hit)`: a feature's name made a label of the plate where it was pressed, to move by hand. */
+    onfeaturelabel = null,
     /** `(map)`: the map framed as the other map of its group; offered only where there is one. */
     onsameview = null,
     /** `[id, label]` of the grounds a plate's maps can be drawn on. */
@@ -415,6 +417,9 @@
   }
   /** The plate's time as a map reads its layers: on its own day when it draws them on its imagery's. */
   const timeOf = (element) => { const day = layersDay(element); return day ? { ...time, at: day } : time; };
+  /** The features whose names the plate writes itself on `map`, as labels tied to them, shown now: `layer/key` each. */
+  const takenOf = (map) => spec.elements.filter((item) => item.kind === 'label' && item.ref && item.of === map.id && !item.hidden && shownOn(item, at, stepPlace))
+    .map((item) => `${item.ref.layer}/${item.ref.key}`);
   const lockedMap = (element) => element.kind === 'map' && !framingFor(element).own && !framingFor(element).first;
   /** The other map of a map's group, as a comparison's pair is grouped; none outside a group. */
   const pairedMap = (element) => (element.group ? spec.elements.find((item) => item.kind === 'map' && item.group === element.group && item.id !== element.id) ?? null : null);
@@ -709,7 +714,7 @@
         interactive={framing === element.id} away={!shownOn(element, at, stepPlace)} glide={playing ? glide : 0}
         onview={(view, frame, placer) => reported(element, view, frame, placer)}
         onname={(hit) => (nameMenu = { element, ...hit })}
-        onfeature={(hit) => (featureMenu = { element, ...hit })}
+        onfeature={(hit) => (featureMenu = { element, ...hit })} takenNames={takenOf(element)}
         onready={(handle) => onmap?.(element.id, handle)} />
     {/each}
     {#each spec.elements.filter((item) => item.kind === 'video' && !item.hidden && shownOn(item, at, stepPlace)) as element (element.id)}
@@ -871,6 +876,11 @@
     <button type="button" class="fm-item" title="Only this map leaves it out, the layer keeps it"
       onclick={() => { const { element, layer, id } = featureMenu; featureMenu = null; element.layers = withHidden(element.layers, layer, id, true); }}>
       <Icon name="eyeOff" size={14} /><span class="fm-grow">Hide it on this map</span></button>
+    {#if onfeaturelabel && featureMenu.named && featureMenu.at}
+      <button type="button" class="fm-item" title="Its name becomes a label of this plate, tied to it, to move by hand; the layer keeps its own"
+        onclick={() => { const { element, ...hit } = featureMenu; featureMenu = null; onfeaturelabel(element, hit); }}>
+        <Icon name="text" size={14} /><span class="fm-grow">Make its name a label to move</span></button>
+    {/if}
   </FloatingMenu>
 {/if}
 

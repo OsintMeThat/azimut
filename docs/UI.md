@@ -6911,7 +6911,12 @@ dotted), **Front line**, **Events** (larger marks) or **Context** (grey and thin
 legend then names its areas and lines by the role, its points keeping their words.
 One feature can be left out of one map: a right-click on it, or a click on it in the
 framed map, offers to hide it on this map, and the layer's row lists those hidden under
-**Hidden here**, a press bringing one back. A dated layer has a **From** day and a **To**
+**Hidden here**, a press bringing one back. An area or a line whose name the layer writes
+also offers **Make its name a label to move**: the name becomes a label of the plate where
+it was pressed, tied to its feature so it shows when the feature does, moved and restyled
+as any label; the layer's own name for it is left out of that map while the label stands,
+and comes back when the label goes. The layer is not changed, so the other maps and plates
+keep its name where the layer puts it. A dated layer has a **From** day and a **To**
 day: what began before the first or after the last is left out of the map, whatever came
 of it since, and the days it changed on leave the plate's bar with it. What began between
 them keeps changing after To. Either end set past the other pulls it along, and a plate
