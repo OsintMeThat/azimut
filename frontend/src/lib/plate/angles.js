@@ -40,3 +40,27 @@ export function anglesOf(places) {
   });
   return { middle: middle.map((value) => round(value, 6)), aimed, cones };
 }
+
+/** The room round the files laid together, and between them, in millimetres. */
+const EDGE_MM = 8;
+const GAP_MM = 3;
+
+/**
+ * Where `count` files of one event go when they play together on one slide: a strip
+ * along the foot of a `width` by `height` page, sixteen to nine each, one row up to
+ * four of them and two rows past that, none wider than a third of the page.
+ */
+export function angleBoxes(count, width, height) {
+  if (count < 1) return [];
+  const cols = count <= 4 ? count : Math.ceil(count / 2);
+  const rows = Math.ceil(count / cols);
+  const w = Math.min((width - 2 * EDGE_MM - (cols - 1) * GAP_MM) / cols, width / 3);
+  const h = (w * 9) / 16;
+  const top = height - EDGE_MM - rows * h - (rows - 1) * GAP_MM;
+  return Array.from({ length: count }, (_, index) => {
+    const row = Math.floor(index / cols);
+    const inRow = Math.min(cols, count - row * cols);
+    const left = (width - inRow * w - (inRow - 1) * GAP_MM) / 2;
+    return [left + (index % cols) * (w + GAP_MM), top + row * (h + GAP_MM), w, h].map((value) => round(value, 1));
+  });
+}

@@ -6798,11 +6798,15 @@ sets one on the page pointing at its point; **Footage on the map** lists the vid
 photos the case placed on the map (the same files a right-click on a marker offers), a
 video played on a slide of its own and a photo set on the page, each pointing at its
 place. On a page with no map, what goes on points at nothing, and the panel says so.
-Each list is read when its tab is first shown. Ticking two files or more filmed from
-different places lays them as **angles** of one event: on the day, a view cone named
-for its angle at each place, facing the middle of them all (a guess the plate says, and
-north when the files stand on one spot), then a slide each, named for its angle, its
-file pointing at its place. A cone is turned in its inspector like any other.
+Each list is read when its tab is first shown. Ticking files filmed from different
+places lays them as **angles** of one event: on the day, a view cone named for its
+angle at each place, facing the middle of them all (a guess the plate says, and north
+when the files stand on one spot), then their files pointing at their places, either
+**One slide each**, named for its angle and played one after the other, or **All on one
+slide**, side by side along the foot of the page and played together, the slide running
+as long as the longest clip. The panel says which before the press. One file ticked
+alone gets its cone too, facing north, since a file keeps no direction. A cone is turned
+by dragging its tip, or in its inspector like any other.
 
 **Layers**, the list's second tab, says where the maps get what they draw, since a plate
 keeps no data of its own: each map is drawn on a ground and draws some of the case's
@@ -6811,15 +6815,16 @@ map, it names the ground with the day its picture was taken (a Wayback release, 
 Sentinel-2 pass, a cloudless year; imagery stitched from several days says so), then the
 case's layers, those the map draws first and ticked. A tick draws a layer or takes it
 off; a layer followed over time is marked **dated**, since the plate draws it as it stood
-on its day. A map on a picture of one day (a Wayback release, a Sentinel-2 pass) offers
+on its day. **›** beside a layer the map draws opens that layer's page for the map (see
+below). A map on a picture of one day (a Wayback release, a Sentinel-2 pass) offers
 **Layers as they stood that day**, here and in its inspector: its dated layers, its
 legend, the counts and the labels tied to its features then read that day rather than
 the plate's, so a picture of the past never shows what came after it; the other maps
 keep the plate's day, and a map whose day is not known yet keeps it too.
 **Open in the Map** edits a layer the analyst draws where the map looks,
-Back coming back; the map's gear opens its settings in the inspector, where the rest of a
-layer's look is set; **New layer here** and **Make a layer of the N drawn here** sit under
-each map. The list stays on the tab it was left on.
+Back coming back; the map's gear opens its settings in the inspector; **New layer here**
+and **Make a layer of the N drawn here** sit under each map. The list stays on the tab it
+was left on.
 
 The list of elements on the left and the inspector on the right are widened by
 dragging their edge, a double click putting the width back, and put away from the
@@ -6952,15 +6957,28 @@ sides or four, or as ticks on the frame only, its ink light over imagery and dar
 over a pale ground unless set; the plain ground's detail, presence, borders and
 colours, what it draws, the language of its names, and the relief's strength; the
 imagery's strength, colour, light, contrast and tint, with **Greyed**, **Faded**,
-**Darkened** and **Muted** as starts; and the case's layers it draws, each with its groups left
-out or in, its lines and its marks sized apart, its own colour, dash and area fill (full,
-hatched or the outline alone) on this plate alone, drawn higher or lower. **Stands
-for** gives it a role's look in one press, on the page's colours: **Held** (a full
-tint of the accent), **Claimed** (hatched, dashed), **Contested** (amber, hatched,
-dotted), **Front line**, **Events** (larger marks) or **Context** (grey and thin); the
-legend then names its areas and lines by the role, its points keeping their words.
+**Darkened** and **Muted** as starts; and the case's layers it draws, a line each: ticked,
+drawn higher or lower, and under its name what this map does to it in a few words
+(*Claimed · hatched · 1 group left out*), or *Its own look*.
+
+**A layer on a page of its own.** **›** on that line, the same in the Layers tab, or
+**Front on this map…** in a right-click on one of its features, opens the layer's page in
+the inspector's place, for that map alone: each map keeps its own settings for a layer,
+so the page names the map it is on, moves to the same layer on another map that draws
+it, and **← Map** goes back to the map's settings. **Look**: **Stands for** gives it a
+role's look in one press, on the page's colours: **Held** (a full tint of the accent),
+**Claimed** (hatched, dashed), **Contested** (amber, hatched, dotted), **Front line**,
+**Events** (larger marks) or **Context** (grey and thin); the legend then names its areas
+and lines by the role, its points keeping their words. Then its own colour, its lines
+(dashed or dotted), its areas (full, hatched or the outline alone), its line weight and
+its mark size, and **Back to its own look** once any is set. **What shows**: its groups,
+each left out or in by a press; its days, on a dated layer; and the features hidden on
+this map. **Names**: **Label its named features**. **Same on the other maps** gives the
+other maps that draw it this look and these groups at one press, their days and hidden
+features staying their own; **Edit the layer in the Map** is for what should change
+everywhere; **Take it off this map** stops drawing it there.
 One feature can be left out of one map: a right-click on it, or a click on it in the
-framed map, offers to hide it on this map, and the layer's row lists those hidden under
+framed map, offers to hide it on this map, and the layer's page lists those hidden under
 **Hidden here**, a press bringing one back. An area or a line whose name the layer writes
 also offers **Make its name a label to move**: the name becomes a label of the plate where
 it was pressed, tied to its feature so it shows when the feature does, moved and restyled
@@ -6978,7 +6996,7 @@ it on a slide, **Add linked picture** sets a still on the page, each pointing at
 marker and the video saying its source.
 A plate draws every point of a layer at every zoom, where the Map lets the ones that
 overlap drop out far out: a page leaving the app must not lose one. And
-**Label its named features**, and **Label its named features**, which places
+**Label its named features**, on the layer's page, places
 a label beside each feature in the frame without two covering each other, tied to
 its feature so it shows when the feature does. **New layer here** makes a layer of the
 case, draws it on the map and opens it for editing in the Map where the map looks,

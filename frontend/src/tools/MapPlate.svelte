@@ -105,8 +105,9 @@
   import { inspectorWidth, layout, listWidth, saveLayout, toggleFold, togglePanel } from '../lib/plate/layout.svelte.js';
   import { imagerySaid, layersDayOf } from '../lib/plate/source.js';
   import { comparisonOnPlate, lostSaid, pairOnComparison, sideDay } from '../lib/plate/fromCompare.js';
-  import { anglesOf } from '../lib/plate/angles.js';
+  import { angleBoxes, anglesOf } from '../lib/plate/angles.js';
   import PlateLayers from './plate/PlateLayers.svelte';
+  import PlateLayerPage from './plate/PlateLayerPage.svelte';
   import PlateFromCase from './plate/PlateFromCase.svelte';
   import { plateTabs } from '../lib/plate/oneTab.js';
   import { buildHash, readSolo, splitHash } from '../lib/hash.js';
@@ -166,6 +167,12 @@
   let adding = $state(null);
   /** Add › From the case, open: `{ anchor }`. */
   let fromCase = $state(null);
+  /** One layer of one map on a page of its own in the inspector's place, `{ map, name }`: let go once that map is no longer the one picked. */
+  let layerPage = $state(null);
+  $effect(() => {
+    if (layerPage && (selection.length !== 1 || selection[0] !== layerPage.map)) layerPage = null;
+  });
+  const layerMap = $derived(layerPage ? plate?.spec?.elements.find((element) => element.id === layerPage.map && element.kind === 'map') ?? null : null);
   let addButton = $state(null);
   let focusAdd = $state(null);
   /** The page alone, the panels called back over it one by one. Never kept: it is a moment. */
@@ -1049,7 +1056,7 @@
   /** What Add › From the case picked, laid on the page: a comparison, a proof's picture, a placed file pointing at its place, or files laid as angles. */
   function putFromCase({ what, row, how }) {
     if (what === 'comparison') { putComparison(row, how); return; }
-    if (what === 'angles') { layAngles(row); return; }
+    if (what === 'angles') { layAngles(row, how); return; }
     const main = mainMap(spec);
     if (what === 'proof') {
       const point = row.points?.[0];
@@ -1064,10 +1071,13 @@
   }
   /**
    * Files filmed from several places laid as angles of one event: on the day, a view cone at
-   * each place facing the middle of them all (`lib/plate/angles.js`); then a slide each,
-   * named for its angle, its file pointing at its place. The guess the cones make is said.
+   * each place facing the middle of them all (`lib/plate/angles.js`); then their files,
+   * each pointing at its place, either a slide each named for its angle (`apart`), played
+   * one after the other, or all on one slide along the foot of the page (`together`),
+   * played side by side. One file alone gets its cone facing north. The guess the cones
+   * make is said.
    */
-  function layAngles(picked) {
+  function layAngles(picked, how = 'apart') {
     const main = mainMap(spec);
     if (!main) { toast('Put a map on the page first', 'warn'); return; }
     if (playing) stop();
@@ -1075,16 +1085,35 @@
     const day = bornAt(at, playable, null);
     put(...cones.map((cone, index) => ({ id: newId('cone'), kind: 'cone', name: `Angle ${index + 1}`, of: main.id, at: cone.at, box: [0, 0, 1, 1],
       bearing: cone.bearing, spread: 50, reach: cone.reach, look: 'fill', width: 1, size: defaultSize('cone'), ...day })));
-    picked.forEach((row, index) => {
+    const place = (row) => [row.lon, row.lat].map((value) => Math.round(value * 1e6) / 1e6);
+    if (how === 'together' && picked.length > 1) {
       const slide = newStep();
       if (!slide) return;
-      changeStep(slide, { name: `Angle ${index + 1}${row.title ? ` · ${row.title}` : ''}` });
-      const media = linkedMedia({ media_path: row.path, media_kind: row.media_kind });
-      const element = media && linked(media.as === 'video' ? 'video' : 'image', main, row.path, [row.lon, row.lat].map((value) => Math.round(value * 1e6) / 1e6));
-      if (element) element.name = `Angle ${index + 1}`;
-    });
-    toast(aimed ? `${picked.length} angles laid: each cone faces the middle of the places picked. Turn one in its inspector.`
-      : `${picked.length} angles laid: the files stand on one spot, so the cones face north. Turn them in their inspector.`, 'ok', 7000);
+      changeStep(slide, { name: `${picked.length} angles` });
+      const { width, height } = pageSize(spec.page);
+      const boxes = angleBoxes(picked.length, width, height);
+      put(...picked.map((row, index) => {
+        const media = linkedMedia({ media_path: row.path, media_kind: row.media_kind });
+        const shared = { id: newId(media?.as === 'video' ? 'video' : 'image'), name: `Angle ${index + 1}`, box: boxes[index], src: row.path,
+          at: place(row), of: main.id, leader: 'straight', step: slide, carry: false };
+        return media?.as === 'video'
+          ? { ...shared, kind: 'video', clip: [0, FIRST_SECONDS], sound: false, volume: 1, caption: true, text: '', size: 7, fit: 'contain', border: true }
+          : { ...shared, kind: 'image', fit: 'contain', data: null };
+      }));
+      for (const element of spec.elements.filter((item) => item.step === slide && item.kind === 'video')) sayCaption(element, element.src);
+    } else {
+      picked.forEach((row, index) => {
+        const slide = newStep();
+        if (!slide) return;
+        changeStep(slide, { name: `Angle ${index + 1}${row.title ? ` · ${row.title}` : ''}` });
+        const media = linkedMedia({ media_path: row.path, media_kind: row.media_kind });
+        const element = media && linked(media.as === 'video' ? 'video' : 'image', main, row.path, place(row));
+        if (element) element.name = `Angle ${index + 1}`;
+      });
+    }
+    const played = how === 'together' && picked.length > 1 ? 'all on one slide, played together' : picked.length > 1 ? 'a slide each, played one after the other' : 'on a slide';
+    toast(picked.length === 1 ? 'Laid with its cone facing north: drag its tip to where the camera looked.'
+      : `${picked.length} angles laid, ${played}. ${aimed ? 'Each cone faces the middle of the places: drag a tip to turn it.' : 'The files stand on one spot, so the cones face north: drag a tip to turn one.'}`, 'ok', 8000);
   }
   async function putComparison(row, how) {
     const { width, height } = pageSize(spec.page);
@@ -1267,6 +1296,12 @@
     layout.tab = 'layers';
     saveLayout();
   }
+  /** A layer of `map` on a page of its own, where the inspector stands: its look, what shows of it and its names on that map. */
+  function openLayer(map, row) {
+    selection = [map.id];
+    if (!inspectorShown) panel('inspector');
+    layerPage = { map: map.id, name: row.name };
+  }
   /** A map picked from the Layers tab, the inspector shown on its Layers section. */
   function mapSettings(map) {
     selection = [map.id];
@@ -1373,10 +1408,12 @@
   function featureItems(element, at) {
     const hit = element.kind === 'map' ? handles.get(element.id)?.featureAt?.(at) : null;
     if (!hit) return [];
+    const row = rows.find((item) => item.name === hit.layer);
     return [...mediaItems(element, hit), { label: hit.name ? `Hide ${hit.name} on this map` : 'Hide this feature on this map', icon: 'eyeOff',
       title: 'Only this map leaves it out, the layer keeps it', run: () => { element.layers = withHidden(element.layers, hit.layer, hit.id, true); } },
     ...(hit.named && hit.at ? [{ label: 'Make its name a label to move', icon: 'text', title: 'Its name becomes a label of this plate, tied to it, to move by hand; the layer keeps its own',
-      run: () => featureNameLabel(element, hit) }] : []), 'sep'];
+      run: () => featureNameLabel(element, hit) }] : []),
+    ...(row && !plate.template ? [{ label: `${row.title} on this map…`, icon: 'layers', title: 'Its look, what shows of it and its names, on this map', run: () => openLayer(element, row) }] : []), 'sep'];
   }
   /**
    * Over a feature that shows a file of the case, and only then: its video played on a
@@ -1400,11 +1437,14 @@
     const element = spec.elements.find((item) => !before.has(item.id) && item.kind === kind);
     if (!element) return null;
     Object.assign(element, { src: path, ...(map && point ? { at: point, of: map.id, leader: 'straight' } : {}), ...(kind === 'image' ? { data: null } : {}) });
-    if (kind !== 'video') return element;
+    if (kind === 'video') sayCaption(element, path);
+    return element;
+  }
+  /** A video's line saying where it comes from, read from the file's record once it answers; left empty to write by hand when it cannot. */
+  function sayCaption(element, path) {
     api.get(`/api/cases/${plate.caseId ?? caseId}/media/item?path=${encodeURIComponent(path)}`)
       .then((item) => { if (element.src === path && !element.text) element.text = captionOf(item); })
       .catch(() => { /* the line stays empty, to be written by hand */ });
-    return element;
   }
   function oneItems(element) {
     const owed = element.kind === 'credits' && spec.elements.filter((item) => item.kind === 'credits').length < 2;
@@ -2203,7 +2243,7 @@
             oncontext={elementMenu} bind:tab={() => layout.tab, (value) => { layout.tab = value; saveLayout(); }} layers={sourcePanel} />
           {#snippet sourcePanel()}
             <PlateLayers spec={plate.spec} {rows} {grounds} {releases} {years} template={!!plate.template}
-              onsettings={mapSettings} onopen={plate.template ? null : openLayerInMap} onnewlayer={plate.template ? null : newLayerHere}
+              onsettings={mapSettings} onlayer={plate.template ? null : openLayer} onopen={plate.template ? null : openLayerInMap} onnewlayer={plate.template ? null : newLayerHere}
               onkeepdrawn={plate.template ? null : keepDrawn} />
           {/snippet}
           <PanelEdge bind:width={layout.listW} helpers={listWidth} side="right" label="Resize the list" />
@@ -2280,13 +2320,18 @@
       {#if inspectorShown}
         <div class="dock right" style:width="{layout.inspectorW}px" data-guide="plate.inspector">
           <PanelEdge bind:width={layout.inspectorW} helpers={inspectorWidth} side="left" label="Resize the inspector" />
-          <PlateInspector bind:spec={plate.spec} {selection} caseId={plate.caseId ?? caseId ?? ''} {rows} {grounds} {releases} {years} {legend} {creditList} {framing} {at} moments={playable ? moments : []}
-            {place} step={stepIndex >= 0 ? { id: stepId, name: stepName(stepIndex) } : null} {featureName} {datedLayer}
-            {overflow} {featurePictures} onpaper={paper} ontheme={applyTheme} onremove={removeElement} onduplicate={duplicate} onorder={restackBy} canorder={(element, by) => stepOf(listed, element.id, by) !== null} ongroup={group} onwayback={readReleases} onnewlayer={newLayerHere} onkeepdrawn={keepDrawn}
-            {framingFor} onmapview={mapView} onkeep={keepFraming} plays={!plate.template && sequence.length > 1}
-            onsymbol={(style) => (lastSymbol = { ...lastSymbol, ...style })}
-            onframe={(element) => (framing = framing === element.id ? '' : element.id)} onlabels={labelFeatures}
-            onpoint={(element) => { if (!mainMap(spec)) { toast('Put a map on the page first', 'warn'); return; } placing = { kind: 'callout', id: element.id }; }} />
+          {#if layerMap}
+            <PlateLayerPage spec={plate.spec} map={layerMap} name={layerPage.name} {rows} {at} {featureName} {datedLayer} onback={() => (layerPage = null)}
+              onmap={(next) => openLayer(next, { name: layerPage.name })} onopen={plate.template ? null : openLayerInMap} onlabels={labelFeatures} />
+          {:else}
+            <PlateInspector bind:spec={plate.spec} {selection} caseId={plate.caseId ?? caseId ?? ''} {rows} {grounds} {releases} {years} {legend} {creditList} {framing} {at} moments={playable ? moments : []}
+              {place} step={stepIndex >= 0 ? { id: stepId, name: stepName(stepIndex) } : null}
+              {overflow} {featurePictures} onpaper={paper} ontheme={applyTheme} onremove={removeElement} onduplicate={duplicate} onorder={restackBy} canorder={(element, by) => stepOf(listed, element.id, by) !== null} ongroup={group} onwayback={readReleases} onnewlayer={newLayerHere} onkeepdrawn={keepDrawn}
+              {framingFor} onmapview={mapView} onkeep={keepFraming} plays={!plate.template && sequence.length > 1}
+              onsymbol={(style) => (lastSymbol = { ...lastSymbol, ...style })}
+              onframe={(element) => (framing = framing === element.id ? '' : element.id)} onlayer={openLayer}
+              onpoint={(element) => { if (!mainMap(spec)) { toast('Put a map on the page first', 'warn'); return; } placing = { kind: 'callout', id: element.id }; }} />
+          {/if}
         </div>
       {/if}
     </div>

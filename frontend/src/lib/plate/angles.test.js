@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { anglesOf, bearingTo } from './angles.js';
+import { angleBoxes, anglesOf, bearingTo } from './angles.js';
 
 describe('one event filmed from several places', () => {
   it('measures the compass direction from one place to another', () => {
@@ -31,5 +31,30 @@ describe('one event filmed from several places', () => {
     const { cones } = anglesOf([[34.6, 47.5], [34.62, 47.5], [34.61, 47.5]]);
     expect(cones[2]).toMatchObject({ bearing: 0, reach: 0.2 });
     expect(cones[0].bearing).toBe(90);
+  });
+});
+
+describe('the files of one event played together', () => {
+  it('stand in a strip along the foot of the page, sixteen to nine, in the middle', () => {
+    const boxes = angleBoxes(3, 297, 210);
+    expect(boxes).toHaveLength(3);
+    for (const [, y, w, h] of boxes) {
+      expect(Math.abs(h - (w * 9) / 16)).toBeLessThan(0.1);
+      expect(Math.abs(y + h - 202)).toBeLessThan(0.1);
+    }
+    // the same room either side, the same gap between
+    expect(Math.abs(boxes[0][0] - (297 - boxes[2][0] - boxes[2][2]))).toBeLessThan(0.2);
+    expect(Math.abs(boxes[1][0] - (boxes[0][0] + boxes[0][2]) - 3)).toBeLessThan(0.2);
+  });
+
+  it('keeps one alone no wider than a third of the page, and lays past four on two rows', () => {
+    expect(angleBoxes(1, 297, 210)[0][2]).toBe(99);
+    const six = angleBoxes(6, 297, 210);
+    expect(new Set(six.map(([, y]) => y)).size).toBe(2);
+    // five: three on the first row, the two left centred under them
+    const five = angleBoxes(5, 297, 210);
+    expect(five.slice(0, 3).every(([, y]) => y === five[0][1])).toBe(true);
+    expect(Math.abs(five[3][0] - (297 - five[4][0] - five[4][2]))).toBeLessThan(0.2);
+    expect(angleBoxes(0, 297, 210)).toEqual([]);
   });
 });

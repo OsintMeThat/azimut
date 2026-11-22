@@ -194,99 +194,23 @@ describe('hover help on every setting', () => {
     expect(bare()).toEqual([]);
   });
 
-  it('gives a layer what it stands for in one press, its fill with it, and its own look back', () => {
+  it('lists a map\'s layers a line each, saying what the map does to each, its page opened by a press', async () => {
     const spec = $state(houseLayout());
     const map = spec.elements.find((element) => element.kind === 'map');
-    map.layers = [{ name: 'front', hidden: [], stroke: 1, icons: 1 }];
-    const rows = [{ name: 'front', title: 'Front', categories: [{ name: 'Lines' }] }];
-    held = mount(PlateInspector, { target: document.body, props: { spec, selection: [map.id], rows } });
-    flushSync();
-    const role = document.body.querySelector('[aria-label="Front stands for"]');
-    role.value = 'claimed'; role.dispatchEvent(new Event('change', { bubbles: true })); flushSync();
-    expect(map.layers[0]).toMatchObject({ name: 'front', role: 'claimed', colour: spec.theme.accent, fill: 'hatch', dash: 'dashed' });
-    const fill = (label) => [...document.body.querySelectorAll('[aria-label="Front areas on this plate"] button')].find((node) => node.textContent === label);
-    expect(fill('Hatched').getAttribute('aria-pressed')).toBe('true');
-    fill('Full').click(); flushSync();
-    expect(map.layers[0].fill).toBe('solid');
-    const again = document.body.querySelector('[aria-label="Front stands for"]');
-    again.value = ''; again.dispatchEvent(new Event('change', { bubbles: true })); flushSync();
-    expect(map.layers[0]).toMatchObject({ role: '', colour: null, fill: '', dash: '' });
-  });
-
-  it('starts a dated layer on a day of the map, and puts the plate on it when it stood before', async () => {
-    const spec = $state(houseLayout());
-    spec.time = { ...spec.time, at: '2026-10-05' };
-    const map = spec.elements.find((element) => element.kind === 'map');
-    map.layers = [{ name: 'front', hidden: [], stroke: 1, icons: 1 }, { name: 'roads', hidden: [], stroke: 1, icons: 1 }];
-    const rows = [{ name: 'front', title: 'Front', categories: [] }, { name: 'roads', title: 'Roads', categories: [] }];
-    held = mount(PlateInspector, { target: document.body, props: { spec, selection: [map.id], rows, at: '2026-10-05', moments: ['2026-10-03'],
-      datedLayer: (name) => name === 'front' } });
+    map.layers = [{ name: 'front', hidden: ['Rumoured'], stroke: 1, icons: 1, role: 'claimed', fill: 'hatch' }, { name: 'roads', hidden: [], stroke: 1, icons: 1 }];
+    const rows = [{ name: 'front', title: 'Front', categories: [] }, { name: 'roads', title: 'Roads', categories: [] }, { name: 'ports', title: 'Ports', categories: [] }];
+    const opened = [];
+    held = mount(PlateInspector, { target: document.body, props: { spec, selection: [map.id], rows, onlayer: (on, row) => opened.push([on.id, row.name]) } });
     flushSync(); await settle();
-    // an undated layer has no first day to set
-    expect(end('Roads first day')).toBeNull();
-    expect(end('Front first day').textContent).toContain('Its first day');
-    press(end('Front first day'));
-    press([...document.body.querySelectorAll('button.btn')].find((button) => button.textContent === 'This day'));
-    expect(map.layers[0].start).toBe('2026-10-05');
-    expect(spec.time.at).toBe('2026-10-05');
-    press(end('Front first day'));
-    press(document.body.querySelector('button[title="2026-10-12"]'));
-    expect(map.layers[0].start).toBe('2026-10-12');
-    expect([spec.time.at, spec.time.step]).toEqual(['2026-10-12', null]);
+    // the settings a layer had under it are on its page now: none of them stands in the list
+    expect(document.body.querySelector('[aria-label="Front stands for"]')).toBeNull();
+    expect([...document.body.querySelectorAll('.layer-said')].map((node) => node.textContent)).toEqual(['Claimed · hatched · 1 group left out', 'Its own look']);
+    press(document.body.querySelector('.layer-said'));
+    press(document.body.querySelector('[aria-label="Roads on this map"]'));
+    expect(opened).toEqual([[map.id, 'front'], [map.id, 'roads']]);
+    // a layer the map does not draw has no page to open
+    expect(document.body.querySelector('[aria-label="Ports on this map"]')).toBeNull();
     expect(bare()).toEqual([]);
-    press(end('Front first day'));
-    await settle();
-    expect(bare()).toEqual([]);
-    press([...document.body.querySelectorAll('button.btn')].find((button) => button.textContent === 'Its first day'));
-    expect(map.layers[0].start).toBeNull();
-    expect(end('Front first day').textContent).toContain('Its first day');
-  });
-
-  it('ends a dated layer on a day of the map, the period it runs between kept apart from the plate\'s', async () => {
-    const spec = $state(houseLayout());
-    spec.time = { ...spec.time, at: '2026-10-15' };
-    const map = spec.elements.find((element) => element.kind === 'map');
-    map.layers = [{ name: 'front', hidden: [], stroke: 1, icons: 1, start: '2026-10-05' }];
-    const rows = [{ name: 'front', title: 'Front', categories: [] }];
-    held = mount(PlateInspector, { target: document.body, props: { spec, selection: [map.id], rows, at: '2026-10-15', moments: ['2026-10-03'],
-      datedLayer: () => true } });
-    flushSync(); await settle();
-    expect(end('Front last day').textContent).toContain('Its last day');
-    press(end('Front last day'));
-    // one calendar open at a time
-    expect(document.body.querySelector('[aria-label="Front last day calendar"]')).not.toBeNull();
-    expect(document.body.querySelector('[aria-label="Front first day calendar"]')).toBeNull();
-    press(document.body.querySelector('button[title="2026-10-12"]'));
-    expect([map.layers[0].start, map.layers[0].end]).toEqual(['2026-10-05', '2026-10-12']);
-    // the plate stood after it, so it is put on the day just set
-    expect([spec.time.at, spec.time.step]).toEqual(['2026-10-12', null]);
-    expect(end('Front last day').textContent).toContain('12 Oct 2026');
-    expect(bare()).toEqual([]);
-    // a last day before the first pulls the first back to it
-    press(end('Front last day'));
-    press(document.body.querySelector('button[title="2026-10-02"]'));
-    expect([map.layers[0].start, map.layers[0].end]).toEqual(['2026-10-02', '2026-10-02']);
-    press(end('Front last day'));
-    await settle();
-    expect(bare()).toEqual([]);
-    press([...document.body.querySelectorAll('button.btn')].find((button) => button.textContent === 'Its last day'));
-    expect([map.layers[0].start, map.layers[0].end]).toEqual(['2026-10-02', null]);
-  });
-
-  it('lists the features hidden on the map by name, each shown again by a press', () => {
-    const spec = $state(houseLayout());
-    const map = spec.elements.find((element) => element.kind === 'map');
-    map.layers = [{ name: 'front', hidden: [], stroke: 1, icons: 1, hidden_features: ['post', '~Gate@2.30000,48.86000'] }];
-    const rows = [{ name: 'front', title: 'Front', categories: [] }];
-    held = mount(PlateInspector, { target: document.body, props: { spec, selection: [map.id], rows,
-      featureName: (layer, id) => (layer === 'front' && id === 'post' ? 'Post' : '') } });
-    flushSync();
-    const chips = () => [...document.body.querySelectorAll('.hidden-here .chip')];
-    expect(chips().map((chip) => chip.textContent)).toEqual(['Post', 'No name']);
-    press(chips()[0]);
-    expect(map.layers[0].hidden_features).toEqual(['~Gate@2.30000,48.86000']);
-    press(chips()[0]);
-    expect(document.body.querySelector('.hidden-here')).toBeNull();
   });
 
   it('sets a country focus: the rest darkened or faded, how far, and its days like any annotation', async () => {

@@ -18,6 +18,7 @@
   import Icon from '../../components/Icon.svelte';
   import { KIND_LABELS, MAP_KINDS, bringTo, carryOn, dated, fillTokens, landingIn, listedOf, periodSaid, shownOn } from '../../lib/plate/page.js';
   import { momentLabel } from '../../lib/map/layerHistory.js';
+  import { mapName } from '../../lib/plate/source.js';
   import symbols from '../../lib/map/layerSymbols.json';
 
   let {
@@ -66,11 +67,7 @@
 
   function describe(element) {
     if (element.name) return element.name;
-    if (element.kind === 'map' && element.of) return 'Detail map';
-    if (element.kind === 'map') {
-      const index = spec.elements.filter((item) => item.kind === 'map').indexOf(element);
-      return index ? `Map ${index + 1}` : 'Map';
-    }
+    if (element.kind === 'map') return mapName(spec, element);
     if (element.kind === 'video' && element.src) return element.src.split('/').pop();
     if (element.kind === 'symbol') return symbols.find((choice) => choice.id === element.symbol)?.label ?? KIND_LABELS.symbol;
     if (['text', 'label', 'arrow', 'zone'].includes(element.kind) && element.text) {

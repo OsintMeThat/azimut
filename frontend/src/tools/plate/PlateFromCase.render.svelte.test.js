@@ -90,18 +90,35 @@ describe('the case\'s work, from Add', () => {
     expect(picked).toEqual([{ what: 'proof', row: PROOFS[0], how: '' }]);
   });
 
-  it('lays footage ticked from several places as angles of one event, two at least', async () => {
+  it('lays footage ticked from several places as angles of one event, a slide each or all on one, and one alone with its cone', async () => {
     const calls = await show({ what: 'media' });
-    const lay = () => [...document.body.querySelectorAll('.angles button')][0];
+    const lay = () => document.body.querySelector('.lay button');
+    const played = (text) => [...document.body.querySelectorAll('.played button')].find((node) => node.textContent === text);
     expect(lay().disabled).toBe(true);
     const ticks = [...document.body.querySelectorAll('input.tick')];
     ticks[2].click(); flushSync();
-    expect(lay().disabled).toBe(true);
+    // one file alone gets its cone too, facing north to be turned
+    expect(lay().textContent.trim()).toBe('Lay 1 as an angle');
+    expect(document.body.querySelector('.lay span').textContent).toContain('facing north');
+    expect(played('One slide each')).toBeUndefined();
     ticks[0].click(); flushSync();
     expect(lay().textContent.trim()).toBe('Lay 2 as angles');
+    // the choice says how they play, a slide each first
+    expect(played('One slide each').getAttribute('aria-pressed')).toBe('true');
+    expect(document.body.querySelector('.lay span').textContent).toContain('one after the other');
     lay().click();
     // in the order they were ticked: the angles are numbered so
-    expect(calls.onpick).toHaveBeenCalledWith({ what: 'angles', row: [MEDIA[2], MEDIA[0]], how: '' });
+    expect(calls.onpick).toHaveBeenCalledWith({ what: 'angles', row: [MEDIA[2], MEDIA[0]], how: 'apart' });
+  });
+
+  it('plays the angles together on one slide when asked, and a single one on its own slide', async () => {
+    const calls = await show({ what: 'media' });
+    const ticks = [...document.body.querySelectorAll('input.tick')];
+    ticks[0].click(); ticks[2].click(); flushSync();
+    [...document.body.querySelectorAll('.played button')].find((node) => node.textContent === 'All on one slide').click(); flushSync();
+    expect(document.body.querySelector('.lay span').textContent).toContain('played together');
+    document.body.querySelector('.lay button').click();
+    expect(calls.onpick).toHaveBeenCalledWith({ what: 'angles', row: [MEDIA[0], MEDIA[2]], how: 'together' });
   });
 
   it('says a picture will not point at its place when the page has no map', async () => {

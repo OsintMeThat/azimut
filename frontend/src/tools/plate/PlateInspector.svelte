@@ -35,9 +35,8 @@
   import GroundSwatch from './GroundSwatch.svelte';
   import { TEXT_STYLES, styled } from '../../lib/plate/design.js';
   import { drawnOn } from '../../lib/plate/toLayer.js';
-  import { imageryDay, withLayer } from '../../lib/plate/source.js';
-  import { ROLE_LIST, withRole } from '../../lib/plate/roles.js';
-  import { spanTo, withHidden } from '../../lib/plate/kept.js';
+  import { imageryDay, layerSaid, mapName, withLayer } from '../../lib/plate/source.js';
+  import { roleLabel } from '../../lib/plate/roles.js';
   import { countryNames } from '../../lib/plate/spotlight.js';
   import { WAYBACK_ID } from '../../lib/wayback.js';
   import { shrinkPicture } from '../../lib/plate/picture.js';
@@ -81,7 +80,8 @@
     /** `(element, by)`: whether a step forward (1) or back (-1) can move it, among the rows the list shows. */
     canorder = () => true,
     onframe,
-    onlabels,
+    /** `(map, row)`: one of the map's layers on a page of its own, its look, what shows of it and its names. */
+    onlayer = null,
     /** `(style)` once a symbol's marker, colour or size is set, which the next symbol placed takes. */
     onsymbol = null,
     onpoint,
@@ -99,10 +99,6 @@
     onkeep = null,
     /** The plate plays: through days followed over time, or through steps. */
     plays = false,
-    /** `(layer, id)`: what a feature hidden on a map is called, '' when nothing says. */
-    featureName = () => '',
-    /** `(name)`: whether a layer has dated features, so a map can start it on a day. */
-    datedLayer = () => false,
   } = $props();
 
   const picked = $derived(spec.elements.filter((item) => selection.includes(item.id)));
@@ -204,7 +200,7 @@
     window.addEventListener('pointerdown', away, true);
     return () => window.removeEventListener('pointerdown', away, true);
   });
-  const name = (map) => map.name || (map.of ? 'Detail map' : maps.indexOf(map) ? `Map ${maps.indexOf(map) + 1}` : 'Map');
+  const name = (map) => mapName(spec, map);
 
   function toggleOverlay(id) {
     const list = element.overlays ?? [];
@@ -220,25 +216,6 @@
     list.splice(from, 1);
     list.splice(to, 0, entry);
     element.layers = list;
-  }
-  function toggleGroup(entry, group) {
-    entry.hidden = entry.hidden.includes(group) ? entry.hidden.filter((item) => item !== group) : [...entry.hidden, group];
-  }
-  /** The layer whose first or last day has its calendar open: `{ name, which }`. */
-  let dating = $state(null);
-  $effect(() => { void element?.id; dating = null; });
-  const datingOn = (name, which) => dating?.name === name && dating.which === which;
-  /**
-   * The first (`start`) or last (`end`) day the map draws a layer on, or none for all
-   * of it. A plate on a day outside them is put on the end it passed, so the day the
-   * analyst just set is the one shown.
-   */
-  function dateLayer(entry, which, day) {
-    Object.assign(entry, spanTo(entry, which, day));
-    dating = null;
-    const shown = at ? dayOf(at) : '';
-    const onto = shown && entry.start && shown < entry.start ? entry.start : shown && entry.end && shown > entry.end ? entry.end : '';
-    if (onto) Object.assign(spec.time, { at: onto, step: null });
   }
   async function openPictures(event) {
     pickAnchor = event.currentTarget;
@@ -829,75 +806,19 @@
       <ul class="layers">
         {#each [...(element.layers ?? []).map((entry) => rows.find((row) => row.name === entry.name)).filter(Boolean), ...rows.filter((row) => !(element.layers ?? []).some((entry) => entry.name === row.name))] as row (row.name)}
           {@const entry = (element.layers ?? []).find((item) => item.name === row.name)}
+          {@const said = layerSaid(entry, { role: roleLabel, day: momentLabel })}
           <li>
             <div class="layer"><label title={PLATE_HELP['Draw the layer']}><input type="checkbox" checked={!!entry} onchange={() => toggleLayer(row)} />
               <span class="name">{row.title}</span>{#if isTracked(row)}<Icon name="clock" size={11} />{/if}</label>
               {#if entry}
                 <button type="button" class="icon-act small" aria-label={`Draw ${row.title} higher`} title="Draw it over the others" onclick={() => moveLayer(entry, -1)}><Icon name="chevronUp" size={11} /></button>
                 <button type="button" class="icon-act small" aria-label={`Draw ${row.title} lower`} title="Draw it under the others" onclick={() => moveLayer(entry, 1)}><Icon name="chevronDown" size={11} /></button>
+                {#if onlayer}<button type="button" class="icon-act small" aria-label={`${row.title} on this map`} title="Its look, what shows of it and its names, on this map"
+                  onclick={() => onlayer(element, row)}><Icon name="chevronRight" size={12} /></button>{/if}
               {/if}
             </div>
-            {#if entry}
-              <div class="layer-set">
-                <label class="weight role" title="One press gives the layer its role's colour, fill and lines, named in the legend">Stands for
-                  <select aria-label={`${row.title} stands for`} value={entry.role ?? ''}
-                    onchange={(event) => { const index = element.layers.indexOf(entry); element.layers[index] = withRole(entry, event.currentTarget.value, spec.theme); }}>
-                    <option value="">Its own look</option>
-                    {#each ROLE_LIST as [value, label] (value)}<option {value}>{label}</option>{/each}
-                  </select></label>
-                <div class="groups">
-                  {#each row.categories as group (group.name)}
-                    <button type="button" class="chip" class:off={entry.hidden.includes(group.name)} title={entry.hidden.includes(group.name) ? 'Show on this plate' : 'Leave out of this plate'}
-                      onclick={() => toggleGroup(entry, group.name)}>{group.name}</button>
-                  {/each}
-                </div>
-                {#if datedLayer(row.name) || entry.start || entry.end}
-                  <div class="span">
-                    {#each [['start', 'From', 'first day', 'What began before this day is left out of this map', 'Its first day'],
-                      ['end', 'To', 'last day', 'What began after this day is left out of this map', 'Its last day']] as [which, key, said, title, open] (which)}
-                      <span class="key" {title}>{key}</span>
-                      <button type="button" class="end" class:open={datingOn(row.name, which)} aria-expanded={datingOn(row.name, which)} aria-label={`${row.title} ${said}`}
-                        {title} onclick={() => (dating = datingOn(row.name, which) ? null : { name: row.name, which })}>
-                        <Icon name="calendar" size={12} />{entry[which] ? momentLabel(entry[which]) : open}</button>
-                      {#if datingOn(row.name, which)}
-                        <div class="pick">
-                          <div class="tools wide">
-                            {#if at}<button type="button" class="btn btn-xs" title={`${momentLabel(at)}, the plate's day`} onclick={() => dateLayer(entry, which, dayOf(at))}>This day</button>{/if}
-                            {#if entry[which]}<button type="button" class="btn btn-xs" title={which === 'start' ? 'Draws what began before it again' : 'Draws what began after it again'}
-                              onclick={() => dateLayer(entry, which, '')}>{open}</button>{/if}
-                          </div>
-                          <MonthGrid value={(entry[which] || dayOf(at) || lastDay).slice(0, 10)} max={lastDay} label={`${row.title} ${said}`} onpick={(day) => dateLayer(entry, which, day)} />
-                        </div>
-                      {/if}
-                    {/each}
-                  </div>
-                {/if}
-                {#if entry.hidden_features?.length}
-                  <div class="weight hidden-here">Hidden here
-                    <span class="groups">
-                      {#each entry.hidden_features as id (id)}
-                        <button type="button" class="chip off" title="Press to show it again on this map"
-                          onclick={() => { element.layers = withHidden(element.layers, row.name, id, false); }}>{featureName(row.name, id) || 'No name'}</button>
-                      {/each}
-                    </span>
-                  </div>
-                {/if}
-                <label class="weight" title={PLATE_HELP['Lines on this plate']}>Lines <input type="range" min="0.5" max="3" step="0.25" bind:value={entry.stroke} /> <span>{entry.stroke}×</span></label>
-                <label class="weight" title={PLATE_HELP['Marks on this plate']}>Marks <input type="range" min="0.5" max="3" step="0.25" value={entry.icons ?? 1} oninput={(event) => (entry.icons = Number(event.currentTarget.value))} /> <span>{entry.icons ?? 1}×</span></label>
-                <div class="weight">Here in {#if !entry.colour}<span class="quiet">its own colours</span>{/if}</div>
-                <PlateColour label={`${row.title} colour on this plate`} value={entry.colour ?? '#c8102e'} theme={spec.theme} none onpick={(hex) => (entry.colour = hex)} />
-                <div class="segments thin" role="group" aria-label={`${row.title} lines on this plate`}>
-                  {#each [['', 'Its lines'], ['dashed', 'Dashed'], ['dotted', 'Dotted']] as [value, label] (value)}
-                    <button type="button" aria-pressed={(entry.dash ?? '') === value} onclick={() => (entry.dash = value)}>{label}</button>
-                  {/each}
-                </div>
-                <div class="segments thin" role="group" aria-label={`${row.title} areas on this plate`}>
-                  {#each [['', 'Its fill'], ['solid', 'Full'], ['hatch', 'Hatched'], ['none', 'Outline']] as [value, label] (value)}
-                    <button type="button" aria-pressed={(entry.fill ?? '') === value} onclick={() => (entry.fill = value)}>{label}</button>
-                  {/each}
-                </div>
-                <button type="button" class="text-act" title="A label beside each named feature in the frame, none covering another" onclick={() => onlabels(element, row)}>Label its named features</button>
-              </div>
+            {#if entry && onlayer}
+              <button type="button" class="layer-said" title="Its look, what shows of it and its names, on this map" onclick={() => onlayer(element, row)}>{said || 'Its own look'}</button>
             {/if}
           </li>
         {/each}
@@ -1454,7 +1375,6 @@
   .rename { flex: 1; }
   .segments { display: flex; border: 1px solid var(--border); border-radius: var(--r-sm); overflow: hidden; background: var(--bg-1); }
   .segments button { flex: 1; min-width: 0; padding: 4px 3px; color: var(--text-2); font-size: 11px; cursor: pointer; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .segments.thin button { padding: 2px; font-size: 10px; }
   .segments button.short { flex: 0 0 26px; }
   .segments button + button { border-left: 1px solid var(--border); }
   .segments button[aria-pressed='true'] { background: var(--accent-soft); color: var(--text-1); font-weight: 600; }
@@ -1464,17 +1384,11 @@
   .layer { display: flex; align-items: center; gap: 2px; }
   .layer label { display: flex; align-items: center; gap: 6px; flex: 1; min-width: 0; cursor: pointer; }
   .layer .name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text-1); }
-  .layer-set { margin: 4px 0 4px 22px; display: grid; gap: 6px; }
-  .groups { display: flex; flex-wrap: wrap; gap: 3px; }
-  .chip { padding: 1px 7px; border: 1px solid var(--border); border-radius: 999px; background: var(--accent-soft); color: var(--text-1); font-size: 10.5px; cursor: pointer; }
-  .chip.off { background: none; color: var(--text-3); text-decoration: line-through; }
+  /* what this map does to the layer, in a few words, which opens its page */
+  .layer-said { display: block; max-width: calc(100% - 22px); margin: -2px 0 0 22px; padding: 0; overflow: hidden; color: var(--text-3); font-size: 10.5px;
+    text-align: left; text-overflow: ellipsis; white-space: nowrap; cursor: pointer; }
+  .layer-said:hover, .layer-said:focus-visible { color: var(--accent); }
   .weight { display: flex; align-items: center; gap: 6px; color: var(--text-3); font-size: 10.5px; }
-  .weight.role select { flex: 1; min-width: 0; }
-  .span { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 4px 6px; align-items: center; color: var(--text-3); font-size: 10.5px; }
-  .span .key { font-size: inherit; }
-  .span .pick { grid-column: 1 / -1; }
-  .hidden-here { align-items: flex-start; }
-  .hidden-here .groups { flex: 1; min-width: 0; }
   .weight input[type='range'] { flex: 1; }
   .quiet { color: var(--text-3); }
   .frame { width: 100%; justify-content: center; margin-bottom: 4px; }

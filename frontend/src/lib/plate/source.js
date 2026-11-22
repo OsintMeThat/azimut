@@ -55,6 +55,54 @@ export const layersDayOf = (map, { releases = [] } = {}) => (map?.layers_on === 
 /** The maps that draw the case's layers, in the page's order: insets draw none. */
 export const layeredMaps = (spec) => (spec?.elements ?? []).filter((element) => element.kind === 'map');
 
+/** A map as the panels name it: its own name, else Map, Map 2… by its place on the page, a detail map as one. */
+export function mapName(spec, map) {
+  if (map?.name) return map.name;
+  if (map?.of) return 'Detail map';
+  const index = layeredMaps(spec).indexOf(map);
+  return index > 0 ? `Map ${index + 1}` : 'Map';
+}
+
+/** What a map's own look for a layer holds, which Same on the other maps gives the others: its days and hidden features stay each map's. */
+export const LOOK_FIELDS = ['role', 'colour', 'dash', 'fill', 'stroke', 'icons', 'hidden'];
+
+/** `entry` drawn as `source` draws the same layer: its role, colours, lines, fill, weights and groups left out. */
+export function withLookOf(entry, source) {
+  const look = Object.fromEntries(LOOK_FIELDS.filter((field) => field in source).map((field) => [field, field === 'hidden' ? [...source.hidden] : source[field]]));
+  return { ...entry, ...look };
+}
+
+/** Whether two maps draw a layer alike, their days and hidden features aside. */
+export function sameLook(a, b) {
+  const value = (entry, field) => (field === 'hidden' ? [...(entry?.hidden ?? [])].sort().join('\n') : entry?.[field] ?? (['stroke', 'icons'].includes(field) ? 1 : field === 'colour' ? null : ''));
+  return LOOK_FIELDS.every((field) => value(a, field) === value(b, field));
+}
+
+const FILLS = { solid: 'full', hatch: 'hatched', none: 'outline only' };
+
+/**
+ * What a map does to a layer beyond drawing it as the Map does, in a few words for
+ * its row: its role, its lines and fill, its weights, its groups and features left
+ * out, its days. '' when it keeps the layer's own look whole. `role(id)` names a role,
+ * `day(iso)` a day.
+ */
+export function layerSaid(entry, { role = (id) => id, day = (iso) => iso } = {}) {
+  if (!entry) return '';
+  const said = [];
+  if (entry.role) said.push(role(entry.role));
+  if (entry.dash) said.push(entry.dash);
+  if (FILLS[entry.fill]) said.push(FILLS[entry.fill]);
+  if ((entry.stroke ?? 1) !== 1) said.push(`lines ${entry.stroke}×`);
+  if ((entry.icons ?? 1) !== 1) said.push(`marks ${entry.icons}×`);
+  const groups = entry.hidden?.length ?? 0;
+  if (groups) said.push(`${groups} ${groups === 1 ? 'group' : 'groups'} left out`);
+  const features = entry.hidden_features?.length ?? 0;
+  if (features) said.push(`${features} hidden here`);
+  if (entry.start) said.push(`from ${day(entry.start)}`);
+  if (entry.end) said.push(`to ${day(entry.end)}`);
+  return said.join(' · ');
+}
+
 /** A map toggled on or off one of the case's layers, drawn over the others when it comes in. */
 export function withLayer(map, name) {
   const list = map.layers ?? [];

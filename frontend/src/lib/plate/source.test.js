@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { groundSaid, imageryDay, imagerySaid, layeredMaps, layersDayOf, withLayer } from './source.js';
+import { groundSaid, imageryDay, imagerySaid, layerSaid, layeredMaps, layersDayOf, mapName, sameLook, withLayer, withLookOf } from './source.js';
 
 const grounds = [['plain', 'Plain'], ['esri-world-imagery', 'Esri World Imagery'], ['esri-wayback', 'World Imagery Wayback, dated'],
   ['s2cloudless', "Sentinel-2 cloudless, a year's mosaic"], ['sentinel2', 'Sentinel-2, one dated pass'], ['osm', 'OpenStreetMap']];
@@ -57,5 +57,39 @@ describe('a map that draws its layers on its imagery\'s day', () => {
     // the releases not read yet, or a ground with no day: the plate's day, never a guess
     expect(layersDayOf({ basemap: 'esri-wayback', release: 41, layers_on: 'imagery' })).toBeNull();
     expect(layersDayOf({ basemap: 'esri-world-imagery', layers_on: 'imagery' }, { releases })).toBeNull();
+  });
+});
+
+describe('one layer on one map', () => {
+  it('names a map as the panels do: its own name, a detail map, else by its place on the page', () => {
+    const spec = { elements: [{ id: 'm1', kind: 'map' }, { id: 'i', kind: 'inset' }, { id: 'm2', kind: 'map' }, { id: 'd', kind: 'map', of: 'm1' }, { id: 'n', kind: 'map', name: 'Port' }] };
+    // an inset is no map of its own: it leaves the count alone
+    expect(layeredMaps(spec).map((element) => mapName(spec, element))).toEqual(['Map', 'Map 2', 'Detail map', 'Port']);
+  });
+
+  it('gives another map the look and the groups, never its days nor its hidden features', () => {
+    const source = { name: 'front', role: 'held', colour: '#c8102e', dash: '', fill: 'solid', stroke: 1.5, icons: 1, hidden: ['Rumoured'], start: '2026-10-01', hidden_features: ['a'] };
+    const other = { name: 'front', hidden: [], stroke: 1, icons: 1, end: '2026-10-09', hidden_features: ['b'] };
+    const given = withLookOf(other, source);
+    expect(given).toEqual({ name: 'front', role: 'held', colour: '#c8102e', dash: '', fill: 'solid', stroke: 1.5, icons: 1, hidden: ['Rumoured'], end: '2026-10-09', hidden_features: ['b'] });
+    // the groups are copied, not shared
+    given.hidden.push('Other');
+    expect(source.hidden).toEqual(['Rumoured']);
+    expect(sameLook(given, source)).toBe(false);
+    expect(sameLook(withLookOf(other, source), source)).toBe(true);
+  });
+
+  it('reads a fresh entry as the layer\'s own look', () => {
+    expect(sameLook({ name: 'front', hidden: [], stroke: 1, icons: 1 }, { name: 'front', role: '', colour: null, dash: '', fill: '', hidden: [] })).toBe(true);
+    expect(sameLook({ name: 'front', hidden: ['A', 'B'] }, { name: 'front', hidden: ['B', 'A'] })).toBe(true);
+    expect(sameLook({ name: 'front', stroke: 2 }, { name: 'front' })).toBe(false);
+  });
+
+  it('says in a few words what a map does to a layer, nothing when it keeps its own look', () => {
+    expect(layerSaid({ name: 'front', hidden: [], stroke: 1, icons: 1 })).toBe('');
+    expect(layerSaid({ name: 'front', role: 'claimed', dash: 'dashed', fill: 'hatch', stroke: 1.5, icons: 2, hidden: ['A'], hidden_features: ['x', 'y'], start: '2026-10-01', end: '2026-10-09' },
+      { role: (id) => id.toUpperCase(), day: (iso) => iso.slice(5) }))
+      .toBe('CLAIMED · dashed · hatched · lines 1.5× · marks 2× · 1 group left out · 2 hidden here · from 10-01 · to 10-09');
+    expect(layerSaid({ name: 'front', fill: 'none', hidden: ['A', 'B'] })).toBe('outline only · 2 groups left out');
   });
 });

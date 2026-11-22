@@ -1087,7 +1087,7 @@ test('footage of one event filmed from several places is laid as its angles: a c
   await panel.getByLabel('Lay Roof as an angle').check();
   await panel.getByLabel('Lay Street as an angle').check();
   await panel.getByRole('button', { name: 'Lay 2 as angles' }).click();
-  await expect(page.getByText('each cone faces the middle of the places picked')).toBeVisible();
+  await expect(page.getByText('2 angles laid, a slide each, played one after the other.', { exact: false })).toBeVisible();
   await expect(page.locator('.steps [role="option"]')).toHaveCount(3);
   await expect.poll(() => {
     const spec = lastSave(store)?.spec;
@@ -1096,6 +1096,39 @@ test('footage of one event filmed from several places is laid as its angles: a c
     return [cones.map((cone) => [cone.name, cone.bearing, cone.step ?? null]), (spec?.steps?.now ?? []).map((step) => step.name),
       videos.map((video) => [video.src, video.step === spec.steps.now.find((step) => step.name.startsWith(video.name))?.id])];
   }).toEqual([[['Angle 1', 90, null], ['Angle 2', 270, null]], ['Angle 1 · Roof', 'Angle 2 · Street'], [['media/roof.mp4', true], ['media/street.mp4', true]]]);
+});
+
+test('the angles of one event play together on one slide when asked, and one file alone gets its cone', async ({ page }) => {
+  const store = await plateFixture(page);
+  const filmed = (id, title, lon, lat = 48.86) => ({ key: `${id}@${lat},${lon}`, id, path: `media/${id}.mp4`, media_kind: 'video', title, lat, lon, thumbnail: null });
+  await page.route(`**/api/cases/${CASE_ID}/satellite/media`, (route) => route.fulfill({ json: [filmed('roof', 'Roof', 2.30), filmed('street', 'Street', 2.32),
+    filmed('tower', 'Tower', 2.31, 48.87)] }));
+  await page.goto('/#plate');
+  await newPlate(page);
+  await expect(page.locator('.plate-map')).toHaveCount(2);
+  await addOnPage(page, 'Footage on the map');
+  const panel = page.getByRole('dialog', { name: 'From the case' });
+  for (const title of ['Roof', 'Street', 'Tower']) await panel.getByLabel(`Lay ${title} as an angle`).check();
+  await panel.getByRole('button', { name: 'All on one slide' }).click();
+  await panel.getByRole('button', { name: 'Lay 3 as angles' }).click();
+  await expect(page.getByText('3 angles laid, all on one slide, played together.', { exact: false })).toBeVisible();
+  await expect(page.locator('.steps [role="option"]')).toHaveCount(2);
+  // the three files on the one slide, side by side along the foot of the page, each pointing at its place
+  await expect.poll(() => {
+    const spec = lastSave(store)?.spec;
+    const videos = (spec?.elements ?? []).filter((element) => element.kind === 'video');
+    const slide = spec?.steps?.now?.[0];
+    return [slide?.name, videos.map((video) => [video.name, video.src, video.step === slide?.id, video.box[1] === videos[0].box[1], video.leader])];
+  }).toEqual(['3 angles', [['Angle 1', 'media/roof.mp4', true, true, 'straight'], ['Angle 2', 'media/street.mp4', true, true, 'straight'],
+    ['Angle 3', 'media/tower.mp4', true, true, 'straight']]]);
+  await expect(page.locator('.plate-video')).toHaveCount(3);
+  // one file ticked alone: its cone faces north, to be turned by hand
+  await addOnPage(page, 'Footage on the map');
+  await panel.getByLabel('Lay Tower as an angle').check();
+  await panel.getByRole('button', { name: 'Lay 1 as an angle' }).click();
+  await expect(page.getByText('Laid with its cone facing north', { exact: false })).toBeVisible();
+  await expect.poll(() => (lastSave(store)?.spec.elements ?? []).filter((element) => element.kind === 'cone').map((cone) => cone.bearing).at(-1)).toBe(0);
+  await expect(page.locator('.steps [role="option"]')).toHaveCount(3);
 });
 
 test('an empty slide takes a copy of the one before it from the pill over the page', async ({ page }) => {
@@ -1155,6 +1188,8 @@ test('a feature is hidden on one map from its right-click or a click in the fram
     await page.mouse.click(middle.x, middle.y, { button: 'right' });
     await expect(hide).toBeVisible({ timeout: 1000 });
   }).toPass();
+  // and the layer's own page on this map, beside it
+  await expect(page.getByRole('menuitem', { name: 'Front on this map…' })).toBeVisible();
   await hide.click();
   await expect.poll(hidden).toEqual(['gate']);
   await expect(ticks).toHaveCount(4);
@@ -1169,7 +1204,11 @@ test('a feature is hidden on one map from its right-click or a click in the fram
   await expect(ticks).toHaveCount(3);
   await page.keyboard.press('Escape');
 
-  // the map's layers list them, and start the layer on a day: what began before it goes, its days with it
+  // the layer's page on this map lists them, and starts the layer on a day: what began before it goes, its days with it
+  await expect(page.locator('.layer-said')).toHaveText('2 hidden here');
+  await page.getByRole('button', { name: 'Front on this map' }).click();
+  const layerPage = page.getByRole('complementary', { name: 'Front on Map' });
+  await expect(layerPage).toBeVisible();
   await expect(page.locator('.hidden-here .chip')).toHaveText(['Gate', 'Depot']);
   await page.getByRole('button', { name: 'Front first day' }).click();
   await page.locator('button[title="2026-10-05"]').click();
@@ -1194,6 +1233,10 @@ test('a feature is hidden on one map from its right-click or a click in the fram
   await page.getByRole('button', { name: 'Its last day', exact: true }).click();
   await expect.poll(() => lastSave(store)?.spec.elements[0].layers[0].end).toBeNull();
   await expect(ticks).toHaveCount(2);
+  // back to the map's settings, the row saying what the map does to the layer
+  await layerPage.locator('.back').click();
+  await expect(layerPage).toHaveCount(0);
+  await expect(page.locator('.layer-said')).toHaveText('1 hidden here · from 5 Oct 2026');
 });
 
 test('an area\'s name becomes a label of the plate to move by hand, the layer keeping its own', async ({ page }) => {

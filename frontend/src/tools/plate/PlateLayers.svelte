@@ -8,15 +8,15 @@
    * picture of one day can draw its dated layers as they stood that day instead, so a
    * picture of the past never shows what came after it.
    *
-   * A tick draws a layer or takes it off, as the inspector's own list does. The rest of
-   * a layer's look (its role, groups, days, colours, hidden features) stays in the
-   * inspector, which **Settings** opens on that map. **Open in the Map** edits a layer
-   * the analyst draws, the plate waiting for Back.
+   * A tick draws a layer or takes it off, as the inspector's own list does. **›** opens
+   * a drawn layer's own page for that map, in the inspector's place: its role, colours,
+   * groups, days and hidden features there. **Settings** opens the map's inspector.
+   * **Open in the Map** edits a layer the analyst draws, the plate waiting for Back.
    */
   import Icon from '../../components/Icon.svelte';
   import { isTracked } from '../../lib/map/layerHistory.js';
   import { drawnOn } from '../../lib/plate/toLayer.js';
-  import { groundSaid, imageryDay, layeredMaps, withLayer } from '../../lib/plate/source.js';
+  import { groundSaid, imageryDay, layeredMaps, mapName, withLayer } from '../../lib/plate/source.js';
 
   let {
     spec,
@@ -29,6 +29,8 @@
     template = false,
     /** `(map)`: the map picked, its settings opened in the inspector. */
     onsettings = null,
+    /** `(map, row)`: a layer the map draws, on a page of its own for that map. */
+    onlayer = null,
     /** `(map, row)`: the layer opened for editing in the Map, where this map looks. */
     onopen = null,
     /** `(map)`: a new layer of the case, drawn on this map and opened in the Map. */
@@ -39,11 +41,7 @@
 
   const maps = $derived(layeredMaps(spec));
 
-  function name(map, index) {
-    if (map.name) return map.name;
-    if (map.of) return 'Detail map';
-    return index ? `Map ${index + 1}` : 'Map';
-  }
+  const name = (map) => mapName(spec, map);
   /** The map's layers first, in the order it draws them, then the case's others. */
   function listed(map) {
     const own = (map.layers ?? []).map((entry) => rows.find((row) => row.name === entry.name)).filter(Boolean);
@@ -57,15 +55,15 @@
   {#if !maps.length}
     <p class="note">No map on the page yet. Add › Map puts one.</p>
   {/if}
-  {#each maps as map, index (map.id)}
+  {#each maps as map (map.id)}
     {@const ground = groundSaid(map, { grounds, releases, years })}
     {@const drawn = drawnOn(spec, map.id).length}
     <section class="map">
       <div class="map-head">
         <Icon name="satellite" size={12} />
-        <h5>{name(map, index)}</h5>
+        <h5>{name(map)}</h5>
         {#if onsettings}
-          <button type="button" class="mini" aria-label={`Settings of ${name(map, index)}`} title="Its ground, layers and their look, in the inspector"
+          <button type="button" class="mini" aria-label={`Settings of ${name(map)}`} title="Its ground and its layers, in the inspector"
             onclick={() => onsettings(map)}><Icon name="settings" size={12} /></button>
         {/if}
       </div>
@@ -82,7 +80,7 @@
       {:else if !rows.length}
         <p class="note">The case has no map layers yet. Make one in the Map, in My layers, or here.</p>
       {:else}
-        <ul class="layers" aria-label={`Layers ${name(map, index)} draws`}>
+        <ul class="layers" aria-label={`Layers ${name(map)} draws`}>
           {#each listed(map) as row (row.name)}
             <li>
               <label title={draws(map, row) ? 'Drawn on this map. Untick to take it off' : 'Tick to draw it on this map'}>
@@ -92,6 +90,10 @@
               {#if isTracked(row)}
                 <span class="tag" title="Followed over time: the plate draws it as it stood on its day">
                   <Icon name="clock" size={10} />dated</span>
+              {/if}
+              {#if onlayer && draws(map, row)}
+                <button type="button" class="mini" aria-label={`${row.title} on ${name(map)}`} title="Its look, what shows of it and its names, on this map"
+                  onclick={() => onlayer(map, row)}><Icon name="chevronRight" size={12} /></button>
               {/if}
               {#if onopen && row.editable}
                 <button type="button" class="mini" aria-label={`Open ${row.title} in the Map`} title="Edit it in the Map, where this map looks. Back comes back here"
