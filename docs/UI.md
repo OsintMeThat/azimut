@@ -7753,10 +7753,11 @@ title, *All articles* on the right), and a map page carries a small link inside 
 instead. The commit then rebuilds, only where Azimut made them, `articles.json`, `feed.xml` and
 `sitemap.xml`, fills the lists between `<!-- azimut:articles -->` markers in the analyst's own
 pages (`section="…"` for one category, `layout="map"` for the maps, `limit="N"`), and, when the
-root holds no home page or holds Azimut's, writes a default one with tabs by category. A map page
-an article links to is listed under that article, not on its own line, and the first such map is
-also a **Map** badge in the corner of the article's cover, so a list that hides links still leads
-to it. Once a listed article has a place, that home shows a world map under its header (`engine/siteatlas.py`):
+root holds no home page or holds Azimut's, writes a default one with tabs by category, which come
+with its first listed article. A map page an article links to is listed under that article, not on
+its own line, and the first such map is also a **Map** badge in the corner of the article's cover, so
+a list that hides links still leads to it. Once a listed article has a place, that home shows a world
+map under its header (`engine/siteatlas.py`):
 Natural Earth's land at 1:110 million in the Equal Earth projection, one 33 KB file the home carries
 beside itself (`azimut-site/atlas.svg`, written once and only once a map shows; made by
 `scripts/make_site_atlas.py` from the outline the map plate ships), framed to the box of the pins with
@@ -9001,7 +9002,7 @@ failure included (`components/BusyLabel.svelte`, the one spinner of the hub and 
 
 **The read.** **Read the site** (`POST /api/publishing/github/site/read`), on Articles and in Hosting's
 Limits, reads the branch's tree and cards and writes nothing: its address, whether the home page is
-Azimut's or the analyst's, whether the articles carry the site's own bar (`bar`), every card with its category, kind, date, picture and weight, the
+Azimut's or the analyst's, whether the articles carry the site's own bar (`bar`) and footer (`footer`), every card with its category, kind, date, picture and weight, the
 categories, the pages that carry Azimut's markers, the legal and privacy pages, the last change and the
 size of the site and its repository. It never runs on mount. The answer is kept for the session
 (`lib/siteRead.svelte.js`), so the hero, the Overview's checklist, Identity's preview, Hosting's bars,
@@ -9035,7 +9036,8 @@ is refused said under it); without one the site uses the Publishing logo, and **
 (`DELETE /api/settings/site-logo`) gives it back, or **Remove the logo** when there is no Publishing logo to
 go back to. The picture shown is the one the pages carry, read from `GET /api/settings/site-logo.png`. When the read found a home page of the analyst's own, a line says Azimut
 fills its lists and leaves its header alone. When it found the site's own bar in use, **Article bar** shows its
-place, hatched, as *azimut-bar.html* and *Your own bar, on every article*, in place of Azimut's. The settings backup carries `site-logo.png`.
+place, hatched, as *azimut-bar.html* and *Your own bar, on every article*, in place of Azimut's; the site's own
+footer shows the same way under the article, as *azimut-footer.html* and *Your own footer, on every article*. The settings backup carries `site-logo.png`.
 
 **Hosting.** *Where the site lives*: the **GitHub Pages** card below, **The address** (GitHub's, or the
 analyst's own domain), how to point a domain of one's own at Pages, and **Limits**. Two bars say how much of
@@ -9142,18 +9144,18 @@ token. The numbers are kept for the session, never on disk, and dropped when the
 tag typed by hand changes.
 
 **Upkeep.** *Keep it in shape*. **Update the site** is one press that rebuilds the home, list, feed and sitemap
-from the articles on GitHub, and gives each article the bar the site asks for (below), in one commit, with no
+from the articles on GitHub, and gives each article the bar and footer the site asks for (below), in one commit, with no
 note published (`POST /api/publishing/github/site`), also
 in the hero: the press reads *Updating…*, then *The site is up to date.* or how many files were written and when, with
 what the server says to mind, or the last change the read found. It is disabled until GitHub is set up, saying
 so on hover, and a missing repository or a Pages that is off shows the press that makes it. **Who writes what**
 says which files are Azimut's and which stay the analyst's, with the pages the read found marked and
-`azimut-bar.html`, *Copied into each article's bar.* **Usual
+`azimut-bar.html`, *Copied into each article's bar.*, and `azimut-footer.html`, *Copied to the end of each article.* **Usual
 chores** gives the five (take an article down, move it to another category on its line in Articles, rename the
 site or change its logo, fix a typo on GitHub, test an article before it shows).
 
 **Make it yours.** Five cards, the ways to change what Azimut makes: write one's own `index.html` and put the
-`<!-- azimut:articles -->` markers where the list goes; **Your own bar**, a header of one's own; the same markers
+`<!-- azimut:articles -->` markers where the list goes; **Your own bar and footer**, a header and a footer of one's own; the same markers
 with `section="…"` for a page per category; a domain of one's own, with GitHub's guide; and `articles.json` for
 one's own scripts. The words are the engine's (`engine/site.py`), which the folder's HOW-TO-PUBLISH.md carries
 too, and a test holds the two to the same text.
@@ -9173,6 +9175,16 @@ changes the bar of every article Azimut published whose bar differs, between the
 commit (1,000 files, 200 MB; past that it says to press again), and `articles.json` keeps which bar they all
 carry (`bar`), so the next press reads no page. A bar changed this way is no edit: the warning that a folder
 was changed on GitHub, and an edition's Check, look past it.
+
+**Your own footer.** `azimut-footer.html` beside it holds the site's footer, read, cleaned and capped as the bar
+is, in its own `<azimut-footer>`. Every article page, Article or Story, carries it right after Azimut's own
+footer (the edition, its day and *Made with Azimut*), between `<!-- azimut:footer -->` and
+`<!-- /azimut:footer -->`; a map page never does. With no file a page holds neither markers nor footer, so a site
+without one sees no byte of its pages change. Update the site puts the markers in after Azimut's footer when a
+footer first comes, on pages published before it too, changes what is between them after, and takes them out
+with the footer. Past 64 KB, or when it does not read, the articles go without it and the publish or the update
+says why. `articles.json` keeps its id as `footer` beside `bar` (no key for none, as a record from before footers
+reads), so the next press reads no page, and a footer changed this way is no edit either.
 
 **WordPress.** A panel of Settings › Website, apart from the GitHub site, connects the site a note is sent
 to: **Site address** (https, or http on this computer for a test site; a WordPress.com

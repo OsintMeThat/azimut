@@ -51,11 +51,12 @@ Azimut owns it. Reading the site is `GET git/trees/…?recursive=1` for the whol
 `GET git/blobs/…` (raw) for each card and each page to fill, bounded in number and size.
 The commit keeps the sha of the folder's tree, which the note's record holds so that a
 later publish can say the folder was changed on GitHub since; a tree that differs only between
-the bar's markers of its pages, which Update the site changes, or in its card's category, which
-Settings › Website changes, is no change (`changed_since`). A category the site gave the article
+the bar's or the footer's markers of its pages (the footer's markers themselves included), which
+Update the site changes, or in its card's category, which Settings › Website changes, is no change
+(`changed_since`). A category the site gave the article
 since stands over the one the publish still asks for, the one it had then, and the publish says so.
-The folder's page carries the site's own bar when the plan names one (`RootPlan.bar`).
-Rebuilding those root files, and the bar of every article page, without a note is
+The folder's page carries the site's own bar and footer when the plan names them (`RootPlan.bar`,
+`RootPlan.footer`). Rebuilding those root files, and the bar and footer of every article page, without a note is
 `update_site`, which also commits a change of categories (`sitesync.recategorizer`). Reading what the site holds, for Settings › Website, is `read_branch`: the
 same reads as a publish's plan, plus the head commit's date and first line, and nothing written. Taking a folder off the site is `delete_folder`: one commit that removes
 the folder file by file (a tree entry with a null `sha` for each blob the folder's recursive
@@ -580,8 +581,8 @@ def build_state(gh: GitHub, owner: str, repo: str, commit: str) -> Build:
 def page_state(gh: GitHub, owner: str, repo: str, branch: str, path: str, sha256: str, bare: str = "") -> str:
     """Whether the page a publish committed is still the one on the branch:
     `unchanged`, `changed` or `missing`. Reads it back, bounded. ``bare`` is the page's id with
-    nothing between its bar's markers (`site.without_bar`): a page whose bar alone Update the site
-    changed since is unchanged."""
+    nothing between its bar's markers and none of the site's footer (`site.bare`): a page whose bar
+    or footer alone Update the site changed since is unchanged."""
     try:
         answer = gh.call("GET", _repo_path(owner, repo, f"/contents/{quote(path)}"), query={"ref": branch},
                          accept="application/vnd.github.raw+json", doing="read the page", cap=MAX_PAGE)
@@ -589,7 +590,7 @@ def page_state(gh: GitHub, owner: str, repo: str, branch: str, path: str, sha256
         return "missing"
     if hashlib.sha256(answer.body).hexdigest() == sha256:
         return "unchanged"
-    same = bool(bare) and hashlib.sha256(site_engine.without_bar(answer.body)).hexdigest() == bare
+    same = bool(bare) and hashlib.sha256(site_engine.bare(answer.body)).hexdigest() == bare
     return "unchanged" if same else "changed"
 
 
@@ -696,6 +697,9 @@ class RootPlan:
     #: What the folder's article page carries between its bar's markers in place of the bar it was
     #: built with: the site's own (`site.own_bar`); None keeps Azimut's.
     bar: str | None = None
+    #: The site's own footer (`site.own_footer`), which the folder's article page carries after
+    #: Azimut's between its footer's markers; None for none.
+    footer: str | None = None
 
 
 #: Plans the site's root from the id of its tree ("" when it has none yet), the name of the
@@ -723,7 +727,7 @@ class Published:
     warnings: list[str] = field(default_factory=list)
     categories: list[str] | None = None
     #: The SHA-256 of the folder's page as committed, and of it with nothing between its bar's
-    #: markers (`site.without_bar`), "" for a folder with no page.
+    #: markers and none of the site's footer (`site.bare`), "" for a folder with no page.
     page: str = ""
     bare: str = ""
     #: The category the folder's card carries as committed, None for a folder with no card.
@@ -857,8 +861,9 @@ def publish(gh: GitHub, owner: str, repo: str, branch: str, files: Mapping[str, 
     With a ``card``, the folder carries it as `article.json`, dated as the card already in the
     folder is when there is one (the first publication's day stands). With a ``plan`` the same
     commit writes what it names at the site's root (`RootPlan`), and the folder's page takes the
-    site's own bar when the plan names one. ``expected_tree`` is the id of the folder's tree as the
-    last publish left it: the result says whether it is another now, beyond the bar of its pages.
+    site's own bar and footer when the plan names them. ``expected_tree`` is the id of the folder's
+    tree as the last publish left it: the result says whether it is another now, beyond the bar and
+    footer of its pages.
     """
     _bounded(files)
     _plain(folder)
@@ -903,9 +908,13 @@ def publish(gh: GitHub, owner: str, repo: str, branch: str, files: Mapping[str, 
         files[site_engine.CARD] = card.as_json()
     root = plan(opened.level, name, card) if plan is not None else RootPlan()
     page = files.get(notes_web.INDEX)
-    if root.bar is not None and page is not None:
-        # the site's own bar, in place of Azimut's the page was built with; a map page has none to swap
-        page = site_engine.with_bar(page, root.bar) or page
+    if page is not None and (root.bar is not None or root.footer):
+        # the site's own bar, in place of Azimut's the page was built with, and its own footer after
+        # Azimut's; a map page has no bar's markers, so neither
+        if root.bar is not None:
+            page = site_engine.with_bar(page, root.bar) or page
+        if root.footer:
+            page = site_engine.with_footer(page, root.footer) or page
         files[notes_web.INDEX] = page
         _bounded(files)
     have = set(old.values())
@@ -926,7 +935,7 @@ def publish(gh: GitHub, owner: str, repo: str, branch: str, files: Mapping[str, 
                      files=sorted(files), tree=folder_tree, edited=edited, root=sorted(root.files),
                      warnings=[*said, *root.warnings], categories=root.categories,
                      page=hashlib.sha256(page).hexdigest() if page is not None else "",
-                     bare=hashlib.sha256(site_engine.without_bar(page)).hexdigest() if page is not None else "",
+                     bare=hashlib.sha256(site_engine.bare(page)).hexdigest() if page is not None else "",
                      category=card.category if card is not None else None)
 
 
@@ -940,7 +949,7 @@ def read_site(gh: GitHub, owner: str, repo: str, branch: str, root: str, plan: P
     return plan(opened.level, "", None)
 
 
-#: The most pages of a folder looked into to tell a change of bar from an edit.
+#: The most pages of a folder looked into to tell a change of bar or footer from an edit.
 MAX_BAR_PAGES = 4
 
 
@@ -963,8 +972,8 @@ def _listing(gh: GitHub, owner: str, repo: str, tree: str) -> dict[str, str] | N
 def _upkeep_only(gh: GitHub, owner: str, repo: str, then: Mapping[str, str], now: Mapping[str, str]) -> bool:
     """Whether a folder's files ``now`` differ from what they were (``then``) only in what Settings ›
     Website changes on its presses, which is not an edit: what is between the bar's markers of its pages
-    (Update the site), and the category of its card (a change of categories). Reads each file that
-    differs, both sides."""
+    and the site's footer with its markers (Update the site), and the category of its card (a change of
+    categories). Reads each file that differs, both sides."""
     if set(then) != set(now):
         return False
     changed = sorted(path for path, sha in now.items() if then[path] != sha)
@@ -979,7 +988,7 @@ def _upkeep_only(gh: GitHub, owner: str, repo: str, then: Mapping[str, str], now
     for path in pages:
         old = read_blob(gh, owner, repo, then[path], MAX_PAGE)
         new = read_blob(gh, owner, repo, now[path], MAX_PAGE)
-        if old is None or new is None or site_engine.without_bar(old) != site_engine.without_bar(new):
+        if old is None or new is None or site_engine.bare(old) != site_engine.bare(new):
             return False
     return True
 
@@ -1006,8 +1015,8 @@ def _category_since(gh: GitHub, owner: str, repo: str, then: Mapping[str, str],
 
 def changed_since(gh: GitHub, owner: str, repo: str, before: str, now: str) -> bool:
     """Whether a folder was changed on GitHub since a publish left it as the tree ``before``, ``now``
-    being its tree on the branch ("" for none): another tree, unless only the bar of its pages or the
-    category of its card moved."""
+    being its tree on the branch ("" for none): another tree, unless only the bar or footer of its pages
+    or the category of its card moved."""
     if not before or not now or now == before:
         return False
     listed = _listing(gh, owner, repo, now)

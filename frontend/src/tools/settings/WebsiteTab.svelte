@@ -183,10 +183,11 @@
   /* The hub lays itself out by its own width, not the window's: the case sidebar takes a third of it or none. */
   .hub { container: hub / inline-size; padding: 14px 0 40px; }
 
-  /* every tab in sight: on a narrow hub the bar takes a second line rather than hide some */
-  .tabs { position: sticky; top: 0; z-index: 5; display: flex; flex-wrap: wrap; align-items: flex-end; gap: 0 2px; margin: 18px -18px 0; padding: 0 18px;
+  /* every tab in sight: the nine fit one line from a hub of about 670px (1280 wide, the case sidebar open),
+     and a narrower hub takes a second line rather than hide some */
+  .tabs { position: sticky; top: 0; z-index: 5; display: flex; flex-wrap: wrap; align-items: flex-end; gap: 0; margin: 18px -18px 0; padding: 0 18px;
     background: var(--bg-0); border-bottom: 1px solid var(--border); }
-  .tab { flex: none; display: inline-flex; align-items: center; gap: 7px; margin-bottom: -1px; padding: 10px 12px 9px; border-bottom: 2px solid transparent;
+  .tab { flex: none; display: inline-flex; align-items: center; gap: 6px; margin-bottom: -1px; padding: 10px 7px 9px; border-bottom: 2px solid transparent;
     color: var(--text-2); font-size: var(--fs-sm); white-space: nowrap; transition: color 0.12s var(--ease), border-color 0.12s var(--ease); }
   .tab:hover { color: var(--text-1); }
   .tab.on { color: var(--text-1); border-bottom-color: var(--accent); }
@@ -194,7 +195,7 @@
   .count { min-width: 18px; padding: 0 5px; border: 1px solid var(--border-strong); border-radius: 99px; color: var(--text-3); font-size: 0.66rem;
     line-height: 15px; text-align: center; font-variant-numeric: tabular-nums; }
   .tab.on .count { color: var(--text-2); }
-  .sep { flex: none; align-self: center; width: 1px; height: 18px; margin: 0 8px; background: var(--border-strong); }
+  .sep { flex: none; align-self: center; width: 1px; height: 18px; margin: 0 6px; background: var(--border-strong); }
   .narrow { max-width: 640px; }
 
   /* -- the hub's vocabulary, shared by its panels ------------------------------------------------ */

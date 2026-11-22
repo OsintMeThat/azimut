@@ -4,10 +4,12 @@
    * them: the bar over an article, the home page and the feed, in the site's own paper and ink
    * (`engine/site.py`, `engine/sitehome.py`). It follows what is typed. With the site read, the lists
    * show its latest articles, its categories and its pages; before, a sample stands in. A read that
-   * finds the site's own bar in use (`azimut-bar.html`) shows it in place of Azimut's. An article by
+   * finds the site's own bar in use (`azimut-bar.html`) shows it in place of Azimut's, and its own footer
+   * (`azimut-footer.html`) at the article's end. An article by
    * someone else names them after its day, their picture first, as the site's lists do (`site._by`).
    */
-  import { OWN_BAR_FILE, OWN_BAR_IN_USE, PREVIEWS, PREVIEW_SAMPLE as SAMPLE, WEBSITE_HELP as HELP } from '../../../lib/websiteSetup.js';
+  import { OWN_BAR_FILE, OWN_BAR_IN_USE, OWN_FOOTER_FILE, OWN_FOOTER_IN_USE, PREVIEWS, PREVIEW_SAMPLE as SAMPLE, WEBSITE_HELP as HELP }
+    from '../../../lib/websiteSetup.js';
 
   let { name, tagline = '', logoUrl = '', credit = true, version = '', read = null } = $props();
 
@@ -47,6 +49,9 @@
         <p class="meta">{rows[0].day}</p>
         <div class="ln" style:width="94%"></div><div class="ln" style:width="88%"></div><div class="ln" style:width="91%"></div><div class="ln" style:width="62%"></div>
       </div>
+      {#if read?.footer === 'yours'}
+        <div class="bar own own-foot" data-preview="own-footer"><span class="own-file">{OWN_FOOTER_FILE}</span><span class="back">{OWN_FOOTER_IN_USE}</span></div>
+      {/if}
     {:else if view === 'home'}
       <div class="home">
         <div class="hd">
@@ -99,6 +104,8 @@
   .back { margin-left: auto; flex: none; color: var(--muted); }
   /* the site's own bar, which Azimut does not draw: its place, marked */
   .bar.own { border-bottom-style: dashed; background: repeating-linear-gradient(135deg, #fff 0 6px, var(--tint) 6px 12px); }
+  /* and its own footer, at the article's end */
+  .bar.own-foot { border-bottom: 0; border-top: 1px dashed var(--rule); }
   .own-file { overflow: hidden; color: var(--ink); font: 500 0.72rem/1 ui-monospace, 'SF Mono', Menlo, Consolas, monospace; white-space: nowrap;
     text-overflow: ellipsis; }
   .art { padding: 18px 20px 20px; }

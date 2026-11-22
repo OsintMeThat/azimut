@@ -517,6 +517,21 @@ describe('Identity', () => {
     expect(preview().querySelector('[data-preview="own-bar"]')).toBeNull();
     expect(preview().textContent).toContain('All articles');
   });
+
+  it('shows the site\'s own footer at the article\'s end once the read finds it in use, and nothing before', async () => {
+    await show();
+    expect(preview().querySelector('[data-preview="own-footer"]')).toBeNull();
+    await readSite({ ...READ, footer: 'yours' });
+    await open('Identity');
+    const own = preview().querySelector('[data-preview="own-footer"]');
+    expect(own.textContent).toBe('azimut-footer.htmlYour own footer, on every article');
+    // after the article, under Azimut's bar, which stays
+    expect(preview().querySelector('.art').compareDocumentPosition(own) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(preview().querySelector('.bar [data-preview="name"]')).not.toBeNull();
+    await readSite({ ...READ, footer: 'none' });
+    await open('Identity');
+    expect(preview().querySelector('[data-preview="own-footer"]')).toBeNull();
+  });
 });
 
 describe('the site logo', () => {
@@ -980,8 +995,9 @@ describe('Upkeep: who writes what, and the chores', () => {
     expect([...panel('upkeep').querySelectorAll('.owners th')].map((node) => node.textContent)).toEqual(['File', 'Made by', 'What Azimut does']);
     expect(rows().map(([file, who]) => [file, who])).toEqual([
       ['each article\'s folder', 'Azimut'], ['articles.jsonfeed.xmlsitemap.xml', 'Azimut'], ['index.html', 'Azimut'], ['azimut-bar.html', 'You'],
-      ['everything else', 'You']]);
+      ['azimut-footer.html', 'You'], ['everything else', 'You']]);
     expect(rows()[3][2]).toBe('Copied into each article\'s bar.');
+    expect(rows()[4][2]).toBe('Copied to the end of each article.');
     expect(panel('upkeep').textContent).toContain('Read the site, in Articles, to see which of your pages Azimut fills.');
   });
 
@@ -991,7 +1007,7 @@ describe('Upkeep: who writes what, and the chores', () => {
     await open('Upkeep');
     expect(rows().map(([file, who]) => [file, who])).toEqual([
       ['each article\'s folder', 'Azimut'], ['articles.jsonfeed.xmlsitemap.xml', 'Azimut'], ['index.html', 'You'],
-      ['investigations/conflict-watch/', 'You'], ['azimut-bar.html', 'You'], ['everything else', 'You']]);
+      ['investigations/conflict-watch/', 'You'], ['azimut-bar.html', 'You'], ['azimut-footer.html', 'You'], ['everything else', 'You']]);
     expect(rows()[2][2]).toBe('Fills the list between its markers, nothing else.');
     expect(panel('upkeep').textContent).not.toContain('to see which of your pages');
   });
@@ -1014,12 +1030,13 @@ describe('Make it yours and WordPress', () => {
     await show();
     const own = panel('yours').querySelector('[data-guide="settings.website-own"]');
     expect([...own.querySelectorAll('h3')].map((node) => node.textContent)).toEqual(
-      ['Your own home page', 'Your own bar', 'A page per category', 'Your own domain', 'Your own scripts']);
+      ['Your own home page', 'Your own bar and footer', 'A page per category', 'Your own domain', 'Your own scripts']);
     expect([...own.querySelectorAll('code')].map((node) => node.textContent)).toContain('<!-- azimut:articles -->');
     expect(own.querySelectorAll('pre')).toHaveLength(4);
-    const bar = own.querySelector('section[aria-label="Your own bar"]');
-    expect(bar.querySelector('p').textContent).toMatch(/^Put your header and its <style> in azimut-bar\.html at the site's root: /);
-    expect([...bar.querySelectorAll('code')].map((node) => node.textContent)).toEqual(['<style>', 'azimut-bar.html', '<svg>', 'width', 'height']);
+    const bar = own.querySelector('section[aria-label="Your own bar and footer"]');
+    expect(bar.querySelector('p').textContent).toMatch(/^Put your header and its <style> in azimut-bar\.html at the site's root, and your footer in azimut-footer\.html\. /);
+    expect([...bar.querySelectorAll('code')].map((node) => node.textContent)).toEqual(
+      ['<style>', 'azimut-bar.html', 'azimut-footer.html', '<svg>', 'width', 'height']);
     expect(bar.querySelector('pre').textContent).toContain('<svg width="24" height="24">');
     expect(own.querySelector('pre').textContent).toContain('<!-- azimut:articles -->');
     const link = own.querySelector('a');
