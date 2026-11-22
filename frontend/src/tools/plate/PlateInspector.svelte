@@ -20,10 +20,10 @@
   import { isTracked, momentLabel } from '../../lib/map/layerHistory.js';
   import { prefs, toast } from '../../lib/state.svelte.js';
   import { FONTS, KIND_LABELS, MAX_MAPS, PAGE, PAPERS, PLATE_OVERLAYS, SIGNATURE, THEMES, TOKENS, TOKEN_SAID, TOO_MANY_MAPS, bornOn, bringTo, dayOf, endOn, labelBox,
-    backOnPaper, mainMap, mapCount, offPaper, pageSize, shownOn, startOn, textMeasurer, transitionsOf, turnable } from '../../lib/plate/page.js';
+    backOnPaper, mainMap, mapCount, offPaper, pageMargin, pageSize, shownOn, startOn, textMeasurer, transitionsOf, turnable } from '../../lib/plate/page.js';
   import { FIRST_SECONDS, captionOf, clipRange, isGif, readTimecode, timecode } from '../../lib/plate/clip.js';
   import { GRATICULE_STEPS } from '../../lib/plate/geo.js';
-  import { align, distribute, fittedHeight, sameSize } from '../../lib/plate/arrange.js';
+  import { align, distribute, filling, fittedHeight, sameSize } from '../../lib/plate/arrange.js';
   import { moveRow } from '../../lib/plate/legend.js';
   import { GROUNDS, PALETTES, groundPalette, readsHeights, topographic } from '../../lib/plate/plainBasemap.js';
   import { CLOUDLESS_ID, cloudlessYear } from '../../lib/plate/cloudless.js';
@@ -591,6 +591,12 @@
       <button type="button" class="btn btn-sm frame" class:on={framing === element.id} disabled={held}
         title={framing === element.id ? 'Stop framing the map' : 'Pan, zoom and turn the map by the hand'} onclick={() => onframe(element)}>
         <Icon name="move" size={12} /> {framing === element.id ? 'Done framing' : 'Frame the map'}</button>
+      <div class="tools wide fill">
+        <button type="button" class="btn btn-xs" disabled={element.locked} title="The whole page, its frame off, as on the Post plate"
+          onclick={() => Object.assign(element, { box: filling(pageSize(spec.page)), border: false })}>To the edges</button>
+        <button type="button" class="btn btn-xs" disabled={element.locked} title="The page inside the margins its guides draw"
+          onclick={() => (element.box = filling(pageSize(spec.page), pageMargin(spec.page)))}>To the margins</button>
+      </div>
       <div class="rows">
         {#if element.of}
           <span class="key">Detail of</span>
@@ -1467,6 +1473,7 @@
   .weight input[type='range'] { flex: 1; }
   .quiet { color: var(--text-3); }
   .frame { width: 100%; justify-content: center; margin-bottom: 4px; }
+  .fill { margin: 0 0 6px; }
   .frame.on { border-color: var(--accent); color: var(--accent); }
   .keep { margin: 2px 0 0; font-weight: 600; color: var(--text-1); }
   .checks .sub { padding-left: 20px; }

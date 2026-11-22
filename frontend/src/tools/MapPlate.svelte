@@ -103,8 +103,8 @@
   import NewPlateDialog from './plate/NewPlateDialog.svelte';
   import TemplateSketch from './plate/TemplateSketch.svelte';
   import { inspectorWidth, layout, listWidth, saveLayout, toggleFold, togglePanel } from '../lib/plate/layout.svelte.js';
-  import { groundSaid, imagerySaid } from '../lib/plate/source.js';
-  import { comparisonOnPlate } from '../lib/plate/fromCompare.js';
+  import { imagerySaid } from '../lib/plate/source.js';
+  import { comparisonOnPlate, lostSaid, pairOnComparison, sideDay } from '../lib/plate/fromCompare.js';
   import PlateLayers from './plate/PlateLayers.svelte';
   import PlateFromCase from './plate/PlateFromCase.svelte';
   import { plateTabs } from '../lib/plate/oneTab.js';
@@ -271,24 +271,49 @@
 
   /**
    * A new plate as the questions answered it (`NewPlateDialog`): the house layout, a
-   * ready plate laid out for the paper picked or one of the analyst's templates set on
-   * it, over the ground the Map looks at or round the layers picked, in its own look or
-   * the one picked.
+   * ready plate laid out for the paper picked (Before and after set on a comparison of
+   * the case when one was picked), a blank page, or one of the analyst's templates set
+   * on it, over the ground the Map looks at or round the layers picked, in its own look
+   * or the one picked.
    */
-  function makePlate({ from, where, layers, format, look }) {
+  async function makePlate({ from, where, layers, format, look, comparison = '' }) {
     creating = false;
     const view = (where === 'layers' && framed(rows.filter((row) => layers.includes(row.name)).map((row) => row.bbox).filter(Boolean))) || mapGround(layers);
     const page = format ? formatPage(format) : null;
     let spec;
     if (from.kind === 'ready') spec = fromTemplate(readyTemplate(from.id, page), { view, layers });
+    else if (from.kind === 'empty') spec = { ...houseLayout(page ?? {}), elements: [] };
     else if (from.kind === 'mine') {
       const template = templates.find((entry) => entry.id === from.id);
       if (!template) { toast('That template is no longer kept', 'warn'); return; }
       spec = fromTemplate(template.data, { view, layers });
       if (page) spec = onPaper(spec, page);
     } else spec = houseLayout({ ...(page ?? {}), view, layers });
+    if (comparison) {
+      const before = { opened, caseId };
+      spec = await onComparison(spec, comparison);
+      // another plate or case opened while the comparison was read: this one is not wanted now
+      if (opened !== before.opened || caseId !== before.caseId) return;
+    }
     if (look) spec = inLook(spec, look);
     startPlate(spec);
+  }
+
+  /** A new Before and after with its two maps on a comparison's sides and days; as laid out, and said, when the comparison cannot be read. */
+  async function onComparison(spec, name) {
+    let session;
+    try { session = await api.get(`/api/cases/${caseId}/compare/sessions/${encodeURIComponent(name)}`); }
+    catch (error) { toast(`${error?.message ?? 'The comparison could not be read'}: the plate starts on its own grounds`, 'warn', 6000); return spec; }
+    if ([session?.spec?.a, session?.spec?.b].some((side) => side?.provider === WAYBACK_ID)) await readReleases();
+    const made = pairOnComparison(spec.elements, session, { offered: grounds.map(([id]) => id), dayOf: (map) => sideDay(map, { grounds, releases, years }) });
+    sayLost(made.lost);
+    return { ...spec, elements: made.elements };
+  }
+
+  /** Says which sides of a comparison a plate laid on World Imagery, and why. */
+  function sayLost(lost) {
+    const said = lostSaid(lost, providers);
+    if (said) toast(said, 'warn', 8000);
   }
 
   function startPlate(spec) {
@@ -969,7 +994,11 @@
     let element;
     switch (kind) {
       case 'map': element = { id, kind: 'map', box: box(width * 0.3, height * 0.3, width * 0.4, height * 0.4), view: { ...(main?.view ?? mapGround()) },
-        basemap: main?.basemap ?? 'plain', overlays: [...(main?.overlays ?? ['relief'])], layers: JSON.parse(JSON.stringify(main?.layers ?? [])), grid: 'none' }; break;
+        basemap: main?.basemap ?? 'plain', overlays: [...(main?.overlays ?? ['relief'])], grid: 'none',
+        // the page's first map draws what a new plate would (a template keeps none), on the ground of the page's look
+        layers: main ? JSON.parse(JSON.stringify(main.layers ?? [])) : plate.template ? [] : mapLayers().map((name) => ({ name, hidden: [], stroke: 1, icons: 1 })) };
+        if (!main && THEMES[spec.theme.preset]) element = inLook({ theme: spec.theme, elements: [element] }, spec.theme.preset).elements[0];
+        break;
       case 'detail': element = { id, kind: 'map', of, box: box(mx + mw - 64, my + 4, 60, 45), view: { ...main.view, zoom: Math.min(20, main.view.zoom + 2.5) },
         basemap: main.basemap, overlays: [...(main.overlays ?? [])], layers: JSON.parse(JSON.stringify(main.layers ?? [])), grid: 'none', name: 'Detail' }; break;
       case 'inset': element = { id, kind: 'inset', of, box: box(mx + mw - 52, my + mh - 42, 48, 38), border: true, zoom: null }; break;
@@ -1030,16 +1059,11 @@
     catch (error) { toast(error?.message ?? 'The comparison could not be read', 'danger'); return; }
     if ([session?.spec?.a, session?.spec?.b].some((side) => side?.provider === WAYBACK_ID)) await readReleases();
     // a pass not picked yet has no day to write: the badge says Before or After
-    const dayOf = (map) => (map.basemap === SENTINEL_ID && !map.acquired ? '' : groundSaid(map, { grounds, releases, years }).when);
     const made = comparisonOnPlate(session, { width, height, offered: grounds.map(([id]) => id), layers: mainMap(spec)?.layers ?? [],
-      theme: spec.theme, newId, group: newId('g'), dayOf });
+      theme: spec.theme, newId, group: newId('g'), dayOf: (map) => sideDay(map, { grounds, releases, years }) });
     put(...made.elements.map(born));
     selection = made.elements.map((element) => element.id);
-    if (made.lost.length) {
-      const named = [...new Set(made.lost)].map((id) => providers.find((entry) => entry.id === id)?.label ?? id);
-      const keyed = made.lost.some((id) => providers.find((entry) => entry.id === id)?.needs_key);
-      toast(`${named.join(' and ')} laid on World Imagery: a plate cannot draw ${named.length === 1 ? 'it' : 'them'}${keyed ? ' until its account is set up in Settings › Imagery' : ''}`, 'warn', 8000);
-    }
+    sayLost(made.lost);
   }
 
   /** The country under `point` lit on map `of`, the rest of the world drawn back, on the plate's day or step `day`. */
@@ -2222,7 +2246,7 @@
           </div>
           <button class="btn btn-primary" onclick={() => (creating = true)}><Icon name="plus" size={15} /> New plate</button>
         </div>
-        <p class="hint">A plate opens where the Map is looking. A ready plate starts at once; New plate first asks for its layers, paper and look.</p>
+        <p class="hint">A plate opens where the Map is looking. A ready plate starts at once; New plate first asks what it shows, then its layers, paper and look.</p>
         <h4>In this case</h4>
         {#if plates.length}
           <div class="tiles">
@@ -2314,7 +2338,7 @@
 {/if}
 
 {#if creating}
-  <NewPlateDialog {templates} {rows} layers={mapLayers()} onmake={makePlate} onclose={() => (creating = false)} />
+  <NewPlateDialog {templates} {rows} layers={mapLayers()} caseId={caseId ?? ''} onmake={makePlate} onclose={() => (creating = false)} />
 {/if}
 
 {#if templateMenu}

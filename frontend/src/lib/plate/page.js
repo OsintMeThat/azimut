@@ -312,10 +312,16 @@ export function stepOf(list, id, by) {
 /** The ids of the house layout, which a change of paper lays out again rather than stretches. */
 export const HOUSE_IDS = ['map', 'title', 'subtitle', 'legend', 'inset', 'cartouche', 'scale', 'north', 'credits'];
 
+/** The margins of a page, in millimetres: those the editor's guides draw and the house layout keeps. */
+export const pageMargin = (page) => {
+  const { width, height } = pageSize(page);
+  return Math.max(6, Math.round(Math.min(width, height) * 0.045));
+};
+
 /** The boxes of the house layout on a page: a column beside the map when landscape, a band under it when upright. */
 function houseBoxes(page) {
   const { width, height } = pageSize(page);
-  const margin = Math.max(6, Math.round(Math.min(width, height) * 0.045));
+  const margin = pageMargin(page);
   const band = 16;
   const mapTop = margin + band;
   if (height > width * 1.05) {

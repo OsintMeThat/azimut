@@ -7,12 +7,16 @@
  * A plate draws fewer grounds than Compare reads. A side on a ground a plate cannot
  * draw (radar, fires, night lights, a source that needs a key not set up) is laid on
  * Esri World Imagery instead, and `lost` says so, side by side, for the toast.
+ *
+ * New plate sets the ready plate Before and after on a comparison the same way: its
+ * two maps take the sides' grounds and days, and its two badges the days.
  */
 import { WAYBACK_ID } from '../wayback.js';
 import { fromMercator, turnedBox } from '../map/groundFrame.js';
 import { styled } from './design.js';
 import { PX_PER_MM } from './page.js';
 import { SENTINEL_ID } from './sentinelPass.js';
+import { groundSaid } from './source.js';
 
 /** The ground a side falls back to when a plate cannot draw its own. */
 export const FALLBACK_GROUND = 'esri-world-imagery';
@@ -63,6 +67,56 @@ export function sideGround(side, offered = []) {
       maxcc: Number.isFinite(side.sentinel?.maxcc) ? side.sentinel.maxcc : null });
   }
   return { ground, lost: '' };
+}
+
+/**
+ * The day a side's map shows, as its badge writes it: a Wayback release's, a
+ * Sentinel-2 pass's, a cloudless year; '' for a ground with no day of its own or a
+ * pass not picked yet. `read` holds the plate's `grounds`, `releases` and `years`.
+ */
+export function sideDay(map, read = {}) {
+  return map?.basemap === SENTINEL_ID && !map.acquired ? '' : groundSaid(map, read).when;
+}
+
+/**
+ * What a plate says of the sides it laid on World Imagery, named as `providers` lists
+ * them: '' when it drew every side on its own ground.
+ */
+export function lostSaid(lost = [], providers = []) {
+  if (!lost.length) return '';
+  const named = [...new Set(lost)].map((id) => providers.find((entry) => entry.id === id)?.label ?? id);
+  const keyed = lost.some((id) => providers.find((entry) => entry.id === id)?.needs_key);
+  return `${named.join(' and ')} laid on World Imagery: a plate cannot draw ${named.length === 1 ? 'it' : 'them'}${keyed ? ' until its account is set up in Settings › Imagery' : ''}`;
+}
+
+/** The fields a map's ground is held in, beside `basemap`: let go when it takes another ground. */
+const GROUND_FIELDS = ['basemap', 'release', 'year', 'acquired', 'product', 'maxcc'];
+
+/**
+ * A plate's elements with its two maps `maps` (by id, before then after) set on a
+ * comparison's two sides, each on its side's ground, framed where the comparison
+ * looks, and its two badges `badges` writing each side's day (`dayOf(map)`), their own
+ * words kept where a side has none. `lost` as `comparisonOnPlate` says it.
+ */
+export function pairOnComparison(elements, session, { maps = ['before', 'after'], badges = ['before-badge', 'after-badge'], offered = [], dayOf = () => '' } = {}) {
+  const spec = session?.spec ?? {};
+  const lost = [];
+  const sides = elements.map((element) => {
+    const index = element.kind === 'map' ? maps.indexOf(element.id) : -1;
+    if (index < 0) return element;
+    const { ground, lost: missing } = sideGround(spec[index ? 'b' : 'a'], offered);
+    if (missing) lost.push(missing);
+    const kept = Object.fromEntries(Object.entries(element).filter(([key]) => !GROUND_FIELDS.includes(key)));
+    return { ...kept, ...ground, view: compareView(spec, element.box) };
+  });
+  const days = maps.map((id) => {
+    const map = sides.find((element) => element.kind === 'map' && element.id === id);
+    return map ? dayOf(map) : '';
+  });
+  return { elements: sides.map((element) => {
+    const index = badges.indexOf(element.id);
+    return index >= 0 && days[index] ? { ...element, text: days[index] } : element;
+  }), lost };
 }
 
 /**

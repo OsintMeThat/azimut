@@ -1199,6 +1199,88 @@ test('a ready plate opens at once from the list, and New plate lays one out for 
   expect(spec.elements.find((element) => element.kind === 'image').text).toBe('The footage, a still');
 });
 
+test('New plate keeps the layouts that answer what the plate shows, and a blank page says how to start until a map is put on it', async ({ page }) => {
+  const store = await plateFixture(page);
+  const front = { name: 'front', title: 'Front', source: { kind: 'editable' }, editable: true, hidden: [], features: 0, categories: [], sha256: 'f1', icons: 0 };
+  await page.route(`**/api/cases/${CASE_ID}/map-layers`, (route) => route.fulfill({ json: [front] }));
+  await page.route(`**/api/cases/${CASE_ID}/map-layers/front/data**`, (route) => route.fulfill({ json: { type: 'FeatureCollection', features: [] } }));
+  let indexed = 0;
+  await page.route(`**/api/cases/${CASE_ID}/satellite/index`, (route) => { indexed += 1; return route.fulfill({ json: [] }); });
+  await page.goto('/#plate');
+  await page.getByRole('button', { name: 'New plate', exact: true }).click();
+  const dialog = page.getByRole('dialog', { name: 'New plate' });
+  const read = indexed;
+  // a chip keeps the layouts that answer it, and picks the first when the one picked is not among them
+  await dialog.getByRole('button', { name: 'A geolocation', exact: true }).click();
+  await expect(dialog.locator('.tile .name')).toHaveText(['Geolocation card', 'Line of sight', 'Locator', 'Blank page']);
+  await expect(dialog.locator('.tile[aria-selected="true"] .name')).toHaveText('Geolocation card');
+  // no layer of the case is followed over time yet, and the chip says where that is set
+  await dialog.getByRole('button', { name: 'An evolution over time', exact: true }).click();
+  await expect(dialog.getByText('Needs a dated layer: in the Map, open one of My layers and turn on Track over time in its ⋯ menu.')).toBeVisible();
+  await dialog.locator('.tile', { hasText: 'Blank page' }).click();
+  await expect(dialog.getByText('A blank page has no map yet.', { exact: false })).toBeVisible();
+  await dialog.getByRole('button', { name: 'Feed post, 4:5' }).click();
+  await dialog.locator('.look', { hasText: 'Tactical' }).click();
+  await dialog.getByRole('button', { name: 'Create plate' }).click();
+  await expect.poll(() => store.saves.length).toBeGreaterThan(0);
+  expect(lastSave(store).spec).toMatchObject({ page: { paper: 'social', orientation: 'portrait' }, theme: { preset: 'tactical' }, elements: [] });
+  // the empty page says how to start in its middle, over the page rather than on it, so no export draws it
+  const hint = page.locator('.blank-hint');
+  await expect(hint).toHaveText('An empty page. Press A, or Add, to put a map on it.');
+  await expect(page.locator('.page .blank-hint')).toHaveCount(0);
+  const [said, sheet] = await Promise.all([hint.boundingBox(), page.locator('.page').boundingBox()]);
+  expect(Math.abs(said.x + said.width / 2 - (sheet.x + sheet.width / 2))).toBeLessThan(2);
+  expect(Math.abs(said.y + said.height / 2 - (sheet.y + sheet.height / 2))).toBeLessThan(2);
+  // the comparisons were never read: Before and after was not picked
+  expect(indexed).toBe(read);
+  await page.keyboard.press('a');
+  await page.locator('.float-menu .tile', { hasText: /^Map$/ }).click();
+  await expect(hint).toHaveCount(0);
+  await expect(page.locator('.plate-map')).toHaveCount(1);
+  // the first map draws what a new plate would, on the ground of the page's look
+  await expect.poll(() => (lastSave(store).spec.elements.find((element) => element.kind === 'map') ?? {}).layers?.map((entry) => entry.name)).toEqual(['front']);
+  expect(lastSave(store).spec.elements.find((element) => element.kind === 'map').basemap).toBe('plain-tactical');
+  // and fills the page inside its margins, or to its edges, from its inspector
+  await page.getByRole('button', { name: 'To the margins', exact: true }).click();
+  await expect.poll(() => lastSave(store).spec.elements.find((element) => element.kind === 'map').box).toEqual([10, 10, 196, 250]);
+  await page.getByRole('button', { name: 'To the edges', exact: true }).click();
+  await expect.poll(() => lastSave(store).spec.elements.find((element) => element.kind === 'map')).toMatchObject({ box: [0, 0, 216, 270], border: false });
+});
+
+test('New plate starts Before and after from a comparison of the case, each map on its side\'s ground and day', async ({ page }) => {
+  const store = await plateFixture(page);
+  const ground = (id, label) => ({ id, label, url: `https://tiles.invalid/${id}/{z}/{x}/{y}.png`, attribution: 'Browser fixture', max_zoom: 19, tile_size: 256, imagery: true });
+  await page.route('**/api/satellite/providers', (route) => route.fulfill({ json: [ground('esri-world-imagery', 'Esri World Imagery'), ground('esri-wayback', 'Esri Wayback')] }));
+  await page.route('**/api/satellite/wayback/releases', (route) => route.fulfill({ json: { releases: [{ release: 41, date: '2024-03-12' }] } }));
+  const row = { id: 'c1', key: 'c1', kind: 'comparison', session: 'energodar', title: 'Energodar', imagery_a: '2024-03-12', imagery_b: null, thumbnail: null, kept: [] };
+  let indexed = 0;
+  await page.route(`**/api/cases/${CASE_ID}/satellite/index`, (route) => { indexed += 1; return route.fulfill({ json: [row] }); });
+  await page.route(`**/api/cases/${CASE_ID}/compare/sessions/energodar`, (route) => route.fulfill({ json: { title: 'Energodar', spec: { version: 2,
+    camera: { lat: 47.5, lon: 34.6, zoom: 16, bearing: 0 }, a: { provider: 'esri-wayback', wayback_release: 41 }, b: { provider: 'sentinel1-radar' } } } }));
+  await page.goto('/#plate');
+  await page.getByRole('button', { name: 'New plate', exact: true }).click();
+  const dialog = page.getByRole('dialog', { name: 'New plate' });
+  const read = indexed;
+  const from = dialog.getByRole('combobox', { name: 'From a comparison' });
+  await expect(from).toHaveCount(0);
+  // the one ready plate for a change between two dates is picked, and only then are the comparisons read
+  await dialog.getByRole('button', { name: 'A change between two dates', exact: true }).click();
+  await expect(dialog.locator('.tile[aria-selected="true"] .name')).toHaveText('Before and after');
+  await expect(from).toBeVisible();
+  expect(indexed).toBe(read + 1);
+  await from.selectOption('energodar');
+  await expect(dialog.getByRole('button', { name: 'Where the Map is looking' })).toBeDisabled();
+  await dialog.getByRole('button', { name: 'Create plate' }).click();
+  // a side a plate cannot draw is laid on World Imagery, and the plate says so
+  await expect(page.getByText('laid on World Imagery')).toBeVisible();
+  await expect(page.locator('.plate-map')).toHaveCount(2);
+  await expect.poll(() => (lastSave(store)?.spec.elements ?? []).filter((element) => element.kind === 'map').map((map) => [map.id, map.basemap, map.release ?? null, map.view.lat, map.view.lon]))
+    .toEqual([['before', 'esri-wayback', 41, 47.5, 34.6], ['after', 'esri-world-imagery', null, 47.5, 34.6]]);
+  const spec = lastSave(store).spec;
+  expect(spec.ready).toBe('before-after');
+  expect(['before-badge', 'after-badge'].map((id) => spec.elements.find((element) => element.id === id).text)).toEqual(['12 Mar 2024', 'After']);
+});
+
 /** A plate on the layer `front`, its features `features`, the layer dated `precision`, its spec, time and map `extra`. */
 async function trackedPlate(page, features, extra = {}, precision = 'day') {
   needsWebGL();

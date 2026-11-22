@@ -6652,10 +6652,27 @@ says what it is checking.
 **Map plate**, in Compose, lays a page out round the case's maps, for a report,
 a print or a post. **New plate** opens one screen, each choice answered until
 changed, so **Create plate** works at once: the layout on the left (the house layout,
-one of the ready plates or one of the analyst's templates, each drawn as its page),
-and on the right where the map looks (where the Map is looking, or round the layers
-picked), which of the case's layers it draws, the paper (a report, a screen or post, a
-feed post, a square, a story or a print) and the look, its own or another. **Map plate…** in the
+one of the ready plates, a **Blank page** or one of the analyst's templates, each drawn
+as its page), and on the right where the map looks (where the Map is looking, or round
+the layers picked), which of the case's layers it draws, the paper (a report, a screen
+or post, a feed post, a square, a story or a print) and the look, its own or another.
+A row of chips over the layouts asks what the plate shows: **All** (the default), **A
+situation**, **A change between two dates**, **An evolution over time**, **One event,
+several angles**, **A geolocation** and **A post**. A chip keeps in view the layouts
+that answer it and the Blank page, the analyst's templates waiting under All, and
+picks the first of them when the one picked is not among them. **An evolution over
+time** says, while no layer of the case is followed over time, that one is needed and
+where Track over time is turned on; **One event, several angles** has no ready plate
+of its own yet, so it keeps the Geolocation card and Incidents and says that each angle
+takes a slide from **+ Slide**, its footage from **Add › Video**. Picking **Before and
+after** reads the case's comparisons, never before: when it has some, **From a
+comparison** sets the two maps on one's sides, each on its side's ground and day and
+framed where the comparison looks, each badge saying its day, a side the plate cannot
+draw laid on World Imagery and said, as From the case does (below). A **Blank page**
+takes the paper and the look and nothing else; the empty page says in its middle, on
+the screen only, that A or Add puts a map on it, and the first map put on a page
+without one looks where the Map is looking and draws the layers a new plate would, on
+the ground of the page's look. **Map plate…** in the
 Map's capture menu opens the house layout at once. A new plate looks where the Map is
 looking, with the layers switched on there (the analyst's own layers when none is;
 before the Map has looked anywhere, the ground the case's layers cover, else the
@@ -6773,7 +6790,9 @@ that offers only the places a row can take, and the inspector's arrows step an
 element among the rows listed. A double click names an element, and its row hides
 or locks it.
 Several picked elements are lined up, spaced evenly, given one size, grouped,
-locked or removed together from the inspector.
+locked or removed together from the inspector. A map's inspector sets its box **To the
+edges** of the page, its frame off, as the Post plate lays its map, or **To the
+margins** the page's guides draw.
 
 What stands on the ground (a label's point, an arrow's two ends, a zone's corners, a
 line's points, the rings' centre and reach, the cone's eye and tip, a distance's two

@@ -404,20 +404,34 @@ function briefing(page) {
 }
 
 /**
+ * What a new plate is asked to show, `[id, words]`: New plate's chips, each keeping the
+ * layouts that answer it in view. Read on the screen only, never saved with a plate.
+ */
+export const ASKS = [
+  ['situation', 'A situation'],
+  ['change', 'A change between two dates'],
+  ['evolution', 'An evolution over time'],
+  ['angles', 'One event, several angles'],
+  ['geolocation', 'A geolocation'],
+  ['post', 'A post'],
+];
+
+/**
  * The ready plates, in the order the gallery shows them: the id, the name, what it is
- * for in one line, the paper it opens on unless another is picked, and its recipe.
+ * for in one line, what it answers among `ASKS` (each one opening on the Screen or post
+ * paper answers A post), the paper it opens on unless another is picked, and its recipe.
  */
 export const GALLERY = [
-  { id: 'situation', name: 'Situation map', note: 'The front line or the areas held, on a quiet ground, its key beside it.', format: 'report', make: situation },
-  { id: 'geolocation', name: 'Geolocation card', note: 'The footage beside the place it was filmed, the matches numbered.', format: 'slide', make: geolocation },
-  { id: 'before-after', name: 'Before and after', note: 'The same ground on two dates, side by side, what changed counted.', format: 'slide', make: beforeAfter },
-  { id: 'incidents', name: 'Incidents', note: 'Every reported event placed and dated, its chronology beside the map.', format: 'report', make: incidents },
-  { id: 'track', name: 'Route or track', note: 'A convoy, a vessel or a flight, its stops numbered and listed.', format: 'report', make: track },
-  { id: 'sightline', name: 'Line of sight', note: 'Where the camera stood and what it could see, on the relief.', format: 'report', make: sightline },
-  { id: 'site', name: 'Site profile', note: 'A facility from above, what stands there numbered and named.', format: 'report', make: site },
-  { id: 'locator', name: 'Locator', note: 'The place, a closer look at it, and where it lies.', format: 'report', make: locator },
-  { id: 'briefing', name: 'Briefing', note: 'A map with its key points and a figure written beside it.', format: 'report', make: briefing },
-  { id: 'post', name: 'Post', note: 'The map to the edges, its title on a card over it, signed.', format: 'slide', make: post },
+  { id: 'situation', name: 'Situation map', note: 'The front line or the areas held, on a quiet ground, its key beside it.', asks: ['situation', 'evolution'], format: 'report', make: situation },
+  { id: 'geolocation', name: 'Geolocation card', note: 'The footage beside the place it was filmed, the matches numbered.', asks: ['geolocation', 'angles', 'post'], format: 'slide', make: geolocation },
+  { id: 'before-after', name: 'Before and after', note: 'The same ground on two dates, side by side, what changed counted.', asks: ['change', 'post'], format: 'slide', make: beforeAfter },
+  { id: 'incidents', name: 'Incidents', note: 'Every reported event placed and dated, its chronology beside the map.', asks: ['situation', 'evolution', 'angles'], format: 'report', make: incidents },
+  { id: 'track', name: 'Route or track', note: 'A convoy, a vessel or a flight, its stops numbered and listed.', asks: ['evolution'], format: 'report', make: track },
+  { id: 'sightline', name: 'Line of sight', note: 'Where the camera stood and what it could see, on the relief.', asks: ['geolocation'], format: 'report', make: sightline },
+  { id: 'site', name: 'Site profile', note: 'A facility from above, what stands there numbered and named.', asks: ['situation'], format: 'report', make: site },
+  { id: 'locator', name: 'Locator', note: 'The place, a closer look at it, and where it lies.', asks: ['situation', 'geolocation'], format: 'report', make: locator },
+  { id: 'briefing', name: 'Briefing', note: 'A map with its key points and a figure written beside it.', asks: ['situation'], format: 'report', make: briefing },
+  { id: 'post', name: 'Post', note: 'The map to the edges, its title on a card over it, signed.', asks: ['post'], format: 'slide', make: post },
 ];
 
 /** The page of a format by its id. */

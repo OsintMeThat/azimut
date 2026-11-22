@@ -434,6 +434,23 @@ describe('the ground, the type and the layers of a plate', () => {
     expect(bare()).toEqual([]);
   });
 
+  it('sets a map to the edges of the page, its frame off, or to the margins its guides draw, unless it is locked', () => {
+    const { spec, map } = showMap();
+    const button = (text) => [...document.body.querySelectorAll('.inspector button')].find((node) => node.textContent.trim() === text);
+    const before = spec.elements.filter((element) => element.id !== map.id).map((element) => element.box);
+    button('To the margins').click(); flushSync();
+    expect(map.box).toEqual([9, 9, 279, 192]);
+    expect(map.border).not.toBe(false);
+    button('To the edges').click(); flushSync();
+    expect(map.box).toEqual([0, 0, 297, 210]);
+    expect(map.border).toBe(false);
+    // the rest of the page stays where it was
+    expect(spec.elements.filter((element) => element.id !== map.id).map((element) => element.box)).toEqual(before);
+    map.locked = true; flushSync();
+    expect(button('To the edges').disabled).toBe(true);
+    expect(button('To the margins').disabled).toBe(true);
+  });
+
   it('offers a new layer here, and a layer of what was drawn on the map once something is', () => {
     const made = [];
     const spec = $state(houseLayout());

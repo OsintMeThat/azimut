@@ -57,6 +57,15 @@ export function distribute(elements, axis) {
   return out;
 }
 
+/**
+ * The box that fills a page `width` by `height` millimetres inside a `margin` all
+ * round: to the edges at 0, as the ready plate Post sets its map.
+ */
+export function filling({ width, height }, margin = 0) {
+  const inset = Math.max(0, Math.min(margin, (Math.min(width, height) - 1) / 2));
+  return [round(inset), round(inset), round(width - 2 * inset), round(height - 2 * inset)];
+}
+
 /** Every element given the width or the height (or both) of the one picked last. */
 export function sameSize(elements, which, model) {
   const out = {};
