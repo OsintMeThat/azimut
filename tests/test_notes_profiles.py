@@ -293,7 +293,10 @@ def test_a_report_ends_on_academic_sources_and_every_annex_in_the_pdf_and_the_pa
         assert f'data-annex="{key}"' in page, key
     # the editions take the corrections' place, under their id
     assert page.count('id="corrections"') == 1 and 'class="az-annex az-corrections"' in page
-    assert 'data-style="academic"' in page and "<cite>port-authority.example.org</cite>" in page
+    # a web page writes every style's sources the one way: grouped, each its card
+    sources = page[page.index('<section class="az-sources"'):]
+    assert "data-style=" not in sources and "port-authority.example.org, <a class=\"az-source-title\"" in sources
+    assert "“<bdi>Port authority notice</bdi>”</a>, accessed 13 March 2026." in sources
     assert 'href="#limits"' in page and '<a href="#az-geolocations">Geolocations</a>' in page
 
 
@@ -302,7 +305,7 @@ def test_a_web_article_writes_its_sources_for_the_web_with_credits_and_correctio
     text = _note(made)
     page = notes_html.render(case, title="Strike", text=text, look=look(style="article"), public=True,
                              earlier=EARLIER, changes="A typo.", created=CREATED).html.decode()
-    assert 'data-look="article"' in page and 'data-style="web"' in page
+    assert 'data-look="article"' in page and "<h3>Posts and footage</h3>" in page
     assert 'data-annex="credits"' in page and 'data-annex="editions"' in page
     assert 'data-annex="method"' not in page and 'data-annex="geolocations"' not in page
     assert '<a class="az-archive"' in page and "A typo." in page
@@ -409,20 +412,21 @@ def _proof_number(page: str) -> int:
     """The proof's number in the sources, as the HTML page's annex cites it."""
     row = re.search(r'data-annex="geolocations".*?<tbody>(.*?)</tbody>', page, re.S)
     assert row is not None
-    return int(re.search(r'href="#src-(\d+)"', row.group(1)).group(1))
+    return int(re.search(r'data-card="src-(\d+)"', row.group(1)).group(1))
 
 
 def test_a_geolocation_s_name_opens_its_post_and_its_number_its_entry_in_every_format(sourced):
     """The owner pressed a proof in the Geolocations annex and got its source: its name
-    opens the post the analyst published of it, its number still the proof's entry."""
+    opens the post the analyst published of it, its number still the proof's entry (on the
+    web page, the name shows that entry's card)."""
     _, case, made = sourced
     _geolocated(case, made)
     case.update_entity(made["proof"]["id"], {"attrs": {"posted_url": POSTED}})
     text = _note(made)
     page = notes_html.render(case, title="Strike", text=text, look=look(style="report"), created=CREATED).html.decode()
     number = _proof_number(page)
-    assert (f'<a class="az-cite" href="#src-{number}" data-src="{number}">[{number}]</a> <a href="{POSTED}" '
-            'target="_blank" rel="noopener noreferrer" title="Open the post on X">Strike geolocated</a>') in page
+    assert (f'<a href="{POSTED}" target="_blank" rel="noopener noreferrer" title="Open the post on X" '
+            f'data-card="src-{number}">Strike geolocated</a>') in page
     # a PDF table's cell holds one link: the number stands in a column of its own
     pdf = notes_pdf.render(case, title="Strike", text=text, look=look(style="report"), created=CREATED).pdf
     links = _links_on(pdf, "Coordinates")
@@ -438,7 +442,7 @@ def test_a_geolocation_never_posted_opens_its_entry_as_before(sourced):
     text = _note(made)
     page = notes_html.render(case, title="Strike", text=text, look=look(style="report"), created=CREATED).html.decode()
     number = _proof_number(page)
-    assert f'data-src="{number}">[{number}]</a> Strike geolocated</td>' in page
+    assert f'<a href="#src-{number}" data-card="src-{number}">Strike geolocated</a></td>' in page
     pdf = notes_pdf.render(case, title="Strike", text=text, look=look(style="report"), created=CREATED).pdf
     links = _links_on(pdf, "Coordinates")
     assert (f"[{number}]", "entry") in links and ("Strikegeolocated", "entry") in links
@@ -579,7 +583,7 @@ def test_both_lists_print_the_generated_one_headed_references_and_numbered(sourc
     assert "References" in printed and "Harbour bulletin" in printed
     assert squash("“Port authority notice”, port-authority.example.org,") in squash(printed)
     page = notes_html.render(case, title="Strike", text=text, look=chosen, created=CREATED).html.decode()
-    assert '<h2 id="sources-title">References</h2>' in page and 'href="#src-1"' in page and "Harbour bulletin" in page
+    assert '<h2 id="sources-title">References</h2>' in page and 'data-card="src-1"' in page and "Harbour bulletin" in page
     draft = notes_wordpress.build(case, title="Strike", text=text, look=chosen)
     assert 'id="sources">References</h2>' in draft.content and "Harbour bulletin" in draft.content
     # a note headed References keeps "Sources" for the generated list

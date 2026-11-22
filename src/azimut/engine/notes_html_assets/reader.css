@@ -245,19 +245,21 @@ a.az-site-link:hover { text-decoration: underline; }
 .az-coords { white-space: nowrap; font-variant-numeric: tabular-nums; }
 span.az-ref { font-weight: 600; }
 
-/* a citation: a small raised number; reader.js shows its source beside it */
-.az-cite { margin-left: .08em; padding: 0 .15em; border-radius: 3px; font: 600 .7em/0 var(--ui); vertical-align: .55em; text-decoration: none; white-space: nowrap; }
-.az-cite:hover, .az-cite[aria-expanded] { background: var(--accent-soft); }
+/* words that cite a source: reader.js opens its card beside them */
+span[data-card], .az-cited[data-card] { cursor: help; border-bottom: 1px dotted var(--accent-ink); }
+span.az-ref[data-card]:focus-visible, .az-inline-video[data-card]:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 2px; }
+[data-card][aria-expanded] { background: var(--accent-soft); border-radius: 2px; }
 .az-card {
   position: absolute; z-index: 40; width: min(22rem, calc(100vw - 2rem)); padding: .85rem 1rem .9rem; border: 1px solid var(--rule); border-radius: 6px;
   background: var(--paper); box-shadow: 0 12px 32px -8px rgba(0, 0, 0, .25); font: 400 .8125rem/1.45 var(--ui); overflow-wrap: anywhere;
   animation: az-in .14s var(--ease);
 }
 .az-card > * { display: block; }
-.az-card-number { margin-bottom: .3rem; font-weight: 700; font-size: .6875rem; letter-spacing: .08em; text-transform: uppercase; color: var(--accent-ink); }
-.az-card .az-source-label { font-weight: 700; }
-.az-card .az-source-details { color: var(--muted); }
-.az-card .az-hash, .az-card .az-source-from { display: none; }
+.az-card-kind { margin-bottom: .3rem; font-weight: 700; font-size: .6875rem; letter-spacing: .08em; text-transform: uppercase; color: var(--accent-ink); }
+.az-card .az-source-links { margin-top: .3rem; }
+.az-card .az-hash { display: block; color: var(--muted); font-size: .75rem; }
+.az-card-page { margin-top: .4rem; font: 600 .75rem/1.4 var(--mono); color: var(--accent-ink); }
+.az-card-list { margin-top: .5rem; font-weight: 600; }
 @keyframes az-in { from { opacity: 0; transform: translateY(3px); } }
 
 /* figures: one wide width, what is said of each on its own edges */
@@ -288,15 +290,16 @@ p .az-zoom::after { content: none; }
 .az-zoom .az-inline { width: auto; height: 1.55em; }
 .az-figure figcaption { display: flex; flex-wrap: wrap; align-items: baseline; gap: .25rem 1.5rem; margin-top: .8rem; font: 400 .875rem/1.5 var(--ui); color: var(--ink-2); text-align: start; }
 .az-caption { flex: 1 1 22rem; min-width: 0; text-wrap: pretty; }
-/* a narrow picture, or a credit that is only its source marker: the credit follows the caption, never far from it */
-.az-figure[data-width]:not([data-width="100%"]) figcaption, figcaption:has(> .az-credit > .az-cite:only-child) { display: block; }
+/* a narrow picture, or a credit that only names its source: the credit follows the caption, never far from it */
+.az-figure[data-width]:not([data-width="100%"]) figcaption, figcaption:has(> .az-credit > .az-credit-source:only-child) { display: block; }
 .az-figure[data-width]:not([data-width="100%"]) .az-credit { display: block; margin-top: .15rem; text-align: left; }
-.az-credit:has(> .az-cite:only-child) { display: inline; margin-left: .3em; }
+.az-credit:has(> .az-credit-source:only-child) { display: inline; margin-left: .3em; }
+.az-credit[data-card] { cursor: help; }
 .az-fig-num { margin-right: .3em; font-weight: 700; color: var(--accent-ink); }
 .az-credit, .az-dates { font-size: .75rem; color: var(--muted); }
 .az-credit { margin-left: auto; text-align: right; }
 .az-credit a { color: inherit; }
-.az-credit .az-cite { color: var(--accent-ink); }
+.az-credit .az-credit-source { color: var(--accent-ink); }
 .az-figure figcaption .az-posted { font-size: .8125rem; font-weight: 600; }
 .az-dates { flex-basis: 100%; }
 
@@ -504,7 +507,7 @@ html:not(.az-js) .az-graphic:focus-within img { filter: none; transform: none; }
     rgba(8, 9, 11, .3) 68%, rgba(8, 9, 11, .16) 84%, rgba(8, 9, 11, .5));
 }
 [data-web="story"] .az-cover-figure figcaption { position: absolute; z-index: 1; right: var(--gutter); bottom: 1.25rem; max-width: 40%; margin: 0; color: rgba(255, 255, 255, .7); }
-[data-web="story"] .az-cover-figure .az-credit, [data-web="story"] .az-cover-figure .az-credit .az-cite { color: inherit; }
+[data-web="story"] .az-cover-figure .az-credit, [data-web="story"] .az-cover-figure .az-credit .az-credit-source { color: inherit; }
 [data-web="story"] .az-cover:has(> .az-cover-figure) .az-title { text-shadow: 0 2px 28px rgba(0, 0, 0, .55); }
 [data-web="story"] .az-cover:has(> .az-cover-figure) :is(.az-standfirst, .az-tlp-note) { color: rgba(255, 255, 255, .86); }
 [data-web="story"] .az-cover:has(> .az-cover-figure) :is(.az-dateline, .az-kicker) { color: rgba(255, 255, 255, .72); }
@@ -570,16 +573,16 @@ html:not(.az-js) .az-graphic:focus-within img { filter: none; transform: none; }
 /* the end of the page, on the text's column */
 .az-sources, .az-corrections { width: min(var(--measure), 100% - 2 * var(--gutter)); margin: 4.5rem auto 0; padding-top: 1.5rem; border-top: 2px solid var(--ink); font: 400 .875rem/1.55 var(--ui); }
 .az-sources > h2, .az-corrections > h2 { margin: 0 0 1rem; font-size: .8125rem; letter-spacing: .12em; text-transform: uppercase; }
-.az-sources ol { margin: 0; padding: 0; list-style: none; counter-reset: az-source; }
-.az-sources li { position: relative; padding: .75rem 0 .8rem 2.5rem; border-bottom: 1px solid var(--rule); counter-increment: az-source; overflow-wrap: anywhere; scroll-margin-top: calc(var(--bar) + 5rem); }
-.az-sources li::before { content: counter(az-source); position: absolute; left: 0; color: var(--accent-ink); font-weight: 700; font-variant-numeric: tabular-nums; }
+.az-sources-how { margin: -.4rem 0 .4rem; color: var(--muted); }
+/* grouped by what they are, each group in the order the text cites it: no numbers */
+.az-sources h3 { margin: 1.6rem 0 .2rem; font: 600 .6875rem/1.3 var(--ui); letter-spacing: .12em; text-transform: uppercase; color: var(--muted); }
+.az-sources ul { margin: 0; padding: 0; list-style: none; }
+.az-sources li { padding: .6rem 0 .65rem; border-bottom: 1px solid var(--rule); overflow-wrap: anywhere; scroll-margin-top: calc(var(--bar) + 5rem); }
 .az-sources li:target { background: var(--accent-soft); }
-.az-source-label { font-weight: 700; }
-.az-source-details, .az-source-from { color: var(--muted); }
 .az-source-links { display: block; margin-top: .15rem; }
 .az-source-links > * { margin-right: .75rem; }
-.az-source-address { font-size: .8125rem; }
 .az-source-links .az-hash { display: block; color: var(--muted); font-size: .75rem; }
+.az-archive { margin-left: .5em; }
 .az-verify, .az-posted, .az-archive { font-weight: 600; white-space: nowrap; }
 .az-corrections { border-top-width: 1px; color: var(--ink-2); }
 .az-corrections ol { margin: 0; padding-left: 1.2rem; }
@@ -703,11 +706,10 @@ html.az-locked { overflow: hidden; }
 }
 @media print { video::-webkit-media-controls { display: none !important; } }
 
-/* the annexes a style carries after its sources; a reference list written in full reads as running text */
+/* the annexes a style carries after its sources */
 [data-look="article"] { --az-accent: #a83228; --accent-ink: #681f19; --accent-soft: #fbf0ee; --ink: #18181a; --rule: #dcd8d2; --tint: #f6f4f1; }
 .az-annex { width: min(var(--measure), 100% - 2 * var(--gutter)); margin: 3rem auto 0; padding-top: 1.25rem; border-top: 1px solid var(--rule); font: 400 .875rem/1.55 var(--ui); color: var(--ink-2); }
 .az-annex > h2 { margin: 0 0 .9rem; font-size: .8125rem; letter-spacing: .12em; text-transform: uppercase; color: var(--ink); }
-.az-ref .az-source-address { font-size: inherit; }
 .az-annex-table { width: 100%; border-collapse: collapse; font-variant-numeric: tabular-nums; }
 .az-annex-table :is(th, td) { padding: .4rem .75rem .4rem 0; border-bottom: 1px solid var(--rule); text-align: left; vertical-align: top; }
 .az-annex-table th { border-bottom-color: var(--ink); font-weight: 600; }

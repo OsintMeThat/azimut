@@ -34,18 +34,30 @@ links and during every wait. A run that Azimut's closing cut short is never pick
 again by itself: the record says it stopped, and the next press goes on from where it
 was, a copy made just before the cut being found by the lookup rather than made twice.
 
+**The page's own title.** A web page's list names each page by the title it published
+and its day (`notesources.card_entry`), never by the words a note linked it with. Once a
+page has its copy, the run reads that copy back from the archive, the raw page as it was
+saved (`id_`), and keeps the title and the day the page states of itself. The page's own
+site is never asked: the archive already holds the address, so nothing new leaves.
+A post or a profile on a walled site (`notesources.WALLED`) is cited by its account and
+day instead, and a file downloaded from a page keeps what the download recorded. A link
+archived already whose page has no title yet is a link to work on too.
+
 **Network.** Only that press reaches it: `archive.org` and `web.archive.org`, with
 Azimut's user agent, nothing else sent. Reading the plan, the record, a note or the
 check never does, nor does starting the app (SPEC §9).
 
 **What is written.** On the item: `archive_url`, `archived_at` (the day the copy was
 made), and on a bookmark this run files, `fetched_at`, the moment Azimut archived it,
-which is the day a reader is told the page was accessed (`accessed`).
+which is the day a reader is told the page was accessed (`accessed`). On a bookmark, the
+page's `page_title` and `published_at` when the copy states them; one this run filed is
+named after its page's title too.
 """
 
 from __future__ import annotations
 
 import functools
+import html
 import json
 import re
 import threading
@@ -54,7 +66,7 @@ import uuid
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from typing import TYPE_CHECKING, Any, Callable, Iterator
-from urllib.parse import urlsplit, urlunsplit
+from urllib.parse import urljoin, urlsplit, urlunsplit
 
 import httpx
 
@@ -119,8 +131,10 @@ CLOSED = "Azimut was closed before it finished. What was done is kept."
 ENDED = "It stopped before it finished. What was done is kept."
 HALTED = "Stopped. What was done is kept."
 
+#: The day a bookmark's copy was read for its page's title, found or not: read once.
+TITLE_TRIED = "page_title_tried"
 #: Who files the bookmarks, as provenance says.
-FILED_BY = "note"
+FILED_BY = notesources.LINKS_FILED_BY
 #: This process. A run asked in another one was cut short by Azimut closing.
 BOOT = uuid.uuid4().hex
 
@@ -172,13 +186,20 @@ class Copy:
 @dataclass(frozen=True)
 class Link:
     """One outside link of a note: its address, its words, the archived copy its item
-    holds and that copy's day ("" for none), and whether the case holds an item for it."""
+    holds and that copy's day ("" for none), whether the case holds an item for it, and
+    whether its page still wants its own title read (`wants_title`)."""
 
     url: str
     text: str
     archive: str = ""
     archived: str = ""
     held: bool = False
+    untitled: bool = False
+
+    @property
+    def todo(self) -> bool:
+        """Whether a run has work on it: a copy to make, or a title to read."""
+        return not self.archive or self.untitled
 
 
 # -- the links of a note ------------------------------------------------------------
@@ -198,8 +219,19 @@ def links_of(case: "Case", note_id: str, *, internal: bool = False) -> list[Link
     links = []
     for address, words, _line, source in cited.outside():
         said = md.cut_text(words or urltitles.title_of(address), MAX_TEXT)
-        links.append(Link(address, said, source.archive, source.archived, bool(source.entity_id)))
+        links.append(Link(address, said, source.archive, source.archived, bool(source.entity_id),
+                          untitled=wants_title(case, address, source)))
     return links
+
+
+def wants_title(case: "Case", address: str, source: notesources.Source) -> bool:
+    """Whether a link's page should have its own title read from its copy: a bookmark of a
+    page, not a post on a walled site, a document or a file a download recorded, with no
+    title yet and none looked for in its copy before."""
+    if source.title or source.type != "bookmark" or notesources.walled(address) or notesources.is_report(address):
+        return False
+    record = case.get_entity(source.entity_id) if source.entity_id else None
+    return not ((record or {}).get("attrs") or {}).get(TITLE_TRIED)
 
 
 def folder_name(title: str) -> str:
@@ -224,14 +256,17 @@ def plan(case: "Case", note_id: str, *, internal: bool = False) -> dict[str, Any
     links = links_of(case, note_id, internal=internal)
     more = 0 if internal else max(0, len(links_of(case, note_id, internal=True)) - len(links))
     todo = [link for link in links if not link.archive]
+    titles = [link for link in links if link.archive and link.untitled]
     return {
         "links": [
             {"url": link.url, "text": link.text, "state": "archived" if link.archive else "todo",
-             "copy": link.archive, "made": link.archived, "held": link.held}
+             "copy": link.archive, "made": link.archived, "held": link.held,
+             **({"untitled": True} if link.untitled else {})}
             for link in links[:MAX_LINKS]
         ],
         "total": len(links),
         "todo": len(todo),
+        "titles": len(titles),
         "archived": len(links) - len(todo),
         "filed": sum(1 for link in todo if not link.held),
         "more_internal": more,
@@ -344,7 +379,7 @@ def start(case: "Case", note_id: str, *, internal: bool = False, fresh: bool = F
         before = view(case, note_id)
         if before is not None and before["state"] in ACTIVE:
             raise ArchiveError("The links of this note are being archived already.")
-        todo = [link for link in links_of(case, note_id, internal=internal) if not link.archive][:MAX_LINKS]
+        todo = [link for link in links_of(case, note_id, internal=internal) if link.todo][:MAX_LINKS]
         if not todo:
             raise ArchiveError("Every link of this note has an archived copy.")
         now = _now().strftime("%Y-%m-%dT%H:%M:%SZ")
@@ -487,8 +522,9 @@ def settle(case: "Case", archive: "Wayback", url: str, text: str, record: dict[s
     holder = _holder(case, url)
     held_copy = notesources.web(((holder or {}).get("attrs") or {}).get(notesources.ARCHIVE))
     if held_copy:
-        # given a copy meanwhile, by hand or another run
+        # given a copy before, by hand or another run: its page's title may still be wanted
         made = str(((holder or {}).get("attrs") or {}).get(notesources.ARCHIVED_AT) or notesources.archive_day(held_copy))
+        _name_page(case, archive, holder, url, held_copy)
         return {"state": KEPT, "copy": held_copy, "made": made}
     page = _page(url)
     found = archive.newest(page)
@@ -502,10 +538,40 @@ def settle(case: "Case", archive: "Wayback", url: str, text: str, record: dict[s
                 return {"state": FAILED, "reason": exc.reason, "gone": exc.gone or None}
             copy, state, said, gone = found, OLDER, exc.reason, exc.gone
     try:
-        _keep(case, holder, url, text, copy, record.get("folder") or folder_name("Note"), accessed=accessed(state))
+        kept = _keep(case, holder, url, text, copy, record.get("folder") or folder_name("Note"), accessed=accessed(state))
     except CaseError:
         return {"state": FAILED, "reason": "The item of this link was deleted while it was archived."}
+    _name_page(case, archive, kept, url, copy.address)
     return {"state": state, "copy": copy.address, "made": copy.stamp, "reason": said, "gone": gone or None}
+
+
+def _name_page(case: "Case", archive: "Wayback", holder: dict[str, Any] | None, url: str, copy: str) -> None:
+    """Keep the title and the day a bookmark's page states of itself, read back from its
+    copy; a bookmark a note's links filed is named after that title. A copy that says
+    nothing readable, or a page that is not one, leaves the bookmark as it was."""
+    if holder is None or holder.get("type") != "bookmark":
+        return
+    attrs = holder.get("attrs") or {}
+    if attrs.get(notesources.PAGE_TITLE) or notesources.walled(url) or notesources.is_report(url):
+        return
+    try:
+        facts = archive.page(copy, url)
+    except (Offline, Busy, Stopped):
+        # the copy is made and kept: the link is settled, and the run hears this again at its next step
+        return
+    if facts is None:
+        return  # no answer: the next press asks again
+    patch: dict[str, Any] = {"attrs": {TITLE_TRIED: _now().date().isoformat()}}
+    if facts.title:
+        patch["attrs"][notesources.PAGE_TITLE] = facts.title
+        if facts.day:
+            patch["attrs"][notesources.PUBLISHED_AT] = facts.day
+        if (holder.get("provenance") or {}).get("by") == FILED_BY:
+            patch["label"] = facts.title
+    try:
+        case.update_entity(str(holder["id"]), patch)
+    except CaseError:
+        pass
 
 
 def accessed(state: str) -> bool:
@@ -536,15 +602,15 @@ def _holder(case: "Case", url: str) -> dict[str, Any] | None:
 
 
 def _keep(case: "Case", holder: dict[str, Any] | None, url: str, text: str, copy: Copy, folder: str,
-          *, accessed: bool) -> None:
+          *, accessed: bool) -> dict[str, Any]:
+    """Keep the copy on the item the link finds, or on a bookmark filed for it; that item."""
     kept = {notesources.ARCHIVE: copy.address, notesources.ARCHIVED_AT: copy.stamp}
     if holder is not None:
-        case.update_entity(str(holder["id"]), {"attrs": kept})
-        return
+        return case.update_entity(str(holder["id"]), {"attrs": kept})
     attrs: dict[str, Any] = {"url": url, "site": urlsplit(url).hostname or "", "folder": folder, **kept}
     if accessed:
         attrs["fetched_at"] = _now().isoformat(timespec="seconds")
-    case.add_entity("bookmark", urltitles.title_of(url, text), attrs, by=FILED_BY)
+    return case.add_entity("bookmark", urltitles.title_of(url, text), attrs, by=FILED_BY)
 
 
 def _page(url: str) -> str:
@@ -628,6 +694,33 @@ class Wayback:
             raise PageError(f"The Internet Archive answered {status} and made no copy.")
         raise PageError("The Internet Archive made no copy.")  # pragma: no cover - the loop always answers
 
+    def page(self, copy: str, page: str) -> "PageFacts | None":
+        """What a copy's page states of itself (`page_facts`), read from the archive as it
+        was saved, following the archive's own redirects to the nearest copy. A copy that
+        says nothing readable answers an empty title; None when the archive did not answer."""
+        address = _raw(copy)
+        for _hop in range(MAX_HOPS):
+            if not address:
+                return None
+            response: httpx.Response | None = None
+            for response in self._ask("read", LOOK_GAP, functools.partial(self.http.get, address, timeout=LOOK_TIMEOUT)):
+                break
+            if response is None:
+                return None
+            if response.status_code in (301, 302, 303, 307, 308):
+                address = urljoin(address, response.headers.get("location", ""))
+                if notesources.host(address) != COPY_HOST:
+                    return None
+                continue
+            kind = response.headers.get("content-type", "").lower()
+            if response.status_code >= 500:
+                return None
+            if response.status_code != 200 or (kind and "html" not in kind):
+                return PageFacts("")
+            said = page_facts(response.content[:MAX_BODY].decode(response.encoding or "utf-8", "replace"), page)
+            return said or PageFacts("")
+        return None
+
     def _ask(self, kind: str, gap: float, send: Callable[[], httpx.Response]) -> Iterator[httpx.Response | None]:
         """Each answer to ``send``, asked again while the caller goes on; a 429 waits and
         asks again by itself. None for a request that timed out."""
@@ -664,6 +757,90 @@ class Wayback:
             if left <= 0:
                 return
             self.sleep(min(1.0, left))
+
+
+@dataclass(frozen=True)
+class PageFacts:
+    """What a page states of itself: its title, and the day it was published ("" when it does not say)."""
+
+    title: str
+    day: str = ""
+
+
+#: How many of the archive's redirects a reading of a copy follows.
+MAX_HOPS = 4
+_META = re.compile(r"<meta\b[^>]*>", re.I)
+_META_ATTR = re.compile(r"""([a-zA-Z_:.-]+)\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s>]+))""")
+_TITLE_TAG = re.compile(r"<title\b[^>]*>(.*?)</title>", re.I | re.S)
+_LD_PUBLISHED = re.compile(r'"datePublished"\s*:\s*"([^"]{10,40})"')
+_DAY = re.compile(r"^(\d{4}-\d{2}-\d{2})")
+#: The meta tags a page states its title and its day in, in the order they are believed.
+TITLE_KEYS = ("og:title", "twitter:title")
+DAY_KEYS = ("article:published_time", "og:published_time", "datepublished", "publishdate", "pubdate",
+            "publication_date", "date", "dc.date.issued", "dc.date", "dcterms.date", "parsely-pub-date",
+            "sailthru.date", "article.published")
+#: What a copy says when it is not the page: a wall, an error, a challenge.
+NOT_A_TITLE = re.compile(r"^(just a moment|attention required|access denied|forbidden|403\b|404\b|page not found|"
+                         r"not found|error\b|javascript is not available|are you a robot|security check|"
+                         r"one more step|log ?in\b|sign ?in\b|wayback machine)", re.I)
+
+
+def page_facts(page_html: str, url: str) -> PageFacts | None:
+    """The title and the day a page's HTML states of itself, or None when it names none a
+    reader could use. Meta tags first (`og:title`, `article:published_time`), then its
+    `<title>` without the site's name after it; dates as their day."""
+    metas: dict[str, str] = {}
+    for tag in _META.findall(page_html):
+        found = {key.lower(): next(value for value in values if value is not None)
+                 for key, *values in _META_ATTR.findall(tag)}
+        name = (found.get("property") or found.get("name") or found.get("itemprop") or "").lower()
+        if name and "content" in found:
+            metas.setdefault(name, found["content"])
+    title = next((_clean(metas[key]) for key in TITLE_KEYS if _clean(metas.get(key, ""))), "")
+    if not title:
+        tag = _TITLE_TAG.search(page_html)
+        title = _without_site(_clean(tag.group(1)) if tag else "", metas.get("og:site_name", ""), url)
+    site = notesources.outlet(url)
+    if not title or NOT_A_TITLE.match(title) or title.lower() in (site.lower(), notesources.host(url)):
+        return None
+    said = [metas.get(key, "") for key in DAY_KEYS] + _LD_PUBLISHED.findall(page_html)
+    day = next((found.group(1) for found in (_DAY.match(value.strip()) for value in said if value) if found
+                and _plausible(found.group(1))), "")
+    return PageFacts(title[:notesources.MAX_LABEL], day)
+
+
+def _clean(text: str) -> str:
+    return " ".join(html.unescape(re.sub(r"<[^>]*>", " ", text or "")).split())
+
+
+def _without_site(title: str, site_name: str, url: str) -> str:
+    """`Yemen's forces retreat` from `Yemen's forces retreat | Al-Monitor`: the site's name dropped."""
+    names = {name.lower() for name in (site_name.strip(), notesources.outlet(url), notesources.host(url)) if name}
+    for mark in (" | ", " - ", " – ", " — ", " :: "):
+        head, _, tail = title.rpartition(mark)
+        if head and tail.strip().lower() in names:
+            return head.strip()
+    return title
+
+
+def _plausible(day: str) -> bool:
+    try:
+        when = datetime.strptime(day, "%Y-%m-%d").replace(tzinfo=timezone.utc)
+    except ValueError:
+        return False
+    return datetime(1990, 1, 1, tzinfo=timezone.utc) <= when <= _now() + timedelta(days=2)
+
+
+def _raw(copy: str) -> str:
+    """The address the archive serves a copy's page from as it was saved (`id_`), or ""."""
+    try:
+        parts = urlsplit(copy)
+    except ValueError:
+        return ""
+    match = _STAMP.match(parts.path + (f"?{parts.query}" if parts.query else ""))
+    if not match or (parts.hostname or "") not in (COPY_HOST, "wayback.archive.org"):
+        return ""
+    return f"https://{COPY_HOST}/web/{match.group(1)}id_/{match.group(2)}"
 
 
 def _retry_after(response: httpx.Response, fallback: float) -> float:
@@ -721,5 +898,5 @@ def _saved(response: httpx.Response, page: str) -> Copy | None:
 workqueue.register(JOB, run)
 
 
-__all__ = ["ArchiveError", "Copy", "Link", "Wayback", "change", "folder_name", "links_of", "plan", "read", "start",
+__all__ = ["ArchiveError", "Copy", "Link", "PageFacts", "Wayback", "page_facts", "change", "folder_name", "links_of", "plan", "read", "start",
            "stop", "view"]

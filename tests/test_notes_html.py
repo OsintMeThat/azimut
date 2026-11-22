@@ -21,7 +21,7 @@ import pytest
 from PIL import Image
 
 from azimut import config
-from azimut.engine import notefill, notes_html, notes_markdown, notes_pdf
+from azimut.engine import notefill, notes_html, notes_markdown, notes_pdf, notesources
 from azimut.engine.notelook import NoteLook
 from azimut.workspace import Case
 
@@ -321,16 +321,28 @@ def test_the_check_weighs_the_file_without_writing_a_clip(report):
     assert "data:video/mp4" not in checked.html.decode("utf-8")
 
 
-def test_a_reference_is_its_words_and_a_citation_its_entry(report):
+def test_a_reference_is_its_words_and_its_words_open_its_entry(report):
     page = report["page"]
     references = page.find(cls="az-ref")
     assert references and all("entity" not in node.attrs.get("href", "") for node in references)
-    entries = {node.attrs["id"] for node in page.one("section", "az-sources").find("li")}
-    cites = page.find("a", "az-cite")
-    assert cites
-    for cite in cites:
-        number = cite.attrs["data-src"]
-        assert cite.attrs["href"] == f"#src-{number}" and f"src-{number}" in entries
+    sources = page.one("section", "az-sources")
+    entries = {node.attrs["id"]: node for node in sources.find("li")}
+    # no number anywhere: the citing words carry the card of their entry
+    assert not page.find(cls="az-cite") and not page.find("sup")
+    body = page.one("main")
+    cards = [node for node in body.walk() if "data-card" in node.attrs]
+    assert cards
+    for node in cards:
+        assert node.attrs["data-card"] in entries
+        assert node.tag in ("a", "span") and (node.words() or node.find("img"))
+        if node.tag == "span":  # words that are no link still take the keyboard
+            assert node.attrs.get("tabindex") == "0" or node.find("button") or node.find("a")
+    # every entry says what kind of source it is, for its card's heading
+    assert all(entry.attrs.get("data-label") for entry in entries.values())
+    # the groups come in their one order, none empty
+    groups = [node.words() for node in sources.find("h3")]
+    assert groups and groups == [name for name in notesources.GROUPS if name in groups]
+    assert all(group.parent is sources for group in sources.find("h3"))
 
 
 def test_a_coded_row_can_be_linked_to(report):

@@ -411,8 +411,8 @@ def test_the_html_page_draws_the_card_in_its_own_look(kept):
     assert ">900<" not in card and " 900 " not in card and "favorite" not in card
     assert "/* a post from X or Bluesky" in page
     assert kept["sites"].outside == 0
-    # the post is a source the page cites, listed with the others
-    assert re.search(r'class="az-cite" href="#src-1"', card)
+    # the post is a source the page cites, listed with the others; the card names it itself, no number
+    assert "az-cite" not in card and "data-card" not in card
     assert "coast_monitor" in page[page.index('id="sources"'):]
 
 

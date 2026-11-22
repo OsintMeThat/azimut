@@ -853,6 +853,6 @@ def test_a_proof_named_in_the_text_opens_its_post_its_number_its_sources(sourced
 
     page = notes_html.render(case, title="Strike", text=text, look=on).html.decode()
     assert (f'<a class="az-ref" href="{POSTED_URL}" target="_blank" rel="noopener noreferrer" '
-            f'title="Open the post on X">the proof</a><a class="az-cite" href="#src-1"') in page
+            f'title="Open the post on X" data-card="src-1">the proof</a>') in page
     draft = notes_wordpress.build(case, title="Strike", text=text, look=on)
     assert f'<a href="{POSTED_URL}">the proof</a>' in draft.content
