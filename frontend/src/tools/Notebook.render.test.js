@@ -148,8 +148,8 @@ describe('the home', () => {
       'Source profile', 'Daily SITREP', 'Fact-check', 'Investigation log']) {
       expect(text()).toContain(name);
     }
-    // the nine ready notes, and From the case beside them
-    expect(target.querySelectorAll('[data-guide="notebook.ready"] img')).toHaveLength(10);
+    // the ready notes, the Web article among them, and From the case beside them
+    expect(target.querySelectorAll('[data-guide="notebook.ready"] img')).toHaveLength(11);
     expect(target.querySelector('[data-guide="notebook.from-case"]').textContent).toContain('From the case');
   });
 
@@ -243,7 +243,8 @@ describe('the home', () => {
     await settle();
     const dialog = document.body.querySelector('[role="dialog"][aria-label="New note"]');
     const starts = [...dialog.querySelectorAll('[role="radio"][data-start]')].map((one) => one.dataset.start);
-    expect(starts.slice(0, 4)).toEqual(['blank', 'from-case', 'web-map', 'geolocation']);
+    // what is made for the web comes first, then the two ways to start
+    expect(starts.slice(0, 5)).toEqual(['article', 'web-map', 'story', 'blank', 'from-case']);
     // the analyst's own templates come after the ready notes
     expect(starts.at(-1)).toBe('t:t1');
     expect(dialog.querySelector('[data-start="t:t1"]').textContent).toContain('House write-up');
