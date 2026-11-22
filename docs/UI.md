@@ -7657,8 +7657,9 @@ built from removed however it ends. **Download**, the main press then, saves it 
 case's download route, where an upload page will look for it; **Show in folder** opens the
 bundles folder. A link written to the published address of a map page the file carries is
 written in the copy as a mention of that map, a bare address taking the map's title, since
-the receiving case keeps no record of where the sender published it. A line points to
-osintmethat.com/contribute, which takes Azimut files, never web pages.
+the receiving case keeps no record of where the sender published it. A line invites the
+analyst to send it to osintmethat.com/contribute, which reads it first and publishes nothing
+before they agree; the page says the rest of the process.
 
 **Sources on a web page.** The HTML page and the web folder cite without numbers: the
 words that cite a source (a link, a mention, a figure's credit, a proof's name in the

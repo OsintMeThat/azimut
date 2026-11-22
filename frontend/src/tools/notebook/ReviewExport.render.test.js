@@ -72,6 +72,8 @@ it('says what leaves and what stays before anything is written', async () => {
   expect(text('.review-head')).toBe('What leaves 3 MB');
   expect(text('.review-stays')).toBe('2 internal passages, left out of the text, and the rest of the case.');
   expect(document.body.textContent).toContain('their metadata included; a published page strips it.');
+  expect(text('.review-invite')).toBe('Want it published on osintmethat.com under your name? Send this file at '
+    + 'osintmethat.com/contribute: it is read first, and nothing goes online before you agree.');
   const link = document.querySelector('.review-invite a');
   expect(link.getAttribute('href')).toBe('https://osintmethat.com/contribute');
   expect(link.getAttribute('rel')).toContain('noopener');

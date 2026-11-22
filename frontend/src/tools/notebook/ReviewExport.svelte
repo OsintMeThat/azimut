@@ -102,7 +102,7 @@
 </script>
 
 {#snippet invite()}
-  <p class="review-invite">Send the file for review at <a href={CONTRIBUTE} target="_blank" rel="noopener noreferrer">osintmethat.com/contribute</a>: the site takes Azimut files, never web pages.</p>
+  <p class="review-invite">Want it published on osintmethat.com under your name? Send this file at <a href={CONTRIBUTE} target="_blank" rel="noopener noreferrer">osintmethat.com/contribute</a>: it is read first, and nothing goes online before you agree.</p>
 {/snippet}
 
 <section class="review" aria-label="For review">
