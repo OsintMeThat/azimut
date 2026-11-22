@@ -64,8 +64,8 @@ describe('the bare menu', () => {
       expect(option.detail, option.label).not.toBe('');
       expect(option.info().querySelector('.cm-ip-name').textContent).toBe(option.label);
     }
-    expect(options.map((option) => option.label).slice(0, 8)).toEqual(
-      ['Heading 1', 'Heading 2', 'Heading 3', 'Bulleted list', 'Numbered list', 'To-do', 'Quote', 'Callout']);
+    expect(options.map((option) => option.label).slice(0, 9)).toEqual(
+      ['Heading 1', 'Heading 2', 'Heading 3', 'Bulleted list', 'Numbered list', 'To-do', 'Quote', 'Footnote', 'Callout']);
     expect(options.filter((option) => option.section.name === 'Figures').map((option) => option.label)).toEqual(['Table', 'Chart', 'Diagram', 'Infographic']);
   });
 

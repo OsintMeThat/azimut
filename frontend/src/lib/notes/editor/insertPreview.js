@@ -52,6 +52,8 @@ const ART = {
   story: () => [el('span', 'cm-ip-story', picture(), el('span', 'cm-ip-col', lines(3)))],
   logo: () => [el('span', 'cm-ip-row', el('span', 'cm-ip-logo', 'LOGO')), ...lines(2)],
   cite: () => [el('span', 'cm-ip-row', el('span', 'cm-ip-words', 'Seen at '), el('span', 'cm-ip-chip', '✓ Quay north'), el('span', 'cm-ip-words', ' on day 2.'))],
+  footnote: () => [el('span', 'cm-ip-row', el('span', 'cm-ip-words', 'Open to both,'), el('span', 'cm-ip-fn', 'a'), el('span', 'cm-ip-words', ' for a century.')),
+    el('span', 'cm-ip-rule'), el('span', 'cm-ip-row', el('span', 'cm-ip-fn-said', 'a'), el('span', 'cm-ip-words', 'The 1921 text calls it so.'))],
   map: () => [el('span', 'cm-ip-map', el('span', 'cm-ip-front'), [1, 2, 3, 4].map((at) => el('span', `cm-ip-mark cm-ip-mark-${at}`)),
     el('span', 'cm-ip-map-said', 'Front, north · 16 Nov'))],
   post: () => [el('span', 'cm-ip-row', el('span', 'cm-ip-chip', 'Coast Monitor'), el('span', 'cm-ip-words', ' @coast_monitor · X')),
@@ -106,6 +108,7 @@ export function sampleMarkdown(command) {
   if (command.menu) return '';
   const written = {
     cite: '[[entity:…|Quay north]]',
+    footnote: 'Open to both,^[The 1921 text calls it so.]',
     picture: '[[media:…|Frame 12]]',
     upload: '[[media:…|photo.jpg]]',
     map: '::: map\ntitle: The front, north\nlayer: Front, north\n:::',
@@ -216,6 +219,11 @@ export const previewLook = EditorView.theme({
     display: 'inline-flex', padding: '0 6px', borderRadius: '4px', background: 'var(--bg-3)', border: '1px solid var(--border)',
     color: 'var(--text-1)', fontSize: '11.5px', whiteSpace: 'nowrap',
   },
+  '.cm-ip-fn': {
+    alignSelf: 'flex-start', marginLeft: '-6px', padding: '0 3px', borderRadius: '3px', background: 'var(--accent-soft)', color: 'var(--accent)',
+    fontSize: '9px', fontWeight: '700', lineHeight: '1.4',
+  },
+  '.cm-ip-fn-said': { color: 'var(--accent)', fontSize: '11px', fontWeight: '700', width: '10px', flex: 'none' },
   '.cm-ip-map': {
     position: 'relative', display: 'block', height: '86px', borderRadius: '4px', overflow: 'hidden',
     background: 'radial-gradient(circle at 30% 40%, #3d4f45 0, #2b3a33 55%, #22303a 100%)',

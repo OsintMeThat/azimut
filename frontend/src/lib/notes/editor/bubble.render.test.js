@@ -64,7 +64,8 @@ describe('the bubble', () => {
     editor('Seen at the quay on day two.', 8, 16);
     expect(bubbleShown(view.state)).toBe(true);
     const titles = [...bubble().querySelectorAll('button')].map((button) => button.title);
-    expect(titles).toEqual(['Bold (Ctrl+B)', 'Italic (Ctrl+I)', 'Link (Ctrl+K)', 'Heading', 'Bulleted list', 'Quote', 'Code (Ctrl+E)',
+    expect(titles).toEqual(['Bold (Ctrl+B)', 'Italic (Ctrl+I)', 'Link (Ctrl+K)', 'Footnote: a comment the reader opens from a small letter',
+      'Heading', 'Bulleted list', 'Quote', 'Code (Ctrl+E)',
       'Internal: left out of the public edition', 'Clear bold, italic and code']);
     expect(bubble().querySelector('[role="toolbar"]').getAttribute('aria-label')).toBe('Format the words selected');
   });
@@ -268,7 +269,8 @@ describe('the Link field', () => {
     expect(openLinkField(view)).toBe(false);
   });
 
-  it('holds Bold, Italic, Link, Heading, a list, Quote, Code, Internal and Clear, in that order', () => {
-    expect(BUBBLE_BUTTONS.filter(Boolean).map((item) => item.id)).toEqual(['bold', 'italic', 'link', 'heading', 'bullet', 'quote', 'code', 'internal', 'clear']);
+  it('holds Bold, Italic, Link, Footnote, Heading, a list, Quote, Code, Internal and Clear, in that order', () => {
+    expect(BUBBLE_BUTTONS.filter(Boolean).map((item) => item.id)).toEqual(
+      ['bold', 'italic', 'link', 'footnote', 'heading', 'bullet', 'quote', 'code', 'internal', 'clear']);
   });
 });

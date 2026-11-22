@@ -1,11 +1,12 @@
 /**
- * What the page draws inside a line: a case reference as a chip, coordinates with
- * their ⌖, a task's box, a bullet, a list's number, a callout's name, a template's
- * guidance and the words the PDF fills in. Also the two helpers a drawn block uses to show
+ * What the page draws inside a line: a case reference as a chip, a footnote as its
+ * letter, coordinates with their ⌖, a task's box, a bullet, a list's number, a callout's
+ * name, a template's guidance and the words the PDF fills in. Also the two helpers a drawn block uses to show
  * guidance and those words the way a line shows them.
  */
 import { WidgetType } from '@codemirror/view';
 
+import { footnoteText } from '../footnotes.js';
 import { HINT_LINE } from '../look.js';
 import { PLACEHOLDERS, findPlaceholders, placeholderValue } from '../reportParts.js';
 
@@ -40,6 +41,37 @@ export class ChipWidget extends WidgetType {
       ? `${this.entity.label} · ${this.entity.type}${this.entity.attrs?.folder ? ` · ${this.entity.attrs.folder}` : ''}. Click to open`
       : 'No longer in the case';
     return chip;
+  }
+
+  ignoreEvent() {
+    return false;
+  }
+}
+
+/**
+ * A footnote (`^[words]`) as its small raised letter, its words on hover; a press opens them
+ * in the Footnote field (`editor/bubble.js`). `at` is where it starts in the note.
+ */
+export class FootnoteWidget extends WidgetType {
+  constructor(letter, words, at) {
+    super();
+    this.letter = letter;
+    this.words = words;
+    this.at = at;
+  }
+
+  eq(other) {
+    return other.letter === this.letter && other.words === this.words && other.at === this.at;
+  }
+
+  toDOM() {
+    const mark = document.createElement('sup');
+    mark.className = 'cm-footnote';
+    mark.dataset.footnote = String(this.at);
+    mark.textContent = this.letter;
+    mark.title = `Footnote ${this.letter}: ${footnoteText(this.words)}`;
+    mark.setAttribute('aria-label', `Footnote ${this.letter}`);
+    return mark;
   }
 
   ignoreEvent() {
