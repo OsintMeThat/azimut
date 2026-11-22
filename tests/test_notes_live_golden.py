@@ -73,11 +73,15 @@ LOOKS = {"article": NoteLook(), "story": NoteLook.model_validate({"web": "story"
 #: 2026-11-21: a guest author's picture, round in the logo's place: two lines of reader.css, nothing else.
 #: 2026-11-22: footnotes, their raised letters and their Notes: eleven lines of reader.css; the base sheet
 #: put back gives the digests before, so nothing else.
+#: 2026-11-22: the source cards, merged beside the footnotes that were pinned alone: words that cite a source
+#: open its card where a raised number did, and the Sources list groups them by kind with no numbers; twenty-two
+#: lines of reader.css in place of twenty, with the footnotes' eleven. The sheet before both put back gives the
+#: digests before, so nothing else.
 GOLDEN = {
-    "single-article": "9050283dfff989eabe67905c97c766b21aa91f293fe0297faf3e62847de7f007",
-    "single-story": "7961afe3bbbb0f612e1df841a0c724797d9ab3cf7cef70f8bc189715b9b32c14",
-    "folder-article": "024d8add1f0ddcde5737b19f6b8240436ac12c430d30a4face15f3d79481c511",
-    "folder-story": "759dd23364f7553c2b5781aea41a1a7a55b929d6261918efbb62deb5997b0f15",
+    "single-article": "1451c2bebc6fc1c84e6983c05db36b3c8e97bc970b2169eb40816232e0220382",
+    "single-story": "20d98c5172e0dc837bf5711c2e39ee9af2f7079c413580e4257a5bad25d11af4",
+    "folder-article": "1018301f73e2c4de46fed7e056c826f34267703bad3a306c3f075e1ec19bbc26",
+    "folder-story": "2fded5f49d9a2d60ae14eacd7eda5271a5fa41dd40242dd63c59cca051bac14c",
 }
 
 
