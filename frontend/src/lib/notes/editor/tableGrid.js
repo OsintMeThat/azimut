@@ -49,7 +49,7 @@ import { heldHeight, holdHeight, moveHeight, releaseHeight } from './heights.js'
 import { ChipWidget } from './inline.js';
 import { chooseTableFile, cutSaid, pasteAsTable, pastedTable, readTableFile, sizeSaid } from './pasteTable.js';
 import { openSource, settle } from './ranges.js';
-import { noteCase, noteHandlers, resolve } from './state.js';
+import { isMapNote, noteCase, noteHandlers, resolve } from './state.js';
 import { gridAt, isBlankCell, pickCell, pictureColumns, rowVideo, timeLabel } from './tablePictures.js';
 import { SETTINGS_THEME, markSettings, openTableSettings, settingsButton } from './tableSettings.js';
 import {
@@ -85,10 +85,12 @@ function element(tag, className) {
 /** A record cited in a cell, drawn as the text's chips are, under the words written for it, which are what prints. */
 function cellChip(id, label, info) {
   const entity = resolve(info, id);
-  const chip = new ChipWidget({ id, label }, entity).toDOM();
+  const map = isMapNote(info, entity);
+  const chip = new ChipWidget({ id, label }, entity, map).toDOM();
   chip.lastChild.textContent = label || entity?.label || id;
   // in a grid a press types in the cell: the record opens on Ctrl+click, as a link does
-  chip.title = entity ? `${entity.label} · ${entity.type}. Ctrl+click to open` : 'No longer in the case';
+  chip.title = !entity ? 'No longer in the case'
+    : map ? `Link to the map ${entity.label}. Ctrl+click to open` : `${entity.label} · ${entity.type}. Ctrl+click to open`;
   return chip;
 }
 

@@ -54,6 +54,8 @@ Website says them too.
 `article.json`, and `cover.jpg`, the picture of its line in the site's list: the look's list
 picture, else its cover picture, a map page's ground or its first picture, else the link card
 itself. A page of the site starts with a bar back to it, and counts its readers when the site asks.
+Each link to a web map of the case that the site holds opens the map's page there (`maps`), at the
+site's address, which the site's lists read to fold the map under the article (`site.links_of`).
 
 Nothing is fetched and nothing is published from here: the folder is written to
 disk (`write`, swapped in by renames so it is whole or not there, on every OS).
@@ -76,7 +78,7 @@ from urllib.parse import unquote, urlsplit, urlunsplit
 
 from PIL import Image, ImageDraw, ImageFilter, ImageFont, ImageOps, UnidentifiedImageError
 
-from . import dirswap, notefill, notelook, notes_style, pdffonts
+from . import dirswap, notefill, notelinks, notelook, notes_style, pdffonts
 from . import notes_html as html_engine
 from . import site as site_engine
 from . import notes_markdown as md
@@ -332,6 +334,7 @@ def build(
     now: datetime | None = None,
     live: bool = True,
     placement: site_engine.Placement | None = None,
+    maps: notelinks.SiteMaps | None = None,
 ) -> WebBuild:
     """The web folder of one note, in memory: its files, its name, what to know of it.
 
@@ -343,6 +346,7 @@ def build(
     ``live`` lets its maps go live online; False keeps them as the HTML report draws them.
     ``placement`` makes it a page of the analyst's site: it gets the way back to the site, the
     site's counts, a card and the picture of its line in the site's list (`engine/site.py`).
+    ``maps`` says where the web maps it links to stand on that site, so each link opens its page there.
     """
     if edition != md.PUBLIC:
         raise NotesWebError("A web folder holds the public edition only.")
@@ -363,7 +367,7 @@ def build(
     hidden = placement is not None and placement.role_of(look) == site_engine.UNLISTED
     folder = html_engine.Folder(csp=folder_csp(), head=lambda description: _head(title, description, where, hidden=hidden),
                                 live=vendor, frame=site_engine.frame_of(placement.site) if placement else None,
-                                author_face=face[0] if face is not None else "")
+                                author_face=face[0] if face is not None else "", maps=maps)
     # a note someone else wrote is signed with their name, under the title unless the look signs it at the end
     signer = notefill.Identity.from_settings().written_by(look.author) if look.author else None
     shown = look.model_copy(update={"signed": "title"}) if look.author and not look.signed else look

@@ -104,6 +104,17 @@ export function resolve(info, id) {
   return info.byId.get(to) ?? null;
 }
 
+/** Whether a record is a web map, a note laid out as a map page: a mention of one is a link to the map. */
+export function isMapNote(info, entity) {
+  return entity?.type === 'note' && (entity.attrs?.look?.web === 'map' || info?.notes?.get(entity.id)?.look?.web === 'map');
+}
+
+/** The case's web maps, by name: what Link to a map offers. */
+export function mapNotes(info) {
+  return (info?.entities ?? []).filter((entity) => isMapNote(info, entity))
+    .sort((a, b) => String(a.label ?? '').localeCompare(String(b.label ?? '')));
+}
+
 /**
  * The block whose source is open, `{ from, to }` over its lines, or null. A drawn
  * block shows its source only while it is open (or the cursor is inside it, which a

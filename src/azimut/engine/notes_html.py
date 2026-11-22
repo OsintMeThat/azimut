@@ -19,8 +19,10 @@ internal passage blanked before anything is read (`notes_markdown.strip_internal
 and refused if one were still there. Guidance lines and HTML comments are dropped,
 raw HTML is shown as text, a case reference is its words with no record id, and a
 link to this machine, a private network or a case path keeps its words and loses
-its address. Pictures are encoded again without their EXIF, GPS or text chunks, and
-a clip is copied without its container's metadata (`ffmpeg -map_metadata -1`).
+its address. On a site, a link to a web map of the case that the site holds opens the
+map's page there (`Folder.maps`, `notelinks.SiteMaps`); elsewhere it is its words.
+Pictures are encoded again without their EXIF, GPS or text chunks, and a clip is
+copied without its container's metadata (`ffmpeg -map_metadata -1`).
 
 **Its weight.** About 25 MB at most (`MAX_BYTES`). A picture is at most 2400 pixels
 on its long side, a JPEG unless it shows through somewhere. A clip goes in only when
@@ -113,6 +115,7 @@ from . import (
     noteannexes,
     notecharts,
     notefill,
+    notelinks,
     notes_chart_wall,
     notes_charts,
     notes_infographic,
@@ -289,6 +292,9 @@ class Folder:
     #: The author's picture, a file at the folder's root (`notes_web.author_face`): a guest's stands
     #: round where the analyst's logo would by their name (`_Page._author_face`); "" for none.
     author_face: str = ""
+    #: Where the web maps the page links to stand on the site it is published to: a link to one
+    #: opens its page there (`notelinks.SiteMaps`); None for a folder that is not on a site.
+    maps: "notelinks.SiteMaps | None" = None
     files: dict[str, bytes] = field(default_factory=dict)
     _named: dict[str, str] = field(default_factory=dict, repr=False)
 
@@ -1715,6 +1721,11 @@ class _Page:
         number = self.cited.number(self.cited.link_source(href)) if self.cited.annex is not None else 0
         card = _card(number)
         entity = md.ENTITY_HREF.match(href)
+        mapped = self._on_site(entity.group(1) if entity else "", href)
+        if mapped:
+            # a link to a map the site holds: its page there, which the site's lists fold under this one
+            kind = ' class="az-ref"' if entity else ""
+            return f"<a{kind} {_outward(mapped)}{card}>", "</a>"
         if entity:
             if self.case is None:
                 return '<span class="az-ref">', "</span>"
@@ -1739,6 +1750,14 @@ class _Page:
             # a file of the case: its entry in the sources list
             return f'<a class="az-ref" href="#src-{number}"{card}>', "</a>"
         return '<span class="az-unlinked">', "</span>"
+
+    def _on_site(self, entity_id: str, href: str) -> str:
+        """The address, on the site the page is published to, of the web map a mention names or a
+        written link is to; "" when it is no map the site holds."""
+        maps = self.folder.maps if self.folder is not None else None
+        if maps is None:
+            return ""
+        return maps.of(entity_id) if entity_id else maps.instead_of(href)
 
     def _prose(self, text: str) -> str:
         """Prose with each bare address linked and cited, each coordinate pair linked
@@ -1768,7 +1787,9 @@ class _Page:
                 if md.is_local(value, ()):
                     out.append(_text(written))
                 else:
-                    out.append(f"<a {_outward(value)}{_card(number)}>{_text(written)}</a>")
+                    # a map's address on another site is written as its address on this one
+                    mapped = self._on_site("", value)
+                    out.append(f"<a {_outward(mapped or value)}{_card(number)}>{_text(mapped or written)}</a>")
             elif kind == "coords":
                 lat, lon = value.group(1), value.group(2)
                 out.append(f'<a class="az-coords" {_outward(md.MAP_LINK.format(lat=lat, lon=lon))}>'

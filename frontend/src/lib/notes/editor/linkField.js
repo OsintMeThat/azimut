@@ -4,7 +4,9 @@
  * bookmark, a capture, a downloaded post), the field says so and offers to cite that
  * item as a chip in place of the words, or to keep a plain link. Words that are not
  * an address find the case's items by name, so a citation is made without knowing
- * how one is written.
+ * how one is written. With nothing typed, it lists the case's web maps under Link to
+ * a map: a press links the words to the map, a mention of it holding the words, which a
+ * page published to a site opens as a link to the map's page there.
  *
  * The case is asked through the editor's `lookup(url)` (`/sources/lookup`, read off
  * the address and the case alone); `lookupAddress` reads its answer, the fuller one
@@ -15,10 +17,12 @@
 import { foldText } from '../../textFold.js';
 import { mentionMatches, pastedUrl } from '../syntax.js';
 import { iconSvg } from './icon.js';
-import { noteCase, noteHandlers } from './state.js';
+import { isMapNote, mapNotes, noteCase, noteHandlers } from './state.js';
 
 /** How long typing rests before the case is asked. */
 export const LOOKUP_REST_MS = 160;
+/** How many web maps the field lists before anything is typed; typing a name finds the rest. */
+export const MAX_MAPS_SHOWN = 8;
 
 /** What a kind of case item is called on the field's line. */
 const NOUNS = { bookmark: 'Bookmark', capture: 'Capture', media: 'Media file', proof: 'Proof' };
@@ -189,7 +193,7 @@ function button(className, text, { title = '', icon = '', primary = false } = {}
 
 /**
  * The field, for the words `target` names (`linkTarget` in `editor/marks.js`), in
- * `view`. `act` carries out what is picked: `{ link: url, title }`, `{ cite: entity }`,
+ * `view`. `act` carries out what is picked: `{ link: url, title }`, `{ cite: entity }`, `{ map: entity }`,
  * `{ bookmark: url, title, author?, published? }`, `{ remove: true }` or `{ close: true }`. Answers
  * `{ dom, focus(), destroy() }`.
  */
@@ -304,6 +308,29 @@ export function linkField(view, target, act) {
       actions);
   };
 
+  /** A case item as the lists show it: a web map is linked to, the words kept, any other item cited. */
+  const itemRow = (entity, info) => {
+    const map = isMapNote(info, entity);
+    const item = el('button', 'cm-link-item', el('span', 'cm-link-item-icon', iconSvg(map ? 'mapArea' : TYPE_ICONS[entity.type] ?? 'tag', 13)),
+      el('span', 'cm-link-item-name', entity.label),
+      el('span', 'cm-link-item-kind', [map ? 'map' : entity.type, entity.attrs?.folder].filter(Boolean).join(' · ')));
+    item.type = 'button';
+    item.setAttribute('role', 'option');
+    item.title = map ? 'Link these words to the map' : 'Cite it in place of these words, as a chip';
+    item.addEventListener('mousedown', (event) => event.preventDefault());
+    item.addEventListener('click', () => act(map ? { map: entity } : { cite: entity }));
+    return item;
+  };
+
+  const listOf = (entities, info, label) => {
+    const list = el('div', 'cm-link-items');
+    list.setAttribute('role', 'listbox');
+    list.setAttribute('aria-label', label);
+    for (const entity of entities) list.append(itemRow(entity, info));
+    primary = () => rows[lit]?.click();
+    return list;
+  };
+
   const itemsList = (query) => {
     const info = view.state.field(noteCase, false);
     const found = mentionMatches(info?.entities ?? [], query, 6);
@@ -311,21 +338,14 @@ export function linkField(view, target, act) {
       primary = null;
       return [el('div', 'cm-link-empty', 'No case item by that name. Paste an address to link it.')];
     }
-    const list = el('div', 'cm-link-items');
-    list.setAttribute('role', 'listbox');
-    list.setAttribute('aria-label', 'Case items');
-    for (const entity of found) {
-      const item = el('button', 'cm-link-item', el('span', 'cm-link-item-icon', iconSvg(TYPE_ICONS[entity.type] ?? 'tag', 13)),
-        el('span', 'cm-link-item-name', entity.label), el('span', 'cm-link-item-kind', [entity.type, entity.attrs?.folder].filter(Boolean).join(' · ')));
-      item.type = 'button';
-      item.setAttribute('role', 'option');
-      item.title = 'Cite it in place of these words, as a chip';
-      item.addEventListener('mousedown', (event) => event.preventDefault());
-      item.addEventListener('click', () => act({ cite: entity }));
-      list.append(item);
-    }
-    primary = () => rows[lit]?.click();
-    return [el('div', 'cm-link-caption', 'Cite a case item'), list];
+    return [el('div', 'cm-link-caption', 'Cite a case item'), listOf(found, info, 'Case items')];
+  };
+
+  /** With nothing typed, the case's web maps: the one way to link words to a map. */
+  const mapsList = () => {
+    const info = view.state.field(noteCase, false);
+    const maps = mapNotes(info).slice(0, MAX_MAPS_SHOWN);
+    return maps.length ? [el('div', 'cm-link-caption', 'Link to a map'), listOf(maps, info, 'Maps of the case')] : [];
   };
 
   async function read() {
@@ -333,7 +353,7 @@ export function linkField(view, target, act) {
     const ask = ++asked;
     primary = null;
     if (!text) {
-      show();
+      show(...mapsList());
       return;
     }
     const url = linkAddress(text);
@@ -366,7 +386,7 @@ export function linkField(view, target, act) {
       light(lit + (event.key === 'ArrowDown' ? 1 : -1));
     }
   });
-  if (input.value) void read();
+  void read();
 
   return {
     dom,

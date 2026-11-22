@@ -400,6 +400,17 @@ export function writeCitation(target, entity) {
   return { changes: { from: target.from, to: target.to, insert }, selection: EditorSelection.range(target.from, target.from + insert.length) };
 }
 
+/**
+ * The words of `target` linked to web map `entity`: a mention of the map holding the words,
+ * which a page published to a site opens as a link to the map's page there. With no words, the map's name.
+ */
+export function writeMapLink(target, entity) {
+  const clean = (text) => String(text ?? '').replace(/\s*\n\s*/g, ' ').replace(/\\?[[\]]/g, '').trim();
+  const words = clean(target.words) || clean(entity.label) || entity.id;
+  const insert = `[[entity:${entity.id}|${words}]]`;
+  return { changes: { from: target.from, to: target.to, insert }, selection: EditorSelection.range(target.from, target.from + insert.length) };
+}
+
 /** Dispatch `spec` as one Undo step of its own; false when there was nothing to do. */
 export function runFormat(view, spec) {
   if (!spec || view.state.readOnly) return false;

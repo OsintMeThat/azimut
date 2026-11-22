@@ -22,13 +22,13 @@ const ENTITIES = [
 let view;
 let handlers;
 
-function editor(text, from, to, { mode = 'drawn' } = {}) {
+function editor(text, from, to, { mode = 'drawn', entities = ENTITIES } = {}) {
   const parent = document.createElement('div');
   document.body.append(parent);
   view = new EditorView({ parent, state: EditorState.create({ doc: text, extensions: noteExtensions({ handlers, mode }) }) });
   // happy-dom answers focus() with a selection of its own, which a browser does not; the editor is made focused by its state
   view.focus = vi.fn();
-  view.dispatch({ effects: [setNoteCase.of({ caseId: 'c1', entities: ENTITIES }), setFocused.of(true)] });
+  view.dispatch({ effects: [setNoteCase.of({ caseId: 'c1', entities }), setFocused.of(true)] });
   view.dispatch({ selection: EditorSelection.range(from, to) });
   return view;
 }
@@ -315,6 +315,71 @@ describe('the Link field', () => {
     expect(view.state.sliceDoc(view.state.selection.main.from, view.state.selection.main.to)).toBe('quay');
     view.dispatch({ selection: EditorSelection.cursor(view.state.doc.length) });
     expect(openLinkField(view)).toBe(false);
+  });
+
+  describe('Link to a map', () => {
+    const MAP = { style: 'article', web: 'map' };
+    const WITH_MAPS = [
+      ...ENTITIES,
+      { id: 'm2', type: 'note', label: 'Strikes', attrs: { look: MAP } },
+      { id: 'm1', type: 'note', label: 'Road map', attrs: { look: MAP } },
+      { id: 'n1', type: 'note', label: 'Road notes', attrs: {} },
+    ];
+    const names = () => [...field().querySelectorAll('.cm-link-item')].map((item) => item.querySelector('.cm-link-item-name').textContent);
+
+    it('lists the case\'s web maps before anything is typed, and links the words to one in one Undo step', async () => {
+      editor('See the road for where they went.', 0, 0, { entities: WITH_MAPS });
+      select('the road');
+      openLinkField(view);
+      await settle();
+      expect(field().querySelector('.cm-link-caption').textContent).toBe('Link to a map');
+      expect(names()).toEqual(['Road map', 'Strikes']);
+      const [road] = field().querySelectorAll('.cm-link-item');
+      expect(road.querySelector('.cm-link-item-kind').textContent).toBe('map');
+      expect(road.title).toBe('Link these words to the map');
+      const depth = undoDepth(view.state);
+      road.click();
+      await settle();
+      // the words stay the link's, which a site's page opens as the map's own
+      expect(text()).toBe('See [[entity:m1|the road]] for where they went.');
+      expect(undoDepth(view.state)).toBe(depth + 1);
+      view.dispatch({ selection: EditorSelection.cursor(text().length) });
+      const chip = view.dom.querySelector('.cm-chip-map');
+      expect(chip.textContent).toBe('the road');
+      expect(chip.title).toBe('Link to the map Road map. Click to open');
+      expect(chip.querySelector('.cm-chip-mark svg')).not.toBeNull();
+    });
+
+    it('finds a map by name too and links it, the words kept, where any other note is cited', async () => {
+      editor('See the road for where they went.', 0, 0, { entities: WITH_MAPS });
+      select('the road');
+      openLinkField(view);
+      await typeAddress('road');
+      expect(names()).toEqual(['Road map', 'Road notes']);
+      const kinds = [...field().querySelectorAll('.cm-link-item-kind')].map((kind) => kind.textContent);
+      expect(kinds).toEqual(['map', 'note']);
+      input().dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
+      await settle();
+      expect(text()).toBe('See [[entity:m1|the road]] for where they went.');
+      select('they');
+      openLinkField(view);
+      await typeAddress('road notes');
+      field().querySelector('.cm-link-item').click();
+      await settle();
+      expect(text()).toBe('See [[entity:m1|the road]] for where [[entity:n1|Road notes]] went.');
+      // a mention of a note that is no map stays a chip named as its note
+      view.dispatch({ selection: EditorSelection.cursor(0) });
+      expect([...view.dom.querySelectorAll('.cm-chip')].map((chip) => chip.classList.contains('cm-chip-map'))).toEqual([true, false]);
+    });
+
+    it('offers no map in a case that has none', async () => {
+      editor('See the road.', 0, 0);
+      select('the road');
+      openLinkField(view);
+      await settle();
+      expect(field().querySelector('.cm-link-caption')).toBeNull();
+      expect(field().querySelectorAll('.cm-link-item')).toHaveLength(0);
+    });
   });
 
   it('holds Bold, Italic, Link, Footnote, Heading, a list, Quote, Code, Internal and Clear, in that order', () => {
