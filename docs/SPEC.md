@@ -204,7 +204,7 @@ proof for publication.
 | ✅ **HTML report** | Writes a note as one self-contained page readable offline beside the PDF (a before/after swipe, playable clips, zoomable pictures, a citation's source on hover, verify links, the edition's hash), laid out as an article or as a story of held pictures. |
 | ✅ **Report on the web** | Writes a note as a folder ready to host, with its link card and the GitHub Pages steps, publishes it to the analyst's own GitHub Pages in one press, or sends it to WordPress as a draft. |
 | ✅ **Your website** | Every publish to GitHub Pages also keeps the analyst's site: a card and a list picture with each article, then its list, feed and sitemap, the lists between markers in their own pages (a default home when they have none), pages kept off the lists, a way back to the site on each page, a warning when a folder was changed on GitHub since or the address holds another article, and readers counted on GoatCounter or Cloudflare when asked; only files Azimut made are ever written. |
-| ✅ **Website settings** | Sets the site in one tab (title, line and credit, GitHub Pages and WordPress, how readers are counted, Update the site, the Legal notice starter), and the publish dialog adds a category, Article or Page and a list picture. |
+| ✅ **Website settings** | Sets the site in one tab (title, line and credit, GitHub Pages and WordPress, how readers are counted, Update the site, which also gives pages published before a new domain its address, the Legal notice starter), and the publish dialog adds a category, Article or Page and a list picture. |
 | ✅ **Website hub** | Settings › Website as the site's hub, in panels: a live preview of its name and logo, a read of what it holds with a delete, its limits, readers and upkeep; Unlisted joins Article and Page, first for a note new to the site and kept out of search engines. |
 | ✅ **Reader numbers** | Reads each article's page views over 7 and 30 days, the site's total, referrers and countries from Cloudflare Web Analytics on a press, with a read-only token kept on this computer. |
 | ✅ **Your own bar and footer** | Articles carry the site's own header from `azimut-bar.html` in place of Azimut's bar and its footer from `azimut-footer.html` after Azimut's, each cleaned and kept apart from the article's styles, and Update the site changes them in every article. |
@@ -506,7 +506,8 @@ stops making sense.
   `articles.json`, `feed.xml` and `sitemap.xml` that carry its marks, a root page that
   carries its generator with a version, the content between `azimut:articles` markers, and
   the bar between `azimut:bar` markers and the footer between `azimut:footer` markers of its own
-  article pages) and leaves every other file
+  article pages, and the site's address in its own pages' canonical, og:url, og:image, twitter:image
+  and links to the site's folders) and leaves every other file
   as it is, but for the `category` of a card, wherever it lives, on a change of categories
   the analyst asks for in Settings › Website. The site's own bar and footer, `azimut-bar.html` and
   `azimut-footer.html` (64 KB each at most, past which the articles keep Azimut's bar or go without
@@ -516,7 +517,9 @@ stops making sense.
   declarative shadow root that keeps its styles and the article's apart, under the page's
   own policy (inline styles; pictures and fonts from the site only). Update the site reads
   each article page (8 MB at most) only when `articles.json` does not say which bar and footer
-  they all carry. Names, the short name
+  they all carry, and each page, maps too, only when it does not say the address they all give.
+  The site's address is its custom domain as the Pages API names it (`cname`), else `html_url`.
+  Names, the short name
   and every path are checked at the edge, a folder Azimut did not make is never
   replaced, and the folder is bounded in files and weight before anything is sent. The
   token is a fine-grained one the analyst limits to the one repository (Contents and

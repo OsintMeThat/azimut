@@ -32,6 +32,10 @@ repository is the analyst's.
   `<!-- /azimut:footer -->`. With no such file a page has neither markers nor footer; the markers
   and what is between them are Azimut's, in its own article folders only, and a map page never
   has them. `articles.json` keeps which footer the articles carry as `footer`.
+- The site's address a page in Azimut's own folders gives, articles and maps alike, is Azimut's: its
+  canonical, og:url, og:image and twitter:image, and its links to the site's folders under that address.
+  When the site moves (a custom domain, a repository renamed), Update the site gives them the new one
+  (`readdressed`) and nothing else; `articles.json` keeps the address every page gives as `address`.
 
 - A card's `category`, in any folder, is what Settings › Website changes when the analyst renames
   or deletes a category or gives one article another; nothing else of a card it did not write.
@@ -502,11 +506,115 @@ def with_footer(page: bytes, inner: str) -> bytes | None:
     return page[:end] + marked_footer(inner).encode("utf-8") + page[end:]
 
 
-def bare(page: bytes) -> bytes:
+def bare(page: bytes, bases: Iterable[str] = ()) -> bytes:
     """The page with nothing between its bar's markers and none of the site's own footer: what is the
     same whichever bar and footer Update the site gave it, and what a page published before either
-    was had."""
-    return without_bar(with_footer(page, "") or page)
+    was had. With ``bases``, site addresses, each is also taken off the front of every address
+    `readdressed` may change, so a page whose site's address Update the site moved reads as it was."""
+    plain = without_bar(with_footer(page, "") or page)
+    return _unaddressed(plain, bases) if bases else plain
+
+
+def upkept(was: bytes, now: bytes) -> bool:
+    """Whether a page Azimut published reads ``now`` as it did (``was``) but for what Update the site
+    changes in it: its bar and its footer (`bare`), and the site's address it gives (`readdressed`)."""
+    if bare(was) == bare(now):
+        return True
+    bases = {site_of(page_address(was)), site_of(page_address(now))} - {""}
+    return len(bases) == 2 and bare(was, bases) == bare(now, bases)
+
+
+# -- the site's address in the pages Azimut published ---------------------------------------------------
+#
+# A page gives the address it was published at (`notes_web._head`): its canonical, og:url, and og:image
+# and twitter:image (its `share.jpg`); and a link the analyst wrote to another page of the site names
+# it under that address too. A site that moves (a custom domain, a repository renamed) leaves those on
+# the old address until Update the site gives them the new one (`readdressed`), in those attributes
+# alone: an address quoted in the text, the page's policy and every other byte stay as they were, and
+# so do the site's own bar and footer, which are the site's files.
+
+#: The head's lines that give the page's own address, as Azimut writes them (`notes_web._head`).
+_OWN_ADDRESS = re.compile(rb'<link rel="canonical" href="|<meta property="og:url" content="|'
+                          rb'<meta property="og:image" content="|<meta name="twitter:image" content="')
+_CANONICAL = re.compile(rb'<link rel="canonical" href="([^"]*)"')
+_LINK = re.compile(rb'<a\b[^>]*?\shref="')
+_HEAD_END = b"</head>"
+
+
+def page_address(page: bytes) -> str:
+    """The address a page Azimut published gives as its own, its canonical; "" for none."""
+    end = page.find(_HEAD_END)
+    found = _CANONICAL.search(page, 0, end) if end >= 0 else None
+    return html.unescape(found.group(1).decode("utf-8", "replace")) if found else ""
+
+
+def site_of(address: str, folder: str = "") -> str:
+    """The site's address a page's own (`page_address`) is under, with its closing slash: the address
+    less its last part, which must be ``folder`` when one is given; "" for none or another folder."""
+    if not address.startswith("https://") or not address.endswith("/"):
+        return ""
+    base, _, last = address[:-1].rpartition("/")
+    if not last or base.count("/") < 2 or (folder and last != folder):
+        return ""
+    return f"{base}/"
+
+
+def _escaped(address: str) -> bytes:
+    return html.escape(address, quote=True).encode("utf-8")
+
+
+def _spots(page: bytes) -> tuple[list[int], list[int]]:
+    """Where each address `readdressed` may change starts: in the head's own lines, then in the links of
+    the body, none of them inside the site's bar or footer."""
+    end = page.find(_HEAD_END)
+    if end < 0:
+        return [], []
+    own = [found.end() for found in _OWN_ADDRESS.finditer(page, 0, end)]
+    kept = [span for span in (_bar_span(page), _footer_span(page)) if span is not None]
+    links = [found.end() for found in _LINK.finditer(page, end)
+             if not any(start <= found.start() < stop for start, stop in kept)]
+    return own, links
+
+
+def _spliced(page: bytes, cuts: list[tuple[int, int]], put: bytes) -> bytes:
+    """The page with each of ``cuts`` (where, how long), in order, given ``put`` in place."""
+    out, last = [], 0
+    for at, length in cuts:
+        out += [page[last:at], put]
+        last = at + length
+    out.append(page[last:])
+    return b"".join(out)
+
+
+def readdressed(page: bytes, old: str, new: str, folders: Iterable[str]) -> bytes:
+    """The page with the site's old address ``old`` given as ``new`` (each a site's address with its
+    closing slash): at the front of its head's canonical, og:url, og:image and twitter:image, and of each
+    link (`<a href>`) to one of the site's ``folders`` under it. Every other byte stays as it was."""
+    if not old.endswith("/") or not new.endswith("/") or old == new:
+        return page
+    was, names = _escaped(old), set(folders)
+    own, links = _spots(page)
+    cuts = [at for at in own if page.startswith(was, at)]
+    for at in links:
+        close = page.find(b'"', at)
+        if close > at and page.startswith(was, at):
+            first = re.split(rb"[/?#]", page[at + len(was):close], maxsplit=1)[0]
+            if first and html.unescape(first.decode("utf-8", "replace")) in names:
+                cuts.append(at)
+    return _spliced(page, [(at, len(was)) for at in sorted(cuts)], _escaped(new)) if cuts else page
+
+
+def _unaddressed(page: bytes, bases: Iterable[str]) -> bytes:
+    """The page with any of the site addresses ``bases`` taken off the front of every address
+    `readdressed` may change, the longest first: what a page reads as whichever of them it gives."""
+    wanted = sorted({_escaped(base) for base in bases if base}, key=len, reverse=True)
+    own, links = _spots(page)
+    cuts = []
+    for at in sorted(own + links):
+        found = next((was for was in wanted if page.startswith(was, at)), None)
+        if found is not None:
+            cuts.append((at, len(found)))
+    return _spliced(page, cuts, b"")
 
 
 # -- the site's own bar and footer: azimut-bar.html, azimut-footer.html ---------------------------------

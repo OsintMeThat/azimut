@@ -1894,7 +1894,7 @@ def _github_page_state(record: dict[str, Any]) -> str:
         with githubpages.client() as http:
             return githubpages.page_state(githubpages.GitHub(target.token, http), owner, repo, record["branch"],
                                           f"{record['path']}/{web_engine.INDEX}", record["sha256"],
-                                          record.get("bare_sha256", ""))
+                                          record.get("bare_sha256", ""), record.get("tree", ""))
     except githubpages.GitHubError as exc:
         raise HTTPException(status_code=502, detail=str(exc)) from exc
 
@@ -2053,7 +2053,7 @@ def github_publish(case_id: str, note_id: str, body: GitHubPublishIn) -> dict[st
             published = githubpages.publish(
                 gh, target.account, target.repo, target.branch, files, folder, f"Publish {title}", card=made.card,
                 plan=sitesync.planner(gh, target.account, target.repo, placement.site),
-                expected_tree=_published_tree(case, note_id, repository, target.branch, folder))
+                expected_tree=_published_tree(case, note_id, repository, target.branch, folder), address=pages.url)
     except githubpages.GitHubError as exc:
         raise HTTPException(status_code=502, detail=str(exc)) from exc
     record: dict[str, Any] = {
