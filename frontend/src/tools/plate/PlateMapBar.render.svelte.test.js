@@ -64,6 +64,19 @@ describe('a plate map\'s own bar', () => {
     expect(element.view.bearing).toBe(0);
   });
 
+  it('keeps its hover words off a menu it has opened, so they never cover it', () => {
+    show({ id: 'm', kind: 'map', basemap: 'esri-wayback', release: 41, view: { lat: 0, lon: 0, zoom: 4 }, layers: [] },
+      { grounds: [['esri-wayback', 'World Imagery Wayback, dated']], releases: [{ release: 41, date: '2024-03-12' }] });
+    for (const label of ['Ground', 'Ground\'s day']) {
+      expect(button(label).title).not.toBe('');
+      button(label).click(); flushSync();
+      expect(button(label).getAttribute('aria-expanded')).toBe('true');
+      expect(button(label).hasAttribute('title')).toBe(false);
+      button(label).click(); flushSync();
+      expect(button(label).title).not.toBe('');
+    }
+  });
+
   it('wraps a turn round the half circle', () => {
     const element = show({ kind: 'map', view: { lat: 0, lon: 0, zoom: 5, bearing: 175 }, basemap: 'plain', overlays: [] });
     button('Turn the map left').click();
