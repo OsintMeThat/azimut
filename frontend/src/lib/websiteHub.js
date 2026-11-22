@@ -44,6 +44,9 @@ function itemOf(raw) {
     role: ROLES.includes(raw?.role) ? raw.role : 'article',
     layout: LAYOUTS.includes(raw?.layout) ? raw.layout : 'article',
     image: webLink(raw?.image),
+    // who it is by, and their picture: the site's own name for an article of the analyst's
+    author: line(raw?.author, 120),
+    authorImage: webLink(raw?.author_image),
     bytes: bytesOf(raw?.bytes),
     // where it stands on the site's map, null for nowhere
     place: placeOf(raw?.place),

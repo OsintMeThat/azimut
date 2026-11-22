@@ -3,6 +3,8 @@ import { api } from './api.js';
 import {
   bundleDownloadUrl,
   discardBundleUpload,
+  flaggedSaid,
+  importedSaid,
   inspectBundle,
   readBundleJob,
   startBundleExport,
@@ -37,6 +39,7 @@ it('uploads the selected file and keeps passwords out of URLs', async () => {
   expect(api.post).toHaveBeenNthCalledWith(2, '/api/cases/bundles/import', {
     upload_id: 'a'.repeat(32),
     password: 'secret',
+    keep_flagged: false,
   });
   expect(api.post).toHaveBeenNthCalledWith(3, '/api/cases/case-1/bundle/export', {
     password: 'secret',
@@ -82,4 +85,23 @@ it('bounds a job that never settles', async () => {
   await expect(
     waitForBundle('case-1', 'job-1', { pause: 0, maxPause: 0, timeout: 0 })
   ).rejects.toThrow('timed out');
+});
+
+it('keeps what the check flagged only when asked, in so many words', async () => {
+  await startBundleImport('a'.repeat(32), '', true);
+  expect(api.post).toHaveBeenLastCalledWith('/api/cases/bundles/import', { upload_id: 'a'.repeat(32), password: null, keep_flagged: true });
+  await startBundleImport('a'.repeat(32), '', 'yes');
+  expect(api.post.mock.calls.at(-1)[1].keep_flagged).toBe(false);
+});
+
+it('says what the import leaves out before, and what it left out after', () => {
+  expect(flaggedSaid(1)).toBe('1 file could run as a program or is not what its name says. The import leaves it out.');
+  expect(flaggedSaid(3)).toMatch(/^3 files could run as a program or are not what their name says\./);
+  expect(importedSaid('Guest case', { left_out: [] })).toBe('Imported “Guest case”');
+  expect(importedSaid('Guest case', {})).toBe('Imported “Guest case”');
+  const left = [{ name: 'files/setup.exe' }, { name: 'media/a.jpg' }, { name: 'run.sh' }, { name: 'more.bat' }];
+  expect(importedSaid('Guest case', { left_out: left.slice(0, 1), left_out_count: 1 }))
+    .toBe('Imported “Guest case”, leaving out 1 file: files/setup.exe');
+  expect(importedSaid('Guest case', { left_out: left, left_out_count: 250 }))
+    .toBe('Imported “Guest case”, leaving out 250 files: files/setup.exe, media/a.jpg, run.sh…');
 });

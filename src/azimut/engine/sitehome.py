@@ -71,6 +71,7 @@ img{max-width:100%;display:block}
 .az-title a{color:var(--ink);text-decoration:none}
 .az-title a:hover{color:var(--accent)}
 .az-meta{margin:0 0 .6rem;color:var(--muted);font:400 .85rem var(--head)}
+.az-face{width:1.25em;height:1.25em;margin-right:.35em;border-radius:50%;object-fit:cover;vertical-align:-.3em}
 .az-summary{margin:0 0 .75rem;color:var(--ink-2)}
 .az-links{margin:0;display:flex;flex-wrap:wrap;gap:.4rem 1rem;font:500 .9rem var(--head)}
 .az-links a{text-decoration:none}

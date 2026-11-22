@@ -120,6 +120,17 @@ describe('Case bundles', () => {
     expect(source).toContain('A lost password cannot be recovered.');
   });
 
+  it('lists what the import leaves out before it starts, and keeps it only when the box is ticked', () => {
+    expect(source).toContain('{#if bundlePreview.flagged_count}');
+    expect(source).toContain('{flaggedSaid(bundlePreview.flagged_count)}');
+    expect(source).toContain('{item.name}</span><span class="flagged-why">{item.reason}</span>');
+    expect(source).toContain('bind:checked={keepFlagged} title={KEEP_FLAGGED_HELP}');
+    expect(source).toContain('startBundleImport(bundlePreview.upload_id, bundlePassword, keepFlagged)');
+    // every new check starts with the box off
+    expect(source.match(/keepFlagged = false;/g)).toHaveLength(2);
+    expect(source).toContain('importedSaid(started.name, job)');
+  });
+
   it('waits for durable export and import jobs', () => {
     expect(source).toContain('waitForBundle(current.id, started.job_id, {');
     expect(source).toContain('waitForBundle(started.case_id, started.job_id, {');

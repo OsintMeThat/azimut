@@ -40,8 +40,15 @@ describe('the read, as the hub holds it', () => {
     expect(read.items).toHaveLength(6);
     expect(read.items[0]).toEqual({ folder: 'bab', deletable: true, address: 'https://news.example.org/bab/', title: 'The Bab front', date: '2026-11-20',
       dateLabel: '20 November 2026', category: 'Conflict Watch', role: 'article', layout: 'story', image: 'https://news.example.org/bab/cover.jpg', bytes: BAB,
-      place: null });
+      place: null, author: '', authorImage: '' });
     expect(read.categories).toEqual(ANSWER.categories);
+  });
+
+  it('keeps who a row is by and their picture, a picture only as a web address', () => {
+    const row = (more) => siteReadOf({ items: [card('guest', more)] }).items[0];
+    expect(row({ author: '  Jane   Guest ', author_image: 'https://news.example.org/guest/author.jpg' }))
+      .toMatchObject({ author: 'Jane Guest', authorImage: 'https://news.example.org/guest/author.jpg' });
+    expect(row({ author_image: 'javascript:alert(1)' }).authorImage).toBe('');
   });
 
   it('keeps a row\'s place on the site\'s map when it reads as one, and none otherwise', () => {

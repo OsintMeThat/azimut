@@ -160,7 +160,8 @@ it('while GitHub is not set up, a press shows the way to Settings and publishes 
   const props = show();
   await settle();
   expect(bound.connected).toBe(false);
-  expect(target.textContent.trim()).toBe('');
+  // only who wrote the note, which can be said with GitHub off
+  expect([...target.querySelectorAll('.lbl')].map((node) => node.textContent.trim())).toEqual(['Author', 'Author picture']);
   expect(await live.publish()).toBeNull();
   await settle();
   expect(target.textContent).toContain('connect GitHub once, in Settings › Website');
@@ -335,7 +336,7 @@ it('keeps the picture of the list in the note\'s look as it is picked, clears it
   serve({ look: { style: 'report', list_image: 'e_a' } });
   const props = show({ entities: PICTURES });
   await settle();
-  const pick = () => target.querySelector('button.pick');
+  const pick = () => target.querySelector('button[data-pick="list"]');
   expect(pick().textContent.trim()).toBe('Harbour');
   expect(pick().getAttribute('title')).toBeTruthy();
   pick().click();
@@ -360,11 +361,11 @@ it('says a picture was not kept, and shows the one it was', async () => {
   const props = show({ entities: PICTURES });
   await settle();
   put.mockRejectedValue(new Error('That picture is not in the case.'));
-  target.querySelector('button.pick').click();
+  target.querySelector('button[data-pick="list"]').click();
   await settle();
   [...target.querySelectorAll('.picture-row')][1].click();
   await settle();
-  expect(target.querySelector('button.pick').textContent.trim()).toBe('Harbour');
+  expect(target.querySelector('button[data-pick="list"]').textContent.trim()).toBe('Harbour');
   expect(props.onlook).not.toHaveBeenCalled();
 });
 
@@ -594,4 +595,89 @@ it('publishes when the editions cannot be read, as with a check that fails', asy
   await settle();
   expect((await live.publish()).published).toBe(true);
   expect(checks()).toEqual([]);
+});
+
+// -- who wrote it ---------------------------------------------------------------------------
+
+const author = () => target.querySelector('#export-author');
+const leave = async (field, value) => {
+  field.value = value;
+  field.dispatchEvent(new Event('input', { bubbles: true }));
+  field.dispatchEvent(new Event('change', { bubbles: true }));
+  await settle();
+};
+
+it('opens on the author the note keeps, its placeholder the name it falls back to, for every role', async () => {
+  prefs.reportName = 'A. Analyst';
+  serve({ look: { author: 'Jane Guest', author_image: 'e_a' } });
+  show({ entities: PICTURES });
+  await settle();
+  expect(author().value).toBe('Jane Guest');
+  expect(author().getAttribute('placeholder')).toBe('A. Analyst');
+  expect(author().getAttribute('title')).toBeTruthy();
+  expect(target.querySelector('button[data-pick="author"]').textContent.trim()).toBe('Harbour');
+  for (const role of ['Page', 'Unlisted', 'Article']) {
+    choice(role).click();
+    flushSync();
+    expect(author()).not.toBeNull();
+  }
+});
+
+it('keeps the author in the look as the field is left, and an emptied one goes back to the default', async () => {
+  serve({ look: { style: 'report' } });
+  const props = show({ entities: PICTURES });
+  await settle();
+  await leave(author(), '  Jane   Guest ');
+  expect(put).toHaveBeenLastCalledWith('/api/cases/c1/notes/n1/look', expect.objectContaining({ style: 'report', author: 'Jane Guest' }));
+  expect(author().value).toBe('Jane Guest');
+  expect(props.onlook).toHaveBeenCalledTimes(1);
+  // leaving it unchanged writes nothing
+  await leave(author(), 'Jane Guest');
+  expect(put).toHaveBeenCalledTimes(1);
+  await leave(author(), '');
+  expect('author' in put.mock.calls.at(-1)[1]).toBe(false);
+});
+
+it('picks the author picture among the case pictures, never a clip, and clears it', async () => {
+  serve({ look: {} });
+  show({ entities: PICTURES });
+  await settle();
+  const pick = () => target.querySelector('button[data-pick="author"]');
+  expect(pick().textContent.trim()).toBe('No picture');
+  pick().click();
+  await settle();
+  expect([...target.querySelectorAll('.picture-row')].map((node) => node.textContent.trim())).toEqual(['Harbour', 'Pier at dawn']);
+  [...target.querySelectorAll('.picture-row')][0].click();
+  await settle();
+  expect(put).toHaveBeenLastCalledWith('/api/cases/c1/notes/n1/look', expect.objectContaining({ author_image: 'e_a' }));
+  expect(pick().textContent.trim()).toBe('Harbour');
+  target.querySelector('button[aria-label="No author picture"]').click();
+  await settle();
+  expect('author_image' in put.mock.calls.at(-1)[1]).toBe(false);
+  expect(pick().textContent.trim()).toBe('No picture');
+});
+
+it('with GitHub off, the author can still be set, so it travels with the case', async () => {
+  serve({ github: NOTHING, look: {} });
+  show({ entities: PICTURES });
+  await settle();
+  await leave(author(), 'Jane Guest');
+  expect(put).toHaveBeenLastCalledWith('/api/cases/c1/notes/n1/look', expect.objectContaining({ author: 'Jane Guest' }));
+  expect(post).not.toHaveBeenCalled();
+});
+
+it('publishes only once the author just typed is in the look', async () => {
+  serve({ look: {} });
+  publishOk();
+  let release;
+  put.mockImplementation((path, body) => new Promise((resolve) => { release = () => resolve({ look: body }); }));
+  show({ entities: PICTURES });
+  await settle();
+  await leave(author(), 'Jane Guest');
+  const publishing = live.publish();
+  await settle();
+  expect(post.mock.calls.some(([path]) => path.endsWith('/github'))).toBe(false);
+  release();
+  await publishing;
+  expect(post.mock.calls.some(([path]) => path.endsWith('/github'))).toBe(true);
 });
