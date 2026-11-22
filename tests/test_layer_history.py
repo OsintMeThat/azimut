@@ -468,6 +468,25 @@ def test_a_selection_moved_with_no_date_moves_on_every_day_or_not_at_all(client,
     assert [feature(client, owner, row, key) for key in (steady, plain)] == before
 
 
+def test_a_name_put_by_hand_is_one_place_on_every_day_and_stays_when_its_line_moves_on_one(client, owner):
+    row = create(client, owner)
+    key = add_line(client, owner, row, date="2026-10-03", label="on")
+    edit(client, owner, row, key, at="2026-10-12", geometry={"type": "LineString", "coordinates": MOVED})
+    # dated or not, the place is the feature's, never a state's
+    assert edit(client, owner, row, key, at="2026-10-12", label_at=[30.05, 50.05]).status_code == 200
+    stored = feature(client, owner, row, key)["properties"]
+    assert stored["label_at"] == [30.05, 50.05] and all("label_at" not in state for state in stored["states"])
+    # moved on a day, the line leaves the name where the analyst put it for the days before
+    answer = client.post(f"{url_of(owner, row)}/selection", json={"keys": [key], "offset": [0, 0.1], "at": "2026-10-20"})
+    assert answer.status_code == 200, answer.text
+    assert feature(client, owner, row, key)["properties"]["label_at"] == [30.05, 50.05]
+    # moved with no date, on every day, the name goes with it
+    plain = add_line(client, owner, row, FURTHER, label="on")
+    edit(client, owner, row, plain, label_at=[30.05, 50.25])
+    client.post(f"{url_of(owner, row)}/selection", json={"keys": [plain], "offset": [0, 1]})
+    assert feature(client, owner, row, plain)["properties"]["label_at"] == [30.05, 51.25]
+
+
 def test_a_group_of_events_marks_its_features_for_the_map(client, owner):
     row = create(client, owner)
     groups = client.get(f"{url_of(owner, row)}/edit").json()["groups"]

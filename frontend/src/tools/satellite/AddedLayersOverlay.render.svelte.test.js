@@ -6,7 +6,7 @@ const made = vi.hoisted(() => []);
 vi.mock('../../lib/map/addedLayer.js', () => ({
   createAddedLayer: vi.fn((engine, options) => {
     const layer = { options, set: vi.fn(async () => {}), filter: vi.fn(), destroy: vi.fn(), interactive: vi.fn(),
-      floor: () => null, stackUnder: vi.fn(), hide: vi.fn(), reveal: vi.fn(), feature: vi.fn(), drawn: vi.fn(async () => {}) };
+      floor: () => null, stackUnder: vi.fn(), hide: vi.fn(), hideNames: vi.fn(), reveal: vi.fn(), feature: vi.fn(), drawn: vi.fn(async () => {}) };
     made.push(layer);
     return layer;
   }),
@@ -20,13 +20,14 @@ let landings = $state.raw([]);
 let dragging = $state.raw(null);
 let edited = $state.raw(null);
 let sketch = $state.raw(null);
+let naming = $state.raw(null);
 Object.defineProperties(editor, { landings: { get: () => landings }, dragging: { get: () => dragging }, editor: { get: () => edited },
-  sketch: { get: () => sketch } });
+  sketch: { get: () => sketch }, naming: { get: () => naming } });
 editor.claim = vi.fn((landing) => { landing.claimed = true; });
 editor.landed = vi.fn();
 
 let held = null;
-afterEach(() => { if (held) unmount(held); held = null; made.length = 0; landings = []; dragging = null; edited = null; sketch = null; vi.clearAllMocks(); });
+afterEach(() => { if (held) unmount(held); held = null; made.length = 0; landings = []; dragging = null; edited = null; sketch = null; naming = null; vi.clearAllMocks(); });
 const settle = async () => { for (let i = 0; i < 10; i += 1) await Promise.resolve(); flushSync(); };
 
 describe('the layers drawn on a map', () => {
@@ -80,6 +81,24 @@ describe('the layers drawn on a map', () => {
       await settle();
       return { props, drawing, layer: made[0] };
     }
+
+    it('holds a carried name off its layer alone, and lets it back with the data that writes it where it landed', async () => {
+      const { layer } = await drawn();
+      expect(made[0].options.id).toBe('front');
+      naming = { name: 'front', key: 'k' };
+      await settle();
+      expect(layer.hideNames).toHaveBeenLastCalledWith(['k']);
+      expect(layer.hide).not.toHaveBeenCalledWith(['k']);
+      const landing = { name: 'front', keys: ['k'], properties: { label_at: [3, 48] }, saved: false, sha: null };
+      layer.hideNames.mockClear();
+      landings = [landing]; naming = { ...naming, landing };
+      await settle();
+      expect(layer.set.mock.calls.at(-1)[0].features[0].properties.label_at).toEqual([3, 48]);
+      expect(layer.set.mock.calls.at(-1)[1].heldNames).toEqual([]);
+      // the copy waits for the data, never shown back where it was meanwhile
+      expect(layer.hideNames).not.toHaveBeenCalled();
+      expect(editor.landed).toHaveBeenCalledWith(landing);
+    });
 
     it('is drawn where it landed at once, the dragged copies going once it is on screen', async () => {
       const { layer } = await drawn();

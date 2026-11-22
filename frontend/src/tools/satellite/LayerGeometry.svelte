@@ -9,7 +9,9 @@
    * Mounted by every map that edits (Map, Detect, Compare, Horizon), so the bar
    * and the gestures are the same whichever one the analyst is on. A press on
    * a picked feature (an area by its edge) is taken before the map sees it, so
-   * it moves the feature rather than the map; a drag anywhere else pans.
+   * it moves the feature rather than the map; a drag anywhere else pans. A
+   * picked line's or area's name drawn on the map is carried the same way, and
+   * written where it is let go (`lib/map/layerNames.js`).
    */
   import LayerEditBar from './LayerEditBar.svelte';
   import LayerFeatureMenu from './LayerFeatureMenu.svelte';
@@ -17,7 +19,8 @@
   import { iconLibrary } from '../../lib/iconLibrary.svelte.js';
   import { featuresInLoop, hitFeature, hitPart, linesOf, markerDisc } from '../../lib/map/layerHit.js';
   import { isBadge } from '../../lib/map/markerGlyphs.js';
-  import { SOURCE_ICON_SCALE } from '../../lib/map/addedLayer.js';
+  import { SOURCE_ICON_SCALE, namesUnder } from '../../lib/map/addedLayer.js';
+  import { nameMoves, namePlace, nameShown } from '../../lib/map/layerNames.js';
   import { middleClickPaste } from '../../lib/clipboardPaste.js';
   import { overlayHoldsKeys } from '../../lib/overlayStack.js';
   import { sketchReading } from '../../lib/map/sketchMeasure.js';
@@ -58,6 +61,10 @@
   let altHeld = false;
   /** Whether the last press was on this map: a Delete after a press on a button of the panel removes nothing. */
   let pressedOnMap = false;
+  /** A line's or an area's name being carried, `{ key, text, size, x, y }` in screen pixels: drawn here until the map writes it where it landed. */
+  let carried = $state(null);
+  /** Whether this map's pointer is over a name it can carry, which its cursor says. */
+  let overName = false;
 
   const editing = $derived(active && !!engine && !!controller.editor && !controller.loading);
   const groups = $derived(new Map((controller.groups ?? []).map((group) => [group.id, group])));
@@ -77,6 +84,14 @@
     }).sort((a, b) => (rank.get(b.properties.group) ?? 0) - (rank.get(a.properties.group) ?? 0));
   });
   const project = (lon, lat) => engine.latLngToContainerPoint({ lat, lon });
+  /** The lines and areas whose names the map writes, by key: a press on one of those names finds its feature. */
+  const named = $derived(new Set(shown.filter((feature) => nameMoves(feature)
+    && nameShown(feature.properties, groups.get(feature.properties.group))).map((feature) => feature.properties.key)));
+  /** The key of the line or area of this layer whose name is drawn under a point of the map, or null. */
+  function nameAt(at) {
+    if (!named.size || !controller.editor) return null;
+    return namesUnder(engine, at, controller.editor.name).find((key) => named.has(key)) ?? null;
+  }
 
   const sketch = $derived(active ? controller.sketch : null);
   /**
@@ -403,10 +418,19 @@
         drawLoop(event, at, local);
         return;
       }
-      const hit = hitPart(shown, project, at, ownReach);
+      const found = hitPart(shown, project, at, ownReach);
+      const add = event.shiftKey || event.ctrlKey || event.metaKey;
+      // a line's or an area's name over a feature is what was pressed, a mark being the one thing drawn over it
+      const word = found && shown.find((one) => one.properties.key === found.key)?.geometry.type === 'Point' ? null : nameAt(at);
+      if (word && !add && (controller.selection ?? []).includes(word)) {
+        swallow = true; event.preventDefault(); event.stopPropagation();
+        carry(word, at, local);
+        return;
+      }
+      // …and a name of a feature not picked picks it, as a press on the feature would
+      const hit = found ?? (word ? { key: word, part: 'edge' } : null);
       if (!hit) return;
       const { key } = hit;
-      const add = event.shiftKey || event.ctrlKey || event.metaKey;
       if (!add && (!(controller.selection ?? []).includes(key) || hit.part === 'inside')) {
         // Only what is picked moves, and an area by its edge: a press picks, a drag pans
         // the map, so a pan that starts on a feature never carries it off.
@@ -462,7 +486,10 @@
     const hover = perFrame(hovered);
     function hovered(event) {
       const sketch = controller.sketch;
-      if (!onMap(event.target)) { if (!event.target?.closest?.('.vertex, .midpoint')) pointer = null; return; }
+      if (!onMap(event.target)) { if (!event.target?.closest?.('.vertex, .midpoint')) pointer = null; nameCursor(false); return; }
+      // over a picked line's or area's name, the pointer says it can be carried; a drag under way keeps its own
+      if (!dragCleanup) nameCursor(!sketch && !controller.armed && (controller.selection ?? []).some((key) => named.has(key))
+        && (controller.selection ?? []).includes(nameAt(local(event))));
       if (!sketch || ['Point', 'Selection'].includes(sketch.type)) { snapTarget = null; pointer = null; return; }
       // an area being reshaped takes no click, so only a corner being dragged shows where it would land
       if (sketch.key && sketch.type !== 'LineString') { if (!dragCleanup) snapTarget = null; pointer = null; return; }
@@ -483,9 +510,67 @@
       hover.cancel();
       for (const [type, run] of listening) window.removeEventListener(type, run, true);
       snapTarget = null; pointer = null;
+      nameCursor(false);
       dragCleanup?.();
     };
   });
+
+  /** The grab hand over a name that can be carried, and the map's own cursor back once the pointer leaves it. */
+  function nameCursor(on) {
+    if (on === overName) return;
+    overName = on;
+    const canvas = engine?.impl?.getCanvas?.();
+    if (!canvas) return;
+    if (on) canvas.style.cursor = 'grab';
+    else if (canvas.style.cursor === 'grab' || canvas.style.cursor === 'grabbing') canvas.style.cursor = '';
+  }
+
+  /**
+   * A press on a picked line's or area's name: dragged, the name follows the pointer and
+   * is written where it is let go, at once on every map, one edit Ctrl+Z takes back; a
+   * click leaves it where it is. A name put by hand is held where it was taken, one the
+   * map placed by its middle.
+   */
+  function carry(key, start, local) {
+    const feature = shown.find((one) => one.properties.key === key);
+    if (!feature) return;
+    const placed = namePlace(feature.properties);
+    const from = placed ? project(placed[0], placed[1]) : start;
+    const grab = { x: start.x - from.x, y: start.y - from.y };
+    let moved = false;
+    dragCleanup?.();
+    const setGrabbing = (on) => { const canvas = engine?.impl?.getCanvas?.(); if (canvas && overName) canvas.style.cursor = on ? 'grabbing' : 'grab'; };
+    const follow = (event) => {
+      const at = local(event);
+      if (!moved && Math.hypot(at.x - start.x, at.y - start.y) < DRAG_PIXELS) return;
+      if (!moved) { moved = true; controller.carryName(key); nameCursor(true); setGrabbing(true); }
+      carried = { key, text: String(feature.properties.name ?? ''), size: Number(feature.properties.label_size) || 11, x: at.x - grab.x, y: at.y - grab.y };
+    };
+    const move = perFrame(follow);
+    const cleanup = () => {
+      move.cancel();
+      window.removeEventListener('pointermove', move); window.removeEventListener('pointerup', end); window.removeEventListener('pointercancel', cancel);
+      dragCleanup = null;
+      setGrabbing(false);
+    };
+    const end = () => {
+      move.flush();
+      cleanup();
+      // a click on the name of one of several picked features picks it alone, as a click on the feature does
+      if (!moved && (controller.selection ?? []).length > 1) controller.chooseKeys([key]);
+      const spot = moved ? carried : null;
+      // on the globe, the sky holds no ground to write it on
+      const ground = spot ? engine.containerPointToLatLng({ x: spot.x, y: spot.y }) : null;
+      if (!ground || !Number.isFinite(ground.lat) || !Number.isFinite(ground.lon)) { carried = null; if (moved) controller.carryName(null); return; }
+      // the map hands back a longitude already folded inside ±180
+      controller.placeName(key, [ground.lon, Math.max(-90, Math.min(90, ground.lat))]);
+    };
+    const cancel = () => { cleanup(); carried = null; if (moved) controller.carryName(null); };
+    dragCleanup = cancel;
+    window.addEventListener('pointermove', move); window.addEventListener('pointerup', end); window.addEventListener('pointercancel', cancel);
+  }
+  // the copy goes once the map writes the name where it landed, or the carry was dropped
+  $effect(() => { if (!controller.naming) carried = null; });
 
   /** A press on a picked feature: a click picks it alone, a drag moves the whole selection with it. */
   function press(event, key, start, local) {
@@ -694,6 +779,9 @@
         <MarkerSymbol symbol={mark.symbol} colour={mark.colour} status={mark.status} external={mark.external} icon={mark.icon} size={mark.size} />
       </span>
     {/each}
+    {#if carried && controller.naming?.key === carried.key}
+      <span class="ghost-name" style:left={`${carried.x}px`} style:top={`${carried.y}px`} style:font-size={`${carried.size}px`}>{carried.text}</span>
+    {/if}
   </div>
 {/if}
 
@@ -762,6 +850,10 @@
   /* a pin's tip, 7.7 of its 64 pixels above the bottom, on its point, as the map anchors it */
   .ghost-mark { position: absolute; transform: translate(-50%, -88%); opacity: .9; }
   .ghost-mark.badge { transform: translate(-50%, -50%); }
+  /* a name carried, written as the map writes it, on the point it will land on */
+  .ghost-name { position: absolute; transform: translate(-50%, -50%); max-width: 10em; color: #fff; font-family: ui-sans-serif, system-ui, sans-serif;
+    line-height: 1.2; text-align: center; overflow-wrap: anywhere; text-shadow: 0 0 2px #000, 0 0 2px #000, 0 0 3px #000;
+    outline: 1px dashed #f5a623; outline-offset: 2px; }
   .vertex, .midpoint { position: absolute; transform: translate(-50%, -50%); pointer-events: auto; border: 1px solid #fff; border-radius: 50%; background: #f5a623; width: 11px; height: 11px; padding: 0; box-shadow: 0 0 0 1px #222; cursor: grab; touch-action: none; }
   .vertex.chosen { width: 14px; height: 14px; background: #fff; box-shadow: 0 0 0 2px #f5a623; }
   .vertex:focus-visible { outline: 2px solid #fff; outline-offset: 3px; }

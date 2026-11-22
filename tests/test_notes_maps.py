@@ -643,6 +643,28 @@ def test_hiding_colouring_and_naming_a_layer_shape_what_the_map_draws(client):
     assert {one["id"][:2] for one in shown["features"]} == {"l1"}
 
 
+def test_a_name_put_by_hand_is_written_there_once_and_never_rides_in_the_data(client):
+    """Both parts of an area are one feature on a notes map, its name written once, where the analyst put it."""
+    cid, case = _case(client)
+    name = client.post(f"/api/cases/{cid}/map-layers/editable", json={"title": "Zones"}).json()["name"]
+    url = f"/api/cases/{cid}/map-layers/{name}"
+    parts = {"type": "MultiPolygon", "coordinates": [
+        [[[43.40, 12.70], [43.45, 12.70], [43.45, 12.75], [43.40, 12.70]]],
+        [[[43.50, 12.70], [43.55, 12.70], [43.55, 12.75], [43.50, 12.70]]]]}
+    placed = client.post(f"{url}/shapes", json={"geometry": parts, "name": "Held ground", "label": "on"}).json()["key"]
+    client.post(f"{url}/shapes", json={"geometry": {"type": "LineString", "coordinates": [[43.4, 12.6], [43.5, 12.6]]},
+                                        "name": "Road", "label": "on"})
+    assert client.patch(f"{url}/markers/{placed}", json={"label_at": [43.47, 12.78]}).status_code == 200
+    data = notes_maps.derive(case, notes_maps.parse_block(f"layer: {name}")).data
+    shown = [(one["label"], one.get("at"), bool(one["style"].get("label"))) for one in data["features"]]
+    assert shown == [("Held ground", [43.47, 12.78], True),
+                     ("Road", [43.45, pytest.approx(12.6, abs=1e-4)], True)], "where it was put; a name nobody moved on its middle"
+    assert not any("label_at" in one for one in data["features"])
+    # the page with no script and the print write it there too
+    derived = notes_maps.derive(case, notes_maps.parse_block(f"layer: {name}"))
+    assert notes_maps.svg(derived).count(">Held ground</text>") == 1
+
+
 def test_proofs_only_where_they_were_filmed(client):
     cid, case = _case(client)
     _proof(client, cid, "Heights", "2026-10-20", [("12.7295, 43.5002", "POV", True), ("12.7400, 43.5100", "Crest", False)])

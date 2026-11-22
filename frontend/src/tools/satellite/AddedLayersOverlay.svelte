@@ -114,6 +114,12 @@
     return drag?.offset && drag.name === name ? [...drag.keys, ...reshaped] : reshaped;
   }
 
+  /** The name the editor carries on the map, held off this layer until it is let go; none once it lands. */
+  function namesOff(name) {
+    const carried = untrack(() => personalLayers.naming);
+    return carried && !carried.landing && carried.name === name ? [carried.key] : [];
+  }
+
   function paint(row, entry) {
     const collection = drawn(row, entry.collection);
     return entry.layer.set(entry.landed.length && collection ? { ...collection, features: landAt(collection.features, entry.landed) } : collection, {
@@ -122,6 +128,7 @@
       period: row.period,
       attribution: attribution(row),
       held: heldOff(row.name),
+      heldNames: namesOff(row.name),
     });
   }
 
@@ -206,6 +213,7 @@
       }
       if (existing) drop(row.name);
       const layer = createAddedLayer(engine, {
+        id: row.name,
         editable: !!row.editable,
         history: isTracked(row),
         card: (properties, point, geometry) => {
@@ -316,6 +324,14 @@
     void personalLayers.sketch?.key;
     void layers;
     for (const [name, { layer }] of live) if (!(drag?.landing && drag.name === name)) layer.hide(heldOff(name));
+  });
+
+  // A name carried in the editor leaves the map while its copy moves, and comes back with
+  // the drawing that writes it where it was let go.
+  $effect(() => {
+    const carried = personalLayers.naming;
+    void layers;
+    for (const [name, { layer }] of live) if (!(carried?.landing && carried.name === name)) layer.hideNames(namesOff(name));
   });
 
   /**

@@ -884,6 +884,95 @@ def test_a_feature_carries_its_own_look_and_how_sure_it_is(client, owner):
         assert client.patch(f"{url}/markers/{key}", json=wrong).status_code == 422
 
 
+SQUARE = {"type": "Polygon", "coordinates": [[[2.3, 48.8], [2.4, 48.8], [2.4, 48.9], [2.3, 48.9], [2.3, 48.8]]]}
+
+
+def drawn_of(client, owner, row, key):
+    return next(f["properties"] for f in client.get(f"{layer_url(owner, row)}/data").json()["features"]
+                if f["properties"]["key"] == key)
+
+
+def test_a_line_or_an_area_keeps_its_name_where_it_was_put_and_null_puts_it_back(client, owner):
+    row = create(client, owner)
+    url = layer_url(owner, row)
+    key = client.post(f"{url}/shapes", json={"geometry": SQUARE, "label": "on"}).json()["key"]
+    assert "label_at" not in drawn_of(client, owner, row, key), "a name nobody moved stays where the map puts it"
+    placed = client.patch(f"{url}/markers/{key}", json={"label_at": [2.31234567891, 48.85]})
+    assert placed.status_code == 200, placed.text
+    drawn = drawn_of(client, owner, row, key)
+    assert drawn["label_at"] == [2.3123457, 48.85] and drawn["show_label"] is True
+    assert read(client, owner, row)["document"]["features"][0]["properties"]["label_at"] == [2.3123457, 48.85]
+    back = client.patch(f"{url}/markers/{key}", json={"label_at": None})
+    assert back.status_code == 200, back.text
+    assert "label_at" not in drawn_of(client, owner, row, key)
+
+
+@pytest.mark.parametrize("place", ["[200, 48]", "[2.3, -91]", "[2.3]", '["2.3", "48.8"]', "[true, 48]", "[2.3, 48.8, 0]",
+                                   "[NaN, 48]", "[2.3, Infinity]", '"2.3, 48.8"', '{"lon": 2.3, "lat": 48.8}'])
+def test_a_names_place_is_two_numbers_on_the_map_or_nothing_is_written(client, owner, place):
+    row = create(client, owner)
+    url = layer_url(owner, row)
+    key = client.post(f"{url}/shapes", json={"geometry": SQUARE, "label": "on"}).json()["key"]
+    client.patch(f"{url}/markers/{key}", json={"label_at": [2.35, 48.85]})
+    refused = client.patch(f"{url}/markers/{key}", content=f'{{"label_at": {place}}}',
+                           headers={"content-type": "application/json"})
+    assert refused.status_code == 422
+    assert read(client, owner, row)["document"]["features"][0]["properties"]["label_at"] == [2.35, 48.85]
+
+
+def test_a_points_name_stays_under_its_marker_and_a_selection_never_shares_one_place(client, owner):
+    row = create(client, owner)
+    url = layer_url(owner, row)
+    pin = marker(client, owner, row, name="Depot", label="on")["properties"]["key"]
+    refused = client.patch(f"{url}/markers/{pin}", json={"label_at": [2.35, 48.85]})
+    assert refused.status_code == 422 and "under its marker" in refused.json()["detail"]
+    area = client.post(f"{url}/shapes", json={"geometry": SQUARE}).json()["key"]
+    client.patch(f"{url}/markers/{area}", json={"label_at": [2.35, 48.85]})
+    shared = client.post(f"{url}/selection", json={"keys": [pin, area], "changes": {"label_at": [2.36, 48.86]}})
+    assert shared.status_code == 422 and "one feature's name at a time" in shared.json()["detail"]
+    # …but every name picked goes back to its middle at once
+    cleared = client.post(f"{url}/selection", json={"keys": [pin, area], "changes": {"label_at": None}})
+    assert cleared.status_code == 200, cleared.text
+    assert "label_at" not in drawn_of(client, owner, row, area)
+    # a place written by another way onto a point is never drawn
+    case = Case.open(owner)
+    with case.lock:
+        spec = layerediting._spec(case, row["name"])
+        next(f for f in spec["document"]["features"] if f["properties"]["key"] == pin)["properties"]["label_at"] = [2.3, 48.8]
+        layerediting._save(case, row["name"], spec)
+    assert "label_at" not in drawn_of(client, owner, row, pin)
+
+
+def test_a_name_put_by_hand_goes_with_its_feature_moved_and_comes_back_with_its_undo(client, owner):
+    row = create(client, owner)
+    url = layer_url(owner, row)
+    key = client.post(f"{url}/shapes", json={"geometry": SQUARE, "label": "on"}).json()["key"]
+    client.patch(f"{url}/markers/{key}", json={"label_at": [2.35, 48.85]})
+    moved = client.post(f"{url}/selection", json={"keys": [key], "offset": [0.1, -0.05]})
+    assert moved.status_code == 200, moved.text
+    assert drawn_of(client, owner, row, key)["label_at"] == [2.45, 48.8]
+    assert client.post(f"{url}/selection/{moved.json()['batch']}/restore").status_code == 200
+    assert drawn_of(client, owner, row, key)["label_at"] == [2.35, 48.85]
+    # a name that a move would carry off the map goes back to its middle
+    client.patch(f"{url}/markers/{key}", json={"label_at": [179.95, 48.85]})
+    assert client.post(f"{url}/selection", json={"keys": [key], "offset": [0.1, 0]}).status_code == 200
+    assert "label_at" not in drawn_of(client, owner, row, key)
+
+
+def test_a_split_keeps_the_name_put_by_hand_on_its_first_part_only(client, owner):
+    row = create(client, owner)
+    url = layer_url(owner, row)
+    other = {"type": "Polygon", "coordinates": [[[3.3, 48.8], [3.4, 48.8], [3.4, 48.9], [3.3, 48.9], [3.3, 48.8]]]}
+    first = client.post(f"{url}/shapes", json={"geometry": SQUARE, "name": "Zone", "label": "on"}).json()["key"]
+    second = client.post(f"{url}/shapes", json={"geometry": other, "label": "on"}).json()["key"]
+    assert client.post(f"{url}/merge", json={"keys": [first, second]}).status_code == 200
+    client.patch(f"{url}/markers/{first}", json={"label_at": [2.35, 48.85]})
+    split = client.post(f"{url}/split", json={"key": first})
+    assert split.status_code == 200, split.text
+    names = {f["properties"]["name"]: f["properties"] for f in client.get(f"{url}/data").json()["features"]}
+    assert names["Zone"]["label_at"] == [2.35, 48.85] and "label_at" not in names["Zone 2"]
+
+
 def test_a_group_lends_its_look_to_features_that_set_none(client, owner):
     row = create(client, owner)
     url = layer_url(owner, row)

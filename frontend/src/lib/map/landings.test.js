@@ -36,6 +36,22 @@ describe('edits drawn where they landed', () => {
     expect(past).toBe(trail);
   });
 
+  it('carries a name put by hand with a move sent with no date, and leaves it where it was put on a dated one', () => {
+    const zone = (key, at) => feature(key, { type: 'Polygon', coordinates: [[[0, 0], [1, 0], [1, 1], [0, 0]]] }, { label_at: at });
+    const [moved, dated, edge] = landAt([zone('moved', [0.5, 0.5]), zone('dated', [0.5, 0.5]), zone('edge', [179.9, 0.5])], [
+      { keys: ['moved', 'edge'], offset: [0.25, 1] }, { keys: ['dated'], offset: [0.25, 1], dated: true }]);
+    expect(moved.properties.label_at).toEqual([0.75, 1.5]);
+    expect(dated.properties.label_at).toEqual([0.5, 0.5]);
+    // off the map, it goes back to its middle, as the layer saves it
+    expect('label_at' in edge.properties).toBe(false);
+  });
+
+  it('puts a name where it was let go, and back to its middle with a null', () => {
+    const zone = feature('zone', { type: 'Polygon', coordinates: [[[0, 0], [1, 0], [1, 1], [0, 0]]] }, { label_at: [0.5, 0.5] });
+    expect(landAt([zone], [{ keys: ['zone'], properties: { label_at: [2, 3] } }])[0].properties.label_at).toEqual([2, 3]);
+    expect('label_at' in landAt([zone], [{ keys: ['zone'], properties: { label_at: null } }])[0].properties).toBe(false);
+  });
+
   it('hands the features back untouched when nothing landed', () => {
     const features = [point('a', 0, 0)];
     expect(landAt(features, [])).toBe(features);

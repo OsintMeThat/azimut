@@ -2543,9 +2543,17 @@ Shift-click adds to the selection, and a click on bare ground lets it go. Only w
 is picked drags, and an area only by its edge. A drag that starts anywhere else
 pans the map, so a pan never carries a feature off. Dragging moves the whole selection with it, the map does
 not pan under the drag, and the toast offers **Undo**. What is let go is drawn where
-it landed at once and saves behind; a move the layer refuses goes back. Ctrl+Z takes back any edit
+it landed at once and saves behind; a move the layer refuses goes back. A picked line's
+or area's name written on the map is dragged the same way, the grab hand showing over it,
+and written where it is let go, centred on that point: a click on a name picks its
+feature, a drag from the name of one not picked pans. The place is the feature's own
+(`label_at`), one for every day of a layer followed over time; a move with no date
+carries it along, a move dated to one day leaves it where it was put. The Map, a plate,
+the globe and a notebook's map write the name there; a name nobody moved stays where the
+map puts it. On the globe, which writes only names put by hand, such a name drags too.
+A point's name stays under its marker. Ctrl+Z takes back any edit
 of the session, one step at a time (an added marker, a restyle, a status, a reshape, a
-move, a removal, a merge, a split, a group made, its settings, an **Ungroup**), and
+move, a name placed, a removal, a merge, a split, a group made, its settings, an **Ungroup**), and
 Ctrl+Shift+Z or Ctrl+Y makes it again. Pressed while an edit still saves, it waits for
 it and takes that one back; while a shape is drawn Ctrl+Z takes its last point. **Select an area** draws a
 free loop round what to pick; Shift adds. Delete removes the selection, with
@@ -2676,7 +2684,9 @@ names what the feature sets of its own while folded and stays as it was left fro
 one feature to the next: a marker's **Size**, a line's **Width**, **Dash** (solid,
 dashed, dotted) and **Arrow** at its end or both, an area's **Fill** (filled,
 hatched, or its outline only) and the fill's strength, and its **Name** on the map,
-as its group says, shown at a size of its own, or hidden. Each slider says its
+as its group says, shown at a size of its own, or hidden. Under it, a line's or an
+area's sheet says **Name put by hand** with **Back to the middle**, which gives the
+place back to the map, or that the name can be dragged on the map. Each slider says its
 value, quieter while the group sets it, and **Reset** gives it back to the group.
 Every row says what it does when the pointer rests on its name, as a group's
 settings and the layer's menu do; the words live in one module the sheet, the

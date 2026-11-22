@@ -881,6 +881,40 @@ describe('what the sheet says on hover', () => {
     expect(width.querySelector('button').textContent).toBe('Reset');
   });
 
+  it('says a line\'s name was put by hand and takes it back to the middle, or how to move one the map placed', () => {
+    const placed = { ...line, properties: { ...line.properties, label: 'on', label_at: [2.05, 48.01] } };
+    const placeName = vi.fn();
+    const controller = picked(placed, { groups: [{ id: 'g', name: 'Markers', stroke: 2 }], placeName });
+    controller.form = { ...controller.form, ...looks, label: 'on' };
+    show(LayerFeatureSheet, { controller });
+    fold('look');
+    expect(document.querySelector('.fold[data-section="look"] .fold-holds').textContent).toBe('Width · Dash · Name · Name placed');
+    unfold('look');
+    const said = document.querySelector('.name-place');
+    expect(said.textContent).toContain('Name put by hand');
+    expect(said.title).toBe('Drag its name on the map to put it where it reads best');
+    const back = byText('Back to the middle');
+    expect(back.title).toBe('Writes its name where the map puts it again');
+    back.click();
+    expect(placeName).toHaveBeenCalledWith('l1', null);
+    unmount(held); held = null;
+    // the map finds its place: the sheet says how to choose another
+    const free = { ...line, properties: { ...line.properties, label: 'on' } };
+    show(LayerFeatureSheet, { controller: { ...picked(free, { groups: [{ id: 'g', name: 'Markers', stroke: 2 }] }), form: { ...controller.form } } });
+    unfold('look');
+    expect(document.querySelector('.name-place').textContent).toBe('Drag the name on the map to move it');
+    expect(byText('Back to the middle')).toBeUndefined();
+    unmount(held); held = null;
+    // a point's name sits under its marker, and a name not written has no place to say
+    for (const feature of [{ type: 'Feature', properties: { key: 'm1', name: 'Depot', group: 'g', label: 'on', label_at: [2, 48] }, geometry: { type: 'Point', coordinates: [2, 48] } },
+      { ...placed, properties: { ...placed.properties, label: 'off' } }]) {
+      show(LayerFeatureSheet, { controller: picked(feature, { groups: [{ id: 'g', name: 'Markers' }] }) });
+      unfold('look');
+      expect(document.querySelector('.name-place')).toBeNull();
+      unmount(held); held = null;
+    }
+  });
+
   it('says a marker\'s status by what it draws, nothing said first', () => {
     const marker = { type: 'Feature', properties: { key: 'm1', name: 'Depot', group: 'g' }, geometry: { type: 'Point', coordinates: [2, 48] } };
     const setStatus = vi.fn();

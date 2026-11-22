@@ -233,6 +233,89 @@ test('a pin let go is drawn where it lands at once, before the layer has saved i
   expect(await blue(pin.x)).toBe(0);
 });
 
+/** Where the map writes white in a box of the page, as the middle of its white pixels in page pixels, and how many: a name's letters. */
+async function whiteIn(page, clip) {
+  const picture = await page.screenshot({ clip });
+  const found = await page.evaluate(async (bytes) => {
+    const image = await createImageBitmap(new Blob([new Uint8Array(bytes)], { type: 'image/png' }));
+    const context = new OffscreenCanvas(image.width, image.height).getContext('2d');
+    context.drawImage(image, 0, 0);
+    const { data } = context.getImageData(0, 0, image.width, image.height);
+    let count = 0, x = 0, y = 0;
+    for (let i = 0; i < data.length; i += 4) {
+      if (data[i] < 180 || data[i + 1] < 180 || data[i + 2] < 180) continue;
+      count += 1; x += (i / 4) % image.width; y += Math.floor(i / 4 / image.width);
+    }
+    return { count, x: count ? x / count : 0, y: count ? y / count : 0, scale: image.width };
+  }, [...picture]);
+  const scale = found.scale / clip.width;
+  return { count: found.count, x: clip.x + found.x / scale, y: clip.y + found.y / scale };
+}
+
+test('an area\'s name is carried where it reads best, drawn there at once, taken back by Ctrl+Z and by Back to the middle', async ({ page }) => {
+  const fixture = await personalFixture(page);
+  await page.goto('/#satellite?ll=48.85,2.35&z=16'); await awaitMapReady(page);
+  const panel = await createPersonalLayer(page, 'Names');
+  const map = await page.locator('.map').boundingBox();
+  const at = (x, y) => ({ x: map.x + map.width * x, y: map.y + map.height * y });
+  await tools(page).getByRole('button', { name: 'Draw area', exact: true }).click();
+  for (const corner of [at(.3, .3), at(.5, .3), at(.5, .55), at(.3, .55)]) await page.mouse.click(corner.x, corner.y);
+  await page.keyboard.press('Enter');
+  await expect(panel.getByText('1 feature', { exact: true })).toBeVisible();
+  const feature = () => fixture.collections.get(fixture.rows[0].name)[0];
+  // picked by its edge, its name written on the map from its sheet
+  const edge = at(.4, .3); await page.mouse.click(edge.x, edge.y);
+  await expect(panel.getByLabel('Feature name', { exact: true })).toHaveValue('Area 1');
+  const look = panel.locator('.fold[data-section="look"]');
+  if (await look.getAttribute('aria-expanded') === 'false') await look.click();
+  await panel.getByRole('group', { name: 'Name on the map', exact: true }).getByRole('button', { name: 'Shown', exact: true }).click();
+  await expect.poll(() => feature().properties.label).toBe('on');
+  await expect(panel.getByText('Drag the name on the map to move it', { exact: true })).toBeVisible();
+  // where the map writes it on its own: inside the area
+  const middle = { x: at(.3, .3).x, y: at(.3, .3).y, width: at(.5, .3).x - at(.3, .3).x, height: at(.3, .55).y - at(.3, .3).y };
+  await expect.poll(async () => (await whiteIn(page, middle)).count).toBeGreaterThan(8);
+  const name = await whiteIn(page, middle);
+  const target = at(.7, .72);
+  const there = { x: target.x - 60, y: target.y - 20, width: 120, height: 40 };
+  expect((await whiteIn(page, there)).count).toBe(0);
+
+  await page.mouse.move(name.x, name.y); await page.mouse.down();
+  await page.mouse.move(target.x, target.y, { steps: 10 });
+  await expect(page.locator('.ghost-name')).toHaveText('Area 1');
+  await page.mouse.up();
+  // written where it was let go, its middle on the pointer, and nowhere else
+  await expect(page.locator('.ghost-name')).toHaveCount(0);
+  await expect.poll(() => feature().properties.label_at?.length ?? 0).toBe(2);
+  const [lon, lat] = feature().properties.label_at;
+  const ring = feature().geometry.coordinates[0];
+  expect(lon).toBeGreaterThan(Math.max(...ring.map(([x]) => x)));
+  expect(lat).toBeLessThan(Math.min(...ring.map(([, y]) => y)));
+  await expect.poll(async () => (await whiteIn(page, there)).count).toBeGreaterThan(8);
+  const moved = await whiteIn(page, there);
+  expect(Math.abs(moved.x - target.x)).toBeLessThan(8);
+  expect(Math.abs(moved.y - target.y)).toBeLessThan(8);
+  expect((await whiteIn(page, middle)).count).toBe(0);
+  // the area itself never moved
+  expect(feature().geometry.coordinates[0]).toEqual(ring);
+  await expect(panel.getByText('Name put by hand')).toBeVisible();
+
+  // one edit Ctrl+Z takes back, and Ctrl+Shift+Z makes again
+  await page.keyboard.press('Control+z');
+  await expect.poll(() => 'label_at' in feature().properties).toBe(false);
+  await expect.poll(async () => (await whiteIn(page, middle)).count).toBeGreaterThan(8);
+  expect((await whiteIn(page, there)).count).toBe(0);
+  await page.keyboard.press('Control+Shift+z');
+  await expect.poll(() => feature().properties.label_at?.length ?? 0).toBe(2);
+  await expect.poll(async () => (await whiteIn(page, there)).count).toBeGreaterThan(8);
+
+  // the sheet puts it back where the map finds it
+  await panel.getByRole('button', { name: 'Back to the middle', exact: true }).click();
+  await expect.poll(() => 'label_at' in feature().properties).toBe(false);
+  await expect.poll(async () => (await whiteIn(page, middle)).count).toBeGreaterThan(8);
+  expect((await whiteIn(page, there)).count).toBe(0);
+  await page.screenshot({ path: test.info().outputPath('name-back-in-the-middle.png') });
+});
+
 test('a source feature is copied into one of the analyst\'s layers as somebody else\'s point', async ({ page }) => {
   const fixture = await personalFixture(page, { imported: true });
   await page.goto('/#satellite?ll=48.85,2.35&z=16'); await awaitMapReady(page);
@@ -607,7 +690,10 @@ async function personalFixture(page, { imported = false, shared = false, count =
     }
     if (action === 'data') return route.fulfill({ json: { type: 'FeatureCollection', features: visibleFeatures().map((feature) => {
       const group = ownGroups?.find((group) => group.id === feature.properties.group);
+      // as the server: a name is written when its group or the feature asks
+      const named = feature.properties.label === 'on' || (group?.labels && feature.properties.label !== 'off');
       return { ...feature, properties: { ...feature.properties, icon_scale: group?.size ?? 1, stroke_width: group?.stroke ?? 2,
+        ...(named ? { show_label: true } : {}),
         ...(group?.mode === 'uniform' ? { category: group.name, colour: group.colour, symbol: group.symbol, icon: '' }
           : group?.mode === 'colour' ? { colour: group.colour } : {}) } };
     }).sort((a, b) => (ownGroups?.findIndex((group) => group.id === b.properties.group) ?? 0) - (ownGroups?.findIndex((group) => group.id === a.properties.group) ?? 0))
@@ -705,7 +791,10 @@ async function personalFixture(page, { imported = false, shared = false, count =
       const marker = features.find((entry) => entry.properties.key === key);
       const { geometry, ...properties } = route.request().postDataJSON();
       if (geometry) marker.geometry = geometry;
-      Object.assign(marker.properties, properties); changed();
+      Object.assign(marker.properties, properties);
+      // as the server: a name's place sent as nothing puts it back where the map finds it
+      if (properties.label_at === null) delete marker.properties.label_at;
+      changed();
       return route.fulfill({ json: { layer: row, marker } });
     }
     if (action === 'shapes' && method === 'POST') {

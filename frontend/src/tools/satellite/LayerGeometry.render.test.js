@@ -4,8 +4,13 @@ import { flushSync, mount, unmount } from 'svelte';
 import LayerGeometry from './LayerGeometry.svelte';
 import { createMyLayersState } from './state/myLayers.svelte.js';
 
+/** The names the map says it draws under the pointer, by feature key, as `namesUnder` reads them off the engine. */
+const drawnNames = vi.hoisted(() => ({ under: [], asked: [] }));
+vi.mock('../../lib/map/addedLayer.js', async (original) => ({ ...(await original()),
+  namesUnder: (engine, at, id) => { drawnNames.asked.push({ at, id }); return drawnNames.under; } }));
+
 let held;
-afterEach(() => { if (held) unmount(held); held = null; document.body.innerHTML = ''; });
+afterEach(() => { if (held) unmount(held); held = null; document.body.innerHTML = ''; drawnNames.under = []; drawnNames.asked = []; });
 function surface() {
   const box = document.createElement('div');
   box.getBoundingClientRect = () => ({ left: 10, top: 20, width: 800, height: 600 });
@@ -16,13 +21,13 @@ function surface() {
 async function setup(type = 'Polygon', features = [], props = {}) {
   const callbacks = new Map(), removed = vi.fn();
   const { box, canvas } = surface();
-  const engine = { container: box,
+  const engine = { container: box, impl: { getCanvas: () => canvas },
     latLngToContainerPoint: ({ lon, lat }) => ({ x: lon * 10, y: lat * 10 }),
     containerPointToLatLng: ({ x, y }) => ({ lon: x / 10, lat: y / 10 }),
     on: (name, run) => { callbacks.set(name, run); return removed; }, readClicks: vi.fn() };
   const row = { editable: true, name: 'work', title: 'Working' };
   const api = { post: vi.fn(async () => ({ layer: row, document: { features },
-    groups: [{ id: 'g', name: 'Markers', mode: 'individual', size: 1 }] })) };
+    groups: [{ id: 'g', name: 'Markers', mode: 'individual', size: 1 }] })), patch: vi.fn() };
   const notify = vi.fn();
   const controller = createMyLayersState({ api, layers: { rows: [], edited: vi.fn() },
     caseId: () => 'case', notify, reloadCase: vi.fn() });
@@ -33,6 +38,86 @@ async function setup(type = 'Polygon', features = [], props = {}) {
 const point = (key, lon, lat, extra = {}) => ({ type: 'Feature', geometry: { type: 'Point', coordinates: [lon, lat] },
   properties: { key, group: 'g', symbol: 'badge-tank', ...extra } });
 const press = (target, x, y, init = {}) => target.dispatchEvent(new PointerEvent('pointerdown', { button: 0, clientX: x, clientY: y, bubbles: true, ...init }));
+
+describe('a line\'s or an area\'s name carried on the map', () => {
+  const zone = (extra = {}) => ({ type: 'Feature', geometry: { type: 'Polygon', coordinates: [[[0, 0], [10, 0], [10, 10], [0, 0]]] },
+    properties: { key: 'zone', group: 'g', name: 'Held ground', label: 'on', ...extra } });
+  const release = (x, y) => window.dispatchEvent(new PointerEvent('pointerup', { clientX: x, clientY: y }));
+  const drag = (x, y) => window.dispatchEvent(new PointerEvent('pointermove', { clientX: x, clientY: y }));
+
+  it('picks the area on a click of its name, then carries the name where it is let go, held where it was taken', async () => {
+    const { controller, api, canvas } = await setup(null, [zone()]);
+    drawnNames.under = ['zone'];
+    // far from the area's edges and outside it: only its name is there
+    press(canvas, 510, 540); release(510, 540);
+    expect(controller.selection).toEqual(['zone']);
+    expect(drawnNames.asked.at(-1)).toEqual({ at: { x: 500, y: 520 }, id: 'work' });
+    api.patch.mockImplementation(async (url, body) => ({ layer: { name: 'work' }, marker: zone({ label_at: body.label_at }) }));
+    const down = new PointerEvent('pointerdown', { button: 0, clientX: 510, clientY: 540, bubbles: true, cancelable: true });
+    canvas.dispatchEvent(down);
+    expect(down.defaultPrevented).toBe(true);
+    drag(530, 560); flushSync();
+    expect(controller.naming).toEqual({ name: 'work', key: 'zone' });
+    // a name the map placed is held by its middle: the copy stands on the pointer
+    const ghost = document.querySelector('.ghost-name');
+    expect(ghost.textContent).toBe('Held ground');
+    expect([ghost.style.left, ghost.style.top]).toEqual(['520px', '540px']);
+    expect(canvas.style.cursor).toBe('grabbing');
+    release(530, 560);
+    expect(controller.features[0].properties.label_at).toEqual([52, 54]);
+    await controller.whenSaved(); flushSync();
+    expect(api.patch).toHaveBeenCalledWith('/api/cases/case/map-layers/work/markers/zone', { label_at: [52, 54] });
+    expect(controller.naming).toBeNull();
+    expect(document.querySelector('.ghost-name')).toBeNull();
+    expect(controller.features[0].geometry.coordinates[0][1]).toEqual([10, 0]);
+    // put by hand, it is held where it was taken: three pixels right of its point and two below
+    press(canvas, 533, 562); drag(543, 562); flushSync();
+    expect([document.querySelector('.ghost-name').style.left, document.querySelector('.ghost-name').style.top]).toEqual(['530px', '540px']);
+    release(543, 562);
+    await controller.whenSaved();
+    expect(api.patch).toHaveBeenLastCalledWith('/api/cases/case/map-layers/work/markers/zone', { label_at: [53, 54] });
+  });
+
+  it('pans on a drag from the name of an area not picked, and drops a carry the pointer gives up', async () => {
+    const { controller, api, canvas } = await setup(null, [zone()]);
+    drawnNames.under = ['zone'];
+    const down = new PointerEvent('pointerdown', { button: 0, clientX: 510, clientY: 540, bubbles: true, cancelable: true });
+    canvas.dispatchEvent(down);
+    expect(down.defaultPrevented).toBe(false);
+    drag(570, 540); release(570, 540); flushSync();
+    expect(controller.selection).toEqual([]);
+    expect(controller.naming).toBeNull();
+    controller.chooseKeys(['zone']);
+    press(canvas, 510, 540); drag(540, 540); flushSync();
+    expect(document.querySelector('.ghost-name')).not.toBeNull();
+    window.dispatchEvent(new PointerEvent('pointercancel')); flushSync();
+    expect(controller.naming).toBeNull();
+    expect(document.querySelector('.ghost-name')).toBeNull();
+    // a click on it leaves it where it is
+    press(canvas, 510, 540); release(510, 540); flushSync();
+    expect(api.patch).not.toHaveBeenCalled();
+  });
+
+  it('says a picked name can be carried with the grab hand, and leaves a point\'s name and a hidden one alone', async () => {
+    const pin = point('pin', 30, 30, { name: 'Gate', label: 'on' });
+    const { controller, canvas } = await setup(null, [zone(), zone({ key: 'quiet', label: 'off' }), pin]);
+    controller.chooseKeys(['zone']);
+    drawnNames.under = ['zone'];
+    canvas.dispatchEvent(new PointerEvent('pointermove', { clientX: 510, clientY: 540, bubbles: true })); flushSync();
+    expect(canvas.style.cursor).toBe('grab');
+    drawnNames.under = [];
+    await new Promise((done) => requestAnimationFrame(done));
+    canvas.dispatchEvent(new PointerEvent('pointermove', { clientX: 600, clientY: 540, bubbles: true })); flushSync();
+    expect(canvas.style.cursor).toBe('');
+    // only the names of lines and areas the map writes are ever asked about
+    for (const key of ['quiet', 'pin']) {
+      controller.chooseKeys([key]); drawnNames.asked = [];
+      drawnNames.under = [key];
+      press(canvas, 510, 540); drag(540, 540); release(540, 540); flushSync();
+      expect(controller.naming).toBeNull();
+    }
+  });
+});
 
 describe('layer geometry handles', () => {
   it('draws clicked points as a closed area and moves its vertices without a write', async () => {

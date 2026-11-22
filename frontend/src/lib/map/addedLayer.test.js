@@ -10,10 +10,12 @@ import {
   iconName,
   markerIcon,
   kindOf,
+  namesUnder,
   periodFilter,
   registerIcons,
   visibilityFilter,
 } from './addedLayer.js';
+import { compileLayer, evaluable } from '../globe/style.js';
 import { PALETTE } from './addedLayers.js';
 import symbols from './layerSymbols.json';
 import { BADGE_GLYPHS } from './markerGlyphs.js';
@@ -126,7 +128,7 @@ describe('personal marker symbols', () => {
     expect(bearing.layout['icon-rotation-alignment']).toBe('map');
     const label = [...editable.map.layers.values()].find((entry) => entry.id.endsWith('-label'));
     expect(label.filter).toEqual(['all', ['!', ['any', ['has', '$trail'], ['has', '$change']]],
-      ['has', 'show_label'], ['!=', ['get', 'name'], '']]);
+      ['has', 'show_label'], ['!=', ['get', 'name'], ''], ['any', ['has', '$label'], ['!', ['has', '$placed']]]]);
     expect([...source.map.layers.keys()].some((id) => id.endsWith('-bearing') || id.endsWith('-label'))).toBe(false);
   });
 
@@ -181,7 +183,7 @@ describe('personal marker symbols', () => {
     // the past is the lowest of the layer's own drawing
     expect(ids.findIndex((id) => id.endsWith('-change-fill'))).toBeLessThan(ids.findIndex((id) => id.endsWith('-fill') && !id.includes('change')));
     expect(layers.find((entry) => entry.id.endsWith('-trail-line')).paint['line-dasharray']).toEqual([2, 2]);
-    expect(layers.find((entry) => entry.id.endsWith('-hit')).filter[1]).toEqual(['!', ['any', ['has', '$trail'], ['has', '$change']]]);
+    expect(layers.find((entry) => entry.id.endsWith('-hit')).filter[1]).toEqual(['!', ['any', ['has', '$trail'], ['has', '$change'], ['has', '$label']]]);
     // what is new keeps its own colour, whatever the feature's
     expect(layers.find((entry) => entry.id.endsWith('-new-line')).paint['line-color']).toBe('#ffd400');
     expect(layers.find((entry) => entry.id.endsWith('-new-ring')).filter).toContainEqual(['has', '$new']);
@@ -247,6 +249,108 @@ describe('personal marker symbols', () => {
     } finally {
       vi.useRealTimers();
     }
+  });
+});
+
+describe('a line\'s or an area\'s name put by hand', () => {
+  const ZONE = { type: 'Polygon', coordinates: [[[2, 48], [2.1, 48], [2.1, 48.1], [2, 48]]] };
+  const zone = (properties = {}) => ({ type: 'Feature', geometry: ZONE,
+    properties: { index: 0, key: 'zone', name: 'Held ground', category: 'Front', colour: '#d55e00', show_label: true, label_at: [2.05, 48.2], ...properties } });
+  const pin = { type: 'Feature', geometry: { type: 'Point', coordinates: [2.05, 48.2] },
+    properties: { index: 1, key: 'pin', name: 'Gate', category: 'Front', colour: '#d55e00', show_label: true, label_at: [2.3, 48.3] } };
+  const road = { type: 'Feature', geometry: { type: 'LineString', coordinates: [[2, 48], [2.2, 48.1]] },
+    properties: { index: 2, key: 'road', name: 'Road', category: 'Front', colour: '#d55e00', show_label: true } };
+  /** Every GL layer drawing the layer's own source, as the globe reads it too. */
+  function drawn(engine) {
+    const [id, source] = [...engine.map.sources.entries()][0];
+    const layers = [...engine.map.layers.values()].filter((entry) => entry.source === id).map((entry) => ({ entry, layer: compileLayer(entry) }));
+    const takes = ({ layer }, feature) => layer.accepts(14, evaluable(feature.geometry.type, feature.properties));
+    return { features: source.data.features, layers, takes };
+  }
+
+  it('is a point of its own only the names read, written on it and first to its spot, its shape left whole', async () => {
+    const engine = stubEngine();
+    await createAddedLayer(engine, { editable: true }).set({ type: 'FeatureCollection', features: [zone(), pin, road] });
+    const { features, layers, takes } = drawn(engine);
+    const names = features.filter((feature) => feature.properties.$label);
+    expect(names).toHaveLength(1);
+    const [name] = names;
+    expect(name.geometry).toEqual({ type: 'Point', coordinates: [2.05, 48.2] });
+    expect(name.properties).toMatchObject({ key: 'zone', index: 0, name: 'Held ground', category: 'Front' });
+    const area = features.find((feature) => feature.properties.key === 'zone' && !feature.properties.$label);
+    const label = layers.find(({ entry }) => entry.id.endsWith('-label'));
+    for (const one of layers) {
+      // never a dot, a mark, a click target or a ring: only its name
+      expect(takes(one, name), one.entry.id).toBe(one === label);
+    }
+    expect(takes(label, area)).toBe(false);
+    expect(layers.filter((one) => takes(one, area)).map(({ entry }) => entry.id.replace(/^added-\d+-/, ''))).toEqual(['fill', 'line']);
+    // a point's name stays under its marker, a line nobody moved keeps the place the map finds
+    expect(takes(label, features.find((feature) => feature.properties.key === 'pin'))).toBe(true);
+    expect(takes(label, features.find((feature) => feature.properties.key === 'road'))).toBe(true);
+    const at = (feature, field) => label.layer.layout(field, 14, evaluable(feature.geometry.type, feature.properties));
+    expect([at(name, 'text-anchor'), at(name, 'text-offset'), at(name, 'symbol-sort-key')]).toEqual(['center', [0, 0], 0]);
+    expect([at(road, 'text-anchor'), at(road, 'text-offset'), at(road, 'symbol-sort-key')]).toEqual(['top', [0, 0.9], 1]);
+  });
+
+  it('is drawn for no place that is none, no name nobody shows and no past', async () => {
+    const engine = stubEngine();
+    await createAddedLayer(engine, { editable: true, history: true }).set({ type: 'FeatureCollection', features: [
+      zone({ key: 'a', label_at: [200, 48] }), zone({ key: 'b', label_at: ['2', '48'] }), zone({ key: 'c', show_label: undefined }),
+      zone({ key: 'd', name: '' }), zone({ key: 'e', $trail: true }), pin] });
+    const { features, layers, takes } = drawn(engine);
+    expect(features.filter((feature) => feature.properties.$label || feature.properties.$placed)).toEqual([]);
+    const label = layers.find(({ entry }) => entry.id.endsWith('-label'));
+    expect(features.filter((feature) => takes(label, feature)).map((feature) => feature.properties.key)).toEqual(['a', 'b', 'pin']);
+    // a layer somebody else made writes no name at all
+    const source = stubEngine();
+    await createAddedLayer(source).set({ type: 'FeatureCollection', features: [zone()] });
+    expect([...source.map.sources.values()][0].data.features).toHaveLength(1);
+  });
+
+  it('opens its shape\'s card, a mark under it still winning, and goes with its feature\'s filters', async () => {
+    const engine = stubEngine();
+    const layer = createAddedLayer(engine, { editable: true });
+    await layer.set({ type: 'FeatureCollection', features: [zone(), pin] });
+    const { features } = drawn(engine);
+    const name = features.find((feature) => feature.properties.$label);
+    const mark = features.find((feature) => feature.properties.key === 'pin');
+    engine.map.queryRenderedFeatures = vi.fn(() => [name, mark]);
+    expect(layer.featureUnder({ x: 5, y: 5 }).properties.key).toBe('pin');
+    engine.map.queryRenderedFeatures = vi.fn(() => [name]);
+    expect(layer.featureUnder({ x: 5, y: 5 }).geometry.type).toBe('Polygon');
+    // hidden with its group, out of the period, or while its feature is dragged, like its feature
+    layer.filter(['Front'], { start: '2026-01-01' });
+    layer.hide(['zone']);
+    const label = [...engine.map.layers.values()].find((entry) => entry.id.endsWith('-label'));
+    expect(compileLayer(label).accepts(14, evaluable('Point', name.properties))).toBe(false);
+  });
+
+  it('is held off the map alone while the editor carries it, and let back with the data that moves it', async () => {
+    const engine = stubEngine();
+    const layer = createAddedLayer(engine, { editable: true });
+    await layer.set({ type: 'FeatureCollection', features: [zone()] });
+    const filter = (end) => JSON.stringify([...engine.map.layers.values()].find((entry) => entry.id.endsWith(end)).filter);
+    layer.hideNames(['zone']);
+    expect(filter('-label')).toContain('"zone"');
+    expect(filter('-fill')).not.toContain('"zone"');
+    await layer.set({ type: 'FeatureCollection', features: [zone({ label_at: [2.06, 48.21] })] }, { heldNames: [] });
+    expect(filter('-label')).not.toContain('"zone"');
+  });
+
+  it('says which names of one layer are under the pointer, and none of another', async () => {
+    const engine = stubEngine();
+    const mine = createAddedLayer(engine, { editable: true, id: 'zones' });
+    const theirs = createAddedLayer(engine, { editable: true, id: 'other' });
+    await mine.set({ type: 'FeatureCollection', features: [zone()] });
+    await theirs.set({ type: 'FeatureCollection', features: [zone({ key: 'theirs' })] });
+    const labels = [...engine.map.layers.keys()].filter((id) => id.endsWith('-label'));
+    engine.map.queryRenderedFeatures = vi.fn((box, { layers }) => (layers.includes(labels[0]) ? [{ properties: { key: 'zone' } }] : []));
+    expect(namesUnder(engine, { x: 10, y: 20 }, 'zones')).toEqual(['zone']);
+    expect(engine.map.queryRenderedFeatures).toHaveBeenCalledWith([[7, 17], [13, 23]], { layers: [labels[0]] });
+    expect(namesUnder(engine, { x: 10, y: 20 }, 'nobody')).toEqual([]);
+    mine.visible(false);
+    expect(namesUnder(engine, { x: 10, y: 20 }, 'zones')).toEqual([]);
   });
 });
 
