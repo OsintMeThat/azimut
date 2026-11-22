@@ -7614,7 +7614,12 @@ pages, Posts and footage, Imagery, Made for this article and Other files, each i
 the text first cites it: who and where, the work's own title linked, its day, its archived
 copy, the day it was read, and what a made item was made from, each linked to its entry.
 Footnotes (`[a]`) open their own card and are listed under Notes before the sources. The
-PDF keeps its numbered list, written as the look's *Sources written as* says.
+PDF keeps its numbered list, written as the look's *Sources written as* says. A post whose
+address names neither its account nor its day (an Instagram post, a YouTube video) takes
+them from its bookmark: **Bookmark it** on the link's card in the editor, then **Open** and
+fill *Author* (`@name`) and *Published* in Details; the entry then reads *@name on Instagram,
+post, 4 January 2026*. Archive every link fills *Published* from a page's copy, never over a
+day typed there.
 
 **Book or report.** A record made on the Board under Work (title, author, publisher,
 year, kind, and where it can be read online when it can) for a source with no address. A

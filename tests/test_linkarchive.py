@@ -683,3 +683,15 @@ def test_a_short_link_redirected_to_its_article_keeps_its_title():
                                        "<title>Al Jazeera</title>", "<p>no head</p>"])
 def test_a_wall_or_a_bare_site_name_is_no_title(page_html):
     assert linkarchive.page_facts(page_html, JAZEERA) is None
+
+
+def test_a_day_typed_on_the_bookmark_stands_over_the_copy_s(client, archive):
+    cid = make_case(client, "Typed day")
+    case = Case.open(cid)
+    mark = case.add_entity("bookmark", "Mocha", {"url": JAZEERA, "published_at": "2026-09-11"}, by="note")
+    note = make_note(client, cid, title="Typed", content=f"[Al Jazeera]({JAZEERA}).\n")
+    archive.pages[JAZEERA] = PAGE
+    press(client, cid, note["id"])
+    workqueue.drain(case)
+    attrs = case.get_entity(mark["id"])["attrs"]
+    assert attrs[notesources.PAGE_TITLE] == "Houthis take Mocha port" and attrs["published_at"] == "2026-09-11"

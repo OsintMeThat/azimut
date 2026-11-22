@@ -564,7 +564,8 @@ def _name_page(case: "Case", archive: "Wayback", holder: dict[str, Any] | None, 
     patch: dict[str, Any] = {"attrs": {TITLE_TRIED: _now().date().isoformat()}}
     if facts.title:
         patch["attrs"][notesources.PAGE_TITLE] = facts.title
-        if facts.day:
+        if facts.day and not attrs.get(notesources.PUBLISHED_AT):
+            # a day the analyst typed on the bookmark stands
             patch["attrs"][notesources.PUBLISHED_AT] = facts.day
         if (holder.get("provenance") or {}).get("by") == FILED_BY:
             patch["label"] = facts.title

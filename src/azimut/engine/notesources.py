@@ -499,6 +499,8 @@ class Reader:
             # the page's own title, read back from its copy; a bookmark someone filed by hand
             # is named after its page, one a note's links filed only after the link's words
             title = _line(attrs.get(PAGE_TITLE))
+            # who put it up, as the analyst wrote it on the bookmark
+            author = author or _line(attrs.get("author"))
             filed_by = ((record or {}).get("provenance") or {}).get("by")
             if (not title and filed_by != LINKS_FILED_BY and label not in (address, host(address))
                     and not _cites_site(label, address) and not _an_address(label)):

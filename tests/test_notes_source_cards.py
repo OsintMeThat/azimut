@@ -223,3 +223,22 @@ def test_a_report_online_links_its_title_and_keeps_its_copy():
     work = next(part for part in parts if part.kind == "work")
     assert work.link == "https://ims.example/reports/14.pdf"
     assert notesources.card_label(report) == "Report"
+
+
+def test_a_post_whose_address_names_nobody_takes_the_author_and_day_typed_on_its_bookmark(client):
+    from azimut.workspace import Case
+    from test_notes_report import make_case
+
+    cid = make_case(client, "Typed")
+    url = "https://www.instagram.com/p/DTD31tUETFY/"
+    # Details writes the two fields as any declared ones, checked
+    made = client.post(f"/api/cases/{cid}/entities", json={
+        "type": "bookmark", "label": "Instagram post", "attrs": {"url": url, "author": "@gaivire_8", "published_at": "2026-01-04"}})
+    assert made.status_code == 200, made.text
+    refused = client.post(f"/api/cases/{cid}/entities", json={
+        "type": "bookmark", "label": "x", "attrs": {"url": url, "published_at": "the other day"}})
+    assert refused.status_code in (400, 422)
+    source = notesources.Reader(Case.open(cid)).link(url, "a ceremony photo")
+    assert (source.author, source.published) == ("@gaivire_8", "2026-01-04")
+    assert said(notesources.card_entry(source)).startswith("@gaivire_8 on Instagram, post, 4 January 2026")
+    assert notesources.short_name(source) == "@gaivire_8 on Instagram (post)"

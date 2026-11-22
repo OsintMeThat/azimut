@@ -627,11 +627,17 @@ ENTITY_TYPES: tuple[EntityType, ...] = (
     # filed it — the extension is on the page, so the server stamps the moment it
     # was seen — and are not declared here: a declared attr is a field an analyst
     # fills, and neither of those is typed. What is typed is the archived copy,
-    # once someone has made one, and how much the source is worth.
+    # once someone has made one, how much the source is worth, and who put the page
+    # up and when, for a post whose address names neither (an Instagram post, a
+    # YouTube video): the sources list writes `@name on Instagram, post, 4 January
+    # 2026` from them. Archive every link fills the day from the page's copy when the
+    # page states one, never over a day the analyst typed.
     EntityType(
         "bookmark", "Bookmark", DOCUMENT, "bookmark", ATTESTATION,
         hint="a page the case points at, stored as a link rather than a copy",
         attrs=(
+            Attr("author", "Author", hint="who posted or wrote it: an account such as @name, or a person"),
+            Attr("published_at", "Published", kind="temporal", hint="the day the page or the post went up"),
             Attr("archive_url", "Archived copy", kind="url",
                  hint="a snapshot that survives the page being taken down"),
             Attr(
