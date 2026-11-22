@@ -169,6 +169,8 @@ MAX_PREVIEW_BODY_BYTES = MAX_PDF_BODY_BYTES
 MAX_PAGE_MAP = 2000
 #: The pictures header's budget, in bytes: well under what a browser accepts.
 MAX_PICTURES_HEADER = 48_000
+#: How many blocks' starts the preview's header carries (`_spots_header`): about 30 KB.
+MAX_SPOTS = 2500
 MAX_HEADER_WARNINGS = 20
 MAX_WARNING_CHARS = 300
 MAX_DIAGRAM_HEADER_BYTES = 48 * 1024
@@ -805,6 +807,7 @@ def preview_response(
             "X-Note-Warning-Lines": _ascii_json(rendered.warning_lines[:MAX_HEADER_WARNINGS]),
             "X-Note-Warning-Kinds": _ascii_json(rendered.warning_kinds[:MAX_HEADER_WARNINGS]),
             "X-Note-Pictures": _pictures_header(rendered.pictures),
+            "X-Note-Spots": _spots_header(rendered.spots),
             "X-Note-Internal": str(rendered.internal),
         },
     )
@@ -867,6 +870,16 @@ def _pictures_header(pictures: list[pdf_engine.PagePicture]) -> str:
         room -= len(item) + 1
         items.append(item)
     return f"[{','.join(items)}]"
+
+
+def _spots_header(spots: list[tuple[int, float, int]]) -> str:
+    """Where each block of the text starts, flat (`page, top in thousandths, line`, then
+    the next), for a double-click on the preview to find its line; as many as the header
+    holds, the rest left to the page's first line."""
+    flat: list[int] = []
+    for page, top, line in spots[:MAX_SPOTS]:
+        flat.extend((page, round(top * 1000), line))
+    return _ascii_json(flat)
 
 
 def _diagram_header(pending: list[tuple[str, str]]) -> str:

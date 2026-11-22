@@ -1250,7 +1250,12 @@ class _Page:
             elif self._fixed:
                 self._line = self._block_line
             handler = getattr(self, f"_on_{token.type}", None)
+            drawn, line = len(self.out), self._line
             index = handler(tokens, index) if handler is not None else index + 1
+            if self.light:
+                # the Page pane's copy says the line each element comes from, for a double-click
+                # on it to take the note there; a file written out never carries it
+                self.out[drawn:] = [_lined(part, line) for part in self.out[drawn:]]
 
     def _on_heading_open(self, tokens: list[Token], index: int) -> int:
         token = tokens[index]
@@ -3396,6 +3401,21 @@ def _quoted(text: str) -> str:
     if len(text) > 1 and text[0] == "\u201c" and text[-1] == "\u201d":
         return f"\u201c<bdi>{_text(text[1:-1])}</bdi>\u201d"
     return f"<bdi>{_text(text)}</bdi>"
+
+
+#: An element's opening tag, which a line is written on (`_lined`).
+_OPENING = re.compile(r"^(\s*<[a-zA-Z][\w-]*)(?=[\s>/])")
+
+
+def _lined(part: str, line: int) -> str:
+    """``part`` with the note's line it comes from on its first element, `data-line`,
+    unless it says one already (an element drawn by a walk within it)."""
+    if not part or part.lstrip().startswith("</"):
+        return part
+    match = _OPENING.match(part)
+    if match is None or "data-line=" in part[: part.find(">") + 1]:
+        return part
+    return f'{match.group(1)} data-line="{line}"{part[match.end():]}'
 
 
 def _card(number: int) -> str:

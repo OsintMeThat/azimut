@@ -8,6 +8,7 @@
  * a browser, so the diagrams the server could not draw are drawn here once, kept
  * under the key it gave, and the page is asked for again with them.
  */
+import { readSpots } from './spots.js';
 import { api } from '../api.js';
 import { asSvg, drawDiagrams } from '../notesExport.js';
 import { warningKind } from './warnings.js';
@@ -64,6 +65,7 @@ export async function fetchPreview({ caseId = '', note = 'case', title = '', tex
     diagrams: headerList(headers, 'X-Note-Diagrams').filter((item) => item && typeof item.key === 'string'),
     warnings: noteWarnings(headers),
     pictures: headerList(headers, 'X-Note-Pictures').filter(placedPicture),
+    spots: readSpots(headerList(headers, 'X-Note-Spots')),
     internal: internalHeader(headers),
   };
 }
@@ -134,6 +136,13 @@ export function pageLine(pages, index) {
 
 /** The longest a pane waits after typing stops, however long its pages take. */
 export const MOST_DELAY = 4000;
+/**
+ * The server lays out one page at a time for every pane and answers 503 when another
+ * held its turn past the wait: the PDF and the HTML page asked together, a long report.
+ * A pane then waits this long and asks again, this many times, before it says so.
+ */
+export const BUSY_PAUSE = 1500;
+export const BUSY_TRIES = 6;
 
 /**
  * The preview of one pane. `ask(request)` waits for typing to stop, `now(request)`
@@ -159,6 +168,7 @@ export function createPreview({
   onerror = () => {},
   onbusy = () => {},
   now: clock = () => Date.now(),
+  busyPause = BUSY_PAUSE,
 } = {}) {
   const { drawn, failed } = stores[kind];
   let timer = null;
@@ -179,7 +189,8 @@ export function createPreview({
     wanted = [...wanted.filter((item) => item !== key), key].slice(-SENT_DIAGRAMS);
   };
 
-  async function once(request, current) {
+  /** One request asked; true when the server was busy with another and it should be asked again. */
+  async function once(request, current, last) {
     const mine = new AbortController();
     controller = mine;
     const started = clock();
@@ -201,11 +212,14 @@ export function createPreview({
       took = clock() - started;
       onresult(answer);
     } catch (error) {
-      if (current !== ticket || error?.name === 'AbortError') return;
+      if (current !== ticket || error?.name === 'AbortError') return false;
+      // another page held the server's turn: waited for and asked again, said only if it never frees
+      if (error?.status === 503 && !last) return true;
       onerror(String(error?.message || error || 'The page could not be drawn').split('\n')[0]);
     } finally {
       if (controller === mine) controller = null;
     }
+    return false;
   }
 
   function run(request) {
@@ -219,10 +233,17 @@ export function createPreview({
     flight = (async () => {
       let next = request;
       let current = ticket;
+      let tries = 0;
       while (next) {
         current = ticket;
         queued = null;
-        await once(next, current);
+        const busy = await once(next, current, tries >= BUSY_TRIES);
+        if (busy) {
+          tries += 1;
+          await new Promise((done) => { setTimeout(done, busyPause); });
+          // a newer request made meanwhile is asked instead
+          if (current === ticket && !queued) queued = next;
+        } else tries = 0;
         next = queued;
       }
       flight = null;

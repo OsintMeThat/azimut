@@ -135,6 +135,25 @@ describe('the pictures on the pages', () => {
     expect(onjump).toHaveBeenCalledWith(6);
   });
 
+  it('open the app\'s menu on a right-click rather than the browser\'s, its first item taking the note there', async () => {
+    const onjump = vi.fn();
+    await pane({ onresize: vi.fn(), onjump });
+    const event = new MouseEvent('contextmenu', { bubbles: true, cancelable: true, clientX: 200, clientY: 300 });
+    sheet(1).querySelector('.hit').dispatchEvent(event);
+    expect(event.defaultPrevented).toBe(true);
+    await vi.waitFor(() => expect(document.body.querySelector('.float-menu[aria-label="The page"]')).not.toBeNull());
+    const menu = document.body.querySelector('.float-menu[aria-label="The page"]');
+    const items = [...menu.querySelectorAll('.fm-item')];
+    expect(items.map((item) => item.querySelector('.fm-grow').textContent))
+      .toEqual(['Go to it in the note', 'Copy the words', 'See it on the whole screen']);
+    // nothing read under the pointer: nothing to copy
+    expect(items[1].disabled).toBe(true);
+    items[0].click();
+    flushSync();
+    expect(onjump).toHaveBeenCalledWith(6, undefined);
+    expect(document.body.querySelector('.float-menu[aria-label="The page"]')).toBeNull();
+  });
+
   it('take a caption written in place, under the picture, from what the line says', async () => {
     const onresize = vi.fn();
     await pane({ onresize, text: TEXT });

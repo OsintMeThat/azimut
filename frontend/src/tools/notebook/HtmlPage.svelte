@@ -29,7 +29,23 @@
       + `addEventListener('message',function(e){if(e.source!==parent||!e.data||typeof e.data.azimutScroll!=='number')return;`
       + `back=Math.max(0,e.data.azimutScroll);keep();hold();});`
       + `addEventListener('scroll',function(){clearTimeout(t);t=setTimeout(function(){if(!held)mark();`
-      + `parent.postMessage({azimutPage:Math.round(scrollY)},'*');},80);},{passive:true});})();<\/script>`;
+      + `parent.postMessage({azimutPage:Math.round(scrollY)},'*');},80);},{passive:true});`
+      // a double-click says the note's line the element comes from, and the word it took, as a TeX viewer does
+      + `addEventListener('dblclick',function(e){var n=e.target&&e.target.closest?e.target.closest('[data-line]'):null;if(!n)return;`
+      + `var w=String(getSelection?getSelection():'').trim().slice(0,80);`
+      + `parent.postMessage({azimutLine:Number(n.getAttribute('data-line')),azimutWord:w},'*');});`
+      // a right-click opens the app's menu rather than the browser's: what it is on goes up with it
+      + `addEventListener('contextmenu',function(e){var t=e.target,n=t&&t.closest?t.closest('[data-line]'):null,`
+      + `a=t&&t.closest?t.closest('a[href]'):null,w='';e.preventDefault();`
+      + `try{var r=document.caretRangeFromPoint?document.caretRangeFromPoint(e.clientX,e.clientY):null,`
+      + `p=!r&&document.caretPositionFromPoint?document.caretPositionFromPoint(e.clientX,e.clientY):null,`
+      + `o=r?r.startContainer:p&&p.offsetNode,k=r?r.startOffset:p&&p.offset;`
+      + `if(o&&o.nodeType===3){var x=o.data,i=k,j=k,c=/[\\p{L}\\p{N}'’-]/u;while(i>0&&c.test(x[i-1]))i--;`
+      + `while(j<x.length&&c.test(x[j]))j++;w=x.slice(i,j);}}catch(_){}`
+      + `var s=String(getSelection?getSelection():'').trim();`
+      + `parent.postMessage({azimutMenu:{line:n?Number(n.getAttribute('data-line')):-1,word:w.slice(0,80),`
+      + `words:(s||(n?n.innerText:'')).slice(0,4000),href:a&&/^https?:/i.test(a.href)?a.href:'',x:e.clientX,y:e.clientY}},'*');});`
+      + `})();<\/script>`;
     const text = String(html ?? '');
     const end = text.lastIndexOf('</body>');
     return end < 0 ? `${text}${script}` : `${text.slice(0, end)}${script}${text.slice(end)}`;
@@ -59,7 +75,7 @@
    */
   import { onDestroy, untrack } from 'svelte';
 
-  let { html = '', label = 'The HTML page' } = $props();
+  let { html = '', label = 'The HTML page', online = null, onmenu = null } = $props();
 
   let frames = $state([{ doc: '', ticket: 0 }, { doc: '', ticket: 0 }]);
   let shown = $state(0);
@@ -103,6 +119,27 @@
   function heard(event) {
     if (!elements.some((element) => element?.contentWindow && element.contentWindow === event.source)) return;
     if (event.source !== elements[shown]?.contentWindow) return;
+    const asked = event.data?.azimutMenu;
+    if (asked && typeof asked === 'object') {
+      // where the pointer is in the window: the frame's own place, and its scale when it is drawn smaller
+      const frame = elements[shown];
+      const box = frame.getBoundingClientRect();
+      const scale = frame.offsetWidth ? box.width / frame.offsetWidth : 1;
+      const line = Number(asked.line);
+      onmenu?.({
+        line: Number.isInteger(line) && line >= 0 ? line : -1,
+        word: typeof asked.word === 'string' ? asked.word.slice(0, 80) : '',
+        words: typeof asked.words === 'string' ? asked.words.slice(0, 4000) : '',
+        href: typeof asked.href === 'string' && /^https?:\/\//i.test(asked.href) ? asked.href : '',
+        at: { x: box.left + (Number(asked.x) || 0) * scale, y: box.top + (Number(asked.y) || 0) * scale },
+      });
+      return;
+    }
+    const line = Number(event.data?.azimutLine);
+    if (Number.isInteger(line) && line >= 0) {
+      online?.(line, typeof event.data.azimutWord === 'string' ? event.data.azimutWord.slice(0, 80) : '');
+      return;
+    }
     const y = Number(event.data?.azimutPage);
     if (Number.isFinite(y) && y >= 0) top = y;
   }

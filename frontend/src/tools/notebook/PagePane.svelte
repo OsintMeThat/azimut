@@ -40,6 +40,9 @@
   import { onDestroy, tick, untrack } from 'svelte';
   import { prefs } from '../../lib/state.svelte.js';
   import { createPreview, htmlPreview, pageLine } from '../../lib/notes/preview.js';
+  import { blockWords, spotLine } from '../../lib/notes/spots.js';
+  import { copyText } from '../../lib/clipboard.js';
+  import ContextMenu from '../../components/ContextMenu.svelte';
   import { HTML, PDF, keepFormat, readFormat } from '../../lib/notes/formats.js';
   import {
     CAPTION_HELP, PICTURE_ALIGNS, PICTURE_SIZES, POSTED_HELP, SOURCE_HELP, blockAlignAt, captionField, pictureAt, pictureLine, postedAddress,
@@ -62,6 +65,38 @@
 
   let data = $state(null);
   let pages = $state([]);
+  /** Where each block of the PDF starts and its line (`lib/notes/spots.js`). */
+  let spots = $state([]);
+
+  /** The preview's right-click menu, `{ at, items }` (`components/ContextMenu`), or null. */
+  let menu = $state(null);
+  /**
+   * The right-click menu over the preview, for what is under the pointer (`said`: the
+   * note's `line` it comes from, the `word` under it, the block's `words` or the words
+   * selected, a link's `href`, the pointer `at`): every item a shortcut to a double-click,
+   * a copy, a link or the whole-screen button.
+   */
+  function openMenu(said) {
+    const items = [
+      { label: 'Go to it in the note', icon: 'enter', keys: 'Double-click', disabled: !(said.line >= 0),
+        title: 'Write, at the line it comes from, on the word', run: () => onjump(said.line, said.word ? { word: said.word } : undefined) },
+      { label: 'Copy the words', icon: 'copy', disabled: !said.words, title: 'The words selected, else the paragraph',
+        run: () => void copyText(said.words) },
+    ];
+    if (said.href) {
+      items.push('sep',
+        { label: 'Open the link', icon: 'external', title: said.href, run: () => window.open(said.href, '_blank', 'noopener,noreferrer') },
+        { label: 'Copy the address', icon: 'link', run: () => void copyText(said.href, { said: 'Address copied' }) });
+    }
+    items.push('sep', full
+      ? { label: 'Back beside the note', icon: 'minimize', keys: 'Esc', run: () => void wholeScreen(false) }
+      : { label: 'See it on the whole screen', icon: 'maximize', run: () => void wholeScreen(true) });
+    menu = { at: said.at, items };
+  }
+  /** What a right-click on a PDF page found, read against the blocks the PDF says it holds. */
+  function pdfMenu({ index, top, word, lines, href, at }) {
+    openMenu({ line: spotLine(spots, pages, index, top), word, words: blockWords(spots, index, top, lines), href, at });
+  }
   let count = $state(0);
   let warnings = $state([]);
   let pictures = $state([]);
@@ -203,6 +238,7 @@
     onresult: (answer) => {
       data = answer.data;
       pages = answer.pages;
+      spots = answer.spots ?? [];
       pictures = answer.pictures ?? [];
       if (shows !== PDF) return;
       warnings = answer.warnings ?? [];
@@ -386,15 +422,20 @@
     <div class="view">
       <div class="frame">
         {#if shows === HTML}
-          <HtmlPage bind:this={htmlView} {html} label="The note as an HTML page" />
+          <HtmlPage bind:this={htmlView} {html} label="The note as an HTML page"
+            online={(line, word) => onjump(line, word ? { word } : undefined)} onmenu={openMenu} />
         {:else}
           <PagePreview bind:this={pdfView} {data} label="Pages of the PDF" onerror={(message) => (error = message)} onpages={(n) => (count = n)}
-            onpage={(index) => onjump(pageLine(pages, index))} overlay={pictures.length ? marks : null} />
+            onpage={(index) => onjump(pageLine(pages, index))} overlay={pictures.length ? marks : null}
+            ondouble={(index, top, word) => onjump(spotLine(spots, pages, index, top), word ? { word } : undefined)}
+            onmenu={pdfMenu} />
         {/if}
       </div>
     </div>
   </div>
 </aside>
+
+<ContextMenu {menu} label="The page" onclose={() => (menu = null)} />
 
 {#snippet marks(index, size)}
   {#each pictures as picture, at (at)}

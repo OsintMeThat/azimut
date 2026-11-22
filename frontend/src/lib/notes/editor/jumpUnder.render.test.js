@@ -106,3 +106,21 @@ describe("a warning's Go to on a heading", () => {
     expect(underHeading(code, 2)).toBeNull();
   });
 });
+
+describe('a double-click on the preview', () => {
+  it('lands on the word it took, in the paragraph its line starts', () => {
+    editor('# Front\n\nThe line held at the ridge,\nwhere the road bends.\n\nLast words of the line.\n');
+    jumpToLine(view, 2, { word: 'road' });
+    const { from, to } = view.state.selection.main;
+    expect(text().slice(from, to)).toBe('road');
+    // a whole word first: "line" is not taken from "lineage"
+    jumpToLine(view, 5, { word: 'line' });
+    expect(view.state.selection.main.from).toBe(text().indexOf('line.'));
+  });
+
+  it('stays at the paragraph\'s start for a word it does not hold', () => {
+    editor('# Front\n\nThe line held.\n\nLast words.\n');
+    jumpToLine(view, 2, { word: 'absent' });
+    expect(view.state.selection.main.head).toBe(text().indexOf('The line'));
+  });
+});
