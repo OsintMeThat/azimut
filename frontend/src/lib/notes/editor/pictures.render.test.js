@@ -73,7 +73,7 @@ describe('a picture\'s bar', () => {
   it('offers its sizes, its places, its caption, Graphic and Replace…, Graphic pressed when the braces say graphic', () => {
     editor(DOC);
     const labels = [...bar().querySelectorAll('button')].map((button) => button.textContent || button.getAttribute('aria-label'));
-    expect(labels).toEqual(['XXS', 'XS', 'S', 'M', 'L', 'Full', 'Left', 'Centre', 'Right', 'Caption', 'Graphic', 'Replace…', 'Edit the source']);
+    expect(labels).toEqual(['XXS', 'XS', 'S', 'M', 'L', 'Full', 'Left', 'Centre', 'Right', 'Caption', 'Graphic', 'Replace…', 'Side by side', 'Edit the source']);
     expect(bar().querySelector('[data-graphic]').getAttribute('aria-pressed')).toBe('false');
     expect(bar().querySelector('[data-graphic]').title).toBe('Graphic: blurred on the web until pressed');
     view.destroy();

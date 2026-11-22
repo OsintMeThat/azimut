@@ -33,8 +33,13 @@
  *   step over it whole and a delete take it whole.
  * - **how it opens**: `open(view, block)`, on a double press, Enter or its `</>`.
  *   Without one, its source opens in place (`openSource` in `editor/ranges.js`).
+ * - **whether it is written in place**: `writtenIn(ctx, range)` dresses its lines while
+ *   the cursor is in it and it is not opened, the lines left to the ordinary marks
+ *   (a row of columns, `editor/columnsBlock.js`). Without one, the cursor in it shows
+ *   its source.
  *
- * And optionally: `height` (an estimate before it is drawn, in pixels), `fallback`
+ * And optionally: `actions(state, block)` (more entries atop its block menu, as
+ * `editor/blockMenu.js` writes them), `height` (an estimate before it is drawn, in pixels), `fallback`
  * (read after every other kind of the same node), `tools(box, widget, view)` (a bar
  * of its own, which then carries its `</>`), `bar` (the selector of that bar, whose
  * presses go to `press(target, box, view)` rather than picking the block), `fields`

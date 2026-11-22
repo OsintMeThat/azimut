@@ -52,6 +52,11 @@ as the picture lays them (each chart its own SVG, the map the page's own, the wo
 text), then its one source line. On a phone the columns become one, in the text's order.
 A web folder also carries the whole page as one picture, a press away.
 
+**Columns.** A `:::: columns` row is its columns side by side, each its written share of
+the row (`reader.columns.css`, carried only by a page holding one). A row of pictures
+only shares the row out by each picture's shape, so they stand at one height, and stays
+side by side on a phone, where any other row reads one column under the other.
+
 **Three layouts.** The look's `web` lays the page out as an article, or as a story whose
 pictures hold still while the words after each go by (`_scenes`, the `::: story` markup
 reused), or as a map page (a web map): the note's first map on the whole page under its
@@ -141,6 +146,8 @@ FIGURE_ASSET_NAMES = ("reader.chart.css", "reader.infographic.css")
 TABLE_ASSET_NAMES = ("reader.table.css",)
 #: What a page drawing a post from X or Bluesky (`::: post`) adds, for the same reason.
 POST_ASSET_NAMES = ("reader.post.css",)
+#: What a page laying columns side by side (`:::: columns`) adds, for the same reason.
+COLUMNS_ASSET_NAMES = ("reader.columns.css",)
 #: What a map page adds: its layout, its panel's script spliced after the map's, and, in a web
 #: folder whose look names a GoatCounter site, the counter beside the page.
 MAPPAGE_ASSET_NAMES = ("reader.mappage.css", "reader.mappage.js", "reader.count.js")
@@ -595,6 +602,10 @@ class _Page:
         self.infographics = 0
         #: The posts it draws (`::: post`), whose cards the page then styles (`reader.post.css`).
         self.posts = 0
+        #: How many rows of columns the page lays side by side (`reader.columns.css`), and
+        #: whether the walk is inside one of their columns now.
+        self.columns = 0
+        self._columned = False
         #: Tables with a settings line, whose rules the page then carries (`reader.table.css`).
         self.table_looks = 0
         #: The words the page's charts draw, which its faces must carry.
@@ -762,6 +773,7 @@ class _Page:
                       + (_asset("reader.infographic.css") if self.infographics else "")
                       + (_asset("reader.table.css") if self.table_looks else "")
                       + (_asset("reader.post.css") if self.posts else "")
+                      + (_asset("reader.columns.css") if self.columns else "")
                       + (_asset(live.sheet) if live is not None else ""))
         reader = _asset("reader.js")
         map_js = _asset("reader.map.js") + (_asset("reader.mappage.js") if paged else "")
@@ -1231,6 +1243,11 @@ class _Page:
             level = int(token.tag[1])
             self.out.append(f'<h{level} class="az-cover-heading" dir="auto">{inner}</h{level}>\n')
             return index + 3
+        if self._columned:
+            # a heading inside a column: its rank's size, never numbered or in the contents
+            tag = max(2, min(6, md.heading_level(token.tag, self._shift) - self._base + 2))
+            self.out.append(f'<h{tag} class="az-column-heading" dir="auto">{inner}</h{tag}>\n')
+            return index + 3
         words = " ".join(md.inline_text(inline).split())
         self.out.append(self._heading_html(words, md.heading_level(token.tag, self._shift), inner=inner))
         return index + 3
@@ -1279,6 +1296,46 @@ class _Page:
     def _on_az_post(self, tokens: list[Token], index: int) -> int:
         self.out.append(self._post(tokens[index].content))
         return index + 1
+
+    def _on_az_columns_open(self, tokens: list[Token], index: int) -> int:
+        """A `:::: columns` row, its columns side by side (`reader.columns.css`), each taking
+        its written share of the row. A row of pictures only gives each column its
+        picture's shape instead, so every picture stands at one height, nothing cropped;
+        it stays side by side on a phone, where any other row reads one column under the
+        other. On the note's own cover the columns read one under the other."""
+        spans, end = md.column_spans(tokens, index)
+        if self._on_cover or self._columned or len(spans) < 2:
+            return index + 1
+        self._columned = True
+        try:
+            drawn = [self._drawn(tokens, first, stop) for first, stop, _ in spans]
+        finally:
+            self._columned = False
+        ratios = [self._shape_of(inner) for inner in drawn] if tokens[index].meta.get("pictures") else []
+        pictures = bool(ratios) and all(ratio is not None for ratio in ratios)
+        columns = []
+        for position, (inner, (_, _, share)) in enumerate(zip(drawn, spans)):
+            grow = ratios[position] if pictures else share * 100
+            columns.append(f'<div class="az-column" style="flex:{grow:.4f} 1 0">\n{inner}</div>\n')
+        self.columns += 1
+        kind = "az-columns az-columns-pictures" if pictures else "az-columns"
+        self.out.append(f'<div class="{kind}">\n{"".join(columns)}</div>\n')
+        return end
+
+    def _shape_of(self, inner: str) -> float | None:
+        """The width over height of the one picture a column shows, or None without one:
+        a figure's shape (`--r`), a clip's still, or a picture's own size."""
+        shape = re.search(r"--r:([0-9.]+)", inner)
+        if shape:
+            return float(shape.group(1)) or None
+        clip = re.search(r"\x00C(\d+)\x00", inner)
+        if clip and int(clip.group(1)) < len(self.clips):
+            wide, high = self.clips[int(clip.group(1))].poster_size
+            return wide / high if wide and high else 16 / 9
+        sized = re.search(r' width="(\d+)" height="(\d+)"', inner)
+        if sized and int(sized.group(2)):
+            return int(sized.group(1)) / int(sized.group(2))
+        return None
 
     def _post(self, body: str) -> str:
         """A post from X or Bluesky the case keeps, drawn as a card in the page's look

@@ -1,7 +1,9 @@
 /**
  * The block handle: a small ⋮⋮ in the left margin of the block under the pointer, or
  * of the cursor's block (on a touch screen, only that one). Dragging it moves the
- * block, a line showing where it lands; a press opens its menu (`editor/blockMenu.js`),
+ * block, a line showing where it lands; a picture let go against the side of another
+ * picture, or of a row with room for one more, goes beside it, in a row of columns
+ * (`besideSpec`). A press opens its menu (`editor/blockMenu.js`),
  * as Ctrl+/ does at the cursor; Alt+↑ and Alt+↓ move the cursor's block. Every move is
  * one transaction (`editor/turnInto.js`), which one Undo takes back to the byte.
  *
@@ -12,7 +14,9 @@ import { Prec } from '@codemirror/state';
 import { EditorView, ViewPlugin, keymap } from '@codemirror/view';
 
 import { paths as iconPaths } from '../../../components/Icon.svelte';
+import { MAX_COLUMNS } from '../columns.js';
 import { blockName, openBlockMenu } from './blockMenu.js';
+import { besideSpec, rowAround } from './columnsRow.js';
 import { blockRanges } from './ranges.js';
 import { focused } from './state.js';
 import { moveBlock, moveBy } from './turnInto.js';
@@ -141,11 +145,16 @@ class BlockHandle {
     this.line = document.createElement('div');
     this.line.className = 'cm-handle-drop';
     this.line.hidden = true;
+    // a picture held against another's side: the edge it goes to, and the word for it
+    this.beside = document.createElement('div');
+    this.beside.className = 'cm-handle-beside';
+    this.beside.hidden = true;
+    this.beside.append(Object.assign(document.createElement('span'), { textContent: 'Beside' }));
     this.said = document.createElement('div');
     this.said.className = 'cm-handle-said';
     this.said.setAttribute('role', 'status');
     this.said.setAttribute('aria-live', 'polite');
-    view.scrollDOM.append(this.mark, this.line, this.dom, this.said);
+    view.scrollDOM.append(this.mark, this.line, this.beside, this.dom, this.said);
 
     this.onMove = (event) => {
       if (event.pointerType === 'touch' || this.drag) return;
@@ -455,12 +464,47 @@ class BlockHandle {
     return best;
   }
 
+  /**
+   * The side of a picture, or of a row with room for one more, the dragged picture is held
+   * against: `{ target, side, edge }` (`edge` its box on screen), or null.
+   */
+  besideAt(clientX, clientY) {
+    const { drag, view } = this;
+    if (drag?.block.kind !== 'picture') return null;
+    const hit = view.root.elementFromPoint?.(clientX, clientY)?.closest?.('.cm-block-picture, .cm-block-columns');
+    if (!hit || !view.contentDOM.contains(hit)) return null;
+    const target = blockAt(this.ranges(), view.posAtDOM(hit));
+    if (!target || target.from === drag.block.from || !['picture', 'columns'].includes(target.kind)) return null;
+    if (target.kind === 'columns' && (rowAround(view.state, target.from)?.columns.length ?? MAX_COLUMNS) >= MAX_COLUMNS) return null;
+    const edge = (hit.querySelector('.cm-picture-frame, .cm-cols-row') ?? hit).getBoundingClientRect();
+    const zone = Math.min(96, edge.width * 0.3);
+    const side = clientX <= edge.left + zone && clientX >= edge.left - 48 ? 'left'
+      : clientX >= edge.right - zone && clientX <= edge.right + 48 ? 'right' : null;
+    return side ? { target, side, edge } : null;
+  }
+
   dragTo(clientY, clientX = this.drag?.x ?? 0) {
     const { drag, view } = this;
     if (!drag) return;
     drag.y = clientY;
     drag.x = clientX;
     if (this.ghost) Object.assign(this.ghost.style, { left: `${clientX + 14}px`, top: `${clientY + 12}px` });
+    drag.beside = this.besideAt(clientX, clientY);
+    if (drag.beside) {
+      const { edge, side } = drag.beside;
+      const box = view.scrollDOM.getBoundingClientRect();
+      Object.assign(this.beside.style, {
+        left: `${(side === 'left' ? edge.left - 8 : edge.right + 6) - box.left + view.scrollDOM.scrollLeft}px`,
+        top: `${edge.top - box.top + view.scrollDOM.scrollTop}px`,
+        height: `${Math.max(24, edge.height)}px`,
+      });
+      this.beside.classList.toggle('cm-handle-beside-left', side === 'left');
+      this.beside.hidden = false;
+      this.line.hidden = true;
+      drag.before = undefined;
+      return;
+    }
+    this.beside.hidden = true;
     const gap = this.gapAt(clientY);
     const blocks = this.ranges();
     const from = blocks.findIndex((one) => one.from === drag.block.from);
@@ -506,8 +550,15 @@ class BlockHandle {
     this.ghost?.remove();
     this.ghost = null;
     this.line.hidden = true;
+    this.beside.hidden = true;
     this.light(null);
-    if (drop && !drag.cancelled && drag.before !== undefined) {
+    if (drop && !drag.cancelled && drag.beside) {
+      const spec = besideSpec(view.state, drag.block, drag.beside.target, drag.beside.side);
+      if (spec) {
+        view.dispatch(spec);
+        view.focus();
+      }
+    } else if (drop && !drag.cancelled && drag.before !== undefined) {
       const spec = moveBlock(view.state, drag.block, drag.before, this.ranges());
       if (spec) {
         view.dispatch(spec);
@@ -527,6 +578,7 @@ class BlockHandle {
     this.dom.remove();
     this.mark.remove();
     this.line.remove();
+    this.beside.remove();
     this.said.remove();
   }
 }
@@ -585,7 +637,16 @@ export const handleTheme = EditorView.theme({
     border: '1px dashed var(--border-strong)', background: 'color-mix(in srgb, var(--text-1) 3%, transparent)',
   },
   '&.cm-handle-dragging .cm-handle-mark': { background: 'color-mix(in srgb, var(--text-1) 6%, transparent)' },
-  '.cm-handle-mark[hidden], .cm-handle-drop[hidden]': { display: 'none' },
+  '.cm-handle-mark[hidden], .cm-handle-drop[hidden], .cm-handle-beside[hidden]': { display: 'none' },
+  '.cm-handle-beside': {
+    position: 'absolute', zIndex: '4', width: '3px', pointerEvents: 'none', borderRadius: '2px', background: 'var(--accent)',
+    boxShadow: '0 0 0 3px color-mix(in srgb, var(--accent) 18%, transparent)',
+  },
+  '.cm-handle-beside > span': {
+    position: 'absolute', top: '-4px', left: '9px', padding: '2px 7px', borderRadius: '3px', background: 'var(--accent)',
+    color: 'var(--accent-text)', fontFamily: 'var(--font-sans)', fontSize: '11px', fontWeight: '700', whiteSpace: 'nowrap',
+  },
+  '.cm-handle-beside-left > span': { left: 'auto', right: '9px' },
   '.cm-handle-drop': {
     position: 'absolute', zIndex: '4', height: '2px', pointerEvents: 'none', borderRadius: '1px', background: 'var(--accent)',
   },
