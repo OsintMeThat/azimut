@@ -460,6 +460,18 @@ One-time setup: register the repo as a
 
 Full spec: [docs/SPEC.md](https://github.com/OsintMeThat/azimut/blob/main/docs/SPEC.md).
 
+## Responsible use
+
+Azimut is made to verify public events and build proofs about them: conflicts,
+disasters, crimes, claims made in public.
+
+- Don't use it to track private people.
+- A match from Find or Horizon is a lead, not a proof. A wrong place, once
+  published, can harm people who were never there.
+- The people in a photo did not choose to have it read. Blur or crop anyone who
+  is not the subject before you publish.
+- Wait before publishing the position of active troops or of civilians in danger.
+
 ## License
 
 Copyright © 2026 the Azimut maintainer.
