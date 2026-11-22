@@ -39,6 +39,20 @@ export function groundSaid(map, { grounds = [], releases = [], years = [] } = {}
   return { name, when: '', drawn: false, undated: true };
 }
 
+/**
+ * A map's ground's day as its bar says it, short: a Wayback release's day, a Sentinel-2
+ * pass's, a cloudless year; "Newest" for a release or a year not picked and not read yet,
+ * "No pass yet" for Sentinel-2 before its pass is known; '' for a ground with no day of
+ * its own, which shows none.
+ */
+export function groundDay(map, { releases = [], years = [] } = {}) {
+  const day = (value) => (DAY.test(String(value ?? '')) ? momentLabel(value) : String(value ?? ''));
+  if (map?.basemap === WAYBACK_ID) return day(releaseOf(map, releases)?.date) || (map.release ? `Release ${map.release}` : 'Newest');
+  if (map?.basemap === CLOUDLESS_ID) return String(cloudlessYear(map, years)?.year ?? map.year ?? 'Newest');
+  if (map?.basemap === SENTINEL_ID) return map.acquired ? day(map.acquired) : 'No pass yet';
+  return '';
+}
+
 /** The day a map's picture was taken, `YYYY-MM-DD`: a Wayback release's or a Sentinel-2 pass's; '' for a ground with no single day. */
 export function imageryDay(map, { releases = [] } = {}) {
   const day = map?.basemap === WAYBACK_ID ? releaseOf(map, releases)?.date : map?.basemap === SENTINEL_ID ? map.acquired : '';

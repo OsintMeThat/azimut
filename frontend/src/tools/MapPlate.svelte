@@ -108,6 +108,7 @@
   import { anglesOf } from '../lib/plate/angles.js';
   import PlateLayers from './plate/PlateLayers.svelte';
   import PlateFromCase from './plate/PlateFromCase.svelte';
+  import { createPlateSentinel } from './plate/plateSentinel.svelte.js';
   import { plateTabs } from '../lib/plate/oneTab.js';
   import { buildHash, readSolo, splitHash } from '../lib/hash.js';
   import { settlePlace } from '../lib/backButton.js';
@@ -864,6 +865,11 @@
   function keepFraming(map, keep) {
     spec.framing = framedAs(spec, shownKey, map.id, keep ? null : { ...framingFor(map).view });
   }
+
+  /** The map picked alone, whose Sentinel-2 pass the inspector and its bar pick on one calendar. */
+  const pickedMap = $derived(selection.length === 1 ? elements.find((element) => element.id === selection[0] && element.kind === 'map') ?? null : null);
+  const sentinel = createPlateSentinel({ target: () => pickedMap, place: (map) => { const { lat, lon } = framingFor(map).view; return { lat, lon }; },
+    notify: toast, api });
 
   function changeStep(id, patch) {
     const list = stepsOf(spec, at).map((item) => (item.id === id ? { ...item, ...patch } : item));
@@ -2217,7 +2223,7 @@
             {framingFor} onmapview={mapView} onkeep={keepFraming} beat={shownKey} follows={followsMap} {written} onnamelabel={nameToLabel}
             {glide} oncontext={(id, point) => (id ? elementMenu(id, point) : pageMenu(point))}
             onmap={(id, handle) => handles.set(id, handle)} top={focus ? 44 : 0} onlayers={plate.template ? null : showLayers} onsameview={sameView} {layersDay}
-            onfeaturelabel={featureNameLabel} />
+            onfeaturelabel={featureNameLabel} {releases} {years} {sentinel} template={!!plate.template} />
         {/key}
         {#if focus}
           <div class="focus-bar" role="toolbar" aria-label="The plate">
@@ -2283,7 +2289,7 @@
           <PlateInspector bind:spec={plate.spec} {selection} caseId={plate.caseId ?? caseId ?? ''} {rows} {grounds} {releases} {years} {legend} {creditList} {framing} {at} moments={playable ? moments : []}
             {place} step={stepIndex >= 0 ? { id: stepId, name: stepName(stepIndex) } : null} {featureName} {datedLayer}
             {overflow} {featurePictures} onpaper={paper} ontheme={applyTheme} onremove={removeElement} onduplicate={duplicate} onorder={restackBy} canorder={(element, by) => stepOf(listed, element.id, by) !== null} ongroup={group} onwayback={readReleases} onnewlayer={newLayerHere} onkeepdrawn={keepDrawn}
-            {framingFor} onmapview={mapView} onkeep={keepFraming} plays={!plate.template && sequence.length > 1}
+            {framingFor} onmapview={mapView} onkeep={keepFraming} plays={!plate.template && sequence.length > 1} {sentinel} template={!!plate.template}
             onsymbol={(style) => (lastSymbol = { ...lastSymbol, ...style })}
             onframe={(element) => (framing = framing === element.id ? '' : element.id)} onlabels={labelFeatures}
             onpoint={(element) => { if (!mainMap(spec)) { toast('Put a map on the page first', 'warn'); return; } placing = { kind: 'callout', id: element.id }; }} />

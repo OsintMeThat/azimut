@@ -100,6 +100,13 @@
     written = '',
     /** `(map)`: the day a map draws its dated layers on when it is not the plate's, else null. */
     layersDay = () => null,
+    /** The Wayback releases and the cloudless years a map's bar offers as its ground's day. */
+    releases = [],
+    years = [],
+    /** The plate's Sentinel-2 choices, read from the map picked alone (`plateSentinel.svelte.js`). */
+    sentinel = null,
+    /** The plate is a template, which keeps no layers. */
+    template = false,
   } = $props();
 
   const size = $derived(pageSize(spec.page));
@@ -927,7 +934,9 @@
             keep={framed && !framed.first ? !framed.own : null} onview={(next) => onmapview(element, next)}
             onkeep={(keep) => onkeep?.(element, keep)} onlayers={onlayers ? () => onlayers(element) : null}
             onsameview={onsameview && pairedMap(element) ? () => onsameview(element) : null}
-            onframe={() => { if (lockedMap(element)) { sayHeld(); return; } framing = framing === element.id ? '' : element.id; selection = [element.id]; }} />
+            onframe={() => { if (lockedMap(element)) { sayHeld(); return; } framing = framing === element.id ? '' : element.id; selection = [element.id]; }}
+            {releases} {years} {sentinel} {template} onpick={() => (selection = [element.id])}
+            room={Math.max(160, element.box[2] * PX_PER_MM * scale - 12)} />
         </div>
       {/each}
 

@@ -49,6 +49,18 @@ function props({ s2 = {}, ...overrides } = {}) {
 }
 
 describe('SentinelPicker date safety', () => {
+  it('lays the calendar open in place, without its chip or a layer to write, for a menu that holds it', () => {
+    const { body } = render(SentinelPicker, { props: props({ s2: { menuOpen: false }, inline: true }) });
+    expect(body).not.toContain('aria-label="Sentinel-2 layer and date"');
+    expect(body).toMatch(/class="s2-menu[^"]*inline/);
+    expect(body).toContain('cal-day');
+    expect(body).not.toContain('Write a layer');
+    // the chip's own opens it on a press, and writes layers there
+    const chip = render(SentinelPicker, { props: props() }).body;
+    expect(chip).toContain('aria-label="Sentinel-2 layer and date"');
+    expect(chip).toContain('Write a layer');
+  });
+
   it('disables dates from the previous map location', () => {
     const { body } = render(SentinelPicker, { props: props({ s2: { stale: true } }) });
     expect(body).toContain('Refreshing dates for this location.');

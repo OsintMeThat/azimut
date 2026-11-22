@@ -1,10 +1,14 @@
 // @vitest-environment happy-dom
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { flushSync, mount, unmount } from 'svelte';
 import PlateMapBar from './PlateMapBar.svelte';
+import { createPlateSentinel } from './plateSentinel.svelte.js';
+import { api } from '../../lib/api.js';
 
 let held = null;
-afterEach(() => { if (held) unmount(held); held = null; document.body.innerHTML = ''; });
+/** The effect roots a plate's Sentinel-2 choices live in, as MapPlate's would. */
+let roots = [];
+afterEach(() => { if (held) unmount(held); held = null; roots.forEach((stop) => stop()); roots = []; document.body.innerHTML = ''; vi.useRealTimers(); });
 
 function show(element, props = {}) {
   const state = $state(element);
@@ -129,5 +133,129 @@ describe('a plate map\'s own bar', () => {
     item('Railways').click(); flushSync();
     item('Power lines and plants').click(); flushSync();
     expect(element.overlays).toEqual(['railway', 'power']);
+  });
+
+  describe('the ground\'s day', () => {
+    const grounds = [['plain', 'Plain'], ['esri-world-imagery', 'Esri World Imagery'], ['esri-wayback', 'World Imagery Wayback, dated'],
+      ['s2cloudless', "Sentinel-2 cloudless, a year's mosaic"], ['sentinel2', 'Sentinel-2, one dated pass'], ['osm', 'OpenStreetMap']];
+    const releases = [{ release: 900, date: '2025-02-20' }, { release: 41, date: '2024-03-12' }];
+    const years = [{ year: 2025, licence: 'CC BY-NC-SA 4.0', free: false }, { year: 2016, licence: 'CC BY 4.0', free: true }];
+    const map = (fields) => ({ id: 'm', kind: 'map', view: { lat: 47.5, lon: 34.6, zoom: 12, bearing: 0 }, overlays: [], ...fields });
+    const chip = () => button('Ground\'s day');
+    const choice = (label) => [...document.body.querySelectorAll('.float-menu .fm-item')].find((node) => node.querySelector('.fm-grow')?.textContent.trim() === label);
+    const layered = () => [...document.body.querySelectorAll('.float-menu label')].find((node) => node.textContent.includes('Layers as they stood that day'));
+
+    it('is said beside the ground that has one, and nowhere else', () => {
+      for (const [fields, said] of [[{ basemap: 'esri-wayback', release: 41 }, '12 Mar 2024'], [{ basemap: 'esri-wayback' }, '20 Feb 2025'],
+        [{ basemap: 's2cloudless' }, '2025'], [{ basemap: 'sentinel2', acquired: '2026-10-08' }, '8 Oct 2026'], [{ basemap: 'sentinel2' }, 'No pass yet']]) {
+        show(map(fields), { grounds, releases, years });
+        expect(chip().textContent.trim()).toBe(said);
+        unmount(held); held = null; document.body.innerHTML = '';
+      }
+      for (const basemap of ['plain', 'esri-world-imagery', 'osm']) {
+        show(map({ basemap }), { grounds, releases, years });
+        expect(chip()).toBeNull();
+        unmount(held); held = null; document.body.innerHTML = '';
+      }
+      // an inset keeps its ground plain: no day of its own on its bar
+      show({ kind: 'inset', basemap: 'esri-wayback', overlays: [] }, { grounds, releases, years });
+      expect(chip()).toBeNull();
+    });
+
+    it('picks a Wayback release from its menu, newest first, and draws the layers as they stood that day', () => {
+      const element = show(map({ basemap: 'esri-wayback', release: 41, layers: [] }), { grounds, releases, years });
+      chip().click(); flushSync();
+      expect(document.body.querySelector('.float-menu .fm-head').textContent).toBe('Wayback release');
+      expect([...document.body.querySelectorAll('.float-menu [role="menuitemradio"] .fm-grow')].map((node) => node.textContent)).toEqual(['Newest', '20 Feb 2025', '12 Mar 2024']);
+      expect(choice('12 Mar 2024').getAttribute('aria-checked')).toBe('true');
+      choice('20 Feb 2025').click(); flushSync();
+      expect(element.release).toBe(900);
+      expect(chip().textContent.trim()).toBe('20 Feb 2025');
+      layered().querySelector('input').click(); flushSync();
+      expect(element.layers_on).toBe('imagery');
+      layered().querySelector('input').click(); flushSync();
+      expect(element.layers_on).toBe('plate');
+      choice('Newest').click(); flushSync();
+      expect(element.release).toBeNull();
+      // another ground closes it, and coming back does not open it again
+      element.basemap = 'plain'; flushSync();
+      expect(chip()).toBeNull();
+      expect(document.body.querySelector('.float-menu')).toBeNull();
+      element.basemap = 'esri-wayback'; flushSync();
+      expect(chip().getAttribute('aria-expanded')).toBe('false');
+      expect(document.body.querySelector('.float-menu')).toBeNull();
+    });
+
+    it('offers no layers switch on a template, nor before the release\'s day is known', () => {
+      show(map({ basemap: 'esri-wayback', release: 41 }), { grounds, releases, years, template: true });
+      chip().click(); flushSync();
+      expect(choice('12 Mar 2024')).toBeDefined();
+      expect(layered()).toBeUndefined();
+      unmount(held); held = null; document.body.innerHTML = '';
+      show(map({ basemap: 'esri-wayback', release: 41 }), { grounds, years });
+      expect(chip().textContent.trim()).toBe('Release 41');
+      chip().click(); flushSync();
+      expect(layered()).toBeUndefined();
+    });
+
+    it('picks a cloudless year with its terms, which holds no one day to draw the layers on', () => {
+      const element = show(map({ basemap: 's2cloudless' }), { grounds, releases, years });
+      chip().click(); flushSync();
+      expect(document.body.querySelector('.float-menu').textContent).toContain('Free for non-commercial use only');
+      expect(choice('2016').textContent).toContain('free for any use');
+      choice('2016').click(); flushSync();
+      expect(element.year).toBe(2016);
+      expect(chip().textContent.trim()).toBe('2016');
+      expect(document.body.querySelector('.float-menu').textContent).toContain('Free for any use, with its credit.');
+      expect(layered()).toBeUndefined();
+    });
+
+    /** Copernicus as a fake: a month's passes, the layers the configuration serves, a day's coverage. */
+    function copernicus() {
+      const asked = [];
+      const fetch = vi.spyOn(globalThis, 'fetch').mockImplementation(async (url) => {
+        asked.push(String(url));
+        const body = String(url).includes('/sentinel/layers') ? { layers: [{ id: 'TRUE_COLOR', label: 'True colour' }], source: 'instance' }
+          : String(url).includes('/sentinel/coverage') ? { available: true }
+            : { dates: [{ date: '2026-10-18', cloud: 76 }, { date: '2026-10-13', cloud: 8.2 }, { date: '2026-10-08', cloud: 0 }] };
+        return new Response(JSON.stringify(body), { status: 200, headers: { 'Content-Type': 'application/json' } });
+      });
+      roots.push(() => fetch.mockRestore());
+      return asked;
+    }
+    const settle = async () => { for (let i = 0; i < 6; i += 1) await Promise.resolve(); flushSync(); };
+
+    it('opens Satellite\'s calendar on a Sentinel-2 map, picked alone first, its pass written into the map', async () => {
+      vi.useFakeTimers({ toFake: ['Date'] }); vi.setSystemTime(new Date('2026-10-20T12:00:00Z'));
+      const asked = copernicus();
+      const picked = $state({ ids: ['m', 'badge'] });
+      const element = $state(map({ basemap: 'sentinel2', acquired: '2026-10-08', maxcc: 30, layers: [] }));
+      let sentinel = null;
+      roots.push($effect.root(() => {
+        sentinel = createPlateSentinel({ target: () => (picked.ids.length === 1 && picked.ids[0] === element.id ? element : null),
+          place: (one) => ({ lat: one.view.lat, lon: one.view.lon }), notify: () => {}, api });
+      }));
+      held = mount(PlateMapBar, { target: document.body, props: { element, grounds, releases, years, sentinel, onpick: () => { picked.ids = [element.id]; } } });
+      flushSync();
+      await settle();
+      // nothing is asked of Copernicus until the day is opened
+      expect(asked).toEqual([]);
+      expect(chip().textContent.trim()).toBe('8 Oct 2026');
+      chip().click(); flushSync();
+      expect(picked.ids).toEqual(['m']);
+      await vi.waitFor(() => expect(document.body.querySelectorAll('.float-menu .s2-menu.inline .cal-day.has').length).toBe(3));
+      expect(asked.filter((url) => url.includes('/sentinel/dates?'))).toHaveLength(1);
+      expect(document.body.querySelector('.float-menu [aria-label="Sentinel-2 layer and date"]')).toBeNull();
+      // the pass already on the map stays its pass: no newest one put over it
+      expect(element.acquired).toBe('2026-10-08');
+      expect(document.body.querySelector('.float-menu').textContent).toContain('the pass of 2026-10-08.');
+      const day = [...document.body.querySelectorAll('.float-menu .cal-day.has')].find((node) => node.textContent.trim() === '13');
+      day.click();
+      await vi.waitFor(() => expect(element.acquired).toBe('2026-10-13'));
+      flushSync();
+      expect(chip().textContent.trim()).toBe('13 Oct 2026');
+      expect(element.maxcc).toBe(30);
+      expect(layered()).toBeDefined();
+    });
   });
 });

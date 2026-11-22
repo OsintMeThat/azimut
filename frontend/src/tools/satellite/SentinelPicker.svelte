@@ -14,10 +14,14 @@
 
   /** `s2` is the store from `state/sentinel.svelte.js`: what has been asked,
    *  what came back, and what is still in flight. The label helpers are pure
-   *  (`lib/sentinel.js`) and are handed over so this stays a view. */
+   *  (`lib/sentinel.js`) and are handed over so this stays a view. `inline`
+   *  lays the calendar open in place, without its chip and without writing a
+   *  layer (a plate map's bar, whose menu holds it); whoever shows it asks for
+   *  its passes (`s2.readMenu`). */
   let {
     menuEl = $bindable(),
     s2,
+    inline = false,
     maxccLabel,
     monthLabel,
     monthGrid,
@@ -135,9 +139,10 @@
   }
 </script>
 
-<div class="s2-wrap" bind:this={menuEl}>
+<div class="s2-wrap" class:inline bind:this={menuEl}>
   <!-- Opened from a dated chip, as the Wayback and Sentinel-1 pickers are: the
        date is what you look for, and a layers icon hid it behind a click. -->
+  {#if !inline}
   <button
     class="chip"
     class:on={s2.menuOpen}
@@ -149,8 +154,9 @@
     <Icon name="clock" size={13} />
     <span class="mono">{chipDate || 'Most recent'}</span>
   </button>
-  {#if s2.menuOpen}
-    <div class="s2-menu card" class:writing={open}>
+  {/if}
+  {#if inline || s2.menuOpen}
+    <div class="s2-menu" class:card={!inline} class:inline class:writing={open}>
       <div class="menu-row">
         <span class="menu-label">Layer</span>
         <select class="select" aria-label="Sentinel-2 layer" title="What the pass is drawn as: true colour, false colour, a band combination or a layer of yours"
@@ -165,7 +171,9 @@
       </div>
       {#if s2.layerHint}<div class="menu-hint">{s2.layerHint}</div>{/if}
 
-      {#if !open}
+      {#if inline}
+        <!-- a layer is written where there is room to read its script: the inspector, or Satellite -->
+      {:else if !open}
         <div class="menu-hint dim write-row">
           <button class="linkish" onclick={() => openWriting('')}>
             {resuming ? 'Keep writing…' : 'Write a layer…'}
@@ -355,6 +363,10 @@
   /* A script needs room to be read; a date picker does not. The menu widens
      only while one is open, and never past the viewport on a narrow screen. */
   .s2-menu.writing { width: min(620px, calc(100vw - 32px)); }
+  /* laid open in a menu of its own: it takes the menu's width and colours, and scrolls with it */
+  .s2-wrap.inline { display: block; }
+  .s2-menu.inline { position: static; width: auto; max-height: none; overflow: visible; padding: 2px 4px; background: none;
+    backdrop-filter: none; box-shadow: none; }
   .s2-menu .select { max-width: 150px; padding: 4px 6px; font-size: var(--fs-xs); }
   .write-row { display: flex; gap: 10px; }
   .write-row .dismiss { margin-left: auto; color: var(--text-3); }

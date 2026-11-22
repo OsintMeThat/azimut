@@ -2,11 +2,15 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { flushSync, mount, unmount } from 'svelte';
 import PlateInspector from './PlateInspector.svelte';
+import { createPlateSentinel } from './plateSentinel.svelte.js';
+import { api } from '../../lib/api.js';
 import { houseLayout } from '../../lib/plate/page.js';
 
 let held = null;
+/** The effect roots the plate's Sentinel-2 choices live in, as MapPlate's would. */
+let roots = [];
 beforeEach(() => { vi.useFakeTimers({ toFake: ['Date'] }); vi.setSystemTime(new Date('2026-10-20T12:00:00Z')); });
-afterEach(() => { if (held) unmount(held); held = null; document.body.innerHTML = ''; vi.useRealTimers(); });
+afterEach(() => { if (held) unmount(held); held = null; roots.forEach((stop) => stop()); roots = []; document.body.innerHTML = ''; vi.useRealTimers(); });
 
 function show({ element = {}, at = '2026-10-05', moments = ['2026-10-03', '2026-10-05'], kind = 'text' } = {}) {
   const spec = $state(houseLayout());
@@ -323,7 +327,12 @@ describe('the ground, the type and the layers of a plate', () => {
   function showMap(props = {}) {
     const spec = $state(houseLayout());
     const map = spec.elements.find((element) => element.kind === 'map');
-    held = mount(PlateInspector, { target: document.body, props: { spec, selection: [map.id], grounds, years, ...props } });
+    // the plate's one Sentinel-2 state, bound to the map picked alone, as MapPlate keeps it
+    let sentinel = null;
+    roots.push($effect.root(() => {
+      sentinel = createPlateSentinel({ target: () => map, place: (picked) => ({ lat: picked.view.lat, lon: picked.view.lon }), notify: () => {}, api });
+    }));
+    held = mount(PlateInspector, { target: document.body, props: { spec, selection: [map.id], grounds, years, sentinel, ...props } });
     flushSync();
     return { spec, map };
   }
@@ -406,6 +415,29 @@ describe('the ground, the type and the layers of a plate', () => {
       expect(copernicus$.asked.length).toBe(asked);
       expect(map.acquired).toBe('2026-10-13');
     } finally { copernicus$.restore(); }
+  });
+
+  it('sets the Wayback release and the layers as they stood that day under the ground, where the bar sets them too', async () => {
+    const releases = [{ release: 900, date: '2025-02-20' }, { release: 41, date: '2024-03-12' }];
+    const wayback = [...grounds, ['esri-wayback', 'World Imagery Wayback, dated']];
+    const { map } = showMap({ grounds: wayback, releases });
+    map.basemap = 'esri-wayback'; flushSync();
+    const release = document.body.querySelector('[aria-label="Wayback release"]');
+    release.value = '41'; release.dispatchEvent(new Event('change', { bubbles: true })); flushSync();
+    expect(map.release).toBe(41);
+    const layered = () => [...document.body.querySelectorAll('.inspector label')].find((node) => node.textContent.trim() === 'Layers as they stood that day');
+    // under the ground's day, not at the foot of the layers
+    expect(layered().closest('section')?.textContent).toContain('Release');
+    layered().querySelector('input').click(); flushSync();
+    expect(map.layers_on).toBe('imagery');
+    await settle();
+    expect(bare()).toEqual([]);
+    unmount(held); held = null; document.body.innerHTML = '';
+    // a template keeps no layers
+    const { map: kept } = showMap({ grounds: wayback, releases, template: true });
+    kept.basemap = 'esri-wayback'; flushSync();
+    expect(document.body.querySelector('[aria-label="Wayback release"]')).not.toBeNull();
+    expect(layered()).toBeUndefined();
   });
 
   it('keeps Sentinel-2 in sight, locked, with the steps to a free account, while Copernicus is not set up', () => {
