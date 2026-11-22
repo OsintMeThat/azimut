@@ -451,7 +451,9 @@
     </PlateSection>
   {:else}
     <header>
-      <h3>{element.kind === 'label' && element.leader === 'none' ? 'Text on the map' : KIND_LABELS[element.kind]}{#if element.kind === 'map' && element.of}{' (detail)'}{/if}{#if element.kind === 'map' && (element.terrain ?? 0) > 0}{' in 3D'}{/if}{#if about}<span class="about" role="img" aria-label="About it" title={about}><Icon name="info" size={12} /></span>{/if}</h3>
+      <h3>{element.kind === 'label' && element.leader === 'none' ? 'Text on the map' : KIND_LABELS[element.kind]}{#if element.kind === 'map' && element.of}{' (detail)'}{/if}{#if element.kind === 'map' && (element.terrain ?? 0) > 0}{' in 3D'}{/if}</h3>
+      {#if about}<span class="about" role="img" aria-label="About it" title={about}><Icon name="info" size={12} /></span>{/if}
+      <span class="grow"></span>
       <button type="button" class="icon-act" aria-label="Bring forward" title="Bring forward"
         disabled={!canorder(element, 1)} onclick={() => onorder(element, 1)}><Icon name="chevronUp" size={13} /></button>
       <button type="button" class="icon-act" aria-label="Send back" title="Send back"
@@ -1238,7 +1240,8 @@
     container-type: inline-size; scrollbar-width: thin; }
   header { display: flex; align-items: center; gap: 2px; margin-bottom: 6px; }
   h3 { flex: 1; margin: 0 0 8px; font-size: var(--fs-sm); }
-  header h3 { display: flex; align-items: center; gap: 5px; margin: 0; }
+  header h3 { flex: 0 1 auto; min-width: 0; margin: 0 4px 0 0; }
+  header .grow { flex: 1; }
   /* a wide inspector sets its sections side by side, the element's name and its first fields across the top */
   @container (min-width: 540px) {
     .flow { columns: 2; column-gap: 22px; }

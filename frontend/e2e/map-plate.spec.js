@@ -712,6 +712,8 @@ test('a line and a text go on the map, a step frames the map its own way, and th
   }).toBeCloseTo(0.5, 1);
   // the video goes from the day to the step by the plate's transitions, once they are on
   await page.keyboard.press('Escape');
+  // Video transitions start folded, as the sections few plates need do
+  await page.locator('.part h4 button', { hasText: 'Video transitions' }).click();
   await page.getByLabel('Between the days and the slides').check();
   await page.getByLabel('Blurred as it moves').uncheck();
   await expect.poll(() => {
