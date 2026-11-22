@@ -38,13 +38,17 @@
    * it with the rule it was read by, and only while the coordinates are empty: nothing is ever filled without
    * that press. It goes up with the publish and is kept in the look like the category; emptied, it is gone.
    *
-   * **Before it replaces a folder.** Every press asks the check first (`checkFolder`). A folder no record
+   * **Before it replaces a folder.** The check (`checkFolder`) runs as soon as the dialog knows the address,
+   * and again once a typed short name settles, so what stands there is said before any press; every press
+   * asks it again unless the analyst was already told. A folder no record
    * of this note names is another's: the dialog names what it holds and offers **Replace it**, which
    * publishes on (`onpublish`), or **Pick another address**, which puts a free short name in the field
    * and the focus on it. The note's own folder changed on GitHub since is said too. Either way `warned` is
-   * up and the press that follows publishes anyway: a warning, never a stop, and a check that fails just
-   * publishes. A folder Azimut did not make is never replaced, so that one offers another address only.
+   * up and the press that follows publishes anyway: a warning, never a stop. A check that fails says so,
+   * and the press after it publishes: nothing is replaced unread without one more press. A folder Azimut
+   * did not make is never replaced, so that one offers another address only.
    */
+  import { untrack } from 'svelte';
   import BusyLabel from '../../components/BusyLabel.svelte';
   import Icon from '../../components/Icon.svelte';
   import GitHubSetupPress from '../../components/GitHubSetupPress.svelte';
@@ -60,7 +64,7 @@
   import { siteName } from '../../lib/websiteHub.js';
   import {
     AUTHOR_IMAGE_LABEL, AUTHOR_IMAGE_NONE, AUTHOR_LABEL, AUTHOR_MAX, BUSY,
-    CATEGORY_MAX, CATEGORY_NEW, CATEGORY_NEW_PLACEHOLDER, CATEGORY_NONE, CATEGORY_SAID, HAND_EDITED, LIST_IMAGE_COVER, NO_NAME_PRESS, ON_SITE, ON_SITE_TRY, PICK_ANOTHER, PLACE_COORDS_LABEL, PLACE_COORDS_PLACEHOLDER,
+    CATEGORY_MAX, CATEGORY_NEW, CATEGORY_NEW_PLACEHOLDER, CATEGORY_NONE, CATEGORY_SAID, checkUnreadSaid, HAND_EDITED, LIST_IMAGE_COVER, NO_NAME_PRESS, ON_SITE, ON_SITE_TRY, PICK_ANOTHER, PLACE_COORDS_LABEL, PLACE_COORDS_PLACEHOLDER,
     MORE_OPTIONS, PLACE_LEAD, PLACE_NAME_LABEL, PLACE_NAME_MAX, PLACE_NAME_PLACEHOLDER, PLACE_TITLE, PLACE_WHY, REPLACE_PRESS, WEBSITE_HELP as HELP, noNameSaid, onSiteSaid,
     placeText, placeUseSaid, readPlace, takenOutsideSaid, takenSaid,
   } from '../../lib/websiteSetup.js';
@@ -135,11 +139,12 @@
   // typed before the look came, so what was typed is kept
   let touched = { category: false, role: false, place: false, author: false };
 
-  // what the check found at the address, until the analyst answers: { kind: 'edited' }, or { kind: 'taken',
-  // title, ours, free } for another's folder. The next press publishes anyway, unless Azimut did not make it
+  // what the check found at the address, until the analyst answers: { kind: 'edited' }, { kind: 'unread' } for a
+  // check that failed, or { kind: 'taken', title, ours, free } for another's folder. The next press publishes
+  // anyway, unless Azimut did not make it
   let held = $state(null);
   // a folder Azimut did not make is never replaced: that press checks again rather than publish
-  const replaceable = $derived(held !== null && (held.kind === 'edited' || held.ours));
+  const replaceable = $derived(held !== null && (held.kind === 'edited' || held.kind === 'unread' || held.ours));
   let shortField = $state(null);
 
   // a branch opened afresh has published nothing yet, and warned of nothing
@@ -354,20 +359,36 @@
 
   /**
    * What stands at the address before a publish replaces it, or null for nothing to say: another
-   * article, map or page of the site (`taken`), or this note's own folder changed on GitHub since.
-   * A check that fails says nothing.
+   * article, map or page of the site (`taken`), this note's own folder changed on GitHub since, or a
+   * check that failed (`unread`), so that nothing is replaced unread on a single press.
    */
-  async function inTheWay() {
+  async function inTheWay(name = short) {
     try {
-      const answer = await checkFolder(caseId, noteId, short);
+      const answer = await checkFolder(caseId, noteId, name);
       if (answer?.taken) {
-        return { kind: 'taken', title: String(answer.taken.title || short), ours: answer.taken.ours === true, free: String(answer.free ?? '') };
+        return { kind: 'taken', title: String(answer.taken.title || name), ours: answer.taken.ours === true, free: String(answer.free ?? '') };
       }
       return answer?.edited ? { kind: 'edited' } : null;
-    } catch {
-      return null;
+    } catch (error) {
+      return { kind: 'unread', why: String(error?.message ?? '') };
     }
   }
+
+  // What the address holds, read as soon as it is known and again once a typed short name settles, so the
+  // warning shows before any press. Only the latest read lands, and none while a publish is on its way.
+  const CHECK_SETTLE_MS = 500;
+  let checkTurn = 0;
+  $effect(() => {
+    const name = short;
+    // a press reads the address itself: its coming and going asks no read of its own
+    if (!ready || wrong || !name || untrack(() => working)) return;
+    const turn = ++checkTurn;
+    const timer = setTimeout(async () => {
+      const found = await inTheWay(name);
+      if (turn === checkTurn && name === short && !working) held = found;
+    }, CHECK_SETTLE_MS);
+    return () => clearTimeout(timer);
+  });
 
   /** Leave what holds the address and take a free short name, the field focused to change it. */
   function pickAnother() {
@@ -572,9 +593,9 @@
     {#if held}
       <div class="held" role="alert">
         <p><Icon name="alert" size={13} />
-          {held.kind === 'edited' ? HAND_EDITED : held.ours ? takenSaid(held.title) : takenOutsideSaid(held.title)}</p>
+          {held.kind === 'edited' ? HAND_EDITED : held.kind === 'unread' ? checkUnreadSaid(held.why) : held.ours ? takenSaid(held.title) : takenOutsideSaid(held.title)}</p>
         <div class="held-presses">
-          {#if held.kind === 'edited'}
+          {#if held.kind === 'edited' || held.kind === 'unread'}
             <button type="button" class="btn btn-sm" title={HELP.publishStop} onclick={() => (held = null)}>Don't publish</button>
           {:else}
             {#if held.ours}

@@ -29,6 +29,14 @@ export const SITE_OWN = Object.freeze([
 ]);
 export const LEGAL_SENTENCE = 'Depending on your country, a website may need a legal notice.';
 export const HAND_EDITED = 'This folder was changed on GitHub since you published it: publishing replaces it.';
+/** A check of the address that failed: the next press publishes, so nothing is replaced unread on one press. */
+export const CHECK_UNREAD = 'Could not read what this address holds. Publish again to go ahead anyway.';
+/** The same, with the reason the check gave, so a token or a network problem is named before the publish meets it. */
+export function checkUnreadSaid(why = '') {
+  const reason = String(why || '').trim();
+  if (!reason) return CHECK_UNREAD;
+  return `Could not read what this address holds: ${/[.!?]$/.test(reason) ? reason : `${reason}.`} Publish again to go ahead anyway.`;
+}
 export const WORKFLOW_NOTICE = 'Pages here is built by a GitHub Actions workflow: its build must copy Azimut\'s folders through to the site.';
 
 /** The three ways readers are counted, as the engine names them (`site.STATS`). */

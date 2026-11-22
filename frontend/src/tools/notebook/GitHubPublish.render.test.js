@@ -864,7 +864,7 @@ it('offers only another address for a folder Azimut did not make, and a press ch
   expect(publishes()).toEqual([]);
 });
 
-it('publishes anyway when the check itself fails', async () => {
+it('says a check that failed, and publishes only on the press after it', async () => {
   serve({ editions: [GITHUB_EDITION] });
   post.mockImplementation(async (path) => {
     if (path.endsWith('/github/check')) throw new Error('GitHub did not answer.');
@@ -872,9 +872,66 @@ it('publishes anyway when the check itself fails', async () => {
   });
   show();
   await settle();
-  expect((await live.publish()).published).toBe(true);
-  expect(bound.warned).toBe(false);
-  expect(target.querySelector('[role="alert"]')).toBeNull();
+  expect(await live.publish()).toBeNull();
+  await settle();
+  expect(publishes()).toEqual([]);
+  expect(bound.warned).toBe(true);
+  expect(target.querySelector('[role="alert"] p').textContent.trim()).toBe('Could not read what this address holds: GitHub did not answer. Publish again to go ahead anyway.');
+  expect(button("Don't publish")).toBeTruthy();
+  // the analyst has the last word: the next press publishes without reading again
+  const answer = await live.publish();
+  await settle();
+  expect(answer).toMatchObject({ published: true, told: true });
+  expect(publishes()).toHaveLength(1);
+  expect(checks()).toHaveLength(1);
+});
+
+it('reads what the address holds as soon as it is known, and says it before any press', async () => {
+  vi.useFakeTimers();
+  try {
+    serve();
+    holding(TAKEN);
+    show();
+    await settle();
+    // nothing read on every keystroke: the address settles first
+    expect(checks()).toEqual([]);
+    await vi.advanceTimersByTimeAsync(600);
+    await settle();
+    expect(checks()).toEqual([['/api/cases/c1/notes/n1/github/check', { short_name: 'port-strike' }]]);
+    expect(target.querySelector('[role="alert"] p').textContent.trim()).toBe('This address already holds “Harbour fire”. Replace it?');
+    expect(bound.warned).toBe(true);
+    expect(publishes()).toEqual([]);
+    // a short name typed is read once it settles, the warning gone meanwhile
+    holding({ ...TAKEN, exists: false, taken: null, free: '' });
+    const input = target.querySelector('#export-short');
+    input.value = 'port-strike-2';
+    input.dispatchEvent(new Event('input', { bubbles: true }));
+    await settle();
+    expect(target.querySelector('[role="alert"]')).toBeNull();
+    await vi.advanceTimersByTimeAsync(600);
+    await settle();
+    expect(checks().at(-1)).toEqual(['/api/cases/c1/notes/n1/github/check', { short_name: 'port-strike-2' }]);
+    expect(target.querySelector('[role="alert"]')).toBeNull();
+    expect(bound.warned).toBe(false);
+  } finally {
+    vi.useRealTimers();
+  }
+});
+
+it('says the folder changed on GitHub since as soon as the dialog opens', async () => {
+  vi.useFakeTimers();
+  try {
+    serve({ editions: [GITHUB_EDITION] });
+    holding({ checked: true, exists: true, edited: true, warning: '', taken: null, free: '' });
+    show();
+    await settle();
+    await vi.advanceTimersByTimeAsync(600);
+    await settle();
+    expect(target.querySelector('[role="alert"]').textContent).toContain('This folder was changed on GitHub since you published it: publishing replaces it.');
+    expect(publishes()).toEqual([]);
+  } finally {
+    vi.useRealTimers();
+  }
 });
 
 it('publishes when the editions cannot be read', async () => {

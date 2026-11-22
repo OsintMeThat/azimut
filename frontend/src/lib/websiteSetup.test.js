@@ -484,3 +484,12 @@ describe('what a change of categories says', () => {
     expect(setup.CATEGORY_ADD_OWN_PAGES).toBe('Add a page and a menu link for it if you want one; its articles already show in your lists.');
   });
 });
+
+describe('checkUnreadSaid', () => {
+  it('names why the address could not be read, and says the next press publishes', async () => {
+    const { checkUnreadSaid, CHECK_UNREAD } = await import('./websiteSetup.js');
+    expect(checkUnreadSaid('')).toBe(CHECK_UNREAD);
+    expect(checkUnreadSaid('GitHub did not answer.')).toBe('Could not read what this address holds: GitHub did not answer. Publish again to go ahead anyway.');
+    expect(checkUnreadSaid('offline')).toBe('Could not read what this address holds: offline. Publish again to go ahead anyway.');
+  });
+});

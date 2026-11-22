@@ -7764,7 +7764,8 @@ own policy; the home's script adds a card of what stands there (place, titles li
 name) on hover, focus or a tap, a tap on a gathered pin opening its card first, Escape or a press
 elsewhere closing it. A phone shows the map taller, with more land above and below. With no place,
 no map. A page (role *page*) stays off every list and is linked from the default home's header. The
-category and the role are kept in the note's look. Every press asks a check first
+category and the role are kept in the note's look. The dialog asks a check as soon as it knows the
+address, again once a typed short name settles, and before a press unless already told
 (`POST /notes/{id}/github/check`, a read): a folder the note's own records name that was changed
 on GitHub since says *This folder was changed on GitHub since you published it: publishing replaces
 it.*, and an address holding anything else, another note's article, map or page, says *This address
@@ -7823,14 +7824,17 @@ category, and emptying the coordinates takes it off at the next publish. A page 
 shows no place and sends none. The card and the line of `articles.json` carry it only when set;
 the format stays `azimut-article/1`.
 
-**Before it replaces a folder.** The press first asks what the address holds. The note's own folder,
+**Before it replaces a folder.** The dialog reads what the address holds as soon as it knows it, and
+again half a second after a typed short name settles, so the warning shows before any press; a press
+reads it again unless the analyst was already told. The note's own folder,
 one its records name, changed on GitHub since this Azimut published it says *This folder was changed
 on GitHub since you published it: publishing replaces it.* with **Don't publish**. Another article,
 map or page there says *This address already holds “Harbour fire”. Replace it?* with **Replace it**,
 which publishes, and **Pick another address**, which fills in a free short name and focuses the field.
 Either way the button reads **Publish anyway** and one more press publishes. A folder Azimut did not
-make offers another address only. It never blocks, a check that fails just publishes, and typing
-another short name starts over.
+make offers another address only. It never blocks: a check that fails says *Could not read what this
+address holds: …* with its reason, and the press after it publishes. Typing another short name starts
+over.
 
 **Maps.** `/` › *Interactive map* asks what a map shows: some of the case's layers, or one
 of its Map plates (its layers as it draws them, its days, its steps and how each frames the
