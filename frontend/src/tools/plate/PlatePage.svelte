@@ -847,6 +847,10 @@
   {#if held}<p class="tip" role="status">{held}</p>
   {:else if framing}<p class="tip">Drag and scroll to frame the map, Shift-drag or double-click and hold to turn it. Esc when done.</p>
   {:else if placing}<p class="tip">{HINTS[placing.kind] ?? ''} Esc to stop.</p>{/if}
+  {#if !spec.elements.length}
+    <!-- an empty page says how to start in its middle, on the screen only: an export draws the plate, never this -->
+    <p class="blank-hint" style:left="{shown.x + (width * scale) / 2}px" style:top="{shown.y + (height * scale) / 2}px">An empty page. Press A, or Add, to put a map on it.</p>
+  {/if}
 </div>
 
 {#if nameMenu}
@@ -922,6 +926,8 @@
   .zoom button:hover:not(:disabled) { background: var(--bg-2); color: var(--text-1); }
   .zoom button:disabled { opacity: .45; cursor: default; }
   .zoom-value { min-width: 40px; text-align: center; color: var(--text-2); font-size: var(--fs-xs); font-variant-numeric: tabular-nums; }
+  .blank-hint { position: absolute; z-index: 5; transform: translate(-50%, -50%); margin: 0; padding: 6px 14px; border-radius: 999px;
+    background: rgba(0, 0, 0, .72); color: #fff; font-size: 13px; pointer-events: none; max-width: 80%; text-align: center; }
   /* the pill saying what a press does now; not `.framing`, which the hand layer takes while a map is framed */
   .tip { position: absolute; left: 50%; bottom: 14px; transform: translateX(-50%); margin: 0; padding: 4px 12px; border-radius: 999px;
     background: rgba(0, 0, 0, .72); color: #fff; font-size: 12px; pointer-events: none; max-width: 80%; text-align: center; }

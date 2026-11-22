@@ -1,5 +1,7 @@
 import { describe, expect, it } from 'vitest';
-import { align, distribute, fittedHeight, numbered, pasted, placeLabels, sameSize, shortDay, tableRows } from './arrange.js';
+import { align, distribute, filling, fittedHeight, numbered, pasted, placeLabels, sameSize, shortDay, tableRows } from './arrange.js';
+import { pageMargin, pageSize } from './page.js';
+import { readyTemplate } from './gallery.js';
 
 const boxes = [{ id: 'a', box: [10, 10, 20, 10] }, { id: 'b', box: [50, 30, 10, 20] }, { id: 'c', box: [100, 5, 30, 5] }];
 
@@ -17,6 +19,21 @@ describe('laying several elements out', () => {
     expect(spaced.b[0] - (spaced.a[0] + 20)).toBeCloseTo(spaced.c[0] - (spaced.b[0] + 10), 1);
     expect(distribute(boxes.slice(0, 2), 'h')).toEqual({});
     expect(sameSize(boxes, 'width', boxes[2]).a[2]).toBe(30);
+  });
+
+  it('fills the page with a box, to the edges as the Post plate sets its map, or to the margins the guides draw', () => {
+    const a4 = { paper: 'a4', orientation: 'landscape' };
+    const size = pageSize(a4);
+    expect(filling(size)).toEqual([0, 0, 297, 210]);
+    expect(filling(size)).toEqual(readyTemplate('post', a4).elements.find((element) => element.id === 'map').box);
+    expect(pageMargin(a4)).toBe(9);
+    expect(filling(size, pageMargin(a4))).toEqual([9, 9, 279, 192]);
+    // an upright page and a square one keep the same margin all round
+    expect(filling(pageSize({ paper: 'a4', orientation: 'portrait' }), 9)).toEqual([9, 9, 192, 279]);
+    expect(filling({ width: 100, height: 100 }, 6)).toEqual([6, 6, 88, 88]);
+    // a margin wider than the page leaves a box of a millimetre at least
+    expect(filling({ width: 30, height: 20 }, 50)).toEqual([9.5, 9.5, 11, 1]);
+    expect(filling(size, -4)).toEqual([0, 0, 297, 210]);
   });
 
   it('carries copies to another plate, pointed at its map unless their own came along', () => {

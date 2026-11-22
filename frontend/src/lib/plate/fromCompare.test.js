@@ -1,5 +1,7 @@
 import { describe, expect, it } from 'vitest';
-import { FALLBACK_GROUND, compareView, comparisonOnPlate, pairBoxes, plateBearing, sideGround } from './fromCompare.js';
+import { FALLBACK_GROUND, compareView, comparisonOnPlate, lostSaid, pairBoxes, pairOnComparison, plateBearing, sideDay, sideGround } from './fromCompare.js';
+import { fromTemplate } from './page.js';
+import { readyTemplate } from './gallery.js';
 import { toMercator } from '../map/groundFrame.js';
 import { PX_PER_MM } from './page.js';
 
@@ -84,5 +86,56 @@ describe('a comparison laid on a plate', () => {
     expect(first.role).toBe('badge');
     expect(first.box[0]).toBe(before.box[0] + 3);
     expect(made.lost).toEqual(['firms']);
+  });
+});
+
+describe('Before and after set on a comparison', () => {
+  const session = { title: 'Energodar', spec: { camera: { lat: 47.5, lon: 34.6, zoom: 16, bearing: 30 },
+    a: { provider: 'sentinel2', sentinel: { layer: 'TRUE_COLOR', date: '2022-03-04', maxcc: 20 } }, b: { provider: 'esri-wayback', wayback_release: 41 } } };
+  const ready = () => fromTemplate(readyTemplate('before-after'), { view: { lat: 0, lon: 0, zoom: 3, bearing: 0 }, layers: ['front'] }).elements;
+
+  it('lays its two maps on the sides\' grounds and days, where the comparison looks, each badge saying its day', () => {
+    const elements = ready();
+    const made = pairOnComparison(elements, session, { offered, dayOf: (map) => ({ sentinel2: '4 Mar 2022', 'esri-wayback': '12 Mar 2024' })[map.basemap] ?? '' });
+    const before = made.elements.find((element) => element.id === 'before');
+    const after = made.elements.find((element) => element.id === 'after');
+    expect(before).toMatchObject({ basemap: 'sentinel2', acquired: '2022-03-04', product: '', maxcc: 20 });
+    expect(after).toMatchObject({ basemap: 'esri-wayback', release: 41 });
+    expect(before.view).toEqual(compareView(session.spec, before.box));
+    expect(before.view.bearing).toBe(-30);
+    // what the recipe set beside the ground stays: the box, the frame, the layers
+    expect(before.box).toEqual(elements.find((element) => element.id === 'before').box);
+    expect(before.layers.map((entry) => entry.name)).toEqual(['front']);
+    expect(made.elements.find((element) => element.id === 'before-badge').text).toBe('4 Mar 2022');
+    expect(made.elements.find((element) => element.id === 'after-badge').text).toBe('12 Mar 2024');
+    expect(made.elements.map((element) => element.id)).toEqual(elements.map((element) => element.id));
+    expect(made.lost).toEqual([]);
+  });
+
+  it('keeps a badge\'s words for a side with no day, lets the recipe\'s ground go, and says what it could not draw', () => {
+    const elements = ready().map((element) => (element.id === 'before' ? { ...element, release: 12 } : element));
+    const made = pairOnComparison(elements, { spec: { camera: session.spec.camera, a: { provider: 'sentinel1-radar' }, b: { provider: 'esri-world-imagery' } } }, { offered });
+    const before = made.elements.find((element) => element.id === 'before');
+    expect(before.basemap).toBe(FALLBACK_GROUND);
+    expect(before.release).toBeUndefined();
+    expect(made.elements.find((element) => element.id === 'before-badge').text).toBe('Before');
+    expect(made.elements.find((element) => element.id === 'after-badge').text).toBe('After');
+    expect(made.lost).toEqual(['sentinel1-radar']);
+  });
+
+  it('writes a side\'s day as the Layers tab does, and nothing for a pass not picked yet', () => {
+    const read = { grounds: [['esri-wayback', 'Wayback']], releases: [{ release: 41, date: '2024-03-12' }], years: [] };
+    expect(sideDay({ basemap: 'esri-wayback', release: 41 }, read)).toBe('12 Mar 2024');
+    expect(sideDay({ basemap: 'sentinel2', acquired: '2022-03-04' }, read)).toBe('4 Mar 2022');
+    expect(sideDay({ basemap: 'sentinel2', acquired: null }, read)).toBe('');
+    expect(sideDay({ basemap: 'esri-world-imagery' }, read)).toBe('');
+  });
+
+  it('names what it laid on World Imagery once, and the account a side waits for', () => {
+    const providers = [{ id: 'sentinel1-radar', label: 'Sentinel-1 radar' }, { id: 'sentinel2', label: 'Sentinel-2', needs_key: true }];
+    expect(lostSaid([], providers)).toBe('');
+    expect(lostSaid(['sentinel1-radar', 'sentinel1-radar'], providers)).toBe('Sentinel-1 radar laid on World Imagery: a plate cannot draw it');
+    expect(lostSaid(['firms', 'sentinel2'], providers))
+      .toBe('firms and Sentinel-2 laid on World Imagery: a plate cannot draw them until its account is set up in Settings › Imagery');
   });
 });

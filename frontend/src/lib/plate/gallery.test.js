@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { FORMATS, GALLERY, formatPage, readyTemplate, relaid } from './gallery.js';
+import { ASKS, FORMATS, GALLERY, formatPage, readyTemplate, relaid } from './gallery.js';
 import { MAP_KINDS, MAX_MAPS, THEMES, fromTemplate, mapCount, onPaper, pageSize, templateOf } from './page.js';
 import { TEXT_STYLES, mutedOf } from './design.js';
 
@@ -53,6 +53,22 @@ describe('the ready plates', () => {
         }
       }
     }
+  });
+
+  it('each answer what New plate asks, a post being every one that opens on the Screen or post paper', () => {
+    const known = ASKS.map(([id]) => id);
+    for (const entry of GALLERY) {
+      expect(entry.asks.length, entry.id).toBeGreaterThan(0);
+      expect(entry.asks.every((ask) => known.includes(ask)), entry.id).toBe(true);
+      expect(new Set(entry.asks).size, entry.id).toBe(entry.asks.length);
+      expect(entry.asks.includes('post'), entry.id).toBe(entry.format === 'slide');
+    }
+    // every question has a ready plate to start from
+    for (const ask of known) expect(GALLERY.some((entry) => entry.asks.includes(ask)), ask).toBe(true);
+    expect(GALLERY.filter((entry) => entry.asks.includes('change')).map((entry) => entry.id)).toEqual(['before-after']);
+    // what a plate answers is the gallery's, never written into the plate
+    expect(readyTemplate('before-after').asks).toBeUndefined();
+    expect(JSON.stringify(fromTemplate(readyTemplate('before-after'), { view }))).not.toContain('asks');
   });
 
   it('open on their own paper and look, and remember which they were', () => {
