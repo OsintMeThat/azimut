@@ -87,6 +87,17 @@ describe('the terrain under the photo', () => {
     expect(at).toEqual({ x: 200, y: 50 });
   });
 
+  it('keeps how the ground is drawn in its corner, its buttons taking their own press, and says what loads', () => {
+    const view = { ground: 'relief', lines: false, placed: null, nearOn: false, releases: [], setGround: vi.fn(), setLines: vi.fn() };
+    const { root, onpress } = pane({ view, note: 'Loading the view all round · 40%' });
+    expect(root.querySelector('[role="status"]').textContent).toBe('Loading the view all round · 40%');
+    const plain = [...root.querySelectorAll('.controls button')].find((b) => b.textContent.trim() === 'Plain');
+    pointer(plain, 'pointerdown', { button: 0, clientX: 700, clientY: 20 });
+    expect(onpress).not.toHaveBeenCalled();
+    plain.click();
+    expect(view.setGround).toHaveBeenCalledWith('plain');
+  });
+
   it('draws a line where the pointer is and where it stands over the photo', () => {
     const { root, onpoint } = pane({ cross: 250, facing: '93.4°' });
     expect(root.querySelectorAll('.cross')).toHaveLength(1);

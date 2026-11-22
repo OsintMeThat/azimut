@@ -144,14 +144,19 @@ test.describe('the band over a photo in Horizon', () => {
     // the bar's buttons sit together under the photo's middle, Save as picture among them
     const save = await seam.getByRole('button', { name: 'Save as picture' }).boundingBox();
     expect(save.x + save.width).toBeLessThan(top.x + top.width + 120);
-    // a drag over the photo moves the view, the photo with it, never one over the other
+    // above, the photo alone: a drag moves it and the terrain follows, never one over the other
+    const alone = page.getByRole('application', { name: /^The photo alone, locked/ });
+    await expect(alone).toBeVisible();
     await expect(band.getByRole('button', { name: 'Move the terrain' })).toBeDisabled();
     await expect(band.getByRole('button', { name: 'Move the terrain' })).toHaveAttribute('title', 'Close Side by side to align the photo');
     await page.mouse.move(top.x + top.width * 0.5, top.y + top.height * 0.3);
     await page.mouse.down();
     await page.mouse.move(top.x + top.width * 0.3, top.y + top.height * 0.3, { steps: 5 });
     await page.mouse.up();
-    await expect(page.locator('.frame').getByRole('button', { name: 'Fit' })).toBeVisible();
+    await alone.getByRole('button', { name: 'Fit' }).click();
+    await expect(alone.getByRole('button', { name: 'Fit' })).toHaveCount(0);
+    // the terrain keeps how its ground is drawn in its corner
+    await expect(terrain.getByRole('group', { name: 'Ground drawn as' })).toBeVisible();
     // unlocked, the terrain moves alone; locked again, it follows the photo
     const lock = seam.getByRole('button', { name: 'Lock the two halves together' });
     await expect(lock).toHaveAttribute('aria-pressed', 'true');

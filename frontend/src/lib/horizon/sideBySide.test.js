@@ -1,6 +1,17 @@
 import { describe, expect, it } from 'vitest';
 import { rayFor, toScreen } from './camera.js';
-import { crossAt, dragLook, keepUnder, SEAM, splitFrames, throughCamera, traceRays, zoomedAbout } from './sideBySide.js';
+import {
+  crossAt,
+  dragLook,
+  keepUnder,
+  photoAzimuth,
+  photoColumn,
+  SEAM,
+  splitFrames,
+  throughCamera,
+  traceRays,
+  zoomedAbout,
+} from './sideBySide.js';
 import { looked } from './view.js';
 
 const CAMERA = { heading: 80, tilt: 2, roll: 0, fov: 60, width: 1200, height: 800, projection: 'camera' };
@@ -117,5 +128,26 @@ describe('the line that runs down both halves', () => {
     expect(crossAt(CAMERA, 260)).toBeNull();
     expect(crossAt(CAMERA, null)).toBeNull();
     expect(crossAt({ ...CAMERA, width: 0 }, 80)).toBeNull();
+  });
+});
+
+describe('a column of the photo and the direction it looks at', () => {
+  const WHOLE = { zoom: 1, x: 0.5, y: 0.5 };
+  const LEVEL = { ...CAMERA, tilt: 0 };
+
+  it('reads the photo through its own camera when it is seen whole', () => {
+    expect(photoAzimuth(LEVEL, WHOLE, 600)).toBeCloseTo(80, 6);
+    expect(photoAzimuth(LEVEL, WHOLE, 1200)).toBeCloseTo(110, 6);
+    expect(photoColumn(LEVEL, WHOLE, 110)).toBeCloseTo(1200, 6);
+  });
+
+  it('follows the loupe: the right half of the photo magnified twice fills the frame', () => {
+    const closer = { zoom: 2, x: 0.75, y: 0.5 };
+    // the middle of the screen is three quarters across the photo
+    const { azimuth } = rayFor(LEVEL, 900, 400);
+    expect(photoAzimuth(LEVEL, closer, 600)).toBeCloseTo(azimuth, 6);
+    expect(photoColumn(LEVEL, closer, azimuth)).toBeCloseTo(600, 6);
+    // the photo's left edge is off the screen now
+    expect(photoColumn(LEVEL, closer, 50)).toBeNull();
   });
 });

@@ -3805,18 +3805,19 @@ view names every line it draws, the terrain's own ridge lines and the eye's
 level included. **Details** (D) adds the band the terrain's skyline may be off
 by (wide over a near ridge), the cuts and the pairs' letters, which also show
 while a tool is out. **Side by side** splits the view in two, live: the photo
-above as Overlay shows it, the terrain alone under it at the same size, with its
-names, its ruler and the trace laid on it. The view's one engine draws both, the
-terrain first and copied under the photo. A drag moves the view and the wheel
-zooms it in either half: above, the photo and the terrain go together, held as
-the L key holds them, so the match never moves; the hands are greyed, since the
-photo is matched in one view. The bar between the halves, its buttons together
-under the photo's middle, starts **Locked**: whatever one half does, the other
-does. **Unlocked**, each moves alone, the terrain turning freely from the same
-eye, and locking again puts it back under the photo. A line down each half
-follows the direction under the pointer over the other. The bar saves the pair
-as a picture through the photo's frame, and Escape or its × goes back to one
-view. A collage cut for a
+alone above, with its trace and nothing round it, and the terrain alone under
+it at the same size, with its names, its ruler, the trace laid on it and how
+its ground is drawn in its corner. The view's one engine draws the terrain, the
+page draws the photo, straightened as the view shows it. In either half a drag
+moves and the wheel zooms; the hands are greyed, since the photo is matched in
+one view. The bar between the halves, its buttons together under the photo's
+middle, starts **Locked**: the photo and the terrain are looked at through the
+same loupe, so whatever one half does, the other does, and a hill in one stands
+straight under it in the other. **Unlocked**, each moves alone, the terrain
+turning freely from the same eye, and locking again puts it back under the photo
+where the photo was left. A line down each half follows the direction under the
+pointer over the other. The bar saves the pair as a picture through the photo's
+frame, and Escape or its × goes back to one view. A collage cut for a
 search adds **Piece by piece**, a still of its terrain as the search read it:
 each piece through the camera the search found for it, the seams dashed on both,
 and the piece under the pointer says how far it was turned, tilted and rolled.
@@ -7752,8 +7753,10 @@ title, *All articles* on the right), and a map page carries a small link inside 
 instead. The commit then rebuilds, only where Azimut made them, `articles.json`, `feed.xml` and
 `sitemap.xml`, fills the lists between `<!-- azimut:articles -->` markers in the analyst's own
 pages (`section="…"` for one category, `layout="map"` for the maps, `limit="N"`), and, when the
-root holds no home page or holds Azimut's, writes a default one with tabs by category. Once a
-listed article has a place, that home shows a world map under its header (`engine/siteatlas.py`):
+root holds no home page or holds Azimut's, writes a default one with tabs by category. A map page
+an article links to is listed under that article, not on its own line, and the first such map is
+also a **Map** badge in the corner of the article's cover, so a list that hides links still leads
+to it. Once a listed article has a place, that home shows a world map under its header (`engine/siteatlas.py`):
 Natural Earth's land at 1:110 million in the Equal Earth projection, one 33 KB file the home carries
 beside itself (`azimut-site/atlas.svg`, written once and only once a map shows; made by
 `scripts/make_site_atlas.py` from the outline the map plate ships), framed to the box of the pins with

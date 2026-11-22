@@ -10,6 +10,7 @@
    * handed up (HorizonView) as it happens: this pane only reads the pointer.
    */
   import { TERRAIN_TAG } from '../../lib/horizon/viewExport.js';
+  import PictureControls from './PictureControls.svelte';
 
   let {
     /** The camera this half is drawn through, in CSS pixels of the frame. */
@@ -29,6 +30,12 @@
     linked = true,
     /** Ink names on a day sky, as the view draws them. */
     daylight = true,
+    /** What the ground says while it loads, or why it could not, or ''. */
+    note = '',
+    /** The tab's view state, for how the ground is drawn (PictureControls), and the Copernicus setup it may ask for. */
+    view = null,
+    copernicus = false,
+    onsetup = () => {},
     onpress = () => {},
     /** A drag, in CSS pixels since the last move. */
     onmove = () => {},
@@ -50,6 +57,8 @@
 
   function down(event) {
     if (event.button !== 0 && event.button !== 1) return;
+    // the ground's own buttons take their press
+    if (event.target.closest?.('.controls')) return;
     event.preventDefault();
     event.currentTarget.setPointerCapture(event.pointerId);
     press = { x: event.clientX, y: event.clientY, moved: false };
@@ -128,6 +137,15 @@
     </span>
   {/if}
   <span class="tag">{TERRAIN_TAG}</span>
+  {#if view}
+    <!-- how the ground is drawn, in the terrain's corner as in the view's -->
+    <div class="controls" data-chrome="control">
+      <PictureControls {view} {copernicus} {onsetup} />
+    </div>
+  {/if}
+  {#if note}
+    <div class="note" role="status" aria-live="polite">{note}</div>
+  {/if}
   <div class="ruler" data-chrome="control" aria-hidden="true">
     {#each ticks as tick (tick.azimuth ?? tick.x)}
       <span class="tick" class:named={tick.named} style:left="{tick.x}px">{tick.label ?? ''}</span>
@@ -239,6 +257,23 @@
     color: #e3e3e3;
     font-size: var(--fs-xs);
     font-weight: 600;
+    pointer-events: none;
+  }
+  .controls {
+    position: absolute;
+    top: 10px;
+    right: 10px;
+  }
+  .note {
+    position: absolute;
+    left: 50%;
+    bottom: 36px;
+    padding: 4px 10px;
+    border-radius: var(--r-sm);
+    background: var(--hz-glass);
+    color: var(--text-1);
+    font-size: var(--fs-xs);
+    transform: translateX(-50%);
     pointer-events: none;
   }
   .ruler {
