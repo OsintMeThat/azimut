@@ -548,6 +548,29 @@ test('Update the site waits for GitHub to be set up', async ({ page }) => {
   await expect(hero(page)).toContainText('No address until GitHub Pages is set up');
 });
 
+test('the nine tabs sit on one line at 1280 wide with the case sidebar open, the Articles count in, dark and light', async ({ page }) => {
+  await page.setViewportSize({ width: 1280, height: 800 });
+  await openWebsite(page);
+  await standIn(page);
+  await tab(page, 'Articles').click();
+  await panel(page, 'Articles').getByRole('button', { name: 'Read the site' }).click();
+  await expect(tab(page, 'Articles')).toHaveText('Articles6');
+  const tabs = page.getByRole('tablist', { name: 'Website' }).getByRole('tab');
+  await expect(tabs).toHaveCount(9);
+  for (const theme of ['dark', 'light']) {
+    await page.evaluate((value) => { document.documentElement.dataset.theme = value; }, theme);
+    const boxes = await tabs.evaluateAll((nodes) => nodes.map((node) => node.getBoundingClientRect().toJSON()));
+    expect(new Set(boxes.map((box) => Math.round(box.top))).size, theme).toBe(1);
+    // still a comfortable target
+    for (const box of boxes) expect(box.height >= 36 && box.width >= 48, theme).toBe(true);
+  }
+  // and a keyboard's focus shows
+  await tab(page, 'Articles').focus();
+  await page.keyboard.press('ArrowRight');
+  await expect(tab(page, 'Categories')).toBeFocused();
+  expect(await tab(page, 'Categories').evaluate((node) => getComputedStyle(node).outlineStyle)).toBe('solid');
+});
+
 test('Make it yours and WordPress have their panels', async ({ page }) => {
   await openWebsite(page);
   await tab(page, 'Make it yours').click();
