@@ -131,6 +131,7 @@
           </select>
         </label>
       </div>
+      {#if shown.groups.some((group) => group.key === 'pages')}<p class="review-quiet review-signs">These sign the article and its maps.</p>{/if}
       {@render invite()}
     {/if}
     {#if failed}<p class="review-problem" role="alert">{failed}</p>{/if}

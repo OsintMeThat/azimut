@@ -7641,7 +7641,8 @@ the case; that pictures and files go as they are, metadata included, which a pub
 strips. **Author** starts from the note's look, else Settings › Publishing's name, and
 **Author picture** from the look's picture, else *Your logo* (Settings' logo, filed in the file
 as a picture of its own), or *None*: a note with no author would otherwise be signed by
-whoever publishes it. **Export** writes `<note> (for review).azimut.zip` in the bundles
+whoever publishes it. Each web map the file carries is signed with the same two, unless it
+already names another author, and the dialog then says *These sign the article and its maps.* **Export** writes `<note> (for review).azimut.zip` in the bundles
 folder as a job (`POST /notes/{id}/review`), the source case only read and the copy it is
 built from removed however it ends. **Download** then saves it through the browser, the whole
 case's download route, where an upload page will look for it; **Show in folder** opens the

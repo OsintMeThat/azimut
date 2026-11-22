@@ -94,6 +94,18 @@ it('prefills the author from the note, and reads again when another picture is p
   expect(get).toHaveBeenLastCalledWith('/api/cases/c%201/notes/n1/review?picture=logo');
 });
 
+it('says the author signs the maps too, only when map pages go with the article', async () => {
+  get.mockResolvedValue(SHOWN);
+  show();
+  await settle();
+  expect(document.querySelector('.review-signs')).toBeNull();
+  unmount(live);
+  get.mockResolvedValue({ ...SHOWN, groups: [...SHOWN.groups, { key: 'pages', label: 'Map pages', count: 1, names: ['Harbour map'] }] });
+  show();
+  await settle();
+  expect(text('.review-signs')).toBe('These sign the article and its maps.');
+});
+
 it('writes the note first, exports with the fields as typed, then offers the download and the folder', async () => {
   get.mockResolvedValue(SHOWN);
   let finish;
