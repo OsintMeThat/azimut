@@ -98,6 +98,29 @@ describe('a map page', () => {
     expect(doc.querySelector('.az-map-hint').classList.contains('az-on')).toBe(false);
   });
 
+  it('fills the bands round its still map with its own ground, under the drawing, until a live map has covered them', async () => {
+    const doc = await mapPage();
+    const stage = doc.querySelector('.az-map-stage');
+    const ground = stage.querySelector('.az-map-ground');
+    const fill = stage.querySelector(':scope > img.az-map-fill');
+    // the same picture, nothing for a reader or a screen reader to find, under the map's own world
+    expect(fill.getAttribute('src')).toBe(ground.getAttribute('src'));
+    expect([fill.getAttribute('alt'), fill.getAttribute('aria-hidden')]).toEqual(['', 'true']);
+    expect(stage.firstElementChild).toBe(fill);
+    expect(doc.querySelectorAll('.az-map-fill')).toHaveLength(1);
+    // the framing is the map page's own: the map whole in the middle of the stage, its bands round it
+    expect(doc.querySelector('figure.az-map').classList.contains('az-paged')).toBe(true);
+    // shown over the whole stage, stretched to cover it, blurred and darker than the map
+    const style = window.getComputedStyle(fill);
+    expect([style.display, style.position, style.objectFit]).toEqual(['block', 'absolute', 'cover']);
+    expect(style.filter).toMatch(/^blur\(24px\) saturate\(0?\.62\) brightness\(0?\.45\)$/);
+    expect(style.visibility).not.toBe('hidden');
+    // out of sight once a live map has taken the stage over (a fresh copy read: happy-dom keeps an element's first style)
+    doc.querySelector('figure.az-map').classList.add('az-gl-on');
+    const covered = stage.appendChild(fill.cloneNode());
+    expect(window.getComputedStyle(covered).visibility).toBe('hidden');
+  });
+
   it('switches a legend row’s features off the map and back, a layer’s name all of its rows', async () => {
     const doc = await mapPage();
     const row = doc.querySelector('li[data-layer="Vehicles"][data-key="Destroyed"]');

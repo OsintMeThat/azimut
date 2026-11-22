@@ -12,6 +12,7 @@
 /* a dark base: its street map turned dark, as the PDF's picture is (`dark_ground`) */
 .az-map-stage[data-base="dark"] { background: #111316; }
 .az-map-stage[data-base="dark"] .az-map-world { filter: grayscale(1) invert(1) brightness(.82) contrast(1.1); }
+.az-map-stage[data-base="dark"] .az-map-fill { filter: grayscale(1) invert(1) blur(24px) brightness(.5); }
 .az-map-stage:is([data-base="map"], [data-base="topographic"]) .az-map-world { filter: saturate(.8) brightness(.94); }
 /* a north arrow, under the card and over the drawing */
 .az-map-north {

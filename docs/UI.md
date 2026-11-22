@@ -7875,7 +7875,10 @@ it, which move with it. Where the map looks is
 kept in the address as `#zoom/lat/lon` (a tile's zoom, as OpenStreetMap writes it), read on
 the way in and written as the map moves, never a step of the history, and only once it has
 moved. **Full screen** asks the browser's own for the whole page; where the browser has none
-the button is gone, the page holding the window already. Without script or printed, the
+the button is gone, the page holding the window already. Until the live map is up, the bands
+round the drawing held whole show its own ground stretched over them, blurred and darkened, so
+they never read as a map still loading; the framing is the same, and a map on the whole screen
+in an article does the same. Without script or printed, the
 title, the map and the words follow one another. A map page whose note holds no map reads as
 an article and the check says so. Its one setting of its own, under the row, is the optional
 **View counter**: the code of the analyst's own free GoatCounter site (`counter`, the code or

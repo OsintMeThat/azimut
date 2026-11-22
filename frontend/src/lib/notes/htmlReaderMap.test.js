@@ -223,6 +223,29 @@ describe('a map on the whole screen', () => {
     expect(button.getAttribute('aria-label')).toBe('Full screen');
   });
 
+  it('fills the bands round the map held whole on the screen with its own ground, never in the article', async () => {
+    const doc = await report();
+    fakeScreen(doc);
+    const stage = doc.querySelector('.az-map-stage');
+    // in the article the stage is the map's own shape: no band, so no fill
+    expect(stage.querySelector('.az-map-fill')).toBeNull();
+    press(screenButton(doc));
+    await settle();
+    const fill = stage.querySelector(':scope > img.az-map-fill');
+    expect(fill.getAttribute('src')).toBe(stage.querySelector('.az-map-ground').getAttribute('src'));
+    expect(stage.firstElementChild).toBe(fill);
+    expect(window.getComputedStyle(fill).display).toBe('block');
+    // given back, out of sight (a fresh copy read: happy-dom keeps an element's first style); taken again, the same one
+    press(screenButton(doc));
+    await settle();
+    const after = stage.appendChild(fill.cloneNode());
+    expect(window.getComputedStyle(after).display).toBe('none');
+    after.remove();
+    press(screenButton(doc));
+    await settle();
+    expect(stage.querySelectorAll('.az-map-fill')).toHaveLength(1);
+  });
+
   it('covers the window where the browser has no full screen for it, the page held still and found where it was', async () => {
     const doc = await report();
     delete window.HTMLElement.prototype.requestFullscreen;
