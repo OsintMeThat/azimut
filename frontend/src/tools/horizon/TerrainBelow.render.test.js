@@ -4,7 +4,7 @@
  * camera, and what the hand does over it, handed up to the view as it happens.
  */
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { flushSync, mount, unmount } from 'svelte';
+import { createRawSnippet, flushSync, mount, unmount } from 'svelte';
 import TerrainBelow from './TerrainBelow.svelte';
 
 const CAMERA = { heading: 90, tilt: 0, roll: 0, fov: 60, projection: 'camera', width: 800, height: 400 };
@@ -96,6 +96,17 @@ describe('the terrain under the photo', () => {
     expect(onpress).not.toHaveBeenCalled();
     plain.click();
     expect(view.setGround).toHaveBeenCalledWith('plain');
+  });
+
+  it('lays what the page puts in its corner under how the ground is drawn', () => {
+    const view = { ground: 'relief', lines: false, placed: null, nearOn: false, releases: [], setGround: vi.fn(), setLines: vi.fn() };
+    const corner = createRawSnippet(() => ({ render: () => '<button type="button" aria-label="Add reference">R</button>' }));
+    const { root, onpress } = pane({ view, corner });
+    const seat = root.querySelector('.controls [aria-label="Add reference"]');
+    expect(seat).not.toBeNull();
+    expect(seat.previousElementSibling.classList.contains('picture')).toBe(true);
+    pointer(seat, 'pointerdown', { button: 0, clientX: 780, clientY: 60 });
+    expect(onpress).not.toHaveBeenCalled();
   });
 
   it('draws a line where the pointer is and where it stands over the photo', () => {

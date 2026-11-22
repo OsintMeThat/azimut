@@ -3571,8 +3571,9 @@ trace, Find's area and alignments, the mode) is kept in the case and offered
 at the foot of that map: **Resume** lays it back, **Discard** lets it go, and
 anything started instead replaces it. Work a saved view or a search keeps is
 not offered; Open has it. A link that names a viewpoint still stands there.
-**Reference** in the header opens the Map's reference windows over the view:
-the same picker and windows, in the same session list, so a window opened on the
+**Add reference**, the image seat in the view's top-right corner under how the
+ground is drawn, as on the Map's rail, opens the Map's reference windows over
+the view: the same picker and windows, in the same session list, so a window opened on the
 Map is there too. Each tab draws them only while it is on screen, so a clip
 never plays twice. Docked, the view narrows beside them; pinned, they keep clear
 of its band, its corner controls and its ruler.

@@ -29,14 +29,22 @@ async function openView(page) {
 
 test('adds a reference over the Horizon view, and docks it beside the view, which narrows for it', async ({ page }) => {
   await openView(page);
-  const add = page.getByRole('button', { name: 'Add reference' });
+  // the seat is in the view's top-right corner, under how the ground is drawn, as on the Map's rail
+  await expect(page.locator('header').getByRole('button', { name: 'Add reference' })).toHaveCount(0);
+  const add = page.locator('.horizon-view .controls').getByRole('button', { name: 'Add reference' });
+  const view = page.locator('.horizon-view');
+  const box = await view.boundingBox();
+  const seat = await add.boundingBox();
+  const ground = await page.locator('.horizon-view .controls').getByRole('group', { name: 'Ground drawn as' }).boundingBox();
+  expect(box.x + box.width - (seat.x + seat.width)).toBeLessThan(24);
+  expect(seat.y).toBeGreaterThan(ground.y + ground.height - 1);
+  expect(seat.y - box.y).toBeLessThan(120);
   await add.click();
   await page.getByRole('dialog', { name: 'Add reference' }).locator('.ref-pick[title="Gate"]').click();
   const pane = page.locator('.view-area .ref-viewer');
-  await expect(pane).toHaveCount(1);
+  await expect(pane).toBeVisible();
   await expect(add).toHaveAttribute('title', '1 reference window open · add another');
 
-  const view = page.locator('.horizon-view');
   const wide = (await view.boundingBox()).width;
   await pane.getByRole('button', { name: 'Place' }).click();
   await pane.getByRole('button', { name: 'Column on the left' }).click();

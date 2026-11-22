@@ -137,6 +137,8 @@
   import RefViewer from './RefViewer.svelte';
   import RefDock from './satellite/RefDock.svelte';
   import RefPicker from './satellite/RefPicker.svelte';
+  import MapRail from './satellite/MapRail.svelte';
+  import { MAP_ACTIONS, railSections } from '../lib/map/tools.js';
   import { createRefsState } from './satellite/state/refs.svelte.js';
   import ViewsMenu from './horizon/ViewsMenu.svelte';
   import ExportMenu from './horizon/ExportMenu.svelte';
@@ -1241,6 +1243,10 @@
     setViewers: (windows) => (uiState.refViewers = windows),
   });
   const refsHere = $derived(uiState.tool === 'horizon' && layout === 'looking' && mode !== 'find' && !swapped);
+  /** The seat that opens them, in the view's top-right corner as on the Map's rail. */
+  const REF_RAIL = railSections([
+    { ...MAP_ACTIONS.find((action) => action.id === 'reference'), hint: 'Add a reference image or video over the view', kind: 'action' },
+  ]);
 
   /**
    * Side by side, live: the photo over the view above, the terrain alone under it
@@ -1316,8 +1322,10 @@
     if (!split || !overlay.traceShown || overlay.traceHidden || !overlay.strokesShown.length || !frame.width) return [];
     return traceRays(traceOnTerrain(overlay.strokesShown, traceCamera, pieced), traceCamera);
   });
+  // held to the photo in the same breath as the view's `overlay`: the effect that clears `split`
+  // runs only after the page has drawn once without the photo
   const splitView = $derived(
-    split
+    split && photoOn && overlay.source
       ? {
           linked: split.linked,
           trace: splitTrace,
@@ -1888,6 +1896,21 @@
   />
 {/snippet}
 
+{#snippet refSeat()}
+  <MapRail
+    sections={REF_RAIL}
+    state={{
+      reference: {
+        on: refs.open.length > 0,
+        title: refs.open.length
+          ? `${refs.open.length} reference window${refs.open.length === 1 ? '' : 's'} open · add another`
+          : undefined,
+      },
+    }}
+    onpick={() => refs.openPicker()}
+  />
+{/snippet}
+
 {#snippet refColumn(side)}
   {#if refsHere && refs.dockedOn(side).length}
     <RefDock {side} width={refs.dockWidth(side)} onwidth={(w, total) => refs.setDockWidth(side, w, total)}>
@@ -1987,18 +2010,6 @@
         />
       {/if}
       {#if layout === 'looking'}
-        <button
-          type="button"
-          class="btn btn-sm hz-act"
-          class:hz-refs-on={refs.open.length > 0}
-          onclick={() => refs.openPicker()}
-          title={refs.open.length
-            ? `${refs.open.length} reference window${refs.open.length === 1 ? '' : 's'} open · add another`
-            : 'Add a reference image or video over the view'}
-          aria-label="Add reference"
-        >
-          <Icon name="image" size={13} /><span class="hz-act-label">Reference</span>
-        </button>
         <CaptureMenu busy={captureBusy} oncapture={captureView} />
         <ExportMenu
           photo={Boolean(photoOn && overlay.source)}
@@ -2084,6 +2095,7 @@
               onsetup={() => (copernicusHelp = true)}
               {buildings}
               split={splitView}
+              corner={refsHere ? refSeat : null}
             />
             {#if buildings.on && buildings.panelOpen}
               <div class="hz-buildings">
@@ -2657,10 +2669,6 @@
     flex: 1;
     min-width: 0;
     min-height: 0;
-  }
-  .hz-act.hz-refs-on {
-    border-color: var(--accent);
-    color: var(--accent);
   }
   /* the place of the search looked from, to confirm: low over the view, out of the photo's way */
   .hz-found {

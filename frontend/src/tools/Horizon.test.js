@@ -89,7 +89,7 @@ describe('the Horizon layout', () => {
     expect(view).toContain(
       'Boolean(view.observer) && !(laid && (overlay.tracing || overlay.erasing || overlay.warping || overlay.linking || overlay.cutting || overlay.distancing || overlay.clearing || overlay.keying || overlay.bending))'
     );
-    expect(view).toContain('{#if controlsShown}\n    <div class="controls" data-chrome="control">');
+    expect(view).toContain('{#if controlsShown}\n    <div class="controls hz-control" data-chrome="control"');
     // the names keep clear of the corner only while the controls are in it
     expect(view).toContain('controls.width && controlsShown');
     // the band has no ground of its own any more
@@ -115,14 +115,23 @@ describe('the Horizon layout', () => {
     expect(source).toContain("} else if (split && !side && uiState.tool === 'horizon') {");
     // a photo taken away or another mode ends it
     expect(source).toContain('if (photoOn && mode === \'overlay\' && overlay.source) return;\n    side = null;\n    split = null;');
+    // and the view hears it in the same breath as the photo goes, before that effect has run
+    expect(source).toContain('const splitView = $derived(\n    split && photoOn && overlay.source\n');
+    const view = readFileSync(new URL('./horizon/HorizonView.svelte', import.meta.url), 'utf8');
+    expect(view).toContain('const below = $derived(\n    split && overlay ?');
   });
 
   it('opens the session’s reference windows over the view, drawn only while it is on screen', () => {
     expect(source).toContain('viewers: () => uiState.refViewers,');
     expect(source).toContain("const refsHere = $derived(uiState.tool === 'horizon' && layout === 'looking' && mode !== 'find' && !swapped);");
+    // the seat is in the view's top-right corner, under how the ground is drawn, as on the Map's rail
     const header = markup.slice(markup.indexOf('<header'), markup.indexOf('</header>'));
-    expect(header).toContain('onclick={() => refs.openPicker()}');
-    expect(header).toContain('aria-label="Add reference"');
+    expect(header).not.toContain('refs.openPicker');
+    expect(markup).toContain('corner={refsHere ? refSeat : null}');
+    expect(markup).toContain('onpick={() => refs.openPicker()}');
+    const view = readFileSync(new URL('./horizon/HorizonView.svelte', import.meta.url), 'utf8');
+    expect(view).toContain('<PictureControls {view} {copernicus} {onsetup} />\n      {@render corner?.()}');
+    expect(view).toContain('{corner}');
     expect(markup).toContain('{#each refsHere ? refs.floating : [] as pane (pane.id)}');
     expect(markup).toContain('{#if refsHere && refs.dockedOn(side).length}');
     expect(markup).toContain("{@render refColumn('left')}");

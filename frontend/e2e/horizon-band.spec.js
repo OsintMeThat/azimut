@@ -175,6 +175,31 @@ test.describe('the band over a photo in Horizon', () => {
     await expect(band.getByRole('button', { name: 'Move the terrain' })).toBeEnabled();
   });
 
+  test('lets go of Side by side with the photo, whether the mode changes or the view is closed', async ({ page }) => {
+    const errors = [];
+    page.on('pageerror', (error) => errors.push(String(error)));
+    const { band } = await layPhoto(page);
+    const seam = page.getByRole('toolbar', { name: 'Photo above the terrain' });
+    const modes = page.getByRole('group', { name: 'Horizon mode' });
+    await band.getByRole('button', { name: 'Side by side' }).click();
+    await expect(seam).toBeVisible();
+    // View takes the photo away: both halves go with it, and the page goes on answering
+    await modes.getByRole('button', { name: 'View' }).click();
+    await expect(seam).toHaveCount(0);
+    await expect(page.getByRole('application', { name: /^The photo alone/ })).toHaveCount(0);
+    await modes.getByRole('button', { name: 'Overlay' }).click();
+    await expect(band).toBeVisible();
+    await band.getByRole('button', { name: 'Side by side' }).click();
+    await expect(seam).toBeVisible();
+    // closing the view, its work discarded
+    await page.getByRole('button', { name: 'Close', exact: true }).click();
+    await page.getByRole('button', { name: 'Discard changes' }).click();
+    await expect(page.getByText('Discard unsaved changes?')).toHaveCount(0);
+    await expect(band).toHaveCount(0);
+    await expect(seam).toHaveCount(0);
+    expect(errors).toEqual([]);
+  });
+
   test('keeps how the ground is drawn on the view, out of the way while the pen is out', async ({ page }) => {
     const { band } = await layPhoto(page);
     const ground = page.getByRole('group', { name: 'Ground drawn as' });

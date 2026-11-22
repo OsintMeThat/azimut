@@ -100,6 +100,8 @@
     /** Whether a Copernicus key is set, and how to ask for the setup when it is not. */
     copernicus = false,
     onsetup = () => {},
+    /** What the page lays in the view's corner under how the ground is drawn (the reference seat), or null. */
+    corner = null,
     /** A photo or a video laid over the view (state/overlay.svelte.js), or null. */
     overlay = null,
     /** The buildings round the eye (state/buildings.svelte.js), or null. */
@@ -227,9 +229,9 @@
   const photoCamera = $derived({ ...view.camera, width: size.width, height: size.height });
   /** The direction under the pointer over the photo, for the line down the terrain. */
   let aboveAzimuth = $state(null);
-  /** The camera the terrain under the photo is drawn through: the view's while linked. */
+  /** The camera the terrain under the photo is drawn through: the view's while linked; none without a photo. */
   const below = $derived(
-    split ? (split.linked || !freeLens ? camera : { ...freeLens, width: size.width, height: size.height }) : null
+    split && overlay ? (split.linked || !freeLens ? camera : { ...freeLens, width: size.width, height: size.height }) : null
   );
   /** The canvas the terrain's frame is copied into, and its 2D context. */
   let belowCanvas = $state(null);
@@ -1886,8 +1888,9 @@
   {/each}
 
   {#if controlsShown}
-    <div class="controls" data-chrome="control">
-      <PictureControls {view} {copernicus} {onsetup} bind:width={controls.width} bind:height={controls.height} />
+    <div class="controls hz-control" data-chrome="control" bind:clientWidth={controls.width} bind:clientHeight={controls.height}>
+      <PictureControls {view} {copernicus} {onsetup} />
+      {@render corner?.()}
     </div>
   {/if}
 
@@ -2026,6 +2029,7 @@
     {view}
     {copernicus}
     {onsetup}
+    {corner}
     onpress={onBelowPress}
     onmove={onBelowMove}
     onzoom={onBelowZoom}
@@ -2552,6 +2556,10 @@
     position: absolute;
     top: 10px;
     right: 10px;
+    display: flex;
+    flex-direction: column;
+    align-items: flex-end;
+    gap: 6px;
   }
   /* how much the loupe magnifies, and the way back to the whole photo */
   .loupe {

@@ -36,6 +36,8 @@
     view = null,
     copernicus = false,
     onsetup = () => {},
+    /** What the page lays under how the ground is drawn (the reference seat), or null. */
+    corner = null,
     onpress = () => {},
     /** A drag, in CSS pixels since the last move. */
     onmove = () => {},
@@ -141,6 +143,7 @@
     <!-- how the ground is drawn, in the terrain's corner as in the view's -->
     <div class="controls" data-chrome="control">
       <PictureControls {view} {copernicus} {onsetup} />
+      {@render corner?.()}
     </div>
   {/if}
   {#if note}
@@ -263,6 +266,10 @@
     position: absolute;
     top: 10px;
     right: 10px;
+    display: flex;
+    flex-direction: column;
+    align-items: flex-end;
+    gap: 6px;
   }
   .note {
     position: absolute;
