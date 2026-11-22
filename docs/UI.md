@@ -6968,7 +6968,9 @@ colours, what it draws, the language of its names, and the relief's strength; th
 imagery's strength, colour, light, contrast and tint, with **Greyed**, **Faded**,
 **Darkened** and **Muted** as starts; and the case's layers it draws, a line each: ticked,
 drawn higher or lower, and under its name what this map does to it in a few words
-(*Claimed · hatched · 1 group left out*), or *Its own look*.
+(*Claimed · hatched · 1 group left out*), or *Its own look*. A map's sections run
+**Ground**, **Layers**, **3D**, **Grid**, then the imagery or the plain ground, so what the
+map shows comes before how it is drawn.
 
 **A layer on a page of its own.** **›** on that line, the same in the Layers tab, or
 **Front on this map…** in a right-click on one of its features, opens the layer's page in

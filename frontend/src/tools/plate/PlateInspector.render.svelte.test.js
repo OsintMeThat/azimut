@@ -206,6 +206,8 @@ describe('hover help on every setting', () => {
     const opened = [];
     held = mount(PlateInspector, { target: document.body, props: { spec, selection: [map.id], rows, onlayer: (on, row) => opened.push([on.id, row.name]) } });
     flushSync(); await settle();
+    // what the map shows comes first: its ground and its layers, before how it is drawn
+    expect([...document.body.querySelectorAll('.part .title')].map((node) => node.textContent)).toEqual(['Ground', 'Layers', '3D', 'Grid', 'The plain ground']);
     // the settings a layer had under it are on its page now: none of them stands in the list
     expect(document.body.querySelector('[aria-label="Front stands for"]')).toBeNull();
     expect([...document.body.querySelectorAll('.layer-said')].map((node) => node.textContent)).toEqual(['Claimed · hatched · 1 group left out', 'Its own look']);

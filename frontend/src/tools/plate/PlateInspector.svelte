@@ -556,6 +556,37 @@
       <PlateGroundDay {element} {releases} {years} {sentinel} {template} />
       </PlateSection>
 
+      <PlateSection title="Layers" summary={`${(element.layers ?? []).length} drawn`}>
+      {@const drawn = drawnOn(spec, element.id).length}
+      {#if !rows.length}<p class="note">The case has no map layers yet. Draw on the plate from Add, or make one here.</p>{/if}
+      <div class="tools wide">
+        {#if onnewlayer}<button type="button" class="btn btn-xs" title="A new case layer, opened for editing in the Map where this map looks"
+          onclick={() => onnewlayer(element)}><Icon name="plus" size={11} /> New layer here</button>{/if}
+        {#if onkeepdrawn && drawn}<button type="button" class="btn btn-xs" title="Makes what was drawn by hand here a layer of the case"
+          onclick={() => onkeepdrawn(element)}>Make a layer of the {drawn} drawn here</button>{/if}
+      </div>
+      <ul class="layers">
+        {#each [...(element.layers ?? []).map((entry) => rows.find((row) => row.name === entry.name)).filter(Boolean), ...rows.filter((row) => !(element.layers ?? []).some((entry) => entry.name === row.name))] as row (row.name)}
+          {@const entry = (element.layers ?? []).find((item) => item.name === row.name)}
+          {@const said = layerSaid(entry, { role: roleLabel, day: momentLabel })}
+          <li>
+            <div class="layer"><label title={PLATE_HELP['Draw the layer']}><input type="checkbox" checked={!!entry} onchange={() => toggleLayer(row)} />
+              <span class="name">{row.title}</span>{#if isTracked(row)}<Icon name="clock" size={11} />{/if}</label>
+              {#if entry}
+                <button type="button" class="icon-act small" aria-label={`Draw ${row.title} higher`} title="Draw it over the others" onclick={() => moveLayer(entry, -1)}><Icon name="chevronUp" size={11} /></button>
+                <button type="button" class="icon-act small" aria-label={`Draw ${row.title} lower`} title="Draw it under the others" onclick={() => moveLayer(entry, 1)}><Icon name="chevronDown" size={11} /></button>
+                {#if onlayer}<button type="button" class="icon-act small" aria-label={`${row.title} on this map`} title="Its look, what shows of it and its names, on this map"
+                  onclick={() => onlayer(element, row)}><Icon name="chevronRight" size={12} /></button>{/if}
+              {/if}
+            </div>
+            {#if entry && onlayer}
+              <button type="button" class="layer-said" title="Its look, what shows of it and its names, on this map" onclick={() => onlayer(element, row)}>{said || 'Its own look'}</button>
+            {/if}
+          </li>
+        {/each}
+      </ul>
+      </PlateSection>
+
       <PlateSection title="3D" summary={(element.terrain ?? 0) > 0 ? `Tilted ${Math.round(framed.view.pitch ?? 0)}°` : 'Flat'}>
       <label class="check"><input type="checkbox" checked={(element.terrain ?? 0) > 0}
         onchange={(event) => { const on = event.currentTarget.checked; element.terrain = on ? 1.5 : 0;
@@ -705,37 +736,6 @@
           {/if}
         {/each}
       </div>
-      </PlateSection>
-
-      <PlateSection title="Layers" summary={`${(element.layers ?? []).length} drawn`}>
-      {@const drawn = drawnOn(spec, element.id).length}
-      {#if !rows.length}<p class="note">The case has no map layers yet. Draw on the plate from Add, or make one here.</p>{/if}
-      <div class="tools wide">
-        {#if onnewlayer}<button type="button" class="btn btn-xs" title="A new case layer, opened for editing in the Map where this map looks"
-          onclick={() => onnewlayer(element)}><Icon name="plus" size={11} /> New layer here</button>{/if}
-        {#if onkeepdrawn && drawn}<button type="button" class="btn btn-xs" title="Makes what was drawn by hand here a layer of the case"
-          onclick={() => onkeepdrawn(element)}>Make a layer of the {drawn} drawn here</button>{/if}
-      </div>
-      <ul class="layers">
-        {#each [...(element.layers ?? []).map((entry) => rows.find((row) => row.name === entry.name)).filter(Boolean), ...rows.filter((row) => !(element.layers ?? []).some((entry) => entry.name === row.name))] as row (row.name)}
-          {@const entry = (element.layers ?? []).find((item) => item.name === row.name)}
-          {@const said = layerSaid(entry, { role: roleLabel, day: momentLabel })}
-          <li>
-            <div class="layer"><label title={PLATE_HELP['Draw the layer']}><input type="checkbox" checked={!!entry} onchange={() => toggleLayer(row)} />
-              <span class="name">{row.title}</span>{#if isTracked(row)}<Icon name="clock" size={11} />{/if}</label>
-              {#if entry}
-                <button type="button" class="icon-act small" aria-label={`Draw ${row.title} higher`} title="Draw it over the others" onclick={() => moveLayer(entry, -1)}><Icon name="chevronUp" size={11} /></button>
-                <button type="button" class="icon-act small" aria-label={`Draw ${row.title} lower`} title="Draw it under the others" onclick={() => moveLayer(entry, 1)}><Icon name="chevronDown" size={11} /></button>
-                {#if onlayer}<button type="button" class="icon-act small" aria-label={`${row.title} on this map`} title="Its look, what shows of it and its names, on this map"
-                  onclick={() => onlayer(element, row)}><Icon name="chevronRight" size={12} /></button>{/if}
-              {/if}
-            </div>
-            {#if entry && onlayer}
-              <button type="button" class="layer-said" title="Its look, what shows of it and its names, on this map" onclick={() => onlayer(element, row)}>{said || 'Its own look'}</button>
-            {/if}
-          </li>
-        {/each}
-      </ul>
       </PlateSection>
     {:else if element.kind === 'inset'}
       <div class="rows">
