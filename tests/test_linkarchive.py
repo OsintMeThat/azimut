@@ -643,6 +643,42 @@ def test_a_page_states_its_title_and_day_in_its_tags(page_html, url, said):
     assert facts is not None and (facts.title, facts.day) == said
 
 
+def test_a_title_that_is_another_page_s_is_refused():
+    # the archive saved this address as a redirect to another article: its words share none of the address's
+    other = "<title>Saudi Arabia says three people wounded in attacks on southern airports | Al Jazeera</title>"
+    url = "https://www.aljazeera.com/news/2026/10/5/yemen-forces-claim-to-seize-dhubab-sites-near-bab-al-mandeb"
+    assert linkarchive.page_facts(other, url) is None
+    right = "<title>Yemen forces claim to seize Dhubab sites near Bab al-Mandeb | Al Jazeera</title>"
+    assert linkarchive.page_facts(right, url).title == "Yemen forces claim to seize Dhubab sites near Bab al-Mandeb"
+    # an address with no words in it fits any title
+    assert linkarchive.page_facts(other, "https://english.aawsat.com/node/5327743") is not None
+
+
+def read_through_redirect(start: str, landed: str, title: str) -> linkarchive.PageFacts | None:
+    """What a copy of ``start`` says when the archive kept it as a redirect to ``landed``."""
+    def handle(request):
+        if request.url.raw_path.decode().endswith(start.split("://", 1)[1]):
+            return httpx.Response(302, headers={"Location": f"https://web.archive.org/web/20260910080000id_/{landed}"})
+        return httpx.Response(200, headers={"content-type": "text/html"}, text=f"<title>{title}</title>")
+
+    with linkarchive.client(httpx.MockTransport(handle)) as http:
+        return linkarchive.Wayback(http, sleep=lambda _s: None).page(f"https://web.archive.org/web/20260910080000/{start}", start)
+
+
+def test_a_copy_that_redirects_to_another_story_or_a_home_page_gives_no_title():
+    other = "https://www.aljazeera.com/news/2026/10/5/saudi-arabia-says-three-wounded-in-airport-attacks"
+    assert read_through_redirect(JAZEERA, other, "Saudi Arabia says three wounded in airport attacks") == linkarchive.PageFacts("")
+    home = "https://english.aawsat.com/"
+    assert read_through_redirect("https://english.aawsat.com/node/5327743", home, "Latest news") == linkarchive.PageFacts("")
+
+
+def test_a_short_link_redirected_to_its_article_keeps_its_title():
+    story = "https://english.aawsat.com/arab-world/5327743-operation-dawn-yemen-clears-bab-al-mandab"
+    facts = read_through_redirect("https://english.aawsat.com/node/5327743", story,
+                                  "Operation Dawn of Yemen Clears Bab al-Mandab of Houthi Forces")
+    assert facts is not None and facts.title == "Operation Dawn of Yemen Clears Bab al-Mandab of Houthi Forces"
+
+
 @pytest.mark.parametrize("page_html", ["<title>Just a moment...</title>", "<title>Access denied</title>",
                                        "<title>Al Jazeera</title>", "<p>no head</p>"])
 def test_a_wall_or_a_bare_site_name_is_no_title(page_html):

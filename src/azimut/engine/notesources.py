@@ -495,7 +495,8 @@ class Reader:
             # is named after its page, one a note's links filed only after the link's words
             title = _line(attrs.get(PAGE_TITLE))
             filed_by = ((record or {}).get("provenance") or {}).get("by")
-            if not title and filed_by != LINKS_FILED_BY and label not in (address, host(address)):
+            if (not title and filed_by != LINKS_FILED_BY and label not in (address, host(address))
+                    and not _cites_site(label, address) and not _an_address(label)):
                 title = label
         return Source(
             key=f"entity:{entity_id}" if entity_id else f"path:{path}",
@@ -1194,9 +1195,13 @@ def post_link(url: str) -> PostLink | None:
 
 
 def _snowflake(ident: str) -> str:
-    """When an X post was posted, read off its id, or "" for an id older than X's ids."""
+    """When an X post was posted, read off its id, or "" for an id older than X's ids: the ones
+    counted one by one before them all fall within seconds of their epoch."""
     try:
-        moment = datetime.fromtimestamp(((int(ident) >> 22) + X_EPOCH_MS) / 1000, tz=timezone.utc)
+        offset = int(ident) >> 22
+        if offset < 86_400_000:
+            return ""
+        moment = datetime.fromtimestamp((offset + X_EPOCH_MS) / 1000, tz=timezone.utc)
     except (ValueError, OverflowError, OSError):
         return ""
     return _moment_said(moment)

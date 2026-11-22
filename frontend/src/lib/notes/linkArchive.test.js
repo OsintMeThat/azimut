@@ -10,7 +10,7 @@ vi.mock('../api.js', () => ({ api: { get, post } }));
 vi.mock('../state.svelte.js', () => ({ toast }));
 
 const {
-  POLL_MS, countWords, dayWords, endedToast, follow, followed, forgetRuns, isActive, leftWords, onEnded, planWords,
+  POLL_MS, countWords, dayWords, endedToast, follow, followed, forgetRuns, isActive, leftWords, onEnded, planWords, pressWords,
   progressWords, readPlan, readRun, rowMark, rowWords, startArchive, stopArchive,
 } = await import('./linkArchive.svelte.js');
 
@@ -99,6 +99,11 @@ describe('the words', () => {
     expect(planWords({ todo: 88, archived: 2, filed: 85 })).toBe('88 links to archive · 2 archived already · 85 filed as bookmarks');
     expect(planWords({ todo: 1, archived: 0, filed: 1 })).toBe('1 link to archive · 1 filed as a bookmark');
     expect(planWords({ todo: 0, archived: 3, filed: 0 })).toBe('0 links to archive · 3 archived already');
+    expect(planWords({ todo: 0, archived: 3, titles: 2, filed: 0 })).toBe('0 links to archive · 3 archived already · 2 page titles to read');
+    expect(pressWords({ todo: 4, titles: 2 })).toBe('Archive 4 links');
+    expect(pressWords({ todo: 0, titles: 1 })).toBe('Read 1 page title');
+    expect(pressWords({ todo: 0, titles: 0 })).toBe('Every link is archived');
+    expect(rowWords({ state: 'archived', made: '2026-11-17T14:29:11Z', untitled: true })).toMatch(/^archived 17 Nov · title to read$/);
   });
 
   it('say how far a run is, in the dialog and in the note\'s header', () => {

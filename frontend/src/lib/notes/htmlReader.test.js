@@ -71,8 +71,9 @@ describe('the page without anything pressed', () => {
   it('stays under the weight agreed for its two files, unminified', () => {
     // 75 KB until the story layout, the bar and the links the page takes itself came in; 84 KB
     // until charts appended their own section (a map's reader is spliced in only where a map is);
-    // 88 KB until the cover's author card, the analyst's logo set by their name
-    expect(Buffer.byteLength(READER) + Buffer.byteLength(CSS)).toBeLessThan(89 * 1024);
+    // 88 KB until the cover's author card, the analyst's logo set by their name; 89 KB until the
+    // words that cite a source opened its card on hover, on focus and on a finger's tap
+    expect(Buffer.byteLength(READER) + Buffer.byteLength(CSS)).toBeLessThan(92 * 1024);
   });
 });
 
@@ -376,27 +377,80 @@ describe('a table\'s settings line asks the reader', () => {
   });
 });
 
-describe('a citation shows its source', () => {
-  const PAGE = `<p>Smoke over the port <a class="az-cite" href="#src-1" data-src="1">[1]</a>.</p>
-    <section class="az-sources" id="sources"><ol><li id="src-1"><strong>First clip</strong>, posted on X. <a class="az-verify" href="https://web.archive.org/x">Archive ↗</a>
-    <span class="az-hash" id="h1">9f2c…</span> <a class="az-back" href="#cite-1">↩</a></li></ol></section>`;
+describe('the words that cite a source open its card', () => {
+  const PAGE = `<p>Smoke over <a href="https://x.com/a/status/1" data-card="src-1">the port</a>, and
+    <button type="button" class="bookref" data-card="src-2" data-page="41">Straits of Salt</button>.</p>
+    <section class="az-sources" id="sources"><ul><li id="src-1" data-label="Post on X">@a on X, <a href="https://x.com/a/status/1">post</a>.
+    <a class="az-archive" href="https://web.archive.org/x">Archived copy</a> <span class="az-hash" id="h1">9f2c…</span>
+    <a class="az-back" href="#cite-1">↩</a></li><li id="src-2" data-label="Book">Helena Marsh, <cite>Straits of Salt</cite>.</li></ul></section>`;
+  const wait = (ms) => new Promise((done) => { setTimeout(done, ms); });
+  const pointer = (node, type, kind) => node.dispatchEvent(new window.PointerEvent(type, { bubbles: true, cancelable: true, pointerType: kind }));
+  const press = (node) => {
+    const event = new window.MouseEvent('click', { bubbles: true, cancelable: true });
+    node.dispatchEvent(event);
+    return event;
+  };
 
-  it('opens a card from the Sources entry on focus, described to a screen reader, and closes on Escape', async () => {
+  it('opens on keyboard focus, described to a screen reader, and closes on Escape', async () => {
     const doc = await report(PAGE);
-    const link = doc.querySelector('.az-cite');
-    link.dispatchEvent(new window.FocusEvent('focus'));
+    const link = doc.querySelector('a[data-card]');
+    link.dispatchEvent(new window.FocusEvent('focusin', { bubbles: true }));
     const card = doc.getElementById('az-card');
     expect(card.getAttribute('role')).toBe('tooltip');
-    expect(card.textContent).toContain('Source 1');
-    expect(card.textContent).toContain('First clip');
-    expect(card.querySelector('.az-verify').getAttribute('href')).toBe('https://web.archive.org/x');
-    // a copy, so no id twice and no way back from it
+    expect(card.querySelector('.az-card-kind').textContent).toBe('Post on X');
+    expect(card.textContent).toContain('@a on X');
+    expect(card.querySelector('.az-archive').getAttribute('href')).toBe('https://web.archive.org/x');
+    // a copy, so no id twice and no way back from it; no list link for a mouse
     expect(card.querySelector('[id]')).toBeNull();
     expect(card.querySelector('.az-back')).toBeNull();
+    expect(card.querySelector('.az-card-list')).toBeNull();
     expect(link.getAttribute('aria-describedby')).toBe('az-card');
     key(doc, 'Escape');
     expect(doc.getElementById('az-card')).toBeNull();
     expect(link.hasAttribute('aria-describedby')).toBe(false);
+  });
+
+  it('shows on hover after a beat, stays while the pointer is on it, and a click still opens the original', async () => {
+    const doc = await report(PAGE);
+    const link = doc.querySelector('a[data-card]');
+    pointer(link, 'pointerover', 'mouse');
+    expect(doc.getElementById('az-card')).toBeNull();
+    await wait(260);
+    const card = doc.getElementById('az-card');
+    expect(card).not.toBeNull();
+    // into the card: it stays
+    link.dispatchEvent(new window.PointerEvent('pointerout', { bubbles: true, pointerType: 'mouse', relatedTarget: card }));
+    await wait(320);
+    expect(doc.getElementById('az-card')).not.toBeNull();
+    // a mouse's click is the link's own
+    expect(press(link).defaultPrevented).toBe(false);
+    link.dispatchEvent(new window.PointerEvent('pointerout', { bubbles: true, pointerType: 'mouse', relatedTarget: doc.body }));
+    await wait(320);
+    expect(doc.getElementById('az-card')).toBeNull();
+  });
+
+  it('opens on a finger\'s first tap with the way to the list, the second tap following the link', async () => {
+    const doc = await report(PAGE, { wide: false });
+    const link = doc.querySelector('a[data-card]');
+    pointer(link, 'pointerdown', 'touch');
+    expect(press(link).defaultPrevented).toBe(true);
+    const card = doc.getElementById('az-card');
+    expect(card.querySelector('.az-card-list').getAttribute('href')).toBe('#src-1');
+    pointer(link, 'pointerdown', 'touch');
+    expect(press(link).defaultPrevented).toBe(false);
+    // a tap elsewhere closes it
+    pointer(doc.body, 'pointerdown', 'touch');
+    press(doc.querySelector('p'));
+    expect(doc.getElementById('az-card')).toBeNull();
+  });
+
+  it('says which page of a book the words cite', async () => {
+    const doc = await report(PAGE);
+    const book = doc.querySelector('button[data-card]');
+    book.dispatchEvent(new window.FocusEvent('focusin', { bubbles: true }));
+    const card = doc.getElementById('az-card');
+    expect(card.querySelector('.az-card-kind').textContent).toBe('Book');
+    expect(card.querySelector('.az-card-page').textContent).toBe('Cited here: page 41');
   });
 });
 
@@ -563,7 +617,7 @@ describe('the story layout', () => {
     <figure class="az-figure" data-kind="picture"><button type="button" class="az-zoom"><img src="data:image/png;base64,Y2hhcnQ=" alt=""></button></figure>
     <section class="az-story az-scenes"><div class="az-story-figures">
       <figure class="az-figure" data-kind="picture" data-step="1" style="--az-n:1"><button type="button" class="az-zoom"><img src="${PIXEL}" alt=""></button>
-      <figcaption><span class="az-caption">The quay</span><span class="az-credit">Esri <a class="az-cite" href="#src-1" id="c1">[1]</a></span></figcaption></figure>
+      <figcaption><span class="az-caption">The quay</span><span class="az-credit" data-card="src-1">Esri</span></figcaption></figure>
       <figure class="az-figure" data-kind="picture" data-step="2" style="--az-n:2"><button type="button" class="az-zoom"><img src="${PIXEL}" alt=""></button></figure>
     </div><div class="az-story-steps">
       <div class="az-story-step" data-step="1" style="--az-n:1"><p>The quay.</p></div>
@@ -629,7 +683,7 @@ describe('the story layout', () => {
 
 describe('a link to a part of the page', () => {
   const PAGE = `<div class="az-page"><nav class="az-contents"><ol><li><a href="#one">One</a></li><li><a href="#two">Two</a></li></ol></nav>
-    <main class="az-body"><p><a class="az-cite" href="#src-1" data-src="1">[1]</a> and <a href="#gone">a part since cut</a></p>
+    <main class="az-body"><p><a class="az-ref" href="#src-1" data-card="src-1">the clip</a> and <a href="#gone">a part since cut</a></p>
     <h2 id="one">One</h2><h2 id="two">Two</h2></main>
     <section class="az-sources" id="sources"><ol><li id="src-1">First clip</li></ol></section></div>`;
   const follow = (doc, href, init) => {

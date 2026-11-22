@@ -699,6 +699,7 @@ class Wayback:
         was saved, following the archive's own redirects to the nearest copy. A copy that
         says nothing readable answers an empty title; None when the archive did not answer."""
         address = _raw(copy)
+        landed = page
         for _hop in range(MAX_HOPS):
             if not address:
                 return None
@@ -711,6 +712,7 @@ class Wayback:
                 address = urljoin(address, response.headers.get("location", ""))
                 if notesources.host(address) != COPY_HOST:
                     return None
+                landed = _kept_page(address) or landed
                 continue
             kind = response.headers.get("content-type", "").lower()
             if response.status_code >= 500:
@@ -718,6 +720,11 @@ class Wayback:
             if response.status_code != 200 or (kind and "html" not in kind):
                 return PageFacts("")
             said = page_facts(response.content[:MAX_BODY].decode(response.encoding or "utf-8", "replace"), page)
+            if said is not None and urltitles.url_key(landed) != urltitles.url_key(page):
+                # kept as a redirect to another address: its title is this page's only when that
+                # address spells it out (a short link to its article), never a home page or another story
+                if not (_slug_words(landed) and _fits_address(said.title, landed)):
+                    return PageFacts("")
             return said or PageFacts("")
         return None
 
@@ -803,10 +810,48 @@ def page_facts(page_html: str, url: str) -> PageFacts | None:
     site = notesources.outlet(url)
     if not title or NOT_A_TITLE.match(title) or title.lower() in (site.lower(), notesources.host(url)):
         return None
+    if not _fits_address(title, url):
+        return None
     said = [metas.get(key, "") for key in DAY_KEYS] + _LD_PUBLISHED.findall(page_html)
     day = next((found.group(1) for found in (_DAY.match(value.strip()) for value in said if value) if found
                 and _plausible(found.group(1))), "")
     return PageFacts(title[:notesources.MAX_LABEL], day)
+
+
+#: Words an address's slug shares with any title, which say nothing about which page it is.
+_SLUG_SKIP = frozenset({"the", "and", "for", "from", "with", "says", "said", "news", "after", "over", "into", "near"})
+
+
+def _slug_words(url: str) -> set[str]:
+    """The words an address spells (`/houthis-take-mocha`), when it spells at least three."""
+    try:
+        path = urlsplit(url).path
+    except ValueError:
+        return set()
+    slug = max((part for part in path.split("/") if part.count("-") >= 2), key=len, default="")
+    wanted = {word for word in re.split(r"[^a-z0-9]+", slug.lower()) if len(word) >= 4 and word not in _SLUG_SKIP}
+    return wanted if len(wanted) >= 3 else set()
+
+
+def _fits_address(title: str, url: str) -> bool:
+    """Whether a title can be the page's whose address spells its words: an address with no
+    such words fits any title; one with them must share some with it (one of a short slug's,
+    two of a longer one's). A copy of another story, saved where this address redirected, fails."""
+    wanted = _slug_words(url)
+    if not wanted:
+        return True
+    said = {word for word in re.split(r"[^a-z0-9]+", title.lower().replace("’", "'")) if len(word) >= 4}
+    return len(wanted & said) >= (1 if len(wanted) <= 4 else 2)
+
+
+def _kept_page(copy: str) -> str:
+    """The page an archive address keeps, or ""."""
+    try:
+        parts = urlsplit(copy)
+    except ValueError:
+        return ""
+    match = _STAMP.match(parts.path + (f"?{parts.query}" if parts.query else ""))
+    return notesources.web(match.group(2)) if match else ""
 
 
 def _clean(text: str) -> str:
