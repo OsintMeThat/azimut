@@ -3807,13 +3807,16 @@ by (wide over a near ridge), the cuts and the pairs' letters, which also show
 while a tool is out. **Side by side** splits the view in two, live: the photo
 above as Overlay shows it, the terrain alone under it at the same size, with its
 names, its ruler and the trace laid on it. The view's one engine draws both, the
-terrain first and copied under the photo. The bar between them holds **Linked**:
-linked, the terrain is seen through the photo's camera, and a drag or the wheel
-over it moves the loupe, so both halves move together and the match never moves.
-**Free** turns and zooms the terrain alone from the same eye, and linking it
-again puts it back under the photo. A line down each half follows the direction
-under the pointer over the other. The bar saves the pair as a picture through
-the photo's frame, and Escape or its × goes back to one view. A collage cut for a
+terrain first and copied under the photo. A drag moves the view and the wheel
+zooms it in either half: above, the photo and the terrain go together, held as
+the L key holds them, so the match never moves; the hands are greyed, since the
+photo is matched in one view. The bar between the halves, its buttons together
+under the photo's middle, starts **Locked**: whatever one half does, the other
+does. **Unlocked**, each moves alone, the terrain turning freely from the same
+eye, and locking again puts it back under the photo. A line down each half
+follows the direction under the pointer over the other. The bar saves the pair
+as a picture through the photo's frame, and Escape or its × goes back to one
+view. A collage cut for a
 search adds **Piece by piece**, a still of its terrain as the search read it:
 each piece through the camera the search found for it, the seams dashed on both,
 and the piece under the pointer says how far it was turned, tilted and rolled.

@@ -1244,7 +1244,7 @@
 
   /**
    * Side by side, live: the photo over the view above, the terrain alone under it
-   * (HorizonView `split`), linked to the photo's camera until freed. Null while off.
+   * (HorizonView `split`), locked to the photo's camera until unlocked (`linked`). Null while off.
    */
   let split = $state(null);
   /** The photo's frame and the seam under it while the two show, the terrain's frame the same size a seam lower. */
@@ -2099,44 +2099,42 @@
               aria-label="Photo above the terrain"
               style:top="{splitBox.seam.top}px"
               style:height="{splitBox.seam.height}px"
+              style:left="{splitBox.frame.left + splitBox.frame.width / 2}px"
             >
-              <span></span>
               <button
                 type="button"
-                class="btn btn-sm hz-link"
+                class="btn btn-sm hz-lock"
                 class:on={split.linked}
                 aria-pressed={split.linked}
-                aria-label="Link the terrain to the photo"
-                title={split.linked ? 'The terrain follows the photo; press to move it alone' : 'The terrain moves alone; press to put it back under the photo'}
+                aria-label="Lock the two halves together"
+                title={split.linked ? 'Both halves move together; press to move each alone' : 'Each half moves alone; press to lock them, the terrain back under the photo'}
                 onclick={() => (split.linked = !split.linked)}
               >
-                <Icon name={split.linked ? 'link' : 'unlink'} size={13} /><span>{split.linked ? 'Linked' : 'Free'}</span>
+                <Icon name={split.linked ? 'lock' : 'unlock'} size={13} /><span>{split.linked ? 'Locked' : 'Unlocked'}</span>
               </button>
-              <span class="hz-seam-acts">
-                {#if pieceByPiece}
-                  <button
-                    type="button"
-                    class="btn btn-sm btn-ghost"
-                    disabled={siding}
-                    aria-busy={siding}
-                    onclick={showSide}
-                    title="The terrain as the search read the cut collage, each piece through its own camera">Piece by piece</button
-                  >
-                {/if}
+              {#if pieceByPiece}
                 <button
                   type="button"
                   class="btn btn-sm btn-ghost"
-                  disabled={Boolean(exportBusy)}
-                  aria-busy={exportBusy === 'column'}
-                  onclick={() => exportView('column', { trace: true })}
-                  title="Write the photo above the terrain as one picture, through the photo's frame"
+                  disabled={siding}
+                  aria-busy={siding}
+                  onclick={showSide}
+                  title="The terrain as the search read the cut collage, each piece through its own camera">Piece by piece</button
                 >
-                  <Icon name="download" size={13} /><span>{exportBusy === 'column' ? 'Saving…' : 'Save as picture'}</span>
-                </button>
-                <button type="button" class="btn btn-sm btn-ghost hz-seam-close" onclick={() => (split = null)} title="Back to one view (Esc)" aria-label="Close side by side">
-                  <Icon name="x" size={14} />
-                </button>
-              </span>
+              {/if}
+              <button
+                type="button"
+                class="btn btn-sm btn-ghost"
+                disabled={Boolean(exportBusy)}
+                aria-busy={exportBusy === 'column'}
+                onclick={() => exportView('column', { trace: true })}
+                title="Write the photo above the terrain as one picture, through the photo's frame"
+              >
+                <Icon name="download" size={13} /><span>{exportBusy === 'column' ? 'Saving…' : 'Save as picture'}</span>
+              </button>
+              <button type="button" class="btn btn-sm btn-ghost hz-seam-close" onclick={() => (split = null)} title="Back to one view (Esc)" aria-label="Close side by side">
+                <Icon name="x" size={14} />
+              </button>
             </div>
           {/if}
           {#if side}
@@ -2705,27 +2703,19 @@
   .frame.boxed {
     inset: auto;
   }
-  /* Side by side: the bar between the photo and the terrain, the link in its middle */
+  /* Side by side: the bar between the photo and the terrain, its buttons together under the photo's middle */
   .hz-seam {
     position: absolute;
-    left: 0;
-    right: 0;
-    display: grid;
-    grid-template-columns: 1fr auto 1fr;
-    align-items: center;
-    gap: 8px;
-    padding: 0 10px;
-  }
-  .hz-seam-acts {
     display: flex;
-    justify-content: flex-end;
-    gap: 4px;
-    min-width: 0;
+    align-items: center;
+    gap: 6px;
+    transform: translateX(-50%);
+    white-space: nowrap;
   }
-  .hz-link {
+  .hz-lock {
     gap: 6px;
   }
-  .hz-link.on {
+  .hz-lock.on {
     border-color: var(--accent);
     background: var(--accent-soft);
     color: var(--accent);

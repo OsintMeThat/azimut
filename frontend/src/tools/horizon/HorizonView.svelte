@@ -232,7 +232,7 @@
     belowPress = { start: { ...below }, dx: 0, dy: 0 };
   }
 
-  /** A drag over the terrain: the loupe's while linked, so both move; the terrain's own turn while free. */
+  /** A drag over the terrain: the loupe's while locked to the photo, so both halves move; the terrain's own turn unlocked. */
   function onBelowMove(dx, dy) {
     scene?.moving();
     if (split.linked) {
@@ -245,7 +245,7 @@
     freeLens = looked(freeLens, dragLook(belowPress.start, belowPress.dx, belowPress.dy));
   }
 
-  /** The wheel over the terrain: the loupe's while linked, the terrain's own lens while free. */
+  /** The wheel over the terrain: the loupe's while locked to the photo, the terrain's own lens unlocked. */
   function onBelowZoom(factor, at) {
     scene?.moving();
     if (split.linked) overlay.zoomLoupe(factor, at, size);
@@ -855,10 +855,16 @@
   const picking = $derived(laid && (overlay.linking || overlay.cutting || overlay.distancing || overlay.clearing || overlay.keying));
   /** The photo's corners out to be pulled. */
   const warping = $derived(laid && overlay.warping);
-  /** The photo held to the terrain: the view's gestures carry both, and none parts them. */
-  const locked = $derived(laid && overlay.locked);
+  /**
+   * The photo held to the terrain: the view's gestures carry both, and none
+   * parts them. Side by side holds it so, whatever the hands say: a drag there
+   * moves the view in either half, and the photo is matched in one view.
+   */
+  const locked = $derived(laid && (overlay.locked || Boolean(split)));
   /** What a drag and the wheel move: the terrain, the photo, or both (`overlay.moves`). */
-  const moves = $derived(laid ? overlay.moves : 'terrain');
+  const moves = $derived(laid ? (split ? 'both' : overlay.moves) : 'terrain');
+  /** Why the view will not turn on its own while the photo is held. */
+  const heldTitle = $derived(split ? 'Close Side by side to turn' : 'Move one alone to turn');
   /** How far the rubber reaches, in screen pixels, and where it is while erasing. */
   const RUBBER_PX = 12;
   /** How wide the brush over bent parts paints, in screen pixels either side of the hand. */
@@ -1818,7 +1824,7 @@
       class:hidden={item.hidden}
       style:top="{item.y}px"
       disabled={locked}
-      title={locked ? 'Move one alone to turn' : 'Turn to it'}
+      title={locked ? heldTitle : 'Turn to it'}
       onclick={() => turnTo(item)}
     >
       {#if item.side === 'left'}<span aria-hidden="true">◂</span>{/if}
@@ -1924,7 +1930,7 @@
               class="hz-caret mono"
               aria-label="Heading, click to type"
               disabled={locked}
-              title={locked ? 'Move one alone to turn' : undefined}
+              title={locked ? heldTitle : undefined}
               onclick={editHeading}
             >
               {headingText(facing.heading, facing.fov)}

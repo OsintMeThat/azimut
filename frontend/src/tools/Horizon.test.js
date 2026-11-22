@@ -103,9 +103,11 @@ describe('the Horizon layout', () => {
     expect(markup).toContain('onside={toggleSplit} sideOn={Boolean(split)}');
     expect(markup).toContain('split={splitView}');
     expect(source).toContain('const boxed = $derived(\n    splitBox ? splitBox.frame :');
-    // the bar between the two: the link, the still picture piece by piece for a cut collage, the save, the way back
+    // the bar between the two, under the photo's middle: the lock, the still piece by piece for a cut collage, the save, the way back
     const seam = markup.slice(markup.indexOf('class="hz-seam"'), markup.indexOf('{#if side}'));
+    expect(seam).toContain('style:left="{splitBox.frame.left + splitBox.frame.width / 2}px"');
     expect(seam).toContain('aria-pressed={split.linked}');
+    expect(seam).toContain('aria-label="Lock the two halves together"');
     expect(seam).toContain('onclick={() => (split.linked = !split.linked)}');
     expect(seam).toContain('{#if pieceByPiece}');
     expect(seam).toContain("onclick={() => exportView('column', { trace: true })}");

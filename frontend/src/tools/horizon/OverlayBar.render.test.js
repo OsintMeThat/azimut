@@ -296,6 +296,17 @@ describe('the band over a photo', () => {
     expect(button(video, 'Move the terrain').getAttribute('aria-pressed')).toBe('false');
   });
 
+  it('holds both hands while the photo shows above the terrain, which is matched in one view', () => {
+    const overlay = fakeOverlay();
+    const root = bar(overlay, { sideOn: true });
+    for (const name of ['Move the photo', 'Move the terrain']) {
+      const hand = button(root, name);
+      expect(hand.getAttribute('aria-pressed')).toBe('true');
+      expect(hand.disabled).toBe(true);
+      expect(hand.title).toBe('Close Side by side to align the photo');
+    }
+  });
+
   it('lights both hands to move both, which offers no fit and no reshape', () => {
     const held = bar(fakeOverlay({ locked: true, moves: 'both', warped: true }), { gap: { median: 0.4, span: 52, offset: 0.1, points: 40 } });
     expect(button(held, 'Move the photo').getAttribute('aria-pressed')).toBe('true');

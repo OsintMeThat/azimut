@@ -5,8 +5,8 @@
    * that frame into this canvas before it draws the photo's half. The names,
    * the ruler and the trace laid on the terrain are placed for the same camera.
    *
-   * Linked, a drag or the wheel here is the loupe's, so both halves move
-   * together; free, they turn and zoom this half alone. What the hand does is
+   * Locked to the photo, a drag or the wheel here is the loupe's, so both
+   * halves move together; unlocked, they turn and zoom this half alone. What the hand does is
    * handed up (HorizonView) as it happens: this pane only reads the pointer.
    */
   import { TERRAIN_TAG } from '../../lib/horizon/viewExport.js';
@@ -94,8 +94,8 @@
   role="application"
   tabindex="-1"
   aria-label={linked
-    ? 'The terrain under the photo, linked: drag or wheel to move and zoom both'
-    : 'The terrain under the photo, free: drag to turn it, wheel to zoom it'}
+    ? 'The terrain under the photo, locked: drag or wheel to move and zoom both'
+    : 'The terrain under the photo, unlocked: drag to turn it, wheel to zoom it'}
   onpointerdown={down}
   onpointermove={move}
   onpointerup={() => (press = null)}
@@ -127,7 +127,7 @@
       {#if facing}<span class="facing mono">{facing}</span>{/if}
     </span>
   {/if}
-  <span class="tag">{TERRAIN_TAG}{linked ? '' : ', free'}</span>
+  <span class="tag">{TERRAIN_TAG}</span>
   <div class="ruler" data-chrome="control" aria-hidden="true">
     {#each ticks as tick (tick.azimuth ?? tick.x)}
       <span class="tick" class:named={tick.named} style:left="{tick.x}px">{tick.label ?? ''}</span>

@@ -61,9 +61,8 @@ describe('the terrain under the photo', () => {
   });
 
   it('says when it moves on its own', () => {
-    const { root } = pane({ linked: false });
-    expect(root.querySelector('.tag').textContent).toBe('Terrain, simulated, free');
-    expect(root.getAttribute('aria-label')).toMatch(/free: drag to turn it/);
+    expect(pane().root.getAttribute('aria-label')).toMatch(/locked: drag or wheel to move and zoom both/);
+    expect(pane({ linked: false }).root.getAttribute('aria-label')).toMatch(/unlocked: drag to turn it/);
   });
 
   it('hands up a drag as it goes, and the wheel about the pointer', () => {

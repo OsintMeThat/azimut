@@ -133,7 +133,7 @@ test.describe('the band over a photo in Horizon', () => {
     await side.click();
     await expect(side).toHaveAttribute('aria-pressed', 'true');
     await expect(seam).toBeVisible();
-    const terrain = page.getByRole('application', { name: /^The terrain under the photo, linked/ });
+    const terrain = page.getByRole('application', { name: /^The terrain under the photo, locked/ });
     await expect(terrain).toBeVisible();
     // the two halves the same size, the terrain a seam under the photo
     const top = await page.locator('.frame').boundingBox();
@@ -141,21 +141,33 @@ test.describe('the band over a photo in Horizon', () => {
     expect(Math.abs(under.width - top.width)).toBeLessThan(1);
     expect(Math.abs(under.height - top.height)).toBeLessThan(1);
     expect(under.y).toBeGreaterThan(top.y + top.height);
-    // freed, the terrain moves alone; linked again, it follows the photo
-    const link = seam.getByRole('button', { name: 'Link the terrain to the photo' });
-    await expect(link).toHaveAttribute('aria-pressed', 'true');
-    await link.click();
-    await expect(link).toHaveAttribute('aria-pressed', 'false');
-    await expect(page.getByRole('application', { name: /^The terrain under the photo, free/ })).toBeVisible();
-    await link.click();
+    // the bar's buttons sit together under the photo's middle, Save as picture among them
+    const save = await seam.getByRole('button', { name: 'Save as picture' }).boundingBox();
+    expect(save.x + save.width).toBeLessThan(top.x + top.width + 120);
+    // a drag over the photo moves the view, the photo with it, never one over the other
+    await expect(band.getByRole('button', { name: 'Move the terrain' })).toBeDisabled();
+    await expect(band.getByRole('button', { name: 'Move the terrain' })).toHaveAttribute('title', 'Close Side by side to align the photo');
+    await page.mouse.move(top.x + top.width * 0.5, top.y + top.height * 0.3);
+    await page.mouse.down();
+    await page.mouse.move(top.x + top.width * 0.3, top.y + top.height * 0.3, { steps: 5 });
+    await page.mouse.up();
+    await expect(page.locator('.frame').getByRole('button', { name: 'Fit' })).toBeVisible();
+    // unlocked, the terrain moves alone; locked again, it follows the photo
+    const lock = seam.getByRole('button', { name: 'Lock the two halves together' });
+    await expect(lock).toHaveAttribute('aria-pressed', 'true');
+    await lock.click();
+    await expect(lock).toHaveAttribute('aria-pressed', 'false');
+    await expect(page.getByRole('application', { name: /^The terrain under the photo, unlocked/ })).toBeVisible();
+    await lock.click();
     await expect(terrain).toBeVisible();
     // no cut collage the search eased, so no still piece by piece
     await expect(seam.getByRole('button', { name: 'Piece by piece' })).toHaveCount(0);
     await expectAllInside(band);
-    // Escape goes back to one view
+    // Escape goes back to one view, the hands as they were
     await page.keyboard.press('Escape');
     await expect(seam).toHaveCount(0);
     await expect(side).toHaveAttribute('aria-pressed', 'false');
+    await expect(band.getByRole('button', { name: 'Move the terrain' })).toBeEnabled();
   });
 
   test('keeps how the ground is drawn on the view, out of the way while the pen is out', async ({ page }) => {
