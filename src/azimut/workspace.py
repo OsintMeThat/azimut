@@ -1469,14 +1469,15 @@ def open_workspace() -> None:
     Imports are local because the modules below sit above this one; calling them
     at import time would close the circle.
     """
-    from .engine import bundles, scrapers, terrain, tilecache, turncache, workqueue
+    from .engine import bundles, reviewexport, scrapers, terrain, tilecache, turncache, workqueue
     from .engine.buildings import service as buildings_service
 
     config.ensure_workspace()
     scrapers.activate()
     Case.migrate_all()
     for housekeeping in (
-        bundles.sweep_scaffolds, Case.cleanup_scratch, bundles.cleanup_uploads, workqueue.recover_all
+        bundles.sweep_scaffolds, Case.cleanup_scratch, bundles.cleanup_uploads, reviewexport.sweep_staging,
+        workqueue.recover_all,
     ):
         try:
             housekeeping()
