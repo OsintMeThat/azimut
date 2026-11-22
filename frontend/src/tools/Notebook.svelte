@@ -103,6 +103,7 @@
   import PublishSteps from './notebook/PublishSteps.svelte';
   import LinkList from './notebook/LinkList.svelte';
   import ArchiveLinks from './notebook/ArchiveLinks.svelte';
+  import ReviewExportDialog from './notebook/ReviewExportDialog.svelte';
   import { followed, isActive, onEnded, progressWords, readPlan } from '../lib/notes/linkArchive.svelte.js';
   import ReadyPanel from './notebook/ReadyPanel.svelte';
   import ToPostItem from './notebook/ToPostItem.svelte';
@@ -163,6 +164,8 @@
   let editionsOf = $state(null);
   // the note whose links are being archived, in the dialog: { noteId, title }
   let archiveOf = $state(null);
+  // the note being exported for review (`ReviewExportDialog`), or null
+  let reviewOf = $state(null);
   // Ready to publish?: the panel open on { noteId, title, fromExport }, what its check said, and the fix under way
   let readyOf = $state(null);
   let readyAnswer = $state(null);
@@ -1161,6 +1164,11 @@
         <button type="button" class="fm-item" title="Send each outside link to the Internet Archive and keep its copy"
           onclick={() => fromMenu((note) => (archiveOf = { noteId: note.id, title: note.title }))}>
           <Icon name="bookmark" size={14} /><span class="fm-grow">Archive every link…</span></button>
+        {#if row.id !== CASE_NOTES}
+          <button type="button" class="fm-item" title="This note and what its page needs, as an Azimut file to send for review"
+            onclick={() => fromMenu((note) => (reviewOf = { noteId: note.id }))}>
+            <Icon name="upload" size={14} /><span class="fm-grow">Export for review…</span></button>
+        {/if}
       {/if}
       {#if row}
         <div class="fm-sep"></div>
@@ -1413,6 +1421,11 @@
 
   {#if archiveOf}
     <ArchiveLinks {caseId} noteId={archiveOf.noteId} title={archiveOf.title} onclose={closeArchive} />
+  {/if}
+
+  {#if reviewOf}
+    <ReviewExportDialog {caseId} noteId={reviewOf.noteId} onbeforeexport={() => (doc ? flush(doc) : undefined)}
+      onclose={() => (reviewOf = null)} />
   {/if}
 
   {#if exportPicker}
