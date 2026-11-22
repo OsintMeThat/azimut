@@ -77,6 +77,21 @@ def test_a_map_page_is_its_title_subtitle_and_first_map_with_the_other_words_bes
     assert ".az-mappage-panel" in page and "function mapPage()" in page
 
 
+def test_the_page_pane_s_copy_of_a_map_page_is_a_map_page_too(tmp_path, monkeypatch):
+    """The Page pane's copy writes each element's line for a double-click (`data-line`): a
+    map page read there is still its map, its subtitle and the words beside it."""
+    monkeypatch.setattr(notes_maps, "derive", lambda *_, **__: _fixture_map())
+    rendered = notes_html.render(golden_case(tmp_path), title="Armour on the road", text=TEXT, look=MAP_PAGE, public=True,
+                                 created=CREATED, identity=notefill.Identity(), light=True)
+    page = rendered.html.decode("utf-8")
+    assert 'data-web="map"' in page and notes_html.NO_MAP_PAGE not in rendered.warnings
+    head = re.search(r'<header class="az-mappage-head".*?</header>', page, re.S).group(0)
+    assert "The front line and the armour left on the road" in head
+    main = re.search(r'<main class="az-mappage-main" id="main">(.*?)</main>', page, re.S).group(1)
+    assert main.strip().startswith('<figure class="az-figure az-map')
+    assert re.search(r'<figure class="az-figure az-map[^>]*data-line="\d+">', main)
+
+
 def test_a_map_page_says_the_looks_subtitle_and_the_analysts_name_linked_to_their_site(tmp_path, monkeypatch):
     look = NoteLook.model_validate({"style": "article", "web": "map", "cover": {"subtitle": "Its own line"}})
     who = notefill.Identity(name="A. Analyst", organisation="Desk", site="https://desk.github.io/maps/")

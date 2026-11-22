@@ -730,7 +730,7 @@ class _Page:
         rest = body[:found.start()] + body[found.end():]
         subtitle = _text(" ".join(self.look.cover.subtitle.split()))
         if not subtitle:
-            first = re.search(r'<p dir="auto">(.*?)</p>\n?', rest, re.S)
+            first = PARAGRAPH.search(rest)
             if first is not None:
                 subtitle = first.group(1)
                 rest = rest[:first.start()] + rest[first.end():]
@@ -2078,7 +2078,7 @@ class _Page:
         first paragraph of its text, its footnotes left out."""
         said = " ".join(self.look.cover.subtitle.split())
         if not said:
-            found = re.search(r'<p dir="auto">(.*?)</p>', body, re.S)
+            found = PARAGRAPH.search(body)
             if found is None:
                 return ""
             inner = re.sub("\x00T(\\d+)\x00", lambda match: _text(self.times[int(match.group(1))].words),
@@ -3403,19 +3403,23 @@ def _quoted(text: str) -> str:
     return f"<bdi>{_text(text)}</bdi>"
 
 
-#: An element's opening tag, which a line is written on (`_lined`).
-_OPENING = re.compile(r"^(\s*<[a-zA-Z][\w-]*)(?=[\s>/])")
+#: An element's opening tag up to its end, which a line is written at (`_lined`).
+_OPENING = re.compile(r"^\s*<[a-zA-Z][\w-]*\b[^>]*?(?=/?>)")
+#: A paragraph as the page writes one, read back by the map page and the description: the
+#: Page pane's copy writes the line it comes from on it too.
+PARAGRAPH = re.compile(r'<p dir="auto"(?: data-line="\d+")?>(.*?)</p>\n?', re.S)
 
 
 def _lined(part: str, line: int) -> str:
-    """``part`` with the note's line it comes from on its first element, `data-line`,
-    unless it says one already (an element drawn by a walk within it)."""
+    """``part`` with the note's line it comes from on its first element, `data-line`, as
+    the last of its attributes so a reading of the page's own (`MAP_FIGURE`) still finds
+    it; never on one that says one already (an element drawn by a walk within it)."""
     if not part or part.lstrip().startswith("</"):
         return part
     match = _OPENING.match(part)
-    if match is None or "data-line=" in part[: part.find(">") + 1]:
+    if match is None or "data-line=" in match.group(0):
         return part
-    return f'{match.group(1)} data-line="{line}"{part[match.end():]}'
+    return f'{match.group(0)} data-line="{line}"{part[match.end():]}'
 
 
 def _card(number: int) -> str:
