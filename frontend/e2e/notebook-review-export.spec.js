@@ -15,7 +15,9 @@ const note = (id, label) => ({
 });
 const FILE = 'Harbour article (for review).azimut.zip';
 const SHOWN = {
-  title: 'Harbour article', file: FILE, size: 5 * 1024 * 1024, internal: 1, map_count: 1, maps: ['Situation'],
+  // 660 MB with its two source videos, 501 MB of it: the size of the owner's own article
+  title: 'Harbour article', file: FILE, size: 660 * 1024 * 1024, internal: 1, map_count: 1, maps: ['Situation'],
+  videos: { count: 2, size: 501 * 1024 * 1024 }, limit: 1024 ** 3,
   author: 'Guest Writer', picture: 'logo', pictures: [{ value: 'logo', label: 'Your logo' }],
   groups: [
     { key: 'note', label: 'Note', count: 1, names: ['Harbour article'] },
@@ -109,7 +111,16 @@ test('Export offers For review for one note, which says what leaves and what sta
     'Sources (1) @harbourwatch',
     'Maps (1) Situation',
   ]);
-  await expect(dialog.locator('.review-head').first()).toHaveText('What leaves 5 MB');
+  // the source videos stay behind until they are ticked, and the size follows the box
+  const videos = dialog.locator('.review-videos input');
+  await expect(dialog.locator('.review-videos'))
+    .toHaveText('Source videos (501 MB): send them so the reviewer can check each frame against its footage');
+  await expect(videos).not.toBeChecked();
+  await expect(dialog.locator('.review-head').first()).toHaveText('What leaves 159 MB');
+  await videos.check();
+  await expect(dialog.locator('.review-head').first()).toHaveText('What leaves 660 MB');
+  await videos.uncheck();
+  await expect(dialog.locator('.review-head').first()).toHaveText('What leaves 159 MB');
   await expect(dialog.locator('.review-stays')).toHaveText('1 internal passage, left out of the text, and the rest of the case.');
   await expect(dialog.getByRole('link', { name: 'osintmethat.com/contribute' })).toHaveAttribute('href', 'https://osintmethat.com/contribute');
   // nothing was written by choosing it
@@ -120,7 +131,7 @@ test('Export offers For review for one note, which says what leaves and what sta
   await expect(dialog.locator('.review select')).toHaveValue('logo');
   await dialog.getByRole('button', { name: 'Export', exact: true }).click();
   await expect(dialog.locator('.review-done')).toHaveText(`Written: ${FILE}`);
-  expect(state.exported).toEqual([{ author: 'Guest Analyst', picture: 'logo', videos: true }]);
+  expect(state.exported).toEqual([{ author: 'Guest Analyst', picture: 'logo', videos: false }]);
 
   // Download is the main press: the browser saves the file where an upload page will look for it
   const saved = page.waitForEvent('download');

@@ -121,7 +121,7 @@ it('writes the note first, exports with the fields as typed, then downloads and 
   await body.send();
   await settle();
   expect(prepare).toHaveBeenCalledTimes(1);
-  expect(post).toHaveBeenCalledWith('/api/cases/c%201/notes/n1/review', { author: 'Guest Analyst', picture: 'e_piece00001', videos: true });
+  expect(post).toHaveBeenCalledWith('/api/cases/c%201/notes/n1/review', { author: 'Guest Analyst', picture: 'e_piece00001', videos: false });
   expect(text('.review-done')).toBe(`Written: ${SHOWN.file}`);
   const opened = [];
   const click = vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(function () { opened.push(this.getAttribute('href')); });
@@ -148,52 +148,60 @@ it('says why an export failed and stays on what leaves', async () => {
 
 const GB = 1024 ** 3;
 const MB = 1024 ** 2;
-const WITH_VIDEOS = { ...SHOWN, size: 900 * MB, videos: { count: 2, size: 525 * MB }, send_videos: true, limit: GB };
+const WITH_VIDEOS = { ...SHOWN, size: 900 * MB, videos: { count: 2, size: 525 * MB }, limit: GB };
 const box = () => document.querySelector('.review-videos input');
+const WORDS = 'Source videos (525 MB): send them so the reviewer can check each frame against its footage';
 
-it('sends the source videos by default, and the size follows the box', async () => {
-  get.mockResolvedValue(WITH_VIDEOS);
+it('leaves the source videos behind until they are ticked, and the size follows the box', async () => {
+  get.mockImplementation((url) => (url.includes('/bundle/jobs/')
+    ? Promise.resolve({ id: 'j3', state: 'ready', file: SHOWN.file })
+    : Promise.resolve(WITH_VIDEOS)));
   post.mockResolvedValue({ job_id: 'j3', state: 'queued', file: SHOWN.file });
-  show();
+  const { body } = show();
   await settle();
-  expect(text('.review-videos')).toBe('Source videos (525 MB)');
+  expect(text('.review-videos')).toBe(WORDS);
   expect(document.querySelector('.review-videos').title).toBe('Videos the page only cites, never plays');
-  expect(box().checked).toBe(true);
-  expect(text('.review-head')).toBe('What leaves 900 MB');
+  expect(box().checked).toBe(false);
+  expect(text('.review-head')).toBe('What leaves 375 MB');
   expect(document.querySelector('.review-limit')).toBeNull();
   box().click();
   flushSync();
-  expect(text('.review-head')).toBe('What leaves 375 MB');
-  // left behind by hand under the limit: nothing to say
+  expect(text('.review-head')).toBe('What leaves 900 MB');
+  // under the limit with them too: nothing to say
   expect(document.querySelector('.review-limit')).toBeNull();
+  await body.send();
+  expect(post).toHaveBeenCalledWith('/api/cases/c%201/notes/n1/review', { author: 'Guest Writer', picture: 'e_piece00001', videos: true });
 });
 
-it('leaves the source videos behind when the whole would pass 1 GB, and says so', async () => {
-  get.mockResolvedValue({ ...WITH_VIDEOS, size: GB + 200 * MB, send_videos: false });
-  post.mockResolvedValue({ job_id: 'j4', state: 'queued', file: SHOWN.file });
+it('starts unticked over 1 GB too, and says it when they are ticked', async () => {
   get.mockImplementation((url) => (url.includes('/bundle/jobs/')
     ? Promise.resolve({ id: 'j4', state: 'ready', file: SHOWN.file })
-    : Promise.resolve({ ...WITH_VIDEOS, size: GB + 200 * MB, send_videos: false })));
+    : Promise.resolve({ ...WITH_VIDEOS, size: GB + 200 * MB })));
+  post.mockResolvedValue({ job_id: 'j4', state: 'queued', file: SHOWN.file });
   const { body } = show();
   await settle();
   expect(box().checked).toBe(false);
   expect(text('.review-head')).toBe('What leaves 699 MB');
-  expect(text('.review-limit')).toBe(
-    'osintmethat.com/contribute takes files up to 1 GB, so the source videos stay behind; tick to send them anyway.');
+  expect(document.querySelector('.review-limit')).toBeNull();
   box().click();
   flushSync();
-  expect(text('.review-limit')).toBe('This is over the 1 GB the site takes.');
+  expect(text('.review-head')).toBe('What leaves 1.2 GB');
+  expect(text('.review-limit')).toBe('With them it is over the 1 GB osintmethat.com/contribute takes.');
   box().click();
   flushSync();
+  expect(document.querySelector('.review-limit')).toBeNull();
   await body.send();
   expect(post).toHaveBeenCalledWith('/api/cases/c%201/notes/n1/review', { author: 'Guest Writer', picture: 'e_piece00001', videos: false });
 });
 
 it('says a file over 1 GB even without its videos is over what the site takes', async () => {
-  get.mockResolvedValue({ ...WITH_VIDEOS, size: GB + 600 * MB, send_videos: false });
+  get.mockResolvedValue({ ...WITH_VIDEOS, size: GB + 600 * MB });
   show();
   await settle();
   expect(box().checked).toBe(false);
+  expect(text('.review-limit')).toBe('This is over the 1 GB the site takes.');
+  box().click();
+  flushSync();
   expect(text('.review-limit')).toBe('This is over the 1 GB the site takes.');
 });
 

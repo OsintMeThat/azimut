@@ -560,7 +560,7 @@ describe('exporting a note for review', () => {
     expect(localStorage.getItem('azimut:note-export-format')).toBe('html');
     anyButton('Export').click();
     await settle();
-    expect(post).toHaveBeenCalledWith('/api/cases/case-a/notes/n1/review', { author: 'Guest Writer', picture: '', videos: true });
+    expect(post).toHaveBeenCalledWith('/api/cases/case-a/notes/n1/review', { author: 'Guest Writer', picture: '', videos: false });
     expect(dialog.textContent).toContain(`Written: ${REVIEWED.file}`);
     const download = anyButton('Download');
     expect(download.classList.contains('btn-primary')).toBe(true);

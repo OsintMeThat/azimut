@@ -479,13 +479,15 @@ def test_source_videos_can_stay_behind_and_the_pages_read_the_same(article, monk
     case = Case.open(article["cid"])
     before = _pages(case, article, monkeypatch)
     clip, clip_path = article["clip"]
-    sent = reviewexport.contents(case, article["note"])
-    found = reviewexport.contents(case, article["note"], videos=False)
+    # left behind unless asked for: the page and its maps read the same without them
+    sent = reviewexport.contents(case, article["note"], videos=True)
+    found = reviewexport.contents(case, article["note"])
+    assert set(article["videos"].values()) <= set(sent.files)
     # the frame's video and the proof's footage are only cited; the clip the page plays always goes
     assert set(found.videos) == set(article["videos"].values()) and clip_path not in found.videos
     assert clip_path in found.files and not set(found.videos) & set(found.files)
     assert found.size == sent.size - sum(found.videos.values())
-    bundle = reviewexport.export(case, article["note"], videos=False)
+    bundle = reviewexport.export(case, article["note"])
     with zipfile.ZipFile(bundle) as archive:
         members = {name.removeprefix("case/azimut/") for name in archive.namelist()}
     for path in article["videos"].values():
@@ -502,15 +504,17 @@ def test_source_videos_can_stay_behind_and_the_pages_read_the_same(article, monk
     _same_pages(before, after)
 
 
-def test_the_source_videos_go_unless_the_whole_passes_what_the_site_takes(article, monkeypatch):
+def test_the_source_videos_stay_behind_unless_they_are_asked_for(article):
+    from azimut.api.cases.bundles import ReviewExport
+
     case = Case.open(article["cid"])
     shown = reviewexport.preview(case, article["note"])
     videos = sum((case.tool_root / path).stat().st_size for path in article["videos"].values())
-    assert shown["videos"] == {"count": 2, "size": videos}
-    assert shown["send_videos"] is True and shown["limit"] == reviewexport.SITE_LIMIT
-    assert reviewexport.SITE_LIMIT == 1073741824
-    # ticked up to the limit itself, left behind one byte past it
-    monkeypatch.setattr(reviewexport, "SITE_LIMIT", shown["size"])
-    assert reviewexport.preview(case, article["note"])["send_videos"] is True
-    monkeypatch.setattr(reviewexport, "SITE_LIMIT", shown["size"] - 1)
-    assert reviewexport.preview(case, article["note"])["send_videos"] is False
+    # the size counts them, which the dialog takes off while its box is unticked, as it starts
+    assert shown["videos"] == {"count": 2, "size": videos} and "send_videos" not in shown
+    assert shown["size"] == reviewexport.contents(case, article["note"]).size + videos
+    assert shown["limit"] == reviewexport.SITE_LIMIT == 1073741824
+    # the route sends them only when asked
+    assert ReviewExport().videos is False and ReviewExport(videos=True).videos is True
+    job = reviewexport.queue(case, article["note"])
+    assert job["payload"]["videos"] is False
