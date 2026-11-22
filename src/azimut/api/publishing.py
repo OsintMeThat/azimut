@@ -584,13 +584,13 @@ def read_cloudflare_numbers() -> dict[str, Any]:
         raise HTTPException(status_code=409, detail=sitestats.NOT_SET)
     target = github_settings()
     address = target.base if target.account else ""
-    options = {"prefix": sitestats.site_prefix(address), "host": urlsplit(address).hostname or ""}
+    prefix, host = sitestats.site_prefix(address), urlsplit(address).hostname or ""
     try:
         with sitestats.client() as http:
             if not known:
                 tag = sitestats.find_site_tag(http, token, account, site_token)
                 _remember_tag(tag, site_token)
-            numbers = sitestats.read_numbers(http, token, account, tag, **options)
+            numbers = sitestats.read_numbers(http, token, account, tag, prefix=prefix, host=host)
             if known and not by_hand and sitestats.counted_nothing(numbers):
                 try:
                     again = sitestats.find_site_tag(http, token, account, site_token)
@@ -600,7 +600,7 @@ def read_cloudflare_numbers() -> dict[str, Any]:
                 if again != tag:
                     tag = again
                     _remember_tag(tag, site_token)
-                    numbers = sitestats.read_numbers(http, token, account, tag, **options)
+                    numbers = sitestats.read_numbers(http, token, account, tag, prefix=prefix, host=host)
     except sitestats.StatsError as exc:
         if exc.needs:
             return {"ok": False, "needs": exc.needs, "detail": str(exc)}
