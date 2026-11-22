@@ -25,13 +25,16 @@ import pytest
 from PIL import Image
 
 from azimut import config, layout
-from azimut.engine import bundles, media, notelinks, notelook, notes_web, reviewexport, thumbnails, tiles, workqueue
+from azimut.engine import bundles, media, notelinks, notelook, notes_html, notes_web, reviewexport, thumbnails, tiles
+from azimut.engine import workqueue
 from azimut.workspace import Case
 
 from fullcase import build_full_case
 from jobwait import WAIT
 
 NOW = datetime(2026, 11, 22, 12, 0).astimezone()
+#: Who the receiving desk's Settings name, which the guest's pages must never be signed with.
+RECEIVER = "Receiving Desk"
 #: The address the sender published the map page at.
 MAP_ADDRESS = "https://desk.github.io/articles/harbour-map/"
 
@@ -55,6 +58,15 @@ def _lookup(client, cid: str, attr: str, value: str) -> str:
 def _upload(client, cid: str, name: str, colour) -> tuple[str, str]:
     item = _ok(client.post(f"/api/cases/{cid}/media/upload",
                            files={"file": (name, io.BytesIO(_png(colour=colour)), "image/png")}), name)
+    return item["entity"]["id"], item["item"]["path"]
+
+
+#: The first bytes of an MP4, which is what an import checks a video by (`engine/filescreen.py`).
+VIDEO = b"\x00\x00\x00\x18ftypmp42" + bytes(4096)
+
+
+def _file(client, cid: str, name: str, data: bytes, mime: str) -> tuple[str, str]:
+    item = _ok(client.post(f"/api/cases/{cid}/media/upload", files={"file": (name, io.BytesIO(data), mime)}), name)
     return item["entity"]["id"], item["item"]["path"]
 
 
@@ -150,6 +162,15 @@ def article(client, flat_tiles):
     _ok(client.post(f"/api/cases/{cid}/map-layers/{editable}/links", json={"items": [
         {"id": photo, "lat": 48.8584, "lon": 2.2945}, {"id": proof_id, "lat": 48.8584, "lon": 2.2945}]}), "follow")
     ground = _ground(client, cid, 48.8584, 2.2945)
+    # three videos: one a frame shown on the page was cut from, the footage the proof rests on, and
+    # a clip the page plays
+    source_video, source_path = _file(client, cid, "source.mp4", VIDEO + b"source", "video/mp4")
+    footage, footage_path = _file(client, cid, "footage.mp4", VIDEO + b"footage", "video/mp4")
+    clip, clip_path = _file(client, cid, "clip.mp4", VIDEO + b"clip", "video/mp4")
+    frame, _ = _upload(client, cid, "frame.png", (120, 120, 0))
+    # the chain a tool writes when it cuts a frame, or a proof is made from footage: no analyst states it
+    for holder, origin in ((frame, source_video), (proof_id, footage)):
+        Case.open(cid).add_link(holder, origin, "derived-from", by="inspect")
     page_ground = _ground(client, cid, 48.85, 2.30)
     # pictures only internal passages name, and a person named nowhere else in public
     secret, secret_path = _upload(client, cid, "secret.png", (250, 0, 250))
@@ -181,6 +202,7 @@ def article(client, flat_tiles):
         f"![Harbour change](azimut://media/{pair})\n\n"
         f"![Loose frame](/files/{quote(cid)}/media/loose.png)\n\n"
         f"[[media:{proof_id}|Gate proof]]\n\n"
+        f"[[media:{frame}|a frame of the video]] and [[media:{clip}|the clip]]\n\n"
         f"The ship [[entity:{full.vessel_id}|MV Aurora]] and [the harbour thread](https://example.test/thread/48).\n\n"
         f"[[include:{chapter}]]\n\n"
         f"::: map\ntitle: Situation\nlayer: {editable}\nlayer: {layer}\nplate: {plate}\n"
@@ -200,7 +222,8 @@ def article(client, flat_tiles):
     assert workqueue.wait_until_idle(timeout=WAIT)
     return {"full": full, "cid": cid, "note": note, "chapter": chapter, "map_page": map_page, "photo": photo,
             "piece": piece, "pair": pair, "proof": proof_id, "secret": secret, "secret_path": secret_path,
-            "chapter_secret": chapter_secret, "ground": ground, "layer": layer, "editable": editable}
+            "chapter_secret": chapter_secret, "ground": ground, "layer": layer, "editable": editable,
+            "videos": {source_video: source_path, footage: footage_path}, "clip": (clip, clip_path)}
 
 
 def _import(bundle: Path) -> Case:
@@ -214,13 +237,49 @@ def _import(bundle: Path) -> Case:
     assert workqueue.wait_until_idle(timeout=WAIT)
     for item in imported.list_media_items():
         if item.get("kind") in thumbnails.THUMBNAILED_KINDS and item.get("sha256"):
-            thumbnails.generate(imported, item["path"], item["sha256"], item["kind"])
+            try:
+                thumbnails.generate(imported, item["path"], item["sha256"], item["kind"])
+            except thumbnails.ThumbnailError:
+                pass  # a stand-in video draws no still, here as in the case it came from
     return imported
 
 
-def test_the_imported_article_and_its_map_page_are_the_pages_the_original_builds(article):
+def _pages(case: Case, article: dict, monkeypatch) -> dict:
+    """The article's and the map page's web folders built from the original case, under a receiver
+    whose Settings name them: the map page as the copy signs it, the original page it is held to
+    being the one the original case builds when the map page names that author and picture."""
+    # the receiver publishes under their own name: what the guest's pages must never be signed with
+    config.update_settings(lambda settings: settings.update(report_name=RECEIVER))
+    before = {"note": notes_web.build(case, article["note"], now=NOW)}
+    article_look = notelook.stored(case, article["note"])
+    assert article_look is not None and notelook.stored(case, article["map_page"]).author == ""
+    stored = notelook.stored
+    with monkeypatch.context() as patch:
+        patch.setattr(notelook, "stored", lambda held, note_id, **kw: reviewexport.signed(
+            stored(held, note_id, **kw), article_look) if note_id == article["map_page"] else stored(held, note_id, **kw))
+        before["map_page"] = notes_web.build(case, article["map_page"], now=NOW)
+    return before
+
+
+def _same_pages(before: dict, after: dict) -> None:
+    """The imported pages are the original's, file for file, but the two differences named above."""
+    assert WRITTEN.search(before["note"].files[notes_web.INDEX])
+    for one in ("note", "map_page"):
+        original = _as_mentions(before[one].files) if one == "note" else before[one].files
+        was, now = _fingerprinted(original), _fingerprinted(after[one].files)
+        assert sorted(now) == sorted(was)
+        for name, data in was.items():
+            assert now[name] == data, f"{one}: {name} differs {_where(data, now[name])}"
+        # what the check said of that link as an outside page goes with it: it is a mention now
+        outside = {"“the harbour map” has no archived copy.",
+                   "“the harbour map” is not in the case, so no day says when it was read."}
+        assert outside <= set(before["note"].warnings) or one == "map_page"
+        assert after[one].warnings == [said for said in before[one].warnings if said not in outside]
+
+
+def test_the_imported_article_and_its_map_page_are_the_pages_the_original_builds(article, monkeypatch):
     case = Case.open(article["cid"])
-    before = {one: notes_web.build(case, article[one], now=NOW) for one in ("note", "map_page")}
+    before = _pages(case, article, monkeypatch)
     # the parsed copies drawing a layer leaves are dropped: reading the maps must not write them back
     cached = sorted((case.tool_root / layout.LAYERS_DIR / layout.LAYER_CACHE_DIR).glob("*.geojson"))
     assert cached
@@ -239,18 +298,14 @@ def test_the_imported_article_and_its_map_page_are_the_pages_the_original_builds
     imported = _import(bundle)
     assert imported.read()["name"] == "Harbour article (for review) (imported)"
     after = {one: notes_web.build(imported, article[one], now=NOW) for one in ("note", "map_page")}
-    assert WRITTEN.search(before["note"].files[notes_web.INDEX])
-    for one in ("note", "map_page"):
-        original = _as_mentions(before[one].files) if one == "note" else before[one].files
-        was, now = _fingerprinted(original), _fingerprinted(after[one].files)
-        assert sorted(now) == sorted(was)
-        for name, data in was.items():
-            assert now[name] == data, f"{one}: {name} differs {_where(data, now[name])}"
-        # what the check said of that link as an outside page goes with it: it is a mention now
-        outside = {"“the harbour map” has no archived copy.",
-                   "“the harbour map” is not in the case, so no day says when it was read."}
-        assert outside <= set(before["note"].warnings) or one == "map_page"
-        assert after[one].warnings == [said for said in before[one].warnings if said not in outside]
+    _same_pages(before, after)
+    # the map page carries the article's author and picture: its header shows the guest, not the receiver
+    page_look = notelook.stored(imported, article["map_page"])
+    assert page_look is not None
+    assert (page_look.author, page_look.author_image) == ("Guest Writer", article["piece"])
+    page = after["map_page"].files[notes_web.INDEX]
+    assert b"Guest Writer" in page and RECEIVER.encode() not in page
+    assert any(name.startswith(notes_html.AUTHOR_FACE) for name in after["map_page"].files)
     # the links written to the map page's address are mentions of it in the copy, which the
     # receiving case reads as links to that map
     text = imported.read_note(article["note"])
@@ -316,7 +371,12 @@ def test_what_the_dialog_lists_is_what_leaves(article):
 def test_an_article_with_no_author_is_signed_with_the_name_and_logo_given(client, monkeypatch):
     cid = _ok(client.post("/api/cases", json={"name": "Desk"}), "case")["id"]
     picture, _ = _upload(client, cid, "shot.png", (90, 90, 90))
-    note = _note(client, cid, "Short piece", f"Words.\n\n[[media:{picture}|shot]]\n")
+    page = _note(client, cid, "Port map", "Words.\n", look={"style": "article", "web": "map"})
+    # a map page someone else made keeps the author it names, and the picture beside it
+    theirs = _note(client, cid, "Their map", "Words.\n",
+                   look={"style": "article", "web": "map", "author": "Map Maker", "author_image": picture})
+    note = _note(client, cid, "Short piece", (f"Words.\n\n[[media:{picture}|shot]]\n\n"
+                                              f"On [[entity:{page}|the map]] and [[entity:{theirs}|theirs]].\n"))
     config.signature_path().parent.mkdir(parents=True, exist_ok=True)
     Image.new("RGBA", (120, 120), (200, 40, 40, 255)).save(config.signature_path())
     monkeypatch.setattr(reviewexport, "report_name", lambda: "Guest Analyst")
@@ -334,10 +394,19 @@ def test_an_article_with_no_author_is_signed_with_the_name_and_logo_given(client
     face = imported.get_entity(look.author_image)
     assert face is not None and face["type"] == "media" and face["attrs"]["kind"] == "image"
     assert imported.resolve_inside(face["attrs"]["path"]).read_bytes() == config.signature_path().read_bytes()
-    page = notes_web.build(imported, note, now=NOW)
-    assert "author.png" in page.files and b"Guest Analyst" in page.files["index.html"]
-    # the source note keeps no author of its own
-    assert notelook.stored(case, note) is None
+    built = notes_web.build(imported, note, now=NOW)
+    assert "author.png" in built.files and b"Guest Analyst" in built.files["index.html"]
+    # the map page it links to is signed the same, by the one logo filed once
+    signed = notelook.stored(imported, page)
+    assert signed is not None and (signed.author, signed.author_image, signed.web) == ("Guest Analyst", look.author_image,
+                                                                                        "map")
+    assert len([one for one in imported.list_entities() if one["label"] == "Author"]) == 1
+    mapped = notes_web.build(imported, page, now=NOW)
+    assert "author.png" in mapped.files and b"Guest Analyst" in mapped.files["index.html"]
+    kept = notelook.stored(imported, theirs)
+    assert kept is not None and (kept.author, kept.author_image) == ("Map Maker", picture)
+    # the source notes keep no author of their own
+    assert notelook.stored(case, note) is None and notelook.stored(case, page).author == ""
 
 
 def test_an_export_that_fails_leaves_nothing_behind(client, monkeypatch):
@@ -404,3 +473,44 @@ def test_only_links_to_a_carried_map_page_become_its_mention():
         "[[entity:e_map0000001|Harbour map]]\n"
     )
     assert reviewexport._mentioned(text, {}) == text
+
+
+def test_source_videos_can_stay_behind_and_the_pages_read_the_same(article, monkeypatch):
+    case = Case.open(article["cid"])
+    before = _pages(case, article, monkeypatch)
+    clip, clip_path = article["clip"]
+    sent = reviewexport.contents(case, article["note"])
+    found = reviewexport.contents(case, article["note"], videos=False)
+    # the frame's video and the proof's footage are only cited; the clip the page plays always goes
+    assert set(found.videos) == set(article["videos"].values()) and clip_path not in found.videos
+    assert clip_path in found.files and not set(found.videos) & set(found.files)
+    assert found.size == sent.size - sum(found.videos.values())
+    bundle = reviewexport.export(case, article["note"], videos=False)
+    with zipfile.ZipFile(bundle) as archive:
+        members = {name.removeprefix("case/azimut/") for name in archive.namelist()}
+    for path in article["videos"].values():
+        assert path not in members and layout.sidecar_rel(path) in members
+    assert clip_path in members
+
+    imported = _import(bundle)
+    # their records, sidecars and links travel, their files stay behind
+    for entity_id, path in article["videos"].items():
+        assert imported.get_entity(entity_id) is not None and not imported.resolve_inside(path).exists()
+        assert imported.media_items_by_paths([path])
+    assert imported.resolve_inside(clip_path).is_file()
+    after = {one: notes_web.build(imported, article[one], now=NOW) for one in ("note", "map_page")}
+    _same_pages(before, after)
+
+
+def test_the_source_videos_go_unless_the_whole_passes_what_the_site_takes(article, monkeypatch):
+    case = Case.open(article["cid"])
+    shown = reviewexport.preview(case, article["note"])
+    videos = sum((case.tool_root / path).stat().st_size for path in article["videos"].values())
+    assert shown["videos"] == {"count": 2, "size": videos}
+    assert shown["send_videos"] is True and shown["limit"] == reviewexport.SITE_LIMIT
+    assert reviewexport.SITE_LIMIT == 1073741824
+    # ticked up to the limit itself, left behind one byte past it
+    monkeypatch.setattr(reviewexport, "SITE_LIMIT", shown["size"])
+    assert reviewexport.preview(case, article["note"])["send_videos"] is True
+    monkeypatch.setattr(reviewexport, "SITE_LIMIT", shown["size"] - 1)
+    assert reviewexport.preview(case, article["note"])["send_videos"] is False

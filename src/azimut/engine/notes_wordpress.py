@@ -274,7 +274,8 @@ def build(
     """
     look = look or DEFAULT_LOOK
     day = date.fromisoformat(look.cover.date) if look.cover.date else (created or datetime.now()).date()
-    identity = identity if identity is not None else notefill.Identity.from_settings()
+    # a note someone else wrote is signed with their name, and their picture stands by it
+    identity, look = notefill.signing(look, identity)
     values = identity.values(day)
     passages = [0]
     profile = look.profile()
@@ -602,6 +603,7 @@ class _Writer:
         # the post's title is WordPress's own: a byline asked for opens the content under it
         if self.look.signed == "title" and identity.byline():
             rest = identity.byline()[len(f"By {identity.name}"):]
+            out.extend(self._face())
             out.append(paragraph(f"<em>By {_to_site(identity, _text(identity.name))}{_text(rest)}</em>"))
         for piece in pieces:
             if piece.kind == "chapter":
@@ -1197,12 +1199,26 @@ class _Writer:
         signature = self._built_in(notefill.MY_SIGNATURE) if identity.picture(notefill.MY_SIGNATURE) else []
         if not signature and not identity.name:
             return []
-        said = [separator(), *signature]
+        said = [separator(), *signature, *(self._face() if identity.name else [])]
         if identity.name:
             credentials = identity.credentials()
             said.append(paragraph(f"<strong>{_to_site(identity, _text(identity.name))}</strong>"
                                   + (f"<br>{_text(credentials)}" if credentials else "")))
         return said
+
+    def _face(self) -> list[str]:
+        """A guest author's picture (`NoteLook.author_image`) by their name, as a picture of its own
+        made again from its pixels (`notes_html.author_face`); none for the analyst's own note."""
+        if self.case is None or not self.cited.identity.guest or not self.look.author_image:
+            return []
+        made = report.author_face(self.case, self.look.author_image)
+        if made is None:
+            return []
+        name, data = self.cited.identity.name, made[1]
+        digest = hashlib.sha256(data).hexdigest()
+        mime = "image/png" if made[0].endswith(".png") else "image/jpeg"
+        index = self._add(f"face:{digest}", data, mime, name, "", Path(made[0]).suffix, digest)
+        return [image(index, name, media_link=False)] if index is not None else []
 
     def _built_in(self, name: str) -> list[str]:
         """The analyst's logo or signature, as a picture of its own; the app's logo

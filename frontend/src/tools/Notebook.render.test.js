@@ -132,6 +132,9 @@ const buttonNamed = (words) => [...target.querySelectorAll('button')].find((butt
 // a dialog is put on the page's body, outside the tool
 const everything = () => document.body.textContent.replace(/\s+/g, ' ');
 const anyButton = (words) => [...document.body.querySelectorAll('button')].find((button) => button.textContent.trim() === words);
+// the export dialog's format choice, in its order
+const formatButtons = () => [...document.querySelectorAll('[role="dialog"] [role="group"][aria-label="Format"] button')]
+  .map((button) => button.textContent.trim());
 
 describe('the home', () => {
   it('shows the case notes, each note with what it holds, and what a new one starts from', () => {
@@ -145,8 +148,8 @@ describe('the home', () => {
       'Source profile', 'Daily SITREP', 'Fact-check', 'Investigation log']) {
       expect(text()).toContain(name);
     }
-    // the nine ready notes, and From the case beside them
-    expect(target.querySelectorAll('[data-guide="notebook.ready"] img')).toHaveLength(10);
+    // the ready notes, the Web article among them, and From the case beside them
+    expect(target.querySelectorAll('[data-guide="notebook.ready"] img')).toHaveLength(11);
     expect(target.querySelector('[data-guide="notebook.from-case"]').textContent).toContain('From the case');
   });
 
@@ -240,7 +243,8 @@ describe('the home', () => {
     await settle();
     const dialog = document.body.querySelector('[role="dialog"][aria-label="New note"]');
     const starts = [...dialog.querySelectorAll('[role="radio"][data-start]')].map((one) => one.dataset.start);
-    expect(starts.slice(0, 4)).toEqual(['blank', 'from-case', 'web-map', 'geolocation']);
+    // what is made for the web comes first, then the two ways to start
+    expect(starts.slice(0, 5)).toEqual(['article', 'web-map', 'story', 'blank', 'from-case']);
     // the analyst's own templates come after the ready notes
     expect(starts.at(-1)).toBe('t:t1');
     expect(dialog.querySelector('[data-start="t:t1"]').textContent).toContain('House write-up');
@@ -357,6 +361,8 @@ describe('picking notes on the home', () => {
     await settle();
     expect(everything()).toContain('Export notes as PDF');
     expect(everything()).toContain('2 PDFs will be written, one per note.');
+    // several notes never go for review: that file is one note's page
+    expect(formatButtons()).toEqual(['PDF', 'HTML page', 'Web folder', 'WordPress draft']);
     anyButton('Export 2 PDFs').click();
     await settle();
     const [, asked] = post.mock.calls.find(([address]) => address.endsWith('/notes/pdf/diagrams'));
@@ -478,31 +484,6 @@ describe('a note\'s menu', () => {
     expect(everything()).toContain('Nothing exported yet. Each export is listed here.');
   });
 
-  it('exports a note for review from its card and from its own menu, never the case notes', async () => {
-    const fallbackGet = get.getMockImplementation();
-    get.mockImplementation(async (url) => (url.endsWith('/notes/n1/review')
-      ? { title: 'Old lead', file: 'Old lead (for review).azimut.zip', size: 2048, internal: 0, author: '', picture: '',
-        pictures: [], maps: [], map_count: 0, groups: [{ key: 'note', label: 'Note', count: 1, names: ['Old lead'] }] }
-      : fallbackGet(url)));
-    cardMenu('the case notes');
-    expect(anyButton('Export for review…')).toBeUndefined();
-    document.body.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' }));
-    flushSync();
-    cardMenu('Old lead');
-    anyButton('Export for review…').click();
-    await settle();
-    const dialog = document.querySelector('[role="dialog"][aria-label="Export for review"]');
-    expect(dialog.textContent).toContain('Note (1) Old lead');
-    expect(get).toHaveBeenCalledWith('/api/cases/case-a/notes/n1/review');
-    anyButton('Cancel').click();
-    flushSync();
-    target.querySelector('button[title="Open Old lead"]').click();
-    await settle();
-    target.querySelector('button[aria-label="More"]').click();
-    flushSync();
-    expect(anyButton('Export for review…')).not.toBeUndefined();
-  });
-
   it('deletes the note open, from its own menu', async () => {
     del.mockResolvedValue({ status: 'deleted', deleted: ['n1'], trash: 't1' });
     target.querySelector('button[title="Open Old lead"]').click();
@@ -514,6 +495,103 @@ describe('a note\'s menu', () => {
     await confirmDelete();
     expect(del).toHaveBeenCalledWith('/api/cases/case-a/entities/n1');
     expect(target.querySelector('.cm-editor')).toBeNull();
+  });
+});
+
+describe('exporting a note for review', () => {
+  const REVIEWED = {
+    title: 'Old lead', file: 'Old lead (for review).azimut.zip', size: 2048, internal: 1, author: 'Guest Writer', picture: '',
+    pictures: [], maps: [], map_count: 0,
+    groups: [{ key: 'note', label: 'Note', count: 1, names: ['Old lead'] }, { key: 'pages', label: 'Map pages', count: 1, names: ['Harbour map'] }],
+  };
+  const cardExport = async (title) => {
+    target.querySelector(`button[aria-label="Actions for ${title}"]`).click();
+    flushSync();
+    anyButton('Export').click();
+    await settle();
+  };
+  const withReview = () => {
+    const fallbackGet = get.getMockImplementation();
+    get.mockImplementation(async (url) => {
+      if (url.endsWith('/notes/n1/review')) return REVIEWED;
+      if (url.endsWith('/bundle/jobs/j1')) return { id: 'j1', kind: 'review-export', state: 'ready', file: REVIEWED.file };
+      return fallbackGet(url);
+    });
+    const fallbackPost = post.getMockImplementation();
+    post.mockImplementation(async (url, body) => {
+      if (url.endsWith('/notes/n1/review')) return { job_id: 'j1', state: 'queued', file: REVIEWED.file };
+      if (url.endsWith('/bundle/reveal')) return { status: 'revealed' };
+      return fallbackPost(url, body);
+    });
+  };
+
+  it('is the fifth choice for one note, never for the case notes, and no longer in the note\'s menu', async () => {
+    withReview();
+    target.querySelector('button[aria-label="Actions for Old lead"]').click();
+    flushSync();
+    expect(anyButton('Export for review…')).toBeUndefined();
+    anyButton('Export').click();
+    await settle();
+    expect(formatButtons()).toEqual(['PDF', 'HTML page', 'Web folder', 'WordPress draft', 'For review']);
+    const choice = [...document.querySelectorAll('[aria-label="Format"] button')].find((button) => button.textContent.trim() === 'For review');
+    expect(choice.title).toBe('Only what its page needs, as an Azimut file to send for review');
+    anyButton('Cancel').click();
+    flushSync();
+    await cardExport('the case notes');
+    expect(formatButtons()).toEqual(['PDF', 'HTML page', 'Web folder', 'WordPress draft']);
+  });
+
+  it('shows what leaves, exports it, then offers the download and the folder, and is never remembered', async () => {
+    withReview();
+    await cardExport('Old lead');
+    anyButton('HTML page').click();
+    await settle();
+    expect(everything()).toContain('Export note as HTML');
+    const checked = post.mock.calls.filter(([url]) => url.endsWith('/notes/pdf/check')).length;
+    anyButton('For review').click();
+    await settle();
+    const dialog = document.querySelector('[role="dialog"][aria-label="Export note for review"]');
+    expect(dialog.textContent).toContain('Note (1) Old lead');
+    expect(dialog.textContent).toContain('1 internal passage, left out of the text, and the rest of the case.');
+    expect(dialog.textContent).toContain('These sign the article and its maps.');
+    // the review branch has no destination of its own, and no check of a PDF or a page
+    expect(dialog.textContent).not.toContain('Destination');
+    expect(post.mock.calls.filter(([url]) => url.endsWith('/notes/pdf/check'))).toHaveLength(checked);
+    expect(localStorage.getItem('azimut:note-export-format')).toBe('html');
+    anyButton('Export').click();
+    await settle();
+    expect(post).toHaveBeenCalledWith('/api/cases/case-a/notes/n1/review', { author: 'Guest Writer', picture: '', videos: true });
+    expect(dialog.textContent).toContain(`Written: ${REVIEWED.file}`);
+    const download = anyButton('Download');
+    expect(download.classList.contains('btn-primary')).toBe(true);
+    const opened = [];
+    const click = vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(function () { opened.push(this.getAttribute('href')); });
+    download.click();
+    click.mockRestore();
+    expect(opened).toEqual(['/api/cases/case-a/bundle/jobs/j1/download']);
+    anyButton('Show in folder').click();
+    await settle();
+    expect(post).toHaveBeenCalledWith('/api/cases/case-a/bundle/reveal');
+    anyButton('Done').click();
+    flushSync();
+    // the next export opens on the last of the four, and For review was never kept
+    expect(localStorage.getItem('azimut:note-export-format')).toBe('html');
+    await cardExport('Old lead');
+    expect(everything()).toContain('Export note as HTML');
+  });
+
+  it('keeps the four formats as they were when For review is picked and left', async () => {
+    withReview();
+    await cardExport('Old lead');
+    anyButton('For review').click();
+    await settle();
+    anyButton('PDF').click();
+    await settle();
+    expect(everything()).toContain('One PDF will be written.');
+    anyButton('Export PDF').click();
+    await settle();
+    expect(post.mock.calls.find(([address]) => address.endsWith('/notes/pdf'))[1].notes).toEqual(['n1']);
+    expect(localStorage.getItem('azimut:note-export-format')).toBe('pdf');
   });
 });
 
@@ -847,7 +925,7 @@ describe('the check before export', () => {
     });
     await exportFromNote();
     const buttons = [...dialog().querySelectorAll('[role="group"][aria-label="Format"] button')];
-    expect(buttons.map((button) => button.textContent.trim())).toEqual(['PDF', 'HTML page', 'Web folder', 'WordPress draft']);
+    expect(buttons.map((button) => button.textContent.trim())).toEqual(['PDF', 'HTML page', 'Web folder', 'WordPress draft', 'For review']);
     expect(buttons.every((button) => button.title)).toBe(true);
     buttons[2].click();
     await settle();
@@ -945,7 +1023,7 @@ describe('the check before export', () => {
     answerCheck((notes) => ({ notes: notes.map((note) => ({ note, title: 'Old lead', warnings: [] })) }));
     await exportFromNote();
     const asked = post.mock.calls.filter(([url]) => url.endsWith('/notes/pdf/check')).length;
-    [...dialog().querySelectorAll('[role="group"][aria-label="Format"] button')].at(-1).click();
+    [...dialog().querySelectorAll('[role="group"][aria-label="Format"] button')].find((button) => button.textContent.trim() === 'WordPress draft').click();
     await settle();
     expect(dialog().getAttribute('aria-label')).toBe('Export note as a WordPress draft');
     // the WordPress branch checks the public edition itself: the files' check is not asked again

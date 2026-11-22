@@ -70,7 +70,7 @@
   import { exportNotes, revealExports } from '../lib/notesExport.js';
   import { checkNotes, isLeftOut, isNoAddress, jumpFor } from '../lib/notes/warnings.js';
   import {
-    HTML, HTML_BUDGET, PDF, PUBLIC_ONLY, WEB, WORDPRESS, keepFormat, readFormat, weightWords,
+    HTML, HTML_BUDGET, PDF, PUBLIC_ONLY, REVIEW, WEB, WORDPRESS, keepFormat, readFormat, weightWords,
   } from '../lib/notes/formats.js';
   import {
     correctionFor, editionOf, editionOfAll, keepCorrection, keepEdition, listEditions, PUBLIC, showEdition,
@@ -103,7 +103,7 @@
   import PublishSteps from './notebook/PublishSteps.svelte';
   import LinkList from './notebook/LinkList.svelte';
   import ArchiveLinks from './notebook/ArchiveLinks.svelte';
-  import ReviewExportDialog from './notebook/ReviewExportDialog.svelte';
+  import ReviewExport from './notebook/ReviewExport.svelte';
   import { followed, isActive, onEnded, progressWords, readPlan } from '../lib/notes/linkArchive.svelte.js';
   import ReadyPanel from './notebook/ReadyPanel.svelte';
   import ToPostItem from './notebook/ToPostItem.svelte';
@@ -164,8 +164,11 @@
   let editionsOf = $state(null);
   // the note whose links are being archived, in the dialog: { noteId, title }
   let archiveOf = $state(null);
-  // the note being exported for review (`ReviewExportDialog`), or null
-  let reviewOf = $state(null);
+  // the For review branch of the export dialog (`ReviewExport`): its handle, and what it says
+  let reviewBody = $state(null);
+  let reviewBusy = $state(false);
+  let reviewReady = $state(false);
+  let reviewWritten = $state(null);
   // Ready to publish?: the panel open on { noteId, title, fromExport }, what its check said, and the fix under way
   let readyOf = $state(null);
   let readyAnswer = $state(null);
@@ -693,6 +696,8 @@
    */
   function exportSome(noteIds, { correcting = false } = {}) {
     exportIds = noteIds.map((id) => id ?? CASE_NOTES);
+    // For review is never kept: an export opens on the last of the four
+    if (exportFormat === REVIEW) exportFormat = readFormat('export');
     exportEdition = correcting ? PUBLIC : editionOfAll(caseId, exportIds);
     if (correcting && (exportFormat === PDF || exportFormat === WORDPRESS)) {
       exportFormat = HTML;
@@ -759,10 +764,10 @@
     }
   }
 
-  /** PDF or HTML, picked in the dialog: kept for the next export, and the check asked again. */
+  /** A format picked in the dialog: kept for the next export, For review aside, and the check asked again. */
   function chooseFormat(format) {
     exportFormat = format;
-    keepFormat('export', format);
+    if (format !== REVIEW) keepFormat('export', format);
     void checkExport(exportIds);
   }
 
@@ -781,8 +786,8 @@
     const id = caseId;
     const mine = new AbortController();
     checkController = mine;
-    // the WordPress branch says what it checks itself
-    if (exportFormat === WORDPRESS) {
+    // the WordPress and For review branches say what they check themselves
+    if (exportFormat === WORDPRESS || exportFormat === REVIEW) {
       checkController = null;
       return;
     }
@@ -821,6 +826,7 @@
     stopCheck();
     exportOpen = false;
     webDone = null;
+    reviewWritten = null;
     githubDone = null;
     stepsOpen = false;
   }
@@ -835,6 +841,7 @@
 
   /** The format and edition the panel checks: the export dialog's when it came from there, else what the export would open on. */
   function readyChoice(noteId, fromExport) {
+    if (fromExport && exportFormat === REVIEW) return { format: HTML, edition: PUBLIC, address: '' };
     if (fromExport) return { format: exportFormat, edition: exportEdition, address: webAddress.trim() };
     return { format: readFormat('export'), edition: editionOf(caseId, noteId), address: readAddress(caseId, noteId) };
   }
@@ -1164,11 +1171,6 @@
         <button type="button" class="fm-item" title="Send each outside link to the Internet Archive and keep its copy"
           onclick={() => fromMenu((note) => (archiveOf = { noteId: note.id, title: note.title }))}>
           <Icon name="bookmark" size={14} /><span class="fm-grow">Archive every link…</span></button>
-        {#if row.id !== CASE_NOTES}
-          <button type="button" class="fm-item" title="This note and what its page needs, as an Azimut file to send for review"
-            onclick={() => fromMenu((note) => (reviewOf = { noteId: note.id }))}>
-            <Icon name="upload" size={14} /><span class="fm-grow">Export for review…</span></button>
-        {/if}
       {/if}
       {#if row}
         <div class="fm-sep"></div>
@@ -1201,6 +1203,8 @@
 
   {#if exportOpen}
     {@const several = exportIds.length > 1}
+    {@const reviewable = !several && exportIds[0] !== CASE_NOTES}
+    {@const review = exportFormat === REVIEW && reviewable}
     {@const html = exportFormat === HTML}
     {@const web = exportFormat === WEB}
     {@const wordpress = exportFormat === WORDPRESS}
@@ -1214,7 +1218,8 @@
     {@const page = (html || web) && exportCheck && !exportCheck.checking ? exportCheck : null}
     {@const shared = exportEdition === PUBLIC || publicOnly || !exportCheck?.internal}
     {@const problem = web && !several ? (githubSet ? githubProblem : addressProblem(webAddress)) : ''}
-    <Modal title={several ? `Export notes as ${named}` : `Export note as ${named}`} onclose={closeExport} width="560px">
+    <Modal title={review ? 'Export note for review' : several ? `Export notes as ${named}` : `Export note as ${named}`}
+      onclose={closeExport} width="560px">
       {#if webDone}
         {@const count = webDone.written.length}
         <section class="web-done" aria-label="Web folder written">
@@ -1247,9 +1252,9 @@
       {/if}
       <div class="export-format">
         <span class="dest-label">Format</span>
-        <FormatSwitch value={exportFormat} onchange={chooseFormat} />
+        <FormatSwitch value={exportFormat} review={reviewable} onchange={chooseFormat} />
       </div>
-      {#if !wordpress}
+      {#if !wordpress && !review}
         <div class="export-dest">
           <span class="dest-label">Destination</span>
           <span class="dest-path mono" title={exportDir || "The case's own exports folder"}>{exportDir || "the case's exports folder"}</span>
@@ -1299,6 +1304,9 @@
         <WordPressDraft bind:this={wordpressDraft} bind:busy={draftBusy} bind:ready={draftReady} bind:sent={draftSent}
           {caseId} noteIds={exportIds} prepare={async () => { if (doc) await flush(doc); }} onleave={closeExport} />
         <!-- end of the WordPress branch -->
+      {:else if review}
+        <ReviewExport bind:this={reviewBody} bind:busy={reviewBusy} bind:ready={reviewReady} bind:written={reviewWritten}
+          {caseId} noteId={exportIds[0]} prepare={async () => { if (doc) await flush(doc); }} />
       {:else}
         <p class="export-note">
           {#if html}{several ? `${exportIds.length} HTML pages will be written, one per note.` : 'One HTML page will be written.'}
@@ -1381,9 +1389,19 @@
         </section>
       {/if}
       <div class="modal-row">
+        {#if review && reviewWritten}
+          <button type="button" class="btn btn-sm" onclick={() => reviewBody?.reveal()}><Icon name="folderOpen" size={14} /> Show in folder</button>
+        {/if}
         <div style="flex:1"></div>
+        {#if review && reviewWritten}
+          <button class="btn" onclick={closeExport}>Done</button>
+          <button class="btn btn-primary" onclick={() => reviewBody?.download()}><Icon name="download" size={14} /> Download</button>
+        {:else}
         <button class="btn" onclick={closeExport}>{wordpress && draftSent ? 'Close' : 'Cancel'}</button>
-        {#if !wordpress}
+        {#if review}
+          <button class="btn btn-primary" disabled={reviewBusy || !reviewReady} aria-busy={reviewBusy}
+            onclick={() => reviewBody?.send()}>{reviewBusy ? 'Exporting…' : 'Export'}</button>
+        {:else if !wordpress}
           <button class={web && !several && githubSet ? 'btn' : 'btn btn-primary'} disabled={exportBusy || githubBusy || Boolean(problem)}
             onclick={() => runExport(exportIds)}>
             {exportBusy ? 'Exporting…' : found.length ? 'Export anyway' : web ? (several ? `Export ${exportIds.length} web folders` : 'Export web folder')
@@ -1401,6 +1419,7 @@
         {:else}
           <button class="btn btn-primary" disabled={draftBusy || !draftReady} onclick={() => wordpressDraft?.send()}
             title="Upload the pictures and save the note as a draft; nothing is published">{draftBusy ? 'Sending…' : 'Send as a draft'}</button>
+        {/if}
         {/if}
       </div>
       {/if}
@@ -1421,11 +1440,6 @@
 
   {#if archiveOf}
     <ArchiveLinks {caseId} noteId={archiveOf.noteId} title={archiveOf.title} onclose={closeArchive} />
-  {/if}
-
-  {#if reviewOf}
-    <ReviewExportDialog {caseId} noteId={reviewOf.noteId} onbeforeexport={() => (doc ? flush(doc) : undefined)}
-      onclose={() => (reviewOf = null)} />
   {/if}
 
   {#if exportPicker}

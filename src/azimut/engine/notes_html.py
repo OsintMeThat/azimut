@@ -289,7 +289,7 @@ class Folder:
     #: How a page published to a site is framed: the way back to the site and the counts its
     #: pages make (`engine/site.py`); None for a folder that is not on a site.
     frame: "site_engine.Frame | None" = None
-    #: The author's picture, a file at the folder's root (`notes_web.author_face`): a guest's stands
+    #: The author's picture, a file at the folder's root (`author_face`): a guest's stands
     #: round where the analyst's logo would by their name (`_Page._author_face`); "" for none.
     author_face: str = ""
     #: Where the web maps the page links to stand on the site it is published to: a link to one
@@ -409,6 +409,44 @@ class RenderedHtml:
     map_page: MapPage | None = None
 
 
+#: The author's picture (`NoteLook.author_image`) as a page shows it beside their name, at a web
+#: folder's root or inlined: a small square, `author.png` when it holds transparency, else `author.jpg`.
+AUTHOR_FACE = "author"
+AUTHOR_FACE_SIDE = 96
+AUTHOR_FACE_QUALITY = 86
+
+
+def author_face(case: "Case", entity_id: str) -> tuple[str, bytes] | None:
+    """The author's picture as a page shows it, a file of a web folder or inlined where there is
+    none: its file name and its bytes, a square of `AUTHOR_FACE_SIDE` cut from the middle, upright,
+    made again from its pixels so that nothing the file held besides them (its place, its camera,
+    its author, its comments) goes online. None when it is no picture in the case any more or
+    cannot be read."""
+    path = notefill.case_picture(case, entity_id)
+    if path is None:
+        return None
+    side = AUTHOR_FACE_SIDE
+    try:
+        with PILImage.open(path) as image:
+            if image.width * image.height > MAX_IMAGE_PIXELS:
+                return None
+            image.draft("RGB", (side * 4, side * 4))
+            upright = ImageOps.exif_transpose(image)
+            clear = upright.mode in ("RGBA", "LA", "PA") or "transparency" in upright.info
+            upright = upright.convert("RGBA" if clear else "RGB")
+    except (OSError, ValueError, UnidentifiedImageError, PILImage.DecompressionBombError):
+        return None
+    square = ImageOps.fit(upright, (side, side), PILImage.Resampling.LANCZOS)
+    # a JPEG's comment rides in `info` through a resize and back out on save
+    square.info = {}
+    buffer = BytesIO()
+    if clear:
+        square.save(buffer, "PNG", optimize=True)
+        return f"{AUTHOR_FACE}.png", buffer.getvalue()
+    square.save(buffer, "JPEG", quality=AUTHOR_FACE_QUALITY, optimize=True)
+    return f"{AUTHOR_FACE}.jpg", buffer.getvalue()
+
+
 def render(
     case: "Case | None",
     *,
@@ -442,7 +480,14 @@ def render(
     """
     look = look or DEFAULT_LOOK
     day = date.fromisoformat(look.cover.date) if look.cover.date else (created or datetime.now()).date()
-    identity = identity if identity is not None else notefill.Identity.from_settings()
+    # a note someone else wrote is signed with their name, and their picture stands by it
+    identity, look = notefill.signing(look, identity)
+    face = ""
+    if folder is None and identity.guest and look.author_image and case is not None:
+        made = author_face(case, look.author_image)
+        if made is not None:
+            kind = "png" if made[0].endswith(".png") else "jpeg"
+            face = f"data:image/{kind};base64,{base64.b64encode(made[1]).decode('ascii')}"
     values = identity.values(day)
     empty: dict[str, int] = {}
     passages = [0]
@@ -471,7 +516,7 @@ def render(
         cited.warn(notefill.NO_NAME, empty["name"], md.SETTING)
     # a note with no internal passage has one edition, shareable as it stands: it says public
     page = _Page(case, look=look, theme=theme, cited=cited, diagrams=diagrams or {}, light=light, check=check,
-                 public=public or not passages[0], round_pov=round_pov, day=day, folder=folder)
+                 public=public or not passages[0], round_pov=round_pov, day=day, folder=folder, face=face)
     source = md.printed_source(shown)
     printed = hashlib.sha256(source.encode("utf-8")).hexdigest()
     document = page.build(title, pieces, blocks, cover=cover, printed=printed, changes=changes, earlier=earlier)
@@ -567,9 +612,12 @@ class _Page:
         round_pov: bool,
         day: date,
         folder: Folder | None = None,
+        face: str = "",
     ) -> None:
         self.case = case
         self.look = look
+        #: A guest author's picture inlined, for a page with no folder to hold it as a file.
+        self.face = face
         self.theme = theme
         self.cited = cited
         self.diagrams = diagrams
@@ -1129,9 +1177,11 @@ class _Page:
         return f'<div class="az-signed {kind}">{picture}{name}{role}</div>\n'
 
     def _author_face(self) -> str:
-        """A guest author's picture, round, where the analyst's logo would stand by their name, on a
-        web page that has one; "" for the analyst's own note. Its words are the name beside it."""
-        face = self.folder.author_face if self.folder is not None and self.cited.identity.guest else ""
+        """A guest author's picture, round, where the analyst's logo would stand by their name: a file of
+        a web folder, else inlined; "" for the analyst's own note. Its words are the name beside it."""
+        if not self.cited.identity.guest:
+            return ""
+        face = self.folder.author_face if self.folder is not None else self.face
         return f'<img class="az-face" src="{_attr(face)}" alt="" width="40" height="40">' if face else ""
 
     def _to_site(self, inner: str) -> str:

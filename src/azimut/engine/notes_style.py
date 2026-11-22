@@ -832,6 +832,8 @@ class NotePage(FPDF):
                 self.ln(2.5 if beside is None else 4.0)
                 self._cover_byline(left, frame, byline, beside)
                 logo = None if beside is not None else logo
+            if self.signer is not None and self.signer.guest and not signs:
+                logo = None  # a guest's picture never stands alone, away from their name
             self.ln(7)
             self.set_x(left)
             self.set_font(self.theme.heading_family, "B", 10)
@@ -876,8 +878,10 @@ class NotePage(FPDF):
 
     def card_logo(self) -> Sized | None:
         """The analyst's logo when the cover asks for it (`NoteCover.marks`) and Settings
-        has one, sized to stand by their name: at most `CARD_LOGO_HEIGHT` tall."""
-        if "logo" not in self.look.cover.marks:
+        has one, sized to stand by their name: at most `CARD_LOGO_HEIGHT` tall. A guest's
+        picture (`Identity.written_by`, their face as its logo) stands by their name whatever
+        the cover asks, as on their web page."""
+        if "logo" not in self.look.cover.marks and not (self.signer is not None and self.signer.guest):
             return None
         return self._sized("my-logo", CARD_LOGO_HEIGHT, CARD_LOGO_WIDTH)
 

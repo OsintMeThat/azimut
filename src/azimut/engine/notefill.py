@@ -27,12 +27,16 @@ import re
 from dataclasses import dataclass, replace
 from datetime import date
 from pathlib import Path
-from typing import Callable, Mapping
+from typing import TYPE_CHECKING, Callable, Mapping
 from urllib.parse import urlsplit
 
 from .. import __version__, config
 from .notes_style import long_date
 from .notetext import FENCE, INCLUDE
+
+if TYPE_CHECKING:
+    from ..workspace import Case
+    from .notelook import NoteLook
 
 PLACEHOLDER = re.compile(r"\{(title|date|name|role|organisation)\}")
 #: The line a note's own first page ends at: an HTML comment, so it never prints.
@@ -173,6 +177,32 @@ class Identity:
         if name == LOGO:
             return AZIMUT_LOGO
         return self.logo if name == MY_LOGO else self.signature if name == MY_SIGNATURE else None
+
+
+def signing(look: "NoteLook", identity: Identity | None = None) -> tuple[Identity, "NoteLook"]:
+    """Who signs a note wherever it is exported or read (the PDF, the Page preview, an HTML file, a
+    web folder, a map page, a WordPress draft, the text its editions compare) and the look it is laid
+    out in: ``identity``, else this machine's Settings, but a note someone else wrote
+    (`NoteLook.author`) by their name alone (`Identity.written_by`), under its title unless the look
+    signs it at the end. The one rule they all share."""
+    found = identity if identity is not None else Identity.from_settings()
+    if not look.author:
+        return found, look
+    return found.written_by(look.author), look if look.signed else look.model_copy(update={"signed": "title"})
+
+
+def case_picture(case: "Case", entity_id: str) -> Path | None:
+    """The file of a case picture a look names (for the site's list, beside its author's name), None
+    when it is no picture there any more."""
+    record = case.get_entity(entity_id)
+    attrs = (record or {}).get("attrs") or {}
+    if not record or not attrs.get("path") or attrs.get("kind") in ("video", "audio"):
+        return None
+    try:
+        path = case.resolve_inside(str(attrs["path"]))
+    except Exception:
+        return None
+    return path if path.is_file() else None
 
 
 def picture_name(source: str) -> str | None:

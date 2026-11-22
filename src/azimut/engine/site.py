@@ -400,7 +400,7 @@ BAR_CLOSE = b"<!-- /azimut:bar -->"
 _BODY = re.compile(rb"<body\b[^>]*>")
 #: Where an article's folder keeps the site's logo its bar shows (`notes_html._way_home`).
 LOGO_FILE = re.compile(r"^assets/[0-9a-f]{8,16}-site-logo\.png$")
-#: The author's picture as a card names it: a file at its folder's root (`notes_web.author_face`).
+#: The author's picture as a card names it: a file at its folder's root (`notes_html.author_face`).
 AUTHOR_FILE = re.compile(r"^author\.(?:jpg|png)$")
 
 

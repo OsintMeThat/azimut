@@ -163,7 +163,8 @@ def printed_now(case: "Case | None", *, title: str, text: str, look: NoteLook | 
     place and its internal passages out. Laid out in memory; nothing is drawn or written."""
     look = look or DEFAULT_LOOK
     day = date.fromisoformat(look.cover.date) if look.cover.date else (created or datetime.now()).date()
-    identity = identity if identity is not None else notefill.Identity.from_settings()
+    # a note someone else wrote fills `{name}` with theirs, as its pages print it
+    identity, look = notefill.signing(look, identity)
     values = identity.values(day)
     empty: dict[str, int] = {}
     passages = [0]
