@@ -19,8 +19,13 @@
  *   place, a pin or another measure's corner, the point is put on it, unless
  *   Alt is held.
  * - **A line of two points can be used as something**: rings round A, a cone
- *   from A toward B, a shadow from a foot at A to its tip at B, the ground in
- *   sight from A out to B (`lib/measures.js`).
+ *   from A toward B, an alignment run on past two things lined up in a
+ *   picture, a shadow from a foot at A to its tip at B, the ground in sight
+ *   from A out to B (`lib/measures.js`).
+ * - **Alignments come in a row.** Once a line is made one, each new line is
+ *   another after two clicks, with the same run, so three are drawn in six
+ *   clicks and read where they meet. Pressing Align off, another use or
+ *   Escape with nothing selected puts new lines back to plain measures.
  * - **The ground is read on a press.** A line's heights and what its eye sees
  *   come from the terrain server, so they are read when the analyst turns the
  *   Ground switch on, or when the 3D view, which reads the relief anyway, is
@@ -45,13 +50,19 @@ import { cornerHandles, ghostHandles } from '../../../lib/map/handles.js';
 import { createSurface } from '../../../lib/map/surface.js';
 import { destination, formatBearing, formatDistance, formatHeight, haversine } from '../../../lib/measure.js';
 import {
+  clampReach,
   crossings,
   headline,
   isPair,
   labels,
   MAX_RINGS,
+  meeting,
+  meetingWords,
   newMeasure,
   pairReading,
+  pathOf,
+  REACH,
+  runsOn,
   shadowSentence,
   sightRuns,
   summary,
@@ -72,6 +83,12 @@ const BLOCKED = { radius: 6, stroke: '#fff', strokeWidth: 2, fill: HIDDEN, fillO
 const SKY = '#2de0ff';
 const RING = { stroke: SKY, strokeWidth: 2.5, strokeOpacity: 1, interactive: false };
 const CONE = { stroke: SKY, strokeWidth: 2.5, strokeOpacity: 1, fill: SKY, fillOpacity: 0.18, interactive: false };
+const RUN = { stroke: SKY, strokeWidth: 2, strokeOpacity: 1, interactive: false };
+// where the alignments meet: a dashed ring round their crossings, pressed to copy its middle; the
+// ground inside it still takes a click, as an area's does
+const MEET = { stroke: SKY, strokeWidth: 2, strokeOpacity: 1, dash: '5 4' };
+const MEET_FILL = { strokeWidth: 0, strokeOpacity: 0, fill: SKY, fillOpacity: 0.12, interactive: false };
+const USE_STYLE = { circle: RING, polygon: CONE, line: RUN };
 const USE_CASING = { stroke: '#000', strokeWidth: 5.5, strokeOpacity: 0.5, interactive: false };
 // a fill alone: a surface strokes what names no stroke of its own
 const BARE = { strokeWidth: 0, strokeOpacity: 0 };
@@ -159,6 +176,9 @@ export function createMeasureState({
   let droppedAt = -Infinity; // when a corner was last let go
   // the heights chart, put away from its window or the panel until shown again
   let chartShown = $state(true);
+  // new lines are alignments, run on as the last one was
+  let aligning = $state(false);
+  let run = { past: 'both', reach: REACH };
 
   const units = () => unitsChoice ?? appUnits() ?? 'metric';
   const byId = (id) => measures.find((m) => m.id === id) ?? null;
@@ -246,7 +266,7 @@ export function createMeasureState({
     }
     for (const [i, shape] of useShapes(m).entries()) {
       out.push({ ...shape, id: `m${m.id}-use-${i}-casing`, style: USE_CASING });
-      out.push({ ...shape, id: `m${m.id}-use-${i}`, style: shape.kind === 'circle' ? RING : CONE });
+      out.push({ ...shape, id: `m${m.id}-use-${i}`, style: USE_STYLE[shape.kind] });
     }
     if (m.id === drawingId) {
       for (const point of points) out.push({ kind: 'dot', at: point, style: DOT });
@@ -292,9 +312,29 @@ export function createMeasureState({
       onClick: () => copy(coords(crossed.at.lat, crossed.at.lon)),
     }));
     const reading = readPoint();
-    shapes.set([...list, ...marks, reading && { kind: 'dot', at: reading, style: READ_AT }]);
+    shapes.set([...list, ...meetingShapes(), ...marks, reading && { kind: 'dot', at: reading, style: READ_AT }]);
     shapes.visible(on);
     drawWords();
+  }
+
+  /** Where the alignments meet, once two pairs of them or more cross. */
+  function meetingShapes() {
+    const meet = meeting(measures);
+    if (!meet?.at || meet.crossed < 2) return [];
+    const where = coords(meet.at.lat, meet.at.lon);
+    const radiusM = Math.max(meet.spread, 1);
+    return [
+      { id: 'meeting-fill', kind: 'circle', at: meet.at, radiusM, style: MEET_FILL },
+      {
+        id: 'meeting',
+        kind: 'circle',
+        at: meet.at,
+        radiusM,
+        style: { ...MEET, interactive: drawingId == null },
+        tip: `${meetingWords(meet, units()).lead} of ${where}. Click to copy`,
+        onClick: drawingId == null ? () => copy(where) : undefined,
+      },
+    ];
   }
 
   /**
@@ -721,6 +761,7 @@ export function createMeasureState({
     get hint() {
       if (!on) return '';
       const m = drawing();
+      if (aligning) return m ? 'Click the second thing lined up' : 'Click two things lined up in the picture';
       if (!m) return measures.length ? 'Click to start another measure' : 'Click to start a measure';
       if (m.points.length === 1) return 'Click the next point';
       return m.points.length >= 3
@@ -748,7 +789,9 @@ export function createMeasureState({
         : m.points.length >= 2
           ? `${leg} · total ${formatDistance(total, units())}`
           : leg;
-      return { from, to, first: plain(m.points[0]), closing, text, label: snapped?.label ?? '' };
+      // an alignment to come shows how it will run on, so it can be aimed
+      const runs = aligning ? runsOn({ points: [from, to], closed: false, use: 'align', ...run }).map((one) => one.points) : [];
+      return { from, to, first: plain(m.points[0]), closing, text, label: snapped?.label ?? '', runs };
     },
 
     open() {
@@ -761,6 +804,7 @@ export function createMeasureState({
     close() {
       if (drawingId != null) finish();
       on = false;
+      aligning = false;
       pointer = null;
       snapped = null;
       readIndex = null;
@@ -799,6 +843,10 @@ export function createMeasureState({
         return true; // the second click of a double click on a lone point
       }
       m.points.push(point);
+      if (aligning && m.points.length === 2) {
+        Object.assign(m, { use: 'align', past: run.past, reach: run.reach });
+        return finish();
+      }
       draw();
       return true;
     },
@@ -809,7 +857,11 @@ export function createMeasureState({
     /** Escape: finish what is drawn, else let go of the selection. False when there was neither. */
     escape() {
       if (drawingId != null) return finish();
-      if (selectedId == null) return false;
+      if (selectedId == null) {
+        if (!aligning) return false;
+        aligning = false;
+        return true;
+      }
       selectedId = null;
       readIndex = null;
       draw();
@@ -925,7 +977,11 @@ export function createMeasureState({
 
     /** Look from B toward A instead: the line turned round. */
     swap(id) {
-      change(id, (m) => m.points.reverse());
+      change(id, (m) => {
+        m.points.reverse();
+        // an alignment run on past one end keeps running on past the same place
+        if (m.past === 'a' || m.past === 'b') m.past = m.past === 'a' ? 'b' : 'a';
+      });
     },
 
     /** A line of two points given an exact length, B moved along its bearing. */
@@ -950,6 +1006,55 @@ export function createMeasureState({
       change(id, (m) => {
         m.use = m.use === use ? null : use;
       });
+      const m = byId(id);
+      aligning = m.use === 'align';
+      if (aligning) run = { past: m.past ?? 'both', reach: clampReach(m.reach) };
+    },
+
+    /** New lines are alignments, from the last one made. */
+    get aligning() {
+      return aligning;
+    },
+
+    /** New lines are plain measures again. */
+    stopAligning() {
+      aligning = false;
+    },
+
+    /** Which way an alignment runs on (`lib/measures.js` PAST); the next ones follow. */
+    setPast(id, past) {
+      if (!['a', 'b', 'both'].includes(past)) return;
+      change(id, (m) => {
+        m.past = past;
+      });
+      if (byId(id)?.use === 'align') run = { ...run, past };
+    },
+
+    /** How far an alignment runs on past its ends; the next ones follow. */
+    setReach(id, metres) {
+      if (!(Number(metres) > 0)) return;
+      const reach = clampReach(metres);
+      change(id, (m) => {
+        m.reach = reach;
+      });
+      if (byId(id)?.use === 'align') run = { ...run, reach };
+    },
+
+    /**
+     * Where the alignments meet, with its middle as the analyst's coordinates
+     * read and what it says, or null until there are two alignments.
+     */
+    get meeting() {
+      const meet = meeting(measures);
+      if (!meet) return null;
+      const words = meetingWords(meet, units());
+      return { ...meet, ...words, where: meet.at ? coords(meet.at.lat, meet.at.lon) : '' };
+    },
+
+    /** The middle of where the alignments meet, to the clipboard. */
+    copyMeeting() {
+      const meet = meeting(measures);
+      if (meet?.at) copy(coords(meet.at.lat, meet.at.lon));
     },
 
     setRings(id, count) {
@@ -1004,8 +1109,9 @@ export function createMeasureState({
 
     /**
      * The measure as a feature of a personal layer: its shape, named by what it
-     * reads, with its text in the notes. Rings keep their outer circle and a
-     * cone its wedge; a shadow or a viewshed keeps its line and its answer.
+     * reads, with its text in the notes. Rings keep their outer circle, a cone
+     * its wedge and an alignment its whole run; a shadow or a viewshed keeps
+     * its line and its answer.
      */
     feature(id) {
       const m = byId(id);
@@ -1014,6 +1120,7 @@ export function createMeasureState({
       const shape = isPair(m) ? useShapes(m).at(-1) : null;
       let geometry;
       if (m.closed) geometry = { type: 'Polygon', coordinates: [ring(m.points)] };
+      else if (shape?.kind === 'line') geometry = { type: 'LineString', coordinates: pathOf(m).map((p) => [p.lon, p.lat]) };
       else if (shape?.kind === 'circle') {
         const points = Array.from({ length: 64 }, (_, i) => destination(shape.at, (360 * i) / 64, shape.radiusM));
         geometry = { type: 'Polygon', coordinates: [ring(points)] };

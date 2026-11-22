@@ -3136,7 +3136,16 @@ nautical), and its measures wait, hidden, while it is closed.
 The panel shows the selected measure in large. A line of two points takes an
 exact length or bearing typed in place, in any unit or as a wind, and can be used
 as **Ring** (up to five circles round A, each as wide as the line), **Cone** (what
-a camera at A facing B takes in, its opening set), **Shadow** or **Viewshed**. A
+a camera at A facing B takes in, its opening set), **Align**, **Shadow** or
+**Viewshed**. An alignment is the line through two things lined up in a picture,
+run on 20 km past both ends, or past one, as far as is typed: the camera stood
+somewhere on it, on the side of the nearer thing. It follows the great circle,
+not a straight line on the flat map. Once a line is an alignment, each new line
+is another after two clicks, with the same run and its run drawn while the second
+point is aimed, until Align is pressed off, **Stop** is pressed or Escape is
+pressed with nothing selected. Alignments cross along their whole run, though not
+at a thing two of them share, and from three on a dashed ring circles where they
+meet. The panel says how far apart the crossings lie and copies their middle. A
 shadow is drawn from an object's foot to the tip of its shadow: its direction
 names the hour the sun stood opposite on the picture's day, and its length the
 object's height at that sun, for level ground seen from overhead. A picture with
