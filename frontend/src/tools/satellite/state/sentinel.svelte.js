@@ -210,7 +210,15 @@ export function createSentinelState({ place, onBilled, notify, api }) {
 
   function toggleMenu() {
     menuOpen = !menuOpen;
-    if (!menuOpen) return;
+    if (menuOpen) readMenu();
+  }
+
+  /**
+   * What an opened calendar shows: the layers, and this month's passes. Asked by
+   * `toggleMenu`, and by a calendar laid open in place of its chip (a plate map's
+   * bar), which opens without it.
+   */
+  function readMenu() {
     // Ask the instance what it actually serves, once per session. The built-in
     // list is only a fallback: a configuration serves whatever it was built
     // with, and offering a layer that isn't there just 400s when picked.
@@ -481,6 +489,7 @@ export function createSentinelState({ place, onBilled, notify, api }) {
     loadPasses,
     stepMonth,
     toggleMenu,
+    readMenu,
     resolveLatest,
     rememberLayer,
     clearDate,

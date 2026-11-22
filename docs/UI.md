@@ -6817,7 +6817,7 @@ case's layers, those the map draws first and ticked. A tick draws a layer or tak
 off; a layer followed over time is marked **dated**, since the plate draws it as it stood
 on its day. **›** beside a layer the map draws opens that layer's page for the map (see
 below). A map on a picture of one day (a Wayback release, a Sentinel-2 pass) offers
-**Layers as they stood that day**, here and in its inspector: its dated layers, its
+**Layers as they stood that day**, here, on its bar and in its inspector: its dated layers, its
 legend, the counts and the labels tied to its features then read that day rather than
 the plate's, so a picture of the past never shows what came after it; the other maps
 keep the plate's day, and a map whose day is not known yet keeps it too.
@@ -6841,7 +6841,11 @@ A press picks an element, Shift adds to the picked ones, and elements put in one
 group (Ctrl+G, Ctrl+Shift+G to undo it) are picked together. A drag moves what is
 picked once the pointer has gone four pixels, so a click never nudges; it catches on
 the page's edges and middle and on the other boxes (Alt lets go), and a corner with
-Shift keeps the box's proportions. **A drag on a map moves its frame, as any
+Shift keeps the box's proportions. **Several picked (a group, or a Shift-pick) are sized
+as one picture** by the four corners of the box round them, from the opposite corner,
+catching on the same lines: each map zooms with it on every day and slide, so it shows
+the same ground and what stands there stays on it, and the words, symbols and lines
+inside grow or shrink with it; a locked one stays as it is. **A drag on a map moves its frame, as any
 element's; its ground stays put** until a double click goes into it (drag to pan,
 scroll to zoom, and a Shift-drag, a middle-drag or a double click held and dragged to
 turn, as on the app's other maps; Esc when done). The arrow keys move, Delete
@@ -6890,9 +6894,14 @@ ground round it. A picture can point at the ground, and the picture picker offer
 the proofs and footage the main map's features carry, set pointing at their place.
 
 A map picked on the page carries its own bar: **Frame**, a half step of zoom
-either way, a step to either side and a compass to turn it, **Ground**, and how many
+either way, a step to either side and a compass to turn it, **Ground**, the day of a
+ground that has one (a Wayback release, a Sentinel-2 pass, a cloudless year), and how many
 of the case's layers it draws (**No layer**, in the accent, when it draws none), which
-opens the Layers tab. The
+opens the Layers tab. A press on the day opens the ground's releases, its years or
+Satellite's calendar, as the inspector's **Ground** section shows them, with **Layers as
+they stood that day** under them. On Sentinel-2 it picks the map alone, whose calendar
+the bar and the inspector share. The bar's words give way on a small map,
+its buttons keeping their size. The
 grounds are drawn small as they look, in the bar's menu and in the inspector's
 **Ground** gallery. The plain ones are drawn from OpenStreetMap's vector tiles in a
 style each: **Plain**, **Light grey**, **Newsroom** (warm paper, its relief shaded by
@@ -6900,10 +6909,10 @@ four lights, the coast drawn as lines going out into the water), **Humanitarian*
 **Shaded relief** (a survey's tinted heights under bluish shadows and a warm light),
 **Topographic**, **Staff map**, **Toner** (black and white), **Plain, dark** and
 **Tactical** (dark blue, its coast glowing). Then the pictures: Esri imagery, **World
-Imagery Wayback, dated** (a release picked in the inspector, its date said in the
+Imagery Wayback, dated** (a release picked from the bar or the inspector, its date said in the
 credits and in `{imagery}`), **Sentinel-2 cloudless** (EOX's cloud-free picture of the
 world a year, made of many passes, so it holds no single date and says so: its year
-is picked in the inspector, 2016 free for any use and the later ones for
+is picked from the bar or the inspector, 2016 free for any use and the later ones for
 non-commercial use only, each credited in EOX's words), **Sentinel-2, one dated
 pass** once a Copernicus account is set up (one pass on the day it was taken, never a
 mosaic of several: its layer, cloud ceiling and day are picked on Satellite's own

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { groundSaid, imageryDay, imagerySaid, layerSaid, layeredMaps, layersDayOf, mapName, sameLook, withLayer, withLookOf } from './source.js';
+import { groundDay, groundSaid, imageryDay, imagerySaid, layerSaid, layeredMaps, layersDayOf, mapName, sameLook, withLayer, withLookOf } from './source.js';
 
 const grounds = [['plain', 'Plain'], ['esri-world-imagery', 'Esri World Imagery'], ['esri-wayback', 'World Imagery Wayback, dated'],
   ['s2cloudless', "Sentinel-2 cloudless, a year's mosaic"], ['sentinel2', 'Sentinel-2, one dated pass'], ['osm', 'OpenStreetMap']];
@@ -14,6 +14,21 @@ describe('where a plate map gets what it draws', () => {
     expect(groundSaid({ basemap: 's2cloudless', year: 2021 }, { grounds, years }).when).toBe('2021');
     expect(groundSaid({ basemap: 'sentinel2', acquired: '2025-10-03' }, { grounds }).when).toBe('3 Oct 2025');
     expect(groundSaid({ basemap: 'sentinel2' }, { grounds }).when).toBe('no pass picked yet');
+  });
+
+  it('says a ground\'s day short, as a map\'s bar shows it, and nothing for a ground with no day of its own', () => {
+    expect(groundDay({ basemap: 'esri-wayback', release: 41 }, { releases })).toBe('12 Mar 2024');
+    expect(groundDay({ basemap: 'esri-wayback' }, { releases })).toBe('20 Feb 2025');
+    // the releases not read yet: what the map asks for, by its number or as the newest
+    expect(groundDay({ basemap: 'esri-wayback', release: 41 })).toBe('Release 41');
+    expect(groundDay({ basemap: 'esri-wayback' })).toBe('Newest');
+    expect(groundDay({ basemap: 's2cloudless', year: 2021 }, { years })).toBe('2021');
+    expect(groundDay({ basemap: 's2cloudless' }, { years })).toBe('2024');
+    expect(groundDay({ basemap: 's2cloudless' })).toBe('Newest');
+    expect(groundDay({ basemap: 'sentinel2', acquired: '2025-10-03' })).toBe('3 Oct 2025');
+    expect(groundDay({ basemap: 'sentinel2' })).toBe('No pass yet');
+    for (const basemap of ['plain', 'plain-news', 'esri-world-imagery', 'osm', 'opentopomap', '']) expect(groundDay({ basemap }, { releases, years })).toBe('');
+    expect(groundDay(null)).toBe('');
   });
 
   it('marks imagery stitched from several days apart from a ground drawn from map data', () => {

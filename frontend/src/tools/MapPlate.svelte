@@ -109,6 +109,7 @@
   import PlateLayers from './plate/PlateLayers.svelte';
   import PlateLayerPage from './plate/PlateLayerPage.svelte';
   import PlateFromCase from './plate/PlateFromCase.svelte';
+  import { createPlateSentinel } from './plate/plateSentinel.svelte.js';
   import { plateTabs } from '../lib/plate/oneTab.js';
   import { buildHash, readSolo, splitHash } from '../lib/hash.js';
   import { settlePlace } from '../lib/backButton.js';
@@ -872,6 +873,11 @@
     spec.framing = framedAs(spec, shownKey, map.id, keep ? null : { ...framingFor(map).view });
   }
 
+  /** The map picked alone, whose Sentinel-2 pass the inspector and its bar pick on one calendar. */
+  const pickedMap = $derived(selection.length === 1 ? elements.find((element) => element.id === selection[0] && element.kind === 'map') ?? null : null);
+  const sentinel = createPlateSentinel({ target: () => pickedMap, place: (map) => { const { lat, lon } = framingFor(map).view; return { lat, lon }; },
+    notify: toast, api });
+
   function changeStep(id, patch) {
     const list = stepsOf(spec, at).map((item) => (item.id === id ? { ...item, ...patch } : item));
     spec.steps = { ...(spec.steps ?? {}), [dayOf(at)]: list };
@@ -1487,7 +1493,7 @@
       { label: 'Duplicate', icon: 'copy', keys: 'Ctrl+D', run: () => { for (const element of chosen) if (element.kind !== 'credits') duplicate(element); } },
       { label: 'Copy', icon: 'clipboard', keys: 'Ctrl+C', run: copySelection },
       'sep',
-      { label: 'Group', icon: 'layers', keys: 'Ctrl+G', title: 'Picked and moved as one from now on', run: () => group(true) },
+      { label: 'Group', icon: 'layers', keys: 'Ctrl+G', title: 'Picked, moved and sized as one from now on', run: () => group(true) },
       ...(grouped ? [{ label: 'Ungroup', icon: 'layers', keys: 'Ctrl+Shift+G', run: () => group(false) }] : []),
       'sep',
       { label: hidden ? 'Show them' : 'Hide them', icon: hidden ? 'eye' : 'eyeOff', run: () => { for (const element of chosen) element.hidden = !hidden; } },
@@ -2258,7 +2264,7 @@
             {framingFor} onmapview={mapView} onkeep={keepFraming} beat={shownKey} follows={followsMap} {written} onnamelabel={nameToLabel}
             {glide} oncontext={(id, point) => (id ? elementMenu(id, point) : pageMenu(point))}
             onmap={(id, handle) => handles.set(id, handle)} top={focus ? 44 : 0} onlayers={plate.template ? null : showLayers} onsameview={sameView} {layersDay}
-            onfeaturelabel={featureNameLabel} />
+            onfeaturelabel={featureNameLabel} {releases} {years} {sentinel} template={!!plate.template} />
         {/key}
         {#if focus}
           <div class="focus-bar" role="toolbar" aria-label="The plate">
@@ -2328,7 +2334,7 @@
             <PlateInspector bind:spec={plate.spec} {selection} caseId={plate.caseId ?? caseId ?? ''} {rows} {grounds} {releases} {years} {legend} {creditList} {framing} {at} moments={playable ? moments : []}
               {place} step={stepIndex >= 0 ? { id: stepId, name: stepName(stepIndex) } : null}
               {overflow} {featurePictures} onpaper={paper} ontheme={applyTheme} onremove={removeElement} onduplicate={duplicate} onorder={restackBy} canorder={(element, by) => stepOf(listed, element.id, by) !== null} ongroup={group} onwayback={readReleases} onnewlayer={newLayerHere} onkeepdrawn={keepDrawn}
-              {framingFor} onmapview={mapView} onkeep={keepFraming} plays={!plate.template && sequence.length > 1}
+              {framingFor} onmapview={mapView} onkeep={keepFraming} plays={!plate.template && sequence.length > 1} {sentinel} template={!!plate.template}
               onsymbol={(style) => (lastSymbol = { ...lastSymbol, ...style })}
               onframe={(element) => (framing = framing === element.id ? '' : element.id)} onlayer={openLayer}
               onpoint={(element) => { if (!mainMap(spec)) { toast('Put a map on the page first', 'warn'); return; } placing = { kind: 'callout', id: element.id }; }} />

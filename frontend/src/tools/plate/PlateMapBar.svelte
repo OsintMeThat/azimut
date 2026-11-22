@@ -9,6 +9,10 @@
    *   middle-drag or a double click held turns it too.
    * - **Tilt**: a map drawn in 3D leans further or less.
    * - **Ground**: the basemaps a plate offers, and what can be laid over them.
+   * - **The ground's day**, on a ground that has one (a Wayback release, a Sentinel-2
+   *   pass, a cloudless year): a press opens its releases, its years or Satellite's
+   *   calendar, with **Layers as they stood that day** (`PlateGroundDay`, as the
+   *   inspector shows them).
    * - **Same view**: a map grouped with another (a comparison's pair) takes the other's
    *   framing at a press, on the day or slide shown.
    * - **Layers**: how many of the case's layers the map draws; a press shows them in
@@ -17,11 +21,15 @@
    *   first holds the framing before it until this is unticked; then the map moves
    *   for it alone.
    */
+  import { flushSync } from 'svelte';
   import Icon from '../../components/Icon.svelte';
   import FloatingMenu from '../../components/FloatingMenu.svelte';
   import { PLATE_OVERLAYS } from '../../lib/plate/page.js';
   import { GROUNDS } from '../../lib/plate/plainBasemap.js';
+  import { SENTINEL_ID } from '../../lib/plate/sentinelPass.js';
+  import { groundDay } from '../../lib/plate/source.js';
   import GroundSwatch from './GroundSwatch.svelte';
+  import PlateGroundDay from './PlateGroundDay.svelte';
 
   let {
     element,
@@ -40,6 +48,18 @@
     onlayers = null,
     /** The map framed as the other map of its group is; null where it stands in no group with one. */
     onsameview = null,
+    /** The Wayback releases, `{ release, date }`, newest first, once read. */
+    releases = [],
+    /** The years of Sentinel-2 cloudless, `{ year, licence, free }`, newest first. */
+    years = [],
+    /** The plate's Sentinel-2 choices, read from the map picked alone (`plateSentinel.svelte.js`). */
+    sentinel = null,
+    /** The plate is a template, which keeps no layers. */
+    template = false,
+    /** Picks this map alone, the one the plate's Sentinel-2 choices are read from. */
+    onpick = null,
+    /** The widest the bar goes, in pixels: the map's width on the screen. Its words give way first. */
+    room = null,
   } = $props();
 
   const isMap = $derived(element.kind === 'map');
@@ -53,6 +73,24 @@
   let menu = $state(false);
   let anchor = $state(null);
   let dial = $state(null);
+  /** The ground's day as the chip says it, '' on a ground with no day of its own. */
+  const day = $derived(isMap ? groundDay(element, { releases, years }) : '');
+  const looking = $derived(element.basemap === SENTINEL_ID && !element.acquired && sentinel?.map === element.id && sentinel.s2.latestBusy);
+  let dayMenu = $state(false);
+  let dayAnchor = $state(null);
+  // another ground, from here or the inspector: its day is asked for afresh
+  $effect(() => { void element.basemap; dayMenu = false; });
+
+  /** The day's menu opened: on Sentinel-2, the map is picked alone and its calendar reads this month's passes. */
+  function openDay() {
+    if (dayMenu) { dayMenu = false; return; }
+    if (element.basemap === SENTINEL_ID && sentinel) {
+      onpick?.();
+      flushSync();
+      if (sentinel.map === element.id) sentinel.s2.readMenu();
+    }
+    dayMenu = true;
+  }
 
   const tidy = (value) => Math.round((((value + 180) % 360 + 360) % 360 - 180) * 10) / 10;
   function turn(by) {
@@ -97,7 +135,7 @@
 </script>
 
 <!-- svelte-ignore a11y_no_static_element_interactions -->
-<div class="map-bar" role="toolbar" aria-label="Map" tabindex="-1" onpointerdown={(event) => event.stopPropagation()}>
+<div class="map-bar" role="toolbar" aria-label="Map" tabindex="-1" style:max-width={room ? `${room}px` : null} onpointerdown={(event) => event.stopPropagation()}>
   {#if isMap}
     {#if keep !== null}
       <label class="keep" title="This day or slide shows the map as the one before it does">
@@ -131,6 +169,10 @@
   {/if}
   <button type="button" class="ground" bind:this={anchor} aria-expanded={menu} aria-label="Ground" title="The ground the map is drawn on"
     onclick={() => (menu = !menu)}><Icon name="satellite" size={13} /><span>{ground}</span><Icon name="chevronDown" size={11} /></button>
+  {#if day}
+    <button type="button" class="ground day" bind:this={dayAnchor} aria-expanded={dayMenu} aria-label="Ground's day" title="The day the ground's picture was taken"
+      onclick={openDay}><Icon name="clock" size={13} /><span>{looking ? 'Looking…' : day}</span><Icon name="chevronDown" size={11} /></button>
+  {/if}
   {#if isMap && onsameview}
     <button type="button" aria-label="Same view as the other map" title="Frames this map as the other map of its group, on the day or slide shown"
       disabled={held} onclick={onsameview}><Icon name="columns" size={14} /></button>
@@ -141,6 +183,12 @@
       onclick={onlayers}><Icon name="layers" size={13} /><span>{count ? `${count} ${count === 1 ? 'layer' : 'layers'}` : 'No layer'}</span></button>
   {/if}
 </div>
+
+{#if dayMenu && day}
+  <FloatingMenu anchor={dayAnchor} width={260} column label="Ground's day" onclose={() => (dayMenu = false)}>
+    <PlateGroundDay {element} {releases} {years} {sentinel} {template} menu />
+  </FloatingMenu>
+{/if}
 
 {#if menu}
   <FloatingMenu {anchor} width={260} label="Ground" onclose={() => (menu = false)}>
@@ -178,7 +226,12 @@
   .ring { fill: var(--bg-2); stroke: var(--border); stroke-width: 1; }
   .north { fill: #e5484d; }
   .south { fill: var(--text-3); }
-  .ground span { max-width: 110px; overflow: hidden; text-overflow: ellipsis; }
+  .ground span { min-width: 0; max-width: 110px; overflow: hidden; text-overflow: ellipsis; }
+  .day span { max-width: 92px; font-variant-numeric: tabular-nums; }
+  /* on a small map the words give way, the buttons keep their size */
+  .map-bar > * { flex: none; }
+  .map-bar > .ground { flex: 0 1 auto; min-width: 0; }
+  .ground :global(svg) { flex: none; }
   /* a map that draws none of the case's layers says so where the eye is */
   .ground.none { color: var(--accent); }
   .room { flex: none; width: 14px; }

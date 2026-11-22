@@ -13,6 +13,8 @@
    *   in one group are picked together. A drag moves what is picked once the
    *   pointer has really moved, and catches on the page's lines and the other
    *   boxes (Alt lets go of them). A locked element stays where it is.
+   * - Several picked have four corners round them: one pulled sizes them as one
+   *   picture from the opposite corner (`arrange.sizedAsOne`), a map keeping its ground.
    * - A drag on a map moves its frame, as any element's; its ground stays put until a
    *   double click (or the bar's button) goes into it: pan, zoom, and turn by a
    *   middle-drag, a Shift-drag or a double click held, as the app's other maps.
@@ -36,6 +38,7 @@
   import Icon from '../../components/Icon.svelte';
   import FloatingMenu from '../../components/FloatingMenu.svelte';
   import { BOXED_ON_THE_GROUND, ON_THE_GROUND, decorDensity, facesOf, fitPage, insetView, PX_PER_MM, pageSize, shownOn, standsOver, zoomPageAt } from '../../lib/plate/page.js';
+  import { SIZED_FIELDS, bounds, leastScale, pictureOf, sizedAsOne } from '../../lib/plate/arrange.js';
   import { bearingTo, circle, corners, distance, project as flatProject, sameView, sector, travel, unproject as flatUnproject } from '../../lib/plate/geo.js';
 
   let {
@@ -97,6 +100,13 @@
     written = '',
     /** `(map)`: the day a map draws its dated layers on when it is not the plate's, else null. */
     layersDay = () => null,
+    /** The Wayback releases and the cloudless years a map's bar offers as its ground's day. */
+    releases = [],
+    years = [],
+    /** The plate's Sentinel-2 choices, read from the map picked alone (`plateSentinel.svelte.js`). */
+    sentinel = null,
+    /** The plate is a template, which keeps no layers. */
+    template = false,
   } = $props();
 
   const size = $derived(pageSize(spec.page));
@@ -396,6 +406,92 @@
   function squared(item) {
     const side = round(Math.max(2, item.box[2], item.box[3]), 1);
     item.box = [item.box[0], item.box[1], side, side];
+  }
+
+  /** Several picked, the ones a corner sizes as one picture: shown here, not locked, holding a box of their own. */
+  const pictured = $derived(selection.length > 1
+    ? spec.elements.filter((item) => selection.includes(item.id) && !item.locked && visible(item) && framing !== item.id
+      && (!ON_THE_GROUND.includes(item.kind) || BOXED_ON_THE_GROUND.includes(item.kind)))
+    : []);
+  /** The box round them as the page shows them, where their corners stand. */
+  const pictureBox = $derived(pictured.length ? bounds(pictured.map(shownBox)) : null);
+  const CORNERS = ['nw', 'ne', 'se', 'sw'];
+
+  /**
+   * A corner of several picked pulled: they are sized as one picture from the opposite
+   * corner, their proportions kept, the pulled corner catching on the page's lines and
+   * the other boxes (Alt lets go). Each step is worked out from the plate as it stood when
+   * the pull began, so nothing drifts; a map's labels are already where they belong, so
+   * its report does not move them again.
+   */
+  function grabPicture(event, corner) {
+    if (event.button !== 0 || !pictureBox) return;
+    event.preventDefault();
+    event.stopPropagation();
+    framing = '';
+    const ids = [...selection];
+    const before = JSON.parse(JSON.stringify(spec.elements));
+    const framingBefore = spec.framing ? JSON.parse(JSON.stringify(spec.framing)) : null;
+    const { picked, maps, tied } = pictureOf(before, ids);
+    const members = new Set([...picked, ...tied].map((item) => item.id));
+    const startBoxes = new Map(spec.elements.filter((item) => members.has(item.id)).map((item) => [item.id, [...shownBox(item)]]));
+    const insetZoom = (inset) => {
+      const of = spec.elements.find((item) => item.id === inset.of);
+      const live = of ? views[of.id]?.view ?? (of.kind === 'map' ? framingFor(of).view : of.view) : null;
+      return live ? insetView(inset, live).zoom : null;
+    };
+    const [bx, by, bw, bh] = pictureBox;
+    const anchor = [corner.includes('w') ? bx + bw : bx, corner.includes('n') ? by + bh : by];
+    const reach = [(corner.includes('w') ? bx : bx + bw) - anchor[0], (corner.includes('n') ? by : by + bh) - anchor[1]];
+    const length = reach[0] ** 2 + reach[1] ** 2;
+    if (!length) return;
+    const least = leastScale(before, ids);
+    const { xs, ys } = lines(members);
+    const screen = [event.clientX, event.clientY];
+    let started = false;
+    const move = (next) => {
+      if (!started && Math.hypot(next.clientX - screen[0], next.clientY - screen[1]) < DRAG_PIXELS) return;
+      started = true;
+      const [mx, my] = toMm(next);
+      // the pointer read along the box's diagonal, so the picture keeps its proportions
+      let factor = Math.max(least, ((mx - anchor[0]) * reach[0] + (my - anchor[1]) * reach[1]) / length);
+      const found = [];
+      if (!next.altKey) {
+        // the nearer line the pulled corner comes to sets the size
+        const near = [['x', caught([anchor[0] + reach[0] * factor], xs), reach[0], anchor[0]], ['y', caught([anchor[1] + reach[1] * factor], ys), reach[1], anchor[1]]]
+          .filter(([, hit, side]) => hit && side)
+          .map(([axis, hit, side, from]) => ({ axis, at: hit.at, gap: Math.abs(hit.gap), by: (hit.at - from) / side }))
+          .filter((hit) => hit.by >= least)
+          .sort((a, b) => a.gap - b.gap)[0];
+        if (near) { factor = near.by; found.push({ axis: near.axis, at: near.at }); }
+      }
+      guides = found;
+      const sized = sizedAsOne(before, ids, { from: anchor, by: factor, shown: (item) => startBoxes.get(item.id), framing: framingBefore, insetZoom });
+      // the maps' zoom moves without the hand framing them: their labels move here, not on their report
+      for (const id of maps) reportedFor.delete(id);
+      for (const item of spec.elements) {
+        if (!members.has(item.id)) continue;
+        const was = before.find((entry) => entry.id === item.id);
+        const patch = sized.patches[item.id] ?? {};
+        for (const field of SIZED_FIELDS) {
+          // a copy: the plate as it stood stays as it was for the next step
+          const value = field in patch ? patch[field] : was[field] && typeof was[field] === 'object' ? structuredClone(was[field]) : was[field];
+          if (value === undefined) { if (field in item) delete item[field]; } else item[field] = value;
+        }
+      }
+      if (sized.framing) spec.framing = structuredClone(sized.framing);
+    };
+    const up = () => {
+      guides = [];
+      window.removeEventListener('pointermove', move);
+      window.removeEventListener('pointerup', up);
+      window.removeEventListener('pointercancel', up);
+      // a text or a symbol on a map left as it was stands where the picture took it: its point goes along
+      if (started) for (const item of spec.elements) if (members.has(item.id) && standsOver(item) && !maps.has(item.of)) carryPoint(item);
+    };
+    window.addEventListener('pointermove', move);
+    window.addEventListener('pointerup', up);
+    window.addEventListener('pointercancel', up);
   }
 
   /** A name of the ground clicked in a framed map, while its menu is open: `{ element, text, at, point, client }`. */
@@ -806,6 +902,18 @@
           {/if}
         {/each}
       {/if}
+      {#if pictureBox}
+        <!-- several picked are sized as one picture by the corners of the box round them -->
+        {@const [x, y, w, h] = pictureBox}
+        <div class="picture-box" style:left={px(x)} style:top={px(y)} style:width={px(w)} style:height={px(h)}></div>
+        {#each CORNERS as corner (corner)}
+          <!-- svelte-ignore a11y_no_static_element_interactions -->
+          <div class="handle {corner}" data-corner={corner} title="Drag to size them as one picture"
+            style:left={px(x + (corner.includes('w') ? 0 : w))} style:top={px(y + (corner.includes('n') ? 0 : h))}
+            style:transform="translate(-50%, -50%) scale({1 / scale})"
+            onpointerdown={(event) => grabPicture(event, corner)}></div>
+        {/each}
+      {/if}
       {#each spec.elements.filter((item) => selection.includes(item.id) && !item.locked) as element (element.id)}
         {#each shape(element)?.handles ?? [] as [field, point] (field)}
           {#if point}
@@ -826,7 +934,9 @@
             keep={framed && !framed.first ? !framed.own : null} onview={(next) => onmapview(element, next)}
             onkeep={(keep) => onkeep?.(element, keep)} onlayers={onlayers ? () => onlayers(element) : null}
             onsameview={onsameview && pairedMap(element) ? () => onsameview(element) : null}
-            onframe={() => { if (lockedMap(element)) { sayHeld(); return; } framing = framing === element.id ? '' : element.id; selection = [element.id]; }} />
+            onframe={() => { if (lockedMap(element)) { sayHeld(); return; } framing = framing === element.id ? '' : element.id; selection = [element.id]; }}
+            {releases} {years} {sentinel} {template} onpick={() => (selection = [element.id])}
+            room={Math.max(160, element.box[2] * PX_PER_MM * scale - 12)} />
         </div>
       {/each}
 
@@ -917,6 +1027,8 @@
   .handle { position: absolute; width: 9px; height: 9px; border: 1.5px solid #3b82f6; background: #fff; border-radius: 2px;
     pointer-events: auto; z-index: 2; }
   .handle.nw, .handle.se { cursor: nwse-resize; }
+  /* the box round several picked, sized as one by its corners */
+  .picture-box { position: absolute; outline: 1px dashed rgba(59, 130, 246, .8); pointer-events: none; z-index: 1; }
   .handle.ne, .handle.sw { cursor: nesw-resize; }
   .handle.n, .handle.s { cursor: ns-resize; }
   .handle.e, .handle.w { cursor: ew-resize; }

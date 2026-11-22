@@ -9,7 +9,6 @@
    * its place), the part of it the clip runs, its sound, and the line saying where
    * it comes from, read from the file's record and written over as wanted.
    */
-  import { untrack } from 'svelte';
   import Icon from '../../components/Icon.svelte';
   import FloatingMenu from '../../components/FloatingMenu.svelte';
   import MonthGrid from '../../components/MonthGrid.svelte';
@@ -26,16 +25,13 @@
   import { align, distribute, filling, fittedHeight, sameSize } from '../../lib/plate/arrange.js';
   import { moveRow } from '../../lib/plate/legend.js';
   import { GROUNDS, PALETTES, groundPalette, readsHeights, topographic } from '../../lib/plate/plainBasemap.js';
-  import { CLOUDLESS_ID, cloudlessYear } from '../../lib/plate/cloudless.js';
-  import { PLATE_MAXCC, SENTINEL_ID } from '../../lib/plate/sentinelPass.js';
-  import { DEFAULT_LAYER, cloudClass, cloudLabel, maxccLabel, monthGrid, monthLabel } from '../../lib/sentinel.js';
-  import { createSentinelState } from '../satellite/state/sentinel.svelte.js';
-  import SentinelPicker from '../satellite/SentinelPicker.svelte';
+  import { SENTINEL_ID } from '../../lib/plate/sentinelPass.js';
   import { ACCOUNT_STEPS } from '../../lib/copernicusSetup.js';
   import GroundSwatch from './GroundSwatch.svelte';
+  import PlateGroundDay from './PlateGroundDay.svelte';
   import { TEXT_STYLES, styled } from '../../lib/plate/design.js';
   import { drawnOn } from '../../lib/plate/toLayer.js';
-  import { imageryDay, layerSaid, mapName, withLayer } from '../../lib/plate/source.js';
+  import { layerSaid, mapName, withLayer } from '../../lib/plate/source.js';
   import { roleLabel } from '../../lib/plate/roles.js';
   import { countryNames } from '../../lib/plate/spotlight.js';
   import { WAYBACK_ID } from '../../lib/wayback.js';
@@ -99,6 +95,10 @@
     onkeep = null,
     /** The plate plays: through days followed over time, or through steps. */
     plays = false,
+    /** The plate's Sentinel-2 choices, for the map picked alone (`plateSentinel.svelte.js`), shared with the map's bar. */
+    sentinel = null,
+    /** The plate is a template, which keeps no layers. */
+    template = false,
   } = $props();
 
   const picked = $derived(spec.elements.filter((item) => selection.includes(item.id)));
@@ -138,20 +138,6 @@
     if (id === WAYBACK_ID) onwayback?.();
   }
 
-  /**
-   * Satellite's own Sentinel-2 choices (`state/sentinel.svelte.js`), for the map picked:
-   * its layer, its cloud ceiling and its pass, picked on the same calendar over the
-   * map's middle. What is picked is written into the map; another map picked reads its own.
-   */
-  const s2 = createSentinelState({
-    place: () => { const { lat, lon } = framingFor(element).view; return { lat, lon }; },
-    onBilled: () => {},
-    notify: toast,
-    api,
-  });
-  let s2MenuEl = $state();
-  /** The map the choices were last read from. */
-  let s2For = '';
   /** Natural Earth's countries, read the first time a focus's list is opened. */
   let world = $state.raw(null);
   async function readWorld() {
@@ -161,45 +147,6 @@
 
   /** Whether the steps to a Copernicus account are shown under the locked Sentinel-2 ground. */
   let copernicusShown = $state(false);
-  // a map on Sentinel-2 picked: the choices read from it, its pass pinned as the day it holds
-  $effect(() => {
-    const target = element;
-    if (target?.basemap !== SENTINEL_ID || s2For === target.id) return;
-    s2For = target.id;
-    untrack(() => {
-      s2.layer = target.product || DEFAULT_LAYER;
-      s2.setMaxcc(target.maxcc ?? PLATE_MAXCC);
-      s2.date = target.acquired ?? '';
-    });
-  });
-  // "Most recent", or a map set on Sentinel-2 just now with no pass yet, here or from its bar: the newest
-  // pass under the ceiling is looked for, a request or two the analyst's choice asks for
-  $effect(() => {
-    const [date, maxcc] = [s2.date, s2.maxcc];
-    if (element?.basemap !== SENTINEL_ID || s2For !== element.id || date) return;
-    void maxcc;
-    untrack(() => s2.resolveLatest());
-  });
-  $effect(() => { if (element?.basemap !== SENTINEL_ID) s2For = ''; });
-  // what is picked on the calendar is the map's: one day, its layer, its ceiling
-  $effect(() => {
-    const target = element;
-    const [day, layer, maxcc] = [s2.day, s2.layer, s2.maxcc];
-    if (target?.basemap !== SENTINEL_ID || s2For !== target.id) return;
-    untrack(() => {
-      if (day && target.acquired !== day) target.acquired = day;
-      const product = layer === DEFAULT_LAYER ? '' : layer;
-      if ((target.product ?? '') !== product) target.product = product;
-      if ((target.maxcc ?? null) !== maxcc) target.maxcc = maxcc;
-    });
-  });
-  // the calendar closes on a press anywhere else, as on Satellite's map
-  $effect(() => {
-    if (!s2.menuOpen) return;
-    const away = (event) => { if (s2MenuEl && !s2MenuEl.contains(event.target)) s2.menuOpen = false; };
-    window.addEventListener('pointerdown', away, true);
-    return () => window.removeEventListener('pointerdown', away, true);
-  });
   const name = (map) => mapName(spec, map);
 
   function toggleOverlay(id) {
@@ -479,13 +426,13 @@
     </PlateSection>
     <PlateSection title="Together">
     <div class="tools wide">
-      <button type="button" class="btn btn-xs" title="Picked and moved as one from now on (Ctrl+G)" onclick={() => ongroup?.(true)}><Icon name="layers" size={12} /> Group</button>
+      <button type="button" class="btn btn-xs" title="Picked, moved and sized as one from now on (Ctrl+G)" onclick={() => ongroup?.(true)}><Icon name="layers" size={12} /> Group</button>
       <button type="button" class="btn btn-xs" title="Each picked on its own again (Ctrl+Shift+G)" onclick={() => ongroup?.(false)}>Ungroup</button>
       <button type="button" class="btn btn-xs" title="Kept where they are, or free to move again" onclick={() => { const lock = !picked.every((item) => item.locked); for (const item of picked) item.locked = lock; }}>
         <Icon name="lock" size={12} /> {picked.every((item) => item.locked) ? 'Unlock' : 'Lock'}</button>
       <button type="button" class="btn btn-xs danger" title="Take them all off the page" onclick={() => { for (const item of [...picked]) onremove(item); }}><Icon name="trash" size={12} /> Remove</button>
     </div>
-    <p class="note">A group is picked and moved as one. Ctrl+G groups, Ctrl+Shift+G ungroups.</p>
+    <p class="note">A group is picked, moved and sized as one. Ctrl+G groups, Ctrl+Shift+G ungroups.</p>
     </PlateSection>
   {:else}
     <header>
@@ -606,36 +553,7 @@
         <p class="note">Sentinel-2's dated passes need a Copernicus account, free and with no card:</p>
         <ol class="setup">{#each ACCOUNT_STEPS as line (line)}<li>{line}</li>{/each}</ol>
       {/if}
-      {#if element.basemap === WAYBACK_ID}
-        <div class="rows">
-          <span class="key">Release</span>
-          <select aria-label="Wayback release" value={String(element.release ?? '')}
-            onchange={(event) => (element.release = event.currentTarget.value ? Number(event.currentTarget.value) : null)}>
-            <option value="">Newest</option>
-            {#each releases as entry (entry.release)}<option value={String(entry.release)}>{entry.date}</option>{/each}
-          </select>
-        </div>
-      {:else if element.basemap === CLOUDLESS_ID}
-        {@const shown = cloudlessYear(element, years)}
-        <div class="rows">
-          <span class="key">Year</span>
-          <select aria-label="Cloudless year" value={String(element.year ?? '')}
-            onchange={(event) => (element.year = event.currentTarget.value ? Number(event.currentTarget.value) : null)}>
-            <option value="">Newest</option>
-            {#each years as entry (entry.year)}<option value={String(entry.year)}>{entry.year}{entry.free ? ', free for any use' : ''}</option>{/each}
-          </select>
-        </div>
-        <p class="note">One cloud-free picture of that year, made of many passes: it holds no single date.</p>
-        {#if shown}<p class="note">{shown.free ? 'Free for any use, with its credit.' : 'Free for non-commercial use only, with its credit. 2016 is free for any use.'}</p>{/if}
-      {:else if element.basemap === SENTINEL_ID}
-        <div class="rows s2">
-          <span class="key">Pass</span>
-          <span class="s2-pick"><SentinelPicker bind:menuEl={s2MenuEl} {s2} {maxccLabel} {monthLabel} {monthGrid} {cloudClass} {cloudLabel} /></span>
-        </div>
-        <p class="note">{s2.latestBusy && !element.acquired ? 'Looking for the newest pass…' : !element.acquired ? 'No pass picked yet.'
-          : `${s2.layerLabel}, the pass of ${element.acquired}${s2.date ? '' : s2.maxcc < 100 ? `, the newest under ${s2.maxcc}% cloud` : ', the newest'}.`}</p>
-        <p class="note">One pass at 10 m a pixel, empty where it did not reach, its tiles spending your Copernicus quota.</p>
-      {/if}
+      <PlateGroundDay {element} {releases} {years} {sentinel} {template} />
       </PlateSection>
 
       <PlateSection title="3D" summary={(element.terrain ?? 0) > 0 ? `Tilted ${Math.round(framed.view.pitch ?? 0)}°` : 'Flat'}>
@@ -791,11 +709,6 @@
 
       <PlateSection title="Layers" summary={`${(element.layers ?? []).length} drawn`}>
       {@const drawn = drawnOn(spec, element.id).length}
-      {#if imageryDay(element, { releases })}
-        <label class="check" title="Draws the dated layers as they stood on the day this map's picture was taken, not on the plate's day">
-          <input type="checkbox" checked={element.layers_on === 'imagery'} onchange={(event) => (element.layers_on = event.currentTarget.checked ? 'imagery' : 'plate')} />
-          Layers as they stood on {momentLabel(imageryDay(element, { releases }))}</label>
-      {/if}
       {#if !rows.length}<p class="note">The case has no map layers yet. Draw on the plate from Add, or make one here.</p>{/if}
       <div class="tools wide">
         {#if onnewlayer}<button type="button" class="btn btn-xs" title="A new case layer, opened for editing in the Map where this map looks"
@@ -1426,7 +1339,6 @@
   .ground-tile :global(svg.ground-swatch) { width: 100%; height: auto; aspect-ratio: 58 / 38; }
   .ground-tile span { overflow: hidden; display: -webkit-box; -webkit-line-clamp: 2; line-clamp: 2; -webkit-box-orient: vertical; }
   .ground-tile:hover { border-color: var(--border-strong, var(--text-3)); color: var(--text-1); }
-  .s2-pick { display: flex; justify-content: flex-end; }
   .credit-list { margin: 0 0 6px; padding: 0; list-style: none; }
   .credit-list label { display: flex; align-items: flex-start; gap: 6px; padding: 2px 0; color: var(--text-1); font-size: 11px; line-height: 1.35; cursor: pointer; }
   .credit-list input { margin-top: 1px; }
