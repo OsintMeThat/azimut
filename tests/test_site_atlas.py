@@ -90,6 +90,34 @@ def test_the_land_is_one_small_path_of_natural_earth_made_by_the_script_from_wha
     assert "Natural Earth" in json.loads((ROOT / "frontend/src/lib/plate/world.json").read_text())["source"]
 
 
+def test_the_land_reads_back_as_rings_and_a_point_of_it_back_in_degrees():
+    """What a web map with no ground stands on in its cover (`notes_web.map_cover`)."""
+    for lon, lat in ((43.5075, 12.725), (-66.9184, 10.443637), (151.2, -33.87), (-179.5, 71.0), (0.0, 0.0)):
+        back = siteatlas.unproject(*siteatlas.project(lon, lat))
+        assert back == (pytest.approx(lon, abs=1e-9), pytest.approx(lat, abs=1e-9))
+    rings = siteatlas.rings()
+    path = re.search(r' d="([^"]+)"', siteatlas.land().decode("utf-8"))
+    assert path is not None and len(rings) == path.group(1).count("M") > 200
+    for (left, top, right, bottom), corners in rings:
+        assert len(corners) >= 3 and 0 <= left <= right <= siteatlas.WIDTH and 0 <= top <= bottom <= siteatlas.HEIGHT
+        assert (left, top, right, bottom) == (min(x for x, _ in corners), min(y for _, y in corners),
+                                             max(x for x, _ in corners), max(y for _, y in corners))
+    # the Arabian peninsula holds Sanaa, the Red Sea west of it none
+    sanaa, sea = siteatlas.project(44.2, 15.35), siteatlas.project(39.5, 18.0)
+    holding = [corners for box, corners in rings if box[0] <= sanaa[0] <= box[2] and box[1] <= sanaa[1] <= box[3]]
+    assert any(_inside(sanaa, corners) for corners in holding)
+    assert not any(_inside(sea, corners) for _, corners in rings)
+
+
+def _inside(point: tuple[float, float], corners: tuple[tuple[float, float], ...]) -> bool:
+    x, y = point
+    inside = False
+    for (x0, y0), (x1, y1) in zip(corners, corners[1:] + corners[:1]):
+        if (y0 > y) != (y1 > y) and x < x0 + (y - y0) * (x1 - x0) / (y1 - y0):
+            inside = not inside
+    return inside
+
+
 # -- framing and grouping -------------------------------------------------------------------------------------------
 
 

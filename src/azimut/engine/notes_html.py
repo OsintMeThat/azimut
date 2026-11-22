@@ -351,6 +351,19 @@ class Hero:
     alt: str
 
 
+@dataclass(frozen=True)
+class MapPage:
+    """What a map page shows round its map, which its cover is drawn from (`notes_web.map_cover`):
+    the map as derived, and the analyst's name, handle and logo as its header says them; ``face``,
+    whether the author's picture stands by the name."""
+
+    map: notes_maps.Derived
+    who: str = ""
+    handle: str = ""
+    logo: Path | None = None
+    face: bool = False
+
+
 @dataclass
 class RenderedHtml:
     """One finished page, and what the analyst should know about it."""
@@ -389,9 +402,11 @@ class RenderedHtml:
     #: How it was laid out: `article`, `story`, or `map` when it is a map page; a note asked to be
     #: a map page that holds no map reads as an article.
     layout: str = "article"
-    #: The picture the site's list shows for it when its look names none: the cover's, else a map
-    #: page's ground, else the first picture the page shows.
+    #: The picture the site's list shows for an article when its look names none: the cover's, else
+    #: the first picture the page shows.
     picture: Path | None = None
+    #: A map page's map and header, which its cover is drawn from; None for any other page.
+    map_page: MapPage | None = None
 
 
 def render(
@@ -481,6 +496,7 @@ def render(
         ready=cited.ready,
         layout=page.layout,
         picture=page.picture,
+        map_page=page.page_map,
     )
 
 
@@ -608,8 +624,11 @@ class _Page:
         self.live = False
         #: Whether it is laid out as a map page (`_map_page`), its first map on the whole page.
         self.map_page = False
-        #: The first map's ground, which stands in for a map page's picture.
+        #: The first map's ground, which stands in for the picture of a page that has no other.
         self.ground: Path | None = None
+        #: A map page's maps as derived, by their figure's id, and the one it is laid out on (`_map_page`).
+        self._derived: dict[str, notes_maps.Derived] = {}
+        self.page_map: MapPage | None = None
         #: Each map's steps, `(label, day)`, by its figure's id: the cards a story gives it.
         self._map_steps: dict[str, list[tuple[str, str, str, str]]] = {}
         #: The figure each proof shown in the page stands in, by its record, which a map's card links to.
@@ -733,6 +752,7 @@ class _Page:
             return None
         self.map_page = True
         figure = found.group(0)
+        ident = re.search(r' id="([^"]+)"', figure)
         rest = body[:found.start()] + body[found.end():]
         subtitle = _text(" ".join(self.look.cover.subtitle.split()))
         if not subtitle:
@@ -745,6 +765,10 @@ class _Page:
         logo = self._built_in(notefill.MY_LOGO, inline=True)
         by = ""
         face = self._author_face() if who else ""
+        derived = self._derived.get(ident.group(1)) if ident is not None else None
+        if derived is not None:
+            self.page_map = MapPage(derived, who=who, handle=identity.handle,
+                                    logo=identity.picture(notefill.MY_LOGO) if logo else None, face=bool(face))
         if identity.site:
             words = who or urlsplit(identity.site).hostname or identity.site
             by = (f'<a class="az-mappage-site" href="{_attr(identity.site)}" target="_blank" '
@@ -2077,12 +2101,10 @@ class _Page:
 
     @property
     def picture(self) -> Path | None:
-        """The picture a list of articles shows for the page: the cover's, else a map page's
-        ground, else the first picture, else the ground of a map the note holds."""
+        """The picture a list of articles shows for the page: the cover's, else the first
+        picture, else the ground of a map the note holds."""
         if self._cover_hero is not None:
             return self._cover_hero.path
-        if self.map_page and self.ground is not None:
-            return self.ground
         if self._heroes:
             return self._heroes[0][0].path
         return self.ground
@@ -2359,6 +2381,8 @@ class _Page:
             self._warn(f'The map "{md.cut_text(block.title or "Map", 60)}": {notes_maps.ESRI_TERMS}', line, md.OTHER)
         self.pov.extend((said, self._line) for said in derived.pov)
         self.ground = self.ground or derived.ground
+        if self.look.web == "map":
+            self._derived[ident] = derived
         self._map_steps[ident] = [(str(step.get("label") or ""), str(step.get("day") or ""), str(step.get("text") or ""),
                                    str(step.get("name") or "")) for step in derived.data.get("steps") or []]
         self._map_credits.extend(str(one) for one in derived.data.get("credits") or [] if one)
@@ -3065,9 +3089,8 @@ def _map_legend(rows: list[dict[str, Any]], ident: str, *, keyed: bool = False) 
             style = row.get("style") or {}
             colour = _attr(str(style.get("color") or "#0072b2"))
             if row.get("kind") == "point":
-                key = ("proof-pov" if style.get("pov") else "proof") if style.get("proof") else str(style.get("icon") or "")
                 swatch = (f'<svg class="az-key-mark" viewBox="0 0 64 64" aria-hidden="true">'
-                          f'<use href="#{ident}-mk-{_attr(key)}"/></svg>')
+                          f'<use href="#{ident}-mk-{_attr(notes_maps.marker_key(style))}"/></svg>')
             elif row.get("kind") == "line":
                 dash = ' stroke-dasharray="5 4"' if style.get("dash") == "dashed" else (
                     ' stroke-dasharray="1 3"' if style.get("dash") == "dotted" else "")

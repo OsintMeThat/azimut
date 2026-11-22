@@ -5,6 +5,8 @@ domain), the outline the map plate already ships (`frontend/src/lib/plate/world.
 Earth projection and simplified to a few tens of KB. `scripts/make_site_atlas.py` makes it once, with
 `project` below, so the pins land where the land was drawn. The home carries it as a file of its own
 (`sitehome.ATLAS`), written once and cached by the reader's browser: no tile, no request elsewhere.
+The same land is read back as rings (`rings`, `unproject`) for the cover of a web map with no
+ground picture (`notes_web.map_cover`), drawn where the outline is fine enough for the map.
 
 **The pins** are drawn in the page itself, an inline SVG whose `viewBox` frames them: the box around
 the pins, a margin on each side, never closer than a region (`MIN_SPAN`) nor wider than the world.
@@ -19,7 +21,9 @@ from __future__ import annotations
 
 import html
 import math
+import re
 from dataclasses import dataclass, field
+from functools import lru_cache
 from pathlib import Path
 from typing import Any
 
@@ -56,9 +60,51 @@ def project(lon: float, lat: float) -> tuple[float, float]:
     return WIDTH / 2 + SCALE * x, HEIGHT / 2 - SCALE * y
 
 
+def unproject(x: float, y: float) -> tuple[float, float]:
+    """A point of the atlas back in degrees, ``(lon, lat)``: `project` undone, its latitude found by
+    Newton's steps."""
+    across = (x - WIDTH / 2) / SCALE
+    up = (HEIGHT / 2 - y) / SCALE
+    theta = up / _A1
+    for _ in range(12):
+        t2 = theta * theta
+        t6 = t2 * t2 * t2
+        step = (theta * (_A1 + _A2 * t2 + t6 * (_A3 + _A4 * t2)) - up) / (_A1 + 3 * _A2 * t2 + t6 * (7 * _A3 + 9 * _A4 * t2))
+        theta -= step
+        if abs(step) < 1e-12:
+            break
+    t2 = theta * theta
+    t6 = t2 * t2 * t2
+    lam = _M * across * (_A1 + 3 * _A2 * t2 + t6 * (7 * _A3 + 9 * _A4 * t2)) / math.cos(theta)
+    return math.degrees(lam), math.degrees(math.asin(max(-1.0, min(1.0, math.sin(theta) / _M))))
+
+
 def land() -> bytes:
     """The atlas as the home carries it."""
     return LAND.read_bytes()
+
+
+#: One ring of the atlas's path: its first corner, then relative steps, closed.
+_RING = re.compile(r"M(-?\d+) (-?\d+)l([^Mz]*)z?")
+_NUMBER = re.compile(r"-?\d+")
+
+
+@lru_cache(maxsize=1)
+def rings() -> tuple[tuple[tuple[float, float, float, float], tuple[tuple[float, float], ...]], ...]:
+    """The land as rings of corners in atlas units, each with its box ``(left, top, right, bottom)``:
+    the file's one path read back as `scripts/make_site_atlas.py` wrote it."""
+    found = re.search(r' d="([^"]+)"', LAND.read_text(encoding="utf-8"))
+    out = []
+    for match in _RING.finditer(found.group(1) if found else ""):
+        x, y = float(match.group(1)), float(match.group(2))
+        corners = [(x, y)]
+        steps = [float(value) for value in _NUMBER.findall(match.group(3))]
+        for dx, dy in zip(steps[::2], steps[1::2]):
+            x, y = x + dx, y + dy
+            corners.append((x, y))
+        xs, ys = [one[0] for one in corners], [one[1] for one in corners]
+        out.append(((min(xs), min(ys), max(xs), max(ys)), tuple(corners)))
+    return tuple(out)
 
 
 @dataclass

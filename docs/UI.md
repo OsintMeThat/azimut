@@ -7909,7 +7909,15 @@ address the canonical link and absolute card addresses. **share.jpg** (1200 by 6
 page's cover in small: the note's cover picture, else the picture its story opens on,
 under a dark veil with the title centred in the report's own face, the accent rule, the
 day, and an imagery or map provider's credit in its corner; with no picture, the title and
-the description on the report's paper under its accent. `POST /notes/web` writes it
+the description on the report's paper under its accent. A map page's is the page as it shows
+once its map is up (`notes_web.map_cover`): the dark band with the title, the description on
+one line and the analyst's logo, name and handle; the map's ground cut to fill the rest with no
+band round it, slid to keep as many marks in sight as it can, its marks drawn as the page draws
+them (icons, colours, lines, areas, a crowd as its count) and its imagery credit in the corner;
+and the legend in a column at the right, each layer's rows with their symbol and count, set
+smaller when that fits them all, else ending on *and N more*. A map with no ground stands on
+its plain background, or on Natural Earth's land from the site atlas when it spans a region.
+It is drawn with Pillow from what the page holds, so it never fetches a tile. `POST /notes/web` writes it
 (`base_url` checked at the edge: https, no name or password, no `?` or `#`, 300
 characters at most; one note at a time with an address), records it with `format: web`,
 the page's SHA-256 and the address, and `POST /notes/pdf/check` with `format: web` says
@@ -7987,9 +7995,9 @@ show the link's words as before.
 (title, summary, first publication's day, category, author, article or page, layout, links to
 the site's other folders, and its place on the site's map only when it has one), and `cover.jpg`
 (1200 by 630): the picture of the note's line in the
-site's list, made from the look's *list picture* when it has one, else the cover picture, a map
-page's ground or the first picture, so a designed cover for the list never replaces the
-article's own. An article with an author picture carries `author.jpg` (or `author.png` when it
+site's list, made from the look's *list picture* when it has one, else the cover picture or the
+first picture, so a designed cover for the list never replaces the article's own; a map page's
+is its link card, the map itself, unless a list picture is set. An article with an author picture carries `author.jpg` (or `author.png` when it
 holds transparency), 96 pixels square, made again from its pixels so that no place, camera or
 name the file held goes online, and its card names it as `author_image`. Each page published to the site starts with a bar back to it (its logo and
 title, *All articles* on the right), and a map page carries a small link inside its own header

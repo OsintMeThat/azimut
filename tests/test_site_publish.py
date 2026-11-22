@@ -478,8 +478,8 @@ def _map_note(client, monkeypatch, tmp_path):
     return case, made["id"]
 
 
-def test_a_map_page_has_the_crumb_in_its_header_and_never_a_bar_and_its_ground_is_its_picture(client, monkeypatch,
-                                                                                                tmp_path):
+def test_a_map_page_has_the_crumb_in_its_header_and_never_a_bar_and_its_map_is_its_picture(client, monkeypatch,
+                                                                                             tmp_path):
     case, note_id = _map_note(client, monkeypatch, tmp_path)
     placement = site.Placement(site.Site(title="The Desk", address="https://octo.github.io/articles/"))
     made = notes_web.build(case, note_id, base_url="https://octo.github.io/articles/the-road/", placement=placement)
@@ -488,8 +488,9 @@ def test_a_map_page_has_the_crumb_in_its_header_and_never_a_bar_and_its_ground_i
     assert re.search(r'<div class="az-mappage-titles">' + re.escape(site.BAR_STYLE)
                      + r'<a class="az-site-crumb" href="\.\./">The Desk</a><h1 class="az-title"', page)
     assert made.card is not None and made.card.layout == "map" and made.card.image == "cover.jpg"
+    # the list's picture is the map's own cover (`test_notes_mapcover.py`), its link card as well
     cover = Image.open(io.BytesIO(made.files["cover.jpg"])).convert("RGB")
-    assert cover.size == (1200, 630) and cover.getpixel((600, 315))[1] > 120
+    assert cover.size == (1200, 630) and made.files["cover.jpg"] == made.files["share.jpg"]
     counted = site.Placement(site.Site(title="The Desk", address="https://octo.github.io/articles/", stats="goatcounter",
                                        code="desk"))
     page = notes_web.build(case, note_id, base_url="https://octo.github.io/articles/the-road/",
