@@ -268,7 +268,7 @@ def _note_maps(text: str) -> Iterator[Lean]:
         for picture in [block.ground, *block.details]:
             if picture and notes_maps.ENTITY_ID.match(picture):
                 yield Lean(picture, "is the ground of a map in it")
-        for proof in dict.fromkeys(step.proof for step in block.steps if step.proof):
+        for proof in dict.fromkeys(one for step in block.steps for one in notes_maps.step_ids(step.proof)):
             if notes_maps.ENTITY_ID.match(proof):
                 yield Lean(proof, "is a step of a map in it")
 

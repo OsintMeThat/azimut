@@ -36,11 +36,14 @@ function svgNode(tag, attrs = {}) {
 export const TOOL_HINTS = {
   frame: 'Drag a rectangle over the map: it shows that part. Esc cancels.',
   step: 'Drag a rectangle over what this step shows. Esc cancels.',
+  within: 'Drag a rectangle over the area whose marks make the steps. Esc cancels.',
   point: 'Press where the point goes. Esc cancels.',
   line: 'Press each corner of the line, then press the last one again or Enter. Backspace takes a corner back.',
   area: 'Press each corner of the area, then the first one again or Enter. Backspace takes a corner back.',
   highlight: 'Press each corner round the area to highlight, then the first one again or Enter.',
 };
+/** The tools that drag a rectangle: the map's frame, a step's, the area a layer's steps come from. */
+const RECTANGLES = new Set(['frame', 'step', 'within']);
 /** What the map says under it while Draw is open and no tool is in hand. */
 export const NAV_HINT = 'Scroll or pinch to zoom, drag to move the map, 0 for the whole map.';
 /** What a tool's words add while the map can move. */
@@ -173,7 +176,7 @@ export function mapSurface(stage, described, {
   function paintWorking() {
     working.replaceChildren();
     if (!tool) return;
-    if ((tool === 'frame' || tool === 'step') && start && pointer) {
+    if (RECTANGLES.has(tool) && start && pointer) {
       const [x0, y0, x1, y1] = boxOf(start, pointer);
       working.append(svgNode('rect', { x: x0, y: y0, width: x1 - x0, height: y1 - y0, class: 'cm-map-box cm-map-box-new', 'stroke-width': 2 * unit }));
       return;
@@ -472,7 +475,7 @@ export function mapSurface(stage, described, {
     event.preventDefault();
     event.stopPropagation();
     const point = at(event);
-    if (tool === 'frame' || tool === 'step') {
+    if (RECTANGLES.has(tool)) {
       start = point;
       pointer = point;
       over.setPointerCapture?.(event.pointerId);
@@ -517,7 +520,7 @@ export function mapSurface(stage, described, {
   });
   over.addEventListener('pointerup', (event) => {
     if (letGo(event)) return;
-    if (!(tool === 'frame' || tool === 'step') || !start) return;
+    if (!RECTANGLES.has(tool) || !start) return;
     const end = at(event);
     const [x0, y0, x1, y1] = boxOf(start, end);
     start = null;
@@ -550,7 +553,7 @@ export function mapSurface(stage, described, {
       zoomBy(event.shiftKey ? 0.5 : 2, [event.clientX - box.left, event.clientY - box.top]);
       return;
     }
-    if (!tool || tool === 'frame' || tool === 'step' || tool === 'point') return;
+    if (!tool || RECTANGLES.has(tool) || tool === 'point') return;
     event.preventDefault();
     event.stopPropagation();
     // the double press put its corner down twice

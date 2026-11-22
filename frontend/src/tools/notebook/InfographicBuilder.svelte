@@ -1053,7 +1053,7 @@
   .ib-card :global(.ib-map .cm-map-tab) { padding: 0 9px; }
   .ib-card :global(.ib-map .cm-map-tab-body) { gap: 12px; padding: 10px 10px 12px; }
   .ib-card :global(.ib-map .cm-map-field), .ib-card :global(.ib-map .cm-map-grid .cm-map-field) { grid-template-columns: minmax(0, 1fr); gap: 4px; }
-  .ib-card :global(.ib-map .cm-map-field > *), .ib-card :global(.ib-map .cm-map-steps > .cm-map-act) { grid-column: 1; }
+  .ib-card :global(.ib-map .cm-map-field > *) { grid-column: 1; }
   .ib-card :global(.ib-map .cm-map-field-name:empty) { display: none; }
   .ib-card :global(.ib-map .cm-map-grid) { grid-template-columns: minmax(0, 1fr); gap: 12px; }
   .ib-card :global(.ib-map .cm-chart-seg-btn) { padding: 3px 8px; }

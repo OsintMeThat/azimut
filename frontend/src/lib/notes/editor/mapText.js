@@ -54,15 +54,25 @@ export function frameOf(text) {
   return numbers;
 }
 
-/** A step's line read: `day | label | lat, lon, zoom | proof | words`, any part empty. */
+/** The case records one step names at most: a proof, or the pictures of the marks it lights (`MAX_STEP_IDS`). */
+export const MAX_STEP_IDS = 12;
+
+/** The case records a step's fourth part names, in its order, each once (`step_ids`). */
+export function stepIds(proof) {
+  return [...new Set(String(proof ?? '').split(',').map((part) => part.trim()).filter(Boolean))];
+}
+
+/** A step's line read: `day | label | lat, lon, zoom | proof | words`, any part empty, the proof one record or several. */
 export function stepOf(text) {
   const parts = String(text ?? '').split('|');
   const head = parts.slice(0, 4).map((part) => part.trim());
   while (head.length < 4) head.push('');
   const words = parts.slice(4).join('|').trim();
-  const [day, label, where, proof] = head;
+  const [day, label, where] = head;
   if (day && !DAY.test(day)) return null;
-  if (proof && !ENTITY.test(proof)) return null;
+  const ids = stepIds(head[3]);
+  if (ids.length > MAX_STEP_IDS || !ids.every((one) => ENTITY.test(one))) return null;
+  const proof = ids.join(', ');
   const view = where ? viewOf(where) : null;
   if (where && !view) return null;
   if (!day && !label && !view && !proof && !words) return null;

@@ -131,6 +131,8 @@ CROWDS = 12
 #: The map's own steps one block holds.
 MAX_STEPS = 60
 MAX_STEP_WORDS = 300
+#: The case records one step names: a proof, or the pictures of the marks it lights.
+MAX_STEP_IDS = 12
 MAX_TITLE = 200
 #: Layers one map names, features it draws, proofs it shows and icons it carries.
 MAX_LAYERS = 12
@@ -176,7 +178,9 @@ NAME = re.compile(r"^[^/\\\x00-\x1f]{1,120}$")
 @dataclass
 class Step:
     """One of the map's own steps (`step:`): its day, its short name, where it looks
-    (``lat, lon, zoom``), the proof whose card it opens and its words, each may be empty."""
+    (``lat, lon, zoom``), what it is about and its words, each may be empty. What it is
+    about is a proof, whose card it opens, or the pictures of the layer's marks it lights,
+    ``e_a, e_b`` (`step_ids`)."""
 
     day: str = ""
     label: str = ""
@@ -396,16 +400,24 @@ def frame_of_text(text: str) -> tuple[float, float, float, float] | None:
     return west, south, east, north
 
 
+def step_ids(proof: str) -> list[str]:
+    """The case records a step's fourth part names, in its order, each once."""
+    return list(dict.fromkeys(part.strip() for part in proof.split(",") if part.strip()))
+
+
 def step_of_text(text: str) -> Step | None:
     """A ``step:`` line's parts, ``day | label | lat, lon, zoom | proof | words``: any
-    may be empty, the words may hold a ``|`` of their own."""
+    may be empty, the words may hold a ``|`` of their own, and the proof may be several
+    records, ``e_a, e_b``."""
     parts = [part.strip() for part in text.split("|", 4)]
     parts += [""] * (5 - len(parts))
     day, label, where, proof, words = parts
     if day and not DAY.match(day):
         return None
-    if proof and not ENTITY_ID.match(proof):
+    ids = step_ids(proof)
+    if len(ids) > MAX_STEP_IDS or not all(ENTITY_ID.match(one) for one in ids):
         return None
+    proof = ", ".join(ids)
     view = None
     if where:
         read = _view_of(where)
@@ -704,7 +716,7 @@ def derive(
         _cards_proofs(case, features, anchors=anchors)
         _cards_media(case, features, encode=encode if pictured else None, card_side=card_side, out=out)
         if block.steps:
-            steps = _own_steps(block.steps, out)
+            steps = _own_steps(block.steps, out, features)
     ground = _ground(case, block.ground, encode=encode, side=ground_side) if case is not None and block.ground else None
     if block.ground and ground is None and case is not None:
         warn(f"{said}: its ground picture is no longer in the case.", "missing", "ground")
@@ -846,14 +858,25 @@ def _opening(view: tuple[float, float, float, float] | None, bounds: list[float]
     return [_round(value) for value in (west, south, east, north)]
 
 
-def _own_steps(written: list[Step], out: Derived) -> list[dict[str, Any]]:
+def _own_steps(written: list[Step], out: Derived, features: list[dict[str, Any]]) -> list[dict[str, Any]]:
     """The map's own steps, in their order: each flies where it says (the map's own view
-    when it says nothing) on its day, a proof's step opening its card."""
+    when it says nothing) on its day, a proof's step opening its card, and a step naming
+    the pictures of a layer's marks lighting those marks."""
     steps: list[dict[str, Any]] = []
     out.step_proofs = {}
+    showing: dict[str, list[str]] = {}
+    for feature in features:
+        for wanted in dict.fromkeys((feature.get("picture"), feature.get("entity"))):
+            if wanted:
+                showing.setdefault(str(wanted), []).append(feature["id"])
     for number, step in enumerate(written):
         ident = f"s{number}"
-        proof = out.proofs.get(step.proof) if step.proof else None
+        ids = step_ids(step.proof)
+        proof = out.proofs.get(ids[0]) if len(ids) == 1 else None
+        focus: list[str] = []
+        for wanted in ids:
+            shown = out.proofs.get(wanted)
+            focus.extend(shown["ids"] if shown is not None else showing.get(wanted, []))
         view: dict[str, Any] | None = None
         if step.view is not None:
             lat, lon, zoom = step.view
@@ -861,7 +884,7 @@ def _own_steps(written: list[Step], out: Derived) -> list[dict[str, Any]]:
         elif proof is not None:
             view = {"center": list(proof["center"]), "zoom": None, "bearing": 0, "pitch": 0}
         made: dict[str, Any] = {"id": ident, "label": _cut(step.label, 80), "day": step.day or None, "view": view,
-                                "focus": list(proof["ids"]) if proof is not None else []}
+                                "focus": list(dict.fromkeys(focus))}
         if step.words:
             made["text"] = _cut(step.words, MAX_STEP_WORDS)
         if proof is not None:

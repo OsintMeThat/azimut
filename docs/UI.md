@@ -8226,8 +8226,15 @@ drawn keeps its corners, and a second Esc gives it up; the button (*Exit full sc
 browser's own exit do the same. An infographic's map panel in the builder has the same button, its
 settings beside the map there. **Time**: the timeline on or off, the day it
 opens on (a day of its own becomes a stop of the slider), Play's pace; the steps, its plate's or its
-proofs' until one is changed, then its own (`step: day | label | lat, lon, zoom | proof | words`):
-moved, framed by a rectangle dragged on the map, named, given their words, taken out or added.
+proofs' until one is changed, then its own (`step: day | label | lat, lon, zoom | proof | words`,
+the proof one record or the pictures of the marks the step lights, `e_a, e_b`): moved, framed by a
+rectangle dragged on the map, named, given their words, taken out or added. **From a layer** makes
+them at once from a layer the map shows: one step a day of its dated marks inside what the map
+shows or a rectangle dragged on it, between two days (the layer's whole span to start with), each
+framed on that day's marks, named and worded from them (several marks, or a name too long to be
+one, take the day as name and the names as words) and lighting them when it comes. The panel counts the marks, days and steps
+before anything is written, says how many marks have no day, and its button names the steps it
+replaces when the map has its own; Undo brings them back.
 **Cards**: what a feature's card shows, its picture, its sentence, its source and its verify links.
 The offline map, the live map, the PDF's picture and an infographic's map panel each honour what
 applies to them: the live map draws *Map* and *Dark* in OpenFreeMap's own styles, sharper than the

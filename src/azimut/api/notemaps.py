@@ -372,6 +372,36 @@ def _drawn(layer: str, spec: dict[str, Any]) -> list[dict[str, Any]]:
     return found
 
 
+class StepsIn(BlockIn):
+    #: The layer the steps come from, one the map shows.
+    layer: str = Field(min_length=1, max_length=120)
+    #: The area its marks count in, `[west, south, east, north]`; every mark when left out.
+    within: list[float] | None = Field(default=None, min_length=4, max_length=4)
+    #: The period, either end open.
+    start: str = Field(default="", max_length=10)
+    end: str = Field(default="", max_length=10)
+
+
+@router.post("/cases/{case_id}/notes/maps/steps")
+def steps_from_layer(case_id: str, body: StepsIn) -> dict[str, Any]:
+    """The story steps one of the map's layers makes, one a day of its dated marks inside an
+    area and a period (`engine/notes_mapsteps.py`), with how many marks and days make them, for
+    the card to count before it writes them. Reads the case only, never the network."""
+    from ..engine import notes_mapsteps
+
+    if body.within is not None and not notes_mapsteps.finite_box(body.within):
+        raise HTTPException(status_code=422, detail="The area is not a part of the world.")
+    for day in (body.start, body.end):
+        if day and not notes_maps.DAY.match(day):
+            raise HTTPException(status_code=422, detail="Write the days as YYYY-MM-DD.")
+    case = get_case(case_id)
+    try:
+        return notes_mapsteps.steps_from_layer(case, _block_of(body.text), body.layer, within=body.within,
+                                               start=body.start, end=body.end)
+    except notes_mapsteps.StepsError as error:
+        raise HTTPException(status_code=404, detail=str(error)) from error
+
+
 class GroundIn(BlockIn):
     base: Literal["satellite", "map", "topographic", "dark"] = "satellite"
     #: The imagery a satellite base is taken from; the others take their own.

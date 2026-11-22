@@ -15,7 +15,8 @@
  *   area, each with its name, its day or its days and its colour, kept in a personal
  *   layer of the case the map names;
  * - **Time**: the timeline on or off, the day it opens on, Play's pace, and the steps:
- *   reordered, each framed by a rectangle dragged on the map, its words written;
+ *   reordered, each framed by a rectangle dragged on the map, its words written, or made
+ *   at once from a layer's dated marks inside an area and a period (*From a layer*);
  * - **Cards**: what a feature's card shows.
  *
  * The card writes nothing itself: each choice goes to `write(changes)`, which the map block
@@ -77,6 +78,8 @@ export const DRAW_TOOLS = [
 const KIND_NAMES = { point: 'Point', line: 'Line', area: 'Area' };
 /** An area to highlight starts orange, apart from the proofs' yellow and the lines' blue. */
 export const HIGHLIGHT_COLOUR = '#d55e00';
+/** `n` things, said in words: `1 mark`, `3 marks`. */
+const counted = (n, one) => `${n} ${one}${n === 1 ? '' : 's'}`;
 const longDay = (day) => {
   const at = new Date(`${day}T00:00:00Z`);
   return Number.isNaN(at.getTime()) ? day : at.toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric', timeZone: 'UTC' });
@@ -174,7 +177,8 @@ export function paletteOf(named = []) {
  * `state()` the map as it stands, `{ map, described, busy }` (`readMap`, the describe
  * answer, the press under way); `write(changes)` one choice; `base(value)` the base filed
  * and written; `imagery(value)` a satellite map's imagery, its ground filed and written with
- * it; `arm(tool, done)` a tool armed on the map; `draw(kind, coords, extra)`,
+ * it; `arm(tool, done)` a tool armed on the map; `seen()` what the map shows, `[w, s, e, n]`;
+ * `stepsFrom(request)` the steps one of its layers makes, read and not written; `draw(kind, coords, extra)`,
  * `edit(row, changes)` and `remove(row)` what is drawn; `addLayer(name)` another layer;
  * `fromSheet()`, when the note can, a layer made from a sheet and put on the map;
  * `sizedBy`, when the map's host sets its width (an infographic's panel), the words said in
@@ -195,6 +199,13 @@ export function mapSettings(panel, ctx) {
   let pickedStep = -1;
   /** Whether Esri was picked on this card: its terms are said under the choice, once, while it stays picked. */
   let esriPicked = false;
+  /**
+   * *From a layer*, while its panel is open: the layer, the area (`shown`, what the map shows, or
+   * `box`, a rectangle dragged on it), the days, and the server's last count of what they make.
+   */
+  let fromLayer = null;
+  /** The latest count asked: an answer to an older one is left unread. */
+  let asked = 0;
 
   function renderTabs() {
     tabs.replaceChildren(...TABS.map((tab) => {
@@ -224,10 +235,19 @@ export function mapSettings(panel, ctx) {
     const parts = { look, layers, draw, time, cards }[current](map, described, busy ?? '');
     body.replaceChildren(...parts.filter(Boolean));
     body.setAttribute('aria-label', TABS.find((tab) => tab.id === current)?.label ?? '');
-    ctx.overlay?.(current === 'look' && map.frame ? [{ kind: 'box', coords: map.frame, dashed: true, label: 'Frame' }]
-      : current === 'time' && pickedStep >= 0 && stepsOf(map, described)[pickedStep]?.view
-        ? [{ kind: 'box', coords: viewBounds(stepsOf(map, described)[pickedStep].view), colour: '#ffd640', label: `Step ${pickedStep + 1}` }] : []);
+    ctx.overlay?.(shapesOver(map, described));
     if (focused) [...panel.querySelectorAll('[aria-label]')].find((node) => node.getAttribute('aria-label') === focused)?.focus({ preventScroll: true });
+  }
+
+  /** What the card points at on the map: the frame in Look; in Time the area steps come from and the step picked. */
+  function shapesOver(map, described) {
+    if (current === 'look') return map.frame ? [{ kind: 'box', coords: map.frame, dashed: true, label: 'Frame' }] : [];
+    if (current !== 'time') return [];
+    const shapes = [];
+    if (fromLayer?.where === 'box' && fromLayer.box) shapes.push({ kind: 'box', coords: fromLayer.box, dashed: true, label: 'Area' });
+    const picked = pickedStep >= 0 ? stepsOf(map, described)[pickedStep] : null;
+    if (picked?.view) shapes.push({ kind: 'box', coords: viewBounds(picked.view), colour: '#ffd640', label: `Step ${pickedStep + 1}` });
+    return shapes;
   }
 
   // -- Look --
@@ -586,14 +606,157 @@ export function mapSettings(panel, ctx) {
       list.append(item);
     });
     box.append(list);
+    const actions = element('div', 'cm-map-actions');
     const add = button('cm-map-act', { label: 'Add a step', iconName: 'plus', title: 'A step framed by a rectangle dragged on the map' });
     add.addEventListener('mousedown', (event) => event.preventDefault());
     add.addEventListener('click', () => {
       pickedStep = steps.length;
       ctx.arm('step', (bounds) => save([...steps, { day: described?.day || '', label: '', view: fitView(bounds), proof: '', words: '' }]));
     });
-    box.append(add);
+    actions.append(add);
+    if (ctx.stepsFrom) {
+      const layers = stepLayers(described);
+      const from = button('cm-map-act', { label: 'From a layer', iconName: 'layers',
+        title: layers.length ? 'One step a day of a layer’s dated marks, in an area and a period' : 'The map shows no layer with marks' });
+      from.setAttribute('aria-expanded', String(Boolean(fromLayer)));
+      from.disabled = !layers.length;
+      from.addEventListener('mousedown', (event) => event.preventDefault());
+      from.addEventListener('click', () => {
+        fromLayer = fromLayer ? null : { layer: layers[0].name, where: 'shown', box: null, start: '', end: '', answer: null, error: '', making: false };
+        count();
+        render();
+      });
+      actions.append(from);
+    }
+    box.append(actions);
+    if (fromLayer) box.append(fromLayerPanel(map, described));
     return box;
+  }
+
+  // -- Steps from a layer --
+
+  /** The layers steps can come from: shown on the map, in the case, with marks. */
+  function stepLayers(described) {
+    return (described?.layers ?? []).filter((layer) => layer.on && !layer.missing && layer.features > 0);
+  }
+
+  /** The panel's choices as the server reads them, or null while a rectangle is still to drag. */
+  function request() {
+    if (!fromLayer?.layer) return null;
+    const within = fromLayer.where === 'box' ? fromLayer.box : ctx.seen?.() ?? null;
+    if (fromLayer.where === 'box' && !within) return null;
+    return { layer: fromLayer.layer, within, start: fromLayer.start, end: fromLayer.end };
+  }
+
+  /** Ask what the choices make; `then(answer)` when it is still the latest count asked. */
+  function count(then = null) {
+    const asking = request();
+    const mine = ++asked;
+    if (!fromLayer) return;
+    fromLayer.answer = null;
+    fromLayer.error = '';
+    if (!asking) return;
+    ctx.stepsFrom(asking).then((answer) => {
+      if (mine !== asked || !fromLayer) return;
+      fromLayer.answer = answer;
+      // a layer's days start out as its whole span
+      if (!fromLayer.start && !fromLayer.end && answer.first) Object.assign(fromLayer, { start: answer.first, end: answer.last });
+      if (then) then(answer);
+      else render();
+    }, (error) => {
+      if (mine !== asked || !fromLayer) return;
+      Object.assign(fromLayer, { error: error?.message || 'The layer could not be read', making: false });
+      render();
+    });
+  }
+
+  /** Write the steps the choices make now, in place of the map's: asked again, so what the map shows now counts. */
+  function makeSteps() {
+    fromLayer.making = true;
+    render();
+    count((answer) => {
+      fromLayer = null;
+      pickedStep = -1;
+      if (answer.steps.length) ctx.write({ step: answer.steps.map(stepValue) });
+      render();
+    });
+  }
+
+  function fromLayerPanel(map, described) {
+    const box = element('div', 'cm-map-fromlayer');
+    box.setAttribute('role', 'group');
+    box.setAttribute('aria-label', 'Steps from a layer');
+    const which = element('label', 'cm-map-field');
+    const pick = element('select', 'cm-map-select');
+    pick.setAttribute('aria-label', 'Layer the steps come from');
+    for (const layer of stepLayers(described)) {
+      const option = element('option', '', layer.title);
+      option.value = layer.name;
+      pick.append(option);
+    }
+    pick.value = fromLayer.layer;
+    pick.addEventListener('change', () => {
+      Object.assign(fromLayer, { layer: pick.value, start: '', end: '' });
+      count();
+      render();
+    });
+    which.append(element('span', 'cm-map-field-name', 'Layer'), pick);
+    const where = segmented('Where', [
+      { value: 'shown', label: 'What the map shows', title: 'The marks inside the map as it shows here' },
+      { value: 'box', label: 'A rectangle', title: 'Drag a rectangle over the area on the map' },
+    ], fromLayer.where, (value) => {
+      fromLayer.where = value;
+      if (value === 'box') {
+        ctx.arm('within', (bounds) => {
+          if (!fromLayer) return;
+          Object.assign(fromLayer, { where: 'box', box: bounds });
+          count();
+          render();
+        });
+      }
+      count();
+      render();
+    }, { again: true });
+    const when = element('div', 'cm-map-field');
+    const days = element('div', 'cm-map-actions');
+    const span = { min: fromLayer.answer?.first ?? '', max: fromLayer.answer?.last ?? '' };
+    days.append(
+      dateField('First day of the steps', fromLayer.start, (value) => { fromLayer.start = value; count(); render(); }, span),
+      element('span', 'cm-map-note', 'to'),
+      dateField('Last day of the steps', fromLayer.end, (value) => { fromLayer.end = value; count(); render(); }, span),
+    );
+    when.append(element('span', 'cm-map-field-name', 'When'), days);
+    const answer = fromLayer.answer;
+    const said = element('p', 'cm-map-fromlayer-count', fromLayer.error || countSaid(answer));
+    said.setAttribute('aria-live', 'polite');
+    const notes = [];
+    if (answer?.undated) notes.push(element('p', 'cm-map-note', `${counted(answer.undated, 'mark')} with no day left out.`));
+    if (answer?.more) notes.push(element('p', 'cm-map-note', `A map holds ${answer.steps.length} steps, so the last ${counted(answer.more, 'day')} are left out.`));
+    const own = map.steps.length;
+    const buttons = element('div', 'cm-map-actions');
+    const make = button('cm-map-act', { label: fromLayer.making ? 'Making…' : own ? `Replace the ${counted(own, 'step')}` : 'Make the steps',
+      iconName: 'check', title: own ? 'Undo brings the map’s own steps back' : 'Each step stays yours to edit' });
+    make.disabled = fromLayer.making || !answer?.steps?.length;
+    make.addEventListener('mousedown', (event) => event.preventDefault());
+    make.addEventListener('click', makeSteps);
+    const cancel = button('cm-map-act', { label: 'Cancel' });
+    cancel.addEventListener('mousedown', (event) => event.preventDefault());
+    cancel.addEventListener('click', () => {
+      fromLayer = null;
+      asked += 1;
+      render();
+    });
+    buttons.append(make, cancel);
+    box.append(which, where, when, said, ...notes, buttons);
+    return box;
+  }
+
+  /** What the panel's last count says. */
+  function countSaid(answer) {
+    if (fromLayer.where === 'box' && !fromLayer.box) return 'Drag a rectangle over the area on the map.';
+    if (!answer) return 'Counting…';
+    if (!answer.steps.length) return 'No dated mark of this layer in that area and period.';
+    return `${counted(answer.marks, 'mark')} on ${counted(answer.days, 'day')} make ${counted(answer.steps.length, 'step')}.`;
   }
 
   // -- Cards --
