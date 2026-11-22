@@ -3,7 +3,7 @@ import {
   bareAddress, chipsOf, countingOf, countsOf, formatBytes, hostOf, itemsFor, kindOf, levelOf, onSite, ownDomain, pathOf, percentOf, shareOf, siteName,
   siteReadOf, withoutFolder,
 } from './websiteHub.js';
-import { addProblem, carrying, categoriesFrom, categoryChoices, categoryRows, withCategories } from './websiteHub.js';
+import { addProblem, carrying, categoriesFrom, categoryChoices, categoryRows, countryOf, numbersOf, numbersRows, withCategories } from './websiteHub.js';
 
 const MB = 1024 * 1024;
 const BAB = Math.round(4.2 * MB);
@@ -214,6 +214,66 @@ describe('the name, the address and the counter', () => {
     expect(countingOf({ siteStats: 'goatcounter', siteStatsCode: '', siteStatsToken: 'x' })).toBe('');
     expect(countingOf({ siteStats: 'goatcounter', siteStatsCode: 'desk', siteStatsToken: '' })).toBe('goatcounter');
     expect(countingOf({ siteStats: 'cloudflare', siteStatsCode: '', siteStatsToken: 'abcd1234' })).toBe('cloudflare');
+  });
+});
+
+describe('the numbers', () => {
+  const counts = (views, visits = views) => ({ views, visits });
+  const page = (path, pageName, week, month) => ({ path, page: pageName, week: counts(week), month: counts(month) });
+  const ANSWER_NUMBERS = {
+    ok: true,
+    address: 'https://news.example.org/',
+    pages: [
+      page('/bab/', 'bab/', 40, 120), page('/bab/map.html', 'bab/map.html', 2, 9), page('/', '', 8, 12),
+      page('/2026/01/05/old/', '2026/01/05/old/', 0, 30), page('/2026/', '2026/', 1, 1), page('/lost/', 'lost/', 3, 4), page('/away/', null, 0, 2),
+      { path: 'no slash', page: 'x', week: counts(1), month: counts(1) }, { page: 'x' },
+    ],
+    total: { week: counts(53, 39), month: counts(176, 128) },
+    referrers: [{ host: '', views: 40, visits: 40 }, { host: 'news.ycombinator.com', views: 30, visits: 55 }, { host: 'quiet.example', views: 3, visits: 0 }],
+    countries: [{ country: 'FR', views: 80, visits: 60 }],
+    sampled: true,
+  };
+
+  it('reads what the server answers, what it left out as nothing', () => {
+    const numbers = numbersOf(ANSWER_NUMBERS);
+    expect(numbers.pages).toHaveLength(7);
+    expect(numbers.total).toEqual({ week: counts(53, 39), month: counts(176, 128) });
+    // ranked by the visits they sent, and one that sent none left out
+    expect(numbers.referrers.map((one) => one.host)).toEqual(['news.ycombinator.com', '']);
+    expect(numbers.countries).toEqual([{ country: 'FR', views: 80, visits: 60 }]);
+    expect(numbers.sampled).toBe(true);
+    expect(numbersOf(null)).toEqual({ address: '', pages: [], total: { week: counts(0), month: counts(0) }, referrers: [], countries: [], sampled: false });
+    expect(numbersOf({ pages: [{ path: '/x/', page: 'x/', week: { views: -2, visits: 'a' }, month: { views: '7' } }] }).pages[0])
+      .toEqual({ path: '/x/', page: 'x/', week: counts(0), month: { views: 7, visits: 0 } });
+  });
+
+  it('names each page by the article the read of the site holds it in, sums an article\'s pages, and ranks by 30 days', () => {
+    const rows = numbersRows(numbersOf(ANSWER_NUMBERS), siteReadOf(ANSWER), 'https://news.example.org/');
+    expect(rows.map((row) => [row.title, row.href, row.week.views, row.month.views, row.known])).toEqual([
+      ['The Bab front', 'https://news.example.org/bab/', 42, 129, true],
+      // a nested folder is its own article, not its parent's
+      ['Old', 'https://news.example.org/2026/01/05/old/', 0, 30, true],
+      ['Home page', 'https://news.example.org/', 8, 12, true],
+      ['/lost/', 'https://news.example.org/lost/', 3, 4, false],
+      ['/away/', 'https://news.example.org/away/', 0, 2, false],
+      ['/2026/', 'https://news.example.org/2026/', 1, 1, false],
+    ]);
+  });
+
+  it('falls back to each page\'s path with no read, and to no link with no address', () => {
+    const rows = numbersRows(numbersOf({ ...ANSWER_NUMBERS, address: '' }), null, '');
+    expect(rows[0]).toMatchObject({ title: '/bab/', href: '', known: false });
+    expect(rows.find((row) => row.key === 'home')).toMatchObject({ title: 'Home page', href: '' });
+    // the server's address serves when the panel has none
+    expect(numbersRows(numbersOf(ANSWER_NUMBERS), null, '')[0].href).toBe('https://news.example.org/bab/');
+    expect(numbersRows(null)).toEqual([]);
+  });
+
+  it('says a country by its name, and what is no code as it came', () => {
+    expect(countryOf('FR')).toBe('France');
+    expect(countryOf('us')).toBe('United States');
+    expect(countryOf('')).toBe('Unknown');
+    expect(countryOf('Somewhere')).toBe('Somewhere');
   });
 });
 

@@ -9075,13 +9075,41 @@ and does not call the change an edit; its look takes the category.
 
 **Readers.** *Who reads it*. **Count readers** is off by default, with three buttons: Off, GoatCounter and
 Cloudflare Web Analytics, each saying in a line what it does, free and with no cookie. GoatCounter takes the
-site's code (or the site's address, which is read down to the code), Cloudflare its token (or the
+site's code (or the site's address, which is read down to the code), Cloudflare its **Site token** (or the
 snippet it shows, read down to the token), with a link to Cloudflare's dashboard; an answer that is neither is
-said under the field and never sent, one the server accepts is kept (the token being public: every page prints
-it). The steps for each, field by field, stay open while the code or token is missing
+said under the field and never sent, one the server accepts is kept (the site token being public: every page
+prints it). The steps for each, field by field, stay open while the code or token is missing
 (`lib/websiteSetup.js`). A choice with no code says so rather than pretend to count, and counting starts with
-the next publish or Update the site. **Follow and find** gives the feed and the sitemap addresses, built from the
-site's address, each with a **Copy** press.
+the next publish or Update the site. With GoatCounter, a line says *Numbers are read from Cloudflare Web
+Analytics only; open GoatCounter's own page.*, with a link to the site's `<code>.goatcounter.com` once the code
+is set. **Follow and find** gives the feed and the sitemap addresses, built from the site's address, each with a
+**Copy** press.
+
+**Numbers**, under them while Cloudflare counts (`NumbersCard.svelte`), reads how many read the site on its
+**Read the numbers** press, and only then (`POST /api/publishing/cloudflare/numbers`, one query to Cloudflare's
+GraphQL Analytics API, `engine/sitestats.py`). While it reads, the press is disabled and a spinner says
+*Reading…*; then *Read today at 13:55*, or what went wrong in one sentence (a refused token, a token without
+Account Analytics, a wrong account ID, Cloudflare asking to wait five minutes, no connection). It shows the whole
+site over 7 and 30 days in two tiles (page views, with the visits under them), a table of pages with their
+7-day and 30-day page views, each named by the article the session's read of the site holds it in (its title
+linking to it, the pages of one article summed; the home as *Home page*; a page the read does not know by its
+path), *Where visits came from* (referrer hosts by visits, the site's own host left out, *No referrer* for
+visits that came with none) and *Countries* by page views, ten each. A 30-day count Cloudflare sampled says so;
+a read with nothing in it says to check the site token, and the site tag if it was typed by hand. Below, its
+fields: **Account ID** (32 letters and digits, or a dashboard address read down to it), saved as a preference
+once it reads as one, and **API token**, a password field that goes up once and comes back only as its last
+four characters, with **Forget**. The site tag is found by the press: the server lists the account's Web
+Analytics sites and takes the one whose site token is the one above, then keeps it, so the next press asks no
+list (it looks again when the site token changes, or when nothing is counted under the tag it kept). The field
+shows the tag found, folded under **Set the site tag by hand**, which opens when the press could not find it
+(*No Web Analytics site in this account has the site token set in Readers.*, or a token without Account
+Settings, Read); a tag typed there wins and is never looked up. The steps follow Cloudflare's token page field
+by field (Ctrl+K › Copy account ID; Manage account › Account API tokens › Create a token; the name
+`azimut-reader-numbers`; Start from scratch (Custom) rather than the Read analytics or Read all resources
+templates; Account Analytics: Read and Account Settings: Read), say both permissions are free and only read and
+that the token stays on this computer, and stay open while something is missing, with Cloudflare's guide to the
+token. The numbers are kept for the session, never on disk, and dropped when the account ID, the site token or a
+tag typed by hand changes.
 
 **Upkeep.** *Keep it in shape*. **Update the site** is one press that rebuilds the home, list, feed and sitemap
 from the articles on GitHub, and gives each article the bar and footer the site asks for (below), in one commit, with no

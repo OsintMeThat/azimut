@@ -271,7 +271,8 @@ def test_export_leaves_the_login_session_behind(client):
 #: with its reason, the way NOT_EXPORTED records the keys.
 NOT_CARRIED_FILES: dict[str, str] = {
     "cookies.txt": "a live login session, which would expire in transit and trip device checks",
-    "publishing.json": "live write credentials stay on the machine that made them",
+    "publishing.json": "live credentials stay on the machine that made them: the WordPress password and the "
+    "GitHub token, which write, and the Cloudflare API token, which reads",
 }
 
 

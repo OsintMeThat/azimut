@@ -483,16 +483,94 @@ test('readers are counted only when asked, with the setup said field by field', 
   await expect(page.getByText('Make a free account at cloudflare.com.')).toBeVisible();
   await expect(page.getByRole('link', { name: 'Cloudflare sign-up' })).toHaveAttribute('href', 'https://dash.cloudflare.com/sign-up');
   await expect(page.getByRole('link', { name: /Open Cloudflare's dashboard/ })).toHaveAttribute('href', 'https://dash.cloudflare.com/?to=/:account/web-analytics');
-  await page.getByLabel('Cloudflare token').fill(`<script defer src='https://static.cloudflareinsights.com/beacon.min.js' data-cf-beacon='{"token": "${TOKEN}"}'></script>`);
-  await page.getByLabel('Cloudflare token').press('Tab');
+  await page.getByLabel('Cloudflare site token').fill(`<script defer src='https://static.cloudflareinsights.com/beacon.min.js' data-cf-beacon='{"token": "${TOKEN}"}'></script>`);
+  await page.getByLabel('Cloudflare site token').press('Tab');
   await expect.poll(() => fixture.settingsWrites).toContainEqual({ site_stats_token: TOKEN });
-  await expect(page.getByLabel('Cloudflare token')).toHaveValue(TOKEN);
+  await expect(page.getByLabel('Cloudflare site token')).toHaveValue(TOKEN);
   await expect(hero(page)).toContainText('Readers counted by Cloudflare Web Analytics');
 
   await group.getByRole('radio', { name: 'Off' }).click();
   await expect.poll(() => fixture.settingsWrites).toContainEqual({ site_stats: '' });
-  await expect(page.getByLabel('Cloudflare token')).toHaveCount(0);
+  await expect(page.getByLabel('Cloudflare site token')).toHaveCount(0);
   await expect(page.getByRole('link', { name: /Open Cloudflare's dashboard/ })).toHaveCount(0);
+  fixture.expectNoUnexpectedRequests();
+});
+
+test('Numbers are read from Cloudflare on a press only, each article by its title, the site tag found or typed, and a refusal said', async ({ page }) => {
+  const counts = (views, visits = views) => ({ views, visits });
+  const fixture = await openWebsite(page, {
+    github,
+    cloudflare: { token: { set: true, hint: '…kkkk' } },
+    settings: { site_stats: 'cloudflare', site_stats_token: TOKEN, site_stats_account: '0123456789abcdef0123456789abcdef', site_stats_tag: '' },
+  });
+  await standIn(page);
+  const TAG = 'fedcba9876543210fedcba9876543210';
+  const asked = [];
+  let refuse = '';
+  await page.route('**/api/publishing/cloudflare/numbers', (route) => {
+    asked.push(route.request().method());
+    if (refuse === 'busy') {
+      return route.fulfill({ status: 502, json: { detail: 'Cloudflare asks Azimut to wait: try again in 5 minutes.' } });
+    }
+    if (refuse === 'tag') {
+      return route.fulfill({ json: { ok: false, needs: 'tag', detail: 'No Web Analytics site in this account has the site token set in Readers.' } });
+    }
+    return route.fulfill({ json: {
+      ok: true, address: 'https://octo.github.io/articles/',
+      pages: [
+        { path: '/articles/bab-el-mandab-2026/', page: 'bab-el-mandab-2026/', week: counts(45, 31), month: counts(1302, 920) },
+        { path: '/articles/guide/', page: 'guide/', week: counts(3), month: counts(30, 20) },
+        { path: '/articles/', page: '', week: counts(8), month: counts(12) },
+        { path: '/articles/old-page/', page: 'old-page/', week: counts(0), month: counts(2) },
+      ],
+      total: { week: counts(56, 42), month: counts(1346, 954) },
+      referrers: [{ host: 'news.ycombinator.com', views: 30, visits: 30 }, { host: '', views: 40, visits: 40 }],
+      countries: [{ country: 'FR', views: 800, visits: 600 }, { country: 'US', views: 500, visits: 300 }],
+      sampled: true, read_at: '2026-11-21T12:00:00Z', days: [7, 30], tag: TAG, tag_found: true,
+    } });
+  });
+
+  // the read of the site names the articles; Cloudflare is asked nothing until the press
+  await tab(page, 'Articles').click();
+  await panel(page, 'Articles').getByRole('button', { name: 'Read the site' }).click();
+  await expect(rows(page)).toHaveCount(6);
+  await tab(page, 'Readers').click();
+  const numbers = page.getByRole('region', { name: 'Numbers' });
+  await expect(numbers).toContainText('Press Read the numbers to see what is read, and from where.');
+  await expect(numbers.getByLabel('Cloudflare API token')).toHaveAttribute('placeholder', '•••• kkkk');
+  expect(asked).toEqual([]);
+
+  await numbers.getByRole('button', { name: 'Read the numbers' }).click();
+  await expect(numbers.locator('.press-line [role="status"]')).toContainText(/Read today at \d\d:\d\d/);
+  expect(asked).toEqual(['POST']);
+  await expect(numbers.getByRole('group', { name: 'Whole site' })).toContainText('1,346');
+  const table = numbers.getByRole('table', { name: 'Page views by page' });
+  await expect(table.locator('tbody tr')).toHaveText([/The fall of the Bab al-Mandab front, Sep-Nov 2026\s*45\s*1,302/,
+    /Installing Azimut: the complete guide\s*3\s*30/, /Home page\s*8\s*12/, /\/articles\/old-page\/\s*0\s*2/]);
+  await expect(table.getByRole('link', { name: 'The fall of the Bab al-Mandab front, Sep-Nov 2026' }))
+    .toHaveAttribute('href', 'https://octo.github.io/articles/bab-el-mandab-2026/');
+  await expect(numbers.getByRole('region', { name: 'Where visits came from' }).getByRole('listitem')).toHaveText([/No referrer\s*40/, /news\.ycombinator\.com\s*30/]);
+  await expect(numbers.getByRole('region', { name: 'Countries' }).getByRole('listitem')).toHaveText([/France\s*800/, /United States\s*500/]);
+  await expect(numbers).toContainText('so the 30-day counts are estimates');
+  // the site tag the press found shows in its field, folded away
+  const byHand = numbers.locator('details').filter({ hasText: 'Set the site tag by hand' });
+  await expect(byHand).not.toHaveAttribute('open', '');
+  await expect(numbers.getByLabel('Web Analytics site tag')).toHaveValue(TAG);
+
+  // a refusal is said in its sentence, and the press stays
+  refuse = 'busy';
+  await numbers.getByRole('button', { name: 'Read again' }).click();
+  await expect(numbers.locator('.press-line [role="status"]')).toHaveText('Cloudflare asks Azimut to wait: try again in 5 minutes.');
+  await expect(numbers.getByRole('button', { name: 'Read again' })).toBeEnabled();
+  // a tag the press could not find opens its field, and one typed there is saved
+  refuse = 'tag';
+  await numbers.getByRole('button', { name: 'Read again' }).click();
+  await expect(numbers.locator('.press-line [role="status"]')).toHaveText('No Web Analytics site in this account has the site token set in Readers.');
+  await expect(byHand).toHaveAttribute('open', '');
+  await numbers.getByLabel('Web Analytics site tag').fill('0'.repeat(32));
+  await numbers.getByLabel('Web Analytics site tag').press('Tab');
+  await expect.poll(() => fixture.settingsWrites).toContainEqual({ site_stats_tag: '0'.repeat(32) });
+  expect(asked).toEqual(['POST', 'POST', 'POST']);
   fixture.expectNoUnexpectedRequests();
 });
 
