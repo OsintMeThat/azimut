@@ -8060,10 +8060,14 @@ and **Author picture**, one of the case's pictures picked as the list picture is
 default and never a logo in its place. Both are kept in the note's look as they are left
 (`author`, `author_image`), with GitHub set up or not, so a contributor sets them before exporting the
 case and they open filled in on the machine that publishes it; a Publish waits for an author just
-typed. The page is signed with that name alone (none of the analyst's role, organisation, logo,
-handwritten signature or links), under the title unless the look signs at the end; the picture stands
+typed. Every reading of the note in HTML (the Page preview, an HTML file, a web folder, a map page, a
+WordPress draft; `notefill.signing`) is signed with that name alone (none of the analyst's role,
+organisation, logo, handle, handwritten signature or links), under the title unless the look signs at
+the end; the PDF keeps the analyst's for now. The picture stands
 round where the analyst's logo would in the author card (beside the byline, the cover's signature or
-the one at the end, and in a map page's header), and with no picture the name stands alone; the card, `articles.json`, the read of the site and the lists name the author,
+the one at the end, and in a map page's header), a file of a web folder, inlined in the preview and an
+HTML file, a picture of its own above the byline in a WordPress draft; with no picture the name stands
+alone; the card, `articles.json`, the read of the site and the lists name the author,
 the picture before the name, unless it is the site's own name. A picture gone from the case is said
 among the warnings and the page goes without it. A template carries neither.
 

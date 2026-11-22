@@ -123,7 +123,7 @@ def test_the_author_picture_is_a_small_square_made_again_with_nothing_but_its_pi
     _publish(client, note)
     data = fake.files()["guest-story/author.jpg"]
     picture = Image.open(io.BytesIO(data))
-    assert picture.format == "JPEG" and picture.size == (notes_web.AUTHOR_FACE_SIDE, notes_web.AUTHOR_FACE_SIDE)
+    assert picture.format == "JPEG" and picture.size == (notes_html.AUTHOR_FACE_SIDE, notes_html.AUTHOR_FACE_SIDE)
     assert not picture.getexif() and "comment" not in picture.info and "exif" not in picture.info
     assert b"SecretCam" not in data and b"Secret Person" not in data and b"secret comment" not in data
 
@@ -132,7 +132,7 @@ def test_a_picture_with_transparency_stays_a_png():
     cid = Case.create("Clear").id
     case = Case.open(cid)
     face = _image(case, "Clear", Image.new("RGBA", (200, 200), (10, 20, 30, 0)), {"type": "clipboard"})
-    name, data = notes_web.author_face(case, face["id"]) or ("", b"")
+    name, data = notes_html.author_face(case, face["id"]) or ("", b"")
     assert name == "author.png" and Image.open(io.BytesIO(data)).mode == "RGBA"
     assert Image.open(io.BytesIO(data)).size == (96, 96)
 
@@ -293,11 +293,13 @@ def test_with_no_guest_the_card_is_the_analysts_whatever_picture_the_folder_hold
     assert '<span class="az-signer">Alex Doe</span>' in body and "az-face" not in body
 
 
-def test_the_pdf_and_the_html_report_keep_the_analyst_whoever_the_look_names(analyst):
+def test_the_html_report_signs_the_guest_and_the_pdf_keeps_the_analyst(analyst):
     look = notelook.NoteLook.model_validate({"style": "report", "author": GUEST, "signed": "title", "cover": ALL_MARKS})
     report = notes_html.render(None, title="Bridge", text=TEXT, identity=analyst, look=look).html.decode()
     body = report.split("</style>")[-1]
-    assert "By Alex Doe, Analyst · Open Desk" in body and GUEST not in report and "az-face" not in body
+    # every page read in HTML is signed by the look's author (`notefill.signing`), never the analyst
+    assert f"By {GUEST}" in body and "Alex Doe" not in report and "Open Desk" not in report
+    assert "az-my-logo" not in body
     printed = notes_pdf.render(None, title="Bridge", text=TEXT, identity=analyst, look=look).pdf
     words = " ".join(" ".join((page.extract_text() or "").split()) for page in PdfReader(io.BytesIO(printed)).pages)
     assert "Alex Doe" in words and GUEST not in words

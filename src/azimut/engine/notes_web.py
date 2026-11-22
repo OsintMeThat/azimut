@@ -82,7 +82,7 @@ from urllib.parse import unquote, urlsplit, urlunsplit
 
 from PIL import Image, ImageChops, ImageColor, ImageDraw, ImageFilter, ImageFont, ImageOps, UnidentifiedImageError
 
-from . import dirswap, notefill, notelinks, notelook, notes_maps, notes_style, pdffonts, siteatlas
+from . import dirswap, notelinks, notelook, notes_maps, notes_style, pdffonts, siteatlas
 from . import notes_html as html_engine
 from . import site as site_engine
 from . import notes_markdown as md
@@ -108,11 +108,7 @@ SHARE_SIZE = (1200, 630)
 SHARE_QUALITY = 88
 #: The list picture, as a card names it: the same size, a little lighter.
 COVER_QUALITY = 84
-#: The author's picture (`NoteLook.author_image`) at the folder's root, as the page and the card
-#: name it: a small square, `author.png` when it holds transparency, else `author.jpg`.
-AUTHOR_FACE = "author"
-AUTHOR_FACE_SIDE = 96
-AUTHOR_FACE_QUALITY = 86
+#: What the check says when the author's picture (`notes_html.author_face`) is gone.
 AUTHOR_IMAGE_GONE = ("The author's picture is no longer in the case or could not be read; the page goes "
                      "without it.")
 #: The longest address a folder may be given.
@@ -364,7 +360,7 @@ def build(
     day = date.fromisoformat(look.cover.date) if look.cover.date else when.date()
     vendor = live_maps() if live else None
     said: list[str] = []
-    face = author_face(case, look.author_image) if look.author_image else None
+    face = html_engine.author_face(case, look.author_image) if look.author_image else None
     if look.author_image and face is None:
         said.append(AUTHOR_IMAGE_GONE)
     # online at its address only: kept out of search engines too
@@ -372,12 +368,10 @@ def build(
     folder = html_engine.Folder(csp=folder_csp(), head=lambda description: _head(title, description, where, hidden=hidden),
                                 live=vendor, frame=site_engine.frame_of(placement.site) if placement else None,
                                 author_face=face[0] if face is not None else "", maps=maps)
-    # a note someone else wrote is signed with their name, under the title unless the look signs it at the end
-    signer = notefill.Identity.from_settings().written_by(look.author) if look.author else None
-    shown = look.model_copy(update={"signed": "title"}) if look.author and not look.signed else look
+    # a note someone else wrote is signed with their name (`notefill.signing`, inside the render)
     rendered = html_engine.render(
-        case, title=title, text=text, look=shown, note_id=note_id, resolve=md.case_resolver(case), created=when,
-        public=True, identity=signer, diagrams=diagrams, round_pov=round_pov, changes=changes, earlier=earlier,
+        case, title=title, text=text, look=look, note_id=note_id, resolve=md.case_resolver(case), created=when,
+        public=True, diagrams=diagrams, round_pov=round_pov, changes=changes, earlier=earlier,
         check=check, folder=folder,
     )
     files: dict[str, bytes] = {INDEX: rendered.html, **folder.files}
@@ -434,7 +428,7 @@ def _site_card(placement: site_engine.Placement, case: "Case", look: NoteLook, r
     role = placement.role_of(look)
     picture = None
     if look.list_image:
-        picture = _list_picture(case, look.list_image)
+        picture = html_engine.case_picture(case, look.list_image)
         if picture is None:
             said.append("The list picture is no longer in the case or could not be read; the cover picture "
                         "stands in the site's list.")
@@ -452,20 +446,6 @@ def _site_card(placement: site_engine.Placement, case: "Case", look: NoteLook, r
         links=site_engine.links_of(page, site, name), place=placement.card_place(look.place))
 
 
-def _list_picture(case: "Case", entity_id: str) -> Path | None:
-    """The file of a case picture a look names for the site's list, None when it is no picture
-    there any more."""
-    record = case.get_entity(entity_id)
-    attrs = (record or {}).get("attrs") or {}
-    if not record or not attrs.get("path") or attrs.get("kind") in ("video", "audio"):
-        return None
-    try:
-        path = case.resolve_inside(str(attrs["path"]))
-    except Exception:
-        return None
-    return path if path.is_file() else None
-
-
 def _list_cover(path: Path | None) -> bytes | None:
     """The 1200 by 630 JPEG of a line in the site's list, cut from a picture to fill it: upright,
     progressive, with no metadata. None when there is no picture or it cannot be read."""
@@ -475,36 +455,6 @@ def _list_cover(path: Path | None) -> bytes | None:
     buffer = BytesIO()
     picture.convert("RGB").save(buffer, "JPEG", quality=COVER_QUALITY, optimize=True, progressive=True)
     return buffer.getvalue()
-
-
-def author_face(case: "Case", entity_id: str) -> tuple[str, bytes] | None:
-    """The author's picture as the folder carries it: its file name and its bytes, a square of
-    `AUTHOR_FACE_SIDE` cut from the middle, upright, made again from its pixels so that nothing the
-    file held besides them (its place, its camera, its author, its comments) goes online. None when
-    it is no picture in the case any more or cannot be read."""
-    path = _list_picture(case, entity_id)
-    if path is None:
-        return None
-    side = AUTHOR_FACE_SIDE
-    try:
-        with Image.open(path) as image:
-            if image.width * image.height > MAX_IMAGE_PIXELS:
-                return None
-            image.draft("RGB", (side * 4, side * 4))
-            upright = ImageOps.exif_transpose(image)
-            clear = upright.mode in ("RGBA", "LA", "PA") or "transparency" in upright.info
-            upright = upright.convert("RGBA" if clear else "RGB")
-    except (OSError, ValueError, UnidentifiedImageError, Image.DecompressionBombError):
-        return None
-    square = ImageOps.fit(upright, (side, side), Image.Resampling.LANCZOS)
-    # a JPEG's comment rides in `info` through a resize and back out on save
-    square.info = {}
-    buffer = BytesIO()
-    if clear:
-        square.save(buffer, "PNG", optimize=True)
-        return f"{AUTHOR_FACE}.png", buffer.getvalue()
-    square.save(buffer, "JPEG", quality=AUTHOR_FACE_QUALITY, optimize=True)
-    return f"{AUTHOR_FACE}.jpg", buffer.getvalue()
 
 
 def live_maps() -> html_engine.LiveMaps | None:

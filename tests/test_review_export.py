@@ -25,7 +25,8 @@ import pytest
 from PIL import Image
 
 from azimut import config, layout
-from azimut.engine import bundles, media, notelinks, notelook, notes_web, reviewexport, thumbnails, tiles, workqueue
+from azimut.engine import bundles, media, notelinks, notelook, notes_html, notes_web, reviewexport, thumbnails, tiles
+from azimut.engine import workqueue
 from azimut.workspace import Case
 
 from fullcase import build_full_case
@@ -270,7 +271,7 @@ def test_the_imported_article_and_its_map_page_are_the_pages_the_original_builds
     assert (page_look.author, page_look.author_image) == ("Guest Writer", article["piece"])
     page = after["map_page"].files[notes_web.INDEX]
     assert b"Guest Writer" in page and RECEIVER.encode() not in page
-    assert any(name.startswith(notes_web.AUTHOR_FACE) for name in after["map_page"].files)
+    assert any(name.startswith(notes_html.AUTHOR_FACE) for name in after["map_page"].files)
     # the links written to the map page's address are mentions of it in the copy, which the
     # receiving case reads as links to that map
     text = imported.read_note(article["note"])
