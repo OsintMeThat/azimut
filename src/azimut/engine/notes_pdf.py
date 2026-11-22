@@ -1906,7 +1906,8 @@ class _Builder:
         self._bookmark(runs, level, number)
         colour = theme.ink
         if caps:
-            runs = [Run(run.text.upper(), bold=True, color=theme.accent_dark) for run in runs]
+            # a raised mark (a citation's number, a footnote's letter) keeps its case and its link
+            runs = [run if run.raised else Run(run.text.upper(), bold=True, color=theme.accent_dark) for run in runs]
             pdf.set_char_spacing(0.5)
         elif rank >= 5:
             colour = theme.muted
