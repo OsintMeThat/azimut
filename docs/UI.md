@@ -7249,9 +7249,11 @@ column (Claim, Geolocated); the story's picture wall shows one group a step. The
 *See them filled in the example case* opens the example case. A press makes the note at once in the template's look, named after it
 and numbered when the name is taken, with its title selected to retype. **New note**
 opens one dialog (`NewNoteDialog.svelte`): what to start from as tiles drawn by their
-first page (Blank, From the case, the ready notes, your templates; one Tab stop, the
-arrows pick), an optional title whose placeholder is the name the note gets, and a
-folder. A card's ⋯ opens it, pins it to the
+first page, in groups (`START_GROUPS` in `lib/notes/ready.js`): *For the web* first (Web
+article, Web map, Story article), then *Start from* (Blank, From the case),
+*Investigations*, *Briefs, logs and registers* and *Your templates*; one Tab stop, the
+arrows pick across the groups. Then an optional title whose placeholder is the name the
+note gets, and a folder. A card's ⋯ opens it, pins it to the
 side, opens it in its own tab, exports it, lists its editions, or deletes it.
 
 **The example case** is a fictional case anyone can open to see a report filled

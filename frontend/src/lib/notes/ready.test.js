@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { READY_NOTES, SHOWCASE, filledBody } from './ready.js';
+import { READY_NOTES, SHOWCASE, START_GROUPS, filledBody, groupStarts } from './ready.js';
 import { HINT_LINE, coverChoice, normaliseLook, templateLook } from './look.js';
 import { COVER_SKELETON, SIGNATURE_BLOCK, coverLineIndex, hasCover } from './reportParts.js';
 import { calloutOf } from './callouts.js';
@@ -11,7 +11,7 @@ const named = (id) => READY_NOTES.find((ready) => ready.id === id);
 describe('the ready templates', () => {
   it('are the nine an analyst starts from, blank first, then the five that show what a report holds', () => {
     expect(READY_NOTES.map((ready) => ready.name)).toEqual([
-      'Blank', 'Geolocation report', 'Chronolocation', 'Media verification', 'Incident brief (5W)',
+      'Blank', 'Web article', 'Geolocation report', 'Chronolocation', 'Media verification', 'Incident brief (5W)',
       'Source profile', 'Daily SITREP', 'Fact-check', 'Investigation log',
       'Front-line analysis', 'Equipment losses register', 'Strike and damage assessment', 'Claim against footage',
       'Story article for the web',
@@ -160,5 +160,25 @@ describe('the ready templates', () => {
   it('dates the log entries the way the journal look reads them', () => {
     expect(named('log').look.style).toBe('journal');
     expect(named('log').body).toContain('### {now}');
+  });
+});
+
+describe('New note\'s starts, in groups', () => {
+  const tile = (id) => ({ id });
+  it('puts what is made for the web first, every ready note in a group, the analyst\'s own last', () => {
+    const tiles = ['blank', 'from-case', 'web-map', ...READY_NOTES.map((ready) => ready.id), 't:1'].filter((id, at, all) => all.indexOf(id) === at).map(tile);
+    const groups = groupStarts(tiles);
+    expect(groups.map((group) => group.title)).toEqual(['For the web', 'Start from', 'Investigations', 'Briefs, logs and registers', 'Your templates']);
+    expect(groups[0].tiles.map((item) => item.id)).toEqual(['article', 'web-map', 'story']);
+    expect(groups.at(-1).tiles.map((item) => item.id)).toEqual(['t:1']);
+    // every start in exactly one group
+    expect(groups.flatMap((group) => group.tiles).length).toBe(tiles.length);
+    const named = START_GROUPS.flatMap((group) => group.starts);
+    expect(new Set(named).size).toBe(named.length);
+  });
+
+  it('keeps a start no group names under More, and leaves an empty group out', () => {
+    const groups = groupStarts([tile('blank'), tile('new-kind')]);
+    expect(groups.map((group) => [group.title, group.tiles.map((item) => item.id)])).toEqual([['Start from', ['blank']], ['More', ['new-kind']]]);
   });
 });

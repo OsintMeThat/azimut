@@ -30,6 +30,32 @@ const REPORT = { style: 'report', cover: { on: true, mode: 'own' }, numbered: tr
 const REPORT_OPEN = { style: 'report', numbered: true };
 const SOURCES_HINT = '<!--? Every link with its archived copy, and each imagery date, with the day you looked. -->';
 
+/**
+ * How New note groups its starts, in this order: what is made for the web first, then a
+ * blank page and the case's own count, then the ready notes by what they are for. A start
+ * no group names goes under More, and the analyst's own templates come last.
+ */
+export const START_GROUPS = [
+  { id: 'web', title: 'For the web', starts: ['article', 'web-map', 'story'] },
+  { id: 'start', title: 'Start from', starts: ['blank', 'from-case'] },
+  { id: 'reports', title: 'Investigations', starts: ['geolocation', 'chronolocation', 'verification', 'factcheck', 'claims', 'damage', 'frontline'] },
+  { id: 'briefs', title: 'Briefs, logs and registers', starts: ['incident', 'sitrep', 'source', 'log', 'register'] },
+];
+
+/** The starts of New note in their groups: `[{ id, title, tiles }]`, the empty ones left out. */
+export function groupStarts(tiles) {
+  const placed = new Set();
+  const groups = START_GROUPS.map((group) => {
+    const held = group.starts.map((id) => tiles.find((tile) => tile.id === id)).filter(Boolean);
+    for (const tile of held) placed.add(tile.id);
+    return { id: group.id, title: group.title, tiles: held };
+  });
+  const own = tiles.filter((tile) => tile.id.startsWith('t:'));
+  const more = tiles.filter((tile) => !placed.has(tile.id) && !tile.id.startsWith('t:'));
+  return [...groups, { id: 'more', title: 'More', tiles: more }, { id: 'own', title: 'Your templates', tiles: own }]
+    .filter((group) => group.tiles.length);
+}
+
 /** The templates that show what a report can hold, after the working methods. */
 export const SHOWCASE = ['frontline', 'register', 'damage', 'claims', 'story'];
 
@@ -46,6 +72,29 @@ export const READY_NOTES = [
     note: 'An empty page',
     look: null,
     body: '',
+  },
+  {
+    id: 'article',
+    name: 'Web article',
+    note: 'An article for a site, its sources as cards',
+    look: { style: 'article' },
+    body: lines(
+      '<!--? Two sentences under the title: what happened, and what the evidence can show of it. -->',
+      '',
+      '## What happened',
+      '',
+      '<!--? The facts in order, each one cited: select its words and press Link, or type @ for an item of the case. An aside goes in a Footnote. -->',
+      '',
+      '## What the evidence shows',
+      '',
+      '<!--? A picture, a map or a proof for each point, with what it shows and what it cannot. -->',
+      '',
+      '> [!unverified] What is not settled yet.',
+      '',
+      '## Method and limits',
+      '',
+      '<!--? How it was checked, and what stays unknown. Every figure is a minimum. -->',
+    ),
   },
   {
     id: 'geolocation',

@@ -102,10 +102,12 @@ afterEach(async () => {
 });
 
 describe('the starts', () => {
-  it('lists the blank page, From the case, Web map, then the ready notes and the analyst’s own, as radio buttons', async () => {
+  it('lists what is made for the web first, then a blank page and From the case, the ready notes and the analyst’s own, in groups', async () => {
     await open();
     expect(dialog().querySelector('[role="radiogroup"]').getAttribute('aria-labelledby')).toBe('notebook-note-start');
-    expect(tileIds()).toEqual(['blank', 'from-case', 'web-map', 'factcheck', 't:1']);
+    expect(tileIds()).toEqual(['web-map', 'blank', 'from-case', 'factcheck', 't:1']);
+    expect([...dialog().querySelectorAll('.group-title')].map((title) => title.textContent))
+      .toEqual(['For the web', 'Start from', 'Investigations', 'Your templates']);
     expect(tile('factcheck').textContent).toContain('Fact-check');
     expect(tile('factcheck').textContent).toContain('A claim, tested');
     expect(tile('from-case').textContent).toContain('From the case');
@@ -135,13 +137,16 @@ describe('the starts', () => {
     flushSync();
     expect(pickedIds()).toEqual(['t:1']);
     expect(document.activeElement).toBe(tile('t:1'));
-    // the ends meet
+    // the ends meet, across the groups
     press(tile('t:1'), 'ArrowRight');
     flushSync();
-    expect(pickedIds()).toEqual(['blank']);
-    press(tile('blank'), 'ArrowLeft');
+    expect(pickedIds()).toEqual(['web-map']);
+    press(tile('web-map'), 'ArrowLeft');
     flushSync();
     expect(pickedIds()).toEqual(['t:1']);
+    press(tile('web-map'), 'ArrowRight');
+    flushSync();
+    expect(pickedIds()).toEqual(['blank']);
   });
 
   it('reads nothing from the case until From the case is picked', async () => {
