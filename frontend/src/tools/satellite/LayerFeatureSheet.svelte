@@ -31,6 +31,7 @@
   import { parseLatLon } from '../../lib/sheetRoles.js';
   import { fileUrl } from '../../lib/fileUrl.js';
   import { hasHistory, momentLabel, spanLabel, spanOf } from '../../lib/map/layerHistory.js';
+  import { nameMoves, namePlace, nameShown } from '../../lib/map/layerNames.js';
   import { CONFIDENCE_CHOICES, LAYER_HELP as HELP, STATUS_CHOICES } from '../../lib/map/layerHelp.js';
 
   /** `inline` when it opens under its row in the list rather than above the list. */
@@ -141,10 +142,13 @@
   const daySaid = $derived(tracked ? '' : one && hasHistory(one) ? spanLabel(spanOf(one)) : day === null ? 'Several days' : day ? momentLabel(day) : '');
   const detailsSaid = $derived([groups.length > 1 ? (group === null ? 'Several groups' : their?.name ?? '') : '', daySaid,
     measured ? measured[1] : position].filter(Boolean).join(' · '));
+  /** A line's or an area's name the map writes: where the analyst put it, or null where the map finds it a place. */
+  const nameHere = $derived(one && nameMoves(one) && nameShown(one.properties, groups.find((option) => option.id === one.properties.group))
+    ? { placed: !!namePlace(one.properties) } : null);
   /** The look rows set on what is picked, said on the folded Look line. */
-  const lookSet = $derived([['marker_size', 'Size'], ['line_width', 'Width'], ['line_dash', 'Dash'], ['line_arrow', 'Arrow'],
+  const lookSet = $derived([...[['marker_size', 'Size'], ['line_width', 'Width'], ['line_dash', 'Dash'], ['line_arrow', 'Arrow'],
     ['area_fill', 'Fill'], ['fill_opacity', 'Strength'], ['label', 'Name'], ['label_size', 'Name size']]
-    .filter(([field]) => (one ? form?.[field] : shared(field, '')) ?? '').map(([, label]) => label));
+    .filter(([field]) => (one ? form?.[field] : shared(field, '')) ?? '').map(([, label]) => label), ...(nameHere?.placed ? ['Name placed'] : [])]);
   /** Its group's features are events, there on their day and fading after it. */
   const inEvents = $derived(!!groups.find((option) => option.id === one?.properties.group)?.events);
   /** Several picked, all events: their one day is said as an event's. */
@@ -412,6 +416,13 @@
           <span class="key" title={HELP.nameSize}>Name size</span>
           {@render slider('label_size', 'Name size', [6, 32, 1], 11, (value) => `${value} px`, HELP.nameSize)}
         {/if}
+        {#if nameHere?.placed}
+          <p class="name-place" title={HELP.namePlace}>Name put by hand
+            <button type="button" class="text-act" title={HELP.nameBack} disabled={busy}
+              onclick={() => controller.placeName(one.properties.key, null)}>Back to the middle</button></p>
+        {:else if nameHere}
+          <p class="name-place quiet">Drag the name on the map to move it</p>
+        {/if}
       </div>
     {/if}
   </div>
@@ -470,6 +481,8 @@
   .credit { margin: 5px 0 0; color: var(--text-3); font-size: 10.5px; overflow-wrap: anywhere; }
   .away { margin: 0 0 8px; padding: 4px 7px; border-radius: var(--r-sm); background: var(--bg-1); color: var(--text-2); font-size: 10.5px; line-height: 1.4; }
   .key { color: var(--text-3); font-size: 11px; }
+  .name-place { grid-column: 1 / -1; display: flex; align-items: center; gap: 8px; margin: 0; color: var(--text-2); font-size: 10.5px; }
+  .name-place.quiet { color: var(--text-3); }
   .value { display: flex; align-items: center; gap: 4px; min-height: 24px; color: var(--text-1); font-size: var(--fs-xs); font-variant-numeric: tabular-nums; }
   .value.quiet { color: var(--text-3); }
   select, textarea, .address { width: 100%; min-width: 0; padding: 3px 6px; font-size: var(--fs-xs); border-radius: var(--r-sm); }

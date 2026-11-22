@@ -745,11 +745,12 @@ def derive(
     if block.card is not None:
         _cards_trimmed(features, block.card)
     for feature in features:
-        # a line's or an area's name is written where it reads best: its middle
+        # a line's or an area's name is written where it reads best: where the analyst put it, else its middle
         if feature["kind"] != "point" and feature["style"].get("label") and feature.get("label"):
             spot = label_anchor(feature)
             if spot is not None:
                 feature["at"] = spot
+        feature.pop("label_at", None)
     for step in steps:
         # a step about one proof moves in on it, as far as the ground stays sharp
         if isinstance(step.get("view"), dict) and step["view"].get("zoom") is None:
@@ -913,8 +914,14 @@ def _all_points(features: Iterable[dict[str, Any]]) -> Iterator[tuple[float, flo
 
 
 def label_anchor(feature: Mapping[str, Any]) -> list[float] | None:
-    """Where a line's or an area's name is written: halfway along its longest part, or
-    the middle of its largest area (its centroid, as the map's own square reads it)."""
+    """Where a line's or an area's name is written: where the analyst put it on the map
+    (`label_at`), else halfway along its longest part, or the middle of its largest area
+    (its centroid, as the map's own square reads it)."""
+    from .layerediting import label_place_of
+
+    placed = label_place_of(feature.get("label_at"))
+    if placed is not None:
+        return [_round(placed[0]), _round(placed[1])]
     coords: Any = feature.get("coords") or []
     try:
         if feature.get("kind") == "line":
@@ -1057,6 +1064,8 @@ def _layer_features(case: "Case", name: str, index: int, frame: dict[str, Any] |
             style.pop("label", None)
         icon = str(properties.get("icon") or "")
         symbol = str(properties.get("symbol") or "pin")
+        # a line's or an area's name the analyst put somewhere by hand, written once, there
+        placed = layerediting.label_place_of(properties.get("label_at")) if editable else None
         states = list(_states(properties, feature.get("geometry"), window))
         history = _history(states)
         for state, (geometry, status, first, last) in enumerate(states):
@@ -1077,6 +1086,8 @@ def _layer_features(case: "Case", name: str, index: int, frame: dict[str, Any] |
                         shaped["tip"] = True
                 else:
                     shaped.pop("bearing", None)
+                    if placed and part:
+                        shaped.pop("label", None)
                 card = _layer_card(properties, title, first, last, status=status, kind=kind, coords=coords,
                                    columns=not editable)
                 if history:
@@ -1096,6 +1107,8 @@ def _layer_features(case: "Case", name: str, index: int, frame: dict[str, Any] |
                     "group": category,
                     "entity": str(properties.get("entity_id") or "") or None,
                     "picture": str(properties.get("picture") or "") or None,
+                    # read once by `label_anchor`, never kept in the map's data
+                    **({"label_at": placed} if placed and kind != "point" and not part else {}),
                 })
                 row = legend.setdefault((category, kind), {
                     "label": category if category and category != layerediting.DEFAULT_GROUP else "",
@@ -1245,7 +1258,7 @@ MAX_CARD_VALUE = 600
 OWN_FIELDS = frozenset({
     "name", "description", "category", "colour", "icon", "key", "symbol", "group", "date", "date_end", "status",
     "bearing", "links", "provenance", "confidence", "credit", "picture", "index", "line_width", "line_dash",
-    "line_arrow", "area_fill", "fill_opacity", "marker_size", "label", "label_size", "icon_scale", "stroke_width",
+    "line_arrow", "area_fill", "fill_opacity", "marker_size", "label", "label_size", "label_at", "icon_scale", "stroke_width",
     "show_label", "event", "icon_mode", "icon_name", "colour_name", "icon_meaning", "states", "entity_id",
     "follows", "followed", "proof_id", "media_id", "sheet_row", "entity_type", "entity_label", "entity_picture",
     "media", "proof", "picture_label", "picture_type", "picture_path", "synced",

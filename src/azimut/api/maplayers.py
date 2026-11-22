@@ -226,6 +226,8 @@ class MarkerUpdateIn(MarkerFields):
     #: The pictogram it wears, "" taking it off; a symbol picked takes it off too.
     icon: IconKey | None = None
     icon_from: str | None = Field(default=None, max_length=200)
+    #: Where a line's or an area's name is written, `[lon, lat]`, checked by the engine; null puts it back.
+    label_at: list[Any] | None = Field(default=None, max_length=2)
 
     @field_validator("symbol")
     @classmethod

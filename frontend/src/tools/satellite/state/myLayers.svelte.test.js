@@ -988,6 +988,48 @@ describe('an edit made on the map', () => {
     expect(editor.formChanged).toBe(false);
   });
 
+  it('writes an area\'s name where it was let go at once, keeps the copy until a map draws it, and Ctrl+Z takes it back', async () => {
+    const editor = store(); await editor.open(ROW);
+    editor.carryName('zone');
+    expect(editor.naming).toEqual({ name: 'working', key: 'zone' });
+    const answer = deferred();
+    api.patch.mockReturnValueOnce(answer.promise);
+    const placing = editor.placeName('zone', [0.123456789, 0.5]);
+    expect(where(editor, 'zone').properties.label_at).toEqual([0.1234568, 0.5]);
+    const [landing] = editor.landings;
+    expect(editor.naming.landing).toBe(landing);
+    editor.claim(landing);
+    answer.resolve({ layer: { ...ROW, sha256: 'b' }, marker: { ...area, properties: { ...area.properties, label_at: [0.1234568, 0.5] } } });
+    expect(await placing).toBe(true);
+    expect(api.patch).toHaveBeenCalledWith('/api/cases/first/map-layers/working/markers/zone', { label_at: [0.1234568, 0.5] });
+    // the carried copy waits for the map drawing it
+    expect(editor.naming.landing).toBe(landing);
+    editor.landed(landing);
+    expect(editor.naming).toBeNull();
+    api.post.mockResolvedValueOnce({ layer: ROW, document: { features: [at('a', 2, 48), at('b', 5, 50), area, line] } });
+    expect(editor.undo()).toBe(true);
+    await editor.whenSaved();
+    expect(api.post).toHaveBeenLastCalledWith('/api/cases/first/map-layers/working/revert', { put: [area], drop: [] });
+    expect(notify).toHaveBeenCalledWith('Undone: name place', 'ok', 1600);
+  });
+
+  it('puts a name back where the map finds it, goes back when refused, and leaves a point\'s name alone', async () => {
+    api.get.mockResolvedValue({ layer: ROW, document: { features: [{ ...area, properties: { ...area.properties, label_at: [0.5, 0.5] } }, at('a', 2, 48)] } });
+    const editor = store(); await editor.open(ROW);
+    api.patch.mockRejectedValueOnce(new Error('The layer is busy'));
+    const clearing = editor.placeName('zone', null);
+    expect('label_at' in where(editor, 'zone').properties).toBe(false);
+    expect(await clearing).toBe(false);
+    expect(where(editor, 'zone').properties.label_at).toEqual([0.5, 0.5]);
+    api.patch.mockResolvedValueOnce({ layer: ROW, marker: area });
+    expect(await editor.placeName('zone', null)).toBe(true);
+    expect(api.patch).toHaveBeenLastCalledWith('/api/cases/first/map-layers/working/markers/zone', { label_at: null });
+    editor.carryName('a');
+    expect(await editor.placeName('a', [1, 1])).toBe(false);
+    expect(editor.naming).toBeNull();
+    expect(api.patch).toHaveBeenCalledTimes(2);
+  });
+
   it('adds no corner to an area being reshaped on a click, where a line being reshaped grows', async () => {
     const editor = store(); await editor.open(ROW);
     editor.select('zone'); editor.editGeometry();

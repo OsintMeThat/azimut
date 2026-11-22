@@ -408,6 +408,135 @@ test('a pan over relief across a layer\'s area opens no card, and a click on it 
   await expect(card).toContainText('Front line area');
 });
 
+/** The middle of what is drawn white in a box of the page, and how much: a name's letters. */
+async function whiteIn(page, clip) {
+  const picture = await page.screenshot({ clip });
+  const found = await page.evaluate(async (bytes) => {
+    const image = await createImageBitmap(new Blob([new Uint8Array(bytes)], { type: 'image/png' }));
+    const context = new OffscreenCanvas(image.width, image.height).getContext('2d');
+    context.drawImage(image, 0, 0);
+    const { data } = context.getImageData(0, 0, image.width, image.height);
+    let count = 0, x = 0, y = 0;
+    for (let i = 0; i < data.length; i += 4) {
+      if (data[i] < 180 || data[i + 1] < 180 || data[i + 2] < 180) continue;
+      count += 1; x += (i / 4) % image.width; y += Math.floor(i / 4 / image.width);
+    }
+    return { count, x: count ? x / count : 0, y: count ? y / count : 0, width: image.width };
+  }, [...picture]);
+  const scale = found.width / clip.width;
+  return { count: found.count, x: clip.x + found.x / scale, y: clip.y + found.y / scale };
+}
+
+test('a line\'s or an area\'s name put by hand is written there on the flat map and on the globe, and opens its card', async ({ page }) => {
+  // a small area on the view's middle, its name put by hand some way east of it
+  const area = { type: 'Feature', id: 0, geometry: { type: 'Polygon',
+    coordinates: [[[7.895, 46.597], [7.905, 46.597], [7.905, 46.603], [7.895, 46.603], [7.895, 46.597]]] },
+    properties: { key: 'held', group: 'g', name: 'Held ground', colour: '#d55e00', category: 'Areas', index: 0,
+      show_label: true, label_at: [7.915, 46.6] } };
+  const row = { name: 'areas', title: 'Areas map', editable: true, source: { kind: 'editable' },
+    features: 1, categories: [], icons: 0, sha256: 'b'.repeat(64), refresh: {}, hidden: [] };
+  await installAppFixture(page);
+  await serveRelief(page);
+  await page.route(`**/api/cases/${CASE_ID}/map-layers`, (route) => route.fulfill({ json: [row] }));
+  await page.route(`**/api/cases/${CASE_ID}/map-layers/areas/data**`,
+    (route) => route.fulfill({ json: { type: 'FeatureCollection', features: [area] } }));
+  await page.goto('/#satellite?ll=46.6,7.9&z=13&p=esri-world-imagery');
+  await awaitMapReady(page);
+  await page.getByRole('button', { name: 'Areas map', exact: true }).click();
+  const map = await page.locator('.map').boundingBox();
+  const centre = { x: map.x + map.width / 2, y: map.y + map.height / 2 };
+  const east = { x: centre.x + 30, y: centre.y - 30, width: 140, height: 60 };
+  const middle = { x: centre.x - 30, y: centre.y - 30, width: 60, height: 60 };
+  // flat: east of its area, on its point, and nothing where the map would have written it
+  await expect.poll(async () => (await whiteIn(page, east)).count).toBeGreaterThan(8);
+  const flat = await whiteIn(page, east);
+  expect(flat.x - centre.x).toBeGreaterThan(50);
+  expect(Math.abs(flat.y - centre.y)).toBeLessThan(8);
+  expect((await whiteIn(page, middle)).count).toBe(0);
+  // a press on it is a press on its area: its card opens
+  await page.mouse.click(flat.x, flat.y);
+  await expect(page.locator('.layer-card')).toContainText('Held ground');
+  await page.keyboard.press('Escape');
+
+  await page.getByRole('button', { name: '3D', exact: true }).click();
+  await expect(tilt(page)).toHaveText(/Tilt 20°/, LEANS);
+  await expect(globe(page)).toBeVisible();
+  // the globe stands the same name on the same point, east of the area
+  const written = () => page.locator('.globe canvas.marks').evaluate((canvas) => {
+    const { data } = canvas.getContext('2d').getImageData(0, 0, canvas.width, canvas.height);
+    const box = canvas.getBoundingClientRect();
+    let count = 0, x = 0, y = 0;
+    for (let i = 0; i < data.length; i += 4) {
+      if (data[i + 3] < 200 || data[i] < 180 || data[i + 1] < 180 || data[i + 2] < 180) continue;
+      count += 1; x += (i / 4) % canvas.width; y += Math.floor(i / 4 / canvas.width);
+    }
+    return count ? { count, x: box.x + (x / count) * box.width / canvas.width, y: box.y + (y / count) * box.height / canvas.height } : { count };
+  });
+  await expect.poll(async () => (await written()).count, { timeout: 15_000 }).toBeGreaterThan(8);
+  const standing = await written();
+  expect(standing.x - centre.x).toBeGreaterThan(50);
+  expect(Math.abs(standing.y - centre.y)).toBeLessThan(25);
+});
+
+test('on the globe, the name put by hand of a picked area is carried where it is let go', async ({ page }) => {
+  let placed = [7.915, 46.6];
+  let version = 1;
+  const sent = [];
+  const area = () => ({ type: 'Feature', id: 0, geometry: { type: 'Polygon',
+    coordinates: [[[7.895, 46.597], [7.905, 46.597], [7.905, 46.603], [7.895, 46.603], [7.895, 46.597]]] },
+    properties: { key: 'held', group: 'g', name: 'Held ground', colour: '#d55e00', category: 'Areas', index: 0, label: 'on', label_at: placed } });
+  const row = () => ({ name: 'areas', title: 'Areas map', editable: true, source: { kind: 'editable' },
+    features: 1, categories: [], icons: 0, sha256: String(version).repeat(64), refresh: {}, hidden: [] });
+  await installAppFixture(page);
+  await serveRelief(page);
+  await page.route(`**/api/cases/${CASE_ID}/map-layers`, (route) => route.fulfill({ json: [row()] }));
+  await page.route(`**/api/cases/${CASE_ID}/map-layers/areas/data**`, (route) => route.fulfill({ json: { type: 'FeatureCollection',
+    features: [{ ...area(), properties: { ...area().properties, show_label: true } }] } }));
+  await page.route(`**/api/cases/${CASE_ID}/map-layers/areas/edit`, (route) => route.fulfill({ json: {
+    layer: row(), document: { type: 'FeatureCollection', features: [area()] }, checkpoint: 'c'.repeat(32),
+    groups: [{ id: 'g', name: 'Areas', mode: 'individual', colour: '#d55e00', symbol: 'pin', size: 1, stroke: 2 }] } }));
+  await page.route(`**/api/cases/${CASE_ID}/map-layers/areas/markers/held`, (route) => {
+    const body = route.request().postDataJSON();
+    sent.push(body);
+    placed = body.label_at; version += 1;
+    return route.fulfill({ json: { layer: row(), marker: area() } });
+  });
+  await page.goto('/#satellite?ll=46.6,7.9&z=13&p=esri-world-imagery');
+  await awaitMapReady(page);
+  await page.getByRole('button', { name: 'Edit Areas map', exact: true }).click();
+  await expect(page.getByRole('toolbar', { name: 'Layer tools', exact: true })).toBeVisible();
+  await page.getByRole('button', { name: '3D', exact: true }).click();
+  await expect(tilt(page)).toHaveText(/Tilt 20°/, LEANS);
+  await expect(globe(page)).toBeVisible();
+  const written = () => page.locator('.globe canvas.marks').evaluate((canvas) => {
+    const { data } = canvas.getContext('2d').getImageData(0, 0, canvas.width, canvas.height);
+    const box = canvas.getBoundingClientRect();
+    let count = 0, x = 0, y = 0;
+    for (let i = 0; i < data.length; i += 4) {
+      if (data[i + 3] < 200 || data[i] < 180 || data[i + 1] < 180 || data[i + 2] < 180) continue;
+      count += 1; x += (i / 4) % canvas.width; y += Math.floor(i / 4 / canvas.width);
+    }
+    return count ? { count, x: box.x + (x / count) * box.width / canvas.width, y: box.y + (y / count) * box.height / canvas.height } : { count };
+  });
+  await expect.poll(async () => (await written()).count, { timeout: 15_000 }).toBeGreaterThan(8);
+  const name = await written();
+  const map = await page.locator('.map').boundingBox();
+  // picked by a click inside it, as on the flat map
+  await page.mouse.click(map.x + map.width / 2, map.y + map.height / 2);
+  await expect(page.getByRole('textbox', { name: 'Feature name', exact: true })).toHaveValue('Held ground');
+  await page.mouse.move(name.x, name.y); await page.mouse.down();
+  await page.mouse.move(name.x + 60, name.y + 30, { steps: 10 });
+  await expect(page.locator('.ghost-name')).toHaveText('Held ground');
+  await page.mouse.up();
+  await expect.poll(() => sent.length).toBe(1);
+  // further east and south than it stood, the area itself left where it is
+  expect(sent[0].label_at[0]).toBeGreaterThan(7.917);
+  expect(sent[0].label_at[1]).toBeLessThan(46.6);
+  expect(Object.keys(sent[0])).toEqual(['label_at']);
+  await expect.poll(async () => (await written()).x - name.x, { timeout: 15_000 }).toBeGreaterThan(40);
+  await expect(page.locator('.layer-card')).toHaveCount(0);
+});
+
 test('on the globe, a click on the layer being edited picks it rather than opening its card, and a double click opens its corners', async ({ page }) => {
   const area = { type: 'Feature', id: 0, geometry: { type: 'Polygon',
     coordinates: [[[-170, -80], [170, -80], [170, 80], [-170, 80], [-170, -80]]] },

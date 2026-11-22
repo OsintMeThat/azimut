@@ -30,6 +30,8 @@ export const LAYER_HELP = {
   strength: 'How strongly the fill covers the ground',
   name: 'Whether its name is written on the map',
   nameSize: 'The size its name is written at',
+  namePlace: 'Drag its name on the map to put it where it reads best',
+  nameBack: 'Writes its name where the map puts it again',
   day: 'The day the time strip and the Timeline file it under',
   days: 'Its history is kept while Track over time is off',
   facing: 'Where it points, set by the ring round it on the map',

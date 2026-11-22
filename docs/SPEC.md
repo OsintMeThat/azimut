@@ -174,6 +174,7 @@ proof for publication.
 | ✅ **Map layers** | Stacks infrastructure overlays, FIRMS fires, VIIRS night lights and OpenStreetMap borders, imports KML, KMZ, GeoJSON and GPX, and follows My Maps and GeoConfirmed. |
 | ✅ **Personal layers** | Draws markers, lines and areas on any map from a blank layer, a file or a My Maps link, fed by the case's places, proofs and files, styled with the analyst's own icons, colours and a case key. |
 | ✅ **Layers over time** | Dates every edit and reads a layer on any day with what changed ringed, on its time strip and on the Timeline. |
+| ✅ **Names placed by hand** | Drags a line's or an area's name where it reads best, kept in the layer and written there on the Map, plates, the globe and notebook maps. |
 | ✅ **Layers everywhere** | Offers every layer in Compare, Detect and Horizon from one menu, reopens each case on its layers, and downloads a layer as KMZ, KML or GeoJSON or sends a day of it to My Maps. |
 | ✅ **Map plates** | Lays a page out round the case's maps (legend, scale, north, inset, marks, tables, credits) from ten ready plates or a template, on vector, topographic, 3D or Sentinel-2 grounds, with looks, text styles, layer roles and features left out one by one or outside a period. |
 | ✅ **Played plates** | Plays a plate by day (or by hour on layers dated to the minute) and slide, each with its annotations, framing, transitions and case videos, and exports a PNG, a print PDF, an MP4, a GIF or an evolution sheet while the analyst works on. |

@@ -49,9 +49,10 @@ _LINK = re.compile(r"^https?://[^\s]+$", re.IGNORECASE)
 #: The marker fields an edit may clear by sending nothing for them.
 #: How a feature is drawn beyond its colour and icon, each cleared by sending nothing:
 #: its line's width and dash, an area's fill and its opacity, an arrow on a line's end,
-#: a marker's size, its name on the map and that name's size.
+#: a marker's size, its name on the map, that name's size, and where a line's or an
+#: area's name is written when the analyst put it somewhere by hand (`label_at`).
 STYLE_FIELDS = ("line_width", "line_dash", "line_arrow", "area_fill", "fill_opacity", "marker_size",
-                "label", "label_size")
+                "label", "label_size", "label_at")
 #: How sure the analyst is of a feature, which a dash says on the map.
 CONFIDENCES = ("confirmed", "probable", "claimed")
 CLEARABLE = ("date", "status", "bearing", "links", "provenance", "confidence", "credit", "picture") + STYLE_FIELDS
@@ -383,6 +384,13 @@ def drawing(spec: dict[str, Any], case: Case | None = None) -> dict[str, Any]:
                 properties[field] = group[field]
         if (group.get("labels") and properties.get("label") != "off") or properties.get("label") == "on":
             properties["show_label"] = True
+        # a line's or an area's name put by hand is drawn there; a point's sits under its marker
+        if "label_at" in properties:
+            place = None if "Point" in str(feature["geometry"].get("type") or "") else label_place_of(properties["label_at"])
+            if place is None:
+                properties.pop("label_at")
+            else:
+                properties["label_at"] = place
         # an event fades after its day on a tracked layer, where a lasting thing stays
         if group.get("events"):
             properties["event"] = True
@@ -768,6 +776,32 @@ def apply_style(target: dict[str, Any], changes: dict[str, Any]) -> None:
         if not math.isfinite(number) or not low <= number <= high:
             raise maplayers.LayerError(f"{field.replace('_', ' ')} is between {low:g} and {high:g}")
         target[field] = round(number, 2)
+    if "label_at" in changes:
+        if changes["label_at"] in (None, "", []):
+            # its name goes back to the place the map finds for it
+            target.pop("label_at", None)
+        else:
+            target["label_at"] = label_place(changes["label_at"])
+
+
+def label_place_of(value: Any) -> list[float] | None:
+    """A name's place as a feature keeps it, `[lon, lat]`, or None for anything else."""
+    if not isinstance(value, (list, tuple)) or len(value) != 2:
+        return None
+    if any(isinstance(number, bool) or not isinstance(number, (int, float)) for number in value):
+        return None
+    lon, lat = float(value[0]), float(value[1])
+    if not (math.isfinite(lon) and math.isfinite(lat) and -180 <= lon <= 180 and -90 <= lat <= 90):
+        return None
+    return [round(lon, 7), round(lat, 7)]
+
+
+def label_place(value: Any) -> list[float]:
+    """Where an edit puts a line's or an area's name, checked: two numbers on the map."""
+    place = label_place_of(value)
+    if place is None:
+        raise maplayers.LayerError("put the name at a longitude from -180 to 180 and a latitude from -90 to 90")
+    return place
 
 
 # -- a layer followed over time ------------------------------------------------------
@@ -1192,7 +1226,8 @@ def update_marker(case: Case, layer: str, key: str, changes: dict[str, Any]) -> 
 
     With no `at`, a feature with a history changes on every day it has, which
     only what never changed by date can (`_undated`); on a layer no longer
-    tracked its latest state is corrected.
+    tracked its latest state is corrected. `label_at`, where a line's or an
+    area's name is written, is one place for every day.
     """
     with case.lock:
         spec = _spec(case, layer)
@@ -1235,6 +1270,8 @@ def update_marker(case: Case, layer: str, key: str, changes: dict[str, Any]) -> 
             elif field == "unlink" and value:
                 properties.pop("entity_id", None)
         fields = {field: value for field, value in changes.items() if field in CLEARABLE}
+        if fields.get("label_at") not in (None, "", []) and "Point" in str(stored["geometry"]["type"]):
+            raise maplayers.LayerError("a point's name is written under its marker")
         # A tracked feature's status is part of what it was at a moment.
         status: Any = _KEEP
         if (moment is not None or properties.get("states")) and "status" in fields:
@@ -1429,7 +1466,9 @@ def edit_selection(case: Case, layer: str, keys: list[str], *, changes: dict[str
     item's, and says how many it left where they were. On a tracked layer `at`
     dates a move or a status, as for one feature (`update_marker`), and `start`
     and `end` give every feature the same first and last day, or `end_unknown`
-    the same unknown end; one that cannot take it refuses the whole edit.
+    the same unknown end; one that cannot take it refuses the whole edit. A name
+    put by hand (`label_at`) moves with a move sent with no date, and stays where
+    it was put when the move is dated to one day.
     """
     changes = dict(changes)
     start, end = changes.pop("start", None), changes.pop("end", None)
@@ -1445,6 +1484,8 @@ def edit_selection(case: Case, layer: str, keys: list[str], *, changes: dict[str
             raise maplayers.LayerError("select existing features exactly once")
         if "geometry" in changes:
             raise maplayers.LayerError("move a selection with its handle")
+        if changes.get("label_at") not in (None, "", []):
+            raise maplayers.LayerError("put one feature's name at a time")
         target = _group(spec, changes["group"]) if "group" in changes else None
         if remove:
             batch = _undo(spec, removed=[{"index": i, "feature": f}
@@ -1463,15 +1504,30 @@ def edit_selection(case: Case, layer: str, keys: list[str], *, changes: dict[str
                 return point
             return [shifted(child) for child in node]
 
+        def carried(properties: dict[str, Any]) -> None:
+            """A name put by hand goes with its feature moved with no date, or back to its middle off the map."""
+            place = label_place_of(properties.get("label_at"))
+            if place is None or not offset:
+                return
+            lon, lat = place[0] + offset[0], place[1] + offset[1]
+            if -180 <= lon <= 180 and -90 <= lat <= 90:
+                properties["label_at"] = [round(lon, 7), round(lat, 7)]
+            else:
+                properties.pop("label_at", None)
+
         _restyle_icon(case, layer, spec, [by_key[key]["properties"] for key in keys], changes)
         moving = [key for key in keys if offset and not by_key[key]["properties"].get("entity_id")]
         undo = _undo(spec, before=[{"key": key, "geometry": copy.deepcopy(by_key[key]["geometry"]),
-                                    "time": _time_fields(by_key[key])}
+                                    "time": _time_fields(by_key[key]),
+                                    "label_at": copy.deepcopy(by_key[key]["properties"].get("label_at"))}
                                    for key in moving]) if moving else None
         moments = {key: _timed(spec, by_key[key], at) for key in keys}
         for key in moving:
             feature = by_key[key]
             dated = moments[key]
+            # one place for every day: a move dated to one leaves it where it was put
+            if at is None:
+                carried(feature["properties"])
             if dated is None and not feature["properties"].get("states"):
                 feature["geometry"]["coordinates"] = shifted(feature["geometry"]["coordinates"])
                 continue
@@ -1604,11 +1660,16 @@ def restore_selection(case: Case, layer: str, batch_id: str) -> dict[str, Any]:
         for entry in batch.get("geometry") or []:
             if entry["key"] in by_key:
                 by_key[entry["key"]]["geometry"] = entry["geometry"]
+                properties = by_key[entry["key"]]["properties"]
                 if "time" in entry:
-                    properties = by_key[entry["key"]]["properties"]
                     for field in ("states", "date", "date_end", "status", "end_unknown"):
                         properties.pop(field, None)
                     properties.update(copy.deepcopy(entry["time"]))
+                # a moved feature's name goes back with it
+                if entry.get("label_at") is not None:
+                    properties["label_at"] = entry["label_at"]
+                elif "label_at" in entry:
+                    properties.pop("label_at", None)
         groups = _groups(spec)
         ids = {group["id"] for group in groups}
         for item in batch["items"]:
@@ -1739,6 +1800,8 @@ def split(case: Case, layer: str, key: str, at: int | None = None) -> dict[str, 
             twin["geometry"] = piece
             twin["properties"]["key"] = uuid.uuid4().hex
             twin["properties"]["name"] = maplayers._text(f"{name} {number}".strip(), maplayers.MAX_NAME)
+            # a name put by hand stays with the first part; the others find their own middles
+            twin["properties"].pop("label_at", None)
             copies.append(twin)
         batch = _undo(spec, added=[twin["properties"]["key"] for twin in copies],
                       before=[{"key": key, "geometry": copy.deepcopy(geometry)}])

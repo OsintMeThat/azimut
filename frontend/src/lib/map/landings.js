@@ -6,12 +6,14 @@
  * every map drawing the layer put it where it landed at once, and the saved
  * layer replaces that drawing when it comes back. A refused edit goes back.
  *
- * A landing is `{ keys, offset?, geometry?, properties?, feature? }`: `offset`
- * shifts every point of those features by `[dLon, dLat]`, `geometry` replaces
- * their shape, and `properties` is added to what they say, a null taking a field
- * off. `feature` is one just added (a pin put down, a shape ended with Enter),
- * drawn until the layer read back holds it under its own key.
+ * A landing is `{ keys, offset?, dated?, geometry?, properties?, feature? }`:
+ * `offset` shifts every point of those features by `[dLon, dLat]`, and a name put
+ * by hand with them unless the move is `dated` to one day (`layerediting.edit_selection`);
+ * `geometry` replaces their shape, and `properties` is added to what they say, a
+ * null taking a field off. `feature` is one just added (a pin put down, a shape
+ * ended with Enter), drawn until the layer read back holds it under its own key.
  */
+import { namePlace } from './layerNames.js';
 
 /** The group fields a feature takes when it sets none of its own (`layerediting.GROUP_STYLE`). */
 const GROUP_STYLE = ['line_dash', 'line_arrow', 'area_fill', 'fill_opacity'];
@@ -50,7 +52,17 @@ const shift = (node, [dx, dy]) => (typeof node?.[0] === 'number'
 function put(feature, landing) {
   let { geometry, properties } = feature;
   if (landing.geometry) geometry = landing.geometry;
-  else if (landing.offset && geometry) geometry = { ...geometry, coordinates: shift(geometry.coordinates, landing.offset) };
+  else if (landing.offset && geometry) {
+    geometry = { ...geometry, coordinates: shift(geometry.coordinates, landing.offset) };
+    const name = landing.dated ? null : namePlace(properties);
+    if (name) {
+      const [lon, lat] = shift(name, landing.offset);
+      properties = { ...properties };
+      // as the layer saves it: a name a move would carry off the map goes back to its middle
+      if (Math.abs(lon) <= 180 && Math.abs(lat) <= 90) properties.label_at = [lon, lat];
+      else delete properties.label_at;
+    }
+  }
   if (landing.properties) {
     properties = { ...properties, ...landing.properties };
     for (const [field, value] of Object.entries(landing.properties)) if (value === null) delete properties[field];

@@ -1,5 +1,6 @@
 import { changedBy, momentLabel, momentNow, moments as momentsOf, seenAt } from '../../../lib/map/layerHistory.js';
 import { drawnAs, landAt } from '../../../lib/map/landings.js';
+import { nameMoves } from '../../../lib/map/layerNames.js';
 import { attribution } from '../../../lib/map/addedLayers.js';
 import { destination } from '../../../lib/measure.js';
 
@@ -69,6 +70,9 @@ export function createMyLayersState({ api, layers, caseId, notify, reloadCase,
   // Once let go, `landing` names the edit that draws them where they landed: raw, so it
   // stays the very landing the maps hold rather than a copy of it.
   let dragging = $state.raw(null);
+  // A line's or an area's name being carried on the map, `{ name, key, landing? }`: the maps
+  // leave it off while its copy moves, and once let go, `landing` puts it where it landed.
+  let naming = $state.raw(null);
   /** Edits drawn where they landed while they save (`lib/map/landings.js`), each
    *  `{ name, keys, offset | geometry | properties, saved, sha, claimed }`. */
   let landings = $state.raw([]);
@@ -147,7 +151,8 @@ export function createMyLayersState({ api, layers, caseId, notify, reloadCase,
       confidence: properties.confidence ?? '', credit: properties.credit ?? '', picture: properties.picture ?? '',
       ...Object.fromEntries(STYLE.map((field) => [field, properties[field] ?? ''])) };
   };
-  /** How a feature is drawn beyond its colour and icon (`layerediting.STYLE_FIELDS`). */
+  /** How a feature is drawn beyond its colour and icon (`layerediting.STYLE_FIELDS`), but
+   *  where its name was put by hand, which the map sets and the sheet only takes back (`placeName`). */
   const STYLE = ['line_width', 'line_dash', 'line_arrow', 'area_fill', 'fill_opacity', 'marker_size', 'label', 'label_size'];
   const NUMBERS = ['line_width', 'fill_opacity', 'marker_size', 'label_size'];
   /** The fields an edit clears by sending nothing, as the backend's `CLEARABLE`. */
@@ -225,6 +230,7 @@ export function createMyLayersState({ api, layers, caseId, notify, reloadCase,
     placing = false;
     lassoing = false;
     dragging = null;
+    naming = null;
     landings = [];
     pasting = null;
     linking = false;
@@ -586,7 +592,7 @@ export function createMyLayersState({ api, layers, caseId, notify, reloadCase,
       : before.type.includes('Polygon') ? 'area' : 'line';
     const offset = before.type === 'Selection' ? [before.rings[0][0][0] - before.origin[0], before.rings[0][0][1] - before.origin[1]] : null;
     // drawn where it lands the moment it is ended, a new shape too, the save catching up behind
-    const [landing, task] = offset ? land({ keys: before.keys, offset }, (path) => api.post(`${path}/selection`, { keys: before.keys, offset, ...stamp() }), null, { label })
+    const [landing, task] = offset ? land({ keys: before.keys, offset, dated: !undated() }, (path) => api.post(`${path}/selection`, { keys: before.keys, offset, ...stamp() }), null, { label })
       : key ? land({ keys: [key], geometry: shape }, (path) => api.patch(`${path}/markers/${key}`, { geometry: shape, ...stamp() }), null, { label })
         : land({ keys: [], feature: added(shape, { colour: draft.colour, symbol: 'pin', ...(group ? { group } : {}) }) },
           (path) => api.post(`${path}/shapes`, body), null, { label });
@@ -820,7 +826,7 @@ export function createMyLayersState({ api, layers, caseId, notify, reloadCase,
      * a map has drawn them there (`landed`), or the save answers when none draws them.
      */
     moveFeatures(keys, offset) {
-      const [landing, task] = land({ keys, offset }, (path) => api.post(`${path}/selection`, { keys, offset, ...stamp() }), (answer) => {
+      const [landing, task] = land({ keys, offset, dated: !undated() }, (path) => api.post(`${path}/selection`, { keys, offset, ...stamp() }), (answer) => {
         const moved = keys.length - (answer.kept ?? 0);
         if (answer.kept && !moved) notify('Linked markers stay on the case item they follow', 'info', 4000);
         else undoable(answer.kept ? `Moved ${moved}; ${answer.kept} linked stay on their case item` : moved === 1 ? 'Moved' : `Moved ${moved} features`);
@@ -867,7 +873,31 @@ export function createMyLayersState({ api, layers, caseId, notify, reloadCase,
     /** A map is drawing this landing and will say once it has (`landed`). */
     claim(landing) { landing.claimed = true; },
     /** A map has drawn this landing: the dragged copies over it can go. */
-    landed(landing) { if (dragging?.landing === landing) dragging = null; },
+    landed(landing) {
+      if (dragging?.landing === landing) dragging = null;
+      if (naming?.landing === landing) naming = null;
+    },
+    /** The name being carried on the map, `{ name, key, landing? }`, or null. */
+    get naming() { return naming; },
+    /** A line's or an area's name is picked up on the map (`key`), or put down where it was (null). */
+    carryName(key) { naming = key && editor ? { name: editor.name, key } : null; },
+    /**
+     * Write a line's or an area's name at `[lon, lat]`, or back where the map puts it
+     * with null: one place for every day, drawn at once, one edit Ctrl+Z takes back.
+     * False for a point, whose name sits under its marker.
+     */
+    placeName(key, at) {
+      const feature = features.find((one) => one.properties.key === key);
+      if (!editor || loading || !feature || !nameMoves(feature)) { if (naming?.key === key) naming = null; return Promise.resolve(false); }
+      const place = at ? [Number(at[0].toFixed(7)), Number(at[1].toFixed(7))] : null;
+      const [landing, task] = land({ keys: [key], properties: { label_at: place } },
+        (path) => api.patch(`${path}/markers/${key}`, { label_at: place }), null, { label: 'name place' });
+      if (naming?.key === key) naming = { ...naming, landing };
+      return task.then((answer) => {
+        if (naming?.landing === landing && (!landing.saved || !landing.claimed)) naming = null;
+        return !!answer;
+      });
+    },
     merge() {
       const keys = [...selection];
       return enqueue((path) => api.post(`${path}/merge`, { keys }), (answer) => {

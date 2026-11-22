@@ -32,13 +32,17 @@
  *   did draw the source's picture, the ones that did not draw our tinted shape.
  *   That split is also the fallback. An icon that 404s, decodes badly or never
  *   arrives costs its features nothing beyond the pictogram they would have had.
- * - **No map labels.** A feature's name lives in the hover reading and in the
- *   card, both resolved through the engine's own hit testing.
+ * - **No map labels** on a layer somebody else made: a feature's name lives in
+ *   the hover reading and in the card, both resolved through the engine's own hit
+ *   testing. A personal layer writes the names its analyst asks for, and a line's
+ *   or an area's name put by hand is a point of its own in the source
+ *   (`layerNames.js`), read by the names alone.
  */
 import { Popup } from 'maplibre-gl';
 import { paths } from '../../components/Icon.svelte';
 import { wrapLon } from '../coords.js';
 import { categoryColour } from './addedLayers.js';
+import { namePoints, placedName } from './layerNames.js';
 import { drawMarker, drawOwnMarker, isBadge, MARKER_PIXELS, ownMarkerSide } from './markerGlyphs.js';
 import { loadPicture } from './ownIcons.js';
 
@@ -461,11 +465,13 @@ export function sameFeatures(a, b) {
  *   the live map lets overlapping ones drop out far out with a dot for each, since a
  *   page that leaves the app must not lose a point the reader cannot zoom in to find;
  *   and its areas may be hatched, as a plate draws a claimed ground.
+ * @param {string} [opts.id] the layer this draws, by its name, so the editor can ask
+ *   which of its names is under the pointer (`namesUnder`)
  */
 export function createAddedLayer(
   engine,
   { card, popup = defaultPopup, iconUrl = null, loadIcon = defaultLoadIcon, menu = null,
-    editable = false, history = false, page = false, buildBadge = badgeImage, buildPersonal = personalMarkerImage, buildHatch = hatchImage,
+    editable = false, history = false, page = false, id = null, buildBadge = badgeImage, buildPersonal = personalMarkerImage, buildHatch = hatchImage,
     buildOwn = ownMarkerImage, readPicture = loadPicture } = {}
 ) {
   const map = engine.impl;
@@ -508,7 +514,9 @@ export function createAddedLayer(
   const DRAWN = [...DECOR, ...PAINTED, ...(editable ? [ARROW] : [])];
   // A merge makes multi-part lines and areas, so each kind names both forms.
   const POINT = ['in', ['geometry-type'], ['literal', ['Point', 'MultiPoint']]];
-  const NOW = ['!', ['any', ['has', '$trail'], ['has', '$change']]];
+  // what the layer is now, never its past nor a name put by hand, which only the names read
+  const PRESENT = ['!', ['any', ['has', '$trail'], ['has', '$change']]];
+  const NOW = ['!', ['any', ['has', '$trail'], ['has', '$change'], ['has', '$label']]];
   const BASE = {
     [FILL]: ['all', NOW, ['in', ['geometry-type'], ['literal', ['Polygon', 'MultiPolygon']]]],
     [LINE]: ['all', NOW, ['!', POINT], ['!', ['has', '$dash']]],
@@ -522,7 +530,8 @@ export function createAddedLayer(
     // question of whether this feature's own icon is registered.
     [MARK]: ['all', NOW, POINT, ['!', ['has', '$own']]],
     [OWN]: ['all', NOW, POINT, ['has', '$own']],
-    [LABEL]: ['all', NOW, ['has', 'show_label'], ['!=', ['get', 'name'], '']],
+    // a name put by hand is written at its own point, its feature's own place left empty
+    [LABEL]: ['all', PRESENT, ['has', 'show_label'], ['!=', ['get', 'name'], ''], ['any', ['has', '$label'], ['!', ['has', '$placed']]]],
     [HIT]: ['all', NOW, POINT, ['!', ['has', '$own']]],
     [HIT_OWN]: ['all', NOW, POINT, ['has', '$own']],
     [CHANGE_FILL]: ['has', '$change'],
@@ -537,6 +546,8 @@ export function createAddedLayer(
   const pictures = new Map();
   // Features held off the map while the editor drags their copies (`hide`).
   let hiddenKeys = new Set();
+  // …and names, while the editor carries one elsewhere (`hideNames`).
+  let hiddenNames = new Set();
   let lastFilter = [[], null];
 
   let built = false;
@@ -728,11 +739,13 @@ export function createAddedLayer(
         'text-field': ['get', 'name'],
         'text-font': LABEL_FONT,
         'text-size': ['coalesce', ['get', 'label_size'], 11],
-        'text-anchor': 'top',
-        'text-offset': [0, 0.9],
+        // under its mark, or on the very point a name was put at by hand, which wins a contested spot
+        'text-anchor': ['case', ['has', '$label'], 'center', 'top'],
+        'text-offset': ['case', ['has', '$label'], ['literal', [0, 0]], ['literal', [0, 0.9]]],
         'text-max-width': 10,
         'text-optional': true,
         'symbol-placement': 'point',
+        'symbol-sort-key': ['case', ['has', '$label'], 0, 1],
       },
       paint: { 'text-color': '#fff', 'text-halo-color': 'rgba(0, 0, 0, 0.85)', 'text-halo-width': 1.3 },
     });
@@ -747,7 +760,8 @@ export function createAddedLayer(
         paint: { 'circle-radius': ['max', 10, ['*', ['case', ['has', '$native'], 22, 13], ['coalesce', ['get', 'icon_scale'], 1]]], 'circle-opacity': 0 } });
     }
     if (!owners.has(map)) owners.set(map, new Map());
-    owners.get(map).set(prefix, { layers: PAINTED, active: () => interactive && shown });
+    owners.get(map).set(prefix, { layers: PAINTED, active: () => interactive && shown,
+      id, names: editable ? LABEL : null, visible: () => shown });
     bindHandlers();
     if (!shown) applyVisibility();
   }
@@ -811,7 +825,7 @@ export function createAddedLayer(
       .filter((owner) => owner.active()).flatMap((owner) => owner.layers)
       .filter((id) => map.getLayer(id));
     const hits = map.queryRenderedFeatures(event.point, { layers: painted });
-    const top = hits.find((hit) => hit.geometry?.type === 'Point') ?? hits[0];
+    const top = hits.find(isMark) ?? hits[0];
     return !top || PAINTED.includes(top.layer?.id);
   }
 
@@ -940,9 +954,10 @@ export function createAddedLayer(
      *
      * `held`, when given, is what `hide` holds off the map from now on, changed
      * with the data rather than before it: features the editor dragged come back
-     * where they landed, never for a frame where they were.
+     * where they landed, never for a frame where they were. `heldNames` does the
+     * same for the names `hideNames` holds off.
      */
-    async set(data, { categories: groups = [], hidden = [], period = null, attribution, held = null } = {}) {
+    async set(data, { categories: groups = [], hidden = [], period = null, attribution, held = null, heldNames = null } = {}) {
       build(attribution);
       categories = groups;
       collection = data;
@@ -1012,8 +1027,12 @@ export function createAddedLayer(
           ...(badge ? { $own: badge, ...(native ? { $native: true } : { $badge: true }) } : ready.has(feature.properties?.icon)
             ? { $own: sourceIconName(iconUrl(feature.properties.icon)) }
             : null),
+          // its name is written at the point the analyst put it at, never where the map would find it one
+          ...(editable && placedName(feature) ? { $placed: true } : null),
         },
       }; });
+      // a name put by hand is a point of its own, read by the names alone
+      const names = editable && !unchanged ? namePoints(features) : [];
       const arrows = editable && !unchanged ? features.flatMap((feature) => {
         const heads = arrowHeads(feature);
         if (!heads.length) return [];
@@ -1031,7 +1050,7 @@ export function createAddedLayer(
         const symbols = [...new Set(features.map((feature) => feature.properties.symbol))]
           .filter((symbol) => ['circle', 'star', 'flag'].includes(symbol));
         registerIcons(map, iconImage, symbols);
-        map.getSource(SOURCE)?.setData({ type: 'FeatureCollection', features });
+        map.getSource(SOURCE)?.setData({ type: 'FeatureCollection', features: names.length ? [...features, ...names] : features });
       }
       for (const layer of DRAWN) {
         if ([OWN, HIT, HIT_OWN, BEARING, LABEL, CHANGE_FILL, NEW_LINE, NEW_RING, FILL_HATCH, ARROW].includes(layer) || !map.getLayer(layer)) continue;
@@ -1040,6 +1059,7 @@ export function createAddedLayer(
         map.setPaintProperty(layer, property, featureColour(colour));
       }
       if (held) hiddenKeys = new Set(held);
+      if (heldNames) hiddenNames = new Set(heldNames);
       filtered = '';
       this.filter(hidden, period);
     },
@@ -1075,15 +1095,17 @@ export function createAddedLayer(
     filter(hidden = [], period = null) {
       lastFilter = [hidden, period];
       if (!built) return;
-      const key = JSON.stringify([hidden, period?.start ?? '', period?.end ?? '', [...hiddenKeys]]);
+      const key = JSON.stringify([hidden, period?.start ?? '', period?.end ?? '', [...hiddenKeys], [...hiddenNames]]);
       if (key === filtered) return;
       filtered = key;
       const rules = [visibilityFilter(hidden), periodFilter(period), hiddenKeys.size
         ? ['!', ['in', ['get', 'key'], ['literal', [...hiddenKeys]]]] : null].filter(Boolean);
       const rule = rules.length > 1 ? ['all', ...rules] : rules[0];
+      const names = hiddenNames.size ? ['!', ['in', ['get', 'key'], ['literal', [...hiddenNames]]]] : null;
       for (const layer of DRAWN) {
         if (!map.getLayer(layer)) continue;
-        map.setFilter(layer, rule ? ['all', BASE[layer], rule] : BASE[layer]);
+        const own = layer === LABEL && names ? (rule ? ['all', rule, names] : names) : rule;
+        map.setFilter(layer, own ? ['all', BASE[layer], own] : BASE[layer]);
       }
       closeCard();
     },
@@ -1125,7 +1147,7 @@ export function createAddedLayer(
       const layers = PAINTED.filter((id) => map.getLayer(id));
       if (!layers.length) return null;
       const hits = map.queryRenderedFeatures([[x - reach, y - reach], [x + reach, y + reach]], { layers });
-      const top = hits.find((hit) => hit.geometry?.type === 'Point') ?? hits[0];
+      const top = hits.find(isMark) ?? hits[0];
       return top ? featureAt(collection, top.properties?.index) : null;
     },
 
@@ -1155,6 +1177,17 @@ export function createAddedLayer(
       const next = new Set(keys);
       if (next.size === hiddenKeys.size && [...next].every((key) => hiddenKeys.has(key))) return;
       hiddenKeys = next;
+      if (built) this.filter(...lastFilter);
+    },
+
+    /**
+     * Hold these features' names off the map, or none: the editor draws the one the
+     * analyst carries until the layer writes it where it was let go.
+     */
+    hideNames(keys = []) {
+      const next = new Set(keys);
+      if (next.size === hiddenNames.size && [...next].every((key) => hiddenNames.has(key))) return;
+      hiddenNames = next;
       if (built) this.filter(...lastFilter);
     },
 
@@ -1208,6 +1241,25 @@ export function createAddedLayer(
       built = false;
     },
   };
+}
+
+/** A hit on a mark of the map, which wins over a line or an area under it; a name put by hand is its shape's. */
+const isMark = (hit) => hit.geometry?.type === 'Point' && !hit.properties?.$label;
+
+/**
+ * The keys of the features of layer `id` (`createAddedLayer`'s option) whose names
+ * are drawn within `reach` pixels of `point`, the map's own pixels, topmost first:
+ * what the editor carries elsewhere when one is pressed. Empty while that layer
+ * draws no names or is off.
+ */
+export function namesUnder(engine, { x, y }, id, reach = 3) {
+  const map = engine?.impl;
+  if (!map?.queryRenderedFeatures || id === null || id === undefined) return [];
+  const names = [...(owners.get(map)?.values() ?? [])]
+    .filter((owner) => owner.id === id && owner.names && owner.visible() && map.getLayer(owner.names)).map((owner) => owner.names);
+  if (!names.length) return [];
+  const hits = map.queryRenderedFeatures([[x - reach, y - reach], [x + reach, y + reach]], { layers: names });
+  return [...new Set(hits.map((hit) => hit.properties?.key).filter((key) => typeof key === 'string' && key))];
 }
 
 /**
