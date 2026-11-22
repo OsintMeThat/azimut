@@ -7,6 +7,7 @@
    * press only (`lib/githubPages.js`). When the token may not do it, the way on
    * github.com shows in its place (`lib/githubPagesSetup.js`).
    */
+  import BusyLabel from './BusyLabel.svelte';
   import Icon from './Icon.svelte';
   import { WEBSITE_HELP as HELP } from '../lib/websiteSetup.js';
   import { createRepository, turnOnPages } from '../lib/githubPages.js';
@@ -50,12 +51,12 @@
     {detail || (needs === 'repository' ? `There is no repository ${repository} yet.` : `Pages is off for ${repository}.`)}</p>
   <div class="press">
     {#if needs === 'repository'}
-      <button type="button" class="btn btn-sm btn-primary" onclick={press} disabled={busy} title={HELP.githubCreate}>
-        {busy ? 'Creating…' : 'Create the repository'}</button>
+      <button type="button" class="btn btn-sm btn-primary" onclick={press} disabled={busy} aria-busy={busy} title={HELP.githubCreate}>
+        <BusyLabel {busy} text="Creating…">Create the repository</BusyLabel></button>
       <span class="said">{CREATE_SAID}</span>
     {:else}
-      <button type="button" class="btn btn-sm btn-primary" onclick={press} disabled={busy} title={HELP.githubPagesOn}>
-        {busy ? 'Turning on…' : 'Turn on Pages'}</button>
+      <button type="button" class="btn btn-sm btn-primary" onclick={press} disabled={busy} aria-busy={busy} title={HELP.githubPagesOn}>
+        <BusyLabel {busy} text="Turning on…">Turn on Pages</BusyLabel></button>
       <span class="said">{PAGES_ON_SAID}{github?.base ? ` It will live at ${github.base}` : ''}</span>
     {/if}
   </div>

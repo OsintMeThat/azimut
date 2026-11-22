@@ -126,11 +126,11 @@ describe('the bar of panels', () => {
     expect(bar.getAttribute('aria-label')).toBe('Website');
     expect(bar.getAttribute('data-guide')).toBe('settings.website-hub');
     expect([...bar.querySelectorAll('[role="tab"]')].map((node) => node.textContent.trim())).toEqual(
-      ['Overview', 'Identity', 'Hosting', 'Articles', 'Readers', 'Upkeep', 'Make it yours', 'WordPress']);
+      ['Overview', 'Identity', 'Hosting', 'Articles', 'Categories', 'Readers', 'Upkeep', 'Make it yours', 'WordPress']);
     expect(bar.querySelector('.sep').nextElementSibling.textContent.trim()).toBe('WordPress');
     expect(tab('Overview').getAttribute('aria-selected')).toBe('true');
     expect(panel('overview').hidden).toBe(false);
-    for (const id of ['identity', 'hosting', 'articles', 'readers', 'upkeep', 'yours', 'wordpress']) expect(panel(id).hidden, id).toBe(true);
+    for (const id of ['identity', 'hosting', 'articles', 'categories', 'readers', 'upkeep', 'yours', 'wordpress']) expect(panel(id).hidden, id).toBe(true);
     await open('Hosting');
     expect(tab('Hosting').getAttribute('aria-selected')).toBe('true');
     expect(tab('Overview').getAttribute('aria-selected')).toBe('false');
@@ -270,7 +270,7 @@ describe('the hero', () => {
 describe('the Overview', () => {
   const steps = () => [...panel('overview').querySelectorAll('.check li')];
   const stepOf = (label) => steps().find((node) => node.textContent.includes(label));
-  const tips = () => [...panel('overview').querySelectorAll('.hub-col h3')].map((node) => node.textContent);
+  const cards = () => [...panel('overview').querySelectorAll('.hub-card h3')].map((node) => node.textContent);
 
   it('shows the four steps from a note to a reader, naming the repository and the site', async () => {
     await show();
@@ -285,14 +285,14 @@ describe('the Overview', () => {
   it('says the state of each step, asks for a read of what it cannot tell, and opens the panel where it is set', async () => {
     applyPrefs({ site_title: 'Octo Desk', signature: true });
     await show();
-    expect(steps().map((node) => node.dataset.state)).toEqual(['done', 'done', 'todo', 'todo', 'unknown', 'unknown']);
+    expect(steps().map((node) => node.dataset.state)).toEqual(['done', 'unknown', 'done', 'todo', 'todo', 'unknown', 'unknown']);
     expect(stepOf('Connect GitHub Pages').textContent).toContain('octo/articles on main');
     expect(stepOf('Name the site').textContent).toContain('Octo Desk');
     expect(stepOf('Pick the site').textContent).toContain('Uses your Publishing logo for now.');
     expect(stepOf('Count readers').querySelector('.step-name').textContent).toBe('Count readers · optional');
     expect(stepOf('Count readers').textContent).toContain('Nobody is counted.');
     expect(stepOf('A legal notice').textContent).toContain('Read the site, in Articles, to tell.');
-    expect(panel('overview').textContent).toContain('2 of 6 done. 2 need a read of the site.');
+    expect(panel('overview').textContent).toContain('2 of 7 done. 3 need a read of the site.');
     expect(panel('overview').querySelector('[role="progressbar"]').getAttribute('aria-valuenow')).toBe('2');
     button('Identity', stepOf('Pick the site')).click();
     await settle();
@@ -310,24 +310,76 @@ describe('the Overview', () => {
     await show();
     await readSite({ ...READ, legal: 'legal-notice/' });
     await open('Overview');
-    expect(steps().map((node) => node.dataset.state)).toEqual(['done', 'done', 'done', 'done', 'done', 'done']);
+    expect(steps().map((node) => node.dataset.state)).toEqual(['done', 'done', 'done', 'done', 'done', 'done', 'done']);
     expect(stepOf('A legal notice').textContent).toContain('legal-notice/ is on the site.');
     expect(stepOf('Publish a first article').textContent).toContain('2 articles on the site.');
-    expect(panel('overview').textContent).toContain('6 of 6 done.');
+    expect(panel('overview').textContent).toContain('7 of 7 done.');
+    // Azimut's home is online: the step opens it
+    const see = [...stepOf('Put your home page online').querySelectorAll('a')].find((node) => node.textContent.trim() === 'See it');
+    expect(see.getAttribute('href')).toBe('https://octo.github.io/articles/');
+    expect(see.getAttribute('target')).toBe('_blank');
     expect(panel('overview').textContent).not.toContain('need a read');
   });
 
-  it('gives the three tips, and one more once the site passes four fifths of what Pages serves, opening Hosting', async () => {
+  it('puts the home page online on its press, only while the read finds none, then shows the way to it', async () => {
     await show();
-    expect(tips()).toEqual(['Try before you announce', 'Take an article down', 'Change the name or the logo']);
-    expect(panel('overview').textContent).toContain('Publish as Unlisted');
+    expect(stepOf('Put your home page online').textContent).toContain('Read the site, in Articles, to tell.');
+    expect(button('Put it online', panel('overview'))).toBeUndefined();
+    await readSite({ ...READ, home: 'none', items: [], categories: [], marked: [] });
+    await open('Overview');
+    const step = stepOf('Put your home page online');
+    expect(step.dataset.state).toBe('todo');
+    expect(step.textContent).toContain('The site has no home page yet.');
+    let answer;
+    post.mockImplementation((path) => (path === '/api/publishing/github/site' ? new Promise((resolve) => { answer = resolve; }) : Promise.resolve({})));
+    button('Put it online', step).click();
+    await settle();
+    // it is Update the site, which says so with a spinner here and in the hero
+    expect(post).toHaveBeenCalledWith('/api/publishing/github/site');
+    const press = button('Putting it online', stepOf('Put your home page online'));
+    expect(press.disabled).toBe(true);
+    expect(press.getAttribute('aria-busy')).toBe('true');
+    expect(press.getAttribute('title')).toBe("Write Azimut's home page, its feed and its sitemap on the site now");
+    answer({ ok: true, updated: true, commit: 'c'.repeat(40), written: ['articles.json', 'azimut-site/site.css', 'feed.xml', 'index.html', 'sitemap.xml'], warnings: [] });
+    await settle();
+    expect(stepOf('Put your home page online').dataset.state).toBe('done');
+    expect(stepOf('Put your home page online').textContent).toContain("Azimut's home page is online.");
+    expect([...stepOf('Put your home page online').querySelectorAll('a')].some((node) => node.textContent.trim() === 'See it')).toBe(true);
+    expect(siteRead.data.home).toBe('azimut');
+  });
+
+  it('never offers to put a home page over the analyst\'s own, and says what went wrong under the step', async () => {
+    await show();
+    await readSite({ ...READ, home: 'yours' });
+    await open('Overview');
+    expect(stepOf('Put your home page online').textContent).toContain('Your own home page is online.');
+    expect(button('Put it online', panel('overview'))).toBeUndefined();
+    await readSite({ ...READ, home: 'none' });
+    await open('Overview');
+    post.mockImplementation(async (path) => {
+      if (path === '/api/publishing/github/site') throw new Error('GitHub refused the token.');
+      return {};
+    });
+    button('Put it online', stepOf('Put your home page online')).click();
+    await settle();
+    expect(stepOf('Put your home page online').dataset.state).toBe('todo');
+    expect(stepOf('Put your home page online').querySelector('.failed').textContent).toBe('GitHub refused the token.');
+  });
+
+  it('holds no tips but the checklist, and one card beside it once the site passes four fifths of what Pages serves', async () => {
+    await show();
+    // what each press does is said beside it in its own panel, not in cards here
+    expect(cards()).toEqual(['Your site, step by step']);
+    expect(panel('overview').querySelector('.hub-card.tip')).toBeNull();
+    expect(panel('overview').querySelector('.hub-grid')).toBeNull();
     // 700 MB of the gigabyte is under four fifths
     await readSite({ ...READ, size: { site: 700 * MB, repository: null } });
     await open('Overview');
-    expect(tips()).toHaveLength(3);
+    expect(cards()).toEqual(['Your site, step by step']);
     await readSite({ ...READ, size: { site: 850 * MB, repository: null } });
     await open('Overview');
-    expect(tips()[0]).toBe('The site is getting big');
+    expect(cards()).toEqual(['Your site, step by step', 'The site is getting big']);
+    expect(panel('overview').querySelector('.hub-grid')).not.toBeNull();
     expect(panel('overview').textContent).toContain('It weighs 850 MB, 83% of the 1 GB GitHub Pages serves.');
     button('See the limits', panel('overview')).click();
     await settle();
@@ -339,6 +391,13 @@ describe('Identity', () => {
   const name = () => panel('identity').querySelector('#hub-site-name');
   const tagline = () => panel('identity').querySelector('#hub-site-tagline');
   const preview = () => panel('identity').querySelector('.paper');
+
+  it('says beside the name and the logo when a change of them reaches the site', async () => {
+    await show();
+    const card = panel('identity').querySelector('section[aria-label="Site"]');
+    expect(card.querySelector('.when-said').textContent)
+      .toBe('A new name or logo reaches the lists at the next publish or Update the site, and an article\'s bar when it is published again.');
+  });
 
   it('saves the name and the tagline once the field is left, spaces gathered, and says what an empty name falls back to', async () => {
     const { savePrefs: save } = await show();
@@ -670,7 +729,7 @@ describe('Readers', () => {
     expect(choices.map((node) => node.textContent.trim())).toEqual(['Off', 'GoatCounter', 'Cloudflare Web Analytics']);
     expect(radio('Off').getAttribute('aria-checked')).toBe('true');
     expect(target.querySelector('input[aria-label="GoatCounter site code"]')).toBeNull();
-    expect(target.querySelector('input[aria-label="Cloudflare token"]')).toBeNull();
+    expect(target.querySelector('input[aria-label="Cloudflare site token"]')).toBeNull();
     expect(stats().getAttribute('data-guide')).toBe('settings.statistics');
     expect(stats().textContent).toContain('Nobody is counted');
     expect(stats().textContent).toContain('starts with the next publish or Update the site');
@@ -716,7 +775,7 @@ describe('Readers', () => {
     await settle();
     expect(save).toHaveBeenLastCalledWith({ site_stats: 'cloudflare' });
     expect(target.querySelector('input[aria-label="GoatCounter site code"]')).toBeNull();
-    const token = target.querySelector('input[aria-label="Cloudflare token"]');
+    const token = target.querySelector('input[aria-label="Cloudflare site token"]');
     expect(stats().textContent).toContain('Free. Loads one script from static.cloudflareinsights.com and counts with no cookie.');
     const steps = stats().querySelector('details.hub-how');
     expect(steps.open).toBe(true);
@@ -734,7 +793,7 @@ describe('Readers', () => {
     type(token, 'too short');
     await settle();
     expect(save).not.toHaveBeenCalled();
-    expect(stats().querySelector('[role="alert"]').textContent).toContain('does not read as a Cloudflare token');
+    expect(stats().querySelector('[role="alert"]').textContent).toContain('does not read as a Cloudflare site token');
     type(token, `<script defer src='https://static.cloudflareinsights.com/beacon.min.js' data-cf-beacon='{"token": "${CODE}"}'></script>`);
     await settle();
     expect(save).toHaveBeenLastCalledWith({ site_stats_token: CODE });
@@ -806,28 +865,50 @@ describe('Upkeep: Update the site', () => {
     expect(post).not.toHaveBeenCalled();
   });
 
-  it('asks GitHub on its press only, shows it working in both places, and says the site is up to date', async () => {
+  it('asks GitHub on its press only, shows it working on both presses, and says the site is up to date', async () => {
     await show();
     expect(section('Update the site').getAttribute('data-guide')).toBe('settings.update-site');
     expect(update().disabled).toBe(false);
     expect(post).not.toHaveBeenCalled();
     let answer;
     post.mockImplementation(() => new Promise((resolve) => { answer = resolve; }));
-    update().click();
+    const presses = [update(), button('Update the site', hero())];
+    presses[0].click();
     await settle();
     expect(post).toHaveBeenCalledWith('/api/publishing/github/site');
-    expect(said().dataset.state).toBe('busy');
-    expect(said().textContent).toContain('Updating octo/articles…');
-    expect(update().disabled).toBe(true);
-    // the hero says it too, and cannot be pressed again
-    expect(hero().textContent).toContain('Updating octo/articles…');
-    expect(button('Update the site', hero()).disabled).toBe(true);
+    // the press says it, with a spinner; the hero's is the same press, and cannot be pressed again
+    for (const press of presses) {
+      expect(press.textContent.trim()).toBe('Updating…');
+      expect(press.querySelector('.busy-spin')).not.toBeNull();
+      expect(press.disabled).toBe(true);
+      expect(press.getAttribute('aria-busy')).toBe('true');
+    }
+    expect(said().textContent.trim()).toBe('');
     answer({ ok: true, updated: false, commit: '', written: [], warnings: [], categories: [] });
     await settle();
     expect(said().textContent).toContain('The site is up to date.');
     expect(said().dataset.state).toBe('ok');
     expect(hero().querySelector('[data-state="ok"]').textContent).toMatch(/^Updated today at \d\d:\d\d$/);
-    expect(update().disabled).toBe(false);
+    for (const press of presses) {
+      expect(press.textContent.trim()).toBe('Update the site');
+      expect(press.disabled).toBe(false);
+    }
+  });
+
+  it('is the same press again after a failed update', async () => {
+    await show();
+    let fail;
+    post.mockImplementation(() => new Promise((_, reject) => { fail = reject; }));
+    const press = update();
+    press.click();
+    await settle();
+    expect(press.textContent.trim()).toBe('Updating…');
+    fail(new Error('GitHub refused the token.'));
+    await settle();
+    expect(press.textContent.trim()).toBe('Update the site');
+    expect(press.disabled).toBe(false);
+    expect(press.querySelector('.busy-spin')).toBeNull();
+    expect(said().dataset.state).toBe('error');
   });
 
   it('is pressed from the hero as well, the same press, saying when', async () => {

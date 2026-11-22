@@ -508,6 +508,29 @@ def test_a_map_page_keeps_its_own_counter_over_the_sites(client, monkeypatch, tm
     assert 'data-counter="mine"' in page and 'name="az-counter" content="mine"' in page and "desk.goatcounter" not in page
 
 
+def test_only_an_unlisted_page_asks_search_engines_to_leave_it_out(client, tmp_path):
+    cid = make_case(client, "Roles")
+    made = make_note(client, cid, title="Port strike", content="Smoke over the pier.\n")
+    case = Case.open(cid)
+    where = "https://octo.github.io/articles/port-strike/"
+    desk = site.Site(title="The Desk", address="https://octo.github.io/articles/")
+
+    def head(placement: site.Placement | None) -> str:
+        page = notes_web.build(case, made["id"], base_url=where, placement=placement).files["index.html"].decode()
+        return page[:page.index("</head>")]
+
+    noindex = '<meta name="robots" content="noindex">'
+    assert noindex in head(site.Placement(desk, role="unlisted"))
+    for role in ("article", "page"):
+        assert "robots" not in head(site.Placement(desk, role=role)), role
+    # a web folder exported to disk is no page of the site
+    assert "robots" not in head(None)
+    # left to the look, the look's role decides
+    client.put(f"/api/cases/{cid}/notes/{made['id']}/look", json={"role": "unlisted"})
+    assert noindex in head(site.Placement(desk))
+    assert "robots" not in head(site.Placement(desk, role="article"))
+
+
 def test_a_note_asked_to_be_a_map_page_that_holds_no_map_is_an_article_in_its_card(client, tmp_path):
     cid = make_case(client, "NoMap")
     made = make_note(client, cid, title="No map", content="Words.\n")
@@ -536,16 +559,16 @@ def test_a_folder_changed_on_github_is_warned_before_and_after_never_blocked(cli
     url = note["url"]
     # nothing published yet: nothing to be changed
     never = client.post(f"{url}/check", json={"short_name": "port-strike"}).json()
-    assert never == {"checked": True, "exists": False, "edited": False, "warning": ""}
+    assert never == {"checked": True, "exists": False, "edited": False, "warning": "", "taken": None, "free": ""}
     first = client.post(url, json={"short_name": "port-strike"}).json()
     assert first["edited"] is False
     record = client.get(f"/api/cases/{note['cid']}/notes/{note['note']}/editions").json()["editions"][0]
     assert re.fullmatch(r"[0-9a-f]{40}", record["tree"])
     assert client.post(f"{url}/check", json={"short_name": "port-strike"}).json() == {
-        "checked": True, "exists": True, "edited": False, "warning": ""}
+        "checked": True, "exists": True, "edited": False, "warning": "", "taken": None, "free": ""}
     _edit(fake, "port-strike/index.html", b"changed by hand")
     warned = client.post(f"{url}/check", json={"short_name": "port-strike"}).json()
-    assert warned == {"checked": True, "exists": True, "edited": True, "warning": site.HAND_EDITED}
+    assert warned == {"checked": True, "exists": True, "edited": True, "warning": site.HAND_EDITED, "taken": None, "free": ""}
     assert site.HAND_EDITED == "This folder was changed on GitHub since you published it: publishing replaces it."
     # the press goes through, replaces the folder, and says it did
     again = client.post(url, json={"short_name": "port-strike"})
@@ -563,11 +586,57 @@ def test_a_folder_changed_on_github_is_warned_before_and_after_never_blocked(cli
     assert client.post(url, json={"short_name": "port-strike"}).json()["edited"] is False
 
 
+def test_an_address_another_note_holds_is_named_before_it_is_replaced(client, fake, note):
+    """The check tells the note's own folder from another's by the note's records, names what the
+    other holds by its card, and offers a short name nothing holds; a deliberate press still replaces it."""
+    fake.make_repo(files={"port-strike-2/index.html": b"<p>taken too</p>", "port-strike-2/share.jpg": b"jpg"})
+    _connect(client)
+    other = _new_note(client, title="Harbour fire")
+    assert client.post(other["url"], json={"short_name": "port-strike"}).status_code == 200
+    taken = client.post(f"{note['url']}/check", json={"short_name": "port-strike"}).json()
+    assert taken == {"checked": True, "exists": True, "edited": False, "warning": "",
+                     "taken": {"title": "Harbour fire", "ours": True}, "free": "port-strike-3"}
+    # the other note's own folder is no other's to it
+    assert client.post(f"{other['url']}/check", json={"short_name": "port-strike"}).json()["taken"] is None
+    # a free address says nothing
+    assert client.post(f"{note['url']}/check", json={"short_name": "port-strike-9"}).json()["taken"] is None
+    # the analyst has the last word: the press replaces it, and the folder is this note's from then on
+    assert client.post(note["url"], json={"short_name": "port-strike"}).status_code == 200
+    assert _card(fake.files(), "port-strike")["title"] == "Port strike"
+    assert client.post(f"{note['url']}/check", json={"short_name": "port-strike"}).json()["taken"] is None
+
+
+def test_an_address_holding_a_page_names_it_by_its_title_and_says_what_azimut_did_not_make(client, fake, note):
+    fake.make_repo(files={
+        "harbour/index.html": b"<html><head><title>Harbour &amp; fire\n  log</title></head><body></body></html>",
+        "atlas/index.html": b"<html><head><title>The atlas</title></head></html>", "atlas/share.jpg": b"jpg",
+        "bare/readme.txt": b"no page", "license": b"a file at the root"})
+    _connect(client)
+    asked = len(fake.requests)
+    said = {short: client.post(f"{note['url']}/check", json={"short_name": short}).json()
+            for short in ("harbour", "atlas", "bare", "license", "free-one")}
+    # the check reads, and writes nothing
+    assert {request.method for request in fake.requests[asked:]} == {"GET"}
+    # a folder of the analyst's own: named by its page, and not Azimut's, which a publish refuses
+    assert said["harbour"]["taken"] == {"title": "Harbour & fire log", "ours": False}
+    assert said["harbour"]["free"] == "harbour-2"
+    # a folder Azimut made that holds no card, such as a map page from before cards: its page's title
+    assert said["atlas"]["taken"] == {"title": "The atlas", "ours": True}
+    # nothing to read a title from: the folder's name
+    assert said["bare"]["taken"] == {"title": "bare", "ours": False}
+    # a file of that name at the site's root holds the address too
+    assert said["license"] == {"checked": True, "exists": False, "edited": False, "warning": "",
+                               "taken": {"title": "license", "ours": False}, "free": "license-2"}
+    assert said["free-one"]["taken"] is None and said["free-one"]["free"] == ""
+    refused = client.post(note["url"], json={"short_name": "harbour"})
+    assert refused.status_code == 502 and "that Azimut did not make" in refused.json()["detail"]
+
+
 def test_the_check_before_publishing_is_a_read_and_says_what_is_missing(client, fake, note):
     fake.make_repo(pages=False)
     _connect(client)
     said = client.post(f"{note['url']}/check", json={"short_name": "port-strike"}).json()
-    assert said == {"checked": False, "exists": False, "edited": False, "warning": ""}
+    assert said == {"checked": False, "exists": False, "edited": False, "warning": "", "taken": None, "free": ""}
     assert [request.method for request in fake.requests] == ["GET"] * len(fake.requests)
     assert client.post(f"{note['url']}/check", json={"short_name": "../x"}).status_code == 422
     fake.make_repo()
@@ -809,7 +878,7 @@ def test_the_settings_backup_carries_the_site_and_reads_what_it_cannot_as_none(c
 def test_the_website_settings_are_read_and_written_with_the_other_preferences(client):
     assert {key: client.get("/api/settings").json()[key] for key in site.PREF_KEYS} == {
         "site_title": "", "site_tagline": "", "site_credit_azimut": True, "site_stats": "",
-        "site_stats_code": "", "site_stats_token": ""}
+        "site_stats_code": "", "site_stats_token": "", "site_stats_account": "", "site_stats_tag": ""}
     for bad in ({"site_stats": "tracker"}, {"site_stats_code": "No Good"}, {"site_stats_token": "bad token!"},
                 {"site_title": "x" * 121}):
         assert client.put("/api/settings/prefs", json=bad).status_code == 422, bad

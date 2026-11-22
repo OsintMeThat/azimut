@@ -24,13 +24,29 @@ const picture = (id, label) => ({
   id, type: 'media', label, attrs: { path: `media/${id}.jpg` }, provenance: { by: 'user', at, status: 'confirmed' },
 });
 
+// a page this note published to the site before, so the dialog starts on what the look says rather than Unlisted
+const HERE = { at: '2026-11-18T19:00:00Z', edition: 'public', format: 'github', file: 'port-strike', address: ADDRESS,
+  repository: 'octo/articles', branch: 'main', path: 'port-strike', commit: COMMIT, sha256: 'a'.repeat(64), text_sha256: 'b'.repeat(64) };
+
 async function shoot(page, name) {
   if (!SHOTS) return;
   mkdirSync(SHOTS, { recursive: true });
   await page.screenshot({ path: `${SHOTS}/${name}.png` });
 }
 
-async function stand(page, { pages = true, categories = [], edited = false, look = { style: 'report' }, editions = [], settings = {}, offer = null } = {}) {
+/** The same picture in both themes. */
+async function shootBoth(page, name) {
+  if (!SHOTS) return;
+  for (const theme of ['dark', 'light']) {
+    await page.evaluate((value) => { document.documentElement.dataset.theme = value; }, theme);
+    await page.waitForTimeout(300);
+    await shoot(page, `${name}-${theme}`);
+  }
+  await page.evaluate(() => { document.documentElement.dataset.theme = 'dark'; });
+}
+
+async function stand(page, { pages = true, categories = [], edited = false, look = { style: 'report' }, editions = [], settings = {}, offer = null,
+  taken = null } = {}) {
   const catalog = [note('n1', 'Port strike'), picture('e_pier', 'Pier at dawn'), picture('e_harbour', 'Harbour')];
   const github = { account: 'octo', repo: 'articles', branch: 'main', site: '', base: 'https://octo.github.io/articles/',
     token: { set: true, hint: '…wxyz' }, categories };
@@ -80,8 +96,11 @@ async function stand(page, { pages = true, categories = [], edited = false, look
     }
     if (path === '/n1/github/check') {
       state.checks += 1;
+      const short = request.postDataJSON().short_name;
+      const held = taken && short === 'port-strike';
       return route.fulfill({ json: { checked: true, exists: true, edited,
-        warning: edited ? 'This folder was changed on GitHub since you published it: publishing replaces it.' : '' } });
+        warning: edited ? 'This folder was changed on GitHub since you published it: publishing replaces it.' : '',
+        taken: held ? taken : null, free: held ? 'port-strike-2' : '' } });
     }
     if (path === '/n1/github') {
       const body = request.postDataJSON();
@@ -150,7 +169,17 @@ test('a note goes live on GitHub Pages on one press, and its editions list the p
   await expect(dialog.getByRole('button', { name: 'Publish to GitHub Pages' })).toBeDisabled();
   await short.fill('port-strike');
 
+  // the press says it is at work, and waits
+  await page.route(`**/api/cases/${CASE_ID}/notes/n1/github`, async (route) => {
+    await new Promise((resolve) => setTimeout(resolve, 700));
+    return route.fallback();
+  });
   await dialog.getByRole('button', { name: 'Publish to GitHub Pages' }).click();
+  const publishing = dialog.getByRole('button', { name: 'Publishing…' });
+  await expect(publishing).toBeDisabled();
+  await expect(publishing.locator('.busy-spin')).toBeVisible();
+  await expect(dialog.locator('.sending')).toContainText('Making the folder and sending it to octo/articles…');
+  await shoot(page, 'dialog-github-publishing');
   await expect(dialog).toContainText('GitHub is building the page…');
   await shoot(page, 'dialog-github-building');
   const live = dialog.locator('.line.done');
@@ -160,9 +189,11 @@ test('a note goes live on GitHub Pages on one press, and its editions list the p
   await expect(open).toHaveAttribute('href', ADDRESS);
   await expect(open).toHaveAttribute('target', '_blank');
   await expect(dialog.getByRole('button', { name: 'Copy link' })).toBeVisible();
-  // its maps go live online unless the dialog's Keep its maps offline is ticked
+  // its maps go live online unless the dialog's Keep its maps offline is ticked; never published to the site, it went Unlisted
   expect(state.published).toEqual([{ short_name: 'port-strike', diagrams: {}, round_pov: false, changes: '', offline_maps: false,
-    category: '', role: 'article', place: null }]);
+    category: '', role: 'unlisted' }]);
+  // the press asked what the address holds first
+  expect(state.checks).toBe(1);
   await shoot(page, 'dialog-github-live');
   await dialog.getByRole('button', { name: 'Done' }).click();
 
@@ -194,12 +225,19 @@ test('Pages turned off is turned on from the dialog by its own press', async ({ 
 });
 
 test('the dialog says what the note is on the site: its category, Article or Page and its list picture', async ({ page }) => {
-  const state = await stand(page, { look: { style: 'report', category: 'Harbour' }, categories: ['Conflict Watch'] });
+  const state = await stand(page, { look: { style: 'report', category: 'Harbour' }, categories: ['Conflict Watch'], editions: [HERE] });
   const dialog = await openWebFolder(page);
-  // started from the note's look, suggesting what the site and the note hold, reaching nothing
-  const category = dialog.locator('#export-category');
-  await expect(category).toHaveValue('Harbour');
-  await expect(dialog.locator('#export-categories option')).toHaveCount(2);
+  // started from the note's look, the list offering none, what the site and the note hold and a new one, reaching nothing
+  const category = dialog.getByRole('combobox', { name: 'Category' });
+  await expect(category).toHaveText('Harbour');
+  const options = page.getByRole('listbox', { name: 'Category' }).getByRole('option');
+  await category.click();
+  await expect(options).toHaveText(['No category', 'Conflict Watch', 'Harbour', 'New category…']);
+  await expect(options.filter({ hasText: 'Harbour' })).toHaveAttribute('aria-selected', 'true');
+  await shootBoth(page, 'dialog-github-category');
+  await page.keyboard.press('Escape');
+  await expect(options).toHaveCount(0);
+  await expect(dialog).toBeVisible();
   const role = dialog.getByRole('radiogroup', { name: 'On the site' });
   await expect(role.getByRole('radio', { name: 'Article' })).toHaveAttribute('aria-checked', 'true');
   // no title in Settings › Website: the site is called by its account, and the line says so, with a way to name it
@@ -213,11 +251,29 @@ test('the dialog says what the note is on the site: its category, Article or Pag
   // the site's own categories are read on a press of their own
   await dialog.getByRole('button', { name: 'Read the site' }).click();
   await expect(dialog).toContainText('2 categories on the site.');
-  await expect(dialog.locator('#export-categories option')).toHaveCount(3);
+  await category.click();
+  await expect(options).toHaveText(['No category', 'Investigations', 'Conflict Watch', 'Harbour', 'New category…']);
+  await page.keyboard.press('Escape');
   expect(state.presses).toEqual(['/api/publishing/github/categories']);
 
-  // a new category typed, a picture of the list picked and kept in the look as it is picked
-  await category.fill('Port news');
+  // walked by the keys: letters filter, Enter picks
+  await category.focus();
+  await page.keyboard.press('i');
+  await page.keyboard.press('n');
+  await expect(options).toHaveText(['Investigations', 'New category…']);
+  await page.keyboard.press('Enter');
+  await expect(category).toHaveText('Investigations');
+  await expect(category).toBeFocused();
+
+  // a new category typed in the field New category… opens, a picture of the list picked and kept in the look as it is picked
+  await page.keyboard.press('ArrowDown');
+  await page.keyboard.press('End');
+  await page.keyboard.press('Enter');
+  const fresh = dialog.getByPlaceholder('New category');
+  await expect(fresh).toBeFocused();
+  await fresh.fill('Port news');
+  await fresh.press('Enter');
+  await expect(category).toHaveText('Port news');
   const reads = state.lookReads;
   await dialog.getByRole('button', { name: 'The cover picture' }).click();
   await dialog.getByPlaceholder('Find a picture…').fill('pier');
@@ -237,27 +293,55 @@ test('the dialog says what the note is on the site: its category, Article or Pag
   await expect(category).toHaveCount(0);
   await expect(dialog.getByRole('button', { name: 'Pier at dawn' })).toHaveCount(0);
   await role.getByRole('radio', { name: 'Article' }).click();
-  await expect(category).toHaveValue('Port news');
+  await expect(category).toHaveText('Port news');
   await dialog.getByRole('button', { name: 'Publish to GitHub Pages' }).click();
   await expect(dialog.locator('.line.done')).toContainText(`Live at ${ADDRESS}`);
   expect(state.published).toHaveLength(1);
   expect(state.published[0]).toMatchObject({ short_name: 'port-strike', category: 'Port news', role: 'article' });
-  // a note published for the first time is never checked against a folder
-  expect(state.checks).toBe(0);
+  expect(state.checks).toBe(1);
+});
+
+test('a guest\'s name and picture are kept with the note as they are left, for every role', async ({ page }) => {
+  const state = await stand(page, { look: { style: 'report' } });
+  const dialog = await openWebFolder(page);
+  const author = dialog.locator('#export-author');
+  await expect(author).toHaveValue('');
+  await author.fill('Jane Guest');
+  await author.press('Tab');
+  await expect.poll(() => state.looks.length).toBe(1);
+  expect(state.looks[0]).toMatchObject({ style: 'report', author: 'Jane Guest' });
+  await dialog.getByRole('button', { name: 'No picture' }).click();
+  await dialog.getByPlaceholder('Find a picture…').fill('pier');
+  await dialog.getByRole('button', { name: 'Pier at dawn' }).click();
+  await expect.poll(() => state.looks.length).toBe(2);
+  expect(state.looks[1]).toMatchObject({ author: 'Jane Guest', author_image: 'e_pier' });
+  const role = dialog.getByRole('radiogroup', { name: 'On the site' });
+  for (const name of ['Page', 'Unlisted']) {
+    await role.getByRole('radio', { name }).click();
+    await expect(author).toHaveValue('Jane Guest');
+  }
+  await shoot(page, 'dialog-github-author');
 });
 
 test('an article is placed on the site\'s map by hand or by the note\'s offer, never filled without a press', async ({ page }) => {
   const offer = { lat: 12.7250041, lon: 43.5075, name: 'Bab al-Mandab', from: 'place', label: 'Bab al-Mandab' };
-  const state = await stand(page, { offer });
+  const state = await stand(page, { offer, editions: [HERE] });
   const dialog = await openWebFolder(page);
-  const place = dialog.getByRole('group', { name: 'Place on the site\'s map' });
+  const place = dialog.getByRole('group', { name: 'Coordinates for this article (optional)' });
   const coords = place.getByRole('textbox', { name: 'Coordinates' });
   const name = place.getByRole('textbox', { name: 'Place name' });
   const said = place.getByRole('status');
+  // folded under More options, shut as the dialog opens
+  const more = dialog.getByRole('button', { name: 'More options' });
+  await expect(more).toHaveAttribute('aria-expanded', 'false');
+  await expect(place).toHaveCount(0);
+  await more.click();
+  await expect(more).toHaveAttribute('aria-expanded', 'true');
+  await expect(place).toContainText('They show the article as a pin on the site\'s map.');
   // empty, and the note's one place offered as a press with its rule, filled by nothing
   await expect(coords).toHaveValue('');
   await expect(name).toHaveValue('');
-  await expect(said).toHaveText('Optional. Left empty, the article has no pin on the site\'s map.');
+  await expect(said).toHaveText('');
   const use = place.getByRole('button', { name: 'Use 12.7250, 43.5075 · Bab al-Mandab' });
   await expect(use).toBeVisible();
   await expect(use).toHaveAttribute('title', 'Fill the place with the point this note names');
@@ -292,9 +376,12 @@ test('an article is placed on the site\'s map by hand or by the note\'s offer, n
 
 test('a place the note keeps opens in the dialog, and emptied it goes up as none', async ({ page }) => {
   const kept = { lat: -33.9, lon: 18.42, name: 'Cape Town' };
-  const state = await stand(page, { look: { style: 'report', place: kept }, offer: { lat: 1, lon: 2, name: 'Elsewhere', from: 'map', label: 'A map' } });
+  const state = await stand(page, { look: { style: 'report', place: kept }, offer: { lat: 1, lon: 2, name: 'Elsewhere', from: 'map', label: 'A map' },
+    editions: [HERE] });
   const dialog = await openWebFolder(page);
-  const place = dialog.getByRole('group', { name: 'Place on the site\'s map' });
+  // a place kept opens More options: a value is never hidden
+  await expect(dialog.getByRole('button', { name: 'More options' })).toHaveAttribute('aria-expanded', 'true');
+  const place = dialog.getByRole('group', { name: 'Coordinates for this article (optional)' });
   await expect(place.getByRole('textbox', { name: 'Coordinates' })).toHaveValue('-33.9, 18.42');
   await expect(place.getByRole('textbox', { name: 'Place name' })).toHaveValue('Cape Town');
   await expect(place.getByRole('status')).toHaveText('Reads as 33.9° S, 18.42° E.');
@@ -308,7 +395,7 @@ test('a place the note keeps opens in the dialog, and emptied it goes up as none
 });
 
 test('the dialog names the site by its title, and says nothing of a name it has', async ({ page }) => {
-  await stand(page, { settings: { site_title: 'Octo Desk' } });
+  await stand(page, { settings: { site_title: 'Octo Desk' }, editions: [HERE] });
   const dialog = await openWebFolder(page);
   await expect(dialog).toContainText('Goes on Octo Desk\'s home page and in its feed.');
   await expect(dialog).not.toContainText('has no name yet');
@@ -326,9 +413,7 @@ test('the dialog says the site has no name yet, and opens Settings on Identity t
 });
 
 test('a folder changed on GitHub is said before it is replaced, and replaced on one more press', async ({ page }) => {
-  const published = { at: '2026-11-18T19:00:00Z', edition: 'public', format: 'github', file: 'port-strike', address: ADDRESS,
-    repository: 'octo/articles', branch: 'main', path: 'port-strike', commit: COMMIT, sha256: 'a'.repeat(64), text_sha256: 'b'.repeat(64) };
-  const state = await stand(page, { edited: true, editions: [published] });
+  const state = await stand(page, { edited: true, editions: [HERE] });
   const dialog = await openWebFolder(page);
   await dialog.getByRole('button', { name: 'Publish to GitHub Pages' }).click();
   const warning = dialog.getByRole('alert').filter({ hasText: 'This folder was changed on GitHub since you published it' });
@@ -358,4 +443,46 @@ test('what the site had to say of itself is listed under the page once published
   await dialog.getByRole('button', { name: 'Publish to GitHub Pages' }).click();
   await expect(dialog.locator('.line.done')).toContainText(`Live at ${ADDRESS}`);
   await expect(dialog.getByRole('list', { name: 'To mind' })).toContainText('The site holds too many files for Azimut to read');
+});
+
+test('an address another note holds is named before it is replaced, and Replace it publishes over it', async ({ page }) => {
+  const state = await stand(page, { taken: { title: 'Harbour fire', ours: true } });
+  const dialog = await openWebFolder(page);
+  await dialog.getByRole('button', { name: 'Publish to GitHub Pages' }).click();
+  const warning = dialog.getByRole('alert').filter({ hasText: 'This address already holds' });
+  await expect(warning.locator('p')).toHaveText('This address already holds “Harbour fire”. Replace it?');
+  await expect(dialog.getByRole('button', { name: 'Publish anyway' })).toBeVisible();
+  await shootBoth(page, 'dialog-github-taken');
+  expect(state.published).toEqual([]);
+  await warning.getByRole('button', { name: 'Replace it' }).click();
+  await expect(dialog.locator('.line.done')).toContainText(`Live at ${ADDRESS}`);
+  expect(state.published).toHaveLength(1);
+  expect(state.published[0]).toMatchObject({ short_name: 'port-strike' });
+  expect(state.checks).toBe(1);
+});
+
+test('Pick another address leaves the other note\'s page and fills in a free short name', async ({ page }) => {
+  const state = await stand(page, { taken: { title: 'Harbour fire', ours: true } });
+  const dialog = await openWebFolder(page);
+  await dialog.getByRole('button', { name: 'Publish to GitHub Pages' }).click();
+  const warning = dialog.getByRole('alert').filter({ hasText: 'This address already holds' });
+  await warning.getByRole('button', { name: 'Pick another address' }).click();
+  await expect(warning).toHaveCount(0);
+  const short = dialog.getByRole('textbox', { name: 'Short name' });
+  await expect(short).toHaveValue('port-strike-2');
+  await expect(short).toBeFocused();
+  await dialog.getByRole('button', { name: 'Publish to GitHub Pages' }).click();
+  await expect(dialog.locator('.line.done')).toContainText('Live at https://octo.github.io/articles/port-strike-2/');
+  expect(state.published[0]).toMatchObject({ short_name: 'port-strike-2' });
+  expect(state.checks).toBe(2);
+});
+
+test('draws the publish window\'s site fields and More options open, dark and light', async ({ page }) => {
+  test.skip(!SHOTS, 'Pictures only when AZIMUT_SHOTS names a folder');
+  await stand(page, { look: { style: 'report', category: 'Conflict Watch' }, categories: ['Conflict Watch', 'Methods & Tools'], editions: [HERE],
+    offer: { lat: 12.7250041, lon: 43.5075, name: 'Bab al-Mandab', from: 'place', label: 'Bab al-Mandab' } });
+  const dialog = await openWebFolder(page);
+  await shootBoth(page, 'dialog-github-folded');
+  await dialog.getByRole('button', { name: 'More options' }).click();
+  await shootBoth(page, 'dialog-github-more');
 });

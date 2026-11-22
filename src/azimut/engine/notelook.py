@@ -25,7 +25,9 @@ never reads it. A map page may name the GoatCounter site that counts its readers
 which only its web folder calls, once read online. And what the note is on the analyst's site
 (`category`, `role`, `list_image`): the one category its list files it under, whether it is an
 article in the list, a page off it or an unlisted page that is in no list, and the picture its line in the list shows in place of the
-cover's (`engine/site.py`); the PDF and the page itself never read them. So is where the note stands on a
+cover's (`engine/site.py`); the PDF and the page itself never read them. Who wrote it (`author`, `author_image`),
+for a note written by someone else: the web page is signed with that name and the picture beside it, and the
+site's lists name them; the PDF never reads them. So is where the note stands on a
 map of the site's articles (`place`), which most notes never have and none is given by itself
 (`engine/siteplace.py` only offers one). And which list of sources the document ends on
 (`sources_list`): the generated one, the note's own section, or both; and the same for the
@@ -103,6 +105,8 @@ SOURCES_STYLES: tuple[str, ...] = ("academic", "web", "short")
 Role = Literal["", "article", "page", "unlisted"]
 #: The longest a category's name is, in characters.
 CATEGORY_MAX = 60
+#: The longest an article's author is, in characters: one line.
+AUTHOR_MAX = 120
 #: How far north or south a note's place on the site's map may stand: web maps draw in Web
 #: Mercator, which stops at about 85 degrees.
 PLACE_LAT_MAX = 85
@@ -129,7 +133,7 @@ ANNEXES: tuple[str, ...] = ("geolocations", "credits", "method", "limits", "edit
 #: Keys a look writes only once they leave their default, so a look that never used
 #: them is stored, served and bundled exactly as an older Azimut wrote it.
 LATE_KEYS = ("font", "size", "sources", "web", "sources_style", "link_check", "sources_list", "method_list",
-             "geolocations_list", "signed", "counter", "category", "role", "list_image")
+             "geolocations_list", "signed", "counter", "category", "role", "list_image", "author", "author_image")
 #: The page bands under the same rule: one with nothing in it is not written.
 BAND_KEYS = ("header", "footer")
 #: The longest a header or footer slot is, in characters: one line of a page's edge.
@@ -428,6 +432,12 @@ class NoteLook(BaseModel):
     #: A case media entity id: the picture the note's line in the site's list shows in place of
     #: the cover's, or "" for the cover picture.
     list_image: str = Field(default="", max_length=64, pattern=r"^[A-Za-z0-9_-]*$")
+    #: Who wrote the note, when it is not the analyst: its web page is signed with this name and the
+    #: site's lists name it. "" is the analyst, as Settings › Publishing names them.
+    author: str = Field(default="", max_length=AUTHOR_MAX)
+    #: A case media entity id: the author's picture, shown small and round beside their name; "" for none.
+    #: Never a logo in its place: the site's logo is already in its bar.
+    author_image: str = Field(default="", max_length=64, pattern=r"^[A-Za-z0-9_-]*$")
     #: Where the note stands on a map of the site's articles, None for nowhere: the analyst's
     #: alone to set, and written only once set.
     place: NotePlace | None = None
@@ -467,9 +477,9 @@ class NoteLook(BaseModel):
     def article_is_the_default(cls, value: Any) -> Any:
         return "" if value == "article" else value
 
-    @field_validator("category", mode="before")
+    @field_validator("category", "author", mode="before")
     @classmethod
-    def one_line_category(cls, value: Any) -> Any:
+    def one_line_words(cls, value: Any) -> Any:
         return " ".join(value.split()) if isinstance(value, str) else value
 
     @property
@@ -526,6 +536,13 @@ class TemplateLook(NoteLook):
     def no_place(cls, value: NotePlace | None) -> NotePlace | None:
         if value is not None:
             raise ValueError("a template cannot hold an article's place")
+        return value
+
+    @field_validator("author", "author_image")
+    @classmethod
+    def no_author(cls, value: str) -> str:
+        if value:
+            raise ValueError("a template cannot hold an article's author")
         return value
 
 
@@ -617,8 +634,8 @@ def save(case: "Case", note_id: str, look: NoteLook) -> None:
 
 
 def cover_image_ids(look: NoteLook | None) -> list[str]:
-    """The media a look shows on its cover and in the site's list, which the note derives
-    from as it does from a picture in its text."""
+    """The media a look shows on its cover, in the site's list and beside its author's name, which
+    the note derives from as it does from a picture in its text."""
     if look is None:
         return []
-    return [one for one in dict.fromkeys((look.cover.image, look.list_image)) if one]
+    return [one for one in dict.fromkeys((look.cover.image, look.list_image, look.author_image)) if one]

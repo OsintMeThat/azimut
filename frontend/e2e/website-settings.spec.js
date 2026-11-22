@@ -4,10 +4,11 @@ import { CASE_ID, installAppFixture } from './app.fixture.js';
 
 /**
  * Settings › Website as the site's hub, end to end in the browser: the hero over a bar of panels
- * (Overview, Identity, Hosting, Articles, Readers, Upkeep, Make it yours, WordPress) walked by click
- * and by keyboard, the site's name and logo with their preview, a read of the site and a delete
- * through its confirmation, a refused one, the limits, how readers are counted, Update the site, the
- * Legal notice and Privacy pages, and Unlisted in the publish dialog. The server and GitHub are stood
+ * (Overview, Identity, Hosting, Articles, Categories, Readers, Upkeep, Make it yours, WordPress) walked by
+ * click and by keyboard, the site's name and logo with their preview, a read of the site and a delete
+ * through its confirmation, a refused one, an article's category on its line, the categories added,
+ * renamed and deleted, the home page put online, the limits, how readers are counted, Update the site,
+ * the Legal notice and Privacy pages, and Unlisted in the publish dialog. The server and GitHub are stood
  * in for: what is checked is what the browser asks, and that nothing reaches GitHub before a press.
  *
  * `AZIMUT_SHOTS` names a folder the last test draws every panel into, dark and light, at 1280 wide.
@@ -63,7 +64,7 @@ async function openWebsite(page, options = { github }) {
 }
 
 /** The server's side of the hub's presses, each recorded as it is asked. */
-async function standIn(page, { read = READ, deleted = null } = {}) {
+async function standIn(page, { read = READ, deleted = null, changed = null } = {}) {
   const asked = [];
   await page.route('**/api/publishing/github/site/read', (route) => {
     asked.push(`${route.request().method()} read`);
@@ -75,6 +76,23 @@ async function standIn(page, { read = READ, deleted = null } = {}) {
     const answer = typeof deleted === 'function' ? deleted(body) : deleted;
     return route.fulfill(answer ?? { json: { ok: true, commit: 'c'.repeat(40), folder: body.folder, removed: 4,
       written: ['articles.json', 'feed.xml', 'sitemap.xml'], warnings: [] } });
+  });
+  // the changes of categories: one commit each, the categories the server keeps then; an added one stays added
+  let added = [];
+  for (const path of ['categories/rename', 'categories/delete', 'site/category']) {
+    await page.route(`**/api/publishing/github/${path}`, (route) => {
+      const body = route.request().postDataJSON();
+      asked.push(`${route.request().method()} ${path} ${JSON.stringify(body)}`);
+      const answer = typeof changed === 'function' ? changed(path, body) : changed;
+      return route.fulfill(answer ?? { json: { ok: true, commit: 'c'.repeat(40), changed: 1,
+        written: ['articles.json', 'feed.xml', 'index.html'], warnings: [], categories: ['Conflict Watch', 'Methods & Tools', ...added], added } });
+    });
+  }
+  await page.route('**/api/publishing/github/categories/added', (route) => {
+    const body = route.request().postDataJSON();
+    asked.push(`${route.request().method()} added ${JSON.stringify(body.names)}`);
+    added = body.names;
+    return route.fulfill({ json: { added: body.names, categories: [...body.names, 'Conflict Watch', 'Methods & Tools'].sort() } });
   });
   return asked;
 }
@@ -98,7 +116,8 @@ test('the hub opens on its Overview, walks its tabs by click and by keyboard, an
 
   const bar = page.getByRole('tablist', { name: 'Website' });
   await expect(bar).toHaveAttribute('data-guide', 'settings.website-hub');
-  await expect(bar.getByRole('tab')).toHaveText(['Overview', 'Identity', 'Hosting', 'Articles', 'Readers', 'Upkeep', 'Make it yours', 'WordPress']);
+  await expect(bar.getByRole('tab')).toHaveText(['Overview', 'Identity', 'Hosting', 'Articles', 'Categories', 'Readers', 'Upkeep', 'Make it yours',
+    'WordPress']);
   await expect(tab(page, 'Overview')).toHaveAttribute('aria-selected', 'true');
   await expect(panel(page, 'Overview')).toBeVisible();
   await expect(panel(page, 'Identity')).toBeHidden();
@@ -107,10 +126,14 @@ test('the hub opens on its Overview, walks its tabs by click and by keyboard, an
 
   // the checklist says what is set, what is left and what needs a read, and opens the panel where it is done
   const steps = panel(page, 'Overview').getByRole('region', { name: 'Your site, step by step' }).getByRole('listitem');
-  await expect(steps).toHaveCount(6);
+  await expect(steps).toHaveCount(7);
   await expect(steps.nth(0)).toContainText('octo/articles on main');
-  await expect(steps.nth(4)).toContainText('Read the site, in Articles, to tell.');
-  await expect(panel(page, 'Overview')).toContainText('1 of 6 done. 2 need a read of the site.');
+  await expect(steps.nth(1)).toContainText('Put your home page online');
+  await expect(steps.nth(5)).toContainText('Read the site, in Articles, to tell.');
+  await expect(panel(page, 'Overview')).toContainText('1 of 7 done. 3 need a read of the site.');
+  // no tip cards: what a press does is said beside the press
+  await expect(panel(page, 'Overview').getByRole('heading', { level: 3 })).toHaveText(['Write', 'Publish', 'GitHub keeps it', 'Readers find it',
+    'Your site, step by step']);
   await steps.nth(2).getByRole('button', { name: 'Identity' }).click();
   await expect(tab(page, 'Identity')).toHaveAttribute('aria-selected', 'true');
   await expect(panel(page, 'Identity')).toBeVisible();
@@ -229,6 +252,7 @@ test('Articles reads the site on a press only, lists what it holds, and deletes 
   await expect(rows(page).nth(2)).toContainText('Map');
   await expect(rows(page).nth(2)).toContainText('290 MB');
   await expect(rows(page).nth(4)).toContainText('Unlisted');
+  await expect(articles.locator('.del-said')).toHaveText('Delete takes an article down, and off the lists, the feed and the sitemap, in one commit.');
   await expect(first.getByRole('link', { name: /Open/ })).toHaveAttribute('href', 'https://octo.github.io/articles/bab-el-mandab-2026/');
   // an article that stands somewhere shows its pin, and one that does not shows none
   const pin = first.locator('.pin');
@@ -243,7 +267,8 @@ test('Articles reads the site on a press only, lists what it holds, and deletes 
   await expect(nested).toHaveAttribute('title', 'Made outside Azimut: delete it on GitHub');
   // the hero and the categories carry the read too
   await expect(hero(page)).toContainText('3 articles · 1 map · 1 page · 1 unlisted · 312 MB');
-  await expect(articles.getByRole('region', { name: 'Categories' }).getByRole('listitem')).toHaveCount(2);
+  // the Categories panel, hidden behind its tab, holds them too
+  await expect(page.locator('#hub-panel-categories .cats li')).toHaveCount(2);
   // a picture fills its frame without stretching, and a long title stays on its line, cut with an ellipsis
   expect(await first.locator('.th img').evaluate((node) => getComputedStyle(node).objectFit)).toBe('cover');
   const long = nested.locator('.t b');
@@ -273,7 +298,111 @@ test('Articles reads the site on a press only, lists what it holds, and deletes 
   await expect(rows(page)).toHaveCount(5);
   await expect(articles).toContainText('Deleted bab-el-mandab-2026/: 3 files written.');
   await expect(tab(page, 'Articles')).toContainText('5');
-  await expect(articles.getByRole('region', { name: 'Categories' }).getByRole('listitem')).toHaveCount(1);
+  // Conflict Watch has no article left, and its page still names it
+  await tab(page, 'Categories').click();
+  const categories = panel(page, 'Categories').getByRole('region', { name: 'Categories' }).getByRole('listitem');
+  await expect(categories).toHaveCount(2);
+  await expect(categories.nth(1)).toContainText('Conflict Watch');
+  await expect(categories.nth(1)).toContainText('No article yet');
+  fixture.expectNoUnexpectedRequests();
+});
+
+test('an article takes another category from its line, sent to GitHub once picked', async ({ page }) => {
+  const fixture = await openWebsite(page);
+  const asked = await standIn(page);
+  await tab(page, 'Articles').click();
+  await panel(page, 'Articles').getByRole('button', { name: 'Read the site' }).click();
+  const first = rows(page).first();
+  const pick = first.getByRole('combobox', { name: /^Category of/ });
+  await expect(pick).toHaveText('Conflict Watch');
+  await expect(pick).toHaveAttribute('title', 'The category of this article, changed on GitHub as you pick it');
+  await pick.click();
+  await expect(page.getByRole('listbox').getByRole('option')).toHaveText(['No category', 'Conflict Watch', 'Methods & Tools', 'New category…']);
+  expect(asked).toEqual(['POST read']);
+  await page.getByRole('listbox').getByRole('option', { name: 'Methods & Tools' }).click();
+  await expect(pick).toHaveText('Methods & Tools');
+  expect(asked).toEqual(['POST read', 'POST site/category {"folder":"bab-el-mandab-2026","category":"Methods & Tools"}']);
+  await expect(panel(page, 'Articles')).toContainText('“The fall of the Bab al-Mandab front, Sep-Nov 2026” is in Methods & Tools now.');
+  // a page or an unlisted one has no list
+  await expect(rows(page).nth(3).getByRole('combobox')).toHaveCount(0);
+  fixture.expectNoUnexpectedRequests();
+});
+
+test('Categories adds a name here, renames and deletes one on GitHub through a confirmation, and says what the analyst\'s own pages ask', async ({ page }) => {
+  const fixture = await openWebsite(page);
+  const asked = await standIn(page, { read: { ...READ, home: 'yours' } });
+  await tab(page, 'Categories').click();
+  const categories = panel(page, 'Categories');
+  await expect(categories.getByRole('heading', { name: 'How articles are grouped' })).toBeVisible();
+  await expect(categories).toContainText('Read the site to list its categories.');
+  expect(asked).toEqual([]);
+  await categories.getByRole('button', { name: 'Read the site' }).click();
+  await expect(categories.getByRole('note')).toHaveText(
+    'Your site has its own pages: Azimut updates the articles and the lists; your menu and category pages are yours to change.');
+  const lines = categories.getByRole('region', { name: 'Categories' }).getByRole('listitem');
+  await expect(lines).toHaveCount(2);
+  await expect(lines.nth(0)).toContainText('Conflict Watch');
+  await expect(lines.nth(0)).toContainText('1 article');
+  await expect(lines.nth(0)).toContainText('/conflict-watch/ lists them');
+
+  // add: kept here, nothing on GitHub
+  await categories.getByRole('textbox', { name: 'New category' }).fill('Harbour');
+  await categories.getByRole('button', { name: 'Add' }).click();
+  await expect(lines).toHaveCount(3);
+  await expect(lines.nth(2)).toContainText('Harbour');
+  await expect(lines.nth(2)).toContainText('No article yet');
+  await expect(categories).toContainText('Harbour is added. Add a page and a menu link for it if you want one');
+  expect(asked).toEqual(['POST read', 'PUT added ["Harbour"]']);
+
+  // rename asks first, naming the page that lists it and the menu
+  await lines.nth(0).getByRole('button', { name: 'Rename' }).click();
+  await lines.nth(0).getByRole('textbox').fill('Conflicts');
+  await lines.nth(0).getByRole('textbox').press('Enter');
+  const dialog = page.getByRole('alertdialog', { name: 'Rename this category?' });
+  await expect(dialog).toContainText('Renames Conflict Watch to Conflicts on 1 article, and in the lists and the feed, in one commit.');
+  await expect(dialog).toContainText('Your page /conflict-watch/ lists this category by name: change it there too, or its list will be empty. '
+    + 'Rename its link in your menu.');
+  expect(asked).toHaveLength(2);
+  await dialog.getByRole('button', { name: 'Rename' }).click();
+  await expect(dialog).toHaveCount(0);
+  expect(asked[2]).toBe('POST categories/rename {"name":"Conflict Watch","to":"Conflicts"}');
+  await expect(categories).toContainText('Conflict Watch is Conflicts now, on 1 article.');
+  // its page still names the old name, which it lists no more; the added one waits on
+  await expect(lines.filter({ hasText: 'Conflicts' })).toContainText('1 article');
+  await expect(lines.filter({ hasText: 'Conflict Watch' })).toContainText('No article yet');
+  await expect(lines.filter({ hasText: 'Harbour' })).toContainText('No article yet');
+
+  // delete asks first too, and its articles stay
+  await lines.filter({ hasText: 'Methods & Tools' }).getByRole('button', { name: 'Delete' }).click();
+  const remove = page.getByRole('alertdialog', { name: 'Delete this category?' });
+  await expect(remove).toContainText('Takes Methods & Tools off 3 articles, in one commit. They stay on the site, with no category.');
+  await remove.getByRole('button', { name: 'Delete the category' }).click();
+  await expect(remove).toHaveCount(0);
+  expect(asked[3]).toBe('POST categories/delete {"name":"Methods & Tools"}');
+  await expect(lines.filter({ hasText: 'Methods & Tools' })).toHaveCount(0);
+  fixture.expectNoUnexpectedRequests();
+});
+
+test('the Overview puts the home page online when the site has none, then shows the way to it', async ({ page }) => {
+  const fixture = await openWebsite(page);
+  await standIn(page, { read: { ...READ, home: 'none', items: [], categories: [], marked: [], legal: '' } });
+  let updates = 0;
+  await page.route('**/api/publishing/github/site', async (route) => {
+    updates += 1;
+    await new Promise((resolve) => setTimeout(resolve, 400));
+    return route.fulfill({ json: { ok: true, updated: true, commit: 'c'.repeat(40), written: ['articles.json', 'feed.xml', 'index.html', 'sitemap.xml'],
+      warnings: [], categories: [] } });
+  });
+  await tab(page, 'Articles').click();
+  await panel(page, 'Articles').getByRole('button', { name: 'Read the site' }).click();
+  await tab(page, 'Overview').click();
+  const step = panel(page, 'Overview').getByRole('listitem').filter({ hasText: 'Put your home page online' });
+  await expect(step).toContainText('The site has no home page yet.');
+  await step.getByRole('button', { name: 'Put it online' }).click();
+  await expect(step.getByRole('button', { name: 'Putting it online…' })).toBeDisabled();
+  await expect(step).toContainText('Azimut\'s home page is online.');
+  await expect(step.getByRole('link', { name: 'See it' })).toHaveAttribute('href', 'https://octo.github.io/articles/');
+  expect(updates).toBe(1);
   fixture.expectNoUnexpectedRequests();
 });
 
@@ -354,16 +483,94 @@ test('readers are counted only when asked, with the setup said field by field', 
   await expect(page.getByText('Make a free account at cloudflare.com.')).toBeVisible();
   await expect(page.getByRole('link', { name: 'Cloudflare sign-up' })).toHaveAttribute('href', 'https://dash.cloudflare.com/sign-up');
   await expect(page.getByRole('link', { name: /Open Cloudflare's dashboard/ })).toHaveAttribute('href', 'https://dash.cloudflare.com/?to=/:account/web-analytics');
-  await page.getByLabel('Cloudflare token').fill(`<script defer src='https://static.cloudflareinsights.com/beacon.min.js' data-cf-beacon='{"token": "${TOKEN}"}'></script>`);
-  await page.getByLabel('Cloudflare token').press('Tab');
+  await page.getByLabel('Cloudflare site token').fill(`<script defer src='https://static.cloudflareinsights.com/beacon.min.js' data-cf-beacon='{"token": "${TOKEN}"}'></script>`);
+  await page.getByLabel('Cloudflare site token').press('Tab');
   await expect.poll(() => fixture.settingsWrites).toContainEqual({ site_stats_token: TOKEN });
-  await expect(page.getByLabel('Cloudflare token')).toHaveValue(TOKEN);
+  await expect(page.getByLabel('Cloudflare site token')).toHaveValue(TOKEN);
   await expect(hero(page)).toContainText('Readers counted by Cloudflare Web Analytics');
 
   await group.getByRole('radio', { name: 'Off' }).click();
   await expect.poll(() => fixture.settingsWrites).toContainEqual({ site_stats: '' });
-  await expect(page.getByLabel('Cloudflare token')).toHaveCount(0);
+  await expect(page.getByLabel('Cloudflare site token')).toHaveCount(0);
   await expect(page.getByRole('link', { name: /Open Cloudflare's dashboard/ })).toHaveCount(0);
+  fixture.expectNoUnexpectedRequests();
+});
+
+test('Numbers are read from Cloudflare on a press only, each article by its title, the site tag found or typed, and a refusal said', async ({ page }) => {
+  const counts = (views, visits = views) => ({ views, visits });
+  const fixture = await openWebsite(page, {
+    github,
+    cloudflare: { token: { set: true, hint: '…kkkk' } },
+    settings: { site_stats: 'cloudflare', site_stats_token: TOKEN, site_stats_account: '0123456789abcdef0123456789abcdef', site_stats_tag: '' },
+  });
+  await standIn(page);
+  const TAG = 'fedcba9876543210fedcba9876543210';
+  const asked = [];
+  let refuse = '';
+  await page.route('**/api/publishing/cloudflare/numbers', (route) => {
+    asked.push(route.request().method());
+    if (refuse === 'busy') {
+      return route.fulfill({ status: 502, json: { detail: 'Cloudflare asks Azimut to wait: try again in 5 minutes.' } });
+    }
+    if (refuse === 'tag') {
+      return route.fulfill({ json: { ok: false, needs: 'tag', detail: 'No Web Analytics site in this account has the site token set in Readers.' } });
+    }
+    return route.fulfill({ json: {
+      ok: true, address: 'https://octo.github.io/articles/',
+      pages: [
+        { path: '/articles/bab-el-mandab-2026/', page: 'bab-el-mandab-2026/', week: counts(45, 31), month: counts(1302, 920) },
+        { path: '/articles/guide/', page: 'guide/', week: counts(3), month: counts(30, 20) },
+        { path: '/articles/', page: '', week: counts(8), month: counts(12) },
+        { path: '/articles/old-page/', page: 'old-page/', week: counts(0), month: counts(2) },
+      ],
+      total: { week: counts(56, 42), month: counts(1346, 954) },
+      referrers: [{ host: 'news.ycombinator.com', views: 30, visits: 30 }, { host: '', views: 40, visits: 40 }],
+      countries: [{ country: 'FR', views: 800, visits: 600 }, { country: 'US', views: 500, visits: 300 }],
+      sampled: true, read_at: '2026-11-21T12:00:00Z', days: [7, 30], tag: TAG, tag_found: true,
+    } });
+  });
+
+  // the read of the site names the articles; Cloudflare is asked nothing until the press
+  await tab(page, 'Articles').click();
+  await panel(page, 'Articles').getByRole('button', { name: 'Read the site' }).click();
+  await expect(rows(page)).toHaveCount(6);
+  await tab(page, 'Readers').click();
+  const numbers = page.getByRole('region', { name: 'Numbers' });
+  await expect(numbers).toContainText('Press Read the numbers to see what is read, and from where.');
+  await expect(numbers.getByLabel('Cloudflare API token')).toHaveAttribute('placeholder', '•••• kkkk');
+  expect(asked).toEqual([]);
+
+  await numbers.getByRole('button', { name: 'Read the numbers' }).click();
+  await expect(numbers.locator('.press-line [role="status"]')).toContainText(/Read today at \d\d:\d\d/);
+  expect(asked).toEqual(['POST']);
+  await expect(numbers.getByRole('group', { name: 'Whole site' })).toContainText('1,346');
+  const table = numbers.getByRole('table', { name: 'Page views by page' });
+  await expect(table.locator('tbody tr')).toHaveText([/The fall of the Bab al-Mandab front, Sep-Nov 2026\s*45\s*1,302/,
+    /Installing Azimut: the complete guide\s*3\s*30/, /Home page\s*8\s*12/, /\/articles\/old-page\/\s*0\s*2/]);
+  await expect(table.getByRole('link', { name: 'The fall of the Bab al-Mandab front, Sep-Nov 2026' }))
+    .toHaveAttribute('href', 'https://octo.github.io/articles/bab-el-mandab-2026/');
+  await expect(numbers.getByRole('region', { name: 'Where visits came from' }).getByRole('listitem')).toHaveText([/No referrer\s*40/, /news\.ycombinator\.com\s*30/]);
+  await expect(numbers.getByRole('region', { name: 'Countries' }).getByRole('listitem')).toHaveText([/France\s*800/, /United States\s*500/]);
+  await expect(numbers).toContainText('so the 30-day counts are estimates');
+  // the site tag the press found shows in its field, folded away
+  const byHand = numbers.locator('details').filter({ hasText: 'Set the site tag by hand' });
+  await expect(byHand).not.toHaveAttribute('open', '');
+  await expect(numbers.getByLabel('Web Analytics site tag')).toHaveValue(TAG);
+
+  // a refusal is said in its sentence, and the press stays
+  refuse = 'busy';
+  await numbers.getByRole('button', { name: 'Read again' }).click();
+  await expect(numbers.locator('.press-line [role="status"]')).toHaveText('Cloudflare asks Azimut to wait: try again in 5 minutes.');
+  await expect(numbers.getByRole('button', { name: 'Read again' })).toBeEnabled();
+  // a tag the press could not find opens its field, and one typed there is saved
+  refuse = 'tag';
+  await numbers.getByRole('button', { name: 'Read again' }).click();
+  await expect(numbers.locator('.press-line [role="status"]')).toHaveText('No Web Analytics site in this account has the site token set in Readers.');
+  await expect(byHand).toHaveAttribute('open', '');
+  await numbers.getByLabel('Web Analytics site tag').fill('0'.repeat(32));
+  await numbers.getByLabel('Web Analytics site tag').press('Tab');
+  await expect.poll(() => fixture.settingsWrites).toContainEqual({ site_stats_tag: '0'.repeat(32) });
+  expect(asked).toEqual(['POST', 'POST', 'POST']);
   fixture.expectNoUnexpectedRequests();
 });
 
@@ -392,9 +599,14 @@ test('Update the site asks GitHub on its press only, from Upkeep or from the her
   await expect(press).toBeEnabled();
   expect(asked).toEqual([]);
   await press.click();
-  await expect(section).toContainText('Updating octo/articles…');
-  await expect(hero(page)).toContainText('Updating octo/articles…');
+  // both presses say it, with a spinner, and wait
+  for (const busy of [section.getByRole('button', { name: 'Updating…' }), hero(page).getByRole('button', { name: 'Updating…' })]) {
+    await expect(busy).toBeDisabled();
+    await expect(busy).toHaveAttribute('aria-busy', 'true');
+    await expect(busy.locator('.busy-spin')).toBeVisible();
+  }
   await expect(section).toContainText('The site is updated: 2 files written.');
+  await expect(press).toBeEnabled();
   await expect(section.getByRole('list', { name: 'To mind' })).toContainText('feed.xml is yours');
   await expect(hero(page)).toContainText(/Updated today at \d\d:\d\d/);
   expect(asked).toEqual(['POST']);
@@ -527,12 +739,16 @@ test('the publish dialog puts a note online Unlisted, in no list', async ({ page
   const { dialog, published } = await openPublish(page);
   const role = dialog.getByRole('radiogroup', { name: 'On the site' });
   await expect(role.getByRole('radio')).toHaveText(['Article', 'Page', 'Unlisted']);
+  // never published to this site: it starts on Unlisted, with the line that says why beside the choice
+  await expect(role.getByRole('radio', { name: 'Unlisted' })).toHaveAttribute('aria-checked', 'true');
+  await expect(dialog).toContainText('Unlisted lets you read it online before you announce it.');
+  await role.getByRole('radio', { name: 'Article' }).click();
   await expect(dialog).toContainText('Goes on octo\'s home page and in its feed.');
   await role.getByRole('radio', { name: 'Unlisted' }).click();
   await expect(role.getByRole('radio', { name: 'Unlisted' })).toHaveAttribute('aria-checked', 'true');
   await expect(role.getByRole('radio', { name: 'Unlisted' })).toHaveAttribute('title', 'Put it online without listing it anywhere');
   await expect(dialog).toContainText('Online at its address only, in no list, feed or sitemap.');
-  await expect(dialog.getByRole('textbox', { name: 'Category' })).toHaveCount(0);
+  await expect(dialog.getByRole('combobox', { name: 'Category' })).toHaveCount(0);
   await dialog.getByRole('button', { name: 'Publish to GitHub Pages' }).click();
   await expect.poll(() => published.length).toBe(1);
   expect(published[0]).toMatchObject({ role: 'unlisted' });
@@ -582,6 +798,8 @@ test('draws every panel, dark and light', async ({ page }) => {
   await expect(rows(page)).toHaveCount(6);
   await page.waitForTimeout(300);
   await shoot('articles');
+  await tab(page, 'Categories').click();
+  await shoot('categories');
   await tab(page, 'Overview').click();
   await shoot('overview');
   await tab(page, 'Identity').click();
@@ -626,4 +844,13 @@ test('draws every panel, dark and light', async ({ page }) => {
   await page.screenshot({ path: `${SHOTS}/articles-900-dark.png` });
   await tab(page, 'Overview').click();
   await page.screenshot({ path: `${SHOTS}/overview-900-dark.png` });
+  // a site with no home page yet: the step's own press
+  await page.setViewportSize({ width: 1280, height: 1000 });
+  await page.unroute('**/api/publishing/github/site/read');
+  await page.route('**/api/publishing/github/site/read', (route) => route.fulfill({ json: { ...READ, home: 'none', items: [], categories: [], marked: [] } }));
+  await tab(page, 'Articles').click();
+  await panel(page, 'Articles').getByRole('button', { name: 'Read the site again' }).click();
+  await tab(page, 'Overview').click();
+  await expect(panel(page, 'Overview').getByRole('button', { name: 'Put it online' })).toBeVisible();
+  await shoot('overview-home');
 });

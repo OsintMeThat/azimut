@@ -28,6 +28,9 @@ repository is the analyst's.
   only; a map page has none. `articles.json` keeps which bar they carry as `bar`
   (`engine/sitesync.py`).
 
+- A card's `category`, in any folder, is what Settings › Website changes when the analyst renames
+  or deletes a category or gives one article another; nothing else of a card it did not write.
+
 A file Azimut would write but does not own is left as it is, and the rest still happens.
 
 **The card** (format `azimut-article/1`): title, summary, date (`YYYY-MM-DD`), category,
@@ -44,11 +47,18 @@ is the card it always was; being optional, it keeps the format `azimut-article/1
 `articles.json` carries it the same way, and a place a hand edit left unreadable is dropped, the
 line kept.
 
+An article is by the note's own author when its look names one, else by the site's (`Site.author`).
+Its author's picture, `author_image`, is a file in its folder, `author.jpg` or `author.png`, and the
+key is written only when it has one. A line carries it from the site's root as it carries `image`, and
+a name a hand edit made anything else is dropped. A list names the author after the day, the picture
+before the name, unless the author is the site's own name: then neither shows.
+
 A map page cited by an article shows as a link under that article, never as its own line; a
 map nothing cites keeps its own line so it is never lost. A page (`role: "page"`) is on no
 list: it is in `articles.json` under `pages`, and the default home's header links it. An
 unlisted page (`role: "unlisted"`) is online at its address and nowhere else: in no list, no feed,
-no sitemap, no `articles.json`, and its category adds none; a card that names it never folds it
+no sitemap, no `articles.json`, its head asks search engines not to index it (`notes_web`), and its
+category adds none; a card that names it never folds it
 under itself, and Read the site (`sitesync.survey`) still shows it.
 """
 
@@ -61,12 +71,12 @@ from dataclasses import dataclass, field, replace
 from datetime import date, datetime, timezone
 from email.utils import format_datetime
 from html.parser import HTMLParser
-from typing import Any, Literal, Mapping
+from typing import Any, Iterable, Literal, Mapping
 from urllib.parse import urlsplit
 
 from pydantic import ValidationError
 
-from .notelook import CATEGORY_MAX, NotePlace
+from .notelook import CATEGORY_MAX, NoteLook, NotePlace
 
 CARD = "article.json"
 CARD_FORMAT = "azimut-article/1"
@@ -192,6 +202,10 @@ class Placement:
     #: The place the card carries (`NotePlace`), None for none, or `OWN_PLACE` for the look's own.
     place: NotePlace | None | Literal["own"] = OWN_PLACE
 
+    def role_of(self, look: NoteLook) -> str:
+        """What the note is on the site: the role the dialog chose, else its look's (`NoteLook.role`)."""
+        return self.role if self.role is not None else look.role
+
     def card_place(self, kept: NotePlace | None) -> NotePlace | None:
         """The place the card carries: the one the dialog chose, else ``kept``, the look's."""
         return kept if isinstance(self.place, str) else self.place
@@ -205,7 +219,7 @@ class Site:
     #: Where the site is served, with its closing slash (`githubpages.site_base`).
     address: str
     tagline: str = ""
-    #: Who an article is by when its card says nobody else: the report name, else the title.
+    #: Who an article is by when its note names nobody else: the report name, else the title.
     author: str = ""
     #: Whether the default home ends on "Made with Azimut" (`site_credit_azimut`).
     credit: bool = True
@@ -254,7 +268,10 @@ def from_settings(settings: Mapping[str, Any], *, address: str, account: str, lo
 
 
 #: The settings of Settings › Website that are read and written as preferences.
-PREF_KEYS = ("site_title", "site_tagline", "site_credit_azimut", "site_stats", "site_stats_code", "site_stats_token")
+PREF_KEYS = ("site_title", "site_tagline", "site_credit_azimut", "site_stats", "site_stats_code", "site_stats_token",
+             "site_stats_account", "site_stats_tag")
+#: A Cloudflare account ID and a Web Analytics site tag, where the site's numbers are read (`engine/sitestats.py`).
+CLOUDFLARE_ID = re.compile(r"^[0-9a-f]{32}$")
 
 
 def prefs_of(settings: Mapping[str, Any]) -> dict[str, Any]:
@@ -269,7 +286,18 @@ def prefs_of(settings: Mapping[str, Any]) -> dict[str, Any]:
         "site_stats": stats if stats in STATS else "",
         "site_stats_code": code.strip().lower() if COUNTER_CODE.match(code.strip().lower()) else "",
         "site_stats_token": token.strip() if BEACON_TOKEN.match(token.strip()) else "",
+        "site_stats_account": cloudflare_id(settings.get("site_stats_account")),
+        "site_stats_tag": cloudflare_id(settings.get("site_stats_tag")),
+        # whether that tag was found from the site token rather than typed by hand
+        "site_stats_tag_found": bool(cloudflare_id(settings.get("site_stats_tag"))
+                                     and BEACON_TOKEN.match(str(settings.get("site_stats_tag_from") or ""))),
     }
+
+
+def cloudflare_id(value: Any) -> str:
+    """An account ID or a site tag as saved, lower case, or "" for one that does not read as one."""
+    text = value.strip().lower() if isinstance(value, str) else ""
+    return text if CLOUDFLARE_ID.match(text) else ""
 
 
 def categories_read(value: Any) -> list[str]:
@@ -361,6 +389,8 @@ BAR_CLOSE = b"<!-- /azimut:bar -->"
 _BODY = re.compile(rb"<body\b[^>]*>")
 #: Where an article's folder keeps the site's logo its bar shows (`notes_html._way_home`).
 LOGO_FILE = re.compile(r"^assets/[0-9a-f]{8,16}-site-logo\.png$")
+#: The author's picture as a card names it: a file at its folder's root (`notes_web.author_face`).
+AUTHOR_FILE = re.compile(r"^author\.(?:jpg|png)$")
 
 
 def marked_bar(frame: Frame, logo: str) -> str:
@@ -675,6 +705,8 @@ class Card:
     links: tuple[str, ...] = ()
     #: Where the article stands on a map of the site's articles, None for nowhere.
     place: NotePlace | None = None
+    #: The author's picture, a file in the folder (`AUTHOR_FILE`), "" for none.
+    author_image: str = ""
 
     def dated(self, day: str) -> "Card":
         return replace(self, date=day)
@@ -686,6 +718,8 @@ class Card:
             "image": self.image, "links": list(self.links), "maps": []}
         if self.place is not None:
             card["place"] = self.place.model_dump(mode="json")
+        if self.author_image:
+            card["author_image"] = self.author_image
         return (json.dumps(card, indent=1, ensure_ascii=False) + "\n").encode("utf-8")
 
 
@@ -706,6 +740,28 @@ def card_date(data: bytes) -> str:
         return date.fromisoformat(day).isoformat() if isinstance(day, str) and len(day) == 10 else ""
     except ValueError:
         return ""
+
+
+def card_title(data: bytes) -> str:
+    """The title a card Azimut wrote carries, on one line, "" when it is no such card or holds none."""
+    if len(data) > MAX_CARD_BYTES:
+        return ""
+    try:
+        card = json.loads(data)
+    except ValueError:
+        return ""
+    return one_line(card.get("title"), MAX_TITLE) if isinstance(card, dict) and card.get("format") == CARD_FORMAT else ""
+
+
+_TITLE = re.compile(rb"<title\b[^>]*>(.*?)</title\s*>", re.S | re.I)
+
+
+def page_title(data: bytes) -> str:
+    """The `<title>` of a page, its entities read and on one line, "" when it has none."""
+    found = _TITLE.search(data)
+    if found is None:
+        return ""
+    return one_line(html.unescape(found.group(1).decode("utf-8", "replace")), MAX_TITLE)
 
 
 def links_of(page: str, site: Site, own: str) -> tuple[str, ...]:
@@ -778,6 +834,7 @@ def read_card(folder: str, data: bytes) -> dict[str, Any] | None:
         if where and words:
             kept_maps.append({"title": words, "address": where})
     place = read_place(card.get("place"))
+    face = card.get("author_image")
     return {
         "folder": folder,
         "address": f"/{folder}/",
@@ -793,6 +850,7 @@ def read_card(folder: str, data: bytes) -> dict[str, Any] | None:
         "links": [str(one).strip("/")[:200] for one in links[:MAX_LINKS] if isinstance(one, str)],
         "maps": kept_maps,
         **({"place": place} if place is not None else {}),
+        **({"author_image": f"/{folder}/{face}"} if isinstance(face, str) and AUTHOR_FILE.match(face) else {}),
     }
 
 
@@ -875,9 +933,16 @@ def _at(prefix: str, address: str) -> str:
     return f"{prefix}{address}" if address.startswith("/") else address
 
 
-def _by(author: str, site_title: str) -> str:
-    """The author after a line's date, left out when it is the site's own name."""
-    return f" · {html.escape(author)}" if author and author != site_title else ""
+def _by(line: dict[str, Any], site_title: str, prefix: str) -> str:
+    """The author after a line's date, their picture before their name; both left out when it is
+    the site's own name."""
+    author = line.get("author", "")
+    if not author or author == site_title:
+        return ""
+    face = line.get("author_image", "")
+    picture = (f'<img class="az-face" src="{html.escape(_at(prefix, face))}" alt="" width="20" height="20" '
+               f'loading="lazy" decoding="async">') if face else ""
+    return f" · {picture}{html.escape(author)}"
 
 
 def render_maps(maps: list[dict[str, Any]], site_title: str, limit: int = 0, prefix: str = "") -> str:
@@ -895,7 +960,7 @@ def render_maps(maps: list[dict[str, Any]], site_title: str, limit: int = 0, pre
         if m["category"]:
             out.append(f'<span class="az-category">{e(m["category"])}</span>')
         out.append(f'<h2 class="az-title"><a href="{home}">{e(m["title"])}</a></h2>')
-        by = _by(m.get("author", ""), site_title)
+        by = _by(m, site_title, prefix)
         out.append(f'<p class="az-meta"><time datetime="{m["date"]}">{m["date_label"]}</time>{by}</p>')
         if m["summary"]:
             out.append(f'<p class="az-summary">{e(m["summary"])}</p>')
@@ -927,7 +992,7 @@ def render(lines: list[dict[str, Any]], site_title: str, section: str = "", limi
         if a["category"]:
             out.append(f'<span class="az-category">{e(a["category"])}</span>')
         out.append(f'<h2 class="az-title"><a href="{home}">{e(a["title"])}</a></h2>')
-        by = _by(a["author"], site_title)
+        by = _by(a, site_title, prefix)
         out.append(f'<p class="az-meta"><time datetime="{a["date"]}">{a["date_label"]}</time>{by}</p>')
         if a["summary"]:
             out.append(f'<p class="az-summary">{e(a["summary"])}</p>')
@@ -1013,8 +1078,86 @@ def sitemap_paths(text: str, site: Site) -> list[str]:
 
 
 def articles_json(lines: list[dict[str, Any]], maps: list[dict[str, Any]], pages: list[dict[str, str]],
-                  site: Site) -> str:
-    """The list as a file, for the analyst's own scripts: every address is on the site, from its root."""
-    payload = {"format": SITE_FORMAT, "site": {"title": site.title, "address": site.address},
-               "articles": lines, "maps": maps, "pages": pages}
+                  site: Site, renamed: Mapping[str, str] | None = None) -> str:
+    """The list as a file, for the analyst's own scripts: every address is on the site, from its root.
+    ``renamed`` is the record of the categories renamed (`RENAMED`), written only when it holds one."""
+    payload: dict[str, Any] = {"format": SITE_FORMAT, "site": {"title": site.title, "address": site.address},
+                               "articles": lines, "maps": maps, "pages": pages}
+    if renamed:
+        payload[RENAMED] = dict(renamed)
     return json.dumps(payload, indent=1, ensure_ascii=False) + "\n"
+
+
+# -- the categories, changed from Settings › Website ------------------------------------------------
+#
+# A category lives in the cards that carry it. Renaming one, deleting one or moving one article to
+# another rewrites the `category` of the cards concerned and nothing else of them, in one commit with
+# the lists (`sitesync.recategorizer`): a card is how a site tells Azimut what an article is, so a card
+# of `azimut-article/1` is changed wherever it lives, a folder made outside Azimut included. Each rename
+# is kept in `articles.json` as `"renamed": {"Old name": "New name"}`, so that the site's own pages and
+# scripts can send a reader from the old category to the new: a chain keeps one step (A to B then B to
+# C records A and B both to C), the record outlives later publishes, and an old name a category of the
+# site carries again leaves it.
+
+RENAMED = "renamed"
+#: The most renames the record keeps, the oldest going first.
+MAX_RENAMED = 200
+
+
+def card_category(data: bytes | None) -> str | None:
+    """The category a card carries, read as a line of the list reads it; None for no card Azimut reads."""
+    if data is None or len(data) > MAX_CARD_BYTES:
+        return None
+    try:
+        card = json.loads(data)
+    except ValueError:
+        return None
+    if not isinstance(card, dict) or card.get("format") != CARD_FORMAT:
+        return None
+    return one_line(card.get("category"), 80)
+
+
+def recategorized(data: bytes, category: str) -> bytes | None:
+    """A card with ``category`` for its own and every other key as it was; None for a file that is no
+    card Azimut reads, which is never changed."""
+    if card_category(data) is None:
+        return None
+    card = json.loads(data)
+    card["category"] = category
+    return (json.dumps(card, indent=1, ensure_ascii=False) + "\n").encode("utf-8")
+
+
+def renamed_of(payload: Any) -> dict[str, str]:
+    """The renames a list file records, each a pair of names read as a card's category is; what does
+    not read as one is dropped."""
+    record = payload.get(RENAMED) if isinstance(payload, dict) else None
+    if not isinstance(record, dict):
+        return {}
+    found: dict[str, str] = {}
+    for old, new in list(record.items())[-MAX_RENAMED:]:
+        old_name, new_name = one_line(old, 80), one_line(new, 80)
+        if old_name and new_name and old_name != new_name:
+            found[old_name] = new_name
+    return found
+
+
+def renamed_after(record: Mapping[str, str], old: str, new: str) -> dict[str, str]:
+    """The record once ``old`` is renamed ``new``: every name that led to ``old`` leads to ``new``, so a
+    chain keeps one step, and a name that would lead to itself goes."""
+    made = {key: new if value == old else value for key, value in record.items() if key != old}
+    made[old] = new
+    kept = {key: value for key, value in made.items() if key != value}
+    return dict(list(kept.items())[-MAX_RENAMED:])
+
+
+def renamed_kept(record: Mapping[str, str], live: Iterable[str]) -> dict[str, str]:
+    """The record without the old names a category of the site carries again."""
+    carried = set(live)
+    return {old: new for old, new in record.items() if old not in carried}
+
+
+def category_kept(name: str) -> str:
+    """What a publish says when it kept the category the site gave its article since the last publish."""
+    if name:
+        return f"It stays in {name}, the category it was given on the site since your last publish."
+    return "It stays with no category, as it was left on the site since your last publish."

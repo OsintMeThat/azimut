@@ -14,8 +14,9 @@
  * how the HTML page is laid out, is one too: the server keeps it only once set. So is
  * `counter`, the GoatCounter site a map page's web folder counts its readers on. And what the
  * note is on the analyst's site, `category`, `role` (a page, off the site's lists, or unlisted, in none),
- * `list_image` (the picture of its line in the list) and `place` (where it stands on the site's map), which
- * the publish dialog chooses and the Look only carries, so that saving a look never drops them.
+ * `list_image` (the picture of its line in the list), `place` (where it stands on the site's map), `author` and
+ * `author_image` (who wrote it when it is not the analyst, and their picture), which the publish dialog chooses
+ * and the Look only carries, so that saving a look never drops them.
  *
  * The style is the profile: it says what the document carries after its text, the
  * sources list and how it is written, the five annexes and how strict the check is
@@ -409,6 +410,8 @@ function annexesOf(value) {
 }
 /** The longest a category's name is (`notelook.CATEGORY_MAX`). */
 const CATEGORY_MAX = 60;
+/** The longest an article's author is (`notelook.AUTHOR_MAX`). */
+const AUTHOR_MAX = 120;
 const HEX = /^#[0-9a-f]{6}$/;
 const DAY = /^\d{4}-\d{2}-\d{2}$/;
 
@@ -425,6 +428,8 @@ export function normaliseLook(look) {
   const role = given.role === 'page' || given.role === 'unlisted' ? given.role : '';
   const listImage = /^[A-Za-z0-9_-]{1,64}$/.test(String(given.list_image ?? '')) ? String(given.list_image) : '';
   const place = placeOf(given.place);
+  const author = String(given.author ?? '').split(/\s+/).filter(Boolean).join(' ').slice(0, AUTHOR_MAX);
+  const authorImage = /^[A-Za-z0-9_-]{1,64}$/.test(String(given.author_image ?? '')) ? String(given.author_image) : '';
   return {
     style: pick(given.style, STYLES, DEFAULT_LOOK.style),
     font: pick(given.font ?? '', FONTS, ''),
@@ -459,6 +464,8 @@ export function normaliseLook(look) {
     ...(role && { role }),
     ...(listImage && { list_image: listImage }),
     ...(place && { place }),
+    ...(author && { author }),
+    ...(authorImage && { author_image: authorImage }),
   };
 }
 
@@ -480,12 +487,14 @@ export function sectionsSet(look) {
   };
 }
 
-/** A look a template can carry: no picture, no day and no place of a case. */
+/** A look a template can carry: no picture, no day, no place and no author of a case. */
 export function templateLook(look) {
   const whole = normaliseLook(look);
   const kept = { ...whole, cover: { ...whole.cover, image: '', date: '' } };
   delete kept.list_image;
   delete kept.place;
+  delete kept.author;
+  delete kept.author_image;
   return kept;
 }
 

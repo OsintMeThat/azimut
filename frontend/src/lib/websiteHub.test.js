@@ -3,6 +3,7 @@ import {
   bareAddress, chipsOf, countingOf, countsOf, formatBytes, hostOf, itemsFor, kindOf, levelOf, onSite, ownDomain, pathOf, percentOf, shareOf, siteName,
   siteReadOf, withoutFolder,
 } from './websiteHub.js';
+import { addProblem, carrying, categoriesFrom, categoryChoices, categoryRows, countryOf, numbersOf, numbersRows, withCategories } from './websiteHub.js';
 
 const MB = 1024 * 1024;
 const BAB = Math.round(4.2 * MB);
@@ -40,8 +41,15 @@ describe('the read, as the hub holds it', () => {
     expect(read.items).toHaveLength(6);
     expect(read.items[0]).toEqual({ folder: 'bab', deletable: true, address: 'https://news.example.org/bab/', title: 'The Bab front', date: '2026-11-20',
       dateLabel: '20 November 2026', category: 'Conflict Watch', role: 'article', layout: 'story', image: 'https://news.example.org/bab/cover.jpg', bytes: BAB,
-      place: null });
+      place: null, author: '', authorImage: '' });
     expect(read.categories).toEqual(ANSWER.categories);
+  });
+
+  it('keeps who a row is by and their picture, a picture only as a web address', () => {
+    const row = (more) => siteReadOf({ items: [card('guest', more)] }).items[0];
+    expect(row({ author: '  Jane   Guest ', author_image: 'https://news.example.org/guest/author.jpg' }))
+      .toMatchObject({ author: 'Jane Guest', authorImage: 'https://news.example.org/guest/author.jpg' });
+    expect(row({ author_image: 'javascript:alert(1)' }).authorImage).toBe('');
   });
 
   it('keeps a row\'s place on the site\'s map when it reads as one, and none otherwise', () => {
@@ -99,7 +107,10 @@ describe('the read, as the hub holds it', () => {
     // Conflict Watch keeps its map, counted again
     expect(without.categories).toEqual([{ name: 'Conflict Watch', count: 1, pages: ['conflict-watch/'] }, { name: 'Methods', count: 1, pages: [] }]);
     expect(without.size.site).toBe(300 * MB - BAB);
-    expect(withoutFolder(without, 'bab-map').categories.map((entry) => entry.name)).toEqual(['Methods']);
+    // its last article gone, a category its page names stays, with none
+    expect(withoutFolder(without, 'bab-map').categories).toEqual([{ name: 'Methods', count: 1, pages: [] },
+      { name: 'Conflict Watch', count: 0, pages: ['conflict-watch/'] }]);
+    expect(withoutFolder(read, '2026/01/05/old').categories.map((entry) => entry.name)).toEqual(['Conflict Watch']);
     expect(withoutFolder(read, 'legal-notice').legal).toBe('');
     // an unlisted draft was never counted in a category
     expect(withoutFolder(read, 'draft').categories).toEqual(read.categories);
@@ -198,5 +209,117 @@ describe('the name, the address and the counter', () => {
     expect(countingOf({ siteStats: 'goatcounter', siteStatsCode: '', siteStatsToken: 'x' })).toBe('');
     expect(countingOf({ siteStats: 'goatcounter', siteStatsCode: 'desk', siteStatsToken: '' })).toBe('goatcounter');
     expect(countingOf({ siteStats: 'cloudflare', siteStatsCode: '', siteStatsToken: 'abcd1234' })).toBe('cloudflare');
+  });
+});
+
+describe('the numbers', () => {
+  const counts = (views, visits = views) => ({ views, visits });
+  const page = (path, pageName, week, month) => ({ path, page: pageName, week: counts(week), month: counts(month) });
+  const ANSWER_NUMBERS = {
+    ok: true,
+    address: 'https://news.example.org/',
+    pages: [
+      page('/bab/', 'bab/', 40, 120), page('/bab/map.html', 'bab/map.html', 2, 9), page('/', '', 8, 12),
+      page('/2026/01/05/old/', '2026/01/05/old/', 0, 30), page('/2026/', '2026/', 1, 1), page('/lost/', 'lost/', 3, 4), page('/away/', null, 0, 2),
+      { path: 'no slash', page: 'x', week: counts(1), month: counts(1) }, { page: 'x' },
+    ],
+    total: { week: counts(53, 39), month: counts(176, 128) },
+    referrers: [{ host: '', views: 40, visits: 40 }, { host: 'news.ycombinator.com', views: 30, visits: 55 }, { host: 'quiet.example', views: 3, visits: 0 }],
+    countries: [{ country: 'FR', views: 80, visits: 60 }],
+    sampled: true,
+  };
+
+  it('reads what the server answers, what it left out as nothing', () => {
+    const numbers = numbersOf(ANSWER_NUMBERS);
+    expect(numbers.pages).toHaveLength(7);
+    expect(numbers.total).toEqual({ week: counts(53, 39), month: counts(176, 128) });
+    // ranked by the visits they sent, and one that sent none left out
+    expect(numbers.referrers.map((one) => one.host)).toEqual(['news.ycombinator.com', '']);
+    expect(numbers.countries).toEqual([{ country: 'FR', views: 80, visits: 60 }]);
+    expect(numbers.sampled).toBe(true);
+    expect(numbersOf(null)).toEqual({ address: '', pages: [], total: { week: counts(0), month: counts(0) }, referrers: [], countries: [], sampled: false });
+    expect(numbersOf({ pages: [{ path: '/x/', page: 'x/', week: { views: -2, visits: 'a' }, month: { views: '7' } }] }).pages[0])
+      .toEqual({ path: '/x/', page: 'x/', week: counts(0), month: { views: 7, visits: 0 } });
+  });
+
+  it('names each page by the article the read of the site holds it in, sums an article\'s pages, and ranks by 30 days', () => {
+    const rows = numbersRows(numbersOf(ANSWER_NUMBERS), siteReadOf(ANSWER), 'https://news.example.org/');
+    expect(rows.map((row) => [row.title, row.href, row.week.views, row.month.views, row.known])).toEqual([
+      ['The Bab front', 'https://news.example.org/bab/', 42, 129, true],
+      // a nested folder is its own article, not its parent's
+      ['Old', 'https://news.example.org/2026/01/05/old/', 0, 30, true],
+      ['Home page', 'https://news.example.org/', 8, 12, true],
+      ['/lost/', 'https://news.example.org/lost/', 3, 4, false],
+      ['/away/', 'https://news.example.org/away/', 0, 2, false],
+      ['/2026/', 'https://news.example.org/2026/', 1, 1, false],
+    ]);
+  });
+
+  it('falls back to each page\'s path with no read, and to no link with no address', () => {
+    const rows = numbersRows(numbersOf({ ...ANSWER_NUMBERS, address: '' }), null, '');
+    expect(rows[0]).toMatchObject({ title: '/bab/', href: '', known: false });
+    expect(rows.find((row) => row.key === 'home')).toMatchObject({ title: 'Home page', href: '' });
+    // the server's address serves when the panel has none
+    expect(numbersRows(numbersOf(ANSWER_NUMBERS), null, '')[0].href).toBe('https://news.example.org/bab/');
+    expect(numbersRows(null)).toEqual([]);
+  });
+
+  it('says a country by its name, and what is no code as it came', () => {
+    expect(countryOf('FR')).toBe('France');
+    expect(countryOf('us')).toBe('United States');
+    expect(countryOf('')).toBe('Unknown');
+    expect(countryOf('Somewhere')).toBe('Somewhere');
+  });
+});
+
+describe('the categories, changed from the hub', () => {
+  const read = siteReadOf(ANSWER);
+
+  it('counts the listed articles of each, most first, then the ones a page names with none', () => {
+    const items = [{ role: 'article', category: 'b' }, { role: 'article', category: 'A' }, { role: 'article', category: 'b' },
+      { role: 'unlisted', category: 'Secret' }, { role: 'page', category: 'Pages' }, { role: 'article', category: '' }];
+    expect(categoriesFrom(items, { Deep: ['deep/'], b: ['b/'], Gone: [] })).toEqual([
+      { name: 'b', count: 2, pages: ['b/'] }, { name: 'A', count: 1, pages: [] }, { name: 'Deep', count: 0, pages: ['deep/'] }]);
+    expect(categoriesFrom([], {})).toEqual([]);
+  });
+
+  it('follows a rename, a delete and one article moved, as the next read would', () => {
+    const renamed = withCategories(read, { kind: 'rename', name: 'Methods', to: 'How-to' });
+    // every card that carried it, the unlisted draft too, which counts nowhere
+    expect(renamed.items.filter((item) => item.category === 'How-to').map((item) => item.folder)).toEqual(['2026/01/05/old', 'draft']);
+    expect(renamed.categories).toEqual([{ name: 'Conflict Watch', count: 2, pages: ['conflict-watch/'] }, { name: 'How-to', count: 1, pages: [] }]);
+    const deleted = withCategories(read, { kind: 'delete', name: 'Conflict Watch' });
+    expect(deleted.items.filter((item) => item.category === 'Conflict Watch')).toEqual([]);
+    // the page that names it still does
+    expect(deleted.categories).toEqual([{ name: 'Methods', count: 1, pages: [] }, { name: 'Conflict Watch', count: 0, pages: ['conflict-watch/'] }]);
+    const moved = withCategories(read, { kind: 'move', folder: 'bab', to: '  Methods ' });
+    expect(moved.items.find((item) => item.folder === 'bab').category).toBe('Methods');
+    expect(moved.categories.map((entry) => [entry.name, entry.count])).toEqual([['Methods', 2], ['Conflict Watch', 1]]);
+    expect(withCategories(read, { kind: 'move', folder: 'bab', to: '' }).items[0].category).toBe('');
+    expect(withCategories(null, { kind: 'delete', name: 'x' })).toBeNull();
+    expect(withCategories(read, null)).toBe(read);
+  });
+
+  it('counts every card a rename or a delete changes, whatever its kind', () => {
+    expect(carrying(read, 'Methods')).toBe(2);
+    expect(carrying(read, 'Nowhere')).toBe(0);
+    expect(carrying(null, 'Methods')).toBe(0);
+  });
+
+  it('lists the site\'s categories, then the ones added here that the site does not hold, case aside', () => {
+    expect(categoryRows(read, ['Harbour', 'methods']).map((row) => [row.name, row.count, row.added])).toEqual([
+      ['Conflict Watch', 2, false], ['Methods', 1, false], ['Harbour', 0, true]]);
+    // no read, or one cut short: only the added ones
+    expect(categoryRows(null, ['Harbour']).map((row) => row.name)).toEqual(['Harbour']);
+    expect(categoryRows({ ...read, truncated: true }, []).length).toBe(0);
+    expect(categoryChoices(read, ['Harbour'])).toEqual(['Conflict Watch', 'Methods', 'Harbour']);
+  });
+
+  it('says what a name typed to add is up against', () => {
+    expect(addProblem('  ', read, [])).toBe('empty');
+    expect(addProblem('conflict  WATCH', read, [])).toBe('site');
+    expect(addProblem('harbour', read, ['Harbour'])).toBe('added');
+    expect(addProblem('Bridges', read, ['Harbour'])).toBe('');
+    expect(addProblem('Bridges', null)).toBe('');
   });
 });

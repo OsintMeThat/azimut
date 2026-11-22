@@ -3,10 +3,12 @@
    * Readers: how the readers of every page are counted, and how they follow and find the site.
    *
    * Counting is off until one of GoatCounter or Cloudflare Web Analytics is picked with its code or
-   * token; what is typed is checked before it is sent, and what the server keeps is shown again. It
-   * starts with the next publish or Update the site. Follow and find gives the feed and the sitemap
-   * addresses, built from the site's address, each with a Copy press. Nothing here reaches the
-   * network: the links open in another tab, on a press.
+   * site token; what is typed is checked before it is sent, and what the server keeps is shown again.
+   * It starts with the next publish or Update the site. With Cloudflare, Numbers reads how many read
+   * each article on its press (`NumbersCard.svelte`); GoatCounter keeps its numbers on its own page.
+   * Follow and find gives the feed and the sitemap addresses, built from the site's address, each with
+   * a Copy press. Nothing here reaches the network but Read the numbers: the links open in another
+   * tab, on a press.
    */
   import Icon from '../../../components/Icon.svelte';
   import { copyText } from '../../../lib/clipboard.js';
@@ -14,11 +16,13 @@
   import {
     CLOUDFLARE_BAD, CLOUDFLARE_DASHBOARD, CLOUDFLARE_GUIDE, CLOUDFLARE_MISSING, CLOUDFLARE_SAID, CLOUDFLARE_SIGNUP, CLOUDFLARE_STEPS, COPY_PRESS,
     COUNTING_SAID, FEED_SAID, FOLLOW_NONE, FOLLOW_TITLE, GOATCOUNTER_BAD, GOATCOUNTER_MISSING, GOATCOUNTER_SAID, GOATCOUNTER_SIGNUP, GOATCOUNTER_STEPS,
-    HUB_LEADS, SITEMAP_SAID, STATS_CHOICES, STATS_INTRO, STATS_OFF_SAID, STATS_TITLE, WEBSITE_HELP as HELP, beaconToken, counterCode,
+    HUB_LEADS, NUMBERS_GOATCOUNTER, SITEMAP_SAID, STATS_CHOICES, STATS_INTRO, STATS_OFF_SAID, STATS_TITLE, WEBSITE_HELP as HELP, beaconToken,
+    counterCode,
   } from '../../../lib/websiteSetup.js';
   import HubCard from './HubCard.svelte';
   import HubField from './HubField.svelte';
   import HubPanel from './HubPanel.svelte';
+  import NumbersCard from './NumbersCard.svelte';
 
   let { active = false, prefs, savePrefs, address = '' } = $props();
 
@@ -97,11 +101,16 @@
           <a class="hub-ext" href={GOATCOUNTER_SIGNUP} target="_blank" rel="noopener noreferrer" title={HELP.goatcounterSignup}>
             GoatCounter sign-up <Icon name="external" size={11} /></a>
         </details>
+        <p class="elsewhere">{NUMBERS_GOATCOUNTER}</p>
+        {#if prefs.siteStatsCode}
+          <a class="hub-ext" href="https://{prefs.siteStatsCode}.goatcounter.com/" target="_blank" rel="noopener noreferrer" title={HELP.goatcounterOwn}>
+            {prefs.siteStatsCode}.goatcounter.com <Icon name="external" size={11} /></a>
+        {/if}
       {:else if prefs.siteStats === 'cloudflare'}
         <div class="fields">
-          <HubField id="hub-stats-token" label="Token" hint={prefs.siteStatsToken ? COUNTING_SAID : CLOUDFLARE_MISSING} problem={tokenProblem}>
+          <HubField id="hub-stats-token" label="Site token" hint={prefs.siteStatsToken ? COUNTING_SAID : CLOUDFLARE_MISSING} problem={tokenProblem}>
             <input id="hub-stats-token" class="input hub-mono" bind:value={tokenText} onchange={saveToken} placeholder="0123456789abcdef…" spellcheck="false"
-              autocomplete="off" aria-label="Cloudflare token" aria-invalid={tokenProblem ? 'true' : undefined} title={HELP.statsToken} />
+              autocomplete="off" aria-label="Cloudflare site token" aria-invalid={tokenProblem ? 'true' : undefined} title={HELP.statsToken} />
           </HubField>
         </div>
         <p class="dash"><a class="hub-ext" href={CLOUDFLARE_DASHBOARD} target="_blank" rel="noopener noreferrer" title={HELP.cloudflareDashboard}>
@@ -133,6 +142,10 @@
       {#if !address}<p class="none-said">{FOLLOW_NONE}</p>{/if}
     </HubCard>
   </div>
+
+  {#if prefs.siteStats === 'cloudflare'}
+    <div class="hub-gap"><NumbersCard {prefs} {savePrefs} {address} /></div>
+  {/if}
 </HubPanel>
 
 <style>
@@ -141,6 +154,8 @@
   .said { margin-top: 8px; color: var(--text-2); font-size: var(--fs-xs); }
   .fields { margin-top: 6px; }
   .dash { margin-top: 2px; }
+  .elsewhere { margin-top: 12px; color: var(--text-2); font-size: var(--fs-xs); }
+  .elsewhere + .hub-ext { margin-top: 4px; }
   .guides { display: flex; flex-wrap: wrap; gap: 6px 14px; margin-top: 6px; }
   .follow { color: var(--text-2); }
   .follow:not(:first-of-type) { margin-top: 16px; }

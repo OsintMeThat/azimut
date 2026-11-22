@@ -299,6 +299,11 @@ a:hover {
   opacity: 0.45;
   cursor: not-allowed;
 }
+/* a press waiting on its answer is at work, not unavailable (`components/BusyLabel.svelte`) */
+.btn[aria-busy='true']:disabled {
+  opacity: 0.8;
+  cursor: progress;
+}
 
 .btn-primary {
   background: var(--accent);

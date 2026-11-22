@@ -7,7 +7,7 @@
  * asked on mount; `siteReadOf` takes its answer down to what the hub shows, so a field the server
  * leaves out reads as empty rather than break a panel.
  */
-import { ALL_CHIP, KIND_CHIP, LIMITS_AMBER, LIMITS_RED, SITE_LIMIT_BYTES, placeOf } from './websiteSetup.js';
+import { ALL_CHIP, KIND_CHIP, LIMITS_AMBER, LIMITS_RED, NUMBERS_HOME, SITE_LIMIT_BYTES, placeOf } from './websiteSetup.js';
 import { webLink } from './wordpressSetup.js';
 
 // -- the read ---------------------------------------------------------------------------------------
@@ -44,6 +44,9 @@ function itemOf(raw) {
     role: ROLES.includes(raw?.role) ? raw.role : 'article',
     layout: LAYOUTS.includes(raw?.layout) ? raw.layout : 'article',
     image: webLink(raw?.image),
+    // who it is by, and their picture: the site's own name for an article of the analyst's
+    author: line(raw?.author, 120),
+    authorImage: webLink(raw?.author_image),
     bytes: bytesOf(raw?.bytes),
     // where it stands on the site's map, null for nowhere
     place: placeOf(raw?.place),
@@ -79,23 +82,81 @@ export function siteReadOf(answer) {
   };
 }
 
+/**
+ * The categories of a read worked out again from its items, as the server counts them: each with the listed
+ * articles that carry it, most first, then those a marked page names with no article yet. `pages` is the
+ * read's own list of the pages that name each, by name.
+ */
+export function categoriesFrom(items, pages = {}) {
+  const counts = new Map();
+  for (const item of items) if (item.role === 'article' && item.category) counts.set(item.category, (counts.get(item.category) ?? 0) + 1);
+  for (const [name, named] of Object.entries(pages)) if (named.length && !counts.has(name)) counts.set(name, 0);
+  const fold = (name) => name.toLowerCase();
+  return [...counts].map(([name, count]) => ({ name, count, pages: pages[name] ?? [] }))
+    .sort((a, b) => b.count - a.count || (fold(a.name) < fold(b.name) ? -1 : fold(a.name) > fold(b.name) ? 1 : 0));
+}
+
+/** The pages that name each category of a read, by its name. */
+const pagesOf = (read) => Object.fromEntries(read.categories.map((entry) => [entry.name, entry.pages]));
+
 /** The read without one folder, as the next read would find it: its row gone, the categories counted again, its weight off. */
 export function withoutFolder(read, folder) {
   if (!read) return read;
   const gone = read.items.find((item) => item.folder === folder);
   if (!gone) return read;
   const items = read.items.filter((item) => item !== gone);
-  const listed = new Map();
-  for (const item of items) if (item.role === 'article' && item.category) listed.set(item.category, (listed.get(item.category) ?? 0) + 1);
   const named = `${folder}/`;
   return {
     ...read,
     items,
-    categories: read.categories.filter((entry) => listed.has(entry.name)).map((entry) => ({ ...entry, count: listed.get(entry.name) })),
+    categories: categoriesFrom(items, pagesOf(read)),
     legal: read.legal === named ? '' : read.legal,
     privacy: read.privacy === named ? '' : read.privacy,
     size: { ...read.size, site: read.size.site !== null && gone.bytes !== null ? Math.max(0, read.size.site - gone.bytes) : read.size.site },
   };
+}
+
+/**
+ * The read once a change of categories is on GitHub, as the next read would find it: `rename` gives every card
+ * of `name` the name `to`, `delete` takes `name` off them, `move` gives the card of `folder` the category `to`
+ * ('' for none). The categories are counted again; the pages keep naming what they named.
+ */
+export function withCategories(read, change) {
+  if (!read || !change) return read;
+  const touches = (item) => (change.kind === 'move' ? item.folder === change.folder : item.category === change.name);
+  const to = change.kind === 'delete' ? '' : line(change.to, 60);
+  const items = read.items.map((item) => (touches(item) ? { ...item, category: to } : item));
+  return { ...read, items, categories: categoriesFrom(items, pagesOf(read)) };
+}
+
+/** How many cards of the read a rename or a delete of `name` changes: every card that carries it, whatever its kind. */
+export function carrying(read, name) {
+  return (read?.items ?? []).filter((item) => item.category === name).length;
+}
+
+/**
+ * The rows of the Categories panel: each category of the read (`count` its listed articles, `pages` those that
+ * name it), then each one added here that the read does not hold, `added`, with no article yet.
+ */
+export function categoryRows(read, added = []) {
+  const found = read && !read.truncated ? read.categories : [];
+  const known = new Set(found.map((entry) => entry.name.toLowerCase()));
+  return [...found.map((entry) => ({ ...entry, added: false })),
+    ...added.filter((name) => !known.has(name.toLowerCase())).map((name) => ({ name, count: 0, pages: [], added: true }))];
+}
+
+/** What a category typed to add is up against: '' when it may be added, `site` when the site has it, `added` when it was added here. */
+export function addProblem(name, read, added = []) {
+  const wanted = line(name, 60).toLowerCase();
+  if (!wanted) return 'empty';
+  if ((read?.categories ?? []).some((entry) => entry.name.toLowerCase() === wanted)) return 'site';
+  if (added.some((one) => one.toLowerCase() === wanted)) return 'added';
+  return '';
+}
+
+/** The categories an article's line offers: the site's, then the ones added here, each once. */
+export function categoryChoices(read, added = []) {
+  return categoryRows(read, added).map((row) => row.name);
 }
 
 // -- kinds, chips and counts ------------------------------------------------------------------------
@@ -219,4 +280,87 @@ export function countingOf(prefs) {
   if (prefs.siteStats === 'goatcounter' && prefs.siteStatsCode) return 'goatcounter';
   if (prefs.siteStats === 'cloudflare' && prefs.siteStatsToken) return 'cloudflare';
   return '';
+}
+
+// -- the numbers -----------------------------------------------------------------------------------
+
+/** Most rows the panel keeps of an answer, as the server bounds it (`sitestats.MAX_PAGES`, `MAX_RANKED`). */
+const MAX_PAGES = 500;
+const MAX_RANKED = 10;
+
+const windowOf = (value) => ({ views: count(value?.views), visits: count(value?.visits) });
+
+/**
+ * The numbers as `POST /api/publishing/cloudflare/numbers` answers them (`engine/sitestats.py`), what the
+ * server left out read as nothing: `pages` (each `{ path, page, week, month }`, `page` the path within the
+ * site's folder, '' its home, null outside it), `total`, `referrers` ranked by the visits they sent,
+ * `countries`, whether the 30 days were `sampled`, and the `address` the server read the site at.
+ */
+export function numbersOf(answer) {
+  const list = (value, max) => (Array.isArray(value) ? value.slice(0, max) : []);
+  const pages = list(answer?.pages, MAX_PAGES)
+    .filter((one) => typeof one?.path === 'string' && one.path.startsWith('/'))
+    .map((one) => ({ path: line(one.path, 512), page: typeof one.page === 'string' ? line(one.page, 512) : null, week: windowOf(one.week), month: windowOf(one.month) }));
+  const referrers = list(answer?.referrers, MAX_RANKED)
+    .map((one) => ({ host: line(one?.host, 253), ...windowOf(one) }))
+    .filter((one) => one.visits > 0)
+    .sort((a, b) => b.visits - a.visits);
+  const countries = list(answer?.countries, MAX_RANKED).map((one) => ({ country: line(one?.country, 64), ...windowOf(one) }));
+  return {
+    address: webLink(answer?.address),
+    pages,
+    total: { week: windowOf(answer?.total?.week), month: windowOf(answer?.total?.month) },
+    referrers,
+    countries,
+    sampled: answer?.sampled === true,
+  };
+}
+
+/**
+ * The rows of the numbers' table: each page of the site as the read of the site names it (the article
+ * whose folder holds it, with its title and its address; pages within one article summed), the home,
+ * then what the read does not know, by its path. `read` is the session's read or null; `address` is
+ * where the site is served, for the links. Ranked by their 30 days, then their 7.
+ */
+export function numbersRows(numbers, read = null, address = '') {
+  if (!numbers) return [];
+  const base = webLink(address) || numbers.address;
+  const origin = (() => {
+    try {
+      return new URL(base).origin;
+    } catch {
+      return '';
+    }
+  })();
+  // the longest folder first, so a nested one wins over its parent
+  const folders = [...(read?.items ?? [])].sort((a, b) => b.folder.length - a.folder.length);
+  const rows = new Map();
+  for (const one of numbers.pages) {
+    const item = one.page ? folders.find((entry) => one.page === `${entry.folder}/` || one.page.startsWith(`${entry.folder}/`)) : null;
+    const row = item
+      ? { key: `item:${item.folder}`, title: item.title, href: item.address || onSite(base, `${item.folder}/`), known: true }
+      : one.page === ''
+        ? { key: 'home', title: NUMBERS_HOME, href: base, known: true }
+        : { key: `path:${one.path}`, title: one.path, href: origin ? `${origin}${one.path}` : '', known: false };
+    const kept = rows.get(row.key);
+    if (kept) {
+      kept.week = { views: kept.week.views + one.week.views, visits: kept.week.visits + one.week.visits };
+      kept.month = { views: kept.month.views + one.month.views, visits: kept.month.visits + one.month.visits };
+    } else {
+      rows.set(row.key, { ...row, week: { ...one.week }, month: { ...one.month } });
+    }
+  }
+  return [...rows.values()].sort((a, b) => b.month.views - a.month.views || b.week.views - a.week.views || a.title.localeCompare(b.title));
+}
+
+/** A country as Cloudflare names it, an ISO code such as `FR`, said in English; the code itself when it is no known region. */
+export function countryOf(code) {
+  const value = line(code, 64);
+  if (!value) return 'Unknown';
+  if (!/^[A-Za-z]{2}$/.test(value)) return value;
+  try {
+    return new Intl.DisplayNames(['en'], { type: 'region' }).of(value.toUpperCase()) || value;
+  } catch {
+    return value;
+  }
 }

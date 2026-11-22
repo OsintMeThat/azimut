@@ -1199,11 +1199,13 @@ export async function installAppFixture(page, options = {}) {
         : route.fulfill({ status: 404, body: '' });
     }
     if (path === '/api/settings') return json(route, fixtureSettings);
-    // Settings › Website reads its WordPress site and its GitHub Pages site from this machine: none set here
+    // Settings › Website reads its WordPress site, its GitHub Pages site and whether a Cloudflare API token is kept
+    // from this machine: none set here
     if (path === '/api/publishing') {
       return json(route, {
         wordpress: options.wordpress ?? { site: '', user: '', password: { set: false, hint: '' } },
         github: options.github ?? { account: '', repo: 'articles', branch: 'main', site: '', base: '', token: { set: false, hint: '' } },
+        cloudflare: options.cloudflare ?? { token: { set: false, hint: '' } },
       });
     }
     if (path === '/api/settings/prefs' && request.method() === 'PUT') {

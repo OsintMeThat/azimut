@@ -455,7 +455,7 @@ def test_a_bar_changed_by_update_the_site_is_never_called_an_edit(client, fake):
     _put(fake, {"azimut-bar.html": OWN})
     assert client.post(UPDATE).json()["written"] == ["articles.json", "port-strike/index.html"]
     assert client.post(check, json={"short_name": "port-strike"}).json() == {
-        "checked": True, "exists": True, "edited": False, "warning": ""}
+        "checked": True, "exists": True, "edited": False, "warning": "", "taken": None, "free": ""}
     edition = f"/api/cases/{made['cid']}/notes/{made['note']}/editions"
     record = client.get(edition).json()["editions"][0]
     assert record["bare_sha256"] != record["sha256"]

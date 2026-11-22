@@ -271,6 +271,28 @@ def test_a_card_cannot_make_a_page_run_something_or_swell():
     assert site.read_card("x", b" " * (site.MAX_CARD_BYTES + 1)) is None
 
 
+def test_what_holds_an_address_is_named_by_its_card_else_its_page():
+    card = Card(title="Harbour   fire\nat dawn", summary="", date="2026-11-20")
+    assert site.card_title(card.as_json()) == "Harbour fire at dawn"
+    for other in (b"not json", b"[]", json.dumps({"format": "else/1", "title": "x"}).encode(), b" " * (site.MAX_CARD_BYTES + 1)):
+        assert site.card_title(other) == ""
+    assert site.page_title(b"<html><HEAD><Title lang='en'>Port &amp; strike\n log</TITLE></head></html>") == "Port & strike log"
+    assert site.page_title(b"<p>no title</p>") == "" and site.page_title(b"<title>  </title>") == ""
+    assert len(site.page_title(b"<title>" + b"t" * 900 + b"</title>")) == site.MAX_TITLE
+
+
+def test_a_free_short_name_is_found_beside_the_taken_ones():
+    assert githubpages.free_name("port-strike", {"port-strike"}) == "port-strike-2"
+    assert githubpages.free_name("port-strike", {"port-strike", "port-strike-2", "Port-Strike-3"}) == "port-strike-4"
+    # a name ending on a number goes on from it
+    assert githubpages.free_name("port-strike-2", {"port-strike-2"}) == "port-strike-3"
+    assert githubpages.free_name("report-2026", {"report-2026"}) == "report-2026-2"
+    # a long name is cut to make room, never past what a short name may be
+    made = githubpages.free_name("a" * githubpages.MAX_SHORT, {"a" * githubpages.MAX_SHORT})
+    assert made == "a" * (githubpages.MAX_SHORT - 2) + "-2" and githubpages.SHORT.match(made)
+    assert githubpages.free_name("x", {"x", *(f"x-{n}" for n in range(2, 102))}) == ""
+
+
 # -- who owns what ----------------------------------------------------------------------------------
 
 

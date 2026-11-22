@@ -4,7 +4,8 @@
    * them: the bar over an article, the home page and the feed, in the site's own paper and ink
    * (`engine/site.py`, `engine/sitehome.py`). It follows what is typed. With the site read, the lists
    * show its latest articles, its categories and its pages; before, a sample stands in. A read that
-   * finds the site's own bar in use (`azimut-bar.html`) shows it in place of Azimut's.
+   * finds the site's own bar in use (`azimut-bar.html`) shows it in place of Azimut's. An article by
+   * someone else names them after its day, their picture first, as the site's lists do (`site._by`).
    */
   import { OWN_BAR_FILE, OWN_BAR_IN_USE, PREVIEWS, PREVIEW_SAMPLE as SAMPLE, WEBSITE_HELP as HELP } from '../../../lib/websiteSetup.js';
 
@@ -15,7 +16,8 @@
 
   const listed = $derived((read?.items ?? []).filter((item) => item.role === 'article').slice(0, 2));
   const rows = $derived(listed.length
-    ? listed.map((item) => ({ title: item.title, day: item.dateLabel || item.date, image: item.image, category: item.category }))
+    ? listed.map((item) => ({ title: item.title, day: item.dateLabel || item.date, image: item.image, category: item.category,
+      by: item.author && item.author !== name ? item.author : '', face: item.author && item.author !== name ? item.authorImage : '' }))
     : [{ title: SAMPLE.title, day: SAMPLE.day, image: '', category: SAMPLE.category }, { title: SAMPLE.other, day: SAMPLE.day, image: '', category: '' }]);
   const tabs = $derived((read?.categories ?? []).map((entry) => entry.name).slice(0, 4));
   const pages = $derived((read?.items ?? []).filter((item) => item.role === 'page').map((item) => item.title).slice(0, 2));
@@ -56,7 +58,8 @@
         {#each rows as row, index (index)}
           <div class="it">
             <span class="th" style:background-image={row.image ? `url("${row.image}")` : null}></span>
-            <div class="tx">{#if row.category}<span class="kick">{row.category}</span>{/if}<h5>{row.title}</h5><small>{row.day}</small></div>
+            <div class="tx">{#if row.category}<span class="kick">{row.category}</span>{/if}<h5>{row.title}</h5>
+              <small>{row.day}{#if row.by} · {#if row.face}<img class="face" src={row.face} alt="" referrerpolicy="no-referrer" />{/if}<span data-preview="by">{row.by}</span>{/if}</small></div>
           </div>
         {/each}
         {#if credit}<div class="cr" data-preview="credit">Made with Azimut{version ? ` ${version}` : ''}</div>{/if}
@@ -119,6 +122,7 @@
   .it h5 { margin: 1px 0 0; overflow: hidden; color: var(--ink); font: 700 0.78rem/1.25 system-ui, sans-serif; white-space: nowrap; text-overflow: ellipsis;
     letter-spacing: 0; text-transform: none; }
   .it small, .fi small { display: block; color: var(--muted); font: 400 0.64rem system-ui, sans-serif; }
+  .it .face { width: 1.1em; height: 1.1em; margin-right: 0.3em; border-radius: 50%; object-fit: cover; vertical-align: -0.25em; }
   .cr { margin-top: 12px; padding-top: 8px; border-top: 1px solid var(--rule); color: var(--muted); font: 400 0.64rem system-ui, sans-serif; text-align: center; }
 
   .feed { padding: 14px 16px; font-family: system-ui, sans-serif; }
