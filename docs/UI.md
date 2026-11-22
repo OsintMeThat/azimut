@@ -7752,8 +7752,10 @@ between its two dated, credited sides; a timecode plays its passage of the clip;
 of more than twelve rows can be filtered, any table sorted by a column (each as its
 settings say, with a long one folded under *Show all*), and a code such as `[V12](#V12)`
 jumps to its row, opening the fold or the filter it hides in. A citation shows its source on hover or focus, and
-*How this was checked* under a figure opens the chain from the original post to the
-picture. A `::: steps` block shows one picture at a time with arrows and a row of days,
+*Where it comes from* under a figure (*How this was checked* under a proof, which
+states a place someone checked) opens the chain from the original post to the picture: a
+frame still named as Inspect named it reads *Frame at 0:14 of the video*, and a file made
+in the case gives the SHA-256 of that file, the original's being on the line it came from. A `::: steps` block shows one picture at a time with arrows and a row of days,
 its clip playing muted; a `::: story` keeps the picture beside the words being read and
 moves in on the part a step names (`{zoom=x,y,w,h}`). A picture marked `{graphic}` is
 blurred until pressed: a veil for the reader, not a redaction, as the picture is in the

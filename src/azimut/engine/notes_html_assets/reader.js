@@ -748,7 +748,7 @@
     for (const link of all('.az-body :is(p, li) a')) if (/^\S{28,}$/.test(words(link))) link.classList.add('az-long');
   }
 
-  /* printed, every "How this was checked" is open */
+  /* printed, every fold is open: where a picture comes from, how a proof was checked */
   function printing() {
     let opened = [];
     window.addEventListener('beforeprint', () => {

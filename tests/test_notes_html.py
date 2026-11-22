@@ -237,7 +237,10 @@ def test_a_picture_is_a_figure_with_its_caption_credit_and_chain(report):
     assert caption.one(cls="az-caption")
     credit = caption.one(cls="az-credit")
     assert "Esri World Imagery" in credit.words() and "Esri, Maxar" in credit.words()
-    chain = figure.one("details", "az-checked").one("ol", "az-chain")
+    fold = figure.one("details", "az-checked")
+    # nothing was checked on a picture: its fold says where it comes from
+    assert fold.one("summary").words() == "Where it comes from"
+    chain = fold.one("ol", "az-chain")
     assert chain.find(cls="az-hash") and chain.find(cls="az-imagery")
 
 
@@ -252,9 +255,27 @@ def test_a_proof_says_its_sentence_its_points_and_both_dates(report):
     dates = figure.one(cls="az-dates").words()
     assert "Imagery: Esri World Imagery, about 3 June 2025" in dates and "Footage: 24 October 2025" in dates
     assert figure.one("a", "az-posted").attrs["href"].startswith("https://x.com/our_desk/")
-    # the chain goes back through the frame to the post
+    # the chain goes back through the frame to the post, under the place someone checked
+    assert figure.one("details", "az-checked").one("summary").words() == "How this was checked"
     chain = figure.one("ol", "az-chain")
     assert any(node.attrs.get("href") == POST_URL for node in chain.find("a", "az-original"))
+    # the frame the analyst named keeps its name and its moment; a file made in the case gives
+    # its own fingerprint, the post's video the original's
+    frame = next(item for item in chain.find("li") if "The lead tank stops" in item.words())
+    assert "Frame at 0:12.4" in frame.words() and "SHA-256 of this file" in frame.one(cls="az-hash").words()
+    video = next(item for item in chain.find("li") if item.one(cls="az-chain-what").words() == "Video")
+    assert "SHA-256 of the original" in video.one(cls="az-hash").words()
+
+
+def test_a_frame_still_named_by_inspect_is_called_by_its_moment():
+    video = notesources.Source(key="entity:v1", label="barry with the NED - the western entrance", noun="Video")
+    named = notesources.Source(key="entity:f1", label="00-00-25 barry with the NED - the western entrance", noun="Picture",
+                               at="0:25", arrival="made", origins=(video,))
+    assert notes_html._frame_name(named) == "Frame at 0:25 of the video"
+    # a frame the analyst named keeps its name, and a picture cut from no video says no video
+    assert notes_html._frame_name(notesources.Source(key="entity:f2", label="The checkpoint", at="0:25", origins=(video,))) == ""
+    assert notes_html._frame_name(notesources.Source(key="entity:f3", label="01-02-03 still", at="1:02:03")) == "Frame at 1:02:03"
+    assert notes_html._frame_name(notesources.Source(key="entity:f4", label="00-00-25 no moment")) == ""
 
 
 def test_a_pair_is_two_pictures_and_a_slider_each_half_dated(report):
