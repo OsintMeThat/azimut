@@ -744,11 +744,22 @@ export const PAGES = {
         text: 'Puts a new element on the page.',
         opens: {
           shot: 'plate-add',
-          lead: 'Maps, legend, scale, north, inset, text, pictures and credits, searchable.',
+          lead: 'The case’s own work first (comparisons, Geo Proofs, footage), then maps, legend, scale, text and pictures, searchable.',
           marks: [{ anchor: 'plate.add-groups', title: 'The catalogue', text: 'Search it, or browse it by kind.' }],
         },
       },
       { anchor: 'plate.list', title: 'On the page', text: 'Every element in stacking order. Pick one to set it.' },
+      {
+        anchor: 'plate.layers',
+        title: 'Layers',
+        text: 'Where the maps get what they draw: the case’s layers, ticked on and off.',
+        opens: {
+          shot: 'plate-layers',
+          lead: 'Each map, its ground and the day its picture was taken, and the case’s layers it draws.',
+          marks: [],
+        },
+      },
+      { anchor: 'plate.slides', title: 'Slides', text: '+ Slide adds a picture played after the page. Slides make it a video.' },
       { anchor: 'plate.page', title: 'The page', text: 'A drag inside a map moves its ground, and its edge moves the frame.' },
       { anchor: 'plate.inspector', title: 'Inspector', text: 'Paper, fonts and colours, or the settings of the element picked.' },
       { anchor: 'plate.looks', title: 'Looks', text: 'A whole look in one press: Press, Night, Newsroom, Humanitarian, Tactical and more.' },
@@ -776,6 +787,7 @@ export const PAGES = {
     tips: [
       { title: 'A new plate starts from the Map', text: 'A ready plate opens at once; New plate sorts the layouts by what the plate shows, then picks its layers, paper and look.' },
       { title: 'Days and slides', text: 'A dated layer is drawn on the plate’s day; the video plays its days, each followed by its slides.' },
+      { title: 'From the case', text: 'Add › From the case lays a comparison, a Geo Proof or placed footage on the page, each pointing at its place.' },
       { title: 'Templates', text: 'Keep as template saves the layout without its data, to start other plates from.' },
       { title: 'Texts that fill themselves', text: '{date}, {case}, {title}, {scale} and {imagery} are written in when the page is drawn.' },
       { title: 'Focus', text: 'F sets one element apart, to adjust it without the rest of the page.' },

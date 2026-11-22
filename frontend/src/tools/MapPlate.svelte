@@ -2238,7 +2238,7 @@
         {#if barShown}
           <!-- the plate's days and the day's steps on one bar; a plate that plays nothing has none, Add holds its first step -->
           <!-- fixed columns: what the day holds never moves the days' track; a narrow bar gives the steps a line of their own -->
-          <div class="timebar" class:days={moments.length} class:narrow={barWidth > 0 && barWidth < NARROW_BAR} bind:clientHeight={barHeight} bind:clientWidth={barWidth}>
+          <div class="timebar" data-guide="plate.slides" class:days={moments.length} class:narrow={barWidth > 0 && barWidth < NARROW_BAR} bind:clientHeight={barHeight} bind:clientWidth={barWidth}>
             <div class="controls">
               <button type="button" class="play" aria-label={playing ? 'Pause' : 'Play'} title={playing ? 'Pause' : moments.length ? 'Play the days and their slides' : 'Play the slides'}
                 disabled={sequence.length < 2} onclick={play}><Icon name={playing ? 'pause' : 'play'} size={14} /></button>
@@ -2297,7 +2297,7 @@
           </div>
           <button class="btn btn-primary" onclick={() => (creating = true)}><Icon name="plus" size={15} /> New plate</button>
         </div>
-        <p class="hint">A plate opens where the Map is looking. A ready plate starts at once; New plate first asks what it shows, then its layers, paper and look.</p>
+        <p class="hint">A plate opens where the Map is looking. A ready plate starts at once; New plate asks what it shows first.</p>
         <h4>In this case</h4>
         {#if plates.length}
           <div class="tiles">

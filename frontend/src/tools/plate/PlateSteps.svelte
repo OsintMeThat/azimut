@@ -279,7 +279,7 @@
   <button type="button" class="add" class:said={still} aria-label="Add a slide" title={current ? 'Add a slide after this one' : 'Add a slide to this day, played after it'} onclick={() => onadd?.()}>
     <Icon name="plus" size={14} />{#if still}<span>Slide</span>{/if}</button>
   {#if still}
-    <span class="hint">One picture for now. Slides play one after another and make it a video.</span>
+    <span class="hint">Slides make it a video.</span>
   {/if}
   {#if compact}
     <span class="tally" title="The slide shown, of the day's slides">{shownIndex >= 0 ? `${shownIndex + 1} / ${steps.length}` : `${steps.length} slides`}</span>

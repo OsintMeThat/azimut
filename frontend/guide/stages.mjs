@@ -1065,13 +1065,28 @@ export const STAGES = [
     },
   },
   {
-    shot: 'plate-home',
+    shot: 'plate-layers',
     from: 'plate',
     window: WIDE,
+    focus: ['[data-guide="plate.list"]', '[data-guide="plate.page"]'],
+    async run({ page }) {
+      await seen(page, '[data-guide="plate.layers"]').click();
+      await seen(page, '[data-guide="plate.list"] section.map').waitFor();
+    },
+  },
+  {
+    shot: 'plate-home',
+    from: 'plate',
+    // short enough that the ready plates, framed whole, keep the picture landscape
+    window: { width: WIDE.width, height: 540 },
     focus: ['[data-guide="plate.ready"]'],
     async run({ page }) {
       await seen(page, '[data-guide="plate.home"]').click();
       await seen(page, '[data-guide="plate.ready"]').waitFor();
+      // the case's plates and the analyst's templates come first: the ready ones are
+      // brought up to the top, their heading in sight
+      await page.locator('h4:has-text("Ready plates")').evaluate((node) => node.scrollIntoView({ block: 'start' }));
+      await page.waitForTimeout(300);
     },
   },
   {
