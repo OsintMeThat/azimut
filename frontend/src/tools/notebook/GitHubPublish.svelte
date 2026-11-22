@@ -49,7 +49,7 @@
    * did not make is never replaced, so that one offers another address only.
    *
    * **Maps not on the site yet.** A link to a web map of the case opens the map's page on the site once the
-   * site holds it (`linkedMaps`, read from the case on opening). Each map the note links to that the site does
+   * site holds it (`linkedMaps`, read from the case on opening). Each map the note mentions that the site does
    * not hold is named before any press, with **Publish the map first**: each such map goes up to the same site
    * under the name it has elsewhere, else one made from its title, never over another's folder, unlisted with an
    * unlisted article and listed otherwise, then the article. A warning, never a stop: published without it, the
@@ -154,9 +154,10 @@
   const replaceable = $derived(held !== null && (held.kind === 'edited' || held.kind === 'unread' || held.ours));
   let shortField = $state(null);
 
-  // the web maps the note links to, each with its address on the site, '' while the site does not hold it
+  // the web maps the note links to, each with its address on the site, '' while the site does not hold it; those it
+  // mentions read as words until then, where a link written to the map's address elsewhere still opens it there
   let maps = $state([]);
-  const missingMaps = $derived(maps.filter((map) => !map.address));
+  const missingMaps = $derived(maps.filter((map) => !map.address && map.mentioned));
   // Publish the map first was pressed: the next publish puts those maps up before the article
   let mapsFirst = false;
   // the title of the map going up, '' while none is

@@ -86,8 +86,8 @@ opens the address instead.
 
 A link to a web map of the case (`notelinks.linked_maps`) opens the map's page on the same site,
 at the site's address, once a record of the map names that repository and branch (`_site_maps`);
-until then it reads as its words. `/github/maps` lists the maps the note links to and the address
-each has there, "" for none yet, so the dialog can offer to publish them first. It reads the case only.
+until then a mention of it reads as its words. `/github/maps` lists the maps the note links to and the
+address each has there, "" for none yet, so the dialog can offer to publish them first. It reads the case only.
 
 **The site.** The same press also keeps the analyst's website up to date (`engine/site.py`):
 the folder carries a card and the picture of its line in the site's list, with the category and
@@ -1970,15 +1970,15 @@ def _on_site(record: dict[str, Any], repository: str, branch: str) -> bool:
             and record["branch"] == branch)
 
 
-def _site_maps(case: Case, note_id: str, repository: str, branch: str, base: str,
+def _site_maps(case: Case, note_id: str, text: str, repository: str, branch: str, base: str,
                root: str | None = None) -> tuple[notelinks.SiteMaps, list[str]]:
-    """Where the web maps the note's public edition links to stand on the site of ``repository`` and
-    ``branch``, served at ``base``: their addresses there, by the site's address now rather than the one
+    """Where the web maps ``text``, the note's public edition, links to stand on the site of ``repository``
+    and ``branch``, served at ``base``: their addresses there, by the site's address now rather than the one
     a record kept; and the ids of every map it links to, in order, those the site does not hold among
     them. ``root`` is the folder the site is served from, when known: a map published outside it is none."""
     ids: dict[str, str] = {}
     addresses: dict[str, str] = {}
-    linked = [map_id for map_id in notelinks.linked_maps(case, _public_text(case, note_id)) if map_id != note_id]
+    linked = [map_id for map_id in notelinks.linked_maps(case, text) if map_id != note_id]
     for map_id in linked:
         records = _read_editions(case, map_id)
         here = next((record for record in records if _on_site(record, repository, branch)
@@ -2013,9 +2013,10 @@ def _map_short(case: Case, map_id: str) -> str:
 @router.get("/{case_id}/notes/{note_id}/github/maps")
 def github_maps(case_id: str, note_id: str) -> dict[str, Any]:
     """The web maps the note's public edition links to, in order, each with its address on the site of
-    Settings › Website, "" while the site does not hold it, and the short name it would go up under.
-    The publish dialog reads it to say which maps are not on the site yet. Reads the case and the
-    settings only."""
+    Settings › Website, "" while the site does not hold it, the short name it would go up under, and
+    whether the note mentions it (``mentioned``): a mention reads as its words until the site holds the
+    map, where a link written to an address of it still opens it there. The publish dialog reads it to
+    say which maps are not on the site yet. Reads the case and the settings only."""
     from .publishing import github_settings
 
     case = get_case(case_id)
@@ -2023,9 +2024,12 @@ def github_maps(case_id: str, note_id: str) -> dict[str, Any]:
     target = github_settings()
     if not target.account:
         return {"maps": []}
-    found, linked = _site_maps(case, note_id, f"{target.account}/{target.repo}", target.branch, target.base)
+    text = _public_text(case, note_id)
+    found, linked = _site_maps(case, note_id, text, f"{target.account}/{target.repo}", target.branch, target.base)
+    mentioned = set(notetext.mentioned_ids(text))
     return {"maps": [{"id": map_id, "title": _note_title(case, map_id), "address": found.of(map_id),
-                      "short": "" if found.of(map_id) else _map_short(case, map_id)} for map_id in linked]}
+                      "short": "" if found.of(map_id) else _map_short(case, map_id), "mentioned": map_id in mentioned}
+                     for map_id in linked]}
 
 
 @router.get("/{case_id}/notes/{note_id}/place")
@@ -2129,7 +2133,8 @@ def github_publish(case_id: str, note_id: str, body: GitHubPublishIn) -> dict[st
             placement = site_engine.Placement(site_for(target, pages.url), category=body.category, role=body.role,
                                               place=body.chosen_place)
             # each link to a map the site holds opens its page there; one it does not hold yet reads as words
-            maps, _ = _site_maps(case, note_id, repository, target.branch, pages.url, pages.root)
+            maps, _ = _site_maps(case, note_id, _public_text(case, note_id), repository, target.branch, pages.url,
+                                 pages.root)
             try:
                 made = web_engine.build(
                     case, note_id, base_url=where, diagrams=diagrams, round_pov=body.round_pov, changes=changes,

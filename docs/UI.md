@@ -7940,8 +7940,9 @@ reads *Reading…*, and the dialog says *Making the folder and sending it to oct
 address the map was published at written by hand) opens the map's page on the same site once
 the site holds it: the publish gives it the site's own address, `https://octo.github.io/articles/road-map/`,
 which the site's lists read to fold the map under the article and Update the site moves with a new
-domain. A link written to the map's address on another site takes its address on this one. A map
-the site does not hold yet is named under the site's fields before any press, *The map “Road map”
+domain. A link written to the map's address on another site takes its address on this one, and
+keeps the one written while this site lacks the map. A map the article links to from the Link field
+that the site does not hold yet is named under the site's fields before any press, *The map “Road map”
 is not on this site yet.*, then *Published without it, the link to it reads as plain text.*, with
 **Publish the map first**, which puts the map on the same site and then the article: under the name
 it has elsewhere, else one made from its title, never the article's own nor another's folder, and

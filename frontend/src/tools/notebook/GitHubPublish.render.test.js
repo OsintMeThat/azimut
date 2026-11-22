@@ -1035,7 +1035,7 @@ it('publishes only once the author just typed is in the look', async () => {
 
 // -- the maps the note links to ------------------------------------------------------------
 
-const ROAD = { id: 'n_road', title: 'Road map', address: '', short: '' };
+const ROAD = { id: 'n_road', title: 'Road map', address: '', short: '', mentioned: true };
 const ROAD_HERE = 'https://octo.github.io/articles/road-map/';
 let served = [];
 
@@ -1050,7 +1050,9 @@ function serveMaps(maps, options) {
 const published = () => post.mock.calls.filter(([path]) => /\/github$/.test(path));
 
 it('names a map the site lacks before any press, reading the note as saved, and publishes the article without it', async () => {
-  serveMaps([ROAD, { id: 'n_coast', title: 'Coast', address: 'https://octo.github.io/articles/coast/', short: '' }]);
+  // the coast on the site already, the harbour linked by an address that still opens it elsewhere: neither said
+  serveMaps([ROAD, { id: 'n_coast', title: 'Coast', address: 'https://octo.github.io/articles/coast/', short: '', mentioned: true },
+    { id: 'n_harbour', title: 'Harbour', address: '', short: 'harbour', mentioned: false }]);
   publishOk();
   const props = show();
   await settle();
@@ -1066,7 +1068,7 @@ it('names a map the site lacks before any press, reading the note as saved, and 
 });
 
 it('names several maps in one sentence, and none when the site holds them all', async () => {
-  serveMaps([ROAD, { id: 'n_strikes', title: 'Strikes', address: '', short: '' }]);
+  serveMaps([ROAD, { id: 'n_strikes', title: 'Strikes', address: '', short: '', mentioned: true }]);
   show();
   await settle();
   expect(target.querySelector('.maps p').textContent.trim()).toBe('The maps “Road map” and “Strikes” are not on this site yet.');

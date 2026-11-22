@@ -159,7 +159,7 @@ def test_a_link_to_a_map_the_site_holds_opens_its_page_there_and_folds_it_under_
     _publish(client, cid, road, "road-map")
     article = make_note(client, cid, title="Port strike", content=f"Smoke over the pier: see [[entity:{road}|the road map]].\n")
     assert _maps(client, cid, article["id"]) == [
-        {"id": road, "title": "The road", "address": f"{SITE}road-map/", "short": ""}]
+        {"id": road, "title": "The road", "address": f"{SITE}road-map/", "short": "", "mentioned": True}]
     _publish(client, cid, article["id"], "port-strike")
     files = fake.files()
     page = files["port-strike/index.html"].decode()
@@ -181,7 +181,7 @@ def test_a_map_not_on_the_site_yet_is_said_its_link_reads_as_words_and_a_later_p
     cid = make_case(client, "Road")
     road = _drawn_map(client, cid, monkeypatch, tmp_path)
     article = make_note(client, cid, title="Port strike", content=f"See [[entity:{road}|the road map]].\n")
-    assert _maps(client, cid, article["id"]) == [{"id": road, "title": "The road", "address": "", "short": ""}]
+    assert _maps(client, cid, article["id"]) == [{"id": road, "title": "The road", "address": "", "short": "", "mentioned": True}]
     _publish(client, cid, article["id"], "port-strike")
     page = fake.files()["port-strike/index.html"].decode()
     assert "the road map" in page and "road-map" not in page
@@ -202,7 +202,12 @@ def test_a_map_published_to_another_site_only_offers_the_name_it_has_there(clien
     Case.open(cid).update_entity(road, {"attrs": {"editions": [
         _published("the-road", "https://octo.github.io/old/the-road/", repository="octo/old")]}})
     article = make_note(client, cid, title="Port strike", content=f"See [[entity:{road}|the road map]].\n")
-    assert _maps(client, cid, article["id"]) == [{"id": road, "title": "The road", "address": "", "short": "the-road"}]
+    assert _maps(client, cid, article["id"]) == [
+        {"id": road, "title": "The road", "address": "", "short": "the-road", "mentioned": True}]
+    # a link written to its address there still opens it there: no mention, nothing reads as words
+    written = make_note(client, cid, title="Old", content="See [the road](https://octo.github.io/old/the-road/).\n")
+    assert _maps(client, cid, written["id"]) == [
+        {"id": road, "title": "The road", "address": "", "short": "the-road", "mentioned": False}]
 
 
 def test_a_written_link_to_the_map_on_another_site_takes_its_address_on_this_one(client, fake, monkeypatch, tmp_path):

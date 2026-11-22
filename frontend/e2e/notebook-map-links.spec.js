@@ -61,7 +61,7 @@ async function stand(page, { text = '## What we saw\n\nSmoke over the pier, alon
     }
     if (path === '/n1/github/maps') {
       const address = state.editions.n_road[0]?.address ?? '';
-      return route.fulfill({ json: { maps: state.text.includes('[[entity:n_road|') ? [{ id: 'n_road', title: 'Road map', address, short: '' }] : [] } });
+      return route.fulfill({ json: { maps: state.text.includes('[[entity:n_road|') ? [{ id: 'n_road', title: 'Road map', address, short: '', mentioned: true }] : [] } });
     }
     const check = /^\/(n1|n_road)\/github\/check$/.exec(path);
     if (check) {

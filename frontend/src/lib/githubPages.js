@@ -111,15 +111,17 @@ export function checkFolder(caseId, noteId, shortName) {
 }
 
 /**
- * The web maps a note's public edition links to, in order: `[{ id, title, address, short }]`, `address` the map's on
- * the site of Settings › Website, '' while the site does not hold it, and `short` the name it has elsewhere, '' for
- * none. Reads the case and the settings only: the dialog names the maps a publish would leave as plain text.
+ * The web maps a note's public edition links to, in order: `[{ id, title, address, short, mentioned }]`, `address` the
+ * map's on the site of Settings › Website, '' while the site does not hold it, `short` the name it has elsewhere, '' for
+ * none, and `mentioned` whether the note mentions it, a link that reads as its words until the site holds the map.
+ * Reads the case and the settings only: the dialog names the maps a publish would leave as plain text.
  */
 export async function linkedMaps(caseId, noteId) {
   const answer = await api.get(`/api/cases/${caseId}/notes/${noteId || 'case'}/github/maps`);
   return (Array.isArray(answer?.maps) ? answer.maps : [])
     .filter((map) => typeof map?.id === 'string' && map.id)
-    .map((map) => ({ id: map.id, title: String(map.title ?? ''), address: webLink(map.address), short: String(map.short ?? '') }));
+    .map((map) => ({ id: map.id, title: String(map.title ?? ''), address: webLink(map.address), short: String(map.short ?? ''),
+      mentioned: map.mentioned === true }));
 }
 
 /**
