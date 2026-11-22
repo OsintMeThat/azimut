@@ -789,6 +789,32 @@ export function takenOutsideSaid(title) {
 export const REPLACE_PRESS = 'Replace it';
 export const PICK_ANOTHER = 'Pick another address';
 
+/** “A”, “A” and “B”, “A”, “B” and “C”: titles named as a sentence names them. */
+function namedList(titles) {
+  const named = titles.map((title) => `“${title}”`);
+  return named.length > 1 ? `${named.slice(0, -1).join(', ')} and ${named.at(-1)}` : named[0] ?? '';
+}
+/** The web maps an article links to that the site does not hold yet, named before the press. */
+export function mapsMissingSaid(titles) {
+  return titles.length > 1 ? `The maps ${namedList(titles)} are not on this site yet.` : `The map ${namedList(titles)} is not on this site yet.`;
+}
+/** What publishing without them does to the article's links, in one sentence. */
+export function mapsPlainSaid(count) {
+  return count > 1 ? 'Published without them, the links to them read as plain text.' : 'Published without it, the link to it reads as plain text.';
+}
+/** The press that puts them on the site, then the article. */
+export function mapsFirstPress(count) {
+  return count > 1 ? 'Publish the maps first' : 'Publish the map first';
+}
+/** What the dialog says while one of them goes up. */
+export function mapGoingSaid(title, repository) {
+  return `Publishing the map “${title}” to ${repository}…`;
+}
+/** A map that did not go up, named, with GitHub's reason: the article waits. */
+export function mapFailedSaid(title, why) {
+  return `The map “${title}” was not published: ${why}`;
+}
+
 // -- on hover, one clause each --------------------------------------------------------------------
 
 /**
@@ -887,6 +913,7 @@ export const WEBSITE_HELP = {
   publishStop: 'Leave the folder on GitHub as it is',
   publishReplace: 'Publish this note in its place',
   publishPickAnother: 'Leave it there and give this note a free address',
+  publishMapsFirst: 'Publish each map to this site, then this article',
   // WordPress
   wordpressSite: 'The WordPress site a note is sent to as a draft',
   wordpressUser: 'The username you sign in to WordPress with',

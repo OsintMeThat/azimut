@@ -47,6 +47,13 @@
    * up and the press that follows publishes anyway: a warning, never a stop. A check that fails says so,
    * and the press after it publishes: nothing is replaced unread without one more press. A folder Azimut
    * did not make is never replaced, so that one offers another address only.
+   *
+   * **Maps not on the site yet.** A link to a web map of the case opens the map's page on the site once the
+   * site holds it (`linkedMaps`, read from the case on opening). Each map the note links to that the site does
+   * not hold is named before any press, with **Publish the map first**: each such map goes up to the same site
+   * under the name it has elsewhere, else one made from its title, never over another's folder, unlisted with an
+   * unlisted article and listed otherwise, then the article. A warning, never a stop: published without it, the
+   * link reads as plain text, and the next publish once the map is online makes it a link.
    */
   import { untrack } from 'svelte';
   import BusyLabel from '../../components/BusyLabel.svelte';
@@ -54,7 +61,7 @@
   import GitHubSetupPress from '../../components/GitHubSetupPress.svelte';
   import PickList from '../../components/PickList.svelte';
   import { prefs, toast, uiState } from '../../lib/state.svelte.js';
-  import { categoriesOf, checkFolder, placeOffer, publishNote, readCategories, readGitHub } from '../../lib/githubPages.js';
+  import { categoriesOf, checkFolder, linkedMaps, placeOffer, publishNote, readCategories, readGitHub } from '../../lib/githubPages.js';
   import {
     GITHUB_FREE, MAX_SHORT, PAGES_PUBLIC, githubReady, shortNameFrom, shortNameOf, shortNameProblem,
   } from '../../lib/githubPagesSetup.js';
@@ -66,7 +73,7 @@
     AUTHOR_IMAGE_LABEL, AUTHOR_IMAGE_NONE, AUTHOR_LABEL, AUTHOR_MAX, BUSY,
     CATEGORY_MAX, CATEGORY_NEW, CATEGORY_NEW_PLACEHOLDER, CATEGORY_NONE, CATEGORY_SAID, checkUnreadSaid, HAND_EDITED, LIST_IMAGE_COVER, NO_NAME_PRESS, ON_SITE, ON_SITE_TRY, PICK_ANOTHER, PLACE_COORDS_LABEL, PLACE_COORDS_PLACEHOLDER,
     MORE_OPTIONS, PLACE_LEAD, PLACE_NAME_LABEL, PLACE_NAME_MAX, PLACE_NAME_PLACEHOLDER, PLACE_TITLE, PLACE_WHY, REPLACE_PRESS, WEBSITE_HELP as HELP, noNameSaid, onSiteSaid,
-    placeText, placeUseSaid, readPlace, takenOutsideSaid, takenSaid,
+    mapFailedSaid, mapGoingSaid, mapsFirstPress, mapsMissingSaid, mapsPlainSaid, placeText, placeUseSaid, readPlace, takenOutsideSaid, takenSaid,
   } from '../../lib/websiteSetup.js';
 
   let {
@@ -147,6 +154,14 @@
   const replaceable = $derived(held !== null && (held.kind === 'edited' || held.kind === 'unread' || held.ours));
   let shortField = $state(null);
 
+  // the web maps the note links to, each with its address on the site, '' while the site does not hold it
+  let maps = $state([]);
+  const missingMaps = $derived(maps.filter((map) => !map.address));
+  // Publish the map first was pressed: the next publish puts those maps up before the article
+  let mapsFirst = false;
+  // the title of the map going up, '' while none is
+  let mapGoing = $state('');
+
   // a branch opened afresh has published nothing yet, and warned of nothing
   busy = false;
   warned = false;
@@ -211,6 +226,25 @@
   $effect(() => {
     if (ownRole === null || touched.role) return;
     role = ownRole || (fresh ? 'unlisted' : 'article');
+  });
+
+  /** Read again which maps the note links to and which the site holds, from the note as saved. */
+  async function readMaps() {
+    try {
+      maps = await linkedMaps(caseId, noteId);
+    } catch {
+      maps = [];
+    }
+  }
+
+  // the maps the note links to, read from the case once GitHub is set up, the editor's words written first
+  $effect(() => {
+    if (!ready) return;
+    const [id, note] = [caseId, noteId];
+    let live = true;
+    untrack(() => Promise.resolve(prepare())).catch(() => {}).then(() => (live ? linkedMaps(id, note) : null))
+      .then((found) => { if (live && found) maps = found; }).catch(() => {});
+    return () => { live = false; };
   });
 
   // the point the note offers for its place, read from the case once GitHub is set up; a failed read offers none
@@ -399,12 +433,54 @@
     shortField?.select?.();
   }
 
+  /** Publish the maps the site lacks, then the article: the press is the dialog's own publish, maps first. */
+  function publishMapsFirst() {
+    mapsFirst = true;
+    onpublish();
+    // the publish reads it as it starts: a press nothing carried out leaves nothing for the next one
+    mapsFirst = false;
+  }
+
+  /**
+   * Each map the note links to that the site does not hold, published to it: under the name it has elsewhere, else
+   * one made from its title, never the article's own nor another's folder. Unlisted with an unlisted article, so a
+   * first publish is still read before it is announced, and listed otherwise, so the site folds it under the
+   * article. True once all are up; false, with what is missing or what failed said, when one is not.
+   */
+  async function publishMaps({ roundPov, offlineMaps }) {
+    for (const map of missingMaps) {
+      mapGoing = map.title;
+      let name = map.short || shortNameOf(map.title);
+      if (name === short) name = `${name.slice(0, MAX_SHORT - 4)}-map`;
+      try {
+        const found = await checkFolder(caseId, map.id, name);
+        if (found?.taken) name = String(found.free || '') || `${name}-map`;
+        const answer = await publishNote(caseId, map.id, {
+          shortName: name, roundPov, offlineMaps, role: role === 'unlisted' ? 'unlisted' : 'article',
+        });
+        if (!answer?.published) {
+          needs = { needs: answer?.needs === 'repository' ? 'repository' : 'pages', detail: String(answer?.detail ?? '') };
+          return false;
+        }
+      } catch (error) {
+        failed = mapFailedSaid(map.title, error.message);
+        return false;
+      }
+    }
+    mapGoing = '';
+    await readMaps();
+    return true;
+  }
+
   /**
    * Publish the note to GitHub Pages; the dialog's button calls this. Answers what
    * GitHub said once published, or null when it was not: a folder changed on GitHub
-   * asks for one more press first (`warned`).
+   * asks for one more press first (`warned`). After Publish the map first, the maps the
+   * site lacks go up before it.
    */
   export async function publish({ roundPov = false, changes = '', offlineMaps = false } = {}) {
+    const first = mapsFirst;
+    mapsFirst = false;
     if (working) return null;
     if (!ready) {
       setupShown = true;
@@ -419,6 +495,7 @@
       await prepare();
       // an author typed and left a moment ago is in the look before the page is made
       await authorSaving;
+      if (first && missingMaps.length && !(await publishMaps({ roundPov, offlineMaps }))) return null;
       const told = replaceable;
       if (!told) {
         const found = await inTheWay();
@@ -438,6 +515,7 @@
       if (answer?.published) {
         held = null;
         onlook();
+        void readMaps();
         return { ...answer, told };
       }
       needs = { needs: answer?.needs === 'repository' ? 'repository' : 'pages', detail: String(answer?.detail ?? '') };
@@ -447,6 +525,7 @@
       return null;
     } finally {
       working = false;
+      mapGoing = '';
     }
   }
 
@@ -587,8 +666,17 @@
       {/if}
     </div>
 
+    {#if missingMaps.length}
+      <div class="maps" role="group" aria-label="Maps not on this site">
+        <p><Icon name="mapArea" size={13} /> {mapsMissingSaid(missingMaps.map((map) => map.title))}</p>
+        <p class="maps-said">{mapsPlainSaid(missingMaps.length)}</p>
+        <button type="button" class="btn btn-sm" disabled={working} aria-busy={Boolean(mapGoing)} title={HELP.publishMapsFirst}
+          onclick={publishMapsFirst}><BusyLabel busy={Boolean(mapGoing)} text={BUSY.publish}>{mapsFirstPress(missingMaps.length)}</BusyLabel></button>
+      </div>
+    {/if}
     {#if working}
-      <p class="sending" role="status"><BusyLabel busy text="Making the folder and sending it to {github.account}/{github.repo}…" /></p>
+      <p class="sending" role="status"><BusyLabel busy text={mapGoing ? mapGoingSaid(mapGoing, `${github.account}/${github.repo}`)
+        : `Making the folder and sending it to ${github.account}/${github.repo}…`} /></p>
     {/if}
     {#if held}
       <div class="held" role="alert">
@@ -690,6 +778,12 @@
   .held p { display: flex; align-items: center; gap: 6px; margin: 0; color: var(--text-1); font-size: var(--fs-sm); overflow-wrap: anywhere; }
   .held p > :global(svg) { flex: none; color: var(--warn); }
   .held-presses { display: flex; flex-wrap: wrap; gap: 6px; }
+  .maps { display: flex; flex-direction: column; align-items: flex-start; gap: 4px; margin-top: 6px; border: 1px solid var(--border);
+    border-radius: var(--r-md); padding: 8px 12px; background: var(--bg-1); }
+  .maps p { display: flex; align-items: center; gap: 6px; margin: 0; color: var(--text-1); font-size: var(--fs-sm); overflow-wrap: anywhere; }
+  .maps p > :global(svg) { flex: none; color: var(--warn); }
+  .maps .maps-said { color: var(--text-3); font-size: var(--fs-xs); }
+  .maps .btn { margin-top: 2px; }
   .set-up { display: flex; align-items: center; gap: 5px; margin: 4px 0 0; color: var(--ok); font-size: var(--fs-xs); }
   .failed { display: flex; align-items: center; gap: 5px; margin: 4px 0 0; color: var(--danger); font-size: var(--fs-xs); overflow-wrap: anywhere; }
   .setup { display: flex; flex-direction: column; gap: 6px; margin-top: 8px; border: 1px solid var(--border); border-radius: var(--r-md);

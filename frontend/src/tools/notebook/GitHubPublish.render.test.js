@@ -1032,3 +1032,120 @@ it('publishes only once the author just typed is in the look', async () => {
   await publishing;
   expect(post.mock.calls.some(([path]) => path.endsWith('/github'))).toBe(true);
 });
+
+// -- the maps the note links to ------------------------------------------------------------
+
+const ROAD = { id: 'n_road', title: 'Road map', address: '', short: '' };
+const ROAD_HERE = 'https://octo.github.io/articles/road-map/';
+let served = [];
+
+/** The server as `serve` has it, and the web maps the note links to, which a publish of a map changes. */
+function serveMaps(maps, options) {
+  serve(options);
+  served = maps;
+  const before = get.getMockImplementation();
+  get.mockImplementation(async (path) => (path.endsWith('/github/maps') ? { maps: served } : before(path)));
+}
+/** The presses that published a note, this one or a map, in order, each with what it sent. */
+const published = () => post.mock.calls.filter(([path]) => /\/github$/.test(path));
+
+it('names a map the site lacks before any press, reading the note as saved, and publishes the article without it', async () => {
+  serveMaps([ROAD, { id: 'n_coast', title: 'Coast', address: 'https://octo.github.io/articles/coast/', short: '' }]);
+  publishOk();
+  const props = show();
+  await settle();
+  expect(props.prepare).toHaveBeenCalled();
+  expect(get).toHaveBeenCalledWith('/api/cases/c1/notes/n1/github/maps');
+  const box = target.querySelector('.maps');
+  expect([...box.querySelectorAll('p')].map((line) => line.textContent.trim())).toEqual([
+    'The map “Road map” is not on this site yet.', 'Published without it, the link to it reads as plain text.']);
+  expect(button('Publish the map first').title).toBe('Publish each map to this site, then this article');
+  // a warning, never a stop: the dialog's own press publishes the article alone
+  expect((await live.publish()).published).toBe(true);
+  expect(published().map(([path]) => path)).toEqual(['/api/cases/c1/notes/n1/github']);
+});
+
+it('names several maps in one sentence, and none when the site holds them all', async () => {
+  serveMaps([ROAD, { id: 'n_strikes', title: 'Strikes', address: '', short: '' }]);
+  show();
+  await settle();
+  expect(target.querySelector('.maps p').textContent.trim()).toBe('The maps “Road map” and “Strikes” are not on this site yet.');
+  expect(target.querySelector('.maps-said').textContent).toBe('Published without them, the links to them read as plain text.');
+  expect(button('Publish the maps first')).toBeTruthy();
+  unmount(live);
+  serveMaps([{ ...ROAD, address: ROAD_HERE }]);
+  live = null;
+  show();
+  await settle();
+  expect(target.querySelector('.maps')).toBeNull();
+});
+
+it('Publish the map first puts the map up under its title, listed, then the article, and the warning goes', async () => {
+  serveMaps([ROAD]);
+  post.mockImplementation(async (path) => {
+    if (path.endsWith('/pdf/diagrams')) return { diagrams: [] };
+    if (path.endsWith('/github/check')) return { checked: true, exists: false, edited: false, taken: null, free: '' };
+    if (path === '/api/cases/c1/notes/n_road/github') {
+      served = [{ ...ROAD, address: ROAD_HERE }];
+      return { ...PUBLISHED, address: ROAD_HERE };
+    }
+    return PUBLISHED;
+  });
+  const props = show();
+  props.onpublish.mockImplementation(() => live.publish({ roundPov: true, offlineMaps: true }));
+  await settle();
+  button('Publish the map first').click();
+  await settle();
+  await settle();
+  expect(post).toHaveBeenCalledWith('/api/cases/c1/notes/n_road/github/check', { short_name: 'road-map' });
+  expect(published().map(([path]) => path)).toEqual(['/api/cases/c1/notes/n_road/github', '/api/cases/c1/notes/n1/github']);
+  expect(published()[0][1]).toMatchObject({ short_name: 'road-map', role: 'article', round_pov: true, offline_maps: true });
+  expect(published()[1][1]).toMatchObject({ short_name: 'port-strike', role: 'article' });
+  expect(target.querySelector('.maps')).toBeNull();
+  // the next press is the dialog's own again: no map goes first
+  post.mockClear();
+  await live.publish();
+  expect(published().map(([path]) => path)).toEqual(['/api/cases/c1/notes/n1/github']);
+});
+
+it('an unlisted article takes its map up unlisted, never over the article\'s name nor another\'s folder', async () => {
+  // never published to this site: the article starts on Unlisted
+  serveMaps([{ ...ROAD, short: 'port-strike' }], { editions: [] });
+  post.mockImplementation(async (path, body) => {
+    if (path.endsWith('/pdf/diagrams')) return { diagrams: [] };
+    if (path.endsWith('/n_road/github/check')) {
+      return body.short_name === 'port-strike-map' ? { checked: true, exists: true, taken: { title: 'Old map', ours: true }, free: 'port-strike-map-2' }
+        : { checked: true };
+    }
+    if (path.endsWith('/github/check')) return { checked: true };
+    return PUBLISHED;
+  });
+  const props = show();
+  props.onpublish.mockImplementation(() => live.publish());
+  await settle();
+  button('Publish the map first').click();
+  await settle();
+  await settle();
+  expect(published()[0][0]).toBe('/api/cases/c1/notes/n_road/github');
+  expect(published()[0][1]).toMatchObject({ short_name: 'port-strike-map-2', role: 'unlisted' });
+  expect(published()[1][1]).toMatchObject({ short_name: 'port-strike', role: 'unlisted' });
+});
+
+it('a map that does not go up is named with GitHub\'s words, and the article waits', async () => {
+  serveMaps([ROAD]);
+  post.mockImplementation(async (path) => {
+    if (path.endsWith('/pdf/diagrams')) return { diagrams: [] };
+    if (path.endsWith('/github/check')) return { checked: true };
+    if (path.endsWith('/n_road/github')) throw new Error('GitHub did not answer.');
+    return PUBLISHED;
+  });
+  const props = show();
+  props.onpublish.mockImplementation(() => live.publish());
+  await settle();
+  button('Publish the map first').click();
+  await settle();
+  await settle();
+  expect(target.querySelector('.failed').textContent.trim()).toBe('The map “Road map” was not published: GitHub did not answer.');
+  expect(published().map(([path]) => path)).toEqual(['/api/cases/c1/notes/n_road/github']);
+  expect(target.querySelector('.maps')).not.toBeNull();
+});

@@ -111,6 +111,18 @@ export function checkFolder(caseId, noteId, shortName) {
 }
 
 /**
+ * The web maps a note's public edition links to, in order: `[{ id, title, address, short }]`, `address` the map's on
+ * the site of Settings › Website, '' while the site does not hold it, and `short` the name it has elsewhere, '' for
+ * none. Reads the case and the settings only: the dialog names the maps a publish would leave as plain text.
+ */
+export async function linkedMaps(caseId, noteId) {
+  const answer = await api.get(`/api/cases/${caseId}/notes/${noteId || 'case'}/github/maps`);
+  return (Array.isArray(answer?.maps) ? answer.maps : [])
+    .filter((map) => typeof map?.id === 'string' && map.id)
+    .map((map) => ({ id: map.id, title: String(map.title ?? ''), address: webLink(map.address), short: String(map.short ?? '') }));
+}
+
+/**
  * The point a note offers for its place on the site's map, `{ lat, lon, name, from, label }`, or null when it
  * names no one place (`engine/siteplace.py`). Reads the case only, and keeps nothing: the dialog shows it as a press.
  */
