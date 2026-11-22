@@ -9,35 +9,40 @@ import { WidgetType } from '@codemirror/view';
 import { footnoteText } from '../footnotes.js';
 import { HINT_LINE } from '../look.js';
 import { PLACEHOLDERS, findPlaceholders, placeholderValue } from '../reportParts.js';
+import { iconSvg } from './icon.js';
 
 const ICONS = {
   place: '◉', person: '●', media: '▣', capture: '▣', note: '¶', proof: '✓', bookmark: '↗', post: '✎',
 };
 
 export class ChipWidget extends WidgetType {
-  constructor(ref, entity) {
+  /** `map`: the record is a web map, and the reference a link to it, drawn as its words with the map's mark. */
+  constructor(ref, entity, map = false) {
     super();
     this.ref = ref;
     this.entity = entity;
+    this.map = Boolean(map && entity);
   }
 
   eq(other) {
-    return other.ref.id === this.ref.id && other.ref.label === this.ref.label
+    return other.ref.id === this.ref.id && other.ref.label === this.ref.label && other.map === this.map
       && other.entity?.label === this.entity?.label && other.entity?.type === this.entity?.type;
   }
 
   toDOM() {
     const chip = document.createElement('span');
-    chip.className = `cm-chip${this.entity ? '' : ' cm-chip-broken'}`;
+    chip.className = `cm-chip${this.entity ? '' : ' cm-chip-broken'}${this.map ? ' cm-chip-map' : ''}`;
     chip.dataset.entityId = this.ref.id;
     chip.dataset.chip = 'true';
     const mark = document.createElement('span');
     mark.className = 'cm-chip-mark';
-    mark.textContent = ICONS[this.entity?.type] ?? '◆';
+    if (this.map) mark.append(iconSvg('mapArea', 12));
+    else mark.textContent = ICONS[this.entity?.type] ?? '◆';
     const label = document.createElement('span');
-    label.textContent = this.entity?.label ?? this.ref.label;
+    label.textContent = this.map ? this.ref.label || this.entity.label : this.entity?.label ?? this.ref.label;
     chip.append(mark, label);
-    chip.title = this.entity
+    if (this.map) chip.title = `Link to the map ${this.entity.label}. Click to open`;
+    else chip.title = this.entity
       ? `${this.entity.label} · ${this.entity.type}${this.entity.attrs?.folder ? ` · ${this.entity.attrs.folder}` : ''}. Click to open`
       : 'No longer in the case';
     return chip;

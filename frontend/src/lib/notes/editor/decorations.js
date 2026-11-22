@@ -43,7 +43,8 @@ import {
   BulletWidget, CalloutLabelWidget, ChipWidget, CoordinatesWidget, FootnoteWidget, HintWidget, NumberWidget, PlaceholderWidget, TaskWidget,
 } from './inline.js';
 import {
-  cursorLines, focused, noteCase, noteHandlers, openBlock, resolve, selecting, setFocused, setNoteCase, setSelecting, templateMode, typedAt,
+  cursorLines, focused, isMapNote, noteCase, noteHandlers, openBlock, resolve, selecting, setFocused, setNoteCase, setSelecting, templateMode,
+  typedAt,
 } from './state.js';
 
 /**
@@ -466,7 +467,7 @@ export function noteDecorations(state) {
       if (source) ranges.push(Decoration.mark({ class: 'cm-ref-source' }).range(ref.from, ref.to));
       else {
         whole.push(ref);
-        ranges.push(Decoration.replace({ widget: new ChipWidget(ref, entity), conceal: 'atom' }).range(ref.from, ref.to));
+        ranges.push(Decoration.replace({ widget: new ChipWidget(ref, entity, isMapNote(info, entity)), conceal: 'atom' }).range(ref.from, ref.to));
       }
     }
     for (const point of findCoordinates(line.text, line.from)) {

@@ -67,6 +67,9 @@ export const look = EditorView.theme({
   '.cm-chip:hover': { borderColor: 'var(--accent)' },
   '.cm-chip-mark': { color: 'var(--accent)', fontSize: '0.8em' },
   '.cm-chip-broken': { color: 'var(--text-3)', textDecoration: 'line-through', cursor: 'default' },
+  // a link to a map: its words in the link's colour, beside the map's mark
+  '.cm-chip-map': { alignItems: 'center', color: 'var(--accent)' },
+  '.cm-chip-map .cm-chip-mark': { display: 'inline-flex' },
   '.cm-ref-source': { color: 'var(--text-3)', fontFamily: 'var(--font-mono)', fontSize: '0.85em' },
   // a footnote: its small raised letter, as the page prints it, its words a press away
   '.cm-footnote': {

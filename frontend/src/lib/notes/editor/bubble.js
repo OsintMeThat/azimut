@@ -19,6 +19,7 @@ import { iconSvg } from './icon.js';
 import { linkField } from './linkField.js';
 import {
   activeFormats, clearInline, linkTarget, removeLink, runFormat, toggleInline, toggleInternal, toggleLines, toggleQuote, writeCitation, writeLink,
+  writeMapLink,
 } from './marks.js';
 import { blocksIn, pickedBlock } from './ranges.js';
 import { cursorLines, noteHandlers, selecting, setSelecting } from './state.js';
@@ -151,6 +152,7 @@ async function linkPicked(view, choice) {
   if (choice.remove) runFormat(view, removeLink(target));
   else if (choice.link) runFormat(view, writeLink(target, choice.link, { title: choice.title }));
   else if (choice.cite) runFormat(view, writeCitation(target, choice.cite));
+  else if (choice.map) runFormat(view, writeMapLink(target, choice.map));
   else if (choice.bookmark) {
     const facts = choice.author || choice.published ? [{ author: choice.author ?? '', published: choice.published ?? '' }] : [];
     const filed = await view.state.facet(noteHandlers).bookmark?.(choice.bookmark, choice.title, ...facts);

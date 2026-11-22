@@ -16,7 +16,8 @@ const VIDEO = { id: 'v1', type: 'media', label: 'Ground tour', attrs: { path: 'm
 const ROOF = { id: 'm1', type: 'media', label: 'Roof', attrs: { path: 'media/roof.png', kind: 'image' } };
 const PROOF = { id: 'e_50', type: 'proof', label: 'YEMEN Proof 50', attrs: {} };
 const QUAY = { id: 'p1', type: 'place', label: 'Quay', attrs: {} };
-const ENTITIES = [VIDEO, ROOF, PROOF, QUAY];
+const ROAD = { id: 'n_road', type: 'note', label: 'Road map', attrs: { look: { style: 'article', web: 'map' } } };
+const ENTITIES = [VIDEO, ROOF, PROOF, QUAY, ROAD];
 
 const TABLE = '| Model | Grade | At least |\n| --- | --- | ---: |\n| Streit Cougar | identified | 8 |\n| Al-Wahsh | almost sure | 2 |';
 const NOTE = `Words before.\n\n${TABLE}\n\nWords after.`;
@@ -94,6 +95,14 @@ describe('the grid drawn', () => {
     key('Escape');
     mouse(cell(0, 0).querySelector('.cm-chip'), 'mousedown', { ctrlKey: true });
     expect(handlers.open).toHaveBeenCalledWith(PROOF);
+  });
+
+  it('draws a link to a web map in a cell as its words with the map\'s mark', () => {
+    editor('| Where | Map |\n| --- | --- |\n| Quay | [[entity:n_road|the road]] |');
+    const chip = cell(0, 1).querySelector('.cm-chip');
+    expect(chip.classList.contains('cm-chip-map')).toBe(true);
+    expect(chip.textContent).toBe('the road');
+    expect(chip.title).toBe('Link to the map Road map. Ctrl+click to open');
   });
 
   it('draws a table whose header holds a chip, which the Markdown parser misses', () => {
