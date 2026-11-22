@@ -527,6 +527,16 @@ the export refuses rather than leave it out. There is no fixed size
 ceiling: exports and imports use current free space plus a safety reserve, and
 the import dialog warns when the temporary requirement reaches 10 GiB.
 
+A note exported for review (`engine/reviewexport.py`) is a plain bundle of a cut-down
+copy of the case, never sealed. The copy is built in a hidden `.review-<random>/` folder
+under `bundles/`: the files the note's public page reads, copied as they are; its notes
+written as their public text; the database cleaned as above, then cut to the records the
+page reads, with no folder, setting or meta key it does not need, the graph's pins, saved
+readings, photos, merges and redirects dropped, and vacuumed with `secure_delete` on. That
+copy is exported by the same `export_case` as `<note> (for review).azimut.zip`, as a
+`review-export` job, and removed whether it succeeds or fails; one a crash left is removed
+at the next start. The source case is only read.
+
 Password protection encrypts the complete ZIP in 1 MiB AES-256-GCM chunks. The
 key comes from scrypt (`n=2^15`, `r=8`, `p=1`), and only the envelope parameters
 remain clear. Passwords live in a process-memory map keyed by job id, never in

@@ -216,6 +216,7 @@ proof for publication.
 | ✅ **Home before articles** | The Overview puts Azimut's home page online before any article, never over the analyst's own. |
 | ✅ **Map of places** | Azimut's home shows the articles that stand somewhere on a world map of Natural Earth land, a pin each, framed to fit, links without a script and cards with it. |
 | ✅ **Bundles from someone else** | An import refuses a case database holding what Azimut never makes, and names programs and disguised files before it starts, leaving them out unless the analyst keeps them. |
+| ✅ **Export for review** | Writes one note as an Azimut file holding only what its public page needs, never the rest of the case, signed with the author and picture given, to send to someone who publishes it. |
 | ✅ **Maps in reports** | Puts the case's layers, a Map plate or a period's proofs in a note as a map read day by day, its marks opening their cards: offline in the file, live over OpenFreeMap once hosted, a picture in the PDF; set from its card (base, Sentinel-2 or Esri imagery streamed live, layers, frame, timeline, steps, cards) and drawn on at any zoom, from an area to highlight to a map started from nothing. |
 | ✅ **Web maps** | Makes a note that is the analyst's own layers on a page of their own, from Notebook › New or a layer's row, drawn and carded as the app's map draws them, with a layer switcher, a search, the timeline and each view in its address, published as a web folder or to GitHub Pages and counting its readers on the analyst's own GoatCounter when asked. |
 | ✅ **Links to a map** | Links an article's words to a web map of the case, published as a link to the map's page on the same site, which folds the map under the article; a map the site lacks goes up first, and an Unlisted one is listed with its Article. |
@@ -391,7 +392,8 @@ stops making sense.
   its command line (`engine/gallerydl.py`), the binary starting itself as gallery-dl.
 - **Storage:** per-case SQLite `case.db` is the authoritative graph (files for
   media/notes/proofs); deleted artifacts wait in `.trash/`, and portable case
-  bundles carry a cleaned database plus declared files under a SHA-256 manifest.
+  bundles carry a cleaned database plus declared files under a SHA-256 manifest;
+  an export for review is one such bundle cut down to a note's public page.
   Legacy `case.json` cases migrate on open; case open and lists use bounded,
   cursor-paged queries; thumbnails and background work run through a durable,
   recoverable per-case job queue drained by one worker. Details in

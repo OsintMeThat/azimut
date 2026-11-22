@@ -4,6 +4,9 @@ The work itself runs as a durable job (`engine/bundles.py`); these routes queue 
 report on it and hand back the finished file. The inspect names what the import would
 leave out (`flagged`: what could run, and files that are not what their name says); the
 import leaves them out unless asked to keep them, and its job names what it left out.
+
+A note exported for review (`engine/reviewexport.py`) is a bundle of its own: its routes
+say what it would carry, queue it, and show the folder it lands in.
 """
 
 from __future__ import annotations
@@ -17,7 +20,8 @@ from pydantic import BaseModel, Field
 
 from ... import config
 from ...engine import bundles as bundle_engine
-from ...engine import examplecase
+from ...engine import examplecase, reveal, reviewexport
+from ...engine import notelook
 from ...workspace import CaseError
 from .common import get_case
 
@@ -26,6 +30,13 @@ router = APIRouter(prefix="/api/cases", tags=["cases"])
 
 class BundlePassword(BaseModel):
     password: str | None = Field(default=None, max_length=1024)
+
+class ReviewExport(BaseModel):
+    #: Who wrote the note: None keeps its look's, "" signs it as whoever publishes it.
+    author: str | None = Field(default=None, max_length=notelook.AUTHOR_MAX)
+    #: The picture beside the name: None keeps its look's, "" none, `logo` the exporter's own
+    #: logo, else a picture of the case by its id.
+    picture: str | None = Field(default=None, max_length=64, pattern=r"^[A-Za-z0-9_-]*$")
 
 class BundleUpload(BundlePassword):
     upload_id: str = Field(min_length=32, max_length=32)
@@ -104,6 +115,7 @@ def bundle_job(case_id: str, job_id: str) -> dict[str, Any]:
     if job is None or job.get("kind") not in {
         bundle_engine.EXPORT_JOB,
         bundle_engine.IMPORT_JOB,
+        reviewexport.REVIEW_JOB,
     }:
         raise HTTPException(status_code=404, detail=f"bundle job '{job_id}' not found")
     payload = job.get("payload") or {}
@@ -115,6 +127,8 @@ def bundle_job(case_id: str, job_id: str) -> dict[str, Any]:
         "error": job.get("error"),
         **({"left_out": left, "left_out_count": int(payload.get("left_out_count") or len(left))}
            if isinstance(left, list) else {}),
+        # the file a note exported for review was written to, by its name in the bundles folder
+        **({"file": Path(str(payload.get("output") or "")).name} if job["kind"] == reviewexport.REVIEW_JOB else {}),
     }
 
 @router.get("/{case_id}/bundle/jobs/{job_id}/download")
@@ -122,7 +136,8 @@ def download_bundle(case_id: str, job_id: str) -> FileResponse:
     job = bundle_engine.job_status(case_id, job_id)
     if (
         job is None
-        or job.get("kind") != bundle_engine.EXPORT_JOB
+        # a whole case, or one note exported for review
+        or job.get("kind") not in (bundle_engine.EXPORT_JOB, reviewexport.REVIEW_JOB)
         or job.get("state") != "ready"
     ):
         raise HTTPException(status_code=404, detail="bundle download not ready")
@@ -138,3 +153,37 @@ def download_bundle(case_id: str, job_id: str) -> FileResponse:
         filename=path.name,
         media_type="application/octet-stream",
     )
+
+
+@router.get("/{case_id}/notes/{note_id}/review")
+def review_preview(case_id: str, note_id: str, picture: str | None = None) -> dict[str, Any]:
+    """What exporting one note for review would carry and leave out, and who would sign it."""
+    case = get_case(case_id)
+    try:
+        return reviewexport.preview(case, note_id, picture=picture)
+    except CaseError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@router.post("/{case_id}/notes/{note_id}/review")
+def review_export(case_id: str, note_id: str, body: ReviewExport) -> dict[str, Any]:
+    """Queue one note's export for review; `bundle/jobs/{job_id}` says when it is written."""
+    case = get_case(case_id)
+    try:
+        job = reviewexport.queue(case, note_id, author=body.author, picture=body.picture)
+    except CaseError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return {"case_id": case.id, "job_id": job["id"], "state": job["state"],
+            "file": Path(str(job["payload"]["output"])).name}
+
+
+@router.post("/{case_id}/bundle/reveal")
+def reveal_bundles(case_id: str) -> dict[str, str]:
+    """Show the folder exported bundles land in, in the system's file manager."""
+    get_case(case_id)
+    folder = config.bundles_dir()
+    try:
+        reveal.reveal(folder)
+    except reveal.RevealError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return {"status": "revealed"}

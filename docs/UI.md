@@ -7544,8 +7544,8 @@ file is named after the title, and the title keeps what a file name cannot hold:
 `Map: the front by day` is saved as `Map_ the front by day.md`, and only a rename ever
 changes it), files it in a folder, says whether it is saved, and holds
 **Look**, **Write | Page**, **Pin to the side**, **Open in its own tab**, **Export**, and a
-⋯ with *Editions*, *Archive every link…*, *Keep as template*, *To Post* and *Delete*
-(*Clear the case notes* for the case's page).
+⋯ with *Editions*, *Archive every link…*, *Export for review…*, *Keep as template*, *To Post* and
+*Delete* (*Clear the case notes* for the case's page, which has no *Export for review…*).
 PDF export writes one server-rendered PDF per note without a print dialog, in the
 note's look, local images and browser-drawn diagrams with it, remote images left out,
 homonyms under stable suffixes, into the shared notes destination (the case's
@@ -7625,6 +7625,30 @@ archived before are read for their titles too: *N page titles to read* in the pl
 **Read N page titles** when nothing is left to archive. Posts on X, Telegram, Instagram,
 Facebook, TikTok and Bluesky are cited by their account and day instead, an X or a TikTok
 post's moment read off its address.
+
+**Export for review…**, in a note's ⋯ on its card and in its header, writes one note as an
+Azimut file for someone else to import and publish under its author's name
+(`engine/reviewexport.py`, `tools/notebook/ReviewExportDialog.svelte`). The file is a plain
+case bundle holding only what the note's public web page needs: its public text (every
+internal passage left out before anything is looked for), its chapters, the pictures it
+and its look show with what their sources read, its maps with their layers, plate, grounds,
+followed items and proofs, its posts, the sheets its charts read, the records it mentions or
+its links find, and each web map it links to, with all that page needs. Its editions and
+publishing records, the Trash, the jobs and the rest of the case stay. The dialog reads it
+first (`GET /notes/{id}/review`, nothing written): **What leaves**, by kind with counts and
+the first names, and its size; **What stays**, the internal passages left out and the rest of
+the case; that pictures and files go as they are, metadata included, which a published page
+strips. **Author** starts from the note's look, else Settings › Publishing's name, and
+**Author picture** from the look's picture, else *Your logo* (Settings' logo, filed in the file
+as a picture of its own), or *None*: a note with no author would otherwise be signed by
+whoever publishes it. **Export** writes `<note> (for review).azimut.zip` in the bundles
+folder as a job (`POST /notes/{id}/review`), the source case only read and the copy it is
+built from removed however it ends. **Download** then saves it through the browser, the whole
+case's download route, where an upload page will look for it; **Show in folder** opens the
+bundles folder. A link written to the published address of a map page the file carries is
+written in the copy as a mention of that map, a bare address taking the map's title, since
+the receiving case keeps no record of where the sender published it. A line points to
+osintmethat.com/contribute, which takes Azimut files, never web pages.
 
 **Sources on a web page.** The HTML page and the web folder cite without numbers: the
 words that cite a source (a link, a mention, a figure's credit, a proof's name in the

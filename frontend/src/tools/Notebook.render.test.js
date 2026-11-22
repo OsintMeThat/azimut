@@ -478,6 +478,31 @@ describe('a note\'s menu', () => {
     expect(everything()).toContain('Nothing exported yet. Each export is listed here.');
   });
 
+  it('exports a note for review from its card and from its own menu, never the case notes', async () => {
+    const fallbackGet = get.getMockImplementation();
+    get.mockImplementation(async (url) => (url.endsWith('/notes/n1/review')
+      ? { title: 'Old lead', file: 'Old lead (for review).azimut.zip', size: 2048, internal: 0, author: '', picture: '',
+        pictures: [], maps: [], map_count: 0, groups: [{ key: 'note', label: 'Note', count: 1, names: ['Old lead'] }] }
+      : fallbackGet(url)));
+    cardMenu('the case notes');
+    expect(anyButton('Export for review…')).toBeUndefined();
+    document.body.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' }));
+    flushSync();
+    cardMenu('Old lead');
+    anyButton('Export for review…').click();
+    await settle();
+    const dialog = document.querySelector('[role="dialog"][aria-label="Export for review"]');
+    expect(dialog.textContent).toContain('Note (1) Old lead');
+    expect(get).toHaveBeenCalledWith('/api/cases/case-a/notes/n1/review');
+    anyButton('Cancel').click();
+    flushSync();
+    target.querySelector('button[title="Open Old lead"]').click();
+    await settle();
+    target.querySelector('button[aria-label="More"]').click();
+    flushSync();
+    expect(anyButton('Export for review…')).not.toBeUndefined();
+  });
+
   it('deletes the note open, from its own menu', async () => {
     del.mockResolvedValue({ status: 'deleted', deleted: ['n1'], trash: 't1' });
     target.querySelector('button[title="Open Old lead"]').click();
