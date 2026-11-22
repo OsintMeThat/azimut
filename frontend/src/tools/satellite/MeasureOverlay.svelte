@@ -18,7 +18,7 @@
 
   let {
     engine = null,
-    /** `tool.live`: `{ from, to, first, closing, text, label, runs }`, or null. */
+    /** `tool.live`: `{ from, to, first, closing, text, label, runs, edges }`, or null. */
     live = null,
     /**
      * The sight to stand in the air: `{ a, b, eye, target, blockedAt }`, the
@@ -51,7 +51,14 @@
     const from = at(live.from);
     const to = at(live.to);
     if (!from || !to) return null;
-    return { from, to, first: live.closing ? at(live.first) : null, snapped: Boolean(live.label), runs: (live.runs ?? []).map(trace).filter(Boolean) };
+    return {
+      from,
+      to,
+      first: live.closing ? at(live.first) : null,
+      snapped: Boolean(live.label),
+      runs: (live.runs ?? []).map(trace).filter(Boolean),
+      edges: (live.edges ?? []).map(trace).filter(Boolean),
+    };
   });
 
   /** A run on the ground as a path on screen, cut where a point is off the globe's face. */
@@ -116,6 +123,7 @@
     {#if sky.target}<circle class="end" cx={sky.target.x} cy={sky.target.y} r="4" />{/if}
   {/if}
   {#if band}
+    {#each band.edges as d, i (i)}<path class="edge" {d} />{/each}
     {#each band.runs as d, i (i)}<path class="run" {d} />{/each}
     <line class="band" x1={band.from.x} y1={band.from.y} x2={band.to.x} y2={band.to.y} />
     {#if band.first}
@@ -164,6 +172,13 @@
     stroke-dasharray: 6 4;
     stroke-opacity: 0.85;
     filter: drop-shadow(0 0 1.5px rgba(0, 0, 0, 0.8));
+  }
+  .edge {
+    fill: none;
+    stroke: #2de0ff;
+    stroke-width: 1.2;
+    stroke-dasharray: 3 3;
+    stroke-opacity: 0.7;
   }
   .band.closing {
     stroke-opacity: 0.55;

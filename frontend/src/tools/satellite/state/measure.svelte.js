@@ -23,8 +23,9 @@
  *   picture, a shadow from a foot at A to its tip at B, the ground in sight
  *   from A out to B (`lib/measures.js`).
  * - **Alignments come in a row.** Once a line is made one, each new line is
- *   another after two clicks, with the same run, so three are drawn in six
- *   clicks and read where they meet. Pressing Align off, another use or
+ *   another after two clicks, with the same run and tolerance, so three are
+ *   drawn in six clicks and read where they meet. A tolerance lays the band
+ *   the camera may stand in either side of the line. Pressing Align off, another use or
  *   Escape with nothing selected puts new lines back to plain measures.
  * - **The ground is read on a press.** A line's heights and what its eye sees
  *   come from the terrain server, so they are read when the analyst turns the
@@ -50,7 +51,9 @@ import { cornerHandles, ghostHandles } from '../../../lib/map/handles.js';
 import { createSurface } from '../../../lib/map/surface.js';
 import { destination, formatBearing, formatDistance, formatHeight, haversine } from '../../../lib/measure.js';
 import {
+  bands,
   clampReach,
+  clampTolerance,
   crossings,
   headline,
   isPair,
@@ -84,11 +87,16 @@ const SKY = '#2de0ff';
 const RING = { stroke: SKY, strokeWidth: 2.5, strokeOpacity: 1, interactive: false };
 const CONE = { stroke: SKY, strokeWidth: 2.5, strokeOpacity: 1, fill: SKY, fillOpacity: 0.18, interactive: false };
 const RUN = { stroke: SKY, strokeWidth: 2, strokeOpacity: 1, interactive: false };
+// the ground an alignment's tolerance leaves the camera, and its sides, faint under the line
+const BAND = { strokeWidth: 0, strokeOpacity: 0, fill: SKY, fillOpacity: 0.13, interactive: false };
+const EDGE = { stroke: SKY, strokeWidth: 1.2, strokeOpacity: 0.85, dash: '4 3', interactive: false };
 // where the alignments meet: a dashed ring round their crossings, pressed to copy its middle; the
 // ground inside it still takes a click, as an area's does
 const MEET = { stroke: SKY, strokeWidth: 2, strokeOpacity: 1, dash: '5 4' };
 const MEET_FILL = { strokeWidth: 0, strokeOpacity: 0, fill: SKY, fillOpacity: 0.12, interactive: false };
-const USE_STYLE = { circle: RING, polygon: CONE, line: RUN };
+const USE_STYLE = { circle: RING, polygon: CONE, line: RUN, band: BAND, edge: EDGE };
+// what a use draws bare, with no dark casing under it
+const UNCASED = new Set(['band', 'edge']);
 const USE_CASING = { stroke: '#000', strokeWidth: 5.5, strokeOpacity: 0.5, interactive: false };
 // a fill alone: a surface strokes what names no stroke of its own
 const BARE = { strokeWidth: 0, strokeOpacity: 0 };
@@ -178,7 +186,7 @@ export function createMeasureState({
   let chartShown = $state(true);
   // new lines are alignments, run on as the last one was
   let aligning = $state(false);
-  let run = { past: 'both', reach: REACH };
+  let run = { past: 'both', reach: REACH, tolerance: 0 };
 
   const units = () => unitsChoice ?? appUnits() ?? 'metric';
   const byId = (id) => measures.find((m) => m.id === id) ?? null;
@@ -265,8 +273,8 @@ export function createMeasureState({
       if (at >= 0) out.push({ id: `m${m.id}-blocked`, kind: 'dot', at: { lat: ground.lat[at], lon: ground.lon[at] }, style: BLOCKED });
     }
     for (const [i, shape] of useShapes(m).entries()) {
-      out.push({ ...shape, id: `m${m.id}-use-${i}-casing`, style: USE_CASING });
-      out.push({ ...shape, id: `m${m.id}-use-${i}`, style: USE_STYLE[shape.kind] });
+      if (!UNCASED.has(shape.role)) out.push({ ...shape, id: `m${m.id}-use-${i}-casing`, style: USE_CASING });
+      out.push({ ...shape, id: `m${m.id}-use-${i}`, style: USE_STYLE[shape.role] ?? USE_STYLE[shape.kind] });
     }
     if (m.id === drawingId) {
       for (const point of points) out.push({ kind: 'dot', at: point, style: DOT });
@@ -789,9 +797,11 @@ export function createMeasureState({
         : m.points.length >= 2
           ? `${leg} · total ${formatDistance(total, units())}`
           : leg;
-      // an alignment to come shows how it will run on, so it can be aimed
-      const runs = aligning ? runsOn({ points: [from, to], closed: false, use: 'align', ...run }).map((one) => one.points) : [];
-      return { from, to, first: plain(m.points[0]), closing, text, label: snapped?.label ?? '', runs };
+      // an alignment to come shows how it will run on, and its band, so it can be aimed
+      const coming = { points: [from, to], closed: false, use: 'align', ...run };
+      const runs = aligning ? runsOn(coming).map((one) => one.points) : [];
+      const edges = aligning ? bands(coming).flatMap((band) => [band.left, band.right]) : [];
+      return { from, to, first: plain(m.points[0]), closing, text, label: snapped?.label ?? '', runs, edges };
     },
 
     open() {
@@ -844,7 +854,7 @@ export function createMeasureState({
       }
       m.points.push(point);
       if (aligning && m.points.length === 2) {
-        Object.assign(m, { use: 'align', past: run.past, reach: run.reach });
+        Object.assign(m, { use: 'align', past: run.past, reach: run.reach, tolerance: run.tolerance });
         return finish();
       }
       draw();
@@ -1008,7 +1018,7 @@ export function createMeasureState({
       });
       const m = byId(id);
       aligning = m.use === 'align';
-      if (aligning) run = { past: m.past ?? 'both', reach: clampReach(m.reach) };
+      if (aligning) run = { past: m.past ?? 'both', reach: clampReach(m.reach), tolerance: clampTolerance(m.tolerance) };
     },
 
     /** New lines are alignments, from the last one made. */
@@ -1038,6 +1048,21 @@ export function createMeasureState({
         m.reach = reach;
       });
       if (byId(id)?.use === 'align') run = { ...run, reach };
+    },
+
+    /** How far off true, in degrees, an alignment may be; the next ones follow. */
+    setTolerance(id, degrees) {
+      const tolerance = clampTolerance(degrees);
+      change(id, (m) => {
+        m.tolerance = tolerance;
+      });
+      if (byId(id)?.use === 'align') run = { ...run, tolerance };
+    },
+
+    /** Where an alignment's band stops ruling anything out, when that is short of its run, or null. */
+    bandOpensAt(id) {
+      const m = byId(id);
+      return m ? (bands(m).find((band) => band.opensAt != null)?.opensAt ?? null) : null;
     },
 
     /**

@@ -3140,8 +3140,13 @@ a camera at A facing B takes in, its opening set), **Align**, **Shadow** or
 **Viewshed**. An alignment is the line through two things lined up in a picture,
 run on 20 km past both ends, or past one, as far as is typed: the camera stood
 somewhere on it, on the side of the nearer thing. It follows the great circle,
-not a straight line on the flat map. Once a line is an alignment, each new line
-is another after two clicks, with the same run and its run drawn while the second
+not a straight line on the flat map. **Within** sets how far off true, up to 5°,
+the two things may line up in the picture, and lays the band the camera may stand
+in either side of the line: the ground from which the two things are seen that
+far apart, which opens at that angle by the nearer thing and widens faster the
+closer together they are. Where the band stops ruling anything out short of the
+run, the panel says how far out. Once a line is an alignment, each new line
+is another after two clicks, with the same run and tolerance, drawn while the second
 point is aimed, until Align is pressed off, **Stop** is pressed or Escape is
 pressed with nothing selected. Alignments cross along their whole run, though not
 at a thing two of them share, and from three on a dashed ring circles where they

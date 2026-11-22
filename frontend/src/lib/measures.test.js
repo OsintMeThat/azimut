@@ -2,7 +2,11 @@ import { describe, expect, it } from 'vitest';
 import { destination, haversine } from './measure.js';
 import { bearingBetween } from './horizon/geometry.js';
 import {
+  bandEnd,
+  bands,
+  bandWidth,
   clampReach,
+  clampTolerance,
   coneWidth,
   crossings,
   fieldUnit,
@@ -55,6 +59,7 @@ describe('a measure read in one line', () => {
     expect(headline(line([A, B], { use: 'ring' }), 'metric')).toBe('Radius 1.55 km');
     expect(headline(line([A, B], { use: 'cone', aperture: 40 }), 'metric')).toBe('40° cone · 1.55 km');
     expect(headline(line([A, B], { use: 'align' }), 'metric')).toBe('Alignment · 090°');
+    expect(headline(line([A, B], { use: 'align', tolerance: 1 }), 'metric')).toBe('Alignment · 090° ±1°');
   });
 
   it('reads in the units asked for', () => {
@@ -164,6 +169,55 @@ describe('what a line of two points is used as', () => {
     expect(haversine(path[0], A)).toBeCloseTo(REACH, 0);
     expect(haversine(path.at(-1), B)).toBeCloseTo(REACH, 0);
     expect(pathOf(line([A, B, C]))).toEqual([A, B, C]);
+  });
+});
+
+describe('how far off true an alignment may be', () => {
+  const D = haversine(A, B);
+
+  it('keeps between none and five degrees, to a tenth', () => {
+    expect(clampTolerance(7)).toBe(5);
+    expect(clampTolerance(-1)).toBe(0);
+    expect(clampTolerance('far')).toBe(0);
+    expect(clampTolerance(1.04)).toBe(1);
+    expect(clampTolerance('0.5')).toBe(0.5);
+  });
+
+  it('draws no band while it is nil', () => {
+    expect(bands(line([A, B], { use: 'align' }))).toEqual([]);
+    expect(useShapes(line([A, B], { use: 'align' })).map((shape) => shape.role)).toEqual(['run', 'run']);
+  });
+
+  it('lays a band either side of each run, under it', () => {
+    const roles = useShapes(line([A, B], { use: 'align', tolerance: 1 })).map((shape) => shape.role);
+    expect(roles).toEqual(['band', 'edge', 'edge', 'band', 'edge', 'edge', 'run', 'run']);
+  });
+
+  it('puts its sides where the camera sees the two things that far apart', () => {
+    const [band] = bands(line([A, B], { use: 'align', past: 'b', tolerance: 1 }));
+    for (const i of [8, 24, 48, 64]) {
+      for (const side of [band.left[i], band.right[i]]) {
+        const seen = Math.abs(((bearingBetween(side, A) - bearingBetween(side, B) + 540) % 360) - 180);
+        expect(seen).toBeCloseTo(1, 1);
+      }
+    }
+  });
+
+  it('opens at the tolerance by the nearer thing, then widens faster than a fan', () => {
+    expect(bandWidth(10, D, 1) / 10).toBeCloseTo(Math.tan(Math.PI / 180), 3);
+    expect(bandWidth(10_000, D, 1)).toBeGreaterThan(10_000 * Math.tan(Math.PI / 180) * 5);
+    expect(bandWidth(0, D, 0)).toBe(0);
+  });
+
+  it('says where it stops ruling anything out, when that is short of the run', () => {
+    expect(bandEnd(D, 5)).toBeCloseTo((D * (Math.sqrt(1 + Math.tan(Math.PI / 36) ** 2) - Math.tan(Math.PI / 36))) / (2 * Math.tan(Math.PI / 36)), 6);
+    expect(bandWidth(bandEnd(D, 5) + 10, D, 5)).toBe(null);
+    const [wide] = bands(line([A, B], { use: 'align', past: 'b', tolerance: 5 }));
+    expect(wide.opensAt).toBeCloseTo(bandEnd(D, 5), 6);
+    expect(haversine(B, wide.left.at(-1))).toBeGreaterThan(wide.opensAt);
+    const [narrow] = bands(line([A, B], { use: 'align', past: 'b', tolerance: 1 }));
+    expect(narrow.opensAt).toBe(null);
+    expect(narrow.ring).toHaveLength(2 * narrow.left.length - 1);
   });
 });
 
@@ -332,6 +386,9 @@ describe('the measure as text', () => {
   it('says how far an alignment runs on, and which way', () => {
     expect(summary(line([A, B], { use: 'align' }), 'metric', { coords })).toContain('Alignment run on 20.0 km past both ends');
     expect(summary(line([A, B], { use: 'align', past: 'b', reach: 5000 }), 'metric', { coords })).toContain('Alignment run on 5.00 km past B');
+    const loose = summary(line([A, B], { use: 'align', tolerance: 5 }), 'metric', { coords });
+    expect(loose).toContain('Alignment run on 20.0 km past both ends, within ±5°');
+    expect(loose).toMatch(/At ±5° it rules nothing out past 8\.\d\d km/);
   });
 });
 
