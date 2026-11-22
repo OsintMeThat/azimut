@@ -124,9 +124,80 @@ def without_hints(text: str) -> str:
     return "\n".join(rows)
 
 
-def plain_line(line: str) -> str:
-    """One Markdown line as a reader would say it: references by name, no marks."""
+def _backticks(line: str, at: int) -> int:
+    """How many backticks run from ``at``."""
+    return len(line) - at - len(line[at:].lstrip("`"))
+
+
+def _code_end(line: str, at: int) -> int:
+    """Where the code span opening at ``at`` (a run of backticks) ends, or -1 when no run
+    as long closes it, the backticks then being text."""
+    run = _backticks(line, at)
+    close = line.find("`" * run, at + run)
+    while close >= 0 and line[close + run : close + run + 1] == "`":
+        close = line.find("`" * run, close + run + 1)
+    return -1 if close < 0 else close + run
+
+
+def footnote_spans(line: str) -> list[tuple[int, int]]:
+    """Each footnote written on a line, `^[` to its closing bracket, as (start, end). Its
+    brackets balance, a backslash escapes, code is skipped, and one never closed or holding
+    nothing is none: the parser's reading (`notes_markdown._footnote`), and the Notebook's
+    (`lib/notes/footnotes.js`)."""
+    spans: list[tuple[int, int]] = []
+    at, opened, depth = 0, -1, 0
+    while True:
+        if at >= len(line):
+            if opened < 0:
+                return spans
+            # one never closed is text: read on from just after its `^`
+            at, opened = opened + 1, -1
+            continue
+        char = line[at]
+        if char == "\\":
+            at += 2
+        elif char == "`":
+            end = _code_end(line, at)
+            at = end if end > 0 else at + _backticks(line, at)
+        elif opened < 0 and line.startswith("^[", at):
+            opened, depth = at, 1
+            at += 2
+        elif opened >= 0 and char == "[":
+            depth += 1
+            at += 1
+        elif opened >= 0 and char == "]" and depth == 1:
+            if line[opened + 2 : at].strip():
+                spans.append((opened, at + 1))
+                at, opened = at + 1, -1
+            else:
+                # `^[]` holds nothing, so it is no footnote
+                at, opened = opened + 1, -1
+        else:
+            depth -= 1 if opened >= 0 and char == "]" else 0
+            at += 1
+
+
+def without_footnotes(line: str, *, said: bool = False) -> str:
+    """A line with its footnotes taken out, or with ``said`` their words in brackets where
+    their letters stand, as one reading the line aloud would say them."""
+    out: list[str] = []
+    at = 0
+    for start, end in footnote_spans(line):
+        out.append(line[at:start])
+        if said:
+            out.append(f" ({line[start + 2 : end - 1]})")
+        at = end
+    out.append(line[at:])
+    return "".join(out)
+
+
+def plain_line(line: str, *, footnotes: bool = True) -> str:
+    """One Markdown line as a reader would say it: references by name, no marks. Its
+    footnotes are said in brackets where they stand, or with ``footnotes`` off left out,
+    as a summary leaves them."""
     line = COMMENT.sub("", line)
+    if "^[" in line:
+        line = without_footnotes(line, said=footnotes)
     line = MEDIA_REF.sub(lambda match: match.group(2), line)
     line = ENTITY_REF.sub(lambda match: match.group(2), line)
     line = IMAGE.sub(lambda match: match.group(1), line)
@@ -142,11 +213,12 @@ def plain_line(line: str) -> str:
     return " ".join(line.split())
 
 
-def plain(text: str) -> list[tuple[int, str]]:
-    """Every line that says something, as plain text, with its index."""
+def plain(text: str, *, footnotes: bool = True) -> list[tuple[int, str]]:
+    """Every line that says something, as plain text, with its index; its footnotes said in
+    brackets, or left out with ``footnotes`` off (`plain_line`)."""
     out: list[tuple[int, str]] = []
     for index, line in _prose_lines(text):
-        said = plain_line(line)
+        said = plain_line(line, footnotes=footnotes)
         if said:
             out.append((index, said))
     return out
@@ -164,7 +236,8 @@ def excerpt(text: str, title: str = "") -> str:
     and a heading ends with a full stop so it does not run into the sentence after it."""
     rows = (text or "").splitlines()
     lines: list[str] = []
-    for index, said in plain(text):
+    # a footnote is an aside: the card reads the running text without it
+    for index, said in plain(text, footnotes=False):
         if HEADING.match(rows[index]) and not said.endswith((".", ":", "?", "!")):
             said = f"{said}."
         lines.append(said)
@@ -174,7 +247,8 @@ def excerpt(text: str, title: str = "") -> str:
 
 
 def word_count(text: str) -> int:
-    return sum(len(said.split()) for _, said in plain(text))
+    """How many words the running text holds, its footnotes left out as a summary leaves them."""
+    return sum(len(said.split()) for _, said in plain(text, footnotes=False))
 
 
 def tasks(text: str) -> list[Task]:

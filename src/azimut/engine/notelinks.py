@@ -41,12 +41,13 @@ MAX_NOTES = 5000
 def outside_links(text: str) -> list[str]:
     """The web addresses a note's text links to, in order and each once: its written
     links and the addresses written bare, read as the print reads them, so an address
-    in a code block or one a reader cannot open (this machine, a private network) is none."""
+    in a code block or one a reader cannot open (this machine, a private network) is none. A
+    footnote's links are the note's like any other."""
     found: list[str] = []
     for token in notes_markdown.parse(text):
         if token.type != "inline":
             continue
-        for child in token.children or []:
+        for child in notes_markdown.with_footnotes(token.children):
             if child.type == "link_open":
                 href = str(child.attrGet("href") or "")
                 if notesources.web(href) and not notes_markdown.is_local(href, ()):

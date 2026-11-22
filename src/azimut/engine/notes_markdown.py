@@ -34,10 +34,12 @@ import hashlib
 import ipaddress
 import re
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any, Callable, NamedTuple
+from typing import TYPE_CHECKING, Any, Callable, Iterator, NamedTuple
 from urllib.parse import parse_qs, quote, unquote, urlsplit
 
 from markdown_it import MarkdownIt
+from markdown_it.helpers import parseLinkLabel
+from markdown_it.rules_inline import StateInline
 from markdown_it.token import Token
 
 from . import notefill, notes_tables, notesources, urltitles
@@ -73,6 +75,14 @@ POST_TOKEN = "az_post"
 #: The blocks a renderer draws whole, by name, and the one token each becomes
 #: (`block_token`): every renderer has an `_on_<token>` for each.
 TOKEN_BLOCKS: dict[str, str] = {MAP: MAP_TOKEN, CHART: CHART_TOKEN, INFOGRAPHIC: INFOGRAPHIC_TOKEN, POST: POST_TOKEN}
+#: A footnote, written `^[words]` (Pandoc's inline form): a comment the reader opens from a
+#: small letter, the letters a, b… in reading order (`footnote_letter`), the words listed
+#: under Notes before the sources. One token inside a line, its words parsed as its children,
+#: so a walk that does not know it leaves them out of the running text (a summary, a
+#: heading's words, a word count), and one looking for links reads them (`with_footnotes`).
+FOOTNOTE_TOKEN = "az_footnote"
+#: Set in the parser's env while a footnote's words are read: a footnote holds no footnote.
+_IN_FOOTNOTE = "az_in_footnote"
 
 
 #: How deep chapters nest: a report's chapter may hold chapters of its own, and
@@ -576,8 +586,92 @@ def image_options(href: str) -> ImageOptions:
 
 
 def parser() -> MarkdownIt:
-    """CommonMark plus the two GFM rules the preview enables (marked's `gfm`)."""
-    return MarkdownIt("commonmark").enable(["table", "strikethrough"])
+    """CommonMark plus the two GFM rules the preview enables (marked's `gfm`), and
+    Pandoc's inline footnote (`^[words]`, `_footnote`)."""
+    md = MarkdownIt("commonmark").enable(["table", "strikethrough"])
+    md.inline.ruler.after("image", FOOTNOTE_TOKEN, _footnote)
+    return md
+
+
+# -- footnotes -------------------------------------------------------------------
+
+
+def _footnote(state: StateInline, silent: bool) -> bool:
+    """`^[words]`, Pandoc's inline footnote, as one `FOOTNOTE_TOKEN` holding its words
+    parsed as a line is. Its brackets balance as a link's do, code and escapes skipped,
+    so `\\^[` and a `^[` never closed stay text; a link's words and a footnote's own
+    hold none, and an empty one is none."""
+    start = state.pos
+    if (start + 1 >= state.posMax or state.src[start] != "^" or state.src[start + 1] != "["
+            or state.linkLevel > 0 or state.env.get(_IN_FOOTNOTE)):
+        return False
+    end = parseLinkLabel(state, start + 1)
+    if end < 0:
+        return False
+    words = state.src[start + 2 : end]
+    if not words.strip():
+        return False
+    if not silent:
+        token = state.push(FOOTNOTE_TOKEN, "", 0)
+        token.content = words
+        state.env[_IN_FOOTNOTE] = True
+        try:
+            children: list[Token] = []
+            state.md.inline.parse(words, state.md, state.env, children)
+        finally:
+            del state.env[_IN_FOOTNOTE]
+        token.children = _joined(children)
+    state.pos = end + 1
+    return True
+
+
+def _joined(children: list[Token]) -> list[Token]:
+    """A footnote's words as the parser leaves a line's: an escaped character read as
+    text and joined to the text around it (the core's `text_join`, which only walks lines)."""
+    out: list[Token] = []
+    for child in children:
+        if child.type == "text_special":
+            child.type = "text"
+        if child.type == "text" and out and out[-1].type == "text":
+            out[-1].content += child.content
+        else:
+            out.append(child)
+    return out
+
+
+def footnote_words(token: Token) -> Token:
+    """A footnote's words as a line of their own, which a renderer draws as it draws any line."""
+    inline = Token("inline", "", 0)
+    inline.content = token.content
+    inline.children = list(token.children or [])
+    return inline
+
+
+def with_footnotes(children: list[Token] | None) -> Iterator[Token]:
+    """A line's tokens with each footnote's words read in its place: what a pass looking
+    for links reads, so a link in a footnote is found and cited like any other."""
+    for child in children or []:
+        if child.type == FOOTNOTE_TOKEN:
+            yield from child.children or []
+        else:
+            yield child
+
+
+def holds_footnotes(tokens: list[Token]) -> bool:
+    """Whether a stretch of parsed note marks a footnote anywhere."""
+    return any(child.type == FOOTNOTE_TOKEN for token in tokens if token.type == "inline"
+               for child in token.children or [])
+
+
+def footnote_letter(index: int) -> str:
+    """The letter of the footnote ``index`` (from 0) in reading order: a to z, then aa, ab…,
+    as a list lettered `lower-alpha` counts."""
+    letters = ""
+    index += 1
+    while index:
+        index, rest = divmod(index - 1, 26)
+        letters = chr(ord("a") + rest) + letters
+    return letters
 
 
 def parse(source: str) -> list[Token]:
@@ -1030,7 +1124,8 @@ class Cited:
         href: str | None = None
         words: list[str] = []
         opened = at
-        for child in token.children or []:
+        # a footnote's links are read where its letter stands, so they are cited in reading order
+        for child in with_footnotes(token.children):
             kind = child.type
             if kind in ("softbreak", "hardbreak"):
                 at += 0 if fixed else 1
@@ -1357,10 +1452,7 @@ def exact_counts(inline: Token) -> list[str]:
     noun of `COUNT_NOUNS`, with no hedge or range before it, each as written (`12 trucks`).
     Its code spans are no prose. The PDF and the HTML page read a paragraph alike; neither
     reads a heading, a table, a caption or a quote."""
-    text = "".join("\x00" if child.type == "code_inline" else
-                   (" " if child.type in ("softbreak", "hardbreak") else child.content)
-                   for child in inline.children or [] if child.type in ("text", "code_inline", "softbreak",
-                                                                        "hardbreak"))
+    text = _count_text(inline.children)
     found: list[str] = []
     for match in BARE_COUNT.finditer(text):
         if match.group(2).lower() not in COUNT_NOUNS or int(match.group(1)) < 2:
@@ -1369,6 +1461,22 @@ def exact_counts(inline: Token) -> list[str]:
             continue
         found.append(f"{match.group(1)} {match.group(2)}")
     return found
+
+
+def _count_text(children: list[Token] | None) -> str:
+    """A line's prose for `exact_counts`: code as a stop, and each footnote's words read where
+    its letter stands, set apart so no hedge reaches across into or out of them."""
+    said: list[str] = []
+    for child in children or []:
+        if child.type == FOOTNOTE_TOKEN:
+            said.append(f"\x00{_count_text(child.children)}\x00")
+        elif child.type == "code_inline":
+            said.append("\x00")
+        elif child.type in ("softbreak", "hardbreak"):
+            said.append(" ")
+        elif child.type == "text":
+            said.append(child.content)
+    return "".join(said)
 
 
 def counts_said(phrases: list[str]) -> str:
@@ -1530,7 +1638,7 @@ def prints(tokens: list[Token], index: int) -> bool:
         if inline is None:
             return False
         return bool(inline_text(inline).strip()) or any(
-            child.type == "image" for child in inline.children or []
+            child.type in ("image", FOOTNOTE_TOKEN) for child in inline.children or []
         )
     if token.type == "html_block":
         text = token.content.strip()
