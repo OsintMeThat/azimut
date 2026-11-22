@@ -153,6 +153,9 @@ test('two things lined up run on as an alignment, the next lines follow, and thr
   await expect(reading(page)).toHaveText('Alignment · 090°');
   await expect(page.locator('.measure-panel .aligning')).toContainText('Click two things lined up in the picture');
   await expect(page.getByLabel('How far the line runs on')).toHaveValue('20');
+  // a tolerance lays a band either side, and the next lines take it
+  await page.getByLabel('Tolerance in degrees').fill('2');
+  await expect(reading(page)).toHaveText('Alignment · 090° ±2°');
 
   // the next line is an alignment after two clicks, and shows its run while it is aimed
   await page.mouse.click(...at(700, 150));
@@ -160,7 +163,7 @@ test('two things lined up run on as an alignment, the next lines follow, and thr
   await expect(page.locator('.measure-overlay .run')).toHaveCount(2);
   await page.mouse.click(...at(700, 250));
   await expect(page.locator('.measure-panel .list li')).toHaveCount(2);
-  await expect(reading(page)).toHaveText('Alignment · 180°');
+  await expect(reading(page)).toHaveText('Alignment · 180° ±2°');
   await expect(page.locator('.measure-crossing')).toHaveCount(1);
   await expect(page.locator('.measure-panel .detail')).toContainText('The two alignments cross');
 

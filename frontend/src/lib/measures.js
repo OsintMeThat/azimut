@@ -10,7 +10,7 @@
  * from a point, and drawing one is the same two clicks whatever it is for.
  *
  * Everything here is arithmetic over plain data (`{ points, closed, use,
- * rings, aperture, past, reach }`), so the readings, the words on the map and the copied
+ * rings, aperture, past, reach, tolerance }`), so the readings, the words on the map and the copied
  * text are read off a test (measures.test.js).
  */
 import { bearingBetween } from './horizon/geometry.js';
@@ -47,6 +47,8 @@ export const APERTURE = 60;
 /** How far an alignment runs on past its ends until the analyst says otherwise, and at most. */
 export const REACH = 20_000;
 export const MAX_REACH = 500_000;
+/** How far off true, in degrees, two things may line up in the picture, at most. */
+export const MAX_TOLERANCE = 5;
 
 /** Which way an alignment runs on, in the order the panel offers them. */
 export const PAST = [
@@ -57,7 +59,28 @@ export const PAST = [
 
 /** A fresh measure, starting at one point. */
 export function newMeasure(id, at) {
-  return { id, points: [{ lat: at.lat, lon: at.lon }], closed: false, use: null, rings: 1, aperture: APERTURE, past: 'both', reach: REACH };
+  return {
+    id,
+    points: [{ lat: at.lat, lon: at.lon }],
+    closed: false,
+    use: null,
+    rings: 1,
+    aperture: APERTURE,
+    past: 'both',
+    reach: REACH,
+    tolerance: 0,
+  };
+}
+
+/** How far off true an alignment may be, kept between none and its ceiling, to a tenth of a degree. */
+export function clampTolerance(degrees) {
+  const value = Number(degrees);
+  return Number.isFinite(value) && value > 0 ? Math.round(Math.min(MAX_TOLERANCE, value) * 10) / 10 : 0;
+}
+
+/** A tolerance as it is written: `±1°`, `±0.5°`. */
+export function formatTolerance(degrees) {
+  return `±${clampTolerance(degrees)}°`;
 }
 
 /** A distance an alignment runs on, kept between a hundred metres and its ceiling. */
@@ -100,7 +123,10 @@ export function headline(measure, units) {
   const { length, bearing } = pairReading(measure);
   if (measure.use === 'ring') return `Radius ${formatDistance(length, units)}`;
   if (measure.use === 'cone') return `${Math.round(measure.aperture)}° cone · ${formatDistance(length, units)}`;
-  if (measure.use === 'align') return `Alignment · ${formatBearing(bearing)}`;
+  if (measure.use === 'align') {
+    const tolerance = clampTolerance(measure.tolerance);
+    return `Alignment · ${formatBearing(bearing)}${tolerance ? ` ${formatTolerance(tolerance)}` : ''}`;
+  }
   return `${formatDistance(length, units)} · ${formatBearing(bearing)}`;
 }
 
@@ -159,7 +185,15 @@ export function useShapes(measure) {
     return Array.from({ length: count }, (_, i) => ({ kind: 'circle', at: a, radiusM: length * (i + 1) }));
   }
   if (measure.use === 'cone') return [{ kind: 'polygon', points: cone(a, bearing, measure.aperture, length) }];
-  if (measure.use === 'align') return runsOn(measure).map((run) => ({ kind: 'line', points: run.points }));
+  if (measure.use === 'align') {
+    const runs = runsOn(measure).map((run) => ({ kind: 'line', role: 'run', points: run.points }));
+    const zones = bands(measure).flatMap((band) => [
+      { kind: 'polygon', role: 'band', points: band.ring },
+      { kind: 'line', role: 'edge', points: band.left },
+      { kind: 'line', role: 'edge', points: band.right },
+    ]);
+    return [...zones, ...runs];
+  }
   return [];
 }
 
@@ -188,6 +222,68 @@ export function runsOn(measure) {
   if (past !== 'b') out.push({ end: 'a', points: stretch(a, bearing + 180, 0) });
   if (past !== 'a') out.push({ end: 'b', points: stretch(b, bearing, length) });
   return out;
+}
+
+/** Steps along each side of a band: closer together where it widens fastest. */
+const BAND_STEPS = 64;
+
+/**
+ * How far either side of an alignment the camera may stand, at `x` metres past
+ * the nearer of two things `apart` metres apart that it sees within
+ * `tolerance` degrees of each other, or null where it may stand anywhere
+ * across.
+ *
+ * The camera sees the two things `tolerance` apart wherever the angle between
+ * them is that, which is on a circle through both, so the band is not a fan:
+ * close to the nearer thing it opens at the tolerance, and farther out it
+ * widens faster the closer together the two things are.
+ */
+export function bandWidth(x, apart, tolerance) {
+  const k = Math.tan((clampTolerance(tolerance) * Math.PI) / 180);
+  if (!k) return 0;
+  const room = apart * apart - 4 * k * k * x * (x + apart);
+  return room < 0 ? null : (apart - Math.sqrt(room)) / (2 * k);
+}
+
+/** How far past the nearer thing a band narrows anything at all: past it the camera may stand anywhere across. */
+export function bandEnd(apart, tolerance) {
+  const k = Math.tan((clampTolerance(tolerance) * Math.PI) / 180);
+  return k ? (apart * (Math.sqrt(1 + k * k) - k)) / (2 * k) : Infinity;
+}
+
+/**
+ * The ground either side of an alignment's runs where the camera may stand,
+ * given how far off true the two things may line up in the picture: for each
+ * run, its two sides and the ring that fills it, and how far out it ends when
+ * that is short of the run's reach. None while the tolerance is nil.
+ */
+export function bands(measure) {
+  const tolerance = clampTolerance(measure?.tolerance);
+  if (!tolerance) return [];
+  const [a] = measure.points;
+  const { length, bearing } = pairReading(measure);
+  const reach = clampReach(measure.reach);
+  const end = bandEnd(length, tolerance);
+  const limit = Math.min(reach, end);
+  // how wide a band is where it ends, which rounding can leave just past reach of the formula
+  const widest = length / (2 * Math.tan((tolerance * Math.PI) / 180));
+  return runsOn(measure).map((run) => {
+    const along = run.end === 'a' ? bearing + 180 : bearing;
+    const from = run.end === 'a' ? 0 : length;
+    const left = [];
+    const right = [];
+    for (let i = 0; i <= BAND_STEPS; i++) {
+      // closer together toward the far end, where the sides turn fastest
+      const x = limit * (1 - (1 - i / BAND_STEPS) ** 2);
+      const at = i ? destination(a, along, from + x) : run.points[0];
+      const ahead = destination(a, along, from + x + 1);
+      const heading = bearingBetween(at, ahead);
+      const width = bandWidth(x, length, tolerance) ?? widest;
+      left.push(width ? destination(at, heading - 90, width) : at);
+      right.push(width ? destination(at, heading + 90, width) : at);
+    }
+    return { end: run.end, left, right, ring: [...left, ...right.slice(1).reverse()], opensAt: end < reach ? end : null };
+  });
 }
 
 /** A measure's line as it is drawn: an alignment's with the stretches it runs on. */
@@ -435,7 +531,10 @@ export function summary(measure, units, { coords, ground = null, shadow = null, 
   }
   if (measure.use === 'align') {
     const where = { a: 'past A', b: 'past B' }[measure.past] ?? 'past both ends';
-    lines.push(`Alignment run on ${formatDistance(clampReach(measure.reach), units)} ${where}`);
+    const tolerance = clampTolerance(measure.tolerance);
+    lines.push(`Alignment run on ${formatDistance(clampReach(measure.reach), units)} ${where}${tolerance ? `, within ${formatTolerance(tolerance)}` : ''}`);
+    const opens = bands(measure).find((band) => band.opensAt != null)?.opensAt;
+    if (opens != null) lines.push(`At ${formatTolerance(tolerance)} it rules nothing out past ${formatDistance(opens, units)}`);
   }
   if (measure.use === 'shadow' && shadow) lines.push(shadowSentence(shadow, units));
   if (measure.use === 'viewshed' && viewshed) {

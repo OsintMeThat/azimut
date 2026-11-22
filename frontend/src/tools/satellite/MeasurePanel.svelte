@@ -14,7 +14,20 @@
   import Icon from '../../components/Icon.svelte';
   import DateField from '../../components/DateField.svelte';
   import { formatArea, formatBearing, formatDistance, pathLength, perimeter, polygonArea } from '../../lib/measure.js';
-  import { coneWidth, fieldUnit, fieldValue, isPair, MAX_RINGS, pairReading, parseDistance, PAST, REACH, USES } from '../../lib/measures.js';
+  import {
+    coneWidth,
+    fieldUnit,
+    fieldValue,
+    formatTolerance,
+    isPair,
+    MAX_RINGS,
+    MAX_TOLERANCE,
+    pairReading,
+    parseDistance,
+    PAST,
+    REACH,
+    USES,
+  } from '../../lib/measures.js';
   import { parseHeading, windOf } from '../../lib/horizon/geometry.js';
 
   let {
@@ -65,6 +78,8 @@
   const reach = $derived(m?.reach ?? REACH);
   const reachUnit = $derived(fieldUnit(reach, units));
   const meet = $derived(m?.use === 'align' ? tool.meeting : null);
+  const tolerance = $derived(m?.tolerance ?? 0);
+  const opensAt = $derived(m?.use === 'align' ? tool.bandOpensAt(m.id) : null);
 
   function typedLength(event) {
     const metres = parseDistance(event.currentTarget.value, unit);
@@ -252,6 +267,22 @@
                 <span class="unit">{reachUnit === 'nm' ? 'NM' : reachUnit}</span>
               </label>
             </div>
+            <label class="field tolerance" title="How far off true the two things may line up in the picture">
+              <span>Within</span>
+              <input
+                type="range"
+                min="0"
+                max={MAX_TOLERANCE}
+                step="0.1"
+                aria-label="Tolerance in degrees"
+                value={tolerance}
+                oninput={(e) => tool.setTolerance(m.id, e.currentTarget.value)}
+              />
+              <span class="mono value">{tolerance ? formatTolerance(tolerance) : 'exact'}</span>
+            </label>
+            {#if opensAt != null}
+              <p class="note">At {formatTolerance(tolerance)} it rules nothing out past {formatDistance(opensAt, units)}.</p>
+            {/if}
             {#if meet}
               {#if meet.at}
                 <div class="meet">
@@ -692,6 +723,22 @@
   }
   .aligning span {
     margin-right: auto;
+  }
+  .field.tolerance {
+    display: flex;
+  }
+  .field.tolerance input {
+    flex: 1;
+    width: auto;
+    padding: 0;
+    border: 0;
+    background: none;
+    accent-color: #2de0ff;
+  }
+  .field.tolerance .value {
+    min-width: 4.5ch;
+    color: var(--text-1);
+    text-align: right;
   }
   .meet {
     display: flex;

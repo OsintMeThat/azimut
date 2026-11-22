@@ -631,6 +631,39 @@ describe('alignments in a row', () => {
     expect(haversine(before, after)).toBeLessThan(1);
   });
 
+  it('lays the band a tolerance leaves either side, and the next lines take it too', () => {
+    const tool = store();
+    tool.open();
+    const line = aligned(tool);
+    tool.setTolerance(line.id, 1.5);
+    expect(tool.readout).toBe('Alignment · 190° ±1.5°');
+    const drawnNow = shapes().last;
+    const band = drawnNow.find((shape) => shape.id === 'm1-use-0');
+    expect(band).toMatchObject({ kind: 'polygon', role: 'band', style: { fill: '#2de0ff', interactive: false } });
+    expect(drawnNow.some((shape) => shape.id === 'm1-use-0-casing')).toBe(false);
+    expect(drawnNow.find((shape) => shape.id === 'm1-use-1').style.dash).toBe('4 3');
+    const [far, near] = things(120);
+    tool.addPoint(far);
+    tool.follow(near);
+    expect(tool.live.edges).toHaveLength(4);
+    tool.addPoint(near);
+    expect(tool.measures.at(-1).tolerance).toBe(1.5);
+    tool.setTolerance(line.id, 0);
+    expect(shapes().last.some((shape) => shape.role === 'band' && shape.id.startsWith('m1-'))).toBe(false);
+  });
+
+  it('says where a loose band stops ruling anything out', () => {
+    const tool = store();
+    tool.open();
+    const line = aligned(tool);
+    expect(tool.bandOpensAt(line.id)).toBe(null);
+    tool.setTolerance(line.id, 5);
+    expect(tool.bandOpensAt(line.id)).toBeGreaterThan(10_000);
+    expect(tool.bandOpensAt(line.id)).toBeLessThan(20_000);
+    tool.setTolerance(line.id, 1);
+    expect(tool.bandOpensAt(line.id)).toBe(null);
+  });
+
   it('keeps an alignment in a layer with the whole of its run', () => {
     const tool = store();
     tool.open();
