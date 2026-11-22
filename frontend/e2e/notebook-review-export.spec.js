@@ -27,7 +27,7 @@ const SHOWN = {
 async function notebook(page) {
   const catalog = [note('n1', 'Harbour article')];
   const fixture = await installAppFixture(page, { catalog });
-  const state = { read: [], exported: [], jobs: 0, revealed: 0 };
+  const state = { read: [], exported: [], jobs: 0, revealed: 0, downloads: 0 };
   await page.route(`**/api/cases/${CASE_ID}/catalog/entities**`, (route) =>
     route.fulfill({ json: { items: catalog, next_cursor: null, total: catalog.length } }));
   await page.route(`**/api/cases/${CASE_ID}/entities/redirects`, (route) => route.fulfill({ json: { redirects: {} } }));
@@ -36,6 +36,13 @@ async function notebook(page) {
     if (path.endsWith('/bundle/jobs/review-job')) {
       state.jobs += 1;
       return route.fulfill({ json: { id: 'review-job', kind: 'review-export', state: 'ready', error: null, file: FILE } });
+    }
+    if (path.endsWith('/bundle/jobs/review-job/download')) {
+      state.downloads += 1;
+      return route.fulfill({
+        body: 'PK', contentType: 'application/octet-stream',
+        headers: { 'Content-Disposition': `attachment; filename*=utf-8''${encodeURIComponent(FILE)}` },
+      });
     }
     if (path.endsWith('/bundle/reveal') && route.request().method() === 'POST') {
       state.revealed += 1;
@@ -98,6 +105,11 @@ test('a note exported for review says what leaves and what stays, then shows whe
   await expect(dialog.getByRole('status')).toHaveText(`Written: ${FILE}`);
   expect(state.exported).toEqual([{ author: 'Guest Analyst', picture: 'logo' }]);
 
+  // Download is the main press: the browser saves the file where an upload page will look for it
+  const saved = page.waitForEvent('download');
+  await dialog.getByRole('button', { name: 'Download' }).click();
+  expect((await saved).suggestedFilename()).toBe(FILE);
+  expect(state.downloads).toBe(1);
   await dialog.getByRole('button', { name: 'Show in folder' }).click();
   await expect.poll(() => state.revealed).toBe(1);
   await dialog.getByRole('button', { name: 'Done' }).click();

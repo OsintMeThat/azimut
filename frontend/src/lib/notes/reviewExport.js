@@ -20,11 +20,12 @@ export function readReview(caseId, noteId, picture = null) {
   return api.get(`${base(caseId, noteId)}${picture === null ? '' : `?picture=${encodeURIComponent(picture)}`}`);
 }
 
-/** The press: queue the export, then wait for its file. Resolves to the finished job. */
+/** The press: queue the export, then wait for its file. Resolves to the finished job, whose `id`
+ * the whole case's download takes (`lib/bundles.js`). */
 export async function exportForReview(caseId, noteId, { author, picture }, options = {}) {
   const started = await api.post(base(caseId, noteId), { author, picture });
   const job = await waitForBundle(caseId, started.job_id, options);
-  return { ...job, file: job.file ?? started.file };
+  return { ...job, id: job.id ?? started.job_id, file: job.file ?? started.file };
 }
 
 /** The folder the file was written in, in the system's file manager. */

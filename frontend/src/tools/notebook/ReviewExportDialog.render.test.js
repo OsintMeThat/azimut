@@ -94,7 +94,7 @@ it('prefills the author from the note, and reads again when another picture is p
   expect(get).toHaveBeenLastCalledWith('/api/cases/c%201/notes/n1/review?picture=logo');
 });
 
-it('writes the note first, exports with the fields as typed, then offers the folder', async () => {
+it('writes the note first, exports with the fields as typed, then offers the download and the folder', async () => {
   get.mockResolvedValue(SHOWN);
   let finish;
   post.mockImplementation((url) => (url.endsWith('/review')
@@ -117,6 +117,14 @@ it('writes the note first, exports with the fields as typed, then offers the fol
   finish({ id: 'j1', state: 'ready', file: SHOWN.file });
   await settle();
   expect(text('.review-done')).toBe(`Written: ${SHOWN.file}`);
+  // the main press is the download, by the route a whole case's export uses
+  const download = button('Download');
+  expect(download.classList.contains('btn-primary')).toBe(true);
+  const opened = [];
+  const click = vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(function () { opened.push(this.getAttribute('href')); });
+  download.click();
+  click.mockRestore();
+  expect(opened).toEqual(['/api/cases/c%201/bundle/jobs/j1/download']);
   button('Show in folder').click();
   await settle();
   expect(post).toHaveBeenLastCalledWith('/api/cases/c%201/bundle/reveal');

@@ -6,11 +6,12 @@
    * Before the press it reads from the server what would leave, grouped with counts and
    * names, its size, and what stays; the author fields start from the note's look, else the
    * exporter's own name and logo. The press writes the file as a bundle job, then the dialog
-   * offers the folder it landed in.
+   * offers it as a download, the whole case's own (`lib/bundles.js`), and the folder it landed in.
    */
   import { untrack } from 'svelte';
   import Icon from '../../components/Icon.svelte';
   import Modal from '../../components/Modal.svelte';
+  import { downloadBundle } from '../../lib/bundles.js';
   import { formatSize } from '../../lib/trash.js';
   import {
     CONTRIBUTE, METADATA, exportForReview, namesWords, readReview, revealBundles, staysWords,
@@ -29,7 +30,8 @@
   let picture = $state('');
   let failed = $state('');
   let busy = $state(false);
-  let written = $state('');
+  // the file written and its job, which the download asks for
+  let written = $state(null);
   let reading = 0;
 
   async function load(choice = null) {
@@ -61,7 +63,7 @@
     try {
       await onbeforeexport();
       const job = await exportForReview(caseId, noteId, { author: author.trim(), picture });
-      if (job.state === 'ready') written = job.file;
+      if (job.state === 'ready') written = { file: job.file, job: job.id };
       else failed = job.error ? `Could not export the note: ${job.error}` : 'Could not export the note';
     } catch (error) {
       failed = error.message;
@@ -85,13 +87,15 @@
 
 <Modal title="Export for review" {onclose} width="560px">
   {#if written}
-    <p class="review-done" role="status"><Icon name="check" size={14} /> Written: {written}</p>
+    <p class="review-done" role="status"><Icon name="check" size={14} /> Written: {written.file}</p>
     {@render invite()}
     {#if failed}<p class="review-problem" role="alert">{failed}</p>{/if}
     <div class="review-foot">
       <button type="button" class="btn btn-sm" onclick={reveal}><Icon name="folderOpen" size={14} /> Show in folder</button>
       <span class="review-grow"></span>
-      <button type="button" class="btn btn-primary" onclick={onclose}>Done</button>
+      <button type="button" class="btn" onclick={onclose}>Done</button>
+      <button type="button" class="btn btn-primary" onclick={() => downloadBundle(caseId, written.job)}>
+        <Icon name="download" size={14} /> Download</button>
     </div>
   {:else}
     {#if !shown && !failed}

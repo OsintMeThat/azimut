@@ -136,7 +136,8 @@ def download_bundle(case_id: str, job_id: str) -> FileResponse:
     job = bundle_engine.job_status(case_id, job_id)
     if (
         job is None
-        or job.get("kind") != bundle_engine.EXPORT_JOB
+        # a whole case, or one note exported for review
+        or job.get("kind") not in (bundle_engine.EXPORT_JOB, reviewexport.REVIEW_JOB)
         or job.get("state") != "ready"
     ):
         raise HTTPException(status_code=404, detail="bundle download not ready")
