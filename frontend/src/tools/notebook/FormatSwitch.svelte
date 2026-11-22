@@ -1,15 +1,15 @@
 <script>
   /**
    * The file a note exports to, or the one the Page pane draws (`lib/notes/formats.js`):
-   * PDF · HTML page · Web folder · WordPress draft in the export dialog, PDF | HTML in
-   * the pane, which `page` says.
+   * PDF · HTML page · Web folder · WordPress draft in the export dialog, For review after them
+   * when `review` offers it (one note), PDF | HTML in the pane, which `page` says.
    */
   import { LOOK_HELP } from '../../lib/notes/lookHelp.js';
-  import { FORMATS, FORMAT_LABELS, HTML, PAGE_FORMATS, PAGE_LABELS, PDF, WEB, WORDPRESS } from '../../lib/notes/formats.js';
+  import { FORMATS, FORMAT_LABELS, HTML, PAGE_FORMATS, PAGE_LABELS, PDF, REVIEW, WEB, WORDPRESS } from '../../lib/notes/formats.js';
 
-  let { value = PDF, tight = false, page = false, onchange = () => {} } = $props();
+  let { value = PDF, tight = false, page = false, review = false, onchange = () => {} } = $props();
 
-  const offered = $derived(page ? PAGE_FORMATS : FORMATS);
+  const offered = $derived(page ? PAGE_FORMATS : review ? [...FORMATS, REVIEW] : FORMATS);
   const shown = $derived(offered.includes(value) ? value : PDF);
   const labels = $derived(page ? PAGE_LABELS : FORMAT_LABELS);
   const titles = $derived({
@@ -17,6 +17,7 @@
     [HTML]: page ? LOOK_HELP.page_html : LOOK_HELP.html,
     [WEB]: LOOK_HELP.web_folder,
     [WORDPRESS]: LOOK_HELP.wordpress,
+    [REVIEW]: LOOK_HELP.review,
   });
 </script>
 

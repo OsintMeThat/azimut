@@ -6,20 +6,23 @@
  *
  * The export dialog and the Page pane each remember the last one picked, for this
  * browser, apart: a page read as HTML while writing does not decide what the next
- * export writes. PDF the first time, as before HTML existed.
+ * export writes. PDF the first time, as before HTML existed. For review is never kept.
  */
 
 export const PDF = 'pdf';
 export const HTML = 'html';
 export const WEB = 'web';
 export const WORDPRESS = 'wordpress';
+/** One note and what its page needs, as an Azimut file to send for review (`engine/reviewexport.py`):
+ * offered last, for one note only, and never remembered, so the next export opens on one of the four. */
+export const REVIEW = 'review';
 /** What the export dialog offers, in its order, and what the Page pane draws. */
 export const FORMATS = [PDF, HTML, WEB, WORDPRESS];
 export const PAGE_FORMATS = [PDF, HTML];
 /** What goes out in the public edition only: a page put online. */
 export const PUBLIC_ONLY = [WEB, WORDPRESS];
 /** How the export dialog names each, and the Page pane, where there are two. */
-export const FORMAT_LABELS = { [PDF]: 'PDF', [HTML]: 'HTML page', [WEB]: 'Web folder', [WORDPRESS]: 'WordPress draft' };
+export const FORMAT_LABELS = { [PDF]: 'PDF', [HTML]: 'HTML page', [WEB]: 'Web folder', [WORDPRESS]: 'WordPress draft', [REVIEW]: 'For review' };
 export const PAGE_LABELS = { [PDF]: 'PDF', [HTML]: 'HTML' };
 
 const KEYS = {

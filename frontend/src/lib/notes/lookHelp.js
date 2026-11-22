@@ -88,6 +88,7 @@ export const LOOK_HELP = {
   page_html: 'The HTML page beside the note, drawn as you type',
   web_folder: 'The public edition as a folder to put online, with its picture card for X',
   wordpress: 'The public edition as a draft on your WordPress site',
+  review: 'Only what its page needs, as an Azimut file to send for review',
   web_address: 'Where the folder will be online, which gives X its picture card',
   offline_maps: 'Its maps drawn on the picture filed with them, fetching nothing',
   internal: 'The note whole, its internal passages in marked boxes',

@@ -3,15 +3,15 @@ import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { flushSync, mount, unmount } from 'svelte';
 
 /**
- * The Export for review dialog: what leaves and what stays, said from the server's reading
- * before anything is written; the author fields, prefilled; the press with its busy state;
- * then the file's name and Show in folder.
+ * The export dialog's For review branch: what leaves and what stays, said from the server's
+ * reading before anything is written; the author fields, prefilled; then what the dialog's own
+ * buttons call: `send()`, `download()` and `reveal()`.
  */
 
 const get = vi.fn();
 const post = vi.fn();
 vi.mock('../../lib/api.js', () => ({ api: { get, post } }));
-const { default: ReviewExportDialog } = await import('./ReviewExportDialog.svelte');
+const { default: ReviewExport } = await import('./ReviewExport.svelte');
 
 const SHOWN = {
   title: 'Harbour article',
@@ -36,7 +36,6 @@ let live;
 let target;
 const settle = async () => { for (let i = 0; i < 30; i++) await Promise.resolve(); flushSync(); };
 const text = (selector) => document.querySelector(selector)?.textContent.replace(/\s+/g, ' ').trim();
-const button = (words) => [...document.querySelectorAll('button')].find((node) => node.textContent.trim().startsWith(words));
 
 beforeEach(() => {
   vi.clearAllMocks();
@@ -50,10 +49,9 @@ afterEach(() => {
 });
 
 function show(props = {}) {
-  const onclose = vi.fn();
-  const onbeforeexport = vi.fn(async () => {});
-  live = mount(ReviewExportDialog, { target, props: { caseId: 'c 1', noteId: 'n1', onclose, onbeforeexport, ...props } });
-  return { onclose, onbeforeexport };
+  const prepare = vi.fn(async () => {});
+  live = mount(ReviewExport, { target, props: { caseId: 'c 1', noteId: 'n1', prepare, ...props } });
+  return { prepare, body: live };
 }
 
 it('says what leaves and what stays before anything is written', async () => {
@@ -106,52 +104,42 @@ it('says the author signs the maps too, only when map pages go with the article'
   expect(text('.review-signs')).toBe('These sign the article and its maps.');
 });
 
-it('writes the note first, exports with the fields as typed, then offers the download and the folder', async () => {
-  get.mockResolvedValue(SHOWN);
-  let finish;
+it('writes the note first, exports with the fields as typed, then downloads and shows the folder', async () => {
   post.mockImplementation((url) => (url.endsWith('/review')
     ? Promise.resolve({ job_id: 'j1', state: 'queued', file: SHOWN.file })
     : Promise.resolve({ status: 'revealed' })));
   get.mockImplementation((url) => (url.includes('/bundle/jobs/')
-    ? new Promise((resolve) => { finish = resolve; })
+    ? Promise.resolve({ id: 'j1', state: 'ready', file: SHOWN.file })
     : Promise.resolve(SHOWN)));
-  const { onbeforeexport } = show();
+  const { prepare, body } = show();
   await settle();
   const input = document.querySelector('input.input');
   input.value = '  Guest Analyst ';
   input.dispatchEvent(new Event('input'));
-  button('Export').click();
+  await body.send();
   await settle();
-  expect(onbeforeexport).toHaveBeenCalledTimes(1);
+  expect(prepare).toHaveBeenCalledTimes(1);
   expect(post).toHaveBeenCalledWith('/api/cases/c%201/notes/n1/review', { author: 'Guest Analyst', picture: 'e_piece00001' });
-  // busy while the job runs
-  expect(button('Exporting…').disabled).toBe(true);
-  finish({ id: 'j1', state: 'ready', file: SHOWN.file });
-  await settle();
   expect(text('.review-done')).toBe(`Written: ${SHOWN.file}`);
-  // the main press is the download, by the route a whole case's export uses
-  const download = button('Download');
-  expect(download.classList.contains('btn-primary')).toBe(true);
   const opened = [];
   const click = vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(function () { opened.push(this.getAttribute('href')); });
-  download.click();
+  body.download();
   click.mockRestore();
   expect(opened).toEqual(['/api/cases/c%201/bundle/jobs/j1/download']);
-  button('Show in folder').click();
-  await settle();
+  await body.reveal();
   expect(post).toHaveBeenLastCalledWith('/api/cases/c%201/bundle/reveal');
 });
 
-it('says why an export failed and keeps the dialog open', async () => {
+it('says why an export failed and stays on what leaves', async () => {
   post.mockResolvedValue({ job_id: 'j2', state: 'queued', file: SHOWN.file });
   get.mockImplementation((url) => (url.includes('/bundle/jobs/')
     ? Promise.resolve({ id: 'j2', state: 'failed', error: 'not enough free space' })
     : Promise.resolve(SHOWN)));
-  const { onclose } = show();
+  const { body } = show();
   await settle();
-  button('Export').click();
+  await body.send();
   await settle();
   expect(text('.review-problem')).toBe('Could not export the note: not enough free space');
-  expect(onclose).not.toHaveBeenCalled();
-  expect(button('Export').disabled).toBe(false);
+  expect(document.querySelector('.review-done')).toBeNull();
+  expect(document.querySelector('.review-groups')).not.toBeNull();
 });
