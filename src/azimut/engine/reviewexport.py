@@ -568,8 +568,8 @@ class _Reading:
             if picture:
                 self.add(picture, "pictures")
         for step in block.steps:
-            if step.proof:
-                self.add(step.proof, "pictures")
+            for one in notes_maps.step_ids(step.proof):
+                self.add(one, "pictures")
         period = block.period()
         if period is not None:
             out = notes_maps.Derived(data={})

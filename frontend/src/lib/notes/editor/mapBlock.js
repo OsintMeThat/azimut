@@ -29,7 +29,7 @@ import { Transaction } from '@codemirror/state';
 import { fileUrl } from '../../fileUrl.js';
 import { holdScreen } from '../../fullscreen.js';
 import {
-  drawFeature, describeMap, editFeature, fileGround, fileView, forgetMaps, makeOwnLayer, removeFeature, restoreFeature,
+  drawFeature, describeMap, editFeature, fileGround, fileView, forgetMaps, makeOwnLayer, removeFeature, restoreFeature, stepsFromLayer,
 } from '../mapSettings.svelte.js';
 import { rovingToolbar } from '../pictureSize.js';
 import { MAP_BLOCK } from '../syntax.js';
@@ -388,6 +388,13 @@ export class MapEditing {
     if (this.write({ view: viewText(fitView(this.surface.seen())) })) this.say('The page opens the map here');
   }
 
+  /** The story steps one of the map's layers makes (`stepsFromLayer`), read for the block as it stands. */
+  stepsFrom(request) {
+    const text = this.text();
+    if (!this.caseId || text == null) return Promise.reject(new Error('The map could not be read'));
+    return stepsFromLayer(this.caseId, { text, ...request });
+  }
+
   /** Arm `tool` on the map, the card's choice answered with what it drew. */
   arm(tool, done) {
     if (!this.surface) return;
@@ -500,6 +507,8 @@ export class MapEditing {
         base: (value, options) => this.base(value, options),
         imagery: (value) => this.base('satellite', { imagery: value }),
         arm: (tool, done) => this.arm(tool, done),
+        seen: () => this.surface?.seen() ?? null,
+        stepsFrom: (request) => this.stepsFrom(request),
         draw: (kind, coords, extra) => this.drawn(kind, coords, extra),
         edit: (row, changes) => this.editDrawn(row, changes),
         remove: (row) => this.removed(row),
@@ -937,7 +946,13 @@ const THEME = {
   '.cm-map-steps': { alignItems: 'start' },
   '.cm-map-steps-head': { display: 'flex', flexDirection: 'column', gap: '3px' },
   '.cm-map-step-list': { display: 'flex', flexDirection: 'column', gap: '4px', margin: '0', padding: '0', listStyle: 'none' },
-  '.cm-map-steps > .cm-map-act': { gridColumn: '2', justifySelf: 'start' },
+  '.cm-map-steps > :is(.cm-map-actions, .cm-map-fromlayer)': { gridColumn: '2' },
+  '.cm-map-fromlayer': {
+    display: 'flex', flexDirection: 'column', gap: '8px', padding: '10px 12px', border: '1px solid var(--border)', borderRadius: '7px',
+    background: 'var(--bg-1)',
+  },
+  '.cm-map-fromlayer .cm-map-field': { gridTemplateColumns: '64px minmax(0, 1fr)' },
+  '.cm-map-fromlayer-count': { margin: '0', fontWeight: '600', fontVariantNumeric: 'tabular-nums' },
   '.cm-map-step': {
     display: 'grid', gridTemplateColumns: '26px 92px minmax(80px, 1fr) minmax(120px, 2fr) repeat(4, 26px)', alignItems: 'center', gap: '6px',
     padding: '3px 4px', borderRadius: '6px',

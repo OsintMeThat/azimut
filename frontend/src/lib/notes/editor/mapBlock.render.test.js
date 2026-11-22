@@ -10,7 +10,7 @@ import { undo } from '@codemirror/commands';
  * and an area, a point or a line drawn on the map into the layer the map names.
  */
 
-const server = vi.hoisted(() => ({ asked: [], described: null, ground: null, feature: null, detail: null }));
+const server = vi.hoisted(() => ({ asked: [], described: null, ground: null, feature: null, detail: null, steps: null }));
 vi.mock('../../api.js', async (original) => {
   const real = await original();
   return {
@@ -24,6 +24,7 @@ vi.mock('../../api.js', async (original) => {
         if (path.endsWith('/notes/maps/layer')) return { name: 'The front, drawn', title: 'The front, drawn' };
         if (path.endsWith('/notes/maps/features')) return server.feature(body);
         if (path.endsWith('/notes/maps/detail')) return server.detail(body);
+        if (path.endsWith('/notes/maps/steps')) return server.steps(body);
         throw new Error(`not stood in: ${path}`);
       }),
       patch: vi.fn(async (path, body) => {
@@ -67,6 +68,15 @@ const DESCRIBED = {
   own_steps: false, palette: [{ name: 'Government', colour: '#1e88e5' }], providers: [], warnings: [],
 };
 
+/** What *From a layer* makes of the Front line: two days, the first with two marks. */
+const MADE = {
+  steps: [
+    { day: '2026-10-14', label: '14 October 2026', view: [12.74, 43.5, 13.5], proof: 'e_a, e_b', words: 'The assault video and The north edge' },
+    { day: '2026-11-13', label: 'Dhubab airport', view: [12.8636, 43.5205, 13.5], proof: 'e_c', words: 'Inside the airport.' },
+  ],
+  marks: 3, days: 2, undated: 1, more: 0, first: '2026-09-14', last: '2026-11-13',
+};
+
 let view;
 let handlers;
 beforeEach(() => {
@@ -75,6 +85,7 @@ beforeEach(() => {
   server.ground = () => ({ ground: 'e_osm', details: ['e_osm2'], view: '12.73976, 43.51350, 12.05', filed: ['e_osm', 'e_osm2'], base: 'map' });
   server.feature = (body) => ({ layer: body.layer, key: 'k1' });
   server.detail = () => ({ detail: 'e_view1', details: ['e_view1'], filed: ['e_view1'] });
+  server.steps = () => MADE;
   forgetMaps();
 });
 afterEach(() => {
@@ -324,6 +335,116 @@ describe('each choice is one line and one Undo step', () => {
     picture.checked = false;
     picture.dispatchEvent(new Event('change', { bubbles: true }));
     expect(lines().at(-2)).toBe('card: sentence, source, verify');
+  });
+});
+
+describe('steps from a layer', () => {
+  const fromLayer = () => [...panel().querySelectorAll('.cm-map-act')].find((node) => node.textContent === 'From a layer');
+  const box = () => panel().querySelector('[aria-label="Steps from a layer"]');
+  const said = () => box().querySelector('.cm-map-fromlayer-count').textContent;
+  const asks = () => server.asked.filter((one) => one.path.endsWith('/notes/maps/steps')).map((one) => one.body);
+  const act = (words) => [...box().querySelectorAll('.cm-map-act')].find((node) => node.textContent === words);
+
+  it('counts what a layer of the map makes in what the map shows, its days its whole span, before it writes anything', async () => {
+    await opened('Time');
+    press(fromLayer());
+    await settle();
+    const [first] = asks();
+    expect(first).toMatchObject({ text: BLOCK, layer: 'Front line', start: '', end: '' });
+    expect(first.within).toHaveLength(4);
+    expect(said()).toBe('3 marks on 2 days make 2 steps.');
+    expect(box().querySelector('p.cm-map-note').textContent).toBe('1 mark with no day left out.');
+    expect([named('First day of the steps').value, named('Last day of the steps').value]).toEqual(['2026-09-14', '2026-11-13']);
+    expect([...named('Layer the steps come from').options].map((option) => option.textContent)).toEqual(['Front line', 'Vehicles']);
+    expect(block()).toBe(BLOCK);
+  });
+
+  it('asks again for another layer, from its own whole span, and for the days picked', async () => {
+    await opened('Time');
+    press(fromLayer());
+    await settle();
+    const pick = named('Layer the steps come from');
+    pick.value = 'Vehicles';
+    pick.dispatchEvent(new Event('change', { bubbles: true }));
+    await settle();
+    expect(asks().at(-1)).toMatchObject({ layer: 'Vehicles', start: '', end: '' });
+    const until = named('Last day of the steps');
+    until.value = '2026-10-31';
+    until.dispatchEvent(new Event('change', { bubbles: true }));
+    await settle();
+    expect(asks().at(-1)).toMatchObject({ layer: 'Vehicles', start: '2026-09-14', end: '2026-10-31' });
+  });
+
+  it('counts the marks in a rectangle dragged on the map', async () => {
+    await opened('Time');
+    press(fromLayer());
+    await settle();
+    press(radio('Where', 'A rectangle'));
+    expect(said()).toBe('Drag a rectangle over the area on the map.');
+    expect(map().querySelector('.cm-map-hint').textContent).toBe('Drag a rectangle over the area whose marks make the steps. Esc cancels.');
+    const over = map().querySelector('.cm-map-over');
+    over.getBoundingClientRect = () => ({ left: 0, top: 0, width: 1600, height: 1000, right: 1600, bottom: 1000 });
+    const at = (type, x, y) => over.dispatchEvent(new MouseEvent(type, { bubbles: true, cancelable: true, button: 0, clientX: x, clientY: y }));
+    at('pointerdown', 400, 250);
+    at('pointermove', 1200, 750);
+    at('pointerup', 1200, 750);
+    await settle();
+    const [west, south, east, north] = asks().at(-1).within;
+    expect(west).toBeCloseTo(43.45, 6);
+    expect(east).toBeCloseTo(43.55, 6);
+    expect(south).toBeCloseTo(12.71, 1);
+    expect(north).toBeCloseTo(12.77, 1);
+    expect(said()).toBe('3 marks on 2 days make 2 steps.');
+  });
+
+  it('writes the steps it makes as the map’s own, asked again on the press, one Undo step', async () => {
+    await opened('Time');
+    press(fromLayer());
+    await settle();
+    const before = asks().length;
+    press(act('Make the steps'));
+    await settle();
+    expect(asks()).toHaveLength(before + 1);
+    expect(lines().slice(-3)).toEqual([
+      'step: 2026-10-14 | 14 October 2026 | 12.74000, 43.50000, 13.5 | e_a, e_b | The assault video and The north edge',
+      'step: 2026-11-13 | Dhubab airport | 12.86360, 43.52050, 13.5 | e_c | Inside the airport.',
+      ':::',
+    ]);
+    expect(box()).toBeNull();
+    undo(view);
+    expect(block()).toBe(BLOCK);
+  });
+
+  it('says it replaces the map’s own steps, and Cancel writes nothing', async () => {
+    const own = BLOCK.replace('\n:::', '\nstep: 2026-10-20 | Mine\n:::');
+    editor(`Before.\n\n${own}\n\nAfter.`);
+    await settle();
+    press(map().querySelector('.cm-map-settings-btn'));
+    await settle();
+    press(tab('Time'));
+    await settle();
+    press(fromLayer());
+    await settle();
+    expect(act('Replace the 1 step').disabled).toBe(false);
+    press(act('Cancel'));
+    expect(box()).toBeNull();
+    expect(text()).toContain('step: 2026-10-20 | Mine\n:::');
+  });
+
+  it('offers no layer the map hides, and says so when none is left', async () => {
+    server.described = () => ({ ...DESCRIBED, layers: DESCRIBED.layers.map((layer) => ({ ...layer, on: false })) });
+    await opened('Time');
+    expect(fromLayer().disabled).toBe(true);
+    expect(fromLayer().title).toBe('The map shows no layer with marks');
+  });
+
+  it('says when nothing dated is there, and the button stays down', async () => {
+    server.steps = () => ({ ...MADE, steps: [], marks: 0, days: 0, undated: 0 });
+    await opened('Time');
+    press(fromLayer());
+    await settle();
+    expect(said()).toBe('No dated mark of this layer in that area and period.');
+    expect(act('Make the steps').disabled).toBe(true);
   });
 });
 

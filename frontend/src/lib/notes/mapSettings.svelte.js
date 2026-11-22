@@ -1,8 +1,9 @@
 /**
  * What a map's settings card asks of the case (`api/notemaps.py`): the map as it shows now,
  * read for the card to draw it and draw on it; the ground of another base or frame, or of the
- * view its Draw tab shows, filed on the press that asks for it; a map started from nothing; and
- * the points, lines and areas drawn on it, kept in a personal layer of the case the block names.
+ * view its Draw tab shows, filed on the press that asks for it; a map started from nothing; the
+ * story steps one of its layers makes; and the points, lines and areas drawn on it, kept in a
+ * personal layer of the case the block names.
  *
  * What is drawn on a map is case data, not a line of the note, so the Page pane is told
  * (`mapsChanged`) and draws the page again at once, as it does when a picture's source is
@@ -62,6 +63,14 @@ export function fileGround(caseId, { text, base: wanted, provider }, { post = ap
  */
 export function fileView(caseId, { text, base: wanted, west, south, east, north }, { post = api.post } = {}) {
   return post(`${base(caseId)}/detail`, { text, base: wanted, west, south, east, north });
+}
+
+/**
+ * The story steps one of the map's layers makes, `{ text, layer, within, start, end }`, read from the
+ * case alone: `{ steps, marks, days, undated, more, first, last }`, nothing written.
+ */
+export function stepsFromLayer(caseId, request, { post = api.post } = {}) {
+  return post(`${base(caseId)}/steps`, request);
 }
 
 /** A map from nothing: `{ title, west, south, east, north, base, provider }` → `{ text, filed, layer }`. */

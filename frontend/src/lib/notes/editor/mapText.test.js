@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
-  aboutArea, areaKm2, fitView, frameOf, readMap, stepOf, stepText, viewBounds, viewText, withMapSettings,
+  aboutArea, areaKm2, fitView, frameOf, readMap, stepIds, stepOf, stepText, viewBounds, viewText, withMapSettings,
 } from './mapText.js';
 
 /**
@@ -41,6 +41,16 @@ describe('a map block read', () => {
     expect(stepText({ day: '', label: 'Whole map', view: null, proof: '', words: '' })).toBe(' | Whole map');
     expect(stepOf('2026-10-21 |  | 12.73770, 43.50166, 14.05 | e_ac82e73408 | Seen there.').view).toEqual([12.7377, 43.50166, 14.05]);
     expect(frameOf('43.6, 12.6, 43.4, 12.8')).toBeNull();
+  });
+
+  it('reads a step naming several records, each once, as the engine does (`step_ids`)', () => {
+    const twelve = Array.from({ length: 12 }, (_, at) => `e_${at}`).join(', ');
+    expect(stepOf('2026-10-14 | Two | | e_a,e_b , e_a | Words | with a bar')).toEqual(
+      { day: '2026-10-14', label: 'Two', view: null, proof: 'e_a, e_b', words: 'Words | with a bar' });
+    expect(stepIds('e_a,e_b , e_a')).toEqual(['e_a', 'e_b']);
+    expect(stepOf(`2026-10-14 | Twelve | | ${twelve}`)?.proof).toBe(twelve);
+    expect(stepOf(`2026-10-14 | Thirteen | | ${twelve}, e_12`)).toBeNull();
+    expect(stepOf('2026-10-14 | Bad | | e_a, not/one')).toBeNull();
   });
 });
 
