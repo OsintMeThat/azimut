@@ -7411,7 +7411,10 @@ a page it does not hold offers **Link**, or **Bookmark it**, which files it as a
 named from its address and cites it. Words that are not an address find the case's
 items by name, a press citing one. A written link opens with its address, and
 **Remove** keeps its words. Ctrl+K anywhere else in the note still opens Go to. The
-bar above holds the same as buttons.
+bar above holds the same as buttons. With nothing typed, the field lists the case's web maps
+under **Link to a map**; a press links the words to the map, `[[entity:<map note>|the words]]`,
+and a web map found by name links the same way. The page draws such a link as its words in the
+link's colour beside a small map, *Link to the map Road map* on hover, in a table's cells too.
 
 **Footnotes.** A comment the reader opens from a small letter, written `^[words]` (Pandoc's
 inline footnote, `lib/notes/footnotes.js`). The page never shows it written: it is its
@@ -7932,6 +7935,19 @@ on github.com. While GitHub is not set up, the press shows how to connect it and
 Settings › Website. While it works the press reads *Publishing…* beside a spinner, as **Read the site**
 reads *Reading…*, and the dialog says *Making the folder and sending it to octo/articles…*. `POST /notes/{id}/github` does it (`engine/githubpages.py`), and
 `POST /api/publishing/github/build` answers the watch.
+
+**Links to a map.** A link to a web map of the case (the Link field's *Link to a map*, or an
+address the map was published at written by hand) opens the map's page on the same site once
+the site holds it: the publish gives it the site's own address, `https://octo.github.io/articles/road-map/`,
+which the site's lists read to fold the map under the article and Update the site moves with a new
+domain. A link written to the map's address on another site takes its address on this one. A map
+the site does not hold yet is named under the site's fields before any press, *The map “Road map”
+is not on this site yet.*, then *Published without it, the link to it reads as plain text.*, with
+**Publish the map first**, which puts the map on the same site and then the article: under the name
+it has elsewhere, else one made from its title, never the article's own nor another's folder, and
+unlisted with an unlisted article, listed otherwise. It never holds the publish back: the link reads
+as its words until a publish finds the map online (`GET /notes/{id}/github/maps`, read from the case
+only). The PDF, the HTML report and the in-app reader show the link's words as before.
 
 **Your site.** The same press keeps the site beside the folder, in the same commit
 (`engine/site.py`, `engine/sitesync.py`). The folder carries a card, `article.json`
