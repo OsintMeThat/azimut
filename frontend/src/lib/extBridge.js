@@ -49,7 +49,7 @@ export function captureTab({ timeoutMs = 4000, win = window } = {}) {
   return new Promise((resolve, reject) => {
     const id = `cap-${++seq}`;
     const timer = setTimeout(() => {
-      win.removeEventListener('message', onMessage);
+      win.removeEventListener?.('message', onMessage);
       reject(new Error('the capture extension did not answer'));
     }, timeoutMs);
     function onMessage(event) {
@@ -61,7 +61,7 @@ export function captureTab({ timeoutMs = 4000, win = window } = {}) {
       const msg = event.data;
       if (!msg || msg.channel !== CHANNEL || msg.type !== 'capture-result' || msg.id !== id) return;
       clearTimeout(timer);
-      win.removeEventListener('message', onMessage);
+      win.removeEventListener?.('message', onMessage);
       if (msg.ok && msg.dataUrl) {
         resolve(msg.dataUrl);
       } else {
@@ -104,7 +104,7 @@ export function handOffPost(payload, { timeoutMs = 2000, win = window } = {}) {
   return new Promise((resolve, reject) => {
     const id = `post-${++seq}`;
     const timer = setTimeout(() => {
-      win.removeEventListener('message', onMessage);
+      win.removeEventListener?.('message', onMessage);
       reject(new Error('the capture extension did not answer'));
     }, timeoutMs);
     function onMessage(event) {
@@ -112,7 +112,7 @@ export function handOffPost(payload, { timeoutMs = 2000, win = window } = {}) {
       const msg = event.data;
       if (!msg || msg.channel !== CHANNEL || msg.type !== 'post-handoff-result' || msg.id !== id) return;
       clearTimeout(timer);
-      win.removeEventListener('message', onMessage);
+      win.removeEventListener?.('message', onMessage);
       if (msg.ok) resolve(true);
       else reject(new Error(msg.error || 'the capture extension refused'));
     }
@@ -140,7 +140,7 @@ export function handOffReverse(payload, { timeoutMs = 2000, win = window } = {})
   return new Promise((resolve, reject) => {
     const id = `rev-${++seq}`;
     const timer = setTimeout(() => {
-      win.removeEventListener('message', onMessage);
+      win.removeEventListener?.('message', onMessage);
       reject(new Error('the capture extension did not answer'));
     }, timeoutMs);
     function onMessage(event) {
@@ -148,7 +148,7 @@ export function handOffReverse(payload, { timeoutMs = 2000, win = window } = {})
       const msg = event.data;
       if (!msg || msg.channel !== CHANNEL || msg.type !== 'reverse-handoff-result' || msg.id !== id) return;
       clearTimeout(timer);
-      win.removeEventListener('message', onMessage);
+      win.removeEventListener?.('message', onMessage);
       if (msg.ok) resolve(true);
       else reject(new Error(msg.error || 'the capture extension refused'));
     }
@@ -351,7 +351,7 @@ export function mapLinkRelay({ win = window, doc = document } = {}) {
     },
     close() {
       post('close');
-      win.removeEventListener('message', onMessage);
+      win.removeEventListener?.('message', onMessage);
       heard = null;
     },
   };
@@ -386,7 +386,7 @@ export function pingExtensions({ timeoutMs = 700, win = window } = {}) {
     }
     win.addEventListener('message', onMessage);
     setTimeout(() => {
-      win.removeEventListener('message', onMessage);
+      win.removeEventListener?.('message', onMessage);
       resolve(found);
     }, timeoutMs);
     win.postMessage({ channel: CHANNEL, type: 'ping', id }, win.location.origin);
@@ -436,7 +436,7 @@ export function extensionState({ timeoutMs = 700, win = window } = {}) {
     }
     win.addEventListener('message', onMessage);
     setTimeout(() => {
-      win.removeEventListener('message', onMessage);
+      win.removeEventListener?.('message', onMessage);
       resolve(found);
     }, timeoutMs);
     win.postMessage({ channel: CHANNEL, type: 'ext-state', id }, win.location.origin);
@@ -460,7 +460,7 @@ export function reloadExtension(installId, { timeoutMs = 2000, win = window } = 
   return new Promise((resolve, reject) => {
     const id = `reload-${++seq}`;
     const timer = setTimeout(() => {
-      win.removeEventListener('message', onMessage);
+      win.removeEventListener?.('message', onMessage);
       reject(new Error('the capture extension did not answer'));
     }, timeoutMs);
     function onMessage(event) {
@@ -468,7 +468,7 @@ export function reloadExtension(installId, { timeoutMs = 2000, win = window } = 
       const msg = event.data;
       if (!msg || msg.channel !== CHANNEL || msg.type !== 'ext-reload-result' || msg.id !== id) return;
       clearTimeout(timer);
-      win.removeEventListener('message', onMessage);
+      win.removeEventListener?.('message', onMessage);
       if (msg.ok) resolve(true);
       else reject(new Error(msg.error || 'the capture extension refused'));
     }
