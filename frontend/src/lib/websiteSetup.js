@@ -22,7 +22,7 @@ export const SITE_OWN_TITLE = 'Make it yours';
 /** Each way to make the site one's own: its lead, then what to do, with `code` and one [link](address). */
 export const SITE_OWN = Object.freeze([
   ['Your own home page', 'write your `index.html` and put `<!-- azimut:articles -->` `<!-- /azimut:articles -->` where the list goes.'],
-  ['Your own bar', 'put your header and its `<style>` in `azimut-bar.html` at the site\'s root: articles carry it in place of Azimut\'s bar, maps keep theirs, and Update the site brings an edit to all of them. Scripts are dropped, links start from the site\'s root, and each `<svg>` needs a `width` and a `height`.'],
+  ['Your own bar and footer', 'put your header and its `<style>` in `azimut-bar.html` at the site\'s root, and your footer in `azimut-footer.html`. Articles carry the header in place of Azimut\'s bar and the footer at their end, after Azimut\'s own lines; maps carry neither. Update the site brings an edit to all of them. Scripts are dropped, links start from the site\'s root, and each `<svg>` needs a `width` and a `height`.'],
   ['A page per category', 'the same markers with `section="Investigations"` list that category only.'],
   ['Your own domain', 'buy one, then point it to GitHub Pages ([GitHub\'s guide](https://docs.github.com/en/pages/configuring-a-custom-domain-for-your-github-pages-site)).'],
   ['Your own scripts', '`articles.json` lists every article with its title, date, category and picture.'],
@@ -333,9 +333,11 @@ export const PREVIEW_SAMPLE = Object.freeze({
   short: '20 Nov 2026',
 });
 export const OWN_HOME_PILL = 'Your home page';
-/** The site's own bar, `azimut-bar.html`, and what the Article bar preview says once a read finds it in use. */
+/** The site's own bar and footer, `azimut-bar.html` and `azimut-footer.html`, and what the Article bar preview says once a read finds them in use. */
 export const OWN_BAR_FILE = 'azimut-bar.html';
 export const OWN_BAR_IN_USE = 'Your own bar, on every article';
+export const OWN_FOOTER_FILE = 'azimut-footer.html';
+export const OWN_FOOTER_IN_USE = 'Your own footer, on every article';
 export function ownHomeSaid(host) {
   return `${host || 'The site'} has a home page of your own: Azimut fills its lists and leaves its header as you wrote it.`;
 }
@@ -466,6 +468,7 @@ export function ownersOf(read) {
       : { files: ['index.html'], who: 'azimut', text: 'Writes the default home page, until you write your own.' },
     ...(pages.length ? [{ files: pages, who: 'you', text: 'Fills the list between their markers, nothing else.' }] : []),
     { files: [OWN_BAR_FILE], who: 'you', text: 'Copied into each article\'s bar.' },
+    { files: [OWN_FOOTER_FILE], who: 'you', text: 'Copied to the end of each article.' },
     { files: ['everything else'], who: 'you', text: 'Never touches it.' },
   ];
 }
@@ -488,7 +491,7 @@ export function lastChangeSaid(when, message = '') {
 /** What Make it yours shows under a way, as lines each with how it is drawn: `m` markup, `c` a marker, '' plain. */
 export const SITE_OWN_SAMPLES = Object.freeze({
   'Your own home page': [['m', '<main>'], ['c', '  <!-- azimut:articles -->'], ['c', '  <!-- /azimut:articles -->'], ['m', '</main>']],
-  'Your own bar': [['m', '<style>:host { font: 15px system-ui }</style>'], ['m', '<header><a href="./">'],
+  'Your own bar and footer': [['m', '<style>:host { font: 15px system-ui }</style>'], ['m', '<header><a href="./">'],
     ['m', '  <svg width="24" height="24">…</svg> My site'], ['m', '</a></header>']],
   'A page per category': [['c', '<!-- azimut:articles section="Investigations" -->'], ['c', '<!-- /azimut:articles -->']],
   'Your own scripts': [['', '{ "title": "…", "date": "2026-11-20",'], ['', '  "category": "Conflict Watch", "image": "/…/cover.jpg" }']],

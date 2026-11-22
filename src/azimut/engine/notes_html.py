@@ -2796,6 +2796,8 @@ class _Page:
                 f'<h2 id="corrections-title">Corrections</h2>\n<ol>{"".join(rows)}</ol>\n</section>\n')
 
     def _footer(self, printed: str) -> str:
+        """The page's own footer: its edition, its day, its fingerprint and Made with Azimut. On a
+        site's article page, the site's own footer follows it (`site.with_footer`)."""
         edition = "Public edition" if self.public else "Internal edition"
         made = ""
         if self.cited.identity.credit:

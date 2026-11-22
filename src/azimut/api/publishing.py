@@ -489,7 +489,8 @@ def read_github_site() -> dict[str, Any]:
     """Read what the site holds, for Settings › Website › Articles: its cards (every article, map and
     page, unlisted ones too, each with its weight and whether `/github/site/delete` takes it), its
     categories with the pages that list them, whose home it has, whose bar its articles carry (``bar``,
-    `yours` for its own `azimut-bar.html`, else `azimut`), its legal and privacy pages, the last commit,
+    `yours` for its own `azimut-bar.html`, else `azimut`) and whose footer (``footer``, `yours` for its own
+    `azimut-footer.html`, else `none`), its legal and privacy pages, the last commit,
     and what the site and the repository weigh. Keeps the categories it found. Reads only."""
     target = _needs_target()
     try:
@@ -505,7 +506,8 @@ def read_github_site() -> dict[str, Any]:
     except github.GitHubError as exc:
         raise HTTPException(status_code=502, detail=str(exc)) from exc
     keep_categories(surveyed.found)
-    return {"ok": True, "address": home.address, "home": surveyed.home, "bar": surveyed.bar, "items": surveyed.items,
+    return {"ok": True, "address": home.address, "home": surveyed.home, "bar": surveyed.bar, "footer": surveyed.footer,
+            "items": surveyed.items,
             "categories": surveyed.categories, "marked": surveyed.marked, "legal": surveyed.legal,
             "privacy": surveyed.privacy,
             "last": {"date": read.date, "message": read.message} if read.date else None,

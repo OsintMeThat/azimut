@@ -554,8 +554,9 @@ test('Make it yours and WordPress have their panels', async ({ page }) => {
   const own = panel(page, 'Make it yours');
   await expect(own.getByRole('heading', { name: 'Your own home page' })).toBeVisible();
   await expect(own.locator('code').first()).toContainText('index.html');
-  const bar = own.getByRole('region', { name: 'Your own bar' });
-  await expect(bar).toContainText('azimut-bar.html at the site\'s root: articles carry it in place of Azimut\'s bar, maps keep theirs');
+  const bar = own.getByRole('region', { name: 'Your own bar and footer' });
+  await expect(bar).toContainText('azimut-bar.html at the site\'s root, and your footer in azimut-footer.html.');
+  await expect(bar).toContainText('the footer at their end, after Azimut\'s own lines; maps carry neither.');
   await expect(bar.locator('pre')).toContainText('<svg width="24" height="24">');
   await expect(own.getByRole('link', { name: /GitHub's guide/ }))
     .toHaveAttribute('href', 'https://docs.github.com/en/pages/configuring-a-custom-domain-for-your-github-pages-site');
@@ -565,22 +566,25 @@ test('Make it yours and WordPress have their panels', async ({ page }) => {
   await expect(page.getByLabel('Site address')).toBeVisible();
 });
 
-test('a read that finds the site\'s own bar shows it in the article bar preview, and Upkeep says the file is the analyst\'s', async ({ page }) => {
+test('a read that finds the site\'s own bar and footer shows them in the article bar preview, and Upkeep says the files are the analyst\'s', async ({ page }) => {
   const fixture = await openWebsite(page);
-  const asked = await standIn(page, { read: { ...READ, bar: 'yours' } });
+  const asked = await standIn(page, { read: { ...READ, bar: 'yours', footer: 'yours' } });
   await tab(page, 'Identity').click();
   const paper = panel(page, 'Identity').locator('.paper');
   await expect(paper.locator('[data-preview="own-bar"]')).toHaveCount(0);
+  await expect(paper.locator('[data-preview="own-footer"]')).toHaveCount(0);
   await expect(paper).toContainText('All articles');
   await tab(page, 'Articles').click();
   await panel(page, 'Articles').getByRole('button', { name: 'Read the site' }).click();
   await expect(rows(page)).toHaveCount(6);
   await tab(page, 'Identity').click();
   await expect(paper.locator('[data-preview="own-bar"]')).toHaveText('azimut-bar.htmlYour own bar, on every article');
+  await expect(paper.locator('[data-preview="own-footer"]')).toHaveText('azimut-footer.htmlYour own footer, on every article');
   await expect(paper).not.toContainText('All articles');
   await tab(page, 'Upkeep').click();
   const owners = panel(page, 'Upkeep').getByRole('region', { name: 'Who writes what' });
   await expect(owners.getByRole('row', { name: /azimut-bar\.html/ })).toContainText('Copied into each article\'s bar.');
+  await expect(owners.getByRole('row', { name: /azimut-footer\.html/ })).toContainText('Copied to the end of each article.');
   expect(asked).toEqual(['POST read']);
   fixture.expectNoUnexpectedRequests();
 });

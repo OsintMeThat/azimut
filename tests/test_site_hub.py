@@ -193,7 +193,7 @@ def test_the_read_lists_every_card_newest_first_with_addresses_on_the_site(clien
     _the_live_site(client, fake)
     before = len(fake.requests)
     said = client.post(READ).json()
-    assert list(said) == ["ok", "address", "home", "bar", "items", "categories", "marked", "legal", "privacy",
+    assert list(said) == ["ok", "address", "home", "bar", "footer", "items", "categories", "marked", "legal", "privacy",
                           "last", "size", "warnings"]
     assert said["ok"] is True and said["address"] == "https://osintmethat.com/" and said["warnings"] == []
     assert [(item["folder"], item["role"], item["layout"]) for item in said["items"]] == [
