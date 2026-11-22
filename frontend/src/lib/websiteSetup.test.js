@@ -107,6 +107,12 @@ describe('the words of the tab', () => {
     expect(updateSaid({ updated: true })).toBe('The site is updated.');
     expect(updateSaid(null)).toBe('The site is up to date.');
   });
+
+  it('says how many pages still give the site\'s old address, and that Update the site refreshes them', () => {
+    expect(setup.oldAddressSaid(1)).toBe('1 page still gives the site\'s old address: Update the site refreshes it.');
+    expect(setup.oldAddressSaid(3)).toBe('3 pages still give the site\'s old address: Update the site refreshes them.');
+    expect(setup.oldAddressSaid(3)).not.toContain('—');
+  });
 });
 
 describe('what a typed code or token reads as', () => {
@@ -194,7 +200,8 @@ describe('the hub\'s panels', () => {
       expect(said).toMatch(/^[A-Z].*\.$/);
       expect(said).not.toContain('—');
     }
-    expect(setup.CHORES).toHaveLength(5);
+    expect(setup.CHORES).toHaveLength(6);
+    expect(setup.CHORES[5][0]).toBe('Give the site its own domain');
   });
 
   it('names the repository and the site in the flow once they are known', () => {

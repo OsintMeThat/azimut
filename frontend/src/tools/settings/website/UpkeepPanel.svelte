@@ -11,7 +11,7 @@
   import { siteRead } from '../../../lib/siteRead.svelte.js';
   import {
     BUSY, CHORES, CHORES_TITLE, HUB_LEADS, OWNERS_HEAD, OWNERS_TITLE, OWNERS_TRUNCATED, OWNERS_UNREAD, OWNER_LABEL, UPDATE_NOT_SET, UPDATE_PRESS,
-    UPDATE_SAID, WEBSITE_HELP as HELP, lastChangeSaid, ownersOf, whenSaid,
+    UPDATE_SAID, WEBSITE_HELP as HELP, lastChangeSaid, oldAddressSaid, ownersOf, whenSaid,
   } from '../../../lib/websiteSetup.js';
   import HubCard from './HubCard.svelte';
   import HubPanel from './HubPanel.svelte';
@@ -47,6 +47,7 @@
         {:else if setUp}<Icon name="check" size={12} />{setUp}
         {:else if read?.last}{lastChangeSaid(whenSaid(read.last.date), read.last.message)}{/if}
       </p>
+      {#if read?.oldAddress}<p class="hub-line old-address" role="status"><Icon name="alert" size={12} />{oldAddressSaid(read.oldAddress)}</p>{/if}
     </div>
     <button type="button" class="btn btn-primary" onclick={onupdate} disabled={!ready || working} aria-busy={working}
       title={ready ? HELP.siteUpdate : UPDATE_NOT_SET}><BusyLabel busy={working} text={BUSY.update}>{UPDATE_PRESS}</BusyLabel></button>
@@ -95,6 +96,7 @@
   .update h3 { margin: 0 0 4px; color: var(--text-1); font-size: var(--fs-md); font-weight: 600; letter-spacing: 0; text-transform: none; }
   .update .body > p:not(.hub-line) { margin: 0; color: var(--text-2); font-size: var(--fs-sm); line-height: 1.5; }
   .update .hub-line { margin-top: 8px; }
+  .update .old-address { margin-top: 2px; }
   .when { color: var(--text-3); }
   .update .btn { padding: 6px 14px; }
   .wide { grid-column: 1 / -1; }

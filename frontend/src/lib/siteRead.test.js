@@ -7,7 +7,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 const post = vi.fn();
 vi.mock('./api.js', () => ({ api: { post, get: vi.fn(), put: vi.fn(), del: vi.fn() } }));
-const { dropFolder, forgetRead, homeWritten, runRead, siteRead } = await import('./siteRead.svelte.js');
+const { addressesLeft, dropFolder, forgetRead, homeWritten, runRead, siteRead } = await import('./siteRead.svelte.js');
 
 const ANSWER = {
   ok: true, address: 'https://octo.github.io/articles/', home: 'azimut', marked: [''], legal: '', privacy: '',
@@ -91,6 +91,19 @@ describe('the read', () => {
     expect(siteRead.data.home).toBe('yours');
     forgetRead();
     homeWritten();
+    expect(siteRead.data).toBeNull();
+  });
+  it('takes the count of pages on an old address from Update the site, and keeps it when the update could not tell', async () => {
+    post.mockResolvedValue({ ...ANSWER, old_address: 3 });
+    await runRead('octo/articles@main');
+    expect(siteRead.data.oldAddress).toBe(3);
+    // one commit's bounds reached: the server says null, and the read keeps its count
+    addressesLeft(null);
+    expect(siteRead.data.oldAddress).toBe(3);
+    addressesLeft(0);
+    expect(siteRead.data.oldAddress).toBe(0);
+    forgetRead();
+    addressesLeft(2);
     expect(siteRead.data).toBeNull();
   });
 });

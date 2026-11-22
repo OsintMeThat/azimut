@@ -7687,7 +7687,8 @@ offline and its check says so once.
 Pages** puts the folder online in the analyst's own repository, on their press only
 (SPEC §8's one exception to no auto-posting). With GitHub set up in Settings ›
 Website, the address field is the site's own address, read on this machine
-(`https://octo.github.io/articles/`, or the custom domain Pages last gave), followed by a
+(`https://octo.github.io/articles/`, or the custom domain Pages last gave, even while its
+`html_url` still names github.io), followed by a
 **short name** the analyst can change (lower case, digits, hyphens and underscores; said
 under the field and holding both buttons back when wrong). It starts as the last part of
 the address the note was last given, else its title, and Export web folder writes the same
@@ -9115,12 +9116,14 @@ tag typed by hand changes.
 from the articles on GitHub, and gives each article the bar and footer the site asks for (below), in one commit, with no
 note published (`POST /api/publishing/github/site`), also
 in the hero: the press reads *Updating…*, then *The site is up to date.* or how many files were written and when, with
-what the server says to mind, or the last change the read found. It is disabled until GitHub is set up, saying
+what the server says to mind, or the last change the read found. While the read finds pages still giving an
+address the site had before it moved, a line under it says so: *3 pages still give the site's old address: Update
+the site refreshes them.* It is disabled until GitHub is set up, saying
 so on hover, and a missing repository or a Pages that is off shows the press that makes it. **Who writes what**
 says which files are Azimut's and which stay the analyst's, with the pages the read found marked and
 `azimut-bar.html`, *Copied into each article's bar.*, and `azimut-footer.html`, *Copied to the end of each article.* **Usual
-chores** gives the five (take an article down, move it to another category on its line in Articles, rename the
-site or change its logo, fix a typo on GitHub, test an article before it shows).
+chores** gives the six (take an article down, move it to another category on its line in Articles, rename the
+site or change its logo, fix a typo on GitHub, test an article before it shows, give the site its own domain).
 
 **Make it yours.** Five cards, the ways to change what Azimut makes: write one's own `index.html` and put the
 `<!-- azimut:articles -->` markers where the list goes; **Your own bar and footer**, a header and a footer of one's own; the same markers
@@ -9153,6 +9156,16 @@ footer first comes, on pages published before it too, changes what is between th
 with the footer. Past 64 KB, or when it does not read, the articles go without it and the publish or the update
 says why. `articles.json` keeps its id as `footer` beside `bar` (no key for none, as a record from before footers
 reads), so the next press reads no page, and a footer changed this way is no edit either.
+
+**The site's address.** A page gives the address the site had when it was published: its canonical, og:url,
+og:image and twitter:image, and the links its words wrote to the site's other pages. When the site moves (a
+custom domain, a repository renamed), Update the site gives every page Azimut published, articles and maps
+alike, whose canonical names its folder under another address the site's address now, in those attributes
+only: an address quoted in the words, the page's policy and the site's own bar and footer stay byte for byte.
+`articles.json` keeps the address they all give (`address`), so the first press after a move or an upgrade
+reads each page once and the next reads none, within the same commit bounds. A page refreshed this way is no
+edit, and a publish on a custom domain gives the note's links to the site's folders under its github.io
+address the domain's.
 
 **WordPress.** A panel of Settings › Website, apart from the GitHub site, connects the site a note is sent
 to: **Site address** (https, or http on this computer for a test site; a WordPress.com

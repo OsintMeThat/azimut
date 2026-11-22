@@ -33,7 +33,7 @@
   import { githubReady } from '../../lib/githubPagesSetup.js';
   import { updateSite } from '../../lib/githubPages.js';
   import { siteLogoUrl } from '../../lib/myLogo.js';
-  import { forgetRead, homeWritten, siteRead } from '../../lib/siteRead.svelte.js';
+  import { addressesLeft, forgetRead, homeWritten, siteRead } from '../../lib/siteRead.svelte.js';
   import { countingOf, siteName } from '../../lib/websiteHub.js';
   import { HUB_LEADS, HUB_TABS, WEBSITE_HELP as HELP, updateSaid } from '../../lib/websiteSetup.js';
 
@@ -129,6 +129,7 @@
       updated = { text: updateSaid(answer), at: new Date(), warnings: Array.isArray(answer?.warnings) ? answer.warnings : [] };
       // a site with no home page has Azimut's now
       if (Array.isArray(answer?.written) && answer.written.includes('index.html')) homeWritten();
+      addressesLeft(answer?.old_address);
     } catch (error) {
       updated = { error: error.message, at: new Date(), warnings: [] };
     }

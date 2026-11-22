@@ -79,6 +79,8 @@ export function siteReadOf(answer) {
     privacy: line(answer?.privacy, 120),
     last: last && line(last.date, 40) ? { date: line(last.date, 40), message: line(last.message, 120) } : null,
     size: { site: bytesOf(size.site), repository: bytesOf(size.repository) },
+    // the pages still giving an address the site had before it moved, which Update the site refreshes
+    oldAddress: Number.isInteger(answer?.old_address) && answer.old_address > 0 ? answer.old_address : 0,
     warnings: list(answer?.warnings).map((warning) => line(warning, 400)).filter(Boolean),
   };
 }
