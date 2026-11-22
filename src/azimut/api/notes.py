@@ -86,8 +86,9 @@ opens the address instead.
 
 A link to a web map of the case (`notelinks.linked_maps`) opens the map's page on the same site,
 at the site's address, once a record of the map names that repository and branch (`_site_maps`);
-until then a mention of it reads as its words. `/github/maps` lists the maps the note links to and the
-address each has there, "" for none yet, so the dialog can offer to publish them first. It reads the case only.
+until then a mention of it reads as its words. `/github/maps` lists the maps the note links to, the
+address each has there, "" for none yet, and its role, so the dialog can offer to publish them first and
+list an Unlisted one with an Article. It reads the case only.
 
 **The site.** The same press also keeps the analyst's website up to date (`engine/site.py`):
 the folder carries a card and the picture of its line in the site's list, with the category and
@@ -2013,10 +2014,12 @@ def _map_short(case: Case, map_id: str) -> str:
 @router.get("/{case_id}/notes/{note_id}/github/maps")
 def github_maps(case_id: str, note_id: str) -> dict[str, Any]:
     """The web maps the note's public edition links to, in order, each with its address on the site of
-    Settings › Website, "" while the site does not hold it, the short name it would go up under, and
-    whether the note mentions it (``mentioned``): a mention reads as its words until the site holds the
-    map, where a link written to an address of it still opens it there. The publish dialog reads it to
-    say which maps are not on the site yet. Reads the case and the settings only."""
+    Settings › Website, "" while the site does not hold it; its short name, its folder there or the name it
+    would go up under; whether the note mentions it (``mentioned``): a mention reads as its words until the
+    site holds the map, where a link written to an address of it still opens it there; and what its look says
+    it is on a site (``role``, `article`, `page` or `unlisted`, as its last publish left it). The publish
+    dialog reads it to say which maps are not on the site yet, and which an Article lists with it.
+    Reads the case and the settings only."""
     from .publishing import github_settings
 
     case = get_case(case_id)
@@ -2027,9 +2030,13 @@ def github_maps(case_id: str, note_id: str) -> dict[str, Any]:
     text = _public_text(case, note_id)
     found, linked = _site_maps(case, note_id, text, f"{target.account}/{target.repo}", target.branch, target.base)
     mentioned = set(notetext.mentioned_ids(text))
-    return {"maps": [{"id": map_id, "title": _note_title(case, map_id), "address": found.of(map_id),
-                      "short": "" if found.of(map_id) else _map_short(case, map_id), "mentioned": map_id in mentioned}
-                     for map_id in linked]}
+    rows = []
+    for map_id in linked:
+        here = found.of(map_id)
+        rows.append({"id": map_id, "title": _note_title(case, map_id), "address": here,
+                     "short": here.rstrip("/").rsplit("/", 1)[-1] if here else _map_short(case, map_id),
+                     "mentioned": map_id in mentioned, "role": notelook.effective(case, map_id).role or site_engine.ARTICLE})
+    return {"maps": rows}
 
 
 @router.get("/{case_id}/notes/{note_id}/place")
