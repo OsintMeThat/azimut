@@ -340,11 +340,11 @@ def _credits(case: "Case | None", entries: list[Source], *, faces: Iterable[str]
                     _keep(imagery, part)
     out: list[tuple[str, str]] = []
     if imagery:
-        out.append(("Imagery", "; ".join(imagery)))
+        out.append(("Imagery", "; ".join(_merged(imagery))))
     if terrain:
-        out.append(("Terrain", "; ".join(terrain)))
+        out.append(("Terrain", "; ".join(_merged(terrain))))
     if plates:
-        out.append(("Maps", "; ".join(plates)))
+        out.append(("Maps", "; ".join(_merged(plates))))
     if footage:
         said = [f"{site}: {', '.join(names)}" if names else site for site, names in footage.items()]
         out.append(("Footage and posts", "; ".join(said)))
@@ -368,6 +368,28 @@ def _keep(found: list[str], value: str) -> None:
     value = " ".join(value.split())
     if value and value not in found:
         found.append(value)
+
+
+def _said(credit: str) -> str:
+    """A credit as its words read, for telling two apart: no ©, no case, one space."""
+    return " ".join(credit.replace("©", " ").casefold().split()).strip(" .;,")
+
+
+def _merged(found: list[str]) -> list[str]:
+    """Each credit once: one whose words another already says whole goes (`Apple Maps` beside
+    `© Apple Maps`, a relief's notice beside `Relief` and the same notice). One that says
+    anything more stays, so no rights holder is ever left out."""
+    words = [_said(credit) for credit in found]
+    kept = []
+    for index, credit in enumerate(found):
+        said = words[index]
+        within = any(
+            other != index and said and (said in words[other] and (said != words[other] or other < index))
+            for other in range(len(found))
+        )
+        if not within:
+            kept.append(credit)
+    return kept
 
 
 # -- how this was made --------------------------------------------------------------

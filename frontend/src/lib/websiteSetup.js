@@ -127,6 +127,12 @@ export function updateSaid(answer) {
   return count ? `The site is updated: ${count} file${count === 1 ? '' : 's'} written.` : 'The site is updated.';
 }
 
+/** What Upkeep says while pages give the address the site had before it moved (a domain, a new repository name). */
+export function oldAddressSaid(count) {
+  return count === 1 ? '1 page still gives the site\'s old address: Update the site refreshes it.'
+    : `${count} pages still give the site's old address: Update the site refreshes them.`;
+}
+
 /** What a press says while it waits on its answer, beside a small spinner (`components/BusyLabel.svelte`). */
 export const BUSY = Object.freeze({
   read: 'Reading…', publish: 'Publishing…', update: 'Updating…', delete: 'Deleting…', test: 'Testing…', start: 'Starting…',
@@ -564,6 +570,7 @@ export const CHORES = Object.freeze([
   ['Rename the site or change its logo', 'Update the site changes the lists and the feed. Each article\'s bar changes when you publish it again.'],
   ['Fix a typo on GitHub directly', 'Fine. The next publish of that note asks before it replaces your fix.'],
   ['Test an article before it shows', 'Publish it as Unlisted, then as Article once it is ready.'],
+  ['Give the site its own domain', 'Set it in the repository\'s Settings › Pages on GitHub, then press Update the site so the pages published before give the new address.'],
 ]);
 
 /** The last change the read found on the branch, said in Upkeep until Update the site is pressed here. */

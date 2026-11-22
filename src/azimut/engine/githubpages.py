@@ -14,8 +14,12 @@ reference (docs.github.com, read on 2026-11-18):
 
 - `GET /user`, who the token signs in as;
 - `GET /repos/{owner}/{repo}`, whether the repository is there and what it weighs (`size`, KiB);
-- `GET /repos/{owner}/{repo}/pages`, whether Pages is on, its address (`html_url`,
-  a custom domain included), the branch and folder it serves;
+- `GET /repos/{owner}/{repo}/pages`, whether Pages is on, its address, the branch and folder it
+  serves. The address is `https://<cname>/` when the site has a custom domain (`cname`, "The Pages
+  site's custom domain", set the moment the domain is), else `html_url` ("The web address the Page can
+  be accessed from", optional, and seen lagging behind a domain just set), else the github.io one.
+  GitHub writes a `CNAME` file for a site served from a branch only, and a workflow's build ignores
+  it, so the file is not read;
 - the Git database to commit the whole folder as **one commit**: `GET git/ref/heads/…`,
   `GET git/commits/…`, `GET git/trees/…`, `POST git/blobs` for each file the folder's
   earlier copy does not already hold, `POST git/trees` for the folder (made whole,
@@ -51,9 +55,9 @@ Azimut owns it. Reading the site is `GET git/trees/…?recursive=1` for the whol
 `GET git/blobs/…` (raw) for each card and each page to fill, bounded in number and size.
 The commit keeps the sha of the folder's tree, which the note's record holds so that a
 later publish can say the folder was changed on GitHub since; a tree that differs only between
-the bar's or the footer's markers of its pages (the footer's markers themselves included), which
-Update the site changes, or in its card's category, which Settings › Website changes, is no change
-(`changed_since`). A category the site gave the article
+the bar's or the footer's markers of its pages (the footer's markers themselves included) or in the
+site's address its pages give, which Update the site changes, or in its card's category, which
+Settings › Website changes, is no change (`changed_since`, `site.upkept`). A category the site gave the article
 since stands over the one the publish still asks for, the one it had then, and the publish says so.
 The folder's page carries the site's own bar and footer when the plan names them (`RootPlan.bar`,
 `RootPlan.footer`). Rebuilding those root files, and the bar and footer of every article page, without a note is
@@ -523,11 +527,20 @@ def pages(gh: GitHub, owner: str, repo: str) -> Pages | None:
     return _pages(body, owner, repo)
 
 
+#: A custom domain as the Pages API names it (`cname`): a host name, nothing more.
+DOMAIN = re.compile(r"^(?=.{1,253}$)[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?(?:\.[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?)+$")
+
+
 def _pages(body: dict[str, Any], owner: str, repo: str) -> Pages:
+    """The Pages site as GitHub's answer says it. Its address is its custom domain's when it has one,
+    which GitHub names the moment it is set while `html_url` may still give the github.io address."""
     source = _part(body.get("source"))
     url = body.get("html_url")
+    cname = body.get("cname")
+    domain = cname.strip().lower().rstrip(".") if isinstance(cname, str) else ""
+    address = f"https://{domain}/" if DOMAIN.match(domain) else url if isinstance(url, str) else ""
     return Pages(
-        url=site_base(owner, repo, url if isinstance(url, str) else ""),
+        url=site_base(owner, repo, address),
         branch=str(source.get("branch") or "")[:100],
         path=str(source.get("path") or "/")[:20],
         build_type=str(body.get("build_type") or "legacy")[:20],
@@ -578,11 +591,14 @@ def build_state(gh: GitHub, owner: str, repo: str, commit: str) -> Build:
     return Build("building")
 
 
-def page_state(gh: GitHub, owner: str, repo: str, branch: str, path: str, sha256: str, bare: str = "") -> str:
+def page_state(gh: GitHub, owner: str, repo: str, branch: str, path: str, sha256: str, bare: str = "",
+               tree: str = "") -> str:
     """Whether the page a publish committed is still the one on the branch:
     `unchanged`, `changed` or `missing`. Reads it back, bounded. ``bare`` is the page's id with
     nothing between its bar's markers and none of the site's footer (`site.bare`): a page whose bar
-    or footer alone Update the site changed since is unchanged."""
+    or footer alone Update the site changed since is unchanged. ``tree`` is the folder's tree as the
+    publish committed it: when neither id tells, the page as published is read from it, and a page
+    Update the site alone changed since, its site's address included (`site.upkept`), is unchanged."""
     try:
         answer = gh.call("GET", _repo_path(owner, repo, f"/contents/{quote(path)}"), query={"ref": branch},
                          accept="application/vnd.github.raw+json", doing="read the page", cap=MAX_PAGE)
@@ -590,8 +606,14 @@ def page_state(gh: GitHub, owner: str, repo: str, branch: str, path: str, sha256
         return "missing"
     if hashlib.sha256(answer.body).hexdigest() == sha256:
         return "unchanged"
-    same = bool(bare) and hashlib.sha256(site_engine.bare(answer.body)).hexdigest() == bare
-    return "unchanged" if same else "changed"
+    if bare and hashlib.sha256(site_engine.bare(answer.body)).hexdigest() == bare:
+        return "unchanged"
+    listed = _listing(gh, owner, repo, tree) if tree else None
+    name = path.rsplit("/", 1)[-1]
+    then = read_blob(gh, owner, repo, listed[name], MAX_PAGE) if listed is not None and name in listed else None
+    if then is not None and hashlib.sha256(then).hexdigest() == sha256 and site_engine.upkept(then, answer.body):
+        return "unchanged"
+    return "changed"
 
 
 # -- setting up, each on its own press -----------------------------------------------------
@@ -700,6 +722,9 @@ class RootPlan:
     #: The site's own footer (`site.own_footer`), which the folder's article page carries after
     #: Azimut's between its footer's markers; None for none.
     footer: str | None = None
+    #: How many pages Azimut published still give an old address of the site once the plan is
+    #: committed (Update the site, `sitesync.own_parts`); None when it did not look.
+    old_address: int | None = None
 
 
 #: Plans the site's root from the id of its tree ("" when it has none yet), the name of the
@@ -732,6 +757,8 @@ class Published:
     bare: str = ""
     #: The category the folder's card carries as committed, None for a folder with no card.
     category: str | None = None
+    #: What Update the site leaves of the pages giving an old address of the site (`RootPlan.old_address`).
+    old_address: int | None = None
 
 
 def _bounded(files: Mapping[str, bytes]) -> None:
@@ -853,7 +880,7 @@ def _root_entries(gh: GitHub, owner: str, repo: str, plan: RootPlan, taken: str,
 
 def publish(gh: GitHub, owner: str, repo: str, branch: str, files: Mapping[str, bytes], folder: str,
             message: str, *, card: "site_engine.Card | None" = None, plan: Planner | None = None,
-            expected_tree: str = "") -> Published:
+            expected_tree: str = "", address: str = "") -> Published:
     """Commit ``files`` as ``folder`` (`<short>` or `docs/<short>`) on ``branch``, in one
     commit, with `.nojekyll` at the folder's root: the folder made whole, so a file the
     new build no longer has is gone; everything else in the repository as it was.
@@ -863,7 +890,9 @@ def publish(gh: GitHub, owner: str, repo: str, branch: str, files: Mapping[str, 
     commit writes what it names at the site's root (`RootPlan`), and the folder's page takes the
     site's own bar and footer when the plan names them. ``expected_tree`` is the id of the folder's
     tree as the last publish left it: the result says whether it is another now, beyond the bar and
-    footer of its pages.
+    footer of its pages. ``address`` is the site's address the page is published at: on a custom
+    domain, a link of its text to one of the site's folders under the repository's github.io address
+    is given that one (`site.readdressed`), as Update the site gives it to the pages published before.
     """
     _bounded(files)
     _plain(folder)
@@ -917,6 +946,11 @@ def publish(gh: GitHub, owner: str, repo: str, branch: str, files: Mapping[str, 
             page = site_engine.with_footer(page, root.footer) or page
         files[notes_web.INDEX] = page
         _bounded(files)
+    former = site_base(owner, repo)
+    if page is not None and address and address != former:
+        # the note's text may still name the site's pages under the address it had before its domain
+        folders = {name, *(str(item.get("path")) for item in top if item.get("type") == "tree")}
+        page = files[notes_web.INDEX] = site_engine.readdressed(page, former, address, folders)
     have = set(old.values())
     wanted = {path: blob_sha(data) for path, data in files.items()}
     new = sorted(path for path, sha in wanted.items() if sha not in have)
@@ -971,9 +1005,10 @@ def _listing(gh: GitHub, owner: str, repo: str, tree: str) -> dict[str, str] | N
 
 def _upkeep_only(gh: GitHub, owner: str, repo: str, then: Mapping[str, str], now: Mapping[str, str]) -> bool:
     """Whether a folder's files ``now`` differ from what they were (``then``) only in what Settings ›
-    Website changes on its presses, which is not an edit: what is between the bar's markers of its pages
-    and the site's footer with its markers (Update the site), and the category of its card (a change of
-    categories). Reads each file that differs, both sides."""
+    Website changes on its presses, which is not an edit: what is between the bar's markers of its pages,
+    the site's footer with its markers and the site's address its pages give (Update the site,
+    `site.upkept`), and the category of its card (a change of categories). Reads each file that differs,
+    both sides."""
     if set(then) != set(now):
         return False
     changed = sorted(path for path, sha in now.items() if then[path] != sha)
@@ -988,7 +1023,7 @@ def _upkeep_only(gh: GitHub, owner: str, repo: str, then: Mapping[str, str], now
     for path in pages:
         old = read_blob(gh, owner, repo, then[path], MAX_PAGE)
         new = read_blob(gh, owner, repo, now[path], MAX_PAGE)
-        if old is None or new is None or site_engine.bare(old) != site_engine.bare(new):
+        if old is None or new is None or not site_engine.upkept(old, new):
             return False
     return True
 
@@ -1015,8 +1050,8 @@ def _category_since(gh: GitHub, owner: str, repo: str, then: Mapping[str, str],
 
 def changed_since(gh: GitHub, owner: str, repo: str, before: str, now: str) -> bool:
     """Whether a folder was changed on GitHub since a publish left it as the tree ``before``, ``now``
-    being its tree on the branch ("" for none): another tree, unless only the bar or footer of its pages
-    or the category of its card moved."""
+    being its tree on the branch ("" for none): another tree, unless only the bar or footer of its pages,
+    the site's address they give or the category of its card moved."""
     if not before or not now or now == before:
         return False
     listed = _listing(gh, owner, repo, now)
@@ -1113,14 +1148,15 @@ def update_site(gh: GitHub, owner: str, repo: str, branch: str, root: str, messa
     made = plan(opened.level, "", None)
     if not made.files:
         return Published(commit=opened.parent, folder="", uploaded=0, reused=0, removed=None,
-                         warnings=list(made.warnings), categories=made.categories)
+                         warnings=list(made.warnings), categories=made.categories, old_address=made.old_address)
     pace = len(made.files) > PACE_FROM
     entries = _root_entries(gh, owner, repo, made, "", pace=pace)
     if not any(item.get("path") == NOJEKYLL and item.get("type") == "blob" for item in opened.top):
         entries.append({"path": NOJEKYLL, "mode": "100644", "type": "blob", "content": ""})
     sha = _land(gh, owner, repo, branch, opened, above, entries, message, moved=moved)
     return Published(commit=sha, folder="", uploaded=len(made.files), reused=0, removed=None,
-                     root=sorted(made.files), warnings=list(made.warnings), categories=made.categories)
+                     root=sorted(made.files), warnings=list(made.warnings), categories=made.categories,
+                     old_address=made.old_address)
 
 
 @dataclass

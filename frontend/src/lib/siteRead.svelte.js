@@ -58,6 +58,11 @@ export function homeWritten() {
   if (siteRead.data?.home === 'none') siteRead.data = { ...siteRead.data, home: 'azimut' };
 }
 
+/** Update the site said how many pages it left on an old address: the read says so too. */
+export function addressesLeft(count) {
+  if (siteRead.data && Number.isInteger(count) && count >= 0) siteRead.data = { ...siteRead.data, oldAddress: count };
+}
+
 /** Forget what was read: the repository changed, or GitHub was forgotten. */
 export function forgetRead() {
   siteRead.data = null;

@@ -43,6 +43,16 @@ them once every page carries that bar and footer, a publish keeps them while wha
 drops both otherwise, a delete keeps them. With them matching, Update the site reads no page; without,
 it reads each article page once (remembered by blob id, at most `MAX_BAR_PAGE_BYTES` each) and writes
 it again.
+
+**The site's address** a page gives (`site.page_address`, its canonical) is the one the site had when
+the page was published. Update the site gives every page Azimut published, articles and maps alike,
+whose canonical names its folder under another address, the site's address now (`site.readdressed`):
+the head's own lines and the links to the site's folders, nothing else. `articles.json` keeps it as
+`address`, the address every page gives, under the same rules as `bar` and `footer`: Update the site
+writes it once no page is left on an old one, a publish keeps it while it is the address it publishes
+at, a delete and a change of categories keep it. With it matching, no page is read for it; without,
+each page is read once, the first Update the site after a move or an upgrade. A read of the site
+counts the pages still on an old address (`Survey.old_address`) the same way, writing nothing.
 """
 
 from __future__ import annotations
@@ -77,9 +87,13 @@ AZIMUT_BAR = "azimut"
 BAR_KEY = "bar"
 #: The footer the article pages carry, as `articles.json` keeps it: the id of the site's own, no key for none.
 FOOTER_KEY = "footer"
+#: The site's address every page Azimut published gives as its own, as `articles.json` keeps it.
+ADDRESS_KEY = "address"
 #: What every article page carries, as `articles.json` keeps it: its bar's kind (`bar_kind`), then its
 #: footer's (`footer_kind`).
 Carried = tuple[str, str]
+#: What one page carries: its bar's kind, its footer's, and the address it gives as its own (`known_of`).
+Known = tuple[str, str, str]
 #: The most an article page may weigh for Update the site to change its bar or footer.
 MAX_BAR_PAGE_BYTES = 8 * 1024 * 1024
 PAGES_LEFT = "Azimut changed as many articles as one commit holds: press Update the site again for the others."
@@ -122,7 +136,8 @@ class _Files:
         self.entries = entries
         self.given = dict(given or {})
 
-    def read(self, path: str, cap: int) -> bytes | None:
+    def read(self, path: str, cap: int, *, keep: bool = True) -> bytes | None:
+        """A file's bytes, None for none or one past ``cap``; ``keep`` False reads it without keeping it."""
         if path in self.given:
             return self.given[path] if len(self.given[path]) <= cap else None
         sha = self.entries.get(path)
@@ -131,7 +146,7 @@ class _Files:
         data = _recall(sha)
         if data is None:
             data = githubpages.read_blob(self.gh, self.owner, self.repo, sha, cap)
-            if data is not None:
+            if data is not None and keep:
                 _remember(sha, data)
         return data if data is not None and len(data) <= cap else None
 
@@ -155,16 +170,16 @@ def pages_too_large(count: int) -> str:
     return f"{pages} too large for Azimut to change: publish {'it' if count == 1 else 'them'} again."
 
 
-#: What each page read carries (`carried_by`), by its blob id.
-_carried: OrderedDict[str, Carried] = OrderedDict()
+#: What each page read carries (`known_of`), by its blob id.
+_carried: OrderedDict[str, Known] = OrderedDict()
 
 
-def _carried_known(sha: str) -> Carried | None:
+def _carried_known(sha: str) -> Known | None:
     with _lock:
         return _carried.get(sha)
 
 
-def _carried_kept(sha: str, carried: Carried) -> None:
+def _carried_kept(sha: str, carried: Known) -> None:
     with _lock:
         _carried[sha] = carried
         _carried.move_to_end(sha)
@@ -190,6 +205,11 @@ def carried_by(page: bytes) -> Carried:
     return bar_kind(site.bar_in(page)), footer_kind(site.footer_in(page))
 
 
+def known_of(page: bytes) -> Known:
+    """What a page carries: its bar and footer by kind (`carried_by`), and the address it gives as its own."""
+    return (*carried_by(page), site.page_address(page))
+
+
 def _no_marker(sha: str) -> None:
     with _lock:
         _plain[sha] = None
@@ -204,15 +224,16 @@ def planner(gh: githubpages.GitHub, owner: str, repo: str, home_site: Site) -> g
     def plan(level: str, folder: str, card: Card | None) -> RootPlan:
         tree = githubpages.read_tree(gh, owner, repo, level)
         made = make_plan(gh, owner, repo, home_site, tree, folder, card)
-        _publish_parts(gh, owner, repo, tree, made)
+        _publish_parts(gh, owner, repo, home_site, tree, made)
         return made
 
     return plan
 
 
 def updater(gh: githubpages.GitHub, owner: str, repo: str, home_site: Site) -> githubpages.Planner:
-    """The plan of Update the site: the publish's plan with no note, and every article page Azimut
-    published given the bar and the footer the site asks for now (`own_parts`)."""
+    """The plan of Update the site: the publish's plan with no note, every article page Azimut
+    published given the bar and the footer the site asks for now, and every page of its the site's
+    address now (`own_parts`)."""
 
     def plan(level: str, folder: str, card: Card | None) -> RootPlan:
         tree = githubpages.read_tree(gh, owner, repo, level)
@@ -233,9 +254,9 @@ def remover(gh: githubpages.GitHub, owner: str, repo: str, home_site: Site) -> g
         left = {path: sha for path, sha in tree.entries.items() if path != folder and not path.startswith(f"{folder}/")}
         made = make_plan(gh, owner, repo, home_site, githubpages.TreeRead(left, tree.complete), folder, None)
         if tree.complete and made.categories is not None:
-            # a folder gone takes no bar or footer with it: the other pages carry what they did
+            # a folder gone takes no bar, footer or address with it: the other pages carry what they did
             files = _Files(gh, owner, repo, left)
-            _record(made, files, left, _recorded(files, left))
+            _record(made, files, left, *_recorded(files, left))
         return made
 
     return plan
@@ -274,7 +295,7 @@ def recategorizer(gh: githubpages.GitHub, owner: str, repo: str, home: Site,
     """The plan of a change of categories (`githubpages.update_site`): each card concerned with its
     `category` rewritten and every other key as it was (`site.recategorized`), and the root files made
     from the cards as they will be, the lists, the feed and the sitemap, with a rename kept in
-    `articles.json` (`site.RENAMED`) and its record of the bar and footer as it was. A card of `azimut-article/1`
+    `articles.json` (`site.RENAMED`) and its record of the bar, footer and address as it was. A card of `azimut-article/1`
     is changed wherever it lives. Nothing is written for a site Azimut cannot read whole (`Refused`), and
     a category no card carries is `CategoryGone`, a folder holding no card `githubpages.FolderGone`."""
 
@@ -306,8 +327,8 @@ def recategorizer(gh: githubpages.GitHub, owner: str, repo: str, home: Site,
         made = make_plan(gh, owner, repo, home, tree, "", None, given=given,
                          rename=(change.name, change.to) if change.kind == "rename" else None)
         made.files.update(given)
-        # the article pages carry the bar and footer they did: the record of them stays as it was
-        _record(made, files, tree.entries, _recorded(files, tree.entries))
+        # the pages carry the bar, footer and address they did: the record of them stays as it was
+        _record(made, files, tree.entries, *_recorded(files, tree.entries))
         return made
 
     return plan
@@ -472,23 +493,26 @@ def _site_parts(files: _Files, tree: githubpages.TreeRead, warnings: list[str]) 
     return bar, footer, kinds
 
 
-def _recorded(files: _Files, entries: dict[str, str]) -> Carried | None:
+def _recorded(files: _Files, entries: dict[str, str]) -> tuple[Carried | None, str]:
     """The bar and footer `articles.json` says every article page carries, None when it says none or is
-    not Azimut's. A record with a bar and no footer, as one from before footers, says none."""
+    not Azimut's (a record with a bar and no footer, as one from before footers, says none); and the
+    address it says every page gives, "" for none."""
     text = files.text(site.ARTICLES, MAX_LIST_BYTES) if site.ARTICLES in entries else None
     try:
         payload = json.loads(text) if text is not None else None
     except ValueError:
-        return None
+        return None, ""
     if not isinstance(payload, dict) or payload.get("format") != site.SITE_FORMAT:
-        return None
-    bar, footer = payload.get(BAR_KEY), payload.get(FOOTER_KEY, "")
-    return (bar, footer) if isinstance(bar, str) and bar and isinstance(footer, str) else None
+        return None, ""
+    bar, footer, address = payload.get(BAR_KEY), payload.get(FOOTER_KEY, ""), payload.get(ADDRESS_KEY)
+    return ((bar, footer) if isinstance(bar, str) and bar and isinstance(footer, str) else None,
+            address if isinstance(address, str) else "")
 
 
-def _record(plan: RootPlan, files: _Files, entries: dict[str, str], state: Carried | None) -> None:
+def _record(plan: RootPlan, files: _Files, entries: dict[str, str], state: Carried | None, address: str) -> None:
     """`articles.json` as the plan leaves it, with ``state`` as the bar and footer every article page
-    carries (None for none known), where Azimut owns that file; written only where it then differs."""
+    carries (None for none known) and ``address`` as the address every page gives ("" for none known),
+    where Azimut owns that file; written only where it then differs."""
     data = plan.files.get(site.ARTICLES)
     if data is None:
         text = files.text(site.ARTICLES, MAX_LIST_BYTES) if site.ARTICLES in entries else None
@@ -503,10 +527,13 @@ def _record(plan: RootPlan, files: _Files, entries: dict[str, str], state: Carri
         return
     payload.pop(BAR_KEY, None)
     payload.pop(FOOTER_KEY, None)
+    payload.pop(ADDRESS_KEY, None)
     if state is not None:
         payload[BAR_KEY] = state[0]
         if state[1]:
             payload[FOOTER_KEY] = state[1]
+    if address:
+        payload[ADDRESS_KEY] = address
     out = (json.dumps(payload, indent=1, ensure_ascii=False) + "\n").encode("utf-8")
     sha = githubpages.blob_sha(out)
     if sha == entries.get(site.ARTICLES):
@@ -516,10 +543,12 @@ def _record(plan: RootPlan, files: _Files, entries: dict[str, str], state: Carri
         _remember(sha, out)
 
 
-def _publish_parts(gh: githubpages.GitHub, owner: str, repo: str, tree: githubpages.TreeRead, plan: RootPlan) -> None:
+def _publish_parts(gh: githubpages.GitHub, owner: str, repo: str, home: Site, tree: githubpages.TreeRead,
+                   plan: RootPlan) -> None:
     """What a publish adds to its plan for the bar and the footer: the site's own for its page
     (`RootPlan.bar`, `RootPlan.footer`), and `articles.json`'s record kept while they are what every
-    page carries, dropped otherwise."""
+    page carries, dropped otherwise; its record of the address kept while it is the site's address the
+    page is published at (``home``), dropped otherwise."""
     if not tree.complete:
         return
     files = _Files(gh, owner, repo, tree.entries)
@@ -527,8 +556,9 @@ def _publish_parts(gh: githubpages.GitHub, owner: str, repo: str, tree: githubpa
     plan.bar = bar or None
     plan.footer = footer or None
     if plan.categories is not None:
-        recorded = _recorded(files, tree.entries)
-        _record(plan, files, tree.entries, recorded if recorded == kinds else None)
+        recorded, address = _recorded(files, tree.entries)
+        _record(plan, files, tree.entries, recorded if recorded == kinds else None,
+                address if address == home.address else "")
 
 
 def _logo_of(folder: str, held: set[str], entries: dict[str, str], home: Site) -> str:
@@ -543,18 +573,23 @@ def _logo_of(folder: str, held: set[str], entries: dict[str, str], home: Site) -
 
 def own_parts(gh: githubpages.GitHub, owner: str, repo: str, home: Site, tree: githubpages.TreeRead,
               plan: RootPlan) -> None:
-    """Give every article page Azimut published the bar and the footer the site asks for now, in ``plan``:
-    the site's own bar (`azimut-bar.html`) or Azimut's, and the site's own footer (`azimut-footer.html`)
-    or none. Only a folder Azimut published (`githubpages.deletable`) whose card is no map's, only a page
-    with the bar's markers, only the part that differs, and only between its markers (a footer's put in
-    after Azimut's footer the first time); within one commit's bounds. A page carrying Azimut's bar
-    keeps it as it is."""
+    """Give every page Azimut published what the site asks for now, in ``plan``: to each article page the
+    bar (the site's own `azimut-bar.html`, else Azimut's) and the footer (the site's own
+    `azimut-footer.html`, else none), between their markers only (a footer's put in after Azimut's footer
+    the first time); and to every page, articles and maps alike, the site's address now (``home``) where
+    its canonical names its folder under another one (`site.readdressed`). Only a folder Azimut published
+    (`githubpages.deletable`), only what differs, within one commit's bounds. A page carrying Azimut's bar
+    keeps it as it is. `RootPlan.old_address` says how many pages are left on an old address."""
     files = _Files(gh, owner, repo, tree.entries)
     entries = tree.entries
     bar, footer, wanted = _site_parts(files, tree, plan.warnings)
-    recorded = _recorded(files, entries)
-    if recorded == wanted:
-        _record(plan, files, entries, wanted)
+    address = home.address
+    recorded, given = _recorded(files, entries)
+    # what the record says already holds is not looked for again: a map page has only an address
+    parts_known, address_known = recorded == wanted, given == address
+    plan.old_address = 0
+    if parts_known and address_known:
+        _record(plan, files, entries, wanted, address)
         return
     held = _held(entries)
     frame = site.frame_of(home)
@@ -562,11 +597,14 @@ def own_parts(gh: githubpages.GitHub, owner: str, repo: str, home: Site, tree: g
     spare = site.ARTICLES not in plan.files
     count = len(plan.files) + spare
     weight = sum(len(data) for data in plan.files.values()) + (MAX_LIST_BYTES if spare else 0)
-    large = 0
+    large = large_articles = 0
     for folder in _card_folders(entries):
         data = files.read(f"{folder}/{site.CARD}", site.MAX_CARD_BYTES)
         card = site.read_card(folder, data) if data is not None else None
-        if card is None or card["layout"] == "map" or not githubpages.deletable(folder, held.get(folder, set()), True):
+        if card is None or not githubpages.deletable(folder, held.get(folder, set()), True):
+            continue
+        is_map = card["layout"] == "map"
+        if is_map and address_known:
             continue
         path = f"{folder}/{site.HOME}"
         known = _carried_known(entries[path])
@@ -574,37 +612,48 @@ def own_parts(gh: githubpages.GitHub, owner: str, repo: str, home: Site, tree: g
         if known is None:
             page = files.read(path, MAX_BAR_PAGE_BYTES)
             if page is None:
-                large += 1
+                large, large_articles = large + 1, large_articles + (not is_map)
                 continue
-            known = carried_by(page)
+            known = known_of(page)
             _carried_kept(entries[path], known)
-        if known[0] == "" or known == wanted:
+        base = site.site_of(known[2], folder)
+        moved = bool(base) and base != address
+        # a page with no bar's markers (a map page, or one an older Azimut published) gets neither part
+        new_bar = known[0] != "" and known[0] != wanted[0]
+        new_footer = known[0] != "" and known[1] != wanted[1]
+        if not (moved or new_bar or new_footer):
             continue
         page = page if page is not None else files.read(path, MAX_BAR_PAGE_BYTES)
         if page is None:
-            large += 1
+            large, large_articles = large + 1, large_articles + (not is_map)
             continue
-        changed: bytes | None = page
-        if known[0] != wanted[0]:
-            changed = site.with_bar(page, bar or site.bar(frame, _logo_of(folder, held.get(folder, set()), entries, home)))
-        if changed is not None and known[1] != wanted[1]:
+        changed = page
+        if new_bar:
+            logo = _logo_of(folder, held.get(folder, set()), entries, home)
+            changed = site.with_bar(changed, bar or site.bar(frame, logo)) or changed
+        if new_footer:
             # a page with no footer of Azimut's to follow keeps its bar changed and goes without
             changed = site.with_footer(changed, footer) or changed
-        if changed is None or changed == page:
+        if moved:
+            changed = site.readdressed(changed, base, address, held)
+        if changed == page:
             continue
         if count + 1 > githubpages.MAX_FILES or weight + len(changed) > githubpages.MAX_TOTAL_BYTES:
             plan.warnings.append(PAGES_LEFT)
-            _record(plan, files, entries, None)
+            # the pages left are not all known: what the record held stays, the rest is looked for again
+            plan.old_address = None
+            _record(plan, files, entries, wanted if parts_known else None, address if address_known else "")
             return
         plan.files[path] = changed
         count, weight = count + 1, weight + len(changed)
         sha = githubpages.blob_sha(changed)
-        _carried_kept(sha, carried_by(changed))
+        _carried_kept(sha, known_of(changed))
         _remember(sha, changed)
     if large:
         # a page left as it was: nothing says they all carry the same, so the next press looks again
         plan.warnings.append(pages_too_large(large))
-    _record(plan, files, entries, None if large else wanted)
+    _record(plan, files, entries, wanted if parts_known or not large_articles else None,
+            address if address_known or not large else "")
 
 
 # -- reading the site, writing nothing -------------------------------------------------------------
@@ -630,6 +679,8 @@ class Survey:
     footer: str = "none"
     #: What the site's files weigh in bytes, None when the tree was too long to read whole.
     bytes: int | None = None
+    #: How many pages Azimut published still give an old address of the site (`old_addresses`).
+    old_address: int = 0
 
 
 def _on_site(address: str, home: Site) -> str:
@@ -684,10 +735,38 @@ def _page_named(entries: dict[str, str], items: list[dict[str, Any]], names: tup
     return ""
 
 
+def old_addresses(files: _Files, tree: githubpages.TreeRead, home: Site, cards: list[dict[str, Any]],
+                  held: dict[str, set[str]]) -> int:
+    """How many pages Azimut published among ``cards`` give an old address of the site, which Update the
+    site would refresh (`own_parts`). None is read when `articles.json` says every page gives the site's
+    address; else each page is read once, remembered by blob id and never kept, none past
+    `MAX_BAR_PAGE_BYTES`."""
+    if _recorded(files, tree.entries)[1] == home.address:
+        return 0
+    found = 0
+    for card in cards:
+        folder = card["folder"]
+        path = f"{folder}/{site.HOME}"
+        if not githubpages.deletable(folder, held.get(folder, set()), True):
+            continue
+        known = _carried_known(tree.entries[path])
+        if known is None:
+            size = tree.sizes.get(path)
+            page = files.read(path, MAX_BAR_PAGE_BYTES, keep=False) if size is None or size <= MAX_BAR_PAGE_BYTES else None
+            if page is None:
+                continue
+            known = known_of(page)
+            _carried_kept(tree.entries[path], known)
+        base = site.site_of(known[2], folder)
+        found += bool(base) and base != home.address
+    return found
+
+
 def survey(gh: githubpages.GitHub, owner: str, repo: str, home: Site, tree: githubpages.TreeRead) -> Survey:
     """The site's tree as a survey: every card (at most `site.MAX_CARDS`) as an item, newest first,
-    the categories of the listed ones, the root page's kind, the pages with Azimut's markers and the
-    legal and privacy pages, read by blob id through the same bounded memory as a publish's plan."""
+    the categories of the listed ones, the root page's kind, the pages with Azimut's markers, the
+    legal and privacy pages and the pages still on an old address (`old_addresses`), read by blob id
+    through the same bounded memory as a publish's plan."""
     out = Survey()
     if not tree.complete:
         out.warnings.append(TREE_TOO_LONG_READ)
@@ -745,4 +824,5 @@ def survey(gh: githubpages.GitHub, owner: str, repo: str, home: Site, tree: gith
     out.legal = _page_named(entries, out.items, LEGAL_FOLDERS, site.LEGAL_TITLE)
     out.privacy = _page_named(entries, out.items, PRIVACY_FOLDERS, site.PRIVACY_TITLE)
     out.found = sorted({*site.categories_of(cards), *listed})
+    out.old_address = old_addresses(files, tree, home, cards, held)
     return out
