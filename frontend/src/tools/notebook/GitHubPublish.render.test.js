@@ -1151,3 +1151,55 @@ it('a map that does not go up is named with GitHub\'s words, and the article wai
   expect(published().map(([path]) => path)).toEqual(['/api/cases/c1/notes/n_road/github']);
   expect(target.querySelector('.maps')).not.toBeNull();
 });
+
+it('an Article lists a map the site holds Unlisted: said before the press, then republished to its own folder first', async () => {
+  serveMaps([{ ...ROAD, address: ROAD_HERE, short: 'road-map', role: 'unlisted' },
+    { id: 'n_coast', title: 'Coast', address: 'https://octo.github.io/articles/coast/', short: 'coast', mentioned: true, role: 'article' }]);
+  post.mockImplementation(async (path) => {
+    if (path.endsWith('/pdf/diagrams')) return { diagrams: [] };
+    if (path.endsWith('/github/check')) return { checked: true };
+    if (path === '/api/cases/c1/notes/n_road/github') {
+      served = served.map((map) => (map.id === 'n_road' ? { ...map, role: 'article' } : map));
+      return { ...PUBLISHED, address: ROAD_HERE };
+    }
+    return PUBLISHED;
+  });
+  show();
+  await settle();
+  const said = target.querySelector('[aria-label="Maps listed with this article"]');
+  expect(said.textContent.trim()).toBe('The map “Road map” is Unlisted on this site: it is listed with this article.');
+  expect(target.querySelector('[aria-label="Maps not on this site"]')).toBeNull();
+  expect((await live.publish({ roundPov: true })).published).toBe(true);
+  await settle();
+  expect(published().map(([path]) => path)).toEqual(['/api/cases/c1/notes/n_road/github', '/api/cases/c1/notes/n1/github']);
+  expect(published()[0][1]).toMatchObject({ short_name: 'road-map', role: 'article', round_pov: true });
+  expect(published()[1][1]).toMatchObject({ short_name: 'port-strike', role: 'article' });
+  expect(target.querySelector('[aria-label="Maps listed with this article"]')).toBeNull();
+});
+
+it('an Unlisted article or a Page leaves the site\'s maps as they are, and says nothing of them', async () => {
+  serveMaps([{ ...ROAD, address: ROAD_HERE, short: 'road-map', role: 'unlisted' }]);
+  publishOk();
+  show();
+  await settle();
+  const radio = (name) => [...target.querySelectorAll('[role="radio"]')].find((node) => node.textContent.trim() === name);
+  for (const choice of ['Unlisted', 'Page']) {
+    radio(choice).click();
+    await settle();
+    expect(target.querySelector('[aria-label="Maps listed with this article"]')).toBeNull();
+    post.mockClear();
+    await live.publish();
+    expect(published().map(([path]) => path)).toEqual(['/api/cases/c1/notes/n1/github']);
+  }
+  // and a listed map an Unlisted article links to is never unlisted with it
+  unmount(live);
+  live = null;
+  serveMaps([{ ...ROAD, address: ROAD_HERE, short: 'road-map', role: 'article' }], { editions: [] });
+  publishOk();
+  show();
+  await settle();
+  post.mockClear();
+  await live.publish();
+  expect(published().map(([path]) => path)).toEqual(['/api/cases/c1/notes/n1/github']);
+  expect(published()[0][1]).toMatchObject({ role: 'unlisted' });
+});

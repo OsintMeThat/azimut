@@ -5,8 +5,9 @@ import { CASE_ID, installAppFixture } from './app.fixture.js';
 /**
  * A link to a map, end to end in the browser: the Link field lists the case's web maps and links the
  * words to one, drawn as a link to the map; the publish dialog names a linked map the site does not
- * hold yet, and Publish the map first puts the map on the site before the article. The server and
- * GitHub are stood in for: what is checked is what the browser asks, in which order.
+ * hold yet, and Publish the map first puts the map on the site before the article; once the article
+ * is an Article, its Unlisted map is listed first. The server and GitHub are stood in for: what is
+ * checked is what the browser asks, in which order; the fold on the site is `tests/test_map_links.py`'s.
  *
  * `AZIMUT_SHOTS` names a folder the run also draws the views into, at 1440x900.
  */
@@ -31,7 +32,7 @@ async function stand(page, { text = '## What we saw\n\nSmoke over the pier, alon
   const catalog = [entity('n1', 'Port strike'), entity('n_road', 'Road map', { look: MAP_LOOK })];
   const github = { account: 'octo', repo: 'articles', branch: 'main', site: '', base: SITE, token: { set: true, hint: '…wxyz' }, categories: [] };
   await installAppFixture(page, { catalog, github });
-  const state = { text, published: [], checks: [], outside: [], editions: { n1: [], n_road: [] } };
+  const state = { text, published: [], checks: [], outside: [], editions: { n1: [], n_road: [] }, roles: {} };
   page.on('request', (request) => {
     const url = new URL(request.url());
     if (url.hostname !== '127.0.0.1' && url.hostname !== 'localhost' && url.protocol.startsWith('http')) state.outside.push(url.href);
@@ -61,7 +62,9 @@ async function stand(page, { text = '## What we saw\n\nSmoke over the pier, alon
     }
     if (path === '/n1/github/maps') {
       const address = state.editions.n_road[0]?.address ?? '';
-      return route.fulfill({ json: { maps: state.text.includes('[[entity:n_road|') ? [{ id: 'n_road', title: 'Road map', address, short: '', mentioned: true }] : [] } });
+      const map = { id: 'n_road', title: 'Road map', address, short: state.editions.n_road[0]?.file ?? '', mentioned: true,
+        role: state.roles.n_road ?? 'article' };
+      return route.fulfill({ json: { maps: state.text.includes('[[entity:n_road|') ? [map] : [] } });
     }
     const check = /^\/(n1|n_road)\/github\/check$/.exec(path);
     if (check) {
@@ -73,6 +76,7 @@ async function stand(page, { text = '## What we saw\n\nSmoke over the pier, alon
       const body = request.postDataJSON();
       const address = `${SITE}${body.short_name}/`;
       state.published.push({ note: publish[1], body });
+      state.roles[publish[1]] = body.role;
       state.editions[publish[1]] = [{ at: '2026-11-22T10:00:00Z', edition: 'public', format: 'github', file: body.short_name, address,
         repository: 'octo/articles', branch: 'main', path: body.short_name, commit: COMMIT, sha256: 'a'.repeat(64), text_sha256: 'b'.repeat(64) }];
       return route.fulfill({ json: { published: true, address, repository: 'octo/articles', branch: 'main', commit: COMMIT, sha256: 'a'.repeat(64),
@@ -146,7 +150,7 @@ test('the Link field lists the case\'s web maps and links the words to one, draw
   expect(state.outside).toEqual([]);
 });
 
-test('a map the site does not hold is named before the press, and Publish the map first puts it up before the article', async ({ page }) => {
+test('a map the site lacks goes up first with the Unlisted article, and is listed with it once it is an Article', async ({ page }) => {
   const state = await stand(page);
   await openArticle(page);
   await page.locator('[data-guide="notebook.pdf"]').click();
@@ -169,5 +173,19 @@ test('a map the site does not hold is named before the press, and Publish the ma
   expect(state.published[1].body).toMatchObject({ short_name: 'port-strike', role: 'unlisted' });
   expect(state.checks.find((one) => one.note === 'n_road')).toEqual({ note: 'n_road', short: 'road-map' });
   await shoot(page, 'dialog-map-first-live');
+  await dialog.getByRole('button', { name: 'Done' }).click();
+
+  // read, then listed: as an Article, the article lists its Unlisted map first, in the map's own folder
+  await page.locator('[data-guide="notebook.pdf"]').click();
+  await page.getByRole('group', { name: 'Format' }).getByRole('button', { name: 'Web folder' }).click();
+  await dialog.getByRole('radiogroup', { name: 'On the site' }).getByRole('radio', { name: 'Article' }).click();
+  const listed = dialog.getByRole('note', { name: 'Maps listed with this article' });
+  await expect(listed).toHaveText('The map “Road map” is Unlisted on this site: it is listed with this article.');
+  await expect(dialog.getByRole('group', { name: 'Maps not on this site' })).toHaveCount(0);
+  await shoot(page, 'dialog-map-listed');
+  await dialog.getByRole('button', { name: 'Publish to GitHub Pages' }).click();
+  await expect(dialog.locator('.line.done')).toContainText(`Live at ${SITE}port-strike/`);
+  expect(state.published.slice(2).map((one) => [one.note, one.body.short_name, one.body.role])).toEqual([
+    ['n_road', 'road-map', 'article'], ['n1', 'port-strike', 'article']]);
   expect(state.outside).toEqual([]);
 });

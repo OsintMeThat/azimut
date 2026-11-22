@@ -53,7 +53,10 @@
    * not hold is named before any press, with **Publish the map first**: each such map goes up to the same site
    * under the name it has elsewhere, else one made from its title, never over another's folder, unlisted with an
    * unlisted article and listed otherwise, then the article. A warning, never a stop: published without it, the
-   * link reads as plain text, and the next publish once the map is online makes it a link.
+   * link reads as plain text, and the next publish once the map is online makes it a link. A map the site holds as
+   * Unlisted, linked from a note published as an Article, is listed with it: the dialog says so before the press, and
+   * the press republishes the map to its own folder as an Article before the article, so the site folds it under the
+   * article. Never the other way: an Unlisted article or a Page leaves a listed map as it is.
    */
   import { untrack } from 'svelte';
   import BusyLabel from '../../components/BusyLabel.svelte';
@@ -73,7 +76,8 @@
     AUTHOR_IMAGE_LABEL, AUTHOR_IMAGE_NONE, AUTHOR_LABEL, AUTHOR_MAX, BUSY,
     CATEGORY_MAX, CATEGORY_NEW, CATEGORY_NEW_PLACEHOLDER, CATEGORY_NONE, CATEGORY_SAID, checkUnreadSaid, HAND_EDITED, LIST_IMAGE_COVER, NO_NAME_PRESS, ON_SITE, ON_SITE_TRY, PICK_ANOTHER, PLACE_COORDS_LABEL, PLACE_COORDS_PLACEHOLDER,
     MORE_OPTIONS, PLACE_LEAD, PLACE_NAME_LABEL, PLACE_NAME_MAX, PLACE_NAME_PLACEHOLDER, PLACE_TITLE, PLACE_WHY, REPLACE_PRESS, WEBSITE_HELP as HELP, noNameSaid, onSiteSaid,
-    mapFailedSaid, mapGoingSaid, mapsFirstPress, mapsMissingSaid, mapsPlainSaid, placeText, placeUseSaid, readPlace, takenOutsideSaid, takenSaid,
+    mapFailedSaid, mapGoingSaid, mapsFirstPress, mapsListedSaid, mapsMissingSaid, mapsPlainSaid, placeText, placeUseSaid, readPlace,
+    takenOutsideSaid, takenSaid,
   } from '../../lib/websiteSetup.js';
 
   let {
@@ -158,6 +162,8 @@
   // mentions read as words until then, where a link written to the map's address elsewhere still opens it there
   let maps = $state([]);
   const missingMaps = $derived(maps.filter((map) => !map.address && map.mentioned));
+  // the maps the site holds as Unlisted, which an Article lists with it; never the other way
+  const unlistedMaps = $derived(role === 'article' ? maps.filter((map) => map.address && map.role === 'unlisted') : []);
   // Publish the map first was pressed: the next publish puts those maps up before the article
   let mapsFirst = false;
   // the title of the map going up, '' while none is
@@ -450,26 +456,42 @@
    */
   async function publishMaps({ roundPov, offlineMaps }) {
     for (const map of missingMaps) {
-      mapGoing = map.title;
-      let name = map.short || shortNameOf(map.title);
-      if (name === short) name = `${name.slice(0, MAX_SHORT - 4)}-map`;
-      try {
+      const going = await publishMap(map, { roundPov, offlineMaps, mapRole: role === 'unlisted' ? 'unlisted' : 'article' }, async () => {
+        let name = map.short || shortNameOf(map.title);
+        if (name === short) name = `${name.slice(0, MAX_SHORT - 4)}-map`;
         const found = await checkFolder(caseId, map.id, name);
-        if (found?.taken) name = String(found.free || '') || `${name}-map`;
-        const answer = await publishNote(caseId, map.id, {
-          shortName: name, roundPov, offlineMaps, role: role === 'unlisted' ? 'unlisted' : 'article',
-        });
-        if (!answer?.published) {
-          needs = { needs: answer?.needs === 'repository' ? 'repository' : 'pages', detail: String(answer?.detail ?? '') };
-          return false;
-        }
-      } catch (error) {
-        failed = mapFailedSaid(map.title, error.message);
+        return found?.taken ? String(found.free || '') || `${name}-map` : name;
+      });
+      if (!going) return false;
+    }
+    await readMaps();
+    return true;
+  }
+
+  /** Each map the site holds as Unlisted, republished to its own folder as an Article, so the site folds it under this one. */
+  async function listMaps({ roundPov, offlineMaps }) {
+    for (const map of unlistedMaps) {
+      if (!(await publishMap(map, { roundPov, offlineMaps, mapRole: 'article' }, async () => map.short || shortNameOf(map.title)))) return false;
+    }
+    await readMaps();
+    return true;
+  }
+
+  /** One map published as `mapRole` under the name `named()` answers: true once it is up, false with why said. */
+  async function publishMap(map, { roundPov, offlineMaps, mapRole }, named) {
+    mapGoing = map.title;
+    try {
+      const answer = await publishNote(caseId, map.id, { shortName: await named(), roundPov, offlineMaps, role: mapRole });
+      if (!answer?.published) {
+        needs = { needs: answer?.needs === 'repository' ? 'repository' : 'pages', detail: String(answer?.detail ?? '') };
         return false;
       }
+    } catch (error) {
+      failed = mapFailedSaid(map.title, error.message);
+      return false;
+    } finally {
+      mapGoing = '';
     }
-    mapGoing = '';
-    await readMaps();
     return true;
   }
 
@@ -505,6 +527,8 @@
           return null;
         }
       }
+      // an Article lists the maps it links to that the site holds Unlisted, once nothing stands in its way
+      if (role === 'article' && unlistedMaps.length && !(await listMaps({ roundPov, offlineMaps }))) return null;
       onaddress(address);
       const answer = await publishNote(caseId, noteId, {
         shortName: short, roundPov, changes, offlineMaps,
@@ -673,6 +697,11 @@
         <p class="maps-said">{mapsPlainSaid(missingMaps.length)}</p>
         <button type="button" class="btn btn-sm" disabled={working} aria-busy={Boolean(mapGoing)} title={HELP.publishMapsFirst}
           onclick={publishMapsFirst}><BusyLabel busy={Boolean(mapGoing)} text={BUSY.publish}>{mapsFirstPress(missingMaps.length)}</BusyLabel></button>
+      </div>
+    {/if}
+    {#if unlistedMaps.length}
+      <div class="maps" role="note" aria-label="Maps listed with this article">
+        <p><Icon name="mapArea" size={13} /> {mapsListedSaid(unlistedMaps.map((map) => map.title))}</p>
       </div>
     {/if}
     {#if working}

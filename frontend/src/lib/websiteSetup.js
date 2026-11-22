@@ -802,6 +802,11 @@ export function mapsMissingSaid(titles) {
 export function mapsPlainSaid(count) {
   return count > 1 ? 'Published without them, the links to them read as plain text.' : 'Published without it, the link to it reads as plain text.';
 }
+/** The maps an Article lists with it, unlisted on the site until now: said before the press, in one sentence. */
+export function mapsListedSaid(titles) {
+  return titles.length > 1 ? `The maps ${namedList(titles)} are Unlisted on this site: they are listed with this article.`
+    : `The map ${namedList(titles)} is Unlisted on this site: it is listed with this article.`;
+}
 /** The press that puts them on the site, then the article. */
 export function mapsFirstPress(count) {
   return count > 1 ? 'Publish the maps first' : 'Publish the map first';

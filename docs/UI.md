@@ -7948,7 +7948,13 @@ is not on this site yet.*, then *Published without it, the link to it reads as p
 it has elsewhere, else one made from its title, never the article's own nor another's folder, and
 unlisted with an unlisted article, listed otherwise. It never holds the publish back: the link reads
 as its words until a publish finds the map online (`GET /notes/{id}/github/maps`, read from the case
-only). The PDF, the HTML report and the in-app reader show the link's words as before.
+only, each map with its folder there and the role its last publish left in its look). A map the site
+holds as Unlisted, linked from a note published as an Article, is listed with it: the dialog says
+*The map “Road map” is Unlisted on this site: it is listed with this article.* before the press, and
+the press republishes the map to its own folder as an Article before the article, so a guest's article
+read Unlisted and then listed brings its map onto the lists, folded under it. Never the other way: an
+Unlisted article or a Page leaves a listed map as it is. The PDF, the HTML report and the in-app reader
+show the link's words as before.
 
 **Your site.** The same press keeps the site beside the folder, in the same commit
 (`engine/site.py`, `engine/sitesync.py`). The folder carries a card, `article.json`
