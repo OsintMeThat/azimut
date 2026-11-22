@@ -43,7 +43,10 @@ and says so once.
 **The card** (`share_card`) is the note's cover picture, else the picture the story
 layout opens on, under a dark gradient with the title in the report's own face, its
 day, and the provider's credit for imagery or a map; with no picture, the title on
-the report's paper under its accent rule.
+the report's paper under its accent rule. A map page's card is the page itself as it shows
+once its map is up (`map_cover`): its band with the title, its line and the analyst, the
+map's ground cut to fill the rest with no band round it and its marks drawn over it, and its
+legend in a column at the right, drawn here from what the page holds.
 
 **How to publish** is said once, here (`PAGES_*`), and written into the folder as
 `HOW-TO-PUBLISH.md`; the app shows the same words (`frontend/src/lib/githubPagesSetup.js`,
@@ -52,8 +55,8 @@ Website says them too.
 
 **A folder published to a site** (`placement`, `engine/site.py`) also carries its card,
 `article.json`, and `cover.jpg`, the picture of its line in the site's list: the look's list
-picture, else its cover picture, a map page's ground or its first picture, else the link card
-itself. A page of the site starts with a bar back to it, and counts its readers when the site asks.
+picture, else its cover picture or its first picture, else the link card itself, which a map
+page's always is. A page of the site starts with a bar back to it, and counts its readers when the site asks.
 Each link to a web map of the case that the site holds opens the map's page there (`maps`), at the
 site's address, which the site's lists read to fold the map under the article (`site.links_of`).
 
@@ -63,6 +66,7 @@ disk (`write`, swapped in by renames so it is whole or not there, on every OS).
 
 from __future__ import annotations
 
+import bisect
 import hashlib
 import html
 import re
@@ -76,9 +80,9 @@ from pathlib import Path, PurePosixPath
 from typing import TYPE_CHECKING, Any, Iterable, Mapping
 from urllib.parse import unquote, urlsplit, urlunsplit
 
-from PIL import Image, ImageDraw, ImageFilter, ImageFont, ImageOps, UnidentifiedImageError
+from PIL import Image, ImageChops, ImageColor, ImageDraw, ImageFilter, ImageFont, ImageOps, UnidentifiedImageError
 
-from . import dirswap, notefill, notelinks, notelook, notes_style, pdffonts
+from . import dirswap, notefill, notelinks, notelook, notes_maps, notes_style, pdffonts, siteatlas
 from . import notes_html as html_engine
 from . import site as site_engine
 from . import notes_markdown as md
@@ -379,7 +383,10 @@ def build(
     files: dict[str, bytes] = {INDEX: rendered.html, **folder.files}
     if face is not None:
         files[face[0]] = face[1]
-    if not check:
+    if not check and rendered.map_page is not None:
+        files[SHARE] = map_cover(rendered.map_page, title=title, description=rendered.description, look=look,
+                                 face=face[1] if face is not None and rendered.map_page.face else None)
+    elif not check:
         files[SHARE] = share_card(title=title, day=rendered.day or day, look=look, hero=rendered.hero,
                                   description=rendered.description)
     files[NOJEKYLL] = b""
@@ -417,8 +424,8 @@ def _site_card(placement: site_engine.Placement, case: "Case", look: NoteLook, r
                files: dict[str, bytes], said: list[str], *, title: str, day: date, name: str,
                face: str = "") -> site_engine.Card:
     """The card a folder published to a site carries, and `cover.jpg` beside it: the picture of
-    its line in the site's list, made from the look's list picture, else the page's own (its
-    cover, a map page's ground, its first picture), else the link card as a last resort. Its
+    its line in the site's list, made from the look's list picture, else an article's own (its
+    cover, its first picture), else the link card, which a map page's is (`map_cover`). Its
     author is the look's, else the site's (`Site.author`); ``face`` is the author's picture in the
     folder, "" for none."""
     site = placement.site
@@ -431,7 +438,7 @@ def _site_card(placement: site_engine.Placement, case: "Case", look: NoteLook, r
         if picture is None:
             said.append("The list picture is no longer in the case or could not be read; the cover picture "
                         "stands in the site's list.")
-    cover = _list_cover(picture or rendered.picture)
+    cover = _list_cover(picture or (rendered.picture if rendered.map_page is None else None))
     if cover is None and SHARE in files:
         cover = files[SHARE]
     if cover is not None:
@@ -786,6 +793,403 @@ def _spaced(draw: ImageDraw.ImageDraw, at: tuple[float, float], text: str, face:
         x += face.getlength(char) + tracking
 
 
+# -- a map page's cover --------------------------------------------------------------
+
+#: A map page's cover, on the page's own dark (`reader.mappage.css`): the rules between its parts,
+#: and its words in white at .84, .72 and .6 on that dark.
+MAP_RULE = (58, 59, 61)
+MAP_WORDS = (216, 216, 217)
+MAP_QUIET = (188, 188, 189)
+MAP_MUTED = (159, 160, 160)
+#: The legend's column, as wide as the page's panel, and the room round what is set in it and the band.
+MAP_PANEL = 336
+MAP_PAD = 24
+#: How large the cover draws the map's marks: one of the page's pixels to this many of its own.
+MAP_MARKS = 1.0
+#: How near the map's edge the cover keeps a mark it can keep, in the page's pixels.
+MAP_MARGIN = 30.0
+#: The credit's corner on the map, as the live map's sets it on imagery.
+CREDIT_INK = (16, 18, 22, 168)
+#: What a map with no ground stands on: the sea, the site atlas's land and its coast, light as a map's
+#: plain background (`notes_maps.PLAIN_GROUND`), or dark on a dark base.
+LAND_LIGHT = ((205, 214, 222), ImageColor.getrgb(notes_maps.PLAIN_GROUND)[:3], (176, 187, 197))
+LAND_DARK = ((17, 19, 22), (42, 46, 52), (66, 72, 80))
+#: The narrowest map whose land is drawn, in atlas units across: Natural Earth's outline at 1:110 million
+#: places a coast to about a unit, too coarse to say where it runs on a closer map, which stays plain.
+LAND_SPAN = 30.0
+
+
+def map_cover(page: html_engine.MapPage, *, title: str, description: str, look: NoteLook | None = None,
+              face: bytes | None = None) -> bytes:
+    """A map page's picture, its link card and the picture of its line in a site's list: 1200 by 630,
+    a JPEG with no metadata. The page as it shows once its map is up, in its own dark and faces: the
+    band with its title, its line under it and the analyst, the map filling the rest with no band
+    round it (`cover_frame`), its marks drawn as the page draws them, and its legend in a column at
+    the right as the page's switcher lists it (`map_legend`). ``face`` is the author's picture the
+    page shows by the name. Drawn from what the page holds, it fetches nothing."""
+    theme = notes_style.theme_for(look or DEFAULT_LOOK)
+    width, height = SHARE_SIZE
+    card = Image.new("RGB", SHARE_SIZE, STORY_DARK)
+    top = _map_band(card, page, title, description, theme.heading_family, face)
+    rows = map_legend(page.map)
+    side = MAP_PANEL if rows else 0
+    drawn = _map_drawn(page.map, (width - side, height - top))
+    card.paste(drawn, (0, top))
+    _map_credit(card, page.map.data, (0, top, width - side, height), theme.heading_family)
+    draw = ImageDraw.Draw(card)
+    draw.rectangle((0, top - 1, width, top - 1), fill=MAP_RULE)
+    if rows:
+        draw.rectangle((width - side, top, width - side, height), fill=MAP_RULE)
+        _map_key(card, rows, page.map.icons, (width - side + 1, top, width, height), theme.heading_family)
+    buffer = BytesIO()
+    card.save(buffer, "JPEG", quality=SHARE_QUALITY, optimize=True, progressive=True, subsampling=0)
+    return buffer.getvalue()
+
+
+def map_legend(derived: notes_maps.Derived) -> list[tuple[str, list[dict[str, Any]]]]:
+    """A map's legend as a map page's switcher lists it: each layer, named when the map shows more
+    than one ("" otherwise), with its rows in order; nothing when the map hides its legend."""
+    if derived.display.get("legend") == "hidden":
+        return []
+    layers = list(dict.fromkeys(str(row.get("layer") or "") for row in derived.legend))
+    return [(layer if len(layers) > 1 else "", [row for row in derived.legend if str(row.get("layer") or "") == layer])
+            for layer in layers]
+
+
+def cover_frame(data: Mapping[str, Any], width: float, height: float) -> list[float]:
+    """The part of the world a map page's cover shows of its map, ``[w, s, e, n]``, in a picture of
+    ``width`` by ``height``: where the page opens (`opens`, else its frame) held whole, as its live map
+    shows it, as far as its ground reaches round it; past that, cut to the picture's shape inside the
+    ground so that no band shows, and slid to keep in sight as many of its marks as it can, nearest
+    to where the page looks. A map with no ground shows where the page opens, whole."""
+    opened = data.get("opens") or data.get("bounds") or [-10.0, -10.0, 10.0, 10.0]
+    x0, y0 = notes_maps.mercator(opened[0], opened[3])
+    x1, y1 = notes_maps.mercator(opened[2], opened[1])
+    wide, high = max(x1 - x0, 1e-12), max(y1 - y0, 1e-12)
+    if wide / high > width / height:
+        high = wide * height / width
+    else:
+        wide = high * width / height
+    middle_x, middle_y = (x0 + x1) / 2, (y0 + y1) / 2
+    placed = (data.get("ground") or {}).get("bounds")
+    if placed and len(placed) == 4:
+        gx0, gy0 = notes_maps.mercator(placed[0], placed[3])
+        gx1, gy1 = notes_maps.mercator(placed[2], placed[1])
+        shrink = min(1.0, (gx1 - gx0) / wide, (gy1 - gy0) / high)
+        wide, high = wide * shrink, high * shrink
+        margin = MAP_MARGIN * MAP_MARKS * wide / width
+        marks = [notes_maps.mercator(lon, lat) for lon, lat in _marks_of(data)]
+        middle_x = _slid([x for x, _ in marks], middle_x, wide, (gx0, gx1), margin)
+        across = [y for x, y in marks if abs(x - middle_x) <= wide / 2 - margin]
+        middle_y = _slid(across, middle_y, high, (gy0, gy1), margin)
+    west, north = notes_maps.unmercator(middle_x - wide / 2, middle_y - high / 2)
+    east, south = notes_maps.unmercator(middle_x + wide / 2, middle_y + high / 2)
+    return [west, south, east, north]
+
+
+def _marks_of(data: Mapping[str, Any]) -> Iterable[tuple[float, float]]:
+    """Where each feature the map shows on its day stands, as the cover keeps them in sight: a point
+    where it is, a line or an area at its name's place, else its middle."""
+    day = str(data.get("day") or "")
+    for feature in data.get("features") or []:
+        if day and not notes_maps.shows_on(feature, day):
+            continue
+        spot = feature.get("coords") if feature.get("kind") == "point" else (
+            feature.get("at") or notes_maps.label_anchor(feature))
+        if spot:
+            yield float(spot[0]), float(spot[1])
+
+
+def _slid(values: list[float], middle: float, span: float, limits: tuple[float, float], margin: float) -> float:
+    """Where a window ``span`` long on one axis stands, by its middle, inside ``limits``: the place
+    holding the most of ``values`` at least ``margin`` from its ends, the nearest to ``middle`` of those."""
+    lowest, highest = limits[0] + span / 2, limits[1] - span / 2
+    if highest < lowest:
+        return (limits[0] + limits[1]) / 2
+
+    def inside(at: float) -> float:
+        return min(max(at, lowest), highest)
+
+    held = sorted(value for value in values if limits[0] <= value <= limits[1])
+    room = max(0.0, span / 2 - margin)
+
+    def holds(at: float) -> int:
+        return bisect.bisect_right(held, at + room) - bisect.bisect_left(held, at - room)
+
+    best = inside(middle)
+    most = holds(best)
+    for value in held:
+        for at in (inside(value + room), inside(value - room)):
+            count = holds(at)
+            if count > most or (count == most and abs(at - middle) < abs(best - middle)):
+                best, most = at, count
+    return best
+
+
+def _map_drawn(derived: notes_maps.Derived, size: tuple[int, int]) -> Image.Image:
+    """The map in its part of the cover: its ground cut to fill it, or the land of a map with none,
+    and its marks by the map's own painter, sized as the page draws them, a crowd its count."""
+    width, height = size
+    data = derived.data
+    framed = {**data, "bounds": cover_frame(data, width, height)}
+    plain = None if data.get("ground") else _land(framed["bounds"], (width * 2, height * 2), dark=data.get("base") == "dark")
+    drawn = notes_maps.picture(framed, width, ground=derived.ground, icons=derived.icons, read_width=width / MAP_MARKS,
+                               as_page=True, plain=plain)
+    return drawn if drawn.size == size else drawn.resize(size, Image.Resampling.LANCZOS)
+
+
+def _land(bounds: list[float], size: tuple[int, int], *, dark: bool) -> Image.Image:
+    """What a map with no ground stands on, ``size`` pixels over ``bounds``: the site atlas's land on
+    its sea when the map is wide enough for the outline to hold (`LAND_SPAN`), else the land's plain tone."""
+    sea, ground, coast = LAND_DARK if dark else LAND_LIGHT
+    west, south, east, north = bounds
+    edges = [siteatlas.project(west + (east - west) * step / 8, lat) for step in range(9) for lat in (south, north)]
+    edges += [siteatlas.project(lon, south + (north - south) * step / 8) for step in range(9) for lon in (west, east)]
+    left, right = min(x for x, _ in edges), max(x for x, _ in edges)
+    top, bottom = min(y for _, y in edges), max(y for _, y in edges)
+    if right - left < LAND_SPAN:
+        return Image.new("RGB", size, ground)
+    picture = Image.new("RGB", size, sea)
+    draw = ImageDraw.Draw(picture)
+    x0, y0 = notes_maps.mercator(west, north)
+    x1, y1 = notes_maps.mercator(east, south)
+    scale_x, scale_y = size[0] / max(x1 - x0, 1e-12), size[1] / max(y1 - y0, 1e-12)
+    shapes: list[list[tuple[float, float]]] = []
+    for (ring_left, ring_top, ring_right, ring_bottom), corners in siteatlas.rings():
+        if ring_right < left or ring_left > right or ring_bottom < top or ring_top > bottom:
+            continue
+        points = []
+        for x, y in corners:
+            mx, my = notes_maps.mercator(*siteatlas.unproject(x, y))
+            points.append(((mx - x0) * scale_x, (my - y0) * scale_y))
+        shapes.append(points)
+        draw.polygon(points, fill=ground)
+    for points in shapes:
+        draw.line([*points, points[0]], fill=coast, width=2, joint="curve")
+    return picture
+
+
+def _map_band(card: Image.Image, page: html_engine.MapPage, title: str, description: str, family: str,
+              face: bytes | None) -> int:
+    """The page's band across the top: its title and the line under it at the left, the analyst at the
+    right (their logo, picture and name on a line, their handle under it), both in its middle; where it
+    ends."""
+    width = SHARE_SIZE[0]
+    draw = ImageDraw.Draw(card)
+    who_face = _face(family, 700, 19, page.who)
+    handle_face = _face(family, 400, 16, page.handle)
+    pictures = [one for one in (_logo(page.logo, 38), _round_face(face, 38) if page.face else None) if one is not None]
+    name_width = who_face.getlength(page.who) if page.who else 0.0
+    line = sum(one.width + 10 for one in pictures) + name_width - (10 if pictures and not page.who else 0)
+    signed = max(line, handle_face.getlength(page.handle) if page.handle else 0.0)
+    signed_high = (38 if line else 0) + (24 if page.handle else 0)
+    room = width - 2 * MAP_PAD - (signed + 36 if signed else 0)
+    words = " ".join(title.split()) or "Untitled"
+    heading, lines = _title_lines(words, family, room)
+    leading = round(heading.size * 1.16)
+    said = _face(family, 400, 18, description) if description else None
+    under = _ellipsis(" ".join(description.split()), said, room) if said is not None else ""
+    titles_high = leading * len(lines) + (30 if under else 0)
+    inner = max(titles_high, signed_high)
+    height = 18 + inner + 16
+    top = 18 + (inner - titles_high) / 2
+    for index, text in enumerate(lines):
+        draw.text((MAP_PAD, top + index * leading), text, font=heading, fill=WHITE, anchor="la")
+    if said is not None and under:
+        draw.text((MAP_PAD, top + leading * len(lines) + 6), under, font=said, fill=MAP_WORDS, anchor="la")
+    if signed:
+        right = width - MAP_PAD
+        y = 18 + (inner - signed_high) / 2
+        if line:
+            x = right - line
+            for one in pictures:
+                card.paste(one, (round(x), round(y + (38 - one.height) / 2)), one)
+                x += one.width + 10
+            if page.who:
+                draw.text((right, y + 19), page.who, font=who_face, fill=WHITE, anchor="rm")
+        if page.handle:
+            draw.text((right, y + signed_high), page.handle, font=handle_face, fill=MAP_QUIET, anchor="rd")
+    return round(height) + 1
+
+
+def _title_lines(title: str, family: str, room: float) -> tuple[ImageFont.FreeTypeFont, list[str]]:
+    """The title as the band sets it: one line as large as it reads, else two balanced lines, the
+    second cut with an ellipsis at the smallest size."""
+    for size in (32, 30):
+        face = _face(family, 700, size, title)
+        if face.getlength(title) <= room:
+            return face, [title]
+    for size in range(30, 23, -2):
+        face = _face(family, 700, size, title)
+        if len(_wrap(title, face, room)) <= 2:
+            return face, _balanced(title, face, room, 2)
+    lines = _wrap(title, face, room)
+    return face, [lines[0], _ellipsis(f"{' '.join(lines[1:])}…", face, room)]
+
+
+def _logo(path: Path | None, high: int) -> Image.Image | None:
+    """The analyst's logo ``high`` pixels tall, as the page's header shows it; None when it cannot be read."""
+    if path is None:
+        return None
+    try:
+        with Image.open(path) as opened:
+            if opened.width * opened.height > MAX_IMAGE_PIXELS:
+                return None
+            picture = ImageOps.exif_transpose(opened).convert("RGBA")
+    except (OSError, ValueError, UnidentifiedImageError, Image.DecompressionBombError):
+        return None
+    wide = max(1, min(high * 4, round(picture.width * high / max(1, picture.height))))
+    return picture.resize((wide, high), Image.Resampling.LANCZOS)
+
+
+def _round_face(data: bytes | None, side: int) -> Image.Image | None:
+    """The author's picture in a circle ``side`` pixels across."""
+    if not data:
+        return None
+    try:
+        with Image.open(BytesIO(data)) as opened:
+            square = ImageOps.fit(opened.convert("RGBA"), (side * 4, side * 4), Image.Resampling.LANCZOS)
+    except (OSError, ValueError, UnidentifiedImageError):
+        return None
+    mask = Image.new("L", square.size, 0)
+    ImageDraw.Draw(mask).ellipse((0, 0, square.width - 1, square.height - 1), fill=255)
+    square.putalpha(ImageChops.multiply(square.getchannel("A"), mask))
+    return square.resize((side, side), Image.Resampling.LANCZOS)
+
+
+def _map_credit(card: Image.Image, data: Mapping[str, Any], box: tuple[int, int, int, int], family: str) -> None:
+    """What the map's ground owes, in its lower right corner, as the live map says it over imagery."""
+    words = "; ".join(str(one) for one in data.get("credits") or [] if one)
+    if not words:
+        return
+    left, top, right, bottom = box
+    face = _face(family, 400, 13, words)
+    words = _ellipsis(words, face, (right - left) * 0.8)
+    wide = face.getlength(words) + 16
+    corner = Image.new("RGBA", (round(wide), 22), (0, 0, 0, 0))
+    shape = ImageDraw.Draw(corner)
+    shape.rounded_rectangle((0, 0, corner.width + 6, corner.height + 6), radius=5, fill=CREDIT_INK)
+    shape.text((8, 11), words, font=face, fill=(255, 255, 255, 220), anchor="lm")
+    card.paste(corner, (right - corner.width, bottom - corner.height), corner)
+
+
+def _map_key(card: Image.Image, rows: list[tuple[str, list[dict[str, Any]]]], icons: Mapping[str, Mapping[str, Any]],
+             box: tuple[int, int, int, int], family: str) -> None:
+    """The legend's column, as the page's panel lists it: Layers, then each layer's name over its rows,
+    a row its symbol, its words on two lines at most and its count. Set smaller when that holds every
+    row (`KEY_SCALES`), and what still does not fit is counted last."""
+    left, top, right, bottom = box
+    x0, x1 = left + MAP_PAD - 2, right - MAP_PAD
+    floor = bottom - MAP_PAD
+    y = top + MAP_PAD - 2.0
+    for scale in KEY_SCALES:
+        laid = _key_laid(rows, family, x1 - x0, scale)
+        if y + sum(high for _, high, _ in laid) <= floor:
+            break
+    draw = ImageDraw.Draw(card)
+    left_over = sum(len(items) for _, items in rows)
+    after = round(24 * scale)
+    for index, (kind, high, said) in enumerate(laid):
+        # a layer's name only with its first row under it, and room kept to count what is left
+        needs = high + (laid[index + 1][1] if kind == "layer" and index + 1 < len(laid) else 0)
+        if kind != "label" and y + needs > floor - (after if left_over > 1 else 0):
+            draw.text((x0, y + 6 * scale), f"and {left_over} more", font=_face(family, 400, round(15 * scale), "more"),
+                      fill=MAP_MUTED, anchor="la")
+            return
+        if kind == "row":
+            row, lines, words_face, count_face = said
+            swatch = _key_swatch(row, icons, scale)
+            middle = y + (high - KEY_GAP * scale) / 2
+            card.paste(swatch, (round(x0 + 17 * scale - swatch.width / 2), round(middle - swatch.height / 2)), swatch)
+            leading = KEY_LEADING * scale
+            for number, text in enumerate(lines):
+                draw.text((x0 + 44 * scale, middle + (number - (len(lines) - 1) / 2) * leading), text, font=words_face,
+                          fill=MAP_WORDS, anchor="lm")
+            draw.text((x1, middle), str(int(row.get("count") or 0)), font=count_face, fill=MAP_MUTED, anchor="rm")
+            left_over -= 1
+        else:
+            face, text = said
+            _small_caps(draw, (x0, y + (KEY_LAYER_GAP * scale if kind == "layer" and index > 1 else 0)), text, face, x1 - x0)
+        y += high
+
+
+#: The legend's sizes, tried in turn until every row fits: its words', a row's lines apart, the room
+#: under a row, under the column's label and over a layer's name, at the largest.
+KEY_SCALES = (1.0, 0.9, 0.8)
+KEY_WORDS = 16
+KEY_LEADING = 20.0
+KEY_ROW = 28.0
+KEY_GAP = 8.0
+KEY_LABEL = 13
+KEY_LAYER_GAP = 8.0
+
+
+def _key_laid(rows: list[tuple[str, list[dict[str, Any]]]], family: str, wide: float,
+              scale: float) -> list[tuple[str, float, Any]]:
+    """The legend's column at ``scale``, as ``(kind, height, what)`` from the top: its label, each layer's
+    name, each row with its lines and faces."""
+    label = round(KEY_LABEL * scale)
+    laid: list[tuple[str, float, Any]] = [("label", 30 * scale, (_face(family, 700, label, "LAYERS"), "Layers"))]
+    count_face = _face(family, 400, round((KEY_WORDS - 1) * scale), "0123456789")
+    for index, (layer, items) in enumerate(rows):
+        if layer:
+            laid.append(("layer", (25 + (KEY_LAYER_GAP if index else 0)) * scale,
+                         (_face(family, 700, label, layer.upper()), layer)))
+        for row in items:
+            name = str(row.get("label") or layer or "")
+            words_face = _face(family, 400, round(KEY_WORDS * scale), name)
+            room = wide - 44 * scale - count_face.getlength(str(int(row.get("count") or 0))) - 12 * scale
+            lines = _wrap(name, words_face, room) or [""]
+            if len(lines) > 2:
+                lines = [lines[0], _ellipsis(f"{' '.join(lines[1:])}…", words_face, room)]
+            high = max(KEY_ROW, KEY_LEADING * len(lines)) * scale + KEY_GAP * scale
+            laid.append(("row", high, (row, lines, words_face, count_face)))
+    return laid
+
+
+def _small_caps(draw: ImageDraw.ImageDraw, at: tuple[float, float], text: str, face: ImageFont.FreeTypeFont,
+                room: float) -> None:
+    """A label as the page's panel sets one, in spaced capitals; a script with no capitals as it is."""
+    words = _ellipsis(" ".join(text.split()).upper(), face, room - 0.1 * face.size * len(text))
+    if words.isascii():
+        _spaced(draw, at, words, face, 0.1 * face.size, MAP_MUTED)
+    else:
+        draw.text(at, words, font=face, fill=MAP_MUTED)
+
+
+def _key_swatch(row: Mapping[str, Any], icons: Mapping[str, Mapping[str, Any]], scale: float) -> Image.Image:
+    """A legend row's symbol: a point's marker, a stretch of a line, a patch of an area, as the page draws
+    them, at ``scale``."""
+    style = row.get("style") or {}
+    if row.get("kind") == "point":
+        return notes_maps.marker(notes_maps.marker_key(style), style, icons, round(26 * scale))
+    colour = _colour(style.get("color"))
+    zoom = 4
+    swatch = Image.new("RGBA", (32 * zoom, 20 * zoom), (0, 0, 0, 0))
+    draw = ImageDraw.Draw(swatch)
+    if row.get("kind") == "line":
+        middle = 10 * zoom
+        draw.line((3 * zoom, middle, 29 * zoom, middle), fill=(0, 0, 0, 72), width=6 * zoom)
+        dash = {"dashed": (6, 4), "dotted": (1.2, 3.4)}.get(str(style.get("dash") or ""))
+        x = 3.0
+        while x < 29:
+            end = min(29.0, x + dash[0]) if dash else 29.0
+            draw.line((x * zoom, middle, end * zoom, middle), fill=(*colour, 255), width=round(3.4 * zoom))
+            x = end + (dash[1] if dash else 0)
+    else:
+        draw.rounded_rectangle((3 * zoom, 3 * zoom, 29 * zoom, 17 * zoom), radius=2 * zoom, fill=(*colour, 72),
+                               outline=(*colour, 255), width=round(2.2 * zoom))
+    return swatch.resize((round(32 * scale), round(20 * scale)), Image.Resampling.LANCZOS)
+
+
+def _colour(value: Any) -> tuple[int, int, int]:
+    try:
+        red, green, blue = ImageColor.getrgb(str(value or "#0072b2"))[:3]
+    except ValueError:
+        return (0, 114, 178)
+    return red, green, blue
+
+
 # -- the head and small helpers ------------------------------------------------------
 
 
@@ -849,5 +1253,6 @@ __all__ = [
     "ADDRESS", "COVER", "HOW_TO", "IMAGERY_HOSTS", "INDEX", "LIVE_DARK", "LIVE_HOST", "LIVE_LICENSE", "LIVE_MISSING",
     "LIVE_SOURCES", "LIVE_STYLE", "LIVE_VENDOR", "MAX_ADDRESS", "NOJEKYLL", "NO_ADDRESS", "NotesWebError", "PAGES_CARD", "PAGES_INTRO",
     "PAGES_PUBLIC", "PAGES_STEPS", "PAGES_UPDATE", "SHARE", "SHARE_SIZE", "UPLOAD", "WEB_DIR", "WebBuild", "address",
-    "build", "folder_csp", "folder_name", "how_to", "live_maps", "share_card", "write",
+    "build", "cover_frame", "folder_csp", "folder_name", "how_to", "live_maps", "map_cover", "map_legend", "share_card",
+    "write",
 ]

@@ -20,6 +20,12 @@
 .az-map-world img { position: absolute; max-width: none; user-select: none; -webkit-user-drag: none; }
 .az-map-ground { inset: 0; width: 100%; height: 100%; }
 .az-map-detail { opacity: 0; transition: opacity .5s var(--ease); }
+/* the bands round a map held whole on a stage of another shape: its own ground stretched over them, blurred
+   and darkened, out of sight once a live map has covered them */
+.az-map-fill {
+  display: none; position: absolute; inset: 0; width: 100%; height: 100%; max-width: none; object-fit: cover;
+  filter: blur(24px) saturate(.62) brightness(.45); transform: scale(1.12); pointer-events: none; user-select: none;
+}
 .az-map-detail.az-on { opacity: 1; }
 .az-map-svg { position: absolute; inset: 0; display: block; width: 100%; height: 100%; max-width: none; overflow: hidden; }
 .az-map-svg .az-off, .az-map-svg .az-clash { opacity: 0; visibility: hidden; }
@@ -195,6 +201,8 @@
     --tint: rgba(255, 255, 255, .12); --accent-soft: rgba(255, 255, 255, .08); --accent-ink: color-mix(in srgb, var(--az-accent) 40%, #fff);
   }
   .az-full .az-map-stage { height: 100%; aspect-ratio: auto; background: none; touch-action: none; }
+  :is(.az-full, .az-paged) .az-map-fill { display: block; }
+  :is(.az-full, .az-paged).az-gl-on .az-map-fill { visibility: hidden; transition: visibility 0s .7s; }
   .az-full .az-map-world { right: auto; bottom: auto; overflow: hidden; }
   .az-full .az-map-svg:not(.az-gl-over) { clip-path: inset(var(--az-t, 0) var(--az-r, 0) var(--az-b, 0) var(--az-l, 0)); }
   .az-full .az-map-stage > .az-map-tools { top: calc(var(--az-t, 0px) + .75rem); left: calc(var(--az-l, 0px) + .75rem); }

@@ -79,7 +79,8 @@ that says it has nothing to show.
 **How it is drawn.** `svg` writes the features over the ground as the page shows them
 with no script and in print, in the layer's own colours and pictograms (the map's own
 drawings, `notes_html_assets/markers.json`, kept equal to `lib/map/markerGlyphs.js`
-by a test). `render_png` paints the same with Pillow for the PDF.
+by a test). `picture` paints the same with Pillow, for the PDF (`render_png`) and a map
+page's cover (`notes_web.map_cover`).
 """
 
 from __future__ import annotations
@@ -2032,12 +2033,15 @@ SPREAD_PX = 27.0
 
 
 def arrange(points: list[tuple[str, float, float]], *, near: float = NEAR_PX,
-            gap: float = SPREAD_PX) -> dict[str, tuple[float, float]]:
+            gap: float = SPREAD_PX, crowds: list[tuple[list[str], float, float]] | None = None,
+            crowd_from: float = CROWDS) -> dict[str, tuple[float, float]]:
     """Where each mark stands once marks that would cover one another are spread round
     the place they share: a ring for a few, a sunflower for more, the nearest to the
     middle. ``points`` are ``(id, x, y)`` in pixels; a mark that stands alone keeps
     its place. The reader's script spreads them the same way at every zoom
-    (`arrange` in `reader.js`); the data never moves."""
+    (`arrange` in `reader.map.js`); the data never moves. Given a ``crowds`` list, a crowd
+    of more than ``crowd_from`` marks is left out and added to it as ``(ids, x, y)``, the
+    count the page draws there."""
     cell = max(near, 1.0)
     grid: dict[tuple[int, int], list[int]] = {}
     for index, (_, x, y) in enumerate(points):
@@ -2067,6 +2071,9 @@ def arrange(points: list[tuple[str, float, float]], *, near: float = NEAR_PX,
             continue
         cx = sum(points[one][1] for one in group) / len(group)
         cy = sum(points[one][2] for one in group) / len(group)
+        if crowds is not None and len(group) > crowd_from:
+            crowds.append(([points[one][0] for one in group], cx, cy))
+            continue
         for one, (x, y) in zip(_by_angle(group, points, cx, cy), _slots(len(group), gap)):
             out[points[one][0]] = (cx + x, cy + y)
     return out
@@ -2311,11 +2318,50 @@ def _day_attr(name: str, value: Any) -> str:
 def render_png(data: Mapping[str, Any], width: int, *, ground: "Image.Image | Path | bytes | None" = None,
                day: str | None = None, icons: Mapping[str, Mapping[str, Any]] | None = None,
                fmt: str = "PNG") -> bytes:
+    """The map as one picture ``width`` pixels wide (`picture`), encoded as ``fmt``."""
+    out = picture(data, width, ground=ground, day=day, icons=icons)
+    buffer = BytesIO()
+    if fmt.upper() == "JPEG":
+        out.save(buffer, "JPEG", quality=86, optimize=True, progressive=True)
+    else:
+        out.save(buffer, "PNG", optimize=True)
+    return buffer.getvalue()
+
+
+#: A crowd's count, as the page draws it (`bubble` in reader.map.js), in its pixels: its radius
+#: before its share of the marks, its ring, and the size of its number.
+BUBBLE_RADIUS = 15.0
+BUBBLE_RING = 3.5
+BUBBLE_TEXT = 13
+
+
+def marker_key(style: Mapping[str, Any]) -> str:
+    """The pictogram a point wears, by its key in a map's icons: a proof's own, else its layer's."""
+    if style.get("proof"):
+        return "proof-pov" if style.get("pov") else "proof"
+    return str(style.get("icon") or "")
+
+
+def marker(key: str, style: Mapping[str, Any], icons: Mapping[str, Mapping[str, Any]] | None, side: int) -> Image.Image:
+    """One point's marker painted ``side`` pixels square, from the map's ``icons`` (a layer's own
+    included), else from what its key and style say."""
+    icon = dict((icons or {}).get(key) or {}) or _icon_from_key(key, style)
+    return _marker_image(icon, side)
+
+
+def picture(data: Mapping[str, Any], width: int, *, ground: "Image.Image | Path | bytes | None" = None,
+            day: str | None = None, icons: Mapping[str, Mapping[str, Any]] | None = None,
+            read_width: float = READ_WIDTH, as_page: bool = False, plain: Image.Image | None = None) -> Image.Image:
     """The map as one picture ``width`` pixels wide: its ground, then its areas, lines
     and markers as they stand on ``day`` (the map's own day by default), their names
     kept off one another. ``ground`` is the picture under it when the caller holds it;
     else ``data.ground.src`` is read when it is a `data:` address. ``icons`` are the
-    pictograms `derive` found, so a layer's own icons are drawn too."""
+    pictograms `derive` found, so a layer's own icons are drawn too. Its marks are sized
+    for a map read ``read_width`` pixels wide. ``as_page`` draws them as the page opens on
+    them, where a picture with no zoom spreads every mark and names it beside it: a crowd
+    past the map's own count (`crowds`, `CROWDS` by default) as that count in a ring of its
+    colours, a mark's name under it. ``plain`` is what a map with no ground is drawn on in
+    place of its plain background."""
     width = max(200, min(int(width), 4096))
     bounds = list(data.get("bounds") or [-10, -10, 10, 10])
     project = _Projector(bounds)
@@ -2323,7 +2369,9 @@ def render_png(data: Mapping[str, Any], width: int, *, ground: "Image.Image | Pa
     supersample = 2
     big = (width * supersample, height * supersample)
     canvas = _ground_image(data, ground, big, project)
-    if data.get("ground") or ground is not None:
+    if plain is not None and not data.get("ground") and ground is None:
+        canvas = plain.convert("RGBA").resize(big, Image.Resampling.LANCZOS)
+    elif data.get("ground") or ground is not None:
         # the ground muted under the marks, as the page shows it; a dark base is its street map turned dark
         if data.get("base") == "dark":
             canvas = dark_ground(canvas)
@@ -2337,7 +2385,7 @@ def render_png(data: Mapping[str, Any], width: int, *, ground: "Image.Image | Pa
     every = list(data.get("features") or [])
     faint = traces(every, shown_day)
     features = [feature for feature in every if shows_on(feature, shown_day) or feature["id"] in faint]
-    pixel = big[0] / READ_WIDTH  # a CSS pixel of a map read at READ_WIDTH, in canvas pixels
+    pixel = big[0] / read_width  # a CSS pixel of a map read at read_width, in canvas pixels
 
     def at(lon: float, lat: float) -> tuple[float, float]:
         x, y = project(lon, lat)
@@ -2377,7 +2425,11 @@ def render_png(data: Mapping[str, Any], width: int, *, ground: "Image.Image | Pa
     points = sorted((feature for feature in features if feature["kind"] == "point"), key=lambda one: -one["coords"][1])
     kept: dict[str, Image.Image] = {}
     true = {feature["id"]: at(*feature["coords"]) for feature in points}
-    spread = arrange([(ident, x / pixel, y / pixel) for ident, (x, y) in true.items()])
+    crowded: list[tuple[list[str], float, float]] | None = [] if as_page else None
+    spread = arrange([(ident, x / pixel, y / pixel) for ident, (x, y) in true.items()], crowds=crowded,
+                     crowd_from=math.inf if data.get("crowds") == 0 else float(data.get("crowds") or CROWDS))
+    grouped = {ident for ids, _, _ in crowded or [] for ident in ids}
+    points = [feature for feature in points if feature["id"] not in grouped]
     where = {ident: (spread[ident][0] * pixel, spread[ident][1] * pixel) if ident in spread else spot
              for ident, spot in true.items()}
     leaders = ImageDraw.Draw(canvas)
@@ -2392,32 +2444,52 @@ def render_png(data: Mapping[str, Any], width: int, *, ground: "Image.Image | Pa
     for feature in points:
         style = feature["style"]
         side = max(8, round(MARKER_PX * float(style.get("size") or 1) * pixel))
-        key = ("proof-pov" if style.get("pov") else "proof") if style.get("proof") else str(style.get("icon") or "")
-        marker = kept.get(f"{key}/{side}")
-        if marker is None:
-            icon = dict((icons or {}).get(key) or {})
-            if not icon:
-                icon = _icon_from_key(key, style)
-            marker = _marker_image(icon, side)
-            kept[f"{key}/{side}"] = marker
+        key = marker_key(style)
+        painted = kept.get(f"{key}/{side}")
+        if painted is None:
+            painted = kept[f"{key}/{side}"] = marker(key, style, icons, side)
         x, y = where[feature["id"]]
-        canvas.alpha_composite(marker, (round(x - side / 2), round(y - side / 2)))
+        canvas.alpha_composite(painted, (round(x - side / 2), round(y - side / 2)))
+    colours = {feature["id"]: _rgb(feature["style"].get("color")) for feature in features if feature["id"] in grouped}
+    for ids, x, y in crowded or []:
+        _draw_bubble(canvas, [colours[ident] for ident in ids], x * pixel, y * pixel, pixel)
     named = [feature for feature in features if feature["kind"] != "point" and feature.get("at")
              and feature["style"].get("label") and feature["id"] not in faint]
     _draw_labels(canvas, named, lambda feature: at(*feature["at"]), pixel, centred=True)
     _draw_labels(canvas, [feature for feature in points if feature["style"].get("label")],
-                 lambda feature: where[feature["id"]], pixel)
+                 lambda feature: where[feature["id"]], pixel, under=as_page)
     if data.get("north"):
         _draw_north(canvas, pixel)
     if data.get("scale") == "on":
         _draw_scale(canvas, bounds, project, pixel)
-    out = canvas.convert("RGB").resize((width, height), Image.Resampling.LANCZOS)
-    buffer = BytesIO()
-    if fmt.upper() == "JPEG":
-        out.save(buffer, "JPEG", quality=86, optimize=True, progressive=True)
-    else:
-        out.save(buffer, "PNG", optimize=True)
-    return buffer.getvalue()
+    return canvas.convert("RGB").resize((width, height), Image.Resampling.LANCZOS)
+
+
+def _draw_bubble(canvas: Image.Image, colours: list[tuple[int, int, int]], x: float, y: float, pixel: float) -> None:
+    """A crowd's count where it stands, as the page draws it: a dark disc ringed white, a ring of
+    its marks' colours in their shares, its number in the middle."""
+    count = len(colours)
+    radius = (BUBBLE_RADIUS + min(9.0, count / 5)) * pixel
+    draw = ImageDraw.Draw(canvas)
+    draw.ellipse((x - radius, y - radius, x + radius, y + radius), fill=(16, 18, 22, 230), outline=(255, 255, 255, 255),
+                 width=max(1, round(1.5 * pixel)))
+    shares: dict[tuple[int, int, int], int] = {}
+    for colour in colours:
+        shares[colour] = shares.get(colour, 0) + 1
+    ring = radius - 2.5 * pixel
+    wide = max(1, round(BUBBLE_RING * pixel))
+    turn = -90.0
+    for colour, share in shares.items():
+        sweep = share / count * 360
+        end = turn + max(0.1, sweep - (4.6 if len(shares) > 1 else 0.0))
+        outer = ring + wide / 2
+        draw.arc((x - outer, y - outer, x + outer, y + outer), turn, end, fill=(*colour, 255), width=wide)
+        for angle in ((turn, end) if len(shares) > 1 else ()):
+            # the page rounds each arc's ends
+            cx, cy = x + ring * math.cos(math.radians(angle)), y + ring * math.sin(math.radians(angle))
+            draw.ellipse((cx - wide / 2, cy - wide / 2, cx + wide / 2, cy + wide / 2), fill=(*colour, 255))
+        turn += sweep
+    draw.text((x, y), str(count), font=_font(max(8, round(BUBBLE_TEXT * pixel))), anchor="mm", fill=(255, 255, 255, 255))
 
 
 def dark_ground(picture: Image.Image) -> Image.Image:
@@ -2568,11 +2640,20 @@ def _dashes(points: list[tuple[float, float]], on: float, off: float) -> Iterato
         yield current
 
 
+#: A mark's name as the page writes it under the mark (`LABEL_PX` in reader.map.js), its baseline
+#: this many of its sizes under the mark's middle.
+LABEL_PX = 11.0
+LABEL_UNDER = 1.75
+
+
 def _draw_labels(canvas: Image.Image, features: list[dict[str, Any]],
-                 at: Callable[[dict[str, Any]], tuple[float, float]], pixel: float, *, centred: bool = False) -> None:
+                 at: Callable[[dict[str, Any]], tuple[float, float]], pixel: float, *, centred: bool = False,
+                 under: bool = False) -> None:
+    """The names, each kept off those already written: a line's or an area's on its middle
+    (``centred``), a mark's beside it, or ``under`` it as the page writes it."""
     if not features:
         return
-    size = max(10, round(12.5 * pixel))
+    size = max(10, round((LABEL_PX if under and not centred else 12.5) * pixel))
     font = _font(size)
     draw = ImageDraw.Draw(canvas)
     taken: list[tuple[float, float, float, float]] = []
@@ -2581,8 +2662,10 @@ def _draw_labels(canvas: Image.Image, features: list[dict[str, Any]],
         if not text:
             continue
         x, y = at(feature)
-        left = x if centred else x + 15 * pixel
-        anchor = "mm" if centred else "lm"
+        left = x if centred or under else x + 15 * pixel
+        anchor = "mm" if centred else "ms" if under else "lm"
+        if under and not centred:
+            y += LABEL_UNDER * size
         box = draw.textbbox((left, y), text, font=font, anchor=anchor)
         if any(box[0] < other[2] and other[0] < box[2] and box[1] < other[3] and other[1] < box[3] for other in taken):
             continue
@@ -2849,5 +2932,6 @@ def _text(value: str) -> str:
 
 __all__ = [
     "BASES", "BLOCK", "CARD_PARTS", "Derived", "MapBlock", "Step", "TOKEN", "block_text", "blocks_in", "derive",
-    "fit_view", "ground_bounds", "label_anchor", "parse_block", "render_png", "settings_lines", "step_text", "svg",
+    "fit_view", "ground_bounds", "label_anchor", "marker", "marker_key", "parse_block", "picture", "render_png",
+    "settings_lines", "step_text", "svg",
 ]

@@ -91,6 +91,15 @@
     if (!stage || !svg) return null;
     const ground = stage.querySelector('.az-map-ground');
     const world = stage.querySelector('.az-map-world');
+    /* a stage of another shape than the map's (a map page, the whole screen) holds the map whole in its middle:
+       the bands round it show the map's own ground, stretched to cover them, blurred and darkened, under the
+       drawing and under a live map taking over (reader.map.css), so they never read as a map still loading */
+    let fill = null;
+    function filled() {
+      if (fill || !ground) return;
+      fill = make('img', { class: 'az-map-fill', src: ground.getAttribute('src') || '', alt: '', 'aria-hidden': 'true', decoding: 'async' });
+      stage.prepend(fill);
+    }
     const details = all('.az-map-detail', stage);
     const [, , W = 1600, H = 1000] = String(svg.getAttribute('viewBox') || '').split(/[\s,]+/).map(Number);
     const [west, south, east, north] = data.bounds || [0, 0, 1, 1];
@@ -868,6 +877,7 @@
     function changed(on) {
       full = on;
       if (on) {
+        filled();
         side = make('div', { class: 'az-map-side' });
         side.append(...[...figure.children].filter((node) => !node.matches('.az-map-frame, script')));
         figure.append(side);
@@ -953,6 +963,7 @@
         paged = true;
         full = true;
         figure.classList.add('az-paged');
+        filled();
         for (const button of all('[data-act="full"]', figure)) labelled(button);
         if (!root.requestFullscreen || doc.fullscreenEnabled === false) screens.hidden = true;
         refit();
