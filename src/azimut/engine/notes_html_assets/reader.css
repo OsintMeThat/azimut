@@ -596,6 +596,18 @@ html:not(.az-js) .az-graphic:focus-within img { filter: none; transform: none; }
 .az-made a { color: inherit; }
 .az-edition { font-weight: 700; color: var(--ink); }
 
+/* a footnote: a raised letter, its words under Notes before the sources */
+sup.az-fn { font: 600 .7em/0 var(--ui); vertical-align: .55em; }
+.az-fn > a { padding: 0 .15em; border-radius: 3px; text-decoration: none; }
+.az-fn > a:hover, .az-notes li:target { background: var(--accent-soft); }
+.az-notes { width: min(var(--measure), 100% - 2 * var(--gutter)); margin: 4.5rem auto 0; padding-top: 1.5rem; border-top: 2px solid var(--ink); font: 400 .875rem/1.55 var(--ui); }
+.az-notes > h2 { margin: 0 0 1rem; font-size: .8125rem; letter-spacing: .12em; text-transform: uppercase; }
+.az-notes li { padding: .3rem 0; overflow-wrap: anywhere; scroll-margin-top: calc(var(--bar) + 5rem); }
+.az-notes li::marker { color: var(--accent-ink); font-weight: 700; }
+.az-back { text-decoration: none; }
+.az-contents-notes a { font-style: italic; }
+@media print { .az-notes { width: auto; } .az-back { display: none; } }
+
 /* the lightbox, made by reader.js */
 .az-lightbox {
   position: fixed; inset: 0; width: 100%; height: 100%; max-width: none; max-height: none; margin: 0; padding: 0; border: 0; overflow: hidden;

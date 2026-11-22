@@ -35,6 +35,10 @@ the public edition. The check lists each one, and the export can round them to a
 **Counts.** A count with no "at least" or range before it is said by the check as a
 warning (`COUNT`), never changed. A confidence the analyst typed is printed as typed.
 
+**Footnotes.** A `^[words]` is a small letter in the text (`sup.az-fn`, a, b… in reading
+order, its words a card a press away for the reader script) and its words, drawn as any
+line is, under Notes before the sources (`section.az-notes`), each linking back to its letter.
+
 **Maps.** A `::: map` block is a figure the reader can move about (`engine/notes_maps.py`
 reads what it shows): the ground filed when it was put in, the layers' features drawn
 over it as SVG in their own colours and pictograms, a card a press away for each, and a
@@ -229,6 +233,9 @@ SCENE_WORDS = re.compile(r"<(?:p|ul|ol|blockquote|h4|h5|h6)[ >]|<aside class=\"a
 #: Ids the page keeps for itself.
 RESERVED_IDS = frozenset({"sources", "corrections", "contents", "top", "main", "cover", "footer"})
 RESERVED_ID = re.compile(r"^(?:src|clip|fig|step|limits|map)-\d+$")
+#: The ids of the Notes and of each footnote, which a heading never takes.
+FOOTNOTE_IDS = frozenset({"notes", "notes-title"})
+FOOTNOTE_ID = re.compile(r"^fn(?:ref)?-[a-z]+$")
 #: The side of a picture a map's card shows.
 CARD_SIDE = 640
 
@@ -608,6 +615,10 @@ class _Page:
         self._limit_ids: list[str] = []
         #: The note's words, which a chart reads for whether the note calls its figures minimums.
         self._note_text = ""
+        #: Each footnote as (letter, words drawn), in reading order, which the Notes list before the
+        #: sources; and the letter each footnote's token was given, the token kept so its id stays its own.
+        self.footnotes: list[tuple[str, str]] = []
+        self._footnote_marks: dict[int, tuple[Token, str]] = {}
 
     # -- the whole document -------------------------------------------------------
 
@@ -673,6 +684,7 @@ class _Page:
         if self.look.signed == "end":
             # a guest's picture stands left of their name, as on the cover's author card
             body += self._signature("az-signed-end", self._author_face())
+        notes = self._scrub(self._notes())
         sources = self._sources()
         earlier = list(earlier)
         profile = self.cited.profile
@@ -682,7 +694,7 @@ class _Page:
         footer = self._footer(printed)
         warning = f'<p class="az-graphic-warning" role="note">{_text(GRAPHIC_WARNING)}</p>\n' if self.graphic else ""
         if self.look.web == "map":
-            laid = self._map_page(title, body, f"{sources}{annexes}{corrections}{footer}")
+            laid = self._map_page(title, body, f"{notes}{sources}{annexes}{corrections}{footer}")
             if laid is not None:
                 return self._assemble(title, warning + laid)
             self._warn(NO_MAP_PAGE, None, md.OTHER)
@@ -690,7 +702,7 @@ class _Page:
         # the contents, the text and its end matter share one box, which the contents
         # rail stays inside: it never runs into the footer
         page = (f'{warning}{head}<div class="az-page">\n{contents}<main class="az-body" id="main">\n{body}</main>\n'
-                f"{sources}{annexes}{corrections}</div>\n{footer}")
+                f"{notes}{sources}{annexes}{corrections}</div>\n{footer}")
         return self._assemble(title, page)
 
     def _map_page(self, title: str, body: str, end: str) -> str | None:
@@ -1148,7 +1160,7 @@ class _Page:
 
     def _new_id(self, wanted: str) -> str:
         base = wanted or "section"
-        if base in RESERVED_IDS or RESERVED_ID.match(base):
+        if base in RESERVED_IDS or RESERVED_ID.match(base) or base in FOOTNOTE_IDS or FOOTNOTE_ID.match(base):
             base = f"{base}-section"
         candidate, counter = base, 2
         while candidate in self.ids:
@@ -1159,7 +1171,7 @@ class _Page:
     def _contents(self, sources: bool, corrections: bool, annexes: list[tuple[str, str]] | None = None) -> str:
         entries = list(self.headings)
         annexes = annexes or []
-        if not entries and not sources and not annexes:
+        if not entries and not sources and not annexes and not self.footnotes:
             return ""
         items: list[str] = []
         open_sub = False
@@ -1178,6 +1190,8 @@ class _Page:
             items.append(f"<li>{link}</li>")
         if open_sub:
             items.append("</ol></li>")
+        if self.footnotes:
+            items.append('<li class="az-contents-notes"><a href="#notes">Notes</a></li>')
         if sources:
             items.append(f'<li class="az-contents-sources"><a href="#sources">{_text(self.cited.list_title)}</a></li>')
         items.extend(f'<li class="az-contents-annex"><a href="#{ident}">{_text(name)}</a></li>' for ident, name in annexes)
@@ -1603,6 +1617,8 @@ class _Page:
                 parts.append(links.pop() if links else "")
             elif kind == "image":
                 parts.append(self._inline_picture(child))
+            elif kind == md.FOOTNOTE_TOKEN:
+                parts.append(self._footnote(child))
             elif kind == "code_inline":
                 parts.append(f"<code>{_text(child.content)}</code>")
             elif kind == "softbreak":
@@ -1617,6 +1633,19 @@ class _Page:
                 parts.append(_text(child.content) if links else self._prose(child.content))
         parts.extend(reversed(links))
         return "".join(parts)
+
+    def _footnote(self, token: Token) -> str:
+        """A footnote's letter where it is written, which opens its words as a card and links to
+        them under Notes; its words are drawn as any line is, a link in them citing its source."""
+        known = self._footnote_marks.get(id(token))
+        if known is not None:
+            letter = known[1]
+        else:
+            letter = md.footnote_letter(len(self.footnotes))
+            self._footnote_marks[id(token)] = (token, letter)
+            self.footnotes.append((letter, self._inline(md.footnote_words(token))))
+        return (f'<sup class="az-fn" id="fnref-{letter}"><a href="#fn-{letter}" data-card="fn-{letter}" '
+                f'data-label="Note {letter}">[{letter}]</a></sup>')
 
     def _link(self, token: Token) -> tuple[str, str]:
         """How a written link opens and closes: the words that cite a source open its card."""
@@ -1984,7 +2013,7 @@ class _Page:
 
     def _describe(self, body: str) -> str:
         """What the page is about, for a link's card: the cover's subtitle, else the
-        first paragraph of its text."""
+        first paragraph of its text, its footnotes left out."""
         said = " ".join(self.look.cover.subtitle.split())
         if not said:
             found = re.search(r'<p dir="auto">(.*?)</p>', body, re.S)
@@ -1992,6 +2021,7 @@ class _Page:
                 return ""
             inner = re.sub("\x00T(\\d+)\x00", lambda match: _text(self.times[int(match.group(1))].words),
                            found.group(1))
+            inner = re.sub(r'<sup class="az-fn"[^>]*>.*?</sup>', "", inner)
             said = " ".join(html.unescape(re.sub("<[^>]*>|\x00C\\d+\x00", "", inner)).split())
         return _clipped(said, DESCRIPTION_CHARS)
 
@@ -2637,6 +2667,15 @@ class _Page:
         return DATA_ATTRIBUTE.sub(lift, html)
 
     # -- the end of the page ------------------------------------------------------------
+
+    def _notes(self) -> str:
+        """The footnotes, lettered as their marks in the text, each linking back to its mark."""
+        if not self.footnotes:
+            return ""
+        items = "".join(f'<li id="fn-{letter}"><a class="az-back" href="#fnref-{letter}" aria-label="Back to the text">'
+                        f"^</a> {words}</li>\n" for letter, words in self.footnotes)
+        return (f'<section class="az-notes" id="notes" aria-labelledby="notes-title">\n'
+                f'<h2 id="notes-title">Notes</h2>\n<ol type="a">\n{items}</ol>\n</section>\n')
 
     def _sources(self) -> str:
         """The sources the page cites, grouped by what they are (`notesources.GROUPS`), each

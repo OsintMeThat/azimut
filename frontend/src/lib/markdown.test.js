@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { entityReference, markdownHtml, remoteImageUrls } from './markdown.js';
+import { entityReference, markdownHtml, markdownInlineHtml, remoteImageUrls } from './markdown.js';
 
 describe('markdownHtml', () => {
   it('renders GitHub-flavored tables, task lists and fenced code', () => {
@@ -7,6 +7,16 @@ describe('markdownHtml', () => {
     expect(html).toContain('<table>');
     expect(html).toContain('type="checkbox"');
     expect(html).toContain('<pre><code class="language-js">');
+  });
+
+  it('draws a footnote as a small mark, its words on hover, wherever a part of a note is drawn alone', () => {
+    expect(markdownInlineHtml('Cougar^[Seen twice, [here](https://example.org/a) & *there*.]')).toBe(
+      '<span>Cougar<sup class="md-footnote" title="Footnote: Seen twice, here &amp; there.">†</sup></span>');
+    expect(markdownHtml('Open to both,^[The 1921 text.] for long.')).toContain('both,<sup class="md-footnote"');
+    // escaped, in code or never closed, it is text
+    expect(markdownHtml('Seen \\^[no] there')).toContain('Seen ^[no] there');
+    expect(markdownHtml('Seen `^[no]` there')).toContain('<code>^[no]</code>');
+    expect(markdownHtml('Seen ^[never closed')).toContain('Seen ^[never closed');
   });
 
   it('removes unsafe HTML and URL schemes', () => {

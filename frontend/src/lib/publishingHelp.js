@@ -39,7 +39,7 @@ export const PUBLISHING_HELP = {
   styleMethod: 'Facts read from the case: tools, days, counts, fingerprints, edition',
   styleLimits: 'Every Limits box of the note, gathered at the end',
   styleEditions: 'The public editions before this one, and what each corrected',
-  styleWritten: 'How each source is written: academic, for the web, or short',
+  styleWritten: 'How the PDF writes each source: academic, for the web, or short. A web page lists them as cards',
   styleCheck: 'How the check before export names links with no archived copy or no seen day',
   stylesReset: "Every style back to what Azimut gives it",
 };

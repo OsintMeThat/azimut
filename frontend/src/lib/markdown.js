@@ -2,6 +2,7 @@ import DOMPurify from 'dompurify';
 import { marked, Renderer } from 'marked';
 
 import { fileRelPath, fileUrl } from './fileUrl.js';
+import { findFootnotes, footnoteText } from './notes/footnotes.js';
 import { blockSide, readAttrs } from './notes/pictureSize.js';
 import { BUILT_IN_ADDRESS, builtInPicture, builtInSrc } from './notes/reportParts.js';
 import { withoutLookLines } from './notes/editor/tableLook.js';
@@ -15,6 +16,28 @@ const ATTR_PARAM = '__azimut_attrs';
 /** Wrapper a ```mermaid fence renders to, and the hook lib/mermaid.js draws into. */
 export const MERMAID_CLASS = 'mermaid-diagram';
 const purify = typeof window === 'undefined' ? null : DOMPurify(window);
+
+/**
+ * A footnote (`^[words]`, `lib/notes/footnotes.js`) where a part of a note is drawn on its own
+ * (a table's cell, a step's words, an aligned block, a copy): a small mark with its words on
+ * hover. The note's page letters it, and every document made from it.
+ */
+marked.use({
+  extensions: [{
+    name: 'footnote',
+    level: 'inline',
+    start: (src) => {
+      const at = src.indexOf('^[');
+      return at < 0 ? undefined : at;
+    },
+    tokenizer: (src) => {
+      if (!src.startsWith('^[')) return undefined;
+      const [note] = findFootnotes(src);
+      return note?.from === 0 ? { type: 'footnote', raw: src.slice(0, note.to), words: note.words } : undefined;
+    },
+    renderer: (token) => `<sup class="md-footnote" title="${escapeHtml(`Footnote: ${footnoteText(token.words)}`)}">†</sup>`,
+  }],
+});
 
 function escapeHtml(value) {
   return String(value)

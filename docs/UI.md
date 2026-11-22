@@ -7330,7 +7330,7 @@ written in included, so nothing moves as the caret goes from line to line
 
 **The insert menu.** **/**, the **+** in the left margin of the empty line being
 written, or the toolbar's **+** open one menu in five parts: **Text** (headings, lists,
-a to-do, a quote, **Callout ›** with its six kinds, Internal, code, today's date, a dated
+a to-do, a quote, a footnote, **Callout ›** with its six kinds, Internal, code, today's date, a dated
 log entry), **Media** (a case picture, an image from a file, **Steps** and **Story**, an
 empty `::: steps` or `::: story` block, the cursor after it, drawn as its strip, your logo), **From the
 case** (a case item, a **Post from X or Bluesky**, an **Interactive map**, a note included as a chapter), **Layout**
@@ -7345,7 +7345,7 @@ Internal. Every entry is one Undo step. An empty note says once, *Type / or pres
 add anything*, until the menu is first used in this browser.
 
 **The selection bubble.** Words selected on the drawn page bring up a bar above them,
-or under them near the top of the page, never over them: **B**, **I**, **Link**, **H**,
+or under them near the top of the page, never over them: **B**, **I**, **Link**, **Footnote**, **H**,
 a bulleted list, a quote, **</>**, **Internal** and **Clear**, each title naming its key.
 Each press writes the Markdown an expert would type, read from the syntax tree (the
 `*` of italic is never taken for half of a bold's `**`), as one Undo step; a mark set on
@@ -7365,7 +7365,23 @@ a page it does not hold offers **Link**, or **Bookmark it**, which files it as a
 named from its address and cites it. Words that are not an address find the case's
 items by name, a press citing one. A written link opens with its address, and
 **Remove** keeps its words. Ctrl+K anywhere else in the note still opens Go to. The
-bar above holds the same as buttons. Enter on an empty item leaves the list. Pasting or dropping an image adds it to the case's media;
+bar above holds the same as buttons.
+
+**Footnotes.** A comment the reader opens from a small letter, written `^[words]` (Pandoc's
+inline footnote, `lib/notes/footnotes.js`). The page never shows it written: it is its
+letter, a, b… in reading order as every document letters it, its words on hover, and the
+caret steps over it whole. **Footnote** in the bubble opens a one-line field under the words
+selected; Enter writes the footnote right after them, Escape leaves the note alone. The
+`/` menu's **Footnote** opens the same field at the cursor, the letter on the word before.
+A press on a letter opens it alone, its words to change, and **Remove** (clearing the
+words does the same). Each is one Undo step, and a bracket that would end it early is
+escaped. In a table's cell or a step's words it is a small † with its words on hover.
+The HTML page, the PDF and a WordPress draft print its letter in the text and its words
+under **Notes** before the sources, a link in them cited like any other; a public
+edition letters only the footnotes it shows. A summary, a word count and the contents
+leave them out; search finds their words.
+
+Enter on an empty item leaves the list. Pasting or dropping an image adds it to the case's media;
 a library file dragged in lands as its picture. A link pasted alone is offered as a
 bookmark of the case, titled from its address, nothing fetched. A note with a remote
 image says its host is contacted on every open.
@@ -7550,6 +7566,30 @@ note's text is never changed: its sources list the copy and the day, and the che
 counts the link no more. Offline or past the archive's patience it stops and says so,
 keeping what it did; failed links are tried again on the next press, and a run cut
 short by Azimut closing waits for that press rather than going on at startup.
+Once a page has its copy, the same press reads that copy back from the archive for the
+title and the day the page states of itself, never from the page's own site, and keeps
+them on its bookmark; a bookmark it filed takes that title as its name. A copy the archive
+kept of another page (a redirect to another story, a home page) gives no title. Links
+archived before are read for their titles too: *N page titles to read* in the plan, and
+**Read N page titles** when nothing is left to archive. Posts on X, Telegram, Instagram,
+Facebook, TikTok and Bluesky are cited by their account and day instead, an X or a TikTok
+post's moment read off its address.
+
+**Sources on a web page.** The HTML page and the web folder cite without numbers: the
+words that cite a source (a link, a mention, a figure's credit, a proof's name in the
+Geolocations annex) open its card on hover after a beat, on keyboard focus, and on a
+finger's first tap, which then offers *Go to the list*; a mouse's click still opens the
+original. The list at the end groups the sources into Books and reports, Articles and
+pages, Posts and footage, Imagery, Made for this article and Other files, each in the order
+the text first cites it: who and where, the work's own title linked, its day, its archived
+copy, the day it was read, and what a made item was made from, each linked to its entry.
+Footnotes (`[a]`) open their own card and are listed under Notes before the sources. The
+PDF keeps its numbered list, written as the look's *Sources written as* says.
+
+**Book or report.** A record made on the Board under Work (title, author, publisher,
+year, kind, and where it can be read online when it can) for a source with no address. A
+note cites it with @; on a web page its words open its card and the list names it under
+Books and reports, its title in italics. The page cited is written in the sentence.
 
 **PDF | HTML.** The export dialog opens with a **PDF | HTML** switch, the last one picked
 kept for this browser; everything else (the edition, the destination, the check, the
@@ -7581,8 +7621,9 @@ paragraph), featured image (the cover picture, else the first credited one), and
 written as a person would in the block editor: headings, paragraphs, lists, quotes,
 tables, separators, code, each picture an image block with its caption and credit linked
 to the full picture, a comparison's two sides in two columns with their labels, a graphic
-picture folded in a Details block, a callout as a paragraph led by its label, and the
-numbered **Sources** list every `[n]` links to. Diagrams go as the PNG the browser drew;
+picture folded in a Details block, a callout as a paragraph led by its label, each
+footnote's `[a]` an anchor to its words under **Notes**, and the numbered **Sources** list
+every `[n]` links to. Diagrams go as the PNG the browser drew;
 the Story layout and `::: steps`/`::: story` read as a plain article. The dialog then says
 *Draft saved in WordPress* (or *updated*) with **Preview** and **Open in WordPress**.
 Sending the note again updates its draft while it is still one, reusing the pictures

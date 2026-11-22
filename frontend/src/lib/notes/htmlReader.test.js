@@ -72,8 +72,9 @@ describe('the page without anything pressed', () => {
     // 75 KB until the story layout, the bar and the links the page takes itself came in; 84 KB
     // until charts appended their own section (a map's reader is spliced in only where a map is);
     // 88 KB until the cover's author card, the analyst's logo set by their name; 89 KB until the
-    // words that cite a source opened its card on hover, on focus and on a finger's tap
-    expect(Buffer.byteLength(READER) + Buffer.byteLength(CSS)).toBeLessThan(92 * 1024);
+    // words that cite a source opened its card on hover, on focus and on a finger's tap, and
+    // footnotes came with their raised letters and their Notes
+    expect(Buffer.byteLength(READER) + Buffer.byteLength(CSS)).toBeLessThan(93 * 1024);
   });
 });
 
