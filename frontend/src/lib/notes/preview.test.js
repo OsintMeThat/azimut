@@ -5,7 +5,7 @@ vi.mock('../api.js', () => ({ api: { postBytes } }));
 vi.mock('../notesExport.js', () => ({ drawDiagrams: vi.fn(), asSvg: (svg) => svg }));
 
 const {
-  MOST_DELAY, createPreview, fetchHtmlPreview, fetchPreview, forgetDiagrams, headerList, internalHeader, noteWarnings, pageLine,
+  BUSY_PAUSE, BUSY_TRIES, MOST_DELAY, createPreview, fetchHtmlPreview, fetchPreview, forgetDiagrams, headerList, internalHeader, noteWarnings, pageLine,
 } = await import('./preview.js');
 
 const page = (overrides = {}) => ({ data: new ArrayBuffer(4), pages: [0], diagrams: [], warnings: [], ...overrides });
@@ -133,6 +133,43 @@ describe('a pane drawn as the note is typed', () => {
     expect(fetch).toHaveBeenCalledTimes(1);
     expect(fetch.mock.calls[0][0].text).toBe('ab');
     expect(onresult).toHaveBeenCalledTimes(1);
+  });
+
+  it('waits while the server lays out another page, and asks again rather than going blank', async () => {
+    const busy = Object.assign(new Error('another preview is still being laid out'), { status: 503 });
+    let refusals = 2;
+    const fetch = vi.fn(async () => {
+      if (refusals > 0) { refusals -= 1; throw busy; }
+      return page({ pages: [3] });
+    });
+    const onresult = vi.fn();
+    const onerror = vi.fn();
+    const preview = createPreview({ fetch, onresult, onerror, draw: vi.fn() });
+    const done = preview.now({ text: 'a' });
+    await vi.advanceTimersByTimeAsync(BUSY_PAUSE * 2 + 10);
+    await done;
+    expect(fetch).toHaveBeenCalledTimes(3);
+    expect(onerror).not.toHaveBeenCalled();
+    expect(onresult.mock.calls.map(([answer]) => answer.pages)).toEqual([[3]]);
+  });
+
+  it('says the server is busy only once it never freed, and a newer request is asked instead of the old one', async () => {
+    const busy = Object.assign(new Error('another preview is still being laid out'), { status: 503 });
+    const fetch = vi.fn(async () => { throw busy; });
+    const onerror = vi.fn();
+    const preview = createPreview({ fetch, onerror, draw: vi.fn() });
+    const done = preview.now({ text: 'a' });
+    await vi.advanceTimersByTimeAsync(BUSY_PAUSE * (BUSY_TRIES + 1));
+    await done;
+    expect(fetch).toHaveBeenCalledTimes(BUSY_TRIES + 1);
+    expect(onerror).toHaveBeenCalledWith('another preview is still being laid out');
+    fetch.mockImplementationOnce(async () => { throw busy; }).mockImplementation(async () => page());
+    const again = preview.now({ text: 'old' });
+    await vi.advanceTimersByTimeAsync(10);
+    void preview.now({ text: 'new' });
+    await vi.advanceTimersByTimeAsync(BUSY_PAUSE + 10);
+    await again;
+    expect(fetch.mock.calls.slice(-2).map(([request]) => request.text)).toEqual(['old', 'new']);
   });
 
   it('lets the request in flight finish, then asks once for the newest made meanwhile', async () => {
