@@ -48,7 +48,7 @@
   import { toast, reloadCase, prefs, uiState } from '../lib/state.svelte.js';
   import { foldText } from '../lib/textFold.js';
   import { mediaReference, entityReference, remoteImageUrls } from '../lib/markdown.js';
-  import { createBookmark } from '../lib/bookmarks.js';
+  import { createBookmark, describeBookmark } from '../lib/bookmarks.js';
   import { openerFor } from '../lib/notes/openers.js';
   import '../lib/notes/openersLoaded.js';
   import { canStateSourceOf, lookupSource, sourceItem, statePostedOf, stateSourceOf } from '../lib/notes/sources.js';
@@ -189,7 +189,9 @@
     url: (url, from, to) => offerBookmark(url, from, to),
     // the Link field and the citation card ask the case what it holds at an address, and can file one as a bookmark; nothing is fetched
     get lookup() { return template || !caseId ? null : (url, words) => lookupSource(caseId, url, { words, note: ownId }); },
-    get bookmark() { return template || !caseId ? null : (url, title) => fileBookmark(url, title); },
+    get bookmark() { return template || !caseId ? null : (url, title, facts) => fileBookmark(url, title, facts); },
+    // who put a bookmarked post up and when, for an address that names neither
+    get describe() { return template || !caseId ? null : (id, facts) => describeFiled(id, facts); },
     // what the case knows of the item a chip cites, for the citation card
     get source() { return template || !caseId ? null : (id) => sourceItem(caseId, id, { note: ownId }); },
     media: (event, at) => dropMedia(event, at),
@@ -571,7 +573,7 @@
   }
 
   /** A page filed as a bookmark of the case, named from what the case read off its address, else its host and path. Nothing is fetched. */
-  async function fileBookmark(url, title = '') {
+  async function fileBookmark(url, title = '', facts = {}) {
     let name = title || url;
     if (!title) {
       try {
@@ -580,9 +582,22 @@
       } catch { /* the address itself */ }
     }
     try {
-      const entity = await createBookmark(caseId, { title: name, url });
+      const entity = await createBookmark(caseId, { title: name, url, ...facts });
       await reloadCase();
       toast(`Bookmark “${name}” filed`, 'ok', 2200);
+      return entity;
+    } catch (error) {
+      toast(error.message, 'danger');
+      return null;
+    }
+  }
+
+  /** Who put a bookmarked post up and when, written on its bookmark from the Link field. */
+  async function describeFiled(id, facts) {
+    try {
+      const entity = await describeBookmark(caseId, id, facts);
+      await reloadCase();
+      toast('Saved on the bookmark', 'ok', 2200);
       return entity;
     } catch (error) {
       toast(error.message, 'danger');

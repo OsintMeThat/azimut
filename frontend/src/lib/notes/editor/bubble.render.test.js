@@ -227,6 +227,54 @@ describe('the Link field', () => {
     expect(text()).toBe('See [[entity:b9|example.org/report]] here.');
   });
 
+  it('asks who posted a post and when, for an address that names neither, and files them with the bookmark', async () => {
+    const post = 'https://www.instagram.com/p/DIC1c6ysX7w/';
+    handlers.lookup = vi.fn(async (url) => ({ url, title: 'Instagram post DIC1c6ysX7w', found: [] }));
+    handlers.bookmark = vi.fn(async () => ({ id: 'b7', label: 'Instagram post DIC1c6ysX7w' }));
+    editor('See the ceremony photo.', 0, 0);
+    select('the ceremony photo');
+    openLinkField(view);
+    await typeAddress(post);
+    field().querySelector('.cm-link-author').value = '@gaivire_8';
+    field().querySelector('.cm-link-day').value = '2026-01-04';
+    [...field().querySelectorAll('button')].find((button) => button.textContent === 'Bookmark it').click();
+    await settle();
+    expect(handlers.bookmark).toHaveBeenCalledWith(post, 'Instagram post DIC1c6ysX7w', { author: '@gaivire_8', published: '2026-01-04' });
+    expect(text()).toBe('See [[entity:b7|Instagram post DIC1c6ysX7w]].');
+  });
+
+  it('asks nothing more of a page, whose own copy says its day', async () => {
+    handlers.lookup = vi.fn(async (url) => ({ url, title: 'example.org/report', found: [] }));
+    handlers.bookmark = vi.fn(async () => ({ id: 'b9', label: 'example.org/report' }));
+    editor('See the report here.', 0, 0);
+    select('the report');
+    openLinkField(view);
+    await typeAddress('https://example.org/report');
+    expect(field().querySelector('.cm-link-who')).toBeNull();
+  });
+
+  it('writes who posted a bookmarked post and when on its bookmark, from the field', async () => {
+    const post = 'https://www.instagram.com/p/DIC1c6ysX7w/';
+    const known = { id: 'b7', type: 'bookmark', label: 'Instagram post', noun: 'Bookmark', address: post, author: '', published: '' };
+    handlers.lookup = vi.fn(async (url) => ({ url, title: 'Instagram post', known }));
+    handlers.describe = vi.fn(async () => ({ id: 'b7' }));
+    editor('See the ceremony photo.', 0, 0);
+    select('the ceremony photo');
+    openLinkField(view);
+    await typeAddress(post);
+    expect(field().querySelector('.cm-link-head').textContent).toBe('In the case: Instagram post');
+    field().querySelector('.cm-link-author').value = '@gaivire_8';
+    field().querySelector('.cm-link-day').value = '2026-01-04';
+    known.author = '@gaivire_8';
+    known.published = '2026-01-04';
+    [...field().querySelectorAll('button')].find((button) => button.textContent === 'Save').click();
+    await settle();
+    expect(handlers.describe).toHaveBeenCalledWith('b7', { author: '@gaivire_8', published: '2026-01-04' });
+    // read again: said in the facts, the fields gone
+    expect(field().querySelector('.cm-link-facts').textContent).toMatch(/by @gaivire_8 · posted 4 Jan/);
+    expect(field().querySelector('.cm-link-who')).toBeNull();
+  });
+
   it('answers from the case\'s own records when no server is asked', async () => {
     editor('Seen by the BBC.', 0, 0);
     select('the BBC');

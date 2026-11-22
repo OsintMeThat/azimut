@@ -11,7 +11,7 @@
  */
 import { api } from './api.js';
 
-export async function createBookmark(caseId, { title, url, folder = '', notes = '' }) {
+export async function createBookmark(caseId, { title, url, folder = '', notes = '', author = '', published = '' }) {
   const label = (title ?? '').trim();
   const target = (url ?? '').trim();
   if (!label) throw new Error('Title required');
@@ -19,6 +19,19 @@ export async function createBookmark(caseId, { title, url, folder = '', notes = 
   return api.post(`/api/cases/${caseId}/entities`, {
     type: 'bookmark',
     label,
-    attrs: { url: target, notes: (notes ?? '').trim(), folder: (folder ?? '').trim() },
+    attrs: { url: target, notes: (notes ?? '').trim(), folder: (folder ?? '').trim(), ...whoAndWhen({ author, published }) },
   });
+}
+
+/** Who put a bookmarked page up and when, as the bookmark's Author and Published keep them: only what was said. */
+export function whoAndWhen({ author = '', published = '' } = {}) {
+  const said = {};
+  if (String(author ?? '').trim()) said.author = String(author).trim();
+  if (String(published ?? '').trim()) said.published_at = String(published).trim();
+  return said;
+}
+
+/** Write who put a bookmarked page up and when on its bookmark. */
+export function describeBookmark(caseId, id, facts) {
+  return api.patch(`/api/cases/${caseId}/entities/${id}`, { attrs: whoAndWhen(facts) });
 }

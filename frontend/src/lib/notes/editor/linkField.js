@@ -71,6 +71,20 @@ export function shortDay(value, now = new Date()) {
   return `${Number(day[3])} ${month}${Number(day[1]) === now.getFullYear() ? '' : ` ${day[1]}`}`;
 }
 
+/** Sites whose post addresses name neither who posted it nor when (X and TikTok name both). */
+const SAYS_NOBODY = ['instagram.com', 'facebook.com', 'fb.watch', 'youtube.com', 'youtu.be', 't.me', 'telegram.me', 'threads.net', 'vk.com', 'bsky.app'];
+
+/** Whether the field asks who posted the page at `url` and when: a post on a site whose address does not say. */
+export function asksWhoAndWhen(url) {
+  let host = '';
+  try {
+    host = new URL(url).hostname.toLowerCase().replace(/^(www|m|mobile)\./, '');
+  } catch {
+    return false;
+  }
+  return SAYS_NOBODY.some((site) => host === site || host.endsWith(`.${site}`));
+}
+
 /** A record of the case (one the lookup found, or one the editor holds), as the field and the citation card read it. */
 export function recordItem(entity) {
   const attrs = entity.attrs ?? {};
@@ -80,9 +94,9 @@ export function recordItem(entity) {
     label: entity.label || '',
     noun: NOUNS[entity.type] ?? '',
     address: attrs.url || attrs.source_url || '',
-    author: '',
+    author: attrs.author || '',
     account: '',
-    published: '',
+    published: attrs.published_at || '',
     archive: attrs.archive_url || '',
     archivedAt: '',
     seen: attrs.fetched_at || '',
@@ -176,7 +190,7 @@ function button(className, text, { title = '', icon = '', primary = false } = {}
 /**
  * The field, for the words `target` names (`linkTarget` in `editor/marks.js`), in
  * `view`. `act` carries out what is picked: `{ link: url, title }`, `{ cite: entity }`,
- * `{ bookmark: url, title }`, `{ remove: true }` or `{ close: true }`. Answers
+ * `{ bookmark: url, title, author?, published? }`, `{ remove: true }` or `{ close: true }`. Answers
  * `{ dom, focus(), destroy() }`.
  */
 export function linkField(view, target, act) {
@@ -215,6 +229,35 @@ export function linkField(view, target, act) {
     if (rows.length) light(0);
   };
 
+  /** Who posted a post and when, for an address that says neither: two fields, Enter doing `then`. */
+  const whoFields = ({ author = '', published = '' } = {}, then = null) => {
+    const who = el('input', 'cm-link-author');
+    who.type = 'text';
+    who.placeholder = 'Posted by (@account)';
+    who.setAttribute('aria-label', 'Who posted it');
+    who.spellcheck = false;
+    who.value = author;
+    const day = el('input', 'cm-link-day');
+    day.type = 'date';
+    day.title = 'The day it was posted';
+    day.setAttribute('aria-label', 'The day it was posted');
+    day.value = /^\d{4}-\d{2}-\d{2}/.test(published) ? published.slice(0, 10) : '';
+    for (const node of [who, day]) {
+      node.addEventListener('keydown', (event) => {
+        if (event.key === 'Escape') {
+          event.preventDefault();
+          event.stopPropagation();
+          act({ close: true });
+        } else if (event.key === 'Enter') {
+          event.preventDefault();
+          event.stopPropagation();
+          then?.();
+        }
+      });
+    }
+    return { node: el('div', 'cm-link-who', who, day), read: () => ({ author: who.value.trim(), published: day.value }) };
+  };
+
   const foundCard = ({ url, title, item }) => {
     const cited = citedTimes(view.state.doc.toString(), item, url);
     const cite = button('', 'Cite it', { title: 'The case item in place of these words, as a chip', primary: true });
@@ -222,11 +265,24 @@ export function linkField(view, target, act) {
     const keep = button('', 'Keep the link', { title: 'A plain link to the address' });
     keep.addEventListener('click', () => act({ link: url, title }));
     primary = () => cite.click();
+    const actions = el('div', 'cm-link-actions', cite, keep);
+    // a bookmarked post whose address names nobody: who posted it and when, written on its bookmark here
+    let fields = null;
+    if (item.type === 'bookmark' && handlers.describe && asksWhoAndWhen(item.address || url) && !(item.author && item.published)) {
+      const save = button('', 'Save', { title: 'Write who posted it and when on its bookmark' });
+      fields = whoFields(item, () => save.click());
+      save.addEventListener('click', async () => {
+        const said = fields.read();
+        if (!said.author && !said.published) return;
+        if (await handlers.describe(item.id, said)) void read();
+      });
+      actions.append(save);
+    }
     return el('div', 'cm-link-card cm-link-found',
       el('span', 'cm-link-mark', iconSvg('check', 14)),
       el('div', 'cm-link-said', el('div', 'cm-link-head', 'In the case: ', el('strong', '', item.label || title || url)),
-        el('div', 'cm-link-facts', itemFacts(item, { cited }))),
-      el('div', 'cm-link-actions', cite, keep));
+        el('div', 'cm-link-facts', itemFacts(item, { cited })), fields?.node),
+      actions);
   };
 
   const newCard = ({ url, title }) => {
@@ -234,14 +290,17 @@ export function linkField(view, target, act) {
     link.addEventListener('click', () => act({ link: url, title }));
     primary = () => link.click();
     const actions = el('div', 'cm-link-actions', link);
+    let fields = null;
     if (handlers.bookmark) {
       const keep = button('', 'Bookmark it', { title: 'File it as a bookmark of the case, then cite it' });
-      keep.addEventListener('click', () => act({ bookmark: url, title }));
+      // a post whose address names nobody: who posted it and when go on the bookmark with it
+      if (asksWhoAndWhen(url)) fields = whoFields({}, () => keep.click());
+      keep.addEventListener('click', () => act({ bookmark: url, title, ...(fields ? fields.read() : {}) }));
       actions.append(keep);
     }
     return el('div', 'cm-link-card cm-link-new',
       el('span', 'cm-link-mark cm-link-none', iconSvg('link', 14)),
-      el('div', 'cm-link-said', el('div', 'cm-link-head', 'Not in the case yet'), el('div', 'cm-link-facts', title || url)),
+      el('div', 'cm-link-said', el('div', 'cm-link-head', 'Not in the case yet'), el('div', 'cm-link-facts', title || url), fields?.node),
       actions);
   };
 
@@ -269,7 +328,7 @@ export function linkField(view, target, act) {
     return [el('div', 'cm-link-caption', 'Cite a case item'), list];
   };
 
-  const read = async () => {
+  async function read() {
     const text = input.value.trim();
     const ask = ++asked;
     primary = null;
@@ -285,7 +344,7 @@ export function linkField(view, target, act) {
     const said = await lookupAddress(url, { lookup: handlers.lookup, entities: view.state.field(noteCase, false)?.entities ?? [] });
     if (ask !== asked) return;
     show(said.item ? foundCard(said) : newCard(said));
-  };
+  }
 
   input.addEventListener('input', () => {
     clearTimeout(timer);

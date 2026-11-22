@@ -152,7 +152,8 @@ async function linkPicked(view, choice) {
   else if (choice.link) runFormat(view, writeLink(target, choice.link, { title: choice.title }));
   else if (choice.cite) runFormat(view, writeCitation(target, choice.cite));
   else if (choice.bookmark) {
-    const filed = await view.state.facet(noteHandlers).bookmark?.(choice.bookmark, choice.title);
+    const facts = choice.author || choice.published ? [{ author: choice.author ?? '', published: choice.published ?? '' }] : [];
+    const filed = await view.state.facet(noteHandlers).bookmark?.(choice.bookmark, choice.title, ...facts);
     const now = view.state.field(bubbleState, false)?.link;
     if (filed?.id && now) runFormat(view, writeCitation(now, filed));
   }
@@ -448,6 +449,14 @@ const look = EditorView.theme({
   '.cm-link-head strong': { color: 'var(--text-1)', fontWeight: '650' },
   '.cm-link-facts': { color: 'var(--text-3)', fontSize: '11.5px', lineHeight: '1.4', marginTop: '2px', overflowWrap: 'anywhere' },
   '.cm-link-actions': { display: 'flex', gap: '6px' },
+  '.cm-link-who': { display: 'flex', gap: '6px', marginTop: '7px' },
+  '.cm-link-who input': {
+    minWidth: '0', height: '26px', padding: '0 8px', borderRadius: '5px', border: '1px solid var(--border-strong)', background: 'var(--bg-0)',
+    color: 'var(--text-1)', font: 'inherit', fontSize: '12px',
+  },
+  '.cm-link-who input:focus': { outline: 'none', borderColor: 'var(--accent)' },
+  '.cm-link-who .cm-link-author': { flex: '1 1 auto' },
+  '.cm-link-who .cm-link-day': { flex: '0 0 132px' },
   '.cm-link-button': {
     display: 'inline-flex', alignItems: 'center', gap: '5px', height: '26px', padding: '0 10px', borderRadius: '5px', whiteSpace: 'nowrap',
     border: '1px solid var(--border-strong)', background: 'var(--bg-2)', color: 'var(--text-1)', cursor: 'pointer', font: 'inherit', fontSize: '12px',

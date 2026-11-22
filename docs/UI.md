@@ -7616,9 +7616,11 @@ copy, the day it was read, and what a made item was made from, each linked to it
 Footnotes (`[a]`) open their own card and are listed under Notes before the sources. The
 PDF keeps its numbered list, written as the look's *Sources written as* says. A post whose
 address names neither its account nor its day (an Instagram post, a YouTube video) takes
-them from its bookmark: **Bookmark it** on the link's card in the editor, then **Open** and
-fill *Author* (`@name`) and *Published* in Details; the entry then reads *@name on Instagram,
-post, 4 January 2026*. Archive every link fills *Published* from a page's copy, never over a
+them from its bookmark. The Link field asks for them under *Not in the case yet* for a post
+on Instagram, Facebook, YouTube, Telegram, Threads, VK or Bluesky (who posted it, `@name`,
+and the day), and **Bookmark it** files them with the bookmark; for a post bookmarked
+already without them, the same two fields and **Save** write them on it. Details shows them
+as *Author* and *Published*. The entry then reads *@name on Instagram, post, 4 January 2026*. Archive every link fills *Published* from a page's copy, never over a
 day typed there.
 
 **Book or report.** A record made on the Board under Work (title, author, publisher,
