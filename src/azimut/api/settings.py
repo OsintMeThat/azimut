@@ -59,6 +59,7 @@ SITE_TITLE_MAX = 120
 SITE_TAGLINE_MAX = 200
 SITE_CODE = r"^([a-z0-9](?:[a-z0-9-]{0,48}[a-z0-9])?)?$"
 SITE_TOKEN = r"^([A-Za-z0-9_-]{8,64})?$"
+CLOUDFLARE_ID = r"^([0-9a-f]{32})?$"
 
 router = APIRouter(prefix="/api", tags=["settings"])
 
@@ -202,13 +203,15 @@ class PrefsIn(BaseModel):
     # the analyst's website (Settings › Website, engine/site.py): its title ("" reads the report
     # name, else the GitHub account), the line under it, whether its home ends on "Made with
     # Azimut", and how its readers are counted: "" nobody, "goatcounter" with the site's code, or
-    # "cloudflare" with its public token
+    # "cloudflare" with its public token, then the account ID and the site tag its numbers are read from
     site_title: str | None = Field(default=None, max_length=SITE_TITLE_MAX)
     site_tagline: str | None = Field(default=None, max_length=SITE_TAGLINE_MAX)
     site_credit_azimut: bool | None = None
     site_stats: Literal["", "goatcounter", "cloudflare"] | None = None
     site_stats_code: str | None = Field(default=None, pattern=SITE_CODE)
     site_stats_token: str | None = Field(default=None, pattern=SITE_TOKEN)
+    site_stats_account: str | None = Field(default=None, pattern=CLOUDFLARE_ID)
+    site_stats_tag: str | None = Field(default=None, pattern=CLOUDFLARE_ID)
     # what each note style carries by default, the whole table as Settings shows it;
     # only what differs from Azimut's own is kept, and {} is Azimut's own throughout
     note_styles: dict[notelook.Style, notelook.StyleChoices] | None = None
@@ -243,6 +246,11 @@ class PrefsIn(BaseModel):
     @classmethod
     def beacon_token(cls, value: Any) -> Any:
         return value.strip() if isinstance(value, str) else value
+
+    @field_validator("site_stats_account", "site_stats_tag", mode="before")
+    @classmethod
+    def cloudflare_id(cls, value: Any) -> Any:
+        return value.strip().lower() if isinstance(value, str) else value
 
 
 def _detect_view(saved: Any) -> dict[str, Any]:
@@ -509,6 +517,9 @@ def _apply_prefs(settings: dict[str, Any], body: PrefsIn) -> None:
     for key in site_engine.PREF_KEYS:
         if getattr(body, key) is not None:
             settings[key] = getattr(body, key)
+    if body.site_stats_tag is not None:
+        # a tag typed by hand wins over one found from the site token, and is never looked up
+        settings["site_stats_tag_from"] = ""
     if body.note_styles is not None:
         given = {style: choices.model_dump(exclude_none=True) for style, choices in body.note_styles.items()}
         settings[notelook.SETTINGS_KEY] = notelook.saved_styles(given)
@@ -766,9 +777,10 @@ def export_settings() -> Response:
     machine), how much the 3D views draw (this machine's graphics card), the
     half-written Copernicus layer in the picker,
     ``cookies.txt`` (a live login session), ``publishing.json`` (the WordPress
-    application password and the GitHub token: live write credentials stay on the
-    machine that made them, while the site's address, the username, the GitHub
-    account, repository and branch travel), the cases themselves
+    application password, the GitHub token and the Cloudflare API token: live
+    credentials stay on the machine that made them, while the site's address, the
+    username, the GitHub account, repository and branch, and the Cloudflare account
+    ID and site tag travel), the cases themselves
     (portable folders already), the extension folder the app owns
     (``config.extension_dir()`` — those are this build's own bundled bytes, and
     the new machine's Install button writes its own copy, which the browser has
@@ -983,6 +995,9 @@ class ImportedSettings(BaseModel):
     site_stats: str = ""
     site_stats_code: str = Field(default="", max_length=64)
     site_stats_token: str = Field(default="", max_length=128)
+    site_stats_account: str = Field(default="", max_length=64)
+    site_stats_tag: str = Field(default="", max_length=64)
+    site_stats_tag_from: str = Field(default="", max_length=128)
     github_categories: list[str] = Field(default_factory=list, max_length=100)
     github_categories_added: list[str] = Field(default_factory=list, max_length=100)
     # what each note style carries: only what differs from Azimut's own, read the way
@@ -1077,11 +1092,16 @@ class ImportedSettings(BaseModel):
         code = value.strip().lower()
         return code if site_engine.COUNTER_CODE.match(code) else ""
 
-    @field_validator("site_stats_token")
+    @field_validator("site_stats_token", "site_stats_tag_from")
     @classmethod
     def readable_site_stats_token(cls, value: str) -> str:
         token = value.strip()
         return token if site_engine.BEACON_TOKEN.match(token) else ""
+
+    @field_validator("site_stats_account", "site_stats_tag")
+    @classmethod
+    def readable_cloudflare_id(cls, value: str) -> str:
+        return site_engine.cloudflare_id(value)
 
     @field_validator("note_styles", mode="before")
     @classmethod

@@ -52,6 +52,9 @@ export const prefs = $state({
   siteStats: '', // '' nobody, 'goatcounter' or 'cloudflare'
   siteStatsCode: '', // the GoatCounter site's code
   siteStatsToken: '', // the Cloudflare Web Analytics token
+  siteStatsAccount: '', // the Cloudflare account ID its numbers are read from
+  siteStatsTag: '', // the Web Analytics site tag its numbers are read from
+  siteStatsTagFound: false, // whether that tag was found from the site token rather than typed by hand
   noteStyles: null, // what each note style carries, Settings › Publishing › Styles over Azimut's own (lib/notes/look.js)
   logoSet: false, // the logo of Settings › Publishing is on disk (azimut:my-logo)
   siteLogoSet: false, // the site has a logo of its own, beside settings.json (Settings › Website)
@@ -154,6 +157,9 @@ export function applyPrefs(s) {
   if (s.site_stats !== undefined) prefs.siteStats = s.site_stats;
   if (s.site_stats_code !== undefined) prefs.siteStatsCode = s.site_stats_code;
   if (s.site_stats_token !== undefined) prefs.siteStatsToken = s.site_stats_token;
+  if (s.site_stats_account !== undefined) prefs.siteStatsAccount = s.site_stats_account;
+  if (s.site_stats_tag !== undefined) prefs.siteStatsTag = s.site_stats_tag;
+  if (s.site_stats_tag_found !== undefined) prefs.siteStatsTagFound = Boolean(s.site_stats_tag_found);
   if (s.note_styles !== undefined) prefs.noteStyles = s.note_styles;
   if (s.signature !== undefined) prefs.logoSet = Boolean(s.signature);
   if (s.site_logo !== undefined) prefs.siteLogoSet = Boolean(s.site_logo);

@@ -268,7 +268,10 @@ def from_settings(settings: Mapping[str, Any], *, address: str, account: str, lo
 
 
 #: The settings of Settings › Website that are read and written as preferences.
-PREF_KEYS = ("site_title", "site_tagline", "site_credit_azimut", "site_stats", "site_stats_code", "site_stats_token")
+PREF_KEYS = ("site_title", "site_tagline", "site_credit_azimut", "site_stats", "site_stats_code", "site_stats_token",
+             "site_stats_account", "site_stats_tag")
+#: A Cloudflare account ID and a Web Analytics site tag, where the site's numbers are read (`engine/sitestats.py`).
+CLOUDFLARE_ID = re.compile(r"^[0-9a-f]{32}$")
 
 
 def prefs_of(settings: Mapping[str, Any]) -> dict[str, Any]:
@@ -283,7 +286,18 @@ def prefs_of(settings: Mapping[str, Any]) -> dict[str, Any]:
         "site_stats": stats if stats in STATS else "",
         "site_stats_code": code.strip().lower() if COUNTER_CODE.match(code.strip().lower()) else "",
         "site_stats_token": token.strip() if BEACON_TOKEN.match(token.strip()) else "",
+        "site_stats_account": cloudflare_id(settings.get("site_stats_account")),
+        "site_stats_tag": cloudflare_id(settings.get("site_stats_tag")),
+        # whether that tag was found from the site token rather than typed by hand
+        "site_stats_tag_found": bool(cloudflare_id(settings.get("site_stats_tag"))
+                                     and BEACON_TOKEN.match(str(settings.get("site_stats_tag_from") or ""))),
     }
+
+
+def cloudflare_id(value: Any) -> str:
+    """An account ID or a site tag as saved, lower case, or "" for one that does not read as one."""
+    text = value.strip().lower() if isinstance(value, str) else ""
+    return text if CLOUDFLARE_ID.match(text) else ""
 
 
 def categories_read(value: Any) -> list[str]:

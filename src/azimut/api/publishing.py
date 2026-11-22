@@ -1,12 +1,15 @@
 """REST API for Settings › Website: the WordPress site a note is sent to as a
-draft, and the GitHub Pages site a note's web folder is published to.
+draft, the GitHub Pages site a note's web folder is published to, and the numbers
+Cloudflare Web Analytics keeps of its readers.
 
 The site's address and the username are ordinary settings (`wordpress_site`,
 `wordpress_user`), carried by a settings backup; so are the GitHub account, the
 repository and the branch (`github_account`, `github_repo`, `github_branch`) and the
-address Pages last said the site has (`github_site`). The application password and the
-GitHub token are kept apart, in ``publishing.json`` (`engine/publishsecrets.py`), and
-never sent back: the browser learns only whether one is set and its last four characters.
+address Pages last said the site has (`github_site`), and the Cloudflare account ID and
+site tag (`site_stats_account`, `site_stats_tag`, saved as Settings › Website's preferences).
+The application password, the GitHub token and the Cloudflare API token are kept apart, in
+``publishing.json`` (`engine/publishsecrets.py`), and never sent back: the browser learns
+only whether one is set and its last four characters.
 
 Nothing here reaches the network but its presses: **Test connection** for either
 service, and for GitHub **Create the repository**, **Turn on Pages**, **Update the site**
@@ -16,7 +19,9 @@ articles, maps and pages it holds, with its home, categories and last commit; re
 **Delete** an article's folder (`/github/site/delete`, one commit, only a folder Azimut published),
 **Rename** and **Delete** a category and give one article another (`/github/categories/rename`,
 `/github/categories/delete`, `/github/site/category`, each one commit of the cards concerned and the
-lists) and the watch of a page being built (`/github/build`, asked by the export dialog after a publish).
+lists), the watch of a page being built (`/github/build`, asked by the export dialog after a publish),
+and **Read the numbers** (`/cloudflare/numbers`, `engine/sitestats.py`: one query to api.cloudflare.com,
+after the list of the account's sites when the site tag must be found from the site token).
 A category added there (`/github/categories/added`) is kept on this machine until an article carries it.
 Reading these settings, saving them and forgetting them stay on this machine. Sending
 a note is the Notebook's (`/notes/{note}/wordpress` and `/notes/{note}/github`,
@@ -28,6 +33,7 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass, field
 from typing import Any
+from urllib.parse import urlsplit
 
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
@@ -36,7 +42,7 @@ from .. import config
 from ..engine import githubpages as github
 from ..engine import notes_web
 from ..engine import notes_wordpress as wordpress
-from ..engine import notelook, publishsecrets, site, sitesync
+from ..engine import notelook, publishsecrets, site, sitestats, sitesync
 
 router = APIRouter(prefix="/api/publishing", tags=["publishing"])
 
@@ -76,7 +82,7 @@ def _state() -> dict[str, Any]:
 @router.get("")
 def read_publishing() -> dict[str, Any]:
     """What Settings › Website shows of each service: never a secret, never fetched."""
-    return {WORDPRESS: _state(), GITHUB: _github_state()}
+    return {WORDPRESS: _state(), GITHUB: _github_state(), CLOUDFLARE: _cloudflare_state()}
 
 
 @router.put("/wordpress")
@@ -644,3 +650,88 @@ def move_to_category(body: MoveIn) -> dict[str, Any]:
     to = _category_name(body.category)
     return _change(sitesync.CategoryChange("move", to=to, folder=folder),
                    f"Move {folder} to {to}" if to else f"Take {folder} out of its category")
+
+
+# -- Cloudflare Web Analytics: the site's numbers -------------------------------------------------
+
+CLOUDFLARE = "cloudflare"
+
+
+class CloudflareIn(BaseModel):
+    """The API token that reads the site's numbers. An empty one keeps the one kept: Forget is how
+    it goes."""
+
+    token: str | None = Field(default=None, max_length=publishsecrets.MAX_SECRET + 20)
+
+
+def _cloudflare_state() -> dict[str, Any]:
+    return {"token": publishsecrets.status(CLOUDFLARE)}
+
+
+@router.put("/cloudflare")
+def save_cloudflare(body: CloudflareIn) -> dict[str, Any]:
+    try:
+        if body.token:
+            publishsecrets.write(CLOUDFLARE, sitestats.api_token(body.token))
+    except (sitestats.StatsError, publishsecrets.SecretError) as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    return _cloudflare_state()
+
+
+@router.delete("/cloudflare")
+def forget_cloudflare() -> dict[str, Any]:
+    """Forget the API token on this machine; the account ID and the site tag stay, being no secret."""
+    publishsecrets.forget(CLOUDFLARE)
+    return _cloudflare_state()
+
+
+def _remember_tag(tag: str, site_token: str) -> None:
+    """Keep a site tag found from the site token, with that token, so the next press asks no list."""
+    config.update_settings(lambda settings: settings.update(site_stats_tag=tag, site_stats_tag_from=site_token))
+
+
+@router.post("/cloudflare/numbers")
+def read_cloudflare_numbers() -> dict[str, Any]:
+    """Read the site's numbers from Cloudflare Web Analytics: the page views and visits of each page
+    over 7 and 30 days, the totals, the referrers and the countries, on the Read the numbers press only.
+
+    The site tag the query filters by is the one typed by hand, else the one last found for the site
+    token Readers holds, else found now from that token by listing the account's sites, and kept. A
+    found tag under which Cloudflare counts nothing is looked up again once. 409 until the account ID,
+    the API token and the site token (or a tag) are set; ``{ok: false, needs: "tag", detail}`` when the
+    tag cannot be found (no site has that token, or the token may not list the sites), for the analyst
+    to type it; 502 with what went wrong in one sentence."""
+    settings = config.load_settings()
+    account = site.cloudflare_id(settings.get("site_stats_account"))
+    token = publishsecrets.read(CLOUDFLARE)
+    prefs = site.prefs_of(settings)
+    site_token = prefs["site_stats_token"]
+    tag = prefs["site_stats_tag"]
+    by_hand = bool(tag) and not prefs["site_stats_tag_found"]
+    known = by_hand or (bool(tag) and settings.get("site_stats_tag_from") == site_token)
+    if not (account and sitestats.API_TOKEN.match(token) and (known or site_token)):
+        raise HTTPException(status_code=409, detail=sitestats.NOT_SET)
+    target = github_settings()
+    address = target.base if target.account else ""
+    prefix, host = sitestats.site_prefix(address), urlsplit(address).hostname or ""
+    try:
+        with sitestats.client() as http:
+            if not known:
+                tag = sitestats.find_site_tag(http, token, account, site_token)
+                _remember_tag(tag, site_token)
+            numbers = sitestats.read_numbers(http, token, account, tag, prefix=prefix, host=host)
+            if known and not by_hand and sitestats.counted_nothing(numbers):
+                try:
+                    again = sitestats.find_site_tag(http, token, account, site_token)
+                except sitestats.StatsError:
+                    # the list cannot say: the tag kept and its empty numbers stand
+                    again = tag
+                if again != tag:
+                    tag = again
+                    _remember_tag(tag, site_token)
+                    numbers = sitestats.read_numbers(http, token, account, tag, prefix=prefix, host=host)
+    except sitestats.StatsError as exc:
+        if exc.needs:
+            return {"ok": False, "needs": exc.needs, "detail": str(exc)}
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
+    return {"ok": True, "address": address, "tag": tag, "tag_found": not by_hand, **numbers}

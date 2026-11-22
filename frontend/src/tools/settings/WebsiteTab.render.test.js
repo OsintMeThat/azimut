@@ -729,7 +729,7 @@ describe('Readers', () => {
     expect(choices.map((node) => node.textContent.trim())).toEqual(['Off', 'GoatCounter', 'Cloudflare Web Analytics']);
     expect(radio('Off').getAttribute('aria-checked')).toBe('true');
     expect(target.querySelector('input[aria-label="GoatCounter site code"]')).toBeNull();
-    expect(target.querySelector('input[aria-label="Cloudflare token"]')).toBeNull();
+    expect(target.querySelector('input[aria-label="Cloudflare site token"]')).toBeNull();
     expect(stats().getAttribute('data-guide')).toBe('settings.statistics');
     expect(stats().textContent).toContain('Nobody is counted');
     expect(stats().textContent).toContain('starts with the next publish or Update the site');
@@ -775,7 +775,7 @@ describe('Readers', () => {
     await settle();
     expect(save).toHaveBeenLastCalledWith({ site_stats: 'cloudflare' });
     expect(target.querySelector('input[aria-label="GoatCounter site code"]')).toBeNull();
-    const token = target.querySelector('input[aria-label="Cloudflare token"]');
+    const token = target.querySelector('input[aria-label="Cloudflare site token"]');
     expect(stats().textContent).toContain('Free. Loads one script from static.cloudflareinsights.com and counts with no cookie.');
     const steps = stats().querySelector('details.hub-how');
     expect(steps.open).toBe(true);
@@ -793,7 +793,7 @@ describe('Readers', () => {
     type(token, 'too short');
     await settle();
     expect(save).not.toHaveBeenCalled();
-    expect(stats().querySelector('[role="alert"]').textContent).toContain('does not read as a Cloudflare token');
+    expect(stats().querySelector('[role="alert"]').textContent).toContain('does not read as a Cloudflare site token');
     type(token, `<script defer src='https://static.cloudflareinsights.com/beacon.min.js' data-cf-beacon='{"token": "${CODE}"}'></script>`);
     await settle();
     expect(save).toHaveBeenLastCalledWith({ site_stats_token: CODE });

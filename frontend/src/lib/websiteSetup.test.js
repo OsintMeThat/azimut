@@ -7,7 +7,7 @@ import {
   nameFallbackSaid, noNameSaid, onSiteSaid, ownParts, ownersOf, placeDegrees, placeOf, placeText, placeUseSaid, progressSaid, readPlace, sizeTipSaid,
   updateSaid, whenSaid,
 } from './websiteSetup.js';
-import { categoryCountSaid, categoryDeleteSaid, categoryDoneSaid, movedSaid, ownPagesSaid, renameSaid } from './websiteSetup.js';
+import { apiToken, apiTokenKeptSaid, categoryCountSaid, categoryDeleteSaid, categoryDoneSaid, cloudflareId, countSaid, movedSaid, NUMBERS_STEPS, ownPagesSaid, renameSaid, tileSaid } from './websiteSetup.js';
 
 const read = (path) => readFileSync(new URL(path, import.meta.url), 'utf8');
 // the hub is the tab and one component per panel
@@ -87,7 +87,7 @@ describe('the words of the tab', () => {
     expect(setup.CLOUDFLARE_SAID).toMatch(/^Free\./);
     expect(setup.CLOUDFLARE_SAID).toContain('static.cloudflareinsights.com');
     expect(setup.CLOUDFLARE_SAID).toContain('no cookie');
-    expect(CLOUDFLARE_STEPS.map(([step]) => step)).toEqual(['Sign up', 'Add the site', 'Copy the token', 'Paste the token']);
+    expect(CLOUDFLARE_STEPS.map(([step]) => step)).toEqual(['Sign up', 'Add the site', 'Copy the site token', 'Paste the site token']);
     const steps = CLOUDFLARE_STEPS.map(([, text]) => text).join(' ');
     for (const said of ['free account', 'Web Analytics', 'Add a site', 'host name', 'Done', 'Manage site', 'data-cf-beacon', 'Update the site']) {
       expect(steps, said).toContain(said);
@@ -396,6 +396,59 @@ describe('the place on the site\'s map', () => {
       expect(said).toMatch(/^[A-Z].*\.$/);
       expect(said).not.toContain('—');
     }
+  });
+});
+
+describe('the numbers, read from Cloudflare', () => {
+  const ID = '0123456789abcdef0123456789abcdef';
+  const TAG = 'fedcba9876543210fedcba9876543210';
+
+  it('reads an account ID or a site tag typed, or from an address of Cloudflare\'s dashboard', () => {
+    expect(cloudflareId('')).toBe('');
+    expect(cloudflareId(null, 'tag')).toBe('');
+    expect(cloudflareId(` ${ID.toUpperCase()} `)).toBe(ID);
+    expect(cloudflareId(TAG, 'tag')).toBe(TAG);
+    const dashboard = `https://dash.cloudflare.com/${ID}/web-analytics/overview?siteTag~in=${TAG}&time-window=10080`;
+    expect(cloudflareId(dashboard, 'account')).toBe(ID);
+    expect(cloudflareId(dashboard, 'tag')).toBe(TAG);
+    // what holds neither, or holds one too long, names none
+    for (const bad of ['0123', 'g'.repeat(32), `${ID}0`, 'https://dash.cloudflare.com/', `siteTag~in=${TAG}0`]) {
+      expect(cloudflareId(bad, 'tag'), bad).toBeNull();
+    }
+    expect(cloudflareId(`https://example.org/${ID}/`, 'account')).toBeNull();
+  });
+
+  it('takes an API token as a Bearer header carries one, and never says it back whole', () => {
+    expect(apiToken(` ${'Ab_-.~+/='.repeat(4)} `)).toBe('Ab_-.~+/='.repeat(4));
+    for (const bad of ['', 'short', 'has a space in it, too long', 'x'.repeat(256), 'quote"quote"quote"quote']) expect(apiToken(bad), bad).toBeNull();
+    expect(apiTokenKeptSaid('…wxyz')).toBe('Kept on this computer, ending wxyz. Paste a new one to replace it.');
+    expect(apiTokenKeptSaid('')).toBe('Kept on this computer. Paste a new one to replace it.');
+  });
+
+  it('writes counts with their thousands, and a total with its visits', () => {
+    expect(countSaid(1234567)).toBe('1,234,567');
+    expect(countSaid(-3)).toBe('0');
+    expect(countSaid(Number.NaN)).toBe('0');
+    expect(tileSaid({ views: 176, visits: 1280 })).toBe('page views · 1,280 visits');
+    expect(tileSaid({ views: 1, visits: 1 })).toBe('page view · 1 visit');
+  });
+
+  it('says where each answer is found, field by field as Cloudflare\'s token page reads, free, and that the token only reads and stays here', () => {
+    expect(NUMBERS_STEPS.map(([step]) => step)).toEqual(['Account ID', 'Token page', 'Token name', 'Permission policies', 'Permissions', 'Create it']);
+    const said = NUMBERS_STEPS.map(([, text]) => text).join(' ');
+    for (const words of ['Copy account ID', 'Manage account › Account API tokens', 'Create a token', 'azimut-reader-numbers', 'Start from scratch (Custom)',
+      'Read analytics', 'Read all resources', 'Account Analytics: Read', 'Account Settings: Read', 'shows it once']) {
+      expect(said, words).toContain(words);
+    }
+    expect(setup.TAG_WHERE).toContain('siteTag~in=');
+    for (const [, text] of NUMBERS_STEPS) {
+      expect(text).toMatch(/^[A-Z]/);
+      expect(text).toMatch(/\.$/);
+      expect(text).not.toContain('—');
+    }
+    expect(setup.NUMBERS_FREE).toBe('Both permissions are free and only read.');
+    expect(setup.NUMBERS_STAYS).toBe('The token stays on this computer, never in a backup.');
+    expect(setup.NUMBERS_GOATCOUNTER).toBe('Numbers are read from Cloudflare Web Analytics only; open GoatCounter\'s own page.');
   });
 });
 

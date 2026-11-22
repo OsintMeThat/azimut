@@ -237,13 +237,20 @@ DEFAULT_SETTINGS: dict[str, Any] = {
     # on "Made with Azimut" (articles keep report_credit_azimut), and how readers are
     # counted on every page of it: "" nobody, "goatcounter" (site_stats_code is the
     # site's code) or "cloudflare" (site_stats_token is its public beacon token, which
-    # every page prints, so it is no secret and the backup carries it).
+    # every page prints, so it is no secret and the backup carries it). With Cloudflare,
+    # site_stats_account and site_stats_tag are the account ID and the Web Analytics site
+    # tag its numbers are read from on a press (engine/sitestats.py); site_stats_tag_from is
+    # the site token a tag was found from, "" for one typed by hand. The API token that
+    # reads them is kept in publishing.json, which no backup carries.
     "site_title": "",
     "site_tagline": "",
     "site_credit_azimut": True,
     "site_stats": "",
     "site_stats_code": "",
     "site_stats_token": "",
+    "site_stats_account": "",
+    "site_stats_tag": "",
+    "site_stats_tag_from": "",
     # Pairing token for the capture browser extension (api/ingest.py). Minted
     # lazily on first use, shown once in Settings, pasted into the extension.
     # Empty means "not minted yet" — never a valid credential.

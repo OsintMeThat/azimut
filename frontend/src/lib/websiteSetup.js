@@ -78,9 +78,9 @@ export const STATS_OFF_SAID = 'Nobody is counted: the pages carry no counter.';
 export const GOATCOUNTER_SAID = 'Free. Counts each page view on your own GoatCounter site, with no cookie.';
 export const CLOUDFLARE_SAID = 'Free. Loads one script from static.cloudflareinsights.com and counts with no cookie.';
 export const GOATCOUNTER_MISSING = 'Paste the site code below for the count to start.';
-export const CLOUDFLARE_MISSING = 'Paste the token below for the count to start.';
+export const CLOUDFLARE_MISSING = 'Paste the site token below for the count to start.';
 export const GOATCOUNTER_BAD = 'That does not read as a GoatCounter code: lower-case letters, digits and hyphens, such as mycode.';
-export const CLOUDFLARE_BAD = 'That does not read as a Cloudflare token: 8 to 64 letters, digits, hyphens and underscores.';
+export const CLOUDFLARE_BAD = 'That does not read as a Cloudflare site token: 8 to 64 letters, digits, hyphens and underscores.';
 
 /** Where a Cloudflare account is made, and its own guide to the site's snippet. */
 export const CLOUDFLARE_SIGNUP = 'https://dash.cloudflare.com/sign-up';
@@ -97,8 +97,8 @@ export const GOATCOUNTER_STEPS = Object.freeze([
 export const CLOUDFLARE_STEPS = Object.freeze([
   ['Sign up', 'Make a free account at cloudflare.com. The site does not have to use Cloudflare for anything else.'],
   ['Add the site', 'In the dashboard, open Web Analytics and press Add a site. Type the site’s host name, such as your-name.github.io, pick it in the box that appears and press Done.'],
-  ['Copy the token', 'Under Manage site, the snippet holds data-cf-beacon with a token: copy the letters and digits after "token":.'],
-  ['Paste the token', 'Type it below, or paste the whole snippet. Counting starts with the next publish or Update the site.'],
+  ['Copy the site token', 'Under Manage site, the snippet holds data-cf-beacon with a token: copy the letters and digits after "token":.'],
+  ['Paste the site token', 'Type it below, or paste the whole snippet. Counting starts with the next publish or Update the site.'],
 ]);
 
 /** A Cloudflare token as the server reads one: 8 to 64 letters, digits, hyphens and underscores. */
@@ -444,6 +444,89 @@ export const SITEMAP_SAID = 'Give the sitemap to Google Search Console or Bing W
 export const FOLLOW_NONE = 'Set up GitHub Pages first, and the addresses show here.';
 export const COPY_PRESS = 'Copy';
 
+// the numbers, read from Cloudflare Web Analytics on a press (`api/publishing.py`, `engine/sitestats.py`)
+
+export const NUMBERS_TITLE = 'Numbers';
+export const NUMBERS_INTRO = 'Page views of each article over 7 and 30 days, read from Cloudflare when you press.';
+export const NUMBERS_PRESS = 'Read the numbers';
+export const NUMBERS_AGAIN = 'Read again';
+export const NUMBERS_BUSY = 'Reading…';
+export const NUMBERS_NOT_SET = 'Fill in the account ID, the API token and the site token first';
+export const NUMBERS_FIRST = 'Press Read the numbers to see what is read, and from where.';
+export const NUMBERS_NONE = 'No page view in 30 days: if readers came, check the site token, and the site tag if you set it by hand.';
+export const NUMBERS_SAMPLED = 'Cloudflare samples what is older than 7 days, so the 30-day counts are estimates.';
+export const NUMBERS_GOATCOUNTER = 'Numbers are read from Cloudflare Web Analytics only; open GoatCounter\'s own page.';
+export const NUMBERS_HEAD = Object.freeze(['Page', '7 days', '30 days']);
+export const NUMBERS_TOTAL = 'Whole site';
+export const NUMBERS_HOME = 'Home page';
+export const REFERRERS_TITLE = 'Where visits came from';
+export const COUNTRIES_TITLE = 'Countries';
+export const NO_REFERRER = 'No referrer';
+export const RANKED_NONE = 'None in 30 days.';
+/** A count as the panel writes it: `1,234`. */
+export function countSaid(count) {
+  return Number.isFinite(count) ? Math.max(0, Math.round(count)).toLocaleString('en-US') : '0';
+}
+/** What a window's total says under its page views: `page views · 980 visits`. */
+export function tileSaid({ views = 0, visits = 0 } = {}) {
+  return `${views === 1 ? 'page view' : 'page views'} · ${countSaid(visits)} ${visits === 1 ? 'visit' : 'visits'}`;
+}
+
+/**
+ * Where each answer is found in Cloudflare, field by field, as its token page reads (Manage account ›
+ * Account API tokens › Create a token), and what the token may do: two read-only permissions, one to read
+ * the numbers, one to list the account's Web Analytics sites so the site tag is found from the site token.
+ */
+export const NUMBERS_SETUP = 'How to let Azimut read the numbers';
+export const TOKEN_NAME = 'azimut-reader-numbers';
+export const NUMBERS_FREE = 'Both permissions are free and only read.';
+export const NUMBERS_STAYS = 'The token stays on this computer, never in a backup.';
+export const NUMBERS_STEPS = Object.freeze([
+  ['Account ID', 'In Cloudflare\'s dashboard, press Ctrl+K (⌘K on a Mac), type Copy account ID and pick it.'],
+  ['Token page', 'Open Manage account › Account API tokens and press Create a token.'],
+  ['Token name', `Type ${TOKEN_NAME}.`],
+  ['Permission policies', 'Pick Start from scratch (Custom): the Read analytics and Read all resources templates give far more than Azimut needs.'],
+  ['Permissions', 'Add two lines, Account Analytics: Read and Account Settings: Read.'],
+  ['Create it', 'Create the token and copy it, as Cloudflare shows it once, then paste it below.'],
+]);
+export const CLOUDFLARE_TOKEN_GUIDE = 'https://developers.cloudflare.com/analytics/graphql-api/getting-started/authentication/api-token-auth/';
+export const ACCOUNT_HINT = 'From Copy account ID in Cloudflare\'s dashboard.';
+export const TAG_HAND_TITLE = 'Set the site tag by hand';
+export const TAG_HINT = 'Left empty, Azimut finds it from the site token.';
+export const TAG_FOUND_HINT = 'Found from the site token. A tag typed here wins.';
+export const TAG_WHERE = 'In Web Analytics, open your site: the page\'s address holds siteTag~in= and the tag. Paste the address or the tag.';
+export const API_TOKEN_HINT = 'Account Analytics and Account Settings, both Read. Kept on this computer only, never in a backup.';
+export const ACCOUNT_BAD = 'That does not read as an account ID: 32 letters and digits, a to f and 0 to 9.';
+export const TAG_BAD = 'That does not read as a site tag: 32 letters and digits, a to f and 0 to 9.';
+export const API_TOKEN_BAD = 'That does not read as a Cloudflare API token: copy it whole, as Cloudflare showed it.';
+/** What the token field says once one is kept: its last characters only, never the token. */
+export function apiTokenKeptSaid(hint = '') {
+  return `Kept on this computer${hint ? `, ending ${hint.replace('…', '')}` : ''}. Paste a new one to replace it.`;
+}
+
+const CLOUDFLARE_ID = /^[0-9a-f]{32}$/;
+
+/**
+ * An account ID or a site tag a typed answer names, lower case: the 32 digits themselves, or, from an
+ * address of Cloudflare's dashboard, the account (`dash.cloudflare.com/<account>/…`) or the site tag
+ * (`siteTag~in=<tag>`). "" for nothing typed, null for something that names none.
+ */
+export function cloudflareId(text, which = 'account') {
+  const value = String(text ?? '').trim();
+  if (!value) return '';
+  if (CLOUDFLARE_ID.test(value.toLowerCase())) return value.toLowerCase();
+  const found = which === 'tag'
+    ? /siteTag(?:~in)?=([0-9a-fA-F]{32})(?![0-9a-fA-F])/.exec(value)
+    : /dash\.cloudflare\.com\/([0-9a-fA-F]{32})(?![0-9a-fA-F])/.exec(value);
+  return found ? found[1].toLowerCase() : null;
+}
+
+/** An API token as the server takes one: what a Bearer header carries, 20 to 255 characters; null for none. */
+export function apiToken(text) {
+  const value = String(text ?? '').trim();
+  return /^[A-Za-z0-9._~+/=-]{20,255}$/.test(value) ? value : null;
+}
+
 // upkeep
 
 export const OWNERS_TITLE = 'Who writes what';
@@ -745,12 +828,24 @@ export const WEBSITE_HELP = {
   statsGoatcounter: 'Count each page view on your GoatCounter site, with no cookie',
   statsCloudflare: 'Count readers with Cloudflare Web Analytics, which sets no cookie',
   statsCode: 'Your GoatCounter site code, the first part of its address',
-  statsToken: 'The token of your Cloudflare Web Analytics site, which every page prints',
+  statsToken: 'The site token of your Web Analytics site, which every page prints',
   statsHow: 'How to make the counter and where its code is found',
   goatcounterSignup: 'Open GoatCounter, to make a free site',
   cloudflareSignup: 'Open Cloudflare, to make a free account',
   cloudflareGuide: "Cloudflare's own guide to adding a site",
   cloudflareDashboard: "Open Cloudflare's Web Analytics dashboard",
+  statsAccount: 'Your Cloudflare account ID, 32 letters and digits',
+  statsTag: 'The site tag Web Analytics gives the site, which is not its token',
+  statsTagHand: 'Type the site tag yourself, for when Azimut cannot find it',
+  statsApiToken: 'A read-only Cloudflare API token, kept on this computer only',
+  statsApiForget: 'Forget the API token on this computer',
+  statsNumbers: 'Ask Cloudflare for the last 30 days of numbers',
+  statsNumbersHow: 'Where each answer is found in Cloudflare',
+  statsTokenGuide: "Cloudflare's guide to a token that reads analytics",
+  statsOpenPage: 'Open this page on the site',
+  statsWeek: 'Page views over the last 7 days',
+  statsMonth: 'Page views over the last 30 days',
+  goatcounterOwn: 'Open your GoatCounter site, where its numbers are',
   copyFeed: 'Copy the address of the feed',
   copySitemap: 'Copy the address of the sitemap',
   chore: 'Show how to do it',
