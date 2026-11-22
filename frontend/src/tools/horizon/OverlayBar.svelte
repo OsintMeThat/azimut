@@ -33,10 +33,10 @@
     fitting = false,
     /** Asked to find the skyline in the photo. */
     ondetect = () => {},
-    /** Asked to show the photo above the terrain, the same frame on both. */
+    /** Asked to show the photo above the terrain, or to go back to one view. */
     onside = () => {},
-    /** Whether that is being drawn. */
-    siding = false,
+    /** Whether the photo shows above the terrain. */
+    sideOn = false,
   } = $props();
 
   const terrainShare = $derived(Math.round((1 - overlay.mix) * 100));
@@ -245,10 +245,10 @@
   <button
     type="button"
     class="act"
-    disabled={siding}
-    aria-busy={siding}
+    class:on={sideOn}
+    aria-pressed={sideOn}
     onclick={onside}
-    title="Show the {what.toLowerCase()} above the terrain, the same frame on both"
+    title={sideOn ? 'Back to one view' : `Show the ${what.toLowerCase()} above the terrain, both live`}
     aria-label="Side by side"
   >
     <Icon name="columns" size={14} /><span class="word spare">Side by side</span>

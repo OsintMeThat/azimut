@@ -34,12 +34,11 @@ import {
   DEFAULT_REACH,
   FOV,
   GROUNDS,
-  headingOf,
   heightFor,
   linesByDefault,
+  looked,
   MODES,
   reachFor,
-  TILT,
   VISIBILITY_KM,
 } from '../../../lib/horizon/view.js';
 
@@ -94,8 +93,6 @@ function browserStorage() {
     return null;
   }
 }
-
-const clamp = (value, low, high) => Math.min(high, Math.max(low, value));
 
 /**
  * @param {object} deps
@@ -570,13 +567,7 @@ export function createHorizonState({
 
     /** Turn, tilt, roll or zoom: nothing asked of the app. */
     look(change) {
-      const next = { ...camera, ...change };
-      next.heading = headingOf(next.heading);
-      next.tilt = clamp(Number(next.tilt) || 0, TILT.min, TILT.max);
-      next.roll = clamp(Number(next.roll) || 0, -180, 180);
-      const widest = next.projection === 'panorama' ? 360 : FOV.max;
-      next.fov = clamp(Number(next.fov) || FOV.start, FOV.min, widest);
-      camera = next;
+      camera = looked(camera, change);
     },
 
     /**

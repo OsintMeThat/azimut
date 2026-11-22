@@ -107,7 +107,7 @@ test.describe('the band over a photo in Horizon', () => {
     await expect(band.getByRole('radiogroup')).toHaveCount(0);
   });
 
-  test('folds the trace’s details until asked, and draws the photo above the terrain only on a press', async ({ page }) => {
+  test('folds the trace’s details until asked, and shows the photo above the terrain only on a press', async ({ page }) => {
     const { band } = await layPhoto(page);
     await band.getByRole('button', { name: 'Trace skyline' }).click();
     const frame = await page.locator('.frame').boundingBox();
@@ -126,11 +126,36 @@ test.describe('the band over a photo in Horizon', () => {
     await page.mouse.move(frame.x + frame.width * 0.25, frame.y + frame.height * 0.8);
     await page.keyboard.press('d');
     await expect(details).toHaveAttribute('aria-pressed', 'false');
-    // nothing side by side until asked; with no terrain served here, the press says why it cannot draw
-    await expect(page.getByRole('region', { name: 'Photo above the terrain' })).toHaveCount(0);
-    await band.getByRole('button', { name: 'Side by side' }).click();
-    await expect(page.getByText('Could not draw them side by side: the view has not finished landing')).toBeVisible();
+    // nothing side by side until asked; the press splits the view, the terrain live under the photo
+    const side = band.getByRole('button', { name: 'Side by side' });
+    const seam = page.getByRole('toolbar', { name: 'Photo above the terrain' });
+    await expect(seam).toHaveCount(0);
+    await side.click();
+    await expect(side).toHaveAttribute('aria-pressed', 'true');
+    await expect(seam).toBeVisible();
+    const terrain = page.getByRole('application', { name: /^The terrain under the photo, linked/ });
+    await expect(terrain).toBeVisible();
+    // the two halves the same size, the terrain a seam under the photo
+    const top = await page.locator('.frame').boundingBox();
+    const under = await terrain.boundingBox();
+    expect(Math.abs(under.width - top.width)).toBeLessThan(1);
+    expect(Math.abs(under.height - top.height)).toBeLessThan(1);
+    expect(under.y).toBeGreaterThan(top.y + top.height);
+    // freed, the terrain moves alone; linked again, it follows the photo
+    const link = seam.getByRole('button', { name: 'Link the terrain to the photo' });
+    await expect(link).toHaveAttribute('aria-pressed', 'true');
+    await link.click();
+    await expect(link).toHaveAttribute('aria-pressed', 'false');
+    await expect(page.getByRole('application', { name: /^The terrain under the photo, free/ })).toBeVisible();
+    await link.click();
+    await expect(terrain).toBeVisible();
+    // no cut collage the search eased, so no still piece by piece
+    await expect(seam.getByRole('button', { name: 'Piece by piece' })).toHaveCount(0);
     await expectAllInside(band);
+    // Escape goes back to one view
+    await page.keyboard.press('Escape');
+    await expect(seam).toHaveCount(0);
+    await expect(side).toHaveAttribute('aria-pressed', 'false');
   });
 
   test('keeps how the ground is drawn on the view, out of the way while the pen is out', async ({ page }) => {

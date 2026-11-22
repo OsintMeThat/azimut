@@ -84,6 +84,7 @@
   import { destinationLabel } from '../lib/exportDest.js';
   import { earthCameraLink } from '../lib/maplinks.js';
   import { verticalFov } from '../lib/horizon/camera.js';
+  import { SEAM, splitFrames, traceRays } from '../lib/horizon/sideBySide.js';
   import {
     fitFrame,
     fitToTrace,
@@ -133,6 +134,10 @@
   import OverlayBar from './horizon/OverlayBar.svelte';
   import OverlayTransport from './horizon/OverlayTransport.svelte';
   import PhotoDialog from './horizon/PhotoDialog.svelte';
+  import RefViewer from './RefViewer.svelte';
+  import RefDock from './satellite/RefDock.svelte';
+  import RefPicker from './satellite/RefPicker.svelte';
+  import { createRefsState } from './satellite/state/refs.svelte.js';
   import ViewsMenu from './horizon/ViewsMenu.svelte';
   import ExportMenu from './horizon/ExportMenu.svelte';
   import CaptureMenu from './horizon/CaptureMenu.svelte';
@@ -927,6 +932,9 @@
     } else if (swapped) {
       event.preventDefault();
       mapLarge = false;
+    } else if (split && !side && uiState.tool === 'horizon') {
+      event.preventDefault();
+      split = null;
     }
   }
 
@@ -1219,8 +1227,32 @@
   const credits = $derived(creditsOf(false));
   const pictureCredits = $derived(creditsOf(true));
   const aspect = $derived((photoOn && overlay.aspect) || (frame.width && frame.height ? frame.width / frame.height : 4 / 3));
+  /**
+   * Reference windows: the same scratch panes as Satellite's, in the one session
+   * list (state/refs.svelte.js), so the shot being matched comes along. They are
+   * drawn while the view is on screen, never captured: the view's pictures come
+   * from its engine, not from the page.
+   */
+  const refs = createRefsState({
+    api,
+    notify: toast,
+    caseId: () => caseState.current?.id,
+    viewers: () => uiState.refViewers,
+    setViewers: (windows) => (uiState.refViewers = windows),
+  });
+  const refsHere = $derived(uiState.tool === 'horizon' && layout === 'looking' && mode !== 'find' && !swapped);
+
+  /**
+   * Side by side, live: the photo over the view above, the terrain alone under it
+   * (HorizonView `split`), linked to the photo's camera until freed. Null while off.
+   */
+  let split = $state(null);
+  /** The photo's frame and the seam under it while the two show, the terrain's frame the same size a seam lower. */
+  const splitBox = $derived(split && photoOn && overlay.source && overlay.aspect ? splitFrames(overlay.aspect, slot) : null);
   /** The frame in the photo's shape while one is laid, letterboxed in the room there is. */
-  const boxed = $derived(photoOn && overlay.source && overlay.aspect ? fitFrame(overlay.aspect, slot) : null);
+  const boxed = $derived(
+    splitBox ? splitBox.frame : photoOn && overlay.source && overlay.aspect ? fitFrame(overlay.aspect, slot) : null
+  );
 
   // -- the photo laid over the view ------------------------------------------------
 
@@ -1279,8 +1311,29 @@
     photoOn && overlay.traceShown && overlay.strokes.length && frame.width && view.panorama ? terrainLine(traceCamera, band, pieced) : []
   );
 
+  /** The trace laid on the terrain as the directions it stands at, which the terrain's half draws through its own camera. */
+  const splitTrace = $derived.by(() => {
+    if (!split || !overlay.traceShown || overlay.traceHidden || !overlay.strokesShown.length || !frame.width) return [];
+    return traceRays(traceOnTerrain(overlay.strokesShown, traceCamera, pieced), traceCamera);
+  });
+  const splitView = $derived(
+    split
+      ? {
+          linked: split.linked,
+          trace: splitTrace,
+          ridges: overlay.strokesShown.map((_, index) => overlay.marks.inner.includes(overlay.marks.lines[index])),
+        }
+      : null
+  );
+  /** A cut collage whose pieces the search eased, which only a still picture shows piece by piece. */
+  const pieceByPiece = $derived(Boolean(pieces?.length && overlay.marks.cuts.length));
+
+  function toggleSplit() {
+    split = split ? null : { linked: true };
+  }
+
   /**
-   * The photo above the terrain, the same frame on both, drawn when asked and
+   * A cut collage as the search read it, piece by piece, drawn when asked and
    * shown over the view (SideBySide) until closed: what the view drew, with the
    * trace as traced and as laid on the terrain.
    */
@@ -1328,7 +1381,9 @@
   }
   // a photo taken away or another mode takes its pictures with it
   $effect(() => {
-    if (!photoOn || mode !== 'overlay') side = null;
+    if (photoOn && mode === 'overlay' && overlay.source) return;
+    side = null;
+    split = null;
   });
 
   /** The places the last whole-turn search found, while the eye and the trace are the ones it read. */
@@ -1822,6 +1877,27 @@
 
 <svelte:window onkeydown={onKey} />
 
+{#snippet refWindow(pane)}
+  <RefViewer
+    viewer={pane}
+    caseId={caseState.current?.id}
+    onfocus={(id) => refs.focus(id)}
+    onclose={(id) => refs.close(id)}
+    onplace={(id, where) => refs.place(id, where)}
+    onkeep={(id, still, at) => refs.keepFrame(id, still, at)}
+  />
+{/snippet}
+
+{#snippet refColumn(side)}
+  {#if refsHere && refs.dockedOn(side).length}
+    <RefDock {side} width={refs.dockWidth(side)} onwidth={(w, total) => refs.setDockWidth(side, w, total)}>
+      {#each refs.dockedOn(side) as pane (pane.id)}
+        {@render refWindow(pane)}
+      {/each}
+    </RefDock>
+  {/if}
+{/snippet}
+
 <div
   class="horizon-tool {layout}"
   class:folded
@@ -1911,6 +1987,18 @@
         />
       {/if}
       {#if layout === 'looking'}
+        <button
+          type="button"
+          class="btn btn-sm hz-act"
+          class:hz-refs-on={refs.open.length > 0}
+          onclick={() => refs.openPicker()}
+          title={refs.open.length
+            ? `${refs.open.length} reference window${refs.open.length === 1 ? '' : 's'} open · add another`
+            : 'Add a reference image or video over the view'}
+          aria-label="Add reference"
+        >
+          <Icon name="image" size={13} /><span class="hz-act-label">Reference</span>
+        </button>
         <CaptureMenu busy={captureBusy} oncapture={captureView} />
         <ExportMenu
           photo={Boolean(photoOn && overlay.source)}
@@ -1955,12 +2043,20 @@
     </header>
 
     <div class="hz-stage dark-surface">
+      <div class="hz-row">
+      {@render refColumn('left')}
       <!-- svelte-ignore a11y_no_static_element_interactions -->
       <div class="view-area" ondragover={onDragOver} ondragleave={() => (dropping = false)} ondrop={onDrop}>
         {#if photoOn && overlay.source && layout === 'looking' && !swapped}
-          <OverlayBar {overlay} {gap} onfit={fit} {fitting} ondetect={detect} onside={showSide} {siding} />
+          <OverlayBar {overlay} {gap} onfit={fit} {fitting} ondetect={detect} onside={toggleSplit} sideOn={Boolean(split)} />
         {/if}
-        <div class="frame-slot" bind:clientWidth={slot.width} bind:clientHeight={slot.height}>
+        <div
+          class="frame-slot"
+          data-chrome="surface"
+          bind:clientWidth={slot.width}
+          bind:clientHeight={slot.height}
+          style:--hz-seam="{SEAM}px"
+        >
           <div
             class="frame"
             class:boxed
@@ -1987,6 +2083,7 @@
               {copernicus}
               onsetup={() => (copernicusHelp = true)}
               {buildings}
+              split={splitView}
             />
             {#if buildings.on && buildings.panelOpen}
               <div class="hz-buildings">
@@ -1994,6 +2091,54 @@
               </div>
             {/if}
           </div>
+          {#if splitBox}
+            <div
+              class="hz-seam"
+              data-chrome="control"
+              role="toolbar"
+              aria-label="Photo above the terrain"
+              style:top="{splitBox.seam.top}px"
+              style:height="{splitBox.seam.height}px"
+            >
+              <span></span>
+              <button
+                type="button"
+                class="btn btn-sm hz-link"
+                class:on={split.linked}
+                aria-pressed={split.linked}
+                aria-label="Link the terrain to the photo"
+                title={split.linked ? 'The terrain follows the photo; press to move it alone' : 'The terrain moves alone; press to put it back under the photo'}
+                onclick={() => (split.linked = !split.linked)}
+              >
+                <Icon name={split.linked ? 'link' : 'unlink'} size={13} /><span>{split.linked ? 'Linked' : 'Free'}</span>
+              </button>
+              <span class="hz-seam-acts">
+                {#if pieceByPiece}
+                  <button
+                    type="button"
+                    class="btn btn-sm btn-ghost"
+                    disabled={siding}
+                    aria-busy={siding}
+                    onclick={showSide}
+                    title="The terrain as the search read the cut collage, each piece through its own camera">Piece by piece</button
+                  >
+                {/if}
+                <button
+                  type="button"
+                  class="btn btn-sm btn-ghost"
+                  disabled={Boolean(exportBusy)}
+                  aria-busy={exportBusy === 'column'}
+                  onclick={() => exportView('column', { trace: true })}
+                  title="Write the photo above the terrain as one picture, through the photo's frame"
+                >
+                  <Icon name="download" size={13} /><span>{exportBusy === 'column' ? 'Saving…' : 'Save as picture'}</span>
+                </button>
+                <button type="button" class="btn btn-sm btn-ghost hz-seam-close" onclick={() => (split = null)} title="Back to one view (Esc)" aria-label="Close side by side">
+                  <Icon name="x" size={14} />
+                </button>
+              </span>
+            </div>
+          {/if}
           {#if side}
             <SideBySide
               frames={side.frames}
@@ -2035,6 +2180,17 @@
               <p>Drop to lay it over the view{caseState.current ? ': it is added to the case' : ''}</p>
             </div>
           {/if}
+          {#if layout === 'looking' && view.error}
+            <!-- in the middle of the view, of the photo's half while the terrain shows under it -->
+            <div
+              class="trouble"
+              role="alert"
+              style:top={splitBox ? `${splitBox.frame.top + splitBox.frame.height / 2}px` : null}
+            >
+              <p>{view.error}</p>
+              <button type="button" class="btn btn-sm" onclick={() => view.retry()}>Try again</button>
+            </div>
+          {/if}
         </div>
         {#if photoOn && overlay.source?.kind === 'video' && layout === 'looking' && !swapped}
           <OverlayTransport {overlay} />
@@ -2044,12 +2200,12 @@
             <CopernicusNeeded need="account" tool="Sentinel-2 near the eye" onclose={() => (copernicusHelp = false)} />
           </div>
         {/if}
-        {#if layout === 'looking' && view.error}
-          <div class="trouble" role="alert">
-            <p>{view.error}</p>
-            <button type="button" class="btn btn-sm" onclick={() => view.retry()}>Try again</button>
-          </div>
-        {/if}
+        <!-- the reference windows over the view, scratch aids like the Map's -->
+        {#each refsHere ? refs.floating : [] as pane (pane.id)}
+          {@render refWindow(pane)}
+        {/each}
+      </div>
+      {@render refColumn('right')}
       </div>
       <!-- under the view, by its heading: the strip's lit field is the span the ruler above it reads -->
       {#if !swapped}
@@ -2284,6 +2440,18 @@
   {/if}
 </div>
 
+{#if refs.picking}
+  <RefPicker
+    media={refs.media}
+    loading={refs.loading}
+    caseId={caseState.current?.id}
+    bind:category={refs.category}
+    bind:showWorking={refs.showWorking}
+    onpick={(item) => refs.add(item)}
+    onclose={() => (refs.picking = false)}
+  />
+{/if}
+
 {#if photoDialog}
   <PhotoDialog
     caseId={caseState.current?.id ?? null}
@@ -2478,12 +2646,23 @@
     min-height: 0;
     background: var(--bg-0);
   }
+  /* the view between the reference columns, when one is docked */
+  .hz-row {
+    display: flex;
+    flex: 1;
+    min-height: 0;
+  }
   .view-area {
     position: relative;
     display: flex;
     flex-direction: column;
     flex: 1;
+    min-width: 0;
     min-height: 0;
+  }
+  .hz-act.hz-refs-on {
+    border-color: var(--accent);
+    color: var(--accent);
   }
   /* the place of the search looked from, to confirm: low over the view, out of the photo's way */
   .hz-found {
@@ -2525,6 +2704,34 @@
   }
   .frame.boxed {
     inset: auto;
+  }
+  /* Side by side: the bar between the photo and the terrain, the link in its middle */
+  .hz-seam {
+    position: absolute;
+    left: 0;
+    right: 0;
+    display: grid;
+    grid-template-columns: 1fr auto 1fr;
+    align-items: center;
+    gap: 8px;
+    padding: 0 10px;
+  }
+  .hz-seam-acts {
+    display: flex;
+    justify-content: flex-end;
+    gap: 4px;
+    min-width: 0;
+  }
+  .hz-link {
+    gap: 6px;
+  }
+  .hz-link.on {
+    border-color: var(--accent);
+    background: var(--accent-soft);
+    color: var(--accent);
+  }
+  .hz-seam-close {
+    padding: 0 6px;
   }
   /* the buildings' settings over the view, where their effect is watched while they change */
   .hz-buildings {

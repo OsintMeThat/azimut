@@ -9,10 +9,13 @@
  * engine's own buttons (zoom, scale, credits) sit inside the map and are read
  * by their class. Other reference windows are not controls: two pinned to one
  * corner may overlap, as two dropped there would.
+ *
+ * A view drawn by another engine (Horizon's) says so itself: its surface wears
+ * `data-chrome="surface"`, and the controls laid over it `data-chrome="control"`.
  */
 
-const ENGINE_CONTROLS = '.maplibregl-ctrl';
-const NOT_CONTROLS = '.map, .globe, .ref-viewer';
+const ENGINE_CONTROLS = '.maplibregl-ctrl, [data-chrome="control"]';
+const NOT_CONTROLS = '.map, .globe, .ref-viewer, [data-chrome="surface"]';
 
 /**
  * @param {Element} wrap the map's container, the box the windows are placed in

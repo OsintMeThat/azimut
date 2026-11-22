@@ -1,6 +1,6 @@
 // @vitest-environment happy-dom
 /**
- * The photo above the terrain, asked for from the band: the two pictures in
+ * The photo above the terrain as a still, asked for from Side by side's bar: the two pictures in
  * one frame, the names and the trace on both, a line down both that says the
  * direction, and a way back to the view.
  */

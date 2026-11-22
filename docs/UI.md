@@ -3547,6 +3547,11 @@ trace, Find's area and alignments, the mode) is kept in the case and offered
 at the foot of that map: **Resume** lays it back, **Discard** lets it go, and
 anything started instead replaces it. Work a saved view or a search keeps is
 not offered; Open has it. A link that names a viewpoint still stands there.
+**Reference** in the header opens the Map's reference windows over the view:
+the same picker and windows, in the same session list, so a window opened on the
+Map is there too. Each tab draws them only while it is on screen, so a clip
+never plays twice. Docked, the view narrows beside them; pinned, they keep clear
+of its band, its corner controls and its ruler.
 
 The inspector under the small map is grouped by what is asked of the view.
 **Measures** holds the marked point and the ground clicked in the view.
@@ -3785,13 +3790,20 @@ lying off the terrain says by how much on a red badge ("2.4° above the land",
 view names every line it draws, the terrain's own ridge lines and the eye's
 level included. **Details** (D) adds the band the terrain's skyline may be off
 by (wide over a near ridge), the cuts and the pairs' letters, which also show
-while a tool is out. **Side by side** draws the photo above the terrain through
-the same frame, on demand, with a line down both that says the direction under
-the pointer, and saves the pair as a picture. A collage cut for a search shows
-its terrain **Piece by piece**, as the search read it: each piece through the
-camera the search found for it, the seams dashed on both, and the piece under
-the pointer says how far it was turned, tilted and rolled. **One camera** shows
-the terrain whole, and the picture saved is the one shown.
+while a tool is out. **Side by side** splits the view in two, live: the photo
+above as Overlay shows it, the terrain alone under it at the same size, with its
+names, its ruler and the trace laid on it. The view's one engine draws both, the
+terrain first and copied under the photo. The bar between them holds **Linked**:
+linked, the terrain is seen through the photo's camera, and a drag or the wheel
+over it moves the loupe, so both halves move together and the match never moves.
+**Free** turns and zooms the terrain alone from the same eye, and linking it
+again puts it back under the photo. A line down each half follows the direction
+under the pointer over the other. The bar saves the pair as a picture through
+the photo's frame, and Escape or its × goes back to one view. A collage cut for a
+search adds **Piece by piece**, a still of its terrain as the search read it:
+each piece through the camera the search found for it, the seams dashed on both,
+and the piece under the pointer says how far it was turned, tilted and rolled.
+**One camera** shows the terrain whole, and the picture saved is the one shown.
 
 Horizon offers these controls and the place search on its large map and in
 Find, including its three-column view. The small map

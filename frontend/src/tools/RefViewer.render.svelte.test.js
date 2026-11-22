@@ -158,6 +158,18 @@ describe('its place', () => {
     expect(viewer.h).toBe(300);
   });
 
+  it('free, comes back inside a smaller box than the one it was left in', () => {
+    // left far right on the Map, then drawn over Horizon's narrower view
+    const viewer = $state(createViewer('ref-1', SHOT, { x: 900, y: 500, z: 1 }));
+    const target = document.createElement('div');
+    target.getBoundingClientRect = () => ({ left: 0, top: 0, width: 600, height: 400 });
+    document.body.appendChild(target);
+    app = mount(RefViewer, { target, props: { viewer, caseId: 'case-1', onfocus: vi.fn(), onclose: vi.fn(), onplace: vi.fn(), onkeep: vi.fn() } });
+    flushSync();
+    expect(viewer.x).toBe(600 - viewer.w);
+    expect(viewer.y).toBe(Math.max(0, 400 - viewer.h));
+  });
+
   it('pinned, grows away from its corner', () => {
     const { viewer, root } = open(SHOT, { corner: 'br' });
     resize(root, -60, -40);

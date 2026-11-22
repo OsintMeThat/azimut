@@ -635,6 +635,9 @@
     viewers: () => uiState.refViewers,
     setViewers: (windows) => (uiState.refViewers = windows),
   });
+  // Horizon draws the same windows: each tab draws them only while it is on
+  // screen, so a clip never plays in two places (state/refs.svelte.js).
+  const refsHere = $derived(uiState.tool === 'satellite');
   // A scene being geolocated (Inspect's Geolocate, the To-do, the pill): its video
   // in a reference window, the scene marked on its bar (`lib/geolocating.svelte.js`).
   $effect(() => {
@@ -650,6 +653,7 @@
   // A docked reference narrows the map beside it, so the engine remeasures
   // whenever a column opens, closes or changes width.
   $effect(() => {
+    void refsHere;
     for (const side of ['left', 'right']) {
       void refs.dockedOn(side).length;
       void refs.dockWidth(side);
@@ -2592,7 +2596,7 @@
 {/snippet}
 
 {#snippet refColumn(side)}
-  {#if refs.dockedOn(side).length}
+  {#if refsHere && refs.dockedOn(side).length}
     <RefDock {side} width={refs.dockWidth(side)} onwidth={(w, total) => refs.setDockWidth(side, w, total)}>
       {#each refs.dockedOn(side) as pane (pane.id)}
         {@render refWindow(pane)}
@@ -3050,7 +3054,7 @@
         />
       {/if}
       <!-- floating reference-image windows (scratch aids over the map) -->
-      {#each refs.floating as pane (pane.id)}
+      {#each refsHere ? refs.floating : [] as pane (pane.id)}
         {@render refWindow(pane)}
       {/each}
       </MapSurface>

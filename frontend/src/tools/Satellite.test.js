@@ -196,8 +196,11 @@ describe('reference windows', () => {
     // a rail seat that runs rather than arms: it opens a picker and a window
     expect(source).toContain("if (id === 'reference') return refs.openPicker();");
     expect(source).toContain('on: refs.open.length > 0,');
-    // over the map, and in a column on either side of it
-    expect(source).toContain('{#each refs.floating as pane (pane.id)}');
+    // over the map, and in a column on either side of it, while the Map is on screen:
+    // Horizon draws the same windows, and a clip must never play in two places
+    expect(source).toContain("const refsHere = $derived(uiState.tool === 'satellite');");
+    expect(source).toContain('{#each refsHere ? refs.floating : [] as pane (pane.id)}');
+    expect(source).toContain('{#if refsHere && refs.dockedOn(side).length}');
     expect(source).toContain('{#each refs.dockedOn(side) as pane (pane.id)}');
     expect(source).toContain("{@render refColumn('left')}");
     expect(source).toContain("{@render refColumn('right')}");
