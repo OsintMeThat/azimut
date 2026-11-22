@@ -120,7 +120,7 @@ test('Export offers For review for one note, which says what leaves and what sta
   await expect(dialog.locator('.review select')).toHaveValue('logo');
   await dialog.getByRole('button', { name: 'Export', exact: true }).click();
   await expect(dialog.locator('.review-done')).toHaveText(`Written: ${FILE}`);
-  expect(state.exported).toEqual([{ author: 'Guest Analyst', picture: 'logo' }]);
+  expect(state.exported).toEqual([{ author: 'Guest Analyst', picture: 'logo', videos: true }]);
 
   // Download is the main press: the browser saves the file where an upload page will look for it
   const saved = page.waitForEvent('download');

@@ -37,6 +37,8 @@ class ReviewExport(BaseModel):
     #: The picture beside the name: None keeps its look's, "" none, `logo` the exporter's own
     #: logo, else a picture of the case by its id.
     picture: str | None = Field(default=None, max_length=64, pattern=r"^[A-Za-z0-9_-]*$")
+    #: Whether the source videos the page never plays go too (`reviewexport.Contents.videos`).
+    videos: bool = True
 
 class BundleUpload(BundlePassword):
     upload_id: str = Field(min_length=32, max_length=32)
@@ -170,7 +172,7 @@ def review_export(case_id: str, note_id: str, body: ReviewExport) -> dict[str, A
     """Queue one note's export for review; `bundle/jobs/{job_id}` says when it is written."""
     case = get_case(case_id)
     try:
-        job = reviewexport.queue(case, note_id, author=body.author, picture=body.picture)
+        job = reviewexport.queue(case, note_id, author=body.author, picture=body.picture, videos=body.videos)
     except CaseError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     return {"case_id": case.id, "job_id": job["id"], "state": job["state"],

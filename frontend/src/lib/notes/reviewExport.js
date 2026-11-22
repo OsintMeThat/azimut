@@ -10,6 +10,8 @@ import { waitForBundle } from '../bundles.js';
 
 /** Where a guest sends the file. */
 export const CONTRIBUTE = 'https://osintmethat.com/contribute';
+/** What the Source videos box says on hover. */
+export const VIDEOS_HELP = 'Videos the page only cites, never plays';
 /** What the pictures and files carry as they go. */
 export const METADATA = 'Pictures and files go as they are in the case, their metadata included; a published page strips it.';
 
@@ -21,9 +23,10 @@ export function readReview(caseId, noteId, picture = null) {
 }
 
 /** The press: queue the export, then wait for its file. Resolves to the finished job, whose `id`
- * the whole case's download takes (`lib/bundles.js`). */
-export async function exportForReview(caseId, noteId, { author, picture }, options = {}) {
-  const started = await api.post(base(caseId, noteId), { author, picture });
+ * the whole case's download takes (`lib/bundles.js`). ``videos`` false leaves the source videos'
+ * files behind. */
+export async function exportForReview(caseId, noteId, { author, picture, videos = true }, options = {}) {
+  const started = await api.post(base(caseId, noteId), { author, picture, videos });
   const job = await waitForBundle(caseId, started.job_id, options);
   return { ...job, id: job.id ?? started.job_id, file: job.file ?? started.file };
 }
@@ -46,4 +49,23 @@ export function namesWords(group) {
 export function staysWords(internal) {
   const left = Number(internal) || 0;
   return left ? `${plural(left, 'internal passage')}, left out of the text, and the rest of the case.` : 'The rest of the case.';
+}
+
+/** The largest file the site takes (`reviewexport.SITE_LIMIT`) as its form says it: `1 GB`. */
+export function limitWords(limit) {
+  const gigabytes = Number(limit) / 1024 ** 3;
+  return Number.isInteger(gigabytes) && gigabytes > 0 ? `${gigabytes} GB` : `${Math.round(Number(limit) / 1024 ** 2)} MB`;
+}
+
+/** What leaves weighs with the box as it stands, and the one line the limit asks for, if any: past
+ * it whatever the box, or the videos left behind because the whole would pass it. */
+export function sizeSaid(shown, sendVideos) {
+  const videos = shown?.videos?.size ?? 0;
+  const size = Math.max(0, (shown?.size ?? 0) - (sendVideos ? 0 : videos));
+  const limit = shown?.limit ?? 0;
+  if (limit && size > limit) return { size, line: `This is over the ${limitWords(limit)} the site takes.` };
+  if (limit && !sendVideos && videos && (shown?.size ?? 0) > limit) {
+    return { size, line: `osintmethat.com/contribute takes files up to ${limitWords(limit)}, so the source videos stay behind; tick to send them anyway.` };
+  }
+  return { size, line: '' };
 }

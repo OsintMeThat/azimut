@@ -119,7 +119,7 @@ it('writes the note first, exports with the fields as typed, then downloads and 
   await body.send();
   await settle();
   expect(prepare).toHaveBeenCalledTimes(1);
-  expect(post).toHaveBeenCalledWith('/api/cases/c%201/notes/n1/review', { author: 'Guest Analyst', picture: 'e_piece00001' });
+  expect(post).toHaveBeenCalledWith('/api/cases/c%201/notes/n1/review', { author: 'Guest Analyst', picture: 'e_piece00001', videos: true });
   expect(text('.review-done')).toBe(`Written: ${SHOWN.file}`);
   const opened = [];
   const click = vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(function () { opened.push(this.getAttribute('href')); });
@@ -142,4 +142,62 @@ it('says why an export failed and stays on what leaves', async () => {
   expect(text('.review-problem')).toBe('Could not export the note: not enough free space');
   expect(document.querySelector('.review-done')).toBeNull();
   expect(document.querySelector('.review-groups')).not.toBeNull();
+});
+
+const GB = 1024 ** 3;
+const MB = 1024 ** 2;
+const WITH_VIDEOS = { ...SHOWN, size: 900 * MB, videos: { count: 2, size: 525 * MB }, send_videos: true, limit: GB };
+const box = () => document.querySelector('.review-videos input');
+
+it('sends the source videos by default, and the size follows the box', async () => {
+  get.mockResolvedValue(WITH_VIDEOS);
+  post.mockResolvedValue({ job_id: 'j3', state: 'queued', file: SHOWN.file });
+  show();
+  await settle();
+  expect(text('.review-videos')).toBe('Source videos (525 MB)');
+  expect(document.querySelector('.review-videos').title).toBe('Videos the page only cites, never plays');
+  expect(box().checked).toBe(true);
+  expect(text('.review-head')).toBe('What leaves 900 MB');
+  expect(document.querySelector('.review-limit')).toBeNull();
+  box().click();
+  flushSync();
+  expect(text('.review-head')).toBe('What leaves 375 MB');
+  // left behind by hand under the limit: nothing to say
+  expect(document.querySelector('.review-limit')).toBeNull();
+});
+
+it('leaves the source videos behind when the whole would pass 1 GB, and says so', async () => {
+  get.mockResolvedValue({ ...WITH_VIDEOS, size: GB + 200 * MB, send_videos: false });
+  post.mockResolvedValue({ job_id: 'j4', state: 'queued', file: SHOWN.file });
+  get.mockImplementation((url) => (url.includes('/bundle/jobs/')
+    ? Promise.resolve({ id: 'j4', state: 'ready', file: SHOWN.file })
+    : Promise.resolve({ ...WITH_VIDEOS, size: GB + 200 * MB, send_videos: false })));
+  const { body } = show();
+  await settle();
+  expect(box().checked).toBe(false);
+  expect(text('.review-head')).toBe('What leaves 699 MB');
+  expect(text('.review-limit')).toBe(
+    'osintmethat.com/contribute takes files up to 1 GB, so the source videos stay behind; tick to send them anyway.');
+  box().click();
+  flushSync();
+  expect(text('.review-limit')).toBe('This is over the 1 GB the site takes.');
+  box().click();
+  flushSync();
+  await body.send();
+  expect(post).toHaveBeenCalledWith('/api/cases/c%201/notes/n1/review', { author: 'Guest Writer', picture: 'e_piece00001', videos: false });
+});
+
+it('says a file over 1 GB even without its videos is over what the site takes', async () => {
+  get.mockResolvedValue({ ...WITH_VIDEOS, size: GB + 600 * MB, send_videos: false });
+  show();
+  await settle();
+  expect(box().checked).toBe(false);
+  expect(text('.review-limit')).toBe('This is over the 1 GB the site takes.');
+});
+
+it('shows no box when no source video goes', async () => {
+  get.mockResolvedValue({ ...WITH_VIDEOS, videos: { count: 0, size: 0 } });
+  show();
+  await settle();
+  expect(document.querySelector('.review-videos')).toBeNull();
 });

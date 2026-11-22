@@ -27,6 +27,10 @@ and no stranger's HTML runs anywhere. What it holds is one article, never the wh
   period selects, the pictures its cards show, and the case's named colours and icons;
 - each map page it links to (`notelinks.linked_maps`), with everything that page needs.
 
+**Source videos** (`Contents.videos`): a video the page only cites, never plays nor shows a still
+of (a frame's video, a proof's footage, a kept post's video with a still of its own), may leave its
+file behind, its record, sidecar and links still travelling; past `SITE_LIMIT` the dialog starts so.
+
 **What stays**: the rest of the case, its Trash and its jobs, and what the note's earlier
 publishing recorded (its editions, GitHub, WordPress and site records): the receiver starts
 fresh. The source case is never written: the copy is built in a hidden folder beside the
@@ -86,6 +90,9 @@ SUFFIX = ".azimut.zip"
 STAGING_PREFIX = ".review-"
 #: How many names of each group the dialog lists; its counts stay whole.
 MAX_NAMES = 12
+#: The largest file osintmethat.com/contribute takes, 1 GB as its form says it: past it the dialog
+#: starts with the source videos left behind, and says so.
+SITE_LIMIT = 1073741824
 
 #: The groups the dialog lists what leaves under, in its order: the key and the words.
 GROUPS: tuple[tuple[str, str], ...] = (
@@ -162,6 +169,11 @@ class Contents:
     #: The look each map page it carries keeps, signed as the article is (`signed`): a map page
     #: is published as a page of its own, so it carries the same author and picture.
     pages: dict[str, notelook.NoteLook] = field(default_factory=dict)
+    #: The source videos the page only cites and never plays or shows a frame of, by their file,
+    #: with its size: a frame's video, a proof's footage, a kept post's video with its own still.
+    videos: dict[str, int] = field(default_factory=dict)
+    #: Whether their files go too; without them their records, sidecars and links still travel.
+    send_videos: bool = True
 
     @property
     def size(self) -> int:
@@ -220,6 +232,8 @@ class _Reading:
         self._rows: dict[str, dict[str, Any] | None] = {}
         self._waiting: list[str] = []
         self._origins: set[str] = set()
+        #: The records whose file the page plays or shows, a still of a video included.
+        self._shown: set[str] = set()
         self._index: urltitles.AddressIndex | None = None
         self._published: dict[str, list[str]] | None = None
         self._post_proofs: Any = None
@@ -244,6 +258,8 @@ class _Reading:
         record = self.row(entity_id)
         if record is None:
             return False
+        if group == "pictures":
+            self._shown.add(entity_id)  # its file, or a still of it, is on the page
         held = self.contents.entities
         kind = str(record.get("type") or "")
         listed = group if kind == "note" or group in ("sources", "records") else _BY_TYPE.get(kind, group)
@@ -289,13 +305,15 @@ class _Reading:
             return {}
         return found[0] if found and isinstance(found[0], dict) else {}
 
-    def path_entity(self, rel: str, group: str) -> None:
-        """A case file named by its path: its record when the index files one, else the file."""
+    def path_entity(self, rel: str, group: str) -> str:
+        """A case file named by its path: its record when the index files one, else the file. The
+        record's id, "" for none."""
         if not self.file(rel):
-            return
+            return ""
         entity_id = str(self.item(rel).get("entity_id") or "")
         if entity_id:
             self.add(entity_id, group)
+        return entity_id
 
     def drain(self) -> None:
         """What each record carried brings with it, until nothing new comes."""
@@ -366,7 +384,11 @@ class _Reading:
         spec = socialposts.read_spec(self.case, record) or {}
         for picture in spec.get("pictures") or []:
             if isinstance(picture, dict) and isinstance(picture.get("media"), str):
-                self.path_entity(picture["media"], "sources")
+                kept = self.path_entity(picture["media"], "sources")
+                # a video with no still of its own shows one made from its file (`socialposts._post`)
+                poster = picture.get("poster")
+                if kept and picture.get("kind") == "video" and not (isinstance(poster, str) and self.file(poster)):
+                    self._shown.add(kept)
         if self._post_proofs is None:
             self._post_proofs = socialposts._Proofs(self.case)
         proof = self._post_proofs.of(str(spec.get("url") or ""))
@@ -581,6 +603,7 @@ class _Reading:
             followed = str(properties.get("entity_id") or "")
             if followed:
                 self.add(followed, "sources")
+                self._shown.add(followed)  # its card shows its picture, a video's still
                 self._stands(followed)
             picture = str(properties.get("picture") or "")
             if picture:
@@ -675,9 +698,11 @@ def exported_look(case: "Case", note_id: str, *, author: str | None = None,
     return look, logo
 
 
-def contents(case: "Case", note_id: str, *, author: str | None = None, picture: str | None = None) -> Contents:
+def contents(case: "Case", note_id: str, *, author: str | None = None, picture: str | None = None,
+             videos: bool = True) -> Contents:
     """What exporting ``note_id`` for review carries, and what it leaves out: the one reading
-    the dialog shows and the export writes."""
+    the dialog shows and the export writes. ``videos`` False leaves the files of the source videos
+    the page never plays behind (`Contents.videos`)."""
     title = _note_title(case, note_id)
     look, logo = exported_look(case, note_id, author=author, picture=picture)
     reading = _Reading(case, note_id)
@@ -690,7 +715,26 @@ def contents(case: "Case", note_id: str, *, author: str | None = None, picture: 
         reading.contents.pages[page] = signed(notelook.stored(case, page), look)
         reading.look(reading.contents.pages[page])
     _unfiled(case, reading.contents)
+    _source_videos(case, reading, videos)
     return reading.contents
+
+
+def _source_videos(case: "Case", reading: _Reading, send: bool) -> None:
+    """The videos the page cites and never plays nor shows a still of, and, unless ``send``, their
+    files left out: their records, sidecars and links still travel, so the page and its sources
+    read the same."""
+    found = reading.contents
+    for entity_id in found.entities:
+        if entity_id in reading._shown:
+            continue
+        attrs = (reading.row(entity_id) or {}).get("attrs") or {}
+        rel = str(attrs.get("path") or "")
+        if attrs.get("kind") == "video" and rel in found.files:
+            found.videos[rel] = found.files[rel]
+    found.send_videos = send
+    if not send:
+        for rel in found.videos:
+            found.files.pop(rel, None)
 
 
 def signed(page: notelook.NoteLook | None, article: notelook.NoteLook) -> notelook.NoteLook:
@@ -727,7 +771,8 @@ def report_name() -> str:
 
 
 def preview(case: "Case", note_id: str, *, picture: str | None = None) -> dict[str, Any]:
-    """What the dialog shows before the press: what leaves, what stays, who signs."""
+    """What the dialog shows before the press: what leaves, what stays, who signs. ``size`` counts
+    the source videos (``videos``), which go unless the whole would pass `SITE_LIMIT` (``send_videos``)."""
     look = notelook.stored(case, note_id) or notelook.DEFAULT
     own = look.author_image if look.author_image and picture_of(case, look.author_image) is not None else ""
     has_logo = config.signature_path().is_file()
@@ -748,6 +793,9 @@ def preview(case: "Case", note_id: str, *, picture: str | None = None) -> dict[s
         "maps": found.maps[:MAX_NAMES],
         "map_count": len(found.maps),
         "size": found.size,
+        "videos": {"count": len(found.videos), "size": sum(found.videos.values())},
+        "send_videos": not found.videos or found.size <= SITE_LIMIT,
+        "limit": SITE_LIMIT,
         "internal": found.internal,
         "author": look.author or report_name(),
         "picture": chosen,
@@ -768,10 +816,11 @@ def output_path(title: str) -> Path:
 
 
 def export(case: "Case", note_id: str, *, author: str | None = None, picture: str | None = None,
-           output: Path | None = None) -> Path:
+           videos: bool = True, output: Path | None = None) -> Path:
     """Write the bundle of one note for review and return its path. The source case is only
-    read; the copy is built beside the bundles and gone once this returns, however it ends."""
-    found = contents(case, note_id, author=author, picture=picture)
+    read; the copy is built beside the bundles and gone once this returns, however it ends.
+    ``videos`` False leaves the source videos' files behind (`contents`)."""
+    found = contents(case, note_id, author=author, picture=picture, videos=videos)
     config.bundles_dir().mkdir(parents=True, exist_ok=True)
     target = Path(output) if output is not None else output_path(found.title)
     staging = Path(tempfile.mkdtemp(prefix=STAGING_PREFIX, dir=config.bundles_dir()))
@@ -859,7 +908,8 @@ def _prune(db: Path, found: Contents, *, name: str) -> None:
         conn.execute("CREATE TEMP TABLE kept(id TEXT PRIMARY KEY)")
         conn.executemany("INSERT INTO kept(id) VALUES(?)", [(one,) for one in keep])
         conn.execute("CREATE TEMP TABLE kept_paths(path TEXT PRIMARY KEY)")
-        conn.executemany("INSERT INTO kept_paths(path) VALUES(?)", [(one,) for one in found.files])
+        # a source video left behind keeps its row in the media index, its sidecar travelling
+        conn.executemany("INSERT INTO kept_paths(path) VALUES(?)", [(one,) for one in {*found.files, *found.videos}])
         for statement in (
             "DELETE FROM links WHERE from_id NOT IN (SELECT id FROM kept) OR to_id NOT IN (SELECT id FROM kept)",
             # presentation of the sender's own graph, their saved readings and merges
@@ -1064,13 +1114,15 @@ def _addressed(case: "Case", text: str, filed: dict[str, str]) -> str:
 # -- the job ---------------------------------------------------------------------------------
 
 
-def queue(case: "Case", note_id: str, *, author: str | None = None, picture: str | None = None) -> dict[str, Any]:
+def queue(case: "Case", note_id: str, *, author: str | None = None, picture: str | None = None,
+          videos: bool = True) -> dict[str, Any]:
     """Queue one export for review, once what it was asked is checked; the file is named now."""
     title = _note_title(case, note_id)
     exported_look(case, note_id, author=author, picture=picture)
     job = case.enqueue_job(
         REVIEW_JOB,
-        payload={"note": note_id, "author": author, "picture": picture, "output": str(output_path(title))},
+        payload={"note": note_id, "author": author, "picture": picture, "videos": videos,
+                 "output": str(output_path(title))},
         max_attempts=1,
     )
     workqueue.wake(case)
@@ -1081,7 +1133,7 @@ def _handle(case: "Case", job: dict[str, Any]) -> None:
     payload = job.get("payload") or {}
     try:
         export(case, str(payload.get("note") or ""), author=payload.get("author"), picture=payload.get("picture"),
-               output=Path(str(payload.get("output") or "")))
+               videos=payload.get("videos") is not False, output=Path(str(payload.get("output") or "")))
     except (ReviewExportError, bundles.BundleError) as exc:
         raise workqueue.JobRefused(str(exc)) from exc
 

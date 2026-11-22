@@ -15,7 +15,7 @@
   import { downloadBundle } from '../../lib/bundles.js';
   import { formatSize } from '../../lib/trash.js';
   import {
-    CONTRIBUTE, METADATA, exportForReview, namesWords, readReview, revealBundles, staysWords,
+    CONTRIBUTE, METADATA, VIDEOS_HELP, exportForReview, namesWords, readReview, revealBundles, sizeSaid, staysWords,
   } from '../../lib/notes/reviewExport.js';
 
   let {
@@ -34,7 +34,10 @@
   let author = $state('');
   let picture = $state('');
   let failed = $state('');
+  // the source videos' files go unless the whole would pass what the site takes (`send_videos`)
+  let sendVideos = $state(true);
   let reading = 0;
+  const said = $derived(sizeSaid(shown, sendVideos));
 
   // a branch opened afresh has written nothing yet
   written = null;
@@ -47,7 +50,10 @@
     try {
       const answer = await readReview(caseId, noteId, choice);
       if (mine !== reading) return;
-      if (shown === null) author = answer.author ?? '';
+      if (shown === null) {
+        author = answer.author ?? '';
+        sendVideos = answer.send_videos !== false;
+      }
       shown = answer;
       picture = answer.picture ?? '';
     } catch (error) {
@@ -70,7 +76,7 @@
     failed = '';
     try {
       await prepare();
-      const job = await exportForReview(caseId, noteId, { author: author.trim(), picture });
+      const job = await exportForReview(caseId, noteId, { author: author.trim(), picture, videos: sendVideos });
       if (job.state === 'ready') written = { file: job.file, job: job.id };
       else failed = job.error ? `Could not export the note: ${job.error}` : 'Could not export the note';
     } catch (error) {
@@ -107,7 +113,7 @@
     <p class="review-quiet" role="status">Reading what the page needs…</p>
   {:else if shown}
     <section aria-label="What leaves">
-      <h3 class="review-head">What leaves <span>{formatSize(shown.size)}</span></h3>
+      <h3 class="review-head">What leaves <span>{formatSize(said.size)}</span></h3>
       <ul class="review-groups">
         {#each shown.groups ?? [] as group (group.key)}
           <li><strong>{group.label} ({group.count})</strong> <span dir="auto">{namesWords(group)}</span></li>
@@ -116,6 +122,11 @@
           <li><strong>Maps ({shown.map_count})</strong> <span dir="auto">{namesWords({ names: shown.maps, count: shown.map_count })}</span></li>
         {/if}
       </ul>
+      {#if shown.videos?.count}
+        <label class="review-videos" title={VIDEOS_HELP}>
+          <input type="checkbox" bind:checked={sendVideos} disabled={busy} /> Source videos ({formatSize(shown.videos.size)})</label>
+      {/if}
+      {#if said.line}<p class="review-limit" role="status">{said.line}</p>{/if}
     </section>
     <section aria-label="What stays">
       <h3 class="review-head">What stays</h3>
@@ -158,6 +169,8 @@
     line-height: 1.4; overflow-wrap: anywhere;
   }
   .review-groups strong { color: var(--text-1); font-weight: 600; }
+  .review-videos { display: flex; align-items: center; gap: 6px; margin: -6px 0 10px; color: var(--text-1); font-size: var(--fs-sm); }
+  .review-limit { margin: 0 0 12px; color: var(--warn); font-size: var(--fs-xs); line-height: 1.45; }
   .review-stays { margin: 0 0 10px; color: var(--text-2); font-size: var(--fs-sm); }
   .review-quiet { margin: 0 0 12px; color: var(--text-3); font-size: var(--fs-xs); line-height: 1.45; }
   .review-fields { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin: 4px 0 12px; }

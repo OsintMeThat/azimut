@@ -211,7 +211,9 @@ def _handle(case: "CaseType", job: dict[str, Any]) -> None:
 
     rel = job["payload"].get("path")
     item = media_engine.read_item(case, rel) if rel else None
-    if item is None:  # the media (or its sidecar) is gone — nothing to do
+    # the media or its sidecar is gone, or the file alone, as a source video a note sent for
+    # review leaves behind (`engine/reviewexport.py`): nothing to render
+    if item is None or not case.resolve_inside(rel).is_file():
         raise workqueue.JobCancelled(f"media gone: {rel}")
     try:
         thumb_rel = generate(case, rel, item.get("sha256", ""), item.get("kind", ""))

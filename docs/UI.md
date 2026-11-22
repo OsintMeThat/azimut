@@ -7640,7 +7640,14 @@ publishing records, the Trash, the jobs and the rest of the case stay. The dialo
 first, in place of the destination and the check (`GET /notes/{id}/review`, nothing written): **What leaves**, by kind with counts and
 the first names, and its size; **What stays**, the internal passages left out and the rest of
 the case; that pictures and files go as they are, metadata included, which a published page
-strips. **Author** starts from the note's look, else Settings › Publishing's name, and
+strips. **Source videos (N MB)** decides whether the files of the videos the page only cites
+go too: a frame's video, a proof's footage, a kept post's video with a still of its own; their
+records, sidecars and links go either way, so the page and its sources read the same, and a
+video the page plays or shows a still of always goes. It is ticked, and starts unticked only when
+the whole file would pass the 1 GB osintmethat.com/contribute takes (`reviewexport.SITE_LIMIT`),
+saying *osintmethat.com/contribute takes files up to 1 GB, so the source videos stay behind; tick to
+send them anyway.*; a file over it even without them says *This is over the 1 GB the site takes.*
+The size shown follows the box. **Author** starts from the note's look, else Settings › Publishing's name, and
 **Author picture** from the look's picture, else *Your logo* (Settings' logo, filed in the file
 as a picture of its own), or *None*: a note with no author would otherwise be signed by
 whoever publishes it. Each web map the file carries is signed with the same two, unless it
