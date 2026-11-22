@@ -1293,6 +1293,10 @@ test('New plate keeps the layouts that answer what the plate shows, and a blank 
   await page.getByRole('button', { name: 'New plate', exact: true }).click();
   const dialog = page.getByRole('dialog', { name: 'New plate' });
   const read = indexed;
+  // the list of layers keeps its rows whole however tall the look's choices run under it
+  const [list, row] = await Promise.all([dialog.getByRole('list', { name: 'Layers drawn' }).boundingBox(),
+    dialog.getByRole('list', { name: 'Layers drawn' }).getByText('Front').boundingBox()]);
+  expect(list.height).toBeGreaterThan(row.height);
   // a chip keeps the layouts that answer it, and picks the first when the one picked is not among them
   await dialog.getByRole('button', { name: 'A geolocation', exact: true }).click();
   await expect(dialog.locator('.tile .name')).toHaveText(['Geolocation card', 'Line of sight', 'Locator', 'Blank page']);

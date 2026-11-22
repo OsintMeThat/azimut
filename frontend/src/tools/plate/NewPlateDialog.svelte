@@ -200,6 +200,8 @@
   .body { display: grid; grid-template-columns: minmax(0, 1fr) 280px; gap: 18px; height: min(64vh, 620px); }
   .layouts, .options { display: flex; flex-direction: column; min-height: 0; }
   .options { overflow: auto; padding-right: 4px; }
+  /* the column scrolls as a whole: none of its parts is squeezed to fit, the list of layers first of all */
+  .options > * { flex: none; }
   h4 { margin: 14px 0 6px; color: var(--text-3); font-size: var(--fs-xs); font-weight: 600; letter-spacing: .06em; text-transform: uppercase; }
   .layouts h4, .options h4:first-child { margin-top: 0; }
   .asks { display: flex; flex-wrap: wrap; gap: 4px; margin: 0 0 10px; }
