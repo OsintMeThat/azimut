@@ -130,13 +130,16 @@ def _backticks(line: str, at: int) -> int:
 
 
 def _code_end(line: str, at: int) -> int:
-    """Where the code span opening at ``at`` (a run of backticks) ends, or -1 when no run
-    as long closes it, the backticks then being text."""
+    """Where the code span opening at ``at`` (a run of backticks) ends: after the next run
+    exactly as long, or -1 when none closes it, the backticks then being text."""
     run = _backticks(line, at)
-    close = line.find("`" * run, at + run)
-    while close >= 0 and line[close + run : close + run + 1] == "`":
-        close = line.find("`" * run, close + run + 1)
-    return -1 if close < 0 else close + run
+    search = at + run
+    while (close := line.find("`", search)) >= 0:
+        length = _backticks(line, close)
+        if length == run:
+            return close + run
+        search = close + length
+    return -1
 
 
 def footnote_spans(line: str) -> list[tuple[int, int]]:

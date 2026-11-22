@@ -11,6 +11,7 @@
     { "line": "Code `^[not a note]` stays code.", "notes": [] },
     { "line": "A bracket in code inside^[one `]` two] counts.", "notes": ["one `]` two"] },
     { "line": "``double ^[x]`` code, then^[y].", "notes": ["y"] },
+    { "line": "`one ```two^[x]``` three` then^[y].", "notes": ["y"] },
     { "line": "Never closed ^[so it stays text", "notes": [] },
     { "line": "Never closed ^[outer, ^[inner] still open", "notes": ["inner"] },
     { "line": "Nested ^[outer ^[inner] rest] reads as one.", "notes": ["outer ^[inner] rest"] },
