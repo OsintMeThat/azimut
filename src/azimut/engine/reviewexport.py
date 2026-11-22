@@ -42,7 +42,8 @@ note reads as its words where the link was a link; on the receiver's site it is 
 **Who signs.** A note with no author in its look is signed by whoever publishes it, from
 their own Settings. The copy's look therefore names the author the dialog was given, and the
 picture beside the name: one of the case's pictures, or the exporter's own logo filed in
-the copy as a picture of its own (`LOGO`).
+the copy as a picture of its own (`LOGO`). Each map page it carries is a page of
+its own, so it is signed the same, unless it already names another author.
 """
 
 from __future__ import annotations
@@ -158,6 +159,9 @@ class Contents:
     internal: int = 0
     #: Whether the copy files the exporter's logo as the author's picture.
     logo: bool = False
+    #: The look each map page it carries keeps, signed as the article is (`signed`): a map page
+    #: is published as a page of its own, so it carries the same author and picture.
+    pages: dict[str, notelook.NoteLook] = field(default_factory=dict)
 
     @property
     def size(self) -> int:
@@ -683,9 +687,20 @@ def contents(case: "Case", note_id: str, *, author: str | None = None, picture: 
     reading.note(note_id, "note", 0)
     reading.look(look)
     for page in [one for one, group in reading.contents.entities.items() if group == "pages"]:
-        reading.look(notelook.stored(case, page))
+        reading.contents.pages[page] = signed(notelook.stored(case, page), look)
+        reading.look(reading.contents.pages[page])
     _unfiled(case, reading.contents)
     return reading.contents
+
+
+def signed(page: notelook.NoteLook | None, article: notelook.NoteLook) -> notelook.NoteLook:
+    """A map page's look in the copy: the article's author and picture beside the name, unless the
+    page already names an author of its own, who keeps it and their picture. Chapters print inside
+    the article and are never signed apart."""
+    page = page or notelook.DEFAULT
+    if page.author and page.author != article.author:
+        return page
+    return page.model_copy(update={"author": article.author, "author_image": article.author_image})
 
 
 def _unfiled(case: "Case", found: Contents) -> None:
@@ -784,11 +799,14 @@ def _build(case: "Case", found: Contents, staging: Path) -> "Case":
     graph = SqliteCase(db)
     filed = {rel: _file_unfiled(graph, tool, rel, label) for rel, label in found.unfiled.items()}
     look = found.look
-    if found.logo:
-        look = look.model_copy(update={"author_image": _file_logo(graph, tool)})
-        # the note shows it as it shows a picture on its cover (`api/notes.write_look`)
-        graph.add_link(found.note_id, look.author_image, link_engine.DERIVED_FROM, by="note", unique=True)
+    logo = _file_logo(graph, tool) if found.logo else ""
+    if logo:
+        look = look.model_copy(update={"author_image": logo})
     _write_note(graph, found.note_id, look)
+    for page, page_look in found.pages.items():
+        if page_look.author == found.look.author and page_look.author_image == found.look.author_image:
+            page_look = page_look.model_copy(update={"author_image": look.author_image})  # the one logo, filed once
+        _write_note(graph, page, page_look)
     maps = _published_maps(case, found)
     texts = {note_id: _mentioned(_addressed(case, text, filed), maps) for note_id, text in found.texts.items()}
     for note_id, text in texts.items():
@@ -911,9 +929,12 @@ def _restate(graph: SqliteCase, texts: dict[str, str]) -> None:
 
 
 def _write_note(graph: SqliteCase, note_id: str, look: notelook.NoteLook) -> None:
-    """The copy's note keeps the look asked for: its author and the picture beside the name."""
+    """The copy's note keeps the look asked for, its author and the picture beside the name, and
+    shows that picture as it shows one on its cover (`api/notes.write_look`)."""
     value = None if look.is_default else look.model_dump(mode="json")
     graph.update_entity(note_id, {"attrs": {notelook.ATTR: value}})
+    if look.author_image and graph.get_entity(look.author_image) is not None:
+        graph.add_link(note_id, look.author_image, link_engine.DERIVED_FROM, by="note", unique=True)
 
 
 def _file_picture(graph: SqliteCase, tool: Path, rel: str, label: str, source: dict[str, Any],

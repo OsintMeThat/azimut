@@ -32,6 +32,8 @@ from fullcase import build_full_case
 from jobwait import WAIT
 
 NOW = datetime(2026, 11, 22, 12, 0).astimezone()
+#: Who the receiving desk's Settings name, which the guest's pages must never be signed with.
+RECEIVER = "Receiving Desk"
 #: The address the sender published the map page at.
 MAP_ADDRESS = "https://desk.github.io/articles/harbour-map/"
 
@@ -218,9 +220,20 @@ def _import(bundle: Path) -> Case:
     return imported
 
 
-def test_the_imported_article_and_its_map_page_are_the_pages_the_original_builds(article):
+def test_the_imported_article_and_its_map_page_are_the_pages_the_original_builds(article, monkeypatch):
     case = Case.open(article["cid"])
+    # the receiver publishes under their own name: what the guest's pages must never be signed with
+    config.update_settings(lambda settings: settings.update(report_name=RECEIVER))
     before = {one: notes_web.build(case, article[one], now=NOW) for one in ("note", "map_page")}
+    # the map page travels signed as the article is: the original page it is held to is the one
+    # the original case builds when the map page names that author and picture
+    article_look = notelook.stored(case, article["note"])
+    assert article_look is not None and notelook.stored(case, article["map_page"]).author == ""
+    stored = notelook.stored
+    with monkeypatch.context() as patch:
+        patch.setattr(notelook, "stored", lambda held, note_id, **kw: reviewexport.signed(
+            stored(held, note_id, **kw), article_look) if note_id == article["map_page"] else stored(held, note_id, **kw))
+        before["map_page"] = notes_web.build(case, article["map_page"], now=NOW)
     # the parsed copies drawing a layer leaves are dropped: reading the maps must not write them back
     cached = sorted((case.tool_root / layout.LAYERS_DIR / layout.LAYER_CACHE_DIR).glob("*.geojson"))
     assert cached
@@ -251,6 +264,13 @@ def test_the_imported_article_and_its_map_page_are_the_pages_the_original_builds
                    "“the harbour map” is not in the case, so no day says when it was read."}
         assert outside <= set(before["note"].warnings) or one == "map_page"
         assert after[one].warnings == [said for said in before[one].warnings if said not in outside]
+    # the map page carries the article's author and picture: its header shows the guest, not the receiver
+    page_look = notelook.stored(imported, article["map_page"])
+    assert page_look is not None
+    assert (page_look.author, page_look.author_image) == ("Guest Writer", article["piece"])
+    page = after["map_page"].files[notes_web.INDEX]
+    assert b"Guest Writer" in page and RECEIVER.encode() not in page
+    assert any(name.startswith(notes_web.AUTHOR_FACE) for name in after["map_page"].files)
     # the links written to the map page's address are mentions of it in the copy, which the
     # receiving case reads as links to that map
     text = imported.read_note(article["note"])
@@ -316,7 +336,12 @@ def test_what_the_dialog_lists_is_what_leaves(article):
 def test_an_article_with_no_author_is_signed_with_the_name_and_logo_given(client, monkeypatch):
     cid = _ok(client.post("/api/cases", json={"name": "Desk"}), "case")["id"]
     picture, _ = _upload(client, cid, "shot.png", (90, 90, 90))
-    note = _note(client, cid, "Short piece", f"Words.\n\n[[media:{picture}|shot]]\n")
+    page = _note(client, cid, "Port map", "Words.\n", look={"style": "article", "web": "map"})
+    # a map page someone else made keeps the author it names, and the picture beside it
+    theirs = _note(client, cid, "Their map", "Words.\n",
+                   look={"style": "article", "web": "map", "author": "Map Maker", "author_image": picture})
+    note = _note(client, cid, "Short piece", (f"Words.\n\n[[media:{picture}|shot]]\n\n"
+                                              f"On [[entity:{page}|the map]] and [[entity:{theirs}|theirs]].\n"))
     config.signature_path().parent.mkdir(parents=True, exist_ok=True)
     Image.new("RGBA", (120, 120), (200, 40, 40, 255)).save(config.signature_path())
     monkeypatch.setattr(reviewexport, "report_name", lambda: "Guest Analyst")
@@ -334,10 +359,19 @@ def test_an_article_with_no_author_is_signed_with_the_name_and_logo_given(client
     face = imported.get_entity(look.author_image)
     assert face is not None and face["type"] == "media" and face["attrs"]["kind"] == "image"
     assert imported.resolve_inside(face["attrs"]["path"]).read_bytes() == config.signature_path().read_bytes()
-    page = notes_web.build(imported, note, now=NOW)
-    assert "author.png" in page.files and b"Guest Analyst" in page.files["index.html"]
-    # the source note keeps no author of its own
-    assert notelook.stored(case, note) is None
+    built = notes_web.build(imported, note, now=NOW)
+    assert "author.png" in built.files and b"Guest Analyst" in built.files["index.html"]
+    # the map page it links to is signed the same, by the one logo filed once
+    signed = notelook.stored(imported, page)
+    assert signed is not None and (signed.author, signed.author_image, signed.web) == ("Guest Analyst", look.author_image,
+                                                                                        "map")
+    assert len([one for one in imported.list_entities() if one["label"] == "Author"]) == 1
+    mapped = notes_web.build(imported, page, now=NOW)
+    assert "author.png" in mapped.files and b"Guest Analyst" in mapped.files["index.html"]
+    kept = notelook.stored(imported, theirs)
+    assert kept is not None and (kept.author, kept.author_image) == ("Map Maker", picture)
+    # the source notes keep no author of their own
+    assert notelook.stored(case, note) is None and notelook.stored(case, page).author == ""
 
 
 def test_an_export_that_fails_leaves_nothing_behind(client, monkeypatch):
