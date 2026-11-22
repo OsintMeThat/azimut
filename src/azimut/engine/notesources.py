@@ -204,6 +204,8 @@ class Source:
     #: The work's own title as it was published: a page's, read back from its archived
     #: copy (`linkarchive`), or a publication's. Never the words a note linked it with.
     title: str = ""
+    #: Who issued a publication: its press or its organization.
+    publisher: str = ""
 
     @property
     def host(self) -> str:
@@ -468,6 +470,9 @@ class Reader:
             noun, what = "Account", ACCOUNT
         elif kind == "bookmark":
             noun, what = "Web page", PAGE
+        elif kind == PUBLICATION:
+            noun, what = _line(attrs.get("medium")) or "Book", PAGE if address else ""
+            author = _line(attrs.get("author"))
         elif imagery:
             noun, what = "Imagery", IMAGERY
         elif path:
@@ -489,7 +494,7 @@ class Reader:
         origins = self._origins(entity_id, depth) if entity_id and path else ()
         derived = bool(self._parents.get(entity_id)) if entity_id and path else False
         label = _line((record or {}).get("label")) or _line(item.get("title")) or PurePosixPath(path).name
-        title = ""
+        title = label if kind == PUBLICATION else ""
         if kind == "bookmark":
             # the page's own title, read back from its copy; a bookmark someone filed by hand
             # is named after its page, one a note's links filed only after the link's words
@@ -510,6 +515,7 @@ class Reader:
             author=author,
             published=(_day(attrs.get("posted_at")) if kind == "social-post"
                        else _day(attrs.get(PUBLISHED_AT)) if kind == "bookmark"
+                       else _line(attrs.get("year"))[:20] if kind == PUBLICATION
                        else timeline.media_published(sidecar) or "" if not imagery else ""),
             collected=collected,
             arrival="made" if derived or kind == "proof" else ARRIVALS.get(route, "collected"),
@@ -526,6 +532,7 @@ class Reader:
             route=route,
             type=kind,
             title=title,
+            publisher=_line(attrs.get("publisher")) if kind == PUBLICATION else "",
         )
 
     def _readings(self, sidecar: dict[str, Any], attrs: dict[str, Any]) -> tuple[Reading, ...]:
@@ -997,6 +1004,8 @@ def _academic(source: Source) -> list[Part]:
     title = _title(source)
     if title:
         groups.append([Part(f"\u201c{title}\u201d", "title")])
+    if source.publisher:
+        groups.append([Part(source.publisher)])
     if source.kind != PAGE and source.noun:
         medium = source.noun.lower() if source.noun != PLATE_NOUN else source.noun
         groups.append([Part(f"{medium} at {source.at}" if source.at else medium)])
@@ -1053,6 +1062,8 @@ def _web(source: Source) -> list[Part]:
         groups.append([Part(source.noun.lower() if source.noun != PLATE_NOUN else source.noun)])
     if source.readings or (source.kind == IMAGERY and source.attribution):
         groups.append([Part(_imagery_said(source))])
+    if source.publisher:
+        groups.append([Part(source.publisher)])
     if source.published:
         groups.append([Part(short_day(source.published))])
     parts = _joined(groups)
@@ -1351,7 +1362,15 @@ def card_entry(source: Source, origins: Iterable[tuple[int, Source]] = ()) -> li
         when = source.published or (link.moment if link is not None else "")
         if when and not account:
             groups.append([Part(spoken_day(when))])
-    elif found in (PAGES, BOOKS) and source.type != PUBLICATION:
+    elif source.type == PUBLICATION:
+        if source.author:
+            groups.append([Part(source.author)])
+        groups.append([Part(source.title or source.label or "Untitled", "work", target)])
+        if source.publisher:
+            groups.append([Part(source.publisher)])
+        if source.published:
+            groups.append([Part(spoken_day(source.published))])
+    elif found in (PAGES, BOOKS):
         if address:
             groups.append([Part(outlet(address))])
         word = "report" if found == BOOKS else "page"
@@ -1384,7 +1403,7 @@ def card_entry(source: Source, origins: Iterable[tuple[int, Source]] = ()) -> li
             groups.append([Part("made from "), *made_from])
         elif source.readings:
             groups.append([Part(_imagery_said(source))])
-    if source.collected:
+    if source.collected and source.type != PUBLICATION:
         # the day the analyst read the page or the file came into the case: what an OSINT reader checks against
         verb = "accessed" if source.kind == PAGE else source.arrival
         groups.append([Part(f"{verb} {spoken_day(source.collected)}")])

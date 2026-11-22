@@ -140,7 +140,7 @@ to one clause — no full stop, no em-dash, under a hundred characters.
 | `class` | a model the case counts with, never one particular object | `equipment-type` |
 | `identifier` | a handle on a system | `account`, `email`, `phone`, `domain`, `ip`, `network` |
 | `collected` | bytes gathered into the case rather than written, so one may depict a place | `media`, `capture`, `social-post` |
-| `document` | it is read rather than gathered: made or consulted | `proof`, `post`, `note`, `sheet`, `inspect-session`, `collage`, `map-plate`, `compare-session`, `horizon-view`, `horizon-find`, `map-layer`, `analysis-zones`, `analysis-area`, `analysis-follow-up`, `analysis-run`, `bookmark` |
+| `document` | it is read rather than gathered: made or consulted | `proof`, `post`, `note`, `sheet`, `inspect-session`, `collage`, `map-plate`, `compare-session`, `horizon-view`, `horizon-find`, `map-layer`, `analysis-zones`, `analysis-area`, `analysis-follow-up`, `analysis-run`, `bookmark`, `publication` |
 | `place` | a point, never a thing | `place` |
 | `claim` | a statement about the graph, carrying its own reasoning | `claim` |
 
@@ -168,7 +168,7 @@ picture of the case is about it. The line that matters is between the first two 
 | Role | Reads as | Members | In the drawing |
 |---|---|---|---|
 | `subject` | the case is about it | `person`, `organization`, `vehicle`, `vessel`, `aircraft`, `structure`, `equipment-type`, `account`, `email`, `phone`, `domain`, `ip`, `network`, `media`, `place`, `claim` | a node |
-| `attestation` | a wrapper around something the case already holds | `bookmark`, `proof`, `capture`, `social-post` | folded into the edge that carries its provenance, drawn or not (below) |
+| `attestation` | a wrapper around something the case already holds | `bookmark`, `publication`, `proof`, `capture`, `social-post` | folded into the edge that carries its provenance, drawn or not (below) |
 | `annex` | consulted rather than seen, hanging off one node | `note`, `sheet`, `inspect-session`, `collage`, `compare-session`, `horizon-view`, `horizon-find`, `map-layer`, `analysis-zones`, `analysis-area`, `analysis-follow-up`, `analysis-run` | out of the case readings, drawn by **My work** |
 | `deliverable` | what the case produced | `post`, `map-plate` | out of the case readings, drawn by **My work** |
 
@@ -204,7 +204,8 @@ answer by omission (`tests/test_entities.py`).
 | `analysis-run` | document | annex | ✅ | detect | `spec` (json): candidates, frozen inputs and review decisions | yes (`.analysis/runs-<id>.json` + `.assets/` previews) |
 | `note` | document | annex | ✅ | notebook | `path`, `folder?`, `look?` (json): how it prints, its style and, once set, what it carries after its text (`sources_style`, `annexes`, `link_check`, `sources_list`); `link_archive?` (json): its last Archive every link run; the case notes keep both in the settings `notes.case_look` and `notes.case_link_archive` | yes (Markdown) |
 | `sheet` | document | annex | ✅ | sheet | `path` (csv) | yes (CSV + sidecar) |
-| `bookmark` | document | attestation | ✅ | capture extension, Archive every link | `url`, `fetched_at?`, `archive_url?`, `archived_at?`, `reliability?` | no (a URL) |
+| `bookmark` | document | attestation | ✅ | capture extension, Archive every link | `url`, `fetched_at?`, `archive_url?`, `archived_at?`, `reliability?`, `page_title?`, `published_at?`, `page_title_tried?` (the page's own title and day, read back from its copy by Archive every link) | no (a URL) |
+| `publication` | document | attestation | ✅ | analyst (Board › Work) | `author?`, `publisher?`, `year?`, `medium?` (Book, Report, Journal article, Chapter), `url?`, `archive_url?`: a book or a report a note cites by a mention, listed under Books and reports | no (a record) |
 | `person` | actor | subject | ✅ | analyst | `aliases`, `role`, `nationality` | no |
 | `organization` | actor | subject | ✅ | analyst | `aliases`, `echelon`, `country` | no |
 | `vehicle` | asset | subject | ✅ | analyst | `plate`, `make`, `model`, `colour`, `condition` | no |

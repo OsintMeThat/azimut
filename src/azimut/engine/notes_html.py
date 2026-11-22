@@ -2674,7 +2674,8 @@ class _Page:
             elif part.kind == "ref":
                 said.append(f'<a class="az-source-ref" href="#src-{part.number}"{_card(part.number)}>{_text(part.text)}</a>')
             elif part.kind == "work":
-                said.append(f"<cite>{_text(part.text)}</cite>")
+                work = f"<cite>{_text(part.text)}</cite>"
+                said.append(f'<a class="az-source-title" {_outward(part.link)}>{work}</a>' if part.link else work)
             else:
                 said.append(_text(part.text))
         links = [f'<a class="az-verify" {_outward(address)}>Check on {_text(site)}</a>' for site, address in source.verify]

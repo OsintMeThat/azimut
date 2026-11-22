@@ -182,3 +182,44 @@ def test_a_bookmark_named_by_the_words_citing_its_site_has_no_title(client):
     assert reader.link(url, "The National, 5 Oct").title == ""
     assert said(notesources.card_entry(reader.link(url, "The National, 5 Oct"))).startswith("The National, page, accessed ")
     assert reader.link(page_url, "the notice").title == "Port authority notice"
+
+
+# -- a book or a report a note cites ------------------------------------------------------
+
+
+def test_a_book_is_its_author_its_title_in_italics_its_publisher_and_its_year(client):
+    from azimut.engine import notes_html, notes_pdf
+    from azimut.engine.notelook import NoteLook
+    from azimut.workspace import Case
+    from test_notes_report import make_case
+    from test_notes_pdf import pdf_text
+
+    case = Case.open(make_case(client, "Books"))
+    book = case.add_entity("publication", "Straits of Salt", {
+        "author": "Helena Marsh", "publisher": "Northgate University Press", "year": "2019", "medium": "Book"}, by="user")
+    source = notesources.Reader(case).entity(book["id"])
+    assert notesources.group(source) == notesources.BOOKS and notesources.card_label(source) == "Book"
+    parts = notesources.card_entry(source)
+    assert said(parts) == "Helena Marsh, Straits of Salt, Northgate University Press, 2019."
+    assert [part.kind for part in parts if part.text == "Straits of Salt"] == ["work"]
+    # cited by a mention, the words open its card; the page is written in the sentence
+    text = f"As [[entity:{book['id']}|Marsh writes]] (p. 12), the charter is older than the border.\n"
+    page = notes_html.render(case, title="T", text=text, look=NoteLook.model_validate({"style": "article"})).html.decode()
+    assert '<span class="az-ref" data-card="src-1" tabindex="0">Marsh writes</span>' in page
+    sources = page[page.index('<section class="az-sources"'):]
+    assert "<h3>Books and reports</h3>" in sources and 'data-label="Book"' in sources
+    assert "Helena Marsh, <cite>Straits of Salt</cite>, Northgate University Press, 2019." in sources
+    # paper keeps its numbered list, the publisher named
+    printed = pdf_text(notes_pdf.render(case, title="T", text=text, look=NoteLook.model_validate({"style": "report"})).pdf)
+    assert "Northgate University Press" in printed and "Helena Marsh" in printed
+
+
+def test_a_report_online_links_its_title_and_keeps_its_copy():
+    report = Source(key="entity:r", label="Closing the Merrow", kind=notesources.PAGE, noun="Report",
+                    address="https://ims.example/reports/14.pdf", archive="https://web.archive.org/web/2026/x",
+                    author="Institute for Maritime Studies", published="2026", type="publication", title="Closing the Merrow")
+    parts = notesources.card_entry(report)
+    assert said(parts) == "Institute for Maritime Studies, Closing the Merrow, 2026. Archived copy"
+    work = next(part for part in parts if part.kind == "work")
+    assert work.link == "https://ims.example/reports/14.pdf"
+    assert notesources.card_label(report) == "Report"
