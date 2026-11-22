@@ -33,6 +33,12 @@ fresh. The source case is never written: the copy is built in a hidden folder be
 bundles (`config.bundles_dir`), exported from there by `bundles.export_case`, and removed
 on success and on failure.
 
+**What the copy writes again.** A picture written by the sender's file address (`/files/<case>/…`)
+is written by its record, and a link written to the address a carried map page was published at
+is written as a mention of the map (`[[entity:<map>|<its words>]]`): the receiving case has
+another name, and keeps no record of where the sender published anything. Off-site a mention of a
+note reads as its words where the link was a link; on the receiver's site it is the map's address.
+
 **Who signs.** A note with no author in its look is signed by whoever publishes it, from
 their own Settings. The copy's look therefore names the author the dialog was given, and the
 picture beside the name: one of the case's pictures, or the exporter's own logo filed in
@@ -783,7 +789,8 @@ def _build(case: "Case", found: Contents, staging: Path) -> "Case":
         # the note shows it as it shows a picture on its cover (`api/notes.write_look`)
         graph.add_link(found.note_id, look.author_image, link_engine.DERIVED_FROM, by="note", unique=True)
     _write_note(graph, found.note_id, look)
-    texts = {note_id: _addressed(case, text, filed) for note_id, text in found.texts.items()}
+    maps = _published_maps(case, found)
+    texts = {note_id: _mentioned(_addressed(case, text, filed), maps) for note_id, text in found.texts.items()}
     for note_id, text in texts.items():
         if note_id == notelook.CASE_NOTE:
             continue
@@ -795,6 +802,12 @@ def _build(case: "Case", found: Contents, staging: Path) -> "Case":
         destination.parent.mkdir(parents=True, exist_ok=True)
         destination.write_text(text, encoding="utf-8")
     _restate(graph, texts)
+    # a link written to a map page's address is a mention of the map now: its edge, as a save states it
+    for note_id, text in texts.items():
+        if note_id != notelook.CASE_NOTE and text != found.texts[note_id]:
+            for map_id in dict.fromkeys(ident for ident, _title in maps.values()):
+                if f"[[entity:{map_id}|" in text:
+                    graph.add_link(note_id, map_id, link_engine.MENTIONS, by="note", unique=True)
     case_notes = texts.get(notelook.CASE_NOTE)
     layout.notes_file(root).write_text(case_notes if case_notes is not None else f"# {name}\n\n", encoding="utf-8")
     manifest = case.read()
@@ -938,6 +951,71 @@ def _file_logo(graph: SqliteCase, tool: Path) -> str:
     shutil.copyfile(config.signature_path(), tool / "media" / name)
     return _file_picture(graph, tool, f"media/{name}", "Author", {"type": "upload", "original_name": "logo.png"},
                          by="review-export")
+
+
+#: A link written in a note: its words and its address, an image's left alone.
+_WRITTEN_LINK = re.compile(r"(?<!!)\[([^\]\n]*)\]\(\s*<?(https?://[^\s()<>]+)>?(?:\s+\"[^\"\n]*\")?\s*\)")
+#: An address written between angle brackets, which Markdown reads as a link to itself.
+_AUTOLINK = re.compile(r"<(https?://[^\s<>]+)>")
+#: A code span, whose words are never a link.
+_CODE_SPAN = re.compile(r"(`+)[^`]*?\1")
+
+
+def _published_maps(case: "Case", found: Contents) -> dict[str, tuple[str, str]]:
+    """Each address a carried map page was published at, by `notelinks.page_key`: the map and its title."""
+    return {key: (map_id, found.names.get(map_id) or "Map") for key, map_id in notelinks.map_addresses(case).items()
+            if map_id in found.entities}
+
+
+def _mentioned(text: str, maps: dict[str, tuple[str, str]]) -> str:
+    """A note's text with each link written to a carried map page's published address written as a
+    mention of the map (`[[entity:<map>|<the link's words>]]`), a bare address taking the map's title.
+
+    The address names where the sender published the map, which the receiving case keeps no record
+    of (`notelinks.published_addresses`); a mention it reads as a link to a map
+    (`notelinks.linked_maps`), which publishing gives the receiver's own address."""
+    if not maps or "http" not in text:
+        return text
+
+    def mention(address: str, words: str = "") -> str | None:
+        found = maps.get(notelinks.page_key(address))
+        if found is None:
+            return None
+        said = " ".join(words.split())
+        return f"[[entity:{found[0]}|{said if said and said != address else found[1]}]]"
+
+    lines = text.split("\n")
+    fenced = False
+    for number, line in enumerate(lines):
+        if notetext.FENCE.match(line):
+            fenced = not fenced
+            continue
+        if fenced or "http" not in line:
+            continue
+        code = [match.span() for match in _CODE_SPAN.finditer(line)]
+
+        def outside(start: int, end: int, held: list[tuple[int, int]]) -> bool:
+            return not any(first < end and start < last for first, last in held)
+
+        def written(match: re.Match[str]) -> str:
+            said = mention(match.group(2), match.group(1)) if outside(*match.span(), code) else None
+            return said or match.group(0)
+
+        def angled(match: re.Match[str]) -> str:
+            said = mention(match.group(1)) if outside(*match.span(), code) else None
+            return said or match.group(0)
+
+        line = _AUTOLINK.sub(angled, _WRITTEN_LINK.sub(written, line))
+        held = [match.span() for match in _CODE_SPAN.finditer(line)]
+        held += [match.span() for match in (*md.ENTITY_REF.finditer(line), *md.MEDIA_REF.finditer(line))]
+        for start, end, address in reversed(md.bare_urls(line)):
+            # an address a link or a picture is written to is no bare one
+            written_to = line[max(0, start - 2):start] == "](" or line[start - 1:start] == "<"
+            said = mention(address) if outside(start, end, held) and not written_to else None
+            if said:
+                line = f"{line[:start]}{said}{line[end:]}"
+        lines[number] = line
+    return "\n".join(lines)
 
 
 def _addressed(case: "Case", text: str, filed: dict[str, str]) -> str:

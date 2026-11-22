@@ -25,13 +25,15 @@ import pytest
 from PIL import Image
 
 from azimut import config, layout
-from azimut.engine import bundles, media, notelook, notes_web, reviewexport, thumbnails, tiles, workqueue
+from azimut.engine import bundles, media, notelinks, notelook, notes_web, reviewexport, thumbnails, tiles, workqueue
 from azimut.workspace import Case
 
 from fullcase import build_full_case
 from jobwait import WAIT
 
 NOW = datetime(2026, 11, 22, 12, 0).astimezone()
+#: The address the sender published the map page at.
+MAP_ADDRESS = "https://desk.github.io/articles/harbour-map/"
 
 
 def _png(size=(64, 48), colour=(200, 30, 30)) -> bytes:
@@ -87,6 +89,27 @@ def _fingerprinted(files: dict[str, bytes]) -> dict[str, bytes]:
     source the page fingerprints says the same picture in other words."""
     return {name: FINGERPRINT.sub(rb"\1-\2", data) if name == notes_web.INDEX else data
             for name, data in files.items()}
+
+
+#: A link written to the map page's address, as an off-site page reads it: an outside link and a source.
+WRITTEN = re.compile(rb'<a href="' + re.escape(MAP_ADDRESS.encode()) +
+                     rb'" target="_blank" rel="noopener noreferrer" data-card="(src-\d+)">(.*?)</a>')
+
+
+def _as_mentions(files: dict[str, bytes]) -> dict[str, bytes]:
+    """The original page with each link written to the map page's address read as the copy's
+    mention of the map: its words (the map's title for a bare address) and no source of its own.
+    The second difference the copy makes on purpose, and only off-site: the address names where
+    the sender published the map, which the receiving case keeps no record of, so the copy writes
+    the link as the map's mention, which publishing to the receiver's site gives their own address.
+    Off-site a mention of a note reads as its words, where a written link is a link and a source."""
+    page = files[notes_web.INDEX]
+    cards = {match.group(1) for match in WRITTEN.finditer(page)}
+    page = WRITTEN.sub(lambda match: b'<span class="az-ref">' + (
+        b"Harbour map" if match.group(2) == MAP_ADDRESS.encode() else match.group(2)) + b"</span>", page)
+    for card in cards:
+        page = re.sub(rb'<li id="' + card + rb'" class="az-ref"[^>]*>.*?</li>\n?', b"", page)
+    return {**files, notes_web.INDEX: page}
 
 
 def _tree(root: Path) -> dict[str, str]:
@@ -145,6 +168,9 @@ def article(client, flat_tiles):
         "Where everything stands.\n\n"
         f"::: map\ntitle: The harbour\nlayer: {layer}\nground: {page_ground}\n:::\n"),
         look={"style": "article", "web": "map"})
+    # where the sender published that map page, which the article also links to by its address
+    case.update_entity(map_page, {"attrs": {"editions": [
+        {"format": "github", "address": MAP_ADDRESS, "at": "2026-11-01T10:00:00Z", "edition": "public"}]}})
     chapter = _note(client, cid, "Background", (
         "## Background\n\n"
         f"The ship [[entity:{full.vessel_id}|MV Aurora]] berthed here, as [[media:{piece}|the piece]] shows.\n\n"
@@ -164,7 +190,8 @@ def article(client, flat_tiles):
         "| Subject | Status |\n| --- | --- |\n| Quai sud | ruled out |\n| Pont nord | to do |\n:::\n\n"
         f"::: chart\nkind: pictures\n| Picture | # |\n| --- | --- |\n| {piece} | #1 |\n:::\n\n"
         f"> [!internal]\n> Only for the desk: [[media:{secret}|the secret]] and [[entity:{full.person_id}|A. Nadeau]].\n\n"
-        f"The whole harbour is on [[entity:{map_page}|the map]].\n"
+        f"The whole harbour is on [[entity:{map_page}|the map]], published as [the harbour map]({MAP_ADDRESS})"
+        f" at {MAP_ADDRESS}.\n"
     )
     note = _note(client, cid, "Harbour article", text, look={
         "style": "article", "cover": {"on": True, "subtitle": "What the case shows", "image": photo,
@@ -212,12 +239,26 @@ def test_the_imported_article_and_its_map_page_are_the_pages_the_original_builds
     imported = _import(bundle)
     assert imported.read()["name"] == "Harbour article (for review) (imported)"
     after = {one: notes_web.build(imported, article[one], now=NOW) for one in ("note", "map_page")}
+    assert WRITTEN.search(before["note"].files[notes_web.INDEX])
     for one in ("note", "map_page"):
-        was, now = _fingerprinted(before[one].files), _fingerprinted(after[one].files)
+        original = _as_mentions(before[one].files) if one == "note" else before[one].files
+        was, now = _fingerprinted(original), _fingerprinted(after[one].files)
         assert sorted(now) == sorted(was)
         for name, data in was.items():
             assert now[name] == data, f"{one}: {name} differs {_where(data, now[name])}"
-        assert after[one].warnings == before[one].warnings
+        # what the check said of that link as an outside page goes with it: it is a mention now
+        outside = {"“the harbour map” has no archived copy.",
+                   "“the harbour map” is not in the case, so no day says when it was read."}
+        assert outside <= set(before["note"].warnings) or one == "map_page"
+        assert after[one].warnings == [said for said in before[one].warnings if said not in outside]
+    # the links written to the map page's address are mentions of it in the copy, which the
+    # receiving case reads as links to that map
+    text = imported.read_note(article["note"])
+    assert f"[[entity:{article['map_page']}|the harbour map]]" in text
+    assert f"at [[entity:{article['map_page']}|Harbour map]]." in text and MAP_ADDRESS not in text
+    assert notelinks.linked_maps(imported, text) == [article["map_page"]]
+    assert article["map_page"] in {link["to"] for link in imported.links_of(article["note"])
+                                   if link["type"] == "mentions"}
     # the map page holds no file address: its fingerprint is the original's too
     assert after["map_page"].files[notes_web.INDEX] == before["map_page"].files[notes_web.INDEX]
 
@@ -325,6 +366,11 @@ def test_the_route_queues_the_export_and_the_job_names_its_file(client):
     job = _ok(client.get(f"/api/cases/{cid}/bundle/jobs/{started['job_id']}"), "job")
     assert (job["state"], job["file"]) == ("ready", "Piece (for review).azimut.zip")
     assert (config.bundles_dir() / job["file"]).is_file()
+    # the browser downloads it by the route a whole case's export uses
+    download = client.get(f"/api/cases/{cid}/bundle/jobs/{started['job_id']}/download")
+    assert download.status_code == 200
+    assert download.content == (config.bundles_dir() / job["file"]).read_bytes()
+    assert "Piece%20%28for%20review%29.azimut.zip" in download.headers["content-disposition"]
     # a picture that is no picture of the case, or the case notes, are refused at the edge
     refused = client.post(f"/api/cases/{cid}/notes/{note}/review", json={"picture": "e_nothing00"})
     assert refused.status_code == 400
@@ -340,3 +386,21 @@ def test_a_copy_an_interrupted_export_left_is_swept_at_the_next_start(tmp_worksp
     kept.write_bytes(b"zip")
     assert reviewexport.sweep_staging() == 1
     assert not left.exists() and kept.is_file()
+
+
+def test_only_links_to_a_carried_map_page_become_its_mention():
+    maps = {notelinks.page_key(MAP_ADDRESS): ("e_map0000001", "Harbour map")}
+    text = (
+        f"See [the map]({MAP_ADDRESS}), <{MAP_ADDRESS}>, {MAP_ADDRESS}index.html and [its address]({MAP_ADDRESS}).\n"
+        f"Not this: `{MAP_ADDRESS}`, ![a picture]({MAP_ADDRESS}) or [elsewhere](https://example.org/a).\n"
+        f"```\n{MAP_ADDRESS}\n```\n"
+        f"[{MAP_ADDRESS}]({MAP_ADDRESS})\n"
+    )
+    assert reviewexport._mentioned(text, maps) == (
+        "See [[entity:e_map0000001|the map]], [[entity:e_map0000001|Harbour map]], "
+        "[[entity:e_map0000001|Harbour map]] and [[entity:e_map0000001|its address]].\n"
+        f"Not this: `{MAP_ADDRESS}`, ![a picture]({MAP_ADDRESS}) or [elsewhere](https://example.org/a).\n"
+        f"```\n{MAP_ADDRESS}\n```\n"
+        "[[entity:e_map0000001|Harbour map]]\n"
+    )
+    assert reviewexport._mentioned(text, {}) == text

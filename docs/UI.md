@@ -7638,8 +7638,12 @@ strips. **Author** starts from the note's look, else Settings › Publishing's n
 as a picture of its own), or *None*: a note with no author would otherwise be signed by
 whoever publishes it. **Export** writes `<note> (for review).azimut.zip` in the bundles
 folder as a job (`POST /notes/{id}/review`), the source case only read and the copy it is
-built from removed however it ends; **Show in folder** then opens that folder. A line points
-to osintmethat.com/contribute, which takes Azimut files, never web pages.
+built from removed however it ends. **Download** then saves it through the browser, the whole
+case's download route, where an upload page will look for it; **Show in folder** opens the
+bundles folder. A link written to the published address of a map page the file carries is
+written in the copy as a mention of that map, a bare address taking the map's title, since
+the receiving case keeps no record of where the sender published it. A line points to
+osintmethat.com/contribute, which takes Azimut files, never web pages.
 
 **Sources on a web page.** The HTML page and the web folder cite without numbers: the
 words that cite a source (a link, a mention, a figure's credit, a proof's name in the
