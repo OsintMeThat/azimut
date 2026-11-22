@@ -13,6 +13,7 @@
 import { startCompletion } from '@codemirror/autocomplete';
 
 import { slashGroup, slashHint, slashInsert, slashMatches, slashSection } from '../syntax.js';
+import { openFootnoteField } from './bubble.js';
 import { columnAt } from './columnsRow.js';
 import { insertHintUsed } from './insertHint.js';
 import { plusAt } from './insertMenu.js';
@@ -34,6 +35,14 @@ export const SLASH_WRITERS = {
   action: (view, { command, start, end, handlers }) => {
     if (end > start) view.dispatch({ changes: { from: start, to: end, insert: '' }, selection: { anchor: start } });
     handlers[command.action]?.();
+  },
+  // a footnote: what was typed goes, with the space before it so the letter sits on the word, and the Footnote field opens there
+  footnote: (view, { start, end, line }) => {
+    const from = start > line.from && view.state.sliceDoc(start - 1, start) === ' ' && !/\s/.test(view.state.sliceDoc(start - 2, start - 1)) ? start - 1 : start;
+    view.dispatch({ changes: { from, to: end, insert: '' }, selection: { anchor: from }, userEvent: 'input.complete' });
+    if (openFootnoteField(view, { at: from })) return;
+    // the raw Markdown has no field: its brackets are written, the cursor between them
+    view.dispatch({ changes: { from, insert: '^[]' }, selection: { anchor: from + 2 } });
   },
   // a group: type its name, and its commands come up together
   menu: (view, { command, start, end }) => {
@@ -71,6 +80,7 @@ function spaceBefore(view, at) {
 /** The writer an entry takes, by the first of its fields that names one. */
 export function slashWriter(command) {
   if (command.action === 'cite') return 'cite';
+  if (command.footnote) return 'footnote';
   return ['action', 'menu', 'wrap', 'line'].find((field) => command[field]) ?? 'insert';
 }
 

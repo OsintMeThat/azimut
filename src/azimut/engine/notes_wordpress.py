@@ -14,8 +14,8 @@ separators, each picture an image block with its alt text, caption and credit, a
 comparison's two sides in two columns with their labels, a `:::: columns` row as a
 Columns block with each column's share (a row of pictures shared out by their shapes so
 they stand at one height, kept side by side on a phone), a graphic picture folded in a
-Details block, and the numbered Sources list with each entry's links and verify links,
-which every citation links to. A chart (`::: chart`) is its picture, captioned as every
+Details block, each footnote's `[a]` an anchor to its words under Notes, and the numbered
+Sources list with each entry's links and verify links, which every citation links to. A chart (`::: chart`) is its picture, captioned as every
 figure is, its numbers folded under it in a table, or its own table after it when the
 block says to show it. An infographic (`:::: infographic`) is one picture of its whole
 page, then each chart's numbers under "The numbers". The Story layout and the `::: steps` and `::: story`
@@ -578,6 +578,10 @@ class _Writer:
         self.swaps: dict[int, tuple[str, str]] = {}
         #: Uploads only named in a line of words so far, which a figure describes better.
         self._named_only: set[int] = set()
+        #: Each footnote as (letter, its words as rich text), in reading order, which the Notes
+        #: list before the sources, and the letter each footnote's token was given.
+        self.footnotes: list[tuple[str, str]] = []
+        self._footnote_marks: dict[int, tuple[Token, str]] = {}
 
     @property
     def anchors(self) -> set[str]:
@@ -619,6 +623,7 @@ class _Writer:
             out.insert(0, paragraph(f"<em>{_text('This article holds graphic pictures, each folded until pressed.')}</em>"))
         if self.look.signed == "end":
             out.extend(self._signed_end())
+        out.extend(self._notes())
         out.extend(self._sources())
         out.extend(self._annexes())
         if self.cited.identity.credit:
@@ -754,7 +759,8 @@ class _Writer:
 
     def _new_id(self, wanted: str) -> str:
         base = wanted or "section"
-        if base in report.RESERVED_IDS or base.startswith("source-"):
+        if (base in report.RESERVED_IDS or base.startswith("source-") or base in report.FOOTNOTE_IDS
+                or report.FOOTNOTE_ID.match(base)):
             base = f"{base}-section"
         candidate, counter = base, 2
         while candidate in self._ids:
@@ -994,6 +1000,8 @@ class _Writer:
                 parts.append(closing + (_cite(number) if number else ""))
             elif kind == "image":
                 parts.append(self._inline_picture(child))
+            elif kind == md.FOOTNOTE_TOKEN:
+                parts.append(self._footnote(child))
             elif kind == "code_inline":
                 parts.append(f"<code>{_text(child.content)}</code>")
             elif kind == "softbreak":
@@ -1008,6 +1016,18 @@ class _Writer:
                 parts.append(_text(child.content) if links else self._prose(child.content))
         parts.extend(closing for closing, _ in reversed(links))
         return "".join(parts).strip()
+
+    def _footnote(self, token: Token) -> str:
+        """A footnote's letter where it is written, a plain anchor to its words under Notes,
+        which are written as any line is."""
+        known = self._footnote_marks.get(id(token))
+        if known is not None:
+            letter = known[1]
+        else:
+            letter = md.footnote_letter(len(self.footnotes))
+            self._footnote_marks[id(token)] = (token, letter)
+            self.footnotes.append((letter, self._inline(md.footnote_words(token))))
+        return f'<sup id="fnref-{letter}"><a href="#fn-{letter}">[{letter}]</a></sup>'
 
     def _open_link(self, token: Token) -> tuple[str, str, int]:
         href = md.token_attr(token, "href").strip()
@@ -1462,6 +1482,16 @@ class _Writer:
         return len(self.uploads) - 1
 
     # -- the end ------------------------------------------------------------------
+
+    def _notes(self) -> list[str]:
+        """The footnotes before the sources, lettered as their marks, each linking back to its mark."""
+        if not self.footnotes:
+            return []
+        items = [list_item(f'<a href="#fnref-{letter}" aria-label="Back to the text">^</a> {words}', anchor=f"fn-{letter}")
+                 for letter, words in self.footnotes]
+        lettered = block("list", f'<ol style="list-style-type:lower-alpha" class="wp-block-list">{nested(items)}</ol>',
+                         {"ordered": True, "type": "lower-alpha"})
+        return [heading(2, "Notes", "notes"), lettered]
 
     def _sources(self) -> list[str]:
         annex = self.cited.annex

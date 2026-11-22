@@ -463,47 +463,93 @@
     if (location.hash) point(location.hash);
   }
 
-  /* a citation shows its source from the Sources list, on hover or focus */
+  /* words that cite a source open its card: the entry from the Sources list (or a note's
+     own text), shown on hover after a beat, on keyboard focus, and on a finger's first tap,
+     which then offers the list; a mouse's click still follows the link */
   function citations() {
     let card = null;
     let shown = null;
-    let timer = 0;
+    let opening = 0;
+    let closing = 0;
+    let pointer = 'mouse';
+    const SHOW_MS = 180;
+    const HIDE_MS = 250;
+    const trigger = (node) => node?.closest?.('[data-card]') ?? null;
     const hide = () => {
-      clearTimeout(timer);
+      clearTimeout(opening);
+      clearTimeout(closing);
       shown?.removeAttribute('aria-describedby');
       shown?.removeAttribute('aria-expanded');
       shown = null;
       card?.remove();
+      card = null;
     };
-    function show(link) {
-      const number = link.dataset.src || link.hash.replace(/^#src-/, '');
-      const entry = doc.getElementById(`src-${number}`);
-      if (!entry) return;
+    const later = () => { clearTimeout(opening); clearTimeout(closing); closing = setTimeout(hide, HIDE_MS); };
+    function show(words, withList) {
+      const target = doc.getElementById(words.dataset.card);
+      if (!target) return;
       hide();
       card = make('div', { class: 'az-card', role: 'tooltip', id: 'az-card' });
-      card.append(make('span', { class: 'az-card-number' }, `Source ${number}`));
-      const copy = entry.cloneNode(true);
+      card.append(make('span', { class: 'az-card-kind' }, words.dataset.label || target.dataset.label || 'Source'));
+      const copy = target.cloneNode(true);
       for (const node of all('[id]', copy)) node.removeAttribute('id');
       for (const node of all('.az-back', copy)) node.remove();
-      card.append(...copy.childNodes);
+      const body = make('div', { class: 'az-card-body' });
+      body.append(...copy.childNodes);
+      card.append(body);
+      if (words.dataset.page) card.append(make('span', { class: 'az-card-page' }, `Cited here: page ${words.dataset.page}`));
+      if (withList) {
+        const list = make('a', { class: 'az-card-list', href: `#${target.id}` }, 'Go to the list');
+        list.addEventListener('click', () => hide());
+        card.append(list);
+      }
+      card.addEventListener('pointerenter', () => clearTimeout(closing));
+      card.addEventListener('pointerleave', (event) => { if (event.pointerType === 'mouse') later(); });
       doc.body.append(card);
-      shown = link;
-      link.setAttribute('aria-describedby', 'az-card');
-      link.setAttribute('aria-expanded', 'true');
-      const at = link.getBoundingClientRect();
+      shown = words;
+      words.setAttribute('aria-describedby', 'az-card');
+      words.setAttribute('aria-expanded', 'true');
+      const at = words.getBoundingClientRect();
       const own = card.getBoundingClientRect();
       const below = at.bottom + 8 + own.height < window.innerHeight || at.top < own.height + 16;
       card.style.left = `${Math.min(Math.max(8, at.left + at.width / 2 - own.width / 2), window.innerWidth - own.width - 8) + window.scrollX}px`;
       card.style.top = `${(below ? at.bottom + 8 : at.top - own.height - 8) + window.scrollY}px`;
     }
-    for (const link of all('a.az-cite')) {
-      link.addEventListener('mouseenter', () => { clearTimeout(timer); timer = setTimeout(() => show(link), 120); });
-      link.addEventListener('mouseleave', hide);
-      link.addEventListener('focus', () => show(link));
-      link.addEventListener('blur', hide);
-    }
+    doc.addEventListener('pointerdown', (event) => { pointer = event.pointerType || 'mouse'; }, true);
+    doc.addEventListener('pointerover', (event) => {
+      if (event.pointerType !== 'mouse') return;
+      const words = trigger(event.target);
+      if (!words) return;
+      clearTimeout(closing);
+      if (words === shown) return;
+      clearTimeout(opening);
+      opening = setTimeout(() => show(words, false), card ? 0 : SHOW_MS);
+    });
+    doc.addEventListener('pointerout', (event) => {
+      if (event.pointerType !== 'mouse') return;
+      const words = trigger(event.target);
+      if (!words || words.contains(event.relatedTarget) || card?.contains(event.relatedTarget)) return;
+      clearTimeout(opening);
+      if (shown) later();
+    });
+    doc.addEventListener('focusin', (event) => {
+      const words = trigger(event.target);
+      if (words && pointer === 'mouse' && words !== shown) show(words, false);
+    });
+    doc.addEventListener('focusout', (event) => {
+      if (shown && !card?.contains(event.relatedTarget) && !shown.contains(event.relatedTarget)) later();
+    });
+    doc.addEventListener('click', (event) => {
+      const words = trigger(event.target);
+      if (words && pointer !== 'mouse') {
+        // a finger has no hover: the first tap opens the card, the card's own link goes to the list
+        if (words !== shown) { event.preventDefault(); event.stopImmediatePropagation(); show(words, true); }
+        return;
+      }
+      if (shown && !words && !card?.contains(event.target)) hide();
+    }, true);
     doc.addEventListener('keydown', (event) => { if (event.key === 'Escape' && shown) hide(); });
-    window.addEventListener('scroll', () => { if (shown && !shown.matches(':focus')) hide(); }, { passive: true });
+    window.addEventListener('scroll', () => { if (shown && !shown.matches(':focus') && pointer === 'mouse') hide(); }, { passive: true });
   }
 
   /* steps go one at a time: the buttons, the dots, the arrow keys; a step's clip plays muted */

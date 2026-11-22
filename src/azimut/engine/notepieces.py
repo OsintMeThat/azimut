@@ -16,7 +16,8 @@ the pieces into posts and cuts long text with its own counter (`tools/post/start
   for each post a ``::: post`` block draws, by its address.
 
 A case reference reads as its label, and a written link as its words then its address
-(a link a reader cannot open keeps its words only).
+(a link a reader cannot open keeps its words only). A footnote's words are said in brackets
+where its letter would stand, its links kept.
 
 **Public edition only.** Every internal passage is blanked first, with the rule the
 PDF and the HTML report follow (`notes_markdown.strip_internal`) over the whole note,
@@ -425,6 +426,10 @@ class _Reading:
                 href = None
             elif kind == "image":
                 self._picture(notes_markdown.token_attr(child, "src"))
+            elif kind == notes_markdown.FOOTNOTE_TOKEN:
+                # a post has no letter to press: its words are said in brackets where it stands
+                words_said = " ".join(self._inline(notes_markdown.footnote_words(child)).replace(SOFT, " ").split())
+                into.append(f" ({words_said})")
             elif kind == "softbreak":
                 into.append(SOFT)
             elif kind == "hardbreak":

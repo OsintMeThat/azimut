@@ -35,6 +35,10 @@ the public edition. The check lists each one, and the export can round them to a
 **Counts.** A count with no "at least" or range before it is said by the check as a
 warning (`COUNT`), never changed. A confidence the analyst typed is printed as typed.
 
+**Footnotes.** A `^[words]` is a small letter in the text (`sup.az-fn`, a, b… in reading
+order, its words a card a press away for the reader script) and its words, drawn as any
+line is, under Notes before the sources (`section.az-notes`), each linking back to its letter.
+
 **Maps.** A `::: map` block is a figure the reader can move about (`engine/notes_maps.py`
 reads what it shows): the ground filed when it was put in, the layers' features drawn
 over it as SVG in their own colours and pictograms, a card a press away for each, and a
@@ -236,11 +240,17 @@ SCENE_WORDS = re.compile(r"<(?:p|ul|ol|blockquote|h4|h5|h6)[ >]|<aside class=\"a
 #: Ids the page keeps for itself.
 RESERVED_IDS = frozenset({"sources", "corrections", "contents", "top", "main", "cover", "footer"})
 RESERVED_ID = re.compile(r"^(?:src|clip|fig|step|limits|map)-\d+$")
+#: The ids of the Notes and of each footnote, which a heading never takes.
+FOOTNOTE_IDS = frozenset({"notes", "notes-title"})
+FOOTNOTE_ID = re.compile(r"^fn(?:ref)?-[a-z]+$")
 #: The side of a picture a map's card shows.
 CARD_SIDE = 640
 
 #: How long a page's description runs, for a link's card.
 DESCRIPTION_CHARS = 200
+#: The line under the sources' heading: how the words and the list meet.
+SOURCES_HOW = ("The words in the text link to the original. Hover a link, or tap it, to see its card. "
+               "Each source below keeps its archived copy where one exists.")
 #: How many credits of one kind a figure names before it counts the rest.
 MAX_CREDITS = 4
 
@@ -616,6 +626,10 @@ class _Page:
         self._limit_ids: list[str] = []
         #: The note's words, which a chart reads for whether the note calls its figures minimums.
         self._note_text = ""
+        #: Each footnote as (letter, words drawn), in reading order, which the Notes list before the
+        #: sources; and the letter each footnote's token was given, the token kept so its id stays its own.
+        self.footnotes: list[tuple[str, str]] = []
+        self._footnote_marks: dict[int, tuple[Token, str]] = {}
 
     # -- the whole document -------------------------------------------------------
 
@@ -681,6 +695,7 @@ class _Page:
         if self.look.signed == "end":
             # a guest's picture stands left of their name, as on the cover's author card
             body += self._signature("az-signed-end", self._author_face())
+        notes = self._scrub(self._notes())
         sources = self._sources()
         earlier = list(earlier)
         profile = self.cited.profile
@@ -690,7 +705,7 @@ class _Page:
         footer = self._footer(printed)
         warning = f'<p class="az-graphic-warning" role="note">{_text(GRAPHIC_WARNING)}</p>\n' if self.graphic else ""
         if self.look.web == "map":
-            laid = self._map_page(title, body, f"{sources}{annexes}{corrections}{footer}")
+            laid = self._map_page(title, body, f"{notes}{sources}{annexes}{corrections}{footer}")
             if laid is not None:
                 return self._assemble(title, warning + laid)
             self._warn(NO_MAP_PAGE, None, md.OTHER)
@@ -698,7 +713,7 @@ class _Page:
         # the contents, the text and its end matter share one box, which the contents
         # rail stays inside: it never runs into the footer
         page = (f'{warning}{head}<div class="az-page">\n{contents}<main class="az-body" id="main">\n{body}</main>\n'
-                f"{sources}{annexes}{corrections}</div>\n{footer}")
+                f"{notes}{sources}{annexes}{corrections}</div>\n{footer}")
         return self._assemble(title, page)
 
     def _map_page(self, title: str, body: str, end: str) -> str | None:
@@ -1157,7 +1172,7 @@ class _Page:
 
     def _new_id(self, wanted: str) -> str:
         base = wanted or "section"
-        if base in RESERVED_IDS or RESERVED_ID.match(base):
+        if base in RESERVED_IDS or RESERVED_ID.match(base) or base in FOOTNOTE_IDS or FOOTNOTE_ID.match(base):
             base = f"{base}-section"
         candidate, counter = base, 2
         while candidate in self.ids:
@@ -1168,7 +1183,7 @@ class _Page:
     def _contents(self, sources: bool, corrections: bool, annexes: list[tuple[str, str]] | None = None) -> str:
         entries = list(self.headings)
         annexes = annexes or []
-        if not entries and not sources and not annexes:
+        if not entries and not sources and not annexes and not self.footnotes:
             return ""
         items: list[str] = []
         open_sub = False
@@ -1187,6 +1202,8 @@ class _Page:
             items.append(f"<li>{link}</li>")
         if open_sub:
             items.append("</ol></li>")
+        if self.footnotes:
+            items.append('<li class="az-contents-notes"><a href="#notes">Notes</a></li>')
         if sources:
             items.append(f'<li class="az-contents-sources"><a href="#sources">{_text(self.cited.list_title)}</a></li>')
         items.extend(f'<li class="az-contents-annex"><a href="#{ident}">{_text(name)}</a></li>' for ident, name in annexes)
@@ -1346,9 +1363,8 @@ class _Page:
         if not drawn.posts:
             return _aside(socialposts.MISSING_SAID) if drawn.missing else ""
         self.posts += 1
-        numbers = [self.cited.number(self.cited.reader.entity(post.id)) for post in drawn.posts]
-        cite = "".join(_cite(number) for number in dict.fromkeys(numbers) if number)
-        return notes_posts.html_card(drawn, lambda path, side, name: self._picture(path, side, name), cite=cite)
+        # the card names who posted it, when, and links the post and its copy: its own citation
+        return notes_posts.html_card(drawn, lambda path, side, name: self._picture(path, side, name))
 
     def _on_html_block(self, tokens: list[Token], index: int) -> int:
         # shown as what it is, never run, and never with a comment in it
@@ -1644,21 +1660,22 @@ class _Page:
         if token.type != "inline":
             return ""
         parts: list[str] = []
-        links: list[tuple[str, int]] = []
+        links: list[str] = []
         for child in token.children or []:
             kind = child.type
             if kind in ("strong_open", "strong_close", "em_open", "em_close", "s_open", "s_close"):
                 tag = {"strong": "strong", "em": "em", "s": "s"}[kind.rsplit("_", 1)[0]]
                 parts.append(f"<{tag}>" if kind.endswith("_open") else f"</{tag}>")
             elif kind == "link_open":
-                opening, closing, number = self._link(child)
+                opening, closing = self._link(child)
                 parts.append(opening)
-                links.append((closing, number))
+                links.append(closing)
             elif kind == "link_close":
-                closing, number = links.pop() if links else ("", 0)
-                parts.append(closing + (_cite(number) if number else ""))
+                parts.append(links.pop() if links else "")
             elif kind == "image":
                 parts.append(self._inline_picture(child))
+            elif kind == md.FOOTNOTE_TOKEN:
+                parts.append(self._footnote(child))
             elif kind == "code_inline":
                 parts.append(f"<code>{_text(child.content)}</code>")
             elif kind == "softbreak":
@@ -1671,38 +1688,52 @@ class _Page:
                     parts.append(_text(shown))
             elif kind == "text":
                 parts.append(_text(child.content) if links else self._prose(child.content))
-        parts.extend(closing for closing, _ in reversed(links))
+        parts.extend(reversed(links))
         return "".join(parts)
 
-    def _link(self, token: Token) -> tuple[str, str, int]:
-        """How a written link opens and closes, and the source it cites."""
+    def _footnote(self, token: Token) -> str:
+        """A footnote's letter where it is written, which opens its words as a card and links to
+        them under Notes; its words are drawn as any line is, a link in them citing its source."""
+        known = self._footnote_marks.get(id(token))
+        if known is not None:
+            letter = known[1]
+        else:
+            letter = md.footnote_letter(len(self.footnotes))
+            self._footnote_marks[id(token)] = (token, letter)
+            self.footnotes.append((letter, self._inline(md.footnote_words(token))))
+        return (f'<sup class="az-fn" id="fnref-{letter}"><a href="#fn-{letter}" data-card="fn-{letter}" '
+                f'data-label="Note {letter}">[{letter}]</a></sup>')
+
+    def _link(self, token: Token) -> tuple[str, str]:
+        """How a written link opens and closes: the words that cite a source open its card."""
         href = md.token_attr(token, "href").strip()
         number = self.cited.number(self.cited.link_source(href)) if self.cited.annex is not None else 0
+        card = _card(number)
         entity = md.ENTITY_HREF.match(href)
         if entity:
             if self.case is None:
-                return '<span class="az-ref">', "</span>", 0
+                return '<span class="az-ref">', "</span>"
             source = self.cited.reader.entity(entity.group(1))
             if source is None:
-                return '<span class="az-ref az-gone">', "</span>", 0
+                return '<span class="az-ref az-gone">', "</span>"
             if source.link:
                 # a proof the analyst published opens its post, and says so on hover
                 said = f' title="Open the post on {_attr(_platform(source.posted))}"' if source.posted else ""
-                return f'<a class="az-ref" {_outward(source.link)}{said}>', "</a>", number
-            return '<span class="az-ref">', "</span>", number
+                return f'<a class="az-ref" {_outward(source.link)}{said}{card}>', "</a>"
+            return f'<span class="az-ref"{card}{_focusable(number)}>', "</span>"
         if href.startswith("#"):
             if ANCHOR.match(href[1:]):
-                return f'<a href="#{_attr(href[1:])}">', "</a>", 0
-            return "<span>", "</span>", 0
+                return f'<a href="#{_attr(href[1:])}">', "</a>"
+            return "<span>", "</span>"
         if notesources.web(href) and not md.is_local(href, ()):
-            return f"<a {_outward(href)}>", "</a>", number
+            return f"<a {_outward(href)}{card}>", "</a>"
         scheme = urlsplit(href).scheme.lower() if ":" in href else ""
         if scheme in ("mailto", "tel"):
-            return f'<a href="{_attr(href)}">', "</a>", 0
+            return f'<a href="{_attr(href)}">', "</a>"
         if number:
             # a file of the case: its entry in the sources list
-            return f'<a class="az-ref" href="#src-{number}">', "</a>", 0
-        return '<span class="az-unlinked">', "</span>", 0
+            return f'<a class="az-ref" href="#src-{number}"{card}>', "</a>"
+        return '<span class="az-unlinked">', "</span>"
 
     def _prose(self, text: str) -> str:
         """Prose with each bare address linked and cited, each coordinate pair linked
@@ -1732,7 +1763,7 @@ class _Page:
                 if md.is_local(value, ()):
                     out.append(_text(written))
                 else:
-                    out.append(f"<a {_outward(value)}>{_text(written)}</a>{_cite(number) if number else ''}")
+                    out.append(f"<a {_outward(value)}{_card(number)}>{_text(written)}</a>")
             elif kind == "coords":
                 lat, lon = value.group(1), value.group(2)
                 out.append(f'<a class="az-coords" {_outward(md.MAP_LINK.format(lat=lat, lon=lon))}>'
@@ -1803,12 +1834,13 @@ class _Page:
         if attrs.get("kind") == "video" or media_kind(path.name) == "video":
             url = source.traced_address if source is not None else ""
             named = f"<a {_outward(url)}>[{_text(words)}]</a>" if url else f"[{_text(words)}]"
-            return f'<span class="az-inline-video">{named}</span>{_cite(number) if number else ""}'
+            return f'<span class="az-inline-video"{_card(number)}{_focusable(number and not url)}>{named}</span>'
         encoded = self._picture(path, INLINE_SIDE, words)
         if encoded is None:
             return f'<span class="az-missing">[{_text(words)}]</span>'
         uri, size = encoded
-        return f'{_zoom_button(_img(uri, size, words, "az-inline"), words)}{_cite(number) if number else ""}'
+        shown = _zoom_button(_img(uri, size, words, "az-inline"), words)
+        return f'<span class="az-cited"{_card(number)}>{shown}</span>' if number else shown
 
     def _find(self, written: str) -> "tuple[Path, str, dict[str, Any] | None] | str":
         """The case file a picture shows and its record, or the words said instead."""
@@ -1990,18 +2022,20 @@ class _Page:
         from the picture or, for one made in the case, from everything it was made
         from. Past `MAX_CREDITS` of a kind the rest are counted; How this was checked
         names them all."""
-        cite = f" {_cite(number)}" if number else ""
         groups = _credit_groups(source)
         if not groups:
-            return f'<span class="az-credit">{cite.strip()}</span>\n' if number else ""
+            return (f'<span class="az-credit"><a class="az-credit-source" href="#src-{number}"{_card(number)}>Source</a>'
+                    "</span>\n" if number else "")
         said: list[str] = []
+        linked = False
         for kind, items in groups.items():
             shown = [f"<a {_outward(link)}>{_text(words)}</a>" if link else _text(words)
                      for words, link in items[:MAX_CREDITS]]
+            linked = linked or any(link for _, link in items[:MAX_CREDITS])
             more = len(items) - MAX_CREDITS
             tail = f" and {more} more" if more > 0 else ""
             said.append(f'<span class="az-credit-kind">{_text(kind)}:</span> {" · ".join(shown)}{tail}')
-        return f'<span class="az-credit">{"; ".join(said)}{cite}</span>\n'
+        return f'<span class="az-credit"{_card(number)}{_focusable(number and not linked)}>{"; ".join(said)}</span>\n'
 
     def _may_open_on(self, hero: Hero, credited: bool) -> None:
         """A picture the page could open on: the first of a cover of its own is the cover's."""
@@ -2036,7 +2070,7 @@ class _Page:
 
     def _describe(self, body: str) -> str:
         """What the page is about, for a link's card: the cover's subtitle, else the
-        first paragraph of its text, citations left out."""
+        first paragraph of its text, its footnotes left out."""
         said = " ".join(self.look.cover.subtitle.split())
         if not said:
             found = re.search(r'<p dir="auto">(.*?)</p>', body, re.S)
@@ -2044,7 +2078,7 @@ class _Page:
                 return ""
             inner = re.sub("\x00T(\\d+)\x00", lambda match: _text(self.times[int(match.group(1))].words),
                            found.group(1))
-            inner = re.sub(r'<a class="az-cite"[^>]*>.*?</a>', "", inner)
+            inner = re.sub(r'<sup class="az-fn"[^>]*>.*?</sup>', "", inner)
             said = " ".join(html.unescape(re.sub("<[^>]*>|\x00C\\d+\x00", "", inner)).split())
         return _clipped(said, DESCRIPTION_CHARS)
 
@@ -2691,44 +2725,63 @@ class _Page:
 
     # -- the end of the page ------------------------------------------------------------
 
+    def _notes(self) -> str:
+        """The footnotes, lettered as their marks in the text, each linking back to its mark."""
+        if not self.footnotes:
+            return ""
+        items = "".join(f'<li id="fn-{letter}"><a class="az-back" href="#fnref-{letter}" aria-label="Back to the text">'
+                        f"^</a> {words}</li>\n" for letter, words in self.footnotes)
+        return (f'<section class="az-notes" id="notes" aria-labelledby="notes-title">\n'
+                f'<h2 id="notes-title">Notes</h2>\n<ol type="a">\n{items}</ol>\n</section>\n')
+
     def _sources(self) -> str:
+        """The sources the page cites, grouped by what they are (`notesources.GROUPS`), each
+        group in the order a reader first meets them. Every entry is also the card the words
+        citing it open, so the list holds no number: a reader goes from words to card."""
         annex = self.cited.annex
         if annex is None or not annex.entries:
             return ""
-        style = self.cited.profile.sources_style
-        entries = "".join(self._source_entry(entry) if style == "short" else self._styled_entry(entry, style)
-                          for entry in annex.entries)
+        by_number = {entry.number: entry.source for entry in annex.entries}
+        grouped: dict[str, list[str]] = {}
+        for entry in annex.entries:
+            grouped.setdefault(notesources.group(entry.source), []).append(self._card_entry(entry, by_number))
+        lists = "".join(f'<h3>{_text(name)}</h3>\n<ul>\n{"".join(grouped[name])}</ul>\n'
+                        for name in notesources.GROUPS if name in grouped)
         return (f'<section class="az-sources" id="sources" aria-labelledby="sources-title">\n'
-                f'<h2 id="sources-title">{_text(self.cited.list_title)}</h2>\n<ol>\n{entries}</ol>\n</section>\n')
+                f'<h2 id="sources-title">{_text(self.cited.list_title)}</h2>\n'
+                f'<p class="az-sources-how">{_text(SOURCES_HOW)}</p>\n{lists}</section>\n')
 
-    def _styled_entry(self, entry: Entry, style: str) -> str:
-        """One source as ``style`` writes it (`notesources.entry`), a capture's check pages
-        and a file's fingerprint under it as in the short form."""
+    def _card_entry(self, entry: Entry, by_number: dict[int, Source]) -> str:
+        """One source as its card shows it (`notesources.card_entry`), a capture's check
+        pages, where the analyst posted it and a file's fingerprint under it."""
         source = entry.source
+        origins = [(number, by_number[number]) for number in entry.origins if number in by_number]
         said: list[str] = []
-        for part in notesources.entry(source, style, entry.origins):
-            if part.kind == "cite":
-                said.append(_cite(part.number))
-            elif part.kind == "address":
-                said.append(f'<a class="az-source-address" {_outward(part.link)}>{_text(part.text)}</a>')
-            elif part.kind == "outlet":
-                said.append(f"<cite>{_text(part.text)}</cite>")
-            elif part.kind == "link" and part.text == "Archived copy":
+        for part in notesources.card_entry(source, origins):
+            if part.kind == "title":
+                quoted = _quoted(f"\u201c{part.text}\u201d")
+                said.append(f'<a class="az-source-title" {_outward(part.link)}>{quoted}</a>' if part.link
+                            else f'<span class="az-source-title">{quoted}</span>')
+            elif part.kind == "link":
+                said.append(f'<a class="az-source-link" {_outward(part.link)}>{_text(part.text)}</a>' if part.link
+                            else _text(part.text))
+            elif part.kind == "archive":
                 said.append(f'<a class="az-archive" {_outward(part.link)}>{_text(part.text)}</a>')
-            elif part.link and part.kind in ("title", "link"):
-                said.append(f'<a class="az-source-title" {_outward(part.link)}>{_quoted(part.text)}</a>')
-            elif part.kind == "title":
-                said.append(f'<span class="az-source-title">{_quoted(part.text)}</span>')
+            elif part.kind == "ref":
+                said.append(f'<a class="az-source-ref" href="#src-{part.number}"{_card(part.number)}>{_text(part.text)}</a>')
+            elif part.kind == "work":
+                work = f"<cite>{_text(part.text)}</cite>"
+                said.append(f'<a class="az-source-title" {_outward(part.link)}>{work}</a>' if part.link else work)
             else:
                 said.append(_text(part.text))
         links = [f'<a class="az-verify" {_outward(address)}>Check on {_text(site)}</a>' for site, address in source.verify]
-        if style == "web" and source.posted and source.posted not in (source.address, source.archive):
+        if source.posted and source.posted not in (source.address, source.archive):
             links.append(_posted(source.posted))
         if source.sha256:
             links.append(f'<span class="az-hash">SHA-256 <code>{source.sha256}</code></span>')
         more = f'<span class="az-source-links">{" ".join(links)}</span>' if links else ""
-        return (f'<li id="src-{entry.number}" class="az-ref" data-style="{style}" data-kind="{_attr(source.kind or "item")}">'
-                f'{"".join(said)}{more}</li>\n')
+        return (f'<li id="src-{entry.number}" class="az-ref" data-kind="{_attr(source.kind or "item")}" '
+                f'data-label="{_attr(notesources.card_label(source))}">{"".join(said)}{more}</li>\n')
 
     # -- the annexes ----------------------------------------------------------------
 
@@ -2761,15 +2814,20 @@ class _Page:
         return "".join(out), listed
 
     def _annex_geolocations(self, annexes: noteannexes.Annexes) -> str:
-        """A row per proof: its number opens its entry in the sources, its name the post
-        the analyst published of it."""
+        """A row per proof: its name opens the post the analyst published of it, else its
+        entry in the sources, and shows that entry's card."""
         rows: list[str] = []
         for place in annexes.geolocations:
-            number = f"{_cite(place.number)} " if place.number else ""
-            proof = (f'<a {_outward(place.posted)} title="Open the post on {_attr(_platform(place.posted))}">'
-                     f"{_text(place.proof)}</a>" if place.posted else _text(place.proof))
+            card = _card(place.number)
+            if place.posted:
+                proof = (f'<a {_outward(place.posted)} title="Open the post on {_attr(_platform(place.posted))}"{card}>'
+                         f"{_text(place.proof)}</a>")
+            elif place.number:
+                proof = f'<a href="#src-{place.number}"{card}>{_text(place.proof)}</a>'
+            else:
+                proof = _text(place.proof)
             coords = f'<a class="az-coords" {_outward(place.link)}><bdi>{place.coords}</bdi></a>' if place.coords else ""
-            rows.append(f'<tr><td dir="auto">{number}{proof}</td><td dir="auto">{_text(place.where)}</td>'
+            rows.append(f'<tr><td dir="auto">{proof}</td><td dir="auto">{_text(place.where)}</td>'
                         f"<td>{_text(place.day)}</td><td>{coords}</td></tr>")
         return ('<div class="az-table-wrap"><table class="az-annex-table">\n<thead><tr><th scope="col">Proof</th>'
                 '<th scope="col">Place</th><th scope="col">Day</th><th scope="col">Coordinates</th></tr></thead>\n'
@@ -2801,29 +2859,6 @@ class _Page:
             mark = ' class="az-this-edition"' if one.current else ""
             rows.append(f"<li{mark}>{when} <span>{_text(one.said)}</span>{fingerprint}</li>")
         return f'<ol>{"".join(rows)}</ol>\n'
-
-    def _source_entry(self, entry: Entry) -> str:
-        source = entry.source
-        label = f'<span class="az-source-label" dir="auto">{_text(source.label or source.host or "Untitled")}</span>'
-        said = notesources.details(source)
-        details = f' <span class="az-source-details">{_text(" · ".join(said))}</span>' if said else ""
-        origins = ""
-        if entry.origins:
-            linked = ", ".join(_cite(number) for number in entry.origins)
-            origins = f' <span class="az-source-from">from {linked}</span>'
-        links: list[str] = []
-        if source.address:
-            links.append(f'<a class="az-source-address" {_outward(source.address)}>{_text(source.address)}</a>')
-        if source.archive and source.archive != source.address:
-            links.append(f'<a class="az-archive" {_outward(source.archive)}>Archived copy</a>')
-        if source.posted and source.posted not in (source.address, source.archive):
-            links.append(_posted(source.posted))
-        links.extend(f'<a class="az-verify" {_outward(address)}>Check on {_text(site)}</a>'
-                     for site, address in source.verify)
-        if source.sha256:
-            links.append(f'<span class="az-hash">SHA-256 <code>{source.sha256}</code></span>')
-        more = f'<span class="az-source-links">{" ".join(links)}</span>' if links else ""
-        return f'<li id="src-{entry.number}" data-kind="{_attr(source.kind or "item")}">{label}{details}{origins}{more}</li>\n'
 
     def _corrections(self, changes: str, earlier: Iterable[dict[str, Any]]) -> str:
         """What this edition changed, and the public editions before it that said what
@@ -3356,8 +3391,14 @@ def _quoted(text: str) -> str:
     return f"<bdi>{_text(text)}</bdi>"
 
 
-def _cite(number: int) -> str:
-    return f'<a class="az-cite" href="#src-{number}" data-src="{number}">[{number}]</a>'
+def _card(number: int) -> str:
+    """The attribute that makes words open the card of source ``number`` ("" for none)."""
+    return f' data-card="src-{number}"' if number else ""
+
+
+def _focusable(wanted: object) -> str:
+    """Words that open a card without being a link still take the keyboard's focus."""
+    return ' tabindex="0"' if wanted else ""
 
 
 def _table_classes(look: notes_tables.TableLook, coloured: bool) -> str:

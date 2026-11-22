@@ -139,6 +139,7 @@ class FullCase:
     structure_id: str = ""
     model_id: str = ""
     bookmark_id: str = ""
+    publication_id: str = ""
     claim_id: str = ""
     counted_id: str = ""  # the statement that counts a model rather than objects
     pinned_id: str = ""  # a node placed by hand on the graph canvas
@@ -644,6 +645,13 @@ def build_full_case(
             "archive_url": "https://web.archive.test/web/2026/https://example.test/thread/48",
             "reliability": "B",
         },
+    )
+
+    # A book a note cites, which owns nothing on disk and travels as a record.
+    full.publication_id = entity(
+        "publication",
+        "Straits of Salt: A History of the Merrow Crossing",
+        {"author": "Helena Marsh", "publisher": "Northgate University Press", "year": "2019", "medium": "Book"},
     )
 
     full.claim_id = entity(

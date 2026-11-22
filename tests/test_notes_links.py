@@ -131,13 +131,15 @@ def test_the_pdf_lists_what_the_case_knows_of_a_link_it_never_cited_otherwise(so
     assert squash(f"Archive: {ARCHIVE_URL}") in flat and "SHA-256" in annex
 
 
-def test_the_html_page_lists_the_same(sourced):
+def test_the_html_page_lists_the_same_facts_by_kind(sourced):
     _, case, _ = sourced
     text = f"Port Watch [posted it]({POST_URL}) and [the notice]({NOTICE_URL}).\n"
     page = notes_html.render(case, title="T", text=text, look=REPORT).html.decode()
     sources = page[page.index('<section class="az-sources"'):]
-    assert "by Port Watch · posted 12 March 2026 · collected 13 March 2026" in sources
-    assert f'href="{ARCHIVE_URL}"' in sources and "Strike on the port" in sources
+    assert "Port Watch (@portwatch) on X, " in sources and "12 March 2026, collected 13 March 2026." in sources
+    assert "“<bdi>Strike on the port</bdi>”" in sources
+    assert f'href="{ARCHIVE_URL}"' in sources and "port-authority.example.org, " in sources
+    assert sources.index("<h3>Articles and pages</h3>") < sources.index("<h3>Posts and footage</h3>")
 
 
 def test_the_web_folder_and_the_wordpress_draft_list_the_same(client, sourced):
@@ -147,7 +149,7 @@ def test_the_web_folder_and_the_wordpress_draft_list_the_same(client, sourced):
     client.put(f"/api/cases/{cid}/notes/{note['id']}/look", json={"style": "report"})
     folder = notes_web.build(case, note["id"], base_url="https://me.github.io/front/", check=True)
     page = folder.files[folder.index].decode()
-    assert "by Port Watch · posted 12 March 2026 · collected 13 March 2026" in page[page.index('class="az-sources"'):]
+    assert "12 March 2026, collected 13 March 2026." in page[page.index('class="az-sources"'):]
     draft = notes_wordpress.build(case, title="Front", text=text, look=REPORT, identity=notefill.Identity())
     assert "by Port Watch · posted 12 March 2026 · collected 13 March 2026" in draft.content
 

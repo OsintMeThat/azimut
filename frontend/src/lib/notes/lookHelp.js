@@ -56,7 +56,7 @@ export const LOOK_HELP = {
   annexMethod: 'Facts read from the case: tools, days, counts, fingerprints, edition',
   annexLimits: 'Every Limits box of the note, gathered at the end',
   annexEditions: 'The public editions before this one, and what each corrected',
-  sourcesStyle: 'How each source is written in the list at the end',
+  sourcesStyle: 'How the PDF writes each source in its list at the end',
   sourcesAcademic: 'Author, "title", outlet, day, address, archived copy, accessed day',
   sourcesWeb: 'The outlet, the title linked and the day, then the archived copy',
   sourcesShort: 'What it is, where and when, its addresses under it',

@@ -78,6 +78,8 @@ as the style has it (`notesources.entry`): a report's academic, a Web article's 
 web, the others' short. After it come the annexes the style carries
 (`engine/noteannexes.py`), each under a heading of its own: Geolocations, Credits, How
 this was made, Limits (linked back to each box) and Editions and corrections.
+A footnote (`^[words]`) is a small raised `[a]` in the text, lettered in reading order and
+linked to its words, listed under **Notes** before the sources.
 
 **The check before export.** Every warning has a kind (`WARNING_KINDS`), so the
 Page pane and the export's check can say what is wrong and where: a picture or a
@@ -130,6 +132,7 @@ from .notes_markdown import (
     COUNT,
     EMPTY_SECTION,
     ENTITY_HREF,
+    FOOTNOTE_TOKEN,
     INTERNAL,
     LIMITS,
     LOG_STAMP,
@@ -148,6 +151,9 @@ from .notes_markdown import (
     empty_sections,
     exact_counts,
     expand,
+    footnote_letter,
+    footnote_words,
+    holds_footnotes,
     inline_text,
     internal_passages,
     mermaid_sources,
@@ -529,7 +535,7 @@ def render(
     document.signer = identity
     bands = [slot for band in (look.header, look.footer) for slot in (band.left, band.center, band.right) if slot]
     _warn_bands(cited, bands, identity, named="name" in empty)
-    words = "\n".join([title, look.cover.subtitle, *(piece.text for piece in shown), *cited.words(),
+    words = "\n".join([title, look.cover.subtitle, "Notes", *(piece.text for piece in shown), *cited.words(),
                        *annexes.words(), *(document.band_text(slot) for slot in bands)])
     faces = pdffonts.install(document, words, body=theme.body_family, font=look.font)
     builder = _Builder(document, case, diagrams or {}, look=look, faces=faces, cited=cited, light=light,
@@ -885,6 +891,12 @@ class _Builder:
         self.cited = cited if cited is not None else _Cited(case, look=self.look, styled=not self.theme.plain)
         #: The internal link to each entry of the sources list, made when first used.
         self._entry_links: dict[int, int] = {}
+        #: Each footnote as (letter, its words' runs), in the order drawn, which the Notes list
+        #: before the sources; the letter each footnote's token was given (the token kept so its
+        #: id stays its own), and the internal link to each note, set when the Notes are drawn.
+        self._footnotes: list[tuple[str, list[Run]]] = []
+        self._footnote_marks: dict[int, tuple[Token, str]] = {}
+        self._footnote_links: dict[str, int] = {}
         #: The (family, style) pairs this document loaded, so emphasis it lacks borrows.
         self.faces = faces if faces is not None else set(pdffonts.CORE_FACES)
         self.warnings: list[str] = []
@@ -1036,6 +1048,7 @@ class _Builder:
         if self._counts:
             self._warn(counts_said([phrase for phrase, _ in self._counts]), self._counts[0][1], COUNT)
             self.cited.listed[COUNT] = counts_listed(self._counts)
+        self._notes()
         self._sources()
         self._annexes()
         self._made_with()
@@ -1175,6 +1188,36 @@ class _Builder:
             pdf.ln(leading * 0.4)
         self._runs(runs, align=align, size=size, leading=leading, family=theme.heading_family, bold=True,
                    color=theme.ink, bottom=leading * 0.35)
+
+    # -- the notes -------------------------------------------------------------
+
+    def _notes(self) -> None:
+        """The footnotes before the sources: an unnumbered top heading, in the contents and
+        the bookmarks like the sources', then each note's words hanging from its letter,
+        where its mark in the text links to. A report starts them on a page of their own."""
+        if not self._footnotes:
+            return
+        self._end_entry()
+        pdf, theme = self.pdf, self.theme
+        self._shift = 0
+        if theme.style == "report" and pdf.get_y() > pdf.body_top + 0.5:
+            pdf.add_page()
+        self._heading([Run("Notes")], self._base, [], 0, Align.L, numbered=False)
+        size, leading = ENTRY_SIZE * theme.scale * 1.06, ENTRY_LEADING * theme.scale * 1.1
+        pdf.set_font(theme.heading_family, "B", size)
+        hang = max(7.0, pdf.get_string_width(self._footnotes[-1][0]) + 2.4)
+        for letter, runs in self._footnotes:
+            if pdf.will_page_break(leading * 2):
+                pdf.add_page()
+            top = pdf.get_y()
+            pdf.set_link(self._footnote_link(letter), y=top, page=pdf.page)
+            pdf.set_font(theme.heading_family, "B", size)
+            pdf.set_text_color(*theme.accent)
+            self._text_at(pdf.l_margin + pdf.c_margin, top, letter, leading)
+            pdf.set_xy(pdf.l_margin, top)
+            with self._indent(hang):
+                self._runs(runs, size=size, leading=leading, family=theme.body_family, color=theme.ink,
+                           bottom=ENTRY_GAP * theme.scale)
 
     # -- the sources list ------------------------------------------------------
 
@@ -1545,6 +1588,8 @@ class _Builder:
         self._contents_entries = sum(1 for level in levels if level - self._base <= 1)
         if self._listed():
             self._contents_entries += 1  # the sources list's own heading
+        if any(holds_footnotes(block.tokens) for piece in pieces if piece.kind == "text" for block in blocks[id(piece)]):
+            self._contents_entries += 1  # the Notes' own heading
         self._contents_entries += len(self._annex_keys())
 
     def _count_entry(self, heading: str) -> None:
@@ -1881,7 +1926,8 @@ class _Builder:
         self._bookmark(runs, level, number)
         colour = theme.ink
         if caps:
-            runs = [Run(run.text.upper(), bold=True, color=theme.accent_dark) for run in runs]
+            # a raised mark (a citation's number, a footnote's letter) keeps its case and its link
+            runs = [run if run.raised else Run(run.text.upper(), bold=True, color=theme.accent_dark) for run in runs]
             pdf.set_char_spacing(0.5)
         elif rank >= 5:
             colour = theme.muted
@@ -2862,6 +2908,8 @@ class _Builder:
                 link, entity, cite = "", 0, 0
             elif kind == "image":
                 runs.extend(self._inline_image(child))
+            elif kind == FOOTNOTE_TOKEN:
+                runs.append(self._footnote(child))
             elif kind == "html_inline" and child.content.startswith("<!--"):
                 continue  # a comment, or a template's guidance: never printed
             elif kind in ("text", "html_inline", "code_inline", "softbreak", "hardbreak"):
@@ -2890,6 +2938,26 @@ class _Builder:
     def _citation(self, number: int) -> Run:
         """The small `[3]` after a citation, linked to its entry in the sources list."""
         return Run(f"[{number}]", color=self.theme.accent, entry=number, raised=True)
+
+    def _footnote(self, token: Token) -> Run:
+        """A footnote's small raised `[a]` where it is written, linked to its words under Notes,
+        which are read as any line is: a link in them cites its source."""
+        known = self._footnote_marks.get(id(token))
+        if known is not None:
+            letter = known[1]
+        else:
+            letter = footnote_letter(len(self._footnotes))
+            self._footnote_marks[id(token)] = (token, letter)
+            self._footnotes.append((letter, self._inline(footnote_words(token))))
+        return Run(f"[{letter}]", color=self.theme.accent, raised=True, goto=self._footnote_link(letter))
+
+    def _footnote_link(self, letter: str) -> int:
+        """The internal link to a footnote's words, placed when the Notes are drawn."""
+        link = self._footnote_links.get(letter)
+        if link is None:
+            link = self.pdf.add_link()
+            self._footnote_links[letter] = link
+        return link
 
     def _prose(self, run: Run) -> list[Run]:
         """A run of prose: each address written bare in it followed by its number

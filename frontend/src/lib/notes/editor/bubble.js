@@ -1,8 +1,10 @@
 /**
  * The selection bubble: words selected on the drawn page bring up a small bar above
- * them, Bold, Italic, Link, Heading, a list, Quote, Code, Internal and Clear. Each
- * press writes the Markdown an expert would type (`editor/marks.js`), as one Undo
- * step. Link (Ctrl+K) opens the Link field under the bar (`editor/linkField.js`).
+ * them, Bold, Italic, Link, Footnote, Heading, a list, Quote, Code, Internal and Clear.
+ * Each press writes the Markdown an expert would type (`editor/marks.js`), as one Undo
+ * step. Link (Ctrl+K) opens the Link field under the bar (`editor/linkField.js`), and
+ * Footnote the Footnote field (`editor/footnoteField.js`), which a press on a footnote's
+ * letter and the `/` menu's Footnote open too, then without the bar.
  *
  * The bar never covers the words: it stands above them, or under them when the top of
  * the page is too near. It goes while the mouse is still selecting, when a block is
@@ -12,6 +14,7 @@ import { EditorSelection, Prec, StateEffect, StateField } from '@codemirror/stat
 import { EditorView, keymap, showTooltip } from '@codemirror/view';
 
 import { rovingToolbar } from '../pictureSize.js';
+import { footnoteAt, footnoteField, footnoteTarget, removeFootnote, writeFootnote } from './footnoteField.js';
 import { iconSvg } from './icon.js';
 import { linkField } from './linkField.js';
 import {
@@ -27,10 +30,16 @@ export const hideBubble = StateEffect.define();
 export const openLink = StateEffect.define({
   map: (value, changes) => (value ? { ...value, from: changes.mapPos(value.from, 1), to: changes.mapPos(value.to, -1) } : value),
 });
+/** A Footnote field's target (`footnoteTarget`) where the note changed around it. */
+const mappedFootnote = (value, changes) => (value
+  ? { ...value, from: changes.mapPos(value.from, 1), to: changes.mapPos(value.to, -1), at: changes.mapPos(value.at, -1) } : value);
+/** Open the Footnote field on a target (`footnoteTarget`), or close it (null). */
+export const openFootnote = StateEffect.define({ map: mappedFootnote });
 
 /** The stretch the bubble stands for, or null when it does not show. */
-function bubbleSpan(state, hidden, link) {
+function bubbleSpan(state, hidden, link, footnote) {
   if (link) return { from: link.from, to: link.to };
+  if (footnote) return { from: footnote.from, to: footnote.to };
   if (hidden || state.readOnly || state.field(selecting, false)) return null;
   const range = state.selection.main;
   if (range.empty || pickedBlock(state)) return null;
@@ -40,28 +49,38 @@ function bubbleSpan(state, hidden, link) {
 }
 
 const bubbleState = StateField.define({
-  create: () => ({ hidden: false, link: null, span: null, tooltip: null }),
+  create: () => ({ hidden: false, link: null, footnote: null, span: null, tooltip: null }),
   update(value, transaction) {
-    let { hidden, link } = value;
+    let { hidden, link, footnote } = value;
     const moved = transaction.selection && !transaction.startState.selection.eq(transaction.state.selection);
     if (moved) {
       hidden = false;
       link = null;
-    } else if (link && transaction.docChanged) {
-      link = { ...link, from: transaction.changes.mapPos(link.from, 1), to: transaction.changes.mapPos(link.to, -1) };
+      footnote = null;
+    } else if (transaction.docChanged) {
+      if (link) link = { ...link, from: transaction.changes.mapPos(link.from, 1), to: transaction.changes.mapPos(link.to, -1) };
+      footnote = mappedFootnote(footnote, transaction.changes);
     }
+    // one field at a time: the Link field or the Footnote field
     for (const effect of transaction.effects) {
       if (effect.is(hideBubble)) hidden = effect.value;
-      if (effect.is(openLink)) link = effect.value;
+      if (effect.is(openLink)) {
+        link = effect.value;
+        if (link) footnote = null;
+      }
+      if (effect.is(openFootnote)) {
+        footnote = effect.value;
+        if (footnote) link = null;
+      }
     }
-    const span = bubbleSpan(transaction.state, hidden, link);
+    const span = bubbleSpan(transaction.state, hidden, link, footnote);
     let { tooltip } = value;
     // the same tooltip while the words start at the same place, so the bar is not drawn again as a selection grows
     if (!span) tooltip = null;
     else if (!tooltip || tooltip.pos !== span.from) {
       tooltip = { pos: span.from, above: true, strictSide: true, create: (view) => new BubbleView(view) };
     }
-    return { hidden, link, span, tooltip };
+    return { hidden, link, footnote, span, tooltip };
   },
   provide: (field) => showTooltip.from(field, (value) => value.tooltip),
 });
@@ -90,6 +109,36 @@ export function openLinkField(view) {
   return true;
 }
 
+/**
+ * Open the Footnote field: on the footnote the words selected are, else for a footnote right
+ * after them, or at `at` (the `/` menu's place) with nothing selected. False on a page with no
+ * bubble (the raw Markdown) or one that cannot be written.
+ */
+export function openFootnoteField(view, { at = null } = {}) {
+  const { state } = view;
+  if (state.readOnly || !state.field(bubbleState, false)) return false;
+  const range = at == null ? state.selection.main : EditorSelection.cursor(at);
+  view.dispatch({ effects: openFootnote.of(footnoteTarget(state, range)) });
+  return true;
+}
+
+/** Open the Footnote field on the footnote written at `pos`, as a press on its letter does. */
+export function openFootnoteAt(view, pos) {
+  const { state } = view;
+  const target = state.readOnly || !state.field(bubbleState, false) ? null : footnoteAt(state, pos);
+  if (!target) return false;
+  view.dispatch({ effects: openFootnote.of(target) });
+  return true;
+}
+
+/** What the Footnote field said, written as the footnote. */
+function footnotePicked(view, choice) {
+  const target = view.state.field(bubbleState).footnote;
+  if (target && !choice.close) runFormat(view, choice.remove ? removeFootnote(target) : writeFootnote(target, choice.words));
+  if (view.state.field(bubbleState).footnote) view.dispatch({ effects: openFootnote.of(null) });
+  view.focus();
+}
+
 /** What the Link field picked, written in place of its words. */
 async function linkPicked(view, choice) {
   const state = view.state.field(bubbleState);
@@ -115,6 +164,10 @@ export const BUBBLE_BUTTONS = [
   { id: 'bold', label: 'Bold', keys: 'Ctrl+B', glyph: 'B', run: (view) => runFormat(view, toggleInline(view.state, 'bold')) },
   { id: 'italic', label: 'Italic', keys: 'Ctrl+I', glyph: 'I', run: (view) => runFormat(view, toggleInline(view.state, 'italic')) },
   { id: 'link', label: 'Link', keys: 'Ctrl+K', icon: 'link', text: 'Link', run: (view) => openLinkField(view) },
+  {
+    id: 'footnote', label: 'Footnote', said: 'Footnote: a comment the reader opens from a small letter', glyph: 'a', text: 'Footnote',
+    run: (view) => openFootnoteField(view),
+  },
   null,
   { id: 'heading', label: 'Heading', glyph: 'H', run: (view) => runFormat(view, toggleLines(view.state, 'heading')) },
   { id: 'bullet', label: 'Bulleted list', icon: 'list', run: (view) => runFormat(view, toggleLines(view.state, 'bullet')) },
@@ -160,7 +213,8 @@ class BubbleView {
       if (item.text) press.append(Object.assign(document.createElement('span'), { className: 'cm-bubble-text', textContent: item.text }));
       press.addEventListener('click', () => {
         item.run(this.view);
-        if (item.id !== 'link') this.view.focus();
+        // a field takes the keys
+        if (item.id !== 'link' && item.id !== 'footnote') this.view.focus();
       });
       this.buttons.set(item.id, press);
       this.bar.append(press);
@@ -174,11 +228,12 @@ class BubbleView {
       const to = event.relatedTarget;
       if (to && (this.dom.contains(to) || this.view.dom.contains(to))) return;
       queueMicrotask(() => {
-        if (this.view.state.field(bubbleState, false)?.tooltip) this.view.dispatch({ effects: [hideBubble.of(true), openLink.of(null)] });
+        if (this.view.state.field(bubbleState, false)?.tooltip) this.view.dispatch({ effects: [hideBubble.of(true), openLink.of(null), openFootnote.of(null)] });
       });
     });
     this.stopRoving = rovingToolbar(this.bar);
     this.field = null;
+    this.footnoteField = null;
     this.refresh(view.state);
   }
 
@@ -206,6 +261,26 @@ class BubbleView {
       this.field.dom.remove();
       this.field = null;
       this.dom.classList.remove('cm-bubble-linking');
+    }
+    this.refreshFootnote(state);
+  }
+
+  /** Open or close the Footnote field; opened on a footnote or with nothing selected, it stands alone, without the bar. */
+  refreshFootnote(state) {
+    const footnote = state.field(bubbleState).footnote;
+    this.buttons.get('footnote').classList.toggle('cm-bubble-open', Boolean(footnote));
+    this.dom.classList.toggle('cm-bubble-alone', Boolean(footnote && (footnote.existing || footnote.from === footnote.to)));
+    if (footnote && !this.footnoteField) {
+      this.footnoteField = footnoteField(footnote, (choice) => footnotePicked(this.view, choice));
+      this.dom.append(this.footnoteField.dom);
+      this.dom.classList.add('cm-bubble-linking');
+      const field = this.footnoteField;
+      queueMicrotask(() => field === this.footnoteField && field.focus());
+    } else if (!footnote && this.footnoteField) {
+      this.footnoteField.destroy();
+      this.footnoteField.dom.remove();
+      this.footnoteField = null;
+      if (!this.field) this.dom.classList.remove('cm-bubble-linking');
     }
   }
 
@@ -237,7 +312,7 @@ class BubbleView {
     const above = first.top - height - gap >= page.top;
     const below = last.bottom + gap + height <= page.bottom;
     let top;
-    if (above && !(value?.link && below)) top = first.top - height - gap;
+    if (above && !((value?.link || value?.footnote) && below)) top = first.top - height - gap;
     else if (below) top = last.bottom + gap;
     else top = page.top + gap;
     this.dom.classList.toggle('cm-bubble-under', top > first.top);
@@ -247,6 +322,7 @@ class BubbleView {
   destroy() {
     this.stopRoving?.();
     this.field?.destroy();
+    this.footnoteField?.destroy();
   }
 }
 
@@ -260,6 +336,13 @@ const letGo = new WeakMap();
  */
 const pointer = EditorView.domEventHandlers({
   mousedown(event, view) {
+    // a press on a footnote's letter opens its words
+    const footnote = event.button === 0 ? event.target.closest?.('[data-footnote]') : null;
+    if (footnote && view.dom.contains(footnote)) {
+      event.preventDefault();
+      openFootnoteAt(view, Number(footnote.dataset.footnote));
+      return true;
+    }
     // a press on words; a block, a chip or a button inside the page answers its own
     if (event.button !== 0 || !event.target.closest?.('.cm-line') || event.target.closest('button, input, [data-chip]')) return false;
     clearTimeout(letGo.get(view));
@@ -286,7 +369,7 @@ const pointer = EditorView.domEventHandlers({
   blur(event, view) {
     const to = event.relatedTarget;
     if (to && view.dom.contains(to)) return false;
-    if (view.state.field(bubbleState, false)?.tooltip) view.dispatch({ effects: [hideBubble.of(true), openLink.of(null)] });
+    if (view.state.field(bubbleState, false)?.tooltip) view.dispatch({ effects: [hideBubble.of(true), openLink.of(null), openFootnote.of(null)] });
     return false;
   },
 });
@@ -308,7 +391,7 @@ const keys = Prec.high(keymap.of([
     run: (view) => {
       const value = view.state.field(bubbleState, false);
       if (!value?.tooltip) return false;
-      view.dispatch({ effects: value.link ? openLink.of(null) : hideBubble.of(true) });
+      view.dispatch({ effects: value.link ? openLink.of(null) : value.footnote ? openFootnote.of(null) : hideBubble.of(true) });
       return true;
     },
   },
@@ -333,6 +416,11 @@ const look = EditorView.theme({
   '.cm-bubble-italic .cm-bubble-glyph': { fontStyle: 'italic', fontFamily: 'Georgia, serif', fontSize: '14px' },
   '.cm-bubble-heading .cm-bubble-glyph': { fontWeight: '700' },
   '.cm-bubble-code .cm-bubble-glyph': { fontFamily: 'var(--font-mono)', fontSize: '11px' },
+  '.cm-bubble-footnote .cm-bubble-glyph, .cm-footnote-icon': { color: 'var(--accent)', fontSize: '10px', fontWeight: '700', verticalAlign: '0.45em' },
+  '.cm-footnote-icon': { fontFamily: 'var(--font-sans)', fontSize: '11px', verticalAlign: 'baseline', width: '14px', justifyContent: 'center' },
+  // the Footnote field opened on a footnote's letter or at the cursor stands without the bar
+  '.cm-bubble-alone .cm-bubble-bar': { display: 'none' },
+  '.cm-bubble-alone .cm-link-field': { borderTop: 'none' },
   '.cm-bubble-internal': { color: 'var(--internal)' },
   '.cm-bubble-internal[aria-pressed="true"]': { color: 'var(--internal)', background: 'color-mix(in srgb, var(--internal) 18%, transparent)' },
   '.cm-bubble-rule': { width: '1px', height: '18px', margin: '0 4px', background: 'var(--border-strong)', flex: 'none' },

@@ -164,7 +164,8 @@ const ALIGNMENTS = [
  * bare list and, picked, types its name so the commands of its `group` (offered only
  * once something is typed) come up together. `hint` is the line under its name in the
  * menu, `icon` (or `glyph`, a heading's level) what it is drawn with; where it stands
- * in the menu is `INSERT_SECTIONS`'s to say.
+ * in the menu is `INSERT_SECTIONS`'s to say. A `footnote` one opens the Footnote field
+ * where it is typed (`editor/footnoteField.js`).
  */
 export const SLASH_COMMANDS = [
   { id: 'h1', label: 'Heading 1', icon: 'text', glyph: 'H1', words: 'title h1', line: '# ', hint: 'A part of the note' },
@@ -182,6 +183,7 @@ export const SLASH_COMMANDS = [
     hint: callout.hint, ...(callout.kind === 'internal' ? {} : { group: 'callout' }),
   })),
   { id: 'quote', label: 'Quote', icon: 'quote', words: 'blockquote cite', line: '> ', hint: 'Words someone said or wrote' },
+  { id: 'footnote', label: 'Footnote', icon: 'text', glyph: 'a', words: 'aside comment remark annotation endnote', footnote: true, hint: 'A comment the reader opens from a small letter' },
   { id: 'cite', label: 'Case item', icon: 'at', words: 'mention reference link entity place person', action: 'cite', hint: 'A place, a person or a file, as a chip' },
   { id: 'picture', label: 'Case picture', icon: 'image', words: 'media image photo capture video', action: 'picture', hint: 'From the case’s media, captures and proofs' },
   { id: 'upload', label: 'Image from a file', icon: 'upload', words: 'upload picture file', action: 'upload', hint: 'Added to the case’s media' },
@@ -229,7 +231,7 @@ export const SLASH_COMMANDS = [
  * nowhere stands at the end of its own `section`, Figures else.
  */
 export const INSERT_SECTIONS = [
-  { id: 'text', label: 'Text', ids: ['h1', 'h2', 'h3', 'bullet', 'numbered', 'task', 'quote', 'callout', 'callout-internal', 'code', 'date', 'entry', 'hint'] },
+  { id: 'text', label: 'Text', ids: ['h1', 'h2', 'h3', 'bullet', 'numbered', 'task', 'quote', 'footnote', 'callout', 'callout-internal', 'code', 'date', 'entry', 'hint'] },
   { id: 'media', label: 'Media', ids: ['picture', 'upload', 'steps', 'story', 'my-logo'] },
   { id: 'case', label: 'From the case', ids: ['cite', 'post', 'map', 'include'] },
   { id: 'layout', label: 'Layout', ids: ['divider', 'columns', 'pagebreak', 'cover', 'align', 'corner', 'signature', 'field'] },
@@ -336,7 +338,7 @@ export function today(now = new Date()) {
  * `null` for an action, which the editor carries out itself.
  */
 export function slashInsert(command, { before = '', now = new Date() } = {}) {
-  if (command.action || command.menu) return null;
+  if (command.action || command.menu || command.footnote) return null;
   if (command.wrap) return wrapInBlock(command.wrap, before);
   const alone = !before.trim();
   if (command.line) {

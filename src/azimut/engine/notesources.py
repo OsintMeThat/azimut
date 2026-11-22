@@ -48,10 +48,10 @@ import math
 import re
 from collections import deque
 from dataclasses import dataclass, replace
-from datetime import date
+from datetime import date, datetime, timedelta, timezone
 from pathlib import PurePosixPath
 from typing import TYPE_CHECKING, Any, Iterable, Iterator
-from urllib.parse import urlsplit
+from urllib.parse import parse_qsl, urlsplit
 
 from . import copernicus_credit, entities, links, notes_style, timeline, urltitles, verifylinks
 from .proposals import URL_ATTRS
@@ -115,6 +115,12 @@ SHA256 = re.compile(r"^[0-9a-f]{64}$")
 INSTANT = re.compile(r"^(\d{4}-\d{2}-\d{2})T(\d{2}:\d{2})(?::\d{2})?Z$")
 #: The day a copy was made, kept beside its address once something archived it.
 ARCHIVED_AT = "archived_at"
+#: A bookmark's page as it called itself and the day it was published, read back from
+#: its archived copy by Archive every link (`linkarchive`), never typed.
+PAGE_TITLE = "page_title"
+PUBLISHED_AT = "published_at"
+#: Who files the bookmarks of a note's links: their label is the link's words, not a title.
+LINKS_FILED_BY = "note"
 #: A Wayback copy's address says when it was taken: `web.archive.org/web/20261118093012/…`.
 WAYBACK_STAMP = re.compile(r"^/web/(\d{4})(\d{2})(\d{2})\d*[a-z_]*/", re.I)
 #: Where an archived copy of a page lives: such a link is a copy already, dated by the archive.
@@ -195,6 +201,11 @@ class Source:
     #: Every set of words the note links a page the case holds nothing of with, in order:
     #: where a written title is found when the first link only named the site.
     words: tuple[str, ...] = ()
+    #: The work's own title as it was published: a page's, read back from its archived
+    #: copy (`linkarchive`), or a publication's. Never the words a note linked it with.
+    title: str = ""
+    #: Who issued a publication: its press or its organization.
+    publisher: str = ""
 
     @property
     def host(self) -> str:
@@ -459,6 +470,9 @@ class Reader:
             noun, what = "Account", ACCOUNT
         elif kind == "bookmark":
             noun, what = "Web page", PAGE
+        elif kind == PUBLICATION:
+            noun, what = _line(attrs.get("medium")) or "Book", PAGE if address else ""
+            author = _line(attrs.get("author"))
         elif imagery:
             noun, what = "Imagery", IMAGERY
         elif path:
@@ -480,6 +494,15 @@ class Reader:
         origins = self._origins(entity_id, depth) if entity_id and path else ()
         derived = bool(self._parents.get(entity_id)) if entity_id and path else False
         label = _line((record or {}).get("label")) or _line(item.get("title")) or PurePosixPath(path).name
+        title = label if kind == PUBLICATION else ""
+        if kind == "bookmark":
+            # the page's own title, read back from its copy; a bookmark someone filed by hand
+            # is named after its page, one a note's links filed only after the link's words
+            title = _line(attrs.get(PAGE_TITLE))
+            filed_by = ((record or {}).get("provenance") or {}).get("by")
+            if (not title and filed_by != LINKS_FILED_BY and label not in (address, host(address))
+                    and not _cites_site(label, address) and not _an_address(label)):
+                title = label
         return Source(
             key=f"entity:{entity_id}" if entity_id else f"path:{path}",
             label=label,
@@ -491,6 +514,8 @@ class Reader:
             posted=next(iter(urltitles.own_posts(attrs)), ""),
             author=author,
             published=(_day(attrs.get("posted_at")) if kind == "social-post"
+                       else _day(attrs.get(PUBLISHED_AT)) if kind == "bookmark"
+                       else _line(attrs.get("year"))[:20] if kind == PUBLICATION
                        else timeline.media_published(sidecar) or "" if not imagery else ""),
             collected=collected,
             arrival="made" if derived or kind == "proof" else ARRIVALS.get(route, "collected"),
@@ -506,6 +531,8 @@ class Reader:
             origins=origins,
             route=route,
             type=kind,
+            title=title,
+            publisher=_line(attrs.get("publisher")) if kind == PUBLICATION else "",
         )
 
     def _readings(self, sidecar: dict[str, Any], attrs: dict[str, Any]) -> tuple[Reading, ...]:
@@ -977,6 +1004,8 @@ def _academic(source: Source) -> list[Part]:
     title = _title(source)
     if title:
         groups.append([Part(f"\u201c{title}\u201d", "title")])
+    if source.publisher:
+        groups.append([Part(source.publisher)])
     if source.kind != PAGE and source.noun:
         medium = source.noun.lower() if source.noun != PLATE_NOUN else source.noun
         groups.append([Part(f"{medium} at {source.at}" if source.at else medium)])
@@ -1033,6 +1062,8 @@ def _web(source: Source) -> list[Part]:
         groups.append([Part(source.noun.lower() if source.noun != PLATE_NOUN else source.noun)])
     if source.readings or (source.kind == IMAGERY and source.attribution):
         groups.append([Part(_imagery_said(source))])
+    if source.publisher:
+        groups.append([Part(source.publisher)])
     if source.published:
         groups.append([Part(short_day(source.published))])
     parts = _joined(groups)
@@ -1074,6 +1105,313 @@ def reference(source: Source, style: str = "short") -> str:
     if source.sha256:
         said.append(f"SHA-256 {source.sha256}")
     return " ".join(said)
+
+
+# -- the web page's list: grouped, each entry a card ---------------------------------
+#
+# A web page cites by its words: each linked stretch opens a card with the source's
+# entry, and the list at the end groups the entries by what they are, each group in the
+# order a reader meets them. Paper keeps the numbered list (`entry`), since nothing on
+# paper opens a card. The same words are written for osintmethat.com's older articles.
+
+#: The groups of the list, in their order.
+BOOKS = "Books and reports"
+PAGES = "Articles and pages"
+POSTS = "Posts and footage"
+IMAGERY_GROUP = "Imagery"
+MADE = "Made for this article"
+FILES = "Other files"
+GROUPS = (BOOKS, PAGES, POSTS, IMAGERY_GROUP, MADE, FILES)
+#: The record a book or a report printed without an address is kept as.
+PUBLICATION = "publication"
+#: Sites a source is cited on by account and day: their pages are posts and profiles,
+#: whose copies say nothing a title could (`linkarchive` reads no title there).
+WALLED = ("x.com", "twitter.com", "t.me", "telegram.me", "instagram.com", "facebook.com", "fb.watch", "tiktok.com",
+          "bsky.app", "threads.net", "vk.com")
+#: X's ids count milliseconds from this moment (its "snowflake" ids), TikTok's seconds
+#: from 1970 in their top 32 bits: a post's address says when it was posted.
+X_EPOCH_MS = 1288834974657
+#: Before this an id is not one that carries its moment.
+FIRST_MOMENT = datetime(2010, 11, 4, tzinfo=timezone.utc)
+_FILE_NAME = re.compile(r"^\S+\.[A-Za-z0-9]{2,5}$")
+_GENERIC_POST = re.compile(r"^(post|video|picture|reel|tiktok video|instagram (post|reel)|facebook (post|video)|"
+                           r"youtube (video|short))\b.*\b(by|on)\b", re.I)
+
+
+@dataclass(frozen=True)
+class PostLink:
+    """What a post's or an account's address says by itself: its platform, the account
+    when the address names it, whether it is a post rather than a profile, and when it
+    was posted when its id carries the moment (`2026-03-09T14:22:00Z`)."""
+
+    platform: str
+    account: str = ""
+    post: bool = True
+    moment: str = ""
+
+
+def post_link(url: str) -> PostLink | None:
+    """The post or the account at ``url`` on a platform a reader knows, or None for any other page."""
+    name = host(url)
+    for prefix in ("mobile.", "m."):
+        name = name.removeprefix(prefix)
+    try:
+        parts = urlsplit(url)
+    except ValueError:
+        return None
+    segs = [seg for seg in parts.path.split("/") if seg]
+    query = dict(parse_qsl(parts.query))
+    platform = outlet(f"https://{name}/")
+    if name in ("x.com", "twitter.com"):
+        if len(segs) >= 3 and segs[1] == "status" and segs[2].isdigit() and segs[0] not in ("i",):
+            return PostLink("X", f"@{segs[0]}", True, _snowflake(segs[2]))
+        if "status" in segs:
+            return PostLink("X")
+        if len(segs) == 1 and handle_of(url):
+            return PostLink("X", f"@{segs[0]}", False)
+        return None
+    if name in ("t.me", "telegram.me"):
+        segs = segs[1:] if segs[:1] == ["s"] else segs
+        if len(segs) >= 2 and segs[1].isdigit() and segs[0] != "c":
+            return PostLink("Telegram", f"@{segs[0]}")
+        if len(segs) >= 3 and segs[0] == "c":
+            return PostLink("Telegram")
+        return PostLink("Telegram", f"@{segs[0]}", False) if len(segs) == 1 else None
+    if name == "tiktok.com":
+        account = segs[0] if segs and segs[0].startswith("@") else ""
+        if len(segs) >= 3 and segs[1] in ("video", "photo") and segs[2].isdigit():
+            return PostLink("TikTok", account, True, _tiktok_moment(segs[2]))
+        return PostLink("TikTok", account, False) if account and len(segs) == 1 else None
+    if name == "instagram.com":
+        if len(segs) >= 2 and segs[0] in ("p", "reel", "reels", "tv"):
+            return PostLink("Instagram")
+        if len(segs) >= 3 and segs[1] in ("p", "reel"):
+            return PostLink("Instagram", f"@{segs[0]}")
+        return PostLink("Instagram", f"@{segs[0]}", False) if len(segs) == 1 else None
+    if name in ("facebook.com", "fb.watch"):
+        if name == "fb.watch" or set(segs) & {"posts", "videos", "reel", "watch", "permalink.php", "story.php", "share"}:
+            return PostLink("Facebook")
+        return PostLink("Facebook", segs[0], False) if len(segs) == 1 else None
+    if name == "bsky.app" and segs[:1] == ["profile"] and len(segs) >= 2:
+        return PostLink("Bluesky", f"@{segs[1]}", len(segs) >= 4 and segs[2] == "post")
+    if name in ("youtube.com", "youtu.be"):
+        if name == "youtu.be" or (segs[:1] == ["watch"] and query.get("v")) or segs[:1] == ["shorts"]:
+            return PostLink("YouTube")
+        return PostLink("YouTube", segs[0], False) if segs and segs[0].startswith("@") else None
+    if name == "threads.net" and segs and segs[0].startswith("@"):
+        return PostLink("Threads", segs[0], len(segs) >= 3 and segs[1] == "post")
+    if name == "vk.com" and segs:
+        return PostLink(platform, "", segs[0].startswith(("wall", "video")))
+    return None
+
+
+def _snowflake(ident: str) -> str:
+    """When an X post was posted, read off its id, or "" for an id older than X's ids: the ones
+    counted one by one before them all fall within seconds of their epoch."""
+    try:
+        offset = int(ident) >> 22
+        if offset < 86_400_000:
+            return ""
+        moment = datetime.fromtimestamp((offset + X_EPOCH_MS) / 1000, tz=timezone.utc)
+    except (ValueError, OverflowError, OSError):
+        return ""
+    return _moment_said(moment)
+
+
+def _tiktok_moment(ident: str) -> str:
+    try:
+        moment = datetime.fromtimestamp(int(ident) >> 32, tz=timezone.utc)
+    except (ValueError, OverflowError, OSError):
+        return ""
+    return _moment_said(moment)
+
+
+def _moment_said(moment: datetime) -> str:
+    if moment < FIRST_MOMENT or moment > datetime.now(timezone.utc) + timedelta(days=1):
+        return ""
+    return moment.strftime("%Y-%m-%dT%H:%M:00Z")
+
+
+def walled(url: str) -> bool:
+    """Whether ``url`` is on a site cited by account and day, whose page has no title to read."""
+    return _on(url, WALLED)
+
+
+def is_report(url: str) -> bool:
+    """Whether ``url`` is a document rather than a page: a PDF."""
+    try:
+        return urlsplit(url).path.lower().endswith(".pdf")
+    except ValueError:
+        return False
+
+
+def _page_of(source: Source) -> Source:
+    """A written link to an archived copy, read as that copy of its page."""
+    return _held_copy(source) if source.key.startswith("url:") and original(source.address) else source
+
+
+def _address(source: Source) -> str:
+    return source.address or original(source.archive)
+
+
+def group(source: Source) -> str:
+    """Which group of the web page's list a source falls in."""
+    source = _page_of(source)
+    address = _address(source)
+    if source.type == PUBLICATION:
+        return BOOKS
+    if source.kind == IMAGERY:
+        return IMAGERY_GROUP
+    if source.derived or source.arrival == "made":
+        return MADE
+    if source.kind in (POST, ACCOUNT) or (address and post_link(address)):
+        return POSTS
+    if address and is_report(address):
+        return BOOKS
+    if address:
+        return PAGES
+    return FILES
+
+
+def _named(source: Source) -> str:
+    """What an entry may quote as the item's name: the work's own title, else a name the
+    analyst gave an item of the case. Never the words a note linked a page with, a file's
+    name, an address, or a stock name like *Post by @h on X*."""
+    if source.title:
+        return source.title
+    if source.key.startswith("url:") or source.type == "bookmark":
+        return ""
+    label = source.label.strip()
+    if not label or label in (source.host, source.address, source.archive) or _an_address(label):
+        return ""
+    if _FILE_NAME.match(label) or _GENERIC_POST.match(label):
+        return ""
+    return label
+
+
+def card_label(source: Source) -> str:
+    """The card's small heading: `Post on X`, `Video on TikTok`, `Page`, `Imagery`, `Proof`."""
+    source = _page_of(source)
+    found = group(source)
+    if found == BOOKS:
+        return "Report" if source.type != PUBLICATION else (source.noun or "Book")
+    if found == PAGES:
+        return "Article" if source.published else "Page"
+    if found == IMAGERY_GROUP:
+        return "Imagery"
+    if found in (MADE, FILES):
+        return source.noun or "File"
+    address = _address(source)
+    link = post_link(address) if address else None
+    platform = link.platform if link else (outlet(address) if address else "")
+    if source.kind == ACCOUNT or (link is not None and not link.post):
+        what = "Account"
+    elif source.kind == POST and source.noun and source.type != "social-post":
+        what = source.noun
+    else:
+        what = "Post"
+    return f"{what} on {platform}" if platform else what
+
+
+def short_name(source: Source) -> str:
+    """How an entry names another one it was made from: `@almasaobl on X (video)`."""
+    source = _page_of(source)
+    address = _address(source)
+    found = group(source)
+    if found == POSTS:
+        link = post_link(address) if address else None
+        platform = link.platform if link else outlet(address)
+        who = _author(source) or (link.account if link else "")
+        noun = (source.noun or "post").lower() if source.kind == POST and source.type != "social-post" else "post"
+        if source.kind == ACCOUNT or (link is not None and not link.post):
+            noun = "account"
+        return f"{who} on {platform} ({noun})" if who else f"{platform} {noun}"
+    if found == IMAGERY_GROUP:
+        provider = next((reading.provider for reading in source.readings if reading.provider), "")
+        return provider or (f"“{_named(source)}”" if _named(source) else "imagery")
+    named = _named(source)
+    if named:
+        return f"“{named}”"
+    if address:
+        return outlet(address)
+    return (source.noun or "file").lower()
+
+
+def card_entry(source: Source, origins: Iterable[tuple[int, Source]] = ()) -> list[Part]:
+    """One source as the web page's list and its card write it (SOURCES 4B): who and
+    where first, the work's own title linked to it, its day, its archived copy. A part
+    the case does not know is left out with its comma; nothing is made up. The items it
+    was made from close it, each named and linked to its own entry (`ref`)."""
+    source = _page_of(source)
+    address = _address(source)
+    target = address or source.archive
+    found = group(source)
+    named = _named(source)
+    groups: list[list[Part]] = []
+    if found == POSTS:
+        link = post_link(address) if address else None
+        platform = link.platform if link else (outlet(address) if address else "")
+        who = _author(source) or (link.account if link else "")
+        lead = f"{who} on {platform}" if who and platform else who or platform
+        if lead:
+            groups.append([Part(lead)])
+        account = source.kind == ACCOUNT or (link is not None and not link.post)
+        word = "account" if account else (
+            source.noun.lower() if source.kind == POST and source.noun and source.type != "social-post" else "post")
+        groups.append([Part(named, "title", target)] if named else [Part(word, "link", target)])
+        when = source.published or (link.moment if link is not None else "")
+        if when and not account:
+            groups.append([Part(spoken_day(when))])
+    elif source.type == PUBLICATION:
+        if source.author:
+            groups.append([Part(source.author)])
+        groups.append([Part(source.title or source.label or "Untitled", "work", target)])
+        if source.publisher:
+            groups.append([Part(source.publisher)])
+        if source.published:
+            groups.append([Part(spoken_day(source.published))])
+    elif found in (PAGES, BOOKS):
+        if address:
+            groups.append([Part(outlet(address))])
+        word = "report" if found == BOOKS else "page"
+        groups.append([Part(source.title, "title", target)] if source.title else [Part(word, "link", target)])
+        if source.published:
+            groups.append([Part(spoken_day(source.published))])
+    elif found == IMAGERY_GROUP:
+        if named:
+            groups.append([Part(named, "title", address)])
+        said = _imagery_said(source)
+        if said:
+            groups.append([Part(said)])
+        if address and not named:
+            groups.append([Part("via "), Part(outlet(address), "link", address)])
+    else:
+        groups.append([Part(named, "title")] if named else [Part(source.noun or "File")])
+        if named and source.noun:
+            groups.append([Part(source.noun.lower() if source.noun != PLATE_NOUN else source.noun)])
+        if source.at:
+            groups.append([Part(f"at {source.at}")])
+        if source.seen:
+            groups.append([Part(source.seen)])
+        made_from: list[Part] = []
+        listed = list(origins)
+        for position, (number, origin) in enumerate(listed):
+            if position:
+                made_from.append(Part(" and " if position == len(listed) - 1 else ", "))
+            made_from.append(Part(short_name(origin), "ref", number=number))
+        if made_from:
+            groups.append([Part("made from "), *made_from])
+        elif source.readings:
+            groups.append([Part(_imagery_said(source))])
+    if source.collected and source.type != PUBLICATION:
+        # the day the analyst read the page or the file came into the case: what an OSINT reader checks against
+        verb = "accessed" if source.kind == PAGE else source.arrival
+        groups.append([Part(f"{verb} {spoken_day(source.collected)}")])
+    parts = _joined(groups) or [Part(source.label or "Untitled")]
+    parts.append(Part("."))
+    if source.archive and source.archive != address:
+        parts.extend([Part(" "), Part("Archived copy", "archive", source.archive)])
+    return parts
 
 
 # -- small readings ---------------------------------------------------------------
@@ -1207,6 +1545,7 @@ def _line(value: Any) -> str:
     return " ".join(value.split())[:MAX_LABEL] if isinstance(value, str) else ""
 
 
-__all__ = ["Annex", "Credit", "Entry", "Part", "Reader", "Reading", "Source", "archive_day", "details", "entry",
-           "entry_text", "handle_of", "host", "is_archive", "is_own_tool", "outlet", "reference", "short_day", "spoken_day",
-           "web"]
+__all__ = ["GROUPS", "Annex", "Credit", "Entry", "Part", "PostLink", "Reader", "Reading", "Source", "archive_day",
+           "card_entry", "card_label", "details", "entry", "entry_text", "group", "handle_of", "host", "is_archive",
+           "is_own_tool", "is_report", "outlet", "post_link", "reference", "short_day", "short_name", "spoken_day",
+           "walled", "web"]

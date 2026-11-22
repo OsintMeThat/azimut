@@ -68,6 +68,16 @@ export const look = EditorView.theme({
   '.cm-chip-mark': { color: 'var(--accent)', fontSize: '0.8em' },
   '.cm-chip-broken': { color: 'var(--text-3)', textDecoration: 'line-through', cursor: 'default' },
   '.cm-ref-source': { color: 'var(--text-3)', fontFamily: 'var(--font-mono)', fontSize: '0.85em' },
+  // a footnote: its small raised letter, as the page prints it, its words a press away
+  '.cm-footnote': {
+    display: 'inline-block', minWidth: '1.1em', padding: '0 3px', margin: '0 1px', borderRadius: '3px', boxSizing: 'border-box',
+    background: 'var(--accent-soft)', color: 'var(--accent)', font: '650 0.7em/1.35 var(--font-sans)', textAlign: 'center',
+    verticalAlign: '0.6em', cursor: 'pointer',
+  },
+  '.cm-footnote:hover': { background: 'var(--accent)', color: 'var(--accent-text)' },
+  '.cm-footnote-source': { color: 'var(--text-3)' },
+  // the same mark in a block drawn whole (a table's cell, a step's words), with no letter of its own there
+  '.md-footnote': { color: 'var(--accent)', fontWeight: '650', cursor: 'help' },
   '.cm-coords': { fontFamily: 'var(--font-mono)', fontSize: '0.92em', borderBottom: '1px dotted var(--accent)' },
   '.cm-coords-go': {
     border: 'none', background: 'none', color: 'var(--accent)', cursor: 'pointer', padding: '0 2px', font: 'inherit', lineHeight: '1',
