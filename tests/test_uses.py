@@ -218,6 +218,31 @@ def test_a_written_link_to_the_post_a_file_came_from_uses_that_file(client):
     assert _impact(client, cid, ids=[bookmark["id"]])["counts"]["touched"] == 0
 
 
+def test_a_link_to_a_web_map_uses_the_map_by_its_mention_or_by_where_it_was_published(client):
+    cid = _case(client)
+    road = client.post(f"/api/cases/{cid}/notes", json={"title": "Road map", "content": "The road.\n"}).json()["id"]
+    assert client.put(f"/api/cases/{cid}/notes/{road}/look", json={"style": "article", "web": "map"}).status_code == 200
+    published = {"at": "2026-11-20T10:00:00Z", "edition": "public", "format": "github", "file": "road-map",
+                 "address": "https://desk.github.io/articles/road-map/", "repository": "desk/articles", "branch": "main",
+                 "path": "road-map", "commit": "a" * 40, "sha256": "b" * 64, "text_sha256": "c" * 64}
+    case = Case.open(cid)
+    case.update_entity(road, {"attrs": {"editions": [published]}})
+    written = client.post(f"/api/cases/{cid}/notes", json={"title": "Strike", "content": (
+        "See [the road](https://desk.github.io/articles/road-map/index.html#top).\n")}).json()["id"]
+    client.post(f"/api/cases/{cid}/notes", json={"title": "Port", "content": f"See [[entity:{road}|the road]].\n"})
+    # the map's own address, written on its own page, is no use of itself
+    client.put(f"/api/cases/{cid}/notes/{road}", json={"text": "Also at https://desk.github.io/articles/road-map/\n"})
+
+    assert road in uses_engine.used_refs(case)
+    assert _touched(_impact(client, cid, ids=[road])) == {"Strike": ["links to its page"], "Port": ["mentions"]}
+    # read live: the link gone from the text, or the note no longer a map, the use goes
+    client.put(f"/api/cases/{cid}/notes/{written}", json={"text": "Nothing linked.\n"})
+    assert "Strike" not in _touched(_impact(client, cid, ids=[road]))
+    client.put(f"/api/cases/{cid}/notes/{written}", json={"text": "[r](https://desk.github.io/articles/road-map/)\n"})
+    client.put(f"/api/cases/{cid}/notes/{road}/look", json={"style": "article"})
+    assert road not in uses_engine.used_refs(case)
+
+
 def test_a_layer_marker_following_an_entity_is_named(client):
     cid = _case(client)
     place = client.post(

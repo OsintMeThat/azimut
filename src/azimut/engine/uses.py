@@ -43,7 +43,10 @@ Past the chain:
   holds at its address, the file downloaded from that post, the bookmark of that
   page, the capture of that view or the proof imported from that post
   (`urltitles.AddressIndex`, read once per question), which is what its print cites
-  for the link. Read live, since what a link finds follows what the case holds;
+  for the link, or the web map of the case published at that address
+  (`notelinks.published_addresses`), whose page a publish links it to. Read live, since
+  what a link finds follows what the case holds. A mention of a web map is a mention,
+  read in the graph;
 - an entity's photo chosen from Media (`entity_images`);
 - a Detect routine watching an area: by the area's record. The delete refuses that
   one until the routine lets the area go (`api/cases/common.delete_entities_deep`),
@@ -402,9 +405,14 @@ def _records(case: "Case") -> Iterator[tuple[_Holder, Lean]]:
         yield _Holder(bench, BENCH_TYPE), lean
     cursor: str | None = None
     linking: list[tuple[_Holder, tuple[str, ...]]] = []
+    # where each web map was published, by `notelinks.page_key`: a written link there is a link to it
+    maps: dict[str, str] = {}
     while True:
         notes = case.page_entities(limit=500, cursor=cursor, types=["note"])
         for entity in notes.get("items", []):
+            if notelinks.is_map(entity):
+                for key in filter(None, map(notelinks.page_key, notelinks.published_addresses(entity))):
+                    maps.setdefault(key, str(entity["id"]))
             rel = str((entity.get("attrs") or {}).get("path") or "")
             if not rel:
                 continue
@@ -425,8 +433,10 @@ def _records(case: "Case") -> Iterator[tuple[_Holder, Lean]]:
     if linking:
         index = urltitles.AddressIndex(case)
         for holder, addresses in linking:
-            found = (index.first(address) for address in addresses)
-            for target in dict.fromkeys(str(item["id"]) for item in found if item is not None):
+            found = [str(item["id"]) for item in (index.first(address) for address in addresses) if item is not None]
+            own = str((holder.entity or {}).get("id") or "")
+            found += [ident for address in addresses if (ident := maps.get(notelinks.page_key(address), own)) != own]
+            for target in dict.fromkeys(found):
                 yield holder, Lean(target, "links to its page")
     cursor = None
     while True:
