@@ -5,11 +5,12 @@ import PlateInspector from './PlateInspector.svelte';
 import { createPlateSentinel } from './plateSentinel.svelte.js';
 import { api } from '../../lib/api.js';
 import { houseLayout } from '../../lib/plate/page.js';
+import { FOLDED_FIRST, layout } from '../../lib/plate/layout.svelte.js';
 
 let held = null;
 /** The effect roots the plate's Sentinel-2 choices live in, as MapPlate's would. */
 let roots = [];
-beforeEach(() => { vi.useFakeTimers({ toFake: ['Date'] }); vi.setSystemTime(new Date('2026-10-20T12:00:00Z')); });
+beforeEach(() => { vi.useFakeTimers({ toFake: ['Date'] }); vi.setSystemTime(new Date('2026-10-20T12:00:00Z')); Object.assign(layout, { folded: [], opened: [] }); });
 afterEach(() => { if (held) unmount(held); held = null; roots.forEach((stop) => stop()); roots = []; document.body.innerHTML = ''; vi.useRealTimers(); });
 
 function show({ element = {}, at = '2026-10-05', moments = ['2026-10-03', '2026-10-05'], kind = 'text' } = {}) {
@@ -137,6 +138,8 @@ describe('a symbol on the map', () => {
 });
 
 describe('hover help on every setting', () => {
+  // every section open, so each setting is looked at, the folded-first ones included
+  beforeEach(() => { layout.opened = [...FOLDED_FIRST]; });
   // what the pointer can rest on: every field, every chooser, every row's key and every button
   const settings = () => [...document.body.querySelectorAll('.inspector :is(select, input:not([type="file"]), textarea, [role="group"], .key, button.btn)')];
   const bare = () => settings().filter((node) => !node.closest('[title]')?.getAttribute('title'))
@@ -198,6 +201,27 @@ describe('hover help on every setting', () => {
     expect(bare()).toEqual([]);
   });
 
+  it('opens simple: how a map is drawn in detail starts folded, and what an element is said on its ⓘ', async () => {
+    layout.opened = [];
+    const spec = $state(houseLayout());
+    const map = spec.elements.find((element) => element.kind === 'map');
+    spec.elements.push({ id: 'n', kind: 'north', of: map.id, box: [0, 0, 10, 10] });
+    held = mount(PlateInspector, { target: document.body, props: { spec, selection: [map.id] } });
+    flushSync(); await settle();
+    const open = () => [...document.body.querySelectorAll('.part h4 button')].map((node) => [node.querySelector('.title').textContent, node.getAttribute('aria-expanded')]);
+    expect(open()).toEqual([['Ground', 'true'], ['3D', 'false'], ['Grid', 'false'], ['The plain ground', 'false']]);
+    // a section says what it is for on its ⓘ, once
+    expect(document.body.querySelector('[aria-label="About 3D"]').title).toBe('A tilted map has no scale bar and no grid');
+    expect(document.body.querySelectorAll('.inspector p.note').length).toBe(0);
+    unmount(held); held = null; document.body.innerHTML = '';
+    held = mount(PlateInspector, { target: document.body, props: { spec, selection: ['n'] } });
+    flushSync();
+    expect(document.body.querySelector('[aria-label="About it"]').title).toBe('It turns with its map');
+    expect(document.body.querySelector('[aria-label="Rotation"]')).toBeNull();
+    [...document.body.querySelectorAll('.part h4 button')].find((node) => node.textContent.includes('More')).click(); flushSync();
+    expect(document.body.querySelector('[aria-label="Rotation"]')).not.toBeNull();
+  });
+
   it('sets a map\'s ground, framing and look, its layers left to the list\'s Layers tab', async () => {
     const spec = $state(houseLayout());
     const map = spec.elements.find((element) => element.kind === 'map');
@@ -218,7 +242,7 @@ describe('hover help on every setting', () => {
     expect(document.body.querySelector('[aria-label="Country lit"]').value).toBe('Ukraine');
     // on a played plate it is shown from a first to a last day, as the other annotations are
     expect(end('First day shown')).not.toBeNull();
-    expect(document.body.textContent).toContain('faded in by the video');
+    expect(document.body.querySelector('[aria-label="About it"]').title).toContain('disputed areas');
   });
 
   it('says it in the words kept for it, and follows a setting whose name changes', async () => {
@@ -253,6 +277,7 @@ describe('the ground, the type and the layers of a plate', () => {
   }
 
   it('picks a ground from its tiles, and a year of Sentinel-2 cloudless with its licence', async () => {
+    layout.opened = ['The plain ground'];
     const { map } = showMap();
     const tile = (label) => [...document.body.querySelectorAll('.ground-tile')].find((node) => node.textContent.trim() === label);
     expect(tile('Plain').getAttribute('aria-checked')).toBe('true');
@@ -366,6 +391,7 @@ describe('the ground, the type and the layers of a plate', () => {
   });
 
   it('sets a plain ground\'s detail, presence and borders, its colours folded until asked', async () => {
+    layout.opened = ['The plain ground'];
     const { map } = showMap();
     expect(document.body.querySelector('[aria-label="Land colour"]')).toBeNull();
     [...document.body.querySelectorAll('[aria-label="Ground detail"] button')].find((node) => node.textContent === 'Less').click(); flushSync();
@@ -470,6 +496,7 @@ describe('a GIF on a step', () => {
     const runs = document.body.querySelector('[aria-label="GIF runs"]');
     runs.value = '0:07'; runs.dispatchEvent(new Event('change', { bubbles: true })); flushSync();
     expect(note.clip).toEqual([0, 7]);
-    expect(document.body.textContent).toContain('A GIF plays round and round');
+    // what a GIF does is said on the ⓘ beside its name, not in a line under its settings
+    expect(document.body.querySelector('[aria-label="About it"]').title).toContain('A GIF plays round and round');
   });
 });

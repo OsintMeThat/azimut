@@ -1117,9 +1117,9 @@
         if (element) element.name = `Angle ${index + 1}`;
       });
     }
-    const played = how === 'together' && picked.length > 1 ? 'all on one slide, played together' : picked.length > 1 ? 'a slide each, played one after the other' : 'on a slide';
-    toast(picked.length === 1 ? 'Laid with its cone facing north: drag its tip to where the camera looked.'
-      : `${picked.length} angles laid, ${played}. ${aimed ? 'Each cone faces the middle of the places: drag a tip to turn it.' : 'The files stand on one spot, so the cones face north: drag a tip to turn one.'}`, 'ok', 8000);
+    const played = how === 'together' && picked.length > 1 ? 'played together' : 'a slide each';
+    toast(picked.length === 1 ? 'Laid with its cone facing north: drag its tip to where the camera looked'
+      : `${picked.length} angles laid, ${played}, their cones facing ${aimed ? 'the middle of the places' : 'north'}: drag a tip to turn one`, 'ok', 8000);
   }
   async function putComparison(row, how) {
     const { width, height } = pageSize(spec.page);
@@ -1976,7 +1976,7 @@
         return;
       }
       const show = { label: 'Show', onClick: () => revealPlates(caseId).catch((error) => toast(error.message, 'warn')) };
-      if (tilesMissing) toast(`${answer.file} written, but some map tiles had not loaded: a map may have blank patches. Export again once the map is drawn`, 'warn', 9000, show);
+      if (tilesMissing) toast(`${answer.file} written with blank patches where map tiles had not loaded: export again once the map is drawn`, 'warn', 9000, show);
       else toast(`${answer.file} written`, 'ok', 5200, show);
     } catch (error) {
       // the pictures already sent wait for nothing now
@@ -2500,6 +2500,21 @@
 
 <style>
   .tool { position: relative; display: flex; flex-direction: column; height: 100%; }
+  /* the plate's sliders, light: a thin track and a small round grip, the accent under the hand */
+  .tool :global(input[type='range']) { -webkit-appearance: none; appearance: none; height: 16px; min-width: 0; margin: 0; padding: 0;
+    background: transparent; cursor: pointer; }
+  .tool :global(input[type='range']::-webkit-slider-runnable-track) { height: 3px; border-radius: 99px; background: var(--border-strong); }
+  .tool :global(input[type='range']::-moz-range-track) { height: 3px; border-radius: 99px; background: var(--border-strong); }
+  .tool :global(input[type='range']::-moz-range-progress) { height: 3px; border-radius: 99px; background: var(--text-3); }
+  .tool :global(input[type='range']::-webkit-slider-thumb) { -webkit-appearance: none; width: 12px; height: 12px; margin-top: -4.5px; border: 2px solid var(--bg-1);
+    border-radius: 50%; background: var(--text-1); box-shadow: 0 0 0 1px var(--border-strong); transition: background .12s; }
+  .tool :global(input[type='range']::-moz-range-thumb) { width: 8px; height: 8px; border: 2px solid var(--bg-1); border-radius: 50%; background: var(--text-1);
+    box-shadow: 0 0 0 1px var(--border-strong); }
+  .tool :global(input[type='range']:hover::-webkit-slider-thumb), .tool :global(input[type='range']:active::-webkit-slider-thumb) { background: var(--accent); }
+  .tool :global(input[type='range']:hover::-moz-range-thumb), .tool :global(input[type='range']:active::-moz-range-thumb) { background: var(--accent); }
+  .tool :global(input[type='range']:disabled) { opacity: .4; cursor: default; }
+  .tool :global(input[type='range']:focus-visible) { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 4px; }
+
   .export-lock { position: absolute; inset: 0; z-index: 40; display: grid; place-content: center; justify-items: center; gap: 8px;
     background: color-mix(in srgb, var(--bg-0, #0d0f12) 45%, transparent); }
   .export-card { display: flex; align-items: center; gap: 12px; min-width: 320px; max-width: 460px; padding: 12px 14px; border: 1px solid var(--border-strong);

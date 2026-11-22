@@ -5,19 +5,19 @@ import PlateSection from './PlateSection.svelte';
 import { layout } from '../../lib/plate/layout.svelte.js';
 
 let held = [];
-beforeEach(() => { localStorage.clear(); layout.folded = []; });
+beforeEach(() => { localStorage.clear(); layout.folded = []; layout.opened = []; });
 afterEach(() => { for (const one of held) unmount(one); held = []; document.body.innerHTML = ''; });
 
 const body = (text) => createRawSnippet(() => ({ render: () => `<p class="inside">${text}</p>` }));
-function show(title, summary = '') {
-  held.push(mount(PlateSection, { target: document.body, props: { title, summary, children: body(title) } }));
+function show(title, summary = '', help = '') {
+  held.push(mount(PlateSection, { target: document.body, props: { title, summary, help, children: body(title) } }));
   flushSync();
 }
 const heads = () => [...document.body.querySelectorAll('h4 button')];
 
 describe('a section of the plate inspector', () => {
   it('folds by its title, says what it holds once folded, and opens again', () => {
-    show('Grid', 'UTM');
+    show('Ground', 'UTM');
     const head = heads()[0];
     expect(head.getAttribute('aria-expanded')).toBe('true');
     expect(document.body.querySelector('.inside')).not.toBeNull();
@@ -30,6 +30,17 @@ describe('a section of the plate inspector', () => {
     head.click();
     flushSync();
     expect(document.body.querySelector('.inside')).not.toBeNull();
+  });
+
+  it('starts a section few plates need folded, says what it is for on its ⓘ, and keeps it open once opened', () => {
+    show('Grid', 'UTM', 'Lines over the map to read places by');
+    const head = heads()[0];
+    expect(head.getAttribute('aria-expanded')).toBe('false');
+    expect(head.textContent).toContain('UTM');
+    expect(document.body.querySelector('[aria-label="About Grid"]').title).toBe('Lines over the map to read places by');
+    head.click(); flushSync();
+    expect(head.getAttribute('aria-expanded')).toBe('true');
+    expect(JSON.parse(localStorage.getItem('azimut:plateLayout')).opened).toEqual(['Grid']);
   });
 
   it('folds every section of that title at once, and remembers it', () => {

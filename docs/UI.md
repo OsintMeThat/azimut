@@ -6832,7 +6832,13 @@ was left on.
 The list of elements on the left and the inspector on the right are widened by
 dragging their edge, a double click putting the width back, and put away from the
 header; both stay as they were left. The inspector's sections fold by their title,
-on every element at once, and a wide inspector sets them side by side. **Focus**
+on every element at once, and a wide inspector sets them side by side. It opens
+simple: the sections few plates need (**3D**, **Grid**, the imagery or the plain ground,
+**Video transitions**, **Size** and **More**, which holds an element's strength, its turn
+and the spacing of its words) start folded and stay open once opened. What an element or
+a section is for is said on the ⓘ beside its name, not in lines under its settings;
+the lines left say a state (off the page, not on the day shown, no picture yet) or a
+setup still to do. **Focus**
 (F) gives the page the whole screen: the app's bars and the plate's header step
 aside, and a bar over the page keeps Add, Undo, Export and the two panels, which
 come back floating over the page. F or Esc gives the screen back; a browser that

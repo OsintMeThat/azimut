@@ -231,6 +231,8 @@ test('a map in 3D goes as far as the hand drags it', async ({ page }) => {
   // there is one kind of map: its 3D box stands it on its heights
   await addOnPage(page, 'Map');
   await expect(page.locator('.plate-map')).toHaveCount(3);
+  // 3D starts folded, as the sections few plates need do
+  await page.locator('.part h4 button', { hasText: '3D' }).click();
   await page.getByText('Show the map in 3D', { exact: true }).click();
   // a map standing on its heights is drawn on the app's globe, the flat map under it
   await expect(page.locator('.plate-map canvas.globe')).toHaveCount(1);
@@ -1199,7 +1201,7 @@ test('footage of one event filmed from several places is laid as its angles: a c
   await panel.getByLabel('Lay Roof as an angle').check();
   await panel.getByLabel('Lay Street as an angle').check();
   await panel.getByRole('button', { name: 'Lay 2 as angles' }).click();
-  await expect(page.getByText('2 angles laid, a slide each, played one after the other.', { exact: false })).toBeVisible();
+  await expect(page.getByText('2 angles laid, a slide each, their cones facing the middle of the places', { exact: false })).toBeVisible();
   await expect(page.locator('.steps [role="option"]')).toHaveCount(3);
   await expect.poll(() => {
     const spec = lastSave(store)?.spec;
@@ -1223,7 +1225,7 @@ test('the angles of one event play together on one slide when asked, and one fil
   for (const title of ['Roof', 'Street', 'Tower']) await panel.getByLabel(`Lay ${title} as an angle`).check();
   await panel.getByRole('button', { name: 'All on one slide' }).click();
   await panel.getByRole('button', { name: 'Lay 3 as angles' }).click();
-  await expect(page.getByText('3 angles laid, all on one slide, played together.', { exact: false })).toBeVisible();
+  await expect(page.getByText('3 angles laid, played together, their cones facing the middle of the places', { exact: false })).toBeVisible();
   await expect(page.locator('.steps [role="option"]')).toHaveCount(2);
   // the three files on the one slide, side by side along the foot of the page, each pointing at its place
   await expect.poll(() => {

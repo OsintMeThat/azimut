@@ -215,9 +215,8 @@
     {#if onlabels}
       <section aria-label="Names">
         <h4>Names</h4>
-        <button type="button" class="btn btn-xs" title="A label beside each named feature in the frame, none covering another" onclick={() => onlabels(map, row)}>
-          <Icon name="text" size={11} /> Label its named features</button>
-        <p class="note">Each label is the plate's own, to move or reword by hand.</p>
+        <button type="button" class="btn btn-xs" title="A label beside each named feature in the frame, none covering another, each the plate's own to move or reword"
+          onclick={() => onlabels(map, row)}><Icon name="text" size={11} /> Label its named features</button>
       </section>
     {/if}
 

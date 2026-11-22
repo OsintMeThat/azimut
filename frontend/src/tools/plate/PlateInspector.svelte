@@ -140,6 +140,14 @@
   /** Whether the steps to a Copernicus account are shown under the locked Sentinel-2 ground. */
   let copernicusShown = $state(false);
   const name = (map) => mapName(spec, map);
+  /** What More holds beyond the usual, said while it is folded: a turn, a strength, words spaced their own way. */
+  function moreSaid(item) {
+    const said = [];
+    if (item.rotate) said.push(`turned ${item.rotate}°`);
+    if ((item.opacity ?? 1) < 1) said.push(`${Math.round(item.opacity * 100)}%`);
+    if (item.tracking || (item.leading ?? 1.25) !== 1.25) said.push('spaced');
+    return said.join(' · ');
+  }
 
   function toggleOverlay(id) {
     const list = element.overlays ?? [];
@@ -265,6 +273,36 @@
   const signatureNote = $derived(prefs.signatureHandle
     ? `{handle} is ${prefs.signatureHandle}; the picture is the one in Settings → Publishing → Signature, when there is one.`
     : 'Set your handle and your picture in Settings → Publishing → Signature; {handle} and {today} are filled in.');
+  /** What the element picked is and does, on the ⓘ beside its name rather than in lines under its settings. */
+  function aboutOf(item) {
+    if (!item) return '';
+    if (item.kind === 'video' && item.src && isGif(item.src)) return 'A GIF plays round and round for as long as it runs, and holds its slide that long';
+    if (item.kind === 'table') return item.source === 'sources' ? 'Each address the features cite, once' : 'The dated features, oldest first, up to the day shown when the plate plays';
+    if (item.kind === 'inset') return item.globe ? 'The world turned to its map\'s middle, not counted among the plate\'s eight maps' : 'It follows its map and outlines the ground it shows';
+    if (item.kind === 'image') return item.data ? 'Kept inside the plate, so a template keeps it too' : item.src === SIGNATURE ? 'Your signature, as set in Settings' : item.src ? 'A picture of the case' : '';
+    if (item.kind === 'signature') return prefs.signatureHandle ? signatureNote : '';
+    return ABOUT[item.kind] ?? '';
+  }
+  const ABOUT = {
+    legend: 'It lists what the map draws in its frame',
+    qr: 'A phone reads it from the print; about two hundred characters fit',
+    key: 'It lists the numbered labels shown on the day, in their order',
+    timeline: 'The days the followed layers change on, the one shown picked out',
+    credits: 'The map\'s sources, written for you, shrunk to fit rather than one lost',
+    symbol: 'It stands over its point of the ground, however the map is framed',
+    brand: 'The mark grows with its box, its amber flank kept amber',
+    scale: 'Measured at the map\'s centre; a tilted map has none',
+    north: 'It turns with its map',
+    focus: 'On a flat map only, disputed areas touching it half lit and dotted round',
+    video: 'Its slide runs as long as the clip',
+    zone: 'Drag its points on the map, or the whole of it',
+    line: 'Drag its points on the map, or the whole of it',
+    arrow: 'Drag its ends on the map, or the whole of it',
+    ring: 'Drag its middle or its edge on the map',
+    cone: 'Drag where it stands or its tip on the map',
+    measure: 'Drag its ends on the map',
+  };
+  const about = $derived(aboutOf(element));
 </script>
 
 <!-- every setting says what it does under the pointer (`lib/plate/plateHelp.js`) -->
@@ -356,7 +394,7 @@
     </PlateSection>
     {#if plays}
       {@const moves = transitionsOf(spec)}
-      <PlateSection title="Video transitions" summary={moves.on ? `${moves.seconds.toFixed(1)} s` : 'Off'}>
+      <PlateSection title="Video transitions" help="Played in the MP4; a slide can still cut straight in from its ⋯" summary={moves.on ? `${moves.seconds.toFixed(1)} s` : 'Off'}>
       <label class="check"><input type="checkbox" checked={moves.on} onchange={(event) => (spec.transitions = { ...moves, on: event.currentTarget.checked })} />
         Between the days and the slides</label>
       {#if moves.on}
@@ -378,12 +416,10 @@
             <label class="sub"><input type="checkbox" checked={moves.blur} onchange={(event) => (spec.transitions = { ...moves, blur: event.currentTarget.checked })} /> Blurred as it moves</label>
           {/if}
         </div>
-        <p class="note">In the MP4. A slide can still cut straight in, from its ⋯.</p>
       {/if}
       </PlateSection>
     {/if}
-    <p class="note">Pick an element on the page to set it, Shift to pick several. A drag inside a map moves its ground; its edge moves the frame.</p>
-    <p class="note">A text fills in words such as {'{date}'} and {'{case}'}; pick one to see them all.</p>
+    <p class="note">Pick an element on the page to set it, Shift to pick several.</p>
   {:else if picked.length > 1}
     <h3>{picked.length} picked</h3>
     <PlateSection title="Line up">
@@ -398,14 +434,13 @@
         onclick={() => setBoxes(distribute(picked, 'v'))}><Icon name="distributeV" size={15} /></button>
     </div>
     </PlateSection>
-    <PlateSection title="Size">
+    <PlateSection title="Size" help="They take the size of the one picked last">
     <div class="tools wide">
       <button type="button" class="btn btn-xs" title="Each as wide as the one picked last" onclick={() => setBoxes(sameSize(picked, 'width', picked.at(-1)))}>Same width</button>
       <button type="button" class="btn btn-xs" title="Each as tall as the one picked last" onclick={() => setBoxes(sameSize(picked, 'height', picked.at(-1)))}>Same height</button>
     </div>
-    <p class="note">They take the size of the one picked last.</p>
     </PlateSection>
-    <PlateSection title="Together">
+    <PlateSection title="Together" help="A group is picked, moved and sized as one: Ctrl+G groups, Ctrl+Shift+G ungroups">
     <div class="tools wide">
       <button type="button" class="btn btn-xs" title="Picked, moved and sized as one from now on (Ctrl+G)" onclick={() => ongroup?.(true)}><Icon name="layers" size={12} /> Group</button>
       <button type="button" class="btn btn-xs" title="Each picked on its own again (Ctrl+Shift+G)" onclick={() => ongroup?.(false)}>Ungroup</button>
@@ -413,11 +448,10 @@
         <Icon name="lock" size={12} /> {picked.every((item) => item.locked) ? 'Unlock' : 'Lock'}</button>
       <button type="button" class="btn btn-xs danger" title="Take them all off the page" onclick={() => { for (const item of [...picked]) onremove(item); }}><Icon name="trash" size={12} /> Remove</button>
     </div>
-    <p class="note">A group is picked, moved and sized as one. Ctrl+G groups, Ctrl+Shift+G ungroups.</p>
     </PlateSection>
   {:else}
     <header>
-      <h3>{element.kind === 'label' && element.leader === 'none' ? 'Text on the map' : KIND_LABELS[element.kind]}{#if element.kind === 'map' && element.of}{' (detail)'}{/if}{#if element.kind === 'map' && (element.terrain ?? 0) > 0}{' in 3D'}{/if}</h3>
+      <h3>{element.kind === 'label' && element.leader === 'none' ? 'Text on the map' : KIND_LABELS[element.kind]}{#if element.kind === 'map' && element.of}{' (detail)'}{/if}{#if element.kind === 'map' && (element.terrain ?? 0) > 0}{' in 3D'}{/if}{#if about}<span class="about" role="img" aria-label="About it" title={about}><Icon name="info" size={12} /></span>{/if}</h3>
       <button type="button" class="icon-act" aria-label="Bring forward" title="Bring forward"
         disabled={!canorder(element, 1)} onclick={() => onorder(element, 1)}><Icon name="chevronUp" size={13} /></button>
       <button type="button" class="icon-act" aria-label="Send back" title="Send back"
@@ -489,9 +523,9 @@
       {@const framed = framingFor(element)}
       {@const held = !framed.own && !framed.first}
       {#if !framed.first}
-        <label class="check keep"><input type="checkbox" checked={held} onchange={(event) => onkeep?.(element, event.currentTarget.checked)} />
+        <label class="check keep" title={held ? 'This day or slide shows the map as the one before it does' : 'Framed here on its own, the slides after it following unless they frame it too'}>
+          <input type="checkbox" checked={held} onchange={(event) => onkeep?.(element, event.currentTarget.checked)} />
           Map stays where it was</label>
-        <p class="note">{held ? 'This day or slide shows the map as the one before it does.' : 'Framed here on its own; the slides after it follow, unless they frame it too.'}</p>
       {/if}
       <button type="button" class="btn btn-sm frame" class:on={framing === element.id} disabled={held}
         title={framing === element.id ? 'Stop framing the map' : 'Pan, zoom and turn the map by the hand'} onclick={() => onframe(element)}>
@@ -537,7 +571,7 @@
       <PlateGroundDay {element} {releases} {years} {sentinel} {template} />
       </PlateSection>
 
-      <PlateSection title="3D" summary={(element.terrain ?? 0) > 0 ? `Tilted ${Math.round(framed.view.pitch ?? 0)}°` : 'Flat'}>
+      <PlateSection title="3D" help="A tilted map has no scale bar and no grid" summary={(element.terrain ?? 0) > 0 ? `Tilted ${Math.round(framed.view.pitch ?? 0)}°` : 'Flat'}>
       <label class="check"><input type="checkbox" checked={(element.terrain ?? 0) > 0}
         onchange={(event) => { const on = event.currentTarget.checked; element.terrain = on ? 1.5 : 0;
           onmapview(element, { ...framed.view, pitch: on ? Math.max(framed.view.pitch ?? 0, 55) : 0 }); if (!on) element.ridges = false; }} />
@@ -547,13 +581,11 @@
           <span class="key">Tilt</span>
           <input type="range" aria-label="Map tilt" min="0" max="85" step="1" value={framed.view.pitch ?? 0} disabled={held}
             oninput={(event) => onmapview(element, { ...framed.view, pitch: Number(event.currentTarget.value) })} />
-          <span class="key">Heights</span>
+          <span class="key" title="Drawn taller than they are to read the slopes; 1× is as they are">Heights</span>
           <span class="pair"><input type="range" aria-label="Height exaggeration" min="1" max="3" step="0.25" bind:value={element.terrain} />
             <span class="quiet">{element.terrain}×</span></span>
         </div>
         <label class="check"><input type="checkbox" bind:checked={element.ridges} /> Ridge lines</label>
-        <p class="note">{element.terrain > 1 ? `The heights are drawn ${element.terrain} times as tall as they are, to read the slopes.` : 'The heights as they are.'}</p>
-        <p class="note">A tilted map has no scale bar and no grid.</p>
       {/if}
       </PlateSection>
 
@@ -596,7 +628,8 @@
       {/if}
       </PlateSection>
 
-      <PlateSection title={element.basemap?.startsWith('plain') ? 'The plain ground' : 'The imagery'}>
+      <PlateSection title={element.basemap?.startsWith('plain') ? 'The plain ground' : 'The imagery'}
+        help={element.basemap?.startsWith('plain') ? 'Framed, a click on a name hides it or makes it a label to move' : ''}>
       {#if element.basemap?.startsWith('plain')}
         {@const plain = element.plain ?? {}}
         <div class="rows">
@@ -622,7 +655,6 @@
           <p class="note hidden-names">Hidden: {plain.hidden_names.join(', ')}. <button type="button" class="text-act"
             onclick={() => (element.plain = { ...plain, hidden_names: [] })}>Show them again</button></p>
         {:else}
-          <p class="note">Framed, a click on a name hides it or makes it a label to move.</p>
         {/if}
         <button type="button" class="text-act" aria-expanded={colouring} onclick={() => (colouring = !colouring)}>
           {colouring ? 'Hide the colours' : 'Change the colours'}{Object.keys(plain.colours ?? {}).length ? ' · changed' : ''}</button>
@@ -710,8 +742,6 @@
         if (!event.currentTarget.checked && mapCount(spec.elements) >= MAX_MAPS) { event.currentTarget.checked = true; toast(TOO_MANY_MAPS, 'warn', 6000); return; }
         element.globe = event.currentTarget.checked;
       }} /> Drawn as a globe</label>
-      {#if element.globe}<p class="note">The world turned to the map's middle, its country in the accent, not counted among the plate's eight maps.</p>
-      {:else}<p class="note">The inset follows its map and outlines the ground it shows.</p>{/if}
     {:else if element.kind === 'legend'}
       <div class="rows">
         <span class="key">Title</span><input aria-label="Legend title" bind:value={element.text} placeholder="Legend" maxlength="120" />
@@ -734,7 +764,6 @@
             onclick={() => (entry.extra ? (element.extra = element.extra.filter((_, index) => `extra/${index}` !== entry.key)) : toggleRow(entry.key))}><Icon name="x" size={11} /></button>
         </div>
       {:else}
-        <p class="note">What the map draws in its frame is listed here.</p>
       {/each}
       {#if rowsOf.some((entry) => entry.off)}
         <details class="removed">
@@ -761,7 +790,6 @@
     {:else if ['text', 'label', 'credits', 'key', 'table', 'qr', 'timeline'].includes(element.kind)}
       {#if element.kind === 'qr'}
         <div class="rows"><span class="key">Address</span><input aria-label="QR address" placeholder="https://…" maxlength="400" bind:value={element.text} /></div>
-        <p class="note">A phone reads it straight from the print. About two hundred characters fit.</p>
       {:else if element.kind === 'table'}
         <div class="rows">
           <span class="key">Lists</span>
@@ -778,12 +806,9 @@
           <span class="key">Rows</span><input type="number" aria-label="Table rows" min="1" max="60" step="1" bind:value={element.rows} />
           <span class="key">Title</span><input aria-label="Table title" placeholder={element.source === 'sources' ? 'Sources' : 'Chronology'} maxlength="120" bind:value={element.text} />
         </div>
-        <p class="note">{element.source === 'sources' ? 'Each address the features cite, once.' : 'The dated features, oldest first; on a played plate, up to the day shown.'}</p>
       {:else if element.kind === 'key'}
         <div class="rows"><span class="key">Title</span><input aria-label="List title" placeholder="No title" maxlength="120" bind:value={element.text} /></div>
-        <p class="note">Lists the numbered labels shown on the day, in their order.</p>
       {:else if element.kind === 'timeline'}
-        <p class="note">The days the plate's followed layers change on, the one shown picked out. Made for the video.</p>
       {:else if element.kind !== 'credits'}
         {#if element.kind === 'text'}
           <div class="rows">
@@ -805,7 +830,6 @@
           </div>
         {/if}
       {:else}
-        <p class="note">The map's sources, written for you. They shrink to fit rather than lose one.</p>
         {#if creditList.length}
           <ul class="credit-list" aria-label="Credits printed">
             {#each creditList as part (part.text)}
@@ -829,12 +853,6 @@
         <PlateWords {element} theme={spec.theme} onchange={() => { if (element.kind === 'label') element.box = labelBox(element, measure); }} />
       {/if}
       <div class="rows">
-        {#if ['text', 'label'].includes(element.kind)}
-          <span class="key">Spacing</span>
-          <input type="range" aria-label="Letter spacing" min="-5" max="40" step="1" value={element.tracking ?? 0} oninput={(event) => (element.tracking = Number(event.currentTarget.value))} />
-          <span class="key">Lines</span>
-          <input type="range" aria-label="Line spacing" min="0.9" max="2.2" step="0.05" value={element.leading ?? 1.25} oninput={(event) => (element.leading = Number(event.currentTarget.value))} />
-        {/if}
         {#if element.kind === 'text' || element.kind === 'credits'}
           <span class="key">Align</span>
           <div class="segments" role="group" aria-label="Align">
@@ -898,10 +916,9 @@
           {/each}
         </div>
       </div>
-      <p class="note">It stands over its point of the ground, the map framed however it is.</p>
     {:else if element.kind === 'signature'}
       <textarea aria-label="Signature words" rows="2" bind:value={element.text} maxlength="400"></textarea>
-      <p class="note">{signatureNote}</p>
+      {#if !prefs.signatureHandle}<p class="note">{signatureNote}</p>{/if}
       <div class="rows">
         <span class="key">Picture</span>
         <div class="segments" role="group" aria-label="Signature side">
@@ -922,7 +939,6 @@
         </div>
       </div>
       <PlateWords {element} theme={spec.theme} />
-      <p class="note">The mark grows with its box; its amber flank stays amber.</p>
     {:else if element.kind === 'scale'}
       <div class="rows">
         <span class="key">Units</span>
@@ -938,7 +954,6 @@
         </div>
       </div>
       <PlateWords {element} theme={spec.theme} />
-      <p class="note">Measured at the map's centre. A tilted map has none.</p>
     {:else if element.kind === 'north'}
       <div class="rows">
         <span class="key">Look</span>
@@ -948,7 +963,6 @@
         <span class="key">Backing</span><input type="checkbox" aria-label="North backing" checked={!!element.fill}
           onchange={(event) => (element.fill = event.currentTarget.checked ? spec.theme.paper : null)} />
       </div>
-      <p class="note">Turns with its map.</p>
     {:else if element.kind === 'image'}
       <div class="tools wide">
         <button type="button" class="btn btn-xs" title="A picture of the case, or a proof on the map pointing at its place" onclick={openPictures}><Icon name="image" size={12} /> From the case</button>
@@ -957,7 +971,7 @@
       </div>
       <input type="file" accept="image/png,image/jpeg,image/webp,image/gif" hidden bind:this={fileInput}
         onchange={(event) => readPicture(event.currentTarget.files?.[0], (data) => { element.data = data; element.src = ''; })} />
-      <p class="note">{element.data ? 'Kept inside the plate, so a template keeps it too.' : element.src === SIGNATURE ? 'Your signature, as set in Settings.' : element.src ? 'A picture of the case.' : 'No picture yet.'}</p>
+      {#if !element.data && !element.src}<p class="note">No picture yet.</p>{/if}
       <div class="rows">
         <span class="key">Fit</span>
         <div class="segments" role="group" aria-label="Picture fit">
@@ -994,7 +1008,6 @@
         <input type="range" aria-label="Focus strength" min="0.1" max="0.9" step="0.05" value={element.spotlight?.dim ?? 0.55}
           oninput={(event) => (element.spotlight = { ...element.spotlight, dim: Number(event.currentTarget.value) })} />
       </div>
-      <p class="note">On a flat map only, disputed areas touching it half lit and dotted round, faded in by the video's transitions.</p>
     {:else if element.kind === 'video'}
       <div class="tools wide">
         <button type="button" class="btn btn-xs" title="The footage placed on the map first, then every video and GIF of the case" onclick={openVideos}><Icon name="video" size={12} /> {element.src ? 'Another video' : 'Choose a video'}</button>
@@ -1007,7 +1020,6 @@
           <input aria-label="GIF runs" value={timecode(range[1] - range[0])}
             onchange={(event) => { const value = readTimecode(event.currentTarget.value); if (value !== null && value > 0) element.clip = clipRange({ clip: [0, value] }); else event.currentTarget.value = timecode(range[1] - range[0]); }} />
         </div>
-        <p class="note">A GIF plays round and round for as long as it runs, and holds its slide that long.</p>
       {:else if element.src}
         <p class="note file" title={element.src}>{fileName(element.src)}</p>
         <!-- svelte-ignore a11y_media_has_caption -->
@@ -1059,7 +1071,6 @@
           {/if}
         </span>
       </div>
-      <p class="note">The slide runs as long as the clip.</p>
     {:else if element.kind === 'shape'}
       <div class="rows">
         <span class="key">Shape</span>
@@ -1145,16 +1156,24 @@
             oninput={(event) => (element.mask = { ...element.mask, darkness: Number(event.currentTarget.value) })} /></label>
         {/if}
       {/if}
-      <p class="note">Drag its points on the map, or the whole of it.</p>
     {/if}
 
     {#if !['map', 'inset', 'arrow', 'zone', 'ring', 'cone', 'measure', 'line', 'video'].includes(element.kind)}
+      <!-- what few elements need, folded until asked: the spacing of the words, the strength and the turn -->
+      <PlateSection title="More" summary={moreSaid(element)}>
       <div class="rows">
+        {#if ['text', 'label'].includes(element.kind)}
+          <span class="key">Spacing</span>
+          <input type="range" aria-label="Letter spacing" min="-5" max="40" step="1" value={element.tracking ?? 0} oninput={(event) => (element.tracking = Number(event.currentTarget.value))} />
+          <span class="key">Lines</span>
+          <input type="range" aria-label="Line spacing" min="0.9" max="2.2" step="0.05" value={element.leading ?? 1.25} oninput={(event) => (element.leading = Number(event.currentTarget.value))} />
+        {/if}
         <span class="key">Strength</span><input type="range" aria-label="Opacity" min="0.05" max="1" step="0.05" value={element.opacity ?? 1}
           oninput={(event) => (element.opacity = Number(event.currentTarget.value))} />
         <span class="key">Turned</span><input type="number" aria-label="Rotation" min="-180" max="180" step="1" value={element.rotate ?? 0}
           onchange={(event) => (element.rotate = Math.max(-180, Math.min(180, number(event.currentTarget.value, 0))))} />
       </div>
+      </PlateSection>
     {/if}
   {/if}
   </div>
@@ -1213,11 +1232,13 @@
 {/if}
 
 <style>
+  .about { display: grid; flex: none; place-items: center; color: var(--text-3); cursor: help; }
+  .about:hover { color: var(--text-1); }
   .inspector { width: 100%; height: 100%; overflow-y: auto; padding: 10px 12px 16px; background: var(--bg-1); font-size: var(--fs-xs);
     container-type: inline-size; scrollbar-width: thin; }
   header { display: flex; align-items: center; gap: 2px; margin-bottom: 6px; }
   h3 { flex: 1; margin: 0 0 8px; font-size: var(--fs-sm); }
-  header h3 { margin: 0; }
+  header h3 { display: flex; align-items: center; gap: 5px; margin: 0; }
   /* a wide inspector sets its sections side by side, the element's name and its first fields across the top */
   @container (min-width: 540px) {
     .flow { columns: 2; column-gap: 22px; }
