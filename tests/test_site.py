@@ -407,6 +407,19 @@ def test_the_default_home_has_tabs_the_newest_large_and_the_marks_of_a_home_azim
     assert '<p class="site-intro">In a world of fragmented information' in page
 
 
+def test_an_empty_home_has_no_tabs_and_they_come_with_the_first_listed_article():
+    here = Site(title="Desk", address="https://octo.github.io/articles/")
+    empty = _home(here, [])
+    assert "site-tabs" not in empty and ">All<" not in empty
+    assert "<main class=\"wrap\">\n<div class=\"articles-block\">" in empty and "No articles yet." in empty
+    # a page alone lists nothing either; one article brings the row, a map nothing cites too
+    assert "site-tabs" not in _home(here, [_card("legal", title="Legal notice", role="page")])
+    one = _home(here, [_card("story", category="Investigations")])
+    assert re.findall(r'data-category="([^"]*)" aria-pressed="[a-z]+">([^<]*)<span class="count">(\d+)', one) == [
+        ("", "All", "1"), ("investigations", "Investigations", "1")]
+    assert '<nav class="site-tabs" aria-label="Categories">' in _home(here, [_card("road", layout="map")])
+
+
 def test_a_tab_hides_the_large_first_article_when_it_is_of_another_category():
     # The large first line's own `display` outranked `[hidden]`, so the newest article stayed
     # under every tab; a filtered list also lays its lines out alike.

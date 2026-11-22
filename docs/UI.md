@@ -7723,7 +7723,8 @@ title, *All articles* on the right), and a map page carries a small link inside 
 instead. The commit then rebuilds, only where Azimut made them, `articles.json`, `feed.xml` and
 `sitemap.xml`, fills the lists between `<!-- azimut:articles -->` markers in the analyst's own
 pages (`section="…"` for one category, `layout="map"` for the maps, `limit="N"`), and, when the
-root holds no home page or holds Azimut's, writes a default one with tabs by category. Once a
+root holds no home page or holds Azimut's, writes a default one with tabs by category, which come
+with its first listed article. Once a
 listed article has a place, that home shows a world map under its header (`engine/siteatlas.py`):
 Natural Earth's land at 1:110 million in the Equal Earth projection, one 33 KB file the home carries
 beside itself (`azimut-site/atlas.svg`, written once and only once a map shows; made by
