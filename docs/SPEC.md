@@ -206,7 +206,7 @@ proof for publication.
 | ✅ **Your website** | Every publish to GitHub Pages also keeps the analyst's site: a card and a list picture with each article, then its list, feed and sitemap, the lists between markers in their own pages (a default home when they have none), pages kept off the lists, a way back to the site on each page, a warning when a folder was changed on GitHub since or the address holds another article, and readers counted on GoatCounter or Cloudflare when asked; only files Azimut made are ever written. |
 | ✅ **Website settings** | Sets the site in one tab (title, line and credit, GitHub Pages and WordPress, how readers are counted, Update the site, the Legal notice starter), and the publish dialog adds a category, Article or Page and a list picture. |
 | ✅ **Website hub** | Settings › Website as the site's hub, in panels: a live preview of its name and logo, a read of what it holds with a delete, its limits, readers and upkeep; Unlisted joins Article and Page, first for a note new to the site and kept out of search engines. |
-| ✅ **Your own bar** | Articles carry the site's own header from `azimut-bar.html` in place of Azimut's bar, cleaned and kept apart from the article's styles, and Update the site changes it in every article. |
+| ✅ **Your own bar and footer** | Articles carry the site's own header from `azimut-bar.html` in place of Azimut's bar and its footer from `azimut-footer.html` after Azimut's, each cleaned and kept apart from the article's styles, and Update the site changes them in every article. |
 | ✅ **Places on the site** | An article may carry a place for a map of the site's articles, kept with its note, offered only when the note names one point, and carried by its card and `articles.json`. |
 | ✅ **Guest authors** | An article may name its own author and their picture, kept with its note so a bundle carries them, signed on its page and named in the site's lists. |
 | ✅ **Site categories** | Settings › Website adds, renames and deletes the site's categories and gives one article another on its line, each in one commit of its cards and lists, a rename recorded for the site's own pages; a site with its own home is told what its menu and pages ask. |
@@ -504,16 +504,18 @@ stops making sense.
   through) and remembered by blob id; Azimut writes only files it made (its folders, a
   `articles.json`, `feed.xml` and `sitemap.xml` that carry its marks, a root page that
   carries its generator with a version, the content between `azimut:articles` markers, and
-  the bar between `azimut:bar` markers of its own article pages) and leaves every other file
+  the bar between `azimut:bar` markers and the footer between `azimut:footer` markers of its own
+  article pages) and leaves every other file
   as it is, but for the `category` of a card, wherever it lives, on a change of categories
-  the analyst asks for in Settings › Website. The site's own bar, `azimut-bar.html` (64 KB at most, past which the articles keep
-  Azimut's), is HTML from the analyst's repository put into every article page, so it is
+  the analyst asks for in Settings › Website. The site's own bar and footer, `azimut-bar.html` and
+  `azimut-footer.html` (64 KB each at most, past which the articles keep Azimut's bar or go without
+  the footer), are HTML from the analyst's repository put into every article page, so each is
   read token by token and written again: no `<script>`, `on*` handler, frame, object, form,
   `<base>`, `<meta>`, `<link>`, SVG animation or address but http(s), mailto and tel, inside a
   declarative shadow root that keeps its styles and the article's apart, under the page's
   own policy (inline styles; pictures and fonts from the site only). Update the site reads
-  each article page (8 MB at most) only when `articles.json` does not say which bar they all
-  carry. Names, the short name
+  each article page (8 MB at most) only when `articles.json` does not say which bar and footer
+  they all carry. Names, the short name
   and every path are checked at the edge, a folder Azimut did not make is never
   replaced, and the folder is bounded in files and weight before anything is sent. The
   token is a fine-grained one the analyst limits to the one repository (Contents and
