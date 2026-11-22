@@ -194,6 +194,11 @@ def _import(bundle: Path) -> Case:
 def test_the_imported_article_and_its_map_page_are_the_pages_the_original_builds(article):
     case = Case.open(article["cid"])
     before = {one: notes_web.build(case, article[one], now=NOW) for one in ("note", "map_page")}
+    # the parsed copies drawing a layer leaves are dropped: reading the maps must not write them back
+    cached = sorted((case.tool_root / layout.LAYERS_DIR / layout.LAYER_CACHE_DIR).glob("*.geojson"))
+    assert cached
+    for path in cached:
+        path.unlink()
     untouched = _tree(case.path)
 
     found = reviewexport.contents(case, article["note"])

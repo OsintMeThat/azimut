@@ -21,7 +21,7 @@ and no stranger's HTML runs anywhere. What it holds is one article, never the wh
   the pictures its picture walls show;
 - the records it mentions (`[[entity:…]]`) and what its written links find in the case
   (`urltitles.AddressIndex`), so its citations and its sources list come out the same;
-- every map it draws (`::: map`, read as `notes_maps.derive` reads it): its layers by name
+- every map it draws (`::: map`, read as `notes_maps.derive` reads it, never drawn): its layers by name
   with their spec, snapshot and icons, the entities an editable layer's markers follow and
   where they stand, its plate, ground and detail captures, the proofs its steps open or its
   period selects, the pictures its cards show, and the case's named colours and icons;
@@ -59,7 +59,8 @@ from ..sqlite_backend import SqliteCase
 from ..store.rows import _entity_search_text
 from ..workspace import CaseError, _now, ensure_dir
 from . import artifacts, bundles, notecharts, notelinks, notelook, notes_charts, notes_infographic, notes_maps
-from . import layerlinks, notesources, notetext, satellite, sheets, socialposts, urltitles, workqueue
+from . import layerediting, layerlinks, maplayers, notesources, notetext, satellite, sheets, socialposts, urltitles
+from . import workqueue
 from . import links as link_engine
 from . import media as media_engine
 from . import notes_markdown as md
@@ -513,7 +514,10 @@ class _Reading:
     # -- the maps -----------------------------------------------------------------------
 
     def map(self, block: notes_maps.MapBlock) -> None:
-        """Everything one map reads: its layers, its plate, its pictures and its proofs."""
+        """Everything one map reads, as `notes_maps.derive` reads it: its layers and plate, its
+        ground and details, what its editable layers' markers follow or show, and the proofs its
+        steps open or its period selects. Read without drawing it, since a drawing would write
+        a layer's parsed copy into the case this only reads."""
         self.contents.maps.append(block.title or "Map")
         names = list(block.layers)
         if block.plate and notes_maps.NAME.match(block.plate):
@@ -527,33 +531,48 @@ class _Reading:
             names += [name for name, _frame in (read or {}).get("layers") or []]
         hidden = set(block.hidden)
         for name in dict.fromkeys(names):
-            if name in hidden or not notes_maps.NAME.match(name or ""):
-                continue
-            rel = layout.layer_spec_rel(name)
-            layer = self.case.find_entity(attr="spec", value=rel)
-            if layer is not None:
-                self.add(str(layer["id"]), "layers")
-            else:
-                for one in (rel, layout.layer_snapshot_rel(name), layout.layer_icons_rel(name)):
-                    self.file(one)
+            if name not in hidden and notes_maps.NAME.match(name or ""):
+                self._layer(name)
         for picture in (block.ground, *block.details):
             if picture:
                 self.add(picture, "pictures")
         for step in block.steps:
             if step.proof:
                 self.add(step.proof, "pictures")
+        period = block.period()
+        if period is not None:
+            out = notes_maps.Derived(data={})
+            notes_maps._proofs(self.case, period, encode=None, anchors={}, round_pov=False, card_side=0, out=out,
+                               filmed=block.proof_points == "filmed")
+            for proof_id in out.proofs:
+                self.add(proof_id, "pictures")
+
+    def _layer(self, name: str) -> None:
+        """One layer by its name: its record and files, and for an editable one what each marker
+        follows, where that stands, and the picture its card shows (`layerlinks.follow`)."""
+        rel = layout.layer_spec_rel(name)
+        layer = self.case.find_entity(attr="spec", value=rel)
+        if layer is not None:
+            self.add(str(layer["id"]), "layers")
+        else:
+            for one in (rel, layout.layer_snapshot_rel(name), layout.layer_icons_rel(name)):
+                self.file(one)
         try:
-            derived = notes_maps.derive(self.case, block)
-        except Exception:  # a map that cannot be read draws what is named above, or nothing
+            spec = maplayers._read_spec(self.case, name)
+        except maplayers.LayerError:
             return
-        for proof_id in derived.proofs:
-            self.add(proof_id, "pictures")
-        for feature in derived.data.get("features") or []:
-            followed = str(feature.get("entity") or "")
+        if not layerediting.editable(spec) or not isinstance((spec.get("document") or {}).get("features"), list):
+            return
+        drawn = layerediting.drawing(spec, self.case)["geojson"]
+        for feature in drawn.get("features") or []:
+            properties = feature.get("properties") if isinstance(feature, dict) else None
+            if not isinstance(properties, dict):
+                continue
+            followed = str(properties.get("entity_id") or "")
             if followed:
                 self.add(followed, "sources")
                 self._stands(followed)
-            picture = str(feature.get("picture") or "")
+            picture = str(properties.get("picture") or "")
             if picture:
                 self.add(picture, "pictures")
 
@@ -751,7 +770,7 @@ def _build(case: "Case", found: Contents, staging: Path) -> "Case":
     for directory in (tool, layout.data_dir(root), *layout.content_dirs(root)):
         ensure_dir(directory)
     for rel in found.files:
-        _copy(case.resolve_inside(rel), tool / PurePosixPath(rel))
+        _copy(case.resolve_inside(rel), tool.joinpath(*PurePosixPath(rel).parts))
     db = layout.database(root)
     bundles._clean_database(case.db_path, db)
     name = f"{found.title}{FOR_REVIEW}"[:bundles.MAX_CASE_NAME]
@@ -770,7 +789,7 @@ def _build(case: "Case", found: Contents, staging: Path) -> "Case":
             continue
         record = graph.get_entity(note_id) or {}
         rel = str((record.get("attrs") or {}).get("path") or "")
-        destination = tool / PurePosixPath(rel)
+        destination = tool.joinpath(*PurePosixPath(rel).parts)
         if not rel or not destination.resolve().is_relative_to(tool.resolve()):
             raise ReviewExportError("a note of this case has no file to write")
         destination.parent.mkdir(parents=True, exist_ok=True)
@@ -888,9 +907,9 @@ def _file_picture(graph: SqliteCase, tool: Path, rel: str, label: str, source: d
                   *, by: str) -> str:
     """File one picture already in the copy's `media/` as a record of its own: its sidecar,
     its row in the media index and its entity, as a picture filed in the app has them."""
-    path = tool / PurePosixPath(rel)
+    path = tool.joinpath(*PurePosixPath(rel).parts)
     digest = media_engine.sha256_file(path)
-    sidecar_path = tool / PurePosixPath(layout.sidecar_rel(rel))
+    sidecar_path = tool.joinpath(*PurePosixPath(layout.sidecar_rel(rel)).parts)
     try:
         sidecar = json.loads(sidecar_path.read_text(encoding="utf-8"))
     except (OSError, ValueError):
