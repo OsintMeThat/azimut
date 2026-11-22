@@ -1012,15 +1012,16 @@ describe('Upkeep: who writes what, and the chores', () => {
     expect(panel('upkeep').textContent).not.toContain('to see which of your pages');
   });
 
-  it('gives the five usual chores, the first open, each with a hover text', async () => {
+  it('gives the six usual chores, the first open, each with a hover text', async () => {
     await show();
     const chores = [...panel('upkeep').querySelectorAll('.chores details')];
     expect(chores.map((node) => node.querySelector('summary').textContent.trim())).toEqual([
       'Take an article down', 'Move an article to another category', 'Rename the site or change its logo', 'Fix a typo on GitHub directly',
-      'Test an article before it shows']);
-    expect(chores.map((node) => node.open)).toEqual([true, false, false, false, false]);
+      'Test an article before it shows', 'Give the site its own domain']);
+    expect(chores.map((node) => node.open)).toEqual([true, false, false, false, false, false]);
     expect(chores[0].textContent).toContain('Press Delete on its line in Articles.');
     expect(chores[4].textContent).toContain('Publish it as Unlisted');
+    expect(chores[5].textContent).toContain('press Update the site so the pages published before give the new address');
     for (const node of chores) expect(node.querySelector('summary').getAttribute('title')).toBe('Show how to do it');
   });
 });
