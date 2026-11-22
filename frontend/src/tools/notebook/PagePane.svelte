@@ -142,6 +142,8 @@
   /** Whether each picture's source is the analyst's to state, by record and address. */
   let sourceable = $state({});
 
+  /** The fields of a bookmark or a book its entry in the list of sources reads. */
+  const ENTRY_FIELDS = ['author', 'published_at', 'page_title', 'archive_url', 'url', 'publisher', 'year', 'medium'];
   const byId = $derived(new Map(entities.map((entity) => [entity.id, entity])));
   /** The case record a printed picture shows, or null for an image read from an address. */
   function entityOf(picture) {
@@ -285,10 +287,17 @@
   // Who signs prints too: a logo, a signature or a name changed in Settings is drawn
   // again at once, the note beside it untouched; and so is a map, once what is drawn on
   // its card changed the layer it names (`lib/notes/mapSettings.svelte.js`).
+  // So is what a source's entry says (who posted a bookmarked page and when, its own title
+  // and copy, a book's fields): written in the Link field, read by Archive every link or
+  // typed in Details, the list of sources and its cards change with no word of the note.
   const stated = $derived([
     entities
       .filter((entity) => entity.attrs?.source_url || postedAddress(entity))
       .map((entity) => `${entity.id}=${entity.attrs.source_url ?? ''}|${postedAddress(entity)}`)
+      .join(','),
+    entities
+      .filter((entity) => entity.type === 'bookmark' || entity.type === 'publication')
+      .map((entity) => `${entity.id}=${entity.label}|${ENTRY_FIELDS.map((key) => entity.attrs?.[key] ?? '').join('|')}`)
       .join(','),
     prefs.picturesRev, prefs.logoRev, prefs.reportName, prefs.reportRole, prefs.reportOrganisation, mapsChanged.rev,
   ].join('\n'));

@@ -273,6 +273,28 @@ describe('the way back, and a source', () => {
     expect(asked.length).toBe(before + 2);
   });
 
+  it('draw the pages again when a cited bookmark says who posted it and when, or a book changes', async () => {
+    const mark = { id: 'b7', type: 'bookmark', label: 'Instagram post', attrs: { url: 'https://www.instagram.com/p/DIC1c6ysX7w/' } };
+    const props = $state({ onresize: vi.fn(), entities: [...ENTITIES, mark], text: TEXT });
+    target = document.createElement('div');
+    document.body.append(target);
+    app = mount(PagePane, { target, props: { caseId: 'c1', note: 'n1', look: { style: 'report' }, ...props,
+      get entities() { return props.entities; } } });
+    await tick();
+    flushSync();
+    const before = asked.length;
+    props.entities = [...ENTITIES, { ...mark, attrs: { ...mark.attrs, author: '@gaivire_8', published_at: '2026-01-04' } }];
+    flushSync();
+    expect(asked.length).toBe(before + 1);
+    props.entities = [...props.entities, { id: 'p1', type: 'publication', label: 'Straits of Salt', attrs: { author: 'Helena Marsh' } }];
+    flushSync();
+    expect(asked.length).toBe(before + 2);
+    // another record changing nothing an entry reads draws nothing
+    props.entities = [...props.entities, { id: 'x1', type: 'person', label: 'Someone', attrs: {} }];
+    flushSync();
+    expect(asked.length).toBe(before + 2);
+  });
+
   it('draw the pages again when Settings changes who signs: a new logo, a signature or a name', async () => {
     const { prefs } = await import('../../lib/state.svelte.js');
     const kept = { picturesRev: prefs.picturesRev, logoRev: prefs.logoRev, reportName: prefs.reportName };
