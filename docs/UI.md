@@ -6780,7 +6780,9 @@ will; and **Made with Azimut**, the app's mark and name set tight beside the wor
 without the air of the app's corner), **Pictures and shapes** (a picture, the signature picture as a logo,
 a box, an ellipse, a rule) and **Slides** (a slide, a video, and ready sequences:
 **Reveal in four beats**, **Zoom in**, a **Title card** and an **End card**). A tool placed by pressing the map is put down by a second press
-on it, or Esc.
+on it, or Esc. **Recent**, over the groups, offers back the last six tiles picked, the
+newest first, kept in this browser as the panels' widths are; it waits while a word is
+searched, and on a template it keeps only what a template offers.
 
 **From the case › Comparison** lists the pairs saved in Compare, read when it opens, each
 with its picture and its two days. A press lays one as two live maps side by side,
@@ -6902,11 +6904,14 @@ of a situation map. A zone is filled, hatched, glowing or outlined and can dim t
 ground round it. A picture can point at the ground, and the picture picker offers
 the proofs and footage the main map's features carry, set pointing at their place.
 
-A map picked on the page carries its own bar: **Frame**, a half step of zoom
-either way, a step to either side and a compass to turn it, **Ground**, the day of a
+A map picked on the page carries its own bar: **Frame**, a compass dragged to turn
+it (a press puts north up), **⋯**, **Ground**, the day of a
 ground that has one (a Wayback release, a Sentinel-2 pass, a cloudless year), and how many
 of the case's layers it draws (**No layer**, in the accent, when it draws none), which
-opens the Layers tab. A press on the day opens the ground's releases, its years or
+opens the Layers tab. **⋯** keeps the steps out of the way: **Zoom in** and **Zoom out** by
+a half step, **Turn 15° left** and **right**, and on a map in 3D **Lean more** and **Lean
+less** under how far it leans. It stays open for the next step, and a day or slide that
+keeps the framing before it greys them, as it does Frame and the compass. A press on the day opens the ground's releases, its years or
 Satellite's calendar, as the inspector's **Ground** section shows them, with **Layers as
 they stood that day** under them. On Sentinel-2 it picks the map alone, whose calendar
 the bar and the inspector share. The bar's words give way on a small map,
@@ -6962,7 +6967,7 @@ shade. A plate saved while the focus was the map's own has it moved onto the map
 one of these, on every day and slide.
 
 There is one kind of map: its inspector's **Show the map in 3D** box stands it on its
-heights, tilted (from the bar, or to the degree in the inspector), the heights drawn as they are or up to three times as tall, said under it.
+heights, tilted (from the bar's ⋯, or to the degree in the inspector), the heights drawn as they are or up to three times as tall, said under it.
 It is drawn on Satellite's globe, its ground, tints, contour lines, names and the
 case's layers laid on the relief; a browser without WebGL2 draws it flat and says so.
 **Ridge lines** traces the crests over it. A tilted map has no scale bar and no grid;
@@ -7122,6 +7127,11 @@ The day's tile and **+** stay put while the slides scroll between them, under th
 too; past what fits, the tiles shrink to their number and time, an arrow each side
 says how many are out of sight, and a count says which one is shown. On a narrow
 window the slides take a line of their own.
+**The end of the bar says what the video plays**, before any export: its days, its
+slides and how long it runs, counted as the export counts them (*12 days · 3 slides ·
+0:42*, *moments* on a plate played hour by hour, the first 120 days and slides since
+an export draws no more), or **A still picture** while nothing plays. A bar too
+narrow for it leaves it out.
 **Every tile says how long it holds in the video, and a press on that time sets
 it**: the day its own seconds or, left alone, every day's (one second until set in
 the export), a slide its own, never shorter than its longest clip, the clip staying on

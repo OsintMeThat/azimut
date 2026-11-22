@@ -17,7 +17,9 @@
    * A day can hold steps, played after it in order (the strip over the date bar).
    * What is added while a step is shown belongs to that step, over what the day
    * shows; a video stands on a step, and the step runs as long as its clip. So one
-   * day can play several videos one after another, each beside its place.
+   * day can play several videos one after another, each beside its place. The end of
+   * the bar says what the video plays, its days, its slides and its length, as the
+   * export counts them (`clip.playSaid`).
    *
    * A day or a step after the first keeps the framing before it until its map bar's
    * "Map stays where it was" is unticked; then its maps are framed for it alone.
@@ -81,7 +83,7 @@
     transitionsOf, unsettled, withoutMaps, withoutStep, restacked, stepOf, bornOn } from '../lib/plate/page.js';
   import { TWEEN_FPS, changes, playedTransit, transitionInto as transitionIntoBeat, transitionPlan, tweenFrames } from '../lib/plate/tween.js';
   import { defaultSize } from '../lib/plate/words.js';
-  import { FIRST_SECONDS, beatClips, beats, boundSeconds, captionOf, clipRange, daySeconds, gifPoster, isGif, linkedMedia, plateSeconds, playDays, posterKey, posterOf, totalSeconds, videoDays } from '../lib/plate/clip.js';
+  import { FIRST_SECONDS, MOST_BEATS, STILL_SAID, beatClips, beats, boundSeconds, captionOf, clipRange, daySeconds, gifPoster, isGif, linkedMedia, plateSeconds, playDays, playSaid, posterKey, posterOf, totalSeconds, videoDays } from '../lib/plate/clip.js';
   import { legendRows } from '../lib/plate/legend.js';
   import { numbered, pasted, placeLabels, tableRows } from '../lib/plate/arrange.js';
   import { drawOver, pictureKey } from '../lib/plate/draw.js';
@@ -182,8 +184,13 @@
   /** The play bar's height, which the panels floating in focus stop above. */
   let barHeight = $state(0);
   let barWidth = $state(0);
-  /** Under this width, the play bar sets the day's steps under the days rather than beside them. */
-  const NARROW_BAR = 920;
+  /**
+   * Under this width, the play bar sets the day's steps under the days rather than beside them:
+   * past it, the steps keep about the room they had before the line saying what the video plays.
+   */
+  const NARROW_BAR = 1100;
+  /** Under this width, the play bar leaves out the line saying what the video plays, so the days and slides keep their room. */
+  const SAID_BAR = 640;
   /** What focus hands the screen to. */
   let toolEl = $state(null);
   const handles = new Map();
@@ -842,14 +849,19 @@
   const stepName = (index, day = at) => stepsOf(spec, day)[index]?.name || `Slide ${index + 1}`;
   /** The days and steps the play goes through, from the plate's day when it has none followed over time. */
   const sequence = $derived(spec ? beats(spec, playable ? videoPlayed : [at]) : []);
-  /** How long a played export runs over `days`, each beat held its own seconds, an MP4's transitions included. */
-  const runtime = (days, format = 'mp4') => {
-    const list = beats(spec, playable ? days : [at]);
-    if (format !== 'mp4') return totalSeconds(list);
-    return totalSeconds(list) + list.reduce((sum, _, index) => sum + (transitionInto(list, index)?.frames ?? 0) / TWEEN_FPS, 0);
-  };
+  /** How long the beats `list` run in a played export, each held its own seconds, an MP4's transitions included. */
+  const runSeconds = (list, format = 'mp4') => totalSeconds(list)
+    + (format === 'mp4' ? list.reduce((sum, _, index) => sum + (transitionInto(list, index)?.frames ?? 0) / TWEEN_FPS, 0) : 0);
+  /** How long a played export runs over `days`, as many beats as it draws. */
+  const runtime = (days, format = 'mp4') => runSeconds(beats(spec, playable ? days : [at]).slice(0, MOST_BEATS), format);
   /** How the video comes into the beat `index` of `list` from the one before, or null where it cuts (`tween.transitionInto`). */
   const transitionInto = (list, index) => transitionIntoBeat(spec, list, index, order);
+  /** What the video plays, at the end of the bar: its days, its slides and how long it runs, counted as the export draws them. */
+  const playLine = $derived.by(() => {
+    if (!spec) return '';
+    const list = sequence.slice(0, MOST_BEATS);
+    return playSaid(list, runSeconds(list), !playable ? null : hourly ? 'moment' : 'day');
+  });
 
   // -- framing a map day by day ---------------------------------------------------------
 
@@ -1913,7 +1925,7 @@
         } else {
           // each day, then each of its steps, each held its own seconds; a step's clips run over its picture in an MP4
           const scale = videoSize(spec, side).width / widthMm;
-          const list = beats(spec, picked).slice(0, 120);
+          const list = beats(spec, picked).slice(0, MOST_BEATS);
           pictures = stagedPictures(caseId, { signal: run.signal });
           const sent = [];
           // an MP4 goes from one beat to the next by the plate's transitions, drawn here from the two beats
@@ -2319,6 +2331,11 @@
               {daySkipped} onskipday={playable ? (on) => (spec.skipped = skippedDays(spec, dayOf(at), on)) : null}
               caseId={plate.caseId ?? caseId ?? ''} onpick={pickStep} onadd={newStep} onremove={dropStep} onchange={changeStep}
               onmove={(id, index) => (spec.steps = movedStep(spec, at, id, index))} onduplicate={duplicateStep} />
+            {#if playLine && !(barWidth > 0 && barWidth < SAID_BAR)}
+              {@const picture = playLine === STILL_SAID}
+              <p class="plays" title={picture ? 'Nothing plays yet, so an export is one picture' : 'What the video plays and how long it runs'}>
+                <Icon name={picture ? 'image' : 'video'} size={12} /><span>{playLine}</span></p>
+            {/if}
           </div>
         {/if}
       </div>
@@ -2572,12 +2589,16 @@
     pointer-events: auto; cursor: pointer; }
   .on-day .pill-act { background: var(--accent-soft); color: var(--accent); }
   .pill-act:hover { text-decoration: underline; }
-  .timebar { display: grid; grid-template-columns: auto minmax(0, 1fr); align-items: center; gap: 12px; padding: 6px 14px; border-top: 1px solid var(--border); background: var(--bg-1); }
-  .timebar.days { grid-template-columns: auto minmax(280px, 34%) minmax(0, 1fr); }
+  .timebar { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: center; gap: 12px; padding: 6px 14px; border-top: 1px solid var(--border); background: var(--bg-1); }
+  .timebar.days { grid-template-columns: auto minmax(280px, 34%) minmax(0, 1fr) auto; }
   .controls { display: flex; align-items: center; gap: 8px; }
   .timebar.days > :global(.steps) { padding-left: 12px; border-left: 1px solid var(--border); }
-  .timebar.days.narrow { grid-template-columns: auto minmax(0, 1fr); row-gap: 4px; }
+  .timebar.days.narrow { grid-template-columns: auto minmax(0, 1fr) auto; row-gap: 4px; }
   .timebar.days.narrow > :global(.steps) { grid-column: 1 / -1; padding: 6px 0 0; border-left: 0; border-top: 1px solid var(--border); }
+  /* what the video plays, said quietly at the end; on a narrow bar it stays beside the days */
+  .plays { display: flex; align-items: center; gap: 5px; margin: 0; padding-left: 12px; border-left: 1px solid var(--border); color: var(--text-3);
+    font-size: 11px; font-variant-numeric: tabular-nums; white-space: nowrap; }
+  .timebar.days.narrow > .plays { grid-row: 1; grid-column: 3; }
   .play { display: grid; place-items: center; width: 32px; height: 32px; border-radius: 50%; background: var(--accent); color: var(--accent-text); cursor: pointer; }
   .play:disabled { opacity: .4; cursor: default; }
   .speed { min-width: 34px; height: 26px; padding: 0 6px; border: 1px solid var(--border); border-radius: var(--r-sm); color: var(--text-2); font-size: var(--fs-xs); cursor: pointer; }

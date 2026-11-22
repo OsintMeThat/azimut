@@ -5,22 +5,35 @@
    * walk the tiles. A tool placed by pressing the map stays lit while it is armed,
    * and a second press on it puts it down. A template plays nothing and keeps no
    * case's work, so it offers no step, no video, and nothing from the case.
+   *
+   * **Recent**, first, offers back the tiles picked lately, the newest first
+   * (`recentAdds.svelte.js`); it waits while a word is searched, and holds only what
+   * the plate offers.
    */
   import Icon from '../../components/Icon.svelte';
   import FloatingMenu from '../../components/FloatingMenu.svelte';
-  import { findAdds } from '../../lib/plate/adds.js';
+  import { ADDS, findAdds } from '../../lib/plate/adds.js';
+  import { keepRecentAdd, recentAdds } from '../../lib/plate/recentAdds.svelte.js';
 
   let { anchor, placing = null, template = false, onadd, onclose } = $props();
 
   let query = $state('');
   let field = $state(null);
   let grid = $state(null);
-  const groups = $derived(findAdds(query).filter((group) => !template || (!group.plays && !group.cased)));
+  /** A template keeps no case's work and plays nothing. */
+  const offered = (group) => !template || (!group.plays && !group.cased);
+  const groups = $derived(findAdds(query).filter(offered));
   const first = $derived(groups[0]?.items[0]?.[0] ?? null);
+  /** The tiles picked lately this plate offers, each `{ group, item }`; none while a word is searched. */
+  const recent = $derived(query.trim() ? [] : recentAdds.list.flatMap((kind) => {
+    const group = ADDS.filter(offered).find((entry) => entry.items.some(([id]) => id === kind));
+    return group ? [{ group, item: group.items.find(([id]) => id === kind) }] : [];
+  }));
 
   $effect(() => { field?.focus(); });
 
   function pick(kind) {
+    keepRecentAdd(kind);
     onclose?.();
     onadd?.(kind);
   }
@@ -64,15 +77,19 @@
     <input bind:this={field} bind:value={query} placeholder="Find an element" aria-label="Find an element" onkeydown={fieldKey} />
   </div>
   <div class="groups" class:found={!!query.trim()} bind:this={grid} data-guide="plate.add-groups">
+    {#if recent.length}
+      <section class="group recent" aria-label="Recent">
+      <div class="group-head"><span>Recent</span></div>
+      <div class="tiles">
+        {#each recent as { group, item } (item[0])}{@render tile(group, item)}{/each}
+      </div>
+      </section>
+    {/if}
     {#each groups as group (group.title)}
       <section class="group">
       <div class="group-head"><span>{group.title}</span>{#if group.note}<span class="hint">{group.note}</span>{/if}</div>
       <div class="tiles">
-        {#each group.items as [kind, label, icon] (kind)}
-          <button type="button" class="tile" class:on={placing?.kind === kind || placing?.preset === kind} class:first={!!query && kind === first}
-            title={group.note ? `${label}: ${group.note.toLowerCase()}` : `Add ${label.toLowerCase()}`} onclick={() => pick(kind)} onkeydown={tileKey}>
-            <Icon name={icon} size={17} /><span>{label}</span></button>
-        {/each}
+        {#each group.items as item (item[0])}{@render tile(group, item)}{/each}
       </div>
       </section>
     {:else}
@@ -80,6 +97,12 @@
     {/each}
   </div>
 </FloatingMenu>
+
+{#snippet tile(group, [kind, label, icon])}
+  <button type="button" class="tile" class:on={placing?.kind === kind || placing?.preset === kind} class:first={!!query && kind === first}
+    title={group.note ? `${label}: ${group.note.toLowerCase()}` : `Add ${label.toLowerCase()}`} onclick={() => pick(kind)} onkeydown={tileKey}>
+    <Icon name={icon} size={17} /><span>{label}</span></button>
+{/snippet}
 
 <style>
   /* the field stays at the top when a short window makes the panel scroll */
@@ -89,6 +112,9 @@
   .find input { flex: 1; min-width: 0; height: 32px; padding: 0; border: 0; outline: none; background: none; color: var(--text-1); font-size: var(--fs-sm); }
   .groups { padding: 0 2px 2px; columns: 2; column-gap: 14px; }
   .group { padding-top: 1px; break-inside: avoid; }
+  /* the tiles picked lately run across both columns, in one row */
+  .recent { column-span: all; }
+  .recent .tiles { grid-template-columns: repeat(6, 1fr); }
   .group-head { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; margin: 8px 2px 5px; color: var(--text-3);
     font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: .06em; }
   .hint { font-weight: 500; letter-spacing: normal; text-transform: none; font-size: 10.5px; }
