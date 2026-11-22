@@ -420,7 +420,9 @@ export function noteDecorations(state) {
   const mapless = state.facet(noteHandlers).point === null;
   const ownLines = lineKinds();
   // a footnote's letter counts every footnote before it, in a table or a block too, as the documents letter them
-  const notes = state.doc.toString().includes('^[') ? footnotesOf(state.doc.toString()) : [];
+  const written = state.doc.toString();
+  const notes = written.includes('^[') ? footnotesOf(written) : [];
+  let nextNote = 0; // the first footnote not on a line before this one: the lines go down the note once
   for (let number = 1; number <= state.doc.lines; number += 1) {
     const line = state.doc.line(number);
     if (inside(line.from) || !line.text) continue;
@@ -435,12 +437,14 @@ export function noteDecorations(state) {
     // only a block whose source is open shows what a line is made of
     const source = shows(line.from, line.to);
     // a footnote is its letter, whatever it holds: its words show on hover and open in the Footnote field
-    const footnotes = notes.filter((note) => note.from >= line.from && note.to <= line.to && !inCode(note.from));
-    for (const note of footnotes) {
+    while (nextNote < notes.length && notes[nextNote].from < line.from) nextNote += 1;
+    for (let index = nextNote; index < notes.length && notes[index].to <= line.to; index += 1) {
+      const note = notes[index];
+      if (inCode(note.from)) continue;
       if (source) ranges.push(Decoration.mark({ class: 'cm-footnote-source' }).range(note.from, note.to));
       else {
         whole.push(note);
-        ranges.push(Decoration.replace({ widget: new FootnoteWidget(footnoteLetter(notes.indexOf(note)), note.words, note.from), conceal: 'atom' })
+        ranges.push(Decoration.replace({ widget: new FootnoteWidget(footnoteLetter(index), note.words, note.from), conceal: 'atom' })
           .range(note.from, note.to));
       }
     }
