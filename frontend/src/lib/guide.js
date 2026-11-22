@@ -53,6 +53,7 @@ export const PAGES = {
       { anchor: 'start.case', title: 'The case', text: 'Switch to another case or start one. Everything you save goes into the one shown here.' },
       { anchor: 'start.stages', title: 'Four stages', text: 'Sources, Examine, Map and Compose, top to bottom in the order an investigation runs.' },
       { anchor: 'start.case-rail', title: 'The case itself', text: 'Its Timeline, Board, Graph and Sheet, one press from any stage.' },
+      { anchor: 'start.settings', title: 'Settings', text: 'Keys, imagery, templates, the extension and backups, at the foot of the rail. A dot means something to install or update.' },
       { anchor: 'start.tabs', title: 'Tools are tabs', text: 'Each stage holds a few tools, and the tab says which one you are in.' },
       {
         anchor: 'start.goto',
@@ -65,7 +66,6 @@ export const PAGES = {
         },
       },
       { anchor: 'start.event', title: 'Add event', text: 'Notes what happened from any tool, with what it shows already cited (Alt+N).' },
-      { anchor: 'start.settings', title: 'Settings', text: 'Keys, imagery, templates, the extension and backups. A dot means something to install or update.' },
       { anchor: 'start.sidebar', title: 'The case sidebar', text: 'The case’s folders, to-do lists and recent work, beside every tool.' },
     ],
     tips: [

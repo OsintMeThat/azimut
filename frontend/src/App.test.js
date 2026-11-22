@@ -94,7 +94,19 @@ describe('the sidebar’s toggle and the first scene kept', () => {
     expect(markup).toContain('<SidebarToggle bind:button={sidebarToggle} onclick={toggleSidebar} />');
     expect(markup).not.toContain('title="Toggle case sidebar"');
     expect(markup.indexOf('<SidebarToggle')).toBeLessThan(markup.indexOf('</header>'));
-    expect(markup.indexOf('<SidebarToggle')).toBeGreaterThan(markup.indexOf('data-guide="start.settings"'));
+    expect(markup.indexOf('<SidebarToggle')).toBeGreaterThan(markup.indexOf('bind:this={guideButton}'));
+  });
+});
+
+describe('Settings', () => {
+  it('sits last at the foot of the rail, with its label, out of the top bar', () => {
+    const at = markup.indexOf('data-guide="start.settings"');
+    expect(at).toBeGreaterThan(markup.indexOf('<nav class="rail">'));
+    expect(at).toBeGreaterThan(markup.indexOf('onclick={toggleTheme}'));
+    expect(at).toBeLessThan(markup.indexOf('</nav>'));
+    expect(markup.slice(0, markup.indexOf('</header>'))).not.toContain('start.settings');
+    expect(markup.slice(at, markup.indexOf('</nav>'))).toContain('<span>Settings</span>');
+    expect(markup.slice(at, markup.indexOf('</nav>'))).toContain("class:active={uiState.tool === 'settings'}");
   });
 
   it('points once at the toggle or the To-do tab, Show opening the To-do', () => {
