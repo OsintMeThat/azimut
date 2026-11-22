@@ -2093,12 +2093,15 @@ class _Page:
                 self._notice(YANDEX_NOTICE, self._line)
 
     def _chain(self, source: Source | None) -> str:
-        """"How this was checked": the picture's sources back to its originals, each
-        with what the case recorded of it."""
+        """The picture's sources back to its originals, each with what the case recorded
+        of it, folded under its figure. A proof states a place someone checked, so its
+        fold says "How this was checked"; any other picture's only says where it comes from,
+        since nothing was checked there."""
         if source is None:
             return ""
         items: list[str] = []
         for one in source.lineage():
+            frame = _frame_name(one)
             said: list[str] = []
             if one.address:
                 said.append(f'<a class="az-original" {_outward(one.address)}>{_text(_short_address(one.address))}</a>')
@@ -2108,7 +2111,7 @@ class _Page:
                 said.append(f'<span class="az-posted-day">Posted {_day(one.published)}</span>')
             if one.collected:
                 said.append(f'<span class="az-collected">{_text(one.arrival.capitalize())} {_day(one.collected)}</span>')
-            if one.at:
+            if one.at and not frame:
                 said.append(f'<span class="az-frame">Frame at {_text(one.at)}</span>')
             imagery = one.imagery() if one.readings else ""
             if imagery:
@@ -2118,15 +2121,19 @@ class _Page:
             said.extend(f'<a class="az-verify" {_outward(address)}>Check on {_text(site)}</a>'
                         for site, address in one.verify)
             if one.sha256:
-                said.append(f'<span class="az-hash">SHA-256 of the original <code>{one.sha256}</code></span>')
+                # a file made in the case (a frame, a comparison) is no original: its own fingerprint is
+                whose = "this file" if one.arrival == "made" else "the original"
+                said.append(f'<span class="az-hash">SHA-256 of {whose} <code>{one.sha256}</code></span>')
             if not said:
                 continue
             what = f'<span class="az-chain-what">{_text(one.noun or "Item")}</span> '
-            label = f'<span class="az-chain-label" dir="auto">{_text(one.label)}</span> ' if one.label else ""
+            named = frame or one.label
+            label = f'<span class="az-chain-label" dir="auto">{_text(named)}</span> ' if named else ""
             items.append(f"<li>{what}{label}{' '.join(said)}</li>")
         if not items:
             return ""
-        return ('<details class="az-checked"><summary>How this was checked</summary>\n'
+        title = "How this was checked" if source.type == "proof" else "Where it comes from"
+        return (f'<details class="az-checked"><summary>{title}</summary>\n'
                 f'<ol class="az-chain">{"".join(items)}</ol>\n</details>\n')
 
     def _dates(self, source: Source | None) -> str:
@@ -3579,6 +3586,20 @@ def _platform(url: str) -> str:
 
 def _posted(url: str) -> str:
     return f'<a class="az-posted" {_outward(url)}>Posted on {_text(_platform(url))} ↗</a>'
+
+
+#: How Inspect names a frame it cuts: the moment it was cut at, `00-04-49`, then the video's name.
+INSPECT_FRAME_NAME = re.compile(r"^\d{2}-\d{2}-\d{2}(?:[.-]\d+)?\s")
+
+
+def _frame_name(one: Source) -> str:
+    """What a frame still named as Inspect named it is called in its chain, `Frame at 0:14
+    of the video`, rather than its file's name; '' for anything else, a frame the analyst
+    named included."""
+    if not one.at or not INSPECT_FRAME_NAME.match(one.label):
+        return ""
+    video = any(origin.noun == "Video" for origin in one.origins)
+    return f"Frame at {one.at} of the video" if video else f"Frame at {one.at}"
 
 
 def _short_address(url: str) -> str:
