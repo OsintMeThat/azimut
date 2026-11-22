@@ -207,11 +207,12 @@ def test_the_read_lists_every_card_newest_first_with_addresses_on_the_site(clien
          "article", "article")]
     first = said["items"][0]
     assert list(first) == ["folder", "address", "title", "summary", "date", "date_label", "category", "role",
-                           "layout", "image", "bytes", "deletable"]
+                           "layout", "image", "bytes", "author", "deletable"]
     assert first["address"] == f"https://osintmethat.com/{ARTICLES}/"
     assert first["title"] == "The fall of the Bab al-Mandab front, Sep-Nov 2026"
     assert first["date"] == "2026-11-20" and first["date_label"] == "20 November 2026"
     assert first["category"] == "Conflict Watch" and first["summary"]
+    assert first["author"] == "OSINT Me That" and "author_image" not in first
     assert first["image"] == f"https://osintmethat.com/{ARTICLES}/cover.jpg"
     assert said["items"][2]["address"] == (
         "https://osintmethat.com/2026/08/13/installing-azimut-the-complete-guide/")
@@ -223,10 +224,12 @@ def test_the_read_lists_every_card_newest_first_with_addresses_on_the_site(clien
 def test_the_read_counts_the_categories_of_the_listed_cards_and_names_the_pages_that_list_them(client, fake):
     _the_live_site(client, fake)
     said = client.post(READ).json()
+    # a category only a marked page names is one too, with no article yet
     assert said["categories"] == [
         {"name": "Investigations", "count": 3, "pages": ["investigations/"]},
         {"name": "Conflict Watch", "count": 2, "pages": ["conflict-watch/"]},
-        {"name": "Methods & Tools", "count": 2, "pages": ["methods-tools/"]}]
+        {"name": "Methods & Tools", "count": 2, "pages": ["methods-tools/"]},
+        {"name": "Deep Dives", "count": 0, "pages": ["deep-dives/"]}]
     # every page with Azimut's markers: the root page, then the ones one level down (a card's folder is no page)
     assert said["marked"] == ["", "conflict-watch/", "deep-dives/", "investigations/", "maps/", "methods-tools/"]
     # the categories are kept for the publish dialog as /github/categories keeps them, a section too
@@ -244,8 +247,10 @@ def test_the_read_shows_pages_and_unlisted_cards_but_counts_only_the_listed(clie
     said = client.post(READ).json()
     assert [(item["folder"], item["role"]) for item in said["items"][:2]] == [("draft", "unlisted"), ("about", "page")]
     assert len(said["items"]) == 9
+    assert {category["name"] for category in said["categories"] if category["count"]} == {
+        "Investigations", "Conflict Watch", "Methods & Tools"}
     assert {category["name"] for category in said["categories"]} == {"Investigations", "Conflict Watch",
-                                                                      "Methods & Tools"}
+                                                                      "Methods & Tools", "Deep Dives"}
     # an unlisted page adds no category anywhere public; a page keeps the one it names
     assert "Secret" not in client.get("/api/publishing").json()["github"]["categories"]
     assert "Pages" in client.get("/api/publishing").json()["github"]["categories"]

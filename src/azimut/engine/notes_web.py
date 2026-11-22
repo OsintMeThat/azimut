@@ -19,6 +19,9 @@ than `data:` addresses, so the page is light and each file is fetched once.
 subtitle or the first paragraph), Open Graph and Twitter tags pointing at
 `share.jpg`, and, once the analyst gives the address the folder will live at
 (`address`), the canonical address, with every card address absolute as X needs.
+A page published to a site as Unlisted also asks search engines not to index it
+(`<meta name="robots" content="noindex">`), so a link shared to try it stays out of them;
+an article or a page never does.
 The folder is named after that address's last part, so a later export replaces the
 same page; with none it is `<note>-<day>`.
 
@@ -73,7 +76,7 @@ from urllib.parse import unquote, urlsplit, urlunsplit
 
 from PIL import Image, ImageDraw, ImageFilter, ImageFont, ImageOps, UnidentifiedImageError
 
-from . import dirswap, notelook, notes_style, pdffonts
+from . import dirswap, notefill, notelook, notes_style, pdffonts
 from . import notes_html as html_engine
 from . import site as site_engine
 from . import notes_markdown as md
@@ -99,6 +102,13 @@ SHARE_SIZE = (1200, 630)
 SHARE_QUALITY = 88
 #: The list picture, as a card names it: the same size, a little lighter.
 COVER_QUALITY = 84
+#: The author's picture (`NoteLook.author_image`) at the folder's root, as the page and the card
+#: name it: a small square, `author.png` when it holds transparency, else `author.jpg`.
+AUTHOR_FACE = "author"
+AUTHOR_FACE_SIDE = 96
+AUTHOR_FACE_QUALITY = 86
+AUTHOR_IMAGE_GONE = ("The author's picture is no longer in the case or could not be read; the page goes "
+                     "without it.")
 #: The longest address a folder may be given.
 MAX_ADDRESS = 300
 #: How many files GitHub takes in one upload from its page.
@@ -345,14 +355,26 @@ def build(
     when = now or datetime.now().astimezone()
     day = date.fromisoformat(look.cover.date) if look.cover.date else when.date()
     vendor = live_maps() if live else None
-    folder = html_engine.Folder(csp=folder_csp(), head=lambda description: _head(title, description, where),
-                                live=vendor, frame=site_engine.frame_of(placement.site) if placement else None)
+    said: list[str] = []
+    face = author_face(case, look.author_image) if look.author_image else None
+    if look.author_image and face is None:
+        said.append(AUTHOR_IMAGE_GONE)
+    # online at its address only: kept out of search engines too
+    hidden = placement is not None and placement.role_of(look) == site_engine.UNLISTED
+    folder = html_engine.Folder(csp=folder_csp(), head=lambda description: _head(title, description, where, hidden=hidden),
+                                live=vendor, frame=site_engine.frame_of(placement.site) if placement else None,
+                                author_face=face[0] if face is not None else "")
+    # a note someone else wrote is signed with their name, under the title unless the look signs it at the end
+    signer = notefill.Identity.from_settings().written_by(look.author) if look.author else None
+    shown = look.model_copy(update={"signed": "title"}) if look.author and not look.signed else look
     rendered = html_engine.render(
-        case, title=title, text=text, look=look, note_id=note_id, resolve=md.case_resolver(case), created=when,
-        public=True, diagrams=diagrams, round_pov=round_pov, changes=changes, earlier=earlier, check=check,
-        folder=folder,
+        case, title=title, text=text, look=shown, note_id=note_id, resolve=md.case_resolver(case), created=when,
+        public=True, identity=signer, diagrams=diagrams, round_pov=round_pov, changes=changes, earlier=earlier,
+        check=check, folder=folder,
     )
     files: dict[str, bytes] = {INDEX: rendered.html, **folder.files}
+    if face is not None:
+        files[face[0]] = face[1]
     if not check:
         files[SHARE] = share_card(title=title, day=rendered.day or day, look=look, hero=rendered.hero,
                                   description=rendered.description)
@@ -362,10 +384,9 @@ def build(
     name = folder_name(title, day, where, note_id=note_id if homonym else "")
     files[HOW_TO] = how_to(name, where).encode("utf-8")
     card: site_engine.Card | None = None
-    said: list[str] = []
     if placement is not None and not check:
         card = _site_card(placement, case, look, rendered, files, said, title=title, day=rendered.day or day,
-                          name=name)
+                          name=name, face=face[0] if face is not None else "")
         files[CARD] = card.as_json()
     made = WebBuild(
         files=files, name=name, title=title, address=where, maps=rendered.maps, live=rendered.live,
@@ -389,14 +410,17 @@ def build(
 
 
 def _site_card(placement: site_engine.Placement, case: "Case", look: NoteLook, rendered: html_engine.RenderedHtml,
-               files: dict[str, bytes], said: list[str], *, title: str, day: date, name: str) -> site_engine.Card:
+               files: dict[str, bytes], said: list[str], *, title: str, day: date, name: str,
+               face: str = "") -> site_engine.Card:
     """The card a folder published to a site carries, and `cover.jpg` beside it: the picture of
     its line in the site's list, made from the look's list picture, else the page's own (its
-    cover, a map page's ground, its first picture), else the link card as a last resort."""
+    cover, a map page's ground, its first picture), else the link card as a last resort. Its
+    author is the look's, else the site's (`Site.author`); ``face`` is the author's picture in the
+    folder, "" for none."""
     site = placement.site
     page = rendered.html.decode("utf-8")
     category = placement.category if placement.category is not None else look.category
-    role = placement.role if placement.role is not None else look.role
+    role = placement.role_of(look)
     picture = None
     if look.list_image:
         picture = _list_picture(case, look.list_image)
@@ -411,7 +435,8 @@ def _site_card(placement: site_engine.Placement, case: "Case", look: NoteLook, r
     return site_engine.Card(
         title=title, summary=rendered.description, date=day.isoformat(),
         category=site_engine.one_line(category, notelook.CATEGORY_MAX),
-        author=site.author, role=role if role in (site_engine.PAGE, site_engine.UNLISTED) else site_engine.ARTICLE,
+        author=look.author or site.author, author_image=face,
+        role=role if role in (site_engine.PAGE, site_engine.UNLISTED) else site_engine.ARTICLE,
         layout=rendered.layout, image=COVER if cover is not None else "",
         links=site_engine.links_of(page, site, name), place=placement.card_place(look.place))
 
@@ -439,6 +464,36 @@ def _list_cover(path: Path | None) -> bytes | None:
     buffer = BytesIO()
     picture.convert("RGB").save(buffer, "JPEG", quality=COVER_QUALITY, optimize=True, progressive=True)
     return buffer.getvalue()
+
+
+def author_face(case: "Case", entity_id: str) -> tuple[str, bytes] | None:
+    """The author's picture as the folder carries it: its file name and its bytes, a square of
+    `AUTHOR_FACE_SIDE` cut from the middle, upright, made again from its pixels so that nothing the
+    file held besides them (its place, its camera, its author, its comments) goes online. None when
+    it is no picture in the case any more or cannot be read."""
+    path = _list_picture(case, entity_id)
+    if path is None:
+        return None
+    side = AUTHOR_FACE_SIDE
+    try:
+        with Image.open(path) as image:
+            if image.width * image.height > MAX_IMAGE_PIXELS:
+                return None
+            image.draft("RGB", (side * 4, side * 4))
+            upright = ImageOps.exif_transpose(image)
+            clear = upright.mode in ("RGBA", "LA", "PA") or "transparency" in upright.info
+            upright = upright.convert("RGBA" if clear else "RGB")
+    except (OSError, ValueError, UnidentifiedImageError, Image.DecompressionBombError):
+        return None
+    square = ImageOps.fit(upright, (side, side), Image.Resampling.LANCZOS)
+    # a JPEG's comment rides in `info` through a resize and back out on save
+    square.info = {}
+    buffer = BytesIO()
+    if clear:
+        square.save(buffer, "PNG", optimize=True)
+        return f"{AUTHOR_FACE}.png", buffer.getvalue()
+    square.save(buffer, "JPEG", quality=AUTHOR_FACE_QUALITY, optimize=True)
+    return f"{AUTHOR_FACE}.jpg", buffer.getvalue()
 
 
 def live_maps() -> html_engine.LiveMaps | None:
@@ -730,10 +785,11 @@ def _spaced(draw: ImageDraw.ImageDraw, at: tuple[float, float], text: str, face:
 # -- the head and small helpers ------------------------------------------------------
 
 
-def _head(title: str, description: str, where: str) -> str:
-    """What the page's head says of it to a site that draws its link."""
+def _head(title: str, description: str, where: str, *, hidden: bool = False) -> str:
+    """What the page's head says of it to a site that draws its link; ``hidden``, an Unlisted page of
+    the site, also asks search engines to leave it out."""
     image = f"{where}{SHARE}" if where else SHARE
-    lines = []
+    lines = ['<meta name="robots" content="noindex">'] if hidden else []
     if description:
         lines.append(f'<meta name="description" content="{_attr(description)}">')
     if where:

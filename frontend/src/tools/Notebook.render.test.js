@@ -965,7 +965,7 @@ describe('the check before export', () => {
       const looks = () => get.mock.calls.filter(([url]) => url.endsWith('/n1/look')).length;
       // the case's pictures are the list's to pick from; the one picked is kept in the look, and the Notebook reads it again
       const before = looks();
-      dialog().querySelector('button.pick').click();
+      dialog().querySelector('button[data-pick="list"]').click();
       flushSync();
       expect([...dialog().querySelectorAll('.picture-row')].map((node) => node.textContent.trim())).toEqual(['Pier at dawn']);
       dialog().querySelector('.picture-row').click();
@@ -988,6 +988,44 @@ describe('the check before export', () => {
     } finally {
       ENTITIES.pop();
     }
+  });
+
+  it('publishes over another note\'s page on Replace it, the press of the dialog\'s own button', async () => {
+    const SET = { account: 'octo', repo: 'articles', branch: 'main', site: '', token: { set: true, hint: '…wxyz' }, categories: [] };
+    const reading = get.getMockImplementation();
+    get.mockImplementation(async (url) => {
+      if (url === '/api/publishing') return { github: SET };
+      if (url.endsWith('/n1/editions')) return { editions: [] };
+      return reading(url);
+    });
+    answerCheck((notes) => ({ notes: notes.map((note) => ({ note, title: 'Old lead', warnings: [], internal: 0 })) }));
+    const fallback = post.getMockImplementation();
+    post.mockImplementation(async (url, body) => {
+      if (url.endsWith('/n1/github/check')) {
+        return { checked: true, exists: true, edited: false, warning: '', taken: { title: 'Harbour fire', ours: true }, free: 'old-lead-2' };
+      }
+      if (url.endsWith('/n1/github')) {
+        return { published: true, address: 'https://octo.github.io/articles/old-lead/', repository: 'octo/articles', branch: 'main', commit: 'd'.repeat(40),
+          edited: false, site: { written: [], warnings: [] }, warnings: [] };
+      }
+      if (url.endsWith('/github/build')) return { state: 'built', detail: '' };
+      return fallback(url, body);
+    });
+    await exportFromNote();
+    [...dialog().querySelectorAll('[role="group"][aria-label="Format"] button')][2].click();
+    await settle();
+    anyButton('Publish to GitHub Pages').click();
+    await settle();
+    expect(dialogText()).toContain('This address already holds “Harbour fire”. Replace it?');
+    expect(anyButton('Publish anyway')).toBeTruthy();
+    anyButton('Replace it').click();
+    await settle();
+    const sent = post.mock.calls.filter(([url]) => url.endsWith('/n1/github'));
+    expect(sent).toHaveLength(1);
+    // a note never published to the site goes Unlisted
+    expect(sent[0][1]).toMatchObject({ short_name: 'old-lead', role: 'unlisted' });
+    expect(post.mock.calls.filter(([url]) => url.endsWith('/n1/github/check'))).toHaveLength(1);
+    expect(dialog().querySelector('section[aria-label="Published to GitHub Pages"]')).not.toBeNull();
   });
 
   it('forgets a check answered after the dialog was closed', async () => {

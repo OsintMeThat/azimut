@@ -88,6 +88,48 @@ it('tests on its press, says who and where, and what to mind', async () => {
   expect(target.querySelector('[aria-label="To mind"]').textContent).toContain('Pages site is public');
 });
 
+it('says it is testing on the press, with a spinner, and is the same press again after a failure', async () => {
+  get.mockResolvedValue({ github: SET });
+  live = mount(GitHubPagesSettings, { target });
+  await settle();
+  let fail;
+  post.mockImplementation(() => new Promise((_, reject) => { fail = reject; }));
+  const press = button('Test connection');
+  press.click();
+  await settle();
+  expect(press.textContent.trim()).toBe('Testing…');
+  expect(press.querySelector('.busy-spin')).not.toBeNull();
+  expect(press.disabled).toBe(true);
+  expect(press.getAttribute('aria-busy')).toBe('true');
+  fail(new Error('GitHub did not answer.'));
+  await settle();
+  expect(press.textContent.trim()).toBe('Test connection');
+  expect(press.disabled).toBe(false);
+  expect(target.querySelector('.said').dataset.state).toBe('error');
+  expect(target.querySelector('.said').textContent).toContain('GitHub did not answer.');
+});
+
+it('says the setup press is working, with a spinner, and is the same press again when GitHub refuses', async () => {
+  get.mockResolvedValue({ github: SET });
+  live = mount(GitHubPagesSettings, { target });
+  await settle();
+  post.mockResolvedValueOnce({ ok: false, login: 'octo', needs: 'pages', detail: 'Pages is off for octo/articles.' });
+  button('Test connection').click();
+  await settle();
+  let fail;
+  post.mockImplementation(() => new Promise((_, reject) => { fail = reject; }));
+  const press = button('Turn on Pages');
+  press.click();
+  await settle();
+  expect(press.textContent.trim()).toBe('Turning on…');
+  expect(press.querySelector('.busy-spin')).not.toBeNull();
+  expect(press.getAttribute('aria-busy')).toBe('true');
+  fail(new Error('GitHub refused.'));
+  await settle();
+  expect(press.textContent.trim()).toBe('Turn on Pages');
+  expect(press.disabled).toBe(false);
+});
+
 it('offers to make the repository when the test found none, and tests again once made', async () => {
   get.mockResolvedValue({ github: SET });
   live = mount(GitHubPagesSettings, { target });

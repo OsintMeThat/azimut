@@ -1,17 +1,22 @@
 <script>
   /**
-   * The Overview: the four steps from a note to a reader, the checklist of what is set and what is
-   * left, each step saying its state and opening the panel where it is done, and the tips, with one
-   * more once the site passes four fifths of what GitHub Pages serves. What only a read of the site
-   * can tell says so until it is read.
+   * The Overview: the four steps from a note to a reader and the checklist of what is set and what is
+   * left, each step saying its state and opening the panel where it is done, with a card beside it once
+   * the site passes four fifths of what GitHub Pages serves. What only a read of the site can tell says so
+   * until it is read. What a press does is said beside the press, in its own panel, not here.
+   *
+   * One step has its press here: **Put your home page online**, while the read finds the site with no home
+   * page. It is Update the site (`onupdate`), which writes Azimut's home with its empty list, the feed and the
+   * sitemap before any article, and never over a home page of the analyst's own; once there, **See it** opens it.
    */
+  import BusyLabel from '../../../components/BusyLabel.svelte';
   import Icon from '../../../components/Icon.svelte';
   import HubCard from './HubCard.svelte';
   import HubPanel from './HubPanel.svelte';
   import { siteRead } from '../../../lib/siteRead.svelte.js';
   import { formatBytes, hostOf, percentOf, shareOf } from '../../../lib/websiteHub.js';
   import {
-    CHECKLIST_TITLE, FLOW_AFTER, FLOW_REFRESHES, HUB_LEADS, HUB_TABS, HUB_TIPS, LIMITS_AMBER, OPTIONAL, SIZE_TIP_GO, SIZE_TIP_TITLE,
+    BUSY, CHECKLIST_TITLE, FLOW_AFTER, FLOW_REFRESHES, HOME_PRESS, HOME_SEE, HUB_LEADS, HUB_TABS, LIMITS_AMBER, OPTIONAL, SIZE_TIP_GO, SIZE_TIP_TITLE,
     WEBSITE_HELP as HELP, checklist, flowSteps, progressSaid, sizeTipSaid,
   } from '../../../lib/websiteSetup.js';
 
@@ -27,7 +32,10 @@
     logoFrom = '',
     /** What the site shows as while it has no title. */
     fallbackName = '',
+    /** What Update the site did: `null`, `'working'`, `{ text, at }` or `{ error, at }`. */
+    updated = null,
     ongo = () => {},
+    onupdate = () => {},
   } = $props();
 
   const [title, sub] = HUB_LEADS.overview;
@@ -39,6 +47,7 @@
     logoFrom, counting, stats: prefs.siteStats, read,
   }));
   const done = $derived(steps.filter((step) => step.state === 'done').length);
+  const working = $derived(updated === 'working');
   const labelOf = (id) => HUB_TABS.find((tab) => tab.id === id)?.label ?? id;
   // a site past four fifths of what GitHub Pages serves gets a tip of its own
   const big = $derived.by(() => {
@@ -56,7 +65,7 @@
   <p class="after">{FLOW_AFTER}
     {#each FLOW_REFRESHES as what (what)}<span class="hub-pill">{what}</span>{/each}</p>
 
-  <div class="hub-grid hub-gap">
+  <div class="hub-gap" class:hub-grid={big}>
     <HubCard title={CHECKLIST_TITLE} label={CHECKLIST_TITLE}>
       <p>{progressSaid(steps)}</p>
       <div class="progress" role="progressbar" aria-label="Steps done" aria-valuemin="0" aria-valuemax={steps.length} aria-valuenow={done}>
@@ -71,24 +80,27 @@
             <span class="what">
               <span class="step-name">{step.label}{#if step.optional}<span class="optional">{` · ${OPTIONAL}`}</span>{/if}</span>
               <small>{step.said}</small>
+              {#if step.act === 'online' && updated?.error}<small class="failed" role="status">{updated.error}</small>{/if}
             </span>
-            <button type="button" class="hub-go" onclick={() => ongo(step.go)} title={HELP.hubGo}>{labelOf(step.go)}<Icon name="chevronRight" size={12} /></button>
+            {#if step.act === 'online'}
+              <button type="button" class="btn btn-sm btn-primary" onclick={onupdate} disabled={working} aria-busy={working}
+                title={HELP.homeOnline}><BusyLabel busy={working} text={BUSY.home}>{HOME_PRESS}</BusyLabel></button>
+            {:else if step.act === 'see' && address}
+              <a class="hub-ext" href={address} target="_blank" rel="noopener noreferrer" title={HELP.homeSee}>{HOME_SEE}<Icon name="external" size={11} /></a>
+            {:else}
+              <button type="button" class="hub-go" onclick={() => ongo(step.go)} title={HELP.hubGo}>{labelOf(step.go)}<Icon name="chevronRight" size={12} /></button>
+            {/if}
           </li>
         {/each}
       </ul>
     </HubCard>
 
-    <div class="hub-col">
-      {#if big}
-        <HubCard title={SIZE_TIP_TITLE} label={SIZE_TIP_TITLE} tip>
-          <p>{big}</p>
-          <p><button type="button" class="hub-go" onclick={() => ongo('hosting')} title={HELP.hubGo}>{SIZE_TIP_GO}<Icon name="chevronRight" size={12} /></button></p>
-        </HubCard>
-      {/if}
-      {#each HUB_TIPS as [tip, said] (tip)}
-        <HubCard title={tip} tip><p>{said}</p></HubCard>
-      {/each}
-    </div>
+    {#if big}
+      <HubCard title={SIZE_TIP_TITLE} label={SIZE_TIP_TITLE} tip>
+        <p>{big}</p>
+        <p><button type="button" class="hub-go" onclick={() => ongo('hosting')} title={HELP.hubGo}>{SIZE_TIP_GO}<Icon name="chevronRight" size={12} /></button></p>
+      </HubCard>
+    {/if}
   </div>
 </HubPanel>
 
@@ -121,6 +133,7 @@
   .optional { color: var(--text-3); }
   .what small { color: var(--text-3); font-size: var(--fs-xs); line-height: 1.45; overflow-wrap: anywhere; }
   li[data-state='done'] .step-name { color: var(--text-2); }
+  .what small.failed { color: var(--danger); }
 
   @container hub (max-width: 640px) {
     .flow { grid-template-columns: repeat(2, minmax(0, 1fr)); }

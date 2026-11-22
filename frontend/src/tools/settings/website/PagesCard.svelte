@@ -3,8 +3,10 @@
    * Pages every site should have: the Legal notice and the Privacy page. Each press makes a note of
    * that name in the open case, a page of the site that names the host and leaves the rest to the
    * analyst, and opens the Notebook on it; pressed again it opens the one made. Once the site is read,
-   * a page it already holds says so. Nothing here reaches GitHub.
+   * a page it already holds says so, and a press says so with a spinner while the note is made. Nothing
+   * here reaches GitHub.
    */
+  import BusyLabel from '../../../components/BusyLabel.svelte';
   import Icon from '../../../components/Icon.svelte';
   import HubCard from './HubCard.svelte';
   import { caseState, reloadCase, toast } from '../../../lib/state.svelte.js';
@@ -12,7 +14,7 @@
   import { startLegalNotice, startPrivacyNotice } from '../../../lib/githubPages.js';
   import { siteRead } from '../../../lib/siteRead.svelte.js';
   import {
-    LEGAL_NO_CASE, LEGAL_PRESS, LEGAL_SAID, LEGAL_SENTENCE, PAGES_NOTE, PAGES_TITLE, PAGE_ON_SITE, PRIVACY_PRESS, PRIVACY_SAID, STARTING,
+    BUSY, LEGAL_NO_CASE, LEGAL_PRESS, LEGAL_SAID, LEGAL_SENTENCE, PAGES_NOTE, PAGES_TITLE, PAGE_ON_SITE, PRIVACY_PRESS, PRIVACY_SAID,
     WEBSITE_HELP as HELP,
   } from '../../../lib/websiteSetup.js';
 
@@ -53,7 +55,7 @@
           <small>{page.said}</small>
         </span>
         <button type="button" class="btn btn-sm" onclick={() => start(page)} disabled={!caseId || busy !== ''} aria-busy={busy === page.id}
-          title={caseId ? page.help : LEGAL_NO_CASE}>{busy === page.id ? STARTING : page.press}</button>
+          title={caseId ? page.help : LEGAL_NO_CASE}><BusyLabel busy={busy === page.id} text={BUSY.start}>{page.press}</BusyLabel></button>
       </li>
     {/each}
   </ul>

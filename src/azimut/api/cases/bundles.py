@@ -1,7 +1,9 @@
 """Case bundles: export one, inspect an upload, import it back.
 
 The work itself runs as a durable job (`engine/bundles.py`); these routes queue it,
-report on it and hand back the finished file.
+report on it and hand back the finished file. The inspect names what the import would
+leave out (`flagged`: what could run, and files that are not what their name says); the
+import leaves them out unless asked to keep them, and its job names what it left out.
 """
 
 from __future__ import annotations
@@ -27,6 +29,8 @@ class BundlePassword(BaseModel):
 
 class BundleUpload(BundlePassword):
     upload_id: str = Field(min_length=32, max_length=32)
+    #: Import what the inspect flagged too: the analyst's choice, never the default.
+    keep_flagged: bool = False
 
 @router.post("/bundles/inspect")
 def inspect_bundle(
@@ -52,6 +56,7 @@ def import_bundle(body: BundleUpload) -> dict[str, Any]:
             source,
             password=body.password,
             cleanup_source=True,
+            keep=body.keep_flagged,
         )
     except CaseError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
@@ -101,11 +106,15 @@ def bundle_job(case_id: str, job_id: str) -> dict[str, Any]:
         bundle_engine.IMPORT_JOB,
     }:
         raise HTTPException(status_code=404, detail=f"bundle job '{job_id}' not found")
+    payload = job.get("payload") or {}
+    left = payload.get("left_out") if job["kind"] == bundle_engine.IMPORT_JOB else None
     return {
         "id": job["id"],
         "kind": job["kind"],
         "state": job["state"],
         "error": job.get("error"),
+        **({"left_out": left, "left_out_count": int(payload.get("left_out_count") or len(left))}
+           if isinstance(left, list) else {}),
     }
 
 @router.get("/{case_id}/bundle/jobs/{job_id}/download")

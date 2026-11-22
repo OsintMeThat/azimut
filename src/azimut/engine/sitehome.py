@@ -2,15 +2,19 @@
 
 It is a template with the same markers a hand-made home carries, filled by the same
 renderer as every marked page (`engine/site.py`), so there is one list for both: the
-site's title and logo, a line under them, the pages linked from its header, tabs (All, one
-per category in use with its count, Maps when the site has maps), the newest article large
-and a grid of the rest, then RSS and, unless the analyst turned it off in Settings ›
-Website, "Made with Azimut <version>" in the footer.
+site's title and logo, a line under them, the pages linked from its header, a map of the
+listed articles that stand somewhere once one does (`engine/siteatlas.py`: Natural Earth land in
+Equal Earth, a pin each, framed to fit them), tabs (All, one per category in use with its count,
+Maps when the site has maps), the newest article large and a grid of the rest, then RSS and,
+unless the analyst turned it off in Settings › Website, "Made with Azimut <version>" in the footer.
+With no article yet it is the same page with its list empty, which Settings › Website puts online
+before the first publish ("Put your home page online", an Update the site).
 
 Its files go under `azimut-site/`, a folder of Azimut's own beside the home: the style
-sheet, the script of its tabs, the logo, the faces (the same as Azimut's published pages, cut
-to the Latin letters so that the files are the same from one publish to the next) and, with a
-GoatCounter site named, the counting script. The home is Azimut's while it holds
+sheet, the script of its tabs and of the map's cards, the logo, the faces (the same as Azimut's
+published pages, cut to the Latin letters so that the files are the same from one publish to the
+next), the map's land once the home shows a map, and, with a GoatCounter site named, the counting
+script. The home is Azimut's while it holds
 `<meta name="generator" content="Azimut <version>">` (`site.owns_home`).
 """
 
@@ -21,7 +25,7 @@ from typing import Any
 
 from .. import __version__
 from . import notes_html as html_engine
-from . import notes_style, site
+from . import notes_style, site, siteatlas
 from .notelook import NoteLook
 from .site import Site
 
@@ -31,6 +35,7 @@ STYLE = f"{KIT}/site.css"
 SCRIPT = f"{KIT}/site.js"
 LOGO = f"{KIT}/logo.png"
 COUNT = f"{KIT}/count.js"
+ATLAS = f"{KIT}/atlas.svg"
 FONTS = f"{KIT}/fonts"
 #: The faces of the home, by the name its style sheet gives each and the file it is cut to.
 FACES = (("az-head", 400, "normal", "head-400"), ("az-head", 700, "normal", "head-700"),
@@ -71,6 +76,7 @@ img{max-width:100%;display:block}
 .az-title a{color:var(--ink);text-decoration:none}
 .az-title a:hover{color:var(--accent)}
 .az-meta{margin:0 0 .6rem;color:var(--muted);font:400 .85rem var(--head)}
+.az-face{width:1.25em;height:1.25em;margin-right:.35em;border-radius:50%;object-fit:cover;vertical-align:-.3em}
 .az-summary{margin:0 0 .75rem;color:var(--ink-2)}
 .az-links{margin:0;display:flex;flex-wrap:wrap;gap:.4rem 1rem;font:500 .9rem var(--head)}
 .az-links a{text-decoration:none}
@@ -79,6 +85,26 @@ img{max-width:100%;display:block}
 .az-from::before{content:"From: "}
 .az-empty{color:var(--muted)}
 .maps-block[hidden]{display:none}
+.site-map{position:relative;margin:2rem 0 0}
+.az-atlas{display:block;width:100%;height:auto;border:1px solid var(--rule);border-radius:.5rem;background:#e7edf2;overflow:hidden}
+.az-pin{cursor:pointer;outline:none}
+.az-pin path{fill:none;stroke-linecap:round;vector-effect:non-scaling-stroke}
+.az-pin .ring{stroke:transparent;stroke-width:30px}
+.az-pin .halo{stroke:#fff;stroke-width:15px}
+.az-pin .dot{stroke:var(--accent);stroke-width:10px}
+.az-pin.az-many .halo{stroke-width:19px}
+.az-pin.az-many .dot{stroke-width:14px}
+.az-pin:hover .dot,.az-pin.is-on .dot{stroke:#0e2b46}
+.az-pin:focus-visible .ring{stroke:var(--accent);stroke-width:24px}
+.az-card{position:absolute;z-index:3;width:17rem;max-width:calc(100% - 1rem);padding:.7rem .85rem .75rem;background:var(--paper);border:1px solid var(--rule);
+border-radius:.375rem;box-shadow:0 6px 22px rgba(20,30,40,.14);font:400 .85rem/1.4 var(--head)}
+.az-card[hidden]{display:none}
+.az-card-place{display:block;margin-bottom:.4rem;color:var(--muted);font-size:.72rem;font-weight:700;letter-spacing:.06em;text-transform:uppercase}
+.az-card ul{list-style:none;margin:0;padding:0}
+.az-card li+li{margin-top:.5rem}
+.az-card a{color:var(--ink);font-weight:700;text-decoration:none}
+.az-card a:hover{color:var(--accent)}
+.az-card small{display:block;color:var(--muted);font-size:.78rem}
 .site-foot{margin-top:4rem;border-top:1px solid var(--rule);padding:1.5rem 0 2.5rem;font:400 .9rem var(--head);color:var(--muted)}
 .site-foot .wrap{display:flex;flex-wrap:wrap;gap:.5rem 1.5rem;justify-content:space-between}
 .site-foot a{color:var(--muted)}
@@ -86,7 +112,7 @@ img{max-width:100%;display:block}
 .made-with a:hover{color:var(--accent)}
 @media (max-width:56rem){.az-list{grid-template-columns:repeat(2,minmax(0,1fr))}
 .az-list:not(.az-maps):not(.is-filtered) .az-item:first-child{grid-template-columns:1fr}.az-list:not(.az-maps):not(.is-filtered) .az-item:first-child .az-cover{grid-row:auto}}
-@media (max-width:36rem){.az-list{grid-template-columns:1fr}.site-top{flex-direction:column;align-items:flex-start}
+@media (max-width:36rem){.az-list{grid-template-columns:1fr}.site-top{flex-direction:column;align-items:flex-start}.az-atlas{aspect-ratio:3/2}
 .az-list:not(.az-maps):not(.is-filtered) .az-item:first-child .az-title{font-size:1.5rem}}
 """
 
@@ -109,6 +135,78 @@ TABS_JS = """// The tabs filter the list in place; without script every article 
       if (list) list.classList.toggle('is-filtered', want !== '');
     });
   });
+})();
+
+// The map's pins: a card of what stands there, on hover, focus or tap. Without script each pin is a link
+// with its title, which the browser shows on hover.
+(function () {
+  var map = document.querySelector('.site-map');
+  if (!map) return;
+  var card = document.createElement('div');
+  card.className = 'az-card';
+  card.hidden = true;
+  map.appendChild(card);
+  var shown = null, timer = 0, touched = false;
+  function make(tag, name, words) {
+    var node = document.createElement(tag);
+    if (name) node.className = name;
+    if (words) node.textContent = words;
+    return node;
+  }
+  function close() {
+    card.hidden = true;
+    shown = null;
+    map.querySelectorAll('.az-pin.is-on').forEach(function (pin) { pin.classList.remove('is-on'); });
+  }
+  function show(pin) {
+    clearTimeout(timer);
+    var at = pin.getAttribute('data-pin');
+    if (shown === at) return;
+    close();
+    shown = at;
+    var all = map.querySelectorAll('.az-pin[data-pin="' + at + '"]');
+    var place = all[0].getAttribute('data-place');
+    card.textContent = '';
+    if (place) card.appendChild(make('span', 'az-card-place', place));
+    var list = make('ul');
+    all.forEach(function (one) {
+      var item = make('li'), link = make('a', '', one.getAttribute('data-title'));
+      var by = one.getAttribute('data-by');
+      link.href = one.getAttribute('href');
+      item.appendChild(link);
+      item.appendChild(make('small', '', one.getAttribute('data-date') + (by ? ' · ' + by : '')));
+      list.appendChild(item);
+      one.classList.add('is-on');
+    });
+    card.appendChild(list);
+    card.hidden = false;
+    var box = map.getBoundingClientRect(), dot = all[0].querySelector('.dot').getBoundingClientRect();
+    var x = dot.left + dot.width / 2 - box.left, y = dot.top + dot.height / 2 - box.top;
+    var wide = card.offsetWidth, high = card.offsetHeight;
+    var left = x > box.width / 2 ? x - wide - 18 : x + 18;
+    card.style.left = Math.max(8, Math.min(box.width - wide - 8, left)) + 'px';
+    card.style.top = Math.max(8, y - high / 2) + 'px';
+  }
+  function later() { timer = setTimeout(close, 250); }
+  map.querySelectorAll('.az-pin').forEach(function (pin) {
+    pin.addEventListener('pointerdown', function (event) { touched = event.pointerType === 'touch'; });
+    pin.addEventListener('pointerenter', function (event) { if (event.pointerType !== 'touch') show(pin); });
+    pin.addEventListener('pointerleave', later);
+    pin.addEventListener('focus', function () { if (!touched) show(pin); });
+    pin.addEventListener('blur', later);
+    // tapped, a pin where several articles stand shows them first; a click elsewhere opens its article
+    pin.addEventListener('click', function (event) {
+      if (touched && pin.classList.contains('az-many') && shown !== pin.getAttribute('data-pin')) {
+        event.preventDefault();
+        show(pin);
+      }
+      touched = false;
+    });
+  });
+  card.addEventListener('pointerenter', function () { clearTimeout(timer); });
+  card.addEventListener('pointerleave', later);
+  document.addEventListener('keydown', function (event) { if (event.key === 'Escape') close(); });
+  document.addEventListener('click', function (event) { if (!map.contains(event.target)) close(); });
 })();
 """
 
@@ -143,10 +241,13 @@ def stylesheet(present: set[str]) -> str:
     return rules + CSS
 
 
-def kit(home_site: Site) -> dict[str, bytes]:
-    """Every file the default home carries beside itself, by its path from the site's root."""
+def kit(home_site: Site, *, atlas: bool = False) -> dict[str, bytes]:
+    """Every file the default home carries beside itself, by its path from the site's root: the land of
+    its map too once it shows one (``atlas``)."""
     woff = faces()
     files: dict[str, bytes] = {STYLE: stylesheet(set(woff)).encode("utf-8"), SCRIPT: TABS_JS.encode("utf-8")}
+    if atlas:
+        files[ATLAS] = siteatlas.land()
     files.update({f"{FONTS}/{name}": data for name, data in woff.items()})
     if home_site.logo:
         files[LOGO] = home_site.logo
@@ -172,6 +273,13 @@ def home(home_site: Site, lines: list[dict[str, Any]], maps: list[dict[str, Any]
     prefix = home_site.prefix
     links = "".join(f'<a href="{e(site._at(prefix, p["address"]))}">{e(p["title"])}</a>' for p in pages)
     nav = f'<nav class="site-pages">{links}</nav>' if links else ""
+    # the map of the articles that stand somewhere, under the header, once one does; an author is named
+    # as the lists name one, unless it is the site's own name
+    def shown_by(line: dict[str, Any]) -> str:
+        author = str(line.get("author") or "")
+        return author if author != home_site.title else ""
+
+    atlas = siteatlas.figure(lines, ATLAS, lambda address: site._at(prefix, address), shown_by)
     logo = f'<img src="{LOGO}" alt="">' if home_site.logo else ""
     intro = f'\n<p class="site-intro">{e(home_site.tagline)}</p>' if home_site.tagline else ""
     description = e(home_site.tagline or home_site.title)
@@ -192,7 +300,7 @@ def home(home_site: Site, lines: list[dict[str, Any]], maps: list[dict[str, Any]
 <header class="site-head"><div class="wrap">
 <div class="site-top"><a class="site-brand" href="./">{logo}{e(home_site.title)}</a>{nav}</div>{intro}</div></header>
 <main class="wrap">
-<nav class="site-tabs" aria-label="Categories">{''.join(tabs)}</nav>
+{atlas + chr(10) if atlas else ""}<nav class="site-tabs" aria-label="Categories">{''.join(tabs)}</nav>
 <div class="articles-block">
 <!-- azimut:articles -->
 <!-- /azimut:articles -->

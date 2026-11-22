@@ -228,6 +228,10 @@ DEFAULT_SETTINGS: dict[str, Any] = {
     # site, so the publish dialog can suggest them without asking GitHub; cleared with
     # github_site when the repository changes (engine/site.py).
     "github_categories": [],
+    # The categories added in Settings › Website that no article of the site carries yet: offered
+    # by the publish dialog until a read finds one carried, then dropped; cleared with
+    # github_categories when the repository changes (api/publishing.py).
+    "github_categories_added": [],
     # The analyst's website on GitHub Pages (engine/site.py): its title (empty reads the
     # report name, else the GitHub account), the line under it, whether its home page ends
     # on "Made with Azimut" (articles keep report_credit_azimut), and how readers are

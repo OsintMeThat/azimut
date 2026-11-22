@@ -127,6 +127,8 @@ p.az-author-logo { display: flex; justify-content: center; margin: 1.5rem 0 0; }
 .az-author > .az-author-logo { grid-area: logo; }
 .az-author > .az-my-signature { grid-area: sign; }
 .az-author-text { grid-area: text; display: flex; flex-direction: column; gap: .15rem; }
+/* a guest's picture in the logo's place */
+.az-face { border-radius: 50%; object-fit: cover; }
 /* the analyst's name and logo, linked to their Website when Settings › Publishing has one */
 .az-site-link { color: inherit; text-decoration: none; }
 a.az-site-link:hover { text-decoration: underline; }

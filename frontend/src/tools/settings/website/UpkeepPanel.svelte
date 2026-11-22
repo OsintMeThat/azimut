@@ -2,15 +2,16 @@
   /**
    * Upkeep: Update the site with what it last did, who writes which file of the site, and how to do
    * the usual chores. Update the site rebuilds the home, list, feed and sitemap from the articles on
-   * GitHub, in one commit, and reaches GitHub on its press only. The table's pages come from the last
-   * read of the site.
+   * GitHub, in one commit, and reaches GitHub on its press only, saying so with a spinner while it works.
+   * The table's pages come from the last read of the site.
    */
+  import BusyLabel from '../../../components/BusyLabel.svelte';
   import Icon from '../../../components/Icon.svelte';
   import GitHubSetupPress from '../../../components/GitHubSetupPress.svelte';
   import { siteRead } from '../../../lib/siteRead.svelte.js';
   import {
-    CHORES, CHORES_TITLE, HUB_LEADS, OWNERS_HEAD, OWNERS_TITLE, OWNERS_TRUNCATED, OWNERS_UNREAD, OWNER_LABEL, UPDATE_NOT_SET, UPDATE_PRESS,
-    UPDATE_SAID, WEBSITE_HELP as HELP, lastChangeSaid, ownersOf, updatingSaid, whenSaid,
+    BUSY, CHORES, CHORES_TITLE, HUB_LEADS, OWNERS_HEAD, OWNERS_TITLE, OWNERS_TRUNCATED, OWNERS_UNREAD, OWNER_LABEL, UPDATE_NOT_SET, UPDATE_PRESS,
+    UPDATE_SAID, WEBSITE_HELP as HELP, lastChangeSaid, ownersOf, whenSaid,
   } from '../../../lib/websiteSetup.js';
   import HubCard from './HubCard.svelte';
   import HubPanel from './HubPanel.svelte';
@@ -40,16 +41,15 @@
     <div class="body">
       <h3>{UPDATE_PRESS}</h3>
       <p>{UPDATE_SAID}</p>
-      <p class="hub-line" role="status" data-state={working ? 'busy' : result?.error ? 'error' : result || setUp ? 'ok' : ''}>
-        {#if working}<span class="hub-spinner" aria-hidden="true"></span>{updatingSaid(`${github.account}/${github.repo}`)}
-        {:else if result?.error}<Icon name="alert" size={12} />{result.error}
+      <p class="hub-line" role="status" data-state={result?.error ? 'error' : result || setUp ? 'ok' : ''}>
+        {#if result?.error}<Icon name="alert" size={12} />{result.error}
         {:else if result}<Icon name="check" size={12} />{result.text}<span class="when">· {whenSaid(result.at)}</span>
         {:else if setUp}<Icon name="check" size={12} />{setUp}
         {:else if read?.last}{lastChangeSaid(whenSaid(read.last.date), read.last.message)}{/if}
       </p>
     </div>
     <button type="button" class="btn btn-primary" onclick={onupdate} disabled={!ready || working} aria-busy={working}
-      title={ready ? HELP.siteUpdate : UPDATE_NOT_SET}>{UPDATE_PRESS}</button>
+      title={ready ? HELP.siteUpdate : UPDATE_NOT_SET}><BusyLabel busy={working} text={BUSY.update}>{UPDATE_PRESS}</BusyLabel></button>
     {#if result?.warnings?.length}
       <ul class="hub-warnings wide" aria-label="To mind">
         {#each result.warnings as warning, index (index)}<li><Icon name="alert" size={12} /> {warning}</li>{/each}

@@ -18,7 +18,7 @@ const SET = { account: 'octo', repo: 'articles', branch: 'main', site: '', token
 const PUBLISHED = { published: true, address: 'https://octo.github.io/articles/port-strike/', repository: 'octo/articles', commit: 'c'.repeat(40) };
 
 /** The server as the dialog asks it: the site's state, the note's look, its editions and the point it offers. */
-function serve({ github = SET, look = {}, editions = [], offer = null } = {}) {
+function serve({ github = SET, look = {}, editions = [GITHUB_EDITION], offer = null } = {}) {
   get.mockImplementation(async (path) => {
     if (path === '/api/publishing') return { github };
     if (path.endsWith('/look')) {
@@ -64,7 +64,8 @@ afterEach(() => {
 /** The branch as the dialog holds it, its bindings read back as the dialog reads them. */
 function show({ address = '', title = 'Port strike', entities = [] } = {}) {
   bound.address = address;
-  const props = { caseId: 'c1', noteId: 'n1', title, entities, prepare: vi.fn(async () => {}), onaddress: vi.fn(), onlook: vi.fn(), onleave: vi.fn() };
+  const props = { caseId: 'c1', noteId: 'n1', title, entities, prepare: vi.fn(async () => {}), onaddress: vi.fn(), onlook: vi.fn(), onleave: vi.fn(),
+    onpublish: vi.fn() };
   for (const key of ['address', 'connected', 'problem', 'busy', 'warned']) {
     Object.defineProperty(props, key, { get: () => bound[key], set: (value) => { bound[key] = value; }, enumerable: true });
   }
@@ -160,7 +161,8 @@ it('while GitHub is not set up, a press shows the way to Settings and publishes 
   const props = show();
   await settle();
   expect(bound.connected).toBe(false);
-  expect(target.textContent.trim()).toBe('');
+  // only who wrote the note, which can be said with GitHub off
+  expect([...target.querySelectorAll('.lbl')].map((node) => node.textContent.trim())).toEqual(['Author', 'Author picture']);
   expect(await live.publish()).toBeNull();
   await settle();
   expect(target.textContent).toContain('connect GitHub once, in Settings › Website');
@@ -175,11 +177,32 @@ it('while GitHub is not set up, a press shows the way to Settings and publishes 
 
 const publishOk = () => post.mockImplementation(async (path) => (path.endsWith('/pdf/diagrams') ? { diagrams: [] } : PUBLISHED));
 const category = () => target.querySelector('#export-category');
-const options = () => [...target.querySelectorAll('#export-categories option')].map((node) => node.getAttribute('value'));
+const categoryShown = () => category().textContent.trim();
 const choice = (name) => [...target.querySelectorAll('[role="radiogroup"][aria-label="On the site"] [role="radio"]')].find((node) => node.textContent.trim() === name);
+const option = (name) => [...document.querySelectorAll('[role="option"]')].find((node) => node.textContent.trim() === name);
+/** What the category's list holds, opened by a press and closed by another. */
+const options = async () => {
+  category().click();
+  await settle();
+  const found = [...document.querySelectorAll('[role="option"]')].map((node) => node.textContent.trim());
+  category().click();
+  await settle();
+  return found;
+};
+const pickCategory = async (name) => {
+  category().click();
+  await settle();
+  option(name).click();
+  await settle();
+};
+/** A new category typed in the field New category… opens, ended with Enter. */
 const typeCategory = async (value) => {
-  category().value = value;
-  category().dispatchEvent(new Event('input', { bubbles: true }));
+  await pickCategory('New category…');
+  const field = category();
+  field.value = value;
+  field.dispatchEvent(new Event('input', { bubbles: true }));
+  await settle();
+  field.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
   await settle();
 };
 
@@ -187,10 +210,12 @@ it('suggests the categories the site uses and the note\'s own, from what this ma
   serve({ github: { ...SET, categories: ['Conflict Watch', 'Methods & Tools'] }, look: { category: 'Harbour' } });
   show();
   await settle();
-  expect(category().value).toBe('Harbour');
-  expect(category().getAttribute('list')).toBe('export-categories');
-  expect(options()).toEqual(['Conflict Watch', 'Methods & Tools', 'Harbour']);
-  expect(category().maxLength).toBe(60);
+  expect(categoryShown()).toBe('Harbour');
+  // an app list, never the system's: none, what the site uses with the note's own, and a new one
+  expect(category().tagName).toBe('BUTTON');
+  expect(category().getAttribute('role')).toBe('combobox');
+  expect(target.querySelector('datalist, select')).toBeNull();
+  expect(await options()).toEqual(['No category', 'Conflict Watch', 'Methods & Tools', 'Harbour', 'New category…']);
   expect(post).not.toHaveBeenCalled();
 });
 
@@ -199,13 +224,62 @@ it('reads the site\'s categories on a press of its own, and says what the read f
   post.mockResolvedValue({ ok: true, categories: ['Investigations', 'Conflict Watch'], warnings: ['The site holds too many files for Azimut to read.'] });
   show();
   await settle();
-  expect(options()).toEqual([]);
+  expect(await options()).toEqual(['No category', 'New category…']);
   button('Read the site').click();
   await settle();
   expect(post).toHaveBeenCalledWith('/api/publishing/github/categories');
-  expect(options()).toEqual(['Investigations', 'Conflict Watch']);
+  expect(await options()).toEqual(['No category', 'Investigations', 'Conflict Watch', 'New category…']);
   expect(target.querySelector('#export-category-said').textContent).toContain('2 categories on the site.');
   expect(target.querySelector('#export-category-said').textContent).toContain('too many files');
+});
+
+it('says it is reading on the press, with a spinner, and is the same press again after a failure', async () => {
+  serve();
+  let fail;
+  post.mockImplementation(() => new Promise((_, reject) => { fail = reject; }));
+  show();
+  await settle();
+  const press = button('Read the site');
+  press.click();
+  await settle();
+  expect(press.textContent.trim()).toBe('Reading…');
+  expect(press.querySelector('.busy-spin')).not.toBeNull();
+  expect(press.disabled).toBe(true);
+  expect(press.getAttribute('aria-busy')).toBe('true');
+  fail(new Error('GitHub did not answer.'));
+  await settle();
+  expect(press.textContent.trim()).toBe('Read the site');
+  expect(press.disabled).toBe(false);
+  expect(press.querySelector('.busy-spin')).toBeNull();
+  expect(target.querySelector('[role="alert"]').textContent).toContain('GitHub did not answer.');
+});
+
+it('says what it sends while it publishes, and Replace it waits with it', async () => {
+  serve();
+  let release;
+  post.mockImplementation(async (path) => {
+    if (path.endsWith('/github/check')) return TAKEN;
+    if (path.endsWith('/pdf/diagrams')) return { diagrams: [] };
+    return new Promise((resolve) => { release = () => resolve(PUBLISHED); });
+  });
+  show();
+  await settle();
+  await live.publish();
+  await settle();
+  const replace = button('Replace it');
+  const publishing = live.publish();
+  await settle();
+  expect(bound.busy).toBe(true);
+  expect(target.querySelector('.sending').textContent.trim()).toBe('Making the folder and sending it to octo/articles…');
+  expect(target.querySelector('.sending .busy-spin')).not.toBeNull();
+  expect(replace.textContent.trim()).toBe('Publishing…');
+  expect(replace.disabled).toBe(true);
+  expect(button('Pick another address').disabled).toBe(true);
+  release();
+  expect((await publishing).published).toBe(true);
+  await settle();
+  expect(bound.busy).toBe(false);
+  expect(target.querySelector('.sending')).toBeNull();
 });
 
 it('shows the press that sets the site up when the read finds Pages off', async () => {
@@ -219,20 +293,42 @@ it('shows the press that sets the site up when the read finds Pages off', async 
   expect(button('Turn on Pages')).toBeTruthy();
 });
 
-it('sends the category typed, a new one included, and none when it is emptied', async () => {
+it('sends the category picked, a new one typed included, and none when No category is picked', async () => {
   serve({ github: { ...SET, categories: ['Conflict Watch'] }, look: { category: 'Harbour' } });
   publishOk();
   show();
   await settle();
   await typeCategory('  Port   news ');
-  expect(category().value).toBe(' Port news ');
+  expect(categoryShown()).toBe('Port news');
   await live.publish();
   expect(post.mock.calls.at(-1)[1]).toMatchObject({ category: 'Port news', role: 'article' });
-  await typeCategory('');
+  await pickCategory('No category');
+  expect(categoryShown()).toBe('No category');
   await live.publish();
   expect(post.mock.calls.at(-1)[1]).toMatchObject({ category: '' });
+  await pickCategory('Conflict Watch');
+  await live.publish();
+  expect(post.mock.calls.at(-1)[1]).toMatchObject({ category: 'Conflict Watch' });
   await typeCategory('x'.repeat(90));
-  expect(category().value).toHaveLength(60);
+  expect(categoryShown()).toHaveLength(60);
+});
+
+it('walks the category\'s list with the keys and picks with Enter', async () => {
+  serve({ github: { ...SET, categories: ['Conflict Watch', 'Methods & Tools'] }, look: {} });
+  publishOk();
+  show();
+  await settle();
+  const key = async (name) => {
+    category().dispatchEvent(new KeyboardEvent('keydown', { key: name, bubbles: true, cancelable: true }));
+    await settle();
+  };
+  category().focus();
+  await key('m');
+  expect([...document.querySelectorAll('[role="option"]')].map((node) => node.textContent.trim())).toEqual(['Methods & Tools', 'New category…']);
+  await key('Enter');
+  expect(categoryShown()).toBe('Methods & Tools');
+  await live.publish();
+  expect(post.mock.calls.at(-1)[1]).toMatchObject({ category: 'Methods & Tools' });
 });
 
 it('starts the Article or Page choice from the look, and a page needs no category or list picture', async () => {
@@ -249,7 +345,7 @@ it('starts the Article or Page choice from the look, and a page needs no categor
   expect(post.mock.calls.at(-1)[1]).toMatchObject({ role: 'page' });
   choice('Article').click();
   await settle();
-  expect(category().value).toBe('Harbour');
+  expect(categoryShown()).toBe('Harbour');
   expect(target.textContent).toContain('Picture in the list');
   await live.publish();
   expect(post.mock.calls.at(-1)[1]).toMatchObject({ role: 'article', category: 'Harbour' });
@@ -277,6 +373,77 @@ it('offers Unlisted beside Article and Page: no category or list picture, said i
   await settle();
   await live.publish();
   expect(post.mock.calls.at(-1)[1]).toMatchObject({ role: 'unlisted' });
+});
+
+it('says beside the role choice that Unlisted is how a page is tried', async () => {
+  serve();
+  show();
+  await settle();
+  const line = target.querySelector('.choice-line');
+  expect(line.querySelector('[role="radiogroup"]')).not.toBeNull();
+  expect(line.querySelector('.choice-said').textContent).toBe('Unlisted lets you read it online before you announce it.');
+});
+
+it('starts a note never published to this site on Unlisted, and on the role it last went up with after', async () => {
+  serve({ editions: [], look: {} });
+  publishOk();
+  show();
+  await settle();
+  expect(get).toHaveBeenCalledWith('/api/cases/c1/notes/n1/editions');
+  expect(choice('Unlisted').getAttribute('aria-checked')).toBe('true');
+  expect(target.textContent).toContain('Online at its address only, in no list, feed or sitemap.');
+  await live.publish();
+  expect(publishes().at(-1)[1]).toMatchObject({ role: 'unlisted' });
+  // a page published to another site is no page of this one
+  unmount(live);
+  live = null;
+  serve({ editions: [{ ...GITHUB_EDITION, repository: 'someone/else' }, { ...GITHUB_EDITION, format: 'web' }], look: {} });
+  show();
+  await settle();
+  expect(choice('Unlisted').getAttribute('aria-checked')).toBe('true');
+  // published here before: the look's role, an article
+  unmount(live);
+  live = null;
+  serve({ editions: [{ ...GITHUB_EDITION, repository: 'Octo/Articles' }], look: {} });
+  show();
+  await settle();
+  expect(choice('Article').getAttribute('aria-checked')).toBe('true');
+  // a page the look names stays a page, first publish or not
+  unmount(live);
+  live = null;
+  serve({ editions: [], look: { role: 'page' } });
+  show();
+  await settle();
+  expect(choice('Page').getAttribute('aria-checked')).toBe('true');
+});
+
+it('keeps the role picked before the editions are read, and an Article when they cannot be read', async () => {
+  serve({ editions: [], look: {} });
+  let answer;
+  get.mockImplementation(async (path) => {
+    if (path === '/api/publishing') return { github: SET };
+    if (path.endsWith('/editions')) return new Promise((resolve) => { answer = resolve; });
+    if (path.endsWith('/place')) return { suggested: null };
+    return { look: {} };
+  });
+  show();
+  await settle();
+  choice('Page').click();
+  await settle();
+  answer({ editions: [] });
+  await settle();
+  expect(choice('Page').getAttribute('aria-checked')).toBe('true');
+  unmount(live);
+  live = null;
+  get.mockImplementation(async (path) => {
+    if (path === '/api/publishing') return { github: SET };
+    if (path.endsWith('/editions')) throw new Error('offline');
+    if (path.endsWith('/place')) return { suggested: null };
+    return { look: {} };
+  });
+  show();
+  await settle();
+  expect(choice('Article').getAttribute('aria-checked')).toBe('true');
 });
 
 it('says where an article will appear, naming the site by its title, else by what it falls back to', async () => {
@@ -335,7 +502,7 @@ it('keeps the picture of the list in the note\'s look as it is picked, clears it
   serve({ look: { style: 'report', list_image: 'e_a' } });
   const props = show({ entities: PICTURES });
   await settle();
-  const pick = () => target.querySelector('button.pick');
+  const pick = () => target.querySelector('button[data-pick="list"]');
   expect(pick().textContent.trim()).toBe('Harbour');
   expect(pick().getAttribute('title')).toBeTruthy();
   pick().click();
@@ -360,11 +527,11 @@ it('says a picture was not kept, and shows the one it was', async () => {
   const props = show({ entities: PICTURES });
   await settle();
   put.mockRejectedValue(new Error('That picture is not in the case.'));
-  target.querySelector('button.pick').click();
+  target.querySelector('button[data-pick="list"]').click();
   await settle();
   [...target.querySelectorAll('.picture-row')][1].click();
   await settle();
-  expect(target.querySelector('button.pick').textContent.trim()).toBe('Harbour');
+  expect(target.querySelector('button[data-pick="list"]').textContent.trim()).toBe('Harbour');
   expect(props.onlook).not.toHaveBeenCalled();
 });
 
@@ -376,11 +543,64 @@ const coords = () => target.querySelector('#export-place');
 const placeName = () => target.querySelector('#export-place-name');
 const placeSaid = () => target.querySelector('#export-place-said').textContent.trim();
 const offerPress = () => button('Use ');
+const more = () => button('More options');
+const openMore = async () => {
+  if (more().getAttribute('aria-expanded') !== 'true') more().click();
+  await settle();
+};
 const fill = async (node, value) => {
   node.value = value;
   node.dispatchEvent(new Event('input', { bubbles: true }));
   await settle();
 };
+
+it('folds the coordinates under More options each time it opens, with what they are for', async () => {
+  serve({ offer: OFFER });
+  show();
+  await settle();
+  expect(more().getAttribute('aria-expanded')).toBe('false');
+  expect(more().getAttribute('title')).toBeTruthy();
+  expect(coords()).toBeNull();
+  expect(offerPress()).toBeUndefined();
+  more().click();
+  await settle();
+  expect(more().getAttribute('aria-expanded')).toBe('true');
+  const group = target.querySelector('[role="group"][aria-label="Coordinates for this article (optional)"]');
+  expect(group.id).toBe(more().getAttribute('aria-controls'));
+  expect(group.textContent).toContain('They show the article as a pin on the site\'s map.');
+  // the offer and its rule are as they were, inside
+  expect(offerPress().textContent.trim()).toBe('Use 12.7250, 43.5075 · Bab al-Mandab');
+  // nothing typed says nothing more under the fields
+  expect(placeSaid()).toBe('');
+  more().click();
+  await settle();
+  expect(coords()).toBeNull();
+  // opened again, it is shut once more
+  unmount(live);
+  live = null;
+  show();
+  await settle();
+  expect(more().getAttribute('aria-expanded')).toBe('false');
+});
+
+it('opens More options on a place the note keeps, and keeps it open while what is typed is no place', async () => {
+  serve({ look: { place: KEPT } });
+  show();
+  await settle();
+  expect(more().getAttribute('aria-expanded')).toBe('true');
+  expect(coords().value).toBe('12.725004, 43.5075');
+  await fill(coords(), 'the strait');
+  expect(bound.problem).not.toBe('');
+  more().click();
+  await settle();
+  // what holds the publish back is never folded away
+  expect(coords()).not.toBeNull();
+  expect(more().getAttribute('aria-expanded')).toBe('true');
+  await fill(coords(), '');
+  more().click();
+  await settle();
+  expect(coords()).toBeNull();
+});
 
 it('starts the place from the look, reads what is typed, and holds the publish back while it is no place', async () => {
   serve({ look: { place: KEPT } });
@@ -414,7 +634,7 @@ it('starts the place from the look, reads what is typed, and holds the publish b
   await fill(coords(), '');
   expect(placeSaid()).toBe('A name needs coordinates: left so, the article has no pin.');
   await fill(placeName(), '');
-  expect(placeSaid()).toBe('Optional. Left empty, the article has no pin on the site\'s map.');
+  expect(placeSaid()).toBe('');
   await live.publish();
   expect(post.mock.calls.at(-1)[1].place).toBeNull();
 });
@@ -424,6 +644,7 @@ it('offers the note\'s one point as a press, with its rule, and fills nothing un
   publishOk();
   show();
   await settle();
+  await openMore();
   expect(get).toHaveBeenCalledWith('/api/cases/c1/notes/n1/place');
   expect(coords().value).toBe('');
   expect(placeName().value).toBe('');
@@ -461,6 +682,7 @@ it('never offers over a place the note keeps, and says the rule of a map\'s offe
   serve({ offer: { lat: 12.6, lon: 43.4, name: '', from: 'map', label: 'The strait' } });
   show();
   await settle();
+  await openMore();
   expect(offerPress().textContent.trim()).toBe('Use 12.6000, 43.4000');
   expect(target.querySelector('.place-why').textContent).toBe('Where the note\'s one map looks.');
   // an offer the server could not read is no offer
@@ -469,6 +691,7 @@ it('never offers over a place the note keeps, and says the rule of a map\'s offe
   serve({ offer: { lat: 99, lon: 1, name: '', from: 'place', label: '' } });
   show();
   await settle();
+  await openMore();
   expect(offerPress()).toBeUndefined();
 });
 
@@ -546,10 +769,10 @@ it('lets the analyst stop at the warning, and asks again for another short name'
   expect(publishes()).toEqual([]);
 });
 
-it('publishes with no warning when the folder is as this Azimut left it, or the note was never published there', async () => {
+it('publishes with no warning when the folder is as this Azimut left it, or nothing holds the address', async () => {
   serve({ editions: [GITHUB_EDITION] });
   post.mockImplementation(async (path) => {
-    if (path.endsWith('/github/check')) return { checked: true, exists: true, edited: false, warning: '' };
+    if (path.endsWith('/github/check')) return { checked: true, exists: true, edited: false, warning: '', taken: null, free: '' };
     return path.endsWith('/pdf/diagrams') ? { diagrams: [] } : PUBLISHED;
   });
   show();
@@ -560,13 +783,85 @@ it('publishes with no warning when the folder is as this Azimut left it, or the 
   unmount(live);
   live = null;
   vi.clearAllMocks();
-  // a note with no page of its own on GitHub has nothing to be changed: the press asks nothing first
+  // a note never published here is checked too: another note may hold its address
   serve({ editions: [{ ...GITHUB_EDITION, format: 'web' }] });
-  publishOk();
+  post.mockImplementation(async (path) => {
+    if (path.endsWith('/github/check')) return { checked: true, exists: false, edited: false, warning: '', taken: null, free: '' };
+    return path.endsWith('/pdf/diagrams') ? { diagrams: [] } : PUBLISHED;
+  });
   show();
   await settle();
   expect((await live.publish()).published).toBe(true);
-  expect(checks()).toEqual([]);
+  expect(checks()).toHaveLength(1);
+  expect(target.querySelector('[role="alert"]')).toBeNull();
+});
+
+const TAKEN = { checked: true, exists: true, edited: false, warning: '', taken: { title: 'Harbour fire', ours: true }, free: 'port-strike-2' };
+const holding = (answer) => post.mockImplementation(async (path) => {
+  if (path.endsWith('/github/check')) return answer;
+  return path.endsWith('/pdf/diagrams') ? { diagrams: [] } : PUBLISHED;
+});
+
+it('names what another note left at the address, and Replace it publishes over it', async () => {
+  serve();
+  holding(TAKEN);
+  const props = show();
+  await settle();
+  expect(await live.publish()).toBeNull();
+  await settle();
+  expect(publishes()).toEqual([]);
+  expect(target.querySelector('[role="alert"] p').textContent.trim()).toBe('This address already holds “Harbour fire”. Replace it?');
+  expect(bound.warned).toBe(true);
+  for (const name of ['Replace it', 'Pick another address']) expect(button(name).getAttribute('title')).toBeTruthy();
+  button('Replace it').click();
+  expect(props.onpublish).toHaveBeenCalledTimes(1);
+  // the press it stands for publishes without asking again: the analyst has the last word
+  const answer = await live.publish();
+  await settle();
+  expect(answer).toMatchObject({ published: true, told: true });
+  expect(checks()).toHaveLength(1);
+  expect(publishes()).toHaveLength(1);
+  expect(bound.warned).toBe(false);
+  expect(target.querySelector('[role="alert"]')).toBeNull();
+});
+
+it('Pick another address puts a free short name in the field and the focus on it', async () => {
+  serve();
+  holding(TAKEN);
+  const props = show();
+  await settle();
+  await live.publish();
+  await settle();
+  button('Pick another address').click();
+  await settle();
+  const input = target.querySelector('#export-short');
+  expect(input.value).toBe('port-strike-2');
+  expect(document.activeElement).toBe(input);
+  expect(bound.warned).toBe(false);
+  expect(target.querySelector('[role="alert"]')).toBeNull();
+  expect(props.onaddress).toHaveBeenLastCalledWith('https://octo.github.io/articles/port-strike-2/');
+  expect(bound.address).toBe('https://octo.github.io/articles/port-strike-2/');
+  expect(publishes()).toEqual([]);
+  // the new address is checked as any other
+  holding({ ...TAKEN, exists: false, taken: null, free: '' });
+  expect((await live.publish()).published).toBe(true);
+  expect(checks().at(-1)[1]).toEqual({ short_name: 'port-strike-2' });
+});
+
+it('offers only another address for a folder Azimut did not make, and a press checks again', async () => {
+  serve();
+  holding({ ...TAKEN, taken: { title: 'harbour', ours: false }, free: 'harbour-2' });
+  show();
+  await settle();
+  await live.publish();
+  await settle();
+  expect(target.querySelector('[role="alert"] p').textContent.trim()).toBe('This address already holds “harbour”, which Azimut did not make.');
+  expect(button('Replace it')).toBeUndefined();
+  expect(button('Pick another address')).toBeTruthy();
+  expect(bound.warned).toBe(false);
+  expect(await live.publish()).toBeNull();
+  expect(checks()).toHaveLength(2);
+  expect(publishes()).toEqual([]);
 });
 
 it('publishes anyway when the check itself fails', async () => {
@@ -582,7 +877,7 @@ it('publishes anyway when the check itself fails', async () => {
   expect(target.querySelector('[role="alert"]')).toBeNull();
 });
 
-it('publishes when the editions cannot be read, as with a check that fails', async () => {
+it('publishes when the editions cannot be read', async () => {
   serve();
   get.mockImplementation(async (path) => {
     if (path === '/api/publishing') return { github: SET };
@@ -593,5 +888,90 @@ it('publishes when the editions cannot be read, as with a check that fails', asy
   show();
   await settle();
   expect((await live.publish()).published).toBe(true);
-  expect(checks()).toEqual([]);
+  expect(checks()).toHaveLength(1);
+});
+
+// -- who wrote it ---------------------------------------------------------------------------
+
+const author = () => target.querySelector('#export-author');
+const leave = async (field, value) => {
+  field.value = value;
+  field.dispatchEvent(new Event('input', { bubbles: true }));
+  field.dispatchEvent(new Event('change', { bubbles: true }));
+  await settle();
+};
+
+it('opens on the author the note keeps, its placeholder the name it falls back to, for every role', async () => {
+  prefs.reportName = 'A. Analyst';
+  serve({ look: { author: 'Jane Guest', author_image: 'e_a' } });
+  show({ entities: PICTURES });
+  await settle();
+  expect(author().value).toBe('Jane Guest');
+  expect(author().getAttribute('placeholder')).toBe('A. Analyst');
+  expect(author().getAttribute('title')).toBeTruthy();
+  expect(target.querySelector('button[data-pick="author"]').textContent.trim()).toBe('Harbour');
+  for (const role of ['Page', 'Unlisted', 'Article']) {
+    choice(role).click();
+    flushSync();
+    expect(author()).not.toBeNull();
+  }
+});
+
+it('keeps the author in the look as the field is left, and an emptied one goes back to the default', async () => {
+  serve({ look: { style: 'report' } });
+  const props = show({ entities: PICTURES });
+  await settle();
+  await leave(author(), '  Jane   Guest ');
+  expect(put).toHaveBeenLastCalledWith('/api/cases/c1/notes/n1/look', expect.objectContaining({ style: 'report', author: 'Jane Guest' }));
+  expect(author().value).toBe('Jane Guest');
+  expect(props.onlook).toHaveBeenCalledTimes(1);
+  // leaving it unchanged writes nothing
+  await leave(author(), 'Jane Guest');
+  expect(put).toHaveBeenCalledTimes(1);
+  await leave(author(), '');
+  expect('author' in put.mock.calls.at(-1)[1]).toBe(false);
+});
+
+it('picks the author picture among the case pictures, never a clip, and clears it', async () => {
+  serve({ look: {} });
+  show({ entities: PICTURES });
+  await settle();
+  const pick = () => target.querySelector('button[data-pick="author"]');
+  expect(pick().textContent.trim()).toBe('No picture');
+  pick().click();
+  await settle();
+  expect([...target.querySelectorAll('.picture-row')].map((node) => node.textContent.trim())).toEqual(['Harbour', 'Pier at dawn']);
+  [...target.querySelectorAll('.picture-row')][0].click();
+  await settle();
+  expect(put).toHaveBeenLastCalledWith('/api/cases/c1/notes/n1/look', expect.objectContaining({ author_image: 'e_a' }));
+  expect(pick().textContent.trim()).toBe('Harbour');
+  target.querySelector('button[aria-label="No author picture"]').click();
+  await settle();
+  expect('author_image' in put.mock.calls.at(-1)[1]).toBe(false);
+  expect(pick().textContent.trim()).toBe('No picture');
+});
+
+it('with GitHub off, the author can still be set, so it travels with the case', async () => {
+  serve({ github: NOTHING, look: {} });
+  show({ entities: PICTURES });
+  await settle();
+  await leave(author(), 'Jane Guest');
+  expect(put).toHaveBeenLastCalledWith('/api/cases/c1/notes/n1/look', expect.objectContaining({ author: 'Jane Guest' }));
+  expect(post).not.toHaveBeenCalled();
+});
+
+it('publishes only once the author just typed is in the look', async () => {
+  serve({ look: {} });
+  publishOk();
+  let release;
+  put.mockImplementation((path, body) => new Promise((resolve) => { release = () => resolve({ look: body }); }));
+  show({ entities: PICTURES });
+  await settle();
+  await leave(author(), 'Jane Guest');
+  const publishing = live.publish();
+  await settle();
+  expect(post.mock.calls.some(([path]) => path.endsWith('/github'))).toBe(false);
+  release();
+  await publishing;
+  expect(post.mock.calls.some(([path]) => path.endsWith('/github'))).toBe(true);
 });

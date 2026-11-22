@@ -149,6 +149,21 @@ describe('a look', () => {
     expect(server).toContain('CATEGORY_MAX = 60');
   });
 
+  it('carries who wrote the note and their picture, and a template never does', () => {
+    const plain = normaliseLook(null);
+    expect('author' in plain || 'author_image' in plain).toBe(false);
+    const set = normaliseLook({ author: '  Jane \n Guest ', author_image: 'e_face' });
+    expect([set.author, set.author_image]).toEqual(['Jane Guest', 'e_face']);
+    expect(normaliseLook(set)).toEqual(set);
+    expect(normaliseLook({ author: 'x'.repeat(200) }).author).toHaveLength(120);
+    expect('author_image' in normaliseLook({ author_image: '../etc' })).toBe(false);
+    const template = templateLook({ category: 'Harbour', author: 'Jane Guest', author_image: 'e_face' });
+    expect('author' in template || 'author_image' in template).toBe(false);
+    const server = readFileSync(new URL('../../../../src/azimut/engine/notelook.py', import.meta.url), 'utf8');
+    expect(server).toMatch(/LATE_KEYS = \([^)]*"author"[^)]*"author_image"/);
+    expect(server).toContain('AUTHOR_MAX = 120');
+  });
+
   it('carries the place on the site\'s map, and a template never does', () => {
     expect('place' in normaliseLook(null)).toBe(false);
     const placed = normaliseLook({ style: 'article', place: { lat: 12.725004, lon: 43.5075, name: 'Bab al-Mandab' } });

@@ -17,9 +17,12 @@ service, and for GitHub **Create the repository**, **Turn on Pages**, **Update t
 **Read the categories** (`/github/categories`), **Read the site** (`/github/site/read`, the
 articles, maps and pages it holds, with its home, categories and last commit; reads only),
 **Delete** an article's folder (`/github/site/delete`, one commit, only a folder Azimut published),
-the watch of a page being built (`/github/build`, asked by the export dialog after a publish), and
-**Read the numbers** (`/cloudflare/numbers`, `engine/sitestats.py`: one query to api.cloudflare.com, after
-the list of the account's sites when the site tag must be found from the site token).
+**Rename** and **Delete** a category and give one article another (`/github/categories/rename`,
+`/github/categories/delete`, `/github/site/category`, each one commit of the cards concerned and the
+lists), the watch of a page being built (`/github/build`, asked by the export dialog after a publish),
+and **Read the numbers** (`/cloudflare/numbers`, `engine/sitestats.py`: one query to api.cloudflare.com,
+after the list of the account's sites when the site tag must be found from the site token).
+A category added there (`/github/categories/added`) is kept on this machine until an article carries it.
 Reading these settings, saving them and forgetting them stay on this machine. Sending
 a note is the Notebook's (`/notes/{note}/wordpress` and `/notes/{note}/github`,
 `api/notes.py`).
@@ -39,7 +42,7 @@ from .. import config
 from ..engine import githubpages as github
 from ..engine import notes_web
 from ..engine import notes_wordpress as wordpress
-from ..engine import publishsecrets, site, sitestats, sitesync
+from ..engine import notelook, publishsecrets, site, sitestats, sitesync
 
 router = APIRouter(prefix="/api/publishing", tags=["publishing"])
 
@@ -224,17 +227,41 @@ def _github_state() -> dict[str, Any]:
         "website": {"title": found.title if target.account else "", "logo": found.logo is not None,
                     "logo_from": (config.site_logo() or (b"", ""))[1],
                     "counting": found.stats if found.counter or found.beacon else ""},
-        "categories": site.categories_read(config.load_settings().get("github_categories")),
+        "categories": offered(),
+        "added": site.categories_read(config.load_settings().get(ADDED)),
     }
 
 
+#: The categories added in Settings › Website that no article of the site carries yet, kept on this machine.
+ADDED = "github_categories_added"
+#: The most of them kept.
+MAX_ADDED = 50
+
+
+def offered() -> list[str]:
+    """The categories the publish dialog offers: those the last read of the site found, and those added
+    in Settings › Website that no article carries yet."""
+    settings = config.load_settings()
+    return site.categories_read([*site.categories_read(settings.get("github_categories")),
+                                 *site.categories_read(settings.get(ADDED))])
+
+
 def keep_categories(categories: list[str] | None) -> None:
-    """Keep the categories a read of the site found, for the dialog to suggest without asking GitHub."""
+    """Keep the categories a read of the site found, for the dialog to suggest without asking GitHub; an
+    added category the site now carries is one of them, and leaves the added ones."""
     if categories is None:
         return
     kept = site.categories_read(categories)
-    if kept != site.categories_read(config.load_settings().get("github_categories")):
-        config.update_settings(lambda settings: settings.update(github_categories=kept))
+    carried = {name.casefold() for name in kept}
+
+    def apply(settings: dict[str, Any]) -> None:
+        settings["github_categories"] = kept
+        settings[ADDED] = [name for name in site.categories_read(settings.get(ADDED)) if name.casefold() not in carried]
+
+    saved = config.load_settings()
+    if kept != site.categories_read(saved.get("github_categories")) or any(
+            name.casefold() in carried for name in site.categories_read(saved.get(ADDED))):
+        config.update_settings(apply)
 
 
 def keep_site(target: GitHubTarget, url: str) -> None:
@@ -267,6 +294,7 @@ def save_github(body: GitHubIn) -> dict[str, Any]:
             # another repository is another site: its address is read again on the next press
             settings["github_site"] = ""
             settings["github_categories"] = []
+            settings[ADDED] = []
 
     if account is not None or repo is not None or branch is not None:
         config.update_settings(apply)
@@ -280,7 +308,7 @@ def forget_github() -> dict[str, Any]:
     publishsecrets.forget(GITHUB)
     config.update_settings(lambda settings: settings.update(
         github_account="", github_repo=github.DEFAULT_REPO, github_branch=github.DEFAULT_BRANCH, github_site="",
-        github_categories=[]))
+        github_categories=[], github_categories_added=[]))
     return _github_state()
 
 
@@ -433,13 +461,14 @@ def update_github_site() -> dict[str, Any]:
             plan = sitesync.updater(gh, target.account, target.repo, site_for(target, found.url))
             done = github.update_site(gh, target.account, target.repo, target.branch, found.root,
                                       "Update the site", plan)
+    except github.BranchMoved as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
     except github.GitHubError as exc:
         raise HTTPException(status_code=502, detail=str(exc)) from exc
     assert done is not None
     keep_categories(done.categories)
     return {"ok": True, "updated": bool(done.root), "commit": done.commit if done.root else "",
-            "written": done.root, "warnings": done.warnings,
-            "categories": site.categories_read(config.load_settings().get("github_categories"))}
+            "written": done.root, "warnings": done.warnings, "categories": offered()}
 
 
 @router.post("/github/categories")
@@ -458,7 +487,7 @@ def read_github_categories() -> dict[str, Any]:
     except github.GitHubError as exc:
         raise HTTPException(status_code=502, detail=str(exc)) from exc
     keep_categories(read.categories)
-    return {"ok": True, "categories": site.categories_read(read.categories), "warnings": read.warnings}
+    return {"ok": True, "categories": offered(), "warnings": read.warnings}
 
 
 @router.post("/github/site/read")
@@ -521,6 +550,106 @@ def delete_github_folder(body: DeleteIn) -> dict[str, Any]:
     keep_categories(done.categories)
     return {"ok": True, "commit": done.commit, "folder": done.folder, "removed": done.removed, "written": done.root,
             "warnings": done.warnings}
+
+
+# -- the categories, from Settings › Website ----------------------------------------------------------
+
+
+def _category_name(value: str) -> str:
+    return " ".join(value.split())[:notelook.CATEGORY_MAX]
+
+
+class AddedIn(BaseModel):
+    names: list[str] = Field(default_factory=list, max_length=MAX_ADDED)
+
+
+@router.put("/github/categories/added")
+def keep_added_categories(body: AddedIn) -> dict[str, Any]:
+    """Keep the categories added in Settings › Website, which no article of the site carries yet, for the
+    publish dialog and each article's line to offer. They stay on this machine: a category is on the site
+    once an article carries it, and then leaves this list. Writes nothing on GitHub."""
+    names = site.categories_read([_category_name(name) for name in body.names])[:MAX_ADDED]
+    config.update_settings(lambda settings: settings.update({ADDED: names}))
+    return {"added": names, "categories": offered()}
+
+
+class RenameIn(BaseModel):
+    name: str = Field(max_length=notelook.CATEGORY_MAX + 40)
+    to: str = Field(max_length=notelook.CATEGORY_MAX + 40)
+
+
+class CategoryIn(BaseModel):
+    name: str = Field(max_length=notelook.CATEGORY_MAX + 40)
+
+
+class MoveIn(BaseModel):
+    folder: str = Field(max_length=300)
+    category: str = Field(default="", max_length=notelook.CATEGORY_MAX + 40)
+
+
+def _change(change: sitesync.CategoryChange, message: str) -> dict[str, Any]:
+    """Commit a change of categories: every card concerned rewritten, and the lists, the feed, the sitemap,
+    the marked pages and Azimut's home with them, in one commit (`sitesync.recategorizer`). A site Azimut
+    cannot read whole is a 422 with nothing written, a category or a folder gone a 404, and the branch
+    moving on GitHub meanwhile a 409 with nothing changed."""
+    target = _needs_target()
+    try:
+        with github.client() as http:
+            gh = github.GitHub(target.token, http, patience=github.MAX_PATIENCE)
+            found = _site_press(target, gh)
+            if isinstance(found, dict):
+                return found
+            plan = sitesync.recategorizer(gh, target.account, target.repo, site_for(target, found.url), change)
+            done = github.update_site(gh, target.account, target.repo, target.branch, found.root, message, plan,
+                                      moved=sitesync.CATEGORY_MOVED)
+    except sitesync.Refused as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    except github.NotFound as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except github.BranchMoved as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except github.GitHubError as exc:
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
+    assert done is not None
+    keep_categories(done.categories)
+    cards = [path for path in done.root if path.endswith(f"/{site.CARD}")]
+    return {"ok": True, "commit": done.commit if done.root else "", "changed": len(cards), "written": done.root,
+            "warnings": done.warnings, "categories": offered(), "added": site.categories_read(config.load_settings().get(ADDED))}
+
+
+@router.post("/github/categories/rename")
+def rename_category(body: RenameIn) -> dict[str, Any]:
+    """Rename a category of the site: every card that carries it takes the new name, in one commit with the
+    lists, and `articles.json` records the rename for the site's own pages (`site.RENAMED`). A name the
+    site has already gathers both. The site's pages and menu are never changed."""
+    name, to = _category_name(body.name), _category_name(body.to)
+    if not name or not to:
+        raise HTTPException(status_code=422, detail="Give the category a name.")
+    if name == to:
+        raise HTTPException(status_code=422, detail="That is its name already.")
+    return _change(sitesync.CategoryChange("rename", name=name, to=to), f"Rename the category {name} to {to}")
+
+
+@router.post("/github/categories/delete")
+def delete_category(body: CategoryIn) -> dict[str, Any]:
+    """Delete a category of the site: every card that carries it is left with none, in one commit with the
+    lists. The articles stay on the site; its pages and menu are never changed."""
+    name = _category_name(body.name)
+    if not name:
+        raise HTTPException(status_code=422, detail="Name the category to delete.")
+    return _change(sitesync.CategoryChange("delete", name=name), f"Delete the category {name}")
+
+
+@router.post("/github/site/category")
+def move_to_category(body: MoveIn) -> dict[str, Any]:
+    """Give one article of the site another category, "" for none: its card only, in one commit with the
+    lists. A folder that holds no card is a 404."""
+    folder = body.folder.strip("/")
+    if not folder or any(part in ("", ".", "..") for part in folder.split("/")) or "\\" in folder:
+        raise HTTPException(status_code=422, detail="Name the article's folder.")
+    to = _category_name(body.category)
+    return _change(sitesync.CategoryChange("move", to=to, folder=folder),
+                   f"Move {folder} to {to}" if to else f"Take {folder} out of its category")
 
 
 # -- Cloudflare Web Analytics: the site's numbers -------------------------------------------------

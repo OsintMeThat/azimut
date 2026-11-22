@@ -70,11 +70,12 @@ LOOKS = {"article": NoteLook(), "story": NoteLook.model_validate({"web": "story"
 #: 2026-11-20: a footer's Made with Azimut line: two lines of reader.css, nothing else.
 #: 2026-11-21: the analyst's logo stands by their name on the cover: nine lines of reader.css, and the
 #: logo link's rule moved from the cover's marks to the logo's own box; nothing else.
+#: 2026-11-21: a guest author's picture, round in the logo's place: two lines of reader.css, nothing else.
 GOLDEN = {
-    "single-article": "f98be72ef582c95db023fcdd506061613a3a8e35b98213b3dbb34cf2c672ea59",
-    "single-story": "8ab3db113bb0d17cdea5c2a20776e1feaa89c1882d2992b9174cf30b289c2c5c",
-    "folder-article": "495356a9dd5f924215d7bf41f39c8d7ddc5fa1dbdf0e3c5ac24bcf5f8d8cb08e",
-    "folder-story": "6a6f47487eb72537a235d3f8dbb8427a0184e2ddfda24e38f4d7589f94d61a28",
+    "single-article": "486d668a76b4d97fd919c600a144234b5c6f7952978921a4b31ba7d71e7b3cfb",
+    "single-story": "4ff4f0438ea3c9c9109aaedbce5ad90fb56539fbb8eae9d88eea1f4971a58e05",
+    "folder-article": "43d93ba775cf835413f51cd5eed5d17d949f47603708fb9d6782bfb8fc383d81",
+    "folder-story": "67ab86e2f59f38d8d0e3c6de7a5754c65e8b61112f2f575fb48e7aedcf12cda2",
 }
 
 

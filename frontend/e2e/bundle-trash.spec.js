@@ -49,6 +49,33 @@ test('shows disk capacity before importing a large bundle', async ({ page }) => 
   fixture.expectNoUnexpectedRequests();
 });
 
+test('names what an import leaves out before it starts, the box to keep them off', async ({ page }) => {
+  const fixture = await installAppFixture(page, {
+    bundlePreview: {
+      upload_id: 'upload-2', case_name: 'Guest case', total_size: 4096, sealed: false,
+      estimated_import_bytes: 4096, free_space_bytes: 30 * 1024 ** 3, space_reserve_bytes: 512 * 1024 ** 2,
+      space_ok: true, large_bundle: false,
+      flagged: [{ name: 'files/setup.exe', reason: 'a Windows program' }, { name: 'files/holiday.jpg', reason: 'named .jpg but not a picture' }],
+      flagged_count: 2,
+    },
+  });
+
+  await page.goto('/#files');
+  await page.getByTitle('Switch case').click();
+  await page.getByRole('button', { name: 'Import case…' }).click();
+  await page.locator('#bundle-import-file').setInputFiles({ name: 'guest.azimut.zip', mimeType: 'application/zip', buffer: Buffer.from('fixture') });
+  await page.getByRole('button', { name: 'Check bundle' }).click();
+
+  const left = page.getByRole('group', { name: 'Files left out' });
+  await expect(left).toContainText('2 files could run as a program or are not what their name says. The import leaves them out.');
+  await expect(left).toContainText('files/setup.exe');
+  await expect(left).toContainText('named .jpg but not a picture');
+  await expect(left.getByRole('checkbox', { name: 'Import them too' })).not.toBeChecked();
+  await expect(page.getByRole('button', { name: 'Import', exact: true })).toBeEnabled();
+  expect(fixture.bundleCalls.map((call) => call.kind)).toEqual(['inspect']);
+  fixture.expectNoUnexpectedRequests();
+});
+
 test('restores a trash group with keyboard-reachable actions', async ({ page }) => {
   const fixture = await installAppFixture(page, {
     trashGroups: [{

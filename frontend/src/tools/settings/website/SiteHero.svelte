@@ -2,14 +2,16 @@
   /**
    * The site at a glance, over every panel: its logo, name and tagline as they read now, where it
    * lives, what it holds, how much it weighs and when it last changed once the site is read, and the
-   * two presses that matter most, Open the site and Update the site. Its two lines of facts keep
-   * their places whatever arrives, so a read or an update changes words, never the layout.
+   * two presses that matter most, Open the site and Update the site, which says so with a spinner while it
+   * works. Its two lines of facts keep their places whatever arrives, so a read or an update changes
+   * words, never the layout.
    */
+  import BusyLabel from '../../../components/BusyLabel.svelte';
   import Icon from '../../../components/Icon.svelte';
   import { bareAddress, countsOf, formatBytes } from '../../../lib/websiteHub.js';
   import {
-    COUNTER_NAME, NOT_READ, NO_ADDRESS, OPEN_SITE, TOO_MANY_SHORT, UNNAMED, UPDATE_NOT_SET, UPDATE_PRESS, WEBSITE_HELP as HELP, changedSaid,
-    countsSaid, readersSaid, updatedSaid, updatingSaid, whenSaid,
+    BUSY, COUNTER_NAME, NOT_READ, NO_ADDRESS, OPEN_SITE, TOO_MANY_SHORT, UNNAMED, UPDATE_NOT_SET, UPDATE_PRESS, WEBSITE_HELP as HELP, changedSaid,
+    countsSaid, readersSaid, updatedSaid, whenSaid,
   } from '../../../lib/websiteSetup.js';
 
   let {
@@ -54,9 +56,7 @@
       <span class="facts-line">
         <span class:quiet={!read}>{what}</span>
         <span>{readersSaid(COUNTER_NAME[counting] ?? '')}</span>
-        {#if working}
-          <span class="state" data-state="busy" role="status"><span class="hub-spinner" aria-hidden="true"></span>{updatingSaid(`${github.account}/${github.repo}`)}</span>
-        {:else if done?.error}
+        {#if done?.error}
           <span class="state" data-state="error" role="status" title={done.error}><Icon name="alert" size={12} />{done.error}</span>
         {:else if done}
           <span class="state" data-state="ok" role="status"><Icon name="check" size={12} />{updatedSaid(whenSaid(done.at))}</span>
@@ -71,7 +71,7 @@
     <a class="btn" class:disabled={!address} href={address || undefined} target="_blank" rel="noopener noreferrer" aria-disabled={address ? undefined : 'true'}
       title={HELP.siteOpen}>{OPEN_SITE} <Icon name="external" size={12} /></a>
     <button type="button" class="btn btn-primary" onclick={onupdate} disabled={!ready || working} aria-busy={working}
-      title={ready ? HELP.siteUpdate : UPDATE_NOT_SET}>{UPDATE_PRESS}</button>
+      title={ready ? HELP.siteUpdate : UPDATE_NOT_SET}><BusyLabel busy={working} text={BUSY.update}>{UPDATE_PRESS}</BusyLabel></button>
   </div>
 </section>
 

@@ -269,6 +269,9 @@ class Folder:
     #: How a page published to a site is framed: the way back to the site and the counts its
     #: pages make (`engine/site.py`); None for a folder that is not on a site.
     frame: "site_engine.Frame | None" = None
+    #: The author's picture, a file at the folder's root (`notes_web.author_face`): a guest's stands
+    #: round where the analyst's logo would by their name (`_Page._author_face`); "" for none.
+    author_face: str = ""
     files: dict[str, bytes] = field(default_factory=dict)
     _named: dict[str, str] = field(default_factory=dict, repr=False)
 
@@ -665,7 +668,8 @@ class _Page:
         body = self._scrub("".join(self.out))
         self.description = self._describe(body)
         if self.look.signed == "end":
-            body += self._signature("az-signed-end")
+            # a guest's picture stands left of their name, as on the cover's author card
+            body += self._signature("az-signed-end", self._author_face())
         sources = self._sources()
         earlier = list(earlier)
         profile = self.cited.profile
@@ -708,12 +712,13 @@ class _Page:
         who = identity.organisation or identity.name
         logo = self._built_in(notefill.MY_LOGO, inline=True)
         by = ""
+        face = self._author_face() if who else ""
         if identity.site:
             words = who or urlsplit(identity.site).hostname or identity.site
             by = (f'<a class="az-mappage-site" href="{_attr(identity.site)}" target="_blank" '
-                  f'rel="noopener noreferrer">{logo}{_text(words)}</a>')
+                  f'rel="noopener noreferrer">{logo}{face}{_text(words)}</a>')
         elif who or logo:
-            by = f'<span class="az-mappage-site">{logo}{_text(who)}</span>'
+            by = f'<span class="az-mappage-site">{logo}{face}{_text(who)}</span>'
         if identity.handle:
             account = identity.handle_url()
             by += (f'<a class="az-mappage-handle" href="{_attr(account)}" target="_blank" rel="noopener noreferrer">'
@@ -1013,9 +1018,14 @@ class _Page:
             lines.append(f'<p class="az-standfirst" dir="auto">{_text(look.cover.subtitle)}</p>\n')
         identity = self.cited.identity
         # the analyst's logo stands by their name, as in the PDF: beside the signature under
-        # the date, else beside the byline, else alone under the date
+        # the date, else beside the byline, else alone under the date. A guest's own picture
+        # stands where it would (`_author_face`), and never alone: the analyst's logo never
+        # stands by another's name
         marks = look.cover.marks if look.cover.on else []
-        logo = self._to_site(self._built_in(notefill.MY_LOGO, inline=True)) if "logo" in marks else ""
+        if identity.guest:
+            logo = self._author_face()
+        else:
+            logo = self._to_site(self._built_in(notefill.MY_LOGO, inline=True)) if "logo" in marks else ""
         byline = identity.byline() if look.signed == "title" else ""
         if byline:
             rest = byline[len(f"By {identity.name}"):]
@@ -1023,6 +1033,8 @@ class _Page:
             logo = "" if beside else logo
             shown = f'<span class="az-author-logo">{beside}</span>' if beside else ""
             lines.append(f'<p class="az-byline" dir="auto">{shown}By {self._to_site(_text(identity.name))}{_text(rest)}</p>\n')
+        if identity.guest and "signature" not in marks:
+            logo = ""
         lines.append(f'<p class="az-dateline"><time class="az-date" datetime="{self.day.isoformat()}">'
                      f"{_text(notes_style.long_date(self.day))}</time></p>\n")
         if look.cover.on:
@@ -1058,6 +1070,12 @@ class _Page:
             return (f'<div class="az-signed {kind} az-author"><span class="az-author-logo">{logo}</span>{picture}'
                     f'<span class="az-author-text">{name}{role}</span></div>\n')
         return f'<div class="az-signed {kind}">{picture}{name}{role}</div>\n'
+
+    def _author_face(self) -> str:
+        """A guest author's picture, round, where the analyst's logo would stand by their name, on a
+        web page that has one; "" for the analyst's own note. Its words are the name beside it."""
+        face = self.folder.author_face if self.folder is not None and self.cited.identity.guest else ""
+        return f'<img class="az-face" src="{_attr(face)}" alt="" width="40" height="40">' if face else ""
 
     def _to_site(self, inner: str) -> str:
         """The analyst's name or logo linked to their Website (Settings › Publishing), as it is

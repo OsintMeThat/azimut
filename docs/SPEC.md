@@ -203,12 +203,17 @@ proof for publication.
 | ✅ **Note to Post** | To Post sends a note's public edition, or the passage selected, to Post as the pieces of a Free post thread; internal passages never leave, and what stays out is said once. |
 | ✅ **HTML report** | Writes a note as one self-contained page readable offline beside the PDF (a before/after swipe, playable clips, zoomable pictures, a citation's source on hover, verify links, the edition's hash), laid out as an article or as a story of held pictures. |
 | ✅ **Report on the web** | Writes a note as a folder ready to host, with its link card and the GitHub Pages steps, publishes it to the analyst's own GitHub Pages in one press, or sends it to WordPress as a draft. |
-| ✅ **Your website** | Every publish to GitHub Pages also keeps the analyst's site: a card and a list picture with each article, then its list, feed and sitemap, the lists between markers in their own pages (a default home when they have none), pages kept off the lists, a way back to the site on each page, a warning when a folder was changed on GitHub since, and readers counted on GoatCounter or Cloudflare when asked; only files Azimut made are ever written. |
+| ✅ **Your website** | Every publish to GitHub Pages also keeps the analyst's site: a card and a list picture with each article, then its list, feed and sitemap, the lists between markers in their own pages (a default home when they have none), pages kept off the lists, a way back to the site on each page, a warning when a folder was changed on GitHub since or the address holds another article, and readers counted on GoatCounter or Cloudflare when asked; only files Azimut made are ever written. |
 | ✅ **Website settings** | Sets the site in one tab (title, line and credit, GitHub Pages and WordPress, how readers are counted, Update the site, the Legal notice starter), and the publish dialog adds a category, Article or Page and a list picture. |
-| ✅ **Website hub** | Settings › Website as the site's hub, in panels: a live preview of its name and logo, a read of what it holds with a delete, its limits, readers and upkeep; Unlisted joins Article and Page. |
+| ✅ **Website hub** | Settings › Website as the site's hub, in panels: a live preview of its name and logo, a read of what it holds with a delete, its limits, readers and upkeep; Unlisted joins Article and Page, first for a note new to the site and kept out of search engines. |
 | ✅ **Reader numbers** | Reads each article's page views over 7 and 30 days, the site's total, referrers and countries from Cloudflare Web Analytics on a press, with a read-only token kept on this computer. |
 | ✅ **Your own bar** | Articles carry the site's own header from `azimut-bar.html` in place of Azimut's bar, cleaned and kept apart from the article's styles, and Update the site changes it in every article. |
 | ✅ **Places on the site** | An article may carry a place for a map of the site's articles, kept with its note, offered only when the note names one point, and carried by its card and `articles.json`. |
+| ✅ **Guest authors** | An article may name its own author and their picture, kept with its note so a bundle carries them, signed on its page and named in the site's lists. |
+| ✅ **Site categories** | Settings › Website adds, renames and deletes the site's categories and gives one article another on its line, each in one commit of its cards and lists, a rename recorded for the site's own pages; a site with its own home is told what its menu and pages ask. |
+| ✅ **Home before articles** | The Overview puts Azimut's home page online before any article, never over the analyst's own. |
+| ✅ **Map of places** | Azimut's home shows the articles that stand somewhere on a world map of Natural Earth land, a pin each, framed to fit, links without a script and cards with it. |
+| ✅ **Bundles from someone else** | An import refuses a case database holding what Azimut never makes, and names programs and disguised files before it starts, leaving them out unless the analyst keeps them. |
 | ✅ **Maps in reports** | Puts the case's layers, a Map plate or a period's proofs in a note as a map read day by day, its marks opening their cards: offline in the file, live over OpenFreeMap once hosted, a picture in the PDF; set from its card (base, Sentinel-2 or Esri imagery streamed live, layers, frame, timeline, steps, cards) and drawn on at any zoom, from an area to highlight to a map started from nothing. |
 | ✅ **Web maps** | Makes a note that is the analyst's own layers on a page of their own, from Notebook › New or a layer's row, drawn and carded as the app's map draws them, with a layer switcher, a search, the timeline and each view in its address, published as a web folder or to GitHub Pages and counting its readers on the analyst's own GoatCounter when asked. |
 | ✅ **Charts and infographics** | Draws a note's table as one of fifteen kinds of chart picked by its picture, a wall of the case's own pictures among them, in the case's colours and saying "at least" where a count is a floor, and lays charts, a map and key figures out as an infographic page or one picture, read from one of the case's sheets. |
@@ -491,7 +496,8 @@ stops making sense.
   in an address, a log or an answer to the browser. Its calls are Test connection,
   Create the repository, Turn on Pages, Publish (the folder's files and the site's own as
   blobs, trees, one commit, a fast-forward of the branch), Update the site (the same
-  without a note), Read the categories, the check before a press that a folder was not
+  without a note), Read the categories, Rename or Delete a category and give one article another
+  (one commit of the cards concerned and the lists), the check before a press that a folder was not
   changed on GitHub since, the bounded watch of that build and an edition's Check, each on a
   press, never on a read or at startup. Keeping the site reads its tree once and each card
   and page to fill by blob id, bounded (500 cards of 64 KB, 60 pages of 2 MB; past a bound,
@@ -500,7 +506,8 @@ stops making sense.
   `articles.json`, `feed.xml` and `sitemap.xml` that carry its marks, a root page that
   carries its generator with a version, the content between `azimut:articles` markers, and
   the bar between `azimut:bar` markers of its own article pages) and leaves every other file
-  as it is. The site's own bar, `azimut-bar.html` (64 KB at most, past which the articles keep
+  as it is, but for the `category` of a card, wherever it lives, on a change of categories
+  the analyst asks for in Settings › Website. The site's own bar, `azimut-bar.html` (64 KB at most, past which the articles keep
   Azimut's), is HTML from the analyst's repository put into every article page, so it is
   read token by token and written again: no `<script>`, `on*` handler, frame, object, form,
   `<base>`, `<meta>`, `<link>`, SVG animation or address but http(s), mailto and tel, inside a
@@ -705,7 +712,15 @@ stops making sense.
   a table, a note, a picture — is refused by size before it is parsed, and the
   routes are not trusted to a list: `tests/test_hardening.py` walks them.
   Case imports extract only unique, non-symlink members declared
-  by the manifest and matching its SHA-256. Password-protected bundles seal the
+  by the manifest and matching its SHA-256, and refuse a database holding a table, an
+  index, a view or a trigger a fresh one does not, SQLite's statistics aside
+  (`bundles.expected_objects`). What could
+  run when opened (a program, a script, an installer, a shortcut, a document with macros)
+  and a file named as a picture, a video or a sound that is none, read from its first 64
+  bytes (`engine/filescreen.py`), the scripts of the case's own exported web folders
+  aside, are listed before the import and left out of it unless
+  the analyst keeps them. Accepted risk: a kept file is written as it came, with no mark of
+  where it came from, and a disguised file is judged by its first bytes only. Password-protected bundles seal the
   complete ZIP with chunked AES-256-GCM and a scrypt-derived key; filenames stay
   encrypted and the password is never persisted in a job. Import temporarily
   stages a decrypted ZIP inside the incoming case directory. Imports validate

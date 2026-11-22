@@ -1118,7 +1118,16 @@ that a lost password cannot be recovered.
 
 **Import case** opens the browser's file picker for `.zip` and `.enc`, uploads
 the selected bundle for a pre-flight check, and shows its case name, size,
-temporary disk requirement, available space and protection state. Confirmation
+temporary disk requirement, available space and protection state. The check also
+names, file by file with its reason, what could run when opened (*a Windows
+program*, *a script*, *an installer*, *a shortcut*, *a document with macros*, *a
+macOS app*) and what is named as a picture, a video or a sound and is none
+(*named .jpg but not a picture*), read from the first bytes of each, the scripts of
+the case's own exported web folders aside: *N files could
+run as a program or are not what their name says. The import leaves them out.* An
+**Import them too** box, off at every check, keeps them. The toast that opens the
+case says what it left out. A bundle whose database holds a table, an index, a view
+or a trigger Azimut never makes is refused; SQLite's own statistics are not a reason. Confirmation
 always creates a new case, waits for the durable
 import job, then opens it. It never replaces or merges an existing case.
 Confirmed entities and relations remain confirmed in the imported case.
@@ -7696,7 +7705,8 @@ replaces its page; git keeps every earlier version. When the repository is missi
 Pages is off, the press writes nothing and the dialog offers **Create the repository** or
 **Turn on Pages**, each saying what it does; a token that may not do it is told the way
 on github.com. While GitHub is not set up, the press shows how to connect it and a way to
-Settings › Website. `POST /notes/{id}/github` does it (`engine/githubpages.py`), and
+Settings › Website. While it works the press reads *Publishing…* beside a spinner, as **Read the site**
+reads *Reading…*, and the dialog says *Making the folder and sending it to octo/articles…*. `POST /notes/{id}/github` does it (`engine/githubpages.py`), and
 `POST /api/publishing/github/build` answers the watch.
 
 **Your site.** The same press keeps the site beside the folder, in the same commit
@@ -7706,36 +7716,74 @@ the site's other folders, and its place on the site's map only when it has one),
 (1200 by 630): the picture of the note's line in the
 site's list, made from the look's *list picture* when it has one, else the cover picture, a map
 page's ground or the first picture, so a designed cover for the list never replaces the
-article's own. Each page published to the site starts with a bar back to it (its logo and
+article's own. An article with an author picture carries `author.jpg` (or `author.png` when it
+holds transparency), 96 pixels square, made again from its pixels so that no place, camera or
+name the file held goes online, and its card names it as `author_image`. Each page published to the site starts with a bar back to it (its logo and
 title, *All articles* on the right), and a map page carries a small link inside its own header
 instead. The commit then rebuilds, only where Azimut made them, `articles.json`, `feed.xml` and
 `sitemap.xml`, fills the lists between `<!-- azimut:articles -->` markers in the analyst's own
 pages (`section="…"` for one category, `layout="map"` for the maps, `limit="N"`), and, when the
-root holds no home page or holds Azimut's, writes a default one with tabs by category. A
-page (role *page*) stays off every list and is linked from the default home's header. The
-category and the role are kept in the note's look; a check before the press
-(`POST /notes/{id}/github/check`, on a press) says *This folder was changed on GitHub since
-you published it: publishing replaces it.* and never blocks. `POST /api/publishing/github/site`
+root holds no home page or holds Azimut's, writes a default one with tabs by category. Once a
+listed article has a place, that home shows a world map under its header (`engine/siteatlas.py`):
+Natural Earth's land at 1:110 million in the Equal Earth projection, one 33 KB file the home carries
+beside itself (`azimut-site/atlas.svg`, written once and only once a map shows; made by
+`scripts/make_site_atlas.py` from the outline the map plate ships), framed to the box of the pins with
+a margin, never closer than a region nor wider than the world, and a pin per article, those at one
+spot gathered (at most 100, the newest). Each pin is a link with its title, day and place, drawn the
+same size on any screen, so the map works with no script and no request elsewhere under the home's
+own policy; the home's script adds a card of what stands there (place, titles linked, days, a guest's
+name) on hover, focus or a tap, a tap on a gathered pin opening its card first, Escape or a press
+elsewhere closing it. A phone shows the map taller, with more land above and below. With no place,
+no map. A page (role *page*) stays off every list and is linked from the default home's header. The
+category and the role are kept in the note's look. Every press asks a check first
+(`POST /notes/{id}/github/check`, a read): a folder the note's own records name that was changed
+on GitHub since says *This folder was changed on GitHub since you published it: publishing replaces
+it.*, and an address holding anything else, another note's article, map or page, says *This address
+already holds “Harbour fire”. Replace it?* (its card's title, else its page's `<title>`, else the
+folder's name) with **Replace it** and **Pick another address**, which puts a free short name such as
+`port-strike-2` in the field and the focus on it. Neither blocks, and the next press publishes; a
+folder Azimut did not make says so and offers another address only, since a publish refuses it. `POST /api/publishing/github/site`
 (Update the site) does the same rebuild with no note, committing only when something differs.
 
 **On the site.** For a published article the dialog's GitHub branch adds, under the address:
-**Article** or **Page** (an article is in the site's list and feed, a page is off every list and
-linked from the home's header; it starts from the note's look), and for an article a **Category**
-and the **Picture in the list**. The category is a field that suggests what the site already
-uses and the note's own (`github.categories`, kept from the last read of the site), a new one
-typed is a new category, empty is none, 60 characters at most; **Read the site** reads them
-again (`POST /api/publishing/github/categories`, on its press, reads only). The picture is the
+**Article**, **Page** or **Unlisted** (an article is in the site's list and feed, a page is off every
+list and linked from the home's header; it starts from the note's look, and a note its editions say was
+never published to this site starts on **Unlisted**, so a first publish is read before it is announced),
+with one line beside the choice, *Unlisted lets you read it online before you announce it.*, and for an
+article a **Category** and the **Picture in the list**. The category is a list drawn as the app's menus are, never the
+system's own (`components/PickList.svelte`): **No category**, then what the site already uses and
+the note's own (`github.categories`, kept from the last read of the site, with the categories added in
+Settings › Website › Categories that no article carries yet), then **New category…**,
+which turns it into a field for a new one, 60 characters at most. The focus stays on it: the arrows,
+Home and End walk the list, Enter or Space picks, Escape closes it, and letters typed filter it;
+**Read the site** reads the categories again (`POST /api/publishing/github/categories`, on its
+press, reads only). The picture is the
 cover's by default, or one of the case's pictures picked as the cover picture is, kept in the
 look as it is picked (`list_image`) with a way back to the cover. The category and the role go
 up with the press and are kept in the look; whatever the dialog changes in the look is handed to
 the Notebook, which reads it again so that its next save never drops it. After a publish, what
 the site had to say (a list left as it was) is listed under *Live at*.
 
-**Place on the site's map.** Under the picture, an article may say where it stands, for a map of the
-site's articles: **Coordinates**, pasted as `lat, lon` (or `12.725N 43.5075E`, or in degrees,
-minutes and seconds, read as the Sheet reads a cell), and a **Place name** of up to 80 characters
-that labels the pin. Both are optional and empty for most notes. Under them, *Reads as 12.725004° N,
-43.5075° E.*, or why the coordinates are no place (unreadable, a latitude past ±85 where web maps
+**Author.** Under the choice of Article, Page or Unlisted, for all three: **Author**, who wrote the
+note when it is not the analyst (a guest's investigation imported from their bundle), one line of up
+to 120 characters, its placeholder the name it falls back to (the Publishing name, else the site's);
+and **Author picture**, one of the case's pictures picked as the list picture is, *No picture* by
+default and never a logo in its place. Both are kept in the note's look as they are left
+(`author`, `author_image`), with GitHub set up or not, so a contributor sets them before exporting the
+case and they open filled in on the machine that publishes it; a Publish waits for an author just
+typed. The page is signed with that name alone (none of the analyst's role, organisation, logo,
+handwritten signature or links), under the title unless the look signs at the end; the picture stands
+round where the analyst's logo would in the author card (beside the byline, the cover's signature or
+the one at the end, and in a map page's header), and with no picture the name stands alone; the card, `articles.json`, the read of the site and the lists name the author,
+the picture before the name, unless it is the site's own name. A picture gone from the case is said
+among the warnings and the page goes without it. A template carries neither.
+
+**Coordinates for this article (optional).** Under the picture, **More options** folds them away,
+shut each time the dialog opens unless the note already has a place, and held open while what is typed
+is no place, so a value is never hidden. Inside, one line, *They show the article as a pin on the site's
+map.*, then **Coordinates**, pasted as `lat, lon` (or `12.725N 43.5075E`, or in degrees, minutes and
+seconds, read as the Sheet reads a cell), and a **Place name** of up to 80 characters that labels the
+pin, both empty for most notes. Under them, *Reads as 12.725004° N, 43.5075° E.*, or why the coordinates are no place (unreadable, a latitude past ±85 where web maps
 stop, a longitude past ±180), which holds Publish back. When the note names one obvious point, a
 press offers it, *Use 12.7250, 43.5075 · Bab al-Mandab*, beside its rule: *The one place the note
 names.* (a place, or proofs that all depict it), *Where the note's one proof concluded.*, or, with no
@@ -7746,11 +7794,14 @@ category, and emptying the coordinates takes it off at the next publish. A page 
 shows no place and sends none. The card and the line of `articles.json` carry it only when set;
 the format stays `azimut-article/1`.
 
-**Before it replaces a folder.** For a note published there before, the press first asks
-whether the folder was changed on GitHub since this Azimut published it. If it was, the dialog
-says *This folder was changed on GitHub since you published it: publishing replaces it.* with
-**Don't publish**, and the button reads **Publish anyway**; one more press publishes. It never
-blocks, a check that fails just publishes, and typing another short name starts over.
+**Before it replaces a folder.** The press first asks what the address holds. The note's own folder,
+one its records name, changed on GitHub since this Azimut published it says *This folder was changed
+on GitHub since you published it: publishing replaces it.* with **Don't publish**. Another article,
+map or page there says *This address already holds “Harbour fire”. Replace it?* with **Replace it**,
+which publishes, and **Pick another address**, which fills in a free short name and focuses the field.
+Either way the button reads **Publish anyway** and one more press publishes. A folder Azimut did not
+make offers another address only. It never blocks, a check that fails just publishes, and typing
+another short name starts over.
 
 **Maps.** `/` › *Interactive map* asks what a map shows: some of the case's layers, or one
 of its Map plates (its layers as it draws them, its days, its steps and how each frames the
@@ -8903,14 +8954,18 @@ counter in use, and, once the site is read, how many articles, maps, pages and u
 with its size and the last change on GitHub (*Not read yet* before), with **Open the site** and **Update
 the site**. Its two lines of facts keep their places, so a read or an update changes words, not the
 layout. Under it a sticky bar of tabs (`data-guide="settings.website-hub"`): **Overview**, **Identity**,
-**Hosting**, **Articles** (with how many cards it holds once read), **Readers**, **Upkeep**, **Make it
-yours**, then a divider and **WordPress**. One panel shows at a time and all stay mounted, so what was
+**Hosting**, **Articles** (with how many cards it holds once read), **Categories**, **Readers**, **Upkeep**,
+**Make it yours**, then a divider and **WordPress**. One panel shows at a time and all stay mounted, so what was
 typed or opened is still there; the arrow keys, Home and End walk the bar with the focus, only the open
 tab is in the tab order, and the publish dialog's *Name the site* opens Identity (`website:identity`). The settings are the preferences
 `site_title`, `site_tagline`, `site_credit_azimut`, `site_stats`, `site_stats_code` and
 `site_stats_token`, which save when a field is left and travel in the settings backup. The words are in
 `lib/websiteSetup.js`, what is worked out of them in `lib/websiteHub.js`, one component per panel in
-`tools/settings/website/`.
+`tools/settings/website/`. Every press that waits on an answer says so on itself: disabled, its words
+turned to *Reading…*, *Updating…*, *Testing…*, *Deleting…*, *Renaming…*, *Moving…*, *Putting it online…*,
+*Starting…* (or *Creating…*, *Turning on…*
+for the setup presses) beside a small spinner, and the same press again once the answer comes, a
+failure included (`components/BusyLabel.svelte`, the one spinner of the hub and the publish window).
 
 **The read.** **Read the site** (`POST /api/publishing/github/site/read`), on Articles and in Hosting's
 Limits, reads the branch's tree and cards and writes nothing: its address, whether the home page is
@@ -8923,18 +8978,24 @@ missing repository or a Pages that is off shows the press that makes it, as the 
 
 **Overview.** *How your site works*: four steps (Write, Publish, GitHub keeps it, Readers find it, the
 last two naming the repository and the site) and the three things each publish also refreshes (the home
-list, the feed, the sitemap). *Your site, step by step* is a checklist of six: connect GitHub Pages, name
-the site, pick its logo, count readers (optional), a legal notice (optional) and publish a first
-article. Each says its state (done, to do, or *Read the site, in Articles, to tell.* for the two that need a
-read, or *The site holds too many files to read.* after a read GitHub cut short), is counted in a progress
-bar, and opens the panel where it is done. Three tips follow (*Try before you announce* with Unlisted, *Take
-an article down*, *Change the name or the logo*), and a fourth, *The site is getting big*, once the site
-passes 80 % of 1 GB, with **See the limits** opening Hosting.
+list, the feed, the sitemap). *Your site, step by step* is a checklist of seven: connect GitHub Pages, put
+your home page online, name the site, pick its logo, count readers (optional), a legal notice (optional) and
+publish a first article. Each says its state (done, to do, or *Read the site, in Articles, to tell.* for the
+three that need a read, or *The site holds too many files to read.* after a read GitHub cut short), is counted
+in a progress bar, and opens the panel where it is done. **Put your home page online** has its own press while
+the read finds the site with no home page: **Put it online** is Update the site, which writes Azimut's home with
+its empty list (*No articles yet.*), the feed and the sitemap before any article, says *Putting it online…*
+meanwhile and what went wrong under the step; once the home is there, Azimut's or the analyst's own (which is
+never written over), the step is done and **See it** opens the site. It takes the panel's width alone, and shares it with one card,
+*The site is getting big*, once the site passes 80 % of 1 GB, with **See the limits** opening Hosting. What a
+press does is said beside the press: Unlisted beside the role choice of the publish window, what a delete
+does under the Articles list, and when a new name or logo reaches the site under Identity's fields.
 
 **Identity.** *What readers see*: **Site name** (left empty, the name set in Settings › Publishing, else
 the GitHub account, said under the field), **Tagline**, **Site logo** and **Made with Azimut** (on by
 default, which ends Azimut's home page on the credit and its version; an article keeps *Credit Azimut* of
-Publishing), beside a preview of **Article bar**, **Home page** and **Feed** that follows what is typed,
+Publishing), then one line: *A new name or logo reaches the lists at the next publish or Update the site,
+and an article's bar when it is published again.*, beside a preview of **Article bar**, **Home page** and **Feed** that follows what is typed,
 with the site's own articles, categories and pages once read and the page's credit as the switch says, drawn
 in the site's paper and ink whatever the app's theme. The logo is a PNG of the site's own (**Choose a
 picture…**, `POST /api/settings/site-logo`, up to 2 MB, checked in the browser and again by the server, what
@@ -8956,8 +9017,14 @@ in place of its bar, and a repository GitHub gave no size for says so.
 Unlisted when there are some, each counting its rows, and a row per card with its picture (or its kind's
 mark), title, address, a small pin with its place's name (or its coordinates) when the card has a place,
 category, kind (Article, Map, Page, Unlisted), date and weight, an **Open** link and
-a **Delete** press: a table when the hub is wide, the facts under each title when it is not, a long title
-cut with an ellipsis. Only a card the read says Azimut published has **Delete** (`deletable`); the others,
+a **Delete** press. An article's category is a list on its line, drawn as the app's menus are: *No category*,
+the site's categories and those added in Categories, then *New category…* typed in place; a choice goes to
+GitHub at once (`POST /api/publishing/github/site/category`, one commit of its card and the lists, its page not
+published again), the line reading *Moving…* meanwhile and the others waiting, and the line beside Read the site
+says *“Title” is in Ports now.* or GitHub's refusal, the category staying. A page or an unlisted page shows
+*no category*. The rows are a table when the hub is wide, the facts under each title when it is not, a long title
+cut with an ellipsis. Under the list, *Delete takes an article down, and off the lists, the feed and the
+sitemap, in one commit.* Only a card the read says Azimut published has **Delete** (`deletable`); the others,
 such as an old WordPress export's nested folders, say *Outside Azimut* and, on hover, *Made outside Azimut:
 delete it on GitHub*. **Delete** asks first (*Delete this article from the site?*, saying the folder, the
 repository, one commit and that the note stays in the case), and only its confirmation reaches GitHub
@@ -8968,14 +9035,41 @@ server counted none), until the next read. A refusal is said on that line in the
 staying: a folder Azimut did not publish, one too large to read, or a branch that moved on GitHub meanwhile
 (press Delete again); a folder already gone leaves the list. A site GitHub cut short lists nothing and says
 so, with GitHub's word. Below, the three kinds
-(Article, Page, Unlisted) with when each is for, the **Categories** the read found with their pages, and
-**Pages every site should have**: **Start a Legal notice page** and **Start a Privacy page** each make a note of
+(Article, Page, Unlisted) with when each is for, and **Pages every site should have**: **Start a Legal notice page** and **Start a Privacy page** each make a note of
 that name in the open case, naming the host (the Privacy page also what counting the site does), and open the
 Notebook on it; pressed again, the one made. With no case open they are disabled and say to open one first,
 and a page the read found says *On the site*. No other legal advice is given. The kind of a note is picked
 in the publish dialog, which also offers **Unlisted** (online at its address, in no list, feed, sitemap or
-`articles.json`), says where the note will appear (*Goes on Octo Desk's home page and in its feed.*) and, while
+`articles.json`, its head carrying `<meta name="robots" content="noindex">` so a link shared to try it stays
+out of search engines, which an article or a page never carries), says where the note will appear (*Goes on Octo Desk's home page and in its feed.*) and, while
 Settings › Website holds no title, what the site then shows as, with a press to name it.
+
+**Categories.** *How articles are grouped*: after **Read the site**, each category the read found with its
+listed articles (*No article yet* for one only a marked page names) and the pages whose markers name it
+(*/investigations/ lists them*), with **Rename** and **Delete**, then those added here. **New category** keeps a
+name on this computer (`PUT /api/publishing/github/categories/added`, the setting `github_categories_added`,
+which the backup carries and a change of repository clears): the publish window and each article's line offer
+it, and it reaches the site with the first article that carries it, when it leaves that list; a name the site
+or the list has already is refused under the field, case aside. An added one is renamed or removed here with
+no confirmation. **Rename** turns the name into a field (Enter or **Save**, Escape or **Cancel**) and then asks
+(*Rename this category?*, how many articles it changes, those of every kind that carry it, and when the new
+name is one the site has, that the two are listed together); **Delete** asks (*Delete this category?*, its
+articles staying on the site with none). Only the confirmation reaches GitHub
+(`POST /api/publishing/github/categories/rename`, `…/delete`): one commit rewrites the `category` of every card
+that carries it, wherever its folder, and nothing else of them, with the lists, the feed, the sitemap and
+Azimut's home, no page published again; a rename is recorded in `articles.json` as
+`"renamed": {"Old": "New"}` (a chain kept to one step, the record kept through later publishes, an old name
+dropped once a category carries it again) for the site's own pages and scripts. The read follows and the line
+beside Read the site says *Harbour is Ports now, on 3 articles.*, or GitHub's refusal (a branch that moved: press
+again; a category no card carries any more: read again). When the read found a home page of the analyst's own,
+a standing line says *Your site has its own pages: Azimut updates the articles and the lists; your menu and
+category pages are yours to change.*, the add says *Add a page and a menu link for it if you want one; its
+articles already show in your lists.*, and each confirmation names the pages whose markers name the category
+(*Your page /investigations/ lists this category by name: change it there too, or its list will be empty.*)
+and the menu (*Rename its link in your menu.*, *Take its link out of your menu.*). Azimut's own site shows none
+of it. A note published again after such a change keeps the category the site gave it unless the publish window
+picks another, says so (*It stays in Ports, the category it was given on the site since your last publish.*),
+and does not call the change an edit; its look takes the category.
 
 **Readers.** *Who reads it*. **Count readers** is off by default, with three buttons: Off, GoatCounter and
 Cloudflare Web Analytics, each saying in a line what it does, free and with no cookie. GoatCounter takes the
@@ -9018,13 +9112,13 @@ tag typed by hand changes.
 **Upkeep.** *Keep it in shape*. **Update the site** is one press that rebuilds the home, list, feed and sitemap
 from the articles on GitHub, and gives each article the bar the site asks for (below), in one commit, with no
 note published (`POST /api/publishing/github/site`), also
-in the hero: it shows a spinner, then *The site is up to date.* or how many files were written and when, with
+in the hero: the press reads *Updating…*, then *The site is up to date.* or how many files were written and when, with
 what the server says to mind, or the last change the read found. It is disabled until GitHub is set up, saying
 so on hover, and a missing repository or a Pages that is off shows the press that makes it. **Who writes what**
 says which files are Azimut's and which stay the analyst's, with the pages the read found marked and
 `azimut-bar.html`, *Copied into each article's bar.* **Usual
-chores** gives the five (take an article down, move it to another category, rename the site or change its logo,
-fix a typo on GitHub, test an article before it shows).
+chores** gives the five (take an article down, move it to another category on its line in Articles, rename the
+site or change its logo, fix a typo on GitHub, test an article before it shows).
 
 **Make it yours.** Five cards, the ways to change what Azimut makes: write one's own `index.html` and put the
 `<!-- azimut:articles -->` markers where the list goes; **Your own bar**, a header of one's own; the same markers

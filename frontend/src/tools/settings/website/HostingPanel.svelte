@@ -18,8 +18,6 @@
 
   let {
     active = false,
-    /** The GitHub settings as read, for the address and for what the read press names. */
-    github = null,
     ready = false,
     address = '',
     readKey = '',
@@ -60,7 +58,7 @@
         <div class="usage">
           {#if !read}
             <p class="unread"><span class="hub-hint">{LIMITS_UNREAD}</span>
-              <ReadSiteButton {ready} repository={github ? `${github.account}/${github.repo}` : ''} key={readKey} /></p>
+              <ReadSiteButton {ready} key={readKey} /></p>
           {:else}
             {#each bars as bar (bar.id)}
               {#if bar.bytes === null}

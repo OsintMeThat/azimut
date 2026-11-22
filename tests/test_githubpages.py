@@ -508,7 +508,8 @@ def test_the_token_is_kept_apart_owner_only_and_never_sent_back(client, fake, pu
     assert state == {"account": "octo", "repo": "articles", "branch": "main",
                      "site": "https://octo.github.io/articles/", "base": "https://octo.github.io/articles/",
                      "token": {"set": True, "hint": f"…{TOKEN[-4:]}"},
-                     "website": {"title": "octo", "logo": False, "logo_from": "", "counting": ""}, "categories": []}
+                     "website": {"title": "octo", "logo": False, "logo_from": "", "counting": ""}, "categories": [],
+                     "added": []}
     for path in ("/api/publishing", "/api/settings", "/api/settings/export",
                  f"/api/cases/{published['cid']}/notes/{published['note']}/editions"):
         assert TOKEN not in client.get(path).text, path
@@ -526,7 +527,7 @@ def test_the_token_is_kept_apart_owner_only_and_never_sent_back(client, fake, pu
     assert publishsecrets.read("github") == TOKEN
     forgotten = client.delete("/api/publishing/github").json()
     assert forgotten == {"account": "", "repo": "articles", "branch": "main", "site": "", "base": "",
-                         "token": {"set": False, "hint": ""}, "categories": [],
+                         "token": {"set": False, "hint": ""}, "categories": [], "added": [],
                          "website": {"title": "", "logo": False, "logo_from": "", "counting": ""}}
     assert publishsecrets.read("github") == ""
 

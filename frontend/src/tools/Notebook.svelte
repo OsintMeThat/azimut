@@ -87,6 +87,7 @@
   import { openInDock } from '../lib/notes/noteDock.svelte.js';
   import { READY_NOTES, filledBody, freeTitle } from '../lib/notes/ready.js';
   import Icon from '../components/Icon.svelte';
+  import BusyLabel from '../components/BusyLabel.svelte';
   import BackButton from '../components/BackButton.svelte';
   import NoteEditor from '../components/NoteEditor.svelte';
   import NotesHome from './notebook/NotesHome.svelte';
@@ -108,7 +109,7 @@
   import ConfirmDialog from '../components/ConfirmDialog.svelte';
   import WordPressDraft from './notebook/WordPressDraft.svelte';
   import GitHubPublish from './notebook/GitHubPublish.svelte';
-  import { WEBSITE_HELP } from '../lib/websiteSetup.js';
+  import { BUSY as WEBSITE_BUSY, WEBSITE_HELP } from '../lib/websiteSetup.js';
   import GitHubLive from './notebook/GitHubLive.svelte';
   import ExportFolderPicker from '../components/ExportFolderPicker.svelte';
   import FloatingMenu from '../components/FloatingMenu.svelte';
@@ -1267,7 +1268,7 @@
               bind:problem={githubProblem} bind:busy={githubBusy} bind:warned={githubWarned} {caseId} noteId={exportIds[0]} title={exportTitle}
               entities={graphEntities} prepare={async () => { if (doc) await flush(doc); }}
               onaddress={(value) => { webAddressTyped = true; keepAddress(caseId, exportIds[0], value); }}
-              onlook={() => readOpenLook(exportIds[0])} onleave={closeExport} />
+              onlook={() => readOpenLook(exportIds[0])} onleave={closeExport} onpublish={runPublish} />
           {/if}
           {#if !several && !githubSet}
             <label class="dest-label" for="export-address">Address it will live at</label>
@@ -1381,10 +1382,10 @@
               : several ? `Export ${exportIds.length} ${html ? 'HTML pages' : 'PDFs'}` : `Export ${named}`}</button>
           {#if web && !several}
             <button class={githubSet ? 'btn btn-primary' : 'btn'} disabled={githubBusy || exportBusy || (githubSet && Boolean(problem))}
-              onclick={runPublish} title={githubWarned ? WEBSITE_HELP.publishAnyway
+              aria-busy={githubBusy} onclick={runPublish} title={githubWarned ? WEBSITE_HELP.publishAnyway
                 : githubSet ? 'Put the folder online in your GitHub repository, one commit'
                 : 'Publish to your own GitHub Pages site, once it is set up in Settings › Website'}>
-              {githubBusy ? 'Publishing…' : githubWarned ? 'Publish anyway' : 'Publish to GitHub Pages'}</button>
+              <BusyLabel busy={githubBusy} text={WEBSITE_BUSY.publish}>{githubWarned ? 'Publish anyway' : 'Publish to GitHub Pages'}</BusyLabel></button>
           {/if}
         {:else if draftSent?.edit}
           <a class="btn btn-primary" href={draftSent.edit} target="_blank" rel="noopener noreferrer"

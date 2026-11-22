@@ -15,7 +15,7 @@ from pathlib import Path
 
 import fullcase
 from azimut import layout
-from azimut.engine import artifacts, bundles
+from azimut.engine import artifacts, bundles, notelook
 from azimut.workspace import Case
 
 # The thumbnail cache is content-addressed, budgeted and regenerated on demand,
@@ -203,6 +203,9 @@ def test_a_full_case_comes_back_whole_from_its_bundle(client):
 
     assert sorted(rel for rel in carried if not landed.resolve_inside(rel).exists()) == []
     assert landed.resolve_inside(full.horizon_work).is_file()
+    # a note's author and their picture travel in its look, for the machine that publishes it
+    look = notelook.stored(landed, full.note_id)
+    assert look is not None and look.author == "Guest Writer" and landed.get_entity(look.author_image) is not None
     plate = client.get(f"/api/cases/{landed.id}/map-plates/{Path(full.map_plate).stem}")
     assert plate.status_code == 200, plate.text
 
