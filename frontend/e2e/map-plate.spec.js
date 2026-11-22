@@ -1237,6 +1237,13 @@ test('a feature is hidden on one map from its right-click or a click in the fram
   await layerPage.locator('.back').click();
   await expect(layerPage).toHaveCount(0);
   await expect(page.locator('.layer-said')).toHaveText('1 hidden here · from 5 Oct 2026');
+  // the Layers tab opens it too, and the map's gear goes back to the map's settings
+  await page.getByRole('tab', { name: /Layers/ }).click();
+  await page.getByRole('button', { name: 'Front on Map', exact: true }).click();
+  await expect(layerPage).toBeVisible();
+  await page.getByRole('button', { name: 'Settings of Map', exact: true }).click();
+  await expect(layerPage).toHaveCount(0);
+  await expect(page.locator('.layer-said')).toBeVisible();
 });
 
 test('an area\'s name becomes a label of the plate to move by hand, the layer keeping its own', async ({ page }) => {

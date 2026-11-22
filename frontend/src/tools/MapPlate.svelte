@@ -1305,6 +1305,7 @@
   /** A map picked from the Layers tab, the inspector shown on its Layers section. */
   function mapSettings(map) {
     selection = [map.id];
+    layerPage = null;
     if (!inspectorShown) panel('inspector');
     if (layout.folded.includes('Layers')) toggleFold('Layers');
   }
