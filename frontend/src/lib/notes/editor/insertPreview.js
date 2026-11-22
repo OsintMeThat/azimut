@@ -50,8 +50,13 @@ const ART = {
   upload: () => [picture('cm-ip-upload'), el('span', 'cm-ip-caption', 'photo.jpg, added to the case')],
   steps: () => [el('span', 'cm-ip-strip', [1, 2, 3].map((at) => el('span', 'cm-ip-step', picture(), el('span', 'cm-ip-badge', String(at)))))],
   story: () => [el('span', 'cm-ip-story', picture(), el('span', 'cm-ip-col', lines(3)))],
+  // a row of two pictures at one height, then words beside a picture
+  columns: () => [el('span', 'cm-ip-cols', picture('cm-ip-wide'), picture('cm-ip-tall')),
+    el('span', 'cm-ip-cols cm-ip-cols-words', el('span', 'cm-ip-col', lines(3)), picture())],
   logo: () => [el('span', 'cm-ip-row', el('span', 'cm-ip-logo', 'LOGO')), ...lines(2)],
   cite: () => [el('span', 'cm-ip-row', el('span', 'cm-ip-words', 'Seen at '), el('span', 'cm-ip-chip', '✓ Quay north'), el('span', 'cm-ip-words', ' on day 2.'))],
+  footnote: () => [el('span', 'cm-ip-row', el('span', 'cm-ip-words', 'Open to both,'), el('span', 'cm-ip-fn', 'a'), el('span', 'cm-ip-words', ' for a century.')),
+    el('span', 'cm-ip-rule'), el('span', 'cm-ip-row', el('span', 'cm-ip-fn-said', 'a'), el('span', 'cm-ip-words', 'The 1921 text calls it so.'))],
   map: () => [el('span', 'cm-ip-map', el('span', 'cm-ip-front'), [1, 2, 3, 4].map((at) => el('span', `cm-ip-mark cm-ip-mark-${at}`)),
     el('span', 'cm-ip-map-said', 'Front, north · 16 Nov'))],
   post: () => [el('span', 'cm-ip-row', el('span', 'cm-ip-chip', 'Coast Monitor'), el('span', 'cm-ip-words', ' @coast_monitor · X')),
@@ -106,6 +111,7 @@ export function sampleMarkdown(command) {
   if (command.menu) return '';
   const written = {
     cite: '[[entity:…|Quay north]]',
+    footnote: 'Open to both,^[The 1921 text calls it so.]',
     picture: '[[media:…|Frame 12]]',
     upload: '[[media:…|photo.jpg]]',
     map: '::: map\ntitle: The front, north\nlayer: Front, north\n:::',
@@ -115,6 +121,7 @@ export function sampleMarkdown(command) {
     chart: '::: chart\nkind: stacked bars\ntitle: At least 41 vehicles, by model\ncount: At least\nby: Model\ncolour by: Grade\n| Model | Grade | At least |\n…\n:::',
     infographic: ':::: infographic\ntitle: At least 60 vehicles lost\n::: chart\nkind: key figures\n…\n:::\n::::',
     cover: '::: center\n# {title}\n{date}\n:::\n<!-- cover -->',
+    columns: ':::: columns\n::: column\n[[media:…|Photo]]\n:::\n::: column\nYour words\n:::\n::::',
   }[command.id];
   if (written) return written;
   if (command.line) return `${command.line}${command.line.startsWith('> [!') ? '' : 'Your words'}`.trimEnd();
@@ -208,6 +215,13 @@ export const previewLook = EditorView.theme({
   },
   '.cm-ip-story': { display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px', alignItems: 'center' },
   '.cm-ip-col': { display: 'flex', flexDirection: 'column', gap: '6px' },
+  '.cm-ip-cols': { display: 'flex', gap: '8px', alignItems: 'flex-start' },
+  '.cm-ip-cols + .cm-ip-cols': { marginTop: '8px' },
+  '.cm-ip-cols .cm-ip-picture': { height: '58px' },
+  '.cm-ip-cols .cm-ip-wide': { flex: '1.6 1 0' },
+  '.cm-ip-cols .cm-ip-tall': { flex: '0.8 1 0' },
+  '.cm-ip-cols-words .cm-ip-col': { flex: '2 1 0' },
+  '.cm-ip-cols-words .cm-ip-picture': { flex: '1 1 0', height: '40px' },
   '.cm-ip-logo': {
     display: 'inline-block', padding: '4px 8px', border: '1px dashed var(--border-strong)', borderRadius: '4px', color: 'var(--text-3)',
     fontSize: '10px', fontWeight: '700', letterSpacing: '0.1em',
@@ -216,6 +230,11 @@ export const previewLook = EditorView.theme({
     display: 'inline-flex', padding: '0 6px', borderRadius: '4px', background: 'var(--bg-3)', border: '1px solid var(--border)',
     color: 'var(--text-1)', fontSize: '11.5px', whiteSpace: 'nowrap',
   },
+  '.cm-ip-fn': {
+    alignSelf: 'flex-start', marginLeft: '-6px', padding: '0 3px', borderRadius: '3px', background: 'var(--accent-soft)', color: 'var(--accent)',
+    fontSize: '9px', fontWeight: '700', lineHeight: '1.4',
+  },
+  '.cm-ip-fn-said': { color: 'var(--accent)', fontSize: '11px', fontWeight: '700', width: '10px', flex: 'none' },
   '.cm-ip-map': {
     position: 'relative', display: 'block', height: '86px', borderRadius: '4px', overflow: 'hidden',
     background: 'radial-gradient(circle at 30% 40%, #3d4f45 0, #2b3a33 55%, #22303a 100%)',

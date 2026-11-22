@@ -226,9 +226,11 @@ proof for publication.
 | ✅ **Tables in reports** | Sets how a table shows from its own card: a search bar, sorting, folding a long one, stripes, rows coloured by a column, a caption and a source. |
 | ✅ **Sheet on a map** | Puts a sheet whose rows have places on the map as a layer in one press, coloured by a column, and updates it when the sheet changes without undoing the analyst's edits. |
 | ✅ **Figure templates** | Keeps an infographic's, a chart's or a map's look as a template without the case's data, three ready ones included, applied by matching its columns to the data's. |
+| ✅ **Columns** | Sets two or three columns of pictures or words side by side, pictures alone at one height with nothing cropped, written in place, made from `/`, a picture's bar or a drag, and printed side by side in every format. |
 | ✅ **Ready to publish?** | Lists before an export what a note still needs (exact counts, links never archived or seen, pictures with no credit or alt text, the marking, the weight), each fixed in one press where it can be. |
 | ✅ **Writing without Markdown** | Edits a note on its drawn page: a bubble on selected words, a handle on every block, one insert menu, tables as grids that take a spreadsheet's paste, pictures and stories set by hand, and no syntax shown while typing. |
 | ✅ **Sources fit to cite** | Finds the case item behind a written link, writes sources academic, web or short with the annexes a report, a web article or a brief carries, archives a note's links in one press, and shows what the case knows of a citation on hover. |
+| ✅ **Sources as cards** | A web page cites by its words: each opens its source's card on hover or a first tap, the list is grouped by kind, pages are named by the title and day their archived copy states, posts by account and moment; footnotes `[a]` and Book or report records for what has no address. |
 | ✅ **Notes in the extension** | A folding panel in the extension holds the note; its Add, a right-click or Alt+Shift+S cites the page (or the post), quotes the selected words with a link to that passage, or puts a map capture in; its infographics open their builder there, beside Ready to publish? and Open in Azimut. |
 | ✅ **One-press extension** | The toolbar button opens what the page is for: the map panel over a map, Capture first and the scenes to geolocate listed, the note beside any other page with Save this page; a pairing popup only until paired. |
 | ✅ **Report editions** | Marks passages internal, prints a report as an internal or a public edition that never carries one, keeps every PDF it wrote with its fingerprint, listed and checked from the note, and says what changed between two public editions, drafting the correction line from it. |
@@ -549,7 +551,10 @@ stops making sense.
   with Azimut's user agent, timeouts, no redirect followed, answers read up to a bound, 10 s
   at least between two saves and the wait a 429 asks for (longer each time, then the run
   stops). Only the page's address goes, never a cookie, a key or the note, and Azimut
-  never fetches the page itself. It runs on the case's queue from that press alone:
+  never fetches the page itself. Once a page has its copy, the same press reads that copy
+  back from `web.archive.org` as it was saved (`id_`, a bounded answer, the archive's own
+  redirects only) for the title and the day the page states of itself, once per bookmark; a
+  post on a walled site is cited by its account and day instead, read off its address. It runs on the case's queue from that press alone:
   reading its plan, its run, the note or the check asks nothing, and a run Azimut's
   closing cut short waits for the next press rather than going on at startup. Accepted
   risk, said in the dialog before the press: the Internet Archive learns the addresses a

@@ -641,6 +641,27 @@ ENTITY_TYPES: tuple[EntityType, ...] = (
             ),
         ),
     ),
+    # A book or a report a note cites, printed or online. Written by the analyst, so
+    # every field is declared: a web page's list names it by its author, its title in
+    # italics, its publisher and its year, and the words citing it open that entry's
+    # card (`notesources.card_entry`). The page cited is written in the sentence.
+    EntityType(
+        "publication", "Book or report", DOCUMENT, "book", ATTESTATION,
+        hint="a book or a report a note cites, with its author, publisher and year",
+        manual=True,
+        attrs=(
+            Attr("author", "Author", hint="who wrote it: a person, or the body that published it"),
+            Attr("publisher", "Publisher", hint="the press or the organization that issued it"),
+            Attr("year", "Year", hint="the year it came out"),
+            Attr("medium", "Kind", kind="choice",
+                 options=(("Book", "Book"), ("Report", "Report"), ("Journal article", "Journal article"),
+                          ("Chapter", "Chapter")),
+                 hint="what it is, as the sources list names it"),
+            Attr("url", "Online at", kind="url", hint="where it can be read online, if it can"),
+            Attr("archive_url", "Archived copy", kind="url",
+                 hint="a snapshot that survives the page being taken down"),
+        ),
+    ),
     # -- place ----------------------------------------------------------------
     # Only the precision fields are declared: `lat`, `lon`, `coords`, `plus_code`,
     # `zoom`, `bearing`, `geo` and `notes` are the Satellite tool's, written by the

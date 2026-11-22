@@ -19,7 +19,8 @@ const ACTIVE = ['queued', 'running', 'stopping'];
 const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
 
 /** What the dialog says before the press, once: what goes out, to whom, and that it is free. */
-export const SENDS = 'Sends each address to the Internet Archive (web.archive.org), which keeps a copy anyone can open. '
+export const SENDS = 'Sends each address to the Internet Archive (web.archive.org), which keeps a copy anyone can open, '
+  + 'then reads each page\'s title and date back from that copy for the sources list. '
   + 'Free, no account. The archive learns which pages the note cites; nothing else leaves this computer.';
 
 const base = (caseId, noteId) => `/api/cases/${encodeURIComponent(caseId)}/notes/${encodeURIComponent(noteId)}/archive`;
@@ -140,8 +141,18 @@ export function planWords(plan) {
   if (!plan) return '';
   const said = [`${plural(plan.todo ?? 0, 'link')} to archive`];
   if (plan.archived) said.push(`${plan.archived} archived already`);
+  if (plan.titles) said.push(`${plural(plan.titles, 'page title')} to read`);
   if (plan.filed) said.push(`${plan.filed} filed as ${plan.filed === 1 ? 'a bookmark' : 'bookmarks'}`);
   return said.join(' · ');
+}
+
+/** What the press button says: the links it archives, else the titles it reads. */
+export function pressWords(plan) {
+  const todo = plan?.todo ?? 0;
+  const titles = plan?.titles ?? 0;
+  if (todo) return `Archive ${plural(todo, 'link')}`;
+  if (titles) return `Read ${plural(titles, 'page title')}`;
+  return 'Every link is archived';
 }
 
 /** The run's head: `34 of 88 archived`, and failures when there are some. */
@@ -167,7 +178,7 @@ export function rowWords(link) {
       : `no new copy · copy of ${dayWords(link.made)} linked`;
     case 'failed': return link.reason || 'no copy';
     case 'saving': return 'saving…';
-    case 'archived': return link.made ? `archived ${dayWords(link.made)}` : 'archived';
+    case 'archived': return `${link.made ? `archived ${dayWords(link.made)}` : 'archived'}${link.untitled ? ' · title to read' : ''}`;
     case 'todo':
       if (link.reason) return `last time: ${link.reason.charAt(0).toLowerCase()}${link.reason.slice(1)}`;
       return link.held ? 'to archive' : 'to archive · new bookmark';

@@ -74,6 +74,9 @@ class Archive:
         self.saves: list[tuple[str, float]] = []
         self.answers: dict[str, list] = {}
         self.agents: set[str] = set()
+        #: What each page's copy holds when read back raw (`id_`), and the pages read so.
+        self.pages: dict[str, str] = {}
+        self.reads: list[str] = []
 
     def handle(self, request: httpx.Request) -> httpx.Response:
         self.agents.add(request.headers.get("user-agent", ""))
@@ -97,6 +100,13 @@ class Archive:
             made = stamp(datetime.now(timezone.utc))
             self.copies.setdefault(page, []).append(made)
             return httpx.Response(302, headers={"Location": f"https://web.archive.org/web/{made}/{page}"})
+        if url.host == "web.archive.org" and b"id_/" in url.raw_path:
+            page = url.raw_path.decode().split("id_/", 1)[1]
+            self.reads.append(page)
+            held = self.pages.get(page)
+            if held is None:
+                return httpx.Response(404)
+            return httpx.Response(200, headers={"content-type": "text/html; charset=utf-8"}, text=held)
         raise AssertionError(f"the run asked something else: {url}")
 
     def saved(self) -> list[str]:
@@ -170,7 +180,7 @@ def test_the_plan_lists_the_public_links_and_says_what_a_press_would_do(client, 
     assert [link["url"] for link in plan["links"]] == [JAZEERA, BBC, REUTERS, NOTICE]
     assert [link["text"] for link in plan["links"]] == ["Al Jazeera, 10 Sep", "BBC, 5 Oct", "Reuters", "the notice"]
     assert plan | {"links": None, "run": None} == {
-        "links": None, "run": None, "total": 4, "todo": 4, "archived": 0, "filed": 3, "more_internal": 1,
+        "links": None, "run": None, "total": 4, "todo": 4, "titles": 0, "archived": 0, "filed": 3, "more_internal": 1,
         "folder": FOLDER, "max": linkarchive.MAX_LINKS,
     }
     inside = client.get(f"/api/cases/{cid}/notes/{note_id}/archive", params={"internal": True}).json()
@@ -550,3 +560,126 @@ def test_spec_records_the_two_hosts_and_the_accepted_risk():
     assert "Archive every link" in posture
     assert "archive.org/wayback/available" in posture and "web.archive.org/save" in posture
     assert "the Internet Archive learns" in posture
+
+
+# -- the page's own title, read back from its copy --------------------------------------
+
+PAGE = """<html><head><title>Houthis take Mocha port | Al Jazeera</title>
+<meta property="article:published_time" content="2026-09-10T08:02:00Z"></head><body>…</body></html>"""
+POST = "https://x.com/port_watch/status/2108508784049926499"
+
+
+def test_each_page_is_named_by_the_title_and_day_its_copy_states(client, front, archive):
+    cid, case, note_id, mark = front
+    archive.pages[JAZEERA] = PAGE
+    archive.pages[NOTICE] = '<meta property="og:title" content="Notice to mariners: the strait is closed">'
+    press(client, cid, note_id)
+    workqueue.drain(case)
+    filed = {entity["attrs"]["url"]: entity for entity in bookmarks(case, FOLDER)}
+    # read back raw from the archive, never from the page's own site
+    assert set(archive.reads) == {JAZEERA, BBC, REUTERS, NOTICE}
+    assert filed[JAZEERA]["label"] == "Houthis take Mocha port"
+    assert filed[JAZEERA]["attrs"][notesources.PAGE_TITLE] == "Houthis take Mocha port"
+    assert filed[JAZEERA]["attrs"][notesources.PUBLISHED_AT] == "2026-09-10"
+    # a copy that says nothing keeps the link's words, and is not read again
+    assert filed[BBC]["label"] == "BBC, 5 Oct" and notesources.PAGE_TITLE not in filed[BBC]["attrs"]
+    # a bookmark someone filed keeps its name and gains its page's title
+    held = case.get_entity(mark)
+    assert held["label"] == "Port notice"
+    assert held["attrs"][notesources.PAGE_TITLE] == "Notice to mariners: the strait is closed"
+    source = notesources.Reader(case).link(JAZEERA, "Al Jazeera, 10 Sep")
+    assert (source.title, source.published) == ("Houthis take Mocha port", "2026-09-10")
+    plan = client.get(f"/api/cases/{cid}/notes/{note_id}/archive").json()
+    assert plan["todo"] == 0 and plan["titles"] == 0
+
+
+def test_links_archived_before_still_get_their_titles_read_once(client, front, archive):
+    cid, case, note_id, _ = front
+    press(client, cid, note_id)
+    workqueue.drain(case)
+    # the four were archived before titles were read: their bookmarks say none was looked for
+    for entity in bookmarks(case):
+        attrs = {key: value for key, value in entity["attrs"].items() if key != linkarchive.TITLE_TRIED}
+        case.update_entity(entity["id"], {"attrs": {**attrs, linkarchive.TITLE_TRIED: None}})
+    archive.reads.clear()
+    archive.pages[REUTERS] = "<title>Front lines shift north - Reuters</title>"
+    plan = client.get(f"/api/cases/{cid}/notes/{note_id}/archive").json()
+    assert plan["todo"] == 0 and plan["titles"] == 3  # the user's bookmark took its own name as its title
+    run = press(client, cid, note_id)
+    assert run["counts"]["total"] == 3
+    saves = len(archive.saves)
+    workqueue.drain(case)
+    assert len(archive.saves) == saves  # nothing saved again, only read
+    filed = {entity["attrs"]["url"]: entity for entity in bookmarks(case, FOLDER)}
+    assert filed[REUTERS]["label"] == "Front lines shift north"
+    assert client.get(f"/api/cases/{cid}/notes/{note_id}/archive").json()["titles"] == 0
+    answer = client.post(f"/api/cases/{cid}/notes/{note_id}/archive", json={})
+    assert answer.status_code == 409
+
+
+def test_a_post_on_a_walled_site_is_cited_by_account_and_day_not_read(client, archive):
+    cid = make_case(client, "Walled")
+    case = Case.open(cid)
+    note = make_note(client, cid, title="Walled", content=f"[his post]({POST}) and [Al Jazeera]({JAZEERA}).\n")
+    archive.pages[POST] = "<title>X</title>"
+    archive.pages[JAZEERA] = PAGE
+    press(client, cid, note["id"])
+    workqueue.drain(case)
+    assert archive.reads == [JAZEERA]
+    plan = client.get(f"/api/cases/{cid}/notes/{note['id']}/archive").json()
+    assert plan["titles"] == 0
+
+
+@pytest.mark.parametrize("page_html, url, said", [
+    (PAGE, JAZEERA, ("Houthis take Mocha port", "2026-09-10")),
+    ('<meta property="og:title" content="Strait cleared, says envoy">'
+     '<script type="application/ld+json">{"datePublished": "2026-10-09T12:00:00+03:00"}</script>',
+     "https://english.aawsat.com/node/5327743", ("Strait cleared, says envoy", "2026-10-09")),
+    ("<title>Yemen: forces retreat — Al-Monitor</title>", "https://www.al-monitor.com/a", ("Yemen: forces retreat", "")),
+    ('<meta name="pubdate" content="1803-01-01"><title>Old &amp; new</title>', "https://e.org/a", ("Old & new", "")),
+])
+def test_a_page_states_its_title_and_day_in_its_tags(page_html, url, said):
+    facts = linkarchive.page_facts(page_html, url)
+    assert facts is not None and (facts.title, facts.day) == said
+
+
+def test_a_title_that_is_another_page_s_is_refused():
+    # the archive saved this address as a redirect to another article: its words share none of the address's
+    other = "<title>Saudi Arabia says three people wounded in attacks on southern airports | Al Jazeera</title>"
+    url = "https://www.aljazeera.com/news/2026/10/5/yemen-forces-claim-to-seize-dhubab-sites-near-bab-al-mandeb"
+    assert linkarchive.page_facts(other, url) is None
+    right = "<title>Yemen forces claim to seize Dhubab sites near Bab al-Mandeb | Al Jazeera</title>"
+    assert linkarchive.page_facts(right, url).title == "Yemen forces claim to seize Dhubab sites near Bab al-Mandeb"
+    # an address with no words in it fits any title
+    assert linkarchive.page_facts(other, "https://english.aawsat.com/node/5327743") is not None
+
+
+def read_through_redirect(start: str, landed: str, title: str) -> linkarchive.PageFacts | None:
+    """What a copy of ``start`` says when the archive kept it as a redirect to ``landed``."""
+    def handle(request):
+        if request.url.raw_path.decode().endswith(start.split("://", 1)[1]):
+            return httpx.Response(302, headers={"Location": f"https://web.archive.org/web/20260910080000id_/{landed}"})
+        return httpx.Response(200, headers={"content-type": "text/html"}, text=f"<title>{title}</title>")
+
+    with linkarchive.client(httpx.MockTransport(handle)) as http:
+        return linkarchive.Wayback(http, sleep=lambda _s: None).page(f"https://web.archive.org/web/20260910080000/{start}", start)
+
+
+def test_a_copy_that_redirects_to_another_story_or_a_home_page_gives_no_title():
+    other = "https://www.aljazeera.com/news/2026/10/5/saudi-arabia-says-three-wounded-in-airport-attacks"
+    assert read_through_redirect(JAZEERA, other, "Saudi Arabia says three wounded in airport attacks") == linkarchive.PageFacts("")
+    home = "https://english.aawsat.com/"
+    assert read_through_redirect("https://english.aawsat.com/node/5327743", home, "Latest news") == linkarchive.PageFacts("")
+
+
+def test_a_short_link_redirected_to_its_article_keeps_its_title():
+    story = "https://english.aawsat.com/arab-world/5327743-operation-dawn-yemen-clears-bab-al-mandab"
+    facts = read_through_redirect("https://english.aawsat.com/node/5327743", story,
+                                  "Operation Dawn of Yemen Clears Bab al-Mandab of Houthi Forces")
+    assert facts is not None and facts.title == "Operation Dawn of Yemen Clears Bab al-Mandab of Houthi Forces"
+
+
+@pytest.mark.parametrize("page_html", ["<title>Just a moment...</title>", "<title>Access denied</title>",
+                                       "<title>Al Jazeera</title>", "<p>no head</p>"])
+def test_a_wall_or_a_bare_site_name_is_no_title(page_html):
+    assert linkarchive.page_facts(page_html, JAZEERA) is None

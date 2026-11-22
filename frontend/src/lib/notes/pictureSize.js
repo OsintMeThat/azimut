@@ -223,6 +223,9 @@ export function casePictures(entities, query = '', { limit = 80 } = {}) {
     .slice(0, limit);
 }
 
+/** A line holding nothing but one picture: `![…](…){…}` or `[[media:…]]{…}`. */
+export const PICTURE_LINE = /^\s*(?:!\[[^\]]*\]\([^)]*\)(?:\{[^}\n]*\})?|\[\[media:[A-Za-z0-9_-]+\|[^\]\n]+\]\](?:\{[^}\n]*\})?)\s*$/;
+
 /** `[[media:id|Label]]`, the line a case picture is written as. */
 export function pictureReference(entity) {
   return `[[media:${entity.id}|${String(entity.label ?? '').replace(/[[\]|\n]/g, '').trim() || 'Picture'}]]`;

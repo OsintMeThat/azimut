@@ -1,0 +1,21 @@
+{
+  "about": "Where a line marks a footnote (`^[words]`), and the words of each, as the parser (`engine/notes_markdown.py`), the plain reader (`engine/notetext.py`) and the Notebook (`lib/notes/footnotes.js`) all read it: brackets balance, a backslash escapes, code is skipped, and one never closed or holding nothing stays text.",
+  "cases": [
+    { "line": "The strait was open to both,^[The 1921 text calls it a “common passage”.] for most of the century.", "notes": ["The 1921 text calls it a “common passage”."] },
+    { "line": "Two^[First.] asides^[Second, *in italics*.] here.", "notes": ["First.", "Second, *in italics*."] },
+    { "line": "^[At the start.] of a line", "notes": ["At the start."] },
+    { "line": "A note with a link^[See [the treaty](https://example.org/treaty) and [sic] there.] in it.", "notes": ["See [the treaty](https://example.org/treaty) and [sic] there."] },
+    { "line": "A note naming a record^[About [[entity:abc|the port]].] in it.", "notes": ["About [[entity:abc|the port]]."] },
+    { "line": "Escaped: \\^[not a note] stays text.", "notes": [] },
+    { "line": "A bracket escaped inside^[one \\] two] counts.", "notes": ["one \\] two"] },
+    { "line": "Code `^[not a note]` stays code.", "notes": [] },
+    { "line": "A bracket in code inside^[one `]` two] counts.", "notes": ["one `]` two"] },
+    { "line": "``double ^[x]`` code, then^[y].", "notes": ["y"] },
+    { "line": "`one ```two^[x]``` three` then^[y].", "notes": ["y"] },
+    { "line": "Never closed ^[so it stays text", "notes": [] },
+    { "line": "Never closed ^[outer, ^[inner] still open", "notes": ["inner"] },
+    { "line": "Nested ^[outer ^[inner] rest] reads as one.", "notes": ["outer ^[inner] rest"] },
+    { "line": "Empty ^[] and blank ^[  ] are none.", "notes": [] },
+    { "line": "A caret ^ alone, and a link [words](https://example.org) are no notes.", "notes": [] }
+  ]
+}

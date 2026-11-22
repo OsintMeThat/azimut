@@ -15,7 +15,7 @@
   import Icon from '../../components/Icon.svelte';
   import Modal from '../../components/Modal.svelte';
   import {
-    SENDS, REUSE_DAYS, countWords, follow, followed, isActive, leftWords, planWords, readPlan, rowMark, rowWords,
+    SENDS, REUSE_DAYS, countWords, follow, followed, isActive, leftWords, planWords, pressWords, readPlan, rowMark, rowWords,
     startArchive, stopArchive,
   } from '../../lib/notes/linkArchive.svelte.js';
 
@@ -188,8 +188,8 @@
       <button type="button" class="btn btn-primary" onclick={onclose}>Close</button>
     {:else}
       <button type="button" class="btn" onclick={onclose}>Cancel</button>
-      <button type="button" class="btn btn-primary" disabled={busy || !plan?.todo} onclick={press}>
-        {busy ? 'Starting…' : plan?.todo ? `Archive ${plan.todo} link${plan.todo === 1 ? '' : 's'}` : 'Every link is archived'}</button>
+      <button type="button" class="btn btn-primary" disabled={busy || !(plan?.todo || plan?.titles)} onclick={press}>
+        {busy ? 'Starting…' : pressWords(plan)}</button>
     {/if}
   </div>
 </Modal>

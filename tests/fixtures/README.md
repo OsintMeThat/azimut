@@ -93,3 +93,13 @@ never show a default the documents do not print.
 Read by `tests/test_notes_profiles.py` against `notes_markdown.own_sources` and by
 `frontend/src/lib/notes/look.test.js` against `ownSources`, so the Look never says a note
 ends on its own section while the document prints the generated list.
+
+## Footnotes
+
+| File | What it is there to break |
+|---|---|
+| `footnotes.json` | Where a line marks a footnote (`^[words]`) and the words of each: brackets that balance around a link or a `[sic]`, an escaped `\^[` or `\]`, code inside and around, one never closed, one nested, an empty one. Written by hand. |
+
+Read by `tests/test_notes_footnotes.py` against the parser and `notetext.footnote_spans`, and
+by `frontend/src/lib/notes/footnotes.test.js` against `findFootnotes`, so the Notebook draws a
+letter exactly where every document prints one.

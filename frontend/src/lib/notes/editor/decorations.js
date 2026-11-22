@@ -4,7 +4,7 @@
  *
  * Three passes, in this order, each leaving alone what an earlier one drew whole:
  * the `:::` blocks line by line, then the syntax tree, then the lines the Markdown
- * parser does not see (chapters, `[[media:…]]` pictures, case references,
+ * parser does not see (chapters, `[[media:…]]` pictures, case references, footnotes,
  * coordinates, the words the PDF fills in). The blocks drawn whole are the kinds
  * registered in `editor/blocks.js`; the marks inside a line (headings, emphasis,
  * links, quotes and callouts, lists and tasks, code) are this module's own.
@@ -24,6 +24,9 @@
  * aligned block each line stands in, by line number), `count(name)` (the next
  * number of a kind, a chapter's), `standsWhole(range)` (nothing the parser found
  * inside is drawn) and `coverEnd()` (the 1-based line of the cover rule, 0 without).
+ * A kind written in place (a row of columns) also gets `decorate(range)` (any
+ * decoration), `cover(from, to)` (a stretch nothing else draws on) and `columns` (the
+ * style of the column each line stands in, by line number, which a block there takes).
  */
 import { EditorState, StateField, Transaction } from '@codemirror/state';
 import { Decoration, EditorView } from '@codemirror/view';
@@ -31,12 +34,13 @@ import { HighlightStyle, ensureSyntaxTree, syntaxTree } from '@codemirror/langua
 import { tags } from '@lezer/highlight';
 
 import { CALLOUT_LINE, calloutOf } from '../callouts.js';
+import { footnoteLetter, footnotesOf } from '../footnotes.js';
 import { HINT_LINE, PAGE_BREAK_LINE } from '../look.js';
 import { COVER_LINE, coverLineIndex, findPlaceholders } from '../reportParts.js';
 import { findCoordinates, findReferences } from '../syntax.js';
 import { blockKind, fenceKinds, isAtomic, lineKinds, nodeKinds } from './blocks.js';
 import {
-  BulletWidget, CalloutLabelWidget, ChipWidget, CoordinatesWidget, HintWidget, NumberWidget, PlaceholderWidget, TaskWidget,
+  BulletWidget, CalloutLabelWidget, ChipWidget, CoordinatesWidget, FootnoteWidget, HintWidget, NumberWidget, PlaceholderWidget, TaskWidget,
 } from './inline.js';
 import {
   cursorLines, focused, noteCase, noteHandlers, openBlock, resolve, selecting, setFocused, setNoteCase, setSelecting, templateMode, typedAt,
@@ -156,6 +160,7 @@ export function noteDecorations(state) {
     isOpen,
     inCode,
     aligns: new Map(), // the place of the aligned block each line stands in, by line number, for a picture there
+    columns: new Map(), // while a row of columns is written in, where its column's lines stand, by line number, for a block there
     line: (pos, className) => ranges.push(lineClass(className).range(pos)),
     lines: (from, to, className) => {
       for (let number = state.doc.lineAt(from).number; number <= state.doc.lineAt(to).number; number += 1) {
@@ -163,6 +168,9 @@ export function noteDecorations(state) {
       }
     },
     mark: (from, to, className) => ranges.push(Decoration.mark({ class: className }).range(from, to)),
+    // a kind that dresses its own lines while it is written in (a row of columns): any decoration, and a stretch nothing else draws on
+    decorate: (range) => ranges.push(range),
+    cover: (from, to) => covered.push([from, to]),
     count: (name) => {
       counts.set(name, (counts.get(name) ?? 0) + 1);
       return counts.get(name);
@@ -189,6 +197,9 @@ export function noteDecorations(state) {
       pinned: Boolean(found.pinned),
       picked: first.from === pick,
     });
+    // a block in the column being written in stands where that column does
+    const column = ctx.columns.get(first.number);
+    if (column) widget.column = column;
     ranges.push(Decoration.replace({ widget, block: true }).range(first.from, last.to));
   };
 
@@ -198,6 +209,8 @@ export function noteDecorations(state) {
       block(kind.name, found);
       return true;
     }
+    // a kind written in place (a row of columns) dresses its own lines while the cursor is in it, and shows its source once opened
+    if (kind.writtenIn && !inOpen(found.from, found.to)) return kind.writtenIn(ctx, found) !== false;
     opened.push([state.doc.lineAt(found.from).from, state.doc.lineAt(found.to).to]);
     return Boolean((kind.source ?? (kind.fence ? fenceSource : null))?.(ctx, found));
   };
@@ -414,10 +427,14 @@ export function noteDecorations(state) {
     },
   });
 
-  // References, coordinates and chapters are not Markdown: found line by line, outside code.
+  // References, footnotes, coordinates and chapters are not Markdown: found line by line, outside code.
   // an editor with no map around it says so with a null `point` (the extension's panel)
   const mapless = state.facet(noteHandlers).point === null;
   const ownLines = lineKinds();
+  // a footnote's letter counts every footnote before it, in a table or a block too, as the documents letter them
+  const written = state.doc.toString();
+  const notes = written.includes('^[') ? footnotesOf(written) : [];
+  let nextNote = 0; // the first footnote not on a line before this one: the lines go down the note once
   for (let number = 1; number <= state.doc.lines; number += 1) {
     const line = state.doc.line(number);
     if (inside(line.from) || !line.text) continue;
@@ -431,6 +448,18 @@ export function noteDecorations(state) {
     if (taken) continue;
     // only a block whose source is open shows what a line is made of
     const source = shows(line.from, line.to);
+    // a footnote is its letter, whatever it holds: its words show on hover and open in the Footnote field
+    while (nextNote < notes.length && notes[nextNote].from < line.from) nextNote += 1;
+    for (let index = nextNote; index < notes.length && notes[index].to <= line.to; index += 1) {
+      const note = notes[index];
+      if (inCode(note.from)) continue;
+      if (source) ranges.push(Decoration.mark({ class: 'cm-footnote-source' }).range(note.from, note.to));
+      else {
+        whole.push(note);
+        ranges.push(Decoration.replace({ widget: new FootnoteWidget(footnoteLetter(index), note.words, note.from), conceal: 'atom' })
+          .range(note.from, note.to));
+      }
+    }
     const refs = findReferences(line.text, line.from).filter((ref) => !inCode(ref.from));
     for (const ref of refs) {
       const entity = resolve(info, ref.id);

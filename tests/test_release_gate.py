@@ -305,6 +305,7 @@ def test_release_tooling_is_bounded_and_built_from_the_lock():
         "azimut/engine/notes_html_assets/reader.infographic.css",
         "azimut/engine/notes_html_assets/reader.table.css",
         "azimut/engine/notes_html_assets/reader.post.css",
+        "azimut/engine/notes_html_assets/reader.columns.css",
         "azimut/engine/notes_html_assets/markers.json",
     ):
         assert font_asset in workflow

@@ -11,9 +11,11 @@ rule every reader uses (`notes_markdown.strip_internal`) and refused if one were
 there. It is read as the HTML report reads it, then written as block editor markup a
 careful person would have made by hand: headings, paragraphs, lists, quotes, tables,
 separators, each picture an image block with its alt text, caption and credit, a
-comparison's two sides in two columns with their labels, a graphic picture folded in a
-Details block, and the numbered Sources list with each entry's links and verify links,
-which every citation links to. A chart (`::: chart`) is its picture, captioned as every
+comparison's two sides in two columns with their labels, a `:::: columns` row as a
+Columns block with each column's share (a row of pictures shared out by their shapes so
+they stand at one height, kept side by side on a phone), a graphic picture folded in a
+Details block, each footnote's `[a]` an anchor to its words under Notes, and the numbered
+Sources list with each entry's links and verify links, which every citation links to. A chart (`::: chart`) is its picture, captioned as every
 figure is, its numbers folded under it in a table, or its own table after it when the
 block says to show it. An infographic (`:::: infographic`) is one picture of its whole
 page, then each chart's numbers under "The numbers". The Story layout and the `::: steps` and `::: story`
@@ -463,9 +465,19 @@ def video(index: int, caption: str = "", poster: int | None = None) -> str:
                           f"</video>{figcaption}</figure>", attrs)
 
 
-def columns(sides: list[list[str]]) -> str:
-    inner = [block("column", f'<div class="wp-block-column">{nested(side)}</div>') for side in sides]
-    return block("columns", f'<div class="wp-block-columns">{nested(inner)}</div>')
+def columns(sides: list[list[str]], widths: list[str] | None = None, *, stacked: bool = True) -> str:
+    """Columns side by side, each its ``widths`` share when given; ``stacked`` False keeps
+    them side by side on a phone too."""
+    inner = []
+    for position, side in enumerate(sides):
+        width = widths[position] if widths else ""
+        style = f' style="flex-basis:{width}"' if width else ""
+        inner.append(block("column", f'<div class="wp-block-column"{style}>{nested(side)}</div>',
+                           {"width": width} if width else None))
+    if stacked:
+        return block("columns", f'<div class="wp-block-columns">{nested(inner)}</div>')
+    return block("columns", f'<div class="wp-block-columns is-not-stacked-on-mobile">{nested(inner)}</div>',
+                 {"isStackedOnMobile": False})
 
 
 def details(summary: str, inner_blocks: list[str]) -> str:
@@ -552,6 +564,10 @@ class _Writer:
         self._shift = 0
         self._base = 1
         self._counters = [0, 0, 0]
+        #: Whether the walk is inside a column of a row side by side, and the pixel size of
+        #: the last picture it uploaded, which a row of pictures shares out by.
+        self._columned = False
+        self._last_size: tuple[int, int] | None = None
         self._figures = 0
         self._label = ""
         self._clip_bytes = 0
@@ -562,6 +578,10 @@ class _Writer:
         self.swaps: dict[int, tuple[str, str]] = {}
         #: Uploads only named in a line of words so far, which a figure describes better.
         self._named_only: set[int] = set()
+        #: Each footnote as (letter, its words as rich text), in reading order, which the Notes
+        #: list before the sources, and the letter each footnote's token was given.
+        self.footnotes: list[tuple[str, str]] = []
+        self._footnote_marks: dict[int, tuple[Token, str]] = {}
 
     @property
     def anchors(self) -> set[str]:
@@ -603,6 +623,7 @@ class _Writer:
             out.insert(0, paragraph(f"<em>{_text('This article holds graphic pictures, each folded until pressed.')}</em>"))
         if self.look.signed == "end":
             out.extend(self._signed_end())
+        out.extend(self._notes())
         out.extend(self._sources())
         out.extend(self._annexes())
         if self.cited.identity.credit:
@@ -686,12 +707,46 @@ class _Writer:
                 out.extend(self._infographic(token))
             elif kind == md.POST_TOKEN:
                 out.extend(self._post(token))
+            elif kind == md.COLUMNS_OPEN:
+                row, stop = self._columns(tokens, index)
+                out.extend(row)
             index = stop
         return [part for part in out if part]
+
+    def _columns(self, tokens: list[Token], index: int) -> tuple[list[str], int]:
+        """A `:::: columns` row as WordPress's own Columns block, each column its share of
+        the row (``width``). A row of pictures shares the row out by each picture's shape,
+        so they stand at one height, and stays side by side on a phone; any other row
+        stacks there, as the block does by default. Where a row cannot be read as one,
+        the walk reads its columns one under the other."""
+        spans, end = md.column_spans(tokens, index)
+        if self._columned or len(spans) < 2:
+            return [], index + 1
+        sides: list[list[str]] = []
+        sizes: list[tuple[int, int] | None] = []
+        self._columned = True
+        try:
+            for first, stop, _ in spans:
+                self._last_size = None
+                sides.append(self._walk(tokens, first, stop))
+                sizes.append(self._last_size)
+        finally:
+            self._columned = False
+        pictures = bool(tokens[index].meta.get("pictures")) and all(size and size[1] for size in sizes)
+        if pictures:
+            ratios = [size[0] / size[1] for size in sizes if size]
+            shares = [ratio / sum(ratios) for ratio in ratios]
+        else:
+            shares = [share for _, _, share in spans]
+        widths = [f"{round(share * 100, 2):g}%" for share in shares]
+        return [columns(sides, widths, stacked=not pictures)], end
 
     def _heading(self, words: str, level: int, inner: str = "") -> str:
         rank = level - self._base
         tag = min(6, rank + 2)
+        if self._columned:
+            # a heading inside a column: its rank's size, never numbered
+            return heading(max(2, tag), inner or _text(words))
         number = ""
         if self.look.numbered and 0 <= rank < len(self._counters):
             self._counters[rank] += 1
@@ -704,7 +759,8 @@ class _Writer:
 
     def _new_id(self, wanted: str) -> str:
         base = wanted or "section"
-        if base in report.RESERVED_IDS or base.startswith("source-"):
+        if (base in report.RESERVED_IDS or base.startswith("source-") or base in report.FOOTNOTE_IDS
+                or report.FOOTNOTE_ID.match(base)):
             base = f"{base}-section"
         candidate, counter = base, 2
         while candidate in self._ids:
@@ -944,6 +1000,8 @@ class _Writer:
                 parts.append(closing + (_cite(number) if number else ""))
             elif kind == "image":
                 parts.append(self._inline_picture(child))
+            elif kind == md.FOOTNOTE_TOKEN:
+                parts.append(self._footnote(child))
             elif kind == "code_inline":
                 parts.append(f"<code>{_text(child.content)}</code>")
             elif kind == "softbreak":
@@ -958,6 +1016,18 @@ class _Writer:
                 parts.append(_text(child.content) if links else self._prose(child.content))
         parts.extend(closing for closing, _ in reversed(links))
         return "".join(parts).strip()
+
+    def _footnote(self, token: Token) -> str:
+        """A footnote's letter where it is written, a plain anchor to its words under Notes,
+        which are written as any line is."""
+        known = self._footnote_marks.get(id(token))
+        if known is not None:
+            letter = known[1]
+        else:
+            letter = md.footnote_letter(len(self.footnotes))
+            self._footnote_marks[id(token)] = (token, letter)
+            self.footnotes.append((letter, self._inline(md.footnote_words(token))))
+        return f'<sup id="fnref-{letter}"><a href="#fn-{letter}">[{letter}]</a></sup>'
 
     def _open_link(self, token: Token) -> tuple[str, str, int]:
         href = md.token_attr(token, "href").strip()
@@ -1363,7 +1433,9 @@ class _Writer:
         made = report.PICTURES.get(path, side)
         if made is None:
             return None
-        data, mime, _ = made
+        data, mime, size = made
+        if not inline:
+            self._last_size = size
         digest = hashlib.sha256(data).hexdigest()
         key = f"picture:{digest}"
         known = self._keys.get(key)
@@ -1410,6 +1482,16 @@ class _Writer:
         return len(self.uploads) - 1
 
     # -- the end ------------------------------------------------------------------
+
+    def _notes(self) -> list[str]:
+        """The footnotes before the sources, lettered as their marks, each linking back to its mark."""
+        if not self.footnotes:
+            return []
+        items = [list_item(f'<a href="#fnref-{letter}" aria-label="Back to the text">^</a> {words}', anchor=f"fn-{letter}")
+                 for letter, words in self.footnotes]
+        lettered = block("list", f'<ol style="list-style-type:lower-alpha" class="wp-block-list">{nested(items)}</ol>',
+                         {"ordered": True, "type": "lower-alpha"})
+        return [heading(2, "Notes", "notes"), lettered]
 
     def _sources(self) -> list[str]:
         annex = self.cited.annex

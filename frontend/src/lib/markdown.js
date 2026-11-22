@@ -2,6 +2,8 @@ import DOMPurify from 'dompurify';
 import { marked, Renderer } from 'marked';
 
 import { fileRelPath, fileUrl } from './fileUrl.js';
+import { findFootnotes, footnoteText } from './notes/footnotes.js';
+import { columnShares, isEmptyColumn, picturesOnly, readColumns } from './notes/columns.js';
 import { blockSide, readAttrs } from './notes/pictureSize.js';
 import { BUILT_IN_ADDRESS, builtInPicture, builtInSrc } from './notes/reportParts.js';
 import { withoutLookLines } from './notes/editor/tableLook.js';
@@ -11,10 +13,34 @@ const MEDIA_REF = /\[\[media:([A-Za-z0-9_-]+)\|([^\]]+)\]\](?:\{([^}\n]+)\})?/g;
 const IMAGE_ATTRS = /!\[([^\]]*)\]\((\S+?)(?:\s+["']([^"']*)["'])?\)\s*\{([^}\n]+)\}/g;
 // a corner of the cover reads as its side here: only the PDF pins it to the page
 const ALIGNMENT_BLOCK = /^:::\s*(left|center|right|top-left|top-right|bottom-left|bottom-right)\s*\n([\s\S]*?)^:::\s*$/gm;
+// a row of columns, `:::: columns` to `::::` (`notes/columns.js`)
+const COLUMNS_BLOCK = /^::::[ \t]*columns[ \t]*\n([\s\S]*?)^::::[ \t]*$/gm;
 const ATTR_PARAM = '__azimut_attrs';
 /** Wrapper a ```mermaid fence renders to, and the hook lib/mermaid.js draws into. */
 export const MERMAID_CLASS = 'mermaid-diagram';
 const purify = typeof window === 'undefined' ? null : DOMPurify(window);
+
+/**
+ * A footnote (`^[words]`, `lib/notes/footnotes.js`) where a part of a note is drawn on its own
+ * (a table's cell, a step's words, an aligned block, a copy): a small mark with its words on
+ * hover. The note's page letters it, and every document made from it.
+ */
+marked.use({
+  extensions: [{
+    name: 'footnote',
+    level: 'inline',
+    start: (src) => {
+      const at = src.indexOf('^[');
+      return at < 0 ? undefined : at;
+    },
+    tokenizer: (src) => {
+      if (!src.startsWith('^[')) return undefined;
+      const [note] = findFootnotes(src);
+      return note?.from === 0 ? { type: 'footnote', raw: src.slice(0, note.to), words: note.words } : undefined;
+    },
+    renderer: (token) => `<sup class="md-footnote" title="${escapeHtml(`Footnote: ${footnoteText(token.words)}`)}">†</sup>`,
+  }],
+});
 
 function escapeHtml(value) {
   return String(value)
@@ -199,6 +225,29 @@ function renderAlignmentBlocks(source, options) {
 }
 
 /**
+ * A note's rows of columns drawn side by side, each column read as Markdown by
+ * `render`: what a copy of the page and a note's preview show. An empty column draws
+ * nothing, and pictures alone share one height as the PDF sets them, their widths left
+ * to their shapes.
+ */
+function renderColumnBlocks(source, render) {
+  const rows = [];
+  const main = source.replace(COLUMNS_BLOCK, (_match, inner) => {
+    const token = `AZIMUT_COLUMNS_BLOCK_${rows.length}`;
+    rows.push({ token, inner });
+    return `\n\n${token}\n\n`;
+  });
+  return rows.reduce((html, row) => {
+    const columns = readColumns(row.inner.split('\n')).columns.filter((column) => !isEmptyColumn(column));
+    const pictures = picturesOnly(columns);
+    const shares = columnShares(columns);
+    const drawn = columns.map((column, at) => `<div class="markdown-column" style="flex: ${pictures ? 1 : (shares[at] * 100).toFixed(1)} 1 0; min-width: 0">${render(column.text)}</div>`);
+    const markup = drawn.length ? `<div class="markdown-columns" style="display: flex; gap: 16px; align-items: flex-start">${drawn.join('')}</div>` : '';
+    return html.replace(`<p>${row.token}</p>`, markup);
+  }, render(main));
+}
+
+/**
  * One line of Markdown as a table's cell shows it: its words, marks, links, chips and
  * pictures, never a block (a cell starting `1.` or `#` is not a list or a heading).
  */
@@ -216,6 +265,6 @@ export function markdownHtml(text = '', { entities = [], caseId = '', redirects 
     renderer: renderer({ entities, caseId, redirects, identity }),
   };
   // a table's settings line is no row of it (`notes/editor/tableLook.js`)
-  const rendered = renderAlignmentBlocks(sourceWithCaseReferences(withoutLookLines(text)), options);
+  const rendered = renderColumnBlocks(sourceWithCaseReferences(withoutLookLines(text)), (part) => renderAlignmentBlocks(part, options));
   return sanitize(rendered);
 }
