@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { beatClips, beats, boundSeconds, captionOf, clipRange, clipSeconds, daySeconds, isGif, leastSeconds, linkedMedia, playDays, readTimecode, stepSeconds, timecode, totalSeconds, videoDays } from './clip.js';
+import { STILL_SAID, beatClips, beats, boundSeconds, captionOf, clipRange, clipSeconds, daySeconds, isGif, leastSeconds, linkedMedia, playDays, playSaid, readTimecode, stepSeconds, timecode, totalSeconds, videoDays } from './clip.js';
 
 describe('a clip', () => {
   it('runs forward, inside its video, ten minutes at most', () => {
@@ -88,6 +88,38 @@ describe('a played plate', () => {
     expect(videoDays(spec, days)).toEqual(['2026-10-10', '2026-10-14']);
     expect(beats(spec, videoDays(spec, days)).map((beat) => beat.day)).toEqual(['2026-10-10', '2026-10-14']);
     expect(videoDays({}, days)).toEqual(days);
+  });
+});
+
+describe('what a played plate says it plays', () => {
+  const steps = { '2026-10-14': [{ id: 'a', duration: 2 }], '2026-10-15': [{ id: 'b', duration: 4 }, { id: 'c', duration: 3 }] };
+
+  it('counts its days and slides as the video goes through them, and says how long it runs', () => {
+    const list = beats({ steps, elements: [] }, ['2026-10-13', '2026-10-14', '2026-10-15']);
+    expect(playSaid(list, totalSeconds(list))).toBe('3 days · 3 slides · 0:12');
+    // the seconds are the ones given, the transitions an MP4 adds included
+    expect(playSaid(list, 42)).toBe('3 days · 3 slides · 0:42');
+  });
+
+  it('says one of each without a plural, and leaves out what it has none of', () => {
+    const one = beats({ steps: { '2026-10-14': [{ id: 'a', duration: 2 }] }, elements: [] }, ['2026-10-14']);
+    expect(playSaid(one, totalSeconds(one))).toBe('1 day · 1 slide · 0:03');
+    const days = beats({ elements: [] }, ['2026-10-14', '2026-10-15']);
+    expect(playSaid(days, totalSeconds(days))).toBe('2 days · 0:02');
+  });
+
+  it('counts no day on a plate that plays its page, and moments on one played hour by hour', () => {
+    const page = beats({ steps: { now: [{ id: 'p', duration: 3 }, { id: 'q', duration: 3 }] }, elements: [] }, [null]);
+    expect(playSaid(page, totalSeconds(page), null)).toBe('2 slides · 0:07');
+    const hours = beats({ elements: [] }, ['2026-10-09T09:00', '2026-10-09T15:00', '2026-10-10T08:00']);
+    expect(playSaid(hours, 75.5, 'moment')).toBe('3 moments · 1:15.5');
+  });
+
+  it('is a still picture while it would play one beat alone', () => {
+    expect(STILL_SAID).toBe('A still picture');
+    expect(playSaid(beats({ elements: [] }, [null]), 1, null)).toBe(STILL_SAID);
+    expect(playSaid(beats({ elements: [] }, ['2026-10-14']), 1)).toBe(STILL_SAID);
+    expect(playSaid([], 0)).toBe(STILL_SAID);
   });
 });
 

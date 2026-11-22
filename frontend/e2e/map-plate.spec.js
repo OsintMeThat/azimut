@@ -789,9 +789,13 @@ test('each day and step holds its own time in the video, the export saying how l
   await page.goto('/#plate');
   await newPlate(page);
   await expect(page.locator('.plate-map')).toHaveCount(2);
+  // the end of the bar says what the video plays, before any export
+  const plays = page.locator('.timebar .plays');
+  await expect(plays).toHaveText('A still picture');
   await addOnPage(page, 'Slide');
   const times = page.locator('.steps .time');
   await expect(times).toHaveText(['0:01', '0:03']);
+  await expect(plays).toHaveText('1 slide · 0:04');
   // a step's time, pressed, is set
   await page.getByRole('button', { name: 'How long Slide 1 holds' }).click();
   const seconds = page.locator('.float-menu input[type="number"]');
@@ -807,6 +811,7 @@ test('each day and step holds its own time in the video, the export saying how l
   await expect.poll(() => lastSave(store)?.spec.holds?.now).toBe(4);
   await page.keyboard.press('Escape');
   await expect(times).toHaveText(['0:04', '0:02.5']);
+  await expect(plays).toHaveText('1 slide · 0:06.5');
   await page.getByRole('button', { name: 'Export', exact: true }).click();
   const dialog = page.getByRole('dialog');
   await dialog.locator('input[value="mp4"]').check();
@@ -1573,6 +1578,7 @@ test('the days stay where they are whatever a day holds, and the wheel runs thro
   await page.getByRole('button', { name: 'Next day' }).click();
   await expect(page.locator('.timebar .moment')).toHaveText('9 Oct 2026');
   await expect(page.locator('.steps .lane [role="option"]')).toHaveCount(14);
+  await expect(page.locator('.timebar .plays')).toHaveText('2 days · 14 slides · 0:16');
   // fourteen steps move neither the days' track nor the height of the bar
   const full = { track: await track.boundingBox(), bar: await bar.boundingBox() };
   expect([full.track.x, full.track.width, full.bar.height]).toEqual([empty.track.x, empty.track.width, empty.bar.height]);
@@ -1608,21 +1614,26 @@ test('a plate on layers dated to the minute plays day by day until it is asked t
     { at: '2026-10-10T08:00', geometry: spot(2.32) }])], { time: { at: '2026-10-09' } }, 'time');
   const ticks = page.locator('.timebar .tick');
   const hours = page.locator('.timebar .switch');
+  const plays = page.locator('.timebar .plays');
   await expect(ticks).toHaveCount(2);
   await expect(hours).toHaveAttribute('aria-pressed', 'false');
   await expect(page.getByRole('button', { name: 'Moment of the day' })).toHaveCount(0);
+  await expect(plays).toHaveText('2 days · 0:02');
 
   // hour by hour, a notch a moment, and the plate stands on the last one of its day
   await hours.click();
   await expect(ticks).toHaveCount(3);
+  await expect(plays).toHaveText('3 moments · 0:03');
   await expect(page.getByRole('button', { name: 'Moment of the day' })).toHaveText('15:00');
   await expect.poll(() => lastSave(store)?.spec.time).toMatchObject({ hours: true, at: '2026-10-09T15:00' });
 
   // a step made on the hour waits under its day when the plate goes back to days, keeping its hour
   await page.getByRole('button', { name: 'Add a slide' }).click();
   await expect.poll(() => Object.keys(lastSave(store)?.spec.steps ?? {})).toEqual(['2026-10-09T15:00']);
+  await expect(plays).toHaveText('3 moments · 1 slide · 0:06');
   await hours.click();
   await expect(ticks).toHaveCount(2);
+  await expect(plays).toHaveText('2 days · 1 slide · 0:05');
   await expect.poll(() => lastSave(store)?.spec.steps['2026-10-09']?.map((step) => step.hour)).toEqual(['15:00']);
   expect(lastSave(store).spec.time).toMatchObject({ hours: false, at: '2026-10-09' });
   await expect(page.locator('.steps .lane [role="option"]')).toHaveCount(1);
@@ -1702,6 +1713,8 @@ test('a plate playing hundreds of days shows a window of them, and goes anywhere
   expect(shown).toBeGreaterThan(10);
   expect(shown).toBeLessThan(60);
   await expect(page.locator('.timebar .tick.on')).toHaveCount(1);
+  // the video holds as many beats as an export draws, and says so
+  await expect(page.locator('.timebar .plays')).toHaveText('120 days · 2:00');
 
   // a quarter along the line of all the days, about the hundredth
   const line = await page.locator('.timebar .overview').boundingBox();

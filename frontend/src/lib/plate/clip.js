@@ -90,8 +90,28 @@ export function playDays(spec, moments) {
 /** The days of `days` the video goes through: all but those it was told to skip, which the editor still shows. */
 export const videoDays = (spec, days) => days.filter((day) => !(spec?.skipped ?? []).includes(day));
 
+/** A played export draws this many beats at most, its days and their slides in order. */
+export const MOST_BEATS = 120;
+
 /** The whole of a sequence, in seconds. */
 export const totalSeconds = (list) => list.reduce((sum, beat) => sum + beat.seconds, 0);
+
+/** What the bar says of a plate whose video would hold one picture alone. */
+export const STILL_SAID = 'A still picture';
+
+/**
+ * What a played plate's video goes through, in one line: `12 days · 3 slides · 0:42`.
+ * `list` is the beats it plays (`beats`), `seconds` how long it runs, and `unit` what
+ * its days are called, 'moment' on a plate played hour by hour and null on one that
+ * plays its page rather than days. A video of one beat alone is a still picture.
+ */
+export function playSaid(list, seconds, unit = 'day') {
+  if (list.length < 2) return STILL_SAID;
+  const counted = (count, word) => (count ? `${count} ${word}${count === 1 ? '' : 's'}` : '');
+  const days = unit ? new Set(list.map((beat) => beat.day)).size : 0;
+  const slides = list.filter((beat) => beat.step).length;
+  return [counted(days, unit), counted(slides, 'slide'), timecode(seconds)].filter(Boolean).join(' · ');
+}
 
 /** The clips a beat runs, with where each one stands, for the export. */
 export function beatClips(spec, beat) {

@@ -7119,6 +7119,11 @@ The day's tile and **+** stay put while the slides scroll between them, under th
 too; past what fits, the tiles shrink to their number and time, an arrow each side
 says how many are out of sight, and a count says which one is shown. On a narrow
 window the slides take a line of their own.
+**The end of the bar says what the video plays**, before any export: its days, its
+slides and how long it runs, counted as the export counts them (*12 days · 3 slides ·
+0:42*, *moments* on a plate played hour by hour, the first 120 days and slides since
+an export draws no more), or **A still picture** while nothing plays. A bar too
+narrow for it leaves it out.
 **Every tile says how long it holds in the video, and a press on that time sets
 it**: the day its own seconds or, left alone, every day's (one second until set in
 the export), a slide its own, never shorter than its longest clip, the clip staying on
