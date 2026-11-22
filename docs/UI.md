@@ -6808,15 +6808,18 @@ as long as the longest clip. The panel says which before the press. One file tic
 alone gets its cone too, facing north, since a file keeps no direction. A cone is turned
 by dragging its tip, or in its inspector like any other.
 
-**Layers**, the list's second tab, says where the maps get what they draw, since a plate
+The list on the left has two halves, **On the page** and **Layers**, one switch split
+evenly as Satellite's Layers and Saved. **Layers** says where the maps get what they draw, since a plate
 keeps no data of its own: each map is drawn on a ground and draws some of the case's
 layers, as the Map keeps them, so an edit made in the Map shows on every plate. Map by
 map, it names the ground with the day its picture was taken (a Wayback release, a
 Sentinel-2 pass, a cloudless year; imagery stitched from several days says so), then the
-case's layers, those the map draws first and ticked. A tick draws a layer or takes it
-off; a layer followed over time is marked **dated**, since the plate draws it as it stood
-on its day. **›** beside a layer the map draws opens that layer's page for the map (see
-below). A map on a picture of one day (a Wayback release, a Sentinel-2 pass) offers
+case's layers, those the map draws first, in the order it draws them, and ticked. A tick
+draws a layer or takes it off; a layer followed over time is marked with a clock, since
+the plate draws it as it stood on its day. Under a layer the map draws, a few words say
+what the map does to it (*Claimed · hatched · 1 group left out*, or *Its own look*); the
+row under the pointer shows its arrows, drawing it over or under the others, and **Open in
+the Map**. **›** or those words open the layer's page for the map (see below). A map on a picture of one day (a Wayback release, a Sentinel-2 pass) offers
 **Layers as they stood that day**, here, on its bar and in its inspector: its dated layers, its
 legend, the counts and the labels tied to its features then read that day rather than
 the plate's, so a picture of the past never shows what came after it; the other maps
@@ -6966,14 +6969,12 @@ sides or four, or as ticks on the frame only, its ink light over imagery and dar
 over a pale ground unless set; the plain ground's detail, presence, borders and
 colours, what it draws, the language of its names, and the relief's strength; the
 imagery's strength, colour, light, contrast and tint, with **Greyed**, **Faded**,
-**Darkened** and **Muted** as starts; and the case's layers it draws, a line each: ticked,
-drawn higher or lower, and under its name what this map does to it in a few words
-(*Claimed · hatched · 1 group left out*), or *Its own look*. A map's sections run
-**Ground**, **Layers**, **3D**, **Grid**, then the imagery or the plain ground, so what the
-map shows comes before how it is drawn.
+**Darkened** and **Muted** as starts. A map's sections run **Ground**, **3D**, **Grid**,
+then the imagery or the plain ground; its layers are set in the list's **Layers** tab,
+which its bar's layer count opens.
 
-**A layer on a page of its own.** **›** on that line, the same in the Layers tab, or
-**Front on this map…** in a right-click on one of its features, opens the layer's page in
+**A layer on a page of its own.** **›** on its line in the Layers tab, the words under
+it, or **Front on this map…** in a right-click on one of its features, opens the layer's page in
 the inspector's place, for that map alone: each map keeps its own settings for a layer,
 so the page names the map it is on, moves to the same layer on another map that draws
 it, and **← Map** goes back to the map's settings. **Look**: **Stands for** gives it a

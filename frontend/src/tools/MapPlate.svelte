@@ -102,7 +102,7 @@
   import { formatCoords, formatMGRS } from '../lib/coords.js';
   import NewPlateDialog from './plate/NewPlateDialog.svelte';
   import TemplateSketch from './plate/TemplateSketch.svelte';
-  import { inspectorWidth, layout, listWidth, saveLayout, toggleFold, togglePanel } from '../lib/plate/layout.svelte.js';
+  import { inspectorWidth, layout, listWidth, saveLayout, togglePanel } from '../lib/plate/layout.svelte.js';
   import { imagerySaid, layersDayOf } from '../lib/plate/source.js';
   import { comparisonOnPlate, lostSaid, pairOnComparison, sideDay } from '../lib/plate/fromCompare.js';
   import { angleBoxes, anglesOf } from '../lib/plate/angles.js';
@@ -1308,12 +1308,11 @@
     if (!inspectorShown) panel('inspector');
     layerPage = { map: map.id, name: row.name };
   }
-  /** A map picked from the Layers tab, the inspector shown on its Layers section. */
+  /** A map picked from the Layers tab, its own settings shown in the inspector. */
   function mapSettings(map) {
     selection = [map.id];
     layerPage = null;
     if (!inspectorShown) panel('inspector');
-    if (layout.folded.includes('Layers')) toggleFold('Layers');
   }
 
   /** What was drawn by hand on this map, made into a layer of the case it then draws in its place; Undo puts it back. */
@@ -2333,10 +2332,10 @@
           {:else}
             <PlateInspector bind:spec={plate.spec} {selection} caseId={plate.caseId ?? caseId ?? ''} {rows} {grounds} {releases} {years} {legend} {creditList} {framing} {at} moments={playable ? moments : []}
               {place} step={stepIndex >= 0 ? { id: stepId, name: stepName(stepIndex) } : null}
-              {overflow} {featurePictures} onpaper={paper} ontheme={applyTheme} onremove={removeElement} onduplicate={duplicate} onorder={restackBy} canorder={(element, by) => stepOf(listed, element.id, by) !== null} ongroup={group} onwayback={readReleases} onnewlayer={newLayerHere} onkeepdrawn={keepDrawn}
+              {overflow} {featurePictures} onpaper={paper} ontheme={applyTheme} onremove={removeElement} onduplicate={duplicate} onorder={restackBy} canorder={(element, by) => stepOf(listed, element.id, by) !== null} ongroup={group} onwayback={readReleases}
               {framingFor} onmapview={mapView} onkeep={keepFraming} plays={!plate.template && sequence.length > 1} {sentinel} template={!!plate.template}
               onsymbol={(style) => (lastSymbol = { ...lastSymbol, ...style })}
-              onframe={(element) => (framing = framing === element.id ? '' : element.id)} onlayer={openLayer}
+              onframe={(element) => (framing = framing === element.id ? '' : element.id)}
               onpoint={(element) => { if (!mainMap(spec)) { toast('Put a map on the page first', 'warn'); return; } placing = { kind: 'callout', id: element.id }; }} />
           {/if}
         </div>

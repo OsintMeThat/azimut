@@ -16,7 +16,7 @@
   import { today as calendarToday } from '../../lib/calendar.js';
   import { fileUrl } from '../../lib/fileUrl.js';
   import { buildMediaQuery } from '../../lib/mediaQuery.js';
-  import { isTracked, momentLabel } from '../../lib/map/layerHistory.js';
+  import { momentLabel } from '../../lib/map/layerHistory.js';
   import { prefs, toast } from '../../lib/state.svelte.js';
   import { FONTS, KIND_LABELS, MAX_MAPS, PAGE, PAPERS, PLATE_OVERLAYS, SIGNATURE, THEMES, TOKENS, TOKEN_SAID, TOO_MANY_MAPS, bornOn, bringTo, dayOf, endOn, labelBox,
     backOnPaper, mainMap, mapCount, offPaper, pageMargin, pageSize, shownOn, startOn, textMeasurer, transitionsOf, turnable } from '../../lib/plate/page.js';
@@ -30,9 +30,7 @@
   import GroundSwatch from './GroundSwatch.svelte';
   import PlateGroundDay from './PlateGroundDay.svelte';
   import { TEXT_STYLES, styled } from '../../lib/plate/design.js';
-  import { drawnOn } from '../../lib/plate/toLayer.js';
-  import { layerSaid, mapName, withLayer } from '../../lib/plate/source.js';
-  import { roleLabel } from '../../lib/plate/roles.js';
+  import { mapName } from '../../lib/plate/source.js';
   import { countryNames } from '../../lib/plate/spotlight.js';
   import { WAYBACK_ID } from '../../lib/wayback.js';
   import { shrinkPicture } from '../../lib/plate/picture.js';
@@ -76,17 +74,11 @@
     /** `(element, by)`: whether a step forward (1) or back (-1) can move it, among the rows the list shows. */
     canorder = () => true,
     onframe,
-    /** `(map, row)`: one of the map's layers on a page of its own, its look, what shows of it and its names. */
-    onlayer = null,
     /** `(style)` once a symbol's marker, colour or size is set, which the next symbol placed takes. */
     onsymbol = null,
     onpoint,
     ongroup,
     onwayback,
-    /** `(map)`: a new layer of the case, drawn on this map and opened for editing in the Map. */
-    onnewlayer = null,
-    /** `(map)`: what was drawn by hand on this map, made into a layer of the case. */
-    onkeepdrawn = null,
     /** The pictures the main map's features carry (a proof's plate, a video's frame), each with its point. */
     featurePictures = [],
     /** How a map is framed on the day or step shown (`page.framingOf`), `(map, view)` to frame it, `(map, keep)` to hold the one before. */
@@ -152,17 +144,6 @@
   function toggleOverlay(id) {
     const list = element.overlays ?? [];
     element.overlays = list.includes(id) ? list.filter((item) => item !== id) : [...list, id];
-  }
-  function toggleLayer(row) {
-    element.layers = withLayer(element, row.name);
-  }
-  function moveLayer(entry, by) {
-    const list = [...element.layers];
-    const from = list.indexOf(entry);
-    const to = Math.max(0, Math.min(list.length - 1, from + by));
-    list.splice(from, 1);
-    list.splice(to, 0, entry);
-    element.layers = list;
   }
   async function openPictures(event) {
     pickAnchor = event.currentTarget;
@@ -554,37 +535,6 @@
         <ol class="setup">{#each ACCOUNT_STEPS as line (line)}<li>{line}</li>{/each}</ol>
       {/if}
       <PlateGroundDay {element} {releases} {years} {sentinel} {template} />
-      </PlateSection>
-
-      <PlateSection title="Layers" summary={`${(element.layers ?? []).length} drawn`}>
-      {@const drawn = drawnOn(spec, element.id).length}
-      {#if !rows.length}<p class="note">The case has no map layers yet. Draw on the plate from Add, or make one here.</p>{/if}
-      <div class="tools wide">
-        {#if onnewlayer}<button type="button" class="btn btn-xs" title="A new case layer, opened for editing in the Map where this map looks"
-          onclick={() => onnewlayer(element)}><Icon name="plus" size={11} /> New layer here</button>{/if}
-        {#if onkeepdrawn && drawn}<button type="button" class="btn btn-xs" title="Makes what was drawn by hand here a layer of the case"
-          onclick={() => onkeepdrawn(element)}>Make a layer of the {drawn} drawn here</button>{/if}
-      </div>
-      <ul class="layers">
-        {#each [...(element.layers ?? []).map((entry) => rows.find((row) => row.name === entry.name)).filter(Boolean), ...rows.filter((row) => !(element.layers ?? []).some((entry) => entry.name === row.name))] as row (row.name)}
-          {@const entry = (element.layers ?? []).find((item) => item.name === row.name)}
-          {@const said = layerSaid(entry, { role: roleLabel, day: momentLabel })}
-          <li>
-            <div class="layer"><label title={PLATE_HELP['Draw the layer']}><input type="checkbox" checked={!!entry} onchange={() => toggleLayer(row)} />
-              <span class="name">{row.title}</span>{#if isTracked(row)}<Icon name="clock" size={11} />{/if}</label>
-              {#if entry}
-                <button type="button" class="icon-act small" aria-label={`Draw ${row.title} higher`} title="Draw it over the others" onclick={() => moveLayer(entry, -1)}><Icon name="chevronUp" size={11} /></button>
-                <button type="button" class="icon-act small" aria-label={`Draw ${row.title} lower`} title="Draw it under the others" onclick={() => moveLayer(entry, 1)}><Icon name="chevronDown" size={11} /></button>
-                {#if onlayer}<button type="button" class="icon-act small" aria-label={`${row.title} on this map`} title="Its look, what shows of it and its names, on this map"
-                  onclick={() => onlayer(element, row)}><Icon name="chevronRight" size={12} /></button>{/if}
-              {/if}
-            </div>
-            {#if entry && onlayer}
-              <button type="button" class="layer-said" title="Its look, what shows of it and its names, on this map" onclick={() => onlayer(element, row)}>{said || 'Its own look'}</button>
-            {/if}
-          </li>
-        {/each}
-      </ul>
       </PlateSection>
 
       <PlateSection title="3D" summary={(element.terrain ?? 0) > 0 ? `Tilted ${Math.round(framed.view.pitch ?? 0)}°` : 'Flat'}>
@@ -1272,7 +1222,7 @@
   @container (min-width: 540px) {
     .flow { columns: 2; column-gap: 22px; }
     .flow > h3, .flow > header, .flow > .element-name, .flow > .warn { column-span: all; }
-    .rows, .checks, .days, .themes, .layers li, .legend-row { break-inside: avoid; }
+    .rows, .checks, .days, .themes, .legend-row { break-inside: avoid; }
   }
   .rows { display: grid; grid-template-columns: 74px minmax(0, 1fr); align-items: center; gap: 7px 8px; margin: 8px 0; }
   .key { color: var(--text-3); font-size: 11px; }
@@ -1293,14 +1243,6 @@
   .segments button[aria-pressed='true'] { background: var(--accent-soft); color: var(--text-1); font-weight: 600; }
   .checks { display: grid; gap: 4px; margin: 6px 0; }
   .checks label, .check { display: flex; align-items: center; gap: 6px; cursor: pointer; }
-  .layers { list-style: none; margin: 0; padding: 0; display: grid; gap: 6px; }
-  .layer { display: flex; align-items: center; gap: 2px; }
-  .layer label { display: flex; align-items: center; gap: 6px; flex: 1; min-width: 0; cursor: pointer; }
-  .layer .name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text-1); }
-  /* what this map does to the layer, in a few words, which opens its page */
-  .layer-said { display: block; max-width: calc(100% - 22px); margin: -2px 0 0 22px; padding: 0; overflow: hidden; color: var(--text-3); font-size: 10.5px;
-    text-align: left; text-overflow: ellipsis; white-space: nowrap; cursor: pointer; }
-  .layer-said:hover, .layer-said:focus-visible { color: var(--accent); }
   .weight { display: flex; align-items: center; gap: 6px; color: var(--text-3); font-size: 10.5px; }
   .weight input[type='range'] { flex: 1; }
   .quiet { color: var(--text-3); }

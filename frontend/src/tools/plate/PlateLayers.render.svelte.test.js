@@ -72,6 +72,33 @@ describe('where the plate\'s maps get what they draw', () => {
     expect(calls.onnewlayer).toHaveBeenCalledOnce();
   });
 
+  it('draws a map\'s layers over or under each other, says what the map does to each, and opens a layer\'s page', () => {
+    const onlayer = vi.fn();
+    const { spec } = show([{ id: 'm', kind: 'map', basemap: 'plain', layers: [
+      { name: 'strikes', hidden: [], stroke: 1, icons: 1 }, { name: 'front', hidden: ['Rumoured'], stroke: 1, icons: 1, role: 'claimed', fill: 'hatch' }] }], { onlayer });
+    const named = (label) => document.body.querySelector(`[aria-label="${label}"]`);
+    // the first can go no higher, the last no lower, and a layer it does not draw has no order
+    expect(named('Draw Strikes higher').disabled).toBe(true);
+    expect(named('Draw Front line lower').disabled).toBe(true);
+    expect(named('Draw GeoConfirmed higher')).toBeNull();
+    named('Draw Strikes lower').click(); flushSync();
+    expect(spec.elements[0].layers.map((entry) => entry.name)).toEqual(['front', 'strikes']);
+    expect([...document.body.querySelectorAll('.said')].map((node) => node.textContent)).toEqual(['Claimed · hatched · 1 group left out', 'Its own look']);
+    document.body.querySelector('.said').click();
+    named('Strikes on Map').click();
+    expect(onlayer.mock.calls.map(([map, row]) => [map.id, row.name])).toEqual([['m', 'front'], ['m', 'strikes']]);
+    expect(named('GeoConfirmed on Map')).toBeNull();
+  });
+
+  it('makes a layer of what was drawn on the map once something is', () => {
+    const { spec, calls } = show([{ id: 'm', kind: 'map', basemap: 'plain', layers: [] }]);
+    const button = (start) => [...document.body.querySelectorAll('button')].find((node) => node.textContent.trim().startsWith(start));
+    expect(button('Make a layer of')).toBeUndefined();
+    spec.elements.push({ id: 'z', kind: 'zone', of: 'm', box: [0, 0, 1, 1], points: [[2, 48], [2.1, 48], [2.1, 48.1]] }); flushSync();
+    button('Make a layer of the 1 drawn here').click();
+    expect(calls.onkeepdrawn).toHaveBeenCalledWith(spec.elements[0]);
+  });
+
   it('says how to start when the case has no layer, the page no map, or the plate is a template', () => {
     show([{ id: 'm', kind: 'map', basemap: 'plain', layers: [] }], { rows: [] });
     expect(document.body.textContent).toContain('The case has no map layers yet');
@@ -93,7 +120,8 @@ describe('the list\'s two tabs', () => {
     held = mount(PlateElements, { target: document.body, props });
     flushSync();
     const tabs = [...document.body.querySelectorAll('[role="tab"]')];
-    expect(tabs.map((tab) => tab.textContent.replace(/\s+/g, ' ').trim())).toEqual(['On the page 1', 'Layers']);
+    expect(tabs.map((tab) => tab.textContent.replace(/\s+/g, ' ').trim())).toEqual(['On the page', 'Layers']);
+    expect(tabs[0].title).toBe('What the page holds, top first: 1');
     expect(document.body.querySelector('.layers-panel')).toBeNull();
     tabs[1].click(); flushSync();
     expect(document.body.querySelector('.layers-panel')).not.toBeNull();

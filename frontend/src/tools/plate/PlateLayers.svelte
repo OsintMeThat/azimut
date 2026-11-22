@@ -8,15 +8,18 @@
    * picture of one day can draw its dated layers as they stood that day instead, so a
    * picture of the past never shows what came after it.
    *
-   * A tick draws a layer or takes it off, as the inspector's own list does. **›** opens
-   * a drawn layer's own page for that map, in the inspector's place: its role, colours,
-   * groups, days and hidden features there. **Settings** opens the map's inspector.
+   * This is where a map's layers are set: a tick draws a layer or takes it off, the
+   * arrows draw it over or under the others, and a few words under it say what this map
+   * does to it. **›** opens a drawn layer's own page for that map, in the inspector's
+   * place: its role, colours, groups, days and hidden features. **Settings** opens the
+   * map's own settings in the inspector: its ground, framing and look.
    * **Open in the Map** edits a layer the analyst draws, the plate waiting for Back.
    */
   import Icon from '../../components/Icon.svelte';
-  import { isTracked } from '../../lib/map/layerHistory.js';
+  import { isTracked, momentLabel } from '../../lib/map/layerHistory.js';
+  import { roleLabel } from '../../lib/plate/roles.js';
   import { drawnOn } from '../../lib/plate/toLayer.js';
-  import { groundSaid, imageryDay, layeredMaps, mapName, withLayer } from '../../lib/plate/source.js';
+  import { groundSaid, imageryDay, layerSaid, layeredMaps, mapName, movedLayer, withLayer } from '../../lib/plate/source.js';
 
   let {
     spec,
@@ -47,7 +50,6 @@
     const own = (map.layers ?? []).map((entry) => rows.find((row) => row.name === entry.name)).filter(Boolean);
     return [...own, ...rows.filter((row) => !own.includes(row))];
   }
-  const draws = (map, row) => (map.layers ?? []).some((entry) => entry.name === row.name);
 </script>
 
 <div class="source" aria-label="Where the maps get what they draw">
@@ -63,7 +65,7 @@
         <Icon name="satellite" size={12} />
         <h5>{name(map)}</h5>
         {#if onsettings}
-          <button type="button" class="mini" aria-label={`Settings of ${name(map)}`} title="Its ground and its layers, in the inspector"
+          <button type="button" class="mini" aria-label={`Settings of ${name(map)}`} title="Its ground, framing and look, in the inspector"
             onclick={() => onsettings(map)}><Icon name="settings" size={12} /></button>
         {/if}
       </div>
@@ -82,22 +84,34 @@
       {:else}
         <ul class="layers" aria-label={`Layers ${name(map)} draws`}>
           {#each listed(map) as row (row.name)}
-            <li>
-              <label title={draws(map, row) ? 'Drawn on this map. Untick to take it off' : 'Tick to draw it on this map'}>
-                <input type="checkbox" checked={draws(map, row)} onchange={() => (map.layers = withLayer(map, row.name))} />
-                <span class="title">{row.title}</span>
-              </label>
-              {#if isTracked(row)}
-                <span class="tag" title="Followed over time: the plate draws it as it stood on its day">
-                  <Icon name="clock" size={10} />dated</span>
-              {/if}
-              {#if onlayer && draws(map, row)}
-                <button type="button" class="mini" aria-label={`${row.title} on ${name(map)}`} title="Its look, what shows of it and its names, on this map"
-                  onclick={() => onlayer(map, row)}><Icon name="chevronRight" size={12} /></button>
-              {/if}
-              {#if onopen && row.editable}
-                <button type="button" class="mini" aria-label={`Open ${row.title} in the Map`} title="Edit it in the Map, where this map looks. Back comes back here"
-                  onclick={() => onopen(map, row)}><Icon name="external" size={11} /></button>
+            {@const entry = (map.layers ?? []).find((item) => item.name === row.name)}
+            <li class:drawn={!!entry}>
+              <div class="row">
+                <label title={entry ? 'Drawn on this map. Untick to take it off' : 'Tick to draw it on this map'}>
+                  <input type="checkbox" checked={!!entry} onchange={() => (map.layers = withLayer(map, row.name))} />
+                  <span class="title">{row.title}</span>
+                </label>
+                {#if isTracked(row)}
+                  <span class="tag" role="img" aria-label="Dated" title="Followed over time: the plate draws it as it stood on its day"><Icon name="clock" size={11} /></span>
+                {/if}
+                {#if entry && map.layers.length > 1}
+                  <button type="button" class="mini on-hover" aria-label={`Draw ${row.title} higher`} title="Draw it over the others" disabled={map.layers[0] === entry}
+                    onclick={() => (map.layers = movedLayer(map.layers, row.name, -1))}><Icon name="chevronUp" size={11} /></button>
+                  <button type="button" class="mini on-hover" aria-label={`Draw ${row.title} lower`} title="Draw it under the others" disabled={map.layers.at(-1) === entry}
+                    onclick={() => (map.layers = movedLayer(map.layers, row.name, 1))}><Icon name="chevronDown" size={11} /></button>
+                {/if}
+                {#if onopen && row.editable}
+                  <button type="button" class="mini on-hover" aria-label={`Open ${row.title} in the Map`} title="Edit it in the Map, where this map looks. Back comes back here"
+                    onclick={() => onopen(map, row)}><Icon name="external" size={11} /></button>
+                {/if}
+                {#if onlayer && entry}
+                  <button type="button" class="mini" aria-label={`${row.title} on ${name(map)}`} title="Its look, what shows of it and its names, on this map"
+                    onclick={() => onlayer(map, row)}><Icon name="chevronRight" size={12} /></button>
+                {/if}
+              </div>
+              {#if onlayer && entry}
+                <button type="button" class="said" title="Its look, what shows of it and its names, on this map"
+                  onclick={() => onlayer(map, row)}>{layerSaid(entry, { role: roleLabel, day: momentLabel }) || 'Its own look'}</button>
               {/if}
             </li>
           {/each}
@@ -135,12 +149,20 @@
   .ground strong { color: var(--text-1); font-weight: 600; }
   .quiet { color: var(--text-3); }
   .layers { display: grid; gap: 2px; margin: 0; padding: 0; list-style: none; }
-  .layers li { display: flex; align-items: center; gap: 4px; min-width: 0; }
+  .layers li { display: grid; min-width: 0; }
+  .layers li.drawn + li:not(.drawn) { margin-top: 4px; }
+  .row { display: flex; align-items: center; gap: 2px; min-width: 0; }
   .layers label { display: flex; flex: 1; align-items: center; gap: 6px; min-width: 0; color: var(--text-1); font-size: 11.5px; cursor: pointer; }
   .title { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .tag { display: inline-flex; flex: none; align-items: center; gap: 2px; padding: 0 4px; border: 1px solid var(--border); border-radius: 999px;
-    color: var(--text-2); font-size: 9.5px; }
+  .tag { display: grid; flex: none; place-items: center; width: 18px; color: var(--text-3); }
   .mini { display: grid; flex: none; place-items: center; width: 20px; height: 20px; border-radius: var(--r-sm); color: var(--text-2); cursor: pointer; }
-  .mini:hover, .mini:focus-visible { background: var(--bg-3); color: var(--text-1); }
+  .mini:hover:not(:disabled), .mini:focus-visible { background: var(--bg-3); color: var(--text-1); }
+  .mini:disabled { opacity: .35; cursor: default; }
+  /* the order and the Map's editor show on the row under the pointer, so a name keeps its room */
+  .row:not(:hover):not(:focus-within) .on-hover { display: none; }
+  /* what this map does to the layer, in a few words, which opens its page */
+  .said { justify-self: start; max-width: calc(100% - 20px); margin: -3px 0 2px 20px; padding: 0; overflow: hidden; color: var(--text-3); font-size: 10.5px;
+    text-align: left; text-overflow: ellipsis; white-space: nowrap; cursor: pointer; }
+  .said:hover, .said:focus-visible { color: var(--accent); }
   .acts { display: flex; flex-wrap: wrap; gap: 4px; }
 </style>

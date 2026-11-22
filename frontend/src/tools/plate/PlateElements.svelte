@@ -146,8 +146,9 @@
   <div class="head">
     {#if layers}
       <div class="tabs" role="tablist" aria-label="The list">
-        <button type="button" role="tab" aria-selected={tab !== 'layers'} class:on={tab !== 'layers'} title="What the page holds, top first"
-          onclick={() => (tab = 'page')}>On the page <span class="count">{list.length}</span></button>
+        <!-- the two halves carry no count, as Satellite's: the list under them is the count -->
+        <button type="button" role="tab" aria-selected={tab !== 'layers'} class:on={tab !== 'layers'} title={`What the page holds, top first: ${list.length}`}
+          onclick={() => (tab = 'page')}>On the page</button>
         <button type="button" role="tab" aria-selected={tab === 'layers'} class:on={tab === 'layers'} data-guide="plate.layers"
           title="Where the maps get what they draw: their ground and the case's layers" onclick={() => (tab = 'layers')}>Layers</button>
       </div>
@@ -209,11 +210,13 @@
   .elements { width: 100%; height: 100%; overflow-y: auto; padding: 6px 10px 14px; background: var(--bg-1); }
   .head { display: flex; align-items: center; gap: 6px; margin-bottom: 4px; }
   .head h4 { flex: 1; margin: 6px 0; }
-  .tabs { display: flex; flex: 1; gap: 2px; margin: 2px 0; }
-  .tabs button { display: flex; align-items: center; padding: 4px 7px; border-radius: var(--r-sm); color: var(--text-3); font-size: 10px; font-weight: 700;
-    text-transform: uppercase; letter-spacing: .06em; cursor: pointer; }
-  .tabs button:hover { color: var(--text-1); }
-  .tabs button.on { background: var(--bg-3); color: var(--text-1); }
+  /* the list's two halves as one control, as Satellite's Layers and Saved: one track split evenly */
+  .tabs { display: flex; flex: 1; gap: 3px; margin: 2px 0; padding: 3px; border: 1px solid var(--border); border-radius: var(--r-lg); background: var(--bg-0); }
+  .tabs button { display: flex; flex: 1; align-items: center; justify-content: center; min-width: 0; padding: 5px 6px; border-radius: var(--r-md);
+    color: var(--text-3); font-size: 12px; font-weight: 500; line-height: 1.2; white-space: nowrap; cursor: pointer;
+    transition: background .12s var(--ease), color .12s var(--ease); }
+  .tabs button:hover:not(.on) { background: var(--bg-3); color: var(--text-1); }
+  .tabs button.on { background: var(--bg-3); color: var(--text-1); box-shadow: var(--shadow-1); }
   h4 { margin: 12px 0 6px; color: var(--text-3); font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: .06em; }
   .count { margin-left: 4px; padding: 0 5px; border-radius: 999px; background: var(--bg-3); color: var(--text-2); font-weight: 600; letter-spacing: normal; }
   .list { list-style: none; margin: 0; padding: 0; }

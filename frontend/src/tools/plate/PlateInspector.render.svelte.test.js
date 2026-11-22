@@ -198,25 +198,14 @@ describe('hover help on every setting', () => {
     expect(bare()).toEqual([]);
   });
 
-  it('lists a map\'s layers a line each, saying what the map does to each, its page opened by a press', async () => {
+  it('sets a map\'s ground, framing and look, its layers left to the list\'s Layers tab', async () => {
     const spec = $state(houseLayout());
     const map = spec.elements.find((element) => element.kind === 'map');
-    map.layers = [{ name: 'front', hidden: ['Rumoured'], stroke: 1, icons: 1, role: 'claimed', fill: 'hatch' }, { name: 'roads', hidden: [], stroke: 1, icons: 1 }];
-    const rows = [{ name: 'front', title: 'Front', categories: [] }, { name: 'roads', title: 'Roads', categories: [] }, { name: 'ports', title: 'Ports', categories: [] }];
-    const opened = [];
-    held = mount(PlateInspector, { target: document.body, props: { spec, selection: [map.id], rows, onlayer: (on, row) => opened.push([on.id, row.name]) } });
+    map.layers = [{ name: 'front', hidden: [], stroke: 1, icons: 1 }];
+    held = mount(PlateInspector, { target: document.body, props: { spec, selection: [map.id], rows: [{ name: 'front', title: 'Front', categories: [] }] } });
     flushSync(); await settle();
-    // what the map shows comes first: its ground and its layers, before how it is drawn
-    expect([...document.body.querySelectorAll('.part .title')].map((node) => node.textContent)).toEqual(['Ground', 'Layers', '3D', 'Grid', 'The plain ground']);
-    // the settings a layer had under it are on its page now: none of them stands in the list
-    expect(document.body.querySelector('[aria-label="Front stands for"]')).toBeNull();
-    expect([...document.body.querySelectorAll('.layer-said')].map((node) => node.textContent)).toEqual(['Claimed · hatched · 1 group left out', 'Its own look']);
-    press(document.body.querySelector('.layer-said'));
-    press(document.body.querySelector('[aria-label="Roads on this map"]'));
-    expect(opened).toEqual([[map.id, 'front'], [map.id, 'roads']]);
-    // a layer the map does not draw has no page to open
-    expect(document.body.querySelector('[aria-label="Ports on this map"]')).toBeNull();
-    expect(bare()).toEqual([]);
+    expect([...document.body.querySelectorAll('.part .title')].map((node) => node.textContent)).toEqual(['Ground', '3D', 'Grid', 'The plain ground']);
+    expect(document.body.textContent).not.toContain('New layer here');
   });
 
   it('sets a country focus: the rest darkened or faded, how far, and its days like any annotation', async () => {
@@ -407,20 +396,6 @@ describe('the ground, the type and the layers of a plate', () => {
     map.locked = true; flushSync();
     expect(button('To the edges').disabled).toBe(true);
     expect(button('To the margins').disabled).toBe(true);
-  });
-
-  it('offers a new layer here, and a layer of what was drawn on the map once something is', () => {
-    const made = [];
-    const spec = $state(houseLayout());
-    const map = spec.elements.find((element) => element.kind === 'map');
-    spec.elements.push({ id: 'z', kind: 'zone', of: map.id, box: [0, 0, 1, 1], points: [[2, 48], [2.1, 48], [2.1, 48.1]] });
-    held = mount(PlateInspector, { target: document.body, props: { spec, selection: [map.id], grounds,
-      onnewlayer: (element) => made.push(['new', element.id]), onkeepdrawn: (element) => made.push(['keep', element.id]) } });
-    flushSync();
-    const button = (start) => [...document.body.querySelectorAll('button')].find((node) => node.textContent.trim().startsWith(start));
-    button('New layer here').click();
-    button('Make a layer of the 1 drawn here').click();
-    expect(made).toEqual([['new', map.id], ['keep', map.id]]);
   });
 
   it('sets a text in a style of the page, and draws an inset as a globe', async () => {

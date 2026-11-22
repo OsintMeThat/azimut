@@ -99,7 +99,6 @@ export const PLATE_HELP = {
   'Sea marks': 'Buoys, beacons and lights at sea',
   'GPS traces': 'Tracks people have recorded with GPS',
   'Night lights': 'Lights seen from space at night',
-  'Draw the layer': 'Draws this layer of the case on the map',
   'Lines on this plate': 'Its lines drawn thinner or thicker on this plate only',
   'Marks on this plate': 'Its marks drawn smaller or larger on this plate only',
   // an inset

@@ -167,10 +167,10 @@
     <button type="button" aria-label="Turn the map right" title="Turn 15° right" disabled={held} onclick={() => turn(-15)}><Icon name="rotateRight" size={14} /></button>
     <span class="rule"></span>
   {/if}
-  <button type="button" class="ground" bind:this={anchor} aria-expanded={menu} aria-label="Ground" title="The ground the map is drawn on"
+  <button type="button" class="ground" bind:this={anchor} aria-expanded={menu} aria-label="Ground" title={menu ? undefined : 'The ground the map is drawn on'}
     onclick={() => (menu = !menu)}><Icon name="satellite" size={13} /><span>{ground}</span><Icon name="chevronDown" size={11} /></button>
   {#if day}
-    <button type="button" class="ground day" bind:this={dayAnchor} aria-expanded={dayMenu} aria-label="Ground's day" title="The day the ground's picture was taken"
+    <button type="button" class="ground day" bind:this={dayAnchor} aria-expanded={dayMenu} aria-label="Ground's day" title={dayMenu ? undefined : 'The day the ground\'s picture was taken'}
       onclick={openDay}><Icon name="clock" size={13} /><span>{looking ? 'Looking…' : day}</span><Icon name="chevronDown" size={11} /></button>
   {/if}
   {#if isMap && onsameview}
@@ -211,7 +211,8 @@
 {/if}
 
 <style>
-  .map-bar { display: flex; align-items: center; gap: 1px; padding: 3px; border: 1px solid var(--border); border-radius: var(--r-sm);
+  /* on a map narrower than the bar, the bar runs on a second line rather than past its own edge */
+  .map-bar { display: flex; flex-wrap: wrap; align-items: center; gap: 1px; padding: 3px; border: 1px solid var(--border); border-radius: var(--r-sm);
     background: var(--bg-1); box-shadow: var(--shadow-2); white-space: nowrap; }
   button { display: flex; align-items: center; justify-content: center; gap: 4px; min-width: 28px; height: 28px; padding: 0 6px;
     border-radius: var(--r-sm); color: var(--text-2); font-size: var(--fs-xs); cursor: pointer; }
@@ -227,10 +228,10 @@
   .north { fill: #e5484d; }
   .south { fill: var(--text-3); }
   .ground span { min-width: 0; max-width: 110px; overflow: hidden; text-overflow: ellipsis; }
-  .day span { max-width: 92px; font-variant-numeric: tabular-nums; }
-  /* on a small map the words give way, the buttons keep their size */
+  /* the buttons keep their size and a day is always said whole; only the ground's name gives way */
   .map-bar > * { flex: none; }
-  .map-bar > .ground { flex: 0 1 auto; min-width: 0; }
+  .map-bar > .ground:not(.day) { flex: 0 1 auto; min-width: 0; }
+  .day span { max-width: none; font-variant-numeric: tabular-nums; }
   .ground :global(svg) { flex: none; }
   /* a map that draws none of the case's layers says so where the eye is */
   .ground.none { color: var(--accent); }

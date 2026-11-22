@@ -1005,7 +1005,8 @@ test('the Layers tab says where each map gets what it draws, and ticks the case\
   const map = page.locator('.source section.map');
   await expect(map.locator('.ground')).toContainText('Plain');
   const row = map.locator('li', { hasText: 'Front' });
-  await expect(row.locator('.tag')).toHaveText('dated');
+  // a layer followed over time carries a clock, saying so on its own words
+  await expect(row.getByRole('img', { name: 'Dated' })).toHaveAttribute('title', /Followed over time/);
   await row.locator('input').check();
   await expect.poll(() => lastSave(store)?.spec.elements[0].layers.map((entry) => entry.name)).toEqual(['front']);
   await expect(page.locator('.map-bar').getByRole('button', { name: 'Layers' })).toHaveText('1 layer');
@@ -1315,9 +1316,10 @@ test('a feature is hidden on one map from its right-click or a click in the fram
   await expect(ticks).toHaveCount(3);
   await page.keyboard.press('Escape');
 
-  // the layer's page on this map lists them, and starts the layer on a day: what began before it goes, its days with it
-  await expect(page.locator('.layer-said')).toHaveText('2 hidden here');
-  await page.getByRole('button', { name: 'Front on this map' }).click();
+  // the layer's page on this map, from the list's Layers tab, lists them, and starts the layer on a day: what began before it goes, its days with it
+  await page.getByRole('tab', { name: /Layers/ }).click();
+  await expect(page.locator('.source .said')).toHaveText('2 hidden here');
+  await page.getByRole('button', { name: 'Front on Map', exact: true }).click();
   const layerPage = page.getByRole('complementary', { name: 'Front on Map' });
   await expect(layerPage).toBeVisible();
   await expect(page.locator('.hidden-here .chip')).toHaveText(['Gate', 'Depot']);
@@ -1344,17 +1346,16 @@ test('a feature is hidden on one map from its right-click or a click in the fram
   await page.getByRole('button', { name: 'Its last day', exact: true }).click();
   await expect.poll(() => lastSave(store)?.spec.elements[0].layers[0].end).toBeNull();
   await expect(ticks).toHaveCount(2);
-  // back to the map's settings, the row saying what the map does to the layer
+  // back to the map's settings, the layer's row saying what the map does to it
   await layerPage.locator('.back').click();
   await expect(layerPage).toHaveCount(0);
-  await expect(page.locator('.layer-said')).toHaveText('1 hidden here · from 5 Oct 2026');
-  // the Layers tab opens it too, and the map's gear goes back to the map's settings
-  await page.getByRole('tab', { name: /Layers/ }).click();
-  await page.getByRole('button', { name: 'Front on Map', exact: true }).click();
+  await expect(page.locator('.source .said')).toHaveText('1 hidden here · from 5 Oct 2026');
+  // the map's gear goes back to the map's settings too
+  await page.locator('.source .said').click();
   await expect(layerPage).toBeVisible();
   await page.getByRole('button', { name: 'Settings of Map', exact: true }).click();
   await expect(layerPage).toHaveCount(0);
-  await expect(page.locator('.layer-said')).toBeVisible();
+  await expect(page.getByRole('complementary', { name: 'Plate inspector' })).toBeVisible();
 });
 
 test('an area\'s name becomes a label of the plate to move by hand, the layer keeping its own', async ({ page }) => {

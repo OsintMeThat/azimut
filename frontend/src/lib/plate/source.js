@@ -69,6 +69,16 @@ export const layersDayOf = (map, { releases = [] } = {}) => (map?.layers_on === 
 /** The maps that draw the case's layers, in the page's order: insets draw none. */
 export const layeredMaps = (spec) => (spec?.elements ?? []).filter((element) => element.kind === 'map');
 
+/** A map's layers with `name` drawn one place higher (`by` -1, over the others) or lower (1), held within the list. */
+export function movedLayer(layers = [], name, by) {
+  const list = [...layers];
+  const from = list.findIndex((entry) => entry.name === name);
+  if (from < 0) return list;
+  const to = Math.max(0, Math.min(list.length - 1, from + by));
+  list.splice(to, 0, ...list.splice(from, 1));
+  return list;
+}
+
 /** A map as the panels name it: its own name, else Map, Map 2… by its place on the page, a detail map as one. */
 export function mapName(spec, map) {
   if (map?.name) return map.name;

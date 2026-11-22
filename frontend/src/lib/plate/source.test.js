@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { groundDay, groundSaid, imageryDay, imagerySaid, layerSaid, layeredMaps, layersDayOf, mapName, sameLook, withLayer, withLookOf } from './source.js';
+import { groundDay, groundSaid, imageryDay, imagerySaid, layerSaid, layeredMaps, layersDayOf, mapName, movedLayer, sameLook, withLayer, withLookOf } from './source.js';
 
 const grounds = [['plain', 'Plain'], ['esri-world-imagery', 'Esri World Imagery'], ['esri-wayback', 'World Imagery Wayback, dated'],
   ['s2cloudless', "Sentinel-2 cloudless, a year's mosaic"], ['sentinel2', 'Sentinel-2, one dated pass'], ['osm', 'OpenStreetMap']];
@@ -106,5 +106,18 @@ describe('one layer on one map', () => {
       { role: (id) => id.toUpperCase(), day: (iso) => iso.slice(5) }))
       .toBe('CLAIMED · dashed · hatched · lines 1.5× · marks 2× · 1 group left out · 2 hidden here · from 10-01 · to 10-09');
     expect(layerSaid({ name: 'front', fill: 'none', hidden: ['A', 'B'] })).toBe('outline only · 2 groups left out');
+  });
+});
+
+describe('the order a map draws its layers in', () => {
+  it('moves one a place higher or lower, never past either end', () => {
+    const layers = [{ name: 'a' }, { name: 'b' }, { name: 'c' }];
+    expect(movedLayer(layers, 'b', -1).map((entry) => entry.name)).toEqual(['b', 'a', 'c']);
+    expect(movedLayer(layers, 'b', 1).map((entry) => entry.name)).toEqual(['a', 'c', 'b']);
+    expect(movedLayer(layers, 'a', -1).map((entry) => entry.name)).toEqual(['a', 'b', 'c']);
+    expect(movedLayer(layers, 'c', 1).map((entry) => entry.name)).toEqual(['a', 'b', 'c']);
+    expect(movedLayer(layers, 'gone', 1)).toEqual(layers);
+    // the list given is left as it was
+    expect(layers.map((entry) => entry.name)).toEqual(['a', 'b', 'c']);
   });
 });
