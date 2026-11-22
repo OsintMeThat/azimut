@@ -6,7 +6,8 @@
  *
  * Pure, so each rule is read off a test.
  */
-import { MAP_KINDS, MM_PER_PT, ON_THE_GROUND, dayBefore, mapsFirst, newId, shownOn } from './page.js';
+import { BOXED_ON_THE_GROUND, MAP_KINDS, MM_PER_PT, ON_THE_GROUND, dayBefore, mapsFirst, newId, shownOn } from './page.js';
+import { defaultSize, wordControls } from './words.js';
 
 const round = (value) => Math.round(value * 10) / 10;
 
@@ -76,6 +77,102 @@ export function sameSize(elements, which, model) {
     out[element.id] = box;
   }
   return out;
+}
+
+// -- several sized as one picture ----------------------------------------------------------
+
+/** The shortest side, in millimetres, a picked box keeps when several are sized down as one. */
+const SMALLEST_SIDE = 1;
+/** A line's weight as the inspector's slider takes it, by kind: `[least, most, step]`. */
+const WEIGHTS = { map: [0.5, 4, 0.25], inset: [0.5, 4, 0.25], shape: [0.2, 8, 0.1],
+  ...Object.fromEntries(['arrow', 'measure', 'ring', 'cone', 'zone', 'line'].map((kind) => [kind, [0.3, 6, 0.1]])) };
+/** The fields sizing several as one writes; one it leaves as it was keeps the value it had. */
+export const SIZED_FIELDS = ['box', 'size', 'width', 'view', 'zoom'];
+
+const holdsBox = (element) => !ON_THE_GROUND.includes(element.kind) || BOXED_ON_THE_GROUND.includes(element.kind);
+const clamp = (value, least, most) => Math.max(least, Math.min(most, value));
+const toStep = (value, step) => Math.round(value / step) * step;
+const exact = (value, digits) => Math.round(value * 10 ** digits) / 10 ** digits;
+
+/**
+ * What sizing the picked elements `ids` as one picture moves: the picked ones that are
+ * not locked and hold a box (`picked`), the maps among them (`maps`, by id), and what
+ * stands on the ground of those maps without being picked (`tied`): its words, its lines,
+ * its pictures pointing there, which belong to the map's picture. A locked one stays.
+ */
+export function pictureOf(elements, ids) {
+  const picked = elements.filter((element) => ids.includes(element.id) && !element.locked && holdsBox(element));
+  const maps = new Set(picked.filter((element) => element.kind === 'map').map((element) => element.id));
+  const tied = elements.filter((element) => !picked.includes(element) && !element.locked && maps.has(element.of)
+    && (ON_THE_GROUND.includes(element.kind) || (['image', 'video'].includes(element.kind) && !!element.at)));
+  return { picked, maps, tied };
+}
+
+/** The least a picture of the picked `ids` is sized down by: no picked box goes under a millimetre on its short side. */
+export function leastScale(elements, ids) {
+  const sides = pictureOf(elements, ids).picked.map((element) => Math.min(element.box[2], element.box[3])).filter((side) => side > 0);
+  return sides.length ? Math.min(1, Math.max(...sides.map((side) => SMALLEST_SIDE / side))) : 1;
+}
+
+/**
+ * The picked elements `ids` sized as one picture by `by` from the page point `from` (the
+ * corner opposite the one pulled), from `elements` as they stood when the pull began.
+ * Every box keeps its place in the picture; words, lines and symbols grow or shrink with
+ * it; a map's zoom follows, on every day and slide that frames it (`framing`), so it shows
+ * the same ground and what stands on that ground stays on it. `shown(element)` is where an
+ * element shows on the page (a text on the map over its point), `insetZoom(inset)` the
+ * zoom an inset without its own shows at now.
+ *
+ * Returns `{ patches, framing }`: the fields each element takes (`SIZED_FIELDS`), only
+ * those that change, and the plate's framings with the maps' zooms followed, null where no
+ * framing names a map that is sized.
+ */
+export function sizedAsOne(elements, ids, { from, by, shown = (element) => element.box, framing = null, insetZoom = () => null }) {
+  const { picked, maps, tied } = pictureOf(elements, ids);
+  const steps = Math.log2(by);
+  const [ax, ay] = from;
+  const patches = {};
+  for (const element of [...picked, ...tied]) {
+    const patch = {};
+    if (holdsBox(element) || ['image', 'video'].includes(element.kind)) {
+      const [x, y, w, h] = shown(element) ?? element.box;
+      const box = [ax + (x - ax) * by, ay + (y - ay) * by, w * by, h * by].map(round);
+      if (box.some((value, index) => value !== element.box[index])) patch.box = box;
+    }
+    if (wordControls(element).includes('size')) {
+      // a scale bar written at 10 is drawn at its own 7, as plates kept it before sizes were set
+      const scaleBar = element.kind === 'scale';
+      const size = scaleBar ? (element.size && element.size !== 10 ? element.size : 7) : element.size ?? defaultSize(element.kind);
+      let next = clamp(toStep(size * by, 0.5), 4, 200);
+      if (scaleBar && next === 10) next += by > 1 ? 0.5 : -0.5;
+      if (next !== size) patch.size = next;
+    }
+    if (WEIGHTS[element.kind]) {
+      const [least, most, step] = WEIGHTS[element.kind];
+      const width = element.width ?? 1;
+      const next = exact(clamp(toStep(width * by, step), least, most), 2);
+      if (next !== width) patch.width = next;
+    }
+    if (element.kind === 'map' && element.view) {
+      const zoom = exact(clamp(element.view.zoom + steps, 0, 22), 3);
+      if (zoom !== element.view.zoom) patch.view = { ...element.view, zoom };
+    }
+    if (element.kind === 'inset' && !element.globe) {
+      // an inset on its own zoom keeps its ground; one that follows a map left as it is takes the zoom it shows now
+      const base = element.zoom ?? (maps.has(element.of) ? null : insetZoom(element));
+      const zoom = Number.isFinite(base) ? exact(clamp(base + steps, 0, 18), 2) : null;
+      if (zoom !== null && Math.abs(zoom - base) >= 0.005) patch.zoom = zoom;
+    }
+    if (Object.keys(patch).length) patches[element.id] = patch;
+  }
+  let framed = null;
+  for (const [key, views] of Object.entries(framing ?? {})) {
+    const ids = Object.keys(views ?? {}).filter((id) => maps.has(id));
+    if (!ids.length) continue;
+    framed ??= { ...framing };
+    framed[key] = { ...views, ...Object.fromEntries(ids.map((id) => [id, { ...views[id], zoom: exact(clamp(views[id].zoom + steps, 0, 22), 3) }])) };
+  }
+  return { patches, framing: framed };
 }
 
 /**

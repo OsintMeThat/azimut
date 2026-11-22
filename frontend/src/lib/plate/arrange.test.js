@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
-import { align, distribute, filling, fittedHeight, numbered, pasted, placeLabels, sameSize, shortDay, tableRows } from './arrange.js';
-import { pageMargin, pageSize } from './page.js';
+import { align, distribute, filling, fittedHeight, leastScale, numbered, pasted, pictureOf, placeLabels, sameSize, shortDay, sizedAsOne, tableRows } from './arrange.js';
+import { PX_PER_MM, pageMargin, pageSize } from './page.js';
+import { project } from './geo.js';
 import { readyTemplate } from './gallery.js';
 
 const boxes = [{ id: 'a', box: [10, 10, 20, 10] }, { id: 'b', box: [50, 30, 10, 20] }, { id: 'c', box: [100, 5, 30, 5] }];
@@ -61,6 +62,108 @@ describe('laying several elements out', () => {
     const one = fittedHeight({ text: 'short', size: 10, box: [0, 0, 50, 3] }, measure);
     const three = fittedHeight({ text: 'many words that will not fit on a single line at all', size: 10, box: [0, 0, 50, 3] }, measure);
     expect(three).toBeGreaterThan(one * 2);
+  });
+});
+
+describe('several picked sized as one picture', () => {
+  // a comparison's pair as Add › From the case lays it: two maps, a date badge over each, one group
+  const view = { lat: 47.5, lon: 34.6, zoom: 15, bearing: 12 };
+  const pair = () => [
+    { id: 'a', kind: 'map', group: 'g', box: [20, 40, 120, 90], view: { ...view }, width: 1 },
+    { id: 'b', kind: 'map', group: 'g', box: [143, 40, 120, 90], view: { ...view } },
+    { id: 'ta', kind: 'text', role: 'badge', group: 'g', box: [23, 43, 34, 6.5], size: 7.5, text: '12 Mar 2024' },
+    { id: 'tb', kind: 'text', role: 'badge', group: 'g', box: [146, 43, 34, 6.5], size: 7.5, text: 'After' },
+  ];
+  const ids = ['a', 'b', 'ta', 'tb'];
+
+  it('scales every box from the corner held, and a map\'s zoom with it, so it shows the same ground', () => {
+    const { patches } = sizedAsOne(pair(), ids, { from: [20, 40], by: 0.5 });
+    expect(patches.a).toEqual({ box: [20, 40, 60, 45], view: { ...view, zoom: 14 }, width: 0.5 });
+    // a frame drawn at its usual weight thins with it
+    expect(patches.b).toEqual({ box: [81.5, 40, 60, 45], view: { ...view, zoom: 14 }, width: 0.5 });
+    expect(patches.ta.box).toEqual([21.5, 41.5, 17, 3.3]);
+    expect(patches.tb.box).toEqual([83, 41.5, 17, 3.3]);
+    // a point of the ground stands where the picture took it, on the page
+    const ground = [34.61, 47.495];
+    const onPage = (map, at) => { const [px, py] = project(at.view, { width: at.box[2] * PX_PER_MM, height: at.box[3] * PX_PER_MM }, ground);
+      return [at.box[0] + px / PX_PER_MM, at.box[1] + py / PX_PER_MM]; };
+    const before = onPage('a', pair()[0]);
+    const after = onPage('a', patches.a);
+    expect(after[0]).toBeCloseTo(20 + (before[0] - 20) * 0.5, 1);
+    expect(after[1]).toBeCloseTo(40 + (before[1] - 40) * 0.5, 1);
+    // twice as big from the bottom right corner: two zoom levels' worth is one
+    const grown = sizedAsOne(pair(), ids, { from: [263, 130], by: 2 }).patches;
+    expect(grown.a.box).toEqual([-223, -50, 240, 180]);
+    expect(grown.a.view.zoom).toBe(16);
+  });
+
+  it('sizes the words like a picture, in half points, so a shrunk badge never runs past its box', () => {
+    const { patches } = sizedAsOne(pair(), ids, { from: [20, 40], by: 0.8 });
+    expect(patches.ta.size).toBe(6);
+    expect(sizedAsOne(pair(), ids, { from: [20, 40], by: 1.3 }).patches.ta.size).toBe(10);
+    // a size the element never set grows from the one it is drawn at, and goes no lower than 4
+    const plain = [{ id: 't', kind: 'text', box: [0, 0, 40, 10] }, { id: 'l', kind: 'legend', box: [50, 0, 30, 30] }];
+    expect(sizedAsOne(plain, ['t', 'l'], { from: [0, 0], by: 1.5 }).patches.t.size).toBe(15);
+    expect(sizedAsOne(plain, ['t', 'l'], { from: [0, 0], by: 1.5 }).patches.l.size).toBe(12);
+    expect(sizedAsOne(plain, ['t', 'l'], { from: [0, 0], by: 0.2 }).patches.t.size).toBe(4);
+    // a scale bar never lands on the 10 it reads as its own 7
+    const bar = [{ id: 's', kind: 'scale', of: 'a', box: [0, 0, 40, 8], size: 8 }, { id: 'x', kind: 'qr', box: [50, 0, 10, 10] }];
+    expect(sizedAsOne(bar, ['s', 'x'], { from: [0, 0], by: 1.25 }).patches.s.size).toBe(10.5);
+  });
+
+  it('carries what stands on a sized map\'s ground along, and leaves what is locked or on another map', () => {
+    const elements = [...pair(),
+      { id: 'label', kind: 'label', of: 'a', at: [34.6, 47.5], box: [60, 70, 20, 5], size: 9, text: 'Depot' },
+      { id: 'arrow', kind: 'arrow', of: 'a', at: [34.6, 47.5], to: [34.61, 47.51], box: [0, 0, 1, 1], width: 1.2, size: 8 },
+      { id: 'symbol', kind: 'symbol', of: 'b', at: [34.6, 47.5], box: [0, 0, 7, 7] },
+      { id: 'kept', kind: 'label', of: 'a', at: [34.6, 47.5], box: [30, 100, 20, 5], locked: true },
+      { id: 'away', kind: 'zone', of: 'elsewhere', points: [], box: [0, 0, 1, 1] },
+      { id: 'scale', kind: 'scale', of: 'a', box: [25, 120, 30, 6] },
+    ];
+    const { picked, maps, tied } = pictureOf(elements, ids);
+    expect(picked.map((item) => item.id)).toEqual(ids);
+    expect([...maps]).toEqual(['a', 'b']);
+    expect(tied.map((item) => item.id)).toEqual(['label', 'arrow', 'symbol']);
+    // a symbol over its point is sized where it shows, the box the page draws for it
+    const { patches } = sizedAsOne(elements, ids, { from: [20, 40], by: 0.5, shown: (item) => (item.id === 'symbol' ? [200, 80, 7, 7] : item.box) });
+    expect(patches.label).toEqual({ box: [40, 55, 10, 2.5], size: 4.5 });
+    expect(patches.arrow).toEqual({ width: 0.6, size: 4 });
+    expect(patches.symbol).toEqual({ box: [110, 60, 3.5, 3.5] });
+    expect(patches.kept).toBeUndefined();
+    expect(patches.away).toBeUndefined();
+    // a scale bar reads its map but stands on the page: it is sized only when picked
+    expect(patches.scale).toBeUndefined();
+    // locked, a map stays as it is, and so does its ground
+    const locked = pair().map((item) => (item.id === 'a' ? { ...item, locked: true } : item));
+    expect(sizedAsOne(locked, ids, { from: [20, 40], by: 0.5 }).patches.a).toBeUndefined();
+  });
+
+  it('follows every framing of a sized map, on each day and slide, and leaves the others\' alone', () => {
+    const framing = { '2026-10-03': { a: { ...view, zoom: 12 }, other: { ...view, zoom: 9 } }, s1: { b: { ...view, zoom: 13.5 } }, s2: { other: { ...view, zoom: 7 } } };
+    const out = sizedAsOne(pair(), ids, { from: [20, 40], by: 0.5, framing }).framing;
+    expect(out['2026-10-03']).toEqual({ a: { ...view, zoom: 11 }, other: { ...view, zoom: 9 } });
+    expect(out.s1.b.zoom).toBe(12.5);
+    expect(out.s2).toBe(framing.s2);
+    expect(framing['2026-10-03'].a.zoom).toBe(12);
+    expect(sizedAsOne(pair(), ids, { from: [20, 40], by: 0.5, framing: { s2: framing.s2 } }).framing).toBeNull();
+    expect(sizedAsOne(pair(), ids, { from: [20, 40], by: 0.5 }).framing).toBeNull();
+  });
+
+  it('keeps an inset on its ground: its own zoom follows, or the one it shows when its map stays', () => {
+    const inset = { id: 'i', kind: 'inset', of: 'm', box: [0, 0, 30, 30] };
+    const elements = [{ id: 'm', kind: 'map', box: [40, 0, 100, 80], view: { ...view } }, inset, { id: 't', kind: 'text', box: [0, 35, 30, 6] }];
+    expect(sizedAsOne(elements, ['i', 't'], { from: [0, 0], by: 2, insetZoom: () => 10.5 }).patches.i).toEqual({ box: [0, 0, 60, 60], zoom: 11.5, width: 2 });
+    expect(sizedAsOne([...elements.slice(0, 1), { ...inset, zoom: 6 }, elements[2]], ['i', 't'], { from: [0, 0], by: 0.5 }).patches.i.zoom).toBe(5);
+    // with its map in the picture, it follows the map's zoom as it always does
+    expect(sizedAsOne(elements, ['m', 'i'], { from: [0, 0], by: 2, insetZoom: () => 10.5 }).patches.i).toEqual({ box: [0, 0, 60, 60], width: 2 });
+    // a globe inset is a drawing: its box alone
+    expect(sizedAsOne([{ ...inset, globe: true }, elements[2]], ['i', 't'], { from: [0, 0], by: 2, insetZoom: () => 3 }).patches.i).toEqual({ box: [0, 0, 60, 60], width: 2 });
+  });
+
+  it('shrinks no picked box under a millimetre, and back at its size writes nothing', () => {
+    expect(leastScale(pair(), ids)).toBeCloseTo(1 / 6.5, 5);
+    expect(leastScale([{ id: 'x', kind: 'text', box: [0, 0, 0.5, 4] }], ['x'])).toBe(1);
+    expect(sizedAsOne(pair(), ids, { from: [20, 40], by: 1 }).patches).toEqual({});
   });
 });
 

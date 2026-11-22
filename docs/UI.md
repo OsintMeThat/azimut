@@ -6836,7 +6836,11 @@ A press picks an element, Shift adds to the picked ones, and elements put in one
 group (Ctrl+G, Ctrl+Shift+G to undo it) are picked together. A drag moves what is
 picked once the pointer has gone four pixels, so a click never nudges; it catches on
 the page's edges and middle and on the other boxes (Alt lets go), and a corner with
-Shift keeps the box's proportions. **A drag on a map moves its frame, as any
+Shift keeps the box's proportions. **Several picked (a group, or a Shift-pick) are sized
+as one picture** by the four corners of the box round them, from the opposite corner,
+catching on the same lines: each map zooms with it on every day and slide, so it shows
+the same ground and what stands there stays on it, and the words, symbols and lines
+inside grow or shrink with it; a locked one stays as it is. **A drag on a map moves its frame, as any
 element's; its ground stays put** until a double click goes into it (drag to pan,
 scroll to zoom, and a Shift-drag, a middle-drag or a double click held and dragged to
 turn, as on the app's other maps; Esc when done). The arrow keys move, Delete

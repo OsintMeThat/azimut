@@ -502,13 +502,13 @@
     </PlateSection>
     <PlateSection title="Together">
     <div class="tools wide">
-      <button type="button" class="btn btn-xs" title="Picked and moved as one from now on (Ctrl+G)" onclick={() => ongroup?.(true)}><Icon name="layers" size={12} /> Group</button>
+      <button type="button" class="btn btn-xs" title="Picked, moved and sized as one from now on (Ctrl+G)" onclick={() => ongroup?.(true)}><Icon name="layers" size={12} /> Group</button>
       <button type="button" class="btn btn-xs" title="Each picked on its own again (Ctrl+Shift+G)" onclick={() => ongroup?.(false)}>Ungroup</button>
       <button type="button" class="btn btn-xs" title="Kept where they are, or free to move again" onclick={() => { const lock = !picked.every((item) => item.locked); for (const item of picked) item.locked = lock; }}>
         <Icon name="lock" size={12} /> {picked.every((item) => item.locked) ? 'Unlock' : 'Lock'}</button>
       <button type="button" class="btn btn-xs danger" title="Take them all off the page" onclick={() => { for (const item of [...picked]) onremove(item); }}><Icon name="trash" size={12} /> Remove</button>
     </div>
-    <p class="note">A group is picked and moved as one. Ctrl+G groups, Ctrl+Shift+G ungroups.</p>
+    <p class="note">A group is picked, moved and sized as one. Ctrl+G groups, Ctrl+Shift+G ungroups.</p>
     </PlateSection>
   {:else}
     <header>

@@ -1046,6 +1046,58 @@ test('a comparison of the case goes on the plate as two maps on their days, or a
   await expect.poll(() => lastSave(store)?.spec.elements.find((element) => element.kind === 'image')?.src).toBe('media/energodar.png');
 });
 
+test('a comparison\'s pair is sized as one picture by a corner of its group, its maps keeping their ground', async ({ page }) => {
+  needsWebGL();
+  const store = await plateFixture(page);
+  const ground = (id, label) => ({ id, label, url: `https://tiles.invalid/${id}/{z}/{x}/{y}.png`, attribution: 'Browser fixture', max_zoom: 19, tile_size: 256, imagery: true });
+  await page.route('**/api/satellite/providers', (route) => route.fulfill({ json: [ground('esri-world-imagery', 'Esri World Imagery'), ground('esri-wayback', 'Esri Wayback')] }));
+  await page.route('**/api/satellite/wayback/releases', (route) => route.fulfill({ json: { releases: [{ release: 41, date: '2024-03-12' }] } }));
+  const row = { id: 'c1', key: 'c1', kind: 'comparison', session: 'energodar', title: 'Energodar', imagery_a: '2024-03-12', imagery_b: null, thumbnail: null, kept: [] };
+  await page.route(`**/api/cases/${CASE_ID}/satellite/index`, (route) => route.fulfill({ json: [row] }));
+  await page.route(`**/api/cases/${CASE_ID}/compare/sessions/energodar`, (route) => route.fulfill({ json: { title: 'Energodar', spec: { version: 2,
+    camera: { lat: 47.5, lon: 34.6, zoom: 16, bearing: 0 }, a: { provider: 'esri-wayback', wayback_release: 41 }, b: { provider: 'esri-world-imagery' } } } }));
+  await page.goto('/#plate');
+  await newPlate(page);
+  await expect(page.locator('.plate-map')).toHaveCount(2);
+  await addOnPage(page, 'Comparison');
+  await page.getByRole('dialog', { name: 'From the case' }).locator('.main').click();
+  await expect(page.locator('.plate-map')).toHaveCount(4);
+  const paired = () => (lastSave(store)?.spec.elements ?? []).filter((element) => element.group);
+  await expect.poll(() => paired().map((element) => element.kind).sort()).toEqual(['map', 'map', 'text', 'text']);
+  const before = paired();
+  const first = before.find((element) => element.kind === 'map');
+  // a press on one of the pair picks its group, with four corners round it
+  const hit = await page.locator(`.hit[data-element="${first.id}"]`).boundingBox();
+  await page.mouse.click(hit.x + hit.width / 2, hit.y + hit.height / 2);
+  await expect(page.locator('.handle[data-corner]')).toHaveCount(4);
+  const corner = await page.locator('.handle[data-corner="se"]').boundingBox();
+  await page.mouse.move(corner.x + corner.width / 2, corner.y + corner.height / 2);
+  await page.mouse.down();
+  await page.mouse.move(corner.x - 140, corner.y - 90, { steps: 10 });
+  await page.mouse.up();
+  const now = (id) => paired().find((element) => element.id === id);
+  await expect.poll(() => now(first.id).box[2]).toBeLessThan(first.box[2] - 10);
+  // one picture: every box from the corner held, the maps zoomed out by as much, the badges' words with them
+  const by = now(first.id).box[2] / first.box[2];
+  const [x0, y0] = [Math.min(...before.map((element) => element.box[0])), Math.min(...before.map((element) => element.box[1]))];
+  for (const was of before) {
+    const box = now(was.id).box;
+    expect(box[0]).toBeCloseTo(x0 + (was.box[0] - x0) * by, 0);
+    expect(box[1]).toBeCloseTo(y0 + (was.box[1] - y0) * by, 0);
+    expect(box[2]).toBeCloseTo(was.box[2] * by, 0);
+    expect(box[3]).toBeCloseTo(was.box[3] * by, 0);
+    if (was.kind === 'map') expect(now(was.id).view.zoom).toBeCloseTo(was.view.zoom + Math.log2(by), 2);
+    if (was.kind === 'text') expect(now(was.id).size).toBeCloseTo(Math.max(4, was.size * by), 0);
+  }
+  expect(now(first.id).view).toMatchObject({ lat: first.view.lat, lon: first.view.lon });
+  // and one step back gives it all back
+  await page.waitForTimeout(700);
+  await page.keyboard.press('Control+z');
+  await expect.poll(() => now(first.id).box).toEqual(first.box);
+  expect(paired().map((element) => [element.box, element.view?.zoom ?? null, element.size ?? null]))
+    .toEqual(before.map((element) => [element.box, element.view?.zoom ?? null, element.size ?? null]));
+});
+
 test('a Geo Proof and the footage placed on the map go on the plate from the case, each pointing at its place', async ({ page }) => {
   const store = await plateFixture(page);
   await page.route(`**/api/cases/${CASE_ID}/proofs`, (route) => route.fulfill({ json: [{ name: 'p-1', title: 'Depot strike', png: 'proofs/p-1.png',

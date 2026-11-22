@@ -1446,7 +1446,7 @@
       { label: 'Duplicate', icon: 'copy', keys: 'Ctrl+D', run: () => { for (const element of chosen) if (element.kind !== 'credits') duplicate(element); } },
       { label: 'Copy', icon: 'clipboard', keys: 'Ctrl+C', run: copySelection },
       'sep',
-      { label: 'Group', icon: 'layers', keys: 'Ctrl+G', title: 'Picked and moved as one from now on', run: () => group(true) },
+      { label: 'Group', icon: 'layers', keys: 'Ctrl+G', title: 'Picked, moved and sized as one from now on', run: () => group(true) },
       ...(grouped ? [{ label: 'Ungroup', icon: 'layers', keys: 'Ctrl+Shift+G', run: () => group(false) }] : []),
       'sep',
       { label: hidden ? 'Show them' : 'Hide them', icon: hidden ? 'eye' : 'eyeOff', run: () => { for (const element of chosen) element.hidden = !hidden; } },
