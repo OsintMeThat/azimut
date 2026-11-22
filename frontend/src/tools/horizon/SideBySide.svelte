@@ -1,9 +1,10 @@
 <script>
   /**
    * The photo above the terrain it is matched on, the same frame through the
-   * same lens, shown over the view when asked (the band's Side by side): the
-   * plainest reading of a place, a hill in one found straight under it in the
-   * other. The pictures come from the view (HorizonView `exportPicture`), the
+   * same lens, as a still picture over the view: asked for from the bar of the
+   * live Side by side (HorizonView `split`) when the search eased a cut
+   * collage, which only a still shows piece by piece. A hill in one is found
+   * straight under it in the other. The pictures come from the view (HorizonView `exportPicture`), the
    * summit names and the directions as the view placed them for that frame.
    * The trace shows on both: on the terrain, each piece of a cut collage
    * where the search read it (lib/horizon/overlay.js `traceOnTerrain`). A

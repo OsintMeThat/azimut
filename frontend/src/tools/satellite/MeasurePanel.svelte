@@ -14,7 +14,20 @@
   import Icon from '../../components/Icon.svelte';
   import DateField from '../../components/DateField.svelte';
   import { formatArea, formatBearing, formatDistance, pathLength, perimeter, polygonArea } from '../../lib/measure.js';
-  import { coneWidth, fieldUnit, fieldValue, isPair, MAX_RINGS, pairReading, parseDistance, USES } from '../../lib/measures.js';
+  import {
+    coneWidth,
+    fieldUnit,
+    fieldValue,
+    formatTolerance,
+    isPair,
+    MAX_RINGS,
+    MAX_TOLERANCE,
+    pairReading,
+    parseDistance,
+    PAST,
+    REACH,
+    USES,
+  } from '../../lib/measures.js';
   import { parseHeading, windOf } from '../../lib/horizon/geometry.js';
 
   let {
@@ -33,7 +46,7 @@
     ['imperial', 'mi', 'Feet and miles'],
     ['nautical', 'NM', 'Nautical miles, heights in metres'],
   ];
-  const ICONS = { ring: 'rings', cone: 'viewCone', shadow: 'sun', viewshed: 'eye' };
+  const ICONS = { ring: 'rings', cone: 'viewCone', align: 'alignment', shadow: 'sun', viewshed: 'eye' };
   const FOLD_KEY = 'azimut:measurePanelFolded';
 
   let folded = $state(foldRemembered());
@@ -62,11 +75,22 @@
   const reading = $derived(pair ? pairReading(m) : null);
   const unit = $derived(reading ? fieldUnit(reading.length, units) : 'm');
   const answer = $derived(m ? (tool.answers[m.id] ?? {}) : {});
+  const reach = $derived(m?.reach ?? REACH);
+  const reachUnit = $derived(fieldUnit(reach, units));
+  const meet = $derived(m?.use === 'align' ? tool.meeting : null);
+  const tolerance = $derived(m?.tolerance ?? 0);
+  const opensAt = $derived(m?.use === 'align' ? tool.bandOpensAt(m.id) : null);
 
   function typedLength(event) {
     const metres = parseDistance(event.currentTarget.value, unit);
     if (metres) tool.setLength(m.id, metres);
     else event.currentTarget.value = fieldValue(reading.length, unit);
+  }
+
+  function typedReach(event) {
+    const metres = parseDistance(event.currentTarget.value, reachUnit);
+    if (metres) tool.setReach(m.id, metres);
+    else event.currentTarget.value = fieldValue(reach, reachUnit);
   }
 
   function typedBearing(event) {
@@ -111,17 +135,26 @@
     </button>
   </header>
 
+  {#if tool.aligning}
+    <div class="aligning">
+      <Icon name="alignment" size={13} />
+      <span>{tool.hint}</span>
+      <button class="btn btn-ghost btn-xs" onclick={() => tool.stopAligning()} title="New lines are plain measures again (Escape)">Stop</button>
+    </div>
+  {/if}
+
   {#if folded}
-    {#if tool.drawing}
+    <!-- while aligning, the strip above says what to click -->
+    {#if tool.drawing && !tool.aligning}
       <p class="drawing"><span class="pulse"></span>{tool.hint}</p>
-    {:else if tool.selected}
+    {:else if tool.selected && !tool.drawing}
       <p class="compact mono"><span class="n">{tool.selectedId}</span>{tool.readingOf(tool.selectedId) || '…'}</p>
-    {:else}
+    {:else if !tool.aligning}
       <p class="how">{tool.hint}</p>
     {/if}
   {:else}
 
-  {#if !tool.measures.length}
+  {#if !tool.measures.length && !tool.aligning}
     <div class="welcome">
       <svg viewBox="0 0 120 34" aria-hidden="true">
         <path d="M12 24 L58 10 L104 22" class="drawn" />
@@ -135,7 +168,7 @@
         <li><kbd>Alt</kbd> keeps a click off what is there</li>
       </ul>
     </div>
-  {:else if tool.drawing}
+  {:else if tool.drawing && !tool.aligning}
     <p class="drawing"><span class="pulse"></span>{tool.hint}</p>
   {/if}
 
@@ -213,6 +246,57 @@
               <span class="unit">°</span>
             </label>
             <p class="answer">{formatDistance(coneWidth(m), units)} across at B</p>
+          </div>
+        {:else if m.use === 'align'}
+          <div class="use column">
+            <div class="row-fields">
+              <div class="segments" role="group" aria-label="Run the line on">
+                {#each PAST as way (way.id)}
+                  <button type="button" aria-pressed={(m.past ?? 'both') === way.id} title={way.title} onclick={() => tool.setPast(m.id, way.id)}>{way.label}</button>
+                {/each}
+              </div>
+              <label class="field" title="How far the line runs on, in any unit: 20 km, 5 mi">
+                <span>for</span>
+                <input
+                  class="mono"
+                  aria-label="How far the line runs on"
+                  value={fieldValue(reach, reachUnit)}
+                  onchange={typedReach}
+                  onkeydown={enter}
+                />
+                <span class="unit">{reachUnit === 'nm' ? 'NM' : reachUnit}</span>
+              </label>
+            </div>
+            <label class="field tolerance" title="How far off true the two things may line up in the picture">
+              <span>Within</span>
+              <input
+                type="range"
+                min="0"
+                max={MAX_TOLERANCE}
+                step="0.1"
+                aria-label="Tolerance in degrees"
+                value={tolerance}
+                oninput={(e) => tool.setTolerance(m.id, e.currentTarget.value)}
+              />
+              <span class="mono value">{tolerance ? formatTolerance(tolerance) : 'exact'}</span>
+            </label>
+            {#if opensAt != null}
+              <p class="note">At {formatTolerance(tolerance)} it rules nothing out past {formatDistance(opensAt, units)}.</p>
+            {/if}
+            {#if meet}
+              {#if meet.at}
+                <div class="meet">
+                  <p class="answer">{meet.lead}</p>
+                  <button class="btn btn-ghost btn-xs mono" onclick={() => tool.copyMeeting()} title="Copy where they meet">
+                    {meet.where} <Icon name="copy" size={11} />
+                  </button>
+                </div>
+              {:else}
+                <p class="answer">{meet.lead}</p>
+              {/if}
+              {#if meet.missing}<p class="note">{meet.missing}.</p>{/if}
+            {/if}
+            <p class="note">The camera stands on the line, on the side of the nearer thing.</p>
           </div>
         {:else if m.use === 'shadow'}
           <div class="use column">
@@ -582,7 +666,7 @@
   }
   .tiles {
     display: grid;
-    grid-template-columns: repeat(4, 1fr);
+    grid-template-columns: repeat(5, 1fr);
     gap: 5px;
   }
   .tiles button {
@@ -624,7 +708,48 @@
   }
   .row-fields {
     display: flex;
+    align-items: center;
     gap: 12px;
+  }
+  .aligning {
+    display: flex;
+    align-items: center;
+    gap: 7px;
+    padding: 5px 6px 5px 9px;
+    border-radius: var(--r-md);
+    background: rgba(45, 224, 255, 0.08);
+    box-shadow: inset 0 0 0 1px rgba(45, 224, 255, 0.35);
+    color: #8eefff;
+  }
+  .aligning span {
+    margin-right: auto;
+  }
+  .field.tolerance {
+    display: flex;
+  }
+  .field.tolerance input {
+    flex: 1;
+    width: auto;
+    padding: 0;
+    border: 0;
+    background: none;
+    accent-color: #2de0ff;
+  }
+  .field.tolerance .value {
+    min-width: 4.5ch;
+    color: var(--text-1);
+    text-align: right;
+  }
+  .meet {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: space-between;
+    gap: 4px 8px;
+  }
+  .meet .btn {
+    gap: 5px;
+    color: var(--text-2);
   }
   .field {
     display: inline-flex;

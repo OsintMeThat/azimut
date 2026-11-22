@@ -27,6 +27,15 @@ repository is the analyst's.
   right after `<body>`. What is between those markers is Azimut's, in its own article folders
   only; a map page has none. `articles.json` keeps which bar they carry as `bar`
   (`engine/sitesync.py`).
+- `azimut-footer.html` beside it is the analyst's too: their footer, which every article page
+  carries after Azimut's own footer (`own_footer`), between `<!-- azimut:footer -->` and
+  `<!-- /azimut:footer -->`. With no such file a page has neither markers nor footer; the markers
+  and what is between them are Azimut's, in its own article folders only, and a map page never
+  has them. `articles.json` keeps which footer the articles carry as `footer`.
+- The site's address a page in Azimut's own folders gives, articles and maps alike, is Azimut's: its
+  canonical, og:url, og:image and twitter:image, and its links to the site's folders under that address.
+  When the site moves (a custom domain, a repository renamed), Update the site gives them the new one
+  (`readdressed`) and nothing else; `articles.json` keeps the address every page gives as `address`.
 
 - A card's `category`, in any folder, is what Settings › Website changes when the analyst renames
   or deletes a category or gives one article another; nothing else of a card it did not write.
@@ -133,10 +142,11 @@ SITE_OWN_TITLE = "Make it yours"
 SITE_OWN: tuple[tuple[str, str], ...] = (
     ("Your own home page", "write your `index.html` and put `<!-- azimut:articles -->` "
                            "`<!-- /azimut:articles -->` where the list goes."),
-    ("Your own bar", "put your header and its `<style>` in `azimut-bar.html` at the site's root: articles carry it "
-                     "in place of Azimut's bar, maps keep theirs, and Update the site brings an edit to all of them. "
-                     "Scripts are dropped, links start from the site's root, and each `<svg>` needs a `width` and "
-                     "a `height`."),
+    ("Your own bar and footer", "put your header and its `<style>` in `azimut-bar.html` at the site's root, and "
+                                "your footer in `azimut-footer.html`. Articles carry the header in place of Azimut's "
+                                "bar and the footer at their end, after Azimut's own lines; maps carry neither. "
+                                "Update the site brings an edit to all of them. Scripts are dropped, links start from "
+                                "the site's root, and each `<svg>` needs a `width` and a `height`."),
     ("A page per category", 'the same markers with `section="Investigations"` list that category only.'),
     ("Your own domain", "buy one, then point it to GitHub Pages "
                         "([GitHub's guide](https://docs.github.com/en/pages/configuring-a-custom-domain-for-your-github-pages-site))."),
@@ -434,13 +444,187 @@ def is_azimut_bar(inner: bytes) -> bool:
     return inner.startswith(BAR_STYLE.encode("utf-8") + b'<nav class="az-site-bar"')
 
 
-# -- the site's own bar: azimut-bar.html ---------------------------------------------------------
+# -- the site's own footer between its markers ---------------------------------------------------------
 #
-# The file holds the site's header and its own `<style>`. An article page carries it in place of
-# Azimut's bar, read and cleaned at each publish and Update the site:
+# An article page whose site has a footer of its own carries it right after Azimut's footer
+# (`<footer class="az-footer">`, its edition and "Made with Azimut"), between `<!-- azimut:footer -->`
+# and `<!-- /azimut:footer -->` and a line end. With none the page has neither the markers nor a
+# footer, so a site without one sees no byte of its pages change. Update the site puts the markers
+# in after Azimut's footer the first time a footer comes, and takes them out with it. An article page
+# is one that opens with its bar's markers: a map page has none and so never gets a footer.
+
+FOOTER_OPEN = b"<!-- azimut:footer -->"
+FOOTER_CLOSE = b"<!-- /azimut:footer -->"
+#: Azimut's own footer, which the site's follows (`notes_html._Page._footer`).
+AZ_FOOTER = b'<footer class="az-footer">'
+_AZ_FOOTER_END = b"</footer>"
+
+
+def _footer_span(page: bytes) -> tuple[int, int] | None:
+    """Where the footer is in an article page: between its last pair of footer markers, past its bar;
+    None for a page with no bar's markers or no footer's."""
+    bar = _bar_span(page)
+    close = page.rfind(FOOTER_CLOSE) if bar is not None else -1
+    if bar is None or close < bar[1]:
+        return None
+    start = page.rfind(FOOTER_OPEN, bar[1], close)
+    return (start + len(FOOTER_OPEN), close) if start >= 0 else None
+
+
+def footer_in(page: bytes) -> bytes | None:
+    """What a page holds between its footer's markers, None for a page that has none."""
+    span = _footer_span(page)
+    return page[span[0]:span[1]] if span is not None else None
+
+
+def marked_footer(inner: str) -> str:
+    """The site's own footer between its markers and a line end, as an article page carries it; "" for none."""
+    return f"{FOOTER_OPEN.decode()}{inner}{FOOTER_CLOSE.decode()}\n" if inner else ""
+
+
+def with_footer(page: bytes, inner: str) -> bytes | None:
+    """The article page with ``inner`` as the site's own footer and every other byte as it was: between
+    its footer's markers, put right after Azimut's footer when it has none yet, and with neither markers
+    nor footer for ``inner`` "". None for a page that is no article (no bar's markers) or has no footer
+    of Azimut's to follow, which is never changed."""
+    bar = _bar_span(page)
+    if bar is None:
+        return None
+    span = _footer_span(page)
+    if span is not None:
+        start, end = span[0] - len(FOOTER_OPEN), span[1] + len(FOOTER_CLOSE)
+        end += page.startswith(b"\n", end)
+        return page[:start] + marked_footer(inner).encode("utf-8") + page[end:]
+    if not inner:
+        return page
+    found = page.rfind(AZ_FOOTER, bar[1])
+    end = page.find(_AZ_FOOTER_END, found) if found >= 0 else -1
+    if end < 0:
+        return None
+    end += len(_AZ_FOOTER_END)
+    end += page.startswith(b"\n", end)
+    return page[:end] + marked_footer(inner).encode("utf-8") + page[end:]
+
+
+def bare(page: bytes, bases: Iterable[str] = ()) -> bytes:
+    """The page with nothing between its bar's markers and none of the site's own footer: what is the
+    same whichever bar and footer Update the site gave it, and what a page published before either
+    was had. With ``bases``, site addresses, each is also taken off the front of every address
+    `readdressed` may change, so a page whose site's address Update the site moved reads as it was."""
+    plain = without_bar(with_footer(page, "") or page)
+    return _unaddressed(plain, bases) if bases else plain
+
+
+def upkept(was: bytes, now: bytes) -> bool:
+    """Whether a page Azimut published reads ``now`` as it did (``was``) but for what Update the site
+    changes in it: its bar and its footer (`bare`), and the site's address it gives (`readdressed`)."""
+    if bare(was) == bare(now):
+        return True
+    bases = {site_of(page_address(was)), site_of(page_address(now))} - {""}
+    return len(bases) == 2 and bare(was, bases) == bare(now, bases)
+
+
+# -- the site's address in the pages Azimut published ---------------------------------------------------
 #
-# - it is put in a declarative shadow root (`<template shadowrootmode="open">` in `<azimut-bar>`),
-#   so the reader's rules never reach it and its rules never reach the article;
+# A page gives the address it was published at (`notes_web._head`): its canonical, og:url, and og:image
+# and twitter:image (its `share.jpg`); and a link the analyst wrote to another page of the site names
+# it under that address too. A site that moves (a custom domain, a repository renamed) leaves those on
+# the old address until Update the site gives them the new one (`readdressed`), in those attributes
+# alone: an address quoted in the text, the page's policy and every other byte stay as they were, and
+# so do the site's own bar and footer, which are the site's files.
+
+#: The head's lines that give the page's own address, as Azimut writes them (`notes_web._head`).
+_OWN_ADDRESS = re.compile(rb'<link rel="canonical" href="|<meta property="og:url" content="|'
+                          rb'<meta property="og:image" content="|<meta name="twitter:image" content="')
+_CANONICAL = re.compile(rb'<link rel="canonical" href="([^"]*)"')
+_LINK = re.compile(rb'<a\b[^>]*?\shref="')
+_HEAD_END = b"</head>"
+
+
+def page_address(page: bytes) -> str:
+    """The address a page Azimut published gives as its own, its canonical; "" for none."""
+    end = page.find(_HEAD_END)
+    found = _CANONICAL.search(page, 0, end) if end >= 0 else None
+    return html.unescape(found.group(1).decode("utf-8", "replace")) if found else ""
+
+
+def site_of(address: str, folder: str = "") -> str:
+    """The site's address a page's own (`page_address`) is under, with its closing slash: the address
+    less its last part, which must be ``folder`` when one is given; "" for none or another folder."""
+    if not address.startswith("https://") or not address.endswith("/"):
+        return ""
+    base, _, last = address[:-1].rpartition("/")
+    if not last or base.count("/") < 2 or (folder and last != folder):
+        return ""
+    return f"{base}/"
+
+
+def _escaped(address: str) -> bytes:
+    return html.escape(address, quote=True).encode("utf-8")
+
+
+def _spots(page: bytes) -> tuple[list[int], list[int]]:
+    """Where each address `readdressed` may change starts: in the head's own lines, then in the links of
+    the body, none of them inside the site's bar or footer."""
+    end = page.find(_HEAD_END)
+    if end < 0:
+        return [], []
+    own = [found.end() for found in _OWN_ADDRESS.finditer(page, 0, end)]
+    kept = [span for span in (_bar_span(page), _footer_span(page)) if span is not None]
+    links = [found.end() for found in _LINK.finditer(page, end)
+             if not any(start <= found.start() < stop for start, stop in kept)]
+    return own, links
+
+
+def _spliced(page: bytes, cuts: list[tuple[int, int]], put: bytes) -> bytes:
+    """The page with each of ``cuts`` (where, how long), in order, given ``put`` in place."""
+    out, last = [], 0
+    for at, length in cuts:
+        out += [page[last:at], put]
+        last = at + length
+    out.append(page[last:])
+    return b"".join(out)
+
+
+def readdressed(page: bytes, old: str, new: str, folders: Iterable[str]) -> bytes:
+    """The page with the site's old address ``old`` given as ``new`` (each a site's address with its
+    closing slash): at the front of its head's canonical, og:url, og:image and twitter:image, and of each
+    link (`<a href>`) to one of the site's ``folders`` under it. Every other byte stays as it was."""
+    if not old.endswith("/") or not new.endswith("/") or old == new:
+        return page
+    was, names = _escaped(old), set(folders)
+    own, links = _spots(page)
+    cuts = [at for at in own if page.startswith(was, at)]
+    for at in links:
+        close = page.find(b'"', at)
+        if close > at and page.startswith(was, at):
+            first = re.split(rb"[/?#]", page[at + len(was):close], maxsplit=1)[0]
+            if first and html.unescape(first.decode("utf-8", "replace")) in names:
+                cuts.append(at)
+    return _spliced(page, [(at, len(was)) for at in sorted(cuts)], _escaped(new)) if cuts else page
+
+
+def _unaddressed(page: bytes, bases: Iterable[str]) -> bytes:
+    """The page with any of the site addresses ``bases`` taken off the front of every address
+    `readdressed` may change, the longest first: what a page reads as whichever of them it gives."""
+    wanted = sorted({_escaped(base) for base in bases if base}, key=len, reverse=True)
+    own, links = _spots(page)
+    cuts = []
+    for at in sorted(own + links):
+        found = next((was for was in wanted if page.startswith(was, at)), None)
+        if found is not None:
+            cuts.append((at, len(found)))
+    return _spliced(page, cuts, b"")
+
+
+# -- the site's own bar and footer: azimut-bar.html, azimut-footer.html ---------------------------------
+#
+# `azimut-bar.html` holds the site's header and its own `<style>`, which an article page carries in
+# place of Azimut's bar; `azimut-footer.html` its footer, carried after Azimut's own. Each is a part
+# (`OwnPart`), read and cleaned the same way at each publish and Update the site:
+#
+# - it is put in a declarative shadow root (`<template shadowrootmode="open">` in `<azimut-bar>`, or
+#   `<azimut-footer>`), so the reader's rules never reach it and its rules never reach the article;
 # - its `@font-face` rules go to the page itself, where a font is registered, the rest stays inside;
 # - what could run or reach elsewhere is dropped: `<script>`, `<iframe>`, `<object>`, `<embed>`,
 #   `<template>`, `<form>`, `<base>`, `<meta>`, `<link>`, SVG animation, every `on*` attribute
@@ -449,20 +633,40 @@ def is_azimut_bar(inner: bytes) -> bool:
 #   one folder down (`../theme/logo.png`); an absolute one or one from the root (`/theme/…`) is kept;
 # - an `<svg>` given no width or height is held to 1.5em, so a stylesheet missing never blows it up.
 #
-# Past `MAX_OWN_BAR_BYTES`, or when it does not read as HTML, the articles keep Azimut's bar and a
-# word says so. The page's policy (`notes_web.folder_csp`) lets in inline styles, and pictures and
-# fonts from the site itself only.
+# Past `MAX_OWN_BAR_BYTES`, or when it does not read as HTML, the articles keep Azimut's bar (or go
+# without the footer) and a word says so. The page's policy (`notes_web.folder_csp`) lets in inline
+# styles, and pictures and fonts from the site itself only.
 
 OWN_BAR = "azimut-bar.html"
+OWN_FOOTER = "azimut-footer.html"
+#: The most either file may weigh.
 MAX_OWN_BAR_BYTES = 64 * 1024
 OWN_BAR_TOO_LARGE = f"{OWN_BAR} is larger than {MAX_OWN_BAR_BYTES // 1024} KB: the articles keep Azimut's bar."
 OWN_BAR_UNREAD = f"{OWN_BAR} does not read as HTML: the articles keep Azimut's bar."
-#: What the bar's own sheet starts with: a box of its own, nothing inherited from the article, and
+OWN_FOOTER_TOO_LARGE = f"{OWN_FOOTER} is larger than {MAX_OWN_BAR_BYTES // 1024} KB: the articles go without it."
+OWN_FOOTER_UNREAD = f"{OWN_FOOTER} does not read as HTML: the articles go without it."
+#: What a part's own sheet starts with: a box of its own, nothing inherited from the article, and
 #: an unsized picture held small. Its own rules come after, and win.
 OWN_BAR_BASE = (":host{all:initial;display:block}:where(svg:not([width])){width:1.5em}"
                 ":where(svg:not([height])){height:1.5em}:where(img){max-width:100%}")
-#: The element the site's bar lives in, which no rule of the reader names.
+#: The elements the site's bar and footer live in, which no rule of the reader names.
 OWN_BAR_HOST = "azimut-bar"
+OWN_FOOTER_HOST = "azimut-footer"
+
+
+@dataclass(frozen=True)
+class OwnPart:
+    """A part of the site's own that its article pages carry: its file at the site's root, the
+    element it lives in on a page, and what is said when it is too large or does not read."""
+
+    file: str
+    host: str
+    too_large: str
+    unread: str
+
+
+BAR_PART = OwnPart(OWN_BAR, OWN_BAR_HOST, OWN_BAR_TOO_LARGE, OWN_BAR_UNREAD)
+FOOTER_PART = OwnPart(OWN_FOOTER, OWN_FOOTER_HOST, OWN_FOOTER_TOO_LARGE, OWN_FOOTER_UNREAD)
 
 _VOID = frozenset({"area", "base", "br", "col", "embed", "hr", "img", "input", "keygen", "link", "meta", "param",
                    "source", "track", "wbr"})
@@ -498,12 +702,12 @@ _CSS_COMMENT = re.compile(r"/\*.*?\*/", re.S)
 _CSS_URL = re.compile(r"""url\(\s*(?:"([^"]*)"|'([^']*)'|([^)"'\s]*))\s*\)""", re.I)
 _CSS_IMPORT = re.compile(r"""@import\s+(?:"([^"]*)"|'([^']*)')""", re.I)
 _FONT_FACE = re.compile(r"@font-face\s*\{[^}]*\}", re.I)
-#: A face of the reader's own (`az-head`, `az-body`, …), which a face of the bar's must not replace.
+#: A face of the reader's own (`az-head`, `az-body`, …), which a face of the site's must not replace.
 _READER_FACE = re.compile(r"""font-family\s*:\s*["']?az-""", re.I)
 
 
 def _from_root(address: str, home: str) -> str | None:
-    """An address of the bar as a page one folder down reads it: one relative to the site's root
+    """An address of the site's bar or footer as a page one folder down reads it: one relative to the site's root
     made relative to the page, one from the root, absolute or a fragment kept; None for a scheme
     that is not http(s), mailto or tel."""
     text = address.strip()
@@ -516,7 +720,7 @@ def _from_root(address: str, home: str) -> str | None:
 
 
 def _css_from_root(css: str, home: str) -> str:
-    """A stylesheet of the bar with its relative addresses made the page's, and no `<` left in it,
+    """A stylesheet of the bar or footer with its relative addresses made the page's, and no `<` left in it,
     so it can never close the element it is in nor a marker."""
 
     def moved(found: re.Match[str], form: str) -> str:
@@ -529,8 +733,8 @@ def _css_from_root(css: str, home: str) -> str:
     return css.replace("<", "\\3c ")
 
 
-class _BarCleaner(HTMLParser):
-    """The site's bar read token by token and written again from what is kept: balanced, every
+class _OwnCleaner(HTMLParser):
+    """The site's bar or footer read token by token and written again from what is kept: balanced, every
     word and value escaped, so nothing it holds can close what Azimut puts it in."""
 
     def __init__(self, home: str) -> None:
@@ -635,28 +839,38 @@ class _BarCleaner(HTMLParser):
         return "".join(self.out)
 
 
-def own_bar(data: bytes | None, home: str = "../") -> tuple[str, str]:
-    """The site's own bar (``data``, its `azimut-bar.html`) as an article page carries it between its
+def own_part(part: OwnPart, data: bytes | None, home: str = "../") -> tuple[str, str]:
+    """A part of the site's own (``data``, its file) as an article page carries it between its
     markers, for a page ``home`` below the site's root, and the word to say: ("", "") with no file,
-    ("", why) when it is past `MAX_OWN_BAR_BYTES` or does not read, and the page keeps Azimut's bar."""
+    ("", why) when it is past `MAX_OWN_BAR_BYTES` or does not read, and the page goes without it."""
     if data is None:
         return "", ""
     if len(data) > MAX_OWN_BAR_BYTES:
-        return "", OWN_BAR_TOO_LARGE
+        return "", part.too_large
     try:
-        cleaner = _BarCleaner(home)
+        cleaner = _OwnCleaner(home)
         cleaner.feed(data.decode("utf-8").removeprefix("\ufeff"))
         markup = cleaner.finish()
     except (UnicodeDecodeError, AssertionError, ValueError):
-        return "", OWN_BAR_UNREAD
+        return "", part.unread
     if not markup.strip():
-        return "", OWN_BAR_UNREAD
+        return "", part.unread
     css = _css_from_root(_CSS_COMMENT.sub("", "\n".join(cleaner.css)), home)
     faces = [face for face in _FONT_FACE.findall(css) if not _READER_FACE.search(face)]
     sheet = _FONT_FACE.sub("", css).strip()
     fonts = f"<style>{''.join(faces)}</style>" if faces else ""
-    return (f'{fonts}<{OWN_BAR_HOST}><template shadowrootmode="open"><style>{OWN_BAR_BASE}{sheet}</style>'
-            f"{markup}</template></{OWN_BAR_HOST}>"), ""
+    return (f'{fonts}<{part.host}><template shadowrootmode="open"><style>{OWN_BAR_BASE}{sheet}</style>'
+            f"{markup}</template></{part.host}>"), ""
+
+
+def own_bar(data: bytes | None, home: str = "../") -> tuple[str, str]:
+    """The site's own bar (its `azimut-bar.html`), which the page carries in place of Azimut's (`own_part`)."""
+    return own_part(BAR_PART, data, home)
+
+
+def own_footer(data: bytes | None, home: str = "../") -> tuple[str, str]:
+    """The site's own footer (its `azimut-footer.html`), which the page carries after Azimut's (`own_part`)."""
+    return own_part(FOOTER_PART, data, home)
 
 
 # -- ownership --------------------------------------------------------------------------------------

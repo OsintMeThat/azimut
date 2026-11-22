@@ -124,6 +124,20 @@ describe('spawning a window', () => {
     expect(refs.open[0].id).not.toBe(refs.open[1].id);
   });
 
+  it('never gives two tabs’ windows the same id, the list being the session’s', () => {
+    // Satellite and Horizon each hold a store over the one list
+    const satellite = store();
+    const horizon = store();
+    satellite.add(SHOT);
+    horizon.add(SHOT);
+    satellite.add(CLIP);
+    const ids = session.map((window) => window.id);
+    expect(new Set(ids).size).toBe(3);
+    // and either one closes what the other opened
+    horizon.close(ids[0]);
+    expect(session.map((window) => window.id)).toEqual(ids.slice(1));
+  });
+
   it('stacks each new window above the last', () => {
     const refs = store();
     refs.add(SHOT);

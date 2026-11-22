@@ -1,6 +1,7 @@
 // @vitest-environment happy-dom
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { createMeasureState, EYE_HEIGHT, PROFILE_SAMPLES, usableDate, VIEWSHED_REACH } from './measure.svelte.js';
+import { destination, haversine } from '../../../lib/measure.js';
 
 /**
  * The Measure tool's own rules, apart from the map it draws on.
@@ -498,6 +499,179 @@ describe('what a line of two points is used as', () => {
     const line = drawn(tool, A, B);
     tool.swap(line.id);
     expect(tool.measures[0].points).toEqual([B, A]);
+  });
+});
+
+describe('alignments in a row', () => {
+  const camera = { lat: 46.05, lon: 7.05 };
+  /** Two things lined up on a bearing from the camera: the far one, then the near one. */
+  const things = (bearing) => [destination(camera, bearing, 5000), destination(camera, bearing, 2000)];
+
+  /** A first line made an alignment, so the next ones are alignments too. */
+  function aligned(tool) {
+    const first = drawn(tool, ...things(10));
+    tool.setUse(first.id, 'align');
+    return first;
+  }
+
+  it('runs an alignment on past both ends, in the colour of what a line is used as', () => {
+    const tool = store();
+    tool.open();
+    aligned(tool);
+    const runs = shapes().last.filter((shape) => /^m1-use-\d$/.test(shape.id));
+    expect(runs.map((shape) => shape.kind)).toEqual(['line', 'line']);
+    expect(runs[0].style.stroke).toBe('#2de0ff');
+    expect(tool.readout).toBe('Alignment · 190°');
+  });
+
+  it('makes each new line an alignment after two clicks, until Align is pressed off', () => {
+    const tool = store();
+    tool.open();
+    const first = aligned(tool);
+    expect(tool.aligning).toBe(true);
+    const [far, near] = things(120);
+    tool.addPoint(far);
+    expect(tool.drawing).toBe(true);
+    tool.addPoint(near);
+    expect(tool.drawing).toBe(false);
+    const second = tool.measures.at(-1);
+    expect(second).toMatchObject({ use: 'align', past: 'both' });
+    expect(tool.selectedId).toBe(second.id);
+    // the next one runs on as the last one was set
+    tool.setPast(second.id, 'b');
+    tool.setReach(second.id, 8000);
+    for (const point of things(250)) tool.addPoint(point);
+    expect(tool.measures.at(-1)).toMatchObject({ use: 'align', past: 'b', reach: 8000 });
+    tool.setUse(first.id, 'align');
+    expect(tool.aligning).toBe(false);
+    for (const point of things(300)) tool.addPoint(point);
+    expect(tool.drawing).toBe(true);
+  });
+
+  it('says what to click while aligning', () => {
+    const tool = store();
+    tool.open();
+    aligned(tool);
+    expect(tool.hint).toBe('Click two things lined up in the picture');
+    tool.addPoint(things(120)[0]);
+    expect(tool.hint).toBe('Click the second thing lined up');
+  });
+
+  it('lets go of the selection on Escape, then of the alignments, then of nothing', () => {
+    const tool = store();
+    tool.open();
+    aligned(tool);
+    expect(tool.escape()).toBe(true);
+    expect(tool.aligning).toBe(true);
+    expect(tool.escape()).toBe(true);
+    expect(tool.aligning).toBe(false);
+    expect(tool.escape()).toBe(false);
+    aligned(tool);
+    tool.stopAligning();
+    expect(tool.aligning).toBe(false);
+    tool.setUse(tool.measures.at(-1).id, 'align');
+    tool.close();
+    expect(tool.aligning).toBe(false);
+  });
+
+  it('shows how the alignment to come runs on while it is aimed', () => {
+    const tool = store();
+    tool.open();
+    tool.addPoint(A);
+    tool.follow(B);
+    expect(tool.live.runs).toEqual([]);
+    tool.finish();
+    aligned(tool);
+    const [far, near] = things(120);
+    tool.addPoint(far);
+    tool.follow(near);
+    expect(tool.live.runs).toHaveLength(2);
+    expect(haversine(tool.live.runs[1][0], near)).toBeLessThan(0.01);
+  });
+
+  it('rings where three alignments meet, and copies its middle', () => {
+    const tool = store();
+    tool.open();
+    aligned(tool);
+    for (const point of [...things(120), ...things(250)]) tool.addPoint(point);
+    const meet = tool.meeting;
+    expect(meet.lead).toMatch(/^3 alignments meet within [\d.]+ m$/);
+    expect(haversine(meet.at, camera)).toBeLessThan(1);
+    expect(meet.where).toBe('46.0500, 7.0500');
+    const ring = shapes().last.find((shape) => shape.id === 'meeting');
+    expect(ring.kind).toBe('circle');
+    expect(ring.tip).toMatch(/of 46\.0500, 7\.0500\. Click to copy$/);
+    expect(shapes().last.find((shape) => shape.id === 'meeting-fill').style.interactive).toBe(false);
+    copy.mockClear();
+    ring.onClick();
+    expect(copy).toHaveBeenCalledWith('46.0500, 7.0500');
+    tool.copyMeeting();
+    expect(copy).toHaveBeenCalledTimes(2);
+  });
+
+  it('draws no ring for two alignments, whose crossing is already marked', () => {
+    const tool = store();
+    tool.open();
+    aligned(tool);
+    for (const point of things(120)) tool.addPoint(point);
+    expect(tool.meeting.lead).toBe('The two alignments cross');
+    expect(shapes().last.some((shape) => shape.id === 'meeting')).toBe(false);
+    expect(shapes().last.filter((shape) => shape.className === 'measure-crossing')).toHaveLength(1);
+  });
+
+  it('turns an alignment round without moving where it runs on', () => {
+    const tool = store();
+    tool.open();
+    const line = aligned(tool);
+    tool.setPast(line.id, 'b');
+    const before = shapes().last.find((shape) => shape.id === 'm1-use-0').points.at(-1);
+    tool.swap(line.id);
+    expect(tool.measures[0].past).toBe('a');
+    const after = shapes().last.find((shape) => shape.id === 'm1-use-0').points.at(-1);
+    expect(haversine(before, after)).toBeLessThan(1);
+  });
+
+  it('lays the band a tolerance leaves either side, and the next lines take it too', () => {
+    const tool = store();
+    tool.open();
+    const line = aligned(tool);
+    tool.setTolerance(line.id, 1.5);
+    expect(tool.readout).toBe('Alignment · 190° ±1.5°');
+    const drawnNow = shapes().last;
+    const band = drawnNow.find((shape) => shape.id === 'm1-use-0');
+    expect(band).toMatchObject({ kind: 'polygon', role: 'band', style: { fill: '#2de0ff', interactive: false } });
+    expect(drawnNow.some((shape) => shape.id === 'm1-use-0-casing')).toBe(false);
+    expect(drawnNow.find((shape) => shape.id === 'm1-use-1').style.dash).toBe('4 3');
+    const [far, near] = things(120);
+    tool.addPoint(far);
+    tool.follow(near);
+    expect(tool.live.edges).toHaveLength(4);
+    tool.addPoint(near);
+    expect(tool.measures.at(-1).tolerance).toBe(1.5);
+    tool.setTolerance(line.id, 0);
+    expect(shapes().last.some((shape) => shape.role === 'band' && shape.id.startsWith('m1-'))).toBe(false);
+  });
+
+  it('says where a loose band stops ruling anything out', () => {
+    const tool = store();
+    tool.open();
+    const line = aligned(tool);
+    expect(tool.bandOpensAt(line.id)).toBe(null);
+    tool.setTolerance(line.id, 5);
+    expect(tool.bandOpensAt(line.id)).toBeGreaterThan(10_000);
+    expect(tool.bandOpensAt(line.id)).toBeLessThan(20_000);
+    tool.setTolerance(line.id, 1);
+    expect(tool.bandOpensAt(line.id)).toBe(null);
+  });
+
+  it('keeps an alignment in a layer with the whole of its run', () => {
+    const tool = store();
+    tool.open();
+    const line = aligned(tool);
+    const kept = tool.feature(line.id);
+    expect(kept.geometry.type).toBe('LineString');
+    expect(kept.geometry.coordinates).toHaveLength(98);
+    expect(kept.description).toContain('Alignment run on 20.0 km past both ends');
   });
 });
 

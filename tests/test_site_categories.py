@@ -96,7 +96,9 @@ def test_a_rename_rewrites_every_card_that_carries_it_and_the_lists_in_one_commi
     listed = _list(fake)
     assert {line["category"] for line in listed["articles"]} == {"Ports", "Roads"}
     assert listed["renamed"] == {"Harbour": "Ports"}
-    assert list(listed) == ["format", "site", "articles", "maps", "pages", "renamed", "bar"]
+    # the record of what every page carries stays as it was: its bar, and the address they all give
+    assert list(listed) == ["format", "site", "articles", "maps", "pages", "renamed", "bar", "address"]
+    assert listed["address"] == listed["site"]["address"]
     assert "<category>Ports</category>" in after["feed.xml"].decode()
     assert 'data-category="ports"' in after["index.html"].decode() and "Harbour" not in after["index.html"].decode()
     # the publish dialog is offered the new name, and the old one is gone

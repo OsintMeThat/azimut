@@ -6,7 +6,9 @@
    * - **The stretch to come** while a measure is drawn: from the last point to
    *   the pointer, with what it adds written beside the pointer, and a ring
    *   where the click would land on something already there. Drawn here, the
-   *   pointer's every move repaints nothing on the ground, flat or in 3D.
+   *   pointer's every move repaints nothing on the ground, flat or in 3D. An
+   *   alignment to come shows how far it will run on past both points, so it
+   *   can be aimed along the picture.
    * - **The line of sight in the air**, in 3D: from the eye standing over A to
    *   the target standing over B, the stretch past the ground in its way drawn
    *   in red. The straight line between two points in the air, less the Earth's
@@ -16,7 +18,7 @@
 
   let {
     engine = null,
-    /** `tool.live`: `{ from, to, first, closing, text, label }`, or null. */
+    /** `tool.live`: `{ from, to, first, closing, text, label, runs, edges }`, or null. */
     live = null,
     /**
      * The sight to stand in the air: `{ a, b, eye, target, blockedAt }`, the
@@ -49,8 +51,31 @@
     const from = at(live.from);
     const to = at(live.to);
     if (!from || !to) return null;
-    return { from, to, first: live.closing ? at(live.first) : null, snapped: Boolean(live.label) };
+    return {
+      from,
+      to,
+      first: live.closing ? at(live.first) : null,
+      snapped: Boolean(live.label),
+      runs: (live.runs ?? []).map(trace).filter(Boolean),
+      edges: (live.edges ?? []).map(trace).filter(Boolean),
+    };
   });
+
+  /** A run on the ground as a path on screen, cut where a point is off the globe's face. */
+  function trace(points) {
+    let d = '';
+    let open = false;
+    for (const point of points) {
+      const p = at(point);
+      if (!p) {
+        open = false;
+        continue;
+      }
+      d += `${open ? 'L' : 'M'}${p.x.toFixed(1)},${p.y.toFixed(1)}`;
+      open = true;
+    }
+    return d || null;
+  }
 
   const sky = $derived.by(() => {
     tick;
@@ -98,6 +123,8 @@
     {#if sky.target}<circle class="end" cx={sky.target.x} cy={sky.target.y} r="4" />{/if}
   {/if}
   {#if band}
+    {#each band.edges as d, i (i)}<path class="edge" {d} />{/each}
+    {#each band.runs as d, i (i)}<path class="run" {d} />{/each}
     <line class="band" x1={band.from.x} y1={band.from.y} x2={band.to.x} y2={band.to.y} />
     {#if band.first}
       <line class="band closing" x1={band.to.x} y1={band.to.y} x2={band.first.x} y2={band.first.y} />
@@ -137,6 +164,21 @@
     stroke-width: 2;
     stroke-dasharray: 6 4;
     stroke-opacity: 0.9;
+  }
+  .run {
+    fill: none;
+    stroke: #2de0ff;
+    stroke-width: 2;
+    stroke-dasharray: 6 4;
+    stroke-opacity: 0.85;
+    filter: drop-shadow(0 0 1.5px rgba(0, 0, 0, 0.8));
+  }
+  .edge {
+    fill: none;
+    stroke: #2de0ff;
+    stroke-width: 1.2;
+    stroke-dasharray: 3 3;
+    stroke-opacity: 0.7;
   }
   .band.closing {
     stroke-opacity: 0.55;

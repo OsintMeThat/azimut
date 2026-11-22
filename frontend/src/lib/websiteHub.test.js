@@ -73,10 +73,20 @@ describe('the read, as the hub holds it', () => {
     for (const bar of ['azimut', undefined, 'mine', true]) expect(siteReadOf({ ...ANSWER, bar }).bar, String(bar)).toBe('azimut');
   });
 
+  it('counts the pages still on an old address, nothing for what is not a count', () => {
+    expect(siteReadOf({ ...ANSWER, old_address: 3 }).oldAddress).toBe(3);
+    for (const given of [undefined, null, -1, 'many', true]) expect(siteReadOf({ ...ANSWER, old_address: given }).oldAddress, String(given)).toBe(0);
+  });
+
+  it('says whose footer the articles carry: the site\'s own only when the server says so, else none', () => {
+    expect(siteReadOf({ ...ANSWER, footer: 'yours' }).footer).toBe('yours');
+    for (const footer of ['none', undefined, 'azimut', true]) expect(siteReadOf({ ...ANSWER, footer }).footer, String(footer)).toBe('none');
+  });
+
   it('reads what the server left out as nothing, never as an error', () => {
     const read = siteReadOf({ ok: true });
-    expect(read).toMatchObject({ address: '', home: 'none', bar: 'azimut', items: [], categories: [], marked: [], legal: '', privacy: '', last: null,
-      warnings: [] });
+    expect(read).toMatchObject({ address: '', home: 'none', bar: 'azimut', footer: 'none', items: [], categories: [], marked: [], legal: '', privacy: '', last: null,
+      oldAddress: 0, warnings: [] });
     // a weight that is not given is not a weight of zero, and not a site cut short either
     expect(read.size).toEqual({ site: null, repository: null });
     expect(read.truncated).toBe(false);

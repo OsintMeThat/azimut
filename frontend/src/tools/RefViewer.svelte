@@ -26,6 +26,7 @@
     PLACES,
     clampSize,
     clampPan,
+    clampWindow,
     clampOpacity,
     flipFade,
     hasFacts,
@@ -204,6 +205,18 @@
   function toggleFade() {
     Object.assign(viewer, flipFade(viewer));
   }
+
+  // A free window drawn in a smaller box than the one it was left in (the Map's,
+  // then Horizon's view beside its map) comes back inside it.
+  $effect(() => {
+    if (!el || viewer.docked || viewer.corner) return;
+    untrack(() => {
+      const box = bounds();
+      if (!(box.w > 0 && box.h > 0)) return;
+      const at = clampWindow(viewer.x, viewer.y, viewer.w, viewer.collapsed ? headH : viewer.h, box);
+      if (at.x !== viewer.x || at.y !== viewer.y) Object.assign(viewer, at);
+    });
+  });
 
   // Pinned, the window's place is worked out from its corner, the map's size and
   // the map's controls, read again whenever the map changes size.

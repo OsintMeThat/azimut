@@ -49,6 +49,20 @@ describe('the map’s controls', () => {
     expect(chromeBoxes(wrap)).toEqual([{ x: 12, y: 210, w: 30, h: 60 }]);
   });
 
+  it('reads a view drawn by another engine by what it says of itself', () => {
+    const wrap = map(
+      '<div class="band"></div><div data-chrome="surface"><div class="view"><div data-chrome="control"></div><span class="name"></span></div></div>'
+    );
+    at(wrap.querySelector('.band'), 0, 0, 1000, 40);
+    for (const el of wrap.querySelectorAll('[data-chrome="surface"], .view')) at(el, 0, 40, 1000, 660);
+    at(wrap.querySelector('[data-chrome="control"]'), 900, 50, 90, 120);
+    at(wrap.querySelector('.name'), 400, 200, 60, 14);
+    expect(chromeBoxes(wrap)).toEqual([
+      { x: 0, y: 0, w: 1000, h: 40 },
+      { x: 900, y: 50, w: 90, h: 120 },
+    ]);
+  });
+
   it('leaves out what is hidden or has no size', () => {
     const wrap = map('<div class="a" style="display: none"></div><div class="b"></div>');
     at(wrap.querySelector('.a'), 0, 0, 50, 50);

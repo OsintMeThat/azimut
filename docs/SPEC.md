@@ -170,7 +170,7 @@ proof for publication.
 | Tool | What it does |
 |------|--------------|
 | ✅ **Map navigation & captures** | Links map cameras, places case media and uncertainty footprints, and saves attributed captures with scale and north. |
-| ✅ **Reference windows** | Fades a case picture or clip over the map, docked or pinned clear of its controls, in the app and the extension. |
+| ✅ **Reference windows** | Fades a case picture or clip over the map or the Horizon view, docked or pinned clear of its controls, in the app and the extension. |
 | ✅ **Map layers** | Stacks infrastructure overlays, FIRMS fires, VIIRS night lights and OpenStreetMap borders, imports KML, KMZ, GeoJSON and GPX, and follows My Maps and GeoConfirmed. |
 | ✅ **Personal layers** | Draws markers, lines and areas on any map from a blank layer, a file or a My Maps link, fed by the case's places, proofs and files, styled with the analyst's own icons, colours and a case key. |
 | ✅ **Layers over time** | Dates every edit and reads a layer on any day with what changed ringed, on its time strip and on the Timeline. |
@@ -179,10 +179,10 @@ proof for publication.
 | ✅ **Map plates** | Lays a page out round the case's maps (legend, scale, north, inset, marks, tables, credits) from ten ready plates or a template, on vector, topographic, 3D or Sentinel-2 grounds, with looks, text styles, layer roles and features left out one by one or outside a period. |
 | ✅ **Played plates** | Plays a plate by day (or by hour on layers dated to the minute) and slide, each with its annotations, framing, transitions and case videos, and exports a PNG, a print PDF, an MP4, a GIF or an evolution sheet while the analyst works on. |
 | ✅ **Plates an outsider reads** | Says in a Layers tab where each map gets what it draws, keeps the slides bar in sight with + Slide and a pill saying what an addition shows on, puts the case's comparisons, Geo Proofs and placed footage on a plate from Add › From the case, lays one event's footage as its angles, and lets a map on a picture of one day draw its layers as they stood then. |
-| ✅ **Horizon** | Draws the terrain seen from a viewpoint in 3D with named summits and buildings from open sources, lays a photo over it matched by hand, and saves views that reopen as they were. |
+| ✅ **Horizon** | Draws the terrain seen from a viewpoint in 3D with named summits and buildings from open sources, lays a photo over it matched by hand, shows the photo above the terrain live, locked together or each on its own, and saves views that reopen as they were. |
 | ✅ **Find** (beta) | Ranks the places of an area whose relief fits a photo's traced skyline, helped by marks on the trace, the camera, the sun and alignments, says how far to trust the best one, and keeps searches in the case. |
 | ✅ **Globe 3D** | Draws Satellite's and a plate's 3D maps on the app's own globe over public relief, with the flat map's layers, places and measures, and files a tilted view as a credited capture. |
-| ✅ **Measure** | Measures lines and areas with legs, bearings and angles, uses a line as range rings, a view cone, a shadow's height or a viewshed, and reads the ground and line of sight under it, flat and on the globe. |
+| ✅ **Measure** | Measures lines and areas with legs, bearings and angles, uses a line as range rings, a view cone, an alignment run on to where several meet, a shadow's height or a viewshed, and reads the ground and line of sight under it, flat and on the globe. |
 | ✅ **Historical imagery & radar** | Browses Esri Wayback releases and dated Sentinel-1 passes, keeping acquisition dates separate from imagery releases. |
 | ✅ **Satellite Compare** | Aligns and annotates dated imagery, echoes the pointer on the other side, highlights comparable changes, saves sessions and exports attributed PNGs, GIFs and evolution sheets. |
 | ✅ **Detect** | Reviews Sentinel-2 and Sentinel-1 detections over shared areas, with pass coverage, cloud masks, custom analyzers and dated evidence; analyzers and areas travel as files. |
@@ -206,10 +206,10 @@ proof for publication.
 | ✅ **HTML report** | Writes a note as one self-contained page readable offline beside the PDF (a before/after swipe, playable clips, zoomable pictures, a citation's source on hover, verify links, the edition's hash), laid out as an article or as a story of held pictures. |
 | ✅ **Report on the web** | Writes a note as a folder ready to host, with its link card and the GitHub Pages steps, publishes it to the analyst's own GitHub Pages in one press, or sends it to WordPress as a draft. |
 | ✅ **Your website** | Every publish to GitHub Pages also keeps the analyst's site: a card and a list picture with each article, then its list, feed and sitemap, the lists between markers in their own pages (a default home when they have none), pages kept off the lists, a way back to the site on each page, a warning when a folder was changed on GitHub since or the address holds another article, and readers counted on GoatCounter or Cloudflare when asked; only files Azimut made are ever written. |
-| ✅ **Website settings** | Sets the site in one tab (title, line and credit, GitHub Pages and WordPress, how readers are counted, Update the site, the Legal notice starter), and the publish dialog adds a category, Article or Page and a list picture. |
+| ✅ **Website settings** | Sets the site in one tab (title, line and credit, GitHub Pages and WordPress, how readers are counted, Update the site, which also gives pages published before a new domain its address, the Legal notice starter), and the publish dialog adds a category, Article or Page and a list picture. |
 | ✅ **Website hub** | Settings › Website as the site's hub, in panels: a live preview of its name and logo, a read of what it holds with a delete, its limits, readers and upkeep; Unlisted joins Article and Page, first for a note new to the site and kept out of search engines. |
 | ✅ **Reader numbers** | Reads each article's page views over 7 and 30 days, the site's total, referrers and countries from Cloudflare Web Analytics on a press, with a read-only token kept on this computer. |
-| ✅ **Your own bar** | Articles carry the site's own header from `azimut-bar.html` in place of Azimut's bar, cleaned and kept apart from the article's styles, and Update the site changes it in every article. |
+| ✅ **Your own bar and footer** | Articles carry the site's own header from `azimut-bar.html` in place of Azimut's bar and its footer from `azimut-footer.html` after Azimut's, each cleaned and kept apart from the article's styles, and Update the site changes them in every article. |
 | ✅ **Places on the site** | An article may carry a place for a map of the site's articles, kept with its note, offered only when the note names one point, and carried by its card and `articles.json`. |
 | ✅ **Guest authors** | An article may name its own author and their picture, kept with its note so a bundle carries them, signed on its page and named in the site's lists. |
 | ✅ **Site categories** | Settings › Website adds, renames and deletes the site's categories and gives one article another on its line, each in one commit of its cards and lists, a rename recorded for the site's own pages; a site with its own home is told what its menu and pages ask. |
@@ -507,16 +507,21 @@ stops making sense.
   through) and remembered by blob id; Azimut writes only files it made (its folders, a
   `articles.json`, `feed.xml` and `sitemap.xml` that carry its marks, a root page that
   carries its generator with a version, the content between `azimut:articles` markers, and
-  the bar between `azimut:bar` markers of its own article pages) and leaves every other file
+  the bar between `azimut:bar` markers and the footer between `azimut:footer` markers of its own
+  article pages, and the site's address in its own pages' canonical, og:url, og:image, twitter:image
+  and links to the site's folders) and leaves every other file
   as it is, but for the `category` of a card, wherever it lives, on a change of categories
-  the analyst asks for in Settings › Website. The site's own bar, `azimut-bar.html` (64 KB at most, past which the articles keep
-  Azimut's), is HTML from the analyst's repository put into every article page, so it is
+  the analyst asks for in Settings › Website. The site's own bar and footer, `azimut-bar.html` and
+  `azimut-footer.html` (64 KB each at most, past which the articles keep Azimut's bar or go without
+  the footer), are HTML from the analyst's repository put into every article page, so each is
   read token by token and written again: no `<script>`, `on*` handler, frame, object, form,
   `<base>`, `<meta>`, `<link>`, SVG animation or address but http(s), mailto and tel, inside a
   declarative shadow root that keeps its styles and the article's apart, under the page's
   own policy (inline styles; pictures and fonts from the site only). Update the site reads
-  each article page (8 MB at most) only when `articles.json` does not say which bar they all
-  carry. Names, the short name
+  each article page (8 MB at most) only when `articles.json` does not say which bar and footer
+  they all carry, and each page, maps too, only when it does not say the address they all give.
+  The site's address is its custom domain as the Pages API names it (`cname`), else `html_url`.
+  Names, the short name
   and every path are checked at the edge, a folder Azimut did not make is never
   replaced, and the folder is bounded in files and weight before anything is sent. The
   token is a fine-grained one the analyst limits to the one repository (Contents and

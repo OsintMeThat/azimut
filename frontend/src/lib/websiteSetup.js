@@ -22,13 +22,21 @@ export const SITE_OWN_TITLE = 'Make it yours';
 /** Each way to make the site one's own: its lead, then what to do, with `code` and one [link](address). */
 export const SITE_OWN = Object.freeze([
   ['Your own home page', 'write your `index.html` and put `<!-- azimut:articles -->` `<!-- /azimut:articles -->` where the list goes.'],
-  ['Your own bar', 'put your header and its `<style>` in `azimut-bar.html` at the site\'s root: articles carry it in place of Azimut\'s bar, maps keep theirs, and Update the site brings an edit to all of them. Scripts are dropped, links start from the site\'s root, and each `<svg>` needs a `width` and a `height`.'],
+  ['Your own bar and footer', 'put your header and its `<style>` in `azimut-bar.html` at the site\'s root, and your footer in `azimut-footer.html`. Articles carry the header in place of Azimut\'s bar and the footer at their end, after Azimut\'s own lines; maps carry neither. Update the site brings an edit to all of them. Scripts are dropped, links start from the site\'s root, and each `<svg>` needs a `width` and a `height`.'],
   ['A page per category', 'the same markers with `section="Investigations"` list that category only.'],
   ['Your own domain', 'buy one, then point it to GitHub Pages ([GitHub\'s guide](https://docs.github.com/en/pages/configuring-a-custom-domain-for-your-github-pages-site)).'],
   ['Your own scripts', '`articles.json` lists every article with its title, date, category and picture.'],
 ]);
 export const LEGAL_SENTENCE = 'Depending on your country, a website may need a legal notice.';
 export const HAND_EDITED = 'This folder was changed on GitHub since you published it: publishing replaces it.';
+/** A check of the address that failed: the next press publishes, so nothing is replaced unread on one press. */
+export const CHECK_UNREAD = 'Could not read what this address holds. Publish again to go ahead anyway.';
+/** The same, with the reason the check gave, so a token or a network problem is named before the publish meets it. */
+export function checkUnreadSaid(why = '') {
+  const reason = String(why || '').trim();
+  if (!reason) return CHECK_UNREAD;
+  return `Could not read what this address holds: ${/[.!?]$/.test(reason) ? reason : `${reason}.`} Publish again to go ahead anyway.`;
+}
 export const WORKFLOW_NOTICE = 'Pages here is built by a GitHub Actions workflow: its build must copy Azimut\'s folders through to the site.';
 
 /** The three ways readers are counted, as the engine names them (`site.STATS`). */
@@ -125,6 +133,12 @@ export function updateSaid(answer) {
   if (!answer?.updated) return UPDATE_UPTODATE;
   const count = Array.isArray(answer.written) ? answer.written.length : 0;
   return count ? `The site is updated: ${count} file${count === 1 ? '' : 's'} written.` : 'The site is updated.';
+}
+
+/** What Upkeep says while pages give the address the site had before it moved (a domain, a new repository name). */
+export function oldAddressSaid(count) {
+  return count === 1 ? '1 page still gives the site\'s old address: Update the site refreshes it.'
+    : `${count} pages still give the site's old address: Update the site refreshes them.`;
 }
 
 /** What a press says while it waits on its answer, beside a small spinner (`components/BusyLabel.svelte`). */
@@ -333,9 +347,11 @@ export const PREVIEW_SAMPLE = Object.freeze({
   short: '20 Nov 2026',
 });
 export const OWN_HOME_PILL = 'Your home page';
-/** The site's own bar, `azimut-bar.html`, and what the Article bar preview says once a read finds it in use. */
+/** The site's own bar and footer, `azimut-bar.html` and `azimut-footer.html`, and what the Article bar preview says once a read finds them in use. */
 export const OWN_BAR_FILE = 'azimut-bar.html';
 export const OWN_BAR_IN_USE = 'Your own bar, on every article';
+export const OWN_FOOTER_FILE = 'azimut-footer.html';
+export const OWN_FOOTER_IN_USE = 'Your own footer, on every article';
 export function ownHomeSaid(host) {
   return `${host || 'The site'} has a home page of your own: Azimut fills its lists and leaves its header as you wrote it.`;
 }
@@ -549,6 +565,7 @@ export function ownersOf(read) {
       : { files: ['index.html'], who: 'azimut', text: 'Writes the default home page, until you write your own.' },
     ...(pages.length ? [{ files: pages, who: 'you', text: 'Fills the list between their markers, nothing else.' }] : []),
     { files: [OWN_BAR_FILE], who: 'you', text: 'Copied into each article\'s bar.' },
+    { files: [OWN_FOOTER_FILE], who: 'you', text: 'Copied to the end of each article.' },
     { files: ['everything else'], who: 'you', text: 'Never touches it.' },
   ];
 }
@@ -561,6 +578,7 @@ export const CHORES = Object.freeze([
   ['Rename the site or change its logo', 'Update the site changes the lists and the feed. Each article\'s bar changes when you publish it again.'],
   ['Fix a typo on GitHub directly', 'Fine. The next publish of that note asks before it replaces your fix.'],
   ['Test an article before it shows', 'Publish it as Unlisted, then as Article once it is ready.'],
+  ['Give the site its own domain', 'Set it in the repository\'s Settings › Pages on GitHub, then press Update the site so the pages published before give the new address.'],
 ]);
 
 /** The last change the read found on the branch, said in Upkeep until Update the site is pressed here. */
@@ -571,7 +589,7 @@ export function lastChangeSaid(when, message = '') {
 /** What Make it yours shows under a way, as lines each with how it is drawn: `m` markup, `c` a marker, '' plain. */
 export const SITE_OWN_SAMPLES = Object.freeze({
   'Your own home page': [['m', '<main>'], ['c', '  <!-- azimut:articles -->'], ['c', '  <!-- /azimut:articles -->'], ['m', '</main>']],
-  'Your own bar': [['m', '<style>:host { font: 15px system-ui }</style>'], ['m', '<header><a href="./">'],
+  'Your own bar and footer': [['m', '<style>:host { font: 15px system-ui }</style>'], ['m', '<header><a href="./">'],
     ['m', '  <svg width="24" height="24">…</svg> My site'], ['m', '</a></header>']],
   'A page per category': [['c', '<!-- azimut:articles section="Investigations" -->'], ['c', '<!-- /azimut:articles -->']],
   'Your own scripts': [['', '{ "title": "…", "date": "2026-11-20",'], ['', '  "category": "Conflict Watch", "image": "/…/cover.jpg" }']],

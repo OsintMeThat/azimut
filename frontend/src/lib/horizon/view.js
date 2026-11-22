@@ -83,6 +83,20 @@ export function headingOf(value) {
 }
 
 /**
+ * A camera turned, tilted, rolled or zoomed by `change`: the heading taken
+ * round to 0–360, the tilt, roll and width held to their range.
+ */
+export function looked(camera, change) {
+  const next = { ...camera, ...change };
+  next.heading = headingOf(next.heading);
+  next.tilt = Math.min(TILT.max, Math.max(TILT.min, Number(next.tilt) || 0));
+  next.roll = Math.min(180, Math.max(-180, Number(next.roll) || 0));
+  const widest = next.projection === 'panorama' ? 360 : FOV.max;
+  next.fov = Math.min(widest, Math.max(FOV.min, Number(next.fov) || FOV.start));
+  return next;
+}
+
+/**
  * The view as address parameters.
  *
  * @param {object} view

@@ -89,13 +89,47 @@ describe('the Horizon layout', () => {
     expect(view).toContain(
       'Boolean(view.observer) && !(laid && (overlay.tracing || overlay.erasing || overlay.warping || overlay.linking || overlay.cutting || overlay.distancing || overlay.clearing || overlay.keying || overlay.bending))'
     );
-    expect(view).toContain('{#if controlsShown}\n    <div class="controls">');
+    expect(view).toContain('{#if controlsShown}\n    <div class="controls" data-chrome="control">');
     // the names keep clear of the corner only while the controls are in it
     expect(view).toContain('controls.width && controlsShown');
     // the band has no ground of its own any more
     const band = readFileSync(new URL('./horizon/OverlayBar.svelte', import.meta.url), 'utf8');
     expect(band).not.toContain('PictureControls');
     expect(markup.slice(markup.indexOf('<OverlayBar'), markup.indexOf('/>', markup.indexOf('<OverlayBar')))).not.toContain('copernicus');
+  });
+
+  it('shows the photo above the terrain live, linked until freed, and goes back to one view on Escape', () => {
+    // the band's button switches it, the view draws the terrain under the photo
+    expect(markup).toContain('onside={toggleSplit} sideOn={Boolean(split)}');
+    expect(markup).toContain('split={splitView}');
+    expect(source).toContain('const boxed = $derived(\n    splitBox ? splitBox.frame :');
+    // the bar between the two, under the photo's middle: the lock, the still piece by piece for a cut collage, the save, the way back
+    const seam = markup.slice(markup.indexOf('class="hz-seam"'), markup.indexOf('{#if side}'));
+    expect(seam).toContain('style:left="{splitBox.frame.left + splitBox.frame.width / 2}px"');
+    expect(seam).toContain('aria-pressed={split.linked}');
+    expect(seam).toContain('aria-label="Lock the two halves together"');
+    expect(seam).toContain('onclick={() => (split.linked = !split.linked)}');
+    expect(seam).toContain('{#if pieceByPiece}');
+    expect(seam).toContain("onclick={() => exportView('column', { trace: true })}");
+    expect(seam).toContain('onclick={() => (split = null)}');
+    expect(source).toContain("} else if (split && !side && uiState.tool === 'horizon') {");
+    // a photo taken away or another mode ends it
+    expect(source).toContain('if (photoOn && mode === \'overlay\' && overlay.source) return;\n    side = null;\n    split = null;');
+  });
+
+  it('opens the session’s reference windows over the view, drawn only while it is on screen', () => {
+    expect(source).toContain('viewers: () => uiState.refViewers,');
+    expect(source).toContain("const refsHere = $derived(uiState.tool === 'horizon' && layout === 'looking' && mode !== 'find' && !swapped);");
+    const header = markup.slice(markup.indexOf('<header'), markup.indexOf('</header>'));
+    expect(header).toContain('onclick={() => refs.openPicker()}');
+    expect(header).toContain('aria-label="Add reference"');
+    expect(markup).toContain('{#each refsHere ? refs.floating : [] as pane (pane.id)}');
+    expect(markup).toContain('{#if refsHere && refs.dockedOn(side).length}');
+    expect(markup).toContain("{@render refColumn('left')}");
+    expect(markup).toContain("{@render refColumn('right')}");
+    expect(markup).toContain('onpick={(item) => refs.add(item)}');
+    // a pinned window keeps clear of the view's own controls, not of the view
+    expect(markup).toContain('data-chrome="surface"');
   });
 
   it('lets the inspector be dragged wider, and sizes every box beside it from that width', () => {

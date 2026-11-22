@@ -192,8 +192,8 @@ test('a note goes live on GitHub Pages on one press, and its editions list the p
   // its maps go live online unless the dialog's Keep its maps offline is ticked; never published to the site, it went Unlisted
   expect(state.published).toEqual([{ short_name: 'port-strike', diagrams: {}, round_pov: false, changes: '', offline_maps: false,
     category: '', role: 'unlisted' }]);
-  // the press asked what the address holds first
-  expect(state.checks).toBe(1);
+  // what the address holds was asked before publishing: on opening once the address settled, and by the press
+  expect(state.checks).toBeGreaterThanOrEqual(1);
   await shoot(page, 'dialog-github-live');
   await dialog.getByRole('button', { name: 'Done' }).click();
 
@@ -298,7 +298,7 @@ test('the dialog says what the note is on the site: its category, Article or Pag
   await expect(dialog.locator('.line.done')).toContainText(`Live at ${ADDRESS}`);
   expect(state.published).toHaveLength(1);
   expect(state.published[0]).toMatchObject({ short_name: 'port-strike', category: 'Port news', role: 'article' });
-  expect(state.checks).toBe(1);
+  expect(state.checks).toBeGreaterThanOrEqual(1);
 });
 
 test('a guest\'s name and picture are kept with the note as they are left, for every role', async ({ page }) => {
@@ -412,10 +412,10 @@ test('the dialog says the site has no name yet, and opens Settings on Identity t
   await expect(page.getByLabel('Site name')).toBeVisible();
 });
 
-test('a folder changed on GitHub is said before it is replaced, and replaced on one more press', async ({ page }) => {
+test('a folder changed on GitHub is said as soon as the dialog opens, and replaced on one more press', async ({ page }) => {
   const state = await stand(page, { edited: true, editions: [HERE] });
   const dialog = await openWebFolder(page);
-  await dialog.getByRole('button', { name: 'Publish to GitHub Pages' }).click();
+  // said before any press: the dialog reads the address once it knows it
   const warning = dialog.getByRole('alert').filter({ hasText: 'This folder was changed on GitHub since you published it' });
   await expect(warning).toContainText('publishing replaces it.');
   await expect(dialog.getByRole('button', { name: 'Publish anyway' })).toBeVisible();
@@ -445,10 +445,10 @@ test('what the site had to say of itself is listed under the page once published
   await expect(dialog.getByRole('list', { name: 'To mind' })).toContainText('The site holds too many files for Azimut to read');
 });
 
-test('an address another note holds is named before it is replaced, and Replace it publishes over it', async ({ page }) => {
+test('an address another note holds is named as soon as the dialog opens, and Replace it publishes over it', async ({ page }) => {
   const state = await stand(page, { taken: { title: 'Harbour fire', ours: true } });
   const dialog = await openWebFolder(page);
-  await dialog.getByRole('button', { name: 'Publish to GitHub Pages' }).click();
+  // said before any press
   const warning = dialog.getByRole('alert').filter({ hasText: 'This address already holds' });
   await expect(warning.locator('p')).toHaveText('This address already holds “Harbour fire”. Replace it?');
   await expect(dialog.getByRole('button', { name: 'Publish anyway' })).toBeVisible();
@@ -464,17 +464,20 @@ test('an address another note holds is named before it is replaced, and Replace 
 test('Pick another address leaves the other note\'s page and fills in a free short name', async ({ page }) => {
   const state = await stand(page, { taken: { title: 'Harbour fire', ours: true } });
   const dialog = await openWebFolder(page);
-  await dialog.getByRole('button', { name: 'Publish to GitHub Pages' }).click();
   const warning = dialog.getByRole('alert').filter({ hasText: 'This address already holds' });
   await warning.getByRole('button', { name: 'Pick another address' }).click();
   await expect(warning).toHaveCount(0);
   const short = dialog.getByRole('textbox', { name: 'Short name' });
   await expect(short).toHaveValue('port-strike-2');
   await expect(short).toBeFocused();
+  // the new name is read once it settles, and holds nothing
+  await expect.poll(() => state.checks).toBe(2);
+  await expect(warning).toHaveCount(0);
   await dialog.getByRole('button', { name: 'Publish to GitHub Pages' }).click();
   await expect(dialog.locator('.line.done')).toContainText('Live at https://octo.github.io/articles/port-strike-2/');
   expect(state.published[0]).toMatchObject({ short_name: 'port-strike-2' });
-  expect(state.checks).toBe(2);
+  // the press read the address once more before publishing
+  expect(state.checks).toBe(3);
 });
 
 test('draws the publish window\'s site fields and More options open, dark and light', async ({ page }) => {

@@ -1,6 +1,12 @@
 import { describe, expect, it } from 'vitest';
-import { haversine } from './measure.js';
+import { destination, haversine } from './measure.js';
+import { bearingBetween } from './horizon/geometry.js';
 import {
+  bandEnd,
+  bands,
+  bandWidth,
+  clampReach,
+  clampTolerance,
   coneWidth,
   crossings,
   fieldUnit,
@@ -9,9 +15,15 @@ import {
   isPair,
   labels,
   legs,
+  MAX_REACH,
+  meeting,
+  meetingWords,
   newMeasure,
   pairReading,
   parseDistance,
+  pathOf,
+  REACH,
+  runsOn,
   shadowSentence,
   sightRuns,
   summary,
@@ -46,6 +58,8 @@ describe('a measure read in one line', () => {
   it('names what a line of two points is used as', () => {
     expect(headline(line([A, B], { use: 'ring' }), 'metric')).toBe('Radius 1.55 km');
     expect(headline(line([A, B], { use: 'cone', aperture: 40 }), 'metric')).toBe('40° cone · 1.55 km');
+    expect(headline(line([A, B], { use: 'align' }), 'metric')).toBe('Alignment · 090°');
+    expect(headline(line([A, B], { use: 'align', tolerance: 1 }), 'metric')).toBe('Alignment · 090° ±1°');
   });
 
   it('reads in the units asked for', () => {
@@ -108,6 +122,103 @@ describe('what a line of two points is used as', () => {
   it('draws nothing more for a plain line, a shadow or a viewshed', () => {
     for (const use of [null, 'shadow', 'viewshed']) expect(useShapes(line([A, B], { use }))).toEqual([]);
   });
+
+  it('runs an alignment on past both ends, the reach out from each', () => {
+    const shapes = useShapes(line([A, B], { use: 'align' }));
+    expect(shapes.map((shape) => shape.kind)).toEqual(['line', 'line']);
+    const [pastA, pastB] = runsOn(line([A, B], { use: 'align' }));
+    expect([pastA.end, pastB.end]).toEqual(['a', 'b']);
+    expect(pastA.points[0]).toEqual(A);
+    expect(pastB.points[0]).toEqual(B);
+    expect(haversine(A, pastA.points.at(-1))).toBeCloseTo(REACH, 0);
+    expect(haversine(B, pastB.points.at(-1))).toBeCloseTo(REACH, 0);
+    expect(pastA.points.at(-1).lon).toBeLessThan(A.lon);
+    expect(pastB.points.at(-1).lon).toBeGreaterThan(B.lon);
+  });
+
+  it('runs an alignment on past one end only, as asked', () => {
+    expect(runsOn(line([A, B], { use: 'align', past: 'b' })).map((run) => run.end)).toEqual(['b']);
+    expect(runsOn(line([A, B], { use: 'align', past: 'a' })).map((run) => run.end)).toEqual(['a']);
+    expect(runsOn(line([A, B], { use: 'cone' }))).toEqual([]);
+  });
+
+  it('follows the great circle through A and B, not a straight line on the flat map', () => {
+    const [run] = runsOn(line([A, B], { use: 'align', past: 'b', reach: 100_000 }));
+    // heading due east from 46° N, the line of sight bends toward the equator
+    expect(run.points.at(-1).lat).toBeLessThan(46 - 0.005);
+    // and every point of it stays on the circle through A and B
+    const across = (point) => {
+      const d = haversine(A, point) / 6378137;
+      const turn = ((bearingBetween(A, point) - bearingBetween(A, B)) * Math.PI) / 180;
+      return Math.abs(Math.asin(Math.sin(d) * Math.sin(turn)) * 6378137);
+    };
+    for (const point of run.points) expect(across(point)).toBeLessThan(0.5);
+  });
+
+  it('keeps how far it runs between a hundred metres and its ceiling', () => {
+    expect(clampReach(5)).toBe(100);
+    expect(clampReach(1e9)).toBe(MAX_REACH);
+    expect(clampReach('far')).toBe(REACH);
+    expect(clampReach(42_000)).toBe(42_000);
+  });
+
+  it('is drawn whole, from past A through A and B to past B', () => {
+    const path = pathOf(line([A, B], { use: 'align' }));
+    const at = path.findIndex((point) => point === A || (point.lat === A.lat && point.lon === A.lon));
+    expect(path[at + 1]).toEqual(B);
+    expect(haversine(path[0], A)).toBeCloseTo(REACH, 0);
+    expect(haversine(path.at(-1), B)).toBeCloseTo(REACH, 0);
+    expect(pathOf(line([A, B, C]))).toEqual([A, B, C]);
+  });
+});
+
+describe('how far off true an alignment may be', () => {
+  const D = haversine(A, B);
+
+  it('keeps between none and five degrees, to a tenth', () => {
+    expect(clampTolerance(7)).toBe(5);
+    expect(clampTolerance(-1)).toBe(0);
+    expect(clampTolerance('far')).toBe(0);
+    expect(clampTolerance(1.04)).toBe(1);
+    expect(clampTolerance('0.5')).toBe(0.5);
+  });
+
+  it('draws no band while it is nil', () => {
+    expect(bands(line([A, B], { use: 'align' }))).toEqual([]);
+    expect(useShapes(line([A, B], { use: 'align' })).map((shape) => shape.role)).toEqual(['run', 'run']);
+  });
+
+  it('lays a band either side of each run, under it', () => {
+    const roles = useShapes(line([A, B], { use: 'align', tolerance: 1 })).map((shape) => shape.role);
+    expect(roles).toEqual(['band', 'edge', 'edge', 'band', 'edge', 'edge', 'run', 'run']);
+  });
+
+  it('puts its sides where the camera sees the two things that far apart', () => {
+    const [band] = bands(line([A, B], { use: 'align', past: 'b', tolerance: 1 }));
+    for (const i of [8, 24, 48, 64]) {
+      for (const side of [band.left[i], band.right[i]]) {
+        const seen = Math.abs(((bearingBetween(side, A) - bearingBetween(side, B) + 540) % 360) - 180);
+        expect(seen).toBeCloseTo(1, 1);
+      }
+    }
+  });
+
+  it('opens at the tolerance by the nearer thing, then widens faster than a fan', () => {
+    expect(bandWidth(10, D, 1) / 10).toBeCloseTo(Math.tan(Math.PI / 180), 3);
+    expect(bandWidth(10_000, D, 1)).toBeGreaterThan(10_000 * Math.tan(Math.PI / 180) * 5);
+    expect(bandWidth(0, D, 0)).toBe(0);
+  });
+
+  it('says where it stops ruling anything out, when that is short of the run', () => {
+    expect(bandEnd(D, 5)).toBeCloseTo((D * (Math.sqrt(1 + Math.tan(Math.PI / 36) ** 2) - Math.tan(Math.PI / 36))) / (2 * Math.tan(Math.PI / 36)), 6);
+    expect(bandWidth(bandEnd(D, 5) + 10, D, 5)).toBe(null);
+    const [wide] = bands(line([A, B], { use: 'align', past: 'b', tolerance: 5 }));
+    expect(wide.opensAt).toBeCloseTo(bandEnd(D, 5), 6);
+    expect(haversine(B, wide.left.at(-1))).toBeGreaterThan(wide.opensAt);
+    const [narrow] = bands(line([A, B], { use: 'align', past: 'b', tolerance: 1 }));
+    expect(narrow.opensAt).toBe(null);
+    expect(narrow.ring).toHaveLength(2 * narrow.left.length - 1);
+  });
 });
 
 describe('where two lines cross', () => {
@@ -126,6 +237,59 @@ describe('where two lines cross', () => {
     expect(crossings([one, other])).toEqual([]);
     const area = { ...line([A, B, C], { closed: true }), id: 3 };
     expect(crossings([area, { ...line([{ lat: 45.99, lon: 7.01 }, { lat: 46.02, lon: 7.01 }]), id: 4 }])).toEqual([]);
+  });
+
+  it('marks where two alignments cross far past what was clicked', () => {
+    const east = { ...line([A, { lat: 46, lon: 7.01 }]), id: 1 };
+    const north = { ...line([{ lat: 45.99, lon: 7.05 }, { lat: 45.995, lon: 7.05 }]), id: 2 };
+    expect(crossings([east, north])).toEqual([]);
+    const [found] = crossings([{ ...east, use: 'align' }, { ...north, use: 'align' }]);
+    expect(found.at.lon).toBeCloseTo(7.05, 4);
+    expect(found.at.lat).toBeCloseTo(46, 2);
+  });
+
+  it('marks nothing where two alignments share the thing they were lined up on', () => {
+    const steeple = { lat: 46.01, lon: 7.01 };
+    const one = { ...line([A, steeple], { use: 'align' }), id: 1 };
+    const other = { ...line([B, steeple], { use: 'align' }), id: 2 };
+    expect(crossings([one, other])).toEqual([]);
+    expect(meeting([one, other]).crossed).toBe(0);
+  });
+});
+
+describe('where the alignments meet', () => {
+  const camera = { lat: 46.05, lon: 7.05 };
+  /** An alignment lined up on two things on a bearing from the camera, the far one clicked first. */
+  const lined = (id, bearing, aside = 0) => ({
+    ...line([destination(destination(camera, bearing, 5000), bearing + 90, aside), destination(camera, bearing, 2000)], { use: 'align' }),
+    id,
+  });
+
+  it('waits for two alignments, and leaves plain lines out', () => {
+    expect(meeting([lined(1, 10)])).toBe(null);
+    expect(meeting([lined(1, 10), { ...line([A, B]), id: 2 }])).toBe(null);
+  });
+
+  it('finds the camera where three alignments meet, and how well they agree', () => {
+    const exact = meeting([lined(1, 10), lined(2, 120), lined(3, 250)]);
+    expect(exact).toMatchObject({ lines: 3, pairs: 3, crossed: 3 });
+    expect(haversine(exact.at, camera)).toBeLessThan(1);
+    expect(exact.spread).toBeLessThan(1);
+    const off = meeting([lined(1, 10), lined(2, 120), lined(3, 250, 30)]);
+    expect(off.spread).toBeGreaterThan(5);
+    expect(off.spread).toBeLessThan(100);
+    expect(meetingWords(off, 'metric').lead).toMatch(/^3 alignments meet within \d+ m$/);
+    expect(meetingWords(off, 'metric').missing).toBe('');
+  });
+
+  it('says which pairs do not cross, and when none do', () => {
+    expect(meetingWords({ lines: 2, pairs: 1, crossed: 1, at: camera, spread: 0 }, 'metric')).toEqual({ lead: 'The two alignments cross', missing: '' });
+    expect(meetingWords({ lines: 3, pairs: 3, crossed: 1, at: camera, spread: 0 }, 'metric')).toEqual({
+      lead: 'Two of the alignments cross',
+      missing: '2 pairs do not cross within reach',
+    });
+    expect(meetingWords({ lines: 2, pairs: 1, crossed: 0, at: null, spread: null }, 'metric').lead).toMatch(/do not cross/);
+    expect(meetingWords(null, 'metric')).toBe(null);
   });
 });
 
@@ -217,6 +381,14 @@ describe('the measure as text', () => {
       'Rings every 1.55 km, out to 3.09 km'
     );
     expect(summary(line([A, B], { use: 'cone', aperture: 60 }), 'metric', { coords })).toMatch(/Cone 60° wide, 1\.79 km across at B/);
+  });
+
+  it('says how far an alignment runs on, and which way', () => {
+    expect(summary(line([A, B], { use: 'align' }), 'metric', { coords })).toContain('Alignment run on 20.0 km past both ends');
+    expect(summary(line([A, B], { use: 'align', past: 'b', reach: 5000 }), 'metric', { coords })).toContain('Alignment run on 5.00 km past B');
+    const loose = summary(line([A, B], { use: 'align', tolerance: 5 }), 'metric', { coords });
+    expect(loose).toContain('Alignment run on 20.0 km past both ends, within ±5°');
+    expect(loose).toMatch(/At ±5° it rules nothing out past 8\.\d\d km/);
   });
 });
 

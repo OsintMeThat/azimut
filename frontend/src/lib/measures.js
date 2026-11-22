@@ -3,13 +3,14 @@
  *
  * A measure is points clicked on the map, open (a line) or closed (an area).
  * A line of two points can also be *used as* something: a range ring round A,
- * a view cone from A toward B, a shadow from an object's foot at A to its tip
- * at B, or the reach of a viewshed from A. One gesture and then a choice,
+ * a view cone from A toward B, an alignment run on past two things lined up in
+ * a picture, a shadow from an object's foot at A to its tip at B, or the reach
+ * of a viewshed from A. One gesture and then a choice,
  * rather than a tool per question: each of those is a distance and a bearing
  * from a point, and drawing one is the same two clicks whatever it is for.
  *
  * Everything here is arithmetic over plain data (`{ points, closed, use,
- * rings, aperture }`), so the readings, the words on the map and the copied
+ * rings, aperture, past, reach, tolerance }`), so the readings, the words on the map and the copied
  * text are read off a test (measures.test.js).
  */
 import { bearingBetween } from './horizon/geometry.js';
@@ -34,6 +35,7 @@ import {
 export const USES = [
   { id: 'ring', label: 'Ring', title: 'Circles round A, as wide as the line' },
   { id: 'cone', label: 'Cone', title: 'What a camera at A facing B takes in' },
+  { id: 'align', label: 'Align', title: 'Two things lined up in a picture, the line run on: the camera stands on it' },
   { id: 'shadow', label: 'Shadow', title: 'A shadow from a foot at A to its tip at B: how tall, and the hour' },
   { id: 'viewshed', label: 'Viewshed', title: 'The ground in sight from A, out as far as B' },
 ];
@@ -42,9 +44,49 @@ export const USES = [
 export const MAX_RINGS = 5;
 export const APERTURE = 60;
 
+/** How far an alignment runs on past its ends until the analyst says otherwise, and at most. */
+export const REACH = 20_000;
+export const MAX_REACH = 500_000;
+/** How far off true, in degrees, two things may line up in the picture, at most. */
+export const MAX_TOLERANCE = 5;
+
+/** Which way an alignment runs on, in the order the panel offers them. */
+export const PAST = [
+  { id: 'a', label: 'Past A', title: 'The line runs on past A only' },
+  { id: 'both', label: 'Both ways', title: 'The line runs on past both ends' },
+  { id: 'b', label: 'Past B', title: 'The line runs on past B only' },
+];
+
 /** A fresh measure, starting at one point. */
 export function newMeasure(id, at) {
-  return { id, points: [{ lat: at.lat, lon: at.lon }], closed: false, use: null, rings: 1, aperture: APERTURE };
+  return {
+    id,
+    points: [{ lat: at.lat, lon: at.lon }],
+    closed: false,
+    use: null,
+    rings: 1,
+    aperture: APERTURE,
+    past: 'both',
+    reach: REACH,
+    tolerance: 0,
+  };
+}
+
+/** How far off true an alignment may be, kept between none and its ceiling, to a tenth of a degree. */
+export function clampTolerance(degrees) {
+  const value = Number(degrees);
+  return Number.isFinite(value) && value > 0 ? Math.round(Math.min(MAX_TOLERANCE, value) * 10) / 10 : 0;
+}
+
+/** A tolerance as it is written: `±1°`, `±0.5°`. */
+export function formatTolerance(degrees) {
+  return `±${clampTolerance(degrees)}°`;
+}
+
+/** A distance an alignment runs on, kept between a hundred metres and its ceiling. */
+export function clampReach(metres) {
+  const value = Number(metres);
+  return Number.isFinite(value) && value > 0 ? Math.max(100, Math.min(MAX_REACH, value)) : REACH;
 }
 
 /** A line of exactly two points: the one shape with a bearing and a use. */
@@ -81,6 +123,10 @@ export function headline(measure, units) {
   const { length, bearing } = pairReading(measure);
   if (measure.use === 'ring') return `Radius ${formatDistance(length, units)}`;
   if (measure.use === 'cone') return `${Math.round(measure.aperture)}° cone · ${formatDistance(length, units)}`;
+  if (measure.use === 'align') {
+    const tolerance = clampTolerance(measure.tolerance);
+    return `Alignment · ${formatBearing(bearing)}${tolerance ? ` ${formatTolerance(tolerance)}` : ''}`;
+  }
   return `${formatDistance(length, units)} · ${formatBearing(bearing)}`;
 }
 
@@ -129,7 +175,7 @@ export function labels(measure, units) {
   return out;
 }
 
-/** The shapes a line's use adds round it: rings, or a cone. */
+/** The shapes a line's use adds round it: rings, a cone, or the stretches an alignment runs on. */
 export function useShapes(measure) {
   if (!isPair(measure)) return [];
   const [a] = measure.points;
@@ -139,7 +185,113 @@ export function useShapes(measure) {
     return Array.from({ length: count }, (_, i) => ({ kind: 'circle', at: a, radiusM: length * (i + 1) }));
   }
   if (measure.use === 'cone') return [{ kind: 'polygon', points: cone(a, bearing, measure.aperture, length) }];
+  if (measure.use === 'align') {
+    const runs = runsOn(measure).map((run) => ({ kind: 'line', role: 'run', points: run.points }));
+    const zones = bands(measure).flatMap((band) => [
+      { kind: 'polygon', role: 'band', points: band.ring },
+      { kind: 'line', role: 'edge', points: band.left },
+      { kind: 'line', role: 'edge', points: band.right },
+    ]);
+    return [...zones, ...runs];
+  }
   return [];
+}
+
+/** Steps along each stretch an alignment runs on: enough that its curve on the flat map reads smooth. */
+const RUN_STEPS = 48;
+
+/**
+ * The stretches an alignment runs on past its ends, each from its end outward.
+ *
+ * They follow the great circle through A and B, the line the picture was taken
+ * along, rather than a straight line on the flat map, which drifts off it by
+ * tens of metres over tens of kilometres away from the equator.
+ */
+export function runsOn(measure) {
+  if (!isPair(measure) || measure.use !== 'align') return [];
+  const [a, b] = measure.points;
+  const { length, bearing } = pairReading(measure);
+  const reach = clampReach(measure.reach);
+  const past = measure.past ?? 'both';
+  const stretch = (end, along, from) => {
+    const points = [{ lat: end.lat, lon: end.lon }];
+    for (let i = 1; i <= RUN_STEPS; i++) points.push(destination(a, along, from + (reach * i) / RUN_STEPS));
+    return points;
+  };
+  const out = [];
+  if (past !== 'b') out.push({ end: 'a', points: stretch(a, bearing + 180, 0) });
+  if (past !== 'a') out.push({ end: 'b', points: stretch(b, bearing, length) });
+  return out;
+}
+
+/** Steps along each side of a band: closer together where it widens fastest. */
+const BAND_STEPS = 64;
+
+/**
+ * How far either side of an alignment the camera may stand, at `x` metres past
+ * the nearer of two things `apart` metres apart that it sees within
+ * `tolerance` degrees of each other, or null where it may stand anywhere
+ * across.
+ *
+ * The camera sees the two things `tolerance` apart wherever the angle between
+ * them is that, which is on a circle through both, so the band is not a fan:
+ * close to the nearer thing it opens at the tolerance, and farther out it
+ * widens faster the closer together the two things are.
+ */
+export function bandWidth(x, apart, tolerance) {
+  const k = Math.tan((clampTolerance(tolerance) * Math.PI) / 180);
+  if (!k) return 0;
+  const room = apart * apart - 4 * k * k * x * (x + apart);
+  return room < 0 ? null : (apart - Math.sqrt(room)) / (2 * k);
+}
+
+/** How far past the nearer thing a band narrows anything at all: past it the camera may stand anywhere across. */
+export function bandEnd(apart, tolerance) {
+  const k = Math.tan((clampTolerance(tolerance) * Math.PI) / 180);
+  return k ? (apart * (Math.sqrt(1 + k * k) - k)) / (2 * k) : Infinity;
+}
+
+/**
+ * The ground either side of an alignment's runs where the camera may stand,
+ * given how far off true the two things may line up in the picture: for each
+ * run, its two sides and the ring that fills it, and how far out it ends when
+ * that is short of the run's reach. None while the tolerance is nil.
+ */
+export function bands(measure) {
+  const tolerance = clampTolerance(measure?.tolerance);
+  if (!tolerance) return [];
+  const [a] = measure.points;
+  const { length, bearing } = pairReading(measure);
+  const reach = clampReach(measure.reach);
+  const end = bandEnd(length, tolerance);
+  const limit = Math.min(reach, end);
+  // how wide a band is where it ends, which rounding can leave just past reach of the formula
+  const widest = length / (2 * Math.tan((tolerance * Math.PI) / 180));
+  return runsOn(measure).map((run) => {
+    const along = run.end === 'a' ? bearing + 180 : bearing;
+    const from = run.end === 'a' ? 0 : length;
+    const left = [];
+    const right = [];
+    for (let i = 0; i <= BAND_STEPS; i++) {
+      // closer together toward the far end, where the sides turn fastest
+      const x = limit * (1 - (1 - i / BAND_STEPS) ** 2);
+      const at = i ? destination(a, along, from + x) : run.points[0];
+      const ahead = destination(a, along, from + x + 1);
+      const heading = bearingBetween(at, ahead);
+      const width = bandWidth(x, length, tolerance) ?? widest;
+      left.push(width ? destination(at, heading - 90, width) : at);
+      right.push(width ? destination(at, heading + 90, width) : at);
+    }
+    return { end: run.end, left, right, ring: [...left, ...right.slice(1).reverse()], opensAt: end < reach ? end : null };
+  });
+}
+
+/** A measure's line as it is drawn: an alignment's with the stretches it runs on. */
+export function pathOf(measure) {
+  const runs = runsOn(measure);
+  const before = runs.find((run) => run.end === 'a')?.points.slice(1).reverse() ?? [];
+  const after = runs.find((run) => run.end === 'b')?.points.slice(1) ?? [];
+  return [...before, ...measure.points, ...after];
 }
 
 /** How wide a cone is where it reaches B: the side a camera there would frame. */
@@ -152,27 +304,96 @@ export function coneWidth(measure) {
 const SAME_POINT_M = 0.5;
 
 /**
+ * A line as the crossings read it: its pieces as drawn, each with the box round
+ * it, so two pieces far apart are passed over without any arithmetic.
+ */
+function crossable(measure) {
+  const path = pathOf(measure);
+  const pieces = path.slice(1).map((to, i) => {
+    const from = path[i];
+    return {
+      from,
+      to,
+      box: [Math.min(from.lat, to.lat), Math.max(from.lat, to.lat), Math.min(from.lon, to.lon), Math.max(from.lon, to.lon)],
+    };
+  });
+  return { id: measure.id, ends: [measure.points[0], measure.points.at(-1)], pieces };
+}
+
+const apart = (p, q) => p.box[1] < q.box[0] || q.box[1] < p.box[0] || p.box[3] < q.box[2] || q.box[3] < p.box[2];
+
+/** Where two crossable lines cross, apart from at an end of either. */
+function crossingsOf(one, other) {
+  const ends = [...one.ends, ...other.ends];
+  const found = [];
+  for (const p of one.pieces) {
+    for (const q of other.pieces) {
+      if (apart(p, q)) continue;
+      const at = crossing(p.from, p.to, q.from, q.to);
+      if (!at || ends.some((end) => haversine(end, at) < SAME_POINT_M)) continue;
+      if (found.some((seen) => haversine(seen, at) < SAME_POINT_M)) continue;
+      found.push(at);
+    }
+  }
+  return found;
+}
+
+/**
  * Where the lines of different measures cross. Two bearings drawn from two
  * places meet at what both point at, so a crossing is marked and named rather
- * than left for the eye to find.
+ * than left for the eye to find. An alignment crosses along the whole of its
+ * run, and two that share an end, the same steeple lined up twice, do not
+ * cross there.
  */
 export function crossings(measures) {
-  const lines = measures.filter((m) => !m.closed && m.points.length >= 2);
+  const lines = measures.filter((m) => !m.closed && m.points.length >= 2).map(crossable);
   const found = [];
   for (let i = 0; i < lines.length; i++) {
     for (let j = i + 1; j < lines.length; j++) {
-      const ends = [lines[i].points[0], lines[i].points.at(-1), lines[j].points[0], lines[j].points.at(-1)];
-      for (const one of legs(lines[i])) {
-        for (const other of legs(lines[j])) {
-          const at = crossing(one.from, one.to, other.from, other.to);
-          if (!at || ends.some((end) => haversine(end, at) < SAME_POINT_M)) continue;
-          if (found.some((seen) => haversine(seen.at, at) < SAME_POINT_M)) continue;
-          found.push({ at, between: [lines[i].id, lines[j].id] });
-        }
+      for (const at of crossingsOf(lines[i], lines[j])) {
+        if (found.some((seen) => haversine(seen.at, at) < SAME_POINT_M)) continue;
+        found.push({ at, between: [lines[i].id, lines[j].id] });
       }
     }
   }
   return found;
+}
+
+/**
+ * Where the alignments meet: the middle of the points where each pair of them
+ * crosses, and how far the farthest of those lies from it. Lines lined up on
+ * one camera seldom meet in a single point, and that spread says how well they
+ * agree. Null until there are two alignments.
+ */
+export function meeting(measures) {
+  const lines = measures.filter((m) => isPair(m) && m.use === 'align').map(crossable);
+  if (lines.length < 2) return null;
+  const pairs = (lines.length * (lines.length - 1)) / 2;
+  const points = [];
+  for (let i = 0; i < lines.length; i++) {
+    for (let j = i + 1; j < lines.length; j++) {
+      const [at] = crossingsOf(lines[i], lines[j]);
+      if (at) points.push(at);
+    }
+  }
+  if (!points.length) return { lines: lines.length, pairs, crossed: 0, at: null, spread: null };
+  const at = {
+    lat: points.reduce((sum, p) => sum + p.lat, 0) / points.length,
+    lon: points.reduce((sum, p) => sum + p.lon, 0) / points.length,
+  };
+  const spread = Math.max(...points.map((p) => haversine(at, p)));
+  return { lines: lines.length, pairs, crossed: points.length, at, spread };
+}
+
+/** What the alignments' meeting says, in one sentence, and what is missing from it. */
+export function meetingWords(meet, units) {
+  if (!meet) return null;
+  if (!meet.crossed) return { lead: 'The alignments do not cross: run them on further', missing: '' };
+  let lead = `${meet.lines} alignments meet within ${formatDistance(meet.spread, units)}`;
+  if (meet.crossed === 1) lead = meet.lines === 2 ? 'The two alignments cross' : 'Two of the alignments cross';
+  const left = meet.pairs - meet.crossed;
+  const missing = left ? `${left} ${left === 1 ? 'pair does' : 'pairs do'} not cross within reach` : '';
+  return { lead, missing };
 }
 
 /**
@@ -307,6 +528,13 @@ export function summary(measure, units, { coords, ground = null, shadow = null, 
   }
   if (measure.use === 'cone') {
     lines.push(`Cone ${Math.round(measure.aperture)}° wide, ${formatDistance(coneWidth(measure), units)} across at B`);
+  }
+  if (measure.use === 'align') {
+    const where = { a: 'past A', b: 'past B' }[measure.past] ?? 'past both ends';
+    const tolerance = clampTolerance(measure.tolerance);
+    lines.push(`Alignment run on ${formatDistance(clampReach(measure.reach), units)} ${where}${tolerance ? `, within ${formatTolerance(tolerance)}` : ''}`);
+    const opens = bands(measure).find((band) => band.opensAt != null)?.opensAt;
+    if (opens != null) lines.push(`At ${formatTolerance(tolerance)} it rules nothing out past ${formatDistance(opens, units)}`);
   }
   if (measure.use === 'shadow' && shadow) lines.push(shadowSentence(shadow, units));
   if (measure.use === 'viewshed' && viewshed) {

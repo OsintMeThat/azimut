@@ -33,10 +33,10 @@
     fitting = false,
     /** Asked to find the skyline in the photo. */
     ondetect = () => {},
-    /** Asked to show the photo above the terrain, the same frame on both. */
+    /** Asked to show the photo above the terrain, or to go back to one view. */
     onside = () => {},
-    /** Whether that is being drawn. */
-    siding = false,
+    /** Whether the photo shows above the terrain. */
+    sideOn = false,
   } = $props();
 
   const terrainShare = $derived(Math.round((1 - overlay.mix) * 100));
@@ -44,14 +44,19 @@
   const away = $derived(overlay.source?.kind === 'video' && overlay.strokes.length > 0 && !overlay.traceShown);
   const isPhoto = $derived(overlay.source?.kind === 'image');
 
-  /** The hand beside one end of the slider: lit when a drag and the wheel move that side. */
+  /**
+   * The hand beside one end of the slider: lit when a drag and the wheel move
+   * that side. Side by side moves the view in both halves, so both are lit and
+   * held: the photo is matched in one view.
+   */
   function hand(side) {
     const name = side === 'photo' ? what.toLowerCase() : 'terrain';
-    const on = overlay.moves === side || overlay.moves === 'both';
+    const on = sideOn || overlay.moves === side || overlay.moves === 'both';
     // a panorama turns with the terrain alone
-    const held = overlay.isPanorama && side === 'photo';
+    const held = sideOn || (overlay.isPanorama && side === 'photo');
     let title = `Move the ${name} too, both held together (L)`;
-    if (held) title = 'A panorama stays put: turn the terrain under it';
+    if (sideOn) title = `Close Side by side to align the ${what.toLowerCase()}`;
+    else if (held) title = 'A panorama stays put: turn the terrain under it';
     else if (overlay.moves === 'both') title = 'Drag and the wheel move both, held together (L)';
     else if (on) title = `Drag and the wheel move the ${name}`;
     return { side, on, title, label: `Move the ${name}`, held };
@@ -245,10 +250,10 @@
   <button
     type="button"
     class="act"
-    disabled={siding}
-    aria-busy={siding}
+    class:on={sideOn}
+    aria-pressed={sideOn}
     onclick={onside}
-    title="Show the {what.toLowerCase()} above the terrain, the same frame on both"
+    title={sideOn ? 'Back to one view' : `Show the ${what.toLowerCase()} above the terrain, both live`}
     aria-label="Side by side"
   >
     <Icon name="columns" size={14} /><span class="word spare">Side by side</span>

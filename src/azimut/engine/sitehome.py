@@ -4,11 +4,11 @@ It is a template with the same markers a hand-made home carries, filled by the s
 renderer as every marked page (`engine/site.py`), so there is one list for both: the
 site's title and logo, a line under them, the pages linked from its header, a map of the
 listed articles that stand somewhere once one does (`engine/siteatlas.py`: Natural Earth land in
-Equal Earth, a pin each, framed to fit them), tabs (All, one per category in use with its count,
-Maps when the site has maps), the newest article large and a grid of the rest, then RSS and,
-unless the analyst turned it off in Settings › Website, "Made with Azimut <version>" in the footer.
-With no article yet it is the same page with its list empty, which Settings › Website puts online
-before the first publish ("Put your home page online", an Update the site).
+Equal Earth, a pin each, framed to fit them), tabs once an article is listed (All, one per category
+in use with its count, Maps when the site has maps), the newest article large and a grid of the rest,
+then RSS and, unless the analyst turned it off in Settings › Website, "Made with Azimut <version>" in
+the footer. With no article yet it is the same page with its list empty and no tabs, which Settings ›
+Website puts online before the first publish ("Put your home page online", an Update the site).
 
 Its files go under `azimut-site/`, a folder of Azimut's own beside the home: the style
 sheet, the script of its tabs and of the map's cards, the logo, the faces (the same as Azimut's
@@ -264,6 +264,7 @@ def home(home_site: Site, lines: list[dict[str, Any]], maps: list[dict[str, Any]
     for line in lines:
         if line["category"]:
             counts[line["category"]] = counts.get(line["category"], 0) + 1
+    # the tabs come with the first listed article: a row reading "All 0" filters nothing
     tabs = [f'<button type="button" data-category="" aria-pressed="true">All<span class="count">{len(lines)}</span></button>']
     tabs += [f'<button type="button" data-category="{site.slug(c)}" aria-pressed="false">{e(c)}'
              f'<span class="count">{n}</span></button>' for c, n in sorted(counts.items())]
@@ -285,6 +286,7 @@ def home(home_site: Site, lines: list[dict[str, Any]], maps: list[dict[str, Any]
     description = e(home_site.tagline or home_site.title)
     credit = (f'\n<span class="made-with"><a href="{site.AZIMUT_REPO}">Made with Azimut {__version__}</a></span>'
               if home_site.credit else "")
+    row = f'<nav class="site-tabs" aria-label="Categories">{"".join(tabs)}</nav>\n' if lines else ""
     policy = html_engine.widen_policy(POLICY, site.stats_sources(home_site.counter, home_site.beacon))
     counter = f'<meta name="az-counter" content="{e(home_site.counter)}">\n' if home_site.counter else ""
     count_script = f'<script src="{COUNT}" defer></script>' if home_site.counter else ""
@@ -300,8 +302,7 @@ def home(home_site: Site, lines: list[dict[str, Any]], maps: list[dict[str, Any]
 <header class="site-head"><div class="wrap">
 <div class="site-top"><a class="site-brand" href="./">{logo}{e(home_site.title)}</a>{nav}</div>{intro}</div></header>
 <main class="wrap">
-{atlas + chr(10) if atlas else ""}<nav class="site-tabs" aria-label="Categories">{''.join(tabs)}</nav>
-<div class="articles-block">
+{atlas + chr(10) if atlas else ""}{row}<div class="articles-block">
 <!-- azimut:articles -->
 <!-- /azimut:articles -->
 </div>

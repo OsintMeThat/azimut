@@ -3146,7 +3146,21 @@ nautical), and its measures wait, hidden, while it is closed.
 The panel shows the selected measure in large. A line of two points takes an
 exact length or bearing typed in place, in any unit or as a wind, and can be used
 as **Ring** (up to five circles round A, each as wide as the line), **Cone** (what
-a camera at A facing B takes in, its opening set), **Shadow** or **Viewshed**. A
+a camera at A facing B takes in, its opening set), **Align**, **Shadow** or
+**Viewshed**. An alignment is the line through two things lined up in a picture,
+run on 20 km past both ends, or past one, as far as is typed: the camera stood
+somewhere on it, on the side of the nearer thing. It follows the great circle,
+not a straight line on the flat map. **Within** sets how far off true, up to 5°,
+the two things may line up in the picture, and lays the band the camera may stand
+in either side of the line: the ground from which the two things are seen that
+far apart, which opens at that angle by the nearer thing and widens faster the
+closer together they are. Where the band stops ruling anything out short of the
+run, the panel says how far out. Once a line is an alignment, each new line
+is another after two clicks, with the same run and tolerance, drawn while the second
+point is aimed, until Align is pressed off, **Stop** is pressed or Escape is
+pressed with nothing selected. Alignments cross along their whole run, though not
+at a thing two of them share, and from three on a dashed ring circles where they
+meet. The panel says how far apart the crossings lie and copies their middle. A
 shadow is drawn from an object's foot to the tip of its shadow: its direction
 names the hour the sun stood opposite on the picture's day, and its length the
 object's height at that sun, for level ground seen from overhead. A picture with
@@ -3557,6 +3571,11 @@ trace, Find's area and alignments, the mode) is kept in the case and offered
 at the foot of that map: **Resume** lays it back, **Discard** lets it go, and
 anything started instead replaces it. Work a saved view or a search keeps is
 not offered; Open has it. A link that names a viewpoint still stands there.
+**Reference** in the header opens the Map's reference windows over the view:
+the same picker and windows, in the same session list, so a window opened on the
+Map is there too. Each tab draws them only while it is on screen, so a clip
+never plays twice. Docked, the view narrows beside them; pinned, they keep clear
+of its band, its corner controls and its ruler.
 
 The inspector under the small map is grouped by what is asked of the view.
 **Measures** holds the marked point and the ground clicked in the view.
@@ -3795,13 +3814,24 @@ lying off the terrain says by how much on a red badge ("2.4° above the land",
 view names every line it draws, the terrain's own ridge lines and the eye's
 level included. **Details** (D) adds the band the terrain's skyline may be off
 by (wide over a near ridge), the cuts and the pairs' letters, which also show
-while a tool is out. **Side by side** draws the photo above the terrain through
-the same frame, on demand, with a line down both that says the direction under
-the pointer, and saves the pair as a picture. A collage cut for a search shows
-its terrain **Piece by piece**, as the search read it: each piece through the
-camera the search found for it, the seams dashed on both, and the piece under
-the pointer says how far it was turned, tilted and rolled. **One camera** shows
-the terrain whole, and the picture saved is the one shown.
+while a tool is out. **Side by side** splits the view in two, live: the photo
+alone above, with its trace and nothing round it, and the terrain alone under
+it at the same size, with its names, its ruler, the trace laid on it and how
+its ground is drawn in its corner. The view's one engine draws the terrain, the
+page draws the photo, straightened as the view shows it. In either half a drag
+moves and the wheel zooms; the hands are greyed, since the photo is matched in
+one view. The bar between the halves, its buttons together under the photo's
+middle, starts **Locked**: the photo and the terrain are looked at through the
+same loupe, so whatever one half does, the other does, and a hill in one stands
+straight under it in the other. **Unlocked**, each moves alone, the terrain
+turning freely from the same eye, and locking again puts it back under the photo
+where the photo was left. A line down each half follows the direction under the
+pointer over the other. The bar saves the pair as a picture through the photo's
+frame, and Escape or its × goes back to one view. A collage cut for a
+search adds **Piece by piece**, a still of its terrain as the search read it:
+each piece through the camera the search found for it, the seams dashed on both,
+and the piece under the pointer says how far it was turned, tilted and rolled.
+**One camera** shows the terrain whole, and the picture saved is the one shown.
 
 Horizon offers these controls and the place search on its large map and in
 Find, including its three-column view. The small map
@@ -7767,7 +7797,8 @@ offline and its check says so once.
 Pages** puts the folder online in the analyst's own repository, on their press only
 (SPEC §8's one exception to no auto-posting). With GitHub set up in Settings ›
 Website, the address field is the site's own address, read on this machine
-(`https://octo.github.io/articles/`, or the custom domain Pages last gave), followed by a
+(`https://octo.github.io/articles/`, or the custom domain Pages last gave, even while its
+`html_url` still names github.io), followed by a
 **short name** the analyst can change (lower case, digits, hyphens and underscores; said
 under the field and holding both buttons back when wrong). It starts as the last part of
 the address the note was last given, else its title, and Export web folder writes the same
@@ -7803,8 +7834,11 @@ title, *All articles* on the right), and a map page carries a small link inside 
 instead. The commit then rebuilds, only where Azimut made them, `articles.json`, `feed.xml` and
 `sitemap.xml`, fills the lists between `<!-- azimut:articles -->` markers in the analyst's own
 pages (`section="…"` for one category, `layout="map"` for the maps, `limit="N"`), and, when the
-root holds no home page or holds Azimut's, writes a default one with tabs by category. Once a
-listed article has a place, that home shows a world map under its header (`engine/siteatlas.py`):
+root holds no home page or holds Azimut's, writes a default one with tabs by category, which come
+with its first listed article. A map page an article links to is listed under that article, not on
+its own line, and the first such map is also a **Map** badge in the corner of the article's cover, so
+a list that hides links still leads to it. Once a listed article has a place, that home shows a world
+map under its header (`engine/siteatlas.py`):
 Natural Earth's land at 1:110 million in the Equal Earth projection, one 33 KB file the home carries
 beside itself (`azimut-site/atlas.svg`, written once and only once a map shows; made by
 `scripts/make_site_atlas.py` from the outline the map plate ships), framed to the box of the pins with
@@ -7815,7 +7849,8 @@ own policy; the home's script adds a card of what stands there (place, titles li
 name) on hover, focus or a tap, a tap on a gathered pin opening its card first, Escape or a press
 elsewhere closing it. A phone shows the map taller, with more land above and below. With no place,
 no map. A page (role *page*) stays off every list and is linked from the default home's header. The
-category and the role are kept in the note's look. Every press asks a check first
+category and the role are kept in the note's look. The dialog asks a check as soon as it knows the
+address, again once a typed short name settles, and before a press unless already told
 (`POST /notes/{id}/github/check`, a read): a folder the note's own records name that was changed
 on GitHub since says *This folder was changed on GitHub since you published it: publishing replaces
 it.*, and an address holding anything else, another note's article, map or page, says *This address
@@ -7874,14 +7909,17 @@ category, and emptying the coordinates takes it off at the next publish. A page 
 shows no place and sends none. The card and the line of `articles.json` carry it only when set;
 the format stays `azimut-article/1`.
 
-**Before it replaces a folder.** The press first asks what the address holds. The note's own folder,
+**Before it replaces a folder.** The dialog reads what the address holds as soon as it knows it, and
+again half a second after a typed short name settles, so the warning shows before any press; a press
+reads it again unless the analyst was already told. The note's own folder,
 one its records name, changed on GitHub since this Azimut published it says *This folder was changed
 on GitHub since you published it: publishing replaces it.* with **Don't publish**. Another article,
 map or page there says *This address already holds “Harbour fire”. Replace it?* with **Replace it**,
 which publishes, and **Pick another address**, which fills in a free short name and focuses the field.
 Either way the button reads **Publish anyway** and one more press publishes. A folder Azimut did not
-make offers another address only. It never blocks, a check that fails just publishes, and typing
-another short name starts over.
+make offers another address only. It never blocks: a check that fails says *Could not read what this
+address holds: …* with its reason, and the press after it publishes. Typing another short name starts
+over.
 
 **Maps.** `/` › *Interactive map* asks what a map shows: some of the case's layers, or one
 of its Map plates (its layers as it draws them, its days, its slides and how each frames the
@@ -9049,7 +9087,7 @@ failure included (`components/BusyLabel.svelte`, the one spinner of the hub and 
 
 **The read.** **Read the site** (`POST /api/publishing/github/site/read`), on Articles and in Hosting's
 Limits, reads the branch's tree and cards and writes nothing: its address, whether the home page is
-Azimut's or the analyst's, whether the articles carry the site's own bar (`bar`), every card with its category, kind, date, picture and weight, the
+Azimut's or the analyst's, whether the articles carry the site's own bar (`bar`) and footer (`footer`), every card with its category, kind, date, picture and weight, the
 categories, the pages that carry Azimut's markers, the legal and privacy pages, the last change and the
 size of the site and its repository. It never runs on mount. The answer is kept for the session
 (`lib/siteRead.svelte.js`), so the hero, the Overview's checklist, Identity's preview, Hosting's bars,
@@ -9083,7 +9121,8 @@ is refused said under it); without one the site uses the Publishing logo, and **
 (`DELETE /api/settings/site-logo`) gives it back, or **Remove the logo** when there is no Publishing logo to
 go back to. The picture shown is the one the pages carry, read from `GET /api/settings/site-logo.png`. When the read found a home page of the analyst's own, a line says Azimut
 fills its lists and leaves its header alone. When it found the site's own bar in use, **Article bar** shows its
-place, hatched, as *azimut-bar.html* and *Your own bar, on every article*, in place of Azimut's. The settings backup carries `site-logo.png`.
+place, hatched, as *azimut-bar.html* and *Your own bar, on every article*, in place of Azimut's; the site's own
+footer shows the same way under the article, as *azimut-footer.html* and *Your own footer, on every article*. The settings backup carries `site-logo.png`.
 
 **Hosting.** *Where the site lives*: the **GitHub Pages** card below, **The address** (GitHub's, or the
 analyst's own domain), how to point a domain of one's own at Pages, and **Limits**. Two bars say how much of
@@ -9190,18 +9229,20 @@ token. The numbers are kept for the session, never on disk, and dropped when the
 tag typed by hand changes.
 
 **Upkeep.** *Keep it in shape*. **Update the site** is one press that rebuilds the home, list, feed and sitemap
-from the articles on GitHub, and gives each article the bar the site asks for (below), in one commit, with no
+from the articles on GitHub, and gives each article the bar and footer the site asks for (below), in one commit, with no
 note published (`POST /api/publishing/github/site`), also
 in the hero: the press reads *Updating…*, then *The site is up to date.* or how many files were written and when, with
-what the server says to mind, or the last change the read found. It is disabled until GitHub is set up, saying
+what the server says to mind, or the last change the read found. While the read finds pages still giving an
+address the site had before it moved, a line under it says so: *3 pages still give the site's old address: Update
+the site refreshes them.* It is disabled until GitHub is set up, saying
 so on hover, and a missing repository or a Pages that is off shows the press that makes it. **Who writes what**
 says which files are Azimut's and which stay the analyst's, with the pages the read found marked and
-`azimut-bar.html`, *Copied into each article's bar.* **Usual
-chores** gives the five (take an article down, move it to another category on its line in Articles, rename the
-site or change its logo, fix a typo on GitHub, test an article before it shows).
+`azimut-bar.html`, *Copied into each article's bar.*, and `azimut-footer.html`, *Copied to the end of each article.* **Usual
+chores** gives the six (take an article down, move it to another category on its line in Articles, rename the
+site or change its logo, fix a typo on GitHub, test an article before it shows, give the site its own domain).
 
 **Make it yours.** Five cards, the ways to change what Azimut makes: write one's own `index.html` and put the
-`<!-- azimut:articles -->` markers where the list goes; **Your own bar**, a header of one's own; the same markers
+`<!-- azimut:articles -->` markers where the list goes; **Your own bar and footer**, a header and a footer of one's own; the same markers
 with `section="…"` for a page per category; a domain of one's own, with GitHub's guide; and `articles.json` for
 one's own scripts. The words are the engine's (`engine/site.py`), which the folder's HOW-TO-PUBLISH.md carries
 too, and a test holds the two to the same text.
@@ -9221,6 +9262,26 @@ changes the bar of every article Azimut published whose bar differs, between the
 commit (1,000 files, 200 MB; past that it says to press again), and `articles.json` keeps which bar they all
 carry (`bar`), so the next press reads no page. A bar changed this way is no edit: the warning that a folder
 was changed on GitHub, and an edition's Check, look past it.
+
+**Your own footer.** `azimut-footer.html` beside it holds the site's footer, read, cleaned and capped as the bar
+is, in its own `<azimut-footer>`. Every article page, Article or Story, carries it right after Azimut's own
+footer (the edition, its day and *Made with Azimut*), between `<!-- azimut:footer -->` and
+`<!-- /azimut:footer -->`; a map page never does. With no file a page holds neither markers nor footer, so a site
+without one sees no byte of its pages change. Update the site puts the markers in after Azimut's footer when a
+footer first comes, on pages published before it too, changes what is between them after, and takes them out
+with the footer. Past 64 KB, or when it does not read, the articles go without it and the publish or the update
+says why. `articles.json` keeps its id as `footer` beside `bar` (no key for none, as a record from before footers
+reads), so the next press reads no page, and a footer changed this way is no edit either.
+
+**The site's address.** A page gives the address the site had when it was published: its canonical, og:url,
+og:image and twitter:image, and the links its words wrote to the site's other pages. When the site moves (a
+custom domain, a repository renamed), Update the site gives every page Azimut published, articles and maps
+alike, whose canonical names its folder under another address the site's address now, in those attributes
+only: an address quoted in the words, the page's policy and the site's own bar and footer stay byte for byte.
+`articles.json` keeps the address they all give (`address`), so the first press after a move or an upgrade
+reads each page once and the next reads none, within the same commit bounds. A page refreshed this way is no
+edit, and a publish on a custom domain gives the note's links to the site's folders under its github.io
+address the domain's.
 
 **WordPress.** A panel of Settings › Website, apart from the GitHub site, connects the site a note is sent
 to: **Site address** (https, or http on this computer for a test site; a WordPress.com

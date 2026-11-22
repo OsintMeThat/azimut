@@ -170,6 +170,8 @@
     // the app's own mark, two flanks of the north arrow
     brand: 'M12 1.8 5.8 21.4 12 16.4ZM12 1.8 18.2 21.4 12 16.4Z',
     rings: 'M12 12m-2 0a2 2 0 1 0 4 0a2 2 0 1 0-4 0M12 12m-6 0a6 6 0 1 0 12 0a6 6 0 1 0-12 0M12 12m-9.5 0a9.5 9.5 0 1 0 19 0a9.5 9.5 0 1 0-19 0',
+    // two things lined up, the line through them run on past both
+    alignment: 'M8 16m-2 0a2 2 0 1 0 4 0a2 2 0 1 0-4 0M16 8m-2 0a2 2 0 1 0 4 0a2 2 0 1 0-4 0M2.5 21.5l2-2M9.5 14.5l5-5M19.5 4.5l2-2',
     shield: 'M12 21.5s7.5-3.7 7.5-9.3V5.4L12 2.5 4.5 5.4v6.8c0 5.6 7.5 9.3 7.5 9.3Z',
     chart: 'M3.5 3.5v17h17m-4-5v-6m-5 6V8m-5 8.5v-3',
     // a ridge over its baseline: the elevation profile

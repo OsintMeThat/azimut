@@ -107,6 +107,12 @@ describe('the words of the tab', () => {
     expect(updateSaid({ updated: true })).toBe('The site is updated.');
     expect(updateSaid(null)).toBe('The site is up to date.');
   });
+
+  it('says how many pages still give the site\'s old address, and that Update the site refreshes them', () => {
+    expect(setup.oldAddressSaid(1)).toBe('1 page still gives the site\'s old address: Update the site refreshes it.');
+    expect(setup.oldAddressSaid(3)).toBe('3 pages still give the site\'s old address: Update the site refreshes them.');
+    expect(setup.oldAddressSaid(3)).not.toContain('—');
+  });
 });
 
 describe('what a typed code or token reads as', () => {
@@ -140,7 +146,7 @@ describe('Make it yours', () => {
   });
 
   it('holds the five ways, with no markup left over once cut', () => {
-    expect(SITE_OWN.map(([lead]) => lead)).toEqual(['Your own home page', 'Your own bar', 'A page per category', 'Your own domain', 'Your own scripts']);
+    expect(SITE_OWN.map(([lead]) => lead)).toEqual(['Your own home page', 'Your own bar and footer', 'A page per category', 'Your own domain', 'Your own scripts']);
     const links = SITE_OWN.flatMap(([, text]) => ownParts(text)).filter((part) => part.link);
     expect(links).toEqual([{ link: 'GitHub\'s guide', href: 'https://docs.github.com/en/pages/configuring-a-custom-domain-for-your-github-pages-site' }]);
     for (const [, text] of SITE_OWN) {
@@ -148,13 +154,14 @@ describe('Make it yours', () => {
     }
   });
 
-  it('says of the site\'s own bar where it goes, where it shows, what is dropped and what each picture needs', () => {
-    const text = Object.fromEntries(SITE_OWN)['Your own bar'];
-    expect(ownParts(text).filter((part) => part.code).map((part) => part.code)).toEqual(['<style>', 'azimut-bar.html', '<svg>', 'width', 'height']);
-    for (const said of ['at the site\'s root', 'in place of Azimut\'s bar', 'maps keep theirs', 'Update the site', 'Scripts are dropped',
-      'links start from the site\'s root']) expect(text, said).toContain(said);
+  it('says of the site\'s own bar and footer where they go, where they show, what is dropped and what each picture needs', () => {
+    const text = Object.fromEntries(SITE_OWN)['Your own bar and footer'];
+    expect(ownParts(text).filter((part) => part.code).map((part) => part.code)).toEqual(
+      ['<style>', 'azimut-bar.html', 'azimut-footer.html', '<svg>', 'width', 'height']);
+    for (const said of ['at the site\'s root', 'in place of Azimut\'s bar', 'the footer at their end, after Azimut\'s own lines',
+      'maps carry neither', 'Update the site', 'Scripts are dropped', 'links start from the site\'s root']) expect(text, said).toContain(said);
     expect(text).not.toContain('—');
-    const sample = setup.SITE_OWN_SAMPLES['Your own bar'].map(([, line]) => line).join('\n');
+    const sample = setup.SITE_OWN_SAMPLES['Your own bar and footer'].map(([, line]) => line).join('\n');
     expect(sample).toContain(':host');
     expect(sample).toContain('<svg width="24" height="24">');
     expect(sample).toContain('href="./"');
@@ -193,7 +200,8 @@ describe('the hub\'s panels', () => {
       expect(said).toMatch(/^[A-Z].*\.$/);
       expect(said).not.toContain('—');
     }
-    expect(setup.CHORES).toHaveLength(5);
+    expect(setup.CHORES).toHaveLength(6);
+    expect(setup.CHORES[5][0]).toBe('Give the site its own domain');
   });
 
   it('names the repository and the site in the flow once they are known', () => {
@@ -349,12 +357,13 @@ describe('who writes what', () => {
     const before = ownersOf(null);
     expect(before.map((row) => [row.files.join(' '), row.who])).toEqual([
       ['each article\'s folder', 'azimut'], ['articles.json feed.xml sitemap.xml', 'azimut'], ['index.html', 'azimut'], ['azimut-bar.html', 'you'],
-      ['everything else', 'you']]);
+      ['azimut-footer.html', 'you'], ['everything else', 'you']]);
     expect(before[3].text).toBe('Copied into each article\'s bar.');
+    expect(before[4].text).toBe('Copied to the end of each article.');
     const yours = ownersOf({ truncated: false, home: 'yours', marked: ['', 'investigations/', 'conflict-watch/'] });
     expect(yours.map((row) => [row.files.join(' '), row.who])).toEqual([
       ['each article\'s folder', 'azimut'], ['articles.json feed.xml sitemap.xml', 'azimut'], ['index.html', 'you'],
-      ['investigations/ conflict-watch/', 'you'], ['azimut-bar.html', 'you'], ['everything else', 'you']]);
+      ['investigations/ conflict-watch/', 'you'], ['azimut-bar.html', 'you'], ['azimut-footer.html', 'you'], ['everything else', 'you']]);
     expect(yours[2].text).toBe('Fills the list between its markers, nothing else.');
     // a read cut short found no page: the table stays as before a read
     expect(ownersOf({ truncated: true, home: 'none', marked: [] })).toEqual(before);
@@ -482,5 +491,14 @@ describe('what a change of categories says', () => {
     expect(setup.CATEGORIES_OWN_PAGES).toBe(
       'Your site has its own pages: Azimut updates the articles and the lists; your menu and category pages are yours to change.');
     expect(setup.CATEGORY_ADD_OWN_PAGES).toBe('Add a page and a menu link for it if you want one; its articles already show in your lists.');
+  });
+});
+
+describe('checkUnreadSaid', () => {
+  it('names why the address could not be read, and says the next press publishes', async () => {
+    const { checkUnreadSaid, CHECK_UNREAD } = await import('./websiteSetup.js');
+    expect(checkUnreadSaid('')).toBe(CHECK_UNREAD);
+    expect(checkUnreadSaid('GitHub did not answer.')).toBe('Could not read what this address holds: GitHub did not answer. Publish again to go ahead anyway.');
+    expect(checkUnreadSaid('offline')).toBe('Could not read what this address holds: offline. Publish again to go ahead anyway.');
   });
 });

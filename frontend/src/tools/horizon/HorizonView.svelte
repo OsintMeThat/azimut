@@ -41,7 +41,7 @@
   import { onDestroy, onMount, untrack } from 'svelte';
   import { repeatPress } from '../../lib/repeatPress.js';
   import { createScene } from '../../lib/horizon/mesh/scene.js';
-  import { focal, rayFor, seenLens, toScreen, turnAbout, turnBetween, verticalFov } from '../../lib/horizon/camera.js';
+  import { focal, rayFor, seenLens, toScreen, turnAbout, turnBetween } from '../../lib/horizon/camera.js';
   import { inSight, skylineAt } from '../../lib/horizon/panorama.js';
   import {
     azimuthTicks,
@@ -67,15 +67,21 @@
     strokeFrom,
     fitRuns,
     gapLabel,
+    panLoupe as pannedLoupe,
+    zoomLoupe as zoomedLoupe,
   } from '../../lib/horizon/overlay.js';
 
   import { pointerReading, summitReading } from '../../lib/horizon/readings.js';
   import { formatDistance } from '../../lib/measure.js';
   import { MAP_LIGHT, shadowKeep } from '../../lib/horizon/sky.js';
   import { areaLens, areaWithin, exportScale, layersIn, stripLaid, turnCamera } from '../../lib/horizon/viewExport.js';
+  import { crossAt, dragLook, keepUnder, photoAzimuth, photoColumn, throughCamera, zoomedAbout } from '../../lib/horizon/sideBySide.js';
+  import { looked } from '../../lib/horizon/view.js';
   import { RIDGE_STEPS } from './state/horizon.svelte.js';
   import { detailsShown, pressTool, putAway, toolForKey, toolHint, traceLegend } from '../../lib/horizon/traceTools.js';
   import PictureControls from './PictureControls.svelte';
+  import PhotoAbove from './PhotoAbove.svelte';
+  import TerrainBelow from './TerrainBelow.svelte';
   import { prefs } from '../../lib/state.svelte.js';
   import { HORIZON_PIXELS, qualityOf } from '../../lib/quality3d.js';
 
@@ -110,6 +116,16 @@
     terrain = [],
     /** Find covers the view: it draws nothing and asks for no tile until it shows again. */
     paused = false,
+    /**
+     * Side by side, or null: the photo alone above (PhotoAbove) over this
+     * view's own half, which then draws nothing of its own, and the terrain
+     * alone drawn live under it (TerrainBelow). `{ linked, trace, ridges }`:
+     * whether the two are locked, the trace as the directions it was laid at
+     * on the terrain (lib/horizon/sideBySide.js `traceRays`), and which of
+     * its strokes are ridges. Locked, the terrain is seen through this camera
+     * and the photo through this loupe.
+     */
+    split = null,
   } = $props();
 
   /** Where this browser remembers that the gesture lines were understood, without and with a photo. */
@@ -185,6 +201,110 @@
   /** What the middle of the screen faces, which the heading caret says: the lens's own heading without a loupe. */
   const facing = $derived(seenLens(camera));
 
+  // -- Side by side: the photo above (PhotoAbove), the terrain under it (TerrainBelow) --
+
+  /**
+   * Unlocked, each half has its own: the terrain a lens, the photo a loupe,
+   * both taken from the view's when they were let go. Locked again, the photo
+   * keeps where it was and the terrain comes back under it.
+   */
+  let freeLens = $state(null);
+  let ownLoupe = $state(null);
+  let wasFree = false;
+  $effect(() => {
+    const free = Boolean(split) && !split.linked;
+    if (free === wasFree) return;
+    wasFree = free;
+    untrack(() => {
+      if (!free && split && ownLoupe) overlay?.setLoupe(ownLoupe);
+      freeLens = free ? { ...camera } : null;
+      ownLoupe = free ? (overlay?.loupe ?? NO_LOUPE) : null;
+    });
+  });
+  /** How the photo above is looked at: the view's own loupe while locked. */
+  const aboveLoupe = $derived(split && !split.linked && ownLoupe ? ownLoupe : (overlay?.loupe ?? NO_LOUPE));
+  /** The photo's own camera, at its frame's size and with no loupe: what its columns look at. */
+  const photoCamera = $derived({ ...view.camera, width: size.width, height: size.height });
+  /** The direction under the pointer over the photo, for the line down the terrain. */
+  let aboveAzimuth = $state(null);
+  /** The camera the terrain under the photo is drawn through: the view's while linked. */
+  const below = $derived(
+    split ? (split.linked || !freeLens ? camera : { ...freeLens, width: size.width, height: size.height }) : null
+  );
+  /** The canvas the terrain's frame is copied into, and its 2D context. */
+  let belowCanvas = $state(null);
+  let belowContext = null;
+  /** Where a drag over the terrain began: its camera, and how far the hand has gone since. */
+  let belowPress = null;
+  /** The direction under the pointer over the terrain, for the line down the photo's half. */
+  let belowAzimuth = $state(null);
+  const belowTrace = $derived(below && split.trace?.length ? throughCamera(split.trace, below) : []);
+  const belowFacing = $derived(belowAzimuth != null ? `${belowAzimuth.toFixed(1)}°` : '');
+
+  /** A frame of the view copied into the terrain's canvas, at its pixels. */
+  function copyBelow() {
+    if (belowCanvas.width !== canvas.width) belowCanvas.width = canvas.width;
+    if (belowCanvas.height !== canvas.height) belowCanvas.height = canvas.height;
+    if (!belowContext || belowContext.canvas !== belowCanvas) belowContext = belowCanvas.getContext('2d');
+    belowContext?.drawImage(canvas, 0, 0);
+  }
+
+  function onBelowPress() {
+    belowPress = { start: { ...below }, dx: 0, dy: 0 };
+  }
+
+  /** A drag over the terrain: the loupe's while locked to the photo, so both halves move; the terrain's own turn unlocked. */
+  function onBelowMove(dx, dy) {
+    scene?.moving();
+    if (split.linked) {
+      overlay.panLoupe(dx, dy, size);
+      return;
+    }
+    if (!belowPress) return;
+    belowPress.dx += dx;
+    belowPress.dy += dy;
+    freeLens = looked(freeLens, dragLook(belowPress.start, belowPress.dx, belowPress.dy));
+  }
+
+  /** The wheel over the terrain: the loupe's while locked to the photo, the terrain's own lens unlocked. */
+  function onBelowZoom(factor, at) {
+    scene?.moving();
+    if (split.linked) overlay.zoomLoupe(factor, at, size);
+    else freeLens = zoomedAbout(below, 1 / factor, at);
+  }
+
+  function onBelowPoint(x) {
+    belowAzimuth = x == null || !below ? null : rayFor(below, x, below.height / 2).azimuth;
+  }
+
+  /** A drag over the photo: the loupe's while locked, the terrain following; the photo's own loupe unlocked. */
+  function onAboveMove(dx, dy) {
+    if (!split.linked) {
+      ownLoupe = pannedLoupe(ownLoupe, dx, dy, size);
+      return;
+    }
+    scene?.moving();
+    overlay.panLoupe(dx, dy, size);
+  }
+
+  function onAboveZoom(factor, at) {
+    if (!split.linked) {
+      ownLoupe = zoomedLoupe(ownLoupe, factor, at, size);
+      return;
+    }
+    scene?.moving();
+    overlay.zoomLoupe(factor, at, size);
+  }
+
+  function onAboveFit() {
+    if (split.linked) overlay.fitLoupe();
+    else ownLoupe = NO_LOUPE;
+  }
+
+  function onAbovePoint(x) {
+    aboveAzimuth = x == null || !(size.width > 0) ? null : photoAzimuth(photoCamera, aboveLoupe, x);
+  }
+
   // -- drawing ----------------------------------------------------------------
 
   let shownPicture = null;
@@ -224,7 +344,14 @@
       }
     }
     if (!(size.width > 0)) return;
-    const now = scene.draw(camera, drawOptions());
+    const options = drawOptions();
+    // Side by side: the photo above is drawn by the page, so the engine draws the terrain alone,
+    // copied under it, and nothing of this half, which the photo covers
+    let now;
+    if (below && belowCanvas) {
+      now = scene.draw(below, { ...options, photo: 0 });
+      copyBelow();
+    } else now = scene.draw(camera, options);
     // said in whole percents, so the page is not redrawn for every tile
     if (now.phase !== progress.phase || Math.floor(now.share * 100) !== Math.floor(progress.share * 100)) progress = now;
     landed = scene.landed;
@@ -247,6 +374,7 @@
     void [view.shadowDepth, view.ground, view.lines, view.ridges, view.visibility, view.near, view.shaded, camera, sky];
     void [overlay?.picture, overlay?.frame, overlay?.shown, overlay?.bend];
     void [buildings?.on, buildings?.settings];
+    void [below, belowCanvas];
     redraw();
   });
 
@@ -343,6 +471,8 @@
    */
   export async function snapshot(width = 640) {
     if (!canvas || !landed || !canvas.width || !canvas.height) return null;
+    // Side by side leaves the terrain alone in the canvas: the view is drawn once for the preview
+    if (below && scene) scene.draw(camera, drawOptions());
     const scale = Math.min(1, width / canvas.width);
     const out = document.createElement('canvas');
     out.width = Math.max(1, Math.round(canvas.width * scale));
@@ -513,6 +643,14 @@
   // -- reading the picture ----------------------------------------------------
 
   const shown = $derived(Boolean(size.width && landed));
+  /** Side by side: the names and ticks placed for the terrain's camera, and the line down each half at the direction under the pointer over the other. */
+  const belowLayers = $derived(below && shown ? layersFor(below, 'terrain') : { labels: [], ticks: [] });
+  const crossBelow = $derived(below && aboveAzimuth != null ? crossAt(below, aboveAzimuth) : null);
+  const crossAbove = $derived(below && belowAzimuth != null ? photoColumn(photoCamera, aboveLoupe, belowAzimuth) : null);
+  /** What the terrain says while it loads, or why it could not. */
+  const belowNote = $derived(
+    unsupported || (lost ? 'The graphics card dropped this view' : failed && !view.error ? 'The ground here could not be loaded' : loadingText)
+  );
 
   /** The buildings' question before a download, or how their download or raising goes. */
   const buildingNote = $derived(buildings?.banner ?? null);
@@ -1045,9 +1183,7 @@
       rollNote = { text: `Roll ${view.camera.roll.toFixed(1)}°`, x: press.pivot.x, y: press.pivot.y };
       return;
     }
-    const across = start.fov / size.width / (start.loupe?.zoom ?? 1);
-    const up = start.projection === 'panorama' ? across : verticalFov(start) / size.height;
-    view.look({ heading: start.heading - dx * across, tilt: start.tilt + dy * up });
+    view.look(dragLook(start, dx, dy));
   }
 
   function onPointerUp(event) {
@@ -1192,16 +1328,8 @@
       return;
     }
     const before = rayFor(camera, at.x, at.y);
-    const scale = Math.exp(delta * unit);
-    const fov = view.camera.fov * scale;
-    view.look({ fov });
-    const narrowed = { ...camera, ...view.camera, width: size.width, height: size.height };
-    for (let pass = 0; pass < 2; pass += 1) {
-      const after = rayFor(narrowed, at.x, at.y);
-      narrowed.heading += turnBetween(after.azimuth, before.azimuth);
-      narrowed.tilt += before.elevation - after.elevation;
-    }
-    view.look({ heading: narrowed.heading, tilt: narrowed.tilt });
+    view.look({ fov: view.camera.fov * Math.exp(delta * unit) });
+    view.look(keepUnder({ ...camera, ...view.camera, width: size.width, height: size.height }, before, at));
   }
 
   /** The photo grown or shrunk over the terrain about a point of the screen, the terrain keeping its size there. */
@@ -1455,6 +1583,8 @@
   class:shaping={overPhoto}
   class:panning={laid && spaceHeld}
   class:sliding={moves === 'photo' && !tracing && !erasing && !bending}
+  class:under-photo={Boolean(below)}
+  inert={Boolean(below)}
   bind:this={box}
   tabindex="0"
   role="application"
@@ -1756,7 +1886,7 @@
   {/each}
 
   {#if controlsShown}
-    <div class="controls">
+    <div class="controls" data-chrome="control">
       <PictureControls {view} {copernicus} {onsetup} bind:width={controls.width} bind:height={controls.height} />
     </div>
   {/if}
@@ -1777,7 +1907,7 @@
   {/if}
 
   {#if loupe}
-    <div class="glass loupe hz-control">
+    <div class="glass loupe hz-control" data-chrome="control">
       <span class="mono">×{loupe.zoom < 10 ? loupe.zoom.toFixed(1) : Math.round(loupe.zoom)}</span>
       <button type="button" onclick={() => overlay.fitLoupe()} title="Back to the whole photo in the frame (0)">Fit</button>
     </div>
@@ -1811,11 +1941,11 @@
   {/if}
 
   {#if credits}
-    <div class="credits">{credits}</div>
+    <div class="credits" data-chrome="control">{credits}</div>
   {/if}
 
   {#if shown}
-    <div class="ruler">
+    <div class="ruler" data-chrome="control">
       {#each ticks as tick (tick.azimuth)}
         <span class="tick" class:named={tick.named} style:left="{tick.x}px" aria-hidden="true">{tick.label}</span>
       {/each}
@@ -1863,6 +1993,46 @@
   {/if}
 </div>
 
+{#if below}
+  <PhotoAbove
+    picture={overlay.picture}
+    frame={overlay.frame}
+    bend={overlay.bend}
+    bendShape={overlay.bendShape}
+    loupe={aboveLoupe}
+    {size}
+    trace={overlay.traceShown && !overlay.traceHidden ? overlay.strokesShown : []}
+    ridges={split.ridges ?? []}
+    cross={crossAbove}
+    locked={split.linked}
+    what={overlay.source?.kind === 'video' ? 'Video' : 'Photo'}
+    onmove={onAboveMove}
+    onzoom={onAboveZoom}
+    onfit={onAboveFit}
+    onpoint={onAbovePoint}
+  />
+  <TerrainBelow
+    camera={below}
+    bind:canvas={belowCanvas}
+    labels={belowLayers.labels}
+    ticks={belowLayers.ticks}
+    trace={belowTrace}
+    ridges={split.ridges ?? []}
+    cross={crossBelow}
+    facing={belowFacing}
+    linked={split.linked}
+    daylight={view.ground !== 'plain'}
+    note={belowNote}
+    {view}
+    {copernicus}
+    {onsetup}
+    onpress={onBelowPress}
+    onmove={onBelowMove}
+    onzoom={onBelowZoom}
+    onpoint={onBelowPoint}
+  />
+{/if}
+
 <style>
   .horizon-view {
     position: relative;
@@ -1874,6 +2044,10 @@
     outline: none;
     touch-action: none;
     user-select: none;
+  }
+  /* Side by side: the photo alone lies over this half, which draws the terrain for the half under it */
+  .horizon-view.under-photo {
+    visibility: hidden;
   }
   .horizon-view.dragging {
     cursor: grabbing;

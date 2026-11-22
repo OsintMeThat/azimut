@@ -45,7 +45,7 @@ def fake(monkeypatch):
 def an_empty_memory():
     sitesync._kept.clear()
     sitesync._plain.clear()
-    sitesync._bars.clear()
+    sitesync._carried.clear()
     sitesync._weight = 0
 
 
@@ -340,7 +340,7 @@ def test_update_the_site_gives_each_article_the_sites_bar_where_it_differs_and_k
     quiet = client.post(UPDATE).json()
     assert quiet["updated"] is False and len(fake.history()) == commits
     sitesync._kept.clear()
-    sitesync._bars.clear()
+    sitesync._carried.clear()
     reads = len(_blob_reads(fake))
     assert client.post(UPDATE).json()["updated"] is False
     pages = {githubpages.blob_sha(after[f"{folder}/index.html"]) for folder in ("port-strike", "harbour", "the-road")}
@@ -393,11 +393,11 @@ def test_update_the_site_keeps_to_one_commits_bounds_and_the_next_press_does_the
     # room for the list's files and one page
     monkeypatch.setattr(githubpages, "MAX_FILES", 2)
     first = client.post(UPDATE).json()
-    assert first["warnings"] == [sitesync.BARS_LEFT]
+    assert first["warnings"] == [sitesync.PAGES_LEFT]
     assert first["written"] == ["articles.json", "note-0/index.html"]
     assert "bar" not in json.loads(fake.files()["articles.json"])
     second = client.post(UPDATE).json()
-    assert second["warnings"] == [sitesync.BARS_LEFT] and second["written"] == ["note-1/index.html"]
+    assert second["warnings"] == [sitesync.PAGES_LEFT] and second["written"] == ["note-1/index.html"]
     monkeypatch.setattr(githubpages, "MAX_FILES", 1000)
     third = client.post(UPDATE).json()
     assert third["warnings"] == [] and third["written"] == ["articles.json", "note-2/index.html"]
@@ -405,7 +405,7 @@ def test_update_the_site_keeps_to_one_commits_bounds_and_the_next_press_does_the
     assert all(_inner(fake.files()[f"note-{number}/index.html"]) == inner for number in range(3))
     monkeypatch.setattr(githubpages, "MAX_TOTAL_BYTES", 10)
     _put(fake, {"azimut-bar.html": None})
-    assert sitesync.BARS_LEFT in client.post(UPDATE).json()["warnings"]
+    assert sitesync.PAGES_LEFT in client.post(UPDATE).json()["warnings"]
 
 
 def test_a_page_too_large_to_read_keeps_its_bar_and_is_said(client, fake, monkeypatch):
@@ -416,12 +416,12 @@ def test_a_page_too_large_to_read_keeps_its_bar_and_is_said(client, fake, monkey
     _put(fake, {"azimut-bar.html": OWN})
     monkeypatch.setattr(sitesync, "MAX_BAR_PAGE_BYTES", 100)
     said = client.post(UPDATE).json()
-    assert said["warnings"] == [sitesync.bars_too_large(1)]
+    assert said["warnings"] == [sitesync.pages_too_large(1)]
     # nothing says every page carries the site's bar, so the next press tries again and says it again
     assert "bar" not in json.loads(fake.files()["articles.json"])
-    assert client.post(UPDATE).json()["warnings"] == [sitesync.bars_too_large(1)]
-    assert sitesync.bars_too_large(1) == "1 article page is too large for Azimut to change the bar: publish it again."
-    assert sitesync.bars_too_large(2) == "2 article pages are too large for Azimut to change the bar: publish them again."
+    assert client.post(UPDATE).json()["warnings"] == [sitesync.pages_too_large(1)]
+    assert sitesync.pages_too_large(1) == "1 article page is too large for Azimut to change: publish it again."
+    assert sitesync.pages_too_large(2) == "2 article pages are too large for Azimut to change: publish them again."
     assert site.is_azimut_bar(_inner(fake.files()["port-strike/index.html"]))
 
 

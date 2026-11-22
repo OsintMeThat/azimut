@@ -9,6 +9,10 @@
  *   were open is worth restoring, and a capture must never show them — the
  *   crop hides them by class (`MapSurface.svelte`), which only works because
  *   they are chrome painted over the map rather than anything on it.
+ * - **They follow the analyst from Satellite to Horizon.** Both tabs open
+ *   them into the one session list (`uiState.refViewers`), each through a store
+ *   of its own, and each draws them only while it is on screen: a clip never
+ *   plays twice, and one drawn again picks up where it was.
  * - **The picker reads the case's media when it opens**, never on mount. A tab
  *   that indexed the case just by being selected would be a request nobody
  *   asked for.
@@ -54,11 +58,13 @@ import { sceneColorAt } from '../../../lib/scenes.js';
 const STAGGER = 26;
 const STAGGER_WRAP = 6;
 
+/** The id source, one for every store: the windows are the session's, and Satellite and Horizon both open them. */
+let spawned = 0;
+
 export function createRefsState({ api, notify, caseId, viewers, setViewers }) {
   let picking = $state(false); // the "pick an image" modal
   let media = $state([]); // what the case has to offer
   let loading = $state(false);
-  let spawned = 0; // id source, so two windows on the same media stay distinct
   // The picker's chip and working-files switch, kept for the session so the
   // next reference opens on the same narrowing as the last one.
   let category = $state(null);

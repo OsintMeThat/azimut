@@ -113,11 +113,15 @@ describe('the band over a photo', () => {
     expect(details.title).toMatch(/^Show how far the terrain may be off/);
     details.click();
     expect(overlay.setDetails).toHaveBeenCalledWith(true);
-    button(root, 'Side by side').click();
+    const side = button(root, 'Side by side');
+    expect(side.getAttribute('aria-pressed')).toBe('false');
+    expect(side.title).toBe('Show the photo above the terrain, both live');
+    side.click();
     expect(onside).toHaveBeenCalledOnce();
-    // while the two are being drawn, a second press waits
-    const busy = bar(fakeOverlay(), { siding: true });
-    expect(button(busy, 'Side by side').disabled).toBe(true);
+    // shown, the same press goes back to one view
+    const open = button(bar(fakeOverlay(), { sideOn: true }), 'Side by side');
+    expect(open.getAttribute('aria-pressed')).toBe('true');
+    expect(open.title).toBe('Back to one view');
     const shown = bar(fakeOverlay({ details: true, setDetails: vi.fn() }));
     expect(button(shown, 'Details').getAttribute('aria-pressed')).toBe('true');
   });
@@ -290,6 +294,17 @@ describe('the band over a photo', () => {
     const video = bar(fakeOverlay({ source: { kind: 'video', name: 'clip.mp4' }, moves: 'photo' }));
     expect(button(video, 'Move the video').getAttribute('aria-pressed')).toBe('true');
     expect(button(video, 'Move the terrain').getAttribute('aria-pressed')).toBe('false');
+  });
+
+  it('holds both hands while the photo shows above the terrain, which is matched in one view', () => {
+    const overlay = fakeOverlay();
+    const root = bar(overlay, { sideOn: true });
+    for (const name of ['Move the photo', 'Move the terrain']) {
+      const hand = button(root, name);
+      expect(hand.getAttribute('aria-pressed')).toBe('true');
+      expect(hand.disabled).toBe(true);
+      expect(hand.title).toBe('Close Side by side to align the photo');
+    }
   });
 
   it('lights both hands to move both, which offers no fit and no reshape', () => {
