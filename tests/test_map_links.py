@@ -234,6 +234,24 @@ def test_a_written_link_to_the_map_on_another_site_takes_its_address_on_this_one
     assert _card(files, "port-strike")["links"] == ["road-map"]
 
 
+def test_on_a_site_served_from_docs_the_map_there_is_linked_and_one_left_at_the_root_is_none(
+        client, fake, monkeypatch, tmp_path):
+    fake.make_repo()
+    fake.repos["octo/articles"]["pages"]["source"]["path"] = "/docs"
+    _connect(client)
+    cid = make_case(client, "Road")
+    road = _drawn_map(client, cid, monkeypatch, tmp_path)
+    _publish(client, cid, road, "road-map")
+    article = make_note(client, cid, title="Port strike", content=f"See [[entity:{road}|the road map]].\n")
+    _publish(client, cid, article["id"], "port-strike")
+    assert f'href="{SITE}road-map/"' in fake.files()["docs/port-strike/index.html"].decode()
+    # the site served from its root again: the map's folder under docs/ is no page of it
+    fake.repos["octo/articles"]["pages"]["source"]["path"] = "/"
+    _publish(client, cid, article["id"], "port-strike")
+    page = fake.files()["port-strike/index.html"].decode()
+    assert "the road map" in page and "road-map/" not in page
+
+
 def test_a_map_named_only_in_an_internal_passage_is_none_of_the_public_pages(client, fake, monkeypatch, tmp_path):
     fake.make_repo()
     _connect(client)
