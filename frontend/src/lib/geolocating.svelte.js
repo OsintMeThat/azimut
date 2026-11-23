@@ -14,9 +14,10 @@
  */
 import { api } from './api.js';
 import { onEvent } from './events.js';
+import { PROOF_MAP_HELP } from './geolocatingHelp.js';
 import { gatheredScene, openScenes, sceneCount, withProofs } from './sceneQueue.js';
 import { retimedBy } from './sceneRetime.svelte.js';
-import { caseState, uiState } from './state.svelte.js';
+import { caseState, toast, uiState } from './state.svelte.js';
 
 /** `scene` is the queue's row for it (`video`, `id`, `start`, `end`, `label`, `state`,
  *  `captures`, `abandoned`, `since`), or null. */
@@ -116,6 +117,28 @@ export function goWithScene(tool, view = null) {
   if (at && tool === 'horizon') uiState.horizonAt = { lat: at.lat, lon: at.lon };
   else if (at) uiState.gotoCoords = { lat: at.lat, lon: at.lon, ...(Number.isFinite(at.zoom) ? { zoom: at.zoom } : {}) };
   uiState.tool = tool;
+}
+
+/**
+ * Go to the map for a scene with no map capture yet, from Make the proof: Satellite with
+ * its reference window, the scene geolocated first when it is not the one held, so what
+ * is captured there is gathered for it. `scene` is `{video, id}` at least.
+ */
+export async function mapWithScene(caseId, scene) {
+  const held = geolocating.caseId === caseId ? geolocating.scene : null;
+  if (held && held.video === scene.video && held.id === scene.id) goWithScene('satellite');
+  else await geolocateScene(caseId, scene);
+}
+
+/**
+ * Make the proof of a picture with no map capture yet: it opens no chooser to say so in,
+ * so a toast says what the chooser says, with the same way to the map. Never a stop.
+ */
+export function warnNoMapCapture(caseId, scene) {
+  toast(PROOF_MAP_HELP.none, 'warn', null, {
+    label: PROOF_MAP_HELP.go,
+    onClick: () => mapWithScene(caseId, scene).catch((e) => toast(e.message, 'danger')),
+  });
 }
 
 /**

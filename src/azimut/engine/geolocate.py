@@ -367,8 +367,8 @@ def gathered(case: Case) -> dict[str, Any]:
     """What the scene being geolocated gathered, as its pill lists it: the leads dropped
     for it, the map captures attached to it, and what its file gives it, the frames of the
     video's Inspect strip and its collages inside the scene's moments, or the picture
-    itself. Each with the thumbnail the case keeps for it, if any. ``geolocating`` is
-    None when no scene is."""
+    itself. Each with the thumbnail the case keeps for it, if any, and a frame with the
+    edits Inspect keeps for it. ``geolocating`` is None when no scene is."""
     held = current(case)
     if held is None:
         return {"geolocating": None}
@@ -379,7 +379,11 @@ def gathered(case: Case) -> dict[str, Any]:
         frames: list[dict[str, Any]] = []
         collages: list[dict[str, Any]] = []
     else:
-        frames = [{k: f[k] for k in ("id", "time", "path", "thumb")} for f in scenes_engine.draft_frames(case, video, draft_id)]
+        # a frame never saved keeps Inspect's edits, for the list to draw it as Inspect would save it
+        frames = [
+            {k: f[k] for k in ("id", "time", "path", "thumb", "edits")}
+            for f in scenes_engine.draft_frames(case, video, draft_id)
+        ]
         moments = inspectwork.scene_moments(draft)
         # every one the count holds, one never exported included: it has no picture yet
         collages = [

@@ -1036,11 +1036,33 @@ describe('geolocating a scene', () => {
     expect([...dialog.querySelectorAll('input[type="checkbox"]')].map((b) => [b.getAttribute('aria-label'), b.checked]))
       .toEqual([['Frame at 0:02', true], ['Capture Bridge from above', true]]);
     expect(dialog.querySelector('[aria-label="Captures of the scene"] img').getAttribute('src')).toContain('thumbs/cap.jpg');
+    // a scene holding a map capture is not warned
+    expect(dialog.textContent).not.toContain('No map capture yet');
     [...dialog.querySelectorAll('button')].find((b) => b.textContent.trim() === 'Make the proof').click();
     await settle(10);
     // the frames first, then the captures
     expect(uiState.proofScene.panels).toEqual(['media/saved-2.png', 'media/cap.png']);
     expect(uiState.tool).toBe('proof');
+  });
+
+  it('warns a scene with no map capture, and goes to the map with it, geolocated', async () => {
+    keep([frame('fr_a', 2)], [{ id: 'sc_1', start: 1, end: 4, label: 'bridge?' }]);
+    await start();
+    await openFile('Convoy clip');
+    await settle(10);
+    showScenes();
+    button('Prove sc_1').click();
+    flushSync();
+    const dialog = () => document.querySelector('[role="dialog"][aria-label="Make the proof"]');
+    expect(dialog().textContent).toContain('No map capture yet: the proof gets no coordinates from the map.');
+    [...dialog().querySelectorAll('button')].find((b) => b.textContent.trim() === 'Go to the map').click();
+    await settle(10);
+
+    expect(dialog()).toBeNull();
+    expect(put.mock.calls.find(([path]) => path === '/api/cases/case-a/geolocating')[1]).toEqual({ video: 'media/clip.mp4', draft: 'sc_1' });
+    expect(uiState.geolocateRef).toMatchObject({ video: 'media/clip.mp4', draft: 'sc_1' });
+    expect(uiState.tool).toBe('satellite');
+    expect(uiState.proofScene).toBeUndefined();
   });
 
   it('says so when the scene sent is no longer in its video', async () => {

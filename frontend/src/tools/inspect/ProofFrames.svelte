@@ -1,6 +1,7 @@
 <script>
   import Icon from '../../components/Icon.svelte';
   import Modal from '../../components/Modal.svelte';
+  import { PROOF_MAP_HELP } from '../../lib/geolocatingHelp.js';
   import { INSPECT_HELP } from '../../lib/inspectHelp.js';
   import { cropImgStyle, previewStyle, styleText } from '../../lib/inspect.js';
   import { editClock, isWholeVideo, sceneTime, sceneTitle, shortClock } from '../../lib/scenes.js';
@@ -11,7 +12,9 @@
   // between them, ticked, by the picture each was last saved as. A scene holding no
   // frame and no collage says which frame is captured for it instead, since a proof of
   // the scene rests on one of its frames. Frames not in the case yet are saved on the
-  // way, which the note under them says.
+  // way, which the note under them says. A scene with no map capture yet says the proof
+  // gets no coordinates from the map, and offers the way there: a warning, the proof
+  // still made.
   let {
     scene,
     frames = [],
@@ -25,6 +28,8 @@
     busy = false,
     onconfirm,
     oncancel,
+    // Go to the map for the scene, the chooser closed: offered while it holds no map capture
+    onmap = null,
   } = $props();
 
   // seeded once from the frames and captures it opened on, all ticked
@@ -170,6 +175,16 @@
       </ul>
     {/if}
 
+    {#if !captures.length}
+      <p class="map-none" data-testid="proof-no-map-capture">
+        <Icon name="satellite" size={13} />
+        <span>{PROOF_MAP_HELP.none}</span>
+        {#if onmap}
+          <button class="btn btn-ghost btn-xs" disabled={busy} onclick={() => onmap()} title={INSPECT_HELP.sceneGeolocate}>{PROOF_MAP_HELP.go}</button>
+        {/if}
+      </p>
+    {/if}
+
     <div class="acts">
       <button class="btn btn-ghost btn-sm" disabled={busy} onclick={() => oncancel?.()}>Cancel</button>
       <button class="btn btn-primary btn-sm" disabled={!ready} onclick={make} title={INSPECT_HELP.proofFramesMake}>
@@ -304,6 +319,21 @@
   .none p {
     margin: 0;
     line-height: 1.4;
+  }
+  .map-none {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 4px 6px;
+    margin: 0;
+    color: var(--text-3);
+    font-size: var(--fs-xs);
+  }
+  .map-none :global(svg) {
+    flex-shrink: 0;
+  }
+  .map-none button {
+    margin-left: auto;
   }
   .acts {
     display: flex;

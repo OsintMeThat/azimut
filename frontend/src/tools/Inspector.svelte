@@ -18,8 +18,8 @@
     wholeDrafts, wholeTaker,
   } from '../lib/scenes.js';
   import {
-    abandonProof, abandonScene, geolocateScene, geolocating, joinScenes, restoreProof, restoreScene, sceneEdit as sceneGiven,
-    stopGeolocating, unjoinScenes,
+    abandonProof, abandonScene, geolocateScene, geolocating, joinScenes, mapWithScene, restoreProof, restoreScene, sceneEdit as sceneGiven,
+    stopGeolocating, unjoinScenes, warnNoMapCapture,
   } from '../lib/geolocating.svelte.js';
   import { onEvent } from '../lib/events.js';
   import {
@@ -1866,6 +1866,8 @@
     if (pressed?.kind !== 'draft' || !hasScenes || makingProof || isAbandoned(pressed)) return;
     const scene = settled(pressed);
     if (!isVideo) {
+      // no chooser to warn in: a toast says it, the proof still made
+      if (!scene.captures?.length) warnNoMapCapture(work.caseId, { video: work.source.path, id: scene.id, file_kind: 'image' });
       uiState.proofScene = pictureHandoff(scene, work.source.path, scene.captures);
       uiState.tool = 'proof';
       return;
@@ -1887,6 +1889,21 @@
       captures: (scene.captures ?? []).map(gathered),
       collages,
     };
+  }
+
+  /** The chooser's Go to the map, for a scene with no map capture: geolocated, Satellite beside it. */
+  async function proofToMap() {
+    const chooser = proofChooser;
+    if (!chooser || makingProof) return;
+    proofChooser = null;
+    const run = openRun;
+    try {
+      await heldWork();
+      if (run !== openRun) return;
+      await mapWithScene(work.caseId, { video: work.source.path, id: chooser.scene.id });
+    } catch (e) {
+      if (run === openRun) toast(e.message, 'danger');
+    }
   }
 
   async function confirmProof(ids, capturePaths = [], collagePaths = []) {
@@ -2536,6 +2553,7 @@
       busy={makingProof}
       onconfirm={confirmProof}
       oncancel={() => (proofChooser = null)}
+      onmap={proofToMap}
     />
   {/if}
 

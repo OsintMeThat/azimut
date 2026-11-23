@@ -258,15 +258,33 @@ describe('what the scene gathered, and the links', () => {
     captures: [{ path: 'media/cap-1.png', title: 'cap-1', thumb: 'media/.thumbs/cap-1.jpg' }],
     frames: [
       { id: 'f1', time: 240.5, path: 'media/frame-1.png', thumb: null },
-      { id: 'f2', time: 245, path: null, thumb: null },
+      { id: 'f2', time: 245, path: null, thumb: null, edits: { rotation: 90 } },
     ],
     collages: [{ name: 'quay', title: 'Quay', path: null, thumb: null }],
   };
   const panel = () => document.querySelector('[data-testid="gathered-panel"]');
   const inBody = (text) => [...document.querySelectorAll('button')].find((b) => b.textContent.trim() === text);
 
+  // a frame never saved is drawn from its video; unless a test says, the server cannot
+  let drawFrame = async () => ({ ok: false });
+  const renders = [];
+  const revoked = [];
   beforeEach(() => {
     globalThis.ResizeObserver ??= class { observe() {} disconnect() {} };
+    drawFrame = async () => ({ ok: false });
+    renders.length = 0;
+    revoked.length = 0;
+    vi.stubGlobal('fetch', vi.fn(async (url, init) => {
+      renders.push({ url, ...JSON.parse(init.body) });
+      return drawFrame();
+    }));
+    vi.spyOn(URL, 'createObjectURL').mockImplementation(() => 'blob:f2');
+    vi.spyOn(URL, 'revokeObjectURL').mockImplementation((url) => revoked.push(url));
+    answers.set('GET /api/inspect/ops', { filters: [] });
+  });
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    vi.restoreAllMocks();
   });
 
   async function opened(scene = { ...SCENE, leads: [LEAD] }) {
@@ -304,6 +322,36 @@ describe('what the scene gathered, and the links', () => {
     window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' }));
     flushSync();
     expect(panel()).toBeNull();
+  });
+
+  it('draws a frame never saved from its video while the list is open, and lets it go when it closes', async () => {
+    drawFrame = async () => ({ ok: true, blob: async () => new Blob(['jpeg']) });
+    await opened();
+    await vi.waitFor(() => expect(panel().querySelector('.shot.unsaved img')).not.toBeNull());
+    // through the edits Inspect keeps for it, as Make the proof draws it
+    expect(renders).toEqual([{
+      url: '/api/cases/c1/inspect/render-preview', path: 'media/convoy.mp4', time: 245, ops: [{ op: 'rotate', params: { angle: 90 } }], format: 'jpeg',
+    }]);
+    const shot = panel().querySelector('.shot.unsaved');
+    expect(shot.querySelector('img').getAttribute('src')).toBe('blob:f2');
+    expect(shot.title).toBe('Not saved to the case yet: open the scene in Inspect');
+    // the list read again draws nothing twice
+    geolocating.scene = { ...geolocating.scene, footage: 5 };
+    await settle();
+    expect(renders).toHaveLength(1);
+    window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' }));
+    flushSync();
+    expect(panel()).toBeNull();
+    expect(revoked).toEqual(['blob:f2']);
+  });
+
+  it('keeps the dashed chip for a frame its video cannot draw', async () => {
+    await opened();
+    await vi.waitFor(() => expect(renders).toHaveLength(1));
+    await settle();
+    const shot = panel().querySelector('.shot.unsaved');
+    expect(shot.querySelector('img')).toBeNull();
+    expect(shot.querySelector('svg')).not.toBeNull();
   });
 
   it('shows a lead on the map, and deletes one in a press', async () => {

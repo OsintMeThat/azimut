@@ -49,7 +49,10 @@ Three small links beside the counts go to Inspect on the scene, to Satellite wit
 reference window open again, and to Horizon. **Pressing the counts lists what the scene
 gathered** (`components/GatheredPanel.svelte`, `GET /geolocating/gathered`): its leads,
 its map captures, the frames of its video's strip and its collages inside it, or the
-picture. A lead shows on the map or goes in one press; a capture goes to the case Trash
+picture. A frame never saved to the case is drawn from the video while the list is open,
+twelve at most and one after the other, through the edits Inspect keeps for it, as Make
+the proof draws it (`lib/unfiledFrames.js`); its edge stays dashed, the video icon stands
+in when it cannot be drawn, and a press opens the scene in Inspect. A lead shows on the map or goes in one press; a capture goes to the case Trash
 behind the dialog that says what it touches; a frame leaves Inspect's strip as its ×
 does, its saved picture staying in Media, and an Inspect open on that video drops it too;
 a collage and the picture only open. **A lead is a spot dropped on the map while the
@@ -2087,7 +2090,11 @@ saved on the way, under their default names in the last folder, and Geo Proof op
 new proof of the scene on them, named after its label, on its Proof tab, the facts
 being what is left to do; unsaved work in the open proof is asked about first.
 A scene that gathered captures on the map offers them under its frames, ticked too, and
-Geo Proof lays them out after the frames. A proof still rests on a frame of the video,
+Geo Proof lays them out after the frames. One with none says *No map capture yet: the
+proof gets no coordinates from the map.* beside **Go to the map**, which closes the
+chooser and geolocates the scene on Satellite, its reference window open; the proof can
+still be made. A picture opens no chooser, so its Make the proof says the same in a toast
+with the same press. A proof still rests on a frame of the video,
 so unticking every frame leaves nothing to make. A frame not in the case yet says so on
 its picture, and a scene with no label is named by its time.
 

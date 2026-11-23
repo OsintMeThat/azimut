@@ -52,7 +52,7 @@
   import { ProofScene } from './proof/proofScene.svelte.js';
   import { footageOf, frameOrigin, panelFrames, readHandoff, readStatedScene, sceneBadges, sceneColor, videoName } from '../lib/proofScene.js';
   import { PROOF_SCENE_HELP } from '../lib/proofSceneHelp.js';
-  import { buildFrameOps, frameSaveName, sliderFilters, sourceStem } from '../lib/inspect.js';
+  import { frameSaveName, sourceStem } from '../lib/inspect.js';
   import { preciseClock } from '../lib/inspectPlayer.js';
   import { bindPanelPointerLifecycle, createCanvasRenderGate,
   discardDraft,
@@ -170,14 +170,15 @@
   import MarkShowChoice from '../components/MarkShowChoice.svelte';
   import { onEvent } from '../lib/events.js';
   import {
-    abandonProof, abandonScene, ensureSceneQueue, geolocateScene, geolocating, holdSceneQueue, readSceneQueue, restoreProof, restoreScene,
-    sceneQueue,
+    abandonProof, abandonScene, ensureSceneQueue, geolocateScene, geolocating, holdSceneQueue, mapWithScene, readSceneQueue, restoreProof,
+    restoreScene, sceneQueue, warnNoMapCapture,
   } from '../lib/geolocating.svelte.js';
   import { sceneMaterial, scenesToProve } from '../lib/newProof.js';
   import { openScenes, queueColor } from '../lib/sceneQueue.js';
   import { NO_VIDEO, inVideo, proofLabel, proofVideos, slideTag } from '../lib/proofList.js';
   import { collagesOfScene, pictureHandoff, proofHandoff } from '../lib/sceneFrames.js';
   import { sceneMoments, sceneStart, sceneTime } from '../lib/scenes.js';
+  import { frameDrawer, frameOps } from '../lib/unfiledFrames.js';
 
   const SCALE_STEP = 0.05;
   // Canvas handles are drawn, not styled, so the one accent has to be spelled
@@ -564,7 +565,8 @@
   // `{ video, row, look, navigate, scene, frames, filedIds, captures, collages, capture }` while Make the proof chooses.
   let slideChooser = $state(null);
   let chooserBusy = $state(false);
-  let chooserUrls = [];
+  // the frames a choice shows that the case does not hold yet, drawn from their video
+  const chooserDrawer = frameDrawer();
 
   $effect(() => {
     const star = scene.star, started = proofStarted, page = draftShown;
@@ -1005,7 +1007,7 @@
       return;
     }
     slideChooser = { video, row, look, navigate, scene: { ...row, color }, ...material };
-    void drawUnfiledFrames(caseId, video, material.frames, () => slideChooser?.frames);
+    void chooserDrawer.draw(caseId, video, material.frames, () => slideChooser?.frames);
   }
 
   /** Make this slide, from a tile of the strip or the page of its scene. */
@@ -1014,40 +1016,8 @@
     return chooseSceneFrames({ video: slides.video, row: tile.row, color: tile.color, collages: slides.answer?.collages, look: lastLook });
   }
 
-  // Inspect's sliders, read once: a frame the case does not hold yet is drawn and filed
-  // through the edits Inspect keeps for it, so it comes out as Inspect would save it.
-  let frameFilters = null;
-  async function frameOps(edits) {
-    if (!edits || !Object.keys(edits).length) return [];
-    frameFilters ??= sliderFilters((await api.get('/api/inspect/ops')).filters);
-    return buildFrameOps(frameFilters, edits);
-  }
-
-  /**
-   * The frames the case does not hold yet, drawn from the video for a choice, a few at a
-   * time. `held()` is the list shown now, whose frames take their picture as it comes.
-   */
-  async function drawUnfiledFrames(caseId, video, frames, held) {
-    for (const frame of frames.filter((f) => !f.url).slice(0, 24)) {
-      try {
-        const res = await fetch(`/api/cases/${caseId}/inspect/render-preview`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ path: video, time: frame.time, ops: await frameOps(frame.edits), format: 'jpeg' }),
-        });
-        const shown = held();
-        if (!res.ok || !shown) return;
-        const url = URL.createObjectURL(await res.blob());
-        chooserUrls.push(url);
-        const one = held()?.find((f) => f.id === frame.id);
-        if (one) one.url = url;
-      } catch {
-        return;
-      }
-    }
-  }
-
-  /** The frames of a video the case does not hold yet, filed as Inspect saves them; each takes its path. */
+  /** The frames of a video the case does not hold yet, filed as Inspect saves them
+   *  (`lib/unfiledFrames.frameOps`); each takes its path. */
   async function fileFrames(caseId, video, frames) {
     const unfiled = frames.filter((f) => !f.path);
     if (!unfiled.length) return;
@@ -1061,17 +1031,24 @@
     if (!frames.every((f) => f.path)) throw new Error('A frame could not be saved to the case');
   }
 
-  /** Let go of the frames drawn for a choice, once nothing shows them. */
-  function dropDrawnFrames() {
-    for (const url of chooserUrls) URL.revokeObjectURL(url);
-    chooserUrls = [];
-  }
-
   function closeSlideChooser() {
     slideChooser = null;
-    dropDrawnFrames();
+    chooserDrawer.drop();
   }
-  onDestroy(() => { for (const url of chooserUrls) URL.revokeObjectURL(url); });
+
+  /** The chooser's Go to the map, for a scene with no map capture: geolocated, Satellite beside it. */
+  async function slideChooserToMap() {
+    const chooser = slideChooser;
+    const caseId = caseState.current?.id;
+    if (!chooser || chooserBusy || !caseId) return;
+    closeSlideChooser();
+    try {
+      await mapWithScene(caseId, { video: chooser.video, id: chooser.row.id });
+    } catch (e) {
+      toast(e.message, 'danger');
+    }
+  }
+  onDestroy(() => chooserDrawer.drop());
 
   /** The frames chosen: the ones not in the case filed, then the proof made of them, in clip order. */
   async function confirmSlideFrames(ids, capturePaths = [], collagePaths = []) {
@@ -2243,7 +2220,7 @@
   function closeNewProof() {
     newProofOpen = false;
     newProofScene = null;
-    dropDrawnFrames();
+    chooserDrawer.drop();
   }
 
   // The queue is kept in step while New proof or the home shows its scenes.
@@ -2298,7 +2275,9 @@
     const caseId = caseState.current?.id;
     if (!caseId) return;
     if (file.kind === 'image' || row.file_kind === 'image') {
-      await makeSceneProof(pictureHandoff(row, file.video, row.captures ?? []));
+      const made = await makeSceneProof(pictureHandoff(row, file.video, row.captures ?? []));
+      // no chooser to warn in: a toast says it, the proof made
+      if (made && !row.captures?.length) warnNoMapCapture(caseId, { video: file.video, id: row.id, file_kind: 'image' });
       return;
     }
     let collages = [];
@@ -2337,7 +2316,7 @@
         return now ? (now.startFrame ? [now.startFrame] : now.frames) : null;
       };
       const drawn = held();
-      if (drawn) void drawUnfiledFrames(caseId, entry.video, drawn, held);
+      if (drawn) void chooserDrawer.draw(caseId, entry.video, drawn, held);
       return newProofScene.material;
     } catch {
       return null;
@@ -8829,6 +8808,7 @@
     busy={chooserBusy}
     onconfirm={confirmSlideFrames}
     oncancel={closeSlideChooser}
+    onmap={slideChooserToMap}
   />
 {/if}
 
