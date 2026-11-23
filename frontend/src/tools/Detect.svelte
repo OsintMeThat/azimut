@@ -820,6 +820,7 @@
             items={savedItems}
             caseId={caseState.current.id}
             coords={(item) => fmtCoords(item.lat, item.lon)}
+            names={mapLayers.has('places-names')}
             onopen={flyToSaved}
             onrefresh={reloadCase}
           />

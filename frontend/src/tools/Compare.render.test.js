@@ -749,9 +749,10 @@ describe('Compare', () => {
     expect([...menu.querySelectorAll('.sub-head > span:first-of-type')].map((entry) => entry.textContent)).toEqual([
       'Reference', 'Events', 'Case', 'My layers', 'Added layers',
     ]);
-    // the catalogue's nine and the case's two, Places and Media
-    expect(menu.querySelectorAll('button.eye')).toHaveLength(11);
+    // the catalogue's nine and the case's two, Places with its Names switch, and Media
+    expect(menu.querySelectorAll('button.eye')).toHaveLength(12);
     expect(eye('Places')).not.toBeNull();
+    expect(eye('Names')).not.toBeNull();
     expect(eye('Media')).not.toBeNull();
     // a new pair starts on the borders, as Detect does
     const on = () => [...menu.querySelectorAll('button.eye[aria-pressed="true"]')].map((entry) => entry.getAttribute('aria-label'));

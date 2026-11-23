@@ -28,12 +28,14 @@ vi.mock('../../../lib/map/surface.js', () => ({
   },
 }));
 
-const { createDropState, leadSvg, PLACE_NAME_MAX } = await import('./drop.svelte.js');
+const { createDropState, leadSvg, LEAD_GEOMETRY, PLACE_NAME_MAX } = await import('./drop.svelte.js');
 const { sceneColorAt } = await import('../../../lib/scenes.js');
+const { DROP, DROP_PATH, PLACE_RED, placeMark } = await import('../../../lib/mapMarkers.js');
 
 const SCENE = { video: 'media/convoy.mp4', id: 'sc_1', order: 2, leads: [{ id: 'ld_1', n: 1, lat: 1, lon: 2 }, { id: 'ld_2', n: 4, lat: 3, lon: 4 }] };
 
 let held;
+let shown;
 let deps;
 const settle = async () => {
   for (let i = 0; i < 5; i += 1) await Promise.resolve();
@@ -43,6 +45,7 @@ function make() {
   deps = {
     engine: () => ({}),
     held: () => held,
+    leadsShown: () => shown,
     dropLead: vi.fn(async (at) => ({ id: 'ld_new', n: 5, ...at })),
     moveLead: vi.fn(async () => ({})),
     savePlace: vi.fn(async () => {}),
@@ -57,6 +60,7 @@ beforeEach(() => {
   ghost.shapes = [];
   ghost.moves = [];
   held = null;
+  shown = true;
 });
 
 describe('the drop mode', () => {
@@ -168,7 +172,11 @@ describe('the pin under the pointer', () => {
     expect(ghost.shapes).toEqual([]);
     drop.start();
     drop.ghost({ lat: 1, lon: 1 });
-    expect(ghost.shapes[0].html).toContain('<svg width="30" height="42"');
+    // the place's own mark, the one a saved place is drawn with, in the pin red
+    expect(ghost.shapes[0].html).toBe(placeMark().html);
+    expect(ghost.shapes[0].html).toContain(`fill="${PLACE_RED}"`);
+    expect(ghost.shapes[0].className).toBe('saved-mark-wrap sat-ghost');
+    expect(ghost.shapes[0]).toMatchObject({ size: DROP.size, anchor: DROP.anchor });
     // off the map, it goes
     drop.hideGhost();
     expect(ghost.shapes).toEqual([]);
@@ -201,6 +209,30 @@ describe('the leads on the map', () => {
     drop.at({ lat: 9, lon: 9 });
     drop.draw();
     expect(declared.at(-1).map((s) => s.id)).toEqual(['naming']);
+    // the pin waiting for its name is the place's mark it is about to become
+    const [naming] = declared.at(-1);
+    expect(naming.html).toBe(placeMark().html);
+    expect(naming).toMatchObject({ className: 'saved-mark-wrap sat-naming', size: DROP.size, anchor: DROP.anchor, draggable: true });
+  });
+
+  it('draws no lead while their row hides them, and still drops one', async () => {
+    const drop = make();
+    held = SCENE;
+    shown = false;
+    drop.draw();
+    expect(declared.at(-1)).toEqual([]);
+    drop.start();
+    drop.place({ lat: 5, lon: 6 });
+    await settle();
+    expect(deps.dropLead).toHaveBeenCalledWith({ lat: 5, lon: 6 });
+    shown = true;
+    drop.draw();
+    expect(declared.at(-1).map((s) => s.id)).toEqual(['lead-ld_1', 'lead-ld_2']);
+  });
+
+  it('is the place’s drop in the scene’s colour, so leads and places read as one family', () => {
+    expect(LEAD_GEOMETRY).toBe(DROP);
+    expect(leadSvg(2, '#123456')).toContain(`d="${DROP_PATH}"`);
   });
 
   it('centres the map on a lead clicked, moves one dragged, and takes the click a drag ends in for none', async () => {

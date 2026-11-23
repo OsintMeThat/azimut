@@ -836,6 +836,21 @@ def test_a_colour_list_the_app_never_writes_is_refused(client, keep):
     assert response.status_code == 422
 
 
+def test_a_session_keeps_the_case_layers_each_side_drew(client):
+    # a side drawing the case's places, their names and its placed footage saves them,
+    # so the comparison reopens on them
+    cid = _case(client, "Case layers")
+    spec = _spec()
+    # two pictures that need no release list read, so the save asks nothing of the network
+    spec["b"] = _side(overlays=["places"])
+    spec["a"]["overlays"] = ["boundaries", "places", "places-names", "media"]
+    res = _save(client, cid, "With places", spec=spec)
+    assert res.status_code == 200, res.text
+    loaded = client.get(f"/api/cases/{cid}/compare/sessions/With%20places").json()
+    assert loaded["spec"]["a"]["overlays"] == ["boundaries", "places", "places-names", "media"]
+    assert loaded["spec"]["b"]["overlays"] == ["places"]
+
+
 def test_a_session_saved_with_the_retired_labels_layer_saves_without_it(client):
     # CARTO's labels went when their tiles began asking for a key. A session kept
     # from before, or a tab left open across the update, still sends the id.

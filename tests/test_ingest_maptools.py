@@ -101,6 +101,20 @@ def test_saved_points_are_trimmed_to_what_a_pin_draws(client):
     assert rows[0]["lat"] == pytest.approx(48.8584)
 
 
+def test_a_place_carries_its_colour_to_the_extension_and_none_when_it_has_none(client):
+    headers = _headers(client)
+    cid = _case(client, "Colours")
+    _drop_pin(client, headers, cid)
+    [row] = _saved(client, headers, cid, "places")
+    # a place with no colour of its own says nothing: the pin red is drawn
+    assert "color" not in row
+    patched = client.patch(f"/api/cases/{cid}/entities/{row['id']}", json={"attrs": {"color": "#1f77b4"}})
+    assert patched.status_code == 200, patched.text
+    [row] = _saved(client, headers, cid, "places")
+    assert row["color"] == "#1f77b4"
+    assert set(row) == {"id", "kind", "title", "lat", "lon", "color"}
+
+
 def test_saved_points_answer_one_position_at_a_time(client):
     # the panel draws the position it is on, as the app's own switch does: a
     # capture listed under Places would be a filter that filters nothing

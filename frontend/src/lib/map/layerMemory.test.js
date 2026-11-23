@@ -23,6 +23,10 @@ describe('what a map may keep', () => {
   it('drops a retired or unknown layer', () => {
     expect(keptLayers(['labels', 'roads', 7, null])).toEqual(['roads']);
   });
+
+  it('keeps the names under the places apart from the reference place names', () => {
+    expect(keptLayers(['places-names', 'placenames', 'places'])).toEqual(['placenames', 'places', 'places-names']);
+  });
 });
 
 describe('a map’s switches', () => {
@@ -48,6 +52,13 @@ describe('a map’s switches', () => {
     const satellite = createMapLayerMemory('satellite', ['boundaries', 'placenames'], memory());
     satellite.keep('c1', ['placenames', 'boundaries', 'nightlights']);
     expect(data.size).toBe(0);
+  });
+
+  it('opens a case with the names under its places as it was left, and without them by default', () => {
+    const satellite = createMapLayerMemory('satellite', ['boundaries', 'places', 'media'], memory());
+    expect(satellite.recall('c1')).not.toContain('places-names');
+    satellite.keep('c1', ['boundaries', 'places', 'places-names', 'media']);
+    expect(satellite.recall('c1')).toEqual(['boundaries', 'places', 'places-names', 'media']);
   });
 
   it('keeps going back to the defaults once the case said something', () => {

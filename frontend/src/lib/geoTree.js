@@ -63,8 +63,8 @@ function folderControl(saved, folders) {
 /**
  * The two layers' rows in a map's Layers menu: how many marks each draws, and one
  * with nothing to draw says so. The places' row asks which folder once the places
- * sit in more than one. Media is read only once its layer is on, so a count it
- * never read is not called empty.
+ * sit in more than one, and its Names switch rests with no place to name. Media is
+ * read only once its layer is on, so a count it never read is not called empty.
  *
  * @param {object} saved the tool's saved state
  * @param {{places?: boolean, media?: boolean}} on which of the two layers are on
@@ -79,6 +79,8 @@ export function casePointRows(saved, { places = false } = {}) {
           controls: places && folders.length > 1 ? [folderControl(saved, folders)] : null,
         }
       : { disabled: true, title: 'No place is saved in this case yet' },
+    // the names switch under Places, which has nothing to name without a place
+    'places-names': all.length ? {} : { disabled: true, title: 'No place is saved in this case yet' },
     media: !saved.mediaRead
       ? {}
       : saved.media.length

@@ -408,9 +408,10 @@
             kind: "mark",
             at: { lat: mark.lat, lon: mark.lon },
             glyph,
-            // a bare place carries no imagery: the app outlines it rather than
-            // filling it, so a stack of captures never hides behind one
+            // a place is the drop the app draws, in the colour of its first place,
+            // the newest saved, as the app's own layer paints a stack
             place: only === "place",
+            ...(only === "place" ? { colour: mark.items.find((row) => row.kind === "place")?.color ?? "" } : {}),
             count: mark.items.length,
             lit: shown,
             label: shown ? nameOf(mark) : "",

@@ -418,6 +418,7 @@ describe('what is laid over the imagery', () => {
       'firms',
       'nightlights',
       'places',
+      'places-names',
       'media',
     ]);
     expect(rows).not.toMatch(/^ {6}label: '/m);
@@ -509,6 +510,36 @@ describe('the case’s two layers on the map, Places and Media', () => {
     expect(source).toContain('...pointRows.places,');
     // both on in a case that never said otherwise
     expect(source).toContain("createMapLayerMemory('satellite', ['boundaries', 'places', 'media'])");
+  });
+
+  it('writes the places’ names under their marks from a switch under Places, kept per case and off by default', () => {
+    const rows = source.slice(source.indexOf('const layerRows = $derived(['));
+    expect(rows).toContain("...catalogued('places-names'),\n      of: 'places',");
+    expect(rows).toContain("...(placesOn ? {} : { disabled: true, title: SHOWN_WITH('places') }),");
+    expect(source).toContain('let namesOn = $state(false);');
+    expect(source).toContain("namesOn && 'places-names',");
+    expect(source).toContain("namesOn = ids.includes('places-names');");
+    expect(source).toContain('names={namesOn}');
+  });
+
+  it('lists the leads of the scene being geolocated as a row of their own, hidden for this session only', () => {
+    const rows = source.slice(source.indexOf('const layerRows = $derived(['));
+    expect(rows).toContain("id: 'leads',");
+    expect(rows).toContain('dot: sceneColorAt(heldScene.order),');
+    expect(rows).toContain("detail: String(heldScene.leads?.length ?? 0),");
+    expect(rows).toContain('toggle: () => (leadsOn = !leadsOn),');
+    // the drop mode draws them, and keeps working while they are hidden
+    expect(source).toContain('leadsShown: () => leadsOn,');
+    // never kept with the layers a case opens on
+    expect(source).not.toContain("leadsOn && 'leads'");
+  });
+
+  it('hands a capture taken with its layers what is laid on the map, credited, and its marks to paint', () => {
+    expect(source).toContain('layered: laidOnMap,');
+    const laid = source.slice(source.indexOf('function laidOnMap() {'));
+    expect(laid).toContain('...drawnOverlays.map(overlayAttribution), ...added.map(owedCredit)');
+    expect(laid).toContain('paintCaseMarks(ctx, {');
+    expect(source).toContain('bind:layers={capture.layers}');
   });
 
   it('reads the media index once the Media layer is on, not before', () => {

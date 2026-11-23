@@ -125,6 +125,10 @@ DEFAULT_SETTINGS: dict[str, Any] = {
     # default: what is drawn onto somebody's evidence is asked for, never
     # assumed — and the tick is remembered here so it is asked for once.
     "capture_scale_north": False,
+    # Whether a capture is the map as drawn, with its overlays, the analyst's layers
+    # and the case's marks, each source credited on it (the capture menu's tick).
+    # Off by default: a capture is the imagery alone unless asked otherwise.
+    "capture_layers": False,
     # Where the Satellite tab opens before anything points it somewhere else
     # (a case artifact, a "go to coords" handoff). {"lat", "lon", "zoom"}.
     "home_view": {"lat": 43.0, "lon": 25.0, "zoom": 3},

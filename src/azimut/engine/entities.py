@@ -100,6 +100,7 @@ are disposable.
 from __future__ import annotations
 
 import math
+import re
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from typing import Any
@@ -963,6 +964,21 @@ def check_attrs(
         _CHECKS[attr.kind](attr, value)
     if type_ == "place":
         _check_place_precision(attrs, current or {})
+        _check_place_colour(attrs)
+
+
+#: The colour a place's mark is drawn in (the Map tool's key, like ``lat`` and ``lon``):
+#: a code the map can paint, ``#rrggbb``. Absent or empty is the app's pin red.
+PLACE_COLOUR = re.compile(r"^#[0-9a-fA-F]{6}$")
+
+
+def _check_place_colour(attrs: Mapping[str, Any]) -> None:
+    """A place's colour is a ``#rrggbb`` code: it is written into the mark's SVG."""
+    value = attrs.get("color")
+    if value is None or value == "":
+        return
+    if not isinstance(value, str) or not PLACE_COLOUR.match(value):
+        raise CaseError("'color' must be a colour code like #e5484d")
 
 
 def _check_text(attr: Attr, value: Any) -> None:

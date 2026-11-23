@@ -288,7 +288,8 @@ hand and the located media the case collected, both drawn from the start and eac
 put away or back with its own button. Each is read on its own, because a file
 carries no coordinates of its own and is not in the index places come from.
 Captures are not drawn: they are pictures of a map. Filing a point puts Places
-back if it was away, so the point just filed is drawn rather than swallowed.
+back if it was away, so the point just filed is drawn rather than swallowed. A place
+is the app's drop, in the colour its card in the app gave it, red without one.
 
 **Placing a point** is one click. Once **Place a point** is pressed, a faint pin
 follows the pointer over the map where the click will land; the click puts the

@@ -630,6 +630,107 @@ def test_a_tilted_capture_refuses_what_the_3d_map_cannot_have_drawn(client, data
     assert r.status_code == status, r.text
 
 
+def _layered(client, cid, **extra):
+    """A capture taken with the layers on the map, flat unless told otherwise."""
+    import json as _json
+
+    data = {"lat": "46.5", "lon": "8.0", "zoom": "15.4", "provider": "esri-world-imagery", "pitch": "0",
+            "layers": _json.dumps(["boundaries", "added", "places", "places-names", "leads"]),
+            "layer_names": _json.dumps(["Front line"]),
+            "credits": "OpenFreeMap © OpenMapTiles · Data © OpenStreetMap contributors · Front line — geoconfirmed.org",
+            **extra}
+    return client.post(
+        f"/api/cases/{cid}/satellite/oblique",
+        files={"image": ("layers.png", _png_bytes(w=800), "image/png")},
+        data=data,
+    )
+
+
+def test_a_capture_with_its_layers_records_them_and_credits_every_source(client):
+    cid = client.post("/api/cases", json={"name": "Sat"}).json()["id"]
+    r = _layered(client, cid)
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert body["method"] == "render"
+    # what was drawn over the imagery, so it is never read as the imagery alone
+    assert body["layers"] == ["boundaries", "added", "places", "places-names", "leads"]
+    assert body["layer_names"] == ["Front line"]
+    # the imagery's credit, then every layer's, burned on the picture
+    assert body["attribution"].startswith("Esri")
+    assert body["attribution"].endswith(
+        " · OpenFreeMap © OpenMapTiles · Data © OpenStreetMap contributors · Front line — geoconfirmed.org"
+    )
+    # looking straight down at a flat map: no relief drawn, none credited
+    assert body["relief"] is None
+    assert "Relief" not in body["attribution"]
+    # the saved list says it carries layers, and which
+    row = client.get(f"/api/cases/{cid}/satellite/index").json()[0]
+    assert (row["layers"], row["layer_names"]) == (body["layers"], ["Front line"])
+
+
+def test_a_capture_of_the_imagery_alone_lists_no_layers(client):
+    cid = client.post("/api/cases", json={"name": "Sat"}).json()["id"]
+    body = client.post(
+        f"/api/cases/{cid}/satellite/oblique",
+        files={"image": ("tilted.png", _png_bytes(), "image/png")},
+        data={"lat": "46.5", "lon": "8.0", "zoom": "12", "provider": "esri-world-imagery", "pitch": "45"},
+    ).json()
+    assert "layers" not in body
+    assert "layers" not in client.get(f"/api/cases/{cid}/satellite/index").json()[0]
+
+
+def test_a_capture_with_its_layers_carries_a_scale_bar_only_looking_straight_down(client):
+    cid = client.post("/api/cases", json={"name": "Sat"}).json()["id"]
+    flat = _layered(client, cid, scale_north="true", device_scale="2").json()
+    assert flat["marks"] and flat["marks"]["scale"]
+    tilted = _layered(client, cid, pitch="50", scale_north="true").json()
+    assert tilted["marks"] is None
+    # tilted, the heights were drawn and are credited beside the layers
+    assert tilted["relief"]["source"] == "mapterhorn"
+    assert "Relief" in tilted["attribution"]
+
+
+def test_a_flat_capture_drawn_by_the_3d_view_credits_the_heights(client):
+    cid = client.post("/api/cases", json={"name": "Sat"}).json()["id"]
+    body = _layered(client, cid, relief="true").json()
+    assert body["relief"]["source"] == "mapterhorn"
+    assert "Relief" in body["attribution"]
+
+
+def test_a_capture_with_its_layers_is_reused_only_for_the_same_layers(client):
+    cid = client.post("/api/cases", json={"name": "Sat"}).json()["id"]
+    first = _layered(client, cid, reuse="true").json()
+    again = _layered(client, cid, reuse="true").json()
+    assert again["reused"] is True and again["entity"]["id"] == first["entity"]["id"]
+    other = _layered(client, cid, reuse="true", layers='["boundaries"]').json()
+    assert not other.get("reused")
+
+
+@pytest.mark.parametrize("extra, detail", [
+    ({"layers": '["boundaries", "secret-layer"]'}, "unknown capture layer 'secret-layer'"),
+    ({"layers": '{"places": true}'}, "'layers' must be a JSON list"),
+    ({"layers": "not json"}, "'layers' must be a JSON list"),
+    ({"layers": '["places", 4]'}, "by id"),
+    ({"layers": "[" + ", ".join(['"places"'] * 40) + "]"}, "by id"),
+    ({"layer_names": '[' + ', '.join(['"x"'] * 41) + ']'}, "at most 40 names"),
+    ({"credits": "x" * 4001}, "under 4000 characters"),
+    ({"layers": "[]"}, "captured from tiles"),
+])
+def test_a_capture_with_its_layers_refuses_what_no_map_draws(client, extra, detail):
+    cid = client.post("/api/cases", json={"name": "Sat"}).json()["id"]
+    r = _layered(client, cid, **extra)
+    assert r.status_code == 422, r.text
+    assert detail in r.text
+
+
+def test_a_capture_names_the_analysts_layers_on_one_line_each(client):
+    import json as _json
+
+    cid = client.post("/api/cases", json={"name": "Sat"}).json()["id"]
+    body = _layered(client, cid, layer_names=_json.dumps(["  Front\nline  ", "x" * 300, ""])).json()
+    assert body["layer_names"] == ["Front line", "x" * 120]
+
+
 def test_screenshot_provenance_distinguishes_a_framed_crop_from_a_pasted_image(client):
     """A screen crop taken through the capture frame is registered — its
     lat/lon *are* the crop centre — while a pasted screenshot's coordinates are

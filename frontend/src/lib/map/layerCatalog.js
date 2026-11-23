@@ -53,6 +53,9 @@ export const LAYERS = Object.freeze([
   // photos and videos where they were placed. Captures are not drawn on a map: they
   // are listed in the Saved panel, and a scene's in its pill.
   { id: 'places', label: 'Places', group: 'case', title: 'The places saved in this case' },
+  // A switch under Places rather than a layer of its own (`of`): each place's name
+  // written under its mark. Off until asked for, since a name covers the ground under it.
+  { id: 'places-names', label: 'Names', group: 'case', of: 'places', title: "Each place's name under its mark" },
   { id: 'media', label: 'Media', group: 'case', title: "This case's photos and videos where they were placed" },
 ]);
 
@@ -80,4 +83,22 @@ export function knownLayers(value) {
 }
 
 /** The case's own point layers, which a map draws itself rather than lay over its picture. */
-export const CASE_POINT_LAYERS = Object.freeze(['places', 'media']);
+export const CASE_POINT_LAYERS = Object.freeze(['places', 'places-names', 'media']);
+
+/**
+ * The layers a capture says it carries, in words for its details: the catalogue's
+ * names, the places with their names when those were written, the scene's leads,
+ * and the analyst's own layers by name (`api/satellite.capture_oblique`).
+ */
+export function capturedLayerWords(ids = [], names = []) {
+  const list = Array.isArray(ids) ? ids : [];
+  const words = [];
+  for (const id of list) {
+    if (id === 'places-names') continue;
+    if (id === 'places') words.push(list.includes('places-names') ? 'Places with names' : 'Places');
+    else if (id === 'leads') words.push('Leads');
+    else if (id === 'added') words.push(...(names?.length ? names : ['Your layers']));
+    else words.push(layerInfo(id)?.label ?? id);
+  }
+  return words.join(', ');
+}

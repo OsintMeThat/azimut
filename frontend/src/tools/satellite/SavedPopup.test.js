@@ -141,7 +141,8 @@ describe('SavedPopup, a saved comparison', () => {
   });
 
   it('draws a stack of captures and comparisons with the capture glyph, not a pin', () => {
-    expect(overlay).toContain('const kind = markKind(mark.kinds);');
+    // the look is read off the mark (`lib/savedMarkers.markLook`, tested there)
+    expect(overlay).toContain('const look = markLook(mark);');
   });
 
   it('outlines its frame in dashes, never as a guess about a place', () => {
@@ -164,7 +165,7 @@ describe('SavedOverlay popup wiring', () => {
   });
 
   it('opens a card for every mark of saved work, one item or a stack', () => {
-    expect(overlay).toContain('content: () => popupContent(mark)');
+    expect(overlay).toContain('content: () => popupContent(mark, at)');
     // no shortcut path that flies straight there on a single-item mark. A mark of
     // located files is the one that answers its own click, by playing them in the
     // panel — there is no card for a photo to open.
@@ -186,7 +187,7 @@ describe('SavedOverlay popup wiring', () => {
     // the dot is drawn from the count the saved index carries, and the proof
     // itself is never a second mark at the same point
     expect(overlay).toContain('saved-mark-worked');
-    expect(overlay).toContain('proofs > 0');
+    expect(overlay).toContain("look.worked ? '<i class=\"saved-mark-worked\"></i>'");
   });
 
   it('keys marks on the row key, so one proof at two places lights both', () => {
@@ -240,7 +241,7 @@ describe('SavedPopup relations', () => {
     expect(overlay).toContain('onPopupOpen: () => (popupOpen = true)');
     // the layer's teardown is not the data effect's cleanup, which Svelte runs
     // before every re-run — including one that decides to defer
-    expect(overlay).toContain('function rebuild(rows, precision)');
+    expect(overlay).toContain('function rebuild(rows, precision, named)');
   });
 
   it('never caches a failed read as "this point has no relations"', () => {

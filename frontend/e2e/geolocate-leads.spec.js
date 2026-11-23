@@ -179,3 +179,82 @@ test('draws the case’s places with the Places layer on by default, and turns i
   await expect.poll(() => fixture.placeWrites.length).toBe(1);
   await expect(places).toHaveAttribute('aria-pressed', 'true');
 });
+
+test('draws a place as one drop from the pin under the pointer to the place saved, in the colour its card gives it', async ({ page }) => {
+  const { fixture } = await openMap(page, {
+    geolocated: false,
+    places: [{ id: 'place-1', key: 'place-1', kind: 'place', title: 'North depot', lat: 48.859, lon: 2.295 }],
+  });
+  const saved = page.locator('.saved-mark-wrap:not(.sat-ghost):not(.sat-naming) .place-drop');
+  await expect(saved).toHaveCount(1);
+  await expect(saved.locator('path')).toHaveAttribute('fill', '#e5484d');
+
+  // the pale pin and the pin waiting for its name are the same drop
+  await page.getByRole('button', { name: 'Save place' }).click();
+  const box = await page.locator('.map[data-map-ready="true"]').boundingBox();
+  await page.mouse.move(box.x + box.width / 2 + 90, box.y + box.height / 2 - 40);
+  await expect(page.locator('.sat-ghost .place-drop')).toHaveCount(1);
+  await clickMap(page, 90, -40);
+  await expect(page.locator('.sat-naming .place-drop')).toHaveCount(1);
+  await page.keyboard.press('Escape');
+
+  // the card picks a colour, kept on the place, and the mark wears it at once
+  await saved.click();
+  await page.getByRole('button', { name: 'Place colour' }).click();
+  await page.getByRole('button', { name: 'More colours' }).click();
+  const code = page.getByRole('textbox', { name: 'Place colour code' });
+  await code.fill('#1f77b4');
+  await code.press('Enter');
+  await expect.poll(() => fixture.entityWrites.find((write) => write.body?.attrs?.color)?.body).toEqual({ attrs: { color: '#1f77b4' } });
+  await expect(saved.locator('path')).toHaveAttribute('fill', '#1f77b4');
+});
+
+test('writes the places’ names under their marks from the Names switch under Places', async ({ page }) => {
+  await openMap(page, {
+    geolocated: false,
+    places: [{ id: 'place-1', key: 'place-1', kind: 'place', title: 'North depot', lat: 48.859, lon: 2.295 }],
+  });
+  const names = page.getByRole('button', { name: 'Names', exact: true });
+  await expect(names).toHaveAttribute('aria-pressed', 'false');
+  await expect(page.locator('.saved-mark-name')).toHaveCount(0);
+  await names.click();
+  await expect(page.locator('.saved-mark-name')).toHaveText('North depot');
+  // with Places off there is nothing to name, and the switch rests
+  await page.getByRole('button', { name: 'Places', exact: true }).click();
+  await expect(names).toBeDisabled();
+  await expect(page.locator('.saved-mark-name')).toHaveCount(0);
+});
+
+test('lists the scene’s leads as a row of Layers whose eye hides them, and still drops one', async ({ page }) => {
+  const { server } = await openMap(page);
+  const drop = page.getByRole('button', { name: 'Drop a lead' });
+  await drop.click();
+  await clickMap(page, 120, -60);
+  await expect.poll(() => server.calls).toEqual(['drop ld_1']);
+  await expect(page.locator('.sat-lead')).toHaveCount(1);
+
+  const leads = page.getByRole('button', { name: 'Leads', exact: true });
+  await expect(leads).toHaveAttribute('aria-pressed', 'true');
+  const row = page.locator('li', { has: leads });
+  await expect(row.locator('.detail')).toHaveText('1');
+  await leads.click();
+  await expect(page.locator('.sat-lead')).toHaveCount(0);
+  // hidden, a click still drops one, and the row counts it
+  await clickMap(page, -140, 40);
+  await expect.poll(() => server.calls).toEqual(['drop ld_1', 'drop ld_2']);
+  await expect(row.locator('.detail')).toHaveText('2');
+  await expect(page.locator('.sat-lead')).toHaveCount(0);
+  await leads.click();
+  await expect(page.locator('.sat-lead')).toHaveCount(2);
+});
+
+test('remembers the Layers on the map tick, and rests 2× and Max while it is ticked', async ({ page }) => {
+  const { fixture } = await openMap(page, { geolocated: false });
+  await page.getByRole('button', { name: 'Capture options' }).click();
+  const tick = page.getByRole('checkbox', { name: 'Layers on the map' });
+  await expect(tick).not.toBeChecked();
+  await tick.check();
+  await expect.poll(() => fixture.settingsWrites).toContainEqual({ capture_layers: true });
+  await expect(page.getByRole('button', { name: '2×' })).toBeDisabled();
+  await expect(page.getByRole('button', { name: 'Max' })).toHaveAttribute('title', 'Layers are captured at screen resolution');
+});

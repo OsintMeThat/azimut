@@ -3141,6 +3141,18 @@ screenshot gets neither, since its coordinates describe the map view at filing
 time rather than the picture itself. What was drawn is written into the
 capture's provenance.
 
+A capture is the imagery alone until **Layers on the map** is ticked beside it, which
+is remembered the same way. Then it is the map as drawn, flat or tilted: the borders,
+roads, names and other overlays, the analyst's own layers, and the case's places, files
+and leads painted where the screen shows them, with the marker. Every source drawn
+adds its credit to the line under the picture, the overlays' as the catalogue states
+them and a followed layer's as its source asks, and the capture records the layers it
+carries (`layers`, the analyst's by name), which its details list, so it is never read
+as the imagery alone. It is taken at screen resolution, so 2× and Max rest while it is
+ticked and say why. Looking straight down it can still carry the scale bar. A map
+with nothing laid on it is captured as the imagery, and a Google basemap, grabbed
+from the screen, does not offer the tick.
+
 **Figure** sits in the same menu while Sentinel-2 is on, in its first row beside
 Capture and Capture an area, since it is a third thing to take off this map rather
 than a setting for the other two: the same ground on the day already chosen,
@@ -3219,7 +3231,9 @@ where you click** rather than filing the map's centre: once pressed, a pale pin 
 the pointer to show where the click lands. The pin asks for its name in a field beside
 it, and Enter saves it as a place, which ends the mode, as Escape does; Save waits for a
 name, since a place with none only reads as its coordinates. Notes, folder and relations
-are the place card's. While a scene is geolocated the button reads **Drop a lead** with
+are the place card's. The pale pin, the pin waiting for its name and the place saved are
+one mark, a red drop with a white heart (`lib/mapMarkers.placeMark`). While a scene is
+geolocated the button reads **Drop a lead** with
 the scene's dot, the pale pin is the next lead with its number, and each click drops one
 with nothing asked, until Escape or the button again; the right-click's *Save place here…* reads
 *Drop a lead here* then. A lead is dragged to move it and clicked to centre the map on
@@ -3451,13 +3465,21 @@ only once that layer is on. Captures are not drawn on a map: they are listed in 
 Saved panel, and a scene's in its pill. Places ask **which folder** under their row,
 offered only where they sit in more than one, and each row counts what it draws. A map
 kept with the old Saved work layer opens with both. The switches are kept per case with
-the other layers.
-Places draw as outlined pins, located
-files as white-ringed ones, items at the same spot collapse
+the other layers. A **Names** switch under Places, off until pressed and kept per case
+too, writes each place's title under its mark, cut past 28 characters, and "3 places"
+under a stack of them; Compare, Detect and Horizon list it under their Places too.
+While the case geolocates a scene, a **Leads** row in the scene's colour counts its leads
+and its eye hides them from the map for the session; dropping one still works.
+A place draws as a drop in its own colour, red until one is picked, with a white heart,
+or the count of a stack of places in it, which wears its newest place's colour. The
+place's card picks the colour from the palette a layer's style uses: the plain colours,
+those picked lately and a code typed or pasted. It is kept on the place (`attrs.color`)
+and the extension draws the same drop. Located
+files draw as white-ringed teardrops, items at the same spot collapse
 into one counted mark, and clicking a mark of saved work opens a card
 with its preview, provider, dates and note. A mark of files has no card: it plays
 them in the panel. A mark whose capture carries proofs
-wears a dot up-left, and its card names the count. Hovering a card, a tree row or a search result
+wears a dot on its shoulder, and its card names the count. Hovering a card, a tree row or a search result
 lights the others.
 
 A card also holds the point's relations. The Saved index carries their count only,

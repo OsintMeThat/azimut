@@ -15,6 +15,8 @@
   import { toast } from '../../lib/state.svelte.js';
   import { loadRelationTypes, relationAction } from '../../lib/relations.svelte.js';
   import { keptLabel, lookLabel, pairLabel, stackOrder } from '../../lib/savedMarkers.js';
+  import { placeColour } from '../../lib/mapMarkers.js';
+  import LayerStylePalette from './LayerStylePalette.svelte';
 
   let {
     items = [],
@@ -27,6 +29,9 @@
     ontrace,
     onentity, // a related entity was picked: leave for its own tool
     onrefresh, // a relation was settled: sync the other surfaces
+    // a place was given a colour: its mark is painted again at once. Absent on a
+    // map that edits nothing, which offers no colour either.
+    oncolour = null,
   } = $props();
 
   const GLYPH = { place: 'pin', capture: 'satellite', screenshot: 'screen', comparison: 'compare', view: 'horizon' };
@@ -114,6 +119,27 @@
   async function relationSettled(row) {
     await loadRelations(row);
     await onrefresh?.();
+  }
+
+  // A place's colour, picked from the palette a layer's style is (recent colours and
+  // a code typed or pasted). The colour a place shows waits for no reload.
+  let colouring = $state(null);
+  let picked = $state({});
+  const colourOf = (row) => placeColour(picked[rowKey(row)] ?? row.color);
+
+  async function recolour(row, hex) {
+    const colour = placeColour(hex);
+    if (colour === colourOf(row) || !caseId || !row.id) return;
+    const before = picked[rowKey(row)];
+    picked = { ...picked, [rowKey(row)]: colour };
+    try {
+      await api.patch(`/api/cases/${caseId}/entities/${row.id}`, { attrs: { color: colour } });
+      oncolour?.(row, colour);
+      await onrefresh?.();
+    } catch (e) {
+      picked = { ...picked, [rowKey(row)]: before };
+      toast(`Could not change the colour: ${e.message}`, 'danger', 5000);
+    }
   }
 
 </script>
@@ -220,6 +246,20 @@
                 <Icon name={row.kind === 'comparison' ? 'compare' : row.kind === 'view' ? 'horizon' : 'edit'} size={13} />
               </button>
             {/if}
+            {#if row.kind === 'place' && oncolour}
+              <button
+                type="button"
+                class="icon-act"
+                class:on={colouring === rowKey(row)}
+                aria-label="Place colour"
+                aria-expanded={colouring === rowKey(row)}
+                title="The colour of this place on the map"
+                onclick={(event) => {
+                  event.stopPropagation();
+                  colouring = colouring === rowKey(row) ? null : rowKey(row);
+                }}
+              ><span class="colour-dot" style:background={colourOf(row)}></span></button>
+            {/if}
             {#if row.kind === 'place' && ontrace}
               <button
                 type="button"
@@ -254,6 +294,12 @@
               >Full image <Icon name="external" size={10} /></a>
             {/if}
           </p>
+          {#if row.kind === 'place' && oncolour && colouring === rowKey(row)}
+            <div class="colours">
+              <LayerStylePalette label="Place" colour={colourOf(row)} point={false}
+                onpick={({ colour }) => recolour(row, colour)} />
+            </div>
+          {/if}
         </div>
       </div>
     {/each}
@@ -437,6 +483,9 @@
   .icon-act { display: grid; place-items: center; flex: none; width: 24px; height: 24px; padding: 0; border: 0; border-radius: var(--r-sm); background: transparent; color: var(--text-2); cursor: pointer; }
   .icon-act:hover { color: var(--accent); background: var(--bg-3); }
   .icon-act.danger:hover { color: var(--danger); }
+  .icon-act.on { background: var(--bg-3); }
+  .colour-dot { width: 12px; height: 12px; border-radius: 50%; box-shadow: 0 0 0 1.5px #141414, 0 0 0 2.5px rgba(255, 255, 255, 0.35); }
+  .colours { margin-top: 4px; padding-top: 6px; border-top: 1px solid var(--border); }
   .acts > .link { margin-left: 4px; }
   .link {
     display: inline-flex;

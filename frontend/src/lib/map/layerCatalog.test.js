@@ -1,11 +1,11 @@
 import { describe, expect, it } from 'vitest';
 import { OVERLAY_IDS } from './basemap.js';
-import { CASE_POINT_LAYERS, knownLayers, LAYER_GROUPS, LAYERS, layerInfo } from './layerCatalog.js';
+import { CASE_POINT_LAYERS, knownLayers, LAYER_GROUPS, LAYERS, layerInfo, capturedLayerWords } from './layerCatalog.js';
 
 describe('the layer catalogue', () => {
   it('names every overlay the surface can draw, and the case’s own two layers', () => {
     const drawn = LAYERS.map((layer) => layer.id).filter((id) => !CASE_POINT_LAYERS.includes(id));
-    expect(CASE_POINT_LAYERS).toEqual(['places', 'media']);
+    expect(CASE_POINT_LAYERS).toEqual(['places', 'places-names', 'media']);
     expect(new Set(drawn)).toEqual(new Set(OVERLAY_IDS));
   });
 
@@ -30,5 +30,19 @@ describe('the layer catalogue', () => {
   it('says nothing about a layer nobody offers', () => {
     expect(layerInfo('roads').imageryOnly).toBe(true);
     expect(layerInfo('labels')).toBeNull();
+  });
+});
+
+describe('the layers a capture carries, in words', () => {
+  it('names the catalogue’s layers, the places with their names, the leads and the analyst’s layers by name', () => {
+    expect(capturedLayerWords(['boundaries', 'roads', 'places', 'places-names', 'media', 'leads', 'added'], ['Front line']))
+      .toBe('Borders, Roads, Places with names, Media, Leads, Front line');
+    expect(capturedLayerWords(['places', 'added'])).toBe('Places, Your layers');
+    expect(capturedLayerWords(null)).toBe('');
+  });
+
+  it('keeps the Names switch under Places, apart from the reference place names', () => {
+    expect(layerInfo('places-names')).toMatchObject({ label: 'Names', group: 'case', of: 'places' });
+    expect(layerInfo('placenames').label).toBe('Place names');
   });
 });

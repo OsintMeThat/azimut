@@ -419,3 +419,35 @@ def test_a_place_with_no_precision_states_none_in_the_index(client):
     )
 
     assert row["radius_m"] is None and row["footprint"] is None
+
+
+# -- the colour its mark is drawn in -----------------------------------------
+
+
+def test_a_place_takes_a_colour_code_for_its_mark_and_the_saved_index_carries_it(client):
+    cid = _new_case(client, "Coloured place")
+    eid = _place(client, cid).json()["id"]
+    assert _patch(client, cid, eid, {"color": "#1F77B4"}).status_code == 200
+    [row] = client.get(f"/api/cases/{cid}/satellite/index").json()
+    assert row["color"] == "#1F77B4"
+    # cleared, it is the pin red again, which the index says as nothing
+    assert _patch(client, cid, eid, {"color": ""}).status_code == 200
+    [row] = client.get(f"/api/cases/{cid}/satellite/index").json()
+    assert row["color"] is None
+
+
+@pytest.mark.parametrize("colour", ["red", "#12345", "#1234567", "#gg0000", "rgb(1,2,3)", 12, "#e5484d;x"])
+def test_a_place_refuses_anything_but_a_colour_code(client, colour):
+    """The colour is written into the mark's SVG, so only a code goes in."""
+    cid = _new_case(client, "Bad colour")
+    eid = _place(client, cid).json()["id"]
+    res = _patch(client, cid, eid, {"color": colour})
+    assert res.status_code == 400, res.text
+    assert "colour code" in res.text
+
+
+def test_only_a_place_reads_a_colour_in_the_saved_index(client):
+    cid = _new_case(client, "No colour elsewhere")
+    client.post(f"/api/cases/{cid}/satellite/place", json={"lat": 1, "lon": 2, "title": "P"})
+    [row] = client.get(f"/api/cases/{cid}/satellite/index").json()
+    assert row["kind"] == "place" and row["color"] is None

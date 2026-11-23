@@ -97,6 +97,7 @@ describe('on a basemap with no figure to build', () => {
       'Captures the centred size below.',
       'Captures a deeper zoom for a sharper file.',
       'Drawn into the capture, in your units.',
+      'The map as drawn, each source credited.',
     ]);
   });
 });
@@ -114,5 +115,39 @@ describe('over a tilted map', () => {
     show({ tilted: false });
     expect(document.body.textContent).toContain('Resolution');
     expect(document.body.textContent).toContain('Scale bar & north arrow');
+  });
+});
+
+describe('the layers on the map', () => {
+  const chip = (text) => [...document.body.querySelectorAll('.chip')].find((node) => node.textContent.trim() === text);
+  const tick = () => [...document.body.querySelectorAll('.menu-check')].find((node) => node.textContent.includes('Layers on the map'));
+
+  it('is a tick beside the scale bar’s, flat or tilted, and never on a screen-grabbed basemap', () => {
+    show();
+    expect(tick()).toBeTruthy();
+    expect(tick().querySelector('input').checked).toBe(false);
+    unmount(held);
+    show({ tilted: true });
+    expect(tick()).toBeTruthy();
+    unmount(held);
+    show({ widgetBase: true });
+    expect(tick()).toBeUndefined();
+  });
+
+  it('rests 2× and Max while ticked, and says why once', () => {
+    show({ layers: true, resolution: 2 });
+    expect(chip('2×').disabled).toBe(true);
+    expect(chip('Max').disabled).toBe(true);
+    expect(chip('2×').title).toBe('Layers are captured at screen resolution');
+    // 1× is what is taken, whatever was picked before
+    expect(chip('1×').classList.contains('on')).toBe(true);
+    expect(hints()).toContain('Layers are captured at screen resolution.');
+    expect(hints()).not.toContain('Captures a deeper zoom for a sharper file.');
+  });
+
+  it('leaves every resolution free while unticked', () => {
+    show({ layers: false });
+    expect(chip('2×').disabled).toBe(false);
+    expect(chip('Max').disabled).toBe(false);
   });
 });

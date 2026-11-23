@@ -22,6 +22,8 @@
     customHeight = $bindable(),
     resolution = $bindable(),
     scaleNorth = $bindable(),
+    /** The capture is the map as drawn, its layers and marks credited on it. */
+    layers = $bindable(false),
     openScreenshot,
     openExtensionGate,
     /** Build a figure instead of one picture. Absent where there is none to
@@ -36,6 +38,10 @@
     /** The view as an offer to the note pinned beside (`mapNote.viewOffer`); its row shows only while one is. */
     noteOffer = null,
   } = $props();
+
+  /** Why 2× and Max rest while the layers are captured: the map is drawn at screen resolution. */
+  const SCREEN_ONLY = 'Layers are captured at screen resolution';
+  const screenOnly = $derived(layers && !widgetBase);
 </script>
 
 <div class="capture-split" role="group" data-guide="sat.capture">
@@ -180,12 +186,14 @@
           <div class="menu-row">
             <span class="menu-label">Resolution</span>
             <div class="chips">
-              <button class="chip" class:on={resolution === 1} onclick={() => (resolution = 1)}>1×</button>
-              <button class="chip" class:on={resolution === 2} onclick={() => (resolution = 2)}>2×</button>
-              <button class="chip" class:on={resolution === 'max'} onclick={() => (resolution = 'max')}>Max</button>
+              <button class="chip" class:on={screenOnly || resolution === 1} onclick={() => (resolution = 1)}>1×</button>
+              <button class="chip" class:on={!screenOnly && resolution === 2} disabled={screenOnly}
+                title={screenOnly ? SCREEN_ONLY : undefined} onclick={() => (resolution = 2)}>2×</button>
+              <button class="chip" class:on={!screenOnly && resolution === 'max'} disabled={screenOnly}
+                title={screenOnly ? SCREEN_ONLY : undefined} onclick={() => (resolution = 'max')}>Max</button>
             </div>
           </div>
-          <div class="menu-hint">Captures a deeper zoom for a sharper file.</div>
+          <div class="menu-hint">{screenOnly ? `${SCREEN_ONLY}.` : 'Captures a deeper zoom for a sharper file.'}</div>
         {/if}
 
         {#if !tilted}
@@ -194,6 +202,13 @@
             <span>Scale bar & north arrow</span>
           </label>
           <div class="menu-hint last">Drawn into the capture, in your units.</div>
+        {/if}
+        {#if !widgetBase}
+          <label class="menu-check" class:next={!tilted}>
+            <input type="checkbox" bind:checked={layers} />
+            <span>Layers on the map</span>
+          </label>
+          <div class="menu-hint last">The map as drawn, each source credited.</div>
         {/if}
         {#if noteOffer && !blocked}
           <PutInNote offer={noteOffer} class="btn btn-sm put-row" role="button" onput={() => (menuOpen = false)} />
@@ -285,5 +300,9 @@
     cursor: pointer;
   }
   .menu-check input { accent-color: var(--accent); cursor: pointer; }
+  /* the second tick sits under the first, one rule above the pair */
+  .menu-check.next { margin-top: 6px; padding-top: 0; border-top: 0; }
+  .chip:disabled { opacity: 0.45; cursor: not-allowed; }
+  .chip:disabled:hover { border-color: var(--border); color: var(--text-2); }
   .menu-row + .custom-size { justify-content: flex-end; padding: 2px 0; }
 </style>

@@ -327,6 +327,16 @@ def test_get_settings_exposes_prefs_and_free_tier(client):
     assert body["update_dismissed_version"] == ""
 
 
+def test_the_capture_ticks_are_kept_in_settings(client):
+    fresh = client.get("/api/settings").json()
+    assert (fresh["capture_scale_north"], fresh["capture_layers"]) == (False, False)
+    saved = client.put("/api/settings/prefs", json={"capture_layers": True}).json()
+    assert saved["capture_layers"] is True
+    # one tick saved leaves the other as it was
+    assert saved["capture_scale_north"] is False
+    assert client.get("/api/settings").json()["capture_layers"] is True
+
+
 def test_put_prefs_roundtrips_update_popup_prefs(client):
     saved = client.put(
         "/api/settings/prefs",

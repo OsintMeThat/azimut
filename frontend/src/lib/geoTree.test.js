@@ -371,11 +371,17 @@ describe('the case’s two layers on a map: Places and Media', () => {
   it('counts each, and says when a case has nothing for one', () => {
     expect(casePointRows(saved())).toEqual({
       places: { disabled: true, title: 'No place is saved in this case yet' },
+      // the names switch under Places has nothing to name either
+      'places-names': { disabled: true, title: 'No place is saved in this case yet' },
       // media is read only once its layer is on: a count never read is not called empty
       media: {},
     });
     const state = saved({ rows: [PLACE, { id: 'c', kind: 'capture' }], mapPlaces: [PLACE], mediaRead: true, media: [{ id: 'm' }] });
-    expect(casePointRows(state, { places: true })).toEqual({ places: { detail: '1', controls: null }, media: { detail: '1' } });
+    expect(casePointRows(state, { places: true })).toEqual({
+      places: { detail: '1', controls: null },
+      'places-names': {},
+      media: { detail: '1' },
+    });
     expect(casePointRows(saved({ mediaRead: true })).media).toEqual({ disabled: true, title: 'No photo or video is placed in this case yet' });
   });
 

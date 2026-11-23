@@ -9,10 +9,11 @@
 
   let {
     /**
-     * `{ id, label, on, disabled, title, detail, toggle }`, plus three that
+     * `{ id, label, on, disabled, title, detail, toggle }`, plus five that
      * only some layers carry: `actions` (buttons under the row), `controls`
-     * (its own settings, for a layer that is a question) and `note` (why it is
-     * on but drawing nothing yet).
+     * (its own settings, for a layer that is a question), `note` (why it is
+     * on but drawing nothing yet), `of` (the layer this one is a switch under,
+     * which indents it) and `dot` (the colour it is drawn in).
      */
     rows,
   } = $props();
@@ -20,7 +21,7 @@
 
 <ul class="layers">
   {#each rows as row (row.id)}
-    <li>
+    <li class:sub={Boolean(row.of)}>
       <div class="row">
         <button
           type="button"
@@ -34,6 +35,7 @@
         >
           <Icon name="eye" size={13} />
         </button>
+        {#if row.dot}<span class="dot" style:background={row.dot} aria-hidden="true"></span>{/if}
         <!-- the name repeats the tooltip, so the reason a switch is greyed is on a word, not only on its icon -->
         <span class="name" class:off={!row.on || row.disabled} title={row.title ?? row.label}>{row.label}</span>
         {#if row.detail}<span class="detail">{row.detail}</span>{/if}
@@ -91,6 +93,17 @@
   .eye:disabled {
     opacity: 0.4;
     cursor: not-allowed;
+  }
+  /* a switch under the layer above it, indented to its name */
+  .sub .row {
+    padding-left: 30px;
+  }
+  .dot {
+    flex: none;
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.4);
   }
   .name {
     flex: 1;
