@@ -343,7 +343,7 @@
   let postTarget = $state('x');
   let postPrefill = $state(true);
   let reversePrefill = $state(true);
-  let supportHeartbeat = $state(true); // the rail's Support heart beats now and then
+  let supportHeartbeat = $state(true); // the heart on Tip, in the top bar, beats now and then
   let updateOnStart = $state(true); // pop a notice on load when a release is out
   // whether saving a proof files its point as a place, or asks first
   let proofPlaceAuto = $state(true);

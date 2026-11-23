@@ -6,10 +6,10 @@ phasing lives in [SPEC.md](SPEC.md).
 ## Layout anatomy
 
 ```
-┌ topbar: rose+wordmark (home) · case switcher · geolocating pill · (spacer) · Add event · guide mark · settings gear · sidebar toggle ┐
-├ rail: Sources · Examine · Map · Compose · ── · Case · … · Support · theme ┬ tab strip (several tools only) ┬ case sidebar ┤
-│                                                                          │ tool canvas                    │              │
-└──────────────────────────────────────────────────────────────────────────┴────────────────────────────────┴──────────────┘
+┌ topbar: rose+wordmark (home) · case switcher · geolocating pill · (spacer) · Tip · Go to · Add event · guide mark · settings gear · sidebar toggle ┐
+├ rail: Sources · Examine · Map · Compose · ── · Case · … · theme ┬ tab strip (several tools only) ┬ case sidebar ┤
+│                                                                │ tool canvas                    │              │
+└────────────────────────────────────────────────────────────────┴────────────────────────────────┴──────────────┘
 ```
 
 ## Workspace model (UX)
@@ -26,15 +26,15 @@ in `frontend/src/lib/workspaces.js` and appear as tabs, never as new rail entrie
 | **Map** | Satellite, Compare, Detect, Coords & Sky | Event layers, Ground Imagery, OSM Query, Map Board |
 | **Compose** | Geo Proof, Post, Map plate, Notebook | Report Builder, GIF maker |
 
-**Support sits at the foot of the rail, above the theme switch, and is not a workspace.**
-It opens one small dialog: a tip on Ko-fi, a form to vote or suggest an idea, an invite
+**Support is the ♥ Tip button in the top bar, before Go to, and is not a workspace.**
+It is named for the tip it leads with, and opens one small dialog: a tip on Ko-fi, a form to vote or suggest an idea, an invite
 to the OSINT Me That Discord, and a problem report that leads to Settings → System.
 A block stays hidden until its link exists in `lib/support.js`, and a release refuses a stand-in link. A line from
 `TIP_LINES` sits above the tip: drawn when the dialog opens, turned by a press or every
 ten seconds, held while a pointer or the keyboard rests on it and still under reduced
 motion, in a box sized to the longest so the button never moves. Each choice says in one
 grey line what it is for, and the foot names who makes Azimut with a link to the site.
-The rail's heart is grey like its neighbours and warm only under the pointer or while it
+Tip's heart is grey like the marks beside it and warm only under the pointer or while it
 beats, in the accent colour, once every ten minutes the app is in sight (`lib/supportBeat.js`) until Support is opened that session: never under
 reduced motion, and Settings › General has the switch (`support_heartbeat`). The tip
 also has a quiet link in Home's footer and one line on the last page of What's new.

@@ -1,5 +1,5 @@
 /**
- * When the Support heart at the foot of the rail beats: once every
+ * When the heart on Tip, in the top bar, beats: once every
  * `SUPPORT_BEAT_MINUTES` the page is in sight. Time spent in another tab or
  * window does not count, so coming back never sets it off at once. App.svelte
  * stops it for the session once Support has been opened, and never starts it

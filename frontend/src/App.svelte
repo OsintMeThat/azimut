@@ -264,7 +264,7 @@
   let paletteOpen = $state(false);
   let supportOpen = $state(false);
 
-  // The Support heart beats once every ten minutes the app is in sight
+  // The heart on Tip beats once every ten minutes the app is in sight
   // (lib/supportBeat.js) until Support is opened this session. Settings › General
   // can stop it, and reduced motion never starts it. Each beat re-mounts the heart,
   // so its animation plays once a beat whatever happened to the last one.
@@ -461,6 +461,14 @@
     <div class="spacer"></div>
     <DetectActivity />
     <PlateActivity />
+    <!-- Support & feedback, named for the tip it leads with: in the top bar, where its
+         heart's beat is seen, grey like the marks beside it until it beats. -->
+    <button class="btn btn-ghost btn-sm tip-btn" title="Support & feedback" onclick={openSupport}>
+      {#key supportBeats}
+        <span class="heart" class:beat={supportBeats > 0}><Icon name="heart" size={16} /></span>
+      {/key}
+      <span>Tip</span>
+    </button>
     <button class="btn btn-ghost btn-sm" title="Go to (Ctrl+K / ⌘K)" aria-label="Go to" data-guide="start.goto"
             aria-keyshortcuts="Control+k Meta+k" onclick={() => (paletteOpen = true)}>
       <Icon name="search" size={16} />
@@ -557,17 +565,7 @@
         <span>{CASE_WORKSPACE.label}</span>
       </button>
       <button
-        class="rail-btn support-rail"
-        onclick={openSupport}
-        title="Support & feedback"
-      >
-        {#key supportBeats}
-          <span class="heart" class:beat={supportBeats > 0}><Icon name="heart" size={19} /></span>
-        {/key}
-        <span>Support</span>
-      </button>
-      <button
-        class="rail-btn"
+        class="rail-btn theme-rail"
         onclick={toggleTheme}
         title={uiState.theme === 'light' ? 'Switch to dark theme' : 'Switch to light theme'}
       >
@@ -774,21 +772,21 @@
     background: var(--border-strong);
   }
   /* pinned to the foot of the rail, away from the workspace switches */
-  .support-rail {
+  .theme-rail {
     margin-top: auto;
   }
   /* grey like its neighbours; warm only while it beats or under the pointer */
-  .support-rail .heart {
+  .tip-btn .heart {
     display: flex;
   }
-  .support-rail:hover .heart {
+  .tip-btn:hover .heart {
     color: var(--accent);
   }
-  .support-rail .heart.beat {
+  .tip-btn .heart.beat {
     animation: heartbeat 1.2s ease-in-out;
   }
   /* the icons are drawn in outline, so the beat fills this one as well */
-  .support-rail .heart.beat :global(svg) {
+  .tip-btn .heart.beat :global(svg) {
     animation: heartfill 1.2s ease-in-out;
   }
   @keyframes heartfill {
@@ -825,8 +823,8 @@
     }
   }
   @media (prefers-reduced-motion: reduce) {
-    .support-rail .heart.beat,
-    .support-rail .heart.beat :global(svg) {
+    .tip-btn .heart.beat,
+    .tip-btn .heart.beat :global(svg) {
       animation: none;
     }
   }

@@ -38,7 +38,7 @@ export const prefs = $state({
   postPrefill: true, // let the capture extension fill that composer on Publish
   postAltText: false, // Post shows an Alt text field under each picture (lib/postAlt.js)
   reversePrefill: true, // let it hand the image to the engine on Reverse Search
-  supportHeartbeat: true, // the rail's Support heart beats now and then (lib/supportBeat.js)
+  supportHeartbeat: true, // the heart on Tip, in the top bar, beats now and then (lib/supportBeat.js)
   signatureHandle: '', // account handle stamped onto proofs that opt into it
   // who signs a report: what a note's {name}, {role} and {organisation} print
   reportName: '',
