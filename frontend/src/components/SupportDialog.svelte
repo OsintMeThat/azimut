@@ -1,6 +1,6 @@
 <script>
   /**
-   * Support & feedback: a tip, a vote, an idea, the Discord, a problem, and who makes it. Opened from the rail and from
+   * Support & feedback: a tip, a vote, an idea, the Discord, a problem, and who makes it. Opened from Tip in the top bar and from
    * nowhere else, it never comes to the analyst, and nothing here reaches the network
    * until a link is pressed. A block waits for its link (lib/support.js).
    */

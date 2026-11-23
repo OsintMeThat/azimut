@@ -2,18 +2,18 @@ import { test, expect } from '@playwright/test';
 import { installAppFixture } from './app.fixture.js';
 import { KOFI_URL, SITE_URL, TIP_LINES } from '../src/lib/support.js';
 
-test('opens from the rail, reaches nothing until a link is pressed, and steps aside', async ({ page }) => {
+test('opens from Tip in the top bar, reaches nothing until a link is pressed, and steps aside', async ({ page }) => {
   const fixture = await installAppFixture(page);
   const outside = [];
   page.on('request', (request) => {
     if (new URL(request.url()).hostname !== '127.0.0.1') outside.push(request.url());
   });
   await page.goto('/#media');
-  const rail = page.locator('.rail').getByRole('button', { name: 'Support', exact: true });
-  await expect(rail).toBeVisible();
-  await expect(rail).toHaveAttribute('title', 'Support & feedback');
+  const button = page.locator('header.topbar').getByRole('button', { name: 'Tip', exact: true });
+  await expect(button).toBeVisible();
+  await expect(button).toHaveAttribute('title', 'Support & feedback');
 
-  await rail.click();
+  await button.click();
   const dialog = page.getByRole('dialog', { name: 'Support & feedback' });
   await expect(dialog).toBeVisible();
   const tip = dialog.getByRole('link', { name: 'Tip on Ko-fi' });
@@ -23,7 +23,7 @@ test('opens from the rail, reaches nothing until a link is pressed, and steps as
 
   await page.keyboard.press('Escape');
   await expect(dialog).toHaveCount(0);
-  await expect(rail).toBeFocused();
+  await expect(button).toBeFocused();
   expect(outside).toEqual([]);
   fixture.expectNoUnexpectedRequests();
 });
@@ -31,7 +31,7 @@ test('opens from the rail, reaches nothing until a link is pressed, and steps as
 test('turns its line on a press without ever moving the tip under the cursor', async ({ page }) => {
   await installAppFixture(page);
   await page.goto('/#media');
-  await page.locator('.rail').getByRole('button', { name: 'Support', exact: true }).click();
+  await page.locator('header.topbar').getByRole('button', { name: 'Tip', exact: true }).click();
   const dialog = page.getByRole('dialog', { name: 'Support & feedback' });
   const words = dialog.locator('.words');
   const tip = dialog.getByRole('link', { name: 'Tip on Ko-fi' });
@@ -58,11 +58,11 @@ test('beats the heart every ten minutes in sight, until Support is opened', asyn
   await page.clock.install();
   await installAppFixture(page);
   await page.goto('/#media');
-  const support = page.locator('.rail').getByRole('button', { name: 'Support', exact: true });
+  const support = page.locator('header.topbar').getByRole('button', { name: 'Tip', exact: true });
   const heart = support.locator('.heart');
   await expect(heart).toBeVisible();
   await expect(heart).not.toHaveClass(/beat/);
-  // grey like the rest of the rail between beats
+  // grey like the marks beside it between beats
   const colour = (locator) => locator.evaluate((node) => getComputedStyle(node).color);
   expect(await colour(heart)).toBe(await colour(support.locator('span').last()));
   await page.clock.fastForward('09:00');
@@ -88,7 +88,7 @@ for (const [why, setUp] of [
     await page.clock.install();
     await setUp(page);
     await page.goto('/#media');
-    const heart = page.locator('.rail .support-rail .heart');
+    const heart = page.locator('header.topbar .tip-btn .heart');
     await expect(heart).toBeVisible();
     for (let i = 0; i < 3; i += 1) await page.clock.fastForward('10:00');
     await expect(heart).not.toHaveClass(/beat/);
@@ -98,20 +98,19 @@ for (const [why, setUp] of [
 test('takes a problem to the report in Settings', async ({ page }) => {
   await installAppFixture(page);
   await page.goto('/#media');
-  await page.locator('.rail').getByRole('button', { name: 'Support', exact: true }).click();
+  await page.locator('header.topbar').getByRole('button', { name: 'Tip', exact: true }).click();
   await page.getByRole('dialog', { name: 'Support & feedback' }).getByRole('button', { name: 'Report a problem' }).click();
   await expect(page.getByRole('dialog', { name: 'Support & feedback' })).toHaveCount(0);
   await expect(page.getByRole('heading', { name: 'Report an issue' })).toBeVisible();
 });
 
-test('keeps the theme switch at the foot of the rail, with Support above it', async ({ page }) => {
+test('keeps the theme switch alone at the foot of the rail', async ({ page }) => {
   await installAppFixture(page);
   await page.goto('/#media');
   const rail = page.locator('.rail');
-  const support = await rail.getByRole('button', { name: 'Support', exact: true }).boundingBox();
+  await expect(rail.getByRole('button', { name: 'Tip', exact: true })).toHaveCount(0);
   const theme = await rail.getByRole('button', { name: /^(Light|Dark)$/ }).boundingBox();
   const box = await rail.boundingBox();
-  expect(support.y + support.height).toBeLessThanOrEqual(theme.y + 1);
   expect(theme.y + theme.height).toBeGreaterThan(box.y + box.height - 24);
 });
 

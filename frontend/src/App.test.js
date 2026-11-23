@@ -7,17 +7,16 @@ const source = readFileSync(new URL('./App.svelte', import.meta.url), 'utf8');
 const markup = source.slice(source.indexOf('</script>'));
 
 describe('the case on the rail', () => {
-  it('sits under the four stages, a rule between them, with Support and the theme at the foot', () => {
+  it('sits under the four stages, a rule between them, with the theme alone at the foot', () => {
     const stages = markup.indexOf('{/each}', markup.indexOf('{#each WORKSPACES as ws (ws.id)}'));
     const rule = markup.indexOf('<span class="rail-rule"');
     const caseButton = markup.indexOf('onclick={() => openWorkspace(CASE_WORKSPACE)}');
-    const support = markup.indexOf('class="rail-btn support-rail"');
     const theme = markup.indexOf('onclick={toggleTheme}');
     expect(stages).toBeGreaterThan(-1);
     expect(rule).toBeGreaterThan(stages);
     expect(caseButton).toBeGreaterThan(rule);
-    expect(support).toBeGreaterThan(caseButton);
-    expect(theme).toBeGreaterThan(support);
+    expect(theme).toBeGreaterThan(caseButton);
+    expect(markup.slice(markup.indexOf('<nav class="rail">'), markup.indexOf('</nav>'))).not.toContain('openSupport');
     expect(markup).toContain('title="The case: its Timeline, Board, Graph and Sheet"');
   });
 
@@ -95,6 +94,20 @@ describe('the sidebar’s toggle and the first scene kept', () => {
     expect(markup).not.toContain('title="Toggle case sidebar"');
     expect(markup.indexOf('<SidebarToggle')).toBeLessThan(markup.indexOf('</header>'));
     expect(markup.indexOf('<SidebarToggle')).toBeGreaterThan(markup.indexOf('bind:this={guideButton}'));
+  });
+});
+
+describe('Tip, for Support & feedback', () => {
+  it('sits in the top bar before Go to, named Tip, its heart beating there', () => {
+    const tip = markup.indexOf('tip-btn');
+    expect(tip).toBeGreaterThan(markup.indexOf('<div class="spacer"></div>'));
+    expect(tip).toBeLessThan(markup.indexOf('data-guide="start.goto"'));
+    const button = markup.slice(tip, markup.indexOf('</button>', tip));
+    expect(button).toContain('title="Support & feedback"');
+    expect(button).toContain('onclick={openSupport}');
+    expect(button).toContain('{#key supportBeats}');
+    expect(button).toContain('<span>Tip</span>');
+    expect(markup.match(/onclick=\{openSupport\}/g)).toHaveLength(1);
   });
 });
 

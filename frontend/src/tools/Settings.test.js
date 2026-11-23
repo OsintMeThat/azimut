@@ -141,7 +141,7 @@ describe('Settings sections', () => {
     expect(shell).toContain('bind:supportHeartbeat');
     expect(general).toContain('Let the heart beat');
     expect(general).toMatch(/<span title=\{HEARTBEAT_TITLE\}>Let the heart beat/);
-    expect(general).toMatch(/title=\{HEARTBEAT_TITLE\}\s+aria-label="Let the Support heart beat"/);
+    expect(general).toMatch(/title=\{HEARTBEAT_TITLE\}\s+aria-label="Let the heart on Tip beat"/);
   });
 
   it('switches the shared map view from General, checked by default', () => {
