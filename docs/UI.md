@@ -6,10 +6,10 @@ phasing lives in [SPEC.md](SPEC.md).
 ## Layout anatomy
 
 ```
-┌ topbar: rose+wordmark (home) · case switcher · geolocating pill · (spacer) · Add event · guide mark · sidebar toggle ┐
-├ rail: Sources · Examine · Map · Compose · ── · Case · … · Support · theme · Settings ┬ tab strip (several tools only) ┬ case sidebar ┤
-│                                                                                     │ tool canvas                    │              │
-└─────────────────────────────────────────────────────────────────────────────────────┴────────────────────────────────┴──────────────┘
+┌ topbar: rose+wordmark (home) · case switcher · geolocating pill · (spacer) · Add event · guide mark · settings gear · sidebar toggle ┐
+├ rail: Sources · Examine · Map · Compose · ── · Case · … · Support · theme ┬ tab strip (several tools only) ┬ case sidebar ┤
+│                                                                          │ tool canvas                    │              │
+└──────────────────────────────────────────────────────────────────────────┴────────────────────────────────┴──────────────┘
 ```
 
 ## Workspace model (UX)
@@ -343,7 +343,7 @@ Rules:
   last-used tab.
 - Deep links use `#<tool>`, `#<workspace>` or `#<workspace>/<tool>`.
 - Artifact actions can open a tool, locate a place or add an item to a proof.
-- Settings is app plumbing: last at the foot of the rail, under Support and the theme, apart from the stages.
+- Settings is app plumbing: behind the topbar gear, not on the rail, so its update dot is seen.
 
 ## Pasting into a case
 

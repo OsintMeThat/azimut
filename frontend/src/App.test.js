@@ -99,14 +99,18 @@ describe('the sidebar’s toggle and the first scene kept', () => {
 });
 
 describe('Settings', () => {
-  it('sits last at the foot of the rail, with its label, out of the top bar', () => {
+  it('is the gear in the top bar, between the guide and the sidebar, so its dot is seen', () => {
     const at = markup.indexOf('data-guide="start.settings"');
-    expect(at).toBeGreaterThan(markup.indexOf('<nav class="rail">'));
-    expect(at).toBeGreaterThan(markup.indexOf('onclick={toggleTheme}'));
-    expect(at).toBeLessThan(markup.indexOf('</nav>'));
-    expect(markup.slice(0, markup.indexOf('</header>'))).not.toContain('start.settings');
-    expect(markup.slice(at, markup.indexOf('</nav>'))).toContain('<span>Settings</span>');
-    expect(markup.slice(at, markup.indexOf('</nav>'))).toContain("class:active={uiState.tool === 'settings'}");
+    expect(markup.match(/data-guide="start\.settings"/g)).toHaveLength(1);
+    expect(at).toBeGreaterThan(markup.indexOf('bind:this={guideButton}'));
+    expect(at).toBeLessThan(markup.indexOf('<SidebarToggle'));
+    expect(at).toBeLessThan(markup.indexOf('</header>'));
+    const gear = markup.slice(at, markup.indexOf('<SidebarToggle'));
+    expect(gear).toContain("class:topbar-active={uiState.tool === 'settings'}");
+    expect(gear).toContain('{#if badges.any}');
+    expect(gear).toContain('<span class="update-dot" aria-hidden="true"></span>');
+    const rail = markup.slice(markup.indexOf('<nav class="rail">'), markup.indexOf('</nav>'));
+    expect(rail).not.toContain("'settings'");
   });
 
   it('points once at the toggle or the To-do tab, Show opening the To-do', () => {

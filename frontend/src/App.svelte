@@ -73,8 +73,8 @@
   // The rail holds the pipeline workspaces (docs/UI.md §3); tools are tabs
   // inside them. Three workspaces sit apart from the stages: home, the mark in
   // the topbar, which is where the app opens and is not a stage either; the case,
-  // under the stages, which is what they file into; and Settings, at the rail's
-  // foot with the app's other plumbing, not part of the working flow at all.
+  // under the stages, which is what they file into; and Settings, the gear in the
+  // topbar, which is app plumbing and not part of the working flow at all.
   const TOOLS = [
     { id: 'overview', label: TOOL_LABELS.overview, load: () => import('./tools/Overview.svelte') },
     { id: 'board', label: TOOL_LABELS.board, load: () => import('./tools/Board.svelte') },
@@ -507,6 +507,21 @@
     >
       <Icon name="help" size={16} />
     </button>
+    <!-- In the top bar, where the eye goes, so its update dot gets seen. -->
+    <button
+      class="btn btn-ghost btn-sm dotted"
+      data-guide="start.settings"
+      class:topbar-active={uiState.tool === 'settings'}
+      title={badges.any ? 'Settings · something to install or update' : 'Settings'}
+      aria-label="Settings"
+      onclick={() => (uiState.tool = 'settings')}
+    >
+      <Icon name="settings" size={16} />
+      {#if badges.any}
+        <!-- the title says it, so the name stays Settings -->
+        <span class="update-dot" aria-hidden="true"></span>
+      {/if}
+    </button>
     <!-- with the accent's dot while it is closed on scenes waiting to be geolocated -->
     <SidebarToggle bind:button={sidebarToggle} onclick={toggleSidebar} />
   </header>
@@ -558,23 +573,6 @@
       >
         <Icon name={uiState.theme === 'light' ? 'moon' : 'sun'} size={19} />
         <span>{uiState.theme === 'light' ? 'Dark' : 'Light'}</span>
-      </button>
-      <!-- Last in the corner, with the app's other plumbing rather than the stages. -->
-      <button
-        class="rail-btn"
-        data-guide="start.settings"
-        class:active={uiState.tool === 'settings'}
-        title={badges.any ? 'Settings · something to install or update' : 'Settings'}
-        onclick={() => (uiState.tool = 'settings')}
-      >
-        <span class="dotted rail-icon">
-          <Icon name="settings" size={19} />
-          {#if badges.any}
-            <!-- the title says it, so the name stays Settings -->
-            <span class="update-dot" aria-hidden="true"></span>
-          {/if}
-        </span>
-        <span>Settings</span>
       </button>
     </nav>
     {/if}
@@ -778,10 +776,6 @@
   /* pinned to the foot of the rail, away from the workspace switches */
   .support-rail {
     margin-top: auto;
-  }
-  /* the update dot hangs off the gear's corner, not the label's */
-  .rail-icon {
-    display: flex;
   }
   /* grey like its neighbours; warm only while it beats or under the pointer */
   .support-rail .heart {

@@ -66,7 +66,7 @@ test.describe('buildings in Horizon', () => {
   test('open their settings beside the view, unknown heights at a storey by default', async ({ page }) => {
     await openHorizon(page);
     await page.getByRole('checkbox', { name: 'Buildings' }).check();
-    // the Buildings row's, not the rail's beside the canvas
+    // the Buildings row's, not the top bar's gear
     await page.locator('main.canvas').getByRole('button', { name: 'Settings', exact: true }).click();
     const panel = page.getByRole('region', { name: 'Buildings settings' });
     await expect(panel).toBeVisible();
