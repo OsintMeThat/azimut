@@ -137,6 +137,7 @@ describe('the leads of the scene the proof takes up', () => {
 
   it('measures the map again when its frame changes width, as the list comes or goes', async () => {
     const watched = [];
+    const native = globalThis.ResizeObserver;
     globalThis.ResizeObserver = class {
       constructor(callback) { this.callback = callback; watched.push(this); }
       observe() {}
@@ -146,10 +147,11 @@ describe('the leads of the scene the proof takes up', () => {
       await open(VIEW, { leads: LEADS });
       const engine = engines.at(-1);
       engine.resize.mockClear();
-      watched.forEach((watch) => watch.callback([]));
+      // the dialog's own watch is the last made: the map's credits keep one of their own
+      watched.at(-1).callback([]);
       expect(engine.resize).toHaveBeenCalled();
     } finally {
-      delete globalThis.ResizeObserver;
+      globalThis.ResizeObserver = native;
     }
   });
 
