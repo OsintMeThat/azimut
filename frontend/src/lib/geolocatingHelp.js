@@ -23,3 +23,13 @@ export const GATHERED_HELP = {
   unsavedFrame: 'Not saved to the case yet: open the scene in Inspect',
   openCollage: 'Not exported yet: open it in Collage',
 };
+
+/**
+ * What Make the proof says of a scene with no map capture yet, in its chooser
+ * (`tools/inspect/ProofFrames.svelte`) or, for a picture that opens no chooser, a toast.
+ * A warning: the proof is still made.
+ */
+export const PROOF_MAP_HELP = {
+  none: 'No map capture yet: the proof gets no coordinates from the map.',
+  go: 'Go to the map',
+};

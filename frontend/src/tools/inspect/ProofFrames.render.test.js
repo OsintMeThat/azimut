@@ -147,6 +147,40 @@ describe('making the proof of a scene', () => {
     expect(props.onconfirm).toHaveBeenCalledWith([], ['media/cap-1.png'], []);
   });
 
+  it('warns when the scene holds no map capture, the proof still made, and offers the way to the map', () => {
+    const onmap = vi.fn();
+    const props = show({ frames: [frame('a', 11)], filedIds: new Set(['a']), onmap });
+    const line = dialog().querySelector('[data-testid="proof-no-map-capture"]');
+    expect(line.textContent).toContain('No map capture yet: the proof gets no coordinates from the map.');
+    // a warning, never a stop
+    expect(button('Make the proof').disabled).toBe(false);
+    const go = button('Go to the map');
+    expect(go.title).toBe('Find it on the map, the video open beside it');
+    go.click();
+    expect(onmap).toHaveBeenCalledTimes(1);
+    expect(props.onconfirm).not.toHaveBeenCalled();
+    button('Make the proof').click();
+    expect(props.onconfirm).toHaveBeenCalledWith(['a'], [], []);
+  });
+
+  it('says nothing of the map once the scene holds a capture, and nothing to press while it works', () => {
+    show({ frames: [frame('a', 11)], captures: [{ path: 'media/cap-1.png', url: 'blob:c1', title: 'Cap' }], onmap: vi.fn() });
+    expect(dialog().querySelector('[data-testid="proof-no-map-capture"]')).toBeNull();
+    unmount(live);
+    live = null;
+    document.body.innerHTML = '';
+
+    show({ frames: [frame('a', 11)], busy: true, onmap: vi.fn() });
+    expect(button('Go to the map').disabled).toBe(true);
+  });
+
+  it('warns a scene with no frame and no map capture too', () => {
+    show({ capture: { time: 14.2, why: 'start' }, onmap: vi.fn() });
+    expect(dialog().textContent).toContain('No frame in this scene yet.');
+    expect(dialog().textContent).toContain('No map capture yet');
+    expect(button('Make the proof').disabled).toBe(false);
+  });
+
   it('names an unlabelled scene by its time, and the whole video in words', () => {
     show({ scene: { ...scene, label: '' }, frames: [frame('a', 11)] });
     const line = dialog().querySelector('.scene-line');

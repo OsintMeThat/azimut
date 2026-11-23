@@ -12,13 +12,14 @@ vi.mock('./api.js', () => {
   return { api: { get: request('GET'), put: request('PUT'), del: request('DELETE'), post: request('POST') } };
 });
 
-vi.mock('./state.svelte.js', () => ({ uiState: { tool: 'inspect', geolocateRef: null }, caseState: { rev: 0 } }));
+vi.mock('./state.svelte.js', () => ({ uiState: { tool: 'inspect', geolocateRef: null }, caseState: { rev: 0 }, toast: vi.fn() }));
 
 const { dispatch } = await import('./events.js');
-const { caseState, uiState } = await import('./state.svelte.js');
+const { caseState, toast, uiState } = await import('./state.svelte.js');
 const {
-  abandonScene, ensureSceneQueue, geolocateScene, geolocating, holdSceneCount, holdSceneQueue, joinScenes, markToGeolocate, sceneEdit,
+  abandonScene, ensureSceneQueue, geolocateScene, geolocating, holdSceneCount, holdSceneQueue, joinScenes, mapWithScene, markToGeolocate, sceneEdit,
   readGeolocating, readSceneQueue, restoreScene, sceneQueue, scenesWaiting, startGeolocating, stopGeolocating, unjoinScenes,
+  warnNoMapCapture,
 } = await import('./geolocating.svelte.js');
 
 const SCENE = { video: 'media/clip.mp4', id: 's1', label: 'Bridge', state: 'todo', captures: [] };
@@ -88,6 +89,42 @@ describe('Geolocate', () => {
     await expect(geolocateScene('c1', { video: 'media/clip.mp4', id: 'gone' })).rejects.toThrow();
     expect(uiState.tool).toBe('inspect');
     expect(uiState.geolocateRef).toBe(null);
+  });
+});
+
+describe('Go to the map, from Make the proof', () => {
+  it('goes to Satellite on the scene held, asking the server nothing', async () => {
+    Object.assign(geolocating, { caseId: 'c1', scene: { ...SCENE, start: 4, end: 9, order: 1 } });
+    uiState.tool = 'inspect';
+    uiState.geolocateRef = null;
+    await mapWithScene('c1', { video: 'media/clip.mp4', id: 's1' });
+    expect(calls).toHaveLength(0);
+    expect(uiState.tool).toBe('satellite');
+    expect(uiState.geolocateRef).toMatchObject({ video: 'media/clip.mp4', draft: 's1', start: 4, end: 9 });
+  });
+
+  it('geolocates another scene first, so what is captured there is gathered for it', async () => {
+    Object.assign(geolocating, { caseId: 'c1', scene: { ...SCENE, id: 's0' } });
+    uiState.tool = 'proof';
+    answers.set('PUT /api/cases/c1/geolocating', { geolocating: { ...SCENE, start: 1, end: 2, order: 0 } });
+    await mapWithScene('c1', { video: 'media/clip.mp4', id: 's1' });
+    expect(calls.at(-1)).toMatchObject({ method: 'PUT', body: { video: 'media/clip.mp4', draft: 's1' } });
+    expect(geolocating.scene.id).toBe('s1');
+    expect(uiState.tool).toBe('satellite');
+    expect(uiState.geolocateRef).toMatchObject({ draft: 's1', kind: 'video' });
+  });
+
+  it('says it of a picture in a toast, whose press takes the same way to the map', async () => {
+    toast.mockClear();
+    const photo = { video: 'media/photo.png', id: 's1', file_kind: 'image' };
+    warnNoMapCapture('c1', photo);
+    expect(toast).toHaveBeenCalledWith(
+      'No map capture yet: the proof gets no coordinates from the map.', 'warn', null, expect.objectContaining({ label: 'Go to the map' }),
+    );
+    answers.set('PUT /api/cases/c1/geolocating', { geolocating: { ...SCENE, ...photo, order: 0 } });
+    await toast.mock.calls[0][3].onClick();
+    expect(uiState.tool).toBe('satellite');
+    expect(uiState.geolocateRef).toMatchObject({ video: 'media/photo.png', kind: 'image' });
   });
 });
 

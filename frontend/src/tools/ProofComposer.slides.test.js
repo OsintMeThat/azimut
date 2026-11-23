@@ -95,12 +95,28 @@ describe('moving between slides', () => {
   });
 
   it('files a frame Inspect never saved through the edits Inspect keeps for it', () => {
-    expect(bodyOfFn('drawUnfiledFrames')).toContain('ops: await frameOps(frame.edits)');
+    // drawn and filed through the one recipe the pill's list draws them with (lib/unfiledFrames.js)
+    expect(source).toContain("import { frameDrawer, frameOps } from '../lib/unfiledFrames.js';");
     expect(bodyOfFn('fileFrames')).toContain('ops: await frameOps(f.edits)');
+    expect(bodyOfFn('chooseSceneFrames')).toContain('void chooserDrawer.draw(caseId, video, material.frames, () => slideChooser?.frames);');
+    expect(bodyOfFn('readNewProofScene')).toContain('void chooserDrawer.draw(caseId, entry.video, drawn, held);');
+    // what a choice drew goes when it closes
+    expect(bodyOfFn('closeSlideChooser')).toContain('chooserDrawer.drop();');
+    expect(bodyOfFn('closeNewProof')).toContain('chooserDrawer.drop();');
     // the strip's chooser and New proof file them through the one function
     expect(bodyOfFn('confirmSlideFrames')).toContain('await fileFrames(caseId, chooser.video, frames);');
     expect(bodyOfFn('createSceneProof')).toContain('await fileFrames(caseId, entry.video, unfiled);');
-    expect(bodyOfFn('frameOps')).toContain('buildFrameOps(frameFilters, edits)');
+  });
+
+  it('goes to the map from the chooser of a scene with no map capture, and warns a picture with none', () => {
+    // the chooser closes first, its drawn frames let go, then the scene goes to the map geolocated
+    const toMap = bodyOfFn('slideChooserToMap');
+    expect(toMap.indexOf('closeSlideChooser();')).toBeGreaterThan(-1);
+    expect(toMap.indexOf('closeSlideChooser();')).toBeLessThan(toMap.indexOf('await mapWithScene(caseId, { video: chooser.video, id: chooser.row.id });'));
+    expect(source).toContain('onmap={slideChooserToMap}');
+    // a picture opens no chooser: once its proof is made, a toast says it
+    const home = bodyOfFn('makeFromHome');
+    expect(home).toContain("if (made && !row.captures?.length) warnNoMapCapture(caseId, { video: file.video, id: row.id, file_kind: 'image' });");
   });
 
   it('renames and deletes a slide from its menu, the slide open renamed as its name field would', () => {

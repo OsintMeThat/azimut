@@ -235,7 +235,7 @@ def test_the_pill_lists_what_the_scene_gathered_and_only_what_falls_in_it(client
     filed = cut.json()["saved"][0]["item"]["path"]
     frames = [
         {"id": "in", "path": video, "time": 1.5, "filed": {"path": filed}},
-        {"id": "loose", "path": video, "time": 1.8},
+        {"id": "loose", "path": video, "time": 1.8, "rotation": 90},
         {"id": "out", "path": video, "time": 3.5},
     ]
     res = client.put(f"/api/cases/{cid}/inspect/work", json={"path": video, "spec": {"frames": frames, "scenes": [
@@ -254,6 +254,8 @@ def test_the_pill_lists_what_the_scene_gathered_and_only_what_falls_in_it(client
     assert [c["path"] for c in got["captures"]] == [shot["path"]]
     assert got["captures"][0]["thumb"]
     assert [(f["id"], f["path"]) for f in got["frames"]] == [("in", filed), ("loose", None)]
+    # a frame never saved comes with Inspect's edits, for the list to draw it as Inspect would save it
+    assert got["frames"][1]["edits"] == {"rotation": 90}
     assert [c["title"] for c in got["collages"]] == ["Quay"]
     assert "picture" not in got
     # the list says as many as the counts on the pill

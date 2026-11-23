@@ -935,6 +935,8 @@ describe('a picture', () => {
     expect(uiState.proofScene).toEqual({ picture: ROOF, panels: [ROOF, 'media/cap.png'], label: 'Market?' });
     expect(uiState.tool).toBe('proof');
     expect(document.querySelector('[role="dialog"][aria-label="Make the proof"]')).toBeNull();
+    // it holds a map capture: nothing to warn
+    expect(toast.mock.calls.some(([text]) => String(text).startsWith('No map capture yet'))).toBe(false);
   });
 
   it('opens from the pill on its tab, and with proof, its Make the proof', async () => {
@@ -947,6 +949,10 @@ describe('a picture', () => {
     expect(uiState.inspectScene).toBeNull();
     expect(picked()).toContain('Scenes');
     expect(uiState.proofScene).toEqual({ picture: ROOF, panels: [ROOF], label: 'Market' });
+    // no chooser to warn in: a toast says the proof gets no coordinates from the map, never a stop
+    expect(toast).toHaveBeenCalledWith(
+      'No map capture yet: the proof gets no coordinates from the map.', 'warn', null, expect.objectContaining({ label: 'Go to the map' }),
+    );
   });
 
   it('says so when the scene sent is no longer in it', async () => {

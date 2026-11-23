@@ -5,13 +5,16 @@
    * and what its file gives it, the frames of the video's Inspect strip and its collages
    * inside the scene, or the picture itself (`GET /geolocating/gathered`).
    *
+   * A frame never saved to the case is drawn from the video while the list is open, as
+   * Make the proof draws it (`lib/unfiledFrames.js`), its dashed edge kept.
+   *
    * A lead shows on the map and is deleted in one press: it is the scene's, nothing
    * else in the case reads it. A capture goes to the case Trash behind the dialog that
    * says what it touches. A frame leaves Inspect's strip, as Inspect's × does, its
    * picture staying in Media. A collage is deleted in Collage, and the picture is the
    * question itself: both only open. The extension's pill lists the same.
    */
-  import { tick, untrack } from 'svelte';
+  import { onDestroy, tick, untrack } from 'svelte';
   import ConfirmDialog from './ConfirmDialog.svelte';
   import Icon from './Icon.svelte';
   import MediaViewer from './MediaViewer.svelte';
@@ -23,6 +26,7 @@
   import { preciseClock } from '../lib/inspectPlayer.js';
   import { fmtCoords, toast, uiState } from '../lib/state.svelte.js';
   import { deletedToast, RESTORABLE } from '../lib/trash.js';
+  import { frameDrawer } from '../lib/unfiledFrames.js';
 
   let {
     caseId,
@@ -75,6 +79,40 @@
   // a picture that does not load shows the icon of its kind, not a broken image
   let unloaded = $state(new Set());
   const failed = (url) => (unloaded = new Set(unloaded).add(url));
+
+  // The frames never saved, drawn from the video a few at a time while the list is open,
+  // and let go when it closes; one that cannot be drawn keeps its dashed chip.
+  const DRAWN_AT_MOST = 12;
+  const drawer = frameDrawer();
+  let drawn = $state([]); // `{ id, time, edits, url }`, a frame's picture once it came
+  let drawnFor = '';
+  let open = true;
+  $effect(() => {
+    const about = found?.geolocating;
+    const unsaved = frames.filter((f) => !f.path);
+    untrack(() => {
+      if (!about?.video) return;
+      // the answer is about another scene: what was drawn for the last one goes
+      const owner = `${about.video}|${about.id}`;
+      if (owner !== drawnFor) {
+        drawer.drop();
+        drawn = [];
+        drawnFor = owner;
+      }
+      const fresh = unsaved
+        .filter((f) => !drawn.some((one) => one.id === f.id))
+        .slice(0, Math.max(0, DRAWN_AT_MOST - drawn.length))
+        .map((f) => ({ id: f.id, time: f.time, edits: f.edits ?? {}, url: '' }));
+      if (!fresh.length) return;
+      drawn.push(...fresh);
+      void drawer.draw(caseId, about.video, fresh, () => (open ? drawn : null), { limit: DRAWN_AT_MOST });
+    });
+  });
+  onDestroy(() => {
+    open = false;
+    drawer.drop();
+  });
+  const drawnUrl = (id) => drawn.find((one) => one.id === id)?.url ?? '';
 
   // ← and → walk every picture the list shows, in its order.
   const shown = $derived([
@@ -245,8 +283,9 @@
                   {#if unloaded.has(thumb(frame))}<Icon name="image" size={16} />{:else}<img src={thumb(frame)} alt="" loading="lazy" onerror={() => failed(thumb(frame))} />{/if}
                 </button>
               {:else}
+                {@const url = drawnUrl(frame.id)}
                 <button class="shot unsaved" onclick={openInInspect} title={HELP.unsavedFrame}>
-                  <Icon name="video" size={16} />
+                  {#if url && !unloaded.has(url)}<img src={url} alt="" onerror={() => failed(url)} />{:else}<Icon name="video" size={16} />{/if}
                 </button>
               {/if}
               <span class="caption mono">{preciseClock(frame.time)}</span>
