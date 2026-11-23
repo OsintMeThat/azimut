@@ -37,6 +37,8 @@ export function copyRows(lat, lon, preferred = 'dd') {
 export const ACTIONS = [
   { id: 'lookup', label: 'What is here?', icon: 'search' },
   { id: 'place', label: 'Save place here…', icon: 'pin' },
+  // Satellite while a scene is geolocated: the point is one of its leads, not a place
+  { id: 'lead', label: 'Drop a lead here', icon: 'pin' },
   { id: 'candidate', label: 'Add candidate here', icon: 'plus' },
   { id: 'measure', label: 'Measure from here', icon: 'ruler' },
   { id: 'sky', label: 'Sun and moon from here', icon: 'sun' },

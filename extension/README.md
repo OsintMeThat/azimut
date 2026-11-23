@@ -25,7 +25,8 @@ It supports seven flows:
 - On a 2D map, the same panel draws Azimut's own tools over the site: measure,
   points, sun and moon, a search grid, the case's own images and videos held over
   the map, and NASA FIRMS fire detections laid over whatever that map is
-  showing. It lists the case's scenes still to geolocate.
+  showing. It lists the case's scenes still to geolocate, and drops numbered leads
+  for the one being geolocated.
 - Beside any page, a panel holds a note of the case. Its Add (+), a right-click
   or Alt+Shift+S cites the page or the post, quotes the words selected on it with
   a link back to them, or puts a capture of an area of a map into the note. Its
@@ -118,7 +119,7 @@ fold. **Capture an area** comes first, then the scenes to geolocate, then six to
 | Tool | What it does |
 |---|---|
 | Measure | Distance along a clicked path, or the area it encloses. Same formulas and same wording as the app. |
-| Points | Draws one of the case's three positions (its located media, its places, its captures) on the map, and files a new point. |
+| Points | Draws one of the case's three positions (its located media, its places, its captures) on the map, and files a new point under the name you give it. While a scene is geolocated it drops leads instead. |
 | Sun & moon | Plants a point and draws the day's sun and moon arcs around it, with a date and an hour slider. |
 | Grid | Drags a box or clicks out a shape, cuts it into metric cells, and marks each cleared or flagged. The grid is saved into the case and opens in the app's own Grid Search. |
 | Refs | Floats an image or a video from the case over the map, to compare against the imagery while you pan. |
@@ -126,9 +127,10 @@ fold. **Capture an area** comes first, then the scenes to geolocate, then six to
 
 Only the open tool draws, and pressing it again puts it down: the map goes back to
 being a map. What you told a tool stays in it: a measured path, a planted point,
-an open sweep all come back when you pick it up again. Reference windows and the
-fire layer are the exceptions: the windows are not on the map, and the fires are
-ground rather than drawing, so both stay while you measure over them.
+an open sweep all come back when you pick it up again. Reference windows, the
+fire layer and the leads of the scene being geolocated are the exceptions: the
+windows are not on the map, the fires are ground rather than drawing, and the leads
+are the scene's rather than a tool's, so all three stay while you measure over them.
 
 **Scenes to geolocate.** A case whose videos or pictures hold scenes kept in Inspect
 or marked in the app, and not yet taken up by a proof, lists them under Capture,
@@ -140,13 +142,30 @@ the scene, which is marked on the bar in the colour Inspect gives it: a band for
 a passage, a pin for an instant. A pill then names the scene in its colour and
 counts its captures, the moment the app says one landed; its ✕ stops, and **Make the
 proof** brings the Azimut tab to the front on its proof chooser, or opens one when none
-is open. Nothing is written from the map.
+is open. Three small links beside the scene's name do the same for Inspect on the
+scene, and for Satellite and Horizon on the spot this map shows.
 While it lasts, the app attaches every capture filed in the case to that scene,
 the panel's included, and the capture's report says "Attached to" it. A scene
 started from the app shows the same pill here, and pressing the pill brings its
 video up. A picture marked to geolocate reads "Whole picture" and is held over the
 map as a picture, with nothing on a bar. A case with no scene to geolocate shows
 nothing new.
+
+**Leads.** While a scene is geolocated, Points' **Drop a lead** turns each click on
+the map into a lead for it: a spot it may be, numbered, drawn in the scene's colour
+whatever tool is open, and kept with the scene rather than among the case's places.
+The drop stays armed for the next one until its button or Esc puts it down. Drag a
+lead to move it, click it to show its name. The app erases a scene's leads
+when it is given up or a proof takes it up.
+
+**What the scene gathered.** Pressing the pill's counts opens it under the pill, as
+the app's pill does: the leads (a press moves this map onto one, × deletes it), the
+map captures, the frames of the video's Inspect strip inside the scene and its
+collages, or the picture for a picture scene, each with its thumbnail. A capture
+goes to the case Trash once the panel has said what else in the case uses it; a
+frame leaves the strip, its picture saved to the case staying in Media. Collages are
+deleted in Collage. Each of these reaches the scene being geolocated and nothing else
+of the case.
 
 **Link the view** with the chain button in the panel's header. It puts this map on
 one camera with the other linked maps: other panels on other sites, and the app's
@@ -386,7 +405,8 @@ later.
 The token allows this extension to file captures through the local Azimut
 server, to read back the media and proofs a thread attaches, and, for the map
 tools, the points, search grids, images, videos and scenes to geolocate of the
-case you pick. Rotate it in
+case you pick, with the leads, captures and frames the scene being geolocated
+gathered. Rotate it in
 Settings to revoke existing pairings.
 
 ## Fill the composer

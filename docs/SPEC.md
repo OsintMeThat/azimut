@@ -240,6 +240,7 @@ proof for publication.
 | ✅ **Showcase templates & example case** | Starts a report from five templates whose figures come set up and empty (a front-line analysis, a losses register, a damage assessment, a claim against footage, a story for the web), and opens them filled in a fictional example case made offline in one press from a bundle the app ships, its pictures real public-domain photographs of other places, each captioned as an illustration where it shows. |
 | ✅ **From the case** | Writes a note of a period's geolocations from the Notebook home, a figure each or a table, dated by what they show or when they were geolocated. |
 | ✅ **Report covers and signature** | Writes a first page of one's own above a cover line, fills the title, day, name, role and organisation when the PDF is made, prints the Azimut logo, the analyst's logo (rounded, framed or set on a disc in Settings) and a handwritten signature on any cover, signs an article under its title or at its end, and starts a template from anything. |
+| ✅ **Leads and named places** | Save place drops a pin where you click and asks its name; while a scene is geolocated it drops numbered leads in the scene's colour, kept on the scene and erased once it is proved or abandoned; the Geolocating pill, in the app and the extension, lists what the scene gathered, lets a capture or a frame go and links to Inspect, Satellite and Horizon. |
 | ✅ **Post** | Geo Report renamed: saves itself; a home in three parts (in progress, ready to post, posted); New post (Geolocation, Video thread, Map plate, Compare, Free post); a video thread of two proofs or more in four orders, with a title of the analyst's own, a recap map previewed and made from its places or its contact sheet, and a clip or the link for a video too long; posts and proofs with no name listed by their place and date; the time a proof states printed in its post, `[0:15]`; templates and defaults per kind; a window saying once why the extension helps; a reply under the source post on X or Bluesky; Mark as posted in the header or on a card, with its link or none, the post dated by its link and kept on its proof; an Open list with filters; To Post from Map plate, Compare and Detect, and from Geo Proof back into its post in progress with its cut clip; Copy the rest when a hand-off stops; a preview of the thread as X or Bluesky shows it; a note from the Notebook laid out as a thread, cut under the platform's count. |
 
 ---
@@ -427,7 +428,10 @@ stops making sense.
   in a bundle never runs script in the app's origin. The one route that reads a case file back out
   of that island — the attachments a composer hand-off carries — fences on the
   **resolved** path, so `media/../case.json` is refused where a prefix read off
-  the request would have served it. Filling a composer and handing a picture to a
+  the request would have served it. The island deletes one kind of thing only: from the
+  map panel's Geolocating pill, a capture the scene being geolocated gathered (to the
+  case Trash) or one of its frames off Inspect's strip, checked against that scene on the
+  server, so a borrowed token reaches no other file. Filling a composer and handing a picture to a
   reverse-image engine are the extension's only reach past localhost — eight
   hosts, declared, where it writes what the app gave it — and
   each switch that uses one is in the app (Settings → Publishing, Settings →

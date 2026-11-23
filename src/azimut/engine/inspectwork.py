@@ -65,6 +65,8 @@ MAX_SCENE_LABEL = 200
 #: The most moments one scene still to prove holds, as many as a proof states
 #: (`engine/scenes.MAX_MOMENTS`): one place often comes back in several extracts of a clip.
 MAX_SCENE_MOMENTS = 20
+#: The leads one scene keeps: candidate spots dropped on a map while it is geolocated.
+MAX_LEADS = 50
 MAX_PIECES = 200
 #: The collage list's preview: the browser draws it no wider than this, and a
 #: larger one is shrunk rather than stored.
@@ -86,9 +88,10 @@ _MARK_KEYS = ("id", "time", "label")
 #: written as it always was; `more` holds the moments after it, only when there are some.
 _SCENE_KEYS = ("id", "start", "end", "label", "more")
 #: What a scene to prove holds that only the server writes (`engine/geolocate.py`): the
-#: captures gathered while it was being geolocated, and the word it was abandoned with.
-#: Inspect saves its scenes whole and never sends these, so a save keeps them.
-SCENE_STATE = ("captures", "abandoned")
+#: captures gathered while it was being geolocated, the leads dropped for it on a map,
+#: and the word it was abandoned with. Inspect saves its scenes whole and never sends
+#: these, so a save keeps them.
+SCENE_STATE = ("captures", "leads", "abandoned")
 _PIECE_KEYS = ("id", "frameId", "save", "w", "h", "quad", "frameOps", "crop", "exclude")
 #: The areas painted on a piece that auto-stitch must not match on (Collage's brush):
 #: strokes of points normalised 0–1 in the picture the stitch receives (the piece as
@@ -602,6 +605,28 @@ def update_scene(
     return target
 
 
+def remove_frame(case: "Case", subject: str, frame_id: str) -> dict[str, Any]:
+    """Take one frame off a file's Inspect strip, the rest of the work written back as it
+    was read: what Inspect's × on a frame does, asked from the pill of the scene being
+    geolocated. A frame saved to the case stays in Media. Answers with the frame."""
+    with case.lock:
+        found = _settle(case, subject)
+        if not found:
+            raise CaseError("that file has no Inspect work")
+        rel, previous = found
+        frames = [f for f in previous.get("frames") or [] if isinstance(f, dict)]
+        gone = next((f for f in frames if f.get("id") == frame_id), None)
+        if gone is None:
+            raise CaseError("that frame is no longer in the strip")
+        left = [f for f in frames if f is not gone]
+        active = previous.get("activeFrameId")
+        _write(
+            case.resolve_inside(rel),
+            {**previous, "frames": left, "activeFrameId": None if active == frame_id else active, "updated_at": _now()},
+        )
+    return gone
+
+
 def retime_scene(
     case: "Case", subject: str, scene_id: str, start: Any, end: Any, more: Any = None
 ) -> dict[str, Any]:
@@ -640,6 +665,45 @@ def _set_more(scene: dict[str, Any], more: Any) -> None:
     scene.setdefault("more", more)
 
 
+def _coordinate(value: Any, bound: float) -> float | None:
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return None
+    number = float(value)
+    return number if math.isfinite(number) and -bound <= number <= bound else None
+
+
+def clean_leads(value: Any) -> list[dict[str, Any]]:
+    """A scene's leads as stored, ``{id, n, lat, lon}`` each, anything else left out.
+
+    A lead is a spot the analyst dropped on a map while geolocating the scene: a
+    candidate, which asserts nothing. ``n`` is the number it is drawn with, kept when
+    another is deleted so a lead never changes its name."""
+    out: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    for one in value if isinstance(value, list) else []:
+        if not isinstance(one, dict):
+            continue
+        pid, n = one.get("id"), one.get("n")
+        lat, lon = _coordinate(one.get("lat"), 90), _coordinate(one.get("lon"), 180)
+        if not isinstance(pid, str) or not pid or len(pid) > 64 or pid in seen:
+            continue
+        if isinstance(n, bool) or not isinstance(n, int) or n < 1 or lat is None or lon is None:
+            continue
+        seen.add(pid)
+        out.append({"id": pid, "n": n, "lat": lat, "lon": lon})
+    return out[:MAX_LEADS]
+
+
+def _joined_leads(target: Any, source: Any) -> list[dict[str, Any]]:
+    """The leads of two scenes joined: the ones joined into as they are, the other's
+    numbered on after them."""
+    kept, given = clean_leads(target), clean_leads(source)
+    after = max((p["n"] for p in kept), default=0)
+    taken = {p["id"] for p in kept}
+    moved = [{**p, "n": after + at} for at, p in enumerate((p for p in given if p["id"] not in taken), start=1)]
+    return [*kept, *moved][:MAX_LEADS]
+
+
 def _undo_record(value: Any, max_captures: int) -> dict[str, Any]:
     """A scene as a join answered it, handed back to be put back: checked as a save
     checks one, with what only the server writes on it (`SCENE_STATE`)."""
@@ -651,6 +715,12 @@ def _undo_record(value: Any, max_captures: int) -> dict[str, Any]:
         if not isinstance(captures, list) or len(captures) > max_captures:
             raise CaseError("a scene's captures are a list of files")
         record["captures"] = list(dict.fromkeys(p for p in captures if isinstance(p, str) and p))
+    leads = value.get("leads")
+    if leads is not None:
+        if not isinstance(leads, list) or len(leads) > MAX_LEADS:
+            raise CaseError("a scene's leads are a list of points")
+        if kept_leads := clean_leads(leads):
+            record["leads"] = kept_leads
     abandoned = value.get("abandoned")
     if abandoned is not None:
         if not isinstance(abandoned, dict):
@@ -711,6 +781,9 @@ def join_scenes(case: "Case", subject: str, scene_id: str, into: str, max_captur
         captures = list(dict.fromkeys(held))[:max_captures]
         if captures:
             joined["captures"] = captures
+        leads = _joined_leads(target.get("leads"), source.get("leads"))
+        if leads:
+            joined["leads"] = leads
         scenes = [joined if s is target else s for s in scenes if s is not source]
         _write(case.resolve_inside(rel), {**previous, "scenes": sorted(scenes, key=_stored_order), "updated_at": _now()})
     return {"scene": joined, "kept": kept, "gone": gone}
@@ -740,6 +813,11 @@ def unjoin_scenes(case: "Case", subject: str, kept: Any, gone: Any, max_captures
         since = [p for p in joined.get("captures") or [] if isinstance(p, str) and p not in before]
         if since:
             held["captures"] = [*(held.get("captures") or []), *since][:max_captures]
+        # a lead dropped on the joined scene since stays with it, numbered on
+        known = {p["id"] for p in [*clean_leads(held.get("leads")), *clean_leads(given.get("leads"))]}
+        dropped = [p for p in clean_leads(joined.get("leads")) if p["id"] not in known]
+        if dropped:
+            held["leads"] = _joined_leads(held.get("leads"), dropped)
         scenes = [held if s is joined else s for s in scenes] + [given]
         _write(case.resolve_inside(rel), {**previous, "scenes": sorted(scenes, key=_stored_order), "updated_at": _now()})
     return {"scene": held, "gone": given}

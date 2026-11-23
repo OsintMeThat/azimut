@@ -423,7 +423,7 @@ export const PAGES = {
           ],
         },
       },
-      { anchor: 'sat.place', title: 'Save place', text: 'Files the point as a place, with a title and a note if you want.' },
+      { anchor: 'sat.place', title: 'Save place', text: 'Click on the map to drop a pin, name it, and it is a place. While a scene is geolocated it drops leads.' },
       {
         anchor: 'sat.capture',
         title: 'Capture',

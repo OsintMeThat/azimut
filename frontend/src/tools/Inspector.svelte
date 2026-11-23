@@ -750,6 +750,14 @@
     });
   }
 
+  /** A frame the server took off this strip (`api/inspect.py`, remove_gathered_frame). */
+  function dropRemovedFrame(id) {
+    const index = work.frames.findIndex((f) => f.id === id);
+    if (index === -1) return;
+    work.frames.splice(index, 1);
+    if (work.activeFrameId === id) work.activeFrameId = null;
+  }
+
   function duplicateFrame(frame) {
     const index = work.frames.findIndex((f) => f.id === frame.id);
     const copy = {
@@ -1113,6 +1121,9 @@
   onDestroy(
     onEvent('scenes', (event) => {
       if (event.case_id !== work.caseId || (event.video && event.video !== work.source?.path)) return;
+      // a frame taken off this strip from the pill of the scene being geolocated: held
+      // here too, or the next save of this work would put it back
+      if (event.frame_removed) dropRemovedFrame(event.frame_removed);
       if (uiState.tool !== 'inspect' || !hasScenes || opening) return;
       clearTimeout(scenesTimer);
       const run = openRun;

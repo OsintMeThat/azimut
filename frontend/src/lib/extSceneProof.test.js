@@ -19,6 +19,9 @@ vi.mock('./state.svelte.js', () => ({
   caseState, uiState, toast, openCase, refreshCaseList, sessionStarted: () => started,
 }));
 
+const goWithScene = vi.fn();
+vi.mock('./geolocating.svelte.js', () => ({ goWithScene }));
+
 const { proveScene, takeSceneProof } = await import('./extSceneProof.js');
 
 const SCENE = { caseId: 'c1', video: 'media/walk.mp4', draft: 'sc_2' };
@@ -33,6 +36,7 @@ beforeEach(() => {
   toast.mockClear();
   openCase.mockClear();
   refreshCaseList.mockClear();
+  goWithScene.mockClear();
 });
 
 describe('a scene handed over by the extension', () => {
@@ -54,6 +58,20 @@ describe('a scene handed over by the extension', () => {
     expect(await going).toBe(true);
     expect(openCase).not.toHaveBeenCalled();
     expect(uiState.tool).toBe('inspect');
+  });
+
+  it('opens Inspect on the scene for the pill’s Inspect link, without the chooser', async () => {
+    expect(await proveScene({ ...SCENE, to: 'inspect' })).toBe(true);
+    expect(uiState).toEqual({ tool: 'inspect', inspectScene: { video: 'media/walk.mp4', draft: 'sc_2' } });
+  });
+
+  it('goes to Satellite or Horizon with the scene, at the spot the other map showed', async () => {
+    const view = { lat: 48.1, lon: 2.3, zoom: 16 };
+    expect(await proveScene({ ...SCENE, to: 'satellite', view })).toBe(true);
+    expect(goWithScene).toHaveBeenLastCalledWith('satellite', view);
+    expect(await proveScene({ ...SCENE, to: 'horizon', view })).toBe(true);
+    expect(goWithScene).toHaveBeenLastCalledWith('horizon', view);
+    expect(uiState.inspectScene).toBe(null);
   });
 
   it('opens its case first, through the guards', async () => {

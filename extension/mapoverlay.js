@@ -207,8 +207,10 @@
 
   function freshScenes() {
     // `open` is null while the panel decides (`listOpen`), else the analyst's own fold;
-    // `proving` while Make the proof is on its way to the app tab
-    return { files: null, geo: null, open: null, busy: false, proving: false };
+    // `handing` while Make the proof or a quick link is on its way to the app tab;
+    // `gathered` while the pill's list is open (`{ found, error }`), and `asking` while
+    // one of its deletes waits for a yes (`gatheredBlock`)
+    return { files: null, geo: null, open: null, busy: false, handing: false, gathered: null, asking: null };
   }
 
   /**
@@ -394,6 +396,9 @@
     // else. Re-asking on every frame of a pan would be a request per frame.
     ground.style.transform = moved;
     ground.style.transformOrigin = "0 0";
+    // and so do the leads, which are drawn as elements rather than on the canvas
+    leadLayer.style.transform = moved;
+    leadLayer.style.transformOrigin = "0 0";
   }
 
   function clearGesture() {
@@ -420,6 +425,7 @@
     settling = true;
     settleMoved = 0;
     layer.canvas.style.opacity = "0.25";
+    dimLeads();
     clearTimeout(settle);
     clearTimeout(giveUp);
     settle = setTimeout(function poll() {
@@ -439,6 +445,7 @@
     clearTimeout(settle);
     clearTimeout(giveUp);
     layer.canvas.style.opacity = confidence();
+    dimLeads();
     leadOn();
   }
 
@@ -469,6 +476,8 @@
     // is being measured over it, which is the whole reason to have it here.
     placeFires();
     refreshFires();
+    // the scene's leads are not a tool's, so they stay whatever is picked up
+    placeLeads();
     if (!tool || !state.view || !say.ok) {
       layer.clear();
       return;
@@ -1270,6 +1279,13 @@
         render();
         return;
       }
+      // While a scene is geolocated a click is a lead for it, filed at once and
+      // unnamed, and the drop stays armed for the next one. A draft already in
+      // hand is still a point to name.
+      if (state.scenes.geo && !tools.pins.draft) {
+        dropLead(point ?? anchor);
+        return;
+      }
       tools.pins.click(point, anchor);
       render();
       return;
@@ -1481,10 +1497,15 @@
   }
 
   /** File the draft point as a place, the same route the popup files one with —
-   *  so a point dropped here lands in the Saved panel like any other. */
+   *  so a point dropped here lands in the Saved panel like any other. A place is
+   *  named: it is found again by its name everywhere the case lists it. */
   async function placePin() {
     const draft = tools.pins.draft;
     if (!draft || !state.caseId) return;
+    if (!state.pinTitle.trim()) {
+      state.note = UNNAMED;
+      return render();
+    }
     try {
       await call("POST", "/api/ingest/place", {
         form: true,
@@ -1723,7 +1744,18 @@
   let heldTicket = 0;
   function holdScene(geo) {
     heldTicket = ++tickets;
+    setGeo(geo);
+  }
+
+  /** The scene held, and what belongs to the one before it put away: its pill's
+   *  list, a delete it was asking about, the lead clicked open. */
+  function setGeo(geo) {
+    const was = state.scenes.geo;
     state.scenes.geo = geo;
+    if (geo && was && geo.video === was.video && geo.id === was.id) return;
+    state.scenes.gathered = null;
+    state.scenes.asking = null;
+    heldLead = null;
   }
 
   async function loadScenes() {
@@ -1740,7 +1772,7 @@
     state.scenes.files = answer?.files ?? [];
     if (asked >= heldTicket) {
       heldTicket = asked;
-      state.scenes.geo = answer?.geolocating ?? null;
+      setGeo(answer?.geolocating ?? null);
     } else mirrorScene(state.scenes.geo);
     render();
   }
@@ -1842,29 +1874,374 @@
     render();
   }
 
+  /** The pill's quick links: where each takes the scene, and what its tooltip says. */
+  const SCENE_LINKS = [
+    { to: "inspect", icon: "inspect", title: "Open the scene in Inspect" },
+    { to: "satellite", icon: "satellite", title: "Open Satellite on the spot this map shows" },
+    { to: "horizon", icon: "horizon", title: "Open Horizon on the spot this map shows" },
+  ];
+  /** The two that open where this map is, and so need it to say where. */
+  const AT_THE_SPOT = new Set(["satellite", "horizon"]);
+  /** The deepest level the app takes a spot at (`background.js`, `sceneView`). */
+  const SPOT_MAX_ZOOM = 23;
+
+  /** The spot this map shows, as a quick link hands it, or null when the address
+   *  states no centre or no scale. */
+  function shownSpot() {
+    const view = state.view;
+    if (!view || ![view.lat, view.lon, view.zoom].every(Number.isFinite)) return null;
+    return { lat: view.lat, lon: view.lon, zoom: Math.max(0, Math.min(SPOT_MAX_ZOOM, view.zoom)) };
+  }
+
   /**
-   * Make the proof, in the app: its tab comes to the front on Inspect's chooser for
-   * the scene held, where the frames, the collages and the captures are offered
-   * (`background.js`, `scene-proof`). Nothing is written from this map.
+   * The scene held, handed to the app: its tab comes to the front on Inspect's
+   * chooser for it to make the proof, where the frames, the collages and the
+   * captures are offered, or on Inspect, Satellite or Horizon for a quick link, the
+   * last two at the spot this map shows (`background.js`, `scene-proof`). Nothing is
+   * written from this map.
    */
-  async function makeProof() {
+  async function handScene(to = "proof") {
     const geo = state.scenes.geo;
-    if (!state.caseId || !geo || state.scenes.proving) return;
-    state.scenes.proving = true;
+    if (!state.caseId || !geo || state.scenes.handing) return;
+    const scene = { caseId: state.caseId, video: geo.video, draft: geo.id };
+    if (to !== "proof") scene.to = to;
+    if (AT_THE_SPOT.has(to)) {
+      scene.view = shownSpot();
+      if (!scene.view) return;
+    }
+    state.scenes.handing = true;
     render();
     try {
-      const answer = await api.runtime.sendMessage({
-        type: "scene-proof",
-        scene: { caseId: state.caseId, video: geo.video, draft: geo.id },
-      });
+      const answer = await api.runtime.sendMessage({ type: "scene-proof", scene });
       if (!answer?.ok) state.note = answer?.error || "Azimut did not answer";
     } catch (e) {
       state.note = e.message;
     } finally {
-      state.scenes.proving = false;
+      state.scenes.handing = false;
       render();
     }
   }
+
+  // --- what the scene being geolocated gathered ------------------------------
+  //
+  // The pill's counts open a list of it, as the app's pill does
+  // (`components/GatheredPanel.svelte`): the leads dropped for the scene, the map
+  // captures attached to it, and what its file gives it, the frames of the video's
+  // Inspect strip and its collages inside the scene, or the picture itself
+  // (`GET /api/ingest/geolocating/gathered`). Every route behind it reaches the
+  // scene being geolocated and nothing else of the case.
+  //
+  // A lead is deleted in one press: nothing else reads it. A capture goes to the
+  // case Trash once the analyst has read what else it touches, and a frame leaves
+  // Inspect's strip, its picture staying in Media. A collage is deleted in Collage
+  // and the picture is the question itself, so neither is deleted from here.
+
+  let gatherSeq = 0;
+  let regathering = 0;
+
+  /** Read the list again, while it is open. */
+  async function readGathered() {
+    const caseId = state.caseId;
+    if (!caseId || !state.scenes.gathered) return;
+    const mine = ++gatherSeq;
+    try {
+      const found = await call("GET", "/api/ingest/geolocating/gathered", { query: { case_id: caseId } });
+      if (mine !== gatherSeq || caseId !== state.caseId || !state.scenes.gathered) return;
+      // nothing is geolocated any more: the queue read the nudge asks for drops the pill
+      state.scenes.gathered = found?.geolocating ? { found, error: "" } : null;
+    } catch (e) {
+      if (mine !== gatherSeq || !state.scenes.gathered) return;
+      if (TROUBLES.has(e?.code)) failed(e);
+      else state.scenes.gathered = { ...state.scenes.gathered, error: e?.message || String(e) };
+    }
+    render();
+  }
+
+  /** A burst of nudges reads the open list once. */
+  function regather() {
+    if (!state.scenes.gathered) return;
+    clearTimeout(regathering);
+    regathering = setTimeout(readGathered, REQUEUE_MS);
+  }
+
+  function toggleGathered() {
+    if (state.scenes.gathered) {
+      state.scenes.gathered = null;
+      state.scenes.asking = null;
+    } else if (state.scenes.geo) {
+      state.scenes.gathered = { found: null, error: "" };
+      readGathered();
+    }
+    render();
+  }
+
+  /** The row a press in the list names, as the last read gave it. */
+  function gatheredRow(kind, key) {
+    const found = state.scenes.gathered?.found;
+    if (kind === "capture") return (found?.captures ?? []).find((row) => row.path === key) ?? null;
+    if (kind === "frame") return (found?.frames ?? []).find((row) => row.id === key) ?? null;
+    return null;
+  }
+
+  /**
+   * A delete of the list, asked about in place: a capture says what else it touches
+   * (`POST /api/ingest/geolocating/impact`), a frame that its picture stays in Media.
+   * The question never blocks, apart from what the app itself would refuse.
+   */
+  async function askDelete(kind, key) {
+    const row = gatheredRow(kind, key);
+    if (!row) return;
+    state.scenes.asking = { kind, key, impact: null, checking: kind === "capture", unknown: false };
+    render();
+    if (kind !== "capture") return;
+    const caseId = state.caseId;
+    let impact = null;
+    try {
+      impact = await call("POST", "/api/ingest/geolocating/impact", { body: { case_id: caseId, path: key } });
+    } catch {
+      // said in the question, and the delete stays open: a check that failed is not a no
+    }
+    const asking = state.scenes.asking;
+    if (!asking || asking.kind !== kind || asking.key !== key) return;
+    state.scenes.asking = { ...asking, impact, checking: false, unknown: !impact };
+    render();
+  }
+
+  async function confirmDelete() {
+    const asking = state.scenes.asking;
+    const caseId = state.caseId;
+    if (!asking || asking.busy || !caseId) return;
+    state.scenes.asking = { ...asking, busy: true };
+    render();
+    try {
+      const answer = await call("POST", "/api/ingest/geolocating/remove", {
+        body: { case_id: caseId, kind: asking.kind, target: asking.key },
+      });
+      if (caseId !== state.caseId) return;
+      state.scenes.asking = null;
+      if (answer && "geolocating" in answer) holdScene(answer.geolocating ?? null);
+      readGathered();
+    } catch (e) {
+      if (state.scenes.asking) state.scenes.asking = { ...state.scenes.asking, busy: false };
+      failed(e);
+    }
+    render();
+  }
+
+  // --- the leads of the scene being geolocated -------------------------------
+  //
+  // Spots the scene may be, dropped on this map while it is geolocated: numbered,
+  // drawn in the scene's colour, kept with the scene and never as one of the case's
+  // places (`POST /api/ingest/leads`). They go when the scene is given up or a proof
+  // takes it up. Drawn whatever tool is open, since they are the scene's and not a
+  // tool's, and dragged to move.
+  //
+  // Each one is an element over the drawing rather than a shape in it: the pointer
+  // has to be able to take one without arming the canvas, which would take every
+  // other click from the map underneath.
+
+  const leadLayer = document.createElement("div");
+  Object.assign(leadLayer.style, { position: "fixed", inset: "0", pointerEvents: "none", zIndex: "1" });
+  root.appendChild(leadLayer);
+  /** The element drawn for each lead, by its id. */
+  const leadEls = new Map();
+  let heldLead = null; // the lead clicked open, its number named beside it
+  let leadDrag = null; // { id, el, from, tip, moved } while one is in the hand
+
+  /** The leads of the scene held, none when no scene is. */
+  const heldLeads = () => state.scenes.geo?.leads ?? [];
+
+  /** How sure the leads may look: as sure as the drawing beside them. */
+  function dimLeads() {
+    leadLayer.style.opacity = settling ? "0.25" : verdict().far ? "0.55" : "";
+  }
+
+  /** Put each lead on its spot, the one in the hand left where the pointer has it. */
+  function placeLeads() {
+    const geo = state.scenes.geo;
+    const leads = heldLeads();
+    if (!leads.length || !state.view || !verdict().ok) {
+      leadLayer.replaceChildren();
+      leadEls.clear();
+      return;
+    }
+    const color = T.sceneColor(geo);
+    const kept = new Set();
+    for (const lead of leads) {
+      kept.add(lead.id);
+      let el = leadEls.get(lead.id);
+      if (!el) {
+        el = document.createElement("div");
+        el.className = "lead";
+        el.dataset.lead = lead.id;
+        el.innerHTML = `<div class="lead-pin"><b></b></div><span class="lead-name"></span>`;
+        leadLayer.appendChild(el);
+        leadEls.set(lead.id, el);
+      }
+      el.style.setProperty("--scene", color);
+      el.querySelector("b").textContent = String(lead.n);
+      el.querySelector(".lead-name").textContent = `Lead ${lead.n}`;
+      el.querySelector(".lead-pin").title = `Lead ${lead.n}`;
+      el.classList.toggle("lit", heldLead === lead.id);
+      if (leadDrag?.id === lead.id) continue;
+      const at = toScreen(lead);
+      const near = at && Number.isFinite(at.x) && Number.isFinite(at.y) && Math.abs(at.x) < D.FAR && Math.abs(at.y) < D.FAR;
+      el.style.display = near ? "" : "none";
+      if (near) {
+        el.style.left = `${at.x}px`;
+        el.style.top = `${at.y}px`;
+      }
+    }
+    for (const [id, el] of leadEls) {
+      if (kept.has(id)) continue;
+      el.remove();
+      leadEls.delete(id);
+    }
+    dimLeads();
+  }
+
+  /** Drop a lead for the scene held, where the map was clicked. The drop stays armed. */
+  async function dropLead(at) {
+    const caseId = state.caseId;
+    if (!caseId || !state.scenes.geo) return;
+    try {
+      const answer = await call("POST", "/api/ingest/leads", { body: { case_id: caseId, lat: at.lat, lon: at.lon } });
+      if (caseId !== state.caseId) return;
+      if (answer && "geolocating" in answer) holdScene(answer.geolocating ?? null);
+      state.note = "";
+    } catch (e) {
+      failed(e);
+      loadScenes(); // what refused it may be that the scene ended
+    }
+    regather();
+    render();
+  }
+
+  async function moveLead(id, at) {
+    const caseId = state.caseId;
+    const geo = state.scenes.geo;
+    if (!caseId || !geo) return;
+    // where it was let go, at once, and the app's word on it after
+    holdScene({ ...geo, leads: heldLeads().map((lead) => (lead.id === id ? { ...lead, lat: at.lat, lon: at.lon } : lead)) });
+    render();
+    try {
+      const answer = await call("POST", "/api/ingest/leads/move", {
+        body: { case_id: caseId, lead: id, lat: at.lat, lon: at.lon },
+      });
+      if (caseId !== state.caseId) return;
+      if (answer && "geolocating" in answer) holdScene(answer.geolocating ?? null);
+    } catch (e) {
+      failed(e);
+      loadScenes(); // the queue puts it back where the app has it
+    }
+    regather();
+    render();
+  }
+
+  async function removeLead(id) {
+    const caseId = state.caseId;
+    if (!caseId) return;
+    try {
+      const answer = await call("POST", "/api/ingest/leads/remove", { body: { case_id: caseId, lead: id } });
+      if (caseId !== state.caseId) return;
+      if (answer && "geolocating" in answer) holdScene(answer.geolocating ?? null);
+      if (heldLead === id) heldLead = null;
+    } catch (e) {
+      failed(e);
+    }
+    readGathered();
+    render();
+  }
+
+  /**
+   * This map, moved onto a lead from the list, at the level it is at.
+   *
+   * The way a linked view is followed (`followView`): the address is rewritten and
+   * the site does the moving. Most of these sites reload for it, and the worker is
+   * told first, so it puts the tools back once the page has loaded, as it does for
+   * a follow. A reference window open over the map does not come back with them.
+   */
+  function goToLead(id) {
+    const lead = heldLeads().find((one) => one.id === id);
+    if (!lead || !canGo()) return;
+    heldLead = id;
+    const view = { lat: lead.lat, lon: lead.lon, zoom: state.view.zoom, bearing: state.view.bearing || 0 };
+    const href = K.writeView(state.parsed, location.href, view, mapHeight());
+    if (!href) return render(); // it is there already
+    leading = null;
+    clearTimeout(leadQuiet);
+    following = view;
+    followedFrom = location.href;
+    linkSend({ type: "follow", view });
+    location.assign(href);
+  }
+
+  /** Whether this map can be moved onto a lead: a flat map whose address the panel writes. */
+  const canGo = () => K.followable(state.parsed) && !drag && !settling;
+
+  function onLeadDown(event) {
+    const el = event.target.closest?.(".lead");
+    if (!el || event.button !== 0) return;
+    // the map underneath never hears of it, so it does not pan under the lead
+    event.preventDefault();
+    event.stopPropagation();
+    const lead = heldLeads().find((one) => one.id === el.dataset.lead);
+    const tip = lead && toScreen(lead);
+    if (!tip) return;
+    if (settling) {
+      state.note = "The map is still moving";
+      render();
+      return;
+    }
+    // `k`: a zoom the canvas is still carrying scales what the pointer travels
+    leadDrag = { id: lead.id, el, from: { x: event.clientX, y: event.clientY }, tip, k: gesture?.k || 1, moved: false };
+    el.classList.add("dragging");
+    window.addEventListener("pointermove", leadMoving, true);
+    window.addEventListener("pointerup", leadLetGo, true);
+  }
+
+  function onLeadMove(event) {
+    if (!leadDrag) return;
+    const dx = event.clientX - leadDrag.from.x;
+    const dy = event.clientY - leadDrag.from.y;
+    if (!leadDrag.moved && Math.abs(dx) < 3 && Math.abs(dy) < 3) return;
+    leadDrag.moved = true;
+    leadDrag.el.style.left = `${leadDrag.tip.x + dx / leadDrag.k}px`;
+    leadDrag.el.style.top = `${leadDrag.tip.y + dy / leadDrag.k}px`;
+    event.stopPropagation();
+  }
+
+  /** Let go: moved, it is filed where its tip is now; not moved, it was a click,
+   *  which names it beside itself or puts the name away. */
+  function onLeadUp(event) {
+    dropLeadListeners();
+    const held = leadDrag;
+    leadDrag = null;
+    if (!held) return;
+    held.el.classList.remove("dragging");
+    if (!held.moved) {
+      heldLead = heldLead === held.id ? null : held.id;
+      return placeLeads();
+    }
+    event.stopPropagation();
+    if (!state.view || !verdict().ok) return placeLeads(); // the map left geometry under the hand
+    // in the frame the view describes, which is the one the lead was drawn in
+    const at = M.toLatLon(
+      { x: held.tip.x + (event.clientX - held.from.x) / held.k, y: held.tip.y + (event.clientY - held.from.y) / held.k },
+      state.view,
+      area()
+    );
+    if (!at || !Number.isFinite(at.lat) || !Number.isFinite(at.lon) || Math.abs(at.lat) > 90) return placeLeads();
+    moveLead(held.id, { lat: at.lat, lon: ((((at.lon + 180) % 360) + 360) % 360) - 180 });
+  }
+
+  const leadMoving = trusted(onLeadMove);
+  const leadLetGo = trusted(onLeadUp);
+  function dropLeadListeners() {
+    window.removeEventListener("pointermove", leadMoving, true);
+    window.removeEventListener("pointerup", leadLetGo, true);
+  }
+  leadLayer.addEventListener("pointerdown", trusted(onLeadDown));
 
   /** The scene's video or picture over the map: the window already holding it, else a new one. */
   function showScene(scene) {
@@ -1888,6 +2265,8 @@
     if (!event || event.case_id !== state.caseId) return;
     // started, ended or a capture attached, from here, the app or another map:
     // shown at once, then read
+    // what the scene gathered may have moved with any of these: its open list follows
+    if (event.type === "geolocating" || event.type === "scenes" || event.type === "saved") regather();
     if (event.type === "geolocating") {
       if (heardScene(event)) render();
       rereadScenes();
@@ -2378,6 +2757,84 @@
     }
     @media (prefers-reduced-motion: reduce) { .geo-count.bump { animation: none; } }
     .geo-pill .icon { width: 24px; padding: 3px 0; border-radius: 999px; }
+    /* the counts open what the scene gathered, so they are a button that reads as the chip */
+    button.geo-count { border: 0; gap: 7px; line-height: normal; }
+    button.geo-count:hover:not([disabled]) { background: ${t.bg3}; box-shadow: inset 0 0 0 1px ${t.borderStrong}; }
+    button.geo-count[aria-expanded="true"] { box-shadow: inset 0 0 0 1px ${t.accent}; }
+    /* the quick links, small enough to sit beside the scene's name */
+    .geo-links { flex: none; display: inline-flex; }
+    .geo-pill .geo-link {
+      width: 20px; padding: 3px 0; border-radius: 999px;
+      background: none; border-color: transparent; color: ${t.text2};
+    }
+    .geo-pill .geo-link:hover:not([disabled]) { background: none; border-color: transparent; color: ${t.accent}; }
+    /* what the scene gathered, under its pill: a row each, its thumbnail first */
+    .gth {
+      display: grid; grid-template-columns: minmax(0, 1fr); gap: 1px;
+      max-height: 260px; overflow: auto; padding: 0 0 6px; border-bottom: 1px solid ${t.border};
+    }
+    .gth-head { padding: 5px 4px 2px; font-size: 10.5px; font-weight: 600; color: ${t.text3}; }
+    .gth-row { display: flex; align-items: center; gap: 7px; min-width: 0; padding: 2px 2px 2px 4px; border-radius: 7px; }
+    .gth-row:hover { background: ${t.bg2}; }
+    .gth-main {
+      flex: 1 1 0; min-width: 0; display: flex; align-items: center; justify-content: flex-start; gap: 7px;
+      padding: 2px 0; background: none; border: 0; color: ${t.text1};
+    }
+    button.gth-main:hover:not([disabled]) { background: none; color: ${t.accent}; }
+    .gth-n {
+      flex: none; min-width: 18px; height: 18px; padding: 0 4px; box-sizing: border-box; border-radius: 9px;
+      display: inline-grid; place-items: center; background: var(--scene, ${t.accent}); color: #141414;
+      font-size: 10.5px; font-weight: 700; font-variant-numeric: tabular-nums;
+    }
+    .gth-words {
+      flex: 1 1 0; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+      font-size: 11.5px; color: inherit; text-align: start;
+    }
+    .gth-words.mono { font-variant-numeric: tabular-nums; }
+    .gth-pic {
+      flex: none; width: 40px; height: 28px; box-sizing: border-box; overflow: hidden; border-radius: 4px;
+      display: grid; place-items: center; background: ${t.bg0}; border: 1px solid ${t.border}; color: ${t.text3};
+    }
+    .gth-pic canvas { display: block; width: 100%; height: 100%; }
+    .gth-clock { border-style: dashed; font-size: 10px; color: ${t.text2}; font-variant-numeric: tabular-nums; }
+    .gth-row .gth-act { width: 22px; padding: 3px 0; color: ${t.text3}; }
+    .gth-row .gth-act:hover:not([disabled]) { color: ${t.danger}; }
+    .gth-ask {
+      display: grid; grid-template-columns: minmax(0, 1fr); gap: 4px; margin: 2px 0 4px 4px; padding: 7px 8px;
+      background: ${t.bg0}; border: 1px solid ${t.border}; border-left: 2px solid ${t.danger}; border-radius: 0 7px 7px 0;
+    }
+    .gth-ask-q { font-size: 12px; font-weight: 600; }
+    .gth-impact { display: grid; gap: 1px; font-size: 11px; }
+    .gth-impact-head { color: ${t.text2}; }
+    .gth-impact.danger .gth-impact-head { color: ${t.danger}; }
+    .gth-impact-item { padding-left: 8px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .gth-impact-item span { color: ${t.text3}; }
+    .gth-ask .row button { padding: 4px 8px; font-size: 11.5px; }
+    .gth-ask button.danger { background: ${t.danger}; border-color: ${t.danger}; color: ${t.accentText}; font-weight: 600; }
+    .gth-ask button.danger:hover:not([disabled]) { background: ${t.danger}; border-color: ${t.danger}; filter: brightness(1.08); }
+    /* The scene's leads over the map: the app's teardrop in the scene's colour, its
+       number in it, the sharp corner on the spot. Only the mark takes the pointer. */
+    .lead { position: absolute; width: 0; height: 0; }
+    .lead-pin {
+      position: absolute; left: -10px; top: -24px; width: 20px; height: 20px;
+      display: grid; place-items: center; pointer-events: auto; cursor: grab; touch-action: none; user-select: none;
+      font: 700 10.5px/1 system-ui, -apple-system, "Segoe UI", sans-serif; color: ${t.accentText};
+    }
+    .lead-pin::before {
+      content: ""; position: absolute; inset: 0; box-sizing: border-box;
+      border-radius: 50% 50% 50% 2px; transform: rotate(-45deg);
+      background: var(--scene, ${t.accent}); border: 1.5px solid rgba(0, 0, 0, .55);
+      box-shadow: 0 1px 4px rgba(0, 0, 0, .45);
+    }
+    .lead-pin b { position: relative; font: inherit; }
+    .lead-pin:hover::before, .lead.lit .lead-pin::before, .lead.dragging .lead-pin::before { border: 2px solid #fff; }
+    .lead.dragging .lead-pin { cursor: grabbing; }
+    .lead-name {
+      display: none; position: absolute; left: 14px; top: -25px; padding: 2px 7px; white-space: nowrap;
+      font: 12px/1.35 system-ui, -apple-system, "Segoe UI", sans-serif; color: ${t.text1};
+      background: rgba(20, 20, 20, .92); border: 1px solid ${t.borderStrong}; border-radius: 5px; pointer-events: none;
+    }
+    .lead.lit .lead-name { display: block; }
     .geo-proof {
       flex: none; gap: 5px; padding: 3px 9px; border-radius: 999px;
       font-size: 11px; font-weight: 500; color: ${t.text1};
@@ -2560,8 +3017,12 @@
 
     if (state.tool === "pins") {
       const draft = tool.draft;
+      // while a scene is geolocated, a click on the map is a lead for it
+      const leads = !!state.scenes.geo && !draft;
+      const drop = tool.dropping ? "Click the map" : leads ? "Drop a lead" : "Place a point";
+      const dropTitle = leads ? ` title="${tool.dropping ? "Press again or Esc to stop" : "Mark spots the scene may be, kept with it"}"` : "";
       return `
-        ${button("pin-drop", "pin", tool.dropping ? "Click the map" : "Place a point", tool.dropping)}
+        ${button("pin-drop", "pin", drop, tool.dropping, dropTitle)}
         <div class="row wrap">
           ${tool.kinds
             .map((entry) =>
@@ -2569,12 +3030,12 @@
             )
             .join("")}
         </div>
-        <div class="readout small">${esc(readout)}</div>
+        <div class="readout small">${esc(leads && tool.dropping ? "Each click drops a lead, Esc stops" : readout)}</div>
         ${draft ? `
           <input data-act="pin-title" placeholder="Name this point" value="${esc(state.pinTitle)}">
           <div class="hint">${draft.lat.toFixed(5)}, ${draft.lon.toFixed(5)}</div>
           <div class="row">
-            ${button("pin-save", "check", "File it")}
+            ${button("pin-save", "check", "File it", false, saveState())}
             ${button("pin-cancel", "trash", "Discard")}
           </div>` : `<div class="hint">Point at a mark to name it, click to keep it open.</div>`}`;
     }
@@ -2681,6 +3142,10 @@
         </select>`}`;
   }
 
+  /** Why File it is greyed: a place is filed under its name. */
+  const UNNAMED = "Name the point to file it";
+  const saveState = () => (state.pinTitle.trim() ? "" : ` disabled title="${UNNAMED}"`);
+
   /** The one line under the sky slider: what is up, and how high. */
   function skyLine(tool) {
     const curve = tool.day?.curve;
@@ -2729,18 +3194,30 @@
     };
     // the count steps up with a pulse, as the app's pill does, carried on across a redraw
     const pulse = bump(geo, count);
+    const handing = state.scenes.handing ? " disabled" : "";
+    const spot = shownSpot();
+    // Inspect on the scene, Satellite and Horizon where this map is, as the app's pill links them
+    const links = SCENE_LINKS.map(({ to, icon: glyph, title }) => {
+      const nowhere = AT_THE_SPOT.has(to) && !spot;
+      const said = nowhere ? "This page gives no spot to open there" : title;
+      return `<button data-act="geo-to" data-to="${to}" class="geo-link" title="${esc(said)}" aria-label="${esc(title)}"${nowhere ? " disabled" : handing}>${icon(glyph, 13)}</button>`;
+    }).join("");
+    const leadCount = geo?.leads?.length ?? 0;
+    const gathered = !!state.scenes.gathered;
     const pill = geo
       ? `<div class="geo-pill">
           <div class="geo-line">
             <span class="geo-dot" style="--scene: ${esc(T.sceneColor(geo))}"></span>
             ${button("geo-show", "", `Geolocating · ${T.queueTime(geo)}${geo.label ? ` · ${geo.label}` : ""}`, false, ` class="geo-what" title="Show its ${picture ? "picture" : "video"} over the map"`)}
+            <span class="geo-links">${links}</span>
             <button data-act="geo-stop" class="icon" title="Stop geolocating it, its captures stay with it" aria-label="Stop geolocating">${icon("x", 13)}</button>
           </div>
           <div class="geo-line">
-            <span class="geo-count${pulse == null ? "" : " bump"}"${pulse ? ` style="animation-delay: -${pulse}ms"` : ""}>${counts(geo, true)}</span>
-            <button data-act="geo-proof" class="geo-proof" title="Make the proof in Azimut, from ${picture ? "the picture and its captures" : "its frames and captures"}"${state.scenes.proving ? " disabled" : ""}>${icon("proof", 12)}<span>Make the proof</span></button>
+            <button data-act="geo-gathered" class="geo-count${pulse == null ? "" : " bump"}"${pulse ? ` style="animation-delay: -${pulse}ms"` : ""} aria-expanded="${gathered}" aria-label="What this scene gathered">${counts(geo, true)}${leadCount ? `<span class="geo-n geo-leads" title="${leadCount === 1 ? "1 lead" : `${leadCount} leads`}">${icon("pin", 11)}${leadCount}</span>` : ""}</button>
+            <button data-act="geo-proof" class="geo-proof" title="Make the proof in Azimut, from ${picture ? "the picture and its captures" : "its frames and captures"}"${handing}>${icon("proof", 12)}<span>Make the proof</span></button>
           </div>
-        </div>`
+        </div>
+        ${gathered ? gatheredBlock(geo) : ""}`
       : "";
     // the scene as its video's bar draws it, in the colour Inspect gives it, beside its time
     const mark = (scene) => {
@@ -2778,6 +3255,199 @@
       ? `<button data-act="geo-fold" class="geo-fold" aria-expanded="${open}" title="${open ? "Fold the list" : "Show the scenes still to geolocate"}"><span>${label}</span><span class="n">${geo && !open ? more : total}</span>${icon(open ? "chevronUp" : "chevronDown", 13)}</button>`
       : "";
     return `<div class="geo" data-guide="ext.scenes">${pill}${fold}${list}</div>`;
+  }
+
+  /** How many of each group a delete's question names before counting the rest. */
+  const IMPACT_SHOWN = 4;
+
+  /**
+   * The pill's list of what the scene gathered, under the pill, in the app's
+   * order: leads, the picture, map captures, frames, collages (`readGathered`).
+   */
+  function gatheredBlock(geo) {
+    const { found, error } = state.scenes.gathered;
+    if (error) return `<div class="gth"><div class="note">${esc(error)}</div></div>`;
+    if (!found) return `<div class="gth"><div class="hint">Reading…</div></div>`;
+    const leads = found.leads ?? [];
+    const captures = found.captures ?? [];
+    const frames = found.frames ?? [];
+    const collages = found.collages ?? [];
+    const picture = found.picture ?? null;
+    if (!leads.length && !captures.length && !frames.length && !collages.length && !picture) {
+      return `<div class="gth"><div class="hint">Nothing gathered yet. Drop a lead or capture the map.</div></div>`;
+    }
+    const color = esc(T.sceneColor(geo));
+    const go = canGo();
+    const asking = state.scenes.asking;
+    const waiting = asking ? " disabled" : "";
+    const section = (name, rows, title = "") =>
+      rows.length ? `<div class="gth-head"${title ? ` title="${esc(title)}"` : ""}>${esc(name)}</div>${rows.join("")}` : "";
+    // the thumbnail is painted in once the app sends it (`fillThumbs`); until then, and
+    // for a file the app keeps none of, the slot shows what kind of file it is
+    const pic = (row, glyph, title = "") =>
+      `<span class="gth-pic" data-thumb="${esc(row?.thumb ? row.path : "")}"${title ? ` title="${esc(title)}"` : ""}>${icon(glyph, 13)}</span>`;
+    const ask = (kind, key) => (asking?.kind === kind && asking.key === key ? askBlock(asking) : "");
+    const named = (row) => `<span class="gth-words" dir="auto" title="${esc(row.title)}">${esc(row.title)}</span>`;
+
+    const leadRows = leads.map((lead) => {
+      const words = `<span class="gth-n" style="--scene: ${color}">${esc(lead.n)}</span>`
+        + `<span class="gth-words mono">${Number(lead.lat).toFixed(5)}, ${Number(lead.lon).toFixed(5)}</span>`;
+      return `
+        <div class="gth-row">
+          ${go
+            ? `<button data-act="lead-go" data-lead="${esc(lead.id)}" class="gth-main" title="Move this map to it">${words}</button>`
+            : `<span class="gth-main">${words}</span>`}
+          <button data-act="lead-remove" data-lead="${esc(lead.id)}" class="icon gth-act" title="Delete this lead" aria-label="Delete lead ${esc(lead.n)}">${icon("x", 12)}</button>
+        </div>`;
+    });
+    const pictureRows = picture ? [`<div class="gth-row">${pic(picture, "image")}${named(picture)}</div>`] : [];
+    const captureRows = captures.map((row) => `
+      <div class="gth-row">
+        ${pic(row, "satellite")}${named(row)}
+        <button data-act="gth-delete" data-kind="capture" data-key="${esc(row.path)}" class="icon gth-act" title="Move this capture to the Trash" aria-label="Delete ${esc(row.title)}"${waiting}>${icon("trash", 12)}</button>
+      </div>${ask("capture", row.path)}`);
+    const frameRows = frames.map((row) => {
+      const at = T.preciseClock(row.time);
+      // a frame never saved to the case is a time on the strip and nothing more
+      const slot = row.path
+        ? pic(row, "image")
+        : `<span class="gth-pic gth-clock" title="Not saved to the case yet">${esc(T.sceneClock(row.time))}</span>`;
+      const leaves = row.path ? "Take it off Inspect's strip, its picture stays in Media" : "Take it off Inspect's strip";
+      return `
+        <div class="gth-row">
+          ${slot}<span class="gth-words mono">${esc(at)}</span>
+          <button data-act="gth-delete" data-kind="frame" data-key="${esc(row.id)}" class="icon gth-act" title="${leaves}" aria-label="Take the frame at ${esc(at)} off the strip"${waiting}>${icon("x", 12)}</button>
+        </div>${ask("frame", row.id)}`;
+    });
+    const collageRows = collages.map((row) => `
+      <div class="gth-row">${pic(row, "image", row.path ? "" : "Not exported yet")}${named(row)}</div>`);
+    return `<div class="gth" role="group" aria-label="What this scene gathered">
+      ${section("Leads", leadRows)}${section("Picture", pictureRows)}${section("Map captures", captureRows)}${section("Frames", frameRows)}${section("Collages", collageRows, "Deleted in Collage")}
+    </div>`;
+  }
+
+  /** A delete of the list, asked in place under its row (`askDelete`). */
+  function askBlock(asking) {
+    const capture = asking.kind === "capture";
+    const row = gatheredRow(asking.kind, asking.key);
+    const lines = [];
+    if (capture) {
+      lines.push(`<div class="hint">It goes to the case Trash with its image.</div>`);
+      if (asking.checking) lines.push(`<div class="hint">Checking what else it touches…</div>`);
+      else if (asking.unknown) lines.push(`<div class="hint">${esc(T.impactUnknown())}</div>`);
+      else {
+        lines.push(`<div class="hint">${esc(T.impactLead(asking.impact))}</div>`);
+        for (const group of T.impactGroups(asking.impact)) {
+          const shown = group.items.slice(0, IMPACT_SHOWN);
+          const more = group.more + group.items.length - shown.length;
+          lines.push(`<div class="gth-impact${group.tone ? ` ${group.tone}` : ""}">
+            <div class="gth-impact-head">${esc(group.heading)}</div>
+            ${shown.map((item) => {
+              const how = T.impactHow(item);
+              return `<div class="gth-impact-item" dir="auto">${esc(item.label || item.path || "")}${how ? ` <span>${esc(how)}</span>` : ""}</div>`;
+            }).join("")}
+            ${more ? `<div class="gth-impact-item"><span>+${more} more</span></div>` : ""}
+          </div>`);
+        }
+      }
+    } else if (row?.path) {
+      lines.push(`<div class="hint">Its picture saved to the case stays in Media.</div>`);
+    }
+    const blocked = capture && T.impactBlocked(asking.impact);
+    const off = blocked
+      ? ` disabled title="${esc(T.impactGroups(asking.impact)[0]?.heading ?? "")}"`
+      : asking.busy || asking.checking ? " disabled" : "";
+    return `<div class="gth-ask">
+      <div class="gth-ask-q">${capture ? "Delete this capture?" : "Take this frame off the strip?"}</div>
+      ${lines.join("")}
+      <div class="row">
+        <button data-act="gth-confirm" class="danger"${off}>${capture ? "Delete" : "Remove"}</button>
+        <button data-act="gth-cancel">Keep</button>
+      </div>
+    </div>`;
+  }
+
+  // --- thumbnails of what the scene gathered ---------------------------------
+  //
+  // Asked of the app one file at a time, for the files the scene gathered and no
+  // other (`background.js`, `map-image`), and painted on a canvas rather than
+  // linked: a map site's content policy may refuse a `data:` image, and a canvas
+  // asks no policy anything (`mapref.js` says the same of its windows). Each one is
+  // cut down to its slot as it lands, and only so many are kept.
+
+  /** The slot's size, twice over for a sharp screen. */
+  const THUMB_W = 80;
+  const THUMB_H = 56;
+  const THUMBS_KEPT = 60;
+  /** `case, path, thumbnail` → the picture cut down to its slot, or null where the app
+   *  sent none; the newest last, the oldest dropped past `THUMBS_KEPT`. */
+  const thumbs = new Map();
+  const thumbing = new Set();
+  const thumbKey = (row) => `${state.caseId}\n${row.path}\n${row.thumb}`;
+
+  /** Paint what is already here into the list just drawn, and ask for the rest. */
+  function fillThumbs() {
+    const found = state.scenes.gathered?.found;
+    if (!found) return;
+    const rows = [found.picture, ...(found.captures ?? []), ...(found.frames ?? []), ...(found.collages ?? [])];
+    const byPath = new Map(rows.filter((row) => row?.path && row.thumb).map((row) => [row.path, row]));
+    for (const slot of panel.querySelectorAll(".gth-pic[data-thumb]")) {
+      const row = byPath.get(slot.dataset.thumb);
+      if (!row) continue;
+      const key = thumbKey(row);
+      if (!thumbs.has(key)) askThumb(row, key);
+      else if (thumbs.get(key)) paintThumb(slot, thumbs.get(key));
+    }
+  }
+
+  async function askThumb(row, key) {
+    if (thumbing.has(key)) return;
+    thumbing.add(key);
+    let small = null;
+    try {
+      const answer = await api.runtime.sendMessage({
+        type: "map-image",
+        path: "/api/ingest/geolocating/thumb",
+        query: { case_id: state.caseId, path: row.path },
+      });
+      if (answer?.ok) small = await shrink(answer.src);
+    } catch {
+      // the slot keeps its placeholder
+    }
+    thumbing.delete(key);
+    thumbs.delete(key);
+    thumbs.set(key, small);
+    while (thumbs.size > THUMBS_KEPT) thumbs.delete(thumbs.keys().next().value);
+    if (!small) return;
+    for (const slot of panel.querySelectorAll(".gth-pic[data-thumb]")) {
+      if (slot.dataset.thumb === row.path && key === thumbKey(row)) paintThumb(slot, small);
+    }
+  }
+
+  /** The app's thumbnail, decoded and cropped to fill its slot as the app's grid does. */
+  async function shrink(src) {
+    const binary = atob(String(src || "").split(",")[1] ?? "");
+    const bytes = new Uint8Array(binary.length);
+    for (let i = 0; i < binary.length; i += 1) bytes[i] = binary.charCodeAt(i);
+    const bitmap = await createImageBitmap(new Blob([bytes]));
+    const canvas = document.createElement("canvas");
+    canvas.width = THUMB_W;
+    canvas.height = THUMB_H;
+    const cover = Math.max(THUMB_W / bitmap.width, THUMB_H / bitmap.height);
+    const w = bitmap.width * cover;
+    const h = bitmap.height * cover;
+    canvas.getContext("2d").drawImage(bitmap, (THUMB_W - w) / 2, (THUMB_H - h) / 2, w, h);
+    bitmap.close?.();
+    return canvas;
+  }
+
+  function paintThumb(slot, small) {
+    if (slot.querySelector("canvas")) return;
+    const canvas = document.createElement("canvas");
+    canvas.width = small.width;
+    canvas.height = small.height;
+    canvas.getContext("2d").drawImage(small, 0, 0);
+    slot.replaceChildren(canvas);
   }
 
   // The count's pulse: when it began, for the scene and the count it was for.
@@ -2832,6 +3502,7 @@
       </div>`;
     panel.classList.toggle("collapsed", state.collapsed);
     paint();
+    fillThumbs();
   }
 
   /** What the status says, in words: the view's facts, or why nothing is drawn. */
@@ -3073,7 +3744,17 @@
       return render();
     }
     if (act === "geo-stop") return stopGeolocating();
-    if (act === "geo-proof") return makeProof();
+    if (act === "geo-proof") return handScene("proof");
+    if (act === "geo-to") return handScene(target.dataset.to);
+    if (act === "geo-gathered") return toggleGathered();
+    if (act === "lead-go") return goToLead(target.dataset.lead);
+    if (act === "lead-remove") return removeLead(target.dataset.lead);
+    if (act === "gth-delete") return askDelete(target.dataset.kind, target.dataset.key);
+    if (act === "gth-confirm") return confirmDelete();
+    if (act === "gth-cancel") {
+      state.scenes.asking = null;
+      return render();
+    }
 
     if (act === "ref-add") {
       refLayer.openPicker();
@@ -3166,7 +3847,16 @@
     const act = event.target.dataset.act;
     if (act === "cap-lat") state.capLat = event.target.value;
     if (act === "cap-lon") state.capLon = event.target.value;
-    if (act === "pin-title") state.pinTitle = event.target.value;
+    if (act === "pin-title") {
+      state.pinTitle = event.target.value;
+      // File it follows the name as it is typed, without redrawing the field under the cursor
+      const save = panel.querySelector('[data-act="pin-save"]');
+      if (save) {
+        save.disabled = !state.pinTitle.trim();
+        if (save.disabled) save.title = UNNAMED;
+        else save.removeAttribute("title");
+      }
+    }
     if (act === "grid-title") state.gridTitle = event.target.value;
     if (act === "sky-scrub") {
       tools.sky.index = Number(event.target.value);
@@ -3323,6 +4013,16 @@
     redraw();
   }
 
+  /** Esc puts down the drop, which stays armed lead after lead, as its button pressed
+   *  again does; a point half placed goes with it. Any other key is the site's. */
+  function onKey(event) {
+    if (event.key !== "Escape" || !tools.pins.dropping) return;
+    tools.pins.clearDraft();
+    state.pinTitle = "";
+    syncArmed();
+    render();
+  }
+
   // --- lifecycle -------------------------------------------------------------
 
   const listeners = [
@@ -3333,6 +4033,7 @@
     [window, "dblclick", trusted(onDoubleClick), true],
     [window, "wheel", trusted(onWheel), { capture: true, passive: true }],
     [window, "resize", onResize, false],
+    [window, "keydown", trusted(onKey), true],
     [document, "visibilitychange", onShown, false],
     [layer.canvas, "pointerdown", trusted(canvasDown), false],
     [layer.canvas, "pointermove", trusted(canvasMove), false],
@@ -3370,6 +4071,8 @@
     clearTimeout(giveUp);
     clearTimeout(settle);
     clearTimeout(frameQuiet);
+    clearTimeout(regathering);
+    dropLeadListeners();
     if (frame) cancelAnimationFrame(frame);
     for (const [node, type, fn, opts] of listeners) node.removeEventListener(type, fn, opts);
     api.runtime.onMessage.removeListener(onCaptureFrame);

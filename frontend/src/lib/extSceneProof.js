@@ -3,13 +3,16 @@
  * over another site's map (`extension/background.js`, `scene-proof`). The extension
  * brings this tab to the front and hands the scene over (`lib/extBridge.js`,
  * `onSceneProof`); this tab opens Inspect's Make the proof chooser on it, as the
- * pill's own button does (`components/GeolocatingPill.svelte`).
+ * pill's own button does (`components/GeolocatingPill.svelte`). The panel's pill links
+ * hand the scene over the same way with somewhere else to go (`to`): Inspect on the
+ * scene, or Satellite or Horizon at the spot that map showed (`view`).
  *
  * Nothing is written from the map page. A scene of another case opens that case
  * first, through `openCase` and the guards that ask about unsaved work; kept where
  * it was, the tab says so and stays. A detached map window refuses: the extension
  * hands the scene to a main tab only.
  */
+import { goWithScene } from './geolocating.svelte.js';
 import { caseState, openCase, refreshCaseList, sessionStarted, toast, uiState } from './state.svelte.js';
 
 // The hand-offs taken: the extension asks again while a tab is still loading, and a
@@ -27,8 +30,9 @@ export function takeSceneProof(scene, { solo = false } = {}) {
   return { ok: true };
 }
 
-/** The scene's case open, then Inspect's chooser on the scene. Says its own trouble. */
-export async function proveScene({ caseId, video, draft }) {
+/** The scene's case open, then Inspect's chooser on the scene, or where its link goes.
+ *  Says its own trouble. */
+export async function proveScene({ caseId, video, draft, to = 'proof', view = null }) {
   await sessionStarted();
   if (caseState.current?.id !== caseId) {
     const named = () => caseState.list.find((one) => one.id === caseId);
@@ -50,7 +54,11 @@ export async function proveScene({ caseId, video, draft }) {
       return false;
     }
   }
-  uiState.inspectScene = { video, draft, proof: true };
+  if (to === 'satellite' || to === 'horizon') {
+    goWithScene(to, view);
+    return true;
+  }
+  uiState.inspectScene = { video, draft, ...(to === 'proof' ? { proof: true } : {}) };
   uiState.tool = 'inspect';
   return true;
 }

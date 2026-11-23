@@ -1201,6 +1201,10 @@ async function fillEngine(url, image) {
 // app's own guards (`lib/extSceneProof.js`). Nothing is written on the way, and the
 // scene goes to no tab but the paired app's.
 //
+// The pill's quick links ride the same way, the scene naming where it goes (`to`):
+// Inspect on the scene, or Satellite and Horizon on the spot the panel's map shows
+// (`view`). Without `to` it is Make the proof, as it always was.
+//
 // The bridge takes it to the page and brings the page's answer back (`bridge.js`).
 // A tab still loading has no one to answer yet, so it is asked again a moment later.
 // With no app tab open, one is opened at the paired address and handed the scene once
@@ -1211,14 +1215,47 @@ async function fillEngine(url, image) {
 const SCENE_WAITS = [0, 400, 800, 1600, 3200];
 /** A detached map window of the app, which is not where a proof is made. */
 const MAP_WINDOW = /[#?&]solo=1(?:&|$)/;
+/** Where a scene may be handed: the tool of the app a fresh tab opens on, and what
+ *  the press that sent it is called in a notification. */
+const SCENE_TO = {
+  proof: { tool: "inspect", press: "Make the proof" },
+  inspect: { tool: "inspect", press: "Inspect" },
+  satellite: { tool: "satellite", press: "Satellite" },
+  horizon: { tool: "horizon", press: "Horizon" },
+};
+/** The two that open at a spot, and so carry one. */
+const SCENE_AT_A_SPOT = new Set(["satellite", "horizon"]);
+/** The deepest level a handed spot may ask for. */
+const SCENE_MAX_ZOOM = 23;
 
-/** The scene a panel hands over, or null when it is not one. */
+/** A spot on a map, as the panel hands it: real numbers, on the globe, at a level
+ *  a map opens at. Null for anything else. */
+function sceneView(view) {
+  const real = (value) => typeof value === "number" && Number.isFinite(value);
+  if (!real(view?.lat) || !real(view?.lon) || !real(view?.zoom)) return null;
+  if (Math.abs(view.lat) > 90 || Math.abs(view.lon) > 180) return null;
+  if (view.zoom < 0 || view.zoom > SCENE_MAX_ZOOM) return null;
+  return { lat: view.lat, lon: view.lon, zoom: view.zoom };
+}
+
+/** The scene a panel hands over, or null when it is not one. `to` is kept only
+ *  where it says something Make the proof does not, and `view` only where it goes. */
 function sceneHandoff(scene) {
   const text = (value, max) => (typeof value === "string" && value && value.length <= max ? value : null);
   const caseId = text(scene?.caseId, 200);
   const video = text(scene?.video, 1024);
   const draft = text(scene?.draft, 200);
-  return caseId && video && draft ? { caseId, video, draft } : null;
+  if (!caseId || !video || !draft) return null;
+  const to = scene.to ?? "proof";
+  if (!Object.hasOwn(SCENE_TO, to)) return null;
+  const handed = { caseId, video, draft };
+  if (to !== "proof") handed.to = to;
+  if (SCENE_AT_A_SPOT.has(to)) {
+    const view = sceneView(scene.view);
+    if (!view) return null;
+    handed.view = view;
+  }
+  return handed;
 }
 
 /** The paired app's own tabs, the one used last first, its map windows left out. */
@@ -1278,6 +1315,7 @@ async function sceneProof(msg) {
   if (!isAppUrl(backendUrl)) return { ok: false, error: "the Azimut address in the options is not on this machine" };
   // one hand-off, however many times it is asked for: the app opens it once
   const handed = { ...scene, id: crypto.randomUUID() };
+  const { tool, press } = SCENE_TO[scene.to ?? "proof"];
   const [tab] = await appTabs();
   if (tab) {
     await bringForward(tab);
@@ -1287,10 +1325,10 @@ async function sceneProof(msg) {
       await api.scripting.executeScript({ target: { tabId: tab.id }, files: ["bridge.js"] }).catch(() => {});
       answer = await deliverScene(tab.id, handed, [0, 400, 800]);
     }
-    if (!answer.ok) notify("Azimut", `${answer.error}. Reload its tab, then press Make the proof again.`);
+    if (!answer.ok) notify("Azimut", `${answer.error}. Reload its tab, then press ${press} again.`);
     return answer.ok ? { ok: true } : { ok: false, error: answer.error };
   }
-  const opened = await api.tabs.create({ url: `${backendUrl}/#inspect`, active: true });
+  const opened = await api.tabs.create({ url: `${backendUrl}/#${tool}`, active: true });
   try {
     await api.windows?.update(opened.windowId, { focused: true });
   } catch {
@@ -1299,7 +1337,7 @@ async function sceneProof(msg) {
   tabLoaded(opened.id)
     .then(() => deliverScene(opened.id, handed))
     .then((answer) => {
-      if (!answer.ok) notify("Azimut", `${answer.error}. Press Make the proof again once it has loaded.`);
+      if (!answer.ok) notify("Azimut", `${answer.error}. Press ${press} again once it has loaded.`);
     });
   return { ok: true, opened: true };
 }
@@ -1412,9 +1450,9 @@ function notify(title, message) {
 //
 // The allowlist is the point. This worker holds the pairing token, and a relay
 // that forwarded any path would hand the whole ingest surface to whatever ends
-// up running in a map tab. These are the routes the four tools need and nothing
-// else. The nudge stream is not among them and never should be: it is one answer
-// that never ends, and it is read below rather than relayed.
+// up running in a map tab. These are the routes the panel's tools and its scene
+// pill need and nothing else. The nudge stream is not among them and never should
+// be: it is one answer that never ends, and it is read below rather than relayed.
 const MAP_ROUTES = new Set([
   "/api/ingest/ping",
   "/api/ingest/cases",
@@ -1432,12 +1470,24 @@ const MAP_ROUTES = new Set([
   // starting and stopping: the extension's origins are allowed GET and POST only)
   "/api/ingest/scenes",
   "/api/ingest/geolocating",
+  // what the scene being geolocated gathered: the leads dropped for it, and the
+  // captures and frames its pill lets go, each checked by the app to be that scene's
+  "/api/ingest/leads",
+  "/api/ingest/leads/move",
+  "/api/ingest/leads/remove",
+  "/api/ingest/geolocating/gathered",
+  "/api/ingest/geolocating/impact",
+  "/api/ingest/geolocating/remove",
 ]);
 
 // …and the ones that answer with bytes. Separate because the relay above parses
 // what comes back as JSON, and because a route that hands over a picture is
 // worth listing where it can be seen rather than inferred from a content type.
-const MAP_IMAGE_ROUTES = new Set(["/api/ingest/firms"]);
+const MAP_IMAGE_ROUTES = new Set([
+  "/api/ingest/firms",
+  // the thumbnail of a file the scene being geolocated gathered, and of no other
+  "/api/ingest/geolocating/thumb",
+]);
 
 //. Injected in this order: each one reads the globals the ones before it left.
 const MAP_FILES = [
@@ -1496,7 +1546,8 @@ async function mapApi(msg) {
 }
 
 /**
- * A picture the app draws for the panel — today, NASA FIRMS over the view.
+ * A picture the app draws for the panel: NASA FIRMS over the view, or the
+ * thumbnail of something the scene being geolocated gathered.
  *
  * Two reasons it is not `mapApi`: what comes back is bytes rather than JSON,
  * and it is handed over as a data URL because a content script cannot hold the

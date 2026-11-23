@@ -1127,3 +1127,20 @@ describe('the whole video, once', () => {
     }
   });
 });
+
+describe('a frame taken off the strip from the pill of the scene being geolocated', () => {
+  it('leaves the strip held here too, so the next save does not put it back', async () => {
+    work(CLIP, [kept('sc_1', 1, 4, '')]);
+    saved[CLIP].spec.frames = [{ id: 'f1', path: CLIP, time: 2 }, { id: 'f2', path: CLIP, time: 3 }];
+    saved[CLIP].spec.activeFrameId = 'f1';
+    await start();
+    await openFile('Convoy clip');
+    const { dispatch } = await import('../lib/events.js');
+    // another video's frame is not this strip's
+    dispatch({ type: 'scenes', case_id: 'case-a', video: 'media/walk-clip.mp4', frame_removed: 'f2' });
+    dispatch({ type: 'scenes', case_id: 'case-a', video: CLIP, frame_removed: 'f1' });
+    await afterQuiet();
+    expect(lastSpec().frames.map((f) => f.id)).toEqual(['f2']);
+    expect(lastSpec().activeFrameId).toBe(null);
+  });
+});

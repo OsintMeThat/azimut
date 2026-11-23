@@ -24,11 +24,13 @@ from __future__ import annotations
 import json
 import math
 import threading
+from collections.abc import Mapping, Sequence
 from datetime import datetime, timezone
+from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from .. import layout
-from ..workspace import CaseError
+from ..workspace import CaseError, _new_id
 from . import inspectwork
 from . import scenes as scenes_engine
 from .scenes import draft_row as scene_row
@@ -240,6 +242,210 @@ def attach(case: Case, path: str) -> dict[str, Any] | None:
     }
 
 
+# -- leads ---------------------------------------------------------------------------
+#
+# A lead is a spot dropped on a map while a scene is geolocated, from the app or the
+# extension: a candidate, "maybe here", drawn in the scene's colour with its number. It
+# is kept on the scene like its captures (`inspectwork.SCENE_STATE`), never as a place
+# of the case, and it goes with the scene: abandoning it or a proof taking it up erases
+# them (`forget_leads`). A proof takes its point from its capture, as it always did.
+
+
+def _held_scene(case: Case) -> dict[str, str]:
+    """The scene being geolocated, as held: leads are only ever its."""
+    with _lock:
+        held = dict(_active.get(case.id) or {})
+    if not held:
+        raise CaseError("no scene is being geolocated")
+    return held
+
+
+def _on_held(case: Case, change: Any) -> dict[str, Any]:
+    held = _held_scene(case)
+    try:
+        return inspectwork.update_scene(case, held["video"], held["draft"], change)
+    except CaseError:
+        # gone meanwhile: the geolocating ends with it
+        if _draft(case, held["video"], held["draft"]) is None:
+            stop(case, held["draft"])
+        raise
+
+
+def add_lead(case: Case, lat: float, lon: float) -> dict[str, Any]:
+    """Drop a lead for the scene being geolocated. Answers with it."""
+    made: dict[str, Any] = {}
+
+    def drop(scene: dict[str, Any]) -> None:
+        leads = inspectwork.clean_leads(scene.get("leads"))
+        if len(leads) >= inspectwork.MAX_LEADS:
+            raise CaseError(f"a scene keeps at most {inspectwork.MAX_LEADS} leads")
+        number = max((p["n"] for p in leads), default=0) + 1
+        made.update(id=_new_id("ld"), n=number, lat=float(lat), lon=float(lon))
+        scene["leads"] = [*leads, dict(made)]
+
+    _on_held(case, drop)
+    return made
+
+
+def move_lead(case: Case, lead_id: str, lat: float, lon: float) -> dict[str, Any]:
+    """Move one lead of the scene being geolocated. Answers with it."""
+    moved: dict[str, Any] = {}
+
+    def move(scene: dict[str, Any]) -> None:
+        leads = inspectwork.clean_leads(scene.get("leads"))
+        one = next((p for p in leads if p["id"] == lead_id), None)
+        if one is None:
+            raise CaseError("that lead is no longer there")
+        one.update(lat=float(lat), lon=float(lon))
+        moved.update(one)
+        scene["leads"] = leads
+
+    _on_held(case, move)
+    return moved
+
+
+def remove_lead(case: Case, lead_id: str) -> None:
+    """Delete one lead of the scene being geolocated; the others keep their numbers."""
+
+    def drop(scene: dict[str, Any]) -> None:
+        leads = inspectwork.clean_leads(scene.get("leads"))
+        left = [p for p in leads if p["id"] != lead_id]
+        if len(left) == len(leads):
+            raise CaseError("that lead is no longer there")
+        if left:
+            scene["leads"] = left
+        else:
+            scene.pop("leads", None)
+
+    _on_held(case, drop)
+
+
+def forget_leads(case: Case, video: str, draft_id: str) -> bool:
+    """Erase a scene's leads, once it is proved or given up on. True if it held some."""
+    draft = _draft(case, video, draft_id)
+    if draft is None or "leads" not in draft:
+        return False
+    try:
+        inspectwork.update_scene(case, video, draft_id, lambda scene: scene.pop("leads", None))
+    except CaseError:
+        return False
+    return True
+
+
+def settle_leads(case: Case, paths: list[str]) -> None:
+    """Erase the leads of the scenes of these files that a proof proves now: a picture
+    marked to geolocate is proved by a proof laying it out, which a save says."""
+    worked = [(path, drafts) for path in dict.fromkeys(paths) if (drafts := [d for d in _drafts(case, path) if "leads" in d])]
+    if not worked:
+        return
+    proofs = scenes_engine.read_proofs(case)
+    taken = _taken(proofs[0])
+    kinds = _kinds(case, [path for path, _drafts in worked])
+    for path, drafts in worked:
+        for draft in drafts:
+            if _proved(proofs[0], taken, path, draft["id"], kinds.get(path, "video")):
+                forget_leads(case, path, draft["id"])
+
+
+# -- what the scene gathered, for its pill ----------------------------------------------
+
+
+def _thumb(case: Case, item: dict[str, Any] | None) -> str | None:
+    rel = (item or {}).get("thumbnail")
+    return scenes_engine._existing(case, rel) if isinstance(rel, str) else None
+
+
+def _in_moments(times: list[float], moments: Sequence[Mapping[str, Any]]) -> bool:
+    """Whether a collage counts in a scene, by the rule its count uses (`scenes.Footage`)."""
+    if not moments:
+        return True
+    step = 1 / scenes_engine.DEFAULT_FPS
+    return any(scenes_engine.frame_in_moment(t, m["start"], m["end"], step) for t in times for m in moments)
+
+
+def gathered(case: Case) -> dict[str, Any]:
+    """What the scene being geolocated gathered, as its pill lists it: the leads dropped
+    for it, the map captures attached to it, and what its file gives it, the frames of the
+    video's Inspect strip and its collages inside the scene's moments, or the picture
+    itself. Each with the thumbnail the case keeps for it, if any. ``geolocating`` is
+    None when no scene is."""
+    held = current(case)
+    if held is None:
+        return {"geolocating": None}
+    video, draft_id = held["video"], held["id"]
+    draft = _draft(case, video, draft_id) or {}
+    answer: dict[str, Any] = {"geolocating": held, "leads": inspectwork.clean_leads(draft.get("leads"))}
+    if held.get("file_kind") == "image":
+        frames: list[dict[str, Any]] = []
+        collages: list[dict[str, Any]] = []
+    else:
+        frames = [{k: f[k] for k in ("id", "time", "path", "thumb")} for f in scenes_engine.draft_frames(case, video, draft_id)]
+        moments = inspectwork.scene_moments(draft)
+        # every one the count holds, one never exported included: it has no picture yet
+        collages = [
+            {"name": row["collage"], "title": row["title"], "path": row.get("export") or None}
+            for row in scenes_engine.video_collages(case, video)
+            if _in_moments(row["times"], moments)
+        ]
+    captures = list(held.get("captures") or [])
+    present = _present(case, [*captures, *(c["path"] for c in collages if c["path"]), video])
+    answer["captures"] = [
+        {"path": p, "title": scenes_engine.file_title(present.get(p), p), "thumb": _thumb(case, present.get(p))}
+        for p in captures if p in present
+    ]
+    answer["frames"] = frames
+    answer["collages"] = [{**c, "thumb": _thumb(case, present.get(c["path"]))} for c in collages]
+    if held.get("file_kind") == "image":
+        answer["picture"] = {"path": video, "title": held.get("file_title") or video, "thumb": _thumb(case, present.get(video))}
+    return answer
+
+
+def gathered_capture(case: Case, path: str) -> str:
+    """A capture the scene being geolocated gathered, checked before it is deleted from
+    its pill: nothing else is reached from there."""
+    held = current(case)
+    if held is None:
+        raise CaseError("no scene is being geolocated")
+    if path not in (held.get("captures") or []):
+        raise CaseError("that capture is not one this scene gathered")
+    return path
+
+
+def remove_gathered_frame(case: Case, frame_id: str) -> dict[str, Any]:
+    """Take a frame of the scene being geolocated off its video's Inspect strip, as
+    Inspect's × does: only one inside the scene, the rest of the strip untouched. A frame
+    saved to the case stays in Media. Answers with the video and the frame."""
+    held = current(case)
+    if held is None:
+        raise CaseError("no scene is being geolocated")
+    if held.get("file_kind") == "image":
+        raise CaseError("a picture has no frames")
+    video = held["video"]
+    if not any(f["id"] == frame_id for f in scenes_engine.draft_frames(case, video, held["id"])):
+        raise CaseError("that frame is not one of this scene's")
+    inspectwork.remove_frame(case, video, frame_id)
+    return {"video": video, "frame": frame_id}
+
+
+def gathered_thumb(case: Case, path: str) -> Path | None:
+    """The thumbnail file the case keeps for one of its files, or None."""
+    rel = _thumb(case, _present(case, [path]).get(path))
+    return case.resolve_inside(rel) if rel else None
+
+
+def gathered_paths(case: Case) -> set[str]:
+    """Every case file the pill of the scene being geolocated shows, for a thumbnail
+    asked by path to be one of them."""
+    found = gathered(case)
+    if found.get("geolocating") is None:
+        return set()
+    paths = {c["path"] for c in found["captures"]} | {c["path"] for c in found["collages"] if c.get("path")}
+    paths |= {f["path"] for f in found["frames"] if f.get("path")}
+    if found.get("picture"):
+        paths.add(found["picture"]["path"])
+    return paths
+
+
 # -- the same place -------------------------------------------------------------------
 
 
@@ -291,13 +497,16 @@ def unjoin(case: Case, video: str, kept: Any, gone: Any, geolocating: Any = None
 
 def abandon(case: Case, video: str, draft_id: str, reason: Any = "") -> dict[str, Any]:
     """Give up on a scene to prove, with a word if the analyst has one. It stays where
-    it is, and `restore` brings it back as it was, captures and all."""
+    it is, and `restore` brings it back as it was, captures and all, though not the
+    leads dropped for it, which go with the search."""
     if reason is not None and not isinstance(reason, str):
         raise CaseError("the reason is text")
     word = (reason or "").strip()[:MAX_REASON]
 
     def leave(scene: dict[str, Any]) -> None:
         scene["abandoned"] = {"reason": word, "at": _now()}
+        # its leads go with it: a scene taken up again starts its search anew
+        scene.pop("leads", None)
 
     scene = inspectwork.update_scene(case, video, draft_id, leave)
     stop(case, draft_id)

@@ -278,6 +278,10 @@ describe('the case’s points', () => {
     panel.pick('pins');
     panel.press('pin-drop');
     panel.clickMap();
+    // a place is filed under its name
+    const title = panel.root.querySelector('[data-act="pin-title"]');
+    title.value = 'The quay';
+    title.dispatchEvent(new window.Event('input', { bubbles: true }));
     panel.forget();
     panel.press('pin-save');
     await vi.waitFor(() => expect(panel.tools.pins.kind).toBe('places'));

@@ -304,6 +304,52 @@ describe('handle: map-api (the panel asking the app)', () => {
     expect(answer).toEqual({ ok: false, error: 'the map tools may not call /api/ingest/screenshot' });
     expect(fetchImpl).not.toHaveBeenCalled();
   });
+
+  it('relays what the pill does with what the scene gathered, as JSON with the token', async () => {
+    const fetchImpl = answered({ geolocating: null });
+    const { handle } = load({ fetchImpl });
+    const sent = [
+      ['/api/ingest/leads', { case_id: 'c1', lat: 50.45, lon: 30.52 }],
+      ['/api/ingest/leads/move', { case_id: 'c1', lead: 'ld_1', lat: 50.4, lon: 30.5 }],
+      ['/api/ingest/leads/remove', { case_id: 'c1', lead: 'ld_1' }],
+      ['/api/ingest/geolocating/impact', { case_id: 'c1', path: 'media/c1.png' }],
+      ['/api/ingest/geolocating/remove', { case_id: 'c1', kind: 'capture', target: 'media/c1.png' }],
+    ];
+    for (const [path, body] of sent) {
+      expect(await handle({ type: 'map-api', method: 'POST', path, body }, {})).toEqual({ ok: true, data: { geolocating: null } });
+    }
+    expect(await handle({ type: 'map-api', path: '/api/ingest/geolocating/gathered', query: { case_id: 'c1' } }, {})).toMatchObject({ ok: true });
+    const calls = fetchImpl.mock.calls;
+    expect(calls.map(([url]) => String(url))).toEqual([
+      ...sent.map(([path]) => `http://127.0.0.1:8477${path}`),
+      'http://127.0.0.1:8477/api/ingest/geolocating/gathered?case_id=c1',
+    ]);
+    sent.forEach(([, body], i) => {
+      const init = calls[i][1];
+      expect(init.method).toBe('POST');
+      expect(init.headers).toMatchObject({ 'X-Azimut-Token': 'tok-123', 'Content-Type': 'application/json' });
+      expect(JSON.parse(init.body)).toEqual(body);
+    });
+  });
+
+  it('brings a thumbnail of what the scene gathered as a picture, and no other file through that door', async () => {
+    const fetchImpl = vi.fn(async () => ({
+      ok: true,
+      status: 200,
+      blob: async () => ({ type: 'image/jpeg', arrayBuffer: async () => new Uint8Array([1, 2, 3]).buffer }),
+    }));
+    const { handle } = load({ fetchImpl });
+    const answer = await handle(
+      { type: 'map-image', path: '/api/ingest/geolocating/thumb', query: { case_id: 'c1', path: 'media/c1.png' } },
+      {},
+    );
+    expect(answer).toEqual({ ok: true, src: `data:image/jpeg;base64,${btoa('\x01\x02\x03')}` });
+    expect(String(fetchImpl.mock.calls[0][0])).toBe('http://127.0.0.1:8477/api/ingest/geolocating/thumb?case_id=c1&path=media%2Fc1.png');
+    expect(fetchImpl.mock.calls[0][1].headers['X-Azimut-Token']).toBe('tok-123');
+    expect(await handle({ type: 'map-image', path: '/api/ingest/file', query: { case_id: 'c1', path: 'x' } }, {})).toEqual({
+      ok: false, error: 'the map tools may not call /api/ingest/file',
+    });
+  });
 });
 
 describe('handle: map-file (a picture or a video for a reference window)', () => {
@@ -1052,6 +1098,83 @@ describe('handle: scene-proof (a map panel making the proof)', () => {
       ok: false, error: 'the Azimut address in the options is not on this machine',
     });
     expect(away.tabs.create).not.toHaveBeenCalled();
+  });
+
+  describe('the pill’s quick links', () => {
+    const SPOT = { lat: 50.45, lon: 30.52, zoom: 17.5 };
+
+    it('hand over where the scene goes, and the spot for Satellite and Horizon', async () => {
+      const chrome = proofChrome([APP(5, 'http://127.0.0.1:8477/')]);
+      const { handle } = await worker(chrome);
+      const handed = [
+        { ...SCENE, to: 'inspect', view: SPOT },
+        { ...SCENE, to: 'satellite', view: SPOT },
+        { ...SCENE, to: 'horizon', view: { ...SPOT, extra: 'dropped' } },
+        { ...SCENE, to: 'proof', view: SPOT },
+      ];
+      for (const scene of handed) expect(await handle({ type: 'scene-proof', scene }, MAP)).toEqual({ ok: true });
+      const scenes = chrome.tabs.sendMessage.mock.calls.map(([, msg]) => {
+        const { id, ...rest } = msg.scene;
+        return rest;
+      });
+      expect(scenes).toEqual([
+        // Inspect opens on the scene and needs no spot
+        { ...SCENE, to: 'inspect' },
+        { ...SCENE, to: 'satellite', view: SPOT },
+        { ...SCENE, to: 'horizon', view: SPOT },
+        // Make the proof by its name is Make the proof as it always was
+        SCENE,
+      ]);
+    });
+
+    it('refuse a place to go they do not know, and a spot that is not one', async () => {
+      const chrome = proofChrome([APP(5, 'http://127.0.0.1:8477/')]);
+      const { handle } = await worker(chrome);
+      const refused = [
+        { ...SCENE, to: 'graph' },
+        { ...SCENE, to: '' },
+        { ...SCENE, to: 'satellite' },
+        { ...SCENE, to: 'horizon', view: { lat: 50.45, lon: 30.52 } },
+        { ...SCENE, to: 'satellite', view: { ...SPOT, lat: 91 } },
+        { ...SCENE, to: 'satellite', view: { ...SPOT, lon: -180.5 } },
+        { ...SCENE, to: 'satellite', view: { ...SPOT, zoom: 24 } },
+        { ...SCENE, to: 'satellite', view: { ...SPOT, zoom: -1 } },
+        { ...SCENE, to: 'horizon', view: { ...SPOT, lat: Number.NaN } },
+        { ...SCENE, to: 'horizon', view: { ...SPOT, lon: '30.52' } },
+        { ...SCENE, to: 'horizon', view: { ...SPOT, zoom: Infinity } },
+      ];
+      for (const scene of refused) {
+        expect(await handle({ type: 'scene-proof', scene }, MAP), JSON.stringify(scene)).toEqual({ ok: false, error: 'not a scene to prove' });
+      }
+      expect(chrome.tabs.sendMessage).not.toHaveBeenCalled();
+      // the edges of the globe and of the zoom are spots all the same
+      for (const view of [{ lat: -90, lon: 180, zoom: 0 }, { lat: 90, lon: -180, zoom: 23 }]) {
+        expect(await handle({ type: 'scene-proof', scene: { ...SCENE, to: 'satellite', view } }, MAP)).toEqual({ ok: true });
+      }
+    });
+
+    it('open the app on the tool they go to when no tab holds it', async () => {
+      const chrome = proofChrome([], () => ({ ok: true }));
+      chrome.tabs.create = vi.fn(async () => ({ id: 7, windowId: 3 }));
+      const { handle } = await worker(chrome);
+      await handle({ type: 'scene-proof', scene: { ...SCENE, to: 'horizon', view: SPOT } }, MAP);
+      expect(chrome.tabs.create).toHaveBeenCalledWith({ url: 'http://127.0.0.1:8477/#horizon', active: true });
+      await vi.waitFor(() => expect(chrome.tabs.sendMessage).toHaveBeenCalled(), { timeout: 2000 });
+      expect(chrome.tabs.sendMessage.mock.calls[0][1].scene).toMatchObject({ to: 'horizon', view: SPOT });
+    });
+
+    it('name the press to try again when the tab never answers', async () => {
+      vi.useFakeTimers();
+      onTestFinished(() => vi.useRealTimers());
+      const chrome = proofChrome([APP(5, 'http://127.0.0.1:8477/')], () => ({ ok: false, error: 'Azimut did not answer' }));
+      const { handle } = load({ chrome });
+      const asked = handle({ type: 'scene-proof', scene: { ...SCENE, to: 'satellite', view: SPOT } }, MAP);
+      await vi.runAllTimersAsync();
+      await asked;
+      expect(chrome.notifications.create).toHaveBeenCalledWith(expect.objectContaining({
+        message: 'Azimut did not answer. Reload its tab, then press Satellite again.',
+      }));
+    });
   });
 });
 

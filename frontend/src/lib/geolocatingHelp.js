@@ -7,4 +7,19 @@ export const GEOLOCATING_HELP = {
   make: 'Make the proof from its frames and captures',
   makePicture: 'Make the proof from the picture and its captures',
   stop: 'Stop geolocating it, its captures stay with it',
+  gathered: 'What this scene gathered',
+  inspect: 'Open the scene in Inspect',
+  satellite: 'Go to Satellite, its reference beside the map',
+  horizon: 'Go to Horizon',
+};
+
+/** What the list of what a scene gathered says on hover (`components/GatheredPanel.svelte`). */
+export const GATHERED_HELP = {
+  showLead: 'Show it on the map',
+  deleteLead: 'Delete this lead',
+  open: 'Open it',
+  deleteCapture: 'Move this capture to the Trash',
+  removeFrame: "Take it off Inspect's strip",
+  unsavedFrame: 'Not saved to the case yet: open the scene in Inspect',
+  openCollage: 'Not exported yet: open it in Collage',
 };

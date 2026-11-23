@@ -202,6 +202,11 @@ def _panel_sources(spec: dict[str, Any]) -> list[str]:
     ]
 
 
+def panel_sources(spec: dict[str, Any]) -> list[str]:
+    """The case files a proof lays out as its panels."""
+    return _panel_sources(spec)
+
+
 def _parent_video(case: Case, item: dict[str, Any], cache: dict[str, str | None]) -> str | None:
     """The clip a frame was cut from, as the case holds it now."""
     entity_id = item.get("entity_id")
@@ -903,7 +908,7 @@ def draft_row(
         given = 1
     else:
         given = (footage if footage is not None else video_footage(case, video)).count(moments)
-    return {
+    row = {
         "kind": "draft",
         "video": video,
         "id": draft["id"],
@@ -915,6 +920,11 @@ def draft_row(
         "abandoned": abandoned,
         "file_kind": file_kind,
     }
+    # the spots dropped for it on a map, only when there are some (`engine/geolocate.py`)
+    leads = inspectwork.clean_leads(draft.get("leads"))
+    if leads:
+        row["leads"] = leads
+    return row
 
 
 def laid_out_by(specs: list[tuple[str, dict[str, Any]]], path: str) -> list[tuple[str, dict[str, Any]]]:

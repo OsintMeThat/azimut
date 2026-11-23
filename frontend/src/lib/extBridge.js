@@ -157,8 +157,24 @@ export function handOffReverse(payload, { timeoutMs = 2000, win = window } = {})
   });
 }
 
+/** Where a scene handed over takes the tab: Make the proof (Inspect's chooser) unless
+ *  the panel's pill asked for one of its links. */
+export const SCENE_GOES = ['proof', 'inspect', 'satellite', 'horizon'];
+
+/** The spot another site's map showed, `{ lat, lon, zoom? }`, or null. */
+function handedView(view) {
+  const number = (value, bound) => (typeof value === 'number' && Number.isFinite(value) && Math.abs(value) <= bound ? value : null);
+  const lat = number(view?.lat, 90);
+  const lon = number(view?.lon, 180);
+  if (lat == null || lon == null) return null;
+  const zoom = typeof view.zoom === 'number' && view.zoom >= 0 && view.zoom <= 23 ? view.zoom : null;
+  return { lat, lon, ...(zoom != null ? { zoom } : {}) };
+}
+
 /** The scene a map panel hands over (`extension/background.js`, `scene-proof`), or
- *  null when it is not one: the case, the file and the scene, by id. */
+ *  null when it is not one: the case, the file and the scene, by id, where a link of
+ *  the pill goes (`to`, one of `SCENE_GOES`, absent for Make the proof) and, for a map
+ *  tool, the spot shown (`view`). */
 export function sceneHandoff(scene) {
   const text = (value, max) => (typeof value === 'string' && value && value.length <= max ? value : null);
   const caseId = text(scene?.caseId, 200);
@@ -166,7 +182,10 @@ export function sceneHandoff(scene) {
   const draft = text(scene?.draft, 200);
   if (!caseId || !video || !draft) return null;
   const id = text(scene.id, 200);
-  return { caseId, video, draft, ...(id ? { id } : {}) };
+  const to = SCENE_GOES.includes(scene.to) ? scene.to : 'proof';
+  const view = to === 'satellite' || to === 'horizon' ? handedView(scene.view) : null;
+  // Make the proof, the pill's first act, says nothing of where it goes
+  return { caseId, video, draft, ...(id ? { id } : {}), ...(to !== 'proof' ? { to } : {}), ...(view ? { view } : {}) };
 }
 
 /**
