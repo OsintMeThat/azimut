@@ -451,6 +451,18 @@ describe('saved points', () => {
     expect(tool.marks).toHaveLength(1); // whole degrees: a country is one mark
   });
 
+  it('draws a place in its own colour, a stack in its first place’s, and a file in none', () => {
+    const tool = ext.createPins();
+    tool.load('places', [{ ...PLACES[1], color: '#1f77b4' }, { ...PLACES[0], color: '#00aa00' }, { ...PLACES[0], id: 'a2', key: 'a2', color: '#aa0000' }]);
+    tool.load('media', [{ id: 'd', key: 'd', kind: 'media', media_kind: 'image', title: 'Shot', lat: 40, lon: 3 }]);
+    tool.atZoom(18);
+    const shapes = tool.shapes();
+    const near = (lat) => shapes.find((shape) => shape.at.lat === lat);
+    expect(near(48.9).colour).toBe('#1f77b4');
+    expect(near(48.8584)).toMatchObject({ colour: '#00aa00', count: 2 });
+    expect(near(40).colour).toBeUndefined();
+  });
+
   it('draws a lone place outlined and a file filled, like the app', () => {
     const tool = ext.createPins();
     tool.load('places', [PLACES[1]]);

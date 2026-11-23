@@ -1871,6 +1871,66 @@ async def capture_screenshot(
     return _attached(case, {"path": result["item"]["path"], "title": label, "entity": result["entity"], **provenance})
 
 
+#: What a capture taken with its layers may say was drawn on it: the reference and
+#: event layers a map lays over its imagery (frontend ``lib/map/layerCatalog.js``),
+#: the case's own marks (places, their names, placed media, a scene's leads), and
+#: ``added`` for the analyst's own layers, which are named in ``layer_names``.
+CAPTURE_LAYERS = frozenset({
+    "boundaries", "placenames", "roads", "railway", "power", "seamarks", "gpstraces",
+    "firms", "nightlights",
+    "places", "places-names", "media", "leads",
+    "added",
+})
+#: How many of the analyst's layers a capture names, and how long each name may be.
+MAX_LAYER_NAMES = 40
+MAX_LAYER_NAME = 120
+#: The credits the layers owe, as one line burned under the picture.
+MAX_LAYER_CREDITS = 4000
+
+
+def _json_list(raw: str | None, field: str) -> list[Any]:
+    """A form field holding a JSON list, or an empty one when it was not sent."""
+    if raw is None or raw == "":
+        return []
+    try:
+        value = json.loads(raw)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=f"'{field}' must be a JSON list") from exc
+    if not isinstance(value, list):
+        raise HTTPException(status_code=422, detail=f"'{field}' must be a JSON list")
+    return value
+
+
+def _one_line(text: str) -> str:
+    """Free text on one line, its runs of space and line breaks made single spaces."""
+    return " ".join(str(text).split())
+
+
+def captured_layers(
+    layers: str | None, layer_names: str | None, credits: str | None
+) -> tuple[list[str], list[str], str]:
+    """What a capture says is drawn on it, checked: the known layer ids in the order
+    sent, the analyst's layers by name, and the credits owed, each bounded.
+
+    A name and a credit are free text the client composed, so they are cut to one
+    line each; an id nobody draws is refused rather than recorded.
+    """
+    ids = _json_list(layers, "layers")
+    if len(ids) > len(CAPTURE_LAYERS) or not all(isinstance(entry, str) for entry in ids):
+        raise HTTPException(status_code=422, detail="'layers' lists at most one of each layer, by id")
+    unknown = sorted(set(ids) - CAPTURE_LAYERS)
+    if unknown:
+        raise HTTPException(status_code=422, detail=f"unknown capture layer '{unknown[0]}'")
+    names = _json_list(layer_names, "layer_names")
+    if len(names) > MAX_LAYER_NAMES or not all(isinstance(entry, str) for entry in names):
+        raise HTTPException(status_code=422, detail=f"'layer_names' holds at most {MAX_LAYER_NAMES} names")
+    named = [_one_line(name)[:MAX_LAYER_NAME] for name in names]
+    credit = _one_line(credits or "")
+    if len(credit) > MAX_LAYER_CREDITS:
+        raise HTTPException(status_code=422, detail=f"'credits' must be under {MAX_LAYER_CREDITS} characters")
+    return list(dict.fromkeys(ids)), [name for name in named if name], credit
+
+
 @router.post("/cases/{case_id}/satellite/oblique")
 async def capture_oblique(
     case_id: str,
@@ -1880,7 +1940,7 @@ async def capture_oblique(
     zoom: float = Form(ge=1, le=22),
     provider: str = Form(),
     bearing: float = Form(default=0.0, ge=0, le=360),
-    pitch: float = Form(gt=0, le=85),
+    pitch: float = Form(ge=0, le=85),
     exaggeration: float = Form(default=1.0, ge=1, le=3),
     imagery_date: str | None = Form(default=None),
     imagery_exact: bool = Form(default=True),
@@ -1888,8 +1948,26 @@ async def capture_oblique(
     relief_fallback: bool = Form(default=False),
     elevation: float | None = Form(default=None, ge=-500, le=9000),
     reuse: bool = Form(default=False),
+    layers: str | None = Form(default=None),
+    layer_names: str | None = Form(default=None),
+    credits: str | None = Form(default=None, max_length=MAX_LAYER_CREDITS * 2),
+    relief: bool | None = Form(default=None),
+    scale_north: bool = Form(default=False),
+    device_scale: float = Form(default=1.0, gt=0, le=8),
 ) -> dict[str, Any]:
-    """File the tilted view the 3D map drew as a capture.
+    """File the view the map drew as a capture: tilted over the relief, or taken with
+    the layers laid on it.
+
+    **With its layers** (``layers``, the ids `CAPTURE_LAYERS` knows), it is the map
+    as drawn, flat or tilted: the imagery, the overlays, the analyst's own layers
+    (``added``, named in ``layer_names``) and the case's marks. Each source is owed a
+    credit, which the browser composes from the catalogue (``credits``) and which is
+    burned beside the imagery's, and the ids are recorded in its provenance so it is
+    never taken for the imagery alone. Looking straight down (``pitch`` 0) it may
+    carry a scale bar and north arrow (``scale_north``), the picture holding
+    ``device_scale`` pixels per CSS pixel. A flat view without layers is refused:
+    the imagery alone is stitched from tiles (``/capture``). ``relief`` says the 3D
+    view drew it, whose heights are then credited even looking straight down.
 
     A tilted view has no straight-down frame to stitch from tiles, so this is
     the picture the map rendered, imagery draped over the relief, with the
@@ -1913,6 +1991,13 @@ async def capture_oblique(
     """
     case = get_case(case_id)
     zoom = round(zoom, 2)
+    laid, laid_names, laid_credits = captured_layers(layers, layer_names, credits)
+    if not pitch and not laid:
+        raise HTTPException(
+            status_code=422, detail="a flat view of the imagery alone is captured from tiles"
+        )
+    # the heights were drawn whenever the 3D view drew, tilted or not
+    drew_relief = pitch > 0 or bool(relief)
     try:
         prov = tiles.get_provider(provider)
         far = tiles.get_provider(far_provider) if far_provider else None
@@ -1942,20 +2027,39 @@ async def capture_oblique(
         exaggeration=exaggeration, relief_fallback=relief_fallback,
         elevation=round(elevation) if elevation is not None else None,
         width=img.width, height=img.height,
+        **({"layers": laid, "layer_names": laid_names, "credits": laid_credits,
+            "relief": drew_relief, "scale_north": [scale_north, units_preference() if scale_north else None]}
+           if laid else {}),
     )
     if reuse and (filed := snapshots.filed_view(case, key)) is not None:
         return _attached(case, _reused(filed))
 
-    relief = terrain.MAPTERHORN
-    # a picture drawn from the heights carries what their licences ask of one
-    attribution = f"{prov.attribution} · Relief {relief.published}"
-    if relief_fallback:
-        attribution += f" · {terrain.AWS_TERRAIN.published}"
+    # Looking straight down, the picture has one scale for the bar to state.
+    marks = (
+        tiles.burn_scale_north(
+            img,
+            meters_per_pixel=tiles.meters_per_pixel(lat, zoom) / device_scale,
+            bearing=bearing,
+            units=units_preference(),
+        )
+        if scale_north and not pitch
+        else None
+    )
+
+    relief_source = terrain.MAPTERHORN
+    attribution = prov.attribution
+    if drew_relief:
+        # a picture drawn from the heights carries what their licences ask of one
+        attribution += f" · Relief {relief_source.published}"
+        if relief_fallback:
+            attribution += f" · {terrain.AWS_TERRAIN.published}"
     if far is not None and far.id != prov.id:
         attribution += f" · Far ground {far.attribution}"
-    if exaggeration > 1:
+    if drew_relief and exaggeration > 1:
         # in words: the band's font has no multiplication sign
         attribution += f" · heights exaggerated {exaggeration:g} times"
+    if laid_credits:
+        attribution += f" · {laid_credits}"
     img = tiles.burn_attribution(img, attribution)
 
     label = satellite_engine.coords_label(lat, lon)
@@ -1964,7 +2068,7 @@ async def capture_oblique(
     provenance: dict[str, Any] = {
         "provider": prov.id,
         "provider_label": prov.label,
-        "method": "render",  # the map's own drawing of a tilted view
+        "method": "render",  # the map's own drawing of the view
         "framed": True,
         "lat": lat,
         "lon": lon,
@@ -1973,14 +2077,16 @@ async def capture_oblique(
         "pitch": pitch,
         "elevation": round(elevation) if elevation is not None else None,
         "relief": {
-            "source": relief.id,
+            "source": relief_source.id,
             "exaggeration": exaggeration,
             **({"fallback": terrain.AWS_TERRAIN.id} if relief_fallback else {}),
-        },
+        } if drew_relief else None,
         "far_provider": far.id if far is not None and far.id != prov.id else None,
         "attribution": attribution,
         "attribution_burned": True,
-        "marks": None,
+        "marks": marks,
+        # what was drawn over the imagery, so the picture is never taken for it alone
+        **({"layers": laid, **({"layer_names": laid_names} if laid_names else {})} if laid else {}),
         "plus_code": plus_code,
         "dms": geo.to_dms(lat, lon),
         "fetched_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
@@ -1993,7 +2099,8 @@ async def capture_oblique(
         provenance["imagery_exact"] = False
 
     stamp = datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%S")
-    filename = f"sat_{stamp}_z{round(zoom)}_{prov.id}_tilt{round(pitch)}.png"
+    shape = f"tilt{round(pitch)}" if pitch else "layers"
+    filename = f"sat_{stamp}_z{round(zoom)}_{prov.id}_{shape}.png"
     result = media_engine.import_image(
         case,
         img,

@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { groupSavedMarkers, keptLabel, markKind, markerPrecision, pairLabel, stackOrder } from './savedMarkers.js';
+import { groupSavedMarkers, keptLabel, markKind, markLook, markName, markerPrecision, NAME_ROOM, pairLabel, stackOrder } from './savedMarkers.js';
+import { PLACE_RED } from './mapMarkers.js';
 
 const at = (id, lat, lon, extra = {}) => ({ id, kind: 'capture', lat, lon, ...extra });
 
@@ -134,5 +135,50 @@ describe('markKind', () => {
 
   it('draws a stack holding a place as the place', () => {
     expect(markKind(['capture', 'place'])).toBe('place');
+  });
+});
+
+describe('how a mark is drawn', () => {
+  const mark = (items) => groupSavedMarkers(items)[0];
+  const place = (id, extra = {}) => ({ id, kind: 'place', title: id, lat: 1, lon: 2, ...extra });
+
+  it('draws a place in its own colour, the pin red without one', () => {
+    expect(markLook(mark([place('a', { color: '#1f77b4' })]))).toMatchObject({ kind: 'place', glyph: 'pin', colour: '#1f77b4', count: 1 });
+    expect(markLook(mark([place('a')])).colour).toBe(PLACE_RED);
+  });
+
+  it('draws a stack of places in its first place’s colour, the newest saved', () => {
+    const look = markLook(mark([place('new', { color: '#00aa00' }), place('old', { color: '#0000aa' })]));
+    expect(look).toMatchObject({ kind: 'place', colour: '#00aa00', count: 2 });
+  });
+
+  it('draws files as footage only when all of it is footage, and gives them no colour', () => {
+    const video = { id: 'v', kind: 'media', media_kind: 'video', lat: 1, lon: 2 };
+    const photo = { id: 'p', kind: 'media', media_kind: 'image', lat: 1, lon: 2 };
+    expect(markLook(mark([video]))).toMatchObject({ kind: 'media', glyph: 'video', colour: null });
+    expect(markLook(mark([video, photo])).glyph).toBe('image');
+  });
+
+  it('draws a stack of imagery as a capture, and marks a point a proof stands on', () => {
+    const look = markLook(mark([at('c', 1, 2), at('d', 1, 2, { kind: 'comparison', proofs: 1 })]));
+    expect(look).toMatchObject({ kind: 'capture', glyph: 'satellite', worked: true });
+  });
+});
+
+describe('the name written under a mark', () => {
+  const mark = (items) => groupSavedMarkers(items)[0];
+  const place = (title) => ({ id: title, kind: 'place', title, lat: 1, lon: 2 });
+
+  it('is its place’s title, cut with an ellipsis past the room it has', () => {
+    expect(markName(mark([place('North depot')]))).toBe('North depot');
+    const long = markName(mark([place('The old grain silo by the northern railway yard')])).normalize();
+    expect([...long]).toHaveLength(NAME_ROOM);
+    expect(long.endsWith('…')).toBe(true);
+  });
+
+  it('counts a stack of places, and names nothing that is not a place', () => {
+    expect(markName(mark([place('A'), place('B'), place('C')]))).toBe('3 places');
+    expect(markName(mark([{ id: 'm', kind: 'media', lat: 1, lon: 2 }]))).toBe('');
+    expect(markName(mark([place('Gate'), { id: 'm', kind: 'media', lat: 1, lon: 2 }]))).toBe('Gate');
   });
 });

@@ -120,6 +120,16 @@ def test_the_map_tabs_switch_travels_with_the_backup(client):
     assert client.get("/api/settings").json()["map_sync"] is False
 
 
+def test_the_capture_layers_tick_travels_with_the_backup(client):
+    client.put("/api/settings/prefs", json={"capture_layers": True})
+    blob = bundle_of(client)
+    assert blob["settings"]["capture_layers"] is True
+
+    client.put("/api/settings/prefs", json={"capture_layers": False})
+    client.post("/api/settings/import", json=blob)
+    assert client.get("/api/settings").json()["capture_layers"] is True
+
+
 # -- what the bundle carries ------------------------------------------------
 
 

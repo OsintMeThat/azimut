@@ -38,6 +38,16 @@
    *  the two have to agree or the same point reads differently on each map. */
   const MARK_TIP = (MARK / 2) * Math.SQRT2;
 
+  /** A place is a drop whose tip is the point, 26 by 36, in its own colour with a
+   *  white heart, or the count of a stack in it: `lib/mapMarkers.js` (`DROP`,
+   *  `DROP_PATH`, `PLACE_RED`) states the same numbers for the app. */
+  const DROP = { size: [26, 36], anchor: [13, 35] };
+  const DROP_PATH = "M13 35 C13 35 24 21 24 12.5 A11 11 0 1 0 2 12.5 C2 21 13 35 13 35 Z";
+  const PLACE_RED = "#e5484d";
+  const DROP_INK = "#141414";
+  /** A colour code the drop may be painted in; anything else is the pin red. */
+  const placeColour = (value) => (/^#[0-9a-f]{6}$/i.test(String(value ?? "")) ? String(value) : PLACE_RED);
+
   const near = (p) => p && Number.isFinite(p.x) && Number.isFinite(p.y)
     && Math.abs(p.x) < FAR && Math.abs(p.y) < FAR;
 
@@ -195,15 +205,62 @@
     }
 
     /**
-     * A saved point, drawn as the app draws it: a rounded teardrop turned 45°,
-     * amber for work that carries imagery and outlined for a bare place, with
-     * the count of what is stacked underneath.
+     * A place, drawn as the app draws it: the drop in its colour, its tip on the
+     * point, with a white heart or the count of what is stacked there. Pointed at
+     * or held open, it grows from its tip as the app's does.
+     */
+    function drop(shape, at) {
+      const grow = shape.lit ? 1.2 : 1;
+      ctx.save();
+      ctx.translate(at.x, at.y);
+      ctx.scale(grow, grow);
+      ctx.beginPath();
+      ctx.ellipse(0, 0, 4, 2, 0, 0, Math.PI * 2);
+      ctx.fillStyle = "rgba(0,0,0,0.45)";
+      ctx.fill();
+      ctx.translate(-DROP.anchor[0], -DROP.anchor[1]);
+      const body = new Path2D(DROP_PATH);
+      ctx.save();
+      ctx.shadowColor = "rgba(0,0,0,0.55)";
+      ctx.shadowBlur = 3;
+      ctx.shadowOffsetY = 2;
+      ctx.fillStyle = placeColour(shape.colour);
+      ctx.fill(body);
+      ctx.restore();
+      ctx.lineWidth = 1.6;
+      ctx.strokeStyle = DROP_INK;
+      ctx.stroke(body);
+      if (shape.count > 1) {
+        ctx.font = `700 ${shape.count >= 100 ? 8.5 : 11}px system-ui, -apple-system, sans-serif`;
+        ctx.fillStyle = DROP_INK;
+        ctx.textAlign = "center";
+        ctx.textBaseline = "alphabetic";
+        ctx.fillText(String(shape.count), 13, 16.5);
+        ctx.textAlign = "start";
+      } else {
+        ctx.beginPath();
+        ctx.arc(13, 12.5, 4.6, 0, Math.PI * 2);
+        ctx.fillStyle = "#fff";
+        ctx.fill();
+        ctx.lineWidth = 1;
+        ctx.stroke();
+      }
+      ctx.restore();
+      label(shape.label, { x: at.x, y: at.y - 22 * grow }, (DROP.size[0] / 2 + 4) * grow);
+    }
+
+    /**
+     * Any other saved point (a file), drawn as the app draws it: a rounded
+     * teardrop turned 45°, amber, with the count of what is stacked underneath.
      *
      * The corner is the claim, so it is the corner that goes on the coordinate
      * and the body that moves up out of the way (`MARK_TIP`).
      */
     function mark(shape, at) {
-      const place = !!shape.place;
+      if (shape.place) {
+        drop(shape, at);
+        return;
+      }
       const body = { x: at.x, y: at.y - MARK_TIP };
       ctx.save();
       ctx.translate(body.x, body.y);
@@ -211,13 +268,13 @@
       ctx.rotate(-Math.PI / 4);
       ctx.beginPath();
       ctx.roundRect(-MARK / 2, -MARK / 2, MARK, MARK, [MARK / 2, MARK / 2, MARK / 2, 2]);
-      ctx.fillStyle = place ? "rgba(20,20,20,0.82)" : THEME.TOKENS.accent;
+      ctx.fillStyle = THEME.TOKENS.accent;
       ctx.fill();
       ctx.lineWidth = shape.lit ? 2.5 : 1.5;
-      ctx.strokeStyle = place || shape.lit ? THEME.TOKENS.accent : "rgba(0,0,0,0.55)";
+      ctx.strokeStyle = shape.lit ? THEME.TOKENS.accent : "rgba(0,0,0,0.55)";
       ctx.stroke();
       ctx.restore();
-      glyph(shape.glyph || "pin", MARK_GLYPH, place ? THEME.TOKENS.accent : THEME.TOKENS.accentText);
+      glyph(shape.glyph || "pin", MARK_GLYPH, THEME.TOKENS.accentText);
       if (shape.count > 1) {
         const text = String(shape.count);
         ctx.font = "700 9px system-ui, -apple-system, sans-serif";
@@ -338,5 +395,5 @@
     };
   }
 
-  window.AzimutMapDraw = { createDrawLayer, FAR, LABEL_MAX, MARK, MARK_TIP };
+  window.AzimutMapDraw = { createDrawLayer, FAR, LABEL_MAX, MARK, MARK_TIP, DROP, DROP_PATH, PLACE_RED };
 })();

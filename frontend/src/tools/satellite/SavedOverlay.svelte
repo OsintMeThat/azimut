@@ -6,8 +6,9 @@
   import { mount, unmount } from 'svelte';
   import { createSurface } from '../../lib/map/surface.js';
   import { paths } from '../../components/Icon.svelte';
-  import { groupSavedMarkers, markKind, markerPrecision } from '../../lib/savedMarkers.js';
-  import { TEARDROP, TEARDROP_CARD_OFFSET } from '../../lib/mapMarkers.js';
+  import { groupSavedMarkers, markLook, markName, markerPrecision } from '../../lib/savedMarkers.js';
+  import { DROP_CARD_OFFSET, TEARDROP, TEARDROP_CARD_OFFSET, placeMark } from '../../lib/mapMarkers.js';
+  import { escapeXml } from '../../lib/plate.js';
   import { openEntity } from '../../lib/navigate.js';
   import { coneMark } from '../../lib/horizon/marks.js';
   import SavedPopup from './SavedPopup.svelte';
@@ -21,6 +22,8 @@
     hoveredId = $bindable(null),
     // the stack the media viewer is reading, lit until it closes
     activeKey = null,
+    // each place's name written under its mark (the Places layer's Names switch)
+    names = false,
     onopen,
     onedit,
     ondelete,
@@ -28,8 +31,6 @@
     ontrace,
     onmedia,
   } = $props();
-
-  const GLYPH = { place: 'pin', capture: 'satellite', screenshot: 'screen', comparison: 'compare', view: 'horizon' };
 
   /** True when every item under a mark is a located file: it opens the viewer. */
   const isMedia = (mark) => mark.kinds.every((kind) => kind === 'media');
@@ -47,24 +48,24 @@
     );
   }
 
-  function icon(mark) {
-    // A stack of imagery draws as a capture; one holding a place, as the place.
-    const kind = markKind(mark.kinds);
-    // a stack of files draws as footage only when all of it is footage
-    const name = isMedia(mark)
-      ? mark.items.every((row) => row.media_kind === 'video')
-        ? 'video'
-        : 'image'
-      : (GLYPH[kind] ?? 'pin');
-    const count =
-      mark.items.length > 1 ? `<i class="saved-mark-count">${mark.items.length}</i>` : '';
-    // A proof stands on the point it argues, and appears as a dot on it.
-    const worked = mark.items.some((row) => row.proofs > 0)
-      ? '<i class="saved-mark-worked"></i>'
-      : '';
+  /**
+   * A mark's look (`lib/savedMarkers.markLook`). A place, alone or with what was
+   * filed on it, is the drop every place mark is (`lib/mapMarkers.placeMark`); a
+   * file is the turned teardrop with its glyph.
+   */
+  function icon(mark, named) {
+    const look = markLook(mark);
+    const name = named ? markName(mark) : '';
+    const label = name ? `<span class="saved-mark-name">${escapeXml(name)}</span>` : '';
+    if (look.kind === 'place') {
+      const drop = placeMark({ colour: look.colour, count: look.count, worked: look.worked });
+      return { ...drop, html: drop.html + label };
+    }
+    const count = look.count > 1 ? `<i class="saved-mark-count">${look.count}</i>` : '';
+    const worked = look.worked ? '<i class="saved-mark-worked"></i>' : '';
     return {
       className: 'saved-mark-wrap',
-      html: `<span class="saved-mark saved-mark-${kind}">${glyph(name, 13)}${count}${worked}</span>`,
+      html: `<span class="saved-mark saved-mark-${look.kind}">${glyph(look.glyph, 13)}${count}${worked}</span>${label}`,
       ...TEARDROP,
     };
   }
@@ -72,7 +73,14 @@
   // Mount the card's content as a component, inside the popup's own element.
   let mounted = null;
 
-  function popupContent(mark) {
+  /** A place given a colour from its card is painted again at once, without the
+   *  rebuild that would close the card. */
+  function recolour(mark, id, row, colour) {
+    const items = mark.items.map((item) => (item === row ? { ...item, color: colour } : item));
+    surface?.patch(id, { icon: icon({ ...mark, items }, builtNames) });
+  }
+
+  function popupContent(mark, id) {
     const host = document.createElement('div');
     if (mounted) unmount(mounted);
     const close = (then) => (arg) => {
@@ -98,6 +106,8 @@
         // vanishes without saying it would
         onentity: close(openEntity),
         onrefresh: () => onrefresh?.(),
+        // a place's colour is an edit, offered where the map edits
+        oncolour: onedit ? (row, colour) => recolour(mark, id, row, colour) : null,
       },
     });
     return host;
@@ -139,13 +149,14 @@
     const rows = items;
     const cid = caseId;
     const precision = markerPrecision(zoom);
+    const named = names;
     const held = popupOpen; // tracked, so closing the card applies what waited
     if (!engine) return;
     // A different case is never deferred: leaving another case's marks on the map
     // would be worse than closing a card.
     if (held && builtFor === cid) return;
     builtFor = cid;
-    rebuild(rows, precision);
+    rebuild(rows, precision, named);
   });
 
   /**
@@ -208,7 +219,11 @@
       }));
   }
 
-  function rebuild(rows, precision) {
+  // whether the marks on the map carry their names, as they were last built
+  let builtNames = false;
+
+  function rebuild(rows, precision, named) {
+    builtNames = named;
     const marks = groupSavedMarkers(rows, precision);
     surface ??= createSurface(engine, {
       onPopupOpen: () => (popupOpen = true),
@@ -223,7 +238,7 @@
           id: at,
           kind: 'marker',
           at: mark,
-          ...icon(mark),
+          ...icon(mark, named),
           title: mark.items.length > 1 ? `${mark.items.length} saved here` : mark.items[0].title,
           keyboard: false,
           onOver: () => (hoveredId = mark.items[0].key ?? mark.items[0].id),
@@ -236,11 +251,11 @@
             ? { onClick: () => onmedia?.(mark.items) }
             : {
                 popup: {
-                  content: () => popupContent(mark),
+                  content: () => popupContent(mark, at),
                   className: 'saved-popup',
                   minWidth: 296,
                   maxWidth: 330,
-                  offset: TEARDROP_CARD_OFFSET,
+                  offset: markLook(mark).kind === 'place' ? DROP_CARD_OFFSET : TEARDROP_CARD_OFFSET,
                 },
               }),
         },
@@ -347,5 +362,52 @@
   :global(.saved-mark-wrap:hover .saved-mark) {
     transform: rotate(-45deg) scale(1.25);
     z-index: 500;
+  }
+  /* A place's drop (lib/mapMarkers.placeMark): it grows from its tip, which stays
+     on the point. */
+  :global(.place-drop) {
+    position: relative;
+    display: block;
+    width: 26px;
+    height: 36px;
+    filter: drop-shadow(0 2px 3px rgba(0, 0, 0, 0.55));
+    transform-origin: 13px 35px;
+    transition: transform 0.12s var(--ease);
+  }
+  :global(.place-drop > svg) {
+    display: block;
+    overflow: visible;
+  }
+  :global(.saved-mark-wrap.is-active .place-drop),
+  :global(.saved-mark-wrap.is-hovered .place-drop),
+  :global(.saved-mark-wrap:hover .place-drop) {
+    transform: scale(1.2);
+  }
+  /* the proof's dot, on the drop's shoulder */
+  :global(.place-drop-worked) {
+    position: absolute;
+    top: 0;
+    right: 0;
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background: #fff;
+    box-shadow: 0 0 0 1.5px rgba(0, 0, 0, 0.55);
+  }
+  /* a place's name under its point (the Names switch), white on a dark halo so it
+     reads on sand and on water alike */
+  :global(.saved-mark-name) {
+    position: absolute;
+    left: 50%;
+    top: calc(100% + 4px);
+    transform: translateX(-50%);
+    max-width: none;
+    white-space: nowrap;
+    color: #fff;
+    font-size: 11px;
+    font-weight: 600;
+    line-height: 1.2;
+    text-shadow: 0 0 2px rgba(0, 0, 0, 0.9), 0 0 3px rgba(0, 0, 0, 0.8), 0 1px 2px rgba(0, 0, 0, 0.8);
+    pointer-events: none;
   }
 </style>

@@ -11,8 +11,10 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { flushSync, mount, unmount } from 'svelte';
 
 const drawn = [];
+const patched = [];
 const surface = {
   set: (shapes) => drawn.push(shapes),
+  patch: (id, change) => patched.push([id, change]),
   element: () => document.createElement('div'),
   closePopup: vi.fn(),
   clear: vi.fn(),
@@ -21,6 +23,7 @@ const surface = {
 vi.mock('../../lib/map/surface.js', () => ({ createSurface: () => surface }));
 
 const { default: SavedOverlay } = await import('./SavedOverlay.svelte');
+const { DROP, DROP_CARD_OFFSET, PLACE_RED, placeMark } = await import('../../lib/mapMarkers.js');
 
 const engine = { getZoom: () => 16, on: () => () => {} };
 let held = null;
@@ -84,5 +87,34 @@ describe('a mark of located files', () => {
     const [mark] = draw([place, media('quay')]);
     expect(mark.onClick).toBeUndefined();
     expect(mark.popup).toBeTruthy();
+  });
+});
+
+describe('a place’s mark', () => {
+  it('is the drop every place mark is, in the place’s colour, the pin red without one', () => {
+    const [mark] = draw([{ ...place, color: '#1f77b4' }]);
+    expect(mark.html).toBe(placeMark({ colour: '#1f77b4' }).html);
+    expect(mark).toMatchObject({ className: 'saved-mark-wrap', size: DROP.size, anchor: DROP.anchor });
+    expect(mark.popup.offset).toBe(DROP_CARD_OFFSET);
+    const [red] = draw([place]);
+    expect(red.html).toContain(`fill="${PLACE_RED}"`);
+  });
+
+  it('counts a stack of places in its heart, and keeps the proof’s dot', () => {
+    const [mark] = draw([{ ...place, proofs: 1 }, { ...place, id: 'p2', key: 'p2' }]);
+    expect(mark.html).toBe(placeMark({ count: 2, worked: true }).html);
+  });
+
+  it('writes the place’s name under it only when Names is on, escaped', () => {
+    expect(draw([place])[0].html).not.toContain('saved-mark-name');
+    const [named] = draw([{ ...place, title: '<b>Quay</b>' }], { names: true });
+    expect(named.html).toContain('<span class="saved-mark-name">&lt;b&gt;Quay&lt;/b&gt;</span>');
+    const [stack] = draw([place, { ...place, id: 'p2', key: 'p2' }, { ...place, id: 'p3', key: 'p3' }], { names: true });
+    expect(stack.html).toContain('>3 places</span>');
+  });
+
+  it('names no file, whose mark says nothing under it', () => {
+    const [mark] = draw([media('quay')], { names: true });
+    expect(mark.html).not.toContain('saved-mark-name');
   });
 });

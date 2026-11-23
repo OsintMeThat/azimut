@@ -655,6 +655,8 @@ def saved_points(
             # a photograph and a video are drawn with their own glyph, as the app
             # draws them; absent on everything else
             **({"media_kind": row["media_kind"]} if row.get("media_kind") else {}),
+            # a place's mark is drawn in its own colour, the pin red when it has none
+            **({"color": row["color"]} if row.get("color") else {}),
             "title": row["title"],
             "lat": row["lat"],
             "lon": row["lon"],

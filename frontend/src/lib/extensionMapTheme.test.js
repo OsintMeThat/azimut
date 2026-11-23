@@ -131,8 +131,9 @@ describe('the paint the tools use', () => {
   });
 
   it('names the same glyph for a saved row as the Saved layer', () => {
-    const overlay = read('../tools/satellite/SavedOverlay.svelte');
-    const block = /const GLYPH = \{([^}]*)\}/.exec(overlay)[1];
+    // the look of a mark is read off it in one place (`lib/savedMarkers.markLook`)
+    const marks = read('./savedMarkers.js');
+    const block = /const GLYPH = \{([^}]*)\}/.exec(marks)[1];
     // eslint-disable-next-line no-new-func
     expect(theme.SAVED_GLYPH).toEqual(new Function(`return {${block}}`)());
   });

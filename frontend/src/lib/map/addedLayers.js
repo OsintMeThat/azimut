@@ -170,6 +170,22 @@ export function attribution(layer) {
 }
 
 /**
+ * What a layer drawn on a picture owes, or '' when it owes nobody: a GeoConfirmed
+ * feed, a link or a My Maps is somebody else's work and is credited; a file of the
+ * analyst's own owes nobody, and an editable copy of somebody else's layer still
+ * owes them. A map plate's credits box and a capture taken with its layers both
+ * read it.
+ */
+export function owedCredit(layer) {
+  const source = layer?.source;
+  const elsewhere = (from) => from?.kind === 'geoconfirmed' || from?.kind === 'url' || Boolean(from?.my_maps);
+  if (!layer?.editable && elsewhere(source)) return attribution(layer);
+  const origin = layer?.origin?.source;
+  if (layer?.editable && origin) return attribution({ title: origin.name || layer.title, source: origin });
+  return '';
+}
+
+/**
  * Whether switching this layer on for the first time in a session re-reads it:
  * a followed layer that did not ask to move only on Refresh. The spec still
  * calls that `on_open`, from when it happened on case open.

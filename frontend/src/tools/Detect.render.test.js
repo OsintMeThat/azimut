@@ -263,7 +263,7 @@ describe('Detect', () => {
     ]);
     expect([...menu.querySelectorAll('button.eye')].map((entry) => entry.getAttribute('aria-label'))).toEqual([
       'Borders', 'Place names', 'Roads', 'Railways', 'Power lines', 'Sea marks', 'GPS traces',
-      'Active fires', 'Night lights', 'Places', 'Media', 'Saved detections', 'Watched areas',
+      'Active fires', 'Night lights', 'Places', 'Names', 'Media', 'Saved detections', 'Watched areas',
     ]);
     // no key: the fire layer stays listed, locked, with the way to unlock it
     expect(chip('Active fires').disabled).toBe(true);

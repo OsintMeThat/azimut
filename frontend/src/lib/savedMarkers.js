@@ -10,6 +10,7 @@
  */
 
 import { CAPTURE_KINDS } from './geoTree.js';
+import { placeColour } from './mapMarkers.js';
 
 /**
  * The kind a mark is drawn as, from the kinds it holds.
@@ -23,6 +24,49 @@ export function markKind(kinds) {
   const list = [...(kinds ?? [])];
   if (list.length === 1) return list[0];
   return list.length && list.every((kind) => CAPTURE_KINDS.has(kind)) ? 'capture' : 'place';
+}
+
+/** The icon a mark of one kind wears (`components/Icon.svelte`). */
+const GLYPH = { place: 'pin', capture: 'satellite', screenshot: 'screen', comparison: 'compare', view: 'horizon' };
+
+/**
+ * How a mark is drawn, from what it holds: its kind, its glyph, how many it
+ * stacks, whether a proof stands on it, and for a place its colour.
+ *
+ * A stack of files draws as footage only when all of it is footage. A stack of
+ * places of several colours wears its first place's, the newest saved: the
+ * index's order is the mark's.
+ */
+export function markLook(mark) {
+  const kinds = mark?.kinds ?? [];
+  const items = mark?.items ?? [];
+  const media = kinds.length > 0 && kinds.every((kind) => kind === 'media');
+  const kind = media ? 'media' : markKind(kinds);
+  const place = items.find((row) => row.kind === 'place');
+  return {
+    kind,
+    glyph: media ? (items.every((row) => row.media_kind === 'video') ? 'video' : 'image') : (GLYPH[kind] ?? 'pin'),
+    count: items.length,
+    // a proof stands on the point it argues, and appears as a dot on it
+    worked: items.some((row) => row.proofs > 0),
+    colour: kind === 'place' ? placeColour(place?.color) : null,
+  };
+}
+
+/** How long a place's name runs under its mark before it is cut. */
+export const NAME_ROOM = 28;
+
+/**
+ * The name the Names switch writes under a mark: its place's title, cut with an
+ * ellipsis past `NAME_ROOM` characters, or "3 places" for a stack of them. A mark
+ * holding no place says nothing.
+ */
+export function markName(mark) {
+  const places = (mark?.items ?? []).filter((row) => row.kind === 'place');
+  if (places.length > 1) return `${places.length} places`;
+  const title = String(places[0]?.title ?? '').replace(/\s+/g, ' ').trim();
+  const chars = [...title];
+  return chars.length > NAME_ROOM ? `${chars.slice(0, NAME_ROOM - 1).join('').trimEnd()}…` : title;
 }
 
 /** Decimal places to key on at a given map zoom.

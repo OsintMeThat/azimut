@@ -10,12 +10,15 @@
  * go does: a place with no name only reads as its coordinates later, so the name is
  * asked first.
  *
- * It draws the scene's leads too, and the pin waiting for its name: a lead is dragged to
- * move it and clicked to centre the map on it.
+ * It draws the scene's leads too, unless the Layers panel hid them, and the pin waiting
+ * for its name: a lead is dragged to move it and clicked to centre the map on it. The
+ * pin under the pointer and the pin waiting are a place's own mark
+ * (`lib/mapMarkers.placeMark`), in the red a place wears until it is given a colour.
  *
  * @param {object} deps
  * @param {() => object|null} deps.engine the map façade, once built
  * @param {() => object|null} deps.held the scene the case geolocates, or null
+ * @param {() => boolean} [deps.leadsShown] whether the scene's leads are drawn
  * @param {(at: {lat: number, lon: number}) => Promise<object>} deps.dropLead
  * @param {(id: string, at: {lat: number, lon: number}) => Promise<object>} deps.moveLead
  * @param {(place: {lat: number, lon: number, title: string}) => Promise<void>} deps.savePlace
@@ -23,7 +26,7 @@
  * @param {(message: string, kind?: string, ms?: number) => void} deps.notify
  */
 import { createSurface } from '../../../lib/map/surface.js';
-import { MARKER_GEOMETRY, markerSvg } from '../../../lib/mapMarkers.js';
+import { DROP, DROP_PATH, placeMark } from '../../../lib/mapMarkers.js';
 import { sceneColorAt } from '../../../lib/scenes.js';
 
 /** What the status bar's drop button says on hover, one clause each. */
@@ -36,8 +39,8 @@ export const DROP_HELP = {
 /** The longest name a place takes, as the place dialog does. */
 export const PLACE_NAME_MAX = 200;
 
-/** A lead's mark: a teardrop in the scene's colour, its number inside, its tip the spot. */
-export const LEAD_GEOMETRY = { size: [26, 36], anchor: [13, 35] };
+/** A lead's mark: a place's drop in the scene's colour, its number inside, its tip the spot. */
+export const LEAD_GEOMETRY = DROP;
 
 /** A colour the mark may be painted in: a code, or one of the theme's own variables,
  *  which the scene colours are (`lib/scenes.sceneColorAt`). Anything else is not written. */
@@ -48,7 +51,7 @@ export function leadSvg(n, color) {
   const fill = PAINT.test(String(color)) ? color : '#e5484d';
   // in a style rather than the fill attribute: a theme variable resolves there
   return `<svg width="26" height="36" viewBox="0 0 26 36" aria-hidden="true">
-    <path d="M13 35 C13 35 24 21 24 12.5 A11 11 0 1 0 2 12.5 C2 21 13 35 13 35 Z" style="fill: ${fill}" stroke="rgba(0,0,0,0.55)" stroke-width="1.5"/>
+    <path d="${DROP_PATH}" style="fill: ${fill}" stroke="rgba(0,0,0,0.55)" stroke-width="1.5"/>
     <text x="13" y="16.5" text-anchor="middle" font-size="${number >= 10 ? 9.5 : 11}" font-weight="700" fill="#fff" font-family="system-ui, sans-serif">${number}</text>
   </svg>`;
 }
@@ -56,7 +59,7 @@ export function leadSvg(n, color) {
 /** What a click on a lead and a drag of it are told apart by: a drag ends in a click. */
 const AFTER_DRAG_MS = 300;
 
-export function createDropState({ engine, held, dropLead, moveLead, savePlace, centre, notify }) {
+export function createDropState({ engine, held, leadsShown = () => true, dropLead, moveLead, savePlace, centre, notify }) {
   let armed = $state(false);
   // the pin waiting for its name: `{ lat, lon, title }`
   let naming = $state(null);
@@ -78,7 +81,7 @@ export function createDropState({ engine, held, dropLead, moveLead, savePlace, c
       const next = Math.max(0, ...(scene.leads ?? []).map((lead) => lead.n)) + 1;
       return { key: `lead:${next}:${scene.order ?? 0}`, html: leadSvg(next, sceneColorAt(scene.order)), ...LEAD_GEOMETRY, at };
     }
-    return { key: 'place', html: markerSvg('pin'), ...MARKER_GEOMETRY.pin, at };
+    return { key: 'place', ...placeMark({ className: 'sat-ghost' }), at };
   }
 
   function showGhost(at) {
@@ -90,8 +93,8 @@ export function createDropState({ engine, held, dropLead, moveLead, savePlace, c
     if (ghostLook === shape.key && ghostSurface.patch('ghost', { at })) return;
     ghostLook = shape.key;
     ghostSurface.set([{
-      id: 'ghost', kind: 'marker', at, className: 'sat-ghost', html: shape.html, size: shape.size, anchor: shape.anchor,
-      zIndex: 580, keyboard: false,
+      id: 'ghost', kind: 'marker', at, className: shape.className ?? 'sat-ghost', html: shape.html, size: shape.size,
+      anchor: shape.anchor, zIndex: 580, keyboard: false,
     }]);
   }
 
@@ -126,7 +129,8 @@ export function createDropState({ engine, held, dropLead, moveLead, savePlace, c
     const map = engine();
     if (!map) return;
     const scene = held();
-    const leads = scene?.leads ?? [];
+    // hidden from the Layers panel, the leads are not drawn; dropping one still works
+    const leads = leadsShown() ? (scene?.leads ?? []) : [];
     const color = sceneColorAt(scene?.order);
     const shapes = leads.map((lead) => ({
       id: `lead-${lead.id}`,
@@ -167,10 +171,7 @@ export function createDropState({ engine, held, dropLead, moveLead, savePlace, c
         id: 'naming',
         kind: 'marker',
         at: { lat: naming.lat, lon: naming.lon },
-        className: 'sat-marker',
-        html: markerSvg('pin'),
-        size: MARKER_GEOMETRY.pin.size,
-        anchor: MARKER_GEOMETRY.pin.anchor,
+        ...placeMark({ className: 'sat-naming' }),
         zIndex: 575,
         draggable: true,
         keyboard: false,

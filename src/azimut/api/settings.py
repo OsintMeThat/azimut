@@ -171,6 +171,8 @@ class PrefsIn(BaseModel):
     sentinel1_layer: str | None = Field(default=None, pattern=r"^$|^[A-Z0-9_]{1,40}$")
     # burn a scale bar and a north arrow into captures (the capture menu's tick)
     capture_scale_north: bool | None = None
+    # capture the map as drawn, its layers and marks credited (the capture menu's tick)
+    capture_layers: bool | None = None
     # whether saving a proof files its point as a place, or asks first
     proof_place_auto: bool | None = None
     post_mention: str | None = None  # handle a new post draft is addressed to
@@ -297,6 +299,7 @@ def _prefs(settings: dict[str, Any]) -> dict[str, Any]:
         "detect_view": _detect_view(settings.get("detect_view")),
         "sentinel1_layer": settings.get("sentinel1_layer", ""),
         "capture_scale_north": bool(settings.get("capture_scale_north", False)),
+        "capture_layers": bool(settings.get("capture_layers", False)),
         "proof_place_auto": bool(settings.get("proof_place_auto", True)),
         "post_mention": settings.get("post_mention", DEFAULT_POST_MENTION),
         "post_mention_bluesky": _bluesky_mention(settings),
@@ -479,6 +482,8 @@ def _apply_prefs(settings: dict[str, Any], body: PrefsIn) -> None:
         settings["sentinel1_layer"] = body.sentinel1_layer
     if body.capture_scale_north is not None:
         settings["capture_scale_north"] = bool(body.capture_scale_north)
+    if body.capture_layers is not None:
+        settings["capture_layers"] = bool(body.capture_layers)
     if body.proof_place_auto is not None:
         settings["proof_place_auto"] = bool(body.proof_place_auto)
     if body.post_mention is not None:
@@ -968,6 +973,7 @@ class ImportedSettings(BaseModel):
     )
     map_sync: bool = True
     capture_scale_north: bool = False
+    capture_layers: bool = False
     proof_place_auto: bool = True
     post_mention: str = Field(default=DEFAULT_POST_MENTION, max_length=280)
     # None is not chosen yet, as a backup from before it says by leaving it out

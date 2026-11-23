@@ -46,6 +46,9 @@ import {
   tileParams as nightTileParams,
 } from './nightlights.js';
 
+/** Why a switch under another layer rests while that layer is off. */
+export const SHOWN_WITH = (id) => `Shown with ${layerInfo(id)?.label ?? id}`;
+
 export function createLayerSet({
   fireKey,
   initial = [],
@@ -154,6 +157,8 @@ export function createLayerSet({
           toggle: () => toggle(layer.id),
         };
         if (!usable(layer.id)) Object.assign(row, { disabled: true, title: 'Only useful over satellite imagery' });
+        // a switch under another layer works while that one is on
+        if (layer.of) Object.assign(row, { of: layer.of, ...(on.includes(layer.of) ? {} : { disabled: true, title: SHOWN_WITH(layer.of) }) });
         if (layer.id === 'firms') Object.assign(row, fireRow(row.on));
         if (layer.id === 'nightlights') Object.assign(row, nightRow(row.on));
         return { ...row, ...patch[layer.id] };

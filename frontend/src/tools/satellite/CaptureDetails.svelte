@@ -11,6 +11,7 @@
   import Modal from '../../components/Modal.svelte';
   import FolderSelect from '../../components/FolderSelect.svelte';
   import { fileUrl } from '../../lib/fileUrl.js';
+  import { capturedLayerWords } from '../../lib/map/layerCatalog.js';
 
   let {
     /** The saved-index row being edited. */
@@ -77,6 +78,13 @@
       <span class="sat-info-label">Imagery date</span>
       <span class="mono">{row.imagery_date ?? '—'}</span>
     </div>
+    {#if row.layers?.length}
+      <!-- what was drawn over the imagery, so this is never read as the imagery alone -->
+      <div class="sat-info-row" data-testid="capture-layers">
+        <span class="sat-info-label">Layers</span>
+        <span>{capturedLayerWords(row.layers, row.layer_names)}</span>
+      </div>
+    {/if}
     <div class="sat-info-row">
       <span class="sat-info-label">Image</span>
       <a

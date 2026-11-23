@@ -31,6 +31,10 @@ function fakeContext() {
   const record = (name) => (...args) => calls.push([name, ...args]);
   const ctx = {
     measureText: () => ({ width: 20 }),
+    // the paint a shape is filled with, which says whose colour it wears
+    set fillStyle(value) {
+      calls.push(['fillStyle', value]);
+    },
   };
   for (const name of [
     'setTransform', 'clearRect', 'beginPath', 'moveTo', 'lineTo', 'closePath',
@@ -141,6 +145,25 @@ describe('drawing over someone else’s map', () => {
       ['lineTo', 2, 0],
       ['lineTo', 0, 0],
     ]);
+  });
+
+  it('draws a place as the app’s drop, its tip on the point, in its colour', () => {
+    layer.render([{ kind: 'mark', at: { lat: 100, lon: 50 }, glyph: 'pin', place: true, colour: '#1f77b4', count: 1 }], flat);
+    const styles = named('fillStyle').map(([, value]) => value);
+    expect(named('translate')[0]).toEqual(['translate', 50, 100]);
+    expect(named('translate')).toContainEqual(['translate', -ext.DROP.anchor[0], -ext.DROP.anchor[1]]);
+    expect(named('fill').some(([, path]) => path?.d === ext.DROP_PATH)).toBe(true);
+    expect(styles).toContain('#1f77b4');
+    // the white heart of a lone place, and no turned box
+    expect(named('arc')).toContainEqual(['arc', 13, 12.5, 4.6, 0, Math.PI * 2]);
+    expect(named('rotate')).toEqual([]);
+  });
+
+  it('draws a place without a colour code in the pin red, and counts a stack in its heart', () => {
+    layer.render([{ kind: 'mark', at: { lat: 1, lon: 2 }, glyph: 'pin', place: true, colour: 'red; x', count: 3 }], flat);
+    const styles = named('fillStyle').map(([, value]) => value);
+    expect(styles).toContain(ext.PLACE_RED);
+    expect(named('fillText')).toContainEqual(['fillText', '3', 13, 16.5]);
   });
 
   it('draws a saved mark as the app’s turned teardrop', () => {

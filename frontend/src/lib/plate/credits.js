@@ -6,7 +6,7 @@
  * control on the screen. Gathered from every map of the plate, each said once.
  */
 import { overlayAttribution } from '../map/basemap.js';
-import { attribution as layerCredit } from '../map/addedLayers.js';
+import { owedCredit } from '../map/addedLayers.js';
 import { PLAIN_ATTRIBUTION, readsHeights } from './plainBasemap.js';
 import { CLOUDLESS_ID, cloudlessYear } from './cloudless.js';
 import { SENTINEL_ID, passCredit } from './sentinelPass.js';
@@ -49,18 +49,12 @@ function groundCredits(element, { providers = [], relief = null, releases = [], 
   return parts.map(strip).filter(Boolean);
 }
 
-/** Whether a layer came from somebody else: a GeoConfirmed feed, a link, a My Maps. A file of the analyst's own owes nobody. */
-const fromElsewhere = (source) => source?.kind === 'geoconfirmed' || source?.kind === 'url' || Boolean(source?.my_maps);
-
-/** What the layers a map draws owe the people who made them. */
+/** What the layers a map draws owe the people who made them (`owedCredit`). */
 function layerCredits(element, rows) {
   const parts = [];
   for (const entry of element.layers ?? []) {
     const row = rows.find((item) => item.name === entry.name);
-    if (!row) continue;
-    if (!row.editable && fromElsewhere(row.source)) parts.push(layerCredit(row));
-    // an editable copy of somebody else's layer still owes them
-    else if (row.editable && row.origin?.source) parts.push(layerCredit({ title: row.origin.source.name || row.title, source: row.origin.source }));
+    if (row) parts.push(owedCredit(row));
   }
   return parts.map(strip).filter(Boolean);
 }

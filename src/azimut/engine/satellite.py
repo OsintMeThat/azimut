@@ -613,6 +613,10 @@ def _saved_row(
         "source_url": attrs.get("source_url") or source.get("source_url"),
         "fetched_at": _saved_when(entity, capture),
         "imagery_date": source.get("imagery_date"),
+        # a capture taken with the layers on the map lists them, so it is never
+        # read as the imagery alone (`api/satellite.capture_oblique`)
+        **({"layers": source["layers"], "layer_names": source.get("layer_names") or []}
+           if capture is not None and source.get("layers") else {}),
         "notes": source.get("notes") or attrs.get("notes") or "",
         # How tightly the point is pinned (ONTOLOGY §2). Carried in the index
         # because the map overlay draws it: an approximate place is a circle or a
@@ -620,6 +624,8 @@ def _saved_row(
         # Absent stays absent — a point with no radius draws exactly as before.
         "radius_m": attrs.get("radius_m"),
         "footprint": attrs.get("footprint"),
+        # the colour a place's mark is drawn in; none is the app's pin red
+        **({"color": attrs.get("color") or None} if kind == "place" else {}),
         # how many proofs were built on this point. `All` draws every point
         # once, so a worked row is marked rather than doubled by a proof
         # marker landing on the capture it composes.

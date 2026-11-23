@@ -51,6 +51,11 @@
  * @param {() => number} [deps.reliefScale] how much taller the relief is drawn
  * @param {() => string|null} [deps.farProvider] who drew the far ground of a tilted
  *   view, when it is not the provider chosen (`lib/map/quotaGuard.js`)
+ * @param {() => {ids: string[], names?: string[], credits?: string,
+ *   paint?: (ctx: CanvasRenderingContext2D, frame: {rect: object, scale: number}) => void}|null} [deps.layered]
+ *   what is laid over the imagery now, for a capture taken with its layers: the
+ *   layers' ids, the analyst's own layers by name, the credits they owe, and the
+ *   case's marks painted onto the picture
  */
 import { clampSize, scaledCapture } from '../../../lib/captureSize.js';
 import { captureTab, extensionVersion } from '../../../lib/extBridge.js';
@@ -59,6 +64,7 @@ import { startRectDrag } from '../../../lib/map/gestures.js';
 import { isGround } from '../../../lib/map/basemap.js';
 import { writtenZoom } from '../../../lib/map/view.js';
 import { applyPrefs, prefs } from '../../../lib/state.svelte.js';
+import { paintMarker } from '../../../lib/mapMarkers.js';
 
 /** Standard output sizes for the centred button, named by what they are for. */
 export const PRESETS = [
@@ -98,6 +104,7 @@ export function createCaptureState({
   tilt = () => 0,
   reliefScale = () => 1,
   farProvider = () => null,
+  layered = () => null,
   // the mode the main button starts on: an area drawn on the map, the owner's usual capture
   startMode = 'select',
 }) {
@@ -118,26 +125,39 @@ export function createCaptureState({
   let shotOpen = $state(false); // the paste/drop fallback dialog
 
   /**
-   * The scale bar and north arrow tick, kept in settings.json rather than here.
+   * The two ticks, the scale bar and north arrow and the layers on the map, kept
+   * in settings.json rather than here.
    *
    * Every other option in this menu is answered per session — a size, a ratio,
-   * a resolution are decided for the shot being taken. This one is a house
+   * a resolution are decided for the shot being taken. These two are a house
    * style: an analyst who wants a scale bar wants it on every capture, and
    * ticking it again each morning would be the feature failing. So the store
-   * holds no copy of it. `prefs` is the one, filled from settings.json before
+   * holds no copy of them. `prefs` is the one, filled from settings.json before
    * any tool reads it, and a click writes both at once.
    */
-  async function setScaleNorth(on) {
+  async function setTick(pref, key, on) {
     const want = !!on;
-    if (want === prefs.captureScaleNorth) return;
-    prefs.captureScaleNorth = want; // the tick answers the click, not the round trip
+    if (want === prefs[pref]) return;
+    prefs[pref] = want; // the tick answers the click, not the round trip
     try {
-      applyPrefs(await api.put('/api/settings/prefs', { capture_scale_north: want }));
+      applyPrefs(await api.put('/api/settings/prefs', { [key]: want }));
     } catch {
       // The capture still carries what is ticked; only the remembering failed,
       // and saying so is worth one line rather than undoing their click.
       notify('That tick could not be saved, so it lasts this session only', 'warn');
     }
+  }
+
+  /**
+   * What is laid over the imagery, when the capture is asked to carry it (the
+   * Layers on the map tick, kept in settings like the scale bar's): null when it
+   * is not, or when nothing is laid there and the imagery is all there is to take.
+   * A widget basemap is grabbed from the screen, which these do not reach.
+   */
+  function laidNow() {
+    if (!prefs.captureLayers || widget) return null;
+    const laid = layered();
+    return laid?.ids?.length ? laid : null;
   }
 
   /** The chosen output size in px. Custom is clamped to what the backend takes. */
@@ -291,9 +311,10 @@ export function createCaptureState({
    * so nothing of our chrome can be in it and no extension is needed.
    *
    * Only the imagery on its relief is drawn into it, as the stitched road files
-   * only the imagery: names, borders and the analyst's layers would each need
-   * a credit of their own on the image, and the line would outgrow the frame.
-   * The zoom goes with its fraction, which over relief is part of the camera.
+   * only the imagery, unless the capture is asked to carry the layers on the map
+   * (`layeredCapture`): then names, borders and the analyst's layers are each
+   * credited on the image. The zoom goes with its fraction, which over relief is
+   * part of the camera.
    */
   async function obliqueCapture(framedOn, rect) {
     busy = true;
@@ -308,14 +329,46 @@ export function createCaptureState({
     }
   }
 
+  /**
+   * The capture taken with its layers: the map as drawn, imagery and all that is
+   * laid on it, flat or tilted, each source credited on the picture and the layers
+   * recorded with it, so it is never taken for the imagery alone. Drawn at the
+   * screen's own resolution.
+   */
+  async function layeredCapture(framedOn, rect, laid) {
+    busy = true;
+    try {
+      await renderAndFile(framedOn, rect, { laid });
+      notify('Captured with its layers & filed', 'ok');
+    } catch (e) {
+      if (e.warn) notify(e.message, 'warn', e.loading ? 6000 : 7000);
+      else notify(`Capture failed: ${e.message}`, 'danger', 6000);
+    } finally {
+      busy = false;
+    }
+  }
+
+  /** The analyst's own marker on a picture of the map, where a stitched capture burns it:
+   *  on the pin moved, or on the frame's middle. */
+  function paintPin(ctx, framedOn, rect, scale) {
+    const pin = marker();
+    if (pin.style !== 'pin' && pin.style !== 'crosshair') return;
+    const at = pin.at ? engine().latLngToContainerPoint(pin.at) : { x: rect.x + rect.w / 2, y: rect.y + rect.h / 2 };
+    if (!Number.isFinite(at?.x) || !Number.isFinite(at?.y)) return;
+    paintMarker(ctx, (at.x - rect.x) * scale, (at.y - rect.y) * scale, pin.style, { scale });
+  }
+
   /** The tilted road's work: the map's own drawing cropped to the frame and
-   *  filed. `reuse` cites a view already filed in this very state. Throws what
-   *  stopped it. */
-  async function renderAndFile(framedOn, rect, { reuse = false } = {}) {
+   *  filed. `reuse` cites a view already filed in this very state. `laid`, what is
+   *  laid over the imagery (`laidNow`), takes the map as drawn, flat or tilted,
+   *  rather than the imagery alone. Throws what stopped it. */
+  async function renderAndFile(framedOn, rect, { reuse = false, laid = null } = {}) {
     const box = element().getBoundingClientRect();
     if (!frameFitsView(rect, box)) throw tooBig(rect);
     const pixels = provenance();
-    const { canvas: drawn, complete } = await engine().snapshot({ keep: (id) => isGround(id) });
+    // with its layers, the map as drawn: on the globe what it lays on the ground
+    // and stands on it too, as a plate's capture takes it
+    const { canvas: drawn, complete } = await engine().snapshot(laid ? { laid: true } : { keep: (id) => isGround(id) });
     if (!complete) {
       const error = new Error('The map is still loading. Capture again once it has settled');
       error.warn = true;
@@ -326,19 +379,36 @@ export function createCaptureState({
     const crop = document.createElement('canvas');
     crop.width = Math.round(rect.w * scale);
     crop.height = Math.round(rect.h * scale);
-    crop
-      .getContext('2d')
-      .drawImage(drawn, rect.x * scale, rect.y * scale, crop.width, crop.height, 0, 0, crop.width, crop.height);
+    const ctx = crop.getContext('2d');
+    ctx.drawImage(drawn, rect.x * scale, rect.y * scale, crop.width, crop.height, 0, 0, crop.width, crop.height);
+    if (laid) {
+      // the case's marks are the page's own elements, not the map's: painted on
+      laid.paint?.(ctx, { rect, scale });
+      paintPin(ctx, framedOn, rect, scale);
+    }
     const blob = await new Promise((resolve) => crop.toBlob(resolve, 'image/png'));
     const owner = await ensureCase();
     const form = new FormData();
-    form.append('image', blob, 'tilted.png');
+    const pitch = tilt();
+    form.append('image', blob, laid ? 'layers.png' : 'tilted.png');
     form.append('lat', String(framedOn.lat));
     form.append('lon', String(framedOn.lon));
     form.append('zoom', String(writtenZoom(engine().exactZoom?.() ?? view().zoom, true)));
     form.append('bearing', String(bearing()));
-    form.append('pitch', String(tilt()));
+    form.append('pitch', String(pitch));
     form.append('exaggeration', String(reliefScale()));
+    if (laid) {
+      form.append('layers', JSON.stringify(laid.ids));
+      if (laid.names?.length) form.append('layer_names', JSON.stringify(laid.names));
+      if (laid.credits) form.append('credits', laid.credits);
+      // the heights were drawn whenever the 3D view drew, tilted or not
+      if (engine().globe) form.append('relief', 'true');
+      // looking straight down, a bar can state the ground the picture covers
+      if (!pitch && prefs.captureScaleNorth) {
+        form.append('scale_north', 'true');
+        form.append('device_scale', String(scale));
+      }
+    }
     form.append('provider', pixels.provider);
     const far = farProvider();
     if (far) form.append('far_provider', far);
@@ -368,6 +438,8 @@ export function createCaptureState({
   async function take(framedOn, baseW, baseH, rectCss) {
     if (busy) return;
     if (widget) return widgetCapture(framedOn, rectCss);
+    const laid = laidNow();
+    if (laid) return layeredCapture(framedOn, rectCss, laid);
     if (tilt() > 0) return obliqueCapture(framedOn, rectCss);
     busy = true;
     try {
@@ -502,8 +574,9 @@ export function createCaptureState({
     busy = true;
     try {
       let result;
+      const laid = laidNow();
       if (widget) result = await grabAndFile(framedOn, rect, { quiet: true });
-      else if (tilt() > 0) result = await renderAndFile(framedOn, rect, { reuse: true });
+      else if (laid || tilt() > 0) result = await renderAndFile(framedOn, rect, { reuse: true, laid });
       else {
         result = await stitchAndFile(framedOn, Math.round(rect.w), Math.round(rect.h), { reuse: true });
         const [words, kind] = stitchedWords(result);
@@ -610,7 +683,14 @@ export function createCaptureState({
       return prefs.captureScaleNorth;
     },
     set scaleNorth(value) {
-      setScaleNorth(value);
+      setTick('captureScaleNorth', 'capture_scale_north', value);
+    },
+    /** Whether a capture carries the layers on the map, kept in settings like the scale bar's tick. */
+    get layers() {
+      return prefs.captureLayers;
+    },
+    set layers(value) {
+      setTick('captureLayers', 'capture_layers', value);
     },
     get mode() {
       return mode;

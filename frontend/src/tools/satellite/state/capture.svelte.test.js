@@ -88,6 +88,7 @@ beforeEach(() => {
   // The marks tick lives in the app-wide preference rather than in the store,
   // so one test ticking it would otherwise arrive ticked in the next.
   prefs.captureScaleNorth = false;
+  prefs.captureLayers = false;
 });
 
 describe('the output shape', () => {
@@ -587,5 +588,146 @@ describe('a tilted view over billed imagery', () => {
     capture.run();
     await vi.waitFor(() => expect(api.post).toHaveBeenCalled());
     expect(api.post.mock.calls[0][1].get('far_provider')).toBe('esri-world-imagery');
+  });
+});
+
+describe('a capture taken with the layers on the map', () => {
+  /**
+   * The tick takes the map as drawn: imagery, overlays, the analyst's layers and the
+   * case's marks, credited and recorded, so the picture is never read as the imagery
+   * alone. It goes down the road that files the map's own drawing.
+   */
+  let made;
+  let snapped;
+  function drawing() {
+    made = { width: 0, height: 0, drawn: [], getContext: () => ctx, toBlob: (done) => done(new Blob(['png'])) };
+    const ctx = { drawImage: (...args) => made.drawn.push(args) };
+    made.ctx = ctx;
+    const real = document.createElement.bind(document);
+    vi.spyOn(document, 'createElement').mockImplementation((tag) => (tag === 'canvas' ? made : real(tag)));
+    snapped = [];
+    engine.snapshot = async (options) => {
+      snapped.push(options);
+      return { canvas: { width: 3200, height: 1800 }, complete: true };
+    };
+    engine.exactZoom = () => 16.4;
+  }
+  const LAID = (paint = vi.fn()) => ({
+    ids: ['boundaries', 'added', 'places', 'leads'],
+    names: ['Front line'],
+    credits: 'OpenFreeMap © OpenMapTiles · Front line — geoconfirmed.org',
+    paint,
+  });
+
+  beforeEach(() => {
+    pin = { style: 'none', at: null };
+  });
+  afterEach(() => vi.restoreAllMocks());
+
+  it('starts off, and is remembered in settings the moment it is ticked', async () => {
+    const capture = store();
+    expect(capture.layers).toBe(false);
+    capture.layers = true;
+    await vi.waitFor(() => expect(api.put).toHaveBeenCalled());
+    expect(api.put.mock.calls[0]).toEqual(['/api/settings/prefs', { capture_layers: true }]);
+    expect(capture.layers).toBe(true);
+  });
+
+  it('leaves a flat capture on the stitched road while it is off', async () => {
+    const laid = vi.fn(() => LAID());
+    const capture = store({ layered: laid });
+    capture.run();
+    await vi.waitFor(() => expect(api.post).toHaveBeenCalled());
+    expect(api.post.mock.calls[0][0]).toBe('/api/cases/case-1/satellite/capture');
+    expect(laid).not.toHaveBeenCalled();
+  });
+
+  it('files the map as drawn, its layers named and credited, the marks painted on', async () => {
+    drawing();
+    prefs.captureLayers = true;
+    const paint = vi.fn();
+    const capture = store({ layered: () => LAID(paint) });
+    capture.run();
+    await vi.waitFor(() => expect(api.post).toHaveBeenCalled());
+    const [path, form] = api.post.mock.calls[0];
+    expect(path).toBe('/api/cases/case-1/satellite/oblique');
+    // every layer on the map, not the ground alone
+    expect(snapped[0]).toEqual({ laid: true });
+    expect(form.get('pitch')).toBe('0');
+    expect(JSON.parse(form.get('layers'))).toEqual(['boundaries', 'added', 'places', 'leads']);
+    expect(JSON.parse(form.get('layer_names'))).toEqual(['Front line']);
+    expect(form.get('credits')).toBe('OpenFreeMap © OpenMapTiles · Front line — geoconfirmed.org');
+    expect(form.get('zoom')).toBe('16.4');
+    // the marks are painted onto the very crop that is filed, at its density
+    const rect = { x: 200, y: 112.5, w: 1200, h: 675 };
+    expect(paint).toHaveBeenCalledWith(made.ctx, { rect, scale: 2 });
+    expect([made.width, made.height]).toEqual([2400, 1350]);
+    expect(notify).toHaveBeenCalledWith('Captured with its layers & filed', 'ok');
+  });
+
+  it('carries the scale bar looking straight down, with the picture’s density, and never tilted', async () => {
+    drawing();
+    prefs.captureLayers = true;
+    prefs.captureScaleNorth = true;
+    const flat = store({ layered: () => LAID() });
+    flat.run();
+    await vi.waitFor(() => expect(api.post).toHaveBeenCalled());
+    expect(api.post.mock.calls[0][1].get('scale_north')).toBe('true');
+    expect(api.post.mock.calls[0][1].get('device_scale')).toBe('2');
+
+    const tilted = store({ layered: () => LAID(), tilt: () => 45 });
+    tilted.run();
+    await vi.waitFor(() => expect(api.post).toHaveBeenCalledTimes(2));
+    expect(api.post.mock.calls[1][1].get('pitch')).toBe('45');
+    expect(api.post.mock.calls[1][1].get('scale_north')).toBe(null);
+  });
+
+  it('says the 3D view drew the heights, even looking straight down', async () => {
+    drawing();
+    prefs.captureLayers = true;
+    engine.globe = {};
+    const capture = store({ layered: () => LAID() });
+    capture.run();
+    await vi.waitFor(() => expect(api.post).toHaveBeenCalled());
+    expect(api.post.mock.calls[0][1].get('relief')).toBe('true');
+    delete engine.globe;
+  });
+
+  it('takes the imagery alone when nothing is laid on it', async () => {
+    prefs.captureLayers = true;
+    const capture = store({ layered: () => ({ ids: [] }) });
+    capture.run();
+    await vi.waitFor(() => expect(api.post).toHaveBeenCalled());
+    expect(api.post.mock.calls[0][0]).toBe('/api/cases/case-1/satellite/capture');
+  });
+
+  it('paints the analyst’s marker where a stitched capture burns it', async () => {
+    drawing();
+    prefs.captureLayers = true;
+    pin = { style: 'crosshair', at: null };
+    const ctx = made.ctx;
+    const calls = [];
+    for (const name of ['save', 'restore', 'translate', 'scale', 'beginPath', 'moveTo', 'lineTo', 'stroke', 'arc']) {
+      ctx[name] = (...args) => calls.push([name, ...args]);
+    }
+    const capture = store({ layered: () => LAID() });
+    capture.run();
+    await vi.waitFor(() => expect(api.post).toHaveBeenCalled());
+    // the middle of the 1200×675 frame, at the picture's density
+    expect(calls).toContainEqual(['translate', 1200, 675]);
+  });
+
+  it('puts an area in a note with its layers too', async () => {
+    drawing();
+    prefs.captureLayers = true;
+    api.post = vi.fn(async () => ({ entity: { id: 'cap-1' }, reused: false }));
+    const capture = store({ layered: () => LAID() });
+    const waiting = capture.takeForNote();
+    drawBox(capture, 100, 100, 500, 400);
+    await waiting;
+    const [path, form] = api.post.mock.calls[0];
+    expect(path).toBe('/api/cases/case-1/satellite/oblique');
+    expect(form.get('reuse')).toBe('true');
+    expect(JSON.parse(form.get('layers'))).toContain('places');
   });
 });

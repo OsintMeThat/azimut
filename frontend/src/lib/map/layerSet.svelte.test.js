@@ -14,8 +14,21 @@ describe('one map’s layers', () => {
   it('lists every catalogue layer as a chip, whatever is on', () => {
     const layers = createLayerSet({ fireKey: keyed() });
     expect(layers.rows().map((row) => row.id)).toEqual([
-      'boundaries', 'placenames', 'roads', 'railway', 'power', 'seamarks', 'gpstraces', 'firms', 'nightlights', 'places', 'media',
+      'boundaries', 'placenames', 'roads', 'railway', 'power', 'seamarks', 'gpstraces', 'firms', 'nightlights', 'places',
+      'places-names', 'media',
     ]);
+  });
+
+  it('rests the Names switch under Places while Places is off, and draws it nowhere', () => {
+    const layers = createLayerSet({ fireKey: keyed(), initial: ['places-names'] });
+    expect(layers.rows().find((row) => row.id === 'places-names')).toMatchObject({
+      of: 'places', on: true, disabled: true, title: 'Shown with Places',
+    });
+    layers.toggle('places');
+    expect(layers.rows().find((row) => row.id === 'places-names')).toMatchObject({ of: 'places', on: true });
+    expect(layers.rows().find((row) => row.id === 'places-names').disabled).toBeUndefined();
+    // the tool writes the names on its own marks: no tile layer is asked for
+    expect(layers.overlays).toEqual([]);
   });
 
   it('switches a layer from its chip', () => {

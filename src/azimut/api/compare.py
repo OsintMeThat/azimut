@@ -61,6 +61,8 @@ router = APIRouter(prefix="/api", tags=["compare"])
 OVERLAYS = frozenset({
     "boundaries", "placenames", "roads", "railway", "power", "seamarks", "gpstraces",
     "firms", "nightlights", "saved",
+    # the case's own layers, which a side draws itself (`lib/map/layerCatalog.js`)
+    "places", "places-names", "media",
 })
 MAX_FRAME_BYTES = 24_000_000
 MAX_GIF_PIXELS = 16_000_000

@@ -90,7 +90,8 @@
   import { askable as firmsAskable, keyState, tileParams as firmsTileParams } from '../lib/map/firms.js';
   import { askable as nightAskable, tileParams as nightTileParams } from '../lib/map/nightlights.js';
   import { createFireKey } from '../lib/map/fireKey.svelte.js';
-  import { LAYERS } from '../lib/map/layerCatalog.js';
+  import { CASE_POINT_LAYERS, LAYERS } from '../lib/map/layerCatalog.js';
+  import { SHOWN_WITH } from '../lib/map/layerSet.svelte.js';
   import {
     compareFireControls,
     compareFireNote,
@@ -509,7 +510,7 @@
           if (!nightAskable(asked)) return null;
           return { id, params: nightTileParams(asked) };
         }
-        if (id === 'places' || id === 'media') return null;
+        if (CASE_POINT_LAYERS.includes(id)) return null;
         return id;
       })
       .filter(Boolean);
@@ -1374,7 +1375,7 @@
   function toggleLayer(id) {
     if (!a.present && !b.present) return;
     if (id === 'firms' && !fireKey.keyed) return;
-    if (id === 'places' && !savedWork.rows.some((row) => row.kind === 'place')) return;
+    if ((id === 'places' || id === 'places-names') && !savedWork.rows.some((row) => row.kind === 'place')) return;
     layerIds = toggledLayer(layerIds, id);
     switchMemory.keep(caseState.current?.id ?? null, layerIds);
   }
@@ -1448,6 +1449,18 @@
       if (layer.id === 'places' || layer.id === 'media') {
         const told = points[layer.id];
         return { ...row, ...told, ...(shown ? {} : { controls: null }), disabled: !present || Boolean(told.disabled) };
+      }
+      // the names switch under Places, which works while Places is on
+      if (layer.of) {
+        const told = points[layer.id] ?? {};
+        const parent = layerIds.includes(layer.of);
+        return {
+          ...row,
+          of: layer.of,
+          ...(parent ? {} : { title: SHOWN_WITH(layer.of) }),
+          ...told,
+          disabled: !present || !parent || Boolean(told.disabled),
+        };
       }
       return row;
     });
@@ -3001,6 +3014,7 @@
               items={pointsA}
               caseId={caseState.current?.id}
               coords={savedCoords}
+              names={layers.a.includes('places-names')}
               {fullscreen}
               onopen={openSaved}
               onedit={editSaved}
@@ -3102,6 +3116,7 @@
               items={pointsB}
               caseId={caseState.current?.id}
               coords={savedCoords}
+              names={layers.b.includes('places-names')}
               {fullscreen}
               onopen={openSaved}
               onedit={editSaved}

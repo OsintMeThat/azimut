@@ -73,6 +73,10 @@
   } from '../lib/map/nightlights.js';
   import { fireControls, nightControls as nightQuestions } from '../lib/map/eventControls.js';
   import { layerInfo } from '../lib/map/layerCatalog.js';
+  import { overlayAttribution } from '../lib/map/basemap.js';
+  import { owedCredit } from '../lib/map/addedLayers.js';
+  import { paintCaseMarks } from '../lib/map/paintMarks.js';
+  import { SHOWN_WITH } from '../lib/map/layerSet.svelte.js';
   // The map's tools declare themselves once (lib/map/tools.js); the rail, the
   // panel slot, the surface's cursor and the exclusion between modes are all
   // read from that declaration rather than written out here per tool.
@@ -220,6 +224,11 @@
   // footage. Kept per case with the other layers (`openLayers`).
   let placesOn = $state(true);
   let mediaOn = $state(true);
+  // each place's name under its mark (the Names switch under Places), off until asked for
+  let namesOn = $state(false);
+  // the leads of the scene being geolocated, drawn unless their row is switched off;
+  // for this session only, as the geolocating itself is
+  let leadsOn = $state(true);
   /**
    * The located files the panel is playing, or null for the saved-work list.
    *
@@ -287,6 +296,7 @@
       ...Object.keys(refLayers).filter((id) => refLayers[id]),
       railOverlay && 'railway',
       placesOn && 'places',
+      namesOn && 'places-names',
       mediaOn && 'media',
     ].filter(Boolean)
   );
@@ -298,6 +308,7 @@
     });
     railOverlay = ids.includes('railway');
     placesOn = ids.includes('places');
+    namesOn = ids.includes('places-names');
     mediaOn = ids.includes('media');
   }
   $effect(() => switchMemory.keep(layersFor, switchedOn));
@@ -1561,11 +1572,33 @@
       ...pointRows.places,
     },
     {
+      ...catalogued('places-names'),
+      of: 'places',
+      on: namesOn,
+      toggle: () => (namesOn = !namesOn),
+      ...(placesOn ? {} : { disabled: true, title: SHOWN_WITH('places') }),
+      ...pointRows['places-names'],
+    },
+    {
       ...catalogued('media'),
       on: mediaOn,
       toggle: () => (mediaOn = !mediaOn),
       ...pointRows.media,
     },
+    // the scene being geolocated, while there is one: its leads, which its row hides
+    ...(heldScene
+      ? [
+          {
+            id: 'leads',
+            label: 'Leads',
+            dot: sceneColorAt(heldScene.order),
+            on: leadsOn,
+            detail: String(heldScene.leads?.length ?? 0),
+            title: 'The spots dropped for the scene being geolocated',
+            toggle: () => (leadsOn = !leadsOn),
+          },
+        ]
+      : []),
     ...(sheetPoints
       ? [
           {
@@ -2081,7 +2114,50 @@
     tilt: () => (reliefOn ? pitch : 0),
     reliefScale: () => exaggeration,
     farProvider: () => (reliefOn && pitch > 0 && shown.provider?.meter ? FREE_FAR_PROVIDER : null),
+    layered: laidOnMap,
   });
+
+  /**
+   * What is laid over the imagery now, for a capture that carries it: the
+   * overlays drawn, the analyst's own layers, and the case's marks, each by its
+   * layer's id (`lib/map/layerCatalog.js`, `added` for the analyst's, `leads` for
+   * the scene's), the analyst's layers by name, the credits they owe, and the
+   * marks painted where the screen shows them (`lib/map/paintMarks.js`).
+   */
+  function laidOnMap() {
+    const drawnOverlays = overlays.map((entry) => (typeof entry === 'string' ? entry : entry.id));
+    const added = uiState.tool === 'satellite' ? addedLayers.drawn : [];
+    const shownPoints = placesOn || mediaOn ? mapPoints : [];
+    const places = shownPoints.some((row) => row.kind === 'place');
+    const leads = leadsOn ? (heldScene?.leads ?? []) : [];
+    const ids = [
+      ...drawnOverlays,
+      added.length && 'added',
+      places && 'places',
+      places && namesOn && 'places-names',
+      shownPoints.some((row) => row.kind === 'media') && 'media',
+      leads.length && 'leads',
+    ].filter(Boolean);
+    const credits = [...new Set([...drawnOverlays.map(overlayAttribution), ...added.map(owedCredit)].filter(Boolean))];
+    return {
+      ids,
+      // as many as a capture names (`api/satellite.MAX_LAYER_NAMES`)
+      names: added.map((row) => row.title || row.name).filter(Boolean).slice(0, 40),
+      credits: credits.join(' · '),
+      paint: (ctx, { rect, scale }) =>
+        paintCaseMarks(ctx, {
+          saved: shownPoints,
+          zoom: engine.getZoom(),
+          names: namesOn,
+          leads,
+          leadColour: sceneColorAt(heldScene?.order),
+          // where the page lays a mark: the globe stands it on its ground, hidden behind the relief
+          project: (at) => (engine.globe ? engine.globe.standingAt(at.lat, at.lon) : engine.latLngToContainerPoint(at)),
+          rect,
+          scale,
+        }),
+    };
+  }
   let sizeMenuEl = $state(); // bound to the popover wrapper — outside-click detection
   // The live drag outline, in map-container px. Shared chrome: the capture
   // marquee and the Grid Search rectangle are the same gesture and cannot both
@@ -2210,6 +2286,7 @@
   const drop = createDropState({
     engine: () => engine,
     held: () => heldScene,
+    leadsShown: () => leadsOn,
     dropLead: (at) => dropLead(caseState.current.id, at),
     moveLead: (id, at) => moveLead(caseState.current.id, id, at),
     savePlace: async ({ lat, lon, title }) => {
@@ -2224,7 +2301,7 @@
     notify: toast,
   });
   // the scene's leads and the pin waiting for its name, drawn again when they move
-  const leadsKey = $derived(JSON.stringify([heldScene?.order ?? null, heldScene?.leads ?? []]));
+  const leadsKey = $derived(JSON.stringify([heldScene?.order ?? null, heldScene?.leads ?? [], leadsOn]));
   const namingAt = $derived(drop.naming ? `${drop.naming.lat},${drop.naming.lon}` : '');
   $effect(() => {
     void leadsKey;
@@ -2627,6 +2704,7 @@
           {fullscreen}
           bind:hoveredId={hoveredSavedId}
           activeKey={mediaView ? mediaView.items[mediaView.index]?.key : null}
+          names={namesOn}
           onopen={openSaved}
           onedit={editSaved}
           ondelete={(row) => placeDeletion.open(row.id)}
@@ -2983,6 +3061,7 @@
           bind:customHeight={capture.customH}
           bind:resolution={capture.resolution}
           bind:scaleNorth={capture.scaleNorth}
+          bind:layers={capture.layers}
           tilted={reliefOn && pitch > 0}
           openScreenshot={() => (capture.shotOpen = true)}
           openExtensionGate={() => (capture.extGate = true)}
@@ -3443,6 +3522,10 @@
   :global(.sat-lead) {
     cursor: grab;
     filter: drop-shadow(0 1px 2px rgba(0, 0, 0, 0.5));
+  }
+  /* the pin waiting for its name, the place's own drop: grabbed to move it */
+  :global(.sat-naming) {
+    cursor: grab;
   }
   /* the pin following the pointer while the drop is armed: the click goes through it */
   :global(.sat-ghost) {
