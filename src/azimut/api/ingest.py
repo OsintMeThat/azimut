@@ -69,11 +69,13 @@ from ..engine import (
 from ..workspace import Case, CaseError
 from . import events
 from .cases import get_case
-from .inspect import attach_capture, say_geolocating
+from .impact import ImpactIn, delete_impact
+from .inspect import attach_capture, lead_answer, remove_gathered_frame, say_geolocating
 from .limits import MAX_IMAGE_BYTES
 from .satellite import (
     GridSaveIn,
     apply_grid_marks,
+    delete_capture,
     firms_answer,
     firms_drawn,
     firms_key,
@@ -927,6 +929,115 @@ def geolocating(body: GeolocatingIn) -> dict[str, Any]:
     except CaseError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     return {"geolocating": say_geolocating(case)}
+
+
+# ---- what the scene being geolocated gathered, from its pill over another map ----
+#
+# The same pill as the app's: its leads, its captures, its frames and collages. Every
+# route here reaches the scene being geolocated and nothing else, so the token a map
+# tab borrows can trash a capture that scene gathered and no other file of the case.
+
+
+class LeadDropIn(BaseModel):
+    case_id: str = Field(min_length=1, max_length=200)
+    lat: float = Field(ge=-90, le=90, allow_inf_nan=False)
+    lon: float = Field(ge=-180, le=180, allow_inf_nan=False)
+
+
+class LeadMoveIn(LeadDropIn):
+    lead: str = Field(min_length=1, max_length=64)
+
+
+class LeadRemoveIn(BaseModel):
+    case_id: str = Field(min_length=1, max_length=200)
+    lead: str = Field(min_length=1, max_length=64)
+
+
+class GatheredIn(BaseModel):
+    case_id: str = Field(min_length=1, max_length=200)
+    kind: Literal["capture", "frame"]
+    # a capture by its path, a frame of the video's strip by its id
+    target: str = Field(min_length=1, max_length=1024)
+
+
+class GatheredCaptureIn(BaseModel):
+    case_id: str = Field(min_length=1, max_length=200)
+    path: str = Field(min_length=1, max_length=1024)
+
+
+@router.post("/leads", dependencies=[Depends(require_token)])
+def drop_lead(body: LeadDropIn) -> dict[str, Any]:
+    """Drop a lead for the scene being geolocated, from over another map."""
+    case = get_case(body.case_id)
+    try:
+        lead = geolocate.add_lead(case, body.lat, body.lon)
+    except CaseError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    return lead_answer(case, lead)
+
+
+@router.post("/leads/move", dependencies=[Depends(require_token)])
+def move_lead(body: LeadMoveIn) -> dict[str, Any]:
+    case = get_case(body.case_id)
+    try:
+        moved = geolocate.move_lead(case, body.lead, body.lat, body.lon)
+    except CaseError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    return lead_answer(case, moved)
+
+
+@router.post("/leads/remove", dependencies=[Depends(require_token)])
+def remove_lead(body: LeadRemoveIn) -> dict[str, Any]:
+    case = get_case(body.case_id)
+    try:
+        geolocate.remove_lead(case, body.lead)
+    except CaseError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    return lead_answer(case)
+
+
+@router.get("/geolocating/gathered", dependencies=[Depends(require_token)])
+def geolocating_gathered(case_id: str) -> dict[str, Any]:
+    """What the scene being geolocated gathered, as the app's pill lists it."""
+    return geolocate.gathered(get_case(case_id))
+
+
+@router.get("/geolocating/thumb", dependencies=[Depends(require_token)])
+def geolocating_thumb(case_id: str, path: str) -> Response:
+    """The thumbnail of a file the scene being geolocated gathered, and of no other."""
+    case = get_case(case_id)
+    if path not in geolocate.gathered_paths(case):
+        raise HTTPException(status_code=403, detail="that file is not one this scene gathered")
+    thumb = geolocate.gathered_thumb(case, path)
+    if thumb is None:
+        raise HTTPException(status_code=404, detail="no thumbnail for that file")
+    return FileResponse(thumb)
+
+
+@router.post("/geolocating/impact", dependencies=[Depends(require_token)])
+def geolocating_impact(body: GatheredCaptureIn) -> dict[str, Any]:
+    """What deleting a capture the scene gathered would touch, as the app's dialogs say."""
+    case = get_case(body.case_id)
+    try:
+        geolocate.gathered_capture(case, body.path)
+    except CaseError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    return delete_impact(case.id, ImpactIn(paths=[body.path]))
+
+
+@router.post("/geolocating/remove", dependencies=[Depends(require_token)])
+def geolocating_remove(body: GatheredIn) -> dict[str, Any]:
+    """Send a capture the scene gathered to the case Trash, or take one of its frames off
+    Inspect's strip, as the app's pill does. POST, as every extension route."""
+    case = get_case(body.case_id)
+    if body.kind == "frame":
+        return remove_gathered_frame(case, body.target)
+    try:
+        geolocate.gathered_capture(case, body.target)
+    except CaseError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    result = delete_capture(case.id, body.target)
+    return {**result, "geolocating": say_geolocating(case)}
 
 
 # ---- reading back: the attachments a hand-off carries -------------------------

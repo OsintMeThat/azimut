@@ -18,6 +18,9 @@
   import { createGridState } from './satellite/state/grid.svelte.js';
   import { createRefsState } from './satellite/state/refs.svelte.js';
   import { createFootprintState } from './satellite/state/footprint.svelte.js';
+  import { createDropState, DROP_HELP } from './satellite/state/drop.svelte.js';
+  import { dropLead, geolocating, moveLead } from '../lib/geolocating.svelte.js';
+  import { sceneColorAt } from '../lib/scenes.js';
   import {
     createCaptureState,
     PRESETS,
@@ -120,6 +123,7 @@
   import RefDock from './satellite/RefDock.svelte';
   import CaptureDetails from './satellite/CaptureDetails.svelte';
   import PlaceDialog from './satellite/PlaceDialog.svelte';
+  import PlaceNamer from './satellite/PlaceNamer.svelte';
   import CaptureOptions from './satellite/CaptureOptions.svelte';
   import FigureDialog from './satellite/FigureDialog.svelte';
   import SavedTree from './satellite/SavedTree.svelte';
@@ -860,6 +864,8 @@
     if (sky.placing) return sky.togglePlacing();
     // a measure being drawn is finished, then let go of, before the tool closes
     if (measure.on && measure.escape()) return;
+    // a pin waiting for its name is let go of before the mode ends
+    if (drop.cancel()) return;
     if (armedMode) return disarm(modes);
     if (capture.menuOpen) return void (capture.menuOpen = false);
     // native fullscreen already exits on Esc (handled by onFullscreenChange);
@@ -1239,8 +1245,12 @@
   let pointMenu = $state(null); // { lat, lon, x, y, frame, lookup, feature?, layer? }
   let pointLookupSeq = 0;
   // while a layer is edited the rail is put away, so the acts that arm one of its tools are left out
-  const pointActions = $derived(actionsFor(myLayers.editor ? ['lookup', 'place', 'horizon', 'history', 'centre']
-    : ['lookup', 'place', 'measure', 'sky', 'horizon', 'history', 'centre']));
+  // while a scene is geolocated the point is dropped as one of its leads, else saved as a named place
+  const pointActions = $derived.by(() => {
+    const keep = heldScene ? 'lead' : 'place';
+    return actionsFor(myLayers.editor ? ['lookup', keep, 'horizon', 'history', 'centre']
+      : ['lookup', keep, 'measure', 'sky', 'horizon', 'history', 'centre']);
+  });
   const pointTools = otherMapTools('satellite');
 
   function onMapContextMenu(at) {
@@ -1265,8 +1275,8 @@
     closePointMenu();
     if (id === 'copy') {
       await copyText(value);
-    } else if (id === 'place') {
-      openNewPlaceAt(point);
+    } else if (id === 'place' || id === 'lead') {
+      drop.at(point);
     } else if (id === 'centre') {
       engine.setView(point, center.zoom);
     } else if (id === 'measure') {
@@ -1356,6 +1366,7 @@
   /** Where the analyst clicked, `{ lat, lon }` from the façade. */
   function onMapClick(at) {
     if (myLayers.armed) return;
+    if (drop.place(at)) return;
     if (footprint.addPoint(at)) return;
     if (grid.addVertex(at)) return;
     if (sky.place(at)) return;
@@ -1414,6 +1425,12 @@
       open: () => {},
       close: () => footprint.cancel(),
       pointing: () => footprint.on,
+    },
+    drop: {
+      isOn: () => drop.armed,
+      open: () => drop.start(),
+      close: () => drop.stop(),
+      pointing: () => drop.armed,
     },
   };
 
@@ -2210,27 +2227,34 @@
     if (mapReady) grid.forCase(id);
   });
 
-  // save just the point (pin if moved, else center) as a navigable place — no image
-  let savingPlace = $state(false);
-  async function savePlace() {
-    if (savingPlace) return;
-    savingPlace = true;
-    try {
+  // --- dropping a pin where the analyst clicks (state/drop.svelte.js) ---
+  // While the case geolocates a scene, a click drops one of its leads, in its colour
+  // and numbered; otherwise the pin asks for a name and is saved as a place of the case.
+  const heldScene = $derived(
+    geolocating.caseId && geolocating.caseId === caseState.current?.id ? geolocating.scene : null,
+  );
+  const drop = createDropState({
+    engine: () => engine,
+    held: () => heldScene,
+    dropLead: (at) => dropLead(caseState.current.id, at),
+    moveLead: (id, at) => moveLead(caseState.current.id, id, at),
+    savePlace: async ({ lat, lon, title }) => {
       const c = await ensureCase();
-      const place = await api.post(`/api/cases/${c.id}/satellite/place`, {
-        lat: displayCoords.lat,
-        lon: displayCoords.lon,
-        zoom: center.zoom,
-        bearing,
-      });
+      const place = await api.post(`/api/cases/${c.id}/satellite/place`, { lat, lon, zoom: center.zoom, bearing, title });
       await reloadCase();
       filedToast('Place saved', [place], { fallback: 'Place saved. Find it in the case sidebar' });
-    } catch (e) {
-      toast(`Could not save place: ${e.message}`, 'danger', 6000);
-    } finally {
-      savingPlace = false;
-    }
-  }
+    },
+    centre: (at) => engine?.setView(at, center.zoom),
+    notify: toast,
+  });
+  // the scene's leads and the pin waiting for its name, drawn again when they move
+  const leadsKey = $derived(JSON.stringify([heldScene?.order ?? null, heldScene?.leads ?? []]));
+  const namingAt = $derived(drop.naming ? `${drop.naming.lat},${drop.naming.lon}` : '');
+  $effect(() => {
+    void leadsKey;
+    void namingAt;
+    if (mapReady) untrack(() => drop.draw());
+  });
 
   // Deletions drop a file / an entity — always behind a confirm. The target is
   // a saved-index row; its kind says which of the two it is.
@@ -2408,8 +2432,8 @@
   // batch at a time (state/saved.svelte.js).
   const runLocate = () => savedWork.runLocate(caseState.current?.id);
 
-  // --- place edit modal (title + notes), used for both save & later edits ---
-  // { id: string|null, title, notes, folder, lat, lon, zoom, bearing }; id null = new
+  // --- place edit modal (title + notes) for a saved place ---
+  // { id, title, notes, folder, lat, lon, zoom, bearing }
   let placeModal = $state(null);
   let placeSaving = $state(false);
 
@@ -2487,25 +2511,6 @@
     placeModal = null;
   }
 
-  function openNewPlace() {
-    openNewPlaceAt(displayCoords);
-  }
-
-  /** The same dialog for any point, such as one right-clicked away from the centre. */
-  function openNewPlaceAt({ lat, lon }) {
-    placeModal = {
-      id: null,
-      title: '',
-      notes: '',
-      folder: '',
-      lat,
-      lon,
-      zoom: center.zoom,
-      bearing,
-      relation: null, // collected by the gate, filed once the place exists
-    };
-  }
-
   function openEditPlace(row) {
     placeModal = {
       id: row.id,
@@ -2539,37 +2544,20 @@
     return fmtCoords(m.lat, m.lon);
   }
 
+  /** An edit of a saved place: a new place is dropped and named on the map (`state/drop.svelte.js`). */
   async function savePlaceModal() {
-    if (!placeModal || placeSaving) return;
+    if (!placeModal?.id || placeSaving) return;
     placeSaving = true;
     try {
       const m = placeModal;
-      let caseId = caseState.current.id;
-      let placeId = m.id;
-      if (m.id) {
-        // edit existing place: retitle + set/clear the note
-        const title = m.title.trim() || placeCoordsLabel(m);
-        await api.patch(`/api/cases/${caseId}/entities/${m.id}`, {
-          label: title,
-          attrs: { notes: m.notes.trim(), folder: m.folder ?? '' },
-        });
-      } else {
-        const c = await ensureCase();
-        caseId = c.id;
-        const entity = await api.post(`/api/cases/${c.id}/satellite/place`, {
-          lat: m.lat,
-          lon: m.lon,
-          zoom: m.zoom,
-          bearing: m.bearing,
-          title: m.title,
-          notes: m.notes,
-          folder: m.folder,
-        });
-        placeId = entity.id;
-      }
-      // The relation is filed last: it needs a place that exists, and saving the
-      // point is worth keeping even if the edge is refused.
-      if (m.relation && placeId) await saveRelation(caseId, placeId, m.relation);
+      const caseId = caseState.current.id;
+      // retitle + set/clear the note
+      const title = m.title.trim() || placeCoordsLabel(m);
+      await api.patch(`/api/cases/${caseId}/entities/${m.id}`, {
+        label: title,
+        attrs: { notes: m.notes.trim(), folder: m.folder ?? '' },
+      });
+      if (m.relation) await saveRelation(caseId, m.id, m.relation);
       placeModal = null;
       await reloadCase();
       toast('Place saved', 'ok', 1600);
@@ -2966,24 +2954,23 @@
              once, beside the two acts that are pressed all day. -->
         {#if !myLayers.editor}
         <MarkerMenu bind:style={markerStyle} free={moveMode} toggleFree={toggleMoveMode} />
-        <div class="place-save" data-guide="sat.place">
-          <button
-            class="btn place-save-main"
-            onclick={savePlace}
-            disabled={savingPlace}
-            title="Save this point as a place (no image)"
-          >
-            <Icon name="pin" size={15} /> {savingPlace ? 'Saving…' : 'Save place'}
-          </button>
-          <button
-            class="btn place-save-edit"
-            onclick={openNewPlace}
-            title="Save place with a title and note…"
-            aria-label="Save place with a title and note"
-          >
-            <Icon name="note" size={14} />
-          </button>
-        </div>
+        <!-- One button arms the drop: each click on the map drops a lead of the scene
+             being geolocated, or a pin to name and save as a place. Escape ends it. -->
+        <button
+          class="btn place-drop"
+          class:on={drop.armed}
+          data-guide="sat.place"
+          aria-pressed={drop.armed}
+          onclick={() => arm(modes, 'drop')}
+          title={drop.armed ? DROP_HELP.stop : heldScene ? DROP_HELP.lead : DROP_HELP.place}
+        >
+          {#if heldScene}
+            <span class="drop-dot" style:--scene={sceneColorAt(heldScene.order)} aria-hidden="true"></span>
+            <Icon name="pin" size={15} /> Drop a lead
+          {:else}
+            <Icon name="pin" size={15} /> Save place
+          {/if}
+        </button>
         <!-- capture controls: one split button. The main part re-runs whichever
              mode was used last — a centred capture at the chosen size, or
              arming a marquee to drag a custom area — and the arrow opens the
@@ -3051,6 +3038,18 @@
           notePoint={clickedPoint}
           onpick={onPointMenu}
           onclose={closePointMenu}
+        />
+      {/if}
+      <!-- a dropped pin asks for its name before it is a place of the case -->
+      {#if drop.naming && engine}
+        <PlaceNamer
+          {engine}
+          pin={drop.naming}
+          saving={drop.saving}
+          coords={fmtCoords(drop.naming.lat, drop.naming.lon)}
+          ontitle={(title) => drop.setTitle(title)}
+          onsave={() => drop.save()}
+          oncancel={() => drop.cancel()}
         />
       {/if}
       <!-- floating reference-image windows (scratch aids over the map) -->
@@ -3452,6 +3451,11 @@
   :global(.sat-marker) {
     filter: drop-shadow(0 1px 2px rgba(0, 0, 0, 0.5));
   }
+  /* a lead of the scene geolocated: grabbed to move it, pressed to centre on it */
+  :global(.sat-lead) {
+    cursor: grab;
+    filter: drop-shadow(0 1px 2px rgba(0, 0, 0, 0.5));
+  }
   .map-bar {
     position: absolute;
     top: 12px;
@@ -3583,20 +3587,20 @@
     align-items: center;
     gap: 3px;
   }
-  .place-save {
-    display: flex;
-    align-items: stretch;
+  .place-drop {
+    white-space: nowrap;
   }
-  .place-save-main {
-    border-top-right-radius: 0;
-    border-bottom-right-radius: 0;
+  /* armed: the accent edge says each click on the map now drops one */
+  .place-drop.on {
+    border-color: var(--accent);
+    box-shadow: inset 0 0 0 1px var(--accent);
+    color: var(--text-1);
   }
-  .place-save-edit {
-    border-top-left-radius: 0;
-    border-bottom-left-radius: 0;
-    border-left: none;
-    padding-left: 8px;
-    padding-right: 8px;
+  .drop-dot {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background: var(--scene);
   }
   .btn-toggle {
     white-space: nowrap;

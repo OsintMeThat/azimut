@@ -1736,6 +1736,54 @@
     return { id: scene.id, name: sceneName(scene), time: queueTime(scene), start, end, moments, color: sceneColor(scene) };
   }
 
+  // --- what a delete touches ---------------------------------------------------
+  //
+  // `lib/deleteImpact.js` a second time, as much as the pill's delete of a capture
+  // needs: the app's dialogs and this panel say what else the press reaches in the
+  // same words. `extensionMapTools.test.js` runs both over the same answer.
+
+  /** How many other records the delete reaches, across every group. */
+  function impactTotal(impact) {
+    const counts = impact?.counts ?? {};
+    return (counts.blocking ?? 0) + (counts.cascade ?? 0) + (counts.tombstone ?? 0) + (counts.touched ?? 0);
+  }
+
+  /** Whether the app will refuse the delete: something holds the target first. */
+  function impactBlocked(impact) {
+    return (impact?.counts?.blocking ?? impact?.blocking?.length ?? 0) > 0;
+  }
+
+  /** The groups to list, in the order they matter, each with how many are left unlisted. */
+  function impactGroups(impact, it = "it") {
+    // the app's own groups, less the icon it draws beside each heading
+    const groups = [
+      { key: "blocking", tone: "danger", heading: `Take ${it} out of these first` },
+      { key: "cascade", tone: "danger", heading: `Deleted with ${it} because they cannot stand alone` },
+      { key: "tombstone", tone: "", heading: `Kept with a record of ${it === "it" ? "its" : "their"} missing source` },
+      { key: "touched", tone: "", heading: `Kept, losing their link to ${it}` },
+    ];
+    return groups
+      .map((group) => {
+        const items = impact?.[group.key] ?? [];
+        const count = impact?.counts?.[group.key] ?? items.length;
+        return { ...group, items, more: Math.max(0, count - items.length) };
+      })
+      .filter((group) => group.items.length > 0);
+  }
+
+  /** The one line above the groups. */
+  function impactLead(impact, it = "it") {
+    const total = impactTotal(impact);
+    if (!total) return `Nothing else in the case uses ${it}.`;
+    return `Linked to ${total} other ${total === 1 ? "item" : "items"} in the case.`;
+  }
+
+  /** What a touched record does with the target. */
+  const impactHow = (item) => (item?.how ?? []).join(", ");
+
+  /** What is said when the check failed or never came back. */
+  const impactUnknown = (it = "it") => `Could not check what else ${it} touches.`;
+
   // --- the calendar ----------------------------------------------------------
   //
   // `lib/calendar.js` a second time, for the same reason the fire question is:
@@ -2008,5 +2056,11 @@
     openScenes,
     sceneMark,
     sceneColor,
+    impactTotal,
+    impactBlocked,
+    impactGroups,
+    impactLead,
+    impactHow,
+    impactUnknown,
   };
 })();

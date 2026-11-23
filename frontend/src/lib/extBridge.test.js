@@ -511,6 +511,18 @@ describe('onSceneProof', () => {
       expect(sceneHandoff(scene)).toBe(null);
     }
   });
+
+  it('reads where a link of the pill goes, and the spot a map tool opens at, strictly', () => {
+    const view = { lat: 48.1, lon: 2.3, zoom: 16 };
+    expect(sceneHandoff({ ...SCENE, to: 'inspect', view })).toEqual({ ...SCENE, to: 'inspect' });
+    expect(sceneHandoff({ ...SCENE, to: 'satellite', view })).toEqual({ ...SCENE, to: 'satellite', view });
+    expect(sceneHandoff({ ...SCENE, to: 'horizon', view: { lat: 1, lon: 2, zoom: 40 } })).toEqual({ ...SCENE, to: 'horizon', view: { lat: 1, lon: 2 } });
+    // an unknown place to go is Make the proof; a spot off the globe is no spot
+    expect(sceneHandoff({ ...SCENE, to: 'settings' })).toEqual(SCENE);
+    expect(sceneHandoff({ ...SCENE, to: 'proof' })).toEqual(SCENE);
+    expect(sceneHandoff({ ...SCENE, to: 'satellite', view: { lat: 91, lon: 2 } })).toEqual({ ...SCENE, to: 'satellite' });
+    expect(sceneHandoff({ ...SCENE, to: 'satellite', view: { lat: '1', lon: 2 } })).toEqual({ ...SCENE, to: 'satellite' });
+  });
 });
 
 // What the extension's bridge posts about a thread it handed out: forged here, each the

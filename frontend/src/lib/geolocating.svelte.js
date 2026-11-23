@@ -87,14 +87,80 @@ export async function startGeolocating(caseId, video, draft) {
  */
 export async function geolocateScene(caseId, scene, { picture = null } = {}) {
   const held = await startGeolocating(caseId, scene.video, scene.id);
-  uiState.geolocateRef = {
-    video: held.video, draft: held.id, start: held.start, end: held.end, ...(held.more?.length ? { more: held.more } : {}),
-    label: held.label, order: held.order,
-    kind: (held.file_kind ?? scene.file_kind) === 'image' ? 'image' : 'video',
-    ...(picture && picture !== held.video ? { picture } : {}),
-  };
+  uiState.geolocateRef = sceneRef(held, { kind: scene.file_kind, picture });
   uiState.tool = 'satellite';
   return held;
+}
+
+/** The reference window Satellite opens for a scene held (`uiState.geolocateRef`). */
+function sceneRef(held, { kind = null, picture = null } = {}) {
+  return {
+    video: held.video, draft: held.id, start: held.start, end: held.end, ...(held.more?.length ? { more: held.more } : {}),
+    label: held.label, order: held.order,
+    kind: (held.file_kind ?? kind) === 'image' ? 'image' : 'video',
+    ...(picture && picture !== held.video ? { picture } : {}),
+  };
+}
+
+/**
+ * Go to a map tool with the scene being geolocated: Satellite opens its reference window
+ * again, the one already open if it is (`state/refs.svelte.js`, openScene); Horizon draws
+ * the same windows. `view`, `{ lat, lon, zoom }`, is the spot another site's map showed
+ * when the extension asked: Satellite flies there, Horizon stands its eye there.
+ */
+export function goWithScene(tool, view = null) {
+  const held = geolocating.scene;
+  if (held && tool === 'satellite') uiState.geolocateRef = sceneRef(held);
+  const at = view && Number.isFinite(view.lat) && Number.isFinite(view.lon) ? view : null;
+  // Horizon stands its eye there, as the map's Look from here does
+  if (at && tool === 'horizon') uiState.horizonAt = { lat: at.lat, lon: at.lon };
+  else if (at) uiState.gotoCoords = { lat: at.lat, lon: at.lon, ...(Number.isFinite(at.zoom) ? { zoom: at.zoom } : {}) };
+  uiState.tool = tool;
+}
+
+/**
+ * Drop a lead for the scene being geolocated: a spot to come back to, numbered, in the
+ * scene's colour (`engine/geolocate.py`). The scene held takes the server's answer, so the
+ * map and the pill draw it at once. Answers with the lead.
+ */
+export async function dropLead(caseId, at) {
+  const answer = await api.post(`${base(caseId)}/geolocating/leads`, { lat: at.lat, lon: at.lon });
+  holdNow(caseId, answer.geolocating);
+  return answer.lead;
+}
+
+/** Move one lead of the scene being geolocated. */
+export async function moveLead(caseId, id, at) {
+  const answer = await api.patch(`${base(caseId)}/geolocating/leads/${encodeURIComponent(id)}`, { lat: at.lat, lon: at.lon });
+  holdNow(caseId, answer.geolocating);
+  return answer.lead;
+}
+
+/** Delete one lead of the scene being geolocated; the others keep their numbers. */
+export async function removeLead(caseId, id) {
+  const answer = await api.del(`${base(caseId)}/geolocating/leads/${encodeURIComponent(id)}`);
+  holdNow(caseId, answer.geolocating);
+}
+
+/** The leads of the scene held for this case, none when it is another's or none is. */
+export function heldLeads(caseId) {
+  return geolocating.caseId === caseId ? (geolocating.scene?.leads ?? []) : [];
+}
+
+/**
+ * What the scene being geolocated gathered, as its pill lists it: `{ geolocating,
+ * leads, captures, frames, collages, picture? }` (`GET /geolocating/gathered`).
+ */
+export function readGathered(caseId) {
+  return api.get(`${base(caseId)}/geolocating/gathered`);
+}
+
+/** Take a frame of the scene being geolocated off its video's Inspect strip. */
+export async function removeGatheredFrame(caseId, frame) {
+  const answer = await api.del(`${base(caseId)}/geolocating/frames/${encodeURIComponent(frame)}`);
+  holdNow(caseId, answer.geolocating);
+  mirror(answer.geolocating);
+  return answer;
 }
 
 /** Stop geolocating. True when there was one to stop. */
@@ -379,6 +445,8 @@ function mirror(scene) {
   if (Number.isInteger(scene.captureCount)) row.captureCount = scene.captureCount;
   else delete row.captureCount;
   if (Number.isInteger(scene.footage)) row.footage = scene.footage;
+  if (scene.leads?.length) row.leads = [...scene.leads];
+  else delete row.leads;
 }
 
 /**

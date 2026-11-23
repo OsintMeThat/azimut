@@ -9,15 +9,19 @@
    * scene's colour, the one Inspect's bar and the reference window draw it in, ties
    * the three together (`order`, `lib/scenes.sceneColorAt`). Its label goes
    * back to the scene in Inspect, Make the proof opens Inspect's chooser on it, and ✕
-   * stops. It sits in the top bar, clear of every map control and capture button.
+   * stops. Its counts open the list of what the scene gathered, leads included
+   * (`components/GatheredPanel.svelte`), and three small links go to Inspect on the
+   * scene, Satellite and Horizon. It sits in the top bar, clear of every map control
+   * and capture button.
    */
   import { onDestroy, untrack } from 'svelte';
+  import GatheredPanel from './GatheredPanel.svelte';
   import Icon from './Icon.svelte';
   import SceneCounts from './SceneCounts.svelte';
   import { onEvent } from '../lib/events.js';
   import { fileStem } from '../lib/proofScene.js';
   import { caseState, toast, uiState } from '../lib/state.svelte.js';
-  import { geolocating, readGeolocating, stopGeolocating } from '../lib/geolocating.svelte.js';
+  import { geolocating, goWithScene, readGeolocating, stopGeolocating } from '../lib/geolocating.svelte.js';
   import { GEOLOCATING_HELP as HELP } from '../lib/geolocatingHelp.js';
   import { sceneColorAt } from '../lib/scenes.js';
   import { captureCount, isPicture, queueShortTime, queueTime } from '../lib/sceneQueue.js';
@@ -67,6 +71,13 @@
     last = { id, count: n };
   });
 
+  // The list of what it gathered, under the counts; closed when the scene ends.
+  let listOpen = $state(false);
+  let countButton = $state();
+  $effect(() => {
+    if (!held) listOpen = false;
+  });
+
   function backToScene(proof = false) {
     if (!held) return;
     uiState.inspectScene = { video: held.video, draft: held.id, ...(proof ? { proof: true } : {}) };
@@ -85,7 +96,7 @@
 </script>
 
 {#if held}
-  <div class="geo-pill" role="group" aria-label={named}>
+  <div class="geo-pill" role="group" aria-label={named} style:--scene={color}>
     <button
       class="geo-scene"
       onclick={() => backToScene()}
@@ -101,10 +112,34 @@
       {/if}
     </button>
     {#key pulse}
-      <span class="geo-count" data-testid="geolocating-count">
+      <button
+        class="geo-count"
+        class:open={listOpen}
+        bind:this={countButton}
+        onclick={() => (listOpen = !listOpen)}
+        aria-expanded={listOpen}
+        aria-label={HELP.gathered}
+        data-testid="geolocating-count"
+      >
         <SceneCounts scene={held} live mark={false} size={12} bump={pulse > 0} />
-      </span>
+        {#if held.leads?.length}
+          <span class="geo-leads" title={`${held.leads.length} ${held.leads.length === 1 ? 'lead' : 'leads'}`} data-testid="geolocating-leads">
+            <Icon name="pin" size={12} />{held.leads.length}
+          </span>
+        {/if}
+      </button>
     {/key}
+    <span class="geo-links">
+      <button class="geo-link" onclick={() => backToScene()} title={HELP.inspect} aria-label={HELP.inspect}>
+        <Icon name="inspect" size={13} />
+      </button>
+      <button class="geo-link" onclick={() => goWithScene('satellite')} title={HELP.satellite} aria-label="Go to Satellite">
+        <Icon name="satellite" size={13} />
+      </button>
+      <button class="geo-link" onclick={() => goWithScene('horizon')} title={HELP.horizon} aria-label={HELP.horizon}>
+        <Icon name="horizon" size={13} />
+      </button>
+    </span>
     <span class="geo-rule" aria-hidden="true"></span>
     <button class="geo-make" onclick={() => backToScene(true)} title={picture ? HELP.makePicture : HELP.make}>
       <Icon name="proof" size={12} />
@@ -114,6 +149,15 @@
       <Icon name="x" size={12} />
     </button>
   </div>
+  {#if listOpen && countButton}
+    <GatheredPanel
+      caseId={geolocating.caseId}
+      scene={held}
+      {color}
+      anchor={countButton}
+      onclose={() => (listOpen = false)}
+    />
+  {/if}
 {/if}
 
 <style>
@@ -121,7 +165,7 @@
   .geo-pill {
     flex: 0 1 auto;
     min-width: 0;
-    max-width: 560px;
+    max-width: 640px;
     height: 28px;
     display: inline-flex;
     align-items: center;
@@ -183,10 +227,44 @@
     flex-shrink: 0;
     display: inline-flex;
     align-items: center;
+    gap: 6px;
     height: 20px;
     padding: 0 8px;
     border-radius: 10px;
     background: var(--bg-3);
+    color: inherit;
+  }
+  .geo-count:hover,
+  .geo-count.open {
+    background: var(--bg-2);
+    box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent) 45%, transparent);
+  }
+  .geo-leads {
+    display: inline-flex;
+    align-items: center;
+    gap: 2px;
+    color: var(--text-1);
+  }
+  .geo-leads :global(svg) {
+    color: var(--scene, var(--accent));
+  }
+  .geo-links {
+    flex-shrink: 0;
+    display: inline-flex;
+    align-items: center;
+    margin-left: 2px;
+  }
+  .geo-link {
+    width: 22px;
+    height: 22px;
+    display: inline-grid;
+    place-items: center;
+    border-radius: 11px;
+    color: var(--text-3);
+  }
+  .geo-link:hover {
+    color: var(--text-1);
+    background: var(--bg-2);
   }
   .geo-rule {
     flex-shrink: 0;

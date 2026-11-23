@@ -25,6 +25,7 @@ describe('what the menu offers', () => {
     expect(ACTIONS.map((action) => action.id)).toEqual([
       'lookup',
       'place',
+      'lead',
       'candidate',
       'measure',
       'sky',

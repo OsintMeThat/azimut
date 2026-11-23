@@ -23,7 +23,7 @@ vi.mock('../lib/api.js', () => {
 const caseState = $state({ current: { id: 'c1' }, rev: 0 });
 const uiState = $state({ tool: 'satellite', inspectScene: null, geolocateRef: null });
 const toast = vi.fn();
-vi.mock('../lib/state.svelte.js', () => ({ caseState, uiState, toast }));
+vi.mock('../lib/state.svelte.js', () => ({ caseState, uiState, toast, fmtCoords: (lat, lon) => `${lat}, ${lon}` }));
 
 const { default: GeolocatingPill } = await import('./GeolocatingPill.svelte');
 const { paths } = await import('./Icon.svelte');
@@ -247,5 +247,116 @@ describe('the pill', () => {
     target.querySelector('[aria-label="Stop geolocating"]').click();
     await settle();
     expect(toast).toHaveBeenCalledWith('unexpected DELETE /api/cases/c1/geolocating', 'danger');
+  });
+});
+
+describe('what the scene gathered, and the links', () => {
+  const LEAD = { id: 'ld_1', n: 2, lat: 15.3547, lon: 44.2066 };
+  const GATHERED = {
+    geolocating: { ...SCENE, leads: [LEAD] },
+    leads: [LEAD],
+    captures: [{ path: 'media/cap-1.png', title: 'cap-1', thumb: 'media/.thumbs/cap-1.jpg' }],
+    frames: [
+      { id: 'f1', time: 240.5, path: 'media/frame-1.png', thumb: null },
+      { id: 'f2', time: 245, path: null, thumb: null },
+    ],
+    collages: [{ name: 'quay', title: 'Quay', path: null, thumb: null }],
+  };
+  const panel = () => document.querySelector('[data-testid="gathered-panel"]');
+  const inBody = (text) => [...document.querySelectorAll('button')].find((b) => b.textContent.trim() === text);
+
+  beforeEach(() => {
+    globalThis.ResizeObserver ??= class { observe() {} disconnect() {} };
+  });
+
+  async function opened(scene = { ...SCENE, leads: [LEAD] }) {
+    answers.set('GET /api/cases/c1/geolocating', { geolocating: scene });
+    answers.set('GET /api/cases/c1/geolocating/gathered', GATHERED);
+    await show();
+    target.querySelector('[data-testid="geolocating-count"]').click();
+    await settle();
+  }
+
+  it('counts the scene’s leads beside what the map and the video gave it, only when it has some', async () => {
+    answers.set('GET /api/cases/c1/geolocating', { geolocating: SCENE });
+    await show();
+    expect(target.querySelector('[data-testid="geolocating-leads"]')).toBeNull();
+    geolocating.scene = { ...SCENE, leads: [LEAD, { ...LEAD, id: 'ld_2', n: 3 }] };
+    flushSync();
+    expect(target.querySelector('[data-testid="geolocating-leads"]').textContent.trim()).toBe('2');
+  });
+
+  it('lists its leads, captures, frames and collages from its counts, and closes on Escape', async () => {
+    await opened();
+    expect(calls).toContain('GET /api/cases/c1/geolocating/gathered');
+    const list = panel();
+    expect([...list.querySelectorAll('h4')].map((h) => h.textContent)).toEqual(['Leads', 'Map captures', 'Frames', 'Collages']);
+    expect(list.querySelector('.num').textContent).toBe('2');
+    expect(list.querySelector('img').getAttribute('src')).toBe('/files/c1/media/.thumbs/cap-1.jpg');
+    // a frame never saved to the case says so, and opens Inspect on the scene
+    list.querySelector('.shot.unsaved').click();
+    expect(uiState).toMatchObject({ tool: 'inspect', inspectScene: { video: 'media/convoy.mp4', draft: 'sc_1' } });
+    await settle();
+    expect(panel()).toBeNull();
+
+    target.querySelector('[data-testid="geolocating-count"]').click();
+    await settle();
+    window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' }));
+    flushSync();
+    expect(panel()).toBeNull();
+  });
+
+  it('shows a lead on the map, and deletes one in a press', async () => {
+    await opened();
+    panel().querySelector('.row.lead .main').click();
+    expect(uiState.gotoCoords).toEqual({ lat: 15.3547, lon: 44.2066, zoom: 17 });
+    expect(uiState.tool).toBe('satellite');
+
+    target.querySelector('[data-testid="geolocating-count"]').click();
+    await settle();
+    answers.set('DELETE /api/cases/c1/geolocating/leads/ld_1', { geolocating: SCENE });
+    panel().querySelector('[aria-label="Delete lead 2"]').click();
+    await settle();
+    expect(calls).toContain('DELETE /api/cases/c1/geolocating/leads/ld_1');
+    expect(geolocating.scene.leads).toBeUndefined();
+  });
+
+  it('takes a frame off Inspect’s strip behind a dialog, its saved picture staying in Media', async () => {
+    await opened();
+    panel().querySelector('[aria-label="Take the frame at 4:00.500 off the strip"], [aria-label^="Take the frame at"]').click();
+    flushSync();
+    expect(document.body.textContent).toContain('Its picture saved to the case stays in Media.');
+    answers.set('DELETE /api/cases/c1/geolocating/frames/f1', { video: 'media/convoy.mp4', frame: 'f1', geolocating: { ...SCENE, footage: 3 } });
+    inBody('Remove').click();
+    await settle();
+    expect(calls).toContain('DELETE /api/cases/c1/geolocating/frames/f1');
+    expect(geolocating.scene.footage).toBe(3);
+  });
+
+  it('sends a capture to the Trash behind the dialog that says what it touches', async () => {
+    await opened();
+    answers.set('POST /api/cases/c1/delete-impact', { blocking: [], cascade: [], tombstone: [], touched: [], counts: { blocking: 0, cascade: 0, tombstone: 0, touched: 0 } });
+    panel().querySelector('[aria-label="Delete cap-1"]').click();
+    await settle();
+    expect(calls).toContain('POST /api/cases/c1/delete-impact');
+    answers.set('DELETE /api/cases/c1/satellite?path=media%2Fcap-1.png', { deleted: ['e1'], trash: 't1' });
+    inBody('Delete').click();
+    await settle();
+    expect(calls).toContain('DELETE /api/cases/c1/satellite?path=media%2Fcap-1.png');
+    expect(toast).toHaveBeenCalledWith('Deleted “cap-1”', 'info', 7000, expect.anything());
+  });
+
+  it('links to Inspect on the scene, to Satellite with its reference window, and to Horizon', async () => {
+    answers.set('GET /api/cases/c1/geolocating', { geolocating: { ...SCENE, order: 1 } });
+    await show();
+    target.querySelector('[aria-label="Open the scene in Inspect"]').click();
+    expect(uiState).toMatchObject({ tool: 'inspect', inspectScene: { video: 'media/convoy.mp4', draft: 'sc_1' } });
+
+    target.querySelector('[aria-label="Go to Satellite"]').click();
+    expect(uiState.tool).toBe('satellite');
+    expect(uiState.geolocateRef).toMatchObject({ video: 'media/convoy.mp4', draft: 'sc_1', start: 238, end: 252, order: 1, kind: 'video' });
+
+    target.querySelector('[aria-label="Go to Horizon"]').click();
+    expect(uiState.tool).toBe('horizon');
   });
 });

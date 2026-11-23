@@ -257,6 +257,9 @@ def build_full_case(
     )
     assert shot.status_code == 200, shot.text
     assert shot.json()["scene"]["id"] == "sc_1", shot.text
+    # and a lead dropped for it, kept on the scene in the work
+    lead = client.post(f"/api/cases/{case_id}/geolocating/leads", json={"lat": 48.8586, "lon": 2.2947})
+    assert lead.status_code == 200, lead.text
     assert client.delete(f"/api/cases/{case_id}/geolocating").json() == {"ended": True}
     full.capture = client.get(f"/api/cases/{case_id}/satellite").json()[0]["path"]
 

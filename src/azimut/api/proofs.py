@@ -827,9 +827,10 @@ def save_proof(case_id: str, body: ProofIn) -> dict[str, Any]:
     # its description, day and sources, and the footage behind it is the same marker.
     layerediting.sync_followers(case, entity_id)
     # A picture marked to geolocate is proved once a proof lays it out: its geolocating
-    # ends, and the queue may have lost a row.
+    # ends, the leads dropped for it go, and the queue may have lost a row.
     if geolocate.settle(case):
         say_geolocating(case)
+    geolocate.settle_leads(case, scene_engine.panel_sources(spec))
     events.publish({"type": "scenes", "case_id": case.id, "video": None})
     return {
         # The proof's entity, so the composer can ask what it shares with the case.
@@ -1143,9 +1144,12 @@ def state_proof_scene(case_id: str, name: str, body: SceneIn) -> dict[str, Any]:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
     # The date the proof states is about its moments: they moved, so it follows.
     _restate_dated_moments(case, name)
-    # A scene a proof takes up is proved: its geolocating is over, and it leaves the queue.
+    # A scene a proof takes up is proved: its geolocating is over, the leads dropped for
+    # it go, and it leaves the queue.
     if scene.get("draft") and geolocate.stop(case, scene["draft"]):
         say_geolocating(case)
+    if scene.get("draft") and scene.get("video"):
+        geolocate.forget_leads(case, scene["video"], scene["draft"])
     events.publish({"type": "scenes", "case_id": case.id, "video": scene.get("video")})
     return scene
 

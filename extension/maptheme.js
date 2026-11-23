@@ -116,6 +116,7 @@
     cornerBR: "M4 5h16a1 1 0 0 1 1 1v12a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V6a1 1 0 0 1 1-1ZM12.5 12h5v4h-5Z",
     pushpin: "M8.4 4h7.2v4.8l3.2 4.3H5.2l3.2-4.3V4ZM12 13.1V20",
     note: "M6 3h9l5 5v13a1 1 0 0 1-1 1H6a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1Zm8 0v6h6M9 13h6m-6 4h4",
+    inspect: "M11 4a7 7 0 1 0 0 14 7 7 0 0 0 0-14Zm9 16-4.35-4.35M8 11h6m-3-3v6",
   };
 
   /** One icon as an inline SVG string, for the panel's own markup. */

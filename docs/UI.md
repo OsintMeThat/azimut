@@ -42,8 +42,21 @@ Nothing reaches the network before a press, and there is no counter or donor fea
 
 **While a scene is geolocated, a pill sits beside the case**: *Geolocating*, the scene's
 colour, its time and label, and its two counts (below): the captures gathered for it, which
-pulses as one lands from the app or the extension, and what its video gives it. Its label opens the scene in Inspect, **Make the
+pulses as one lands from the app or the extension, and what its video gives it, then its
+leads when it has some. Its label opens the scene in Inspect, **Make the
 proof** opens Inspect's chooser on it, and ✕ stops; the captures stay with the scene.
+Three small links beside the counts go to Inspect on the scene, to Satellite with its
+reference window open again, and to Horizon. **Pressing the counts lists what the scene
+gathered** (`components/GatheredPanel.svelte`, `GET /geolocating/gathered`): its leads,
+its map captures, the frames of its video's strip and its collages inside it, or the
+picture. A lead shows on the map or goes in one press; a capture goes to the case Trash
+behind the dialog that says what it touches; a frame leaves Inspect's strip as its ×
+does, its saved picture staying in Media, and an Inspect open on that video drops it too;
+a collage and the picture only open. **A lead is a spot dropped on the map while the
+scene is geolocated** (below, the status line's drop): numbered, in the scene's colour,
+kept on the scene like its captures and never as a place of the case, and erased when the
+scene is abandoned or a proof takes it up. The proof still takes its point from its
+capture. The extension's pill lists the same and drops leads over other sites' maps.
 Every capture filed meanwhile, from any map tool or the extension, is gathered for it on
 the server (`engine/geolocate.py`), and every tab and the extension's panel follow the
 same scene. **Send to Geo Proof** then makes the proof of that scene, from Horizon's
@@ -3187,7 +3200,15 @@ or brings it back.
 
 Underneath, the **status line** reads where you are (coordinates, the ground's
 height in 3D, zoom) on the left, and carries the two acts that take
-something off the map — Save place and Capture — on the right. What marks the
+something off the map — Save place and Capture — on the right. **Save place drops a pin
+where you click** rather than filing the map's centre: it arms a mode in which each
+click drops one until Escape or the button again. Each pin asks for its name in a field
+beside it, and Enter saves it as a place; Save waits for a name, since a place with none
+only reads as its coordinates. Notes, folder and relations are the place card's. While a
+scene is geolocated the button reads **Drop a lead** with the scene's dot, and each click
+drops one of its leads with nothing asked; the right-click's *Save place here…* reads
+*Drop a lead here* then. A lead is dragged to move it and clicked to centre the map on
+it. What marks the
 point, and whether that point is the map's centre or a pin dropped somewhere,
 is one small menu beside them: both are set once and the two acts are pressed
 all day. The engine's scale bracket reads under the coordinates, where how far

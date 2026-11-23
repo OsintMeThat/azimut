@@ -32,6 +32,7 @@ import * as appCal from './calendar.js';
 import * as appScenes from './scenes.js';
 import * as appQueue from './sceneQueue.js';
 import * as appCounts from './sceneCounts.js';
+import * as appImpact from './deleteImpact.js';
 
 const here = dirname(fileURLToPath(import.meta.url));
 const load = (name) => readFileSync(join(here, `../../../extension/${name}`), 'utf8');
@@ -1311,5 +1312,42 @@ describe('the scenes to geolocate, on both sides of the boundary', () => {
     expect(held.z).toBe(Math.max(...refs.open.map((v) => v.z)));
     // another scene of the same video is a window of its own
     expect(refs.holdScene(row('i', 3, null), 'Market walk')).not.toBe(held);
+  });
+});
+
+describe('what a delete touches, on both sides of the boundary', () => {
+  // the pill's delete of a capture says it in the app's own words
+  const row = (label, how = []) => ({ id: label, type: 'proof', label, path: null, how });
+  const ANSWERS = [
+    null,
+    { blocking: [], cascade: [], tombstone: [], touched: [], counts: { blocking: 0, cascade: 0, tombstone: 0, touched: 0 } },
+    {
+      blocking: [], cascade: [row('Frame strip')], tombstone: [row('Board card')],
+      touched: [row('Bridge proof', ['uses it as a panel', 'cites it'])],
+      counts: { blocking: 0, cascade: 1, tombstone: 1, touched: 7 },
+    },
+    {
+      blocking: [row('Night watch', ['watches it'])], cascade: [], tombstone: [], touched: [],
+      counts: { blocking: 1, cascade: 0, tombstone: 0, touched: 0 },
+    },
+    // an older answer with lists and no counts
+    { touched: [row('Quay note', ['mentions it'])] },
+  ];
+
+  it('counts, words and groups an answer as the app does', () => {
+    for (const impact of ANSWERS) {
+      expect(ext.impactTotal(impact)).toBe(appImpact.impactTotal(impact));
+      expect(ext.impactBlocked(impact)).toBe(appImpact.impactBlocked(impact));
+      expect(ext.impactLead(impact)).toBe(appImpact.impactLead(impact));
+      expect(ext.impactLead(impact, 'them')).toBe(appImpact.impactLead(impact, 'them'));
+      // the app draws an icon by each heading, which the panel does not
+      const without = (groups) => groups.map(({ icon, ...group }) => group);
+      expect(ext.impactGroups(impact)).toEqual(without(appImpact.impactGroups(impact)));
+      expect(ext.impactGroups(impact, 'them')).toEqual(without(appImpact.impactGroups(impact, 'them')));
+      for (const group of ext.impactGroups(impact)) {
+        for (const item of group.items) expect(ext.impactHow(item)).toBe(appImpact.impactHow(item));
+      }
+    }
+    expect(ext.impactUnknown()).toBe(appImpact.impactUnknown());
   });
 });

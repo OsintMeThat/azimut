@@ -53,6 +53,8 @@ beforeAll(() => {
     new Proxy({ measureText: () => ({ width: 20 }) }, { get: (target, name) => target[name] ?? (() => {}) });
   globalThis.URL.createObjectURL = vi.fn(() => 'blob:azimut/1');
   globalThis.URL.revokeObjectURL = vi.fn();
+  // a thumbnail is decoded and painted, never linked
+  globalThis.createImageBitmap = vi.fn(async () => ({ width: 160, height: 90, close: () => {} }));
 });
 
 let panel = null;
@@ -65,9 +67,13 @@ afterEach(() => {
 
 /** A panel over OpenStreetMap, with the app answering `answers` (a value, or a
  *  function of the message for a route whose answer depends on what was sent). */
-function open(answers = {}) {
+function open(answers = {}, { images = () => ({ ok: true, src: 'data:image/png;base64,AAAA' }) } = {}) {
   window.happyDOM.setViewport({ width: 1400, height: 900 });
-  const location = { href: 'https://www.openstreetmap.org/#map=17/50.45/30.52', host: 'www.openstreetmap.org' };
+  const location = {
+    href: 'https://www.openstreetmap.org/#map=17/50.45/30.52',
+    host: 'www.openstreetmap.org',
+    assign: vi.fn(),
+  };
   const app = {
     '/api/ingest/ping': { units: 'metric' },
     '/api/ingest/cases': [{ id: CASE, name: 'Case one' }, { id: OTHER, name: 'Case two' }],
@@ -85,6 +91,8 @@ function open(answers = {}) {
   const asked = [];
   const sent = [];
   const ports = [];
+  const links = []; // the linked-views port, which also hears a move onto a lead
+  const pictures = []; // the thumbnails asked for
   const handed = []; // what Make the proof handed the worker
   let proof = { ok: true };
   const api = {
@@ -94,6 +102,10 @@ function open(answers = {}) {
       sendMessage: vi.fn(async (message) => {
         sent.push(message);
         if (message.type === 'map-file') return { ok: true, file: { type: 'video/mp4', data: '', next: null, total: 0 } };
+        if (message.type === 'map-image') {
+          pictures.push(message);
+          return images(message);
+        }
         if (message.type === 'scene-proof') {
           handed.push(message);
           return typeof proof === 'function' ? proof(message) : proof;
@@ -114,6 +126,7 @@ function open(answers = {}) {
           disconnect: vi.fn(),
         };
         if (info.name === 'map-sync') ports.push(port);
+        if (info.name === 'map-link') links.push(port);
         return port;
       }),
     },
@@ -126,6 +139,9 @@ function open(answers = {}) {
   return {
     ...handle,
     app,
+    location,
+    links,
+    pictures,
     $,
     $$: (selector) => [...root.querySelectorAll(selector)],
     calls: (path) => asked.filter((m) => m.path === path),
@@ -646,5 +662,524 @@ describe('making the proof from over this map', () => {
     panel = open({ '/api/ingest/scenes': { ...structuredClone(QUEUE), geolocating: picture } });
     await settle();
     expect(proof().title).toBe('Make the proof in Azimut, from the picture and its captures');
+  });
+});
+
+/** Where a lead is, as the app gives it on the scene's row and in what it gathered. */
+const lead = (id, n, lat, lon) => ({ id, n, lat, lon });
+const LEADS = [lead('ld_1', 1, 50.45, 30.52), lead('ld_2', 3, 50.4504, 30.5208)];
+
+/** The pixel a coordinate is drawn at, and back, in the panel's own frame. */
+function project(panel, point) {
+  const area = { x: panel.state.frame.x, y: panel.state.frame.y, w: 1400, h: 900 };
+  return window.AzimutMapMath.toScreen(point, panel.state.view, area);
+}
+function unproject(panel, at) {
+  const area = { x: panel.state.frame.x, y: panel.state.frame.y, w: 1400, h: 900 };
+  return window.AzimutMapMath.toLatLon(at, panel.state.view, area);
+}
+
+/** A click on the map, which is the drawing surface over it while a tool is armed. */
+const clickMap = (panel, at) =>
+  panel.root.querySelector('canvas').dispatchEvent(new window.PointerEvent('pointerdown', { clientX: at.x, clientY: at.y }));
+
+/** The pointer down on a lead's mark, moved by `by` and let go over the window. */
+function dragLead(panel, id, by) {
+  const el = panel.$(`.lead[data-lead="${id}"]`);
+  const at = { x: parseFloat(el.style.left), y: parseFloat(el.style.top) - 14 };
+  el.querySelector('.lead-pin').dispatchEvent(
+    new window.PointerEvent('pointerdown', { clientX: at.x, clientY: at.y, button: 0, bubbles: true, composed: true }),
+  );
+  const to = { x: at.x + by.x, y: at.y + by.y };
+  if (by.x || by.y) window.dispatchEvent(new window.PointerEvent('pointermove', { clientX: to.x, clientY: to.y, bubbles: true }));
+  window.dispatchEvent(new window.PointerEvent('pointerup', { clientX: to.x, clientY: to.y, bubbles: true }));
+}
+
+describe('leads, dropped while a scene is geolocated', () => {
+  /** The bridge being geolocated, the app keeping each lead dropped on it. */
+  function geolocatingBridge(extra = {}) {
+    const kept = [];
+    panel = open({
+      '/api/ingest/scenes': { ...structuredClone(QUEUE), geolocating: { ...BRIDGE, order: 1 } },
+      '/api/ingest/leads': (message) => {
+        const made = lead(`ld_${kept.length + 1}`, kept.length + 1, message.body.lat, message.body.lon);
+        kept.push(made);
+        return { lead: made, geolocating: { ...BRIDGE, order: 1, leads: [...kept] } };
+      },
+      ...extra,
+    });
+  }
+
+  it('files a lead at each click, unnamed and at once, and stays armed for the next', async () => {
+    geolocatingBridge();
+    await settle();
+    panel.$('[data-tab="pins"]').click();
+    const drop = panel.$('[data-act="pin-drop"]');
+    expect(drop.textContent).toBe('Drop a lead');
+    expect(drop.title).toBe('Mark spots the scene may be, kept with it');
+    drop.click();
+    expect(panel.$('[data-act="pin-drop"]').textContent).toBe('Click the map');
+    expect(panel.$('.readout').textContent).toBe('Each click drops a lead, Esc stops');
+    clickMap(panel, { x: 760, y: 400 });
+    await settle();
+    clickMap(panel, { x: 640, y: 520 });
+    await settle();
+    const bodies = panel.calls('/api/ingest/leads').map((m) => [m.method, m.body]);
+    expect(bodies).toHaveLength(2);
+    const first = unproject(panel, { x: 760, y: 400 });
+    expect(bodies[0][0]).toBe('POST');
+    expect(Object.keys(bodies[0][1]).sort()).toEqual(['case_id', 'lat', 'lon']);
+    expect(bodies[0][1].case_id).toBe(CASE);
+    expect(bodies[0][1].lat).toBeCloseTo(first.lat, 9);
+    expect(bodies[0][1].lon).toBeCloseTo(first.lon, 9);
+    // no place is filed and nothing asks for a name
+    expect(panel.calls('/api/ingest/place')).toHaveLength(0);
+    expect(panel.tools.pins.draft).toBe(null);
+    expect(panel.$('[data-act="pin-title"]')).toBe(null);
+    expect(panel.tools.pins.dropping).toBe(true);
+    expect(panel.root.querySelector('canvas').style.pointerEvents).toBe('auto');
+    // both drawn, numbered, the moment the app answered
+    expect(panel.$$('.lead b').map((b) => b.textContent)).toEqual(['1', '2']);
+    expect(panel.$('.geo-pill .geo-leads').textContent).toBe('2');
+    expect(panel.$('.geo-pill .geo-leads').title).toBe('2 leads');
+  });
+
+  it('puts the drop down on Esc, as its button pressed again does', async () => {
+    geolocatingBridge();
+    await settle();
+    panel.$('[data-tab="pins"]').click();
+    panel.press('pin-drop');
+    expect(panel.$('[data-act="pin-drop"]').title).toBe('Press again or Esc to stop');
+    window.dispatchEvent(new window.KeyboardEvent('keydown', { key: 'Escape' }));
+    expect(panel.tools.pins.dropping).toBe(false);
+    expect(panel.root.querySelector('canvas').style.pointerEvents).toBe('none');
+    expect(panel.$('[data-act="pin-drop"]').textContent).toBe('Drop a lead');
+    panel.press('pin-drop');
+    panel.press('pin-drop');
+    expect(panel.tools.pins.dropping).toBe(false);
+  });
+
+  it('says why the app refused one, and stays armed', async () => {
+    geolocatingBridge({ '/api/ingest/leads': new Error('a scene keeps at most 50 leads') });
+    await settle();
+    panel.$('[data-tab="pins"]').click();
+    panel.press('pin-drop');
+    clickMap(panel, { x: 760, y: 400 });
+    await settle();
+    expect(panel.$('.note').textContent).toBe('a scene keeps at most 50 leads');
+    expect(panel.tools.pins.dropping).toBe(true);
+  });
+
+  it('files a named place outside a geolocate, File it waiting for the name', async () => {
+    panel = open({ '/api/ingest/place': { ok: true } });
+    await settle();
+    panel.$('[data-tab="pins"]').click();
+    expect(panel.$('[data-act="pin-drop"]').textContent).toBe('Place a point');
+    panel.press('pin-drop');
+    clickMap(panel, { x: 760, y: 400 });
+    await settle();
+    expect(panel.calls('/api/ingest/leads')).toHaveLength(0);
+    const save = () => panel.$('[data-act="pin-save"]');
+    expect(save().disabled).toBe(true);
+    expect(save().title).toBe('Name the point to file it');
+    const title = panel.$('[data-act="pin-title"]');
+    title.value = '   ';
+    title.dispatchEvent(new window.Event('input', { bubbles: true }));
+    expect(save().disabled).toBe(true);
+    title.value = 'The quay';
+    title.dispatchEvent(new window.Event('input', { bubbles: true }));
+    // the same field, still under the cursor: only the button followed
+    expect(panel.$('[data-act="pin-title"]')).toBe(title);
+    expect(save().disabled).toBe(false);
+    expect(save().hasAttribute('title')).toBe(false);
+    save().click();
+    await settle();
+    const [filed] = panel.calls('/api/ingest/place');
+    expect(filed.form).toBe(true);
+    expect(filed.body).toMatchObject({ case_id: CASE, title: 'The quay' });
+  });
+});
+
+describe('the leads on the map', () => {
+  async function withLeads(extra = {}) {
+    panel = open({
+      '/api/ingest/scenes': { ...structuredClone(QUEUE), geolocating: { ...BRIDGE, order: 1, leads: LEADS } },
+      '/api/ingest/leads/move': (message) => ({
+        lead: lead(message.body.lead, 1, message.body.lat, message.body.lon),
+        geolocating: { ...BRIDGE, order: 1, leads: [lead('ld_1', 1, message.body.lat, message.body.lon), LEADS[1]] },
+      }),
+      ...extra,
+    });
+    await settle();
+  }
+
+  it('draws each lead of the scene held, numbered in its colour, with no tool picked up', async () => {
+    await withLeads();
+    expect(panel.state.tool).toBe(null);
+    const drawn = panel.$$('.lead');
+    expect(drawn.map((el) => el.querySelector('b').textContent)).toEqual(['1', '3']);
+    const red = window.AzimutMapTheme.SCENE_COLORS[1];
+    expect(drawn.every((el) => el.style.getPropertyValue('--scene') === red)).toBe(true);
+    // the tip on the spot
+    const at = project(panel, LEADS[1]);
+    expect(parseFloat(drawn[1].style.left)).toBeCloseTo(at.x, 6);
+    expect(parseFloat(drawn[1].style.top)).toBeCloseTo(at.y, 6);
+    expect(drawn[1].querySelector('.lead-pin').title).toBe('Lead 3');
+    // and counted in the pill, by the scene's two counts, as the app's pill shows them
+    expect(panel.$('.geo-pill .geo-leads').textContent).toBe('2');
+  });
+
+  it('goes with the scene', async () => {
+    await withLeads();
+    panel.nudge({ type: 'geolocating', case_id: CASE, video: null, draft: null });
+    expect(panel.$$('.lead')).toHaveLength(0);
+  });
+
+  it('is drawn afresh when the app says the scene’s leads moved', async () => {
+    panel = open({ '/api/ingest/scenes': { ...structuredClone(QUEUE), geolocating: BRIDGE } });
+    await settle();
+    expect(panel.$$('.lead')).toHaveLength(0);
+    panel.app['/api/ingest/scenes'] = { ...structuredClone(QUEUE), geolocating: { ...BRIDGE, leads: LEADS } };
+    panel.nudge({ type: 'geolocating', case_id: CASE, video: VIDEO, draft: 'sc_2' });
+    await settle();
+    expect(panel.$$('.lead b').map((b) => b.textContent)).toEqual(['1', '3']);
+  });
+
+  it('moves one dragged, and tells the app where its tip was let go', async () => {
+    await withLeads();
+    const tipBefore = project(panel, LEADS[0]);
+    dragLead(panel, 'ld_1', { x: 40, y: 30 });
+    await settle();
+    const [moved] = panel.calls('/api/ingest/leads/move');
+    const there = unproject(panel, { x: tipBefore.x + 40, y: tipBefore.y + 30 });
+    expect(moved.body).toMatchObject({ case_id: CASE, lead: 'ld_1' });
+    expect(moved.body.lat).toBeCloseTo(there.lat, 9);
+    expect(moved.body.lon).toBeCloseTo(there.lon, 9);
+    // south and east of where it was, as the pointer went
+    expect(moved.body.lat).toBeLessThan(LEADS[0].lat);
+    expect(moved.body.lon).toBeGreaterThan(LEADS[0].lon);
+    const el = panel.$('.lead[data-lead="ld_1"]');
+    expect(parseFloat(el.style.left)).toBeCloseTo(tipBefore.x + 40, 6);
+    expect(parseFloat(el.style.top)).toBeCloseTo(tipBefore.y + 30, 6);
+  });
+
+  it('names one clicked, and puts the name away on the next click, moving nothing', async () => {
+    await withLeads();
+    dragLead(panel, 'ld_2', { x: 0, y: 0 });
+    const el = panel.$('.lead[data-lead="ld_2"]');
+    expect(el.classList.contains('lit')).toBe(true);
+    expect(el.querySelector('.lead-name').textContent).toBe('Lead 3');
+    dragLead(panel, 'ld_2', { x: 1, y: 1 });
+    expect(el.classList.contains('lit')).toBe(false);
+    await settle();
+    expect(panel.calls('/api/ingest/leads/move')).toHaveLength(0);
+  });
+
+  it('puts one back where the app has it when the app refuses the move', async () => {
+    await withLeads({ '/api/ingest/leads/move': new Error('that lead is no longer there') });
+    const tipBefore = project(panel, LEADS[0]);
+    dragLead(panel, 'ld_1', { x: 40, y: 30 });
+    await settle();
+    expect(panel.$('.note').textContent).toBe('that lead is no longer there');
+    expect(parseFloat(panel.$('.lead[data-lead="ld_1"]').style.left)).toBeCloseTo(tipBefore.x, 6);
+  });
+});
+
+describe('what the scene gathered, from the pill’s counts', () => {
+  const GATHERED = {
+    geolocating: { ...BRIDGE, order: 1, leads: LEADS },
+    leads: LEADS,
+    captures: [
+      { path: 'media/c1.png', title: 'Roof line', thumb: 'media/.thumbs/c1.jpg' },
+      { path: 'media/c2.png', title: 'Quay', thumb: null },
+    ],
+    frames: [
+      { id: 'fr_1', time: 240.4, path: 'media/frame-1.png', thumb: 'media/.thumbs/f1.jpg' },
+      { id: 'fr_2', time: 245, path: null, thumb: null },
+    ],
+    collages: [
+      { name: 'co_1', title: 'Bridge strip', path: 'media/collage.png', thumb: 'media/.thumbs/co.jpg' },
+      { name: 'co_2', title: 'Unexported', path: null, thumb: null },
+    ],
+  };
+  const IMPACT = {
+    blocking: [], cascade: [], tombstone: [],
+    touched: [{ id: 'e1', type: 'proof', label: 'Bridge proof', path: null, how: ['uses it as a panel'] }],
+    counts: { blocking: 0, cascade: 0, tombstone: 0, touched: 1 },
+  };
+
+  async function opened(extra = {}, options) {
+    panel = open({
+      '/api/ingest/scenes': { ...structuredClone(QUEUE), geolocating: { ...BRIDGE, order: 1, leads: LEADS } },
+      '/api/ingest/geolocating/gathered': structuredClone(GATHERED),
+      '/api/ingest/geolocating/impact': IMPACT,
+      '/api/ingest/geolocating/remove': { geolocating: { ...BRIDGE, order: 1, leads: LEADS } },
+      '/api/ingest/leads/remove': { geolocating: { ...BRIDGE, order: 1, leads: [LEADS[1]] } },
+      ...extra,
+    }, options);
+    await settle();
+    panel.press('geo-gathered');
+    await settle();
+  }
+  const heads = () => panel.$$('.gth-head').map((el) => el.textContent);
+  /** The rows under one heading of the list. */
+  const rows = (head) => {
+    const out = [];
+    let at = panel.$$('.gth-head').find((el) => el.textContent === head)?.nextElementSibling;
+    while (at && !at.classList.contains('gth-head')) {
+      if (at.classList.contains('gth-row')) out.push(at);
+      at = at.nextElementSibling;
+    }
+    return out;
+  };
+
+  it('opens under the pill and lists the leads, the captures, the frames and the collages', async () => {
+    await opened();
+    expect(panel.calls('/api/ingest/geolocating/gathered').map((m) => m.query)).toEqual([{ case_id: CASE }]);
+    expect(panel.$('[data-act="geo-gathered"]').getAttribute('aria-expanded')).toBe('true');
+    expect(panel.$('[data-act="geo-gathered"]').getAttribute('aria-label')).toBe('What this scene gathered');
+    expect(heads()).toEqual(['Leads', 'Map captures', 'Frames', 'Collages']);
+    const [first, second] = rows('Leads');
+    expect(first.querySelector('.gth-n').textContent).toBe('1');
+    expect(first.querySelector('.gth-n').style.getPropertyValue('--scene')).toBe(window.AzimutMapTheme.SCENE_COLORS[1]);
+    expect(first.querySelector('.gth-words').textContent).toBe('50.45000, 30.52000');
+    expect(second.querySelector('[data-act="lead-remove"]').title).toBe('Delete this lead');
+    expect(rows('Map captures').map((row) => row.querySelector('.gth-words').textContent)).toEqual(['Roof line', 'Quay']);
+    expect(rows('Map captures')[0].querySelector('[data-act="gth-delete"]').title).toBe('Move this capture to the Trash');
+    const [saved, unsaved] = rows('Frames');
+    expect(saved.querySelector('.gth-words').textContent).toBe('4:00.400');
+    expect(saved.querySelector('[data-act="gth-delete"]').title).toBe("Take it off Inspect's strip, its picture stays in Media");
+    // a frame never saved is a time chip, and only leaves the strip
+    expect(unsaved.querySelector('.gth-clock').textContent).toBe('4:05');
+    expect(unsaved.querySelector('.gth-clock').title).toBe('Not saved to the case yet');
+    expect(unsaved.querySelector('[data-act="gth-delete"]').title).toBe("Take it off Inspect's strip");
+    // a collage is deleted in Collage, so nothing here deletes one
+    expect(rows('Collages').map((row) => row.querySelector('.gth-words').textContent)).toEqual(['Bridge strip', 'Unexported']);
+    expect(rows('Collages').some((row) => row.querySelector('button'))).toBe(false);
+    expect(panel.$$('.gth-head').at(-1).title).toBe('Deleted in Collage');
+    // pressed again, it folds away
+    panel.press('geo-gathered');
+    expect(panel.$('.gth')).toBe(null);
+  });
+
+  it('asks the app for the thumbnails it keeps, and paints them rather than linking them', async () => {
+    await opened({}, {
+      images: (message) => (message.query.path === 'media/frame-1.png'
+        ? { ok: false, error: 'no thumbnail for that file' }
+        : { ok: true, src: 'data:image/png;base64,AAAA' }),
+    });
+    await settle();
+    expect(panel.pictures.map((m) => [m.path, m.query])).toEqual([
+      ['/api/ingest/geolocating/thumb', { case_id: CASE, path: 'media/c1.png' }],
+      ['/api/ingest/geolocating/thumb', { case_id: CASE, path: 'media/frame-1.png' }],
+      ['/api/ingest/geolocating/thumb', { case_id: CASE, path: 'media/collage.png' }],
+    ]);
+    const [roof, quay] = rows('Map captures');
+    expect(roof.querySelector('.gth-pic canvas')).not.toBe(null);
+    expect(panel.$('.gth img')).toBe(null);
+    // none kept, or none sent: the slot says what kind of file it is
+    expect(quay.querySelector('.gth-pic canvas')).toBe(null);
+    expect(quay.querySelector('.gth-pic svg')).not.toBe(null);
+    expect(rows('Frames')[0].querySelector('.gth-pic canvas')).toBe(null);
+    expect(rows('Collages')[0].querySelector('.gth-pic canvas')).not.toBe(null);
+    // painted again from what is kept, not asked twice
+    panel.press('geo-gathered');
+    panel.press('geo-gathered');
+    await settle();
+    expect(panel.pictures).toHaveLength(3);
+    expect(rows('Map captures')[0].querySelector('.gth-pic canvas')).not.toBe(null);
+  });
+
+  it('lists the picture of a picture scene, which is not deleted from here', async () => {
+    const PHOTO = { ...BRIDGE, video: 'media/harbour.png', file_kind: 'image', start: null, end: null };
+    await opened({
+      '/api/ingest/scenes': { ...structuredClone(QUEUE), geolocating: PHOTO },
+      '/api/ingest/geolocating/gathered': {
+        geolocating: PHOTO, leads: [], captures: [], frames: [], collages: [],
+        picture: { path: 'media/harbour.png', title: 'Harbour photo', thumb: 'media/.thumbs/h.jpg' },
+      },
+    });
+    expect(heads()).toEqual(['Picture']);
+    const [picture] = rows('Picture');
+    expect(picture.querySelector('.gth-words').textContent).toBe('Harbour photo');
+    expect(picture.querySelector('button')).toBe(null);
+  });
+
+  it('says so when the scene has gathered nothing yet', async () => {
+    await opened({
+      '/api/ingest/geolocating/gathered': { geolocating: BRIDGE, leads: [], captures: [], frames: [], collages: [] },
+    });
+    expect(panel.$('.gth .hint').textContent).toBe('Nothing gathered yet. Drop a lead or capture the map.');
+  });
+
+  it('deletes a lead in one press', async () => {
+    await opened();
+    panel.forget();
+    panel.app['/api/ingest/geolocating/gathered'] = { ...structuredClone(GATHERED), leads: [LEADS[1]] };
+    panel.$('[data-act="lead-remove"][data-lead="ld_1"]').click();
+    await settle();
+    expect(panel.calls('/api/ingest/leads/remove').map((m) => [m.method, m.body])).toEqual([
+      ['POST', { case_id: CASE, lead: 'ld_1' }],
+    ]);
+    expect(panel.$$('.lead b').map((b) => b.textContent)).toEqual(['3']);
+    expect(rows('Leads')).toHaveLength(1);
+  });
+
+  it('moves this map onto a lead, at the level it is at, and has the worker bring the tools back', async () => {
+    await opened();
+    expect(panel.$('[data-act="lead-go"]').title).toBe('Move this map to it');
+    panel.$('[data-act="lead-go"][data-lead="ld_2"]').click();
+    expect(panel.location.assign).toHaveBeenCalledWith('https://www.openstreetmap.org/#map=17/50.4504/30.5208');
+    expect(panel.links.at(-1).postMessage).toHaveBeenCalledWith({
+      type: 'follow', view: { lat: 50.4504, lon: 30.5208, zoom: 17, bearing: 0 },
+    });
+  });
+
+  it('asks before a capture goes to the Trash, saying what else it touches', async () => {
+    await opened();
+    panel.forget();
+    panel.$('[data-act="gth-delete"][data-key="media/c1.png"]').click();
+    await settle();
+    expect(panel.calls('/api/ingest/geolocating/impact').map((m) => [m.method, m.body])).toEqual([
+      ['POST', { case_id: CASE, path: 'media/c1.png' }],
+    ]);
+    const ask = panel.$('.gth-ask');
+    // under its own row
+    expect(ask.previousElementSibling.querySelector('[data-key="media/c1.png"]')).not.toBe(null);
+    expect(ask.querySelector('.gth-ask-q').textContent).toBe('Delete this capture?');
+    expect([...ask.querySelectorAll('.hint')].map((el) => el.textContent)).toEqual([
+      'It goes to the case Trash with its image.',
+      'Linked to 1 other item in the case.',
+    ]);
+    expect(ask.querySelector('.gth-impact-head').textContent).toBe('Kept, losing their link to it');
+    expect(ask.querySelector('.gth-impact-item').textContent).toBe('Bridge proof uses it as a panel');
+    // no other delete while this one is asked
+    expect(panel.$$('[data-act="gth-delete"]').every((b) => b.disabled)).toBe(true);
+    expect(panel.calls('/api/ingest/geolocating/remove')).toHaveLength(0);
+    panel.app['/api/ingest/geolocating/gathered'] = { ...structuredClone(GATHERED), captures: [GATHERED.captures[1]] };
+    panel.press('gth-confirm');
+    await settle();
+    expect(panel.calls('/api/ingest/geolocating/remove').map((m) => [m.method, m.body])).toEqual([
+      ['POST', { case_id: CASE, kind: 'capture', target: 'media/c1.png' }],
+    ]);
+    expect(panel.$('.gth-ask')).toBe(null);
+    expect(rows('Map captures').map((row) => row.querySelector('.gth-words').textContent)).toEqual(['Quay']);
+  });
+
+  it('keeps the capture on Keep', async () => {
+    await opened();
+    panel.$('[data-act="gth-delete"][data-key="media/c1.png"]').click();
+    await settle();
+    panel.press('gth-cancel');
+    await settle();
+    expect(panel.$('.gth-ask')).toBe(null);
+    expect(panel.calls('/api/ingest/geolocating/remove')).toHaveLength(0);
+  });
+
+  it('still lets a capture go when the check did not come back, and says so', async () => {
+    await opened({ '/api/ingest/geolocating/impact': new Error('the app did not answer') });
+    panel.$('[data-act="gth-delete"][data-key="media/c1.png"]').click();
+    await settle();
+    expect(panel.$('.gth-ask').textContent).toContain('Could not check what else it touches.');
+    expect(panel.$('[data-act="gth-confirm"]').disabled).toBe(false);
+  });
+
+  it('holds the delete back where the app would refuse it, and says what to do first', async () => {
+    await opened({
+      '/api/ingest/geolocating/impact': {
+        ...IMPACT,
+        blocking: [{ id: 'r1', type: 'routine', label: 'Night watch', how: ['watches it'] }],
+        counts: { ...IMPACT.counts, blocking: 1 },
+      },
+    });
+    panel.$('[data-act="gth-delete"][data-key="media/c1.png"]').click();
+    await settle();
+    const confirm = panel.$('[data-act="gth-confirm"]');
+    expect(confirm.disabled).toBe(true);
+    expect(confirm.title).toBe('Take it out of these first');
+  });
+
+  it('takes a frame off the strip after a word, its picture staying in Media', async () => {
+    await opened();
+    panel.$('[data-act="gth-delete"][data-key="fr_1"]').click();
+    await settle();
+    const ask = panel.$('.gth-ask');
+    expect(ask.querySelector('.gth-ask-q').textContent).toBe('Take this frame off the strip?');
+    expect(ask.querySelector('.hint').textContent).toBe('Its picture saved to the case stays in Media.');
+    expect(panel.calls('/api/ingest/geolocating/impact')).toHaveLength(0);
+    expect(panel.$('[data-act="gth-confirm"]').textContent).toBe('Remove');
+    panel.press('gth-confirm');
+    await settle();
+    expect(panel.calls('/api/ingest/geolocating/remove').at(-1).body).toEqual({ case_id: CASE, kind: 'frame', target: 'fr_1' });
+  });
+
+  it('reads the list again, once, when the app says what the scene gathered moved', async () => {
+    await opened();
+    panel.forget();
+    panel.nudge({ type: 'geolocating', case_id: CASE, video: VIDEO, draft: 'sc_2', capture: 'media/c3.png', captures: 3 });
+    panel.nudge({ type: 'scenes', case_id: CASE, video: VIDEO, frame_removed: 'fr_2' });
+    await new Promise((resolve) => setTimeout(resolve, 350));
+    await settle();
+    expect(panel.calls('/api/ingest/geolocating/gathered')).toHaveLength(1);
+  });
+
+  it('closes when the scene ends', async () => {
+    await opened();
+    panel.nudge({ type: 'geolocating', case_id: CASE, video: null, draft: null });
+    expect(panel.$('.gth')).toBe(null);
+  });
+});
+
+describe('the pill’s quick links', () => {
+  async function geolocating(extra = {}) {
+    panel = open({ '/api/ingest/scenes': { ...structuredClone(QUEUE), geolocating: BRIDGE }, ...extra });
+    await settle();
+  }
+
+  it('sit by the scene’s name, each saying where it goes', async () => {
+    await geolocating();
+    expect(panel.$$('.geo-pill .geo-link').map((b) => [b.dataset.to, b.title])).toEqual([
+      ['inspect', 'Open the scene in Inspect'],
+      ['satellite', 'Open Satellite on the spot this map shows'],
+      ['horizon', 'Open Horizon on the spot this map shows'],
+    ]);
+  });
+
+  it('hand the scene over with where it goes, and the spot this map shows for Satellite and Horizon', async () => {
+    await geolocating();
+    for (const to of ['inspect', 'satellite', 'horizon']) {
+      panel.press('geo-to', { to });
+      await settle();
+    }
+    const scene = { caseId: CASE, video: VIDEO, draft: 'sc_2' };
+    expect(panel.handed).toEqual([
+      { type: 'scene-proof', scene: { ...scene, to: 'inspect' } },
+      { type: 'scene-proof', scene: { ...scene, to: 'satellite', view: { lat: 50.45, lon: 30.52, zoom: 17 } } },
+      { type: 'scene-proof', scene: { ...scene, to: 'horizon', view: { lat: 50.45, lon: 30.52, zoom: 17 } } },
+    ]);
+    // Make the proof names no place to go: it goes where it always went
+    panel.press('geo-proof');
+    await settle();
+    expect(panel.handed.at(-1)).toEqual({ type: 'scene-proof', scene });
+  });
+
+  it('cannot open Satellite or Horizon on a page that states no spot', async () => {
+    await geolocating({ '/api/ingest/parse': { site: null } });
+    const [inspect, satellite, horizon] = panel.$$('.geo-pill .geo-link');
+    expect(inspect.disabled).toBe(false);
+    expect([satellite.disabled, horizon.disabled]).toEqual([true, true]);
+    expect(satellite.title).toBe('This page gives no spot to open there');
+  });
+
+  it('are held while a hand-off is on its way', async () => {
+    await geolocating();
+    let answer;
+    panel.proveWith(() => new Promise((resolve) => (answer = resolve)));
+    panel.press('geo-to', { to: 'inspect' });
+    await settle();
+    expect(panel.$$('.geo-pill .geo-link, .geo-pill [data-act="geo-proof"]').every((b) => b.disabled)).toBe(true);
+    answer({ ok: true });
+    await settle();
+    expect(panel.$$('.geo-pill .geo-link').every((b) => !b.disabled)).toBe(true);
   });
 });

@@ -5,6 +5,8 @@
       {
         "title": "And also",
         "items": [
+          { "icon": "pin", "text": "Save place drops a pin where you click and asks its name; while a scene is geolocated it drops numbered leads in the scene's colour, gone once the scene is proved." },
+          { "icon": "crosshair", "text": "The Geolocating pill lists what its scene gathered, deletes a capture or a frame from there, and links to Inspect, Satellite and Horizon, in the app and the extension." },
           { "icon": "post", "text": "Geo Report is now Post: the same tool, for more kinds of posts." },
           { "icon": "at", "text": "Bluesky posts now mention a real Bluesky handle, @geoconfirmed.org by default." },
           { "icon": "alignment", "text": "Align, in Measure, runs on the line through two things lined up in a picture; draw a few and they meet near the camera." },

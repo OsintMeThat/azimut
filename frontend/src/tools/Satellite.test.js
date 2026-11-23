@@ -180,9 +180,10 @@ describe('filing saved work from its details dialog', () => {
     expect(source).toContain('{ path: notesItem.path, notes, title, folder }');
   });
 
-  it('files a place, whether it is being saved or edited', () => {
+  it('edits a saved place there, a new one being dropped and named on the map', () => {
     expect(source).toContain("attrs: { notes: m.notes.trim(), folder: m.folder ?? '' }");
-    expect(source).toContain('folder: m.folder,');
+    expect(source).toContain('if (!placeModal?.id || placeSaving) return;');
+    expect(source).not.toContain('openNewPlaceAt');
   });
 });
 
@@ -599,6 +600,23 @@ describe('the two acts at the foot of the map', () => {
     expect(acts).toContain('Save place');
     expect(acts).toContain('<CaptureOptions');
   });
+
+  it('drops the point where the analyst clicks, a lead while a scene is geolocated', () => {
+    const acts = source.slice(source.indexOf('<MapStatusBar'), source.indexOf('</MapStatusBar>'));
+    // one button arms the drop rather than filing the middle of the map
+    expect(acts).toContain("onclick={() => arm(modes, 'drop')}");
+    expect(acts).toContain('Drop a lead');
+    expect(acts).not.toContain('displayCoords');
+    // a click on the map goes to the drop first while it is armed, and Escape lets the
+    // pin waiting for its name go before the mode ends
+    const click = source.slice(source.indexOf('function onMapClick(at)'));
+    expect(click.slice(0, 200)).toContain('if (drop.place(at)) return;');
+    const escape = source.slice(source.indexOf("if (e.key !== 'Escape') return;"));
+    expect(escape.indexOf('if (drop.cancel()) return;')).toBeLessThan(escape.indexOf('if (armedMode) return disarm(modes);'));
+    // the right-click offers a lead while a scene is geolocated, a named place otherwise
+    expect(source).toContain("const keep = heldScene ? 'lead' : 'place';");
+    expect(source).toContain('<PlaceNamer');
+  });
 });
 
 describe('accepting a proposed point from the Saved panel', () => {
@@ -944,7 +962,7 @@ describe('the right-click menu', () => {
   it('hands each act the clicked point rather than the map centre', () => {
     const acts = source.slice(source.indexOf('async function onPointMenu(id, value)'));
     const body = acts.slice(0, acts.indexOf('async function lookUpPoint'));
-    expect(body).toContain('openNewPlaceAt(point)');
+    expect(body).toContain('drop.at(point)');
     expect(body).toContain('measure.addPoint(point)');
     expect(body).toContain('sky.handOff({ ...point');
     expect(body).toContain('engine.setView(point');
@@ -953,7 +971,7 @@ describe('the right-click menu', () => {
 
   it('offers its own subset of acts, and opens the point in Compare or Detect', () => {
     // while a layer is edited the rail is put away, and with it the acts that arm one of its tools
-    expect(source).toContain("actionsFor(myLayers.editor ? ['lookup', 'place', 'horizon', 'history', 'centre']\n    : ['lookup', 'place', 'measure', 'sky', 'horizon', 'history', 'centre'])");
+    expect(source).toContain("actionsFor(myLayers.editor ? ['lookup', keep, 'horizon', 'history', 'centre']\n      : ['lookup', keep, 'measure', 'sky', 'horizon', 'history', 'centre'])");
     expect(source).toContain("otherMapTools('satellite')");
     expect(source).toContain('tools={pointTools}');
     const acts = source.slice(source.indexOf('async function onPointMenu(id, value)'));

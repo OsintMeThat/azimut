@@ -585,6 +585,72 @@ def stop_geolocating(case_id: str) -> dict[str, Any]:
     return {"ended": ended}
 
 
+class LeadIn(BaseModel):
+    lat: float = Field(ge=-90, le=90, allow_inf_nan=False)
+    lon: float = Field(ge=-180, le=180, allow_inf_nan=False)
+
+
+def lead_answer(case: Any, lead: dict[str, Any] | None = None) -> dict[str, Any]:
+    """Tell every surface the scene's leads moved, and answer with the scene as it is."""
+    held = say_geolocating(case)
+    return {"lead": lead, "geolocating": held} if lead is not None else {"geolocating": held}
+
+
+@router.post("/cases/{case_id}/geolocating/leads")
+def drop_lead(case_id: str, body: LeadIn) -> dict[str, Any]:
+    """Drop a lead for the scene being geolocated: a spot to come back to, no more."""
+    case = get_case(case_id)
+    try:
+        lead = geolocate.add_lead(case, body.lat, body.lon)
+    except CaseError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    return lead_answer(case, lead)
+
+
+@router.patch("/cases/{case_id}/geolocating/leads/{lead}")
+def move_lead(case_id: str, lead: str, body: LeadIn) -> dict[str, Any]:
+    case = get_case(case_id)
+    try:
+        moved = geolocate.move_lead(case, lead, body.lat, body.lon)
+    except CaseError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    return lead_answer(case, moved)
+
+
+@router.delete("/cases/{case_id}/geolocating/leads/{lead}")
+def delete_lead(case_id: str, lead: str) -> dict[str, Any]:
+    case = get_case(case_id)
+    try:
+        geolocate.remove_lead(case, lead)
+    except CaseError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    return lead_answer(case)
+
+
+@router.get("/cases/{case_id}/geolocating/gathered")
+def geolocating_gathered(case_id: str) -> dict[str, Any]:
+    """What the scene being geolocated gathered, for its pill to list: leads, captures,
+    and the frames and collages of its video inside it, or its picture."""
+    return geolocate.gathered(get_case(case_id))
+
+
+def remove_gathered_frame(case: Any, frame: str) -> dict[str, Any]:
+    """Take a frame of the scene being geolocated off Inspect's strip, and say so: an
+    Inspect open on that video drops it from the strip it holds, rather than its next
+    save putting it back."""
+    try:
+        done = geolocate.remove_gathered_frame(case, frame)
+    except CaseError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    events.publish({"type": "scenes", "case_id": case.id, "video": done["video"], "frame_removed": frame})
+    return {**done, "geolocating": say_geolocating(case)}
+
+
+@router.delete("/cases/{case_id}/geolocating/frames/{frame}")
+def delete_gathered_frame(case_id: str, frame: str) -> dict[str, Any]:
+    return remove_gathered_frame(get_case(case_id), frame)
+
+
 class MomentIn(BaseModel):
     start: float = Field(ge=0, allow_inf_nan=False)
     end: float | None = Field(default=None, ge=0, allow_inf_nan=False)
