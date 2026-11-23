@@ -194,6 +194,8 @@
   function tip(tile) {
     const parts = [tile.title];
     if (tile.time && tile.time !== tile.title) parts.push(tile.time);
+    // a proof titled by its time says where it stands on hover
+    if (tile.place && tile.place !== tile.title) parts.push(tile.place);
     if (tile.state === ABANDONED) parts.push(tile.reason ? `Abandoned: ${tile.reason}` : 'Abandoned');
     else if (tile.kind === 'draft' || tile.unplaced) parts.push(tile.words);
     else if (tile.state === NEW) parts.push(HELP.unsaved);

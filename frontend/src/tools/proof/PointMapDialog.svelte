@@ -18,6 +18,9 @@
    * imagery proposed is the middle of a capture until somebody looks, so the
    * composer walks each one through here and the analyst either moves the pin or
    * says the point is right.
+   *
+   * The leads of the scene the proof takes up (`leads`), dropped on the map while it was
+   * geolocated, are drawn and listed beside it: a press puts the point on one.
    */
   import { onMount, untrack } from 'svelte';
   import Modal from '../../components/Modal.svelte';
@@ -29,6 +32,7 @@
   import { createSurface } from '../../lib/map/surface.js';
   import { turnFromKey, turnFromPress } from '../../lib/map/gestures.js';
   import { markerGeometry, markerSvg } from '../../lib/mapMarkers.js';
+  import { LEAD_GEOMETRY, leadSvg } from '../satellite/state/drop.svelte.js';
   // The reference layers, named where they are already named for a reader
   // (`lib/map/compare.js`): the same seven key-less overlays, the same words.
   import { layerInfo, LAYERS } from '../../lib/map/layerCatalog.js';
@@ -43,6 +47,9 @@
      *  is checking: then the caller moves on to the next point. */
     onpick,
     onclose,
+    /** The leads of the scene the proof takes up, `{ id, n, lat, lon }` each, and their colour. */
+    leads = [],
+    leadColor = null,
     /** `{ step, label }` when checking a point before a save or a post. */
     check = null,
     /** Checking before a save only: save now, leaving the point unchecked. */
@@ -93,11 +100,31 @@
   // The pin is drawn once the map is up, then moved in place: rebuilt on every
   // drag frame it would be dropped and re-added mid-gesture, which is why its
   // opening position is read untracked.
+  /** Put the point on a lead, the map going there. */
+  function takeLead(lead) {
+    at = { lat: lead.lat, lon: lead.lon };
+    engine?.setView?.(at, Math.max(engine.getZoom?.() ?? 16, 16));
+  }
+  const onLead = (lead) => Math.abs(at.lat - lead.lat) < 1e-9 && Math.abs(at.lon - lead.lon) < 1e-9;
+
   $effect(() => {
     if (!ready || !engine) return;
     const layer = createSurface(engine);
     const { size, anchor } = markerGeometry('pin');
+    const marks = leads.map((lead) => ({
+      id: `lead-${lead.id}`,
+      kind: 'marker',
+      at: { lat: lead.lat, lon: lead.lon },
+      className: 'point-lead',
+      html: leadSvg(lead.n, leadColor ?? '#e5484d'),
+      size: LEAD_GEOMETRY.size,
+      anchor: LEAD_GEOMETRY.anchor,
+      title: `Lead ${lead.n}: put the point here`,
+      zIndex: 560,
+      onClick: () => takeLead(lead),
+    }));
     layer.set([
+      ...marks,
       {
         id: PIN,
         kind: 'marker',
@@ -150,6 +177,7 @@
       <span>Taken from the imagery. Put the pin on what the proof shows, or keep it if it is right.</span>
     </p>
   {/if}
+  <div class="body">
   <div class="stage">
     <MapSurface
       bind:engine
@@ -178,6 +206,23 @@
     </div>
   </div>
 
+  {#if leads.length}
+    <aside class="leads" aria-label="Leads">
+      <h4>Leads</h4>
+      <p class="leads-note">Dropped while the scene was geolocated. Press one to put the point on it.</p>
+      <ul>
+        {#each leads as lead (lead.id)}
+          <li>
+            <button type="button" class:on={onLead(lead)} onclick={() => takeLead(lead)} title={`Put the point on lead ${lead.n}`}>
+              <span class="num" style:--lead={leadColor ?? '#e5484d'}>{lead.n}</span>
+              <span class="mono">{formatCoords(lead.lat, lead.lon, prefs.coordFormat)}</span>
+            </button>
+          </li>
+        {/each}
+      </ul>
+    </aside>
+  {/if}
+  </div>
   <div class="foot">
     <span class="hint">Click the map to move the pin.</span>
     <span class="reading mono">{reading}</span>
@@ -206,8 +251,14 @@
   .check strong {
     color: var(--text-1);
   }
+  .body {
+    display: flex;
+    gap: 10px;
+  }
   .stage {
     position: relative;
+    flex: 1;
+    min-width: 0;
     display: flex;
     height: min(62vh, 520px);
     border: 1px solid var(--border);
@@ -244,6 +295,63 @@
     border: 1px solid var(--border);
     border-radius: var(--r-sm);
     cursor: pointer;
+  }
+  .leads {
+    flex: 0 0 200px;
+    max-height: min(62vh, 520px);
+    overflow-y: auto;
+    font-size: var(--fs-sm);
+  }
+  .leads h4 {
+    margin: 2px 0 4px;
+    font-size: var(--fs-xs);
+    font-weight: 600;
+    color: var(--text-3);
+  }
+  .leads-note {
+    margin: 0 0 8px;
+    font-size: var(--fs-xs);
+    color: var(--text-3);
+  }
+  .leads ul {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    margin: 0;
+    padding: 0;
+    list-style: none;
+  }
+  .leads button {
+    width: 100%;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 5px 6px;
+    border-radius: var(--r-sm);
+    color: var(--text-1);
+    text-align: left;
+  }
+  .leads button:hover {
+    background: var(--bg-2);
+  }
+  .leads button.on {
+    background: var(--accent-soft);
+  }
+  .leads .num {
+    flex-shrink: 0;
+    width: 18px;
+    height: 18px;
+    display: inline-grid;
+    place-items: center;
+    border-radius: 50%;
+    background: var(--lead);
+    color: #fff;
+    font-size: 11px;
+    font-weight: 700;
+  }
+  :global(.point-lead) {
+    cursor: pointer;
+    filter: drop-shadow(0 1px 2px rgba(0, 0, 0, 0.5));
   }
   .foot {
     display: flex;

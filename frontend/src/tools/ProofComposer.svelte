@@ -170,14 +170,14 @@
   import MarkShowChoice from '../components/MarkShowChoice.svelte';
   import { onEvent } from '../lib/events.js';
   import {
-    abandonProof, abandonScene, ensureSceneQueue, geolocateScene, geolocating, holdSceneQueue, mapWithScene, readSceneQueue, restoreProof,
-    restoreScene, sceneQueue, warnNoMapCapture,
+    abandonProof, abandonScene, ensureSceneQueue, geolocateScene, geolocating, holdSceneQueue, mapWithScene, readGeolocating, readSceneQueue,
+    restoreProof, restoreScene, sceneQueue, warnNoMapCapture,
   } from '../lib/geolocating.svelte.js';
   import { sceneMaterial, scenesToProve } from '../lib/newProof.js';
   import { openScenes, queueColor } from '../lib/sceneQueue.js';
   import { NO_VIDEO, inVideo, proofLabel, proofVideos, slideTag } from '../lib/proofList.js';
   import { collagesOfScene, pictureHandoff, proofHandoff } from '../lib/sceneFrames.js';
-  import { sceneMoments, sceneStart, sceneTime } from '../lib/scenes.js';
+  import { sceneColorAt, sceneMoments, sceneStart, sceneTime } from '../lib/scenes.js';
   import { frameDrawer, frameOps } from '../lib/unfiledFrames.js';
 
   const SCALE_STEP = 0.05;
@@ -1230,6 +1230,31 @@
   let importOpen = $state(false);
   // `{ row, view }` while one point is being moved on the map, else null.
   let pointMap = $state(null);
+
+  // The leads of the scene this proof takes up, for its point map: spots dropped on the
+  // map while it was geolocated, kept until the proof states its place (`engine/geolocate.py`).
+  let pointLeads = $state({ leads: [], color: null });
+  async function readPointLeads() {
+    const c = caseState.current;
+    const held = c && geolocating.caseId === c.id ? geolocating.scene : null;
+    pointLeads = { leads: [], color: null };
+    if (!c) return;
+    try {
+      if (scene.draft && scene.star) {
+        const query = new URLSearchParams({ video: scene.star });
+        const { leads = [] } = await api.get(`/api/cases/${c.id}/scenes/${encodeURIComponent(scene.draft)}/leads?${query}`);
+        pointLeads = { leads, color: held?.id === scene.draft ? sceneColorAt(held.order) : null };
+      } else if (held?.file_kind === 'image' && proof.panels.some((panel) => panel.src === held.video)) {
+        // a picture's proof states no scene: the picture it lays out is the one geolocated
+        pointLeads = { leads: held.leads ?? [], color: sceneColorAt(held.order) };
+      }
+    } catch {
+      // no leads to offer is a map like any other
+    }
+  }
+  $effect(() => {
+    if (pointMap || checking) untrack(readPointLeads);
+  });
   let newProofTemplateId = $state('');
   let newProofLoading = $state(false);
   let creatingProof = $state(false);
@@ -1651,14 +1676,37 @@
     }
   });
 
-  // consume an "open this proof" handoff from the sidebar
+  // consume an "open this proof" handoff: a name from the sidebar, or `{ name, add }` from
+  // the pill of a scene this proof took up, whose map captures it does not hold yet join it
   $effect(() => {
     if (uiState.tool === 'proof' && uiState.openProof && caseState.current) {
-      const name = uiState.openProof;
+      const asked = uiState.openProof;
       uiState.openProof = null;
-      requestOpenProof({ name });
+      untrack(() => openAsked(asked));
     }
   });
+
+  // Once per proof and session: a proof saved with no place yet keeps its scene geolocated,
+  // and the analyst hears it rather than finding the pill still there.
+  const toldStill = new Set();
+  async function sayStillGeolocating(caseId, name) {
+    if (toldStill.has(name)) return;
+    const held = await readGeolocating(caseId);
+    if (held?.proof !== name) return;
+    toldStill.add(name);
+    toast('Still geolocating: map captures join this proof until it has its place', 'info', 6000);
+  }
+
+  async function openAsked(asked) {
+    const { name, add = [] } = typeof asked === 'string' ? { name: asked } : asked;
+    await requestOpenProof({ name });
+    if (savedName !== name || !add.length) return;
+    const held = new Set(proof.panels.map((panel) => panel.src));
+    const missing = [...new Set(add)].filter((path) => !held.has(path));
+    if (!missing.length) return;
+    await addPanelsFromPaths(missing);
+    toast(missing.length === 1 ? '1 map capture added' : `${missing.length} map captures added`, 'ok', 2600);
+  }
 
   // consume a "make the proof" handoff from a scene of Inspect or a map tab
   $effect(() => {
@@ -7098,6 +7146,7 @@
       await scene.flush();
       await reloadCase();
       savedThumb = { name: result.name, thumb: result.thumb ?? null };
+      void sayStillGeolocating(c.id, result.name);
       if (!slide) toast(`Proof saved: ${result.png}`, 'ok');
       else if (unchecked) toast(`Saved ${ownName(result.title, 'proof') || 'the slide'} · ${unchecked === 1 ? '1 point' : `${unchecked} points`} still to check, kept off the map`, 'warn', 5200);
       else toast(`Saved ${ownName(result.title, 'proof') || 'the slide'}`, 'info', 1600);
@@ -8742,6 +8791,8 @@
 {#if pointMap}
   <PointMapDialog
     view={pointMap.view}
+    leads={pointLeads.leads}
+    leadColor={pointLeads.color}
     onpick={(point) => movePoint(pointMap.row, point)}
     onclose={() => (pointMap = null)}
   />
@@ -8753,6 +8804,8 @@
     <PointMapDialog
       view={checkStep?.view}
       check={checkStep?.check}
+      leads={pointLeads.leads}
+      leadColor={pointLeads.color}
       onpick={checkPick}
       onlater={checkStep?.later ? () => finishCheck(true) : null}
       onclose={() => (checking = null)}

@@ -68,7 +68,8 @@ describe('the tiles of a strip', () => {
     const by = Object.fromEntries(tiles.map((t) => [t.key, t]));
     expect(by['proof:road-bridge']).toMatchObject({ state: PROVED, unplaced: true, words: 'No place yet' });
     expect(by['proof:market']).toMatchObject({ state: ABANDONED, unplaced: false, words: 'Abandoned', reason: 'no landmark' });
-    expect(by['proof:square']).toMatchObject({ state: PROVED, unplaced: false, words: 'Whole video' });
+    // open with no name of its own in the header: its time is its title, saved beneath
+    expect(by['proof:square']).toMatchObject({ state: PROVED, unplaced: false, title: 'Whole video', words: 'Saved' });
   });
 
   it('count a scene\'s captures once nobody geolocates it', () => {
@@ -108,11 +109,25 @@ describe('the tiles of a strip', () => {
     const tiles = slideTiles(ANSWER, { started: true, name: 'market', title: 'Market', draft: 's1', time: '0:50–1:00' });
     expect(tiles[1]).toMatchObject({ key: 'proof:market', time: '0:50–1:00', words: '0:50–1:00' });
     // a time changed a moment ago, before the strip is read again
-    expect(slideTiles(ANSWER, { started: true, name: 'road-bridge', time: '0:32' })[0]).toMatchObject({ time: '0:32', words: '0:32' });
+    expect(slideTiles(ANSWER, { started: true, name: 'road-bridge', time: '0:32' })[0]).toMatchObject({ time: '0:32', title: '0:32', words: 'Saved' });
     // what is not a time stays what it says
     expect(slideTiles(ANSWER, { started: true, name: 'square', time: '1:40' }).find((t) => t.current)).toMatchObject({ words: 'No picture yet', time: '1:40' });
     // with no time given, the server's
-    expect(slideTiles(ANSWER, { started: true, name: 'road-bridge' })[0]).toMatchObject({ words: '0:30–0:45' });
+    expect(slideTiles(ANSWER, { started: true, name: 'road-bridge' })[0]).toMatchObject({ title: '0:30–0:45', words: 'Saved' });
+  });
+
+  it('title a proof with no name of its own by its time in the clip, its place and date kept for the hover', () => {
+    // a proof with no name of its own carries the file's, "Proof 7", never shown as a name
+    const row = proof('Proof 7', { title: 'Proof 7', moments: [{ start: 30, end: 45 }], state: PROVED, points: [{ lat: 48.85, lon: 2.29 }] });
+    const named = proof('quay', { title: 'Quay', moments: [{ start: 50, end: 55 }], state: PROVED, points: [{ lat: 48.85, lon: 2.29 }] });
+    const tiles = slideTiles({ ...ANSWER, scenes: [row, named] }, {});
+    const by = Object.fromEntries(tiles.map((t) => [t.key, t]));
+    expect(by['proof:Proof 7']).toMatchObject({ title: '0:30–0:45', words: 'Saved' });
+    expect(by['proof:Proof 7'].place).toMatch(/48\.85/);
+    expect(by['proof:quay']).toMatchObject({ title: 'Quay', words: '0:50–0:55' });
+    // a slide not saved yet says its time and that it is not saved
+    const fresh = slideTiles(ANSWER, { started: true, time: '1:10' }).find((t) => t.current);
+    expect(fresh).toMatchObject({ kind: 'new', title: '1:10', words: 'Not saved' });
   });
 
   it('add a new slide at the end of the live ones, before the abandoned', () => {

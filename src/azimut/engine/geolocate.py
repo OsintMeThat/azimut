@@ -59,6 +59,30 @@ def _taken(specs: list[tuple[str, dict[str, Any]]]) -> set[str]:
     return taken
 
 
+def _holder(specs: list[tuple[str, dict[str, Any]]], draft_id: str) -> tuple[str, dict[str, Any]] | None:
+    """The proof that took this scene up, its name and spec, or None."""
+    for name, spec in specs:
+        stated = scenes_engine.stated_scene(spec)
+        if stated and stated.get("draft") == draft_id:
+            return name, spec
+    return None
+
+
+def _settled(specs: list[tuple[str, dict[str, Any]]], path: str, draft_id: str, kind: str) -> bool:
+    """Whether geolocating a scene is over: a proof of it states a place someone checked.
+
+    A proof that took the scene up and states no place yet leaves it going: what the
+    map captures meanwhile joins that proof, which the pill opens, and its leads stay
+    until the place is set."""
+    if kind == "image":
+        return any(scenes_engine.states_place(spec) for _name, spec in scenes_engine.laid_out_by(specs, path))
+    return any(
+        scenes_engine.states_place(spec)
+        for _name, spec in specs
+        if (scenes_engine.stated_scene(spec) or {}).get("draft") == draft_id
+    )
+
+
 def _kinds(case: Case, paths: list[str]) -> dict[str, str]:
     """Each file's kind, `video` or `image`, as the media index holds it."""
     return {item["path"]: str(item.get("kind") or "") for item in case.media_items_by_paths(paths) if item.get("path")}
@@ -136,8 +160,10 @@ def current(
 ) -> dict[str, Any] | None:
     """The scene the case is geolocating, read afresh, or None.
 
-    One that left meanwhile (deleted in Inspect, taken up by a proof, abandoned, its
-    video sent to the Trash) ends here, so nothing is attached to a scene that is gone.
+    One that left meanwhile (deleted in Inspect, proved by a proof stating its place,
+    abandoned, its video sent to the Trash) ends here, so nothing is attached to a scene
+    that is gone. One a proof took up with no place yet carries that proof's name
+    (``proof``), for the pill to open it rather than make another.
     What a caller already read for the whole case is given rather than read twice: the
     proofs (`scenes.read_proofs`), every file's work (`inspectwork.subject_specs`) and
     each video's collages (`scenes.collage_times`).
@@ -151,7 +177,7 @@ def current(
     draft, spec = _work_draft(case, video, held["draft"]) if item is not None else (None, {})
     proofs = proofs if proofs is not None else scenes_engine.read_proofs(case)
     kind = str((item or {}).get("kind") or "") or "video"
-    if draft is None or draft.get("abandoned") or _proved(proofs[0], _taken(proofs[0]), video, draft["id"], kind):
+    if draft is None or draft.get("abandoned") or _settled(proofs[0], video, draft["id"], kind):
         stop(case, held["draft"])
         return None
     footage = None
@@ -159,6 +185,9 @@ def current(
         times = (collages if collages is not None else scenes_engine.collage_times(case)).get(video, [])
         footage = scenes_engine.Footage(scenes_engine.strip_times(spec, video), times)
     row = _placed(scene_row(case, video, draft, kind, footage), _orders(case, [video], proofs, specs))
+    holder = _holder(proofs[0], draft["id"]) if kind != "image" else None
+    if holder is not None:
+        row["proof"] = holder[0]
     # what the case calls its file, which the pill names
     return {**row, "file_title": scenes_engine.file_title(item, video), "since": held["since"]}
 
@@ -181,7 +210,7 @@ def start(case: Case, video: str, draft_id: str) -> dict[str, Any]:
         raise CaseError("that scene is no longer in its file's work")
     proofs = scenes_engine.read_proofs(case)
     kind = _kinds(case, [video]).get(video, "video")
-    if _proved(proofs[0], _taken(proofs[0]), video, draft_id, kind):
+    if _settled(proofs[0], video, draft_id, kind):
         raise CaseError("a proof already geolocates that scene")
     if draft.get("abandoned"):
         raise CaseError("that scene was abandoned: bring it back first")
@@ -333,18 +362,27 @@ def forget_leads(case: Case, video: str, draft_id: str) -> bool:
 
 
 def settle_leads(case: Case, paths: list[str]) -> None:
-    """Erase the leads of the scenes of these files that a proof proves now: a picture
-    marked to geolocate is proved by a proof laying it out, which a save says."""
+    """Erase the leads of the scenes of these files whose geolocating is over: a proof
+    of the scene now states a checked place (`_settled`), which a save says. A proof
+    with no place yet keeps them, for its point to be set on one."""
     worked = [(path, drafts) for path in dict.fromkeys(paths) if (drafts := [d for d in _drafts(case, path) if "leads" in d])]
     if not worked:
         return
-    proofs = scenes_engine.read_proofs(case)
-    taken = _taken(proofs[0])
+    specs = scenes_engine.proof_specs(case)
     kinds = _kinds(case, [path for path, _drafts in worked])
     for path, drafts in worked:
         for draft in drafts:
-            if _proved(proofs[0], taken, path, draft["id"], kinds.get(path, "video")):
+            if _settled(specs, path, draft["id"], kinds.get(path, "video")):
                 forget_leads(case, path, draft["id"])
+
+
+def draft_leads(case: Case, video: str, draft_id: str) -> list[dict[str, Any]]:
+    """The leads a scene holds, taken up by a proof or not: what the proof's point map
+    offers to set its point on."""
+    draft = _draft(case, video, draft_id)
+    if draft is None:
+        raise CaseError("that scene is no longer in its file's work")
+    return inspectwork.clean_leads(draft.get("leads"))
 
 
 # -- what the scene gathered, for its pill ----------------------------------------------

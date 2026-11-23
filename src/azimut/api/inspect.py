@@ -627,6 +627,17 @@ def delete_lead(case_id: str, lead: str) -> dict[str, Any]:
     return lead_answer(case)
 
 
+@router.get("/cases/{case_id}/scenes/{draft}/leads")
+def list_draft_leads(case_id: str, draft: str, video: str) -> dict[str, Any]:
+    """The leads a scene holds, a proof having taken it up or not: what Geo Proof's point
+    map offers to set the proof's point on."""
+    try:
+        leads = geolocate.draft_leads(get_case(case_id), video, draft)
+    except CaseError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    return {"leads": leads}
+
+
 @router.get("/cases/{case_id}/geolocating/gathered")
 def geolocating_gathered(case_id: str) -> dict[str, Any]:
     """What the scene being geolocated gathered, for its pill to list: leads, captures,

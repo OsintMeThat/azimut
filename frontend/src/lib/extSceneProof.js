@@ -12,7 +12,7 @@
  * it was, the tab says so and stays. A detached map window refuses: the extension
  * hands the scene to a main tab only.
  */
-import { goWithScene } from './geolocating.svelte.js';
+import { geolocating, goWithScene, openHeldProof, readGeolocating } from './geolocating.svelte.js';
 import { caseState, openCase, refreshCaseList, sessionStarted, toast, uiState } from './state.svelte.js';
 
 // The hand-offs taken: the extension asks again while a tab is still loading, and a
@@ -57,6 +57,11 @@ export async function proveScene({ caseId, video, draft, to = 'proof', view = nu
   if (to === 'satellite' || to === 'horizon') {
     goWithScene(to, view);
     return true;
+  }
+  // Make the proof of a scene a proof already took up opens that proof, as the pill does
+  if (to === 'proof') {
+    const held = geolocating.caseId === caseId ? geolocating.scene : await readGeolocating(caseId);
+    if (held?.video === video && held.id === draft && openHeldProof(held)) return true;
   }
   uiState.inspectScene = { video, draft, ...(to === 'proof' ? { proof: true } : {}) };
   uiState.tool = 'inspect';

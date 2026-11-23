@@ -624,6 +624,18 @@ describe('making the proof from over this map', () => {
     expect(panel.$('.geo-pill [data-act="geo-stop"]').getAttribute('aria-label')).toBe('Stop geolocating');
   });
 
+  it('opens the proof a proof with no place yet took the scene up with, worded so, the same hand-off', async () => {
+    panel = open({ '/api/ingest/scenes': { ...structuredClone(QUEUE), geolocating: { ...BRIDGE, proof: 'bridge' } } });
+    await settle();
+    expect(proof().textContent).toBe('Open the proof');
+    expect(proof().title).toBe('Open its proof in Azimut, with the map captures it does not hold yet');
+    panel.forget();
+    proof().click();
+    await settle();
+    // the app reads which proof holds the scene: the scene alone crosses, as for Make the proof
+    expect(panel.handed).toEqual([{ type: 'scene-proof', scene: { caseId: CASE, video: VIDEO, draft: 'sc_2' } }]);
+  });
+
   it('hands the scene held to the app, case and all, and writes nothing to it', async () => {
     await geolocating();
     panel.forget();

@@ -3287,7 +3287,10 @@
           </div>
           <div class="geo-line">
             <button data-act="geo-gathered" class="geo-count${pulse == null ? "" : " bump"}"${pulse ? ` style="animation-delay: -${pulse}ms"` : ""} aria-expanded="${gathered}" aria-label="What this scene gathered">${counts(geo, true)}${leadCount ? `<span class="geo-n geo-leads" title="${leadCount === 1 ? "1 lead" : `${leadCount} leads`}">${icon("pin", 11)}${leadCount}</span>` : ""}</button>
-            <button data-act="geo-proof" class="geo-proof" title="Make the proof in Azimut, from ${picture ? "the picture and its captures" : "its frames and captures"}"${handing}>${icon("proof", 12)}<span>Make the proof</span></button>
+            ${geo.proof
+              // a proof took the scene up with no place yet: the press opens it in Azimut, never a second one
+              ? `<button data-act="geo-proof" class="geo-proof" title="Open its proof in Azimut, with the map captures it does not hold yet"${handing}>${icon("proof", 12)}<span>Open the proof</span></button>`
+              : `<button data-act="geo-proof" class="geo-proof" title="Make the proof in Azimut, from ${picture ? "the picture and its captures" : "its frames and captures"}"${handing}>${icon("proof", 12)}<span>Make the proof</span></button>`}
           </div>
         </div>
         ${gathered ? gatheredBlock(geo) : ""}`

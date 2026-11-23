@@ -392,3 +392,56 @@ def test_a_bundle_carries_a_scene_s_leads_into_the_case_it_makes(client):
     stored = next(s for s in _stored(client, made, photo) if s["id"] == "s1")
     assert stored["leads"] == [lead]
 
+
+
+# -- a proof with no place yet keeps the scene going ------------------------------------
+
+
+@needs_ffmpeg
+def test_a_proof_with_no_place_keeps_its_scene_geolocated_until_it_states_one(client, tmp_path):
+    cid = _case(client)
+    video = _video(client, cid, tmp_path)
+    _save_work(client, cid, video, [{"id": "s1", "start": 1, "end": 2, "label": "Bridge"}])
+    _geolocate(client, cid, video, "s1")
+    lead = _drop(client, cid).json()["lead"]
+    cut = client.post(f"/api/cases/{cid}/inspect/save-frames", json={"items": [{"path": video, "time": 1.5}]})
+    frame = cut.json()["saved"][0]["item"]["path"]
+
+    # made and saved with no coordinates: it takes the scene up, and the scene goes on
+    made = client.post(f"/api/cases/{cid}/proofs", json={"title": "Bridge", "spec": {"panels": [{"id": "p0", "src": frame}]}})
+    assert made.status_code == 200, made.text
+    name = made.json()["name"]
+    res = client.put(f"/api/cases/{cid}/proofs/{name}/scene", json={"moments": [{"start": 1, "end": 2}], "video": video, "draft": "s1"})
+    assert res.status_code == 200, res.text
+    held = _held(client, cid)
+    assert held is not None and held["id"] == "s1"
+    # the pill opens that proof rather than making a second one
+    assert held["proof"] == name
+    assert held["leads"] == [lead]
+    # the map's captures still join the scene
+    shot = _capture(client, cid)
+    assert shot["scene"]["id"] == "s1"
+    # and the proof's point map reads its leads, the scene taken up
+    listed = client.get(f"/api/cases/{cid}/scenes/s1/leads", params={"video": video})
+    assert listed.json() == {"leads": [lead]}
+
+    # once it states a checked place, the geolocating ends and the leads go
+    saved = client.post(f"/api/cases/{cid}/proofs", json={"name": name, "title": "Bridge", "spec": {"panels": [
+        {"id": "p0", "src": frame}, {"id": "p1", "src": shot["path"]},
+    ], "coordsText": PLACE, "scene": {"video": video, "draft": "s1", "moments": [{"start": 1, "end": 2}]}}})
+    assert saved.status_code == 200, saved.text
+    # the same proof saved again, not a second one
+    assert saved.json()["name"] == name
+    assert _held(client, cid) is None
+    assert client.get(f"/api/cases/{cid}/scenes/s1/leads", params={"video": video}).json() == {"leads": []}
+
+
+def test_a_scene_s_leads_are_read_for_its_point_map_and_an_unknown_scene_is_refused(client):
+    cid = _case(client)
+    photo = _upload(client, cid)
+    _save_work(client, cid, photo, SCENES)
+    _geolocate(client, cid, photo, "s1")
+    lead = _drop(client, cid).json()["lead"]
+    assert client.get(f"/api/cases/{cid}/scenes/s1/leads", params={"video": photo}).json() == {"leads": [lead]}
+    assert client.get(f"/api/cases/{cid}/scenes/s2/leads", params={"video": photo}).json() == {"leads": []}
+    assert client.get(f"/api/cases/{cid}/scenes/nope/leads", params={"video": photo}).status_code == 404
