@@ -14,7 +14,7 @@ describe('one map’s layers', () => {
   it('lists every catalogue layer as a chip, whatever is on', () => {
     const layers = createLayerSet({ fireKey: keyed() });
     expect(layers.rows().map((row) => row.id)).toEqual([
-      'boundaries', 'placenames', 'roads', 'railway', 'power', 'seamarks', 'gpstraces', 'firms', 'nightlights', 'saved',
+      'boundaries', 'placenames', 'roads', 'railway', 'power', 'seamarks', 'gpstraces', 'firms', 'nightlights', 'places', 'media',
     ]);
   });
 
@@ -32,9 +32,9 @@ describe('one map’s layers', () => {
   });
 
   it('leaves the case’s saved work to the tool, which draws it itself', () => {
-    const layers = createLayerSet({ fireKey: keyed(), initial: ['saved'] });
+    const layers = createLayerSet({ fireKey: keyed(), initial: ['places'] });
     expect(layers.overlays).toEqual([]);
-    expect(layers.rows({ saved: { detail: '4' } }).find((row) => row.id === 'saved')).toMatchObject({ on: true, detail: '4' });
+    expect(layers.rows({ places: { detail: '4' } }).find((row) => row.id === 'places')).toMatchObject({ on: true, detail: '4' });
   });
 
   it('asks a layer’s questions under its row only once it is on, as the Map does', () => {
@@ -92,6 +92,7 @@ describe('one map’s layers', () => {
   it('puts back what was kept but the fire and night layers, so nothing reaches NASA on the next visit', () => {
     const layers = createLayerSet({ fireKey: keyed(), initial: ['boundaries'] });
     layers.restore(['firms', 'roads', 'nightlights', 'saved', 'labels']);
-    expect(layers.ids).toEqual(['roads', 'saved']);
+    // the old Saved work layer comes back as the case's two
+    expect(layers.ids).toEqual(['roads', 'places', 'media']);
   });
 });

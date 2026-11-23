@@ -7,8 +7,25 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
  */
 
 const declared = [];
+// the pin under the pointer, on its surface of its own: what it holds, and where
+const ghost = { shapes: [], moves: [] };
+let surfaces = 0;
 vi.mock('../../../lib/map/surface.js', () => ({
-  createSurface: () => ({ set: (shapes) => declared.push(shapes), destroy: () => {} }),
+  createSurface: () => {
+    // the leads' surface is made first, the ghost's on the first move
+    const mine = surfaces++;
+    return {
+      set: (shapes) => (shapes.some((shape) => shape.id === 'ghost') ? (ghost.shapes = shapes) : declared.push(shapes)),
+      patch: (id, change) => {
+        if (id !== 'ghost' || !ghost.shapes.length) return false;
+        ghost.moves.push(change.at);
+        return true;
+      },
+      clear: () => (ghost.shapes = []),
+      destroy: () => {},
+      mine,
+    };
+  },
 }));
 
 const { createDropState, leadSvg, PLACE_NAME_MAX } = await import('./drop.svelte.js');
@@ -37,6 +54,8 @@ function make() {
 
 beforeEach(() => {
   declared.length = 0;
+  ghost.shapes = [];
+  ghost.moves = [];
   held = null;
 });
 
@@ -86,7 +105,8 @@ describe('the drop mode', () => {
     expect(await drop.save()).toBe(true);
     expect(deps.savePlace).toHaveBeenCalledWith({ lat: 7, lon: 8, title: 'Water tower' });
     expect(drop.naming).toBe(null);
-    expect(drop.armed).toBe(true);
+    // a place is saved one at a time: the mode ends with it
+    expect(drop.armed).toBe(false);
   });
 
   it('keeps a name to the length a place takes', () => {
@@ -106,17 +126,63 @@ describe('the drop mode', () => {
     expect(deps.notify).toHaveBeenCalledWith('Could not save place: offline', 'danger', 6000);
   });
 
-  it('lets Escape go of the pin waiting before the mode ends', () => {
+  it('ends the mode when the pin waiting is let go, as a save does', () => {
     const drop = make();
     drop.start();
     expect(drop.cancel()).toBe(false);
+    expect(drop.armed).toBe(true);
     drop.place({ lat: 1, lon: 1 });
     expect(drop.cancel()).toBe(true);
     expect(drop.naming).toBe(null);
-    expect(drop.armed).toBe(true);
+    expect(drop.armed).toBe(false);
+    drop.start();
     drop.place({ lat: 1, lon: 1 });
     drop.stop();
     expect(drop.naming).toBe(null);
+  });
+
+  it('keeps dropping leads until it is ended, and the ghost shows the next one', async () => {
+    const drop = make();
+    held = SCENE;
+    drop.start();
+    drop.ghost({ lat: 5, lon: 6 });
+    expect(ghost.shapes).toHaveLength(1);
+    // the next lead of the scene: after its highest number, in its colour
+    expect(ghost.shapes[0].html).toContain('>5</text>');
+    expect(ghost.shapes[0].html).toContain(sceneColorAt(2));
+    expect(ghost.shapes[0]).toMatchObject({ className: 'sat-ghost', at: { lat: 5, lon: 6 } });
+    // a move only moves it
+    drop.ghost({ lat: 7, lon: 8 });
+    expect(ghost.moves).toEqual([{ lat: 7, lon: 8 }]);
+    drop.place({ lat: 7, lon: 8 });
+    await settle();
+    expect(drop.armed).toBe(true);
+  });
+
+});
+
+describe('the pin under the pointer', () => {
+  it('follows the pointer as a place’s pin while armed, and nowhere else', () => {
+    const drop = make();
+    drop.ghost({ lat: 1, lon: 1 });
+    expect(ghost.shapes).toEqual([]);
+    drop.start();
+    drop.ghost({ lat: 1, lon: 1 });
+    expect(ghost.shapes[0].html).toContain('<svg width="30" height="42"');
+    // off the map, it goes
+    drop.hideGhost();
+    expect(ghost.shapes).toEqual([]);
+    // while a pin waits for its name, none follows
+    drop.ghost({ lat: 1, lon: 1 });
+    drop.place({ lat: 2, lon: 2 });
+    expect(ghost.shapes).toEqual([]);
+    drop.ghost({ lat: 3, lon: 3 });
+    expect(ghost.shapes).toEqual([]);
+    drop.cancel();
+    drop.start();
+    drop.ghost({ lat: 3, lon: 3 });
+    drop.stop();
+    expect(ghost.shapes).toEqual([]);
   });
 });
 

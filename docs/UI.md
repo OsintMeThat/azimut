@@ -3201,12 +3201,13 @@ or brings it back.
 Underneath, the **status line** reads where you are (coordinates, the ground's
 height in 3D, zoom) on the left, and carries the two acts that take
 something off the map — Save place and Capture — on the right. **Save place drops a pin
-where you click** rather than filing the map's centre: it arms a mode in which each
-click drops one until Escape or the button again. Each pin asks for its name in a field
-beside it, and Enter saves it as a place; Save waits for a name, since a place with none
-only reads as its coordinates. Notes, folder and relations are the place card's. While a
-scene is geolocated the button reads **Drop a lead** with the scene's dot, and each click
-drops one of its leads with nothing asked; the right-click's *Save place here…* reads
+where you click** rather than filing the map's centre: once pressed, a pale pin follows
+the pointer to show where the click lands. The pin asks for its name in a field beside
+it, and Enter saves it as a place, which ends the mode, as Escape does; Save waits for a
+name, since a place with none only reads as its coordinates. Notes, folder and relations
+are the place card's. While a scene is geolocated the button reads **Drop a lead** with
+the scene's dot, the pale pin is the next lead with its number, and each click drops one
+with nothing asked, until Escape or the button again; the right-click's *Save place here…* reads
 *Drop a lead here* then. A lead is dragged to move it and clicked to centre the map on
 it. What marks the
 point, and whether that point is the map's centre or a pin dropped somewhere,
@@ -3428,14 +3429,16 @@ somewhere else, and a tab still reading the point before it answers about the wr
 ground. Between two moves the field is yours — what you typed, or the point you
 picked out of the case, stands.
 
-The saved-work layer answers two questions under its own switch: **what kind**
-(Media, Places or Captures) and **which folder**, offered only where the
-case has more than one to choose between. They are the Saved panel's own
-filter, so a map read here and the panel beside it can never disagree about
-what the case holds, and the layer's count is what is drawn rather than what is
-filed. It is on in a case that never switched it off, on the Media
-position, and its switch is kept per case with the other layers.
-Places draw as outlined pins, captures and screenshots as filled ones, located
+**The case's points are two layers, Places and Media**, each switched on its own and
+both on in a case that never switched them off (`lib/geoTree.js`, casePoints): the
+places saved in the case, so a place dropped is seen at once and its layer comes back on
+if it was off, and the photos and videos where they were placed, whose index is read
+only once that layer is on. Captures are not drawn on a map: they are listed in the
+Saved panel, and a scene's in its pill. Places ask **which folder** under their row,
+offered only where they sit in more than one, and each row counts what it draws. A map
+kept with the old Saved work layer opens with both. The switches are kept per case with
+the other layers.
+Places draw as outlined pins, located
 files as white-ringed ones, items at the same spot collapse
 into one counted mark, and clicking a mark of saved work opens a card
 with its preview, provider, dates and note. A mark of files has no card: it plays
@@ -3560,8 +3563,8 @@ again on the layers each map had on**, kept per case in the browser, never in th
 case or the settings backup; a case that never switched one opens on that map's
 defaults. The fires and the night lights are not kept: they show a day, so each
 session starts with them off. A deleted case takes its kept switches with it. A layer that
-asks a question shows its settings under its row once it is on: Saved work asks
-Media, Places or Captures, on Media first as on the Map. The fires
+asks a question shows its settings under its row once it is on: Places asks which
+folder, as on the Map. The fires
 and the night lights start on the day of the picture on screen where the map
 knows it, and on the last 24 hours and the last night where it does not. Added
 layers are added and worked in Satellite; the app reads each one once, and only

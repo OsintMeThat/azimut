@@ -12,12 +12,12 @@ import { awaitMapReady, CASE_ID, installAppFixture } from './app.fixture.js';
 const VIDEO = 'media/steps.webm';
 const CAPTURE = 'media/capture-bridge.png';
 
-async function openMap(page, { geolocated = true } = {}) {
+async function openMap(page, { geolocated = true, places = [] } = {}) {
   await page.setViewportSize({ width: 1500, height: 900 });
   const media = [
     { path: VIDEO, filename: 'steps.webm', title: 'Convoy clip', kind: 'video', entity_id: 'e_steps', size: 100, source: { type: 'upload' }, thumbnail: null, folder: '' },
   ];
-  const fixture = await installAppFixture(page, { media });
+  const fixture = await installAppFixture(page, { media, savedIndexes: { [CASE_ID]: places } });
   const server = { leads: [], calls: [], geolocating: geolocated ? 'sc_1' : null };
   const current = () => (server.geolocating
     ? {
@@ -130,13 +130,52 @@ test('asks a name for a pin dropped with no scene geolocated, and saves it as a 
   expect(Number.isFinite(fixture.placeWrites[0].lat)).toBe(true);
   await expect(namer).toHaveCount(0);
 
-  // Escape lets a pin waiting go, then ends the mode
+  // a place is saved one at a time: the mode ended with it
+  await expect(save).toHaveAttribute('aria-pressed', 'false');
+  // and Escape lets a pin waiting go, which ends it too
+  await save.click();
   await clickMap(page, -100, 50);
   await expect(namer).toBeVisible();
   await page.keyboard.press('Escape');
   await expect(namer).toHaveCount(0);
-  await expect(save).toHaveAttribute('aria-pressed', 'true');
-  await page.locator('.map[data-map-ready="true"]').focus().catch(() => {});
-  await page.keyboard.press('Escape');
   await expect(save).toHaveAttribute('aria-pressed', 'false');
+});
+
+test('shows a pale pin under the pointer while the drop is armed, a lead with its next number while geolocating', async ({ page }) => {
+  await openMap(page);
+  await page.getByRole('button', { name: 'Drop a lead' }).click();
+  const box = await page.locator('.map[data-map-ready="true"]').boundingBox();
+  await page.mouse.move(box.x + box.width / 2 + 80, box.y + box.height / 2);
+  const ghost = page.locator('.sat-ghost');
+  await expect(ghost).toHaveCount(1);
+  await expect(ghost.locator('text')).toHaveText('1');
+  await clickMap(page, 80, 0);
+  await page.mouse.move(box.x + box.width / 2 + 160, box.y + box.height / 2 + 40);
+  await expect(ghost.locator('text')).toHaveText('2');
+  // off the map it goes, and with the mode
+  await page.mouse.move(box.x - 40, box.y + 20);
+  await expect(ghost).toHaveCount(0);
+  await page.keyboard.press('Escape');
+  await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
+  await expect(ghost).toHaveCount(0);
+});
+
+test('draws the case’s places with the Places layer on by default, and turns it back on when a place is saved', async ({ page }) => {
+  const { fixture } = await openMap(page, {
+    geolocated: false,
+    places: [{ id: 'place-1', key: 'place-1', kind: 'place', title: 'North depot', lat: 48.859, lon: 2.295 }],
+  });
+  const places = page.getByRole('button', { name: 'Places', exact: true });
+  await expect(places).toHaveAttribute('aria-pressed', 'true');
+  await expect(page.getByRole('button', { name: 'Media', exact: true })).toHaveAttribute('aria-pressed', 'true');
+  await expect(page.getByRole('button', { name: 'Captures', exact: true })).toHaveCount(0);
+  await places.click();
+  await expect(places).toHaveAttribute('aria-pressed', 'false');
+  await page.getByRole('button', { name: 'Save place' }).click();
+  await clickMap(page);
+  const field = page.getByTestId('place-namer').getByRole('textbox', { name: 'Name of the place' });
+  await field.fill('Depot');
+  await field.press('Enter');
+  await expect.poll(() => fixture.placeWrites.length).toBe(1);
+  await expect(places).toHaveAttribute('aria-pressed', 'true');
 });

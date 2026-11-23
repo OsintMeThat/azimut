@@ -30,7 +30,7 @@
   import { setAnalysisPeriod } from '../lib/analysisSearch.svelte.js';
   import { temporalMapQuery } from '../lib/temporalMap.js';
   import { windowWords } from '../lib/timeline.js';
-  import { kindControl } from '../lib/geoTree.js';
+  import { casePointRows, casePoints } from '../lib/geoTree.js';
   import { stackOf } from '../lib/mediaViewer.js';
   import {
     caseState, uiState, ensureCase, reloadCase, toast, dismissToast, prefs, fmtCoords, prefsReady,
@@ -215,9 +215,11 @@
   // first switched on in a session, on Refresh, and never otherwise. This is
   // where they are added and worked; the other maps only switch them on.
   let savedSearchOpen = $state(false);
-  // Map layer: on from the start, on the Media position, so a case opens on its
-  // footage already placed. Kept per case with the other layers (`openLayers`).
-  let savedOverlay = $state(true);
+  // The case's own two layers, the places saved in it and its footage where it was
+  // placed: both on from the start, so a place saved is seen and a case opens on its
+  // footage. Kept per case with the other layers (`openLayers`).
+  let placesOn = $state(true);
+  let mediaOn = $state(true);
   /**
    * The located files the panel is playing, or null for the saved-work list.
    *
@@ -277,14 +279,15 @@
    * (`lib/map/layerMemory.js`): borders and the saved work for a case that
    * never said otherwise. The fire and night layers are not among them.
    */
-  const switchMemory = createMapLayerMemory('satellite', ['boundaries', 'saved']);
+  const switchMemory = createMapLayerMemory('satellite', ['boundaries', 'places', 'media']);
   /** The case the switches were last set for, which is the case they are kept under. */
   let layersFor = null;
   const switchedOn = $derived(
     [
       ...Object.keys(refLayers).filter((id) => refLayers[id]),
       railOverlay && 'railway',
-      savedOverlay && 'saved',
+      placesOn && 'places',
+      mediaOn && 'media',
     ].filter(Boolean)
   );
   function openLayers(id) {
@@ -294,7 +297,8 @@
       for (const key of Object.keys(refLayers)) refLayers[key] = ids.includes(key);
     });
     railOverlay = ids.includes('railway');
-    savedOverlay = ids.includes('saved');
+    placesOn = ids.includes('places');
+    mediaOn = ids.includes('media');
   }
   $effect(() => switchMemory.keep(layersFor, switchedOn));
   /**
@@ -1461,40 +1465,9 @@
   // A layer being edited puts its own bar on the map, and the rail steps aside for it.
   const railBottom = $derived(railTop + (myLayers.editor ? 0 : railHeight + 8));
 
-  /** Whether the case has anything the saved layer could draw, on any of its
-   *  three positions — media reads its own index, so one length is not enough. */
-  const savedAnything = $derived(savedWork.rows.length > 0 || savedWork.media.length > 0);
-
-  /**
-   * The saved layer's own two questions, asked where the layer is listed.
-   *
-   * The folder row appears only where there is a choice to make: a case whose
-   * saved work all sits in one place gets a control that could only ever be
-   * set back to where it already was.
-   */
-  const savedFilters = $derived.by(() => {
-    const folders = savedWork.folders;
-    const rows = [kindControl(savedWork)];
-    if (folders.length > 1) {
-      rows.push({
-        label: 'Folder',
-        value: savedWork.folder ?? 'all',
-        // folders are named by the analyst and there can be dozens, so this one
-        // is a list rather than the row of chips the fixed questions get
-        list: true,
-        options: [
-          { id: 'all', label: 'All', title: 'Every folder' },
-          ...folders.map((entry) => ({
-            id: entry.id,
-            label: entry.id || 'Unfiled',
-            title: `${entry.count} item${entry.count === 1 ? '' : 's'}`,
-          })),
-        ],
-        pick: (id) => (savedWork.folder = id === 'all' ? null : id),
-      });
-    }
-    return rows;
-  });
+  /** What the case's two layers draw, and their rows in the menu (`lib/geoTree.js`). */
+  const mapPoints = $derived(casePoints(savedWork, { places: placesOn, media: mediaOn }));
+  const pointRows = $derived(casePointRows(savedWork, { places: placesOn }));
 
   /**
    * What is drawn over the imagery, as the panel on the right lists it.
@@ -1582,19 +1555,16 @@
           : 'Pick a night inside this sensor’s record.',
     },
     {
-      ...catalogued('saved'),
-      on: savedOverlay,
-      // Either index is enough to have something to draw: a case whose footage
-      // is placed but which nobody has dropped a pin in is exactly the case the
-      // panel opens on Media for.
-      disabled: !savedAnything,
-      detail: savedWork.shown.length ? String(savedWork.shown.length) : '',
-      ...(savedAnything ? {} : { title: 'Nothing is saved or placed in this case yet' }),
-      toggle: () => (savedOverlay = !savedOverlay),
-      // Which of them are drawn. The same two answers the Saved panel is asking
-      // — what kind, and which folder — so a map read here and a panel read
-      // beside it can never disagree about what is on the case.
-      controls: savedOverlay && savedAnything ? savedFilters : null,
+      ...catalogued('places'),
+      on: placesOn,
+      toggle: () => (placesOn = !placesOn),
+      ...pointRows.places,
+    },
+    {
+      ...catalogued('media'),
+      on: mediaOn,
+      toggle: () => (mediaOn = !mediaOn),
+      ...pointRows.media,
     },
     ...(sheetPoints
       ? [
@@ -1672,7 +1642,7 @@
     // a file flies the map to where it stands and plays beside it, with every
     // other file on that metre a press of the arrows away
     if (row.kind === 'media') {
-      const { items, index } = stackOf(savedWork.shown, row);
+      const { items, index } = stackOf(savedWork.media, row);
       openMedia(items, index);
     }
     if (row.lat == null || row.lon == null) {
@@ -1797,8 +1767,11 @@
       { west: Infinity, east: -Infinity, south: Infinity, north: -Infinity }), { padding: 40 });
   }
 
-  // The media index, read the first time that position is opened.
+  // The media index, read the first time the Media layer or that position is opened.
   $effect(() => savedWork.loadMode(caseState.current?.id, caseState.rev));
+  $effect(() => {
+    if (mediaOn) savedWork.loadMedia(caseState.current?.id, caseState.rev);
+  });
 
   // A reloaded media index re-reads the stack being played: a file deleted or
   // unplaced elsewhere leaves it, and the viewer closes once nothing is left.
@@ -1921,7 +1894,8 @@
     // whole index and take no notice of the window, so left on they answer a period
     // with every place the case has ever held — the layer then reads as showing
     // everything. The pin button is right there for anyone who wants that comparison.
-    savedOverlay = false;
+    placesOn = false;
+    mediaOn = false;
     api.get(temporalMapQuery(caseId, handed.from, handed.to, handed.categories ?? []))
       .then((result) => {
         if (run !== temporalMapSeq || caseState.current?.id !== caseId) return;
@@ -2242,6 +2216,8 @@
       const c = await ensureCase();
       const place = await api.post(`/api/cases/${c.id}/satellite/place`, { lat, lon, zoom: center.zoom, bearing, title });
       await reloadCase();
+      // a place saved is seen: its layer comes back on if it was off
+      placesOn = true;
       filedToast('Place saved', [place], { fallback: 'Place saved. Find it in the case sidebar' });
     },
     centre: (at) => engine?.setView(at, center.zoom),
@@ -2254,6 +2230,19 @@
     void leadsKey;
     void namingAt;
     if (mapReady) untrack(() => drop.draw());
+  });
+  // while the drop is armed, a pale pin follows the pointer to show where a click lands
+  $effect(() => {
+    if (!mapReady || !drop.armed || !engine) return;
+    const element = mapEl;
+    const leave = () => drop.hideGhost();
+    const stopMoving = engine.on('pointer-move', (at) => drop.ghost(at));
+    element?.addEventListener('pointerleave', leave);
+    return () => {
+      stopMoving();
+      element?.removeEventListener('pointerleave', leave);
+      drop.hideGhost();
+    };
   });
 
   // Deletions drop a file / an entity — always behind a confirm. The target is
@@ -2628,12 +2617,11 @@
         onoverlaytrouble={(id) => id === 'firms' && fireTrouble()}
         onviewsettled={(camera) => share.settled(camera, engine?.maxZoom())}
       >
-      <!-- saved work on the map: navigation only, off by default, session-only.
-           It draws the panel's current selection, not the whole index. -->
-      {#if savedOverlay}
+      <!-- the case's places and placed footage, its two layers: navigation only -->
+      {#if placesOn || mediaOn}
         <SavedOverlay
           engine={mapReady ? engine : null}
-          items={savedWork.shown}
+          items={mapPoints}
           caseId={caseState.current?.id}
           coords={coordsLabel}
           {fullscreen}
@@ -3455,6 +3443,12 @@
   :global(.sat-lead) {
     cursor: grab;
     filter: drop-shadow(0 1px 2px rgba(0, 0, 0, 0.5));
+  }
+  /* the pin following the pointer while the drop is armed: the click goes through it */
+  :global(.sat-ghost) {
+    pointer-events: none;
+    opacity: 0.6;
+    filter: drop-shadow(0 1px 2px rgba(0, 0, 0, 0.4));
   }
   .map-bar {
     position: absolute;

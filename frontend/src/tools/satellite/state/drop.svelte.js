@@ -1,12 +1,14 @@
 /**
  * Dropping a pin where the analyst clicks, rather than reading the middle of the map.
  *
- * The status bar's button arms it, and each click on the map drops one until Escape or
- * the button again ends it. While the case geolocates a scene, a click drops a **lead**
- * for that scene: a spot to come back to, numbered, in the scene's colour, kept on the
- * scene and never as a place of the case (`engine/geolocate.py`). Otherwise a click asks
- * for a name beside the point, and Enter saves a place of the case under it: a place
- * with no name only reads as its coordinates later, so the name is asked first.
+ * The status bar's button arms it, and a pale pin follows the pointer to show where a
+ * click lands. While the case geolocates a scene, a click drops a **lead** for that
+ * scene: a spot to come back to, numbered, in the scene's colour, kept on the scene and
+ * never as a place of the case (`engine/geolocate.py`); several are dropped in a row,
+ * until Escape or the button again. Otherwise a click asks for a name beside the point,
+ * and Enter saves a place of the case under it, which ends the mode, as letting the pin
+ * go does: a place with no name only reads as its coordinates later, so the name is
+ * asked first.
  *
  * It draws the scene's leads too, and the pin waiting for its name: a lead is dragged to
  * move it and clicked to centre the map on it.
@@ -61,9 +63,43 @@ export function createDropState({ engine, held, dropLead, moveLead, savePlace, c
   let saving = $state(false);
   let dropping = $state(false);
   let surface = null;
+  // the pin under the pointer, on a surface of its own so a move only moves it
+  let ghostSurface = null;
+  let ghostLook = '';
+  let ghostAt = null;
   let draggedAt = 0;
   // where a mark being dragged stands, kept out of the state so the map is not redrawn under the hand
   const dragged = new Map();
+
+  /** The pin under the pointer: the next lead of the scene held, or a place's pin. */
+  function ghostShape(at) {
+    const scene = held();
+    if (scene) {
+      const next = Math.max(0, ...(scene.leads ?? []).map((lead) => lead.n)) + 1;
+      return { key: `lead:${next}:${scene.order ?? 0}`, html: leadSvg(next, sceneColorAt(scene.order)), ...LEAD_GEOMETRY, at };
+    }
+    return { key: 'place', html: markerSvg('pin'), ...MARKER_GEOMETRY.pin, at };
+  }
+
+  function showGhost(at) {
+    const map = engine();
+    if (!map || !armed || naming) return hideGhost();
+    ghostAt = at;
+    const shape = ghostShape(at);
+    ghostSurface ??= createSurface(map);
+    if (ghostLook === shape.key && ghostSurface.patch('ghost', { at })) return;
+    ghostLook = shape.key;
+    ghostSurface.set([{
+      id: 'ghost', kind: 'marker', at, className: 'sat-ghost', html: shape.html, size: shape.size, anchor: shape.anchor,
+      zIndex: 580, keyboard: false,
+    }]);
+  }
+
+  function hideGhost() {
+    if (!ghostLook) return;
+    ghostLook = '';
+    ghostSurface?.clear();
+  }
 
   /** Drop at a point: a lead for the scene held, else a pin asking for its name. */
   async function dropAt(at) {
@@ -83,6 +119,7 @@ export function createDropState({ engine, held, dropLead, moveLead, savePlace, c
     }
     // a click elsewhere moves the pin waiting, the name typed so far kept
     naming = { ...point, title: naming?.title ?? '' };
+    hideGhost();
   }
 
   function draw() {
@@ -147,6 +184,8 @@ export function createDropState({ engine, held, dropLead, moveLead, savePlace, c
     }
     surface ??= createSurface(map);
     surface.set(shapes);
+    // a lead just dropped makes the next one's number: the pin under the pointer says it
+    if (ghostLook && ghostAt) showGhost(ghostAt);
   }
 
   return {
@@ -169,6 +208,7 @@ export function createDropState({ engine, held, dropLead, moveLead, savePlace, c
     stop() {
       armed = false;
       naming = null;
+      hideGhost();
     },
     /** A click on the map, taken while the mode is armed. */
     place(at) {
@@ -180,10 +220,11 @@ export function createDropState({ engine, held, dropLead, moveLead, savePlace, c
     at(point) {
       dropAt(point);
     },
-    /** Let go of the pin waiting for its name. True when there was one. */
+    /** Let go of the pin waiting for its name, which ends the mode. True when there was one. */
     cancel() {
       if (!naming) return false;
       naming = null;
+      armed = false;
       return true;
     },
     setTitle(title) {
@@ -198,6 +239,8 @@ export function createDropState({ engine, held, dropLead, moveLead, savePlace, c
       try {
         await savePlace({ lat: pin.lat, lon: pin.lon, title });
         if (naming === pin || (naming && naming.lat === pin.lat && naming.lon === pin.lon)) naming = null;
+        // a place is saved one at a time: the mode ends with it
+        armed = false;
         return true;
       } catch (e) {
         notify(`Could not save place: ${e.message}`, 'danger', 6000);
@@ -208,9 +251,14 @@ export function createDropState({ engine, held, dropLead, moveLead, savePlace, c
     },
     /** Draw the scene's leads and the pin waiting, as they now stand. */
     draw,
+    /** The pointer moved over the map: the pale pin follows it while the mode is armed. */
+    ghost: showGhost,
+    hideGhost,
     destroy() {
       surface?.destroy?.();
       surface = null;
+      ghostSurface?.destroy?.();
+      ghostSurface = null;
     },
   };
 }

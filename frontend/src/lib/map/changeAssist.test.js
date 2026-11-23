@@ -31,7 +31,7 @@ describe('which pairs Difference reads', () => {
     // the reading takes the picture alone, so a layer on one side is no change
     expect(changeCompatibility(side({ overlays: ['roads'] }), side({ waybackRelease: 2 }))).toMatchObject({ ok: true });
     expect(
-      changeCompatibility(side({ overlays: ['roads'] }), side({ overlays: ['railway', 'saved'], waybackRelease: 2 }))
+      changeCompatibility(side({ overlays: ['roads'] }), side({ overlays: ['railway', 'places'], waybackRelease: 2 }))
     ).toMatchObject({ ok: true });
     expect(changeCompatibility(side(), side())).toMatchObject({ ok: false });
   });

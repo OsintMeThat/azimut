@@ -23,7 +23,7 @@
   import { createLayerSet } from '../lib/map/layerSet.svelte.js';
   import { addedLayers } from '../lib/map/addedLayersState.svelte.js';
   import { createMapLayerMemory } from '../lib/map/layerMemory.js';
-  import { savedRow } from '../lib/geoTree.js';
+  import { casePointRows, casePoints } from '../lib/geoTree.js';
   import { copyText } from '../lib/clipboard.js';
   import { marksToZones, sourceLabel, viewZone, zoneMarks, zoneRing } from '../lib/map/analyzers.js';
   import { blinkable } from '../lib/map/detectReview.js';
@@ -131,13 +131,14 @@
     mapLayers.restore(switchMemory.recall(id));
   });
   $effect(() => switchMemory.keep(layersFor, mapLayers.ids));
-  // The case's saved places, captures and located files, as the other maps draw
-  // them. Off at first: Detect opens on its own findings.
+  // The case's saved places and placed footage, as the other maps draw them. Off at
+  // first: Detect opens on its own findings.
   const savedWork = createSavedState({ api, notify: toast, assignFolder, reloadCase });
   $effect(() => savedWork.load(caseState.current?.id ?? null));
-  $effect(() => savedWork.loadMode(caseState.current?.id, caseState.rev));
-  // the position picked under the layer's row, Media first as on the Map
-  const savedItems = $derived(savedWork.shown);
+  $effect(() => {
+    if (mapLayers.has('media')) savedWork.loadMedia(caseState.current?.id, caseState.rev);
+  });
+  const savedItems = $derived(casePoints(savedWork, { places: mapLayers.has('places'), media: mapLayers.has('media') }));
   const myLayers = addedLayers.scope('detect');
   // a FIRMS key pasted into Settings, or tested back to life there
   $effect(() => {
@@ -148,9 +149,7 @@
   // menu with the reload that follows it
   $effect(() => addedLayers.load(caseState.current?.id ?? null, caseState.rev));
   const layerRows = $derived([
-    ...mapLayers.rows({
-      saved: savedRow(savedWork, mapLayers.has('saved')),
-    }),
+    ...mapLayers.rows(casePointRows(savedWork, { places: mapLayers.has('places') })),
     // Detect's own, under the case's: what its runs found, and where it watches
     { id: 'detections', group: 'case', label: 'Saved detections', title: 'What saved runs found, drawn over the map',
       on: savedVisible, toggle: () => (savedVisible = !savedVisible) },
@@ -815,7 +814,7 @@
           onremovefeature={(row, key) => personalLayers.remove(key, row)} ondeleteplace={personalPlaceDeletion.open}
           oncopyfeature={(row, feature, anchor) => personalLayers.copy(row, feature, anchor)}
         />
-        {#if mapLayers.has('saved') && !bare && caseState.current && !personalLayers.armed}
+        {#if savedItems.length && !bare && caseState.current && !personalLayers.armed}
           <SavedOverlay
             engine={ready ? engine : null}
             items={savedItems}

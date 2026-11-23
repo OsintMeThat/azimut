@@ -163,7 +163,9 @@ describe('Find\'s map, mounted while another tool is on screen', () => {
 describe('the small map\'s layers', () => {
   it('offers every layer the other maps do, from the shared catalogue and store', () => {
     expect(source).toContain("const mapLayers = createLayerSet({");
-    expect(source).toContain("const HORIZON_LAYERS = ['boundaries', 'saved'];");
+    expect(source).toContain("const HORIZON_LAYERS = ['boundaries', 'places', 'media'];");
+    // the case's places and placed media, as the other maps draw them, and never a capture
+    expect(source).toContain("const savedItems = $derived(casePoints(savedWork, { places: mapLayers.has('places'), media: mapLayers.has('media') }));");
     expect(source).toContain("createMapLayerMemory('horizon', HORIZON_LAYERS)");
     expect(source).toContain("const myLayers = addedLayers.scope('horizon');");
     expect(markup).toContain('<MapLayersPanel');
@@ -177,7 +179,7 @@ describe('the small map\'s layers', () => {
     expect(find).toContain('added: myLayers.rows');
     expect(find).toContain("drawn: uiState.tool === 'horizon' ? myLayers.drawn : []");
     expect(find).toContain('toggle: (layer) => myLayers.toggle(caseState.current?.id, layer)');
-    expect(find).toContain("saved: mapLayers.has('saved') && caseState.current ? savedItems : null");
+    expect(find).toContain('saved: savedItems.length && caseState.current ? savedItems : null');
   });
 
   it('draws case layers only on screen and allows their cards only while editing', () => {

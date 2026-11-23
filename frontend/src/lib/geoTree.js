@@ -13,8 +13,9 @@
 import { matchesTerms } from './folderBrowse.js';
 import { haversine } from './measure.js';
 
-/** The switch's three positions, in the order a case is read: the footage
- *  first, then the points dropped on it, then the imagery captured of it.
+/** The Saved panel's three positions, in the order a case is read: the footage
+ *  first, then the points dropped on it, then the imagery captured of it. A map
+ *  draws the first two as layers of their own (`casePoints`), and never captures.
  *
  *  **Media** is a mode, not a filter — a file carries no point of its own and
  *  stands where the graph puts it, so it has an index of its own and swaps the
@@ -27,30 +28,63 @@ export const KINDS = [
   { id: 'captures', label: 'Captures' },
 ];
 
-/** The saved layer's Show question, the same wherever a map lists the layer. */
-export function kindControl(saved) {
+/**
+ * What a map draws of the case, as its two layers ask (`lib/map/layerCatalog.js`):
+ * the places saved in it, from the folder the map reads, and its photos and videos
+ * where they were placed. Captures are never drawn on a map.
+ *
+ * @param {object} saved the tool's saved state (`tools/satellite/state/saved.svelte.js`)
+ * @param {{places?: boolean, media?: boolean}} on which of the two layers are on
+ */
+export function casePoints(saved, { places = false, media = false } = {}) {
+  return [...(places ? saved.mapPlaces : []), ...(media ? saved.media : [])];
+}
+
+/** Which folder the map reads its places from, once there is a choice to make. */
+function folderControl(saved, folders) {
   return {
-    label: 'Show',
-    value: saved.kind,
-    options: KINDS.map((entry) => ({ id: entry.id, label: entry.label })),
-    pick: (id) => (saved.kind = id),
+    label: 'Folder',
+    value: saved.folder ?? 'all',
+    // folders are named by the analyst and there can be dozens, so this one is a
+    // list rather than the row of chips the fixed questions get
+    list: true,
+    options: [
+      { id: 'all', label: 'All', title: 'Every folder' },
+      ...folders.map((entry) => ({
+        id: entry.id,
+        label: entry.id || 'Unfiled',
+        title: `${entry.count} place${entry.count === 1 ? '' : 's'}`,
+      })),
+    ],
+    pick: (id) => (saved.folder = id === 'all' ? null : id),
   };
 }
 
 /**
- * The saved layer's row in a map's Layers menu: how many marks it draws, and
- * once it is on, which of the three positions. Either index is enough to have
- * something to show, so a case with placed footage and no pin is not locked.
+ * The two layers' rows in a map's Layers menu: how many marks each draws, and one
+ * with nothing to draw says so. The places' row asks which folder once the places
+ * sit in more than one. Media is read only once its layer is on, so a count it
+ * never read is not called empty.
  *
- * @param {object} saved the tool's saved state (`tools/satellite/state/saved.svelte.js`)
- * @param {boolean} on whether the layer is on in that map
- * @param {object[]} [shown] what the map draws, when it holds some back
+ * @param {object} saved the tool's saved state
+ * @param {{places?: boolean, media?: boolean}} on which of the two layers are on
  */
-export function savedRow(saved, on, shown = saved.shown) {
-  if (!saved.rows.length && !saved.media.length) {
-    return { disabled: true, title: 'Nothing is saved or placed in this case yet' };
-  }
-  return { detail: shown.length ? String(shown.length) : '', controls: on ? [kindControl(saved)] : null };
+export function casePointRows(saved, { places = false } = {}) {
+  const all = saved.rows.filter((row) => row.kind === 'place');
+  const folders = savedFolders(all);
+  return {
+    places: all.length
+      ? {
+          detail: String(saved.mapPlaces.length),
+          controls: places && folders.length > 1 ? [folderControl(saved, folders)] : null,
+        }
+      : { disabled: true, title: 'No place is saved in this case yet' },
+    media: !saved.mediaRead
+      ? {}
+      : saved.media.length
+        ? { detail: String(saved.media.length) }
+        : { disabled: true, title: 'No photo or video is placed in this case yet' },
+  };
 }
 
 /** The kinds a list reading the saved index alone can offer, where `all` is

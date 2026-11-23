@@ -3,16 +3,16 @@ import {
   bilingual,
   branchKeys,
   buildGeoTree,
+  casePointRows,
+  casePoints,
   filterSaved,
   isMode,
   keyFor,
-  kindControl,
   KINDS,
   oneEach,
   pendingLocate,
   SAVED_KINDS,
   savedFolders,
-  savedRow,
 } from './geoTree.js';
 
 const ok = (country, code, region, extra = {}) => ({
@@ -354,28 +354,40 @@ describe('showing only the folders wanted on the map', () => {
   });
 });
 
-describe('the saved layer in a map’s Layers menu', () => {
-  const saved = (over = {}) => ({ kind: 'media', rows: [], media: [], shown: [], ...over });
-
-  it('asks Media, Places or Captures, Media first, and moves the map’s own position', () => {
-    const state = saved();
-    const control = kindControl(state);
-    expect(control.options.map((entry) => entry.label)).toEqual(['Media', 'Places', 'Captures']);
-    expect(control.value).toBe('media');
-    control.pick('places');
-    expect(state.kind).toBe('places');
+describe('the case’s two layers on a map: Places and Media', () => {
+  const PLACE = { id: 'p1', kind: 'place', folder: 'North' };
+  const saved = (over = {}) => ({
+    rows: [], media: [], mediaRead: false, folder: null, mapPlaces: [], ...over,
   });
 
-  it('counts what it draws and asks its question only once it is on', () => {
-    const state = saved({ rows: [{ id: 'p' }], shown: [] });
-    expect(savedRow(state, false)).toEqual({ detail: '', controls: null });
-    expect(savedRow(state, true).controls.map((entry) => entry.label)).toEqual(['Show']);
-    expect(savedRow(state, true, [{ id: 'a' }, { id: 'b' }]).detail).toBe('2');
+  it('draws the places and the media its layers ask for, and never a capture', () => {
+    const state = saved({ mapPlaces: [PLACE], media: [{ id: 'm1', kind: 'media' }] });
+    expect(casePoints(state, { places: true, media: true }).map((row) => row.id)).toEqual(['p1', 'm1']);
+    expect(casePoints(state, { places: true }).map((row) => row.id)).toEqual(['p1']);
+    expect(casePoints(state, { media: true }).map((row) => row.id)).toEqual(['m1']);
+    expect(casePoints(state)).toEqual([]);
   });
 
-  it('locks the row when the case has nothing saved and nothing placed', () => {
-    expect(savedRow(saved(), true)).toEqual({ disabled: true, title: 'Nothing is saved or placed in this case yet' });
-    // placed footage and no pin is something to show
-    expect(savedRow(saved({ media: [{ id: 'm' }] }), true).disabled).toBeUndefined();
+  it('counts each, and says when a case has nothing for one', () => {
+    expect(casePointRows(saved())).toEqual({
+      places: { disabled: true, title: 'No place is saved in this case yet' },
+      // media is read only once its layer is on: a count never read is not called empty
+      media: {},
+    });
+    const state = saved({ rows: [PLACE, { id: 'c', kind: 'capture' }], mapPlaces: [PLACE], mediaRead: true, media: [{ id: 'm' }] });
+    expect(casePointRows(state, { places: true })).toEqual({ places: { detail: '1', controls: null }, media: { detail: '1' } });
+    expect(casePointRows(saved({ mediaRead: true })).media).toEqual({ disabled: true, title: 'No photo or video is placed in this case yet' });
+  });
+
+  it('asks which folder the places are read from once they sit in more than one, and only while on', () => {
+    const state = saved({ rows: [PLACE, { id: 'p2', kind: 'place', folder: '' }], mapPlaces: [PLACE] });
+    expect(casePointRows(state, { places: false }).places.controls).toBe(null);
+    const [control] = casePointRows(state, { places: true }).places.controls;
+    expect(control.label).toBe('Folder');
+    expect(control.options.map((entry) => entry.label)).toEqual(['All', 'North', 'Unfiled']);
+    control.pick('North');
+    expect(state.folder).toBe('North');
+    control.pick('all');
+    expect(state.folder).toBe(null);
   });
 });

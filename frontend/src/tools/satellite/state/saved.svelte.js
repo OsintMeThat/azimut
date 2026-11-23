@@ -3,7 +3,8 @@
  *
  * Two indexes, not one: places, captures and filed screenshots come back in one
  * compact index when a case opens, while located media is read only once its
- * position is opened — a case must not pay for a view it may never show. The
+ * position or a map's Media layer is opened — a case must not pay for a view it
+ * may never show. The
  * lazy one is keyed on the case *and its revision*, because placing a file
  * reloads the case and a stale list would still show the folder it just left.
  *
@@ -18,7 +19,7 @@
  * @param {(id: string, entity: object, folder: string) => Promise<any>} deps.assignFolder
  * @param {() => Promise<any>} deps.reloadCase
  */
-import { filterSaved, isMode, pendingLocate, savedFolders } from '../../../lib/geoTree.js';
+import { filterSaved, isMode, pendingLocate } from '../../../lib/geoTree.js';
 
 const GROUP_KEY = 'azimut:satelliteSavedGroup';
 const LOCATE_BATCH = 10;
@@ -39,14 +40,16 @@ const ENTITY_TYPE = { place: 'place', media: 'media', comparison: 'compare-sessi
 
 export function createSavedState({ api, notify, assignFolder, reloadCase }) {
   let rows = $state([]);
-  // the located files, read the first time that position is opened
+  // the located files, read the first time that position or a Media layer is opened
   let mediaRows = $state([]);
+  // whether that read has answered for the case open, so an empty list is known empty
+  let mediaRead = $state(false);
   // Media first: a map opened on a case answers "what footage do I have, and
   // where" before it lists every pin the analyst has dropped.
   let kind = $state('media');
   let query = $state('');
   /**
-   * Which folder the map is drawing, or null for every one of them.
+   * Which folder the map draws its places from, or null for every one of them.
    *
    * The map's own filter rather than the panel's: the tree browses folders as
    * branches, and a busy case is read by taking the other folders off the
@@ -66,6 +69,7 @@ export function createSavedState({ api, notify, assignFolder, reloadCase }) {
   function reset() {
     rows = [];
     mediaRows = [];
+    mediaRead = false;
     mediaFor = null;
     locateStopped = true;
     locateGeneration += 1;
@@ -97,26 +101,33 @@ export function createSavedState({ api, notify, assignFolder, reloadCase }) {
   }
 
   /**
-   * The media index, the first time that position is opened.
+   * The media index for this case and revision, read once.
    *
    * An answer lands only while its case and revision are still the ones asked
-   * about. Leaving the position before it arrives keeps it rather than throwing
-   * it away: that stamp is already spent, and coming back would find nothing.
+   * about. Leaving before it arrives keeps it rather than throwing it away: that
+   * stamp is already spent, and coming back would find nothing.
    */
-  function loadMode(caseId, rev) {
+  function loadMedia(caseId, rev) {
     const stamp = `${caseId}:${rev}`;
-    if (!caseId || !isMode(kind) || mediaFor === stamp) return;
+    if (!caseId || mediaFor === stamp) return;
     mediaFor = stamp;
     api
       .get(MEDIA_INDEX(caseId))
       .then((answer) => {
-        if (mediaFor === stamp) mediaRows = answer;
+        if (mediaFor !== stamp) return;
+        mediaRows = answer;
+        mediaRead = true;
       })
       .catch(() => {
         if (mediaFor !== stamp) return;
         mediaRows = [];
         mediaFor = null;
       });
+  }
+
+  /** The media index, the first time the panel's Media position is opened. */
+  function loadMode(caseId, rev) {
+    if (isMode(kind)) loadMedia(caseId, rev);
   }
 
   async function runLocate(caseId) {
@@ -240,6 +251,14 @@ export function createSavedState({ api, notify, assignFolder, reloadCase }) {
     get media() {
       return mediaRows;
     },
+    /** Whether the media index answered for the case open. */
+    get mediaRead() {
+      return mediaRead;
+    },
+    /** The places a map draws, from the folder it reads (`lib/geoTree.js`, casePoints). */
+    get mapPlaces() {
+      return filterSaved(rows, { kind: 'places', folder });
+    },
     get kind() {
       return kind;
     },
@@ -257,10 +276,6 @@ export function createSavedState({ api, notify, assignFolder, reloadCase }) {
     },
     set folder(value) {
       folder = value;
-    },
-    /** The folders the rows on offer are filed under, each with its tally. */
-    get folders() {
-      return savedFolders(this.shownRows);
     },
     get group() {
       return group;
@@ -284,16 +299,13 @@ export function createSavedState({ api, notify, assignFolder, reloadCase }) {
     get shownRows() {
       return isMode(kind) ? mediaRows : rows;
     },
-    /** What the panel is showing, which is also what the map layer draws. */
-    get shown() {
-      return filterSaved(this.shownRows, { kind, query, folder });
-    },
     get pending() {
       return pendingLocate(rows);
     },
 
     reset,
     load,
+    loadMedia,
     loadMode,
     runLocate,
     stopLocate: () => (locateStopped = true),

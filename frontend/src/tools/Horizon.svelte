@@ -124,7 +124,7 @@
   import { createLayerSet } from '../lib/map/layerSet.svelte.js';
   import { addedLayers } from '../lib/map/addedLayersState.svelte.js';
   import { createMapLayerMemory } from '../lib/map/layerMemory.js';
-  import { savedRow } from '../lib/geoTree.js';
+  import { casePointRows, casePoints } from '../lib/geoTree.js';
   import SavedOverlay from './satellite/SavedOverlay.svelte';
   import MapNavigation from './horizon/MapNavigation.svelte';
   import HorizonView from './horizon/HorizonView.svelte';
@@ -961,7 +961,7 @@
    * case's saved work on in a case that never said otherwise: they say where one
    * is. Each case opens on the layers it was left on.
    */
-  const HORIZON_LAYERS = ['boundaries', 'saved'];
+  const HORIZON_LAYERS = ['boundaries', 'places', 'media'];
   const mapLayers = createLayerSet({
     fireKey,
     initial: HORIZON_LAYERS,
@@ -987,21 +987,15 @@
   const myLayers = addedLayers.scope('horizon');
   $effect(() => addedLayers.load(caseState.current?.id ?? null, caseState.rev));
 
-  // the case's saved work: places, captures and located photos and videos, read as Satellite reads them
+  // the case's places and placed photos and videos, its two layers, read as Satellite reads them
   const savedWork = createSavedState({ api, notify: toast, assignFolder, reloadCase });
   $effect(() => savedWork.load(caseState.current?.id ?? null));
-  $effect(() => savedWork.loadMode(caseState.current?.id, caseState.rev));
-  // the position picked under the layer's row, Media first as on the Map. The
-  // view open here is the eye the map already draws: its saved row would sit on it twice
-  const savedItems = $derived(
-    savedWork.shown.filter((row) => row.kind !== 'view' || row.view !== views.current?.name)
-  );
+  $effect(() => {
+    if (mapLayers.has('media')) savedWork.loadMedia(caseState.current?.id, caseState.rev);
+  });
+  const savedItems = $derived(casePoints(savedWork, { places: mapLayers.has('places'), media: mapLayers.has('media') }));
 
-  const layerRows = $derived(
-    mapLayers.rows({
-      saved: savedRow(savedWork, mapLayers.has('saved'), savedItems),
-    })
-  );
+  const layerRows = $derived(mapLayers.rows(casePointRows(savedWork, { places: mapLayers.has('places') })));
 
   /** A saved item picked on the map: the map goes to it. */
   function flyToSaved(row) {
@@ -2321,7 +2315,7 @@
           onremovefeature={(row, key) => personalLayers.remove(key, row)} ondeleteplace={personalPlaceDeletion.open}
           oncopyfeature={(row, feature, anchor) => personalLayers.copy(row, feature, anchor)}
         />
-        {#if mapLayers.has('saved') && caseState.current && !personalLayers.armed}
+        {#if savedItems.length && caseState.current && !personalLayers.armed}
           <SavedOverlay
             engine={ready ? engine : null}
             items={savedItems}
@@ -2426,7 +2420,7 @@
         toggle: (layer) => myLayers.toggle(caseState.current?.id, layer),
         caseId: caseState.current?.id ?? '',
         drawing: addedLayers.drawing,
-        saved: mapLayers.has('saved') && caseState.current ? savedItems : null,
+        saved: savedItems.length && caseState.current ? savedItems : null,
         onmanage: () => (uiState.tool = 'satellite'),
         onrefresh: reloadCase,
       }}

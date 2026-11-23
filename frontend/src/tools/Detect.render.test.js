@@ -263,7 +263,7 @@ describe('Detect', () => {
     ]);
     expect([...menu.querySelectorAll('button.eye')].map((entry) => entry.getAttribute('aria-label'))).toEqual([
       'Borders', 'Place names', 'Roads', 'Railways', 'Power lines', 'Sea marks', 'GPS traces',
-      'Active fires', 'Night lights', 'Saved work', 'Saved detections', 'Watched areas',
+      'Active fires', 'Night lights', 'Places', 'Media', 'Saved detections', 'Watched areas',
     ]);
     // no key: the fire layer stays listed, locked, with the way to unlock it
     expect(chip('Active fires').disabled).toBe(true);
@@ -284,7 +284,10 @@ describe('Detect', () => {
     // Detect's own findings and areas on, the case's saved places left to the other maps
     expect(chip('Saved detections').getAttribute('aria-pressed')).toBe('true');
     expect(chip('Watched areas').getAttribute('aria-pressed')).toBe('true');
-    expect(chip('Saved work').getAttribute('aria-pressed')).toBe('false');
+    expect(chip('Places').getAttribute('aria-pressed')).toBe('false');
+    expect(chip('Media').getAttribute('aria-pressed')).toBe('false');
+    // the media index is read only once its layer is on
+    expect(get.mock.calls.some(([path]) => path.includes('/satellite/media'))).toBe(false);
     expect(get.mock.calls.some(([path]) => path.includes('/sentinel/'))).toBe(false);
     expect(post).not.toHaveBeenCalled();
   });
@@ -315,24 +318,24 @@ describe('Detect', () => {
     expect(post).not.toHaveBeenCalled();
   });
 
-  it('asks Media, Places or Captures under Saved work once it is on, Media first', async () => {
-    savedIndex = [{ id: 'p1', kind: 'place', title: 'Gate', lat: 14.81, lon: 42.95 }];
+  it('draws the case’s places and placed media as two layers, each counted, and never a capture', async () => {
+    savedIndex = [
+      { id: 'p1', kind: 'place', title: 'Gate', lat: 14.81, lon: 42.95 },
+      { id: 'c1', kind: 'capture', path: 'media/cap.png', title: 'cap', lat: 14.7, lon: 42.9 },
+    ];
     savedMedia = [{ id: 'm1', key: 'm1@14.8,42.9', kind: 'media', media_kind: 'video', path: 'media/clip.mp4', title: 'clip', lat: 14.8, lon: 42.9 }];
     await open();
     starts('Layers').click(); await settle();
     const menu = target.querySelector('.layer-menu [role="dialog"]');
     expect(menu.textContent).not.toContain('Captures');
-    chip('Saved work').click(); await settle();
-    const row = () => chip('Saved work').closest('li');
-    const choices = () => [...row().querySelectorAll('.settings button')];
-    const choice = (label) => choices().find((entry) => entry.textContent.trim() === label);
-    expect(choices().map((entry) => entry.textContent.trim())).toEqual(['Media', 'Places', 'Captures']);
-    expect(choice('Media').getAttribute('aria-pressed')).toBe('true');
-    expect(row().querySelector('.detail')?.textContent).toBe('1');
-    choice('Captures').click(); await settle();
-    expect(choice('Captures').getAttribute('aria-pressed')).toBe('true');
-    // no capture in the case: nothing to count
-    expect(row().querySelector('.detail')).toBeNull();
+    const detail = (label) => chip(label).closest('li').querySelector('.detail')?.textContent ?? null;
+    expect(detail('Places')).toBe('1');
+    chip('Places').click(); await settle();
+    expect(chip('Places').getAttribute('aria-pressed')).toBe('true');
+    expect(get.mock.calls.some(([path]) => path.includes('/satellite/media'))).toBe(false);
+    chip('Media').click(); await settle();
+    expect(get.mock.calls.some(([path]) => path.includes('/satellite/media'))).toBe(true);
+    expect(detail('Media')).toBe('1');
   });
 
   it('opens on the saved detections whatever an earlier visit left', async () => {
