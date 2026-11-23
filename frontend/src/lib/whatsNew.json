@@ -9,7 +9,7 @@
           { "icon": "layers", "text": "Places and Media are two map layers of their own, both on, so a place you save is always seen; captures stay in the Saved panel." },
           { "icon": "proof", "text": "A proof saved with no place yet keeps its scene geolocated: the pill opens that proof with your new captures, and its point map lists the scene's leads." },
           { "icon": "pin", "text": "A place is one drop, red until its card gives it a colour, and a Names switch writes each name under it." },
-          { "icon": "eye", "text": "The leads of the scene being geolocated have a row in Layers that hides them from the map." },
+          { "icon": "pin", "text": "A scene's leads are counted beside its captures, in the To-do, the pill and Inspect." },
           { "icon": "satellite", "text": "Tick Layers on the map to capture the map as drawn, each source credited on the picture." },
           { "icon": "crosshair", "text": "The Geolocating pill lists what its scene gathered, deletes a capture or a frame from there, and links to Inspect, Satellite and Horizon, in the app and the extension." },
           { "icon": "proof", "text": "Make the proof says when a scene has no map capture yet, and takes you to the map." },

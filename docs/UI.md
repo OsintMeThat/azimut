@@ -3465,11 +3465,12 @@ only once that layer is on. Captures are not drawn on a map: they are listed in 
 Saved panel, and a scene's in its pill. Places ask **which folder** under their row,
 offered only where they sit in more than one, and each row counts what it draws. A map
 kept with the old Saved work layer opens with both. The switches are kept per case with
-the other layers. A **Names** switch under Places, off until pressed and kept per case
-too, writes each place's title under its mark, cut past 28 characters, and "3 places"
-under a stack of them; Compare, Detect and Horizon list it under their Places too.
-While the case geolocates a scene, a **Leads** row in the scene's colour counts its leads
-and its eye hides them from the map for the session; dropping one still works.
+the other layers. A **Names** switch, a small *T* on the Places line before its count,
+off until pressed and kept per case too, writes each place's title under its mark, cut
+past 28 characters, and "3 places" under a stack of them; Compare, Detect and Horizon
+carry it on their Places line too.
+A scene's leads are counted beside its two counts wherever a scene is (the To-do, the
+pill, Inspect's Scenes tab, Geo Proof's strip), by a pin, once it has some.
 A place draws as a drop in its own colour, red until one is picked, with a white heart,
 or the count of a stack of places in it, which wears its newest place's colour. The
 place's card picks the colour from the palette a layer's style uses: the plain colours,

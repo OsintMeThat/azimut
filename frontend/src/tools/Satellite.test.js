@@ -522,16 +522,10 @@ describe('the case’s two layers on the map, Places and Media', () => {
     expect(source).toContain('names={namesOn}');
   });
 
-  it('lists the leads of the scene being geolocated as a row of their own, hidden for this session only', () => {
-    const rows = source.slice(source.indexOf('const layerRows = $derived(['));
-    expect(rows).toContain("id: 'leads',");
-    expect(rows).toContain('dot: sceneColorAt(heldScene.order),');
-    expect(rows).toContain("detail: String(heldScene.leads?.length ?? 0),");
-    expect(rows).toContain('toggle: () => (leadsOn = !leadsOn),');
-    // the drop mode draws them, and keeps working while they are hidden
-    expect(source).toContain('leadsShown: () => leadsOn,');
-    // never kept with the layers a case opens on
-    expect(source).not.toContain("leadsOn && 'leads'");
+  it('lists no row for the leads: the scene’s counts say how many, wherever they are shown', () => {
+    const rows = source.slice(source.indexOf('const layerRows = $derived(['), source.indexOf('...(sheetPoints'));
+    expect(rows).not.toContain("id: 'leads'");
+    expect(source).not.toContain('leadsOn');
   });
 
   it('hands a capture taken with its layers what is laid on the map, credited, and its marks to paint', () => {

@@ -151,9 +151,9 @@ describe('a place’s drop, from the pin under the pointer to the place saved', 
   it('is the same box, classes and anchor wherever it is laid, plus the caller’s own class', () => {
     const plain = placeMark();
     expect(plain).toMatchObject({ className: 'saved-mark-wrap', size: DROP.size, anchor: DROP.anchor });
-    expect(plain.html).toBe(`<span class="place-drop">${placeDropSvg()}</span>`);
+    expect(plain.html).toBe(`<span class="saved-place-drop">${placeDropSvg()}</span>`);
     expect(placeMark({ className: 'sat-ghost' }).className).toBe('saved-mark-wrap sat-ghost');
-    expect(placeMark({ worked: true }).html).toContain('<i class="place-drop-worked"></i>');
+    expect(placeMark({ worked: true }).html).toContain('<i class="saved-place-drop-worked"></i>');
   });
 
   it('states the same drop the extension draws on other people’s maps', () => {

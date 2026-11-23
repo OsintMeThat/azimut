@@ -1,20 +1,23 @@
 <script>
   /**
-   * A scene's two counts, with the small mark of where it stands (`lib/sceneCounts.js`):
+   * A scene's counts, with the small mark of where it stands (`lib/sceneCounts.js`):
    * the map's captures by the map's icon, the video's frames and collages by the
-   * video's, a picture marked to geolocate by the picture's. A count at 0 is greyed, the
+   * video's, a picture marked to geolocate by the picture's, and the leads dropped for it
+   * by a pin once there are some. A count at 0 is greyed, the
    * mark of the scene being geolocated keeps the accent, and the hover says it all in
    * words. `mark` leaves the mark out where the row already draws one; `bump` pulses
    * the map's count, as the pill does when a capture lands.
    */
   import Icon from './Icon.svelte';
-  import { countWords, mapCount, sceneStage, videoCount } from '../lib/sceneCounts.js';
+  import { countWords, leadCount, mapCount, sceneStage, videoCount } from '../lib/sceneCounts.js';
 
   let { scene, live = false, mark = true, size = 11, bump = false } = $props();
 
   const stage = $derived(sceneStage(scene, live));
   const map = $derived(mapCount(scene));
   const given = $derived(videoCount(scene));
+  // the leads dropped for it on a map, counted only once there are some
+  const leads = $derived(leadCount(scene));
   const picture = $derived(scene?.file_kind === 'image');
   const words = $derived(countWords(scene, live));
 </script>
@@ -28,6 +31,11 @@
   <span class="sc-count" class:none={!given} aria-hidden="true" data-testid="count-video">
     <Icon name={picture ? 'image' : 'video'} {size} />{given}
   </span>
+  {#if leads}
+    <span class="sc-count" aria-hidden="true" data-testid="count-leads">
+      <Icon name="pin" {size} />{leads}
+    </span>
+  {/if}
 </span>
 
 <style>

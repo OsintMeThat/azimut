@@ -122,11 +122,6 @@
         data-testid="geolocating-count"
       >
         <SceneCounts scene={held} live mark={false} size={12} bump={pulse > 0} />
-        {#if held.leads?.length}
-          <span class="geo-leads" title={`${held.leads.length} ${held.leads.length === 1 ? 'lead' : 'leads'}`} data-testid="geolocating-leads">
-            <Icon name="pin" size={12} />{held.leads.length}
-          </span>
-        {/if}
       </button>
     {/key}
     <span class="geo-links">
@@ -246,15 +241,6 @@
   .geo-count.open {
     background: var(--bg-2);
     box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent) 45%, transparent);
-  }
-  .geo-leads {
-    display: inline-flex;
-    align-items: center;
-    gap: 2px;
-    color: var(--text-1);
-  }
-  .geo-leads :global(svg) {
-    color: var(--scene, var(--accent));
   }
   .geo-links {
     flex-shrink: 0;

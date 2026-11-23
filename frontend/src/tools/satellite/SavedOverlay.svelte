@@ -365,7 +365,7 @@
   }
   /* A place's drop (lib/mapMarkers.placeMark): it grows from its tip, which stays
      on the point. */
-  :global(.place-drop) {
+  :global(.saved-place-drop) {
     position: relative;
     display: block;
     width: 26px;
@@ -374,17 +374,17 @@
     transform-origin: 13px 35px;
     transition: transform 0.12s var(--ease);
   }
-  :global(.place-drop > svg) {
+  :global(.saved-place-drop > svg) {
     display: block;
     overflow: visible;
   }
-  :global(.saved-mark-wrap.is-active .place-drop),
-  :global(.saved-mark-wrap.is-hovered .place-drop),
-  :global(.saved-mark-wrap:hover .place-drop) {
+  :global(.saved-mark-wrap.is-active .saved-place-drop),
+  :global(.saved-mark-wrap.is-hovered .saved-place-drop),
+  :global(.saved-mark-wrap:hover .saved-place-drop) {
     transform: scale(1.2);
   }
   /* the proof's dot, on the drop's shoulder */
-  :global(.place-drop-worked) {
+  :global(.saved-place-drop-worked) {
     position: absolute;
     top: 0;
     right: 0;
