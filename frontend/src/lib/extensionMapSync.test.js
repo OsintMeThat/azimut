@@ -47,6 +47,9 @@ const spec = (statuses = {}, revision = 3) => ({
 });
 
 const POINT = { id: 'p1', kind: 'place', title: 'The quay', lat: 50.45, lon: 30.52 };
+const FOOTAGE = { id: 'm1', kind: 'media', media_kind: 'video', title: 'Market walk', lat: 50.451, lon: 30.521 };
+/** The saved route, answering each layer's read with that layer's rows. */
+const savedOf = (layers) => (message) => layers[message.query.kind] ?? [];
 
 beforeAll(() => {
   globalThis.Path2D = class {
@@ -91,7 +94,8 @@ function open({ answers } = {}) {
       geometry: true,
       scale_source: 'zoom',
     },
-    '/api/ingest/saved': [POINT],
+    // each layer its own read: the places hold the quay, the media nothing
+    '/api/ingest/saved': savedOf({ places: [POINT] }),
     '/api/ingest/grids': [{ name: 'sweep', title: 'Quay sweep' }],
     '/api/ingest/grid': spec(),
     ...answers,
@@ -108,7 +112,8 @@ function open({ answers } = {}) {
       sendMessage: vi.fn(async (message) => {
         if (message.type !== 'map-api') return { ok: true, data: {} };
         asked.push(message);
-        return { ok: true, data: app[message.path] ?? null };
+        const answer = app[message.path];
+        return { ok: true, data: typeof answer === 'function' ? answer(message) : (answer ?? null) };
       }),
       connect: vi.fn((info) => {
         const port = {
@@ -228,14 +233,17 @@ describe('listening at all', () => {
 });
 
 describe('the case’s points', () => {
-  it('re-reads them when one is filed elsewhere', async () => {
+  it('re-reads them when one is filed elsewhere, each layer with its own read', async () => {
     panel = open();
     await settle();
     panel.forget();
-    panel.app['/api/ingest/saved'] = [POINT, { ...POINT, id: 'p2', title: 'The bridge' }];
+    panel.app['/api/ingest/saved'] = savedOf({ places: [POINT, { ...POINT, id: 'p2', title: 'The bridge' }] });
     panel.nudge({ type: 'place', case_id: CASE, title: 'The bridge' });
     await vi.waitFor(() => expect(panel.tools.pins.rows).toHaveLength(2));
-    expect(panel.queries('/api/ingest/saved').at(-1)).toEqual({ case_id: CASE, kind: 'media' });
+    expect(panel.queries('/api/ingest/saved')).toEqual([
+      { case_id: CASE, kind: 'places' },
+      { case_id: CASE, kind: 'media' },
+    ]);
   });
 
   it('re-reads them when the app moves its own saved work', async () => {
@@ -256,26 +264,51 @@ describe('the case’s points', () => {
     expect(panel.asks()).not.toContain('/api/ingest/saved');
   });
 
-  it('reads one position at a time, the footage first', async () => {
-    // media has an index of its own on the app's side, so switching position is
+  it('draws the places and the media together, both on from the start, and no captures', async () => {
+    panel = open({ answers: { '/api/ingest/saved': savedOf({ places: [POINT], media: [FOOTAGE], captures: [POINT] }) } });
+    await settle();
+    expect(panel.queries('/api/ingest/saved').map((query) => query.kind)).toEqual(['places', 'media']);
+    expect(panel.tools.pins.rows.map((row) => row.id)).toEqual(['p1', 'm1']);
+    panel.pick('pins');
+    const toggles = [...panel.root.querySelectorAll('[data-act="pin-show"]')];
+    expect(toggles.map((b) => [b.textContent, b.getAttribute('aria-pressed'), b.title])).toEqual([
+      ['Places', 'true', "Hide the case's places"],
+      ['Media', 'true', "Hide the case's located media"],
+    ]);
+  });
+
+  it('puts one layer away and brings it back with a read of its own, the other untouched', async () => {
+    // media has an index of its own on the app's side, so bringing it back is
     // another read rather than a filter over rows the panel already holds
-    panel = open();
+    panel = open({ answers: { '/api/ingest/saved': savedOf({ places: [POINT], media: [FOOTAGE] }) } });
     await settle();
     panel.pick('pins');
     panel.forget();
-    panel.app['/api/ingest/saved'] = [{ ...POINT, id: 'c1', kind: 'capture', title: 'Roof' }];
-    panel.press('pin-kind', { kind: 'captures' });
-    await vi.waitFor(() => expect(panel.tools.pins.rows).toHaveLength(1));
-    expect(panel.queries('/api/ingest/saved').at(-1)).toEqual({ case_id: CASE, kind: 'captures' });
-    expect(panel.tools.pins.kind).toBe('captures');
+    panel.press('pin-show', { kind: 'media' });
+    expect(panel.tools.pins.rows.map((row) => row.id)).toEqual(['p1']);
+    expect(panel.root.querySelector('[data-act="pin-show"][data-kind="media"]').getAttribute('aria-pressed')).toBe('false');
+    expect(panel.root.querySelector('[data-act="pin-show"][data-kind="media"]').title).toBe("Draw the case's located media");
+    await settle(50);
+    expect(panel.asks()).not.toContain('/api/ingest/saved');
+    // away, it is not read on a nudge either
+    panel.nudge({ type: 'saved', case_id: CASE });
+    await vi.waitFor(() => expect(panel.queries('/api/ingest/saved')).toEqual([{ case_id: CASE, kind: 'places' }]));
+    panel.forget();
+    panel.press('pin-show', { kind: 'media' });
+    await vi.waitFor(() => expect(panel.tools.pins.rows.map((row) => row.id)).toEqual(['p1', 'm1']));
+    expect(panel.queries('/api/ingest/saved')).toEqual([{ case_id: CASE, kind: 'media' }]);
+    // both away: nothing drawn, and the tool says so
+    panel.press('pin-show', { kind: 'media' });
+    panel.press('pin-show', { kind: 'places' });
+    expect(panel.tools.pins.rows).toEqual([]);
+    expect(panel.root.querySelector('.readout').textContent).toBe('Places and media are put away');
   });
 
-  it('goes to the position a point it just filed is on', async () => {
-    // filing one while the footage is drawn would land it on a position that
-    // cannot show it
+  it('brings Places back to show a point it just filed there, and ends the drop', async () => {
     panel = open();
     await settle();
     panel.pick('pins');
+    panel.press('pin-show', { kind: 'places' });
     panel.press('pin-drop');
     panel.clickMap();
     // a place is filed under its name
@@ -284,8 +317,12 @@ describe('the case’s points', () => {
     title.dispatchEvent(new window.Event('input', { bubbles: true }));
     panel.forget();
     panel.press('pin-save');
-    await vi.waitFor(() => expect(panel.tools.pins.kind).toBe('places'));
-    expect(panel.queries('/api/ingest/saved').at(-1)).toEqual({ case_id: CASE, kind: 'places' });
+    await vi.waitFor(() => expect(panel.tools.pins.isShown('places')).toBe(true));
+    await vi.waitFor(() => expect(panel.queries('/api/ingest/saved')).toEqual([{ case_id: CASE, kind: 'places' }]));
+    // one point, one click: the map is the map again
+    expect(panel.tools.pins.dropping).toBe(false);
+    expect(panel.root.querySelector('canvas').style.pointerEvents).toBe('none');
+    expect(panel.root.querySelector('[data-act="pin-drop"]').textContent).toBe('Place a point');
   });
 });
 

@@ -1235,9 +1235,19 @@
   }
 
   function canvasMove(event) {
+    if (tools.pins.dropping) {
+      ghostAt = { x: event.clientX, y: event.clientY };
+      placeGhost();
+    }
     if (!box) return;
     box.to = { x: event.clientX, y: event.clientY };
     redraw();
+  }
+
+  /** Off the map, onto the panel, a window or a lead: no mark says where a click lands. */
+  function canvasLeave() {
+    ghostAt = null;
+    placeGhost();
   }
 
   function canvasUp() {
@@ -1477,23 +1487,28 @@
     await readUrl(true);
   }
 
-  async function loadPins() {
-    if (!state.caseId) return;
-    const wanted = tools.pins.kind;
-    try {
-      const rows = await call("GET", "/api/ingest/saved", {
-        query: { case_id: state.caseId, kind: wanted },
-      });
-      // the switch moved again while this was in flight: those rows belong to a
-      // position nobody is looking at
-      if (tools.pins.kind !== wanted) return;
-      tools.pins.load(rows);
-      tools.pins.atZoom(state.view?.zoom);
-      render();
-    } catch (e) {
-      state.note = e.message;
-      render();
-    }
+  /** Each read of a layer takes a number, so an older answer landing late is dropped. */
+  const pinReads = {};
+
+  /** Read the layers that are on, each its own request, `kinds` alone when named. */
+  async function loadPins(kinds = tools.pins.kinds.map((entry) => entry.id)) {
+    const caseId = state.caseId;
+    if (!caseId) return;
+    await Promise.all(
+      kinds.filter((kind) => tools.pins.isShown(kind)).map(async (kind) => {
+        const mine = (pinReads[kind] = (pinReads[kind] ?? 0) + 1);
+        try {
+          const rows = await call("GET", "/api/ingest/saved", { query: { case_id: caseId, kind } });
+          // a newer read, another case, or the layer put away while this was in flight
+          if (mine !== pinReads[kind] || caseId !== state.caseId) return;
+          tools.pins.load(kind, rows);
+        } catch (e) {
+          state.note = e.message;
+        }
+      })
+    );
+    tools.pins.atZoom(state.view?.zoom);
+    render();
   }
 
   /** File the draft point as a place, the same route the popup files one with —
@@ -1519,13 +1534,13 @@
           title: state.pinTitle.trim(),
         },
       });
+      // filed, the drop is over: a place is one click, a lead one per click
       tools.pins.clearDraft();
       state.pinTitle = "";
       state.note = "";
-      // a point filed while the footage is drawn would land on a position that
-      // cannot show it: go to the one it belongs to rather than swallowing it
-      tools.pins.setKind("places");
-      await loadPins();
+      // a point filed with Places put away would be swallowed: they come back to show it
+      tools.pins.setShown("places", true);
+      await loadPins(["places"]);
     } catch (e) {
       state.note = e.message;
     }
@@ -2243,6 +2258,54 @@
   }
   leadLayer.addEventListener("pointerdown", trusted(onLeadDown));
 
+  // --- where the next click lands --------------------------------------------
+  //
+  // While the drop is armed a faint mark rides under the pointer, its tip where
+  // the click will file: the next lead, numbered in the scene's colour, while a
+  // scene is geolocated, else a place. Only over the map: off it, over a window
+  // or the panel, and while a point waits for its name, it says nothing. It takes
+  // no pointer, so the click goes through to the map. A view whose clicks file
+  // the address's own point rather than the pixel shows none, since it would lie.
+
+  const ghostLayer = document.createElement("div");
+  Object.assign(ghostLayer.style, { position: "fixed", inset: "0", pointerEvents: "none", zIndex: "1" });
+  const ghost = document.createElement("div");
+  ghost.className = "ghost";
+  ghost.innerHTML = `<div class="lead-pin"><b></b></div>`;
+  ghost.style.display = "none";
+  ghostLayer.appendChild(ghost);
+  root.appendChild(ghostLayer);
+  let ghostAt = null; // the pointer over the map while the drop is armed
+  let ghostFace = ""; // what the mark shows, so a move only moves it
+
+  /** The number the next lead of the scene held will get, as the app numbers it. */
+  const nextLead = () => heldLeads().reduce((top, lead) => Math.max(top, lead.n), 0) + 1;
+
+  function placeGhost() {
+    if (!tools.pins.dropping) ghostAt = null;
+    const shown = ghostAt && !tools.pins.draft && state.view && verdict().ok;
+    if (!shown) {
+      ghost.style.display = "none";
+      return;
+    }
+    const geo = state.scenes.geo;
+    const face = geo ? `${T.sceneColor(geo)} ${nextLead()}` : "place";
+    if (face !== ghostFace) {
+      ghostFace = face;
+      ghost.classList.toggle("place", !geo);
+      if (geo) {
+        ghost.style.setProperty("--scene", T.sceneColor(geo));
+        ghost.querySelector("b").textContent = String(nextLead());
+      } else {
+        ghost.style.removeProperty("--scene");
+        ghost.querySelector("b").innerHTML = icon("pin", 11);
+      }
+    }
+    ghost.style.left = `${ghostAt.x}px`;
+    ghost.style.top = `${ghostAt.y}px`;
+    ghost.style.display = "";
+  }
+
   /** The scene's video or picture over the map: the window already holding it, else a new one. */
   function showScene(scene) {
     tools.refs.holdScene(scene, sceneFile(scene.video));
@@ -2814,7 +2877,7 @@
     .gth-ask button.danger:hover:not([disabled]) { background: ${t.danger}; border-color: ${t.danger}; filter: brightness(1.08); }
     /* The scene's leads over the map: the app's teardrop in the scene's colour, its
        number in it, the sharp corner on the spot. Only the mark takes the pointer. */
-    .lead { position: absolute; width: 0; height: 0; }
+    .lead, .ghost { position: absolute; width: 0; height: 0; }
     .lead-pin {
       position: absolute; left: -10px; top: -24px; width: 20px; height: 20px;
       display: grid; place-items: center; pointer-events: auto; cursor: grab; touch-action: none; user-select: none;
@@ -2835,6 +2898,12 @@
       background: rgba(20, 20, 20, .92); border: 1px solid ${t.borderStrong}; border-radius: 5px; pointer-events: none;
     }
     .lead.lit .lead-name { display: block; }
+    /* where the next click lands: faint, and never in the way of the click */
+    .ghost { opacity: .55; }
+    .ghost .lead-pin { pointer-events: none; cursor: default; }
+    .ghost .lead-pin b { display: grid; place-items: center; }
+    .ghost.place .lead-pin { color: ${t.accent}; }
+    .ghost.place .lead-pin::before { background: rgba(20, 20, 20, .82); border: 1.5px solid ${t.accent}; }
     .geo-proof {
       flex: none; gap: 5px; padding: 3px 9px; border-radius: 999px;
       font-size: 11px; font-weight: 500; color: ${t.text1};
@@ -3025,9 +3094,13 @@
         ${button("pin-drop", "pin", drop, tool.dropping, dropTitle)}
         <div class="row wrap">
           ${tool.kinds
-            .map((entry) =>
-              button("pin-kind", "", entry.label, tool.kind === entry.id, ` data-kind="${esc(entry.id)}"`)
-            )
+            .map((entry) => {
+              // two layers, each on or off on its own, as the app's map draws them
+              const on = tool.isShown(entry.id);
+              const what = entry.id === "places" ? "the case's places" : "the case's located media";
+              return button("pin-show", entry.id === "places" ? "pin" : "image", entry.label, on,
+                ` data-kind="${esc(entry.id)}" aria-pressed="${on}" title="${on ? `Hide ${what}` : `Draw ${what}`}"`);
+            })
             .join("")}
         </div>
         <div class="readout small">${esc(leads && tool.dropping ? "Each click drops a lead, Esc stops" : readout)}</div>
@@ -3503,6 +3576,7 @@
     panel.classList.toggle("collapsed", state.collapsed);
     paint();
     fillThumbs();
+    placeGhost();
   }
 
   /** What the status says, in words: the view's facts, or why nothing is drawn. */
@@ -3667,11 +3741,11 @@
       syncArmed();
       return render();
     }
-    if (act === "pin-kind") {
-      if (!tools.pins.setKind(target.dataset.kind)) return;
-      redraw();
+    if (act === "pin-show") {
+      const kind = target.dataset.kind;
+      if (!tools.pins.setShown(kind, !tools.pins.isShown(kind))) return;
       render();
-      return loadPins();
+      return tools.pins.isShown(kind) ? loadPins([kind]) : undefined;
     }
     if (act === "pin-save") return placePin();
     if (act === "pin-cancel") {
@@ -4038,6 +4112,7 @@
     [layer.canvas, "pointerdown", trusted(canvasDown), false],
     [layer.canvas, "pointermove", trusted(canvasMove), false],
     [layer.canvas, "pointerup", trusted(canvasUp), false],
+    [layer.canvas, "pointerleave", trusted(canvasLeave), false],
   ];
   for (const [node, type, fn, opts] of listeners) node.addEventListener(type, fn, opts);
   const poll = setInterval(() => readUrl(), URL_POLL_MS);

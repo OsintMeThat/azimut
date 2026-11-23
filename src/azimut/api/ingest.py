@@ -632,10 +632,11 @@ def saved_points(
 ) -> list[dict[str, Any]]:
     """The case's points, for drawing over another map.
 
-    One position at a time, the same three the app's own panel offers and in the
-    same order: the located footage, the points dropped by hand, the imagery
-    captured. Media reads its own index — a file carries no coordinates and
-    stands where the graph puts it — and the other two filter the saved one.
+    One kind a request: the located footage or the places dropped by hand, the
+    panel's two layers, each read on its own. Media reads its own index, since a
+    file carries no coordinates and stands where the graph puts it, and places
+    filter the saved one. ``captures`` is no longer drawn on a map; it is still
+    answered for a panel installed before 0.3.4 until its extension updates.
 
     Trimmed to what a pin needs. The app's own indexes carry thumbnails, folder
     counts, continents and link tallies, all of which would cross into the

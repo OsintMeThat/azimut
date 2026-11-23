@@ -114,7 +114,7 @@ export const PAGES = {
     shot: 'extension-tools',
     marks: [
       { anchor: 'ext.measure', title: 'Measure', text: 'Distances, rings and lines of sight, to the map’s own scale.' },
-      { anchor: 'ext.points', title: 'Points', text: 'The case’s media, places and captures where they stand, and new points to file.' },
+      { anchor: 'ext.points', title: 'Points', text: 'The case’s places and media where they stand, and new points to file.' },
       { anchor: 'ext.sky', title: 'Sun & moon', text: 'Where they stood at the hour you pick, to read a shadow.' },
       { anchor: 'ext.grid', title: 'Search grid', text: 'A grid to sweep cell by cell, kept with the case.' },
       { anchor: 'ext.refs', title: 'Refs', text: 'The case’s photos and videos held over the map while you pan.' },
@@ -423,7 +423,7 @@ export const PAGES = {
           ],
         },
       },
-      { anchor: 'sat.place', title: 'Save place', text: 'Click on the map to drop a pin, name it, and it is a place. While a scene is geolocated it drops leads.' },
+      { anchor: 'sat.place', title: 'Save place', text: 'A pin follows the pointer: click to drop it, name it, and it is a place. While a scene is geolocated it drops leads.' },
       {
         anchor: 'sat.capture',
         title: 'Capture',

@@ -17,7 +17,7 @@ const memory = () => createLayerMemory(() => storage);
 
 describe('what a map may keep', () => {
   it('keeps every catalogue layer but the fire and night ones, which show a day', () => {
-    expect(keptLayers(['firms', 'roads', 'nightlights', 'saved', 'boundaries'])).toEqual(['boundaries', 'roads', 'saved']);
+    expect(keptLayers(['firms', 'roads', 'nightlights', 'places', 'boundaries'])).toEqual(['boundaries', 'roads', 'places']);
   });
 
   it('drops a retired or unknown layer', () => {
@@ -27,9 +27,9 @@ describe('what a map may keep', () => {
 
 describe('a map’s switches', () => {
   it('opens a case that never said anything on the map’s defaults', () => {
-    const satellite = createMapLayerMemory('satellite', ['boundaries', 'placenames', 'saved'], memory());
-    expect(satellite.recall('c1')).toEqual(['boundaries', 'placenames', 'saved']);
-    expect(satellite.recall(null)).toEqual(['boundaries', 'placenames', 'saved']);
+    const satellite = createMapLayerMemory('satellite', ['boundaries', 'placenames', 'places', 'media'], memory());
+    expect(satellite.recall('c1')).toEqual(['boundaries', 'placenames', 'places', 'media']);
+    expect(satellite.recall(null)).toEqual(['boundaries', 'placenames', 'places', 'media']);
   });
 
   it('opens the case again on what was kept, per map and per case', () => {

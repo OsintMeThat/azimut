@@ -238,26 +238,27 @@
    *
    * **Nothing is labelled until it is pointed at.** A case with fifty saved
    * points drew fifty names across the map, which is a screenshot of nothing.
-   * Points at the same spot merge into one counted mark, exactly as the app's
-   * Saved layer merges them, and the name belongs to the mark under the pointer
-   * or the one held open by a click.
+   * Points at the same spot merge into one counted mark, and the name belongs
+   * to the mark under the pointer or the one held open by a click.
    *
-   * **One position at a time**, the same three the app's panel offers: the
-   * located footage first, then the points dropped by hand, then the captured
-   * imagery. Each is its own read — the panel calls back for the rows rather
-   * than filtering a set it holds, because media never was in the saved index.
+   * **Two layers, each on or off**, as the app's map offers them: the places
+   * dropped by hand and the located media, both drawn from the start. Each is
+   * its own read, because media never was in the saved index, and a layer put
+   * away drops its rows rather than keeping a copy nobody looks at. Captures are
+   * not drawn: they are pictures of a map, and this is a map.
    */
-  /** What the points tool can draw, in the order a case is read. Mirrors the
-   *  app's own switch (`lib/geoTree.KINDS`) and the `kind` the saved route takes. */
+  /** What the points tool can draw. Mirrors the app's two catalog layers and the
+   *  `kind` the saved route takes. */
   const PIN_KINDS = [
-    { id: "media", label: "Media" },
     { id: "places", label: "Places" },
-    { id: "captures", label: "Captures" },
+    { id: "media", label: "Media" },
   ];
+  const PIN_KIND_IDS = PIN_KINDS.map((entry) => entry.id);
 
   function createPins() {
-    let rows = [];
-    let kind = PIN_KINDS[0].id;
+    // each layer's rows, as its own read gave them, and whether it is drawn
+    const rowsOf = Object.fromEntries(PIN_KIND_IDS.map((id) => [id, []]));
+    const shown = Object.fromEntries(PIN_KIND_IDS.map((id) => [id, true]));
     let zoom = null;
     let marks = [];
     let dropping = false;
@@ -265,8 +266,9 @@
     let hovered = null; // mark key under the pointer
     let held = null; // mark key clicked open
 
+    const drawn = () => PIN_KIND_IDS.flatMap((id) => (shown[id] ? rowsOf[id] : []));
     const regroup = () => {
-      marks = groupSavedMarkers(rows, markerPrecision(zoom));
+      marks = groupSavedMarkers(drawn(), markerPrecision(zoom));
     };
 
     const nameOf = (mark) =>
@@ -280,23 +282,24 @@
       get armed() {
         return dropping;
       },
+      /** The rows drawn, every layer that is on. */
       get rows() {
-        return rows;
+        return drawn();
       },
       get marks() {
         return marks;
       },
       kinds: PIN_KINDS,
-      get kind() {
-        return kind;
+      /** Whether a layer is drawn. */
+      isShown(kind) {
+        return shown[kind] === true;
       },
-      /** Switch position. The rows belong to the position that asked for them,
-       *  so they go with it rather than being drawn under the new label until
-       *  the panel's own read lands. */
-      setKind(next) {
-        if (!PIN_KINDS.some((entry) => entry.id === next) || next === kind) return false;
-        kind = next;
-        rows = [];
+      /** Put a layer on or away. Put away, its rows go with it, and the panel reads
+       *  them again when it comes back. False when nothing changed. */
+      setShown(kind, on) {
+        if (!PIN_KIND_IDS.includes(kind) || shown[kind] === !!on) return false;
+        shown[kind] = !!on;
+        rowsOf[kind] = [];
         regroup();
         return true;
       },
@@ -312,12 +315,15 @@
       get held() {
         return held;
       },
-      /** The rows of the open position, filtered to what can actually be drawn. */
-      load(index) {
-        rows = (index ?? []).filter(
+      /** One layer's rows, filtered to what can actually be drawn. A layer put
+       *  away while they were on their way keeps nothing. */
+      load(kind, index) {
+        if (!shown[kind]) return false;
+        rowsOf[kind] = (index ?? []).filter(
           (row) => Number.isFinite(row.lat) && Number.isFinite(row.lon)
         );
         regroup();
+        return true;
       },
       /** Marks merge by a precision that follows the zoom, so this is re-run
        *  whenever the view changes scale. */
@@ -387,14 +393,8 @@
       },
       shapes() {
         const out = marks.map((mark) => {
-          // one kind draws as itself, a stack of imagery as a capture, and any
-          // mix holding a place as the place (`markKind` in the app)
-          const only =
-            mark.kinds.length === 1
-              ? mark.kinds[0]
-              : mark.kinds.every((kind) => THEME.SAVED_CAPTURE_KINDS.includes(kind))
-                ? "capture"
-                : "place";
+          // one kind draws as itself, and a place and a file at one spot as the place
+          const only = mark.kinds.length === 1 ? mark.kinds[0] : "place";
           const shown = mark.key === hovered || mark.key === held;
           // a stack of files draws as footage only when all of it is footage,
           // the way the app's own layer glyphs one (`SavedOverlay.svelte`)
@@ -436,10 +436,10 @@
             : "Filing the point you clicked";
         }
         if (dropping) return "Click the map to place a point";
-        if (!rows.length) {
-          const label = PIN_KINDS.find((entry) => entry.id === kind)?.label.toLowerCase();
-          return `No ${label} in this case yet`;
-        }
+        const on = PIN_KINDS.filter((entry) => shown[entry.id]).map((entry) => entry.label.toLowerCase());
+        if (!on.length) return "Places and media are put away";
+        const rows = drawn();
+        if (!rows.length) return `No ${on.join(" or ")} in this case yet`;
         const merged = rows.length - marks.length;
         return merged > 0 ? `${rows.length} here, in ${marks.length} marks` : `${rows.length} on this map`;
       },

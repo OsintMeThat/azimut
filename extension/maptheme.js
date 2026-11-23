@@ -131,10 +131,6 @@
   /** Which glyph a saved row is drawn with — `SavedOverlay.svelte`'s own map. */
   const SAVED_GLYPH = { place: "pin", capture: "satellite", screenshot: "screen", comparison: "compare", view: "horizon" };
 
-  /** The kinds a stack may mix and still draw as a capture — `geoTree.js`'s
-   *  `CAPTURE_KINDS`. Any other mix draws as a place (`markKind` in the app). */
-  const SAVED_CAPTURE_KINDS = ["capture", "screenshot", "comparison", "view"];
-
   window.AzimutMapTheme = {
     TOKENS,
     SCENE_COLORS,
@@ -146,7 +142,6 @@
     MEASURE_DOT,
     ICONS,
     SAVED_GLYPH,
-    SAVED_CAPTURE_KINDS,
     icon,
   };
 })();

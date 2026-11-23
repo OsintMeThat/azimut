@@ -119,7 +119,7 @@ fold. **Capture an area** comes first, then the scenes to geolocate, then six to
 | Tool | What it does |
 |---|---|
 | Measure | Distance along a clicked path, or the area it encloses. Same formulas and same wording as the app. |
-| Points | Draws one of the case's three positions (its located media, its places, its captures) on the map, and files a new point under the name you give it. While a scene is geolocated it drops leads instead. |
+| Points | Draws the case's places and its located media on the map, each switched on or off on its own, and files a new point under the name you give it. While a scene is geolocated it drops leads instead. |
 | Sun & moon | Plants a point and draws the day's sun and moon arcs around it, with a date and an hour slider. |
 | Grid | Drags a box or clicks out a shape, cuts it into metric cells, and marks each cleared or flagged. The grid is saved into the case and opens in the app's own Grid Search. |
 | Refs | Floats an image or a video from the case over the map, to compare against the imagery while you pan. |
@@ -154,7 +154,8 @@ nothing new.
 **Leads.** While a scene is geolocated, Points' **Drop a lead** turns each click on
 the map into a lead for it: a spot it may be, numbered, drawn in the scene's colour
 whatever tool is open, and kept with the scene rather than among the case's places.
-The drop stays armed for the next one until its button or Esc puts it down. Drag a
+The drop stays armed for the next one until its button or Esc puts it down, and the
+pin under the pointer is the next lead, with its number. Drag a
 lead to move it, click it to show its name. The app erases a scene's leads
 when it is given up or a proof takes it up.
 
@@ -280,15 +281,19 @@ the several addresses it writes during one zoom. Dimmed means "not right now",
 which is the honest thing for a tool whose output ends up in a case file.
 
 **Saved points are drawn without their names.** Point at a mark to read it, click
-to keep it open. Points at the same spot merge into one counted mark, the way the
-app's own Saved layer merges them.
+to keep it open. Points at the same spot merge into one counted mark.
 
-**One position is drawn at a time**, the same three the app's Saved panel offers
-and in the same order: the located media the case collected, the places dropped
-by hand, the captures taken of them. The panel opens on the media, and switching
-position reads that position, because a file carries no coordinates of its own and is
-not in the index the other two come from. Filing a point goes to Places, so the
-point just filed is drawn rather than swallowed.
+**Places and Media are two layers**, as on the app's map: the places dropped by
+hand and the located media the case collected, both drawn from the start and each
+put away or back with its own button. Each is read on its own, because a file
+carries no coordinates of its own and is not in the index places come from.
+Captures are not drawn: they are pictures of a map. Filing a point puts Places
+back if it was away, so the point just filed is drawn rather than swallowed.
+
+**Placing a point** is one click. Once **Place a point** is pressed, a faint pin
+follows the pointer over the map where the click will land; the click puts the
+point there, you name it, and **File it** files it and ends the drop. Esc ends it
+too.
 
 **The case stays in step, in every window onto it.** Save a point in the app and
 it appears here; mark a cell here and it appears in the app's own Grid Search and

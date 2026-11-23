@@ -825,6 +825,8 @@ describe('the leads on the map', () => {
     expect(parseFloat(drawn[1].style.left)).toBeCloseTo(at.x, 6);
     expect(parseFloat(drawn[1].style.top)).toBeCloseTo(at.y, 6);
     expect(drawn[1].querySelector('.lead-pin').title).toBe('Lead 3');
+    // a lead takes the pointer, to be dragged; the map under the rest of the layer keeps it
+    expect(window.getComputedStyle(drawn[1].querySelector('.lead-pin')).pointerEvents).toBe('auto');
     // and counted in the pill, by the scene's two counts, as the app's pill shows them
     expect(panel.$('.geo-pill .geo-leads').textContent).toBe('2');
   });
@@ -1181,5 +1183,92 @@ describe('the pill’s quick links', () => {
     answer({ ok: true });
     await settle();
     expect(panel.$$('.geo-pill .geo-link').every((b) => !b.disabled)).toBe(true);
+  });
+});
+
+describe('where the next click lands', () => {
+  const ghost = () => panel.$('.ghost');
+  const hover = (at) =>
+    panel.root.querySelector('canvas').dispatchEvent(new window.PointerEvent('pointermove', { clientX: at.x, clientY: at.y }));
+  const leave = () => panel.root.querySelector('canvas').dispatchEvent(new window.PointerEvent('pointerleave', {}));
+
+  it('rides under the pointer as a place once the drop is armed, and never takes the click', async () => {
+    panel = open();
+    await settle();
+    panel.$('[data-tab="pins"]').click();
+    hover({ x: 500, y: 300 });
+    expect(ghost().style.display).toBe('none');
+    panel.press('pin-drop');
+    hover({ x: 500, y: 300 });
+    expect(ghost().style.display).toBe('');
+    expect([ghost().style.left, ghost().style.top]).toEqual(['500px', '300px']);
+    expect(ghost().classList.contains('place')).toBe(true);
+    expect(ghost().querySelector('b svg path').getAttribute('d')).toBe(window.AzimutMapTheme.ICONS.pin);
+    hover({ x: 520, y: 310 });
+    expect([ghost().style.left, ghost().style.top]).toEqual(['520px', '310px']);
+    // faint, and the pointer goes through it to the map
+    expect(window.getComputedStyle(ghost().querySelector('.lead-pin')).pointerEvents).toBe('none');
+    // off the map, onto the panel or a window: nothing says where a click lands
+    leave();
+    expect(ghost().style.display).toBe('none');
+  });
+
+  it('goes while the point waits for its name, and with the drop, which Esc ends', async () => {
+    panel = open();
+    await settle();
+    panel.$('[data-tab="pins"]').click();
+    panel.press('pin-drop');
+    hover({ x: 500, y: 300 });
+    clickMap(panel, { x: 500, y: 300 });
+    await settle();
+    hover({ x: 510, y: 300 });
+    expect(ghost().style.display).toBe('none');
+    // a place is one click: Esc puts the drop down with the point half placed
+    window.dispatchEvent(new window.KeyboardEvent('keydown', { key: 'Escape' }));
+    expect(panel.tools.pins.dropping).toBe(false);
+    expect(panel.tools.pins.draft).toBe(null);
+    expect(panel.$('[data-act="pin-drop"]').textContent).toBe('Place a point');
+    panel.press('pin-drop');
+    expect(ghost().style.display).toBe('none'); // the pointer is on the panel, not the map
+  });
+
+  it('is the next lead while a scene is geolocated, numbered after the last, in its colour', async () => {
+    const kept = [...LEADS];
+    panel = open({
+      '/api/ingest/scenes': { ...structuredClone(QUEUE), geolocating: { ...BRIDGE, order: 1, leads: LEADS } },
+      '/api/ingest/leads': (message) => {
+        const made = lead('ld_9', 4, message.body.lat, message.body.lon);
+        kept.push(made);
+        return { lead: made, geolocating: { ...BRIDGE, order: 1, leads: [...kept] } };
+      },
+    });
+    await settle();
+    panel.$('[data-tab="pins"]').click();
+    panel.press('pin-drop');
+    hover({ x: 500, y: 300 });
+    expect(ghost().classList.contains('place')).toBe(false);
+    // the leads are 1 and 3: the next is 4, as the app numbers it
+    expect(ghost().querySelector('b').textContent).toBe('4');
+    expect(ghost().style.getPropertyValue('--scene')).toBe(window.AzimutMapTheme.SCENE_COLORS[1]);
+    clickMap(panel, { x: 500, y: 300 });
+    await settle();
+    // armed for the next one, which is 5
+    hover({ x: 540, y: 330 });
+    expect(ghost().style.display).toBe('');
+    expect(ghost().querySelector('b').textContent).toBe('5');
+  });
+
+  it('shows nowhere on a view whose click files the address’s own point', async () => {
+    panel = open({
+      '/api/ingest/parse': {
+        site: 'google-maps', label: 'Google Maps', lat: 50.45, lon: 30.52, zoom: null, bearing: 0,
+        projection: 'webmercator', view_kind: 'street', geometry: false, scale_source: null,
+      },
+    });
+    await settle();
+    panel.$('[data-tab="pins"]').click();
+    panel.press('pin-drop');
+    hover({ x: 500, y: 300 });
+    expect(ghost().style.display).toBe('none');
   });
 });

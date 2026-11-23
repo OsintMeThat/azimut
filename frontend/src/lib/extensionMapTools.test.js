@@ -376,15 +376,16 @@ describe('measure', () => {
 
 describe('saved points', () => {
   const VIEW = { lat: 48.8, lon: 2.3 };
-  const ROWS = [
+  const PLACES = [
     { id: 'a', key: 'a', kind: 'place', title: 'Gate', lat: 48.8584, lon: 2.2945 },
-    { id: 'b', key: 'b', kind: 'capture', title: 'Roof', lat: 48.8584, lon: 2.2945 },
     { id: 'c', key: 'c', kind: 'place', title: 'Far', lat: 48.9, lon: 2.4 },
   ];
+  const MEDIA = [{ id: 'b', key: 'b', kind: 'media', media_kind: 'image', title: 'Roof', lat: 48.8584, lon: 2.2945 }];
 
   const loaded = (zoom = 18) => {
     const tool = ext.createPins();
-    tool.load(ROWS);
+    tool.load('places', PLACES);
+    tool.load('media', MEDIA);
     tool.atZoom(zoom);
     return tool;
   };
@@ -438,7 +439,7 @@ describe('saved points', () => {
     expect(tool.marks).toHaveLength(2);
     const stacked = tool.shapes().find((s) => s.count === 2);
     expect(stacked).toBeTruthy();
-    // a stack of two kinds is drawn with the shared place glyph
+    // a place and a file at one spot are drawn with the place's glyph
     expect(stacked.glyph).toBe('pin');
     expect(tool.readout()).toBe('3 here, in 2 marks');
   });
@@ -450,15 +451,16 @@ describe('saved points', () => {
     expect(tool.marks).toHaveLength(1); // whole degrees: a country is one mark
   });
 
-  it('draws a lone place outlined and a capture filled, like the app', () => {
+  it('draws a lone place outlined and a file filled, like the app', () => {
     const tool = ext.createPins();
-    tool.load([ROWS[2], { id: 'd', key: 'd', kind: 'capture', title: 'Shot', lat: 40, lon: 3 }]);
+    tool.load('places', [PLACES[1]]);
+    tool.load('media', [{ id: 'd', key: 'd', kind: 'media', media_kind: 'image', title: 'Shot', lat: 40, lon: 3 }]);
     tool.atZoom(18);
-    const [place, capture] = tool.shapes();
+    const [place, file] = tool.shapes();
     expect(place.place).toBe(true);
     expect(place.glyph).toBe('pin');
-    expect(capture.place).toBe(false);
-    expect(capture.glyph).toBe('satellite');
+    expect(file.place).toBe(false);
+    expect(file.glyph).toBe('image');
   });
 
   it('finds the mark under a pointer, and nothing when there is none', () => {
@@ -482,7 +484,7 @@ describe('saved points', () => {
 
   it('draws footage with its own glyph, a stack of it only when all of it is', () => {
     const tool = ext.createPins();
-    tool.load([
+    tool.load('media', [
       { id: 'v', key: 'v', kind: 'media', media_kind: 'video', title: 'Clip', lat: 40, lon: 3 },
       { id: 'p', key: 'p', kind: 'media', media_kind: 'image', title: 'Photo', lat: 41, lon: 3 },
     ]);
@@ -490,7 +492,7 @@ describe('saved points', () => {
     expect(tool.shapes().map((shape) => shape.glyph)).toEqual(['video', 'image']);
 
     // one photograph in the stack and the mark is no longer footage of one kind
-    tool.load([
+    tool.load('media', [
       { id: 'v', key: 'v', kind: 'media', media_kind: 'video', title: 'Clip', lat: 40, lon: 3 },
       { id: 'p', key: 'p', kind: 'media', media_kind: 'image', title: 'Photo', lat: 40, lon: 3 },
     ]);
@@ -498,22 +500,34 @@ describe('saved points', () => {
     expect(tool.shapes()[0].glyph).toBe('image');
   });
 
-  it('opens on the footage, and drops the rows with the position it left', () => {
-    // media is not in the saved index: the rows belong to the position that
-    // asked for them, and the panel reads again rather than filtering
+  it('draws places and media together, each put away on its own, and no captures', () => {
+    // media is not in the saved index: each layer's rows are its own read, and
+    // a layer put away drops them, to be read again when it comes back
     const tool = loaded();
-    expect(tool.kind).toBe('media');
-    expect(tool.kinds.map((entry) => entry.id)).toEqual(['media', 'places', 'captures']);
+    expect(tool.kinds.map((entry) => entry.id)).toEqual(['places', 'media']);
+    expect(['places', 'media'].map((kind) => tool.isShown(kind))).toEqual([true, true]);
+    expect(tool.rows.map((row) => row.id)).toEqual(['a', 'c', 'b']);
 
-    expect(tool.setKind('captures')).toBe(true);
-    expect(tool.rows).toEqual([]);
-    expect(tool.marks).toEqual([]);
-    expect(tool.readout()).toBe('No captures in this case yet');
+    expect(tool.setShown('media', false)).toBe(true);
+    expect(tool.rows.map((row) => row.id)).toEqual(['a', 'c']);
+    expect(tool.marks).toHaveLength(2);
+    expect(tool.marks.every((mark) => mark.items.length === 1)).toBe(true);
+    // rows for a layer that is away are not kept
+    expect(tool.load('media', MEDIA)).toBe(false);
+    expect(tool.rows).toHaveLength(2);
+    expect(tool.setShown('media', true)).toBe(true);
+    expect(tool.rows).toHaveLength(2);
 
-    // the position it is already on, and one that does not exist, change nothing
-    expect(tool.setKind('captures')).toBe(false);
-    expect(tool.setKind('proofs')).toBe(false);
-    expect(tool.kind).toBe('captures');
+    expect(tool.setShown('places', false)).toBe(true);
+    expect(tool.readout()).toBe('No media in this case yet');
+    expect(tool.setShown('media', false)).toBe(true);
+    expect(tool.readout()).toBe('Places and media are put away');
+    expect(ext.createPins().readout()).toBe('No places or media in this case yet');
+
+    // the state it is already in, and a layer that does not exist, change nothing
+    expect(tool.setShown('media', false)).toBe(false);
+    expect(tool.setShown('captures', true)).toBe(false);
+    expect(tool.isShown('captures')).toBe(false);
   });
 
   it('works on a view without geometry', () => {

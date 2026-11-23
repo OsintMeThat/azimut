@@ -1250,8 +1250,10 @@ test('draws the window and nothing else, framed on what it holds', async ({ page
 
   await expect(page.locator('.temporal-mark')).toHaveCount(1);
   await expect(page.locator('.saved-mark-place')).toHaveCount(0);
-  await expect(page.getByRole('button', { name: 'Saved work', exact: true }))
-    .toHaveAttribute('aria-pressed', 'false');
+  // the case's own two layers step aside for the window
+  for (const name of ['Places', 'Media']) {
+    await expect(page.getByRole('button', { name, exact: true })).toHaveAttribute('aria-pressed', 'false');
+  }
 
   const framed = await page.evaluate(() => {
     const map = document.querySelector('.map').getBoundingClientRect();

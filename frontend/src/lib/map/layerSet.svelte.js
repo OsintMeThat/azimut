@@ -34,7 +34,7 @@ import {
   summary as firmsSummary,
   tileParams as firmsTileParams,
 } from './firms.js';
-import { layerInfo, LAYERS, knownLayers } from './layerCatalog.js';
+import { CASE_POINT_LAYERS, layerInfo, LAYERS, knownLayers } from './layerCatalog.js';
 import { keptLayers } from './layerMemory.js';
 import {
   askable as nightAskable,
@@ -121,10 +121,10 @@ export function createLayerSet({
     toggle,
 
     /** What the surface lays over the picture (`lib/map/basemap.js`). The case's
-     *  saved work is the tool's to draw, so it is never among them. */
+     *  places and media are the tool's to draw, so they are never among them. */
     get overlays() {
       return on
-        .filter((id) => id !== 'saved' && usable(id))
+        .filter((id) => !CASE_POINT_LAYERS.includes(id) && usable(id))
         .map((id) => {
           if (id === 'firms') {
             const asked = firesAsked();

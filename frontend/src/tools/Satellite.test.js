@@ -49,8 +49,9 @@ describe('Satellite saved work', () => {
     expect(source).toContain('<SavedSearch');
     expect(source).toContain('<SavedOverlay');
     expect(source).toContain('rows={savedWork.shownRows}');
-    // the overlay draws the panel's filtered selection, never the whole index
-    expect(source).toContain('items={savedWork.shown}');
+    // the overlay draws the case's two layers, the places and the placed media, never
+    // the whole index with its captures
+    expect(source).toContain('items={mapPoints}');
     expect(source).not.toContain('items={savedWork.rows}');
   });
 
@@ -100,12 +101,14 @@ describe('Satellite saved work', () => {
   });
 
   it('opens with the map overlay on, and keeps it out of the case file', () => {
-    // a case is opened to be read, and its located work is what a map is read for
-    expect(source).toContain('let savedOverlay = $state(true)');
-    expect(source).toContain('{#if savedOverlay}');
-    // it is a layer, listed with the other layers rather than sitting in the
-    // toolbox: nothing about it changes what the pointer does
-    expect(source).toContain('toggle: () => (savedOverlay = !savedOverlay)');
+    // a case is opened to be read: its places and its located work are what a map is read for
+    expect(source).toContain('let placesOn = $state(true);');
+    expect(source).toContain('let mediaOn = $state(true);');
+    expect(source).toContain('{#if placesOn || mediaOn}');
+    // they are layers, listed with the other layers rather than sitting in the
+    // toolbox: nothing about them changes what the pointer does
+    expect(source).toContain('toggle: () => (placesOn = !placesOn)');
+    expect(source).toContain('toggle: () => (mediaOn = !mediaOn)');
     expect(layers).toContain('<LayerRows {rows} />');
     expect(layerRows).toContain('aria-pressed={Boolean(row.on)}');
     // one eye for both states: only its colour says whether the layer is on
@@ -414,7 +417,8 @@ describe('what is laid over the imagery', () => {
       'gpstraces',
       'firms',
       'nightlights',
-      'saved',
+      'places',
+      'media',
     ]);
     expect(rows).not.toMatch(/^ {6}label: '/m);
   });
@@ -494,22 +498,29 @@ describe('what is laid over the imagery', () => {
   });
 });
 
-describe('choosing which saved work is drawn', () => {
-  it('asks the layer\'s own two questions where the layer is listed', () => {
-    // the same state the Saved panel binds, so a map read here and a panel read
-    // beside it cannot disagree about what the case holds
-    expect(source).toContain('controls: savedOverlay && savedAnything ? savedFilters : null');
-    // the kind question is the one every map's Layers menu asks (lib/geoTree.js)
-    expect(source).toContain('const rows = [kindControl(savedWork)];');
-    expect(source).toContain("pick: (id) => (savedWork.folder = id === 'all' ? null : id)");
+describe('the case’s two layers on the map, Places and Media', () => {
+  it('draws the places and the placed footage as layers of their own, and never a capture', () => {
+    // what each draws and its row are every map's (lib/geoTree.js, casePoints and casePointRows)
+    expect(source).toContain("import { casePointRows, casePoints } from '../lib/geoTree.js';");
+    expect(source).toContain('const mapPoints = $derived(casePoints(savedWork, { places: placesOn, media: mediaOn }));');
+    expect(source).toContain('items={mapPoints}');
+    expect(source).toContain("...catalogued('places'),");
+    expect(source).toContain("...catalogued('media'),");
+    expect(source).toContain('...pointRows.places,');
+    // both on in a case that never said otherwise
+    expect(source).toContain("createMapLayerMemory('satellite', ['boundaries', 'places', 'media'])");
   });
 
-  it('offers the folder control only where there is a choice to make', () => {
-    expect(source).toContain('if (folders.length > 1)');
+  it('reads the media index once the Media layer is on, not before', () => {
+    expect(source).toContain('if (mediaOn) savedWork.loadMedia(caseState.current?.id, caseState.rev);');
+  });
+
+  it('brings the places back on when one is saved, so it is seen', () => {
+    const save = source.slice(source.indexOf('savePlace: async ({ lat, lon, title }) => {'));
+    expect(save.slice(0, 600)).toContain('placesOn = true;');
   });
 
   it('picks folders from a list, since the analyst names them and there can be many', () => {
-    expect(source).toContain('list: true');
     expect(layerRows).toContain('<LayerControls controls={row.controls} />');
     expect(controls).toContain('{#if control.list}');
     expect(controls).toContain('onchange={(event) => control.pick(event.currentTarget.value)}');
@@ -522,19 +533,6 @@ describe('choosing which saved work is drawn', () => {
       expect(sheet).not.toContain('justify-content: flex-end');
       expect(sheet).not.toContain('justify-content: space-between');
     }
-  });
-
-  it('counts what is drawn rather than what the case holds', () => {
-    expect(source).toContain('detail: savedWork.shown.length ? String(savedWork.shown.length)');
-  });
-
-  it('offers the layer on either index, since media is not in the saved one', () => {
-    // a case whose footage is placed and whose pins nobody dropped is exactly
-    // the case the panel opens on Media for
-    expect(source).toContain(
-      'const savedAnything = $derived(savedWork.rows.length > 0 || savedWork.media.length > 0)'
-    );
-    expect(source).toContain('disabled: !savedAnything');
   });
 });
 

@@ -49,8 +49,16 @@ export const LAYERS = Object.freeze([
     title: 'Thermal detections from NASA FIRMS, live or from the archive',
   },
   { id: 'nightlights', label: 'Night lights', group: 'events', title: 'The ground at night, from NASA’s VIIRS passes' },
-  { id: 'saved', label: 'Saved work', group: 'case', title: "This case's saved work, or its located photos and videos" },
+  // The case's own points, each a layer of its own: the places saved in it, and its
+  // photos and videos where they were placed. Captures are not drawn on a map: they
+  // are listed in the Saved panel, and a scene's in its pill.
+  { id: 'places', label: 'Places', group: 'case', title: 'The places saved in this case' },
+  { id: 'media', label: 'Media', group: 'case', title: "This case's photos and videos where they were placed" },
 ]);
+
+/** Layers that became others: the one Saved work layer, whose switch drew either the
+ *  case's media or its places (or its captures, no longer on a map), is both now. */
+const BECAME = { saved: ['places', 'media'] };
 
 const BY_ID = new Map(LAYERS.map((layer) => [layer.id, layer]));
 
@@ -63,9 +71,13 @@ export function layerInfo(id) {
  * A stored list of layer ids, kept ordered, unique and known.
  *
  * A session or a preference saved with a layer that has since been retired
- * opens without it rather than asking the map for a layer it cannot draw.
+ * opens without it rather than asking the map for a layer it cannot draw, and
+ * one saved with a layer that became others opens with those (`BECAME`).
  */
 export function knownLayers(value) {
-  const asked = new Set(Array.isArray(value) ? value : []);
+  const asked = new Set((Array.isArray(value) ? value : []).flatMap((id) => BECAME[id] ?? [id]));
   return LAYERS.map((layer) => layer.id).filter((id) => asked.has(id));
 }
+
+/** The case's own point layers, which a map draws itself rather than lay over its picture. */
+export const CASE_POINT_LAYERS = Object.freeze(['places', 'media']);

@@ -114,7 +114,7 @@
   } from '../lib/map/compareLayers.js';
   import { addedLayers } from '../lib/map/addedLayersState.svelte.js';
   import { createMapLayerMemory } from '../lib/map/layerMemory.js';
-  import { savedRow } from '../lib/geoTree.js';
+  import { casePointRows, casePoints } from '../lib/geoTree.js';
   import { isGround } from '../lib/map/basemap.js';
   import { isRegistered, sourceRect } from '../lib/screenCrop.js';
   import { deletedToast, RESTORABLE } from '../lib/trash.js';
@@ -389,8 +389,6 @@
     caseState.rev;
     return savedWork.load(caseId);
   });
-  // the located files, for the Media position the saved layer opens on
-  $effect(() => savedWork.loadMode(caseState.current?.id, caseState.rev));
 
   const both = $derived(a.present && b.present);
   const activeView = $derived(view);
@@ -511,7 +509,7 @@
           if (!nightAskable(asked)) return null;
           return { id, params: nightTileParams(asked) };
         }
-        if (id === 'saved') return null;
+        if (id === 'places' || id === 'media') return null;
         return id;
       })
       .filter(Boolean);
@@ -1376,7 +1374,7 @@
   function toggleLayer(id) {
     if (!a.present && !b.present) return;
     if (id === 'firms' && !fireKey.keyed) return;
-    if (id === 'saved' && !savedWork.rows.length && !savedWork.media.length) return;
+    if (id === 'places' && !savedWork.rows.some((row) => row.kind === 'place')) return;
     layerIds = toggledLayer(layerIds, id);
     switchMemory.keep(caseState.current?.id ?? null, layerIds);
   }
@@ -1397,10 +1395,19 @@
     night = { ...night, ...patch };
   }
 
+  /** What each side draws of the case: its places and its placed footage, as its list asks. */
+  const pointsOn = (ids) => casePoints(savedWork, { places: ids.includes('places'), media: ids.includes('media') });
+  const pointsA = $derived(pointsOn(layers.a));
+  const pointsB = $derived(pointsOn(layers.b));
+  $effect(() => {
+    if (layerIds.includes('media')) savedWork.loadMedia(caseState.current?.id, caseState.rev);
+  });
+
   /** The menu's rows: every catalogue layer, as the Map lists them. */
   const layerRows = $derived.by(() => {
     const present = a.present || b.present;
     const key = keyState(fireKey);
+    const points = casePointRows(savedWork, { places: layerIds.includes('places') });
     return LAYERS.map((layer) => {
       const row = {
         id: layer.id,
@@ -1438,9 +1445,9 @@
           note: compareNightNote(night, pictureDays),
         };
       }
-      if (layer.id === 'saved') {
-        const saved = savedRow(savedWork, shown);
-        return { ...row, ...saved, disabled: !present || Boolean(saved.disabled) };
+      if (layer.id === 'places' || layer.id === 'media') {
+        const told = points[layer.id];
+        return { ...row, ...told, ...(shown ? {} : { controls: null }), disabled: !present || Boolean(told.disabled) };
       }
       return row;
     });
@@ -2988,10 +2995,10 @@
             onremovefeature={(row, key) => personalLayers.remove(key, row)} ondeleteplace={personalPlaceDeletion.open}
             oncopyfeature={(row, feature, anchor) => personalLayers.copy(row, feature, anchor)}
           />
-          {#if layers.a.includes('saved') && !personalLayers.armed}
+          {#if pointsA.length && !personalLayers.armed}
             <SavedOverlay
               engine={a.engine}
-              items={savedWork.shown}
+              items={pointsA}
               caseId={caseState.current?.id}
               coords={savedCoords}
               {fullscreen}
@@ -3089,10 +3096,10 @@
             onremovefeature={(row, key) => personalLayers.remove(key, row)} ondeleteplace={personalPlaceDeletion.open}
             oncopyfeature={(row, feature, anchor) => personalLayers.copy(row, feature, anchor)}
           />
-          {#if layers.b.includes('saved') && !personalLayers.armed}
+          {#if pointsB.length && !personalLayers.armed}
             <SavedOverlay
               engine={b.engine}
-              items={savedWork.shown}
+              items={pointsB}
               caseId={caseState.current?.id}
               coords={savedCoords}
               {fullscreen}

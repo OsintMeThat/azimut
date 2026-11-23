@@ -28,7 +28,7 @@ const heading = (target, label) =>
 describe('the layer list', () => {
   it('lists the layers under the catalogue’s headings, with the case’s own last, each with its eye', () => {
     const target = show(LayerList, {
-      rows: [row('Saved work', 'case'), row('Borders', 'reference', { on: true }), row('Active fires', 'events')],
+      rows: [row('Places', 'case'), row('Borders', 'reference', { on: true }), row('Active fires', 'events')],
       added: [{ name: 'ua', title: 'GeoConfirmed UA', enabled: true }],
     });
     expect([...target.querySelectorAll('.sub-head')].map((entry) => entry.textContent.replace(/\s+/g, ' ').trim())).toEqual([

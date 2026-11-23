@@ -78,7 +78,36 @@ describe('opening a case', () => {
     await vi.waitFor(() => expect(saved.media).toHaveLength(2));
     expect(calls).toEqual(['/api/cases/case-1/satellite/media']);
     expect(saved.shownRows).toEqual(MEDIA);
-    expect(saved.shown.map((row) => row.key)).toEqual(['m1@1,2', 'm1@3,4']);
+    expect(saved.media.map((row) => row.key)).toEqual(['m1@1,2', 'm1@3,4']);
+  });
+
+  it('reads the media index for a map’s Media layer, whatever the panel lists, and says when it has', async () => {
+    const saved = store();
+    saved.kind = 'captures';
+    expect(saved.mediaRead).toBe(false);
+    saved.loadMedia('case-1', 3);
+    await vi.waitFor(() => expect(saved.mediaRead).toBe(true));
+    expect(calls).toEqual(['/api/cases/case-1/satellite/media']);
+    saved.loadMedia('case-1', 3);
+    expect(calls).toHaveLength(1);
+    // a different case knows nothing of the last one's media
+    saved.load('case-2');
+    expect(saved.mediaRead).toBe(false);
+  });
+
+  it('gives a map the places alone, from the folder it reads, never a capture', async () => {
+    api.get = vi.fn(async () => [
+      ...ROWS,
+      { id: 'e4', kind: 'place', path: null, title: 'Depot', folder: 'North' },
+    ]);
+    const saved = store();
+    saved.load('case-1');
+    await vi.waitFor(() => expect(saved.rows).toHaveLength(4));
+    expect(saved.mapPlaces.map((row) => row.id)).toEqual(['e1', 'e4']);
+    saved.folder = 'North';
+    expect(saved.mapPlaces.map((row) => row.id)).toEqual(['e4']);
+    saved.folder = '';
+    expect(saved.mapPlaces.map((row) => row.id)).toEqual(['e1']);
   });
 
   it('re-reads the media index when the case is reloaded, not only when it changes', async () => {
@@ -151,17 +180,16 @@ describe('opening a case', () => {
 });
 
 describe('what the panel is showing', () => {
-  it('is what the map layer draws: the filter, never the whole index', async () => {
+  it('lists one position at a time, while a map draws its places whatever the panel lists', async () => {
     const saved = store();
     saved.load('case-1');
     await vi.waitFor(() => expect(saved.rows).toHaveLength(3));
-    saved.kind = 'all';
-    expect(saved.shown).toHaveLength(3);
-    saved.kind = 'places';
-    expect(saved.shown.map((row) => row.id)).toEqual(['e1']);
-    saved.kind = 'all';
-    saved.query = 'quai';
-    expect(saved.shown.map((row) => row.id)).toEqual(['e1']);
+    saved.kind = 'captures';
+    expect(saved.shownRows).toEqual(ROWS);
+    expect(saved.mapPlaces.map((row) => row.id)).toEqual(['e1']);
+    // the panel's search is the panel's: the map's places do not follow it
+    saved.query = 'nothing like it';
+    expect(saved.mapPlaces.map((row) => row.id)).toEqual(['e1']);
   });
 
   it('remembers which grouping the panel was left on', () => {
