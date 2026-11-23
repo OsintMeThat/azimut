@@ -66,6 +66,17 @@ describe('the layer list', () => {
     expect(ontoggleadded).toHaveBeenCalledWith(layer);
   });
 
+  it('puts a switch of a layer on that layer’s line, discreetly, not on a line of its own', () => {
+    const names = { ...row('Names', 'case'), id: 'places-names', of: 'places', title: 'Each place’s name under its mark' };
+    const target = show(LayerList, { rows: [{ ...row('Places', 'case'), id: 'places', on: true, detail: '15' }, names], added: [] });
+    const places = eye(target, 'Places').closest('li');
+    expect(places.contains(eye(target, 'Names'))).toBe(true);
+    expect(eye(target, 'Names').classList.contains('switch')).toBe(true);
+    // one line, the switch before the count
+    expect([...target.querySelectorAll('li')].filter((li) => li.textContent.includes('Names'))).toHaveLength(0);
+    expect(places.querySelector('.detail').textContent).toBe('15');
+  });
+
   it('folds a heading away and keeps the rest', () => {
     const target = show(LayerList, { rows: [row('Borders', 'reference'), row('Night lights', 'events')] });
     heading(target, 'Reference').click();

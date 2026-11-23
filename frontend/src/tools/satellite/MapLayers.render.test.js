@@ -25,20 +25,16 @@ describe('a layer that cannot be switched on', () => {
   });
 });
 
-describe('a switch under another layer, and a layer in a colour', () => {
+describe('a switch of another layer', () => {
   const rows = [
-    { id: 'places', label: 'Places', on: true, toggle: () => {} },
+    { id: 'places', label: 'Places', on: true, detail: '15', toggle: () => {} },
     { id: 'places-names', label: 'Names', of: 'places', on: false, toggle: () => {} },
-    { id: 'leads', label: 'Leads', dot: 'var(--anno-2)', on: true, detail: '3', toggle: () => {} },
   ];
 
-  it('indents the Names switch under Places, and dots the leads in their scene’s colour', () => {
+  it('draws the Names switch on the Places line, small, not as a row of its own', () => {
     const { body } = render(MapLayers, { props: { rows } });
-    expect(body).toMatch(/<li class="[^"]*\bsub\b[^"]*"[^>]*>\s*<div class="row[^"]*">\s*<button[^>]*aria-label="Names"/);
-    expect(body).toContain('style="background: var(--anno-2);"');
-    expect(body).toContain('>3</span>');
-    // no other row is indented or dotted
-    expect(body.match(/<li class="[^"]*\bsub(?![\w-])/g)).toHaveLength(1);
-    expect(body.match(/class="dot/g)).toHaveLength(1);
+    expect(body.match(/<li\b/g)).toHaveLength(1);
+    expect(body).toMatch(/class="eye switch[^"]*"[^>]*aria-label="Names"/);
+    expect(body).toContain('>15</span>');
   });
 });

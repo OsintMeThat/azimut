@@ -12,16 +12,23 @@
      * `{ id, label, on, disabled, title, detail, toggle }`, plus five that
      * only some layers carry: `actions` (buttons under the row), `controls`
      * (its own settings, for a layer that is a question), `note` (why it is
-     * on but drawing nothing yet), `of` (the layer this one is a switch under,
-     * which indents it) and `dot` (the colour it is drawn in).
+     * on but drawing nothing yet) and `of` (the layer this one is a switch of,
+     * drawn as a small toggle on that layer's own line).
      */
     rows,
   } = $props();
+
+  // A switch of a layer (Places' Names) sits on that layer's line, discreetly,
+  // rather than as a row of its own under it.
+  const layers = $derived(rows.filter((row) => !row.of));
+  const switchesOf = (id) => rows.filter((row) => row.of === id);
+  /** The small glyph a switch of a layer wears. */
+  const SWITCH_ICON = { 'places-names': 'text' };
 </script>
 
 <ul class="layers">
-  {#each rows as row (row.id)}
-    <li class:sub={Boolean(row.of)}>
+  {#each layers as row (row.id)}
+    <li>
       <div class="row">
         <button
           type="button"
@@ -35,9 +42,22 @@
         >
           <Icon name="eye" size={13} />
         </button>
-        {#if row.dot}<span class="dot" style:background={row.dot} aria-hidden="true"></span>{/if}
         <!-- the name repeats the tooltip, so the reason a switch is greyed is on a word, not only on its icon -->
         <span class="name" class:off={!row.on || row.disabled} title={row.title ?? row.label}>{row.label}</span>
+        {#each switchesOf(row.id) as sub (sub.id)}
+          <button
+            type="button"
+            class="eye switch"
+            class:on={sub.on}
+            disabled={sub.disabled}
+            aria-pressed={Boolean(sub.on)}
+            aria-label={sub.label}
+            title={sub.title ?? sub.label}
+            onclick={sub.toggle}
+          >
+            <Icon name={SWITCH_ICON[sub.id] ?? 'check'} size={12} />
+          </button>
+        {/each}
         {#if row.detail}<span class="detail">{row.detail}</span>{/if}
         {#if row.edit}<button class="eye" aria-label={`Edit ${row.label}`} title="Edit layer" onclick={row.edit}><Icon name="edit" size={12} /></button>{/if}
         {#if row.download}<button class="eye" aria-label={`Download ${row.label}`} title="Download layer" onclick={row.download}><Icon name="download" size={12} /></button>{/if}
@@ -94,16 +114,14 @@
     opacity: 0.4;
     cursor: not-allowed;
   }
-  /* a switch under the layer above it, indented to its name */
-  .sub .row {
-    padding-left: 30px;
+  /* a switch of the layer, on its line: smaller and quiet until it is on */
+  .eye.switch {
+    width: 20px;
+    height: 20px;
+    opacity: 0.75;
   }
-  .dot {
-    flex: none;
-    width: 8px;
-    height: 8px;
-    border-radius: 50%;
-    box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.4);
+  .eye.switch.on {
+    opacity: 1;
   }
   .name {
     flex: 1;

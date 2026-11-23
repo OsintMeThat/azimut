@@ -35,7 +35,6 @@ const { DROP, DROP_PATH, PLACE_RED, placeMark } = await import('../../../lib/map
 const SCENE = { video: 'media/convoy.mp4', id: 'sc_1', order: 2, leads: [{ id: 'ld_1', n: 1, lat: 1, lon: 2 }, { id: 'ld_2', n: 4, lat: 3, lon: 4 }] };
 
 let held;
-let shown;
 let deps;
 const settle = async () => {
   for (let i = 0; i < 5; i += 1) await Promise.resolve();
@@ -45,7 +44,6 @@ function make() {
   deps = {
     engine: () => ({}),
     held: () => held,
-    leadsShown: () => shown,
     dropLead: vi.fn(async (at) => ({ id: 'ld_new', n: 5, ...at })),
     moveLead: vi.fn(async () => ({})),
     savePlace: vi.fn(async () => {}),
@@ -60,7 +58,6 @@ beforeEach(() => {
   ghost.shapes = [];
   ghost.moves = [];
   held = null;
-  shown = true;
 });
 
 describe('the drop mode', () => {
@@ -213,21 +210,6 @@ describe('the leads on the map', () => {
     const [naming] = declared.at(-1);
     expect(naming.html).toBe(placeMark().html);
     expect(naming).toMatchObject({ className: 'saved-mark-wrap sat-naming', size: DROP.size, anchor: DROP.anchor, draggable: true });
-  });
-
-  it('draws no lead while their row hides them, and still drops one', async () => {
-    const drop = make();
-    held = SCENE;
-    shown = false;
-    drop.draw();
-    expect(declared.at(-1)).toEqual([]);
-    drop.start();
-    drop.place({ lat: 5, lon: 6 });
-    await settle();
-    expect(deps.dropLead).toHaveBeenCalledWith({ lat: 5, lon: 6 });
-    shown = true;
-    drop.draw();
-    expect(declared.at(-1).map((s) => s.id)).toEqual(['lead-ld_1', 'lead-ld_2']);
   });
 
   it('is the place’s drop in the scene’s colour, so leads and places read as one family', () => {

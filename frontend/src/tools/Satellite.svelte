@@ -226,9 +226,6 @@
   let mediaOn = $state(true);
   // each place's name under its mark (the Names switch under Places), off until asked for
   let namesOn = $state(false);
-  // the leads of the scene being geolocated, drawn unless their row is switched off;
-  // for this session only, as the geolocating itself is
-  let leadsOn = $state(true);
   /**
    * The located files the panel is playing, or null for the saved-work list.
    *
@@ -1585,20 +1582,6 @@
       toggle: () => (mediaOn = !mediaOn),
       ...pointRows.media,
     },
-    // the scene being geolocated, while there is one: its leads, which its row hides
-    ...(heldScene
-      ? [
-          {
-            id: 'leads',
-            label: 'Leads',
-            dot: sceneColorAt(heldScene.order),
-            on: leadsOn,
-            detail: String(heldScene.leads?.length ?? 0),
-            title: 'The spots dropped for the scene being geolocated',
-            toggle: () => (leadsOn = !leadsOn),
-          },
-        ]
-      : []),
     ...(sheetPoints
       ? [
           {
@@ -2129,7 +2112,7 @@
     const added = uiState.tool === 'satellite' ? addedLayers.drawn : [];
     const shownPoints = placesOn || mediaOn ? mapPoints : [];
     const places = shownPoints.some((row) => row.kind === 'place');
-    const leads = leadsOn ? (heldScene?.leads ?? []) : [];
+    const leads = heldScene?.leads ?? [];
     const ids = [
       ...drawnOverlays,
       added.length && 'added',
@@ -2286,7 +2269,6 @@
   const drop = createDropState({
     engine: () => engine,
     held: () => heldScene,
-    leadsShown: () => leadsOn,
     dropLead: (at) => dropLead(caseState.current.id, at),
     moveLead: (id, at) => moveLead(caseState.current.id, id, at),
     savePlace: async ({ lat, lon, title }) => {
@@ -2301,7 +2283,7 @@
     notify: toast,
   });
   // the scene's leads and the pin waiting for its name, drawn again when they move
-  const leadsKey = $derived(JSON.stringify([heldScene?.order ?? null, heldScene?.leads ?? [], leadsOn]));
+  const leadsKey = $derived(JSON.stringify([heldScene?.order ?? null, heldScene?.leads ?? []]));
   const namingAt = $derived(drop.naming ? `${drop.naming.lat},${drop.naming.lon}` : '');
   $effect(() => {
     void leadsKey;

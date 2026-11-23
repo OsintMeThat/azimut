@@ -54,8 +54,19 @@ export function videoWords(n, picture = false) {
   return n === 1 ? '1 picture from the video' : `${n} pictures from the video`;
 }
 
-/** The counts in words, for a hover: `In progress: 2 map captures, 5 pictures from the video`. */
+/** How many leads were dropped for a scene on a map (`engine/geolocate.py`). */
+export const leadCount = (scene) => (Array.isArray(scene?.leads) ? scene.leads.length : 0);
+
+/** `1 lead`, `3 leads`, or '' for none: a scene with none says nothing of them. */
+export function leadWords(n) {
+  if (!n) return '';
+  return n === 1 ? '1 lead' : `${n} leads`;
+}
+
+/** The counts in words, for a hover: `In progress: 2 map captures, 5 pictures from the video, 3 leads`. */
 export function countWords(scene, live = false) {
-  const said = `${mapWords(mapCount(scene))}, ${videoWords(videoCount(scene), isPictureScene(scene))}`;
+  const said = [mapWords(mapCount(scene)), videoWords(videoCount(scene), isPictureScene(scene)), leadWords(leadCount(scene))]
+    .filter(Boolean)
+    .join(', ');
   return `${stageWords(sceneStage(scene, live))}: ${said}`;
 }

@@ -298,10 +298,12 @@ describe('what the scene gathered, and the links', () => {
   it('counts the scene’s leads beside what the map and the video gave it, only when it has some', async () => {
     answers.set('GET /api/cases/c1/geolocating', { geolocating: SCENE });
     await show();
-    expect(target.querySelector('[data-testid="geolocating-leads"]')).toBeNull();
+    expect(target.querySelector('[data-testid="count-leads"]')).toBeNull();
     geolocating.scene = { ...SCENE, leads: [LEAD, { ...LEAD, id: 'ld_2', n: 3 }] };
     flushSync();
-    expect(target.querySelector('[data-testid="geolocating-leads"]').textContent.trim()).toBe('2');
+    // the scene's own counts carry them, as everywhere a scene is counted
+    expect(target.querySelector('[data-testid="count-leads"]').textContent.trim()).toBe('2');
+    expect(target.querySelector('[data-testid="scene-counts"]').getAttribute('title')).toContain('2 leads');
   });
 
   it('lists its leads, captures, frames and collages from its counts, and closes on Escape', async () => {

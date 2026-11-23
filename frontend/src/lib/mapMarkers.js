@@ -123,7 +123,7 @@ export function placeDropSvg({ colour, count = 1 } = {}) {
 export function placeMark({ colour, count = 1, worked = false, className = '' } = {}) {
   return {
     className: `saved-mark-wrap${className ? ` ${className}` : ''}`,
-    html: `<span class="place-drop">${placeDropSvg({ colour, count })}${worked ? '<i class="place-drop-worked"></i>' : ''}</span>`,
+    html: `<span class="saved-place-drop">${placeDropSvg({ colour, count })}${worked ? '<i class="saved-place-drop-worked"></i>' : ''}</span>`,
     ...DROP,
   };
 }

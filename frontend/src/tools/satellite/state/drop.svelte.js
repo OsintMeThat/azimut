@@ -18,7 +18,6 @@
  * @param {object} deps
  * @param {() => object|null} deps.engine the map façade, once built
  * @param {() => object|null} deps.held the scene the case geolocates, or null
- * @param {() => boolean} [deps.leadsShown] whether the scene's leads are drawn
  * @param {(at: {lat: number, lon: number}) => Promise<object>} deps.dropLead
  * @param {(id: string, at: {lat: number, lon: number}) => Promise<object>} deps.moveLead
  * @param {(place: {lat: number, lon: number, title: string}) => Promise<void>} deps.savePlace
@@ -59,7 +58,7 @@ export function leadSvg(n, color) {
 /** What a click on a lead and a drag of it are told apart by: a drag ends in a click. */
 const AFTER_DRAG_MS = 300;
 
-export function createDropState({ engine, held, leadsShown = () => true, dropLead, moveLead, savePlace, centre, notify }) {
+export function createDropState({ engine, held, dropLead, moveLead, savePlace, centre, notify }) {
   let armed = $state(false);
   // the pin waiting for its name: `{ lat, lon, title }`
   let naming = $state(null);
@@ -130,7 +129,7 @@ export function createDropState({ engine, held, leadsShown = () => true, dropLea
     if (!map) return;
     const scene = held();
     // hidden from the Layers panel, the leads are not drawn; dropping one still works
-    const leads = leadsShown() ? (scene?.leads ?? []) : [];
+    const leads = scene?.leads ?? [];
     const color = sceneColorAt(scene?.order);
     const shapes = leads.map((lead) => ({
       id: `lead-${lead.id}`,

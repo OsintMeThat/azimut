@@ -97,7 +97,7 @@ test('drops leads where the map is clicked while a scene is geolocated, and lets
 
   // the pill counts them, and its list lets one go
   const pill = page.locator('.geo-pill');
-  await expect(pill.getByTestId('geolocating-leads')).toHaveText('2');
+  await expect(pill.getByTestId('count-leads')).toHaveText('2');
   await pill.getByTestId('geolocating-count').click();
   const list = page.getByTestId('gathered-panel');
   await expect(list.getByRole('heading', { name: 'Leads' })).toBeVisible();
@@ -105,7 +105,7 @@ test('drops leads where the map is clicked while a scene is geolocated, and lets
   await list.getByRole('button', { name: 'Delete lead 1' }).click();
   await expect.poll(() => server.calls).toContain('delete ld_1');
   await expect(page.locator('.sat-lead')).toHaveCount(1);
-  await expect(pill.getByTestId('geolocating-leads')).toHaveText('1');
+  await expect(pill.getByTestId('count-leads')).toHaveText('1');
 });
 
 test('asks a name for a pin dropped with no scene geolocated, and saves it as a place', async ({ page }) => {
@@ -185,7 +185,7 @@ test('draws a place as one drop from the pin under the pointer to the place save
     geolocated: false,
     places: [{ id: 'place-1', key: 'place-1', kind: 'place', title: 'North depot', lat: 48.859, lon: 2.295 }],
   });
-  const saved = page.locator('.saved-mark-wrap:not(.sat-ghost):not(.sat-naming) .place-drop');
+  const saved = page.locator('.saved-mark-wrap:not(.sat-ghost):not(.sat-naming) .saved-place-drop');
   await expect(saved).toHaveCount(1);
   await expect(saved.locator('path')).toHaveAttribute('fill', '#e5484d');
 
@@ -193,9 +193,9 @@ test('draws a place as one drop from the pin under the pointer to the place save
   await page.getByRole('button', { name: 'Save place' }).click();
   const box = await page.locator('.map[data-map-ready="true"]').boundingBox();
   await page.mouse.move(box.x + box.width / 2 + 90, box.y + box.height / 2 - 40);
-  await expect(page.locator('.sat-ghost .place-drop')).toHaveCount(1);
+  await expect(page.locator('.sat-ghost .saved-place-drop')).toHaveCount(1);
   await clickMap(page, 90, -40);
-  await expect(page.locator('.sat-naming .place-drop')).toHaveCount(1);
+  await expect(page.locator('.sat-naming .saved-place-drop')).toHaveCount(1);
   await page.keyboard.press('Escape');
 
   // the card picks a colour, kept on the place, and the mark wears it at once
@@ -225,27 +225,13 @@ test('writes the places’ names under their marks from the Names switch under P
   await expect(page.locator('.saved-mark-name')).toHaveCount(0);
 });
 
-test('lists the scene’s leads as a row of Layers whose eye hides them, and still drops one', async ({ page }) => {
+test('counts the scene’s leads in the To-do and the pill, with no row of their own in Layers', async ({ page }) => {
   const { server } = await openMap(page);
-  const drop = page.getByRole('button', { name: 'Drop a lead' });
-  await drop.click();
-  await clickMap(page, 120, -60);
+  await page.getByRole('button', { name: 'Drop a lead' }).click();
+  await clickMap(page, 80, -40);
   await expect.poll(() => server.calls).toEqual(['drop ld_1']);
-  await expect(page.locator('.sat-lead')).toHaveCount(1);
-
-  const leads = page.getByRole('button', { name: 'Leads', exact: true });
-  await expect(leads).toHaveAttribute('aria-pressed', 'true');
-  const row = page.locator('li', { has: leads });
-  await expect(row.locator('.detail')).toHaveText('1');
-  await leads.click();
-  await expect(page.locator('.sat-lead')).toHaveCount(0);
-  // hidden, a click still drops one, and the row counts it
-  await clickMap(page, -140, 40);
-  await expect.poll(() => server.calls).toEqual(['drop ld_1', 'drop ld_2']);
-  await expect(row.locator('.detail')).toHaveText('2');
-  await expect(page.locator('.sat-lead')).toHaveCount(0);
-  await leads.click();
-  await expect(page.locator('.sat-lead')).toHaveCount(2);
+  await expect(page.locator('.geo-pill').getByTestId('count-leads')).toHaveText('1');
+  await expect(page.getByRole('button', { name: 'Leads', exact: true })).toHaveCount(0);
 });
 
 test('remembers the Layers on the map tick, and rests 2× and Max while it is ticked', async ({ page }) => {
