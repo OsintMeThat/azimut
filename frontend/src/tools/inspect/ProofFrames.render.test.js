@@ -151,7 +151,7 @@ describe('making the proof of a scene', () => {
     const onmap = vi.fn();
     const props = show({ frames: [frame('a', 11)], filedIds: new Set(['a']), onmap });
     const line = dialog().querySelector('[data-testid="proof-no-map-capture"]');
-    expect(line.textContent).toContain('No map capture yet: the proof gets no coordinates from the map.');
+    expect(line.textContent).toContain('No map capture yet. The proof gets no coordinates from the map.');
     // a warning, never a stop
     expect(button('Make the proof').disabled).toBe(false);
     const go = button('Go to the map');

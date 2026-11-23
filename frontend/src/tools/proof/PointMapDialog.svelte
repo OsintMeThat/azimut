@@ -72,6 +72,8 @@
   let at = $state(untrack(() => ({ lat: view.lat, lon: view.lon })));
   // The borders, which are what finding a spot needs first.
   let on = $state(['boundaries']);
+  // the map's frame, which narrows and widens as the leads' list comes and goes
+  let stageEl = $state(null);
   let layersOpen = $state(false);
   let surface = null;
 
@@ -145,6 +147,15 @@
     };
   });
 
+  // The engine sizes its canvas once: when the frame changes width (the leads' list
+  // showing or leaving), it is measured again, or a band of the frame stays empty.
+  $effect(() => {
+    if (!stageEl || !engine || typeof ResizeObserver === 'undefined') return;
+    const watch = new ResizeObserver(() => engine?.resize?.());
+    watch.observe(stageEl);
+    return () => watch.disconnect();
+  });
+
   // The same turn as every other map: a middle-drag, or Shift and the left
   // button, about the grabbed point; Shift and an arrow from the keyboard.
   $effect(() => {
@@ -178,7 +189,7 @@
     </p>
   {/if}
   <div class="body">
-  <div class="stage">
+  <div class="stage" bind:this={stageEl}>
     <MapSurface
       bind:engine
       bind:element

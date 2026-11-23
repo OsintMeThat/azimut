@@ -135,6 +135,26 @@ describe('the leads of the scene the proof takes up', () => {
     expect(onpick).toHaveBeenCalledWith({ lat: 48.86, lon: 2.3 });
   });
 
+  it('measures the map again when its frame changes width, as the list comes or goes', async () => {
+    const watched = [];
+    const native = globalThis.ResizeObserver;
+    globalThis.ResizeObserver = class {
+      constructor(callback) { this.callback = callback; watched.push(this); }
+      observe() {}
+      disconnect() {}
+    };
+    try {
+      await open(VIEW, { leads: LEADS });
+      const engine = engines.at(-1);
+      engine.resize.mockClear();
+      // the dialog's own watch is the last made: the map's credits keep one of their own
+      watched.at(-1).callback([]);
+      expect(engine.resize).toHaveBeenCalled();
+    } finally {
+      globalThis.ResizeObserver = native;
+    }
+  });
+
   it('shows no list when the scene has none', async () => {
     await open();
     expect(document.querySelector('.leads')).toBeNull();
