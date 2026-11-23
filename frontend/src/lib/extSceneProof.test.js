@@ -20,7 +20,10 @@ vi.mock('./state.svelte.js', () => ({
 }));
 
 const goWithScene = vi.fn();
-vi.mock('./geolocating.svelte.js', () => ({ goWithScene }));
+const geolocating = { caseId: null, scene: null };
+const openHeldProof = vi.fn((scene) => Boolean(scene?.proof));
+const readGeolocating = vi.fn(async () => null);
+vi.mock('./geolocating.svelte.js', () => ({ geolocating, goWithScene, openHeldProof, readGeolocating }));
 
 const { proveScene, takeSceneProof } = await import('./extSceneProof.js');
 
@@ -37,6 +40,9 @@ beforeEach(() => {
   openCase.mockClear();
   refreshCaseList.mockClear();
   goWithScene.mockClear();
+  openHeldProof.mockClear();
+  readGeolocating.mockClear();
+  Object.assign(geolocating, { caseId: null, scene: null });
 });
 
 describe('a scene handed over by the extension', () => {
@@ -58,6 +64,17 @@ describe('a scene handed over by the extension', () => {
     expect(await going).toBe(true);
     expect(openCase).not.toHaveBeenCalled();
     expect(uiState.tool).toBe('inspect');
+  });
+
+  it('opens the proof a scene already has rather than the chooser, as the pill does', async () => {
+    Object.assign(geolocating, { caseId: 'c1', scene: { video: 'media/walk.mp4', id: 'sc_2', proof: 'walk', captures: [] } });
+    expect(await proveScene(SCENE)).toBe(true);
+    expect(openHeldProof).toHaveBeenCalledWith(geolocating.scene);
+    expect(uiState.inspectScene).toBe(null);
+    // another scene held: the chooser, as before
+    geolocating.scene = { video: 'media/walk.mp4', id: 'sc_9', proof: 'other', captures: [] };
+    expect(await proveScene(SCENE)).toBe(true);
+    expect(uiState.inspectScene).toMatchObject({ draft: 'sc_2', proof: true });
   });
 
   it('opens Inspect on the scene for the pill’s Inspect link, without the chooser', async () => {

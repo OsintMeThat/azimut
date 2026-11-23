@@ -31,6 +31,7 @@ const WORDS = {
   [NO_PICTURE]: 'No picture yet',
   unplaced: 'No place yet',
   [NEW]: 'Not saved',
+  saved: 'Saved',
   [ABANDONED]: 'Abandoned',
 };
 
@@ -43,17 +44,21 @@ function proofTile(row) {
   const picture = Boolean(row.png);
   const state = isAbandoned(row) ? ABANDONED : picture ? PROVED : NO_PICTURE;
   const open = state !== ABANDONED && unplaced(row);
+  const own = ownName(sceneTitle(row), 'proof');
+  const time = sceneTime(row);
   return {
     key: row.key,
     kind: 'proof',
     name: row.proof,
     state,
     unplaced: open,
-    // its label (`proofLabel`), and the name the analyst gave it, '' for none, for Rename
-    title: proofLabel(row),
-    own: ownName(sceneTitle(row), 'proof'),
-    time: sceneTime(row),
-    words: state === ABANDONED ? WORDS[ABANDONED] : !picture ? WORDS[NO_PICTURE] : open ? WORDS.unplaced : sceneTime(row),
+    // the name the analyst gave it, else its time in the clip, which the strip is in the
+    // order of; its place and date (`proofLabel`) on hover. `own` is '' for none, for Rename
+    title: own || time || proofLabel(row),
+    own,
+    place: proofLabel(row),
+    time,
+    words: state === ABANDONED ? WORDS[ABANDONED] : !picture ? WORDS[NO_PICTURE] : open ? WORDS.unplaced : saidBeside(own, time),
     thumb: row.thumb || null,
     color: row.color,
     reason: row.abandoned?.reason ?? '',
@@ -144,17 +149,24 @@ export function slideTiles(answer, open = {}, { thumbOf = null } = {}) {
 function savedTile(open, row, color) {
   const tile = row
     ? proofTile(row)
-    : { key: `proof:${open.name}`, kind: 'proof', name: open.name, state: PROVED, title: proofLabel({ title: open.name }), own: '', time: '', words: '', thumb: null };
+    : { key: `proof:${open.name}`, kind: 'proof', name: open.name, state: PROVED, title: proofLabel({ title: open.name }), place: proofLabel({ title: open.name }), own: '', time: '', words: '', thumb: null };
   const time = open.time ?? tile.time;
-  const words = tile.words === tile.time ? time : tile.words;
-  // the name in the header as it is typed, else the label the case gives it
+  // the name in the header as it is typed, else its time as the Scene tab reads it
   const own = ownName(open.title, 'proof');
-  return { ...tile, time, words, current: true, thumb: open.thumb || tile.thumb, title: own || tile.title, own, color };
+  const words = tile.words === saidBeside(tile.own, tile.time) ? saidBeside(own, time) : tile.words;
+  return { ...tile, time, words, current: true, thumb: open.thumb || tile.thumb, title: own || time || tile.place, own, color };
 }
 
 function newTile(open, color, key) {
   const own = ownName(open.title, 'proof');
-  return { key, kind: 'new', state: NEW, title: own || 'New slide', own, time: open.time ?? '', words: WORDS[NEW], thumb: null, color, current: true };
+  const time = open.time ?? '';
+  return { key, kind: 'new', state: NEW, title: own || time || 'New slide', own, time, words: WORDS[NEW], thumb: null, color, current: true };
+}
+
+/** What a saved proof's tile says under its title: its time under a name of its own, else
+ *  that it is saved, its time being the title. */
+function saidBeside(own, time) {
+  return own && time ? time : WORDS.saved;
 }
 
 /** The slide `step` tiles from `key`, or null past either end. With no slide shown, the first or the last. */

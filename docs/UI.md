@@ -45,6 +45,11 @@ colour, its time and label, and its two counts (below): the captures gathered fo
 pulses as one lands from the app or the extension, and what its video gives it, then its
 leads when it has some. Its label opens the scene in Inspect, **Make the
 proof** opens Inspect's chooser on it, and ✕ stops; the captures stay with the scene.
+**A proof saved with no place yet keeps the scene geolocated**: the pill stays, what the
+map captures meanwhile is still gathered, and **Make the proof** reads **Open the proof**,
+which opens that proof and lays out the map captures it does not hold yet, never a second
+proof (`scene.proof`, `engine/geolocate.py`). Geo Proof says so once, at that first save.
+The geolocating ends when the proof states a place somebody checked.
 Three small links beside the counts go to Inspect on the scene, to Satellite with its
 reference window open again, and to Horizon. **Pressing the counts lists what the scene
 gathered** (`components/GatheredPanel.svelte`, `GET /geolocating/gathered`): its leads,
@@ -55,8 +60,10 @@ does, its saved picture staying in Media, and an Inspect open on that video drop
 a collage and the picture only open. **A lead is a spot dropped on the map while the
 scene is geolocated** (below, the status line's drop): numbered, in the scene's colour,
 kept on the scene like its captures and never as a place of the case, and erased when the
-scene is abandoned or a proof takes it up. The proof still takes its point from its
-capture. The extension's pill lists the same and drops leads over other sites' maps.
+scene is abandoned or its proof states a checked place. The proof takes its point from its
+capture, or from a lead: Geo Proof's point map (the pin beside Coordinates) draws the
+scene's leads and lists them on its right, a press putting the point on one
+(`GET /scenes/{draft}/leads`). The extension's pill lists the same and drops leads over other sites' maps.
 Every capture filed meanwhile, from any map tool or the extension, is gathered for it on
 the server (`engine/geolocate.py`), and every tab and the extension's panel follow the
 same scene. **Send to Geo Proof** then makes the proof of that scene, from Horizon's
@@ -4552,8 +4559,10 @@ Enter creates and Escape closes. A case with no scene shows no scene anywhere.
 
 **A proof's name is the analyst's.** A new proof has none: the header's field is empty,
 *Name (optional)*, and the proof files under a technical name, *Proof 3*, that is never
-shown. Everywhere a proof is listed (the home, Open proof, the slides strip, the To-do,
-the search) it reads as its **label**: its name when it has one, else where it stands
+shown. Everywhere a proof is listed (the home, Open proof, the To-do, the search) it reads
+as its **label**; on Geo Proof's slides strip, which runs in the clip's order, a proof with
+no name of its own is titled by its **time in the clip**, *Saved* or *Not saved* under it,
+and its label on hover. The label is its name when it has one, else where it stands
 and its day, *Al Jawf, Yemen · 9 Nov* (the region and the country the case filed for its
 first point's place, `engine/satellite.place_words`, and its date, else the day it was
 made), else its point, *15.4712, 45.3221*, else *Untitled proof* (`lib/naming.js`

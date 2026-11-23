@@ -119,6 +119,19 @@ export function goWithScene(tool, view = null) {
 }
 
 /**
+ * Open the proof that took the scene being geolocated up, while it states no place yet
+ * (`scene.proof`, `engine/geolocate.py`), with the map captures the scene gathered: Geo
+ * Proof lays out the ones it does not hold yet. The pill's press once a proof exists,
+ * rather than making a second one. False when the scene has no proof.
+ */
+export function openHeldProof(scene = geolocating.scene) {
+  if (!scene?.proof) return false;
+  uiState.openProof = { name: scene.proof, add: [...(scene.captures ?? [])] };
+  uiState.tool = 'proof';
+  return true;
+}
+
+/**
  * Drop a lead for the scene being geolocated: a spot to come back to, numbered, in the
  * scene's colour (`engine/geolocate.py`). The scene held takes the server's answer, so the
  * map and the pill draw it at once. Answers with the lead.

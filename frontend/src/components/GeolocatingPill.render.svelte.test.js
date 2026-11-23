@@ -346,6 +346,15 @@ describe('what the scene gathered, and the links', () => {
     expect(toast).toHaveBeenCalledWith('Deleted “cap-1”', 'info', 7000, expect.anything());
   });
 
+  it('opens the proof that took the scene up, with the captures it lacks, rather than making a second', async () => {
+    answers.set('GET /api/cases/c1/geolocating', { geolocating: { ...SCENE, proof: 'road-bridge' } });
+    await show();
+    expect(button('Make the proof')).toBeUndefined();
+    button('Open the proof').click();
+    expect(uiState.openProof).toEqual({ name: 'road-bridge', add: ['media/cap-1.png'] });
+    expect(uiState.tool).toBe('proof');
+  });
+
   it('links to Inspect on the scene, to Satellite with its reference window, and to Horizon', async () => {
     answers.set('GET /api/cases/c1/geolocating', { geolocating: { ...SCENE, order: 1 } });
     await show();

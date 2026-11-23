@@ -826,11 +826,13 @@ def save_proof(case_id: str, body: ProofIn) -> dict[str, Any]:
     # The markers showing this proof in the analyst's layers say what it says now:
     # its description, day and sources, and the footage behind it is the same marker.
     layerediting.sync_followers(case, entity_id)
-    # A picture marked to geolocate is proved once a proof lays it out: its geolocating
-    # ends, the leads dropped for it go, and the queue may have lost a row.
+    # A scene is proved once a proof of it states a checked place, a picture marked to
+    # geolocate once a proof laying it out does: its geolocating ends, the leads dropped
+    # for it go, and the queue may have lost a row.
     if geolocate.settle(case):
         say_geolocating(case)
-    geolocate.settle_leads(case, scene_engine.panel_sources(spec))
+    stated = scene_engine.stated_scene(spec)
+    geolocate.settle_leads(case, [*scene_engine.panel_sources(spec), *([stated["video"]] if stated else [])])
     events.publish({"type": "scenes", "case_id": case.id, "video": None})
     return {
         # The proof's entity, so the composer can ask what it shares with the case.
@@ -1144,12 +1146,13 @@ def state_proof_scene(case_id: str, name: str, body: SceneIn) -> dict[str, Any]:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
     # The date the proof states is about its moments: they moved, so it follows.
     _restate_dated_moments(case, name)
-    # A scene a proof takes up is proved: its geolocating is over, the leads dropped for
-    # it go, and it leaves the queue.
-    if scene.get("draft") and geolocate.stop(case, scene["draft"]):
+    # A scene a proof takes up leaves the queue. Its geolocating goes on until the proof
+    # states a checked place, what the map captures meanwhile joining that proof, which
+    # the pill now opens; then it ends and the leads dropped for it go.
+    if scene.get("draft"):
         say_geolocating(case)
-    if scene.get("draft") and scene.get("video"):
-        geolocate.forget_leads(case, scene["video"], scene["draft"])
+        if scene.get("video"):
+            geolocate.settle_leads(case, [scene["video"]])
     events.publish({"type": "scenes", "case_id": case.id, "video": scene.get("video")})
     return scene
 

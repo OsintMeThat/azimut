@@ -113,6 +113,34 @@ afterEach(() => {
   document.body.innerHTML = '';
 });
 
+describe('the leads of the scene the proof takes up', () => {
+  const LEADS = [{ id: 'ld_1', n: 1, lat: 48.86, lon: 2.3 }, { id: 'ld_2', n: 3, lat: 48.87, lon: 2.31 }];
+
+  it('draws and lists them, a press on either putting the point on it', async () => {
+    await open(VIEW, { leads: LEADS, leadColor: '#40c4ff' });
+    const [[shapes]] = set.mock.calls;
+    expect(shapes.map((shape) => shape.id)).toEqual(['lead-ld_1', 'lead-ld_2', 'point']);
+    expect(shapes[1].html).toContain('>3</text>');
+    expect(shapes[1].html).toContain('#40c4ff');
+    expect(document.querySelector('.leads h4').textContent).toBe('Leads');
+    // from the list
+    [...document.querySelectorAll('.leads button')][1].click();
+    flushSync();
+    expect(patch).toHaveBeenLastCalledWith('point', { at: { lat: 48.87, lon: 2.31 } });
+    // and from its mark on the map
+    shapes[0].onClick();
+    flushSync();
+    expect(patch).toHaveBeenLastCalledWith('point', { at: { lat: 48.86, lon: 2.3 } });
+    button('Use this point').click();
+    expect(onpick).toHaveBeenCalledWith({ lat: 48.86, lon: 2.3 });
+  });
+
+  it('shows no list when the scene has none', async () => {
+    await open();
+    expect(document.querySelector('.leads')).toBeNull();
+  });
+});
+
 describe('moving a proof point on the map', () => {
   it('opens on the view it was handed, with the pin on it', async () => {
     await open();

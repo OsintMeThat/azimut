@@ -21,7 +21,7 @@
   import { onEvent } from '../lib/events.js';
   import { fileStem } from '../lib/proofScene.js';
   import { caseState, toast, uiState } from '../lib/state.svelte.js';
-  import { geolocating, goWithScene, readGeolocating, stopGeolocating } from '../lib/geolocating.svelte.js';
+  import { geolocating, goWithScene, openHeldProof, readGeolocating, stopGeolocating } from '../lib/geolocating.svelte.js';
   import { GEOLOCATING_HELP as HELP } from '../lib/geolocatingHelp.js';
   import { sceneColorAt } from '../lib/scenes.js';
   import { captureCount, isPicture, queueShortTime, queueTime } from '../lib/sceneQueue.js';
@@ -141,10 +141,18 @@
       </button>
     </span>
     <span class="geo-rule" aria-hidden="true"></span>
-    <button class="geo-make" onclick={() => backToScene(true)} title={picture ? HELP.makePicture : HELP.make}>
-      <Icon name="proof" size={12} />
-      <span class="geo-make-words">Make the proof</span>
-    </button>
+    <!-- once a proof took the scene up with no place yet, the press opens it: never a second one -->
+    {#if held.proof}
+      <button class="geo-make" onclick={() => openHeldProof(held)} title={HELP.open}>
+        <Icon name="proof" size={12} />
+        <span class="geo-make-words">Open the proof</span>
+      </button>
+    {:else}
+      <button class="geo-make" onclick={() => backToScene(true)} title={picture ? HELP.makePicture : HELP.make}>
+        <Icon name="proof" size={12} />
+        <span class="geo-make-words">Make the proof</span>
+      </button>
+    {/if}
     <button class="geo-stop" onclick={stop} title={HELP.stop} aria-label="Stop geolocating">
       <Icon name="x" size={12} />
     </button>
