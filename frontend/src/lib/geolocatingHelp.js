@@ -32,5 +32,8 @@ export const GATHERED_HELP = {
  */
 export const PROOF_MAP_HELP = {
   none: 'No map capture yet: the proof gets no coordinates from the map.',
+  // the chooser's box says it as its frame box does: the fact first, in bold
+  title: 'No map capture yet.',
+  detail: 'The proof gets no coordinates from the map.',
   go: 'Go to the map',
 };

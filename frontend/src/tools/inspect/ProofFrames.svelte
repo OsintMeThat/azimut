@@ -176,13 +176,14 @@
     {/if}
 
     {#if !captures.length}
-      <p class="map-none" data-testid="proof-no-map-capture">
-        <Icon name="satellite" size={13} />
-        <span>{PROOF_MAP_HELP.none}</span>
+      <!-- framed as the box saying the scene has no frame, the way to the map inside it -->
+      <div class="none map-none" data-testid="proof-no-map-capture">
+        <Icon name="satellite" size={16} />
+        <p><strong>{PROOF_MAP_HELP.title}</strong> {PROOF_MAP_HELP.detail}</p>
         {#if onmap}
           <button class="btn btn-ghost btn-xs" disabled={busy} onclick={() => onmap()} title={INSPECT_HELP.sceneGeolocate}>{PROOF_MAP_HELP.go}</button>
         {/if}
-      </p>
+      </div>
     {/if}
 
     <div class="acts">
@@ -320,20 +321,17 @@
     margin: 0;
     line-height: 1.4;
   }
-  .map-none {
-    display: flex;
-    align-items: center;
-    flex-wrap: wrap;
-    gap: 4px 6px;
-    margin: 0;
-    color: var(--text-3);
-    font-size: var(--fs-xs);
-  }
-  .map-none :global(svg) {
+  .none :global(svg) {
     flex-shrink: 0;
   }
+  .map-none {
+    align-items: center;
+  }
+  .map-none p {
+    flex: 1;
+  }
   .map-none button {
-    margin-left: auto;
+    flex-shrink: 0;
   }
   .acts {
     display: flex;

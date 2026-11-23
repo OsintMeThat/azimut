@@ -1054,7 +1054,7 @@ describe('geolocating a scene', () => {
     button('Prove sc_1').click();
     flushSync();
     const dialog = () => document.querySelector('[role="dialog"][aria-label="Make the proof"]');
-    expect(dialog().textContent).toContain('No map capture yet: the proof gets no coordinates from the map.');
+    expect(dialog().textContent).toContain('No map capture yet. The proof gets no coordinates from the map.');
     [...dialog().querySelectorAll('button')].find((b) => b.textContent.trim() === 'Go to the map').click();
     await settle(10);
 

@@ -1252,8 +1252,11 @@
       // no leads to offer is a map like any other
     }
   }
+  // read each time the map opens, and let go when it closes: a list left from the last
+  // point would open the map narrowed beside leads that are not this proof's
   $effect(() => {
     if (pointMap || checking) untrack(readPointLeads);
+    else pointLeads = { leads: [], color: null };
   });
   let newProofTemplateId = $state('');
   let newProofLoading = $state(false);
