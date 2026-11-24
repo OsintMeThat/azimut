@@ -194,6 +194,103 @@ def place_for_proof(
     )
 
 
+class PlaceHeld(CaseError):
+    """A place a proof states cannot be moved on the map: the proof holds its own
+    coordinates, and its export prints them."""
+
+    def __init__(self, proofs: list[dict[str, Any]]) -> None:
+        names = ", ".join(str(proof.get("label") or proof["id"]) for proof in proofs)
+        super().__init__(f"A proof states this point ({names}). Move it in the proof")
+
+
+def proofs_stating(case: Case, place_id: str) -> list[dict[str, Any]]:
+    """The proofs that conclude on this place, in the order their edges were written.
+
+    A proof always ``depicts`` the points it states (:func:`_state_point`), so the
+    edge is the whole question, whoever wrote it: the composer or a sheet's build.
+    """
+    found: list[dict[str, Any]] = []
+    for link in case.links_of(place_id):
+        if link["to"] != place_id or link["type"] != links.DEPICTS:
+            continue
+        source = case.get_entity(link["from"])
+        if source is not None and source["type"] == "proof" and source not in found:
+            found.append(source)
+    return found
+
+
+def _shifted(geometry: Any, dlat: float, dlon: float) -> Any:
+    """A GeoJSON coordinate tree moved by a fixed offset, latitudes kept on the globe."""
+    if isinstance(geometry, list):
+        if len(geometry) >= 2 and all(isinstance(v, (int, float)) for v in geometry[:2]):
+            lon, lat = float(geometry[0]) + dlon, float(geometry[1]) + dlat
+            return [lon, max(-90.0, min(90.0, lat)), *geometry[2:]]
+        return [_shifted(part, dlat, dlon) for part in geometry]
+    if isinstance(geometry, dict):
+        return {
+            key: _shifted(value, dlat, dlon) if key in ("coordinates", "geometries", "geometry") else value
+            for key, value in geometry.items()
+        }
+    return geometry
+
+
+def move_place(case: Case, place_id: str, lat: float, lon: float) -> dict[str, Any]:
+    """Put a saved place somewhere else, with everything that stands on it.
+
+    The files located at it and the layer markers following it read its point, so
+    they move with it and nothing else is rewritten. A traced footprint moves by
+    the same offset, since it is the place's own shape. A place still named by its
+    coordinates is named by the new ones; a name the analyst gave stays.
+
+    **A point a proof states stays where the proof put it** (:class:`PlaceHeld`):
+    the proof keeps the coordinates in its spec and prints them on its export, so
+    moving the place alone would have the two disagree, and the proof's next save
+    file the old point again. It is moved in the proof.
+
+    Another place already standing on the new point is refused rather than merged:
+    two places one metre apart are the analyst's to tell apart. The geography is
+    the caller's to look up again (``locate_on_save``).
+    """
+    lat, lon = float(lat), float(lon)
+    if not (-90 <= lat <= 90 and -180 <= lon <= 180):
+        raise CaseError("The point is off the globe")
+    with case.lock:
+        place = case.get_entity(place_id)
+        if place is None or place["type"] != "place":
+            raise LookupError(place_id)
+        held = proofs_stating(case, place_id)
+        if held:
+            raise PlaceHeld(held)
+        there = place_at(case, lat, lon, keyed_only=False)
+        if there is not None and there["id"] != place_id:
+            raise CaseError(f"Another place already stands there: {there.get('label') or there['id']}")
+        attrs = place.get("attrs") or {}
+        old_lat, old_lon = attrs.get("lat"), attrs.get("lon")
+        patch: dict[str, Any] = {
+            "coords": coords_label(lat, lon, "dd"),
+            "lat": lat,
+            "lon": lon,
+            "plus_code": geo_engine.plus_code(lat, lon),
+            # the old answer is about the old point: unresolved until the caller looks
+            # the new one up, and the Locate pass picks it up if that lookup fails
+            "geo": None,
+        }
+        if attrs.get(COORD_KEY):
+            patch[COORD_KEY] = coord_key(lat, lon)
+        label = str(place.get("label") or "")
+        if old_lat is not None and old_lon is not None:
+            if attrs.get("footprint"):
+                patch["footprint"] = _shifted(attrs["footprint"], lat - float(old_lat), lon - float(old_lon))
+            named_by_numbers = {
+                coords_label(old_lat, old_lon),
+                coords_label(old_lat, old_lon, "dd"),
+                str(attrs.get("coords") or ""),
+            }
+            if label in named_by_numbers:
+                label = coords_label(lat, lon)
+        return case.update_entity(place_id, {"label": label, "attrs": patch})
+
+
 #: The two verbs a proof's point is stated with. `depicts` for the composition and
 #: for anything it shows; `located-at` for material POV says was recorded there.
 PLACE_VERBS = (links.DEPICTS, links.LOCATED_AT)
@@ -681,6 +778,9 @@ def saved_index(case: Case) -> list[dict[str, Any]]:
     # two grouped queries for the whole case rather than one per row: this list
     # is read on case open and must not walk the graph row by row
     worked = case.count_dependents(link_type=links.DERIVED_FROM, from_type="proof")
+    # a proof is composed from captures and *states* places, which it depicts
+    # (`_state_point`): a place's count is the proofs concluding on it
+    stated = case.count_dependents(link_type=links.DEPICTS, from_type="proof")
     related = case.count_incident_links(
         exclude_types=[
             *links.CHAIN_TYPES,
@@ -705,7 +805,7 @@ def saved_index(case: Case) -> list[dict[str, Any]]:
                 case,
                 entity,
                 capture,
-                worked.get(entity["id"], 0),
+                (stated if entity["type"] == "place" else worked).get(entity["id"], 0),
                 related.get(entity["id"], 0),
                 comparison,
                 view,

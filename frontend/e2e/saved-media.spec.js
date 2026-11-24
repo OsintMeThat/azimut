@@ -2,12 +2,12 @@ import { test, expect } from '@playwright/test';
 import { PANEL_PATH, awaitMapReady, installAppFixture, showSaved } from './app.fixture.js';
 
 /**
- * Located files on the map, and the player they open.
+ * Located files on the map, and the players they open.
  *
- * The gesture is holding footage next to the imagery it is being matched
- * against, so the file plays in the panel and the map stays whole. Whether a
- * mark answers its own click, what the arrows walk and what Escape puts back are
- * all browser facts, which is why they are proved here.
+ * A file's mark opens its card like every mark, and the file plays there, a stack
+ * one at a time. Held next to the imagery it is matched against, it goes to the
+ * panel beside the map. What the card walks, what the panel takes over and what
+ * Escape puts back are browser facts, which is why they are proved here.
  */
 
 const point = {
@@ -66,28 +66,74 @@ test('opens on the case’s located files, with the layer already drawing them',
   fixture.expectNoUnexpectedRequests();
 });
 
-test('plays the whole stack under one mark, and puts the list back', async ({ page }) => {
+const card = (page) => page.locator('.saved-popup');
+
+/** A file's mark pressed, then the file on screen taken to the panel beside the map. */
+async function playBeside(page) {
+  await page.locator('.saved-mark').click();
+  await card(page).getByRole('button', { name: 'Play beside the map' }).click();
+  await expect(card(page)).toHaveCount(0);
+}
+
+test('plays the stack under one mark in its card, one file at a time', async ({ page }) => {
   await installAppFixture(page, { mediaIndex });
   await page.goto('/#satellite');
   await awaitMapReady(page);
 
   await page.locator('.saved-mark').click();
-  // the file plays in the panel; the map is not covered by a window over it
-  await expect(page.locator('.saved-popup')).toHaveCount(0);
+  await expect(card(page).locator('.stage img')).toBeVisible();
+  await expect(card(page).locator('.stage')).toHaveCount(1);
+  await expect(card(page).getByText('1 / 2')).toBeVisible();
+  await expect(card(page).getByText('roadside photo')).toBeVisible();
+  await expect(card(page).getByText('Recorded here')).toBeVisible();
+  // the panel keeps its list: the card is where the file is read first
+  await expect(panel(page).locator('.viewer')).toHaveCount(0);
+
+  await card(page).getByRole('button', { name: 'Next file' }).click();
+  await expect(card(page).getByText('2 / 2')).toBeVisible();
+  await expect(card(page).getByText('rooftop still')).toBeVisible();
+  // why it stands here, and that only a tool has claimed it so far
+  await expect(card(page).getByText('Via Roofline')).toBeVisible();
+  await expect(card(page).getByText('suggested')).toBeVisible();
+});
+
+test('takes the file on screen beside the map, and puts the list back', async ({ page }) => {
+  await installAppFixture(page, { mediaIndex });
+  await page.goto('/#satellite');
+  await awaitMapReady(page);
+
+  await page.locator('.saved-mark').click();
+  await card(page).getByRole('button', { name: 'Next file' }).click();
+  await card(page).getByRole('button', { name: 'Play beside the map' }).click();
+  await expect(card(page)).toHaveCount(0);
+  // the file the card was on, with the rest of the stack a press of the arrows away
   await expect(panel(page).locator('.viewer img')).toBeVisible();
-  await expect(panel(page).getByText('1 / 2')).toBeVisible();
-  await expect(panel(page).getByText('roadside photo')).toBeVisible();
+  await expect(panel(page).getByText('2 / 2')).toBeVisible();
+  await expect(panel(page).getByText('rooftop still')).toBeVisible();
 
   // the arrows walk the stack without a click into the panel first
   await page.keyboard.press('ArrowRight');
-  await expect(panel(page).getByText('2 / 2')).toBeVisible();
-  await expect(panel(page).getByText('rooftop still')).toBeVisible();
-  // why it stands here, and that only a tool has claimed it so far
-  await expect(panel(page).getByText('Via Roofline')).toBeVisible();
-  await expect(panel(page).getByText('suggested')).toBeVisible();
+  await expect(panel(page).getByText('1 / 2')).toBeVisible();
 
   await page.keyboard.press('Escape');
   await expect(panel(page).getByText('Layers')).toBeVisible();
+});
+
+test('plays a file under the work filed on its point, in the one card', async ({ page }) => {
+  await installAppFixture(page, {
+    mediaIndex: [mediaIndex[0]],
+    savedIndex: [{ id: 'place-1', key: 'place-1', kind: 'place', title: 'checkpoint north', ...point }],
+  });
+  await page.goto('/#satellite');
+  await awaitMapReady(page);
+
+  await page.locator('.saved-mark-wrap').click();
+  await expect(card(page).locator('.stage img')).toBeVisible();
+  await expect(card(page).getByText('roadside photo')).toBeVisible();
+  await expect(card(page).getByText('checkpoint north')).toBeVisible();
+  const file = await card(page).locator('.file').boundingBox();
+  const place = await card(page).getByText('checkpoint north').boundingBox();
+  expect(file.y).toBeLessThan(place.y);
 });
 
 test('opens the proof a file was placed by', async ({ page }) => {
@@ -95,7 +141,7 @@ test('opens the proof a file was placed by', async ({ page }) => {
   await page.goto('/#satellite');
   await awaitMapReady(page);
 
-  await page.locator('.saved-mark').click();
+  await playBeside(page);
   await page.keyboard.press('ArrowRight');
   await panel(page).getByRole('button', { name: 'Roofline' }).click();
   await expect(page.locator('.tool-header').getByRole('button', { name: 'New proof', exact: true })).toBeVisible();
@@ -111,7 +157,7 @@ test('keeps the card for saved work, which is read rather than watched', async (
   await awaitMapReady(page);
   await showSaved(page, 'Places');
 
-  await page.locator('.saved-mark').click();
+  await page.locator('.saved-mark-wrap').click();
   await expect(page.locator('.saved-popup')).toBeVisible();
   await expect(panel(page).locator('.viewer')).toHaveCount(0);
 });
@@ -132,7 +178,7 @@ test('puts a file in a layer from the player, a step at a time, the menu whole i
   await page.goto('/#satellite');
   await awaitMapReady(page);
 
-  await page.locator('.saved-mark').click();
+  await playBeside(page);
   // the picture laid out first, so the button stays where the menu opens from
   await expect(panel(page).locator('.viewer img')).toBeVisible();
   await panel(page).getByRole('button', { name: 'Add to a layer', exact: true }).click();

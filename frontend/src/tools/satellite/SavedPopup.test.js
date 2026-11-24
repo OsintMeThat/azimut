@@ -164,13 +164,11 @@ describe('SavedOverlay popup wiring', () => {
     expect(at([capture], { onedit: undefined })).not.toContain('aria-label="Edit"');
   });
 
-  it('opens a card for every mark of saved work, one item or a stack', () => {
+  it('opens a card for every mark, one item or a stack, files included', () => {
     expect(overlay).toContain('content: () => popupContent(mark, at)');
-    // no shortcut path that flies straight there on a single-item mark. A mark of
-    // located files is the one that answers its own click, by playing them in the
-    // panel — there is no card for a photo to open.
-    expect(overlay).toContain('isMedia(mark)\n            ? { onClick: () => onmedia?.(mark.items) }');
-    expect((overlay.match(/onClick/g) ?? []).length).toBe(1);
+    // no shortcut path that flies straight there or plays in the panel: a file
+    // plays in the card its mark opens
+    expect(overlay).not.toContain('onClick');
   });
 
   it('asks for the width its own rows need, and leaves the look to the map', () => {
@@ -277,5 +275,82 @@ describe('how precisely a point is pinned', () => {
   it('is read-only here, because the drawer owns the field', () => {
     const card = popup.slice(popup.indexOf('{#if spread(row)}'));
     expect(card.slice(0, 200)).not.toMatch(/<input|<button/);
+  });
+});
+
+describe('SavedPopup, the files standing on a point', () => {
+  const clip = {
+    id: 'm1',
+    key: 'm1@48.0159,37.8029',
+    kind: 'media',
+    media_kind: 'video',
+    title: 'convoy at the gate',
+    path: 'media/convoy.mp4',
+    lat: 48.0159,
+    lon: 37.8029,
+    status: 'confirmed',
+    roads: [{ type: 'located-at', status: 'confirmed' }],
+  };
+  const photo = { ...clip, id: 'm2', key: 'm2@48.0159,37.8029', media_kind: 'image', title: 'gate, from the road', path: 'media/gate.jpg' };
+
+  it('plays the file in the card, the video with its own controls and no early download', () => {
+    const body = at([clip]);
+    expect(body).toContain('<video');
+    expect(body).toContain('src="/files/case-1/media/convoy.mp4"');
+    expect(body).toContain('preload="metadata"');
+    expect(body).toContain('convoy at the gate');
+    expect(body).toContain('Video');
+    expect(body).toContain('Recorded here');
+    const still = at([photo]);
+    expect(still).toContain('<img src="/files/case-1/media/gate.jpg"');
+    expect(still).toContain('Image');
+  });
+
+  it('walks a stack of files one at a time, rather than one player each', () => {
+    const body = at([clip, photo]);
+    expect((body.match(/class="stage/g) ?? []).length).toBe(1);
+    expect(body).toContain('1 / 2');
+    expect(body).toContain('aria-label="Next file"');
+    expect(at([clip])).not.toContain('Next file');
+  });
+
+  it('lists the work filed on the point under the file, never as a row of its own', () => {
+    const body = at([clip, place]);
+    expect(body.indexOf('convoy at the gate')).toBeLessThan(body.indexOf('checkpoint north'));
+    // the file is the player, not a row in the list that would send it elsewhere
+    expect((body.match(/class="entry/g) ?? []).length).toBe(1);
+  });
+
+  it('takes the file beside the map only where the map has a panel for it', () => {
+    expect(at([clip], { onexpand: noop })).toContain('Play beside the map');
+    expect(at([clip])).not.toContain('Play beside the map');
+  });
+
+  it('opens the file in Media, except from a fullscreen map it would leave', () => {
+    expect(at([clip])).toContain('Open in Media');
+    expect(at([clip], { fullscreen: true })).toContain('Exit fullscreen first');
+  });
+
+  it('says a point only a tool has claimed is a suggestion', () => {
+    expect(at([{ ...clip, status: 'suggested' }])).toContain('suggested');
+    expect(at([clip])).not.toContain('suggested');
+  });
+});
+
+describe('SavedPopup, moving a place', () => {
+  it('offers Move on a place where the map moves things, and nowhere else', () => {
+    expect(at([place], { onmove: noop })).toContain('aria-label="Move place"');
+    expect(at([place])).not.toContain('Move place');
+    expect(at([capture], { onmove: noop })).not.toContain('Move place');
+  });
+
+  it('sends a point a proof states to the proof, which keeps and prints it', () => {
+    expect(at([place], { onmove: noop })).toContain('Pick this place up and put it down elsewhere');
+    expect(at([{ ...place, proofs: 1 }], { onmove: noop })).toContain('A proof states this point');
+  });
+
+  it('closes the card before the hand takes the map', () => {
+    expect(overlay).toContain('onmove: onmove && ((row, pointer) => {\n          surface.closePopup();');
+    expect(overlay).toContain('onexpand: onexpand && ((files, index, start) => {\n          surface.closePopup();');
   });
 });

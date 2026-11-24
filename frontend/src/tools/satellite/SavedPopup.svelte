@@ -7,6 +7,11 @@
    * answer to "what do I already have here?" reads the same whether it is one
    * item or five. Ordered by imagery date, so a stack reads as a timeline of
    * the ground rather than of your clicks.
+   *
+   * A located photo or video is read by looking at it, so the files on a point play
+   * at the top of the card, one at a time with arrows for a stack, and the work
+   * filed there is listed under them. Where the map has a panel for it, the file
+   * is taken there to be read beside the imagery, at the moment it was playing.
    */
   import Icon from '../../components/Icon.svelte';
   import { fileUrl } from '../../lib/fileUrl.js';
@@ -15,6 +20,7 @@
   import { toast } from '../../lib/state.svelte.js';
   import { loadRelationTypes, relationAction } from '../../lib/relations.svelte.js';
   import { keptLabel, lookLabel, pairLabel, stackOrder } from '../../lib/savedMarkers.js';
+  import { roadWords, step } from '../../lib/mediaViewer.js';
   import { placeColour } from '../../lib/mapMarkers.js';
   import LayerStylePalette from './LayerStylePalette.svelte';
 
@@ -32,6 +38,12 @@
     // a place was given a colour: its mark is painted again at once. Absent on a
     // map that edits nothing, which offers no colour either.
     oncolour = null,
+    // the files on this point, read in the panel beside the map: `(files, index,
+    // start)`, `start` the moment a video was at. Absent where the map has no panel.
+    onexpand = null,
+    // a place picked up to be put down elsewhere: `(row, pointer)`, the pointer where
+    // the press was. Absent on a map that moves nothing.
+    onmove = null,
   } = $props();
 
   const GLYPH = { place: 'pin', capture: 'satellite', screenshot: 'screen', comparison: 'compare', view: 'horizon' };
@@ -58,6 +70,25 @@
 
   const ordered = $derived(stackOrder(items));
   const here = $derived(ordered[0]);
+  // the files standing here play at the top; the work filed here is listed under them
+  const files = $derived(ordered.filter((row) => row.kind === 'media'));
+  const work = $derived(ordered.filter((row) => row.kind !== 'media'));
+  let fileIndex = $state(0);
+  const file = $derived(files[Math.min(fileIndex, files.length - 1)] ?? null);
+  const why = $derived(roadWords(file));
+  let video = $state(null);
+
+  /** The file on screen, taken to the panel at the moment it was playing. */
+  function expand() {
+    const start = video && file?.media_kind === 'video'
+      ? { key: rowKey(file), time: video.currentTime, playing: !video.paused }
+      : null;
+    video?.pause();
+    onexpand?.(files, Math.min(fileIndex, files.length - 1), start);
+  }
+
+  /** A place a proof states is moved in the proof, which keeps and prints its point. */
+  const movedInProof = (row) => row.proofs > 0;
 
   const day = (stamp) => (stamp ? String(stamp).slice(0, 10) : null);
   loadRelationTypes();
@@ -150,8 +181,61 @@
     {#if ordered.length > 1}<span class="tally">{ordered.length} saved here</span>{/if}
   </header>
 
-  <div class="stack" class:scrolls={ordered.length > 2}>
-    {#each ordered as row (row.key ?? row.id)}
+  {#if file}
+    <section class="file" aria-label="Located file">
+      <!-- keyed on the file, so stepping away stops the video that was playing -->
+      {#key rowKey(file)}
+        <div class="stage">
+          {#if file.media_kind === 'video'}
+            <!-- svelte-ignore a11y_media_has_caption -->
+            <video bind:this={video} src={fileUrl(caseId, file.path)} controls preload="metadata"></video>
+          {:else}
+            <img src={fileUrl(caseId, file.path)} alt={file.title} decoding="async" />
+          {/if}
+        </div>
+      {/key}
+      <div class="file-head">
+        <span class="title file-title" title={file.title}>{file.title || 'Untitled'}</span>
+        {#if files.length > 1}
+          <span class="walk">
+            <button type="button" class="icon-act" aria-label="Previous file" title="Previous file"
+              onclick={() => (fileIndex = step(fileIndex, -1, files.length))}><Icon name="chevronLeft" size={13} /></button>
+            <span class="count">{Math.min(fileIndex, files.length - 1) + 1} / {files.length}</span>
+            <button type="button" class="icon-act" aria-label="Next file" title="Next file"
+              onclick={() => (fileIndex = step(fileIndex, 1, files.length))}><Icon name="chevronRight" size={13} /></button>
+          </span>
+        {/if}
+      </div>
+      <p class="meta">
+        <span class="kind">
+          <Icon name={file.media_kind === 'video' ? 'video' : 'image'} size={10} />
+          {file.media_kind === 'video' ? 'Video' : 'Image'}
+        </span>
+        {#if why}<span>{why}</span>{/if}
+        {#if file.status === 'suggested'}
+          <span class="proposed" title="Proposed by a tool, waiting for you">suggested</span>
+        {/if}
+      </p>
+      <p class="acts">
+        {#if onexpand}
+          <button type="button" class="icon-act" aria-label="Play beside the map" title="Play beside the map" onclick={expand}>
+            <Icon name="panelRight" size={13} />
+          </button>
+        {/if}
+        <button
+          type="button"
+          class="link"
+          class:off={fullscreen}
+          disabled={fullscreen}
+          title={fullscreen ? 'Exit fullscreen first. This leaves the map' : 'Open this file in Media'}
+          onclick={() => onentity?.({ id: file.id, type: 'media', attrs: { path: file.path } })}
+        >Open in Media</button>
+      </p>
+    </section>
+  {/if}
+
+  <div class="stack" class:scrolls={work.length > 2} class:under={file && work.length}>
+    {#each work as row (row.key ?? row.id)}
       {@const flyable = row.lat != null && row.lon != null}
       <div class="entry">
         <button
@@ -235,6 +319,15 @@
             </section>
           {/if}
           <p class="acts">
+            {#if row.kind === 'place' && onmove}
+              <button
+                type="button"
+                class="icon-act"
+                aria-label="Move place"
+                title={movedInProof(row) ? 'A proof states this point: open it to move the point' : 'Pick this place up and put it down elsewhere'}
+                onclick={(event) => onmove(row, { x: event.clientX, y: event.clientY })}
+              ><Icon name="move" size={13} /></button>
+            {/if}
             {#if row.kind === 'place' && ondelete}
               <button type="button" class="icon-act danger" title="Delete case place" aria-label="Delete case place" onclick={() => ondelete(row)}>
                 <Icon name="trash" size={13} />
@@ -331,6 +424,62 @@
   .stack {
     display: flex;
     flex-direction: column;
+  }
+  .stack:empty {
+    display: none;
+  }
+  /* the work filed on a point, under the file that plays there */
+  .stack.under {
+    border-top: 1px solid var(--border);
+  }
+  .file {
+    display: flex;
+    flex-direction: column;
+    gap: 3px;
+    padding: 8px 0;
+  }
+  /* the picture whole, letterboxed, at the width of the card */
+  .stage {
+    display: grid;
+    place-items: center;
+    height: 166px;
+    border-radius: var(--r-sm);
+    background: #000;
+    overflow: hidden;
+  }
+  .stage video,
+  .stage img {
+    max-width: 100%;
+    max-height: 100%;
+    object-fit: contain;
+  }
+  .stage video {
+    width: 100%;
+    height: 100%;
+  }
+  .file-head {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    margin-top: 3px;
+  }
+  .file-title {
+    flex: 1;
+    min-width: 0;
+    cursor: default;
+  }
+  .file-title:hover {
+    color: var(--text-1);
+  }
+  .walk {
+    display: inline-flex;
+    align-items: center;
+    flex: none;
+  }
+  .count {
+    font-size: var(--fs-xs);
+    color: var(--text-2);
+    font-variant-numeric: tabular-nums;
   }
   /* two entries fit; past that the popup scrolls rather than growing off-map */
   .stack.scrolls {

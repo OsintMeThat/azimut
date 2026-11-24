@@ -3013,11 +3013,17 @@ the same set back behind its own switch (`links.PRODUCED_HERE`). Locate has noth
 either, and the row's own actions are gone: a file is renamed, filed and deleted
 in Media.
 
-Pressing a media row, or its mark on the map, plays the file **in the panel, in
-place of the list**: the footage is read beside the imagery it is being matched
-against, and a window over the map would hide the half being compared. The marks
-stack like any other, so one press opens every file on that metre; `←`/`→` walk
-them, the count says where you are, and `Esc` brings the list back. A focused
+Pressing a file's mark on the map opens its card, and the file plays at the top of
+it: a photo whole, a video with its controls, loaded only when it is played. A
+stack of files plays one at a time, the count and two arrows beside its name, with
+why it stands there and **Open in Media** under it, and the work filed on that
+point (a place, its proof's dot) listed below. A card too tall for the room around
+its mark slides the map just far enough to show it whole, clear of the bar along
+the map's bottom. **Play beside the map** takes the file on screen to the panel,
+the video from the moment it was at: the footage is read beside the imagery it is
+being matched against. Pressing a media row plays it there directly, **in the
+panel, in place of the list**, with every file on that metre; `←`/`→` walk them,
+the count says where you are, and `Esc` brings the list back. A focused
 video keeps its own arrows for seeking. The card carries the file's name, its
 point, why it stands there, and the ways out: **Open in Media**, one button
 per proof built on it, and **Add to a layer**, the same step-by-step menu as a
@@ -3546,9 +3552,9 @@ place's card picks the colour from the palette a layer's style uses: the plain c
 those picked lately and a code typed or pasted. It is kept on the place (`attrs.color`)
 and the extension draws the same drop. Located
 files draw as white-ringed teardrops, items at the same spot collapse
-into one counted mark, and clicking a mark of saved work opens a card
-with its preview, provider, dates and note. A mark of files has no card: it plays
-them in the panel. A mark whose capture carries proofs
+into one counted mark, and clicking a mark opens a card
+with its preview, provider, dates and note; the files on it play at its top. A mark
+whose place a proof concludes on, or whose capture a proof was built from,
 wears a dot on its shoulder, and its card names the count. Hovering a card, a tree row or a search result
 lights the others.
 
@@ -3574,6 +3580,19 @@ and it replaces whatever said how precise the point was — its earlier shape, o
 the circle a radius drew. The panel names what it is replacing before Save, and
 a radius typed back over a traced shape asks in Details before dropping it: the
 map draws one of the two, so a place states its precision once.
+
+**A place's card moves it.** **Move place** picks it up: a page cannot put the
+pointer on the point, so the map slides until the point is under the press, a pale
+copy of the pin follows the pointer, and a click puts it down while the old mark
+waits faint where it stood. `Esc` leaves it there. Saved, the place takes the new
+coordinates, its traced footprint moves by the same offset, a place still named by
+its numbers takes the new ones, and its country is looked up again; the files and
+layer markers standing on it follow, since they read its point. A toast offers
+**Undo**. A point a proof states is moved in the proof, which keeps its coordinates
+in its spec and prints them on its export: there the button opens the proof
+instead, and the server refuses the move (`POST
+/cases/{id}/satellite/places/{entity}/move`, 409). So does a point another place
+already stands on.
 
 **The place dialog hands over to the full editor.** Title, folder, note and
 *Relations* are what an analyst fills at the moment of saving; how precise the

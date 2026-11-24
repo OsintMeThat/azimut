@@ -2140,6 +2140,28 @@ def save_place(case_id: str, body: PlaceIn) -> dict[str, Any]:
     return entity
 
 
+class PlaceMoveIn(BaseModel):
+    lat: float = Field(ge=-90, le=90)
+    lon: float = Field(ge=-180, le=180)
+
+
+@router.post("/cases/{case_id}/satellite/places/{entity_id}/move")
+def move_place(case_id: str, entity_id: str, body: PlaceMoveIn) -> dict[str, Any]:
+    """Put a saved place on another point (``satellite.move_place``). A place a proof
+    states answers 409 naming the proofs, since it is moved in the proof; so does a
+    point another place already stands on."""
+    case = get_case(case_id)
+    try:
+        entity = satellite_engine.move_place(case, entity_id, body.lat, body.lon)
+    except LookupError as exc:
+        raise HTTPException(status_code=404, detail="no such place") from exc
+    except CaseError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    locate_on_save(case, entity_id, body.lat, body.lon)
+    saved_changed(case)
+    return case.get_entity(entity_id) or entity
+
+
 @router.get("/cases/{case_id}/satellite")
 def list_captures(case_id: str) -> list[dict[str, Any]]:
     # tagged like the media listing: the proof pickers render captures in small

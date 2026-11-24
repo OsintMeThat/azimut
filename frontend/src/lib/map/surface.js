@@ -459,6 +459,29 @@ export function createSurface(engine, { onPopupOpen, onPopupClose, tints = false
     card = popup;
     openOn = shape.id;
     onPopupOpen?.(shape.id);
+    if (shape.popup.inView) keepInView(popup, shape.popup.inView);
+  }
+
+  /**
+   * A card taller than the room around its mark opens off the map's edge, where its
+   * buttons cannot be reached: the map slides just far enough to show it whole, and
+   * not at all when it fits. A card taller than the map is shown from its top.
+   * `margin` is the room kept free on each side, for whatever floats over the map
+   * there.
+   */
+  function keepInView(popup, margin) {
+    const box = popup.getElement?.()?.getBoundingClientRect?.();
+    const frame = map.getContainer?.()?.getBoundingClientRect?.();
+    if (!box?.height || !frame?.height) return;
+    const { top = 12, right = 12, bottom = 12, left = 12 } = margin === true ? {} : margin;
+    const shift = (start, end, low, high) => {
+      if (start < low) return start - low;
+      if (end > high) return Math.min(end - high, start - low);
+      return 0;
+    };
+    const dx = shift(box.left, box.right, frame.left + left, frame.right - right);
+    const dy = shift(box.top, box.bottom, frame.top + top, frame.bottom - bottom);
+    if (dx || dy) map.panBy([dx, dy], { duration: 200 });
   }
 
   function closeCard() {

@@ -24,6 +24,8 @@
   let {
     items = [],
     index = $bindable(0),
+    /** Where a video taken from a map card was: `{ key, time, playing }`, picked up once. */
+    start = null,
     caseId,
     coords,
     fullscreen = false,
@@ -64,6 +66,16 @@
     const id = row.id, at = { lat: row.lat, lon: row.lon };
     closeLayers();
     layerItems.add(caseId, id, at, layer, group, style, status);
+  }
+
+  // the moment a card's video was at, for that file and only the first time it loads
+  let resumed = null;
+  function resume(event) {
+    const video = event.currentTarget;
+    if (!start || resumed === start || start.key !== (row?.key ?? row?.id)) return;
+    resumed = start;
+    if (Number.isFinite(start.time) && start.time > 0) video.currentTime = start.time;
+    if (start.playing) video.play().catch(() => {});
   }
 
   function go(delta) {
@@ -117,7 +129,7 @@
       <div class="stage">
         {#if row.media_kind === 'video'}
           <!-- svelte-ignore a11y_media_has_caption -->
-          <video src={fileUrl(caseId, row.path)} controls preload="metadata"></video>
+          <video src={fileUrl(caseId, row.path)} controls preload="metadata" onloadedmetadata={resume}></video>
         {:else}
           <img src={fileUrl(caseId, row.path)} alt={row.title} />
         {/if}

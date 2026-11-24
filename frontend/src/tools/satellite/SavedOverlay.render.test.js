@@ -1,11 +1,7 @@
 // @vitest-environment happy-dom
 /**
- * What the saved layer asks the map to draw, for the one kind of mark that has
- * no card: a located file.
- *
- * A photo is read by looking at it, so its mark plays the stack in the panel
- * instead of opening a card over the map. Everything filed on a point keeps its
- * card, which is what the rest of SavedPopup.test.js covers.
+ * What the saved layer asks the map to draw: every mark opens its card, a located
+ * file's included, where the file plays (SavedPopup.test.js covers the card).
  */
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { flushSync, mount, unmount } from 'svelte';
@@ -23,7 +19,7 @@ const surface = {
 vi.mock('../../lib/map/surface.js', () => ({ createSurface: () => surface }));
 
 const { default: SavedOverlay } = await import('./SavedOverlay.svelte');
-const { DROP, DROP_CARD_OFFSET, PLACE_RED, placeMark } = await import('../../lib/mapMarkers.js');
+const { DROP, DROP_CARD_OFFSET, PLACE_RED, TEARDROP_CARD_OFFSET, placeMark } = await import('../../lib/mapMarkers.js');
 
 const engine = { getZoom: () => 16, on: () => () => {} };
 let held = null;
@@ -59,13 +55,11 @@ afterEach(() => {
 });
 
 describe('a mark of located files', () => {
-  it('answers its own click with the stack, and opens no card', () => {
-    const onmedia = vi.fn();
-    const [mark] = draw([media('quay'), media('roof')], { onmedia });
-    expect(mark.popup).toBeUndefined();
-    mark.onClick();
-    expect(onmedia).toHaveBeenCalledTimes(1);
-    expect(onmedia.mock.calls[0][0].map((row) => row.id)).toEqual(['quay', 'roof']);
+  it('opens a card like every mark, where the stack plays', () => {
+    const [mark] = draw([media('quay'), media('roof')]);
+    expect(mark.onClick).toBeUndefined();
+    expect(mark.popup.className).toBe('saved-popup');
+    expect(mark.popup.offset).toBe(TEARDROP_CARD_OFFSET);
   });
 
   it('draws footage as footage and photographs as photographs', () => {
