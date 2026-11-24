@@ -65,26 +65,29 @@
 </div>
 
 <style>
+  /* Laid out as Map plate's rows: a quiet name, the browser's own thin slider, the
+     value in grey after it. */
   .sliders {
     display: flex;
     flex-direction: column;
-    gap: 9px;
+    gap: 7px;
   }
   .row {
     display: grid;
-    grid-template-columns: 96px 1fr 42px;
+    grid-template-columns: 74px minmax(0, 1fr) auto;
     align-items: center;
     gap: 8px;
-    font-size: var(--fs-sm);
+    font-size: var(--fs-xs);
   }
   .row.toggle {
     grid-template-columns: 1fr auto;
   }
   .row.choice {
-    grid-template-columns: 96px 1fr;
+    grid-template-columns: 74px minmax(0, 1fr);
   }
   .lbl {
-    color: var(--text-2);
+    color: var(--text-3);
+    font-size: 11px;
     display: flex;
     align-items: center;
     gap: 5px;
@@ -121,7 +124,7 @@
   }
   input[type='range'] {
     width: 100%;
-    accent-color: var(--accent);
+    min-width: 0;
   }
   input[type='checkbox'] {
     accent-color: var(--accent);
@@ -129,8 +132,10 @@
     height: 15px;
   }
   .val {
+    min-width: 30px;
     text-align: right;
+    white-space: nowrap;
     color: var(--text-3);
-    font-size: var(--fs-xs);
+    font-size: 11px;
   }
 </style>
