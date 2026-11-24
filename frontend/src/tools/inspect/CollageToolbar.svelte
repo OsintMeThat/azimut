@@ -3,7 +3,8 @@
   import { pinholeOps, stitchCanvas } from '../../lib/inspect.js';
   import { BRUSH_MAX, BRUSH_MIN, excludeRequest } from '../../lib/excludeBrush.js';
   import { LEVEL_MIN_POINTS } from '../../lib/straighten.js';
-  import { cutOf, cutStart } from '../../lib/collageCut.js';
+  import { cutOf, cutStart, sameCut, trimFrame } from '../../lib/collageCut.js';
+  import { loadImage } from '../../lib/collageThumb.js';
   import { stitchedWords } from '../../lib/leftOut.js';
   import { api } from '../../lib/api.js';
   import { caseState, toast } from '../../lib/state.svelte.js';
@@ -13,7 +14,7 @@
   // The bar over the canvas, for what acts on the whole collage: Auto-stitch places
   // the pieces by the imagery they share, Ignore areas paints what it must not match
   // on, Straighten bends the collage along a level line, Cut frames the picture it
-  // saves, and Fit shows the pieces whole. The piece in hand has its own block in the panel.
+  // saves (Trim edges cuts off a panorama's empty corners), and Fit shows the pieces whole. The piece in hand has its own block in the panel.
   // `level` is the line the canvas draws to straighten the collage by, `straighten` what
   // bends the collage along it; `view` is the canvas's zoom and pan, `fit` what fits it
   // to the pieces and `fitted` whether it does. `brush` is the canvas's brush, `{ on,
@@ -215,6 +216,67 @@
     cut.editing = false;
   }
 
+  // Trim edges cuts to the largest frame the pieces fill (lib/collageCut.js). It is read
+  // again a moment after the layout settles, from the pictures already on screen, so the
+  // press can say beforehand when there is nothing to trim.
+  const TRIM_SETTLE = 250;
+  const pictures = new Map();
+  function picture(url) {
+    if (!pictures.has(url)) pictures.set(url, loadImage(url));
+    return pictures.get(url);
+  }
+  const layoutKey = $derived(
+    active ? JSON.stringify(active.nodes.map((n) => [n.id, n.url ?? null, !!n.missing, n.quad])) : '',
+  );
+  const piecesIn = $derived(!!active?.nodes.length && active.nodes.every((n) => n.url || n.missing));
+  const piecesNow = () =>
+    active.nodes.map((n) => ({
+      id: n.id, url: n.url, w: n.w, h: n.h, missing: !!n.missing, quad: n.quad.map(([x, y]) => [x, y]),
+    }));
+  let filled = $state({ key: null, frame: null });
+  $effect(() => {
+    const key = layoutKey;
+    if (!piecesIn) return;
+    const nodes = untrack(piecesNow);
+    // only the pictures of the pieces still on the canvas are kept
+    const urls = new Set(nodes.map((n) => n.url));
+    for (const url of [...pictures.keys()]) if (!urls.has(url)) pictures.delete(url);
+    const timer = setTimeout(() => {
+      trimFrame(nodes, { load: picture })
+        .catch(() => null)
+        .then((frame) => {
+          if (key === layoutKey) filled = { key, frame };
+        });
+    }, TRIM_SETTLE);
+    return () => clearTimeout(timer);
+  });
+  // what the press would keep, or why it rests
+  const trim = $derived.by(() => {
+    if (!active?.nodes.length) return { why: 'Add a piece first' };
+    if (!piecesIn || filled.key === null) return { why: 'Reading the pieces' };
+    if (!filled.frame) return { why: 'No part of the collage is filled' };
+    const clip = cutOf(filled.frame, active.nodes);
+    return sameCut(clip, active.clip) ? { why: 'No empty edge left to trim' } : { clip };
+  });
+  let trimming = $state(false);
+  async function trimEdges() {
+    if (trim.why || trimming) return;
+    trimming = true;
+    // one undo, the layout read again first if it moved since
+    const release = hold?.();
+    try {
+      const frame = filled.key === layoutKey ? filled.frame : await trimFrame(piecesNow(), { load: picture });
+      const clip = frame ? cutOf(frame, active.nodes) : null;
+      if (frame && !sameCut(clip, active.clip)) active.clip = clip;
+      if (cut) cut.editing = false;
+    } catch (e) {
+      toast(e.message, 'danger');
+    } finally {
+      trimming = false;
+      release?.();
+    }
+  }
+
   // ---- the areas a stitch must not match on ----------------------------------
   // Painted on a piece over what moves or was laid over the picture: a person, a car,
   // a watermark (lib/excludeBrush.js). They stay with the collage, never in its picture.
@@ -392,6 +454,15 @@
           aria-label="Cut"
         >
           <Icon name="scissors" size={13} /> <span class="words">Cut</span>
+        </button>
+        <button
+          class="btn btn-sm"
+          disabled={!!trim.why || trimming}
+          onclick={trimEdges}
+          title={trim.why ?? 'Cut to the largest frame the pieces fill'}
+          aria-label="Trim edges"
+        >
+          <Icon name="crop" size={13} /> <span class="words">Trim edges</span>
         </button>
       {/if}
       {#if active?.clip}

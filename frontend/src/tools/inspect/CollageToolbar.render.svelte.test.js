@@ -6,6 +6,8 @@ const post = vi.fn();
 vi.mock('../../lib/api.js', () => ({ api: { post } }));
 const toast = vi.fn();
 vi.mock('../../lib/state.svelte.js', () => ({ caseState: { current: { id: 'case-a' } }, toast }));
+const trimFrame = vi.fn();
+vi.mock('../../lib/collageCut.js', async (importOriginal) => ({ ...(await importOriginal()), trimFrame }));
 
 const { default: CollageToolbar } = await import('./CollageToolbar.svelte');
 
@@ -47,6 +49,8 @@ const settle = async () => {
 beforeEach(() => {
   post.mockReset();
   toast.mockReset();
+  trimFrame.mockReset();
+  trimFrame.mockResolvedValue(null);
   localStorage.clear();
 });
 
@@ -301,6 +305,83 @@ describe('Straighten', () => {
 });
 
 describe('Cut', () => {
+  describe('Trim edges', () => {
+    const trimButton = () => target.querySelector('button[aria-label="Trim edges"]');
+    const measured = async () => {
+      await vi.advanceTimersByTimeAsync(300);
+      flushSync();
+    };
+    beforeEach(() => vi.useFakeTimers());
+    afterEach(() => vi.useRealTimers());
+
+    it('cuts to the largest frame the pieces fill on one press, one undo', async () => {
+      trimFrame.mockResolvedValue({ x: 4.123, y: 2, w: 170, h: 50.5 });
+      const release = vi.fn();
+      const hold = vi.fn(() => release);
+      show({ hold });
+      expect(trimButton().closest('[data-guide="collage.cut"]')).not.toBeNull();
+      expect(trimButton().disabled).toBe(true);
+      expect(trimButton().title).toBe('Reading the pieces');
+      await measured();
+      // read from the pieces as they lie
+      expect(trimFrame).toHaveBeenCalledTimes(1);
+      expect(trimFrame.mock.calls[0][0].map((n) => [n.id, n.url, n.quad[0]])).toEqual([['nd_1', 'blob:nd_1', [0, 0]], ['nd_2', 'blob:nd_2', [100, 0]]]);
+      expect(trimButton().disabled).toBe(false);
+      expect(trimButton().title).toBe('Cut to the largest frame the pieces fill');
+
+      trimButton().click();
+      await settle();
+      expect(collage.clip).toEqual({ x: 4.12, y: 2, w: 170, h: 50.5 });
+      expect(hold).toHaveBeenCalledTimes(1);
+      expect(release).toHaveBeenCalledTimes(1);
+      expect(trimButton().disabled).toBe(true);
+      expect(trimButton().title).toBe('No empty edge left to trim');
+    });
+
+    it('reads the layout again once a piece moves, and trims to what it reads then', async () => {
+      trimFrame.mockResolvedValue({ x: 0, y: 0, w: 170, h: 50 });
+      show();
+      await measured();
+      trimFrame.mockResolvedValue({ x: 0, y: 10, w: 170, h: 40 });
+      collage.nodes[1].quad = collage.nodes[1].quad.map(([x, y]) => [x, y + 10]);
+      flushSync();
+      // pressed before the layout is read again: read now
+      trimButton().click();
+      await settle();
+      expect(trimFrame).toHaveBeenCalledTimes(2);
+      expect(collage.clip).toEqual({ x: 0, y: 10, w: 170, h: 40 });
+    });
+
+    it('rests and says why: no piece, a piece still loading, nothing filled, nothing to trim', async () => {
+      show({ nodes: [] });
+      expect(trimButton().title).toBe('Add a piece first');
+      unmount(live);
+      target.remove();
+
+      show({ nodes: [node('nd_1', 0), { ...node('nd_2', 100), url: null }] });
+      await measured();
+      expect(trimFrame).not.toHaveBeenCalled();
+      expect(trimButton().title).toBe('Reading the pieces');
+      unmount(live);
+      target.remove();
+
+      trimFrame.mockResolvedValue(null);
+      show();
+      await measured();
+      expect(trimButton().disabled).toBe(true);
+      expect(trimButton().title).toBe('No part of the collage is filled');
+      unmount(live);
+      target.remove();
+
+      // the pieces fill their whole box
+      trimFrame.mockResolvedValue({ x: 0, y: 0, w: 180, h: 60 });
+      show();
+      await measured();
+      expect(trimButton().disabled).toBe(true);
+      expect(trimButton().title).toBe('No empty edge left to trim');
+    });
+  });
+
   it('frames the pieces on its press, and keeps the frame on Apply', () => {
     show();
     expect(button('Cut').closest('[data-guide="collage.cut"]')).not.toBeNull();
