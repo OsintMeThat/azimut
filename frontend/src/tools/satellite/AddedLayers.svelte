@@ -287,7 +287,7 @@
             title={row.enabled ? 'Stop drawing this layer' : 'Draw this layer'}
             onclick={() => ontoggle?.(row)}
           >
-            <Icon name="eye" size={13} />
+            <Icon name={row.enabled ? 'eye' : 'eyeOff'} size={13} />
           </button>
           <button
             type="button"

@@ -40,7 +40,8 @@
           title={row.title ?? row.label}
           onclick={row.toggle}
         >
-          <Icon name="eye" size={13} />
+          <!-- crossed out while the layer is not drawn -->
+          <Icon name={row.on && !row.disabled ? 'eye' : 'eyeOff'} size={13} />
         </button>
         <!-- the name repeats the tooltip, so the reason a switch is greyed is on a word, not only on its icon -->
         <span class="name" class:off={!row.on || row.disabled} title={row.title ?? row.label}>{row.label}</span>

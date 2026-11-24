@@ -103,6 +103,7 @@
   --motion-move: 220ms;    /* dialogs and toasts */
   --motion-slide: 220ms;   /* the rail's and the tabs' amber mark following the choice */
   --motion-stagger: 14ms;  /* between two rows of a menu */
+  --motion-turn: 420ms;    /* an icon turning or lifting on hover, slow enough to follow */
   --motion-shift: 4px;
   --motion-shift-lg: 8px;
   --motion-scale: 0.98;
@@ -385,7 +386,7 @@ a:hover {
 }
 /* a plus turns a quarter on hover, an upload arrow lifts */
 .btn > svg[data-icon] {
-  transition: transform var(--motion-pop) var(--ease-out);
+  transition: transform var(--motion-turn) var(--ease);
 }
 .btn:hover:not(:disabled, .disabled) > svg[data-icon='plus'] {
   transform: rotate(90deg);

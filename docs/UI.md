@@ -3724,7 +3724,8 @@ Settings → General → Map tabs turns it off, and each tab keeps its own camer
 
 **Every map offers the same layers.** Satellite works them in its panel. Compare,
 Detect and Horizon's small map list them in a **Layers** menu with the Map's own
-rows, an eye each, under headings that fold: Reference, Events, Case, then the
+rows, an eye each (open in the accent while the layer is drawn, crossed out while it
+is not), under headings that fold: Reference, Events, Case, then the
 Map's own two, My layers (drawn in the case, listed once there is one) and Added
 layers (imported). A folded heading stays folded the next time the menu opens. Each map keeps
 its own switches, so a layer is drawn only where it was switched on. **A case opens
@@ -9851,11 +9852,12 @@ instrument style of QGIS, Google Earth Pro, Resolve and Lightroom.
   colours.
 - **Motion**: short and quiet; things arrive, they never perform. The tokens are in
   `app.css` (`--motion-hover` 120 ms, `--motion-press` 90 ms, `--motion-pop` 160 ms,
-  `--motion-move` and `--motion-slide` 220 ms, `--ease-out`), and only `transform`
+  `--motion-move` and `--motion-slide` 220 ms, `--motion-turn` 420 ms, `--ease-out`), and only `transform`
   and `opacity` move. A floating menu drops 4 px from its opener with its first
   eight rows in a 14 ms cascade; a modal's veil fades and its card rises 8 px; a
   toast rises with a thread running out over its timeout; a button gives to 97 %
-  under the pointer, a plus turns a quarter and an upload arrow lifts on hover; the
+  under the pointer, a plus turns a quarter and an upload arrow lifts on hover, slowly
+  enough to follow; the
   accent mark of the rail and of the tabs slides to the choice (`lib/motion/ink.js`);
   a tool coming into view fades in without travelling; the logo's needle swings and
   settles when the pointer comes to it. Everything closes at once. Maps, the globe,
