@@ -471,9 +471,10 @@ test('the export says what the PDF would warn about first, Go to takes the note 
   await expect(before.getByRole('listitem')).toHaveText([/Roof" has no source\.\s*Go to/, 'Picture "Quay" is no longer in the case.']);
   expect(state.checked).toEqual([['n1']]);
   await expect(dialog.getByRole('button', { name: 'Export anyway' })).toBeVisible();
-  // the keyboard reaches Go to past the format and the destination, and lands in the note at the line
+  // the keyboard reaches Go to past Ready to publish?, the five formats and the destination,
+  // and lands in the note at the line
   const go = before.getByRole('button', { name: 'Go to' });
-  for (let press = 0; press < 8; press += 1) {
+  for (let press = 0; press < 16; press += 1) {
     await page.keyboard.press('Tab');
     if (await go.evaluate((node) => node === document.activeElement)) break;
   }
@@ -703,10 +704,10 @@ test('a picture bar in the note is one Tab away, walked with the arrows, and kee
   await page.keyboard.press('Enter');
   await expect.poll(() => state.written.at(-1)?.text ?? '').toContain('[[media:m1|Roof]]{width=50%}');
   await expect(page.locator('.cm-block-picture [data-size-bar]').getByRole('button', { name: 'M', exact: true })).toBeFocused();
-  // the bar ends on </> (Edit the source), after Caption, Graphic and Replace
+  // the bar ends on </> (Edit the source), after Caption, Graphic, Replace and Side by side
   await page.keyboard.press('End');
   await expect(bar.getByRole('button', { name: 'Edit the source' })).toBeFocused();
-  for (const name of ['Replace…', 'Graphic', 'Caption']) {
+  for (const name of ['Side by side', 'Replace…', 'Graphic', 'Caption']) {
     await page.keyboard.press('ArrowLeft');
     await expect(bar.getByRole('button', { name, exact: true })).toBeFocused();
   }

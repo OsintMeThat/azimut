@@ -5127,7 +5127,9 @@ states no place, and **Delete…**, the question the header asks; a scene still 
 Make this slide, Geolocate and Abandon…. Rename holds the name in the menu (empty for a
 slide with none): the slide open takes it as if typed in its name field, saved with it, and
 another slide is saved under it at once, its picture moving with it. A tile reads as the
-proof's label, and a new slide with no name as *New slide*.
+proof's name; one with no name of its own reads as its time in the clip (*Whole video*,
+*0:30–0:45*), its place and date kept for the hover, and a new slide with neither as
+*New slide*.
 
 **A scene still to prove shows its page** in place of the canvas, and landing on it
 starts nothing: its label or time, where it stands, the captures it gathered, and
