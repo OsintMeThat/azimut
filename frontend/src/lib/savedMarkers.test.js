@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { groupSavedMarkers, keptLabel, markKind, markLook, markName, markerPrecision, NAME_ROOM, pairLabel, stackOrder } from './savedMarkers.js';
+import { groupSavedMarkers, isZone, keptLabel, markKind, markLook, markName, markerPrecision, NAME_ROOM, pairLabel, stackOrder, zonePixels } from './savedMarkers.js';
 import { PLACE_RED } from './mapMarkers.js';
 
 const at = (id, lat, lon, extra = {}) => ({ id, kind: 'capture', lat, lon, ...extra });
@@ -187,5 +187,27 @@ describe('the name written under a mark', () => {
     expect(markName(mark([place('A'), place('B'), place('C')]))).toBe('3 places');
     expect(markName(mark([{ id: 'm', kind: 'media', lat: 1, lon: 2 }]))).toBe('');
     expect(markName(mark([place('Gate'), { id: 'm', kind: 'media', lat: 1, lon: 2 }]))).toBe('Gate');
+  });
+});
+
+describe('a zone, drawn as its area', () => {
+  // about a kilometre a side on the equator
+  const KM = { type: 'Polygon', coordinates: [[[0, 0], [0.009, 0], [0.009, 0.009], [0, 0.009], [0, 0]]] };
+  const zone = { id: 'z', kind: 'place', zone: true, footprint: KM, lat: 0.0045, lon: 0.0045 };
+
+  it('is a place saved as a zone that has its area, and nothing else', () => {
+    expect(isZone(zone)).toBe(true);
+    expect(isZone({ ...zone, zone: false })).toBe(false); // a pin with a traced precision
+    expect(isZone({ ...zone, footprint: null })).toBe(false);
+    expect(isZone({ ...zone, kind: 'capture' })).toBe(false);
+  });
+
+  it('measures how many pixels its area spans at a zoom', () => {
+    // 1 km over the 152.9 m a pixel covers at zoom 10, then over 2.4 m at zoom 16
+    expect(zonePixels(zone, 10)).toBeCloseTo(6.5, 0);
+    expect(zonePixels(zone, 16)).toBeCloseTo(419, -1);
+    // a shape nobody can measure is never swapped for its square
+    expect(zonePixels({ ...zone, footprint: null }, 10)).toBe(Infinity);
+    expect(zonePixels(zone, undefined)).toBe(Infinity);
   });
 });

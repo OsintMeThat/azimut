@@ -128,6 +128,33 @@ export function placeMark({ colour, count = 1, worked = false, className = '' } 
   };
 }
 
+/**
+ * A zone's mark. A zone is its area, drawn under it, so its point carries nothing
+ * while the area is big enough to read: the mark is only where its card and its
+ * name hang. Shrunk under `ZONE_SEEN` pixels by a zoom out, the area would vanish,
+ * so a small square of the zone's colour with its outline stands in for it.
+ */
+export const ZONE_BOX = 18;
+export const ZONE = { size: [ZONE_BOX, ZONE_BOX], anchor: [ZONE_BOX / 2, ZONE_BOX / 2] };
+/** The smallest an area is drawn across before its square stands in for it, in pixels. */
+export const ZONE_SEEN = 16;
+/** How far a zone's card hangs off its point: off the square when it shows, else none. */
+export const zoneCardOffset = (tiny) => (tiny ? ZONE_BOX / 2 + 4 : 0);
+
+const ZONE_GLYPH = 'M5 7l7-4 7 4v8l-7 4-7-4z';
+
+export function zoneMark({ colour, tiny = false, worked = false } = {}) {
+  const dot = worked ? '<i class="saved-zone-worked"></i>' : '';
+  return {
+    className: `saved-mark-wrap saved-zone-wrap${tiny ? ' tiny' : ''}`,
+    html: tiny
+      ? `<span class="saved-zone-mark" style="--zone: ${placeColour(colour)}">`
+        + `<svg viewBox="0 0 24 24" width="12" height="12" aria-hidden="true"><path d="${ZONE_GLYPH}" fill="none" stroke="#fff" stroke-width="2.4" stroke-linejoin="round"/></svg>${dot}</span>`
+      : '<span class="saved-zone-host"></span>',
+    ...ZONE,
+  };
+}
+
 /* -- the same marks, painted onto a capture --------------------------------------- */
 
 /** The drop's own drawing, its tip at (0,0) of the current transform. */

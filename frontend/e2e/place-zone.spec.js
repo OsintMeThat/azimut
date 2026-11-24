@@ -3,8 +3,9 @@ import { CASE_ID, awaitMapReady, installAppFixture } from './app.fixture.js';
 
 /**
  * A zone: Save place's arrow offers Save zone, whose corners are clicked on the map and
- * whose name is typed in the panel. Saved, it is a place drawn as its area; a click in
- * the area opens its card, and Edit footprint opens it with its corners to drag.
+ * whose name is typed in the panel. Saved, it is a place drawn as its area, with no pin;
+ * a click in the area opens its card, Edit footprint opens it with its corners to drag,
+ * and a zoom out that leaves the area too small puts a small square in its place.
  */
 
 async function openMap(page) {
@@ -65,6 +66,10 @@ test('draws a zone corner by corner, names it in the panel and saves it as a pla
   expect(zone.footprint.coordinates[0]).toHaveLength(5); // four corners, closed
   await expect(page.getByText('Zone saved')).toBeVisible();
   await expect(page.locator('.footprint-panel')).toHaveCount(0);
+  // drawn as its area: no pin on its point
+  await expect(page.locator('.saved-zone-wrap')).toHaveCount(1);
+  await expect(page.locator('.saved-place-drop')).toHaveCount(0);
+  await expect(page.locator('.saved-zone-wrap.tiny')).toHaveCount(0);
 
   // a click inside the area, away from its pin, opens the zone's card
   const inside = at(-90, -55);
@@ -91,6 +96,17 @@ test('draws a zone corner by corner, names it in the panel and saves it as a pla
   expect(ring).toHaveLength(5);
   expect(ring[0]).not.toEqual(zone.footprint.coordinates[0][0]);
   await expect(page.getByText('Footprint saved')).toBeVisible();
+
+  // zoomed out until the area is a few pixels across, its square stands in for it
+  const readout = page.locator('.status .z').first();
+  for (let i = 0; i < 6; i += 1) {
+    const before = Number((await readout.textContent()).match(/z(\d+)/)[1]);
+    await page.getByRole('button', { name: 'Zoom out' }).click();
+    await expect(readout).toContainText(`z${before - 1}`);
+  }
+  await expect(page.locator('.saved-zone-wrap.tiny .saved-zone-mark')).toBeVisible();
+  await page.locator('.saved-zone-wrap.tiny').click();
+  await expect(page.locator('.saved-popup').getByText('North quay')).toBeVisible();
 });
 
 test('picks a corner and removes it with Delete, Backspace taking the last one back', async ({ page }) => {

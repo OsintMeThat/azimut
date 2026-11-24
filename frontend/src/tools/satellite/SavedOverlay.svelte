@@ -6,8 +6,10 @@
   import { mount, unmount } from 'svelte';
   import { createSurface } from '../../lib/map/surface.js';
   import { paths } from '../../components/Icon.svelte';
-  import { groupSavedMarkers, markLook, markName, markerPrecision } from '../../lib/savedMarkers.js';
-  import { DROP_CARD_OFFSET, TEARDROP, TEARDROP_CARD_OFFSET, placeColour, placeMark } from '../../lib/mapMarkers.js';
+  import { groupSavedMarkers, isZone, markLook, markName, markerPrecision, zonePixels } from '../../lib/savedMarkers.js';
+  import {
+    DROP_CARD_OFFSET, TEARDROP, TEARDROP_CARD_OFFSET, ZONE_SEEN, placeColour, placeMark, zoneCardOffset, zoneMark,
+  } from '../../lib/mapMarkers.js';
   import { escapeXml } from '../../lib/plate.js';
   import { openEntity } from '../../lib/navigate.js';
   import { coneMark } from '../../lib/horizon/marks.js';
@@ -56,15 +58,26 @@
     );
   }
 
+  /** The zone a mark is, when it holds one zone alone: a stack keeps its drop. */
+  const zoneOf = (mark) => (mark.items.length === 1 && isZone(mark.items[0]) ? mark.items[0] : null);
+  /** Whether a zone's area is too small at this zoom to be seen, so its square shows. */
+  const tinyAt = (row) => zonePixels(row, zoom) < ZONE_SEEN;
+
   /**
    * A mark's look (`lib/savedMarkers.markLook`). A place, alone or with what was
    * filed on it, is the drop every place mark is (`lib/mapMarkers.placeMark`); a
-   * file is the turned teardrop with its glyph.
+   * file is the turned teardrop with its glyph. A zone is its area, so its mark is
+   * nothing until the area shrinks out of sight (`lib/mapMarkers.zoneMark`).
    */
   function icon(mark, named) {
     const look = markLook(mark);
     const name = named ? markName(mark) : '';
     const label = name ? `<span class="saved-mark-name">${escapeXml(name)}</span>` : '';
+    const zone = zoneOf(mark);
+    if (zone) {
+      const own = zoneMark({ colour: zone.color, tiny: tinyAt(zone), worked: zone.proofs > 0 });
+      return { ...own, html: own.html + label };
+    }
     if (look.kind === 'place') {
       const drop = placeMark({ colour: look.colour, count: look.count, worked: look.worked });
       return { ...drop, html: drop.html + label };
@@ -201,7 +214,10 @@
     if (!row) return [];
     // a zone is the place: a click inside it opens the card its pin opens
     const opens = clickable && row.kind === 'place' && row.footprint;
-    const tint = row.kind === 'place' && row.color ? placeColour(row.color) : '#f5a623';
+    const zone = isZone(row);
+    // a zone wears its place's colour, the pin red when it has none; a pin's traced
+    // precision stays the amber every precision is drawn in unless its place has one
+    const tint = zone || (row.kind === 'place' && row.color) ? placeColour(row.color) : '#f5a623';
     const style = row.kind === 'comparison' || row.kind === 'view'
       ? {
           stroke: '#f5a623',
@@ -212,10 +228,11 @@
         }
       : {
           stroke: tint,
-          strokeWidth: 1.5,
+          // a zone has no pin over it, so its outline is what is seen
+          strokeWidth: zone ? 2 : 1.5,
           strokeOpacity: 0.9,
           fill: tint,
-          fillOpacity: 0.12,
+          fillOpacity: zone ? 0.18 : 0.12,
           // never steals the click from the pin it sits under, nor from a tool
           interactive: Boolean(opens),
         };
@@ -280,7 +297,9 @@
             className: 'saved-popup',
             minWidth: 296,
             maxWidth: 330,
-            offset: markLook(mark).kind === 'place' ? DROP_CARD_OFFSET : TEARDROP_CARD_OFFSET,
+            offset: zoneOf(mark)
+              ? zoneCardOffset(tinyAt(zoneOf(mark)))
+              : markLook(mark).kind === 'place' ? DROP_CARD_OFFSET : TEARDROP_CARD_OFFSET,
             // a card holding a player is tall: the map slides to show it whole, clear
             // of the bar the maps keep along their bottom edge
             inView: CARD_ROOM,
@@ -388,6 +407,42 @@
      filed around it without leaving the layer's one colour family */
   :global(.saved-mark-media) {
     box-shadow: 0 0 0 1.5px #fff, 0 2px 5px rgba(0, 0, 0, 0.45);
+  }
+  /* A zone's mark: nothing on its point while its area shows, so the click goes to
+     the area under it; a small square of its colour once the area is too small. */
+  :global(.saved-zone-wrap:not(.tiny)) {
+    pointer-events: none;
+  }
+  :global(.saved-zone-host) {
+    display: block;
+    width: 100%;
+    height: 100%;
+  }
+  :global(.saved-zone-mark) {
+    position: relative;
+    display: grid;
+    place-items: center;
+    width: 18px;
+    height: 18px;
+    border-radius: 4px;
+    background: var(--zone);
+    box-shadow: 0 0 0 1.5px rgba(0, 0, 0, 0.6), 0 2px 4px rgba(0, 0, 0, 0.45);
+    transition: transform 0.12s var(--ease);
+  }
+  :global(.saved-zone-wrap.tiny:hover .saved-zone-mark),
+  :global(.saved-zone-wrap.is-hovered .saved-zone-mark),
+  :global(.saved-zone-wrap.is-active .saved-zone-mark) {
+    transform: scale(1.2);
+  }
+  :global(.saved-zone-worked) {
+    position: absolute;
+    top: -3px;
+    right: -3px;
+    width: 7px;
+    height: 7px;
+    border-radius: 50%;
+    background: #fff;
+    box-shadow: 0 0 0 1.5px rgba(0, 0, 0, 0.55);
   }
   /* a place being moved, where it stood until it is put down. Faint on its
      content: the engine writes the mark's own opacity inline */

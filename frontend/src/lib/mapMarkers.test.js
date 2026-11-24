@@ -232,3 +232,25 @@ describe('the marks painted onto a capture', () => {
     expect(empty.calls).toEqual([]);
   });
 });
+
+describe('a zone’s mark', () => {
+  it('is nothing on its point while its area shows, and lets the area take the click', async () => {
+    const { zoneMark, ZONE, zoneCardOffset } = await import('./mapMarkers.js');
+    const host = zoneMark({ colour: '#1f77b4' });
+    expect(host.className).toBe('saved-mark-wrap saved-zone-wrap');
+    expect(host.html).toBe('<span class="saved-zone-host"></span>');
+    expect(host).toMatchObject({ size: ZONE.size, anchor: ZONE.anchor });
+    expect(zoneCardOffset(false)).toBe(0);
+  });
+
+  it('is a small square of its colour once the area is too small to see', async () => {
+    const { zoneMark, zoneCardOffset } = await import('./mapMarkers.js');
+    const tiny = zoneMark({ colour: '#1f77b4', tiny: true, worked: true });
+    expect(tiny.className).toContain('tiny');
+    expect(tiny.html).toContain('--zone: #1f77b4');
+    expect(tiny.html).toContain('saved-zone-worked');
+    expect(zoneCardOffset(true)).toBeGreaterThan(0);
+    // only a colour code is written into the style
+    expect(zoneMark({ colour: '"><script>', tiny: true }).html).toContain('--zone: #e5484d');
+  });
+});
