@@ -566,6 +566,10 @@ test('plays a video under the canvas, lays its frame, and stitches a panorama of
   expect(asked.stitch.nodes.map((n) => n.time)).toEqual([0.2, 0.52, 0.84]);
   await expect(page.locator('img.node')).toHaveCount(3);
   await expect(rail.locator('.frame')).toHaveCount(3);
+  // drawn in 2D, so the frames of a panorama take no GPU layer each (they filled it, painting black)
+  // (read as set: the computed style writes a flat matrix3d as matrix too)
+  const kinds = await page.locator('img.node').evaluateAll((imgs) => imgs.map((img) => img.style.transform.split('(')[0]));
+  expect(kinds).toEqual(['matrix', 'matrix', 'matrix']);
   if (process.env.COLLAGE_SHOT) await page.screenshot({ path: process.env.COLLAGE_SHOT.replace('.png', '-rail.png') });
 
   // the message's Undo takes the frames back with their stitch

@@ -77,6 +77,10 @@ describe('a stitched collage, as the saved picture shows it', () => {
         return;
       }
       expect(path).toMatch(/^path\(evenodd, "M/);
+      // the kept area reaches a twentieth past the box at most: a GPU mask is that big in 3D
+      const [x0, y0, x1, y1] = path.match(/"M(-?[\d.]+) (-?[\d.]+)H(-?[\d.]+)V(-?[\d.]+)/).slice(1).map(Number);
+      const m = Math.ceil(Math.max(node.w, node.h) / 20);
+      expect([x0, y0, x1, y1]).toEqual([-m, -m, node.w + m, node.h + m]);
       const local = clipHoles(path);
       for (const point of scene.points) {
         const [u, v] = quadUnitAt(node.quad, point.at);

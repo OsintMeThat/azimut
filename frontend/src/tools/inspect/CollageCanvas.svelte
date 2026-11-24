@@ -1,7 +1,7 @@
 <script>
   import { untrack } from 'svelte';
   import {
-    quadMatrix3d, quadCentroid, rotateQuad, quadEdgeMidpoints, scaleQuad,
+    quadTransform, quadCentroid, rotateQuad, quadEdgeMidpoints, scaleQuad,
     quadsBounds, moveQuads, rotateQuads, scaleQuads, quadUnitAt, fitView, translateQuad,
   } from '../../lib/inspect.js';
   import { BRUSH_MAX, BRUSH_MIN, erase, paint, pieceFrame, strokePoint } from '../../lib/excludeBrush.js';
@@ -637,7 +637,7 @@
               class:selected={isSel(node.id)}
               style:width={`${box.w}px`}
               style:height={`${box.h}px`}
-              style:transform={quadMatrix3d(box.w, box.h, node.quad)}
+              style:transform={quadTransform(box.w, box.h, node.quad)}
               onpointerdown={(e) => (e.stopPropagation(), startMove(e, node))}
               title={node.missing ? "This piece's file is no longer in the case" : 'Loading this piece'}
             >
@@ -658,7 +658,7 @@
               title={left ? `Auto-stitch left it here. ${leftOutLine(left.why, left.mode)}` : null}
               style:width={`${box.w}px`}
               style:height={`${box.h}px`}
-              style:transform={quadMatrix3d(box.w, box.h, node.quad)}
+              style:transform={quadTransform(box.w, box.h, node.quad)}
               style:clip-path={node.ghost || movingIds.includes(node.id) ? null : seamClipPath(node, holes[i])}
               style:outline-width={left ? `${2 / scale}px` : null}
               draggable="false"
@@ -673,7 +673,7 @@
                   width={box.w}
                   height={box.h}
                   viewBox={`0 0 ${box.w} ${box.h}`}
-                  style:transform={quadMatrix3d(box.w, box.h, node.quad)}
+                  style:transform={quadTransform(box.w, box.h, node.quad)}
                   aria-hidden="true"
                   data-testid="piece-paint"
                 >

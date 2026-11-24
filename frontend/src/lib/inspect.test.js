@@ -5,7 +5,7 @@ import {
   quadsBounds, translateQuad, moveQuads, rotateQuads, scaleQuads, pinholeOps,
   buildFrameOps, hasVideoEdits, normalizeRightAngleRotation, rotationOps,
   sourceStem, timecode, frameSaveName, frameSaveNames, saveNameOf,
-  newCollage, clampCollageDim, stitchCanvas, COLLAGE_MIN_DIM, COLLAGE_MAX_DIM,
+  quadTransform, newCollage, clampCollageDim, stitchCanvas, COLLAGE_MIN_DIM, COLLAGE_MAX_DIM,
   exportFrame, cutBounds, COLLAGE_MAX_EXPORT_PIXELS, clockTime, collageVideo, mediaOrigin, quadUnitAt, quadMapUnit, fitView,
   COLLAGE_DEFAULT_SIZE, ADJUST_ORDER, ADJUST_PRESETS, activePreset, buildOps, needsRender,
   presetValues, previewOps, previewStyle, sliderTravel, sliderFilters,
@@ -772,5 +772,38 @@ describe('a slider\'s travel', () => {
     const filters = [{ id: 'brightness', params: [BRIGHTNESS], css: 'brightness({v})' }];
     expect(previewStyle(filters, { brightness: 4 }).filter).toBe('brightness(4)');
     expect(previewStyle(filters, { brightness: 1.5 }).filter).toBe('brightness(1.5)');
+  });
+});
+
+describe('quadTransform', () => {
+  // where a CSS transform puts a point of the box
+  const apply = (css, [x, y]) => {
+    const n = css.match(/\(([^)]*)\)/)[1].split(',').map(Number);
+    if (css.startsWith('matrix(')) return [n[0] * x + n[2] * y + n[4], n[1] * x + n[3] * y + n[5]];
+    const w = n[3] * x + n[7] * y + n[15];
+    return [(n[0] * x + n[4] * y + n[12]) / w, (n[1] * x + n[5] * y + n[13]) / w];
+  };
+  const corners = (w, h) => [[0, 0], [w, 0], [w, h], [0, h]];
+
+  it.each([
+    ['laid upright by a stitch', [[120, 40], [520, 40], [520, 340], [120, 340]]],
+    ['turned and scaled by hand', [[100, 0], [400, 100], [300, 400], [0, 300]]],
+  ])('draws a piece %s in 2D, so it takes no GPU layer of its own', (_name, quad) => {
+    const css = quadTransform(800, 600, quad);
+    expect(css.startsWith('matrix(')).toBe(true);
+    corners(800, 600).forEach((p, i) => {
+      const [x, y] = apply(css, p);
+      expect(near(x, quad[i][0], 1e-6) && near(y, quad[i][1], 1e-6)).toBe(true);
+    });
+  });
+
+  it('keeps 3D for a corner pulled by hand', () => {
+    const quad = [[0, 0], [400, 30], [380, 330], [0, 300]];
+    const css = quadTransform(800, 600, quad);
+    expect(css.startsWith('matrix3d(')).toBe(true);
+    corners(800, 600).forEach((p, i) => {
+      const [x, y] = apply(css, p);
+      expect(near(x, quad[i][0], 1e-6) && near(y, quad[i][1], 1e-6)).toBe(true);
+    });
   });
 });
