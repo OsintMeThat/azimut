@@ -231,7 +231,7 @@
     if (key === thumbDrawnFrom) return null;
     const { caseId, name } = doc;
     const nodes = doc.nodes.map((n) => ({
-      id: n.id, quad: n.quad.map(([x, y]) => [x, y]), url: n.url, w: n.w, h: n.h, missing: !!n.missing,
+      id: n.id, quad: n.quad.map(([x, y]) => [x, y]), url: n.url, w: n.w, h: n.h, missing: !!n.missing, save: n.save,
     }));
     const clip = doc.clip ? { ...doc.clip } : null;
     thumbDrawnFrom = key;

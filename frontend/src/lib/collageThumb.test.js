@@ -1,4 +1,7 @@
 import { describe, expect, it } from 'vitest';
+import { readFileSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
+import { dirname, join } from 'node:path';
 import {
   affineFromTriangles, isParallelogram, paintCollage, pieceTriangles, thumbFrame, THUMB_EDGE,
 } from './collageThumb.js';
@@ -117,5 +120,36 @@ describe('paintCollage', () => {
     paintCollage(ctx, nodes, new Map([['low', low], ['high', high]]), frame);
 
     expect(named('drawImage').map((c) => c[1].name)).toEqual(['low', 'high']);
+  });
+
+  describe('stitched pieces', () => {
+    const pan = JSON.parse(readFileSync(join(dirname(fileURLToPath(import.meta.url)), '../../../tests/fixtures/collage-seams.json'), 'utf8')).pan;
+    const nodes = pan.pieces.map((p) => ({ ...p, url: `blob:${p.id}` }));
+    const loaded = (ids) => new Map(ids.map((id) => [id, { naturalWidth: 10, naturalHeight: 10, name: id }]));
+    const whole = { minX: 0, minY: 0, scale: 0.5, width: 316, height: 167 };
+
+    it('meet where the saved picture has them meet: each drawn under its holes, the first and the hand one whole', () => {
+      const { ctx, calls } = recorder();
+      paintCollage(ctx, nodes, loaded(['a', 'b', 'h', 'c']), whole);
+      // one cut for each stitched piece above another, laid before its picture
+      const clips = calls.map((c, i) => [c, i]).filter(([c]) => c[0] === 'clip' && c[1] === 'evenodd');
+      expect(clips).toHaveLength(2);
+      const drawn = calls.filter((c) => c[0] === 'drawImage').map((c) => c[1].name);
+      expect(drawn).toEqual(['a', 'b', 'h', 'c']);
+      const before = (name) => calls.findIndex((c) => c[0] === 'drawImage' && c[1].name === name);
+      expect(clips[0][1]).toBeLessThan(before('b'));
+      expect(clips[1][1]).toBeLessThan(before('c'));
+      expect(clips[1][1]).toBeGreaterThan(before('h'));
+    });
+
+    it('hide nothing on account of a picture that did not load, and lay as they stack when asked', () => {
+      const missing = recorder();
+      paintCollage(missing.ctx, nodes, loaded(['b', 'h', 'c']), whole);
+      // the first piece is not drawn, so only the third is cut, under the second
+      expect(missing.calls.filter((c) => c[0] === 'clip' && c[1] === 'evenodd')).toHaveLength(1);
+      const stacked = recorder();
+      paintCollage(stacked.ctx, nodes, loaded(['a', 'b', 'h', 'c']), whole, { seams: false });
+      expect(stacked.named('clip')).toHaveLength(0);
+    });
   });
 });

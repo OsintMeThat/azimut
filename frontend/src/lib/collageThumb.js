@@ -1,4 +1,5 @@
 import { collageBounds, cutBounds, quadMapUnit } from './inspect.js';
+import { seamHoles } from './seams.js';
 
 // The picture the collage list shows for a collage. The pieces are already drawn
 // in the open tool, so the browser paints them once more onto a small canvas and
@@ -6,7 +7,8 @@ import { collageBounds, cutBounds, quadMapUnit } from './inspect.js';
 //
 // A 2D canvas only draws affine maps, and a warped piece is projective. Each piece
 // is cut into a grid of triangles, each drawn with the affine map its three corners
-// fix; at the preview's size the seams are below a pixel.
+// fix; at the preview's size the seams are below a pixel. Stitched pieces meet where
+// the saved picture has them meet (lib/seams.js).
 
 /** Longest edge of a preview, in pixels. The server shrinks anything larger. */
 export const THUMB_EDGE = 480;
@@ -101,13 +103,41 @@ function tracePath(ctx, pts) {
   ctx.closePath();
 }
 
+function drawPicture(ctx, image, w, h, quad) {
+  if (isParallelogram(quad)) {
+    // One affine map lands the whole picture, so it needs no cut and no clip.
+    const m = affineFromTriangles([[0, 0], [w, 0], [0, h]], [quad[0], quad[1], quad[3]]);
+    if (!m) return;
+    ctx.save();
+    ctx.setTransform(...m);
+    ctx.drawImage(image, 0, 0);
+    ctx.restore();
+    return;
+  }
+  for (const { src, dst } of pieceTriangles(w, h, quad)) {
+    const m = affineFromTriangles(src, dst);
+    if (!m) continue;
+    ctx.save();
+    tracePath(ctx, grown(dst, 0.4));
+    ctx.clip();
+    ctx.setTransform(...m);
+    ctx.drawImage(image, 0, 0);
+    ctx.restore();
+  }
+}
+
 /**
  * Paint the pieces bottom to top. `images` maps a piece's id to a loaded image;
- * a piece whose file is gone is drawn as the hatched gap the canvas shows.
+ * a piece whose file is gone is drawn as the hatched gap the canvas shows. The frame
+ * may scale the height apart (`scaleY`). `seams: false` lays the pieces as they stack,
+ * for what they cover alone.
  */
-export function paintCollage(ctx, nodes, images, frame) {
-  const place = ([x, y]) => [(x - frame.minX) * frame.scale, (y - frame.minY) * frame.scale];
-  for (const node of nodes) {
+export function paintCollage(ctx, nodes, images, frame, { seams = true } = {}) {
+  const sy = frame.scaleY ?? frame.scale;
+  const place = ([x, y]) => [(x - frame.minX) * frame.scale, (y - frame.minY) * sy];
+  // a piece whose picture did not load hides nothing
+  const holes = seams ? seamHoles(nodes.map((n) => (images.has(n.id) ? n : { ...n, url: null }))) : null;
+  for (const [i, node] of nodes.entries()) {
     const quad = node.quad.map(place);
     const image = images.get(node.id);
     if (!image) {
@@ -124,30 +154,29 @@ export function paintCollage(ctx, nodes, images, frame) {
     }
     const w = image.naturalWidth || node.w;
     const h = image.naturalHeight || node.h;
-    if (isParallelogram(quad)) {
-      // One affine map lands the whole picture, so it needs no cut and no clip.
-      const m = affineFromTriangles([[0, 0], [w, 0], [0, h]], [quad[0], quad[1], quad[3]]);
-      if (!m) continue;
-      ctx.save();
-      ctx.setTransform(...m);
-      ctx.drawImage(image, 0, 0);
-      ctx.restore();
+    const cut = holes?.[i] ?? [];
+    if (!cut.length) {
+      drawPicture(ctx, image, w, h, quad);
       continue;
     }
-    for (const { src, dst } of pieceTriangles(w, h, quad)) {
-      const m = affineFromTriangles(src, dst);
-      if (!m) continue;
-      ctx.save();
-      tracePath(ctx, grown(dst, 0.4));
-      ctx.clip();
-      ctx.setTransform(...m);
-      ctx.drawImage(image, 0, 0);
-      ctx.restore();
+    // the picture with what the stitch hides of it left out
+    ctx.save();
+    ctx.beginPath();
+    ctx.rect(-frame.width, -frame.height, frame.width * 3, frame.height * 3);
+    for (const hole of cut) {
+      const [first, ...rest] = hole.map(place);
+      ctx.moveTo(first[0], first[1]);
+      for (const [x, y] of rest) ctx.lineTo(x, y);
+      ctx.closePath();
     }
+    ctx.clip('evenodd');
+    drawPicture(ctx, image, w, h, quad);
+    ctx.restore();
   }
 }
 
-function loadImage(url) {
+/** A picture loaded from its address, or null when it does not load. */
+export function loadImage(url) {
   return new Promise((resolve) => {
     const image = new Image();
     image.onload = () => resolve(image);
@@ -158,7 +187,7 @@ function loadImage(url) {
 
 /**
  * The preview of a collage as a PNG blob, or null when there is nothing to show.
- * `nodes` are plain copies of the pieces ({ id, quad, url, w, h, missing }), so the
+ * `nodes` are plain copies of the pieces ({ id, quad, url, w, h, missing, save }), so the
  * caller can let the open collage go while this finishes; `clip` its frame, if cut.
  */
 export async function renderCollageThumb(nodes, { edge = THUMB_EDGE, load = loadImage, clip = null } = {}) {

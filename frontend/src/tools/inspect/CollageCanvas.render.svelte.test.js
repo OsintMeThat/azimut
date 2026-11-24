@@ -1,6 +1,9 @@
 // @vitest-environment happy-dom
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { flushSync, mount, unmount } from 'svelte';
+import { readFileSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
+import { dirname, join } from 'node:path';
 
 const uiState = { tool: 'collage' };
 vi.mock('../../lib/state.svelte.js', () => ({ uiState }));
@@ -466,5 +469,30 @@ describe('the brush', () => {
     press('Escape');
     expect(brush.on).toBe(false);
     expect(target.querySelector('.brush-cue')).toBeNull();
+  });
+});
+
+describe('where stitched pieces meet', () => {
+  const pan = JSON.parse(readFileSync(join(dirname(fileURLToPath(import.meta.url)), '../../../../tests/fixtures/collage-seams.json'), 'utf8')).pan;
+  const pieces = () => pan.pieces.map((p) => ({ ...p, quad: p.quad.map(([x, y]) => [x, y]), url: `blob:${p.id}` }));
+  const clipOf = (id) => [...target.querySelectorAll('img.node')][pan.pieces.findIndex((p) => p.id === id)].style.getPropertyValue('clip-path');
+
+  it('draws a stitched piece without what an owner below it shows, as the saved picture has it', () => {
+    show([], null, undefined, { collage: { nodes: pieces() } });
+    // the first piece is drawn whole, the ones above it cut, the picture laid by hand whole
+    expect(clipOf('a')).toBe('');
+    expect(clipOf('b')).toMatch(/^path\(evenodd, "/);
+    expect(clipOf('c')).toMatch(/^path\(evenodd, "/);
+    expect(clipOf('h')).toBe('');
+  });
+
+  it('draws a piece in hand whole, to be lined up, and cuts it again once put down', () => {
+    show([], null, undefined, { collage: { nodes: pieces() } });
+    const img = [...target.querySelectorAll('img.node')][1];
+    pointer(img, 'pointerdown', 300, 200);
+    pointer(window, 'pointermove', 340, 210);
+    expect(clipOf('b')).toBe('');
+    pointer(window, 'pointerup', 340, 210);
+    expect(clipOf('b')).toMatch(/^path\(evenodd, "/);
   });
 });

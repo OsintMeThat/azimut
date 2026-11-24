@@ -25,6 +25,7 @@ FIXTURE = Path(__file__).parent / "fixtures" / "collage-seams.json"
 W, H = 360, 240
 FOCAL = 330.0
 # a point is kept this far from every edge and every seam, so a pixel's rounding cannot decide it
+# (and so the canvas's outline, traced a little inside a warp's edge, holds it too)
 MARGIN = 6.0
 PER_KIND = 6
 # each collage, its pieces bottom to top: ("frame", id, yaw, pitch down, drawn larger by) in degrees,
@@ -109,7 +110,8 @@ def _scene(layout: tuple) -> dict:
             outside = x < x0 - MARGIN or x > x1 + MARGIN or y < y0 - MARGIN or y > y1 + MARGIN
             return 1 if inside else 0 if outside else None
         alpha, left, top, larger = alphas[piece["id"]]
-        m = math.ceil(MARGIN / larger)
+        # in its own pixels: a piece drawn larger keeps a wider margin on the canvas
+        m = math.ceil(MARGIN)
         cx, cy = int(round((x - left) / larger)), int(round((y - top) / larger))
         window = alpha[max(0, cy - m):max(0, cy + m + 1), max(0, cx - m):max(0, cx + m + 1)]
         if window.size == 0 or (window == 0).all():
