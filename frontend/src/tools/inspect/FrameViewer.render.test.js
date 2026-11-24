@@ -1,5 +1,5 @@
 // @vitest-environment happy-dom
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { flushSync, mount, unmount } from 'svelte';
 
 const { default: FrameViewer } = await import('./FrameViewer.svelte');
@@ -7,7 +7,7 @@ const { default: FrameViewer } = await import('./FrameViewer.svelte');
 let live = null;
 let target = null;
 
-function show() {
+function show(props = {}) {
   target = document.createElement('div');
   document.body.append(target);
   live = mount(FrameViewer, {
@@ -15,6 +15,7 @@ function show() {
     props: {
       frame: { id: 'f1', url: 'blob:f1', w: 800, h: 600, crop: null, adjust: {} },
       preview: { filter: '', transform: '' },
+      ...props,
     },
   });
   flushSync();
@@ -89,5 +90,69 @@ describe('turning a frame', () => {
     release();
     expect(angle()).toBeUndefined();
     expect(target.querySelector('.hint')?.textContent).toContain('middle-drag turns');
+  });
+});
+
+describe('zone search over a frame', () => {
+  const zoneButton = () => target.querySelector('button[aria-label="Search a zone"]');
+  const zonePicture = () => ({ png: () => Promise.resolve(new Blob()), name: 'z.png', what: 'zone' });
+
+  function turn() {
+    press(100, 100);
+    move(...on(0));
+    move(...on(40));
+    release();
+  }
+
+  it('is offered only where the tool renders the zone', () => {
+    show();
+    expect(zoneButton()).toBeNull();
+    unmount(live);
+    target.remove();
+    show({ zonePicture });
+    expect(zoneButton().title).toBe('Search a zone of the picture on the reverse-search engines (R)');
+  });
+
+  it('stands a turned frame upright and lays the zone over it', () => {
+    show({ zonePicture });
+    turn();
+    expect(angle()).toBe('40°');
+    zoneButton().click();
+    flushSync();
+    expect(angle()).toBeUndefined();
+    expect(zoneButton().getAttribute('aria-pressed')).toBe('true');
+    expect(target.querySelector('.zone-overlay')).not.toBeNull();
+    expect(target.querySelector('.hint').textContent).toBe('scroll zoom · middle-drag pans · Esc closes');
+  });
+
+  it('pans with the middle button rather than turning, so the zone stays upright', () => {
+    show({ zonePicture });
+    zoneButton().click();
+    flushSync();
+    press(100, 100);
+    move(...on(0));
+    move(...on(40));
+    release();
+    expect(angle()).toBeUndefined();
+    expect([...target.querySelectorAll('button')].some((b) => b.textContent.trim() === 'Fit')).toBe(true);
+  });
+
+  it('takes no double-click as a crop while the zone is open', () => {
+    const onbegincrop = vi.fn();
+    show({ zonePicture, onbegincrop });
+    zoneButton().click();
+    flushSync();
+    viewport().dispatchEvent(new window.MouseEvent('dblclick', { bubbles: true }));
+    expect(onbegincrop).not.toHaveBeenCalled();
+    zoneButton().click();
+    flushSync();
+    expect(target.querySelector('.zone-overlay')).toBeNull();
+    viewport().dispatchEvent(new window.MouseEvent('dblclick', { bubbles: true }));
+    expect(onbegincrop).toHaveBeenCalledTimes(1);
+  });
+
+  it('is not offered while a crop is drawn', () => {
+    show({ zonePicture, cropEditing: true });
+    expect(zoneButton()).toBeNull();
   });
 });

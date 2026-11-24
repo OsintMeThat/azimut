@@ -9,8 +9,9 @@
   // engine searches. That is a press of the same button, and the clipboard road
   // is still what every refusal falls back to.
   //
-  // Pick a case photo, or scrub a case video to a frame — or arrive from the Media
-  // Library or Inspect already holding one (`uiState.reverseTarget`). The picking
+  // Pick a case photo, or scrub a case video to a frame — or arrive from Media or
+  // Files already holding one (`uiState.reverseTarget`). Inspect searches a part of
+  // a picture itself, and the link at the foot goes there. The picking
   // is Inspect's own file list, kept on screen until a picture is chosen. Adjustments
   // (brightness, contrast, …) preview live and are baked into the exported
   // image via a same-origin canvas — nothing leaves the machine until an
@@ -19,8 +20,9 @@
   import { api } from '../lib/api.js';
   import { fileUrl } from '../lib/fileUrl.js';
   import { caseState, prefs, uiState, toast } from '../lib/state.svelte.js';
-  import { extensionVersion, handOffReverse } from '../lib/extBridge.js';
-  import { MAX_HANDOFF_BYTES, UPLOAD_PAGES } from '../lib/reverseSearch.js';
+  import { extensionVersion } from '../lib/extBridge.js';
+  import { UPLOAD_PAGES } from '../lib/reverseSearch.js';
+  import { filledEngines, pressEngine } from '../lib/reverseHandoff.js';
   import Modal from '../components/Modal.svelte';
   import Icon from '../components/Icon.svelte';
   import BackButton from '../components/BackButton.svelte';
@@ -60,9 +62,7 @@
   );
   const resetAdjust = () => (adjust = { ...NEUTRAL });
 
-  // A picture that exists nowhere on disk is shown from an address made for it here,
-  // and revoked once it is replaced or discarded.
-  const srcOf = (item) => item.src ?? fileUrl(caseState.current.id, item.path);
+  const srcOf = (item) => fileUrl(caseState.current.id, item.path);
   // The name the list and the Media Library show it by, as a handoff already carries.
   const nameOf = (item) => (item.label || item.title || item.path).replace(/^media\//, '');
   const frameLabel = $derived(selected?.kind === 'video' ? 'frame' : 'image');
@@ -72,7 +72,7 @@
   // Which engines this press can be handed to, and which are left on the two
   // gestures. An engine the extension cannot fill keeps its old group, so the
   // headings never promise more than the buttons under them do.
-  const filled = $derived(prefs.reversePrefill && extInstalled ? UPLOAD_PAGES.filter((e) => e.fill) : []);
+  const filled = $derived(filledEngines(prefs.reversePrefill, extInstalled));
   const pasteLeft = $derived(PASTE.filter((e) => !filled.includes(e)));
   const dragLeft = $derived(DRAG.filter((e) => !filled.includes(e)));
 
@@ -105,10 +105,9 @@
     if (id) refresh(id);
   });
 
-  /** Put a picture in front of the engines, dropping the address of the one before. */
+  /** Put a picture in front of the engines. */
   function show(item) {
-    if (selected?.src) URL.revokeObjectURL(selected.src);
-    selected = item.blob ? { ...item, src: URL.createObjectURL(item.blob) } : item;
+    selected = item;
     resetAdjust();
   }
 
@@ -137,7 +136,6 @@
   }
 
   function discard() {
-    if (selected?.src) URL.revokeObjectURL(selected.src);
     selected = null;
     resetAdjust();
     adjustOpen = false;
@@ -183,106 +181,9 @@
     );
   }
 
-  // -- hand-off (buttons are real links, so nothing is popup-blocked) ---------
-  //
-  // Which road a press takes is decided **before** anything is awaited: the
-  // button is a real link, and a preventDefault that comes back after a promise
-  // comes back too late to stop it.
-
-  /** Put the PNG on the clipboard. `note` is the toast when it lands; a refusal
-   *  is always reported, since both roads lean on the clipboard. */
-  async function copyPng(pending, note) {
-    try {
-      await navigator.clipboard.write([new ClipboardItem({ 'image/png': pending })]);
-      if (note) toast(note, 'ok', 4500);
-      return true;
-    } catch (e) {
-      toast(e.message || 'Could not copy the image', 'warn');
-      return false;
-    }
-  }
-
-  function savePng(blob, note) {
-    const a = document.createElement('a');
-    a.href = URL.createObjectURL(blob);
-    a.download = downloadName();
-    a.click();
-    URL.revokeObjectURL(a.href);
-    toast(note, 'ok', 4500);
-  }
-
-  async function copySelection() {
-    await copyPng(pngBlob(), `Copied the ${frameLabel}. Paste it in the tab with ${shortcut('Ctrl+V')}`);
-  }
-
-  async function saveSelection() {
-    try {
-      savePng(await pngBlob(), `Saved the ${frameLabel}. Drag it into the tab`);
-    } catch (e) {
-      toast(e.message || 'Could not save the image', 'warn');
-    }
-  }
-
-  /** Base64 of a blob: a message carries no blob, so the bytes cross as a string
-   *  and the extension rebuilds the file inside the engine's page. */
-  async function base64(blob) {
-    const bytes = new Uint8Array(await blob.arrayBuffer());
-    let binary = '';
-    const CHUNK = 0x8000; // fromCharCode takes an argument list: chunk it or blow the stack
-    for (let i = 0; i < bytes.length; i += CHUNK) {
-      binary += String.fromCharCode.apply(null, bytes.subarray(i, i + CHUNK));
-    }
-    return btoa(binary);
-  }
-
-  /**
-   * Press an engine the extension can fill.
-   *
-   * The link was stopped, so the tab is the extension's to open and every
-   * refusal has to open it here instead. The image goes on the clipboard first,
-   * while this tab still has focus: it is what the extension's own notice
-   * promises if the engine's page has moved on, and the encode is shared with
-   * the hand-off rather than run a second time.
-   */
-  async function fillEngine(engine) {
-    let blob;
-    const pending = pngBlob();
-    copyPng(pending);
-    try {
-      blob = await pending;
-    } catch (e) {
-      toast(e.message || 'Could not read the image', 'warn');
-      return;
-    }
-    if (blob.size <= MAX_HANDOFF_BYTES) {
-      try {
-        await handOffReverse({
-          url: engine.url,
-          image: { name: downloadName(), type: 'image/png', data: await base64(blob) },
-        });
-        toast(`${engine.label} is opening with the ${frameLabel}.`, 'info', 4200);
-        return;
-      } catch {
-        // Absent, switched off mid-press, not permitted on that site, silent:
-        // one answer, one fallback. Nothing to explain that the toast below
-        // does not say by doing the old thing.
-      }
-    }
-    window.open(engine.url, '_blank', 'noopener,noreferrer');
-    if (engine.paste) toast(`Opened ${engine.label}. Paste the ${frameLabel} with ${shortcut('Ctrl+V')}`, 'info', 4500);
-    else savePng(blob, `Opened ${engine.label}. Drag the saved ${frameLabel} in`);
-  }
-
-  /** The engine buttons' one handler. */
-  function pressEngine(event, engine) {
-    if (!filled.includes(engine)) {
-      if (engine.paste) copySelection();
-      else saveSelection();
-      return;
-    }
-    event.preventDefault();
-    fillEngine(engine);
-  }
+  // -- hand-off: one press, one road (`lib/reverseHandoff.js`) ---------------
+  // The picture as it reads now, encoded by the press itself.
+  const picture = () => ({ png: pngBlob, name: downloadName(), what: frameLabel });
 
   function openInInspect() {
     uiState.inspectPath = selected.path;
@@ -376,8 +277,6 @@
           </div>
           {#if selected.kind === 'video'}
             <p class="hint">Scrub to the moment, then copy or save the frame.</p>
-          {:else if selected.blob}
-            <p class="hint">This {frameLabel} is not saved in the case.</p>
           {/if}
         </div>
 
@@ -418,7 +317,7 @@
                       target="_blank"
                       rel="noreferrer"
                       class="btn engine-btn"
-                      onclick={(event) => pressEngine(event, e)}
+                      onclick={(event) => pressEngine(event, e, picture(), filled)}
                     >
                       <Icon name="search" size={14} /> {e.label}
                     </a>
@@ -436,7 +335,7 @@
                       target="_blank"
                       rel="noreferrer"
                       class="btn engine-btn"
-                      onclick={(event) => pressEngine(event, e)}
+                      onclick={(event) => pressEngine(event, e, picture(), filled)}
                     >
                       <Icon name="copy" size={14} /> {e.label}
                     </a>
@@ -454,7 +353,7 @@
                       target="_blank"
                       rel="noreferrer"
                       class="btn engine-btn"
-                      onclick={(event) => pressEngine(event, e)}
+                      onclick={(event) => pressEngine(event, e, picture(), filled)}
                     >
                       <Icon name="download" size={14} /> {e.label}
                     </a>
@@ -464,11 +363,9 @@
             {/if}
           </div>
 
-          {#if selected.kind === 'video'}
-            <button class="btn btn-ghost btn-sm inspect-link" onclick={openInInspect}>
-              <Icon name="crop" size={13} /> Finer control in Inspect
-            </button>
-          {/if}
+          <button class="btn btn-ghost btn-sm inspect-link" onclick={openInInspect}>
+            <Icon name="zoneSearch" size={13} /> Search a zone in Inspect
+          </button>
         </div>
       </div>
     </div>

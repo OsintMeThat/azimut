@@ -39,6 +39,11 @@ export class ViewTransform {
     this.matrix = IDENTITY;
   }
 
+  /** Stand the view back upright and keep its zoom and pan, the way a zone is drawn. */
+  upright() {
+    this.matrix = IDENTITY;
+  }
+
   /**
    * Zoom by one wheel notch toward the pointer. Never below the fitted size: at 1×
    * the pan snaps back to centre so the picture cannot drift off. `rect` is the

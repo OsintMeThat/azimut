@@ -37,7 +37,8 @@
   import { createAutosave } from '../lib/autosave.svelte.js';
   import { createHistory } from '../lib/history.js';
   import { deletedToast } from '../lib/trash.js';
-  import { openInHorizon, openInReverseSearch } from '../lib/navigate.js';
+  import { openInHorizon } from '../lib/navigate.js';
+  import { zoneFileName } from '../lib/searchZone.js';
   import { offerNote, offerPuts, withdrawNote } from '../lib/noteHere.svelte.js';
   import { lookupEntity } from '../lib/catalog.js';
   import PutInNote from '../components/PutInNote.svelte';
@@ -338,6 +339,7 @@
     cropEditing = false;
     cropBefore = null;
     frameAspect = null;
+    closeZone();
     overview = null;
     scan = null;
     scanning = false;
@@ -599,19 +601,65 @@
     });
   }
 
-  /**
-   * Hand a frame to Reverse Search as it reads here, turned, adjusted and cropped,
-   * without filing it. The crop is usually the subject, and an engine matches a
-   * subject better than the whole picture it sits in.
-   */
-  async function reverseFrame(frame) {
-    try {
-      const blob = await renderBlob(frame.path, frame.time, buildFrameOps(filters, frame));
-      const name = work.source?.title || work.source?.filename || frame.path.split('/').pop();
-      openInReverseSearch({ blob, label: frame.time != null ? `${name} · t=${frame.time.toFixed(2)}s` : name });
-    } catch (e) {
-      toast(e.message, 'danger');
+  // -- zone search: a part of the picture to the reverse-search engines ------------
+  // The zone is drawn over the viewer (`inspect/ZoneSearch.svelte`) as fractions of
+  // the picture as it reads there, and cut by the strip's own render from the file's
+  // pixels: on the video, the frame on screen turned and tuned as shown, which is
+  // what Capture then a crop would give; on a frame, after its turn, crop and
+  // adjustments. An engine matches a subject better than the picture it sits in.
+  // Nothing is filed, and nothing leaves until an engine is pressed.
+  let zoning = $state(false);
+  let zone = $state(null);
+  let zoneRender = null; // { key, png }: the zone's picture, rendered once per zone and frame
+
+  function zoneRecipe() {
+    if (!zone || !work.source) return null;
+    const cut = { op: 'crop', params: { x: zone.x, y: zone.y, w: zone.w, h: zone.h } };
+    if (selected === 'video') {
+      const frame = { sourceOps: rotationOps(videoRotation), adjust: videoSeed(filters, work.videoAdjust) };
+      const time = captureMoment(shared.currentTime, shared.frameTime);
+      return { path: work.source.path, time, ops: [...buildFrameOps(filters, frame), cut], snap: true };
     }
+    if (!activeFrame) return null;
+    return { path: activeFrame.path, time: activeFrame.time ?? null, ops: [...buildFrameOps(filters, activeFrame), cut], snap: false };
+  }
+
+  /**
+   * The zone's picture for an engine press. Rendered once per zone and frame: the
+   * press reuses the render the drawing started, so the engine's tab opens on it at
+   * once, and a press before it has started starts it.
+   */
+  function zonePicture() {
+    const recipe = zoneRecipe();
+    if (!recipe) return null;
+    const key = JSON.stringify(recipe);
+    if (zoneRender?.key !== key) {
+      const png = renderResponse(recipe.path, recipe.time, recipe.ops, { snap: recipe.snap }).then((res) => res.blob());
+      png.catch(() => {}); // a zone drawn and never searched is no error; a press reports its own
+      zoneRender = { key, png };
+    }
+    const { png } = zoneRender;
+    return { png: () => png, name: zoneFileName(stemFor(recipe.path), recipe.time), what: 'zone' };
+  }
+
+  // The render starts once the zone, the frame on screen or its edits hold still,
+  // so a drag or a played clip asks for nothing until it stops.
+  $effect(() => {
+    if (!zoning || !zoneRecipe()) return;
+    const timer = setTimeout(() => untrack(zonePicture), 250);
+    return () => clearTimeout(timer);
+  });
+
+  function openZone() {
+    if (cropEditing) commitCrop();
+    zone = null;
+    zoning = true;
+  }
+
+  function closeZone() {
+    zoning = false;
+    zone = null;
+    zoneRender = null;
   }
 
   /**
@@ -728,6 +776,7 @@
     cropEditing = false;
     cropBefore = null;
     shared.cropMode = false;
+    closeZone();
     work.activeFrameId = id === 'video' ? null : id;
   }
 
@@ -795,6 +844,7 @@
 
   function beginCrop() {
     if (!activeFrame) return;
+    closeZone();
     cropBefore = activeFrame.crop ? { ...activeFrame.crop } : null;
     cropEditing = true;
     if (!activeFrame.crop) shared.cropMode = true;
@@ -854,6 +904,18 @@
     if (key === 'o') {
       e.preventDefault();
       holdOriginal = true;
+      return;
+    }
+    // R opens zone search on the picture in the viewer, or closes it; Escape closes it.
+    if (key === 'r' && !e.repeat && !cropEditing && (selected === 'video' || activeFrame?.url)) {
+      e.preventDefault();
+      if (zoning) closeZone();
+      else openZone();
+      return;
+    }
+    if (zoning && key === 'Escape') {
+      e.preventDefault();
+      closeZone();
       return;
     }
     if (activeFrame && cropEditing) {
@@ -2330,6 +2392,9 @@
               waveform={overview?.waveform ?? null}
               original={holdOriginal}
               oncapture={captureNow}
+              {zonePicture}
+              bind:zoning
+              bind:zone
               editing={sceneOnBar}
               onedit={dragScene}
               onscene={pressedOnBar}
@@ -2347,6 +2412,9 @@
               bind:cropMode={shared.cropMode}
               onbegincrop={beginCrop}
               oncommitcrop={commitCrop}
+              {zonePicture}
+              bind:zoning
+              bind:zone
             />
             {#if renderPending}<span class="rendering" aria-live="polite"><span class="spinner small"></span> Rendering…</span>{/if}
           {:else if activeFrame?.missing}
@@ -2525,7 +2593,8 @@
                 current={analysisCurrent}
                 running={analysisRunning}
                 onrun={runAnalysis}
-                reverse={reverseFrame}
+                reverse={openZone}
+                searching={zoning}
                 horizon={horizonFrame}
               />
             {/if}

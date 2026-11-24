@@ -1802,12 +1802,10 @@ The engines' own pages sit beside it, for a file that is not in the case. Once a
 picture is picked, **Change file** and **Files** in the header work as in Inspect,
 and a case change drops the picture with its handoff.
 
-**Reverse Search opens on the picture it was sent.** From a Media Library row it
-is the case file; from a frame in Inspect it is the frame as it reads there —
-turned, adjusted and cropped — rendered by the strip's own route and filed nowhere,
-and the tool says so under the preview. The crop is the point: an engine matches a
-subject better than the picture it sits in. The handoff is spent once, on the tab
-it was meant for, and a case change drops it with every other handoff.
+**Reverse Search opens on the picture it was sent.** From Open in… in Media or
+Files it is the case file. The handoff is spent once, on the tab it was meant for,
+and a case change drops it with every other handoff. **Search a zone in Inspect**,
+under the engines, opens the file there, where a part of it is searched.
 
 Every media row and card shows the file's human-readable stem, without its
 extension and without a second title line. Editing that name in Details renames
@@ -1860,6 +1858,20 @@ the case's thumbnail cache. The video zooms, pans and turns like a frame, a clic
 plays it, and the speed goes from 0.1× to 4×. Holding **O** shows the picture
 without its adjustments, on a video and on a frame.
 
+**A part of the picture is searched where it is read.** The zone button beside
+Capture, the one at the foot of a frame, **Reverse image search** in Analyze or
+**R** open zone search: the clip pauses, the view stands upright and keeps its zoom,
+and a drag over the picture draws the zone, its handles adjust it and a new drag
+replaces it; the middle button pans, Escape closes. A bar beside the zone gives its
+size in the file's own pixels, warning under 100 on a side, **Whole picture**, Copy
+and the four engines, each pressed the way Reverse Search presses it
+(`lib/reverseHandoff.js`). The zone is cut by the strip's own render from the file:
+on the video, the frame on screen turned and tuned as Capture would take it; on a
+frame, after its turn, crop and tones. It renders once the zone and the frame hold
+still, so the engine's tab opens on it at once. Nothing is filed and nothing leaves
+until an engine is pressed. An engine matches a subject better than the picture it
+sits in, and several zones of one frame are searched in a row.
+
 **The one press every visit needs stays on top of the panel.** Above the tabs sit
 **Capture frame** on the video, with the time it will cut, **Mark to geolocate** under it
 and **Save N frames** once there are captures, and **Save to case** on a frame. C captures from the keyboard and
@@ -1888,8 +1900,8 @@ picture opens on Scenes, a video on the clip rather than a frame of it:
   fold away under them. The answer is kept, so the shots are on the bar the next
   time the clip opens.
 - **Analyze**, on a frame: Error Level Analysis laid over the frame with its
-  strength, and asked again once the frame is edited; Reverse image search and
-  Match in Horizon.
+  strength, and asked again once the frame is edited; Reverse image search, which
+  opens zone search on the frame, and Match in Horizon.
 - **Info**, what the file says about itself: the stream from the probe (resolution,
   frame rate and whether it varies, codec, bit rate, sound, a turn stored in the
   file, the software it went through), the capture date and position from its

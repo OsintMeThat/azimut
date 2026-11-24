@@ -76,7 +76,7 @@ const caseState = $state({ current: { id: 'case-a', folders: [] }, rev: 0 });
 const uiState = $state({ tool: 'inspect', inspectPath: null, openInspect: null, inspectScene: null, proofScene: null, geolocateRef: null, focusMedia: null, todoHint: false, toasts: [] });
 const toast = vi.fn();
 vi.mock('../lib/state.svelte.js', () => ({ caseState, uiState, toast, dismissToast: vi.fn(), reloadCase: vi.fn(async () => {}) }));
-vi.mock('../lib/navigate.js', () => ({ openInReverseSearch: vi.fn(), openInHorizon: vi.fn() }));
+vi.mock('../lib/navigate.js', () => ({ openInHorizon: vi.fn() }));
 vi.mock('../lib/trash.js', () => ({ deletedToast: vi.fn() }));
 
 const { default: Inspector } = await import('./Inspector.svelte');

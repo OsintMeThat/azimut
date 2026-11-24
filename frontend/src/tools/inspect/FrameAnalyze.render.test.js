@@ -4,7 +4,7 @@ import { flushSync, mount, unmount } from 'svelte';
 
 /**
  * The frame's Analyze tab, driven the way an analyst drives it: the reverse-search
- * press hands over the frame pressed on, once, and a reading says whether it still
+ * press opens zone search over the frame, and a reading says whether it still
  * describes the frame as it reads now.
  */
 
@@ -42,7 +42,7 @@ function open(reverse, horizon = null, extra = {}) {
   flushSync();
 }
 
-const button = () => [...target.querySelectorAll('button')].find((b) => b.textContent.includes('Reverse image search') || b.textContent.includes('Preparing'));
+const button = () => [...target.querySelectorAll('button')].find((b) => b.textContent.includes('Reverse image search'));
 
 afterEach(() => {
   if (live) unmount(live);
@@ -51,34 +51,20 @@ afterEach(() => {
 });
 
 describe('reverse search from a frame', () => {
-  it('hands over the active frame', async () => {
-    const reverse = vi.fn(async () => {});
+  it('opens zone search over the frame, staying in Inspect', () => {
+    const reverse = vi.fn();
     open(reverse);
 
     button().click();
-    await Promise.resolve();
 
     expect(reverse).toHaveBeenCalledTimes(1);
-    expect(reverse).toHaveBeenCalledWith(FRAME);
+    expect(button().getAttribute('aria-pressed')).toBe('false');
   });
 
-  it('holds the button while the frame renders, so one press sends it once', async () => {
-    let finish;
-    const reverse = vi.fn(() => new Promise((resolve) => (finish = resolve)));
-    open(reverse);
-
-    button().click();
-    flushSync();
-    expect(button().disabled).toBe(true);
-    expect(button().textContent).toContain('Preparing');
-    button().click();
-    expect(reverse).toHaveBeenCalledTimes(1);
-
-    finish();
-    await Promise.resolve();
-    await Promise.resolve();
-    flushSync();
-    expect(button().disabled).toBe(false);
+  it('shows pressed while the zone search is open', () => {
+    open(vi.fn(), null, { searching: true });
+    expect(button().getAttribute('aria-pressed')).toBe('true');
+    expect(button().classList.contains('active')).toBe(true);
   });
 });
 

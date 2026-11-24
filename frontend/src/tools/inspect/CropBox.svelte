@@ -6,6 +6,9 @@
   // moves, and — while `draw` is armed — dragging empty space draws a fresh box.
   // With `aspect` (pixel w/h) set the box keeps that ratio. All the geometry is
   // pure (see inspect.js), so the Frame overlay and the piece modal share it.
+  //
+  // With `redraw`, empty space always draws a fresh box and `draw` is never spent:
+  // the way a search zone is picked again and again.
   let {
     crop = $bindable(null),
     draw = $bindable(false),
@@ -13,7 +16,10 @@
     natW = null,
     natH = null,
     min = 0.02,
+    redraw = false,
   } = $props();
+
+  const drawing = $derived(draw || redraw);
 
   let layerEl = $state();
   let action = null; // { type:'draw'|'move'|'resize', ... }
@@ -70,7 +76,7 @@
   function onUp() {
     if (action?.type === 'draw') {
       crop = crop && crop.w >= min && crop.h >= min ? clampCrop(crop, min) : action.prev;
-      draw = false;
+      if (!redraw) draw = false;
     }
     action = null;
     window.removeEventListener('pointermove', onMove);
@@ -78,7 +84,7 @@
   }
 
   function layerDown(e) {
-    if (!draw || e.button !== 0) return; // middle-drag falls through (rotate)
+    if (!drawing || e.button !== 0) return; // middle-drag falls through (rotate)
     e.preventDefault();
     const p = frac(e);
     const prev = crop;
@@ -105,7 +111,7 @@
 <!-- svelte-ignore a11y_no_static_element_interactions -->
 <div
   class="cropbox-layer"
-  class:drawing={draw}
+  class:drawing
   bind:this={layerEl}
   onpointerdown={layerDown}
 >

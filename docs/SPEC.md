@@ -190,7 +190,7 @@ proof for publication.
 | ✅ **Capture extension** | Adds case map tools to third-party maps, hands media to publishing and reverse search sites, and supports extension updates. |
 | ✅ **Home, guide & onboarding** | Opens recent work and task lists from Home, pictures every tool in the `?` guide with three walked journeys, tours a newcomer and opens each version on its What's new. |
 | ✅ **Support & feedback** | Offers a tip, a form and a problem report from one top-bar button, Tip, each hidden until its link exists and opened only on a press. |
-| ✅ **Inspect & Collage** | Autosaves work per file, captures the frame on screen with frames, marks and sound along the bar, arranges frames into collages straightened by a level line, and sends pictures to reverse search. |
+| ✅ **Inspect & Collage** | Autosaves work per file, captures the frame on screen with frames, marks and sound along the bar, arranges frames into collages straightened by a level line, and searches a zone drawn over a picture or a frame on the reverse-search engines. |
 | ✅ **Panorama from a pan** | Plays the video in a rail under the Collage canvas, picks a pan's frames between A and B, stitches them with seams halfway between frames, and trims the empty edges. |
 | ✅ **Proof annotations & publishing** | Adds markers, blurs, tags, callouts, zoom insets and view cones, free or tied across panels at one line width, verifies proof points and carries proof dates into post templates. |
 | ✅ **Dates & Timeline** | Shares date entry and clock selection, draws temporal precision explicitly and adds cited events from any tool. |

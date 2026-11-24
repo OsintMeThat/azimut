@@ -23,7 +23,8 @@
           { "icon": "video", "text": "Right-click a plate's marker that shows a video or a photo to set it on the page, pointing at its place." },
           { "icon": "columns", "text": "Horizon's Side by side is live: the photo above, the terrain under it, locked together or each on its own." },
           { "icon": "columns", "text": "A note's Columns set two pictures side by side at one height, or words beside a picture, in the PDF and on the web." },
-          { "icon": "image", "text": "Reference windows open over the Horizon view too, the same ones as on the map." }
+          { "icon": "image", "text": "Reference windows open over the Horizon view too, the same ones as on the map." },
+          { "icon": "zoneSearch", "text": "Inspect searches a part of a picture: draw a zone over it, then press Google Lens, Yandex, Bing or TinEye." }
         ]
       }
     ]

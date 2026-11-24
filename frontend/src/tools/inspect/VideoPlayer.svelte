@@ -1,4 +1,5 @@
 <script>
+  import { untrack } from 'svelte';
   import {
     SPEEDS, faster as fasterRate, frameDuration, frameIndex, loopIsSet, loopRestart, preciseClock,
     seekInto, setLoopEnd, shownFrameTime, slower as slowerRate, speedLabel, stepTarget, zoomLabel,
@@ -9,6 +10,7 @@
   import FloatingMenu from '../../components/FloatingMenu.svelte';
   import TurnGuide from '../../components/TurnGuide.svelte';
   import PlayerTrack from './PlayerTrack.svelte';
+  import ZoneSearch from './ZoneSearch.svelte';
 
   // The clip, read closely: zoomed, panned and turned like a frame
   // (`lib/viewTransform.svelte.js`), stepped a frame at a time, slowed, looped,
@@ -49,6 +51,12 @@
     // A press on a scene's pin, or on its band while `bandsOpen`, by the scene's key.
     onscene,
     bandsOpen = true,
+    // Zone search (`ZoneSearch`): offered when the tool gives the zone's picture.
+    // Open, it pauses the clip and stands it upright, the left button draws the zone
+    // and the middle one pans.
+    zonePicture = null,
+    zoning = $bindable(false),
+    zone = $bindable(null),
   } = $props();
 
   let shell = $state();
@@ -66,6 +74,8 @@
   // The stretch of the clip the bar is zoomed to, null for the whole of it. Never
   // kept: the next file, or the next visit, starts on the whole clip.
   let barZoom = $state(null);
+  // the clip's own size, which the zone reads its pixels in
+  let videoSize = $state({ w: 0, h: 0 });
   const view = new ViewTransform();
 
   const totalDuration = $derived(duration || mediaDuration || 0);
@@ -102,6 +112,19 @@
   $effect(() => {
     if (video) video.playbackRate = rate;
   });
+
+  $effect(() => {
+    if (!zoning) return;
+    untrack(() => {
+      video?.pause();
+      view.upright();
+    });
+  });
+
+  function toggleZone() {
+    zoning = !zoning;
+    zone = null;
+  }
 
   // The frame the browser actually drew, so the clock and a capture name the very
   // frame on screen, even on a variable frame rate. It also keeps the loop to the
@@ -207,10 +230,11 @@
   function onpointerdown(e) {
     if (e.button === 1) {
       e.preventDefault();
-      view.turnFrom(e, { viewport: canvas, layer: layerEl, stage: stageEl });
+      if (zoning) view.panFrom(e);
+      else view.turnFrom(e, { viewport: canvas, layer: layerEl, stage: stageEl });
       return;
     }
-    if (e.button !== 0) return;
+    if (e.button !== 0 || zoning) return;
     e.preventDefault();
     view.panFrom(e, { onclick: togglePlay });
   }
@@ -221,6 +245,7 @@
   <div
     class="video-canvas"
     class:rotating={view.turning}
+    class:zoning
     bind:this={canvas}
     {onwheel}
     {onpointerdown}
@@ -235,7 +260,10 @@
           {src}
           playsinline
           preload="auto"
-          onloadedmetadata={() => (mediaDuration = video?.duration ?? 0)}
+          onloadedmetadata={() => {
+            mediaDuration = video?.duration ?? 0;
+            videoSize = { w: video?.videoWidth ?? 0, h: video?.videoHeight ?? 0 };
+          }}
           {ontimeupdate}
           onseeked={() => (shared.currentTime = video?.currentTime ?? 0)}
           onplay={() => (paused = false)}
@@ -261,10 +289,23 @@
         <button class="btn btn-ghost btn-sm" onclick={() => view.reset()} title={INSPECT_HELP.fit}>
           <Icon name="eye" size={14} /> Fit
         </button>
+      {:else if zoning}
+        <span class="hint">scroll zoom · middle-drag pans · Esc closes</span>
       {:else}
         <span class="hint">scroll zoom · drag pan · middle-drag turns · click plays</span>
       {/if}
     </div>
+    {#if zoning && zonePicture}
+      <ZoneSearch
+        box={() => video}
+        watch={`${view.layerCss} ${transform}`}
+        width={quarterTurn ? videoSize.h : videoSize.w}
+        height={quarterTurn ? videoSize.w : videoSize.h}
+        bind:zone
+        picture={zonePicture}
+        onclose={toggleZone}
+      />
+    {/if}
   </div>
 
   <div class="player-bar" data-guide="inspect.player">
@@ -340,6 +381,18 @@
       <button class="player-btn" onclick={toggleFullscreen} aria-label="Full screen" title={INSPECT_HELP.fullscreen}>
         <Icon name="maximize" size={16} />
       </button>
+      {#if zonePicture}
+        <button
+          class="player-btn"
+          class:on={zoning}
+          onclick={toggleZone}
+          aria-label="Search a zone"
+          aria-pressed={zoning}
+          title={INSPECT_HELP.zoneIcon}
+        >
+          <Icon name="zoneSearch" size={16} />
+        </button>
+      {/if}
       {#if oncapture}
         <button class="player-btn capture" onclick={() => oncapture()} aria-label="Capture this frame" title={INSPECT_HELP.captureIcon}>
           <Icon name="camera" size={17} />
@@ -383,6 +436,9 @@
   .video-canvas.rotating {
     cursor: grabbing;
   }
+  .video-canvas.zoning {
+    cursor: default;
+  }
   .zoom-layer {
     position: relative;
     transform-origin: center center;
@@ -401,6 +457,7 @@
   }
   .view-ctl {
     position: absolute;
+    z-index: 3;
     right: 10px;
     bottom: 10px;
     display: flex;
