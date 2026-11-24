@@ -171,18 +171,24 @@
     }
   }
 
-  // Drag on the empty background pans the view (a plain click still deselects).
-  function startPan(e) {
-    selectedIds = [];
+  // A drag looks around the canvas: on the background, on a piece not in hand, and with the
+  // middle button anywhere, so a panorama filling the view still pans. A click that did not
+  // move does `pick`: on the background it puts down what was in hand.
+  function startPan(e, pick = () => (selectedIds = [])) {
+    if (e.button !== 0 && e.button !== 1) return;
     const sx = e.clientX;
     const sy = e.clientY;
     const ox = cam.x;
     const oy = cam.y;
+    let moved = false;
     const move = (ev) => {
+      // the jitter of a click does not count as a drag
+      if (Math.hypot(ev.clientX - sx, ev.clientY - sy) >= 3) moved = true;
       cam.x = ox + ev.clientX - sx;
       cam.y = oy + ev.clientY - sy;
     };
     const up = () => {
+      if (!moved && e.button === 0) pick();
       window.removeEventListener('pointermove', move);
       window.removeEventListener('pointerup', up);
     };
@@ -190,13 +196,18 @@
     window.addEventListener('pointerup', up);
   }
 
-  // Shift-click adds/removes a piece from the block without moving anything.
-  // Otherwise: pressing a piece *outside* the block selects just it; pressing one
-  // already *inside* the block keeps the whole selection, so the drag carries every
-  // piece — and, if the pointer never really moved, collapses to that single piece
-  // on release (a plain click still means "just this one").
+  // Only what is in hand moves. Shift-click adds/removes a piece from the block without
+  // moving anything. A piece *outside* the block pans on a drag, and a click takes just it
+  // in hand; pressing one already *inside* the block keeps the whole selection, so the drag
+  // carries every piece — and, if the pointer never really moved, collapses to that single
+  // piece on release (a plain click still means "just this one").
   function startMove(e, node) {
     e.preventDefault();
+    if (e.button === 1) {
+      startPan(e);
+      return;
+    }
+    if (e.button !== 0) return;
     if (brush?.on) {
       startPaint(e, node);
       return;
@@ -205,8 +216,11 @@
       toggleSel(node.id);
       return;
     }
-    const group = isSel(node.id) ? collage.nodes.filter((n) => isSel(n.id)) : [node];
-    if (!isSel(node.id)) selectedIds = [node.id];
+    if (!isSel(node.id)) {
+      startPan(e, () => (selectedIds = [node.id]));
+      return;
+    }
+    const group = collage.nodes.filter((n) => isSel(n.id));
     const base = group.map((n) => n.quad.map(([x, y]) => [x, y]));
     const [px, py] = toCanvas(e);
     let moved = false;
@@ -374,6 +388,12 @@
         else brush.on = false;
         return;
       }
+    }
+    // Ctrl+A takes every piece in hand
+    if ((e.ctrlKey || e.metaKey) && !e.shiftKey && !e.altKey && e.key.toLowerCase() === 'a' && collage.nodes.length) {
+      e.preventDefault();
+      selectedIds = collage.nodes.map((n) => n.id);
+      return;
     }
     if (!selectedIds.length) return;
     // The arrows nudge what is selected a canvas pixel, ten with Shift. A burst of them
@@ -601,6 +621,7 @@
   bind:clientHeight={availH}
   style:background={collage.transparent ? null : collage.background}
   onpointerdown={startPan}
+  onmousedown={(e) => e.button === 1 && e.preventDefault()}
   onpointermove={moveRing}
   onpointerleave={() => (ring = null)}
   onwheel={onWheel}
@@ -1015,7 +1036,7 @@
     </div>
   {:else if collage.nodes.length}
     <div class="view-hint">
-      wheel or pinch to zoom · drag the background or two fingers to pan · arrows nudge · pull corners to warp · shift-click to select several
+      wheel or pinch to zoom · drag to pan · click a piece to move it · {shortcut('Ctrl+A')} selects all · shift-click adds · arrows nudge · pull corners to warp
     </div>
   {/if}
 </div>

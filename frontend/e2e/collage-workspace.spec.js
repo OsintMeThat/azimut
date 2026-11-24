@@ -398,6 +398,40 @@ test('pans on two fingers and zooms on a pinch, the mouse wheel zooming too', as
   }
 });
 
+test('pans on a drag over a piece not in hand, moves it once clicked, and takes all on Ctrl+A', async ({ page }) => {
+  await openStrip(page);
+  const piece = page.locator('img.node').first();
+  const drag = async (box, dx, button = 'left') => {
+    await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
+    await page.mouse.down({ button });
+    await page.mouse.move(box.x + box.width / 2 + dx, box.y + box.height / 2, { steps: 6 });
+    await page.mouse.up({ button });
+  };
+
+  // a drag over the piece looks around: the view moves with the hand, the piece with it
+  const start = await surface(page);
+  const box = await piece.boundingBox();
+  await drag(box, 60);
+  await expect.poll(async () => (await surface(page)).x).toBeCloseTo(start.x + 60, 0);
+  await expect(page.locator('img.node.selected')).toHaveCount(0);
+  const shifted = await piece.boundingBox();
+  expect(shifted.x).toBeCloseTo(box.x + 60, 0);
+
+  // a click takes it in hand, and the next drag moves it alone
+  await piece.click();
+  await expect(page.locator('img.node.selected')).toHaveCount(1);
+  const panned = await surface(page);
+  await drag(shifted, 40);
+  expect((await surface(page)).x).toBeCloseTo(panned.x, 0);
+  expect((await piece.boundingBox()).x).toBeCloseTo(shifted.x + 40, 0);
+  // the middle button still looks around over it
+  await drag(await piece.boundingBox(), 30, 'middle');
+  await expect.poll(async () => (await surface(page)).x).toBeCloseTo(panned.x + 30, 0);
+
+  await page.keyboard.press('ControlOrMeta+a');
+  await expect(page.locator('img.node.selected')).toHaveCount(2);
+});
+
 test('paints areas out of a piece\'s stitch, kept with the collage and sent with the next stitch', async ({ page }) => {
   await page.setViewportSize({ width: 1280, height: 720 });
   const { writes } = await openStrip(page, { works: [] });
