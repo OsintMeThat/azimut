@@ -4196,36 +4196,80 @@ else, because the answer changes every question after it:
   and showing frames the ground it covers. The layers button beside them snapshots
   what was kept or pinned into a SAT layer, a routine's heading into its one layer;
   a run with nothing kept says so and stays greyed. A change spans its two passes
-  in that layer, so its date filter finds it in any period between them. A group
-  folds shut from its heading; its colour square changes the routine's colour
-  and its saved map overlays. A one pass has its own small colour square, which
-  changes that run's saved map overlay.
+  in that layer, so its date filter finds it in any period between them. A
+  routine's group opens folded to one line: a sparkline of its passes, its last
+  pass and what it found, the reference it compares against said once, and how
+  many candidates wait for review; that line opens its dashboard. Unfolded, each
+  run reads as its day and its count. **One passes** opens unfolded. A group
+  opened or shut stays so until the app is closed. Its colour square changes the
+  routine's colour and its saved map overlays. A one pass has its own small colour
+  square, which changes that run's saved map overlay.
 - a **routine** is a place you come back to. It keeps its areas, its analyzer and
   what each pass compares against; it is run again whenever there is a new pass,
   and it remembers what it found.
 
-A routine's card carries what it is for, its analyzer, its areas, its rule and
-where its last run stands: the day of the pass it swept and how many candidates
-are still to review, or how far a working one got. The play button opens dates
-in the dock, **Run all** queues idle routines with their saved rules, and the title
-opens the routine's own page. **Analyzers** is where the things a detection looks
+A routine's card carries what it is for, its analyzer, its areas, its rule, a
+sparkline of what each pass found and where its last run stands: the day of the
+pass it swept and how many candidates are still to review, or how far a working
+one got and how many more wait behind it. Past ten days without a pass read, the
+card says so. The play button opens dates in the dock, **Run all** queues idle
+routines with their saved rules, stop halts every run of the routine, and the
+title opens the routine's own page. **Analyzers** is where the things a detection looks
 for are made.
 
 An open routine or run is drawn once, in each area's own colour, by the same
 read-only overlay the list uses; the editable canvas belongs to the wizard and the
 Areas tab. Hovering a routine draws its areas heavier.
 
-A routine's page leads with **Findings**: every candidate it has kept, as a pin or
-just here, newest run first, each marked **Pinned** or **Kept here** and a press
-away from the evidence it came from. **Runs** beside it lists its passes, each
-opening its own review. Opening any run shows only that run's saved overlay;
-Back restores the saved eye states from before the review. **Run routine** opens dates in the right dock, with A and B
+A routine's page is a dashboard of its finished runs read together
+(`lib/map/detectSeries.js`, `GET …/followups/{id}/series`). Its head says when it
+last read a pass and, past ten days, offers to catch up. Area chips narrow the
+whole page to one area. **Overview** gives four tiles (passes read, candidates and
+how many wait for review, spots, the newest pass with what appeared and left),
+**Candidates per pass** as one column a pass, in total or stacked **By area** in
+the areas' colours (areas sharing a colour are told apart by a palette), with an
+amber cap on what is still to review, and **Spots that appeared and left** against
+the pass before that read the same area. Pointing at a column reads it out under
+the chart; pressing it opens that pass.
+
+**Spots** gathers candidates that come back to one place: within 40 m on two
+passes (20, 80 or 150 m on request), matched one to one so two things parked side
+by side stay two. The rule is on screen; it groups and never hides or judges. Each
+spot is a row with one cell a pass, filled where it was seen, empty where its area
+was read and it was not, hatched where its area was not read that day. Chips filter
+**New** (first seen on the newest pass), **Gone** (on the pass before, not the
+newest), **Regular** (on 4 passes in 5 or more since first seen), **Seen once** and
+**Comes and goes**, each saying its rule. A row's tick keeps its candidates here
+and its cross dismisses them from every pass after a yes; a pin in the case is
+left as it is. A filled cell opens that pass on that candidate. While the dashboard
+is up the map rings the spots in their kind's colour instead of the runs'
+overlays, and pressing a ring finds it in the list. **Runs** lists the passes, each
+opening its own review; Back returns to the same tab.
+
+The export button puts any part in the note pinned to the side as a block the
+Notebook keeps editable: the whole dashboard under a heading, the key figures as
+tiles, either chart as a `::: chart` over its own table, or the spots as a table
+whose passes read ● ○ ·. With no note pinned it opens the note panel. The same
+menu downloads every candidate or the spots as CSV, and snapshots what was kept
+into a SAT layer. Opening any run shows only that run's saved overlay; Back
+restores the saved eye states from before the review.
+
+**Catch up** lists the passes a routine missed. Nothing is asked of Copernicus
+until **Look for passes**, one catalogue request over its areas from the first
+pass it read. Passes newer than the last one read are ticked when the newest-pass
+rule would take them (under the cloud ceiling, the whole area covered, a radar
+pass on its track); cloudier ones, partial ones and gaps between two passes read
+stay listed to tick by hand, each saying why it was not ticked. **Read N passes**
+queues one run per pass, oldest first, up to 30: a routine comparing with the pass
+before takes, for each area, the newest pass read or queued before that day, so a
+gap filled late still compares like with like; one with a fixed reference keeps
+it. A day every area already read is left out and said so. **Run routine** opens dates in the right dock, with A and B
 for every area. B is the newest eligible pass by default. **The pass before**
 takes A from that area's last completed pass; the first run uses its chosen A.
 Only areas with a newer eligible B are queued. If every area is current, no run
 is created. The dock resizes from its left edge between 300 and 720 pixels,
 while keeping room for the map.
-The page also offers **Export as layer**, editing and deletion.
+The page also offers editing and deletion.
 
 Either kind is built one step at a time: **Where**, **What**, **When**, then
 **Start**. Only the current step shows, the next one opens once this one has what

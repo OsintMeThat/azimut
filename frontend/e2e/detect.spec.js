@@ -121,7 +121,7 @@ test('the Saved colour square recolours the routine and its map overlay', async 
   await colour.fill('#eab308');
   await expect(colour).toHaveValue('#eab308');
   await expect(page.locator('.analysis-overlay > path').first()).toHaveAttribute('stroke', '#eab308');
-  await expect(page.locator('.fold[aria-expanded="true"]')).toBeVisible();
+  await expect(page.locator('.fold[aria-expanded="false"]')).toBeVisible();
   expect(errors).toEqual([]);
 });
 

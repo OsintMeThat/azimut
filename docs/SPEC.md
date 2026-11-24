@@ -187,6 +187,7 @@ proof for publication.
 | ✅ **Historical imagery & radar** | Browses Esri Wayback releases and dated Sentinel-1 passes, keeping acquisition dates separate from imagery releases. |
 | ✅ **Satellite Compare** | Aligns and annotates dated imagery, echoes the pointer on the other side, highlights comparable changes, saves sessions and exports attributed PNGs, GIFs and evolution sheets. |
 | ✅ **Detect** | Reviews Sentinel-2 and Sentinel-1 detections over shared areas, with pass coverage, cloud masks, custom analyzers and dated evidence; analyzers and areas travel as files. |
+| ✅ **Detect routines over time** | Reads a routine's passes as a dashboard of counts, spots that stay, come and go, judged a spot at a time, put in a note as editable charts or out as CSV, and catches it up on the passes it missed. |
 | ✅ **Copernicus layers & figures** | Writes composite, index and script layers offered in every map, reads one as a Detect rule, and lays several renderings of a pass out as a captioned figure. |
 | ✅ **Capture extension** | Adds case map tools to third-party maps, hands media to publishing and reverse search sites, and supports extension updates. |
 | ✅ **Home, guide & onboarding** | Opens recent work and task lists from Home, pictures every tool in the `?` guide with three walked journeys, tours a newcomer and opens each version on its What's new. |
