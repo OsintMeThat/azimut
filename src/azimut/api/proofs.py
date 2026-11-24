@@ -31,7 +31,6 @@ from fastapi import APIRouter, HTTPException
 from PIL import Image
 from pydantic import BaseModel, Field, StrictBool
 
-from .. import config
 from ..engine import artifacts as artifact_engine
 from ..engine import copernicus_credit
 from ..engine import exportdir, geolocate, inspectwork, layerediting
@@ -1021,33 +1020,29 @@ def _material_paths(spec: dict[str, Any]) -> list[str]:
 def _place_for(
     case: Case, proof_id: str, spec: dict[str, Any]
 ) -> tuple[dict[str, Any] | None, list[dict[str, Any]]]:
-    """File the points this proof carries, or hand the composer the question.
+    """File the points this proof carries.
 
     A proof is where a geolocation is concluded, so its points are what become
-    nodes — here, rather than on every capture taken while looking for them.
-    ``proof_place_auto`` decides which of the two happens; neither is a
-    suggestion, because both spell out the analyst's own answer.
+    nodes — here, rather than on every capture taken while looking for them. They
+    are filed without a question: the place is how the footage behind the proof
+    stands on the map, and a place filed under a file is not listed or drawn
+    beside it (``satellite.behind_its_file``). Nor is it a suggestion, because it
+    spells out the analyst's own answer.
 
     Every path restates what the proof says (``satellite.restate_proof_point``),
     which is what makes a *re*-save mean something: corrected coordinates move the
     edges instead of adding a second set, a point taken off the list rends its
     place, and POV moved to another line changes both verbs. The first half of the
-    answer is what the composer has to report — what was filed, and what it must
-    ask about — ``None`` when there is neither, so **a point the case already holds
-    is neither filed twice nor asked about** and a proof re-saved untouched stays
-    silent while still restating what it says. The second half is the points it let
-    go of.
+    answer is what the composer reports — what was filed, ``None`` when nothing
+    was, so **a point the case already holds is not filed twice** and a proof
+    re-saved untouched stays silent while still restating what it says. The
+    second half is the points it let go of.
     """
-    return _state_points(
-        case,
-        proof_id,
-        satellite_engine.spec_points(spec),
-        auto=bool(config.load_settings().get("proof_place_auto", True)),
-    )
+    return _state_points(case, proof_id, satellite_engine.spec_points(spec))
 
 
 def _state_points(
-    case: Case, proof_id: str, points: list[dict[str, Any]], *, auto: bool
+    case: Case, proof_id: str, points: list[dict[str, Any]]
 ) -> tuple[dict[str, Any] | None, list[dict[str, Any]]]:
     """File what has nowhere to live yet, then state the whole list at once.
 
@@ -1059,13 +1054,11 @@ def _state_points(
 
     **A point nobody checked is never filed** (``proposed``, see
     ``satellite.spec_points``): it is the middle of a capture, and filing it would
-    put a guess on the case map as a conclusion. It is not asked about either, since
-    the composer just offered to check it and heard "later". A place the case
-    already holds there stays, so an older proof re-saved unchecked keeps its point.
+    put a guess on the case map as a conclusion. A place the case already holds
+    there stays, so an older proof re-saved unchecked keeps its point.
     """
     stated: list[dict[str, Any]] = []
     filed: list[dict[str, Any]] = []
-    asking: list[dict[str, Any]] = []
     for rank, point in enumerate(points):
         standing = satellite_engine.place_at(case, point["lat"], point["lon"], keyed_only=False)
         if standing is not None:
@@ -1073,58 +1066,13 @@ def _state_points(
             continue
         if point.get("proposed"):
             continue
-        if not auto:
-            # the point moved somewhere the case cannot hold yet: the old claim is
-            # withdrawn either way, and the new one waits on the analyst's yes
-            asking.append(
-                {
-                    "lat": point["lat"],
-                    "lon": point["lon"],
-                    "label": point["label"],
-                    # so the question can say what the point will mean
-                    "pov": point["pov"],
-                }
-            )
-            continue
         place = satellite_engine.place_for_proof(case, point)
         if rank == 0:
             locate_on_save(case, place["id"], point["lat"], point["lon"])
         stated.append({"id": place["id"], "pov": point["pov"]})
         filed.append({"id": place["id"], "label": place["label"]})
     released = satellite_engine.restate_proof_point(case, proof_id, stated)
-    answer = {"filed": filed, "asking": asking} if (filed or asking) else None
-    return answer, released
-
-
-def file_proof_points(case: Case, proof: dict[str, Any]) -> list[dict[str, Any]]:
-    """File every point a saved proof states, whatever the setting says.
-
-    The composer's yes, and the sheet's way of filing a point the composer would
-    have asked about. The spec on disk is the authority — it was written a moment
-    ago by the save that raised the question, and re-reading it is what keeps the
-    answer about the proof rather than about whatever the caller still held.
-    """
-    points = satellite_engine.spec_points(read_spec(case, proof))
-    answer, _released = _state_points(case, proof["id"], points, auto=True)
-    return (answer or {}).get("filed", [])
-
-
-@router.post("/cases/{case_id}/proofs/{name}/place")
-def save_proof_place(case_id: str, name: str) -> list[dict[str, Any]]:
-    """File the points of a proof the composer just asked the analyst about.
-
-    The other half of ``proof_place_auto`` being off: the save reported points with
-    nowhere to live, the composer asked, and this is the yes. Everything is read
-    off the spec rather than taken from the request — the points, their labels,
-    which one is POV — so two open tabs answering the same question file one set of
-    places rather than two, and a point somebody filed in between is joined instead
-    of minted again.
-    """
-    case = get_case(case_id)
-    proof = case.find_entity(attr="spec", value=layout.proof_spec_rel(existing_stem(name, "proof")))
-    if proof is None:
-        raise HTTPException(status_code=404, detail="no such proof")
-    return file_proof_points(case, proof)
+    return ({"filed": filed} if filed else None), released
 
 
 @router.put("/cases/{case_id}/proofs/{name}/scene")

@@ -135,14 +135,6 @@ DEFAULT_SETTINGS: dict[str, Any] = {
     # Whether Satellite, Compare and Detect share one camera, so a map tab that
     # shows opens where the last one was left. On by default.
     "map_sync": True,
-    # Saving a proof files the point it carries as a `place`, joined by `depicts`
-    # (engine/satellite.place_for_proof). A geolocation is concluded in the
-    # composer, not while framing the map, so the point becomes a node once —
-    # where somebody committed to it — rather than on every capture taken while
-    # looking. On, the save files it; off, the composer asks first. Either way it
-    # is the analyst's own answer, so nothing here is ever `suggested`, and a
-    # point the case already holds is neither filed twice nor asked about.
-    "proof_place_auto": True,
     # The handle a new post draft is addressed to. Empty means no mention.
     "post_mention": "@GeoConfirmed",
     # The one a new Bluesky post is addressed to, where a handle is a domain. None

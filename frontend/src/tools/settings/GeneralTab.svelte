@@ -17,7 +17,6 @@
     coordSample,
     savePrefs,
     saveHome,
-    proofPlaceAuto = $bindable(),
     reversePrefill = $bindable(),
     supportHeartbeat = $bindable(),
     mapSync = $bindable(),
@@ -138,28 +137,6 @@
         >{q.label}</button>
       {/each}
     </div>
-  </div>
-</section>
-
-<section class="group" data-guide="settings.proofs">
-  <h3>Proofs</h3>
-  <p class="intro">
-    Saving a proof turns the coordinates it carries into a place on the map, and
-    says the proof shows it.
-  </p>
-  <div class="row">
-    <div class="row-label">
-      <span>Save the point without asking</span>
-      <span class="row-hint">
-        Off, the composer asks each time. A point already saved is never asked about.
-      </span>
-    </div>
-    <input
-      type="checkbox"
-      bind:checked={proofPlaceAuto}
-      onchange={() => savePrefs({ proof_place_auto: proofPlaceAuto })}
-      aria-label="Save a proof's point without asking"
-    />
   </div>
 </section>
 

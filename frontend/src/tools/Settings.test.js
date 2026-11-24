@@ -121,11 +121,10 @@ describe('Settings sections', () => {
     expect(shell).toContain("const aliases = { preferences: 'general', about: 'system' }");
   });
 
-  it('offers the proof point as save-or-ask, never as a status', () => {
-    expect(general).toContain('proof_place_auto: proofPlaceAuto');
-    expect(shell).toContain('proofPlaceAuto = s.proof_place_auto ?? true');
-    expect(general).toContain('Save the point without asking');
-    expect(general).toContain('Off, the composer asks each time.');
+  it('asks nothing about a proof\'s point, which is always filed', () => {
+    // the place is how the footage behind a proof stands on the map
+    expect(general).not.toContain('proof_place_auto');
+    expect(shell).not.toContain('proofPlaceAuto');
   });
 
   it('switches the reverse-search hand-off from General, checked by default', () => {

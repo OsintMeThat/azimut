@@ -904,22 +904,13 @@ describe('the points a proof states', () => {
 });
 
 describe("the point a proof concludes on", () => {
-  it('files what it can and asks about the rest, never for a point already saved', () => {
+  it('files the point without a question, and says it is on the map', () => {
     // the server answers with nothing when the case holds those points already
     expect(source).toContain('if (result.place?.filed?.length)');
-    expect(source).toContain('if (result.place?.asking?.length)');
-  });
-
-  it('asks with the coordinates, since the map is where the point will be read', () => {
-    expect(source).toContain('Save this point as a place?');
-    expect(source).toContain("'Save these points as places?'");
-    expect(source).toContain('this proof and the files it composes will say they show them');
-    expect(source).toContain('was recorded at the marked one');
-  });
-
-  it('answers through the proof, so the edge is filed with the point', () => {
-    expect(source).toContain('/proofs/${encodeURIComponent(offer.name)}/place');
-    expect(source).toContain('await reloadCase()');
+    expect(source).not.toContain('result.place?.asking');
+    expect(source).not.toContain('Save this point as a place?');
+    // under its footage the map draws the file, so the toast does not say "place"
+    expect(source).toContain('`On the map: ${places[0].label}`');
   });
 
   it('asks before dropping the point a correction moved it off', () => {
@@ -931,10 +922,10 @@ describe("the point a proof concludes on", () => {
     expect(source).toContain('Nothing else in the case points there.');
   });
 
-  it('queues that question behind the other one, since a save can raise both', () => {
-    const dialogs = source.slice(source.indexOf('{#if placeOffer}'));
-    expect(dialogs.indexOf('{:else if orphanOffer}')).toBeGreaterThan(-1);
-    expect(dialogs.indexOf('{:else if orphanOffer}')).toBeLessThan(dialogs.indexOf('{#if deleteTarget}'));
+  it('asks that one question on its own, before the delete dialog', () => {
+    const dialogs = source.slice(source.indexOf('{#if orphanOffer}'));
+    expect(dialogs.indexOf('{#if orphanOffer}')).toBe(0);
+    expect(dialogs.indexOf('{#if deleteTarget}')).toBeGreaterThan(0);
   });
 
   it('drops it through the entity route, so it lands in the trash like any delete', () => {
@@ -1205,7 +1196,7 @@ describe('a dialog over the composer', () => {
 
     for (const flag of [
       'picker', 'newProofOpen', 'importOpen', 'openList',
-      'replaceWithNewConfirm', 'exportPicker', 'overwritePrompt', 'placeOffer',
+      'replaceWithNewConfirm', 'exportPicker', 'overwritePrompt',
       'orphanOffer', 'deleteTarget', 'sourcePick',
     ]) {
       expect(derived).toContain(flag);

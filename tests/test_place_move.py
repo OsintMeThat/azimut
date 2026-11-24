@@ -155,9 +155,23 @@ def test_a_point_a_proof_states_is_moved_in_the_proof(client, sat_tiles):
     assert "Roofline" in res.json()["detail"] and "proof" in res.json()["detail"]
     attrs = _entity(cid, place["id"])["attrs"]
     assert (attrs["lat"], attrs["lon"]) == (50.4501, 30.5234)
-    # the card knows before asking: the index counts the proofs concluding there
+    # its footage draws the point, so the place itself has no card to move it from
+    assert place["id"] not in [r["id"] for r in client.get(f"/api/cases/{cid}/satellite/index").json()]
+
+
+def test_the_card_of_a_proof_place_with_no_footage_knows_a_proof_holds_it(client, sat_tiles):
+    cid = _case(client)
+    cap = client.post(
+        f"/api/cases/{cid}/satellite/capture",
+        json={"lat": 50.4501, "lon": 30.5234, "zoom": 16, "width": 256, "height": 256},
+    ).json()["path"]
+    _save_proof(client, cid, "From above", [cap], coords={"lat": 50.4501, "lon": 30.5234})
+    [place] = [p for p in graph_read.entities(cid) if p["type"] == "place"]
+
+    # the index counts the proofs concluding there, so Move opens the proof
     [row] = [r for r in client.get(f"/api/cases/{cid}/satellite/index").json() if r["id"] == place["id"]]
     assert row["proofs"] == 1
+    assert _move(client, cid, place["id"], 50.46, 30.53).status_code == 409
 
 
 def test_a_point_another_place_stands_on_is_refused(client):

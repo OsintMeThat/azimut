@@ -3050,10 +3050,20 @@ point is where the camera stood, at most one per proof; the others are what the
 footage shows. Nothing in a composition can answer that, which is why it is asked
 rather than guessed. A capture files nothing: ten are taken while hunting one
 roof, and the point is worth minting once, where somebody commits to it.
-Settings → General → Proofs saves them outright or has the composer ask; a point
-the case already holds is neither filed twice nor asked about. Only the first
-point is looked up at save — the rest wait for Locate rather than holding the
-save for a lookup each.
+They are filed without a question, and a point the case already holds is not
+filed twice; the save's toast says **On the map**. Only the first point is looked
+up at save — the rest wait for Locate rather than holding the save for a lookup
+each.
+
+**A proof's place under its footage stays out of sight.** It is how the file
+behind the proof stands on the map, and the Media layer already draws that file on
+the point, with the proof's white dot on its mark: listed under Places or drawn as
+a drop too, it would be the same point twice. It leaves the saved index, so the
+Places list, the map, the search and the extension's Points tool all skip it, with
+the Media layer off as well. It stays in the graph, named and moved through its
+proof. A place saved by hand stays in sight whatever stands on it, and so does the
+place of a proof with no footage (captures only, a sheet row), which nothing else
+draws (`satellite.behind_its_file`).
 
 A row the enrichment proposed from a file's GPS carries a `suggested` chip and an
 **accept** action, on the row and in the search modal, so the point is settled

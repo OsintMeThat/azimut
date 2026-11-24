@@ -165,6 +165,26 @@ def test_saved_points_offer_the_footage_by_default(client):
     assert [r["kind"] for r in _saved(client, headers, cid, "places")] == ["place"]
 
 
+def test_saved_points_leave_out_a_proof_place_its_file_stands_on(client):
+    """The Points tool lists what the app's Places list lists: a place a proof filed
+    under its footage is drawn by the footage, never as a place of its own."""
+    from azimut.engine import satellite as satellite_engine
+    from azimut.workspace import Case
+
+    headers = _headers(client)
+    cid = _case(client, "Behind")
+    photo = _upload(client, cid, "quay.png")["path"]
+    case = Case.open(cid)
+    place = satellite_engine.save_place(case, 48.0159, 37.8029, by="proof-composer")
+    case.add_link(graph_read.entity(cid, path=photo)["id"], place["id"], "located-at", by="proof-composer")
+    client.post(f"/api/cases/{cid}/satellite/place", json={"lat": 48.5, "lon": 37.5, "title": "Depot"})
+
+    assert [r["title"] for r in _saved(client, headers, cid, "places")] == ["Depot"]
+    [row] = _saved(client, headers, cid)
+    assert row["kind"] == "media"
+    assert (row["lat"], row["lon"]) == pytest.approx((48.0159, 37.8029))
+
+
 def test_saved_points_refuse_a_position_that_does_not_exist(client):
     headers = _headers(client)
     cid = _case(client, "Unknown")

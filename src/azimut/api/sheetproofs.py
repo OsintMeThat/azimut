@@ -639,11 +639,6 @@ def _restate_proof(
     filed = reported.get("filed") or []
     if filed:
         place = case.get_entity(str(filed[0]["id"]))
-    elif reported.get("asking"):
-        # `proof_place_auto` is off, so the composer's own save would have asked. The
-        # analyst answered when they read the plan.
-        filed = proofs.file_proof_points(case, proof)
-        place = case.get_entity(str(filed[0]["id"])) if filed else None
     else:
         place = satellite_engine.place_at(case, lat, lon, keyed_only=False)
     return {

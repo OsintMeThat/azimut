@@ -180,8 +180,7 @@ def place_for_proof(
     proof is the analyst's own act, and a review step over one's own answer is a
     step over nothing.
 
-    Files only. The caller decides *whether* to ask (``config.proof_place_auto``),
-    checks :func:`place_at` first so a point already in the case is never
+    Files only. The caller checks :func:`place_at` first so a point already in the case is never
     duplicated, and states the whole list at once
     (:func:`restate_proof_point`) — a point cannot be joined on its own without
     withdrawing the others the same proof concludes on.
@@ -764,7 +763,11 @@ def saved_index(case: Case) -> list[dict[str, Any]]:
     """Places, captures, comparisons and views as one flat list, newest first.
 
     Everything the Saved tree, the search modal and the map overlay read, and
-    nothing else: no media rows, no derivation, no edges. Work that hangs off a
+    nothing else: no media rows, no derivation, no edges.
+
+    **A place a proof filed under its footage is left out** (:func:`behind_its_file`):
+    the file's own mark already stands there, and a place drawn under it would
+    be the same point twice. Work that hangs off a
     point is a count (proofs, relations) rather than a list, so hundreds of rows
     stay in the tens of KB — which is what lets the panel load the whole set on
     case open instead of paging it. The popup loads the edges themselves from the
@@ -788,8 +791,11 @@ def saved_index(case: Case) -> list[dict[str, Any]]:
             *links.CLAIM_CONNECTION_TYPES,
         ]
     )
+    collected = _collected_files(items)
     rows = []
     for entity in saved_entities(case):
+        if behind_its_file(case, entity, collected):
+            continue
         attrs = entity.get("attrs") or {}
         is_image = entity["type"] == "capture"
         capture = by_path.get(attrs.get("path")) if is_image else None
@@ -816,6 +822,43 @@ def saved_index(case: Case) -> list[dict[str, Any]]:
     order = {row["id"]: i for i, row in enumerate(rows)}
     rows.sort(key=lambda r: (r["fetched_at"], order[r["id"]]), reverse=True)
     return rows
+
+
+def _collected_files(items: list[dict[str, Any]]) -> set[str]:
+    """The entities of the photos and videos the case collected, which the Media layer
+    draws: never what the app made out of them (``links.PRODUCED_HERE``)."""
+    return {
+        str(item["entity_id"])
+        for item in items
+        if item.get("entity_id")
+        and item.get("kind") in MAP_MEDIA_KINDS
+        and (item.get("source") or {}).get("type") not in links.PRODUCED_HERE
+    }
+
+
+def behind_its_file(case: Case, entity: dict[str, Any], collected: set[str]) -> bool:
+    """True for a place a proof filed that a collected file stands on.
+
+    A proof files its point as a place so that the footage behind it has somewhere
+    to stand (:func:`_state_point`), and the Media layer then draws that footage on
+    the point. The place is how the file is placed, not something the analyst saved:
+    listed or drawn, it would be the same point twice. It stays in the graph,
+    named and moved through its proof.
+
+    **Only a proof's own.** A place the analyst saved by hand stays in sight even when
+    a proof concludes on it and a file stands on it: that one was saved to be seen.
+    A proof with no footage (captures only, a sheet row) keeps its place in sight
+    too, since nothing else would draw its point.
+    """
+    if entity.get("type") != "place":
+        return False
+    if (entity.get("provenance") or {}).get("by") not in POINT_ROADS:
+        return False
+    place_id = entity["id"]
+    return any(
+        link["to"] == place_id and link["type"] in PLACE_VERBS and link["from"] in collected
+        for link in case.links_of(place_id)
+    )
 
 
 #: How many points one proof may state. A composition arguing fifteen positions is

@@ -6943,14 +6943,10 @@
   }
 
   let overwritePrompt = $state(null); // { slug, andPost, then } when a save hits a named proof
-  // { name, lat, lon } — the point a save carried, where the setting says to ask
-  // first. Only ever set for a point the case does not already hold.
-  let placeOffer = $state(null);
-  let placeSaving = $state(false);
   // [{ id, label }] — points this save moved the proof off that nothing else in
-  // the case holds. Asked about after the question above, never beside it.
+  // the case holds.
   let orphanOffer = $state(null);
-  // The proof both questions are about, named over them once the slides have moved on.
+  // The proof the question is about, named over it once the slides have moved on.
   let offersOf = $state(null);
   const offersOver = $derived(offersOf && offersOf.name !== savedName ? `${offersOf.title}: ` : '');
   /** What the proof just saved shares with the rest of the case: other geolocations on
@@ -6975,44 +6971,13 @@
   }
   let orphanDeleting = $state(false);
 
-  /** Say yes to the points: they are filed exactly as the automatic path files
-   *  them, and from the spec rather than from what this tab still holds. */
-  async function acceptPlaceOffer() {
-    if (!placeOffer || placeSaving) return;
-    placeSaving = true;
-    const offer = placeOffer;
-    try {
-      const filed = await api.post(
-        `/api/cases/${caseState.current.id}/proofs/${encodeURIComponent(offer.name)}/place`,
-      );
-      placeOffer = null;
-      await reloadCase();
-      toast(placedLabel(filed), 'ok', 2600);
-    } catch (e) {
-      toast(`Could not save the point: ${e.message}`, 'danger', 6000);
-    } finally {
-      placeSaving = false;
-    }
-  }
-
-  /** The points the question is about, one per line, named when the analyst
-   *  named them — the map is where they will be read, so it names coordinates
-   *  rather than the file. */
-  function offeredPoints(points) {
-    return points
-      .map((one) => {
-        const where = formatCoords({ lat: one.lat, lon: one.lon }, prefs.coordFormat);
-        return one.label ? `${one.label} — ${where}` : where;
-      })
-      .join('\n') + '\n\nnot saved in this case yet.';
-  }
-
-  /** What a save says about the places it wrote. One is named; several are counted,
-   *  because a toast listing five labels is a paragraph nobody reads. */
+  /** What a save says about the points it put on the map. One is named; several are
+   *  counted, because a toast listing five labels is a paragraph nobody reads. The
+   *  place is not named as such: under its footage the map draws the file instead. */
   function placedLabel(filed) {
     const places = filed ?? [];
-    if (places.length === 1) return `Saved the point as a place: ${places[0].label}`;
-    return `Saved ${places.length} points as places`;
+    if (places.length === 1) return `On the map: ${places[0].label}`;
+    return `${places.length} points on the map`;
   }
 
   /** And what it says about the date it stated for the footage. Counted past one,
@@ -7154,16 +7119,12 @@
       else if (unchecked) toast(`Saved ${ownName(result.title, 'proof') || 'the slide'} · ${unchecked === 1 ? '1 point' : `${unchecked} points`} still to check, kept off the map`, 'warn', 5200);
       else toast(`Saved ${ownName(result.title, 'proof') || 'the slide'}`, 'info', 1600);
       void readKin(c.id, result.id, result.name);
-      // The points this proof carries. Filed already, or a question — the server
-      // answers with nothing at all when the case already holds them, so
-      // re-saving never asks twice.
+      // The points this proof carries, filed already. The server answers with
+      // nothing at all when the case already holds them, so a re-save stays quiet.
       if (result.place?.filed?.length) toast(placedLabel(result.place.filed), 'ok', 2600);
       // The date went onto the footage as a statement of its own. Never asked —
       // dating a proof is dating what it rests on — but never silent either.
       if (result.dated?.length) toast(datedLabel(result.dated), 'ok', 2600);
-      if (result.place?.asking?.length) {
-        placeOffer = { name: result.name, points: result.place.asking };
-      }
       // Corrected coordinates take the old point back. The place stays on the map
       // until the analyst says otherwise, so it is a question, not a cleanup.
       orphanOffer = result.orphans?.length ? result.orphans : null;
@@ -7475,7 +7436,7 @@
   const modalOpen = $derived(
     picker || newProofOpen || importOpen || openList !== null
       || replaceWithNewConfirm || exportPicker || overwritePrompt !== null
-      || placeOffer !== null || orphanOffer !== null || deleteTarget !== null
+      || orphanOffer !== null || deleteTarget !== null
       || sourcePick !== null || pointMap !== null || checking !== null || leaving !== null
       || slideChooser !== null
   );
@@ -8913,25 +8874,8 @@
   />
 {/if}
 
-<!-- The point this proof concludes on, offered once. The map is where it will be
-     read, so the question names the coordinates rather than the file. -->
-{#if placeOffer}
-  <ConfirmDialog
-    title={`${offersOver}${placeOffer.points.length === 1 ? 'Save this point as a place?' : 'Save these points as places?'}`}
-    message={offeredPoints(placeOffer.points)}
-    detail={placeOffer.points.some((one) => one.pov)
-      ? 'They join the map, and the footage this proof composes will say it was recorded at the marked one.'
-      : 'They join the map, and this proof and the files it composes will say they show them.'}
-    confirmLabel={placeOffer.points.length === 1 ? 'Save the point' : 'Save the points'}
-    tone="default"
-    icon="pin"
-    busy={placeSaving}
-    onconfirm={acceptPlaceOffer}
-    oncancel={() => (placeOffer = null)}
-  />
-<!-- The point the proof moved off, once the question above is answered: one save
-     can raise both, and two dialogs at once is a save nobody can read. -->
-{:else if orphanOffer}
+<!-- The point the proof moved off, which nothing else in the case holds. -->
+{#if orphanOffer}
   <ConfirmDialog
     title={`${offersOver}${orphanOffer.length === 1 ? 'Delete the old place?' : 'Delete the old places?'}`}
     message={orphanOffer.length === 1
