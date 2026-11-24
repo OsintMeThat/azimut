@@ -1,6 +1,6 @@
 <script>
   /**
-   * Recap first's picture, in the thread's column: the places on a map (`lib/recapMap.js`)
+   * The recap's picture, in the thread's column: the places on a map (`lib/recapMap.js`)
    * or the proofs sheet. The map takes a few choices, each redrawn at once on a small
    * preview of what goes out: its ground (Satellite or Map), a dashed line joining the
    * places in the video's order, and the signature and the Azimut mark, as the analyst's

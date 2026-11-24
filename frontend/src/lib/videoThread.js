@@ -1,6 +1,6 @@
 /**
  * A video thread as plain data: the posts that put the proofs of one long video online,
- * in one of four orders. Post turns each piece into a post through its templates
+ * in the order its template lays out (`lib/threadOrder.js`). Post turns each piece into a post through its templates
  * (`lib/videoPost.js`); nothing here writes a word of the post itself.
  *
  * **What goes in.** A video's slides, its proofs in clip order as the strip reads them
@@ -10,7 +10,7 @@
  * (no picture) are left out, and listed in `left` with why, so a composer can say so
  * (`videoSlides`). Their order is the strip's, unless the caller hands its own.
  *
- * **What comes out.** For each order, a list of pieces. A piece is one post's role,
+ * **What comes out.** For an order, a list of pieces. A piece is one post's role,
  * its token values (`#video`, `#timecode`, `#scenes`), the proof it is about, and its
  * media by case path:
  *
@@ -21,8 +21,8 @@
  * the recap map (`lib/recapMap.js`), drawn in the browser and filed in the case, so
  * neither has a path here. Neither X nor Bluesky puts a video and pictures in one post
  * (`lib/videoLimits.js`), so the recap picture and the video always go in posts of their
- * own: Recap first opens on the map or the sheet (`recap`) with `#scenes`, all numbering
- * the places the same way, and the video follows. Neither picture prints a title:
+ * own: the recap carries the map or the sheet (`recap`) with `#scenes`, all numbering
+ * the places the same way, and the video has a post of its own wherever it stands. Neither picture prints a title:
  * `#scenes` is their legend.
  *
  * **The time.** One formatter for every time a post prints (`timecode`): an instant
@@ -35,24 +35,7 @@
 import { labelCoords, ownName } from './naming.js';
 import { isAbandoned, momentTime, sceneList, sceneMoments, sceneTime, sceneTitle, sortMoments, unplaced } from './scenes.js';
 import { VIDEO_LIMITS } from './videoLimits.js';
-
-/** The four orders, the default first: one template start each. */
-export const ORDERS = Object.freeze(['recap', 'video', 'proof', 'all']);
-export const DEFAULT_ORDER = 'recap';
-/** What each order is called where one is picked. */
-export const ORDER_NAMES = Object.freeze({
-  recap: 'Recap first',
-  video: 'Video first',
-  proof: 'Proof first',
-  all: 'All in one',
-});
-/** What each order puts where, in a line under its name. */
-export const ORDER_WORDS = Object.freeze({
-  recap: 'The places on a map or the proofs sheet, then the video, then a post per place',
-  video: 'The video, then a post per place',
-  proof: 'The first place, then the video, then the other places',
-  all: 'One post with the places and their pictures',
-});
+import { DEFAULT_ORDER, hasRecap, isAllInOne, orderBlocks, ORDERS } from './threadOrder.js';
 
 /** Why a proof of the video is no post of the thread. */
 export const LEFT_WHY = Object.freeze({
@@ -160,13 +143,13 @@ export function videoSlides(answer) {
   return { video: answer?.video ?? null, slides, left };
 }
 
-/** What Recap first's recap carries: the places on a map, or the proofs sheet. */
+/** What the recap carries: the places on a map, or the proofs sheet. */
 export const RECAPS = Object.freeze(['map', 'sheet']);
 
 /** Whether a thread of `count` places in this order carries the contact sheet, `recap` its recap's picture. */
 export function usesSheet(order, count, recap = 'sheet') {
   if (count < 1) return false;
-  return (order === 'recap' && recap !== 'map') || (order === 'all' && count > PICTURES_PER_POST);
+  return (hasRecap(order) && recap !== 'map') || (isAllInOne(order) && count > PICTURES_PER_POST);
 }
 
 const proofOf = (slide) => ({ name: slide.name, id: slide.id ?? null, title: slide.title });
@@ -182,17 +165,19 @@ function proofPiece(slide, video) {
 }
 
 /**
- * The thread of one video in one order, as pieces.
+ * The thread of one video in one order, as pieces: `order` is a list of blocks or a
+ * ready order's name (`lib/threadOrder.js`), and each block gives its posts in turn.
  *
  * - `video`: `{ path, title }`, the video the slides are of, and the thread's title (`#video`),
  *   the analyst's own words, '' for none.
  * - `slides`: what `videoSlides` keeps, in the order to post them.
  * - `clip`: a case path to post in place of the whole video (a cut, `lib/postClip.js`), or null.
  * - `link`: the video goes out as its link rather than a file, so its post carries none.
- * - `recap`: what Recap first's recap carries, `map` or `sheet` (`RECAPS`).
+ * - `recap`: what the recap carries, `map` or `sheet` (`RECAPS`).
  */
 export function videoThread({ video, slides, order = DEFAULT_ORDER, clip = null, link = false, recap = 'sheet' }) {
-  if (!ORDERS.includes(order)) throw new Error(`no thread order ${order}`);
+  const blocks = orderBlocks(order);
+  if (!blocks) throw new Error(`no thread order ${JSON.stringify(order)}`);
   const named = { path: video?.path ?? null, title: video?.title ?? '' };
   const list = slides ?? [];
   const footage = !link && (clip || named.path) ? [{ kind: 'video', path: clip || named.path }] : [];
@@ -200,25 +185,23 @@ export function videoThread({ video, slides, order = DEFAULT_ORDER, clip = null,
   const each = list.map((slide) => proofPiece(slide, named));
   const lead = { role: 'video', tokens: { '#video': named.title, '#scenes': scenes }, media: footage };
 
-  if (order === 'all') {
+  if (isAllInOne(blocks)) {
     // past four places, the sheet shows every one of them where four pictures could not
-    const media = usesSheet('all', list.length)
+    const media = usesSheet(blocks, list.length)
       ? [{ kind: 'sheet' }]
       : list.filter((s) => s.png).map((s) => ({ kind: 'picture', path: s.png, proof: s.name }));
     return [{ role: 'all', tokens: { '#video': named.title, '#scenes': scenes }, media }];
   }
-  if (order === 'recap') {
-    if (!list.length) return [lead];
-    const picture = { kind: recap === 'map' ? 'map' : 'sheet' };
-    return [{ role: 'recap', tokens: { '#video': named.title, '#scenes': scenes }, media: [picture] }, lead, ...each];
-  }
-  if (order === 'video') return [lead, ...each];
-  // proof first: the strongest place, then the video it comes from, then the rest
+  if (!list.length) return [lead];
+  const picture = { kind: recap === 'map' ? 'map' : 'sheet' };
+  const summary = { role: 'recap', tokens: { '#video': named.title, '#scenes': scenes }, media: [picture] };
+  // the first place on its own leaves the others to the places' block
   const [first, ...rest] = each;
-  return first ? [first, lead, ...rest] : [lead];
+  const posts = { recap: [summary], video: [lead], first: [first], places: blocks.includes('first') ? rest : each };
+  return blocks.flatMap((block) => posts[block]);
 }
 
-/** The thread in each of the four orders, by order. */
+/** The thread in each of the four ready orders, by name. */
 export function videoThreads(input) {
   return Object.fromEntries(ORDERS.map((order) => [order, videoThread({ ...input, order })]));
 }

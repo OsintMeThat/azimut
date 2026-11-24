@@ -164,6 +164,40 @@ test('a signature resize whose release the window never sees still lands, and st
   fixture.expectNoUnexpectedRequests();
 });
 
+test('a video thread template lays its posts out in any order, with the arrows or by dragging', async ({ page }) => {
+  const fixture = await installAppFixture(page);
+  await page.goto('/#settings');
+  await page.getByRole('navigation', { name: 'Settings sections' })
+    .getByRole('button', { name: 'Templates' }).click();
+  await page.getByRole('button', { name: 'New post template' }).click();
+  await page.locator('.float-menu[aria-label="New post template"]').getByRole('button', { name: 'Recap first' }).click();
+
+  const editor = page.locator('.tpl-modal');
+  const rows = editor.locator('.blocks .block-name');
+  const labels = editor.locator('.pv-post .pv-num');
+  await expect(rows).toHaveText(['Recap', 'Video', 'Each place']);
+
+  // the video at the very end, and the source in the first post
+  await editor.getByRole('button', { name: 'Move Video down' }).click();
+  await expect(rows).toHaveText(['Recap', 'Each place', 'Video']);
+  await expect(labels).toHaveText(['1 · Recap', '2 · Road bridge', '3 · Port gate', '4 · Hilltop village', '5 · Video']);
+  await editor.locator('.block[data-block="recap"] textarea').fill('#video\n\n#scenes\n\n#mention\n\nSource: #source');
+  await expect(editor.locator('.pv-post pre').first()).toContainText('Source: ');
+
+  // the places carried to the top by their head
+  const from = await editor.locator('.block[data-block="places"] .block-head').boundingBox();
+  const to = await editor.locator('.block[data-block="recap"]').boundingBox();
+  await page.mouse.move(from.x + 60, from.y + from.height / 2);
+  await page.mouse.down();
+  await page.mouse.move(from.x + 60, from.y - 6, { steps: 4 });
+  await page.mouse.move(to.x + 60, to.y + 12, { steps: 8 });
+  await page.mouse.up();
+  await expect(rows).toHaveText(['Each place', 'Recap', 'Video']);
+  await expect(labels.first()).toHaveText('1 · Road bridge');
+
+  fixture.expectNoUnexpectedRequests();
+});
+
 test('a new post template starts from a layout, counts each platform and mends a misspelled token', async ({ page }) => {
   const fixture = await installAppFixture(page);
   await page.goto('/#settings');

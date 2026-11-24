@@ -257,18 +257,28 @@ describe('a video thread template', () => {
     label: post.querySelector('.pv-num').textContent,
     text: post.querySelector('pre').textContent,
   }));
-  const text = (role) => target.querySelector(`[data-role="${role}"] textarea`);
+  const text = (role) => target.querySelector(`textarea[data-role="${role}"]`);
+  const rows = () => [...target.querySelectorAll('.blocks .block')].map((row) => row.querySelector('.block-name').textContent);
+  const row = (name) => [...target.querySelectorAll('.blocks .block')].find((one) => one.querySelector('.block-name').textContent === name);
+  const press = (label) => click(target.querySelector(`[aria-label="${label}"]`));
+  const button = (words) => [...target.querySelectorAll('[data-thread-posts] button')].find((b) => b.textContent.trim() === words);
+  const type = (el, value) => {
+    el.value = value;
+    el.dispatchEvent(new Event('input', { bubbles: true }));
+    flushSync();
+  };
   const recapFirst = VIDEO_THREAD_STARTERS[0];
 
-  it('says its order and each post\'s text, and previews the whole thread on three places', () => {
+  it('lists its posts top to bottom, each with its text, and previews the whole thread on three places', () => {
     const data = open({ kind: 'video', body: recapFirst.body, mediaEnabled: false });
     // a template that said neither starts on Recap first's
-    expect(data.order).toBe('recap');
+    expect(data.order).toEqual(['recap', 'video', 'places']);
     expect(data.posts).toEqual(recapFirst.posts.map((one) => ({ ...one })));
-    expect(target.querySelector('select.order').value).toBe('recap');
+    expect(rows()).toEqual(['Recap', 'Video', 'Each place']);
+    expect(row('Recap').querySelector('textarea').value).toBe(recapFirst.body);
     expect(text('video').value).toBe('Source: #source');
     expect(text('place').value).toBe('#description\n#timecode\n\n#coordinates');
-    expect(target.querySelector('.chk input')).toBeNull(); // no media post: each post carries its own
+    expect(target.textContent).not.toContain('Include a media post'); // each post carries its own
     expect(posts().map((p) => p.label)).toEqual(['1 · Recap', '2 · Video', '3 · Road bridge', '4 · Port gate', '5 · Hilltop village']);
     expect(posts()[0].text).toBe(`${sample('#video')}\n\n${sample('#scenes')}\n\n@GeoConfirmed`);
     expect(sample('#scenes')).toBe('1. [0:00–0:07] - 48.850000, 2.350000\n2. [0:15] - 48.860000, 2.360000\n3. 48.870000, 2.370000');
@@ -276,36 +286,127 @@ describe('a video thread template', () => {
     expect(posts()[4].text).toBe('Hilltop village\n\n48.870000, 2.370000');
   });
 
-  it('follows the order picked and the texts as they are typed', () => {
-    const data = open({ kind: 'video', body: recapFirst.body });
-    const order = target.querySelector('select.order');
-    order.value = 'proof';
-    order.dispatchEvent(new Event('change', { bubbles: true }));
-    flushSync();
-    expect(data.order).toBe('proof');
-    expect(posts().map((p) => p.label)).toEqual(['1 · Road bridge', '2 · Video', '3 · Port gate', '4 · Hilltop village']);
-    text('place').value = 'Here: #timecode';
-    text('place').dispatchEvent(new Event('input', { bubbles: true }));
-    flushSync();
-    expect(data.posts.find((one) => one.role === 'place').body).toBe('Here: #timecode');
-    expect(posts()[0].text).toBe('Here: [0:00–0:07]');
+  it('reads a ready order by the name the first 0.3.4 builds stored', () => {
+    const data = open({ kind: 'video', body: recapFirst.body, order: 'proof' });
+    expect(data.order).toEqual(['first', 'video', 'places']);
+    expect(rows()).toEqual(['First place', 'Video', 'Other places']);
   });
 
-  it('puts a token in the text last written in', () => {
+  it('moves a post with its arrows: the source in the recap, the video at the very end', () => {
+    const data = open({ kind: 'video', body: recapFirst.body });
+    expect(target.querySelector('[aria-label="Move Recap up"]').disabled).toBe(true);
+    press('Move Video down');
+    expect(data.order).toEqual(['recap', 'places', 'video']);
+    expect(target.querySelector('[aria-label="Move Video down"]').disabled).toBe(true);
+    type(row('Recap').querySelector('textarea'), `${recapFirst.body}\n\nSource: #source`);
+    expect(posts().map((p) => p.label)).toEqual(['1 · Recap', '2 · Road bridge', '3 · Port gate', '4 · Hilltop village', '5 · Video']);
+    expect(posts()[0].text).toBe(`${sample('#video')}\n\n${sample('#scenes')}\n\n@GeoConfirmed\n\nSource: ${sample('#source')}`);
+    // the texts follow their posts
+    expect(rows()).toEqual(['Recap', 'Each place', 'Video']);
+    expect(row('Video').querySelector('textarea').value).toBe('Source: #source');
+  });
+
+  it('moves a post by dragging its head, and a press on its arrows is no drag', () => {
+    const data = open({ kind: 'video', body: recapFirst.body });
+    const head = row('Each place').querySelector('.block-head');
+    head.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, button: 0, clientX: 10, clientY: 200 }));
+    window.dispatchEvent(new PointerEvent('pointermove', { clientX: 10, clientY: 190 }));
+    flushSync();
+    expect(row('Each place').classList.contains('dragging')).toBe(true);
+    row('Recap').dispatchEvent(new PointerEvent('pointerenter', { clientX: 10, clientY: 20 }));
+    flushSync();
+    expect(row('Recap').classList.contains('landing')).toBe(true);
+    window.dispatchEvent(new PointerEvent('pointerup', { clientX: 10, clientY: 20 }));
+    flushSync();
+    expect(data.order).toEqual(['places', 'recap', 'video']);
+    expect(target.querySelector('.block.dragging')).toBeNull();
+    // a press on an arrow arms nothing: the list moves once, by the arrow
+    const arrow = target.querySelector('[aria-label="Move Video up"]');
+    arrow.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, button: 0, clientX: 300, clientY: 300 }));
+    window.dispatchEvent(new PointerEvent('pointermove', { clientX: 300, clientY: 100 }));
+    flushSync();
+    expect(target.querySelector('.block.dragging')).toBeNull();
+    window.dispatchEvent(new PointerEvent('pointerup', { clientX: 300, clientY: 100 }));
+    click(arrow);
+    expect(data.order).toEqual(['places', 'video', 'recap']);
+  });
+
+  it('leaves out the recap and puts it back on top, and lets the first place lead on its own', () => {
+    const data = open({ kind: 'video', body: recapFirst.body });
+    // the video and the places always stay
+    expect(target.querySelector('[aria-label="Leave Video out"]')).toBeNull();
+    expect(target.querySelector('[aria-label="Leave Each place out"]')).toBeNull();
+    press('Leave Recap out');
+    expect(data.order).toEqual(['video', 'places']);
+    expect(posts().map((p) => p.label)).toEqual(['1 · Video', '2 · Road bridge', '3 · Port gate', '4 · Hilltop village']);
+    // its words wait for it
+    expect(data.body).toBe(recapFirst.body);
+    click(button('First place on its own'));
+    expect(data.order).toEqual(['first', 'video', 'places']);
+    expect(rows()).toEqual(['First place', 'Video', 'Other places']);
+    // the places share one text, written on the higher of the two
+    expect(row('First place').querySelector('textarea')).not.toBeNull();
+    expect(row('Other places').textContent).toContain('Same text as First place.');
+    expect(posts().map((p) => p.label)).toEqual(['1 · Road bridge', '2 · Video', '3 · Port gate', '4 · Hilltop village']);
+    type(text('place'), 'Here: #timecode');
+    expect(data.posts.find((one) => one.role === 'place').body).toBe('Here: #timecode');
+    expect(posts()[0].text).toBe('Here: [0:00–0:07]');
+    expect(posts()[2].text).toBe('Here: [0:15]');
+    click(button('Recap'));
+    expect(data.order).toEqual(['recap', 'first', 'video', 'places']);
+    expect(button('Recap')).toBeUndefined();
+  });
+
+  it('goes all in one post and back to the order it had', () => {
+    const data = open({ kind: 'video', body: recapFirst.body });
+    press('Move Video down');
+    const box = target.querySelector('label.all-in-one input');
+    click(box);
+    expect(data.order).toEqual(['all']);
+    expect(rows()).toEqual(['All in one']);
+    expect(target.querySelector('.blocks .mv')).toBeNull();
+    expect(button('Recap')).toBeUndefined();
+    expect(posts()).toHaveLength(1);
+    click(box);
+    expect(data.order).toEqual(['recap', 'places', 'video']);
+  });
+
+  it('puts a token in the text last written in, and never in one not shown', () => {
     const data = open({ kind: 'video', body: '#scenes' });
     text('video').dispatchEvent(new Event('focus'));
     flushSync();
     click([...target.querySelectorAll('.tokens .tok')].find((b) => b.textContent.trim() === '#mention'));
     expect(data.posts.find((one) => one.role === 'video').body).toContain('#mention');
     expect(data.body).toBe('#scenes');
+    // the recap left out, a token meant for it goes where the thread now opens
+    text('recap').dispatchEvent(new Event('focus'));
+    flushSync();
+    press('Leave Recap out');
+    click([...target.querySelectorAll('.tokens .tok')].find((b) => b.textContent.trim() === '#source'));
+    expect(data.body).toBe('#scenes');
+    expect(data.posts.find((one) => one.role === 'video').body).toContain('#source');
+  });
+
+  it('names a misspelled token in the post it is in, and mends it there', () => {
+    const data = open({ kind: 'video', body: recapFirst.body });
+    type(text('video'), 'Source: #sorce');
+    const warning = row('Video').querySelector('.misspelled');
+    expect(warning.textContent).toContain('#sorce');
+    click(warning.querySelector('button'));
+    expect(data.posts.find((one) => one.role === 'video').body).toBe('Source: #source');
   });
 
   it('starts from one order\'s layout, its texts and its order', () => {
     const data = open({ kind: 'video', fresh: true });
     click([...target.querySelectorAll('.starters button')].find((b) => b.textContent.trim() === 'All in one'));
-    const all = VIDEO_THREAD_STARTERS.find((one) => one.order === 'all');
-    expect([data.order, data.body]).toEqual(['all', all.body]);
+    const all = VIDEO_THREAD_STARTERS.find((one) => one.id === 'all');
+    expect([data.order, data.body]).toEqual([['all'], all.body]);
     expect(posts()).toHaveLength(1);
+    click([...target.querySelectorAll('.starters button')].find((b) => b.textContent.trim() === 'Proof first'));
+    expect(data.order).toEqual(['first', 'video', 'places']);
+    // a start's order is the template's own copy
+    press('Move Video up');
+    expect(VIDEO_THREAD_STARTERS.find((one) => one.id === 'proof').order).toEqual(['first', 'video', 'places']);
   });
 
   it('previews with the open post only when it is of that kind', () => {

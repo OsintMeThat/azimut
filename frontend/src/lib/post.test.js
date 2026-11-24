@@ -967,8 +967,9 @@ describe('post templates per kind', () => {
 
   it('starts a video thread on one layout per order, each with its recap, its video post and its place post', () => {
     expect(postStarters('video')).toBe(VIDEO_THREAD_STARTERS);
-    expect(VIDEO_THREAD_STARTERS.map((s) => [s.order, s.label])).toEqual([
-      ['recap', 'Recap first'], ['video', 'Video first'], ['proof', 'Proof first'], ['all', 'All in one'],
+    expect(VIDEO_THREAD_STARTERS.map((s) => [s.id, s.label, s.order])).toEqual([
+      ['recap', 'Recap first', ['recap', 'video', 'places']], ['video', 'Video first', ['video', 'places']],
+      ['proof', 'Proof first', ['first', 'video', 'places']], ['all', 'All in one', ['all']],
     ]);
     for (const starter of VIDEO_THREAD_STARTERS) {
       expect(starter.posts.map((one) => one.role)).toEqual(['video', 'place']);
@@ -983,12 +984,17 @@ describe('post templates per kind', () => {
 
   it('keeps a video thread template\'s order and texts, and only a video thread\'s', () => {
     const posts = [{ role: 'video', body: 'Source: #source' }, { role: 'place', body: '#timecode' }];
-    const made = templateFromPost({ kind: 'video', body: '#scenes', mediaEnabled: false, order: 'all', posts });
-    expect(made).toEqual({ mention: '@GeoConfirmed', body: '#scenes', mediaEnabled: false, extraTweets: [], kind: 'video', order: 'all', posts });
+    const made = templateFromPost({ kind: 'video', body: '#scenes', mediaEnabled: false, order: ['recap', 'places', 'video'], posts });
+    expect(made).toEqual({
+      mention: '@GeoConfirmed', body: '#scenes', mediaEnabled: false, extraTweets: [], kind: 'video', order: ['recap', 'places', 'video'], posts,
+    });
     expect(normPostTemplate(made)).toEqual(made);
+    // a ready order by its name reads as its posts
+    expect(normPostTemplate({ kind: 'video', body: '#scenes', order: 'all' }).order).toEqual(['all']);
     // a role said twice, an unknown role, an order that is none: the first and the known kept
     const odd = normPostTemplate({ kind: 'video', body: '#scenes', order: 'random', posts: [...posts, { role: 'place', body: 'x' }, { role: 'recap', body: 'y' }] });
     expect(odd).not.toHaveProperty('order');
+    expect(normPostTemplate({ kind: 'video', body: '#scenes', order: ['recap', 'places'] })).not.toHaveProperty('order');
     expect(odd.posts).toEqual(posts);
     // another kind has none of it
     for (const kind of [undefined, 'free']) {

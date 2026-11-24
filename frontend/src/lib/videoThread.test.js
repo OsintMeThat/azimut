@@ -1,8 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import {
-  DEFAULT_ORDER, ORDERS, ORDER_NAMES, ORDER_WORDS, PICTURES_PER_POST, placeLabel, scenesText, shortTimecode, timecode, usesSheet,
-  videoSlides, videoThread, videoThreads,
+  PICTURES_PER_POST, placeLabel, scenesText, shortTimecode, timecode, usesSheet, videoSlides, videoThread, videoThreads,
 } from './videoThread.js';
+import { DEFAULT_ORDER, ORDERS, ORDER_NAMES, ORDER_WORDS } from './threadOrder.js';
 import { sceneColorAt } from './scenes.js';
 
 /**
@@ -133,6 +133,7 @@ describe('the four orders', () => {
     expect(Object.keys(ORDER_NAMES)).toEqual(ORDERS);
     expect(Object.keys(ORDER_WORDS)).toEqual(ORDERS);
     expect(() => thread('random')).toThrow();
+    expect(() => thread(['recap', 'places'])).toThrow();
   });
 
   it('Recap first: the places on the sheet, then the video, then one post per place', () => {
@@ -193,6 +194,24 @@ describe('the four orders', () => {
     expect(PICTURES_PER_POST).toBe(4);
     expect([usesSheet('recap', 2), usesSheet('recap', 0), usesSheet('video', 9), usesSheet('proof', 9)]).toEqual([true, false, false, false]);
     expect([usesSheet('all', 4), usesSheet('all', 5)]).toEqual([false, true]);
+    // wherever the recap stands, it carries the sheet, or the map in its place
+    expect([usesSheet(['video', 'places', 'recap'], 2), usesSheet(['video', 'places', 'recap'], 2, 'map')]).toEqual([true, false]);
+  });
+
+  it('lays the posts out in the analyst\'s own order, each block where it stands', () => {
+    const names = (order) => videoThread({ video: VIDEO, slides: posted(), order }).map((p) => p.proof?.name ?? p.role);
+    // the recap opens, the places follow, the video closes the thread
+    expect(names(['recap', 'places', 'video'])).toEqual(['recap', 'bridge', 'square', 'market', 'tower', 'video']);
+    expect(names(['video', 'recap', 'places'])).toEqual(['video', 'recap', 'bridge', 'square', 'market', 'tower']);
+    expect(names(['places', 'video'])).toEqual(['bridge', 'square', 'market', 'tower', 'video']);
+    // the first place on its own leaves the others to the places, wherever each stands
+    expect(names(['recap', 'first', 'places', 'video'])).toEqual(['recap', 'bridge', 'square', 'market', 'tower', 'video']);
+    expect(names(['first', 'recap', 'video', 'places'])).toEqual(['bridge', 'recap', 'video', 'square', 'market', 'tower']);
+    // a ready order by its name is the same thread as its list
+    expect(videoThread({ video: VIDEO, slides: posted(), order: ['first', 'video', 'places'] })).toEqual(thread('proof'));
+    // one place and its own post: no other place to follow it
+    expect(videoThread({ video: VIDEO, slides: posted().slice(0, 1), order: ['first', 'video', 'places'] }).map((p) => p.proof?.name ?? p.role))
+      .toEqual(['bridge', 'video']);
   });
 
   it('keeps the order the caller hands, so a composer can reorder the places', () => {
@@ -202,7 +221,7 @@ describe('the four orders', () => {
   });
 
   it('of a video with no slide is the video alone', () => {
-    for (const order of ['recap', 'video', 'proof']) {
+    for (const order of ['recap', 'video', 'proof', ['places', 'recap', 'video']]) {
       expect(videoThread({ video: VIDEO, slides: [], order }).map((p) => p.media)).toEqual([footage]);
     }
   });

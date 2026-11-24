@@ -301,14 +301,12 @@
       </div>
     {/if}
     {#if stage === 'bottom' || stage === 'leaving'}
-      <!-- all there is to see: a lamp, two eyes, a hint of beak -->
+      <!-- all there is to see: a lamp and two eyes -->
       <svg class="np-who" viewBox="0 0 240 300" aria-hidden="true">
         <defs>
           <radialGradient id="np-glow"><stop offset="0" stop-color="#fff1c7" stop-opacity="0.55" /><stop offset="0.4" stop-color="#ffd98a" stop-opacity="0.16" /><stop offset="1" stop-color="#ffd98a" stop-opacity="0" /></radialGradient>
         </defs>
         <rect x="109" y="43.5" width="22" height="15" rx="5" fill="#12161b" />
-        <path d="M110.5 106.5H120V121Z" fill="#f4b555" fill-opacity="0.13" />
-        <path d="M129.5 106.5H120V121Z" fill="#d68a1e" fill-opacity="0.05" />
         <g class="np-lamp">
           <circle class="np-glare" cx="120" cy="51" r="38" fill="url(#np-glow)" />
           <circle cx="120" cy="51" r="4.6" fill="#fff6dc" />

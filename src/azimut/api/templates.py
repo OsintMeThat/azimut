@@ -185,8 +185,17 @@ class PostExtraTweet(CanonicalModel):
 
 #: What a post is made from, as New post offers it (frontend `lib/post.js` POST_KINDS).
 PostKind = Literal["geolocation", "video", "plate", "compare", "free"]
-#: The order a video thread posts in (frontend `lib/videoThread.js` ORDERS).
-VideoOrder = Literal["recap", "video", "proof", "all"]
+#: A video thread's posts, top to bottom, as blocks (frontend `lib/threadOrder.js`): the
+#: recap, the video, the first place on its own, the places (the others after a first),
+#: or All in one's one post alone.
+ThreadBlock = Literal["recap", "video", "first", "places", "all"]
+#: The four ready orders. The first 0.3.4 builds stored one by its name, read as its list.
+THREAD_ORDER_PRESETS: dict[str, list[str]] = {
+    "recap": ["recap", "video", "places"],
+    "video": ["video", "places"],
+    "proof": ["first", "video", "places"],
+    "all": ["all"],
+}
 #: A post template's keys that a template from before them never had. Unset, they stay
 #: unwritten, so a 0.3.3 template reads and saves back byte for byte.
 POST_UNSTATED_WHEN_NONE = ("kind", "reply", "order", "posts")
@@ -212,10 +221,10 @@ class PostTemplateData(CanonicalModel):
     # Whether a post of this template goes out as a reply under its source by default,
     # when the source is an X or a Bluesky post. None is no, the one spelling of it.
     reply: StrictBool | None = None
-    # A video thread's order, and the texts of its other posts: ``body`` is its recap
-    # (Recap first's first post, All in one's one post), these the video's and each
+    # A video thread's posts top to bottom, and the texts of its other posts: ``body`` is
+    # its recap (the recap's post, All in one's one post), these the video's and each
     # place's. None for any other kind.
-    order: VideoOrder | None = None
+    order: list[ThreadBlock] | None = Field(default=None, max_length=4)
     posts: list[PostRoleText] | None = Field(default=None, max_length=4)
 
     @field_validator("kind")
@@ -236,6 +245,27 @@ class PostTemplateData(CanonicalModel):
     @classmethod
     def no_is_unsaid(cls, reply: bool | None) -> bool | None:
         return True if reply else None
+
+    @field_validator("order", mode="before")
+    @classmethod
+    def order_by_name_reads_as_its_posts(cls, order: Any) -> Any:
+        if isinstance(order, str) and order in THREAD_ORDER_PRESETS:
+            return list(THREAD_ORDER_PRESETS[order])
+        return order
+
+    @field_validator("order")
+    @classmethod
+    def order_is_a_thread(cls, order: list[str] | None) -> list[str] | None:
+        # the video and the places once each, the recap and the first place at most
+        # once, anywhere; or All in one alone
+        if order is None or order == ["all"]:
+            return order
+        if "all" in order or len(set(order)) != len(order) or "video" not in order or "places" not in order:
+            raise ValueError(
+                "a video thread holds the video and the places once each, the recap and the first place "
+                "at most once, or all in one alone"
+            )
+        return order
 
     @field_validator("posts")
     @classmethod

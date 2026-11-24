@@ -415,7 +415,7 @@ describe('post templates per kind', () => {
     items.find((b) => b.textContent.trim() === 'Proof first').click();
     flushSync();
     expect(props.newTemplate).toHaveBeenCalledWith('post', expect.objectContaining({
-      kind: 'video', starter: expect.objectContaining({ id: 'proof', order: 'proof' }),
+      kind: 'video', starter: expect.objectContaining({ id: 'proof', order: ['first', 'video', 'places'] }),
     }));
     target.querySelector('[data-new-post-template]').click();
     flushSync();

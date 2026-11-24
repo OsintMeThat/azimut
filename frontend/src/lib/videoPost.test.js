@@ -30,7 +30,7 @@ const ANSWER = {
 };
 const slides = () => videoSlides(ANSWER).slides;
 const common = { mention: '@GeoConfirmed', source: SOURCE };
-const starter = (order) => VIDEO_THREAD_STARTERS.find((one) => one.order === order);
+const starter = (order) => VIDEO_THREAD_STARTERS.find((one) => one.id === order);
 const thread = (order, extra = {}) => videoPosts({
   video: VIDEO, slides: slides(), layout: videoLayout(starter(order)), common, sheet: 'media/convoy contact sheet.jpg', ...extra,
 });
@@ -53,12 +53,14 @@ const PLACES = [
 describe('the layout', () => {
   it('reads a template, the default start filling what it leaves out', () => {
     expect(videoLayout()).toEqual({
-      order: 'recap', recap: starter('recap').body, video: 'Source: #source', place: '#description\n#timecode\n\n#coordinates',
+      order: ['recap', 'video', 'places'], recap: starter('recap').body, video: 'Source: #source', place: '#description\n#timecode\n\n#coordinates',
     });
+    // a ready order by its name, as the first 0.3.4 builds stored it, reads as its posts
     expect(videoLayout({ order: 'proof', body: '#scenes', posts: [{ role: 'place', body: '#timecode' }] })).toMatchObject({
-      order: 'proof', recap: '#scenes', video: 'Source: #source', place: '#timecode',
+      order: ['first', 'video', 'places'], recap: '#scenes', video: 'Source: #source', place: '#timecode',
     });
-    expect(videoLayout({ order: 'sideways', body: '  ' })).toMatchObject({ order: 'recap', recap: starter('recap').body });
+    expect(videoLayout({ order: ['recap', 'places', 'video'] }).order).toEqual(['recap', 'places', 'video']);
+    expect(videoLayout({ order: 'sideways', body: '  ' })).toMatchObject({ order: ['recap', 'video', 'places'], recap: starter('recap').body });
   });
 
   it('keeps its texts as a template does', () => {
@@ -98,6 +100,18 @@ describe('the four orders, written', () => {
     expect(posts).toHaveLength(1);
     expect(posts[0].mediaPaths).toEqual(['proofs/bridge.png', 'proofs/gate.png', 'proofs/village.png']);
     expect(posts[0].text).toBe(`${RECAP}\n\nSource: ${SOURCE}`);
+  });
+
+  it('Recap first with the source on top and the video at the very end, as an analyst lays it out', () => {
+    const { posts } = videoPosts({
+      video: VIDEO, slides: slides(), common, sheet: 'media/convoy contact sheet.jpg',
+      layout: videoLayout({ ...starter('recap'), order: ['recap', 'places', 'video'], body: `${starter('recap').body}\n\nSource: #source` }),
+    });
+    expect(posts.map((p) => [p.key, p.mediaType])).toEqual([
+      ['recap', 'images'], ['place:bridge', 'images'], ['place:gate', 'images'], ['place:village', 'images'], ['video', 'video'],
+    ]);
+    expect(posts[0].text).toBe(`${RECAP}\n\nSource: ${SOURCE}`);
+    expect(posts.at(-1).mediaPaths).toEqual([VIDEO.path]);
   });
 
   it('keeps the same words for a place whatever the order', () => {

@@ -324,7 +324,7 @@ def test_a_video_thread_is_made_from_its_video_and_lists_as_one(client):
     recap_map = mediafixture._upload(client, cid, "map.png", color=(90, 90, 10))
     clip = mediafixture._upload(client, cid, "clip.png", color=(10, 10, 90))
     state = {
-        "kind": "video", "video": video, "order": "recap", "sheet": sheet, "map": recap_map, "clip": clip,
+        "kind": "video", "video": video, "order": ["recap", "video", "places"], "sheet": sheet, "map": recap_map, "clip": clip,
         "recap": "map", "mapOptions": {"background": "satellite", "line": True, "signature": False, "mark": False},
         "posts": [{"role": "video", "body": "Source: #source"}, {"role": "place", "body": "#description"}],
         "tweet1": "1. [0:00–0:07] Road bridge", "firstMedia": [sheet], "firstMediaType": "images",
