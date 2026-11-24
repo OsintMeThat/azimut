@@ -783,6 +783,52 @@ describe('cards on a mark', () => {
     expect(card.element.style.getPropertyValue('--popup-min-width')).toBe('296px');
   });
 
+  describe('a card that does not fit', () => {
+    const rect = (top, left, height, width) => ({ top, left, height, width, bottom: top + height, right: left + width });
+
+    /** A card of the given box opened on a 600×400 map at (100, 50) on the page. */
+    function opened(box, inView = { bottom: 76 }) {
+      const map = stubMap();
+      map.getContainer = () => ({ getBoundingClientRect: () => rect(50, 100, 400, 600) });
+      map.panBy = vi.fn();
+      const surface = createSurface(stubEngine(map));
+      surface.set([{
+        id: 'mark-1',
+        kind: 'marker',
+        at: { lat: 1, lon: 2 },
+        popup: { content: () => document.createElement('p'), inView },
+      }]);
+      const original = window.HTMLElement.prototype.getBoundingClientRect;
+      window.HTMLElement.prototype.getBoundingClientRect = () => box;
+      try {
+        openCard(marks[0]);
+      } finally {
+        window.HTMLElement.prototype.getBoundingClientRect = original;
+      }
+      return map.panBy;
+    }
+
+    it('slides the map just far enough to show it whole, clear of the bottom bar', () => {
+      // bottom at 430 against a limit of 450 - 76 = 374: 56 px too low
+      expect(opened(rect(130, 300, 300, 296))).toHaveBeenCalledWith([0, 56], { duration: 200 });
+    });
+
+    it('brings a card off the top back down, and one off a side back in', () => {
+      // 20 px above the map's top margin (62), 30 px past its right margin (688)
+      expect(opened(rect(42, 422, 200, 296))).toHaveBeenCalledWith([30, -20], { duration: 200 });
+    });
+
+    it('shows a card taller than the map from its top', () => {
+      // 500 px of card in a 400 px map: never pushed past its own top
+      expect(opened(rect(80, 300, 500, 296))).toHaveBeenCalledWith([0, 18], { duration: 200 });
+    });
+
+    it('leaves the map alone when the card fits, or when it was not asked to', () => {
+      expect(opened(rect(100, 300, 200, 296))).not.toHaveBeenCalled();
+      expect(opened(rect(130, 300, 300, 296), undefined)).not.toHaveBeenCalled();
+    });
+  });
+
   it('says when a card opened and when it closed', () => {
     // the layer defers rebuilding while a card is open: it is a surface the
     // analyst works in, not a tooltip

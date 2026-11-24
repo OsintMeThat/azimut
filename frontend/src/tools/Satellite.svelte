@@ -18,6 +18,7 @@
   import { createGridState } from './satellite/state/grid.svelte.js';
   import { createRefsState } from './satellite/state/refs.svelte.js';
   import { createFootprintState } from './satellite/state/footprint.svelte.js';
+  import { createPlaceMove } from './satellite/state/placeMove.svelte.js';
   import { createDropState, DROP_HELP } from './satellite/state/drop.svelte.js';
   import { dropLead, geolocating, moveLead } from '../lib/geolocating.svelte.js';
   import { sceneColorAt } from '../lib/scenes.js';
@@ -706,6 +707,57 @@
     },
   });
 
+  // --- moving a saved place: picked up from its card, put down with a click ---
+  const placeMove = createPlaceMove({
+    engine: () => engine,
+    move: async (row, at) => {
+      const cid = caseState.current?.id;
+      const from = { lat: Number(row.lat), lon: Number(row.lon) };
+      await api.post(`/api/cases/${cid}/satellite/places/${row.id}/move`, at);
+      if (caseState.current?.id === cid) await reloadCase();
+      toast('Place moved', 'ok', 8000, { label: 'Undo', onClick: () => putBack(cid, row.id, from) });
+    },
+    notify: toast,
+  });
+
+  async function putBack(cid, id, from) {
+    try {
+      await api.post(`/api/cases/${cid}/satellite/places/${id}/move`, from);
+      if (caseState.current?.id === cid) await reloadCase();
+    } catch (e) {
+      toast(`Could not put the place back: ${e.message}`, 'danger', 6000);
+    }
+  }
+
+  /**
+   * The Move press on a place's card. A place a proof states is moved in the proof,
+   * which keeps its coordinates and prints them: the card opens it instead.
+   */
+  async function pickUpPlace(row, pointer) {
+    if (row.proofs > 0) return openProofOf(row);
+    const box = mapEl?.getBoundingClientRect();
+    const at = box && pointer ? { x: pointer.x - box.left, y: pointer.y - box.top } : null;
+    if (!placeMove.start(row, at)) return;
+    closeOthers(modes, 'move');
+    toast('Click where it goes. Esc leaves it where it was', 'info', 4000);
+  }
+
+  /** Open the proof concluding on a place, saying why the map did not pick it up. */
+  async function openProofOf(row) {
+    const cid = caseState.current?.id;
+    try {
+      const chain = await api.get(`/api/cases/${cid}/entities/${row.id}/chain`);
+      const proof = (chain?.relations ?? []).find(
+        (one) => one.direction === 'in' && one.link?.type === 'depicts' && one.entity?.type === 'proof'
+      )?.entity;
+      if (!proof || caseState.current?.id !== cid) return;
+      toast('A proof states this point: move it there and save the proof', 'info', 6000);
+      openEntity(proof);
+    } catch (e) {
+      toast(`Could not open the proof: ${e.message}`, 'danger', 5000);
+    }
+  }
+
   // Svelte only honours a cleanup returned from a *synchronous* onMount, and the
   // setup below has to await the providers and the saved home view. So onMount
   // stays synchronous and hands back a teardown that runs whatever the async
@@ -787,6 +839,7 @@
       sky.destroy();
       grid.destroy();
       footprint.destroy();
+      placeMove.destroy();
       markerSurface?.destroy();
       clearTimeout(pauseTimer);
       clearTimeout(troubleTimer);
@@ -898,6 +951,8 @@
     if (lines?.escape()) return;
     // a pin waiting for its name is let go of before the mode ends
     if (drop.cancel()) return;
+    // a place in the hand stays where it was
+    if (placeMove.cancel()) return;
     if (armedMode) return disarm(modes);
     if (capture.menuOpen) return void (capture.menuOpen = false);
     // native fullscreen already exits on Esc (handled by onFullscreenChange);
@@ -1398,6 +1453,7 @@
   /** Where the analyst clicked, `{ lat, lon }` from the façade. */
   function onMapClick(at) {
     if (myLayers.armed) return;
+    if (placeMove.place(at)) return;
     if (drop.place(at)) return;
     if (footprint.addPoint(at)) return;
     if (grid.addVertex(at)) return;
@@ -1471,6 +1527,13 @@
       open: () => drop.start(),
       close: () => drop.stop(),
       pointing: () => drop.armed,
+    },
+    move: {
+      isOn: () => placeMove.on,
+      // picked up from a place's own card, never from the rail
+      open: () => {},
+      close: () => placeMove.cancel(),
+      pointing: () => placeMove.on,
     },
   };
 
@@ -1670,9 +1733,10 @@
   /** Open one saved item: fly the map to it, or — for a screenshot of a site we
    *  cannot embed, filed without coordinates — reopen the page it came from. */
   /** Play a stack of located files in the panel, opening the panel if it is shut. */
-  async function openMedia(items, index = 0) {
+  async function openMedia(items, index = 0, start = null) {
     if (!items?.length) return;
-    mediaView = { items, index };
+    // `start`: where a card's video was, so the panel goes on from there
+    mediaView = { items, index, start };
     // a file plays in the case's own half of the panel, whichever half was up
     panelTab = 'saved';
     if (capturesCollapsed) {
@@ -2331,6 +2395,24 @@
     void namingAt;
     if (mapReady) untrack(() => drop.draw());
   });
+  // a place in the hand follows the pointer, and is let go of with the case it was in
+  $effect(() => {
+    if (!mapReady || !placeMove.on || !engine) return;
+    const element = mapEl;
+    const leave = () => placeMove.hide();
+    const stopMoving = engine.on('pointer-move', (at) => placeMove.follow(at));
+    element?.addEventListener('pointerleave', leave);
+    return () => {
+      stopMoving();
+      element?.removeEventListener('pointerleave', leave);
+    };
+  });
+  const movingIn = $derived(caseState.current?.id ?? null);
+  $effect(() => {
+    void movingIn;
+    untrack(() => placeMove.cancel());
+  });
+
   // while the drop is armed, a pale pin follows the pointer to show where a click lands
   $effect(() => {
     if (!mapReady || !drop.armed || !engine) return;
@@ -2743,13 +2825,15 @@
           {fullscreen}
           bind:hoveredId={hoveredSavedId}
           activeKey={mediaView ? mediaView.items[mediaView.index]?.key : null}
+          movingKey={placeMove.row ? (placeMove.row.key ?? placeMove.row.id) : null}
           names={namesOn}
           onopen={openSaved}
           onedit={editSaved}
           ondelete={(row) => placeDeletion.open(row.id)}
           onrefresh={reloadCase}
           ontrace={startTrace}
-          onmedia={openMedia}
+          onexpand={openMedia}
+          onmove={pickUpPlace}
         />
       {/if}
 
@@ -3298,6 +3382,7 @@
           <MediaViewer
             items={mediaView.items}
             bind:index={mediaView.index}
+            start={mediaView.start}
             caseId={caseState.current?.id}
             coords={coordsLabel}
             {fullscreen}
@@ -3578,11 +3663,14 @@
   :global(.sat-naming) {
     cursor: grab;
   }
-  /* the pin following the pointer while the drop is armed: the click goes through it */
+  /* the pin following the pointer while the drop is armed: the click goes through it.
+     Pale on its content: the engine writes the mark's own opacity inline */
   :global(.sat-ghost) {
     pointer-events: none;
-    opacity: 0.6;
     filter: drop-shadow(0 1px 2px rgba(0, 0, 0, 0.4));
+  }
+  :global(.sat-ghost > *) {
+    opacity: 0.6;
   }
   .map-bar {
     position: absolute;

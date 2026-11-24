@@ -22,6 +22,8 @@
     hoveredId = $bindable(null),
     // the stack the media viewer is reading, lit until it closes
     activeKey = null,
+    // the place picked up to be moved, left faint at its old spot until it is put down
+    movingKey = null,
     // each place's name written under its mark (the Places layer's Names switch)
     names = false,
     onopen,
@@ -29,13 +31,16 @@
     ondelete,
     onrefresh,
     ontrace,
-    onmedia,
+    // the files on a mark taken to the panel beside the map: `(files, index, start)`
+    onexpand = null,
+    // a place picked up from its card: `(row, pointer)`
+    onmove = null,
   } = $props();
 
-  /** True when every item under a mark is a located file: it opens the viewer. */
-  const isMedia = (mark) => mark.kinds.every((kind) => kind === 'media');
-
   let zoom = $state(null);
+
+  /** The room a card keeps from the map's edges, the bottom one clear of the status bar. */
+  const CARD_ROOM = { top: 12, right: 12, bottom: 76, left: 12 };
 
   // Keep marker elements by item id for hover sync without a rebuild.
   let elements = $state(new Map());
@@ -108,6 +113,15 @@
         onrefresh: () => onrefresh?.(),
         // a place's colour is an edit, offered where the map edits
         oncolour: onedit ? (row, colour) => recolour(mark, id, row, colour) : null,
+        // the panel and the hand both want the map, so the card goes first
+        onexpand: onexpand && ((files, index, start) => {
+          surface.closePopup();
+          onexpand(files, index, start);
+        }),
+        onmove: onmove && ((row, pointer) => {
+          surface.closePopup();
+          onmove(row, pointer);
+        }),
       },
     });
     return host;
@@ -243,21 +257,19 @@
           keyboard: false,
           onOver: () => (hoveredId = mark.items[0].key ?? mark.items[0].id),
           onOut: () => (hoveredId = null),
-          // A file's mark plays it in the panel beside the map, stack and all:
-          // the card is for work filed on a point, and a photo is read by looking.
-          // Every other mark opens its card, one item or five: clicking a pin should
-          // tell you what is there before it moves the map out from under you.
-          ...(isMedia(mark)
-            ? { onClick: () => onmedia?.(mark.items) }
-            : {
-                popup: {
-                  content: () => popupContent(mark, at),
-                  className: 'saved-popup',
-                  minWidth: 296,
-                  maxWidth: 330,
-                  offset: markLook(mark).kind === 'place' ? DROP_CARD_OFFSET : TEARDROP_CARD_OFFSET,
-                },
-              }),
+          // Every mark opens its card, one item or five, files included: clicking a
+          // pin should tell you what is there before it moves the map out from under
+          // you, and a photo plays in the card it opens.
+          popup: {
+            content: () => popupContent(mark, at),
+            className: 'saved-popup',
+            minWidth: 296,
+            maxWidth: 330,
+            offset: markLook(mark).kind === 'place' ? DROP_CARD_OFFSET : TEARDROP_CARD_OFFSET,
+            // a card holding a player is tall: the map slides to show it whole, clear
+            // of the bar the maps keep along their bottom edge
+            inView: CARD_ROOM,
+          },
         },
       ])
     );
@@ -288,6 +300,15 @@
     if (reading && reading !== next) reading.classList.remove('is-active');
     reading = next;
     reading?.classList.add('is-active');
+  });
+
+  // the place in the hand: its mark stays where it stood, faint, until it is put down
+  let lifted = null;
+  $effect(() => {
+    const next = movingKey ? (elements.get(movingKey) ?? null) : null;
+    if (lifted && lifted !== next) lifted.classList.remove('is-moving');
+    lifted = next;
+    lifted?.classList.add('is-moving');
   });
 </script>
 
@@ -352,6 +373,11 @@
      filed around it without leaving the layer's one colour family */
   :global(.saved-mark-media) {
     box-shadow: 0 0 0 1.5px #fff, 0 2px 5px rgba(0, 0, 0, 0.45);
+  }
+  /* a place being moved, where it stood until it is put down. Faint on its
+     content: the engine writes the mark's own opacity inline */
+  :global(.saved-mark-wrap.is-moving > *) {
+    opacity: 0.35;
   }
   /* a view's cone lies on the ground under its pin and never takes a click */
   :global(.saved-cone) {

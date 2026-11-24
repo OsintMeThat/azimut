@@ -25,7 +25,9 @@
           { "icon": "columns", "text": "Horizon's Side by side is live: the photo above, the terrain under it, locked together or each on its own." },
           { "icon": "columns", "text": "A note's Columns set two pictures side by side at one height, or words beside a picture, in the PDF and on the web." },
           { "icon": "image", "text": "Reference windows open over the Horizon view too, the same ones as on the map." },
-          { "icon": "zoneSearch", "text": "Inspect searches a part of a picture: draw a zone over it, then press Google Lens, Yandex, Bing or TinEye." }
+          { "icon": "zoneSearch", "text": "Inspect searches a part of a picture: draw a zone over it, then press Google Lens, Yandex, Bing or TinEye." },
+          { "icon": "video", "text": "A file's mark plays it in its card, a stack one at a time, and Play beside the map takes it to the panel where it was." },
+          { "icon": "move", "text": "Move place on a place's card picks it up and puts it down where you click. A proof's point is moved in its proof." }
         ]
       }
     ]

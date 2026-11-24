@@ -108,6 +108,27 @@ describe('the file on screen', () => {
     expect(button('Next')).toBeUndefined();
     expect(text()).not.toContain('1 / 1');
   });
+
+  it('goes on from the moment a map card’s video was at, once', () => {
+    open({ index: 1, start: { key: clip.key, time: 42.5, playing: true } });
+    const video = document.querySelector('video');
+    const play = vi.spyOn(video, 'play').mockResolvedValue(undefined);
+    video.dispatchEvent(new Event('loadedmetadata'));
+    expect(video.currentTime).toBe(42.5);
+    expect(play).toHaveBeenCalledTimes(1);
+    // a second load (stepping back to it) starts from the top, as any file does
+    video.currentTime = 0;
+    video.dispatchEvent(new Event('loadedmetadata'));
+    expect(video.currentTime).toBe(0);
+    expect(play).toHaveBeenCalledTimes(1);
+  });
+
+  it('starts another file of the stack from the top', () => {
+    open({ index: 1, start: { key: 'someone-else', time: 42.5, playing: true } });
+    const video = document.querySelector('video');
+    video.dispatchEvent(new Event('loadedmetadata'));
+    expect(video.currentTime).toBe(0);
+  });
 });
 
 describe('walking the stack', () => {
