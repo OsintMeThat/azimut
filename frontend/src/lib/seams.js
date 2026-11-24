@@ -177,8 +177,9 @@ const round2 = (v) => Math.round(v * 100) / 100;
 
 /**
  * A piece's holes as a CSS `clip-path` in its own pixels (the `w` × `h` box its quad
- * warps), or null with none. The kept area reaches past the box, so the piece's outline
- * still draws.
+ * warps), or null with none. The kept area reaches a twentieth past the box, so the
+ * piece's outline still draws: no further, as a piece drawn in 3D gets a GPU mask the
+ * size of that area, and one three times the box each way filled the GPU.
  */
 export function seamClipPath(node, holes) {
   if (!holes?.length) return null;
@@ -199,6 +200,6 @@ export function seamClipPath(node, holes) {
     if (local.length >= 3) parts.push(`M${local.map(([x, y]) => `${round2(x)} ${round2(y)}`).join('L')}Z`);
   }
   if (!parts.length) return null;
-  const m = Math.max(w, h);
+  const m = Math.ceil(Math.max(w, h) / 20);
   return `path(evenodd, "M${-m} ${-m}H${w + m}V${h + m}H${-m}Z${parts.join('')}")`;
 }

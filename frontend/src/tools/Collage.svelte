@@ -716,11 +716,17 @@
   // Panorama: the server picks the frames of the rail's A–B stretch, they go on the
   // collage in a row, in the order of the clip, and the collage is stitched in the pan's
   // projection. All of it is one Ctrl+Z.
+  // A Panorama that ends without one puts the collage back as it was, and says why.
   async function makePanorama({ path, start, end, ops }) {
     if (panoramaStep || !doc.open) return;
     const run = docRun;
     const release = holdHistory();
-    panoramaStep = 'Reading…';
+    const before = layoutSnapshot();
+    const fail = (why) => {
+      applySnapshot(before);
+      toast(`${why.charAt(0).toUpperCase()}${why.slice(1).replace(/\.$/, '')}. Nothing was added`, 'warn');
+    };
+    panoramaStep = 'Reading the pan…';
     try {
       const res = await api.post(`/api/cases/${doc.caseId}/inspect/panorama-frames`, { path, start, end });
       if (run !== docRun) return;
@@ -729,7 +735,7 @@
         toast(res?.note || 'No panorama in this stretch', 'warn');
         return;
       }
-      panoramaStep = 'Adding…';
+      panoramaStep = times.length ? `Adding ${times.length} frame${times.length === 1 ? '' : 's'}…` : 'Stitching…';
       // drawn three at a time, laid in the clip's order
       const drawn = new Array(times.length).fill(null);
       let next = 0;
@@ -747,6 +753,8 @@
       await Promise.all([draw(), draw(), draw()]);
       if (run !== docRun) return;
       const missed = drawn.filter((d) => !d).length;
+      // the frames already on the collage count, as the stitch takes them too
+      if (res.times.length - missed < 2) return fail('Too few frames of this stretch could be read');
       times.forEach((time, i) => {
         const got = drawn[i];
         if (!got) return;
@@ -761,9 +769,10 @@
         .filter(Boolean)
         .join('. ');
       // the message's Undo takes the frames back with their stitch, as Ctrl+Z does
-      await toolbar?.stitchPan(note || null, undo);
+      const made = await toolbar?.stitchPan(note || null, undo);
+      if (run === docRun && !(made?.placed >= 2)) fail(made?.why ?? 'The stitch did not answer');
     } catch (e) {
-      if (run === docRun) toast(e.message, 'danger');
+      if (run === docRun) fail(e.message);
     } finally {
       release();
       if (run === docRun) panoramaStep = '';
@@ -1160,7 +1169,16 @@
               bind:fitted
               bind:cut
             />
-            {#if !doc.nodes.length && !opening}
+            {#if panoramaStep}
+              <!-- a Panorama under way holds the canvas, as a failed one puts it back -->
+              <div class="pan-working" role="status" data-testid="panorama-working">
+                <div class="pan-working-card">
+                  <span class="spinner" aria-hidden="true"></span>
+                  <span>{panoramaStep}</span>
+                </div>
+              </div>
+            {/if}
+            {#if !doc.nodes.length && !opening && !panoramaStep}
               <div class="empty-canvas">
                 <div class="ways-in">
                   <Icon name="layers" size={26} />
@@ -1519,6 +1537,25 @@
     display: flex;
     background: var(--bg-0);
     overflow: hidden;
+  }
+  .pan-working {
+    position: absolute;
+    inset: 0;
+    z-index: 20;
+    display: grid;
+    place-items: center;
+    background: color-mix(in srgb, var(--bg-0) 30%, transparent);
+  }
+  .pan-working-card {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 14px 20px;
+    border-radius: var(--r-lg);
+    background: color-mix(in srgb, var(--bg-1) 92%, transparent);
+    border: 1px solid var(--border);
+    box-shadow: var(--shadow-1);
+    color: var(--text-2);
   }
   /* An empty canvas says how pieces come in, and leads there. */
   .empty-canvas {

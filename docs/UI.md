@@ -2172,8 +2172,10 @@ crossed, the longest part kept, and sixteen frames at most, spread wider over a 
 A camera solve with no believable lens places nothing rather than a strip claiming a full
 turn. The message says how many
 pieces moved and, in a panorama projection, about how wide an angle they cover; its Undo,
-like one Ctrl+Z, takes the frames back with their stitch. A stretch the camera barely
-turns in says so and lays nothing.
+like one Ctrl+Z, takes the frames back with their stitch. While it works the canvas shows
+a spinner and the step it is on. A stretch the camera barely turns in says so and lays
+nothing, and a stitch that fails, or joins no two frames, takes its frames back off and
+says why.
 
 **The canvas answers the hand.** The mouse wheel zooms toward the pointer a notch at a
 time; on a touchpad two fingers pan and a pinch zooms; a drag on the background pans. The

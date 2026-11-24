@@ -17,6 +17,9 @@ let media = MEDIA;
 let probe = { duration: 10, fps: 25, width: 1920, height: 1080 };
 let work = null;
 let panorama = { times: [], note: null };
+// stands in for the panorama's reading and its stitch, to hold one or make it fail
+let panoramaAnswer = null;
+let stitchAnswer = null;
 const piece = (path) => ({
   id: 'nd_1', frameId: null, save: { path, time: null, ops: [] }, w: 80, h: 60,
   quad: [[0, 0], [80, 0], [80, 60], [0, 60]], frameOps: [], crop: null,
@@ -39,7 +42,8 @@ const get = vi.fn(async (path) => {
 });
 const post = vi.fn(async (path, body) => {
   if (path === '/api/cases/case-a/collages') return { name: body.title, title: body.title };
-  if (path === '/api/cases/case-a/inspect/panorama-frames') return structuredClone(panorama);
+  if (path === '/api/cases/case-a/inspect/panorama-frames') return panoramaAnswer ? panoramaAnswer() : structuredClone(panorama);
+  if (path === '/api/cases/case-a/inspect/auto-stitch' && stitchAnswer) return stitchAnswer(body);
   if (path === '/api/cases/case-a/inspect/auto-stitch') {
     // each piece put in a row, as a stitch answers, and the angle they cover
     return {
@@ -94,6 +98,8 @@ beforeEach(() => {
   probe = { duration: 10, fps: 25, width: 1920, height: 1080 };
   work = null;
   panorama = { times: [], note: null };
+  panoramaAnswer = null;
+  stitchAnswer = null;
   post.mockClear();
   put.mockClear();
   renderCollageThumb.mockClear();
@@ -430,6 +436,54 @@ describe('the video rail', () => {
     expect(toast).toHaveBeenCalledWith('The camera barely moves here, so one frame is enough.', 'warn');
     expect(post.mock.calls.some(([path]) => path === '/api/cases/case-a/inspect/auto-stitch')).toBe(false);
     expect(target.querySelector('.empty-canvas')).not.toBeNull();
+  });
+
+  async function panoramaOfTheFirstSecond() {
+    await openNew();
+    target.querySelector('.picker .group-head').click();
+    await settle(20);
+    railButton('A').click();
+    for (let i = 0; i < 10; i += 1) key('ArrowRight');
+    railButton('B').click();
+    flushSync();
+    railButton('Panorama').click();
+  }
+
+  it('shows on the canvas that a panorama is under way, until it is done', async () => {
+    panorama = { times: [0.2, 0.6, 1.0], note: null };
+    let answer;
+    panoramaAnswer = () => new Promise((resolve) => (answer = resolve));
+    await panoramaOfTheFirstSecond();
+    await settle();
+    const working = () => target.querySelector('[data-testid="panorama-working"]');
+    expect(working().textContent.trim()).toBe('Reading the pan…');
+    expect(working().querySelector('.spinner')).not.toBeNull();
+    // the canvas's own ways in stay out from under it
+    expect(target.querySelector('.empty-canvas')).toBeNull();
+
+    answer(structuredClone(panorama));
+    await settle(40);
+    expect(working()).toBeNull();
+    expect(target.querySelectorAll('img.node')).toHaveLength(3);
+  });
+
+  it.each([
+    ['the stitch fails', () => { throw new Error('auto-stitch could not estimate the camera rotations'); },
+      'Auto-stitch could not estimate the camera rotations. Nothing was added'],
+    ['the stitch joins no two frames', () => ({ canvas: null, nodes: [{ index: 0, quad: [[0, 0], [80, 0], [80, 60], [0, 60]] }], dropped: [1, 2], why: ['no-overlap', 'no-overlap'] }),
+      'Its frames do not overlap. Nothing was added'],
+  ])('takes its frames back when %s, and says why once', async (_name, answer, words) => {
+    panorama = { times: [0.2, 0.6, 1.0], note: null };
+    stitchAnswer = answer;
+    await panoramaOfTheFirstSecond();
+    await settle(40);
+    expect(post.mock.calls.some(([path]) => path === '/api/cases/case-a/inspect/auto-stitch')).toBe(true);
+    expect(target.querySelectorAll('img.node')).toHaveLength(0);
+    expect(target.querySelector('[data-testid="panorama-working"]')).toBeNull();
+    expect(toast.mock.calls).toEqual([[words, 'warn']]);
+    await settle(500);
+    // nothing to undo: the collage is as it was
+    expect(target.querySelector('.tool-header button[title^="Undo"]').disabled).toBe(true);
   });
 
   it('puts the video of a piece taken in hand in the rail', async () => {

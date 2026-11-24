@@ -318,13 +318,22 @@ function basisToPoints(p) {
 }
 
 /**
- * CSS `matrix3d(...)` mapping the box (0,0)-(w,h) onto `quad`
+ * CSS transform mapping the box (0,0)-(w,h) onto `quad`
  * (4 points: TL, TR, BR, BL, in the same pixel space as the element's parent).
+ *
+ * A quad a hand never bent (moved, scaled, turned, or laid by a stitch) is a 2D
+ * `matrix(...)`; only a pulled corner needs `matrix3d(...)`. A 3D transform gives
+ * the piece a GPU layer of its own, and a seam's clip one more, so sixteen
+ * panorama frames drawn in 3D filled the GPU and the browser painted black.
  */
-export function quadMatrix3d(w, h, quad) {
+export function quadTransform(w, h, quad) {
   const src = [[0, 0], [w, 0], [w, h], [0, h]];
   let H = mul(basisToPoints(quad), adj(basisToPoints(src)));
   H = H.map((x) => x / H[8]);
+  // how far the perspective bends the box: under 1e-4, a piece 10 000 px across moves under a pixel
+  if (Math.abs(H[6]) * w + Math.abs(H[7]) * h < 1e-4) {
+    return `matrix(${[H[0], H[3], H[1], H[4], H[2], H[5]].join(',')})`;
+  }
   const t = [
     H[0], H[3], 0, H[6],
     H[1], H[4], 0, H[7],
