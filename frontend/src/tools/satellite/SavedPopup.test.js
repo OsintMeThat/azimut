@@ -167,8 +167,10 @@ describe('SavedOverlay popup wiring', () => {
   it('opens a card for every mark, one item or a stack, files included', () => {
     expect(overlay).toContain('content: () => popupContent(mark, at)');
     // no shortcut path that flies straight there or plays in the panel: a file
-    // plays in the card its mark opens
-    expect(overlay).not.toContain('onClick');
+    // plays in the card its mark opens. The one click handled here is a zone's,
+    // which opens the card its pin opens.
+    expect((overlay.match(/onClick/g) ?? []).length).toBe(1);
+    expect(overlay).toContain('onClick: () => surface?.element(id)?.click()');
   });
 
   it('asks for the width its own rows need, and leaves the look to the map', () => {
@@ -239,7 +241,7 @@ describe('SavedPopup relations', () => {
     expect(overlay).toContain('onPopupOpen: () => (popupOpen = true)');
     // the layer's teardown is not the data effect's cleanup, which Svelte runs
     // before every re-run — including one that decides to defer
-    expect(overlay).toContain('function rebuild(rows, precision, named)');
+    expect(overlay).toContain('function rebuild(rows, precision, named, clickable = false)');
   });
 
   it('never caches a failed read as "this point has no relations"', () => {
@@ -344,6 +346,18 @@ describe('SavedPopup, the files standing on a point', () => {
     expect(css).toContain('position: absolute;');
     expect(css).toContain('object-fit: contain;');
     expect(at([{ ...clip }])).toContain('style="height: 166px;"');
+  });
+});
+
+describe('SavedPopup, a zone', () => {
+  const square = { type: 'Polygon', coordinates: [[[0, 0], [1, 0], [1, 1], [0, 1], [0, 0]]] };
+
+  it('says it is a zone, and edits its corners rather than drawing it again', () => {
+    const body = at([{ ...place, zone: true, footprint: square }], { ontrace: noop });
+    expect(body).toContain('Zone');
+    expect(body).toContain('aria-label="Edit footprint"');
+    expect(body).toContain('Move, add or remove its corners on the map');
+    expect(at([place], { ontrace: noop })).toContain('aria-label="Trace footprint"');
   });
 });
 

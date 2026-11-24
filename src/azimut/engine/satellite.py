@@ -357,6 +357,67 @@ def restate_proof_point(
     return released
 
 
+def proof_leaving(
+    case: Case, proof_id: str, *, leaving: frozenset[str] = frozenset()
+) -> tuple[list[str], list[dict[str, Any]]]:
+    """What a deleted proof takes with it: ``(places, links)``.
+
+    **A proof's conclusion goes with the proof.** Deleting it is withdrawing the
+    geolocation it stated, so its points come off the footage they were posed on,
+    and the map stops drawing a video where nothing says it stood any more.
+
+    - **places**: the points that were only this proof's — filed by a proof's save
+      (:data:`POINT_ROADS`), stated by no other proof, held by nothing but this proof
+      and what its saves posed there (a proposal nobody reviewed holds nothing). They
+      go to the Trash with the proof, their edges with them.
+    - **links**: what this proof's saves posed on a point it does not take — a place
+      the analyst saved by hand, or one another proof's footage also holds. The place
+      stays, and loses only those.
+
+    A point another proof still concludes on is left whole: its edges on the footage
+    say what that proof says too. ``leaving`` names the other proofs going in the same
+    delete, which hold nothing any more. Both lists go into the delete's own Trash
+    group (``delete_entities_deep``), so restoring the proof puts its geolocation back.
+    """
+    places: list[str] = []
+    posed_links: list[dict[str, Any]] = []
+    gone = leaving | {proof_id}
+    for place_id in _stated_places(case, proof_id):
+        if any(
+            link["to"] == place_id
+            and link["type"] in PLACE_VERBS
+            and link["from"] not in gone
+            and (case.get_entity(link["from"]) or {}).get("type") == "proof"
+            for link in case.links_of(place_id)
+        ):
+            continue
+        place = case.get_entity(place_id)
+        if place is None:
+            continue
+        incident = case.links_of(place_id)
+        posed = [
+            link
+            for link in incident
+            if link["to"] == place_id
+            and link["from"] not in gone
+            and link["type"] in PLACE_VERBS
+            and (link.get("provenance") or {}).get("by") in POINT_ROADS
+        ]
+        posed_ids = {link["id"] for link in posed}
+        held_elsewhere = any(
+            link["from"] not in gone
+            and link["id"] not in posed_ids
+            and not proposal_engine.unreviewed(link)
+            for link in incident
+        )
+        own = (place.get("provenance") or {}).get("by") in POINT_ROADS
+        if own and not held_elsewhere:
+            places.append(place_id)
+        else:
+            posed_links.extend(posed)
+    return places, posed_links
+
+
 def _material_of(case: Case, proof_id: str) -> list[dict[str, Any]]:
     """The files a proof was composed from, the whole chain down: the frame, the collage,
     the video two hops up, the capture. Read off the derivation closure rather than the
@@ -722,6 +783,8 @@ def _saved_row(
         "footprint": attrs.get("footprint"),
         # the colour a place's mark is drawn in; none is the app's pin red
         **({"color": attrs.get("color") or None} if kind == "place" else {}),
+        # a place saved as a zone, whose pin follows its shape when it is reshaped
+        **({"zone": True} if kind == "place" and attrs.get("zone") else {}),
         # how many proofs were built on this point. `All` draws every point
         # once, so a worked row is marked rather than doubled by a proof
         # marker landing on the capture it composes.

@@ -10,7 +10,7 @@ describe('how precisely a point is pinned', () => {
   });
 
   it('prefers a traced footprint over the circle around it', () => {
-    expect(source).toContain("row.footprint\n      ? [{ id: `${id}:shape`, kind: 'geojson', geometry: row.footprint, style }]");
+    expect(source).toContain("return row.footprint\n      ? [{\n          id: `${id}:shape`,\n          kind: 'geojson',\n          geometry: row.footprint,");
   });
 
   it('leaves a point with no precision drawing exactly as before', () => {
@@ -19,9 +19,13 @@ describe('how precisely a point is pinned', () => {
     expect(source).toContain('mark.items.find((r) => r.footprint || r.radius_m > 0)');
   });
 
-  it('keeps the shape under the pin and out of the click path', () => {
+  it('keeps the shape under the pin and out of the click path, a zone apart', () => {
+    // a comparison's frame and a view's ground never take a click; a place's area
+    // opens its card only while no tool owns the map's clicks
     expect(source).toContain('interactive: false');
-    expect(source).toContain('...shapesFor(mark, at),');
+    expect(source).toContain('interactive: Boolean(opens)');
+    expect(source).toContain("const opens = clickable && row.kind === 'place' && row.footprint;");
+    expect(source).toContain('...shapesFor(mark, at, clickable),');
     // one surface still holds everything, so a redraw clears shapes with their pins
     expect(source).toContain('surface.set(\n      marks.flatMap((mark, at) => [');
   });

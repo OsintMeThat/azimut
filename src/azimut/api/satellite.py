@@ -28,6 +28,7 @@ from ..engine.analysis_models import Zone
 from ..engine import (
     cities,
     cloudless,
+    entities as entity_engine,
     firms,
     firmspoints,
     geo,
@@ -113,6 +114,8 @@ class PlaceIn(BaseModel):
     title: str | None = None
     notes: str | None = None
     folder: str | None = None
+    #: A zone saved in one go: the area it covers, as GeoJSON, its pin inside it.
+    footprint: dict[str, Any] | None = None
 
 
 class ParseIn(BaseModel):
@@ -2132,6 +2135,15 @@ def save_place(case_id: str, body: PlaceIn) -> dict[str, Any]:
     # Sent empty, it is a choice of no folder, so the work folder is not applied.
     if body.folder is not None:
         extra["folder"] = body.folder.strip()
+    if body.footprint is not None:
+        # A zone: its shape is checked as Details checks one, and it is marked so that
+        # reshaping it later takes its pin along rather than refusing the shape.
+        try:
+            entity_engine.check_attrs("place", {"footprint": body.footprint})
+        except CaseError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        extra["footprint"] = body.footprint
+        extra["zone"] = True
     entity = satellite_engine.save_place(
         case, body.lat, body.lon, body.zoom, body.bearing, body.title, extra_attrs=extra
     )

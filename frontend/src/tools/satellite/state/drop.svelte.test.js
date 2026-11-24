@@ -46,6 +46,7 @@ function make() {
     held: () => held,
     dropLead: vi.fn(async (at) => ({ id: 'ld_new', n: 5, ...at })),
     moveLead: vi.fn(async () => ({})),
+    removeLead: vi.fn(async () => {}),
     savePlace: vi.fn(async () => {}),
     centre: vi.fn(),
     notify: vi.fn(),
@@ -200,7 +201,7 @@ describe('the leads on the map', () => {
     expect(shapes.map((s) => s.id)).toEqual(['lead-ld_1', 'lead-ld_2']);
     expect(shapes[1].html).toContain(sceneColorAt(2));
     expect(shapes[1].html).toContain('>4</text>');
-    expect(shapes[1]).toMatchObject({ draggable: true, at: { lat: 3, lon: 4 }, title: 'Lead 4: drag to move, click to centre' });
+    expect(shapes[1]).toMatchObject({ draggable: true, at: { lat: 3, lon: 4 }, title: 'Lead 4: drag to move, click to select, Delete to remove' });
 
     held = null;
     drop.at({ lat: 9, lon: 9 });
@@ -231,6 +232,53 @@ describe('the leads on the map', () => {
     expect(deps.moveLead).toHaveBeenCalledWith('ld_1', { lat: 1.5, lon: 2.5 });
     first.onClick();
     expect(deps.centre).toHaveBeenCalledTimes(1);
+  });
+
+  it('selects a lead clicked, which Delete then removes, and draws it picked', async () => {
+    const drop = make();
+    held = SCENE;
+    drop.draw();
+    expect(drop.removeSelected()).toBe(false); // nothing picked: Delete is somebody else's
+    declared.at(-1)[1].onClick();
+    expect(drop.selected).toBe('ld_2');
+    const lit = declared.at(-1);
+    expect(lit[1].className).toBe('sat-lead is-selected');
+    expect(lit[0].className).toBe('sat-lead');
+
+    expect(drop.removeSelected()).toBe(true);
+    expect(deps.removeLead).toHaveBeenCalledWith('ld_2');
+    expect(drop.selected).toBe(null);
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(deps.notify).toHaveBeenCalledWith('Lead 4 deleted', 'ok', 2200);
+  });
+
+  it('lets a lead picked go on Escape or a click elsewhere, and forgets one gone', () => {
+    const drop = make();
+    held = SCENE;
+    drop.draw();
+    declared.at(-1)[0].onClick();
+    expect(drop.deselect()).toBe(true);
+    expect(drop.selected).toBe(null);
+    expect(drop.deselect()).toBe(false);
+    expect(declared.at(-1)[0].className).toBe('sat-lead');
+
+    declared.at(-1)[0].onClick();
+    held = { ...SCENE, leads: SCENE.leads.slice(1) }; // deleted from the pill meanwhile
+    drop.draw();
+    expect(drop.selected).toBe(null);
+  });
+
+  it('says why a lead could not be deleted', async () => {
+    const drop = make();
+    deps.removeLead.mockRejectedValueOnce(new Error('gone'));
+    held = SCENE;
+    drop.draw();
+    declared.at(-1)[0].onClick();
+    drop.removeSelected();
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(deps.notify).toHaveBeenCalledWith('Could not delete the lead: gone', 'danger', 6000);
   });
 
   it('writes only a colour and a number into the mark', () => {

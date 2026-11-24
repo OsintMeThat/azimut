@@ -86,7 +86,7 @@ test('drops leads where the map is clicked while a scene is geolocated, and lets
   await clickMap(page, -140, 40);
   await expect.poll(() => server.calls).toEqual(['drop ld_1', 'drop ld_2']);
   await expect(page.locator('.sat-lead')).toHaveCount(2);
-  await expect(page.locator('.sat-lead').nth(1)).toHaveAttribute('title', 'Lead 2: drag to move, click to centre');
+  await expect(page.locator('.sat-lead').nth(1)).toHaveAttribute('title', 'Lead 2: drag to move, click to select, Delete to remove');
   // the second one stands where it was clicked, left of the first
   const [first, second] = await Promise.all([0, 1].map((i) => page.locator('.sat-lead').nth(i).boundingBox()));
   expect(second.x).toBeLessThan(first.x);
@@ -243,4 +243,34 @@ test('remembers the Layers on the map tick, and rests 2× and Max while it is ti
   await expect.poll(() => fixture.settingsWrites).toContainEqual({ capture_layers: true });
   await expect(page.getByRole('button', { name: '2×' })).toBeDisabled();
   await expect(page.getByRole('button', { name: 'Max' })).toHaveAttribute('title', 'Layers are captured at screen resolution');
+});
+
+test('picks a lead clicked on the map, and Delete removes it', async ({ page }) => {
+  const { server } = await openMap(page);
+  await page.getByRole('button', { name: 'Drop a lead' }).click();
+  await clickMap(page, 120, -60);
+  await clickMap(page, -140, 40);
+  await expect(page.locator('.sat-lead')).toHaveCount(2);
+  await page.keyboard.press('Escape'); // the drop ends; the leads stay
+
+  // nothing picked: Delete is somebody else's
+  await page.keyboard.press('Delete');
+  await page.waitForTimeout(200);
+  expect(server.calls.filter((call) => call.startsWith('delete'))).toEqual([]);
+
+  await page.locator('.sat-lead').first().click();
+  await expect(page.locator('.sat-lead.is-selected')).toHaveCount(1);
+  await page.keyboard.press('Delete');
+  await expect.poll(() => server.calls.filter((call) => call.startsWith('delete'))).toEqual(['delete ld_1']);
+  await expect(page.locator('.sat-lead')).toHaveCount(1);
+  await expect(page.getByText('Lead 1 deleted')).toBeVisible();
+
+  // Escape lets a lead picked go, and Delete then removes nothing
+  await page.locator('.sat-lead').first().click();
+  await expect(page.locator('.sat-lead.is-selected')).toHaveCount(1);
+  await page.keyboard.press('Escape');
+  await expect(page.locator('.sat-lead.is-selected')).toHaveCount(0);
+  await page.keyboard.press('Delete');
+  await page.waitForTimeout(200);
+  expect(server.calls.filter((call) => call.startsWith('delete'))).toEqual(['delete ld_1']);
 });

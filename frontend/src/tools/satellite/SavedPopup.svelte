@@ -290,7 +290,9 @@
             {row.title || 'Untitled'}
           </button>
           <p class="meta">
-            <span class="kind"><Icon name={GLYPH[row.kind] ?? 'pin'} size={10} /> {KIND[row.kind]}</span>
+            <span class="kind">
+              <Icon name={row.zone ? 'polygon' : (GLYPH[row.kind] ?? 'pin')} size={10} /> {row.zone ? 'Zone' : KIND[row.kind]}
+            </span>
             {#if row.provider ?? row.site}<span>{row.provider ?? row.site}</span>{/if}
             {#if row.zoom != null}<span>z{Math.round(row.zoom)}</span>{/if}
             {#if spread(row)}
@@ -391,10 +393,10 @@
               <button
                 type="button"
                 class="icon-act"
-                aria-label={`${row.footprint ? 'Retrace' : 'Trace'} footprint`}
+                aria-label={`${row.footprint ? 'Edit' : 'Trace'} footprint`}
                 onclick={() => ontrace(row)}
                 title={row.footprint
-                  ? 'Draw this shape again on the map'
+                  ? 'Move, add or remove its corners on the map'
                   : 'Draw the area this place really covers'}
               ><Icon name="polygon" size={13} /></button>
             {/if}

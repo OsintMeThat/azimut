@@ -633,7 +633,10 @@ describe('the two acts at the foot of the map', () => {
     // a click on the map goes to the drop first while it is armed, and Escape lets the
     // pin waiting for its name go before the mode ends
     const click = source.slice(source.indexOf('function onMapClick(at)'));
-    expect(click.slice(0, 200)).toContain('if (drop.place(at)) return;');
+    expect(click.slice(0, 400)).toContain('if (drop.place(at)) return;');
+    // and lets go of a lead picked, which Delete would otherwise remove
+    expect(click.slice(0, 400)).toContain('drop.deselect();');
+    expect(source).toContain("if (!typing && (e.key === 'Delete' || e.key === 'Backspace') && drop.removeSelected()) {");
     const escape = source.slice(source.indexOf("if (e.key !== 'Escape') return;"));
     expect(escape.indexOf('if (drop.cancel()) return;')).toBeLessThan(escape.indexOf('if (armedMode) return disarm(modes);'));
     // the right-click offers a lead while a scene is geolocated, a named place otherwise
