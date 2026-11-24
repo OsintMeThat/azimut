@@ -570,7 +570,8 @@ export const PAGES = {
       { title: 'Checks prove an analyzer', text: 'Pins where something should and should not be found turn green or red when tested, and one is needed to save it.' },
       { title: 'Review one by one', text: 'Pin, keep or dismiss each finding, and what you keep is remembered.' },
       { title: 'Review by keyboard', text: 'K keeps, D dismisses and P pins the finding under review, and the arrows walk the queue.' },
-      { title: 'Findings on the map', text: 'Export as layer puts the findings you kept on the map as a layer.' },
+      { title: 'A routine over time', text: 'Its page reads every pass together: counts, spots that stay or come and go, and the passes it missed.' },
+      { title: 'Findings out', text: 'Its export menu puts the dashboard in a note as charts, downloads a CSV, or keeps what you kept as a SAT layer.' },
     ],
   },
   horizon: {
