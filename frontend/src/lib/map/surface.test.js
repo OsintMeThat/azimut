@@ -827,6 +827,35 @@ describe('cards on a mark', () => {
       expect(opened(rect(100, 300, 200, 296))).not.toHaveBeenCalled();
       expect(opened(rect(130, 300, 300, 296), undefined)).not.toHaveBeenCalled();
     });
+
+    it('shows a card whole again once it grew, and does nothing with none open', () => {
+      const map = stubMap();
+      map.getContainer = () => ({ getBoundingClientRect: () => rect(50, 100, 400, 600) });
+      map.panBy = vi.fn();
+      const surface = createSurface(stubEngine(map));
+      surface.fitCard(); // nothing open: not an error
+      surface.set([{
+        id: 'mark-1',
+        kind: 'marker',
+        at: { lat: 1, lon: 2 },
+        popup: { content: () => document.createElement('p'), inView: { bottom: 76 } },
+      }]);
+      const original = window.HTMLElement.prototype.getBoundingClientRect;
+      try {
+        window.HTMLElement.prototype.getBoundingClientRect = () => rect(130, 300, 200, 296);
+        openCard(marks[0]);
+        expect(map.panBy).not.toHaveBeenCalled();
+        // a tall video loaded: the card now runs 56 px past the bottom bar
+        window.HTMLElement.prototype.getBoundingClientRect = () => rect(130, 300, 300, 296);
+        surface.fitCard();
+        expect(map.panBy).toHaveBeenCalledWith([0, 56], { duration: 200 });
+        surface.closePopup();
+        surface.fitCard();
+        expect(map.panBy).toHaveBeenCalledTimes(1);
+      } finally {
+        window.HTMLElement.prototype.getBoundingClientRect = original;
+      }
+    });
   });
 
   it('says when a card opened and when it closed', () => {

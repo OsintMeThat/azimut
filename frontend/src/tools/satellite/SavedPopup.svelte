@@ -13,6 +13,7 @@
    * filed there is listed under them. Where the map has a panel for it, the file
    * is taken there to be read beside the imagery, at the moment it was playing.
    */
+  import { tick } from 'svelte';
   import Icon from '../../components/Icon.svelte';
   import { fileUrl } from '../../lib/fileUrl.js';
   import RelationList from '../../components/RelationList.svelte';
@@ -44,6 +45,8 @@
     // a place picked up to be put down elsewhere: `(row, pointer)`, the pointer where
     // the press was. Absent on a map that moves nothing.
     onmove = null,
+    // the card changed height once a file's shape was known: the map shows it whole again
+    onresize = null,
   } = $props();
 
   const GLYPH = { place: 'pin', capture: 'satellite', screenshot: 'screen', comparison: 'compare', view: 'horizon' };
@@ -77,6 +80,25 @@
   const file = $derived(files[Math.min(fileIndex, files.length - 1)] ?? null);
   const why = $derived(roadWords(file));
   let video = $state(null);
+
+  /**
+   * The stage takes the file's own shape once its size is known: a phone video
+   * stands tall, up to `max`, rather than being cut to a strip of sky. Until then,
+   * and for a file that never says, it is a landscape frame the card's width.
+   */
+  const STAGE = { width: 296, base: 166, min: 120, max: 320 };
+  let shapes = $state({}); // file key → its height over its width
+  const stageHeight = $derived.by(() => {
+    const ratio = file ? shapes[rowKey(file)] : null;
+    if (!ratio) return STAGE.base;
+    return Math.round(Math.min(STAGE.max, Math.max(STAGE.min, STAGE.width * ratio)));
+  });
+
+  function measured(row, width, height) {
+    if (!(width > 0 && height > 0) || shapes[rowKey(row)] === height / width) return;
+    shapes = { ...shapes, [rowKey(row)]: height / width };
+    tick().then(() => onresize?.());
+  }
 
   /** The file on screen, taken to the panel at the moment it was playing. */
   function expand() {
@@ -185,12 +207,24 @@
     <section class="file" aria-label="Located file">
       <!-- keyed on the file, so stepping away stops the video that was playing -->
       {#key rowKey(file)}
-        <div class="stage">
-          {#if file.media_kind === 'video'}
+        {@const shown = file}
+        <div class="stage" style:height="{stageHeight}px">
+          {#if shown.media_kind === 'video'}
             <!-- svelte-ignore a11y_media_has_caption -->
-            <video bind:this={video} src={fileUrl(caseId, file.path)} controls preload="metadata"></video>
+            <video
+              bind:this={video}
+              src={fileUrl(caseId, shown.path)}
+              controls
+              preload="metadata"
+              onloadedmetadata={(event) => measured(shown, event.currentTarget.videoWidth, event.currentTarget.videoHeight)}
+            ></video>
           {:else}
-            <img src={fileUrl(caseId, file.path)} alt={file.title} decoding="async" />
+            <img
+              src={fileUrl(caseId, shown.path)}
+              alt={shown.title}
+              decoding="async"
+              onload={(event) => measured(shown, event.currentTarget.naturalWidth, event.currentTarget.naturalHeight)}
+            />
           {/if}
         </div>
       {/key}
@@ -438,24 +472,23 @@
     gap: 3px;
     padding: 8px 0;
   }
-  /* the picture whole, letterboxed, at the width of the card */
+  /* the picture whole, letterboxed, at the width of the card. Laid over the stage
+     rather than sized by percentages, which a grid row of no set height never
+     resolves: a tall video then took its own height and was cut to its middle */
   .stage {
-    display: grid;
-    place-items: center;
-    height: 166px;
+    position: relative;
     border-radius: var(--r-sm);
     background: #000;
     overflow: hidden;
   }
   .stage video,
   .stage img {
-    max-width: 100%;
-    max-height: 100%;
-    object-fit: contain;
-  }
-  .stage video {
+    position: absolute;
+    inset: 0;
+    display: block;
     width: 100%;
     height: 100%;
+    object-fit: contain;
   }
   .file-head {
     display: flex;
