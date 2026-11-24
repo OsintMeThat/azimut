@@ -1,31 +1,27 @@
 <script>
   /**
-   * One routine's own page, as a dashboard of what its runs found over time.
+   * One routine's own page in the column: what it is, when it last read a pass,
+   * a glance at what its passes found, and its runs.
    *
    * A routine is only worth saving if it remembers, so its runs are read together
-   * (`lib/map/detectSeries.js`): **Overview** gives the headline figures, the
-   * candidates found on each pass and the spots that appeared and left; **Spots**
-   * lists the places candidates come back to, each with its passes, to judge at
-   * once; **Runs** keeps the history. Every part goes into a note as a chart the
-   * Notebook keeps editable, or out as a CSV.
+   * (`lib/map/detectSeries.js`). The column keeps that light: four figures and a
+   * small chart, which open the **dashboard** (`RoutineDashboard`) in a window
+   * with room for the charts and the spots. While the page is up the map rings
+   * the spots, and the one pressed there is summed up here, to judge or open.
    *
    * Running it again asks which pass to read rather than deciding silently, and
    * catching up lists the passes it missed: both cost Copernicus requests, and an
    * analyst usually knows which days they are chasing.
    */
   import { onDestroy } from 'svelte';
-  import { areaColours, seriesFigures, shortDay, spansYears } from '../../lib/map/detectSeries.js';
+  import { CATEGORIES, areaColours, newestMember, seriesFigures, shortDay, spansYears } from '../../lib/map/detectSeries.js';
   import { countsOf, freshness, isActive, plural, ruleLabel, runState } from '../../lib/map/detections.js';
   import { offerPuts, withdrawNote } from '../../lib/noteHere.svelte.js';
-  import { pinned } from '../../lib/notes/putInNote.svelte.js';
-  import { setDockOpen } from '../../lib/notes/noteDock.svelte.js';
-  import FloatingMenu from '../../components/FloatingMenu.svelte';
   import Icon from '../../components/Icon.svelte';
-  import PutInNote from '../../components/PutInNote.svelte';
+  import RoutineDashboard from './RoutineDashboard.svelte';
   import SeriesBars from './SeriesBars.svelte';
-  import SeriesSpark from './SeriesSpark.svelte';
-  import SeriesSpots from './SeriesSpots.svelte';
-  import { candidatesCsv, downloadCsv, fileName, seriesOffers, sourceLine, spotsCsv } from './seriesNote.js';
+  import SeriesExport from './SeriesExport.svelte';
+  import { seriesOffers, sourceLine } from './seriesNote.js';
 
   let {
     detection,
@@ -39,6 +35,8 @@
     /** Which collection its analyzer reads, for the note's source line. */
     sensor = 'sentinel2',
     busy = false,
+    /** Whether the dashboard window is open, and how it is looked at. */
+    dashboard = $bindable(false),
     tab = $bindable('overview'),
     mode = $bindable('total'),
     only = $bindable(null),
@@ -65,20 +63,20 @@
 
   /** The routine's areas in their shared order, named and coloured apart. */
   const routineAreas = $derived.by(() => {
-    const ids = (detail?.zones ?? detection.zones ?? []).map((zone) => zone.id);
-    const known = areas.filter((area) => ids.includes(area.id));
-    const named = Object.fromEntries((detail?.zones ?? detection.zones ?? []).map((zone) => [zone.id, zone.name]));
-    return ids.map((id) => ({ id, name: known.find((area) => area.id === id)?.name ?? named[id] ?? 'Area',
-      colour: known.find((area) => area.id === id)?.colour ?? '' }));
+    const zones = detail?.zones ?? detection.zones ?? [];
+    return zones.map((zone) => {
+      const known = areas.find((area) => area.id === zone.id);
+      return { id: zone.id, name: known?.name ?? zone.name ?? 'Area', colour: known?.colour ?? '' };
+    });
   });
   const colours = $derived(areaColours(routineAreas.map((area) => area.id), routineAreas));
   const names = $derived(Object.fromEntries(routineAreas.map((area) => [area.id, area.name])));
-  const shownAreas = $derived(only ? routineAreas.filter((area) => area.id === only) : routineAreas);
   const figures = $derived(series ? seriesFigures(series) : null);
   const year = $derived(series ? spansYears(series.passes.map((pass) => pass.date)) : false);
   const newest = $derived(series?.passes.at(-1) ?? null);
-  const spotOf = (id) => series?.spots.find((spot) => spot.id === id) ?? null;
   const byArea = $derived(mode === 'area' && !only && routineAreas.length > 1);
+  const picked = $derived(series?.spots.find((spot) => spot.id === selectedSpot) ?? null);
+  const kindOf = Object.fromEntries(CATEGORIES.map((entry) => [entry.id, entry]));
 
   // An area filter that names an area the routine no longer reads falls back to all of them.
   $effect(() => { if (only && !routineAreas.some((area) => area.id === only)) only = null; });
@@ -92,17 +90,9 @@
   });
   onDestroy(() => withdrawNote('detect'));
 
-  let exportAnchor = $state(null);
-  let exporting = $state(false);
-  function download(kind) {
-    exporting = false;
-    const options = { areas: routineAreas };
-    downloadCsv(kind === 'spots' ? spotsCsv(series, options) : candidatesCsv(series, options), fileName(detection.title, kind));
-  }
-
   const kindOfRun = (run) => (run.dates?.[0] && run.dates[0] !== run.dates[1] ? `against ${shortDay(run.dates[0], true)}` : 'one image');
-  const sparks = $derived(countsOf(detection.history));
-  const peak = $derived(Math.max(1, ...sparks.map((entry) => entry.value)));
+  const peak = $derived(Math.max(1, ...countsOf(detection.history).map((entry) => entry.value)));
+  const exportAreas = $derived(routineAreas.map((area) => ({ ...area, colour: colours[area.id] })));
 </script>
 
 <div class="cmp-dock-body dash" style:--tint={detection.colour || 'var(--accent)'}>
@@ -117,9 +107,7 @@
         <progress max={detection.active.total || 1} value={detection.active.progress ?? 0}></progress>
       {/if}
     {:else if fresh.text}
-      <p class="fresh" class:stale={fresh.stale}>
-        <Icon name="clock" size={12} /> Last pass read {fresh.text}
-      </p>
+      <p class="fresh" class:stale={fresh.stale}><Icon name="clock" size={12} /> Last pass read {fresh.text}</p>
     {:else}
       <p class={`state ${state.tone}`}>{state.text}</p>
     {/if}
@@ -141,9 +129,7 @@
           <Icon name="calendar" size={13} /> Catch up
         </button>
       {/if}
-      <button class="cmp-icon" class:on={exporting} bind:this={exportAnchor} aria-haspopup="menu" aria-expanded={exporting}
-        title="Put it in a note or download it" aria-label="Export" disabled={busy}
-        onclick={() => (exporting = !exporting)}><Icon name="upload" size={14} /></button>
+      <SeriesExport {series} title={detection.title} areas={exportAreas} {offers} {busy} onlayer={onexport} />
       <button class="cmp-icon" title="Edit this routine" aria-label={`Edit ${detection.title}`} disabled={busy}
         onclick={onedit}><Icon name="edit" size={13} /></button>
       <button class="cmp-icon" title="Delete this routine" aria-label={`Delete ${detection.title}`} disabled={busy}
@@ -151,66 +137,70 @@
     </div>
   </section>
 
-  {#if exporting}
-    <FloatingMenu anchor={exportAnchor} width={260} align="end" label="Export" onclose={() => (exporting = false)}>
-      <div class="fm-head">Into a note</div>
-      {#if !series?.passes.length}
-        <p class="fm-note">Nothing to put in a note before a finished pass.</p>
-      {:else if pinned.current}
-        {#each offers as offer (offer.id)}
-          <PutInNote {offer} named onput={() => (exporting = false)} />
-        {/each}
-      {:else}
-        <button class="fm-item" role="menuitem" onclick={() => { exporting = false; setDockOpen(true); }}>
-          <Icon name="note" size={13} /><span class="fm-grow">Open the note panel</span>
-        </button>
-        <p class="fm-note">Then each part of this dashboard goes in it as a chart or a table you can edit.</p>
-      {/if}
-      <div class="fm-sep"></div>
-      <div class="fm-head">Download</div>
-      <button class="fm-item" role="menuitem" disabled={!series?.passes.length} onclick={() => download('candidates')}>
-        <Icon name="download" size={13} /><span class="fm-grow">Every candidate (CSV)</span>
+  {#if !series}
+    <p class="hint loading">Reading its passes…</p>
+  {:else if !series.passes.length}
+    <p class="empty">No finished pass yet. Run it on the newest pass, or catch up on the ones it missed: what it finds gathers here pass after pass.</p>
+  {:else}
+    <section class="glance" aria-label="What its passes found">
+      <button class="open" onclick={() => (dashboard = true)}>
+        <span class="open-head">
+          <span>Dashboard</span>
+          <span class="open-go">Open <Icon name="maximize" size={12} /></span>
+        </span>
+        <span class="figures">
+          <span><strong>{figures.passes}</strong>{figures.passes === 1 ? 'pass' : 'passes'}</span>
+          <span><strong>{figures.candidates}</strong>candidates</span>
+          <span><strong>{figures.spots}</strong>spots</span>
+          <span><strong>{figures.newest}</strong>on {shortDay(figures.last)}</span>
+        </span>
       </button>
-      <button class="fm-item" role="menuitem" disabled={!series?.spots.length} onclick={() => download('spots')}>
-        <Icon name="download" size={13} /><span class="fm-grow">The spots (CSV)</span>
-      </button>
-      <div class="fm-sep"></div>
-      <button class="fm-item" role="menuitem" onclick={() => { exporting = false; onexport(); }}>
-        <Icon name="layers" size={13} /><span class="fm-grow">Snapshot as a SAT layer</span>
-      </button>
-    </FloatingMenu>
+      <SeriesBars passes={series.passes} height={78} compact label="Candidates per pass"
+        areaIds={routineAreas.map((area) => area.id)} {colours} {names} onpick={(pass) => onopenrun(pass)} />
+      <p class="line">
+        {shortDay(figures.first, year)} → {shortDay(figures.last, true)}
+        {#if figures.toReview}<span class="review">· {figures.toReview} to review</span>{/if}
+        {#if newest?.compared}· <span class="up">+{figures.arrived}</span> <span class="down">−{figures.left}</span> on the newest pass{/if}
+      </p>
+    </section>
+
+    {#if picked}
+      {@const member = newestMember(picked)}
+      <section class="picked" style:--spot={colours[picked.areaId]}>
+        <header>
+          <strong>{picked.id}</strong>
+          <span class={`kind ${picked.category}`} title={kindOf[picked.category]?.rule}>{kindOf[picked.category]?.label}</span>
+          <span class="seen">seen on {picked.seen} of {picked.read}</span>
+          <button class="cmp-icon" aria-label="Let go of this spot" title="Let go" onclick={() => (selectedSpot = null)}><Icon name="x" size={12} /></button>
+        </header>
+        <span class="strip" style:--n={picked.presence.length} aria-hidden="true">
+          {#each picked.presence as cell, at (at)}<span class={`cell ${cell}`}></span>{/each}
+        </span>
+        <p class="where">{names[picked.areaId] ?? 'Area'} · {picked.first === picked.last ? shortDay(picked.first, year) : `${shortDay(picked.first, year)} → ${shortDay(picked.last, year)}`}</p>
+        <div class="row-acts">
+          <button class="btn btn-sm" disabled={busy || !member} onclick={() => onopenspot(picked, member)}>Open its newest pass</button>
+          <button class="cmp-icon" disabled={busy || !picked.verdicts.toReview} title="Keep its candidates here" aria-label={`Keep ${picked.id} here`}
+            onclick={() => onverdict([picked], 'noted')}><Icon name="check" size={13} /></button>
+          <button class="cmp-icon" disabled={busy || picked.verdicts.pinned === picked.verdicts.total} title="Dismiss its candidates from every pass"
+            aria-label={`Dismiss ${picked.id}`} onclick={() => onverdict([picked], 'dismissed')}><Icon name="x" size={13} /></button>
+          <button class="cmp-icon" title="Find it in the dashboard" aria-label={`Find ${picked.id} in the dashboard`}
+            onclick={() => { filter = 'all'; tab = 'spots'; dashboard = true; }}><Icon name="maximize" size={13} /></button>
+        </div>
+      </section>
+    {:else}
+      <p class="hint">The rings on the map are its spots. Press one to see it here.</p>
+    {/if}
   {/if}
 
-  <div class="cmp-seg fill tabs" role="tablist" aria-label="What to show">
-    <button role="tab" aria-selected={tab === 'overview'} class:on={tab === 'overview'} onclick={() => (tab = 'overview')}>Overview</button>
-    <button role="tab" aria-selected={tab === 'spots'} class:on={tab === 'spots'} onclick={() => (tab = 'spots')}>
-      Spots{series?.spots.length ? ` · ${series.spots.length}` : ''}
-    </button>
-    <button role="tab" aria-selected={tab === 'runs'} class:on={tab === 'runs'} onclick={() => (tab = 'runs')}>
-      Runs{detection.history.length ? ` · ${detection.history.length}` : ''}
-    </button>
-  </div>
-
-  {#if tab !== 'runs' && routineAreas.length > 1 && series?.passes.length}
-    <div class="areas" role="group" aria-label="Areas shown">
-      <button class="area" class:on={!only} aria-pressed={!only} onclick={() => (only = null)}>All areas</button>
-      {#each routineAreas as area (area.id)}
-        <button class="area" class:on={only === area.id} aria-pressed={only === area.id} title={area.name}
-          onclick={() => (only = only === area.id ? null : area.id)}>
-          <span class="dot" style:background={colours[area.id]} aria-hidden="true"></span><span class="label-text">{area.name}</span>
-        </button>
-      {/each}
-    </div>
-  {/if}
-
-  {#if tab === 'runs'}
+  <section class="runs-list" aria-label="Runs">
+    <h4>Runs <small>{detection.history.length}</small></h4>
     {#if !detection.history.length}<p class="hint">Not run yet.</p>{/if}
     <ul class="runs">
       {#each detection.history as run (run.id)}
         {@const past = runState(run)}
         <li class="run">
           <button class="past" disabled={busy} onclick={() => onopenrun(run)}>
-            <span class="line"><strong>{shortDay(run.dates?.[1], true) || run.title}</strong>
+            <span class="line-run"><strong>{shortDay(run.dates?.[1], true) || run.title}</strong>
               <span class={past.tone}>{run.status === 'ready' ? (run.to_review ? `${run.to_review} to review` : plural(run.count ?? 0, 'candidate')) : past.text}</span></span>
             <small>{kindOfRun(run)}</small>
             {#if run.status === 'ready'}<span class="meter" aria-hidden="true"><span style:width={`${((run.count ?? 0) / peak) * 100}%`}></span></span>{/if}
@@ -222,96 +212,18 @@
         </li>
       {/each}
     </ul>
-  {:else if !series}
-    <p class="hint loading">Reading its passes…</p>
-  {:else if !series.passes.length}
-    <div class="empty">
-      <SeriesSpark values={[]} />
-      <p>No finished pass yet. Run it on the newest pass, or catch up on the ones it missed: what it finds gathers here pass after pass.</p>
-    </div>
-  {:else if tab === 'overview'}
-    <div class="tiles">
-      <div class="tile">
-        <span class="figure">{figures.passes}</span>
-        <span class="what">{figures.passes === 1 ? 'pass read' : 'passes read'}</span>
-        <small>{figures.first === figures.last ? shortDay(figures.last, true) : `${shortDay(figures.first, year)} → ${shortDay(figures.last, true)}`}</small>
-      </div>
-      <div class="tile">
-        <span class="figure">{figures.candidates}</span>
-        <span class="what">candidates</span>
-        <small class:review={figures.toReview}>{figures.toReview ? `${figures.toReview} to review` : 'all reviewed'}</small>
-      </div>
-      <button class="tile press" onclick={() => { filter = 'all'; tab = 'spots'; }} title="List the spots">
-        <span class="figure">{figures.spots}</span>
-        <span class="what">spots</span>
-        <small>{figures.steady} regular · within {series.radius} m</small>
-      </button>
-      <button class="tile press" onclick={() => onopenrun(newest)} title="Open the newest pass">
-        <span class="figure">{figures.newest}</span>
-        <span class="what">on {shortDay(figures.last)}</span>
-        <small>{#if newest?.compared}<span class="up">+{figures.arrived}</span> <span class="down">−{figures.left}</span> since the pass before{:else}its first pass{/if}</small>
-      </button>
-    </div>
-
-    <section class="card">
-      <header>
-        <h4>Candidates per pass</h4>
-        {#if !only && routineAreas.length > 1}
-          <div class="cmp-seg small" role="group" aria-label="Bars">
-            <button class:on={mode === 'total'} aria-pressed={mode === 'total'} onclick={() => (mode = 'total')}>Total</button>
-            <button class:on={mode === 'area'} aria-pressed={mode === 'area'} onclick={() => (mode = 'area')}>By area</button>
-          </div>
-        {/if}
-      </header>
-      <SeriesBars passes={series.passes} mode={byArea ? 'area' : 'total'} areaIds={shownAreas.map((area) => area.id)}
-        {colours} {names} onpick={(pass) => onopenrun(pass)} label="Candidates per pass" />
-      <div class="legend">
-        {#if byArea}
-          {#each routineAreas as area (area.id)}<span><i style:background={colours[area.id]}></i>{area.name}</span>{/each}
-        {:else}
-          <span><i class="info"></i>Candidates{only ? ` in ${names[only]}` : ''}</span>
-        {/if}
-        {#if figures.toReview}<span><i class="accent"></i>To review</span>{/if}
-        <span class="aside">Press a column to open its pass</span>
-      </div>
-    </section>
-
-    {#if series.passes.some((pass) => pass.compared)}
-      <section class="card">
-        <header><h4>Spots that appeared and left</h4></header>
-        <SeriesBars kind="change" height={120} passes={series.passes} areaIds={shownAreas.map((area) => area.id)} {names}
-          onpick={(pass) => onopenrun(pass)} label="Spots that appeared and left" />
-        <div class="legend">
-          <span><i class="ok"></i>Appeared</span><span><i class="danger"></i>Left</span>
-          <span class="aside">Against the pass before that read the same area</span>
-        </div>
-      </section>
-    {/if}
-
-    {#if newest?.compared && (newest.arrived.length || newest.left.length)}
-      <section class="card">
-        <header><h4>On the newest pass, {shortDay(newest.date, true)}</h4></header>
-        {#if newest.arrived.length}
-          <div class="spot-chips"><span class="lead up">Appeared</span>
-            {#each newest.arrived as id (id)}
-              <button class="spot-chip up" onclick={() => { selectedSpot = id; const spot = spotOf(id); if (spot) onselectspot(spot); }}>{id}</button>
-            {/each}
-          </div>
-        {/if}
-        {#if newest.left.length}
-          <div class="spot-chips"><span class="lead down">Left</span>
-            {#each newest.left as id (id)}
-              <button class="spot-chip down" onclick={() => { selectedSpot = id; const spot = spotOf(id); if (spot) onselectspot(spot); }}>{id}</button>
-            {/each}
-          </div>
-        {/if}
-      </section>
-    {/if}
-  {:else}
-    <SeriesSpots {series} {colours} {names} {busy} bind:radius bind:filter bind:selected={selectedSpot}
-      onselect={onselectspot} onopen={onopenspot} {onverdict} />
-  {/if}
+  </section>
 </div>
+
+{#if dashboard && series?.passes.length}
+  <RoutineDashboard {detection} {series} areas={routineAreas} {colours} {names} {single} {offers} {busy}
+    bind:tab bind:mode bind:only bind:radius bind:filter bind:selectedSpot
+    onclose={() => (dashboard = false)}
+    onopenrun={(pass) => { dashboard = false; onopenrun(pass, { reopen: true }); }}
+    onopenspot={(spot, member) => { dashboard = false; onopenspot(spot, member, { reopen: true }); }}
+    onshowspot={(spot) => { dashboard = false; selectedSpot = spot.id; onselectspot(spot); }}
+    {onverdict} onlayer={onexport} />
+{/if}
 
 <style>
   .dash { gap: 12px; }
@@ -331,91 +243,51 @@
   .actions { display: flex; align-items: center; gap: 4px; margin-top: 4px; }
   .actions .grow { flex: 1; min-width: 0; }
   .actions .btn { display: inline-flex; align-items: center; justify-content: center; gap: 6px; }
-  .tabs { margin-top: 2px; }
-  /* a scroll container's least height is nothing, and a dock taller than its room would take it */
-  .areas { display: flex; gap: 4px; min-height: 28px; overflow-x: auto; scrollbar-width: thin; padding-bottom: 2px; }
-  .area {
-    display: inline-flex;
-    flex: none;
-    align-items: center;
-    gap: 5px;
-    max-width: 160px;
-    height: 24px;
-    padding: 0 9px;
-    border: 1px solid var(--border);
-    border-radius: 99px;
-    color: var(--text-2);
-    font-size: var(--fs-xs);
-  }
-  .area:hover { border-color: var(--border-strong); color: var(--text-1); }
-  .area.on { border-color: var(--accent); background: var(--accent-soft); color: var(--text-1); }
-  .area .dot { flex: none; width: 8px; height: 8px; border-radius: 2px; }
-  .label-text { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 6px; }
-  .tile {
-    display: grid;
-    align-content: start;
-    gap: 1px;
-    min-width: 0;
-    padding: 9px 11px 10px;
-    border: 1px solid var(--border);
-    border-radius: var(--r-lg);
-    background: var(--bg-2);
-    text-align: left;
-  }
-  .tile.press:hover { border-color: var(--border-strong); background: var(--bg-3); }
-  .figure { color: var(--text-1); font-size: var(--fs-xl); font-weight: 700; line-height: 1.15; font-variant-numeric: tabular-nums; }
-  .what { color: var(--text-2); font-size: var(--fs-xs); }
-  .tile small { overflow: hidden; color: var(--text-3); font-size: 10.5px; text-overflow: ellipsis; white-space: nowrap; }
-  .tile small.review { color: var(--accent); font-weight: 600; }
+  .empty { margin: 0; color: var(--text-2); font-size: var(--fs-xs); line-height: 1.5; }
+  .loading { padding: 10px 2px; }
+  .glance { display: grid; gap: 8px; padding: 10px 10px 8px; border: 1px solid var(--border); border-radius: var(--r-lg); background: var(--bg-1); }
+  .open { display: grid; gap: 8px; text-align: left; }
+  .open-head { display: flex; align-items: center; justify-content: space-between; color: var(--text-1); font-size: var(--fs-sm); font-weight: 650; }
+  .open-go { display: inline-flex; align-items: center; gap: 5px; color: var(--accent); font-size: var(--fs-xs); font-weight: 600; }
+  .open:hover .open-go { text-decoration: underline; }
+  .figures { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 6px; }
+  .figures > span { display: grid; gap: 0; min-width: 0; color: var(--text-3); font-size: 10.5px; white-space: nowrap; }
+  .figures strong { color: var(--text-1); font-size: var(--fs-lg); font-weight: 700; font-variant-numeric: tabular-nums; }
+  .line { margin: 0; color: var(--text-3); font-size: var(--fs-xs); }
+  .line .review { color: var(--accent); font-weight: 600; }
   .up { color: var(--ok); font-weight: 650; }
   .down { color: var(--danger); font-weight: 650; }
-  .card { display: grid; gap: 8px; min-width: 0; padding: 10px 10px 8px; border: 1px solid var(--border); border-radius: var(--r-lg); background: var(--bg-1); }
-  .card header { display: flex; align-items: center; justify-content: space-between; gap: 8px; min-height: 24px; }
-  h4 { margin: 0; color: var(--text-1); font-size: var(--fs-sm); font-weight: 650; }
-  .cmp-seg.small > button { min-height: 22px; padding: 0 8px; font-size: var(--fs-xs); }
-  .legend { display: flex; flex-wrap: wrap; align-items: center; gap: 3px 12px; color: var(--text-2); font-size: 10.5px; }
-  .legend span { display: inline-flex; align-items: center; gap: 5px; }
-  .legend i { display: inline-block; width: 8px; height: 8px; border-radius: 2px; }
-  .legend i.info { background: var(--info); }
-  .legend i.accent { background: var(--accent); }
-  .legend i.ok { background: var(--ok); }
-  .legend i.danger { background: var(--danger); }
-  .legend .aside { margin-left: auto; color: var(--text-3); }
-  .spot-chips { display: flex; flex-wrap: wrap; align-items: center; gap: 4px; }
-  .spot-chips .lead { min-width: 64px; font-size: var(--fs-xs); }
-  .spot-chip {
-    height: 22px;
-    padding: 0 8px;
-    border-radius: 99px;
-    font-size: var(--fs-xs);
-    font-weight: 650;
-    font-variant-numeric: tabular-nums;
-  }
-  .spot-chip.up { background: var(--ok-soft); color: var(--ok); }
-  .spot-chip.down { background: var(--danger-soft); color: var(--danger); }
-  .spot-chip:hover { outline: 1px solid currentColor; }
-  .empty { display: grid; gap: 6px; padding: 8px 2px; }
-  .empty p { margin: 0; color: var(--text-2); font-size: var(--fs-xs); line-height: 1.5; }
-  .loading { padding: 12px 2px; }
+  .picked { display: grid; gap: 7px; padding: 10px; border: 1px solid var(--accent); border-radius: var(--r-lg); background: var(--accent-soft); }
+  .picked header { display: flex; align-items: center; gap: 8px; font-size: var(--fs-xs); }
+  .picked header strong { font-size: var(--fs-sm); }
+  .picked header .cmp-icon { width: 24px; height: 24px; margin-left: auto; }
+  .kind { font-weight: 600; }
+  .kind.new { color: var(--ok); }
+  .kind.gone { color: var(--danger); }
+  .kind.steady { color: var(--info); }
+  .kind.once { color: var(--text-2); }
+  .kind.mixed { color: var(--warn); }
+  .seen { color: var(--text-3); }
+  .strip { display: grid; grid-template-columns: repeat(var(--n), minmax(0, 1fr)); gap: 2px; height: 10px; }
+  .cell { border-radius: 2px; background: color-mix(in srgb, var(--text-3) 22%, transparent); }
+  .cell.present { background: var(--spot, var(--info)); }
+  .cell.unread { background: repeating-linear-gradient(135deg, transparent 0 2px, color-mix(in srgb, var(--text-3) 30%, transparent) 2px 3px); }
+  .where { margin: 0; color: var(--text-3); font-size: 10.5px; }
+  .row-acts { display: flex; align-items: center; gap: 2px; }
+  .row-acts .btn { margin-right: auto; }
+  .runs-list { display: grid; gap: 4px; }
+  h4 { margin: 4px 0 0; color: var(--text-2); font-size: var(--fs-xs); font-weight: 650; letter-spacing: 0.03em; text-transform: uppercase; }
+  h4 small { margin-left: 4px; color: var(--text-3); }
   .runs { display: grid; gap: 2px; margin: 0; padding: 0; list-style: none; }
   .run { display: flex; align-items: center; gap: 4px; }
-  .past {
-    display: grid;
-    flex: 1;
-    gap: 3px;
-    min-width: 0;
-    padding: 7px 8px;
-    border-radius: var(--r-sm);
-    text-align: left;
-  }
+  .past { display: grid; flex: 1; gap: 3px; min-width: 0; padding: 7px 8px; border-radius: var(--r-sm); text-align: left; }
   .past:hover:not(:disabled) { background: var(--bg-2); }
-  .past .line { display: flex; align-items: baseline; gap: 8px; font-size: var(--fs-xs); }
+  .line-run { display: flex; align-items: baseline; gap: 8px; font-size: var(--fs-xs); }
   .past strong { min-width: 74px; color: var(--text-1); font-size: var(--fs-sm); font-variant-numeric: tabular-nums; }
-  .past .line span { color: var(--text-2); }
-  .past .line .new { color: var(--accent); font-weight: 600; }
-  .past .line .busy { color: var(--info); }
-  .past .line .warn { color: var(--warn); }
+  .line-run span { color: var(--text-2); }
+  .line-run .new { color: var(--accent); font-weight: 600; }
+  .line-run .busy { color: var(--info); }
+  .line-run .warn { color: var(--warn); }
   .past small { color: var(--text-3); font-size: 10.5px; }
   .meter { display: block; height: 3px; border-radius: 2px; background: var(--bg-3); overflow: hidden; }
   .meter span { display: block; height: 100%; background: var(--info); opacity: 0.7; }

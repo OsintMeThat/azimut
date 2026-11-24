@@ -156,7 +156,10 @@
   let detail = $state(null);
   /** The routine's finished runs as the server reads them together (`engine.series`), or null. */
   let seriesRows = $state(null);
-  /** How its dashboard is looked at, kept while a run of it is opened and closed. */
+  /** Its dashboard window, and how it is looked at, kept while a run of it is opened and closed. */
+  let dashboardOpen = $state(false);
+  /** A run opened from the dashboard: Back to the routine opens the window again. */
+  let reopenDashboard = false;
   let routineTab = $state('overview');
   let seriesMode = $state('total');
   let seriesOnly = $state(null);
@@ -355,7 +358,7 @@
     view = 'home';
     draft = null;
     launch = null;
-    detectionId = null; detail = null; seriesRows = null; catching = false;
+    detectionId = null; detail = null; seriesRows = null; catching = false; dashboardOpen = false;
     zones = []; selectedZone = null; drawing = 'select';
   }
 
@@ -381,7 +384,10 @@
     // another routine is looked at afresh; the same one keeps its tab, filters and spot
     if (detectionId !== id) {
       routineTab = 'overview'; seriesMode = 'total'; seriesOnly = null; spotFilter = 'all'; selectedSpot = null;
+      reopenDashboard = false;
     }
+    dashboardOpen = reopenDashboard;
+    reopenDashboard = false;
     detectionId = id; detail = body; seriesRows = rows; catching = false;
     zones = [];
     draft = null;
@@ -677,7 +683,7 @@
 
   // The map rings the spots while the dashboard shows them, and nothing of them otherwise.
   $effect(() => {
-    spots = view === 'detection' && !catching && routineTab !== 'runs' && series ? series.spots : [];
+    spots = view === 'detection' && !catching && series ? series.spots : [];
   });
 
   /** One verdict for every candidate of these spots; dismissing asks first. */
@@ -702,7 +708,8 @@
   }
 
   /** Open the run a spot was seen on, at that candidate, with the map on it. */
-  function openSpot(spot, member) {
+  function openSpot(spot, member, { reopen = false } = {}) {
+    reopenDashboard = reopen;
     selectedSpot = spot.id;
     onfocus(member.result.coordinates);
     void act(() => openRun(member.runId, member.result.id));
@@ -717,11 +724,10 @@
     if (answer.skipped.length) toast(answer.skipped.map((row) => row.message).join(' · '), 'info', 8000);
   }
 
-  /** The spot pressed on the map, found in the list. */
+  /** The spot pressed on the map, summed up in the column. */
   export function pickSpot(id) {
     collapsed = false;
     selectedSpot = id;
-    if (routineTab !== 'spots') { spotFilter = 'all'; routineTab = 'spots'; }
   }
 
   export async function addManual(geometry) {
@@ -908,7 +914,7 @@
         {:else if detection}
           <DetectDetection {detection} {detail} {series} areas={lists.areas} methods={catalogue.methods} {busy}
             sensor={detail ? capabilityOf(detail.recipe).sensor : 'sentinel2'}
-            bind:tab={routineTab} bind:mode={seriesMode} bind:only={seriesOnly} bind:radius={spotRadius}
+            bind:dashboard={dashboardOpen} bind:tab={routineTab} bind:mode={seriesMode} bind:only={seriesOnly} bind:radius={spotRadius}
             bind:filter={spotFilter} bind:selectedSpot
             onrun={() => act(() => prepareLaunch(detection))}
             oncatchup={() => { catching = true; }}
@@ -916,7 +922,7 @@
             oncancel={(list) => act(() => cancelRuns(list))}
             onedit={() => act(() => editDetection(detection.id))}
             ondelete={() => act(() => askRemoveItem('followups', detection))}
-            onopenrun={(run) => act(() => openRun(run.id))}
+            onopenrun={(run, { reopen = false } = {}) => { reopenDashboard = reopen; void act(() => openRun(run.id)); }}
             onopenspot={openSpot}
             onselectspot={(spot) => onfocus(spot.centre)}
             onverdict={judge} />

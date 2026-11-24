@@ -4221,35 +4221,43 @@ An open routine or run is drawn once, in each area's own colour, by the same
 read-only overlay the list uses; the editable canvas belongs to the wizard and the
 Areas tab. Hovering a routine draws its areas heavier.
 
-A routine's page is a dashboard of its finished runs read together
-(`lib/map/detectSeries.js`, `GET …/followups/{id}/series`). Its head says when it
-last read a pass and, past ten days, offers to catch up. Area chips narrow the
-whole page to one area. **Overview** gives four tiles (passes read, candidates and
-how many wait for review, spots, the newest pass with what appeared and left),
-**Candidates per pass** as one column a pass, in total or stacked **By area** in
-the areas' colours (areas sharing a colour are told apart by a palette), with an
-amber cap on what is still to review, and **Spots that appeared and left** against
-the pass before that read the same area. Pointing at a column reads it out under
-the chart; pressing it opens that pass.
+A routine's page reads its finished runs together (`lib/map/detectSeries.js`,
+`GET …/followups/{id}/series`) and keeps the column light. Its head says when it
+last read a pass. Under it, four figures (passes, candidates, spots, the newest
+pass) over a small chart of each pass open the **dashboard**, a window over the map
+with room to read it (`RoutineDashboard`); then the routine's runs, each opening its
+own review. While the page is up the map rings its spots, in their kind's colour
+instead of the runs' overlays, and the spot pressed there is summed up in the
+column: its passes, a tick to keep its candidates here, a cross to dismiss them,
+its newest pass to open.
 
-**Spots** gathers candidates that come back to one place: within 40 m on two
-passes (20, 80 or 150 m on request), matched one to one so two things parked side
-by side stay two. The rule is on screen; it groups and never hides or judges. Each
-spot is a row with one cell a pass, filled where it was seen, empty where its area
-was read and it was not, hatched where its area was not read that day. Chips filter
-**New** (first seen on the newest pass), **Gone** (on the pass before, not the
-newest), **Regular** (on 4 passes in 5 or more since first seen), **Seen once** and
-**Comes and goes**, each saying its rule. A row's tick keeps its candidates here
-and its cross dismisses them from every pass after a yes; a pin in the case is
-left as it is. A filled cell opens that pass on that candidate. While the dashboard
-is up the map rings the spots in their kind's colour instead of the runs'
-overlays, and pressing a ring finds it in the list. **Runs** lists the passes, each
-opening its own review; Back returns to the same tab.
+The dashboard's area chips narrow it to one area. **Overview** gives the four
+figures large, **Candidates per pass** as one column a pass, in total or stacked
+**By area** in the areas' colours (areas sharing a colour are told apart by a
+palette), with an amber cap on what is still to review, **Spots that appeared and
+left** against the pass before that read the same area, and the spots by kind with
+what the newest pass changed. Pointing at a column reads it out under the chart;
+pressing it opens that pass, and Back to the routine brings the window again.
 
-The export button puts any part in the note pinned to the side as a block the
-Notebook keeps editable: the whole dashboard under a heading, the key figures as
-tiles, either chart as a `::: chart` over its own table, or the spots as a table
-whose passes read ● ○ ·. With no note pinned it opens the note panel. The same
+**Spots** is a matrix: one row a spot, one column a pass under its date. A spot
+gathers candidates that come back to one place: within 40 m on two passes (20, 80
+or 150 m on request), matched one to one so two things parked side by side stay
+two. The rule is on screen; it groups and never hides or judges. A cell is filled
+where the spot was seen, empty where its area was read and it was not, hatched
+where its area was not read that day; a filled cell opens that pass on that
+candidate. Chips filter **New** (first seen on the newest pass), **Gone** (on the
+pass before, not the newest), **Regular** (on 4 passes in 5 or more since first
+seen), **Seen once** and **Comes and goes**, each saying its rule. A row's tick
+keeps its candidates here and its cross dismisses them from every pass after a
+yes, a pin in the case left as it is; the filter's own buttons do every spot it
+shows. Rows come sixty at a time. A row's crosshair closes the window on that spot
+on the map.
+
+The export menu, in the column and the window, puts any part in the note pinned to
+the side as a block the Notebook keeps editable: the whole dashboard under a
+heading, the key figures as tiles, either chart as a `::: chart` over its own
+table, or the spots as a table whose passes read ● ○ · (its first 200, like every
+table a tool puts in a note). With no note pinned it opens the note panel. The same
 menu downloads every candidate or the spots as CSV, and snapshots what was kept
 into a SAT layer. Opening any run shows only that run's saved overlay; Back
 restores the saved eye states from before the review.

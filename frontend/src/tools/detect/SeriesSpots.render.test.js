@@ -14,14 +14,14 @@ let live, target;
 afterEach(() => { if (live) unmount(live); target?.remove(); });
 
 function open(extra = {}) {
-  const props = liveProps({ series: buildSeries(rows), selected: null, onverdict: vi.fn(), onopen: vi.fn(), onselect: vi.fn(), ...extra });
+  const props = liveProps({ series: buildSeries(rows), selected: null, onverdict: vi.fn(), onopen: vi.fn(), onshow: vi.fn(), ...extra });
   target = document.createElement('div');
   document.body.append(target);
   live = mount(SeriesSpots, { target, props });
   flushSync();
   return props;
 }
-const rowsDrawn = () => target.querySelectorAll('.spot-row').length;
+const rowsDrawn = () => target.querySelectorAll('.line.spot').length;
 
 it('draws a long list a page at a time', () => {
   open();
@@ -36,7 +36,7 @@ it('brings in the page of a spot picked on the map', () => {
   const props = open();
   props.selected = 'S125'; flushSync();
   expect(rowsDrawn()).toBe(130);
-  expect(target.querySelector('.spot-row.on').textContent).toContain('S125');
+  expect(target.querySelector('.line.spot.on').textContent).toContain('S125');
 });
 
 it('judges every spot a filter shows in one press', () => {
@@ -44,4 +44,14 @@ it('judges every spot a filter shows in one press', () => {
   [...target.querySelectorAll('button')].find((b) => b.textContent.trim().startsWith('Keep these')).click();
   expect(props.onverdict).toHaveBeenCalledWith(expect.any(Array), 'noted');
   expect(props.onverdict.mock.calls[0][0]).toHaveLength(130);
+});
+
+it('opens the pass a filled cell stands for, and shows a spot on the map from its row', () => {
+  const props = open();
+  target.querySelector('.line.spot .cell.present').click();
+  expect(props.onopen).toHaveBeenCalledWith(expect.objectContaining({ id: 'S1' }), expect.objectContaining({ runId: 'r1' }));
+  target.querySelector('button[aria-label="Show S2 on the map"]').click();
+  expect(props.onshow).toHaveBeenCalledWith(expect.objectContaining({ id: 'S2' }));
+  // the passes head the columns, dated
+  expect(target.querySelector('.line.head .days').textContent).toContain('27 Sep');
 });

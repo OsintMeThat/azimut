@@ -22,6 +22,8 @@
     /** The pass whose run is open or pointed at elsewhere, drawn ringed. */
     current = null,
     height = 150,
+    /** A glance in the column: no numbers over the columns, no readout under them. */
+    compact = false,
     label = 'Candidates per pass',
     onpick = () => {},
   } = $props();
@@ -29,7 +31,7 @@
   const LEFT = 28;
   const RIGHT = 6;
   const BOTTOM = 20;
-  const TOP = 16;
+  const TOP = $derived(compact ? 6 : 16);
 
   let width = $state(320);
   let hovered = $state(null);
@@ -54,7 +56,8 @@
     ? Math.max(1, ...passes.map((pass) => pass.counts.total))
     : Math.max(1, ...passes.map((pass) => Math.max(pass.arrived.length, pass.left.length))));
   const scale = $derived(niceTop(peak));
-  const ticks = $derived(Array.from({ length: Math.floor(scale.top / scale.step) + 1 }, (_, i) => i * scale.step));
+  const ticks = $derived(compact ? [0, scale.top]
+    : Array.from({ length: Math.floor(scale.top / scale.step) + 1 }, (_, i) => i * scale.step));
   const zero = $derived(kind === 'count' ? height - BOTTOM : TOP + (height - BOTTOM - TOP) / 2);
   const reach = $derived(kind === 'count' ? height - BOTTOM - TOP : (height - BOTTOM - TOP) / 2);
   const yOf = (value) => zero - (value / scale.top) * reach;
@@ -131,14 +134,14 @@
                   height={Math.max(2, yOf(total - pass.counts.toReview) - yOf(total))} rx="2" />
               {/if}
             {/if}
-            {#if band >= 18 && pass.counts.total}
+            {#if !compact && band >= 18 && pass.counts.total}
               <text class="value" x={xOf(index)} y={yOf(pass.counts.total) - 4} text-anchor="middle">{pass.counts.total}</text>
             {/if}
           {/if}
         {:else if pass.compared}
           {#if pass.arrived.length}
             <rect class="up" x={x} y={yOf(pass.arrived.length)} width={barW} height={zero - yOf(pass.arrived.length) - 0.5} rx="2" />
-            {#if band >= 18}<text class="value" x={xOf(index)} y={yOf(pass.arrived.length) - 4} text-anchor="middle">{pass.arrived.length}</text>{/if}
+            {#if !compact && band >= 18}<text class="value" x={xOf(index)} y={yOf(pass.arrived.length) - 4} text-anchor="middle">{pass.arrived.length}</text>{/if}
           {/if}
           {#if pass.left.length}
             <rect class="down" x={x} y={zero + 0.5} width={barW} height={(pass.left.length / scale.top) * reach} rx="2" />
@@ -153,7 +156,7 @@
       </g>
     {/each}
   </svg>
-  {#if readout}
+  {#if readout && !compact}
     {@const said = tip(readout)}
     <!-- what the column pointed at holds, or the newest pass when none is -->
     <p class="readout" aria-live="polite"><strong>{said.day}</strong>{#each said.lines as line (line)}<span>{line}</span>{/each}</p>
